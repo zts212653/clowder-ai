@@ -23,6 +23,7 @@ import {
   formatContinuationPrompt,
   isCollaborationContinuityCapsuleV1,
 } from './CollaborationContinuityCapsule.js';
+import { type EnsureTerminalDeps, ensureTerminalStatus, RouteChainCompletionTracker } from './ensureTerminalStatus.js';
 import type { InvocationQueue, QueueEntry } from './InvocationQueue.js';
 import {
   type CommitInvocationInput,
@@ -218,6 +219,10 @@ export class QueueProcessor {
   private continuationWindows = new Map<string, number[]>();
   private static readonly CONTINUATION_WINDOW_MS = 60 * 60 * 1000;
   private static readonly MAX_CONTINUATIONS_PER_WINDOW = 5;
+  /** F194 Z3 parity: chain completion tracker for ensureTerminalStatus backstop.
+   *  Tracks whether routeExecution reached a clean terminal (succeed/fail) so the
+   *  finally block can write the correct terminal status if the catch block fails. */
+  private readonly chainTracker = new RouteChainCompletionTracker();
 
   constructor(deps: QueueProcessorDeps, opts?: { processingSlotTtlMs?: number }) {
     this.deps = deps;
@@ -960,6 +965,7 @@ export class QueueProcessor {
       await invocationRecordStore.update(invocationId, {
         status: 'running',
       });
+      this.chainTracker.start(invocationId);
 
       // F220 Phase 1: queued execution needs the same earliest liveness signal
       // as direct /api/messages execution. intent_mode stays deferred until the
@@ -1126,6 +1132,7 @@ export class QueueProcessor {
               );
               if (invocationId) {
                 await invocationRecordStore.update(invocationId, { status: 'succeeded' });
+                this.chainTracker.succeed(invocationId);
               }
               finalStatus = 'succeeded';
               return 'succeeded';
@@ -1465,6 +1472,7 @@ export class QueueProcessor {
           : {}),
       });
 
+      this.chainTracker.succeed(invocationId);
       finalStatus = 'succeeded';
 
       // 10. Outbound delivery: send remaining per-turn content to bound external chats
@@ -1485,6 +1493,7 @@ export class QueueProcessor {
       return 'succeeded';
     } catch (err) {
       finalStatus = 'failed';
+      if (invocationId) this.chainTracker.fail(invocationId);
       log.error({ threadId, entryId: entry.id, err }, '[QueueProcessor] executeEntry failed');
       // F148 fix: ack cursors for cats that completed before the exception
       if (cursorBoundaries.size > 0) {
@@ -1513,8 +1522,14 @@ export class QueueProcessor {
           },
           threadId,
         );
-      } catch {
-        /* ignore secondary errors */
+      } catch (updateErr) {
+        // Previously silent — this swallow is the root cause of zombie records:
+        // if update-to-failed fails (e.g. Redis blip), record stays 'running'.
+        // ensureTerminalStatus in finally block now provides CAS-guarded backstop.
+        log.warn(
+          { threadId, entryId: entry.id, err: updateErr, invocationId },
+          '[QueueProcessor] Failed to update invocation record to failed — ensureTerminalStatus will backstop',
+        );
       }
 
       // R4 fix (#873): correct failure cleanup sequence per messages.ts
@@ -1552,6 +1567,35 @@ export class QueueProcessor {
     } finally {
       // Always cleanup tracker + queue (all target cat slots)
       invocationTracker.completeAll(threadId, targetCats, controller);
+
+      // F194 Z3 parity: defensive terminal write (mirrors messages.ts finally block).
+      // If catch block failed to update record to 'failed' (e.g. Redis blip), the record
+      // stays 'running' → zombie detection fires after 600s grace. This CAS-guarded backstop
+      // ensures the invocation reaches a terminal status before tracker cleanup finishes.
+      // Runtime invocationRecordStore implements IInvocationRecordStore.get; the narrower
+      // InvocationRecordStoreLike omits it for testability — runtime check guards the cast.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- runtime guard: InvocationRecordStoreLike
+      // omits .get for testability, but production impls always have it (IInvocationRecordStore).
+      if (invocationId && typeof (invocationRecordStore as unknown as Record<string, unknown>).get === 'function') {
+        try {
+          await ensureTerminalStatus(invocationId, {
+            invocationRecordStore: invocationRecordStore as unknown as EnsureTerminalDeps['invocationRecordStore'],
+            chainCompletion: this.chainTracker,
+            log,
+          });
+        } catch (termErr) {
+          log.warn(
+            { err: termErr, invocationId, feature: 'F194' },
+            'F194 Z3 ensureTerminalStatus failed in QueueProcessor',
+          );
+        }
+      }
+      // Always release tracker — must not depend on .get() guard above, otherwise
+      // every invocation leaks a Map entry when store lacks .get() (#1145 review P2).
+      if (invocationId) {
+        this.chainTracker.release(invocationId);
+      }
+
       queue.removeProcessedAcrossUsers(threadId, entry.id);
       // F175: on success remove batched entries; on failure/cancel rollback so they can retry
       if (finalStatus === 'succeeded') {

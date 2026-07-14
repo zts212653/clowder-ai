@@ -103,7 +103,16 @@ const log = createModuleLogger('invoke');
 const tracer = trace.getTracer('cat-cafe-api', '0.1.0');
 const TRANSCRIPT_DIR =
   process.env.TRANSCRIPT_DIR ?? resolve(findMonorepoRoot(), 'scripts', 'meeting-copilot', 'transcripts');
-const CAT_INVOCATION_STALL_AUTO_KILL_MS = 7 * 60_000;
+// #1145: Stall auto-kill threshold is computed dynamically from the resolved
+// CLI_TIMEOUT_MS — see buildStallAutoKillConfig().  The probe cannot distinguish
+// "CLI waiting for LLM API response" from "CLI truly stuck", so the stall
+// threshold must equal the CLI timeout.  When CLI_TIMEOUT_MS=0 (disabled),
+// stallAutoKill is turned off entirely.
+export function buildStallAutoKillConfig(cliTimeoutMs: number): { stallAutoKill: boolean; stallWarningMs?: number } {
+  if (cliTimeoutMs === 0) return { stallAutoKill: false };
+  const effectiveMs = cliTimeoutMs > 0 ? cliTimeoutMs : DEFAULT_CLI_TIMEOUT_MS;
+  return { stallAutoKill: true, stallWarningMs: effectiveMs };
+}
 const ANTIGRAVITY_AUTOMATIC_RETRY_FRAGMENT_REASONS = new Set([
   'model_capacity',
   'empty_response',
@@ -2014,9 +2023,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         ? { resumeFallbackSystemPrompt: params.systemPrompt }
         : {}),
       // F118 Phase B: Enable liveness probe for all CLI providers.
-      // #774: stallAutoKill clears truly stuck idle-silent CLIs before F216's 10m stale-processing guard.
+      // #1145: stallAutoKill threshold tracks resolved CLI_TIMEOUT_MS (default 30 min).
+      // When CLI_TIMEOUT_MS=0 (disabled), stallAutoKill is off entirely.
       // #854: Windows cannot sample CPU; suppress suspected_stall there so CLI_TIMEOUT_MS stays binding.
-      livenessProbe: { stallAutoKill: true, stallWarningMs: CAT_INVOCATION_STALL_AUTO_KILL_MS },
+      livenessProbe: buildStallAutoKillConfig(cliTimeoutMs),
       ...(catConfig?.cliConfigArgs?.length ? { cliConfigArgs: catConfig.cliConfigArgs } : {}),
       parentSpan: invocationSpan,
     };

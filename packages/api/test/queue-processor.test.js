@@ -1609,6 +1609,72 @@ describe('QueueProcessor', () => {
     assert.ok(failedUpdate.arguments[1].error, 'should include error message');
   });
 
+  it('#1145: ensureTerminalStatus backstop writes failed when catch-block update throws', async () => {
+    // Track record state realistically so get() returns current status.
+    // Update call sequence for route-boom:
+    //   1. { userMessageId } — backfill
+    //   2. { status: 'running' } — mark running
+    //   3. { status: 'failed', error } (no expectedStatus) — catch block → THROW
+    //   4. { status: 'failed', expectedStatus: 'running' } — ensureTerminalStatus CAS → succeed
+    let recordStatus = 'pending';
+    const failDeps = stubDeps({
+      router: {
+        routeExecution: mock.fn(async function* () {
+          throw new Error('route boom');
+        }),
+        ackCollectedCursors: mock.fn(async () => {}),
+      },
+      invocationRecordStore: {
+        create: mock.fn(async () => ({ outcome: 'created', invocationId: 'inv-backstop' })),
+        update: mock.fn(async (_id, patch) => {
+          // Catch-block write: status='failed' WITHOUT expectedStatus (no CAS guard).
+          // This is the exact write that, when it throws, leaves the record in 'running'
+          // and triggers the ensureTerminalStatus backstop.
+          if (patch?.status === 'failed' && !patch?.expectedStatus) {
+            throw new Error('Redis blip');
+          }
+          // All other updates (userMessageId, running, CAS backstop) succeed normally.
+          if (patch?.status) recordStatus = patch.status;
+        }),
+        get: mock.fn(async (id) => {
+          // Return actual tracked state — after catch-block throw, record stays 'running'.
+          if (id === 'inv-backstop') return { invocationId: id, status: recordStatus };
+          return null;
+        }),
+      },
+    });
+    const failProcessor = new QueueProcessor(failDeps);
+
+    const entry = enqueueEntry(failDeps.queue);
+    failDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+    await failProcessor.processNext('t1', 'u1');
+    await new Promise((r) => setTimeout(r, 200));
+
+    const updateCalls = failDeps.invocationRecordStore.update.mock.calls;
+
+    // Verify catch-block write (status=failed, no expectedStatus) was attempted and threw.
+    const catchBlockCall = updateCalls.find(
+      (c) => c.arguments[1]?.status === 'failed' && !c.arguments[1]?.expectedStatus,
+    );
+    assert.ok(catchBlockCall, 'catch-block should attempt status=failed without CAS guard');
+
+    // Verify CAS backstop from ensureTerminalStatus fired with expectedStatus=running.
+    const casUpdate = updateCalls.find(
+      (c) => c.arguments[1]?.expectedStatus === 'running' && c.arguments[1]?.status === 'failed',
+    );
+    assert.ok(casUpdate, 'ensureTerminalStatus CAS backstop should write failed with expectedStatus=running');
+
+    // get() should have been called by ensureTerminalStatus to read current state.
+    assert.ok(
+      failDeps.invocationRecordStore.get.mock.calls.length > 0,
+      'ensureTerminalStatus should read the record via get()',
+    );
+
+    // After the CAS backstop succeeds, record should be in terminal state 'failed'.
+    assert.strictEqual(recordStatus, 'failed', 'record should reach terminal failed via CAS backstop');
+  });
+
   // ── F039 remaining bugfix: queue execution should include contentBlocks ──
 
   it('executeEntry passes contentBlocks from messageId to routeExecution', async () => {
