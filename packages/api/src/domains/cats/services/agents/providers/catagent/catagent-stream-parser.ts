@@ -66,6 +66,8 @@ interface StreamContext {
   blocks: Map<number, BlockAccumulator>;
   sawMessageStop: boolean;
   sawAnyEvent: boolean;
+  /** Set when a data frame fails to parse — terminates the stream fail-closed. */
+  parseError?: string;
 }
 
 /** Parse an Anthropic SSE stream into CatAgentStreamEvents. */
@@ -94,11 +96,15 @@ export async function* parseAnthropicSSE(
 
       for (const line of lines) {
         yield* processAndHandle(line, sseState, ctx);
+        if (ctx.parseError) break;
       }
+      if (ctx.parseError) break;
     }
-    if (buffer.trim()) yield* processAndHandle(buffer, sseState, ctx);
-    const final = flushSSEState(sseState);
-    if (final) yield* handleSSEEvent(final, ctx);
+    if (!ctx.parseError && buffer.trim()) yield* processAndHandle(buffer, sseState, ctx);
+    if (!ctx.parseError) {
+      const final = flushSSEState(sseState);
+      if (final) yield* handleSSEEvent(final, ctx);
+    }
 
     // P1: EOF must be message_stop with no unclosed blocks (check specific first)
     if (ctx.blocks.size > 0) {
@@ -170,7 +176,12 @@ function* handleSSEEvent(evt: ParsedSSEEvent, ctx: StreamContext): Iterable<CatA
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(evt.data);
-  } catch {
+  } catch (err) {
+    // Fail closed: a malformed frame must not be silently dropped. If it were,
+    // a later message_stop would end the stream "cleanly" and any tool_use blocks
+    // accumulated from earlier deltas would be emitted and executed.
+    ctx.parseError = err instanceof Error ? err.message : String(err);
+    yield { type: 'stream_error', error: `Malformed Anthropic data frame: ${ctx.parseError}` };
     return;
   }
 

@@ -352,6 +352,32 @@ describe('AnthropicMessagesAdapter: mapError', () => {
 
 // ── isTerminalStopReason ──
 
+describe('AnthropicMessagesAdapter: malformed frame fails closed', () => {
+  test('tool_use block + malformed frame + message_stop → stream_error, no tool_call emitted', async () => {
+    const a = new AnthropicMessagesAdapter();
+    const stream = [
+      // content_block_start for tool_use
+      `event: content_block_start\ndata: ${JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'call_1', name: 'write_file' } })}\n\n`,
+      // Some valid tool input delta
+      `event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"path":"a' } })}\n\n`,
+      // Malformed frame — must fail closed
+      'event: content_block_delta\ndata: {INVALID JSON\n\n',
+      // message_stop — should NOT make the stream look clean
+      `event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`,
+    ];
+    const events = await collect(a.parseStreamEvents(toStream([stream])));
+
+    const error = events.find((e) => e.type === 'stream_error');
+    assert.ok(error, 'must emit stream_error on malformed frame');
+    assert.match(error.error, /malformed/i);
+
+    const toolBlock = events.find(
+      (e) => e.type === 'content_block_complete' && e.block?.type === 'tool_call',
+    );
+    assert.equal(toolBlock, undefined, 'tool_call must not be emitted after parse error');
+  });
+});
+
 describe('AnthropicMessagesAdapter: isTerminalStopReason', () => {
   const a = new AnthropicMessagesAdapter();
 

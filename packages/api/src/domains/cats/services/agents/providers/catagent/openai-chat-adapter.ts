@@ -57,6 +57,8 @@ interface OpenAIStreamContext {
   toolCalls: Map<number, OpenAIToolCallAccumulator>;
   sawAnyEvent: boolean;
   sawDone: boolean;
+  /** True once any choice carries a non-null finish_reason. */
+  sawFinishReason: boolean;
   /** Set when a data frame fails to parse — terminates the stream fail-closed. */
   parseError?: string;
 }
@@ -127,6 +129,7 @@ async function* parseOpenAIChatStream(
     toolCalls: new Map(),
     sawAnyEvent: false,
     sawDone: false,
+    sawFinishReason: false,
   };
 
   try {
@@ -164,7 +167,25 @@ async function* parseOpenAIChatStream(
       if (ctx.parseError) return;
     }
 
-    yield* emitOpenAIContentBlocks(ctx);
+    // Fail closed: suppress tool calls if the stream never carried a terminal
+    // finish_reason — executing tool_calls from a non-terminal stream is unsafe.
+    if (ctx.toolCalls.size > 0 && !ctx.sawFinishReason) {
+      yield {
+        type: 'stream_error',
+        error:
+          'Stream ended without finish_reason — suppressed accumulated tool calls to prevent execution from non-terminal stream',
+      };
+      // Still emit text blocks (safe, no side effects)
+      if (ctx.textSeen) {
+        yield {
+          type: 'content_block_complete',
+          block: { type: 'text', text: ctx.text },
+          blockIndex: 0,
+        };
+      }
+    } else {
+      yield* emitOpenAIContentBlocks(ctx);
+    }
 
     if (ctx.sawAnyEvent && !ctx.sawDone) {
       yield { type: 'stream_error', error: 'Stream ended without [DONE]' };
@@ -256,6 +277,7 @@ function* handleOpenAIDataEvent(eventData: string, ctx: OpenAIStreamContext): It
 
   const finishReason = choice.finish_reason;
   if (finishReason !== undefined && finishReason !== null) {
+    ctx.sawFinishReason = true;
     yield { type: 'stop', stopReason: String(finishReason) };
   }
 }
@@ -301,9 +323,13 @@ export class OpenAIChatAdapter implements CatAgentProtocolAdapter {
 
   buildRequestBody(input: AdapterRequestInput): unknown {
     const messages = input.messages.flatMap((message) => unwrapMessages(message));
+    const maxTokens = input.maxTokens ?? DEFAULT_MAX_TOKENS;
+    // o-series models (o1, o3, o4-mini, etc.) reject max_tokens in favor of
+    // max_completion_tokens. Detect by model name prefix.
+    const isOSeries = /^o\d/i.test(input.model);
     const body: Record<string, unknown> = {
       model: input.model,
-      max_tokens: input.maxTokens ?? DEFAULT_MAX_TOKENS,
+      ...(isOSeries ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
       messages: input.systemPrompt ? [{ role: 'system' as const, content: input.systemPrompt }, ...messages] : messages,
       stream: true,
       stream_options: { include_usage: true },

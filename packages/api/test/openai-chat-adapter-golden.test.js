@@ -305,6 +305,71 @@ describe('OpenAIChatAdapter: parseStreamEvents', () => {
   });
 });
 
+describe('OpenAIChatAdapter: missing finish_reason suppresses tool calls', () => {
+  test('tool-call deltas + [DONE] without finish_reason emits stream_error, no tool_call', async () => {
+    const adapter = new OpenAIChatAdapter();
+    const stream = [
+      sse({ id: '1', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'write_file', arguments: '{"path":"a.txt"}' } }] }, finish_reason: null }] }),
+      // [DONE] without any chunk carrying finish_reason
+      sse('[DONE]'),
+    ].join('');
+    const events = await collect(adapter.parseStreamEvents(toStream([stream])));
+
+    const error = events.find((event) => event.type === 'stream_error');
+    assert.ok(error, 'must emit stream_error when finish_reason is missing');
+    assert.match(error.error, /finish_reason/i);
+
+    const toolBlock = events.find(
+      (event) => event.type === 'content_block_complete' && event.block?.type === 'tool_call',
+    );
+    assert.equal(toolBlock, undefined, 'tool_call must not be emitted without finish_reason');
+  });
+
+  test('tool-call deltas with finish_reason emits tool_call normally', async () => {
+    const adapter = new OpenAIChatAdapter();
+    const stream = [
+      sse({ id: '1', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'read_file', arguments: '{"path":"a.txt"}' } }] }, finish_reason: null }] }),
+      sse({ id: '1', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] }),
+      sse('[DONE]'),
+    ].join('');
+    const events = await collect(adapter.parseStreamEvents(toStream([stream])));
+
+    const toolBlock = events.find(
+      (event) => event.type === 'content_block_complete' && event.block?.type === 'tool_call',
+    );
+    assert.ok(toolBlock, 'tool_call must be emitted when finish_reason is present');
+    assert.equal(toolBlock.block.name, 'read_file');
+  });
+});
+
+describe('OpenAIChatAdapter: o-series max_completion_tokens', () => {
+  test('o-series model uses max_completion_tokens instead of max_tokens', () => {
+    const adapter = new OpenAIChatAdapter();
+    const body = adapter.buildRequestBody({
+      model: 'o4-mini',
+      maxTokens: 4096,
+      systemPrompt: 'test',
+      messages: [],
+      tools: [],
+    });
+    assert.equal(body.max_completion_tokens, 4096);
+    assert.equal(body.max_tokens, undefined);
+  });
+
+  test('non-o-series model uses max_tokens', () => {
+    const adapter = new OpenAIChatAdapter();
+    const body = adapter.buildRequestBody({
+      model: 'gpt-5.4',
+      maxTokens: 4096,
+      systemPrompt: 'test',
+      messages: [],
+      tools: [],
+    });
+    assert.equal(body.max_tokens, 4096);
+    assert.equal(body.max_completion_tokens, undefined);
+  });
+});
+
 describe('OpenAIChatAdapter: mapError + terminal stop reasons', () => {
   test('mapError emits OpenAI-shaped error text', () => {
     const adapter = new OpenAIChatAdapter();

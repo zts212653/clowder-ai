@@ -826,4 +826,24 @@ describe('audit-after-mutation honesty (commitThenAudit)', () => {
     // Mutation committed
     assert.deepEqual(updates, [{ status: 'done' }]);
   });
+
+  test('run_command returns success with audit-degraded annotation when audit sink throws', async () => {
+    let auditCallCount = 0;
+    const tools = await buildToolRegistry(tmpDir, {
+      nativeToolLevel: 'L2',
+      commandPolicy: [{ binary: 'env' }],
+      audit: () => {
+        auditCallCount++;
+        // Only throw on the success audit (after command completes),
+        // not on the policy-resolved audit or other pre-execution audits.
+        if (auditCallCount > 0) throw new Error('audit down');
+      },
+    });
+    const run = findTool(tools, 'run_command');
+    assert.ok(run);
+    const result = await run.execute({ binary: 'env', args: [] });
+    // Command already executed — result must be success, not an error
+    assert.ok(typeof result === 'string' && result.length > 0, 'command output must be present');
+    assert.ok(result.includes('[audit-degraded'), 'must annotate audit degradation');
+  });
 });

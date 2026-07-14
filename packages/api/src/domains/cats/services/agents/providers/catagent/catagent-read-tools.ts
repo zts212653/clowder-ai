@@ -879,19 +879,24 @@ async function executeRunCommand(
       env: constrainedCommandEnv(),
       signal: options.signal,
     });
-    await emitAudit(options, {
-      tool: 'run_command',
-      outcome: 'ok',
-      timestamp: Date.now(),
-      binary,
-      args,
-      exitCode: 0,
-      durationMs: Date.now() - startedAt,
-      stdoutBytes: Buffer.byteLength(stdout),
-      stderrBytes: Buffer.byteLength(stderr),
-      policyEntry: policyEntry.binary,
-    });
-    return formatCommandOutput(0, stdout, stderr);
+    // Command already executed (non-idempotent side-effect committed) —
+    // use commitThenAudit so audit failure doesn't falsely report tool error.
+    const successMessage = formatCommandOutput(0, stdout, stderr);
+    return commitThenAudit(
+      options,
+      () => {}, // mutation already committed (command ran)
+      {
+        tool: 'run_command',
+        binary,
+        args,
+        exitCode: 0,
+        durationMs: Date.now() - startedAt,
+        stdoutBytes: Buffer.byteLength(stdout),
+        stderrBytes: Buffer.byteLength(stderr),
+        policyEntry: policyEntry.binary,
+      },
+      successMessage,
+    );
   } catch (err) {
     if (isAbortError(err)) {
       await emitAudit(options, {
