@@ -7,9 +7,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { apiFetch } from '@/utils/api-client';
 import { DirectoryBreadcrumb } from './directory-breadcrumb';
-import { FolderIcon, PcIcon, TerminalIcon } from './directory-browser-icons';
+import { FolderIcon, TerminalIcon } from './directory-browser-icons';
 import { type BrowseResult, buildBrowseUrl, pathToSegments, shouldFallbackToHome } from './directory-segments';
 import { DrivesView } from './drives-view';
+import { ThisPcListEntry } from './this-pc-list-entry';
 import { useDrivesLoader } from './use-drives-loader';
 
 interface DirectoryBrowserProps {
@@ -152,32 +153,7 @@ export function DirectoryBrowser({
 
       {/* ── Directory listing ── */}
       <div className="flex-1 overflow-y-auto px-3 py-2 space-y-0.5 min-h-0">
-        {view === 'directory' && showThisPcEntry && (
-          <button
-            type="button"
-            onClick={enterDrivesView}
-            className="w-full text-left px-3 py-2.5 text-sm rounded-lg transition-colors flex items-center gap-2.5 hover:bg-cafe-surface/50"
-            title="查看所有磁盘"
-          >
-            <PcIcon />
-            <div className="min-w-0 flex-1">
-              <span className="font-medium text-cafe-black block truncate">此电脑</span>
-              <span className="text-micro text-cafe-muted block truncate">切换磁盘</span>
-            </div>
-            <svg
-              aria-hidden="true"
-              className="w-3.5 h-3.5 text-cafe-muted flex-shrink-0"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-            >
-              <path
-                fillRule="evenodd"
-                d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
-                clipRule="evenodd"
-              />
-            </svg>
-          </button>
-        )}
+        {view === 'directory' && showThisPcEntry && <ThisPcListEntry onEnterDrivesView={enterDrivesView} />}
 
         {/* Inline new folder input */}
         {creatingDir && (
