@@ -11,7 +11,7 @@ import { promisify } from 'node:util';
 import type { FastifyPluginAsync } from 'fastify';
 import { checkGovernancePreflight } from '../config/governance/governance-preflight.js';
 import { findMonorepoRoot } from '../utils/monorepo-root.js';
-import { validateProjectPath } from '../utils/project-path.js';
+import { resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 const execFileAsync = promisify(execFile);
@@ -67,7 +67,7 @@ export const governanceStatusRoute: FastifyPluginAsync<GovernanceStatusRouteOpti
       return { error: 'projectPath parameter is required' };
     }
 
-    const validated = await validateProjectPath(query.projectPath);
+    const validated = await resolvePersistentProjectPath(query.projectPath);
     if (!validated) {
       reply.status(403);
       return { error: 'Project path not allowed' };

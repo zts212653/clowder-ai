@@ -11,7 +11,7 @@
 
 import type { CatId, ProposalApproveOverrides, ReportingMode, ThreadProposal } from '@cat-cafe/shared';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import { validateProjectPath } from '../utils/project-path.js';
+import { migrateStoredProjectPath, resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 
 /** Parsed approve-body overrides (preferredCats arrives as plain strings from zod). */
 export interface ApproveOverridesInput {
@@ -75,7 +75,7 @@ export async function resolveApproveOverrides(
   // `approving`, and a cat/user who thinks they pinned a repo never silently lands in `default`.
   let finalProjectPath = proposal.projectPath;
   if (overrides.projectPath !== undefined) {
-    const validatedProjectPath = await validateProjectPath(overrides.projectPath);
+    const validatedProjectPath = await resolvePersistentProjectPath(overrides.projectPath);
     if (!validatedProjectPath) {
       return {
         ok: false,
@@ -86,6 +86,17 @@ export async function resolveApproveOverrides(
     finalProjectPath = validatedProjectPath;
   } else if (reparentedThread) {
     finalProjectPath = reparentedThread.projectPath;
+  }
+  if (finalProjectPath && finalProjectPath !== 'default') {
+    const persistentProjectPath = await migrateStoredProjectPath(finalProjectPath);
+    if (!persistentProjectPath) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'Resolved projectPath no longer maps to a persistent workspace',
+      };
+    }
+    finalProjectPath = persistentProjectPath;
   }
 
   return {

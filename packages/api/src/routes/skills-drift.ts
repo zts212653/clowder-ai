@@ -20,7 +20,8 @@ import { readMountRules } from '../config/mount/mount-rules-store.js';
 import { checkGlobal, checkProject } from '../skills/drift-detector.js';
 import { syncDrift } from '../skills/drift-resolver.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
-import { pathsEqual, validateProjectPath } from '../utils/project-path.js';
+import { redirectRuntimeProjectPath, resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
+import { pathsEqual } from '../utils/project-path.js';
 import { resolveSessionUserId, resolveUserId } from '../utils/request-identity.js';
 import { resolveCatCafeSkillsSource } from '../utils/skill-source.js';
 import { resolveStartupProjectRoot } from '../utils/startup-root.js';
@@ -62,9 +63,9 @@ export function fillDefaultMountPaths(policy: ProjectSkillMountPolicy, mountRule
   }
 }
 
-async function resolveTargetProjectRoot(projectPath?: string): Promise<string | null> {
-  if (!projectPath) return STARTUP_REPO_ROOT;
-  return validateProjectPath(projectPath);
+async function resolveTargetProjectRoot(projectPath?: string, defaultRoot = STARTUP_REPO_ROOT): Promise<string | null> {
+  if (!projectPath) return redirectRuntimeProjectPath(defaultRoot);
+  return resolvePersistentProjectPath(projectPath);
 }
 
 interface ProjectSkillMountPolicy {
@@ -226,10 +227,12 @@ async function loadDriftPolicies(projectRoot: string, globalProjectRoot: string)
  * and the unified /api/drift/check route can reuse it.
  */
 export async function computeSkillDrift(projectPath?: string, mainProjectRoot?: string) {
-  const projectRoot = await resolveTargetProjectRoot(projectPath);
-  if (!projectRoot) return null;
   const skillsSource = await resolveCatCafeSkillsSource();
-  const globalProjectRoot = mainProjectRoot ?? dirname(skillsSource);
+  const configuredGlobalRoot = mainProjectRoot ?? dirname(skillsSource);
+  const globalProjectRoot = await redirectRuntimeProjectPath(configuredGlobalRoot);
+  if (!globalProjectRoot) return null;
+  const projectRoot = await resolveTargetProjectRoot(projectPath, globalProjectRoot);
+  if (!projectRoot) return null;
   const isGlobalScope = !projectPath || pathsEqual(projectRoot, globalProjectRoot);
 
   if (isGlobalScope) {
@@ -342,7 +345,7 @@ export const skillsDriftRoutes: FastifyPluginAsync<SkillsDriftRouteOptions> = as
       return { error: 'Required: action ("sync")' };
     }
 
-    const targetRoot = await resolveTargetProjectRoot(body.projectPath);
+    const targetRoot = await resolveTargetProjectRoot(body.projectPath, opts.mainProjectRoot ?? STARTUP_REPO_ROOT);
     if (!targetRoot) {
       reply.status(400);
       return { error: 'Invalid project path: must be an existing directory under allowed roots' };

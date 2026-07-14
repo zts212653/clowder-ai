@@ -18,12 +18,18 @@ import type { McpDriftResolution } from '../mcp/mcp-drift-resolver.js';
 import { syncMcpDrift, VALID_MCP_DRIFT_DECISIONS } from '../mcp/mcp-drift-resolver.js';
 import { syncDrift } from '../skills/drift-resolver.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
-import { validateProjectPath } from '../utils/project-path.js';
+import { redirectRuntimeProjectPath, resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { resolveSessionUserId, resolveUserId } from '../utils/request-identity.js';
 import { resolveStartupProjectRoot } from '../utils/startup-root.js';
 import { computeSkillDrift } from './skills-drift.js';
 
 const STARTUP_REPO_ROOT = resolveStartupProjectRoot();
+
+async function resolveGlobalProjectRoot(): Promise<string> {
+  const root = await redirectRuntimeProjectPath(STARTUP_REPO_ROOT);
+  if (!root) throw new Error('Unable to resolve persistent global drift root');
+  return root;
+}
 const VALID_TYPES = ['skill', 'mcp'] as const;
 type DriftType = (typeof VALID_TYPES)[number];
 
@@ -97,13 +103,14 @@ export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
     }
 
     // type === 'mcp'
-    const projectRoot = projectPath ? await validateProjectPath(projectPath) : null;
+    const projectRoot = projectPath ? await resolvePersistentProjectPath(projectPath) : null;
     if (projectPath && !projectRoot) {
       reply.status(400);
       return { error: 'Invalid project path' };
     }
-    const effectiveRoot = projectRoot ?? STARTUP_REPO_ROOT;
-    const drift = await checkMcpProject(effectiveRoot, STARTUP_REPO_ROOT);
+    const globalRoot = await resolveGlobalProjectRoot();
+    const effectiveRoot = projectRoot ?? globalRoot;
+    const drift = await checkMcpProject(effectiveRoot, globalRoot);
     const issues: DriftIssue[] = drift.issues.map((i) => ({
       id: i.mcpId,
       issueType: i.type,
@@ -152,7 +159,9 @@ export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
     }
 
     if (type === 'skill') {
-      const targetRoot = projectPath ? await validateProjectPath(projectPath) : STARTUP_REPO_ROOT;
+      const targetRoot = projectPath
+        ? await resolvePersistentProjectPath(projectPath)
+        : await resolveGlobalProjectRoot();
       if (!targetRoot) {
         reply.status(400);
         return { error: 'Invalid project path' };
@@ -207,20 +216,21 @@ export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
       resolutions = body.resolutions as McpDriftResolution[];
     }
 
-    const projectRoot = projectPath ? await validateProjectPath(projectPath) : null;
+    const projectRoot = projectPath ? await resolvePersistentProjectPath(projectPath) : null;
     if (projectPath && !projectRoot) {
       reply.status(400);
       return { error: 'Invalid project path' };
     }
-    const effectiveRoot = projectRoot ?? STARTUP_REPO_ROOT;
-    const drift = await checkMcpProject(effectiveRoot, STARTUP_REPO_ROOT);
+    const globalRoot = await resolveGlobalProjectRoot();
+    const effectiveRoot = projectRoot ?? globalRoot;
+    const drift = await checkMcpProject(effectiveRoot, globalRoot);
     if (drift.issues.length === 0) {
       return {
         action: 'sync',
         report: { added: [], removed: [], updated: [], skipped: [], syncedHash: drift.driftHash },
       };
     }
-    const report = await syncMcpDrift(effectiveRoot, STARTUP_REPO_ROOT, drift, resolutions, conflictPolicy);
+    const report = await syncMcpDrift(effectiveRoot, globalRoot, drift, resolutions, conflictPolicy);
     return { action: 'sync', report, projectRoot: effectiveRoot };
   });
 };

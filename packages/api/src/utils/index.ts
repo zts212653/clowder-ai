@@ -14,5 +14,18 @@ export type {
 } from './cli-types.js';
 export { isParseError, parseNDJSON } from './ndjson-parser.js';
 export { normalizeErrorMessage } from './normalize-error.js';
+export type {
+  ExternalProjectPathResult,
+  PersistentProjectPathFailureReason,
+  PersistentProjectPathOptions,
+  PersistentProjectPathResult,
+} from './persistent-project-path.js';
+export {
+  migrateStoredProjectPath,
+  redirectRuntimeProjectPath,
+  resolvePersistentProjectPath,
+  resolvePersistentProjectPathDetailed,
+  validateExternalProjectPathDetailed,
+} from './persistent-project-path.js';
 export type { ProjectPathValidationFailureReason, ProjectPathValidationResult } from './project-path.js';
 export { isUnderAllowedRoot, validateProjectPath, validateProjectPathDetailed } from './project-path.js';

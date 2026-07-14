@@ -7,7 +7,8 @@
 import { mkdir, stat } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
-import { isUnderAllowedRoot, validateProjectPath } from '../utils/project-path.js';
+import { resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
+import { isUnderAllowedRoot } from '../utils/project-path.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 /** Characters not allowed in directory names (cross-platform safe) */
@@ -37,7 +38,7 @@ export const mkdirRoute: FastifyPluginAsync = async (app) => {
     }
 
     // Validate parentPath exists and is under allowed roots
-    const validatedParent = await validateProjectPath(parentPath);
+    const validatedParent = await resolvePersistentProjectPath(parentPath);
     if (!validatedParent) {
       reply.status(403);
       return { error: 'Parent path not allowed' };

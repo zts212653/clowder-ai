@@ -236,6 +236,45 @@ describe('Skills write-route owner gate (AC-E4)', () => {
     }
   });
 
+  it('POST /api/skills/sync redirects runtime-root writes to the persistent workspace', async () => {
+    const prevOwner = process.env.DEFAULT_OWNER_USER_ID;
+    const prevRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    const prevWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    process.env.DEFAULT_OWNER_USER_ID = OWNER_ID;
+    const runtimeRoot = await mkdtemp(join(tmpdir(), 'skills-sync-runtime-root-'));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'skills-sync-workspace-root-'));
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+
+    const app = await buildSkillsApp({ mainProjectRoot: workspaceRoot });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/skills/sync',
+        headers: LOCAL_WRITE_HEADERS,
+        payload: { projectPath: runtimeRoot },
+      });
+
+      assert.equal(res.statusCode, 200, res.body);
+      assert.equal(await pathExists(join(workspaceRoot, '.claude/skills')), true);
+      assert.equal(
+        await pathExists(join(runtimeRoot, '.claude/skills')),
+        false,
+        'runtime checkout must remain untouched',
+      );
+    } finally {
+      if (prevOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = prevOwner;
+      if (prevRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = prevRuntimeRoot;
+      if (prevWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = prevWorkspaceRoot;
+      await app.close();
+      await rm(runtimeRoot, { recursive: true, force: true });
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
   it('POST /api/skills/sync mounts configured custom paths', async () => {
     const prev = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = OWNER_ID;

@@ -15,7 +15,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import { readMountRules } from '../config/mount/mount-rules-store.js';
 import { parseManifestSkillMeta, resolveSkillMcpStatuses, type SkillMcpDependency } from '../skills/skill-meta.js';
-import { validateProjectPath } from '../utils/project-path.js';
+import { redirectRuntimeProjectPath, resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import {
   buildMountPointDirCandidates,
@@ -128,11 +128,16 @@ export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, 
       return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
     const skillsSrc = CAT_CAFE_SKILLS_SRC;
-    const repoRoot = dirname(skillsSrc);
+    const sourceRepoRoot = dirname(skillsSrc);
+    const repoRoot = await redirectRuntimeProjectPath(sourceRepoRoot);
+    if (!repoRoot) {
+      reply.status(500);
+      return { error: 'Unable to resolve persistent global project root' };
+    }
     const query = request.query as { projectPath?: string };
     let projectRoot = repoRoot;
     if (query.projectPath) {
-      const validated = await validateProjectPath(query.projectPath);
+      const validated = await resolvePersistentProjectPath(query.projectPath);
       if (!validated) {
         reply.status(400);
         return { error: 'Invalid project path: must be an existing directory under allowed roots' };

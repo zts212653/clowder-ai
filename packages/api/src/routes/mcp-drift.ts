@@ -19,7 +19,7 @@ import type { McpDriftResolution } from '../mcp/mcp-drift-resolver.js';
 import { syncMcpDrift, VALID_MCP_DRIFT_DECISIONS } from '../mcp/mcp-drift-resolver.js';
 import { syncMcpAll } from '../mcp/mcp-sync-all.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
-import { pathsEqual, validateProjectPath } from '../utils/project-path.js';
+import { redirectRuntimeProjectPath, resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { resolveSessionUserId, resolveUserId } from '../utils/request-identity.js';
 import { resolveStartupProjectRoot } from '../utils/startup-root.js';
 import { probeMcpCapability } from './mcp-probe.js';
@@ -72,6 +72,12 @@ async function resolveProbeTarget(
 
 const STARTUP_REPO_ROOT = resolveStartupProjectRoot();
 
+async function resolveGlobalProjectRoot(): Promise<string> {
+  const root = await redirectRuntimeProjectPath(STARTUP_REPO_ROOT);
+  if (!root) throw new Error('Unable to resolve persistent global MCP root');
+  return root;
+}
+
 function requireMcpWriteAccess(request: FastifyRequest, reply: FastifyReply): { userId?: string; error?: string } {
   const userId = resolveSessionUserId(request);
   if (!userId) {
@@ -101,10 +107,12 @@ export const mcpDriftRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const body = (request.body ?? {}) as { projectPath?: string };
+    const globalRoot = await resolveGlobalProjectRoot();
 
-    // No projectPath or same as main → global drift check (aggregate all projects)
-    if (!body.projectPath || pathsEqual(body.projectPath, STARTUP_REPO_ROOT)) {
-      const globalDrift = await checkMcpGlobal(STARTUP_REPO_ROOT);
+    // An omitted projectPath means global aggregate. An explicit runtime path
+    // is resolved below so it cannot silently mutate the runtime checkout.
+    if (!body.projectPath) {
+      const globalDrift = await checkMcpGlobal(globalRoot);
       return {
         result: {
           perProject: globalDrift.perProject.map((p) => ({
@@ -119,13 +127,13 @@ export const mcpDriftRoutes: FastifyPluginAsync = async (app) => {
     }
 
     // Specific project → single-project drift check
-    const projectRoot = await validateProjectPath(body.projectPath);
+    const projectRoot = await resolvePersistentProjectPath(body.projectPath);
     if (!projectRoot) {
       reply.status(400);
       return { error: 'Invalid project path' };
     }
 
-    const drift = await checkMcpProject(projectRoot, STARTUP_REPO_ROOT);
+    const drift = await checkMcpProject(projectRoot, globalRoot);
     return {
       result: {
         issues: drift.issues,
@@ -156,6 +164,7 @@ export const mcpDriftRoutes: FastifyPluginAsync = async (app) => {
       reply.status(400);
       return { error: 'Required: projectPath' };
     }
+    const globalRoot = await resolveGlobalProjectRoot();
 
     // #712 review: validate resolutions array against resolver contract (use-global | keep-project)
     const MAX_RESOLUTIONS = 200;
@@ -182,14 +191,14 @@ export const mcpDriftRoutes: FastifyPluginAsync = async (app) => {
       }
     }
 
-    const projectRoot = await validateProjectPath(body.projectPath);
+    const projectRoot = await resolvePersistentProjectPath(body.projectPath);
     if (!projectRoot) {
       reply.status(400);
       return { error: 'Invalid project path' };
     }
 
     // Re-compute drift (state may have changed since last check)
-    const drift = await checkMcpProject(projectRoot, STARTUP_REPO_ROOT);
+    const drift = await checkMcpProject(projectRoot, globalRoot);
     if (drift.issues.length === 0) {
       return {
         action: 'sync',
@@ -197,7 +206,7 @@ export const mcpDriftRoutes: FastifyPluginAsync = async (app) => {
       };
     }
 
-    const report = await syncMcpDrift(projectRoot, STARTUP_REPO_ROOT, drift, body.resolutions);
+    const report = await syncMcpDrift(projectRoot, globalRoot, drift, body.resolutions);
     return { action: 'sync', report, projectRoot };
   });
 
@@ -206,7 +215,7 @@ export const mcpDriftRoutes: FastifyPluginAsync = async (app) => {
     const access = requireMcpWriteAccess(request, reply);
     if (!access.userId) return { error: access.error };
 
-    const result = await syncMcpAll(STARTUP_REPO_ROOT);
+    const result = await syncMcpAll(await resolveGlobalProjectRoot());
     return result;
   });
 
@@ -262,9 +271,9 @@ export const mcpDriftRoutes: FastifyPluginAsync = async (app) => {
     }
 
     // #712 P2-1: use project-scoped root when probing from a project tab
-    let probeRoot = STARTUP_REPO_ROOT;
+    let probeRoot = await resolveGlobalProjectRoot();
     if (body.projectPath) {
-      const validated = await validateProjectPath(body.projectPath);
+      const validated = await resolvePersistentProjectPath(body.projectPath);
       if (!validated) {
         reply.status(400);
         return { error: `Invalid project path: ${body.projectPath}` };

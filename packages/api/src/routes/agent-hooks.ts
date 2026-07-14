@@ -5,7 +5,7 @@ import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { getAgentHookStatus, syncAgentHooks } from '../agent-hooks/index.js';
 import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
-import { validateProjectPath } from '../utils/project-path.js';
+import { resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 
 export interface AgentHooksRouteOptions {
   projectRoot?: string;
@@ -88,7 +88,7 @@ async function validateExplicitProjectPath(
 ): Promise<{ ok: true; path: string | null } | { ok: false; error: string }> {
   if (!rawPath) return { ok: true, path: null };
 
-  const validated = await validateProjectPath(rawPath);
+  const validated = await resolvePersistentProjectPath(rawPath);
   if (!validated) {
     return { ok: false, error: `Invalid project path: not found, denied, or not a directory: ${rawPath}` };
   }

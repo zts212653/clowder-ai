@@ -67,6 +67,50 @@ function expectedSymlinkTarget(linkPath, sourcePath) {
 }
 
 describe('Mount Rules Route (F228)', () => {
+  it('PUT /api/mount-rules persists provider rules outside the runtime worktree', async () => {
+    const prevOwner = process.env.DEFAULT_OWNER_USER_ID;
+    const prevRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    const prevWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    process.env.DEFAULT_OWNER_USER_ID = OWNER_ID;
+    const runtimeRoot = await mkdtemp(join(tmpdir(), 'mount-rules-runtime-root-'));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'mount-rules-workspace-root-'));
+    const canonicalWorkspaceRoot = await realpath(workspaceRoot);
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+    const rules = {
+      ...DEFAULT_MOUNT_RULES,
+      mountPoints: Object.fromEntries(
+        Object.entries(DEFAULT_MOUNT_RULES.mountPoints).map(([id, provider]) => [id, { ...provider, enabled: false }]),
+      ),
+      customPaths: [],
+    };
+    const app = await buildMountRulesApp({ mainProjectRoot: canonicalWorkspaceRoot });
+
+    try {
+      const res = await app.inject({
+        method: 'PUT',
+        url: '/api/mount-rules',
+        headers: LOCAL_WRITE_HEADERS,
+        payload: { projectPath: runtimeRoot, rules },
+      });
+
+      assert.equal(res.statusCode, 200, res.body);
+      assert.equal(JSON.parse(res.body).projectRoot, canonicalWorkspaceRoot);
+      assert.equal(await exists(join(workspaceRoot, '.cat-cafe/capabilities.json')), true);
+      assert.equal(await exists(join(runtimeRoot, '.cat-cafe/capabilities.json')), false);
+    } finally {
+      if (prevOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = prevOwner;
+      if (prevRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = prevRuntimeRoot;
+      if (prevWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = prevWorkspaceRoot;
+      await app.close();
+      await rm(runtimeRoot, { recursive: true, force: true });
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
   it('PUT /api/mount-rules waits for capability lock before writing project rules', async () => {
     const prevOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = OWNER_ID;

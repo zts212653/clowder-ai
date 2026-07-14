@@ -69,7 +69,8 @@ import { resolveActiveProjectRoot } from '../../../../../utils/active-project-ro
 import { resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { DEFAULT_CLI_TIMEOUT_MS, resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { findMonorepoRoot, isSameProject } from '../../../../../utils/monorepo-root.js';
-import { pathsEqual, validateProjectPathDetailed } from '../../../../../utils/project-path.js';
+import { resolvePersistentProjectPathDetailed } from '../../../../../utils/persistent-project-path.js';
+import { pathsEqual } from '../../../../../utils/project-path.js';
 import { tcpProbe } from '../../../../../utils/tcp-probe.js';
 import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry.js';
 import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
@@ -1216,9 +1217,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           if (thread.projectPath.startsWith('games/')) {
             workspaceResolutionFailureMessage = `OpenCode requires a filesystem thread projectPath for ${threadId}; virtual game projectPath ${thread.projectPath} cannot be used as a working directory.`;
           } else {
-            const validatedProjectPath = await validateProjectPathDetailed(thread.projectPath);
+            const validatedProjectPath = await resolvePersistentProjectPathDetailed(thread.projectPath);
             if (!validatedProjectPath.ok) {
-              const isTransient = validatedProjectPath.reason === 'io_error';
+              const isTransient = ['io_error', 'runtime_root_invalid', 'runtime_workspace_missing'].includes(
+                validatedProjectPath.reason,
+              );
               workspaceResolutionFailureMessage = isTransient
                 ? `Unable to validate thread projectPath for ${threadId}: ${thread.projectPath}. ${validatedProjectPath.message ?? 'Transient filesystem error.'} Retry; if it persists, re-bind the thread's project workspace.`
                 : `Invalid thread projectPath for ${threadId}: ${thread.projectPath}. Expected an existing directory under allowed roots.`;
@@ -1234,6 +1237,29 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
               );
             } else {
               workingDirectory = validatedProjectPath.path;
+              if (validatedProjectPath.remappedFrom && threadStore.updateProjectPath) {
+                try {
+                  await preflightRace(
+                    Promise.resolve(threadStore.updateProjectPath(threadId, validatedProjectPath.path)),
+                    'updateProjectPath',
+                    signal,
+                  );
+                  log.info(
+                    {
+                      catId,
+                      threadId,
+                      previousProjectPath: validatedProjectPath.remappedFrom,
+                      projectPath: validatedProjectPath.path,
+                    },
+                    'migrated thread projectPath out of the runtime worktree',
+                  );
+                } catch (migrationErr) {
+                  log.warn(
+                    { catId, threadId, err: migrationErr, projectPath: validatedProjectPath.path },
+                    'failed to persist runtime projectPath migration; continuing with persistent workspace',
+                  );
+                }
+              }
             }
           }
         } else if (thread?.bootcampState) {

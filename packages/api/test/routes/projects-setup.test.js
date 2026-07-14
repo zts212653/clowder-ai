@@ -142,6 +142,22 @@ describe('POST /api/projects/setup', () => {
     assert.equal(res.statusCode, 400);
   });
 
+  it('rejects Cat Cafe descendants as external governance targets', async () => {
+    const internalPackage = join(fakeCatCafeRoot, 'packages', 'api');
+    await mkdir(internalPackage, { recursive: true });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/projects/setup',
+      headers: HEADERS,
+      payload: { projectPath: internalPackage, mode: 'skip' },
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.match(JSON.parse(res.payload).error, /external project/i);
+    assert.deepEqual(await readdir(internalPackage), [], 'rejected self-bootstrap must leave the directory untouched');
+  });
+
   it('rejects requests without identity header', async () => {
     const res = await app.inject({
       method: 'POST',

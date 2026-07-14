@@ -7047,6 +7047,57 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(optionsSeen[0]?.workingDirectory, projectRoot);
   });
 
+  it('migrates a legacy runtime-root thread before invoking the agent', async () => {
+    const workspaceRoot = await realpath(join(__dirname, '..', '..', '..'));
+    const runtimeRoot = await realpath(await mkdtemp(join(tmpdir(), 'legacy-thread-runtime-root-')));
+    const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    const previousWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+
+    const optionsSeen = [];
+    const migrations = [];
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+    const threadId = 'thread-legacy-runtime-root';
+    const deps = {
+      ...makeDeps(),
+      threadStore: {
+        get: async () => ({ projectPath: runtimeRoot, createdBy: 'user1' }),
+        updateProjectPath: async (...args) => migrations.push(args),
+        updateParticipantActivity: async () => {},
+      },
+    };
+
+    try {
+      const msgs = await collect(
+        invokeSingleCat(deps, {
+          catId: 'opencode',
+          service,
+          prompt: 'test legacy runtime cwd migration',
+          userId: 'user1',
+          threadId,
+          isLastCat: true,
+        }),
+      );
+
+      assert.ok(msgs.some((m) => m.type === 'done'));
+      assert.equal(optionsSeen[0]?.workingDirectory, workspaceRoot);
+      assert.deepEqual(migrations, [[threadId, workspaceRoot]]);
+    } finally {
+      if (previousRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = previousRuntimeRoot;
+      if (previousWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = previousWorkspaceRoot;
+      await rmWithRetry(runtimeRoot);
+    }
+  });
+
   it('drops OpenCode resume when the stored session workspace differs from the current thread workspace', async () => {
     const repoA = await makeSameProjectWorkspace('opencode-repo-a-');
     const repoB = await makeSameProjectWorkspace('opencode-repo-b-');

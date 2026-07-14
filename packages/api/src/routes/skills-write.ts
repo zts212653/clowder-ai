@@ -18,8 +18,8 @@ import { validateSkillName } from '../config/governance/skill-sync.js';
 import { readMountRules } from '../config/mount/mount-rules-store.js';
 import { classifyMountPath, syncProject } from '../skills/skill-sync-engine.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
+import { redirectRuntimeProjectPath, resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { resolvePluginSkillSourcesForProject } from '../utils/plugin-skill-source.js';
-import { validateProjectPath } from '../utils/project-path.js';
 import { resolveSessionUserId } from '../utils/request-identity.js';
 import { buildSkillMountTargets, createSkillSymlink, resolveMainRepoPath } from '../utils/skill-mount.js';
 import { listSourceSkillNames } from '../utils/skill-source.js';
@@ -51,17 +51,18 @@ interface SkillsWriteRouteOptions {
 
 export const skillsWriteRoutes: FastifyPluginAsync<SkillsWriteRouteOptions> = async (app, opts) => {
   const CAT_CAFE_SKILLS_SRC = opts.skillsSourceDir ?? resolveSkillsSourceDir();
+  const skillsRepoRoot = dirname(CAT_CAFE_SKILLS_SRC);
+  const globalProjectRoot = await redirectRuntimeProjectPath(opts.mainProjectRoot ?? skillsRepoRoot);
+  if (!globalProjectRoot) throw new Error('Unable to resolve persistent global project root for skill writes');
 
   app.post('/api/skills/sync', async (request, reply) => {
     const access = requireSkillsWriteAccess(request, reply);
     if (access.error) return { error: access.error };
     const body = (request.body ?? {}) as { projectPath?: string };
     const skillsSrc = CAT_CAFE_SKILLS_SRC;
-    const skillsRepoRoot = dirname(skillsSrc);
-    const globalProjectRoot = opts.mainProjectRoot ?? skillsRepoRoot;
     let projectRoot = globalProjectRoot;
     if (body.projectPath) {
-      const validated = await validateProjectPath(body.projectPath);
+      const validated = await resolvePersistentProjectPath(body.projectPath);
       if (!validated) {
         reply.status(400);
         return { error: 'Invalid project path: must be an existing directory under allowed roots' };
@@ -183,10 +184,9 @@ export const skillsWriteRoutes: FastifyPluginAsync<SkillsWriteRouteOptions> = as
     }
 
     const skillsSrc = CAT_CAFE_SKILLS_SRC;
-    const globalProjectRoot = opts.mainProjectRoot ?? dirname(skillsSrc);
     let projectRoot = globalProjectRoot;
     if (body.projectPath) {
-      const validated = await validateProjectPath(body.projectPath);
+      const validated = await resolvePersistentProjectPath(body.projectPath);
       if (!validated) {
         reply.status(400);
         return { error: 'Invalid project path: must be an existing directory under allowed roots' };
