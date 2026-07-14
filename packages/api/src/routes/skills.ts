@@ -120,6 +120,14 @@ function collectCatCafeSkillPolicy(
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: GET /api/skills builds full skill inventory
 export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, opts) => {
   const CAT_CAFE_SKILLS_SRC = opts.skillsSourceDir ?? resolveSkillsSourceDir();
+  const sourceRepoRoot = dirname(CAT_CAFE_SKILLS_SRC);
+  const [defaultProjectRoot, mainProjectRoot] = await Promise.all([
+    redirectRuntimeProjectPath(sourceRepoRoot),
+    redirectRuntimeProjectPath(opts.mainProjectRoot ?? (await resolveMainRepoPath())),
+  ]);
+  if (!defaultProjectRoot || !mainProjectRoot) {
+    throw new Error('Unable to resolve persistent project roots for skills');
+  }
 
   app.get('/api/skills', async (request, reply) => {
     const userId = resolveUserId(request);
@@ -128,12 +136,7 @@ export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, 
       return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
     const skillsSrc = CAT_CAFE_SKILLS_SRC;
-    const sourceRepoRoot = dirname(skillsSrc);
-    const repoRoot = await redirectRuntimeProjectPath(sourceRepoRoot);
-    if (!repoRoot) {
-      reply.status(500);
-      return { error: 'Unable to resolve persistent global project root' };
-    }
+    const repoRoot = defaultProjectRoot;
     const query = request.query as { projectPath?: string };
     let projectRoot = repoRoot;
     if (query.projectPath) {
@@ -145,7 +148,7 @@ export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, 
       projectRoot = validated;
     }
     const home = homedir();
-    const mainRepo = opts.mainProjectRoot ?? (await resolveMainRepoPath());
+    const mainRepo = mainProjectRoot;
     const mountRules = await readMountRules(projectRoot, mainRepo);
     const enabledMountPoints = STANDARD_MOUNT_POINT_IDS.filter((id) => mountRules.mountPoints[id].enabled);
     const mountPointDirCandidates = buildMountPointDirCandidates(projectRoot, home, mountRules);

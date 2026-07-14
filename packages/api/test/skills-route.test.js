@@ -1056,6 +1056,19 @@ describe('Skills Route', () => {
     const app = await buildSessionSkillsApp({ mainProjectRoot: runtimeRoot });
     const projectRoots = [];
     try {
+      const getRes = await app.inject({
+        method: 'GET',
+        url: `/api/skills?projectPath=${encodeURIComponent(workspaceRoot)}`,
+        headers: AUTH_HEADERS,
+      });
+      assert.equal(getRes.statusCode, 200, getRes.payload);
+      const listedSkill = JSON.parse(getRes.body).skills.find((skill) => skill.name === skillName);
+      assert.deepEqual(
+        listedSkill.mountHealth.enabledMountPoints,
+        ['claude'],
+        'GET /api/skills must read defaultMountRules from the persistent workspace',
+      );
+
       for (const route of ['/api/skills/sync', '/api/skills/sync-skill']) {
         const projectRoot = await mkdtemp(join(tmpdir(), 'skills-route-persistent-default-project-'));
         projectRoots.push(projectRoot);

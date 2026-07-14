@@ -9,7 +9,7 @@ import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import { findMonorepoRoot } from '../utils/monorepo-root.js';
-import { validateExternalProjectPathDetailed } from '../utils/persistent-project-path.js';
+import { redirectRuntimeProjectPath, validateExternalProjectPathDetailed } from '../utils/persistent-project-path.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 const VALID_MODES = ['clone', 'init', 'skip'] as const;
@@ -133,6 +133,9 @@ async function isEmptyDir(dirPath: string): Promise<boolean> {
 }
 
 export const projectSetupRoute: FastifyPluginAsync<ProjectSetupRouteOptions> = async (app, opts) => {
+  const catCafeRoot = await redirectRuntimeProjectPath(opts.catCafeRoot ?? findMonorepoRoot(process.cwd()));
+  if (!catCafeRoot) throw new Error('Unable to resolve persistent Clowder AI root for project setup');
+
   app.post('/api/projects/setup', async (request, reply) => {
     const userId = resolveHeaderUserId(request);
     if (!userId) {
@@ -160,7 +163,6 @@ export const projectSetupRoute: FastifyPluginAsync<ProjectSetupRouteOptions> = a
       return { error: `mode must be one of: ${VALID_MODES.join(', ')}` };
     }
 
-    const catCafeRoot = opts?.catCafeRoot ?? findMonorepoRoot(process.cwd());
     const validatedResult = await validateExternalProjectPathDetailed(projectPath, catCafeRoot);
     if (!validatedResult.ok) {
       const isOwnedPath = validatedResult.reason === 'cat_cafe_owned_path';
