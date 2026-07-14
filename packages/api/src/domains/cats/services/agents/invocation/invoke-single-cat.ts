@@ -17,6 +17,7 @@ import {
   type CatId,
   type ContextHealth,
   catRegistry,
+  effectiveClientFamilyForCat,
   type MessageContent,
   type SealReason,
   type SessionRecord,
@@ -1619,7 +1620,13 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
     // F127 account injection:
     // Members bind to a concrete accountRef (builtin oauth account or generic api_key account).
-    const builtinClient = provider ? resolveBuiltinClientForProvider(provider) : null;
+    // F159 G2: use protocol-aware family so catagent + openai-chat resolves to
+    // 'openai' — matching the route validation path (effectiveValidationClient).
+    const builtinClient = catConfig
+      ? effectiveClientFamilyForCat(catConfig)
+      : provider
+        ? resolveBuiltinClientForProvider(provider)
+        : null;
     const defaultModel = catConfig?.defaultModel?.trim() || undefined;
     // Account resolution, proxy registration, and runtime config always use the
     // runtime root (process.cwd()), NOT thread.projectPath.  catRegistry loads
@@ -1641,8 +1648,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const assertCompatibleRuntimeAccount = <T extends { id: string }>(
       account: (T & Parameters<typeof validateRuntimeProviderBinding>[1]) | null,
     ) => {
-      if (!provider || !account) return account;
-      const compatibilityError = validateRuntimeProviderBinding(provider, account, defaultModel);
+      if (!builtinClient || !account) return account;
+      // F159 G2: use builtinClient (protocol-aware) so catagent+openai-chat
+      // accounts with clientFamily='openai' pass the family guard.
+      const compatibilityError = validateRuntimeProviderBinding(builtinClient, account, defaultModel);
       if (compatibilityError) {
         throw new Error(compatibilityError);
       }
