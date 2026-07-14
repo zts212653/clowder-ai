@@ -32,6 +32,8 @@ export interface UnifiedAuthEditData {
   displayName?: string;
   baseUrl?: string;
   clientId?: BuiltinAccountClient;
+  /** Authoritative routing family — used as clientId fallback for accounts that have clientFamily but no clientId. */
+  clientFamily?: BuiltinAccountClient;
   authType?: ProfileAuthType;
   models?: string[];
   envVars?: Record<string, string>;
@@ -50,7 +52,7 @@ interface UnifiedAuthModalProps {
 
 export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initialClientId }: UnifiedAuthModalProps) {
   const isEdit = Boolean(editProfile);
-  const defaultClientId = editProfile?.clientId ?? initialClientId ?? 'anthropic';
+  const defaultClientId = editProfile?.clientId ?? editProfile?.clientFamily ?? initialClientId ?? 'anthropic';
   const [authMode, setAuthMode] = useState<AuthMode>(editProfile?.authType === 'api_key' ? 'api_key' : 'oauth');
   const [clientId, setClientId] = useState<BuiltinAccountClient>(defaultClientId);
   const [displayName, setDisplayName] = useState(editProfile?.displayName ?? '');
@@ -70,7 +72,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
   const prevOpenRef = useRef(open);
   useEffect(() => {
     if (open && !prevOpenRef.current) {
-      const cid = editProfile?.clientId ?? initialClientId ?? 'anthropic';
+      const cid = editProfile?.clientId ?? editProfile?.clientFamily ?? initialClientId ?? 'anthropic';
       setClientId(cid);
       setAuthMode(editProfile?.authType === 'api_key' ? 'api_key' : 'oauth');
       setDisplayName(editProfile?.displayName ?? '');

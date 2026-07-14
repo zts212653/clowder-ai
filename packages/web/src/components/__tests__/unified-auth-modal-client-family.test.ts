@@ -78,4 +78,26 @@ describe('UnifiedAuthModal clientFamily payload (F159 G2)', () => {
     const apiKeyOptionsLine = source.match(/const API_KEY_CLIENT_OPTIONS.*?;/s)?.[0] ?? '';
     expect(apiKeyOptionsLine).not.toContain('acp');
   });
+
+  // ── clientFamily fallback for edits ──
+
+  it('defaultClientId falls back to editProfile.clientFamily before initialClientId', () => {
+    // Accounts with clientFamily but no clientId (hand-authored/migrated) must not
+    // silently reset to 'anthropic' on edit — the modal must use clientFamily as fallback.
+    expect(source).toContain('editProfile?.clientId ?? editProfile?.clientFamily ?? initialClientId');
+  });
+
+  it('UnifiedAuthEditData includes clientFamily field', () => {
+    expect(source).toContain('clientFamily?: BuiltinAccountClient');
+  });
+});
+
+// ── HubAccountsTab passes clientFamily to edit data ──
+
+const hubSource = readFileSync(resolve(__dirname, '../HubAccountsTab.tsx'), 'utf-8');
+
+describe('HubAccountsTab clientFamily plumbing', () => {
+  it('handleEdit passes clientFamily from profile to edit data', () => {
+    expect(hubSource).toContain('clientFamily: profile.clientFamily');
+  });
 });
