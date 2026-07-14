@@ -43,6 +43,9 @@ export interface QueueConvergence {
   removeStaleProcessing(threadId: string, catId: string, userId: string): { removed: boolean; entryId?: string };
   /** Release the in-memory processing slot for this thread+cat. */
   releaseSlot(threadId: string, catId: string): void;
+  /** Kick the queue: try to dispatch any waiting entries now that the slot is free.
+   *  Without this, unblocked entries sit idle until the next external trigger. */
+  tryDispatchNext(threadId: string): void;
 }
 
 export interface ReconcileZombieDeps {
@@ -197,9 +200,12 @@ async function processZombie(
         const qr = deps.queueConvergence.removeStaleProcessing(updated.threadId, zombie.catId, updated.userId);
         if (qr.removed) {
           deps.queueConvergence.releaseSlot(updated.threadId, zombie.catId);
+          // Kick the queue so any entry waiting behind the stale slot gets dispatched.
+          // Fire-and-forget: tryDispatchNext is async but convergence is best-effort.
+          deps.queueConvergence.tryDispatchNext(updated.threadId);
           log.info(
             { threadId: updated.threadId, catId: zombie.catId, userId: updated.userId, entryId: qr.entryId },
-            '[reconcile-zombies] #972 queue convergence: removed stale processing entry + released slot',
+            '[reconcile-zombies] #972 queue convergence: removed stale entry + released slot + kicked queue',
           );
         }
       } catch (qErr) {

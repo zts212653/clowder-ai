@@ -353,11 +353,12 @@ export class QueueProcessor {
    *  1. removeStaleProcessing — find + remove the stale processing queue entry,
    *     scoped to the zombie owner's userId (codex R1 P2: prevents cross-user deletion)
    *  2. releaseSlot — delete the in-memory processingSlot
+   *  3. tryDispatchNext — kick tryAutoExecute so queued entries behind the stale
+   *     slot get dispatched (codex R2 P2: without this, unblocked entries idle)
    *
-   * No emitQueueUpdated: broadcasting `queue: []` to the thread room would wipe
-   * other users' legitimate queue state in the frontend (codex R1 P2). The slot
-   * release lets QueueProcessor dispatch the next queued entry, which emits proper
-   * per-user queue_updated events through the normal path.
+   * No broadcastToRoom with queue:[]: that would wipe other users' legitimate
+   * queue state in the frontend (codex R1 P2). tryAutoExecute's normal dispatch
+   * path emits proper per-user queue_updated events.
    */
   buildQueueConvergence(): import('./reconcileZombies.js').QueueConvergence {
     return {
@@ -381,6 +382,13 @@ export class QueueProcessor {
           this.processingSlots.delete(key);
           this.deps.log.info({ threadId, catId }, '[F220 2a] released stale processingSlot');
         }
+      },
+      tryDispatchNext: (threadId: string) => {
+        // Fire-and-forget: kick tryAutoExecute so entries waiting behind the
+        // now-freed slot get dispatched. Errors are logged but non-fatal.
+        this.tryAutoExecute(threadId).catch((err) =>
+          this.deps.log.warn({ threadId, err }, '[F220 2a] tryAutoExecute after zombie convergence failed'),
+        );
       },
     };
   }

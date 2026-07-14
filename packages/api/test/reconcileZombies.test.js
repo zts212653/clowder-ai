@@ -352,6 +352,9 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
       releaseSlot: (threadId, catId) => {
         convergenceCalls.push({ op: 'releaseSlot', threadId, catId });
       },
+      tryDispatchNext: (threadId) => {
+        convergenceCalls.push({ op: 'tryDispatchNext', threadId });
+      },
     };
 
     const zombie = makeZombie({ invocationId: created.invocationId });
@@ -364,7 +367,7 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
 
     assert.equal(result.reconciled, 1);
     // Queue convergence must be called for the reconciled zombie
-    assert.equal(convergenceCalls.length, 2, 'removeStaleProcessing + releaseSlot');
+    assert.equal(convergenceCalls.length, 3, 'removeStaleProcessing + releaseSlot + tryDispatchNext');
     const removeCall = convergenceCalls.find((c) => c.op === 'removeStaleProcessing');
     assert.ok(removeCall, 'must call removeStaleProcessing');
     assert.equal(removeCall.threadId, 't1');
@@ -373,6 +376,10 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
     // Slot released after stale entry removed
     const slotCall = convergenceCalls.find((c) => c.op === 'releaseSlot');
     assert.ok(slotCall, 'must call releaseSlot');
+    // Queue kicked to dispatch waiting entries
+    const dispatchCall = convergenceCalls.find((c) => c.op === 'tryDispatchNext');
+    assert.ok(dispatchCall, 'must kick queue after slot release');
+    assert.equal(dispatchCall.threadId, 't1');
   });
 
   it('#972: queueConvergence not called when zombie is already terminal', async () => {
@@ -394,6 +401,7 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
         return { removed: false };
       },
       releaseSlot: () => convergenceCalls.push({ op: 'releaseSlot' }),
+      tryDispatchNext: () => convergenceCalls.push({ op: 'tryDispatchNext' }),
     };
 
     const zombie = makeZombie({ invocationId: created.invocationId, catId: 'codex' });
@@ -426,6 +434,7 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
         throw new Error('queue store unavailable');
       },
       releaseSlot: () => {},
+      tryDispatchNext: () => {},
     };
 
     const logger = makeRecordingLogger();
@@ -463,6 +472,7 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
         return { removed: false }; // no stale entry found
       },
       releaseSlot: () => convergenceCalls.push({ op: 'releaseSlot' }),
+      tryDispatchNext: () => convergenceCalls.push({ op: 'tryDispatchNext' }),
     };
 
     const zombie = makeZombie({ invocationId: created.invocationId });
@@ -480,6 +490,11 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
       convergenceCalls.filter((c) => c.op === 'releaseSlot').length,
       0,
       'no releaseSlot when nothing removed',
+    );
+    assert.equal(
+      convergenceCalls.filter((c) => c.op === 'tryDispatchNext').length,
+      0,
+      'no tryDispatchNext when nothing removed',
     );
   });
 });
