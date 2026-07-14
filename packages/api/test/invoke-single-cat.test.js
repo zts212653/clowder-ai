@@ -364,34 +364,99 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(payload.invocationId, 'inv-1');
   });
 
-  it('passes CatAgent current-task callback only for the explicitly selected task', async () => {
+  it('passes CatAgent current-task callback only for the CatAgent provider', async () => {
     const { MemoryTaskProgressStore } = await import(
       '../dist/domains/cats/services/agents/invocation/MemoryTaskProgressStore.js'
     );
-    let task = {
-      id: 'task-current',
-      kind: 'work',
-      threadId: 'thread-current-task',
-      subjectKey: null,
-      title: 'Selected task',
-      ownerCatId: 'codex',
-      status: 'todo',
-      why: '',
-      createdBy: 'user',
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    const taskStore = {
-      get: async (id) => (id === task.id ? task : null),
-      update: async (id, input) => {
-        if (id !== task.id) return null;
-        task = { ...task, ...input, updatedAt: Date.now() };
-        return task;
-      },
-    };
+    // Register a temporary CatAgent-provider cat for this test
+    const testCatId = 'test-catagent-cb';
+    catRegistry.register(testCatId, { clientId: 'catagent', catAgentProtocol: 'anthropic' });
+    try {
+      let task = {
+        id: 'task-current',
+        kind: 'work',
+        threadId: 'thread-current-task',
+        subjectKey: null,
+        title: 'Selected task',
+        ownerCatId: testCatId,
+        status: 'todo',
+        why: '',
+        createdBy: 'user',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      const taskStore = {
+        get: async (id) => (id === task.id ? task : null),
+        update: async (id, input) => {
+          if (id !== task.id) return null;
+          task = { ...task, ...input, updatedAt: Date.now() };
+          return task;
+        },
+      };
+      const threadStore = {
+        get: async () => ({
+          id: 'thread-current-task',
+          projectPath: 'default',
+          title: null,
+          createdBy: 'user1',
+          participants: [testCatId],
+          lastActiveAt: Date.now(),
+          createdAt: Date.now(),
+          firstRunQuestState: {
+            v: 1,
+            phase: 'quest-4-task-running',
+            startedAt: Date.now(),
+            selectedTaskId: 'task-current',
+          },
+        }),
+        isRebornSession: async () => false,
+      };
+      const taskProgressStore = new MemoryTaskProgressStore();
+      const deps = { ...makeDeps(), threadStore, taskStore, taskProgressStore };
+      let callbackOptions;
+      const service = {
+        l0CompilerFn: dummyL0CompilerFn,
+        async *invoke(_prompt, options) {
+          callbackOptions = options.catAgentScopedCallbacks;
+          await callbackOptions.currentTask.updateCurrentTaskStatus({
+            status: 'doing',
+            progress: 42,
+            summary: 'Halfway done',
+          });
+          yield { type: 'done', catId: testCatId, timestamp: Date.now() };
+        },
+      };
+
+      await collect(
+        invokeSingleCat(deps, {
+          catId: testCatId,
+          service,
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-current-task',
+          isLastCat: true,
+        }),
+      );
+
+      assert.equal(callbackOptions.currentTask.currentTaskId, 'task-current');
+      assert.equal(task.status, 'doing');
+      assert.equal(task.why, 'Halfway done');
+      const snapshot = await taskProgressStore.getSnapshot('thread-current-task', testCatId);
+      assert.equal(snapshot.tasks[0].id, 'task-current');
+      assert.equal(snapshot.tasks[0].status, 'in_progress');
+      assert.equal(snapshot.tasks[0].activeForm, 'Halfway done');
+    } finally {
+      catRegistry.unregister?.(testCatId);
+    }
+  });
+
+  it('does not pass CatAgent callbacks for non-CatAgent providers', async () => {
+    const { MemoryTaskProgressStore } = await import(
+      '../dist/domains/cats/services/agents/invocation/MemoryTaskProgressStore.js'
+    );
     const threadStore = {
       get: async () => ({
-        id: 'thread-current-task',
+        id: 'thread-no-cb',
         projectPath: 'default',
         title: null,
         createdBy: 'user1',
@@ -402,23 +467,22 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
           v: 1,
           phase: 'quest-4-task-running',
           startedAt: Date.now(),
-          selectedTaskId: 'task-current',
+          selectedTaskId: 'task-no-cb',
         },
       }),
       isRebornSession: async () => false,
     };
+    const taskStore = {
+      get: async () => ({ id: 'task-no-cb', kind: 'work', status: 'todo' }),
+      update: async () => null,
+    };
     const taskProgressStore = new MemoryTaskProgressStore();
     const deps = { ...makeDeps(), threadStore, taskStore, taskProgressStore };
-    let callbackOptions;
+    let callbackOptions = 'SENTINEL';
     const service = {
       l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         callbackOptions = options.catAgentScopedCallbacks;
-        await callbackOptions.currentTask.updateCurrentTaskStatus({
-          status: 'doing',
-          progress: 42,
-          summary: 'Halfway done',
-        });
         yield { type: 'done', catId: 'codex', timestamp: Date.now() };
       },
     };
@@ -429,18 +493,13 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         service,
         prompt: 'test',
         userId: 'user1',
-        threadId: 'thread-current-task',
+        threadId: 'thread-no-cb',
         isLastCat: true,
       }),
     );
 
-    assert.equal(callbackOptions.currentTask.currentTaskId, 'task-current');
-    assert.equal(task.status, 'doing');
-    assert.equal(task.why, 'Halfway done');
-    const snapshot = await taskProgressStore.getSnapshot('thread-current-task', 'codex');
-    assert.equal(snapshot.tasks[0].id, 'task-current');
-    assert.equal(snapshot.tasks[0].status, 'in_progress');
-    assert.equal(snapshot.tasks[0].activeForm, 'Halfway done');
+    // Non-CatAgent provider must NOT receive scoped callbacks
+    assert.equal(callbackOptions, undefined);
   });
 
   it('does not pass CatAgent current-task callback for another cat owner', async () => {
