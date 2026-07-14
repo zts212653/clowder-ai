@@ -462,7 +462,9 @@ describe('F220 Phase 2a: reconcileZombies + QueueConvergence (mock interface)', 
     assert.equal(convergenceCalls.filter((c) => c.op === 'tryDispatchNext').length, 1);
   });
 
-  it('#972: terminal-path convergence passes raw idempotencyKey (P2-1)', async () => {
+  it('#972: terminal-path convergence runs for zombie-terminalized records (P2-1)', async () => {
+    // Record terminalized by zombie reconciliation (error='zombie_record_detected').
+    // Terminal-path convergence SHOULD run — the normal .then() path is dead.
     const store = new InvocationRecordStore();
     const created = store.create({
       threadId: 't1',
@@ -472,7 +474,7 @@ describe('F220 Phase 2a: reconcileZombies + QueueConvergence (mock interface)', 
       idempotencyKey: 'queue-stale-from-terminal',
     });
     store.update(created.invocationId, { status: 'running' });
-    store.update(created.invocationId, { status: 'succeeded' }); // already terminal
+    store.update(created.invocationId, { status: 'failed', error: 'zombie_record_detected' });
 
     const convergenceCalls = [];
     const queueConvergence = {
@@ -497,11 +499,49 @@ describe('F220 Phase 2a: reconcileZombies + QueueConvergence (mock interface)', 
     });
 
     assert.equal(result.alreadyTerminal, 1);
-    assert.ok(convergenceCalls.length > 0, 'convergence must be attempted for terminal zombie');
+    assert.ok(convergenceCalls.length > 0, 'convergence must be attempted for zombie-terminalized record');
     const removeCall = convergenceCalls.find((c) => c.op === 'removeStaleProcessing');
     assert.ok(removeCall, 'must call removeStaleProcessing');
     assert.equal(removeCall.catId, 'codex');
     assert.equal(removeCall.idempotencyKey, 'queue-stale-from-terminal', 'raw idempotencyKey passed');
+  });
+
+  it('#972: terminal-path convergence SKIPPED for normal completion (codex R6 P2 slot mutex)', async () => {
+    // Record terminalized by normal execution (succeeded). The normal executeEntry
+    // .then() cleanup handles slot release + dispatch. Running convergence alongside
+    // it would risk double-releasing the processingSlot mutex.
+    const store = new InvocationRecordStore();
+    const created = store.create({
+      threadId: 't1',
+      userId: 'u1',
+      targetCats: ['codex'],
+      intent: 'execute',
+      idempotencyKey: 'queue-normal-complete',
+    });
+    store.update(created.invocationId, { status: 'running' });
+    store.update(created.invocationId, { status: 'succeeded' });
+
+    const convergenceCalls = [];
+    const queueConvergence = {
+      removeStaleProcessing: (threadId, catId, userId, idempotencyKey) => {
+        convergenceCalls.push({ op: 'removeStaleProcessing' });
+        return { removed: true, entryId: 'should-not-reach', primaryCatId: 'codex' };
+      },
+      releaseSlot: () => convergenceCalls.push({ op: 'releaseSlot' }),
+      tryDispatchNext: () => convergenceCalls.push({ op: 'tryDispatchNext' }),
+    };
+
+    const zombie = makeZombie({ invocationId: created.invocationId, catId: 'codex' });
+    const result = await reconcileZombies([zombie], {
+      invocationRecordStore: store,
+      taskProgressStore: makeTaskProgressStore(),
+      log: makeRecordingLogger(),
+      queueConvergence,
+    });
+
+    assert.equal(result.alreadyTerminal, 1);
+    assert.equal(convergenceCalls.length, 0, 'convergence must NOT run for normal completion (slot mutex safety)');
+    assert.equal(result.errors, 0, 'no errors — skipping is intentional');
   });
 
   it('#972: convergence failure counted as error + scheduleRetry called (Sol R3 P2)', async () => {
@@ -893,7 +933,8 @@ describe('F220 Phase 2a: buildQueueConvergence real adapter (Sol P2-3)', () => {
       idempotencyKey: 'terminal-conv-fail',
     });
     invRecordStore.update(created.invocationId, { status: 'running' });
-    invRecordStore.update(created.invocationId, { status: 'failed', error: 'concurrent' });
+    // Must be zombie-terminalized (zombie_record_detected) for convergence to run
+    invRecordStore.update(created.invocationId, { status: 'failed', error: 'zombie_record_detected' });
 
     const queueConvergence = {
       removeStaleProcessing: () => {

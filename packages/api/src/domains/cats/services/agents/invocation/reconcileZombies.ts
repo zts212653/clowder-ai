@@ -177,13 +177,15 @@ async function processZombie(
       if (isTerminal) {
         const tp = await clearTaskProgress(deps.taskProgressStore, current.threadId, zombie, log);
         // P2-1 (Sol review): retry queue convergence in the terminal path.
-        // Previously blocked (codex R6 P1) because cat-only matching could delete
-        // a NEW live entry. Now safe: P1-1's precise entry identity via
-        // idempotencyKey ensures only the zombie's own queue entry is removed.
-        // If the CAS winner already cleaned the stale entry,
-        // removeStaleProcessing returns {removed: false} (idempotent).
+        // GUARD (codex R6 P2): only converge records terminalized by zombie
+        // reconciliation (error='zombie_record_detected'). If the record was
+        // terminalized by normal completion (succeeded/canceled/failed-with-agent-error),
+        // the normal executeEntry .then() cleanup path handles slot release and
+        // dispatch. Running convergence alongside it risks double-releasing the
+        // processingSlot mutex — the .then() microtask fires after our synchronous
+        // convergence, deleting a slot that was re-claimed by the newly dispatched entry.
         let convergenceErrors = 0;
-        if (deps.queueConvergence && zombie.catId) {
+        if (deps.queueConvergence && zombie.catId && current.error === 'zombie_record_detected') {
           try {
             const qr = deps.queueConvergence.removeStaleProcessing(
               current.threadId,
