@@ -153,29 +153,15 @@ async function processZombie(
       const isTerminal = current.status === 'succeeded' || current.status === 'failed' || current.status === 'canceled';
       if (isTerminal) {
         const tp = await clearTaskProgress(deps.taskProgressStore, current.threadId, zombie, log);
-        // F220 Phase 2a (#972): defensive queue convergence retry for terminal records.
-        // Same pattern as TaskProgress: if the winning sweeper's convergence failed
-        // transiently, future sweeps won't re-surface this record (only running records
-        // are zombies), so retry convergence idempotently (codex R5 P2).
-        if (deps.queueConvergence && zombie.catId) {
-          try {
-            const qr = deps.queueConvergence.removeStaleProcessing(current.threadId, zombie.catId, current.userId);
-            if (qr.removed) {
-              const slotCat = qr.primaryCatId ?? zombie.catId;
-              deps.queueConvergence.releaseSlot(current.threadId, slotCat);
-              deps.queueConvergence.tryDispatchNext(current.threadId);
-              log.info(
-                { threadId: current.threadId, catId: zombie.catId, slotCat },
-                '[reconcile-zombies] #972 terminal-path queue convergence (redundant cleanup)',
-              );
-            }
-          } catch {
-            // Best-effort — same as the primary path
-          }
-        }
+        // NOTE: queue convergence is NOT retried in the terminal path (codex R6 P1).
+        // Unlike TaskProgress (which is idempotent by id), removeStaleProcessing looks
+        // up by thread+cat+user — if the winner already cleaned the stale entry AND
+        // kicked the queue (dispatching the next entry), retrying here would match the
+        // NEW live processing entry and corrupt it. The primary convergence path (on
+        // successful CAS update) is sufficient; sweepZombieSlots provides a TTL backstop.
         log.info(
           { invocationId: zombie.invocationId, currentStatus: current.status, reason: zombie.reason },
-          '[reconcile-zombies] skipped (already terminal); re-attempted TaskProgress + queue cleanup',
+          '[reconcile-zombies] skipped (already terminal); re-attempted TaskProgress cleanup',
         );
         return {
           reconciled: false,

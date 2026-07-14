@@ -383,9 +383,10 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
     assert.equal(dispatchCall.threadId, 't1');
   });
 
-  it('#972: queueConvergence retried defensively for already-terminal zombies', async () => {
-    // Codex R5 P2: if the winning sweeper's convergence failed transiently,
-    // the terminal path retries convergence idempotently (same pattern as TaskProgress).
+  it('#972: queueConvergence NOT retried for terminal zombies (avoids live-entry corruption)', async () => {
+    // Codex R6 P1: terminal-path retry can match a NEW live processing entry
+    // if the winner already cleaned + kicked the queue. Queue convergence only
+    // runs on successful CAS update; sweepZombieSlots provides TTL backstop.
     const store = new InvocationRecordStore();
     const created = store.create({
       threadId: 't1',
@@ -401,7 +402,7 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
     const queueConvergence = {
       removeStaleProcessing: (threadId, catId, userId) => {
         convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId, userId });
-        return { removed: false }; // nothing to remove (already cleaned by winner)
+        return { removed: false };
       },
       releaseSlot: () => convergenceCalls.push({ op: 'releaseSlot' }),
       tryDispatchNext: () => convergenceCalls.push({ op: 'tryDispatchNext' }),
@@ -416,12 +417,8 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
     });
 
     assert.equal(result.alreadyTerminal, 1);
-    // Convergence IS called defensively for terminal zombies (redundant cleanup)
-    const removeCalls = convergenceCalls.filter((c) => c.op === 'removeStaleProcessing');
-    assert.equal(removeCalls.length, 1, 'must retry removeStaleProcessing for terminal zombie');
-    // returned removed=false → no slot release or dispatch kick
-    assert.equal(convergenceCalls.filter((c) => c.op === 'releaseSlot').length, 0);
-    assert.equal(convergenceCalls.filter((c) => c.op === 'tryDispatchNext').length, 0);
+    // Convergence must NOT be called for terminal zombies — prevents live-entry corruption
+    assert.equal(convergenceCalls.length, 0, 'no convergence calls for terminal zombie');
   });
 
   it('#972: queueConvergence failure is best-effort (does not prevent zombie reconciliation)', async () => {
