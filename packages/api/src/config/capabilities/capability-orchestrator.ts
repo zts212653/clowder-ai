@@ -1592,6 +1592,8 @@ export function resolveServersForCat(
   const provider = entry?.config.clientId;
 
   const result: McpServerDescriptor[] = [];
+  /** Track cap.id → encoded name for collision detection. */
+  const nameOrigin = new Map<string, string>();
 
   for (const cap of config.capabilities) {
     if (cap.type !== 'mcp') continue;
@@ -1612,12 +1614,23 @@ export function resolveServersForCat(
     // MCP server names must not contain colons — Codex uses `mcp:<name>/<tool>`
     // convention, so colons in the name break tool resolution. Plugin capability
     // IDs use `plugin:pluginId:resourceName`; replace `:` with `__` (double
-    // underscore) for the external-facing server name. Using `__` instead of `-`
-    // avoids name collisions (e.g. `plugin:a-b:c` vs `plugin:a:b-c` would both
-    // map to `plugin-a-b-c` with `-`, but `plugin__a-b__c` vs `plugin__a__b-c`
-    // are distinct with `__`).
+    // underscore) for the external-facing server name.
+    const name = cap.id.replace(/:/g, '__');
+
+    // Collision guard: reject if a different cap.id already mapped to the same
+    // encoded name (e.g. `plugin:a:b__c` vs `plugin:a:b:c`).
+    const priorCapId = nameOrigin.get(name);
+    if (priorCapId !== undefined && priorCapId !== cap.id) {
+      console.warn(
+        `[resolveServersForCat] MCP name collision: "${cap.id}" and "${priorCapId}" ` +
+          `both encode to "${name}". Skipping duplicate.`,
+      );
+      continue;
+    }
+    nameOrigin.set(name, cap.id);
+
     const desc: McpServerDescriptor = {
-      name: cap.id.replace(/:/g, '__'),
+      name,
       command: mcpServer.command,
       args: mcpServer.args ?? [],
       enabled,

@@ -158,10 +158,7 @@ function createPollTool(config: ProtocolToolConfig, capabilities: string[]): Too
 
           if (result.status === 'succeeded') {
             if (!result.resultUrl) {
-              return errorResult(
-                `Poll succeeded but provider returned no resultUrl (malformed result). ` +
-                  `Raw: ${JSON.stringify(result.raw)}`,
-              );
+              return errorResult('Poll succeeded but provider returned no resultUrl (malformed result).');
             }
             let richBlockEmitted = false;
             try {
@@ -174,11 +171,23 @@ function createPollTool(config: ProtocolToolConfig, capabilities: string[]): Too
             } catch {
               /* best-effort */
             }
-            return successResult(JSON.stringify({ ...result, richBlockEmitted, attempt }, null, 2));
+            return successResult(
+              JSON.stringify(
+                {
+                  status: result.status,
+                  resultUrl: result.resultUrl,
+                  coverUrl: result.coverUrl,
+                  richBlockEmitted,
+                  attempt,
+                },
+                null,
+                2,
+              ),
+            );
           }
 
           if (result.status === 'failed') {
-            return successResult(JSON.stringify({ ...result, attempt }, null, 2));
+            return successResult(JSON.stringify({ status: result.status, error: result.error, attempt }, null, 2));
           }
 
           // Non-terminal: wait before next attempt (unless last attempt).

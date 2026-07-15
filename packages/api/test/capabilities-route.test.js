@@ -934,9 +934,8 @@ describe('GET /api/capabilities (Fastify)', () => {
       assert.equal(item.mcpServer.command, 'node');
       assert.deepEqual(item.mcpServer.args, ['server.js', '--api-key=inline-secret']);
       assert.equal(item.mcpServer.url, 'https://user:inline-secret@example.test/mcp?token=inline-secret');
-      // Client-side app: real values returned (frontend DynamicKVList handles masking)
-      assert.equal(item.mcpServer.env.API_KEY, 'raw-secret');
-      assert.equal(item.mcpServer.headers.Authorization, 'Bearer raw-secret');
+      assert.equal(item.mcpServer.env.API_KEY, REDACTED_SECRET);
+      assert.equal(item.mcpServer.headers.Authorization, REDACTED_SECRET);
     } finally {
       if (prevOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
       else process.env.DEFAULT_OWNER_USER_ID = prevOwner;
@@ -3350,7 +3349,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
     }
   });
 
-  it('returns real secrets in toggle responses but redacts audit logs', async () => {
+  it('redacts secret-bearing capability data in toggle responses and audit logs', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
     const projectDir = await seedProject();
@@ -3363,9 +3362,9 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
         origin: 'http://localhost:3003',
       });
       assert.equal(res.statusCode, 200, res.payload);
-      // Client-side app: response contains real values (frontend handles visual masking)
-      assert.equal(res.json().capability.mcpServer.env.API_KEY, 'raw-secret');
-      assert.equal(res.json().capability.mcpServer.headers.Authorization, 'Bearer raw-secret');
+      assert.doesNotMatch(res.payload, /raw-secret/);
+      assert.equal(res.json().capability.mcpServer.env.API_KEY, REDACTED_SECRET);
+      assert.equal(res.json().capability.mcpServer.headers.Authorization, REDACTED_SECRET);
 
       const config = await readCapabilitiesConfig(projectDir);
       // scope=cat writes blockedCats, cap.enabled/globalEnabled stay unchanged.

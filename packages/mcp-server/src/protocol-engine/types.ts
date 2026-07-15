@@ -2,10 +2,13 @@ import { z } from 'zod';
 
 // ── Response field mapping (JSONPath expressions) ──
 
+/** Only valid terminal/intermediate task states are accepted as statusMap keys. */
+const TaskStatusKeySchema = z.enum(['queued', 'running', 'succeeded', 'failed']);
+
 const ResponseMappingSchema = z.object({
   taskId: z.string().optional(),
   status: z.string().optional(),
-  statusMap: z.record(z.array(z.string())).optional(),
+  statusMap: z.record(TaskStatusKeySchema, z.array(z.string())).optional(),
   resultUrl: z.string().optional(),
   coverUrl: z.string().optional(),
   result: z.string().optional(),
@@ -95,7 +98,6 @@ export type TaskStatus = 'queued' | 'running' | 'succeeded' | 'failed';
 export interface SubmitResult {
   taskId: string;
   status: TaskStatus;
-  raw: unknown;
 }
 
 export interface PollResult {
@@ -103,12 +105,10 @@ export interface PollResult {
   resultUrl?: string;
   coverUrl?: string;
   error?: string;
-  raw: unknown;
 }
 
 export interface SyncResult {
   result: string;
-  raw: unknown;
 }
 
 export interface ExecutionParams {

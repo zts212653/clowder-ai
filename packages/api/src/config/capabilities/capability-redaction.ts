@@ -34,14 +34,17 @@ export function sanitizeCapabilityForAudit(entry: CapabilityEntry | null): Capab
 
 /**
  * For API responses to the local frontend.
- * Env/headers are NOT redacted here — redaction is done at the board
- * response layer via buildBoardMcpServer's includeSecrets flag, gated
- * by canReadMcpSecrets(). This keeps the raw entry available
- * for internal server-side use while the board endpoint controls what
- * reaches the wire.
+ * Env/headers are always redacted on the wire — secrets must not appear
+ * in browser devtools/client state. Server-side code that needs real
+ * values should read persisted config directly (e.g. the MCP probe
+ * endpoint reads from capabilities.json when body is empty).
  */
 export function sanitizeCapabilityForResponse(entry: CapabilityEntry | null): CapabilityEntry | null {
-  return entry;
+  if (!entry) return null;
+  const sanitized: CapabilityEntry = { ...entry };
+  if (entry.mcpServer) sanitized.mcpServer = sanitizeMcpServer(entry.mcpServer);
+  if (entry.mcpServerOverride) sanitized.mcpServerOverride = sanitizeMcpServer(entry.mcpServerOverride);
+  return sanitized;
 }
 
 export function sanitizeCapabilityAuditEntry(entry: CapabilityAuditEntry): CapabilityAuditEntry {

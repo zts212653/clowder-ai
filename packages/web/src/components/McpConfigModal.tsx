@@ -333,6 +333,7 @@ export function McpConfigModal({
           <McpIdentitySection
             id={id}
             isEdit={isEdit}
+            readOnly={readOnly}
             transport={transport}
             onIdChange={(value) => {
               setId(value);
@@ -346,6 +347,7 @@ export function McpConfigModal({
           <McpResolverSection resolver={editData?.resolver} />
           <McpTransportFields
             transport={transport}
+            readOnly={readOnly}
             isEdit={isEdit}
             command={command}
             args={args}
