@@ -81,10 +81,13 @@ describe('UnifiedAuthModal clientFamily payload (F159 G2)', () => {
 
   // ── clientFamily fallback for edits ──
 
-  it('defaultClientId falls back to editProfile.clientFamily before initialClientId', () => {
-    // Accounts with clientFamily but no clientId (hand-authored/migrated) must not
-    // silently reset to 'anthropic' on edit — the modal must use clientFamily as fallback.
-    expect(source).toContain('editProfile?.clientId ?? editProfile?.clientFamily ?? initialClientId');
+  it('defaultClientId prefers clientFamily for API-key edits (F159 AC-G21)', () => {
+    // API-key accounts must prefer the authoritative clientFamily over legacy
+    // clientId to prevent silent family rewrite on no-op edits.
+    expect(source).toContain("editProfile?.authType === 'api_key' ? editProfile?.clientFamily : undefined");
+    // Non-API-key profiles still fall back through clientId → clientFamily → initialClientId
+    expect(source).toContain('editProfile?.clientId');
+    expect(source).toContain('editProfile?.clientFamily');
   });
 
   it('UnifiedAuthEditData includes clientFamily field', () => {
