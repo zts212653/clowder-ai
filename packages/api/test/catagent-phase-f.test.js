@@ -847,3 +847,49 @@ describe('audit-after-mutation honesty (commitThenAudit)', () => {
     assert.ok(result.includes('[audit-degraded'), 'must annotate audit degradation');
   });
 });
+
+// ── Non-regular file rejection (FIFO/device safety) ──
+// POSIX-only: mkfifo is not available on Windows.
+const IS_POSIX = process.platform !== 'win32';
+
+describe('F1: non-regular file rejection', { skip: !IS_POSIX && 'POSIX-only (mkfifo)' }, () => {
+  let fifoPath;
+
+  before(async () => {
+    fifoPath = join(tmpDir, 'test-fifo');
+    const { execFileSync } = await import('node:child_process');
+    try {
+      execFileSync('mkfifo', [fifoPath]);
+    } catch {
+      // If mkfifo not available, tests will be skipped via the POSIX guard
+    }
+  });
+
+  after(() => {
+    try {
+      rmSync(fifoPath, { force: true });
+    } catch {
+      /* best-effort */
+    }
+  });
+
+  test('write_file rejects FIFO target without blocking', async () => {
+    const tools = await buildToolRegistry(tmpDir, { nativeToolLevel: 'L1' });
+    const write = findTool(tools, 'write_file');
+    assert.ok(write);
+    await assert.rejects(
+      () => write.execute({ path: 'test-fifo', content: 'should not write' }),
+      (err) => err.message.includes('non-regular file'),
+    );
+  });
+
+  test('patch_file rejects FIFO target without blocking', async () => {
+    const tools = await buildToolRegistry(tmpDir, { nativeToolLevel: 'L1' });
+    const patch = findTool(tools, 'patch_file');
+    assert.ok(patch);
+    await assert.rejects(
+      () => patch.execute({ path: 'test-fifo', old_text: 'x', new_text: 'y', expected_hash: 'abcdef01' }),
+      (err) => err.message.includes('non-regular file'),
+    );
+  });
+});
