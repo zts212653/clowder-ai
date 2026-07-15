@@ -625,6 +625,22 @@ describe('transient HTTP error retry', () => {
     assert.equal(result.isError, true);
     assert.equal(fetchCount, 1, 'Should not retry abort errors');
   });
+
+  it('scrubs credentials from terminal network exception', async () => {
+    const secret = 'sk-secret-test-key';
+    const config = makeConfig();
+    config.credentials = { apiKey: secret };
+    globalThis.fetch = mock.fn(async () => {
+      throw new TypeError(`fetch failed while using ${secret}`);
+    });
+    const tools = createProtocolTools(config);
+    const submit = findTool(tools, '_submit');
+    const result = await submit.handler({ capability: 'text2video', vars: { prompt: 'test' } });
+    assert.equal(result.isError, true);
+    const errorText = result.content[0].text;
+    assert.ok(!errorText.includes(secret), 'Credential must not leak in terminal network error');
+    assert.ok(errorText.includes('***'), 'Credential should be replaced with placeholder');
+  });
 });
 
 // ── Signal composition ──

@@ -138,7 +138,10 @@ async function executeRequest(
       if (err instanceof DOMException && err.name === 'AbortError') throw err;
       if (err instanceof DOMException && err.name === 'TimeoutError') throw err;
       // Network failures (TypeError: fetch failed, etc.) are retryable.
-      lastError = err instanceof Error ? err : new Error(String(err));
+      // Scrub credentials from the exception message — providers may echo
+      // secrets in transport-layer errors.
+      const rawMsg = err instanceof Error ? err.message : String(err);
+      lastError = new Error(scrubCredentials(rawMsg, credentials));
       if (attempt < MAX_RETRIES) continue;
       throw lastError;
     }
