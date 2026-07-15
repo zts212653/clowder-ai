@@ -939,4 +939,51 @@ describe('auth method schema validation', () => {
     assert.equal(result.auth?.method, 'query-param');
     assert.equal(result.auth?.paramName, 'api_key');
   });
+
+  it('rejects paramName with URL-unsafe characters (space)', async () => {
+    const { ProtocolTemplateSchema } = await import('../dist/protocol-engine/index.js');
+    assert.throws(
+      () =>
+        ProtocolTemplateSchema.parse({
+          name: 'test',
+          version: 1,
+          mode: 'async',
+          auth: { method: 'query-param', paramName: 'api key' },
+          capabilities: {},
+        }),
+      /paramName must be URL-safe/,
+    );
+  });
+
+  it('rejects paramName with URL-unsafe characters (equals, question mark)', async () => {
+    const { ProtocolTemplateSchema } = await import('../dist/protocol-engine/index.js');
+    for (const bad of ['key=val', 'key?', 'a b', 'key%20name', 'key+name']) {
+      assert.throws(
+        () =>
+          ProtocolTemplateSchema.parse({
+            name: 'test',
+            version: 1,
+            mode: 'async',
+            auth: { method: 'query-param', paramName: bad },
+            capabilities: {},
+          }),
+        /paramName must be URL-safe/,
+        `paramName "${bad}" must be rejected`,
+      );
+    }
+  });
+
+  it('accepts paramName with URL-safe special chars (underscore, dot, dash, tilde)', async () => {
+    const { ProtocolTemplateSchema } = await import('../dist/protocol-engine/index.js');
+    for (const safe of ['api_key', 'auth.token', 'x-api-key', 'key~v2']) {
+      const result = ProtocolTemplateSchema.parse({
+        name: 'test',
+        version: 1,
+        mode: 'async',
+        auth: { method: 'query-param', paramName: safe },
+        capabilities: {},
+      });
+      assert.equal(result.auth?.paramName, safe, `paramName "${safe}" must be accepted`);
+    }
+  });
 });
