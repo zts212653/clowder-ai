@@ -30,9 +30,9 @@ export function resolveCapabilityWriteSessionUserId(request: FastifyRequest): st
  *   origin check + loopback guard; the owner gate only adds value when explicitly
  *   configured for multi-user/shared deployments.
  *
- * **For data-visibility filters** (canReadMcpSecrets in capabilities.ts):
- *   Use `{ allowMissingOwner: true }` — single-user mode falls through
- *   (user owns the machine), configured mode checks identity match.
+ * **For data-visibility filters** (canReadSensitiveMcpConfig):
+ *   Use `{ requireConfiguredOwner: true }` — fail when unconfigured, because
+ *   "not configured" means "hide sensitive data" not "block the request".
  *
  * ⚠️ Do NOT use requireConfiguredOwner for write routes — it blocks local single-user
  *   mode unnecessarily. This mistake has recurred in connector plugin routes
