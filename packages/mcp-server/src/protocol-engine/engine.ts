@@ -90,6 +90,13 @@ const TRANSIENT_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 const MAX_RETRIES = 2;
 const RETRY_BASE_MS = 1000;
 
+/** Result of executeRequest: parsed JSON + the full redaction context (including auth artifacts). */
+interface RequestResult {
+  json: unknown;
+  /** Complete secrets list built from raw credentials + auth-derived artifacts. */
+  secrets: string[];
+}
+
 async function executeRequest(
   endpoint: Endpoint,
   baseUrl: string,
@@ -97,7 +104,7 @@ async function executeRequest(
   credentials: Record<string, string>,
   vars: Record<string, string>,
   signal?: AbortSignal,
-): Promise<unknown> {
+): Promise<RequestResult> {
   const body = endpoint.body ? JSON.stringify(renderBody(endpoint.body, vars)) : undefined;
   const url = buildUrl(baseUrl, endpoint.path, vars);
 
@@ -172,7 +179,7 @@ async function executeRequest(
       throw lastError;
     }
 
-    return resp.json();
+    return { json: await resp.json(), secrets };
   }
 
   throw lastError ?? new Error('Request failed after retries');
@@ -214,7 +221,7 @@ export async function submit(
   if (!cap.submit) throw new Error(`Capability "${params.capability}" has no submit endpoint`);
 
   const vars = { ...params.vars, model: params.vars['model'] ?? params.provider.model ?? '' };
-  const json = await executeRequest(
+  const { json, secrets } = await executeRequest(
     cap.submit,
     params.provider.baseUrl,
     params.provider.authType,
@@ -223,7 +230,6 @@ export async function submit(
     signal,
   );
 
-  const secrets = buildSecretsList(params.credentials);
   checkBusinessCode(json, cap.submit, secrets);
 
   const taskId = extractString(json, cap.submit.response.taskId ?? '$.id');
@@ -250,7 +256,7 @@ export async function poll(
   const pollDef = resolvePoll(template, cap, params.capability);
 
   const vars = { ...params.vars, taskId, model: params.vars['model'] ?? params.provider.model ?? '' };
-  const json = await executeRequest(
+  const { json, secrets } = await executeRequest(
     pollDef,
     params.provider.baseUrl,
     params.provider.authType,
@@ -259,7 +265,6 @@ export async function poll(
     signal,
   );
 
-  const secrets = buildSecretsList(params.credentials);
   checkBusinessCode(json, pollDef, secrets);
 
   const resp = pollDef.response;
@@ -301,7 +306,7 @@ export async function execute(
   if (!cap.request) throw new Error(`Capability "${params.capability}" has no request endpoint`);
 
   const vars = { ...params.vars, model: params.vars['model'] ?? params.provider.model ?? '' };
-  const json = await executeRequest(
+  const { json, secrets } = await executeRequest(
     cap.request,
     params.provider.baseUrl,
     params.provider.authType,
@@ -310,7 +315,6 @@ export async function execute(
     signal,
   );
 
-  const secrets = buildSecretsList(params.credentials);
   checkBusinessCode(json, cap.request, secrets);
 
   const result = extractString(json, cap.request.response.result ?? '$.result');
