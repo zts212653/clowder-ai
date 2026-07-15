@@ -69,7 +69,10 @@ import { resolveActiveProjectRoot } from '../../../../../utils/active-project-ro
 import { resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { DEFAULT_CLI_TIMEOUT_MS, resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { findMonorepoRoot, isSameProject } from '../../../../../utils/monorepo-root.js';
-import { resolvePersistentProjectPathDetailed } from '../../../../../utils/persistent-project-path.js';
+import {
+  redirectRuntimeProjectPath,
+  resolvePersistentProjectPathDetailed,
+} from '../../../../../utils/persistent-project-path.js';
 import { pathsEqual } from '../../../../../utils/project-path.js';
 import { tcpProbe } from '../../../../../utils/tcp-probe.js';
 import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry.js';
@@ -1406,7 +1409,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // Bootstrap is handled by Console's explicit init button (projects-setup.ts).
     // invokeCat only gates — checkGovernancePreflight is the real guard.
     if (workingDirectory && !isSameProject(workingDirectory, hostProjectRoot)) {
-      const catCafeRoot = hostProjectRoot;
+      // Project setup writes the registry under the persistent workspace when
+      // the API runs from a disposable checkout. Read from that same root.
+      const catCafeRoot = await redirectRuntimeProjectPath(hostProjectRoot);
+      if (!catCafeRoot) throw new Error('Unable to resolve persistent Cat Cafe root for governance preflight');
       const { checkGovernancePreflight } = await import('../../../../../config/governance/governance-preflight.js');
       const catEntry = catRegistry.tryGet(catId as string);
       const preflight = await checkGovernancePreflight(workingDirectory, catCafeRoot, catEntry?.config.clientId);
