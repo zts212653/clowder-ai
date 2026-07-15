@@ -52,7 +52,14 @@ interface UnifiedAuthModalProps {
 
 export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initialClientId }: UnifiedAuthModalProps) {
   const isEdit = Boolean(editProfile);
-  const defaultClientId = editProfile?.clientId ?? editProfile?.clientFamily ?? initialClientId ?? 'anthropic';
+  // F159 AC-G21: clientFamily is authoritative for API-key accounts; prefer it
+  // over legacy clientId to prevent silent family rewrite on no-op edits.
+  const defaultClientId =
+    (editProfile?.authType === 'api_key' ? editProfile?.clientFamily : undefined) ??
+    editProfile?.clientId ??
+    editProfile?.clientFamily ??
+    initialClientId ??
+    'anthropic';
   const [authMode, setAuthMode] = useState<AuthMode>(editProfile?.authType === 'api_key' ? 'api_key' : 'oauth');
   const [clientId, setClientId] = useState<BuiltinAccountClient>(defaultClientId);
   const [displayName, setDisplayName] = useState(editProfile?.displayName ?? '');
@@ -72,7 +79,12 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
   const prevOpenRef = useRef(open);
   useEffect(() => {
     if (open && !prevOpenRef.current) {
-      const cid = editProfile?.clientId ?? editProfile?.clientFamily ?? initialClientId ?? 'anthropic';
+      const cid =
+        (editProfile?.authType === 'api_key' ? editProfile?.clientFamily : undefined) ??
+        editProfile?.clientId ??
+        editProfile?.clientFamily ??
+        initialClientId ??
+        'anthropic';
       setClientId(cid);
       setAuthMode(editProfile?.authType === 'api_key' ? 'api_key' : 'oauth');
       setDisplayName(editProfile?.displayName ?? '');

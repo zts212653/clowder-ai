@@ -351,6 +351,41 @@ async function rejectWithAudit(
   throw new Error(message);
 }
 
+/**
+ * Wrap resolveCreatePath with audited rejection so path-resolution failures
+ * (traversal, denylist) produce a CATAGENT_SIDE_EFFECT audit record using the
+ * original user-supplied path.
+ */
+async function resolveCreatePathAudited(
+  workDir: string,
+  rawPath: string,
+  tool: CatAgentToolAuditEvent['tool'],
+  options: CatAgentToolRegistryOptions,
+): Promise<string> {
+  try {
+    return await resolveCreatePath(workDir, rawPath);
+  } catch (err) {
+    return rejectWithAudit(options, { tool, path: rawPath }, (err as Error).message);
+  }
+}
+
+/**
+ * Wrap resolveSecurePath with audited rejection for patch_file path-resolution
+ * failures.
+ */
+async function resolveSecurePathAudited(
+  workDir: string,
+  rawPath: string,
+  tool: CatAgentToolAuditEvent['tool'],
+  options: CatAgentToolRegistryOptions,
+): Promise<string> {
+  try {
+    return await resolveSecurePath(workDir, rawPath);
+  } catch (err) {
+    return rejectWithAudit(options, { tool, path: rawPath }, (err as Error).message);
+  }
+}
+
 async function existingFileHash(resolvedPath: string): Promise<string | null> {
   try {
     const st = await lstat(resolvedPath);
@@ -437,7 +472,7 @@ async function executeWriteFile(
     );
   }
 
-  const resolved = await resolveCreatePath(workDir, input.path as string);
+  const resolved = await resolveCreatePathAudited(workDir, input.path as string, 'write_file', options);
   const relPath = normalizedRel(workDir, resolved);
 
   return withPathLock(resolved, async () => {
@@ -482,7 +517,7 @@ async function executePatchFile(
   workDir: string,
   options: CatAgentToolRegistryOptions,
 ): Promise<string> {
-  const resolved = await resolveSecurePath(workDir, input.path as string);
+  const resolved = await resolveSecurePathAudited(workDir, input.path as string, 'patch_file', options);
   const relPath = normalizedRel(workDir, resolved);
   const oldText = input.old_text as string;
   const newText = input.new_text as string;
@@ -916,21 +951,34 @@ async function executeRunCommand(
     const stdout = e.stdout ?? '';
     const stderr = e.stderr ?? '';
     const timedOut = e.timedOut === true;
-    await emitAudit(options, {
-      tool: 'run_command',
-      outcome: 'error',
-      timestamp: Date.now(),
-      binary,
-      args,
-      exitCode: typeof e.code === 'number' ? e.code : null,
-      durationMs: Date.now() - startedAt,
-      stdoutBytes: Buffer.byteLength(stdout),
-      stderrBytes: Buffer.byteLength(stderr),
-      policyEntry: policyEntry.binary,
-      rejectReason: timedOut ? `timed out after ${timeout}ms; sent SIGTERM then SIGKILL` : e.message,
-    });
-    if (timedOut) throw new Error(`Command timed out after ${timeout}ms`);
-    throw new Error(formatCommandOutput(typeof e.code === 'number' ? e.code : null, stdout, stderr));
+    const exitCode = typeof e.code === 'number' ? e.code : null;
+    // Command already ran (non-idempotent side-effect committed) — audit
+    // failure must not mask the real command outcome, same as the success path.
+    let auditDegraded = false;
+    try {
+      await emitAudit(options, {
+        tool: 'run_command',
+        outcome: 'error',
+        timestamp: Date.now(),
+        binary,
+        args,
+        exitCode,
+        durationMs: Date.now() - startedAt,
+        stdoutBytes: Buffer.byteLength(stdout),
+        stderrBytes: Buffer.byteLength(stderr),
+        policyEntry: policyEntry.binary,
+        rejectReason: timedOut ? `timed out after ${timeout}ms; sent SIGTERM then SIGKILL` : e.message,
+      });
+    } catch (auditErr) {
+      auditDegraded = true;
+      // eslint-disable-next-line no-console
+      console.error('[catagent-read-tools] audit emit failed after command error', binary, auditErr);
+    }
+    const degradedSuffix = auditDegraded ? ' [audit-degraded]' : '';
+    if (timedOut) {
+      throw new Error(`Command timed out after ${timeout}ms${degradedSuffix}`);
+    }
+    throw new Error(`${formatCommandOutput(exitCode, stdout, stderr)}${degradedSuffix}`);
   }
 }
 
