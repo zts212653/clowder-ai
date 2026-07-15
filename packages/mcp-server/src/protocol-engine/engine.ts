@@ -17,31 +17,45 @@ import type {
 
 const CREDENTIAL_PLACEHOLDER = '***';
 
-/**
- * Replace all occurrences of known credential values in a string.
- * Prevents provider responses from echoing secrets back through errors/results.
- */
-export function scrubCredentials(text: string, credentials: Record<string, string>): string {
-  let result = text;
+/** Extract secret values from a credentials record, sorted longest-first. */
+export function buildSecretsList(credentials: Record<string, string>, authArtifacts?: string[]): string[] {
+  const secrets: string[] = [];
   for (const [key, value] of Object.entries(credentials)) {
-    // Skip internal metadata keys (e.g. _authParamName) — they hold
-    // auth config labels, not secret values.
     if (key.startsWith('_')) continue;
-    if (value && value.length >= 4) {
-      result = result.replaceAll(value, CREDENTIAL_PLACEHOLDER);
+    if (value && value.length >= 4) secrets.push(value);
+  }
+  if (authArtifacts) {
+    for (const v of authArtifacts) {
+      if (v && v.length >= 4 && !secrets.includes(v)) secrets.push(v);
     }
+  }
+  // Longest first: prevents partial replacement leaving credential suffixes.
+  secrets.sort((a, b) => b.length - a.length);
+  return secrets;
+}
+
+/** Core scrub: replace all known secret values in text (expects pre-sorted array). */
+function scrubSecrets(text: string, secrets: string[]): string {
+  let result = text;
+  for (const value of secrets) {
+    result = result.replaceAll(value, CREDENTIAL_PLACEHOLDER);
   }
   return result;
 }
 
+/** Convenience: scrub text using a raw credentials record (no auth artifacts). */
+export function scrubCredentials(text: string, credentials: Record<string, string>): string {
+  return scrubSecrets(text, buildSecretsList(credentials));
+}
+
 /** Deep-scrub an unknown JSON value, replacing credential substrings in all string leaves. */
-function scrubValue(value: unknown, credentials: Record<string, string>): unknown {
-  if (typeof value === 'string') return scrubCredentials(value, credentials);
-  if (Array.isArray(value)) return value.map((v) => scrubValue(v, credentials));
+function scrubJsonValue(value: unknown, secrets: string[]): unknown {
+  if (typeof value === 'string') return scrubSecrets(value, secrets);
+  if (Array.isArray(value)) return value.map((v) => scrubJsonValue(v, secrets));
   if (value && typeof value === 'object') {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = scrubValue(v, credentials);
+      out[k] = scrubJsonValue(v, secrets);
     }
     return out;
   }
@@ -89,6 +103,9 @@ async function executeRequest(
 
   const auth = getAuthStrategy(authType);
   const authResult = auth.sign(credentials, { method: endpoint.method, url, body });
+
+  // Build complete redaction set: raw credentials + auth-derived artifacts.
+  const secrets = buildSecretsList(credentials, authResult.sensitiveArtifacts);
 
   const finalUrl = authResult.queryParams ? buildUrl(baseUrl, endpoint.path, vars, authResult.queryParams) : url;
 
@@ -141,14 +158,14 @@ async function executeRequest(
       // Scrub credentials from the exception message — providers may echo
       // secrets in transport-layer errors.
       const rawMsg = err instanceof Error ? err.message : String(err);
-      lastError = new Error(scrubCredentials(rawMsg, credentials));
+      lastError = new Error(scrubSecrets(rawMsg, secrets));
       if (attempt < MAX_RETRIES) continue;
       throw lastError;
     }
 
     if (!resp.ok) {
       const text = await resp.text().catch(() => '');
-      const scrubbed = scrubCredentials(text.slice(0, 500), credentials);
+      const scrubbed = scrubSecrets(text.slice(0, 500), secrets);
       lastError = new Error(`HTTP ${resp.status}: ${scrubbed}`);
       // Retry transient errors; permanent 4xx (except 429) are terminal.
       if (TRANSIENT_STATUS_CODES.has(resp.status) && attempt < MAX_RETRIES) continue;
@@ -170,14 +187,16 @@ function mapStatus(rawStatus: string | undefined, statusMap: Record<string, stri
   return 'running';
 }
 
-function checkBusinessCode(json: unknown, endpoint: Endpoint, credentials: Record<string, string>): void {
+function checkBusinessCode(json: unknown, endpoint: Endpoint, secrets: string[]): void {
   const resp = endpoint.response;
   if (resp.codeField && resp.successCode !== undefined) {
     const code = extractString(json, resp.codeField);
     if (code !== undefined && Number(code) !== resp.successCode) {
       const errMsg = resp.error ? extractString(json, resp.error) : undefined;
-      const raw = errMsg ?? JSON.stringify(json);
-      throw new Error(`Business error code=${code}: ${scrubCredentials(raw, credentials)}`);
+      // Deep-scrub the JSON object before stringifying — defeats JSON escaping.
+      const raw = errMsg ? scrubSecrets(errMsg, secrets) : JSON.stringify(scrubJsonValue(json, secrets));
+      const scrubbedCode = scrubSecrets(String(code), secrets);
+      throw new Error(`Business error code=${scrubbedCode}: ${raw}`);
     }
   }
 }
@@ -204,18 +223,19 @@ export async function submit(
     signal,
   );
 
-  checkBusinessCode(json, cap.submit, params.credentials);
+  const secrets = buildSecretsList(params.credentials);
+  checkBusinessCode(json, cap.submit, secrets);
 
   const taskId = extractString(json, cap.submit.response.taskId ?? '$.id');
   if (!taskId) {
-    throw new Error(`No taskId in response: ${scrubCredentials(JSON.stringify(json), params.credentials)}`);
+    throw new Error(`No taskId in response: ${JSON.stringify(scrubJsonValue(json, secrets))}`);
   }
 
   const rawStatus = cap.submit.response.status ? extractString(json, cap.submit.response.status) : undefined;
   const statusMap = cap.submit.response.statusMap ?? {};
   const status = rawStatus ? mapStatus(rawStatus, statusMap) : 'queued';
 
-  return { taskId: scrubCredentials(taskId, params.credentials), status };
+  return { taskId: scrubSecrets(taskId, secrets), status };
 }
 
 export async function poll(
@@ -239,7 +259,8 @@ export async function poll(
     signal,
   );
 
-  checkBusinessCode(json, pollDef, params.credentials);
+  const secrets = buildSecretsList(params.credentials);
+  checkBusinessCode(json, pollDef, secrets);
 
   const resp = pollDef.response;
   const rawStatus = resp.status ? extractString(json, resp.status) : undefined;
@@ -261,12 +282,11 @@ export async function poll(
   const coverUrl = resp.coverUrl ? extractString(json, resp.coverUrl) : undefined;
   const error = resp.error ? extractString(json, resp.error) : undefined;
 
-  const creds = params.credentials;
   return {
     status,
-    resultUrl: resultUrl ? scrubCredentials(resultUrl, creds) : undefined,
-    coverUrl: coverUrl ? scrubCredentials(coverUrl, creds) : undefined,
-    error: error ? scrubCredentials(error, creds) : undefined,
+    resultUrl: resultUrl ? scrubSecrets(resultUrl, secrets) : undefined,
+    coverUrl: coverUrl ? scrubSecrets(coverUrl, secrets) : undefined,
+    error: error ? scrubSecrets(error, secrets) : undefined,
   };
 }
 
@@ -290,14 +310,15 @@ export async function execute(
     signal,
   );
 
-  checkBusinessCode(json, cap.request, params.credentials);
+  const secrets = buildSecretsList(params.credentials);
+  checkBusinessCode(json, cap.request, secrets);
 
   const result = extractString(json, cap.request.response.result ?? '$.result');
   if (!result) {
-    throw new Error(`No result in response: ${scrubCredentials(JSON.stringify(json), params.credentials)}`);
+    throw new Error(`No result in response: ${JSON.stringify(scrubJsonValue(json, secrets))}`);
   }
 
-  return { result: scrubCredentials(result, params.credentials) };
+  return { result: scrubSecrets(result, secrets) };
 }
 
 function resolvePoll(template: ProtocolTemplate, cap: Capability, capName: string): PollEndpoint {

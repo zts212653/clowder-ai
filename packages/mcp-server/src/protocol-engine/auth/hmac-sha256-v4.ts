@@ -79,6 +79,8 @@ export const hmacSha256V4Strategy: AuthStrategy = {
     const region = credentials['region'] ?? 'cn-north-1';
     const service = credentials['service'] ?? 'cv';
     const headers = signRequest(ak, sk, region, service, request);
-    return { headers };
+    // Authorization header contains ak and HMAC signature — both sensitive.
+    const authHeader = headers['Authorization'] ?? '';
+    return { headers, sensitiveArtifacts: [authHeader] };
   },
 };

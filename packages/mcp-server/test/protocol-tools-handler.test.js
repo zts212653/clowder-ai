@@ -687,6 +687,99 @@ describe('signal composition with request timeout', () => {
   });
 });
 
+// ── Handler-level final boundary scrub ──
+
+describe('handler-level credential boundary', () => {
+  let origFetch;
+  let origApiUrl;
+  before(() => {
+    origFetch = globalThis.fetch;
+    origApiUrl = process.env.CAT_CAFE_API_URL;
+    delete process.env.CAT_CAFE_API_URL;
+  });
+  after(() => {
+    globalThis.fetch = origFetch;
+    if (origApiUrl !== undefined) process.env.CAT_CAFE_API_URL = origApiUrl;
+  });
+
+  it('scrubs JWT token from error echoed by provider', async () => {
+    // Simulate provider echoing back the Authorization header in a 403 response
+    const config = makeConfig();
+    config.provider.authType = 'jwt-hs256';
+    config.credentials = { accessKey: 'ak-test-1234', secretKey: 'sk-test-5678-secret' };
+    globalThis.fetch = mock.fn(async () => {
+      return new Response('Unauthorized: Bearer eyJ-echoed-token', { status: 403 });
+    });
+    const tools = createProtocolTools(config);
+    const submit = findTool(tools, '_submit');
+    const result = await submit.handler({ capability: 'text2video', vars: { prompt: 'test' } });
+    assert.equal(result.isError, true);
+    const text = result.content[0].text;
+    assert.ok(!text.includes('ak-test-1234'), 'Access key must not leak');
+    assert.ok(!text.includes('sk-test-5678-secret'), 'Secret key must not leak');
+  });
+
+  it('scrubs business error code containing credential', async () => {
+    const config = makeConfig();
+    config.credentials = { apiKey: 'sk-code-leak-1234' };
+    // Return 200 with business error code that echoes the credential
+    globalThis.fetch = mock.fn(async () => {
+      return new Response(JSON.stringify({ code: 'sk-code-leak-1234', message: 'denied' }));
+    });
+    // Need a template with codeField
+    config.template.capabilities.text2video.submit.response.codeField = '$.code';
+    config.template.capabilities.text2video.submit.response.successCode = 0;
+    config.template.capabilities.text2video.submit.response.error = '$.message';
+    const tools = createProtocolTools(config);
+    const submit = findTool(tools, '_submit');
+    const result = await submit.handler({ capability: 'text2video', vars: { prompt: 'test' } });
+    assert.equal(result.isError, true);
+    const text = result.content[0].text;
+    assert.ok(!text.includes('sk-code-leak-1234'), 'Credential in business code must not leak');
+  });
+});
+
+// ── Abortable sleep correctness ──
+
+describe('abortable sleep', () => {
+  let origFetch;
+  let origApiUrl;
+  before(() => {
+    origFetch = globalThis.fetch;
+    origApiUrl = process.env.CAT_CAFE_API_URL;
+    delete process.env.CAT_CAFE_API_URL;
+  });
+  after(() => {
+    globalThis.fetch = origFetch;
+    if (origApiUrl !== undefined) process.env.CAT_CAFE_API_URL = origApiUrl;
+  });
+
+  it('resolves immediately when signal is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let pollCount = 0;
+    globalThis.fetch = mock.fn(async () => {
+      pollCount++;
+      return new Response(JSON.stringify({ status: 'running' }));
+    });
+    const config = makeConfig();
+    config.template.capabilities.text2video.poll = {
+      method: 'GET',
+      path: '/poll/{{taskId}}',
+      interval: 60_000, // Very long — should NOT actually wait
+      maxAttempts: 3,
+      response: { status: '$.status', statusMap: { running: ['running'] } },
+    };
+    const tools = createProtocolTools(config);
+    const poll = findTool(tools, '_poll');
+    const start = Date.now();
+    await poll.handler({ capability: 'text2video', task_id: 't1' }, { signal: controller.signal });
+    const elapsed = Date.now() - start;
+    // Should complete almost instantly, not wait 60s
+    assert.ok(elapsed < 2000, `Elapsed ${elapsed}ms — should not wait on pre-aborted signal`);
+  });
+});
+
 // ── Name collision regression ──
 
 describe('MCP name collision detection', () => {

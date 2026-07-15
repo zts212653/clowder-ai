@@ -4,7 +4,8 @@ export const apikeyStrategy: AuthStrategy = {
   type: 'apikey',
   sign(credentials): AuthResult {
     const key = credentials['apiKey'] ?? credentials['api_key'] ?? '';
-    return { headers: { Authorization: `Bearer ${key}` } };
+    const bearer = `Bearer ${key}`;
+    return { headers: { Authorization: bearer }, sensitiveArtifacts: [bearer] };
   },
 };
 
@@ -13,6 +14,8 @@ export const queryParamStrategy: AuthStrategy = {
   sign(credentials): AuthResult {
     const key = credentials['apiKey'] ?? credentials['api_key'] ?? '';
     const paramName = credentials['_authParamName'] ?? 'key';
-    return { queryParams: { [paramName]: key } };
+    const encoded = encodeURIComponent(key);
+    const artifacts = encoded !== key ? [encoded] : [];
+    return { queryParams: { [paramName]: key }, sensitiveArtifacts: artifacts };
   },
 };

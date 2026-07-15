@@ -1,6 +1,6 @@
 import { extname } from 'node:path';
 import { z } from 'zod';
-import { execute, poll, submit } from '../protocol-engine/engine.js';
+import { execute, poll, scrubCredentials, submit } from '../protocol-engine/engine.js';
 import type { AuthType, ExecutionParams, ProtocolTemplate, ProviderInstance } from '../protocol-engine/types.js';
 import { callbackPost, getCallbackConfig } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
@@ -53,7 +53,8 @@ function createSubmitTool(config: ProtocolToolConfig, capabilities: string[]): T
         const result = await submit(config.template, buildParams(config, input.capability, input.vars), extra?.signal);
         return successResult(JSON.stringify({ taskId: result.taskId, status: result.status }));
       } catch (err) {
-        return errorResult(`Submit failed: ${err instanceof Error ? err.message : String(err)}`);
+        const raw = err instanceof Error ? err.message : String(err);
+        return errorResult(`Submit failed: ${scrubCredentials(raw, config.credentials)}`);
       }
     }) as (args: never, extra?: ToolExtra) => Promise<ToolResult>,
   };
@@ -130,16 +131,18 @@ async function emitMediaRichBlock(url: string, prefix: string, taskId: string, c
 
 /** Signal-aware sleep: resolves after ms or when signal aborts (whichever first). */
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  // Fast path: already aborted — don't sleep at all.
+  if (signal?.aborted) return Promise.resolve();
   return new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
 
@@ -220,7 +223,8 @@ function createPollTool(config: ProtocolToolConfig, capabilities: string[]): Too
             `Use ${config.prefix}_poll again to check.`,
         );
       } catch (err) {
-        return errorResult(`Poll failed: ${err instanceof Error ? err.message : String(err)}`);
+        const raw = err instanceof Error ? err.message : String(err);
+        return errorResult(`Poll failed: ${scrubCredentials(raw, config.credentials)}`);
       }
     }) as (args: never, extra?: ToolExtra) => Promise<ToolResult>,
   };
@@ -242,7 +246,8 @@ function createExecuteTool(config: ProtocolToolConfig, capabilities: string[]): 
         const result = await execute(config.template, buildParams(config, input.capability, input.vars), extra?.signal);
         return successResult(result.result);
       } catch (err) {
-        return errorResult(`Execute failed: ${err instanceof Error ? err.message : String(err)}`);
+        const raw = err instanceof Error ? err.message : String(err);
+        return errorResult(`Execute failed: ${scrubCredentials(raw, config.credentials)}`);
       }
     }) as (args: never, extra?: ToolExtra) => Promise<ToolResult>,
   };

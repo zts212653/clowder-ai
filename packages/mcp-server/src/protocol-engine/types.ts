@@ -73,6 +73,8 @@ export type AuthType = 'apikey' | 'jwt-hs256' | 'hmac-sha256-v4' | 'query-param'
 export interface AuthResult {
   headers?: Record<string, string>;
   queryParams?: Record<string, string>;
+  /** Derived values that must be scrubbed from provider output (JWT, HMAC sig, etc.). */
+  sensitiveArtifacts?: string[];
 }
 
 export interface AuthStrategy {

@@ -28,6 +28,7 @@ export const jwtHs256Strategy: AuthStrategy = {
     const ak = credentials['accessKey'] ?? credentials['access_key'] ?? '';
     const sk = credentials['secretKey'] ?? credentials['secret_key'] ?? '';
     const token = buildJwt(ak, sk);
-    return { headers: { Authorization: `Bearer ${token}` } };
+    const bearer = `Bearer ${token}`;
+    return { headers: { Authorization: bearer }, sensitiveArtifacts: [bearer, token] };
   },
 };

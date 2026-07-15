@@ -377,12 +377,41 @@ describe('scrubCredentials', () => {
   });
 
   it('excludes _-prefixed metadata keys from scrubbing', () => {
-    // _authParamName holds a query-param label like "api_key", not a secret.
     const url = 'https://cdn.example/video.mp4?api_key=public-label';
     const creds = { apiKey: 'real-secret-key', _authParamName: 'api_key' };
     const result = scrubCredentials(url, creds);
     assert.equal(result, 'https://cdn.example/video.mp4?api_key=public-label');
     assert.ok(!result.includes('***'), 'metadata value should not be scrubbed');
+  });
+
+  it('replaces longest credential first to avoid partial residue', () => {
+    const text = 'key=sk-long-secret-key and sk-long-secret-key-extended';
+    const creds = { short: 'sk-long-secret-key', long: 'sk-long-secret-key-extended' };
+    const result = scrubCredentials(text, creds);
+    assert.equal(result, 'key=*** and ***');
+  });
+});
+
+describe('buildSecretsList', () => {
+  it('includes auth-derived artifacts in secrets list', async () => {
+    const { buildSecretsList } = await import('../dist/protocol-engine/index.js');
+    const creds = { apiKey: 'sk-test-key' };
+    const artifacts = ['Bearer sk-test-key', 'eyJhbGciOiJIUzI1NiJ9.payload.sig'];
+    const secrets = buildSecretsList(creds, artifacts);
+    assert.ok(secrets.includes('sk-test-key'));
+    assert.ok(secrets.includes('Bearer sk-test-key'));
+    assert.ok(secrets.includes('eyJhbGciOiJIUzI1NiJ9.payload.sig'));
+    // Longest first
+    assert.ok(secrets.indexOf('eyJhbGciOiJIUzI1NiJ9.payload.sig') < secrets.indexOf('sk-test-key'));
+  });
+
+  it('deduplicates overlapping values', async () => {
+    const { buildSecretsList } = await import('../dist/protocol-engine/index.js');
+    const creds = { apiKey: 'sk-test' };
+    const artifacts = ['sk-test', 'Bearer sk-test'];
+    const secrets = buildSecretsList(creds, artifacts);
+    const skCount = secrets.filter((s) => s === 'sk-test').length;
+    assert.equal(skCount, 1, 'Should not duplicate');
   });
 });
 
