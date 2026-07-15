@@ -702,117 +702,126 @@ describe('handler-level credential boundary', () => {
     if (origApiUrl !== undefined) process.env.CAT_CAFE_API_URL = origApiUrl;
   });
 
-  it('scrubs ACTUAL JWT bearer token emitted by auth strategy from 403 error', async () => {
-    const { getAuthStrategy } = await import('../dist/protocol-engine/auth/index.js');
-    const creds = { accessKey: 'ak-test-1234', secretKey: 'sk-test-5678-secret' };
-
-    // Compute the ACTUAL auth header the strategy would emit.
-    const authResult = getAuthStrategy('jwt-hs256').sign(creds, {
-      method: 'POST',
-      url: 'https://api.test.local/submit',
-    });
-    const actualBearer = authResult.headers?.['Authorization'] ?? '';
-    assert.ok(actualBearer.startsWith('Bearer '), 'Strategy must produce Bearer header');
-    const actualToken = actualBearer.replace('Bearer ', '');
-
-    // Provider echoes back the REAL Authorization header in its error response.
+  it('scrubs JWT bearer token captured from actual fetch headers', async () => {
+    let capturedHeaders;
     const config = makeConfig();
     config.provider.authType = 'jwt-hs256';
-    config.credentials = creds;
-    globalThis.fetch = mock.fn(async () => {
-      return new Response(`Unauthorized: ${actualBearer}`, { status: 403 });
+    config.credentials = { accessKey: 'ak-test-1234', secretKey: 'sk-test-5678-secret' };
+    globalThis.fetch = mock.fn(async (_url, opts) => {
+      capturedHeaders = opts?.headers;
+      // Echo the ACTUAL Authorization header from the request in the error body.
+      return new Response(`Unauthorized: ${capturedHeaders?.['Authorization'] ?? ''}`, { status: 403 });
     });
     const tools = createProtocolTools(config);
     const submit = findTool(tools, '_submit');
     const result = await submit.handler({ capability: 'text2video', vars: { prompt: 'test' } });
     assert.equal(result.isError, true);
     const text = result.content[0].text;
-    assert.ok(!text.includes(actualToken), 'Actual JWT token must be scrubbed');
+    const actualBearer = capturedHeaders?.['Authorization'] ?? '';
+    assert.ok(actualBearer.startsWith('Bearer '), 'Must emit Bearer header');
     assert.ok(!text.includes(actualBearer), 'Actual Bearer header must be scrubbed');
+    assert.ok(!text.includes(actualBearer.slice(7)), 'Actual JWT token must be scrubbed');
     assert.ok(!text.includes('ak-test-1234'), 'Access key must not leak');
     assert.ok(!text.includes('sk-test-5678-secret'), 'Secret key must not leak');
   });
 
-  it('scrubs ACTUAL apikey Bearer header echoed in 2xx JSON response', async () => {
-    const { getAuthStrategy } = await import('../dist/protocol-engine/auth/index.js');
-    const creds = { apiKey: 'sk-boundary-test-key' };
-
-    // Compute ACTUAL auth output.
-    const authResult = getAuthStrategy('apikey').sign(creds, { method: 'POST', url: '' });
-    const actualBearer = authResult.headers?.['Authorization'] ?? '';
-    assert.equal(actualBearer, 'Bearer sk-boundary-test-key');
-
-    // Provider echoes the Authorization header inside the response body.
+  it('scrubs apikey Bearer header captured from actual fetch headers (2xx)', async () => {
+    let capturedHeaders;
     const config = makeConfig();
-    config.credentials = creds;
-    globalThis.fetch = mock.fn(async () => {
-      return new Response(JSON.stringify({ status: 'done', url: `https://cdn.test/v.mp4?auth=${actualBearer}` }));
+    config.credentials = { apiKey: 'sk-boundary-test-key' };
+    globalThis.fetch = mock.fn(async (_url, opts) => {
+      capturedHeaders = opts?.headers;
+      // Echo the actual Authorization header inside the 2xx response body.
+      const auth = capturedHeaders?.['Authorization'] ?? '';
+      return new Response(JSON.stringify({ status: 'done', url: `https://cdn.test/v.mp4?auth=${auth}` }));
     });
     const tools = createProtocolTools(config);
     const poll = findTool(tools, '_poll');
     const result = await poll.handler({ capability: 'text2video', task_id: 'auth-echo-1' });
     const data = JSON.parse(result.content[0].text);
+    assert.ok(capturedHeaders?.['Authorization']?.includes('sk-boundary-test-key'), 'Must emit credential');
     assert.ok(!data.resultUrl.includes('sk-boundary-test-key'), 'API key must be scrubbed from resultUrl');
-    assert.ok(!data.resultUrl.includes(actualBearer), 'Bearer header must be scrubbed from resultUrl');
+    assert.ok(!data.resultUrl.includes(capturedHeaders['Authorization']), 'Bearer must be scrubbed');
   });
 
-  it('scrubs ACTUAL query-param encoded key from poll resultUrl', async () => {
-    const { getAuthStrategy } = await import('../dist/protocol-engine/auth/index.js');
-    const creds = { apiKey: 'sk+special/chars=test', _authParamName: 'api_key' };
-
-    // Compute ACTUAL query-param output — encodeURIComponent changes + / =
-    const authResult = getAuthStrategy('query-param').sign(creds, { method: 'GET', url: '' });
-    const actualEncoded = encodeURIComponent('sk+special/chars=test');
-    assert.notEqual(actualEncoded, 'sk+special/chars=test', 'Key must differ when URL-encoded');
-    // Confirm the strategy declares the encoded form as a sensitive artifact.
-    assert.ok(
-      authResult.sensitiveArtifacts?.includes(actualEncoded),
-      'Strategy must declare encoded key as sensitive artifact',
-    );
-
+  it('scrubs actual URLSearchParams-encoded credential from fetch URL', async () => {
+    let capturedUrl;
     const config = makeConfig();
     config.provider.authType = 'query-param';
-    config.credentials = creds;
-    // Provider echoes the URL-encoded key inside poll response fields.
-    globalThis.fetch = mock.fn(async () => {
-      return new Response(JSON.stringify({ status: 'done', url: `https://cdn.test/v.mp4?leaked=${actualEncoded}` }));
+    config.credentials = { apiKey: 'dummy secret?', _authParamName: 'key' };
+    globalThis.fetch = mock.fn(async (url) => {
+      capturedUrl = url;
+      // Extract the raw query param value from the ACTUAL fetch URL.
+      const qIdx = url.indexOf('?');
+      const pairs = qIdx !== -1 ? url.slice(qIdx + 1).split('&') : [];
+      const keyPair = pairs.find((p) => p.startsWith('key='));
+      const rawValue = keyPair ? keyPair.slice(4) : '';
+      // Provider echoes the actual serialized value in error body.
+      return new Response(`Invalid key: ${rawValue}`, { status: 403 });
     });
     const tools = createProtocolTools(config);
-    const poll = findTool(tools, '_poll');
-    const result = await poll.handler({ capability: 'text2video', task_id: 'qp-echo-1' });
-    const data = JSON.parse(result.content[0].text);
-    assert.ok(!data.resultUrl.includes(actualEncoded), 'URL-encoded credential must be scrubbed');
-    assert.ok(!data.resultUrl.includes('sk+special/chars=test'), 'Raw credential must be scrubbed');
+    const submit = findTool(tools, '_submit');
+    const result = await submit.handler({ capability: 'text2video', vars: { prompt: 'test' } });
+    assert.equal(result.isError, true);
+    const text = result.content[0].text;
+    // URLSearchParams uses '+' for space; encodeURIComponent uses '%20'.
+    assert.ok(capturedUrl?.includes('dummy+secret%3F'), 'URLSearchParams must use + for space');
+    assert.ok(!text.includes('dummy+secret%3F'), 'URLSearchParams-encoded value must be scrubbed');
+    assert.ok(!text.includes('dummy secret?'), 'Raw credential must be scrubbed');
   });
 
-  it('scrubs ACTUAL HMAC Authorization header from provider error field', async () => {
-    const { getAuthStrategy } = await import('../dist/protocol-engine/auth/index.js');
-    const creds = { accessKey: 'ak-hmac-test', secretKey: 'sk-hmac-secret-key', region: 'us-east-1', service: 'cv' };
-
-    // Compute ACTUAL HMAC auth header.
-    const authResult = getAuthStrategy('hmac-sha256-v4').sign(creds, {
-      method: 'POST',
-      url: 'https://api.test.local/submit',
-      body: JSON.stringify({ prompt: 'test' }),
-    });
-    const actualAuth = authResult.headers?.['Authorization'] ?? '';
-    assert.ok(actualAuth.startsWith('HMAC-SHA256 '), 'Strategy must produce HMAC auth header');
-
+  it('scrubs HMAC Signature sub-component captured from actual fetch headers', async () => {
+    let capturedHeaders;
     const config = makeConfig();
     config.provider.authType = 'hmac-sha256-v4';
-    config.credentials = creds;
-    // Provider echoes the full Authorization header in a failed poll error message.
-    globalThis.fetch = mock.fn(async () => {
-      return new Response(JSON.stringify({ status: 'error', error: `Auth mismatch: expected ${actualAuth}` }));
+    config.credentials = {
+      accessKey: 'ak-hmac-test',
+      secretKey: 'sk-hmac-secret-key',
+      region: 'us-east-1',
+      service: 'cv',
+    };
+    globalThis.fetch = mock.fn(async (_url, opts) => {
+      capturedHeaders = opts?.headers;
+      // Extract just the 64-char hex Signature from the ACTUAL emitted header.
+      const auth = capturedHeaders?.['Authorization'] ?? '';
+      const sig = auth.match(/Signature=([0-9a-f]{64})/);
+      // Provider echoes ONLY the signature value (not the full header) in error body.
+      return new Response(`Signature mismatch: ${sig ? sig[1] : ''}`, { status: 403 });
+    });
+    const tools = createProtocolTools(config);
+    const submit = findTool(tools, '_submit');
+    const result = await submit.handler({ capability: 'text2video', vars: { prompt: 'test' } });
+    assert.equal(result.isError, true);
+    const text = result.content[0].text;
+    const auth = capturedHeaders?.['Authorization'] ?? '';
+    const sig = auth.match(/Signature=([0-9a-f]{64})/);
+    assert.ok(sig, 'HMAC header must contain a 64-char hex Signature');
+    assert.ok(!text.includes(sig[1]), 'HMAC Signature sub-component must be scrubbed');
+    assert.ok(!text.includes('ak-hmac-test'), 'Access key must not leak');
+    assert.ok(!text.includes('sk-hmac-secret-key'), 'Secret key must not leak');
+  });
+
+  it('scrubs auth artifact from 2xx business failure (selected field leak)', async () => {
+    let capturedHeaders;
+    const config = makeConfig();
+    config.provider.authType = 'jwt-hs256';
+    config.credentials = { accessKey: 'ak-2xx-test', secretKey: 'sk-2xx-secret' };
+    // 200 OK with business error that echoes the actual auth header in error field.
+    globalThis.fetch = mock.fn(async (_url, opts) => {
+      capturedHeaders = opts?.headers;
+      const auth = capturedHeaders?.['Authorization'] ?? '';
+      return new Response(JSON.stringify({ status: 'error', error: `Provider echoed ${auth}` }));
     });
     config.template.capabilities.text2video.poll.response.error = '$.error';
     const tools = createProtocolTools(config);
     const poll = findTool(tools, '_poll');
-    const result = await poll.handler({ capability: 'text2video', task_id: 'hmac-echo-1' });
+    const result = await poll.handler({ capability: 'text2video', task_id: '2xx-leak' });
     const data = JSON.parse(result.content[0].text);
-    assert.ok(!data.error.includes(actualAuth), 'HMAC Authorization header must be scrubbed');
-    assert.ok(!data.error.includes('ak-hmac-test'), 'Access key must not leak');
-    assert.ok(!data.error.includes('sk-hmac-secret-key'), 'Secret key must not leak');
+    const actualBearer = capturedHeaders?.['Authorization'] ?? '';
+    assert.ok(actualBearer.startsWith('Bearer '), 'Must emit Bearer header');
+    assert.ok(!data.error.includes(actualBearer), 'Auth artifact must be scrubbed from 2xx error field');
+    assert.ok(!data.error.includes('ak-2xx-test'), 'Access key must not leak in 2xx');
+    assert.ok(!data.error.includes('sk-2xx-secret'), 'Secret key must not leak in 2xx');
   });
 
   it('scrubs business error code containing credential', async () => {

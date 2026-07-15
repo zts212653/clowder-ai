@@ -90,10 +90,8 @@ const TRANSIENT_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 const MAX_RETRIES = 2;
 const RETRY_BASE_MS = 1000;
 
-/** Result of executeRequest: parsed JSON + the full redaction context (including auth artifacts). */
 interface RequestResult {
   json: unknown;
-  /** Complete secrets list built from raw credentials + auth-derived artifacts. */
   secrets: string[];
 }
 
@@ -111,9 +109,6 @@ async function executeRequest(
   const auth = getAuthStrategy(authType);
   const authResult = auth.sign(credentials, { method: endpoint.method, url, body });
 
-  // Build complete redaction set: raw credentials + auth-derived artifacts.
-  const secrets = buildSecretsList(credentials, authResult.sensitiveArtifacts);
-
   const finalUrl = authResult.queryParams ? buildUrl(baseUrl, endpoint.path, vars, authResult.queryParams) : url;
 
   const headers: Record<string, string> = {
@@ -121,6 +116,25 @@ async function executeRequest(
     ...endpoint.headers,
     ...authResult.headers,
   };
+
+  // Derive redaction set from the actual serialized request (not pre-serialization).
+  const artifacts = [...(authResult.sensitiveArtifacts ?? [])];
+  const sigMatch = headers['Authorization']?.match(/Signature=([0-9a-fA-F]{64})/);
+  if (sigMatch) artifacts.push(sigMatch[1]); // HMAC Signature sub-component
+  if (authResult.queryParams) {
+    const qIdx = finalUrl.indexOf('?');
+    if (qIdx !== -1) {
+      const names = new Set(Object.keys(authResult.queryParams));
+      const qs = finalUrl.slice(qIdx + 1).split('#')[0];
+      for (const pair of qs.split('&')) {
+        const eq = pair.indexOf('=');
+        if (eq !== -1 && names.has(pair.slice(0, eq)) && pair.length - eq > 4) {
+          artifacts.push(pair.slice(eq + 1));
+        }
+      }
+    }
+  }
+  const secrets = buildSecretsList(credentials, artifacts);
 
   const REQUEST_TIMEOUT_MS = 30_000;
 
