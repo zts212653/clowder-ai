@@ -390,7 +390,7 @@ async function existingFileHash(resolvedPath: string): Promise<string | null> {
   try {
     const st = await lstat(resolvedPath);
     if (st.isSymbolicLink()) throw new Error('Refusing to overwrite symlink path');
-    if (st.isDirectory()) throw new Error('Refusing to overwrite directory path');
+    if (!st.isFile()) throw new Error('Refusing to overwrite non-regular file (directory, FIFO, socket, or device)');
     return hashContent(await readFile(resolvedPath));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
