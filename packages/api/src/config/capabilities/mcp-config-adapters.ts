@@ -307,11 +307,11 @@ export async function writeGeminiMcpConfig(filePath: string, servers: McpServerD
   // F213 Phase B: L5 cleanup of deprecated managed entries before update.
   applyDeprecatedManagedCleanup(existingMcp, 'gemini');
 
-  // Migration: remove old colon-named entries that were renamed to dash-based
-  // names (resolveServersForCat replaces `:` with `-` for CLI compatibility).
+  // Migration: remove old colon-named entries that were renamed to double-
+  // underscore names (resolveServersForCat replaces `:` with `__`).
   const newGeminiNames = new Set(servers.map((s) => s.name));
   for (const key of Object.keys(existingMcp)) {
-    if (key.includes(':') && newGeminiNames.has(key.replace(/:/g, '-'))) {
+    if (key.includes(':') && newGeminiNames.has(key.replace(/:/g, '__'))) {
       delete existingMcp[key];
     }
   }
@@ -483,11 +483,11 @@ export async function writeAntigravityMcpConfig(filePath: string, servers: McpSe
   // F213 Phase B: L5 cleanup of deprecated managed entries before update.
   applyDeprecatedManagedCleanup(existingMcp, 'antigravity');
 
-  // Migration: remove old colon-named entries that were renamed to dash-based
-  // names (resolveServersForCat replaces `:` with `-` for CLI compatibility).
+  // Migration: remove old colon-named entries that were renamed to double-
+  // underscore names (resolveServersForCat replaces `:` with `__`).
   const newAgNames = new Set(servers.map((s) => s.name));
   for (const key of Object.keys(existingMcp)) {
-    if (key.includes(':') && newAgNames.has(key.replace(/:/g, '-'))) {
+    if (key.includes(':') && newAgNames.has(key.replace(/:/g, '__'))) {
       delete existingMcp[key];
     }
   }
