@@ -23,7 +23,10 @@ const CREDENTIAL_PLACEHOLDER = '***';
  */
 export function scrubCredentials(text: string, credentials: Record<string, string>): string {
   let result = text;
-  for (const value of Object.values(credentials)) {
+  for (const [key, value] of Object.entries(credentials)) {
+    // Skip internal metadata keys (e.g. _authParamName) — they hold
+    // auth config labels, not secret values.
+    if (key.startsWith('_')) continue;
     if (value && value.length >= 4) {
       result = result.replaceAll(value, CREDENTIAL_PLACEHOLDER);
     }
@@ -122,12 +125,23 @@ async function executeRequest(
       ? AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
       : AbortSignal.timeout(REQUEST_TIMEOUT_MS);
 
-    const resp = await fetch(finalUrl, {
-      method: endpoint.method,
-      headers,
-      body: endpoint.method !== 'GET' ? body : undefined,
-      signal: requestSignal,
-    });
+    let resp: Response;
+    try {
+      resp = await fetch(finalUrl, {
+        method: endpoint.method,
+        headers,
+        body: endpoint.method !== 'GET' ? body : undefined,
+        signal: requestSignal,
+      });
+    } catch (err) {
+      // Abort/timeout errors are terminal — do not retry.
+      if (err instanceof DOMException && err.name === 'AbortError') throw err;
+      if (err instanceof DOMException && err.name === 'TimeoutError') throw err;
+      // Network failures (TypeError: fetch failed, etc.) are retryable.
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt < MAX_RETRIES) continue;
+      throw lastError;
+    }
 
     if (!resp.ok) {
       const text = await resp.text().catch(() => '');

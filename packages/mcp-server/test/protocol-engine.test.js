@@ -375,6 +375,15 @@ describe('scrubCredentials', () => {
     const creds = { apiKey: 'sk-test' };
     assert.equal(scrubCredentials(text, creds), '*** echoed: ***');
   });
+
+  it('excludes _-prefixed metadata keys from scrubbing', () => {
+    // _authParamName holds a query-param label like "api_key", not a secret.
+    const url = 'https://cdn.example/video.mp4?api_key=public-label';
+    const creds = { apiKey: 'real-secret-key', _authParamName: 'api_key' };
+    const result = scrubCredentials(url, creds);
+    assert.equal(result, 'https://cdn.example/video.mp4?api_key=public-label');
+    assert.ok(!result.includes('***'), 'metadata value should not be scrubbed');
+  });
 });
 
 // ── Protocol tools (deriveMimeType, buildProviderFromEnv) ──

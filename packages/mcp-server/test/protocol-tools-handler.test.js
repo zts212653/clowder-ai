@@ -597,6 +597,34 @@ describe('transient HTTP error retry', () => {
     assert.equal(result.isError, true);
     assert.equal(fetchCount, 3, 'Should attempt 3 times total (1 + MAX_RETRIES=2)');
   });
+
+  it('retries on network exception then succeeds', async () => {
+    let fetchCount = 0;
+    globalThis.fetch = mock.fn(async () => {
+      fetchCount++;
+      if (fetchCount === 1) throw new TypeError('fetch failed');
+      return new Response(JSON.stringify({ id: 'net-retry-1' }));
+    });
+    const tools = createProtocolTools(makeConfig());
+    const submit = findTool(tools, '_submit');
+    const result = await submit.handler({ capability: 'text2video', vars: { prompt: 'test' } });
+    assert.equal(result.isError, undefined);
+    assert.equal(fetchCount, 2, 'Should retry once after network failure');
+  });
+
+  it('does not retry on abort error', async () => {
+    let fetchCount = 0;
+    globalThis.fetch = mock.fn(async () => {
+      fetchCount++;
+      const err = new DOMException('The operation was aborted', 'AbortError');
+      throw err;
+    });
+    const tools = createProtocolTools(makeConfig());
+    const submit = findTool(tools, '_submit');
+    const result = await submit.handler({ capability: 'text2video', vars: { prompt: 'test' } });
+    assert.equal(result.isError, true);
+    assert.equal(fetchCount, 1, 'Should not retry abort errors');
+  });
 });
 
 // ── Signal composition ──
