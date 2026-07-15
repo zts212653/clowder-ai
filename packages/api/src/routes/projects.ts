@@ -6,6 +6,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, posix, resolve, win32 } from 'node:path';
@@ -86,6 +87,37 @@ export function getProjectBrowseParent(validatedPath: string, platformName = pro
   const pathApi = getPathApi(platformName);
   const parent = pathApi.dirname(validatedPath);
   return parent === validatedPath ? null : parent;
+}
+
+export interface DriveInfo {
+  letter: string;
+  path: string;
+  label: string;
+}
+
+/**
+ * Enumerate available Windows drive letters by probing each letter's root.
+ * Returns [] on non-Windows platforms (single root filesystem).
+ * Skips A:/B: (legacy floppy reservations) and inaccessible drives.
+ */
+export function listAvailableDrives(
+  platformName = process.platform,
+  probeRealpath: (root: string) => string = realpathSync,
+): DriveInfo[] {
+  if (platformName !== 'win32') return [];
+  const drives: DriveInfo[] = [];
+  // C-Z: skip A/B (floppy legacy), probe the rest.
+  for (let code = 'C'.charCodeAt(0); code <= 'Z'.charCodeAt(0); code++) {
+    const letter = String.fromCharCode(code);
+    const root = `${letter}:\\`;
+    try {
+      const real = probeRealpath(root);
+      drives.push({ letter, path: real, label: `本地磁盘 (${letter}:)` });
+    } catch {
+      // Drive not mounted / inaccessible - skip silently.
+    }
+  }
+  return drives;
 }
 
 /**
@@ -285,6 +317,7 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
         parent: canGoUp ? parentDir : null,
         homePath: homedir(),
         entries: dirs,
+        isWindows: process.platform === 'win32',
       };
     } catch (err) {
       reply.status(400);
@@ -292,5 +325,19 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
         error: `Cannot read directory: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
+  });
+
+  // GET /api/projects/drives - list available Windows drive letters
+  // Returns [] on non-Windows. Frontend uses this to render a "此电脑" drive-picker
+  // entry so users can navigate across drive letters (C: → D:) which win32.dirname
+  // cannot traverse (drive root's dirname is itself).
+  app.get('/api/projects/drives', async (request, reply) => {
+    if (!requireTrustedProjectIdentity(request, reply)) {
+      return { error: 'Identity required (X-Cat-Cafe-User header)' };
+    }
+    const allDrives = listAvailableDrives();
+    // Filter to drives whose root is under an allowed root (project-path policy).
+    const accessibleDrives = allDrives.filter((d) => isUnderAllowedRoot(d.path));
+    return { drives: accessibleDrives, isWindows: process.platform === 'win32' };
   });
 };

@@ -369,6 +369,136 @@ describe('DirectoryPickerModal', () => {
     ).toHaveLength(1);
   });
 
+  it('clears the selected directory while browsing the virtual 此电脑 root', async () => {
+    const winCwd = 'D:\\Projects';
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/projects/cwd') return jsonOk({ path: winCwd });
+      if (path === '/api/backlog/items') return jsonOk({ items: [] });
+      if (path === `/api/projects/browse?path=${encodeURIComponent(winCwd)}`) {
+        return jsonOk({
+          current: winCwd,
+          name: 'Projects',
+          parent: 'D:\\',
+          homePath: 'C:\\Users\\test',
+          isWindows: true,
+          entries: [],
+        });
+      }
+      if (path === '/api/projects/drives') {
+        return jsonOk({
+          drives: [
+            { letter: 'C', path: 'C:\\', label: '本地磁盘 (C:)' },
+            { letter: 'D', path: 'D:\\', label: '本地磁盘 (D:)' },
+          ],
+          isWindows: true,
+        });
+      }
+      return jsonFail();
+    });
+
+    render();
+    await flush();
+
+    const browseBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('浏览文件夹'),
+    );
+    expect(browseBtn).toBeTruthy();
+    await act(async () => {
+      browseBtn!.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flush();
+
+    await act(async () => {
+      const thisPc = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('此电脑'));
+      expect(thisPc).toBeTruthy();
+      thisPc!.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flush();
+
+    expect(container.textContent).not.toContain('已选：');
+    const confirmBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('创建对话'),
+    ) as HTMLButtonElement;
+    expect(confirmBtn).toBeTruthy();
+    expect(confirmBtn.disabled).toBe(true);
+  });
+
+  it('does not let a late cwd response reselect a directory while browsing virtual 此电脑 root', async () => {
+    const winCwd = 'D:\\Projects';
+    let resolveCwd: (value: unknown) => void = () => {};
+    const cwdResponse = new Promise((resolve) => {
+      resolveCwd = resolve;
+    });
+
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/projects/cwd') return cwdResponse;
+      if (path === '/api/backlog/items') return jsonOk({ items: [] });
+      if (path === '/api/projects/browse') {
+        return jsonOk({
+          current: winCwd,
+          name: 'Projects',
+          parent: 'D:\\',
+          homePath: 'C:\\Users\\test',
+          isWindows: true,
+          entries: [],
+        });
+      }
+      if (path === '/api/projects/drives') {
+        return jsonOk({
+          drives: [
+            { letter: 'C', path: 'C:\\', label: '本地磁盘 (C:)' },
+            { letter: 'D', path: 'D:\\', label: '本地磁盘 (D:)' },
+          ],
+          isWindows: true,
+        });
+      }
+      return jsonFail();
+    });
+
+    render();
+    await flush();
+
+    const browseBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('浏览文件夹'),
+    );
+    expect(browseBtn).toBeTruthy();
+    await act(async () => {
+      browseBtn!.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flush();
+
+    await act(async () => {
+      const thisPc = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('此电脑'));
+      expect(thisPc).toBeTruthy();
+      thisPc!.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flush();
+
+    let confirmBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('创建对话'),
+    ) as HTMLButtonElement;
+    expect(confirmBtn).toBeTruthy();
+    expect(confirmBtn.disabled).toBe(true);
+    expect(container.textContent).not.toContain('已选：');
+
+    await act(async () => {
+      resolveCwd(await jsonOk({ path: winCwd }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flush();
+
+    confirmBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('创建对话'),
+    ) as HTMLButtonElement;
+    expect(confirmBtn).toBeTruthy();
+    expect(confirmBtn.disabled).toBe(true);
+    expect(container.textContent).not.toContain('已选：');
+  });
+
   // ── F068: Path input ──────────────────────────────────────
 
   it('shows path input field with placeholder', async () => {
