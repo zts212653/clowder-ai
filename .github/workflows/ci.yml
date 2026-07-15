@@ -67,6 +67,8 @@ jobs:
           GIT_AUTHOR_EMAIL: ci@clowder-ai.dev
           GIT_COMMITTER_NAME: CI Runner
           GIT_COMMITTER_EMAIL: ci@clowder-ai.dev
+      - name: Desktop tests
+        run: node --test desktop/*.test.js
 
   dir-size:
     name: Directory Size Guard

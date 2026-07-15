@@ -513,6 +513,23 @@ if (-not $SkipPortableZip) {
     # Desktop assets
     Copy-ToStaging (Join-Path (Join-Path $ProjectRoot "desktop") "assets") "desktop\assets"
 
+    # Desktop package.json — version source for generate-desktop-config.ps1.
+    # Bake the resolved $zipVersion (which honours CATCAFE_VERSION override)
+    # into the staged copy so portable first-run config always matches the
+    # archive name. Without this, a manual CATCAFE_VERSION override would
+    # produce a zip named X but a desktop-config.json recording Y. (#1107)
+    $desktopPkg = Join-Path (Join-Path $ProjectRoot "desktop") "package.json"
+    if (Test-Path $desktopPkg) {
+        $desktopDir = Join-Path $staging "desktop"
+        if (-not (Test-Path $desktopDir)) { New-Item -ItemType Directory -Path $desktopDir -Force | Out-Null }
+        $pkgContent = Get-Content $desktopPkg -Raw | ConvertFrom-Json
+        $pkgContent.version = $zipVersion
+        # Write UTF-8 without BOM — same fix as generate-desktop-config.ps1.
+        # Windows PowerShell 5.1's -Encoding utf8 emits a BOM that breaks JSON.parse.
+        $json = $pkgContent | ConvertTo-Json -Depth 10
+        [System.IO.File]::WriteAllText((Join-Path $desktopDir "package.json"), $json, (New-Object System.Text.UTF8Encoding $false))
+    }
+
     # CLI tool tarballs
     Copy-ToStaging (Join-Path $ProjectRoot "bundled\cli-tools") "bundled\cli-tools"
 
