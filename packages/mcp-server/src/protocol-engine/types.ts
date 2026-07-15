@@ -54,11 +54,11 @@ export const ProtocolTemplateSchema = z.object({
   auth: z
     .object({
       method: z.enum(['apikey', 'query-param', 'jwt-hs256', 'hmac-sha256-v4']).optional(),
-      // Only URL-serialization-stable chars: URLSearchParams must not encode the name,
-      // so the configured name always equals its serialized form in the URL.
+      // WHATWG URLSearchParams-stable chars only (a-z A-Z 0-9 _ . * -).
+      // RFC 3986 unreserved `~` is NOT stable: URLSearchParams encodes it as %7E.
       paramName: z
         .string()
-        .regex(/^[a-zA-Z0-9_.~*-]+$/, 'paramName must be URL-safe')
+        .regex(/^[a-zA-Z0-9_.*-]+$/, 'paramName must be URL-safe')
         .optional(),
     })
     .optional(),

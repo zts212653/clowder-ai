@@ -955,9 +955,10 @@ describe('auth method schema validation', () => {
     );
   });
 
-  it('rejects paramName with URL-unsafe characters (equals, question mark)', async () => {
+  it('rejects paramName with URL-unsafe characters (equals, question mark, tilde)', async () => {
     const { ProtocolTemplateSchema } = await import('../dist/protocol-engine/index.js');
-    for (const bad of ['key=val', 'key?', 'a b', 'key%20name', 'key+name']) {
+    // ~ is RFC 3986 unreserved but URLSearchParams encodes it as %7E
+    for (const bad of ['key=val', 'key?', 'a b', 'key%20name', 'key+name', 'key~v2']) {
       assert.throws(
         () =>
           ProtocolTemplateSchema.parse({
@@ -973,9 +974,9 @@ describe('auth method schema validation', () => {
     }
   });
 
-  it('accepts paramName with URL-safe special chars (underscore, dot, dash, tilde)', async () => {
+  it('accepts paramName with URLSearchParams-stable special chars (underscore, dot, dash, star)', async () => {
     const { ProtocolTemplateSchema } = await import('../dist/protocol-engine/index.js');
-    for (const safe of ['api_key', 'auth.token', 'x-api-key', 'key~v2']) {
+    for (const safe of ['api_key', 'auth.token', 'x-api-key', 'v*2']) {
       const result = ProtocolTemplateSchema.parse({
         name: 'test',
         version: 1,
@@ -985,5 +986,31 @@ describe('auth method schema validation', () => {
       });
       assert.equal(result.auth?.paramName, safe, `paramName "${safe}" must be accepted`);
     }
+  });
+
+  it('every regex-accepted char round-trips through URLSearchParams unchanged', async () => {
+    const { ProtocolTemplateSchema } = await import('../dist/protocol-engine/index.js');
+    // Exhaustive table: every printable ASCII char that the regex accepts
+    // must survive URLSearchParams serialization as a parameter name.
+    const allAllowed = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.*-';
+    for (const c of allAllowed) {
+      // Schema must accept it
+      const name = `k${c}`;
+      const result = ProtocolTemplateSchema.parse({
+        name: 'test',
+        version: 1,
+        mode: 'async',
+        auth: { method: 'query-param', paramName: name },
+        capabilities: {},
+      });
+      assert.equal(result.auth?.paramName, name);
+      // URLSearchParams must not encode it
+      const serialized = new URLSearchParams([[name, 'x']]).toString().split('=')[0];
+      assert.equal(serialized, name, `char "${c}" (0x${c.charCodeAt(0).toString(16)}) must round-trip`);
+    }
+    // Negative: known RFC 3986 unreserved char that URLSearchParams encodes
+    const tildeName = 'k~';
+    const tildeSer = new URLSearchParams([[tildeName, 'x']]).toString().split('=')[0];
+    assert.notEqual(tildeSer, tildeName, 'tilde must NOT round-trip (URLSearchParams encodes it)');
   });
 });
