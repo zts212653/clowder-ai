@@ -71,6 +71,10 @@ test('#1107: version fallback chain is complete', () => {
 
 test('#1107: build script bakes resolved version into staged desktop/package.json', () => {
   const buildScript = readFileSync(path.join(SCRIPTS_DIR, 'build-desktop.ps1'), 'utf8');
+  // Exact regex for the staged package.json write — pins UTF8Encoding($false)
+  // so that a $true mutation (which silently re-enables the BOM) is caught.
+  const stagedPackageWrite =
+    /\[System\.IO\.File\]::WriteAllText\(\(Join-Path\s+\$desktopDir\s+"package\.json"\),\s*\$json,\s*\(New-Object\s+System\.Text\.UTF8Encoding\s+\$false\)\)/;
 
   // Must read the source desktop/package.json
   assert.match(
@@ -91,15 +95,15 @@ test('#1107: build script bakes resolved version into staged desktop/package.jso
   // BOM-less UTF-8 (WriteAllText + UTF8Encoding($false)), not Out-File.
   assert.match(
     buildScript,
-    /WriteAllText.*package\.json/,
-    'build-desktop.ps1 must write modified package.json to staging via WriteAllText',
+    stagedPackageWrite,
+    'build-desktop.ps1 must write staged package.json via WriteAllText with UTF8Encoding($false)',
   );
 
   // Execution order: version assignment MUST precede serialization.
   // If WriteAllText runs before $pkgContent.version = $zipVersion, the
   // written JSON still carries the old version — a silent data bug.
   const assignIdx = buildScript.search(/\$pkgContent\.version\s*=\s*\$zipVersion/);
-  const writeIdx = buildScript.search(/WriteAllText.*package\.json/);
+  const writeIdx = buildScript.search(stagedPackageWrite);
   assert.ok(assignIdx >= 0 && writeIdx >= 0, 'Both version-bake and serialization lines must exist');
   assert.ok(
     assignIdx < writeIdx,
