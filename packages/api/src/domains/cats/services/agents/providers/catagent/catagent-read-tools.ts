@@ -537,6 +537,13 @@ async function executePatchFile(
       if (pathStat.isSymbolicLink()) {
         await rejectWithAudit(options, { tool: 'patch_file', path: relPath }, 'patch_file refuses to follow symlinks');
       }
+      if (!pathStat.isFile()) {
+        await rejectWithAudit(
+          options,
+          { tool: 'patch_file', path: relPath },
+          'patch_file refuses non-regular files (directory, FIFO, socket, or device)',
+        );
+      }
     } catch (err) {
       // ENOENT means the file doesn't exist; readFile below will throw a clear
       // error. Everything else (including rejectWithAudit's throw) must propagate.
