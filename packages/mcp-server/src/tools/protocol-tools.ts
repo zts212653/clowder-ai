@@ -13,11 +13,16 @@ export interface ProtocolToolConfig {
   credentials: Record<string, string>;
 }
 
+/** Extra context the MCP SDK passes to tool handlers (e.g. abort signal). */
+export interface ToolExtra {
+  signal?: AbortSignal;
+}
+
 type ToolDef = {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  handler: (args: never) => Promise<ToolResult>;
+  handler: (args: never, extra?: ToolExtra) => Promise<ToolResult>;
 };
 
 function buildParams(config: ProtocolToolConfig, capability: string, vars: Record<string, string>): ExecutionParams {
@@ -43,14 +48,14 @@ function createSubmitTool(config: ProtocolToolConfig, capabilities: string[]): T
       capability: z.enum(capabilities as [string, ...string[]]).describe('Capability to invoke'),
       vars: z.record(z.string()).describe('Template variables (prompt, imageUrl, etc.)'),
     },
-    handler: (async (input: { capability: string; vars: Record<string, string> }) => {
+    handler: (async (input: { capability: string; vars: Record<string, string> }, extra?: ToolExtra) => {
       try {
-        const result = await submit(config.template, buildParams(config, input.capability, input.vars));
+        const result = await submit(config.template, buildParams(config, input.capability, input.vars), extra?.signal);
         return successResult(JSON.stringify({ taskId: result.taskId, status: result.status }));
       } catch (err) {
         return errorResult(`Submit failed: ${err instanceof Error ? err.message : String(err)}`);
       }
-    }) as (args: never) => Promise<ToolResult>,
+    }) as (args: never, extra?: ToolExtra) => Promise<ToolResult>,
   };
 }
 
@@ -123,7 +128,20 @@ async function emitMediaRichBlock(url: string, prefix: string, taskId: string, c
   return !result.isError;
 }
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/** Signal-aware sleep: resolves after ms or when signal aborts (whichever first). */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+}
 
 /** Resolve poll config (interval/maxAttempts) for a capability. */
 function resolvePollConfig(config: ProtocolToolConfig, capability: string): { interval: number; maxAttempts: number } {
@@ -148,13 +166,15 @@ function createPollTool(config: ProtocolToolConfig, capabilities: string[]): Too
       capability: z.enum(capabilities as [string, ...string[]]).describe('Original capability used for submit'),
       task_id: z.string().min(1).describe('Task ID from submit'),
     },
-    handler: (async (input: { capability: string; task_id: string }) => {
+    handler: (async (input: { capability: string; task_id: string }, extra?: ToolExtra) => {
       try {
         const { interval, maxAttempts } = resolvePollConfig(config, input.capability);
         const params = buildParams(config, input.capability, {});
+        const signal = extra?.signal;
 
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-          const result = await poll(config.template, params, input.task_id);
+          signal?.throwIfAborted();
+          const result = await poll(config.template, params, input.task_id, signal);
 
           if (result.status === 'succeeded') {
             if (!result.resultUrl) {
@@ -190,8 +210,8 @@ function createPollTool(config: ProtocolToolConfig, capabilities: string[]): Too
             return successResult(JSON.stringify({ status: result.status, error: result.error, attempt }, null, 2));
           }
 
-          // Non-terminal: wait before next attempt (unless last attempt).
-          if (attempt < maxAttempts) await sleep(interval);
+          // Non-terminal: signal-aware wait before next attempt (unless last attempt).
+          if (attempt < maxAttempts) await sleep(interval, signal);
         }
 
         // Max attempts exhausted — return last known status from the final iteration.
@@ -202,7 +222,7 @@ function createPollTool(config: ProtocolToolConfig, capabilities: string[]): Too
       } catch (err) {
         return errorResult(`Poll failed: ${err instanceof Error ? err.message : String(err)}`);
       }
-    }) as (args: never) => Promise<ToolResult>,
+    }) as (args: never, extra?: ToolExtra) => Promise<ToolResult>,
   };
 }
 
@@ -217,14 +237,14 @@ function createExecuteTool(config: ProtocolToolConfig, capabilities: string[]): 
       capability: z.enum(capabilities as [string, ...string[]]).describe('Capability to invoke'),
       vars: z.record(z.string()).describe('Template variables (videoUrl, prompt, etc.)'),
     },
-    handler: (async (input: { capability: string; vars: Record<string, string> }) => {
+    handler: (async (input: { capability: string; vars: Record<string, string> }, extra?: ToolExtra) => {
       try {
-        const result = await execute(config.template, buildParams(config, input.capability, input.vars));
+        const result = await execute(config.template, buildParams(config, input.capability, input.vars), extra?.signal);
         return successResult(result.result);
       } catch (err) {
         return errorResult(`Execute failed: ${err instanceof Error ? err.message : String(err)}`);
       }
-    }) as (args: never) => Promise<ToolResult>,
+    }) as (args: never, extra?: ToolExtra) => Promise<ToolResult>,
   };
 }
 

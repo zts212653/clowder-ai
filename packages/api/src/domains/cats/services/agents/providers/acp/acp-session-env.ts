@@ -10,6 +10,8 @@ import type { AcpMcpServer, AcpMcpServerStdio } from './types.js';
 
 /** Prefix for Clowder AI MCP servers that need callback env injection. */
 const CAT_CAFE_SERVER_PREFIX = 'cat-cafe';
+/** Prefix for plugin-registered MCP servers (plugin:x:y → plugin__x__y). */
+const PLUGIN_SERVER_PREFIX = 'plugin__';
 
 /** Callback env keys injected per-invocation into cat-cafe MCP servers. */
 const CALLBACK_ENV_KEYS = [
@@ -27,7 +29,11 @@ const CALLBACK_ENV_KEYS = [
 function isCatCafeStdioServer(server: AcpMcpServer): server is AcpMcpServerStdio {
   return (
     'command' in server &&
-    (server.name === CAT_CAFE_SERVER_PREFIX || server.name.startsWith(`${CAT_CAFE_SERVER_PREFIX}-`))
+    (server.name === CAT_CAFE_SERVER_PREFIX ||
+      server.name.startsWith(`${CAT_CAFE_SERVER_PREFIX}-`) ||
+      // Plugin-registered MCPs (plugin:x:y → plugin__x__y) need callback env
+      // for features like rich block emission (F205 inline media delivery).
+      server.name.startsWith(PLUGIN_SERVER_PREFIX))
   );
 }
 

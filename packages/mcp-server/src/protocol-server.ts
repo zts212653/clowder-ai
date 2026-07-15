@@ -87,8 +87,8 @@ async function main(): Promise<void> {
 
   const server = new McpServer({ name: `protocol-${config.prefix}`, version: '0.1.0' });
   for (const tool of tools) {
-    server.tool(tool.name, tool.description, tool.inputSchema, async (args) => {
-      const result = await tool.handler(args as never);
+    server.tool(tool.name, tool.description, tool.inputSchema, async (args, extra) => {
+      const result = await tool.handler(args as never, extra);
       return result as { content: Array<{ type: 'text'; text: string }>; isError?: boolean };
     });
   }

@@ -1,5 +1,5 @@
 export { getAuthStrategy } from './auth/index.js';
-export { execute, poll, submit } from './engine.js';
+export { execute, poll, scrubCredentials, submit } from './engine.js';
 export { clearTemplateCache, loadProtocolsFromDir, loadProtocolTemplate } from './loader.js';
 export { extractJsonPath, extractString, renderBody, renderTemplate } from './template-utils.js';
 export type {

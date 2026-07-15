@@ -21,7 +21,7 @@ const CREDENTIAL_PLACEHOLDER = '***';
  * Replace all occurrences of known credential values in a string.
  * Prevents provider responses from echoing secrets back through errors/results.
  */
-function scrubCredentials(text: string, credentials: Record<string, string>): string {
+export function scrubCredentials(text: string, credentials: Record<string, string>): string {
   let result = text;
   for (const value of Object.values(credentials)) {
     if (value && value.length >= 4) {
@@ -116,11 +116,17 @@ async function executeRequest(
       signal?.throwIfAborted();
     }
 
+    // Compose caller cancellation with per-request timeout so that
+    // providing a signal does not silently drop the 30 s guard.
+    const requestSignal = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
+      : AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+
     const resp = await fetch(finalUrl, {
       method: endpoint.method,
       headers,
       body: endpoint.method !== 'GET' ? body : undefined,
-      signal: signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: requestSignal,
     });
 
     if (!resp.ok) {
@@ -192,7 +198,7 @@ export async function submit(
   const statusMap = cap.submit.response.statusMap ?? {};
   const status = rawStatus ? mapStatus(rawStatus, statusMap) : 'queued';
 
-  return { taskId, status };
+  return { taskId: scrubCredentials(taskId, params.credentials), status };
 }
 
 export async function poll(
@@ -238,7 +244,13 @@ export async function poll(
   const coverUrl = resp.coverUrl ? extractString(json, resp.coverUrl) : undefined;
   const error = resp.error ? extractString(json, resp.error) : undefined;
 
-  return { status, resultUrl, coverUrl, error };
+  const creds = params.credentials;
+  return {
+    status,
+    resultUrl: resultUrl ? scrubCredentials(resultUrl, creds) : undefined,
+    coverUrl: coverUrl ? scrubCredentials(coverUrl, creds) : undefined,
+    error: error ? scrubCredentials(error, creds) : undefined,
+  };
 }
 
 export async function execute(
@@ -268,7 +280,7 @@ export async function execute(
     throw new Error(`No result in response: ${scrubCredentials(JSON.stringify(json), params.credentials)}`);
   }
 
-  return { result };
+  return { result: scrubCredentials(result, params.credentials) };
 }
 
 function resolvePoll(template: ProtocolTemplate, cap: Capability, capName: string): PollEndpoint {

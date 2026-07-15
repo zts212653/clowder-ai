@@ -18,6 +18,7 @@ import {
   ProtocolTemplateSchema,
   renderBody,
   renderTemplate,
+  scrubCredentials,
 } from '../dist/protocol-engine/index.js';
 
 // ── Template rendering ──
@@ -333,6 +334,46 @@ describe('real protocol templates', () => {
       );
       assert.ok(t.baseUrl, `${name} should have a default baseUrl`);
     }
+  });
+});
+
+// ── Credential scrubbing ──
+
+describe('scrubCredentials', () => {
+  it('replaces credential value in text', () => {
+    const text = 'Error: invalid key sk-secret-abc-123 in request';
+    const creds = { apiKey: 'sk-secret-abc-123' };
+    assert.equal(scrubCredentials(text, creds), 'Error: invalid key *** in request');
+  });
+
+  it('replaces multiple credential values', () => {
+    const text = 'ak=myAccessKey, sk=mySecretKey';
+    const creds = { accessKey: 'myAccessKey', secretKey: 'mySecretKey' };
+    const result = scrubCredentials(text, creds);
+    assert.equal(result, 'ak=***, sk=***');
+  });
+
+  it('skips short credential values (< 4 chars)', () => {
+    const text = 'code=abc in response';
+    const creds = { apiKey: 'abc' };
+    assert.equal(scrubCredentials(text, creds), 'code=abc in response');
+  });
+
+  it('returns text unchanged when no credentials match', () => {
+    const text = 'normal error message';
+    const creds = { apiKey: 'sk-something-else' };
+    assert.equal(scrubCredentials(text, creds), 'normal error message');
+  });
+
+  it('handles empty credentials record', () => {
+    const text = 'some text';
+    assert.equal(scrubCredentials(text, {}), 'some text');
+  });
+
+  it('handles credential appearing multiple times', () => {
+    const text = 'sk-test echoed: sk-test';
+    const creds = { apiKey: 'sk-test' };
+    assert.equal(scrubCredentials(text, creds), '*** echoed: ***');
   });
 });
 
