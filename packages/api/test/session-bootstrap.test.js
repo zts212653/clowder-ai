@@ -7,6 +7,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { buildSessionBootstrap } from '../dist/domains/cats/services/session/SessionBootstrap.js';
 
@@ -62,7 +63,14 @@ describe('SessionBootstrap', () => {
     it('returns bootstrap when no active session but sealed sessions exist (post-seal gap)', async () => {
       // P1-2 fix: after seal, active pointer is cleared but bootstrap should still work
       const store = createMockSessionChainStore([
-        { id: 'sess-0', catId: 'opus', threadId: 'thread-1', status: 'sealed', seq: 0 },
+        {
+          id: 'sess-0',
+          catId: 'opus',
+          threadId: 'thread-1',
+          status: 'sealed',
+          seq: 0,
+          sealReason: 'threshold',
+        },
       ]);
       const reader = createMockTranscriptReader();
 
@@ -74,6 +82,18 @@ describe('SessionBootstrap', () => {
       assert.ok(result);
       assert.ok(result.text.includes('Session #2')); // next session after 1 sealed
       assert.ok(result.text.includes('1 previous session(s) are sealed'));
+      assert.deepEqual(result.recovery?.origin, {
+        sourceSessionId: 'sess-0',
+        sourceSeq: 0,
+        kind: 'threshold',
+        sealReason: 'threshold',
+      });
+      assert.equal(result.recovery?.bootstrapText, result.text);
+      assert.equal(
+        result.recovery?.bootstrapContentHash,
+        `sha256:${createHash('sha256').update(result.text).digest('hex')}`,
+      );
+      assert.equal(result.recovery?.handoffNoteIncluded, false);
     });
 
     it('returns bootstrap with identity for second session (seq=1 → display #2)', async () => {
@@ -93,6 +113,7 @@ describe('SessionBootstrap', () => {
       assert.equal(result.sessionSeq, 1); // raw 0-based seq
       assert.ok(result.text.includes('Session #2')); // display is 1-based
       assert.ok(result.text.includes('1 previous session(s) are sealed'));
+      assert.equal(result.recovery, undefined, 'an already-active target is not a fresh recovery transition');
     });
 
     it('includes previous session digest when available', async () => {

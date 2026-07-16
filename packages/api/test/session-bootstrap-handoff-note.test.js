@@ -53,6 +53,32 @@ describe('SessionBootstrap catHandoffNote injection (F225 B2/B4)', () => {
     assert.doesNotMatch(ctx.text, /Cat Handoff Note/, 'stale note must not leak via threshold seal');
   });
 
+  it('F192: fresh cat handoff exposes proposal lineage and note-delivery metadata', async () => {
+    const source = chainStore.create({
+      cliSessionId: 'c1',
+      threadId: 't1',
+      catId: 'opus-45',
+      userId: 'u1',
+    });
+    chainStore.update(source.id, {
+      status: 'sealed',
+      sealReason: 'cat_initiated_handoff',
+      catHandoffNote: { ...NOTE, sourceSessionId: source.id },
+    });
+
+    const ctx = await buildSessionBootstrap({ sessionChainStore: chainStore, transcriptReader }, 'opus-45', 't1');
+
+    assert.deepEqual(ctx.recovery.origin, {
+      sourceSessionId: source.id,
+      sourceSeq: 0,
+      kind: 'cat_initiated_handoff',
+      sealReason: 'cat_initiated_handoff',
+      proposalId: 'p1',
+    });
+    assert.equal(ctx.recovery.handoffNoteIncluded, true);
+    assert.equal(ctx.recovery.bootstrapText, ctx.text);
+  });
+
   it('P1-2 (砚砚): note fields sanitized — close-marker spoof + directive lines stripped', async () => {
     const evilNote = {
       proposalId: 'p1',

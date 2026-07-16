@@ -20,6 +20,7 @@ import {
   type MessageContent,
   type SealReason,
   type SessionRecord,
+  type SessionRecoveryDeliveryReceipt,
 } from '@cat-cafe/shared';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import {
@@ -78,6 +79,10 @@ import { tcpProbe } from '../../../../../utils/tcp-probe.js';
 import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry.js';
 import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
 import { resolveBootcampWorkspaceRoot } from '../../bootcamp/workspace-root.js';
+import {
+  type BootstrapRecoveryMetadata,
+  hashSessionBootstrap,
+} from '../../session/SessionBootstrap.js';
 import { createPromptDigest } from '../../context/prompt-digest.js';
 // L0-budget-defense PR-B-impl (ADR-038): staging layer prepend, wired here
 // (next to F225 contextHintPrefix) so it lands every turn including resumes.
@@ -674,6 +679,8 @@ export interface InvocationParams {
   readonly invocationSpanRef?: { current?: import('@opentelemetry/api').Span };
   /** #502 PR2: structured route control state to persist on threshold seal. */
   readonly continuityCapsule?: RouteStateContinuityCapsule;
+  /** F192 Phase I: fresh-continuation metadata carried with the route prompt. */
+  readonly recoveryBootstrap?: BootstrapRecoveryMetadata;
 }
 
 /**
@@ -2040,6 +2047,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     let lastErrorMessage: string | undefined;
     const userVisibleOutputSessionIds = new Set<string>();
     const userVisibleOutputCountedSessionIds = new Set<string>();
+    let currentRecoveryDelivery: SessionRecoveryDeliveryReceipt | undefined;
+
+    const recoveryCreateFields = () =>
+      currentRecoveryDelivery && params.recoveryBootstrap
+        ? {
+            openedByInvocationId: invocationId,
+            continuationOrigin: params.recoveryBootstrap.origin,
+            recoveryDelivery: currentRecoveryDelivery,
+          }
+        : {};
 
     // clowder#915 R4 cloud P1 #3 (defer seal): when a mid-stream agent_loop
     // crosses the seal threshold (opencode step_finish ≥ 0.85 fillRatio),
@@ -2482,6 +2499,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                 catId,
                 userId,
                 chainKey: bgChainKey,
+                ...recoveryCreateFields(),
               });
               if (params.continuityCapsule) {
                 await deps.sessionChainStore.update(newRec.id, {
@@ -2581,6 +2599,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                       threadId,
                       catId,
                       userId,
+                      ...recoveryCreateFields(),
                     });
                     if (inheritedFailures > 0) {
                       await deps.sessionChainStore.update(newRec.id, {
@@ -2610,6 +2629,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                 threadId,
                 catId,
                 userId,
+                ...recoveryCreateFields(),
               });
               if (params.continuityCapsule) {
                 await deps.sessionChainStore.update(newRec.id, {
@@ -3103,6 +3123,27 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
       // F089: Use abortableNext instead of `for await` so the invocation timeout
       // can break out even when the service generator is stuck on an unresolvable await.
+      currentRecoveryDelivery = undefined;
+      if (params.recoveryBootstrap && !isResume) {
+        const hashMatches =
+          hashSessionBootstrap(params.recoveryBootstrap.bootstrapText) ===
+          params.recoveryBootstrap.bootstrapContentHash;
+        const promptContainsBootstrap = effectivePrompt.includes(params.recoveryBootstrap.bootstrapText);
+        if (hashMatches && promptContainsBootstrap) {
+          currentRecoveryDelivery = {
+            sourceSessionId: params.recoveryBootstrap.origin.sourceSessionId,
+            providerDispatchAt: Date.now(),
+            bootstrapContentHash: params.recoveryBootstrap.bootstrapContentHash,
+            bootstrapIncludedInPrompt: true,
+            handoffNoteIncluded: params.recoveryBootstrap.handoffNoteIncluded,
+          };
+        } else {
+          log.warn(
+            { catId, threadId, invocationId, hashMatches, promptContainsBootstrap },
+            'F192 recovery metadata did not match provider-bound prompt; receipt suppressed',
+          );
+        }
+      }
       const serviceIter = service.invoke(effectivePrompt, options)[Symbol.asyncIterator]();
       for (;;) {
         const iterResult = await abortableNext(serviceIter, signal);

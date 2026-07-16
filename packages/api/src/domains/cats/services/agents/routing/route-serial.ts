@@ -88,7 +88,10 @@ import {
 } from '../../context/SystemPromptBuilder.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
-import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
+import {
+  type BootstrapRecoveryMetadata,
+  buildSessionBootstrap,
+} from '../../session/SessionBootstrap.js';
 import {
   hydrateCrossThreadReplyHint,
   hydrateReplyPreview,
@@ -825,6 +828,7 @@ export async function* routeSerial(
       // #836: Reborn cats skip bootstrap — every invocation starts with zero prior context.
       // Uses store lookup (not thread field) — Redis memberSS:* fields aren't hydrated by get().
       let bootstrapContext = '';
+      let recoveryBootstrap: BootstrapRecoveryMetadata | undefined;
       // #836: Reborn check is best-effort — transient Redis failure must not
       // abort the invocation before bootstrap/routing. Default to non-reborn.
       let isSerialReborn = false;
@@ -859,6 +863,7 @@ export async function* routeSerial(
           );
           if (bootstrap) {
             bootstrapContext = bootstrap.text;
+            recoveryBootstrap = bootstrap.recovery;
           }
         } catch {
           // Best-effort: bootstrap failure doesn't block invocation
@@ -1266,6 +1271,7 @@ export async function* routeSerial(
         ...(staticIdentity ? { systemPrompt: staticIdentity } : {}),
         ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
         continuityCapsule,
+        ...(recoveryBootstrap ? { recoveryBootstrap } : {}),
         // F247 AC-B1c-3 PR-C: Plumb raw mention text + mentioning cat for cloud bridge dispatch.
         // - mentionContent: the raw user/cat message (NOT the orchestrated prompt with system context)
         // - mentioningCatId: A2A → the cat that @ mentioned; user-initiated → userId as fallback

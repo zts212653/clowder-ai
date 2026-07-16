@@ -135,4 +135,39 @@ describe('#573: route-serial parentInvocationId vs ownInvocationId', () => {
     // Registry mock creates ids like `inv-N` — verify shape (not specific value).
     assert.match(persistedInv, /^inv-\d+$/, 'fallback id matches registry-created shape');
   });
+
+  it('F192: carries fresh recovery metadata through serial routing to target creation', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    const source = sessionChainStore.create({
+      cliSessionId: 'serial-source-cli',
+      threadId: 'serial-recovery-thread',
+      catId: 'opus',
+      userId: 'user1',
+    });
+    sessionChainStore.update(source.id, { status: 'sealed', sealReason: 'threshold' });
+    const appendCalls = [];
+    const receivedPrompts = [];
+    const service = {
+      async *invoke(prompt) {
+        receivedPrompts.push(prompt);
+        yield { type: 'session_init', catId: 'opus', sessionId: 'serial-target-cli', timestamp: Date.now() };
+        yield { type: 'text', catId: 'opus', content: 'continued', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const deps = createMockDeps({ opus: service }, appendCalls);
+    deps.invocationDeps.sessionChainStore = sessionChainStore;
+    deps.invocationDeps.transcriptReader = { readDigest: async () => null };
+
+    for await (const _msg of routeSerial(deps, ['opus'], 'continue', 'user1', 'serial-recovery-thread')) {
+      // drain
+    }
+
+    const target = sessionChainStore.getActive('opus', 'serial-recovery-thread');
+    assert.ok(receivedPrompts[0].includes('[Session Continuity — Session #2]'));
+    assert.equal(target.continuationOrigin.sourceSessionId, source.id);
+    assert.equal(target.recoveryDelivery.bootstrapIncludedInPrompt, true);
+  });
 });

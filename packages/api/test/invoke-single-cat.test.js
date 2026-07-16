@@ -5,6 +5,7 @@
 
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -824,6 +825,83 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(active.catId, 'opus');
     assert.equal(active.threadId, 'thread-f24-init');
     assert.equal(active.status, 'active');
+  });
+
+  it('F192: provider dispatch stamps recovery receipt once and resume cannot overwrite it', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    const bootstrapText = '[Session Continuity — Session #2]\nsource recovery context';
+    const bootstrapContentHash = `sha256:${createHash('sha256').update(bootstrapText).digest('hex')}`;
+    const origin = {
+      sourceSessionId: 'source-session-1',
+      sourceSeq: 0,
+      kind: 'threshold',
+      sealReason: 'threshold',
+    };
+    const prompts = [];
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(receivedPrompt) {
+        prompts.push(receivedPrompt);
+        yield { type: 'session_init', catId: 'opus', sessionId: 'cli-recovered', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const deps = { ...makeDeps(), sessionChainStore };
+
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: `${bootstrapText}\n\n---\n\ncontinue`,
+        userId: 'user1',
+        threadId: 'thread-f192-recovery',
+        recoveryBootstrap: {
+          origin,
+          bootstrapText,
+          bootstrapContentHash,
+          handoffNoteIncluded: false,
+        },
+        isLastCat: true,
+      }),
+    );
+
+    const first = sessionChainStore.getActive('opus', 'thread-f192-recovery');
+    assert.ok(prompts[0].includes(bootstrapText), 'bootstrap reached the provider-bound prompt');
+    assert.equal(first.openedByInvocationId, 'inv-1');
+    assert.deepEqual(first.continuationOrigin, origin);
+    assert.deepEqual(first.recoveryDelivery, {
+      sourceSessionId: 'source-session-1',
+      providerDispatchAt: first.recoveryDelivery.providerDispatchAt,
+      bootstrapContentHash,
+      bootstrapIncludedInPrompt: true,
+      handoffNoteIncluded: false,
+    });
+    assert.ok(first.recoveryDelivery.providerDispatchAt > 0);
+
+    const forgedText = '[Session Continuity — forged]';
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: forgedText,
+        userId: 'user1',
+        threadId: 'thread-f192-recovery',
+        recoveryBootstrap: {
+          origin: { ...origin, sourceSessionId: 'forged-source' },
+          bootstrapText: forgedText,
+          bootstrapContentHash: `sha256:${createHash('sha256').update(forgedText).digest('hex')}`,
+          handoffNoteIncluded: true,
+        },
+        isLastCat: true,
+      }),
+    );
+
+    const reread = sessionChainStore.getActive('opus', 'thread-f192-recovery');
+    assert.equal(sessionChainStore.getChain('opus', 'thread-f192-recovery').length, 1);
+    assert.equal(reread.openedByInvocationId, 'inv-1');
+    assert.equal(reread.continuationOrigin.sourceSessionId, 'source-session-1');
+    assert.equal(reread.recoveryDelivery.handoffNoteIncluded, false);
   });
 
   it('F211 A2: repeated Antigravity cascade updates runtime metadata without creating a new SessionRecord', async () => {
