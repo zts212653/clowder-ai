@@ -1,0 +1,11 @@
+{
+  "verdictId": "2026-07-16-eval-friction-c2-empty-window-after-quota-singleton",
+  "featureId": "F245",
+  "evalSnapshotId": "eval-F245-2026-07-16",
+  "generatedAt": "2026-07-16T03:29:03.984Z",
+  "findings": [],
+  "noFindingRecord": {
+    "reason": "no friction cluster surfaced in the selected window",
+    "evidence": "friction-rollup/cluster_count"
+  }
+}

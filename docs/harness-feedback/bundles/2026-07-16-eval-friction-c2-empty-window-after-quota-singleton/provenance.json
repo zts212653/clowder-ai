@@ -1,0 +1,15 @@
+{
+  "verdictId": "2026-07-16-eval-friction-c2-empty-window-after-quota-singleton",
+  "rawInputs": [
+    {
+      "path": "docs/harness-feedback/bundles/2026-07-16-eval-friction-c2-empty-window-after-quota-singleton/raw/rollup-report.json",
+      "sha256": "e7e7a6eb3b3b8ca0cfb848f403cf081c5a502074b8b1a81e30bf21124c016e70"
+    }
+  ],
+  "generatedAt": "2026-07-16T03:29:03.984Z",
+  "generator": {
+    "name": "eval-friction-live-verdict",
+    "version": "1"
+  },
+  "sanitizeRulesVersion": "f245-friction-rollup-v1"
+}
