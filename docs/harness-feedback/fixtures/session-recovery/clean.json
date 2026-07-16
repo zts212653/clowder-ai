@@ -1,0 +1,119 @@
+{
+  "id": "clean",
+  "ownerUserId": "fixture-owner",
+  "selector": {
+    "kind": "session-recovery-window",
+    "windowStartMs": 1784131200000,
+    "windowEndMs": 1784217600000,
+    "limit": 10
+  },
+  "sessions": [
+    {
+      "id": "fixture-clean-source",
+      "cliSessionId": "fixture-clean-source-cli",
+      "threadId": "fixture-thread-clean",
+      "catId": "cat-vjdun65e",
+      "userId": "fixture-owner",
+      "seq": 0,
+      "status": "sealed",
+      "messageCount": 3,
+      "createdAt": 1784131201000,
+      "updatedAt": 1784134800000,
+      "sealedAt": 1784134800000,
+      "sealReason": "threshold"
+    },
+    {
+      "id": "fixture-clean-target",
+      "cliSessionId": "fixture-clean-target-cli",
+      "threadId": "fixture-thread-clean",
+      "catId": "cat-vjdun65e",
+      "userId": "fixture-owner",
+      "seq": 1,
+      "status": "sealed",
+      "messageCount": 2,
+      "createdAt": 1784134800200,
+      "updatedAt": 1784138400000,
+      "sealedAt": 1784138400000,
+      "sealReason": "completed",
+      "openedByInvocationId": "fixture-clean-invocation",
+      "continuationOrigin": {
+        "sourceSessionId": "fixture-clean-source",
+        "sourceSeq": 0,
+        "kind": "threshold",
+        "sealReason": "threshold"
+      },
+      "recoveryDelivery": {
+        "sourceSessionId": "fixture-clean-source",
+        "providerDispatchAt": 1784134800100,
+        "bootstrapContentHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bootstrapIncludedInPrompt": true,
+        "handoffNoteIncluded": false
+      }
+    }
+  ],
+  "transcripts": {
+    "fixture-clean-target": [
+      {
+        "v": 1,
+        "t": 1784134800300,
+        "threadId": "fixture-thread-clean",
+        "catId": "cat-vjdun65e",
+        "sessionId": "fixture-clean-target",
+        "cliSessionId": "fixture-clean-target-cli",
+        "invocationId": "fixture-clean-invocation",
+        "eventNo": 0,
+        "event": { "type": "system_info" }
+      },
+      {
+        "v": 1,
+        "t": 1784134800400,
+        "threadId": "fixture-thread-clean",
+        "catId": "cat-vjdun65e",
+        "sessionId": "fixture-clean-target",
+        "cliSessionId": "fixture-clean-target-cli",
+        "invocationId": "fixture-clean-invocation",
+        "eventNo": 1,
+        "event": {
+          "type": "text",
+          "content": "SYNTHETIC_CLEAN_TRANSCRIPT_BODY_MUST_NOT_ENTER_BUNDLE"
+        }
+      },
+      {
+        "v": 1,
+        "t": 1784134800500,
+        "threadId": "fixture-thread-clean",
+        "catId": "cat-vjdun65e",
+        "sessionId": "fixture-clean-target",
+        "cliSessionId": "fixture-clean-target-cli",
+        "invocationId": "fixture-clean-invocation",
+        "eventNo": 2,
+        "event": { "type": "done" }
+      }
+    ]
+  },
+  "assessment": {
+    "trialId": "session-recovery:fixture-clean-source",
+    "stateReconstruction": "recovered",
+    "firstMeaningfulAction": "aligned",
+    "outcome": "continued",
+    "evidenceRefs": [
+      "session:fixture-clean-source",
+      "invocation:fixture-clean-invocation",
+      "transcript:fixture-clean-target:event:1"
+    ],
+    "rationale": "SYNTHETIC_CLEAN_RATIONALE_MUST_BE_HASHED"
+  },
+  "expected": {
+    "lineage": "explicit",
+    "transitionIntegrity": "pass",
+    "delivery": "provider_dispatched",
+    "structural": "pass",
+    "semantic": "pass",
+    "stateReconstruction": "recovered",
+    "firstMeaningfulAction": "aligned",
+    "outcome": "continued",
+    "structuralFailCount": 0,
+    "semanticFailCount": 0,
+    "missingTargetCount": 0
+  }
+}
