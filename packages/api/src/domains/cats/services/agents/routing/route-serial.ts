@@ -88,10 +88,7 @@ import {
 } from '../../context/SystemPromptBuilder.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
-import {
-  type BootstrapRecoveryMetadata,
-  buildSessionBootstrap,
-} from '../../session/SessionBootstrap.js';
+import { type BootstrapRecoveryMetadata, buildSessionBootstrap } from '../../session/SessionBootstrap.js';
 import {
   hydrateCrossThreadReplyHint,
   hydrateReplyPreview,

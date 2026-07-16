@@ -41,10 +41,7 @@ import {
   type InvocationContext,
 } from '../../context/SystemPromptBuilder.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
-import {
-  type BootstrapRecoveryMetadata,
-  buildSessionBootstrap,
-} from '../../session/SessionBootstrap.js';
+import { type BootstrapRecoveryMetadata, buildSessionBootstrap } from '../../session/SessionBootstrap.js';
 import type { StoredToolEvent } from '../../stores/ports/MessageStore.js';
 import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
 import { classifyTool } from '../../tool-usage/classify.js';
