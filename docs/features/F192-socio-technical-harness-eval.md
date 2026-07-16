@@ -10,7 +10,7 @@ user_journey_exempt: "Internal harness eval infrastructure — all surfaces are 
 
 # F192: Socio-Technical Harness Eval — harness 共创评估体系
 
-> **Status**: in-progress (Phase F re-eval closure + Phase G `eval:task-outcome` closure) | **Owner**: Ragdoll | **Truth sync**: 2026-06-10
+> **Status**: in-progress (Phase F/G closure + Phase I `eval:session-recovery`) | **Owner**: Ragdoll | **Truth sync**: 2026-07-16
 
 ## Architecture Ownership
 
@@ -432,6 +432,50 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 - task-outcome publish path 已在 PR #2162 (2026-06-09, squash `c9aa0e16d`) 接通；PR-D 补 episode verdict writeback（packet verdict 仍是 4-class，per-episode verdict 通过显式 7-class `episodeVerdicts` 写回）；独立 backlog 剩 **rollup mechanism**
 - AC-H6 real e2e (real git+gh round-trip)：当前 alpha 验已覆盖 happy path 表征，deferred 留待真正端到端测试需求出现时再补
 - **rollup mechanism**（PR-3 占位 futureMode `rollup_deferred`）：daily/weekly batch PR 聚合 N 个 no-action verdict，或 runtime evidence store + 周期 flush archive PR — 等 PR-3 体感数据后再 design
+
+### Phase I（`eval:session-recovery` — session 迁移恢复正确性）
+
+**Why**：`eval:capability-wakeup` 只能回答“猫是否在合适时机想起 handoff”，不能回答“fresh Session 是否真的接住了旧 Session”。2026-07-16 clean/stale 两个隔离 continuation case 已证明 runtime 能交付 bootstrap，也暴露出正式评测缺口：SessionChain 有 source 边界，却没有审计级 source→target lineage、provider-dispatch receipt，以及对 state reconstruction / first meaningful action 的独立 trial contract。
+
+**边界决议**：
+
+- `eval:capability-wakeup` 继续评 activation / trigger reflex；`eval:session-recovery` 只评迁移之后的 correctness。
+- Live eval **只读**现有 SessionChain、Proposal、Transcript / Invocation truth；不复制 Redis、SQLite、HOME、日志或 transcript，不新增平行 lifecycle store。
+- 合成 regression 只使用进程内 fixture / test doubles，不向真实用户 thread 写测试数据。
+- `identity-session` owns typed transition lineage；`harness-eval` consumes it and builds a pure read projection。F192 不反向拥有 Session 状态机。
+
+**终态主链**：
+
+`sealed source Session → buildSessionBootstrap recovery metadata → provider-dispatch receipt → target SessionRecord typed lineage → replayable transition projection → eval-cat semantic assessment → VerdictHandoffPacket → publish-verdict bundle`
+
+**Trial 五维**：
+
+1. `transitionIntegrity`：source 是否正确 seal、target 是否唯一且显式指回 source。
+2. `delivery`：bootstrap 是否在真实 provider dispatch 边界进入 prompt；F225 五件套是否位于 always-keep 区。
+3. `stateReconstruction`：fresh Session 对 worktree/branch/task/已完成事项的理解是否与 live truth 一致。
+4. `firstMeaningfulAction`：第一项有副作用或结论性的动作是否符合 live truth，是否重做/重问/沿 stale state 行动。
+5. `outcome`：续接 invocation 是否成功继续、明确完成/交接，或失败/重复/跑偏。
+
+**AC-I**：
+
+- [ ] AC-I1: target `SessionRecord` 在首次 `session_init` 创建时原子持久化不可变 `continuationOrigin`、`openedByInvocationId` 与无正文 `recoveryDelivery` receipt；重复 `session_init` / provider retry 不得覆盖 lineage。
+- [ ] AC-I2: `buildSessionBootstrap` 返回 source session / seal reason / proposalId / bootstrap hash 等 typed metadata；serial 与 parallel route 都只在“无 active target”的 fresh continuation 上向 invocation 传递该 metadata。
+- [ ] AC-I3: SessionChain store 提供 bounded read-side window enumeration；实现不新增第二份 transition store，legacy 未带 lineage 的 record 明确标 `legacy_unlinked`，不得伪装成 pass。
+- [ ] AC-I4: `SessionRecoveryTrialProvider` 构建 replayable `session-recovery-window` projection，覆盖 explicit target / missing target / duplicate target / legacy inferred candidate，并输出 source/target/invocation/transcript evidence refs。
+- [ ] AC-I5: deterministic grader 负责 transition + delivery；eval cat 通过受校验的 per-trial assessment 负责 state reconstruction + first meaningful action + outcome。proxy signal 不得替代语义 verdict。
+- [ ] AC-I6: clean fixture 判定 recovered/aligned，stale fixture 判定 stale/misaligned；两者均使用进程内 fixture，不连接 6399 或写真实 thread。
+- [ ] AC-I7: registry、domain instruction、`sourceRefs` selector、preview/read path、generator adapter、live-verdict writer、publish route 与 MCP schema 全部接线；任一缺失时保持 honest unwired，不发 scheduled publish 指令。
+- [ ] AC-I8: bundle 能被 Eval Hub round-trip 读取，provenance 记录 window、source/target Session IDs、invocation/event refs、generator version 与 sanitize 规则；不提交自由文本 transcript，只提交 bounded metadata/hash/ref。
+- [ ] AC-I9: handler kind mismatch / invalid window / owner scope / unknown trial / forged evidence ref / duplicate assessment 全部 fail closed；scheduled/manual invocation 可先 preview trials 再形成 verdict。
+- [ ] AC-I10: isolated acceptance 运行 clean/stale 与 missing-target 三类 case，证明无独立 runtime data store、无生产写入，并回写本节 wire status / evidence。
+
+**Eval Contract**：
+
+- Primary users: session/runtime owner、F225 owner、长任务猫与 operator。
+- Activation: bounded window 内 sealed source Session 数、显式 linked target 数、可评 trial 数。
+- Friction: missing/duplicate target、delivery receipt 缺失、state stale、first action 重做/误操作、continuation invocation failed。
+- Regression: clean recovered、stale state corrected before action、missing target、duplicate target、F225 always-keep note、provider retry 不覆盖 lineage。
+- Sunset: 连续 8 周零 session transition 且 session-chain 能力本身 sunset；低触发率单独不能 sunset。若所有五维都被更通用 task-outcome eval 完整覆盖，可发起合并/sunset trial，不能直接删 domain。
 
 ## How To Add A New Eval Domain
 
