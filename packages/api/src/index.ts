@@ -248,6 +248,7 @@ import {
   sessionChainRoutes,
   sessionHandoffApproveRoutes,
   sessionHooksRoutes,
+  sessionRecoveryEvalRoutes,
   sessionStrategyConfigRoutes,
   sessionTranscriptRoutes,
   signalCollectionRoutes,
@@ -706,6 +707,13 @@ async function main(): Promise<void> {
   const transcriptDataDir = process.env.TRANSCRIPT_DATA_DIR ?? `${findMonorepoRoot(process.cwd())}/data/transcripts`;
   const transcriptWriter = new TranscriptWriter({ dataDir: transcriptDataDir });
   const transcriptReader = new TranscriptReader({ dataDir: transcriptDataDir });
+  const { SessionRecoveryTrialProvider } = await import(
+    './infrastructure/harness-eval/session-recovery/session-recovery-trial-provider.js'
+  );
+  const sessionRecoveryTrialProvider = new SessionRecoveryTrialProvider({
+    sessionStore: sessionChainStore,
+    transcriptReader,
+  });
   // F065 Phase C: HandoffConfig for LLM-generated digest on seal
   const handoffConfig: HandoffConfig = {
     getBootstrapDepth: (catId: string) => getConfigSessionStrategy(catId)?.handoff?.bootstrapDepth ?? 'extractive',
@@ -3280,6 +3288,11 @@ async function main(): Promise<void> {
     runtimeSessionStore,
   });
   await app.register(sessionTranscriptRoutes, { sessionChainStore, threadStore, transcriptReader });
+  await app.register(sessionRecoveryEvalRoutes, {
+    trialProvider: sessionRecoveryTrialProvider,
+    callbackRegistry: registry,
+    agentKeyRegistry,
+  });
   await app.register(externalRuntimeSessionsRoutes, { sessionChainStore, runtimeSessionStore, threadStore });
   const hookToken = process.env.CAT_CAFE_HOOK_TOKEN || '';
   await app.register(sessionHooksRoutes, {

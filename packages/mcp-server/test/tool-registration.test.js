@@ -143,6 +143,8 @@ const EXPECTED_TOOLS = [
   'cat_cafe_finance_query',
   // F192 Phase H AC-H4: verdict publishing pipeline (eval cat → MCP → handler)
   'cat_cafe_publish_verdict',
+  // F192 Phase I: bounded owner-scoped session recovery trial preview
+  'cat_cafe_preview_session_recovery_trials',
   // F168 Phase B Task 6: declare awaiting_external state for a community case
   'cat_cafe_community_await_external',
 ];
@@ -180,6 +182,8 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_register_external_runtime_session',
   // F192 Phase H AC-H4: cat_cafe_publish_verdict registered in collab toolset
   'cat_cafe_publish_verdict',
+  // F192 Phase I: callback-authenticated read-only eval preview
+  'cat_cafe_preview_session_recovery_trials',
   // cat_cafe_guide_resolve legacy alias removed in F193 Phase D AC-D2
   'cat_cafe_update_guide_state',
   'cat_cafe_get_available_guides',

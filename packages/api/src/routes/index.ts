@@ -79,6 +79,7 @@ export { servicesRoutes } from './services.js';
 export { sessionChainRoutes } from './session-chain.js';
 export { sessionHandoffApproveRoutes } from './session-handoff-approve-routes.js';
 export { sessionHooksRoutes } from './session-hooks.js';
+export { sessionRecoveryEvalRoutes } from './session-recovery-eval.js';
 export { sessionStrategyConfigRoutes } from './session-strategy-config.js';
 export { sessionTranscriptRoutes } from './session-transcript.js';
 export { signalCollectionRoutes } from './signal-collection-routes.js';

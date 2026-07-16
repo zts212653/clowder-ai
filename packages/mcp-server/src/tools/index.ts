@@ -184,6 +184,12 @@ export {
   sessionSearchInputSchema,
 } from './session-chain-tools.js';
 export {
+  handlePreviewSessionRecoveryTrials,
+  type PreviewSessionRecoveryTrialsInput,
+  previewSessionRecoveryTrialsInputSchema,
+  sessionRecoveryEvalTools,
+} from './session-recovery-eval-tools.js';
+export {
   getShellExecRefusalReason,
   handleShellExec,
   isReadOnlyShellCommand,

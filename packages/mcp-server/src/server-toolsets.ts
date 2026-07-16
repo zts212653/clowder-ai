@@ -24,6 +24,7 @@ import {
   richBlockRulesTools,
   scheduleTools,
   sessionChainTools,
+  sessionRecoveryEvalTools,
   shellTools,
   signalStudyTools,
   signalsTools,
@@ -99,6 +100,8 @@ export const AGENT_KEY_TOOLS = new Set([
   'cat_cafe_get_message',
   // F192 Phase H AC-H4 (砚砚 R9 P1): shared-MCP cats can publish verdicts.
   'cat_cafe_publish_verdict',
+  // F192 Phase I: owner-scoped preview is read-only but callback-authenticated.
+  'cat_cafe_preview_session_recovery_trials',
 ]);
 
 /**
@@ -196,6 +199,7 @@ const COLLAB_TOOL_SOURCES: readonly ToolDef[] = [
   ...hubActionTools,
   ...eventMemoryTools, // F227: cat_cafe_teleport
   ...publishVerdictTools, // F192 Phase H AC-H4
+  ...sessionRecoveryEvalTools, // F192 Phase I: bounded recovery trial preview
   ...richBlockRulesTools,
   ...gameActionTools,
   ...scheduleTools,
@@ -346,6 +350,7 @@ export const EXPLICIT_TOOL_ANNOTATIONS: Record<string, Annotation> = {
   cat_cafe_list_labels: A_READ_LOCAL,
   cat_cafe_list_tasks: A_READ_LOCAL,
   cat_cafe_list_events: A_READ_LOCAL,
+  cat_cafe_preview_session_recovery_trials: A_READ_LOCAL,
   cat_cafe_list_schedule_templates: A_READ_LOCAL,
   cat_cafe_check_permission_status: A_READ_LOCAL,
   cat_cafe_feat_index: A_READ_LOCAL,
