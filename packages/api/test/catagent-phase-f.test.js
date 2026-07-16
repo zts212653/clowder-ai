@@ -850,7 +850,23 @@ describe('audit-after-mutation honesty (commitThenAudit)', () => {
 
 // ── Non-regular file rejection (FIFO/device safety) ──
 // POSIX-only: mkfifo is not available on Windows.
+// Bounded-failure: each tool call races against a short deadline so that
+// a guard regression (readFile blocking on FIFO) produces a deterministic
+// test failure rather than hanging CI until the job timeout.
 const IS_POSIX = process.platform !== 'win32';
+const FIFO_DEADLINE_MS = 5_000;
+
+/** Race a promise against a deadline — rejects with a clear message on timeout. */
+function withFifoDeadline(promise, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label}: blocked >${FIFO_DEADLINE_MS}ms — !isFile() guard likely regressed`)),
+      FIFO_DEADLINE_MS,
+    );
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 describe('F1: non-regular file rejection', { skip: !IS_POSIX && 'POSIX-only (mkfifo)' }, () => {
   let fifoPath;
@@ -878,7 +894,11 @@ describe('F1: non-regular file rejection', { skip: !IS_POSIX && 'POSIX-only (mkf
     const write = findTool(tools, 'write_file');
     assert.ok(write);
     await assert.rejects(
-      () => write.execute({ path: 'test-fifo', content: 'should not write' }),
+      () =>
+        withFifoDeadline(
+          write.execute({ path: 'test-fifo', content: 'should not write' }),
+          'write_file FIFO rejection',
+        ),
       (err) => err.message.includes('non-regular file'),
     );
   });
@@ -888,7 +908,11 @@ describe('F1: non-regular file rejection', { skip: !IS_POSIX && 'POSIX-only (mkf
     const patch = findTool(tools, 'patch_file');
     assert.ok(patch);
     await assert.rejects(
-      () => patch.execute({ path: 'test-fifo', old_text: 'x', new_text: 'y', expected_hash: 'abcdef01' }),
+      () =>
+        withFifoDeadline(
+          patch.execute({ path: 'test-fifo', old_text: 'x', new_text: 'y', expected_hash: 'abcdef01' }),
+          'patch_file FIFO rejection',
+        ),
       (err) => err.message.includes('non-regular file'),
     );
   });
