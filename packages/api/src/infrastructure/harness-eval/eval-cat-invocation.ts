@@ -1,4 +1,8 @@
 import { type EvalDomainRegistryEntry, parseEvalDomainRegistryEntry } from './domain/eval-domain-registry.js';
+import {
+  SESSION_RECOVERY_DOMAIN_INSTRUCTIONS,
+  SESSION_RECOVERY_PUBLISH_INSTRUCTIONS,
+} from './eval-cat-session-recovery-instructions.js';
 
 export interface LegacyCleanupStatus {
   status: 'not_checked' | 'dry_run_ready' | 'redirected' | 'disabled';
@@ -37,6 +41,7 @@ const DOMAIN_INSTRUCTIONS: Partial<Record<string, string>> = {
     'Enter the eval:sop domain thread, load the SOP definition for the target domain, trace session commands / env / git state against machine-checkable predicates, and produce a per-rule violation report. Hand off actionable violations to the rule owner (skill maintainer) with trace evidence.',
   'eval:capability-wakeup':
     'Enter the eval:capability-wakeup domain thread, prioritize workspace-navigator first, compare weekly miss-rate trends across capability wakeup traces, separate cognitive / behavioral / attention-dilution misses, and produce a verdict handoff packet when evidence supports fix/build/keep/delete_sunset.',
+  'eval:session-recovery': SESSION_RECOVERY_DOMAIN_INSTRUCTIONS,
   'eval:task-outcome':
     'Enter the eval:task-outcome domain thread. Analyze task outcome episodes: review permission cancel signals, proposal reject signals, magic word triggers, and A1 world truth events. Bind signals to episodes, compare weekly cancel rates and terminal-state distributions, identify patterns, and produce a verdict handoff packet. Packet verdict is fix/build/keep_observe/delete_sunset. Terminal-state and signal distributions are evidence, not the packet verdict. Assign 7-class episode verdicts only for terminal episodes you actually reviewed; publish them through sourceRefs.episodeVerdicts. Proxy signals navigate; they do not judge.',
   'eval:friction':
@@ -297,6 +302,7 @@ The MCP tool creates branch \`verdict/auto/{domainSlug}/{verdictId}\` + commits 
 const PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN: Partial<Record<string, string>> = {
   'eval:a2a': PUBLISH_VERDICT_INSTRUCTIONS_A2A,
   'eval:capability-wakeup': PUBLISH_VERDICT_INSTRUCTIONS_CAPABILITY_WAKEUP,
+  'eval:session-recovery': PUBLISH_VERDICT_PACKET_INSTRUCTIONS + SESSION_RECOVERY_PUBLISH_INSTRUCTIONS,
   'eval:memory': PUBLISH_VERDICT_INSTRUCTIONS_MEMORY,
   'eval:sop': PUBLISH_VERDICT_INSTRUCTIONS_SOP,
   'eval:task-outcome': PUBLISH_VERDICT_INSTRUCTIONS_TASK_OUTCOME,

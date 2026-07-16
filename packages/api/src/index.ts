@@ -4381,6 +4381,9 @@ async function main(): Promise<void> {
   // F253 Phase C: eval:qc provider is unconditionally wired (pure ctor, zero-baseline
   // metrics, no runtime deps). Phase C bootstrap → keep_observe verdicts.
   wiredPublishDomains.add('eval:qc');
+  // F192 Phase I: session recovery provider is constructed from the always-present
+  // session chain store + transcript reader, so publish support is unconditional.
+  wiredPublishDomains.add('eval:session-recovery');
   if (toolEventLog && skillLoadEventLog) {
     wiredPublishDomains.add('eval:capability-wakeup');
   }
@@ -4409,6 +4412,9 @@ async function main(): Promise<void> {
         // isA2aSourceRefs is the post-fix validator; absence on a stale runtime means
         // the publish flow will throw infra blockers when the cat calls publish_verdict.
         ok = typeof (mod as { isA2aSourceRefs?: unknown }).isA2aSourceRefs === 'function';
+      } else if (domainId === 'eval:session-recovery') {
+        const mod = await import('./infrastructure/harness-eval/publish-verdict/validation.js');
+        ok = typeof (mod as { isSessionRecoverySourceRefs?: unknown }).isSessionRecoverySourceRefs === 'function';
       } else {
         ok = true; // Future per-domain probes plug in here.
       }

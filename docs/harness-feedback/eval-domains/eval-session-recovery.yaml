@@ -1,0 +1,27 @@
+---
+domainId: eval:session-recovery
+displayName: Session Recovery Correctness Eval
+systemThreadId: thread_eval_session_recovery
+evalCat:
+  catId: cat-vjdun65e
+  handle: "@cat-vjdun65e"
+  model: gpt-5.6-sol
+frequency: weekly
+sourceAdapter: session-recovery-eval
+sourceRefsKind: session-recovery-window
+threadPolicy:
+  role: working-home
+  stateSot: registry
+  allowedContent:
+    - longitudinal-analysis
+    - verdict-discussion
+    - handoff-drafts
+legacyScheduledTaskIds: []
+handoffTargetResolver:
+  featureId: F192
+  ownerCatId: cat-vjdun65e
+  threadLookup: feature-thread
+sla:
+  acknowledgeHours: 48
+  reevalWithinHours: 168
+enabled: true
