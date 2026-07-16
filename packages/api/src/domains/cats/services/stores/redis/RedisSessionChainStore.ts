@@ -16,12 +16,20 @@ import type {
   CatHandoffNote,
   CatId,
   ContextHealth,
+  SessionContinuationOrigin,
   SessionRecord,
+  SessionRecoveryDeliveryReceipt,
   SessionStatus,
   SessionUsageSnapshot,
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
-import type { CreateSessionInput, ISessionChainStore, SessionRecordPatch } from '../ports/SessionChainStore.js';
+import {
+  assertValidScanWindow,
+  type CreateSessionInput,
+  type ISessionChainStore,
+  type SessionRecordPatch,
+  type SessionScanWindow,
+} from '../ports/SessionChainStore.js';
 import { SessionChainKeys } from '../redis-keys/session-chain-keys.js';
 
 const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
@@ -33,7 +41,9 @@ const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
  * ARGV[1] = id, ARGV[2] = cliSessionId, ARGV[3] = threadId, ARGV[4] = catId,
  * ARGV[5] = userId, ARGV[6] = now, ARGV[7] = reuseExistingCliSession flag,
  * ARGV[8] = chainKey value ('' = none, KEYS[5] left untouched)
- * ARGV[9] = workingDirectory ('' = none), ARGV[10] = workspaceFingerprint ('' = none)
+ * ARGV[9] = workingDirectory ('' = none), ARGV[10] = workspaceFingerprint ('' = none),
+ * ARGV[11] = openedByInvocationId, ARGV[12] = continuationOrigin JSON,
+ * ARGV[13] = recoveryDelivery JSON (empty string means absent for each)
  *
  * Returns: {'existing', existingId} when cliSessionId is already claimed,
  *          {'created', id, seq} when a new record is created.
@@ -55,6 +65,9 @@ if ARGV[8] ~= '' then
 end
 if ARGV[9] ~= '' then redis.call('HSET', KEYS[3], 'workingDirectory', ARGV[9]) end
 if ARGV[10] ~= '' then redis.call('HSET', KEYS[3], 'workspaceFingerprint', ARGV[10]) end
+if ARGV[11] ~= '' then redis.call('HSET', KEYS[3], 'openedByInvocationId', ARGV[11]) end
+if ARGV[12] ~= '' then redis.call('HSET', KEYS[3], 'continuationOrigin', ARGV[12]) end
+if ARGV[13] ~= '' then redis.call('HSET', KEYS[3], 'recoveryDelivery', ARGV[13]) end
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('EXPIRE', KEYS[3], ${DEFAULT_TTL_SECONDS})` : '-- persistent mode: no EXPIRE'}
 redis.call('ZADD', KEYS[2], seq, ARGV[1])
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('EXPIRE', KEYS[2], ${DEFAULT_TTL_SECONDS})` : '-- persistent mode: no EXPIRE'}
@@ -117,6 +130,9 @@ export class RedisSessionChainStore implements ISessionChainStore {
         input.chainKey ?? '',
         input.workingDirectory ?? '',
         input.workspaceFingerprint ?? '',
+        input.openedByInvocationId ?? '',
+        input.continuationOrigin ? JSON.stringify(input.continuationOrigin) : '',
+        input.recoveryDelivery ? JSON.stringify(input.recoveryDelivery) : '',
       )) as [string, string, string?];
 
       const [status, recordId, seqRaw] = result;
@@ -142,6 +158,9 @@ export class RedisSessionChainStore implements ISessionChainStore {
         ...(input.chainKey ? { chainKey: input.chainKey } : {}),
         ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {}),
         ...(input.workspaceFingerprint ? { workspaceFingerprint: input.workspaceFingerprint } : {}),
+        ...(input.openedByInvocationId ? { openedByInvocationId: input.openedByInvocationId } : {}),
+        ...(input.continuationOrigin ? { continuationOrigin: { ...input.continuationOrigin } } : {}),
+        ...(input.recoveryDelivery ? { recoveryDelivery: { ...input.recoveryDelivery } } : {}),
       };
     }
 
@@ -350,6 +369,35 @@ export class RedisSessionChainStore implements ISessionChainStore {
     return ids;
   }
 
+  async scanAll(window: SessionScanWindow): Promise<SessionRecord[]> {
+    assertValidScanWindow(window);
+    const detailKeys = await this.scanKeys('session:*');
+    if (detailKeys.length === 0) return [];
+
+    const records: SessionRecord[] = [];
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < detailKeys.length; i += BATCH_SIZE) {
+      const batch = detailKeys.slice(i, i + BATCH_SIZE);
+      const pipeline = this.redis.pipeline();
+      for (const key of batch) pipeline.hgetall(key);
+      const results = await pipeline.exec();
+      if (!results) continue;
+      for (const [err, data] of results) {
+        if (err || !data) continue;
+        const raw = data as Record<string, string>;
+        if (!raw.id) continue;
+        const record = this.hydrate(raw);
+        if (record.createdAt >= window.createdAfter && record.createdAt < window.createdBefore) {
+          records.push(record);
+        }
+      }
+    }
+
+    return records
+      .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))
+      .slice(0, window.limit);
+  }
+
   private hydrate(data: Record<string, string>): SessionRecord {
     const contextHealth = safeParseJson<ContextHealth>(data.contextHealth);
     const lastUsage = safeParseJson<SessionUsageSnapshot>(data.lastUsage);
@@ -357,6 +405,8 @@ export class RedisSessionChainStore implements ISessionChainStore {
       data.continuityCapsule !== undefined ? safeParseJson<unknown>(data.continuityCapsule) : undefined;
     const catHandoffNote =
       data.catHandoffNote !== undefined ? safeParseJson<CatHandoffNote>(data.catHandoffNote) : undefined;
+    const continuationOrigin = safeParseJson<SessionContinuationOrigin>(data.continuationOrigin);
+    const recoveryDelivery = safeParseJson<SessionRecoveryDeliveryReceipt>(data.recoveryDelivery);
     const sealReason = data.sealReason as SessionRecord['sealReason'] | undefined;
     const sealedAt = data.sealedAt ? parseInt(data.sealedAt, 10) : undefined;
     const compressionCount = data.compressionCount ? parseInt(data.compressionCount, 10) : undefined;
@@ -373,6 +423,9 @@ export class RedisSessionChainStore implements ISessionChainStore {
       ...(data.workingDirectory ? { workingDirectory: data.workingDirectory } : {}),
       ...(data.workspaceFingerprint ? { workspaceFingerprint: data.workspaceFingerprint } : {}),
       seq: parseInt(data.seq!, 10),
+      ...(data.openedByInvocationId ? { openedByInvocationId: data.openedByInvocationId } : {}),
+      ...(continuationOrigin ? { continuationOrigin } : {}),
+      ...(recoveryDelivery ? { recoveryDelivery } : {}),
       status: (data.status as SessionStatus) ?? 'active',
       ...(contextHealth ? { contextHealth } : {}),
       ...(lastUsage ? { lastUsage } : {}),

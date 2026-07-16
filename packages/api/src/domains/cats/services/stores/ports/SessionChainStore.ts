@@ -7,7 +7,12 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { CatId, SessionRecord } from '@cat-cafe/shared';
+import type {
+  CatId,
+  SessionContinuationOrigin,
+  SessionRecord,
+  SessionRecoveryDeliveryReceipt,
+} from '@cat-cafe/shared';
 
 export interface CreateSessionInput {
   cliSessionId: string;
@@ -17,6 +22,10 @@ export interface CreateSessionInput {
   catId: CatId;
   userId: string;
   reuseExistingCliSession?: boolean;
+  /** F192 Phase I: immutable target-side transition metadata. */
+  openedByInvocationId?: string;
+  continuationOrigin?: SessionContinuationOrigin;
+  recoveryDelivery?: SessionRecoveryDeliveryReceipt;
   /**
    * F198 Bug #3: stable conversation anchor for bg carrier
    * (`bg:${threadId}:${catId}`). When set, the record is indexed by chainKey
@@ -24,6 +33,13 @@ export interface CreateSessionInput {
    * seal+create. Undefined for non-bg providers.
    */
   chainKey?: string;
+}
+
+/** Half-open creation-time window with a mandatory output bound. */
+export interface SessionScanWindow {
+  createdAfter: number;
+  createdBefore: number;
+  limit: number;
 }
 
 export type SessionRecordPatch = Partial<
@@ -73,9 +89,12 @@ export interface ISessionChainStore {
   incrementCompressionCount(id: string): number | null | Promise<number | null>;
   /** F118: List IDs of all sessions currently in 'sealing' status (for global reaper). */
   listSealingSessions(): string[] | Promise<string[]>;
+  /** F192 Phase I: newest-first bounded read projection; never a second lifecycle store. */
+  scanAll(window: SessionScanWindow): SessionRecord[] | Promise<SessionRecord[]>;
 }
 
 const MAX_RECORDS = 1000;
+const MAX_SCAN_LIMIT = 1000;
 
 /**
  * In-memory SessionChainStore.
@@ -124,6 +143,9 @@ export class SessionChainStore implements ISessionChainStore {
       catId: input.catId,
       userId: input.userId,
       seq,
+      ...(input.openedByInvocationId ? { openedByInvocationId: input.openedByInvocationId } : {}),
+      ...(input.continuationOrigin ? { continuationOrigin: { ...input.continuationOrigin } } : {}),
+      ...(input.recoveryDelivery ? { recoveryDelivery: { ...input.recoveryDelivery } } : {}),
       status: 'active',
       messageCount: 0,
       createdAt: now,
@@ -263,6 +285,14 @@ export class SessionChainStore implements ISessionChainStore {
     return ids;
   }
 
+  scanAll(window: SessionScanWindow): SessionRecord[] {
+    assertValidScanWindow(window);
+    return [...this.records.values()]
+      .filter((record) => record.createdAt >= window.createdAfter && record.createdAt < window.createdBefore)
+      .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))
+      .slice(0, window.limit);
+  }
+
   /**
    * Evict one record to stay within MAX_RECORDS.
    * Priority: sealed > non-active > superseded active.
@@ -336,5 +366,17 @@ export class SessionChainStore implements ISessionChainStore {
   /** Current record count (for testing) */
   get size(): number {
     return this.records.size;
+  }
+}
+
+export function assertValidScanWindow(window: SessionScanWindow): void {
+  if (!Number.isFinite(window.createdAfter) || !Number.isFinite(window.createdBefore)) {
+    throw new RangeError('session scan window timestamps must be finite');
+  }
+  if (window.createdAfter < 0 || window.createdBefore <= window.createdAfter) {
+    throw new RangeError('session scan window must be a non-empty half-open interval');
+  }
+  if (!Number.isInteger(window.limit) || window.limit < 1 || window.limit > MAX_SCAN_LIMIT) {
+    throw new RangeError(`session scan limit must be an integer between 1 and ${MAX_SCAN_LIMIT}`);
   }
 }

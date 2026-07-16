@@ -35,6 +35,61 @@ describe('SessionChainStore', () => {
     assert.equal(record.createdAt, record.updatedAt);
   });
 
+  test('create() persists immutable session recovery lineage and delivery receipt', async () => {
+    const store = await createStore();
+    const continuationOrigin = {
+      sourceSessionId: 'source-session-1',
+      sourceSeq: 0,
+      kind: 'threshold',
+      sealReason: 'threshold',
+      proposalId: 'proposal-1',
+    };
+    const recoveryDelivery = {
+      sourceSessionId: 'source-session-1',
+      providerDispatchAt: 1_721_111_111_111,
+      bootstrapContentHash: 'sha256:bootstrap-1',
+      bootstrapIncludedInPrompt: true,
+      handoffNoteIncluded: true,
+    };
+
+    const record = store.create({
+      ...BASE_INPUT,
+      openedByInvocationId: 'invocation-1',
+      continuationOrigin,
+      recoveryDelivery,
+    });
+
+    assert.equal(record.openedByInvocationId, 'invocation-1');
+    assert.deepEqual(record.continuationOrigin, continuationOrigin);
+    assert.deepEqual(record.recoveryDelivery, recoveryDelivery);
+
+    store.update(record.id, {
+      openedByInvocationId: 'forged-invocation',
+      continuationOrigin: { ...continuationOrigin, sourceSessionId: 'forged-source' },
+      recoveryDelivery: { ...recoveryDelivery, sourceSessionId: 'forged-source' },
+    });
+
+    const reread = store.get(record.id);
+    assert.equal(reread.openedByInvocationId, 'invocation-1');
+    assert.deepEqual(reread.continuationOrigin, continuationOrigin);
+    assert.deepEqual(reread.recoveryDelivery, recoveryDelivery);
+  });
+
+  test('scanAll() requires a bounded time window and result limit', async () => {
+    const store = await createStore();
+    store.create(BASE_INPUT);
+    store.create({ ...BASE_INPUT, catId: 'codex', cliSessionId: 'cli-codex-1' });
+
+    const records = store.scanAll({
+      createdAfter: 0,
+      createdBefore: Date.now() + 1_000,
+      limit: 1,
+    });
+
+    assert.equal(records.length, 1);
+    assert.ok(records[0].createdAt >= 0);
+  });
+
   test('create() and update() preserve workspace binding metadata', async () => {
     const store = await createStore();
     const record = store.create({
