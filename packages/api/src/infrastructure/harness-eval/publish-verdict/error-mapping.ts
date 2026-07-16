@@ -22,6 +22,18 @@ export function mapPublishVerdictError(message: string): HandlerError | null {
   if (message.startsWith('no_metrics_in_window')) {
     return { status: 404, error: 'no_metrics_in_window', detail: message };
   }
+  if (
+    message.startsWith('unknown assessment trial:') ||
+    message.startsWith('foreign assessment evidence ref:') ||
+    message.startsWith('duplicate_session_recovery_trial:') ||
+    message.startsWith('missing_session_recovery_assessment:') ||
+    message.startsWith('session_recovery_assessment_mismatch:')
+  ) {
+    return { status: 400, error: 'invalid_session_recovery_assessment', detail: message };
+  }
+  if (message.startsWith('session_scan_limit_reached:')) {
+    return { status: 400, error: 'window_too_broad', detail: message };
+  }
   if (message.startsWith('invalid_packet_field')) {
     return { status: 400, error: 'invalid_packet_field', detail: message };
   }

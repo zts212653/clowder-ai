@@ -1,4 +1,9 @@
 export {
+  type GenerateSessionRecoveryLiveVerdictInput,
+  generateSessionRecoveryLiveVerdict,
+  type SessionRecoveryLiveVerdictArtifact,
+} from './eval-session-recovery-live-verdict.js';
+export {
   gradeSessionRecoveryStructure,
   gradeSessionRecoveryTrial,
   summarizeSessionRecoveryTrials,

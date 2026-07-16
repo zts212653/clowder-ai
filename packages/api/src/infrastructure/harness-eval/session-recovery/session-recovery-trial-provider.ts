@@ -179,14 +179,16 @@ export function validateSessionRecoverySelector(selector: unknown): string | nul
 }
 
 function validateWindow(value: Record<string, unknown>): string | null {
-  if (typeof value.windowStartMs !== 'number' || !Number.isFinite(value.windowStartMs) || value.windowStartMs < 0) {
-    return 'windowStartMs must be a non-negative finite number';
+  const start = value.windowStartMs;
+  const end = value.windowEndMs;
+  if (typeof start !== 'number' || !Number.isSafeInteger(start) || start < 0) {
+    return 'windowStartMs must be a non-negative safe integer';
   }
-  if (typeof value.windowEndMs !== 'number' || !Number.isFinite(value.windowEndMs)) {
-    return 'windowEndMs must be a finite number';
+  if (typeof end !== 'number' || !Number.isSafeInteger(end) || end < 0) {
+    return 'windowEndMs must be a non-negative safe integer';
   }
-  if (value.windowEndMs <= value.windowStartMs) return 'windowEndMs must be > windowStartMs';
-  if (value.windowEndMs - value.windowStartMs > MAX_WINDOW_MS) return 'window must not exceed 31 days';
+  if (end <= start) return 'windowEndMs must be > windowStartMs';
+  if (end - start > MAX_WINDOW_MS) return 'window must not exceed 31 days';
   if (
     value.limit !== undefined &&
     (!Number.isInteger(value.limit) || (value.limit as number) < 1 || (value.limit as number) > MAX_TRIAL_LIMIT)
@@ -224,7 +226,13 @@ function validateAssessments(value: unknown): string | null {
 function validateAssessmentShape(value: unknown): string | null {
   if (!value || typeof value !== 'object') return 'assessment must be an object';
   const assessment = value as Record<string, unknown>;
-  if (typeof assessment.trialId !== 'string' || !assessment.trialId) return 'assessment trialId is required';
+  if (
+    typeof assessment.trialId !== 'string' ||
+    !assessment.trialId.startsWith('session-recovery:') ||
+    /[\r\n]/.test(assessment.trialId)
+  ) {
+    return 'assessment trialId must be a single-line session-recovery anchor';
+  }
   if (!['recovered', 'stale', 'unknown'].includes(String(assessment.stateReconstruction))) {
     return 'invalid stateReconstruction';
   }
@@ -238,9 +246,9 @@ function validateAssessmentShape(value: unknown): string | null {
     !Array.isArray(assessment.evidenceRefs) ||
     assessment.evidenceRefs.length === 0 ||
     assessment.evidenceRefs.length > MAX_EVIDENCE_EVENTS ||
-    assessment.evidenceRefs.some((ref) => typeof ref !== 'string' || !ref)
+    assessment.evidenceRefs.some((ref) => typeof ref !== 'string' || !ref || /[\r\n]/.test(ref))
   ) {
-    return `assessment evidenceRefs must contain 1-${MAX_EVIDENCE_EVENTS} non-empty strings`;
+    return `assessment evidenceRefs must contain 1-${MAX_EVIDENCE_EVENTS} non-empty single-line strings`;
   }
   if (typeof assessment.rationale !== 'string' || !assessment.rationale.trim() || assessment.rationale.length > 4_000) {
     return 'assessment rationale must contain 1-4000 characters';

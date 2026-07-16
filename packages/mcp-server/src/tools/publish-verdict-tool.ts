@@ -265,6 +265,69 @@ const anchorTelemetrySourceRefsShape = z
   })
   .describe('eval:anchor-first sourceRefs — replayable anchor telemetry rollup window selector.');
 
+const sessionRecoveryAssessmentShape = z.object({
+  trialId: z
+    .string()
+    .min(1)
+    .refine(
+      (value) => value.startsWith('session-recovery:') && !/[\r\n]/.test(value),
+      'trialId must be a single-line session-recovery anchor',
+    ),
+  stateReconstruction: z.enum(['recovered', 'stale', 'unknown']),
+  firstMeaningfulAction: z.enum(['aligned', 'repeated', 'misaligned', 'unknown']),
+  outcome: z.enum(['continued', 'completed', 'failed', 'unknown']),
+  evidenceRefs: z
+    .array(
+      z
+        .string()
+        .min(1)
+        .refine((value) => !/[\r\n]/.test(value), 'evidence ref must be single-line'),
+    )
+    .min(1)
+    .max(100),
+  rationale: z.string().trim().min(1).max(4_000),
+});
+
+const sessionRecoverySourceRefsShape = z
+  .object({
+    kind: z.literal('session-recovery-window'),
+    windowStartMs: z.number().int().nonnegative(),
+    windowEndMs: z.number().int().nonnegative(),
+    catId: z
+      .string()
+      .min(1)
+      .refine((value) => !/[\r\n]/.test(value))
+      .optional(),
+    threadId: z
+      .string()
+      .min(1)
+      .refine((value) => !/[\r\n]/.test(value))
+      .optional(),
+    limit: z.number().int().min(1).max(200).optional(),
+    assessments: z.array(sessionRecoveryAssessmentShape).min(1).max(200),
+  })
+  .superRefine((selector, ctx) => {
+    if (selector.windowEndMs <= selector.windowStartMs) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['windowEndMs'], message: 'must be > windowStartMs' });
+    } else if (selector.windowEndMs - selector.windowStartMs > 31 * 86_400_000) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['windowEndMs'], message: 'window must not exceed 31 days' });
+    }
+    const seen = new Set<string>();
+    for (const [index, assessment] of selector.assessments.entries()) {
+      if (seen.has(assessment.trialId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['assessments', index, 'trialId'],
+          message: 'duplicate assessment trialId',
+        });
+      }
+      seen.add(assessment.trialId);
+    }
+  })
+  .describe(
+    'eval:session-recovery publish selector. Assessments are required and are cross-validated against replayed trial/evidence anchors; no assessment mutation is performed.',
+  );
+
 const sourceRefsShape = z
   .union([
     a2aSourceRefsShape,
@@ -274,16 +337,14 @@ const sourceRefsShape = z
     sopSourceRefsShape,
     frictionRollupSourceRefsShape,
     anchorTelemetrySourceRefsShape,
+    sessionRecoverySourceRefsShape,
   ])
   .describe(
-    'Discriminated union by `kind` field. a2a kind is default (backward compat); capability-wakeup-trial-window kind wired in PR-2; memory-recall-snapshot kind wired in F192 memory wire-up; task-outcome-snapshot kind wired in task-outcome PR; sop-trace-eval kind wired in F192 sop-wiring; friction-rollup-snapshot kind wired in F245 PR1b; anchor-telemetry-snapshot kind wired in F236 Track-2.',
+    'Discriminated union by `kind` field. Includes session-recovery-window with required, anchor-validated semantic assessments; see the assigned eval-domain instructions for every shape.',
   );
 
 export const publishVerdictInputSchema = {
-  domainId: z
-    .string()
-    .min(1)
-    .describe('Your assigned eval domain (eval:a2a / eval:capability-wakeup in v2). Must match packet.domainId.'),
+  domainId: z.string().min(1).describe('Your assigned eval domain. Must match packet.domainId.'),
   packet: verdictPacketShape,
   sourceRefs: sourceRefsShape,
   // 砚砚 R4 P1 + cloud R4 P1: catId is NOT a cat-supplied field — server
@@ -348,6 +409,22 @@ type PublishVerdictToolInput = {
         kind: 'anchor-telemetry-snapshot';
         windowStartMs: number;
         windowEndMs: number;
+      }
+    | {
+        kind: 'session-recovery-window';
+        windowStartMs: number;
+        windowEndMs: number;
+        catId?: string;
+        threadId?: string;
+        limit?: number;
+        assessments: Array<{
+          trialId: string;
+          stateReconstruction: 'recovered' | 'stale' | 'unknown';
+          firstMeaningfulAction: 'aligned' | 'repeated' | 'misaligned' | 'unknown';
+          outcome: 'continued' | 'completed' | 'failed' | 'unknown';
+          evidenceRefs: string[];
+          rationale: string;
+        }>;
       };
   agentKeyCatId?: string | undefined;
 };
@@ -377,7 +454,7 @@ export const publishVerdictTools = [
       'Use after your analysis converges to a verdict for your assigned eval domain. ' +
       'Pass the complete VerdictHandoffPacket + sourceRefs (shape depends on your domain — see your eval cat invocation instructions for the exact selector shape). ' +
       'The handler validates schema, dispatches to the per-domain generator inside an isolated git worktree, commits + pushes the branch verdict/auto/<domain-slug>/<verdict-id>, and opens an auto-PR. Returns { commitSha, prUrl }. ' +
-      'GOTCHA: wired domains: eval:a2a (snapshot/attribution YAML basenames) + eval:capability-wakeup (replayable trial-window selector) + eval:memory (memory-recall-snapshot selector) + eval:sop (sop-trace-eval replayable SOP trace selector) + eval:task-outcome (task-outcome-snapshot replay window) + eval:friction (friction-rollup-snapshot replay window) + eval:anchor-first (anchor-telemetry-snapshot rollup window). Unregistered domains return 501. ' +
+      'GOTCHA: wired domains include eval:session-recovery (bounded replay selector + required semantic assessments), alongside the existing a2a/capability-wakeup/memory/sop/task-outcome/friction/anchor-first domains. Unregistered domains return 501. ' +
       'GOTCHA: catId must match the registered eval cat for the domain (or its OQ-20 Redis override); 403 not_allowed otherwise. ' +
       'GOTCHA: DO NOT run git push/commit/add yourself; this tool owns the publish lifecycle.',
     inputSchema: publishVerdictInputSchema,

@@ -28,12 +28,14 @@ import {
   isKnownSourceRefsKind,
   isMemorySourceRefs,
   isQcMetricsSourceRefs,
+  isSessionRecoverySourceRefs,
   isSopSourceRefs,
   isTaskOutcomeSourceRefs,
   validateAnchorTelemetrySelector,
   validateFrictionRollupSelector,
   validateMemoryRecallSelector,
   validateQcMetricsSelector,
+  validateSessionRecoveryPublishSelector,
   validateSopTraceSelector,
   validateSourceRefsFormat,
   validateTaskOutcomeSourceRefs,
@@ -237,6 +239,9 @@ export async function handlePublishVerdict(
   } else if (isQcMetricsSourceRefs(input.sourceRefs)) {
     // F253 Phase C: qc-metrics-rollup selector.
     const selectorError = validateQcMetricsSelector(input.sourceRefs);
+    if (selectorError) return { status: 400, error: 'invalid_source_ref', detail: selectorError };
+  } else if (isSessionRecoverySourceRefs(input.sourceRefs)) {
+    const selectorError = validateSessionRecoveryPublishSelector(input.sourceRefs);
     if (selectorError) return { status: 400, error: 'invalid_source_ref', detail: selectorError };
   } else if (isA2aSourceRefs(input.sourceRefs)) {
     const refsCheck = validateSourceRefsFormat(input.sourceRefs);

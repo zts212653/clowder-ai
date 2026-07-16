@@ -2,6 +2,7 @@ import type { FrictionRollupSourceSelector } from '@cat-cafe/shared';
 import type { Redis } from 'ioredis';
 import type { CapabilityWakeupSourceSelector } from '../capability-wakeup/capability-wakeup-trial-provider.js';
 import type { QcMetricsSelector } from '../qc-metrics-provider.js';
+import type { SessionRecoverySourceSelector } from '../session-recovery/session-recovery-types.js';
 import type { SopTraceInput } from '../sop/sop-trace-adapter.js';
 import type { TaskOutcomeVerdict } from '../task-outcome/task-outcome-episode.js';
 import type { VerdictHandoffPacket } from '../verdict-handoff.js';
@@ -149,6 +150,7 @@ export type VerdictSourceRefs =
   | SopTraceSourceSelector
   | FrictionRollupSourceSelector
   | AnchorTelemetrySourceSelector
+  | SessionRecoverySourceSelector
   | QcMetricsSelector;
 
 /**

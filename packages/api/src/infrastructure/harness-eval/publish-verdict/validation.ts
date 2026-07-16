@@ -2,6 +2,8 @@ import { basename, isAbsolute, resolve } from 'node:path';
 import type { FrictionRollupSourceSelector } from '@cat-cafe/shared';
 import type { QcMetricsSelector } from '../qc-metrics-provider.js';
 import { resolveSafeRawPath } from '../safe-path.js';
+import { validateSessionRecoverySelector } from '../session-recovery/session-recovery-trial-provider.js';
+import type { SessionRecoverySourceSelector } from '../session-recovery/session-recovery-types.js';
 import { VERDICT_CLASSES } from '../task-outcome/task-outcome-episode.js';
 import type { VerdictHandoffPacket } from '../verdict-handoff.js';
 import type {
@@ -27,6 +29,21 @@ export function isA2aSourceRefs(refs: VerdictSourceRefs | undefined): refs is A2
 
 export function isTaskOutcomeSourceRefs(refs: VerdictSourceRefs | undefined): refs is TaskOutcomeSnapshotSourceRefs {
   return Boolean(refs && 'kind' in refs && refs.kind === 'task-outcome-snapshot');
+}
+
+export function isSessionRecoverySourceRefs(
+  refs: VerdictSourceRefs | undefined,
+): refs is SessionRecoverySourceSelector {
+  return Boolean(refs && 'kind' in refs && refs.kind === 'session-recovery-window');
+}
+
+export function validateSessionRecoveryPublishSelector(selector: SessionRecoverySourceSelector): string | null {
+  const selectorError = validateSessionRecoverySelector(selector);
+  if (selectorError) return selectorError;
+  if (!selector.assessments || selector.assessments.length === 0) {
+    return 'session-recovery publish requires at least one explicit semantic assessment';
+  }
+  return null;
 }
 
 /**
@@ -102,6 +119,7 @@ export const KNOWN_SOURCE_REFS_KINDS = [
   'capability-wakeup-trial-window',
   'memory-recall-snapshot',
   'qc-metrics-rollup',
+  'session-recovery-window',
   'sop-trace-eval',
   'task-outcome-snapshot',
   'friction-rollup-snapshot',
@@ -147,6 +165,7 @@ export function inferSourceRefsKind(refs: VerdictSourceRefs | undefined): string
   if (isSopSourceRefs(refs)) return 'sop-trace-eval';
   if (isMemorySourceRefs(refs)) return 'memory-recall-snapshot';
   if (isTaskOutcomeSourceRefs(refs)) return 'task-outcome-snapshot';
+  if (isSessionRecoverySourceRefs(refs)) return 'session-recovery-window';
   // ⚠️ anchor-telemetry + friction guards MUST precede the a2a default:
   // isA2aSourceRefs returns true for undefined/missing-kind refs (backward-compat
   // default) and would swallow kind-discriminated selectors otherwise.

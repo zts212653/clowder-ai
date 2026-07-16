@@ -214,9 +214,26 @@ describe('SessionRecoveryTrialProvider', () => {
     assert.equal(validateSessionRecoverySelector(SELECTOR), null);
     assert.match(validateSessionRecoverySelector({ ...SELECTOR, windowEndMs: 1_500 }), /windowEndMs/);
     assert.match(validateSessionRecoverySelector({ ...SELECTOR, limit: 201 }), /limit/);
+    assert.match(validateSessionRecoverySelector({ ...SELECTOR, windowStartMs: 1_000.5 }), /safe integer/);
     assert.match(
       validateSessionRecoverySelector({ ...SELECTOR, windowEndMs: SELECTOR.windowStartMs + 32 * 86_400_000 }),
       /31 days/,
+    );
+    assert.match(
+      validateSessionRecoverySelector({
+        ...SELECTOR,
+        assessments: [
+          {
+            trialId: 'session-recovery:source\nforged',
+            stateReconstruction: 'unknown',
+            firstMeaningfulAction: 'unknown',
+            outcome: 'unknown',
+            evidenceRefs: ['session:source'],
+            rationale: 'invalid anchor',
+          },
+        ],
+      }),
+      /single-line/,
     );
   });
 

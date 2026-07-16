@@ -1948,6 +1948,10 @@ async function main(): Promise<void> {
     'eval:task-outcome': createTaskOutcomeGeneratorAdapter(),
     'eval:qc': createQcGeneratorAdapter(),
   };
+  const { createSessionRecoveryGeneratorAdapter } = await import(
+    './infrastructure/harness-eval/publish-verdict/session-recovery-generator-adapter.js'
+  );
+  verdictGenerators['eval:session-recovery'] = createSessionRecoveryGeneratorAdapter(sessionRecoveryTrialProvider);
   if (toolEventLog && skillLoadEventLog) {
     const { createCapabilityWakeupGeneratorAdapter } = await import(
       './infrastructure/harness-eval/publish-verdict/capability-wakeup-generator-adapter.js'
