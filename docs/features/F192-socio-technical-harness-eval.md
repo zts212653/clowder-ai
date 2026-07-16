@@ -10,7 +10,7 @@ user_journey_exempt: "Internal harness eval infrastructure — all surfaces are 
 
 # F192: Socio-Technical Harness Eval — harness 共创评估体系
 
-> **Status**: in-progress (Phase F/G closure + Phase I `eval:session-recovery`) | **Owner**: Ragdoll | **Truth sync**: 2026-07-16
+> **Status**: in-progress (Phase F/G closure; Phase I `eval:session-recovery` implementation ready for cross-individual review) | **Owner**: Ragdoll | **Truth sync**: 2026-07-16
 
 ## Architecture Ownership
 
@@ -74,7 +74,7 @@ F192 现在已经不是“某个 feature 结束后写一篇 feedback”的文档
 
 如果链路里任何一环需要人手工补文件、手工抄 bundle、手工 commit，那就还不算接进 F192 control plane。
 
-### Current Domain Wire Status (2026-06-09 truth sync)
+### Current Domain Wire Status (2026-07-16 truth sync)
 
 | Domain | Schedule | Publish path | Current truth |
 |--------|----------|--------------|---------------|
@@ -84,6 +84,7 @@ F192 现在已经不是“某个 feature 结束后写一篇 feedback”的文档
 | `eval:task-outcome` | daily live | wired (PR #2162, squash `c9aa0e16d`) | Publish path is live. Phase G v0.5 signal chain e2e is green; 7-class episode verdict writeback is wired through explicit `sourceRefs.episodeVerdicts`. Manual runtime Eval Hub acceptance remains open. |
 | `eval:sop` | active (weekly) | wired (PR #2186) | Schema / predicate evaluator + SopTrace producer + file-writer + PUBLISH_VERDICT_INSTRUCTIONS all wired. Re-enabled 2026-06-10. |
 | `eval:anchor-first` | weekly | wired (F236 Track-2) | Preview↔drill open-rate rollup via in-memory event log. Generator adapter + live-verdict writer + provider wired. Eval design truth in F236. |
+| `eval:session-recovery` | weekly | wired (Phase I review candidate) | Owner-scoped bounded preview, explicit semantic assessments, publish selector/adapter, sanitized live bundle, Eval Hub readback, scheduler wired-set, and validator prereq probe are connected. Truth remains SessionChain + TranscriptReader; no parallel transition store. |
 
 ## Why
 
@@ -458,16 +459,31 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 
 **AC-I**：
 
-- [ ] AC-I1: target `SessionRecord` 在首次 `session_init` 创建时原子持久化不可变 `continuationOrigin`、`openedByInvocationId` 与无正文 `recoveryDelivery` receipt；重复 `session_init` / provider retry 不得覆盖 lineage。
-- [ ] AC-I2: `buildSessionBootstrap` 返回 source session / seal reason / proposalId / bootstrap hash 等 typed metadata；serial 与 parallel route 都只在“无 active target”的 fresh continuation 上向 invocation 传递该 metadata。
-- [ ] AC-I3: SessionChain store 提供 bounded read-side window enumeration；实现不新增第二份 transition store，legacy 未带 lineage 的 record 明确标 `legacy_unlinked`，不得伪装成 pass。
-- [ ] AC-I4: `SessionRecoveryTrialProvider` 构建 replayable `session-recovery-window` projection，覆盖 explicit target / missing target / duplicate target / legacy inferred candidate，并输出 source/target/invocation/transcript evidence refs。
-- [ ] AC-I5: deterministic grader 负责 transition + delivery；eval cat 通过受校验的 per-trial assessment 负责 state reconstruction + first meaningful action + outcome。proxy signal 不得替代语义 verdict。
-- [ ] AC-I6: clean fixture 判定 recovered/aligned，stale fixture 判定 stale/misaligned；两者均使用进程内 fixture，不连接 6399 或写真实 thread。
-- [ ] AC-I7: registry、domain instruction、`sourceRefs` selector、preview/read path、generator adapter、live-verdict writer、publish route 与 MCP schema 全部接线；任一缺失时保持 honest unwired，不发 scheduled publish 指令。
-- [ ] AC-I8: bundle 能被 Eval Hub round-trip 读取，provenance 记录 window、source/target Session IDs、invocation/event refs、generator version 与 sanitize 规则；不提交自由文本 transcript，只提交 bounded metadata/hash/ref。
-- [ ] AC-I9: handler kind mismatch / invalid window / owner scope / unknown trial / forged evidence ref / duplicate assessment 全部 fail closed；scheduled/manual invocation 可先 preview trials 再形成 verdict。
-- [ ] AC-I10: isolated acceptance 运行 clean/stale 与 missing-target 三类 case，证明无独立 runtime data store、无生产写入，并回写本节 wire status / evidence。
+- [x] AC-I1: target `SessionRecord` 在首次 `session_init` 创建时原子持久化不可变 `continuationOrigin`、`openedByInvocationId` 与无正文 `recoveryDelivery` receipt；重复 `session_init` / provider retry 不得覆盖 lineage。
+- [x] AC-I2: `buildSessionBootstrap` 返回 source session / seal reason / proposalId / bootstrap hash 等 typed metadata；serial 与 parallel route 都只在“无 active target”的 fresh continuation 上向 invocation 传递该 metadata。
+- [x] AC-I3: SessionChain store 提供 bounded read-side window enumeration；实现不新增第二份 transition store，legacy 未带 lineage 的 record 明确标 `legacy_unlinked`，不得伪装成 pass。
+- [x] AC-I4: `SessionRecoveryTrialProvider` 构建 replayable `session-recovery-window` projection，覆盖 explicit target / missing target / duplicate target / legacy inferred candidate，并输出 source/target/invocation/transcript evidence refs。
+- [x] AC-I5: deterministic grader 负责 transition + delivery；eval cat 通过受校验的 per-trial assessment 负责 state reconstruction + first meaningful action + outcome。proxy signal 不得替代语义 verdict。
+- [x] AC-I6: clean fixture 判定 recovered/aligned，stale fixture 判定 stale/misaligned；两者均使用进程内 fixture，不连接 6399 或写真实 thread。
+- [x] AC-I7: registry、domain instruction、`sourceRefs` selector、preview/read path、generator adapter、live-verdict writer、publish route 与 MCP schema 全部接线；任一缺失时保持 honest unwired，不发 scheduled publish 指令。
+- [x] AC-I8: bundle 能被 Eval Hub round-trip 读取，provenance 记录 window、source/target Session IDs、invocation/event refs、generator version 与 sanitize 规则；不提交自由文本 transcript，只提交 bounded metadata/hash/ref。
+- [x] AC-I9: handler kind mismatch / invalid window / owner scope / unknown trial / forged evidence ref / duplicate assessment 全部 fail closed；scheduled/manual invocation 可先 preview trials 再形成 verdict。
+- [x] AC-I10: isolated acceptance 运行 clean/stale 与 missing-target 三类 case，证明无独立 runtime data store、无生产写入，并回写本节 wire status / evidence。
+
+**Phase I implementation evidence（2026-07-16）**：
+
+| AC | Runtime / truth anchor | Verification evidence |
+|----|------------------------|-----------------------|
+| I1–I3 | `SessionChainStore` / `RedisSessionChainStore` creation-only lineage + bounded `scanAll`; `SessionBootstrap` typed recovery metadata; `invokeSingleCat` provider-dispatch stamp | Focused API suite 217/217; isolated Redis `redis-session-chain-store.test.js` 32/32 |
+| I4–I5 | `infrastructure/harness-eval/session-recovery/` provider + deterministic grader; semantic fields remain unknown until an explicit assessment is attached | provider/grader adversarial tests cover explicit, missing, duplicate, cross-identity, legacy, owner scope, scan saturation, and forged refs |
+| I6 / I10 | `docs/harness-feedback/fixtures/session-recovery/{clean,stale,missing-target}.json` | isolated acceptance 3/3; `Socket.connect` hard-fail sentinel observed 0 calls; dependencies expose read ports only; all thread IDs are synthetic `fixture-thread-*` |
+| I7 | `eval-session-recovery.yaml`, eval-cat preview→assess→publish instructions, REST route, MCP preview tool, publish schema/adapter, generator map, wired set, and validator prereq probe | eval-domain regression 90/90; MCP suite 386/386; unwired instruction test proves publish guidance is omitted when runtime support is absent |
+| I8 | `eval-session-recovery-live-verdict.ts` writes bounded metadata/hash/ref bundle and `provenance.json` | generator + fixture tests round-trip through `loadEvalHubSummary`; raw bundle assertions reject owner ID, transcript body, and rationale plaintext |
+| I9 | route/MCP/publish validation and owner principal derivation | publish handler tests reject kind/window/missing/duplicate/unknown/foreign assessment inputs; preview tests reject invalid auth/window and ignore owner spoofing |
+
+**Quality-gate snapshot（当前 worktree）**：`pnpm check` exit 0；`pnpm lint` exit 0；`pnpm -r --if-present run build` exit 0；focused API 217/217；MCP 386/386；isolated Redis 32/32；fixture acceptance 3/3。手动 dogfood 从 `handlePreviewSessionRecoveryTrials` 经 callback HTTP contract、Fastify route、provider、assessed generator adapter 到 Eval Hub：1 个 `explicit + provider_dispatched` clean trial，bundle 中 transcript/rationale plaintext 均不存在。
+
+仓库级 `pnpm test` 当前不是可用的 branch gate：`origin/main` checkout 本身缺少多项被测试引用的私有/导出排除资产（例如 `.claude/settings.json`、`docs/reflections/README.md`、TRPG pack、restore/launchd scripts），本机也未安装 `tmux`；失败路径与本分支 diff 无交集。`check:dir-size` 另被两个 2026-07-15 到期的既有例外阻塞，`check:deps` 因 `origin/main` 不含 `.dependency-cruiser.cjs` 无法启动。上述 baseline gaps 不计作 Phase I 通过证据，也未在本分支修补或绕过。
 
 **Eval Contract**：
 
