@@ -13,6 +13,10 @@ code_anchors:
   - packages/api/src/infrastructure/harness-eval/reeval-closure.ts
   - packages/api/src/infrastructure/harness-eval/eval-a2a-adapter.ts
   - packages/api/src/infrastructure/harness-eval/eval-hub-read-model.ts
+  - packages/api/src/infrastructure/harness-eval/session-recovery/
+  - packages/api/src/infrastructure/harness-eval/publish-verdict/session-recovery-generator-adapter.ts
+  - packages/api/src/routes/session-recovery-eval.ts
+  - packages/mcp-server/src/tools/session-recovery-eval-tools.ts
   - packages/api/src/infrastructure/harness-eval/friction/friction-signal-source.ts
   - packages/api/src/infrastructure/harness-eval/friction/paw-feel-marker.ts
   - packages/api/src/infrastructure/harness-eval/friction/paw-feel-adapter.ts
@@ -36,12 +40,15 @@ code_anchors:
 doc_anchors:
   - docs/features/F192-socio-technical-harness-eval.md
   - docs/features/F245-friction-signal-eval.md
+  - feature-specs/2026-07-16-f192-session-recovery-eval.md
+  - docs/harness-feedback/eval-domains/eval-session-recovery.yaml
   - docs/harness-feedback/
   - feature-discussions/2026-05-21-f192-phase-e-eval-hub-kickoff/README.md
   - sop-definitions/README.md
-static_scan_hints: [harness-eval, VerdictHandoffPacket, eval-domain, reeval, harness-fit-digest, Eval Hub, SopDefinition, sop-definitions, predicate, friction, paw-feel, FrictionSignal]
+static_scan_hints: [harness-eval, VerdictHandoffPacket, eval-domain, reeval, harness-fit-digest, Eval Hub, SopDefinition, sop-definitions, predicate, friction, paw-feel, FrictionSignal, SessionRecoveryTrial, session-recovery-window]
 cited_by:
   - F192 Phase E-pilot
+  - F192 Phase I session-recovery eval
   - F245 Phase A (paw-feel friction collector) + Phase B (cancel/user-feedback/eval-domain adapters + aggregator + clusterer + rollup input; domain registration + rollup sink land in Phase C)
 ---
 
@@ -56,6 +63,7 @@ F192 owns the socio-technical harness evaluation contract: harnesses declare exp
 - Adding or changing an Eval Contract for a harness, skill, MCP tool, SOP, or shared rule.
 - Adding or changing a SOP stage definition or predicate-backed hard rule.
 - Adding an eval domain registry entry such as `eval:a2a` or `eval:memory`.
+- Adding a derived session-transition eval such as `eval:session-recovery`, including bounded preview, semantic assessment, sanitized bundle, and verdict publish contracts.
 - Producing or validating Verdict Handoff Packets.
 - Migrating legacy scheduled tasks into unified eval runtime.
 - Deciding whether a harness should `fix`, `build`, `keep_observe`, or `delete_sunset`.
@@ -64,6 +72,7 @@ F192 owns the socio-technical harness evaluation contract: harnesses declare exp
 
 - Add domain-specific adapters under `packages/api/src/infrastructure/harness-eval/`.
 - Keep raw telemetry ownership in F153; this cell consumes telemetry and produces derived verdicts.
+- For session recovery, consume immutable SessionChain lineage/receipt and canonical transcript event refs from `identity-session`; keep trials derived and owner-scoped instead of adding a second transition store.
 - Keep domain thread text as working context only; registry, snapshots, verdicts, and closure records are the state source of truth.
 - Require dry-run evidence before disabling or redirecting legacy scheduled tasks.
 
@@ -72,6 +81,7 @@ F192 owns the socio-technical harness evaluation contract: harnesses declare exp
 - Do not move canonical trace storage out of F153 into this cell.
 - Do not replace F188 Health Dashboard or F200 memory recall metrics here; consume them as domain inputs.
 - Do not treat Eval Hub as a metrics dashboard. A surfaced item must have verdict, owner ask, and re-eval plan.
+- Do not let session-recovery grading create or repair session lineage. Transition truth belongs to `identity-session`; this cell only projects, validates, grades, and publishes evidence.
 
 ## Static Scan Hints
 
