@@ -7,12 +7,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type {
-  CatId,
-  SessionContinuationOrigin,
-  SessionRecord,
-  SessionRecoveryDeliveryReceipt,
-} from '@cat-cafe/shared';
+import type { CatId, SessionContinuationOrigin, SessionRecord, SessionRecoveryDeliveryReceipt } from '@cat-cafe/shared';
 
 export interface CreateSessionInput {
   cliSessionId: string;
@@ -37,8 +32,8 @@ export interface CreateSessionInput {
 
 /** Half-open creation-time window with a mandatory output bound. */
 export interface SessionScanWindow {
-  createdAfter: number;
-  createdBefore: number;
+  windowStartMs: number;
+  windowEndMs: number;
   limit: number;
 }
 
@@ -143,9 +138,9 @@ export class SessionChainStore implements ISessionChainStore {
       catId: input.catId,
       userId: input.userId,
       seq,
-      ...(input.openedByInvocationId ? { openedByInvocationId: input.openedByInvocationId } : {}),
-      ...(input.continuationOrigin ? { continuationOrigin: { ...input.continuationOrigin } } : {}),
-      ...(input.recoveryDelivery ? { recoveryDelivery: { ...input.recoveryDelivery } } : {}),
+      openedByInvocationId: input.openedByInvocationId,
+      continuationOrigin: input.continuationOrigin,
+      recoveryDelivery: input.recoveryDelivery,
       status: 'active',
       messageCount: 0,
       createdAt: now,
@@ -288,8 +283,8 @@ export class SessionChainStore implements ISessionChainStore {
   scanAll(window: SessionScanWindow): SessionRecord[] {
     assertValidScanWindow(window);
     return [...this.records.values()]
-      .filter((record) => record.createdAt >= window.createdAfter && record.createdAt < window.createdBefore)
-      .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))
+      .filter((record) => isRecordInScanWindow(record, window))
+      .sort((a, b) => recordWindowTimestamp(b) - recordWindowTimestamp(a) || b.id.localeCompare(a.id))
       .slice(0, window.limit);
   }
 
@@ -370,13 +365,25 @@ export class SessionChainStore implements ISessionChainStore {
 }
 
 export function assertValidScanWindow(window: SessionScanWindow): void {
-  if (!Number.isFinite(window.createdAfter) || !Number.isFinite(window.createdBefore)) {
+  if (!Number.isFinite(window.windowStartMs) || !Number.isFinite(window.windowEndMs)) {
     throw new RangeError('session scan window timestamps must be finite');
   }
-  if (window.createdAfter < 0 || window.createdBefore <= window.createdAfter) {
+  if (window.windowStartMs < 0 || window.windowEndMs <= window.windowStartMs) {
     throw new RangeError('session scan window must be a non-empty half-open interval');
   }
   if (!Number.isInteger(window.limit) || window.limit < 1 || window.limit > MAX_SCAN_LIMIT) {
     throw new RangeError(`session scan limit must be an integer between 1 and ${MAX_SCAN_LIMIT}`);
   }
+}
+
+function isRecordInScanWindow(record: SessionRecord, window: SessionScanWindow): boolean {
+  const createdInWindow = record.createdAt >= window.windowStartMs && record.createdAt < window.windowEndMs;
+  const transitionAt = record.sealedAt ?? (record.status === 'sealing' ? record.updatedAt : undefined);
+  const transitionedInWindow =
+    transitionAt !== undefined && transitionAt >= window.windowStartMs && transitionAt < window.windowEndMs;
+  return createdInWindow || transitionedInWindow;
+}
+
+function recordWindowTimestamp(record: SessionRecord): number {
+  return Math.max(record.createdAt, record.sealedAt ?? (record.status === 'sealing' ? record.updatedAt : 0));
 }

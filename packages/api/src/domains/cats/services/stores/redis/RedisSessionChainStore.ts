@@ -158,9 +158,9 @@ export class RedisSessionChainStore implements ISessionChainStore {
         ...(input.chainKey ? { chainKey: input.chainKey } : {}),
         ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {}),
         ...(input.workspaceFingerprint ? { workspaceFingerprint: input.workspaceFingerprint } : {}),
-        ...(input.openedByInvocationId ? { openedByInvocationId: input.openedByInvocationId } : {}),
-        ...(input.continuationOrigin ? { continuationOrigin: { ...input.continuationOrigin } } : {}),
-        ...(input.recoveryDelivery ? { recoveryDelivery: { ...input.recoveryDelivery } } : {}),
+        openedByInvocationId: input.openedByInvocationId,
+        continuationOrigin: input.continuationOrigin,
+        recoveryDelivery: input.recoveryDelivery,
       };
     }
 
@@ -378,24 +378,28 @@ export class RedisSessionChainStore implements ISessionChainStore {
     const BATCH_SIZE = 50;
     for (let i = 0; i < detailKeys.length; i += BATCH_SIZE) {
       const batch = detailKeys.slice(i, i + BATCH_SIZE);
-      const pipeline = this.redis.pipeline();
-      for (const key of batch) pipeline.hgetall(key);
-      const results = await pipeline.exec();
-      if (!results) continue;
-      for (const [err, data] of results) {
-        if (err || !data) continue;
-        const raw = data as Record<string, string>;
-        if (!raw.id) continue;
-        const record = this.hydrate(raw);
-        if (record.createdAt >= window.createdAfter && record.createdAt < window.createdBefore) {
-          records.push(record);
-        }
-      }
+      records.push(...(await this.readScanBatch(batch, window)));
     }
 
     return records
-      .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))
+      .sort((a, b) => recordWindowTimestamp(b) - recordWindowTimestamp(a) || b.id.localeCompare(a.id))
       .slice(0, window.limit);
+  }
+
+  private async readScanBatch(detailKeys: string[], window: SessionScanWindow): Promise<SessionRecord[]> {
+    const pipeline = this.redis.pipeline();
+    for (const key of detailKeys) pipeline.hgetall(key);
+    const results = await pipeline.exec();
+    if (!results) return [];
+    const records: SessionRecord[] = [];
+    for (const [err, data] of results) {
+      if (err || !data) continue;
+      const raw = data as Record<string, string>;
+      if (!raw.id) continue;
+      const record = this.hydrate(raw);
+      if (isRecordInScanWindow(record, window)) records.push(record);
+    }
+    return records;
   }
 
   private hydrate(data: Record<string, string>): SessionRecord {
@@ -475,4 +479,16 @@ function safeParseJson<T>(value: string | undefined): T | null {
   } catch {
     return null;
   }
+}
+
+function isRecordInScanWindow(record: SessionRecord, window: SessionScanWindow): boolean {
+  const createdInWindow = record.createdAt >= window.windowStartMs && record.createdAt < window.windowEndMs;
+  const transitionAt = record.sealedAt ?? (record.status === 'sealing' ? record.updatedAt : undefined);
+  const transitionedInWindow =
+    transitionAt !== undefined && transitionAt >= window.windowStartMs && transitionAt < window.windowEndMs;
+  return createdInWindow || transitionedInWindow;
+}
+
+function recordWindowTimestamp(record: SessionRecord): number {
+  return Math.max(record.createdAt, record.sealedAt ?? (record.status === 'sealing' ? record.updatedAt : 0));
 }

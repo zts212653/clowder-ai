@@ -146,13 +146,30 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     await store.create({ ...BASE_INPUT, catId: 'codex', cliSessionId: 'cli-codex-1' });
 
     const records = await store.scanAll({
-      createdAfter: 0,
-      createdBefore: Date.now() + 1_000,
+      windowStartMs: 0,
+      windowEndMs: Date.now() + 1_000,
       limit: 1,
     });
 
     assert.equal(records.length, 1);
     assert.ok(records[0].createdAt >= 0);
+  });
+
+  it('scanAll() includes a source created earlier but sealed inside the transition window', async () => {
+    const source = await store.create(BASE_INPUT);
+    const sealedAt = source.createdAt + 10_000;
+    await store.update(source.id, { status: 'sealed', sealedAt, updatedAt: sealedAt });
+
+    const records = await store.scanAll({
+      windowStartMs: sealedAt,
+      windowEndMs: sealedAt + 1_000,
+      limit: 10,
+    });
+
+    assert.deepEqual(
+      records.map((record) => record.id),
+      [source.id],
+    );
   });
 
   it('create() and update() preserve workspace binding metadata', async () => {
