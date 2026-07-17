@@ -467,8 +467,15 @@ class ServiceManager {
       redisDataDir,
       '--save',
       '60 1',
+      // Windows: disable AOF. The bundled cygwin portable redis cannot
+      // reliably fork() for AOF background rewrite, so enabling AOF
+      // crashes the redis child process and risks an empty appendonly
+      // file overwriting dump.rdb on the next start (data loss of all
+      // sessions). RDB snapshots (--save above) are sufficient for
+      // desktop single-user persistence. macOS bundles native redis
+      // where AOF rewrite fork works correctly, so keep AOF there.
       '--appendonly',
-      'yes',
+      IS_WIN ? 'no' : 'yes',
       '--maxclients',
       '512',
     ];
