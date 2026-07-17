@@ -114,13 +114,13 @@ if [ -f "$PROJECT_DIR/scripts/restore.ps1" ]; then
   echo "  restore.ps1 已打包进仓库 (desktop/dev 双布局, 一键还原)"
 fi
 
-echo "=== [5/5] 推送到 GitCode ==="
+echo "=== [5/5] 推送到备份仓库 ==="
 cd "$REPO_DIR"
 git add -A
 git commit -m "backup: clowder-ai encrypted migration snapshot" --quiet
 git push origin main --quiet 2>&1 | tail -3 || git push origin HEAD:main --quiet
 echo
-echo "✅ 完成！加密包已推到 https://gitcode.com/kaverjody/cc-backup"
+echo "✅ 完成！加密包已推到备份仓库 (地址见顶部 GC_REMOTE，此处不回显以防泄露凭据)"
 echo "   文件: clowder-backup.tar.gz.enc ($(du -h "$ENC_FILE" | cut -f1))"
 echo "   说明: restore-manifest.json + patch-list.txt (明文，无密钥)"
 echo
