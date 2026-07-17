@@ -18,7 +18,7 @@
  */
 
 import type { CommunityEvent, CommunityObjectProjection } from '@cat-cafe/shared';
-import { DEFAULT_SLA_POLICY, evaluateSlaFindings, type SlaPolicy } from './community-sla-policy.js';
+import { DEFAULT_SLA_POLICY, evaluateSlaFindings, type SlaPolicy } from '../community-sla-policy.js';
 
 // ---------------------------------------------------------------------------
 // Types

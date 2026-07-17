@@ -57,7 +57,7 @@ describe('CommunityReconciler', () => {
   let reconcile;
 
   before(async () => {
-    const mod = await import('../dist/domains/community/CommunityReconciler.js');
+    const mod = await import('../dist/domains/community/reconciliation/CommunityReconciler.js');
     reconcile = mod.reconcile;
   });
 

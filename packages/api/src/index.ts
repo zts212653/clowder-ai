@@ -609,7 +609,7 @@ async function main(): Promise<void> {
   let communityProjector: import('./domains/community/community-projector.js').CommunityProjector | undefined;
   // F168 Phase D D3/D4: reconciliation finding store (Redis-backed, no TTL)
   let communityFindingStore:
-    | import('./domains/community/CommunityReconciliationFindingStore.js').CommunityReconciliationFindingStore
+    | import('./domains/community/reconciliation/CommunityReconciliationFindingStore.js').CommunityReconciliationFindingStore
     | undefined;
   // F233 Phase B (B2): ball-custody ingest（fire-and-forget 旁路写球权事件，注入 AgentRouter）
   let ballCustodyIngest: import('./domains/ball-custody/BallCustodyIngest.js').BallCustodyIngest | undefined;
@@ -621,7 +621,7 @@ async function main(): Promise<void> {
       import('./domains/community/CommunityEventLog.js'),
       import('./domains/community/CommunityObjectStore.js'),
       import('./domains/community/community-projector.js'),
-      import('./domains/community/CommunityReconciliationFindingStore.js'),
+      import('./domains/community/reconciliation/CommunityReconciliationFindingStore.js'),
     ]);
     communityEventLog = new elMod.RedisCommunityEventLog(redis);
     communityObjectStore = new osMod.RedisCommunityObjectStore(redis);
@@ -2825,7 +2825,7 @@ async function main(): Promise<void> {
 
   // F235: Community issue draft routes (publish to community flow)
   {
-    const { GitHubIssuePublisher } = await import('./domains/community/GitHubIssuePublisher.js');
+    const { GitHubIssuePublisher } = await import('./domains/community/github/GitHubIssuePublisher.js');
     const defaultRepo = process.env.COMMUNITY_PUBLISH_DEFAULT_REPO ?? 'clowder-ai/cat-cafe';
     // Phase B: default allowlist includes tutorials repo for multi-target publishing (AC-B2)
     const repoAllowlist = (
@@ -2956,7 +2956,7 @@ async function main(): Promise<void> {
   // D0.3: boot warning when narrator role configured but thread ID absent
   const communityNarratorThreadId = process.env.COMMUNITY_NARRATOR_THREAD_ID;
   {
-    const { NarratorDriver: ND } = await import('./domains/community/NarratorDriver.js');
+    const { NarratorDriver: ND } = await import('./domains/community/narrator/NarratorDriver.js');
     const { DEFAULT_COMMUNITY_ROLE_BINDINGS: bindings } = await import('./domains/community/RoleResolver.js');
     ND.checkNarratorBootConfig({
       narratorRoleConfigured: !!bindings.narrator,
@@ -2964,14 +2964,14 @@ async function main(): Promise<void> {
       log: app.log,
     });
   }
-  let communityNarratorDriver: import('./domains/community/NarratorDriver.js').NarratorDriver | undefined;
+  let communityNarratorDriver: import('./domains/community/narrator/NarratorDriver.js').NarratorDriver | undefined;
   if (communityNarratorThreadId) {
-    const { NarratorDriver } = await import('./domains/community/NarratorDriver.js');
+    const { NarratorDriver } = await import('./domains/community/narrator/NarratorDriver.js');
     const { createRoleResolver, DEFAULT_COMMUNITY_ROLE_BINDINGS } = await import('./domains/community/RoleResolver.js');
     const { createWakeCatFn } = await import('./domains/cats/services/game/wakeCatImpl.js');
     // D0.2: persistent narrator dedup store (Redis-backed)
     const { RedisNarratorDedupStore, InMemoryNarratorDedupStore } = await import(
-      './domains/community/RedisNarratorDedupStore.js'
+      './domains/community/narrator/RedisNarratorDedupStore.js'
     );
     const narratorDedupStore = redis ? new RedisNarratorDedupStore(redis) : new InMemoryNarratorDedupStore();
     const communityWakeCat = createWakeCatFn({

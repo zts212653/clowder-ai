@@ -21,7 +21,7 @@ import type {
   IProposalStore,
   RejectProposalInput,
 } from '../ports/ProposalStore.js';
-import { ProposalKeys } from '../redis-keys/proposal-keys.js';
+import { ProposalKeys } from '../redis-keys/proposals/proposal-keys.js';
 import {
   applyFinalize,
   CAS_TRANSITION_LUA,

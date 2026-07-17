@@ -7,7 +7,7 @@ import { resolve } from 'node:path';
 import type { CreateExternalProjectInput, ExternalProject } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { generateSortableId } from '../cats/services/stores/ports/MessageStore.js';
-import { ExternalProjectKeys } from '../cats/services/stores/redis-keys/external-project-keys.js';
+import { ExternalProjectKeys } from '../cats/services/stores/redis-keys/community/external-project-keys.js';
 
 export class ExternalProjectStore {
   private readonly redis: RedisClient | undefined;

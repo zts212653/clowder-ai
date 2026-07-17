@@ -11,7 +11,7 @@ let sanitize;
 describe('F235 R6: CommunityIssueSanitizer absolute path coverage', () => {
   // Load from compiled output
   before(async () => {
-    const mod = await import('../../dist/domains/community/CommunityIssueSanitizer.js');
+    const mod = await import('../../dist/domains/community/issue-analysis/CommunityIssueSanitizer.js');
     sanitize = mod.sanitize;
   });
 

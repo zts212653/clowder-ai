@@ -15,7 +15,7 @@ import type { CreateFrustrationIssueInput, FrustrationIssue, FrustrationIssueSta
 import { createFrustrationIssue } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { ConfirmIssueInput, IFrustrationIssueStore } from '../ports/FrustrationIssueStore.js';
-import { FrustrationIssueKeys } from '../redis-keys/frustration-issue-keys.js';
+import { FrustrationIssueKeys } from '../redis-keys/community/frustration-issue-keys.js';
 
 const DEFAULT_LIST_LIMIT = 100;
 

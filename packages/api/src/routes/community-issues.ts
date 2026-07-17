@@ -39,10 +39,10 @@ import { registerRoutingTracking } from '../domains/community/community-auto-tra
 import { computeClosureChecklist } from '../domains/community/community-closure-checklist.js';
 import { parseRouteRecommendation } from '../domains/community/community-route-recommendation.js';
 import { derivePrGroup } from '../domains/community/derivePrGroup.js';
-import { type GhIssueFull, mapGitHubIssue } from '../domains/community/GitHubIssueFetcher.js';
-import { type GhPrFull, type GhPrReview, mapGitHubPr } from '../domains/community/GitHubPrFetcher.js';
 import { resolveGuardian } from '../domains/community/GuardianMatcher.js';
-import type { NarratorDriver } from '../domains/community/NarratorDriver.js';
+import { type GhIssueFull, mapGitHubIssue } from '../domains/community/github/GitHubIssueFetcher.js';
+import { type GhPrFull, type GhPrReview, mapGitHubPr } from '../domains/community/github/GitHubPrFetcher.js';
+import type { NarratorDriver } from '../domains/community/narrator/NarratorDriver.js';
 import { TriageOrchestrator } from '../domains/community/TriageOrchestrator.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveUserId } from '../utils/request-identity.js';

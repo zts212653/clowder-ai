@@ -14,7 +14,7 @@ import type { CommunityIssueItem, CreateCommunityIssueInput, UpdateCommunityIssu
 import { generateId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { ICommunityIssueStore } from '../ports/CommunityIssueStore.js';
-import { CommunityIssueKeys } from '../redis-keys/community-issue-keys.js';
+import { CommunityIssueKeys } from '../redis-keys/community/community-issue-keys.js';
 
 const DEFAULT_TTL = 0;
 

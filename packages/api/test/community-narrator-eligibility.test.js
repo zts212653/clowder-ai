@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-const { shouldSpawnNarratorForCase } = await import('../dist/domains/community/community-narrator-eligibility.js');
+const { shouldSpawnNarratorForCase } = await import(
+  '../dist/domains/community/narrator/community-narrator-eligibility.js'
+);
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -7,8 +7,8 @@ import { describe, it } from 'node:test';
  *            callback tokens, session IDs, absolute paths, API keys.
  */
 describe('CommunityIssueSanitizer', () => {
-  /** @returns {Promise<typeof import('../dist/domains/community/CommunityIssueSanitizer.js')>} */
-  const loadModule = () => import('../dist/domains/community/CommunityIssueSanitizer.js');
+  /** @returns {Promise<typeof import('../dist/domains/community/issue-analysis/CommunityIssueSanitizer.js')>} */
+  const loadModule = () => import('../dist/domains/community/issue-analysis/CommunityIssueSanitizer.js');
 
   describe('clean content passes through', () => {
     it('returns clean title and body unchanged', async () => {

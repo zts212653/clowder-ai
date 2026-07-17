@@ -17,7 +17,7 @@ describe('CommunityReconcilerTaskSpec', () => {
   let createCommunityReconcilerTaskSpec;
 
   before(async () => {
-    const mod = await import('../dist/domains/community/CommunityReconcilerTaskSpec.js');
+    const mod = await import('../dist/domains/community/reconciliation/CommunityReconcilerTaskSpec.js');
     createCommunityReconcilerTaskSpec = mod.createCommunityReconcilerTaskSpec;
   });
 

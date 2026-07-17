@@ -43,10 +43,10 @@ import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../cats/services/stores/ports/ThreadStore.js';
 import type { ICommunityEventLog } from '../community/CommunityEventLog.js';
 import type { ICommunityObjectStore } from '../community/CommunityObjectStore.js';
-import type { GitHubSnapshot } from '../community/CommunityReconciler.js';
-import { createCommunityReconcilerTaskSpec } from '../community/CommunityReconcilerTaskSpec.js';
-import type { CommunityReconciliationFindingStore } from '../community/CommunityReconciliationFindingStore.js';
 import type { SlaPolicy } from '../community/community-sla-policy.js';
+import type { GitHubSnapshot } from '../community/reconciliation/CommunityReconciler.js';
+import { createCommunityReconcilerTaskSpec } from '../community/reconciliation/CommunityReconcilerTaskSpec.js';
+import type { CommunityReconciliationFindingStore } from '../community/reconciliation/CommunityReconciliationFindingStore.js';
 import type { ScheduleFactory, ScheduleFactoryDeps, ScheduleFactoryRegistry } from './ScheduleFactoryRegistry.js';
 
 /** Minimal projector interface for optional DI in factories — avoids importing concrete class. */

@@ -11,7 +11,7 @@
 
 import type { DispatchProposal } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
-import { DispatchProposalKeys } from '../../../cats/services/stores/redis-keys/dispatch-proposal-keys.js';
+import { DispatchProposalKeys } from '../../../cats/services/stores/redis-keys/proposals/dispatch-proposal-keys.js';
 import type { CreateDispatchProposalInput, IDispatchProposalStore } from '../ports/IDispatchProposalStore.js';
 
 /** CAS transition: pending → approved. Atomic status check + field update + index ops.

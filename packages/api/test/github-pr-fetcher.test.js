@@ -4,7 +4,7 @@ import { before, describe, test } from 'node:test';
 describe('mapGitHubPr', () => {
   let mapGitHubPr;
   before(async () => {
-    ({ mapGitHubPr } = await import('../dist/domains/community/GitHubPrFetcher.js'));
+    ({ mapGitHubPr } = await import('../dist/domains/community/github/GitHubPrFetcher.js'));
   });
 
   test('open PR with no reviews → unreplied', () => {

@@ -3,7 +3,7 @@ import { deriveTriageConfidence } from '@cat-cafe/shared';
 import type { ICommunityIssueStore } from '../cats/services/stores/ports/CommunityIssueStore.js';
 import type { IThreadStore } from '../cats/services/stores/ports/ThreadStore.js';
 import type { ICommunityRepoConfigStore } from './CommunityRepoConfigStore.js';
-import { resolveConsensus } from './resolveConsensus.js';
+import { resolveConsensus } from './reconciliation/resolveConsensus.js';
 
 interface TriageOrchestratorDeps {
   communityIssueStore: Pick<ICommunityIssueStore, 'get' | 'update'>;

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-const { resolveConsensus } = await import('../dist/domains/community/resolveConsensus.js');
+const { resolveConsensus } = await import('../dist/domains/community/reconciliation/resolveConsensus.js');
 
 const fivePass = [
   { id: 'Q1', result: 'PASS' },

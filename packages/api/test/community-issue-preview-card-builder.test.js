@@ -5,7 +5,7 @@ import { describe, it } from 'node:test';
  * F235 Task 7: CommunityIssuePreviewCard rich block builder.
  */
 
-const loadModule = () => import('../dist/domains/community/community-issue-preview-card-builder.js');
+const loadModule = () => import('../dist/domains/community/issue-analysis/community-issue-preview-card-builder.js');
 
 const draftFixture = {
   draftId: 'cid_test1',

@@ -25,7 +25,7 @@ import type {
   IProfileUpdateProposalStore,
   ProfileUpdateCheckpoint,
 } from '../ports/ProfileUpdateProposalStore.js';
-import { ProfileUpdateProposalKeys } from '../redis-keys/profile-update-proposal-keys.js';
+import { ProfileUpdateProposalKeys } from '../redis-keys/proposals/profile-update-proposal-keys.js';
 import { CAS_TRANSITION_LUA, RECORD_CREATED_THREAD_LUA, RELEASE_DEDUP_LUA } from './RedisProposalStoreHelpers.js';
 
 const DEFAULT_DEDUP_TTL_SECONDS = 10 * 60;

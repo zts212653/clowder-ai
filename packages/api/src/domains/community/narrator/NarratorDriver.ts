@@ -21,7 +21,7 @@
 import { createCatId, type RoleResolver } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
-import type { WakeCatFn } from '../cats/services/game/GameNarratorDriver.js';
+import type { WakeCatFn } from '../../cats/services/game/GameNarratorDriver.js';
 
 // ---------------------------------------------------------------------------
 // D0.2: Persistent dedup store interface (replaces process-local Set)

@@ -30,7 +30,7 @@ describe('CommunityReconciliationFindingStore (Redis)', { skip: redisIsolationSk
   before(async () => {
     assertRedisIsolationOrThrow(REDIS_URL, 'CommunityReconciliationFindingStore');
 
-    const mod = await import('../dist/domains/community/CommunityReconciliationFindingStore.js');
+    const mod = await import('../dist/domains/community/reconciliation/CommunityReconciliationFindingStore.js');
     CommunityReconciliationFindingStore = mod.CommunityReconciliationFindingStore;
     const redisModule = await import('@cat-cafe/shared/utils');
     createRedisClient = redisModule.createRedisClient;

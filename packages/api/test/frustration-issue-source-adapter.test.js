@@ -36,7 +36,7 @@ const defaultConfig = {
 
 describe('F235: FrustrationIssueSourceAdapter', () => {
   beforeEach(async () => {
-    const adapterModule = await import('../dist/domains/community/FrustrationIssueSourceAdapter.js');
+    const adapterModule = await import('../dist/domains/community/issue-analysis/FrustrationIssueSourceAdapter.js');
     createDraftFromFrustrationIssue = adapterModule.createDraftFromFrustrationIssue;
 
     const storeModule = await import('../dist/domains/cats/services/stores/memory/InMemoryCommunityIssueDraftStore.js');

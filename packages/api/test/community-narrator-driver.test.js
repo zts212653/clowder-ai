@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-const { NarratorDriver } = await import('../dist/domains/community/NarratorDriver.js');
+const { NarratorDriver } = await import('../dist/domains/community/narrator/NarratorDriver.js');
 
 // ---------------------------------------------------------------------------
 // Helpers — lightweight fakes

@@ -11,7 +11,7 @@ let GitHubIssuePublisher;
 
 describe('F235 R6: GitHubIssuePublisher token factory', () => {
   before(async () => {
-    const mod = await import('../../dist/domains/community/GitHubIssuePublisher.js');
+    const mod = await import('../../dist/domains/community/github/GitHubIssuePublisher.js');
     GitHubIssuePublisher = mod.GitHubIssuePublisher;
   });
 

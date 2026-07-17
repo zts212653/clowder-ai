@@ -18,7 +18,7 @@ import type {
 import { createCommunityIssueDraft } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { ICommunityIssueDraftStore, PublishDraftInput } from '../ports/CommunityIssueDraftStore.js';
-import { CommunityIssueDraftKeys } from '../redis-keys/community-issue-draft-keys.js';
+import { CommunityIssueDraftKeys } from '../redis-keys/community/community-issue-draft-keys.js';
 
 // ── Serialization ──────────────────────────────────────────────
 

@@ -5,7 +5,7 @@
  */
 
 import type { CommunityIssueDraft, FrustrationIssue, FrustrationSignalType } from '@cat-cafe/shared';
-import type { ICommunityIssueDraftStore } from '../cats/services/stores/ports/CommunityIssueDraftStore.js';
+import type { ICommunityIssueDraftStore } from '../../cats/services/stores/ports/CommunityIssueDraftStore.js';
 import { sanitize } from './CommunityIssueSanitizer.js';
 
 // ── Config ────────────────────────────────────────────────────

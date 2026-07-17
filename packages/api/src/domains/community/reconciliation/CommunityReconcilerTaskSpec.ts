@@ -19,12 +19,12 @@
  */
 
 import type { CommunityObjectProjection } from '@cat-cafe/shared';
-import type { ExecuteContext, GateCtx, TaskSpec_P1 } from '../../infrastructure/scheduler/types.js';
-import type { ICommunityEventLog } from './CommunityEventLog.js';
-import type { ICommunityObjectStore } from './CommunityObjectStore.js';
+import type { ExecuteContext, GateCtx, TaskSpec_P1 } from '../../../infrastructure/scheduler/types.js';
+import type { ICommunityEventLog } from '../CommunityEventLog.js';
+import type { ICommunityObjectStore } from '../CommunityObjectStore.js';
+import type { SlaPolicy } from '../community-sla-policy.js';
 import { type GitHubSnapshot, reconcile } from './CommunityReconciler.js';
 import type { CommunityReconciliationFindingStore } from './CommunityReconciliationFindingStore.js';
-import type { SlaPolicy } from './community-sla-policy.js';
 
 // ---------------------------------------------------------------------------
 // Minimal projector interface

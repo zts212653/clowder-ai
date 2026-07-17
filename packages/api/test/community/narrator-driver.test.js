@@ -15,7 +15,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 
-const NARRATOR_DRIVER_PATH = '../../dist/domains/community/NarratorDriver.js';
+const NARRATOR_DRIVER_PATH = '../../dist/domains/community/narrator/NarratorDriver.js';
 
 /** D0.2: in-memory dedup store for test isolation (atomic claim). */
 function createTestDedupStore() {

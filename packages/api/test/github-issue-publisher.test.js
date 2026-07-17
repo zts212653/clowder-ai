@@ -33,7 +33,7 @@ function mockFetch(status, body) {
 describe('F235: GitHubIssuePublisher', () => {
   beforeEach(async () => {
     originalFetch = globalThis.fetch;
-    const mod = await import('../dist/domains/community/GitHubIssuePublisher.js');
+    const mod = await import('../dist/domains/community/github/GitHubIssuePublisher.js');
     GitHubIssuePublisher = mod.GitHubIssuePublisher;
   });
 

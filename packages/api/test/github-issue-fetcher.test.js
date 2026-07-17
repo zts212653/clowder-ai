@@ -5,7 +5,7 @@ describe('mapGitHubIssue', () => {
   let mapGitHubIssue;
 
   before(async () => {
-    ({ mapGitHubIssue } = await import('../dist/domains/community/GitHubIssueFetcher.js'));
+    ({ mapGitHubIssue } = await import('../dist/domains/community/github/GitHubIssueFetcher.js'));
   });
 
   describe('state mapping', () => {
