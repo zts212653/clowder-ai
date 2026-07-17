@@ -13,9 +13,8 @@ import type {
 } from './session-recovery-types.js';
 
 const SAFE_VERDICT_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
-const SANITIZE_RULES_VERSION = 'f192-session-recovery-v1';
+const SANITIZE_RULES_VERSION = 'f192-session-recovery-v2';
 const MAX_RAW_EVIDENCE_REFS = 100;
-const MAX_RAW_DUPLICATE_TARGETS = 25;
 
 export interface GenerateSessionRecoveryLiveVerdictInput {
   verdictId: string;
@@ -133,22 +132,16 @@ function buildSnapshot(input: GenerateSessionRecoveryLiveVerdictInput, generated
         activationCounts: {
           trial_total: summary.total,
           assessed_total: assessments.length,
-          explicit_lineage_count: count(input.trials, (trial) => trial.lineage === 'explicit'),
-          provider_dispatched_count: count(input.trials, (trial) => trial.delivery === 'provider_dispatched'),
+          observed_target_count: input.trials.length,
           recovered_count: count(input.trials, (trial) => trial.assessment?.stateReconstruction === 'recovered'),
           aligned_count: count(input.trials, (trial) => trial.assessment?.firstMeaningfulAction === 'aligned'),
           continued_count: count(input.trials, (trial) => trial.assessment?.outcome === 'continued'),
           completed_count: count(input.trials, (trial) => trial.assessment?.outcome === 'completed'),
         },
         frictionCounts: {
-          structural_fail_count: summary.structuralFail,
-          structural_unknown_count: summary.structuralUnknown,
           semantic_fail_count: summary.semanticFail,
           semantic_unknown_count: summary.semanticUnknown,
-          missing_target_count: count(input.trials, (trial) => trial.lineage === 'missing'),
-          duplicate_target_count: count(input.trials, (trial) => trial.lineage === 'duplicate'),
-          legacy_unlinked_count: count(input.trials, (trial) => trial.lineage === 'legacy_unlinked'),
-          missing_receipt_count: count(input.trials, (trial) => trial.delivery === 'missing_receipt'),
+          transcript_unavailable_count: count(input.trials, (trial) => trial.transcriptEvidenceStatus !== 'available'),
           stale_count: count(input.trials, (trial) => trial.assessment?.stateReconstruction === 'stale'),
           repeated_count: count(input.trials, (trial) => trial.assessment?.firstMeaningfulAction === 'repeated'),
           misaligned_count: count(input.trials, (trial) => trial.assessment?.firstMeaningfulAction === 'misaligned'),
@@ -162,18 +155,6 @@ function buildSnapshot(input: GenerateSessionRecoveryLiveVerdictInput, generated
 function buildAttribution(input: GenerateSessionRecoveryLiveVerdictInput, generatedAt: string) {
   const summary = summarizeSessionRecoveryTrials(input.trials);
   const findings = [];
-  if (summary.structuralFail > 0) {
-    findings.push(
-      finding(
-        'SR-STRUCTURAL',
-        'structural_fail_count',
-        summary.structuralFail,
-        'transition-lineage',
-        'inspect-transition-lineage',
-        generatedAt,
-      ),
-    );
-  }
   if (summary.semanticFail > 0) {
     findings.push(
       finding(
@@ -198,7 +179,7 @@ function buildAttribution(input: GenerateSessionRecoveryLiveVerdictInput, genera
     : {
         ...base,
         noFindingRecord: {
-          reason: 'no structural or semantic session-recovery failure is present in the assessed window',
+          reason: 'no semantic session-recovery failure is present in the assessed target window',
           evidence: 'session-recovery/assessed_total',
         },
       };
@@ -234,21 +215,8 @@ function sanitizeTrial(trial: SessionRecoveryTrial) {
   return {
     trialId: trial.trialId,
     source: sanitizeSessionRef(trial.source),
-    ...(trial.target ? { target: sanitizeSessionRef(trial.target) } : {}),
-    ...(trial.inferredTarget ? { inferredTarget: sanitizeSessionRef(trial.inferredTarget) } : {}),
-    ...(trial.duplicateTargets
-      ? {
-          duplicateTargetCount: trial.duplicateTargets.length,
-          duplicateTargets: trial.duplicateTargets.slice(0, MAX_RAW_DUPLICATE_TARGETS).map(sanitizeSessionRef),
-          ...(trial.duplicateTargets.length > MAX_RAW_DUPLICATE_TARGETS ? { duplicateTargetsTruncated: true } : {}),
-        }
-      : {}),
-    lineage: trial.lineage,
-    transitionIntegrity: trial.transitionIntegrity,
-    delivery: trial.delivery,
-    structuralIssues: [...trial.structuralIssues],
+    target: sanitizeSessionRef(trial.target),
     ...(trial.firstInvocationId ? { firstInvocationId: trial.firstInvocationId } : {}),
-    ...(trial.firstMeaningfulEventRef ? { firstMeaningfulEventRef: trial.firstMeaningfulEventRef } : {}),
     ...(trial.terminalEventRef ? { terminalEventRef: trial.terminalEventRef } : {}),
     evidenceRefs: trial.evidenceRefs.slice(0, MAX_RAW_EVIDENCE_REFS),
     evidenceRefCount: trial.evidenceRefs.length,
@@ -259,6 +227,9 @@ function sanitizeTrial(trial: SessionRecoveryTrial) {
             trialId: assessment.trialId,
             stateReconstruction: assessment.stateReconstruction,
             firstMeaningfulAction: assessment.firstMeaningfulAction,
+            ...(assessment.firstMeaningfulEventRef
+              ? { firstMeaningfulEventRef: assessment.firstMeaningfulEventRef }
+              : {}),
             outcome: assessment.outcome,
             evidenceRefs: assessment.evidenceRefs.slice(0, MAX_RAW_EVIDENCE_REFS),
             rationaleSha256: sha256Text(assessment.rationale),
@@ -318,7 +289,7 @@ function keyInvocationEventRefs(trials: SessionRecoveryTrial[]): string[] {
     ...new Set(
       trials.flatMap((trial) => [
         ...(trial.firstInvocationId ? [`invocation:${trial.firstInvocationId}`] : []),
-        ...(trial.firstMeaningfulEventRef ? [trial.firstMeaningfulEventRef] : []),
+        ...(trial.assessment?.firstMeaningfulEventRef ? [trial.assessment.firstMeaningfulEventRef] : []),
         ...(trial.terminalEventRef ? [trial.terminalEventRef] : []),
       ]),
     ),

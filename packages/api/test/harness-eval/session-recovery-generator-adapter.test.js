@@ -49,7 +49,7 @@ function packet(id = 'session-recovery-live-test') {
       direction: 'unknown',
     },
     rootCauseHypothesis: {
-      summary: 'One target reconstructed stale state after a valid provider delivery.',
+      summary: 'One observed target reconstructed stale state.',
       confidence: 'medium',
       alternatives: ['The stale assessment may be isolated to one runtime family.'],
     },
@@ -87,16 +87,12 @@ function trial(sourceId, semantic = 'clean') {
   const firstMeaningfulEventRef = `transcript:${target.sessionId}:event:2`;
   const terminalEventRef = `transcript:${target.sessionId}:event:5`;
   return {
-    trialId: `session-recovery:${sourceId}`,
+    trialId: `session-recovery:${target.sessionId}`,
     source,
     target,
-    lineage: 'explicit',
-    transitionIntegrity: 'pass',
-    delivery: 'provider_dispatched',
-    structuralIssues: [],
     firstInvocationId: `inv-${sourceId}`,
-    firstMeaningfulEventRef,
     terminalEventRef,
+    transcriptEvidenceStatus: 'available',
     evidenceRefs: [
       source.evidenceRef,
       target.evidenceRef,
@@ -105,9 +101,10 @@ function trial(sourceId, semantic = 'clean') {
       terminalEventRef,
     ],
     assessment: {
-      trialId: `session-recovery:${sourceId}`,
+      trialId: `session-recovery:${target.sessionId}`,
       stateReconstruction: semantic === 'clean' ? 'recovered' : 'stale',
       firstMeaningfulAction: semantic === 'clean' ? 'aligned' : 'misaligned',
+      firstMeaningfulEventRef,
       outcome: semantic === 'clean' ? 'continued' : 'failed',
       evidenceRefs: [source.evidenceRef, firstMeaningfulEventRef],
       rationale: `PRIVATE FREE TEXT ${sourceId} MUST BE HASHED, NOT COMMITTED`,
@@ -167,7 +164,7 @@ describe('session recovery live verdict and generator adapter', () => {
     assert.ok(provenance.sessionRefs.includes('session:source-clean'));
     assert.ok(provenance.invocationEventRefs.includes('transcript:source-stale-target:event:2'));
     assert.equal(provenance.rawInputs[0].sha256, createHash('sha256').update(rawBytes).digest('hex'));
-    assert.equal(provenance.sanitizeRulesVersion, 'f192-session-recovery-v1');
+    assert.equal(provenance.sanitizeRulesVersion, 'f192-session-recovery-v2');
 
     const summary = loadEvalHubSummary({ harnessFeedbackRoot });
     assert.equal(summary.items.length, 1);

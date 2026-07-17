@@ -35,76 +35,46 @@ describe('SessionChainStore', () => {
     assert.equal(record.createdAt, record.updatedAt);
   });
 
-  test('create() persists immutable session recovery lineage and delivery receipt', async () => {
+  test('create() persists immutable target-side continuation provenance', async () => {
     const store = await createStore();
-    const continuationOrigin = {
-      sourceSessionId: 'source-session-1',
-      sourceSeq: 0,
-      kind: 'threshold',
-      sealReason: 'threshold',
-      proposalId: 'proposal-1',
-    };
-    const recoveryDelivery = {
-      sourceSessionId: 'source-session-1',
-      providerDispatchAt: 1_721_111_111_111,
-      bootstrapContentHash: 'sha256:bootstrap-1',
-      bootstrapIncludedInPrompt: true,
-      handoffNoteIncluded: true,
-    };
-
     const record = store.create({
       ...BASE_INPUT,
       openedByInvocationId: 'invocation-1',
-      continuationOrigin,
-      recoveryDelivery,
+      continuedFromSessionId: 'source-session-1',
     });
 
     assert.equal(record.openedByInvocationId, 'invocation-1');
-    assert.deepEqual(record.continuationOrigin, continuationOrigin);
-    assert.deepEqual(record.recoveryDelivery, recoveryDelivery);
+    assert.equal(record.continuedFromSessionId, 'source-session-1');
 
     store.update(record.id, {
       openedByInvocationId: 'forged-invocation',
-      continuationOrigin: { ...continuationOrigin, sourceSessionId: 'forged-source' },
-      recoveryDelivery: { ...recoveryDelivery, sourceSessionId: 'forged-source' },
+      continuedFromSessionId: 'forged-source',
     });
 
     const reread = store.get(record.id);
     assert.equal(reread.openedByInvocationId, 'invocation-1');
-    assert.deepEqual(reread.continuationOrigin, continuationOrigin);
-    assert.deepEqual(reread.recoveryDelivery, recoveryDelivery);
+    assert.equal(reread.continuedFromSessionId, 'source-session-1');
   });
 
-  test('scanAll() requires a bounded time window and result limit', async () => {
+  test('scanContinuationTargets() is owner scoped, bounded, and excludes ordinary Sessions', async () => {
     const store = await createStore();
     store.create(BASE_INPUT);
-    store.create({ ...BASE_INPUT, catId: 'codex', cliSessionId: 'cli-codex-1' });
+    const target = store.create({
+      ...BASE_INPUT,
+      cliSessionId: 'cli-target',
+      continuedFromSessionId: 'source-session-1',
+    });
+    store.create({ ...BASE_INPUT, cliSessionId: 'cli-foreign', userId: 'user-2', continuedFromSessionId: 'foreign' });
 
-    const records = store.scanAll({
+    const records = store.scanContinuationTargets({
+      ownerUserId: 'user-1',
       windowStartMs: 0,
       windowEndMs: Date.now() + 1_000,
       limit: 1,
     });
-
-    assert.equal(records.length, 1);
-    assert.ok(records[0].createdAt >= 0);
-  });
-
-  test('scanAll() includes a source created earlier but sealed inside the transition window', async () => {
-    const store = await createStore();
-    const source = store.create(BASE_INPUT);
-    const sealedAt = source.createdAt + 10_000;
-    store.update(source.id, { status: 'sealed', sealedAt, updatedAt: sealedAt });
-
-    const records = store.scanAll({
-      windowStartMs: sealedAt,
-      windowEndMs: sealedAt + 1_000,
-      limit: 10,
-    });
-
     assert.deepEqual(
       records.map((record) => record.id),
-      [source.id],
+      [target.id],
     );
   });
 

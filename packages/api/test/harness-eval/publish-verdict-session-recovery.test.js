@@ -78,9 +78,10 @@ function packet(id) {
 
 function assessment(overrides = {}) {
   return {
-    trialId: 'session-recovery:source-1',
+    trialId: 'session-recovery:target-1',
     stateReconstruction: 'recovered',
     firstMeaningfulAction: 'aligned',
+    firstMeaningfulEventRef: 'transcript:target-1:event:2',
     outcome: 'continued',
     evidenceRefs: ['session:source-1', 'transcript:target-1:event:2'],
     rationale: 'The visible anchors match the live task state.',
@@ -100,7 +101,7 @@ function sourceRefs(overrides = {}) {
 
 function resolvedTrial() {
   return {
-    trialId: 'session-recovery:source-1',
+    trialId: 'session-recovery:target-1',
     source: {
       sessionId: 'source-1',
       evidenceRef: 'session:source-1',
@@ -122,13 +123,9 @@ function resolvedTrial() {
       status: 'active',
       createdAt: 1_501,
     },
-    lineage: 'explicit',
-    transitionIntegrity: 'pass',
-    delivery: 'provider_dispatched',
-    structuralIssues: [],
     firstInvocationId: 'inv-target-1',
-    firstMeaningfulEventRef: 'transcript:target-1:event:2',
     terminalEventRef: 'transcript:target-1:event:5',
+    transcriptEvidenceStatus: 'available',
     evidenceRefs: [
       'session:source-1',
       'session:target-1',
@@ -229,7 +226,23 @@ describe('publish_verdict session recovery selector', () => {
       });
       const result = await publish(deps, id);
       assert.equal(result.status, 400, JSON.stringify(result));
-      assert.equal(result.error, 'invalid_session_recovery_assessment');
+      assert.equal(result.error, 'invalid_assessment');
+    }
+  });
+
+  it('maps correctable transcript evidence gaps to invalid_assessment instead of generator_failed', async () => {
+    for (const message of [
+      'semantic assessment requires available transcript evidence: session-recovery:target-1 (read_failed)',
+      'semantic assessment requires a target transcript evidence ref: session-recovery:target-1',
+    ]) {
+      const { deps } = buildDeps({
+        resolve: async () => {
+          throw new Error(message);
+        },
+      });
+      const result = await publish(deps, `session-recovery-evidence-gap-${message.includes('available') ? 'a' : 'b'}`);
+      assert.equal(result.status, 400, JSON.stringify(result));
+      assert.equal(result.error, 'invalid_assessment');
     }
   });
 });

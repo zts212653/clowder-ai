@@ -4,10 +4,13 @@ export {
   type SessionRecoveryLiveVerdictArtifact,
 } from './eval-session-recovery-live-verdict.js';
 export {
-  gradeSessionRecoveryStructure,
   gradeSessionRecoveryTrial,
   summarizeSessionRecoveryTrials,
 } from './session-recovery-grader.js';
+export {
+  SESSION_RECOVERY_OPENING_EVIDENCE_EVENT_LIMIT,
+  selectSessionRecoveryOpeningEvidence,
+} from './session-recovery-opening-evidence.js';
 export {
   SessionRecoveryTrialProvider,
   validateSessionRecoverySelector,
@@ -15,12 +18,8 @@ export {
 export type {
   SessionEvidenceRef,
   SessionRecoveryAssessment,
-  SessionRecoveryDelivery,
-  SessionRecoveryLineage,
   SessionRecoveryResolveScope,
   SessionRecoverySourceSelector,
-  SessionRecoveryStructuralGrade,
-  SessionRecoveryTransitionIntegrity,
   SessionRecoveryTrial,
   SessionRecoveryTrialGrade,
   SessionRecoveryTrialProviderDeps,

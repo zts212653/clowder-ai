@@ -190,7 +190,7 @@ describe('F194 Phase Z2: route-parallel must propagate parentInvocationId to inv
     }
   });
 
-  it('F192: carries fresh recovery metadata through parallel routing to target creation', async () => {
+  it('F192: carries the continuation source through parallel routing to target creation', async () => {
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sessionChainStore = new SessionChainStore();
@@ -221,7 +221,6 @@ describe('F194 Phase Z2: route-parallel must propagate parentInvocationId to inv
 
     const target = sessionChainStore.getActive('opus', 'parallel-recovery-thread');
     assert.ok(receivedPrompts[0].includes('[Session Continuity — Session #2]'));
-    assert.equal(target.continuationOrigin.sourceSessionId, source.id);
-    assert.equal(target.recoveryDelivery.bootstrapIncludedInPrompt, true);
+    assert.equal(target.continuedFromSessionId, source.id);
   });
 });

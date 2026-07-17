@@ -32,9 +32,5 @@ fixtures:
   - id: session-recovery-stale
     featureId: F192
     path: docs/harness-feedback/fixtures/session-recovery/stale.json
-    signal: structurally valid transition with stale semantic recovery
-  - id: session-recovery-missing-target
-    featureId: F192
-    path: docs/harness-feedback/fixtures/session-recovery/missing-target.json
-    signal: committed continuation with no target session
+    signal: observed continuation target with stale semantic recovery
 enabled: true

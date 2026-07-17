@@ -3,244 +3,430 @@ import { describe, it } from 'node:test';
 import {
   SessionRecoveryTrialProvider,
   validateSessionRecoverySelector,
-} from '../../dist/infrastructure/harness-eval/session-recovery/index.js';
+} from '../../dist/infrastructure/harness-eval/session-recovery/session-recovery-trial-provider.js';
 
 const OWNER = 'owner-1';
 
-function session(overrides) {
+function session(overrides = {}) {
   return {
-    id: overrides.id,
-    cliSessionId: `${overrides.id}-cli`,
+    id: 'source-1',
+    cliSessionId: 'cli-source',
     threadId: 'thread-1',
-    catId: 'codex',
+    catId: 'cat-1',
     userId: OWNER,
     seq: 0,
     status: 'sealed',
-    messageCount: 1,
-    createdAt: 1_000,
-    updatedAt: 2_000,
-    sealedAt: 2_000,
     sealReason: 'threshold',
+    sealedAt: 1_500,
+    messageCount: 2,
+    createdAt: 1_000,
+    updatedAt: 1_500,
     ...overrides,
   };
 }
 
-function explicitTarget(source, overrides = {}) {
+function target(overrides = {}) {
   return session({
     id: 'target-1',
-    seq: source.seq + 1,
-    status: 'sealed',
-    createdAt: 2_100,
-    updatedAt: 2_900,
-    sealedAt: 2_900,
-    openedByInvocationId: 'inv-target-1',
-    continuationOrigin: {
-      sourceSessionId: source.id,
-      sourceSeq: source.seq,
-      kind: 'threshold',
-      sealReason: 'threshold',
-    },
-    recoveryDelivery: {
-      sourceSessionId: source.id,
-      providerDispatchAt: 2_050,
-      bootstrapContentHash: `sha256:${'a'.repeat(64)}`,
-      bootstrapIncludedInPrompt: true,
-      handoffNoteIncluded: false,
-    },
+    cliSessionId: 'cli-target',
+    seq: 1,
+    status: 'active',
+    messageCount: 1,
+    createdAt: 2_000,
+    updatedAt: 2_000,
+    sealedAt: undefined,
+    sealReason: undefined,
+    continuedFromSessionId: 'source-1',
+    openedByInvocationId: 'inv-1',
     ...overrides,
   });
 }
 
-function provider(records, eventsByInvocation = {}) {
+function transcriptEvent(eventNo, event, invocationId = 'inv-1') {
+  return {
+    v: 1,
+    t: 2_000 + eventNo,
+    threadId: 'thread-1',
+    catId: 'cat-1',
+    sessionId: 'target-1',
+    cliSessionId: 'cli-target',
+    invocationId,
+    eventNo,
+    event,
+  };
+}
+
+function providerFor(records, events = []) {
+  const byId = new Map(records.map((record) => [record.id, record]));
   return new SessionRecoveryTrialProvider({
-    sessionStore: { scanAll: async () => records },
+    sessionStore: {
+      scanContinuationTargets(query) {
+        return records
+          .filter((record) => record.userId === query.ownerUserId)
+          .filter((record) => record.continuedFromSessionId)
+          .filter((record) => record.createdAt >= query.windowStartMs && record.createdAt < query.windowEndMs)
+          .filter((record) => !query.catId || record.catId === query.catId)
+          .filter((record) => !query.threadId || record.threadId === query.threadId)
+          .slice(0, query.limit);
+      },
+      get(id) {
+        return byId.get(id) ?? null;
+      },
+    },
     transcriptReader: {
-      readEvents: async (_sessionId, _threadId, _catId, cursor, limit = 100) => {
-        const events = Object.values(eventsByInvocation).flat();
-        const start = cursor?.eventNo ?? 0;
-        const page = events.filter((item) => item.eventNo >= start).slice(0, limit);
-        const last = page.at(-1);
-        return {
-          events: page,
-          total: events.length,
-          ...(last && last.eventNo + 1 < events.length ? { nextCursor: { eventNo: last.eventNo + 1 } } : {}),
-        };
+      async readEvents() {
+        return { events, total: events.length };
       },
     },
   });
 }
 
-function event(target, eventNo, type, content = undefined) {
-  return {
-    v: 1,
-    t: 2_200 + eventNo,
-    threadId: target.threadId,
-    catId: target.catId,
-    sessionId: target.id,
-    cliSessionId: target.cliSessionId,
-    invocationId: target.openedByInvocationId,
-    eventNo,
-    event: { type, ...(content ? { content } : {}) },
-  };
-}
-
 const SELECTOR = {
   kind: 'session-recovery-window',
-  windowStartMs: 1_500,
+  windowStartMs: 1_900,
   windowEndMs: 3_000,
-  limit: 20,
+  limit: 10,
 };
 
 describe('SessionRecoveryTrialProvider', () => {
-  it('projects an explicit clean transition without copying transcript bodies', async () => {
-    const source = session({ id: 'source-1' });
-    const target = explicitTarget(source);
-    const secret = 'private transcript body must not enter the trial';
-    const trials = await provider([source, target], {
-      'inv-target-1': [event(target, 0, 'system_info'), event(target, 1, 'text', secret), event(target, 2, 'done')],
-    }).resolve(SELECTOR, { ownerUserId: OWNER });
+  it('projects opening-invocation anchors without server-side first-action semantics or transcript bodies', async () => {
+    const source = session();
+    const next = target();
+    const events = [
+      transcriptEvent(0, { type: 'session_init' }),
+      transcriptEvent(1, { type: 'text', text: 'private transcript body' }),
+      transcriptEvent(2, { type: 'done' }),
+    ];
+    const [trial] = await providerFor([source, next], events).resolve(SELECTOR, { ownerUserId: OWNER });
 
-    assert.equal(trials.length, 1);
-    assert.equal(trials[0].trialId, 'session-recovery:source-1');
-    assert.equal(trials[0].lineage, 'explicit');
-    assert.equal(trials[0].transitionIntegrity, 'pass');
-    assert.equal(trials[0].delivery, 'provider_dispatched');
-    assert.equal(trials[0].firstInvocationId, 'inv-target-1');
-    assert.equal(trials[0].firstMeaningfulEventRef, 'transcript:target-1:event:1');
-    assert.equal(trials[0].assessment, undefined);
-    assert.doesNotMatch(JSON.stringify(trials[0]), new RegExp(secret));
+    assert.equal(trial.trialId, 'session-recovery:target-1');
+    assert.equal(trial.source.sessionId, 'source-1');
+    assert.equal(trial.target.sessionId, 'target-1');
+    assert.equal(trial.firstInvocationId, 'inv-1');
+    assert.equal(trial.firstMeaningfulEventRef, undefined);
+    assert.ok(trial.evidenceRefs.includes('transcript:target-1:event:1'));
+    assert.equal(trial.terminalEventRef, 'transcript:target-1:event:2');
+    assert.equal(JSON.stringify(trial).includes('private transcript body'), false);
   });
 
-  it('keeps stale semantics unknown until an explicit assessment is supplied', async () => {
-    const source = session({ id: 'source-stale' });
-    const target = explicitTarget(source, { id: 'target-stale', openedByInvocationId: 'inv-stale' });
-    const assessment = {
-      trialId: 'session-recovery:source-stale',
-      stateReconstruction: 'stale',
-      firstMeaningfulAction: 'misaligned',
-      outcome: 'failed',
-      evidenceRefs: ['invocation:inv-stale'],
-      rationale: 'The eval cat compared the action with live branch truth.',
-    };
-    const trials = await provider([source, target]).resolve(
-      { ...SELECTOR, assessments: [assessment] },
-      { ownerUserId: OWNER },
-    );
-
-    assert.deepEqual(trials[0].assessment, assessment);
-  });
-
-  it('surfaces missing, duplicate, cross-identity, and legacy transitions honestly', async () => {
-    const missing = session({ id: 'source-missing', seq: 0, sealReason: 'cat_initiated_handoff' });
-    const duplicate = session({ id: 'source-duplicate', seq: 10 });
-    const dupA = explicitTarget(duplicate, { id: 'dup-a', seq: 11, openedByInvocationId: 'inv-dup-a' });
-    const dupB = explicitTarget(duplicate, { id: 'dup-b', seq: 11, openedByInvocationId: 'inv-dup-b' });
-    const cross = session({ id: 'source-cross', seq: 20 });
-    const crossTarget = explicitTarget(cross, {
-      id: 'cross-target',
-      seq: 21,
-      threadId: 'wrong-thread',
-      openedByInvocationId: 'inv-cross',
-    });
-    const legacy = session({ id: 'source-legacy', seq: 30 });
-    const legacyCandidate = session({
-      id: 'legacy-target',
-      seq: 31,
-      status: 'active',
-      createdAt: 2_100,
-      updatedAt: 2_100,
-      sealedAt: undefined,
-      openedByInvocationId: undefined,
-      continuationOrigin: undefined,
-      recoveryDelivery: undefined,
+  it('does not mark an exhausted multi-page opening transcript as truncated', async () => {
+    const source = session();
+    const next = target();
+    let page = 0;
+    const provider = new SessionRecoveryTrialProvider({
+      sessionStore: {
+        scanContinuationTargets() {
+          return [next];
+        },
+        get() {
+          return source;
+        },
+      },
+      transcriptReader: {
+        async readEvents() {
+          page += 1;
+          if (page === 1) {
+            return {
+              events: [transcriptEvent(0, { type: 'session_init' })],
+              nextCursor: { eventNo: 1 },
+              total: 2,
+            };
+          }
+          return { events: [transcriptEvent(1, { type: 'done' })], total: 2 };
+        },
+      },
     });
 
-    const trials = await provider([
-      missing,
-      duplicate,
-      dupA,
-      dupB,
-      cross,
-      crossTarget,
-      legacy,
-      legacyCandidate,
-    ]).resolve(SELECTOR, { ownerUserId: OWNER });
-    const byId = new Map(trials.map((trial) => [trial.trialId, trial]));
+    const [trial] = await provider.resolve(SELECTOR, { ownerUserId: OWNER });
 
-    assert.equal(byId.get('session-recovery:source-missing').lineage, 'missing');
-    assert.equal(byId.get('session-recovery:source-missing').delivery, 'missing_target');
-    assert.equal(byId.get('session-recovery:source-duplicate').lineage, 'duplicate');
-    assert.equal(byId.get('session-recovery:source-duplicate').duplicateTargets.length, 2);
-    assert.equal(byId.get('session-recovery:source-cross').transitionIntegrity, 'fail');
-    assert.ok(byId.get('session-recovery:source-cross').structuralIssues.includes('target_identity_mismatch'));
-    assert.equal(byId.get('session-recovery:source-legacy').lineage, 'legacy_unlinked');
-    assert.equal(byId.get('session-recovery:source-legacy').transitionIntegrity, 'unknown');
-    assert.equal(byId.get('session-recovery:source-legacy').inferredTarget.sessionId, 'legacy-target');
+    assert.equal(trial.transcriptEvidenceStatus, 'available');
+    assert.equal(trial.transcriptEvidenceTruncated, undefined);
   });
 
-  it('requires owner scope, filters foreign sources, and rejects forged assessments', async () => {
-    const own = session({ id: 'own-source', sealReason: 'cat_initiated_handoff' });
-    const foreign = session({ id: 'foreign-source', userId: 'owner-2', sealReason: 'cat_initiated_handoff' });
-    const p = provider([own, foreign]);
-
-    await assert.rejects(p.resolve(SELECTOR), /owner_user_required/);
-    const trials = await p.resolve(SELECTOR, { ownerUserId: OWNER });
-    assert.deepEqual(
-      trials.map((trial) => trial.source.sessionId),
-      ['own-source'],
+  it('bounds the opening-event publish allowlist at the same 100 anchors exposed by the evidence reader', async () => {
+    const source = session();
+    const next = target();
+    const firstPage = Array.from({ length: 100 }, (_, eventNo) =>
+      transcriptEvent(eventNo, { type: eventNo === 99 ? 'tool_use' : 'text' }),
     );
+    const provider = new SessionRecoveryTrialProvider({
+      sessionStore: {
+        scanContinuationTargets() {
+          return [next];
+        },
+        get(id) {
+          return id === source.id ? source : next;
+        },
+      },
+      transcriptReader: {
+        async readEvents(_sessionId, _threadId, _catId, cursor, limit) {
+          assert.equal(cursor, undefined);
+          assert.equal(limit, 100);
+          return { events: firstPage, nextCursor: { eventNo: 100 }, total: 150 };
+        },
+      },
+    });
+
+    const [trial] = await provider.resolve(SELECTOR, { ownerUserId: OWNER });
+
+    assert.equal(trial.transcriptEvidenceTruncated, true);
+    assert.ok(trial.evidenceRefs.includes('transcript:target-1:event:99'));
+    assert.ok(!trial.evidenceRefs.includes('transcript:target-1:event:100'));
     await assert.rejects(
-      p.resolve(
+      provider.resolve(
         {
           ...SELECTOR,
           assessments: [
             {
-              trialId: 'session-recovery:not-in-window',
+              trialId: trial.trialId,
               stateReconstruction: 'recovered',
               firstMeaningfulAction: 'aligned',
+              firstMeaningfulEventRef: 'transcript:target-1:event:149',
               outcome: 'continued',
-              evidenceRefs: ['session:not-in-window'],
-              rationale: 'forged',
+              evidenceRefs: ['session:source-1', 'transcript:target-1:event:149'],
+              rationale: 'A reader-only anchor must not be publishable.',
             },
           ],
         },
         { ownerUserId: OWNER },
       ),
-      /unknown assessment trial/i,
+      /foreign assessment evidence ref/,
     );
   });
 
-  it('validates bounded selectors', () => {
-    assert.equal(validateSessionRecoverySelector(SELECTOR), null);
-    assert.match(validateSessionRecoverySelector({ ...SELECTOR, windowEndMs: 1_500 }), /windowEndMs/);
-    assert.match(validateSessionRecoverySelector({ ...SELECTOR, limit: 201 }), /limit/);
-    assert.match(validateSessionRecoverySelector({ ...SELECTOR, windowStartMs: 1_000.5 }), /safe integer/);
-    assert.match(
-      validateSessionRecoverySelector({ ...SELECTOR, windowEndMs: SELECTOR.windowStartMs + 32 * 86_400_000 }),
-      /31 days/,
-    );
-    assert.match(
-      validateSessionRecoverySelector({
+  it('keeps semantics unknown until an evidence-grounded assessment is supplied', async () => {
+    const records = [session(), target()];
+    const events = [transcriptEvent(1, { type: 'text', text: 'body' }), transcriptEvent(2, { type: 'done' })];
+    const provider = providerFor(records, events);
+    const [unassessed] = await provider.resolve(SELECTOR, { ownerUserId: OWNER });
+    assert.equal(unassessed.assessment, undefined);
+
+    const [assessed] = await provider.resolve(
+      {
         ...SELECTOR,
         assessments: [
           {
-            trialId: 'session-recovery:source\nforged',
-            stateReconstruction: 'unknown',
-            firstMeaningfulAction: 'unknown',
-            outcome: 'unknown',
-            evidenceRefs: ['session:source'],
-            rationale: 'invalid anchor',
+            trialId: unassessed.trialId,
+            stateReconstruction: 'stale',
+            firstMeaningfulAction: 'misaligned',
+            firstMeaningfulEventRef: 'transcript:target-1:event:1',
+            outcome: 'failed',
+            evidenceRefs: ['invocation:inv-1', 'transcript:target-1:event:1'],
+            rationale: 'Target acted from stale state.',
           },
         ],
-      }),
-      /single-line/,
+      },
+      { ownerUserId: OWNER },
+    );
+    assert.equal(assessed.assessment.stateReconstruction, 'stale');
+  });
+
+  it('does not fabricate missing-target trials and fails closed on an invalid backlink', async () => {
+    const source = session();
+    assert.deepEqual(await providerFor([source]).resolve(SELECTOR, { ownerUserId: OWNER }), []);
+
+    const invalid = target({ continuedFromSessionId: 'missing-source' });
+    await assert.rejects(
+      providerFor([source, invalid]).resolve(SELECTOR, { ownerUserId: OWNER }),
+      /invalid_continuation_target: source not found/,
     );
   });
 
-  it('fails closed when the bounded session scan saturates', async () => {
-    const records = Array.from({ length: 1_000 }, (_, index) =>
-      session({ id: `saturated-${index}`, userId: 'foreign-owner' }),
+  it('requires owner scope and pushes owner plus optional filters into target discovery', async () => {
+    let captured;
+    const source = session();
+    const next = target();
+    const provider = new SessionRecoveryTrialProvider({
+      sessionStore: {
+        scanContinuationTargets(query) {
+          captured = query;
+          return [next];
+        },
+        get() {
+          return source;
+        },
+      },
+      transcriptReader: {
+        async readEvents() {
+          return { events: [], total: 0 };
+        },
+      },
+    });
+    await assert.rejects(provider.resolve(SELECTOR), /owner_user_required/);
+    await provider.resolve({ ...SELECTOR, catId: 'cat-1', threadId: 'thread-1' }, { ownerUserId: OWNER });
+    assert.deepEqual(captured, {
+      ownerUserId: OWNER,
+      windowStartMs: 1_900,
+      windowEndMs: 3_000,
+      catId: 'cat-1',
+      threadId: 'thread-1',
+      limit: 10,
+    });
+  });
+
+  it('re-resolves one trial only inside the authenticated owner and selector filters', async () => {
+    const provider = providerFor(
+      [session(), target()],
+      [transcriptEvent(1, { type: 'tool_use', name: 'exec_command' }), transcriptEvent(2, { type: 'done' })],
     );
-    await assert.rejects(provider(records).resolve(SELECTOR, { ownerUserId: OWNER }), /session_scan_limit_reached/);
+    const trial = await provider.resolveTrial(SELECTOR, 'session-recovery:target-1', { ownerUserId: OWNER });
+    assert.equal(trial.target.sessionId, 'target-1');
+    await assert.rejects(
+      provider.resolveTrial(SELECTOR, 'session-recovery:target-1', { ownerUserId: 'other-owner' }),
+      /session_recovery_evidence_not_found/,
+    );
+    await assert.rejects(
+      provider.resolveTrial({ ...SELECTOR, catId: 'other-cat' }, 'session-recovery:target-1', {
+        ownerUserId: OWNER,
+      }),
+      /session_recovery_evidence_not_found/,
+    );
+  });
+
+  it('rejects forged evidence refs and unknown target trial IDs', async () => {
+    const provider = providerFor(
+      [session(), target()],
+      [transcriptEvent(1, { type: 'text', text: 'body' }), transcriptEvent(2, { type: 'done' })],
+    );
+    const assessment = {
+      trialId: 'session-recovery:target-1',
+      stateReconstruction: 'recovered',
+      firstMeaningfulAction: 'aligned',
+      firstMeaningfulEventRef: 'transcript:target-1:event:1',
+      outcome: 'continued',
+      evidenceRefs: ['session:foreign'],
+      rationale: 'forged',
+    };
+    await assert.rejects(
+      provider.resolve({ ...SELECTOR, assessments: [assessment] }, { ownerUserId: OWNER }),
+      /foreign assessment evidence ref/,
+    );
+    await assert.rejects(
+      provider.resolve(
+        { ...SELECTOR, assessments: [{ ...assessment, trialId: 'session-recovery:unknown' }] },
+        { ownerUserId: OWNER },
+      ),
+      /unknown assessment trial/,
+    );
+  });
+
+  it('accepts the eval-cat-selected first meaningful event only when it belongs to the opening invocation', async () => {
+    const provider = providerFor(
+      [session(), target()],
+      [
+        transcriptEvent(1, { type: 'text', text: 'I will first inspect the current state.' }),
+        transcriptEvent(2, { type: 'tool_use', name: 'exec_command' }),
+        transcriptEvent(3, { type: 'done' }),
+        transcriptEvent(4, { type: 'tool_use', name: 'apply_patch' }, 'inv-later'),
+      ],
+    );
+    const assessment = {
+      trialId: 'session-recovery:target-1',
+      stateReconstruction: 'recovered',
+      firstMeaningfulAction: 'aligned',
+      firstMeaningfulEventRef: 'transcript:target-1:event:2',
+      outcome: 'continued',
+      evidenceRefs: ['session:source-1', 'transcript:target-1:event:2'],
+      rationale: 'The status sentence is not the substantive action; the selected tool call advances current work.',
+    };
+
+    const [trial] = await provider.resolve({ ...SELECTOR, assessments: [assessment] }, { ownerUserId: OWNER });
+    assert.equal(trial.assessment.firstMeaningfulEventRef, 'transcript:target-1:event:2');
+
+    await assert.rejects(
+      provider.resolve(
+        {
+          ...SELECTOR,
+          assessments: [
+            {
+              ...assessment,
+              evidenceRefs: ['session:source-1', 'transcript:target-1:event:1'],
+            },
+          ],
+        },
+        { ownerUserId: OWNER },
+      ),
+      /first meaningful event evidence ref is required/,
+    );
+
+    await assert.rejects(
+      provider.resolve(
+        {
+          ...SELECTOR,
+          assessments: [
+            {
+              ...assessment,
+              firstMeaningfulEventRef: 'transcript:other-target:event:2',
+              evidenceRefs: ['session:source-1', 'transcript:target-1:event:2'],
+            },
+          ],
+        },
+        { ownerUserId: OWNER },
+      ),
+      /foreign first meaningful event ref/,
+    );
+    await assert.rejects(
+      provider.resolve(
+        {
+          ...SELECTOR,
+          assessments: [
+            {
+              ...assessment,
+              firstMeaningfulEventRef: 'transcript:target-1:event:4',
+              evidenceRefs: ['session:source-1', 'transcript:target-1:event:2'],
+            },
+          ],
+        },
+        { ownerUserId: OWNER },
+      ),
+      /foreign first meaningful event ref/,
+    );
+  });
+
+  it('marks transcript read failures and rejects semantic claims without transcript anchors', async () => {
+    const records = [session(), target()];
+    const provider = new SessionRecoveryTrialProvider({
+      sessionStore: {
+        scanContinuationTargets() {
+          return [records[1]];
+        },
+        get() {
+          return records[0];
+        },
+      },
+      transcriptReader: {
+        async readEvents() {
+          throw new Error('disk unavailable');
+        },
+      },
+    });
+    const [trial] = await provider.resolve(SELECTOR, { ownerUserId: OWNER });
+    assert.equal(trial.transcriptEvidenceStatus, 'read_failed');
+    await assert.rejects(
+      provider.resolve(
+        {
+          ...SELECTOR,
+          assessments: [
+            {
+              trialId: trial.trialId,
+              stateReconstruction: 'recovered',
+              firstMeaningfulAction: 'unknown',
+              outcome: 'unknown',
+              evidenceRefs: ['session:target-1'],
+              rationale: 'Cannot claim this without transcript evidence.',
+            },
+          ],
+        },
+        { ownerUserId: OWNER },
+      ),
+      /requires available transcript evidence/,
+    );
+  });
+
+  it('validates bounded target-creation selectors', () => {
+    assert.equal(validateSessionRecoverySelector(SELECTOR), null);
+    assert.match(validateSessionRecoverySelector({ ...SELECTOR, windowEndMs: 1_000 }), /must be >/);
+    assert.match(validateSessionRecoverySelector({ ...SELECTOR, limit: 201 }), /between 1 and 200/);
+    assert.match(validateSessionRecoverySelector({ ...SELECTOR, threadId: 'bad\nthread' }), /single-line/);
   });
 });

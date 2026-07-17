@@ -102,6 +102,7 @@ export const AGENT_KEY_TOOLS = new Set([
   'cat_cafe_publish_verdict',
   // F192 Phase I: owner-scoped preview is read-only but callback-authenticated.
   'cat_cafe_preview_session_recovery_trials',
+  'cat_cafe_read_session_recovery_evidence',
 ]);
 
 /**
@@ -351,6 +352,7 @@ export const EXPLICIT_TOOL_ANNOTATIONS: Record<string, Annotation> = {
   cat_cafe_list_tasks: A_READ_LOCAL,
   cat_cafe_list_events: A_READ_LOCAL,
   cat_cafe_preview_session_recovery_trials: A_READ_LOCAL,
+  cat_cafe_read_session_recovery_evidence: A_READ_LOCAL,
   cat_cafe_list_schedule_templates: A_READ_LOCAL,
   cat_cafe_check_permission_status: A_READ_LOCAL,
   cat_cafe_feat_index: A_READ_LOCAL,

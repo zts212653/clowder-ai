@@ -41,7 +41,7 @@ import {
   type InvocationContext,
 } from '../../context/SystemPromptBuilder.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
-import { type BootstrapRecoveryMetadata, buildSessionBootstrap } from '../../session/SessionBootstrap.js';
+import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
 import type { StoredToolEvent } from '../../stores/ports/MessageStore.js';
 import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
 import { classifyTool } from '../../tool-usage/classify.js';
@@ -340,7 +340,7 @@ export async function* routeParallel(
       // #836: Reborn cats skip bootstrap — every invocation starts with zero prior context.
       // Uses store lookup (not thread field) — Redis memberSS:* fields aren't hydrated by get().
       let bootstrapCtx = '';
-      let recoveryBootstrap: BootstrapRecoveryMetadata | undefined;
+      let continuedFromSessionId: string | undefined;
       // #836: Reborn check is best-effort — transient Redis failure must not
       // abort the invocation before bootstrap/routing. Default to non-reborn.
       let isParReborn = false;
@@ -375,7 +375,7 @@ export async function* routeParallel(
           );
           if (bootstrap) {
             bootstrapCtx = bootstrap.text;
-            recoveryBootstrap = bootstrap.recovery;
+            continuedFromSessionId = bootstrap.continuedFromSessionId;
           }
         } catch {
           // Best-effort: bootstrap failure doesn't block invocation
@@ -584,7 +584,7 @@ export async function* routeParallel(
         mentionContent: message,
         mentioningCatId: userId as import('@cat-cafe/shared').CatId,
         continuityCapsule,
-        ...(recoveryBootstrap ? { recoveryBootstrap } : {}),
+        ...(continuedFromSessionId ? { continuedFromSessionId } : {}),
         isLastCat: false,
       });
     }),

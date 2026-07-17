@@ -21,4 +21,10 @@ export const SessionChainKeys = {
    * rotation. Lets session_init reuse the same record instead of seal+create.
    */
   byChainKey: (chainKey: string) => `session-by-chainkey:${chainKey}`,
+  /** Observed continuation targets for one owner (score = target createdAt). */
+  continuationTargetsByOwner: (userId: string) => `session-continuation-targets:owner:${keyPart(userId)}`,
 };
+
+function keyPart(value: string): string {
+  return encodeURIComponent(value);
+}

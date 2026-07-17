@@ -5,7 +5,6 @@
 
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -827,17 +826,10 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(active.status, 'active');
   });
 
-  it('F192: provider dispatch stamps recovery receipt once and resume cannot overwrite it', async () => {
+  it('F192: target creation stamps immutable opening invocation and continuation source', async () => {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sessionChainStore = new SessionChainStore();
     const bootstrapText = '[Session Continuity — Session #2]\nsource recovery context';
-    const bootstrapContentHash = `sha256:${createHash('sha256').update(bootstrapText).digest('hex')}`;
-    const origin = {
-      sourceSessionId: 'source-session-1',
-      sourceSeq: 0,
-      kind: 'threshold',
-      sealReason: 'threshold',
-    };
     const prompts = [];
     const service = {
       l0CompilerFn: dummyL0CompilerFn,
@@ -856,12 +848,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         prompt: `${bootstrapText}\n\n---\n\ncontinue`,
         userId: 'user1',
         threadId: 'thread-f192-recovery',
-        recoveryBootstrap: {
-          origin,
-          bootstrapText,
-          bootstrapContentHash,
-          handoffNoteIncluded: false,
-        },
+        continuedFromSessionId: 'source-session-1',
         isLastCat: true,
       }),
     );
@@ -869,15 +856,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const first = sessionChainStore.getActive('opus', 'thread-f192-recovery');
     assert.ok(prompts[0].includes(bootstrapText), 'bootstrap reached the provider-bound prompt');
     assert.equal(first.openedByInvocationId, 'inv-1');
-    assert.deepEqual(first.continuationOrigin, origin);
-    assert.deepEqual(first.recoveryDelivery, {
-      sourceSessionId: 'source-session-1',
-      providerDispatchAt: first.recoveryDelivery.providerDispatchAt,
-      bootstrapContentHash,
-      bootstrapIncludedInPrompt: true,
-      handoffNoteIncluded: false,
-    });
-    assert.ok(first.recoveryDelivery.providerDispatchAt > 0);
+    assert.equal(first.continuedFromSessionId, 'source-session-1');
 
     const forgedText = '[Session Continuity — forged]';
     await collect(
@@ -887,12 +866,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         prompt: forgedText,
         userId: 'user1',
         threadId: 'thread-f192-recovery',
-        recoveryBootstrap: {
-          origin: { ...origin, sourceSessionId: 'forged-source' },
-          bootstrapText: forgedText,
-          bootstrapContentHash: `sha256:${createHash('sha256').update(forgedText).digest('hex')}`,
-          handoffNoteIncluded: true,
-        },
+        continuedFromSessionId: 'forged-source',
         isLastCat: true,
       }),
     );
@@ -900,8 +874,106 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const reread = sessionChainStore.getActive('opus', 'thread-f192-recovery');
     assert.equal(sessionChainStore.getChain('opus', 'thread-f192-recovery').length, 1);
     assert.equal(reread.openedByInvocationId, 'inv-1');
-    assert.equal(reread.continuationOrigin.sourceSessionId, 'source-session-1');
-    assert.equal(reread.recoveryDelivery.handoffNoteIncluded, false);
+    assert.equal(reread.continuedFromSessionId, 'source-session-1');
+  });
+
+  it('F192: resume self-heal seals the stale source without enrolling the fresh retry in live recovery eval', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    const source = sessionChainStore.create({
+      cliSessionId: 'stale-resume-session',
+      threadId: 'thread-f192-self-heal',
+      catId: 'opus',
+      userId: 'user1',
+    });
+    let attempt = 0;
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        attempt += 1;
+        if (attempt === 1) {
+          yield {
+            type: 'error',
+            catId: 'opus',
+            error: 'No conversation found with session ID: stale-resume-session',
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          return;
+        }
+        yield { type: 'session_init', catId: 'opus', sessionId: 'fresh-after-self-heal', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const deps = { ...makeDeps(), sessionChainStore };
+    deps.sessionManager = {
+      ...deps.sessionManager,
+      get: async () => 'stale-resume-session',
+    };
+
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'continue after resume failure',
+        userId: 'user1',
+        threadId: 'thread-f192-self-heal',
+        isLastCat: true,
+      }),
+    );
+
+    const chain = sessionChainStore.getChain('opus', 'thread-f192-self-heal');
+    assert.equal(chain.length, 2);
+    assert.equal(chain[0].id, source.id);
+    assert.equal(chain[0].status, 'sealed');
+    assert.equal(chain[1].openedByInvocationId, 'inv-1');
+    assert.equal(chain[1].continuedFromSessionId, undefined);
+  });
+
+  it('F192: a same-invocation replacement does not become a second live recovery target', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    const source = sessionChainStore.create({
+      cliSessionId: 'sealed-source-cli',
+      threadId: 'thread-f192-double-init',
+      catId: 'opus',
+      userId: 'user1',
+    });
+    sessionChainStore.update(source.id, {
+      status: 'sealed',
+      sealReason: 'threshold',
+      sealedAt: Date.now(),
+    });
+    const bootstrapText = '[Session Continuity]\nrecover from sealed source';
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yield { type: 'session_init', catId: 'opus', sessionId: 'first-target-cli', timestamp: Date.now() };
+        yield { type: 'session_init', catId: 'opus', sessionId: 'replacement-target-cli', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    await collect(
+      invokeSingleCat(
+        { ...makeDeps(), sessionChainStore },
+        {
+          catId: 'opus',
+          service,
+          prompt: `${bootstrapText}\ncontinue`,
+          userId: 'user1',
+          threadId: 'thread-f192-double-init',
+          continuedFromSessionId: source.id,
+          isLastCat: true,
+        },
+      ),
+    );
+
+    const chain = sessionChainStore.getChain('opus', 'thread-f192-double-init');
+    assert.equal(chain.length, 3);
+    assert.equal(chain[1].continuedFromSessionId, source.id);
+    assert.equal(chain[2].openedByInvocationId, 'inv-1');
+    assert.equal(chain[2].continuedFromSessionId, undefined);
   });
 
   it('F211 A2: repeated Antigravity cascade updates runtime metadata without creating a new SessionRecord', async () => {
@@ -2944,7 +3016,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     );
   });
 
-  it('self-heal fresh retry preserves continuity capsule when retry triggers threshold seal', async () => {
+  it('self-heal fresh retry persists continuity capsule before the resume-failure seal', async () => {
     const { buildCapsuleFromRouteState } = await import(
       '../dist/domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js'
     );
@@ -3000,13 +3072,17 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       },
       sessionChainStore: {
         getChain: async () => [activeRecord],
-        getActive: async () => activeRecord,
+        getActive: async () => (activeRecord.status === 'active' ? activeRecord : null),
         create: async () => activeRecord,
-        update: async () => activeRecord,
+        update: async (_id, patch) => {
+          Object.assign(activeRecord, patch);
+          return activeRecord;
+        },
       },
       sessionSealer: {
         requestSeal: async (input) => {
           sealRequests.push(input);
+          activeRecord.status = 'sealing';
           return { accepted: true, status: 'sealing' };
         },
         finalize: async () => {},
@@ -3033,24 +3109,22 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     );
 
     assert.equal(invokeCount, 2, 'should retry once after stale session error');
-    assert.equal(sealRequests.length, 1, 'retry attempt should still be eligible to seal');
-    const sealEvent = msgs.find((m) => {
-      if (m.type !== 'system_info') return false;
-      try {
-        return JSON.parse(m.content).type === 'session_seal_requested';
-      } catch {
-        return false;
-      }
-    });
-    assert.ok(sealEvent, 'retry seal should emit session_seal_requested');
-    const sealPayload = JSON.parse(sealEvent.content);
-    assert.equal(sealPayload.continuityCapsule.threadId, 'thread-retry-seal');
-    assert.equal(sealPayload.continuityCapsule.catId, 'codex');
-    assert.equal(sealPayload.continuityCapsule.continuationReason, 'threshold_seal');
-    assert.equal(sealPayload.continuityCapsule.seal.sessionId, 'sess-retry-seal');
-    assert.equal(sealPayload.continuityDiagnostics.source, 'route_state');
-    assert.equal(sealPayload.continuityDiagnostics.boundary, 'threshold_seal');
-    assert.equal(sealPayload.continuityDiagnostics.persistedVia, 'session_seal_requested');
+    assert.deepEqual(sealRequests, [{ sessionId: 'sess-retry-seal', reason: 'resume_failure:missing_session' }]);
+    assert.equal(activeRecord.status, 'sealing');
+    assert.equal(activeRecord.continuityCapsule.threadId, 'thread-retry-seal');
+    assert.equal(activeRecord.continuityCapsule.catId, 'codex');
+    assert.equal(
+      msgs.some((m) => {
+        if (m.type !== 'system_info') return false;
+        try {
+          return JSON.parse(m.content).type === 'session_seal_requested';
+        } catch {
+          return false;
+        }
+      }),
+      false,
+      'there is no target Session to threshold-seal until the retry emits session_init',
+    );
   });
 
   it('session self-heal: does not retry on non-session errors', async () => {

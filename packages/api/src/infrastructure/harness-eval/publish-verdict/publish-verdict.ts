@@ -2,8 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { CapabilityWakeupSourceSelector } from '../capability-wakeup/capability-wakeup-trial-provider.js';
 import { validateCapabilityWakeupSelector } from '../capability-wakeup/capability-wakeup-trial-provider.js';
-import { getEvalCatOverride } from '../domain/eval-domain-override.js';
-import { loadDomains } from '../hub/eval-hub-read-model.js';
+import { resolveEvalCatAccessPolicy } from '../domain/eval-cat-access.js';
 import {
   assertCanCrossThreadHandoff,
   parseVerdictHandoffPacket,
@@ -129,34 +128,20 @@ export async function handlePublishVerdict(
       detail: 'catId not provided — MCP layer must derive from callback',
     };
   }
-  const domains = loadDomains(deps.harnessFeedbackRoot);
-  const domainEntry = domains.get(packet.domainId as Parameters<typeof domains.get>[0]);
-  if (!domainEntry) {
+  const evalCatAccess = await resolveEvalCatAccessPolicy(deps, packet.domainId);
+  if (!evalCatAccess.registered) {
     return {
       status: 400,
       error: 'domain_not_registered',
       detail: `Domain '${packet.domainId}' not found in eval-domains/ registry`,
     };
   }
-  // 砚砚 R6 P1: prefer Redis override if set, fallback to static registry cat
-  let allowedCatId = domainEntry.evalCat.catId as string;
-  let overrideApplied = false;
-  if (deps.redis) {
-    try {
-      const override = await getEvalCatOverride(deps.redis, packet.domainId);
-      if (override) {
-        allowedCatId = override.catId;
-        overrideApplied = true;
-      }
-    } catch {
-      // Redis read failure: fall back to static cat (safer than open-fail)
-    }
-  }
-  if (input.catId !== allowedCatId) {
+  const domainEntry = evalCatAccess.domain;
+  if (input.catId !== evalCatAccess.allowedCatId) {
     return {
       status: 403,
       error: 'not_allowed',
-      detail: `catId '${input.catId}' is not the eval cat for domain '${packet.domainId}' (expected '${allowedCatId}'${overrideApplied ? ' via OQ-20 Redis override' : ' from registry'})`,
+      detail: `catId '${input.catId}' is not the eval cat for domain '${packet.domainId}' (expected '${evalCatAccess.allowedCatId}'${evalCatAccess.overrideApplied ? ' via OQ-20 Redis override' : ' from registry'})`,
     };
   }
 

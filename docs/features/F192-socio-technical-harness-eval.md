@@ -10,7 +10,7 @@ user_journey_exempt: "Internal harness eval infrastructure — all surfaces are 
 
 # F192: Socio-Technical Harness Eval — harness 共创评估体系
 
-> **Status**: in-progress (Phase F/G closure; Phase I `eval:session-recovery` implementation ready for cross-individual review) | **Owner**: Ragdoll | **Truth sync**: 2026-07-16
+> **Status**: in-progress (Phase F/G closure; Phase I `eval:session-recovery` approved and merge-gate green, awaiting PR) | **Owner**: Ragdoll | **Truth sync**: 2026-07-19
 
 ## Architecture Ownership
 
@@ -74,7 +74,7 @@ F192 现在已经不是“某个 feature 结束后写一篇 feedback”的文档
 
 如果链路里任何一环需要人手工补文件、手工抄 bundle、手工 commit，那就还不算接进 F192 control plane。
 
-### Current Domain Wire Status (2026-07-16 truth sync)
+### Current Domain Wire Status (2026-07-19 truth sync)
 
 | Domain | Schedule | Publish path | Current truth |
 |--------|----------|--------------|---------------|
@@ -84,7 +84,7 @@ F192 现在已经不是“某个 feature 结束后写一篇 feedback”的文档
 | `eval:task-outcome` | daily live | wired (PR #2162, squash `c9aa0e16d`) | Publish path is live. Phase G v0.5 signal chain e2e is green; 7-class episode verdict writeback is wired through explicit `sourceRefs.episodeVerdicts`. Manual runtime Eval Hub acceptance remains open. |
 | `eval:sop` | active (weekly) | wired (PR #2186) | Schema / predicate evaluator + SopTrace producer + file-writer + PUBLISH_VERDICT_INSTRUCTIONS all wired. Re-enabled 2026-06-10. |
 | `eval:anchor-first` | weekly | wired (F236 Track-2) | Preview↔drill open-rate rollup via in-memory event log. Generator adapter + live-verdict writer + provider wired. Eval design truth in F236. |
-| `eval:session-recovery` | weekly | wired (Phase I review candidate) | Owner-scoped bounded preview, explicit semantic assessments, publish selector/adapter, sanitized live bundle, Eval Hub readback, scheduler wired-set, and validator prereq probe are connected. Truth remains SessionChain + TranscriptReader; no parallel transition store. |
+| `eval:session-recovery` | weekly | wired (Phase I approved; merge-gate green) | Owner-scoped bounded preview, explicit semantic assessments, publish selector/adapter, sanitized live bundle, Eval Hub readback, scheduler wired-set, and validator prereq probe are connected. Truth remains SessionChain + TranscriptReader; no parallel transition store. |
 
 ## Why
 
@@ -436,62 +436,69 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 
 ### Phase I（`eval:session-recovery` — session 迁移恢复正确性）
 
-**Why**：`eval:capability-wakeup` 只能回答“猫是否在合适时机想起 handoff”，不能回答“fresh Session 是否真的接住了旧 Session”。2026-07-16 clean/stale 两个隔离 continuation case 已证明 runtime 能交付 bootstrap，也暴露出正式评测缺口：SessionChain 有 source 边界，却没有审计级 source→target lineage、provider-dispatch receipt，以及对 state reconstruction / first meaningful action 的独立 trial contract。
+**Why**：`eval:capability-wakeup` 只能回答“猫是否在合适时机想起 handoff”，不能回答“fresh Session 是否真的接住了旧 Session”。Phase I 的长期价值是评价模型恢复语义，而不是让运行时用额外 receipt 自证确定性代码已经执行。
 
-**边界决议**：
+**2026-07-17 第一性原理收缩决议**：
 
 - `eval:capability-wakeup` 继续评 activation / trigger reflex；`eval:session-recovery` 只评迁移之后的 correctness。
-- Live eval **只读**现有 SessionChain、Proposal、Transcript / Invocation truth；不复制 Redis、SQLite、HOME、日志或 transcript，不新增平行 lifecycle store。
+- 不引入或保留 `SessionContinuationAttempt`；不为 eval 修改 source Session，也不建立 attempt/source 状态索引。
+- 不持久化 bootstrap hash、provider dispatch timestamp、prompt inclusion、handoff-note delivery、seal kind/proposalId 等自证 receipt。
+- `transitionIntegrity` 与 `delivery` 不进入 scheduled live eval；bootstrap、seal→target、retry/concurrency、`reborn` 等确定性保证由 runtime contract/integration test 覆盖。
+- Runtime 只保留 target Session 自身的 canonical identity facts：每个新 Session 在 create path 写不可变 `openedByInvocationId`；仅 `SessionBootstrap` 跨 invocation 选出的首个 target 写不可变 `continuedFromSessionId`。same-invocation self-heal/runtime replacement 不写 backlink，也不进入 F192 population。
+- Live eval **只读**现有 SessionChain、Transcript / Invocation truth；不复制 Redis、SQLite、HOME、日志或 transcript，不新增平行 lifecycle store。
 - 合成 regression 只使用进程内 fixture / test doubles，不向真实用户 thread 写测试数据。
-- `identity-session` owns typed transition lineage；`harness-eval` consumes it and builds a pure read projection。F192 不反向拥有 Session 状态机。
+- `identity-session` owns minimal target backlink；`harness-eval` consumes observed targets and builds a pure read projection。F192 不反向拥有 Session 状态机。
+- 不记录 attempt 的直接代价是 weekly eval 无法发现“发起接续但没有 target”；这是主动放弃低价值观测，timeout/error telemetry 与 runtime tests 负责该 failure mode。
 
 **终态主链**：
 
-`sealed source Session → buildSessionBootstrap recovery metadata → provider-dispatch receipt → target SessionRecord typed lineage → replayable transition projection → eval-cat semantic assessment → VerdictHandoffPacket → publish-verdict bundle`
+`sealed/sealing source Session → buildSessionBootstrap carries source id → first session_init creates target(openedByInvocationId + continuedFromSessionId) → owner-scoped observed-target projection → evaluator-authorized trial-anchored evidence reader → opening invocation/transcript anchors → eval-cat semantic assessment → VerdictHandoffPacket → publish-verdict bundle`
 
-**Trial 五维**：
+**Trial 三项语义标签**：
 
-1. `transitionIntegrity`：source 是否正确 seal、target 是否唯一且显式指回 source。
-2. `delivery`：bootstrap 是否在真实 provider dispatch 边界进入 prompt；F225 五件套是否位于 always-keep 区。
-3. `stateReconstruction`：fresh Session 对 worktree/branch/task/已完成事项的理解是否与 live truth 一致。
-4. `firstMeaningfulAction`：第一项有副作用或结论性的动作是否符合 live truth，是否重做/重问/沿 stale state 行动。
-5. `outcome`：续接 invocation 是否成功继续、明确完成/交接，或失败/重复/跑偏。
+1. `stateReconstruction`：fresh Session 对 worktree/branch/task/已完成事项的理解是否与 live truth 一致。
+2. `firstMeaningfulAction`：由 eval cat 从 target opening invocation 中选择的第一项实质任务动作是否符合 live truth，是否重做/重问/沿 stale state 行动；状态播报不自动算实质动作。known label 必须提交 `firstMeaningfulEventRef`，服务端只验证其属于 opening invocation，不替猫猫做语义选择。
+3. `outcome`：opening invocation 是否成功继续、明确完成/交接，或失败/跑偏。
+
+语义总分只在 `recovered + aligned + (continued | completed)` 时为 pass；任一 stale / repeated / misaligned / failed 为 fail，其余为 unknown。
 
 **AC-I**：
 
-- [x] AC-I1: target `SessionRecord` 在首次 `session_init` 创建时原子持久化不可变 `continuationOrigin`、`openedByInvocationId` 与无正文 `recoveryDelivery` receipt；重复 `session_init` / provider retry 不得覆盖 lineage。
-- [x] AC-I2: `buildSessionBootstrap` 返回 source session / seal reason / proposalId / bootstrap hash 等 typed metadata；serial 与 parallel route 都只在“无 active target”的 fresh continuation 上向 invocation 传递该 metadata。
-- [x] AC-I3: SessionChain store 提供 bounded read-side window enumeration；实现不新增第二份 transition store，legacy 未带 lineage 的 record 明确标 `legacy_unlinked`，不得伪装成 pass。
-- [x] AC-I4: `SessionRecoveryTrialProvider` 构建 replayable `session-recovery-window` projection，覆盖 explicit target / missing target / duplicate target / legacy inferred candidate，并输出 source/target/invocation/transcript evidence refs。
-- [x] AC-I5: deterministic grader 负责 transition + delivery；eval cat 通过受校验的 per-trial assessment 负责 state reconstruction + first meaningful action + outcome。proxy signal 不得替代语义 verdict。
-- [x] AC-I6: clean fixture 判定 recovered/aligned，stale fixture 判定 stale/misaligned；两者均使用进程内 fixture，不连接 6399 或写真实 thread。
+- [x] AC-I1: target `SessionRecord` 在首次 `session_init` 创建时原子持久化不可变 `openedByInvocationId`；只有 route 携带 `SessionBootstrap` source 的首个 target 同时写 `continuedFromSessionId`。same-invocation self-heal/replacement 与 `reborn` 不写 backlink；重复 same-session init / later invocation 不得覆盖 creation facts。
+- [x] AC-I2: `buildSessionBootstrap` 只在“无 active target”的 fresh continuation 返回 `continuedFromSessionId`；serial 与 parallel route 将它传到 target create path，不传 receipt/hash/classifier metadata。
+- [x] AC-I3: SessionChain store 提供 owner-scoped、target-creation-window-bounded 的 `scanContinuationTargets`；Redis lookup index 与 target create 原子写入，不新增第二份 lifecycle truth。带 cat/thread filter 时分页到 result limit 或索引耗尽；扫描 1,000 个候选仍不足且后方有数据则报 `window_too_broad`，不得静默漏样本。
+- [x] AC-I4: `SessionRecoveryTrialProvider` 只从 observed explicit targets 构建 target-centric projection，验证 source sealing/status、identity tuple、backlink、sequence/time，并输出 source/target/opening-invocation/transcript evidence refs；不伪造 missing target 或 legacy inference。
+- [x] AC-I5: eval cat 通过受校验的 per-trial assessment 负责 state reconstruction + first meaningful action + outcome，并在 first-action known 时显式选择 `firstMeaningfulEventRef`；grader 只汇总三项语义标签，event-type heuristic / proxy / structural signal 不得替代语义 verdict。Domain prompt 明确 source/target drill-down、time-aligned live-truth 优先级、正反例与逐字段 `unknown` 规则。
+- [x] AC-I6: clean fixture 冻结 source outstanding intent、target 现场核验、首实质动作与 continued 终态，判定 recovered/aligned；stale fixture 冻结已完成事实、跳过核验的错误首动作与 failed 终态，判定 stale/misaligned。两者均使用进程内 fixture，不连接 6399 或写真实 thread。
 - [x] AC-I7: registry、domain instruction、`sourceRefs` selector、preview/read path、generator adapter、live-verdict writer、publish route 与 MCP schema 全部接线；任一缺失时保持 honest unwired，不发 scheduled publish 指令。
 - [x] AC-I8: bundle 能被 Eval Hub round-trip 读取，provenance 记录 window、source/target Session IDs、invocation/event refs、generator version 与 sanitize 规则；不提交自由文本 transcript，只提交 bounded metadata/hash/ref。
-- [x] AC-I9: handler kind mismatch / invalid window / owner scope / unknown trial / forged evidence ref / duplicate assessment 全部 fail closed；scheduled/manual invocation 可先 preview trials 再形成 verdict。
-- [x] AC-I10: isolated acceptance 运行 clean/stale 与 missing-target 三类 case，证明无独立 runtime data store、无生产写入，并回写本节 wire status / evidence。
+- [x] AC-I9: handler kind mismatch / invalid window / owner scope / unknown trial / forged/foreign selected event ref / duplicate assessment / scan saturation 全部 fail closed；scheduled/manual invocation 可先 preview trials 再形成 verdict。
+- [x] AC-I10: runtime contract tests 覆盖 bootstrap、serial/parallel plumbing、memory/Redis immutability、self-heal/replacement/`reborn` 不写 continuation backlink；isolated acceptance 只运行 clean/stale semantic cases，证明无独立 runtime data store、无生产写入。
+- [x] AC-I11: F192 专用 evidence reader 只授权 registry 或 OQ-20 override 指定的 domain evaluator；随后以 callback/agent-key principal 的 `ownerUserId` 重解析 selector + `trialId`，且只接受 `source_digest` / `source_events` / `target_opening_invocation`。session/cat/thread/opening invocation 均由 resolved trial 决定；`source_events` 内容只作判断上下文，submit-ready `evidenceRefs` 仅广告 canonical source Session ref；opening event selector 与 publish allowlist 共用同一 100-event bound。通用 transcript route 的 per-cat 403 保持不变，非 evaluator 返回 403，跨 owner/filter miss 返回 404。
+- [x] AC-I12: preview 与 publish 对缺 available transcript / target transcript ref 均返回 `400 invalid_assessment`；不得误报 preview/generator 500。
 
-**Phase I implementation evidence（2026-07-16）**：
+**Phase I implementation evidence（2026-07-19 approved contraction）**：
 
 | AC | Runtime / truth anchor | Verification evidence |
 |----|------------------------|-----------------------|
-| I1–I3 | `SessionChainStore` / `RedisSessionChainStore` creation-only lineage + bounded `scanAll`; `SessionBootstrap` typed recovery metadata; `invokeSingleCat` provider-dispatch stamp | Focused API suite 217/217; isolated Redis `redis-session-chain-store.test.js` 32/32 |
-| I4–I5 | `infrastructure/harness-eval/session-recovery/` provider + deterministic grader; semantic fields remain unknown until an explicit assessment is attached | provider/grader adversarial tests cover explicit, missing, duplicate, cross-identity, legacy, owner scope, scan saturation, and forged refs |
-| I6 / I10 | `docs/harness-feedback/fixtures/session-recovery/{clean,stale,missing-target}.json` | isolated acceptance 3/3; `Socket.connect` hard-fail sentinel observed 0 calls; dependencies expose read ports only; all thread IDs are synthetic `fixture-thread-*` |
-| I7 | `eval-session-recovery.yaml`, eval-cat preview→assess→publish instructions, REST route, MCP preview tool, publish schema/adapter, generator map, wired set, and validator prereq probe | eval-domain regression 90/90; MCP suite 386/386; unwired instruction test proves publish guidance is omitted when runtime support is absent |
+| I1–I3 | `SessionChainStore` / `RedisSessionChainStore` creation-only `openedByInvocationId + continuedFromSessionId` and bounded `scanContinuationTargets`; `SessionBootstrap` → route → `invokeSingleCat` source-id plumbing | runtime focused 190/190; isolated Redis 33/33 covers hydration, immutability, owner scope, pagination, 1,000-candidate saturation, bounds, and ordinary-Session exclusion |
+| I4–I5 | `infrastructure/harness-eval/session-recovery/` target-centric provider + semantic-only grader | provider/grader adversarial tests cover observed target, invalid/missing backlink, cross-identity/status/sequence validation, owner scope, transcript failure, eval-cat-selected opening event, unknown/forged refs, and unknown-until-assessed semantics |
+| I6 / I10 | `docs/harness-feedback/fixtures/session-recovery/{clean,stale}.json` | isolated acceptance freezes readable source intent/current-truth check/selected action/terminal evidence through read-only test ports and synthetic `fixture-thread-*`; no missing-target fixture or synthetic production write |
+| I7 / I11 | `eval-session-recovery.yaml`, eval-cat preview→trial-anchored cross-cat drill-down→assess→publish instructions, REST routes, MCP preview/evidence tools, publish schema/adapter, generator map, wired set, and validator prereq probe | session-recovery API/domain focused 38/38; MCP registration/security/schema focused 98/98; cross-cat E2E proves preview→source/opening drill→selected-anchor publish while forged session/invocation input and cross-owner/filter reads fail closed |
 | I8 | `eval-session-recovery-live-verdict.ts` writes bounded metadata/hash/ref bundle and `provenance.json` | generator + fixture tests round-trip through `loadEvalHubSummary`; raw bundle assertions reject owner ID, transcript body, and rationale plaintext |
-| I9 | route/MCP/publish validation and owner principal derivation | publish handler tests reject kind/window/missing/duplicate/unknown/foreign assessment inputs; preview tests reject invalid auth/window and ignore owner spoofing |
+| I9 / I12 | route/MCP/publish validation and owner principal derivation | publish handler tests reject kind/window/duplicate/unknown/foreign assessment inputs; preview tests reject invalid auth/window and ignore owner spoofing; correctable transcript evidence gaps are stable `400 invalid_assessment` responses |
 
-**Quality-gate snapshot（当前 worktree）**：`pnpm check` exit 0；`pnpm lint` exit 0；`pnpm -r --if-present run build` exit 0；focused API 217/217；MCP 386/386；isolated Redis 32/32；fixture acceptance 3/3。手动 dogfood 从 `handlePreviewSessionRecoveryTrials` 经 callback HTTP contract、Fastify route、provider、assessed generator adapter 到 Eval Hub：1 个 `explicit + provider_dispatched` clean trial，bundle 中 transcript/rationale plaintext 均不存在。
+**收缩后当前验证快照**：跨个体正式 review `APPROVE`（无遗留 P1/P2/P3）；shared/API/MCP build exit 0；`pnpm lint` exit 0（仅既有 web warnings）；`pnpm check` exit 0；session-recovery API/domain focused 38/38；Session store/bootstrap/invocation/serial/parallel focused 190/190；isolated Redis 33/33；MCP registration/security/schema focused 98/98。Cross-cat preview→drill→publish、provider pagination 与 Redis 1,000-noise saturation 均有先红后绿 regression。
 
-仓库级 `pnpm test` 当前不是可用的 branch gate：`origin/main` checkout 本身缺少多项被测试引用的私有/导出排除资产（例如 `.claude/settings.json`、`docs/reflections/README.md`、TRPG pack、restore/launchd scripts），本机也未安装 `tmux`；失败路径与本分支 diff 无交集。`check:dir-size` 另被两个 2026-07-15 到期的既有例外阻塞，`check:deps` 因 `origin/main` 不含 `.dependency-cruiser.cjs` 无法启动。上述 baseline gaps 不计作 Phase I 通过证据，也未在本分支修补或绕过。
+最新仓库级 `pnpm gate` 已在 rebase 后的 `origin/main` 基线上完整通过：build、TypeScript、全部 public tests、lint 与 check 均为绿色；测试阶段 737 秒，总耗时 818 秒。本机使用真实 `tmux 3.7b` 跑通 tmux gateway/spawner 集成路径，没有跳过或伪造终端能力。此前“本机缺 tmux、仓库级 gate 不可用”的基线记录已失效，不再代表当前验收真相。
 
 **Eval Contract**：
 
 - Primary users: session/runtime owner、F225 owner、长任务猫与 operator。
-- Activation: bounded window 内 sealed source Session 数、显式 linked target 数、可评 trial 数。
-- Friction: missing/duplicate target、delivery receipt 缺失、state stale、first action 重做/误操作、continuation invocation failed。
-- Regression: clean recovered、stale state corrected before action、missing target、duplicate target、F225 always-keep note、provider retry 不覆盖 lineage。
-- Sunset: 连续 8 周零 session transition 且 session-chain 能力本身 sunset；低触发率单独不能 sunset。若所有五维都被更通用 task-outcome eval 完整覆盖，可发起合并/sunset trial，不能直接删 domain。
+- Activation: bounded target-creation window 内 observed linked target 数、可读取 opening transcript 的 trial 数、已评 trial 数。
+- Friction: state stale、first action 重做/误操作、outcome failed、opening transcript evidence unavailable。
+- Regression: live eval 覆盖真实证据形状的 clean recovered 与 stale recovery、eval-cat first-action selection 与 scan saturation；runtime tests 覆盖 backlink immutability、bootstrap/source plumbing、self-heal/replacement 与 `reborn` 不产生 continuation backlink。
+- Sunset: 连续 8 周零 observed continuation target 且 session-chain continuation 能力本身 sunset；低触发率单独不能 sunset。若三项语义标签与 source/target/invocation anchors 被更通用 task-outcome eval 完整覆盖，可发起合并/sunset trial，不能直接删 domain；runtime contract tests 不随 scheduled domain 一起删除。
 
 ## How To Add A New Eval Domain
 

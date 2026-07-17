@@ -7,7 +7,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { CatId, SessionContinuationOrigin, SessionRecord, SessionRecoveryDeliveryReceipt } from '@cat-cafe/shared';
+import type { CatId, SessionRecord } from '@cat-cafe/shared';
 
 export interface CreateSessionInput {
   cliSessionId: string;
@@ -17,10 +17,9 @@ export interface CreateSessionInput {
   catId: CatId;
   userId: string;
   reuseExistingCliSession?: boolean;
-  /** F192 Phase I: immutable target-side transition metadata. */
+  /** F192 Phase I: immutable creation identity; backlink is SessionBootstrap-only. */
   openedByInvocationId?: string;
-  continuationOrigin?: SessionContinuationOrigin;
-  recoveryDelivery?: SessionRecoveryDeliveryReceipt;
+  continuedFromSessionId?: string;
   /**
    * F198 Bug #3: stable conversation anchor for bg carrier
    * (`bg:${threadId}:${catId}`). When set, the record is indexed by chainKey
@@ -30,11 +29,14 @@ export interface CreateSessionInput {
   chainKey?: string;
 }
 
-/** Half-open creation-time window with a mandatory output bound. */
-export interface SessionScanWindow {
+/** Owner-scoped bounded discovery of observed continuation targets. */
+export interface SessionContinuationTargetScan {
+  ownerUserId: string;
   windowStartMs: number;
   windowEndMs: number;
   limit: number;
+  catId?: string;
+  threadId?: string;
 }
 
 export type SessionRecordPatch = Partial<
@@ -84,12 +86,11 @@ export interface ISessionChainStore {
   incrementCompressionCount(id: string): number | null | Promise<number | null>;
   /** F118: List IDs of all sessions currently in 'sealing' status (for global reaper). */
   listSealingSessions(): string[] | Promise<string[]>;
-  /** F192 Phase I: newest-first bounded read projection; never a second lifecycle store. */
-  scanAll(window: SessionScanWindow): SessionRecord[] | Promise<SessionRecord[]>;
+  /** F192 Phase I: discover only targets explicitly opened from a cross-invocation SessionBootstrap. */
+  scanContinuationTargets(query: SessionContinuationTargetScan): SessionRecord[] | Promise<SessionRecord[]>;
 }
 
 const MAX_RECORDS = 1000;
-const MAX_SCAN_LIMIT = 1000;
 
 /**
  * In-memory SessionChainStore.
@@ -139,8 +140,7 @@ export class SessionChainStore implements ISessionChainStore {
       userId: input.userId,
       seq,
       openedByInvocationId: input.openedByInvocationId,
-      continuationOrigin: input.continuationOrigin,
-      recoveryDelivery: input.recoveryDelivery,
+      continuedFromSessionId: input.continuedFromSessionId,
       status: 'active',
       messageCount: 0,
       createdAt: now,
@@ -280,12 +280,16 @@ export class SessionChainStore implements ISessionChainStore {
     return ids;
   }
 
-  scanAll(window: SessionScanWindow): SessionRecord[] {
-    assertValidScanWindow(window);
+  scanContinuationTargets(query: SessionContinuationTargetScan): SessionRecord[] {
+    assertValidContinuationTargetScan(query);
     return [...this.records.values()]
-      .filter((record) => isRecordInScanWindow(record, window))
-      .sort((a, b) => recordWindowTimestamp(b) - recordWindowTimestamp(a) || b.id.localeCompare(a.id))
-      .slice(0, window.limit);
+      .filter((record) => record.userId === query.ownerUserId)
+      .filter((record) => record.continuedFromSessionId !== undefined)
+      .filter((record) => record.createdAt >= query.windowStartMs && record.createdAt < query.windowEndMs)
+      .filter((record) => !query.catId || record.catId === query.catId)
+      .filter((record) => !query.threadId || record.threadId === query.threadId)
+      .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))
+      .slice(0, query.limit);
   }
 
   /**
@@ -364,26 +368,22 @@ export class SessionChainStore implements ISessionChainStore {
   }
 }
 
-export function assertValidScanWindow(window: SessionScanWindow): void {
-  if (!Number.isFinite(window.windowStartMs) || !Number.isFinite(window.windowEndMs)) {
-    throw new RangeError('session scan window timestamps must be finite');
+export function assertValidContinuationTargetScan(query: SessionContinuationTargetScan): void {
+  if (!query.ownerUserId || /[\r\n]/.test(query.ownerUserId)) {
+    throw new RangeError('continuation target scan requires a single-line ownerUserId');
   }
-  if (window.windowStartMs < 0 || window.windowEndMs <= window.windowStartMs) {
-    throw new RangeError('session scan window must be a non-empty half-open interval');
+  if (!Number.isFinite(query.windowStartMs) || !Number.isFinite(query.windowEndMs)) {
+    throw new RangeError('continuation target scan timestamps must be finite');
   }
-  if (!Number.isInteger(window.limit) || window.limit < 1 || window.limit > MAX_SCAN_LIMIT) {
-    throw new RangeError(`session scan limit must be an integer between 1 and ${MAX_SCAN_LIMIT}`);
+  if (query.windowStartMs < 0 || query.windowEndMs <= query.windowStartMs) {
+    throw new RangeError('continuation target scan requires a non-empty half-open window');
   }
-}
-
-function isRecordInScanWindow(record: SessionRecord, window: SessionScanWindow): boolean {
-  const createdInWindow = record.createdAt >= window.windowStartMs && record.createdAt < window.windowEndMs;
-  const transitionAt = record.sealedAt ?? (record.status === 'sealing' ? record.updatedAt : undefined);
-  const transitionedInWindow =
-    transitionAt !== undefined && transitionAt >= window.windowStartMs && transitionAt < window.windowEndMs;
-  return createdInWindow || transitionedInWindow;
-}
-
-function recordWindowTimestamp(record: SessionRecord): number {
-  return Math.max(record.createdAt, record.sealedAt ?? (record.status === 'sealing' ? record.updatedAt : 0));
+  if (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > 1000) {
+    throw new RangeError('continuation target scan limit must be between 1 and 1000');
+  }
+  for (const value of [query.catId, query.threadId]) {
+    if (value !== undefined && (!value || /[\r\n]/.test(value))) {
+      throw new RangeError('continuation target filters must be non-empty single-line strings');
+    }
+  }
 }

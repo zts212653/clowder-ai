@@ -17,6 +17,7 @@ function assessment(overrides = {}) {
     trialId: 'session-recovery:source-1',
     stateReconstruction: 'recovered',
     firstMeaningfulAction: 'aligned',
+    firstMeaningfulEventRef: 'transcript:target-1:event:2',
     outcome: 'continued',
     evidenceRefs: ['session:source-1', 'transcript:target-1:event:2'],
     rationale: 'Anchor-only semantic assessment.',
@@ -68,6 +69,24 @@ describe('cat_cafe_publish_verdict session-recovery sourceRefs schema', () => {
     );
     assert.equal(
       schema.safeParse(input({ assessments: [assessment({ evidenceRefs: ['session:source-1\nforged'] })] })).success,
+      false,
+    );
+    assert.equal(
+      schema.safeParse(input({ assessments: [assessment({ firstMeaningfulEventRef: undefined })] })).success,
+      false,
+    );
+    assert.equal(
+      schema.safeParse(input({ assessments: [assessment({ evidenceRefs: ['session:source-1'] })] })).success,
+      false,
+    );
+    assert.equal(
+      schema.safeParse(
+        input({
+          assessments: [
+            assessment({ firstMeaningfulAction: 'unknown', firstMeaningfulEventRef: 'transcript:target-1:event:2' }),
+          ],
+        }),
+      ).success,
       false,
     );
   });

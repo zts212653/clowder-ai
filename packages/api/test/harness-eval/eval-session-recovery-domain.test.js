@@ -53,11 +53,19 @@ describe('eval:session-recovery domain activation', () => {
     assert.match(invocation.instructions, /cat_cafe_publish_verdict/);
     assert.match(invocation.instructions, /session-recovery-window/);
     assert.match(invocation.instructions, /assessments/);
-    assert.match(invocation.instructions, /contextAlignment/);
-    assert.match(invocation.instructions, /intentRepetition/);
+    assert.match(invocation.instructions, /stateReconstruction/);
+    assert.match(invocation.instructions, /firstMeaningfulAction/);
+    assert.match(invocation.instructions, /firstMeaningfulEventRef/);
+    assert.match(invocation.instructions, /cat_cafe_read_session_recovery_evidence/);
+    assert.match(invocation.instructions, /source_digest/);
+    assert.match(invocation.instructions, /target_opening_invocation/);
+    assert.match(invocation.instructions, /Truth priority/);
+    assert.match(invocation.instructions, /Positive example/);
+    assert.match(invocation.instructions, /Negative example/);
+    assert.match(invocation.instructions, /affected field unknown|per-field unknown/);
     assert.match(invocation.instructions, /capability-wakeup/i);
     assert.match(invocation.instructions, /activation|whether.*woke/i);
-    assert.match(invocation.instructions, /post-transition|after.*transition|recovery correctness/i);
+    assert.match(invocation.instructions, /transition boundary|SessionBootstrap-driven|recovery correctness/i);
     assert.match(invocation.instructions, /owner scope|owner-scoped|authenticated principal/i);
   });
 

@@ -16,34 +16,35 @@ import type {
   CatHandoffNote,
   CatId,
   ContextHealth,
-  SessionContinuationOrigin,
   SessionRecord,
-  SessionRecoveryDeliveryReceipt,
   SessionStatus,
   SessionUsageSnapshot,
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import {
-  assertValidScanWindow,
+  assertValidContinuationTargetScan,
   type CreateSessionInput,
   type ISessionChainStore,
+  type SessionContinuationTargetScan,
   type SessionRecordPatch,
-  type SessionScanWindow,
 } from '../ports/SessionChainStore.js';
 import { SessionChainKeys } from '../redis-keys/session-chain-keys.js';
 
 const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
+const MAX_TARGET_SCAN_CANDIDATES = 1000;
+const TARGET_SCAN_PAGE_SIZE = 100;
 
 /**
  * Lua: atomic create session record.
  * KEYS[1] = active key, KEYS[2] = chain key, KEYS[3] = detail key,
- * KEYS[4] = cli key, KEYS[5] = chainKey index key (F198; dummy when no chainKey)
+ * KEYS[4] = cli key, KEYS[5] = chainKey index key (F198; dummy when no chainKey),
+ * KEYS[6] = owner continuation-target index
  * ARGV[1] = id, ARGV[2] = cliSessionId, ARGV[3] = threadId, ARGV[4] = catId,
  * ARGV[5] = userId, ARGV[6] = now, ARGV[7] = reuseExistingCliSession flag,
  * ARGV[8] = chainKey value ('' = none, KEYS[5] left untouched)
  * ARGV[9] = workingDirectory ('' = none), ARGV[10] = workspaceFingerprint ('' = none),
- * ARGV[11] = openedByInvocationId, ARGV[12] = continuationOrigin JSON,
- * ARGV[13] = recoveryDelivery JSON (empty string means absent for each)
+ * ARGV[11] = openedByInvocationId, ARGV[12] = continuedFromSessionId
+ * (empty string means absent)
  *
  * Returns: {'existing', existingId} when cliSessionId is already claimed,
  *          {'created', id, seq} when a new record is created.
@@ -66,8 +67,10 @@ end
 if ARGV[9] ~= '' then redis.call('HSET', KEYS[3], 'workingDirectory', ARGV[9]) end
 if ARGV[10] ~= '' then redis.call('HSET', KEYS[3], 'workspaceFingerprint', ARGV[10]) end
 if ARGV[11] ~= '' then redis.call('HSET', KEYS[3], 'openedByInvocationId', ARGV[11]) end
-if ARGV[12] ~= '' then redis.call('HSET', KEYS[3], 'continuationOrigin', ARGV[12]) end
-if ARGV[13] ~= '' then redis.call('HSET', KEYS[3], 'recoveryDelivery', ARGV[13]) end
+if ARGV[12] ~= '' then
+  redis.call('HSET', KEYS[3], 'continuedFromSessionId', ARGV[12])
+  redis.call('ZADD', KEYS[6], ARGV[6], ARGV[1])
+end
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('EXPIRE', KEYS[3], ${DEFAULT_TTL_SECONDS})` : '-- persistent mode: no EXPIRE'}
 redis.call('ZADD', KEYS[2], seq, ARGV[1])
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('EXPIRE', KEYS[2], ${DEFAULT_TTL_SECONDS})` : '-- persistent mode: no EXPIRE'}
@@ -111,15 +114,17 @@ export class RedisSessionChainStore implements ISessionChainStore {
       // pass a placeholder 5th key to keep numkeys fixed; the Lua guards on
       // ARGV[8] !== '' so the placeholder is never written.
       const chainKeyIndexKey = SessionChainKeys.byChainKey(input.chainKey ?? '__none__');
+      const continuationTargetsKey = SessionChainKeys.continuationTargetsByOwner(input.userId);
 
       const result = (await this.redis.eval(
         CREATE_LUA,
-        5,
+        6,
         activeKey,
         chainSetKey,
         detailKey,
         cliKey,
         chainKeyIndexKey,
+        continuationTargetsKey,
         id,
         input.cliSessionId,
         input.threadId,
@@ -131,8 +136,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
         input.workingDirectory ?? '',
         input.workspaceFingerprint ?? '',
         input.openedByInvocationId ?? '',
-        input.continuationOrigin ? JSON.stringify(input.continuationOrigin) : '',
-        input.recoveryDelivery ? JSON.stringify(input.recoveryDelivery) : '',
+        input.continuedFromSessionId ?? '',
       )) as [string, string, string?];
 
       const [status, recordId, seqRaw] = result;
@@ -159,8 +163,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
         ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {}),
         ...(input.workspaceFingerprint ? { workspaceFingerprint: input.workspaceFingerprint } : {}),
         openedByInvocationId: input.openedByInvocationId,
-        continuationOrigin: input.continuationOrigin,
-        recoveryDelivery: input.recoveryDelivery,
+        continuedFromSessionId: input.continuedFromSessionId,
       };
     }
 
@@ -369,35 +372,66 @@ export class RedisSessionChainStore implements ISessionChainStore {
     return ids;
   }
 
-  async scanAll(window: SessionScanWindow): Promise<SessionRecord[]> {
-    assertValidScanWindow(window);
-    const detailKeys = await this.scanKeys('session:*');
-    if (detailKeys.length === 0) return [];
+  async scanContinuationTargets(query: SessionContinuationTargetScan): Promise<SessionRecord[]> {
+    assertValidContinuationTargetScan(query);
+    const indexKey = SessionChainKeys.continuationTargetsByOwner(query.ownerUserId);
+    const matches: SessionRecord[] = [];
+    let offset = 0;
 
-    const records: SessionRecord[] = [];
-    const BATCH_SIZE = 50;
-    for (let i = 0; i < detailKeys.length; i += BATCH_SIZE) {
-      const batch = detailKeys.slice(i, i + BATCH_SIZE);
-      records.push(...(await this.readScanBatch(batch, window)));
+    while (offset < MAX_TARGET_SCAN_CANDIDATES && matches.length < query.limit) {
+      const pageSize = Math.min(TARGET_SCAN_PAGE_SIZE, MAX_TARGET_SCAN_CANDIDATES - offset);
+      const ids = await this.redis.zrevrangebyscore(
+        indexKey,
+        query.windowEndMs - 1,
+        query.windowStartMs,
+        'LIMIT',
+        offset,
+        pageSize,
+      );
+      if (ids.length === 0) break;
+
+      const records = await this.readRecordsByIds(ids);
+      matches.push(
+        ...records
+          .filter((record) => record.userId === query.ownerUserId)
+          .filter((record) => record.continuedFromSessionId !== undefined)
+          .filter((record) => record.createdAt >= query.windowStartMs && record.createdAt < query.windowEndMs)
+          .filter((record) => !query.catId || record.catId === query.catId)
+          .filter((record) => !query.threadId || record.threadId === query.threadId),
+      );
+      offset += ids.length;
+      if (ids.length < pageSize) break;
     }
 
-    return records
-      .sort((a, b) => recordWindowTimestamp(b) - recordWindowTimestamp(a) || b.id.localeCompare(a.id))
-      .slice(0, window.limit);
+    if (matches.length < query.limit && offset >= MAX_TARGET_SCAN_CANDIDATES) {
+      const overflow = await this.redis.zrevrangebyscore(
+        indexKey,
+        query.windowEndMs - 1,
+        query.windowStartMs,
+        'LIMIT',
+        offset,
+        1,
+      );
+      if (overflow.length > 0) {
+        throw new Error(
+          `session_scan_limit_reached: examined ${MAX_TARGET_SCAN_CANDIDATES} owner continuation targets before satisfying filters; narrow the time, cat, or thread window`,
+        );
+      }
+    }
+
+    return matches.sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id)).slice(0, query.limit);
   }
 
-  private async readScanBatch(detailKeys: string[], window: SessionScanWindow): Promise<SessionRecord[]> {
+  private async readRecordsByIds(ids: string[]): Promise<SessionRecord[]> {
+    if (ids.length === 0) return [];
     const pipeline = this.redis.pipeline();
-    for (const key of detailKeys) pipeline.hgetall(key);
+    for (const id of ids) pipeline.hgetall(SessionChainKeys.detail(id));
     const results = await pipeline.exec();
-    if (!results) return [];
     const records: SessionRecord[] = [];
-    for (const [err, data] of results) {
-      if (err || !data) continue;
-      const raw = data as Record<string, string>;
-      if (!raw.id) continue;
-      const record = this.hydrate(raw);
-      if (isRecordInScanWindow(record, window)) records.push(record);
+    for (const [err, value] of results ?? []) {
+      if (err || !value) continue;
+      const raw = value as Record<string, string>;
+      if (raw.id) records.push(this.hydrate(raw));
     }
     return records;
   }
@@ -409,8 +443,6 @@ export class RedisSessionChainStore implements ISessionChainStore {
       data.continuityCapsule !== undefined ? safeParseJson<unknown>(data.continuityCapsule) : undefined;
     const catHandoffNote =
       data.catHandoffNote !== undefined ? safeParseJson<CatHandoffNote>(data.catHandoffNote) : undefined;
-    const continuationOrigin = safeParseJson<SessionContinuationOrigin>(data.continuationOrigin);
-    const recoveryDelivery = safeParseJson<SessionRecoveryDeliveryReceipt>(data.recoveryDelivery);
     const sealReason = data.sealReason as SessionRecord['sealReason'] | undefined;
     const sealedAt = data.sealedAt ? parseInt(data.sealedAt, 10) : undefined;
     const compressionCount = data.compressionCount ? parseInt(data.compressionCount, 10) : undefined;
@@ -428,8 +460,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
       ...(data.workspaceFingerprint ? { workspaceFingerprint: data.workspaceFingerprint } : {}),
       seq: parseInt(data.seq!, 10),
       ...(data.openedByInvocationId ? { openedByInvocationId: data.openedByInvocationId } : {}),
-      ...(continuationOrigin ? { continuationOrigin } : {}),
-      ...(recoveryDelivery ? { recoveryDelivery } : {}),
+      ...(data.continuedFromSessionId ? { continuedFromSessionId: data.continuedFromSessionId } : {}),
       status: (data.status as SessionStatus) ?? 'active',
       ...(contextHealth ? { contextHealth } : {}),
       ...(lastUsage ? { lastUsage } : {}),
@@ -479,16 +510,4 @@ function safeParseJson<T>(value: string | undefined): T | null {
   } catch {
     return null;
   }
-}
-
-function isRecordInScanWindow(record: SessionRecord, window: SessionScanWindow): boolean {
-  const createdInWindow = record.createdAt >= window.windowStartMs && record.createdAt < window.windowEndMs;
-  const transitionAt = record.sealedAt ?? (record.status === 'sealing' ? record.updatedAt : undefined);
-  const transitionedInWindow =
-    transitionAt !== undefined && transitionAt >= window.windowStartMs && transitionAt < window.windowEndMs;
-  return createdInWindow || transitionedInWindow;
-}
-
-function recordWindowTimestamp(record: SessionRecord): number {
-  return Math.max(record.createdAt, record.sealedAt ?? (record.status === 'sealing' ? record.updatedAt : 0));
 }

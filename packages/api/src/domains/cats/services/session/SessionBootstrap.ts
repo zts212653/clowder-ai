@@ -10,8 +10,7 @@
  * 4. MCP tool recall instructions
  */
 
-import { createHash } from 'node:crypto';
-import type { CatId, SessionContinuationKind, SessionContinuationOrigin } from '@cat-cafe/shared';
+import type { CatId } from '@cat-cafe/shared';
 import { estimateTokens } from '../../../../utils/token-counter.js';
 import { formatPromptTime } from '../format-time.js';
 import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
@@ -87,40 +86,8 @@ export interface BootstrapContext {
   hasTaskSnapshot: boolean;
   /** F065 Phase B: Whether thread memory was injected */
   hasThreadMemory: boolean;
-  /** F192 Phase I: present only while opening a fresh target from a sealed source. */
-  recovery?: BootstrapRecoveryMetadata;
-}
-
-/** Ephemeral provider-dispatch evidence. bootstrapText is never persisted. */
-export interface BootstrapRecoveryMetadata {
-  origin: SessionContinuationOrigin;
-  bootstrapText: string;
-  bootstrapContentHash: string;
-  handoffNoteIncluded: boolean;
-}
-
-export function hashSessionBootstrap(text: string): string {
-  return `sha256:${createHash('sha256').update(text).digest('hex')}`;
-}
-
-function classifyContinuationKind(sealReason: string): SessionContinuationKind {
-  switch (sealReason) {
-    case 'threshold':
-    case 'budget_exhausted':
-    case 'max_compressions':
-    case 'cat_initiated_handoff':
-    case 'manual':
-    case 'error':
-      return sealReason;
-    default:
-      if (/resume|overflow_circuit_breaker|external_registration_failed/i.test(sealReason)) {
-        return 'resume_failure';
-      }
-      if (/runtime|model_capacity|cli_session_replaced/i.test(sealReason)) {
-        return 'runtime_rotation';
-      }
-      return 'other';
-  }
+  /** F192 Phase I: causal predecessor for a fresh target; absent when an active Session already exists. */
+  continuedFromSessionId?: string;
 }
 
 export interface SessionBootstrapOptions {
@@ -371,31 +338,13 @@ export async function buildSessionBootstrap(
     taskSection +
     toolsSection;
 
-  const sealReason = prevSession.sealReason ?? 'unknown';
-  const recovery: BootstrapRecoveryMetadata | undefined = active
-    ? undefined
-    : {
-        origin: {
-          sourceSessionId: prevSession.id,
-          sourceSeq: prevSession.seq,
-          kind: classifyContinuationKind(sealReason),
-          sealReason,
-          ...(prevSession.sealReason === 'cat_initiated_handoff' && prevSession.catHandoffNote?.proposalId
-            ? { proposalId: prevSession.catHandoffNote.proposalId }
-            : {}),
-        },
-        bootstrapText: text,
-        bootstrapContentHash: hashSessionBootstrap(text),
-        handoffNoteIncluded: handoffNoteSection.length > 0,
-      };
-
   return {
     text,
     sessionSeq: currentSeq,
     hasDigest,
     hasTaskSnapshot,
     hasThreadMemory,
-    ...(recovery ? { recovery } : {}),
+    ...(!active ? { continuedFromSessionId: prevSession.id } : {}),
   };
 }
 

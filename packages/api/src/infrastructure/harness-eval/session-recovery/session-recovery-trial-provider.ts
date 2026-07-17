@@ -1,11 +1,15 @@
 import type { SessionRecord } from '@cat-cafe/shared';
 import type { TranscriptEvent } from '../../../domains/cats/services/session/TranscriptReader.js';
-import { gradeSessionRecoveryStructure } from './session-recovery-grader.js';
+import {
+  SESSION_RECOVERY_OPENING_EVIDENCE_EVENT_LIMIT,
+  selectSessionRecoveryOpeningEvidence,
+} from './session-recovery-opening-evidence.js';
 import type {
   SessionEvidenceRef,
   SessionRecoveryAssessment,
   SessionRecoveryResolveScope,
   SessionRecoverySourceSelector,
+  SessionRecoveryTranscriptEvidenceStatus,
   SessionRecoveryTrial,
   SessionRecoveryTrialProviderDeps,
 } from './session-recovery-types.js';
@@ -13,12 +17,11 @@ import type {
 const MAX_WINDOW_MS = 31 * 86_400_000;
 const DEFAULT_TRIAL_LIMIT = 50;
 const MAX_TRIAL_LIMIT = 200;
-const MAX_SESSION_SCAN = 1000;
-const MAX_EVIDENCE_EVENTS = 100;
+const MAX_ASSESSMENT_EVIDENCE_REFS = 100;
 
 interface TranscriptEvidence {
+  transcriptEvidenceStatus: SessionRecoveryTranscriptEvidenceStatus;
   firstInvocationId?: string;
-  firstMeaningfulEventRef?: string;
   terminalEventRef?: string;
   transcriptEvidenceTruncated?: boolean;
   evidenceRefs: string[];
@@ -43,131 +46,146 @@ export class SessionRecoveryTrialProvider {
     if (selectorError) throw new Error(`invalid_selector: ${selectorError}`);
     if (!scope.ownerUserId) throw new Error('owner_user_required: session-recovery window scan requires ownerUserId');
 
-    const records = await this.deps.sessionStore.scanAll({
+    const targets = await this.deps.sessionStore.scanContinuationTargets({
+      ownerUserId: scope.ownerUserId,
       windowStartMs: selector.windowStartMs,
       windowEndMs: selector.windowEndMs,
-      limit: MAX_SESSION_SCAN,
+      ...(selector.catId ? { catId: selector.catId } : {}),
+      ...(selector.threadId ? { threadId: selector.threadId } : {}),
+      limit: selector.limit ?? DEFAULT_TRIAL_LIMIT,
     });
-    if (records.length >= MAX_SESSION_SCAN) {
-      throw new Error(
-        `session_scan_limit_reached: ${MAX_SESSION_SCAN} records matched; narrow window, catId, or threadId`,
-      );
-    }
-    const owned = records.filter((record) => record.userId === scope.ownerUserId);
-    const explicitBySource = groupExplicitTargets(owned);
-    const limit = selector.limit ?? DEFAULT_TRIAL_LIMIT;
-    const sourceCandidates = owned
-      .filter((record) => record.status === 'sealed' || record.status === 'sealing')
-      .filter((record) => {
-        const transitionAt = record.sealedAt ?? record.updatedAt;
-        return transitionAt >= selector.windowStartMs && transitionAt < selector.windowEndMs;
-      })
-      .filter((record) => !selector.catId || record.catId === selector.catId)
-      .filter((record) => !selector.threadId || record.threadId === selector.threadId)
-      .map((source) => ({
-        source,
-        explicitTargets: explicitBySource.get(source.id) ?? [],
-        inferredTarget: findLegacyCandidate(owned, source),
-      }))
-      // A quiet threshold/manual seal is not a failed recovery. It becomes a trial only
-      // when a target exists, a legacy next-session candidate exists, or F225 explicitly
-      // committed to an immediate continuation.
-      .filter(
-        ({ source, explicitTargets, inferredTarget }) =>
-          explicitTargets.length > 0 || inferredTarget !== undefined || source.sealReason === 'cat_initiated_handoff',
-      )
-      .sort((a, b) => (b.source.sealedAt ?? b.source.updatedAt) - (a.source.sealedAt ?? a.source.updatedAt))
-      .slice(0, limit);
 
-    const trials: SessionRecoveryTrial[] = [];
-    for (const candidate of sourceCandidates) {
-      trials.push(await this.projectTrial(candidate.source, candidate.explicitTargets, candidate.inferredTarget));
-    }
+    const trials = await Promise.all(targets.map((target) => this.projectTargetTrial(target)));
     return attachAssessments(trials, selector.assessments ?? []);
   }
 
-  private async projectTrial(
-    source: SessionRecord,
-    explicitTargets: SessionRecord[],
-    inferredTarget?: SessionRecord,
+  /**
+   * Resolve one caller-supplied trial anchor inside an authenticated owner/window scope.
+   * This intentionally does not scan by `limit`: a trial returned by preview remains
+   * drillable if a newer target enters the same window before the next tool call.
+   */
+  async resolveTrial(
+    selector: SessionRecoverySourceSelector,
+    trialId: string,
+    scope: SessionRecoveryResolveScope = {},
   ): Promise<SessionRecoveryTrial> {
-    const structural = gradeSessionRecoveryStructure({ source, explicitTargets, inferredTarget });
-    const target = explicitTargets.length === 1 ? explicitTargets[0] : undefined;
-    const evidenceTarget = target ?? (structural.lineage === 'legacy_unlinked' ? inferredTarget : undefined);
-    const transcript = await this.collectTranscriptEvidence(evidenceTarget);
-    const trial: SessionRecoveryTrial = {
-      trialId: `session-recovery:${source.id}`,
-      source: toEvidenceRef(source),
-      lineage: structural.lineage,
-      transitionIntegrity: structural.transitionIntegrity,
-      delivery: structural.delivery,
-      structuralIssues: structural.issues,
-      ...transcript,
-      evidenceRefs: collectSessionEvidenceRefs(source, target, inferredTarget, explicitTargets).concat(
-        transcript.evidenceRefs,
-      ),
-    };
-    if (target) trial.target = toEvidenceRef(target);
-    if (explicitTargets.length > 1) trial.duplicateTargets = explicitTargets.map(toEvidenceRef);
-    if (structural.lineage === 'legacy_unlinked' && inferredTarget) {
-      trial.inferredTarget = toEvidenceRef(inferredTarget);
+    const selectorError = validateSessionRecoverySelector(selector);
+    if (selectorError) throw new Error(`invalid_selector: ${selectorError}`);
+    if (!scope.ownerUserId) throw new Error('owner_user_required: session-recovery trial read requires ownerUserId');
+    if (!trialId.startsWith('session-recovery:') || /[\r\n]/.test(trialId)) {
+      throw new Error('invalid_evidence_request: trialId must be a single-line session-recovery anchor');
     }
-    return trial;
+    const targetId = trialId.slice('session-recovery:'.length);
+    if (!targetId) throw new Error('invalid_evidence_request: trialId target must not be empty');
+    const target = await this.deps.sessionStore.get(targetId);
+    if (!target || !targetMatchesSelector(target, selector, scope.ownerUserId)) {
+      throw new Error(`session_recovery_evidence_not_found: ${trialId}`);
+    }
+    return this.projectTargetTrial(target);
   }
 
-  private async collectTranscriptEvidence(target?: SessionRecord): Promise<TranscriptEvidence> {
-    const invocationId = target?.openedByInvocationId;
-    if (!target || !invocationId) return { evidenceRefs: [] };
-    const transcript = await this.readInvocationEvents(target, invocationId);
-    const firstMeaningful = transcript.events.find((event) => isMeaningfulEventType(event.event.type));
+  private async projectTargetTrial(target: SessionRecord): Promise<SessionRecoveryTrial> {
+    const sourceId = target.continuedFromSessionId;
+    if (!sourceId) throw new Error(`invalid_continuation_target: missing backlink on ${target.id}`);
+    const source = await this.deps.sessionStore.get(sourceId);
+    if (!source) throw new Error(`invalid_continuation_target: source not found for ${target.id}`);
+    const eligibilityIssue = continuationEligibilityIssue(source, target);
+    if (eligibilityIssue) {
+      throw new Error(`invalid_continuation_target: ${target.id}: ${eligibilityIssue}`);
+    }
+
+    const transcript = await this.collectTranscriptEvidence(target);
+    return {
+      trialId: `session-recovery:${target.id}`,
+      source: toEvidenceRef(source),
+      target: toEvidenceRef(target),
+      ...transcript,
+      evidenceRefs: [`session:${source.id}`, `session:${target.id}`, ...transcript.evidenceRefs],
+    };
+  }
+
+  private async collectTranscriptEvidence(target: SessionRecord): Promise<TranscriptEvidence> {
+    const transcript = await this.readOpeningInvocationEvents(target);
+    if (transcript.status !== 'available') {
+      return { transcriptEvidenceStatus: transcript.status, evidenceRefs: [] };
+    }
     const terminal = findTerminalEvent(transcript.events);
     return {
-      firstInvocationId: invocationId,
-      ...(firstMeaningful ? { firstMeaningfulEventRef: transcriptRef(target.id, firstMeaningful.eventNo) } : {}),
+      firstInvocationId: transcript.invocationId,
+      transcriptEvidenceStatus: 'available',
       ...(terminal ? { terminalEventRef: transcriptRef(target.id, terminal.eventNo) } : {}),
       ...(transcript.truncated ? { transcriptEvidenceTruncated: true } : {}),
       evidenceRefs: [
-        `invocation:${invocationId}`,
+        `invocation:${transcript.invocationId}`,
         ...transcript.events.map((event) => transcriptRef(target.id, event.eventNo)),
       ],
     };
   }
 
-  private async readInvocationEvents(
-    target: SessionRecord,
-    invocationId: string,
-  ): Promise<{ events: TranscriptEvent[]; truncated: boolean }> {
+  private async readOpeningInvocationEvents(target: SessionRecord): Promise<
+    | {
+        events: TranscriptEvent[];
+        invocationId: string;
+        truncated: boolean;
+        status: 'available';
+      }
+    | {
+        events: [];
+        truncated: false;
+        status: Exclude<SessionRecoveryTranscriptEvidenceStatus, 'available'>;
+      }
+  > {
     const events: TranscriptEvent[] = [];
+    let invocationId = target.openedByInvocationId;
     let cursor: { eventNo: number } | undefined;
-    let foundInvocation = false;
+    let sawAnyEvent = false;
+    let hasMore = false;
     const PAGE_SIZE = 100;
     const MAX_PAGES = 10;
+
     for (let page = 0; page < MAX_PAGES; page++) {
-      const result = await this.readTranscriptPage(target, cursor, PAGE_SIZE);
-      if (!result) return { events: [], truncated: false };
-      for (const event of result.events) {
-        if (event.invocationId === invocationId) {
-          foundInvocation = true;
-          events.push(event);
-        } else if (foundInvocation) {
-          return { events, truncated: false };
+      let result;
+      try {
+        result = await this.deps.transcriptReader.readEvents(
+          target.id,
+          target.threadId,
+          target.catId,
+          cursor,
+          PAGE_SIZE,
+        );
+      } catch {
+        return { events: [], truncated: false, status: 'read_failed' };
+      }
+      hasMore = result.nextCursor !== undefined;
+
+      sawAnyEvent ||= result.events.length > 0;
+      invocationId ??= result.events.find((event) => event.invocationId)?.invocationId;
+      if (invocationId) {
+        for (const event of result.events) {
+          if (event.invocationId === invocationId) events.push(event);
+          else if (events.length > 0 && event.invocationId) {
+            return { events, invocationId, truncated: false, status: 'available' };
+          }
         }
       }
-      if (events.length >= MAX_EVIDENCE_EVENTS) {
-        return { events: events.slice(0, MAX_EVIDENCE_EVENTS), truncated: result.nextCursor !== undefined };
+
+      if (events.length >= SESSION_RECOVERY_OPENING_EVIDENCE_EVENT_LIMIT) {
+        return {
+          events: selectSessionRecoveryOpeningEvidence(events),
+          invocationId: invocationId!,
+          truncated: result.nextCursor !== undefined,
+          status: 'available',
+        };
       }
-      if (!result.nextCursor) return { events, truncated: false };
+      if (!result.nextCursor) break;
       cursor = result.nextCursor;
     }
-    return { events, truncated: cursor !== undefined };
-  }
 
-  private async readTranscriptPage(target: SessionRecord, cursor: { eventNo: number } | undefined, limit: number) {
-    try {
-      return await this.deps.transcriptReader.readEvents(target.id, target.threadId, target.catId, cursor, limit);
-    } catch {
-      return null;
+    if (!invocationId) {
+      return { events: [], truncated: false, status: sawAnyEvent ? 'missing_invocation' : 'not_found' };
     }
+    if (events.length === 0) return { events: [], truncated: false, status: 'not_found' };
+    return { events, invocationId, truncated: hasMore, status: 'available' };
   }
 }
 
@@ -239,16 +257,30 @@ function validateAssessmentShape(value: unknown): string | null {
   if (!['aligned', 'repeated', 'misaligned', 'unknown'].includes(String(assessment.firstMeaningfulAction))) {
     return 'invalid firstMeaningfulAction';
   }
+  if (
+    assessment.firstMeaningfulEventRef !== undefined &&
+    (typeof assessment.firstMeaningfulEventRef !== 'string' ||
+      !assessment.firstMeaningfulEventRef ||
+      /[\r\n]/.test(assessment.firstMeaningfulEventRef))
+  ) {
+    return 'firstMeaningfulEventRef must be a non-empty single-line string';
+  }
+  if (assessment.firstMeaningfulAction === 'unknown' && assessment.firstMeaningfulEventRef !== undefined) {
+    return 'firstMeaningfulEventRef must be omitted when firstMeaningfulAction is unknown';
+  }
+  if (assessment.firstMeaningfulAction !== 'unknown' && assessment.firstMeaningfulEventRef === undefined) {
+    return 'firstMeaningfulEventRef is required when firstMeaningfulAction is known';
+  }
   if (!['continued', 'completed', 'failed', 'unknown'].includes(String(assessment.outcome))) {
     return 'invalid outcome';
   }
   if (
     !Array.isArray(assessment.evidenceRefs) ||
     assessment.evidenceRefs.length === 0 ||
-    assessment.evidenceRefs.length > MAX_EVIDENCE_EVENTS ||
+    assessment.evidenceRefs.length > MAX_ASSESSMENT_EVIDENCE_REFS ||
     assessment.evidenceRefs.some((ref) => typeof ref !== 'string' || !ref || /[\r\n]/.test(ref))
   ) {
-    return `assessment evidenceRefs must contain 1-${MAX_EVIDENCE_EVENTS} non-empty single-line strings`;
+    return `assessment evidenceRefs must contain 1-${MAX_ASSESSMENT_EVIDENCE_REFS} non-empty single-line strings`;
   }
   if (typeof assessment.rationale !== 'string' || !assessment.rationale.trim() || assessment.rationale.length > 4_000) {
     return 'assessment rationale must contain 1-4000 characters';
@@ -269,6 +301,10 @@ function attachAssessments(
     for (const ref of assessment.evidenceRefs) {
       if (!allowedRefs.has(ref)) throw new Error(`foreign assessment evidence ref: ${ref}`);
     }
+    if (assessment.firstMeaningfulEventRef && !allowedRefs.has(assessment.firstMeaningfulEventRef)) {
+      throw new Error(`foreign first meaningful event ref: ${assessment.firstMeaningfulEventRef}`);
+    }
+    assertAssessmentHasSemanticEvidence(trial, assessment);
     trial.assessment = {
       ...assessment,
       evidenceRefs: [...assessment.evidenceRefs],
@@ -278,43 +314,60 @@ function attachAssessments(
   return trials;
 }
 
-function groupExplicitTargets(records: SessionRecord[]): Map<string, SessionRecord[]> {
-  const grouped = new Map<string, SessionRecord[]>();
-  for (const record of records) {
-    const sourceId = record.continuationOrigin?.sourceSessionId;
-    if (!sourceId) continue;
-    const targets = grouped.get(sourceId) ?? [];
-    targets.push(record);
-    grouped.set(sourceId, targets);
+function assertAssessmentHasSemanticEvidence(trial: SessionRecoveryTrial, assessment: SessionRecoveryAssessment): void {
+  const requiresTranscript =
+    assessment.stateReconstruction !== 'unknown' ||
+    assessment.firstMeaningfulAction !== 'unknown' ||
+    assessment.outcome !== 'unknown';
+  if (!requiresTranscript) return;
+  if (trial.transcriptEvidenceStatus !== 'available' || !trial.firstInvocationId) {
+    throw new Error(
+      `semantic assessment requires available transcript evidence: ${trial.trialId} (${trial.transcriptEvidenceStatus})`,
+    );
   }
-  return grouped;
+  const invocationRef = `invocation:${trial.firstInvocationId}`;
+  const transcriptPrefix = `transcript:${trial.target.sessionId}:event:`;
+  if (!assessment.evidenceRefs.some((ref) => ref === invocationRef || ref.startsWith(transcriptPrefix))) {
+    throw new Error(`semantic assessment requires a target transcript evidence ref: ${trial.trialId}`);
+  }
+  if (
+    assessment.firstMeaningfulAction !== 'unknown' &&
+    (!assessment.firstMeaningfulEventRef || !assessment.evidenceRefs.includes(assessment.firstMeaningfulEventRef))
+  ) {
+    throw new Error(`first meaningful event evidence ref is required: ${trial.trialId}`);
+  }
+  if (
+    assessment.firstMeaningfulEventRef &&
+    !assessment.firstMeaningfulEventRef.startsWith(`transcript:${trial.target.sessionId}:event:`)
+  ) {
+    throw new Error(`first meaningful event must belong to the target opening invocation: ${trial.trialId}`);
+  }
 }
 
-function findLegacyCandidate(records: SessionRecord[], source: SessionRecord): SessionRecord | undefined {
-  return records.find(
-    (candidate) =>
-      !candidate.continuationOrigin &&
-      candidate.id !== source.id &&
-      candidate.userId === source.userId &&
-      candidate.threadId === source.threadId &&
-      candidate.catId === source.catId &&
-      candidate.seq === source.seq + 1,
+function continuationEligibilityIssue(source: SessionRecord, target: SessionRecord): string | null {
+  if (source.status !== 'sealed' && source.status !== 'sealing') return 'source_not_sealed';
+  if (source.userId !== target.userId || source.catId !== target.catId || source.threadId !== target.threadId) {
+    return 'source_target_identity_mismatch';
+  }
+  if (target.continuedFromSessionId !== source.id) return 'source_backlink_mismatch';
+  if (target.seq !== source.seq + 1) return 'source_target_sequence_mismatch';
+  if (target.createdAt < source.createdAt) return 'target_created_before_source';
+  return null;
+}
+
+function targetMatchesSelector(
+  target: SessionRecord,
+  selector: SessionRecoverySourceSelector,
+  ownerUserId: string,
+): boolean {
+  return (
+    target.userId === ownerUserId &&
+    target.createdAt >= selector.windowStartMs &&
+    target.createdAt < selector.windowEndMs &&
+    target.continuedFromSessionId !== undefined &&
+    (!selector.catId || target.catId === selector.catId) &&
+    (!selector.threadId || target.threadId === selector.threadId)
   );
-}
-
-function collectSessionEvidenceRefs(
-  source: SessionRecord,
-  target: SessionRecord | undefined,
-  inferredTarget: SessionRecord | undefined,
-  explicitTargets: SessionRecord[],
-): string[] {
-  const refs = new Set<string>([`session:${source.id}`]);
-  if (target) refs.add(`session:${target.id}`);
-  if (inferredTarget) refs.add(`session:${inferredTarget.id}`);
-  for (const duplicateTarget of explicitTargets.length > 1 ? explicitTargets : []) {
-    refs.add(`session:${duplicateTarget.id}`);
-  }
-  return [...refs];
 }
 
 function toEvidenceRef(record: SessionRecord): SessionEvidenceRef {
@@ -333,10 +386,6 @@ function toEvidenceRef(record: SessionRecord): SessionEvidenceRef {
 
 function transcriptRef(sessionId: string, eventNo: number): string {
   return `transcript:${sessionId}:event:${eventNo}`;
-}
-
-function isMeaningfulEventType(type: unknown): boolean {
-  return type === 'text' || type === 'tool_use' || type === 'tool_result' || type === 'error';
 }
 
 function findTerminalEvent(events: TranscriptEvent[]): TranscriptEvent | undefined {

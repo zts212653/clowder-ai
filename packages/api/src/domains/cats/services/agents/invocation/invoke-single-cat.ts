@@ -20,7 +20,6 @@ import {
   type MessageContent,
   type SealReason,
   type SessionRecord,
-  type SessionRecoveryDeliveryReceipt,
 } from '@cat-cafe/shared';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import {
@@ -84,7 +83,6 @@ import { createPromptDigest } from '../../context/prompt-digest.js';
 // (next to F225 contextHintPrefix) so it lands every turn including resumes.
 import { buildStagingPrepend } from '../../context/StagingContent.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
-import { type BootstrapRecoveryMetadata, hashSessionBootstrap } from '../../session/SessionBootstrap.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { extractUserEnvTemplates, hasSupportedEnvTemplate, resolveEnvMap } from '../providers/env-map.js';
 import { compileL0ViaSubprocess } from '../providers/l0-compiler.js';
@@ -166,7 +164,7 @@ import type { IRuntimeSessionStore } from '../../runtime-session/RuntimeSessionS
 import type { SessionManager } from '../../session/SessionManager.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
 import type { TranscriptSessionInfo, TranscriptWriter } from '../../session/TranscriptWriter.js';
-import type { ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
+import type { CreateSessionInput, ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../../stores/ports/ThreadStore.js';
 import type { AgentMessage, AgentService, AgentServiceOptions } from '../../types.js';
 import { hasL0CompilerSeam } from '../../types.js';
@@ -676,8 +674,8 @@ export interface InvocationParams {
   readonly invocationSpanRef?: { current?: import('@opentelemetry/api').Span };
   /** #502 PR2: structured route control state to persist on threshold seal. */
   readonly continuityCapsule?: RouteStateContinuityCapsule;
-  /** F192 Phase I: fresh-continuation metadata carried with the route prompt. */
-  readonly recoveryBootstrap?: BootstrapRecoveryMetadata;
+  /** F192 Phase I: cross-invocation SessionBootstrap predecessor for the first fresh target only. */
+  readonly continuedFromSessionId?: string;
 }
 
 /**
@@ -2044,16 +2042,50 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     let lastErrorMessage: string | undefined;
     const userVisibleOutputSessionIds = new Set<string>();
     const userVisibleOutputCountedSessionIds = new Set<string>();
-    let currentRecoveryDelivery: SessionRecoveryDeliveryReceipt | undefined;
+    let pendingContinuedFromSessionId = params.continuedFromSessionId;
 
-    const recoveryCreateFields = () =>
-      currentRecoveryDelivery && params.recoveryBootstrap
-        ? {
-            openedByInvocationId: invocationId,
-            continuationOrigin: params.recoveryBootstrap.origin,
-            recoveryDelivery: currentRecoveryDelivery,
-          }
-        : {};
+    const createSessionRecord = async (
+      input: Omit<CreateSessionInput, 'openedByInvocationId' | 'continuedFromSessionId'>,
+    ): Promise<SessionRecord> => {
+      if (!deps.sessionChainStore) throw new Error('session chain store unavailable');
+      const continuedFromSessionId = pendingContinuedFromSessionId;
+      const record = await deps.sessionChainStore.create({
+        ...input,
+        openedByInvocationId: invocationId,
+        ...(continuedFromSessionId ? { continuedFromSessionId } : {}),
+      });
+      // Route bootstrap provenance belongs to at most one created target.
+      // Later same-invocation replacements stay outside the F192 recovery population.
+      pendingContinuedFromSessionId = undefined;
+      return record;
+    };
+
+    const sealActiveSourceForFreshRetry = async (sealReason: string): Promise<void> => {
+      if (!deps.sessionChainStore || !sessionChainActive) return;
+      try {
+        const source = await deps.sessionChainStore.getActive(catId as CatId, threadId);
+        if (!source) return;
+        await deps.sessionChainStore.update(source.id, {
+          consecutiveRestoreFailures: (source.consecutiveRestoreFailures ?? 0) + 1,
+          ...(params.continuityCapsule ? { continuityCapsule: params.continuityCapsule } : {}),
+          updatedAt: Date.now(),
+        });
+        if (deps.sessionSealer) {
+          const result = await deps.sessionSealer.requestSeal({ sessionId: source.id, reason: sealReason });
+          if (result.accepted) deps.sessionSealer.finalize({ sessionId: source.id }).catch(() => {});
+        } else {
+          const now = Date.now();
+          await deps.sessionChainStore.update(source.id, {
+            status: 'sealed',
+            sealReason,
+            sealedAt: now,
+            updatedAt: now,
+          });
+        }
+      } catch (err) {
+        log.warn({ catId, threadId, invocationId, err }, 'failed to seal source before fresh recovery retry');
+      }
+    };
 
     // clowder#915 R4 cloud P1 #3 (defer seal): when a mid-stream agent_loop
     // crosses the seal threshold (opencode step_finish ≥ 0.85 fillRatio),
@@ -2490,13 +2522,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                 });
               }
             } else {
-              const newRec = await deps.sessionChainStore.create({
+              const newRec = await createSessionRecord({
                 cliSessionId: msg.sessionId,
                 threadId,
                 catId,
                 userId,
                 chainKey: bgChainKey,
-                ...recoveryCreateFields(),
               });
               if (params.continuityCapsule) {
                 await deps.sessionChainStore.update(newRec.id, {
@@ -2590,13 +2621,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                     // F118 D1: Inherit failure count from the replaced session.
                     // create() doesn't accept consecutiveRestoreFailures, so use immediate update().
                     const inheritedFailures = existing.consecutiveRestoreFailures ?? 0;
-                    const newRec = await deps.sessionChainStore.create({
+                    const newRec = await createSessionRecord({
                       cliSessionId: msg.sessionId,
                       ...sessionWorkspaceBinding,
                       threadId,
                       catId,
                       userId,
-                      ...recoveryCreateFields(),
                     });
                     if (inheritedFailures > 0) {
                       await deps.sessionChainStore.update(newRec.id, {
@@ -2620,13 +2650,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
               }
             } else {
               // No active session (first invocation or previous was sealed)
-              const newRec = await deps.sessionChainStore.create({
+              const newRec = await createSessionRecord({
                 cliSessionId: msg.sessionId,
                 ...sessionWorkspaceBinding,
                 threadId,
                 catId,
                 userId,
-                ...recoveryCreateFields(),
               });
               if (params.continuityCapsule) {
                 await deps.sessionChainStore.update(newRec.id, {
@@ -3120,27 +3149,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
       // F089: Use abortableNext instead of `for await` so the invocation timeout
       // can break out even when the service generator is stuck on an unresolvable await.
-      currentRecoveryDelivery = undefined;
-      if (params.recoveryBootstrap && !isResume) {
-        const hashMatches =
-          hashSessionBootstrap(params.recoveryBootstrap.bootstrapText) ===
-          params.recoveryBootstrap.bootstrapContentHash;
-        const promptContainsBootstrap = effectivePrompt.includes(params.recoveryBootstrap.bootstrapText);
-        if (hashMatches && promptContainsBootstrap) {
-          currentRecoveryDelivery = {
-            sourceSessionId: params.recoveryBootstrap.origin.sourceSessionId,
-            providerDispatchAt: Date.now(),
-            bootstrapContentHash: params.recoveryBootstrap.bootstrapContentHash,
-            bootstrapIncludedInPrompt: true,
-            handoffNoteIncluded: params.recoveryBootstrap.handoffNoteIncluded,
-          };
-        } else {
-          log.warn(
-            { catId, threadId, invocationId, hashMatches, promptContainsBootstrap },
-            'F192 recovery metadata did not match provider-bound prompt; receipt suppressed',
-          );
-        }
-      }
       const serviceIter = service.invoke(effectivePrompt, options)[Symbol.asyncIterator]();
       for (;;) {
         const iterResult = await abortableNext(serviceIter, signal);
@@ -3405,24 +3413,13 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           },
           'cat retrying invoke (session self-heal)',
         );
+        const retrySealReason =
+          retryReason === 'malformed_toolcall' ? 'error:malformed_toolcall' : `resume_failure:${retryReason}`;
+        await sealActiveSourceForFreshRetry(retrySealReason);
         try {
           await sessionManager.delete(userId, catId, threadId);
         } catch {
           // Redis delete failure — best-effort only
-        }
-        // F118 AC-C6: Increment consecutive restore failure counter
-        if (deps.sessionChainStore) {
-          try {
-            const activeRec = await deps.sessionChainStore.getActive(catId as CatId, threadId);
-            if (activeRec) {
-              await deps.sessionChainStore.update(activeRec.id, {
-                consecutiveRestoreFailures: (activeRec.consecutiveRestoreFailures ?? 0) + 1,
-                updatedAt: Date.now(),
-              });
-            }
-          } catch {
-            /* best-effort counter update */
-          }
         }
         sessionId = undefined;
         // F118 P2-fix: Clear stale cliSessionId so retry diagnostics don't mis-attribute

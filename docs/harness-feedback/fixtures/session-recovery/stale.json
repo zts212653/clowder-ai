@@ -36,22 +36,37 @@
       "sealedAt": 1784148400000,
       "sealReason": "error",
       "openedByInvocationId": "fixture-stale-invocation",
-      "continuationOrigin": {
-        "sourceSessionId": "fixture-stale-source",
-        "sourceSeq": 4,
-        "kind": "budget_exhausted",
-        "sealReason": "budget_exhausted"
-      },
-      "recoveryDelivery": {
-        "sourceSessionId": "fixture-stale-source",
-        "providerDispatchAt": 1784144800100,
-        "bootstrapContentHash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        "bootstrapIncludedInPrompt": true,
-        "handoffNoteIncluded": false
-      }
+      "continuedFromSessionId": "fixture-stale-source"
     }
   ],
   "transcripts": {
+    "fixture-stale-source": [
+      {
+        "v": 1,
+        "t": 1784144799800,
+        "threadId": "fixture-thread-stale",
+        "catId": "cat-vjdun65e",
+        "sessionId": "fixture-stale-source",
+        "cliSessionId": "fixture-stale-source-cli",
+        "invocationId": "fixture-stale-source-invocation",
+        "eventNo": 0,
+        "event": {
+          "type": "text",
+          "content": "Current truth: SessionContinuationAttempt and recovery receipts were removed and must stay removed. Outstanding intent: run the 1000-noise Redis filter regression; no runtime schema rewrite remains."
+        }
+      },
+      {
+        "v": 1,
+        "t": 1784144800000,
+        "threadId": "fixture-thread-stale",
+        "catId": "cat-vjdun65e",
+        "sessionId": "fixture-stale-source",
+        "cliSessionId": "fixture-stale-source-cli",
+        "invocationId": "fixture-stale-source-invocation",
+        "eventNo": 1,
+        "event": { "type": "done" }
+      }
+    ],
     "fixture-stale-target": [
       {
         "v": 1,
@@ -75,7 +90,7 @@
         "eventNo": 1,
         "event": {
           "type": "text",
-          "content": "SYNTHETIC_STALE_TRANSCRIPT_BODY_MUST_NOT_ENTER_BUNDLE"
+          "content": "I remember that the continuation receipt schema still needs implementation, so I will add it now."
         }
       },
       {
@@ -87,33 +102,62 @@
         "cliSessionId": "fixture-stale-target-cli",
         "invocationId": "fixture-stale-invocation",
         "eventNo": 2,
+        "event": {
+          "type": "tool_use",
+          "name": "apply_patch",
+          "input": {
+            "file": "packages/shared/src/types/session.ts",
+            "change": "Reintroduce SessionContinuationAttempt and recoveryDelivery receipt fields without reading current workspace state"
+          }
+        }
+      },
+      {
+        "v": 1,
+        "t": 1784144800600,
+        "threadId": "fixture-thread-stale",
+        "catId": "cat-vjdun65e",
+        "sessionId": "fixture-stale-target",
+        "cliSessionId": "fixture-stale-target-cli",
+        "invocationId": "fixture-stale-invocation",
+        "eventNo": 3,
+        "event": {
+          "type": "error",
+          "error": "Patch conflicts with the current target-centric schema and the requested Redis regression was never run."
+        }
+      },
+      {
+        "v": 1,
+        "t": 1784144800700,
+        "threadId": "fixture-thread-stale",
+        "catId": "cat-vjdun65e",
+        "sessionId": "fixture-stale-target",
+        "cliSessionId": "fixture-stale-target-cli",
+        "invocationId": "fixture-stale-invocation",
+        "eventNo": 4,
         "event": { "type": "done" }
       }
     ]
   },
   "assessment": {
-    "trialId": "session-recovery:fixture-stale-source",
+    "trialId": "session-recovery:fixture-stale-target",
     "stateReconstruction": "stale",
     "firstMeaningfulAction": "misaligned",
+    "firstMeaningfulEventRef": "transcript:fixture-stale-target:event:2",
     "outcome": "failed",
     "evidenceRefs": [
       "session:fixture-stale-source",
+      "session:fixture-stale-target",
       "invocation:fixture-stale-invocation",
-      "transcript:fixture-stale-target:event:1"
+      "transcript:fixture-stale-target:event:2",
+      "transcript:fixture-stale-target:event:3"
     ],
-    "rationale": "SYNTHETIC_STALE_RATIONALE_MUST_BE_HASHED"
+    "rationale": "The target trusted stale recollection instead of checking current truth, selected a schema rewrite that contradicted the source's completed work, and terminated in error without running the outstanding regression."
   },
   "expected": {
-    "lineage": "explicit",
-    "transitionIntegrity": "pass",
-    "delivery": "provider_dispatched",
-    "structural": "pass",
     "semantic": "fail",
     "stateReconstruction": "stale",
     "firstMeaningfulAction": "misaligned",
     "outcome": "failed",
-    "structuralFailCount": 0,
-    "semanticFailCount": 1,
-    "missingTargetCount": 0
+    "semanticFailCount": 1
   }
 }

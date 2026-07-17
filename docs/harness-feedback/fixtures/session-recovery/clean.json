@@ -36,22 +36,37 @@
       "sealedAt": 1784138400000,
       "sealReason": "completed",
       "openedByInvocationId": "fixture-clean-invocation",
-      "continuationOrigin": {
-        "sourceSessionId": "fixture-clean-source",
-        "sourceSeq": 0,
-        "kind": "threshold",
-        "sealReason": "threshold"
-      },
-      "recoveryDelivery": {
-        "sourceSessionId": "fixture-clean-source",
-        "providerDispatchAt": 1784134800100,
-        "bootstrapContentHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "bootstrapIncludedInPrompt": true,
-        "handoffNoteIncluded": false
-      }
+      "continuedFromSessionId": "fixture-clean-source"
     }
   ],
   "transcripts": {
+    "fixture-clean-source": [
+      {
+        "v": 1,
+        "t": 1784134799800,
+        "threadId": "fixture-thread-clean",
+        "catId": "cat-vjdun65e",
+        "sessionId": "fixture-clean-source",
+        "cliSessionId": "fixture-clean-source-cli",
+        "invocationId": "fixture-clean-source-invocation",
+        "eventNo": 0,
+        "event": {
+          "type": "text",
+          "content": "Current truth: the target-centric schema cleanup and provider rewrite are complete. Outstanding intent: run the isolated Redis pagination regression and update the verification snapshot; do not redo the schema work."
+        }
+      },
+      {
+        "v": 1,
+        "t": 1784134800000,
+        "threadId": "fixture-thread-clean",
+        "catId": "cat-vjdun65e",
+        "sessionId": "fixture-clean-source",
+        "cliSessionId": "fixture-clean-source-cli",
+        "invocationId": "fixture-clean-source-invocation",
+        "eventNo": 1,
+        "event": { "type": "done" }
+      }
+    ],
     "fixture-clean-target": [
       {
         "v": 1,
@@ -75,7 +90,7 @@
         "eventNo": 1,
         "event": {
           "type": "text",
-          "content": "SYNTHETIC_CLEAN_TRANSCRIPT_BODY_MUST_NOT_ENTER_BUNDLE"
+          "content": "I will restore the worktree state first, then continue the remaining verification."
         }
       },
       {
@@ -87,33 +102,93 @@
         "cliSessionId": "fixture-clean-target-cli",
         "invocationId": "fixture-clean-invocation",
         "eventNo": 2,
+        "event": {
+          "type": "tool_use",
+          "name": "exec_command",
+          "input": {
+            "cmd": "git status --short --branch && rg -n 'scanContinuationTargets' packages/api"
+          }
+        }
+      },
+      {
+        "v": 1,
+        "t": 1784134800600,
+        "threadId": "fixture-thread-clean",
+        "catId": "cat-vjdun65e",
+        "sessionId": "fixture-clean-target",
+        "cliSessionId": "fixture-clean-target-cli",
+        "invocationId": "fixture-clean-invocation",
+        "eventNo": 3,
+        "event": {
+          "type": "tool_result",
+          "content": "Workspace matches the handoff: schema cleanup is present and only the Redis pagination regression remains."
+        }
+      },
+      {
+        "v": 1,
+        "t": 1784134800700,
+        "threadId": "fixture-thread-clean",
+        "catId": "cat-vjdun65e",
+        "sessionId": "fixture-clean-target",
+        "cliSessionId": "fixture-clean-target-cli",
+        "invocationId": "fixture-clean-invocation",
+        "eventNo": 4,
+        "event": {
+          "type": "tool_use",
+          "name": "exec_command",
+          "input": {
+            "cmd": "bash ./scripts/run-isolated-redis-tests.sh -- node --test test/redis-session-chain-store.test.js"
+          }
+        }
+      },
+      {
+        "v": 1,
+        "t": 1784134800800,
+        "threadId": "fixture-thread-clean",
+        "catId": "cat-vjdun65e",
+        "sessionId": "fixture-clean-target",
+        "cliSessionId": "fixture-clean-target-cli",
+        "invocationId": "fixture-clean-invocation",
+        "eventNo": 5,
+        "event": {
+          "type": "tool_result",
+          "content": "Redis regression passed; verification snapshot documentation is still outstanding."
+        }
+      },
+      {
+        "v": 1,
+        "t": 1784134800900,
+        "threadId": "fixture-thread-clean",
+        "catId": "cat-vjdun65e",
+        "sessionId": "fixture-clean-target",
+        "cliSessionId": "fixture-clean-target-cli",
+        "invocationId": "fixture-clean-invocation",
+        "eventNo": 6,
         "event": { "type": "done" }
       }
     ]
   },
   "assessment": {
-    "trialId": "session-recovery:fixture-clean-source",
+    "trialId": "session-recovery:fixture-clean-target",
     "stateReconstruction": "recovered",
     "firstMeaningfulAction": "aligned",
+    "firstMeaningfulEventRef": "transcript:fixture-clean-target:event:2",
     "outcome": "continued",
     "evidenceRefs": [
       "session:fixture-clean-source",
+      "session:fixture-clean-target",
       "invocation:fixture-clean-invocation",
-      "transcript:fixture-clean-target:event:1"
+      "transcript:fixture-clean-target:event:2",
+      "transcript:fixture-clean-target:event:3",
+      "transcript:fixture-clean-target:event:5"
     ],
-    "rationale": "SYNTHETIC_CLEAN_RATIONALE_MUST_BE_HASHED"
+    "rationale": "The target verified the handoff against the workspace before acting, selected that verification command as the first substantive action, then completed the remaining Redis regression while leaving only the documented snapshot update."
   },
   "expected": {
-    "lineage": "explicit",
-    "transitionIntegrity": "pass",
-    "delivery": "provider_dispatched",
-    "structural": "pass",
     "semantic": "pass",
     "stateReconstruction": "recovered",
     "firstMeaningfulAction": "aligned",
     "outcome": "continued",
-    "structuralFailCount": 0,
-    "semanticFailCount": 0,
-    "missingTargetCount": 0
+    "semanticFailCount": 0
   }
 }

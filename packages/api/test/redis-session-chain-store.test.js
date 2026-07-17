@@ -16,6 +16,7 @@ const REDIS_URL = process.env.REDIS_URL;
 
 describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisSessionChainStore;
+  let SessionChainKeys;
   let createRedisClient;
   let redis;
   let store;
@@ -27,6 +28,7 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     'session-active:*',
     'session-cli:*',
     'session-by-chainkey:*',
+    'session-continuation-targets:*',
   ];
 
   before(async () => {
@@ -34,6 +36,7 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
 
     const storeModule = await import('../dist/domains/cats/services/stores/redis/RedisSessionChainStore.js');
     RedisSessionChainStore = storeModule.RedisSessionChainStore;
+    ({ SessionChainKeys } = await import('../dist/domains/cats/services/stores/redis-keys/session-chain-keys.js'));
     const redisModule = await import('@cat-cafe/shared/utils');
     createRedisClient = redisModule.createRedisClient;
 
@@ -101,74 +104,133 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.ok(record.createdAt > 0);
   });
 
-  it('create() round-trips immutable session recovery lineage and delivery receipt', async () => {
-    const continuationOrigin = {
-      sourceSessionId: 'source-session-1',
-      sourceSeq: 0,
-      kind: 'cat_initiated_handoff',
-      sealReason: 'cat_initiated_handoff',
-      proposalId: 'proposal-1',
-    };
-    const recoveryDelivery = {
-      sourceSessionId: 'source-session-1',
-      providerDispatchAt: 1_721_111_111_111,
-      bootstrapContentHash: 'sha256:bootstrap-1',
-      bootstrapIncludedInPrompt: true,
-      handoffNoteIncluded: true,
-    };
-
+  it('create() round-trips immutable target-side continuation provenance', async () => {
     const record = await store.create({
       ...BASE_INPUT,
       openedByInvocationId: 'invocation-1',
-      continuationOrigin,
-      recoveryDelivery,
+      continuedFromSessionId: 'source-session-1',
     });
     const hydrated = await store.get(record.id);
 
     assert.equal(hydrated.openedByInvocationId, 'invocation-1');
-    assert.deepEqual(hydrated.continuationOrigin, continuationOrigin);
-    assert.deepEqual(hydrated.recoveryDelivery, recoveryDelivery);
+    assert.equal(hydrated.continuedFromSessionId, 'source-session-1');
 
     await store.update(record.id, {
       openedByInvocationId: 'forged-invocation',
-      continuationOrigin: { ...continuationOrigin, sourceSessionId: 'forged-source' },
-      recoveryDelivery: { ...recoveryDelivery, sourceSessionId: 'forged-source' },
+      continuedFromSessionId: 'forged-source',
     });
 
     const reread = await store.get(record.id);
     assert.equal(reread.openedByInvocationId, 'invocation-1');
-    assert.deepEqual(reread.continuationOrigin, continuationOrigin);
-    assert.deepEqual(reread.recoveryDelivery, recoveryDelivery);
+    assert.equal(reread.continuedFromSessionId, 'source-session-1');
   });
 
-  it('scanAll() returns only the bounded result window', async () => {
+  it('scanContinuationTargets() is owner scoped, bounded, and excludes ordinary Sessions', async () => {
     await store.create(BASE_INPUT);
-    await store.create({ ...BASE_INPUT, catId: 'codex', cliSessionId: 'cli-codex-1' });
+    const target = await store.create({
+      ...BASE_INPUT,
+      cliSessionId: 'cli-target',
+      continuedFromSessionId: 'source-session-1',
+    });
+    await store.create({
+      ...BASE_INPUT,
+      cliSessionId: 'cli-foreign',
+      userId: 'user-2',
+      continuedFromSessionId: 'foreign',
+    });
 
-    const records = await store.scanAll({
+    const records = await store.scanContinuationTargets({
+      ownerUserId: 'user-1',
       windowStartMs: 0,
       windowEndMs: Date.now() + 1_000,
       limit: 1,
     });
-
-    assert.equal(records.length, 1);
-    assert.ok(records[0].createdAt >= 0);
-  });
-
-  it('scanAll() includes a source created earlier but sealed inside the transition window', async () => {
-    const source = await store.create(BASE_INPUT);
-    const sealedAt = source.createdAt + 10_000;
-    await store.update(source.id, { status: 'sealed', sealedAt, updatedAt: sealedAt });
-
-    const records = await store.scanAll({
-      windowStartMs: sealedAt,
-      windowEndMs: sealedAt + 1_000,
-      limit: 10,
-    });
-
     assert.deepEqual(
       records.map((record) => record.id),
-      [source.id],
+      [target.id],
+    );
+  });
+
+  it('scanContinuationTargets() reports window_too_broad instead of hiding a match behind 1000 filtered targets', async () => {
+    const matching = await store.create({
+      ...BASE_INPUT,
+      cliSessionId: 'cli-older-match',
+      threadId: 'thread-match',
+      continuedFromSessionId: 'source-match',
+    });
+    const pipeline = redis.pipeline();
+    const indexKey = SessionChainKeys.continuationTargetsByOwner('user-1');
+    for (let index = 0; index < 1000; index += 1) {
+      const id = `noise-target-${index}`;
+      const createdAt = matching.createdAt + index + 1;
+      pipeline.hset(SessionChainKeys.detail(id), {
+        id,
+        cliSessionId: `noise-cli-${index}`,
+        threadId: 'thread-noise',
+        catId: 'opus',
+        userId: 'user-1',
+        seq: String(index),
+        status: 'sealed',
+        messageCount: '1',
+        createdAt: String(createdAt),
+        updatedAt: String(createdAt),
+        continuedFromSessionId: `noise-source-${index}`,
+      });
+      pipeline.zadd(indexKey, createdAt, id);
+    }
+    await pipeline.exec();
+
+    await assert.rejects(
+      store.scanContinuationTargets({
+        ownerUserId: 'user-1',
+        windowStartMs: matching.createdAt,
+        windowEndMs: matching.createdAt + 2_000,
+        threadId: 'thread-match',
+        limit: 1,
+      }),
+      /session_scan_limit_reached: examined 1000 owner continuation targets/,
+    );
+  });
+
+  it('scanContinuationTargets() pages past filtered noise to return an older matching target', async () => {
+    const matching = await store.create({
+      ...BASE_INPUT,
+      cliSessionId: 'cli-paged-match',
+      threadId: 'thread-match',
+      continuedFromSessionId: 'source-match',
+    });
+    const pipeline = redis.pipeline();
+    const indexKey = SessionChainKeys.continuationTargetsByOwner('user-1');
+    for (let index = 0; index < 150; index += 1) {
+      const id = `paged-noise-target-${index}`;
+      const createdAt = matching.createdAt + index + 1;
+      pipeline.hset(SessionChainKeys.detail(id), {
+        id,
+        cliSessionId: `paged-noise-cli-${index}`,
+        threadId: 'thread-noise',
+        catId: 'opus',
+        userId: 'user-1',
+        seq: String(index),
+        status: 'sealed',
+        messageCount: '1',
+        createdAt: String(createdAt),
+        updatedAt: String(createdAt),
+        continuedFromSessionId: `paged-noise-source-${index}`,
+      });
+      pipeline.zadd(indexKey, createdAt, id);
+    }
+    await pipeline.exec();
+
+    const records = await store.scanContinuationTargets({
+      ownerUserId: 'user-1',
+      windowStartMs: matching.createdAt,
+      windowEndMs: matching.createdAt + 1_000,
+      threadId: 'thread-match',
+      limit: 1,
+    });
+    assert.deepEqual(
+      records.map((record) => record.id),
+      [matching.id],
     );
   });
 

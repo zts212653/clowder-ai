@@ -3294,6 +3294,9 @@ async function main(): Promise<void> {
   await app.register(sessionTranscriptRoutes, { sessionChainStore, threadStore, transcriptReader });
   await app.register(sessionRecoveryEvalRoutes, {
     trialProvider: sessionRecoveryTrialProvider,
+    transcriptReader,
+    harnessFeedbackRoot: resolve(repoRoot, 'docs', 'harness-feedback'),
+    ...(redis ? { redis } : {}),
     callbackRegistry: registry,
     agentKeyRegistry,
   });

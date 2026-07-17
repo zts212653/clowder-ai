@@ -25,11 +25,16 @@ export function mapPublishVerdictError(message: string): HandlerError | null {
   if (
     message.startsWith('unknown assessment trial:') ||
     message.startsWith('foreign assessment evidence ref:') ||
+    message.startsWith('foreign first meaningful event ref:') ||
+    message.startsWith('first meaningful event evidence ref is required:') ||
+    message.startsWith('first meaningful event must belong to the target opening invocation:') ||
+    message.startsWith('semantic assessment requires available transcript evidence:') ||
+    message.startsWith('semantic assessment requires a target transcript evidence ref:') ||
     message.startsWith('duplicate_session_recovery_trial:') ||
     message.startsWith('missing_session_recovery_assessment:') ||
     message.startsWith('session_recovery_assessment_mismatch:')
   ) {
-    return { status: 400, error: 'invalid_session_recovery_assessment', detail: message };
+    return { status: 400, error: 'invalid_assessment', detail: message };
   }
   if (message.startsWith('session_scan_limit_reached:')) {
     return { status: 400, error: 'window_too_broad', detail: message };

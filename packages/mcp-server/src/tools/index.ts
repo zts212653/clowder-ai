@@ -185,8 +185,11 @@ export {
 } from './session-chain-tools.js';
 export {
   handlePreviewSessionRecoveryTrials,
+  handleReadSessionRecoveryEvidence,
   type PreviewSessionRecoveryTrialsInput,
   previewSessionRecoveryTrialsInputSchema,
+  type ReadSessionRecoveryEvidenceInput,
+  readSessionRecoveryEvidenceInputSchema,
   sessionRecoveryEvalTools,
 } from './session-recovery-eval-tools.js';
 export {

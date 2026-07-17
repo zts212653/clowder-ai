@@ -13,7 +13,7 @@ import {
   SessionRecoveryTrialProvider,
 } from '../../dist/infrastructure/harness-eval/session-recovery/index.js';
 
-const FIXTURE_NAMES = ['clean', 'stale', 'missing-target'];
+const FIXTURE_NAMES = ['clean', 'stale'];
 const registrySource = readFileSync(
   new URL('../../../../docs/harness-feedback/eval-domains/eval-session-recovery.yaml', import.meta.url),
   'utf8',
@@ -32,9 +32,19 @@ function loadFixture(name) {
 function createProvider(fixture, reads) {
   return new SessionRecoveryTrialProvider({
     sessionStore: {
-      async scanAll(window) {
-        reads.push({ kind: 'session-scan', window });
-        return fixture.sessions;
+      async scanContinuationTargets(query) {
+        reads.push({ kind: 'target-scan', query });
+        return fixture.sessions.filter(
+          (record) =>
+            record.continuedFromSessionId &&
+            record.userId === query.ownerUserId &&
+            record.createdAt >= query.windowStartMs &&
+            record.createdAt < query.windowEndMs,
+        );
+      },
+      async get(id) {
+        reads.push({ kind: 'session-get', id });
+        return fixture.sessions.find((record) => record.id === id) ?? null;
       },
     },
     transcriptReader: {
@@ -55,7 +65,7 @@ function createProvider(fixture, reads) {
 }
 
 function packet(fixture, trial) {
-  const hasFailure = fixture.expected.structural === 'fail' || fixture.expected.semantic === 'fail';
+  const hasFailure = fixture.expected.semantic === 'fail';
   return {
     id: `session-recovery-fixture-${fixture.id}`,
     domainId: 'eval:session-recovery',
@@ -117,10 +127,25 @@ describe('session recovery isolated acceptance fixtures', () => {
       const fixture = loadFixture(name);
       const reads = [];
       const provider = createProvider(fixture, reads);
+      const source = fixture.sessions.find((record) => record.id === fixture.sessions[1].continuedFromSessionId);
+      const target = fixture.sessions.find((record) => record.continuedFromSessionId === source.id);
+      const sourceEvents = fixture.transcripts[source.id];
+      const targetEvents = fixture.transcripts[target.id];
+      const selectedEventNo = Number(fixture.assessment.firstMeaningfulEventRef.split(':').at(-1));
+      const selectedEvent = targetEvents.find((event) => event.eventNo === selectedEventNo);
+
+      assert.match(sourceEvents[0].event.content, /Current truth:.*Outstanding intent:/);
+      assert.equal(selectedEvent.event.type, 'tool_use');
+      assert.ok(
+        targetEvents.some((event) => event.eventNo < selectedEventNo && event.event.type === 'text'),
+        'fixture must prove status narration can precede the eval-cat-selected substantive action',
+      );
+      assert.ok(targetEvents.some((event) => event.event.type === 'done'));
 
       const previewTrials = await provider.resolve(fixture.selector, { ownerUserId: fixture.ownerUserId });
       assert.equal(previewTrials.length, 1);
       assert.equal(previewTrials[0].assessment, undefined, 'preview must not invent semantic labels');
+      assert.equal(previewTrials[0].firstMeaningfulEventRef, undefined, 'provider must not select semantic action');
 
       const trials = await provider.resolve(
         { ...fixture.selector, assessments: [fixture.assessment] },
@@ -128,10 +153,6 @@ describe('session recovery isolated acceptance fixtures', () => {
       );
       const trial = trials[0];
       const grade = gradeSessionRecoveryTrial(trial);
-      assert.equal(trial.lineage, fixture.expected.lineage);
-      assert.equal(trial.transitionIntegrity, fixture.expected.transitionIntegrity);
-      assert.equal(trial.delivery, fixture.expected.delivery);
-      assert.equal(grade.structural, fixture.expected.structural);
       assert.equal(grade.semantic, fixture.expected.semantic);
       assert.equal(grade.stateReconstruction, fixture.expected.stateReconstruction);
       assert.equal(grade.firstMeaningfulAction, fixture.expected.firstMeaningfulAction);
@@ -152,18 +173,25 @@ describe('session recovery isolated acceptance fixtures', () => {
 
       const raw = readFileSync(join(artifact.bundleDir, 'raw', 'session-recovery-trials.json'), 'utf8');
       assert.doesNotMatch(raw, /fixture-owner/);
-      assert.doesNotMatch(raw, /SYNTHETIC_.*(?:TRANSCRIPT|RATIONALE)/);
+      for (const event of [...sourceEvents, ...targetEvents]) {
+        for (const candidate of [event.event.content, event.event.error, event.event.input?.change]) {
+          if (typeof candidate === 'string') assert.equal(raw.includes(candidate), false);
+        }
+      }
+      assert.equal(raw.includes(fixture.assessment.rationale), false);
       assert.equal(JSON.parse(raw).trials[0].assessment.rationale, undefined);
 
       const summary = loadEvalHubSummary({ harnessFeedbackRoot });
       assert.equal(summary.items.length, 1);
       const component = summary.items[0].trend.components[0];
-      assert.equal(component.frictionCounts.structural_fail_count, fixture.expected.structuralFailCount);
       assert.equal(component.frictionCounts.semantic_fail_count, fixture.expected.semanticFailCount);
-      assert.equal(component.frictionCounts.missing_target_count, fixture.expected.missingTargetCount);
 
       assert.equal(connectMock.mock.callCount(), 0, 'fixture path must not connect to Redis 6399 or any network');
-      assert.ok(reads.every((read) => read.kind === 'session-scan' || read.kind === 'transcript-read'));
+      assert.ok(
+        reads.every(
+          (read) => read.kind === 'target-scan' || read.kind === 'session-get' || read.kind === 'transcript-read',
+        ),
+      );
     });
   }
 });

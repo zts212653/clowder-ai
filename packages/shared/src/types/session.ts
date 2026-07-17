@@ -13,39 +13,7 @@ import type { CatHandoffNote } from './session-handoff-proposal.js';
 
 export type SessionStatus = 'active' | 'sealing' | 'sealed';
 
-/** Why a fresh Session was opened from a sealed predecessor. */
-export type SessionContinuationKind =
-  | 'threshold'
-  | 'budget_exhausted'
-  | 'max_compressions'
-  | 'cat_initiated_handoff'
-  | 'resume_failure'
-  | 'runtime_rotation'
-  | 'manual'
-  | 'error'
-  | 'other';
-
-/** Immutable source-side lineage stamped when the target Session is created. */
-export interface SessionContinuationOrigin {
-  sourceSessionId: string;
-  sourceSeq: number;
-  kind: SessionContinuationKind;
-  sealReason: string;
-  proposalId?: string;
-}
-
-/**
- * Provider-boundary proof that the recovery bootstrap was part of the prompt.
- * The receipt intentionally stores no bootstrap or transcript body.
- */
-export interface SessionRecoveryDeliveryReceipt {
-  sourceSessionId: string;
-  providerDispatchAt: number;
-  bootstrapContentHash: string;
-  bootstrapIncludedInPrompt: true;
-  handoffNoteIncluded: boolean;
-}
-
+/** Canonical Cat Cafe Session identity and lifecycle record. */
 export interface SessionRecord {
   readonly id: string;
   /** CLI-reported session ID (from session_init event) */
@@ -61,10 +29,8 @@ export interface SessionRecord {
   readonly seq: number;
   /** Invocation whose first session_init created this record. Creation-time only. */
   readonly openedByInvocationId?: string;
-  /** Explicit source Session transition. Creation-time only. */
-  readonly continuationOrigin?: SessionContinuationOrigin;
-  /** No-body proof captured at provider dispatch. Creation-time only. */
-  readonly recoveryDelivery?: SessionRecoveryDeliveryReceipt;
+  /** Explicit predecessor selected by a cross-invocation SessionBootstrap. Creation-time only. */
+  readonly continuedFromSessionId?: string;
   status: SessionStatus;
   /** Latest context health snapshot after last invocation */
   contextHealth?: ContextHealth;

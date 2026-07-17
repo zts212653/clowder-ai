@@ -1,10 +1,8 @@
 import type { CatId, SessionRecord, SessionStatus } from '@cat-cafe/shared';
 import type { TranscriptEvent } from '../../../domains/cats/services/session/TranscriptReader.js';
-import type { SessionScanWindow } from '../../../domains/cats/services/stores/ports/SessionChainStore.js';
+import type { SessionContinuationTargetScan } from '../../../domains/cats/services/stores/ports/SessionChainStore.js';
 
-export type SessionRecoveryLineage = 'explicit' | 'missing' | 'duplicate' | 'legacy_unlinked';
-export type SessionRecoveryTransitionIntegrity = 'pass' | 'fail' | 'unknown';
-export type SessionRecoveryDelivery = 'provider_dispatched' | 'missing_receipt' | 'missing_target' | 'unknown';
+export type SessionRecoveryTranscriptEvidenceStatus = 'available' | 'missing_invocation' | 'not_found' | 'read_failed';
 
 export interface SessionEvidenceRef {
   sessionId: string;
@@ -22,6 +20,8 @@ export interface SessionRecoveryAssessment {
   trialId: string;
   stateReconstruction: 'recovered' | 'stale' | 'unknown';
   firstMeaningfulAction: 'aligned' | 'repeated' | 'misaligned' | 'unknown';
+  /** Eval-cat-selected event from the target opening invocation; required when firstMeaningfulAction is known. */
+  firstMeaningfulEventRef?: string;
   outcome: 'continued' | 'completed' | 'failed' | 'unknown';
   evidenceRefs: string[];
   rationale: string;
@@ -29,6 +29,7 @@ export interface SessionRecoveryAssessment {
 
 export interface SessionRecoverySourceSelector {
   kind: 'session-recovery-window';
+  /** Half-open target Session creation window. */
   windowStartMs: number;
   windowEndMs: number;
   catId?: string;
@@ -40,16 +41,10 @@ export interface SessionRecoverySourceSelector {
 export interface SessionRecoveryTrial {
   trialId: `session-recovery:${string}`;
   source: SessionEvidenceRef;
-  target?: SessionEvidenceRef;
-  duplicateTargets?: SessionEvidenceRef[];
-  inferredTarget?: SessionEvidenceRef;
-  lineage: SessionRecoveryLineage;
-  transitionIntegrity: SessionRecoveryTransitionIntegrity;
-  delivery: SessionRecoveryDelivery;
-  structuralIssues: string[];
+  target: SessionEvidenceRef;
   firstInvocationId?: string;
-  firstMeaningfulEventRef?: string;
   terminalEventRef?: string;
+  transcriptEvidenceStatus: SessionRecoveryTranscriptEvidenceStatus;
   transcriptEvidenceTruncated?: boolean;
   evidenceRefs: string[];
   assessment?: SessionRecoveryAssessment;
@@ -60,7 +55,8 @@ export interface SessionRecoveryResolveScope {
 }
 
 export interface SessionRecoverySessionStore {
-  scanAll(window: SessionScanWindow): SessionRecord[] | Promise<SessionRecord[]>;
+  scanContinuationTargets(query: SessionContinuationTargetScan): SessionRecord[] | Promise<SessionRecord[]>;
+  get(id: string): SessionRecord | null | Promise<SessionRecord | null>;
 }
 
 export interface SessionRecoveryTranscriptReader {
@@ -78,18 +74,9 @@ export interface SessionRecoveryTrialProviderDeps {
   transcriptReader: SessionRecoveryTranscriptReader;
 }
 
-export interface SessionRecoveryStructuralGrade {
-  lineage: SessionRecoveryLineage;
-  transitionIntegrity: SessionRecoveryTransitionIntegrity;
-  delivery: SessionRecoveryDelivery;
-  issues: string[];
-}
-
 export interface SessionRecoveryTrialGrade {
-  structural: SessionRecoveryTransitionIntegrity;
   semantic: 'pass' | 'fail' | 'unknown';
   stateReconstruction: SessionRecoveryAssessment['stateReconstruction'];
   firstMeaningfulAction: SessionRecoveryAssessment['firstMeaningfulAction'];
   outcome: SessionRecoveryAssessment['outcome'];
-  issues: string[];
 }

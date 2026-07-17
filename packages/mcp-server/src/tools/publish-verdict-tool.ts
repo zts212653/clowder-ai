@@ -265,28 +265,58 @@ const anchorTelemetrySourceRefsShape = z
   })
   .describe('eval:anchor-first sourceRefs — replayable anchor telemetry rollup window selector.');
 
-const sessionRecoveryAssessmentShape = z.object({
-  trialId: z
-    .string()
-    .min(1)
-    .refine(
-      (value) => value.startsWith('session-recovery:') && !/[\r\n]/.test(value),
-      'trialId must be a single-line session-recovery anchor',
-    ),
-  stateReconstruction: z.enum(['recovered', 'stale', 'unknown']),
-  firstMeaningfulAction: z.enum(['aligned', 'repeated', 'misaligned', 'unknown']),
-  outcome: z.enum(['continued', 'completed', 'failed', 'unknown']),
-  evidenceRefs: z
-    .array(
-      z
-        .string()
-        .min(1)
-        .refine((value) => !/[\r\n]/.test(value), 'evidence ref must be single-line'),
-    )
-    .min(1)
-    .max(100),
-  rationale: z.string().trim().min(1).max(4_000),
-});
+const sessionRecoveryAssessmentShape = z
+  .object({
+    trialId: z
+      .string()
+      .min(1)
+      .refine(
+        (value) => value.startsWith('session-recovery:') && !/[\r\n]/.test(value),
+        'trialId must be a single-line session-recovery anchor',
+      ),
+    stateReconstruction: z.enum(['recovered', 'stale', 'unknown']),
+    firstMeaningfulAction: z.enum(['aligned', 'repeated', 'misaligned', 'unknown']),
+    firstMeaningfulEventRef: z
+      .string()
+      .min(1)
+      .refine((value) => !/[\r\n]/.test(value), 'firstMeaningfulEventRef must be single-line')
+      .optional(),
+    outcome: z.enum(['continued', 'completed', 'failed', 'unknown']),
+    evidenceRefs: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .refine((value) => !/[\r\n]/.test(value), 'evidence ref must be single-line'),
+      )
+      .min(1)
+      .max(100),
+    rationale: z.string().trim().min(1).max(4_000),
+  })
+  .superRefine((assessment, ctx) => {
+    const isKnown = assessment.firstMeaningfulAction !== 'unknown';
+    if (isKnown && !assessment.firstMeaningfulEventRef) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['firstMeaningfulEventRef'],
+        message: 'required when firstMeaningfulAction is known',
+      });
+    }
+    if (!isKnown && assessment.firstMeaningfulEventRef) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['firstMeaningfulEventRef'],
+        message: 'must be omitted when firstMeaningfulAction is unknown',
+      });
+    }
+    if (assessment.firstMeaningfulEventRef && !assessment.evidenceRefs.includes(assessment.firstMeaningfulEventRef)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['evidenceRefs'],
+        message: 'must include firstMeaningfulEventRef',
+      });
+    }
+  });
 
 const sessionRecoverySourceRefsShape = z
   .object({
@@ -421,6 +451,7 @@ type PublishVerdictToolInput = {
           trialId: string;
           stateReconstruction: 'recovered' | 'stale' | 'unknown';
           firstMeaningfulAction: 'aligned' | 'repeated' | 'misaligned' | 'unknown';
+          firstMeaningfulEventRef?: string;
           outcome: 'continued' | 'completed' | 'failed' | 'unknown';
           evidenceRefs: string[];
           rationale: string;
