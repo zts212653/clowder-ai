@@ -271,7 +271,10 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
 
     let embedDeps: CollectionEmbedDeps | undefined;
     const db = (store as StoreWithDb).getDb?.();
-    const embeddingService = opts.getEmbeddingService?.() ?? opts.embeddingService;
+    const resolveEmbeddingService = () =>
+      opts.getEmbeddingService ? opts.getEmbeddingService() : opts.embeddingService;
+    const resolveEmbedMode = () => (opts.getEmbedMode ? opts.getEmbedMode() : (opts.embedMode ?? 'shadow'));
+    const embeddingService = resolveEmbeddingService();
     if (embeddingService && db) {
       try {
         const sqliteVecMod = await import('sqlite-vec');
@@ -279,8 +282,14 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
         const dim = embeddingService.getModelInfo().dim;
         if (ensureVectorTable(db, dim)) {
           const vectorStore = new VectorStore(db, dim);
-          embedDeps = { embedding: embeddingService, vectorStore };
-          const mode = opts.getEmbedMode?.() ?? opts.embedMode ?? 'shadow';
+          embedDeps = {
+            getEmbeddingService: () => {
+              const current = resolveEmbeddingService();
+              return current === embeddingService && resolveEmbedMode() ? current : undefined;
+            },
+            vectorStore,
+          };
+          const mode = resolveEmbedMode() ?? 'shadow';
           (store as SqliteEvidenceStore).setEmbedDeps({ embedding: embeddingService, vectorStore, mode });
         }
       } catch {

@@ -177,7 +177,7 @@ describe('ensureProjectCollection', () => {
       getModelInfo: () => ({ modelId: 'test', modelRev: 'v1', dim: 2 }),
     };
 
-    const result = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, mockEmbeddingService);
+    const result = await ensureProjectCollection(tmpProject, catalog, stores, tmpDataDir, () => mockEmbeddingService);
 
     assert.ok(result.docsIndexed >= 2, `expected ≥2 docs, got ${result.docsIndexed}`);
     assert.ok(embedCallCount >= 2, `expected ≥2 embed calls, got ${embedCallCount}`);

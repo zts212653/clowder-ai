@@ -886,7 +886,7 @@ async function main(): Promise<void> {
         memoryServices.catalog!,
         memoryServices.collectionStores ?? new Map(),
         memoryServices.dataDir!,
-        memoryServices.embeddingService,
+        () => memoryServices.embeddingLifecycle.getService(),
       );
     },
     getFingerprint,

@@ -15,8 +15,29 @@ export interface CollectionRebuildResult {
 }
 
 export interface CollectionEmbedDeps {
-  embedding: IEmbeddingService;
+  getEmbeddingService: () => IEmbeddingService | undefined;
   vectorStore: VectorStore;
+}
+
+function createLiveEmbeddingCapability(getEmbeddingService: () => IEmbeddingService | undefined): IEmbeddingService {
+  const requireService = (): IEmbeddingService => {
+    const service = getEmbeddingService();
+    if (!service) throw new Error('Embedding capability is no longer active');
+    return service;
+  };
+
+  return {
+    load: () => requireService().load(),
+    embed: (texts) => requireService().embed(texts),
+    isReady: () => getEmbeddingService()?.isReady() === true,
+    reprobeIfNeeded: async () => {
+      const service = getEmbeddingService();
+      if (service) await service.reprobeIfNeeded();
+    },
+    getModelInfo: () => requireService().getModelInfo(),
+    // The builder borrows the lifecycle-owned service and must never dispose it.
+    dispose: () => {},
+  };
 }
 
 export class CollectionIndexBuilder {
@@ -45,7 +66,8 @@ export class CollectionIndexBuilder {
     const { indexed, skipped, indexedItems } = await this.indexResults(results, force);
 
     if (this.embedDeps && indexedItems.length > 0) {
-      const { embedding, vectorStore } = this.embedDeps;
+      const { getEmbeddingService, vectorStore } = this.embedDeps;
+      const embedding = createLiveEmbeddingCapability(getEmbeddingService);
       const store = this.store;
       try {
         await embedIndexedItems({
