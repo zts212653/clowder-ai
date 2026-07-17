@@ -317,7 +317,7 @@ Processing rules:
 
 Domain-specific keys remain authoritative where the contract already defines
 them: messaging send uses `(pluginInstanceId, idempotencyKey)` and append uses
-`(pluginInstanceId, Host-resolved messageId, operationId)`. Subscribe preserves
+`(pluginInstanceId, Host-resolved messageId, input.operationId)`. Subscribe preserves
 K-1's atomic `(pluginInstanceId, Host-resolved handleId)` create-or-get key;
 acknowledgement uses the subscription-local ackToken; callback delivery uses a
 Broker-minted deliveryId.
@@ -587,7 +587,7 @@ The registry mapping is fixed as follows:
 | `messaging.send` | `input.idempotencyKey` |
 | `messaging.appendElements` | `(Host-resolved messageId from input.handle, input.operationId)` |
 | `messaging.subscribe` | Host-resolved `input.handle` identity; K-1 create-or-get is authoritative |
-| `messaging.read` | none; at-least-once replay is safe and delivered watermark only advances monotonically |
+| `messaging.read` | none; repeated fetch is at-least-once safe; `lastDeliveredSequence` advances monotonically, while only ack advances `ackedSequence` |
 | `messaging.ack` | `(input.subscriptionId, input.ackToken)` |
 | `messaging.snapshot` | none; current projection may replay and cursor catch-up is monotonic |
 | `host.messaging.deliver` | `input.deliveryId` |
