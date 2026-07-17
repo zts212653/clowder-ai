@@ -2,7 +2,7 @@
 doc_kind: plan
 status: draft
 created: 2026-07-17
-topics: [plugin-platform, host-broker, control-plane, grants, messaging, reconciliation]
+topics: [plugin-platform, host-broker, control-plane, grants, messaging, reconciliation, wire-protocol]
 related_features: [F202, F240]
 ---
 
@@ -115,7 +115,7 @@ K-2 uses five identities that must not be collapsed:
 | `packageDigest` | immutable artifact | package verifier; never runtime self-report |
 | `pluginInstanceId` | one installation, survives runtime restart | Host-minted and durable; changes on reinstall |
 | `brokerSessionId` | one transport connection | Host-minted and ephemeral; fences stale connections |
-| `requestId` / `operationId` | one attempt / one logical action | requestId may change on retry; operationId remains stable |
+| `requestId` / settlement key | one attempt / one logical effect | requestId may change on retry; the registry-extracted domain key remains stable |
 
 The stable installation-scoped `pluginInstanceId` is required for K-1
 idempotency across process restarts. Reinstalling the same package creates a
@@ -240,14 +240,17 @@ part of Broker semantics.
 
 1. `transport_connected`: the Host accepts a connection only for an installed,
    enabled package and binds the connection to that install record.
-2. `candidate_received`: the runtime may report supported contract and delivery
-   modes. Identity fields are candidates, not trust inputs.
-3. `host_bound`: the Host selects an exact compatible contract, generates
-   `brokerSessionId`, and sends Host-bound `pluginId`, `packageDigest`,
-   `contractVersion`, `pluginInstanceId`, current `grantRevision`, and effective
-   grants.
-4. `runtime_acked`: the runtime acknowledges the exact bound tuple before any
-   call or callback is accepted.
+2. `candidate_received`: the runtime reports candidate `pluginId`,
+   `packageDigest`, `contractVersion`, and `wireVersion`. They are claims to
+   validate, not trust inputs or authority.
+3. `host_bound`: the Host accepts only an exact compatible contract/wire pair,
+   generates `brokerSessionId` and a one-use `bindingNonce`, and sends the
+   authoritative `pluginId`, `packageDigest`, `contractVersion`, `wireVersion`,
+   `pluginInstanceId`, `brokerSessionId`, current `grantRevision`, effective
+   grants, and binding nonce.
+4. `runtime_acked`: the runtime acknowledges the binding with only that nonce;
+   it does not echo or choose identity, session, or grant fields. No ordinary
+   call or callback is accepted before this transition completes.
 5. `active`: the Host persists the active session fence and then allows work.
 6. `draining`: no new calls and no new callback leases; in-flight settlement
    and acknowledgements for already leased callbacks may finish until the Host
@@ -267,18 +270,22 @@ optimization, not a first-party backdoor.
 
 ## Call state machine
 
-All plugin-to-Host calls carry a method, requestId, stable operationId, and
-deadline. The transport adapter supplies the broker session; the runtime does
-not supply `pluginInstanceId` inside the method payload.
+All post-activation plugin-to-Host calls carry a method, requestId, and
+deadline. JSON-RPC `id` is the attempt-scoped requestId. There is no second
+generic operationId in the wire envelope: the method registry identifies the
+authoritative domain field or Host-resolved value from which the Broker derives
+settlement identity. The transport adapter supplies the broker session; the
+runtime does not supply `pluginInstanceId` inside the method payload.
 
 ```text
 received
   -> validated
   -> authorized
-  -> claimed
-  -> dispatched
-  -> settled_success | settled_error
-                     \-> dead_letter (only when recovery requires operator action)
+      |-> replay_safe_dispatch -> returned
+      \-> claimed
+          -> dispatched
+          -> settled_success | settled_error
+                             \-> dead_letter (only when recovery requires operator action)
 ```
 
 Processing rules:
@@ -287,24 +294,38 @@ Processing rules:
 2. validate against the negotiated contract schema;
 3. reject an expired deadline before claiming or dispatching work;
 4. authorize against the current grant revision and scoped handles;
-5. claim a durable ledger key `(pluginInstanceId, method, operationId)` with an
-   input digest;
-6. the same key plus the same input returns the existing terminal settlement;
-7. the same key plus the same input and no terminal settlement never blindly
+5. inspect the registry-declared settlement source. `none` is valid only for a
+   schema-declared replay-safe method whose repeated execution cannot duplicate
+   a domain action or hide undelivered data. That path may return newer current
+   state and does not claim an effect ledger. A settled-effect method extracts
+   its domain settlement key, then claims a durable ledger key
+   `(pluginInstanceId, method, settlementKey)` with an input digest;
+6. for an effectful method, the same key plus the same input returns the
+   existing terminal settlement;
+7. the same effect key plus the same input and no terminal settlement never blindly
    dispatches again. If the durable phase is `claimed` but not `dispatched`, a
    fenced recovery owner may advance it and dispatch once. If it is already
    `dispatched`, the Broker queries the domain ledger first; it links any
    terminal domain receipt, otherwise it returns a retryable in-flight result
    and lets reconciliation continue;
-8. the same key plus different input returns `CONFLICT` without dispatch;
-9. dispatch to a domain service such as K-1 only after the claim succeeds;
-10. persist the settlement before replying to the runtime.
+8. the same effect key plus different input returns `CONFLICT` without
+   dispatch;
+9. dispatch a settled effect to a domain service such as K-1 only after the
+   claim succeeds; a replay-safe method dispatches after authorization without
+   an effect claim;
+10. persist an effect settlement before replying to the runtime.
 
 Domain-specific keys remain authoritative where the contract already defines
 them: messaging send uses `(pluginInstanceId, idempotencyKey)` and append uses
-`(pluginInstanceId, messageId, operationId)`. The generic broker ledger records
-transport settlement and points to the domain receipt; it must not execute the
-domain action a second time.
+`(pluginInstanceId, Host-resolved messageId, operationId)`. Subscribe preserves
+K-1's atomic `(pluginInstanceId, Host-resolved handleId)` create-or-get key;
+acknowledgement uses the subscription-local ackToken; callback delivery uses a
+Broker-minted deliveryId.
+The domain eventId remains content inside the delivered envelope and is never
+conflated with delivery settlement. The generic broker ledger records transport
+settlement and points to the domain receipt; it must not transmit or invent
+another unconstrained idempotency value, and it must not execute the domain
+action a second time.
 
 A deadline is not permission to erase an action that may already have committed.
 After dispatch, the reconciler queries the domain ledger and returns its real
@@ -325,8 +346,9 @@ enqueued -> leased -> delivered -> acked
 
 - enqueue requires a current scoped grant; `onMessage` is L2 and never implied
   by `messaging.send`;
-- delivery is at least once; the callback event ID is the consumer idempotency
-  key;
+- delivery is at least once; the Broker-minted deliveryId is the consumer
+  idempotency key. A domain eventId may be present in the envelope but is not a
+  lease or acknowledgement identity;
 - an ack token is callback/subscription-local and bound to the installation and
   broker session;
 - lease ownership is fenced. A stale session cannot acknowledge or settle a
@@ -458,6 +480,193 @@ pre-K-2 audit continuity.
 Migration is copy-and-verify before cutover. Failure leaves the old data and
 authority intact. Uninstall never deletes retained or ask-on-uninstall data
 without the user's explicit choice.
+
+## Wire-shape assessment for issue #1165
+
+[Issue #1165](https://github.com/zts212653/clowder-ai/issues/1165) is a
+shape-only co-sign anchor, not implementation or publication authority. The
+current verdict is **corrections required**; K-2 does not reply
+`shape-approved` on the issue's initial body.
+
+### Grounding correction
+
+The issue says K-1 is pinned to `plugin-contract@0.1.0-beta.1`. The exact K-1
+branch assessed here, `9fb37310ab5bd22ee262d09135a157bc161cbd90`, has no
+plugin-contract package dependency. It still owns a hand-written mirror based
+on an older candidate and already drifts from beta.2. The truthful gate is:
+
+1. contract changes land through a co-signed contract PR and an exact new
+   artifact is registry-verified;
+2. K-1 and K-2 explicitly pin that exact artifact version;
+3. neither consumer follows `next` or another mutable dist-tag;
+4. K-1 removes its mirror before merge.
+
+### Row-by-row verdict
+
+| Requested decision | Verdict | K-2 decision |
+|---|---|---|
+| reject taxonomy | revise | one `HANDSHAKE_REJECTED` class with a closed reason enum; detailed Host audit remains private |
+| framing and limits | accept with constraints | JSON-RPC 2.0 over UTF-8 NDJSON, one non-batch object per line, 1 MiB hard frame ceiling, method-level pagination only |
+| package digest form | revise | one canonical `sha512-<base64>` SRI token over exact staged artifact bytes for every package source |
+| operation and settlement identity | revise | JSON-RPC id is attempt-only; each method registry row points to the one authoritative domain settlement key |
+| session and resume carrier | defer resume | every reconnect performs a fresh handshake and receives a new brokerSessionId; durable ledgers, not a resume token, recover work |
+| SendReceipt to MessageHandle | revise | receipt carries an explicit opaque Host-minted `messageHandle`; messageId is never reused as capability token |
+| public wire registry | conditional accept | names below are reserved; snapshot and callback error rows cannot publish until their bounded schemas close |
+
+### Handshake field direction
+
+The public contract adds these generated structures:
+
+```text
+CandidateHello (plugin -> Host, candidate claims only)
+  pluginId
+  packageDigest
+  contractVersion
+  wireVersion
+
+SessionBinding (Host -> plugin, authoritative)
+  pluginId
+  packageDigest
+  contractVersion
+  wireVersion
+  pluginInstanceId
+  brokerSessionId
+  grantRevision
+  effectiveGrants
+  bindingNonce
+```
+
+`broker.hello` carries CandidateHello. The Host validates it against the exact
+installed record before returning SessionBinding. The plugin then calls
+`broker.ready` on the same connection with only the one-use bindingNonce. A
+successful response is the runtime acknowledgement that moves the session to
+active. CandidateHello and ready params reject additional identity, instance,
+grant, or session fields; the runtime never selects authority by echoing them.
+
+The bindingNonce is connection-bound and activation-only. It is not a session
+resume carrier and cannot authorize a new connection.
+
+### Framing and artifact digest
+
+- stdio uses UTF-8 JSON-RPC 2.0 over NDJSON; stdout is protocol-only and logs
+  go to stderr;
+- canonical output uses LF. A decoder may assemble one logical line from
+  multiple operating-system reads, but a JSON-RPC object never spans multiple
+  NDJSON frames;
+- JSON-RPC batch arrays, compression, blank frames, invalid UTF-8, and trailing
+  non-whitespace data are rejected in v0;
+- `maxFrameBytes = 1_048_576`, counted on raw UTF-8 bytes excluding the LF.
+  This is four times beta.2's 262,144-byte total element-payload limit, leaving
+  bounded room for schema and JSON overhead. The decoder stops buffering and
+  closes the connection when an unterminated frame crosses the ceiling. A
+  future schema that cannot prove a result fits must paginate or negotiate a
+  later wire version rather than silently raising this v0 limit;
+- an oversized domain result is not split by the transport. The method schema
+  must paginate below the ceiling. In particular, `messaging.snapshot` remains
+  unpublished until a bounded snapshot-page request/result is contract-owned;
+- packageDigest is one canonical `sha512-<base64>` SRI token over the exact
+  staged archive bytes. An npm artifact must also pass its registry integrity
+  check. A local external package must become an exact archive before install;
+  an unpacked-tree normalization algorithm is not a second digest truth.
+
+### Settlement identity
+
+Every ordinary call uses:
+
+```text
+JSON-RPC id = requestId                 attempt correlation only
+params.meta.deadlineUnixMs              Host-capped absolute deadline
+params.input                            method-owned schema
+registry.settlementKeySource            authoritative field/composite or "none"
+```
+
+The registry mapping is fixed as follows:
+
+| Method | Settlement key source |
+|---|---|
+| `messaging.send` | `input.idempotencyKey` |
+| `messaging.appendElements` | `(Host-resolved messageId from input.handle, input.operationId)` |
+| `messaging.subscribe` | Host-resolved `input.handle` identity; K-1 create-or-get is authoritative |
+| `messaging.read` | none; at-least-once replay is safe and delivered watermark only advances monotonically |
+| `messaging.ack` | `(input.subscriptionId, input.ackToken)` |
+| `messaging.snapshot` | none; current projection may replay and cursor catch-up is monotonic |
+| `host.messaging.deliver` | `input.deliveryId` |
+
+The Broker extracts rather than duplicates that value. A retry may use a new
+requestId, but the same settlement key plus the same input converges on the
+existing terminal or in-flight result; the same key plus different input is a
+conflict. Rows marked `none` deliberately do not promise byte-identical retry
+responses: their schemas must prove at-least-once replay and monotonic cursor
+updates before publication.
+
+### Initial production method registry
+
+Fixture verbs remain conformance-only. The first public registry reserves these
+exact method names and directions:
+
+| Method | Direction | Grant | Input -> result | Error set |
+|---|---|---|---|---|
+| `broker.hello` | plugin -> Host | protocol-intrinsic | CandidateHello -> SessionBinding | HANDSHAKE_REJECTED |
+| `broker.ready` | plugin -> Host | protocol-intrinsic | bindingNonce -> null | HANDSHAKE_REJECTED |
+| `messaging.send` | plugin -> Host | messaging.send | MessageDraft -> SendReceipt with messageHandle | MessagingErrorCode + deadline |
+| `messaging.appendElements` | plugin -> Host | messaging.appendElements | AppendElementsRequest -> AppendReceipt | MessagingErrorCode + deadline |
+| `messaging.subscribe` | plugin -> Host | message.event.subscribe | handle -> subscriptionId | MessagingErrorCode + deadline |
+| `messaging.read` | plugin -> Host | message.event.subscribe | subscriptionId + limit -> SubscriptionReadResponse | MessagingErrorCode + deadline |
+| `messaging.ack` | plugin -> Host | message.event.subscribe | subscriptionId + ackToken -> null | MessagingErrorCode + deadline |
+| `messaging.snapshot` | plugin -> Host | message.event.subscribe | bounded SnapshotPageRequest -> SnapshotPageResponse | blocked until schema closes |
+| `host.messaging.deliver` | Host -> plugin | onMessage | deliveryId + threadHandle + envelope -> deliveryId ack | closed callback error set required |
+| `host.grants.changed` | Host -> plugin | protocol-intrinsic | GrantSnapshot notification | none |
+| `host.lifecycle.ping` | Host -> plugin | protocol-intrinsic | nonce -> nonce | protocol errors only |
+| `host.lifecycle.drain` | Host -> plugin | protocol-intrinsic | deadlineUnixMs -> null | deadline |
+
+There is no production method for fixture setup/observe, grant presets,
+revocation, permission-matrix inspection, or replay deletion. There is also no
+grant-introspection RPC: SessionBinding and `host.grants.changed` are the
+authoritative snapshots, while every Host call still reads current grants.
+
+### Rejection and reconnect semantics
+
+Handshake rejection uses one public class with one of these reasons:
+
+```text
+MALFORMED_HELLO
+PACKAGE_MISMATCH
+CONTRACT_INCOMPATIBLE
+WIRE_INCOMPATIBLE
+AUTHORITY_VIOLATION
+DEADLINE_EXPIRED
+BINDING_REPLAY
+```
+
+Wrong digest maps to PACKAGE_MISMATCH. A caller-supplied instance, session, or
+grant field maps to AUTHORITY_VIOLATION. The contract harness asserts the
+closed public reason and zero side effects; the Host audit may record a more
+specific internal diagnostic without exposing installed state.
+
+V0 defines no resume token. Disconnect invalidates brokerSessionId and all
+connection leases. Reconnect starts from `broker.hello`; in-flight calls
+converge through their domain settlement keys and callbacks through deliveryId.
+Therefore the contract does not claim a session/instance-resume replay oracle.
+It does test stale-connection fencing and one-use bindingNonce replay.
+
+### Shape-gate disposition
+
+Issue #1165 remains corrections-required until a revision incorporates this
+matrix and closes all of the following:
+
+1. replace the false K-1 beta.1 pin claim with the live mirror state;
+2. generate CandidateHello, SessionBinding, CallMeta, GrantSnapshot, explicit
+   SendReceipt.messageHandle, registry rows, and closed error data from one
+   contract schema;
+3. define bounded SnapshotPageRequest/SnapshotPageResponse and the callback
+   rejection schema under the 1 MiB ceiling;
+4. demonstrate split-read, oversize, invalid-frame, authority-violation,
+   binding-replay, and zero-side-effect handshake conformance;
+5. publish only after contract review and registry verification, then re-pin
+   K-1 and K-2 explicitly.
+
+No production implementation, package publication, or dependency re-pin is
+authorized by this assessment.
 
 ## Implementation slices after the gates
 
