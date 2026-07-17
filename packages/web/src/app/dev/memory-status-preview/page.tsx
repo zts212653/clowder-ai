@@ -25,7 +25,7 @@ const REPORTER_880_WARNINGS: ConfigWarning[] = [
     code: 'embedding_disabled',
     message: 'No embedding model is configured — semantic recall is offline.',
     suggestedAction:
-      'Enable an embedding model in settings (set OPENAI_EMBEDDING_API_KEY or configure a local embedder) and run a full reindex.',
+      'Install and start the recommended local embedding service in Memory Center, then rebuild the index.',
   },
   {
     code: 'vectors_empty',
@@ -43,7 +43,7 @@ const REPORTER_880_WARNINGS: ConfigWarning[] = [
     code: 'vec_table_missing',
     message: 'Passage vector table is unavailable (sqlite-vec not loaded or embedding service not ready).',
     suggestedAction:
-      'Install sqlite-vec via Memory Center → Install Dialog, or disable embeddings if you do not need semantic recall.',
+      'Open the local embedding service controls to start or reinstall it; unsupported platforms will show a platform-specific error.',
   },
 ];
 

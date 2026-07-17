@@ -60,6 +60,11 @@ export interface ServiceLifecycleRouteOptions {
     operator: string;
     reason: 'already-running' | 'readiness';
   }) => void | Promise<void>;
+  onServiceUnavailable?: (event: {
+    service: ServiceManifest;
+    operator: string;
+    reason: 'stop' | 'uninstall' | 'disabled';
+  }) => void | Promise<void>;
   findPidsByPort?: (port: number) => Promise<number[]>;
   listProcesses?: () => Promise<ProcessSnapshot[]>;
   readProcessCommand?: (pid: number) => Promise<string | null>;
@@ -286,19 +291,31 @@ export async function registerServiceLifecycleRoutes(
 
   await registerServiceLifecycleAuditRoutes(app, auditLog);
 
-  function notifyServiceReady(
+  async function notifyServiceReady(
     service: ServiceManifest,
     operator: string,
     reason: 'already-running' | 'readiness',
-  ): void {
+  ): Promise<void> {
     const hook = options.lifecycle?.onServiceReady;
     if (!hook) return;
     try {
-      void Promise.resolve(hook({ service, operator, reason })).catch((error) => {
-        app.log.warn({ err: error, serviceId: service.id, reason }, 'service ready hook failed');
-      });
+      await hook({ service, operator, reason });
     } catch (error) {
       app.log.warn({ err: error, serviceId: service.id, reason }, 'service ready hook failed');
+    }
+  }
+
+  async function notifyServiceUnavailable(
+    service: ServiceManifest,
+    operator: string,
+    reason: 'stop' | 'uninstall' | 'disabled',
+  ): Promise<void> {
+    const hook = options.lifecycle?.onServiceUnavailable;
+    if (!hook) return;
+    try {
+      await hook({ service, operator, reason });
+    } catch (error) {
+      app.log.warn({ err: error, serviceId: service.id, reason }, 'service unavailable hook failed');
     }
   }
 
@@ -696,6 +713,7 @@ export async function registerServiceLifecycleRoutes(
           reply.status(lifecycleFailureStatus(result.error));
         } else {
           serviceConfigStore.set(service.id, { installed: false, enabled: false });
+          await notifyServiceUnavailable(service, operator, 'uninstall');
         }
         return result;
       },
@@ -800,8 +818,12 @@ export async function registerServiceLifecycleRoutes(
                   status: 'completed',
                   reason: 'already-running',
                 });
-                notifyServiceReady(service, operator, 'already-running');
-                return { ok: true, message: `${service.name} is already running`, pids: portProbe.owned };
+                const reconciliation = notifyServiceReady(service, operator, 'already-running');
+                return holdStartupGrace(
+                  { ok: true, message: `${service.name} is already running`, pids: portProbe.owned },
+                  startupReadinessTimeoutMs,
+                  reconciliation,
+                );
               }
               // Legacy-only listener: log and fall through to terminate
               app.log.info(
@@ -1002,8 +1024,8 @@ export async function registerServiceLifecycleRoutes(
           intervalMs: startupProbeIntervalMs,
           stopWhen: cleanExitBeforeReady ? undefined : settlement,
           stopIf: stopIfNoOwnedRuntimeProcess,
-        }).then((ready) => {
-          if (ready) notifyServiceReady(service, operator, 'readiness');
+        }).then(async (ready) => {
+          if (ready) await notifyServiceReady(service, operator, 'readiness');
           return ready;
         });
         const releaseWhen = settlement && !cleanExitBeforeReady ? Promise.race([settlement, readiness]) : readiness;
@@ -1230,6 +1252,7 @@ export async function registerServiceLifecycleRoutes(
         }
         serviceConfigStore.set(service.id, { enabled: false });
         await audit({ serviceId: service.id, action: 'stop', operator, status: 'completed' });
+        await notifyServiceUnavailable(service, operator, 'stop');
         return { ok: true, message: `${service.name} stopped (${stopped.length} process(es))`, stopped };
       },
       { action: 'stop' },
@@ -1268,6 +1291,7 @@ export async function registerServiceLifecycleRoutes(
           }
           const config = serviceConfigStore.set(service.id, patch);
           await audit({ serviceId: service.id, action: 'toggle', operator, status: 'completed' });
+          if (!enabled) await notifyServiceUnavailable(service, operator, 'disabled');
           return { ok: true, config };
         },
         { action: 'toggle' },

@@ -131,6 +131,8 @@ describe('evidence-status-signals (F188 Phase K)', () => {
       assert.ok(warning, 'null embedding_model should warn');
       assert.equal(warning.code, 'embedding_disabled');
       assert.ok(warning.suggestedAction);
+      assert.match(warning.suggestedAction, /local embedding service/i);
+      assert.doesNotMatch(warning.suggestedAction, /OPENAI_EMBEDDING_API_KEY/);
     });
 
     it('embedding_model set → no warn', () => {
@@ -184,6 +186,8 @@ describe('evidence-status-signals (F188 Phase K)', () => {
       const warning = mod.detectVecTableMissing(signals);
       assert.ok(warning);
       assert.equal(warning.code, 'vec_table_missing');
+      assert.match(warning.suggestedAction, /embedding service/i);
+      assert.doesNotMatch(warning.suggestedAction, /OPENAI_EMBEDDING_API_KEY/);
     });
 
     it('passage_vectors_supported === true → no warn', () => {
