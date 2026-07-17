@@ -133,6 +133,8 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
 
   const store = new SqliteEvidenceStore(sqlitePath);
   await store.initialize();
+  const stores = new Map<string, IEvidenceStore>();
+  stores.set('project:cat-cafe', store);
   const entitySeeds = loadEntitySeeds({
     explicitSeedPath: config.entitySeedPath,
     includeRoster: config.includeRosterEntitySeeds,
@@ -158,7 +160,12 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
     undefined,
     childExcludes.length > 0 ? childExcludes : undefined,
   );
-  const embeddingLifecycle = new MemoryEmbeddingLifecycle(store, indexBuilder, embedConfig);
+  const embeddingLifecycle = new MemoryEmbeddingLifecycle(store, indexBuilder, embedConfig, {
+    getDependentStores: () =>
+      [...stores.values()].filter(
+        (candidate): candidate is SqliteEvidenceStore => candidate instanceof SqliteEvidenceStore,
+      ),
+  });
   if (embedConfig.embedMode !== 'off') {
     await embeddingLifecycle.activate(embedConfig.embedMode);
   }
@@ -190,7 +197,6 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
   }
 
   const catalog = new LibraryCatalog();
-  const stores = new Map<string, IEvidenceStore>();
   const now = new Date().toISOString();
 
   catalog.register({
@@ -207,8 +213,6 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
     createdAt: now,
     updatedAt: now,
   });
-  stores.set('project:cat-cafe', store);
-
   if (globalStore) {
     catalog.register({
       id: 'global:methods',

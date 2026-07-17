@@ -26,6 +26,7 @@ interface VectorBackend {
 interface MemoryEmbeddingLifecycleOptions {
   createEmbeddingService?: (config: EmbedConfig) => IEmbeddingService;
   initializeVectorBackend?: (store: SqliteEvidenceStore, dim: number) => Promise<VectorBackend>;
+  getDependentStores?: () => Iterable<SqliteEvidenceStore>;
 }
 
 class VectorBackendUnavailableError extends Error {
@@ -69,6 +70,7 @@ export class MemoryEmbeddingLifecycle {
   private generation = 0;
   private readonly createEmbeddingService: (config: EmbedConfig) => IEmbeddingService;
   private readonly initializeVectorBackend: (store: SqliteEvidenceStore, dim: number) => Promise<VectorBackend>;
+  private readonly getDependentStores: () => Iterable<SqliteEvidenceStore>;
 
   constructor(
     private readonly store: SqliteEvidenceStore,
@@ -79,6 +81,7 @@ export class MemoryEmbeddingLifecycle {
     this.createEmbeddingService =
       options.createEmbeddingService ?? ((embedConfig) => new EmbeddingService(embedConfig));
     this.initializeVectorBackend = options.initializeVectorBackend ?? initializeVectorBackend;
+    this.getDependentStores = options.getDependentStores ?? (() => [store]);
   }
 
   activate(mode: ActiveEmbeddingRuntimeMode): Promise<EmbeddingActivationResult> {
@@ -106,8 +109,7 @@ export class MemoryEmbeddingLifecycle {
     this.mode = 'off';
     this.status = 'off';
     this.reason = undefined;
-    this.indexBuilder.setEmbedDeps(undefined);
-    this.store.setEmbedDeps(undefined);
+    this.clearDependencies();
     this.service?.dispose();
     this.service = undefined;
     this.vectorStore = undefined;
@@ -176,8 +178,7 @@ export class MemoryEmbeddingLifecycle {
       this.reason = error instanceof VectorBackendUnavailableError ? error.reason : 'sqlite_vec_unavailable';
       this.vectorStore = undefined;
       this.passageVectorStore = undefined;
-      this.indexBuilder.setEmbedDeps(undefined);
-      this.store.setEmbedDeps(undefined);
+      this.clearDependencies();
       return this.snapshot(false);
     }
   }
@@ -191,6 +192,13 @@ export class MemoryEmbeddingLifecycle {
     };
     this.indexBuilder.setEmbedDeps(deps);
     this.store.setEmbedDeps({ ...deps, mode: this.mode });
+  }
+
+  private clearDependencies(): void {
+    this.indexBuilder.setEmbedDeps(undefined);
+    const stores = new Set<SqliteEvidenceStore>([this.store]);
+    for (const store of this.getDependentStores()) stores.add(store);
+    for (const store of stores) store.setEmbedDeps(undefined);
   }
 
   private isCurrent(generation: number): boolean {
