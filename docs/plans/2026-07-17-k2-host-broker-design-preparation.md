@@ -54,6 +54,9 @@ Production K-2 work starts only after all of these are true:
 3. Host and SDK transport/handshake structures have one machine-readable owner
    in `@clowder-ai/plugin-contract`; the core repository does not define a
    parallel public wire schema.
+4. Every production registry row marked ready has contract-owned UTF-8 byte
+   bounds and a generated request/result/error encoding proof below the v0
+   frame ceiling. A row without that proof remains reserved but unpublished.
 
 ## Grounded baseline
 
@@ -511,7 +514,7 @@ on an older candidate and already drifts from beta.2. The truthful gate is:
 | operation and settlement identity | revise | JSON-RPC id is attempt-only; each method registry row points to the one authoritative domain settlement key |
 | session and resume carrier | defer resume | every reconnect performs a fresh handshake and receives a new brokerSessionId; durable ledgers, not a resume token, recover work |
 | SendReceipt to MessageHandle | revise | receipt carries an explicit opaque Host-minted `messageHandle`; messageId is never reused as capability token |
-| public wire registry | conditional accept | names below are reserved; snapshot and callback error rows cannot publish until their bounded schemas close |
+| public wire registry | conditional accept | names below are reserved; no row publishes without request/result/error byte-budget proof, and read/snapshot/delivery stay blocked until their bounded page or callback schemas close |
 
 ### Handshake field direction
 
@@ -550,9 +553,11 @@ resume carrier and cannot authorize a new connection.
 
 - stdio uses UTF-8 JSON-RPC 2.0 over NDJSON; stdout is protocol-only and logs
   go to stderr;
-- canonical output uses LF. A decoder may assemble one logical line from
-  multiple operating-system reads, but a JSON-RPC object never spans multiple
-  NDJSON frames;
+- v0 output is compact UTF-8 JSON with no BOM or insignificant whitespace and
+  uses LF as the frame terminator. Non-control Unicode is encoded directly as
+  UTF-8, while required JSON escaping counts toward the budget. A decoder may
+  assemble one logical line from multiple operating-system reads, but a
+  JSON-RPC object never spans multiple NDJSON frames;
 - JSON-RPC batch arrays, compression, blank frames, invalid UTF-8, and trailing
   non-whitespace data are rejected in v0;
 - `maxFrameBytes = 1_048_576`, counted on raw UTF-8 bytes excluding the LF.
@@ -561,13 +566,53 @@ resume carrier and cannot authorize a new connection.
   closes the connection when an unterminated frame crosses the ceiling. A
   future schema that cannot prove a result fits must paginate or negotiate a
   later wire version rather than silently raising this v0 limit;
-- an oversized domain result is not split by the transport. The method schema
-  must paginate below the ceiling. In particular, `messaging.snapshot` remains
-  unpublished until a bounded snapshot-page request/result is contract-owned;
+- the decoder ceiling is the last fail-closed defense, not the normal way to
+  reject a schema-valid value. Inbound request bytes are checked before
+  business dispatch, and outbound result/error bytes are checked before they
+  enter the write queue. An over-budget value produces zero business side
+  effects and never becomes a partial frame;
+- JSON Schema `maxLength` alone is not a byte proof: it counts characters,
+  while UTF-8 encoding and JSON escaping change the wire size. The contract
+  therefore owns both structural limits and semantic raw-byte validators for
+  every free string, identifier, handle/token, error payload, and collection;
+- an oversized domain result is not split by the transport. A method that can
+  return a collection must assemble a bounded page and stop before adding the
+  first item that would cross its generated result budget. A single item must
+  itself be provably encodable. `messaging.read`, `messaging.snapshot`, and
+  `host.messaging.deliver` remain unpublished until bounded read/snapshot pages
+  and callback request/ack/rejection data are contract-owned;
 - packageDigest is one canonical `sha512-<base64>` SRI token over the exact
   staged archive bytes. An npm artifact must also pass its registry integrity
   check. A local external package must become an exact archive before install;
   an unpacked-tree normalization algorithm is not a second digest truth.
+
+### Wire-byte publication invariant
+
+The contract schema and generator own one `wireBounds` truth whose frame cap is
+the v0 `maxFrameBytes`. A registry row may be marked ready only when all of the
+following are generated and mechanically checked:
+
+1. every variable-length request, result, notification, acknowledgement, and
+   public error field has a structural limit plus an exact UTF-8/JSON byte
+   validator;
+2. the row declares `maxEncodedRequestBytes`, `maxEncodedResultBytes`, and
+   `maxEncodedErrorBytes`, each no greater than `maxFrameBytes` under the v0
+   compact JSON-RPC encoding profile, including shared `CallMeta` and escaping;
+3. collection assemblers admit an item only if the encoded page would remain
+   within the row result budget, preserve continuation/watermark state when the
+   next item does not fit, and can prove that one individually valid item fits;
+4. request validation and the row's result/error proof are checked before
+   authorization-visible business dispatch. Dynamic page assembly completes
+   within budget before it advances a delivered watermark, callback lease, or
+   settlement state. The final encoded frame is checked again before write
+   queue mutation; an over-budget value is a contract violation, never a
+   partially emitted success.
+
+This proof covers requestId, plugin/package/version/session identifiers,
+bindingNonce, message/thread/subscription identifiers, handles, cursors,
+deliveryId, callback acknowledgements, and closed public error data. A method
+name may be reserved without this proof, but the method cannot be published or
+advertised as ready.
 
 ### Settlement identity
 
@@ -587,7 +632,7 @@ The registry mapping is fixed as follows:
 | `messaging.send` | `input.idempotencyKey` |
 | `messaging.appendElements` | `(Host-resolved messageId from input.handle, input.operationId)` |
 | `messaging.subscribe` | Host-resolved `input.handle` identity; K-1 create-or-get is authoritative |
-| `messaging.read` | none; repeated fetch is at-least-once safe; `lastDeliveredSequence` advances monotonically, while only ack advances `ackedSequence` |
+| `messaging.read` | none; repeated fetch is at-least-once safe; bounded page assembly advances `lastDeliveredSequence` only through the last emitted event, while only ack advances `ackedSequence` |
 | `messaging.ack` | `(input.subscriptionId, input.ackToken)` |
 | `messaging.snapshot` | none; current projection may replay and cursor catch-up is monotonic |
 | `host.messaging.deliver` | `input.deliveryId` |
@@ -602,7 +647,9 @@ updates before publication.
 ### Initial production method registry
 
 Fixture verbs remain conformance-only. The first public registry reserves these
-exact method names and directions:
+exact method names and directions. Reservation does not imply publication: each
+row remains blocked until its request/result/error byte proof satisfies the
+wire-byte publication invariant.
 
 | Method | Direction | Grant | Input -> result | Error set |
 |---|---|---|---|---|
@@ -611,10 +658,10 @@ exact method names and directions:
 | `messaging.send` | plugin -> Host | messaging.send | MessageDraft -> SendReceipt with messageHandle | MessagingErrorCode + deadline |
 | `messaging.appendElements` | plugin -> Host | messaging.appendElements | AppendElementsRequest -> AppendReceipt | MessagingErrorCode + deadline |
 | `messaging.subscribe` | plugin -> Host | message.event.subscribe | handle -> subscriptionId | MessagingErrorCode + deadline |
-| `messaging.read` | plugin -> Host | message.event.subscribe | subscriptionId + limit -> SubscriptionReadResponse | MessagingErrorCode + deadline |
+| `messaging.read` | plugin -> Host | message.event.subscribe | bounded SubscriptionReadPageRequest -> SubscriptionReadPageResponse | blocked until byte-budget proof closes |
 | `messaging.ack` | plugin -> Host | message.event.subscribe | subscriptionId + ackToken -> null | MessagingErrorCode + deadline |
 | `messaging.snapshot` | plugin -> Host | message.event.subscribe | bounded SnapshotPageRequest -> SnapshotPageResponse | blocked until schema closes |
-| `host.messaging.deliver` | Host -> plugin | onMessage | deliveryId + threadHandle + envelope -> deliveryId ack | closed callback error set required |
+| `host.messaging.deliver` | Host -> plugin | onMessage | bounded deliveryId + threadHandle + envelope -> bounded deliveryId ack | blocked until callback request/ack/rejection byte proof closes |
 | `host.grants.changed` | Host -> plugin | protocol-intrinsic | GrantSnapshot notification | none |
 | `host.lifecycle.ping` | Host -> plugin | protocol-intrinsic | nonce -> nonce | protocol errors only |
 | `host.lifecycle.drain` | Host -> plugin | protocol-intrinsic | deadlineUnixMs -> null | deadline |
@@ -656,12 +703,17 @@ matrix and closes all of the following:
 
 1. replace the false K-1 beta.1 pin claim with the live mirror state;
 2. generate CandidateHello, SessionBinding, CallMeta, GrantSnapshot, explicit
-   SendReceipt.messageHandle, registry rows, and closed error data from one
-   contract schema;
-3. define bounded SnapshotPageRequest/SnapshotPageResponse and the callback
-   rejection schema under the 1 MiB ceiling;
-4. demonstrate split-read, oversize, invalid-frame, authority-violation,
-   binding-replay, and zero-side-effect handshake conformance;
+   SendReceipt.messageHandle, registry rows, closed error data, and `wireBounds`
+   proof metadata from one contract schema;
+3. define bounded SubscriptionReadPageRequest/SubscriptionReadPageResponse,
+   SnapshotPageRequest/SnapshotPageResponse, callback request/ack/rejection
+   data, and byte caps for every CallMeta/identifier/handle/token/cursor/error
+   field under the 1 MiB ceiling. No registry row may be ready without generated
+   request/result/error encoding proof;
+4. demonstrate per-ready-row max-boundary and one-byte-oversize behavior under
+   multibyte UTF-8 and JSON escaping, bounded-page continuation, split-read,
+   invalid-frame, authority-violation, binding-replay, and zero-side-effect
+   inbound/outbound oversize conformance;
 5. publish only after contract review and registry verification, then re-pin
    K-1 and K-2 explicitly.
 
@@ -676,8 +728,9 @@ authorized by this assessment.
 2. **K-2B — Broker state machine with builtin loopback transport**: handshake,
    call ledger, callback delivery, dead-letter, and reconcile using the same
    semantics required of external transports. This slice requires a subsequent
-   contract package version that owns the public handshake structures; builtin
-   loopback does not license a core-local parallel schema.
+   contract package version that owns the public handshake structures and
+   row-level wire byte proofs; builtin loopback does not license a core-local
+   parallel schema or an unbounded result path.
 3. **K-2C — K-1 messaging adapter**: Host-issued handles, current-grant checks,
    exact package conformance, and all 18 signed cases against the real facade.
 4. **K-2D — contract-owned stdio/IPC transport**: only after its schema is
@@ -707,6 +760,8 @@ These are not open architecture questions:
 - `pluginInstanceId` survives runtime restart and changes on reinstall;
 - the published contract package is the only public schema/type/capability
   truth;
+- the 1 MiB v0 frame ceiling is fixed, and every ready registry row has a
+  generated request/result/error encoding proof below it;
 - builtin and external runtimes traverse the same Broker semantics;
 - raw thread IDs and arbitrary wake targets are structurally unavailable;
 - action and callback settlement is durable and restart-reconcilable;
