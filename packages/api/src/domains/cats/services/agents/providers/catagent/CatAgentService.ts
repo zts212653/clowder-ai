@@ -88,11 +88,16 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) throw createAbortError();
 }
 
-function dispatchAuditFields(input: Record<string, unknown>): Pick<CatAgentToolAuditEvent, 'path' | 'binary' | 'args'> {
+function dispatchAuditFields(input: unknown): Pick<CatAgentToolAuditEvent, 'path' | 'binary' | 'args'> {
+  // Guard: adapters may parse valid non-object tool inputs (e.g. null) for
+  // unknown tools before validateToolInput runs; treat them as empty fields
+  // rather than crashing on property access (Codex R5 P2).
+  if (input == null || typeof input !== 'object' || Array.isArray(input)) return {};
+  const obj = input as Record<string, unknown>;
   return {
-    ...(typeof input.path === 'string' ? { path: input.path } : {}),
-    ...(typeof input.binary === 'string' ? { binary: input.binary } : {}),
-    ...(Array.isArray(input.args) && input.args.every((arg) => typeof arg === 'string') ? { args: input.args } : {}),
+    ...(typeof obj.path === 'string' ? { path: obj.path } : {}),
+    ...(typeof obj.binary === 'string' ? { binary: obj.binary } : {}),
+    ...(Array.isArray(obj.args) && obj.args.every((arg) => typeof arg === 'string') ? { args: obj.args } : {}),
   };
 }
 
@@ -287,6 +292,28 @@ export class CatAgentService implements AgentService {
           metadata,
           timestamp: Date.now(),
         };
+        yield* emitDone(this.catId, metadata, totalUsage);
+        return;
+      }
+
+      // Fail-closed: require a non-null stop_reason before executing tools.
+      // A missing stop_reason with accumulated tool blocks means the stream
+      // omitted the message_delta / finish_reason frame — executing write/exec
+      // tools without explicit model intent is unsafe (Codex R5 P2).
+      if (result.stopReason == null) {
+        log.warn(`[${this.catId}] Tool blocks present but stop_reason is null — suppressing execution`);
+        for (const t of toolBlocks) {
+          yield {
+            type: 'tool_result',
+            catId: this.catId,
+            content: 'Error: stream omitted stop_reason — tool execution suppressed',
+            toolName: t.name,
+            toolUseId: t.id,
+            toolResultStatus: 'error',
+            metadata,
+            timestamp: Date.now(),
+          };
+        }
         yield* emitDone(this.catId, metadata, totalUsage);
         return;
       }

@@ -476,6 +476,26 @@ async function executeWriteFile(
   const relPath = normalizedRel(workDir, resolved);
 
   return withPathLock(resolved, async () => {
+    // Reject non-regular files with audit before hashing — parity with
+    // patch_file (which uses rejectWithAudit for the same policy). Plain
+    // throws in existingFileHash bypass audit records (Codex R5 P2).
+    try {
+      const preSt = await lstat(resolved);
+      if (preSt.isSymbolicLink()) {
+        await rejectWithAudit(options, { tool: 'write_file', path: relPath }, 'write_file refuses to follow symlinks');
+      }
+      if (!preSt.isFile()) {
+        await rejectWithAudit(
+          options,
+          { tool: 'write_file', path: relPath },
+          'write_file refuses non-regular files (directory, FIFO, socket, or device)',
+        );
+      }
+    } catch (err) {
+      // ENOENT is fine — file doesn't exist yet. rejectWithAudit throws
+      // a CatAgentToolRejection that must propagate.
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
     await assertWithinWriteCap(resolved, relPath, 'write_file', options);
     const hashBefore = await existingFileHash(resolved);
     const hashAfter = hashContent(content);
@@ -1078,7 +1098,9 @@ export async function buildToolRegistry(
       permission: 'allow',
     });
   }
-  if (options.scopedCallbacks?.currentTask) {
+  // Gate task-status mutation on L1+ — L0 is read-only and should not gain
+  // host mutation access merely because a task scope was available (Codex R5 P2).
+  if (options.scopedCallbacks?.currentTask && levelAtLeast(options.nativeToolLevel, 'L1')) {
     tools.push({
       schema: updateCurrentTaskStatusSchema,
       execute: (i) => executeUpdateCurrentTaskStatus(i, options),
