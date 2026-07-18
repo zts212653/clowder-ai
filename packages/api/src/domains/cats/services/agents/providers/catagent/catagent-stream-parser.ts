@@ -247,7 +247,15 @@ function* handleSSEEvent(evt: ParsedSSEEvent, ctx: StreamContext): Iterable<CatA
         input = { _error: 'Tool input exceeded size limit' };
       } else {
         try {
-          input = JSON.parse(block.toolInputJson || '{}');
+          const parsed2 = JSON.parse(block.toolInputJson || '{}');
+          // Normalize non-object JSON (null, [], string, number) to a sentinel
+          // so encodeAssistantTurn doesn't echo a non-object as tool_use.input,
+          // violating the Anthropic API contract (Codex R10 P2).
+          if (parsed2 == null || typeof parsed2 !== 'object' || Array.isArray(parsed2)) {
+            input = { _error: 'Non-object tool input' };
+          } else {
+            input = parsed2;
+          }
         } catch {
           input = { _error: 'Invalid tool input JSON' };
         }
