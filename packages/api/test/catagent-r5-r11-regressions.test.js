@@ -27,9 +27,10 @@ import { after, before, describe, test } from 'node:test';
 const { buildToolRegistry, findTool } = await import(
   '../dist/domains/cats/services/agents/providers/catagent/catagent-read-tools.js'
 );
-const { executeCatAgentTools } = await import(
+const { CatAgentService, executeCatAgentTools } = await import(
   '../dist/domains/cats/services/agents/providers/catagent/CatAgentService.js'
 );
+const { resetMigrationState } = await import('../dist/config/catalog-accounts.js');
 const { validateToolInput } = await import(
   '../dist/domains/cats/services/agents/providers/catagent/catagent-tool-guard.js'
 );
@@ -84,6 +85,13 @@ before(() => {
   mkdirSync(tmpDir, { recursive: true });
   mkdirSync(outsideDir, { recursive: true });
   writeFileSync(join(tmpDir, 'existing.txt'), 'hello world');
+  // Credentials for CatAgentService tests
+  mkdirSync(join(tmpDir, '.cat-cafe'), { recursive: true });
+  writeFileSync(join(tmpDir, '.cat-cafe', 'accounts.json'), JSON.stringify({ 'test-ant': { authType: 'api_key' } }));
+  writeFileSync(
+    join(tmpDir, '.cat-cafe', 'credentials.json'),
+    JSON.stringify({ 'test-ant': { apiKey: 'sk-test-r11' } }),
+  );
 });
 
 after(() => {
@@ -396,5 +404,139 @@ describe('R11: isToolUseStopReason adapter predicates', () => {
     assert.equal(adapter.isToolUseStopReason('length'), false);
     assert.equal(adapter.isToolUseStopReason('future_reason'), false);
     assert.equal(adapter.isToolUseStopReason(null), false);
+  });
+});
+
+// ── R11 service-level: non-tool-use stop_reason suppresses tool execution ──
+
+describe('R11 service-level: CatAgentService suppresses tools on non-tool-use stop_reason', () => {
+  let prevFetch;
+  let prevEnv;
+  let prevModel;
+
+  before(() => {
+    prevFetch = globalThis.fetch;
+    prevEnv = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    prevModel = process.env.CAT_OPUS_MODEL;
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = tmpDir;
+    process.env.CAT_OPUS_MODEL = 'claude-opus-4-6';
+    resetMigrationState();
+  });
+
+  after(() => {
+    globalThis.fetch = prevFetch;
+    if (prevEnv !== undefined) process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = prevEnv;
+    else delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    if (prevModel !== undefined) process.env.CAT_OPUS_MODEL = prevModel;
+    else delete process.env.CAT_OPUS_MODEL;
+    resetMigrationState();
+  });
+
+  test('pause_turn + tool block → tool NOT executed, error result emitted, no second turn', async () => {
+    let fetchCallCount = 0;
+    globalThis.fetch = async () => {
+      fetchCallCount++;
+      // Stream delivers a tool_use block but stop_reason is 'pause_turn' (not 'tool_use')
+      const events = [
+        sseEvent({ type: 'message_start', message: { id: 'msg-r11', usage: { input_tokens: 10 } } }),
+        sseEvent({
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'tool_use', id: 'tu-r11', name: 'read_file' },
+        }),
+        sseEvent({
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'input_json_delta', partial_json: '{"path":"existing.txt"}' },
+        }),
+        sseEvent({ type: 'content_block_stop', index: 0 }),
+        sseEvent({ type: 'message_delta', delta: { stop_reason: 'pause_turn' }, usage: { output_tokens: 5 } }),
+        sseEvent({ type: 'message_stop' }),
+      ].join('');
+      return {
+        ok: true,
+        headers: new Headers({ 'content-type': 'text/event-stream' }),
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(events));
+            controller.close();
+          },
+        }),
+      };
+    };
+
+    const svc = new CatAgentService({
+      catId: 'opus',
+      projectRoot: tmpDir,
+      catConfig: { accountRef: 'test-ant' },
+    });
+    const msgs = [];
+    for await (const msg of svc.invoke('test', { workingDirectory: tmpDir })) {
+      msgs.push(msg);
+    }
+
+    // Only one fetch call — no second turn initiated
+    assert.equal(fetchCallCount, 1, 'must NOT initiate a second API call');
+
+    // Tool result with error status emitted (suppression message)
+    const toolResult = msgs.find((m) => m.type === 'tool_result');
+    assert.ok(toolResult, 'tool_result event must be emitted');
+    assert.equal(toolResult.toolResultStatus, 'error');
+    assert.ok(toolResult.content.includes('pause_turn'), 'error mentions the non-tool-use stop reason');
+    assert.ok(toolResult.content.includes('suppressed'), 'error mentions suppression');
+
+    // Done event present
+    const done = msgs.find((m) => m.type === 'done');
+    assert.ok(done, 'done event must be emitted');
+  });
+
+  test('future_reason + tool block → same suppression behavior', async () => {
+    let fetchCallCount = 0;
+    globalThis.fetch = async () => {
+      fetchCallCount++;
+      const events = [
+        sseEvent({ type: 'message_start', message: { id: 'msg-r11b', usage: { input_tokens: 10 } } }),
+        sseEvent({
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'tool_use', id: 'tu-r11b', name: 'list_files' },
+        }),
+        sseEvent({
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'input_json_delta', partial_json: '{"path":"."}' },
+        }),
+        sseEvent({ type: 'content_block_stop', index: 0 }),
+        sseEvent({ type: 'message_delta', delta: { stop_reason: 'future_reason' }, usage: { output_tokens: 5 } }),
+        sseEvent({ type: 'message_stop' }),
+      ].join('');
+      return {
+        ok: true,
+        headers: new Headers({ 'content-type': 'text/event-stream' }),
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(events));
+            controller.close();
+          },
+        }),
+      };
+    };
+
+    const svc = new CatAgentService({
+      catId: 'opus',
+      projectRoot: tmpDir,
+      catConfig: { accountRef: 'test-ant' },
+    });
+    const msgs = [];
+    for await (const msg of svc.invoke('test', { workingDirectory: tmpDir })) {
+      msgs.push(msg);
+    }
+
+    assert.equal(fetchCallCount, 1, 'must NOT initiate a second API call');
+    const toolResult = msgs.find((m) => m.type === 'tool_result');
+    assert.ok(toolResult, 'tool_result event must be emitted');
+    assert.equal(toolResult.toolResultStatus, 'error');
+    assert.ok(toolResult.content.includes('future_reason'));
+    assert.ok(toolResult.content.includes('suppressed'));
   });
 });
