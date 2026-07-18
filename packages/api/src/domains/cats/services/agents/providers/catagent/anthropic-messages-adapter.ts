@@ -146,6 +146,10 @@ export class AnthropicMessagesAdapter implements CatAgentProtocolAdapter {
     return stopReason != null && TERMINAL_STOP_REASONS.has(stopReason);
   }
 
+  isToolUseStopReason(stopReason: string | null): boolean {
+    return stopReason === 'tool_use';
+  }
+
   mapError(err: { status?: number; message?: string }): { errorText: string } {
     // Byte-stable with pre-G1 mapAnthropicError text format
     // (catagent-event-bridge.ts:163) so AC-G10 golden-wire test locks down

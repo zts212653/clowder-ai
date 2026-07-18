@@ -180,4 +180,17 @@ export interface CatAgentProtocolAdapter {
    * had to know the Anthropic-specific terminal whitelist.
    */
   isTerminalStopReason(stopReason: string | null): boolean;
+
+  /**
+   * Whether a `stop` event's `stopReason` positively indicates tool use.
+   *
+   * Used as a fail-closed gate: tool blocks are only executed when this
+   * returns `true`. Unknown or missing stop reasons suppress execution
+   * even if tool blocks were accumulated (Codex R5+R11 P2).
+   *
+   * Each protocol has its own tool-use signal:
+   * - Anthropic: `tool_use`
+   * - OpenAI: `tool_calls`
+   */
+  isToolUseStopReason(stopReason: string | null): boolean;
 }

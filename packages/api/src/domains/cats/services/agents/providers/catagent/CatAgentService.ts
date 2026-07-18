@@ -296,17 +296,21 @@ export class CatAgentService implements AgentService {
         return;
       }
 
-      // Fail-closed: require a non-null stop_reason before executing tools.
-      // A missing stop_reason with accumulated tool blocks means the stream
-      // omitted the message_delta / finish_reason frame — executing write/exec
-      // tools without explicit model intent is unsafe (Codex R5 P2).
-      if (result.stopReason == null) {
-        log.warn(`[${this.catId}] Tool blocks present but stop_reason is null — suppressing execution`);
+      // Fail-closed: positively gate tool execution on the adapter's tool-use
+      // stop reason. A null, unknown, or non-tool-use stop reason (e.g.
+      // pause_turn, future_reason) with accumulated tool blocks suppresses
+      // execution — only the provider-specific tool-use signal (Anthropic
+      // "tool_use", OpenAI "tool_calls") permits it (Codex R5+R11 P2).
+      if (!this.adapter.isToolUseStopReason(result.stopReason)) {
+        const reason = result.stopReason ?? 'null';
+        log.warn(
+          `[${this.catId}] Tool blocks present but stop_reason "${reason}" is not a tool-use signal — suppressing execution`,
+        );
         for (const t of toolBlocks) {
           yield {
             type: 'tool_result',
             catId: this.catId,
-            content: 'Error: stream omitted stop_reason — tool execution suppressed',
+            content: `Error: stop_reason "${reason}" is not a tool-use signal — tool execution suppressed`,
             toolName: t.name,
             toolUseId: t.id,
             toolResultStatus: 'error',

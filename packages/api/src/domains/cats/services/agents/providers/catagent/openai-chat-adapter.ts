@@ -392,4 +392,8 @@ export class OpenAIChatAdapter implements CatAgentProtocolAdapter {
   isTerminalStopReason(stopReason: string | null): boolean {
     return stopReason != null && TERMINAL_STOP_REASONS.has(stopReason);
   }
+
+  isToolUseStopReason(stopReason: string | null): boolean {
+    return stopReason === 'tool_calls';
+  }
 }

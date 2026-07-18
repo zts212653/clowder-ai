@@ -850,22 +850,71 @@ describe('audit-after-mutation honesty (commitThenAudit)', () => {
 
 // ── Non-regular file rejection (FIFO/device safety) ──
 // POSIX-only: mkfifo is not available on Windows.
-// Bounded-failure: each tool call races against a short deadline so that
-// a guard regression (readFile blocking on FIFO) produces a deterministic
-// test failure rather than hanging CI until the job timeout.
+// Child-process isolation (R11): the probe runs in a killable child so that
+// a guard regression (readFile blocking on FIFO) terminates the child rather
+// than hanging the test runner or CI. Promise.race in the same process does
+// NOT cancel a pending readFile — the process stays alive until killed.
 const IS_POSIX = process.platform !== 'win32';
 const FIFO_DEADLINE_MS = 5_000;
 
-/** Race a promise against a deadline — rejects with a clear message on timeout. */
-function withFifoDeadline(promise, label) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`${label}: blocked >${FIFO_DEADLINE_MS}ms — !isFile() guard likely regressed`)),
-      FIFO_DEADLINE_MS,
+// Resolve module path for child-process dynamic import
+const CATAGENT_TOOLS_URL = new URL(
+  '../dist/domains/cats/services/agents/providers/catagent/catagent-read-tools.js',
+  import.meta.url,
+).href;
+
+const FIFO_PROBE_SCRIPT = `
+const modulePath = process.argv[2];
+const workDir = process.argv[3];
+const toolName = process.argv[4];
+const input = JSON.parse(process.argv[5]);
+
+const { buildToolRegistry, findTool } = await import(modulePath);
+const tools = await buildToolRegistry(workDir, { nativeToolLevel: 'L1' });
+const tool = findTool(tools, toolName);
+try {
+  await tool.execute(input);
+  process.stderr.write('tool did not reject');
+  process.exit(1);
+} catch (err) {
+  process.stdout.write(err.message);
+  process.exit(0);
+}
+`;
+
+/**
+ * Run a tool probe in a killable child process. If the !isFile() guard
+ * regresses and readFile blocks on a FIFO, the child is killed after
+ * the deadline and the test fails deterministically.
+ */
+async function assertFifoRejectionInChild(toolName, input, label) {
+  const { execFile: execFileCb } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const { writeFileSync: wfs, unlinkSync: uls } = await import('node:fs');
+
+  const probePath = join(tmpDir, `.fifo-probe-${toolName}.mjs`);
+  wfs(probePath, FIFO_PROBE_SCRIPT);
+
+  const execFileP = promisify(execFileCb);
+  try {
+    const { stdout } = await execFileP(
+      'node',
+      [probePath, CATAGENT_TOOLS_URL, tmpDir, toolName, JSON.stringify(input)],
+      { timeout: FIFO_DEADLINE_MS, killSignal: 'SIGKILL' },
     );
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+    assert.ok(stdout.includes('non-regular file'), `${label}: expected non-regular file rejection, got: ${stdout}`);
+  } catch (err) {
+    if (err.killed) {
+      throw new Error(`${label}: child blocked >${FIFO_DEADLINE_MS}ms — !isFile() guard likely regressed`);
+    }
+    throw new Error(`${label}: probe failed (exit ${err.code}): ${err.stderr || err.message}`);
+  } finally {
+    try {
+      uls(probePath);
+    } catch {
+      /* best-effort */
+    }
+  }
 }
 
 describe('F1: non-regular file rejection', { skip: !IS_POSIX && 'POSIX-only (mkfifo)' }, () => {
@@ -890,30 +939,18 @@ describe('F1: non-regular file rejection', { skip: !IS_POSIX && 'POSIX-only (mkf
   });
 
   test('write_file rejects FIFO target without blocking', async () => {
-    const tools = await buildToolRegistry(tmpDir, { nativeToolLevel: 'L1' });
-    const write = findTool(tools, 'write_file');
-    assert.ok(write);
-    await assert.rejects(
-      () =>
-        withFifoDeadline(
-          write.execute({ path: 'test-fifo', content: 'should not write' }),
-          'write_file FIFO rejection',
-        ),
-      (err) => err.message.includes('non-regular file'),
+    await assertFifoRejectionInChild(
+      'write_file',
+      { path: 'test-fifo', content: 'should not write' },
+      'write_file FIFO rejection',
     );
   });
 
   test('patch_file rejects FIFO target without blocking', async () => {
-    const tools = await buildToolRegistry(tmpDir, { nativeToolLevel: 'L1' });
-    const patch = findTool(tools, 'patch_file');
-    assert.ok(patch);
-    await assert.rejects(
-      () =>
-        withFifoDeadline(
-          patch.execute({ path: 'test-fifo', old_text: 'x', new_text: 'y', expected_hash: 'abcdef01' }),
-          'patch_file FIFO rejection',
-        ),
-      (err) => err.message.includes('non-regular file'),
+    await assertFifoRejectionInChild(
+      'patch_file',
+      { path: 'test-fifo', old_text: 'x', new_text: 'y', expected_hash: 'abcdef01' },
+      'patch_file FIFO rejection',
     );
   });
 });
