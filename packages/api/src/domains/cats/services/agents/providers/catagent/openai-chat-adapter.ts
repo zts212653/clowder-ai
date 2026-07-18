@@ -293,11 +293,21 @@ function* emitOpenAIContentBlocks(ctx: OpenAIStreamContext): Iterable<CatAgentSt
     nextIndex++;
   }
   for (const [index, acc] of [...ctx.toolCalls.entries()].sort((a, b) => a[0] - b[0])) {
+    // Fail-closed: reject tool calls whose upstream never provided an id.
+    // The id is the correlation key echoed back via tool_call_id; fabricating
+    // one would let a malformed stream trigger L1/L2 tools (Codex R8 P2).
+    if (!acc.id) {
+      yield {
+        type: 'stream_error',
+        error: `Tool call at index ${index} missing upstream id — suppressed to prevent unverified execution`,
+      };
+      continue;
+    }
     yield {
       type: 'content_block_complete',
       block: {
         type: 'tool_call',
-        id: acc.id || `call_${index}`,
+        id: acc.id,
         name: acc.name || 'unknown_tool',
         input: finaliseToolCallInput(acc),
       },
