@@ -277,7 +277,7 @@ const writeFileSchema: ToolSchema = {
     type: 'object',
     properties: {
       path: { type: 'string', description: 'Relative path to write' },
-      content: { type: 'string', description: 'Full file content' },
+      content: { type: 'string', description: 'Full file content (empty string = create empty file)', allowEmpty: true },
     },
     required: ['path', 'content'] as const,
   },
@@ -291,7 +291,7 @@ const patchFileSchema: ToolSchema = {
     type: 'object',
     properties: {
       path: { type: 'string', description: 'Relative path to patch' },
-      old_text: { type: 'string', description: 'Text that must match exactly once' },
+      old_text: { type: 'string', description: 'Text that must match exactly once (whitespace-only spans are valid targets)', allowEmpty: true },
       new_text: { type: 'string', description: 'Replacement text (empty string = deletion)', allowEmpty: true },
       expected_hash: { type: 'string', description: 'SHA-256 hash or prefix of the current file content' },
     },
