@@ -31,14 +31,22 @@ function rejectUndeclaredFields(name: string, input: Record<string, unknown>, de
   }
 }
 
-/** Ensure required fields are present and non-empty */
-function checkRequiredFields(name: string, input: Record<string, unknown>, required: readonly string[]): void {
+/** Ensure required fields are present and non-empty (unless allowEmpty) */
+function checkRequiredFields(
+  name: string,
+  input: Record<string, unknown>,
+  required: readonly string[],
+  properties: Record<string, unknown>,
+): void {
   for (const key of required) {
     const val = input[key];
     if (val === undefined || val === null) {
       throw new ToolInputValidationError(name, `required field "${key}" is missing`);
     }
-    if (typeof val === 'string' && val.trim() === '') {
+    // Codex R6 P2: honour per-field allowEmpty for legitimate empty-string
+    // values (e.g. patch_file new_text="" for deletion).
+    const prop = properties[key] as { allowEmpty?: boolean } | undefined;
+    if (typeof val === 'string' && val.trim() === '' && !prop?.allowEmpty) {
       throw new ToolInputValidationError(name, `required field "${key}" is empty`);
     }
   }
@@ -74,7 +82,7 @@ export function validateToolInput(schema: ToolSchema, input: Record<string, unkn
   }
   const { properties, required = [] } = schema.input_schema;
   rejectUndeclaredFields(schema.name, input, new Set(Object.keys(properties)));
-  checkRequiredFields(schema.name, input, required);
+  checkRequiredFields(schema.name, input, required, properties);
   checkFieldTypes(schema.name, input, properties);
 }
 

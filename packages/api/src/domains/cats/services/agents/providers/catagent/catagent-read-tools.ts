@@ -292,7 +292,7 @@ const patchFileSchema: ToolSchema = {
     properties: {
       path: { type: 'string', description: 'Relative path to patch' },
       old_text: { type: 'string', description: 'Text that must match exactly once' },
-      new_text: { type: 'string', description: 'Replacement text' },
+      new_text: { type: 'string', description: 'Replacement text (empty string = deletion)', allowEmpty: true },
       expected_hash: { type: 'string', description: 'SHA-256 hash or prefix of the current file content' },
     },
     required: ['path', 'old_text', 'new_text', 'expected_hash'] as const,
