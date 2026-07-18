@@ -252,11 +252,20 @@ function* handleSSEEvent(evt: ParsedSSEEvent, ctx: StreamContext): Iterable<CatA
           input = { _error: 'Invalid tool input JSON' };
         }
       }
-      yield {
-        type: 'content_block_complete',
-        block: anthropicBlockToNeutral({ type: 'tool_use', id: block.toolId, name: block.toolName, input }),
-        blockIndex: index,
-      };
+      // Fail-closed: reject tool_use blocks whose upstream never provided an id.
+      // Parity with OpenAI adapter's missing-id guard (Codex R9 P2).
+      if (!block.toolId) {
+        yield {
+          type: 'stream_error',
+          error: `Anthropic tool_use block at index ${index} missing upstream id — suppressed to prevent unverified execution`,
+        };
+      } else {
+        yield {
+          type: 'content_block_complete',
+          block: anthropicBlockToNeutral({ type: 'tool_use', id: block.toolId, name: block.toolName, input }),
+          blockIndex: index,
+        };
+      }
     }
     return;
   }
