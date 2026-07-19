@@ -54,8 +54,22 @@ describe('UnifiedAuthModal clientFamily payload (F159 G2)', () => {
 
   it('PATCH sends clientFamily for valid family values', () => {
     const patchIdx = source.indexOf('if (isEdit) {');
-    const patchSlice = source.slice(patchIdx, patchIdx + 600);
+    const patchSlice = source.slice(patchIdx, patchIdx + 1000);
     expect(patchSlice).toContain('patch.clientFamily = clientId');
+  });
+
+  it('PATCH guards clientFamily to preserve legacy untyped accounts', () => {
+    // Legacy API-key accounts (no clientFamily) serve as cross-family fallbacks.
+    // A no-op edit (display name/model change only) must NOT stamp clientFamily.
+    // Only send clientFamily when the profile was already typed OR the user
+    // explicitly changed the client selector from the loaded default.
+    const patchIdx = source.indexOf('if (isEdit) {');
+    const patchSlice = source.slice(patchIdx, patchIdx + 1000);
+    // Must contain the guard checking for existing clientFamily
+    expect(patchSlice).toContain('hadClientFamily');
+    expect(patchSlice).toContain('userChangedClient');
+    // Must reference editProfile?.clientFamily for the guard
+    expect(patchSlice).toContain('editProfile?.clientFamily != null');
   });
 
   // ── Client selector visibility ──

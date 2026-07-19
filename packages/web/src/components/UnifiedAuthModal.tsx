@@ -152,9 +152,15 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
           models,
           envVars: envVars ?? {},
         };
-        // F159 G2: always send clientId + clientFamily — UI now shows client selector in both modes
+        // F159 G2: always send clientId — UI now shows client selector in both modes
         patch.clientId = clientId;
-        if (API_KEY_CLIENT_OPTIONS.includes(clientId)) {
+        // Only stamp clientFamily when the profile was already typed (had clientFamily)
+        // or the user explicitly changed the client selector. Legacy untyped accounts
+        // (no clientFamily) are cross-family compatibility fallbacks and must not be
+        // silently typed by a no-op display-name/model edit.
+        const hadClientFamily = editProfile?.clientFamily != null;
+        const userChangedClient = clientId !== defaultClientId;
+        if (API_KEY_CLIENT_OPTIONS.includes(clientId) && (hadClientFamily || userChangedClient)) {
           patch.clientFamily = clientId;
         }
         if (baseUrl.trim()) patch.baseUrl = baseUrl.trim();
