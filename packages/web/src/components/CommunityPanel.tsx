@@ -10,6 +10,7 @@ import { ReconciliationFindingCard } from '@/components/community/Reconciliation
 import { PR_ICON, TYPE_ICONS } from '@/components/community-panel-icons';
 import { DirectionCard, type DirectionCardProps } from '@/components/DirectionCard';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 
 function relativeTime(ts: number): string {
   const diff = Date.now() - ts;
@@ -164,6 +165,7 @@ function IssueRow({
   ) => Promise<void>;
   onRefresh: () => void;
 }) {
+  const resolveCatName = useCatNameResolver();
   const color = ISSUE_STATE_COLORS[item.state] ?? 'text-cafe-muted';
   const icon = TYPE_ICONS[item.issueType] ?? TYPE_ICONS.question;
   const hasDirectionCard =
@@ -204,14 +206,14 @@ function IssueRow({
             className="inline-flex items-center gap-0.5 text-micro text-cafe-accent/80 bg-cafe-accent/5 px-1.5 py-0.5 rounded-full shrink-0"
             title={
               item.assignedThreadName
-                ? `${item.assignedCatId} → ${item.assignedThreadName}`
+                ? `${resolveCatName(item.assignedCatId)} → ${item.assignedThreadName}`
                 : item.assignedThreadId
-                  ? `${item.assignedCatId} → ${item.assignedThreadId}`
-                  : item.assignedCatId
+                  ? `${resolveCatName(item.assignedCatId)} → ${item.assignedThreadId}`
+                  : resolveCatName(item.assignedCatId)
             }
           >
             <UserAssignIcon />
-            <span>{item.assignedCatId}</span>
+            <span>{resolveCatName(item.assignedCatId)}</span>
             {item.assignedThreadName && (
               <>
                 <span className="text-cafe-muted/40">→</span>
@@ -276,6 +278,7 @@ function PrRow({
   repo: string;
   onNavigate: (threadId: string) => void;
 }) {
+  const resolveCatName = useCatNameResolver();
   const color = PR_GROUP_COLORS[item.group] ?? 'text-cafe-muted';
   const handleClick = () => {
     if (item.threadId) onNavigate(item.threadId);
@@ -300,7 +303,7 @@ function PrRow({
       )}
       <span className="truncate flex-1 text-cafe-secondary">{item.title}</span>
       {item.author && <span className="text-micro text-cafe-muted">@{item.author}</span>}
-      {item.ownerCatId && <span className="text-micro text-cafe-accent/60">{item.ownerCatId}</span>}
+      {item.ownerCatId && <span className="text-micro text-cafe-accent/60">{resolveCatName(item.ownerCatId)}</span>}
       <span className="text-micro text-cafe-muted">{relativeTime(item.updatedAt)}</span>
     </div>
   );

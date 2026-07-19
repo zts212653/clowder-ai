@@ -15,6 +15,7 @@
  */
 
 import { useEffect } from 'react';
+import { useCatNameResolver, useCatTechnicalLabelResolver } from '@/hooks/useCatNameResolver';
 import {
   useCallbackAuthAvailable,
   useCallbackAuthError,
@@ -67,6 +68,7 @@ function ReasonDistribution({ byReason, total }: { byReason: Record<string, numb
 }
 
 function CatRoster({ byCat, max = 6 }: { byCat: Record<string, number>; max?: number }) {
+  const resolveCatName = useCatNameResolver();
   const entries = Object.entries(byCat)
     .filter(([, v]) => v > 0)
     .sort((a, b) => b[1] - a[1])
@@ -81,7 +83,9 @@ function CatRoster({ byCat, max = 6 }: { byCat: Record<string, number>; max?: nu
           {/* CallbackAuthCatAvatar reads status + popover from the global store
               so this in-panel roster matches what ThreadItem participants show. */}
           <CallbackAuthCatAvatar catId={catId} size={48} />
-          <div className="truncate text-micro text-cafe">{catId}</div>
+          <div className="w-full truncate text-center text-micro text-cafe" title={resolveCatName(catId)}>
+            {resolveCatName(catId)}
+          </div>
           <div className="text-micro text-cafe-muted">{count} fail</div>
         </div>
       ))}
@@ -115,6 +119,7 @@ function TopList({ title, entries, max = 5 }: { title: string; entries: Array<[s
 }
 
 export function HubCallbackAuthPanel() {
+  const resolveCatName = useCatTechnicalLabelResolver();
   // Cloud Codex P2 #1403 (round 6): consume the global store instead of
   // spawning a second polling instance — eliminates the data-skew window
   // where the in-panel byCat row used a fresh snapshot but the
@@ -181,7 +186,7 @@ export function HubCallbackAuthPanel() {
                 <span className="w-32 text-cafe-muted">{new Date(s.at).toLocaleTimeString()}</span>
                 <span className="w-32 font-mono text-cafe">{s.reason}</span>
                 <span className="font-mono text-cafe-secondary">{s.tool}</span>
-                {s.catId && <span className="ml-auto text-cafe-muted">{s.catId}</span>}
+                {s.catId && <span className="ml-auto text-cafe-muted">{resolveCatName(s.catId)}</span>}
               </div>
             ))}
           </div>

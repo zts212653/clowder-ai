@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { InvestigationProgress } from '@/components/concierge/InvestigationProgress';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 import type { RichCardBlock } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { useConciergeStore } from '@/stores/conciergeStore';
@@ -82,6 +83,7 @@ export function CardBlock({
   messageId?: string;
   confirmations?: CardConfirmationEntry[];
 }) {
+  const resolveCatName = useCatNameResolver();
   const toneStyle = TONE_STYLES[block.tone ?? 'info'] ?? TONE_STYLES.info;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -297,7 +299,7 @@ export function CardBlock({
           const peekContent = data.window
             .map((m) => {
               const prefix = m.isTarget ? '**→ ' : '  ';
-              const sender = m.catId ? `🐱 ${m.catId}` : `👤 ${m.userId}`;
+              const sender = m.catId ? `🐱 ${resolveCatName(m.catId)}` : `👤 ${m.userId}`;
               const suffix = m.isTarget ? ' ←**' : '';
               return `${prefix}${sender}: ${m.content?.slice(0, 200) ?? ''}${suffix}`;
             })

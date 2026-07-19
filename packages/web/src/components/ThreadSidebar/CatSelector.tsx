@@ -72,7 +72,6 @@ export function CatSelector({ selectedCats, onSelectionChange }: CatSelectorProp
                       style={{ backgroundColor: catColorVar(cat.id, 'primary') }}
                     />
                     {formatCatName(cat)}
-                    {!cat.variantLabel && cat.nickname ? `(${cat.nickname})` : ''}
                   </button>
                 );
               })}

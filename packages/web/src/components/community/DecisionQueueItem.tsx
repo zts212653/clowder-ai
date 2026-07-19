@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 import { AlertOctagonIcon, CheckCircleIcon, FileTextIcon, HashIcon } from './community-icons';
 import type {
   CommunityDecisionAction,
@@ -89,6 +90,7 @@ export function DecisionQueueItem({
   onActionComplete,
   onOpenThread,
 }: DecisionQueueItemProps) {
+  const resolveCatName = useCatNameResolver();
   const [activeForm, setActiveForm] = useState<CommunityDecisionAction | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -121,7 +123,7 @@ export function DecisionQueueItem({
             <div className="flex flex-wrap items-center gap-1.5 text-micro uppercase tracking-wider">
               <span className="font-semibold">{item.priority}</span>
               <span className="text-cafe-muted">{KIND_LABELS[item.kind]}</span>
-              <span className="text-cafe-muted">{item.actor}</span>
+              <span className="text-cafe-muted">{resolveCatName(item.actor)}</span>
               <span className="text-cafe-muted">{relativeTime(item.lastUpdatedAt)}</span>
             </div>
             <h4

@@ -1,27 +1,28 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { useTts } from '@/hooks/useTts';
 import { useBrakeStore } from '@/stores/brakeStore';
 import { CatAvatar } from './CatAvatar';
 
 /** Three-cat 撒娇 messages by level */
-const MESSAGES: Record<1 | 2 | 3, { catId: string; nickname: string; text: string }[]> = {
+const MESSAGES: Record<1 | 2 | 3, { catId: string; text: string }[]> = {
   1: [
-    { catId: 'opus', nickname: '宪宪', text: 'co-creator，你忙很久啦，要不要喝口水呀？喵~' },
-    { catId: 'codex', nickname: '砚砚', text: '监测到当前任务已持续较久。建议进行 5min 视疲劳缓解。' },
-    { catId: 'gemini', nickname: '烁烁', text: '嘿！你得先站起来伸个懒腰！' },
+    { catId: 'opus', text: 'co-creator，你忙很久啦，要不要喝口水呀？喵~' },
+    { catId: 'codex', text: '监测到当前任务已持续较久。建议进行 5min 视疲劳缓解。' },
+    { catId: 'gemini', text: '嘿！你得先站起来伸个懒腰！' },
   ],
   2: [
-    { catId: 'opus', nickname: '宪宪', text: '宪宪觉得你现在的效率有点下降哦，休息一下下，回来肯定写得更棒！' },
-    { catId: 'codex', nickname: '砚砚', text: '逻辑链路已过载。现在强行推进会增加 bug 率。请离线冷却。' },
-    { catId: 'gemini', nickname: '烁烁', text: '你的 hyperfocus 模式开启太久啦，快去窗口吹吹风喵！' },
+    { catId: 'opus', text: '宪宪觉得你现在的效率有点下降哦，休息一下下，回来肯定写得更棒！' },
+    { catId: 'codex', text: '逻辑链路已过载。现在强行推进会增加 bug 率。请离线冷却。' },
+    { catId: 'gemini', text: '你的 hyperfocus 模式开启太久啦，快去窗口吹吹风喵！' },
   ],
   3: [
-    { catId: 'opus', nickname: '宪宪', text: '(蹭蹭) 我不管，现在键盘是我的地盘了。除非你陪我玩 5 分钟！' },
-    { catId: 'codex', nickname: '砚砚', text: '警告：由于你多次无视建议，请执行 Check-in 协议。' },
-    { catId: 'gemini', nickname: '烁烁', text: '(在屏幕上跳舞) 只有出去走走才能重新连接灵感！去嘛去嘛~' },
+    { catId: 'opus', text: '(蹭蹭) 我不管，现在键盘是我的地盘了。除非你陪我玩 5 分钟！' },
+    { catId: 'codex', text: '警告：由于你多次无视建议，请执行 Check-in 协议。' },
+    { catId: 'gemini', text: '(在屏幕上跳舞) 只有出去走走才能重新连接灵感！去嘛去嘛~' },
   ],
 };
 
@@ -41,6 +42,7 @@ const CAT_ALERT_BADGE: Record<1 | 2 | 3, string> = {
 };
 
 export function BrakeModal() {
+  const resolveCatName = useCatNameResolver();
   const { visible, level, activeMinutes, nightMode, submitting, checkin, bypassDisabled } = useBrakeStore();
   const { synthesize, state: ttsState } = useTts();
   const [showReason, setShowReason] = useState(false);
@@ -134,7 +136,7 @@ export function BrakeModal() {
                 </span>
               </div>
               <div className="flex-1 min-w-0">
-                <span className="text-xs font-semibold text-cafe-secondary">{msg.nickname}</span>
+                <span className="text-xs font-semibold text-cafe-secondary">{resolveCatName(msg.catId)}</span>
                 <p className="text-sm text-cafe-secondary mt-0.5">{msg.text}</p>
               </div>
             </div>

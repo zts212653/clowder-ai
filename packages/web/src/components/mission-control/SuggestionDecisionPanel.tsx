@@ -1,6 +1,7 @@
 'use client';
 
 import type { BacklogItem, ThreadPhase } from '@cat-cafe/shared';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 
 interface SuggestionDecisionPanelProps {
   item: BacklogItem;
@@ -23,6 +24,7 @@ export function SuggestionDecisionPanel({
   onApprove,
   onReject,
 }: SuggestionDecisionPanelProps) {
+  const resolveCatName = useCatNameResolver();
   return (
     <div className="mt-4 space-y-2">
       {item.status === 'approved' && (
@@ -31,7 +33,7 @@ export function SuggestionDecisionPanel({
         </p>
       )}
       <div className="rounded-lg bg-[var(--console-hover-bg)] p-2 text-xs text-cafe-secondary">
-        <p>建议猫猫：@{item.suggestion?.catId}</p>
+        <p>建议猫猫：{item.suggestion?.catId ? resolveCatName(item.suggestion.catId) : '—'}</p>
         <p>Why：{item.suggestion?.why}</p>
         <p>Plan：{item.suggestion?.plan}</p>
       </div>

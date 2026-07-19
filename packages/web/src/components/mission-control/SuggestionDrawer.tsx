@@ -4,6 +4,7 @@ import type { BacklogItem, MissionHubSelfClaimScope, ThreadPhase } from '@cat-ca
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
+import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { SuggestionDecisionPanel } from './SuggestionDecisionPanel';
 import { SuggestionOpenForm } from './SuggestionOpenForm';
 
@@ -52,12 +53,12 @@ export function SuggestionDrawer({
   onReleaseLease,
   onReclaimLease,
 }: SuggestionDrawerProps) {
-  const { cats } = useCatData();
+  const { cats, getCatById } = useCatData();
   const catOptions = useMemo(
     () =>
       cats.map((cat) => ({
         id: cat.id,
-        label: !cat.variantLabel && cat.nickname ? `${formatCatName(cat)}（${cat.nickname}）` : formatCatName(cat),
+        label: formatCatName(cat),
       })),
     [cats],
   );
@@ -211,7 +212,7 @@ export function SuggestionDrawer({
           {item.lease && (
             <div className="mt-2 rounded-lg bg-[var(--mc-status-dispatched-bg)] px-2 py-1.5 text-xs text-[var(--mc-status-dispatched-text)]">
               <p>Lease：{item.lease.state}</p>
-              <p>Owner：{item.lease.ownerCatId}</p>
+              <p>Owner：{resolveCatDisplayName(item.lease.ownerCatId, getCatById)}</p>
               <p>ExpiresAt：{new Date(item.lease.expiresAt).toLocaleString()}</p>
             </div>
           )}

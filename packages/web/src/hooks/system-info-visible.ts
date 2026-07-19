@@ -5,6 +5,10 @@ export interface VisibleSystemInfoResult {
   variant: VisibleSystemInfoVariant;
 }
 
+type ResolveCatName = (catId: string) => string;
+
+const identityCatName: ResolveCatName = (catId) => catId;
+
 const INTERNAL_SYSTEM_INFO_TELEMETRY_TYPES = new Set([
   'mcp_server_status',
   'resume_failure_stats',
@@ -18,33 +22,39 @@ export function isInternalSystemInfoTelemetry(parsed: Record<string, unknown>): 
   return typeof parsed?.type === 'string' && INTERNAL_SYSTEM_INFO_TELEMETRY_TYPES.has(parsed.type);
 }
 
-function formatPingpongTerminated(parsed: Record<string, unknown>): VisibleSystemInfoResult {
+function formatPingpongTerminated(
+  parsed: Record<string, unknown>,
+  resolveCatName: ResolveCatName,
+): VisibleSystemInfoResult {
   const fromCatId = typeof parsed.fromCatId === 'string' ? parsed.fromCatId : 'unknown';
   const targetCatId = typeof parsed.targetCatId === 'string' ? parsed.targetCatId : 'unknown';
   const pairCount = typeof parsed.pairCount === 'number' ? parsed.pairCount : undefined;
   const rounds = pairCount ? ` ${pairCount} 轮` : '';
   return {
-    content: `🏓 ${fromCatId} ↔ ${targetCatId} 已连续互相 @${rounds}，链路已熔断。`,
+    content: `🏓 ${resolveCatName(fromCatId)} ↔ ${resolveCatName(targetCatId)} 已连续互相 @${rounds}，链路已熔断。`,
     variant: 'info',
   };
 }
 
-function formatRoleRejected(parsed: Record<string, unknown>): VisibleSystemInfoResult {
+function formatRoleRejected(parsed: Record<string, unknown>, resolveCatName: ResolveCatName): VisibleSystemInfoResult {
   const reason = typeof parsed.reason === 'string' ? parsed.reason : '';
   const targetCatId = typeof parsed.targetCatId === 'string' ? parsed.targetCatId : 'unknown';
   const action = typeof parsed.action === 'string' ? parsed.action : '当前';
   return {
-    content: reason || `⛔ @${targetCatId} 不接受 ${action} 任务。`,
+    content: reason || `⛔ ${resolveCatName(targetCatId)} 不接受 ${action} 任务。`,
     variant: 'info',
   };
 }
 
-function formatA2AFollowupAvailable(parsed: Record<string, unknown>): VisibleSystemInfoResult | null {
+function formatA2AFollowupAvailable(
+  parsed: Record<string, unknown>,
+  resolveCatName: ResolveCatName,
+): VisibleSystemInfoResult | null {
   if (parsed?.type !== 'a2a_followup_available') return null;
 
   const mentions = parsed.mentions as Array<{ catId: string; mentionedBy: string }>;
   return {
-    content: mentions.map((m) => `${m.mentionedBy} @了 ${m.catId}`).join('、'),
+    content: mentions.map((m) => `${resolveCatName(m.mentionedBy)} @了 ${resolveCatName(m.catId)}`).join('、'),
     variant: 'a2a_followup',
   };
 }
@@ -59,7 +69,10 @@ function formatWarning(parsed: Record<string, unknown>): VisibleSystemInfoResult
   };
 }
 
-export function formatSessionSealRequested(parsed: Record<string, unknown>): VisibleSystemInfoResult | null {
+export function formatSessionSealRequested(
+  parsed: Record<string, unknown>,
+  resolveCatName: ResolveCatName = identityCatName,
+): VisibleSystemInfoResult | null {
   if (parsed?.type !== 'session_seal_requested') return null;
 
   const catId = typeof parsed.catId === 'string' ? parsed.catId : 'unknown';
@@ -72,7 +85,7 @@ export function formatSessionSealRequested(parsed: Record<string, unknown>): Vis
   const pct = typeof fillRatio === 'number' ? Math.round(fillRatio * 100) : '?';
 
   return {
-    content: `${catId} 的会话 #${sessionSeq} 已封存（上下文 ${pct}%），下次调用将自动创建新会话`,
+    content: `${resolveCatName(catId)} 的会话 #${sessionSeq} 已封存（上下文 ${pct}%），下次调用将自动创建新会话`,
     variant: 'info',
   };
 }
@@ -89,12 +102,15 @@ export function formatGovernanceBlocked(parsed: Record<string, unknown>): Visibl
   };
 }
 
-function formatModeSwitchProposal(parsed: Record<string, unknown>): VisibleSystemInfoResult | null {
+function formatModeSwitchProposal(
+  parsed: Record<string, unknown>,
+  resolveCatName: ResolveCatName,
+): VisibleSystemInfoResult | null {
   if (parsed?.type !== 'mode_switch_proposal') return null;
 
   const by = typeof parsed.proposedBy === 'string' ? parsed.proposedBy : '猫猫';
   return {
-    content: `${by} 提议切换到 ${parsed.proposedMode} 模式。`,
+    content: `${resolveCatName(by)} 提议切换到 ${parsed.proposedMode} 模式。`,
     variant: 'info',
   };
 }
@@ -108,26 +124,34 @@ function formatInvocationPreempted(parsed: Record<string, unknown>): VisibleSyst
   };
 }
 
-function formatSilentCompletion(parsed: Record<string, unknown>): VisibleSystemInfoResult | null {
+function formatSilentCompletion(
+  parsed: Record<string, unknown>,
+  resolveCatName: ResolveCatName,
+  fallbackCatId?: string,
+): VisibleSystemInfoResult | null {
   if (parsed?.type !== 'silent_completion') return null;
 
   const detail = typeof parsed.detail === 'string' ? parsed.detail : '';
-  const catId = typeof parsed.catId === 'string' ? parsed.catId : 'Cat';
+  const catId = typeof parsed.catId === 'string' ? parsed.catId : (fallbackCatId ?? 'Cat');
   return {
-    content: detail || `${catId} completed without a text response.`,
+    content: detail || `${resolveCatName(catId)} completed without a text response.`,
     variant: 'info',
   };
 }
 
-export function formatVisibleSystemInfo(parsed: Record<string, unknown>): VisibleSystemInfoResult | null {
+export function formatVisibleSystemInfo(
+  parsed: Record<string, unknown>,
+  resolveCatName: ResolveCatName = identityCatName,
+  fallbackCatId?: string,
+): VisibleSystemInfoResult | null {
   return (
-    formatA2AFollowupAvailable(parsed) ??
+    formatA2AFollowupAvailable(parsed, resolveCatName) ??
     formatWarning(parsed) ??
-    (parsed?.type === 'a2a_pingpong_terminated' ? formatPingpongTerminated(parsed) : null) ??
-    (parsed?.type === 'a2a_role_rejected' ? formatRoleRejected(parsed) : null) ??
-    formatModeSwitchProposal(parsed) ??
+    (parsed?.type === 'a2a_pingpong_terminated' ? formatPingpongTerminated(parsed, resolveCatName) : null) ??
+    (parsed?.type === 'a2a_role_rejected' ? formatRoleRejected(parsed, resolveCatName) : null) ??
+    formatModeSwitchProposal(parsed, resolveCatName) ??
     formatInvocationPreempted(parsed) ??
-    formatSilentCompletion(parsed)
+    formatSilentCompletion(parsed, resolveCatName, fallbackCatId)
   );
 }
 

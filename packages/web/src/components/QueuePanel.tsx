@@ -4,6 +4,7 @@ import { SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
 import { closestCenter, DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useCallback, useMemo, useState } from 'react';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
@@ -80,6 +81,7 @@ interface QueuePanelProps {
 
 export function QueuePanel({ threadId }: QueuePanelProps) {
   const coCreator = useCoCreatorConfig();
+  const resolveCatName = useCatNameResolver();
   const rawQueue = useChatStore((s) => s.queue);
   const queue = useMemo(() => rawQueue ?? [], [rawQueue]);
   const queuePaused = useChatStore((s) => s.queuePaused) ?? false;
@@ -366,7 +368,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           className="px-3 py-1.5 text-xs text-cafe-muted border-b"
           style={{ borderColor: 'color-mix(in oklch, var(--color-cocreator-primary) 10%, transparent)' }}
         >
-          等待 <span className="font-medium text-cafe-secondary">{waitInfo.catId}</span> 当前回合
+          等待 <span className="font-medium text-cafe-secondary">{resolveCatName(waitInfo.catId)}</span> 当前回合
           {waitInfo.elapsedLabel ? `（已运行 ${waitInfo.elapsedLabel}）` : ''}
         </div>
       )}
@@ -386,6 +388,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
                     isPaused={queuePaused}
                     imageCount={imageCount}
                     ownerName={coCreator.name}
+                    resolveCatName={resolveCatName}
                     onRemove={handleRemove}
                     onRecallEdit={handleRecallEdit}
                     onSteer={handleSteerOpen}

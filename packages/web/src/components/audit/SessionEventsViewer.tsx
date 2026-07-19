@@ -3,6 +3,8 @@
 // biome-ignore lint/correctness/noUnusedImports: React needed for JSX in vitest environment
 import React, { useCallback, useEffect, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
+import { useCatTechnicalLabelResolver } from '@/hooks/useCatNameResolver';
+import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { apiFetch } from '@/utils/api-client';
 import {
   formatBindingLabel,
@@ -217,7 +219,7 @@ export function SessionEventsViewer({ sessionId, catId, onClose }: SessionEvents
   };
 
   const assistantStyle = assistantRoleStyle(catId);
-  const assistantLabel = catId ? (getCatById(catId)?.displayName ?? catId) : 'assistant';
+  const assistantLabel = catId ? resolveCatDisplayName(catId, getCatById) : 'assistant';
 
   return (
     <div className="rounded-lg border border-[var(--console-border-soft)] bg-cafe-surface">
@@ -353,10 +355,11 @@ function RuntimeMetadataHeader({
   session: ExternalRuntimeSessionListItem;
   noise: DigestNoiseSummary[];
 }) {
+  const resolveCatName = useCatTechnicalLabelResolver();
   const badge = formatLifecycleBadge(session.lifecycle);
   const latestIdentity = session.identityHistory?.at(-1);
   const model = latestIdentity?.model ?? session.model ?? 'model unknown';
-  const identityLabel = `${latestIdentity?.catId ?? session.catId} · ${model}`;
+  const identityLabel = `${resolveCatName(latestIdentity?.catId ?? session.catId)} · ${model}`;
 
   return (
     <div className="space-y-2 bg-[var(--console-shell-bg)] px-3 py-2 console-divider-b">

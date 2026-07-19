@@ -12,6 +12,7 @@
 
 import type { CoCreatorConfig } from '@/components/config-viewer-types';
 import type { CatData } from '@/hooks/useCatData';
+import { formatCatDisplayName } from '@/lib/cat-display-name';
 import { CO_CREATOR_COLOR, UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
 
 export interface SenderMeta {
@@ -48,7 +49,7 @@ export function resolveSender(
   const cat = getCatById(senderCatId);
   if (cat) {
     return {
-      label: `@${cat.displayName}`,
+      label: `@${formatCatDisplayName(cat)}`,
       color: cat.color.primary,
       isCoCreator: false,
     };

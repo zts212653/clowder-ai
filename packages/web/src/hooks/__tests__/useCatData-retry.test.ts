@@ -81,6 +81,11 @@ function MultiHookComponent() {
   return null;
 }
 
+function PassiveHookComponent() {
+  hookResult = useCatData({ fetch: false });
+  return null;
+}
+
 beforeAll(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
@@ -106,6 +111,16 @@ afterEach(() => {
 // ── Tests ──────────────────────────────────────────────────
 
 describe('useCatData retry mechanism', () => {
+  it('lets leaf presentation consumers subscribe without starting registry I/O', async () => {
+    await act(async () => {
+      root.render(React.createElement(PassiveHookComponent));
+    });
+
+    expect(mockApiFetch).not.toHaveBeenCalled();
+    expect(hookResult.cats).toEqual([]);
+    expect(hookResult.isLoading).toBe(false);
+  });
+
   it('retries after 10s on failure and stops after success', async () => {
     // F166: /api/config/cat-order always returns empty order; /api/cats follows
     // the retry sequence (fail → success).

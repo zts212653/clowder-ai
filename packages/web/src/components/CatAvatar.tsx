@@ -2,6 +2,7 @@
 
 import { type ReactNode, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
+import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { hexToRgba } from '@/lib/color-utils';
 import { PawIcon } from './icons/PawIcon';
 
@@ -50,6 +51,7 @@ export function CatAvatar({
   const [popoverOpen, setPopoverOpen] = useState(false);
   const { getCatById } = useCatData();
   const cat = getCatById(catId);
+  const catName = resolveCatDisplayName(catId, getCatById);
 
   const isStreaming = status === 'streaming';
   const isError = status === 'error';
@@ -66,7 +68,7 @@ export function CatAvatar({
   return (
     <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
       <Wrapper
-        {...(onClick ? { type: 'button' as const, onClick, 'aria-label': `${cat?.displayName ?? catId}` } : {})}
+        {...(onClick ? { type: 'button' as const, onClick, 'aria-label': catName } : {})}
         className={`rounded-full ring-2 overflow-hidden bg-cafe-surface-elevated flex items-center justify-center transition-shadow duration-300 ${
           isStreaming ? 'animate-pulse' : ''
         } ${onClick ? 'cursor-pointer hover:ring-[var(--cafe-accent)] transition-[box-shadow,--tw-ring-color]' : ''}`}
@@ -83,7 +85,7 @@ export function CatAvatar({
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={cat?.avatar ?? `/avatars/${catId}.png`}
-            alt={cat?.displayName ?? catId}
+            alt={catName}
             width={size}
             height={size}
             className="object-cover"

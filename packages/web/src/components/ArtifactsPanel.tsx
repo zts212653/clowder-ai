@@ -5,6 +5,7 @@ import type { JSX } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
 import { useCatData } from '@/hooks/useCatData';
+import { formatCatDisplayName } from '@/lib/cat-display-name';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
 import { scrollToMessage } from '@/utils/scrollToMessage';
@@ -294,8 +295,14 @@ export function ArtifactsPanel({
     [threadId],
   );
 
-  // F232 Phase B: resolve catId → display nickname (shared by grouping + cat filter)
-  const resolveNickname = useCallback((catId: string) => getCatById(catId)?.nickname, [getCatById]);
+  // F232 Phase B: resolve catId → standard Console member label (shared by grouping + cat filter)
+  const resolveNickname = useCallback(
+    (catId: string) => {
+      const cat = getCatById(catId);
+      return cat ? formatCatDisplayName(cat) : undefined;
+    },
+    [getCatById],
+  );
 
   // F232 Phase B: apply cat filter first, then compute counts on the cat-filtered set
   const catFiltered = useMemo(
@@ -532,7 +539,7 @@ export function ArtifactsPanel({
                           a={a}
                           index={i}
                           grouping={grouping}
-                          resolveNick={(id) => getCatById(id)?.nickname}
+                          resolveNick={resolveNickname}
                           onSelect={setSelected}
                           onJump={handleJump}
                         />

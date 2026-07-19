@@ -484,7 +484,7 @@ export function ChatMessage({
                   message.whisperTo
                     ?.map((id) => {
                       const cat = getCatById(id);
-                      return cat ? cat.displayName : id;
+                      return cat ? formatCatName(cat) : id;
                     })
                     .join(', ') ?? ''
                 }`}

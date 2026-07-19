@@ -7,6 +7,7 @@ import { deriveBubbleId, getBubbleInvocationId } from '@/debug/bubbleIdentity';
 import { recordBubbleInvariantViolation } from '@/debug/bubbleInvariantDiagnostics';
 import { recordDebugEvent } from '@/debug/invocationEventDebug';
 import { adaptIncomingToBubbleEvent } from '@/hooks/bubble-event-adapter';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 import { deriveBubbleKindFromMessage } from '@/stores/bubble-invariants';
 import { projectCanonicalBubbles } from '@/stores/bubble-projection';
 import { applyBubbleEvent, type BubbleReducerInput, type BubbleReducerOutput } from '@/stores/bubble-reducer';
@@ -555,6 +556,8 @@ export interface HandleBackgroundMessageOptions {
   // handlers, so suppression handoff works in both directions.
   nextBgSeq: () => number;
   addToast: (toast: BackgroundToastInput) => void;
+  /** Human-facing projection only; stored events continue to retain stable catId facts. */
+  resolveCatName?: (catId: string) => string;
   /** #80 fix-C: Clear the done-timeout guard when a background thread completes */
   clearDoneTimeout?: (threadId?: string) => void;
   /** #586 follow-up: Just-finalized stream bubble IDs keyed by streamKey */
@@ -960,7 +963,7 @@ export function consumeBackgroundSystemInfo(
 
   try {
     const parsed = JSON.parse(sysContent);
-    const visible = formatVisibleSystemInfo(parsed);
+    const visible = formatVisibleSystemInfo(parsed, options.resolveCatName, msg.catId);
     if (visible) {
       sysContent = visible.content;
       sysVariant = visible.variant;
@@ -1345,16 +1348,16 @@ export function consumeBackgroundSystemInfo(
           sessionSeq: parsed.sessionSeq,
           sessionSealed: true,
         });
-        const visibleSessionSeal = formatSessionSealRequested(parsed);
+        const visibleSessionSeal = formatSessionSealRequested(parsed, options.resolveCatName);
         if (visibleSessionSeal) sysContent = visibleSessionSeal.content;
       }
     } else if (parsed?.type === 'mode_switch_proposal') {
       const by = parsed.proposedBy ?? '猫猫';
-      sysContent = `${by} 提议切换到 ${parsed.proposedMode} 模式。`;
+      sysContent = `${options.resolveCatName?.(by) ?? by} 提议切换到 ${parsed.proposedMode} 模式。`;
     } else if (parsed?.type === 'silent_completion') {
       // Bugfix: silent-exit — cat ran tools but produced no text response
       const detail = typeof parsed.detail === 'string' ? parsed.detail : '';
-      sysContent = detail || `${msg.catId} completed without a text response.`;
+      sysContent = detail || `${options.resolveCatName?.(msg.catId) ?? msg.catId} completed without a text response.`;
     } else if (parsed?.type === 'invocation_preempted') {
       // Bugfix: silent-exit — invocation was superseded by a newer request
       sysContent = 'This response was superseded by a newer request.';
@@ -2439,7 +2442,7 @@ export function handleBackgroundAgentMessage(
       drainPendingBackgroundCallback(msg, options);
       options.addToast({
         type: 'success',
-        title: `${msg.catId} 完成`,
+        title: `${options.resolveCatName?.(msg.catId) ?? msg.catId} 完成`,
         message: preview.slice(0, 80) + (preview.length > 80 ? '...' : ''),
         threadId: msg.threadId,
         duration: 5000,
@@ -2528,7 +2531,7 @@ export function handleBackgroundAgentMessage(
     }
     options.addToast({
       type: 'error',
-      title: `${msg.catId} 出错`,
+      title: `${options.resolveCatName?.(msg.catId) ?? msg.catId} 出错`,
       message: msg.error ?? 'Unknown error',
       threadId: msg.threadId,
       duration: 8000,
@@ -2543,8 +2546,8 @@ export function handleBackgroundAgentMessage(
       options.store.updateThreadCatStatus(msg.threadId, msg.catId, 'done');
       options.addToast({
         type: 'success',
-        title: `${msg.catId} 完成`,
-        message: `${msg.catId} 已完成处理`,
+        title: `${options.resolveCatName?.(msg.catId) ?? msg.catId} 完成`,
+        message: `${options.resolveCatName?.(msg.catId) ?? msg.catId} 已完成处理`,
         threadId: msg.threadId,
         duration: 5000,
       });
@@ -2713,6 +2716,7 @@ export function handleBackgroundAgentMessage(
  * - resetRefs: cleanup for thread switching
  */
 export function useAgentMessages() {
+  const resolveCatName = useCatNameResolver();
   const {
     addMessage,
     appendToMessage,
@@ -3745,13 +3749,20 @@ export function useAgentMessages() {
           finalizedBgRefs: bgFinalizedRefsRef.current,
           nextBgSeq: () => bgSeqRef.current++,
           addToast: (toast) => useToastStore.getState().addToast(toast),
+          resolveCatName,
           clearDoneTimeout,
           pendingCallbacks: pendingCallbacksRef.current,
           deletePendingCallback,
         },
       );
     },
-    [applyActiveExplicitCallbackNow, clearDoneTimeout, deletePendingCallback, markPendingBackgroundStreamFinished],
+    [
+      applyActiveExplicitCallbackNow,
+      clearDoneTimeout,
+      deletePendingCallback,
+      markPendingBackgroundStreamFinished,
+      resolveCatName,
+    ],
   );
 
   const deferPendingCallback = useCallback(
@@ -4144,6 +4155,7 @@ export function useAgentMessages() {
           finalizedBgRefs: bgFinalizedRefsRef.current,
           nextBgSeq: () => bgSeqRef.current++,
           addToast: (toast) => useToastStore.getState().addToast(toast),
+          resolveCatName,
           clearDoneTimeout,
           pendingCallbacks: pendingCallbacksRef.current,
           deferPendingCallback,
@@ -5064,7 +5076,7 @@ export function useAgentMessages() {
         let providerContent = msg.content ?? '';
         try {
           const parsed = JSON.parse(providerContent);
-          const visible = formatVisibleSystemInfo(parsed);
+          const visible = formatVisibleSystemInfo(parsed, resolveCatName, msg.catId);
           if (visible) providerContent = visible.content;
         } catch {
           /* non-JSON payload — display as-is */
@@ -5087,7 +5099,7 @@ export function useAgentMessages() {
         let consumed = false;
         try {
           const parsed = JSON.parse(sysContent);
-          const visible = formatVisibleSystemInfo(parsed);
+          const visible = formatVisibleSystemInfo(parsed, resolveCatName, msg.catId);
           if (visible) {
             sysContent = visible.content;
             sysVariant = visible.variant;
@@ -5499,7 +5511,7 @@ export function useAgentMessages() {
           } else if (parsed?.type === 'silent_completion') {
             // Bugfix: silent-exit — cat ran tools but produced no text response
             const detail = typeof parsed.detail === 'string' ? parsed.detail : '';
-            sysContent = detail || `${msg.catId} completed without a text response.`;
+            sysContent = detail || `${resolveCatName(msg.catId)} completed without a text response.`;
           } else if (parsed?.type === 'invocation_preempted') {
             // Bugfix: silent-exit — invocation was superseded by a newer request
             sysContent = 'This response was superseded by a newer request.';
@@ -5571,7 +5583,7 @@ export function useAgentMessages() {
               sessionSeq: parsed.sessionSeq,
               sessionSealed: true,
             });
-            const visibleSessionSeal = formatSessionSealRequested(parsed);
+            const visibleSessionSeal = formatSessionSealRequested(parsed, resolveCatName);
             if (visibleSessionSeal) sysContent = visibleSessionSeal.content;
           }
         } catch {
@@ -5857,6 +5869,7 @@ export function useAgentMessages() {
       setHasActiveInvocation,
       setMessageUsage,
       requestStreamCatchUp,
+      resolveCatName,
       removeMessage,
       clearAllActive,
       clearFinalized,
