@@ -55,6 +55,8 @@ export const reportHarnessSignalBodySchema = z
 export interface ReportHarnessSignalDeps {
   messageStore: { getById(id: string): StoredMessage | null | Promise<StoredMessage | null> };
   deviationLog: IDeviationEventLog;
+  /** F257 V2 AC-B2: per-pot anomaly-reference stats (optional; skipped when absent). */
+  ledgerStats?: import('../guard-ledger-registry.js').GuardLedgerStats;
 }
 
 /** Server-trusted identity (T-C: callback principal 注入, 不可自报). */
@@ -105,6 +107,18 @@ export async function handleReportHarnessSignal(
     : undefined;
 
   const result = await deps.deviationLog.append(event, idempotencyKey ? { idempotencyKey } : undefined);
+
+  // F257 V2 AC-B2: an anomaly report referencing a pot coordinate increments
+  // that pot's stats — writeback on the WRITE side (F245 KD-4 keeps the
+  // friction pull path read-only). Uses result.eventId (the canonical id even
+  // on dedup replay) + SADD, so retries never double-count. Fail-open.
+  if (deps.ledgerStats) {
+    const { extractLedgerRefs } = await import('../guard-ledger-registry.js');
+    for (const ledgerId of extractLedgerRefs(body.note)) {
+      void deps.ledgerStats.recordAnomalyReference(ledgerId, result.eventId);
+    }
+  }
+
   return {
     status: 200,
     body: { outcome: result.outcome, eventId: result.eventId, incidentKey: event.incidentKey },

@@ -2095,6 +2095,8 @@ async function main(): Promise<void> {
       frustrationIssueStore,
       harnessFeedbackRoot: resolve(repoRoot, 'docs', 'harness-feedback'),
       ...(memoryServices.embeddingService ? { embeddingService: memoryServices.embeddingService } : {}),
+      // F257 V2: 5th friction channel — cat anomaly reports referencing pot ledgerIds.
+      ...(deviationEventLog ? { deviationLog: deviationEventLog, deviationOwnerUserId: 'default-user' } : {}),
     });
     verdictGenerators['eval:friction'] = createFrictionGeneratorAdapter(frictionProvider);
   }

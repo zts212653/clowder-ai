@@ -39,6 +39,7 @@ const CHANNEL_SENSOR_FORM: Record<FrictionChannel, FrictionSensorForm> = {
   cancel: 'act', // 中断动作
   'user-feedback': 'reason', // 用户显式反馈 = 中断理由
   'eval-domain': 'aggregate_proxy', // eval 域 metric = 聚合 proxy
+  'guard-anomaly': 'reason', // F257 V2: 猫显式上报撞锅 = 中断理由（引用 ledgerId）
 };
 
 /** Enrich a cluster with sensorForms (distinct, sorted) + max severity (surfaced for the eval cat). */

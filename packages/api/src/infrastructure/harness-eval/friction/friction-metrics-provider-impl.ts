@@ -9,6 +9,7 @@ import { EvalDomainAdapter } from './eval-domain-adapter.js';
 import { FrictionAggregator } from './friction-aggregator.js';
 import { FrictionClusterer } from './friction-clusterer.js';
 import { buildFrictionRollupInput } from './friction-rollup-input.js';
+import { type DeviationQuerySource, GuardAnomalyAdapter } from './guard-anomaly-adapter.js';
 import { PawFeelAdapter } from './paw-feel-adapter.js';
 import { UserFeedbackAdapter } from './user-feedback-adapter.js';
 
@@ -39,6 +40,13 @@ export interface FrictionMetricsProviderDeps {
   /** LIVE docs/harness-feedback root — EvalDomainAdapter scans bundles snapshot.json files. */
   harnessFeedbackRoot: string;
   embeddingService?: IEmbeddingService;
+  /**
+   * F257 V2: guard-anomaly channel (5th source). Optional — adapter is
+   * skipped when the deviation log (Redis) is unavailable.
+   */
+  deviationLog?: DeviationQuerySource;
+  /** Owner scope for deviation queries (single-user instance: 'default-user'). */
+  deviationOwnerUserId?: string;
 }
 
 export class FrictionMetricsProviderImpl implements FrictionMetricsProvider {
@@ -52,6 +60,16 @@ export class FrictionMetricsProviderImpl implements FrictionMetricsProvider {
       new EvalDomainAdapter(this.deps.harnessFeedbackRoot, {
         excludeFeatureIds: FRICTION_SELF_EXCLUDE_FEATURE_IDS,
       }),
+      // F257 V2: 5th channel — cat anomaly reports referencing pot ledgerIds
+      // (read-only pull per KD-4; AC-B2 stats writeback lives on the write side).
+      ...(this.deps.deviationLog
+        ? [
+            new GuardAnomalyAdapter({
+              deviationLog: this.deps.deviationLog,
+              ownerUserId: this.deps.deviationOwnerUserId ?? 'default-user',
+            }),
+          ]
+        : []),
     ];
     const aggregator = new FrictionAggregator(sources);
     // undefined embedding → clusterer fail-opens to rule-only + degraded=true.

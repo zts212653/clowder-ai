@@ -68,6 +68,7 @@ import { extractIssueTrackingClaims, extractPrTrackingClaims } from '../infrastr
 import { checkGrounding } from '../infrastructure/grounding/grounding-checker.js';
 import { groundingSampleStore } from '../infrastructure/grounding/grounding-sample-singleton.js';
 import { registerReportHarnessSignalRoute } from '../infrastructure/harness-eval/deviation/report-harness-signal.js';
+import { GuardLedgerStats } from '../infrastructure/harness-eval/guard-ledger-registry.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { scoreKeywordRelevance, tokenizeKeyword } from '../utils/keyword-relevance.js';
@@ -844,9 +845,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
   }
   // F257 V1: cat_cafe_report_harness_signal (T-C §3.6) — deviationEventLog absent
   // (no Redis) degrades inside the route to explicit 503, so register unconditionally.
+  // F257 V2 AC-B2: ledgerStats — anomaly reports referencing a pot ledgerId
+  // increment that pot's stats at write time (idempotent SADD, fail-open).
   registerReportHarnessSignalRoute(app, {
     messageStore,
     ...(opts.deviationEventLog ? { deviationLog: opts.deviationEventLog } : {}),
+    ...(opts.redis ? { ledgerStats: new GuardLedgerStats(opts.redis) } : {}),
   });
 
   app.post('/api/callbacks/post-message', async (request, reply) => {
