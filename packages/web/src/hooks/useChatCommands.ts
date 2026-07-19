@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useCallback, useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useCatData } from '@/hooks/useCatData';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
@@ -126,7 +127,7 @@ function formatConfigForDisplay(config: ConfigSnapshot): string {
  */
 export function useChatCommands() {
   const router = useRouter();
-  const { addMessage } = useChatStore();
+  const { addMessage } = useChatStore(useShallow((s) => ({ addMessage: s.addMessage })));
   const { cats } = useCatData();
 
   // Build dynamic mention pattern → catId resolver from cat data
