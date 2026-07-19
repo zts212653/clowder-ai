@@ -296,5 +296,88 @@ describe('Eval Hub API route', () => {
       assert.match(body.detail, /opus-47/);
       await app.close();
     });
+
+    it('sol R2 P2-5: publish 403 emits publish_policy_reject octet; non-403 errors do NOT emit', async () => {
+      const appended = [];
+      const guardRejectionLog = {
+        async append(event) {
+          appended.push(event);
+        },
+      };
+      const agentKeyRegistry = {
+        async verify() {
+          return {
+            ok: true,
+            record: {
+              agentKeyId: 'ak-test-003',
+              catId: 'opus-47',
+              userId: 'you',
+              secretHash: 'u',
+              salt: 'u',
+              scope: 'user-bound',
+              issuedAt: Date.now() - 1000,
+              expiresAt: Date.now() + 3_600_000,
+            },
+          };
+        },
+      };
+      const app = Fastify({ logger: false });
+      app.register(evalHubRoutes, {
+        harnessFeedbackRoot: repoHarnessFeedbackRoot,
+        gitPublisher: {
+          async publishOnIsolatedWorktree(opts) {
+            await opts.stage('/tmp/guard-emit-403-test');
+            return { commitSha: 'x', prUrl: 'x' };
+          },
+        },
+        verdictGenerators: { 'eval:a2a': async () => ({ verdictPath: '/x', bundleDir: '/x' }) },
+        callbackRegistry: {
+          async verify() {
+            return { ok: false, reason: 'unknown_invocation' };
+          },
+        },
+        agentKeyRegistry,
+        guardRejectionLog,
+      });
+
+      // 403 path (wrong cat for domain) → one publish_policy_reject event.
+      const forbidden = await app.inject({
+        method: 'POST',
+        url: '/api/eval-domains/eval:a2a/publish-verdict',
+        headers: { 'x-agent-key-secret': 'agent-key-test-secret', 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          packet: validPacket,
+          sourceRefs: { snapshotName: 'snap.yaml', attributionName: 'attr.yaml' },
+        }),
+      });
+      assert.equal(forbidden.statusCode, 403);
+      assert.equal(forbidden.json().ledgerId, 'eval/publish-verdict-authority', 'rejection carries pot coordinate');
+      assert.equal(appended.length, 1, 'domain-authority 403 must emit exactly one event');
+      const event = appended[0];
+      assert.equal(event.kind, 'publish_policy_reject');
+      assert.equal(event.guardId, 'publish_verdict_authority');
+      assert.equal(event.ledgerId, 'eval/publish-verdict-authority');
+      assert.equal(event.catId, 'opus-47');
+      assert.equal(event.ownerUserId, 'you', 'owner scope server-injected');
+      assert.equal(event.threadId, 'unknown', 'agent_key principal has no thread binding');
+      assert.equal(event.invocationId, 'unknown');
+      assert.equal(event.correlationConfidence, 'window');
+      assert.equal(event.sourceTool, 'publish_verdict');
+      assert.equal(event.layer, 'api-route');
+
+      // Counter-example: unsupported domain → 501, NOT a pot firing.
+      const unsupported = await app.inject({
+        method: 'POST',
+        url: '/api/eval-domains/eval:no-such-domain/publish-verdict',
+        headers: { 'x-agent-key-secret': 'agent-key-test-secret', 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          packet: validPacket,
+          sourceRefs: { snapshotName: 'snap.yaml', attributionName: 'attr.yaml' },
+        }),
+      });
+      assert.notEqual(unsupported.statusCode, 403, 'unsupported domain is not an authority rejection');
+      assert.equal(appended.length, 1, 'non-403 handler errors must NOT emit (auth-shape/infra are not pots)');
+      await app.close();
+    });
   });
 });

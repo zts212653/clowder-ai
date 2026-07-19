@@ -174,6 +174,9 @@ export async function produceHarnessLedgerRunSnapshot(deps: ProduceSnapshotDeps)
     '',
     `- **Window**: ${snapshot.window.durationHours}h [${new Date(windowStartMs).toISOString()} → ${new Date(now).toISOString()})`,
     `- **Total events**: ${events.length}`,
+    ...(truncated
+      ? ['- ⚠️ **WINDOW TRUNCATED at hard cap** — all counts below are LOWER BOUNDS; flag incompleteness in the verdict']
+      : []),
     events.length > 0
       ? `- **By guard**:\n${guardSummary}`
       : '- No guard rejection events in this window (baseline accumulation phase)',

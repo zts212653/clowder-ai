@@ -176,12 +176,12 @@ describe('GuardLedgerStats — idempotent AC-B2 writeback', () => {
     const redis = fakeRedis();
     const stats = new GuardLedgerStats(redis);
 
-    await stats.recordAnomalyReference('mcp/hold-ball-rate-limit', 'dev-1');
-    await stats.recordAnomalyReference('mcp/hold-ball-rate-limit', 'dev-1'); // dedup replay
-    await stats.recordAnomalyReference('mcp/hold-ball-rate-limit', 'dev-2');
+    await stats.recordAnomalyReference('default-user', 'mcp/hold-ball-rate-limit', 'dev-1');
+    await stats.recordAnomalyReference('default-user', 'mcp/hold-ball-rate-limit', 'dev-1'); // dedup replay
+    await stats.recordAnomalyReference('default-user', 'mcp/hold-ball-rate-limit', 'dev-2');
 
-    assert.equal(await stats.anomalyReferenceCount('mcp/hold-ball-rate-limit'), 2);
-    assert.equal(await stats.anomalyReferenceCount('mcp/never-referenced'), 0);
+    assert.equal(await stats.anomalyReferenceCount('default-user', 'mcp/hold-ball-rate-limit'), 2);
+    assert.equal(await stats.anomalyReferenceCount('default-user', 'mcp/never-referenced'), 0);
   });
 
   test('fail-open: redis errors neither throw nor break counts', async () => {
@@ -193,7 +193,7 @@ describe('GuardLedgerStats — idempotent AC-B2 writeback', () => {
         throw new Error('down');
       },
     });
-    await assert.doesNotReject(() => stats.recordAnomalyReference('mcp/hold-ball-rate-limit', 'dev-1'));
-    assert.equal(await stats.anomalyReferenceCount('mcp/hold-ball-rate-limit'), 0);
+    await assert.doesNotReject(() => stats.recordAnomalyReference('default-user', 'mcp/hold-ball-rate-limit', 'dev-1'));
+    assert.equal(await stats.anomalyReferenceCount('default-user', 'mcp/hold-ball-rate-limit'), 0);
   });
 });

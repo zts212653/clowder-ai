@@ -62,6 +62,8 @@ export interface EscalationCheckResult {
   rawEventCount: number;
   /** Coalesced distinct episodes in window — the 3-per-7d threshold unit. */
   episodeCount: number;
+  /** sol R2 P2: window hit the hard cap — counts are lower bounds; thresholdMet is conservative-true. */
+  truncated?: boolean;
   thresholdMet: boolean;
   alreadyEscalated: boolean;
   escalated: boolean;
@@ -145,13 +147,18 @@ export async function checkGuardThreshold(
   }
   const rawEventCount = windowEvents.length;
   const episodeCount = coalesceGuardEpisodes(windowEvents).length;
-  if (episodeCount < ESCALATION_THRESHOLD) {
+  // sol R2 P2: when the window is truncated the count is a LOWER BOUND — we
+  // cannot prove "below threshold", so we must not return thresholdMet=false.
+  // A truncated window at the hard cap trivially warrants an eval look anyway.
+  const meetsThreshold = episodeCount >= ESCALATION_THRESHOLD || truncated;
+  if (!meetsThreshold) {
     return {
       checked: true,
       guardId,
       count: rawEventCount,
       rawEventCount,
       episodeCount,
+      ...(truncated ? { truncated } : {}),
       thresholdMet: false,
       alreadyEscalated: false,
       escalated: false,
@@ -179,6 +186,7 @@ export async function checkGuardThreshold(
       count: rawEventCount,
       rawEventCount,
       episodeCount,
+      ...(truncated ? { truncated } : {}),
       thresholdMet: true,
       alreadyEscalated: true,
       escalated: false,
@@ -206,6 +214,7 @@ export async function checkGuardThreshold(
       count: rawEventCount,
       rawEventCount,
       episodeCount,
+      ...(truncated ? { truncated } : {}),
       thresholdMet: true,
       alreadyEscalated: false,
       escalated: false,
@@ -225,6 +234,7 @@ export async function checkGuardThreshold(
       count: rawEventCount,
       rawEventCount,
       episodeCount,
+      ...(truncated ? { truncated } : {}),
       thresholdMet: true,
       alreadyEscalated: false,
       escalated: false,

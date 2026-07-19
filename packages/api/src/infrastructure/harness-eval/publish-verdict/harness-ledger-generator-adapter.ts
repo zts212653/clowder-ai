@@ -125,13 +125,17 @@ export function createHarnessLedgerGeneratorAdapter(): VerdictGenerator {
       byGuard: guardCountMap,
       byGuardEpisodes,
       sampleAnchors: storedSnapshot.sampleAnchors ?? [],
+      // sol R2 P2: truncation must survive into the COMMITTED bundle — a
+      // capped window means every count is a lower bound, and the verdict's
+      // evidence chain has to say so. Confidence degrades accordingly.
+      truncated: storedSnapshot.truncated ?? false,
       components: [
         {
           componentId: 'guard-rejection-log',
           componentName: 'Guard Rejection Event Log',
           activationCounts: { total_events: totalEvents, ...byKind },
           frictionCounts: guardCountMap,
-          confidence: hasEvents ? 'medium' : 'no-data',
+          confidence: (storedSnapshot.truncated ?? false) ? 'low' : hasEvents ? 'medium' : 'no-data',
         },
       ],
     };

@@ -113,10 +113,24 @@ export function registerCallbackGuardRejectionRoutes(app: FastifyInstance, deps:
       invocationId = 'unknown';
       correlationConfidence = 'window';
       if (parsed.data.threadId && deps.threadStore) {
-        const resolved = await resolveScopedThreadId({ threadId: '', userId: principal.userId }, parsed.data.threadId, {
-          threadStore: deps.threadStore,
-        });
-        threadId = resolved.ok ? resolved.threadId : 'unknown';
+        // sol R2 P1-2: resolver infra failures (threadStore throw) must NOT
+        // 500 the ingest — the observation would be lost. Degrade to
+        // 'unknown' with a loud warning; attribution integrity is preserved
+        // (unknown never merges in the coalescer).
+        try {
+          const resolved = await resolveScopedThreadId(
+            { threadId: '', userId: principal.userId },
+            parsed.data.threadId,
+            { threadStore: deps.threadStore },
+          );
+          threadId = resolved.ok ? resolved.threadId : 'unknown';
+        } catch (err) {
+          request.log.warn(
+            { err, requestedThreadId: parsed.data.threadId },
+            'F257 guard-rejection ingest: scoped-thread resolver failed — degrading to unknown',
+          );
+          threadId = 'unknown';
+        }
       } else {
         threadId = 'unknown';
       }
@@ -132,6 +146,7 @@ export function registerCallbackGuardRejectionRoutes(app: FastifyInstance, deps:
         threadId,
         catId: principal.catId as string,
         guardId: parsed.data.guardId,
+        ownerUserId: principal.userId,
         invocationId,
         sourceTool: parsed.data.sourceTool,
         normalizedReason: parsed.data.normalizedReason,
@@ -169,23 +184,37 @@ export function registerCallbackGuardRejectionRoutes(app: FastifyInstance, deps:
     // what is this pot" flow) would be invisible.
     const until = parsed.data.untilMs ?? Date.now() + 1;
     const since = parsed.data.sinceMs ?? until - SEVEN_DAYS_MS;
-    const { events, truncated } = await deps.guardRejectionLog.queryWindowComplete({
-      since,
-      until,
-      ledgerId: parsed.data.ledgerId,
-    });
-    const anomalyRefCount = deps.ledgerStats ? await deps.ledgerStats.anomalyReferenceCount(parsed.data.ledgerId) : 0;
+    // sol R2 P1-1 (owner scope) + P2 (no fail-open masquerade): the query is
+    // HARD-scoped to the caller's ownerUserId — no principal can read another
+    // owner's thread/cat/invocation data. Strict variant + explicit 503:
+    // "ledger unavailable" must never look like "the pot never fired"
+    // (same discipline as V1 unmeasurable-vs-dormant).
+    try {
+      const { events, truncated } = await deps.guardRejectionLog.queryWindowStrictComplete({
+        since,
+        until,
+        ledgerId: parsed.data.ledgerId,
+        ownerUserId: principal.userId,
+      });
+      const anomalyRefCount = deps.ledgerStats
+        ? await deps.ledgerStats.anomalyReferenceCount(principal.userId, parsed.data.ledgerId)
+        : 0;
 
-    return {
-      ledgerId: parsed.data.ledgerId,
-      window: { sinceMs: since, untilMs: until },
-      events,
-      truncated,
-      stats: {
-        anomalyRefCount,
-        howCounted:
-          'scard guard-ledger:stats:{ledgerId}:anomaly-refs — distinct deviation eventIds whose note references this pot',
-      },
-    };
+      return {
+        ledgerId: parsed.data.ledgerId,
+        window: { sinceMs: since, untilMs: until },
+        events,
+        truncated,
+        stats: {
+          anomalyRefCount,
+          howCounted:
+            'scard guard-ledger:stats:{ownerUserId}:{ledgerId}:anomaly-refs — distinct deviation eventIds whose note references this pot',
+        },
+      };
+    } catch (err) {
+      request.log.warn({ err, ledgerId: parsed.data.ledgerId }, 'F257 guard-rejection query failed (infra)');
+      reply.status(503);
+      return { error: 'guard_rejection_query_failed', message: 'ledger unavailable — not a zero-events result' };
+    }
   });
 }

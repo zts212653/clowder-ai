@@ -372,6 +372,7 @@ export const evalHubRoutes: FastifyPluginAsync<EvalHubRoutesOptions> = async (ap
             threadId: principal.kind === 'invocation' ? principal.threadId : 'unknown',
             catId: principal.catId as string,
             guardId: 'publish_verdict_authority',
+            ownerUserId: principal.userId,
             invocationId: principal.kind === 'invocation' ? principal.invocationId : 'unknown',
             sourceTool: 'publish_verdict',
             normalizedReason: String(result.error ?? 'publish_forbidden'),

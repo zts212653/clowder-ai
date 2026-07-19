@@ -35,9 +35,13 @@ describe('F257 V2: /api/callbacks/guard-rejections ingest', () => {
       // In-memory ledgerId query — mirrors fetchWindow filter semantics so the
       // POST → GET e2e loop closes without Redis.
       async queryWindowComplete(opts) {
+        return this.queryWindowStrictComplete(opts);
+      },
+      async queryWindowStrictComplete(opts) {
         const events = appended.filter(
           (e) =>
             (!opts.ledgerId || e.ledgerId === opts.ledgerId) &&
+            (!opts.ownerUserId || e.ownerUserId === opts.ownerUserId) &&
             e.timestamp >= opts.since &&
             e.timestamp < (opts.until ?? Number.POSITIVE_INFINITY),
         );
@@ -243,6 +247,7 @@ describe('F257 V2: /api/callbacks/guard-rejections ingest', () => {
       threadId: thread.id,
       catId: 'codex',
       guardId: 'cross_post_routing_credentials',
+      ownerUserId: 'user-gr-q',
       invocationId: 'unknown',
       sourceTool: 'cross_post_message',
       normalizedReason: 'no_routing_credentials',
@@ -252,7 +257,7 @@ describe('F257 V2: /api/callbacks/guard-rejections ingest', () => {
     });
 
     // Stats: one anomaly reference recorded for this pot.
-    fakeStatsRedis.sets.set(`guard-ledger:stats:${ledgerId}:anomaly-refs`, new Set(['dev-1']));
+    fakeStatsRedis.sets.set(`guard-ledger:stats:user-gr-q:${ledgerId}:anomaly-refs`, new Set(['dev-1']));
 
     const get = await app.inject({
       method: 'GET',
@@ -325,7 +330,7 @@ describe('F257 V2: /api/callbacks/guard-rejections ingest', () => {
 
     // sol P1-2: pre-fix this returned 200 with statsWrites=0 (route adapter
     // dropped ledgerStats). Now the write side records the reference.
-    const statsKey = 'guard-ledger:stats:mcp/hold-ball-rate-limit:anomaly-refs';
+    const statsKey = 'guard-ledger:stats:user-rep:mcp/hold-ball-rate-limit:anomaly-refs';
     const statsSet = fakeStatsRedis.sets.get(statsKey);
     assert.ok(statsSet && statsSet.size === 1, `stats must be written through the route (got ${statsSet?.size ?? 0})`);
   });

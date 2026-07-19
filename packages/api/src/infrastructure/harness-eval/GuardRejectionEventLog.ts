@@ -64,6 +64,13 @@ interface GuardRejectionEventBase {
   normalizedReason: string;
   /** Emit surface (spec AC-B1 dual-entry requirement). */
   layer: 'api-route' | 'mcp-client' | 'generator';
+  /**
+   * Owner scope, SERVER-injected at every emit point (sol R2 P1: the query
+   * surface must never leak another owner's thread/cat/invocation data).
+   * Read paths filter on it; pre-scope events (missing field) are invisible
+   * to owner-scoped readers (fail-closed for readers, 7d retention ages them out).
+   */
+  ownerUserId: string;
   /** Unix epoch ms. Also used as ZSET score. */
   timestamp: number;
   /** 'window' (threadId+catId+timestamp correlation) until exact bridge lands. */
@@ -152,8 +159,13 @@ export interface GuardRejectionQueryOpts {
   ledgerId?: string;
   threadId?: string;
   catId?: string;
+  /** Owner scope (sol R2 P1): when set, only events with this ownerUserId match. */
+  ownerUserId?: string;
   limit?: number;
 }
+
+/** Redis page size for windowed scans (sol R2 P2: no full-window memory load). */
+const FETCH_BATCH = 1000;
 
 // ---------------------------------------------------------------------------
 // Event Log
@@ -308,20 +320,33 @@ export class GuardRejectionEventLog {
     // Exclusive upper bound: subtract 1ms from until (ZRANGEBYSCORE is inclusive).
     // This aligns with PromptSegmentsSourceSelector [windowStartMs, windowEndMs).
     const upperBound = until - 1;
-    const raw = await this.redis.zrangebyscore(EVENTS_ZSET, opts.since, upperBound);
-    let events: GuardRejectionEvent[] = [];
-    for (const s of raw) {
-      try {
-        events.push(JSON.parse(s) as GuardRejectionEvent);
-      } catch {
-        /* skip corrupted entries — parse errors are data-quality, not infra */
+    const events: GuardRejectionEvent[] = [];
+    let truncated = false;
+    // True Redis-side pagination (sol R2 P2: an unbounded ZRANGEBYSCORE loads
+    // the whole window into memory before capping). Matching events accumulate
+    // up to HARD_QUERY_CAP; one extra fetched row proves overflow.
+    for (let offset = 0; ; offset += FETCH_BATCH) {
+      const raw = await this.redis.zrangebyscore(EVENTS_ZSET, opts.since, upperBound, 'LIMIT', offset, FETCH_BATCH);
+      for (const s of raw) {
+        let parsed: GuardRejectionEvent;
+        try {
+          parsed = JSON.parse(s) as GuardRejectionEvent;
+        } catch {
+          continue; /* skip corrupted entries — parse errors are data-quality, not infra */
+        }
+        if (opts.guardId && parsed.guardId !== opts.guardId) continue;
+        if (opts.ledgerId && parsed.ledgerId !== opts.ledgerId) continue;
+        if (opts.threadId && parsed.threadId !== opts.threadId) continue;
+        if (opts.catId && parsed.catId !== opts.catId) continue;
+        if (opts.ownerUserId && parsed.ownerUserId !== opts.ownerUserId) continue;
+        if (events.length >= HARD_QUERY_CAP) {
+          truncated = true;
+          break;
+        }
+        events.push(parsed);
       }
+      if (truncated || raw.length < FETCH_BATCH) break;
     }
-    if (opts.guardId) events = events.filter((e) => e.guardId === opts.guardId);
-    if (opts.ledgerId) events = events.filter((e) => e.ledgerId === opts.ledgerId);
-    if (opts.threadId) events = events.filter((e) => e.threadId === opts.threadId);
-    if (opts.catId) events = events.filter((e) => e.catId === opts.catId);
-    const truncated = events.length > HARD_QUERY_CAP;
-    return { events: truncated ? events.slice(0, HARD_QUERY_CAP) : events, truncated };
+    return { events, truncated };
   }
 }

@@ -115,7 +115,9 @@ export async function handleReportHarnessSignal(
   if (deps.ledgerStats) {
     const { extractLedgerRefs } = await import('../guard-ledger-registry.js');
     for (const ledgerId of extractLedgerRefs(body.note)) {
-      void deps.ledgerStats.recordAnomalyReference(ledgerId, result.eventId);
+      // Owner-scoped (sol R2 P1): stats attribution stays within the
+      // reporting principal's owner space.
+      void deps.ledgerStats.recordAnomalyReference(principal.userId, ledgerId, result.eventId);
     }
   }
 

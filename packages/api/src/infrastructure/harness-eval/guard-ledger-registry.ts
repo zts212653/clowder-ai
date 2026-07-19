@@ -97,17 +97,18 @@ const STATS_KEY_PREFIX = 'guard-ledger:stats:';
 export class GuardLedgerStats {
   constructor(private readonly redis: StatsRedis) {}
 
-  async recordAnomalyReference(ledgerId: string, deviationEventId: string): Promise<void> {
+  /** Owner-scoped (sol R2 P1: stats must not leak across owners). */
+  async recordAnomalyReference(ownerUserId: string, ledgerId: string, deviationEventId: string): Promise<void> {
     try {
-      await this.redis.sadd(`${STATS_KEY_PREFIX}${ledgerId}:anomaly-refs`, deviationEventId);
+      await this.redis.sadd(`${STATS_KEY_PREFIX}${ownerUserId}:${ledgerId}:anomaly-refs`, deviationEventId);
     } catch {
       /* fail-open */
     }
   }
 
-  async anomalyReferenceCount(ledgerId: string): Promise<number> {
+  async anomalyReferenceCount(ownerUserId: string, ledgerId: string): Promise<number> {
     try {
-      return await this.redis.scard(`${STATS_KEY_PREFIX}${ledgerId}:anomaly-refs`);
+      return await this.redis.scard(`${STATS_KEY_PREFIX}${ownerUserId}:${ledgerId}:anomaly-refs`);
     } catch {
       return 0;
     }
