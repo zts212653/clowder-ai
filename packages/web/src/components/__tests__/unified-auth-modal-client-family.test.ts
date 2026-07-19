@@ -40,31 +40,32 @@ describe('UnifiedAuthModal clientFamily payload (F159 G2)', () => {
 
   // ── PATCH (edit) ──
 
-  it('PATCH sends clientId on every edit (not gated by editProfile?.clientId)', () => {
+  it('PATCH guards clientId to preserve legacy untyped accounts (e.g. Kimi)', () => {
     // The PATCH branch starts with `if (isEdit) {`
     const patchIdx = source.indexOf('if (isEdit) {');
     expect(patchIdx).toBeGreaterThan(0);
-    const patchSlice = source.slice(patchIdx, patchIdx + 600);
+    const patchSlice = source.slice(patchIdx, patchIdx + 1000);
 
-    // Must contain unconditional `patch.clientId = clientId`
+    // Must contain guarded `patch.clientId = clientId` (inside hadClientId || userChangedClient)
     expect(patchSlice).toContain('patch.clientId = clientId');
-    // Must NOT contain the old guard `if (editProfile?.clientId)`
-    expect(patchSlice).not.toContain('editProfile?.clientId');
+    // Must guard against clobbering legacy untyped accounts
+    expect(patchSlice).toContain('hadClientId');
+    expect(patchSlice).toContain('editProfile?.clientId != null');
   });
 
   it('PATCH sends clientFamily for valid family values', () => {
     const patchIdx = source.indexOf('if (isEdit) {');
-    const patchSlice = source.slice(patchIdx, patchIdx + 1000);
+    const patchSlice = source.slice(patchIdx, patchIdx + 1200);
     expect(patchSlice).toContain('patch.clientFamily = clientId');
   });
 
-  it('PATCH guards clientFamily to preserve legacy untyped accounts', () => {
-    // Legacy API-key accounts (no clientFamily) serve as cross-family fallbacks.
-    // A no-op edit (display name/model change only) must NOT stamp clientFamily.
-    // Only send clientFamily when the profile was already typed OR the user
-    // explicitly changed the client selector from the loaded default.
+  it('PATCH guards both clientId and clientFamily to preserve legacy untyped accounts', () => {
+    // Legacy API-key accounts (no clientId, no clientFamily) — e.g. Kimi/Moonshot —
+    // rely on name-based heuristics. A no-op edit must NOT stamp either field.
+    // Only send clientId/clientFamily when the profile already had the field
+    // OR the user explicitly changed the client selector.
     const patchIdx = source.indexOf('if (isEdit) {');
-    const patchSlice = source.slice(patchIdx, patchIdx + 1000);
+    const patchSlice = source.slice(patchIdx, patchIdx + 1200);
     // Must contain the guard checking for existing clientFamily
     expect(patchSlice).toContain('hadClientFamily');
     expect(patchSlice).toContain('userChangedClient');

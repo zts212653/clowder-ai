@@ -237,6 +237,7 @@ async function executeSearchContent(input: Record<string, unknown>, workDir: str
   await resolveSecurePath(workDir, searchPath);
 
   const fixedArgs = [
+    '--no-config',
     '--no-heading',
     '--line-number',
     '--color',
