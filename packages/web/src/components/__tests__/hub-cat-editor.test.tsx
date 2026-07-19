@@ -1695,7 +1695,7 @@ describe('HubCatEditor', () => {
     expect(document.body.querySelector('select[aria-label="认证信息"]')).toBeNull();
   });
 
-  it('shows the selected client builtin account together with all API key accounts', async () => {
+  it('shows matching-family and untyped API-key accounts while hiding mismatched typed ones', async () => {
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/accounts') {
         return Promise.resolve(
@@ -1711,20 +1711,48 @@ describe('HubCatEditor', () => {
                 authType: 'oauth',
                 protocol: 'openai',
                 mode: 'subscription',
+                clientId: 'openai',
                 models: ['gpt-5.4'],
                 hasApiKey: false,
                 createdAt: '2026-03-18T00:00:00.000Z',
                 updatedAt: '2026-03-18T00:00:00.000Z',
               },
               {
-                id: 'claude-sponsor',
-                provider: 'claude-sponsor',
-                displayName: 'Claude Sponsor',
-                name: 'Claude Sponsor',
+                id: 'openai-typed-key',
+                provider: 'openai-typed-key',
+                displayName: 'OpenAI Typed',
+                name: 'OpenAI Typed',
+                authType: 'api_key',
+                protocol: 'openai',
+                mode: 'api_key',
+                clientFamily: 'openai',
+                models: ['gpt-5.4'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+              {
+                id: 'anthropic-typed-key',
+                provider: 'anthropic-typed-key',
+                displayName: 'Anthropic Typed',
+                name: 'Anthropic Typed',
                 authType: 'api_key',
                 protocol: 'anthropic',
                 mode: 'api_key',
+                clientFamily: 'anthropic',
                 models: ['claude-opus-4-6'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+              {
+                id: 'legacy-untyped-key',
+                provider: 'legacy-untyped-key',
+                displayName: 'Legacy Untyped',
+                name: 'Legacy Untyped',
+                authType: 'api_key',
+                mode: 'api_key',
+                models: ['any-model'],
                 hasApiKey: true,
                 createdAt: '2026-03-18T00:00:00.000Z',
                 updatedAt: '2026-03-18T00:00:00.000Z',
@@ -1748,12 +1776,21 @@ describe('HubCatEditor', () => {
     await flushEffects();
     const providerSelect = queryField<HTMLSelectElement>(container, 'select[aria-label="认证信息"]');
     const optionLabels = Array.from(providerSelect.options).map((option) => option.textContent ?? '');
+    // Matching builtin appears
     expect(optionLabels).toContain('Codex (OAuth)（OAuth）');
-    expect(optionLabels).toContain('Claude Sponsor（API Key）');
+    // Matching-family typed key appears
+    expect(optionLabels).toContain('OpenAI Typed（API Key）');
+    // Untyped legacy key appears (backward compat)
+    expect(optionLabels).toContain('Legacy Untyped（API Key）');
+    // Mismatched-family typed key is HIDDEN
+    expect(optionLabels).not.toContain('Anthropic Typed（API Key）');
   });
 
-  it('keeps builtin accounts client-specific while exposing all API key accounts', () => {
+  it('filters family-typed API-key accounts by effective client while keeping untyped legacy profiles as fallback', () => {
+    // F159 G2: profiles with clientFamily are eligible only when matching the effective family.
+    // Profiles without clientFamily (legacy) remain eligible for backward compatibility.
     const profiles: ProfileItem[] = [
+      // Builtin OAuth accounts
       profileItem({
         id: 'claude-oauth',
         provider: 'claude-oauth',
@@ -1761,20 +1798,9 @@ describe('HubCatEditor', () => {
         name: 'Claude (OAuth)',
         authType: 'oauth',
         mode: 'subscription',
+        clientId: 'anthropic',
         models: ['claude-opus-4-6'],
         hasApiKey: false,
-        createdAt: '2026-03-18T00:00:00.000Z',
-        updatedAt: '2026-03-18T00:00:00.000Z',
-      }),
-      profileItem({
-        id: 'claude-sponsor',
-        provider: 'claude-sponsor',
-        displayName: 'Claude Sponsor',
-        name: 'Claude Sponsor',
-        authType: 'api_key',
-        mode: 'api_key',
-        models: ['claude-opus-4-6'],
-        hasApiKey: true,
         createdAt: '2026-03-18T00:00:00.000Z',
         updatedAt: '2026-03-18T00:00:00.000Z',
       }),
@@ -1785,43 +1811,86 @@ describe('HubCatEditor', () => {
         name: 'Codex (OAuth)',
         authType: 'oauth',
         mode: 'subscription',
+        clientId: 'openai',
         models: ['gpt-5.4'],
         hasApiKey: false,
         createdAt: '2026-03-18T00:00:00.000Z',
         updatedAt: '2026-03-18T00:00:00.000Z',
       }),
+      // Typed API-key accounts (have clientFamily)
       profileItem({
-        id: 'codex-sponsor',
-        provider: 'codex-sponsor',
-        displayName: 'Codex Sponsor',
-        name: 'Codex Sponsor',
+        id: 'anthropic-key',
+        provider: 'anthropic-key',
+        displayName: 'Anthropic Key',
+        name: 'Anthropic Key',
         authType: 'api_key',
         mode: 'api_key',
+        clientFamily: 'anthropic',
+        models: ['claude-opus-4-6'],
+        hasApiKey: true,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      }),
+      profileItem({
+        id: 'openai-key',
+        provider: 'openai-key',
+        displayName: 'OpenAI Key',
+        name: 'OpenAI Key',
+        authType: 'api_key',
+        mode: 'api_key',
+        clientFamily: 'openai',
         models: ['gpt-5.4'],
+        hasApiKey: true,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      }),
+      profileItem({
+        id: 'opencode-key',
+        provider: 'opencode-key',
+        displayName: 'OpenCode Key',
+        name: 'OpenCode Key',
+        authType: 'api_key',
+        mode: 'api_key',
+        clientFamily: 'opencode',
+        models: ['deepseek-r2'],
+        hasApiKey: true,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      }),
+      // Untyped legacy API-key account (no clientFamily — backward-compat fallback)
+      profileItem({
+        id: 'legacy-key',
+        provider: 'legacy-key',
+        displayName: 'Legacy Key',
+        name: 'Legacy Key',
+        authType: 'api_key',
+        mode: 'api_key',
+        models: ['any-model'],
         hasApiKey: true,
         createdAt: '2026-03-18T00:00:00.000Z',
         updatedAt: '2026-03-18T00:00:00.000Z',
       }),
     ];
 
-    expect(filterProfiles('openai', profiles).map((profile) => profile.id)).toEqual([
-      'codex-oauth',
-      'claude-sponsor',
-      'codex-sponsor',
-    ]);
-    expect(filterProfiles('anthropic', profiles).map((profile) => profile.id)).toEqual([
+    // Anthropic client: builtin Claude OAuth + matching anthropic-key + untyped legacy
+    // (OpenAI-key and OpenCode-key excluded)
+    expect(filterProfiles('anthropic', profiles).map((p) => p.id)).toEqual([
       'claude-oauth',
-      'claude-sponsor',
-      'codex-sponsor',
-    ]);
-    expect(filterProfiles('opencode', profiles).map((profile) => profile.id)).toEqual([
-      'claude-sponsor',
-      'codex-sponsor',
+      'anthropic-key',
+      'legacy-key',
     ]);
 
+    // OpenAI client: builtin Codex OAuth + matching openai-key + untyped legacy
+    // (anthropic-key and opencode-key excluded)
+    expect(filterProfiles('openai', profiles).map((p) => p.id)).toEqual(['codex-oauth', 'openai-key', 'legacy-key']);
+
+    // OpenCode client: no builtin OAuth match + opencode-key + untyped legacy
+    // (anthropic-key and openai-key excluded)
+    expect(filterProfiles('opencode', profiles).map((p) => p.id)).toEqual(['opencode-key', 'legacy-key']);
+
     // F159: catagent shares anthropic credential family (default / no protocol)
-    expect(filterProfiles('catagent', profiles).map((profile) => profile.id)).toEqual(
-      filterProfiles('anthropic', profiles).map((profile) => profile.id),
+    expect(filterProfiles('catagent', profiles).map((p) => p.id)).toEqual(
+      filterProfiles('anthropic', profiles).map((p) => p.id),
     );
     expect(builtinAccountIdForClient('catagent')).toEqual('claude');
 
@@ -1834,11 +1903,80 @@ describe('HubCatEditor', () => {
     expect(builtinAccountIdForClient('catagent', 'anthropic-messages')).toEqual('claude');
   });
 
+  it('mismatched family-typed API-key profile cannot be auto-selected by the editor', () => {
+    // Proves that when an Anthropic-typed key exists, it cannot sneak into an OpenAI member's
+    // available profiles and potentially be auto-selected.
+    const profiles: ProfileItem[] = [
+      profileItem({
+        id: 'codex-oauth',
+        provider: 'codex-oauth',
+        displayName: 'Codex (OAuth)',
+        name: 'Codex (OAuth)',
+        authType: 'oauth',
+        mode: 'subscription',
+        clientId: 'openai',
+        models: ['gpt-5.4'],
+        hasApiKey: false,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      }),
+      profileItem({
+        id: 'anthropic-typed-key',
+        provider: 'anthropic-typed-key',
+        displayName: 'Anthropic Typed Key',
+        name: 'Anthropic Typed Key',
+        authType: 'api_key',
+        mode: 'api_key',
+        clientFamily: 'anthropic',
+        models: ['claude-opus-4-6'],
+        hasApiKey: true,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      }),
+    ];
+
+    const openaiAvailable = filterAccounts('openai', profiles);
+    // The anthropic-typed key must NOT appear for an OpenAI client
+    expect(openaiAvailable.map((p) => p.id)).not.toContain('anthropic-typed-key');
+    // Only the matching builtin is available
+    expect(openaiAvailable.map((p) => p.id)).toEqual(['codex-oauth']);
+
+    // Conversely, for an Anthropic client, the anthropic-typed key IS available
+    const anthropicAvailable = filterAccounts('anthropic', profiles);
+    expect(anthropicAvailable.map((p) => p.id)).toContain('anthropic-typed-key');
+    // But the codex-oauth is not (it's an openai builtin)
+    expect(anthropicAvailable.map((p) => p.id)).not.toContain('codex-oauth');
+  });
+
   it('F159 G2: existing openai-chat CatAgent preserves codex accountRef on editor open', () => {
     const testProfiles: ProfileItem[] = [
-      profileItem({ id: 'claude', provider: 'claude', displayName: 'Claude', name: 'Claude', authType: 'oauth', mode: 'subscription', clientId: 'anthropic' }),
-      profileItem({ id: 'codex', provider: 'codex', displayName: 'Codex', name: 'Codex', authType: 'oauth', mode: 'subscription', clientId: 'openai' }),
-      profileItem({ id: 'my-openai-key', provider: 'openai', displayName: 'My OpenAI', name: 'My OpenAI', authType: 'api_key', mode: 'api_key', hasApiKey: true }),
+      profileItem({
+        id: 'claude',
+        provider: 'claude',
+        displayName: 'Claude',
+        name: 'Claude',
+        authType: 'oauth',
+        mode: 'subscription',
+        clientId: 'anthropic',
+      }),
+      profileItem({
+        id: 'codex',
+        provider: 'codex',
+        displayName: 'Codex',
+        name: 'Codex',
+        authType: 'oauth',
+        mode: 'subscription',
+        clientId: 'openai',
+      }),
+      profileItem({
+        id: 'my-openai-key',
+        provider: 'openai',
+        displayName: 'My OpenAI',
+        name: 'My OpenAI',
+        authType: 'api_key',
+        mode: 'api_key',
+        hasApiKey: true,
+      }),
     ];
     const catData = {
       id: 'test-openai-agent',
@@ -1868,8 +2006,24 @@ describe('HubCatEditor', () => {
 
   it('F159 G2: default CatAgent (anthropic-messages) preserves claude accountRef', () => {
     const testProfiles: ProfileItem[] = [
-      profileItem({ id: 'claude', provider: 'claude', displayName: 'Claude', name: 'Claude', authType: 'oauth', mode: 'subscription', clientId: 'anthropic' }),
-      profileItem({ id: 'codex', provider: 'codex', displayName: 'Codex', name: 'Codex', authType: 'oauth', mode: 'subscription', clientId: 'openai' }),
+      profileItem({
+        id: 'claude',
+        provider: 'claude',
+        displayName: 'Claude',
+        name: 'Claude',
+        authType: 'oauth',
+        mode: 'subscription',
+        clientId: 'anthropic',
+      }),
+      profileItem({
+        id: 'codex',
+        provider: 'codex',
+        displayName: 'Codex',
+        name: 'Codex',
+        authType: 'oauth',
+        mode: 'subscription',
+        clientId: 'openai',
+      }),
     ];
     const catData = {
       id: 'test-ant-agent',

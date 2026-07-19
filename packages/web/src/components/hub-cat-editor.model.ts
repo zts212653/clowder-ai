@@ -342,7 +342,14 @@ export function filterAccounts(client: ClientId, profiles: ProfileItem[], catAge
     );
     return [...builtinProfiles, ...kimiApiProfiles.filter((profile) => !builtinProfiles.includes(profile))];
   }
-  const apiKeyProfiles = profiles.filter((profile) => profile.authType === 'api_key');
+  const apiKeyProfiles = profiles.filter(
+    (profile) =>
+      profile.authType === 'api_key' &&
+      // F159 G2: typed API-key profiles (with clientFamily) are only eligible when their
+      // family matches the effective client family. Untyped legacy profiles (no clientFamily)
+      // remain eligible as backward-compatibility fallback.
+      (!profile.clientFamily || profile.clientFamily === effective),
+  );
   return [...builtinProfiles, ...apiKeyProfiles.filter((profile) => !builtinProfiles.includes(profile))];
 }
 
