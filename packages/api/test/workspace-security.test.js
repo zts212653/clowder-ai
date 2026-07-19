@@ -191,6 +191,17 @@ describe('workspace-security', () => {
     assert.ok(!mod.isDenylisted('docs/README.md'));
   });
 
+  it('isDenylisted blocks mixed-case filename variants (case-insensitive FS bypass)', () => {
+    assert.ok(mod.isDenylisted('.ENV'));
+    assert.ok(mod.isDenylisted('.Env.Local'));
+    assert.ok(mod.isDenylisted('certs/SERVER.PEM'));
+    assert.ok(mod.isDenylisted('ID_RSA'));
+    assert.ok(mod.isDenylisted('keys/Deploy.Key'));
+    assert.ok(mod.isDenylisted('.CAT-CAFE/config.json'));
+    assert.ok(mod.isDenylisted('.Git/HEAD'));
+    assert.ok(mod.isDenylisted('Secrets/token.txt'));
+  });
+
   // -- Worktree listing --
 
   it('listWorktrees falls back to a startup-style project root when cwd is not a git checkout', async () => {

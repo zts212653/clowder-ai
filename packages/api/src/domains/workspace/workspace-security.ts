@@ -6,7 +6,7 @@ import { resolveStartupProjectRoot } from '../../utils/startup-root.js';
 
 const execFileAsync = promisify(execFile);
 
-const DENYLIST_PATTERNS = [/^\.env/, /\.pem$/, /\.key$/, /^id_rsa/];
+const DENYLIST_PATTERNS = [/^\.env/i, /\.pem$/i, /\.key$/i, /^id_rsa/i];
 
 const DENYLIST_DIRS = new Set(['.git', 'secrets', '.cat-cafe']);
 
