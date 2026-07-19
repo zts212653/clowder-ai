@@ -86,6 +86,24 @@ describe('workspace-security', () => {
     );
   });
 
+  it('rejects .cat-cafe directory (project config storage)', async () => {
+    await assert.rejects(
+      () => mod.resolveWorkspacePath(testRoot, '.cat-cafe/credentials.json'),
+      (err) => err.code === 'DENIED',
+    );
+    await assert.rejects(
+      () => mod.resolveWorkspacePath(testRoot, '.cat-cafe/cat-catalog.json'),
+      (err) => err.code === 'DENIED',
+    );
+  });
+
+  it('rejects data directory (persistent storage)', async () => {
+    await assert.rejects(
+      () => mod.resolveWorkspacePath(testRoot, 'data/sqlite.db'),
+      (err) => err.code === 'DENIED',
+    );
+  });
+
   // -- Symlink escape --
 
   it('rejects symlink that escapes root', async () => {
@@ -138,6 +156,17 @@ describe('workspace-security', () => {
   it('isDenylisted blocks .git directory', () => {
     assert.ok(mod.isDenylisted('.git/config'));
     assert.ok(mod.isDenylisted('.git/HEAD'));
+  });
+
+  it('isDenylisted blocks .cat-cafe config storage', () => {
+    assert.ok(mod.isDenylisted('.cat-cafe/credentials.json'));
+    assert.ok(mod.isDenylisted('.cat-cafe/cat-catalog.json'));
+    assert.ok(mod.isDenylisted('.cat-cafe/linked-roots.json'));
+  });
+
+  it('isDenylisted blocks data directory', () => {
+    assert.ok(mod.isDenylisted('data/sqlite.db'));
+    assert.ok(mod.isDenylisted('data/evidence/index.json'));
   });
 
   it('isDenylisted blocks normalized POSIX paths on every host platform', () => {

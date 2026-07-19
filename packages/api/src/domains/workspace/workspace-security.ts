@@ -8,7 +8,7 @@ const execFileAsync = promisify(execFile);
 
 const DENYLIST_PATTERNS = [/^\.env/, /\.pem$/, /\.key$/, /^id_rsa/];
 
-const DENYLIST_DIRS = new Set(['.git', 'secrets']);
+const DENYLIST_DIRS = new Set(['.git', 'secrets', '.cat-cafe', 'data']);
 
 function assertDenylistAllowed(relPath: string): void {
   for (const seg of relPath.split(sep)) {
