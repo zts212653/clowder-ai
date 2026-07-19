@@ -49,13 +49,13 @@ Not in scope:
 | user `actor.id` | resolved request identity copied to `StoredMessage.userId` | ownership filters and K-1 user actor | some routes cap legacy `userId` at 100 | session/header paths and stores lack one canonical admission rule |
 | cat `actor.id` | cat catalog/registry copied to `StoredMessage.catId` | routing and K-1 cat actor | cat-management route uses 64 + grammar | shared registry schema and message stores do not enforce the same maximum |
 | plugin `actor.id` | K-1 `PluginCallContext.pluginInstanceId` | K-1 plugin actor | plugin payload parser caps at 256 | producer context must reject before persistence, not fail during projection |
-| `occurredAt` | `StoredMessage.timestamp` projected through `new Date(timestamp).toISOString()` | K-1 envelope/event readers | ordinary producers use `Date.now()` | stores accept `NaN`, infinities, fractions, and out-of-Date-range numbers; projection can throw |
+| `occurredAt` | `StoredMessage.timestamp` projected through `new Date(timestamp).toISOString()` | K-1 envelope/event readers | ordinary producers use `Date.now()` | stores accept `NaN`, infinities, and out-of-Date-range numbers; projection can throw |
 
 ## Core invariants
 
 - **INV-1 — pre-write admission:** Invalid identity/timestamp input is rejected before idempotency claims, Redis commands, in-memory append, indexes, or append listeners change.
 - **INV-2 — store parity:** Memory and Redis stores call the same pure policy and return the same error class for the same invalid input.
-- **INV-3 — valid-Date domain:** Every newly persisted timestamp is a finite integer inside the ECMAScript Date range, so `toISOString()` cannot throw.
+- **INV-3 — valid-Date domain:** Every newly persisted timestamp survives ECMAScript `Date` TimeClip (including valid fractional input), so `toISOString()` cannot throw.
 - **INV-4 — generated-id bound:** Every newly minted message ID satisfies a documented finite maximum; generator state cannot silently escape that maximum.
 - **INV-5 — scalar compatibility:** A bound is not called wire-compatible unless the admitted string domain also excludes isolated UTF-16 surrogates required by the compact wire profile.
 - **INV-6 — legacy honesty:** New-write admission does not prove historical compatibility. Legacy closure requires a read-only audit result or an explicit migration/reconciliation policy.
@@ -91,10 +91,10 @@ Not in scope:
 - Test: `packages/api/test/message-store.test.js`
 - Test: `packages/api/test/redis-message-store.test.js`
 
-1. Add RED cases for `NaN`, `Infinity`, `-Infinity`, fractional milliseconds, and values outside `±8_640_000_000_000_000`.
+1. Add RED cases for `NaN`, `Infinity`, `-Infinity`, and values outside `±8_640_000_000_000_000`; add a fractional-millisecond success case to prevent an invented integer-only constraint.
 2. Assert rejection occurs before an append listener or Redis write is observable.
 3. Add one pure `assertValidStoredMessageTimestamp()` helper and call it before any store side effect.
-4. Add boundary-success cases for the minimum/maximum ECMAScript Date values and an ordinary `Date.now()` value.
+4. Add boundary-success cases for the minimum/maximum ECMAScript Date values, fractional milliseconds, and an ordinary `Date.now()` value.
 5. Build and run the focused memory/Redis suites.
 
 ### Task A2: Producer inventory and generated-ID proof
@@ -147,4 +147,3 @@ pnpm check
 - RED→GREEN test names for memory and Redis parity;
 - read-only legacy audit result/provenance, or an explicit statement that affected leaves remain reserved;
 - confirmation that no cursor/lease/settlement state moves on an incompatible stored value.
-

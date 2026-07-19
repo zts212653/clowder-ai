@@ -18,6 +18,7 @@ import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { AppendMessageInput, StoredMessage, StreamMetadataAugmentInput } from '../ports/MessageStore.js';
 import {
   applyStreamMetadataAugment,
+  assertValidStoredMessageTimestamp,
   DEFAULT_THREAD_ID,
   generateSortableId,
   isDelivered,
@@ -75,6 +76,7 @@ export class RedisMessageStore {
   }
 
   async append(msg: AppendMessageInput): Promise<StoredMessage> {
+    assertValidStoredMessageTimestamp(msg.timestamp);
     const threadId = msg.threadId ?? DEFAULT_THREAD_ID;
     const id = generateSortableId(msg.timestamp);
     const idempotencyIndexKey = msg.idempotencyKey
@@ -224,7 +226,7 @@ export class RedisMessageStore {
       ...(parsedMetadata ? { metadata: parsedMetadata } : {}),
       ...(parsedExtra ? { extra: parsedExtra } : {}),
       mentions: safeParseMentions(data.mentions),
-      timestamp: parseInt(data.timestamp ?? '0', 10),
+      timestamp: Number(data.timestamp ?? '0'),
       ...(deletedAt ? { deletedAt, deletedBy: data.deletedBy ?? '' } : {}),
       ...(data._tombstone === '1' ? { _tombstone: true as const } : {}),
       ...(data.thinking ? { thinking: data.thinking } : {}),
@@ -963,7 +965,7 @@ export class RedisMessageStore {
         ...(parsedMetadata ? { metadata: parsedMetadata } : {}),
         ...(parsedExtra ? { extra: parsedExtra } : {}),
         mentions: safeParseMentions(d.mentions),
-        timestamp: parseInt(d.timestamp ?? '0', 10),
+        timestamp: Number(d.timestamp ?? '0'),
         ...(deletedAt ? { deletedAt, deletedBy: d.deletedBy ?? '' } : {}),
         ...(d._tombstone === '1' ? { _tombstone: true as const } : {}),
         ...(d.thinking ? { thinking: d.thinking } : {}),

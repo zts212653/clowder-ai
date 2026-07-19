@@ -26,6 +26,55 @@ describe('MessageStore', () => {
     assert.equal(store.size, 1);
   });
 
+  test('append() rejects invalid Date timestamps before mutating memory or notifying listeners', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const invalidTimestamps = [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      8_640_000_000_000_001,
+      -8_640_000_000_000_001,
+    ];
+
+    for (const timestamp of invalidTimestamps) {
+      let listenerCalls = 0;
+      const store = new MessageStore({ onAppend: () => listenerCalls++ });
+
+      assert.throws(
+        () =>
+          store.append({
+            userId: 'user-1',
+            catId: null,
+            content: 'must not persist',
+            mentions: [],
+            timestamp,
+            idempotencyKey: 'invalid-date',
+          }),
+        { name: 'RangeError', message: /valid ECMAScript Date/ },
+      );
+      assert.equal(store.size, 0, `timestamp ${String(timestamp)} must not append`);
+      assert.equal(listenerCalls, 0, `timestamp ${String(timestamp)} must not notify`);
+    }
+  });
+
+  test('append() admits ECMAScript Date boundaries and fractional milliseconds', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = new MessageStore();
+
+    for (const timestamp of [-8_640_000_000_000_000, 1.5, 8_640_000_000_000_000]) {
+      const stored = store.append({
+        userId: 'user-1',
+        catId: null,
+        content: 'valid Date input',
+        mentions: [],
+        timestamp,
+      });
+      assert.equal(stored.timestamp, timestamp);
+    }
+    assert.equal(store.size, 3);
+  });
+
   test('augmentStreamMetadata() enriches callback messages without replacing canonical content', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
