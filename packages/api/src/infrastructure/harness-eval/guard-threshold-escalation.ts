@@ -1,9 +1,14 @@
 /**
  * F257 sub-item 2: Guard threshold escalation — immediate eval trigger.
  *
- * When a guard accumulates ≥ ESCALATION_THRESHOLD events within
+ * When a guard accumulates ≥ ESCALATION_THRESHOLD distinct EPISODES within
  * ESCALATION_WINDOW_DAYS, triggers an immediate eval:harness-ledger
  * invocation instead of waiting for the weekly cron ceiling.
+ *
+ * V2/Phase B (PR #41 verdict, burst-coalescing fix): the threshold unit is
+ * coalesced episodes, not raw events. Rapid same-guard/thread/cat retries
+ * (adjacent gap ≤ 60s) are ONE incident — see guard-episode-coalescing.ts,
+ * the canonical coalescer shared with the snapshot/bundle path.
  *
  * Design decisions:
  * - **Event-driven**: hooks into GuardRejectionEventLog.postAppendHook —
@@ -18,6 +23,7 @@
 
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { GuardRejectionEvent, GuardRejectionEventLog } from './GuardRejectionEventLog.js';
+import { coalesceGuardEpisodes } from './guard-episode-coalescing.js';
 import type { TriggerNowInput, TriggerNowSkipped, TriggerNowSuccess } from './manual-trigger/trigger-now.js';
 import type { HandlerError } from './manual-trigger/types.js';
 
@@ -28,7 +34,10 @@ export type TriggerEvalResult = TriggerNowSuccess | TriggerNowSkipped | HandlerE
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Minimum events for a single guard to trigger immediate eval. */
+/**
+ * Minimum distinct episodes for a single guard to trigger immediate eval.
+ * Unit is EPISODES (coalesced incidents), not raw events — PR #41 verdict.
+ */
 export const ESCALATION_THRESHOLD = 3;
 
 /** Window in days over which events are counted toward the threshold. */
@@ -47,7 +56,12 @@ const DEDUP_TTL_SECONDS = ESCALATION_WINDOW_DAYS * 24 * 3600;
 export interface EscalationCheckResult {
   checked: true;
   guardId: string;
+  /** Backward-compat alias of rawEventCount (pre-episode consumers). */
   count: number;
+  /** Raw rejection events in window — preserved per PR #41 verdict. */
+  rawEventCount: number;
+  /** Coalesced distinct episodes in window — the 3-per-7d threshold unit. */
+  episodeCount: number;
   thresholdMet: boolean;
   alreadyEscalated: boolean;
   escalated: boolean;
@@ -112,13 +126,32 @@ export async function checkGuardThreshold(
   const windowMs = ESCALATION_WINDOW_DAYS * 24 * 3600 * 1000;
   const since = event.timestamp - windowMs;
 
-  // Step 1: count events for this guard in the window.
-  // +1 because countByGuard→queryWindow uses half-open [since, until) interval
+  // Step 1: fetch this guard's window events and coalesce into episodes.
+  // PR #41 verdict: threshold counts distinct episodes, not raw events —
+  // a rapid retry burst (same guard+thread+cat, adjacent gap ≤ 60s) is ONE incident.
+  // +1 because queryWindow uses half-open [since, until) interval
   // (upperBound = until - 1). Without +1 the just-appended event at event.timestamp
-  // is excluded and the threshold fires one event late (4 instead of 3).
-  const count = await deps.guardRejectionLog.countByGuard(guardId, since, event.timestamp + 1);
-  if (count < ESCALATION_THRESHOLD) {
-    return { checked: true, guardId, count, thresholdMet: false, alreadyEscalated: false, escalated: false };
+  // is excluded and the threshold fires one episode late.
+  // limit 1000 (vs default 200) so heavy windows don't silently under-count episodes.
+  const windowEvents = await deps.guardRejectionLog.queryWindow({
+    since,
+    until: event.timestamp + 1,
+    guardId,
+    limit: 1000,
+  });
+  const rawEventCount = windowEvents.length;
+  const episodeCount = coalesceGuardEpisodes(windowEvents).length;
+  if (episodeCount < ESCALATION_THRESHOLD) {
+    return {
+      checked: true,
+      guardId,
+      count: rawEventCount,
+      rawEventCount,
+      episodeCount,
+      thresholdMet: false,
+      alreadyEscalated: false,
+      escalated: false,
+    };
   }
 
   // Step 2: atomic claim via SET NX EX — only one concurrent caller wins.
@@ -127,11 +160,25 @@ export async function checkGuardThreshold(
   // Atomicity eliminates the GET→SET→EXPIRE race where two fire-and-forget
   // appends both read empty and both trigger.
   const dedupKey = `${DEDUP_KEY_PREFIX}${guardId}`;
-  const claimValue = JSON.stringify({ escalatedAt: event.timestamp, count, triggeredBy: event.eventId });
+  const claimValue = JSON.stringify({
+    escalatedAt: event.timestamp,
+    count: rawEventCount,
+    episodeCount,
+    triggeredBy: event.eventId,
+  });
   const claimed = await deps.redis.set(dedupKey, claimValue, 'EX', DEDUP_TTL_SECONDS, 'NX');
   if (claimed !== 'OK') {
     // Another concurrent caller already claimed — dedup.
-    return { checked: true, guardId, count, thresholdMet: true, alreadyEscalated: true, escalated: false };
+    return {
+      checked: true,
+      guardId,
+      count: rawEventCount,
+      rawEventCount,
+      episodeCount,
+      thresholdMet: true,
+      alreadyEscalated: true,
+      escalated: false,
+    };
   }
 
   // Step 3: trigger eval:harness-ledger via the manual trigger path.
@@ -152,7 +199,9 @@ export async function checkGuardThreshold(
     return {
       checked: true,
       guardId,
-      count,
+      count: rawEventCount,
+      rawEventCount,
+      episodeCount,
       thresholdMet: true,
       alreadyEscalated: false,
       escalated: false,
@@ -169,7 +218,9 @@ export async function checkGuardThreshold(
     return {
       checked: true,
       guardId,
-      count,
+      count: rawEventCount,
+      rawEventCount,
+      episodeCount,
       thresholdMet: true,
       alreadyEscalated: false,
       escalated: false,
@@ -181,7 +232,9 @@ export async function checkGuardThreshold(
   return {
     checked: true,
     guardId,
-    count,
+    count: rawEventCount,
+    rawEventCount,
+    episodeCount,
     thresholdMet: true,
     alreadyEscalated: false,
     escalated: true,

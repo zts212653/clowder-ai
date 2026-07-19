@@ -17,11 +17,17 @@ import { randomBytes } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { GuardRejectionEventLog } from './GuardRejectionEventLog.js';
+import { coalesceGuardEpisodes, type GuardEpisode } from './guard-episode-coalescing.js';
 
 /** Normalized per-guard aggregate in the stored snapshot. */
 export interface GuardAggregate {
+  /** Raw rejection events (preserved per PR #41 verdict). */
   count: number;
   kinds: string[];
+  /** Coalesced distinct episodes — the incident count (PR #41 verdict). */
+  episodeCount: number;
+  /** Episode metadata with per-episode anchors for independent recheck. */
+  episodes: GuardEpisode[];
 }
 
 /** Shape of the stored run snapshot (persisted JSON). */
@@ -98,7 +104,18 @@ export async function produceHarnessLedgerRunSnapshot(deps: ProduceSnapshotDeps)
       existing.count += 1;
       if (!existing.kinds.includes(e.kind)) existing.kinds.push(e.kind);
     } else {
-      byGuard[e.guardId] = { count: 1, kinds: [e.kind] };
+      byGuard[e.guardId] = { count: 1, kinds: [e.kind], episodeCount: 0, episodes: [] };
+    }
+  }
+
+  // Coalesce episodes via the canonical coalescer (PR #41 verdict) — the SAME
+  // implementation the real-time threshold path uses, so decision and artifact
+  // can never drift on accounting.
+  for (const episode of coalesceGuardEpisodes(events)) {
+    const agg = byGuard[episode.guardId];
+    if (agg) {
+      agg.episodeCount += 1;
+      agg.episodes.push(episode);
     }
   }
 
@@ -132,7 +149,10 @@ export async function produceHarnessLedgerRunSnapshot(deps: ProduceSnapshotDeps)
   // KD-17 last-hop: provide exact sourceRefs JSON so eval cat copies raw values
   // (no ISO→epoch conversion that could drift by 1ms and trigger window_mismatch).
   const guardSummary = Object.entries(byGuard)
-    .map(([g, agg]) => `  - ${g}: ${agg.count} event(s) [${agg.kinds.join(', ')}]`)
+    .map(
+      (entry) =>
+        `  - ${entry[0]}: ${entry[1].count} raw event(s) / ${entry[1].episodeCount} episode(s) [${entry[1].kinds.join(', ')}]`,
+    )
     .join('\n');
   const exactSourceRefs = {
     kind: 'prompt-segments' as const,

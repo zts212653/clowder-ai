@@ -111,6 +111,8 @@ export function createHarnessLedgerGeneratorAdapter(): VerdictGenerator {
       guardCountMap[gid] = agg.count;
     }
 
+    const byGuardEpisodes = buildByGuardEpisodes(byGuard);
+
     // --- Bundle: snapshot.json ---
     const bundleSnapshot = {
       verdictId: packet.id,
@@ -121,6 +123,8 @@ export function createHarnessLedgerGeneratorAdapter(): VerdictGenerator {
       totalEvents,
       byKind,
       byGuard: guardCountMap,
+      byGuardEpisodes,
+      sampleAnchors: storedSnapshot.sampleAnchors ?? [],
       components: [
         {
           componentId: 'guard-rejection-log',
@@ -178,6 +182,29 @@ export function createHarnessLedgerGeneratorAdapter(): VerdictGenerator {
   };
 }
 
+// ── Episode accounting for the committed bundle (PR #41 provenance fix) ──
+
+/**
+ * The committed bundle must carry rawEventCount / episodeCount / episode
+ * metadata so burst claims (e.g. "4 events in 7.044s") are independently
+ * recheckable from the bundle alone. episodeCount falls back to raw count
+ * only for legacy snapshots produced before episode coalescing
+ * (conservative upper bound).
+ */
+function buildByGuardEpisodes(
+  byGuard: HarnessLedgerRunSnapshot['byGuard'],
+): Record<string, { rawEventCount: number; episodeCount: number; episodes: unknown[] }> {
+  const out: Record<string, { rawEventCount: number; episodeCount: number; episodes: unknown[] }> = {};
+  for (const [gid, agg] of Object.entries(byGuard)) {
+    out[gid] = {
+      rawEventCount: agg.count,
+      episodeCount: agg.episodeCount ?? agg.count,
+      episodes: agg.episodes ?? [],
+    };
+  }
+  return out;
+}
+
 // ── Attribution builder (extracted for readability) ──
 
 interface BuildAttributionInput {
@@ -186,7 +213,7 @@ interface BuildAttributionInput {
   evalSnapshotId: string;
   generatedAt: string;
   hasEvents: boolean;
-  byGuard: Record<string, { count: number; kinds: string[] }>;
+  byGuard: Record<string, { count: number; kinds: string[]; episodeCount?: number }>;
   windowDays: number;
   windowStartMs: number;
   windowEndMs: number;
@@ -203,6 +230,8 @@ function buildAttribution(input: BuildAttributionInput) {
           const severity: 'low' | 'medium' | 'high' = agg.count >= 20 ? 'high' : agg.count >= 5 ? 'medium' : 'low';
           return {
             id: `f257-guard-${guardId}`,
+            rawEventCount: agg.count,
+            episodeCount: agg.episodeCount ?? agg.count,
             frictionSignal: { type: agg.kinds.join('+'), severity, confidence: 0.7 },
             attribution: {
               primaryLayer: 'guard-rejection-log',

@@ -39,12 +39,32 @@ function createFakeRedis() {
   };
 }
 
-/** Fake GuardRejectionEventLog that returns a fixed count for countByGuard. */
-function createFakeLog(countByGuardResult) {
+/**
+ * Fake GuardRejectionEventLog exposing N SEPARATED events (10 min apart —
+ * far beyond EPISODE_GAP_MS 60s, so each event is its own episode).
+ *
+ * PR #41 episode accounting: the threshold counts episodes, not raw events.
+ * Pre-episode tests asserted on raw counts; separated events keep
+ * rawEventCount == episodeCount, preserving those assertions' semantics.
+ * Burst-specific behavior is covered in guard-episode-coalescing.test.js.
+ */
+function createFakeLog(eventCount) {
+  const events = Array.from({ length: eventCount }, (_, i) => ({
+    eventId: `evt-fake-${i}`,
+    kind: 'http_rate_limit',
+    threadId: 'thread_1',
+    catId: 'cat_1',
+    guardId: 'fake-guard',
+    timestamp: 1700000000000 + i * 600_000,
+    correlationConfidence: 'window',
+    currentCount: 5,
+    maxAllowed: 5,
+    windowMs: 3600000,
+  }));
   return {
-    countByGuard: mock.fn(async () => countByGuardResult),
-    queryWindow: async () => [],
-    queryWindowStrict: async () => [],
+    countByGuard: mock.fn(async () => events.length),
+    queryWindow: mock.fn(async () => events),
+    queryWindowStrict: mock.fn(async () => events),
     append: async () => {},
   };
 }
@@ -170,7 +190,7 @@ describe('F257 sub-item 2: guard threshold escalation', () => {
     assert.equal(triggerEval.mock.callCount(), 2, 'both guards should trigger eval');
   });
 
-  it('countByGuard receives correct window parameters', async () => {
+  it('queryWindow receives correct window parameters (episode accounting reads full events)', async () => {
     const redis = createFakeRedis();
     const log = createFakeLog(1); // below threshold
     const triggerEval = mock.fn(async () => ({}));
@@ -178,13 +198,15 @@ describe('F257 sub-item 2: guard threshold escalation', () => {
 
     await checkGuardThreshold(makeEvent('guard-q', now), { redis, guardRejectionLog: log, triggerEval });
 
-    // countByGuard should be called with (guardId, since, until)
-    assert.equal(log.countByGuard.mock.callCount(), 1);
-    const [guardId, since, until] = log.countByGuard.mock.calls[0].arguments;
-    assert.equal(guardId, 'guard-q');
+    // Episode coalescing needs full events, so the check queries the window
+    // (countByGuard is no longer the accounting source — PR #41).
+    assert.equal(log.queryWindow.mock.callCount(), 1);
+    const [opts] = log.queryWindow.mock.calls[0].arguments;
+    assert.equal(opts.guardId, 'guard-q');
     const expectedWindowMs = ESCALATION_WINDOW_DAYS * 24 * 3600 * 1000;
-    assert.equal(since, now - expectedWindowMs, 'since should be event.timestamp - 7 days');
-    assert.equal(until, now + 1, 'until should be event.timestamp + 1 (half-open interval includes self)');
+    assert.equal(opts.since, now - expectedWindowMs, 'since should be event.timestamp - 7 days');
+    assert.equal(opts.until, now + 1, 'until should be event.timestamp + 1 (half-open interval includes self)');
+    assert.equal(opts.limit, 1000, 'raised limit so heavy windows do not under-count episodes');
   });
 
   it('concurrent threshold checks only trigger once (atomic SET NX)', async () => {
@@ -493,15 +515,18 @@ describe('F257 bootstrap integration: append → threshold escalation', async ()
 
     const now = 1700000000000;
 
-    // Append 2 events (below threshold) — no trigger
+    // PR #41 episode accounting: appends are separated by >60s gaps so each
+    // forms a distinct episode (a 1ms-apart burst would coalesce into ONE
+    // episode and correctly NOT trigger — covered in the coalescing suite).
+    // Append 2 separated events (below threshold) — no trigger
     await log.append(makeEvent('guard-boot', now));
-    await log.append(makeEvent('guard-boot', now + 1));
+    await log.append(makeEvent('guard-boot', now + 100_000));
     // Give fire-and-forget hooks time to settle
     await new Promise((r) => setTimeout(r, 50));
     assert.equal(triggerEval.mock.callCount(), 0, 'below threshold: no trigger');
 
-    // Append 3rd event (reaches threshold) — triggers
-    await log.append(makeEvent('guard-boot', now + 2));
+    // Append 3rd separated event (reaches 3 episodes) — triggers
+    await log.append(makeEvent('guard-boot', now + 200_000));
     await new Promise((r) => setTimeout(r, 50));
     assert.equal(triggerEval.mock.callCount(), 1, 'at threshold: trigger fires');
 
@@ -528,9 +553,10 @@ describe('F257 bootstrap integration: append → threshold escalation', async ()
     log.setPostAppendHook(hook);
 
     const now = 1700000000000;
-    // Append 4 events — 3rd triggers, 4th deduped
+    // Append 4 SEPARATED events (>60s gaps → 4 distinct episodes) —
+    // 3rd triggers, 4th deduped by the escalation claim (PR #41 accounting).
     for (let i = 0; i < 4; i++) {
-      await log.append(makeEvent('guard-dedup', now + i));
+      await log.append(makeEvent('guard-dedup', now + i * 100_000));
     }
     await new Promise((r) => setTimeout(r, 50));
     assert.equal(triggerEval.mock.callCount(), 1, 'dedup: only one trigger despite 4 events');
