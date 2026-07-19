@@ -299,9 +299,14 @@ function buildVerdictMarkdown(input: BuildVerdictMdInput): string {
     : 'next eval scheduled per eval:harness-ledger weekly cadence';
 
   const snapshotRef = `snapshot:bundle/${packet.id}/snapshot`;
-  const attributionRef = hasEvents
-    ? `attribution:bundle/${packet.id}/${evalSnapshotId}`
-    : `attribution:bundle/${packet.id}/${evalSnapshotId}:no-finding`;
+  // Per-finding attribution refs (V2 producer fix; PR #43 fixed historical
+  // assets). The resolver's allowed-ref set is exactly one ref per
+  // findings[].id, or `<evalSnapshotId>:no-finding` when findings=[] with a
+  // noFindingRecord — a bare evalSnapshotId ref resolves to nothing.
+  // finding ids are `f257-guard-<guardId>` (see buildAttribution).
+  const attributionRefs = hasEvents
+    ? Object.keys(guardCountMap).map((guardId) => `attribution:bundle/${packet.id}/f257-guard-${guardId}`)
+    : [`attribution:bundle/${packet.id}/${evalSnapshotId}:no-finding`];
 
   const kindRows = Object.entries(byKind)
     .map(([k, c]) => `| ${k} | ${c} |`)
@@ -331,7 +336,7 @@ function buildVerdictMarkdown(input: BuildVerdictMdInput): string {
     '',
     'Evidence:',
     `- ${snapshotRef}`,
-    `- ${attributionRef}`,
+    ...attributionRefs.map((ref) => `- ${ref}`),
     '',
     `**Window**: ${windowDays} days | **Events**: ${totalEvents}`,
     '',
