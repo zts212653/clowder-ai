@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 
-const { buildToolRegistry, findTool } = await import(
+const { buildToolRegistry, findTool, resetRgCache } = await import(
   '../dist/domains/cats/services/agents/providers/catagent/catagent-read-tools.js'
 );
 const { CatAgentService, executeCatAgentTools } = await import(
@@ -666,7 +666,9 @@ describe('.cat-cafe boundary: all 5 tool operations reject with correct audit', 
     );
   });
 
-  test('search_content refuses .cat-cafe search path (requires rg)', async () => {
+  test('search_content refuses .cat-cafe search path', async (t) => {
+    // Reset rg detection cache — ensures fresh PATH check per test run.
+    resetRgCache();
     const auditEvents = [];
     const tools = await buildToolRegistry(tmpDir, {
       nativeToolLevel: 'L0',
@@ -674,9 +676,9 @@ describe('.cat-cafe boundary: all 5 tool operations reject with correct audit', 
     });
     const search = findTool(tools, 'search_content');
     if (!search) {
-      // rg (ripgrep) not available on this system — search_content not registered.
-      // The denylist is still enforced via resolveSecurePath before rg runs,
-      // tested by the resolver-level workspace-security.test.js suite.
+      // rg (ripgrep) not on PATH — explicitly report as skipped so CI
+      // shows the lost coverage rather than a false green.
+      t.skip('ripgrep (rg) not available — search_content not registered');
       return;
     }
     await assert.rejects(
@@ -737,5 +739,43 @@ describe('.cat-cafe boundary: all 5 tool operations reject with correct audit', 
     // src/data/input.json must be readable (previously blocked by overbroad 'data' rule)
     const result = await read.execute({ path: 'src/data/input.json' });
     assert.ok(result.includes('"test"'), 'src/data/input.json must be readable');
+  });
+});
+
+// ── Protected workspace root: buildToolRegistry refuses protected roots ──
+
+describe('Protected workspace root: buildToolRegistry refuses .cat-cafe roots', () => {
+  test('.cat-cafe as workspace root → zero tools registered', async () => {
+    const protectedRoot = join(tmpDir, '.cat-cafe');
+    mkdirSync(protectedRoot, { recursive: true });
+    const auditEvents = [];
+    const tools = await buildToolRegistry(protectedRoot, {
+      nativeToolLevel: 'L1',
+      audit: (evt) => auditEvents.push(evt),
+    });
+    assert.equal(tools.length, 0, 'no tools should be registered for a protected root');
+    const rejected = auditEvents.filter((e) => e.outcome === 'rejected');
+    assert.ok(rejected.length > 0, 'must emit rejected audit for protected workspace root');
+    assert.ok(rejected[0].rejectReason.includes('.cat-cafe'));
+  });
+
+  test('.git as workspace root → zero tools registered', async () => {
+    const protectedRoot = join(tmpDir, '.git');
+    mkdirSync(protectedRoot, { recursive: true });
+    const tools = await buildToolRegistry(protectedRoot, { nativeToolLevel: 'L1' });
+    assert.equal(tools.length, 0, 'no tools should be registered for a .git root');
+  });
+
+  test('normal workspace root with .cat-cafe descendant → tools registered', async () => {
+    // The workspace root itself is clean — descendant .cat-cafe is handled by denylist
+    const tools = await buildToolRegistry(tmpDir, { nativeToolLevel: 'L1' });
+    assert.ok(tools.length > 0, 'normal workspace root should have tools registered');
+  });
+
+  test('subdirectory of .cat-cafe as workspace root → zero tools', async () => {
+    const nestedProtected = join(tmpDir, '.cat-cafe', 'subdir');
+    mkdirSync(nestedProtected, { recursive: true });
+    const tools = await buildToolRegistry(nestedProtected, { nativeToolLevel: 'L1' });
+    assert.equal(tools.length, 0, 'subdirectory of protected root should have zero tools');
   });
 });

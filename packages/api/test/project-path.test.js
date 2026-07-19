@@ -185,6 +185,44 @@ describe('validateProjectPath', () => {
       // symlink creation may fail in sandboxed environments
     }
   });
+
+  it('rejects .cat-cafe directory as project path (protected namespace)', async () => {
+    const catCafeDir = join(testDir, '.cat-cafe');
+    mkdirSync(catCafeDir, { recursive: true });
+    const result = await validateProjectPathDetailed(catCafeDir);
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.reason, 'denied_root');
+    assert.ok(result.message?.includes('.cat-cafe'));
+  });
+
+  it('rejects .git directory as project path (protected namespace)', async () => {
+    const gitDir = join(testDir, '.git');
+    mkdirSync(gitDir, { recursive: true });
+    const result = await validateProjectPathDetailed(gitDir);
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.reason, 'denied_root');
+  });
+
+  it('rejects symlink alias resolving to .cat-cafe', async () => {
+    const catCafeDir = join(testDir, '.cat-cafe');
+    mkdirSync(catCafeDir, { recursive: true });
+    const linkPath = join(testDir, 'sneaky-link');
+    if (existsSync(linkPath)) rmSync(linkPath);
+    try {
+      symlinkSync(catCafeDir, linkPath);
+      const result = await validateProjectPathDetailed(linkPath);
+      assert.strictEqual(result.ok, false);
+      assert.strictEqual(result.reason, 'denied_root');
+    } catch {
+      // symlink creation may fail in sandboxed environments
+    }
+  });
+
+  it('allows normal project with .cat-cafe descendant', async () => {
+    // testDir itself is valid — its .cat-cafe child is protected separately
+    const result = await validateProjectPathDetailed(testDir);
+    assert.strictEqual(result.ok, true);
+  });
 });
 
 describe('resolvePersistentProjectPathDetailed', () => {

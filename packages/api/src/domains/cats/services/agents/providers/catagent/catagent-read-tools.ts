@@ -19,7 +19,7 @@ import { basename, dirname, join, relative } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { CommandPolicyEntry, TaskStatus } from '@cat-cafe/shared';
-import { isDenylisted } from '../../../../../../domains/workspace/workspace-security.js';
+import { containsProtectedSegment, isDenylisted } from '../../../../../../domains/workspace/workspace-security.js';
 import { buildSafeCommand } from './catagent-tool-guard.js';
 import type {
   CatAgentTool,
@@ -1093,6 +1093,23 @@ export async function buildToolRegistry(
   options: CatAgentToolRegistryOptions = {},
 ): Promise<CatAgentTool[]> {
   const tools: CatAgentTool[] = [];
+
+  // Defense-in-depth: refuse to register ANY tools when the workspace root
+  // itself is inside a protected namespace. A protected root makes the segment
+  // denylist ineffective because relative paths from it have no protected segment.
+  if (workDir) {
+    const protectedSeg = containsProtectedSegment(workDir);
+    if (protectedSeg) {
+      await options.audit?.({
+        tool: 'buildToolRegistry',
+        outcome: 'rejected',
+        rejectReason: `workspace root contains protected segment "${protectedSeg}"`,
+        timestamp: Date.now(),
+      } as CatAgentToolAuditEvent);
+      return tools; // empty — no tools registered
+    }
+  }
+
   if (workDir) {
     tools.push(
       { schema: readFileSchema, execute: (i) => executeReadFile(i, workDir), permission: 'allow' },

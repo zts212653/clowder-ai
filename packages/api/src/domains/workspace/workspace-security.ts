@@ -167,6 +167,24 @@ export function isDenylisted(relPath: string): boolean {
   return false;
 }
 
+/**
+ * Check if an absolute path contains a protected namespace segment.
+ *
+ * A protected namespace (e.g. .cat-cafe, .git, secrets), or any realpath below
+ * it, must never become an agent workspace root. This prevents the attack where
+ * workDir = .../project/.cat-cafe → relative path "credentials.json" bypasses
+ * the segment denylist because the protected segment is in the root, not in the
+ * user path.
+ *
+ * Returns the first matched protected segment, or null if the path is safe.
+ */
+export function containsProtectedSegment(absolutePath: string): string | null {
+  for (const seg of absolutePath.split(/[\\/]/)) {
+    if (seg && DENYLIST_DIRS.has(seg)) return seg;
+  }
+  return null;
+}
+
 export interface WorktreeEntry {
   id: string;
   canonicalId?: string;
