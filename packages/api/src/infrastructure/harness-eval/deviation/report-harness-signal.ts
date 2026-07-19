@@ -167,6 +167,8 @@ export interface ReportHarnessSignalRouteOptions {
   messageStore: ReportHarnessSignalDeps['messageStore'];
   /** undefined when Redis is absent — route degrades to explicit 503 (no fail-open). */
   deviationLog?: IDeviationEventLog;
+  /** F257 V2 AC-B2: pot stats writeback (sol P1-2 — this MUST reach the handler). */
+  ledgerStats?: ReportHarnessSignalDeps['ledgerStats'];
 }
 
 export function registerReportHarnessSignalRoute(app: FastifyInstance, opts: ReportHarnessSignalRouteOptions): void {
@@ -178,7 +180,13 @@ export function registerReportHarnessSignalRoute(app: FastifyInstance, opts: Rep
       return { error: 'deviation_log_unavailable', message: 'DeviationEventLog requires Redis' };
     }
     const res = await handleReportHarnessSignal(
-      { messageStore: opts.messageStore, deviationLog: opts.deviationLog },
+      {
+        messageStore: opts.messageStore,
+        deviationLog: opts.deviationLog,
+        // sol P1-2: this adapter previously dropped ledgerStats — reports
+        // returned 200 with zero stats writes.
+        ...(opts.ledgerStats ? { ledgerStats: opts.ledgerStats } : {}),
+      },
       { userId: principal.userId, catId: principal.catId },
       request.body,
     );

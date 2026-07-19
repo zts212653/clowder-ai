@@ -129,16 +129,20 @@ export async function checkGuardThreshold(
   // Step 1: fetch this guard's window events and coalesce into episodes.
   // PR #41 verdict: threshold counts distinct episodes, not raw events —
   // a rapid retry burst (same guard+thread+cat, adjacent gap ≤ 60s) is ONE incident.
-  // +1 because queryWindow uses half-open [since, until) interval
+  // +1 because the query uses half-open [since, until) interval
   // (upperBound = until - 1). Without +1 the just-appended event at event.timestamp
   // is excluded and the threshold fires one episode late.
-  // limit 1000 (vs default 200) so heavy windows don't silently under-count episodes.
-  const windowEvents = await deps.guardRejectionLog.queryWindow({
+  // Completeness-preserving query (sol P2-1): a silent limit slice would make
+  // episodeCount a quiet under-count. On cap-hit we log loudly — the count is
+  // a lower bound, and at 10k window events the threshold fired long ago.
+  const { events: windowEvents, truncated } = await deps.guardRejectionLog.queryWindowComplete({
     since,
     until: event.timestamp + 1,
     guardId,
-    limit: 1000,
   });
+  if (truncated) {
+    console.warn(`[F257] escalation window truncated at hard cap for guard=${guardId}; episodeCount is a lower bound`);
+  }
   const rawEventCount = windowEvents.length;
   const episodeCount = coalesceGuardEpisodes(windowEvents).length;
   if (episodeCount < ESCALATION_THRESHOLD) {

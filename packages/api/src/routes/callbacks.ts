@@ -3634,10 +3634,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
   if (opts.holdBallDeps) {
     registerCallbackHoldBallRoutes(app, opts.holdBallDeps);
-    // F257 V2: MCP client-layer guard rejection ingest (AC-B1 dual entry).
-    // Reuses the hold-ball deps' guardRejectionLog — same log instance the
-    // API-route emit points append to (single ledger, no drift).
-    registerCallbackGuardRejectionRoutes(app, { guardRejectionLog: opts.holdBallDeps.guardRejectionLog });
+    // F257 V2: MCP client-layer guard rejection ingest + ledgerId query
+    // surface (AC-B1 dual entry). Reuses the hold-ball deps' guardRejectionLog
+    // — same log instance the API-route emit points append to (single ledger).
+    registerCallbackGuardRejectionRoutes(app, {
+      guardRejectionLog: opts.holdBallDeps.guardRejectionLog,
+      ...(opts.redis ? { ledgerStats: new GuardLedgerStats(opts.redis) } : {}),
+      ...(opts.threadStore ? { threadStore: opts.threadStore } : {}),
+    });
   }
 
   // Thread cats discovery for MCP

@@ -114,6 +114,8 @@ function createFakeLogWithEvents(events) {
   return {
     queryWindow: mock.fn(async (opts) => filter(opts)),
     queryWindowStrict: mock.fn(async (opts) => filter(opts)),
+    queryWindowComplete: mock.fn(async (opts) => ({ events: filter(opts), truncated: false })),
+    queryWindowStrictComplete: mock.fn(async (opts) => ({ events: filter(opts), truncated: false })),
     countByGuard: mock.fn(async (guardId, since, until) => filter({ guardId, since, until }).length),
     append: async () => {},
   };

@@ -38,7 +38,7 @@ describe('F257 V2: hold-ball route conditional guard emit', () => {
     };
   }
 
-  async function createApp(guardRejectionLog) {
+  async function createApp(guardRejectionLog, holdBallExtra = {}) {
     const { callbacksRoutes } = await import('../../dist/routes/callbacks.js');
     const app = Fastify();
     await app.register(callbacksRoutes, {
@@ -71,6 +71,7 @@ describe('F257 V2: hold-ball route conditional guard emit', () => {
         messageStore: { async append() {} },
         socketManager: { broadcastToRoom() {} },
         guardRejectionLog,
+        ...holdBallExtra,
       },
     });
     return app;
@@ -108,6 +109,81 @@ describe('F257 V2: hold-ball route conditional guard emit', () => {
     assert.equal(event.sourceTool, 'hold_ball');
     assert.equal(event.normalizedReason, 'missing_wait_source_ref');
     assert.equal(event.layer, 'api-route');
+  });
+
+  test('sol P2-5: gate-keeping blocked emits http_policy_reject with octet + response ledgerId', async () => {
+    const log = makeFakeLog();
+    const thread = await threadStore.create('user-gk-1', 'gk1');
+    // checkGateKeepingGuard reads threadKind via the HOLD-BALL deps' own
+    // threadStore — inject one that marks this thread as gate-keeping.
+    const app = await createApp(log, {
+      threadStore: { get: async (id) => (id === thread.id ? { id, threadKind: 'gate-keeping' } : null) },
+    });
+    const { invocationId, callbackToken } = await registry.create('user-gk-1', 'codex', thread.id);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        reason: 'waiting for external CI on gate-keeping thread',
+        nextStep: 'check result',
+        wakeAfterMs: 3_600_000,
+        waitSourceRef: {
+          kind: 'github_issue',
+          value: 'org/repo#1',
+          expectedSignal: 'closed',
+          slaUntilMs: Date.now() + 3_600_000,
+        },
+      },
+    });
+
+    assert.equal(response.statusCode, 400, `expected gate-keeping block, got ${response.statusCode}: ${response.body}`);
+    const body = JSON.parse(response.body);
+    assert.equal(body.error, 'gate_keeping_thread_default_blocked');
+    assert.equal(body.ledgerId, 'mcp/gate-keeping-thread-default', 'blocked response carries the pot coordinate');
+
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(log._appended.length, 1, 'gate-keeping block must emit exactly one guard event');
+    const event = log._appended[0];
+    assert.equal(event.kind, 'http_policy_reject');
+    assert.equal(event.guardId, 'gate_keeping_thread_default');
+    assert.equal(event.ledgerId, 'mcp/gate-keeping-thread-default');
+    assert.equal(event.catId, 'codex');
+    assert.equal(event.threadId, thread.id);
+    assert.equal(event.invocationId, invocationId);
+    assert.equal(event.correlationConfidence, 'exact');
+    assert.equal(event.sourceTool, 'hold_ball');
+    assert.equal(event.layer, 'api-route');
+  });
+
+  test('sol P2-5 counter-example: non-gate-keeping thread with same payload does NOT emit policy event', async () => {
+    const log = makeFakeLog();
+    const app = await createApp(log);
+    const thread = await threadStore.create('user-gk-2', 'gk2'); // ordinary thread
+    const { invocationId, callbackToken } = await registry.create('user-gk-2', 'codex', thread.id);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        reason: 'same payload, ordinary thread',
+        nextStep: 'check result',
+        wakeAfterMs: 600_000,
+        waitSourceRef: {
+          kind: 'github_issue',
+          value: 'org/repo#1',
+          expectedSignal: 'closed',
+          slaUntilMs: Date.now() + 3_600_000,
+        },
+      },
+    });
+
+    // Ordinary thread passes the gate — whatever the final status, no
+    // http_policy_reject may be emitted for it.
+    const policyEvents = log._appended.filter((e) => e.kind === 'http_policy_reject');
+    assert.equal(policyEvents.length, 0, `no policy event on pass path (status was ${response.statusCode})`);
   });
 
   test('ordinary schema 400 (missing reason, wakeWhen mode) does NOT emit — not a pot', async () => {

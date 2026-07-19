@@ -106,7 +106,10 @@ export const reportHarnessSignalTools = [
       'Your identity is attached server-side from your callback principal (recordedBy) — subjectCatId is who the observation is ABOUT. ' +
       'GOTCHA: sourceAnchor is REQUIRED and must point at an existing same-owner message; source=operator additionally requires that message to be authored by the operator. No anchor → do not report; ask the operator to confirm first. ' +
       'GOTCHA: outcome=incident_claimed means the same incident (same anchor+subject+objective/unit set) is already recorded under the returned eventId — this is dedup, not an error; do not retry with tweaked weights. ' +
-      'GOTCHA: this is a governance evidence ledger (TTL=0) — report observed deviations, not speculation; put the reasoning in note.',
+      'GOTCHA: this is a governance evidence ledger (TTL=0) — report observed deviations, not speculation; put the reasoning in note. ' +
+      'F257 V2 (撞到 4xx 锅拦截 → anomaly 上报引用 ledger id): when a tool call was REJECTED (4xx) and the rejection ' +
+      'response carried a `ledgerId` (e.g. mcp/hold-ball-rate-limit), quote that EXACT ledgerId string in your note — ' +
+      'it attributes the friction to that guard pot (idempotent stats + eval:friction guard-anomaly channel).',
     inputSchema: reportHarnessSignalInputSchema,
     handler: handleReportHarnessSignalTool,
   },

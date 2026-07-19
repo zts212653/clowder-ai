@@ -1,32 +1,41 @@
 /**
- * F257 V2/Phase B — MCP client-layer guard rejection ingest (AC-B1 dual entry).
+ * F257 V2/Phase B — MCP client-layer guard rejection ingest + ledger query
+ * surface (AC-B1 dual entry + "queryable by ledger id").
  *
- * MCP-local fail-closed rejections (e.g. cross_post_message without routing
- * credentials) never reach the API route that would normally emit a guard
- * rejection event — without this ingest they are invisible to the harness
- * ledger. The MCP layer reports them here fire-and-forget (fail-open on the
- * client side; see packages/mcp-server/src/tools/guard-rejection-report.ts).
+ * POST: MCP-local fail-closed rejections (e.g. cross_post_message without
+ * routing credentials) never reach the API route that would normally emit a
+ * guard rejection event — the MCP layer reports them here fire-and-forget
+ * (fail-open client side; see packages/mcp-server/src/tools/guard-rejection-report.ts).
  *
- * Trust boundary (V1 three-axis provenance discipline):
- * - catId / threadId / invocationId come from the AUTH RECORD, never from
- *   the payload — self-reported identity would allow impersonated pot
- *   accounting.
- * - guardId must be in the ledger registry whitelist — an arbitrary
- *   client-supplied guardId could poison pot attribution.
+ * GET: the AC-B1 acceptance step is "trigger a 429 + an MCP-local reject →
+ * query BY LEDGER ID returns both" — this is that consumer surface, also
+ * carrying AC-B2 pot stats (anomalyRefCount + how_counted).
+ *
+ * Trust boundary (V1 three-axis provenance discipline; sol review P1-1/P1-3):
+ * - BOTH principal kinds accepted (requireCallbackPrincipal): invocation
+ *   principals carry trusted threadId/invocationId; agent-key principals
+ *   carry NO thread binding — their thread coordinate is taken from the
+ *   payload but VERIFIED through the scoped-thread resolver (owner check),
+ *   degrading to 'unknown' (coalescer untrusted-key isolation) on any
+ *   failure. Identity (catId/userId) always comes from the principal.
+ * - guardId whitelist uses Object.hasOwn — `in` walks the prototype chain
+ *   and would accept 'toString'/'constructor' and mint function ledgerIds.
  * - eventId / timestamp are server-generated (client clocks untrusted).
- *
- * Path lives under /api/callbacks/ so the existing callback auth preHandler
- * chain decorates the request and auth-failure telemetry (which assumes the
- * /api/callbacks/ prefix) stays coherent.
  */
 
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { GuardRejectionEventLog } from '../infrastructure/harness-eval/GuardRejectionEventLog.js';
-import { GUARD_LEDGER_IDS, ledgerIdForGuard } from '../infrastructure/harness-eval/guard-ledger-registry.js';
-import { requireCallbackAuth } from './callback-auth-prehandler.js';
-import { deriveCallbackActor } from './callback-scope-helpers.js';
+import {
+  GUARD_LEDGER_IDS,
+  type GuardLedgerStats,
+  isRegisteredGuardId,
+  ledgerIdForGuard,
+} from '../infrastructure/harness-eval/guard-ledger-registry.js';
+import { requireCallbackPrincipal } from './callback-auth-prehandler.js';
+import { resolveScopedThreadId } from './callback-scope-helpers.js';
 
 /** Kinds the MCP client layer can legitimately produce locally. */
 const mcpGuardRejectionSchema = z.object({
@@ -34,17 +43,38 @@ const mcpGuardRejectionSchema = z.object({
   guardId: z.string().min(1).max(120),
   sourceTool: z.string().min(1).max(120),
   normalizedReason: z.string().min(1).max(200),
+  /**
+   * Thread coordinate for agent-key callers (no thread binding in the
+   * principal). Verified via scoped-thread resolver — never trusted as-is.
+   * Ignored for invocation principals (their principal.threadId wins).
+   */
+  threadId: z.string().min(1).max(200).optional(),
 });
 
-export interface GuardRejectionIngestDeps {
+const ledgerQuerySchema = z.object({
+  ledgerId: z.string().min(1).max(200),
+  sinceMs: z.coerce.number().int().positive().optional(),
+  untilMs: z.coerce.number().int().positive().optional(),
+});
+
+export interface GuardRejectionRouteDeps {
   guardRejectionLog?: GuardRejectionEventLog | undefined;
+  /** AC-B2 pot stats — optional (absent without Redis). */
+  ledgerStats?: GuardLedgerStats | undefined;
+  /** Scoped-thread verification for agent-key thread coordinates. */
+  threadStore?: Pick<IThreadStore, 'get' | 'list'> | undefined;
 }
 
-export function registerCallbackGuardRejectionRoutes(app: FastifyInstance, deps: GuardRejectionIngestDeps): void {
+const SEVEN_DAYS_MS = 7 * 24 * 3600 * 1000;
+
+export function registerCallbackGuardRejectionRoutes(app: FastifyInstance, deps: GuardRejectionRouteDeps): void {
   app.post('/api/callbacks/guard-rejections', async (request, reply) => {
-    const record = requireCallbackAuth(request, reply);
-    if (!record) return; // 401 already sent by requireCallbackAuth
-    const actor = deriveCallbackActor(record);
+    // sol P1-1: requireCallbackPrincipal accepts BOTH invocation and
+    // agent-key principals — requireCallbackAuth rejected agent-key callers
+    // with 401, silently dropping the exact persistent-MCP scenario AC-B1
+    // dual entry exists for.
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return; // 401 already sent
 
     const parsed = mcpGuardRejectionSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -55,8 +85,10 @@ export function registerCallbackGuardRejectionRoutes(app: FastifyInstance, deps:
       };
     }
 
-    // Fail-closed whitelist — unregistered guardIds must not enter the ledger.
-    if (!(parsed.data.guardId in GUARD_LEDGER_IDS)) {
+    // sol P1-3: Object.hasOwn — `guardId in GUARD_LEDGER_IDS` accepted
+    // prototype keys ('toString', 'constructor') and minted function-typed
+    // ledgerIds into the event log and dropped ledgerId from the response.
+    if (!isRegisteredGuardId(parsed.data.guardId)) {
       reply.status(400);
       return {
         error: `unregistered guardId '${parsed.data.guardId}' — register it in guard-ledger-registry first`,
@@ -64,26 +96,96 @@ export function registerCallbackGuardRejectionRoutes(app: FastifyInstance, deps:
       };
     }
 
+    // Provenance per principal kind (sol P1-1 explicit contract):
+    // - invocation: threadId + invocationId first-hand → 'exact'
+    // - agent_key: payload thread coordinate verified via scoped resolver
+    //   (owner check); verification failure degrades to 'unknown' rather than
+    //   rejecting — the observation must not be lost, but it must never be
+    //   attributed to a thread the caller cannot access. No invocation → 'window'.
+    let threadId: string;
+    let invocationId: string;
+    let correlationConfidence: 'exact' | 'window';
+    if (principal.kind === 'invocation') {
+      threadId = principal.threadId;
+      invocationId = principal.invocationId;
+      correlationConfidence = 'exact';
+    } else {
+      invocationId = 'unknown';
+      correlationConfidence = 'window';
+      if (parsed.data.threadId && deps.threadStore) {
+        const resolved = await resolveScopedThreadId({ threadId: '', userId: principal.userId }, parsed.data.threadId, {
+          threadStore: deps.threadStore,
+        });
+        threadId = resolved.ok ? resolved.threadId : 'unknown';
+      } else {
+        threadId = 'unknown';
+      }
+    }
+
     const ledgerId = ledgerIdForGuard(parsed.data.guardId);
     const eventId = randomUUID();
     if (deps.guardRejectionLog) {
-      // invocationId is first-hand (auth-token bound) → confidence 'exact'.
       await deps.guardRejectionLog.append({
         eventId,
         ledgerId,
         kind: parsed.data.kind,
-        threadId: actor.threadId,
-        catId: actor.catId as string,
+        threadId,
+        catId: principal.catId as string,
         guardId: parsed.data.guardId,
-        invocationId: record.invocationId,
+        invocationId,
         sourceTool: parsed.data.sourceTool,
         normalizedReason: parsed.data.normalizedReason,
         layer: 'mcp-client',
         timestamp: Date.now(),
-        correlationConfidence: 'exact',
+        correlationConfidence,
       });
     }
     reply.status(202);
     return { accepted: true, eventId, ledgerId };
+  });
+
+  // sol P1-4: the ledgerId consumer surface. AC-B1 acceptance: rejection
+  // response hands the cat a ledgerId → this endpoint answers "what has this
+  // pot intercepted" (events across layers) + AC-B2 stats with how_counted.
+  app.get('/api/callbacks/guard-rejections', async (request, reply) => {
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+
+    const parsed = ledgerQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      reply.status(400);
+      return {
+        error: 'invalid ledger query',
+        issues: parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`),
+      };
+    }
+    if (!deps.guardRejectionLog) {
+      reply.status(503);
+      return { error: 'guard_rejection_log_unavailable', message: 'GuardRejectionEventLog requires Redis' };
+    }
+
+    // +1: the window is half-open [since, until) — without it, a rejection
+    // emitted in the SAME millisecond as the query (the "I just got rejected,
+    // what is this pot" flow) would be invisible.
+    const until = parsed.data.untilMs ?? Date.now() + 1;
+    const since = parsed.data.sinceMs ?? until - SEVEN_DAYS_MS;
+    const { events, truncated } = await deps.guardRejectionLog.queryWindowComplete({
+      since,
+      until,
+      ledgerId: parsed.data.ledgerId,
+    });
+    const anomalyRefCount = deps.ledgerStats ? await deps.ledgerStats.anomalyReferenceCount(parsed.data.ledgerId) : 0;
+
+    return {
+      ledgerId: parsed.data.ledgerId,
+      window: { sinceMs: since, untilMs: until },
+      events,
+      truncated,
+      stats: {
+        anomalyRefCount,
+        howCounted:
+          'scard guard-ledger:stats:{ledgerId}:anomaly-refs — distinct deviation eventIds whose note references this pot',
+      },
+    };
   });
 }

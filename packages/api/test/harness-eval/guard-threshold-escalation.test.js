@@ -65,6 +65,8 @@ function createFakeLog(eventCount) {
     countByGuard: mock.fn(async () => events.length),
     queryWindow: mock.fn(async () => events),
     queryWindowStrict: mock.fn(async () => events),
+    queryWindowComplete: mock.fn(async () => ({ events, truncated: false })),
+    queryWindowStrictComplete: mock.fn(async () => ({ events, truncated: false })),
     append: async () => {},
   };
 }
@@ -199,14 +201,14 @@ describe('F257 sub-item 2: guard threshold escalation', () => {
     await checkGuardThreshold(makeEvent('guard-q', now), { redis, guardRejectionLog: log, triggerEval });
 
     // Episode coalescing needs full events, so the check queries the window
-    // (countByGuard is no longer the accounting source — PR #41).
-    assert.equal(log.queryWindow.mock.callCount(), 1);
-    const [opts] = log.queryWindow.mock.calls[0].arguments;
+    // via the completeness-preserving variant (sol P2-1: no silent limit slice).
+    assert.equal(log.queryWindowComplete.mock.callCount(), 1);
+    const [opts] = log.queryWindowComplete.mock.calls[0].arguments;
     assert.equal(opts.guardId, 'guard-q');
     const expectedWindowMs = ESCALATION_WINDOW_DAYS * 24 * 3600 * 1000;
     assert.equal(opts.since, now - expectedWindowMs, 'since should be event.timestamp - 7 days');
     assert.equal(opts.until, now + 1, 'until should be event.timestamp + 1 (half-open interval includes self)');
-    assert.equal(opts.limit, 1000, 'raised limit so heavy windows do not under-count episodes');
+    assert.equal(opts.limit, undefined, 'complete query has no limit — completeness-preserving');
   });
 
   it('concurrent threshold checks only trigger once (atomic SET NX)', async () => {

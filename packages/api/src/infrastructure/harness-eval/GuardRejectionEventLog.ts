@@ -141,6 +141,20 @@ const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 /** Default query limit to prevent unbounded reads. */
 const DEFAULT_QUERY_LIMIT = 200;
 
+/** Absolute cap for completeness-preserving queries (memory backstop). */
+const HARD_QUERY_CAP = 10_000;
+
+/** Shared query options (sol P1-4: ledgerId is a first-class filter). */
+export interface GuardRejectionQueryOpts {
+  since: number;
+  until?: number;
+  guardId?: string;
+  ledgerId?: string;
+  threadId?: string;
+  catId?: string;
+  limit?: number;
+}
+
 // ---------------------------------------------------------------------------
 // Event Log
 // ---------------------------------------------------------------------------
@@ -213,36 +227,29 @@ export class GuardRejectionEventLog {
    * @param opts.catId - Filter by cat.
    * @param opts.limit - Max results after filtering (default 200).
    */
-  async queryWindow(opts: {
-    since: number;
-    until?: number;
-    guardId?: string;
-    threadId?: string;
-    catId?: string;
-    limit?: number;
-  }): Promise<GuardRejectionEvent[]> {
+  async queryWindow(opts: GuardRejectionQueryOpts): Promise<GuardRejectionEvent[]> {
     try {
-      const until = opts.until ?? Date.now();
       const limit = opts.limit ?? DEFAULT_QUERY_LIMIT;
-      // Exclusive upper bound: subtract 1ms from until (ZRANGEBYSCORE is inclusive).
-      // This aligns with PromptSegmentsSourceSelector [windowStartMs, windowEndMs).
-      const upperBound = until - 1;
-      const raw = await this.redis.zrangebyscore(EVENTS_ZSET, opts.since, upperBound);
-      let events: GuardRejectionEvent[] = [];
-      for (const s of raw) {
-        try {
-          events.push(JSON.parse(s) as GuardRejectionEvent);
-        } catch {
-          /* skip corrupted entries */
-        }
-      }
-      // Filter in-app BEFORE applying limit
-      if (opts.guardId) events = events.filter((e) => e.guardId === opts.guardId);
-      if (opts.threadId) events = events.filter((e) => e.threadId === opts.threadId);
-      if (opts.catId) events = events.filter((e) => e.catId === opts.catId);
+      const { events } = await this.fetchWindow(opts);
       return events.slice(0, limit);
     } catch {
       return []; // Fail-open
+    }
+  }
+
+  /**
+   * Fail-open completeness-preserving query (sol P2-1: a silent `limit` slice
+   * makes episode/threshold accounting under-count without warning).
+   * Returns ALL window events up to HARD_QUERY_CAP with an explicit
+   * `truncated` marker when the cap was hit.
+   */
+  async queryWindowComplete(
+    opts: Omit<GuardRejectionQueryOpts, 'limit'>,
+  ): Promise<{ events: GuardRejectionEvent[]; truncated: boolean }> {
+    try {
+      return await this.fetchWindow(opts);
+    } catch {
+      return { events: [], truncated: false }; // Fail-open
     }
   }
 
@@ -259,30 +266,22 @@ export class GuardRejectionEventLog {
    * on error, which the generator misinterpreted as genuine zero events and
    * wrote a false noFindingRecord verdict polluting the eval chain.
    */
-  async queryWindowStrict(opts: {
-    since: number;
-    until?: number;
-    guardId?: string;
-    threadId?: string;
-    catId?: string;
-    limit?: number;
-  }): Promise<GuardRejectionEvent[]> {
-    const until = opts.until ?? Date.now();
+  async queryWindowStrict(opts: GuardRejectionQueryOpts): Promise<GuardRejectionEvent[]> {
     const limit = opts.limit ?? DEFAULT_QUERY_LIMIT;
-    const upperBound = until - 1;
-    const raw = await this.redis.zrangebyscore(EVENTS_ZSET, opts.since, upperBound);
-    let events: GuardRejectionEvent[] = [];
-    for (const s of raw) {
-      try {
-        events.push(JSON.parse(s) as GuardRejectionEvent);
-      } catch {
-        /* skip corrupted entries — parse errors are data-quality, not infra */
-      }
-    }
-    if (opts.guardId) events = events.filter((e) => e.guardId === opts.guardId);
-    if (opts.threadId) events = events.filter((e) => e.threadId === opts.threadId);
-    if (opts.catId) events = events.filter((e) => e.catId === opts.catId);
+    const { events } = await this.fetchWindow(opts);
     return events.slice(0, limit);
+  }
+
+  /**
+   * Fail-closed completeness-preserving query for the eval read path
+   * (sol P2-1). Redis errors propagate; `truncated` marks a HARD_QUERY_CAP
+   * hit so snapshot/bundle consumers can surface incompleteness explicitly
+   * instead of silently reporting a partial window.
+   */
+  async queryWindowStrictComplete(
+    opts: Omit<GuardRejectionQueryOpts, 'limit'>,
+  ): Promise<{ events: GuardRejectionEvent[]; truncated: boolean }> {
+    return this.fetchWindow(opts);
   }
 
   /**
@@ -294,5 +293,35 @@ export class GuardRejectionEventLog {
   async countByGuard(guardId: string, since: number, until?: number): Promise<number> {
     const events = await this.queryWindow({ since, until, guardId });
     return events.length;
+  }
+
+  /**
+   * Shared window fetch: ZRANGEBYSCORE pulls the whole time window (no Redis
+   * LIMIT), parse + in-app filter, then cap at HARD_QUERY_CAP with an
+   * explicit truncation marker. Filters include ledgerId (sol P1-4 — the
+   * spec acceptance step queries BY LEDGER ID).
+   */
+  private async fetchWindow(
+    opts: Omit<GuardRejectionQueryOpts, 'limit'>,
+  ): Promise<{ events: GuardRejectionEvent[]; truncated: boolean }> {
+    const until = opts.until ?? Date.now();
+    // Exclusive upper bound: subtract 1ms from until (ZRANGEBYSCORE is inclusive).
+    // This aligns with PromptSegmentsSourceSelector [windowStartMs, windowEndMs).
+    const upperBound = until - 1;
+    const raw = await this.redis.zrangebyscore(EVENTS_ZSET, opts.since, upperBound);
+    let events: GuardRejectionEvent[] = [];
+    for (const s of raw) {
+      try {
+        events.push(JSON.parse(s) as GuardRejectionEvent);
+      } catch {
+        /* skip corrupted entries — parse errors are data-quality, not infra */
+      }
+    }
+    if (opts.guardId) events = events.filter((e) => e.guardId === opts.guardId);
+    if (opts.ledgerId) events = events.filter((e) => e.ledgerId === opts.ledgerId);
+    if (opts.threadId) events = events.filter((e) => e.threadId === opts.threadId);
+    if (opts.catId) events = events.filter((e) => e.catId === opts.catId);
+    const truncated = events.length > HARD_QUERY_CAP;
+    return { events: truncated ? events.slice(0, HARD_QUERY_CAP) : events, truncated };
   }
 }

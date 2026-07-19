@@ -1050,7 +1050,9 @@ export async function handleCrossPostMessage(input: {
     // pot's firing is visible. Fire-and-forget, fail-open: reporting never
     // affects the error the cat sees. Callers without a resolvable config
     // are skipped (config null → nothing to report against).
-    const guardTransportConfig = getCallbackConfig();
+    const guardTransportConfig = getCallbackConfig(
+      input.agentKeyCatId ? { agentKeyCatId: input.agentKeyCatId } : undefined,
+    );
     if (guardTransportConfig) {
       reportGuardRejection(
         { apiUrl: guardTransportConfig.apiUrl, headers: buildAuthHeaders(guardTransportConfig) },
@@ -1059,6 +1061,9 @@ export async function handleCrossPostMessage(input: {
           guardId: 'cross_post_routing_credentials',
           sourceTool: 'cross_post_message',
           normalizedReason: 'no_routing_credentials',
+          // Agent-key callers have no principal thread binding — pass the
+          // target-thread coordinate for server-side scoped verification.
+          threadId: input.threadId,
         },
       );
     }

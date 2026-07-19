@@ -52,6 +52,11 @@ export interface HarnessLedgerRunSnapshot {
   }>;
   /** how_counted — judgment schema v1 §2 alignment. */
   howCounted: 'zset-window-scan';
+  /**
+   * sol P2-1: true when the window hit the hard query cap — counts are lower
+   * bounds and the eval verdict must flag incompleteness explicitly.
+   */
+  truncated: boolean;
 }
 
 export interface ProduceSnapshotDeps {
@@ -84,8 +89,11 @@ export async function produceHarnessLedgerRunSnapshot(deps: ProduceSnapshotDeps)
   const now = Date.now();
   const windowStartMs = now - windowMs;
 
-  // Fail-closed: queryWindowStrict propagates Redis errors.
-  const events = await deps.guardRejectionLog.queryWindowStrict({
+  // Fail-closed: queryWindowStrictComplete propagates Redis errors.
+  // Completeness-preserving (sol P2-1): the old default-200 slice silently
+  // dropped events; `truncated` is surfaced in the snapshot so eval verdicts
+  // can flag incomplete windows instead of asserting over partial data.
+  const { events, truncated } = await deps.guardRejectionLog.queryWindowStrictComplete({
     since: windowStartMs,
     until: now,
   });
@@ -137,6 +145,7 @@ export async function produceHarnessLedgerRunSnapshot(deps: ProduceSnapshotDeps)
       timestamp: e.timestamp,
     })),
     howCounted: 'zset-window-scan',
+    truncated,
   };
 
   // Persist snapshot to filesystem (generator reads by evalRunId).

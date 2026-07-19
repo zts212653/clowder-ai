@@ -17,27 +17,60 @@
  * fallback, so a missing registration shows up in eval verdicts.
  */
 
-/** Known guard → ledger registry coordinates. */
-export const GUARD_LEDGER_IDS: Record<string, string> = {
-  hold_ball_rate_limit: 'mcp/hold-ball-rate-limit',
-  a2a_block_pingpong: 'mcp/a2a-pingpong-block',
-  hold_ball_wait_source_ref: 'mcp/hold-ball-wait-source-ref',
-  cross_post_routing_credentials: 'mcp/cross-post-routing-credentials',
-  publish_verdict_authority: 'eval/publish-verdict-authority',
-  a2a_route_decision_skip: 'mcp/a2a-route-decision-skip',
-  gate_keeping_thread_default: 'mcp/gate-keeping-thread-default',
-};
+/**
+ * Known guard → ledger registry coordinates.
+ * Null-prototype + frozen (sol review P1-3): a plain object literal inherits
+ * `toString`/`constructor`/`__proto__`, so `guardId in map` and `map[guardId]`
+ * would accept prototype keys and return FUNCTIONS as ledgerIds. Lookups must
+ * additionally go through Object.hasOwn (see isRegisteredGuardId).
+ */
+export const GUARD_LEDGER_IDS: Record<string, string> = Object.freeze(
+  Object.assign(Object.create(null) as Record<string, string>, {
+    hold_ball_rate_limit: 'mcp/hold-ball-rate-limit',
+    a2a_block_pingpong: 'mcp/a2a-pingpong-block',
+    hold_ball_wait_source_ref: 'mcp/hold-ball-wait-source-ref',
+    cross_post_routing_credentials: 'mcp/cross-post-routing-credentials',
+    publish_verdict_authority: 'eval/publish-verdict-authority',
+    a2a_route_decision_skip: 'mcp/a2a-route-decision-skip',
+    gate_keeping_thread_default: 'mcp/gate-keeping-thread-default',
+  }),
+);
+
+/** Prototype-safe whitelist membership (sol P1-3: `in` walks the prototype chain). */
+export function isRegisteredGuardId(guardId: string): boolean {
+  return Object.hasOwn(GUARD_LEDGER_IDS, guardId);
+}
 
 /** Resolve a guard's ledger coordinate; unregistered guards are fail-visible. */
 export function ledgerIdForGuard(guardId: string): string {
-  return GUARD_LEDGER_IDS[guardId] ?? `unregistered/${guardId}`;
+  return Object.hasOwn(GUARD_LEDGER_IDS, guardId) ? GUARD_LEDGER_IDS[guardId] : `unregistered/${guardId}`;
 }
 
-/** Extract registered pot coordinates referenced in free text (whitelist-exact, zero false positives). */
+/** Characters that can appear inside a pot coordinate slug. */
+const SLUG_CHAR = /[a-z0-9/-]/;
+
+/**
+ * Extract registered pot coordinates referenced in free text.
+ * Token-boundary matching (sol P2-2): a bare substring test would attribute
+ * `mcp/hold-ball-rate-limit-evil` (or `xmcp/...`) to the legitimate pot.
+ * An occurrence counts only when both neighbors are non-slug characters
+ * (or string edges).
+ */
 export function extractLedgerRefs(text: string): string[] {
   const refs: string[] = [];
   for (const ledgerId of Object.values(GUARD_LEDGER_IDS)) {
-    if (text.includes(ledgerId)) refs.push(ledgerId);
+    let from = 0;
+    while (true) {
+      const idx = text.indexOf(ledgerId, from);
+      if (idx < 0) break;
+      const before = idx > 0 ? (text[idx - 1] as string) : '';
+      const after = idx + ledgerId.length < text.length ? (text[idx + ledgerId.length] as string) : '';
+      if (!(before && SLUG_CHAR.test(before)) && !(after && SLUG_CHAR.test(after))) {
+        refs.push(ledgerId);
+        break; // one ref per pot per note is enough for attribution
+      }
+      from = idx + 1;
+    }
   }
   return refs;
 }

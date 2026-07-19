@@ -32,11 +32,22 @@ describe('F257 V2: /api/callbacks/guard-rejections ingest', () => {
       append: mock.fn(async (event) => {
         appended.push(event);
       }),
+      // In-memory ledgerId query — mirrors fetchWindow filter semantics so the
+      // POST → GET e2e loop closes without Redis.
+      async queryWindowComplete(opts) {
+        const events = appended.filter(
+          (e) =>
+            (!opts.ledgerId || e.ledgerId === opts.ledgerId) &&
+            e.timestamp >= opts.since &&
+            e.timestamp < (opts.until ?? Number.POSITIVE_INFINITY),
+        );
+        return { events, truncated: false };
+      },
       _appended: appended,
     };
   }
 
-  async function createApp(guardRejectionLog) {
+  async function createApp(guardRejectionLog, extra = {}) {
     const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
     const app = Fastify();
     await app.register(callbacksRoutes, {
@@ -70,6 +81,7 @@ describe('F257 V2: /api/callbacks/guard-rejections ingest', () => {
         socketManager: { broadcastToRoom() {} },
         guardRejectionLog,
       },
+      ...extra,
     });
     return app;
   }
@@ -109,6 +121,213 @@ describe('F257 V2: /api/callbacks/guard-rejections ingest', () => {
     });
     assert.equal(response.statusCode, 400);
     assert.equal(log._appended.length, 0);
+  });
+
+  test('sol P1-3 regression: prototype-chain guardIds are rejected (toString/constructor/__proto__)', async () => {
+    const log = makeFakeLog();
+    const app = await createApp(log);
+    const thread = await threadStore.create('user-gr-proto', 'grproto');
+    const { invocationId, callbackToken } = await registry.create('user-gr-proto', 'codex', thread.id);
+
+    for (const protoKey of ['toString', 'constructor', '__proto__']) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/guard-rejections',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: {
+          kind: 'http_policy_reject',
+          guardId: protoKey,
+          sourceTool: 'x',
+          normalizedReason: 'y',
+        },
+      });
+      assert.equal(response.statusCode, 400, `prototype key '${protoKey}' must be rejected (was 202 pre-fix)`);
+    }
+    assert.equal(log._appended.length, 0, 'no prototype-key event may reach the ledger');
+  });
+
+  test('sol P1-1 regression: agent-key principal is accepted; payload thread verified via scoped resolver', async () => {
+    const log = makeFakeLog();
+    // Fake agent-key registry: secret 'ak-good' → cat 'antigravity' owned by user-ak.
+    const agentKeyRegistry = {
+      async verify(secret) {
+        if (secret !== 'ak-good') return { ok: false, reason: 'unknown_key' };
+        return { ok: true, record: { agentKeyId: 'ak-1', userId: 'user-ak', catId: 'antigravity' } };
+      },
+    };
+    const app = await createApp(log, { agentKeyRegistry });
+    const ownThread = await threadStore.create('user-ak', 'ak-own');
+    const foreignThread = await threadStore.create('user-other', 'ak-foreign');
+
+    // Own thread coordinate → verified and attributed.
+    const ok = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/guard-rejections',
+      headers: { 'x-agent-key-secret': 'ak-good' },
+      payload: {
+        kind: 'http_policy_reject',
+        guardId: 'cross_post_routing_credentials',
+        sourceTool: 'cross_post_message',
+        normalizedReason: 'no_routing_credentials',
+        threadId: ownThread.id,
+      },
+    });
+    assert.equal(ok.statusCode, 202, 'agent-key principal must be accepted (was 401 pre-fix)');
+    assert.equal(log._appended.length, 1);
+    assert.equal(log._appended[0].catId, 'antigravity');
+    assert.equal(log._appended[0].threadId, ownThread.id, 'verified own thread attributed');
+    assert.equal(log._appended[0].invocationId, 'unknown', 'agent-key has no invocation binding');
+    assert.equal(log._appended[0].correlationConfidence, 'window');
+
+    // Foreign thread coordinate → degrades to unknown, never attributed.
+    const foreign = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/guard-rejections',
+      headers: { 'x-agent-key-secret': 'ak-good' },
+      payload: {
+        kind: 'http_policy_reject',
+        guardId: 'cross_post_routing_credentials',
+        sourceTool: 'cross_post_message',
+        normalizedReason: 'no_routing_credentials',
+        threadId: foreignThread.id,
+      },
+    });
+    assert.equal(foreign.statusCode, 202, 'observation is kept even when thread verification fails');
+    assert.equal(
+      log._appended[1].threadId,
+      'unknown',
+      'foreign thread must NOT be attributed (scoped resolver denied)',
+    );
+  });
+
+  test('sol P1-4 e2e: rejection-response ledgerId queries back both events + stats with how_counted', async () => {
+    const log = makeFakeLog();
+    const fakeStatsRedis = {
+      sets: new Map(),
+      async sadd(key, member) {
+        const s = this.sets.get(key) ?? new Set();
+        s.add(member);
+        this.sets.set(key, s);
+        return 1;
+      },
+      async scard(key) {
+        return this.sets.get(key)?.size ?? 0;
+      },
+      // callbacks.ts constructs GuardLedgerStats from opts.redis — provide both ops.
+    };
+    const app = await createApp(log, { redis: fakeStatsRedis });
+    const thread = await threadStore.create('user-gr-q', 'grq');
+    const { invocationId, callbackToken } = await registry.create('user-gr-q', 'codex', thread.id);
+
+    // Ingest an MCP-local reject → response hands us the ledgerId.
+    const post = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/guard-rejections',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        kind: 'http_policy_reject',
+        guardId: 'cross_post_routing_credentials',
+        sourceTool: 'cross_post_message',
+        normalizedReason: 'no_routing_credentials',
+      },
+    });
+    assert.equal(post.statusCode, 202);
+    const { ledgerId } = JSON.parse(post.body);
+
+    // A same-pot API-route event already in the ledger (spec acceptance shape:
+    // "one 429-style route event + one MCP reject → query by ledger id → both").
+    await log.append({
+      eventId: 'evt-route-1',
+      ledgerId,
+      kind: 'http_policy_reject',
+      threadId: thread.id,
+      catId: 'codex',
+      guardId: 'cross_post_routing_credentials',
+      invocationId: 'unknown',
+      sourceTool: 'cross_post_message',
+      normalizedReason: 'no_routing_credentials',
+      layer: 'api-route',
+      timestamp: Date.now(),
+      correlationConfidence: 'window',
+    });
+
+    // Stats: one anomaly reference recorded for this pot.
+    fakeStatsRedis.sets.set(`guard-ledger:stats:${ledgerId}:anomaly-refs`, new Set(['dev-1']));
+
+    const get = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/guard-rejections?ledgerId=${encodeURIComponent(ledgerId)}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(get.statusCode, 200);
+    const body = JSON.parse(get.body);
+    assert.equal(body.ledgerId, ledgerId);
+    assert.equal(body.events.length, 2, 'query by ledgerId returns BOTH layers (mcp-client + api-route)');
+    assert.deepEqual(new Set(body.events.map((e) => e.layer)), new Set(['mcp-client', 'api-route']));
+    assert.equal(body.stats.anomalyRefCount, 1, 'AC-B2 stats exposed on the query surface');
+    assert.ok(body.stats.howCounted.includes('scard'), 'how_counted travels with the stat');
+    assert.equal(body.truncated, false);
+  });
+
+  test('sol P1-2 e2e: anomaly report referencing a ledgerId writes pot stats through the ROUTE', async () => {
+    const log = makeFakeLog();
+    const fakeStatsRedis = {
+      sets: new Map(),
+      async sadd(key, member) {
+        const s = this.sets.get(key) ?? new Set();
+        s.add(member);
+        this.sets.set(key, s);
+        return 1;
+      },
+      async scard(key) {
+        return this.sets.get(key)?.size ?? 0;
+      },
+    };
+    const anchorMsg = { id: 'm-anchor-1', threadId: 'thread-rep', userId: 'user-rep' };
+    const fakeDeviationLog = {
+      async append(event) {
+        return { outcome: 'appended', eventId: event.eventId };
+      },
+      async query() {
+        return { events: [], nextCursor: null, missingBodies: [] };
+      },
+    };
+    const app = await createApp(log, {
+      redis: fakeStatsRedis,
+      deviationEventLog: fakeDeviationLog,
+      messageStore: {
+        async getMessagesForThread() {
+          return [];
+        },
+        async getById(id) {
+          return id === anchorMsg.id ? anchorMsg : null;
+        },
+      },
+    });
+    const thread = await threadStore.create('user-rep', 'rep1');
+    const { invocationId, callbackToken } = await registry.create('user-rep', 'codex', thread.id);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/harness-signals/report',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        subjectCatId: 'codex',
+        source: 'self',
+        note: 'hit 429 twice; rejection carried ledger mcp/hold-ball-rate-limit — reporting per F257 V2',
+        sourceAnchor: { kind: 'thread_message', messageId: anchorMsg.id },
+        attributions: [
+          { objectiveId: 'obj-routing-delivery', unitRefs: [{ unitType: 'segment', unitId: 'S1' }], weight: 1 },
+        ],
+      },
+    });
+    assert.equal(response.statusCode, 200, `report route must succeed, got ${response.body}`);
+
+    // sol P1-2: pre-fix this returned 200 with statsWrites=0 (route adapter
+    // dropped ledgerStats). Now the write side records the reference.
+    const statsKey = 'guard-ledger:stats:mcp/hold-ball-rate-limit:anomaly-refs';
+    const statsSet = fakeStatsRedis.sets.get(statsKey);
+    assert.ok(statsSet && statsSet.size === 1, `stats must be written through the route (got ${statsSet?.size ?? 0})`);
   });
 
   test('400 on unregistered guardId (fail-closed whitelist)', async () => {

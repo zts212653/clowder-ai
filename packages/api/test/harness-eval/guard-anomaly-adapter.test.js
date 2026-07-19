@@ -114,7 +114,7 @@ describe('GuardAnomalyAdapter — 5th friction channel', () => {
   });
 });
 
-describe('extractLedgerRefs — whitelist-exact', () => {
+describe('extractLedgerRefs — token-boundary matching (sol P2-2)', () => {
   test('matches only registered coordinates, no false positives', () => {
     assert.deepEqual(extractLedgerRefs('nothing here'), []);
     assert.deepEqual(extractLedgerRefs('saw mcp/hold-ball-rate-limit today'), ['mcp/hold-ball-rate-limit']);
@@ -122,6 +122,34 @@ describe('extractLedgerRefs — whitelist-exact', () => {
       extractLedgerRefs('unregistered mcp/made-up-pot ref'),
       [],
       'unregistered pots have no stats identity',
+    );
+  });
+
+  test('suffix/prefix extensions do NOT attribute to the legitimate pot', () => {
+    assert.deepEqual(
+      extractLedgerRefs('saw mcp/hold-ball-rate-limit-evil today'),
+      [],
+      'suffix extension must not match (bare substring bug)',
+    );
+    assert.deepEqual(extractLedgerRefs('xmcp/hold-ball-rate-limit'), [], 'prefix extension must not match');
+    assert.deepEqual(
+      extractLedgerRefs('mcp/hold-ball-rate-limit/extra'),
+      [],
+      'deeper path must not match the shorter pot',
+    );
+  });
+
+  test('boundary punctuation and edges still match', () => {
+    assert.deepEqual(extractLedgerRefs('mcp/hold-ball-rate-limit'), ['mcp/hold-ball-rate-limit'], 'exact string');
+    assert.deepEqual(
+      extractLedgerRefs('[ledger: mcp/hold-ball-rate-limit]'),
+      ['mcp/hold-ball-rate-limit'],
+      'bracketed rejection-response format',
+    );
+    assert.deepEqual(
+      extractLedgerRefs('（撞到 mcp/hold-ball-rate-limit，已重试）'),
+      ['mcp/hold-ball-rate-limit'],
+      'CJK punctuation neighbors',
     );
   });
 });

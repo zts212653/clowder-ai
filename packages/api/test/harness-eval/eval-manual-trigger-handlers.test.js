@@ -169,6 +169,9 @@ describe('Eval Manual Trigger Handlers (F192 OQ-21)', () => {
 
     it('returns 503 when snapshot production throws (Redis error)', async () => {
       const throwingLog = {
+        queryWindowStrictComplete: async () => {
+          throw new Error('READONLY: Redis failover');
+        },
         queryWindowStrict: async () => {
           throw new Error('READONLY: Redis failover');
         },
@@ -190,10 +193,12 @@ describe('Eval Manual Trigger Handlers (F192 OQ-21)', () => {
     });
 
     it('invokes eval cat with evidence when snapshot succeeds', async () => {
+      const successEvents = [
+        { eventId: 'e1', kind: 'hold_ball_429', guardId: 'guard-1', timestamp: Date.now(), rawPayload: {} },
+      ];
       const successLog = {
-        queryWindowStrict: async () => [
-          { eventId: 'e1', kind: 'hold_ball_429', guardId: 'guard-1', timestamp: Date.now(), rawPayload: {} },
-        ],
+        queryWindowStrictComplete: async () => ({ events: successEvents, truncated: false }),
+        queryWindowStrict: async () => successEvents,
         queryWindow: async () => [],
       };
       const messageStoreCalls = [];
@@ -243,6 +248,7 @@ describe('Eval Manual Trigger Handlers (F192 OQ-21)', () => {
   describe('handleTriggerNow F257 zero-event skip', () => {
     it('returns TriggerNowSkipped when snapshot has zero events (not an error)', async () => {
       const emptyLog = {
+        queryWindowStrictComplete: async () => ({ events: [], truncated: false }),
         queryWindowStrict: async () => [],
         queryWindow: async () => [],
       };
@@ -279,10 +285,10 @@ describe('Eval Manual Trigger Handlers (F192 OQ-21)', () => {
 
     it('still invokes eval cat when snapshot has events (>0)', async () => {
       // Sanity check: non-zero events should proceed normally
+      const sanityEvents = [{ eventId: 'e1', kind: 'hold_ball_429', guardId: 'guard-1', timestamp: Date.now() }];
       const successLog = {
-        queryWindowStrict: async () => [
-          { eventId: 'e1', kind: 'hold_ball_429', guardId: 'guard-1', timestamp: Date.now() },
-        ],
+        queryWindowStrictComplete: async () => ({ events: sanityEvents, truncated: false }),
+        queryWindowStrict: async () => sanityEvents,
         queryWindow: async () => [],
       };
       const result = await handleTriggerNow(

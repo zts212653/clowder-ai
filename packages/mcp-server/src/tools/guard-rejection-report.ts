@@ -27,6 +27,12 @@ export interface GuardRejectionReport {
   guardId: string;
   sourceTool: string;
   normalizedReason: string;
+  /**
+   * Thread coordinate for agent-key callers (no thread binding in their
+   * principal). Server-side it is VERIFIED via the scoped-thread resolver,
+   * never trusted as-is; invocation principals ignore it entirely.
+   */
+  threadId?: string;
 }
 
 /** Fire-and-forget; never throws, never blocks the tool path. */
