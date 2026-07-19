@@ -1040,35 +1040,44 @@ async function executeUpdateCurrentTaskStatus(
   const currentTask = options.scopedCallbacks?.currentTask;
   if (!currentTask) throw new Error('No current task is bound for this invocation');
 
+  // Shared audit fields for rejection audit (AC-F13d: callback tools must
+  // produce independent structured audit even on validation failure).
+  const auditBase = {
+    tool: 'update_current_task_status' as const,
+    invocationId: currentTask.invocationId,
+    currentTaskId: currentTask.currentTaskId,
+  };
+
   const patch: { status?: TaskStatus; progress?: number; summary?: string } = {};
   if (input.status !== undefined) {
-    if (!TASK_STATUSES.has(input.status as TaskStatus)) throw new Error(`Unsupported task status "${input.status}"`);
+    if (!TASK_STATUSES.has(input.status as TaskStatus)) {
+      return rejectWithAudit(options, auditBase, `Unsupported task status "${input.status}"`);
+    }
     patch.status = input.status as TaskStatus;
   }
   if (input.progress !== undefined) {
     const progress = input.progress as number;
     if (!Number.isFinite(progress) || progress < 0 || progress > 100) {
-      throw new Error('progress must be a finite number between 0 and 100');
+      return rejectWithAudit(options, auditBase, 'progress must be a finite number between 0 and 100');
     }
     patch.progress = progress;
   }
   if (input.summary !== undefined) {
     const summary = (input.summary as string).trim();
-    if (!summary || summary.length > 500) throw new Error('summary must be 1-500 characters');
+    if (!summary || summary.length > 500) {
+      return rejectWithAudit(options, auditBase, 'summary must be 1-500 characters');
+    }
     patch.summary = summary;
   }
   const changedFields = Object.keys(patch);
-  if (changedFields.length === 0) throw new Error('At least one of status, progress, or summary is required');
+  if (changedFields.length === 0) {
+    return rejectWithAudit(options, auditBase, 'At least one of status, progress, or summary is required');
+  }
 
   return commitThenAudit(
     options,
     () => currentTask.updateCurrentTaskStatus(patch),
-    {
-      tool: 'update_current_task_status',
-      invocationId: currentTask.invocationId,
-      currentTaskId: currentTask.currentTaskId,
-      changedFields,
-    },
+    { ...auditBase, changedFields },
     `Updated current task ${currentTask.currentTaskId}: ${changedFields.join(', ')}`,
   );
 }

@@ -165,6 +165,100 @@ describe('R5: L0 does not register update_current_task_status', () => {
   });
 });
 
+// ── R12: task-status validation rejections must emit audit (AC-F13d) ──
+
+describe('R12: update_current_task_status validation emits rejectWithAudit', () => {
+  test('unsupported status emits outcome=rejected audit, zero callback mutations', async () => {
+    const auditEvents = [];
+    const mutations = [];
+    const tools = await buildToolRegistry(undefined, {
+      nativeToolLevel: 'L1',
+      audit: (event) => auditEvents.push(event),
+      scopedCallbacks: {
+        currentTask: {
+          invocationId: 'inv-r12',
+          currentTaskId: 'task-r12',
+          updateCurrentTaskStatus: async (patch) => mutations.push(patch),
+        },
+      },
+    });
+    const update = findTool(tools, 'update_current_task_status');
+    assert.ok(update);
+    await assert.rejects(() => update.execute({ status: 'paused' }), /Unsupported task status/);
+    assert.equal(mutations.length, 0, 'callback must NOT be invoked');
+    assert.equal(auditEvents.length, 1, 'must emit exactly one audit event');
+    assert.equal(auditEvents[0].tool, 'update_current_task_status');
+    assert.equal(auditEvents[0].outcome, 'rejected');
+    assert.equal(auditEvents[0].invocationId, 'inv-r12');
+    assert.equal(auditEvents[0].currentTaskId, 'task-r12');
+    assert.ok(auditEvents[0].rejectReason.includes('paused'));
+  });
+
+  test('out-of-range progress emits outcome=rejected audit', async () => {
+    const auditEvents = [];
+    const mutations = [];
+    const tools = await buildToolRegistry(undefined, {
+      nativeToolLevel: 'L1',
+      audit: (event) => auditEvents.push(event),
+      scopedCallbacks: {
+        currentTask: {
+          invocationId: 'inv-r12b',
+          currentTaskId: 'task-r12b',
+          updateCurrentTaskStatus: async (patch) => mutations.push(patch),
+        },
+      },
+    });
+    const update = findTool(tools, 'update_current_task_status');
+    await assert.rejects(() => update.execute({ progress: 150 }), /finite number between 0 and 100/);
+    assert.equal(mutations.length, 0);
+    assert.equal(auditEvents.length, 1);
+    assert.equal(auditEvents[0].outcome, 'rejected');
+  });
+
+  test('empty patch emits outcome=rejected audit', async () => {
+    const auditEvents = [];
+    const mutations = [];
+    const tools = await buildToolRegistry(undefined, {
+      nativeToolLevel: 'L1',
+      audit: (event) => auditEvents.push(event),
+      scopedCallbacks: {
+        currentTask: {
+          invocationId: 'inv-r12c',
+          currentTaskId: 'task-r12c',
+          updateCurrentTaskStatus: async (patch) => mutations.push(patch),
+        },
+      },
+    });
+    const update = findTool(tools, 'update_current_task_status');
+    await assert.rejects(() => update.execute({}), /At least one of status, progress, or summary/);
+    assert.equal(mutations.length, 0);
+    assert.equal(auditEvents.length, 1);
+    assert.equal(auditEvents[0].outcome, 'rejected');
+    assert.equal(auditEvents[0].invocationId, 'inv-r12c');
+  });
+
+  test('invalid summary emits outcome=rejected audit', async () => {
+    const auditEvents = [];
+    const mutations = [];
+    const tools = await buildToolRegistry(undefined, {
+      nativeToolLevel: 'L1',
+      audit: (event) => auditEvents.push(event),
+      scopedCallbacks: {
+        currentTask: {
+          invocationId: 'inv-r12d',
+          currentTaskId: 'task-r12d',
+          updateCurrentTaskStatus: async (patch) => mutations.push(patch),
+        },
+      },
+    });
+    const update = findTool(tools, 'update_current_task_status');
+    await assert.rejects(() => update.execute({ summary: '' }), /1-500 characters/);
+    assert.equal(mutations.length, 0);
+    assert.equal(auditEvents.length, 1);
+    assert.equal(auditEvents[0].outcome, 'rejected');
+  });
+});
+
 // ── R5: write_file target-type audit parity ──
 
 describe('R5: write_file audits target-type rejections', () => {
