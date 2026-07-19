@@ -772,7 +772,14 @@ async function updateScopedCurrentTaskStatus(input: {
   const updatedTask =
     Object.keys(updateData).length > 0 ? await input.taskStore.update(currentTask.id, updateData) : currentTask;
   if (!updatedTask) throw new Error('Current task update failed');
-  await persistCurrentTaskProgress({ ...input, task: updatedTask });
+  // Progress snapshot is best-effort: the canonical task mutation above is already committed.
+  // A snapshot failure must not mask the successful update or suppress the audit trail.
+  try {
+    await persistCurrentTaskProgress({ ...input, task: updatedTask });
+  } catch (snapshotErr: unknown) {
+    const msg = snapshotErr instanceof Error ? snapshotErr.message : String(snapshotErr);
+    console.warn(`[update_current_task_status] progress snapshot best-effort failed: ${msg}`);
+  }
 }
 
 async function resolveCatAgentScopedCallbacks(input: {

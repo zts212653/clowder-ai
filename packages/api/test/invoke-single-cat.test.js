@@ -692,6 +692,103 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     );
   });
 
+  it('update_current_task_status succeeds even when taskProgressStore.getSnapshot throws (best-effort snapshot)', async () => {
+    const testCatId = 'test-catagent-snapshot-throws';
+    catRegistry.register(testCatId, { clientId: 'catagent', catAgentProtocol: 'anthropic' });
+    try {
+      let task = {
+        id: 'task-snap-throws',
+        kind: 'work',
+        threadId: 'thread-snap-throws',
+        subjectKey: null,
+        title: 'Snapshot boom task',
+        ownerCatId: testCatId,
+        status: 'todo',
+        why: '',
+        createdBy: 'user',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      const taskStore = {
+        get: async (id) => (id === task.id ? task : null),
+        update: async (id, input) => {
+          if (id !== task.id) return null;
+          task = { ...task, ...input, updatedAt: Date.now() };
+          return task;
+        },
+      };
+      const threadStore = {
+        get: async () => ({
+          id: 'thread-snap-throws',
+          projectPath: 'default',
+          title: null,
+          createdBy: 'user1',
+          participants: [testCatId],
+          lastActiveAt: Date.now(),
+          createdAt: Date.now(),
+          firstRunQuestState: {
+            v: 1,
+            phase: 'quest-4-task-running',
+            startedAt: Date.now(),
+            selectedTaskId: 'task-snap-throws',
+          },
+        }),
+        isRebornSession: async () => false,
+      };
+      // Snapshot store that always throws — simulates store degradation
+      const taskProgressStore = {
+        async getSnapshot() {
+          throw new Error('snapshot store down');
+        },
+        async setSnapshot() {
+          throw new Error('snapshot store down');
+        },
+        async getThreadSnapshots() {
+          return {};
+        },
+        async deleteSnapshot() {},
+        async deleteThread() {},
+      };
+      const deps = { ...makeDeps(), threadStore, taskStore, taskProgressStore };
+      let callbackOptions;
+      const service = {
+        l0CompilerFn: dummyL0CompilerFn,
+        async *invoke(_prompt, options) {
+          callbackOptions = options.catAgentScopedCallbacks;
+          // This must NOT throw even though snapshot store is down
+          await callbackOptions.currentTask.updateCurrentTaskStatus({
+            status: 'doing',
+            summary: 'Working despite snapshot failure',
+          });
+          yield { type: 'done', catId: testCatId, timestamp: Date.now() };
+        },
+      };
+
+      const msgs = await collect(
+        invokeSingleCat(deps, {
+          catId: testCatId,
+          service,
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-snap-throws',
+          isLastCat: true,
+        }),
+      );
+
+      // Canonical task mutation must have committed despite snapshot failure
+      assert.equal(task.status, 'doing', 'task status should be updated');
+      assert.equal(task.why, 'Working despite snapshot failure', 'task summary should be updated');
+      // Invocation should complete successfully (no error events)
+      assert.equal(msgs.filter((m) => m.type === 'error').length, 0, 'snapshot failure must not surface as error');
+      assert.ok(
+        msgs.some((m) => m.type === 'done'),
+        'done should still be yielded',
+      );
+    } finally {
+      catRegistry.unregister?.(testCatId);
+    }
+  });
+
   it('finalize marks snapshot interrupted when invocation is aborted after progress (early iterator return)', async () => {
     const { MemoryTaskProgressStore } = await import(
       '../dist/domains/cats/services/agents/invocation/MemoryTaskProgressStore.js'
