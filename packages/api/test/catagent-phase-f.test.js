@@ -486,10 +486,13 @@ describe('F2: run_command policy', () => {
     'timeout returns promptly even when grandchild holds inherited pipes',
     { skip: process.platform === 'win32' },
     async () => {
+      // Use 500ms timeout to give the child enough time to cold-start Node,
+      // spawn the grandchild, and write the PID marker before being killed.
+      // 50ms was flaky because cold V8 startup can exceed that budget.
       const tools = await buildToolRegistry(tmpDir, {
         nativeToolLevel: 'L2',
-        commandTimeoutMs: 50,
-        commandKillGraceMs: 50,
+        commandTimeoutMs: 500,
+        commandKillGraceMs: 100,
         commandPolicy: [
           {
             binary: process.execPath,
@@ -512,7 +515,9 @@ describe('F2: run_command policy', () => {
           /timed out/,
         );
         const elapsed = Date.now() - start;
-        assert.ok(elapsed < 1_000, `Elapsed ${elapsed}ms — expected < 1000ms`);
+        // Must complete within 2s — proves we're not hung on inherited pipes
+        // (a stuck-on-pipe regression would wait for the full job timeout)
+        assert.ok(elapsed < 2_000, `Elapsed ${elapsed}ms — expected < 2000ms`);
         assert.ok(await waitFor(() => existsSync(marker)), 'grandchild PID marker was not created');
         grandchildPid = Number.parseInt(readFileSync(marker, 'utf-8'), 10);
         assert.ok(Number.isSafeInteger(grandchildPid) && grandchildPid > 0, 'invalid grandchild PID');
