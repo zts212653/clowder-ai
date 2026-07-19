@@ -66,6 +66,60 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(msg.userId, 'user1');
   });
 
+  it('append() rejects invalid Date timestamps before writing Redis or notifying listeners', async () => {
+    const invalidTimestamps = [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      8_640_000_000_000_001,
+      -8_640_000_000_000_001,
+    ];
+    let listenerCalls = 0;
+    const admissionStore = new RedisMessageStore(redis, {
+      ttlSeconds: 60,
+      onAppend: () => listenerCalls++,
+    });
+
+    for (const timestamp of invalidTimestamps) {
+      await assert.rejects(
+        admissionStore.append({
+          userId: 'user1',
+          catId: null,
+          content: 'must not persist',
+          mentions: [],
+          timestamp,
+          idempotencyKey: `invalid-date-${String(timestamp)}`,
+        }),
+        { name: 'RangeError', message: /valid ECMAScript Date/ },
+      );
+    }
+
+    const keys = [...(await redis.keys('cat-cafe:msg:*')), ...(await redis.keys('cat-cafe:cat-cafe:msg:*'))];
+    assert.deepEqual(keys, [], 'invalid timestamps must not create Redis keys');
+    assert.equal(listenerCalls, 0, 'invalid timestamps must not notify listeners');
+  });
+
+  it('append() admits ECMAScript Date boundaries and fractional milliseconds', async () => {
+    const roundTripStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
+    for (const timestamp of [-8_640_000_000_000_000, 1.5, 8_640_000_000_000_000]) {
+      const stored = await roundTripStore.append({
+        userId: 'user1',
+        catId: null,
+        content: 'valid Date input',
+        mentions: [],
+        timestamp,
+      });
+      assert.equal(stored.timestamp, timestamp);
+      assert.equal((await roundTripStore.getById(stored.id)).timestamp, timestamp);
+    }
+
+    const hydrated = await roundTripStore.getRecent(10);
+    assert.deepEqual(
+      hydrated.map((message) => message.timestamp),
+      [-8_640_000_000_000_000, 1.5, 8_640_000_000_000_000],
+    );
+  });
+
   it('claimContentDedupKey() is atomic: first wins, live duplicate loses, distinct keys independent', async () => {
     const first = await store.claimContentDedupKey('fp-abc', 5000);
     assert.equal(first, true, 'first claim of a fingerprint succeeds');

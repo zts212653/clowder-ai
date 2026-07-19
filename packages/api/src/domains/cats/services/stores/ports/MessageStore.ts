@@ -338,6 +338,18 @@ const MAX_MESSAGES = 2000;
 const DEFAULT_LIMIT = 50;
 
 /**
+ * Fail closed before persisting a timestamp that cannot be projected to an
+ * ECMAScript Date. Date construction applies the specification's TimeClip,
+ * so valid fractional inputs remain accepted while NaN, infinities, and
+ * values outside the Date range are rejected.
+ */
+export function assertValidStoredMessageTimestamp(timestamp: number): void {
+  if (!Number.isFinite(timestamp) || Number.isNaN(new Date(timestamp).getTime())) {
+    throw new RangeError('message timestamp must be a valid ECMAScript Date value');
+  }
+}
+
+/**
  * In-memory bounded message store.
  */
 /**
@@ -388,6 +400,7 @@ export class MessageStore {
    * Append a message to the store. Returns the stored message with generated id.
    */
   append(msg: AppendMessageInput): StoredMessage {
+    assertValidStoredMessageTimestamp(msg.timestamp);
     const threadId = msg.threadId ?? DEFAULT_THREAD_ID;
     const idempotencyIndexKey = this.buildIdempotencyIndexKey(msg.userId, threadId, msg.idempotencyKey);
     if (idempotencyIndexKey) {
