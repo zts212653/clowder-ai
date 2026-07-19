@@ -95,7 +95,7 @@ async function withPathLock<T>(resolvedPath: string, fn: () => Promise<T>): Prom
   }
 }
 
-/** Denylist globs for rg pre-filtering (isDenylisted is the authoritative filter) */
+/** Denylist globs for rg pre-filtering via --iglob (case-insensitive; isDenylisted is the authoritative filter) */
 const RG_DENYLIST_GLOBS = ['!.env*', '!*.pem', '!*.key', '!id_rsa*', '!.git', '!secrets'];
 
 // ── read_file ──
@@ -242,7 +242,7 @@ async function executeSearchContent(input: Record<string, unknown>, workDir: str
     '100',
     '-e',
     input.pattern as string,
-    ...RG_DENYLIST_GLOBS.flatMap((g) => ['--glob', g]),
+    ...RG_DENYLIST_GLOBS.flatMap((g) => ['--iglob', g]),
   ];
   if (typeof input.include === 'string') fixedArgs.push('--glob', input.include);
 

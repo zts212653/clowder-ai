@@ -219,7 +219,7 @@ async function executeGrepSearch(input: Record<string, unknown>, cwd: string): P
   const args = ['--no-config', '--json', '--max-count', '100', '-e', pattern];
   const includes = stringArrayArg(input, ['Include', 'include', 'Includes', 'includes', 'Glob', 'glob']);
   for (const include of includes) args.push('--glob', include);
-  args.push(...RG_DENYLIST_GLOBS.flatMap((g) => ['--glob', g]));
+  args.push(...RG_DENYLIST_GLOBS.flatMap((g) => ['--iglob', g]));
   args.push('--', searchPath);
 
   return executeRipgrepJson(args, cwd);
