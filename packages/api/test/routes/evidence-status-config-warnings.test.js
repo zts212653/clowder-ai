@@ -161,6 +161,33 @@ describe('GET /api/evidence/status — F188 Phase K config warnings', () => {
     }
   });
 
+  it('reads a newly activated embedding service without recreating Fastify', async () => {
+    const app = Fastify();
+    const db = makeMockDb({
+      docs_count: 10,
+      threads_count: 1,
+      edges_count: 5,
+      passages_count: 8,
+      passage_vectors_count: 8,
+      vectors_count: 8,
+      embedding_model: 'jinaai/jina-embeddings-v2-base-zh',
+    });
+    let embeddingService;
+    await app.register(evidenceRoutes, {
+      evidenceStore: makeMockEvidenceStore(db),
+      getEmbeddingService: () => embeddingService,
+    });
+    await app.ready();
+
+    const before = (await app.inject({ method: 'GET', url: '/api/evidence/status' })).json();
+    assert.equal(before.passage_vectors_supported, false);
+
+    embeddingService = { isReady: () => true };
+    const after = (await app.inject({ method: 'GET', url: '/api/evidence/status' })).json();
+    assert.equal(after.passage_vectors_supported, true);
+    assert.ok(!after.configWarnings.some((warning) => warning.code === 'embedding_disabled'));
+  });
+
   it('no-catalog scenario → docs_root_suspicious skipped, other detectors still active', async () => {
     const app = await setup({
       counts: {

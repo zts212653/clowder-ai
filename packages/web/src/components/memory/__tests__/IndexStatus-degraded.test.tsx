@@ -10,10 +10,18 @@
  * Plan: docs/plans/2026-06-09-f188-phase-k-config-health-surface.md Task 4
  */
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
-import { type ConfigWarning, DegradedBanner, type IndexStatusData, shouldShowDegradedBanner } from '../IndexStatus';
+import {
+  type ConfigWarning,
+  DegradedBanner,
+  type IndexStatusData,
+  shouldShowDegradedBanner,
+  WARNING_ACTION_TARGETS,
+} from '../IndexStatus';
 
 Object.assign(globalThis as Record<string, unknown>, { React });
 
@@ -164,5 +172,25 @@ describe('DegradedBanner render (AC-K4 rendered structure)', () => {
     expect(btn).toBeTruthy();
     // no callback wired — click should be safe noop, not throw
     expect(() => act(() => btn.click())).not.toThrow();
+  });
+});
+
+describe('warning action routing', () => {
+  it('routes embedding lifecycle warnings to the writable service controls', () => {
+    expect(WARNING_ACTION_TARGETS.embedding_disabled).toBe('embedding-service-controls');
+    expect(WARNING_ACTION_TARGETS.vec_table_missing).toBe('embedding-service-controls');
+  });
+
+  it('routes rebuildable index warnings to the rebuild controls', () => {
+    expect(WARNING_ACTION_TARGETS.vectors_empty).toBe('rebuild-controls');
+    expect(WARNING_ACTION_TARGETS.graph_empty).toBe('rebuild-controls');
+  });
+
+  it('keeps the dev preview on the local embedding setup path', () => {
+    const previewSource = readFileSync(resolve(process.cwd(), 'src/app/dev/memory-status-preview/page.tsx'), 'utf8');
+    expect(previewSource).not.toContain('OPENAI_EMBEDDING_API_KEY');
+    expect(previewSource).not.toContain('Install sqlite-vec via Memory Center');
+    expect(previewSource).toContain('recommended local embedding service');
+    expect(previewSource).toContain('Open the local embedding service controls');
   });
 });

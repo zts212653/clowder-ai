@@ -103,6 +103,58 @@ describe('library register + rebuild endpoints', () => {
     assert.equal(body.indexed, 2);
   });
 
+  it('POST /rebuild reads an embedding service activated after route registration', async () => {
+    const lateCatalog = new LibraryCatalog();
+    const lateStores = new Map();
+    const lateDataDir = mkdtempSync(join(tmpdir(), 'lib-api-late-embed-'));
+    const lateApp = Fastify();
+    let embeddingService;
+    await lateApp.register(libraryRoutes, {
+      catalog: lateCatalog,
+      stores: lateStores,
+      dataDir: lateDataDir,
+      getEmbeddingService: () => embeddingService,
+      getEmbedMode: () => 'on',
+    });
+    await lateApp.ready();
+
+    const dir = mkdtempSync(join(tmpdir(), 'rebuild-late-embed-'));
+    writeFileSync(join(dir, 'a.md'), '# Alpha\n\nLate embedding activation.');
+    try {
+      const register = await lateApp.inject({
+        method: 'POST',
+        url: '/api/library/register',
+        payload: {
+          id: 'domain:late-embed',
+          kind: 'domain',
+          name: 'late-embed',
+          displayName: 'Late Embed',
+          root: dir,
+          sensitivity: 'internal',
+          scannerLevel: 1,
+        },
+      });
+      assert.equal(register.statusCode, 200, register.payload);
+
+      embeddingService = {
+        isReady: () => true,
+        reprobeIfNeeded: async () => {},
+        embed: async (texts) => texts.map(() => new Float32Array([1, 0, 0, 0])),
+        getModelInfo: () => ({ modelId: 'test-model', modelRev: 'test', dim: 4 }),
+      };
+      const rebuild = await lateApp.inject({
+        method: 'POST',
+        url: '/api/library/domain:late-embed/rebuild',
+      });
+      assert.equal(rebuild.statusCode, 200, rebuild.payload);
+      const db = lateStores.get('domain:late-embed').getDb();
+      assert.equal(db.prepare('SELECT count(*) AS c FROM evidence_vectors').get().c, 1);
+    } finally {
+      for (const store of lateStores.values()) store.close?.();
+      await lateApp.close();
+    }
+  });
+
   it('POST /rebuild returns 404 for unknown collection', async () => {
     const res = await app.inject({ method: 'POST', url: '/api/library/world:unknown/rebuild' });
     assert.equal(res.statusCode, 404);

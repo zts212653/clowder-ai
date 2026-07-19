@@ -149,10 +149,10 @@ export function DegradedBanner({
  */
 export const WARNING_ACTION_TARGETS: Record<ConfigWarningCode, string> = {
   docs_root_suspicious: 'evidence-config-vars',
-  embedding_disabled: 'evidence-feature-flags',
+  embedding_disabled: 'embedding-service-controls',
   vectors_empty: 'rebuild-controls',
-  graph_empty: 'evidence-config-vars',
-  vec_table_missing: 'evidence-config-vars',
+  graph_empty: 'rebuild-controls',
+  vec_table_missing: 'embedding-service-controls',
 };
 
 /**
@@ -243,7 +243,7 @@ function StatusRow({ label, value }: { label: string; value: string | number }) 
   );
 }
 
-export function IndexStatus() {
+export function IndexStatus({ refreshToken = 0 }: { refreshToken?: number }) {
   const [status, setStatus] = useState<IndexStatusData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [envVars, setEnvVars] = useState<EnvVar[]>([]);
@@ -297,7 +297,7 @@ export function IndexStatus() {
 
   useEffect(() => {
     fetchAll();
-  }, [fetchAll]);
+  }, [fetchAll, refreshToken]);
 
   // AC-K4 P1-1 (砚砚 review 2026-06-19): when a degraded-banner action button
   // is clicked, scroll the relevant config section into view and pulse a focus

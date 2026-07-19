@@ -105,7 +105,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   }
 
   /** @internal Allow late-binding of embed deps (factory sets after construction) */
-  setEmbedDeps(deps: EmbedDeps): void {
+  setEmbedDeps(deps: EmbedDeps | undefined): void {
     this.embedDeps = deps;
   }
 

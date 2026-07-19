@@ -1,4 +1,5 @@
 'use client';
+import { useCallback, useState } from 'react';
 import { ServiceStatusPanel } from '../settings/ServiceStatusPanel';
 import { KnowledgeFeed } from '../workspace/KnowledgeFeed';
 import { CollectionCatalog } from './CollectionCatalog';
@@ -16,7 +17,14 @@ interface MemoryHubProps {
   readonly initialReferrerThread?: string | null;
 }
 
+const MEMORY_SEMANTIC_SERVICE_FEATURES = ['memory-semantic-search'] as const;
+
 export function MemoryHub({ activeTab = 'feed', initialQuery, initialReferrerThread = null }: MemoryHubProps) {
+  const [indexRefreshToken, setIndexRefreshToken] = useState(0);
+  const handleServiceStateChange = useCallback(() => {
+    setIndexRefreshToken((token) => token + 1);
+  }, []);
+
   return (
     <div className="flex h-full flex-col bg-[var(--console-panel-bg)]" data-testid="memory-hub">
       <main className="flex-1 overflow-y-auto">
@@ -45,8 +53,13 @@ export function MemoryHub({ activeTab = 'feed', initialQuery, initialReferrerThr
           )}
           {activeTab === 'status' && (
             <div className="space-y-4" data-testid="memory-tab-status">
-              <ServiceStatusPanel filterFeatures={['memory-semantic-search']} title="语义搜索服务" />
-              <IndexStatus />
+              <ServiceStatusPanel
+                filterFeatures={MEMORY_SEMANTIC_SERVICE_FEATURES}
+                title="语义搜索服务"
+                anchorId="embedding-service-controls"
+                onStateChange={handleServiceStateChange}
+              />
+              <IndexStatus refreshToken={indexRefreshToken} />
             </div>
           )}
           {activeTab === 'health' && (

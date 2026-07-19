@@ -88,7 +88,13 @@ describe('ServiceStatusPanel', () => {
   }
 
   it('renders a filtered read-only service status panel', async () => {
-    await render(React.createElement(ServiceStatusPanel, { filterFeatures: ['voice-input'], title: '语音服务' }));
+    await render(
+      React.createElement(ServiceStatusPanel, {
+        filterFeatures: ['voice-input'],
+        title: '语音服务',
+        anchorId: 'voice-service-controls',
+      }),
+    );
 
     expect(mockFetch.mock.calls[0][0]).toBe('/api/services');
     expect(container.textContent).toContain('语音服务');
@@ -99,6 +105,7 @@ describe('ServiceStatusPanel', () => {
     expect(container.textContent).not.toContain('停止');
     expect(container.textContent).not.toContain('安装');
     expect(container.textContent).not.toContain('卸载');
+    expect(container.querySelector('#voice-service-controls')).toBeTruthy();
   });
 
   it('renders unhealthy service errors and endpoint metadata', async () => {
@@ -669,6 +676,7 @@ describe('ServiceStatusPanel', () => {
     };
 
     let serviceFetchCount = 0;
+    const onStateChange = vi.fn();
     mockFetch.mockImplementation(async (path: string) => {
       if (path === '/api/services') {
         serviceFetchCount += 1;
@@ -684,15 +692,21 @@ describe('ServiceStatusPanel', () => {
     });
 
     await render(
-      React.createElement(ServiceStatusPanel, { filterFeatures: ['memory-semantic-search'], title: '记忆服务' }),
+      React.createElement(ServiceStatusPanel, {
+        filterFeatures: ['memory-semantic-search'],
+        title: '记忆服务',
+        onStateChange,
+      }),
     );
     expect(container.textContent).toContain('启动中');
+    expect(onStateChange).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 2100));
     });
 
     expect(serviceFetchCount).toBeGreaterThanOrEqual(2);
+    expect(onStateChange.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(container.textContent).toContain('异常');
     expect(container.textContent).toContain('connect ECONNREFUSED 127.0.0.1:9880');
   });
