@@ -1,5 +1,6 @@
 ---
 name: video-forge
+tips_exempt: internal quality discipline (continuity contract teaches cats, not users); no new user-facing capability
 description: >
   视频制作全链路：素材入库 → 剧本冻结 → 全局配音 → 对齐 → 渲染 → 审查 → 交付。
   Use when: 做视频、做 showcase、做教程视频、录屏剪辑、video review、节奏审查。
@@ -92,6 +93,61 @@ description: >
 | P1 | 敏感信息泄露 | 截图里有 token / API key / 私人信息 |
 | P2 | 画面选取不佳 | "这段换个更好的片段" |
 
+## AI 视频生成（短片段素材）
+
+当素材来源是 AI 生成（而非人工录制）时，使用可用的视频生成工具（如 MCP 提供的 text2video / image2video 能力）。
+
+### 单段限制
+
+AI 视频生成 API 通常有单次时长限制（如 4-6 秒）。**不要试图用一次调用生成完整长视频。**
+
+### 多段生成策略
+
+目标时长超过单次限制时：
+1. **分镜拆段**：按 video-spec 的 segment contract 拆分，每段一个生成任务
+2. **逐段生成**：每段独立 submit → poll → 获取 resultUrl
+3. **下载素材**：将各段视频下载到 `docs/videos/{project}/assets/` 目录
+4. **FFmpeg 拼接**：按 segment 顺序拼接，注意转场处理
+   ```bash
+   # 简单拼接（同编码格式）
+   ffmpeg -f concat -safe 0 -i segments.txt -c copy output.mp4
+   # 需要重编码时（不同分辨率/编码）
+   ffmpeg -f concat -safe 0 -i segments.txt -c:v libx264 -crf 23 -c:a aac output.mp4
+   ```
+5. **预览拼接结果**：用 rich block 内联播放（见「视频预览」章节）
+
+### 注意事项
+
+- 多段拼接必须过连续性合约（见下方「多段拼接连续性合约」）
+- AI 生成的素材视为原始素材，后续配音/对齐/审查流程不变
+
+## 多段拼接连续性合约
+
+多段生成是正常的。假连续性不是。
+
+拼接前先分类目标输出：
+
+| 类型 | 定义 | 拼接约束 |
+|------|------|---------|
+| **Montage** | 显式多镜头序列 | 异源片段正常；转场可见且有意 |
+| **Pseudo-one-shot** | 伪一镜到底 / 连续动作 | 必须通过连续性检查（见 [`refs/continuity.md`](refs/continuity.md)） |
+
+**核心边界**：`concat`、`xfade`、crop、grading 是收尾工具，不是连续性修复工具。源片段不兼容时，后处理可以打磨接缝，但不能把它当作连续性的证明。
+
+### Seam Review Gate（多段 pseudo-one-shot 必过）
+
+成片后、final render 前，逐接缝回答 5 问：
+
+1. 角色是否仍然是同一个？
+2. 环境是否仍然是同一个场景？
+3. 色温是否足够稳定？
+4. 镜头方向是否连贯？
+5. 运动是否暗示同一个动作，还是独立片段？
+
+**任一项 "否" → 不能宣称 pseudo-one-shot → 走降级路径**（见 [`refs/continuity.md`](refs/continuity.md)）。
+
+> 详细的事前预测清单、降级路径和 15s 典型失败案例见 [`refs/continuity.md`](refs/continuity.md)。
+
 ## 素材管理规范
 
 ### 目录结构
@@ -144,6 +200,53 @@ ffmpeg -i input.mov -c:v libx264 -crf 23 -c:a aac -b:a 128k output.mp4
 | segment contract 扁平不分层 | 4 层：source/narration/render/control |
 | 加速后沿用原始时间轴切段 | **加速会压缩时长，后续段的起始时间必须重新计算。** 例：A 段原 130s 以 2x 输出 65s，B 段在 final timeline 从 65s 开始而非 130s。用 output duration 逐段累加，不要用 source timestamps 直接拼 |
 | 只加速长等待段忽略短等待 | 分段不够细时，"Thinking"状态可能散落在多个区间里。逐段审素材，把所有等待态都标出来分别处理 |
+
+## 视频预览（Console 内联播放）
+
+生成的视频**必须在 Console 中内联可看**，不要只贴 URL 或本地路径。
+
+### 优先级
+
+1. **本地终稿 / `/uploads/...` URL** → 优先用 `kind:"file"` rich block，`mimeType:"video/mp4"`。Web UI 会直接渲染内联 `<video>` 播放器，并进入 artifact 索引
+2. **外部直链 URL**（如云端生成结果）→ 可直接发 `kind:"file"`；若你明确要 `autoplay muted`，再退回 `html_widget` + `<video>`
+3. **只有工作区本地文件、还没可访问 URL** → 先放到 `/uploads/...`，再发 rich block；不要直接贴源码路径
+
+### 示例：优先用 file rich block
+
+```
+cat_cafe_create_rich_block({
+  block: JSON.stringify({
+    id: "video-<唯一标识>",
+    kind: "file",
+    v: 1,
+    url: "/uploads/final-cut.mp4",
+    fileName: "final-cut.mp4",
+    mimeType: "video/mp4"
+  })
+})
+```
+
+### 示例：外部直链需要 autoplay 时再用 html_widget
+
+```
+cat_cafe_create_rich_block({
+  block: JSON.stringify({
+    id: "video-<唯一标识>",
+    kind: "html_widget",
+    v: 1,
+    title: "视频标题",
+    height: 420,
+    html: "<video controls autoplay muted playsinline style='width:100%;max-width:720px;border-radius:12px'><source src='<resultUrl>' type='video/mp4'></video>"
+  })
+})
+```
+
+### 注意事项
+
+- `file` rich block 保证的是**内联播放器**；如果你要强制自动播放，再考虑 `html_widget` + 外部直链
+- 本地视频目前没有图片那样的自动发布合约；要想稳定显示，先显式放到 `/uploads/...`
+- 如果 `create_rich_block` 返回 `stale_ignored`，说明回调凭据过期（见 #1092），可尝试在消息文本中嵌入 `` ```cc_rich `` 格式作为降级
+- 多段视频先用 FFmpeg 拼接成完整文件，再用一个 rich block 播放最终版
 
 ## 技术栈
 

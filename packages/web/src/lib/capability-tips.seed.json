@@ -793,5 +793,21 @@
       "sourceRef": { "path": "docs/features/F245-friction-signal-eval.md", "anchor": "Friction Signal Eval" }
     },
     "owner": "gpt52"
+  },
+  {
+    "id": "feature-f205-video-plugins",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/features/F205-video-provider-plugins.md", "anchor": "User Journey" },
+    "structureSource": { "path": "docs/features/F205-video-provider-plugins.md", "anchor": "What" },
+    "bodySource": { "path": "docs/features/F205-video-provider-plugins.md", "anchor": "User Journey" },
+    "contexts": ["feature_dev"],
+    "audience": ["cvo", "developer"],
+    "body": "视频插件已就绪：设置 → 插件 → video-gen / video-analysis → 配置 provider 凭据（API Key 或 Access Key + Secret Key）并启用。生成结果可在对话中内联播放，分析结果直接返回文本。",
+    "action": {
+      "type": "open_source",
+      "label": "打开 F205 spec",
+      "sourceRef": { "path": "docs/features/F205-video-provider-plugins.md", "anchor": "User Journey" }
+    },
+    "owner": "opus"
   }
 ]

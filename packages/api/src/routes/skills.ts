@@ -45,7 +45,7 @@ interface SkillEntry {
   category: string;
   trigger: string;
   description?: string;
-  source: 'cat-cafe' | 'external';
+  source: 'cat-cafe' | 'external' | 'plugin';
   globalEnabled: boolean;
   mountPaths: string[];
   mounts: SkillMount;

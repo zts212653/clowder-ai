@@ -15,6 +15,7 @@
 | card | Review 结论、状态报告、决策摘要 |
 | diff | 代码修改建议、重构前后对比 |
 | checklist | 待办项、检查清单、验证步骤 |
+| file | 已有文件、成片视频、导出物；`video/*` 文件会内联播放 |
 | media_gallery | 发送已有图片（头像、照片）、截图、设计稿、多图对比 — 不需要现场生成！ |
 | audio | 问候、情感表达、定时播报（系统自动合成语音） |
 | interactive | 需要用户选择/确认的场景（选方案、选猫、确认操作） |
@@ -33,8 +34,11 @@
 | card | title | bodyMarkdown, tone (info/success/warning/danger), fields |
 | diff | filePath, diff | languageHint |
 | checklist | items (id+text) | title |
+| file | url, fileName | mimeType, fileSize |
 | media_gallery | items (url) | title, alt, caption |
 | audio | text | — |
+| interactive | interactiveType, options (id+label) | title, description, maxSelect, allowRandom, messageTemplate |
+| html_widget | html | title, height (50-2000, default 300) |
 
 ### media_gallery 图片 URL 规范
 
@@ -59,8 +63,14 @@ Codex `image_gen` 和 Antigravity 生成的图片现已**自动发布**：
 **手动发布**（仅当自动路径不适用时）：调用 `publishGeneratedImage({ sourcePath, mimeType, publicationKey, provider, toolName })`。
 
 不要把”源码仓里存在这个文件”和”当前 API 正在服务这个文件”混为一谈。runtime 可能跑在另一套 worktree / 另一份 `packages/api/uploads/`。
-| interactive | interactiveType, options (id+label) | title, description, maxSelect, allowRandom, messageTemplate |
-| html_widget | html | title, height (50-2000, default 300) |
+
+### file 文件 / 视频 URL 规范
+
+`file.url` 同样只接受 `/uploads/...`、`/api/...` 或 `https://...`。
+
+- 文档、压缩包等普通文件：显示下载卡片
+- `mimeType` 以 `video/` 开头，或文件名扩展是 `mp4/mov/webm/avi/mkv/m4v/ogv`：Web UI 直接渲染内联 `<video>` 播放器
+- 当前共享自动发布合约只覆盖图片；**本地视频/通用文件还没有自动 publish helper**，需要先显式放到 `/uploads/...`
 
 ## 创建方式
 
