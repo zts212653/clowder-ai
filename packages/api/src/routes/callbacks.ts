@@ -88,6 +88,7 @@ import { recordCallbackAuthFailure } from './callback-auth-telemetry.js';
 import { registerCallbackBootcampRoutes } from './callback-bootcamp-routes.js';
 import { registerCallbackDocumentRoutes } from './callback-document-routes.js';
 import { registerCallbackGameRoutes } from './callback-game-routes.js';
+import { registerCallbackGuardRejectionRoutes } from './callback-guard-rejection-routes.js';
 import { registerCallbackGuideRoutes } from './callback-guide-routes.js';
 import { type HoldBallRouteDeps, registerCallbackHoldBallRoutes } from './callback-hold-ball-routes.js';
 import { registerCallbackLarkActionRoutes } from './callback-lark-action-routes.js';
@@ -3629,6 +3630,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
   if (opts.holdBallDeps) {
     registerCallbackHoldBallRoutes(app, opts.holdBallDeps);
+    // F257 V2: MCP client-layer guard rejection ingest (AC-B1 dual entry).
+    // Reuses the hold-ball deps' guardRejectionLog — same log instance the
+    // API-route emit points append to (single ledger, no drift).
+    registerCallbackGuardRejectionRoutes(app, { guardRejectionLog: opts.holdBallDeps.guardRejectionLog });
   }
 
   // Thread cats discovery for MCP

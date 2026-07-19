@@ -28,6 +28,7 @@ import { formatSuggestedCrossPostActionLines } from './cross-post-suggestion-for
 import { withDegradation } from './degradation.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { reportGuardRejection } from './guard-rejection-report.js';
 
 /**
  * F174 Phase A — reason taxonomy lives in @cat-cafe/shared (single source of
@@ -1044,10 +1045,28 @@ export async function handleCrossPostMessage(input: {
   // ergonomics + closing the agent-key API-layer gap.
   const hasLineStartMention = hasPlausibleLineStartMention(input.content);
   if (!hasTargetCats && !hasLineStartMention) {
+    // F257 V2 (AC-B1 dual entry): this rejection happens client-locally and
+    // never reaches an API route — report it to the harness ledger so the
+    // pot's firing is visible. Fire-and-forget, fail-open: reporting never
+    // affects the error the cat sees. Callers without a resolvable config
+    // are skipped (config null → nothing to report against).
+    const guardTransportConfig = getCallbackConfig();
+    if (guardTransportConfig) {
+      reportGuardRejection(
+        { apiUrl: guardTransportConfig.apiUrl, headers: buildAuthHeaders(guardTransportConfig) },
+        {
+          kind: 'http_policy_reject',
+          guardId: 'cross_post_routing_credentials',
+          sourceTool: 'cross_post_message',
+          normalizedReason: 'no_routing_credentials',
+        },
+      );
+    }
     return errorResult(
       'cross_post_message requires routing credentials (F193 AC-A4). ' +
         'Pass targetCats: ["catHandle"] OR add a line-start @catHandle in content. ' +
-        'Without routing, the cross-thread message would land in the target thread but trigger no cat session.',
+        'Without routing, the cross-thread message would land in the target thread but trigger no cat session. ' +
+        '[ledger: mcp/cross-post-routing-credentials]',
     );
   }
   // cross_post_message is the legitimate cross-thread tool — bypass
