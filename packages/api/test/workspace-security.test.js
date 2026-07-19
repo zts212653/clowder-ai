@@ -97,11 +97,20 @@ describe('workspace-security', () => {
     );
   });
 
-  it('rejects data directory (persistent storage)', async () => {
-    await assert.rejects(
-      () => mod.resolveWorkspacePath(testRoot, 'data/sqlite.db'),
-      (err) => err.code === 'DENIED',
-    );
+  it('allows data directory at any path (not a reserved namespace)', async () => {
+    // Root-level data/ and nested src/data/ are normal project content.
+    // Runtime stores belong under .cat-cafe/ (already denied).
+    await mkdir(join(testRoot, 'data'), { recursive: true });
+    await writeFile(join(testRoot, 'data', 'fixture.json'), '{}');
+    const result = await mod.resolveWorkspacePath(testRoot, 'data/fixture.json');
+    assert.ok(result.endsWith('data/fixture.json'));
+  });
+
+  it('allows nested data directories (src/data/)', async () => {
+    await mkdir(join(testRoot, 'src', 'data'), { recursive: true });
+    await writeFile(join(testRoot, 'src', 'data', 'input.json'), '{}');
+    const result = await mod.resolveWorkspacePath(testRoot, 'src/data/input.json');
+    assert.ok(result.endsWith('src/data/input.json'));
   });
 
   // -- Symlink escape --
@@ -164,9 +173,11 @@ describe('workspace-security', () => {
     assert.ok(mod.isDenylisted('.cat-cafe/linked-roots.json'));
   });
 
-  it('isDenylisted blocks data directory', () => {
-    assert.ok(mod.isDenylisted('data/sqlite.db'));
-    assert.ok(mod.isDenylisted('data/evidence/index.json'));
+  it('isDenylisted allows data directory (not reserved)', () => {
+    assert.ok(!mod.isDenylisted('data/sqlite.db'));
+    assert.ok(!mod.isDenylisted('data/evidence/index.json'));
+    assert.ok(!mod.isDenylisted('src/data/fixture.json'));
+    assert.ok(!mod.isDenylisted('packages/foo/data/input.json'));
   });
 
   it('isDenylisted blocks normalized POSIX paths on every host platform', () => {

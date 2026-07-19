@@ -634,3 +634,103 @@ describe('R11 service-level: CatAgentService suppresses tools on non-tool-use st
     assert.ok(toolResult.content.includes('suppressed'));
   });
 });
+
+// ── .cat-cafe boundary: tool-level negative regressions (Sol re-review requirement) ──
+
+describe('.cat-cafe boundary: all 5 tool operations reject with correct audit', () => {
+  test('read_file refuses .cat-cafe paths', async () => {
+    const auditEvents = [];
+    const tools = await buildToolRegistry(tmpDir, {
+      nativeToolLevel: 'L0',
+      audit: (evt) => auditEvents.push(evt),
+    });
+    const read = findTool(tools, 'read_file');
+    assert.ok(read);
+    await assert.rejects(
+      () => read.execute({ path: '.cat-cafe/credentials.json' }),
+      (err) => err.message.includes('.cat-cafe') || err.message.includes('Access denied'),
+    );
+  });
+
+  test('list_files refuses .cat-cafe directory', async () => {
+    const auditEvents = [];
+    const tools = await buildToolRegistry(tmpDir, {
+      nativeToolLevel: 'L0',
+      audit: (evt) => auditEvents.push(evt),
+    });
+    const list = findTool(tools, 'list_files');
+    assert.ok(list);
+    await assert.rejects(
+      () => list.execute({ path: '.cat-cafe' }),
+      (err) => err.message.includes('.cat-cafe') || err.message.includes('Access denied'),
+    );
+  });
+
+  test('search_content refuses .cat-cafe search path', async () => {
+    const auditEvents = [];
+    const tools = await buildToolRegistry(tmpDir, {
+      nativeToolLevel: 'L0',
+      audit: (evt) => auditEvents.push(evt),
+    });
+    const search = findTool(tools, 'search_content');
+    assert.ok(search);
+    await assert.rejects(
+      () => search.execute({ pattern: 'secret', path: '.cat-cafe' }),
+      (err) => err.message.includes('.cat-cafe') || err.message.includes('Access denied'),
+    );
+  });
+
+  test('write_file refuses .cat-cafe path + emits outcome=rejected audit', async () => {
+    const auditEvents = [];
+    const tools = await buildToolRegistry(tmpDir, {
+      nativeToolLevel: 'L1',
+      audit: (evt) => auditEvents.push(evt),
+    });
+    const write = findTool(tools, 'write_file');
+    assert.ok(write);
+    await assert.rejects(
+      () => write.execute({ path: '.cat-cafe/pwned.txt', content: 'should not write' }),
+      (err) => err.message.includes('.cat-cafe') || err.message.includes('Access denied'),
+    );
+    // write_file's resolveCreatePathAudited emits a rejected audit event
+    const rejected = auditEvents.filter((e) => e.outcome === 'rejected');
+    assert.ok(rejected.length > 0, 'write_file to .cat-cafe must emit rejected audit event');
+    assert.equal(rejected[0].tool, 'write_file');
+  });
+
+  test('patch_file refuses .cat-cafe path + emits outcome=rejected audit', async () => {
+    const auditEvents = [];
+    const tools = await buildToolRegistry(tmpDir, {
+      nativeToolLevel: 'L1',
+      audit: (evt) => auditEvents.push(evt),
+    });
+    const patch = findTool(tools, 'patch_file');
+    assert.ok(patch);
+    await assert.rejects(
+      () =>
+        patch.execute({
+          path: '.cat-cafe/cat-catalog.json',
+          old_text: '"role"',
+          new_text: '"pwned"',
+          expected_hash: 'deadbeef',
+        }),
+      (err) => err.message.includes('.cat-cafe') || err.message.includes('Access denied'),
+    );
+    const rejected = auditEvents.filter((e) => e.outcome === 'rejected');
+    assert.ok(rejected.length > 0, 'patch_file to .cat-cafe must emit rejected audit event');
+    assert.equal(rejected[0].tool, 'patch_file');
+  });
+
+  // Verify data/ paths are NOT blocked (regression guard for the overbroad rule removal)
+  test('read_file allows data/ paths (no segment-wide denylist)', async () => {
+    writeFileSync(join(tmpDir, 'data-fixture.txt'), 'allowed content');
+    mkdirSync(join(tmpDir, 'src', 'data'), { recursive: true });
+    writeFileSync(join(tmpDir, 'src', 'data', 'input.json'), '{"test": true}');
+
+    const tools = await buildToolRegistry(tmpDir, { nativeToolLevel: 'L0' });
+    const read = findTool(tools, 'read_file');
+    // src/data/input.json must be readable (previously blocked by overbroad 'data' rule)
+    const result = await read.execute({ path: 'src/data/input.json' });
+    assert.ok(result.includes('"test"'), 'src/data/input.json must be readable');
+  });
+});
