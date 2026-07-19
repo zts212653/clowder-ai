@@ -1097,8 +1097,15 @@ export async function buildToolRegistry(
   // Defense-in-depth: refuse to register ANY tools when the workspace root
   // itself is inside a protected namespace. A protected root makes the segment
   // denylist ineffective because relative paths from it have no protected segment.
+  // Resolve realpath to catch symlink aliases (safe-link → .cat-cafe).
   if (workDir) {
-    const protectedSeg = containsProtectedSegment(workDir);
+    let canonicalWorkDir: string;
+    try {
+      canonicalWorkDir = await realpath(workDir);
+    } catch {
+      canonicalWorkDir = workDir; // non-existent root: fall through to lexical check
+    }
+    const protectedSeg = containsProtectedSegment(canonicalWorkDir);
     if (protectedSeg) {
       await options.audit?.({
         tool: 'buildToolRegistry',

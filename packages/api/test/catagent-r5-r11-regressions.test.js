@@ -778,4 +778,24 @@ describe('Protected workspace root: buildToolRegistry refuses .cat-cafe roots', 
     const tools = await buildToolRegistry(nestedProtected, { nativeToolLevel: 'L1' });
     assert.equal(tools.length, 0, 'subdirectory of protected root should have zero tools');
   });
+
+  test('symlink alias to .cat-cafe as workspace root → zero tools (realpath check)', async () => {
+    const protectedRoot = join(tmpDir, '.cat-cafe');
+    mkdirSync(protectedRoot, { recursive: true });
+    const linkPath = join(tmpDir, 'safe-looking-link');
+    try {
+      symlinkSync(protectedRoot, linkPath);
+    } catch {
+      return; // skip if symlinks not supported
+    }
+    const tools = await buildToolRegistry(linkPath, { nativeToolLevel: 'L2' });
+    assert.equal(tools.length, 0, 'symlink to protected root must not register tools');
+  });
+
+  test('case-insensitive .CAT-CAFE as workspace root → zero tools', async () => {
+    const mixedCaseRoot = join(tmpDir, '.CAT-CAFE');
+    mkdirSync(mixedCaseRoot, { recursive: true });
+    const tools = await buildToolRegistry(mixedCaseRoot, { nativeToolLevel: 'L1' });
+    assert.equal(tools.length, 0, 'case-insensitive protected root should have zero tools');
+  });
 });

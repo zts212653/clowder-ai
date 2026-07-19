@@ -10,16 +10,34 @@ const DENYLIST_PATTERNS = [/^\.env/, /\.pem$/, /\.key$/, /^id_rsa/];
 
 const DENYLIST_DIRS = new Set(['.git', 'secrets', '.cat-cafe']);
 
+/** Case-insensitive segment match for protected directories. */
+function isProtectedDirSegment(seg: string): boolean {
+  return DENYLIST_DIRS.has(seg.toLowerCase());
+}
+
 function assertDenylistAllowed(relPath: string): void {
   for (const seg of relPath.split(sep)) {
     if (!seg) continue;
-    if (DENYLIST_DIRS.has(seg)) {
+    if (isProtectedDirSegment(seg)) {
       throw new WorkspaceSecurityError(`Access denied: ${seg}`, 'DENIED');
     }
     for (const pat of DENYLIST_PATTERNS) {
       if (pat.test(seg)) {
         throw new WorkspaceSecurityError(`Access denied: ${seg}`, 'DENIED');
       }
+    }
+  }
+}
+
+/**
+ * Reject if the canonical workspace root itself is inside a protected namespace.
+ * This closes the attack where workDir = .../project/.cat-cafe and relative paths
+ * from it bypass the segment denylist.
+ */
+function assertRootNotProtected(canonicalRoot: string): void {
+  for (const seg of canonicalRoot.split(/[\\/]/)) {
+    if (seg && isProtectedDirSegment(seg)) {
+      throw new WorkspaceSecurityError(`Workspace root contains protected segment: ${seg}`, 'DENIED');
     }
   }
 }
@@ -112,6 +130,8 @@ export async function resolveWorkspacePath(root: string, userPath: string): Prom
   // symlinks (e.g. macOS /tmp → /private/tmp).
   try {
     const [real, realRoot] = await Promise.all([realpath(resolved), realpath(root)]);
+    // Canonical root must not itself be inside a protected namespace.
+    assertRootNotProtected(realRoot);
     assertRealPathInside(realRoot, real);
     // Re-check denylist on the realpath result — a symlink named "safe"
     // pointing to ".env" would pass the pre-realpath check above but the
@@ -145,6 +165,8 @@ export async function resolveWorkspaceCreatePath(root: string, userPath: string)
   assertDenylistAllowed(relFromRoot);
 
   const realRoot = await realpath(resolvedRoot);
+  // Canonical root must not itself be inside a protected namespace.
+  assertRootNotProtected(realRoot);
   const ancestor = await findExistingDirectoryAncestor(resolvedRoot, dirname(resolved));
   const realAncestor = await realpath(ancestor);
   assertRealPathInside(realRoot, realAncestor);
@@ -159,7 +181,7 @@ export async function resolveWorkspaceCreatePath(root: string, userPath: string)
 export function isDenylisted(relPath: string): boolean {
   const segments = relPath.split(/[\\/]/);
   for (const seg of segments) {
-    if (DENYLIST_DIRS.has(seg)) return true;
+    if (isProtectedDirSegment(seg)) return true;
     for (const pat of DENYLIST_PATTERNS) {
       if (pat.test(seg)) return true;
     }
@@ -169,18 +191,13 @@ export function isDenylisted(relPath: string): boolean {
 
 /**
  * Check if an absolute path contains a protected namespace segment.
- *
- * A protected namespace (e.g. .cat-cafe, .git, secrets), or any realpath below
- * it, must never become an agent workspace root. This prevents the attack where
- * workDir = .../project/.cat-cafe → relative path "credentials.json" bypasses
- * the segment denylist because the protected segment is in the root, not in the
- * user path.
+ * Case-insensitive to prevent .CAT-CAFE / .Git / Secrets bypass.
  *
  * Returns the first matched protected segment, or null if the path is safe.
  */
 export function containsProtectedSegment(absolutePath: string): string | null {
   for (const seg of absolutePath.split(/[\\/]/)) {
-    if (seg && DENYLIST_DIRS.has(seg)) return seg;
+    if (seg && isProtectedDirSegment(seg)) return seg;
   }
   return null;
 }

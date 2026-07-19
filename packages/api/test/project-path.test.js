@@ -177,12 +177,16 @@ describe('validateProjectPath', () => {
   it('rejects symlinks that escape to denied paths', async () => {
     const linkPath = join(testDir, 'link-to-dev');
     if (existsSync(linkPath)) rmSync(linkPath);
+    let linkCreated = false;
     try {
       symlinkSync('/dev', linkPath);
-      const result = await validateProjectPath(linkPath);
-      assert.strictEqual(result, null);
+      linkCreated = true;
     } catch {
       // symlink creation may fail in sandboxed environments
+    }
+    if (linkCreated) {
+      const result = await validateProjectPath(linkPath);
+      assert.strictEqual(result, null);
     }
   });
 
@@ -208,14 +212,27 @@ describe('validateProjectPath', () => {
     mkdirSync(catCafeDir, { recursive: true });
     const linkPath = join(testDir, 'sneaky-link');
     if (existsSync(linkPath)) rmSync(linkPath);
+    // Separate symlink creation from assertions — catch only covers creation
+    let linkCreated = false;
     try {
       symlinkSync(catCafeDir, linkPath);
+      linkCreated = true;
+    } catch {
+      // symlink creation may fail in sandboxed environments — skip
+    }
+    if (linkCreated) {
       const result = await validateProjectPathDetailed(linkPath);
       assert.strictEqual(result.ok, false);
       assert.strictEqual(result.reason, 'denied_root');
-    } catch {
-      // symlink creation may fail in sandboxed environments
     }
+  });
+
+  it('rejects case-insensitive .CAT-CAFE directory (P2 mixed-case bypass)', async () => {
+    const mixedCaseDir = join(testDir, '.CAT-CAFE');
+    mkdirSync(mixedCaseDir, { recursive: true });
+    const result = await validateProjectPathDetailed(mixedCaseDir);
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.reason, 'denied_root');
   });
 
   it('allows normal project with .cat-cafe descendant', async () => {
