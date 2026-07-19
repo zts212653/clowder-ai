@@ -425,8 +425,35 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
 
     const parsed = holdBallSchema.safeParse(request.body);
     if (!parsed.success) {
+      // F257 V2: an ungrounded-timer reject (wakeAfterMs without waitSourceRef,
+      // the PR-O3 structural pot) is a pot firing — emit http_schema_reject.
+      // Other schema violations are plain input errors, not harness pots.
+      const ungroundedTimer = rawBody?.wakeAfterMs != null && rawBody?.waitSourceRef == null;
+      if (ungroundedTimer && deps.guardRejectionLog) {
+        const { randomUUID } = await import('node:crypto');
+        deps.guardRejectionLog
+          .append({
+            eventId: randomUUID(),
+            ledgerId: ledgerIdForGuard('hold_ball_wait_source_ref'),
+            kind: 'http_schema_reject',
+            threadId: actor.threadId,
+            catId: actor.catId as string,
+            guardId: 'hold_ball_wait_source_ref',
+            invocationId: record.invocationId ?? 'unknown',
+            sourceTool: 'hold_ball',
+            normalizedReason: 'missing_wait_source_ref',
+            layer: 'api-route',
+            timestamp: Date.now(),
+            correlationConfidence: record.invocationId ? 'exact' : 'window',
+          })
+          .catch(() => {});
+      }
       reply.status(400);
-      return { error: 'Invalid request body', details: parsed.error.issues };
+      return {
+        error: 'Invalid request body',
+        details: parsed.error.issues,
+        ...(ungroundedTimer ? { ledgerId: ledgerIdForGuard('hold_ball_wait_source_ref') } : {}),
+      };
     }
 
     const { reason, nextStep, wakeWhen } = parsed.data;
@@ -477,8 +504,28 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       policyContext: { wakeAfterMs, hasEventCallback, hasWaitSourceRef: !!parsed.data.waitSourceRef },
     });
     if (guardResult.outcome === 'blocked' && guardResult.blockedResponse) {
+      // F257 V2: gate-keeping policy block is a pot firing — http_policy_reject.
+      if (deps.guardRejectionLog) {
+        const { randomUUID } = await import('node:crypto');
+        deps.guardRejectionLog
+          .append({
+            eventId: randomUUID(),
+            ledgerId: ledgerIdForGuard('gate_keeping_thread_default'),
+            kind: 'http_policy_reject',
+            threadId: actor.threadId,
+            catId: catIdStr,
+            guardId: 'gate_keeping_thread_default',
+            invocationId: record.invocationId ?? 'unknown',
+            sourceTool: 'hold_ball',
+            normalizedReason: 'gate_keeping_thread_default_blocked',
+            layer: 'api-route',
+            timestamp: Date.now(),
+            correlationConfidence: record.invocationId ? 'exact' : 'window',
+          })
+          .catch(() => {});
+      }
       reply.status(400);
-      return guardResult.blockedResponse;
+      return { ...guardResult.blockedResponse, ledgerId: ledgerIdForGuard('gate_keeping_thread_default') };
     }
 
     const currentCount = getHoldCount(threadId, catIdStr);
@@ -500,12 +547,12 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
             threadId,
             catId: catIdStr,
             guardId: 'hold_ball_rate_limit',
-            invocationId: 'unknown',
+            invocationId: record.invocationId ?? 'unknown',
             sourceTool: 'hold_ball',
             normalizedReason: 'rate_limited',
             layer: 'api-route',
             timestamp: Date.now(),
-            correlationConfidence: 'window',
+            correlationConfidence: record.invocationId ? 'exact' : 'window',
             currentCount,
             maxAllowed: MAX_HOLDS_PER_WINDOW,
             windowMs: HOLD_WINDOW_MS,

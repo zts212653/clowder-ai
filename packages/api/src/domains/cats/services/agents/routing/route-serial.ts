@@ -3104,6 +3104,29 @@ export async function* routeSerial(
                   'A2A text-scan dedup: cat actively processing in InvocationQueue, skipping',
                 );
               }
+              // F257 V2: emit route_decision_skip (fail-open) — swallowed
+              // mentions are otherwise invisible ("@ed but nothing happened").
+              if (deps.guardRejectionLog) {
+                deps.guardRejectionLog
+                  .append({
+                    eventId: crypto.randomUUID(),
+                    ledgerId: ledgerIdForGuard('a2a_route_decision_skip'),
+                    kind: 'route_decision_skip',
+                    threadId,
+                    catId: catId as string,
+                    guardId: 'a2a_route_decision_skip',
+                    invocationId: 'unknown',
+                    sourceTool: 'a2a_mention',
+                    normalizedReason: decision.reason ?? 'unspecified',
+                    layer: 'generator',
+                    timestamp: Date.now(),
+                    correlationConfidence: 'window',
+                    fromCatId: catId as string,
+                    targetCatId: nextCat,
+                    skipReason: decision.reason ?? 'unspecified',
+                  })
+                  .catch(() => {});
+              }
               continue;
             }
             if (decision.action === 'mark_replyto') {
@@ -3297,6 +3320,28 @@ export async function* routeSerial(
                   { threadId, catId: nextCat, fromCat: catId },
                   'A2A text-scan dedup (deferred): cat actively processing, skipping',
                 );
+              }
+              // F257 V2: emit route_decision_skip for deferred path (fail-open).
+              if (deps.guardRejectionLog) {
+                deps.guardRejectionLog
+                  .append({
+                    eventId: crypto.randomUUID(),
+                    ledgerId: ledgerIdForGuard('a2a_route_decision_skip'),
+                    kind: 'route_decision_skip',
+                    threadId,
+                    catId: catId as string,
+                    guardId: 'a2a_route_decision_skip',
+                    invocationId: 'unknown',
+                    sourceTool: 'a2a_mention',
+                    normalizedReason: decision.reason ?? 'unspecified',
+                    layer: 'generator',
+                    timestamp: Date.now(),
+                    correlationConfidence: 'window',
+                    fromCatId: catId as string,
+                    targetCatId: nextCat,
+                    skipReason: decision.reason ?? 'unspecified',
+                  })
+                  .catch(() => {});
               }
               continue;
             }

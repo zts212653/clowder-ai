@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { Redis } from 'ioredis';
 import { getRoster } from '../config/cat-config-loader.js';
@@ -9,6 +10,7 @@ import type { IMessageStore } from '../domains/cats/services/stores/ports/Messag
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { getEvalCatOverride, setEvalCatOverride } from '../infrastructure/harness-eval/domain/eval-domain-override.js';
 import type { GuardRejectionEventLog } from '../infrastructure/harness-eval/GuardRejectionEventLog.js';
+import { ledgerIdForGuard } from '../infrastructure/harness-eval/guard-ledger-registry.js';
 import { loadDomains, loadEvalHubSummary } from '../infrastructure/harness-eval/hub/eval-hub-read-model.js';
 import { ensureEvalDomainThreads } from '../infrastructure/harness-eval/hub/eval-hub-thread-ensure.js';
 import {
@@ -355,6 +357,33 @@ export const evalHubRoutes: FastifyPluginAsync<EvalHubRoutesOptions> = async (ap
     );
 
     if ('error' in result) {
+      // F257 V2: a 403 from the publish handler is the domain-authority pot
+      // firing (the audit's flagship real interception — blocked cross-domain
+      // publish). Emit publish_policy_reject (fail-open) and carry the pot
+      // coordinate in the response. The principal-kind 403 above is an auth
+      // shape error, not a behavioral pot — deliberately not emitted.
+      if (result.status === 403 && opts.guardRejectionLog) {
+        const publishLedgerId = ledgerIdForGuard('publish_verdict_authority');
+        opts.guardRejectionLog
+          .append({
+            eventId: randomUUID(),
+            ledgerId: publishLedgerId,
+            kind: 'publish_policy_reject',
+            threadId: principal.kind === 'invocation' ? principal.threadId : 'unknown',
+            catId: principal.catId as string,
+            guardId: 'publish_verdict_authority',
+            invocationId: principal.kind === 'invocation' ? principal.invocationId : 'unknown',
+            sourceTool: 'publish_verdict',
+            normalizedReason: String(result.error ?? 'publish_forbidden'),
+            layer: 'api-route',
+            timestamp: Date.now(),
+            correlationConfidence: principal.kind === 'invocation' ? 'exact' : 'window',
+          })
+          .catch(() => {});
+        return reply
+          .status(result.status)
+          .send({ error: result.error, detail: result.detail, ledgerId: publishLedgerId });
+      }
       return reply.status(result.status).send({ error: result.error, detail: result.detail });
     }
     return result;

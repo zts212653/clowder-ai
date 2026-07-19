@@ -25,6 +25,7 @@ export const GUARD_LEDGER_IDS: Record<string, string> = {
   cross_post_routing_credentials: 'mcp/cross-post-routing-credentials',
   publish_verdict_authority: 'eval/publish-verdict-authority',
   a2a_route_decision_skip: 'mcp/a2a-route-decision-skip',
+  gate_keeping_thread_default: 'mcp/gate-keeping-thread-default',
 };
 
 /** Resolve a guard's ledger coordinate; unregistered guards are fail-visible. */
