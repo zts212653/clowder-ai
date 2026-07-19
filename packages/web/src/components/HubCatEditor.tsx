@@ -69,7 +69,10 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
   const [templates, setTemplates] = useState<TemplateCard[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>('custom');
 
-  const availableProfiles = useMemo(() => filterAccounts(form.clientId, profiles), [form.clientId, profiles]);
+  const availableProfiles = useMemo(
+    () => filterAccounts(form.clientId, profiles, form.catAgentProtocol || undefined),
+    [form.clientId, form.catAgentProtocol, profiles],
+  );
   const selectedProfile = useMemo(
     () => availableProfiles.find((profile) => profile.id === form.accountRef) ?? null,
     [availableProfiles, form.accountRef],
@@ -241,7 +244,7 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
         return prev;
       }
       if (availableProfiles.length === 0) return prev;
-      const preferredBuiltin = builtinAccountIdForClient(prev.clientId);
+      const preferredBuiltin = builtinAccountIdForClient(prev.clientId, prev.catAgentProtocol || undefined);
       const nextProfile =
         availableProfiles.find((profile) => profile.id === prev.accountRef) ??
         (preferredBuiltin ? availableProfiles.find((profile) => profile.id === preferredBuiltin) : null) ??

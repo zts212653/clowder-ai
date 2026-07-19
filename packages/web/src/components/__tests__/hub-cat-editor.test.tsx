@@ -20,6 +20,7 @@ import {
   buildCatPayload,
   builtinAccountIdForClient,
   DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
+  filterAccounts,
   filterProfiles,
   getAcpWarning,
   getCliEffortOptionsForClient,
@@ -1818,11 +1819,78 @@ describe('HubCatEditor', () => {
       'codex-sponsor',
     ]);
 
-    // F159: catagent shares anthropic credential family
+    // F159: catagent shares anthropic credential family (default / no protocol)
     expect(filterProfiles('catagent', profiles).map((profile) => profile.id)).toEqual(
       filterProfiles('anthropic', profiles).map((profile) => profile.id),
     );
     expect(builtinAccountIdForClient('catagent')).toEqual('claude');
+
+    // F159 G2: catagent + openai-chat → OpenAI accounts + preferred builtin = codex
+    expect(filterAccounts('catagent', profiles, 'openai-chat').map((p) => p.id)).toEqual(
+      filterAccounts('openai', profiles).map((p) => p.id),
+    );
+    expect(builtinAccountIdForClient('catagent', 'openai-chat')).toEqual('codex');
+    // anthropic-messages → same as default
+    expect(builtinAccountIdForClient('catagent', 'anthropic-messages')).toEqual('claude');
+  });
+
+  it('F159 G2: existing openai-chat CatAgent preserves codex accountRef on editor open', () => {
+    const testProfiles: ProfileItem[] = [
+      profileItem({ id: 'claude', provider: 'claude', displayName: 'Claude', name: 'Claude', authType: 'oauth', mode: 'subscription', clientId: 'anthropic' }),
+      profileItem({ id: 'codex', provider: 'codex', displayName: 'Codex', name: 'Codex', authType: 'oauth', mode: 'subscription', clientId: 'openai' }),
+      profileItem({ id: 'my-openai-key', provider: 'openai', displayName: 'My OpenAI', name: 'My OpenAI', authType: 'api_key', mode: 'api_key', hasApiKey: true }),
+    ];
+    const catData = {
+      id: 'test-openai-agent',
+      displayName: 'OpenAI Agent',
+      color: { primary: '#000', secondary: '#fff' },
+      mentionPatterns: [],
+      clientId: 'catagent',
+      catAgentProtocol: 'openai-chat' as const,
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.4',
+      avatar: '',
+      roleDescription: '',
+      personality: '',
+    };
+    const form = initialState(catData as never);
+    expect(form.clientId).toEqual('catagent');
+    expect(form.catAgentProtocol).toEqual('openai-chat');
+    expect(form.accountRef).toEqual('codex');
+    // filterAccounts with the protocol must include OpenAI accounts
+    const available = filterAccounts(form.clientId, testProfiles, form.catAgentProtocol);
+    expect(available.some((p) => p.id === 'codex')).toBe(true);
+    // The persisted accountRef remains in the filtered list — not overwritten
+    expect(available.some((p) => p.id === form.accountRef)).toBe(true);
+    // Preferred builtin matches the protocol family
+    expect(builtinAccountIdForClient(form.clientId, form.catAgentProtocol)).toEqual('codex');
+  });
+
+  it('F159 G2: default CatAgent (anthropic-messages) preserves claude accountRef', () => {
+    const testProfiles: ProfileItem[] = [
+      profileItem({ id: 'claude', provider: 'claude', displayName: 'Claude', name: 'Claude', authType: 'oauth', mode: 'subscription', clientId: 'anthropic' }),
+      profileItem({ id: 'codex', provider: 'codex', displayName: 'Codex', name: 'Codex', authType: 'oauth', mode: 'subscription', clientId: 'openai' }),
+    ];
+    const catData = {
+      id: 'test-ant-agent',
+      displayName: 'Anthropic Agent',
+      color: { primary: '#000', secondary: '#fff' },
+      mentionPatterns: [],
+      clientId: 'catagent',
+      accountRef: 'claude',
+      defaultModel: 'claude-opus-4-6',
+      avatar: '',
+      roleDescription: '',
+      personality: '',
+    };
+    const form = initialState(catData as never);
+    expect(form.clientId).toEqual('catagent');
+    expect(form.catAgentProtocol).toEqual('');
+    expect(form.accountRef).toEqual('claude');
+    // filterAccounts without protocol defaults to Anthropic
+    const available = filterAccounts(form.clientId, testProfiles, form.catAgentProtocol || undefined);
+    expect(available.some((p) => p.id === 'claude')).toBe(true);
+    expect(builtinAccountIdForClient(form.clientId)).toEqual('claude');
   });
 
   it('allows google to use builtin auth plus third-party gateway accounts only', () => {

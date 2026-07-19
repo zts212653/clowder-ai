@@ -79,6 +79,8 @@ export interface CatData {
     instruct?: string;
     temperature?: number;
   };
+  /** F159 G2: CatAgent protocol adapter selector (only meaningful when clientId === 'catagent'). */
+  catAgentProtocol?: 'anthropic-messages' | 'openai-chat';
   /** F149: Adapter mode for Google provider cats (ACP vs legacy CLI) */
   adapterMode?: 'acp' | 'cli';
   /** F127: Roster metadata used by Hub ownership/lead markers */

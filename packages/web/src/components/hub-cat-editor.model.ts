@@ -35,6 +35,8 @@ export interface HubCatEditorFormState {
   caution: string;
   strengths: string;
   clientId: ClientId;
+  /** F159 G2: persisted catAgentProtocol — drives account filter family for catagent. */
+  catAgentProtocol: string;
   accountRef: string;
   defaultModel: string;
   commandArgs: string;
@@ -297,30 +299,35 @@ function isAllowedGoogleGatewayProfile(profile: ProfileItem): boolean {
   return hostname !== null && !isOfficialGoogleHostname(hostname);
 }
 
-// F159 Phase G G2 AC-G19 audit (see @cat-cafe/shared client-routing.ts audit
-// table): DEFERRED to Axis 6 cross-cutting UX polish. Hub UI account-picker
-// filter for catagent + 'openai-chat' should arguably show OpenAI accounts;
-// migration requires threading form.catAgentProtocol through filterAccounts.
-// Does NOT block G2 merge gate (credentials path still fails-closed at adapter
-// level via Axis 2 factory dispatch).
-function resolveBuiltinClientFamily(client: ClientId): BuiltinAccountClient | null {
+// F159 Phase G G2: resolves the effective account family for a client,
+// honoring catAgentProtocol for the 'catagent' client (openai-chat → openai,
+// default/anthropic-messages → anthropic). Non-catagent clients ignore the
+// protocol parameter.
+function resolveBuiltinClientFamily(client: ClientId, catAgentProtocol?: string): BuiltinAccountClient | null {
+  if (client === 'catagent') {
+    return catAgentProtocol === 'openai-chat' ? 'openai' : 'anthropic';
+  }
   if (typeof builtinAccountFamilyForClient === 'function') {
     const family = builtinAccountFamilyForClient(client);
     if (family) return family;
   }
   if (isBuiltinClient(client)) return client;
-  if (client === 'catagent') return 'anthropic';
   return null;
 }
-export function builtinAccountIdForClient(client: ClientId): string | null {
+export function builtinAccountIdForClient(client: ClientId, catAgentProtocol?: string): string | null {
+  if (client === 'catagent') {
+    // F159 G2: for catagent, preferred builtin depends on protocol.
+    // openai-chat → 'codex', default/anthropic-messages → 'claude'.
+    return catAgentProtocol === 'openai-chat' ? 'codex' : 'claude';
+  }
   return sharedBuiltinAccountIdForClient(client);
 }
 
-export function filterAccounts(client: ClientId, profiles: ProfileItem[]): ProfileItem[] {
+export function filterAccounts(client: ClientId, profiles: ProfileItem[], catAgentProtocol?: string): ProfileItem[] {
   // F161: Generic ACP is a transport, not tied to any provider family.
   // Any account (oauth or api_key, any client family) can supply credentials to the ACP carrier.
   if (client === 'acp') return profiles;
-  const effective = resolveBuiltinClientFamily(client);
+  const effective = resolveBuiltinClientFamily(client, catAgentProtocol);
   if (!effective || !isBuiltinClient(effective)) return [];
   const builtinProfiles = profiles.filter(
     (profile) => profile.authType !== 'api_key' && legacyProfileClient(profile) === effective,
@@ -380,6 +387,7 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     caution: cat?.caution ?? '',
     strengths: cat?.strengths?.join(', ') ?? '',
     clientId: (cat?.clientId as ClientId | undefined) ?? createDraft?.clientId ?? 'anthropic',
+    catAgentProtocol: cat?.catAgentProtocol ?? '',
     accountRef: cat?.accountRef ?? createDraft?.accountRef ?? '',
     defaultModel: cat?.defaultModel ?? createDraft?.defaultModel ?? '',
     commandArgs: cat?.commandArgs?.join(' ') ?? createDraft?.commandArgs ?? '',
