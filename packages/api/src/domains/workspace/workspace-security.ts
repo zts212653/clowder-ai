@@ -128,22 +128,34 @@ export async function resolveWorkspacePath(root: string, userPath: string): Prom
   // "final segment is symlink" AND "intermediate directory is symlink".
   // Also realpath the root to handle cases where root itself traverses
   // symlinks (e.g. macOS /tmp → /private/tmp).
+  //
+  // The root is resolved INDEPENDENTLY before the target so that
+  // assertRootNotProtected always fires — even when the target does not
+  // exist yet (realpath(resolved) would throw ENOENT and a Promise.all
+  // would reject before the root check runs). Matches the pattern in
+  // resolveWorkspaceCreatePath.
   try {
-    const [real, realRoot] = await Promise.all([realpath(resolved), realpath(root)]);
+    const realRoot = await realpath(root);
     // Canonical root must not itself be inside a protected namespace.
     assertRootNotProtected(realRoot);
-    assertRealPathInside(realRoot, real);
-    // Re-check denylist on the realpath result — a symlink named "safe"
-    // pointing to ".env" would pass the pre-realpath check above but the
-    // resolved target must still be denied.
-    const realRel = relative(realRoot, real);
-    assertDenylistAllowed(realRel);
+
+    try {
+      const real = await realpath(resolved);
+      assertRealPathInside(realRoot, real);
+      // Re-check denylist on the realpath result — a symlink named "safe"
+      // pointing to ".env" would pass the pre-realpath check above but the
+      // resolved target must still be denied.
+      const realRel = relative(realRoot, real);
+      assertDenylistAllowed(realRel);
+    } catch (e) {
+      if (e instanceof WorkspaceSecurityError) throw e;
+      // ENOENT = target file doesn't exist yet; lexical traversal check above covers it
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+    }
   } catch (e) {
     if (e instanceof WorkspaceSecurityError) throw e;
-    // ENOENT = file doesn't exist yet; traversal check above covers it
-    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw e;
-    }
+    // ENOENT from realpath(root) = root doesn't exist; lexical checks above cover it
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
   }
 
   return resolved;

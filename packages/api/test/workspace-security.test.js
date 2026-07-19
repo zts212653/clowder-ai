@@ -142,6 +142,35 @@ describe('workspace-security', () => {
     }
   });
 
+  // -- Protected root (linked root pointing at .cat-cafe / .git / secrets) --
+
+  it('rejects resolveWorkspacePath when root is a protected directory and target does not exist', async () => {
+    // Regression: when the target does not exist, realpath(resolved) throws
+    // ENOENT. A naive Promise.all([realpath(resolved), realpath(root)]) would
+    // reject before assertRootNotProtected fires, letting a linked root at
+    // .cat-cafe serve non-existent paths (e.g. create credentials.json).
+    const protectedRoot = join(testRoot, '.cat-cafe');
+    await mkdir(protectedRoot, { recursive: true });
+
+    await assert.rejects(
+      () => mod.resolveWorkspacePath(protectedRoot, 'credentials.json'),
+      (err) => err.code === 'DENIED' && /protected segment/i.test(err.message),
+      'Must reject even when target does not exist',
+    );
+  });
+
+  it('rejects resolveWorkspacePath when root is a protected directory and target exists', async () => {
+    const protectedRoot = join(testRoot, '.cat-cafe');
+    await mkdir(protectedRoot, { recursive: true });
+    await writeFile(join(protectedRoot, 'existing.json'), '{}');
+
+    await assert.rejects(
+      () => mod.resolveWorkspacePath(protectedRoot, 'existing.json'),
+      (err) => err.code === 'DENIED' && /protected segment/i.test(err.message),
+      'Must reject even when target exists',
+    );
+  });
+
   // -- isDenylisted (P2: search result filtering) --
 
   it('isDenylisted blocks .env files', () => {
