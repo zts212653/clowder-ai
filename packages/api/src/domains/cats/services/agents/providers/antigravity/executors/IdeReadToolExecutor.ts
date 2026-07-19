@@ -120,6 +120,14 @@ function filterAndTruncateRipgrepJson(stdout: string): string {
 
 export const filterAndTruncateRipgrepJsonForTest = filterAndTruncateRipgrepJson;
 
+/** Exported for testing: the deny globs constant */
+export const RG_DENYLIST_GLOBS_FOR_TEST = RG_DENYLIST_GLOBS;
+
+/** Exported for testing: reset the cached ripgrep binary promise so env overrides take effect */
+export function resetRipgrepBinaryCacheForTest(): void {
+  ripgrepBinaryPromise = undefined;
+}
+
 async function resolveRipgrepBinary(): Promise<string> {
   const configured = process.env.CAT_CAFE_RIPGREP_PATH?.trim();
   if (configured) return configured;

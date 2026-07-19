@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,6 +8,8 @@ import {
   ANTIGRAVITY_IDE_READ_TOOL_NAMES,
   AntigravityIdeReadToolExecutor,
   filterAndTruncateRipgrepJsonForTest,
+  RG_DENYLIST_GLOBS_FOR_TEST,
+  resetRipgrepBinaryCacheForTest,
 } from '../dist/domains/cats/services/agents/providers/antigravity/executors/IdeReadToolExecutor.js';
 
 function base64(value) {
@@ -255,5 +258,74 @@ describe('AntigravityIdeReadToolExecutor', () => {
 
   test('only the known read-only IDE tool names are registered by the executor family', () => {
     assert.deepEqual(ANTIGRAVITY_IDE_READ_TOOL_NAMES, ['grep_search', 'list_dir', 'read_file', 'view_file']);
+  });
+
+  test('grep_search passes --iglob (case-insensitive) for deny globs — rg invocation boundary regression', async () => {
+    // Mutation test evidence: reverting --iglob → --glob passes all other tests
+    // because isDenylisted uses /i patterns (the post-filter). This test catches
+    // that regression by intercepting the actual rg binary args.
+    //
+    // Without --iglob, case-variant filenames like ID_RSA or .ENV are read by rg
+    // (bypassing the pre-filter deny layer) even though output is post-filtered.
+
+    const root = makeWorkspace();
+    const wrapperDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rg-iglob-regression-'));
+    cleanupDirs.push(wrapperDir);
+    const argsLog = path.join(wrapperDir, 'args.log');
+
+    // Find real rg binary
+    let realRg;
+    try {
+      realRg = execSync('which rg', { encoding: 'utf-8' }).trim();
+    } catch {
+      return; // rg not available on PATH, skip
+    }
+
+    // Create wrapper that logs args then delegates to real rg
+    const wrapperScript = path.join(wrapperDir, 'rg');
+    fs.writeFileSync(wrapperScript, `#!/bin/sh\nprintf '%s\\n' "$@" > "${argsLog}"\nexec "${realRg}" "$@"\n`);
+    fs.chmodSync(wrapperScript, 0o755);
+
+    const originalRgPath = process.env.CAT_CAFE_RIPGREP_PATH;
+    process.env.CAT_CAFE_RIPGREP_PATH = wrapperScript;
+    resetRipgrepBinaryCacheForTest();
+
+    try {
+      const executor = new AntigravityIdeReadToolExecutor('grep_search');
+      const { ctx } = makeContext(root);
+
+      await executor.execute({ Pattern: 'needle', Path: 'src' }, ctx);
+
+      const loggedArgs = fs.readFileSync(argsLog, 'utf-8').split('\n').filter(Boolean);
+
+      // Every deny glob (starting with !) must be preceded by --iglob
+      for (let i = 0; i < loggedArgs.length; i++) {
+        const arg = loggedArgs[i];
+        if (arg && arg.startsWith('!')) {
+          const flag = loggedArgs[i - 1];
+          assert.equal(
+            flag,
+            '--iglob',
+            `Deny glob "${arg}" must use --iglob (case-insensitive), got "${flag}" — ` +
+              'security regression: case-variant filenames like ID_RSA or .ENV bypass rg deny layer',
+          );
+        }
+      }
+
+      // Verify all deny globs are present
+      const denyGlobCount = loggedArgs.filter((a) => a.startsWith('!')).length;
+      assert.equal(
+        denyGlobCount,
+        RG_DENYLIST_GLOBS_FOR_TEST.length,
+        `Expected ${RG_DENYLIST_GLOBS_FOR_TEST.length} deny globs in rg args, found ${denyGlobCount}`,
+      );
+    } finally {
+      if (originalRgPath === undefined) {
+        delete process.env.CAT_CAFE_RIPGREP_PATH;
+      } else {
+        process.env.CAT_CAFE_RIPGREP_PATH = originalRgPath;
+      }
+      resetRipgrepBinaryCacheForTest();
+    }
   });
 });

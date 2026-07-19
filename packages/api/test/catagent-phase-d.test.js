@@ -8,12 +8,13 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 
-const { buildToolRegistry, findTool, getToolSchemas, resetRgCache } = await import(
+const { buildToolRegistry, findTool, getToolSchemas, resetRgCache, RG_DENYLIST_GLOBS_FOR_TEST } = await import(
   '../dist/domains/cats/services/agents/providers/catagent/catagent-read-tools.js'
 );
 const { CatAgentService } = await import('../dist/domains/cats/services/agents/providers/catagent/CatAgentService.js');
@@ -240,6 +241,76 @@ describe('D1: search_content', () => {
     // .env contains SECRET, but results should be filtered
     const result = await tool.execute({ pattern: 'SECRET' });
     assert.ok(!result.includes('.env'), 'does not show .env matches');
+  });
+
+  test('search_content passes --iglob (case-insensitive) for deny globs — rg invocation boundary regression', async () => {
+    // This test verifies that the rg binary is invoked with --iglob (not --glob)
+    // for denylist patterns. Without --iglob, case-variant protected filenames
+    // like ID_RSA or .ENV would be read by rg (bypassing the deny layer) even
+    // though the post-filter isDenylisted() would hide them from output.
+    // The post-filter is defense-in-depth, not the primary deny mechanism.
+    //
+    // Mutation test evidence: reverting --iglob → --glob passes all other tests
+    // because isDenylisted uses /i patterns. This test catches that regression.
+
+    const wrapperDir = mkdtempSync(join(tmpdir(), 'rg-iglob-regression-'));
+    const argsLog = join(wrapperDir, 'args.log');
+
+    // Find the real rg binary path
+    let realRg;
+    try {
+      realRg = execSync('which rg', { encoding: 'utf-8' }).trim();
+    } catch {
+      return; // rg not available, skip
+    }
+
+    // Create a wrapper script that logs all args then delegates to real rg
+    const wrapperScript = join(wrapperDir, 'rg');
+    writeFileSync(wrapperScript, `#!/bin/sh\nprintf '%s\\n' "$@" > "${argsLog}"\nexec "${realRg}" "$@"\n`);
+    chmodSync(wrapperScript, 0o755);
+
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${wrapperDir}:${originalPath}`;
+    resetRgCache();
+
+    try {
+      const tools = await buildToolRegistry(tmpDir);
+      const tool = findTool(tools, 'search_content');
+      if (!tool) {
+        assert.fail('rg must be available via wrapper for this test');
+        return;
+      }
+
+      await tool.execute({ pattern: 'VERSION' });
+
+      const loggedArgs = readFileSync(argsLog, 'utf-8').split('\n').filter(Boolean);
+
+      // Every deny glob (starting with !) must be preceded by --iglob
+      for (let i = 0; i < loggedArgs.length; i++) {
+        const arg = loggedArgs[i];
+        if (arg && arg.startsWith('!')) {
+          const flag = loggedArgs[i - 1];
+          assert.equal(
+            flag,
+            '--iglob',
+            `Deny glob "${arg}" must use --iglob (case-insensitive), got "${flag}" — ` +
+              'security regression: case-variant filenames like ID_RSA or .ENV bypass rg deny layer',
+          );
+        }
+      }
+
+      // Verify we have the expected number of deny globs
+      const denyGlobCount = loggedArgs.filter((a) => a.startsWith('!')).length;
+      assert.equal(
+        denyGlobCount,
+        RG_DENYLIST_GLOBS_FOR_TEST.length,
+        `Expected ${RG_DENYLIST_GLOBS_FOR_TEST.length} deny globs in rg args, found ${denyGlobCount}`,
+      );
+    } finally {
+      process.env.PATH = originalPath;
+      resetRgCache();
+      rmSync(wrapperDir, { recursive: true, force: true });
+    }
   });
 });
 

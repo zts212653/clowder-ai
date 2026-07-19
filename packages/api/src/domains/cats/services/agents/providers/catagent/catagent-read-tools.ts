@@ -98,6 +98,9 @@ async function withPathLock<T>(resolvedPath: string, fn: () => Promise<T>): Prom
 /** Denylist globs for rg pre-filtering via --iglob (case-insensitive; isDenylisted is the authoritative filter) */
 const RG_DENYLIST_GLOBS = ['!.env*', '!*.pem', '!*.key', '!id_rsa*', '!.git', '!secrets'];
 
+/** Exported for testing: the deny globs constant */
+export const RG_DENYLIST_GLOBS_FOR_TEST = RG_DENYLIST_GLOBS;
+
 // ── read_file ──
 
 const readFileSchema: ToolSchema = {
