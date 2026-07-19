@@ -2114,6 +2114,145 @@ describe('HubCatEditor', () => {
     expect(filterProfiles('google', profiles).map((profile) => profile.id)).toEqual(['gemini', 'gemini-proxy']);
   });
 
+  it('Google: shows typed Google gateway and untyped legacy, hides typed OpenAI even with valid baseUrl', () => {
+    const profiles: ProfileItem[] = [
+      profileItem({
+        id: 'gemini-oauth',
+        provider: 'gemini',
+        displayName: 'Gemini (OAuth)',
+        name: 'Gemini (OAuth)',
+        authType: 'oauth',
+        mode: 'subscription',
+        clientId: 'google',
+        models: ['gemini-2.5-pro'],
+        hasApiKey: false,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      }),
+      // Typed Google gateway — should appear
+      profileItem({
+        id: 'google-typed-gateway',
+        provider: 'google-typed-gateway',
+        displayName: 'Google Typed Gateway',
+        name: 'Google Typed Gateway',
+        authType: 'api_key',
+        mode: 'api_key',
+        clientFamily: 'google',
+        baseUrl: 'https://gateway.example/google',
+        models: ['gemini-2.5-pro'],
+        hasApiKey: true,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      }),
+      // Untyped legacy gateway (no clientFamily) — should appear (backward compat)
+      profileItem({
+        id: 'legacy-gateway',
+        provider: 'legacy-gateway',
+        displayName: 'Legacy Gateway',
+        name: 'Legacy Gateway',
+        authType: 'api_key',
+        mode: 'api_key',
+        baseUrl: 'https://openrouter.example/api',
+        models: ['google/gemini-flash'],
+        hasApiKey: true,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      }),
+      // Typed OpenAI gateway with valid third-party baseUrl — MUST be hidden
+      profileItem({
+        id: 'openai-typed-gateway',
+        provider: 'openai-typed-gateway',
+        displayName: 'OpenAI Typed Gateway',
+        name: 'OpenAI Typed Gateway',
+        authType: 'api_key',
+        mode: 'api_key',
+        clientFamily: 'openai',
+        baseUrl: 'https://gateway.example/openai',
+        models: ['gpt-5.4'],
+        hasApiKey: true,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      }),
+    ];
+
+    const result = filterProfiles('google', profiles);
+    // Typed Google gateway appears
+    expect(result.map((p) => p.id)).toContain('google-typed-gateway');
+    // Untyped legacy gateway appears (backward compat)
+    expect(result.map((p) => p.id)).toContain('legacy-gateway');
+    // Typed OpenAI is hidden even though its baseUrl passes the third-party check
+    expect(result.map((p) => p.id)).not.toContain('openai-typed-gateway');
+  });
+
+  it('Kimi: shows typed Kimi and untyped legacy kimi-like, hides typed non-Kimi even if legacy metadata looks Kimi-like', () => {
+    const profiles: ProfileItem[] = [
+      profileItem({
+        id: 'kimi-oauth',
+        provider: 'kimi',
+        displayName: 'Kimi (OAuth)',
+        name: 'Kimi (OAuth)',
+        authType: 'oauth',
+        mode: 'subscription',
+        clientId: 'kimi',
+        models: ['kimi-k2'],
+        hasApiKey: false,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      }),
+      // Typed Kimi API key — should appear
+      profileItem({
+        id: 'kimi-typed-key',
+        provider: 'moonshot-api',
+        displayName: 'Moonshot API',
+        name: 'Moonshot API',
+        authType: 'api_key',
+        mode: 'api_key',
+        clientFamily: 'kimi',
+        models: ['kimi-k2'],
+        hasApiKey: true,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      }),
+      // Untyped legacy Kimi-like profile (clientId or name resolves to kimi) — should appear
+      profileItem({
+        id: 'kimi-legacy',
+        provider: 'kimi-legacy',
+        displayName: 'Kimi Legacy',
+        name: 'Kimi Legacy',
+        authType: 'api_key',
+        mode: 'api_key',
+        clientId: 'kimi',
+        models: ['kimi-k1.5'],
+        hasApiKey: true,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      }),
+      // Typed non-Kimi profile — MUST be hidden even if legacy name looks kimi-like
+      profileItem({
+        id: 'openai-looks-kimi',
+        provider: 'kimi-proxy',
+        displayName: 'Kimi Proxy (actually OpenAI)',
+        name: 'kimi-proxy',
+        authType: 'api_key',
+        mode: 'api_key',
+        clientFamily: 'openai',
+        clientId: 'kimi',
+        models: ['gpt-5.4'],
+        hasApiKey: true,
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:00.000Z',
+      }),
+    ];
+
+    const result = filterProfiles('kimi', profiles);
+    // Typed Kimi key appears
+    expect(result.map((p) => p.id)).toContain('kimi-typed-key');
+    // Untyped legacy kimi-like profile appears
+    expect(result.map((p) => p.id)).toContain('kimi-legacy');
+    // Typed non-Kimi is hidden even though legacy metadata (clientId/name) looks kimi-like
+    expect(result.map((p) => p.id)).not.toContain('openai-looks-kimi');
+  });
+
   it('shows google api_key accounts with baseUrl, hides those without (#470)', async () => {
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/accounts') {

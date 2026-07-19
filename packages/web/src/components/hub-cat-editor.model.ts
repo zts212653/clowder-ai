@@ -332,25 +332,26 @@ export function filterAccounts(client: ClientId, profiles: ProfileItem[], catAge
   const builtinProfiles = profiles.filter(
     (profile) => profile.authType !== 'api_key' && legacyProfileClient(profile) === effective,
   );
+  // F159 G2: derive the family-compatible API-key set ONCE before provider-specific branches.
+  // Typed profiles (with clientFamily) are eligible only when matching the effective family.
+  // Untyped legacy profiles (no clientFamily) remain eligible as backward-compat fallback.
+  const familyCompatibleApiKeys = profiles.filter(
+    (profile) => profile.authType === 'api_key' && (!profile.clientFamily || profile.clientFamily === effective),
+  );
   if (effective === 'google') {
-    const gatewayProfiles = profiles.filter(isAllowedGoogleGatewayProfile);
+    // Google: apply third-party gateway predicate to the family-compatible set only.
+    const gatewayProfiles = familyCompatibleApiKeys.filter(isAllowedGoogleGatewayProfile);
     return [...builtinProfiles, ...gatewayProfiles.filter((profile) => !builtinProfiles.includes(profile))];
   }
   if (effective === 'kimi') {
-    const kimiApiProfiles = profiles.filter(
-      (profile) => profile.authType === 'api_key' && legacyProfileClient(profile) === 'kimi',
+    // Kimi: typed profiles require clientFamily === 'kimi' (handled by familyCompatibleApiKeys);
+    // untyped legacy profiles retain the existing Kimi heuristic for backward compat.
+    const kimiApiProfiles = familyCompatibleApiKeys.filter(
+      (profile) => profile.clientFamily === 'kimi' || legacyProfileClient(profile) === 'kimi',
     );
     return [...builtinProfiles, ...kimiApiProfiles.filter((profile) => !builtinProfiles.includes(profile))];
   }
-  const apiKeyProfiles = profiles.filter(
-    (profile) =>
-      profile.authType === 'api_key' &&
-      // F159 G2: typed API-key profiles (with clientFamily) are only eligible when their
-      // family matches the effective client family. Untyped legacy profiles (no clientFamily)
-      // remain eligible as backward-compatibility fallback.
-      (!profile.clientFamily || profile.clientFamily === effective),
-  );
-  return [...builtinProfiles, ...apiKeyProfiles.filter((profile) => !builtinProfiles.includes(profile))];
+  return [...builtinProfiles, ...familyCompatibleApiKeys.filter((profile) => !builtinProfiles.includes(profile))];
 }
 
 export const filterProfiles = filterAccounts;
