@@ -21,6 +21,7 @@ import type { IMessageStore } from '../domains/cats/services/stores/ports/Messag
 import { extractHoldBallClaims } from '../infrastructure/grounding/claim-extractors.js';
 import { checkGrounding } from '../infrastructure/grounding/grounding-checker.js';
 import { groundingSampleStore } from '../infrastructure/grounding/grounding-sample-singleton.js';
+import { ledgerIdForGuard } from '../infrastructure/harness-eval/guard-ledger-registry.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { KILL_GRACE_MS, ManagedRunner } from '../infrastructure/managed-runner.js';
 import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
@@ -488,15 +489,21 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       );
       reply.status(429);
       // F257: emit http_rate_limit event (fail-open, fire-and-forget)
+      const rateLimitLedgerId = ledgerIdForGuard('hold_ball_rate_limit');
       if (deps.guardRejectionLog) {
         const { randomUUID } = await import('node:crypto');
         deps.guardRejectionLog
           .append({
             eventId: randomUUID(),
+            ledgerId: rateLimitLedgerId,
             kind: 'http_rate_limit',
             threadId,
             catId: catIdStr,
             guardId: 'hold_ball_rate_limit',
+            invocationId: 'unknown',
+            sourceTool: 'hold_ball',
+            normalizedReason: 'rate_limited',
+            layer: 'api-route',
             timestamp: Date.now(),
             correlationConfidence: 'window',
             currentCount,
@@ -509,6 +516,9 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
         error:
           `maxHoldsPerWindow (${MAX_HOLDS_PER_WINDOW} per ~1h window) reached. ` +
           'You MUST pass the ball now: @ another cat or @co-creator.',
+        // F257 in-context observability: which pot rejected you — quote this
+        // ledgerId when filing an anomaly report (report_harness_signal).
+        ledgerId: rateLimitLedgerId,
         holdsInWindow: currentCount,
         maxHoldsPerWindow: MAX_HOLDS_PER_WINDOW,
         windowMs: HOLD_WINDOW_MS,

@@ -24,6 +24,7 @@ import { context, trace } from '@opentelemetry/api';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { getCatVoice } from '../../../../../config/cat-voices.js';
+import { ledgerIdForGuard } from '../../../../../infrastructure/harness-eval/guard-ledger-registry.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
   AGENT_ID,
@@ -3141,10 +3142,15 @@ export async function* routeSerial(
                 deps.guardRejectionLog
                   .append({
                     eventId: crypto.randomUUID(),
+                    ledgerId: ledgerIdForGuard('a2a_block_pingpong'),
                     kind: 'route_decision_block',
                     threadId,
                     catId: catId as string,
                     guardId: 'a2a_block_pingpong',
+                    invocationId: 'unknown',
+                    sourceTool: 'a2a_mention',
+                    normalizedReason: 'pingpong_streak',
+                    layer: 'generator',
                     timestamp: Date.now(),
                     correlationConfidence: 'window',
                     fromCatId: catId as string,
@@ -3327,10 +3333,15 @@ export async function* routeSerial(
                 deps.guardRejectionLog
                   .append({
                     eventId: crypto.randomUUID(),
+                    ledgerId: ledgerIdForGuard('a2a_block_pingpong'),
                     kind: 'route_decision_block',
                     threadId,
                     catId: catId as string,
                     guardId: 'a2a_block_pingpong',
+                    invocationId: 'unknown',
+                    sourceTool: 'a2a_mention',
+                    normalizedReason: 'pingpong_streak',
+                    layer: 'generator',
                     timestamp: Date.now(),
                     correlationConfidence: 'window',
                     fromCatId: catId as string,

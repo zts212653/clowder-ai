@@ -14,8 +14,16 @@
  * All Redis operations are wrapped in try/catch with silent fallback.
  *
  * Closed union type with `kind` discriminator (F257 spec §2.1b).
- * Week 1 implements 2 of 6 event kinds:
- *   http_rate_limit | route_decision_block
+ * V2/Phase B implements all 6 event kinds:
+ *   http_rate_limit | route_decision_block | http_schema_reject |
+ *   http_policy_reject | publish_policy_reject | route_decision_skip
+ *
+ * V2 octet contract (spec Phase B): every event carries
+ *   ledgerId / catId / threadId / invocationId / sourceTool /
+ *   normalizedReason / layer / timestamp
+ * Migration note: pre-V2 events in Redis lack the five new fields; they
+ * roll out of the 7-day retention window naturally — read-path consumers
+ * of the new fields must tolerate `undefined` until then.
  *
  * Storage layout:
  *   ZSET  guard-rejection:events        — { eventJSON → timestamp }
@@ -31,8 +39,15 @@ import type { RedisClient } from '@cat-cafe/shared/utils';
 // ---------------------------------------------------------------------------
 
 interface GuardRejectionEventBase {
-  /** Unique event ID for ZSET member uniqueness. */
+  /** Per-event unique coordinate (ZSET uniqueness, sort tie-break, anchors). */
   eventId: string;
+  /**
+   * Ledger registry coordinate `{layer}/{slug}` — WHICH pot rejected
+   * (per-guard). Carried in rejection responses; anomaly reports quote it
+   * for F245 stats attribution. Never interchange with eventId (dual-
+   * coordinate contract). See guard-ledger-registry.ts.
+   */
+  ledgerId: string;
   /** Discriminator for closed union. */
   kind: string;
   /** Thread where the rejection occurred. */
@@ -41,9 +56,17 @@ interface GuardRejectionEventBase {
   catId: string;
   /** Identifier for the guard that rejected (e.g., 'hold_ball_rate_limit'). */
   guardId: string;
+  /** Invocation coordinate; 'unknown' until the exact-correlation bridge lands. */
+  invocationId: string;
+  /** Tool surface that produced the rejection (hold_ball / cross_post_message / …). */
+  sourceTool: string;
+  /** Machine-normalized rejection reason (rate_limited / missing_wait_source_ref / …). */
+  normalizedReason: string;
+  /** Emit surface (spec AC-B1 dual-entry requirement). */
+  layer: 'api-route' | 'mcp-client' | 'generator';
   /** Unix epoch ms. Also used as ZSET score. */
   timestamp: number;
-  /** Week 1 = 'window' (threadId+catId+timestamp window correlation). */
+  /** 'window' (threadId+catId+timestamp correlation) until exact bridge lands. */
   correlationConfidence: 'window' | 'exact';
 }
 
@@ -69,10 +92,39 @@ export interface RouteDecisionBlockEvent extends GuardRejectionEventBase {
   streakCount: number;
 }
 
-// Future Week 2+ event kinds (F257 spec §2.1b):
-// http_schema_reject | http_policy_reject | publish_policy_reject | route_decision_skip
+/** Schema-shape 400 (e.g. wakeAfterMs without waitSourceRef) — HTTP route layer. */
+export interface HttpSchemaRejectEvent extends GuardRejectionEventBase {
+  kind: 'http_schema_reject';
+}
 
-export type GuardRejectionEvent = HttpRateLimitEvent | RouteDecisionBlockEvent;
+/** Policy-gate 400 (gate-keeping block / routing-credential fail-closed). */
+export interface HttpPolicyRejectEvent extends GuardRejectionEventBase {
+  kind: 'http_policy_reject';
+}
+
+/** publish_verdict 403 — domain authority rejection (eval-hub route layer). */
+export interface PublishPolicyRejectEvent extends GuardRejectionEventBase {
+  kind: 'publish_policy_reject';
+}
+
+/** A2A route decision skip — generator-layer guard skipped a mention. */
+export interface RouteDecisionSkipEvent extends GuardRejectionEventBase {
+  kind: 'route_decision_skip';
+  /** Cat that initiated the skipped A2A mention. */
+  fromCatId: string;
+  /** Cat that was the skipped A2A target. */
+  targetCatId: string;
+  /** Guard-specific skip reason. */
+  skipReason: string;
+}
+
+export type GuardRejectionEvent =
+  | HttpRateLimitEvent
+  | RouteDecisionBlockEvent
+  | HttpSchemaRejectEvent
+  | HttpPolicyRejectEvent
+  | PublishPolicyRejectEvent
+  | RouteDecisionSkipEvent;
 
 export type GuardRejectionKind = GuardRejectionEvent['kind'];
 
