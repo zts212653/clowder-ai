@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { useChatCommands } from '@/hooks/useChatCommands';
 import { useChatStore } from '@/stores/chatStore';
 import { MiniThreadSidebar } from '../MiniThreadSidebar';
+import { SplitPaneView } from '../SplitPaneView';
 
 const mocks = vi.hoisted(() => ({
   router: { push: vi.fn() },
@@ -170,5 +171,89 @@ describe('MiniThreadSidebar thread-state subscription', () => {
       }));
     });
     expect(container.textContent).toContain('2');
+  });
+});
+
+describe('SplitPaneView thread-state subscription', () => {
+  const originalState = useChatStore.getState();
+  let container: HTMLDivElement | null = null;
+  let root: Root | null = null;
+
+  beforeAll(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterEach(() => {
+    if (root) {
+      act(() => root?.unmount());
+    }
+    container?.remove();
+    root = null;
+    container = null;
+    useChatStore.setState({
+      threads: originalState.threads,
+      splitPaneThreadIds: originalState.splitPaneThreadIds,
+      splitPaneTargetId: originalState.splitPaneTargetId,
+      currentThreadId: originalState.currentThreadId,
+      threadStates: originalState.threadStates,
+      activeInvocations: originalState.activeInvocations,
+      targetCats: originalState.targetCats,
+    });
+  });
+
+  afterAll(() => {
+    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  it('refreshes the target input when a background pane starts an invocation', () => {
+    const threadId = 'split-subscription-test-thread';
+    const backgroundState = useChatStore.getState().getThreadState(threadId);
+
+    act(() => {
+      useChatStore.setState({
+        currentThreadId: 'default',
+        threads: [
+          {
+            id: threadId,
+            title: 'Split subscription test',
+            projectPath: '/test',
+            createdBy: 'test-user',
+            participants: [],
+            lastActiveAt: 1,
+            createdAt: 1,
+          },
+        ],
+        splitPaneThreadIds: [threadId],
+        splitPaneTargetId: threadId,
+        threadStates: {
+          ...originalState.threadStates,
+          [threadId]: { ...backgroundState, hasActiveInvocation: false },
+        },
+      });
+    });
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() =>
+      root?.render(
+        React.createElement(SplitPaneView, {
+          onSend: vi.fn(),
+          onStop: vi.fn(),
+          onZoomToThread: vi.fn(),
+        }),
+      ),
+    );
+    expect(container.querySelector('[data-testid="active-invocation-banner"]')).toBeNull();
+
+    act(() => {
+      useChatStore.setState((state) => ({
+        threadStates: {
+          ...state.threadStates,
+          [threadId]: { ...state.threadStates[threadId], hasActiveInvocation: true },
+        },
+      }));
+    });
+    expect(container.querySelector('[data-testid="active-invocation-banner"]')).not.toBeNull();
   });
 });
