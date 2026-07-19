@@ -106,13 +106,21 @@ async function emitDispatchRejectionAudit(
   reason: string,
   audit: CatAgentToolAuditSink | undefined,
 ): Promise<void> {
-  await audit?.({
-    tool: block.name,
-    outcome: 'rejected',
-    timestamp: Date.now(),
-    rejectReason: reason,
-    ...dispatchAuditFields(block.input),
-  });
+  // Best-effort: audit sink failure must not abort the tool batch or prevent
+  // the error tool_result from being returned to the model. Otherwise,
+  // already-committed results from earlier tools in the same turn are lost
+  // and the model may unsafely retry committed mutations.
+  try {
+    await audit?.({
+      tool: block.name,
+      outcome: 'rejected',
+      timestamp: Date.now(),
+      rejectReason: reason,
+      ...dispatchAuditFields(block.input),
+    });
+  } catch (err) {
+    log.warn({ err, tool: block.name, reason }, 'dispatch rejection audit failed (best-effort)');
+  }
 }
 
 /**
