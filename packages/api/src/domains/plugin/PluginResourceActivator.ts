@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join, relative } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import {
   type CapabilitiesConfig,
   type CapabilityEntry,
@@ -807,9 +807,22 @@ export class PluginResourceActivator {
       };
     }
 
+    // Plugin MCP entrypoints (e.g. packages/mcp-server/dist/protocol-server.js)
+    // are repo-relative.  resolveMainProjectRoot returns the monorepo/runtime
+    // root even when the active project is a separate config workspace.
+    const runtimeRoot = this.deps.resolveMainProjectRoot?.() ?? this.deps.resolveProjectRoot();
+    const resolvedArgs = (resource.args ?? []).map((arg) => {
+      // Skip flags and already-absolute paths
+      if (arg.startsWith('-') || isAbsolute(arg)) return arg;
+      // Resolve relative path-like args against the runtime root (where the
+      // built MCP server binary lives), consistent with built-in cat-cafe MCPs.
+      const abs = resolve(runtimeRoot, arg);
+      return existsSync(abs) ? abs : arg;
+    });
+
     return {
       command: resource.command!,
-      args: resource.args ?? [],
+      args: resolvedArgs,
       transport: (resource.transport as 'stdio' | 'streamableHttp') ?? 'stdio',
       workingDir: join(this.deps.pluginsDir, manifest.id),
       ...this.buildMcpEnv(manifest),

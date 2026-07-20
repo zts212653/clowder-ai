@@ -104,7 +104,9 @@ describe('mcp-drift-detector: checkMcpProject', () => {
     assert.equal(result.summary.orphan, 1);
   });
 
-  it('does NOT flag external-source MCP as orphan', async () => {
+  it('preserves external-source MCP during orphan detection (project-local installs)', async () => {
+    // External MCPs can be installed project-locally via POST /api/capabilities/mcp/install
+    // with projectPath — these are legitimate and must not be flagged as orphans.
     const global = capConfig([]);
     const project = capConfig([mcpEntry('ext-mcp', { source: 'external' })]);
 
@@ -450,7 +452,7 @@ describe('mcp-sync-engine: syncMcpProject', () => {
     assert.equal(entry.mcpServerOverride.command, 'ruby');
   });
 
-  it('removes non-external orphans from project', async () => {
+  it('removes orphan MCP entries from project regardless of source', async () => {
     writeCapConfig(globalRoot, capConfig([]));
     writeCapConfig(projectRoot, capConfig([mcpEntry('stale-mcp', { source: 'cat-cafe' })]));
 
@@ -463,14 +465,15 @@ describe('mcp-sync-engine: syncMcpProject', () => {
     assert.equal(mcpEntries.length, 0);
   });
 
-  it('preserves external-source entries even when absent from global', async () => {
+  it('preserves external-source entries during orphan cleanup (project-local installs)', async () => {
+    // External MCPs can be installed project-locally via POST /api/capabilities/mcp/install
+    // with projectPath — these are legitimate and must not be treated as orphans.
     writeCapConfig(globalRoot, capConfig([]));
     writeCapConfig(projectRoot, capConfig([mcpEntry('ext-mcp', { source: 'external' })]));
 
     const result = await syncMcpProject(projectRoot, globalRoot, { globalMcpEntries: [] });
 
-    // External entries should NOT be removed
-    assert.ok(!result.removed.includes('ext-mcp'));
+    assert.deepEqual(result.removed, []);
 
     const written = readCapConfig(projectRoot);
     const mcpEntries = written.capabilities.filter((c) => c.type === 'mcp');

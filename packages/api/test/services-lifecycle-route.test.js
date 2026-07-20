@@ -1238,6 +1238,132 @@ describe('service lifecycle write routes', () => {
     }
   });
 
+  it('keeps service status starting until the ready hook finishes reconciliation', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const configs = new Map([['embedding-model', { installed: true, enabled: false, selectedModel: 'test-model' }]]);
+    let releaseHook = () => {};
+    const hookFinished = new Promise((resolve) => {
+      releaseHook = resolve;
+    });
+    let hookStartedResolve = () => {};
+    const hookStarted = new Promise((resolve) => {
+      hookStartedResolve = resolve;
+    });
+    const app = await buildApp({
+      lifecycle: {
+        startupGraceMs: 1_000,
+        startupReadinessTimeoutMs: 250,
+        startupProbeIntervalMs: 5,
+        onServiceReady: async () => {
+          hookStartedResolve();
+          await hookFinished;
+        },
+        serviceConfig: {
+          get: (id) => configs.get(id) ?? { enabled: false },
+          set: (id, patch) => {
+            const updated = { ...(configs.get(id) ?? { enabled: false }), ...patch };
+            configs.set(id, updated);
+            return updated;
+          },
+        },
+        findPidsByPort: async () => [],
+        readProcessCommand: async () => null,
+        runScript: async () => ({ code: null, pid: 4321, output: '' }),
+      },
+      fetchHealth: async () => ({ ok: true, status: 200, error: null }),
+    });
+    try {
+      const start = await app.inject({
+        method: 'POST',
+        url: '/api/services/embedding-model/start',
+        headers: SESSION_HEADERS,
+      });
+      assert.equal(start.statusCode, 200, start.payload);
+      await hookStarted;
+
+      const during = await app.inject({ method: 'GET', url: '/api/services', headers: SESSION_HEADERS });
+      const duringService = JSON.parse(during.payload).services.find((service) => service.id === 'embedding-model');
+      assert.equal(duringService.status, 'starting');
+
+      releaseHook();
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        const after = await app.inject({ method: 'GET', url: '/api/services', headers: SESSION_HEADERS });
+        const afterService = JSON.parse(after.payload).services.find((service) => service.id === 'embedding-model');
+        if (afterService.status === 'healthy') return;
+      }
+      assert.fail('service should leave starting only after reconciliation finishes');
+    } finally {
+      releaseHook();
+      await app.close();
+      restoreOwner(previousOwner);
+    }
+  });
+
+  it('fires the service unavailable hook after stop, disable, and uninstall', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const configs = new Map([['embedding-model', { installed: true, enabled: true }]]);
+    const unavailableEvents = [];
+    const app = await buildApp({
+      lifecycle: {
+        onServiceUnavailable: (event) => {
+          unavailableEvents.push({
+            serviceId: event.service.id,
+            operator: event.operator,
+            reason: event.reason,
+          });
+        },
+        serviceConfig: {
+          get: (id) => configs.get(id) ?? { enabled: false },
+          set: (id, patch) => {
+            const updated = { ...(configs.get(id) ?? { enabled: false }), ...patch };
+            configs.set(id, updated);
+            return updated;
+          },
+        },
+        findPidsByPort: async () => [],
+        readProcessCommand: async () => null,
+        runScript: async () => ({ code: 0, output: 'ok' }),
+      },
+    });
+    try {
+      const stop = await app.inject({
+        method: 'POST',
+        url: '/api/services/embedding-model/stop',
+        headers: SESSION_HEADERS,
+      });
+      assert.equal(stop.statusCode, 200, stop.payload);
+
+      configs.set('embedding-model', { installed: true, enabled: true });
+      const disable = await app.inject({
+        method: 'POST',
+        url: '/api/services/embedding-model/toggle',
+        headers: SESSION_HEADERS,
+        payload: { enabled: false },
+      });
+      assert.equal(disable.statusCode, 200, disable.payload);
+
+      configs.set('embedding-model', { installed: true, enabled: true });
+      const uninstall = await app.inject({
+        method: 'POST',
+        url: '/api/services/embedding-model/uninstall',
+        headers: SESSION_HEADERS,
+      });
+      assert.equal(uninstall.statusCode, 200, uninstall.payload);
+
+      assert.deepEqual(unavailableEvents, [
+        { serviceId: 'embedding-model', operator: 'you', reason: 'stop' },
+        { serviceId: 'embedding-model', operator: 'you', reason: 'disabled' },
+        { serviceId: 'embedding-model', operator: 'you', reason: 'uninstall' },
+      ]);
+    } finally {
+      await app.close();
+      restoreOwner(previousOwner);
+    }
+  });
+
   it('keeps startup state when a detached start wrapper exits before readiness later succeeds', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';

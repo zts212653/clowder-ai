@@ -224,11 +224,15 @@ export class IndexBuilder implements IIndexBuilder {
     this.store.setSourceRoot(this.scanRoot);
   }
 
-  setEmbedDeps(deps: {
-    embedding: IEmbeddingService;
-    vectorStore: VectorStore;
-    passageVectorStore?: PassageVectorStore;
-  }): void {
+  setEmbedDeps(
+    deps:
+      | {
+          embedding: IEmbeddingService;
+          vectorStore: VectorStore;
+          passageVectorStore?: PassageVectorStore;
+        }
+      | undefined,
+  ): void {
     this.embedDeps = deps;
   }
 

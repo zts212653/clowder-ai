@@ -38,6 +38,23 @@ const MOCK_ITEMS = [
     layer: 'L1' as const,
   },
   {
+    id: 'plugin:video-gen:protocol-server',
+    type: 'mcp' as const,
+    source: 'plugin' as const,
+    pluginId: 'video-gen',
+    enabled: true,
+    cats: {},
+    description: 'Video generation MCP',
+    mcpServer: {
+      transport: 'stdio' as const,
+      command: 'node',
+      args: ['protocol-server.js'],
+      env: { VIDEO_GEN_PROVIDER: '••••••' },
+      envKeys: ['VIDEO_GEN_PROVIDER'],
+    },
+    layer: 'L1' as const,
+  },
+  {
     id: 'cross-cat-handoff',
     type: 'skill' as const,
     source: 'cat-cafe' as const,
@@ -165,7 +182,7 @@ describe('McpManageContent', () => {
     expect(capCall![0]).toBe('/api/capabilities');
   });
 
-  it('opens managed MCP cards in a read-only modal (tools lazy-loaded)', async () => {
+  it('opens managed MCP cards in readOnly modal (no save button)', async () => {
     await renderContent();
 
     await act(async () => {
@@ -173,11 +190,35 @@ describe('McpManageContent', () => {
     });
 
     expect(document.body.querySelector('[data-testid="mcp-config-modal"]')).toBeTruthy();
-    expect(document.body.textContent).toContain('PENCIL_TOKEN');
-    // F249 §8.4: tools are NOT preloaded in list response — the modal auto-probes
-    // via POST /api/mcp/:id/tools on mount. At render time, tools section
-    // shows placeholder text, not the tool names from the list response.
+    // Managed MCPs are readOnly — show preview subtitle, no save button
+    expect(document.body.textContent).toContain('只读预览');
     expect(document.body.textContent).not.toContain('保存');
+    expect(document.body.textContent).toContain('关闭');
+  });
+
+  it('opens plugin-owned MCP in readOnly modal (managed by plugin)', async () => {
+    await renderContent();
+
+    // Plugin-owned MCP has pluginId — opens in readOnly mode
+    await act(async () => {
+      buttonByText('plugin:video-gen:protocol-server').click();
+    });
+
+    expect(document.body.querySelector('[data-testid="mcp-config-modal"]')).toBeTruthy();
+    // Plugin MCPs are readOnly — show preview subtitle, no save button
+    expect(document.body.textContent).toContain('只读预览');
+    expect(document.body.textContent).not.toContain('保存');
+    expect(document.body.textContent).toContain('关闭');
+  });
+
+  it('hides delete button for plugin-managed MCPs (source=plugin)', async () => {
+    await renderContent();
+
+    // Plugin-owned MCP should show the badge but NOT the delete button
+    expect(container.textContent).toContain('由插件 video-gen 管理');
+    const trashButtons = Array.from(container.querySelectorAll('button[title="卸载此 MCP"]'));
+    // Only 'custom-mcp' (external, no pluginId) should have trash button
+    expect(trashButtons.length).toBe(1);
   });
 
   it('omits unchanged redacted env and headers when saving external MCP edits', async () => {
@@ -308,7 +349,7 @@ describe('McpManageContent', () => {
     expect(bodies.map((body) => body.projectPath).sort()).toEqual(['/tmp/fast-project', '/tmp/slow-project']);
   });
 
-  it('renders plugin-owned MCP resources as readonly and routes management to plugins', async () => {
+  it('renders plugin-owned MCP with normal controls but no delete button', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -316,7 +357,7 @@ describe('McpManageContent', () => {
           {
             ...MOCK_ITEMS[1],
             id: 'plugin:weixin-mp:mcp',
-            source: 'external',
+            source: 'plugin',
             pluginId: 'weixin-mp',
             description: 'Plugin owned MCP',
           },
@@ -331,24 +372,55 @@ describe('McpManageContent', () => {
 
     const card = container.querySelector('.settings-resource-card');
     expect(card?.textContent).toContain('Plugin owned MCP');
+    // Informational badge still shown
     expect(card?.textContent).toContain('由插件 weixin-mp 管理');
-    expect(card?.querySelector('a[href="/settings?s=plugins"]')).toBeTruthy();
 
+    // Toggle enabled — plugin MCPs are treated like regular MCPs
     const toggle = card?.querySelector('.settings-resource-toggle') as HTMLButtonElement | null;
-    expect(toggle?.disabled).toBe(true);
+    expect(toggle?.disabled).toBe(false);
+    // Delete button hidden (source='plugin' — only source='external' is deletable)
     expect(card?.querySelector('button[title="卸载此 MCP"]')).toBeFalsy();
-    expect(card?.querySelector('button[title="按猫开关"]')).toBeFalsy();
+    // Per-cat toggles available
+    expect(card?.querySelector('button[title="按猫开关"]')).toBeTruthy();
+  });
+
+  it('mount probe uses persisted config (empty body) instead of ad-hoc form values', async () => {
+    // When opening an existing MCP modal, the auto-probe on mount should send
+    // an empty body so the server reads real env from capabilities.json.
+    // Ad-hoc probe body would strip redacted env values (all MCP env is redacted
+    // in API responses), breaking MCPs that conditionally register tools based
+    // on env — e.g. protocol-server for plugin MCPs (F205 -32601 fix).
+    mockFetch.mockResolvedValue(ITEMS_RESPONSE);
+    await renderContent();
 
     mockFetch.mockClear();
-    await act(async () => {
-      toggle?.click();
+    // Mock the probe response separately
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        tools: [{ name: 'test-tool', description: 'A tool' }],
+        connectionStatus: 'connected',
+      }),
     });
 
-    expect(
-      mockFetch.mock.calls.some(
-        (args: unknown[]) => args[0] === '/api/capabilities' && (args[1] as { method?: string })?.method === 'PATCH',
-      ),
-    ).toBe(false);
+    await act(async () => {
+      buttonByText('custom-mcp').click();
+    });
+
+    // Find the probe call — POST /api/mcp/:id/tools
+    const probeCall = mockFetch.mock.calls.find(
+      (args: unknown[]) =>
+        typeof args[0] === 'string' &&
+        (args[0] as string).includes('/api/mcp/') &&
+        (args[0] as string).includes('/tools'),
+    );
+    expect(probeCall).toBeTruthy();
+    const probeBody = JSON.parse((probeCall?.[1] as { body: string }).body) as Record<string, unknown>;
+    // Mount probe must NOT contain command/url/env — empty body tells server
+    // to use persisted config with real (non-redacted) env values.
+    expect(probeBody).not.toHaveProperty('command');
+    expect(probeBody).not.toHaveProperty('url');
+    expect(probeBody).not.toHaveProperty('env');
   });
 
   it('ignores stale project-switch responses when a newer selection resolves first', async () => {

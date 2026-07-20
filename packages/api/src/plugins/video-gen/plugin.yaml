@@ -1,0 +1,68 @@
+id: video-gen
+name: 视频生成
+version: "1.0.0"
+description: 声明式视频/图片生成 — 通过协议模板适配多视频协议（智谱、可灵、即梦等）
+icon: video
+iconBg: "#6366f1"
+
+config:
+  - envName: VIDEO_GEN_PROVIDER
+    label: 视频协议
+    type: select
+    sensitive: false
+    required: true
+    options:
+      - value: zhipu
+        label: 智谱
+        hint: 在智谱开放平台注册，获取 API Key
+        docsUrl: https://docs.bigmodel.cn/cn/guide/models/video-generation
+      - value: kling
+        label: 可灵
+        hint: 在可灵 AI 开放平台注册，获取 Access Key + Secret Key
+        docsUrl: https://klingapi.com/docs
+      - value: jimeng
+        label: 即梦 (火山引擎)
+        hint: 在火山引擎控制台注册，获取 Access Key + Secret Key
+        docsUrl: https://www.volcengine.com/docs/85621/1777001
+
+  - envName: VIDEO_GEN_AUTH_TYPE
+    label: 认证方式
+    type: select
+    sensitive: false
+    required: true
+    options:
+      - value: apikey
+        label: API Key
+      - value: jwt-hs256
+        label: JWT (Access Key + Secret)
+      - value: hmac-sha256-v4
+        label: HMAC-SHA256 V4
+
+  # Credentials — which fields are needed depends on AUTH_TYPE:
+  #   apikey → API_KEY; jwt-hs256 → ACCESS_KEY + SECRET_KEY; hmac → ACCESS_KEY + SECRET_KEY
+  - envName: VIDEO_GEN_API_KEY
+    label: API Key
+    sensitive: true
+    required: false
+  - envName: VIDEO_GEN_ACCESS_KEY
+    label: Access Key
+    sensitive: true
+    required: false
+  - envName: VIDEO_GEN_SECRET_KEY
+    label: Secret Key
+    sensitive: true
+    required: false
+  - envName: VIDEO_GEN_BASE_URL
+    label: Base URL
+    sensitive: false
+    required: false
+  - envName: VIDEO_GEN_MODEL
+    label: 模型名称
+    sensitive: false
+    required: false
+
+resources:
+  - type: mcp
+    name: video-gen-toolset
+    command: node
+    args: ["packages/mcp-server/dist/protocol-server.js", "--prefix", "VIDEO_GEN", "--protocols-dir", "packages/api/src/plugins/video-gen/protocols"]

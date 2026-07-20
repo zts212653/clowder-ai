@@ -61,6 +61,14 @@ export {
 export { KnowledgeResolver } from './KnowledgeResolver.js';
 export { MarkerQueue } from './MarkerQueue.js';
 export { MaterializationService } from './MaterializationService.js';
+export {
+  type ActiveEmbeddingRuntimeMode,
+  type EmbeddingActivationFailure,
+  type EmbeddingActivationResult,
+  type EmbeddingRuntimeMode,
+  type EmbeddingRuntimeStatus,
+  MemoryEmbeddingLifecycle,
+} from './MemoryEmbeddingLifecycle.js';
 export { PassageVectorStore, parsePassageVectorKey, passageVectorKey } from './PassageVectorStore.js';
 export { ReflectionService } from './ReflectionService.js';
 export { SemanticReranker } from './SemanticReranker.js';

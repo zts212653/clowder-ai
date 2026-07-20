@@ -222,6 +222,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.0.0
         version: 1.26.0(zod@3.25.76)
+      yaml:
+        specifier: ^2.8.1
+        version: 2.8.2
       zod:
         specifier: ^3.22.4
         version: 3.25.76

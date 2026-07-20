@@ -886,7 +886,7 @@ async function main(): Promise<void> {
         memoryServices.catalog!,
         memoryServices.collectionStores ?? new Map(),
         memoryServices.dataDir!,
-        memoryServices.embeddingService,
+        () => memoryServices.embeddingLifecycle.getService(),
       );
     },
     getFingerprint,
@@ -1129,12 +1129,13 @@ async function main(): Promise<void> {
         },
         generateAbstractive,
         // Re-embed thread after abstractive summary update (semantic search uses vectors)
-        reEmbed: memoryServices.embeddingService?.isReady()
-          ? async (anchor: string, text: string) => {
-              const [vec] = await memoryServices.embeddingService!.embed([text]);
-              memoryServices.vectorStore?.upsert(anchor, vec);
-            }
-          : undefined,
+        reEmbed: async (anchor: string, text: string) => {
+          const embeddingService = memoryServices.embeddingLifecycle.getService();
+          const vectorStore = memoryServices.embeddingLifecycle.getVectorStore();
+          if (!embeddingService?.isReady() || !vectorStore) return;
+          const [vec] = await embeddingService.embed([text]);
+          vectorStore.upsert(anchor, vec);
+        },
         // H-3: Submit durable candidates to knowledge emergence pipeline
         // Gated by F102_DURABLE_CANDIDATES flag (spec §F102 env config)
         submitCandidate:
@@ -3185,38 +3186,53 @@ async function main(): Promise<void> {
   await app.register(servicesRoutes, {
     lifecycle: {
       autoStartEnabled: true,
-      onServiceReady: ({ service, operator, reason }) => {
+      onServiceReady: async ({ service, operator, reason }) => {
         if (service.id !== 'embedding-model' || !memoryServices.indexBuilder) return;
+        const activationMode = resolvedEmbedMode === 'shadow' ? 'shadow' : 'on';
+        const activation = await memoryServices.embeddingLifecycle.activate(activationMode);
+        if (!activation.ok) {
+          const detail = activation.reason ?? activation.status;
+          appendServiceLog(service.id, `[start] memory embedding activation degraded: ${detail}\n`);
+          app.log.warn(
+            { serviceId: service.id, operator, reason, activation },
+            '[api] F102: embedding service ready but memory activation degraded',
+          );
+          return;
+        }
         appendServiceLog(service.id, `[start] embedding service ready (${reason}); scheduling evidence rebuild\n`);
         app.log.info(
           { serviceId: service.id, operator, reason },
           '[api] F102: embedding service ready; scheduling evidence rebuild',
         );
         const startedAt = Date.now();
-        void memoryServices.indexBuilder
-          .rebuild({ force: true })
-          .then((result) => {
-            const elapsedMs = Date.now() - startedAt;
-            appendServiceLog(
-              service.id,
-              `[start] evidence rebuild completed: ${result.docsIndexed} indexed, ${result.docsSkipped} skipped (${elapsedMs}ms)\n`,
-            );
-            app.log.info(
-              `[api] F102: embedding service catch-up rebuild completed - ${result.docsIndexed} indexed, ${result.docsSkipped} skipped (${elapsedMs}ms)`,
-            );
-            // Backfill passage vectors that were missed when API started before
-            // the embedding service was ready. Without this, only newly indexed
-            // passages get vectors — the ~N thousands indexed while embed was
-            // down remain lexical-only until the next full restart.
-            memoryServices.indexBuilder?.startPassageEmbeddingWarmup();
-          })
-          .catch((error) => {
-            appendServiceLog(service.id, `[start] evidence rebuild failed: ${String(error)}\n`);
-            app.log.warn(
-              { err: error, serviceId: service.id },
-              '[api] F102: embedding service catch-up rebuild failed',
-            );
-          });
+        try {
+          const result = await memoryServices.indexBuilder.rebuild({ force: true });
+          const elapsedMs = Date.now() - startedAt;
+          appendServiceLog(
+            service.id,
+            `[start] evidence rebuild completed: ${result.docsIndexed} indexed, ${result.docsSkipped} skipped (${elapsedMs}ms)\n`,
+          );
+          app.log.info(
+            `[api] F102: embedding service catch-up rebuild completed - ${result.docsIndexed} indexed, ${result.docsSkipped} skipped (${elapsedMs}ms)`,
+          );
+          // Backfill passage vectors that were missed when API started before
+          // the embedding service was ready. Without this, only newly indexed
+          // passages get vectors — the ~N thousands indexed while embed was
+          // down remain lexical-only until the next full restart.
+          memoryServices.indexBuilder.startPassageEmbeddingWarmup();
+        } catch (error) {
+          appendServiceLog(service.id, `[start] evidence rebuild failed: ${String(error)}\n`);
+          app.log.warn({ err: error, serviceId: service.id }, '[api] F102: embedding service catch-up rebuild failed');
+        }
+      },
+      onServiceUnavailable: ({ service, operator, reason }) => {
+        if (service.id !== 'embedding-model') return;
+        memoryServices.embeddingLifecycle.deactivate();
+        appendServiceLog(service.id, `[${reason}] memory embedding dependencies deactivated\n`);
+        app.log.info(
+          { serviceId: service.id, operator, reason },
+          '[api] F102: memory embedding dependencies deactivated',
+        );
       },
     },
   });
@@ -3313,7 +3329,7 @@ async function main(): Promise<void> {
   // Evidence search (SQLite) + reindex endpoint (D-11) + F-4 federated search + F188 rebuild
   await app.register(evidenceRoutes, {
     evidenceStore: memoryServices.evidenceStore,
-    embeddingService: memoryServices.embeddingService,
+    getEmbeddingService: () => memoryServices.embeddingLifecycle.getService(),
     indexBuilder: memoryServices.indexBuilder,
     knowledgeResolver: memoryServices.knowledgeResolver,
     rebuildJobTracker,
@@ -3405,16 +3421,16 @@ async function main(): Promise<void> {
     if (!libraryStores.has('project:cat-cafe')) libraryStores.set('project:cat-cafe', memoryServices.store);
     if (memoryServices.globalStore && !libraryStores.has('global:methods'))
       libraryStores.set('global:methods', memoryServices.globalStore);
-    // Use the resolvedEmbedMode computed above (service.enabled overrides EMBED_MODE=off).
-    const libraryEmbedMode: 'shadow' | 'on' | undefined =
-      resolvedEmbedMode === 'shadow' || resolvedEmbedMode === 'on' ? resolvedEmbedMode : undefined;
     await app.register(libraryRoutes, {
       catalog: memoryServices.catalog,
       stores: libraryStores,
       dataDir: memoryServices.dataDir,
       managedVaultBase: memoryServices.dataDir,
-      embeddingService: memoryServices.embeddingService,
-      embedMode: libraryEmbedMode,
+      getEmbeddingService: () => memoryServices.embeddingLifecycle.getService(),
+      getEmbedMode: () => {
+        const mode = memoryServices.embeddingLifecycle.getMode();
+        return mode === 'off' ? undefined : mode;
+      },
       // F188 Phase F AC-F9: pass redis for tool-usage-metrics endpoint (砚砚 review P1-2)
       ...(redisClient ? { redis: redisClient } : {}),
       // AC-H1 P1 R3: runtime exclude updates for parent IndexBuilder

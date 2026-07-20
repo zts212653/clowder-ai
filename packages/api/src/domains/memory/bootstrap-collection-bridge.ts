@@ -25,7 +25,7 @@ export async function ensureProjectCollection(
   catalog: LibraryCatalog,
   stores: Map<string, IEvidenceStore>,
   dataDir: string,
-  embeddingService?: IEmbeddingService,
+  getEmbeddingService?: () => IEmbeddingService | undefined,
 ): Promise<{ docsIndexed: number; durationMs: number }> {
   const startMs = Date.now();
   const collectionId = deriveCollectionId(projectPath);
@@ -68,6 +68,7 @@ export async function ensureProjectCollection(
   store.setSourceRoot(manifest.root, manifest.id);
 
   let embedDeps: CollectionEmbedDeps | undefined;
+  const embeddingService = getEmbeddingService?.();
   if (embeddingService) {
     try {
       const db = store.getDb();
@@ -75,7 +76,10 @@ export async function ensureProjectCollection(
       sqliteVecMod.load(db);
       const dim = embeddingService.getModelInfo().dim;
       if (ensureVectorTable(db, dim)) {
-        embedDeps = { embedding: embeddingService, vectorStore: new VectorStore(db, dim) };
+        embedDeps = {
+          getEmbeddingService: () => (getEmbeddingService?.() === embeddingService ? embeddingService : undefined),
+          vectorStore: new VectorStore(db, dim),
+        };
       }
     } catch {
       // fail-open: sqlite-vec not available → FTS-only

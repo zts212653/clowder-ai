@@ -16,6 +16,7 @@
     "@cat-cafe/finance": "workspace:*",
     "@cat-cafe/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "yaml": "^2.8.1",
     "zod": "^3.22.4"
   },
   "devDependencies": {

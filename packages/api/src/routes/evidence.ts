@@ -102,6 +102,7 @@ export interface EvidenceRoutesOptions {
   docsRoot?: string;
   evidenceStore: IEvidenceStore;
   embeddingService?: Pick<IEmbeddingService, 'isReady'>;
+  getEmbeddingService?: () => Pick<IEmbeddingService, 'isReady'> | undefined;
   indexBuilder?: IIndexBuilder;
   knowledgeResolver?: IKnowledgeResolver;
   rebuildJobTracker?: RebuildJobTracker;
@@ -432,7 +433,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       // at all" (embed off / sqlite-vec missing), so the UI never shows a warm-up that never finishes.
       let passageVectorCount = 0;
       let passageVectorsSupported = false;
-      const passageEmbeddingReady = opts.embeddingService?.isReady() === true;
+      const passageEmbeddingReady = (opts.getEmbeddingService?.() ?? opts.embeddingService)?.isReady() === true;
       try {
         passageVectorCount = (db.prepare('SELECT count(*) AS c FROM passage_vectors').get() as { c: number }).c;
         passageVectorsSupported = passageEmbeddingReady;

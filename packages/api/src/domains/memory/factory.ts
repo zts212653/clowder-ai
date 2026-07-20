@@ -3,7 +3,6 @@
 import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
-import { EmbeddingService } from './EmbeddingService.js';
 import type { IEventMemoryStore } from './EventMemoryStore.js';
 import { EventMemoryStore } from './EventMemoryStore.js';
 import { loadEntitySeeds } from './entity-seeds.js';
@@ -25,11 +24,11 @@ import { KnowledgeResolver } from './KnowledgeResolver.js';
 import { LibraryCatalog } from './LibraryCatalog.js';
 import { MarkerQueue } from './MarkerQueue.js';
 import { MaterializationService } from './MaterializationService.js';
-import { PassageVectorStore } from './PassageVectorStore.js';
+import { MemoryEmbeddingLifecycle } from './MemoryEmbeddingLifecycle.js';
+import type { PassageVectorStore } from './PassageVectorStore.js';
 import { ReflectionService } from './ReflectionService.js';
 import { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
-import { ensurePassageVectorTable, ensureVectorTable } from './schema.js';
-import { VectorStore } from './VectorStore.js';
+import type { VectorStore } from './VectorStore.js';
 
 export interface MemoryServices {
   evidenceStore: IEvidenceStore;
@@ -44,6 +43,7 @@ export interface MemoryServices {
   knowledgeResolver: IKnowledgeResolver;
   indexBuilder?: IIndexBuilder;
   materializationService?: IMaterializationService;
+  embeddingLifecycle: MemoryEmbeddingLifecycle;
   embeddingService?: IEmbeddingService;
   vectorStore?: VectorStore;
   passageVectorStore?: PassageVectorStore;
@@ -133,6 +133,8 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
 
   const store = new SqliteEvidenceStore(sqlitePath);
   await store.initialize();
+  const stores = new Map<string, IEvidenceStore>();
+  stores.set('project:cat-cafe', store);
   const entitySeeds = loadEntitySeeds({
     explicitSeedPath: config.entitySeedPath,
     includeRoster: config.includeRosterEntitySeeds,
@@ -140,41 +142,6 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
   if (entitySeeds.length > 0) {
     await store.upsertEntities(entitySeeds);
   }
-
-  let embeddingService: IEmbeddingService | undefined;
-  let vectorStore: VectorStore | undefined;
-  let passageVectorStore: PassageVectorStore | undefined;
-
-  if (embedConfig.embedMode !== 'off') {
-    embeddingService = new EmbeddingService(embedConfig);
-
-    // P1 (codex R2): explicitly call load() — without this, isReady() stays false forever.
-    // Wrapped in try-catch for AC-C4 fail-open.
-    try {
-      await embeddingService.load();
-    } catch {
-      // fail-open: model load failed → isReady()=false → lexical-only degradation
-    }
-
-    // Load sqlite-vec + ensure vec0 table (decoupled from migration, fail-open)
-    try {
-      const sqliteVecMod = await import('sqlite-vec');
-      sqliteVecMod.load(store.getDb());
-      const ok = ensureVectorTable(store.getDb(), embedConfig.embedDim);
-      if (ok) {
-        vectorStore = new VectorStore(store.getDb(), embedConfig.embedDim);
-      }
-      const passageOk = ensurePassageVectorTable(store.getDb(), embedConfig.embedDim);
-      if (passageOk) {
-        passageVectorStore = new PassageVectorStore(store.getDb(), embedConfig.embedDim);
-      }
-    } catch {
-      // fail-open: sqlite-vec not available
-    }
-  }
-
-  const embedDeps =
-    embeddingService && vectorStore ? { embedding: embeddingService, vectorStore, passageVectorStore } : undefined;
 
   // Pre-load external manifests to compute child excludes (AC-H1)
   // Must happen before IndexBuilder so CatCafeScanner gets the exclude patterns
@@ -185,7 +152,7 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
   const indexBuilder = new IndexBuilder(
     store,
     docsRoot,
-    embedDeps,
+    undefined,
     config.transcriptDataDir,
     config.threadListFn,
     config.messageListFn,
@@ -193,10 +160,14 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
     undefined,
     childExcludes.length > 0 ? childExcludes : undefined,
   );
-
-  // Wire rerank deps into store for search-time
-  if (embedDeps) {
-    store.setEmbedDeps({ ...embedDeps, mode: embedConfig.embedMode as 'shadow' | 'on' });
+  const embeddingLifecycle = new MemoryEmbeddingLifecycle(store, indexBuilder, embedConfig, {
+    getDependentStores: () =>
+      [...stores.values()].filter(
+        (candidate): candidate is SqliteEvidenceStore => candidate instanceof SqliteEvidenceStore,
+      ),
+  });
+  if (embedConfig.embedMode !== 'off') {
+    await embeddingLifecycle.activate(embedConfig.embedMode);
   }
 
   const markerQueue = new MarkerQueue(markersDir);
@@ -226,7 +197,6 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
   }
 
   const catalog = new LibraryCatalog();
-  const stores = new Map<string, IEvidenceStore>();
   const now = new Date().toISOString();
 
   catalog.register({
@@ -243,8 +213,6 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
     createdAt: now,
     updatedAt: now,
   });
-  stores.set('project:cat-cafe', store);
-
   if (globalStore) {
     catalog.register({
       id: 'global:methods',
@@ -294,9 +262,16 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
     knowledgeResolver,
     indexBuilder,
     materializationService,
-    embeddingService,
-    vectorStore,
-    passageVectorStore,
+    embeddingLifecycle,
+    get embeddingService(): IEmbeddingService | undefined {
+      return embeddingLifecycle.getService();
+    },
+    get vectorStore(): VectorStore | undefined {
+      return embeddingLifecycle.getVectorStore();
+    },
+    get passageVectorStore(): PassageVectorStore | undefined {
+      return embeddingLifecycle.getPassageVectorStore();
+    },
     globalIndexBuilder,
     globalStore,
     catalog,

@@ -34,7 +34,7 @@ export interface SettingsSkillItem {
   category: string;
   trigger: string;
   description?: string;
-  source: 'cat-cafe' | 'external';
+  source: 'cat-cafe' | 'external' | 'plugin';
   mountPaths?: string[];
   pluginId?: string;
   governance: {
@@ -48,7 +48,7 @@ export interface SettingsSkillItem {
     isStaleRemoved: boolean;
   };
   controls: {
-    source: 'cat-cafe' | 'external';
+    source: 'cat-cafe' | 'external' | 'plugin';
     enabled: boolean;
     cats: Record<string, boolean>;
     canToggle: boolean;

@@ -17,7 +17,7 @@ import { EcosystemBadge } from './marketplace/marketplace-badges';
 export interface CapabilityBoardItem {
   id: string;
   type: 'mcp' | 'skill';
-  source: 'cat-cafe' | 'external';
+  source: 'cat-cafe' | 'external' | 'plugin';
   enabled: boolean;
   globalEnabled?: boolean;
   cats: Record<string, boolean>;

@@ -58,7 +58,7 @@ describe('CollectionIndexBuilder embedding integration (bug #6)', () => {
     };
 
     const builder = new CollectionIndexBuilder(store, manifest, scanner, {
-      embedding: mockEmbedding,
+      getEmbeddingService: () => mockEmbedding,
       vectorStore: mockVectorStore,
     });
     const result = await builder.rebuild();

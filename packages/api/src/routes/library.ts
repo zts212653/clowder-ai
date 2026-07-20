@@ -33,6 +33,8 @@ export interface LibraryRoutesOptions {
   managedVaultBase?: string;
   embeddingService?: IEmbeddingService;
   embedMode?: 'shadow' | 'on';
+  getEmbeddingService?: () => IEmbeddingService | undefined;
+  getEmbedMode?: () => 'shadow' | 'on' | undefined;
   // F188 Phase F AC-F9: optional Redis client for tool-usage-metrics endpoint.
   // Typed as `unknown` to accept any RedisClient implementation (ioredis, etc.);
   // ToolEventLog will narrow internally via its own constructor signature.
@@ -269,16 +271,26 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
 
     let embedDeps: CollectionEmbedDeps | undefined;
     const db = (store as StoreWithDb).getDb?.();
-    if (opts.embeddingService && db) {
+    const resolveEmbeddingService = () =>
+      opts.getEmbeddingService ? opts.getEmbeddingService() : opts.embeddingService;
+    const resolveEmbedMode = () => (opts.getEmbedMode ? opts.getEmbedMode() : (opts.embedMode ?? 'shadow'));
+    const embeddingService = resolveEmbeddingService();
+    if (embeddingService && db) {
       try {
         const sqliteVecMod = await import('sqlite-vec');
         sqliteVecMod.load(db);
-        const dim = opts.embeddingService.getModelInfo().dim;
+        const dim = embeddingService.getModelInfo().dim;
         if (ensureVectorTable(db, dim)) {
           const vectorStore = new VectorStore(db, dim);
-          embedDeps = { embedding: opts.embeddingService, vectorStore };
-          const mode = opts.embedMode ?? 'shadow';
-          (store as SqliteEvidenceStore).setEmbedDeps({ embedding: opts.embeddingService, vectorStore, mode });
+          embedDeps = {
+            getEmbeddingService: () => {
+              const current = resolveEmbeddingService();
+              return current === embeddingService && resolveEmbedMode() ? current : undefined;
+            },
+            vectorStore,
+          };
+          const mode = resolveEmbedMode() ?? 'shadow';
+          (store as SqliteEvidenceStore).setEmbedDeps({ embedding: embeddingService, vectorStore, mode });
         }
       } catch {
         // fail-open: sqlite-vec not available → FTS-only

@@ -1,0 +1,99 @@
+name: jimeng
+version: 1
+mode: async
+baseUrl: https://visual.volcengineapi.com
+
+capabilities:
+  text2video:
+    submit:
+      method: POST
+      path: /?Action=CVSync2AsyncSubmitTask&Version=2022-08-31
+      body:
+        req_key: "{{model | default:jimeng_t2v_v30}}"
+        prompt: "{{prompt}}"
+        duration: "{{duration}}"
+        aspect_ratio: "{{aspectRatio}}"
+        negative_prompt: "{{negativePrompt}}"
+      response:
+        taskId: $.data.task_id
+        codeField: $.code
+        successCode: 10000
+    poll:
+      method: POST
+      path: /?Action=CVSync2AsyncGetResult&Version=2022-08-31
+      interval: 8000
+      maxAttempts: 75
+      body:
+        req_key: "{{model | default:jimeng_t2v_v30}}"
+        task_id: "{{taskId}}"
+      response:
+        status: $.data.status
+        statusMap:
+          succeeded: [done]
+          failed: [failed, not_found]
+        resultUrl: $.data.video_url
+        fallbackResultUrl: $.data.resp_data
+        codeField: $.code
+        successCode: 10000
+
+  image2video:
+    submit:
+      method: POST
+      path: /?Action=CVSync2AsyncSubmitTask&Version=2022-08-31
+      body:
+        req_key: "{{model | default:jimeng_i2v_v20}}"
+        prompt: "{{prompt}}"
+        image_urls:
+          - "{{imageUrl}}"
+      response:
+        taskId: $.data.task_id
+        codeField: $.code
+        successCode: 10000
+    poll:
+      method: POST
+      path: /?Action=CVSync2AsyncGetResult&Version=2022-08-31
+      interval: 8000
+      maxAttempts: 75
+      body:
+        req_key: "{{model | default:jimeng_i2v_v20}}"
+        task_id: "{{taskId}}"
+      response:
+        status: $.data.status
+        statusMap:
+          succeeded: [done]
+          failed: [failed, not_found]
+        resultUrl: $.data.video_url
+        fallbackResultUrl: $.data.resp_data
+        codeField: $.code
+        successCode: 10000
+
+  text2image:
+    submit:
+      method: POST
+      path: /?Action=CVSync2AsyncSubmitTask&Version=2022-08-31
+      body:
+        req_key: "{{model | default:jimeng_high_aes_general_v21}}"
+        prompt: "{{prompt}}"
+        width: "{{width}}"
+        height: "{{height}}"
+      response:
+        taskId: $.data.task_id
+        codeField: $.code
+        successCode: 10000
+    poll:
+      method: POST
+      path: /?Action=CVSync2AsyncGetResult&Version=2022-08-31
+      interval: 5000
+      maxAttempts: 60
+      body:
+        req_key: "{{model | default:jimeng_high_aes_general_v21}}"
+        task_id: "{{taskId}}"
+      response:
+        status: $.data.status
+        statusMap:
+          succeeded: [done]
+          failed: [failed, not_found]
+        resultUrl: $.data.image_urls[0]
+        fallbackResultUrl: $.data.resp_data
+        codeField: $.code
+        successCode: 10000

@@ -35,16 +35,18 @@ const SERVICE_INSTALL_BUTTON_CLASS =
   'rounded-lg bg-cafe-accent px-3 py-1.5 text-xs font-semibold text-[var(--cafe-surface)] transition-colors hover:bg-cafe-accent-hover disabled:opacity-50';
 
 interface ServiceStatusPanelProps {
-  filterFeatures?: string[];
+  filterFeatures?: readonly string[];
   title?: string;
+  anchorId?: string;
+  onStateChange?: () => void;
 }
 
-function serviceMatchesFilter(service: HomeServiceState, filterFeatures?: string[]): boolean {
+function serviceMatchesFilter(service: HomeServiceState, filterFeatures?: readonly string[]): boolean {
   if (!filterFeatures?.length) return true;
   return service.features.some((f) => filterFeatures.includes(f));
 }
 
-export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanelProps) {
+export function ServiceStatusPanel({ filterFeatures, title, anchorId, onStateChange }: ServiceStatusPanelProps) {
   const [services, setServices] = useState<ServiceUiState[]>([]);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<Set<string>>(new Set());
@@ -64,12 +66,13 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
       const payload = (await res.json()) as { services?: unknown };
       const list = Array.isArray(payload.services) ? (payload.services as HomeServiceState[]) : [];
       setServices(list.filter((s) => serviceMatchesFilter(s, filterFeatures)).map(adaptServiceState));
+      onStateChange?.();
     } catch {
       setServices([]);
     } finally {
       setLoading(false);
     }
-  }, [filterFeatures]);
+  }, [filterFeatures, onStateChange]);
 
   useEffect(() => {
     void fetchServices();
@@ -195,7 +198,7 @@ export function ServiceStatusPanel({ filterFeatures, title }: ServiceStatusPanel
   if (services.length === 0) return null;
 
   return (
-    <div className="space-y-3">
+    <div id={anchorId} className="space-y-3 transition-shadow">
       {title && (
         <SettingsText as="p" tone="muted" className="font-semibold uppercase tracking-[0.22em]">
           {title}

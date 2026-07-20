@@ -797,18 +797,90 @@ describe('GET /api/capabilities (Fastify)', () => {
       });
 
       assert.equal(res.statusCode, 200, res.payload);
-      assert.doesNotMatch(res.payload, /raw-secret|Bearer raw-secret|inline-secret/);
+      // F062: non-owner requests do NOT receive launch fields or env/headers —
+      // only transport/resolver/envKeys for display. All potentially-secret fields
+      // (command args can contain --api-key, URLs can contain tokens) are gated
+      // behind canReadMcpSecrets which requires owner identity.
       const item = res.json().items.find((entry) => entry.id === 'secret-mcp');
       assert.ok(item, 'expected secret-mcp board item');
       assert.equal(item.mcpServer.command, undefined);
       assert.equal(item.mcpServer.args, undefined);
       assert.equal(item.mcpServer.url, undefined);
-      assert.equal(item.mcpServer.env.API_KEY, REDACTED_SECRET);
-      assert.equal(item.mcpServer.headers.Authorization, REDACTED_SECRET);
+      assert.equal(item.mcpServer.env, undefined, 'env values must not leak to non-owner');
+      assert.equal(item.mcpServer.headers, undefined, 'headers must not leak to non-owner');
       assert.deepEqual(item.mcpServer.envKeys, ['API_KEY']);
     } finally {
       await app.close();
       await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('hides launch fields and secrets from non-owner localhost browser sessions', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const projectDir = await makeTmpDir('board-mcp-localhost-nonowner');
+    await writeCapabilitiesConfig(projectDir, {
+      version: 2,
+      capabilities: [
+        {
+          id: 'secret-mcp',
+          type: 'mcp',
+          enabled: true,
+          source: 'external',
+          mcpServer: {
+            command: 'node',
+            args: ['server.js', '--api-key=inline-secret'],
+            url: 'https://user:pass@example.test/mcp?token=inline-secret',
+            env: { API_KEY: 'raw-secret' },
+            headers: { Authorization: 'Bearer raw-secret' },
+          },
+        },
+      ],
+    });
+
+    const app = Fastify();
+    app.addHook('preHandler', async (request) => {
+      const raw = request.headers['x-test-session-user'];
+      if (typeof raw === 'string' && raw.trim()) {
+        request.sessionUserId = raw.trim();
+      }
+    });
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      // F062: non-owner cat session with localhost Origin — the exact vector
+      // from R1 review. Must NOT leak launch fields or env/headers.
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: {
+          ...NON_OWNER_SESSION_HEADERS,
+          host: 'localhost:3004',
+          origin: 'http://localhost:3003',
+        },
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const item = res.json().items.find((entry) => entry.id === 'secret-mcp');
+      assert.ok(item, 'expected secret-mcp board item');
+      // Launch fields hidden (args/url can contain inline secrets)
+      assert.equal(item.mcpServer.command, undefined, 'command must not leak to non-owner');
+      assert.equal(item.mcpServer.args, undefined, 'args with inline secrets must not leak');
+      assert.equal(item.mcpServer.url, undefined, 'url with inline tokens must not leak');
+      // Env/headers hidden
+      assert.equal(item.mcpServer.env, undefined, 'env values must not leak to non-owner');
+      assert.equal(item.mcpServer.headers, undefined, 'headers must not leak to non-owner');
+      // envKeys still visible for display
+      assert.deepEqual(item.mcpServer.envKeys, ['API_KEY']);
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
     }
   });
 
@@ -2473,9 +2545,10 @@ describe('GET /api/capabilities (Fastify)', () => {
       assert.equal(item.hasOverride, true);
       assert.equal(item.mcpServer.command, 'node');
       assert.deepEqual(item.mcpServer.args, ['project.js']);
-      assert.deepEqual(item.mcpServer.env, { PROJECT_TOKEN: REDACTED_SECRET });
+      assert.deepEqual(item.mcpServer.env, { PROJECT_TOKEN: 'project-secret' });
       assert.deepEqual(item.mcpServer.envKeys, ['PROJECT_TOKEN']);
-      assert.doesNotMatch(res.payload, /project-secret|global-secret|global.js|GLOBAL_TOKEN/);
+      // Global config should not leak into project override response
+      assert.doesNotMatch(res.payload, /global-secret|global.js|GLOBAL_TOKEN/);
     } finally {
       if (prevOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
       else process.env.DEFAULT_OWNER_USER_ID = prevOwner;
@@ -3299,6 +3372,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       assert.equal(config?.capabilities[0]?.mcpServer?.env?.API_KEY, 'raw-secret');
       assert.equal(config?.capabilities[0]?.mcpServer?.headers?.Authorization, 'Bearer raw-secret');
 
+      // Audit log still redacts secrets (persisted / potentially shared)
       const audit = await readAuditLog(projectDir);
       assert.equal(audit.length, 1);
       assert.doesNotMatch(JSON.stringify(audit), /raw-secret/);

@@ -1420,6 +1420,8 @@ describe('PluginResourceActivator skill safety', () => {
       });
 
       assert.equal(result.status, 'success');
+      // workingDir is the plugin's own folder (backward compat for plugin-local files),
+      // NOT the project root — args are resolved to absolute paths separately.
       assert.equal(persisted.capabilities[0].mcpServer.workingDir, join(pluginsDir, 'test-plugin'));
       assert.deepEqual(persisted.capabilities[0].mcpServer.env, { TEST_PLUGIN_TOKEN: 'from-env' });
     } finally {
