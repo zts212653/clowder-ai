@@ -41,7 +41,7 @@ function buildDeps(overrides = {}) {
       emitToUser: mock.fn(),
     },
     messageStore: {
-      markCanceled: mock.fn(async () => {}),
+      markCanceled: mock.fn(async () => ({ deliveryStatus: 'canceled' })),
     },
     ...overrides,
   };
@@ -647,6 +647,33 @@ describe('Queue Management API', () => {
     const del = deps.socketManager.emitToUser.mock.calls.find((c) => c.arguments[1] === 'message_deleted');
     assert.ok(del, 'message_deleted must be emitted');
     assert.equal(del.arguments[2].messageId, 'msg-inflight');
+  });
+
+  it('POST /queue/:entryId/steer immediate does NOT emit message_deleted when markCanceled is no-op (F258 phantom-emit guard)', async () => {
+    // F258: if the message was already delivered (or otherwise non-queued), markCanceled
+    // returns a non-canceled status. The gate must suppress the message_deleted emit —
+    // otherwise the client would flash-delete a delivered message.
+    enqueueEntry(deps.invocationQueue, { userId: 'user-a', content: 'inflight', targetCats: ['opus'] });
+    deps.invocationQueue.markProcessing('t1', 'user-a');
+    const inflight = deps.invocationQueue.findProcessingByCat('t1', 'opus');
+    inflight.messageId = 'msg-already-delivered';
+    const steered = enqueueEntry(deps.invocationQueue, { userId: 'user-a', content: 'steered', targetCats: ['opus'] });
+
+    deps.invocationTracker.has = mock.fn(() => false);
+    // Override: markCanceled returns delivered status (CAS no-op — message already delivered)
+    deps.messageStore.markCanceled = mock.fn(async () => ({ deliveryStatus: 'delivered' }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${steered.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { mode: 'immediate' },
+    });
+
+    assert.equal(res.statusCode, 202);
+    assert.equal(deps.messageStore.markCanceled.mock.calls.length, 1, 'markCanceled must be called');
+    const del = deps.socketManager.emitToUser.mock.calls.find((c) => c.arguments[1] === 'message_deleted');
+    assert.equal(del, undefined, 'message_deleted must NOT be emitted when cancel is a no-op');
   });
 
   it('POST /queue/:entryId/steer immediate scopes cancel broadcast to steered cat only (P1 cloud review)', async () => {
