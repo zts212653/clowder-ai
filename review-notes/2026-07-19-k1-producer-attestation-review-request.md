@@ -9,6 +9,7 @@ Pre-fix review SHA: `05ad80c6f789477bf313b76210dc6657e0edc577`
 - Add one shared `assertValidStoredMessageTimestamp()` admission rule to the memory and Redis message stores.
 - Run that rule before ID generation, idempotency work, store/index mutation, Redis commands, or append listeners.
 - Preserve fractional historical evidence through both Redis hydration paths; hydration is not new-write admission.
+- Preserve present-but-blank historical timestamp evidence as invalid instead of coercing it to epoch zero.
 - Preserve exclusive global/thread before-cursor pagination for that fractional historical evidence, including bounded multi-page consumer progress.
 - Cover the non-negative integral Date domain, chronological IDs, delivery-cursor monotonicity, expired-cursor recovery, and zero-side-effect rejection in paired memory/Redis tests.
 
@@ -49,7 +50,7 @@ Please reviewer check:
 | INV-1 pre-write admission | Invalid timestamps reject before IDs, idempotency state, memory/Redis records/indexes, or listeners change. | Memory size/listener assertions; isolated Redis keyspace/listener assertions; helper is first statement in both `append()` methods. |
 | INV-2 store parity | Memory and Redis use the same pure rule and stable error class/message. | Paired invalid-value tables assert `RangeError` and `/non-negative integer ECMAScript Date/`. |
 | INV-3 sortable valid-Date domain | Every newly persisted timestamp is an integral TimeClip value whose current ID prefix preserves chronological order. | `0`, `1`, and positive TimeClip max succeed; negative/fractional/N+1/NaN/infinities reject; ID/cursor/expired-cursor tests cover consumers. |
-| INV-4 hydration fidelity | Historical fractional timestamp evidence is neither truncated by Redis reads nor replayed by before-cursor pagination. | `Number()` hydration plus a direct legacy fractional hash/zset fixture covering global/thread before APIs and bounded collector progress; D3 raw audit still owns compatibility. |
+| INV-4 hydration fidelity | Historical fractional timestamp evidence is neither truncated/replayed, and present-but-blank timestamp evidence is not fabricated as epoch zero. | Shared Redis timestamp parser plus direct blank/whitespace/fractional/missing fixtures covering single and batch hydration; fractional hash/zset fixtures cover both before APIs and bounded collector progress. D3 raw audit still owns compatibility. |
 | INV-5 legacy honesty | New-write admission does not close historical M7 compatibility or any identifier leaf. | Plan/handoff keep legacy audit/migration and D1–D3 explicitly outside this slice. |
 
 ## E2E User Path Evidence
@@ -62,8 +63,9 @@ Exempt: this is an internal producer data-consistency guard with no UI or direct
 
 1. Is validation early enough in both implementations to guarantee zero idempotency and index side effects?
 2. Do `Number()` hydration and full numeric zset-score comparison jointly preserve legacy fractional cursor exclusivity while retaining all integer behavior?
-3. Is the temporary non-negative integral TimeClip domain the correct safe boundary until D2 replaces lexical cursor ordering?
-4. Does the narrow scope honestly avoid claiming historical M7 or M1/M2 closure?
+3. Does hydration keep blank/whitespace timestamp evidence invalid while retaining fractional and missing-field compatibility?
+4. Is the temporary non-negative integral TimeClip domain the correct safe boundary until D2 replaces lexical cursor ordering?
+5. Does the narrow scope honestly avoid claiming historical M7 or M1/M2 closure?
 
 Please validate every row in the Invariant Matrix independently.
 
@@ -95,6 +97,13 @@ The scan separately recorded the decision-gated sortable-ID/legacy risks above; 
 - Verified mechanism: `docs/SOP.md` requires frontmatter for every `docs/**/*.md`; `scripts/check-frontmatter.mjs` listed this exact path as missing.
 - Red→Green: the target moved from `missingFrontmatter` index `4` to no missing frontmatter, `doc_kind`, or `created` entry after adding F258 bug-report metadata.
 - Maintainer acceptance tail: added a bounded real-Redis `collectAllThreadMessages()` regression. With the old two score-truncation sites restored, it fails after three before-page calls with “pagination did not make progress”; with full numeric score equality it terminates in two calls with two unique records.
+
+## Remote review follow-up — `50f45244d`
+
+- Finding: P2 blank/whitespace Redis hash timestamp was coerced by `Number()` to epoch zero (`[FC:new]`).
+- Verified mechanism: both single and batch hydration used `Number(raw ?? '0')`; present-but-blank strings therefore became `0`, unlike the prior invalid `NaN` evidence.
+- Failure-mode audit: exactly two PR-delta timestamp hydration sites existed. Both now call one parser that distinguishes blank values from the existing missing-field default.
+- Red→Green: direct empty/whitespace fixtures failed first in single hydration because the value was `0`; GREEN keeps them `NaN` through `getById()` and `getRecent()`, while fractional `123.5` and missing-field `0` remain unchanged.
 
 ## Next Action
 
@@ -137,7 +146,7 @@ bash ./scripts/with-test-home.sh \
   bash ./scripts/run-isolated-redis-tests.sh -- \
   node --import "$(pwd)/test/helpers/setup-cat-registry.js" \
   --test --test-timeout=60000 test/redis-message-store.test.js
-  29 passed, 0 failed (isolated Redis on an ephemeral non-protected port)
+  30 passed, 0 failed (isolated Redis on an ephemeral non-protected port)
 
 node --test test/commands-route.test.js
   11 passed, 0 failed

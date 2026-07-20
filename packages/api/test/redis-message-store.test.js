@@ -193,6 +193,50 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(aliceOnly[0].content, 'alice msg');
   });
 
+  it('legacy hydration distinguishes blank timestamps from fractional and missing values', async () => {
+    const cases = [
+      { label: 'empty', timestamp: '', expected: Number.NaN },
+      { label: 'whitespace', timestamp: '   ', expected: Number.NaN },
+      { label: 'fractional', timestamp: '123.5', expected: 123.5 },
+      { label: 'missing', timestamp: undefined, expected: 0 },
+    ];
+    const seeded = [];
+    for (const [index, fixture] of cases.entries()) {
+      const score = Date.now() + index;
+      const id = generateSortableId(score);
+      await redis.hset(`msg:${id}`, {
+        id,
+        threadId: 'thread-legacy-blank-timestamp',
+        userId: 'u',
+        catId: '',
+        content: `legacy ${fixture.label} timestamp`,
+        mentions: '[]',
+        ...(fixture.timestamp === undefined ? {} : { timestamp: fixture.timestamp }),
+      });
+      await redis.zadd('msg:timeline', String(score), id);
+      seeded.push({ ...fixture, id });
+    }
+
+    for (const fixture of seeded) {
+      const actual = (await store.getById(fixture.id)).timestamp;
+      if (Number.isNaN(fixture.expected)) {
+        assert.ok(Number.isNaN(actual), `single hydration must preserve ${fixture.label} invalid evidence`);
+      } else {
+        assert.equal(actual, fixture.expected);
+      }
+    }
+
+    const recentById = new Map((await store.getRecent(10)).map((message) => [message.id, message]));
+    for (const fixture of seeded) {
+      const actual = recentById.get(fixture.id).timestamp;
+      if (Number.isNaN(fixture.expected)) {
+        assert.ok(Number.isNaN(actual), `batch hydration must preserve ${fixture.label} invalid evidence`);
+      } else {
+        assert.equal(actual, fixture.expected);
+      }
+    }
+  });
+
   it('getMentionsFor() returns messages mentioning a specific cat', async () => {
     const now = Date.now();
     await store.append({ userId: 'u', catId: null, content: 'hi opus', mentions: ['opus'], timestamp: now });
