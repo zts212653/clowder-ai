@@ -570,6 +570,10 @@ export interface HandleBackgroundMessageOptions {
   deletePendingCallback?: (threadId: string | undefined, catId: string, invocationId: string) => void;
 }
 
+function resolveBackgroundCatName(options: HandleBackgroundMessageOptions, catId: string): string {
+  return options.resolveCatName?.(catId) ?? catId;
+}
+
 export type ActiveRoutedAgentMessage = {
   type: string;
   catId: string;
@@ -1353,11 +1357,11 @@ export function consumeBackgroundSystemInfo(
       }
     } else if (parsed?.type === 'mode_switch_proposal') {
       const by = parsed.proposedBy ?? '猫猫';
-      sysContent = `${options.resolveCatName?.(by) ?? by} 提议切换到 ${parsed.proposedMode} 模式。`;
+      sysContent = `${resolveBackgroundCatName(options, by)} 提议切换到 ${parsed.proposedMode} 模式。`;
     } else if (parsed?.type === 'silent_completion') {
       // Bugfix: silent-exit — cat ran tools but produced no text response
       const detail = typeof parsed.detail === 'string' ? parsed.detail : '';
-      sysContent = detail || `${options.resolveCatName?.(msg.catId) ?? msg.catId} completed without a text response.`;
+      sysContent = detail || `${resolveBackgroundCatName(options, msg.catId)} completed without a text response.`;
     } else if (parsed?.type === 'invocation_preempted') {
       // Bugfix: silent-exit — invocation was superseded by a newer request
       sysContent = 'This response was superseded by a newer request.';
@@ -2442,7 +2446,7 @@ export function handleBackgroundAgentMessage(
       drainPendingBackgroundCallback(msg, options);
       options.addToast({
         type: 'success',
-        title: `${options.resolveCatName?.(msg.catId) ?? msg.catId} 完成`,
+        title: `${resolveBackgroundCatName(options, msg.catId)} 完成`,
         message: preview.slice(0, 80) + (preview.length > 80 ? '...' : ''),
         threadId: msg.threadId,
         duration: 5000,
@@ -2531,7 +2535,7 @@ export function handleBackgroundAgentMessage(
     }
     options.addToast({
       type: 'error',
-      title: `${options.resolveCatName?.(msg.catId) ?? msg.catId} 出错`,
+      title: `${resolveBackgroundCatName(options, msg.catId)} 出错`,
       message: msg.error ?? 'Unknown error',
       threadId: msg.threadId,
       duration: 8000,
@@ -2546,8 +2550,8 @@ export function handleBackgroundAgentMessage(
       options.store.updateThreadCatStatus(msg.threadId, msg.catId, 'done');
       options.addToast({
         type: 'success',
-        title: `${options.resolveCatName?.(msg.catId) ?? msg.catId} 完成`,
-        message: `${options.resolveCatName?.(msg.catId) ?? msg.catId} 已完成处理`,
+        title: `${resolveBackgroundCatName(options, msg.catId)} 完成`,
+        message: `${resolveBackgroundCatName(options, msg.catId)} 已完成处理`,
         threadId: msg.threadId,
         duration: 5000,
       });
