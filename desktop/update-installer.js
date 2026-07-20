@@ -116,6 +116,10 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, ti
     }
 
     request.on('response', (response) => {
+      // Guard: discard late response arriving after timeout/error settled the Promise.
+      // Without this, a stalled-then-recovered connection creates a write stream
+      // that races with the caller's retry.
+      if (settled) { response.destroy(); return; }
       activeResponse = response;
       let isResume = response.statusCode === 206;
       if (response.statusCode !== 200 && !isResume) {
@@ -186,6 +190,7 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, ti
     dlTimeout = setTimeout(() => {
       dbg('Download timeout (30 min)');
       if (activeResponse) activeResponse.destroy();
+      if (typeof request.abort === 'function') request.abort();
       settle(reject, new Error('Download timeout (30 minutes)'));
     }, timeoutMs || 30 * 60 * 1000);
 

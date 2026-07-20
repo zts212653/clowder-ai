@@ -235,6 +235,70 @@ describe('downloadAsset', () => {
     );
   });
 
+  test('timeout before response — late response discarded, no file created', async () => {
+    const dest = path.join(tempDir, 'app.dmg');
+    const net = {
+      request() {
+        const req = new EventEmitter();
+        req.setHeader = () => {};
+        req.abort = () => {};
+        req.end = () => {
+          // Response arrives 100ms AFTER the 50ms timeout
+          setTimeout(() => {
+            const res = new EventEmitter();
+            res.statusCode = 200;
+            res.headers = {};
+            res.destroy = () => {};
+            req.emit('response', res);
+            process.nextTick(() => {
+              res.emit('data', Buffer.from('LATE_BODY'));
+              res.emit('end');
+            });
+          }, 100);
+        };
+        return req;
+      },
+    };
+    await assert.rejects(
+      () => downloadAsset(net, { name: 'app.dmg', size: 9 }, dest, '0.10.0', noop, noop, 50),
+      /timeout/i,
+    );
+    // Wait for the late response to fire, then verify no file was created
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(existsSync(dest), false, 'late response must not create file');
+  });
+
+  test('mid-download timeout destroys active response and aborts request', async () => {
+    const dest = path.join(tempDir, 'app.dmg');
+    let destroyed = false;
+    let aborted = false;
+    const net = {
+      request() {
+        const req = new EventEmitter();
+        req.setHeader = () => {};
+        req.abort = () => { aborted = true; };
+        req.end = () => {
+          process.nextTick(() => {
+            const res = new EventEmitter();
+            res.statusCode = 200;
+            res.headers = {};
+            res.destroy = () => { destroyed = true; };
+            req.emit('response', res);
+            // Send first chunk immediately, never send 'end' — let timeout fire
+            process.nextTick(() => res.emit('data', Buffer.from('PARTIAL')));
+          });
+        };
+        return req;
+      },
+    };
+    await assert.rejects(
+      () => downloadAsset(net, { name: 'app.dmg', size: 10000 }, dest, '0.10.0', noop, noop, 50),
+      /timeout/i,
+    );
+    assert.ok(destroyed, 'response must be destroyed on timeout');
+    assert.ok(aborted, 'request must be aborted on timeout');
+  });
+
   test('200 with existing partial overwrites (resume rejected by server)', async () => {
     const dest = path.join(tempDir, 'app.dmg');
     writeFileSync(dest, 'OLD_PARTIAL');
