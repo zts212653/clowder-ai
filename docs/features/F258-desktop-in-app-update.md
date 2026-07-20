@@ -66,8 +66,8 @@ created: 2026-07-07
   - 仅当 target > current（`app.getVersion()`）才提示，天然不提示降级。
 - 每个候选 asset 记录 **四元组 `{ id, name, size, digest }`**（digest 直接来自 API response），作为后续下载与校验的绑定凭据。
 - 触发时机：启动后延迟 3min 首查（不抢启动带宽）→ 之后每 6h → tray 菜单「检查更新」手动触发。带 `If-None-Match` ETag 缓存；匿名限额 60 req/h/IP，频率远低于此。
-- 版本比较：自写 ~30 行 semver 数字比较（tag 规范固定 `vX.Y.Z`，不引第三方依赖）。
-- 平台 asset 解析：win → `CatCafe-Setup-{v}.exe`；mac → `CatCafe-{v}-{arm64|x64}.dmg`（按 `process.arch`）。
+- 版本比较：自写 semver 比较（支持 `vX.Y.Z` 及 pre-release 后缀如 `-rc.1`、`-beta.2`，按 semver §11 规范排序；不引第三方依赖）。
+- 平台 asset 解析：win → `ClowderAI-Setup-{v}.exe`；mac → `ClowderAI-{v}-{arm64|x64}.dmg`（按 `process.arch`）。
 - 设置持久化 `{userData}/update-settings.json`：`{ autoCheck: true, skippedVersion: null, lastCheckAt, etag }`。
 - 失败（断网/超时/API 变更/rate limit）：log-only 静默。
 
@@ -102,8 +102,8 @@ downloader 完成+四元组校验通过
 spawn 前落盘 `{userData}/updates/pending-update.json`：
 
 ```json
-{ "targetVersion": "0.12.0", "assetId": 123, "assetName": "CatCafe-Setup-0.12.0.exe",
-  "digest": "sha256:…", "installerPath": "…\\updates\\CatCafe-Setup-0.12.0.exe",
+{ "targetVersion": "0.12.0", "assetId": 123, "assetName": "ClowderAI-Setup-0.12.0.exe",
+  "digest": "sha256:…", "installerPath": "…\\updates\\ClowderAI-Setup-0.12.0.exe",
   "logPath": "…\\updates\\install.log", "startedAt": "…" }
 ```
 
@@ -226,3 +226,10 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
 - **r1 (2026-07-07, Maine Coon/Codex)**: REQUEST CHANGES——P1×2（checksum 应以 API digest 为主源；Win 安装失败恢复缺 journal）+ P2×2（latest 非 semver 选择器；portable installType 不是现状）。外部一手验证：electron-builder mac 签名要求、GitHub latest 语义、asset digest 字段、Range 206 实测。
 - **r2 (2026-07-07, Fable)**: 全部采纳修订。digest 字段与 config 脚本现状均独立复核确认；P2-1 升格为 MVP 直接做 `/releases` max-semver；顺手纳入 config version 硬编码存量 bug 修复。
 - **r2 确认 (2026-07-07, Maine Coon/Codex)**: **放行**。复核确认四项 findings 均进入验收口径。附非阻塞实现提醒：`[InstallDelete]` 后中断时恢复 dialog 不一定可达，须保证 app 外恢复路径（保留 installer/日志于固定位置 + 文档写明"不打开 app 也能重跑安装包"）→ 已固化进 §3.2 / §6 / Phase B。
+- **r3 (2026-07-20, 布偶猫 Opus 实现 + 缅因猫 Codex review PR #1105)**:
+  - 实现 Phase A–D 全部模块，提 PR #1105
+  - 修复 P1：asset 名从 `CatCafe-*` 对齐到 `ClowderAI-*`（品牌契约，含 regression tests 从 build config 反推）
+  - 修复 P1：F204 plugin 迁移后 desktop 三处打包配置仍指向旧 root `plugins/`，改为 `packages/api/src/plugins`（含 4 条 regression tests）
+  - 修复：CI Redis 下载限流 → `GITHUB_TOKEN` header + Inno Setup `skipifsourcedoesntexist` 容错
+  - 增强：semver 比较支持 pre-release 后缀（`-rc.N`、`-beta.N`），支持 RC 版本发布与升级测试
+  - 双平台构建验证通过：Windows installer + portable、macOS DMG arm64 + x64
