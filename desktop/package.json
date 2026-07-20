@@ -124,7 +124,7 @@
         "to": "assets"
       },
       {
-        "from": "../plugins",
+        "from": "../packages/api/src/plugins",
         "to": "plugins"
       }
     ],

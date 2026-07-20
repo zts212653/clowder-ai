@@ -108,7 +108,8 @@ Source: "..\..\guides\*";                          DestDir: "{app}\guides"; \
   Flags: recursesubdirs createallsubdirs
 ; Plugin manifests/resources — loaded by PluginRegistry for pluginized schedules.
 ; Missing → GitHub schedule plugin and migrated pollers are unavailable.
-Source: "..\..\plugins\*";                         DestDir: "{app}\plugins"; \
+; Source: F204 moved plugins from root plugins/ into packages/api/src/plugins/.
+Source: "..\..\packages\api\src\plugins\*";        DestDir: "{app}\plugins"; \
   Flags: recursesubdirs createallsubdirs
 ; (Node.js runtime is shipped as node.tar.gz in bulk archives above)
 ; Desktop scripts (post-install config generation)
