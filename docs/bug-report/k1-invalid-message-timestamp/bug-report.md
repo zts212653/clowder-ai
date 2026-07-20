@@ -60,16 +60,31 @@ tips_exempt:
 | **7. 用户可见交互修正** | 无新增 UI；读取 legacy infinity cursor 时不再重复边界消息或让 bounded collector 无法终止。 |
 | **8. 验收** | 隔离 Redis RED 必须在 direct global/thread 排他或 bounded consumer progress 上失败；统一 Redis 数值解析后正负无穷、fractional、blank、missing 行为全部通过，完整 Redis suite 与 quality gate 无回归。 |
 
-#### Persisted-number representation matrix
+### Follow-up 诊断胶囊：`deliveredAt` 有效排序值表示分裂
 
-| Case | Hash `timestamp` text | Hydrated number | ZSET score input | `ZSCORE` wire text | Cursor-decoded number | Required relationship |
-|---|---|---:|---|---|---:|---|
-| missing hash field | absent | `0` (existing compatibility default) | N/A | N/A | N/A | Missing remains distinct from a present invalid value. |
-| present blank evidence | `''` / whitespace | `NaN` | N/A | N/A | N/A | Blank remains invalid evidence and is never fabricated as epoch zero. |
-| finite integer | `'123'` | `123` | `123` | `'123'` | `123` | Hash and ZSET decoders are numerically equal. |
-| finite fraction | `'123.5'` | `123.5` | `123.5` | `'123.5'` | `123.5` | Hash and ZSET decoders are numerically equal. |
-| positive infinity | `'Infinity'` | `Infinity` | `Infinity` | `'inf'` | `Infinity` | Canonical Redis alias compares equal to the hydrated cursor. |
-| negative infinity | `'-Infinity'` | `-Infinity` | `-Infinity` | `'-inf'` | `-Infinity` | Canonical Redis alias compares equal to the hydrated cursor. |
+| 栏位 | 内容 |
+|------|------|
+| **1. 现象** | 期望：queued → delivered 的有效排序值在 memory、Redis hash、global/user/thread ZSET、hydration 与分页 cursor 中完全一致。实际：`markDelivered` 接受任意 `number`，Redis 保留小数/无穷 score，但两个 hydration 路径用 `parseInt` 截断为整数或 `NaN`；bounded collector 会漏页或报 `ERR min or max is not a float`。 |
+| **2. 证据** | Exact HEAD `2dfc02072` 上，reviewer 通过公开 API 以 `100.25` / `100.5` 投递两条 queued 消息：Redis ZSET 保留原值，hydration 返回 `100`，page-size 1 只收集到最新消息；`Infinity` hydrate 为 `NaN` 后下一页 Redis range 直接报错。内存 store 保留原数字，因此两 store 已失去 parity。 |
+| **3. 问题假设或根因** | 已确认根因：此前 audit 把状态对象错误建模为 hash `timestamp` + ZSET score，遗漏了能重写同一排序 score 的第二 producer `markDelivered(deliveredAt)`。这是 plan/spec census 缺边，不是第三个独立 parser 点。 |
+| **4. 诊断策略** | 先把状态对象扩成 `deliveredAt ?? timestamp`，枚举 append/markDelivered writer、memory/Redis representation、两条 hydration path、三类 materialized history index、mention-index 例外及 cursor consumers；再选择入口拒绝策略并写 paired RED。 |
+| **5. 超时策略** | 若 20 分钟内无法证明 invalid transition 的 Redis 零副作用，记录 hash + timeline/user/thread/mention 五个 key 的前后快照；仍不接触运行实例 Redis。 |
+| **6. 预警策略** | 若修复需要迁移、跳过或认证历史 deliveredAt，立即停止；historical attestation/migration 与 M7 仍 RESERVED。若 invalid rejection 不能保持 queued 状态可重试，则回到 transition owner 重新建模。 |
+| **7. 用户可见交互修正** | 非法 delivery timestamp 立即以稳定 `RangeError` 失败；消息保持 queued，后续合法投递仍可完成，不产生静默漏历史或分页运行时错误。 |
+| **8. 验收** | memory + isolated real Redis 先 RED 证明 fractional/non-finite 值可写并分裂；GREEN 后完整非法域零副作用拒绝、合法边界精确 round-trip、invalid→valid retry 成功，page-size 1 collector 在两 store 均完整且唯一。 |
+
+#### Persisted-number representation and admission matrix
+
+| Producer / case | Admission | Hash text | Hydrated number | ZSET score / wire text | Required relationship |
+|---|---|---|---:|---|---|
+| legacy `timestamp` missing field | historical read | absent | `0` (existing compatibility default) | N/A | Missing remains distinct from a present invalid value. |
+| legacy `timestamp` blank evidence | historical read | `''` / whitespace | `NaN` | N/A | Blank remains invalid evidence and is never fabricated as epoch zero. |
+| legacy `timestamp` finite integer | historical read | `'123'` | `123` | `123` / `'123'` | Hash and ZSET decoders are numerically equal. |
+| legacy `timestamp` finite fraction | historical read | `'123.5'` | `123.5` | `123.5` / `'123.5'` | Hash and ZSET decoders are numerically equal. |
+| legacy `timestamp` positive infinity | historical read | `'Infinity'` | `Infinity` | `Infinity` / `'inf'` | Canonical Redis alias compares equal to the hydrated cursor. |
+| legacy `timestamp` negative infinity | historical read | `'-Infinity'` | `-Infinity` | `-Infinity` / `'-inf'` | Canonical Redis alias compares equal to the hydrated cursor. |
+| future `timestamp` or `deliveredAt` valid integer TimeClip | admit | exact decimal text | exact integer | exact integer / decimal text | All stores and effective-order consumers observe the same value. |
+| future `timestamp` or `deliveredAt` fraction, non-finite, negative, or TimeClip overflow | reject | no write | no new value | no score mutation | `RangeError` occurs before state/index side effects; valid retry remains possible. |
 
 `zscore` consumer audit (all eight call sites in `RedisMessageStore`):
 
@@ -79,3 +94,14 @@ tips_exempt:
 - `getByThreadAfter()` passes the raw score back to Redis range commands; Redis, rather than JavaScript, interprets that bound.
 
 No remaining `zscore` consumer converts a sorted-set score for JavaScript numeric equality outside the shared decoder.
+
+`deliveredAt` producer/consumer audit:
+
+- Runtime writers are `QueueProcessor` and `StartupReconciler`; both supply `Date.now()`-derived integral values through the sole owner `IMessageStore.markDelivered`.
+- In-memory `markDelivered` stores the exact value on the message object. Redis stores the same text in the hash and re-scores global, user, and thread indexes; all three are effective-history-order indexes.
+- The mention index intentionally retains append-time `timestamp` ordering and is not re-scored or reused by effective-history before cursors.
+- `getById()` and `hydrateMessages()` are the two Redis hash hydration paths. Future admitted `deliveredAt` values need no coercive fallback: decimal integer parsing is exact throughout the admitted TimeClip domain.
+- Effective before-cursor consumers were re-audited: `routes/messages.ts`, `AgentRouter.findRecentUserMentionFallback`, `collectAllThreadMessages`, duty-briefing pagination, and the paw-feel adapter all derive cursor/window time from `deliveredAt ?? timestamp` (the paw-feel adapter additionally de-duplicates IDs and stops on non-progress).
+- Non-pagination effective-time consumers `routes/callbacks.ts`, duty-briefing mention collection, and briefing day projection use the same projection and never serialize it into a Redis range bound.
+- Freshness consumers that compare message IDs explicitly retain creation-order semantics; their comments already document the delivered-score/ID split, and they do not parse or reuse `deliveredAt` numerically.
+- Rejecting unsafe transition values therefore keeps every materialized Redis bound in the admitted decimal-integer domain while preserving the existing creation-order and mention-order exceptions.
