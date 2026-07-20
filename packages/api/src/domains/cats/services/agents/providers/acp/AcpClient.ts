@@ -142,6 +142,14 @@ export class AcpClient {
   private closed = false;
   private exited = false;
   private readonly capacityListeners = new Set<(signal: AcpCapacitySignal) => void>();
+  /**
+   * #1186 P1: Per-session cancel callbacks — when cancelSession() is called,
+   * invoke the registered callback to settle the local prompt stream immediately.
+   * Without this, cancel only sends a JSONRPC notification; the pending .next()
+   * blocks until the provider cooperates or the idle watchdog fires, leaving
+   * the lease pinned for the full TTL.
+   */
+  private readonly sessionCancelCallbacks = new Map<string, () => void>();
   /** Client-level capacity signal — always captured regardless of listeners.
    *  Fallback for delayed stderr arriving after invoke listener is removed. */
   private _recentCapacitySignal: AcpCapacitySignal | null = null;
@@ -569,6 +577,28 @@ export class AcpClient {
     };
     this.capacityListeners.add(capacityInjector);
 
+    // #1186 P1: Register cancel callback so cancelSession() settles this stream
+    // immediately instead of waiting for the provider or idle watchdog.
+    const cancelCb = () => {
+      if (done) return;
+      log.info({ sessionId, eventCount }, 'Session cancel settled local prompt stream');
+      promptError = new AcpStreamIdleError(
+        sessionId,
+        Date.now() - (lastEventAt || Date.now()),
+        eventCount,
+        idleStallMs,
+      );
+      done = true;
+      if (idleTimer) clearTimeout(idleTimer);
+      if (budgetTimer) clearTimeout(budgetTimer);
+      if (waitResolve) {
+        const r = waitResolve;
+        waitResolve = null;
+        r();
+      }
+    };
+    this.sessionCancelCallbacks.set(sessionId, cancelCb);
+
     // Start activity-based budget timer — resets on each event from listener
     resetBudget();
 
@@ -611,6 +641,7 @@ export class AcpClient {
     } finally {
       if (idleTimer) clearTimeout(idleTimer);
       if (budgetTimer) clearTimeout(budgetTimer);
+      this.sessionCancelCallbacks.delete(sessionId);
       this.capacityListeners.delete(capacityInjector);
       const idx = this.notificationListeners.indexOf(listener);
       if (idx >= 0) this.notificationListeners.splice(idx, 1);
@@ -620,12 +651,20 @@ export class AcpClient {
   /**
    * Send session/cancel notification (fire-and-forget, no response expected).
    * Does NOT close the shared AcpClient — safe for concurrent sessions.
+   *
+   * #1186 P1: Also settles the local prompt stream via the registered cancel
+   * callback so the pending .next() resolves immediately. Without this, the
+   * generator stays suspended until the provider cooperates or the idle watchdog
+   * fires — leaving the lease pinned for the full TTL.
    */
   cancelSession(sessionId: string): void {
     if (!this.child?.stdin?.writable) return;
     const msg = { jsonrpc: '2.0', method: ACP_METHODS.sessionCancel, params: { sessionId } };
     this.child.stdin.write(`${JSON.stringify(msg)}\n`);
     log.info('Sent session/cancel for %s', sessionId);
+    // Settle the local prompt stream immediately
+    const cb = this.sessionCancelCallbacks.get(sessionId);
+    if (cb) cb();
   }
 
   async close(): Promise<void> {

@@ -393,7 +393,9 @@ export class AcpAgentService implements AgentService {
       const promptDigest = createPromptDigest(effectivePrompt);
       // #1186: Thread resolved idle TTL to promptStream so the watchdog respects
       // the member's ACP Idle TTL (or 30m default) instead of hardcoded 90s/180s.
-      const promptStreamOpts = { idleStallMs: this.idleTtlMs, timeoutMs: this.idleTtlMs };
+      // Turn budget (timeoutMs) must exceed idle stall so AcpStreamIdleError fires
+      // first with configuredIdleStallMs. Add 60s margin to avoid timer races.
+      const promptStreamOpts = { idleStallMs: this.idleTtlMs, timeoutMs: this.idleTtlMs + 60_000 };
       log.info({ ...ctx, sessionId, promptDigest, idleTtlMs: this.idleTtlMs }, 'ACP promptStream starting');
       eventCount = 0;
       for await (const event of client.promptStream(sessionId, effectivePrompt, promptStreamOpts)) {
@@ -788,8 +790,13 @@ function toUserFacingError(providerName: string, errorCode: string, errorMsg: st
       return `${base}\n⚠️ ${label} 服务端容量不足（服务器繁忙），非 Clowder AI 系统故障。`;
     case 'stream_idle_stall':
       return `${base}\n⚠️ ${label} 服务端响应中断（服务器可能繁忙或不稳定），非 Clowder AI 系统故障。`;
-    case 'turn_budget_exceeded':
-      return `${base}\n⚠️ 本轮对话时间预算用完（${Math.round(900 / 60)}分钟），agent 可能在执行复杂工具链。非故障，可重试。`;
+    case 'turn_budget_exceeded': {
+      // #1186: Derive actual timeout from error message instead of hardcoding 15m.
+      // AcpTimeoutError format: "...did not respond within ${ms}ms"
+      const budgetMatch = errorMsg.match(/within (\d+)ms/);
+      const budgetMinutes = budgetMatch ? Math.round(Number(budgetMatch[1]) / 60_000) : '?';
+      return `${base}\n⚠️ 本轮对话时间预算用完（${budgetMinutes}分钟），agent 可能在执行复杂工具链。非故障，可重试。`;
+    }
     case 'mcp_pollution':
       return `${base}\n⚠️ ${label} 工具调用异常（MCP 服务端错误）。`;
     case 'init_failure':

@@ -82,6 +82,8 @@ export class AcpHttpStreamClient {
   private baseUrl = '';
   private initResult: AcpInitializeResult | null = null;
   private readonly capacityListeners = new Set<(signal: AcpCapacitySignal) => void>();
+  /** #1186 P1: Per-session cancel callbacks — settles the local prompt stream on cancel. */
+  private readonly sessionCancelCallbacks = new Map<string, () => void>();
   private _recentCapacitySignal: AcpCapacitySignal | null = null;
 
   constructor(private readonly config: AcpHttpStreamClientConfig) {}
@@ -359,6 +361,25 @@ export class AcpHttpStreamClient {
 
     // Start HTTP streaming request
     this.capacityListeners.add(capacityInjector);
+
+    // #1186 P1: Register cancel callback so cancelSession() settles this stream
+    const cancelCb = () => {
+      if (done) return;
+      log.info({ sessionId, eventCount }, 'HTTP cancel settled local prompt stream');
+      promptError = new AcpStreamIdleError(
+        sessionId,
+        Date.now() - (lastEventAt || Date.now()),
+        eventCount,
+        idleStallMs,
+      );
+      done = true;
+      if (idleTimer) clearTimeout(idleTimer);
+      if (budgetTimer) clearTimeout(budgetTimer);
+      controller.abort();
+      wakeConsumer();
+    };
+    this.sessionCancelCallbacks.set(sessionId, cancelCb);
+
     resetBudget();
 
     const streamPromise = (async () => {
@@ -493,10 +514,15 @@ export class AcpHttpStreamClient {
     } finally {
       if (idleTimer) clearTimeout(idleTimer);
       if (budgetTimer) clearTimeout(budgetTimer);
+      this.sessionCancelCallbacks.delete(sessionId);
       this.capacityListeners.delete(capacityInjector);
     }
   }
 
+  /**
+   * #1186 P1: Cancel also settles the local prompt stream so the pending .next()
+   * resolves immediately and the lease is released without waiting for the provider.
+   */
   cancelSession(sessionId: string): void {
     if (!this.port || this.closed || this.exited) return;
     const body = JSON.stringify({ jsonrpc: '2.0', method: ACP_METHODS.sessionCancel, params: { sessionId } });
@@ -504,6 +530,9 @@ export class AcpHttpStreamClient {
       log.warn({ sessionId, err: err instanceof Error ? err.message : String(err) }, 'ACP HTTP cancel failed');
     });
     log.info('Sent HTTP session/cancel for %s', sessionId);
+    // Settle the local prompt stream immediately
+    const cb = this.sessionCancelCallbacks.get(sessionId);
+    if (cb) cb();
   }
 
   async close(): Promise<void> {

@@ -2901,7 +2901,7 @@ describe('#1186: iterator lease cleanup (Pool at capacity regression)', () => {
 
 // #1186: TTL propagation — AcpAgentService threads idleTtlMs to promptStream
 describe('#1186: idleTtlMs propagation (AcpAgentService → promptStream)', () => {
-  it('passes configured idleTtlMs as idleStallMs + timeoutMs to promptStream', async () => {
+  it('passes configured idleTtlMs as idleStallMs, timeoutMs = idleTtlMs + 60s to promptStream', async () => {
     let capturedPromptStreamOpts = null;
     const fakeClient = {
       recentCapacitySignal: null,
@@ -2946,7 +2946,11 @@ describe('#1186: idleTtlMs propagation (AcpAgentService → promptStream)', () =
 
     assert.ok(capturedPromptStreamOpts, 'promptStream must receive options');
     assert.equal(capturedPromptStreamOpts.idleStallMs, 1_800_000, 'idleStallMs = configured idleTtlMs');
-    assert.equal(capturedPromptStreamOpts.timeoutMs, 1_800_000, 'timeoutMs = configured idleTtlMs');
+    assert.equal(
+      capturedPromptStreamOpts.timeoutMs,
+      1_800_000 + 60_000,
+      'timeoutMs = idleTtlMs + 60s margin (budget must exceed stall)',
+    );
   });
 
   it('resolves DEFAULT_ACP_IDLE_TTL_MS (30m) when idleTtlMs is omitted from config', async () => {
@@ -3000,8 +3004,165 @@ describe('#1186: idleTtlMs propagation (AcpAgentService → promptStream)', () =
     );
     assert.equal(
       capturedPromptStreamOpts.timeoutMs,
-      DEFAULT_ACP_IDLE_TTL_MS,
-      `timeoutMs should be DEFAULT_ACP_IDLE_TTL_MS (${DEFAULT_ACP_IDLE_TTL_MS}), got ${capturedPromptStreamOpts.timeoutMs}`,
+      DEFAULT_ACP_IDLE_TTL_MS + 60_000,
+      `timeoutMs should be DEFAULT_ACP_IDLE_TTL_MS + 60s (${DEFAULT_ACP_IDLE_TTL_MS + 60_000}), got ${capturedPromptStreamOpts.timeoutMs}`,
+    );
+  });
+});
+
+// #1186 P1: Cancel + constrained pool — lease released promptly after cancel
+describe('#1186: cancel settles prompt stream and releases lease (P1)', () => {
+  it('cancel releases lease so next invoke succeeds on constrained pool', async () => {
+    const cancelFn = null;
+    let releaseCalls = 0;
+    const fakeClient = {
+      recentCapacitySignal: null,
+      onCapacity() {},
+      offCapacity() {},
+      async newSession() {
+        return { sessionId: 'cancel-lease-sess' };
+      },
+      cancelSession(sessionId) {
+        // This should now settle the prompt stream via cancel callback
+        cancelFn?.(sessionId);
+      },
+      async *promptStream(sessionId, text, options) {
+        // Simulate a stream that never produces events — waits forever
+        yield {
+          sessionId,
+          update: { sessionUpdate: 'session_init', agentInfo: { name: 'test' } },
+        };
+        // Block forever — cancel must break us out
+        await new Promise(() => {});
+      },
+    };
+
+    const release1 = () => {
+      releaseCalls++;
+    };
+    let acquireCount = 0;
+    const mockPool = {
+      acquire: async () => {
+        acquireCount++;
+        if (acquireCount > 1) {
+          // Second acquire — lease must have been released
+          return {
+            client: {
+              ...fakeClient,
+              async *promptStream() {
+                yield {
+                  sessionId: 'second-sess',
+                  update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ok' } },
+                };
+              },
+            },
+            release: () => {},
+          };
+        }
+        return { client: fakeClient, release: release1 };
+      },
+      rememberSession() {},
+      closeAll: async () => {},
+    };
+
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: mockPool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      idleTtlMs: 60_000,
+    });
+
+    // First invoke with abort
+    const ac = new AbortController();
+    const iter1 = adapter.invoke('hello', { signal: ac.signal })[Symbol.asyncIterator]();
+
+    // Get first event (session_init)
+    const first = await iter1.next();
+    assert.ok(!first.done, 'Should get first event');
+
+    // Abort — this triggers cancelSession which should settle promptStream
+    ac.abort();
+
+    // Drain remaining events (error + done)
+    const remaining = [];
+    for (;;) {
+      const r = await iter1.next();
+      remaining.push(r);
+      if (r.done) break;
+    }
+
+    // The lease should have been released
+    assert.equal(releaseCalls, 1, 'Lease must be released after cancel');
+
+    // Second invoke should succeed (pool not at capacity)
+    const msgs2 = [];
+    for await (const msg of adapter.invoke('world')) {
+      msgs2.push(msg);
+    }
+    assert.ok(msgs2.length > 0, 'Second invoke must succeed after first lease released');
+    assert.equal(acquireCount, 2, 'Pool must have been acquired twice');
+  });
+});
+
+// #1186 P2: idle stall fires before turn budget when thresholds differ
+describe('#1186: idle stall fires before turn budget (P2)', () => {
+  it('produces AcpStreamIdleError (not AcpTimeoutError) when idle exceeds configured TTL', async () => {
+    const { AcpStreamIdleError } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpClient.js');
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: {
+        acquire: async () => ({
+          client: {
+            recentCapacitySignal: null,
+            onCapacity() {},
+            offCapacity() {},
+            async newSession() {
+              return { sessionId: 'idle-race-sess' };
+            },
+            cancelSession() {},
+            async *promptStream(sessionId, text, options) {
+              // Verify budget > stall
+              assert.ok(
+                options.timeoutMs > options.idleStallMs,
+                `timeoutMs (${options.timeoutMs}) must exceed idleStallMs (${options.idleStallMs})`,
+              );
+              // Emit one event then go silent — idle stall should fire first
+              yield {
+                sessionId,
+                update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'start' } },
+              };
+              // Wait for idle stall to terminate us
+              await new Promise((_, reject) => {
+                setTimeout(
+                  () => reject(new AcpStreamIdleError(sessionId, options.idleStallMs, 1, options.idleStallMs)),
+                  options.idleStallMs + 50,
+                );
+              });
+            },
+          },
+          release: () => {},
+        }),
+        rememberSession() {},
+        closeAll: async () => {},
+      },
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      idleTtlMs: 200, // Short for testing
+    });
+
+    const msgs = [];
+    for await (const msg of adapter.invoke('hello')) {
+      msgs.push(msg);
+    }
+
+    const errorMsg = msgs.find((m) => m.type === 'error');
+    assert.ok(errorMsg, 'Should yield error');
+    // The error should be stream_idle_stall, NOT turn_budget_exceeded
+    assert.equal(
+      errorMsg.errorCode,
+      'stream_idle_stall',
+      `Expected stream_idle_stall, got ${errorMsg.errorCode}: ${errorMsg.error}`,
     );
   });
 });
