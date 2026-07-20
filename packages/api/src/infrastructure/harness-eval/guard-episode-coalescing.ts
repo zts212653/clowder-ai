@@ -141,6 +141,130 @@ export function countEpisodesAtLeast(events: GuardRejectionEvent[], k: number, g
   return Math.min(count, k);
 }
 
+// ---------------------------------------------------------------------------
+// Pagewise streaming counter (sol R5 P2-1)
+// ---------------------------------------------------------------------------
+
+/** Redis surface needed by the pagewise counter. */
+export interface PagewiseRedis {
+  zrangebyscore(key: string, min: number, max: number, ...args: unknown[]): Promise<string[]>;
+}
+
+/** Result of a pagewise threshold check with explicit provenance. */
+export interface PagewiseEpisodeResult {
+  /** Episode count — exact if `!isLowerBound`, at least this many otherwise. */
+  episodeCount: number;
+  /** True when early-stopped at k OR scan reached hard cap. */
+  isLowerBound: boolean;
+  /** Matching events processed (may be less than total if early-stopped). */
+  rawEventsSeen: number;
+  /** Redis page calls made (the perf metric — should be 1-2 for typical thresholds). */
+  pagesFetched: number;
+  /** Why the count stopped early, if it did. */
+  earlyStopReason?: 'threshold_met' | 'hard_cap';
+}
+
+const EVENTS_ZSET = 'guard-rejection:events';
+const PAGE_SIZE = 1000;
+const HARD_CAP = 10_000;
+
+/**
+ * Pagewise streaming episode counter: reads Redis pages one at a time,
+ * counting episodes as events arrive in timestamp order. Stops I/O as
+ * soon as `k` closed episodes are found — a 10k-event window for a
+ * single guard typically resolves in 1-2 page calls when k=3.
+ *
+ * ZRANGEBYSCORE returns events in score (timestamp) order, matching the
+ * sort prerequisite for gap-based coalescing. Same-timestamp tie-breaking
+ * differs from the in-memory sort (insertion order vs eventId lex), but
+ * this doesn't affect gap calculations (gap=0 always chains).
+ *
+ * Used by the threshold-escalation path to avoid materializing the full
+ * event window before checking a 3-episode threshold.
+ */
+export async function countEpisodesPagewise(
+  redis: PagewiseRedis,
+  opts: { since: number; until: number; guardId?: string },
+  k: number,
+  gapMs: number = EPISODE_GAP_MS,
+): Promise<PagewiseEpisodeResult> {
+  const upperBound = opts.until - 1;
+  const openRunTs = new Map<string, number>();
+  let count = 0;
+  let rawEventsSeen = 0;
+  let pagesFetched = 0;
+
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const raw = await redis.zrangebyscore(EVENTS_ZSET, opts.since, upperBound, 'LIMIT', offset, PAGE_SIZE);
+    pagesFetched++;
+
+    for (const s of raw) {
+      let parsed: GuardRejectionEvent;
+      try {
+        parsed = JSON.parse(s) as GuardRejectionEvent;
+      } catch {
+        continue;
+      }
+      if (opts.guardId && parsed.guardId !== opts.guardId) continue;
+      rawEventsSeen++;
+
+      if (rawEventsSeen > HARD_CAP) {
+        count += openRunTs.size;
+        return {
+          episodeCount: Math.min(count, k),
+          isLowerBound: true,
+          rawEventsSeen,
+          pagesFetched,
+          earlyStopReason: 'hard_cap',
+        };
+      }
+
+      const trusted = isTrustedKey(parsed.guardId) && isTrustedKey(parsed.threadId) && isTrustedKey(parsed.catId);
+      if (!trusted) {
+        count++;
+        if (count >= k) {
+          return {
+            episodeCount: k,
+            isLowerBound: true,
+            rawEventsSeen,
+            pagesFetched,
+            earlyStopReason: 'threshold_met',
+          };
+        }
+        continue;
+      }
+      const key = `${parsed.guardId}\0${parsed.threadId}\0${parsed.catId}`;
+      const prevTs = openRunTs.get(key);
+      if (prevTs !== undefined && parsed.timestamp - prevTs <= gapMs) {
+        openRunTs.set(key, parsed.timestamp);
+      } else {
+        if (prevTs !== undefined) {
+          count++;
+          if (count >= k) {
+            return {
+              episodeCount: k,
+              isLowerBound: true,
+              rawEventsSeen,
+              pagesFetched,
+              earlyStopReason: 'threshold_met',
+            };
+          }
+        }
+        openRunTs.set(key, parsed.timestamp);
+      }
+    }
+
+    if (raw.length < PAGE_SIZE) break;
+  }
+
+  count += openRunTs.size;
+  return { episodeCount: count, isLowerBound: false, rawEventsSeen, pagesFetched };
+}
+
+// ---------------------------------------------------------------------------
+// Full coalescer (snapshot/bundle path — needs complete episode objects)
+// ---------------------------------------------------------------------------
+
 /**
  * Coalesce raw guard-rejection events into distinct episodes.
  *

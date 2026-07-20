@@ -22,8 +22,8 @@
  */
 
 import type { RedisClient } from '@cat-cafe/shared/utils';
-import type { GuardRejectionEvent, GuardRejectionEventLog } from './GuardRejectionEventLog.js';
-import { countEpisodesAtLeast } from './guard-episode-coalescing.js';
+import type { GuardRejectionEvent } from './GuardRejectionEventLog.js';
+import { countEpisodesPagewise } from './guard-episode-coalescing.js';
 import type { TriggerNowInput, TriggerNowSkipped, TriggerNowSuccess } from './manual-trigger/trigger-now.js';
 import type { HandlerError } from './manual-trigger/types.js';
 
@@ -60,8 +60,15 @@ export interface EscalationCheckResult {
   count: number;
   /** Raw rejection events in window — preserved per PR #41 verdict. */
   rawEventCount: number;
-  /** Coalesced distinct episodes in window — the 3-per-7d threshold unit. */
+  /**
+   * Coalesced distinct episodes in window. When `episodeCountIsLowerBound`
+   * is true, this is at-least-k (early-stopped or hard-cap hit), NOT exact.
+   */
   episodeCount: number;
+  /** True when episodeCount is a lower bound (early-stop or hard cap). */
+  episodeCountIsLowerBound?: boolean;
+  /** Redis pages fetched (perf metric — threshold check should be 1-2). */
+  pagesFetched?: number;
   /** sol R2 P2: window hit the hard cap — counts are lower bounds; thresholdMet is conservative-true. */
   truncated?: boolean;
   thresholdMet: boolean;
@@ -78,7 +85,6 @@ export interface EscalationCheckResult {
 
 export interface GuardThresholdEscalationDeps {
   redis: RedisClient;
-  guardRejectionLog: GuardRejectionEventLog;
   /**
    * Trigger function — typically a partial application of handleTriggerNow
    * with all deps pre-bound. Returns narrowed result so we can distinguish
@@ -128,34 +134,23 @@ export async function checkGuardThreshold(
   const windowMs = ESCALATION_WINDOW_DAYS * 24 * 3600 * 1000;
   const since = event.timestamp - windowMs;
 
-  // Step 1: fetch this guard's window events and coalesce into episodes.
-  // PR #41 verdict: threshold counts distinct episodes, not raw events —
-  // a rapid retry burst (same guard+thread+cat, adjacent gap ≤ 60s) is ONE incident.
+  // Step 1: pagewise streaming episode count (sol R5 P2-1).
+  // Pages through Redis directly, counting episodes as events arrive in
+  // timestamp order. Stops I/O once ESCALATION_THRESHOLD episodes are found —
+  // a 10k-event window typically resolves in 1-2 page calls for k=3.
   // +1 because the query uses half-open [since, until) interval
   // (upperBound = until - 1). Without +1 the just-appended event at event.timestamp
   // is excluded and the threshold fires one episode late.
-  // Completeness-preserving query (sol P2-1): a silent limit slice would make
-  // episodeCount a quiet under-count. On cap-hit we log loudly — the count is
-  // a lower bound, and at 10k window events the threshold fired long ago.
-  const { events: windowEvents, truncated } = await deps.guardRejectionLog.queryWindowComplete({
-    since,
-    until: event.timestamp + 1,
-    guardId,
-  });
+  const pagewiseResult = await countEpisodesPagewise(
+    deps.redis,
+    { since, until: event.timestamp + 1, guardId },
+    ESCALATION_THRESHOLD,
+  );
+  const { episodeCount, isLowerBound, rawEventsSeen: rawEventCount, pagesFetched } = pagewiseResult;
+  const truncated = pagewiseResult.earlyStopReason === 'hard_cap';
   if (truncated) {
     console.warn(`[F257] escalation window truncated at hard cap for guard=${guardId}; episodeCount is a lower bound`);
   }
-  const rawEventCount = windowEvents.length;
-  // sol R4 P2-2: use early-stop counter instead of full coalescer — saves
-  // episode-object allocation, SHA-256 hashes, and anchor arrays. Early-stops
-  // at ESCALATION_THRESHOLD (k=3) so a 10k-event window doesn't process past
-  // the 3rd distinct episode. Returns min(actual, k) which is exactly what the
-  // threshold comparison needs. Redis paging is already handled by fetchWindow's
-  // LIMIT-based pagination; this optimizes the in-memory coalescing step.
-  const episodeCount = countEpisodesAtLeast(windowEvents, ESCALATION_THRESHOLD);
-  // sol R2 P2: when the window is truncated the count is a LOWER BOUND — we
-  // cannot prove "below threshold", so we must not return thresholdMet=false.
-  // A truncated window at the hard cap trivially warrants an eval look anyway.
   const meetsThreshold = episodeCount >= ESCALATION_THRESHOLD || truncated;
   if (!meetsThreshold) {
     return {
@@ -164,6 +159,8 @@ export async function checkGuardThreshold(
       count: rawEventCount,
       rawEventCount,
       episodeCount,
+      ...(isLowerBound ? { episodeCountIsLowerBound: true } : {}),
+      ...(pagesFetched ? { pagesFetched } : {}),
       ...(truncated ? { truncated } : {}),
       thresholdMet: false,
       alreadyEscalated: false,
@@ -181,6 +178,7 @@ export async function checkGuardThreshold(
     escalatedAt: event.timestamp,
     count: rawEventCount,
     episodeCount,
+    ...(isLowerBound ? { episodeCountIsLowerBound: true } : {}),
     triggeredBy: event.eventId,
   });
   const claimed = await deps.redis.set(dedupKey, claimValue, 'EX', DEDUP_TTL_SECONDS, 'NX');
@@ -192,6 +190,8 @@ export async function checkGuardThreshold(
       count: rawEventCount,
       rawEventCount,
       episodeCount,
+      ...(isLowerBound ? { episodeCountIsLowerBound: true } : {}),
+      ...(pagesFetched ? { pagesFetched } : {}),
       ...(truncated ? { truncated } : {}),
       thresholdMet: true,
       alreadyEscalated: true,
@@ -220,6 +220,8 @@ export async function checkGuardThreshold(
       count: rawEventCount,
       rawEventCount,
       episodeCount,
+      ...(isLowerBound ? { episodeCountIsLowerBound: true } : {}),
+      ...(pagesFetched ? { pagesFetched } : {}),
       ...(truncated ? { truncated } : {}),
       thresholdMet: true,
       alreadyEscalated: false,
@@ -240,6 +242,8 @@ export async function checkGuardThreshold(
       count: rawEventCount,
       rawEventCount,
       episodeCount,
+      ...(isLowerBound ? { episodeCountIsLowerBound: true } : {}),
+      ...(pagesFetched ? { pagesFetched } : {}),
       ...(truncated ? { truncated } : {}),
       thresholdMet: true,
       alreadyEscalated: false,
@@ -255,6 +259,8 @@ export async function checkGuardThreshold(
     count: rawEventCount,
     rawEventCount,
     episodeCount,
+    ...(isLowerBound ? { episodeCountIsLowerBound: true } : {}),
+    ...(pagesFetched ? { pagesFetched } : {}),
     ...(truncated ? { truncated } : {}),
     thresholdMet: true,
     alreadyEscalated: false,
