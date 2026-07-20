@@ -325,6 +325,91 @@ describe('delivery-order transition atomicity (PR #1193)', { skip: redisIsolatio
     const second = await store.markCanceled(msg.id);
     assert.equal(second, null, 'second markCanceled must return null (already canceled)');
   });
+
+  // 11. CAS receipt survives without getById (Lua-side HGETALL hydration regression)
+  it('markDelivered returns complete StoredMessage from Lua (no getById gap)', async () => {
+    const base = Date.now();
+    const threadId = 'thread-dlv-receipt-11';
+    const msg = await createQueued('userA', threadId, base);
+
+    // Monkey-patch getById to throw — proves CAS winner is hydrated from Lua, not getById
+    const origGetById = store.getById.bind(store);
+    store.getById = () => {
+      throw new Error('getById must not be called for CAS-win hydration');
+    };
+
+    try {
+      const delivered = await store.markDelivered(msg.id, base + 777);
+
+      assert.ok(delivered, 'CAS winner must return non-null');
+      assert.equal(delivered.id, msg.id, 'id must match');
+      assert.equal(delivered.userId, 'userA', 'userId must be hydrated');
+      assert.equal(delivered.threadId, threadId, 'threadId must be hydrated');
+      assert.equal(delivered.deliveryStatus, 'delivered', 'status must be delivered');
+      assert.equal(delivered.deliveredAt, base + 777, 'deliveredAt must be hydrated');
+      assert.equal(delivered.content, `queued-msg-${base}`, 'content must be hydrated');
+      assert.equal(delivered.timestamp, base, 'timestamp must be hydrated');
+    } finally {
+      store.getById = origGetById;
+    }
+  });
+
+  // 12. Analogous cancel path: CAS receipt without getById
+  it('markCanceled returns complete StoredMessage from Lua (no getById gap)', async () => {
+    const base = Date.now();
+    const threadId = 'thread-dlv-receipt-12';
+    const msg = await createQueued('userA', threadId, base);
+
+    const origGetById = store.getById.bind(store);
+    store.getById = () => {
+      throw new Error('getById must not be called for CAS-win hydration');
+    };
+
+    try {
+      const canceled = await store.markCanceled(msg.id);
+
+      assert.ok(canceled, 'CAS winner must return non-null');
+      assert.equal(canceled.id, msg.id, 'id must match');
+      assert.equal(canceled.deliveryStatus, 'canceled', 'status must be canceled');
+      assert.equal(canceled.userId, 'userA', 'userId must be hydrated');
+      assert.equal(canceled.threadId, threadId, 'threadId must be hydrated');
+      assert.equal(canceled.timestamp, base, 'timestamp must be hydrated');
+    } finally {
+      store.getById = origGetById;
+    }
+  });
+
+  // 13. TTL branch: reassign with ttlSeconds > 0 applies EXPIRE inside Lua
+  it('reassignUserId with positive TTL sets EXPIRE on new user zset key', async () => {
+    const base = Date.now();
+    const threadId = 'thread-dlv-ttl-13';
+
+    // Create a store WITH ttlSeconds to exercise the EXPIRE branch
+    const ttlStore = new RedisMessageStore(redis, { ttlSeconds: 60 });
+    const msg = await ttlStore.append({
+      userId: 'userA',
+      catId: null,
+      content: 'ttl-test-msg',
+      mentions: [],
+      timestamp: base,
+      threadId,
+      deliveryStatus: 'queued',
+    });
+    await ttlStore.markDelivered(msg.id, base + 100);
+
+    // Reassign to userF — EXPIRE should fire inside Lua
+    const reassigned = await ttlStore.reassignUserId(msg.id, 'userF');
+    assert.ok(reassigned, 'reassign must succeed');
+    assert.equal(reassigned.userId, 'userF');
+
+    // Verify the new user zset key has a positive TTL
+    const ttl = await redis.ttl(MessageKeys.user('userF'));
+    assert.ok(ttl > 0 && ttl <= 60, `new user zset key must have TTL (got ${ttl}s)`);
+
+    // Old user key should NOT have the message
+    const oldScore = await redis.zscore(MessageKeys.user('userA'), msg.id);
+    assert.equal(oldScore, null, 'old user must not have entry');
+  });
 });
 
 // ── In-memory MessageStore: markCanceled guard (deterministic RED) ──

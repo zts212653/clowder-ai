@@ -226,6 +226,14 @@ export class RedisMessageStore {
 
   async getById(id: string): Promise<StoredMessage | null> {
     const data = await this.redis.hgetall(MessageKeys.detail(id));
+    return this.hydrateHash(data);
+  }
+
+  /**
+   * Convert a Redis hash (Record<string, string> from HGETALL) into a StoredMessage.
+   * Shared by getById (direct HGETALL) and parseLuaHgetall (Lua-returned HGETALL).
+   */
+  private hydrateHash(data: Record<string, string>): StoredMessage | null {
     if (!data || !data.id) return null;
 
     const contentBlocks = safeParseContentBlocks(data.contentBlocks);
@@ -261,6 +269,21 @@ export class RedisMessageStore {
       ...(data.mentionsUser === '1' ? { mentionsUser: true } : {}),
       ...(data.replyTo ? { replyTo: data.replyTo } : {}),
     };
+  }
+
+  /**
+   * Parse a Lua HGETALL return (flat [key, val, key, val, ...] array) into StoredMessage.
+   * Used by CAS methods (markDelivered, markCanceled, reassignUserId) to hydrate
+   * the winning hash state atomically — no separate getById round-trip needed,
+   * eliminating the gap where a transient failure could lose the CAS receipt.
+   */
+  private parseLuaHgetall(result: unknown): StoredMessage | null {
+    if (!Array.isArray(result)) return null;
+    const data: Record<string, string> = {};
+    for (let i = 0; i < result.length; i += 2) {
+      data[result[i] as string] = result[i + 1] as string;
+    }
+    return this.hydrateHash(data);
   }
 
   /** Scan all stored message hashes (Redis-only repair helper). */
@@ -343,13 +366,14 @@ export class RedisMessageStore {
   async reassignUserId(id: string, nextUserId: string): Promise<StoredMessage | null> {
     const hashKey = MessageKeys.detail(id);
     const ttlArg = String(this.ttlSeconds ?? 0);
-    const applied = (await this.redis.eval(REASSIGN_LUA, 1, hashKey, id, nextUserId, this.keyPrefix, ttlArg)) as number;
+    const result = await this.redis.eval(REASSIGN_LUA, 1, hashKey, id, nextUserId, this.keyPrefix, ttlArg);
 
     // -1 = message not found in hash
-    if (applied === -1) return null;
-
-    // Always return canonical state from Redis (not stale JS object)
-    return this.getById(id);
+    if (result === -1) return null;
+    // 0 = same user (no-op) — no mutation committed, safe to read separately
+    if (result === 0) return this.getById(id);
+    // CAS won: result is HGETALL flat array — hydrate atomically (no getById gap)
+    return this.parseLuaHgetall(result);
   }
 
   async getRecent(limit?: number, userId?: string): Promise<StoredMessage[]> {
@@ -875,11 +899,10 @@ export class RedisMessageStore {
     assertValidStoredMessageTimestamp(deliveredAt);
     const hashKey = MessageKeys.detail(id);
     // Atomic CAS: queued → delivered, anything else → no-op.
-    // Returns the transitioned message ONLY when this call won the CAS;
-    // null means no-op (already delivered / canceled / not found).
-    const applied = (await this.redis.eval(DELIVER_LUA, 1, hashKey, id, String(deliveredAt), this.keyPrefix)) as number;
-    if (applied === 0) return null;
-    return this.getById(id);
+    // Lua returns HGETALL on CAS win (no separate getById round-trip needed).
+    const result = await this.redis.eval(DELIVER_LUA, 1, hashKey, id, String(deliveredAt), this.keyPrefix);
+    if (result === 0) return null;
+    return this.parseLuaHgetall(result);
   }
 
   /**
@@ -891,11 +914,10 @@ export class RedisMessageStore {
   async markCanceled(id: string): Promise<StoredMessage | null> {
     const hashKey = MessageKeys.detail(id);
     // Atomic CAS: queued → canceled, anything else → no-op.
-    // Returns the transitioned message ONLY when this call won the CAS;
-    // null means no-op (already canceled / delivered / not found).
-    const applied = (await this.redis.eval(CANCEL_LUA, 1, hashKey)) as number;
-    if (applied === 0) return null;
-    return this.getById(id);
+    // Lua returns HGETALL on CAS win (no separate getById round-trip needed).
+    const result = await this.redis.eval(CANCEL_LUA, 1, hashKey);
+    if (result === 0) return null;
+    return this.parseLuaHgetall(result);
   }
 
   /**

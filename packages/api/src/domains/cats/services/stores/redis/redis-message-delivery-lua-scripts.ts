@@ -31,9 +31,10 @@
  * ARGV[2] = deliveredAt (string number)
  * ARGV[3] = keyPrefix (e.g. "cat-cafe:") — for constructing zset keys inside Lua
  *
- * Returns: [applied (0|1)]
- * JS side discards the return — canonical state is re-read via getById().
- * Lua handles missing hash: HGET returns false → status ~= 'queued' → no-op.
+ * Returns: 0 on CAS no-op (not queued / missing), or HGETALL flat array on CAS win.
+ * Returning HGETALL eliminates the separate getById round-trip — the winning caller
+ * receives the post-mutation hash atomically, with no gap where a transient Redis
+ * failure could lose the CAS receipt.
  */
 export const DELIVER_LUA = `
 local hash = KEYS[1]
@@ -55,7 +56,7 @@ redis.call('ZADD', kp .. 'msg:thread:' .. threadId, tonumber(deliveredAt), msgId
 redis.call('ZADD', kp .. 'msg:timeline', tonumber(deliveredAt), msgId)
 redis.call('ZADD', kp .. 'msg:user:' .. userId, tonumber(deliveredAt), msgId)
 
-return 1
+return redis.call('HGETALL', hash)
 `;
 
 /**
@@ -63,8 +64,7 @@ return 1
  *
  * KEYS[1] = detail hash key (auto-prefixed by ioredis)
  *
- * Returns: [applied (0|1)]
- * Lua handles missing hash: HGET returns false → status ~= 'queued' → no-op.
+ * Returns: 0 on CAS no-op (not queued / missing), or HGETALL flat array on CAS win.
  */
 export const CANCEL_LUA = `
 local hash = KEYS[1]
@@ -73,7 +73,7 @@ if status ~= 'queued' then
   return 0
 end
 redis.call('HSET', hash, 'deliveryStatus', 'canceled')
-return 1
+return redis.call('HGETALL', hash)
 `;
 
 /**
@@ -90,10 +90,7 @@ return 1
  * Derives currentUserId and effectiveOrder (deliveredAt ?? timestamp) from
  * the hash INSIDE the script — never from a stale JS snapshot.
  *
- * Returns: applied (-1 | 0 | 1)
- * - -1 → message not found (hash missing)
- * -  0 → currentUserId already equals nextUserId (no-op)
- * -  1 → ownership transferred, user zset membership moved, TTL applied
+ * Returns: -1 (not found), 0 (same user / no-op), or HGETALL flat array on CAS win.
  */
 export const REASSIGN_LUA = `
 local hash = KEYS[1]
@@ -124,5 +121,5 @@ if ttl > 0 then
   redis.call('EXPIRE', newUserKey, ttl)
 end
 
-return 1
+return redis.call('HGETALL', hash)
 `;
