@@ -1,6 +1,7 @@
 'use client';
 
 import type { BacklogItem } from '@cat-cafe/shared';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 
 interface MissionControlCardProps {
   item: BacklogItem;
@@ -16,6 +17,7 @@ const PRIORITY_CLASS: Record<BacklogItem['priority'], string> = {
 };
 
 export function MissionControlCard({ item, selected, onSelect }: MissionControlCardProps) {
+  const resolveCatName = useCatNameResolver();
   return (
     <button
       type="button"
@@ -48,7 +50,7 @@ export function MissionControlCard({ item, selected, onSelect }: MissionControlC
       )}
       {item.suggestion && (
         <p className="mt-2 text-micro text-cafe-muted">
-          建议领取：@{item.suggestion.catId} · {item.suggestion.requestedPhase}
+          建议领取：{resolveCatName(item.suggestion.catId)} · {item.suggestion.requestedPhase}
         </p>
       )}
       {item.dependencies && (

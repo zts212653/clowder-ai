@@ -1,6 +1,7 @@
 'use client';
 
 import type { DispatchExecutionDigest } from '@cat-cafe/shared';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 
 interface DispatchProgressProps {
   digests: DispatchExecutionDigest[];
@@ -13,6 +14,7 @@ const STATUS_STYLES: Record<DispatchExecutionDigest['status'], { bg: string; tex
 };
 
 export function DispatchProgress({ digests }: DispatchProgressProps) {
+  const resolveCatName = useCatNameResolver();
   if (digests.length === 0) {
     return (
       <div className="rounded-xl bg-[var(--console-shell-bg)] p-8 text-center text-sm text-cafe-secondary">
@@ -39,7 +41,7 @@ export function DispatchProgress({ digests }: DispatchProgressProps) {
                 <span className={`rounded-full px-2 py-0.5 text-micro font-medium ${style.bg} ${style.text}`}>
                   {style.label}
                 </span>
-                <span className="text-xs font-medium text-cafe-secondary">@{digest.catId}</span>
+                <span className="text-xs font-medium text-cafe-secondary">{resolveCatName(digest.catId)}</span>
               </div>
               <span className="text-micro text-cafe-secondary">
                 {new Date(digest.completedAt).toLocaleString('zh-CN', {

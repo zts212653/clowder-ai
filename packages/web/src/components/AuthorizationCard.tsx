@@ -2,13 +2,7 @@
 
 import { useState } from 'react';
 import type { AuthPendingRequest, RespondScope } from '@/hooks/useAuthorization';
-
-const CAT_LABELS: Record<string, string> = {
-  opus: '布偶猫',
-  codex: '缅因猫',
-  gemini: '暹罗猫',
-  kimi: '梵花猫',
-};
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 
 /**
  * F192 Phase G AC-G10: Cancel reason options as deny button variants.
@@ -35,7 +29,8 @@ interface AuthorizationCardProps {
 
 export function AuthorizationCard({ request, onRespond }: AuthorizationCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const catLabel = CAT_LABELS[request.catId] ?? request.catId;
+  const resolveCatName = useCatNameResolver();
+  const catLabel = resolveCatName(request.catId);
 
   return (
     <div className="border border-conn-amber-ring bg-conn-amber-bg/80 rounded-lg p-3 mx-2 mb-2 shadow-sm animate-pulse-subtle">

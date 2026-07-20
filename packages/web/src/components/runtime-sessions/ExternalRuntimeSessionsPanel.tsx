@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCatTechnicalLabelResolver } from '@/hooks/useCatNameResolver';
 import { apiFetch } from '@/utils/api-client';
 import {
   formatBindingLabel,
@@ -140,6 +141,7 @@ function RuntimeSessionRow({
   session: ExternalRuntimeSessionListItem;
   onViewSession?: (sessionId: string, catId?: string) => void;
 }) {
+  const resolveCatName = useCatTechnicalLabelResolver();
   const badge = formatLifecycleBadge(session.lifecycle);
   const sealReason = formatSealReason(session.lifecycle.sealReason);
   const surfaceBadge = formatSurfaceBadge(session.surface);
@@ -158,12 +160,12 @@ function RuntimeSessionRow({
             )}
             {session.lifecycle.sealReason && <span className="text-micro text-cafe-muted">{sealReason}</span>}
             <span className="min-w-0 truncate text-xs font-semibold text-cafe-text">
-              {formatRuntimeSessionTitle(session)}
+              {formatRuntimeSessionTitle(session, resolveCatName)}
             </span>
           </div>
           <div className="grid min-w-0 gap-x-4 gap-y-1 text-micro text-cafe-muted sm:grid-cols-2">
             <span className="min-w-0 truncate">
-              {session.catId} · {session.model ?? 'model unknown'}
+              {resolveCatName(session.catId)} · {session.model ?? 'model unknown'}
             </span>
             <span className="min-w-0 truncate font-mono">{shortRuntimeId(session.runtimeSessionId)}</span>
             {session.runtimeConversationId && (

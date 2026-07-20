@@ -1,7 +1,9 @@
 'use client';
 
 import type React from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCatData } from '@/hooks/useCatData';
+import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { apiFetch } from '@/utils/api-client';
 import { HubIcon } from './hub-icons';
 
@@ -12,20 +14,6 @@ interface ToolUsageReport {
   daily: Array<{ date: string; native: number; mcp: number; skill: number }>;
   byCat: Record<string, Record<string, number>>;
 }
-
-const CAT_LABELS: Record<string, string> = {
-  opus: '布偶猫 Opus',
-  sonnet: '布偶猫 Sonnet',
-  'opus-45': '布偶猫 Opus 4.5',
-  codex: '缅因猫 Codex',
-  gpt52: '缅因猫 GPT-5.4',
-  spark: '缅因猫 Spark',
-  gemini: '暹罗猫 Gemini',
-  gemini25: '暹罗猫 Gemini 2.5',
-  antigravity: '孟加拉猫',
-  'antig-opus': '孟加拉猫 Opus',
-  opencode: '金渐层',
-};
 
 /* Dataviz tokens defined in console-tokens.css (--dataviz-*), derived from chart palette.
  * No JS override needed — CSS global tokens auto-adapt to light/dark mode. */
@@ -38,11 +26,9 @@ const CATEGORY_STYLE: Record<string, { color: string; bg: string; label: string;
 
 const CATEGORIES = ['native', 'mcp', 'skill'] as const;
 
-function catLabel(catId: string): string {
-  return CAT_LABELS[catId] ?? catId;
-}
-
 export function HubToolUsageTab() {
+  const { cats, getCatById } = useCatData({ fetch: false });
+  const resolveCatName = useCallback((catId: string) => resolveCatDisplayName(catId, getCatById), [getCatById]);
   const [report, setReport] = useState<ToolUsageReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,6 +66,12 @@ export function HubToolUsageTab() {
 
   const total = report?.summary.totalCalls ?? 0;
   const byCat = report?.summary.byCategory ?? { native: 0, mcp: 0, skill: 0 };
+  const catOptionIds = useMemo(() => {
+    const ids = new Set(cats.map((cat) => cat.id));
+    for (const catId of Object.keys(report?.byCat ?? {})) ids.add(catId);
+    if (catFilter) ids.add(catFilter);
+    return [...ids];
+  }, [cats, report?.byCat, catFilter]);
 
   return (
     <div className="space-y-4" style={DATAVIZ_TOKENS}>
@@ -96,9 +88,9 @@ export function HubToolUsageTab() {
             className="console-form-input text-xs"
           >
             <option value="">全部猫猫</option>
-            {Object.entries(CAT_LABELS).map(([id, label]) => (
-              <option key={id} value={id}>
-                {label}
+            {catOptionIds.map((catId) => (
+              <option key={catId} value={catId}>
+                {resolveCatName(catId)}
               </option>
             ))}
           </select>
@@ -151,7 +143,7 @@ export function HubToolUsageTab() {
           <SummaryCards total={total} byCategory={byCat} />
           <DailyTrend daily={report.daily} />
           <TopToolsTable tools={report.topTools} />
-          <ByCatSection byCat={report.byCat} />
+          <ByCatSection byCat={report.byCat} resolveCatName={resolveCatName} />
         </>
       )}
     </div>
@@ -308,7 +300,13 @@ function TopToolsTable({ tools }: { tools: ToolUsageReport['topTools'] }) {
 }
 
 /* ── Per-cat distribution ── */
-function ByCatSection({ byCat }: { byCat: Record<string, Record<string, number>> }) {
+function ByCatSection({
+  byCat,
+  resolveCatName,
+}: {
+  byCat: Record<string, Record<string, number>>;
+  resolveCatName: (catId: string) => string;
+}) {
   const entries = Object.entries(byCat).sort(
     (a, b) => Object.values(b[1]).reduce((s, v) => s + v, 0) - Object.values(a[1]).reduce((s, v) => s + v, 0),
   );
@@ -322,7 +320,7 @@ function ByCatSection({ byCat }: { byCat: Record<string, Record<string, number>>
           const catTotal = Object.values(cats).reduce((s, v) => s + v, 0);
           return (
             <div key={catId} className="flex items-center gap-3 text-xs">
-              <span className="w-28 truncate font-medium text-cafe">{catLabel(catId)}</span>
+              <span className="w-28 truncate font-medium text-cafe">{resolveCatName(catId)}</span>
               <div className="flex h-5 flex-1 overflow-hidden rounded-full bg-[var(--console-pill-bg)]">
                 {CATEGORIES.map((category) => {
                   const val = cats[category] ?? 0;

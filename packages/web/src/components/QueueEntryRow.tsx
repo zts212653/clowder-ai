@@ -19,6 +19,7 @@ export interface QueueEntryRowProps {
   isPaused: boolean;
   imageCount: number;
   ownerName: string;
+  resolveCatName: (catId: string) => string;
   onRemove: (id: string) => void;
   onRecallEdit: (id: string) => void;
   onSteer: (id: string) => void;
@@ -42,6 +43,7 @@ function QueueEntryRow({
   isPaused,
   imageCount,
   ownerName,
+  resolveCatName,
   onRemove,
   onRecallEdit,
   onSteer,
@@ -54,7 +56,7 @@ function QueueEntryRow({
   const rowToneClass = isPaused ? 'bg-conn-amber-bg/60' : isAgent ? 'bg-[var(--color-cocreator-surface)]' : '';
 
   const sourceLabel = isAgent
-    ? `${entry.callerCatId ?? '猫猫'} → ${entry.targetCats[0] ?? '猫猫'}`
+    ? `${entry.callerCatId ? resolveCatName(entry.callerCatId) : '猫猫'} → ${entry.targetCats[0] ? resolveCatName(entry.targetCats[0]) : '猫猫'}`
     : entry.source === 'connector'
       ? 'Connector'
       : ownerName;

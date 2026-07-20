@@ -9,6 +9,14 @@ import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const { mockResolveCatName } = vi.hoisted(() => ({
+  mockResolveCatName: vi.fn((catId: string) => catId),
+}));
+
+vi.mock('@/hooks/useCatNameResolver', () => ({
+  useCatNameResolver: () => mockResolveCatName,
+}));
+
 vi.mock('@/components/ThreadSidebar/thread-navigation', () => ({
   pushThreadRouteWithHistory: vi.fn(),
 }));
@@ -241,6 +249,8 @@ describe('CommunityPanel decision queue (E-PR2)', () => {
 
   beforeEach(() => {
     vi.setSystemTime(NOW);
+    mockResolveCatName.mockReset();
+    mockResolveCatName.mockImplementation((catId: string) => catId);
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -282,6 +292,18 @@ describe('CommunityPanel decision queue (E-PR2)', () => {
     expect(text.indexOf('Add a deterministic routing policy')).toBeLessThan(
       text.indexOf('Ready to close after public report'),
     );
+  });
+
+  it('keeps decision actor roles outside member identity projection', async () => {
+    mockResolveCatName.mockImplementation((catId: string) => `member:${catId}`);
+    installFetchMock([DIRECTION_ITEM]);
+
+    await renderPanel(root);
+
+    const item = container.querySelector(`[data-testid="decision-item-${DIRECTION_ITEM.id}"]`);
+    expect(item?.textContent).toContain('cvo');
+    expect(item?.textContent).not.toContain('member:cvo');
+    expect(mockResolveCatName).not.toHaveBeenCalledWith('cvo');
   });
 
   it('passes routeRecommendation with the assigned owner when accepting a direction queue item', async () => {

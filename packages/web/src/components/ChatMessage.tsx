@@ -1,9 +1,11 @@
 'use client';
 
 import type { CSSProperties } from 'react';
+import { formatSessionSealRequested, formatVisibleSystemInfo } from '@/hooks/system-info-visible';
 import { type CatData, formatCatName } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { useTts } from '@/hooks/useTts';
+import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { catColorVar, catSlug } from '@/lib/cat-slug';
 import { CO_CREATOR_COLOR } from '@/lib/color-defaults';
 import { hexToOklch } from '@/lib/color-utils';
@@ -105,6 +107,18 @@ export function ChatMessage({
   const isSystem = message.type === 'system';
   const isSummary = message.type === 'summary';
   const isConnector = message.type === 'connector';
+  const projectedSystemContent = message.extra?.systemInfo
+    ? ((
+        formatVisibleSystemInfo(
+          message.extra.systemInfo.payload,
+          (catId) => resolveCatDisplayName(catId, getCatById),
+          message.extra.systemInfo.fallbackCatId,
+        ) ??
+        formatSessionSealRequested(message.extra.systemInfo.payload, (catId) =>
+          resolveCatDisplayName(catId, getCatById),
+        )
+      )?.content ?? message.content)
+    : message.content;
 
   const catData = message.catId ? getCatById(message.catId) : undefined;
   const catStyle = catData
@@ -327,7 +341,7 @@ export function ChatMessage({
       <div data-message-id={message.id} className={`flex justify-center ${isTool ? 'mb-1' : 'mb-3'}`}>
         <div className={`text-sm px-4 py-2 rounded-lg whitespace-pre-wrap text-left max-w-[85%] ${toneClass}`}>
           {isFollowup && <span className="mr-1">🔗</span>}
-          {message.content}
+          {projectedSystemContent}
           {isFollowup && (
             <span className="block mt-1 text-xs text-[var(--color-cocreator-primary)]">
               输入 @猫名 跟进 来发起 follow-up
@@ -484,7 +498,7 @@ export function ChatMessage({
                   message.whisperTo
                     ?.map((id) => {
                       const cat = getCatById(id);
-                      return cat ? cat.displayName : id;
+                      return cat ? formatCatName(cat) : id;
                     })
                     .join(', ') ?? ''
                 }`}

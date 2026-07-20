@@ -85,10 +85,13 @@ export function formatSurfaceBadge(surface: string | undefined): RuntimeSurfaceB
   return null;
 }
 
-export function formatRuntimeSessionTitle(session: ExternalRuntimeSessionListItem): string {
+export function formatRuntimeSessionTitle(
+  session: ExternalRuntimeSessionListItem,
+  resolveCatName: (catId: string) => string = (catId) => catId,
+): string {
   const title = session.title?.trim();
   if (title) return title;
-  return `${session.catId} · ${session.model ?? shortRuntimeId(session.runtimeSessionId)}`;
+  return `${resolveCatName(session.catId)} · ${session.model ?? shortRuntimeId(session.runtimeSessionId)}`;
 }
 
 export function shortRuntimeId(id: string): string {

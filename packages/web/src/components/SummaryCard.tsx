@@ -2,6 +2,7 @@
 
 import { useCatData } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
+import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { CatAvatar } from './CatAvatar';
 import { HubIcon } from './hub-icons';
 
@@ -27,7 +28,12 @@ export function SummaryCard({ topic, conclusions, openQuestions, createdBy, time
   const coCreator = useCoCreatorConfig();
   const catData = getCatById(createdBy);
   // Special case: 'system' createdBy → '系统纪要', otherwise use cat displayName or configured co-creator name
-  const creatorLabel = createdBy === 'system' ? '系统纪要' : (catData?.displayName ?? coCreator.name);
+  const creatorLabel =
+    createdBy === 'system'
+      ? '系统纪要'
+      : createdBy === 'user'
+        ? coCreator.name
+        : resolveCatDisplayName(createdBy, getCatById);
 
   return (
     <div className="flex justify-center mb-4">

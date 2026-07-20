@@ -2,6 +2,7 @@
 
 import { useCatData } from '@/hooks/useCatData';
 import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
+import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import type { CatStatusType, LivenessWarningSnapshot } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 
@@ -95,8 +96,7 @@ export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps
   const status: CatStatusType = catStatuses[catId] ?? 'pending';
   if (status === 'done') return null;
 
-  const catData = getCatById(catId);
-  const name = catData?.displayName ?? catId;
+  const name = resolveCatDisplayName(catId, getCatById);
   const warning: LivenessWarningSnapshot | undefined = catInvocations?.[catId]?.livenessWarning;
 
   // F118 D2: spawning — CLI not yet connected, earliest signal

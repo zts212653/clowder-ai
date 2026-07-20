@@ -14,7 +14,7 @@
 
 import { BALL_SIZE_DEFAULT, BALL_SIZE_MAX, BALL_SIZE_MIN } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useCatData } from '@/hooks/useCatData';
+import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { useConciergeStore } from '@/stores/conciergeStore';
 import { apiFetch } from '@/utils/api-client';
 import { RadioOption, RangeSlider, TextInput, ToggleSwitch } from './ConciergeSettingsParts';
@@ -245,12 +245,12 @@ export function ConciergeSettingsContent() {
             >
               {staleDutyCat && (
                 <option key={staleDutyCat.id} value={staleDutyCat.id} disabled>
-                  {staleDutyCat.displayName} ({staleDutyCat.id}) — 不可用
+                  {formatCatName(staleDutyCat)} · {staleDutyCat.id} — 不可用
                 </option>
               )}
               {availableCats.map((cat) => (
                 <option key={cat.id} value={cat.id}>
-                  {cat.displayName} ({cat.id})
+                  {formatCatName(cat)} · {cat.id}
                 </option>
               ))}
             </select>

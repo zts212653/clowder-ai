@@ -13,6 +13,18 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(async () => ({ ok: true, json: async () => ({}) })),
 }));
 
+const TEST_CATS = [
+  { id: 'codex', displayName: '缅因猫', variantLabel: 'sol' },
+  { id: 'opus', displayName: '布偶猫', variantLabel: 'Fable' },
+];
+
+vi.mock('@/hooks/useCatData', () => ({
+  useCatData: () => ({
+    cats: TEST_CATS,
+    getCatById: (id: string) => TEST_CATS.find((cat) => cat.id === id),
+  }),
+}));
+
 const NOW = Date.now();
 
 const QUEUED_ENTRY: QueueEntry = {
@@ -142,7 +154,8 @@ describe('QueuePanel wait-reason render', () => {
     });
     const html = container.innerHTML;
     expect(html).toContain('等待');
-    expect(html).toContain('opus');
+    expect(html).toContain('布偶猫（Fable）');
+    expect(html).not.toContain('等待 <span class="font-medium text-cafe-secondary">opus</span>');
     expect(html).toContain('当前回合');
     expect(html).toContain('已运行');
   });
@@ -170,7 +183,7 @@ describe('QueuePanel wait-reason render', () => {
     });
     const html = container.innerHTML;
     expect(html).toContain('当前回合');
-    expect(html).toContain('opus');
-    expect(html).not.toContain('codex');
+    expect(html).toContain('布偶猫（Fable）');
+    expect(html).not.toContain('缅因猫（sol）');
   });
 });

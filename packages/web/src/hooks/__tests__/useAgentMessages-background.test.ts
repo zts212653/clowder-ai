@@ -30,7 +30,7 @@ let clearDoneTimeoutCalls: Array<string | undefined> = [];
 /**
  * Runs the extracted background-thread branch handler with real stores.
  */
-function simulateBackgroundMessage(msg: BackgroundAgentMessage) {
+function simulateBackgroundMessage(msg: BackgroundAgentMessage, resolveCatName?: (catId: string) => string) {
   handleBackgroundAgentMessage(msg, {
     store: useChatStore.getState(),
     bgStreamRefs: testBgStreamRefs,
@@ -38,6 +38,7 @@ function simulateBackgroundMessage(msg: BackgroundAgentMessage) {
     pendingCallbacks: testPendingCallbacks,
     nextBgSeq: () => testBgSeq++,
     addToast: (toast) => useToastStore.getState().addToast(toast),
+    resolveCatName,
     clearDoneTimeout: (threadId) => {
       clearDoneTimeoutCalls.push(threadId);
     },
@@ -107,6 +108,22 @@ describe('background thread socket handling', () => {
       expect(toasts[0].type).toBe('success');
       expect(toasts[0].title).toBe('codex 完成');
       expect(toasts[0].threadId).toBe('thread-bg');
+    });
+
+    it('projects the runtime member name in background completion toasts', () => {
+      simulateBackgroundMessage(
+        {
+          type: 'done',
+          catId: 'cat-eqdvbcxw',
+          threadId: 'thread-bg',
+          timestamp: Date.now(),
+        },
+        () => '缅因猫（sol）',
+      );
+
+      const [toast] = useToastStore.getState().toasts;
+      expect(toast.title).toBe('缅因猫（sol） 完成');
+      expect(toast.message).toBe('缅因猫（sol） 已完成处理');
     });
 
     it('text with isFinal also transitions to done', () => {
@@ -1202,9 +1219,36 @@ describe('background thread socket handling', () => {
       const ts = useChatStore.getState().getThreadState('thread-bg');
       expect(ts.messages).toHaveLength(3);
       expect(ts.messages[0]?.variant).toBe('info');
+      expect(ts.messages[0]?.extra?.systemInfo).toEqual({
+        v: 1,
+        payload: {
+          type: 'mode_switch_proposal',
+          proposedBy: '缅因猫',
+          proposedMode: 'execute',
+        },
+        fallbackCatId: 'codex',
+      });
       expect(ts.messages[1]?.variant).toBe('info');
       expect(ts.messages[2]?.variant).toBe('a2a_followup');
       expect(ts.messages[2]?.content).toContain('缅因猫 @了 opus');
+    });
+
+    it('projects runtime member names in generated system_info copy', () => {
+      const resolveCatName = (catId: string) => (catId === 'codex' ? '缅因猫（sol）' : catId);
+
+      simulateBackgroundMessage(
+        {
+          type: 'system_info',
+          catId: 'codex',
+          threadId: 'thread-bg',
+          content: JSON.stringify({ type: 'silent_completion' }),
+          timestamp: Date.now(),
+        },
+        resolveCatName,
+      );
+
+      const ts = useChatStore.getState().getThreadState('thread-bg');
+      expect(ts.messages[0]?.content).toBe('缅因猫（sol） completed without a text response.');
     });
 
     it('consumes invocation_usage system_info into thread invocation + message metadata (no raw JSON message)', () => {

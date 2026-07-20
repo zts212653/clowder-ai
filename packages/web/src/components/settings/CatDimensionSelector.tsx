@@ -6,7 +6,7 @@
  * would be active for the selected cat based on breed and provider.
  */
 
-import { useCatData } from '@/hooks/useCatData';
+import { formatCatName, useCatData } from '@/hooks/useCatData';
 import type { ClientId } from '../hub-cat-editor.model';
 import { defaultMcpSupportForClient } from '../hub-cat-editor.protocols';
 
@@ -30,7 +30,7 @@ export function CatDimensionSelector({ onSelect, selected }: CatDimensionSelecto
       <option value="">选择成员预览</option>
       {availableCats.map((cat) => (
         <option key={cat.id} value={cat.id}>
-          {cat.displayName}
+          {formatCatName(cat)}
         </option>
       ))}
     </select>

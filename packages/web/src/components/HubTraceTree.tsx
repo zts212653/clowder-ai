@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useCatTechnicalLabelResolver } from '@/hooks/useCatNameResolver';
 import { apiFetch } from '@/utils/api-client';
 import { buildForest, flattenForest, type SpanNode, type TraceSpan } from './trace-tree-utils';
 
@@ -161,6 +162,7 @@ function TreeWaterfall({
   selectedSpan: string | null;
   onSelectSpan: (id: string | null) => void;
 }) {
+  const resolveCatTechnicalLabel = useCatTechnicalLabelResolver();
   const flat = flattenForest(trace.forest);
   const totalDuration = trace.totalDurationMs || 1;
 
@@ -192,9 +194,14 @@ function TreeWaterfall({
               </span>
             </div>
             {catId ? (
-              <span className="w-14 flex-shrink-0 truncate text-micro text-cafe-muted">{catId}</span>
+              <span
+                className="w-24 flex-shrink-0 truncate text-micro text-cafe-muted"
+                title={resolveCatTechnicalLabel(catId)}
+              >
+                {resolveCatTechnicalLabel(catId)}
+              </span>
             ) : (
-              <span className="w-14 flex-shrink-0" />
+              <span className="w-24 flex-shrink-0" />
             )}
             <div className="relative h-3 flex-1 rounded bg-cafe-surface-elevated">
               <div
@@ -522,6 +529,7 @@ function PromptSection({ content, label, className = '' }: { content: string; la
 }
 
 function PromptMeta({ capture }: { capture: PromptCaptureData }) {
+  const resolveCatTechnicalLabel = useCatTechnicalLabelResolver();
   const { injectionDecision } = capture;
   return (
     <div className="space-y-2 text-micro">
@@ -536,7 +544,7 @@ function PromptMeta({ capture }: { capture: PromptCaptureData }) {
             <span className="font-mono">{capture.invocationId}</span>
           </div>
           <div>
-            <span className="text-cafe-muted">catId:</span> {capture.catId}
+            <span className="text-cafe-muted">member:</span> {resolveCatTechnicalLabel(capture.catId)}
           </div>
           <div>
             <span className="text-cafe-muted">model:</span> {capture.model}

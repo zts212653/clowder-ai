@@ -1,8 +1,18 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CatData } from '@/hooks/useCatData';
+import { _resetCatDataCache, type CatData, useCatData } from '@/hooks/useCatData';
 import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
+
+const mockApiFetch = vi.fn();
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: (...args: unknown[]) => mockApiFetch(...args),
+}));
+vi.mock('@/lib/mention-highlight', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/mention-highlight')>()),
+  refreshMentionData: vi.fn(),
+}));
+vi.mock('@/utils/transcription-corrector', () => ({ refreshSpeechAliases: vi.fn() }));
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
@@ -59,6 +69,8 @@ describe('ChatMessage notice rendering', () => {
   });
 
   beforeEach(() => {
+    _resetCatDataCache();
+    mockApiFetch.mockReset();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -68,6 +80,66 @@ describe('ChatMessage notice rendering', () => {
     act(() => root.unmount());
     container.remove();
     vi.restoreAllMocks();
+  });
+
+  it('reprojects an existing system-info notice after a deferred roster load without another event', async () => {
+    let resolveCatsResponse: ((response: Response) => void) | undefined;
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/config/cat-order') return Promise.resolve({ ok: false } as Response);
+      if (path === '/api/cats') {
+        return new Promise<Response>((resolve) => {
+          resolveCatsResponse = resolve;
+        });
+      }
+      return Promise.resolve({ ok: false } as Response);
+    });
+    const message = {
+      id: 'system-info-session-seal',
+      type: 'system',
+      variant: 'info',
+      content: 'cat-sol 的会话 #2 已封存（上下文 42%），下次调用将自动创建新会话',
+      timestamp: Date.now(),
+      extra: {
+        systemInfo: {
+          v: 1,
+          payload: {
+            type: 'session_seal_requested',
+            catId: 'cat-sol',
+            sessionSeq: 2,
+            healthSnapshot: { fillRatio: 0.42 },
+          },
+          fallbackCatId: 'cat-sol',
+        },
+      },
+    } as unknown as ChatMessageType;
+
+    function NoticeHarness() {
+      const { getCatById } = useCatData();
+      return React.createElement(ChatMessage, { message, getCatById });
+    }
+
+    await act(async () => {
+      root.render(React.createElement(NoticeHarness));
+    });
+    expect(container.textContent).toContain('cat-sol 的会话 #2');
+    expect(mockApiFetch.mock.calls.filter((call) => call[0] === '/api/cats')).toHaveLength(1);
+
+    const completeCatsRequest = resolveCatsResponse;
+    if (!completeCatsRequest) throw new Error('Expected the registry request to be pending');
+    await act(async () => {
+      completeCatsRequest({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            cats: [{ id: 'cat-sol', displayName: '缅因猫', variantLabel: 'sol' }],
+          }),
+      } as Response);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain('缅因猫（sol） 的会话 #2');
+    expect(container.textContent).not.toContain('cat-sol 的会话 #2');
+    expect(mockApiFetch.mock.calls.filter((call) => call[0] === '/api/cats')).toHaveLength(1);
   });
 
   it('renders inline mention hint as in-thread notice bar instead of connector bubble', () => {

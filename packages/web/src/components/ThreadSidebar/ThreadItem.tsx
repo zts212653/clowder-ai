@@ -1,6 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
+import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { catColorVar } from '@/lib/cat-slug';
 import type { ThreadState } from '@/stores/chat-types';
 import { useLabelStore } from '@/stores/label-store';
@@ -138,7 +139,7 @@ export function ThreadItem({
   // Build hover tooltip: full title + participants + time (clowder-ai#29)
   const displayTitle = title ?? (id === 'default' ? '大厅' : '未命名对话');
   const hasDraft = !isActive && (threadState?.hasDraft ?? false);
-  const participantNames = participants.map((catId) => getCatById(catId)?.displayName ?? catId).join(', ');
+  const participantNames = participants.map((catId) => resolveCatDisplayName(catId, getCatById)).join(', ');
   const tooltipLines = [displayTitle];
   if (participantNames) tooltipLines.push(`参与: ${participantNames}`);
   if (projectPath && projectPath !== 'default') tooltipLines.push(`路径: ${projectPath}`);
@@ -373,7 +374,7 @@ export function ThreadItem({
           {preferredCats && preferredCats.length > 0 && (
             <div
               className="flex items-center gap-0.5 ml-1"
-              title={`默认: ${preferredCats.map((id) => getCatById(id)?.displayName ?? id).join(', ')}`}
+              title={`默认: ${preferredCats.map((id) => resolveCatDisplayName(id, getCatById)).join(', ')}`}
             >
               <svg
                 viewBox="0 0 24 24"

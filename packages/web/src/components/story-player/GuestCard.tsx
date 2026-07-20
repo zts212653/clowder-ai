@@ -15,6 +15,7 @@
 
 // biome-ignore lint/correctness/noUnusedImports: React in scope needed for renderToStaticMarkup in tests
 import React, { useEffect, useRef, useState } from 'react';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -46,6 +47,7 @@ export interface GuestCardProps {
 // ---------------------------------------------------------------------------
 
 export function GuestCard({ contentSnippet, catId, visible, onFadeComplete }: GuestCardProps) {
+  const resolveCatName = useCatNameResolver();
   const [fading, setFading] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -124,7 +126,7 @@ export function GuestCard({ contentSnippet, catId, visible, onFadeComplete }: Gu
                 opacity: 0.7,
               }}
             >
-              · {catId}
+              · {resolveCatName(catId)}
             </span>
           )}
         </div>
