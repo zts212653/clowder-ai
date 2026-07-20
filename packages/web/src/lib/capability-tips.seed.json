@@ -763,6 +763,22 @@
     "owner": "opus-48"
   },
   {
+    "id": "feature-f127-native-cli-effort",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/features/F127-cat-instance-management.md", "anchor": "R-11" },
+    "structureSource": { "path": "docs/features/F127-cat-instance-management.md", "anchor": "遗留项" },
+    "bodySource": { "path": "docs/features/F127-cat-instance-management.md", "anchor": "R-11" },
+    "contexts": ["concierge_open", "feature_dev"],
+    "audience": ["cvo"],
+    "body": "在 Hub 成员的「高级运行时参数」里，CLI Effort 可选 preset，也可输入 Codex 等 CLI 的原生值（如 ultra）；保存后从下一次调用生效。",
+    "action": {
+      "type": "open_source",
+      "label": "查看成员配置说明",
+      "sourceRef": { "path": "docs/features/F127-cat-instance-management.md", "anchor": "R-11" }
+    },
+    "owner": "codex"
+  },
+  {
     "id": "feature-f245-friction-eval-rollup",
     "kind": "feature",
     "sourceRef": { "path": "docs/features/F245-friction-signal-eval.md", "anchor": "Friction Signal Eval" },
@@ -793,5 +809,21 @@
       "sourceRef": { "path": "docs/features/F257-harness-ledger.md", "anchor": "Harness Ledger" }
     },
     "owner": "gpt52"
+  },
+  {
+    "id": "feature-f205-video-plugins",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/features/F205-video-provider-plugins.md", "anchor": "User Journey" },
+    "structureSource": { "path": "docs/features/F205-video-provider-plugins.md", "anchor": "What" },
+    "bodySource": { "path": "docs/features/F205-video-provider-plugins.md", "anchor": "User Journey" },
+    "contexts": ["feature_dev"],
+    "audience": ["cvo", "developer"],
+    "body": "视频插件已就绪：设置 → 插件 → video-gen / video-analysis → 配置 provider 凭据（API Key 或 Access Key + Secret Key）并启用。生成结果可在对话中内联播放，分析结果直接返回文本。",
+    "action": {
+      "type": "open_source",
+      "label": "打开 F205 spec",
+      "sourceRef": { "path": "docs/features/F205-video-provider-plugins.md", "anchor": "User Journey" }
+    },
+    "owner": "opus"
   }
 ]
