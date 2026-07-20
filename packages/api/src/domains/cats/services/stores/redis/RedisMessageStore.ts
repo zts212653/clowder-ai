@@ -23,6 +23,7 @@ import {
   DEFAULT_THREAD_ID,
   generateSortableId,
   isDelivered,
+  isQueuedForDeliveryTransition,
 } from '../ports/MessageStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import { isSystemUserMessage } from '../visibility.js';
@@ -876,7 +877,7 @@ export class RedisMessageStore {
     assertValidStoredMessageTimestamp(deliveredAt);
     const msg = await this.getById(id);
     if (!msg) return null;
-    if (msg.deliveryStatus !== 'queued') return msg; // only transition queued → delivered
+    if (!isQueuedForDeliveryTransition(msg)) return msg;
     const pipeline = this.redis.multi();
     pipeline.hset(MessageKeys.detail(id), {
       deliveredAt: String(deliveredAt),
@@ -898,6 +899,7 @@ export class RedisMessageStore {
   async markCanceled(id: string): Promise<StoredMessage | null> {
     const msg = await this.getById(id);
     if (!msg) return null;
+    if (!isQueuedForDeliveryTransition(msg)) return msg;
     await this.redis.hset(MessageKeys.detail(id), { deliveryStatus: 'canceled' });
     msg.deliveryStatus = 'canceled';
     return msg;

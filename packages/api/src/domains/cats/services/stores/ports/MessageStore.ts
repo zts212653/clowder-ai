@@ -28,6 +28,11 @@ export function isDelivered(msg: StoredMessage): boolean {
   return !msg.deliveryStatus || msg.deliveryStatus === 'delivered';
 }
 
+/** Terminal delivery transitions are valid only while the message is queued. */
+export function isQueuedForDeliveryTransition(msg: Pick<StoredMessage, 'deliveryStatus'>): boolean {
+  return msg.deliveryStatus === 'queued';
+}
+
 /**
  * A tool event recorded during agent invocation (tool_use / tool_result).
  * Persisted alongside the assistant message so history reload can display them.
@@ -764,7 +769,7 @@ export class MessageStore {
     assertValidStoredMessageTimestamp(deliveredAt);
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
-    if (msg.deliveryStatus !== 'queued') return msg; // only transition queued → delivered
+    if (!isQueuedForDeliveryTransition(msg)) return msg;
     msg.deliveredAt = deliveredAt;
     msg.deliveryStatus = 'delivered';
     return msg;
@@ -774,6 +779,7 @@ export class MessageStore {
   markCanceled(id: string): StoredMessage | null {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
+    if (!isQueuedForDeliveryTransition(msg)) return msg;
     msg.deliveryStatus = 'canceled';
     return msg;
   }

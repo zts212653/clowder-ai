@@ -152,6 +152,14 @@ Reported: 1 P1, 1 P3
 - RED→GREEN: memory 32/33 → 33/33 and isolated Redis 33/34 → 34/34. Unsafe fractional/non-finite/valid-integer direct `deliveredAt` and terminal status all reject with zero side effects; a queued retry using the same idempotency key succeeds, rehydrates without `deliveredAt`, and Redis global/user/thread indexes retain the exact append timestamp.
 - Existing fixture audit: production call sites already use status absent/`queued`; test-only direct terminal fixtures were migrated to queued→transition or legacy-immediate creation, with their behavior suites green.
 
+## Maintainer `markCanceled` source-state P1 resolution
+
+- Stop-rule response: plan commit `a1d10c8d8` updates the truth-source matrix, INV-9/INV-10, Stateful Object Gate, transition table, adversarial matrix, and bug capsule before runtime code changes.
+- Chosen contract: one shared fail-closed source-state guard is consumed by both memory and Redis terminal methods. `markCanceled` applies only queued → canceled; missing returns `null`; legacy-immediate, delivered, and already-canceled records are returned unchanged.
+- RED→GREEN: memory 33/34 → 34/34 and isolated Redis 34/35 → 35/35. The Redis delivered no-op snapshots hydrated status/`deliveredAt`, raw hash, and global/user/thread scores; queued success and repeated cancellation are also covered.
+- Sibling-transition audit: the exact #1185 Redis tree has independent read→write delivery/cancellation paths and the three queue cancellation loops do not inspect the returned state before emitting `message_deleted`. #1185 therefore makes no concurrency or no-op event claim; atomic CAS and event suppression are explicitly owned by PR #1193 rather than duplicated here.
+- Expanded dependent set: 232/232 across MessageStore, delivery-time, F117 lifecycle, F232 aggregator, callback, commands, and reply-validation suites.
+
 ## Next Action
 
 Please perform an independent formal review of `origin/main...fix/k1-producer-attestation`, with a clear APPROVE or REQUEST_CHANGES verdict and severity on every finding. Do not treat this author-side scan as approval.

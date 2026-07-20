@@ -115,6 +115,36 @@ describe('MessageStore', () => {
     assert.equal(listenerCalls, 1);
   });
 
+  test('markCanceled() transitions only queued messages and preserves legacy/delivered state', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = new MessageStore();
+    const base = {
+      userId: 'user-cancel-owner',
+      catId: null,
+      mentions: [],
+      threadId: 'thread-cancel-owner',
+    };
+    const queued = store.append({ ...base, content: 'queued', timestamp: 100, deliveryStatus: 'queued' });
+    const legacy = store.append({ ...base, content: 'legacy', timestamp: 110 });
+    const delivered = store.append({ ...base, content: 'delivered', timestamp: 120, deliveryStatus: 'queued' });
+    store.markDelivered(delivered.id, 200);
+
+    const legacyBefore = { ...legacy };
+    const deliveredBefore = { ...delivered };
+
+    const canceled = store.markCanceled(queued.id);
+    assert.equal(canceled.deliveryStatus, 'canceled');
+    assert.equal(canceled.deliveredAt, undefined);
+
+    assert.deepEqual(store.markCanceled(legacy.id), legacyBefore, 'legacy-immediate must remain unchanged');
+    assert.deepEqual(store.getById(legacy.id), legacyBefore);
+    assert.deepEqual(store.markCanceled(delivered.id), deliveredBefore, 'delivered state must remain unchanged');
+    assert.deepEqual(store.getById(delivered.id), deliveredBefore);
+
+    const canceledBefore = { ...canceled };
+    assert.deepEqual(store.markCanceled(queued.id), canceledBefore, 'repeated cancellation must be a no-op');
+  });
+
   test('markDelivered() rejects unsafe order timestamps before state transition and permits a valid retry', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const invalidTimestamps = [

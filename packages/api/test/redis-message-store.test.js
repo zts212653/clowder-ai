@@ -177,6 +177,57 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(listenerCalls, 1);
   });
 
+  it('markCanceled() transitions only queued messages and preserves legacy/delivered hash and scores', async () => {
+    const admissionStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
+    const userId = 'user-cancel-owner';
+    const threadId = 'thread-cancel-owner';
+    const base = { userId, catId: null, mentions: [], threadId };
+    const queued = await admissionStore.append({
+      ...base,
+      content: 'queued',
+      timestamp: 100,
+      deliveryStatus: 'queued',
+    });
+    const legacy = await admissionStore.append({ ...base, content: 'legacy', timestamp: 110 });
+    const delivered = await admissionStore.append({
+      ...base,
+      content: 'delivered',
+      timestamp: 120,
+      deliveryStatus: 'queued',
+    });
+    await admissionStore.markDelivered(delivered.id, 200);
+
+    const snapshot = async (message) => ({
+      message: await admissionStore.getById(message.id),
+      hash: await redis.hgetall(`msg:${message.id}`),
+      timeline: await redis.zscore('msg:timeline', message.id),
+      user: await redis.zscore(`msg:user:${userId}`, message.id),
+      thread: await redis.zscore(`msg:thread:${threadId}`, message.id),
+    });
+    const legacyBefore = await snapshot(legacy);
+    const deliveredBefore = await snapshot(delivered);
+
+    const canceled = await admissionStore.markCanceled(queued.id);
+    assert.equal(canceled.deliveryStatus, 'canceled');
+    assert.equal(canceled.deliveredAt, undefined);
+    assert.equal((await redis.hgetall(`msg:${queued.id}`)).deliveryStatus, 'canceled');
+    assert.equal(await redis.zscore('msg:timeline', queued.id), '100');
+    assert.equal(await redis.zscore(`msg:user:${userId}`, queued.id), '100');
+    assert.equal(await redis.zscore(`msg:thread:${threadId}`, queued.id), '100');
+
+    assert.deepEqual(await admissionStore.markCanceled(legacy.id), legacyBefore.message);
+    assert.deepEqual(await snapshot(legacy), legacyBefore, 'legacy-immediate hash and scores must remain unchanged');
+
+    const deliveredResult = await admissionStore.markCanceled(delivered.id);
+    assert.equal(deliveredResult.deliveryStatus, 'delivered');
+    assert.equal(deliveredResult.deliveredAt, 200);
+    assert.deepEqual(await snapshot(delivered), deliveredBefore, 'delivered hash and scores must remain unchanged');
+
+    const canceledBefore = await snapshot(queued);
+    assert.deepEqual(await admissionStore.markCanceled(queued.id), canceledBefore.message);
+    assert.deepEqual(await snapshot(queued), canceledBefore, 'repeated cancellation must be a no-op');
+  });
+
   it('markDelivered() rejects unsafe order timestamps before hash/ZSET mutation and permits a valid retry', async () => {
     const admissionStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
     const invalidTimestamps = [
