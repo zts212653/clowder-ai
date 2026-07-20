@@ -268,3 +268,11 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
   - P2 fix: 超时后迟到 response 竞态 — response 回调入口增加 `settled` 守卫（迟到 response 直接 destroy，不建 write stream）；timeout handler 增加 `request.abort()` 主动取消底层连接
   - 新增 2 条竞态回归测试：timeout→late response 不写文件；mid-body timeout 验证 response.destroy + request.abort 调用
   - 全量 113 tests 通过（58 checker + 16 downloader + 12 installer + 15 manager + 12 config）
+- **r4e (2026-07-21, 缅因猫 Sol re-review → 布偶猫 Opus fix)**:
+  - Sol focused re-review of r4d fix: REQUEST CHANGES — 1×P2 writer 清理缺口
+  - P2 fix: 统一 settle+cleanup 路径 — `activeWs` 提升到 Promise 作用域；settle() 内嵌统一 cleanup（destroy response → end writer → abort request）；所有错误/超时/aborted handler 只需调 settle()
+  - 新增 response `aborted` 事件监听（Electron abort 官方契约）
+  - data handler 增加 `if (settled) return;` 阻止超时后写入
+  - 更新 mid-download 测试：mock abort 触发 aborted 事件、验证 progressCount=1（无迟写）、验证文件不含超时后数据
+  - 代码净减 3 行（settle+cleanup 整合消除了分散的手动 cleanup）
+  - 全量 113 tests 通过（58 checker + 16 downloader + 12 installer + 15 manager + 12 config）

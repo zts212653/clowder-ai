@@ -95,18 +95,22 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, ti
       existingSize = 0;
     }
 
-    // settle guard — MUST live in Promise scope so both request-error and
-    // response-error handlers can reach it (sol r4-review P1: settle was
-    // scoped inside response callback → request-error threw ReferenceError).
+    // State tracked at Promise scope so timeout, request-error, response-error,
+    // and aborted handlers all share a single settle+cleanup path.
     let settled = false;
     let dlTimeout = null;
+    let activeResponse = null;
+    let activeWs = null;
     const settle = (fn, val) => {
       if (settled) return;
       settled = true;
       if (dlTimeout) clearTimeout(dlTimeout);
+      // Unified cleanup: cancel request, destroy response, close writer
+      if (activeResponse) { activeResponse.destroy(); activeResponse = null; }
+      if (activeWs) { activeWs.end(); activeWs = null; }
+      if (typeof request.abort === 'function') request.abort();
       fn(val);
     };
-    let activeResponse = null;
 
     const request = net.request(url);
     request.setHeader('User-Agent', `ClowderAI/${appVersion}`);
@@ -157,13 +161,12 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, ti
 
       let downloaded = existingSize;
       const ws = fs.createWriteStream(destPath, { flags: isResume ? 'a' : 'w' });
+      activeWs = ws;
 
-      ws.on('error', (err) => {
-        response.destroy();
-        settle(reject, err);
-      });
+      ws.on('error', (err) => settle(reject, err));
 
       response.on('data', (chunk) => {
+        if (settled) return;
         downloaded += chunk.length;
         setProgressBar(asset.size > 0 ? downloaded / asset.size : -1);
         if (!ws.write(chunk)) {
@@ -179,18 +182,14 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, ti
         });
       });
 
-      response.on('error', (err) => {
-        ws.end();
-        settle(reject, err);
-      });
+      response.on('error', (err) => settle(reject, err));
+      response.on('aborted', () => settle(reject, new Error('Download aborted')));
     });
 
     // 30-minute overall timeout covers both connection and download phases.
     // Without this, a stalled connection (no response, no error) blocks forever.
     dlTimeout = setTimeout(() => {
       dbg('Download timeout (30 min)');
-      if (activeResponse) activeResponse.destroy();
-      if (typeof request.abort === 'function') request.abort();
       settle(reject, new Error('Download timeout (30 minutes)'));
     }, timeoutMs || 30 * 60 * 1000);
 

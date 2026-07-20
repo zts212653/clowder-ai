@@ -268,35 +268,53 @@ describe('downloadAsset', () => {
     assert.equal(existsSync(dest), false, 'late response must not create file');
   });
 
-  test('mid-download timeout destroys active response and aborts request', async () => {
+  test('mid-download timeout: writer closed, late data does not write or update progress', async () => {
     const dest = path.join(tempDir, 'app.dmg');
     let destroyed = false;
     let aborted = false;
+    let progressCount = 0;
     const net = {
       request() {
         const req = new EventEmitter();
         req.setHeader = () => {};
-        req.abort = () => { aborted = true; };
+        let resRef;
+        req.abort = () => {
+          aborted = true;
+          // Electron contract: abort() with active response triggers 'aborted'
+          if (resRef) resRef.emit('aborted');
+        };
         req.end = () => {
           process.nextTick(() => {
             const res = new EventEmitter();
             res.statusCode = 200;
             res.headers = {};
             res.destroy = () => { destroyed = true; };
+            resRef = res;
             req.emit('response', res);
-            // Send first chunk immediately, never send 'end' — let timeout fire
-            process.nextTick(() => res.emit('data', Buffer.from('PARTIAL')));
+            // First chunk before timeout
+            process.nextTick(() => res.emit('data', Buffer.from('FIRST')));
+            // Late chunk AFTER timeout — must not write or update progress
+            setTimeout(() => {
+              res.emit('data', Buffer.from('LATE'));
+              res.emit('end');
+            }, 100);
           });
         };
         return req;
       },
     };
     await assert.rejects(
-      () => downloadAsset(net, { name: 'app.dmg', size: 10000 }, dest, '0.10.0', noop, noop, 50),
+      () => downloadAsset(net, { name: 'app.dmg', size: 10000 }, dest, '0.10.0', () => progressCount++, noop, 50),
       /timeout/i,
     );
-    assert.ok(destroyed, 'response must be destroyed on timeout');
-    assert.ok(aborted, 'request must be aborted on timeout');
+    await new Promise((r) => setTimeout(r, 200));
+    assert.ok(destroyed, 'response must be destroyed');
+    assert.ok(aborted, 'request must be aborted');
+    assert.equal(progressCount, 1, 'only pre-timeout chunk triggers progress');
+    if (existsSync(dest)) {
+      const content = readFileSync(dest, 'utf-8');
+      assert.ok(!content.includes('LATE'), 'late data must not be in file');
+    }
   });
 
   test('200 with existing partial overwrites (resume rejected by server)', async () => {
