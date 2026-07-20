@@ -15,6 +15,7 @@ const REDIS_URL = process.env.REDIS_URL;
 
 describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisMessageStore;
+  let generateSortableId;
   let createRedisClient;
   let redis;
   let store;
@@ -25,6 +26,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
 
     const storeModule = await import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js');
     RedisMessageStore = storeModule.RedisMessageStore;
+    ({ generateSortableId } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js'));
     const redisModule = await import('@cat-cafe/shared/utils');
     createRedisClient = redisModule.createRedisClient;
 
@@ -66,8 +68,10 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(msg.userId, 'user1');
   });
 
-  it('append() rejects invalid Date timestamps before writing Redis or notifying listeners', async () => {
+  it('append() rejects timestamps outside the sortable-ID-safe Date domain before side effects', async () => {
     const invalidTimestamps = [
+      -1,
+      1.5,
       Number.NaN,
       Number.POSITIVE_INFINITY,
       Number.NEGATIVE_INFINITY,
@@ -90,7 +94,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
           timestamp,
           idempotencyKey: `invalid-date-${String(timestamp)}`,
         }),
-        { name: 'RangeError', message: /valid ECMAScript Date/ },
+        { name: 'RangeError', message: /non-negative integer ECMAScript Date/ },
       );
     }
 
@@ -99,9 +103,9 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(listenerCalls, 0, 'invalid timestamps must not notify listeners');
   });
 
-  it('append() admits ECMAScript Date boundaries and fractional milliseconds', async () => {
+  it('append() admits non-negative integer ECMAScript Date boundaries', async () => {
     const roundTripStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
-    for (const timestamp of [-8_640_000_000_000_000, 1.5, 8_640_000_000_000_000]) {
+    for (const timestamp of [0, 1, 8_640_000_000_000_000]) {
       const stored = await roundTripStore.append({
         userId: 'user1',
         catId: null,
@@ -116,7 +120,31 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     const hydrated = await roundTripStore.getRecent(10);
     assert.deepEqual(
       hydrated.map((message) => message.timestamp),
-      [-8_640_000_000_000_000, 1.5, 8_640_000_000_000_000],
+      [0, 1, 8_640_000_000_000_000],
+    );
+  });
+
+  it('expired cursor recovery preserves order across admitted timestamp boundaries', async () => {
+    const roundTripStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
+    const threadId = 'thread-expired-cursor-domain';
+    const later = [];
+    for (const timestamp of [2, 8_640_000_000_000_000]) {
+      later.push(
+        await roundTripStore.append({
+          userId: 'user1',
+          catId: null,
+          content: `timestamp ${timestamp}`,
+          mentions: [],
+          timestamp,
+          threadId,
+        }),
+      );
+    }
+    const expiredCursor = generateSortableId(1);
+
+    assert.deepEqual(
+      (await roundTripStore.getByThreadAfter(threadId, expiredCursor)).map((message) => message.id),
+      later.map((message) => message.id),
     );
   });
 

@@ -338,14 +338,14 @@ const MAX_MESSAGES = 2000;
 const DEFAULT_LIMIT = 50;
 
 /**
- * Fail closed before persisting a timestamp that cannot be projected to an
- * ECMAScript Date. Date construction applies the specification's TimeClip,
- * so valid fractional inputs remain accepted while NaN, infinities, and
- * values outside the Date range are rejected.
+ * Fail closed before persisting a timestamp that the current sortable-ID
+ * encoding cannot order. Until D2 replaces lexical message-ID cursors with an
+ * explicit order key, new writes are restricted to non-negative integral
+ * ECMAScript Date values. Historical hydration remains unchanged.
  */
 export function assertValidStoredMessageTimestamp(timestamp: number): void {
-  if (!Number.isFinite(timestamp) || Number.isNaN(new Date(timestamp).getTime())) {
-    throw new RangeError('message timestamp must be a valid ECMAScript Date value');
+  if (!Number.isInteger(timestamp) || timestamp < 0 || Number.isNaN(new Date(timestamp).getTime())) {
+    throw new RangeError('message timestamp must be a non-negative integer ECMAScript Date value');
   }
 }
 

@@ -2,11 +2,11 @@
 
 | 栏位 | 内容 |
 |------|------|
-| **1. 现象** | 期望：不属于 ECMAScript valid-Date 域的消息时间戳在任何存储副作用前被拒绝。实际：内存与 Redis store 都直接接受 `number`；内存可持久化 `NaN`，而 K-1 后续执行 `new Date(timestamp).toISOString()` 时才抛错。Redis 路径还会先进入幂等 claim。 |
-| **2. 证据** | 基点 `origin/main@191122256`。`MessageStore.append()` 在构造记录前没有 timestamp admission；`RedisMessageStore.append()` 在校验前生成 ID、读取/写入幂等键并组装 Redis transaction；K-1 `projectEnvelope()` 直接调用 `toISOString()`。Redis 的两条 hydration 路径还用 `parseInt()` 读取 timestamp，使合法 `1.5` 不保真。复现由本分支新增的内存与隔离 Redis 测试固化。 |
-| **3. 问题假设或根因** | 已确认根因：`AppendMessageInput.timestamp` 只有 TypeScript `number` 类型，没有共享的运行时 valid-Date admission；两个 store 都信任调用方，而读取/投影端隐含假设该值可被 `Date` 投影。Redis hydration 另行假设毫秒一定为整数，与 ECMAScript valid-Date 域不一致。 |
-| **4. 诊断策略** | 从两个 store 的 `append()` 入口逆向列出首个可观察副作用；先用 RED 测试证明无效值可越过入口，再引入一个纯 admission helper，并把它放在两个入口的第一条语句。 |
+| **1. 现象** | 期望：新写入 timestamp 既可被 ECMAScript Date 投影，也必须位于当前 lexical sortable-ID/cursor 编码的安全域。实际：初版修复接受完整 TimeClip，导致负数与小数 timestamp 生成的 ID 不按时间排序，进而破坏 delivery/mention/seen cursor 与 expired-cursor 恢复。 |
+| **2. 证据** | Exact HEAD `05ad80c6f` 上，本机 probe 将 `[-2,-1,0,1,1.5,2]` 生成的 ID 排为 `[-1,-2,0,1,2,1.5]`。`DeliveryCursorStore` 用字符串大小维护三个 cursor namespace；内存与 Redis `getByThreadAfter()` 在 cursor 缺失时也用 ID 字典序恢复。 |
+| **3. 问题假设或根因** | 已确认根因：write admission 只验证 Date TimeClip，却没有与下游 ID/cursor ordering contract 组合验证。Redis hydration 继续用 `Number()` 保留历史证据；历史负数/小数属于 D3 审计范围，不能由本次 future-write guard 改写。 |
+| **4. 诊断策略** | 从 append admission 画到 ID producer、三个 cursor namespace、内存/Redis after/before cursor consumers；先用 RED 证明负数/小数越过入口，再把 shared helper 临时收窄到 non-negative integral TimeClip，等待 D2 显式 cursor order 后再扩域。 |
 | **5. 超时策略** | 若 20 分钟内无法证明 Redis 的零副作用顺序，改用隔离 Redis 的 keyspace 快照与 listener spy 缩小范围；不接触运行实例 Redis。 |
 | **6. 预警策略** | 若修复开始需要选择 `messageId`/`threadId`/`actor.id` 的公开最大值、Unicode scalar 策略或存量迁移方案，立即停止：这些属于 #1165 shape/compatibility 决策，不是本 bug 的 valid-Date 修复。 |
-| **7. 用户可见交互修正** | 非法 producer 输入会在 append 边界以稳定的 `RangeError` 立即失败，不再先留下记录或幂等状态、随后在 Host 投影时崩溃。 |
-| **8. 验收** | `MessageStore` 与 `RedisMessageStore` 的命名测试均覆盖 `NaN`、正负无穷、Date 上下界 N+1，断言 `RangeError`、零记录/Redis key、零 listener；同时证明 Date 上下界与合法分数值可写入，且 Redis 单条/批量 hydration 均保真。 |
+| **7. 用户可见交互修正** | 超出当前 sortable-ID 安全域的 producer 输入会在 append 边界以稳定的 `RangeError` 立即失败，不留下记录、幂等状态或 listener 副作用。 |
+| **8. 验收** | 内存与隔离 Redis 均覆盖负数、小数、NaN、无穷、Date 越界值的零副作用拒绝；零、普通正整数、Date 正上界成功；另证明生成 ID 时间顺序、delivery cursor 单调性与两种 store 的 expired-cursor 恢复。 |

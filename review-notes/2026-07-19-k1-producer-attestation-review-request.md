@@ -1,15 +1,15 @@
-# Review Request: K-1 producer valid-Date admission
+# Review Request: K-1 producer sortable-safe Date admission
 
 Review-Target-ID: `fix-k1-producer-attestation`
 Branch: `fix/k1-producer-attestation`
-Code SHA: `ac0ba273f`
+Pre-fix review SHA: `05ad80c6f789477bf313b76210dc6657e0edc577`
 
 ## What
 
 - Add one shared `assertValidStoredMessageTimestamp()` admission rule to the memory and Redis message stores.
 - Run that rule before ID generation, idempotency work, store/index mutation, Redis commands, or append listeners.
-- Preserve valid fractional timestamps through both Redis hydration paths by replacing integer parsing with numeric parsing.
-- Cover invalid Date values, exact Date boundaries, fractional round trips, and zero-side-effect rejection in paired memory/Redis tests.
+- Preserve fractional historical evidence through both Redis hydration paths; hydration is not new-write admission.
+- Cover the non-negative integral Date domain, chronological IDs, delivery-cursor monotonicity, expired-cursor recovery, and zero-side-effect rejection in paired memory/Redis tests.
 
 ## Why
 
@@ -27,7 +27,7 @@ K-1 projects `StoredMessage.timestamp` through `Date#toISOString()`, but both st
 
 ## Tradeoff
 
-The helper follows the ECMAScript Date TimeClip domain, so valid fractional and expanded-year-boundary inputs remain accepted. Redis now round-trips fractions rather than truncating them. That preserves the existing accepted domain but does not repair the older `generateSortableId()` formatting assumptions for fractional/negative timestamps. Message-ID format/maxima, thread/actor bounds, Unicode-scalar admission, and legacy reconciliation remain decision-gated and RESERVED.
+The helper temporarily admits only non-negative integral TimeClip values because the current `generateSortableId()` and cursor stores compare IDs lexically. Redis hydration still round-trips historical fractions rather than truncating or rewriting evidence. D2 owns the explicit cursor-order repair and may restore full valid-Date admission only with memory/Redis compatibility coverage. Message-ID maxima, thread/actor bounds, Unicode-scalar admission, and legacy reconciliation remain decision-gated and RESERVED.
 
 ## Architecture Ownership
 
@@ -46,9 +46,9 @@ Please reviewer check:
 | Invariant | Assertion | Verification |
 |---|---|---|
 | INV-1 pre-write admission | Invalid timestamps reject before IDs, idempotency state, memory/Redis records/indexes, or listeners change. | Memory size/listener assertions; isolated Redis keyspace/listener assertions; helper is first statement in both `append()` methods. |
-| INV-2 store parity | Memory and Redis use the same pure rule and stable error class/message. | Paired invalid-value tables assert `RangeError` and `/valid ECMAScript Date/`. |
-| INV-3 valid-Date domain | Every newly persisted timestamp produces a non-invalid ECMAScript Date. | Exact ±8,640,000,000,000,000 boundaries and `1.5` succeed; N+1, NaN, and infinities reject. |
-| INV-4 hydration fidelity | A valid fractional timestamp is not silently truncated by Redis reads. | `getById()` and `getRecent()` both round-trip `1.5`. |
+| INV-2 store parity | Memory and Redis use the same pure rule and stable error class/message. | Paired invalid-value tables assert `RangeError` and `/non-negative integer ECMAScript Date/`. |
+| INV-3 sortable valid-Date domain | Every newly persisted timestamp is an integral TimeClip value whose current ID prefix preserves chronological order. | `0`, `1`, and positive TimeClip max succeed; negative/fractional/N+1/NaN/infinities reject; ID/cursor/expired-cursor tests cover consumers. |
+| INV-4 hydration fidelity | Historical fractional timestamp evidence is not silently truncated by Redis reads. | Existing `Number()` hydration remains unchanged; D3 raw audit still owns compatibility. |
 | INV-5 legacy honesty | New-write admission does not close historical M7 compatibility or any identifier leaf. | Plan/handoff keep legacy audit/migration and D1–D3 explicitly outside this slice. |
 
 ## E2E User Path Evidence
@@ -61,7 +61,7 @@ Exempt: this is an internal producer data-consistency guard with no UI or direct
 
 1. Is validation early enough in both implementations to guarantee zero idempotency and index side effects?
 2. Is `Number()` correct for the two Redis timestamp hydration paths while retaining all previously valid integer data?
-3. Does accepting the full TimeClip domain preserve the intended `occurredAt` contract without accidentally asserting sortable-ID compatibility?
+3. Is the temporary non-negative integral TimeClip domain the correct safe boundary until D2 replaces lexical cursor ordering?
 4. Does the narrow scope honestly avoid claiming historical M7 or M1/M2 closure?
 
 Please validate every row in the Invariant Matrix independently.
@@ -107,7 +107,7 @@ pnpm --filter @cat-cafe/api run build
 - Phase A1 acceptance criteria are implemented and paired across memory/Redis.
 - Phase A2 and Phase B are intentionally not implemented: no public maxima, scalar policy, generator format change, legacy mutation, beta publication, or consumer pin.
 - No UI, runtime-config, or production-data change.
-- Worktree is clean on `fix/k1-producer-attestation`, directly based on `origin/main@191122256`; parked K-1 `9fb37310` is untouched.
+- The post-review fix stays on `fix/k1-producer-attestation`, based on `origin/main@128263c9b`; parked K-1 `9fb37310` is untouched.
 
 ### Test results
 
@@ -116,30 +116,20 @@ pnpm --filter @cat-cafe/api run build
   PASS
 
 node --test test/message-store.test.js        # from packages/api
-  28 passed, 0 failed
+  30 passed, 0 failed
 
 bash ./scripts/with-test-home.sh \
   bash ./scripts/run-isolated-redis-tests.sh -- \
   node --import "$(pwd)/test/helpers/setup-cat-registry.js" \
   --test --test-timeout=60000 test/redis-message-store.test.js
-  26 passed, 0 failed (isolated Redis on an ephemeral non-protected port)
+  27 passed, 0 failed (isolated Redis on an ephemeral non-protected port)
 
-pnpm lint
-  PASS (existing web warnings only)
+node --test test/commands-route.test.js
+  11 passed, 0 failed
 
-pnpm check
-  PASS after using the correct non-feature branch class `fix/k1-producer-attestation`
-
-pnpm -r --if-present run build
-  PASS (existing web warnings only)
-
-pnpm test
-pnpm test:api:redis
-  BASELINE-RED, not represented as green: origin/main checkout tests reference assets that
-  do not exist on origin/main (for example scripts/redis-restore-from-rdb.sh,
-  docs/reflections/README.md, and .claude/settings.json). An independent detached
-  origin/main@191122256 reproduction ran redis-restore-script + reflection-capsule-m3:
-  1 passed / 6 failed with the same missing-file failures. Target memory/Redis suites above are green.
+pnpm gate
+  Required on the committed post-review SHA before push. The live PR body records the
+  exact HEAD, full-gate result, and focused-suite counts used for remote re-review.
 
 git diff --check origin/main...HEAD
   PASS
@@ -147,8 +137,6 @@ git diff --check origin/main...HEAD
 root media/artifact gate (working tree + committed diff)
   PASS: no matches
 ```
-
-This is a documented Rule-0 exception to the repository-wide “all tests green” prerequisite: the branch does not hide or reclassify the full-suite failure, and exact baseline reproduction is attached so the reviewer can reject the exception if the causal separation is not convincing.
 
 ### Related documents
 
