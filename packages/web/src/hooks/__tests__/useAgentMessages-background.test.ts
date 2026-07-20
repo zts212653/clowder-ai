@@ -1219,6 +1219,15 @@ describe('background thread socket handling', () => {
       const ts = useChatStore.getState().getThreadState('thread-bg');
       expect(ts.messages).toHaveLength(3);
       expect(ts.messages[0]?.variant).toBe('info');
+      expect(ts.messages[0]?.extra?.systemInfo).toEqual({
+        v: 1,
+        payload: {
+          type: 'mode_switch_proposal',
+          proposedBy: '缅因猫',
+          proposedMode: 'execute',
+        },
+        fallbackCatId: 'codex',
+      });
       expect(ts.messages[1]?.variant).toBe('info');
       expect(ts.messages[2]?.variant).toBe('a2a_followup');
       expect(ts.messages[2]?.content).toContain('缅因猫 @了 opus');

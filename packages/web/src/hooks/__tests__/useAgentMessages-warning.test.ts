@@ -185,6 +185,18 @@ describe('useAgentMessages system_info warning', () => {
         type: 'system',
         variant: 'info',
         content: '🏓 sonnet ↔ gpt52 已连续互相 @ 4 轮，链路已熔断。',
+        extra: {
+          systemInfo: {
+            v: 1,
+            payload: {
+              type: 'a2a_pingpong_terminated',
+              fromCatId: 'sonnet',
+              targetCatId: 'gpt52',
+              pairCount: 4,
+            },
+            fallbackCatId: 'sonnet',
+          },
+        },
       }),
     );
   });

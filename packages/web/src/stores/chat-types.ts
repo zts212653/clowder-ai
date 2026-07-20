@@ -230,6 +230,13 @@ export interface ConnectorSourceData {
   sender?: { id: string; name?: string };
 }
 
+/** Structured identity-bearing notice retained for reactive render-time projection. */
+export interface SystemInfoProjection {
+  readonly v: 1;
+  readonly payload: Record<string, unknown>;
+  readonly fallbackCatId?: string;
+}
+
 export interface ChatMessage {
   id: string;
   type: 'user' | 'assistant' | 'system' | 'summary' | 'connector';
@@ -310,6 +317,8 @@ export interface ChatMessage {
     systemKind?: 'a2a_routing' | 'context_briefing';
     /** Machine-readable A2A route metadata. The visible pill text is human-readable; this survives F5. */
     a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string };
+    /** Original visible system_info payload; content remains the persisted fallback copy. */
+    systemInfo?: SystemInfoProjection;
   };
   /** F045: Extended thinking content, rendered as collapsible block inside assistant bubble */
   thinking?: string;

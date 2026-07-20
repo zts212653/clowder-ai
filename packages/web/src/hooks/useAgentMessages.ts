@@ -18,6 +18,7 @@ import type {
   ChatMessageMetadata,
   ChatMessagePatch,
   RichBlock,
+  SystemInfoProjection,
   TaskProgressItem,
   ThreadState,
   TokenUsage,
@@ -585,6 +586,11 @@ interface SystemInfoConsumeResult {
   consumed: boolean;
   content: string;
   variant: 'info' | 'a2a_followup';
+  systemInfo?: SystemInfoProjection;
+}
+
+function retainSystemInfo(payload: Record<string, unknown>, fallbackCatId: string): SystemInfoProjection {
+  return { v: 1, payload, fallbackCatId };
 }
 
 function recoverBackgroundStreamingMessage(
@@ -964,6 +970,7 @@ export function consumeBackgroundSystemInfo(
   let sysContent = msg.content ?? '';
   let sysVariant: 'info' | 'a2a_followup' = 'info';
   let consumed = false;
+  let systemInfo: SystemInfoProjection | undefined;
 
   try {
     const parsed = JSON.parse(sysContent);
@@ -971,6 +978,7 @@ export function consumeBackgroundSystemInfo(
     if (visible) {
       sysContent = visible.content;
       sysVariant = visible.variant;
+      systemInfo = retainSystemInfo(parsed, msg.catId);
     } else if (parsed?.type === 'invocation_created') {
       const targetCatId = parsed.catId ?? msg.catId;
       // Identity canonicalization (砚砚 GPT-5.5 2026-04-26): outer wrapper invocationId
@@ -1353,7 +1361,10 @@ export function consumeBackgroundSystemInfo(
           sessionSealed: true,
         });
         const visibleSessionSeal = formatSessionSealRequested(parsed, options.resolveCatName);
-        if (visibleSessionSeal) sysContent = visibleSessionSeal.content;
+        if (visibleSessionSeal) {
+          sysContent = visibleSessionSeal.content;
+          systemInfo = retainSystemInfo(parsed, msg.catId);
+        }
       }
     } else if (parsed?.type === 'mode_switch_proposal') {
       const by = parsed.proposedBy ?? '猫猫';
@@ -1420,7 +1431,7 @@ export function consumeBackgroundSystemInfo(
     // Not JSON; keep original content as user-facing system info.
   }
 
-  return { consumed, content: sysContent, variant: sysVariant };
+  return { consumed, content: sysContent, variant: sysVariant, systemInfo };
 }
 
 const BACKGROUND_STATUS_MAP: Record<string, CatStatusType> = {
@@ -2699,13 +2710,14 @@ export function handleBackgroundAgentMessage(
     const result = consumeBackgroundSystemInfo(msg, existing, options);
     if (!result.consumed) {
       const bgCliDiag = msg.metadata?.cliDiagnostics;
-      addBackgroundSystemMessage(
-        msg,
-        options,
-        result.content,
-        result.variant,
-        bgCliDiag ? { cliDiagnostics: bgCliDiag } : undefined,
-      );
+      const extra =
+        result.systemInfo || bgCliDiag
+          ? {
+              ...(result.systemInfo ? { systemInfo: result.systemInfo } : {}),
+              ...(bgCliDiag ? { cliDiagnostics: bgCliDiag } : {}),
+            }
+          : undefined;
+      addBackgroundSystemMessage(msg, options, result.content, result.variant, extra);
     }
   }
 }
@@ -5101,12 +5113,14 @@ export function useAgentMessages() {
         let sysContent = msg.content ?? '';
         let sysVariant: 'info' | 'a2a_followup' = 'info';
         let consumed = false;
+        let systemInfo: SystemInfoProjection | undefined;
         try {
           const parsed = JSON.parse(sysContent);
           const visible = formatVisibleSystemInfo(parsed, resolveCatName, msg.catId);
           if (visible) {
             sysContent = visible.content;
             sysVariant = visible.variant;
+            systemInfo = retainSystemInfo(parsed, msg.catId);
           } else if (parsed?.type === 'invocation_created') {
             // New invocation boundary: clear stale task snapshot + finalized ref for this cat.
             // #586: Without clearing finalizedStreamRef here, a stale ref from the
@@ -5588,20 +5602,30 @@ export function useAgentMessages() {
               sessionSealed: true,
             });
             const visibleSessionSeal = formatSessionSealRequested(parsed, resolveCatName);
-            if (visibleSessionSeal) sysContent = visibleSessionSeal.content;
+            if (visibleSessionSeal) {
+              sysContent = visibleSessionSeal.content;
+              systemInfo = retainSystemInfo(parsed, msg.catId);
+            }
           }
         } catch {
           /* not JSON, use raw content */
         }
         if (!consumed) {
           const sysCliDiag = msg.metadata?.cliDiagnostics;
+          const extra =
+            systemInfo || sysCliDiag
+              ? {
+                  ...(systemInfo ? { systemInfo } : {}),
+                  ...(sysCliDiag ? { cliDiagnostics: sysCliDiag } : {}),
+                }
+              : undefined;
           addMessage({
             id: `sysinfo-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             type: 'system',
             variant: sysVariant,
             content: sysContent,
             timestamp: Date.now(),
-            ...(sysCliDiag ? { extra: { cliDiagnostics: sysCliDiag } } : {}),
+            ...(extra ? { extra } : {}),
           });
         }
       } else if (msg.type === 'error') {
