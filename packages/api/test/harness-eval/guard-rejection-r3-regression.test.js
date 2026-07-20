@@ -1,9 +1,8 @@
 /**
  * F257 V2 R3 regression tests — sol verdict 1×P1 + 5×P2.
  *
- * P2-1: countEpisodesAtLeast early-stop function
  * P2-2: isRegisteredLedgerId reverse whitelist (prototype-safe)
- * P2-4④: threshold truncated → conservative-true
+ * P2-4④: threshold truncated → conservative-true (pagewise)
  * P2-4⑤: bundle truncated → confidence 'low'
  *
  * [opus/claude-opus-4-6🐾]
@@ -15,10 +14,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, mock } from 'node:test';
 
-import {
-  coalesceGuardEpisodes,
-  countEpisodesAtLeast,
-} from '../../dist/infrastructure/harness-eval/guard-episode-coalescing.js';
 import {
   GUARD_LEDGER_IDS,
   isRegisteredGuardId,
@@ -104,68 +99,6 @@ function triggerSuccess() {
 }
 
 // ---------------------------------------------------------------------------
-// P2-1: countEpisodesAtLeast — early-stop episode counter
-// ---------------------------------------------------------------------------
-
-describe('P2-1: countEpisodesAtLeast', () => {
-  it('matches coalesceGuardEpisodes length for small inputs', () => {
-    const events = [
-      rawEvent({ timestamp: T, seq: 0 }),
-      rawEvent({ timestamp: T + 120_000, seq: 1 }),
-      rawEvent({ timestamp: T + 240_000, seq: 2 }),
-    ];
-    const full = coalesceGuardEpisodes(events).length;
-    const counted = countEpisodesAtLeast(events, 100);
-    assert.equal(counted, full, 'exact count when k >> total');
-    assert.equal(counted, 3);
-  });
-
-  it('early-stops at k when total > k', () => {
-    // 5 separated events → 5 episodes; ask for at-least 3
-    const events = Array.from({ length: 5 }, (_, i) => rawEvent({ timestamp: T + i * 120_000, seq: i }));
-    const result = countEpisodesAtLeast(events, 3);
-    assert.equal(result, 3, 'stops at k=3 even though 5 exist');
-  });
-
-  it('returns 0 for empty input', () => {
-    assert.equal(countEpisodesAtLeast([], 5), 0);
-  });
-
-  it('returns 0 when k=0', () => {
-    assert.equal(countEpisodesAtLeast([rawEvent()], 0), 0);
-  });
-
-  it('burst of 4 events within gap counts as 1 episode', () => {
-    const burst = [
-      rawEvent({ timestamp: T, seq: 0 }),
-      rawEvent({ timestamp: T + 2300, seq: 1 }),
-      rawEvent({ timestamp: T + 4700, seq: 2 }),
-      rawEvent({ timestamp: T + 7044, seq: 3 }),
-    ];
-    assert.equal(countEpisodesAtLeast(burst, 10), 1);
-  });
-
-  it('untrusted keys each form solo episodes', () => {
-    const events = [
-      rawEvent({ timestamp: T, seq: 0, threadId: '' }),
-      rawEvent({ timestamp: T + 1000, seq: 1, threadId: '' }),
-    ];
-    assert.equal(countEpisodesAtLeast(events, 10), 2);
-  });
-
-  it('agrees with full coalescer on mixed trusted/untrusted events', () => {
-    const events = [
-      rawEvent({ timestamp: T, seq: 0 }),
-      rawEvent({ timestamp: T + 1000, seq: 1, threadId: 'unknown' }),
-      rawEvent({ timestamp: T + 2000, seq: 2 }),
-      rawEvent({ timestamp: T + 200_000, seq: 3 }),
-    ];
-    const full = coalesceGuardEpisodes(events).length;
-    assert.equal(countEpisodesAtLeast(events, 100), full);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // P2-2: isRegisteredLedgerId — reverse whitelist
 // ---------------------------------------------------------------------------
 
@@ -233,6 +166,26 @@ describe('P2-4④: truncated window → conservative-true threshold (pagewise)',
     assert.equal(result.episodeCountIsLowerBound, true, 'explicitly marked as lower bound');
     assert.equal(result.thresholdMet, true);
     assert.equal(result.pagesFetched, 1, 'all 5 events fit in 1 page — no excess fetching');
+  });
+
+  it('distinct-key episodes early-stop without scanning full window (sol R6 P2-1)', async () => {
+    // 1001 events, each with a DIFFERENT threadId → 1001 distinct episodes.
+    // Threshold is 3. Pagewise should stop after 3rd distinct key, NOT scan all 1001.
+    // This proves the lower-bound counting (closed + openRunTs.size >= k).
+    const events = Array.from({ length: 1001 }, (_, i) =>
+      rawEvent({ timestamp: T + i * 120_000, seq: i, eventId: `dk-${i}`, threadId: `thread_${i}` }),
+    );
+    const redis = createFakeRedis(events);
+    const triggerEval = mock.fn(async () => triggerSuccess());
+
+    const result = await checkGuardThreshold(rawEvent({ timestamp: T + 200_000_000 }), { redis, triggerEval });
+
+    assert.equal(result.episodeCount, 3, 'early-stopped at k=3');
+    assert.equal(result.episodeCountIsLowerBound, true, 'marked as lower bound');
+    assert.equal(result.rawEventCountIsLowerBound, true, 'raw count is also a lower bound');
+    assert.equal(result.thresholdMet, true);
+    assert.equal(result.pagesFetched, 1, 'stopped within first page — no excess I/O');
+    assert.ok(result.rawEventCount <= 4, 'scanned ≤ 4 events before stopping (3 needed + at most 1 extra)');
   });
 
   it('exact count when episodes < threshold (no lower bound)', async () => {

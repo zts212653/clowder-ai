@@ -190,15 +190,23 @@ describe('F257 V2 P2-2: route_decision_skip event emission', () => {
     const skipEvents = log.events.filter((e) => e.kind === 'route_decision_skip');
     assert.equal(skipEvents.length, 1, 'exactly one route_decision_skip event');
 
+    // Full octet + dual-coordinate contract assertion (sol R6 P3-1)
     const evt = skipEvents[0];
-    assert.equal(evt.guardId, 'a2a_route_decision_skip');
-    assert.equal(evt.targetCatId, 'opus', 'targetCatId must be the skipped cat');
-    assert.equal(evt.skipReason, 'dedup_active', 'reason must be dedup_active');
-    assert.equal(evt.sourceTool, 'a2a_mention');
-    assert.equal(evt.layer, 'generator');
     assert.ok(evt.eventId, 'eventId must be present');
+    assert.ok(evt.ledgerId, 'ledgerId must be present');
+    assert.equal(evt.kind, 'route_decision_skip');
+    assert.equal(evt.guardId, 'a2a_route_decision_skip');
+    assert.equal(evt.threadId, 'thread-f257-skip-emit', 'threadId must match route threadId');
+    assert.equal(evt.catId, 'codex', 'catId must be the CALLER cat (codex), not the target');
+    assert.equal(evt.invocationId, 'unknown', 'invocationId is unknown for skip path');
+    assert.equal(evt.sourceTool, 'a2a_mention');
+    assert.equal(evt.normalizedReason, 'dedup_active');
+    assert.equal(evt.layer, 'generator');
+    assert.equal(evt.correlationConfidence, 'window');
     assert.ok(evt.timestamp > 0, 'timestamp must be positive');
     assert.equal(evt.ownerUserId, 'user1', 'ownerUserId must match the caller');
+    assert.equal(evt.targetCatId, 'opus', 'targetCatId must be the skipped cat');
+    assert.equal(evt.skipReason, 'dedup_active', 'skipReason must match decision reason');
   });
 
   test('no-skip counterexample: target invoked, zero skip events', async () => {

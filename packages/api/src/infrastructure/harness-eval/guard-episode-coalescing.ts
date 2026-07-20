@@ -33,6 +33,7 @@
 
 import { createHash } from 'node:crypto';
 import type { GuardRejectionEvent } from './GuardRejectionEventLog.js';
+import { EVENTS_ZSET, HARD_QUERY_CAP } from './guard-rejection-constants.js';
 
 /** Adjacent-event gap (ms) at or under which retries chain into one episode. */
 export const EPISODE_GAP_MS = 60_000;
@@ -94,55 +95,64 @@ function buildEpisode(run: GuardRejectionEvent[]): GuardEpisode {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Shared streaming episode state machine (sol R6 P2-2)
+// ---------------------------------------------------------------------------
+
+/** Minimum event shape needed by the streaming counter. */
+interface EpisodeStreamEvent {
+  guardId: string;
+  threadId: string;
+  catId: string;
+  timestamp: number;
+}
+
 /**
- * Early-stop episode counter: returns the number of distinct episodes,
- * halting as soon as `k` closed episodes have been found.
+ * Streaming episode boundary detector — shared primitive for both the
+ * pagewise threshold counter and any future streaming consumers.
  *
- * Same semantics as `coalesceGuardEpisodes(events, gapMs).length` but
- * allocates no episode objects, hashes, or anchor arrays — O(n log n)
- * sort + O(n) scan with O(1) per-event work.
+ * Tracks open runs by group key and counts closed episodes. Accepts
+ * events one at a time in timestamp order. The `lowerBound` property
+ * gives the minimum number of distinct episodes at any point during
+ * the scan (closed episodes + open runs each worth ≥ 1 episode).
  *
- * Return value: exact count when total < k; otherwise k (early-stopped).
- * Caller checks `result >= k` for threshold decisions.
+ * Uses the same key/gap/trusted semantics as `coalesceGuardEpisodes`.
  */
-export function countEpisodesAtLeast(events: GuardRejectionEvent[], k: number, gapMs: number = EPISODE_GAP_MS): number {
-  if (events.length === 0 || k <= 0) return 0;
+export class EpisodeStreamCounter {
+  private readonly openRunTs = new Map<string, number>();
+  private closedCount = 0;
 
-  const sorted = [...events].sort(
-    (a, b) => a.timestamp - b.timestamp || (a.eventId < b.eventId ? -1 : a.eventId > b.eventId ? 1 : 0),
-  );
+  constructor(private readonly gapMs: number = EPISODE_GAP_MS) {}
 
-  let count = 0;
-  /** groupKey → last event timestamp in the open run. */
-  const openRunTs = new Map<string, number>();
-
-  for (const event of sorted) {
+  /**
+   * Feed one event (must be in timestamp order within each group key).
+   * Returns the current lower bound of total episodes.
+   */
+  feed(event: EpisodeStreamEvent): number {
     const trusted = isTrustedKey(event.guardId) && isTrustedKey(event.threadId) && isTrustedKey(event.catId);
     if (!trusted) {
-      count++;
-      if (count >= k) return k;
-      continue;
+      this.closedCount++;
+      return this.lowerBound;
     }
     const key = `${event.guardId}\0${event.threadId}\0${event.catId}`;
-    const prevTs = openRunTs.get(key);
-    if (prevTs !== undefined && event.timestamp - prevTs <= gapMs) {
-      openRunTs.set(key, event.timestamp);
+    const prevTs = this.openRunTs.get(key);
+    if (prevTs !== undefined && event.timestamp - prevTs <= this.gapMs) {
+      this.openRunTs.set(key, event.timestamp);
     } else {
-      if (prevTs !== undefined) {
-        count++;
-        if (count >= k) return k;
-      }
-      openRunTs.set(key, event.timestamp);
+      if (prevTs !== undefined) this.closedCount++;
+      this.openRunTs.set(key, event.timestamp);
     }
+    return this.lowerBound;
   }
 
-  // Finalize: each remaining open run is one episode.
-  count += openRunTs.size;
-  return Math.min(count, k);
+  /** Lower bound: closed episodes + open runs (each is ≥ 1 episode). */
+  get lowerBound(): number {
+    return this.closedCount + this.openRunTs.size;
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Pagewise streaming counter (sol R5 P2-1)
+// Pagewise streaming counter (sol R5 P2-1 + R6 P2-1 early-stop fix)
 // ---------------------------------------------------------------------------
 
 /** Redis surface needed by the pagewise counter. */
@@ -156,7 +166,11 @@ export interface PagewiseEpisodeResult {
   episodeCount: number;
   /** True when early-stopped at k OR scan reached hard cap. */
   isLowerBound: boolean;
-  /** Matching events processed (may be less than total if early-stopped). */
+  /**
+   * Matching events scanned. When `isLowerBound` is true, this is a scan
+   * lower bound (remaining window events were not fetched), NOT the
+   * total events in the window.
+   */
   rawEventsSeen: number;
   /** Redis page calls made (the perf metric — should be 1-2 for typical thresholds). */
   pagesFetched: number;
@@ -164,23 +178,23 @@ export interface PagewiseEpisodeResult {
   earlyStopReason?: 'threshold_met' | 'hard_cap';
 }
 
-const EVENTS_ZSET = 'guard-rejection:events';
 const PAGE_SIZE = 1000;
-const HARD_CAP = 10_000;
 
 /**
  * Pagewise streaming episode counter: reads Redis pages one at a time,
- * counting episodes as events arrive in timestamp order. Stops I/O as
- * soon as `k` closed episodes are found — a 10k-event window for a
- * single guard typically resolves in 1-2 page calls when k=3.
+ * counting episodes via `EpisodeStreamCounter` as events arrive in
+ * timestamp order. Stops I/O as soon as `k` episodes are established —
+ * counting occurs at the LOWER BOUND level (closed + open runs), so a
+ * new distinct-key event immediately contributes to the count without
+ * waiting for its run to close.
  *
  * ZRANGEBYSCORE returns events in score (timestamp) order, matching the
  * sort prerequisite for gap-based coalescing. Same-timestamp tie-breaking
  * differs from the in-memory sort (insertion order vs eventId lex), but
  * this doesn't affect gap calculations (gap=0 always chains).
  *
- * Used by the threshold-escalation path to avoid materializing the full
- * event window before checking a 3-episode threshold.
+ * Redis constants (EVENTS_ZSET, HARD_QUERY_CAP) imported from
+ * guard-rejection-constants.ts — single source shared with EventLog.
  */
 export async function countEpisodesPagewise(
   redis: PagewiseRedis,
@@ -189,8 +203,7 @@ export async function countEpisodesPagewise(
   gapMs: number = EPISODE_GAP_MS,
 ): Promise<PagewiseEpisodeResult> {
   const upperBound = opts.until - 1;
-  const openRunTs = new Map<string, number>();
-  let count = 0;
+  const counter = new EpisodeStreamCounter(gapMs);
   let rawEventsSeen = 0;
   let pagesFetched = 0;
 
@@ -208,10 +221,9 @@ export async function countEpisodesPagewise(
       if (opts.guardId && parsed.guardId !== opts.guardId) continue;
       rawEventsSeen++;
 
-      if (rawEventsSeen > HARD_CAP) {
-        count += openRunTs.size;
+      if (rawEventsSeen > HARD_QUERY_CAP) {
         return {
-          episodeCount: Math.min(count, k),
+          episodeCount: Math.min(counter.lowerBound, k),
           isLowerBound: true,
           rawEventsSeen,
           pagesFetched,
@@ -219,46 +231,22 @@ export async function countEpisodesPagewise(
         };
       }
 
-      const trusted = isTrustedKey(parsed.guardId) && isTrustedKey(parsed.threadId) && isTrustedKey(parsed.catId);
-      if (!trusted) {
-        count++;
-        if (count >= k) {
-          return {
-            episodeCount: k,
-            isLowerBound: true,
-            rawEventsSeen,
-            pagesFetched,
-            earlyStopReason: 'threshold_met',
-          };
-        }
-        continue;
-      }
-      const key = `${parsed.guardId}\0${parsed.threadId}\0${parsed.catId}`;
-      const prevTs = openRunTs.get(key);
-      if (prevTs !== undefined && parsed.timestamp - prevTs <= gapMs) {
-        openRunTs.set(key, parsed.timestamp);
-      } else {
-        if (prevTs !== undefined) {
-          count++;
-          if (count >= k) {
-            return {
-              episodeCount: k,
-              isLowerBound: true,
-              rawEventsSeen,
-              pagesFetched,
-              earlyStopReason: 'threshold_met',
-            };
-          }
-        }
-        openRunTs.set(key, parsed.timestamp);
+      const lb = counter.feed(parsed);
+      if (lb >= k) {
+        return {
+          episodeCount: k,
+          isLowerBound: true,
+          rawEventsSeen,
+          pagesFetched,
+          earlyStopReason: 'threshold_met',
+        };
       }
     }
 
     if (raw.length < PAGE_SIZE) break;
   }
 
-  count += openRunTs.size;
-  return { episodeCount: count, isLowerBound: false, rawEventsSeen, pagesFetched };
+  return { episodeCount: counter.lowerBound, isLowerBound: false, rawEventsSeen, pagesFetched };
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +259,10 @@ export async function countEpisodesPagewise(
  * Pure and deterministic — input order does not affect the output
  * (events are stably re-sorted internally; output is ordered by
  * startMs asc, episodeId as tie-break).
+ *
+ * Uses the same key/gap/trusted semantics as `EpisodeStreamCounter`
+ * but builds full `GuardEpisode` objects with anchors and hashes
+ * (needed by the snapshot/bundle path).
  */
 export function coalesceGuardEpisodes(events: GuardRejectionEvent[], gapMs: number = EPISODE_GAP_MS): GuardEpisode[] {
   // Stable total order: timestamp asc, tie-break by eventId (per-event coordinate).
@@ -290,7 +282,7 @@ export function coalesceGuardEpisodes(events: GuardRejectionEvent[], gapMs: numb
       episodes.push(buildEpisode([event]));
       continue;
     }
-    const key = `${event.guardId}\u0000${event.threadId}\u0000${event.catId}`;
+    const key = `${event.guardId}\0${event.threadId}\0${event.catId}`;
     const run = openRuns.get(key);
     if (run && event.timestamp - run[run.length - 1].timestamp <= gapMs) {
       run.push(event);

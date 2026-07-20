@@ -58,8 +58,13 @@ export interface EscalationCheckResult {
   guardId: string;
   /** Backward-compat alias of rawEventCount (pre-episode consumers). */
   count: number;
-  /** Raw rejection events in window — preserved per PR #41 verdict. */
+  /**
+   * Raw rejection events scanned. When `rawEventCountIsLowerBound` is true,
+   * this is events seen before early-stop, NOT the total window count.
+   */
   rawEventCount: number;
+  /** True when pagewise scan early-stopped — rawEventCount is a scan lower bound. */
+  rawEventCountIsLowerBound?: boolean;
   /**
    * Coalesced distinct episodes in window. When `episodeCountIsLowerBound`
    * is true, this is at-least-k (early-stopped or hard-cap hit), NOT exact.
@@ -158,6 +163,7 @@ export async function checkGuardThreshold(
       guardId,
       count: rawEventCount,
       rawEventCount,
+      ...(isLowerBound ? { rawEventCountIsLowerBound: true } : {}),
       episodeCount,
       ...(isLowerBound ? { episodeCountIsLowerBound: true } : {}),
       ...(pagesFetched ? { pagesFetched } : {}),
@@ -177,6 +183,7 @@ export async function checkGuardThreshold(
   const claimValue = JSON.stringify({
     escalatedAt: event.timestamp,
     count: rawEventCount,
+    ...(isLowerBound ? { rawEventCountIsLowerBound: true } : {}),
     episodeCount,
     ...(isLowerBound ? { episodeCountIsLowerBound: true } : {}),
     triggeredBy: event.eventId,
@@ -189,6 +196,7 @@ export async function checkGuardThreshold(
       guardId,
       count: rawEventCount,
       rawEventCount,
+      ...(isLowerBound ? { rawEventCountIsLowerBound: true } : {}),
       episodeCount,
       ...(isLowerBound ? { episodeCountIsLowerBound: true } : {}),
       ...(pagesFetched ? { pagesFetched } : {}),
@@ -219,6 +227,7 @@ export async function checkGuardThreshold(
       guardId,
       count: rawEventCount,
       rawEventCount,
+      ...(isLowerBound ? { rawEventCountIsLowerBound: true } : {}),
       episodeCount,
       ...(isLowerBound ? { episodeCountIsLowerBound: true } : {}),
       ...(pagesFetched ? { pagesFetched } : {}),
@@ -241,6 +250,7 @@ export async function checkGuardThreshold(
       guardId,
       count: rawEventCount,
       rawEventCount,
+      ...(isLowerBound ? { rawEventCountIsLowerBound: true } : {}),
       episodeCount,
       ...(isLowerBound ? { episodeCountIsLowerBound: true } : {}),
       ...(pagesFetched ? { pagesFetched } : {}),
@@ -258,6 +268,7 @@ export async function checkGuardThreshold(
     guardId,
     count: rawEventCount,
     rawEventCount,
+    ...(isLowerBound ? { rawEventCountIsLowerBound: true } : {}),
     episodeCount,
     ...(isLowerBound ? { episodeCountIsLowerBound: true } : {}),
     ...(pagesFetched ? { pagesFetched } : {}),

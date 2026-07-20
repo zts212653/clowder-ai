@@ -33,6 +33,7 @@
  */
 
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { EVENTS_ZSET, HARD_QUERY_CAP } from './guard-rejection-constants.js';
 
 // ---------------------------------------------------------------------------
 // Event type definitions (closed union)
@@ -139,17 +140,11 @@ export type GuardRejectionKind = GuardRejectionEvent['kind'];
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Redis key for the global guard rejection ZSET. */
-const EVENTS_ZSET = 'guard-rejection:events';
-
 /** TTL: 7 days in milliseconds — events older than this are pruned on append. */
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Default query limit to prevent unbounded reads. */
 const DEFAULT_QUERY_LIMIT = 200;
-
-/** Absolute cap for completeness-preserving queries (memory backstop). */
-const HARD_QUERY_CAP = 10_000;
 
 /** Shared query options (sol P1-4: ledgerId is a first-class filter). */
 export interface GuardRejectionQueryOpts {
