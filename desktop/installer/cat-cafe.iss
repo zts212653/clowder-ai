@@ -123,11 +123,11 @@ Source: "..\..\.claude\hooks\user-level\*";      DestDir: "{app}\.claude\hooks\u
 ; Desktop assets (icon used by uninstaller entry)
 Source: "..\assets\*";                           DestDir: "{app}\desktop\assets"; \
   Flags: recursesubdirs createallsubdirs
-; Portable Redis for Windows — skipifsourcedoesntexist because the CI Redis
-; download may fail (GitHub API rate-limit without token). When absent, the
-; service-manager falls back to system Redis or memory store at runtime.
+; Portable Redis for Windows — fail-closed: any publishable installer MUST
+; include Redis. The build script retries download 3× and verifies
+; redis-server.exe; Inno Setup will abort here if bundled/redis/ is empty.
 Source: "..\..\bundled\redis\*";                 DestDir: "{app}\.cat-cafe\redis\windows"; \
-  Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist
+  Flags: recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}";        Filename: "{app}\desktop-dist\{#MyAppExeName}"
@@ -248,10 +248,12 @@ var
 begin
   Result := '';
   NeedsRestart := False;
-  // P1-2: Escape {app} path for PowerShell single-quoted strings.
-  // StringChange doubles single quotes so paths with apostrophes
-  // (e.g. "O'Reilly") don't break the PowerShell expression or allow injection.
+  // Escape {app} path for PowerShell single-quoted strings and ensure
+  // trailing backslash for directory boundary (prevents killing processes
+  // in sibling dirs like "ClowderAI-Beta" when app is "ClowderAI").
   AppDir := ExpandConstant('{app}');
+  if Copy(AppDir, Length(AppDir), 1) <> '\' then
+    AppDir := AppDir + '\';
   StringChange(AppDir, '''', '''''');
   Cmd := 'Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith(''' +
          AppDir +

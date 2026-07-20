@@ -51,7 +51,7 @@ class UpdateManager {
       cancelId: 3,
       title: 'Clowder AI — Update Failed',
       message: `Update to v${journal?.targetVersion} did not complete`,
-      detail: 'The update was interrupted. You can retry or dismiss this.',
+      detail: `The update was interrupted. You can retry, or run the installer manually from:\n${this._updatesDir}\n\nThe installer is preserved — you can rerun it without opening the app.`,
     });
 
     if (btn === 0) await this._retryInstall(journal);
@@ -173,7 +173,7 @@ class UpdateManager {
 
     try {
       await downloadAsset(this._d.net, target.asset, destPath, this._d.app.getVersion(), setProgressBar, dbg);
-      const valid = dl.verifyFileIntegrity(destPath, target.asset.digest, target.asset.size);
+      const valid = await dl.verifyFileIntegrity(destPath, target.asset.digest, target.asset.size);
       if (!valid) {
         dbg('Integrity check FAILED');
         try {
@@ -225,8 +225,15 @@ class UpdateManager {
       targetVersion: target.version, assetId: target.asset.id, assetName: target.asset.name,
       digest: target.asset.digest, installerPath, logPath, startedAt: new Date().toISOString(),
     });
-    this._spawnInstaller(installerPath, logPath || null);
-    await quitApp();
+    try {
+      await this._spawnInstaller(installerPath, logPath || null);
+      await quitApp();
+    } catch (err) {
+      dbg(`Installer launch failed: ${err.message}`);
+      dl.clearJournal(this._updatesDir);
+      await showDialog({ type: 'error', buttons: ['OK'], title: 'Install Failed',
+        message: 'Could not start the installer', detail: err.message });
+    }
   }
 
   async _retryInstall(journal) {
@@ -243,42 +250,59 @@ class UpdateManager {
       return;
     }
     const stat = fs.statSync(journal.installerPath);
-    if (!dl.verifyFileIntegrity(journal.installerPath, journal.digest, stat.size)) {
+    if (!(await dl.verifyFileIntegrity(journal.installerPath, journal.digest, stat.size))) {
       dl.clearJournal(this._updatesDir);
       return;
     }
-    this._spawnInstaller(journal.installerPath, journal.logPath || null);
-    await this._d.quitApp();
+    try {
+      await this._spawnInstaller(journal.installerPath, journal.logPath || null);
+      await this._d.quitApp();
+    } catch (err) {
+      this._d.dbg(`Retry install failed: ${err.message}`);
+      dl.clearJournal(this._updatesDir);
+    }
   }
 
   /**
-   * P1-1: Spawn the installer with proper elevation.
-   * On Windows, uses PowerShell Start-Process -Verb RunAs to trigger UAC —
-   * child_process.spawn() uses CreateProcess which cannot trigger UAC.
-   * On macOS, opens the DMG with Finder.
+   * Spawn the installer with proper elevation. Returns a Promise that
+   * resolves when the launcher confirms the process started (Windows:
+   * PowerShell exits 0 after UAC accepted) or rejects on failure
+   * (UAC declined, file not found, PowerShell error).
+   *
+   * On Windows: PowerShell Start-Process -Verb RunAs triggers UAC.
+   * On macOS: Finder opens the DMG.
    */
   _spawnInstaller(installerPath, logPath) {
-    const { spawn } = require('node:child_process');
-    const { platform, dbg } = this._d;
+    return new Promise((resolve, reject) => {
+      const { spawn } = require('node:child_process');
+      const { platform, dbg } = this._d;
 
-    if (platform === 'win32') {
-      const innoArgs = ['/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'];
-      if (logPath) innoArgs.push(`/LOG=${logPath}`);
-      // Escape single quotes for PowerShell single-quoted strings
-      const escPath = installerPath.replace(/'/g, "''");
-      const escArgs = innoArgs.join(' ').replace(/'/g, "''");
-      const psCmd = `Start-Process -FilePath '${escPath}' -ArgumentList '${escArgs}' -Verb RunAs`;
-      const child = spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', psCmd], {
-        detached: true,
-        stdio: 'ignore',
-      });
-      child.on('error', (err) => dbg(`Install spawn error: ${err.message}`));
-      child.unref();
-    } else {
-      const child = spawn('open', [installerPath], { detached: true, stdio: 'ignore' });
-      child.on('error', (err) => dbg(`Install spawn error: ${err.message}`));
-      child.unref();
-    }
+      if (platform === 'win32') {
+        const innoArgs = ['/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'];
+        // Wrap /LOG= path in double-quotes — paths like "Clowder AI\updates"
+        // contain spaces and would be split by Start-Process -ArgumentList.
+        if (logPath) innoArgs.push(`"/LOG=${logPath}"`);
+        const escPath = installerPath.replace(/'/g, "''");
+        const escArgs = innoArgs.join(' ').replace(/'/g, "''");
+        const psCmd = `Start-Process -FilePath '${escPath}' -ArgumentList '${escArgs}' -Verb RunAs`;
+        const child = spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', psCmd], {
+          stdio: 'ignore',
+        });
+        child.on('error', (err) => { dbg(`Install spawn error: ${err.message}`); reject(err); });
+        child.on('close', (code) => {
+          if (code === 0) { resolve(); } else {
+            const msg = `Installer launch failed (exit code ${code} — UAC declined?)`;
+            dbg(msg);
+            reject(new Error(msg));
+          }
+        });
+      } else {
+        const child = spawn('open', [installerPath], { detached: true, stdio: 'ignore' });
+        child.on('error', (err) => { dbg(`Install spawn error: ${err.message}`); reject(err); });
+        child.unref();
+        resolve();
+      }
+    });
   }
 
   _getInstallType() {

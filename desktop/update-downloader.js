@@ -115,29 +115,30 @@ function checkUpgradeResult(dir, currentVersion) {
 
 /**
  * Verify a downloaded file's integrity against the expected digest and size.
- * Uses streaming SHA256 (spec §2: "node:crypto streaming sha256").
+ * Uses streaming SHA256 to avoid loading 600-800 MB files into memory.
  *
  * @param {string} filePath — path to the downloaded file
  * @param {string} expectedDigest — e.g. "sha256:abc123..."
  * @param {number} expectedSize — expected byte count
- * @returns {boolean}
+ * @returns {Promise<boolean>}
  */
 function verifyFileIntegrity(filePath, expectedDigest, expectedSize) {
-  try {
-    const stat = fs.statSync(filePath);
-    if (stat.size !== expectedSize) return false;
-
-    // Parse digest format "sha256:{hex}"
-    const colonIdx = expectedDigest.indexOf(':');
-    if (colonIdx === -1) return false;
-    const expectedHash = expectedDigest.slice(colonIdx + 1);
-
-    const content = fs.readFileSync(filePath);
-    const actualHash = createHash('sha256').update(content).digest('hex');
-    return actualHash === expectedHash;
-  } catch {
-    return false;
-  }
+  return new Promise((resolve) => {
+    try {
+      const stat = fs.statSync(filePath);
+      if (stat.size !== expectedSize) { resolve(false); return; }
+      const colonIdx = expectedDigest.indexOf(':');
+      if (colonIdx === -1) { resolve(false); return; }
+      const expectedHash = expectedDigest.slice(colonIdx + 1);
+      const hash = createHash('sha256');
+      const rs = fs.createReadStream(filePath);
+      rs.on('data', (chunk) => hash.update(chunk));
+      rs.on('end', () => resolve(hash.digest('hex') === expectedHash));
+      rs.on('error', () => resolve(false));
+    } catch {
+      resolve(false);
+    }
+  });
 }
 
 module.exports = {

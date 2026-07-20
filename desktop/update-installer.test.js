@@ -191,6 +191,29 @@ describe('downloadAsset', () => {
     assert.equal(existsSync(`${dest}.meta`), false, 'meta should be deleted');
   });
 
+  test('request-level error rejects without ReferenceError (sol r4 P1)', async () => {
+    const dest = path.join(tempDir, 'app.dmg');
+    // Mock that emits request-level error BEFORE any response
+    const net = {
+      request() {
+        const req = new EventEmitter();
+        req.setHeader = () => {};
+        req.end = () => {
+          process.nextTick(() => req.emit('error', new Error('ECONNREFUSED')));
+        };
+        return req;
+      },
+    };
+
+    await assert.rejects(
+      () => downloadAsset(net, { name: 'app.dmg', size: 100 }, dest, '0.10.0', noop, noop),
+      (err) => {
+        assert.equal(err.message, 'ECONNREFUSED');
+        return true;
+      },
+    );
+  });
+
   test('200 with existing partial overwrites (resume rejected by server)', async () => {
     const dest = path.join(tempDir, 'app.dmg');
     writeFileSync(dest, 'OLD_PARTIAL');

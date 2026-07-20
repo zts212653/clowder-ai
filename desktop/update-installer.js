@@ -95,6 +95,18 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg) {
       existingSize = 0;
     }
 
+    // settle guard — MUST live in Promise scope so both request-error and
+    // response-error handlers can reach it (sol r4-review P1: settle was
+    // scoped inside response callback → request-error threw ReferenceError).
+    let settled = false;
+    let dlTimeout = null;
+    const settle = (fn, val) => {
+      if (settled) return;
+      settled = true;
+      if (dlTimeout) clearTimeout(dlTimeout);
+      fn(val);
+    };
+
     const request = net.request(url);
     request.setHeader('User-Agent', `ClowderAI/${appVersion}`);
     if (existingSize > 0 && savedEtag) {
@@ -105,74 +117,48 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg) {
     request.on('response', (response) => {
       let isResume = response.statusCode === 206;
       if (response.statusCode !== 200 && !isResume) {
-        reject(new Error(`HTTP ${response.statusCode}`));
+        settle(reject, new Error(`HTTP ${response.statusCode}`));
         return;
       }
-      // 200 with existing partial = server doesn't support resume or ETag changed
       if (!isResume && existingSize > 0) {
         dbg('Resume rejected — restarting download');
         existingSize = 0;
       }
-      // Validate Content-Range on 206: server must resume from our byte offset.
-      // Mismatch → discard partial + meta so next attempt starts clean (spec §2).
-      // We must NOT consume the truncated 206 body — it's only a suffix.
       if (isResume) {
         const cr = response.headers['content-range'];
         const m = cr?.match(/bytes (\d+)-/);
         if (!m || Number(m[1]) !== existingSize) {
           dbg(`Content-Range mismatch (expected start=${existingSize}, got "${cr}") — discarding partial`);
-          try {
-            fs.unlinkSync(destPath);
-          } catch {}
-          try {
-            fs.unlinkSync(metaPath);
-          } catch {}
+          try { fs.unlinkSync(destPath); } catch {}
+          try { fs.unlinkSync(metaPath); } catch {}
           response.destroy();
-          reject(new Error(`Content-Range mismatch: expected start=${existingSize}, got "${cr}"`));
+          settle(reject, new Error(`Content-Range mismatch: expected start=${existingSize}, got "${cr}"`));
           return;
         }
       }
-
-      // Validate ETag consistency on 206 resume (spec §2 / AC-4).
-      // If the server returns a different ETag, the resource changed — the
-      // existing partial is stale and appending would produce a mixed file.
       const serverEtag = response.headers.etag || null;
       if (isResume && savedEtag && serverEtag && serverEtag !== savedEtag) {
         dbg(`ETag mismatch on 206 (saved="${savedEtag}", got="${serverEtag}") — discarding partial`);
-        try {
-          fs.unlinkSync(destPath);
-        } catch {}
-        try {
-          fs.unlinkSync(metaPath);
-        } catch {}
+        try { fs.unlinkSync(destPath); } catch {}
+        try { fs.unlinkSync(metaPath); } catch {}
         response.destroy();
-        reject(new Error(`ETag mismatch on resume: saved="${savedEtag}", got="${serverEtag}"`));
+        settle(reject, new Error(`ETag mismatch on resume: saved="${savedEtag}", got="${serverEtag}"`));
         return;
       }
       if (serverEtag) {
-        try {
-          fs.writeFileSync(metaPath, JSON.stringify({ etag: serverEtag }), 'utf-8');
-        } catch {}
+        try { fs.writeFileSync(metaPath, JSON.stringify({ etag: serverEtag }), 'utf-8'); } catch {}
       }
 
       let downloaded = existingSize;
       const ws = fs.createWriteStream(destPath, { flags: isResume ? 'a' : 'w' });
-      let settled = false;
-      const settle = (fn, val) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(dlTimeout);
-        fn(val);
-      };
 
-      // P1-5: write-stream error handler — propagate disk errors to caller
       ws.on('error', (err) => {
         response.destroy();
         settle(reject, err);
       });
 
       // 30-minute overall timeout for large assets (600-800 MB typical)
-      const dlTimeout = setTimeout(() => {
+      dlTimeout = setTimeout(() => {
         dbg('Download timeout (30 min)');
         response.destroy();
         ws.end();
@@ -182,7 +168,6 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg) {
       response.on('data', (chunk) => {
         downloaded += chunk.length;
         setProgressBar(asset.size > 0 ? downloaded / asset.size : -1);
-        // Backpressure: pause HTTP stream when disk write buffer is full
         if (!ws.write(chunk)) {
           response.pause();
           ws.once('drain', () => response.resume());

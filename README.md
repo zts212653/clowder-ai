@@ -139,7 +139,10 @@ The desktop app checks for updates automatically at startup. When a new version 
 **If an update fails:**
 
 1. On next launch, a recovery dialog appears with **Retry Install**, **Open Installer Location**, **View Log**, or **Ignore**.
-2. You can also manually download the latest release from the [Releases page](https://github.com/zts212653/clowder-ai/releases) and install it over the existing version. User data (threads, memories, configuration) is preserved across upgrades.
+2. The downloaded installer is preserved at a fixed location — you can rerun it manually **without opening the app**:
+   - **Windows**: `%LOCALAPPDATA%\Clowder AI\updates\` (e.g. `ClowderAI-Setup-0.12.0.exe`)
+   - **macOS**: `~/Library/Application Support/Clowder AI/updates/`
+3. You can also manually download the latest release from the [Releases page](https://github.com/zts212653/clowder-ai/releases) and install it over the existing version. User data (threads, memories, configuration) is preserved across upgrades.
 
 ### Source Setup
 

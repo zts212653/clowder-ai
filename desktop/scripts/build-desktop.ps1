@@ -265,11 +265,8 @@ if (Test-Path $redisBin) {
         }
     }
     if (-not $redisDownloaded) {
-        if ($env:CI) {
-            Write-Err "Redis download failed after 3 attempts (CI build — fail-closed)"
-            exit 1
-        }
-        Write-Warn "Redis download failed — installer will use memory store or system Redis"
+        Write-Err "Redis download failed after 3 attempts — any publishable installer must include Redis"
+        exit 1
     }
     # Verify redis-server.exe actually landed (guards against corrupt/empty archives)
     if ($redisDownloaded -and -not (Test-Path $redisBin)) {

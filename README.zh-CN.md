@@ -133,7 +133,10 @@ pnpm stop
 **如果更新失败：**
 
 1. 下次启动时会弹出恢复对话框，可选 **重试安装**、**打开安装包位置**、**查看日志** 或 **忽略**。
-2. 也可以从 [Releases 页面](https://github.com/zts212653/clowder-ai/releases) 手动下载最新版本覆盖安装。用户数据（聊天记录、记忆、配置）在升级过程中会被保留。
+2. 下载的安装包会保留在固定位置 — 无需打开应用即可手动重跑：
+   - **Windows**: `%LOCALAPPDATA%\Clowder AI\updates\`（如 `ClowderAI-Setup-0.12.0.exe`）
+   - **macOS**: `~/Library/Application Support/Clowder AI/updates/`
+3. 也可以从 [Releases 页面](https://github.com/zts212653/clowder-ai/releases) 手动下载最新版本覆盖安装。用户数据（聊天记录、记忆、配置）在升级过程中会被保留。
 
 ### 源码安装
 

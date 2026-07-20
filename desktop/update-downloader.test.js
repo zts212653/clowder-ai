@@ -183,35 +183,35 @@ describe('verifyFileIntegrity', () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  test('returns true for matching digest and size', () => {
+  test('returns true for matching digest and size', async () => {
     const content = Buffer.from('hello world test content for integrity check');
     const filePath = path.join(tempDir, 'test.exe');
     writeFileSync(filePath, content);
     const hash = createHash('sha256').update(content).digest('hex');
-    const result = verifyFileIntegrity(filePath, `sha256:${hash}`, content.length);
+    const result = await verifyFileIntegrity(filePath, `sha256:${hash}`, content.length);
     assert.equal(result, true);
   });
 
-  test('returns false for digest mismatch', () => {
+  test('returns false for digest mismatch', async () => {
     const content = Buffer.from('hello');
     const filePath = path.join(tempDir, 'bad.exe');
     writeFileSync(filePath, content);
-    const result = verifyFileIntegrity(filePath, 'sha256:0000000000000000', content.length);
+    const result = await verifyFileIntegrity(filePath, 'sha256:0000000000000000', content.length);
     assert.equal(result, false);
   });
 
-  test('returns false for size mismatch', () => {
+  test('returns false for size mismatch', async () => {
     const content = Buffer.from('hello');
     const filePath = path.join(tempDir, 'size.exe');
     writeFileSync(filePath, content);
     const hash = createHash('sha256').update(content).digest('hex');
     // Wrong size
-    const result = verifyFileIntegrity(filePath, `sha256:${hash}`, content.length + 100);
+    const result = await verifyFileIntegrity(filePath, `sha256:${hash}`, content.length + 100);
     assert.equal(result, false);
   });
 
-  test('returns false when file does not exist', () => {
-    const result = verifyFileIntegrity(path.join(tempDir, 'nope.exe'), 'sha256:abc', 100);
+  test('returns false when file does not exist', async () => {
+    const result = await verifyFileIntegrity(path.join(tempDir, 'nope.exe'), 'sha256:abc', 100);
     assert.equal(result, false);
   });
 });
