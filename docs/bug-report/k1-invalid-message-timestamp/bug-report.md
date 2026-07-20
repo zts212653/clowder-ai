@@ -1,3 +1,13 @@
+---
+feature_ids: [F258]
+topics: [messaging, timestamp, redis, cursor]
+doc_kind: bug-report
+created: 2026-07-19
+updated: 2026-07-20
+tips_exempt:
+  reason: Correctness fix for existing message-store admission and pagination behavior; no new user-facing capability.
+---
+
 ### Bug 诊断胶囊：消息存储接受不可投影的时间戳
 
 | 栏位 | 内容 |

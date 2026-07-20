@@ -9,7 +9,7 @@ Pre-fix review SHA: `05ad80c6f789477bf313b76210dc6657e0edc577`
 - Add one shared `assertValidStoredMessageTimestamp()` admission rule to the memory and Redis message stores.
 - Run that rule before ID generation, idempotency work, store/index mutation, Redis commands, or append listeners.
 - Preserve fractional historical evidence through both Redis hydration paths; hydration is not new-write admission.
-- Preserve exclusive global/thread before-cursor pagination for that fractional historical evidence.
+- Preserve exclusive global/thread before-cursor pagination for that fractional historical evidence, including bounded multi-page consumer progress.
 - Cover the non-negative integral Date domain, chronological IDs, delivery-cursor monotonicity, expired-cursor recovery, and zero-side-effect rejection in paired memory/Redis tests.
 
 ## Why
@@ -49,7 +49,7 @@ Please reviewer check:
 | INV-1 pre-write admission | Invalid timestamps reject before IDs, idempotency state, memory/Redis records/indexes, or listeners change. | Memory size/listener assertions; isolated Redis keyspace/listener assertions; helper is first statement in both `append()` methods. |
 | INV-2 store parity | Memory and Redis use the same pure rule and stable error class/message. | Paired invalid-value tables assert `RangeError` and `/non-negative integer ECMAScript Date/`. |
 | INV-3 sortable valid-Date domain | Every newly persisted timestamp is an integral TimeClip value whose current ID prefix preserves chronological order. | `0`, `1`, and positive TimeClip max succeed; negative/fractional/N+1/NaN/infinities reject; ID/cursor/expired-cursor tests cover consumers. |
-| INV-4 hydration fidelity | Historical fractional timestamp evidence is neither truncated by Redis reads nor replayed by before-cursor pagination. | `Number()` hydration plus a direct legacy fractional hash/zset fixture covering global and thread before APIs; D3 raw audit still owns compatibility. |
+| INV-4 hydration fidelity | Historical fractional timestamp evidence is neither truncated by Redis reads nor replayed by before-cursor pagination. | `Number()` hydration plus a direct legacy fractional hash/zset fixture covering global/thread before APIs and bounded collector progress; D3 raw audit still owns compatibility. |
 | INV-5 legacy honesty | New-write admission does not close historical M7 compatibility or any identifier leaf. | Plan/handoff keep legacy audit/migration and D1–D3 explicitly outside this slice. |
 
 ## E2E User Path Evidence
@@ -88,6 +88,13 @@ The scan separately recorded the decision-gated sortable-ID/legacy risks above; 
 - Verified mechanism: both cursor helpers truncated zset scores with `parseInt`, so `1.5` could not compare equal to the hydrated `1.5` timestamp and the cursor-exclusion branch was skipped.
 - Failure-mode audit: the PR contained exactly two `parseInt(score)` sibling sites; both now use full numeric equality. No other Redis message score truncation remains.
 - Red→Green: the direct legacy fixture returned `[earlier, cursor]` before the fix and `[earlier]` through both `getBefore()` and `getByThreadBefore()` after it.
+
+## Remote review follow-up — `e3520dfa6`
+
+- Finding: P1 new `docs/` bug report omitted ADR-011 YAML frontmatter (`[FC:new]`).
+- Verified mechanism: `docs/SOP.md` requires frontmatter for every `docs/**/*.md`; `scripts/check-frontmatter.mjs` listed this exact path as missing.
+- Red→Green: the target moved from `missingFrontmatter` index `4` to no missing frontmatter, `doc_kind`, or `created` entry after adding F258 bug-report metadata.
+- Maintainer acceptance tail: added a bounded real-Redis `collectAllThreadMessages()` regression. With the old two score-truncation sites restored, it fails after three before-page calls with “pagination did not make progress”; with full numeric score equality it terminates in two calls with two unique records.
 
 ## Next Action
 
@@ -130,7 +137,7 @@ bash ./scripts/with-test-home.sh \
   bash ./scripts/run-isolated-redis-tests.sh -- \
   node --import "$(pwd)/test/helpers/setup-cat-registry.js" \
   --test --test-timeout=60000 test/redis-message-store.test.js
-  28 passed, 0 failed (isolated Redis on an ephemeral non-protected port)
+  29 passed, 0 failed (isolated Redis on an ephemeral non-protected port)
 
 node --test test/commands-route.test.js
   11 passed, 0 failed

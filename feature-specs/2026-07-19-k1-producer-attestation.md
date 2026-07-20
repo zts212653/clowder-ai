@@ -60,7 +60,7 @@ Not in scope:
 - **INV-5 — scalar compatibility:** A bound is not called wire-compatible unless the admitted string domain also excludes isolated UTF-16 surrogates required by the compact wire profile.
 - **INV-6 — legacy honesty:** New-write admission does not prove historical compatibility. Legacy closure requires a read-only audit result or an explicit migration/reconciliation policy.
 - **INV-7 — no silent skip:** A legacy incompatibility is a Host fault with a reconciliation path; it cannot advance a delivery cursor, callback lease, or settlement state.
-- **INV-8 — legacy cursor exclusivity:** Redis before-cursor pagination compares the full numeric sorted-set score to the hydrated timestamp, so a preserved fractional cursor is excluded rather than replayed.
+- **INV-8 — legacy cursor exclusivity:** Redis before-cursor pagination compares the full numeric sorted-set score to the hydrated timestamp, so a preserved fractional cursor is excluded rather than replayed and bounded multi-page consumers always make progress.
 
 ## Existing behavior protection
 
@@ -69,7 +69,7 @@ Not in scope:
 | message IDs remain lexicographically sortable for admitted timestamps | paired boundary classes plus delivery-cursor and memory/Redis expired-cursor tests |
 | idempotent append returns the original message | retain existing memory and Redis idempotency tests |
 | Redis and memory stores persist the same canonical fields | paired admission cases in `message-store.test.js` and `redis-message-store.test.js` |
-| Redis legacy fractional timestamps remain exact and before cursors remain exclusive | direct legacy hash/zset fixture exercises both global and thread before-cursor APIs |
+| Redis legacy fractional timestamps remain exact and before cursors remain exclusive | direct legacy hash/zset fixture exercises both before-cursor APIs plus a bounded real-store multi-page collector |
 | existing route-generated thread/user/cat identifiers continue to append | boundary-success fixtures at the selected maxima |
 | no production data is touched by audit tests | audit accepts an injected iterator/snapshot and defaults to report-only |
 
@@ -97,7 +97,7 @@ Not in scope:
 2. Assert rejection occurs before an append listener or Redis write is observable.
 3. Add one pure `assertValidStoredMessageTimestamp()` helper and call it before any store side effect.
 4. Add boundary-success cases for zero, an ordinary integral value, and the positive ECMAScript Date maximum; prove chronological ID order, delivery-cursor monotonicity, and memory/Redis expired-cursor recovery across that admitted class.
-5. Seed a read-only legacy fractional Redis fixture and prove both before-cursor APIs exclude the cursor without truncating its score.
+5. Seed a read-only legacy fractional Redis fixture and prove both before-cursor APIs exclude the cursor without truncating its score; exercise a bounded real-store multi-page consumer to prove cursor progress and uniqueness.
 6. Build and run the focused memory/Redis suites.
 
 ### Task A2: Producer inventory and generated-ID proof
