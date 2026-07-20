@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
 import { useChatCommands } from '@/hooks/useChatCommands';
 import type { DeliveryMode } from '@/stores/chat-types';
@@ -30,7 +31,19 @@ export function useSendMessage(activeThreadId?: string) {
     setHasActiveInvocation,
     setThreadLoading,
     setThreadHasActiveInvocation,
-  } = useChatStore();
+  } = useChatStore(
+    useShallow((s) => ({
+      addMessage: s.addMessage,
+      addMessageToThread: s.addMessageToThread,
+      removeMessage: s.removeMessage,
+      removeThreadMessage: s.removeThreadMessage,
+      replaceThreadMessageId: s.replaceThreadMessageId,
+      setLoading: s.setLoading,
+      setHasActiveInvocation: s.setHasActiveInvocation,
+      setThreadLoading: s.setThreadLoading,
+      setThreadHasActiveInvocation: s.setThreadHasActiveInvocation,
+    })),
+  );
   const { resetRefs } = useAgentMessages();
   const { processCommand } = useChatCommands();
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>('idle');
