@@ -86,6 +86,19 @@ tips_exempt:
 | **7. 用户可见交互修正** | 无新增 UI；JavaScript caller 若绕过 TypeScript 直接向 append 注入 terminal delivery metadata，会在任何 ID/idempotency/listener/hash/index side effect 前收到稳定 `TypeError`。 |
 | **8. 验收** | memory RED 32/33、isolated Redis RED 33/34，唯一失败均为“缺少 TypeError”；GREEN 后分别 33/33、34/34。无效 fractional/non-finite/valid-integer `deliveredAt` 与 terminal statuses 均零副作用拒绝；同一 idempotency key 的 queued retry 成功，Redis rehydrate 无 `deliveredAt` 且 global/user/thread score 均精确等于 append timestamp。 |
 
+### Follow-up 诊断胶囊：`markCanceled` 绕过 queued 源状态
+
+| 栏位 | 内容 |
+|------|------|
+| **1. 现象** | 期望：`markCanceled` 只执行 queued → canceled；legacy-immediate、delivered、canceled 与 missing 都不能被改写。实际：memory 与 Redis 都无条件写 `deliveryStatus=canceled`，可把已投递消息改成带 `deliveredAt` 和 delivery-time indexes 的 canceled 不可能状态。 |
+| **2. 证据** | Maintainer exact-HEAD `0e7050a75` probe 证明 legacy-immediate 可被隐藏，且 queued → `markDelivered(id, 200)` → `markCanceled(id)` 返回 status=canceled、`deliveredAt=200`；Redis hash 同时保留 deliveredAt，global/user/thread scores 仍为 200。源码确认两家 `markCanceled` 均缺少 `deliveryStatus === 'queued'` guard。 |
+| **3. 问题假设或根因** | 已确认根因：Stateful Object Gate 虽声明 `markCanceled` 独占 queued → canceled，却没有把源状态约束落实为 store invariant；实现只校验对象存在。Redis 的 `markDelivered` 与 `markCanceled` 还都是独立 read→write，没有共享 CAS，因此顺序 no-op 修复不能被表述成并发线性化。 |
+| **4. 诊断策略** | 先更新 transition table，明确 missing/queued/non-queued 结果与并发边界；再成对写 memory/real-Redis RED，覆盖 queued success、legacy no-op、delivered no-op，并对 delivered Redis hash 和 global/user/thread scores做前后快照；最后在两家 store 入口加入同一 fail-closed queued-state guard。 |
+| **5. 超时策略** | 若 20 分钟内无法证明 Redis delivered no-op 的零副作用，缩到单条记录并逐项记录 hydrated message、raw hash 与三个 ZSCORE；不连接运行实例 Redis。 |
+| **6. 预警策略** | 若实现需要 Lua/CAS、锁或补偿性 reconciliation，停止扩大本轮：`markDelivered` × `markCanceled` 线性化明确 RESERVED 给独立 terminal-transition atomicity follow-up；delivery × reassignment、zero presence、历史迁移仍按既有 reservation。 |
+| **7. 用户可见交互修正** | 撤回/clear 的重复或迟到调用不再把已经可见、已投递的消息闪删或写成矛盾终态；只有仍在 queued 状态的消息会被取消。 |
+| **8. 验收** | paired memory/isolated Redis RED 先证明 legacy/delivered 会被改写；GREEN 后 queued → canceled 成功，legacy/delivered/canceled 原样返回，delivered 的 `deliveredAt`、Redis hash 与 global/user/thread scores逐项不变；源码 audit 记录并发 CAS 缺口而不暗示已覆盖。 |
+
 #### Persisted-number representation and admission matrix
 
 | Producer / case | Admission | Hash text | Hydrated number | ZSET score / wire text | Required relationship |
@@ -100,6 +113,9 @@ tips_exempt:
 | future `timestamp` or `deliveredAt` fraction, non-finite, negative, or TimeClip overflow | reject | no write | no new value | no score mutation | `RangeError` occurs before state/index side effects; valid retry remains possible. |
 | future append with any `deliveredAt` or terminal status | reject ownership bypass | no write | no new value | no score/index/idempotency mutation | `TypeError` occurs before ID generation or store side effects; terminal fields remain transition-owned. |
 | future append with status absent or `queued` | admit creation | no `deliveredAt`; status absent or `queued` | same as append result | `timestamp` / decimal text | Memory and Redis agree; later terminal state must pass through its lifecycle owner. |
+| sequential `markCanceled` on queued | admit queued → canceled | status=`canceled`; no `deliveredAt` | same as stored state | existing append-time scores unchanged | Cancellation owns only the queued source state and does not re-score history indexes. |
+| sequential `markCanceled` on legacy/delivered/canceled | no-op | hash/object unchanged | existing record unchanged | all index scores unchanged | Late or repeated cancellation cannot rewrite another lifecycle state. |
+| delivery concurrent with cancellation | RESERVED | both methods can independently observe queued | final hash can depend on last writer | delivery scores can survive a canceled status | No shared CAS/Lua exists; terminal-transition linearizability is assigned to an independent follow-up. |
 | delivery concurrent with user reassignment | RESERVED | both values remain individually valid | current owner can change after hydration | user score can remain at append time or under the old owner | Pre-existing atomicity gap; deterministic dual-interleaving reproduction is assigned to `proposal_mrt0j01zvz1mopnq`. |
 | admitted `deliveredAt=0` crossing HTTP/Web projection | RESERVED | exact `'0'` in Redis | exact `0` in store hydration | N/A | Existing truthiness-based copies can omit presence; this transport/UI consumer repair is not part of Phase A1. |
 
@@ -115,7 +131,7 @@ No remaining `zscore` consumer converts a sorted-set score for JavaScript numeri
 `deliveredAt` producer/consumer audit:
 
 - `IMessageStore.append` owns record creation only: its structural input excludes `deliveredAt`, narrows `deliveryStatus` to `queued`, and a shared runtime guard rejects JavaScript callers that inject `deliveredAt`, `delivered`, or `canceled` before side effects. Legacy-immediate creation leaves status absent.
-- Runtime terminal-delivery callers are `QueueProcessor` and `StartupReconciler`; both supply `Date.now()`-derived integral values through the sole owner `IMessageStore.markDelivered`. `markCanceled` independently owns queued → canceled.
+- Runtime terminal-delivery callers are `QueueProcessor` and `StartupReconciler`; both supply `Date.now()`-derived integral values through the sole owner `IMessageStore.markDelivered`. `markCanceled` independently owns queued → canceled and must return every non-queued record unchanged.
 - In-memory `markDelivered` stores the exact value on the message object. Redis stores the same text in the hash and re-scores global, user, and thread indexes; all three are effective-history-order indexes.
 - The mention index intentionally retains append-time `timestamp` ordering and is not re-scored or reused by effective-history before cursors.
 - `getById()` and `hydrateMessages()` are the two Redis hash hydration paths. Future admitted `deliveredAt` values need no coercive fallback: decimal integer parsing is exact throughout the admitted TimeClip domain.
@@ -123,4 +139,4 @@ No remaining `zscore` consumer converts a sorted-set score for JavaScript numeri
 - Effective before-cursor consumers were re-audited: `routes/messages.ts`, `AgentRouter.findRecentUserMentionFallback`, `collectAllThreadMessages`, duty-briefing pagination, and the paw-feel adapter all derive cursor/window time from `deliveredAt ?? timestamp` (the paw-feel adapter additionally de-duplicates IDs and stops on non-progress).
 - Non-pagination effective-time consumers `routes/callbacks.ts`, duty-briefing mention collection, and briefing day projection use the same projection and never serialize it into a Redis range bound.
 - Freshness consumers that compare message IDs explicitly retain creation-order semantics; their comments already document the delivered-score/ID split, and they do not parse or reuse `deliveredAt` numerically.
-- Rejecting unsafe transition values keeps every single-writer materialized Redis bound in the admitted decimal-integer domain while preserving the existing creation-order and mention-order exceptions. Cross-writer atomicity and exact zero-presence beyond the store boundary remain explicitly RESERVED.
+- Rejecting unsafe transition values and fail-closing cancellation on non-queued source states keep every sequential single-writer materialized Redis bound in the admitted decimal-integer domain while preserving the existing creation-order and mention-order exceptions. Redis has no shared CAS between `markDelivered` and `markCanceled`; terminal-transition atomicity, other cross-writer atomicity, and exact zero-presence beyond the store boundary remain explicitly RESERVED.
