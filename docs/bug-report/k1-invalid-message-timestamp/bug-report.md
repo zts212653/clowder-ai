@@ -33,3 +33,16 @@ tips_exempt:
 | **6. 预警策略** | 若修复需要改变新写入 admission、ID 编码或迁移历史数据则立即停止；这些属于 D2/D3，不是本次分页等价修复。 |
 | **7. 用户可见交互修正** | Legacy fractional cursor 在全局与 thread 分页中恢复严格排他，不再把 cursor 自身作为下一页首/尾项返回。 |
 | **8. 验收** | 隔离 Redis RED 先证明两个公开 API 都重复 cursor；将两个同型 score 比较改为非截断数值等价后 GREEN，并运行完整 RedisMessageStore suite 与 quality gate。 |
+
+### Follow-up 诊断胶囊：blank Redis timestamp 被伪造成 epoch
+
+| 栏位 | 内容 |
+|------|------|
+| **1. 现象** | 期望：历史 Redis hash 中空串或纯空白 timestamp 继续作为无效证据被 hydrate 为 `NaN`。实际：`Number()` 将它们转换为 `0`，下游会把损坏数据当作合法 Unix epoch。 |
+| **2. 证据** | Cloud exact-HEAD review `50f45244d` 指出单条 `getById()` 与批量 `hydrateMessages()` 均使用 `Number(raw ?? '0')`；JavaScript 对 `''` 与 `'   '` 的 ToNumber 结果都是 `0`，而旧 `parseInt(..., 10)` 的结果是 `NaN`。 |
+| **3. 问题假设或根因** | 已确认根因：为保留 fractional timestamp 而从 `parseInt` 切到 `Number` 时，没有显式区分“缺失字段的既有兼容默认值”与“存在但空白的损坏证据”。 |
+| **4. 诊断策略** | 直接写入空串/纯空白 hash，分别走单条与批量 hydration；扫描 PR diff 中所有 timestamp 数值转换 sibling，只在统一 helper 中拒绝 blank coercion。 |
+| **5. 超时策略** | 若隔离 Redis 不能稳定返回空白 hash 字段，先用 `hgetall` 记录原始值，再缩到 parser 单测；不连接运行实例 Redis。 |
+| **6. 预警策略** | 若修复开始改变缺失 timestamp 的既有默认语义、迁移存量记录或跳过坏消息，则立即停止；这些属于历史 reconciliation 决策。 |
+| **7. 用户可见交互修正** | 无新增 UI；损坏的历史 timestamp 不再被静默展示或排序成 1970-01-01。 |
+| **8. 验收** | 隔离 Redis RED 证明 `getById()` 与 `getRecent()` 把空串/纯空白 hydrate 为 `0`；GREEN 后两条路径均返回 `NaN`，fractional 与 missing-field 既有行为保持不变。 |

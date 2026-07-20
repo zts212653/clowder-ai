@@ -40,6 +40,11 @@ const log = createModuleLogger('redis-message-store');
 const DEFAULT_LIMIT = 50;
 const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
 
+function parseStoredMessageTimestamp(raw: string | undefined): number {
+  const value = raw ?? '0';
+  return value.trim() === '' ? Number.NaN : Number(value);
+}
+
 export class RedisMessageStore {
   private readonly redis: RedisClient;
   /** null means no expiration/pruning (persistent retention). */
@@ -226,7 +231,7 @@ export class RedisMessageStore {
       ...(parsedMetadata ? { metadata: parsedMetadata } : {}),
       ...(parsedExtra ? { extra: parsedExtra } : {}),
       mentions: safeParseMentions(data.mentions),
-      timestamp: Number(data.timestamp ?? '0'),
+      timestamp: parseStoredMessageTimestamp(data.timestamp),
       ...(deletedAt ? { deletedAt, deletedBy: data.deletedBy ?? '' } : {}),
       ...(data._tombstone === '1' ? { _tombstone: true as const } : {}),
       ...(data.thinking ? { thinking: data.thinking } : {}),
@@ -965,7 +970,7 @@ export class RedisMessageStore {
         ...(parsedMetadata ? { metadata: parsedMetadata } : {}),
         ...(parsedExtra ? { extra: parsedExtra } : {}),
         mentions: safeParseMentions(d.mentions),
-        timestamp: Number(d.timestamp ?? '0'),
+        timestamp: parseStoredMessageTimestamp(d.timestamp),
         ...(deletedAt ? { deletedAt, deletedBy: d.deletedBy ?? '' } : {}),
         ...(d._tombstone === '1' ? { _tombstone: true as const } : {}),
         ...(d.thinking ? { thinking: d.thinking } : {}),
