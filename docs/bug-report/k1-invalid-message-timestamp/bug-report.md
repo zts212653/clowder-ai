@@ -46,3 +46,16 @@ tips_exempt:
 | **6. 预警策略** | 若修复开始改变缺失 timestamp 的既有默认语义、迁移存量记录或跳过坏消息，则立即停止；这些属于历史 reconciliation 决策。 |
 | **7. 用户可见交互修正** | 无新增 UI；损坏的历史 timestamp 不再被静默展示或排序成 1970-01-01。 |
 | **8. 验收** | 隔离 Redis RED 证明 `getById()` 与 `getRecent()` 把空串/纯空白 hydrate 为 `0`；GREEN 后两条路径均返回 `NaN`，fractional 与 missing-field 既有行为保持不变。 |
+
+### Follow-up 诊断胶囊：Redis infinity cursor score 文本不等价
+
+| 栏位 | 内容 |
+|------|------|
+| **1. 现象** | 期望：legacy `Infinity` / `-Infinity` timestamp cursor 在全局与 thread before 分页中保持排他。实际：cursor 自身被再次返回，满页 consumer 可能重复同一页。 |
+| **2. 证据** | Cloud exact-HEAD review `67bde9e3a` 指出 Redis ZSET 会把 `Infinity` / `-Infinity` score 规范化为 `inf` / `-inf`。隔离 Redis 8.6.1 实测四种 score 输入均被接受，`ZSCORE` 返回 `inf` / `-inf`；Node `Number('inf')` 与 `Number('-inf')` 均为 `NaN`。 |
+| **3. 问题假设或根因** | 已确认根因：hash timestamp 与 ZSET score 是同一逻辑值的两种 Redis 文本表示；hydration 解析 `Infinity` 成功，但两个 cursor helper 用通用 `Number()` 解析 Redis canonical score 失败，破坏数值等价不变量。 |
+| **4. 诊断策略** | 逆向跟踪 append 的 hash/ZSET 双写与 before-cursor 双读；用 direct global/thread fixture 覆盖正负无穷，并将 bounded consumer 扩展到正无穷；扫描所有 `zscore` consumer，只修需要 JavaScript 数值等价的两个 sibling。 |
+| **5. 超时策略** | 若 real-store fixture 不能稳定复现，先记录 `ZSCORE` 原始响应和查询上下界，再缩到 Redis number parser 单测；不连接运行实例 Redis。 |
+| **6. 预警策略** | 若修复开始迁移、跳过或认证 legacy 数据，立即停止；本轮只保留历史证据与 cursor progress，D3/M7 仍 RESERVED。连续第三次同一 state-object finding 则停止代码补丁，回到 plan/spec Stateful Object Gate。 |
+| **7. 用户可见交互修正** | 无新增 UI；读取 legacy infinity cursor 时不再重复边界消息或让 bounded collector 无法终止。 |
+| **8. 验收** | 隔离 Redis RED 必须在 direct global/thread 排他或 bounded consumer progress 上失败；统一 Redis 数值解析后正负无穷、fractional、blank、missing 行为全部通过，完整 Redis suite 与 quality gate 无回归。 |

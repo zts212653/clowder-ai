@@ -317,84 +317,117 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(before[1].content, 'msg4');
   });
 
-  it('legacy fractional cursors remain exclusive in global and thread pagination', async () => {
-    const threadId = 'thread-legacy-fractional-before';
-    const earlierTimestamp = Date.now();
-    const cursorTimestamp = earlierTimestamp + 0.5;
-    const earlier = await store.append({
-      userId: 'u',
-      catId: null,
-      content: 'earlier',
-      mentions: [],
-      timestamp: earlierTimestamp,
-      threadId,
-    });
-    const cursorId = generateSortableId(cursorTimestamp);
-    await redis.hset(`msg:${cursorId}`, {
-      id: cursorId,
-      threadId,
-      userId: 'u',
-      catId: '',
-      content: 'legacy fractional cursor',
-      mentions: '[]',
-      timestamp: String(cursorTimestamp),
-    });
-    await redis.zadd('msg:timeline', String(cursorTimestamp), cursorId);
-    await redis.zadd(`msg:user:u`, String(cursorTimestamp), cursorId);
-    await redis.zadd(`msg:thread:${threadId}`, String(cursorTimestamp), cursorId);
+  it('legacy numeric cursors remain exclusive in global and thread pagination', async () => {
+    const base = Date.now();
+    const cases = [
+      { label: 'fractional', cursorTimestamp: base + 0.5, earlierTimestamp: base, redisScore: null },
+      {
+        label: 'positive-infinity',
+        cursorTimestamp: Number.POSITIVE_INFINITY,
+        earlierTimestamp: base + 1,
+        redisScore: 'inf',
+      },
+      {
+        label: 'negative-infinity',
+        cursorTimestamp: Number.NEGATIVE_INFINITY,
+        earlierTimestamp: null,
+        redisScore: '-inf',
+      },
+    ];
 
-    assert.deepEqual(
-      (await store.getBefore(cursorTimestamp, 10, undefined, cursorId)).map((message) => message.id),
-      [earlier.id],
-    );
-    assert.deepEqual(
-      (await store.getByThreadBefore(threadId, cursorTimestamp, 10, cursorId)).map((message) => message.id),
-      [earlier.id],
-    );
+    for (const [index, fixture] of cases.entries()) {
+      const threadId = `thread-legacy-${fixture.label}-before`;
+      const userId = `user-legacy-${fixture.label}-before`;
+      const earlier =
+        fixture.earlierTimestamp !== null
+          ? await store.append({
+              userId,
+              catId: null,
+              content: `earlier than ${fixture.label}`,
+              mentions: [],
+              timestamp: fixture.earlierTimestamp,
+              threadId,
+            })
+          : null;
+      const cursorId = generateSortableId(base + cases.length + index);
+      await redis.hset(`msg:${cursorId}`, {
+        id: cursorId,
+        threadId,
+        userId,
+        catId: '',
+        content: `legacy ${fixture.label} cursor`,
+        mentions: '[]',
+        timestamp: String(fixture.cursorTimestamp),
+      });
+      await redis.zadd('msg:timeline', String(fixture.cursorTimestamp), cursorId);
+      await redis.zadd(`msg:user:${userId}`, String(fixture.cursorTimestamp), cursorId);
+      await redis.zadd(`msg:thread:${threadId}`, String(fixture.cursorTimestamp), cursorId);
+
+      if (fixture.redisScore) {
+        assert.equal(await redis.zscore(`msg:thread:${threadId}`, cursorId), fixture.redisScore);
+      }
+      const expectedIds = earlier ? [earlier.id] : [];
+      assert.deepEqual(
+        (await store.getBefore(fixture.cursorTimestamp, 10, userId, cursorId)).map((message) => message.id),
+        expectedIds,
+        `global ${fixture.label} cursor must remain exclusive`,
+      );
+      assert.deepEqual(
+        (await store.getByThreadBefore(threadId, fixture.cursorTimestamp, 10, cursorId)).map((message) => message.id),
+        expectedIds,
+        `thread ${fixture.label} cursor must remain exclusive`,
+      );
+    }
   });
 
-  it('bounded multi-page consumer makes progress across a legacy fractional cursor', async () => {
-    const threadId = 'thread-legacy-fractional-collector';
-    const earlierTimestamp = Date.now();
-    const cursorTimestamp = earlierTimestamp + 0.5;
-    const earlier = await store.append({
-      userId: 'u',
-      catId: null,
-      content: 'earlier',
-      mentions: [],
-      timestamp: earlierTimestamp,
-      threadId,
-    });
-    const cursorId = generateSortableId(cursorTimestamp);
-    await redis.hset(`msg:${cursorId}`, {
-      id: cursorId,
-      threadId,
-      userId: 'u',
-      catId: '',
-      content: 'legacy fractional cursor',
-      mentions: '[]',
-      timestamp: String(cursorTimestamp),
-    });
-    await redis.zadd('msg:timeline', String(cursorTimestamp), cursorId);
-    await redis.zadd(`msg:user:u`, String(cursorTimestamp), cursorId);
-    await redis.zadd(`msg:thread:${threadId}`, String(cursorTimestamp), cursorId);
+  it('bounded multi-page consumer makes progress across legacy numeric cursors', async () => {
+    const base = Date.now();
+    const cases = [
+      { label: 'fractional', cursorTimestamp: base + 0.5, earlierTimestamp: base },
+      { label: 'positive-infinity', cursorTimestamp: Number.POSITIVE_INFINITY, earlierTimestamp: base + 1 },
+    ];
 
-    let beforeCalls = 0;
-    const boundedStore = {
-      getByThread: (...args) => store.getByThread(...args),
-      getByThreadBefore: (...args) => {
-        beforeCalls += 1;
-        if (beforeCalls > 3) throw new Error('before-cursor pagination did not make progress');
-        return store.getByThreadBefore(...args);
-      },
-    };
-    const collected = await collectAllThreadMessages(boundedStore, threadId, undefined, 1);
-    assert.equal(beforeCalls, 2, 'one full legacy page plus the terminal empty page');
-    assert.deepEqual(
-      new Set(collected.map((message) => message.id)),
-      new Set([earlier.id, cursorId]),
-      'bounded pagination must terminate without replaying its cursor',
-    );
+    for (const [index, fixture] of cases.entries()) {
+      const threadId = `thread-legacy-${fixture.label}-collector`;
+      const earlier = await store.append({
+        userId: 'u',
+        catId: null,
+        content: `earlier than ${fixture.label}`,
+        mentions: [],
+        timestamp: fixture.earlierTimestamp,
+        threadId,
+      });
+      const cursorId = generateSortableId(base + cases.length + index);
+      await redis.hset(`msg:${cursorId}`, {
+        id: cursorId,
+        threadId,
+        userId: 'u',
+        catId: '',
+        content: `legacy ${fixture.label} cursor`,
+        mentions: '[]',
+        timestamp: String(fixture.cursorTimestamp),
+      });
+      await redis.zadd('msg:timeline', String(fixture.cursorTimestamp), cursorId);
+      await redis.zadd(`msg:user:u`, String(fixture.cursorTimestamp), cursorId);
+      await redis.zadd(`msg:thread:${threadId}`, String(fixture.cursorTimestamp), cursorId);
+
+      let beforeCalls = 0;
+      const boundedStore = {
+        getByThread: (...args) => store.getByThread(...args),
+        getByThreadBefore: (...args) => {
+          beforeCalls += 1;
+          if (beforeCalls > 3) throw new Error('before-cursor pagination did not make progress');
+          return store.getByThreadBefore(...args);
+        },
+      };
+      const collected = await collectAllThreadMessages(boundedStore, threadId, undefined, 1);
+      assert.equal(beforeCalls, 2, `${fixture.label}: one full legacy page plus the terminal empty page`);
+      assert.deepEqual(
+        new Set(collected.map((message) => message.id)),
+        new Set([earlier.id, cursorId]),
+        `${fixture.label}: bounded pagination must terminate without replaying its cursor`,
+      );
+    }
   });
 
   it('augmentStreamMetadata() persists stream-only metadata onto callback messages', async () => {
