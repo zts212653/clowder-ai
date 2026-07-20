@@ -76,6 +76,45 @@ describe('MessageStore', () => {
     assert.equal(store.size, 3);
   });
 
+  test('append() rejects transition-owned delivery metadata before side effects and permits a queued retry', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    let listenerCalls = 0;
+    const store = new MessageStore({ onAppend: () => listenerCalls++ });
+    const base = {
+      userId: 'user-1',
+      catId: null,
+      content: 'delivery ownership probe',
+      mentions: [],
+      timestamp: 100,
+      threadId: 'thread-append-delivery-owner',
+      idempotencyKey: 'append-delivery-owner',
+    };
+    const invalidMetadata = [
+      { deliveredAt: undefined },
+      { deliveredAt: 100.5, deliveryStatus: 'delivered' },
+      { deliveredAt: Number.POSITIVE_INFINITY, deliveryStatus: 'delivered' },
+      { deliveredAt: 101, deliveryStatus: 'delivered' },
+      { deliveryStatus: 'delivered' },
+      { deliveryStatus: 'canceled' },
+    ];
+
+    for (const metadata of invalidMetadata) {
+      assert.throws(() => store.append({ ...base, ...metadata }), {
+        name: 'TypeError',
+        message: /append.*delivery metadata|transition owner/i,
+      });
+      assert.equal(store.size, 0, 'ownership rejection must not append');
+      assert.equal(listenerCalls, 0, 'ownership rejection must not notify listeners');
+    }
+
+    const queued = store.append({ ...base, deliveryStatus: 'queued' });
+    assert.equal(queued.deliveryStatus, 'queued');
+    assert.equal(queued.deliveredAt, undefined);
+    assert.deepEqual(store.getById(queued.id), queued);
+    assert.equal(store.size, 1);
+    assert.equal(listenerCalls, 1);
+  });
+
   test('markDelivered() rejects unsafe order timestamps before state transition and permits a valid retry', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const invalidTimestamps = [

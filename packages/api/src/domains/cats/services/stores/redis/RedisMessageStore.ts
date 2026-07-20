@@ -18,6 +18,7 @@ import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { AppendMessageInput, StoredMessage, StreamMetadataAugmentInput } from '../ports/MessageStore.js';
 import {
   applyStreamMetadataAugment,
+  assertValidAppendDeliveryMetadata,
   assertValidStoredMessageTimestamp,
   DEFAULT_THREAD_ID,
   generateSortableId,
@@ -92,6 +93,7 @@ export class RedisMessageStore {
   }
 
   async append(msg: AppendMessageInput): Promise<StoredMessage> {
+    assertValidAppendDeliveryMetadata(msg);
     assertValidStoredMessageTimestamp(msg.timestamp);
     const threadId = msg.threadId ?? DEFAULT_THREAD_ID;
     const id = generateSortableId(msg.timestamp);

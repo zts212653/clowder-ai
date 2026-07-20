@@ -150,14 +150,30 @@ export interface StoredMessage {
 /**
  * Input for appending a message. threadId is optional (defaults to 'default').
  */
-export type AppendMessageInput = Omit<StoredMessage, 'id' | 'threadId'> & {
+export type AppendMessageInput = Omit<StoredMessage, 'id' | 'threadId' | 'deliveredAt' | 'deliveryStatus'> & {
   threadId?: string;
+  /** Append may initialize only queued state; terminal delivery metadata belongs to transition methods. */
+  deliveryStatus?: 'queued';
   /**
    * Optional idempotency token scoped to (userId + threadId + key).
    * Reusing the same token returns the original stored message.
    */
   idempotencyKey?: string;
 };
+
+/**
+ * Enforce delivery lifecycle ownership for JavaScript callers that can bypass
+ * the structural AppendMessageInput boundary.
+ */
+export function assertValidAppendDeliveryMetadata(msg: AppendMessageInput): void {
+  const runtimeInput = msg as AppendMessageInput & Partial<Pick<StoredMessage, 'deliveredAt' | 'deliveryStatus'>>;
+  if (
+    'deliveredAt' in runtimeInput ||
+    (runtimeInput.deliveryStatus !== undefined && runtimeInput.deliveryStatus !== 'queued')
+  ) {
+    throw new TypeError('append() delivery metadata is transition-owned; only queued status may be initialized');
+  }
+}
 
 /**
  * Stream-only metadata collected by route-serial after a callback message was
@@ -400,6 +416,7 @@ export class MessageStore {
    * Append a message to the store. Returns the stored message with generated id.
    */
   append(msg: AppendMessageInput): StoredMessage {
+    assertValidAppendDeliveryMetadata(msg);
     assertValidStoredMessageTimestamp(msg.timestamp);
     const threadId = msg.threadId ?? DEFAULT_THREAD_ID;
     const idempotencyIndexKey = this.buildIdempotencyIndexKey(msg.userId, threadId, msg.idempotencyKey);

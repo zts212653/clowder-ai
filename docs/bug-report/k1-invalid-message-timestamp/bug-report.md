@@ -73,6 +73,19 @@ tips_exempt:
 | **7. 用户可见交互修正** | 非法 delivery timestamp 立即以稳定 `RangeError` 失败；消息保持 queued，后续合法投递仍可完成，不产生静默漏历史或分页运行时错误。 |
 | **8. 验收** | memory + isolated real Redis 先 RED 证明 fractional/non-finite 值可写并分裂；GREEN 后完整非法域零副作用拒绝、合法边界精确 round-trip、invalid→valid retry 成功，page-size 1 collector 在两 store 均完整且唯一。 |
 
+### Follow-up 诊断胶囊：append 绕过 delivery lifecycle owner
+
+| 栏位 | 内容 |
+|------|------|
+| **1. 现象** | 期望：generic append 只能创建 legacy-immediate 或 queued 记录，terminal `deliveredAt`/status 由 `markDelivered`/`markCanceled` 独占。实际：`AppendMessageInput` 从 `StoredMessage` 继承全部 delivery metadata；memory 原样保留，而 Redis 只在 append 返回值里保留 `deliveredAt`，hash/hydration/index score 均丢失或仍使用 `timestamp`。 |
+| **2. 证据** | Maintainer exact-HEAD `ea12c92ce` probe 通过公共 append API 传入 `timestamp=100`, `deliveryStatus=delivered`, `deliveredAt=100.5|Infinity`：memory 保留输入；Redis append 返回输入但 rehydrate 丢失 `deliveredAt`，timeline score 仍为 `100`。生产 call-site census 只发现 status absent/`queued` append；无生产 caller 需要直接 terminal append。 |
+| **3. 问题假设或根因** | 已确认根因：Stateful Object Gate 把 `markDelivered` 写成唯一 terminal owner，却没有把 output-rich `StoredMessage` 与 creation input `AppendMessageInput` 分离；两家 append 又在 runtime spread 未受约束的 input，导致类型、ownership 与持久化实现三者不一致。 |
+| **4. 诊断策略** | 先在 plan 中补齐 append/markDelivered/markCanceled 三个 transition owner；再以公共 API 为 RED，成对覆盖 memory/Redis 的 unsafe `deliveredAt`、terminal status、零副作用、合法 queued retry、rehydration 与 global/user/thread score；随后将 input type 与 runtime guard 收敛到同一契约。 |
+| **5. 超时策略** | 若 20 分钟内无法证明 Redis append rejection 的零副作用，使用隔离 Redis 对 idempotency/hash/global/user/thread/mention keys 做前后快照；不连接运行实例 Redis。 |
+| **6. 预警策略** | 若生产 caller 需要 append 初始化 terminal state，停止并改走“append 是正式 producer”的完整持久化/评分模型；若只剩 test fixtures，迁移 fixture 到 queued→transition 或 legacy-immediate，不放宽 runtime owner。 |
+| **7. 用户可见交互修正** | 无新增 UI；JavaScript caller 若绕过 TypeScript 直接向 append 注入 terminal delivery metadata，会在任何 ID/idempotency/listener/hash/index side effect 前收到稳定 `TypeError`。 |
+| **8. 验收** | memory RED 32/33、isolated Redis RED 33/34，唯一失败均为“缺少 TypeError”；GREEN 后分别 33/33、34/34。无效 fractional/non-finite/valid-integer `deliveredAt` 与 terminal statuses 均零副作用拒绝；同一 idempotency key 的 queued retry 成功，Redis rehydrate 无 `deliveredAt` 且 global/user/thread score 均精确等于 append timestamp。 |
+
 #### Persisted-number representation and admission matrix
 
 | Producer / case | Admission | Hash text | Hydrated number | ZSET score / wire text | Required relationship |
@@ -85,6 +98,8 @@ tips_exempt:
 | legacy `timestamp` negative infinity | historical read | `'-Infinity'` | `-Infinity` | `-Infinity` / `'-inf'` | Canonical Redis alias compares equal to the hydrated cursor. |
 | future `timestamp` or `deliveredAt` valid integer TimeClip | admit | exact decimal text | exact integer | exact integer / decimal text | Store-side representations and before-cursor consumers observe the same value while message ownership is stable. |
 | future `timestamp` or `deliveredAt` fraction, non-finite, negative, or TimeClip overflow | reject | no write | no new value | no score mutation | `RangeError` occurs before state/index side effects; valid retry remains possible. |
+| future append with any `deliveredAt` or terminal status | reject ownership bypass | no write | no new value | no score/index/idempotency mutation | `TypeError` occurs before ID generation or store side effects; terminal fields remain transition-owned. |
+| future append with status absent or `queued` | admit creation | no `deliveredAt`; status absent or `queued` | same as append result | `timestamp` / decimal text | Memory and Redis agree; later terminal state must pass through its lifecycle owner. |
 | delivery concurrent with user reassignment | RESERVED | both values remain individually valid | current owner can change after hydration | user score can remain at append time or under the old owner | Pre-existing atomicity gap; deterministic dual-interleaving reproduction is assigned to `proposal_mrt0j01zvz1mopnq`. |
 | admitted `deliveredAt=0` crossing HTTP/Web projection | RESERVED | exact `'0'` in Redis | exact `0` in store hydration | N/A | Existing truthiness-based copies can omit presence; this transport/UI consumer repair is not part of Phase A1. |
 
@@ -99,7 +114,8 @@ No remaining `zscore` consumer converts a sorted-set score for JavaScript numeri
 
 `deliveredAt` producer/consumer audit:
 
-- Runtime writers are `QueueProcessor` and `StartupReconciler`; both supply `Date.now()`-derived integral values through the sole owner `IMessageStore.markDelivered`.
+- `IMessageStore.append` owns record creation only: its structural input excludes `deliveredAt`, narrows `deliveryStatus` to `queued`, and a shared runtime guard rejects JavaScript callers that inject `deliveredAt`, `delivered`, or `canceled` before side effects. Legacy-immediate creation leaves status absent.
+- Runtime terminal-delivery callers are `QueueProcessor` and `StartupReconciler`; both supply `Date.now()`-derived integral values through the sole owner `IMessageStore.markDelivered`. `markCanceled` independently owns queued → canceled.
 - In-memory `markDelivered` stores the exact value on the message object. Redis stores the same text in the hash and re-scores global, user, and thread indexes; all three are effective-history-order indexes.
 - The mention index intentionally retains append-time `timestamp` ordering and is not re-scored or reused by effective-history before cursors.
 - `getById()` and `hydrateMessages()` are the two Redis hash hydration paths. Future admitted `deliveredAt` values need no coercive fallback: decimal integer parsing is exact throughout the admitted TimeClip domain.

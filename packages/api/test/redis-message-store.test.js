@@ -128,6 +128,55 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     );
   });
 
+  it('append() rejects transition-owned delivery metadata before Redis side effects and preserves queued parity', async () => {
+    let listenerCalls = 0;
+    const admissionStore = new RedisMessageStore(redis, {
+      ttlSeconds: 0,
+      onAppend: () => listenerCalls++,
+    });
+    const userId = 'user-append-delivery-owner';
+    const threadId = 'thread-append-delivery-owner';
+    const timestamp = 100;
+    const base = {
+      userId,
+      catId: null,
+      content: 'delivery ownership probe',
+      mentions: ['opus'],
+      timestamp,
+      threadId,
+      idempotencyKey: 'append-delivery-owner',
+    };
+    const invalidMetadata = [
+      { deliveredAt: undefined },
+      { deliveredAt: 100.5, deliveryStatus: 'delivered' },
+      { deliveredAt: Number.POSITIVE_INFINITY, deliveryStatus: 'delivered' },
+      { deliveredAt: 101, deliveryStatus: 'delivered' },
+      { deliveryStatus: 'delivered' },
+      { deliveryStatus: 'canceled' },
+    ];
+
+    for (const metadata of invalidMetadata) {
+      await assert.rejects(admissionStore.append({ ...base, ...metadata }), {
+        name: 'TypeError',
+        message: /append.*delivery metadata|transition owner/i,
+      });
+      assert.equal(listenerCalls, 0, 'ownership rejection must not notify listeners');
+      const keys = [...(await redis.keys('cat-cafe:msg:*')), ...(await redis.keys('cat-cafe:cat-cafe:msg:*'))];
+      assert.deepEqual(keys, [], 'ownership rejection must not create Redis keys');
+    }
+
+    const queued = await admissionStore.append({ ...base, deliveryStatus: 'queued' });
+    const hydrated = await admissionStore.getById(queued.id);
+    assert.equal(queued.deliveryStatus, 'queued');
+    assert.equal(queued.deliveredAt, undefined);
+    assert.equal(hydrated.deliveryStatus, 'queued');
+    assert.equal(hydrated.deliveredAt, undefined);
+    assert.equal(await redis.zscore('msg:timeline', queued.id), String(timestamp));
+    assert.equal(await redis.zscore(`msg:user:${userId}`, queued.id), String(timestamp));
+    assert.equal(await redis.zscore(`msg:thread:${threadId}`, queued.id), String(timestamp));
+    assert.equal(listenerCalls, 1);
+  });
+
   it('markDelivered() rejects unsafe order timestamps before hash/ZSET mutation and permits a valid retry', async () => {
     const admissionStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
     const invalidTimestamps = [
