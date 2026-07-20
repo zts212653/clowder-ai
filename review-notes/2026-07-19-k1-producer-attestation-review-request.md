@@ -10,7 +10,7 @@ Pre-fix review SHA: `05ad80c6f789477bf313b76210dc6657e0edc577`
 - Run that rule before ID generation, idempotency work, store/index mutation, Redis commands, or append listeners.
 - Preserve fractional historical evidence through both Redis hydration paths; hydration is not new-write admission.
 - Preserve present-but-blank historical timestamp evidence as invalid instead of coercing it to epoch zero.
-- Preserve exclusive global/thread before-cursor pagination for that fractional historical evidence, including bounded multi-page consumer progress.
+- Preserve exclusive global/thread before-cursor pagination for fractional and infinity historical evidence, including bounded multi-page consumer progress across Redis score canonicalization.
 - Cover the non-negative integral Date domain, chronological IDs, delivery-cursor monotonicity, expired-cursor recovery, and zero-side-effect rejection in paired memory/Redis tests.
 
 ## Why
@@ -50,7 +50,7 @@ Please reviewer check:
 | INV-1 pre-write admission | Invalid timestamps reject before IDs, idempotency state, memory/Redis records/indexes, or listeners change. | Memory size/listener assertions; isolated Redis keyspace/listener assertions; helper is first statement in both `append()` methods. |
 | INV-2 store parity | Memory and Redis use the same pure rule and stable error class/message. | Paired invalid-value tables assert `RangeError` and `/non-negative integer ECMAScript Date/`. |
 | INV-3 sortable valid-Date domain | Every newly persisted timestamp is an integral TimeClip value whose current ID prefix preserves chronological order. | `0`, `1`, and positive TimeClip max succeed; negative/fractional/N+1/NaN/infinities reject; ID/cursor/expired-cursor tests cover consumers. |
-| INV-4 hydration fidelity | Historical fractional timestamp evidence is neither truncated/replayed, and present-but-blank timestamp evidence is not fabricated as epoch zero. | Shared Redis timestamp parser plus direct blank/whitespace/fractional/missing fixtures covering single and batch hydration; fractional hash/zset fixtures cover both before APIs and bounded collector progress. D3 raw audit still owns compatibility. |
+| INV-4 hydration fidelity | Historical numeric timestamp evidence is neither truncated/replayed, present-but-blank evidence is not fabricated as epoch zero, and Redis `inf`/`-inf` scores remain equivalent to hydrated infinities. | Shared Redis numeric parser plus direct blank/whitespace/fractional/missing/infinity fixtures; fractional and positive/negative-infinity hash/zset fixtures cover both before APIs, with fractional and positive-infinity bounded collector progress. D3 raw audit still owns compatibility. |
 | INV-5 legacy honesty | New-write admission does not close historical M7 compatibility or any identifier leaf. | Plan/handoff keep legacy audit/migration and D1–D3 explicitly outside this slice. |
 
 ## E2E User Path Evidence
@@ -62,8 +62,8 @@ Exempt: this is an internal producer data-consistency guard with no UI or direct
 ### Technical OQ
 
 1. Is validation early enough in both implementations to guarantee zero idempotency and index side effects?
-2. Do `Number()` hydration and full numeric zset-score comparison jointly preserve legacy fractional cursor exclusivity while retaining all integer behavior?
-3. Does hydration keep blank/whitespace timestamp evidence invalid while retaining fractional and missing-field compatibility?
+2. Does the shared Redis numeric parser preserve legacy fractional/infinity cursor exclusivity across hash and canonical ZSET spellings while retaining integer behavior?
+3. Does hydration keep blank/whitespace timestamp evidence invalid while retaining fractional, infinity, and missing-field compatibility?
 4. Is the temporary non-negative integral TimeClip domain the correct safe boundary until D2 replaces lexical cursor ordering?
 5. Does the narrow scope honestly avoid claiming historical M7 or M1/M2 closure?
 
@@ -104,6 +104,13 @@ The scan separately recorded the decision-gated sortable-ID/legacy risks above; 
 - Verified mechanism: both single and batch hydration used `Number(raw ?? '0')`; present-but-blank strings therefore became `0`, unlike the prior invalid `NaN` evidence.
 - Failure-mode audit: exactly two PR-delta timestamp hydration sites existed. Both now call one parser that distinguishes blank values from the existing missing-field default.
 - Red→Green: direct empty/whitespace fixtures failed first in single hydration because the value was `0`; GREEN keeps them `NaN` through `getById()` and `getRecent()`, while fractional `123.5` and missing-field `0` remain unchanged.
+
+## Remote review follow-up — `67bde9e3a`
+
+- Finding: P2 Redis canonical `inf` / `-inf` ZSET scores failed equality against hydrated `Infinity` / `-Infinity` cursors (`[FC:new]`).
+- Verified mechanism: isolated Redis 8.6.1 accepts `Infinity` / `-Infinity` scores but `ZSCORE` returns `inf` / `-inf`; JavaScript `Number()` parses the hash spellings but not the canonical score spellings.
+- Failure-mode audit: this is the same hash↔ZSET numeric-equivalence invariant as the fractional cursor finding. Exactly two PR-delta score-to-number siblings exist; both now share the parser already used by single and batch timestamp hydration. Other `zscore` consumers only test membership or pass the raw score back to Redis.
+- Red→Green: direct global/thread positive-infinity pagination returned `[earlier, cursor]`, and the bounded collector hit its non-progress guard. GREEN excludes positive and negative infinity cursors through both APIs and terminates the fractional/positive-infinity collectors in two before calls.
 
 ## Next Action
 

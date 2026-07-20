@@ -58,9 +58,9 @@ Not in scope:
 - **INV-3 — sortable valid-Date domain:** Every newly persisted timestamp is a non-negative integer inside ECMAScript `Date` TimeClip, so both `toISOString()` and the current timestamp-prefixed ID ordering remain valid. Full valid-Date admission waits for D2 explicit cursor order.
 - **INV-4 — generated-id bound:** Every newly minted message ID satisfies a documented finite maximum; generator state cannot silently escape that maximum.
 - **INV-5 — scalar compatibility:** A bound is not called wire-compatible unless the admitted string domain also excludes isolated UTF-16 surrogates required by the compact wire profile.
-- **INV-6 — legacy honesty:** New-write admission does not prove historical compatibility. Hydration preserves present-but-blank timestamps as invalid evidence rather than fabricating epoch zero; legacy closure still requires a read-only audit result or an explicit migration/reconciliation policy.
+- **INV-6 — legacy honesty:** New-write admission does not prove historical compatibility. Hydration preserves present-but-blank timestamps as invalid evidence rather than fabricating epoch zero, and Redis numeric aliases retain their original finite/non-finite values; legacy closure still requires a read-only audit result or an explicit migration/reconciliation policy.
 - **INV-7 — no silent skip:** A legacy incompatibility is a Host fault with a reconciliation path; it cannot advance a delivery cursor, callback lease, or settlement state.
-- **INV-8 — legacy cursor exclusivity:** Redis before-cursor pagination compares the full numeric sorted-set score to the hydrated timestamp, so a preserved fractional cursor is excluded rather than replayed and bounded multi-page consumers always make progress.
+- **INV-8 — legacy cursor exclusivity:** Redis before-cursor pagination parses canonical sorted-set score spellings into the same numeric domain as hydrated timestamps, so preserved fractional and infinity cursors are excluded rather than replayed and bounded multi-page consumers always make progress.
 
 ## Existing behavior protection
 
@@ -71,6 +71,7 @@ Not in scope:
 | Redis and memory stores persist the same canonical fields | paired admission cases in `message-store.test.js` and `redis-message-store.test.js` |
 | Redis legacy fractional timestamps remain exact and before cursors remain exclusive | direct legacy hash/zset fixture exercises both before-cursor APIs plus a bounded real-store multi-page collector |
 | Redis blank timestamp evidence is not normalized into valid data | direct empty/whitespace fixtures exercise single and batch hydration while preserving fractional and missing-field compatibility |
+| Redis canonical `inf` / `-inf` scores remain equivalent to hydrated `Infinity` / `-Infinity` | direct positive/negative infinity fixtures exercise both before-cursor APIs; the bounded collector covers positive-infinity progress |
 | existing route-generated thread/user/cat identifiers continue to append | boundary-success fixtures at the selected maxima |
 | no production data is touched by audit tests | audit accepts an injected iterator/snapshot and defaults to report-only |
 
@@ -98,7 +99,7 @@ Not in scope:
 2. Assert rejection occurs before an append listener or Redis write is observable.
 3. Add one pure `assertValidStoredMessageTimestamp()` helper and call it before any store side effect.
 4. Add boundary-success cases for zero, an ordinary integral value, and the positive ECMAScript Date maximum; prove chronological ID order, delivery-cursor monotonicity, and memory/Redis expired-cursor recovery across that admitted class.
-5. Seed read-only legacy Redis fixtures: prove both before-cursor APIs exclude a fractional cursor without truncating its score; exercise a bounded real-store multi-page consumer for progress/uniqueness; prove empty and whitespace hash timestamps remain invalid through single and batch hydration without changing fractional or missing-field behavior.
+5. Seed read-only legacy Redis fixtures: prove both before-cursor APIs exclude fractional and positive/negative-infinity cursors after Redis score canonicalization; exercise a bounded real-store multi-page consumer for progress/uniqueness; prove empty and whitespace hash timestamps remain invalid through single and batch hydration without changing fractional or missing-field behavior.
 6. Build and run the focused memory/Redis suites.
 
 ### Task A2: Producer inventory and generated-ID proof

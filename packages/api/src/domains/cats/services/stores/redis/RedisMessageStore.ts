@@ -40,9 +40,20 @@ const log = createModuleLogger('redis-message-store');
 const DEFAULT_LIMIT = 50;
 const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
 
+const REDIS_NUMBER_ALIASES = new Map<string, number>([
+  ['', Number.NaN],
+  ['inf', Number.POSITIVE_INFINITY],
+  ['+inf', Number.POSITIVE_INFINITY],
+  ['-inf', Number.NEGATIVE_INFINITY],
+]);
+
+function parseRedisNumber(raw: string): number {
+  const value = raw.trim();
+  return REDIS_NUMBER_ALIASES.get(value) ?? Number(value);
+}
+
 function parseStoredMessageTimestamp(raw: string | undefined): number {
-  const value = raw ?? '0';
-  return value.trim() === '' ? Number.NaN : Number(value);
+  return parseRedisNumber(raw ?? '0');
 }
 
 export class RedisMessageStore {
@@ -662,7 +673,7 @@ export class RedisMessageStore {
       for (const id of chunk) {
         if (filtered.length >= limit) break;
         const score = await this.redis.zscore(key, id);
-        if (score !== null && Number(score) === timestamp && id >= beforeId) {
+        if (score !== null && parseRedisNumber(score) === timestamp && id >= beforeId) {
           continue;
         }
         filtered.push(id);
@@ -698,7 +709,7 @@ export class RedisMessageStore {
       const validIds: string[] = [];
       for (const id of chunk) {
         const score = await this.redis.zscore(key, id);
-        if (score !== null && Number(score) === timestamp && id >= beforeId) {
+        if (score !== null && parseRedisNumber(score) === timestamp && id >= beforeId) {
           continue;
         }
         validIds.push(id);
