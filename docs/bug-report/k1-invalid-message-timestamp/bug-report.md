@@ -59,3 +59,23 @@ tips_exempt:
 | **6. 预警策略** | 若修复开始迁移、跳过或认证 legacy 数据，立即停止；本轮只保留历史证据与 cursor progress，D3/M7 仍 RESERVED。连续第三次同一 state-object finding 则停止代码补丁，回到 plan/spec Stateful Object Gate。 |
 | **7. 用户可见交互修正** | 无新增 UI；读取 legacy infinity cursor 时不再重复边界消息或让 bounded collector 无法终止。 |
 | **8. 验收** | 隔离 Redis RED 必须在 direct global/thread 排他或 bounded consumer progress 上失败；统一 Redis 数值解析后正负无穷、fractional、blank、missing 行为全部通过，完整 Redis suite 与 quality gate 无回归。 |
+
+#### Persisted-number representation matrix
+
+| Case | Hash `timestamp` text | Hydrated number | ZSET score input | `ZSCORE` wire text | Cursor-decoded number | Required relationship |
+|---|---|---:|---|---|---:|---|
+| missing hash field | absent | `0` (existing compatibility default) | N/A | N/A | N/A | Missing remains distinct from a present invalid value. |
+| present blank evidence | `''` / whitespace | `NaN` | N/A | N/A | N/A | Blank remains invalid evidence and is never fabricated as epoch zero. |
+| finite integer | `'123'` | `123` | `123` | `'123'` | `123` | Hash and ZSET decoders are numerically equal. |
+| finite fraction | `'123.5'` | `123.5` | `123.5` | `'123.5'` | `123.5` | Hash and ZSET decoders are numerically equal. |
+| positive infinity | `'Infinity'` | `Infinity` | `Infinity` | `'inf'` | `Infinity` | Canonical Redis alias compares equal to the hydrated cursor. |
+| negative infinity | `'-Infinity'` | `-Infinity` | `-Infinity` | `'-inf'` | `-Infinity` | Canonical Redis alias compares equal to the hydrated cursor. |
+
+`zscore` consumer audit (all eight call sites in `RedisMessageStore`):
+
+- `fetchBeforeWithCursor()` and `fetchDeliveredBeforeCursor()` perform JavaScript numeric cursor-boundary equality; both use the shared Redis-number decoder.
+- Four user/thread filtering sites only test `score === null` for membership; they do not interpret the score numerically.
+- User-ownership reassignment forwards the raw score back to `ZADD`, preserving Redis's representation without a JavaScript comparison.
+- `getByThreadAfter()` passes the raw score back to Redis range commands; Redis, rather than JavaScript, interprets that bound.
+
+No remaining `zscore` consumer converts a sorted-set score for JavaScript numeric equality outside the shared decoder.
