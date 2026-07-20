@@ -120,6 +120,30 @@ pnpm stop
 
 ![CVO 训练营](https://github.com/user-attachments/assets/9d9c8d89-27fe-4788-812a-ffc28f47d3f9)
 
+## 升级
+
+### 桌面应用（应用内更新）
+
+桌面应用会在启动时自动检查更新。发现新版本后会弹出对话框，可以选择 **下载**、**跳过此版本** 或 **稍后再说**。
+
+- **Windows（安装包版）**：更新会下载新的 `.exe`，通过 UAC 提权运行 — 应用关闭，安装程序静默运行，之后应用自动重启。
+- **macOS**：更新会下载新的 `.dmg` — 拖到 Applications 覆盖旧版本即可。
+- **Windows（便携版）**：应用内更新会打开 Release 页面 — 手动下载并解压新 zip 覆盖即可。
+
+**如果更新失败：**
+
+1. 下次启动时会弹出恢复对话框，可选 **重试安装**、**打开安装包位置**、**查看日志** 或 **忽略**。
+2. 也可以从 [Releases 页面](https://github.com/zts212653/clowder-ai/releases) 手动下载最新版本覆盖安装。用户数据（聊天记录、记忆、配置）在升级过程中会被保留。
+
+### 源码安装
+
+```bash
+git pull origin main
+pnpm install
+pnpm build
+pnpm start
+```
+
 ## 四条铁律
 
 四个我们自己守住的约定——在 prompt 层和代码层双重执行：

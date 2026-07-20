@@ -126,6 +126,30 @@ Open `http://localhost:3003` → go to **Hub → System Settings → Account Con
 
 ![CVO Bootcamp onboarding](https://github.com/user-attachments/assets/9d9c8d89-27fe-4788-812a-ffc28f47d3f9)
 
+## Upgrading
+
+### Desktop App (In-App Update)
+
+The desktop app checks for updates automatically at startup. When a new version is available, a dialog lets you **Download**, **Skip**, or decide **Later**.
+
+- **Windows (installer)**: the update downloads the new `.exe` and runs it with elevation (UAC prompt) — the app closes, the installer runs silently, and the app restarts automatically.
+- **macOS**: the update downloads the new `.dmg` — drag it to Applications to replace the old version.
+- **Windows (portable)**: in-app update opens the release page — download and extract the new zip manually.
+
+**If an update fails:**
+
+1. On next launch, a recovery dialog appears with **Retry Install**, **Open Installer Location**, **View Log**, or **Ignore**.
+2. You can also manually download the latest release from the [Releases page](https://github.com/zts212653/clowder-ai/releases) and install it over the existing version. User data (threads, memories, configuration) is preserved across upgrades.
+
+### Source Setup
+
+```bash
+git pull origin main
+pnpm install
+pnpm build
+pnpm start
+```
+
 ## The Iron Laws
 
 Four promises we made — enforced at both prompt and code layer:

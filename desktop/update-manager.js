@@ -17,21 +17,7 @@ const GITHUB_OWNER = 'zts212653';
 const GITHUB_REPO = 'clowder-ai';
 
 class UpdateManager {
-  /**
-   * @param {object} deps — injected Electron dependencies
-   * @param {object} deps.app
-   * @param {object} deps.net — Electron net module
-   * @param {Function} deps.showDialog — (opts) => Promise<buttonIndex>
-   * @param {Function} deps.showNotification — (title, body) => void
-   * @param {Function} deps.setProgressBar — (progress: number) => void
-   * @param {Function} deps.openExternal — (url) => void
-   * @param {Function} deps.openPath — (filePath) => void
-   * @param {Function} deps.quitApp — () => Promise<void>
-   * @param {Function} deps.dbg — (msg) => void
-   * @param {string} deps.userDataRoot
-   * @param {string} deps.platform
-   * @param {string} deps.arch
-   */
+  /** @param {object} deps — injected Electron deps (app, net, showDialog, setProgressBar, openExternal, openPath, quitApp, dbg, userDataRoot, platform, arch) */
   constructor(deps) {
     this._d = deps;
     this._updatesDir = dl.updatesDir(deps.userDataRoot);
@@ -102,23 +88,41 @@ class UpdateManager {
     const { dbg, net, platform, arch } = this._d;
     const currentVersion = this._d.app.getVersion();
     const settings = checker.loadSettings(this._settingsPath);
+    const cachePath = path.join(this._d.userDataRoot, 'release-cache.json');
     dbg(`Checking for updates (current: ${currentVersion})`);
 
     try {
-      const releases = await fetchReleases(net, currentVersion, settings.etag);
-      if (!releases) {
-        dbg('No new release data');
+      const result = await fetchReleases(net, currentVersion, settings.etag);
+
+      let releaseData;
+      let newEtag = settings.etag;
+
+      if (result === 'not-modified') {
+        // P1-4: 304 = feed unchanged, but re-evaluate cached data — user may
+        // have changed their skip/later choice since the last check.
+        releaseData = checker.loadCachedReleases(cachePath);
+        if (!releaseData) {
+          dbg('304 but no cached releases — skipping');
+          return;
+        }
+        dbg('304 — re-evaluating cached releases');
+      } else if (result) {
+        releaseData = result.data;
+        newEtag = result.etag || settings.etag;
+        checker.saveCachedReleases(cachePath, releaseData);
+      } else {
+        dbg('Release fetch failed');
         return;
       }
 
-      const target = checker.selectUpdateTarget(releases.data, currentVersion, platform, arch, {
+      const target = checker.selectUpdateTarget(releaseData, currentVersion, platform, arch, {
         skippedVersion: settings.skippedVersion,
       });
 
       checker.saveSettings(this._settingsPath, {
         ...settings,
         lastCheckAt: new Date().toISOString(),
-        etag: releases.etag || settings.etag,
+        etag: newEtag,
       });
 
       if (!target) {
@@ -155,6 +159,13 @@ class UpdateManager {
   /** Download, verify, then prompt install. */
   async downloadAndInstall(target) {
     if (this._downloading) return;
+    // P2: check install type BEFORE downloading — don't waste 600+ MB bandwidth
+    // for portable users who'll just get redirected to the release page.
+    if (this._d.platform === 'win32' && this._getInstallType() !== 'installer') {
+      this._d.dbg('Non-installer — opening release page (skipping download)');
+      this._d.openExternal(`https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/tag/v${target.version}`);
+      return;
+    }
     this._downloading = true;
     const { dbg, setProgressBar } = this._d;
     const destPath = path.join(this._updatesDir, target.asset.name);
@@ -194,63 +205,28 @@ class UpdateManager {
   }
 
   async _executeInstall(target, installerPath) {
-    const { platform, dbg, showDialog, quitApp, openExternal, openPath } = this._d;
-    const { spawn } = require('node:child_process');
+    const { platform, dbg, showDialog, quitApp, openExternal } = this._d;
+    const isWin = platform === 'win32';
 
-    if (platform === 'win32') {
-      if (this._getInstallType() !== 'installer') {
-        dbg('Non-installer — opening release page');
-        openExternal(`https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/tag/v${target.version}`);
-        return;
-      }
-      const btn = await showDialog({
-        type: 'info',
-        buttons: ['Restart & Upgrade', 'Later'],
-        defaultId: 0,
-        cancelId: 1,
-        title: 'Ready to Install',
-        message: `v${target.version} is ready`,
-        detail: 'The app will close and the installer will run.\nYour data will be preserved.',
-      });
-      if (btn !== 0) return;
-      const logPath = path.join(this._updatesDir, 'install.log');
-      dl.writeJournal(this._updatesDir, {
-        targetVersion: target.version,
-        assetId: target.asset.id,
-        assetName: target.asset.name,
-        digest: target.asset.digest,
-        installerPath,
-        logPath,
-        startedAt: new Date().toISOString(),
-      });
-      spawn(installerPath, ['/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', `/LOG=${logPath}`], {
-        detached: true,
-        stdio: 'ignore',
-      }).unref();
-      await quitApp();
-    } else if (platform === 'darwin') {
-      const btn = await showDialog({
-        type: 'info',
-        buttons: ['Quit & Install', 'Later'],
-        defaultId: 0,
-        cancelId: 1,
-        title: 'Ready to Install',
-        message: `v${target.version} downloaded`,
-        detail: 'Drag Clowder AI into Applications to replace the old version.\nYour data will not be affected.',
-      });
-      if (btn !== 0) return;
-      dl.writeJournal(this._updatesDir, {
-        targetVersion: target.version,
-        assetId: target.asset.id,
-        assetName: target.asset.name,
-        digest: target.asset.digest,
-        installerPath,
-        logPath: '',
-        startedAt: new Date().toISOString(),
-      });
-      spawn('open', [installerPath], { detached: true, stdio: 'ignore' }).unref();
-      await quitApp();
+    if (isWin && this._getInstallType() !== 'installer') {
+      dbg('Non-installer — opening release page');
+      openExternal(`https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/tag/v${target.version}`);
+      return;
     }
+
+    const msg = isWin
+      ? { buttons: ['Restart & Upgrade', 'Later'], message: `v${target.version} is ready`, detail: 'The app will close and the installer will run.\nYour data will be preserved.' }
+      : { buttons: ['Quit & Install', 'Later'], message: `v${target.version} downloaded`, detail: 'Drag Clowder AI into Applications to replace the old version.\nYour data will not be affected.' };
+    const btn = await showDialog({ type: 'info', defaultId: 0, cancelId: 1, title: 'Ready to Install', ...msg });
+    if (btn !== 0) return;
+
+    const logPath = isWin ? path.join(this._updatesDir, 'install.log') : '';
+    dl.writeJournal(this._updatesDir, {
+      targetVersion: target.version, assetId: target.asset.id, assetName: target.asset.name,
+      digest: target.asset.digest, installerPath, logPath, startedAt: new Date().toISOString(),
+    });
+    this._spawnInstaller(installerPath, logPath || null);
+    await quitApp();
   }
 
   async _retryInstall(journal) {
@@ -271,16 +247,38 @@ class UpdateManager {
       dl.clearJournal(this._updatesDir);
       return;
     }
+    this._spawnInstaller(journal.installerPath, journal.logPath || null);
+    await this._d.quitApp();
+  }
+
+  /**
+   * P1-1: Spawn the installer with proper elevation.
+   * On Windows, uses PowerShell Start-Process -Verb RunAs to trigger UAC —
+   * child_process.spawn() uses CreateProcess which cannot trigger UAC.
+   * On macOS, opens the DMG with Finder.
+   */
+  _spawnInstaller(installerPath, logPath) {
     const { spawn } = require('node:child_process');
-    if (this._d.platform === 'win32') {
-      spawn(journal.installerPath, ['/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', `/LOG=${journal.logPath}`], {
+    const { platform, dbg } = this._d;
+
+    if (platform === 'win32') {
+      const innoArgs = ['/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'];
+      if (logPath) innoArgs.push(`/LOG=${logPath}`);
+      // Escape single quotes for PowerShell single-quoted strings
+      const escPath = installerPath.replace(/'/g, "''");
+      const escArgs = innoArgs.join(' ').replace(/'/g, "''");
+      const psCmd = `Start-Process -FilePath '${escPath}' -ArgumentList '${escArgs}' -Verb RunAs`;
+      const child = spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', psCmd], {
         detached: true,
         stdio: 'ignore',
-      }).unref();
+      });
+      child.on('error', (err) => dbg(`Install spawn error: ${err.message}`));
+      child.unref();
     } else {
-      spawn('open', [journal.installerPath], { detached: true, stdio: 'ignore' }).unref();
+      const child = spawn('open', [installerPath], { detached: true, stdio: 'ignore' });
+      child.on('error', (err) => dbg(`Install spawn error: ${err.message}`));
+      child.unref();
     }
-    await this._d.quitApp();
   }
 
   _getInstallType() {

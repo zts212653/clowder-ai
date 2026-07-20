@@ -257,6 +257,35 @@ function saveSettings(settingsPath, settings) {
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
 }
 
+// ── Release feed cache (P1-4: ETag/304 must not suppress "Later" re-prompt) ──
+
+/**
+ * Load cached release feed data. Returns null on missing/corrupt file.
+ * The cache sits alongside settings so 304 responses can re-evaluate
+ * against the user's current skip/later state without re-fetching.
+ *
+ * @param {string} cachePath — absolute path to release-cache.json
+ * @returns {Array | null}
+ */
+function loadCachedReleases(cachePath) {
+  try {
+    return JSON.parse(fs.readFileSync(cachePath, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Save release feed data to cache.
+ * @param {string} cachePath
+ * @param {Array} data — GitHub releases API response array
+ */
+function saveCachedReleases(cachePath, data) {
+  const dir = path.dirname(cachePath);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(cachePath, JSON.stringify(data), 'utf-8');
+}
+
 module.exports = {
   parseVersion,
   compareSemver,
@@ -265,4 +294,6 @@ module.exports = {
   selectUpdateTarget,
   loadSettings,
   saveSettings,
+  loadCachedReleases,
+  saveCachedReleases,
 };

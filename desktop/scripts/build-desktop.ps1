@@ -224,7 +224,8 @@ if (-not $reuseBundled) {
 }
 
 $bundledRedis = Join-Path (Join-Path $ProjectRoot "bundled") "redis"
-if (Test-Path (Join-Path $bundledRedis "redis-server.exe")) {
+$redisBin = Join-Path $bundledRedis "redis-server.exe"
+if (Test-Path $redisBin) {
     Write-Ok "Redis portable already present"
 } else {
     New-Item -ItemType Directory -Path $bundledRedis -Force | Out-Null
@@ -235,23 +236,45 @@ if (Test-Path (Join-Path $bundledRedis "redis-server.exe")) {
         $headers["Authorization"] = "Bearer $($env:GITHUB_TOKEN)"
     }
     $releaseApi = "https://api.github.com/repos/redis-windows/redis-windows/releases/latest"
-    try {
-        $release = Invoke-RestMethod -Uri $releaseApi -Headers $headers -TimeoutSec 30
-        $asset = $release.assets | Where-Object { $_.name -match "^Redis-.*-Windows-x64-msys2\.zip$" } | Select-Object -First 1
-        if (-not $asset) { Write-Err "No Redis Windows asset found"; exit 1 }
-        $zipPath = Join-Path $bundledRedis "redis-windows.zip"
-        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -Headers $headers -UseBasicParsing -TimeoutSec 120
-        $extractDir = Join-Path $bundledRedis "_extract"
-        Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
-        $innerDir = Get-ChildItem -Path $extractDir -Directory | Select-Object -First 1
-        if ($innerDir) {
-            Get-ChildItem -Path $innerDir.FullName | Move-Item -Destination $bundledRedis -Force
+    # P1-3: Retry up to 3 times, then fail-closed in CI (release builds must include Redis).
+    $redisDownloaded = $false
+    for ($redisAttempt = 1; $redisAttempt -le 3; $redisAttempt++) {
+        if ($redisAttempt -gt 1) {
+            Write-Host "  Retry $redisAttempt/3 for Redis download..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 5
         }
-        Remove-Item $extractDir -Recurse -Force
-        Remove-Item $zipPath -Force
-        Write-Ok "Redis portable bundled ($($asset.name))"
-    } catch {
+        try {
+            $release = Invoke-RestMethod -Uri $releaseApi -Headers $headers -TimeoutSec 30
+            $asset = $release.assets | Where-Object { $_.name -match "^Redis-.*-Windows-x64-msys2\.zip$" } | Select-Object -First 1
+            if (-not $asset) { throw "No Redis Windows asset found in release" }
+            $zipPath = Join-Path $bundledRedis "redis-windows.zip"
+            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -Headers $headers -UseBasicParsing -TimeoutSec 120
+            $extractDir = Join-Path $bundledRedis "_extract"
+            Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+            $innerDir = Get-ChildItem -Path $extractDir -Directory | Select-Object -First 1
+            if ($innerDir) {
+                Get-ChildItem -Path $innerDir.FullName | Move-Item -Destination $bundledRedis -Force
+            }
+            Remove-Item $extractDir -Recurse -Force
+            Remove-Item $zipPath -Force
+            $redisDownloaded = $true
+            Write-Ok "Redis portable bundled ($($asset.name))"
+            break
+        } catch {
+            Write-Warn "Redis download attempt $redisAttempt failed: $_"
+        }
+    }
+    if (-not $redisDownloaded) {
+        if ($env:CI) {
+            Write-Err "Redis download failed after 3 attempts (CI build — fail-closed)"
+            exit 1
+        }
         Write-Warn "Redis download failed — installer will use memory store or system Redis"
+    }
+    # Verify redis-server.exe actually landed (guards against corrupt/empty archives)
+    if ($redisDownloaded -and -not (Test-Path $redisBin)) {
+        Write-Err "Redis extraction succeeded but redis-server.exe not found in $bundledRedis"
+        exit 1
     }
 }
 

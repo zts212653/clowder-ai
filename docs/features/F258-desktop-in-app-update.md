@@ -233,3 +233,14 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
   - 修复：CI Redis 下载限流 → `GITHUB_TOKEN` header + Inno Setup `skipifsourcedoesntexist` 容错
   - 增强：semver 比较支持 pre-release 后缀（`-rc.N`、`-beta.N`），支持 RC 版本发布与升级测试
   - 双平台构建验证通过：Windows installer + portable、macOS DMG arm64 + x64
+- **r4 (2026-07-21, 缅因猫 Sol review → 布偶猫 Opus fix)**:
+  - Sol cross-family review: REQUEST CHANGES — 6×P1 blocking + P2s
+  - P1-1 fix: Windows UAC 提权 — `spawn()` 改 PowerShell `Start-Process -Verb RunAs` + error listener
+  - P1-2 fix: PrepareToInstall PowerShell 注入 — `{app}` 路径单引号转义 (`StringChange`)
+  - P1-3 fix: Redis 下载 fail-closed — 3 次重试 + CI 环境强制失败 + redis-server.exe 校验
+  - P1-4 fix: ETag/304 不再吃掉 "Later" — fetchReleases 区分 304 vs error，304 时加载缓存 feed 重新评估
+  - P1-5 fix: 下载流 I/O — write-stream error handler + backpressure + 30min timeout + settle guard
+  - P1-6 fix: README 升级文档 — 中英文 Upgrading 章节（桌面应用 + 源码两条路径 + 失败恢复）
+  - P2 fix: portable 用户在下载前检查 installType，避免浪费 600+ MB 带宽
+  - 新增 4 条 release cache 单测（round-trip / missing / corrupt / mkdir）
+  - 全量 70 tests 通过（58 update-checker + 12 generate-desktop-config）

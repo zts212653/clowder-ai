@@ -244,12 +244,17 @@ Type: filesandordirs; Name: "{app}\scripts\node_modules"
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ExitCode: Integer;
-  Cmd: String;
+  Cmd, AppDir: String;
 begin
   Result := '';
   NeedsRestart := False;
+  // P1-2: Escape {app} path for PowerShell single-quoted strings.
+  // StringChange doubles single quotes so paths with apostrophes
+  // (e.g. "O'Reilly") don't break the PowerShell expression or allow injection.
+  AppDir := ExpandConstant('{app}');
+  StringChange(AppDir, '''', '''''');
   Cmd := 'Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith(''' +
-         ExpandConstant('{app}') +
+         AppDir +
          ''') } | Stop-Process -Force -ErrorAction SilentlyContinue';
   Exec('powershell.exe',
        '-NoProfile -ExecutionPolicy Bypass -Command "' + Cmd + '"',

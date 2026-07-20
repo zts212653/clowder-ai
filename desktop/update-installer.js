@@ -13,11 +13,17 @@ const GITHUB_REPO = 'clowder-ai';
 const RELEASES_URL = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases?per_page=10`;
 
 /**
- * Fetch releases from GitHub API. Returns null on 304 / error.
+ * Fetch releases from GitHub API.
+ * Returns { data, etag } on 200, 'not-modified' on 304, null on error.
+ *
+ * Callers MUST distinguish 304 from error — 304 means the cached feed is
+ * still valid and the caller should re-evaluate cached data (the user may
+ * have changed their "Later" / "Skip" choice since the last check).
+ *
  * @param {object} net — Electron net module
  * @param {string} appVersion — for User-Agent
  * @param {string|null} etag — If-None-Match
- * @returns {Promise<{ data: Array, etag: string|null } | null>}
+ * @returns {Promise<{ data: Array, etag: string|null } | 'not-modified' | null>}
  */
 function fetchReleases(net, appVersion, etag) {
   return new Promise((resolve) => {
@@ -30,7 +36,7 @@ function fetchReleases(net, appVersion, etag) {
       let body = '';
       request.on('response', (response) => {
         if (response.statusCode === 304) {
-          resolve(null);
+          resolve('not-modified');
           return;
         }
         if (response.statusCode !== 200) {
@@ -151,29 +157,52 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg) {
 
       let downloaded = existingSize;
       const ws = fs.createWriteStream(destPath, { flags: isResume ? 'a' : 'w' });
+      let settled = false;
+      const settle = (fn, val) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(dlTimeout);
+        fn(val);
+      };
+
+      // P1-5: write-stream error handler — propagate disk errors to caller
+      ws.on('error', (err) => {
+        response.destroy();
+        settle(reject, err);
+      });
+
+      // 30-minute overall timeout for large assets (600-800 MB typical)
+      const dlTimeout = setTimeout(() => {
+        dbg('Download timeout (30 min)');
+        response.destroy();
+        ws.end();
+        settle(reject, new Error('Download timeout (30 minutes)'));
+      }, 30 * 60 * 1000);
 
       response.on('data', (chunk) => {
-        ws.write(chunk);
         downloaded += chunk.length;
         setProgressBar(asset.size > 0 ? downloaded / asset.size : -1);
+        // Backpressure: pause HTTP stream when disk write buffer is full
+        if (!ws.write(chunk)) {
+          response.pause();
+          ws.once('drain', () => response.resume());
+        }
       });
 
       response.on('end', () => {
         ws.end(() => {
-          try {
-            fs.unlinkSync(metaPath);
-          } catch {}
-          resolve();
+          try { fs.unlinkSync(metaPath); } catch {}
+          settle(resolve, undefined);
         });
       });
 
       response.on('error', (err) => {
         ws.end();
-        reject(err);
+        settle(reject, err);
       });
     });
 
-    request.on('error', reject);
+    request.on('error', (err) => settle(reject, err));
     request.end();
   });
 }
