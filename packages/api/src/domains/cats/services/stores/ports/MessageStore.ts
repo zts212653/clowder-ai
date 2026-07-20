@@ -776,7 +776,11 @@ export class MessageStore {
     return msg;
   }
 
-  /** F117: Mark a queued message as canceled (withdraw/clear). */
+  /**
+   * F117: Mark a queued message as canceled (withdraw/clear).
+   * F258: CAS guard — only transitions queued → canceled. Delivered or
+   * immediate messages are left untouched, matching Redis Lua behavior.
+   */
   markCanceled(id: string): StoredMessage | null {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;

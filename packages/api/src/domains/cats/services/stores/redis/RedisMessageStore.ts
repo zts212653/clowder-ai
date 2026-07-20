@@ -23,10 +23,10 @@ import {
   DEFAULT_THREAD_ID,
   generateSortableId,
   isDelivered,
-  isQueuedForDeliveryTransition,
 } from '../ports/MessageStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import { isSystemUserMessage } from '../visibility.js';
+import { CANCEL_LUA, DELIVER_LUA, REASSIGN_LUA } from './redis-message-delivery-lua-scripts.js';
 import {
   safeParseConnectorSource,
   safeParseContentBlocks,
@@ -335,27 +335,29 @@ export class RedisMessageStore {
     return results;
   }
 
-  /** Reassign a message to a different userId and move user-timeline membership. */
+  /**
+   * Reassign a message to a different userId and move user-timeline membership.
+   * F258: atomic Lua — derives currentUserId and effectiveOrder from the hash
+   * inside the script, eliminating stale-snapshot races with markDelivered.
+   */
   async reassignUserId(id: string, nextUserId: string): Promise<StoredMessage | null> {
-    const msg = await this.getById(id);
-    if (!msg) return null;
-    if (msg.userId === nextUserId) return msg;
+    const hashKey = MessageKeys.detail(id);
+    const result = (await this.redis.eval(REASSIGN_LUA, 1, hashKey, id, nextUserId, this.keyPrefix)) as [
+      number,
+      string,
+      string,
+    ];
 
-    const oldUserKey = MessageKeys.user(msg.userId);
-    const newUserKey = MessageKeys.user(nextUserId);
-    const score = (await this.redis.zscore(oldUserKey, id)) ?? String(msg.deliveredAt ?? msg.timestamp);
+    // -1 = message not found in hash
+    if (result[0] === -1) return null;
 
-    const pipeline = this.redis.multi();
-    pipeline.hset(MessageKeys.detail(id), { userId: nextUserId });
-    pipeline.zrem(oldUserKey, id);
-    pipeline.zadd(newUserKey, score, id);
-    if (this.ttlSeconds !== null) {
-      pipeline.expire(newUserKey, this.ttlSeconds);
+    // Apply TTL to the new user key if configured
+    if (result[0] === 1 && this.ttlSeconds !== null) {
+      await this.redis.expire(MessageKeys.user(nextUserId), this.ttlSeconds);
     }
-    await pipeline.exec();
 
-    msg.userId = nextUserId;
-    return msg;
+    // Always return canonical state from Redis (not stale JS object)
+    return this.getById(id);
   }
 
   async getRecent(limit?: number, userId?: string): Promise<StoredMessage[]> {
@@ -872,37 +874,45 @@ export class RedisMessageStore {
     return augmented;
   }
 
-  /** F098-D: Mark a queued message as delivered at an admitted non-negative integral Date value. */
+  /**
+   * F098-D: Mark a queued message as delivered at an admitted non-negative integral Date value.
+   * F258: atomic Lua — reads userId/threadId inside the script so concurrent
+   * reassignUserId cannot cause the score update to land on a stale user key.
+   */
   async markDelivered(id: string, deliveredAt: number): Promise<StoredMessage | null> {
     assertValidStoredMessageTimestamp(deliveredAt);
-    const msg = await this.getById(id);
-    if (!msg) return null;
-    if (!isQueuedForDeliveryTransition(msg)) return msg;
-    const pipeline = this.redis.multi();
-    pipeline.hset(MessageKeys.detail(id), {
-      deliveredAt: String(deliveredAt),
-      deliveryStatus: 'delivered',
-    });
-    // Update sorted set scores so history queries return messages at delivery
-    // position, not original send-time slot (Bug A: queue message ordering).
-    const scoreStr = String(deliveredAt);
-    pipeline.zadd(MessageKeys.thread(msg.threadId), scoreStr, id);
-    pipeline.zadd(MessageKeys.TIMELINE, scoreStr, id);
-    pipeline.zadd(MessageKeys.user(msg.userId), scoreStr, id);
-    await pipeline.exec();
-    msg.deliveredAt = deliveredAt;
-    msg.deliveryStatus = 'delivered';
-    return msg;
+    const hashKey = MessageKeys.detail(id);
+    const exists = await this.redis.exists(hashKey);
+    if (!exists) return null;
+
+    const result = (await this.redis.eval(DELIVER_LUA, 1, hashKey, id, String(deliveredAt), this.keyPrefix)) as [
+      number,
+      string,
+      string,
+      string,
+    ];
+
+    // applied=0 means status was not 'queued' — return canonical state
+    // applied=1 means transition succeeded — return canonical state
+    return this.getById(id);
   }
 
-  /** F117: Mark a queued message as canceled (withdraw/clear). */
+  /**
+   * F117: Mark a queued message as canceled (withdraw/clear).
+   * F258: CAS guard — only transitions queued → canceled. A delivered or
+   * immediate message is left untouched (no-op), preventing cancel from
+   * overwriting a completed delivery.
+   */
   async markCanceled(id: string): Promise<StoredMessage | null> {
-    const msg = await this.getById(id);
-    if (!msg) return null;
-    if (!isQueuedForDeliveryTransition(msg)) return msg;
-    await this.redis.hset(MessageKeys.detail(id), { deliveryStatus: 'canceled' });
-    msg.deliveryStatus = 'canceled';
-    return msg;
+    const hashKey = MessageKeys.detail(id);
+    const exists = await this.redis.exists(hashKey);
+    if (!exists) return null;
+
+    // Atomic CAS: queued → canceled, anything else → no-op
+    await this.redis.eval(CANCEL_LUA, 1, hashKey);
+
+    // Return canonical state (reflects whether the transition actually applied)
+    return this.getById(id);
   }
 
   /**
