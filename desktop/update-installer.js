@@ -1,8 +1,9 @@
-// F258: Desktop In-App Update — HTTP transport layer
+// F258: Desktop In-App Update — install execution layer
 //
 // Separated from update-manager.js for file-size compliance (350 line limit).
-// Uses Electron's `net` module for system proxy support.
+// HTTP transport: Electron `net` module with system proxy support.
 // Resume: Range + If-Range; discard partial on ETag mismatch (spec §2).
+// Spawn: platform-specific installer launch (Windows UAC / macOS open).
 
 'use strict';
 
@@ -106,8 +107,14 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, ti
       settled = true;
       if (dlTimeout) clearTimeout(dlTimeout);
       // Unified cleanup: cancel request, destroy response, close writer
-      if (activeResponse) { activeResponse.destroy(); activeResponse = null; }
-      if (activeWs) { activeWs.end(); activeWs = null; }
+      if (activeResponse) {
+        activeResponse.destroy();
+        activeResponse = null;
+      }
+      if (activeWs) {
+        activeWs.end();
+        activeWs = null;
+      }
       if (typeof request.abort === 'function') request.abort();
       fn(val);
     };
@@ -123,7 +130,10 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, ti
       // Guard: discard late response arriving after timeout/error settled the Promise.
       // Without this, a stalled-then-recovered connection creates a write stream
       // that races with the caller's retry.
-      if (settled) { response.destroy(); return; }
+      if (settled) {
+        response.destroy();
+        return;
+      }
       activeResponse = response;
       let isResume = response.statusCode === 206;
       if (response.statusCode !== 200 && !isResume) {
@@ -139,8 +149,12 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, ti
         const m = cr?.match(/bytes (\d+)-/);
         if (!m || Number(m[1]) !== existingSize) {
           dbg(`Content-Range mismatch (expected start=${existingSize}, got "${cr}") — discarding partial`);
-          try { fs.unlinkSync(destPath); } catch {}
-          try { fs.unlinkSync(metaPath); } catch {}
+          try {
+            fs.unlinkSync(destPath);
+          } catch {}
+          try {
+            fs.unlinkSync(metaPath);
+          } catch {}
           response.destroy();
           settle(reject, new Error(`Content-Range mismatch: expected start=${existingSize}, got "${cr}"`));
           return;
@@ -149,14 +163,20 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, ti
       const serverEtag = response.headers.etag || null;
       if (isResume && savedEtag && serverEtag && serverEtag !== savedEtag) {
         dbg(`ETag mismatch on 206 (saved="${savedEtag}", got="${serverEtag}") — discarding partial`);
-        try { fs.unlinkSync(destPath); } catch {}
-        try { fs.unlinkSync(metaPath); } catch {}
+        try {
+          fs.unlinkSync(destPath);
+        } catch {}
+        try {
+          fs.unlinkSync(metaPath);
+        } catch {}
         response.destroy();
         settle(reject, new Error(`ETag mismatch on resume: saved="${savedEtag}", got="${serverEtag}"`));
         return;
       }
       if (serverEtag) {
-        try { fs.writeFileSync(metaPath, JSON.stringify({ etag: serverEtag }), 'utf-8'); } catch {}
+        try {
+          fs.writeFileSync(metaPath, JSON.stringify({ etag: serverEtag }), 'utf-8');
+        } catch {}
       }
 
       let downloaded = existingSize;
@@ -177,7 +197,9 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, ti
 
       response.on('end', () => {
         ws.end(() => {
-          try { fs.unlinkSync(metaPath); } catch {}
+          try {
+            fs.unlinkSync(metaPath);
+          } catch {}
           settle(resolve, undefined);
         });
       });
@@ -188,14 +210,71 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, ti
 
     // 30-minute overall timeout covers both connection and download phases.
     // Without this, a stalled connection (no response, no error) blocks forever.
-    dlTimeout = setTimeout(() => {
-      dbg('Download timeout (30 min)');
-      settle(reject, new Error('Download timeout (30 minutes)'));
-    }, timeoutMs || 30 * 60 * 1000);
+    dlTimeout = setTimeout(
+      () => {
+        dbg('Download timeout (30 min)');
+        settle(reject, new Error('Download timeout (30 minutes)'));
+      },
+      timeoutMs || 30 * 60 * 1000,
+    );
 
     request.on('error', (err) => settle(reject, err));
     request.end();
   });
 }
 
-module.exports = { fetchReleases, downloadAsset };
+/**
+ * Spawn the installer with proper elevation.
+ * Resolves when the launcher confirms the process started; rejects on failure.
+ *
+ * Windows: PowerShell Start-Process -Verb RunAs triggers UAC.
+ * macOS: Finder opens the DMG via `open`.
+ *
+ * @param {Function} spawn — child_process.spawn (injectable for testing)
+ * @param {string} platform — 'win32' | 'darwin'
+ * @param {Function} dbg — logger
+ * @param {string} installerPath — path to .exe or .dmg
+ * @param {string|null} logPath — Inno Setup log path (Windows only)
+ */
+function spawnInstaller(spawn, platform, dbg, installerPath, logPath) {
+  return new Promise((resolve, reject) => {
+    if (platform === 'win32') {
+      const innoArgs = ['/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'];
+      if (logPath) innoArgs.push(`"/LOG=${logPath}"`);
+      const escPath = installerPath.replace(/'/g, "''");
+      const escArgs = innoArgs.join(' ').replace(/'/g, "''");
+      const psCmd = `Start-Process -FilePath '${escPath}' -ArgumentList '${escArgs}' -Verb RunAs`;
+      const child = spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', psCmd], {
+        stdio: 'ignore',
+      });
+      child.on('error', (err) => {
+        dbg(`Install spawn error: ${err.message}`);
+        reject(err);
+      });
+      child.on('close', (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          const msg = `Installer launch failed (exit code ${code} — UAC declined?)`;
+          dbg(msg);
+          reject(new Error(msg));
+        }
+      });
+    } else {
+      const child = spawn('open', [installerPath], { stdio: 'ignore' });
+      child.on('error', (err) => {
+        dbg(`Install spawn error: ${err.message}`);
+        reject(err);
+      });
+      child.on('close', (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`DMG open failed (exit code ${code})`));
+        }
+      });
+    }
+  });
+}
+
+module.exports = { fetchReleases, downloadAsset, spawnInstaller };

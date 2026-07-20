@@ -31,10 +31,17 @@ function mockSpawn({ emitError, closeCode }) {
 function baseDeps(tempDir, overrides = {}) {
   return {
     app: { getVersion: () => '0.11.0', getAppPath: () => path.join(tempDir, 'app.asar') },
-    net: {}, showDialog: async () => 0, showNotification: () => {},
-    setProgressBar: () => {}, openExternal: () => {}, openPath: () => {},
-    quitApp: async () => {}, dbg: () => {}, userDataRoot: tempDir,
-    platform: 'win32', arch: 'x64',
+    net: {},
+    showDialog: async () => 0,
+    showNotification: () => {},
+    setProgressBar: () => {},
+    openExternal: () => {},
+    openPath: () => {},
+    quitApp: async () => {},
+    dbg: () => {},
+    userDataRoot: tempDir,
+    platform: 'win32',
+    arch: 'x64',
     spawn: mockSpawn({ closeCode: 0 }),
     ...overrides,
   };
@@ -56,8 +63,12 @@ const fakeTarget = {
 
 describe('Windows launcher (_spawnInstaller)', () => {
   let td;
-  beforeEach(() => { td = mkdtempSync(path.join(tmpdir(), 'mgr-win-')); });
-  afterEach(() => { rmSync(td, { recursive: true, force: true }); });
+  beforeEach(() => {
+    td = mkdtempSync(path.join(tmpdir(), 'mgr-win-'));
+  });
+  afterEach(() => {
+    rmSync(td, { recursive: true, force: true });
+  });
 
   test('exit 0 resolves', async () => {
     const m = new UpdateManager(baseDeps(td, { spawn: mockSpawn({ closeCode: 0 }) }));
@@ -76,9 +87,14 @@ describe('Windows launcher (_spawnInstaller)', () => {
 
   test('passes -Verb RunAs and quoted /LOG= to PowerShell', async () => {
     let captured;
-    const m = new UpdateManager(baseDeps(td, {
-      spawn: (...a) => { captured = a; return mockSpawn({ closeCode: 0 })(); },
-    }));
+    const m = new UpdateManager(
+      baseDeps(td, {
+        spawn: (...a) => {
+          captured = a;
+          return mockSpawn({ closeCode: 0 })();
+        },
+      }),
+    );
     await m._spawnInstaller('C:\\Clowder AI\\Setup.exe', 'C:\\Clowder AI\\log.txt');
     assert.equal(captured[0], 'powershell.exe');
     const cmd = captured[1].find((a) => a.includes('Start-Process'));
@@ -91,8 +107,12 @@ describe('Windows launcher (_spawnInstaller)', () => {
 
 describe('macOS launcher (_spawnInstaller)', () => {
   let td;
-  beforeEach(() => { td = mkdtempSync(path.join(tmpdir(), 'mgr-mac-')); });
-  afterEach(() => { rmSync(td, { recursive: true, force: true }); });
+  beforeEach(() => {
+    td = mkdtempSync(path.join(tmpdir(), 'mgr-mac-'));
+  });
+  afterEach(() => {
+    rmSync(td, { recursive: true, force: true });
+  });
 
   test('exit 0 resolves', async () => {
     const m = new UpdateManager(baseDeps(td, { platform: 'darwin', spawn: mockSpawn({ closeCode: 0 }) }));
@@ -118,7 +138,9 @@ describe('journal preservation on launcher failure', () => {
     td = mkdtempSync(path.join(tmpdir(), 'mgr-jnl-'));
     setupInstallType(td, 'installer');
   });
-  afterEach(() => { rmSync(td, { recursive: true, force: true }); });
+  afterEach(() => {
+    rmSync(td, { recursive: true, force: true });
+  });
 
   test('_executeInstall: launcher fail does NOT clear journal (AC-3)', async () => {
     const m = new UpdateManager(baseDeps(td, { spawn: mockSpawn({ closeCode: 1 }) }));
@@ -132,10 +154,14 @@ describe('journal preservation on launcher failure', () => {
 
   test('_executeInstall: launcher success calls quitApp', async () => {
     let quit = false;
-    const m = new UpdateManager(baseDeps(td, {
-      spawn: mockSpawn({ closeCode: 0 }),
-      quitApp: async () => { quit = true; },
-    }));
+    const m = new UpdateManager(
+      baseDeps(td, {
+        spawn: mockSpawn({ closeCode: 0 }),
+        quitApp: async () => {
+          quit = true;
+        },
+      }),
+    );
     await m._executeInstall(fakeTarget, path.join(dl.updatesDir(td), 'Setup.exe'));
     assert.ok(quit, 'quitApp must be called on success');
   });
@@ -148,8 +174,13 @@ describe('journal preservation on launcher failure', () => {
     writeFileSync(ip, 'FAKE');
     const h = createHash('sha256').update(Buffer.from('FAKE')).digest('hex');
     dl.writeJournal(updDir, {
-      targetVersion: '0.12.0', assetId: 1, assetName: 'Setup.exe',
-      digest: `sha256:${h}`, installerPath: ip, logPath: '', startedAt: '2026-07-20T00:00:00Z',
+      targetVersion: '0.12.0',
+      assetId: 1,
+      assetName: 'Setup.exe',
+      digest: `sha256:${h}`,
+      installerPath: ip,
+      logPath: '',
+      startedAt: '2026-07-20T00:00:00Z',
     });
     await m._retryInstall(dl.readJournal(updDir));
     assert.notEqual(dl.readJournal(updDir), null, 'journal must survive retry failure');
@@ -157,18 +188,27 @@ describe('journal preservation on launcher failure', () => {
 
   test('_retryInstall: launcher success calls quitApp', async () => {
     let quit = false;
-    const m = new UpdateManager(baseDeps(td, {
-      spawn: mockSpawn({ closeCode: 0 }),
-      quitApp: async () => { quit = true; },
-    }));
+    const m = new UpdateManager(
+      baseDeps(td, {
+        spawn: mockSpawn({ closeCode: 0 }),
+        quitApp: async () => {
+          quit = true;
+        },
+      }),
+    );
     const updDir = dl.updatesDir(td);
     const ip = path.join(updDir, 'Setup.exe');
     mkdirSync(updDir, { recursive: true });
     writeFileSync(ip, 'FAKE');
     const h = createHash('sha256').update(Buffer.from('FAKE')).digest('hex');
     dl.writeJournal(updDir, {
-      targetVersion: '0.12.0', assetId: 1, assetName: 'Setup.exe',
-      digest: `sha256:${h}`, installerPath: ip, logPath: '', startedAt: '2026-07-20T00:00:00Z',
+      targetVersion: '0.12.0',
+      assetId: 1,
+      assetName: 'Setup.exe',
+      digest: `sha256:${h}`,
+      installerPath: ip,
+      logPath: '',
+      startedAt: '2026-07-20T00:00:00Z',
     });
     await m._retryInstall(dl.readJournal(updDir));
     assert.ok(quit, 'quitApp must be called on success');

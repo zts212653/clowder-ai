@@ -126,9 +126,15 @@ function verifyFileIntegrity(filePath, expectedDigest, expectedSize) {
   return new Promise((resolve) => {
     try {
       const stat = fs.statSync(filePath);
-      if (stat.size !== expectedSize) { resolve(false); return; }
+      if (stat.size !== expectedSize) {
+        resolve(false);
+        return;
+      }
       const colonIdx = expectedDigest.indexOf(':');
-      if (colonIdx === -1) { resolve(false); return; }
+      if (colonIdx === -1) {
+        resolve(false);
+        return;
+      }
       const expectedHash = expectedDigest.slice(colonIdx + 1);
       const hash = createHash('sha256');
       const rs = fs.createReadStream(filePath);

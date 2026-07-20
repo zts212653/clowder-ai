@@ -288,7 +288,9 @@ describe('downloadAsset', () => {
             const res = new EventEmitter();
             res.statusCode = 200;
             res.headers = {};
-            res.destroy = () => { destroyed = true; };
+            res.destroy = () => {
+              destroyed = true;
+            };
             resRef = res;
             req.emit('response', res);
             // First chunk before timeout

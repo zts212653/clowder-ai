@@ -10,7 +10,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const checker = require('./update-checker');
 const dl = require('./update-downloader');
-const { fetchReleases, downloadAsset } = require('./update-installer');
+const { fetchReleases, downloadAsset, spawnInstaller } = require('./update-installer');
 
 const CHECK_DELAY_MS = 3 * 60 * 1000;
 const GITHUB_OWNER = 'zts212653';
@@ -216,15 +216,28 @@ class UpdateManager {
     }
 
     const msg = isWin
-      ? { buttons: ['Restart & Upgrade', 'Later'], message: `v${target.version} is ready`, detail: 'The app will close and the installer will run.\nYour data will be preserved.' }
-      : { buttons: ['Quit & Install', 'Later'], message: `v${target.version} downloaded`, detail: 'Drag Clowder AI into Applications to replace the old version.\nYour data will not be affected.' };
+      ? {
+          buttons: ['Restart & Upgrade', 'Later'],
+          message: `v${target.version} is ready`,
+          detail: 'The app will close and the installer will run.\nYour data will be preserved.',
+        }
+      : {
+          buttons: ['Quit & Install', 'Later'],
+          message: `v${target.version} downloaded`,
+          detail: 'Drag Clowder AI into Applications to replace the old version.\nYour data will not be affected.',
+        };
     const btn = await showDialog({ type: 'info', defaultId: 0, cancelId: 1, title: 'Ready to Install', ...msg });
     if (btn !== 0) return;
 
     const logPath = isWin ? path.join(this._updatesDir, 'install.log') : '';
     dl.writeJournal(this._updatesDir, {
-      targetVersion: target.version, assetId: target.asset.id, assetName: target.asset.name,
-      digest: target.asset.digest, installerPath, logPath, startedAt: new Date().toISOString(),
+      targetVersion: target.version,
+      assetId: target.asset.id,
+      assetName: target.asset.name,
+      digest: target.asset.digest,
+      installerPath,
+      logPath,
+      startedAt: new Date().toISOString(),
     });
     try {
       await this._spawnInstaller(installerPath, logPath || null);
@@ -232,8 +245,13 @@ class UpdateManager {
     } catch (err) {
       dbg(`Installer launch failed: ${err.message}`);
       // Journal preserved — next startup checkPendingUpgrade() shows recovery dialog (AC-3)
-      await showDialog({ type: 'error', buttons: ['OK'], title: 'Install Failed',
-        message: 'Could not start the installer', detail: err.message });
+      await showDialog({
+        type: 'error',
+        buttons: ['OK'],
+        title: 'Install Failed',
+        message: 'Could not start the installer',
+        detail: err.message,
+      });
     }
   }
 
@@ -264,49 +282,9 @@ class UpdateManager {
     }
   }
 
-  /**
-   * Spawn the installer with proper elevation. Returns a Promise that
-   * resolves when the launcher confirms the process started (Windows:
-   * PowerShell exits 0 after UAC accepted) or rejects on failure
-   * (UAC declined, file not found, PowerShell error).
-   *
-   * On Windows: PowerShell Start-Process -Verb RunAs triggers UAC.
-   * On macOS: Finder opens the DMG.
-   */
+  /** Delegate to update-installer.spawnInstaller (extracted for file-size compliance). */
   _spawnInstaller(installerPath, logPath) {
-    return new Promise((resolve, reject) => {
-      const spawn = this._spawn;
-      const { platform, dbg } = this._d;
-
-      if (platform === 'win32') {
-        const innoArgs = ['/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'];
-        // Wrap /LOG= path in double-quotes — paths like "Clowder AI\updates"
-        // contain spaces and would be split by Start-Process -ArgumentList.
-        if (logPath) innoArgs.push(`"/LOG=${logPath}"`);
-        const escPath = installerPath.replace(/'/g, "''");
-        const escArgs = innoArgs.join(' ').replace(/'/g, "''");
-        const psCmd = `Start-Process -FilePath '${escPath}' -ArgumentList '${escArgs}' -Verb RunAs`;
-        const child = spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', psCmd], {
-          stdio: 'ignore',
-        });
-        child.on('error', (err) => { dbg(`Install spawn error: ${err.message}`); reject(err); });
-        child.on('close', (code) => {
-          if (code === 0) { resolve(); } else {
-            const msg = `Installer launch failed (exit code ${code} — UAC declined?)`;
-            dbg(msg);
-            reject(new Error(msg));
-          }
-        });
-      } else {
-        const child = spawn('open', [installerPath], { stdio: 'ignore' });
-        child.on('error', (err) => { dbg(`Install spawn error: ${err.message}`); reject(err); });
-        child.on('close', (code) => {
-          if (code === 0) { resolve(); } else {
-            reject(new Error(`DMG open failed (exit code ${code})`));
-          }
-        });
-      }
-    });
+    return spawnInstaller(this._spawn, this._d.platform, this._d.dbg, installerPath, logPath);
   }
 
   _getInstallType() {
