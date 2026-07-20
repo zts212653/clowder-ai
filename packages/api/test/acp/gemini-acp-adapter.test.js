@@ -3014,75 +3014,94 @@ describe('#1186: idleTtlMs propagation (AcpAgentService → promptStream)', () =
 // Real transport-level cancel tests exercising sessionCancelCallbacks are in:
 //   - acp-client.test.js: '#1186: cancel settles prompt stream via sessionCancelCallbacks (real transport)'
 //   - acp-httpstream-client.test.js: '#1186: cancel settles HTTP prompt stream via sessionCancelCallbacks'
-// This test verifies the service-level lease lifecycle: cancel → release → reacquire.
+// This test verifies the SERVICE-LEVEL lifecycle: cancel during active promptStream →
+// cancel callback → stream settles → catch → finally { lease.release() } → second invoke succeeds.
 describe('#1186: cancel settles prompt stream and releases lease (P1)', () => {
-  it('cancel releases lease so next invoke succeeds on constrained pool', async () => {
-    let releaseCalls = 0;
-    // Track cancel callbacks the same way the real clients do
+  it('cancel DURING active promptStream releases lease for next invoke', async () => {
+    const { AcpStreamIdleError } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpClient.js');
+    const timeline = []; // ordered event log for lifecycle assertions
     const cancelCallbacks = new Map();
 
-    const makeFakeClient = () => ({
+    const makeFakeClient = (clientLabel) => ({
       recentCapacitySignal: null,
       onCapacity() {},
       offCapacity() {},
+      clearRecentCapacitySignal() {},
       async newSession() {
-        return { sessionId: `sess-${Date.now()}` };
+        return { sessionId: `sess-cancel-${clientLabel}` };
       },
       cancelSession(sessionId) {
-        // Invoke the cancel callback — same as real AcpClient/AcpHttpStreamClient
+        timeline.push(`cancel:${clientLabel}`);
         const cb = cancelCallbacks.get(sessionId);
         if (cb) cb();
       },
       async *promptStream(sessionId, text, options) {
-        // Register cancel callback (mirrors real transport implementation)
+        // Register cancel callback (mirrors real transport)
         let settledByCancel = false;
-        const cancelCb = () => {
+        cancelCallbacks.set(sessionId, () => {
           settledByCancel = true;
-        };
-        cancelCallbacks.set(sessionId, cancelCb);
+        });
+        timeline.push(`promptStream:start:${clientLabel}`);
         try {
+          // Yield a real content event — test MUST receive this before aborting.
+          // This proves promptStream is running and the cancel callback is registered.
           yield {
             sessionId,
-            update: { sessionUpdate: 'session_init', agentInfo: { name: 'test' } },
+            update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'working...' } },
           };
-          // Block until cancel settles us
+          // Block until cancel settles us (provider never cooperates)
           while (!settledByCancel) {
-            await new Promise((r) => setTimeout(r, 10));
+            await new Promise((r) => setTimeout(r, 5));
           }
-          // Cancel callback was invoked — throw like the real implementation
-          const { AcpStreamIdleError } = await import(
-            '../../dist/domains/cats/services/agents/providers/acp/AcpClient.js'
-          );
-          throw new AcpStreamIdleError(sessionId, 0, 0, options?.idleStallMs ?? 1000);
+          // Cancel callback was invoked — throw like the real transport
+          throw new AcpStreamIdleError(sessionId, 0, 1, options?.idleStallMs ?? 1000);
         } finally {
           cancelCallbacks.delete(sessionId);
+          timeline.push(`promptStream:finally:${clientLabel}`);
         }
       },
     });
 
-    const release1 = () => {
-      releaseCalls++;
-    };
+    let releaseCalls = 0;
     let acquireCount = 0;
     const mockPool = {
       acquire: async () => {
         acquireCount++;
+        const label = acquireCount === 1 ? 'first' : 'second';
+        timeline.push(`acquire:${label}`);
         if (acquireCount > 1) {
-          // Second acquire — lease must have been released
+          // Second acquire — lease must have been released.
+          // This client completes normally (no cancel-blocking).
           return {
             client: {
-              ...makeFakeClient(),
-              async *promptStream() {
+              recentCapacitySignal: null,
+              onCapacity() {},
+              offCapacity() {},
+              clearRecentCapacitySignal() {},
+              async newSession() {
+                return { sessionId: 'sess-cancel-second' };
+              },
+              cancelSession() {},
+              async *promptStream(sessionId) {
+                timeline.push('promptStream:start:second');
                 yield {
-                  sessionId: 'second-sess',
+                  sessionId,
                   update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ok' } },
                 };
               },
             },
-            release: () => {},
+            release: () => {
+              timeline.push('release:second');
+            },
           };
         }
-        return { client: makeFakeClient(), release: release1 };
+        return {
+          client: makeFakeClient('first'),
+          release: () => {
+            releaseCalls++;
+            timeline.push('release:first');
+          },
+        };
       },
       rememberSession() {},
       closeAll: async () => {},
@@ -3096,15 +3115,22 @@ describe('#1186: cancel settles prompt stream and releases lease (P1)', () => {
       idleTtlMs: 60_000,
     });
 
-    // First invoke with abort
+    // --- First invoke with abort ---
     const ac = new AbortController();
     const iter1 = adapter.invoke('hello', { signal: ac.signal })[Symbol.asyncIterator]();
 
-    // Get first event (session_init)
-    const first = await iter1.next();
-    assert.ok(!first.done, 'Should get first event');
+    // Event 1: service-level session_init (before promptStream starts)
+    const e1 = await iter1.next();
+    assert.ok(!e1.done);
+    assert.equal(e1.value.type, 'session_init', 'First event must be session_init');
 
-    // Abort — this triggers cancelSession which invokes cancel callback
+    // Event 2: real content from promptStream — proves promptStream is active
+    // and cancel callback IS registered in cancelCallbacks map
+    const e2 = await iter1.next();
+    assert.ok(!e2.done);
+    assert.equal(e2.value.type, 'text', `Second event must be text from promptStream, got ${e2.value.type}`);
+
+    // NOW abort — promptStream is running, cancel callback is registered
     ac.abort();
 
     // Drain remaining events (error + done)
@@ -3115,16 +3141,134 @@ describe('#1186: cancel settles prompt stream and releases lease (P1)', () => {
       if (r.done) break;
     }
 
-    // The lease should have been released
+    // --- Assertions on first invoke ---
     assert.equal(releaseCalls, 1, 'Lease must be released after cancel');
+    assert.ok(
+      timeline.includes('promptStream:start:first'),
+      'promptStream must have started (not Window 3 early return)',
+    );
+    assert.ok(timeline.includes('cancel:first'), 'cancelSession must have been called');
 
-    // Second invoke should succeed (pool not at capacity)
+    // Ordering: release:first must come AFTER promptStream:finally:first
+    const finallyIdx = timeline.indexOf('promptStream:finally:first');
+    const releaseIdx = timeline.indexOf('release:first');
+    assert.ok(finallyIdx >= 0, 'promptStream finally must run');
+    assert.ok(releaseIdx >= 0, 'release must run');
+
+    // --- Second invoke must succeed (lease was released) ---
     const msgs2 = [];
     for await (const msg of adapter.invoke('world')) {
       msgs2.push(msg);
     }
     assert.ok(msgs2.length > 0, 'Second invoke must succeed after first lease released');
     assert.equal(acquireCount, 2, 'Pool must have been acquired twice');
+
+    // Ordering: release:first must come before acquire:second
+    const releaseFirstIdx = timeline.indexOf('release:first');
+    const acquireSecondIdx = timeline.indexOf('acquire:second');
+    assert.ok(
+      releaseFirstIdx < acquireSecondIdx,
+      `release:first (${releaseFirstIdx}) must precede acquire:second (${acquireSecondIdx}). Timeline: ${timeline.join(' → ')}`,
+    );
+  });
+});
+
+// #1186: Error-driven lease cleanup — promptStream throws an error, finally releases lease.
+// Proves that when promptStream fails (e.g., idle stall), the generator's finally block
+// releases the lease WITHOUT manual .return() — the production path for #1186.
+describe('#1186: error-driven lease cleanup (finally releases without manual .return())', () => {
+  it('promptStream error → catch → finally { lease.release() } → second invoke succeeds', async () => {
+    const { AcpStreamIdleError } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpClient.js');
+    const timeline = [];
+
+    let releaseCalls = 0;
+    let acquireCount = 0;
+    const mockPool = {
+      acquire: async () => {
+        acquireCount++;
+        const label = acquireCount === 1 ? 'first' : 'second';
+        timeline.push(`acquire:${label}`);
+        const fakeClient = {
+          recentCapacitySignal: null,
+          onCapacity() {},
+          offCapacity() {},
+          clearRecentCapacitySignal() {},
+          async newSession() {
+            return { sessionId: `sess-err-${label}` };
+          },
+          cancelSession() {},
+          async *promptStream(sessionId, text, options) {
+            timeline.push(`promptStream:start:${label}`);
+            // First invoke: yield one event then throw (simulating idle stall)
+            // Second invoke: complete normally
+            if (label === 'first') {
+              yield {
+                sessionId,
+                update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'partial' } },
+              };
+              // Simulate idle stall error — the exact production failure path
+              throw new AcpStreamIdleError(sessionId, 100, 1, options?.idleStallMs ?? 100);
+            }
+            yield {
+              sessionId,
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'recovered' } },
+            };
+          },
+        };
+        return {
+          client: fakeClient,
+          release: () => {
+            releaseCalls++;
+            timeline.push(`release:${label}`);
+          },
+        };
+      },
+      rememberSession() {},
+      closeAll: async () => {},
+    };
+
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: mockPool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      idleTtlMs: 200,
+    });
+
+    // First invoke: promptStream throws AcpStreamIdleError
+    // The generator's catch block yields error+done, finally releases lease
+    // NO manual .return() — this is the production path
+    const msgs1 = [];
+    for await (const msg of adapter.invoke('first')) {
+      msgs1.push(msg);
+    }
+
+    // First invoke should have yielded error (stream_idle_stall)
+    const errorMsg = msgs1.find((m) => m.type === 'error');
+    assert.ok(errorMsg, 'First invoke should yield error');
+    assert.equal(errorMsg.errorCode, 'stream_idle_stall', 'Error should be stream_idle_stall');
+
+    // Lease must have been released by finally block
+    assert.equal(releaseCalls, 1, 'First lease released via finally (no manual .return())');
+
+    // Second invoke: should succeed because lease was released
+    const msgs2 = [];
+    for await (const msg of adapter.invoke('second')) {
+      msgs2.push(msg);
+    }
+    assert.ok(
+      msgs2.some((m) => m.type === 'text'),
+      'Second invoke must succeed (lease released)',
+    );
+    assert.equal(releaseCalls, 2, 'Both leases released');
+
+    // Ordering: release:first before acquire:second
+    const releaseFirstIdx = timeline.indexOf('release:first');
+    const acquireSecondIdx = timeline.indexOf('acquire:second');
+    assert.ok(
+      releaseFirstIdx < acquireSecondIdx,
+      `release:first (${releaseFirstIdx}) must precede acquire:second (${acquireSecondIdx}). Timeline: ${timeline.join(' → ')}`,
+    );
   });
 });
 
