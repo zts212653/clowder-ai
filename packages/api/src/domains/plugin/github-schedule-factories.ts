@@ -36,7 +36,10 @@ import type {
   PrReviewDecision,
   ReviewFeedbackRouter,
 } from '../../infrastructure/email/ReviewFeedbackRouter.js';
-import type { ReviewFeedbackPrMetadata } from '../../infrastructure/email/ReviewFeedbackTaskSpec.js';
+import type {
+  PrFeedbackCommentCursors,
+  ReviewFeedbackPrMetadata,
+} from '../../infrastructure/email/ReviewFeedbackTaskSpec.js';
 import { createReviewFeedbackTaskSpec } from '../../infrastructure/email/ReviewFeedbackTaskSpec.js';
 import type { TaskSpec_P1 } from '../../infrastructure/scheduler/types.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
@@ -75,7 +78,7 @@ export interface GitHubScheduleDeps extends ScheduleFactoryDeps {
   checkMergeable: (repo: string, pr: number) => Promise<{ mergeState: string; headSha: string }>;
   autoExecutor: ConflictAutoExecutor;
   fetchPrMetadata: (repo: string, pr: number) => Promise<ReviewFeedbackPrMetadata | null>;
-  fetchComments: (repo: string, pr: number, sinceId?: number) => Promise<PrFeedbackComment[]>;
+  fetchComments: (repo: string, pr: number, cursors: PrFeedbackCommentCursors) => Promise<PrFeedbackComment[]>;
   fetchReviews: (repo: string, pr: number, sinceId?: number) => Promise<PrReviewDecision[]>;
   isEchoComment: (c: PrFeedbackComment) => boolean;
   isEchoReview: (r: PrReviewDecision) => boolean;

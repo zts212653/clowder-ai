@@ -56,6 +56,9 @@ function makeEventLog(appendResult = { appended: true }) {
   const appendCalls = [];
   return {
     appendCalls,
+    async read() {
+      return [];
+    },
     async append(event) {
       appendCalls.push(event);
       return appendResult;
@@ -191,7 +194,146 @@ describe('ReviewFeedbackTaskSpec: event log append — polling fallback (R3-P1)'
     assert.ok(commentAppend, 'comment 201 must be appended to event log');
     assert.strictEqual(commentAppend.classification, 'informational');
     assert.strictEqual(commentAppend.payload.authorAssociation, 'NONE');
-    assert.strictEqual(commentAppend.sourceEventId, 'prcomment:owner/repo#10:201');
+    assert.strictEqual(commentAppend.sourceEventId, 'prcomment:owner/repo#10:inline:201');
+  });
+
+  it('preserves legacy comment identity while migrating split cursors', async () => {
+    assert.ok(createReviewFeedbackTaskSpec);
+    const task = {
+      ...makePrTask(),
+      automationState: {
+        review: {
+          lastCommentCursor: 500,
+          lastDecisionCursor: 0,
+        },
+      },
+    };
+    const taskStore = makeTaskStore(task);
+    const appendCalls = [];
+    const eventLog = {
+      async read(subjectKey) {
+        assert.strictEqual(subjectKey, 'pr:owner/repo#10');
+        return [
+          {
+            sourceEventId: 'prcomment:owner/repo#10:201',
+            subjectKey,
+            kind: 'pr.review_submitted',
+            classification: 'informational',
+            payload: { commentId: 201, commentType: 'inline' },
+            at: Date.parse('2026-01-01T00:00:00Z'),
+          },
+        ];
+      },
+      async append(event) {
+        appendCalls.push(event);
+        return { appended: true, sequence: appendCalls.length - 1 };
+      },
+    };
+    const projector = makeProjector();
+
+    const spec = createReviewFeedbackTaskSpec({
+      id: 'legacy-comment-identity-migration',
+      taskStore,
+      reviewFeedbackRouter: makeRouter(),
+      fetchComments: async () => [
+        {
+          id: 201,
+          author: 'inline-author',
+          body: 'already projected before migration',
+          createdAt: '2026-01-01T00:00:00Z',
+          commentType: 'inline',
+          authorAssociation: 'NONE',
+        },
+        {
+          id: 201,
+          author: 'conversation-author',
+          body: 'same numeric ID from the independent source',
+          createdAt: '2026-01-02T00:00:00Z',
+          commentType: 'conversation',
+          authorAssociation: 'NONE',
+        },
+      ],
+      fetchReviews: async () => [],
+      eventLog,
+      projector,
+      log,
+    });
+
+    const gate = await runGate(spec);
+
+    assert.equal(gate.run, true);
+    assert.deepEqual(
+      appendCalls.map((event) => event.sourceEventId),
+      ['prcomment:owner/repo#10:conversation:201'],
+      'migration must suppress only the exact legacy source while retaining same-ID comments from the other source',
+    );
+    assert.deepEqual(
+      projector.applyCalls.map((event) => event.sourceEventId),
+      ['prcomment:owner/repo#10:conversation:201'],
+      'legacy duplicates must not be projected again out of temporal order',
+    );
+  });
+
+  it('preserves legacy comment identity after unregister and split-cursor re-registration', async () => {
+    assert.ok(createReviewFeedbackTaskSpec);
+    const task = {
+      ...makePrTask(),
+      automationState: {
+        review: {
+          lastCommentCursor: 0,
+          lastInlineCommentCursor: 0,
+          lastConversationCommentCursor: 0,
+          lastDecisionCursor: 0,
+        },
+      },
+    };
+    const taskStore = makeTaskStore(task);
+    const appendCalls = [];
+    const eventLog = {
+      async read(subjectKey) {
+        assert.strictEqual(subjectKey, 'pr:owner/repo#10');
+        return [
+          {
+            sourceEventId: 'prcomment:owner/repo#10:201',
+            subjectKey,
+            kind: 'pr.review_submitted',
+            classification: 'informational',
+            payload: { commentId: 201, commentType: 'inline' },
+            at: Date.parse('2026-01-01T00:00:00Z'),
+          },
+        ];
+      },
+      async append(event) {
+        appendCalls.push(event);
+        return { appended: true, sequence: appendCalls.length - 1 };
+      },
+    };
+    const projector = makeProjector();
+    const spec = createReviewFeedbackTaskSpec({
+      id: 'legacy-comment-identity-reregister',
+      taskStore,
+      reviewFeedbackRouter: makeRouter(),
+      fetchComments: async () => [
+        {
+          id: 201,
+          author: 'inline-author',
+          body: 'already projected before unregister',
+          createdAt: '2026-01-01T00:00:00Z',
+          commentType: 'inline',
+          authorAssociation: 'NONE',
+        },
+      ],
+      fetchReviews: async () => [],
+      eventLog,
+      projector,
+      log,
+    });
+
+    const gate = await runGate(spec);
+
+    assert.equal(gate.run, true);
+    assert.deepEqual(appendCalls, [], 're-registration replay must reuse the permanent legacy event identity');
+    assert.deepEqual(projector.applyCalls, [], 're-registration replay must not project legacy activity again');
   });
 
   it('calls projector.apply when event is newly appended (appended=true)', async () => {
@@ -690,7 +832,14 @@ describe('ReviewFeedbackTaskSpec: stale cursor advancement (Cloud R16 P2)', () =
       threadId: 'thread-stale',
       ownerCatId: 'cat1',
       userId: 'user1',
-      automationState: { review: { lastCommentCursor: 0, lastDecisionCursor: 0 } },
+      automationState: {
+        review: {
+          lastCommentCursor: 0,
+          lastInlineCommentCursor: 0,
+          lastConversationCommentCursor: 0,
+          lastDecisionCursor: 0,
+        },
+      },
     };
     tasks.set(task.id, task);
 
@@ -726,7 +875,7 @@ describe('ReviewFeedbackTaskSpec: stale cursor advancement (Cloud R16 P2)', () =
         body: 'comment on old commit',
         createdAt: '2026-01-01T00:00:00Z',
         commitId: 'old-sha',
-        commentType: 'INLINE',
+        commentType: 'inline',
         authorAssociation: 'NONE',
       },
       {
@@ -735,7 +884,7 @@ describe('ReviewFeedbackTaskSpec: stale cursor advancement (Cloud R16 P2)', () =
         body: 'another stale comment',
         createdAt: '2026-01-01T01:00:00Z',
         commitId: 'old-sha',
-        commentType: 'INLINE',
+        commentType: 'inline',
         authorAssociation: 'NONE',
       },
     ];
@@ -793,7 +942,14 @@ describe('ReviewFeedbackTaskSpec: stale cursor must not advance past failed fres
       threadId: 'thread-r18',
       ownerCatId: 'cat1',
       userId: 'user1',
-      automationState: { review: { lastCommentCursor: 9, lastDecisionCursor: 0 } },
+      automationState: {
+        review: {
+          lastCommentCursor: 9,
+          lastInlineCommentCursor: 9,
+          lastConversationCommentCursor: 9,
+          lastDecisionCursor: 0,
+        },
+      },
     };
     tasks.set(task.id, task);
 
@@ -828,7 +984,7 @@ describe('ReviewFeedbackTaskSpec: stale cursor must not advance past failed fres
         body: 'fresh comment on current commit',
         createdAt: '2026-01-02T00:00:00Z',
         commitId: 'current-sha',
-        commentType: 'REVIEW_COMMENT',
+        commentType: 'inline',
         authorAssociation: 'NONE',
       },
       {
@@ -837,7 +993,7 @@ describe('ReviewFeedbackTaskSpec: stale cursor must not advance past failed fres
         body: 'stale comment on old commit',
         createdAt: '2026-01-02T01:00:00Z',
         commitId: 'old-sha',
-        commentType: 'REVIEW_COMMENT',
+        commentType: 'inline',
         authorAssociation: 'NONE',
       },
     ];

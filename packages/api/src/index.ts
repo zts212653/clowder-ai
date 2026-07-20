@@ -156,7 +156,10 @@ import {
   fetchPrCiStatus,
   ReviewFeedbackRouter,
 } from './infrastructure/email/index.js';
-import { fetchLatestIssueCommentCursor, maxGithubId } from './infrastructure/github/comment-cursors.js';
+import {
+  fetchInitialPrTrackingBoundary,
+  fetchLatestIssueCommentCursor,
+} from './infrastructure/github/comment-cursors.js';
 import { buildGhCliEnv, resolveGhCliToken, withHiddenGhCliWindow } from './infrastructure/github/gh-cli-env.js';
 import type { EvalDomainId } from './infrastructure/harness-eval/domain/eval-domain-registry.js';
 import { runSchedulerReplyUserIdBackfill } from './infrastructure/scheduler/scheduler-reply-userid-backfill.js';
@@ -2258,41 +2261,9 @@ async function main(): Promise<void> {
   const { createRepoActivityTemplate } = await import('./infrastructure/scheduler/templates/repo-activity.js');
   templateRegistry.register(createRepoActivityTemplate({ getGitHubToken }));
   const fetchPrTrackingBoundary = async (repoFullName: string, prNumber: number) => {
-    const { fetchPaginated } = await import('./infrastructure/github/fetch-paginated.js');
-    const [reviewComments, issueComments, reviews, ciStatus] = await Promise.all([
-      fetchPaginated(`/repos/${repoFullName}/pulls/${prNumber}/comments`, {
-        ghToken: getGitHubToken(),
-      }),
-      fetchPaginated(`/repos/${repoFullName}/issues/${prNumber}/comments`, {
-        ghToken: getGitHubToken(),
-      }),
-      fetchPaginated(`/repos/${repoFullName}/pulls/${prNumber}/reviews`, {
-        ghToken: getGitHubToken(),
-      }),
-      fetchPrCiStatus(repoFullName, prNumber, app.log, { ghToken: getGitHubToken() }),
-    ]);
-    return {
-      review: {
-        lastCommentCursor: maxGithubId([
-          ...(reviewComments as { id?: unknown }[]),
-          ...(issueComments as { id?: unknown }[]),
-        ]),
-        lastDecisionCursor: maxGithubId(reviews as { id?: unknown }[]),
-      },
-      ...(ciStatus
-        ? {
-            ci: {
-              headSha: ciStatus.headSha,
-              ...(ciStatus.aggregateBucket === 'pending'
-                ? {}
-                : {
-                    lastFingerprint: `${ciStatus.headSha}:${ciStatus.aggregateBucket}`,
-                    lastBucket: ciStatus.aggregateBucket,
-                  }),
-            },
-          }
-        : {}),
-    };
+    return fetchInitialPrTrackingBoundary(repoFullName, prNumber, {
+      fetchCiStatus: (repo, pr) => fetchPrCiStatus(repo, pr, app.log, { ghToken: getGitHubToken() }),
+    });
   };
   const fetchIssueCommentCursor = async (repoFullName: string, issueNumber: number): Promise<number> =>
     fetchLatestIssueCommentCursor(repoFullName, issueNumber, { ghToken: getGitHubToken() });
@@ -4042,11 +4013,11 @@ async function main(): Promise<void> {
       }
     };
 
-    const fetchComments = async (repo: string, pr: number, sinceId?: number) => {
+    const fetchComments = async (repo: string, pr: number, cursors: { inline: number; conversation: number }) => {
       await refreshGitHubSelfLogin();
       const [reviewComments, issueComments] = await Promise.all([
-        fetchPaginated(`/repos/${repo}/pulls/${pr}/comments`, sinceId),
-        fetchPaginated(`/repos/${repo}/issues/${pr}/comments`, sinceId),
+        fetchPaginated(`/repos/${repo}/pulls/${pr}/comments`, cursors.inline),
+        fetchPaginated(`/repos/${repo}/issues/${pr}/comments`, cursors.conversation),
       ]);
       return [...reviewComments, ...issueComments].map(
         (c: {

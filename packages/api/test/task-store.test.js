@@ -392,5 +392,51 @@ describe('TaskStore', () => {
         'lastDeliveredCursor must not be lowered by stale re-patch',
       );
     });
+
+    it('explicit null clears a pending wake after durable admission', () => {
+      const task = store.create(
+        makeInput({ kind: 'issue_tracking', subjectKey: 'issue:owner/repo#11', title: 'Track issue #11' }),
+      );
+      store.patchAutomationState(task.id, {
+        issue: {
+          pendingWake: {
+            messageId: 'msg-1',
+            threadId: 'thread-1',
+            catId: 'opus',
+            content: 'wake',
+            deliveredCursor: 10,
+          },
+        },
+      });
+      store.patchAutomationState(task.id, { issue: { pendingWake: null } });
+      assert.equal(store.get(task.id).automationState.issue.pendingWake, null);
+    });
+  });
+
+  describe('patchAutomationState: review source cursor anti-regression', () => {
+    it('does not lower independent inline, conversation, or decision cursors', () => {
+      const task = store.create(
+        makeInput({ kind: 'pr_tracking', subjectKey: 'pr:owner/repo#12', title: 'Track PR #12' }),
+      );
+      store.patchAutomationState(task.id, {
+        review: {
+          lastInlineCommentCursor: 30,
+          lastConversationCommentCursor: 50,
+          lastDecisionCursor: 40,
+        },
+      });
+      store.patchAutomationState(task.id, {
+        review: {
+          lastInlineCommentCursor: 3,
+          lastConversationCommentCursor: 5,
+          lastDecisionCursor: 4,
+        },
+      });
+      assert.deepEqual(store.get(task.id).automationState.review, {
+        lastInlineCommentCursor: 30,
+        lastConversationCommentCursor: 50,
+        lastDecisionCursor: 40,
+      });
+    });
   });
 });
