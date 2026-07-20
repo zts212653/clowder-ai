@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
+import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { apiFetch } from '@/utils/api-client';
 
 export interface AuthPendingRequest {
@@ -144,7 +145,7 @@ export function useAuthorization(threadId: string) {
       // Notify outside updater; dedup via ref to handle concurrent-mode replays
       if (!notifiedRef.current.has(data.requestId)) {
         notifiedRef.current.add(data.requestId);
-        const label = getCatById(data.catId)?.displayName ?? data.catId;
+        const label = resolveCatDisplayName(data.catId, getCatById);
         notifyAuthRequest(data, label);
       }
     },

@@ -2,6 +2,7 @@
 
 import type { MouseEvent, ReactNode } from 'react';
 import { useMemo } from 'react';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 import type { CapabilityBoardItem, CatFamily } from '../capability-board-ui';
 import { HubIcon } from '../hub-icons';
 import {
@@ -251,6 +252,7 @@ export function PerCatToggles({
   onToggle: (item: CapabilityBoardItem, enabled: boolean, catId?: string) => void;
   disabled?: boolean;
 }) {
+  const resolveCatName = useCatNameResolver();
   if (catFamilies.length === 0 || !item.cats) return null;
   const catEntries = Object.entries(item.cats);
   if (catEntries.length === 0) return null;
@@ -268,7 +270,7 @@ export function PerCatToggles({
               {relevantCats.map((catId) => {
                 const enabled = item.cats[catId] ?? false;
                 const busy = toggling === `${item.id}:${catId}`;
-                const catLabel = family.catNames?.[catId] ?? catId;
+                const catLabel = resolveCatName(catId);
                 return (
                   <div key={catId} className="flex items-center justify-between">
                     <span className="text-xs text-cafe-secondary">{catLabel}</span>

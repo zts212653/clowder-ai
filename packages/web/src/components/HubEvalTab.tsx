@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 import { apiFetch } from '@/utils/api-client';
 import { type EvalHubItem, VERDICT_LABELS } from './HubEvalTypes';
 import { HubEvalVerdictCard } from './HubEvalVerdictCard';
@@ -128,6 +129,7 @@ function StatCell({ label, sublabel, value }: { label: string; sublabel?: string
 }
 
 function DomainCard({ domain, onCatUpdated }: { domain: EvalDomainSummary; onCatUpdated?: () => void }) {
+  const resolveCatName = useCatNameResolver();
   const [editing, setEditing] = useState(false);
   const [catId, setCatId] = useState(domain.evalCatId);
   const [saving, setSaving] = useState(false);
@@ -189,7 +191,7 @@ function DomainCard({ domain, onCatUpdated }: { domain: EvalDomainSummary; onCat
                   >
                     {availableCats.map((cat) => (
                       <option key={cat.catId} value={cat.catId}>
-                        {cat.handle} ({cat.family})
+                        {resolveCatName(cat.catId)}
                       </option>
                     ))}
                   </select>
@@ -224,7 +226,7 @@ function DomainCard({ domain, onCatUpdated }: { domain: EvalDomainSummary; onCat
               </span>
             ) : (
               <span>
-                {domain.evalCatHandle}{' '}
+                {domain.evalCatId ? resolveCatName(domain.evalCatId) : domain.evalCatHandle}{' '}
                 <button
                   type="button"
                   onClick={startEditing}

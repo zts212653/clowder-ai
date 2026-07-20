@@ -83,7 +83,6 @@ export function DefaultCatSelector({
             {cats.map((cat) => (
               <option key={cat.id} value={cat.id}>
                 {formatCatName(cat)}
-                {cat.nickname ? ` (${cat.nickname})` : ''}
               </option>
             ))}
           </select>

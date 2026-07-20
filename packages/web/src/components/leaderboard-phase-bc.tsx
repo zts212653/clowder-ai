@@ -1,8 +1,14 @@
 'use client';
 
 import type { Achievement, CvoLevel, GameStats, SillyCatEntry } from '@cat-cafe/shared';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 import { CatAvatar } from './CatAvatar';
 import { CafeIcon } from './rich/CafeIcons';
+
+function CatName({ catId }: { catId: string }) {
+  const resolveCatName = useCatNameResolver();
+  return <>{resolveCatName(catId)}</>;
+}
 
 /** Phase B: Silly cats — 翻车现场 */
 export function SillyCatsList({ entries }: { entries: SillyCatEntry[] }) {
@@ -18,7 +24,7 @@ export function SillyCatsList({ entries }: { entries: SillyCatEntry[] }) {
         <li key={e.catId} className="flex items-center gap-2">
           <CatAvatar catId={e.catId} size={24} />
           <span className="text-compact font-semibold" style={{ color: 'var(--cafe-text)' }}>
-            {e.displayName}
+            <CatName catId={e.catId} />
           </span>
           <span className="text-label ml-auto font-medium" style={{ color: 'var(--cafe-accent)' }}>
             ×{e.count} {e.description}
@@ -44,7 +50,7 @@ export function GameArena({ stats }: { stats: GameStats }) {
           <span className="text-label font-semibold" style={{ color: 'var(--cafe-accent)' }}>
             <span className="inline-flex items-center gap-1">
               <CafeIcon name="trophy" className="w-3 h-3" />
-              MVP: {stats.catKill.topCat.displayName}
+              MVP: <CatName catId={stats.catKill.topCat.catId} />
             </span>
           </span>
         )}
@@ -60,7 +66,7 @@ export function GameArena({ stats }: { stats: GameStats }) {
           <span className="text-label font-semibold" style={{ color: 'var(--cafe-accent)' }}>
             <span className="inline-flex items-center gap-1">
               <CafeIcon name="cross" className="w-3 h-3" />
-              社死王: {stats.whoSpy.shameCat.displayName}
+              社死王: <CatName catId={stats.whoSpy.shameCat.catId} />
             </span>
           </span>
         )}

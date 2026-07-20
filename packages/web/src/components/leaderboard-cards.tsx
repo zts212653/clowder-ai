@@ -2,27 +2,15 @@
 
 import type { RankedCat, StreakCat } from '@cat-cafe/shared';
 import { type ReactNode } from 'react';
-import { useCatData } from '@/hooks/useCatData';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 import typographyTokens from '@/styles/typography-tokens.json';
 import { CatAvatar } from './CatAvatar';
 
 const MEDAL = ['🥇', '🥈', '🥉'];
 
-function CatTag({ catId }: { catId: string }) {
-  const { getCatById } = useCatData();
-  const cat = getCatById(catId);
-  const family = cat?.breedDisplayName ?? cat?.displayName;
-  const detail = cat?.variantLabel ?? cat?.nickname ?? cat?.id;
-  const label = family && detail && family !== detail ? `${family} · ${detail}` : (family ?? detail ?? catId);
-
-  return (
-    <span
-      className="text-label font-medium"
-      style={{ color: 'var(--cafe-text-muted)', fontFamily: 'Plus Jakarta Sans, sans-serif' }}
-    >
-      {label}
-    </span>
-  );
+function CatName({ catId }: { catId: string }) {
+  const resolveCatName = useCatNameResolver();
+  return <>{resolveCatName(catId)}</>;
 }
 
 export function CatHeroCard({ cat, unit }: { cat: RankedCat; unit: string }) {
@@ -33,9 +21,8 @@ export function CatHeroCard({ cat, unit }: { cat: RankedCat; unit: string }) {
       </span>
       <CatAvatar catId={cat.catId} size={72} />
       <span className="text-lg font-medium" style={{ fontFamily: 'Fraunces, serif', color: 'var(--cafe-text)' }}>
-        {cat.displayName}
+        <CatName catId={cat.catId} />
       </span>
-      <CatTag catId={cat.catId} />
       <span
         className="text-4xl font-medium tracking-tight"
         style={{ fontFamily: 'Fraunces, serif', color: 'var(--cafe-accent)' }}
@@ -73,7 +60,7 @@ export function WorkMetric({ cat, label }: { cat: RankedCat | undefined; label: 
             fontFamily: 'Plus Jakarta Sans, sans-serif',
           }}
         >
-          🏅 {cat.displayName}
+          🏅 <CatName catId={cat.catId} />
         </span>
       )}
     </div>
@@ -94,7 +81,7 @@ export function MiniRanked({ items, unit }: { items: RankedCat[]; unit: string }
           <span className="text-sm">{MEDAL[cat.rank - 1] ?? `#${cat.rank}`}</span>
           <CatAvatar catId={cat.catId} size={24} />
           <span className="text-compact font-semibold" style={{ color: 'var(--cafe-text)' }}>
-            {cat.displayName}
+            <CatName catId={cat.catId} />
           </span>
           <span className="text-label ml-auto" style={{ color: 'var(--cafe-text-muted)' }}>
             {cat.count} {unit}
@@ -118,7 +105,7 @@ export function StreakRanked({ items }: { items: StreakCat[] }) {
         <li key={cat.catId} className="flex items-center gap-2">
           <span className="text-sm">{MEDAL[cat.rank - 1] ?? `#${cat.rank}`}</span>
           <span className="text-compact font-semibold" style={{ color: 'var(--cafe-text)' }}>
-            {cat.displayName}
+            <CatName catId={cat.catId} />
           </span>
           <span className="text-label ml-auto" style={{ color: 'var(--cafe-text-muted)' }}>
             连续 {cat.currentStreak} 天 (最长 {cat.maxStreak})

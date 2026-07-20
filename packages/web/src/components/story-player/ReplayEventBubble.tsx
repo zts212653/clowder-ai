@@ -8,6 +8,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 import type { ReplayEvent } from '@/lib/story-player/types';
 
 // ---------------------------------------------------------------------------
@@ -179,6 +180,7 @@ function formatToolContent(input: string): string {
 // ---------------------------------------------------------------------------
 
 export function ReplayEventBubble({ event, displayMode, isRevealing, speedMultiplier }: ReplayEventBubbleProps) {
+  const resolveCatName = useCatNameResolver();
   const isCinematic = displayMode === 'cinematic' && isRevealing;
   const displayText = useCinematicText(
     event.content,
@@ -271,7 +273,7 @@ export function ReplayEventBubble({ event, displayMode, isRevealing, speedMultip
               fontFamily: 'var(--font-mono, monospace)',
             }}
           >
-            {event.catId}
+            {resolveCatName(event.catId)}
           </div>
         )}
         {displayText}

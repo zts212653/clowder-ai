@@ -15,9 +15,9 @@ vi.mock('next/link', () => ({
 const TEST_CATS = [
   {
     id: 'opus',
-    displayName: 'opus',
+    displayName: '布偶猫',
     nickname: '宪宪',
-    variantLabel: undefined,
+    variantLabel: 'Opus 4.6',
     breedDisplayName: '布偶猫',
     color: { primary: '#FFAB91', secondary: '#8D6E63' },
     clientId: 'anthropic',
@@ -31,9 +31,9 @@ const TEST_CATS = [
   },
   {
     id: 'codex',
-    displayName: 'codex',
+    displayName: '缅因猫',
     nickname: '砚砚',
-    variantLabel: undefined,
+    variantLabel: 'sol',
     breedDisplayName: '缅因猫',
     color: { primary: '#66BB6A', secondary: '#2E7D32' },
     clientId: 'openai',
@@ -47,9 +47,9 @@ const TEST_CATS = [
   },
   {
     id: 'gemini',
-    displayName: 'gemini',
+    displayName: '暹罗猫',
     nickname: '烁烁',
-    variantLabel: undefined,
+    variantLabel: 'Flash',
     breedDisplayName: '暹罗猫',
     color: { primary: '#81D4FA', secondary: '#0277BD' },
     clientId: 'google',
@@ -73,7 +73,7 @@ const mockCatData = {
 vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => mockCatData,
   formatCatName: (cat: { displayName: string; variantLabel?: string }) =>
-    cat.variantLabel ? `${cat.displayName} ${cat.variantLabel}` : cat.displayName,
+    cat.variantLabel ? `${cat.displayName}（${cat.variantLabel}）` : cat.displayName,
 }));
 
 // Lazy import after mocks
@@ -218,7 +218,7 @@ describe('DefaultCatSelector (F154 Phase B, AC-B2)', () => {
     expect(container.textContent).toContain('保存失败');
   });
 
-  it('includes nickname in option text', () => {
+  it('uses the standard member name + variant label without nickname aliases', () => {
     act(() => {
       root.render(
         React.createElement(DefaultCatSelector, {
@@ -230,7 +230,8 @@ describe('DefaultCatSelector (F154 Phase B, AC-B2)', () => {
     });
     const select = container.querySelector('[data-testid="default-cat-select"]') as HTMLSelectElement;
     const opusOption = [...select.options].find((o) => o.value === 'opus');
-    expect(opusOption?.textContent).toContain('宪宪');
+    expect(opusOption?.textContent).toBe('布偶猫（Opus 4.6）');
+    expect(opusOption?.textContent).not.toContain('宪宪');
   });
 
   it('shows placeholder when currentDefaultCatId is empty', () => {

@@ -3,6 +3,7 @@ import { getBubbleInvocationId } from '@/debug/bubbleIdentity';
 import { isBubbleInvariantStrictModeOn, recordBubbleInvariantViolation } from '@/debug/bubbleInvariantDiagnostics';
 import { recordDebugEvent } from '@/debug/invocationEventDebug';
 import { getCachedCats } from '@/hooks/useCatData';
+import { formatCatDisplayName } from '@/lib/cat-display-name';
 import { inferFileKind, inferRenderMode } from '@/lib/file-kind';
 import {
   resolveNavigateTargetWorktreeId,
@@ -465,7 +466,7 @@ function fireOwnerMentionNotification(msg: ChatMessage) {
   }
   const cats = getCachedCats();
   const catData = cats.find((c) => c.id === msg.catId);
-  const catName = catData?.displayName ?? msg.catId ?? '猫猫';
+  const catName = catData ? formatCatDisplayName(catData) : (msg.catId ?? '猫猫');
   const preview = typeof msg.content === 'string' ? msg.content.replace(/\n/g, ' ').slice(0, 120) : '';
   new Notification(`${catName} @ 了你`, {
     body: preview,

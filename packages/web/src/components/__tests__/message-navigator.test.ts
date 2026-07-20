@@ -79,8 +79,8 @@ describe('MessageNavigator', () => {
     // base colors come from useCatData (populated by /api/cats)
     expect(html).toContain('#9B7EBD');
     expect(html).toContain('#5B8C5A');
-    expect(html).toContain('跳转到 布偶猫（opus-45） 的消息');
-    expect(html).toContain('跳转到 缅因猫（spark） 的消息');
+    expect(html).toContain('跳转到 opus-45 的消息');
+    expect(html).toContain('跳转到 spark 的消息');
   });
 
   it('resolves non-hyphen variant catIds during fallback', () => {
@@ -97,26 +97,26 @@ describe('MessageNavigator', () => {
     expect(html).toContain('#9B7EBD'); // opus
     expect(html).toContain('#5B9BD5'); // gemini
 
-    expect(html).toContain('跳转到 缅因猫（gpt52） 的消息');
-    expect(html).toContain('跳转到 布偶猫（sonnet） 的消息');
-    expect(html).toContain('跳转到 暹罗猫（gemini25） 的消息');
+    expect(html).toContain('跳转到 gpt52 的消息');
+    expect(html).toContain('跳转到 sonnet 的消息');
+    expect(html).toContain('跳转到 gemini25 的消息');
   });
 
   it('treats messages with catId as assistant even when type is user', () => {
     const msgs = [makeMsg('m1', 'user'), makeMsg('m2', 'user', 'gpt52'), makeMsg('m3', 'assistant', 'codex')];
     const html = render(msgs);
 
-    expect(html).toContain('跳转到 缅因猫（gpt52） 的消息');
+    expect(html).toContain('跳转到 gpt52 的消息');
 
     const ownerLabels = html.match(/跳转到 始皇帝 的消息/g) ?? [];
     expect(ownerLabels.length).toBe(1);
   });
 
-  it('applies kimi fallback colors and labels before /api/cats loads', () => {
+  it('applies kimi fallback color but keeps the raw id until /api/cats loads', () => {
     const msgs = [makeMsg('m1', 'user'), makeMsg('m2', 'assistant', 'kimi'), makeMsg('m3', 'assistant', 'codex')];
     const html = render(msgs);
 
-    expect(html).toContain('跳转到 梵花猫 的消息');
+    expect(html).toContain('跳转到 kimi 的消息');
   });
 
   it('includes accessibility labels', () => {
@@ -124,7 +124,7 @@ describe('MessageNavigator', () => {
     const html = render(msgs);
 
     expect(html).toContain('跳转到 始皇帝 的消息');
-    expect(html).toContain('跳转到 缅因猫 的消息');
+    expect(html).toContain('跳转到 codex 的消息');
   });
 
   it('samples at fixed intervals when messages exceed MAX_DOTS (18)', () => {

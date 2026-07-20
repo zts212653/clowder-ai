@@ -1,4 +1,5 @@
 import { SYNC_ICON } from '@/components/community-panel-icons';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 
 const ISSUE_SECTION_OPTIONS = [
   { key: 'unreplied', label: '未回复' },
@@ -53,6 +54,7 @@ export function CommunityPanelFilters({
   loading,
   onSync,
 }: CommunityPanelFiltersProps) {
+  const resolveCatName = useCatNameResolver();
   return (
     <>
       <div className="flex items-center gap-2 px-3 py-2 border-b border-cafe-subtle/40">
@@ -105,7 +107,7 @@ export function CommunityPanelFilters({
           <option value="all">全部负责猫</option>
           {uniqueCats.map((c) => (
             <option key={c} value={c}>
-              @{c}
+              {resolveCatName(c)}
             </option>
           ))}
         </select>

@@ -20,6 +20,7 @@ vi.mock('@/utils/transcription-corrector', () => ({ refreshSpeechAliases: vi.fn(
 
 import type { CatData } from '@/hooks/useCatData';
 import { _resetCatDataCache, useCatData } from '@/hooks/useCatData';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 
 // ── API response cats (distinguishable from fallback via breedId) ──
 
@@ -69,6 +70,7 @@ let root: Root;
 let hookResult: ReturnType<typeof useCatData>;
 let hookResultA: ReturnType<typeof useCatData>;
 let hookResultB: ReturnType<typeof useCatData>;
+let resolvedCatLabel = '';
 
 function TestComponent() {
   hookResult = useCatData();
@@ -79,6 +81,31 @@ function MultiHookComponent() {
   hookResultA = useCatData();
   hookResultB = useCatData();
   return null;
+}
+
+function PassiveHookComponent() {
+  hookResult = useCatData({ fetch: false });
+  return null;
+}
+
+function PassiveResolverComponent() {
+  const resolveCatName = useCatNameResolver();
+  resolvedCatLabel = resolveCatName('opus');
+  return null;
+}
+
+function RegistryLoaderComponent() {
+  useCatData();
+  return null;
+}
+
+function PassiveResolverWithRegistryLoader() {
+  return React.createElement(
+    React.Fragment,
+    null,
+    React.createElement(PassiveResolverComponent),
+    React.createElement(RegistryLoaderComponent),
+  );
 }
 
 beforeAll(() => {
@@ -106,6 +133,54 @@ afterEach(() => {
 // ── Tests ──────────────────────────────────────────────────
 
 describe('useCatData retry mechanism', () => {
+  it('lets leaf presentation consumers subscribe without starting registry I/O', async () => {
+    await act(async () => {
+      root.render(React.createElement(PassiveHookComponent));
+    });
+
+    expect(mockApiFetch).not.toHaveBeenCalled();
+    expect(hookResult.cats).toEqual([]);
+    expect(hookResult.isLoading).toBe(false);
+  });
+
+  it('hydrates a passive name resolver after the shared registry loads without duplicate cat requests', async () => {
+    let resolveCatsResponse: ((response: Response) => void) | undefined;
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/config/cat-order') return Promise.resolve({ ok: false } as Response);
+      if (path === '/api/cats') {
+        return new Promise<Response>((resolve) => {
+          resolveCatsResponse = resolve;
+        });
+      }
+      return Promise.resolve({ ok: false } as Response);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(PassiveResolverWithRegistryLoader));
+    });
+
+    const catsCallCount = () => mockApiFetch.mock.calls.filter((call) => call[0] === '/api/cats').length;
+    expect(resolvedCatLabel).toBe('opus');
+    expect(catsCallCount()).toBe(1);
+
+    const completeCatsRequest = resolveCatsResponse;
+    if (!completeCatsRequest) throw new Error('Expected the registry request to be pending');
+    await act(async () => {
+      completeCatsRequest({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            cats: API_CATS.map((cat) => (cat.id === 'opus' ? { ...cat, variantLabel: '4.8' } : cat)),
+          }),
+      } as Response);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(resolvedCatLabel).toBe('布偶猫（4.8）');
+    expect(catsCallCount()).toBe(1);
+  });
+
   it('retries after 10s on failure and stops after success', async () => {
     // F166: /api/config/cat-order always returns empty order; /api/cats follows
     // the retry sequence (fail → success).

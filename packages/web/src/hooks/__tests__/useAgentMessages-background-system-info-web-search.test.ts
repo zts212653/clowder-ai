@@ -277,6 +277,7 @@ describe('consumeBackgroundSystemInfo web_search', () => {
 
   it('formats a2a_pingpong_terminated as readable system notice text', () => {
     const options = createMockOptions();
+    options.resolveCatName = (catId) => ({ sonnet: '布偶猫（sonnet）', gpt52: '缅因猫（gpt52）' })[catId] ?? catId;
 
     const msg = {
       type: 'system_info',
@@ -295,7 +296,7 @@ describe('consumeBackgroundSystemInfo web_search', () => {
 
     expect(result.consumed).toBe(false);
     expect(result.variant).toBe('info');
-    expect(result.content).toBe('🏓 sonnet ↔ gpt52 已连续互相 @ 4 轮，链路已熔断。');
+    expect(result.content).toBe('🏓 布偶猫（sonnet） ↔ 缅因猫（gpt52） 已连续互相 @ 4 轮，链路已熔断。');
   });
 });
 

@@ -67,7 +67,7 @@ describe('CallbackAuthCatAvatar healthy-default (F174 D2b-2 cloud P1 #1403)', ()
     expect(html).toContain('data-testid="callback-auth-dot"');
     expect(html).toContain('data-callback-auth-status="unknown"');
     // Label clarifies: "no failure record" rather than asserting healthy.
-    expect(html).toContain('opus: 24h 内无失败记录');
+    expect(html).toContain('Opus: 24h 内无失败记录');
   });
 
   it('renders DEGRADED dot for a cat with mid failures', () => {
@@ -75,7 +75,7 @@ describe('CallbackAuthCatAvatar healthy-default (F174 D2b-2 cloud P1 #1403)', ()
     mockByCat = { opus: { status: 'degraded', failures24h: 3 } };
     const html = renderToStaticMarkup(<CallbackAuthCatAvatar catId="opus" size={48} />);
     expect(html).toContain('data-callback-auth-status="degraded"');
-    expect(html).toContain('opus: degraded · 3 fails (24h)');
+    expect(html).toContain('Opus: degraded · 3 fails (24h)');
   });
 
   it('renders BROKEN dot for a cat above threshold', () => {
@@ -83,6 +83,6 @@ describe('CallbackAuthCatAvatar healthy-default (F174 D2b-2 cloud P1 #1403)', ()
     mockByCat = { opus: { status: 'broken', failures24h: 12 } };
     const html = renderToStaticMarkup(<CallbackAuthCatAvatar catId="opus" size={48} />);
     expect(html).toContain('data-callback-auth-status="broken"');
-    expect(html).toContain('opus: broken · 12 fails (24h)');
+    expect(html).toContain('Opus: broken · 12 fails (24h)');
   });
 });

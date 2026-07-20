@@ -7,7 +7,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useAgentHookHealth } from '@/hooks/useAgentHookHealth';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
 import { useAuthorization } from '@/hooks/useAuthorization';
-import { useCatData } from '@/hooks/useCatData';
+import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { useChatHistory } from '@/hooks/useChatHistory';
 import { useChatSocketCallbacks } from '@/hooks/useChatSocketCallbacks';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
@@ -1346,7 +1346,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         const isLifecyclePhase = /^phase-(5|6|7|8|9|10|11)-/.test(phase);
         if (!isLifecyclePhase && messages.length > 0) return null;
         const leadCat = cats.find((c) => c.id === raw.leadCat) ?? cats[0];
-        const catName = leadCat?.displayName ?? leadCat?.nickname ?? leadCat?.name;
+        const catName = leadCat ? formatCatName(leadCat) : undefined;
         if (!catName) return null;
         return <BootcampGuideOverlay phase={phase} catName={catName} hasMessages={messages.length > 0} />;
       })()}

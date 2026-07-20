@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { type CatData, useCatData } from '@/hooks/useCatData';
+import { formatCatDisplayName } from '@/lib/cat-display-name';
 import { apiFetch } from '@/utils/api-client';
 
 interface CatDailyUsage {
@@ -40,16 +41,13 @@ function formatTokens(n: number): string {
 
 /**
  * Issue #845: derive label from runtime catRegistry (via useCatData) instead of a
- * hardcoded table. Prefers "{breedDisplayName} {variantLabel}" (e.g. "布偶猫 4.6"),
- * falls back to displayName, then raw catId. Avoids the previous drift where
+ * hardcoded table. Uses the same "displayName（variantLabel）" contract as chat,
+ * then falls back to raw catId. Avoids the previous drift where
  * `gpt52` was labeled "GPT-5.4" but actually ran `gpt-5.5`.
  */
 export function buildCatLabel(catId: string, cat: CatData | undefined): string {
   if (!cat) return catId;
-  if (cat.breedDisplayName && cat.variantLabel) {
-    return `${cat.breedDisplayName} ${cat.variantLabel}`;
-  }
-  return cat.displayName ?? catId;
+  return formatCatDisplayName(cat);
 }
 
 export function DailyUsageSection() {
@@ -156,6 +154,7 @@ export function DailyUsageSection() {
 
 function CatUsageRow({ catId, usage, cat }: { catId: string; usage: CatDailyUsage; cat: CatData | undefined }) {
   const label = buildCatLabel(catId, cat);
+  const technicalLabel = label === catId ? catId : `${label} · ${catId}`;
   // Issue #845 (砚砚 P2 fix): show the catId's *current* defaultModel as a hint,
   // NOT as a historical attribution. The aggregated TokenUsage has no per-record
   // model field — a single catId may have run multiple model versions over time.
@@ -170,7 +169,7 @@ function CatUsageRow({ catId, usage, cat }: { catId: string; usage: CatDailyUsag
         {model && (
           <span
             className="text-cafe-muted text-micro truncate italic"
-            title={`${catId} 当前默认模型：${model}。历史聚合按 catId 分桶，不区分模型版本。`}
+            title={`${technicalLabel} 当前默认模型：${model}。历史聚合按 catId 分桶，不区分模型版本。`}
           >
             当前默认 {model}
           </span>

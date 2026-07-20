@@ -1,4 +1,5 @@
 import type { CatData } from '@/hooks/useCatData';
+import { formatCatDisplayName } from '@/lib/cat-display-name';
 import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
 import type { DirectionInfo } from '@/lib/parse-direction';
 
@@ -15,7 +16,7 @@ export function DirectionPill({ direction, getCatById }: DirectionPillProps) {
   const labels = direction.targets.map((target) => {
     if (direction.type === 'crossPost') return target;
     const cat = getCatById(target);
-    return cat ? `@${cat.displayName}` : `@${target}`;
+    return cat ? `@${formatCatDisplayName(cat)}` : `@${target}`;
   });
   const text = `${direction.arrow} ${labels.join(' + ')}`;
 

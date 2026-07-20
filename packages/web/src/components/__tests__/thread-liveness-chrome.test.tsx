@@ -120,7 +120,9 @@ describe('thread-scoped liveness chrome', () => {
       root.render(React.createElement(ThreadExecutionBar, { threadId: 'thread-b' }));
     });
 
-    const stopButton = container.querySelector('button[aria-label="Stop opus"]') as HTMLButtonElement | null;
+    const stopButton = container.querySelector(
+      'button[aria-label="Stop 布偶猫（Opus 4.7）"]',
+    ) as HTMLButtonElement | null;
     expect(stopButton).not.toBeNull();
 
     await act(async () => {
