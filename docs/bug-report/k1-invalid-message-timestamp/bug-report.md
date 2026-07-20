@@ -83,14 +83,16 @@ tips_exempt:
 | legacy `timestamp` finite fraction | historical read | `'123.5'` | `123.5` | `123.5` / `'123.5'` | Hash and ZSET decoders are numerically equal. |
 | legacy `timestamp` positive infinity | historical read | `'Infinity'` | `Infinity` | `Infinity` / `'inf'` | Canonical Redis alias compares equal to the hydrated cursor. |
 | legacy `timestamp` negative infinity | historical read | `'-Infinity'` | `-Infinity` | `-Infinity` / `'-inf'` | Canonical Redis alias compares equal to the hydrated cursor. |
-| future `timestamp` or `deliveredAt` valid integer TimeClip | admit | exact decimal text | exact integer | exact integer / decimal text | All stores and effective-order consumers observe the same value. |
+| future `timestamp` or `deliveredAt` valid integer TimeClip | admit | exact decimal text | exact integer | exact integer / decimal text | Store-side representations and before-cursor consumers observe the same value while message ownership is stable. |
 | future `timestamp` or `deliveredAt` fraction, non-finite, negative, or TimeClip overflow | reject | no write | no new value | no score mutation | `RangeError` occurs before state/index side effects; valid retry remains possible. |
+| delivery concurrent with user reassignment | RESERVED | both values remain individually valid | current owner can change after hydration | user score can remain at append time or under the old owner | Pre-existing atomicity gap; deterministic dual-interleaving reproduction is assigned to `proposal_mrt0j01zvz1mopnq`. |
+| admitted `deliveredAt=0` crossing HTTP/Web projection | RESERVED | exact `'0'` in Redis | exact `0` in store hydration | N/A | Existing truthiness-based copies can omit presence; this transport/UI consumer repair is not part of Phase A1. |
 
 `zscore` consumer audit (all eight call sites in `RedisMessageStore`):
 
 - `fetchBeforeWithCursor()` and `fetchDeliveredBeforeCursor()` perform JavaScript numeric cursor-boundary equality; both use the shared Redis-number decoder.
 - Four user/thread filtering sites only test `score === null` for membership; they do not interpret the score numerically.
-- User-ownership reassignment normally forwards the raw score back to `ZADD`, preserving Redis's representation without a JavaScript comparison. If the source user-index score is missing, its fallback hydrates `deliveredAt ?? timestamp`; future admitted integers remain exact, while any incompatible historical fallback remains D3 audit/reconciliation evidence.
+- Sequential user-ownership reassignment normally forwards the raw score back to `ZADD`, preserving Redis's representation without a JavaScript comparison. If the source user-index score is missing, its fallback hydrates `deliveredAt ?? timestamp`; future admitted integers remain exact. Concurrent reassignment is not covered by that proof: `markDelivered()` and `reassignUserId()` can act on different owner/score snapshots and need an independent atomic transition. Any incompatible historical fallback remains D3 audit/reconciliation evidence.
 - `getByThreadAfter()` passes the raw score back to Redis range commands; Redis, rather than JavaScript, interprets that bound.
 
 No remaining `zscore` consumer converts a sorted-set score for JavaScript numeric equality outside the shared decoder.
@@ -101,8 +103,8 @@ No remaining `zscore` consumer converts a sorted-set score for JavaScript numeri
 - In-memory `markDelivered` stores the exact value on the message object. Redis stores the same text in the hash and re-scores global, user, and thread indexes; all three are effective-history-order indexes.
 - The mention index intentionally retains append-time `timestamp` ordering and is not re-scored or reused by effective-history before cursors.
 - `getById()` and `hydrateMessages()` are the two Redis hash hydration paths. Future admitted `deliveredAt` values need no coercive fallback: decimal integer parsing is exact throughout the admitted TimeClip domain.
-- `reassignUserId()` preserves that effective order both when forwarding an existing user-index score and when reconstructing a missing score from a future-admitted hydrated value; isolated Redis tests cover zero and the positive TimeClip boundary.
+- Sequential `reassignUserId()` preserves that effective order both when forwarding an existing user-index score and when reconstructing a missing score from a future-admitted hydrated value; isolated Redis tests cover zero and the positive TimeClip boundary. This is not a concurrency claim.
 - Effective before-cursor consumers were re-audited: `routes/messages.ts`, `AgentRouter.findRecentUserMentionFallback`, `collectAllThreadMessages`, duty-briefing pagination, and the paw-feel adapter all derive cursor/window time from `deliveredAt ?? timestamp` (the paw-feel adapter additionally de-duplicates IDs and stops on non-progress).
 - Non-pagination effective-time consumers `routes/callbacks.ts`, duty-briefing mention collection, and briefing day projection use the same projection and never serialize it into a Redis range bound.
 - Freshness consumers that compare message IDs explicitly retain creation-order semantics; their comments already document the delivered-score/ID split, and they do not parse or reuse `deliveredAt` numerically.
-- Rejecting unsafe transition values therefore keeps every materialized Redis bound in the admitted decimal-integer domain while preserving the existing creation-order and mention-order exceptions.
+- Rejecting unsafe transition values keeps every single-writer materialized Redis bound in the admitted decimal-integer domain while preserving the existing creation-order and mention-order exceptions. Cross-writer atomicity and exact zero-presence beyond the store boundary remain explicitly RESERVED.

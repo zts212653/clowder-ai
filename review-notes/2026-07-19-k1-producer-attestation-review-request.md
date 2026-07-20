@@ -12,7 +12,7 @@ Pre-fix review SHA: `05ad80c6f789477bf313b76210dc6657e0edc577`
 - Preserve present-but-blank historical timestamp evidence as invalid instead of coercing it to epoch zero.
 - Preserve exclusive global/thread before-cursor pagination for fractional and infinity historical evidence, including bounded multi-page consumer progress across Redis score canonicalization.
 - Apply the same non-negative integral TimeClip admission to `markDelivered()` before delivery state, message hashes, or effective-order indexes can change.
-- Model the complete effective-order value `deliveredAt ?? timestamp`, including append and delivery writers, hash/ZSET persistence, both hydration paths, reassignment forwarding, and every before-cursor consumer.
+- Model the store-side effective-order value `deliveredAt ?? timestamp`, including append and delivery writers, hash/ZSET persistence, both hydration paths, sequential reassignment forwarding, and every before-cursor consumer.
 - Cover the non-negative integral Date domain, chronological IDs, delivery-cursor monotonicity, expired-cursor recovery, and zero-side-effect rejection in paired memory/Redis tests.
 
 ## Why
@@ -31,7 +31,7 @@ K-1 projects `StoredMessage.timestamp` through `Date#toISOString()`, but both st
 
 ## Tradeoff
 
-The shared helper admits only non-negative integral TimeClip values for both append-time `timestamp` and delivery-time `deliveredAt`. This matches every production delivery caller (`Date.now()`), the current lexical message-ID/cursor order, and the existing integral `deliveredAt` hydration contract. Redis hydration still preserves historical `timestamp` fractions rather than rewriting evidence; historical `deliveredAt` attestation or migration remains D3 work. D2 owns the explicit cursor-order repair and may restore a broader write domain only with memory/Redis compatibility coverage. Message-ID maxima, thread/actor bounds, Unicode-scalar admission, and legacy reconciliation remain decision-gated and RESERVED.
+The shared helper admits only non-negative integral TimeClip values for both append-time `timestamp` and delivery-time `deliveredAt`. This matches every production delivery caller (`Date.now()`), the current lexical message-ID/cursor order, and the existing integral `deliveredAt` hydration contract. Redis hydration still preserves historical `timestamp` fractions rather than rewriting evidence; historical `deliveredAt` attestation or migration remains D3 work. Phase A1 proves single-writer/store parity, not linearizability between `markDelivered()` and `reassignUserId()` or exact zero-presence through HTTP/Web copies; those pre-existing gaps are RESERVED to `proposal_mrt0j01zvz1mopnq`. D2 owns the explicit cursor-order repair and may restore a broader write domain only with memory/Redis compatibility coverage. Message-ID maxima, thread/actor bounds, Unicode-scalar admission, and legacy reconciliation remain decision-gated and RESERVED.
 
 ## Architecture Ownership
 
@@ -55,7 +55,7 @@ Please reviewer check:
 | INV-4 hydration fidelity | Historical numeric timestamp evidence is neither truncated/replayed, present-but-blank evidence is not fabricated as epoch zero, and Redis `inf`/`-inf` scores remain equivalent to hydrated infinities. | Shared Redis numeric parser plus direct blank/whitespace/fractional/missing/infinity fixtures; fractional and positive/negative-infinity hash/zset fixtures cover both before APIs, with fractional and positive-infinity bounded collector progress. D3 raw audit still owns compatibility. |
 | INV-5 legacy honesty | New-write admission does not close historical M7 compatibility or any identifier leaf. | Plan/handoff keep legacy audit/migration and D1–D3 explicitly outside this slice. |
 | INV-9 delivery-order admission | `markDelivered()` rejects every value outside the shared non-negative integral TimeClip domain before delivery state, hash fields, or global/user/thread scores change; invalid input is not state-dependent. | Paired memory/Redis invalid-domain loops snapshot queued state, all relevant Redis representations, valid retry, and invalid calls after delivery. |
-| INV-10 effective-order parity | Every admitted delivery value survives memory state, Redis hash text, global/user/thread scores, both hydration paths, reassignment forwarding/fallback, and before-cursor reuse as the same exact number. Mention ordering intentionally remains append-time. | Paired zero/ordinary/positive-TimeClip-boundary transitions, raw-score and missing-score reassignment cases, plus one-record-page collectors; producer/consumer census records append, delivery, reassignment, hydration, and cursor paths. |
+| INV-10 single-writer effective-order parity | With stable ownership during delivery, every admitted value survives memory state, Redis hash text, global/user/thread scores, both hydration paths, sequential reassignment forwarding/fallback, and before-cursor reuse as the same exact number. Mention ordering intentionally remains append-time. | Paired zero/ordinary/positive-TimeClip-boundary transitions, sequential raw-score and missing-score reassignment cases, plus one-record-page collectors. Concurrent delivery × reassignment and transport/UI zero-presence are explicitly RESERVED. |
 
 ## E2E User Path Evidence
 
@@ -70,7 +70,7 @@ Exempt: this is an internal producer data-consistency guard with no UI or direct
 3. Does hydration keep blank/whitespace timestamp evidence invalid while retaining fractional, infinity, and missing-field compatibility?
 4. Is the temporary non-negative integral TimeClip domain the correct safe boundary until D2 replaces lexical cursor ordering?
 5. Does `markDelivered()` reject before any state/hash/index mutation and retain a valid retry across both stores?
-6. Does the producer census correctly distinguish append and delivery as value-producing admissions from reassignment as score forwarding?
+6. Does the producer census correctly distinguish append and delivery as value-producing admissions from sequential reassignment as score forwarding, without implying concurrent atomicity?
 7. Does the narrow scope honestly avoid claiming historical M7 or M1/M2 closure?
 
 Please validate every row in the Invariant Matrix independently.
@@ -98,7 +98,7 @@ Reported: 1 P1, 1 P3
 
 - **P1 dismissed after source verification:** the proposed failure required the shared helper to admit fractions and negatives, but `Number.isInteger(timestamp)` and `timestamp >= 0` are explicit preconditions. Paired tests reject `1.5` and `-1` before Redis access and assert unchanged hash plus timeline/user/thread/mention scores. No parser or second validator was added for this false-positive mechanism.
 - **P3 fixed:** the port and both implementations now state the complete non-negative integral ECMAScript Date contract in their `markDelivered()` JSDoc.
-- **Producer census accepted:** append and `markDelivered()` are the two value-producing admissions; reassignment forwards the existing user-index score (or the already hydrated effective-order value), and the mention index intentionally retains append-time order.
+- **Producer census accepted for value admission:** append and `markDelivered()` are the two value-producing admissions; sequential reassignment forwards the existing user-index score (or the already hydrated effective-order value), and the mention index intentionally retains append-time order. A later systematic scan found that concurrent delivery/reassignment is a separate atomicity gap, now RESERVED rather than over-claimed.
 
 ## Remote review follow-up — `bf04e637`
 
@@ -133,8 +133,15 @@ Reported: 1 P1, 1 P3
 - Finding: P1 `deliveredAt` was omitted as the second effective-order producer, allowing public `markDelivered()` calls to split Redis hash, ZSET, hydration, and pagination representations (`[FC:new]`).
 - Stop-rule response: before changing runtime code, the plan and bug capsule were expanded with the queued-message Stateful Object Gate, `deliveredAt ?? timestamp` truth-source model, state/event table, representation/admission matrix, and full producer/consumer census in `f92b19474`.
 - Chosen contract: memory and Redis reject every delivery value outside the shared non-negative integral TimeClip domain before lookup or mutation. This matches all production callers and keeps invalid API input state-independent.
-- Red→Green: both store suites failed first because fractional/non-finite delivery values did not throw. GREEN rejects the full invalid domain with unchanged queued state; Redis additionally proves unchanged hash and global/user/thread/mention scores, exact zero/ordinary/positive-boundary hydration, raw-score and missing-score user reassignment, successful retry, and complete one-record-page collection.
+- Red→Green: both store suites failed first because fractional/non-finite delivery values did not throw. GREEN rejects the full invalid domain with unchanged queued state; Redis additionally proves unchanged hash and global/user/thread/mention scores, exact zero/ordinary/positive-boundary hydration, sequential raw-score and missing-score user reassignment, successful retry, and complete one-record-page collection.
 - Scope guard: historical attestation/migration and M7 remain RESERVED; `closingIssuesReferences` must stay empty.
+
+## Systematic author scan — `ecca6b705`
+
+- Finding: P1 concurrent `markDelivered()` × `reassignUserId()` can split hash/global/thread order from user-index order, or retain old-user membership (`[FC:new]`). Both opposite interleavings were reproduced on isolated Redis.
+- Finding: P2 admitted `deliveredAt=0` can be omitted by truthiness-based HTTP/Web projection copies (`[FC:new]`). Store/hash/ZSET hydration remains exact; the uncovered boundary is beyond Phase A1's persistence proof.
+- Finding: P3 base/gate evidence became stale after GitHub merged upstream main into the PR branch (`[FC:new]`).
+- Size-gated disposition: the P1 repair requires a shared Redis atomic/CAS transition and concurrency suite, so operator directed it to an independent follow-up. P2 joins that effective-order consumer follow-up. This PR makes no new runtime change for either finding; it narrows INV-10 to stable-owner/single-writer parity and marks both gaps RESERVED under `proposal_mrt0j01zvz1mopnq`.
 
 ## Next Action
 
@@ -160,10 +167,10 @@ pnpm --filter @cat-cafe/api run build
 ### Spec compliance
 
 - Phase A1 acceptance criteria are implemented and paired across memory/Redis.
-- The repeated persisted-number finding triggered the round stop: delivery transition state, effective-order materialization, and all producers/consumers were specified before runtime changes resumed.
+- The repeated persisted-number finding triggered the round stop: delivery admission and stable-owner effective-order materialization were specified before runtime changes resumed; later concurrent owner reconciliation is explicitly RESERVED.
 - Phase A2 and Phase B are intentionally not implemented: no public maxima, scalar policy, generator format change, legacy mutation, beta publication, or consumer pin.
 - No UI, runtime-config, or production-data change.
-- The post-review fix stays on `fix/k1-producer-attestation`, based on `origin/main@128263c9b`; parked K-1 `9fb37310` is untouched.
+- The branch contains GitHub's merge of upstream `main@dff66bdb4` (`5a7d76d78`); the two local Phase A1 commits were replayed on top without overlapping upstream file changes. The final exact HEAD is recorded in the live PR body after the managed gate; parked K-1 `9fb37310` is untouched.
 
 ### Test results
 

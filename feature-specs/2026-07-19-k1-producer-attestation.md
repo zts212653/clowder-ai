@@ -51,7 +51,7 @@ Not in scope:
 | plugin `actor.id` | K-1 `PluginCallContext.pluginInstanceId` | K-1 plugin actor | plugin payload parser caps at 256 | producer context must reject before persistence, not fail during projection |
 | `occurredAt` | `StoredMessage.timestamp` projected through `new Date(timestamp).toISOString()` | K-1 envelope/event readers | ordinary producers use `Date.now()` | stores accept `NaN`, infinities, and out-of-Date-range numbers; projection can throw |
 | delivery transition time | `IMessageStore.markDelivered(id, deliveredAt)` | `StoredMessage.deliveredAt`; Redis global/user/thread ZSET scores; history pagination cursors | production callers use `Date.now()`, but the store contract accepts every JavaScript `number` | Redis hydration truncates fractions and turns infinities into `NaN`, diverging from memory and from the persisted score |
-| effective history order | pure projection `deliveredAt ?? timestamp` | Redis global/user/thread ordering; memory/Redis before-cursor comparison; bounded thread collectors | one logical value must survive admission → hash/ZSET persistence → hydration → cursor reuse | the projection was audited as if `timestamp` were its only producer; `deliveredAt` was omitted |
+| effective history order | pure projection `deliveredAt ?? timestamp` | Redis global/user/thread ordering; memory/Redis before-cursor comparison; bounded thread collectors | one logical value must survive admission → hash/ZSET persistence → hydration → cursor reuse while message ownership is stable | the original projection audit omitted `deliveredAt`; a later systematic scan separately found that concurrent delivery and user reassignment are not one atomic transition |
 
 ### Redis persisted-number representation and admission audit
 
@@ -68,7 +68,7 @@ The executable hash-value versus `ZSCORE` wire matrix, `markDelivered` admission
 - **INV-7 — no silent skip:** A legacy incompatibility is a Host fault with a reconciliation path; it cannot advance a delivery cursor, callback lease, or settlement state.
 - **INV-8 — legacy cursor exclusivity:** Redis before-cursor pagination parses canonical sorted-set score spellings into the same numeric domain as hydrated timestamps, so preserved fractional and infinity cursors are excluded rather than replayed and bounded multi-page consumers always make progress.
 - **INV-9 — delivery-order admission:** `markDelivered` accepts only non-negative integral ECMAScript Date values. Memory and Redis reject every other value before changing delivery state, message hashes, or global/user/thread ordering indexes; a later valid transition remains possible.
-- **INV-10 — effective-order parity:** For every admitted delivery transition, memory `StoredMessage.deliveredAt`, Redis hash `deliveredAt`, Redis global/user/thread scores, hydrated `deliveredAt`, and every before-cursor consumer represent the same exact number. The mention index intentionally retains append-time ordering and is not an effective-history-order consumer.
+- **INV-10 — single-writer effective-order parity:** For an admitted delivery transition that does not overlap user-ownership reassignment, memory `StoredMessage.deliveredAt`, Redis hash `deliveredAt`, Redis global/user/thread scores, hydrated `deliveredAt`, and every before-cursor consumer represent the same exact number. The mention index intentionally retains append-time ordering. Linearizability across concurrent `markDelivered()` and `reassignUserId()`, and exact zero-presence through HTTP/Web projection, are not claimed by Phase A1; both are RESERVED to the independent effective-order atomicity follow-up proposed as `proposal_mrt0j01zvz1mopnq`.
 
 ## Existing behavior protection
 
@@ -80,7 +80,7 @@ The executable hash-value versus `ZSCORE` wire matrix, `markDelivered` admission
 | Redis legacy fractional timestamps remain exact and before cursors remain exclusive | direct legacy hash/zset fixture exercises both before-cursor APIs plus a bounded real-store multi-page collector |
 | Redis blank timestamp evidence is not normalized into valid data | direct empty/whitespace fixtures exercise single and batch hydration while preserving fractional and missing-field compatibility |
 | Redis canonical `inf` / `-inf` scores remain equivalent to hydrated `Infinity` / `-Infinity` | direct positive/negative infinity fixtures exercise both before-cursor APIs; the bounded collector covers positive-infinity progress |
-| valid queued → delivered transitions remain ordered by delivery time | paired memory/Redis boundary-success cases hydrate the exact `deliveredAt` and collect all messages with a one-record page |
+| valid queued → delivered transitions with stable ownership remain ordered by delivery time | paired memory/Redis boundary-success cases hydrate the exact `deliveredAt` and collect all messages with a one-record page |
 | invalid delivery times cannot create split hash/ZSET state | paired memory/Redis invalid-domain cases assert `RangeError`, unchanged queued state, unchanged Redis scores/hash, and successful retry with a valid value |
 | mention scans retain their established append-time order | audit documents that `markDelivered` re-scores only global/user/thread indexes; existing mention cursor tests remain regression guards |
 | existing route-generated thread/user/cat identifiers continue to append | boundary-success fixtures at the selected maxima |
@@ -92,14 +92,14 @@ The executable hash-value versus `ZSCORE` wire matrix, `markDelivered` admission
 |---|---|---|---|
 | message record | `IMessageStore.append` implementation | candidate → admitted → persisted/indexed | invalid input, idempotency replay, Redis contention, listener side effects |
 | queued-message delivery state | `IMessageStore.markDelivered` implementation | queued → delivery-time admitted → delivered; non-queued → unchanged | fractional/non-finite/out-of-Date-range time, repeated delivery, missing ID, valid retry after rejection |
-| effective history-order projection | derived only as `deliveredAt ?? timestamp`; Redis store owns materialized global/user/thread ZSET scores | append score=`timestamp` → successful delivery score=`deliveredAt` → hydration → before-cursor reuse | hash/ZSET representation drift, partial mutation, one-record pages, Redis canonical number spellings |
+| effective history-order projection | derived only as `deliveredAt ?? timestamp`; Redis store owns materialized global/user/thread ZSET scores | append score=`timestamp` → successful delivery score=`deliveredAt` → sequential user reassignment forwards that score → hydration → before-cursor reuse | hash/ZSET representation drift, partial mutation, one-record pages, Redis canonical number spellings; concurrent delivery × reassignment RESERVED |
 | sortable-id generator state | `generateSortableId` module | sequence read → increment → encoded | same millisecond burst, maximum safe sequence, non-monotonic timestamp |
 | persisted legacy message | existing store data | hydrated → audited → compatible/finding | malformed timestamp, oversized/non-scalar identity, missing field |
 | cat registry identity | catalog loader/registry | configured → registered → referenced by message | route-created vs file-configured IDs, registry reload |
 
 ### Stateful Object Gate — delivery transition
 
-Lifecycle owner: the selected `IMessageStore.markDelivered` implementation. Callers request a transition but do not write `deliveryStatus`, `deliveredAt`, or ordering indexes directly. Raw Redis mutation is reserved for isolated legacy fixtures and future operator-reviewed repair tooling; it is not a runtime bypass API.
+Lifecycle owner for delivery admission: the selected `IMessageStore.markDelivered` implementation. Callers request a transition but do not write `deliveryStatus`, `deliveredAt`, or ordering indexes directly. `RedisMessageStore.reassignUserId` is a separate owner/index mutation path; Phase A1 proves sequential forwarding only and does not claim that it is linearizable with delivery. Raw Redis mutation is reserved for isolated legacy fixtures and future operator-reviewed repair tooling; it is not a runtime bypass API.
 
 | Current state | Event | Admission / transition | Memory representation | Redis representation | Required result |
 |---|---|---|---|---|---|
@@ -108,6 +108,7 @@ Lifecycle owner: the selected `IMessageStore.markDelivered` implementation. Call
 | queued | `markDelivered(id, valid)` | queued → delivered | exact `deliveredAt`; status=`delivered` | exact hash text; global/user/thread score=`deliveredAt`; status=`delivered` | return the delivered message with store parity |
 | delivered / canceled / untracked | `markDelivered(id, valid)` | no transition | object unchanged | hash and indexes unchanged | return the existing message |
 | delivered / canceled / untracked | `markDelivered(id, invalid)` | boundary reject | object unchanged | hash and indexes unchanged | throw `RangeError`; invalid API input never becomes state-dependent |
+| queued + ownership changes concurrently | `markDelivered(id, valid)` × `reassignUserId(id, nextUserId)` | **RESERVED**: current read→`MULTI` paths have no shared CAS | N/A: Redis-only reassignment helper | deterministic interleavings can leave the new-user score stale or retain an old-user member | independent atomic-transition follow-up; no Phase A1 parity claim |
 
 The admitted domain is the existing sortable-order timestamp domain: `Number.isInteger(value)`, `value >= 0`, and valid ECMAScript TimeClip. This is stricter than Redis's floating-point score grammar by design. It matches all production callers (`Date.now()`), keeps the delivery field a timestamp, and prevents future hash/ZSET representation splits without expanding D3 historical reconciliation.
 
@@ -117,10 +118,12 @@ The admitted domain is the existing sortable-order timestamp domain: `Number.isI
 |---|---|---|
 | fractional `deliveredAt` (`100.25`) | INV-9 | paired stores reject; message remains queued; Redis hash and three scores remain at append time |
 | `NaN`, `Infinity`, `-Infinity`, negative, and TimeClip overflow | INV-9 | paired invalid-domain loop rejects every value with no state mutation |
-| valid zero and positive TimeClip boundary | INV-9 / INV-10 | exact value survives transition and Redis hydration |
+| valid zero and positive TimeClip boundary with stable ownership | INV-9 / INV-10 | exact value survives transition and Redis hydration |
 | invalid attempt followed by valid retry | INV-9 | retry delivers successfully, proving rejection did not consume the transition |
 | invalid attempts followed by valid increasing deliveries, page size 1 | INV-9 / INV-10 | memory and real Redis collectors both return every delivered message once without runtime error |
-| user ownership reassignment after valid delivery | INV-10 | Redis preserves exact zero/positive-boundary order through raw-score forwarding and the missing-score hydrated fallback |
+| sequential user ownership reassignment after valid delivery | INV-10 | Redis preserves exact zero/positive-boundary order through raw-score forwarding and the missing-score hydrated fallback |
+| concurrent delivery × user ownership reassignment | RESERVED | isolated Redis reproduces both stale-new-user score and stale-old-user membership interleavings; atomic CAS/reconciliation belongs to `proposal_mrt0j01zvz1mopnq` |
+| valid `deliveredAt=0` through HTTP/Web projection | RESERVED | store/hash/ZSET hydration is exact, but existing truthiness-based transport/UI copies can omit zero; consumer-presence repair belongs to the same independent follow-up |
 | legacy fractional/infinite `timestamp` cursor | INV-6 / INV-8 | existing direct hash/ZSET fixtures remain unchanged; historical attestation/migration stays RESERVED |
 
 ## Phase A — executable without a public-bound decision
