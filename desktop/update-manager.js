@@ -22,6 +22,7 @@ class UpdateManager {
     this._d = deps;
     this._updatesDir = dl.updatesDir(deps.userDataRoot);
     this._settingsPath = path.join(deps.userDataRoot, 'update-settings.json');
+    this._spawn = deps.spawn || require('node:child_process').spawn;
     this._checkTimer = null;
     this._downloading = false;
   }
@@ -230,7 +231,7 @@ class UpdateManager {
       await quitApp();
     } catch (err) {
       dbg(`Installer launch failed: ${err.message}`);
-      dl.clearJournal(this._updatesDir);
+      // Journal preserved — next startup checkPendingUpgrade() shows recovery dialog (AC-3)
       await showDialog({ type: 'error', buttons: ['OK'], title: 'Install Failed',
         message: 'Could not start the installer', detail: err.message });
     }
@@ -259,7 +260,7 @@ class UpdateManager {
       await this._d.quitApp();
     } catch (err) {
       this._d.dbg(`Retry install failed: ${err.message}`);
-      dl.clearJournal(this._updatesDir);
+      // Journal preserved — next startup recovery dialog will offer retry again
     }
   }
 
@@ -274,7 +275,7 @@ class UpdateManager {
    */
   _spawnInstaller(installerPath, logPath) {
     return new Promise((resolve, reject) => {
-      const { spawn } = require('node:child_process');
+      const spawn = this._spawn;
       const { platform, dbg } = this._d;
 
       if (platform === 'win32') {
@@ -297,10 +298,13 @@ class UpdateManager {
           }
         });
       } else {
-        const child = spawn('open', [installerPath], { detached: true, stdio: 'ignore' });
+        const child = spawn('open', [installerPath], { stdio: 'ignore' });
         child.on('error', (err) => { dbg(`Install spawn error: ${err.message}`); reject(err); });
-        child.unref();
-        resolve();
+        child.on('close', (code) => {
+          if (code === 0) { resolve(); } else {
+            reject(new Error(`DMG open failed (exit code ${code})`));
+          }
+        });
       }
     });
   }

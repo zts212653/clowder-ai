@@ -214,6 +214,27 @@ describe('downloadAsset', () => {
     );
   });
 
+  test('stalled request (no response, no error) times out', async () => {
+    const dest = path.join(tempDir, 'app.dmg');
+    // Mock that never emits 'response' or 'error' — simulates connection stall
+    const net = {
+      request() {
+        const req = new EventEmitter();
+        req.setHeader = () => {};
+        req.end = () => {};
+        return req;
+      },
+    };
+
+    await assert.rejects(
+      () => downloadAsset(net, { name: 'app.dmg', size: 100 }, dest, '0.10.0', noop, noop, 50),
+      (err) => {
+        assert.match(err.message, /timeout/i);
+        return true;
+      },
+    );
+  });
+
   test('200 with existing partial overwrites (resume rejected by server)', async () => {
     const dest = path.join(tempDir, 'app.dmg');
     writeFileSync(dest, 'OLD_PARTIAL');

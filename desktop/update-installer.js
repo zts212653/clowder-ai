@@ -79,7 +79,7 @@ function fetchReleases(net, appVersion, etag) {
  * @param {Function} setProgressBar — (0..1 | -1)
  * @param {Function} dbg — logger
  */
-function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg) {
+function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, timeoutMs) {
   return new Promise((resolve, reject) => {
     const url =
       asset.browser_download_url || `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/download/${asset.name}`;
@@ -106,6 +106,7 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg) {
       if (dlTimeout) clearTimeout(dlTimeout);
       fn(val);
     };
+    let activeResponse = null;
 
     const request = net.request(url);
     request.setHeader('User-Agent', `ClowderAI/${appVersion}`);
@@ -115,6 +116,7 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg) {
     }
 
     request.on('response', (response) => {
+      activeResponse = response;
       let isResume = response.statusCode === 206;
       if (response.statusCode !== 200 && !isResume) {
         settle(reject, new Error(`HTTP ${response.statusCode}`));
@@ -157,14 +159,6 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg) {
         settle(reject, err);
       });
 
-      // 30-minute overall timeout for large assets (600-800 MB typical)
-      dlTimeout = setTimeout(() => {
-        dbg('Download timeout (30 min)');
-        response.destroy();
-        ws.end();
-        settle(reject, new Error('Download timeout (30 minutes)'));
-      }, 30 * 60 * 1000);
-
       response.on('data', (chunk) => {
         downloaded += chunk.length;
         setProgressBar(asset.size > 0 ? downloaded / asset.size : -1);
@@ -186,6 +180,14 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg) {
         settle(reject, err);
       });
     });
+
+    // 30-minute overall timeout covers both connection and download phases.
+    // Without this, a stalled connection (no response, no error) blocks forever.
+    dlTimeout = setTimeout(() => {
+      dbg('Download timeout (30 min)');
+      if (activeResponse) activeResponse.destroy();
+      settle(reject, new Error('Download timeout (30 minutes)'));
+    }, timeoutMs || 30 * 60 * 1000);
 
     request.on('error', (err) => settle(reject, err));
     request.end();

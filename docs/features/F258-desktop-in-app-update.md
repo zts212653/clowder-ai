@@ -254,3 +254,12 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
   - P2-B fix: verifyFileIntegrity 改 streaming SHA-256（createReadStream），避免 600-800MB readFileSync
   - 新增 request-error regression test；downloader tests 改 async
   - 全量 94 tests 通过（58 checker + 16 downloader + 8 installer + 12 config）
+- **r4c (2026-07-21, 缅因猫 Sol re-review → 布偶猫 Opus fix)**:
+  - Sol focused re-review of r4b fix: REQUEST CHANGES — 1×P1 + 2×P2
+  - P1 fix: launcher 失败时保留 journal — _executeInstall 和 _retryInstall 的 catch 块不再 clearJournal，保障 AC-3 下次启动恢复 dialog
+  - P2 fix: macOS launcher 等待 close — `_spawnInstaller` macOS 路径改为等待 `open` 命令 close 事件，不再 resolve 后异步 error
+  - P2 fix: 总超时覆盖建连阶段 — dlTimeout 从 response 回调内移到 request.end() 前，覆盖连接卡死场景
+  - spawn 注入: 构造函数新增 deps.spawn 可选注入，使 _spawnInstaller 可测
+  - 新增 update-manager.test.js（176 行）: launcher failure-mode sweep（Win/Mac spawn-error/nonzero/success）+ journal 保留 P1 回归
+  - 新增 stalled request timeout 测试（update-installer.test.js）
+  - 全量 111 tests 通过（58 checker + 16 downloader + 10 installer + 15 manager + 12 config）
