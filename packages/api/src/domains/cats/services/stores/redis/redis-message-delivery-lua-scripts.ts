@@ -1,5 +1,5 @@
 /**
- * Lua scripts for atomic delivery-order transitions (F258).
+ * Lua scripts for atomic delivery-order transitions (PR #1193).
  *
  * Bug: reassignUserId / markDelivered / markCanceled each read a JS snapshot
  * then write via independent MULTI — no shared atomic boundary. Two concurrent

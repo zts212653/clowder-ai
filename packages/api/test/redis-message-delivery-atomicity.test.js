@@ -1,5 +1,5 @@
 /**
- * F258: Delivery-order transition atomicity tests.
+ * Delivery-order transition atomicity tests (PR #1193).
  *
  * Bug: reassignUserId / markDelivered / markCanceled each read a JS snapshot
  * then write via independent MULTI/HSET — no shared atomic boundary. Two
@@ -24,9 +24,9 @@ import {
 const REDIS_URL = process.env.REDIS_URL;
 
 /** Per-file unique keyPrefix isolates this suite from concurrent redis-message-store / f232 tests. */
-const TEST_KEY_PREFIX = 'cat-cafe-f258:';
+const TEST_KEY_PREFIX = 'cat-cafe-dlv-atomicity:';
 
-describe('F258: delivery-order transition atomicity', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
+describe('delivery-order transition atomicity (PR #1193)', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisMessageStore;
   let MessageKeys;
   let createRedisClient;
@@ -35,7 +35,7 @@ describe('F258: delivery-order transition atomicity', { skip: redisIsolationSkip
   let connected = false;
 
   before(async () => {
-    assertRedisIsolationOrThrow(REDIS_URL, 'F258-delivery-atomicity');
+    assertRedisIsolationOrThrow(REDIS_URL, 'delivery-atomicity');
 
     const storeModule = await import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js');
     RedisMessageStore = storeModule.RedisMessageStore;
@@ -49,7 +49,7 @@ describe('F258: delivery-order transition atomicity', { skip: redisIsolationSkip
       await redis.ping();
       connected = true;
     } catch {
-      console.warn('[F258-delivery-atomicity] Redis unreachable, skipping');
+      console.warn('[delivery-atomicity] Redis unreachable, skipping');
       await redis.quit().catch(() => {});
       return;
     }
@@ -103,7 +103,7 @@ describe('F258: delivery-order transition atomicity', { skip: redisIsolationSkip
   // 1. reassign snapshot → delivery commit → reassign commit
   it('concurrent reassign+deliver: reassign reads stale → deliver writes → reassign overwrites stale score', async () => {
     const base = Date.now();
-    const threadId = 'thread-f258-rd-1';
+    const threadId = 'thread-dlv-rd-1';
     const msg = await createQueued('userA', threadId, base);
 
     // Run both concurrently — event loop interleaving creates the race window
@@ -127,7 +127,7 @@ describe('F258: delivery-order transition atomicity', { skip: redisIsolationSkip
   // 2. delivery snapshot → reassign commit → delivery retry (now: delivery commit)
   it('concurrent deliver+reassign: deliver reads stale userId → reassign writes → deliver writes to old user', async () => {
     const base = Date.now();
-    const threadId = 'thread-f258-dr-2';
+    const threadId = 'thread-dlv-dr-2';
     const msg = await createQueued('userA', threadId, base);
 
     // Reverse order from test 1
@@ -148,7 +148,7 @@ describe('F258: delivery-order transition atomicity', { skip: redisIsolationSkip
   // 3. cancel vs deliver: exactly one winner
   it('concurrent cancel+deliver on queued msg: exactly one transition wins', async () => {
     const base = Date.now();
-    const threadId = 'thread-f258-cd-3';
+    const threadId = 'thread-dlv-cd-3';
     const msg = await createQueued('userA', threadId, base);
 
     await Promise.all([store.markCanceled(msg.id), store.markDelivered(msg.id, base + 100)]);
@@ -172,7 +172,7 @@ describe('F258: delivery-order transition atomicity', { skip: redisIsolationSkip
   // 4. concurrent reassign A→B / A→C: exactly one final owner
   it('concurrent reassign to two targets: final state has single owner', async () => {
     const base = Date.now();
-    const threadId = 'thread-f258-rr-4';
+    const threadId = 'thread-dlv-rr-4';
     const msg = await createQueued('userA', threadId, base);
     // Deliver first so the score is stable
     await store.markDelivered(msg.id, base + 100);
@@ -199,7 +199,7 @@ describe('F258: delivery-order transition atomicity', { skip: redisIsolationSkip
   // 5. return values must reflect canonical post-state (not stale JS snapshot)
   it('return value of reassignUserId reflects canonical Redis state', async () => {
     const base = Date.now();
-    const threadId = 'thread-f258-ret-5';
+    const threadId = 'thread-dlv-ret-5';
     const msg = await createQueued('userA', threadId, base);
 
     // Deliver, then reassign
@@ -214,7 +214,7 @@ describe('F258: delivery-order transition atomicity', { skip: redisIsolationSkip
   // 6. sequential delivery → reassign → startup backfill all stay green
   it('sequential deliver → reassign preserves score=deliveredAt in new user zset', async () => {
     const base = Date.now();
-    const threadId = 'thread-f258-seq-6';
+    const threadId = 'thread-dlv-seq-6';
     const msg = await createQueued('userA', threadId, base);
 
     // Sequential: deliver first, then reassign
@@ -239,14 +239,15 @@ describe('F258: delivery-order transition atomicity', { skip: redisIsolationSkip
   // 7. markCanceled on delivered message → must be no-op (DETERMINISTIC RED)
   it('markCanceled on delivered message is no-op (guard: queued-only transition)', async () => {
     const base = Date.now();
-    const threadId = 'thread-f258-guard-7';
+    const threadId = 'thread-dlv-guard-7';
     const msg = await createQueued('userA', threadId, base);
 
     // Deliver first
     await store.markDelivered(msg.id, base + 100);
 
-    // Cancel should be no-op — delivered state must survive
+    // Cancel should be CAS no-op — returns null, delivered state survives
     const result = await store.markCanceled(msg.id);
+    assert.equal(result, null, 'CAS no-op must return null (message already delivered)');
 
     const canonical = await store.getById(msg.id);
     assert.equal(canonical.deliveryStatus, 'delivered', 'markCanceled must NOT overwrite delivered status');
@@ -256,7 +257,7 @@ describe('F258: delivery-order transition atomicity', { skip: redisIsolationSkip
   // 8. after concurrent ops, all three zset scores + hash are consistent
   it('concurrent deliver+reassign: thread/timeline/user zset scores all agree with hash', async () => {
     const base = Date.now();
-    const threadId = 'thread-f258-zset-8';
+    const threadId = 'thread-dlv-zset-8';
     // Run 5 rounds to increase chance of hitting the race
     for (let round = 0; round < 5; round++) {
       await cleanupClientKeyspace(redis);
@@ -275,7 +276,7 @@ describe('F258: delivery-order transition atomicity', { skip: redisIsolationSkip
   // 9. regression: no caller depends on cancel-non-queued behavior (F117 withdraw)
   it('markCanceled on immediate/no-status message is no-op', async () => {
     const base = Date.now();
-    const threadId = 'thread-f258-imm-9';
+    const threadId = 'thread-dlv-imm-9';
     // Create a message WITHOUT deliveryStatus (= immediate/legacy)
     const msg = await store.append({
       userId: 'userA',
@@ -287,16 +288,32 @@ describe('F258: delivery-order transition atomicity', { skip: redisIsolationSkip
     });
 
     const result = await store.markCanceled(msg.id);
-    const canonical = await store.getById(msg.id);
+    assert.equal(result, null, 'CAS no-op must return null (message not queued)');
 
-    // An immediate message must not become 'canceled'
+    const canonical = await store.getById(msg.id);
     assert.notEqual(canonical.deliveryStatus, 'canceled', 'immediate message must not be marked canceled');
+  });
+
+  // 10. already-canceled: second markCanceled must return null (CAS idempotency)
+  it('markCanceled on already-canceled message returns null (CAS idempotency)', async () => {
+    const base = Date.now();
+    const threadId = 'thread-dlv-idem-10';
+    const msg = await createQueued('userA', threadId, base);
+
+    // First cancel wins
+    const first = await store.markCanceled(msg.id);
+    assert.ok(first, 'first markCanceled must succeed (CAS applied)');
+    assert.equal(first.deliveryStatus, 'canceled', 'first cancel must transition to canceled');
+
+    // Second cancel is a no-op — CAS sees 'canceled' not 'queued'
+    const second = await store.markCanceled(msg.id);
+    assert.equal(second, null, 'second markCanceled must return null (already canceled)');
   });
 });
 
 // ── In-memory MessageStore: markCanceled guard (deterministic RED) ──
 
-describe('F258: in-memory MessageStore markCanceled guard', () => {
+describe('in-memory MessageStore markCanceled guard (PR #1193)', () => {
   let MessageStore;
 
   before(async () => {
@@ -319,9 +336,10 @@ describe('F258: in-memory MessageStore markCanceled guard', () => {
 
     memStore.markDelivered(msg.id, base + 100);
 
-    // Cancel should be no-op
+    // Cancel should be CAS no-op → null
     const result = memStore.markCanceled(msg.id);
-    assert.equal(result.deliveryStatus, 'delivered', 'in-memory markCanceled must NOT overwrite delivered status');
+    assert.equal(result, null, 'in-memory CAS no-op must return null');
+    assert.equal(memStore.getById(msg.id).deliveryStatus, 'delivered', 'delivered status must survive cancel attempt');
   });
 
   it('markCanceled on immediate/no-status message is no-op', async () => {
@@ -336,6 +354,27 @@ describe('F258: in-memory MessageStore markCanceled guard', () => {
     });
 
     const result = memStore.markCanceled(msg.id);
-    assert.notEqual(result.deliveryStatus, 'canceled', 'immediate message must not be marked canceled in memory store');
+    assert.equal(result, null, 'in-memory CAS no-op must return null (not queued)');
+    assert.notEqual(memStore.getById(msg.id).deliveryStatus, 'canceled', 'immediate message must not become canceled');
+  });
+
+  it('markCanceled on already-canceled message returns null (CAS idempotency parity)', async () => {
+    const memStore = new MessageStore();
+    const msg = await memStore.append({
+      userId: 'u1',
+      catId: null,
+      content: 'test',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 'thread-mem-idem',
+      deliveryStatus: 'queued',
+    });
+
+    const first = memStore.markCanceled(msg.id);
+    assert.ok(first, 'first cancel must succeed');
+    assert.equal(first.deliveryStatus, 'canceled');
+
+    const second = memStore.markCanceled(msg.id);
+    assert.equal(second, null, 'second cancel must return null (already canceled)');
   });
 });

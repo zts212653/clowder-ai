@@ -649,10 +649,10 @@ describe('Queue Management API', () => {
     assert.equal(del.arguments[2].messageId, 'msg-inflight');
   });
 
-  it('POST /queue/:entryId/steer immediate does NOT emit message_deleted when markCanceled is no-op (F258 phantom-emit guard)', async () => {
-    // F258: if the message was already delivered (or otherwise non-queued), markCanceled
-    // returns a non-canceled status. The gate must suppress the message_deleted emit —
-    // otherwise the client would flash-delete a delivered message.
+  it('POST /queue/:entryId/steer immediate does NOT emit message_deleted when markCanceled is no-op (phantom-emit guard)', async () => {
+    // If the message was already canceled/delivered, markCanceled returns null (CAS no-op).
+    // The truthy gate must suppress the message_deleted emit — otherwise the client would
+    // flash-delete a delivered message or duplicate-delete an already-canceled one.
     enqueueEntry(deps.invocationQueue, { userId: 'user-a', content: 'inflight', targetCats: ['opus'] });
     deps.invocationQueue.markProcessing('t1', 'user-a');
     const inflight = deps.invocationQueue.findProcessingByCat('t1', 'opus');
@@ -660,8 +660,8 @@ describe('Queue Management API', () => {
     const steered = enqueueEntry(deps.invocationQueue, { userId: 'user-a', content: 'steered', targetCats: ['opus'] });
 
     deps.invocationTracker.has = mock.fn(() => false);
-    // Override: markCanceled returns delivered status (CAS no-op — message already delivered)
-    deps.messageStore.markCanceled = mock.fn(async () => ({ deliveryStatus: 'delivered' }));
+    // Override: markCanceled returns null (CAS no-op — message already delivered/canceled)
+    deps.messageStore.markCanceled = mock.fn(async () => null);
 
     const res = await app.inject({
       method: 'POST',

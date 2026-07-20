@@ -337,7 +337,7 @@ export class RedisMessageStore {
 
   /**
    * Reassign a message to a different userId and move user-timeline membership.
-   * F258: atomic Lua — derives currentUserId and effectiveOrder from the hash
+   * PR #1193: atomic Lua — derives currentUserId and effectiveOrder from the hash
    * inside the script, eliminating stale-snapshot races with markDelivered.
    */
   async reassignUserId(id: string, nextUserId: string): Promise<StoredMessage | null> {
@@ -868,7 +868,7 @@ export class RedisMessageStore {
 
   /**
    * F098-D: Mark a queued message as delivered at an admitted non-negative integral Date value.
-   * F258: atomic Lua — reads userId/threadId inside the script so concurrent
+   * PR #1193: atomic Lua — reads userId/threadId inside the script so concurrent
    * reassignUserId cannot cause the score update to land on a stale user key.
    */
   async markDelivered(id: string, deliveredAt: number): Promise<StoredMessage | null> {
@@ -881,15 +881,17 @@ export class RedisMessageStore {
 
   /**
    * F117: Mark a queued message as canceled (withdraw/clear).
-   * F258: CAS guard — only transitions queued → canceled. A delivered or
+   * PR #1193: CAS guard — only transitions queued → canceled. A delivered or
    * immediate message is left untouched (no-op), preventing cancel from
    * overwriting a completed delivery.
    */
   async markCanceled(id: string): Promise<StoredMessage | null> {
     const hashKey = MessageKeys.detail(id);
-    // Atomic CAS: queued → canceled, anything else → no-op
-    // Lua handles missing hash (HGET returns nil → no-op); getById returns null
-    await this.redis.eval(CANCEL_LUA, 1, hashKey);
+    // Atomic CAS: queued → canceled, anything else → no-op.
+    // Returns the transitioned message ONLY when this call won the CAS;
+    // null means no-op (already canceled / delivered / not found).
+    const applied = (await this.redis.eval(CANCEL_LUA, 1, hashKey)) as number;
+    if (applied === 0) return null;
     return this.getById(id);
   }
 

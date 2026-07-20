@@ -284,11 +284,11 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       );
 
       // F117: Mark queued messages as canceled + emit message_deleted
-      // F258: only emit if cancel actually applied (CAS guard: non-queued → no-op)
+      // CAS gate: markCanceled returns null on no-op (already canceled / delivered / not found)
       if (messageStore) {
         for (const msgId of messageIds) {
           const canceled = await messageStore.markCanceled(msgId);
-          if (canceled?.deliveryStatus === 'canceled') {
+          if (canceled) {
             socketManager.emitToUser(guard.userId, 'message_deleted', {
               messageId: msgId,
               threadId,
@@ -419,11 +419,11 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
           // executeEntry self-aborts BEFORE its markDelivered block, so without this the original
           // user message stays permanently 'queued' (undelivered + excluded from context) even though
           // its queue entry is gone. Mark it canceled + emit message_deleted.
-          // F258: only emit if cancel actually applied (CAS guard: non-queued → no-op)
+          // CAS gate: markCanceled returns null on no-op (already canceled / delivered / not found)
           if (messageStore) {
             for (const msgId of tombstonedMsgIds) {
               const canceled = await messageStore.markCanceled(msgId);
-              if (canceled?.deliveryStatus === 'canceled') {
+              if (canceled) {
                 socketManager.emitToUser(guard.userId, 'message_deleted', {
                   messageId: msgId,
                   threadId,
@@ -596,11 +596,11 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     await emitQueueUpdated(socketManager, guard.userId, threadId, [], messageStore, 'cleared');
 
     // F117: Mark all queued messages as canceled + emit message_deleted
-    // F258: only emit if cancel actually applied (CAS guard: non-queued → no-op)
+    // CAS gate: markCanceled returns null on no-op (already canceled / delivered / not found)
     if (messageStore) {
       for (const msgId of allMessageIds) {
         const canceled = await messageStore.markCanceled(msgId);
-        if (canceled?.deliveryStatus === 'canceled') {
+        if (canceled) {
           socketManager.emitToUser(guard.userId, 'message_deleted', {
             messageId: msgId,
             threadId,
