@@ -313,7 +313,7 @@ export interface IMessageStore {
     id: string,
     patch: StreamMetadataAugmentInput,
   ): StoredMessage | null | Promise<StoredMessage | null>;
-  /** F098-D: Mark a queued message as delivered (set deliveredAt). Returns null if not found. */
+  /** F098-D: Deliver a queued message at a non-negative integral ECMAScript Date value. Null if not found. */
   markDelivered(id: string, deliveredAt: number): StoredMessage | null | Promise<StoredMessage | null>;
   /** F117: Mark a queued message as canceled (withdraw/clear). Returns null if not found. */
   markCanceled(id: string): StoredMessage | null | Promise<StoredMessage | null>;
@@ -741,9 +741,10 @@ export class MessageStore {
   }
 
   /**
-   * F098-D: Mark a queued message as delivered (set deliveredAt timestamp).
+   * F098-D: Mark a queued message as delivered at an admitted non-negative integral Date value.
    */
   markDelivered(id: string, deliveredAt: number): StoredMessage | null {
+    assertValidStoredMessageTimestamp(deliveredAt);
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
     if (msg.deliveryStatus !== 'queued') return msg; // only transition queued → delivered

@@ -128,6 +128,158 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     );
   });
 
+  it('markDelivered() rejects unsafe order timestamps before hash/ZSET mutation and permits a valid retry', async () => {
+    const admissionStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
+    const invalidTimestamps = [
+      -1,
+      1.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      8_640_000_000_000_001,
+      -8_640_000_000_000_001,
+    ];
+    const validTimestamps = [0, 8_640_000_000_000_000];
+
+    for (const [index, deliveredAt] of invalidTimestamps.entries()) {
+      const userId = `user-delivery-admission-${index}`;
+      const threadId = `thread-delivery-admission-${index}`;
+      const queued = await admissionStore.append({
+        userId,
+        catId: null,
+        content: `queued ${index}`,
+        mentions: ['opus'],
+        timestamp: 100 + index,
+        threadId,
+        deliveryStatus: 'queued',
+      });
+      const keys = {
+        detail: `msg:${queued.id}`,
+        timeline: 'msg:timeline',
+        user: `msg:user:${userId}`,
+        thread: `msg:thread:${threadId}`,
+        mention: 'msg:mentions:opus',
+      };
+      const before = {
+        hash: await redis.hgetall(keys.detail),
+        timeline: await redis.zscore(keys.timeline, queued.id),
+        user: await redis.zscore(keys.user, queued.id),
+        thread: await redis.zscore(keys.thread, queued.id),
+        mention: await redis.zscore(keys.mention, queued.id),
+      };
+
+      await assert.rejects(admissionStore.markDelivered(queued.id, deliveredAt), {
+        name: 'RangeError',
+        message: /non-negative integer ECMAScript Date/,
+      });
+
+      assert.deepEqual(await redis.hgetall(keys.detail), before.hash, `invalid ${String(deliveredAt)} hash mutation`);
+      assert.equal(await redis.zscore(keys.timeline, queued.id), before.timeline);
+      assert.equal(await redis.zscore(keys.user, queued.id), before.user);
+      assert.equal(await redis.zscore(keys.thread, queued.id), before.thread);
+      assert.equal(await redis.zscore(keys.mention, queued.id), before.mention);
+      const unchanged = await admissionStore.getById(queued.id);
+      assert.equal(unchanged.deliveryStatus, 'queued');
+      assert.equal(unchanged.deliveredAt, undefined);
+
+      const validDeliveredAt = validTimestamps[index] ?? 1_000 + index;
+      const delivered = await admissionStore.markDelivered(queued.id, validDeliveredAt);
+      assert.equal(delivered.deliveryStatus, 'delivered');
+      assert.equal(delivered.deliveredAt, validDeliveredAt);
+      assert.equal(await redis.zscore(keys.timeline, queued.id), String(validDeliveredAt));
+      assert.equal(await redis.zscore(keys.user, queued.id), String(validDeliveredAt));
+      assert.equal(await redis.zscore(keys.thread, queued.id), String(validDeliveredAt));
+      assert.equal(await redis.zscore(keys.mention, queued.id), before.mention, 'mention order remains append-time');
+      assert.equal((await admissionStore.getById(queued.id)).deliveredAt, validDeliveredAt);
+
+      const afterDelivery = {
+        hash: await redis.hgetall(keys.detail),
+        timeline: await redis.zscore(keys.timeline, queued.id),
+        user: await redis.zscore(keys.user, queued.id),
+        thread: await redis.zscore(keys.thread, queued.id),
+        mention: await redis.zscore(keys.mention, queued.id),
+      };
+      await assert.rejects(admissionStore.markDelivered(queued.id, deliveredAt), RangeError);
+      assert.deepEqual(
+        await redis.hgetall(keys.detail),
+        afterDelivery.hash,
+        'invalid input must not be state-dependent',
+      );
+      assert.equal(await redis.zscore(keys.timeline, queued.id), afterDelivery.timeline);
+      assert.equal(await redis.zscore(keys.user, queued.id), afterDelivery.user);
+      assert.equal(await redis.zscore(keys.thread, queued.id), afterDelivery.thread);
+      assert.equal(await redis.zscore(keys.mention, queued.id), afterDelivery.mention);
+    }
+  });
+
+  it('markDelivered() recovery preserves bounded effective-order pagination', async () => {
+    const admissionStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
+    const threadId = 'thread-delivery-admission-pagination';
+    const first = await admissionStore.append({
+      userId: 'user-delivery-admission-pagination',
+      catId: null,
+      content: 'first',
+      mentions: [],
+      timestamp: 100,
+      threadId,
+      deliveryStatus: 'queued',
+    });
+    const second = await admissionStore.append({
+      userId: 'user-delivery-admission-pagination',
+      catId: null,
+      content: 'second',
+      mentions: [],
+      timestamp: 200,
+      threadId,
+      deliveryStatus: 'queued',
+    });
+
+    await assert.rejects(admissionStore.markDelivered(first.id, Number.POSITIVE_INFINITY), RangeError);
+    await admissionStore.markDelivered(first.id, 300);
+    await admissionStore.markDelivered(second.id, 400);
+
+    const collected = await collectAllThreadMessages(admissionStore, threadId, undefined, 1);
+    assert.deepEqual(
+      collected.map((message) => message.id),
+      [second.id, first.id],
+      'one-record pages must return both messages exactly once after a valid retry',
+    );
+  });
+
+  it('admitted delivery order stays exact through user-index forwarding and missing-score fallback', async () => {
+    const admissionStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
+    const cases = [
+      { suffix: 'forwarded', deliveredAt: 8_640_000_000_000_000, removeSourceScore: false },
+      { suffix: 'fallback', deliveredAt: 0, removeSourceScore: true },
+    ];
+
+    for (const { suffix, deliveredAt, removeSourceScore } of cases) {
+      const sourceUserId = `user-delivery-reassign-source-${suffix}`;
+      const targetUserId = `user-delivery-reassign-target-${suffix}`;
+      const queued = await admissionStore.append({
+        userId: sourceUserId,
+        catId: null,
+        content: suffix,
+        mentions: [],
+        timestamp: 100,
+        threadId: 'thread-delivery-reassign',
+        deliveryStatus: 'queued',
+      });
+      await admissionStore.markDelivered(queued.id, deliveredAt);
+
+      if (removeSourceScore) {
+        await redis.zrem(`msg:user:${sourceUserId}`, queued.id);
+      }
+      const reassigned = await admissionStore.reassignUserId(queued.id, targetUserId);
+
+      assert.equal(reassigned.userId, targetUserId);
+      assert.equal(reassigned.deliveredAt, deliveredAt);
+      assert.equal(await redis.zscore(`msg:user:${sourceUserId}`, queued.id), null);
+      assert.equal(await redis.zscore(`msg:user:${targetUserId}`, queued.id), String(deliveredAt));
+      assert.equal((await admissionStore.getById(queued.id)).deliveredAt, deliveredAt);
+    }
+  });
+
   it('expired cursor recovery preserves order across admitted timestamp boundaries', async () => {
     const roundTripStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
     const threadId = 'thread-expired-cursor-domain';

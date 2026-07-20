@@ -120,6 +120,7 @@ The admitted domain is the existing sortable-order timestamp domain: `Number.isI
 | valid zero and positive TimeClip boundary | INV-9 / INV-10 | exact value survives transition and Redis hydration |
 | invalid attempt followed by valid retry | INV-9 | retry delivers successfully, proving rejection did not consume the transition |
 | invalid attempts followed by valid increasing deliveries, page size 1 | INV-9 / INV-10 | memory and real Redis collectors both return every delivered message once without runtime error |
+| user ownership reassignment after valid delivery | INV-10 | Redis preserves exact zero/positive-boundary order through raw-score forwarding and the missing-score hydrated fallback |
 | legacy fractional/infinite `timestamp` cursor | INV-6 / INV-8 | existing direct hash/ZSET fixtures remain unchanged; historical attestation/migration stays RESERVED |
 
 ## Phase A — executable without a public-bound decision
