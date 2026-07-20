@@ -26,9 +26,9 @@ const FIXTURE_RELEASES = [
     prerelease: false,
     body: 'New features in 0.12.0',
     assets: [
-      makeAsset('CatCafe-Setup-0.12.0.exe', 201, 802000000, 'sha256:aaa111'),
-      makeAsset('CatCafe-0.12.0-arm64.dmg', 202, 622000000, 'sha256:bbb222'),
-      makeAsset('CatCafe-0.12.0-x64.dmg', 203, 632000000, 'sha256:ccc333'),
+      makeAsset('ClowderAI-Setup-0.12.0.exe', 201, 802000000, 'sha256:aaa111'),
+      makeAsset('ClowderAI-0.12.0-arm64.dmg', 202, 622000000, 'sha256:bbb222'),
+      makeAsset('ClowderAI-0.12.0-x64.dmg', 203, 632000000, 'sha256:ccc333'),
     ],
   },
   {
@@ -37,9 +37,9 @@ const FIXTURE_RELEASES = [
     prerelease: true, // ← should be filtered
     body: 'Beta release',
     assets: [
-      makeAsset('CatCafe-Setup-0.13.0-beta.1.exe', 301, 810000000, 'sha256:ddd444'),
-      makeAsset('CatCafe-0.13.0-beta.1-arm64.dmg', 302, 625000000, 'sha256:eee555'),
-      makeAsset('CatCafe-0.13.0-beta.1-x64.dmg', 303, 635000000, 'sha256:fff666'),
+      makeAsset('ClowderAI-Setup-0.13.0-beta.1.exe', 301, 810000000, 'sha256:ddd444'),
+      makeAsset('ClowderAI-0.13.0-beta.1-arm64.dmg', 302, 625000000, 'sha256:eee555'),
+      makeAsset('ClowderAI-0.13.0-beta.1-x64.dmg', 303, 635000000, 'sha256:fff666'),
     ],
   },
   {
@@ -48,9 +48,9 @@ const FIXTURE_RELEASES = [
     prerelease: false,
     body: 'Draft release',
     assets: [
-      makeAsset('CatCafe-Setup-0.14.0.exe', 401, 820000000, 'sha256:ggg777'),
-      makeAsset('CatCafe-0.14.0-arm64.dmg', 402, 640000000, 'sha256:hhh888'),
-      makeAsset('CatCafe-0.14.0-x64.dmg', 403, 650000000, 'sha256:iii999'),
+      makeAsset('ClowderAI-Setup-0.14.0.exe', 401, 820000000, 'sha256:ggg777'),
+      makeAsset('ClowderAI-0.14.0-arm64.dmg', 402, 640000000, 'sha256:hhh888'),
+      makeAsset('ClowderAI-0.14.0-x64.dmg', 403, 650000000, 'sha256:iii999'),
     ],
   },
   {
@@ -59,9 +59,9 @@ const FIXTURE_RELEASES = [
     prerelease: false,
     body: 'Patch release',
     assets: [
-      makeAsset('CatCafe-Setup-0.11.1.exe', 101, 802000000, 'sha256:jjj000'),
-      makeAsset('CatCafe-0.11.1-arm64.dmg', 102, 622000000, 'sha256:kkk111'),
-      makeAsset('CatCafe-0.11.1-x64.dmg', 103, 632000000, 'sha256:lll222'),
+      makeAsset('ClowderAI-Setup-0.11.1.exe', 101, 802000000, 'sha256:jjj000'),
+      makeAsset('ClowderAI-0.11.1-arm64.dmg', 102, 622000000, 'sha256:kkk111'),
+      makeAsset('ClowderAI-0.11.1-x64.dmg', 103, 632000000, 'sha256:lll222'),
     ],
   },
   {
@@ -71,7 +71,7 @@ const FIXTURE_RELEASES = [
     prerelease: false,
     body: 'Incomplete release',
     assets: [
-      makeAsset('CatCafe-0.11.2-arm64.dmg', 501, 622000000, 'sha256:mmm333'),
+      makeAsset('ClowderAI-0.11.2-arm64.dmg', 501, 622000000, 'sha256:mmm333'),
       // missing Setup.exe and x64.dmg
     ],
   },
@@ -138,36 +138,61 @@ describe('compareSemver', () => {
 
 describe('resolveAssetName', () => {
   test('Windows Setup.exe', () => {
-    assert.equal(resolveAssetName('0.12.0', 'win32', 'x64'), 'CatCafe-Setup-0.12.0.exe');
+    assert.equal(resolveAssetName('0.12.0', 'win32', 'x64'), 'ClowderAI-Setup-0.12.0.exe');
   });
 
   test('Windows ignores arch (single installer)', () => {
-    assert.equal(resolveAssetName('0.12.0', 'win32', 'arm64'), 'CatCafe-Setup-0.12.0.exe');
+    assert.equal(resolveAssetName('0.12.0', 'win32', 'arm64'), 'ClowderAI-Setup-0.12.0.exe');
   });
 
   test('mac arm64 DMG', () => {
-    assert.equal(resolveAssetName('0.12.0', 'darwin', 'arm64'), 'CatCafe-0.12.0-arm64.dmg');
+    assert.equal(resolveAssetName('0.12.0', 'darwin', 'arm64'), 'ClowderAI-0.12.0-arm64.dmg');
   });
 
   test('mac x64 DMG', () => {
-    assert.equal(resolveAssetName('0.12.0', 'darwin', 'x64'), 'CatCafe-0.12.0-x64.dmg');
+    assert.equal(resolveAssetName('0.12.0', 'darwin', 'x64'), 'ClowderAI-0.12.0-x64.dmg');
   });
 
   test('strips v-prefix from version', () => {
-    assert.equal(resolveAssetName('v0.12.0', 'win32', 'x64'), 'CatCafe-Setup-0.12.0.exe');
-    assert.equal(resolveAssetName('v0.12.0', 'darwin', 'arm64'), 'CatCafe-0.12.0-arm64.dmg');
+    assert.equal(resolveAssetName('v0.12.0', 'win32', 'x64'), 'ClowderAI-Setup-0.12.0.exe');
+    assert.equal(resolveAssetName('v0.12.0', 'darwin', 'arm64'), 'ClowderAI-0.12.0-arm64.dmg');
+  });
+});
+
+describe('asset name ↔ build config contract', () => {
+  // Regression test: resolveAssetName must match the names produced by
+  // electron-builder (package.json artifactName) and Inno Setup (OutputBaseFilename).
+  // If the build config renames artifacts, this test catches the drift.
+  const pkgJson = JSON.parse(readFileSync(path.join(__dirname, 'package.json'), 'utf-8'));
+  const issContent = readFileSync(path.join(__dirname, 'installer', 'cat-cafe.iss'), 'utf-8');
+
+  test('win32 asset name matches Inno Setup OutputBaseFilename', () => {
+    // Inno Setup: OutputBaseFilename=ClowderAI-Setup-{#MyAppVersion}
+    const issMatch = issContent.match(/OutputBaseFilename=(.+)/);
+    assert.ok(issMatch, 'OutputBaseFilename must exist in cat-cafe.iss');
+    // Replace Inno variable with a concrete version to compare
+    const issFilename = issMatch[1].replace('{#MyAppVersion}', '0.12.0') + '.exe';
+    assert.equal(resolveAssetName('0.12.0', 'win32', 'x64'), issFilename);
+  });
+
+  test('darwin asset name matches electron-builder artifactName', () => {
+    // electron-builder: artifactName=ClowderAI-${version}-${arch}.${ext}
+    const artifactName = pkgJson.build?.artifactName;
+    assert.ok(artifactName, 'package.json build.artifactName must exist');
+    const expected = artifactName.replace('${version}', '0.12.0').replace('${arch}', 'arm64').replace('${ext}', 'dmg');
+    assert.equal(resolveAssetName('0.12.0', 'darwin', 'arm64'), expected);
   });
 });
 
 describe('extractAssetQuad', () => {
   test('extracts asset info including browser_download_url', () => {
-    const asset = makeAsset('CatCafe-Setup-0.12.0.exe', 201, 802000000, 'sha256:aaa111');
+    const asset = makeAsset('ClowderAI-Setup-0.12.0.exe', 201, 802000000, 'sha256:aaa111');
     const result = extractAssetQuad(asset);
     assert.equal(result.id, 201);
-    assert.equal(result.name, 'CatCafe-Setup-0.12.0.exe');
+    assert.equal(result.name, 'ClowderAI-Setup-0.12.0.exe');
     assert.equal(result.size, 802000000);
     assert.equal(result.digest, 'sha256:aaa111');
-    assert.equal(result.browser_download_url, 'https://github.com/download/CatCafe-Setup-0.12.0.exe');
+    assert.equal(result.browser_download_url, 'https://github.com/download/ClowderAI-Setup-0.12.0.exe');
   });
 
   test('returns null when digest is missing', () => {
@@ -186,19 +211,19 @@ describe('selectUpdateTarget', () => {
     const result = selectUpdateTarget(FIXTURE_RELEASES, '0.10.1', 'win32', 'x64');
     assert.notEqual(result, null);
     assert.equal(result.version, '0.12.0');
-    assert.equal(result.asset.name, 'CatCafe-Setup-0.12.0.exe');
+    assert.equal(result.asset.name, 'ClowderAI-Setup-0.12.0.exe');
     assert.equal(result.asset.id, 201);
     assert.equal(result.asset.digest, 'sha256:aaa111');
     assert.equal(result.releaseNotes, 'New features in 0.12.0');
     // P1-2: browser_download_url must survive through selectUpdateTarget
-    assert.equal(result.asset.browser_download_url, 'https://github.com/download/CatCafe-Setup-0.12.0.exe');
+    assert.equal(result.asset.browser_download_url, 'https://github.com/download/ClowderAI-Setup-0.12.0.exe');
   });
 
   test('selects highest for mac arm64', () => {
     const result = selectUpdateTarget(FIXTURE_RELEASES, '0.10.1', 'darwin', 'arm64');
     assert.notEqual(result, null);
     assert.equal(result.version, '0.12.0');
-    assert.equal(result.asset.name, 'CatCafe-0.12.0-arm64.dmg');
+    assert.equal(result.asset.name, 'ClowderAI-0.12.0-arm64.dmg');
     assert.equal(result.asset.id, 202);
   });
 
@@ -206,7 +231,7 @@ describe('selectUpdateTarget', () => {
     const result = selectUpdateTarget(FIXTURE_RELEASES, '0.10.1', 'darwin', 'x64');
     assert.notEqual(result, null);
     assert.equal(result.version, '0.12.0');
-    assert.equal(result.asset.name, 'CatCafe-0.12.0-x64.dmg');
+    assert.equal(result.asset.name, 'ClowderAI-0.12.0-x64.dmg');
     assert.equal(result.asset.id, 203);
   });
 
@@ -248,9 +273,9 @@ describe('selectUpdateTarget', () => {
         prerelease: false,
         body: 'No digest',
         assets: [
-          makeAsset('CatCafe-Setup-0.12.0.exe', 201, 802000000, null),
-          makeAsset('CatCafe-0.12.0-arm64.dmg', 202, 622000000, 'sha256:bbb222'),
-          makeAsset('CatCafe-0.12.0-x64.dmg', 203, 632000000, 'sha256:ccc333'),
+          makeAsset('ClowderAI-Setup-0.12.0.exe', 201, 802000000, null),
+          makeAsset('ClowderAI-0.12.0-arm64.dmg', 202, 622000000, 'sha256:bbb222'),
+          makeAsset('ClowderAI-0.12.0-x64.dmg', 203, 632000000, 'sha256:ccc333'),
         ],
       },
     ];

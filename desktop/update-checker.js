@@ -10,8 +10,8 @@
 //   - Feed: GET /repos/{owner}/{repo}/releases?per_page=10
 //   - NOT /releases/latest (not a semver selector — Codex review)
 //   - Asset digest comes from GitHub API response (not .sha256 sidecar)
-//   - Win asset = CatCafe-Setup-{v}.exe (Inno Setup, single arch)
-//   - Mac asset = CatCafe-{v}-{arm64|x64}.dmg (per process.arch)
+//   - Win asset = ClowderAI-Setup-{v}.exe (Inno Setup, single arch)
+//   - Mac asset = ClowderAI-{v}-{arm64|x64}.dmg (per process.arch)
 
 'use strict';
 
@@ -74,11 +74,11 @@ function stripV(version) {
 function resolveAssetName(version, platform, arch) {
   const v = stripV(version);
   if (platform === 'win32') {
-    // Inno Setup: OutputBaseFilename=CatCafe-Setup-{#MyAppVersion}
-    return `CatCafe-Setup-${v}.exe`;
+    // Inno Setup: OutputBaseFilename=ClowderAI-Setup-{#MyAppVersion}
+    return `ClowderAI-Setup-${v}.exe`;
   }
-  // electron-builder: artifactName=CatCafe-${version}-${arch}.${ext}
-  return `CatCafe-${v}-${arch}.dmg`;
+  // electron-builder: artifactName=ClowderAI-${version}-${arch}.${ext}
+  return `ClowderAI-${v}-${arch}.dmg`;
 }
 
 // ── Asset four-tuple extraction ────────────────────────────────────────

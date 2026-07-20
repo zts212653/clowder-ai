@@ -39,9 +39,9 @@ describe('journal persistence', () => {
     const data = {
       targetVersion: '0.12.0',
       assetId: 201,
-      assetName: 'CatCafe-Setup-0.12.0.exe',
+      assetName: 'ClowderAI-Setup-0.12.0.exe',
       digest: 'sha256:aaa111',
-      installerPath: path.join(tempDir, 'CatCafe-Setup-0.12.0.exe'),
+      installerPath: path.join(tempDir, 'ClowderAI-Setup-0.12.0.exe'),
       logPath: path.join(tempDir, 'install.log'),
       startedAt: '2026-07-07T08:00:00.000Z',
     };
@@ -57,7 +57,7 @@ describe('journal persistence', () => {
     writeJournal(tempDir, {
       targetVersion: '0.12.0',
       assetId: 201,
-      assetName: 'CatCafe-Setup-0.12.0.exe',
+      assetName: 'ClowderAI-Setup-0.12.0.exe',
       digest: 'sha256:aaa111',
       installerPath: '/fake/path.exe',
       logPath: '/fake/log',
