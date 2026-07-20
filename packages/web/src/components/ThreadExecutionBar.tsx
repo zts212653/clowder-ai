@@ -242,7 +242,7 @@ function CatStatusChip({
         type="button"
         onClick={() => onStop(catId)}
         className="ml-0.5 text-cafe-muted hover:text-conn-red-text transition-colors"
-        aria-label={`Stop ${catId}`}
+        aria-label={`Stop ${label}`}
       >
         <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
           <path

@@ -248,7 +248,7 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
     );
   });
 
-  it('route success: both collection AND delivery cursors advance', async () => {
+  it('route success without an accepted wake advances cursors but not lastNotifiedAt', async () => {
     assert.ok(createIssueCommentTaskSpec);
     const taskStore = makeTaskStore();
     taskStore.addTask(makeTask());
@@ -267,6 +267,37 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
     // Find the commit patch (value=400), not the one-time seed patch (value=0 for unseeded task).
     const deliveryPatch = taskStore.patches.find((p) => p.patch.issue?.lastDeliveredCursor === 400);
     assert.ok(deliveryPatch, 'lastDeliveredCursor must advance to 400 on route success');
+    assert.strictEqual(
+      deliveryPatch.patch.issue.lastNotifiedAt,
+      undefined,
+      'routing a message is not sufficient evidence that the owner was woken',
+    );
+  });
+
+  it('an accepted wake advances lastNotifiedAt together with the delivery cursor', async () => {
+    assert.ok(createIssueCommentTaskSpec);
+    const taskStore = makeTaskStore();
+    taskStore.addTask(makeTask());
+    const router = makeIssueCommentRouter({ failRoute: false });
+    const eventLog = makeEventLog();
+    const comments = [{ id: 401, author: 'alice', body: 'hi', createdAt: '2026-01-01T00:00:00Z' }];
+    const { spec } = makeBaseSpec({
+      taskStore,
+      router,
+      comments,
+      extra: { eventLog, invokeTrigger: { trigger: async () => 'dispatched' } },
+    });
+
+    const gate = await runGate(spec);
+    await runExecute(spec, gate);
+
+    const deliveryPatch = taskStore.patches.find((p) => p.patch.issue?.lastDeliveredCursor === 401);
+    assert.ok(deliveryPatch, 'lastDeliveredCursor must advance after routing');
+    assert.strictEqual(
+      typeof taskStore.tasks.get('task-1').automationState.issue.lastNotifiedAt,
+      'number',
+      'accepted wake acknowledgement persists notification time separately from routed state',
+    );
   });
 
   it('retry: second gate cycle retries delivery, does NOT re-append to event log', async () => {
@@ -328,18 +359,17 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────────────
-  // P1-A: Delivery policy — OWNER/MEMBER comments must NOT be routed
-  // (R1 finding: decideDelivery() never called in production path)
+  // #1153: Explicit issue tracking delivers all non-echo comments, including
+  // OWNER/MEMBER activity. Repository role is not an echo signal.
   // ─────────────────────────────────────────────────────────────────────────
 
-  it('delivery policy: OWNER comment is silent-logged and NOT routed', async () => {
+  it('explicit issue tracking routes OWNER comments unless they are echoes', async () => {
     assert.ok(createIssueCommentTaskSpec);
     const taskStore = makeTaskStore();
     taskStore.addTask(makeTask({ id: 'task-delivery-policy', subjectKey: 'issue:owner/repo#42' }));
     const router = makeIssueCommentRouter({ failRoute: false });
     const eventLog = makeEventLog();
     const comments = [
-      // External user — should be delivered (wake-owner)
       {
         id: 51,
         author: 'external-user',
@@ -347,7 +377,6 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
         createdAt: '2026-01-01T00:00:00Z',
         authorAssociation: 'NONE',
       },
-      // Repo owner — should be silent-logged (OWNER association)
       {
         id: 52,
         author: 'repo-owner',
@@ -360,25 +389,23 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
 
     const gate = await runGate(spec);
 
-    // Both comments should still be COLLECTED (appended to event log)
+    // Both comments are collected and delivered because tracking is opt-in.
     const collected = eventLog.events.map((e) => e.payload.commentId);
     assert.ok(collected.includes(51), 'external comment must be collected in event log');
-    assert.ok(collected.includes(52), 'OWNER comment must also be collected (silent log)');
+    assert.ok(collected.includes(52), 'OWNER comment must also be collected');
 
-    // But delivery should only include the external comment
     assert.strictEqual(gate.run, true, 'gate should run — there is deliverable content');
     const workItemCommentIds = gate.workItems.flatMap((wi) => wi.signal.newComments.map((c) => c.id));
     assert.ok(workItemCommentIds.includes(51), 'external comment (id=51) must be in work items for delivery');
-    assert.ok(!workItemCommentIds.includes(52), 'OWNER comment (id=52) must NOT be in work items (silent-log)');
+    assert.ok(workItemCommentIds.includes(52), 'OWNER comment (id=52) must be delivered by explicit tracking');
 
-    // After execute: router should only receive the external comment
     await runExecute(spec, gate);
     const routedCommentIds = router.calls.flatMap((call) => call.signal.newComments.map((c) => c.id));
     assert.ok(routedCommentIds.includes(51), 'router must receive external comment');
-    assert.ok(!routedCommentIds.includes(52), 'router must NOT receive OWNER comment');
+    assert.ok(routedCommentIds.includes(52), 'router must receive OWNER comment');
   });
 
-  it('delivery policy: MEMBER comment is silent-logged and NOT routed', async () => {
+  it('explicit issue tracking routes MEMBER comments unless they are echoes', async () => {
     assert.ok(createIssueCommentTaskSpec);
     const taskStore = makeTaskStore();
     taskStore.addTask(makeTask({ id: 'task-member-policy', subjectKey: 'issue:owner/repo#42' }));
@@ -405,7 +432,7 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
     const gate = await runGate(spec);
 
     const workItemCommentIds = gate.workItems.flatMap((wi) => wi.signal.newComments.map((c) => c.id));
-    assert.ok(!workItemCommentIds.includes(61), 'MEMBER comment (id=61) must be silent-logged');
+    assert.ok(workItemCommentIds.includes(61), 'MEMBER comment (id=61) must be delivered');
     assert.ok(workItemCommentIds.includes(62), 'CONTRIBUTOR comment (id=62) must be delivered');
   });
 
@@ -428,9 +455,7 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
     assert.ok(workItemCommentIds.includes(71), 'comment with no authorAssociation must default to wake-owner');
   });
 
-  it('delivery policy: collection still includes ALL comments even when some are silent-logged', async () => {
-    // Event log (collection) should record OWNER/MEMBER activity — just not wake the owner.
-    // Silent-log ≠ discard.
+  it('collection and delivery both include OWNER comments for explicit tracking', async () => {
     assert.ok(createIssueCommentTaskSpec);
     const taskStore = makeTaskStore();
     taskStore.addTask(makeTask({ id: 'task-collect-all', subjectKey: 'issue:owner/repo#42' }));
@@ -446,11 +471,12 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
     ];
     const { spec } = makeBaseSpec({ taskStore, comments, extra: { eventLog } });
 
-    await runGate(spec);
+    const gate = await runGate(spec);
 
-    // Comment must be in event log even though it's silent-logged for delivery
     const inLog = eventLog.events.some((e) => e.payload.commentId === 81);
-    assert.ok(inLog, 'OWNER comment must still be appended to event log (silent-log ≠ discard)');
+    assert.ok(inLog, 'OWNER comment must be appended to event log');
+    const workItemCommentIds = gate.workItems.flatMap((wi) => wi.signal.newComments.map((c) => c.id));
+    assert.ok(workItemCommentIds.includes(81), 'OWNER comment must be delivered');
   });
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -504,19 +530,18 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Cloud P2: delivery cursor must advance past silent/echo-only batches to
-  // prevent permanent polling churn on issues with only maintainer activity
+  // Echo-only batches advance the delivery cursor without claiming that an
+  // owner notification was accepted.
   // ─────────────────────────────────────────────────────────────────────────
 
-  it('delivery cursor advances past all-silent comment batch to prevent polling churn (Cloud P2)', async () => {
+  it('delivery cursor advances past echo-only batches without setting lastNotifiedAt', async () => {
     assert.ok(createIssueCommentTaskSpec);
     const taskStore = makeTaskStore();
     taskStore.addTask(makeTask({ id: 'task-silent-churn', subjectKey: 'issue:owner/repo#42' }));
     const router = makeIssueCommentRouter({ failRoute: false });
     const eventLog = makeEventLog();
 
-    // Only OWNER comments — delivery policy silences all of them
-    const silentComments = [
+    const echoComments = [
       {
         id: 1001,
         author: 'repo-owner',
@@ -532,23 +557,27 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
         authorAssociation: 'OWNER',
       },
     ];
-    const { spec } = makeBaseSpec({ taskStore, router, comments: silentComments, extra: { eventLog } });
+    const { spec } = makeBaseSpec({
+      taskStore,
+      router,
+      comments: echoComments,
+      extra: { eventLog, isEchoComment: () => true },
+    });
 
-    // First poll: gate runs (silent comments present), pendingDelivery empty
     const gate = await runGate(spec);
-    // No deliverable items → workItems empty (or gate.run false)
     const workItemCommentIds = (gate.workItems ?? []).flatMap((wi) => wi.signal.newComments.map((c) => c.id));
-    assert.ok(!workItemCommentIds.includes(1001), 'silent OWNER comment must NOT be delivered');
-    assert.ok(!workItemCommentIds.includes(1002), 'silent OWNER comment must NOT be delivered');
+    assert.ok(!workItemCommentIds.includes(1001), 'echo comment must NOT be delivered');
+    assert.ok(!workItemCommentIds.includes(1002), 'echo comment must NOT be delivered');
 
-    // Delivery cursor MUST advance to 1002 — even though nothing was delivered.
-    // Without this, the next poll re-fetches the same OWNER comments forever.
-    // Find the patch with value=1002 (not the one-time seed patch with value=0).
     const deliveryPatch = taskStore.patches.find((p) => p.patch.issue?.lastDeliveredCursor === 1002);
-    assert.ok(deliveryPatch, 'delivery cursor must advance to 1002 — the max silent comment ID (Cloud P2)');
+    assert.ok(deliveryPatch, 'delivery cursor must advance to 1002 — the max echo comment ID');
+    assert.strictEqual(
+      deliveryPatch.patch.issue.lastNotifiedAt,
+      undefined,
+      'echo-only cursor advancement must not claim that the owner was notified',
+    );
 
-    // Verify: router was NOT called (nothing was delivered)
-    assert.strictEqual(router.calls.length, 0, 'router must not be called for silent-only batches');
+    assert.strictEqual(router.calls.length, 0, 'router must not be called for echo-only batches');
   });
 
   it('collection cursor advances for duplicate appends (appended:false) to prevent polling churn (Cloud R3 P2)', async () => {
@@ -801,10 +830,10 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
     assert.ok(!deliveredIds.includes(102), 'comment 102 (unreached after break) must NOT be delivered');
   });
 
-  it('silent-batch delivery cursor does not advance past failed collection boundary (Cloud R4 P1-2 variant)', async () => {
-    // All collected comments are OWNER (silent-log) but collection fails midway.
-    // Comments: c10 (OWNER, ok), c11 (throws), c12 (OWNER, unreached)
-    // Expected: delivery cursor advances to 10 (max successful silent), NOT 12.
+  it('echo-batch delivery cursor does not advance past failed collection boundary (Cloud R4 P1-2 variant)', async () => {
+    // All collected comments are echoes but collection fails midway.
+    // Comments: c10 (echo, ok), c11 (throws), c12 (echo, unreached)
+    // Expected: delivery cursor advances to 10 (max successful echo), NOT 12.
     assert.ok(createIssueCommentTaskSpec);
     const taskStore = makeTaskStore();
     taskStore.addTask(makeTask({ id: 'task-silent-truncation', subjectKey: 'issue:owner/repo#42' }));
@@ -832,16 +861,21 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
       { id: 11, author: 'owner', body: 'fails', createdAt: '2026-01-01T01:00:00Z', authorAssociation: 'OWNER' },
       { id: 12, author: 'owner', body: 'unreached', createdAt: '2026-01-01T02:00:00Z', authorAssociation: 'OWNER' },
     ];
-    const { spec } = makeBaseSpec({ taskStore, router, comments, extra: { eventLog: failingAt11EventLog } });
+    const { spec } = makeBaseSpec({
+      taskStore,
+      router,
+      comments,
+      extra: { eventLog: failingAt11EventLog, isEchoComment: () => true },
+    });
 
     await runGate(spec);
 
     // Find the patch with value=10 (not the one-time seed patch with value=0).
     const deliveryPatch = taskStore.patches.find((p) => p.patch.issue?.lastDeliveredCursor === 10);
-    // Cursor must advance only to 10 (max successfully collected silent comment)
+    // Cursor must advance only to 10 (max successfully collected echo comment)
     assert.ok(
       deliveryPatch,
-      'delivery cursor must advance to 10 (max collected) for silent successfully-collected comments',
+      'delivery cursor must advance to 10 (max collected) for successfully-collected echo comments',
     );
     assert.strictEqual(
       deliveryPatch.patch.issue.lastDeliveredCursor,
@@ -1104,6 +1138,229 @@ describe('IssueCommentTaskSpec: one-time delivery cursor seed before collection 
       deliverySeedPatchIdx < collectionAdvancePatchIdx,
       `delivery cursor seed (patch[${deliverySeedPatchIdx}]) must be persisted BEFORE collection advance (patch[${collectionAdvancePatchIdx}])`,
     );
+  });
+});
+
+describe('PR #1181 maintainer regressions: durable issue wake lifecycle', () => {
+  it('persists a failed wake and retries the same routed message without routing a duplicate', async () => {
+    const taskStore = makeTaskStore();
+    taskStore.addTask(makeTask());
+    const router = makeIssueCommentRouter();
+    const eventLog = makeEventLog();
+    const outcomes = ['full', 'dispatched'];
+    const triggerCalls = [];
+    const spec = createIssueCommentTaskSpec({
+      taskStore,
+      issueCommentRouter: router,
+      fetchComments: async (_repo, _issue, since) =>
+        since < 100 ? [{ id: 100, author: 'maintainer', body: 'please retry', createdAt: '2026-07-19T13:50:00Z' }] : [],
+      fetchIssueState: async () => 'open',
+      invokeTrigger: {
+        async trigger(...args) {
+          triggerCalls.push(args);
+          return outcomes.shift();
+        },
+      },
+      eventLog,
+      log: { info: () => {}, error: () => {}, warn: () => {} },
+    });
+
+    const first = await runGate(spec);
+    await runExecute(spec, first);
+    const afterFailure = taskStore.tasks.get('task-1');
+    assert.equal(afterFailure.automationState.issue.lastDeliveredCursor, 100, 'message was routed once');
+    assert.equal(afterFailure.automationState.issue.lastNotifiedAt, undefined, 'failed wake is not a notification');
+    assert.equal(afterFailure.automationState.issue.pendingWake.messageId, 'msg-1');
+
+    const second = await runGate(spec);
+    assert.equal(second.run, true, 'pending wake must be retryable without new GitHub comments');
+    await runExecute(spec, second);
+
+    assert.equal(router.calls.length, 1, 'retry must reuse the persisted routed message');
+    assert.equal(triggerCalls.length, 2);
+    assert.equal(triggerCalls[0][4], 'msg-1');
+    assert.equal(triggerCalls[1][4], 'msg-1');
+    const afterSuccess = taskStore.tasks.get('task-1');
+    assert.equal(afterSuccess.automationState.issue.pendingWake, null);
+    assert.equal(typeof afterSuccess.automationState.issue.lastNotifiedAt, 'number');
+  });
+
+  it('closed final batch clears its pending wake, then completes after a refreshed gate', async () => {
+    const taskStore = makeTaskStore();
+    taskStore.addTask(makeTask());
+    const router = makeIssueCommentRouter();
+    const outcomes = ['full', 'enqueued'];
+    const spec = createIssueCommentTaskSpec({
+      taskStore,
+      issueCommentRouter: router,
+      fetchComments: async (_repo, _issue, since) =>
+        since < 100 ? [{ id: 100, author: 'maintainer', body: 'closing note', createdAt: '2026-07-19T13:50:00Z' }] : [],
+      fetchIssueState: async () => 'closed',
+      invokeTrigger: { trigger: async () => outcomes.shift() },
+      eventLog: makeEventLog(),
+      log: { info: () => {}, error: () => {}, warn: () => {} },
+    });
+
+    await runExecute(spec, await runGate(spec));
+    assert.equal(taskStore.tasks.get('task-1').status, 'active', 'failed final wake must not close tracking');
+
+    await runExecute(spec, await runGate(spec));
+    const afterAcceptedRetry = taskStore.tasks.get('task-1');
+    assert.equal(afterAcceptedRetry.status, 'active', 'accepted wake still requires a refreshed closure check');
+    assert.equal(afterAcceptedRetry.automationState.issue.pendingWake, null);
+    assert.equal(typeof afterAcceptedRetry.automationState.issue.lastNotifiedAt, 'number');
+
+    await runGate(spec);
+    const completed = taskStore.tasks.get('task-1');
+    assert.equal(completed.status, 'done');
+    assert.equal(completed.automationState.issue.issueState, 'closed');
+  });
+
+  it('accepted final wake stays active until a later gate refetches comments and proves closure', async () => {
+    const taskStore = makeTaskStore();
+    taskStore.addTask(makeTask());
+    const router = makeIssueCommentRouter();
+    const comments = [{ id: 100, author: 'maintainer', body: 'closing note' }];
+    const outcomes = ['full', 'dispatched'];
+    let fetchCalls = 0;
+    const spec = createIssueCommentTaskSpec({
+      taskStore,
+      issueCommentRouter: router,
+      fetchComments: async (_repo, _issue, since) => {
+        fetchCalls += 1;
+        return comments.filter((comment) => comment.id > since);
+      },
+      fetchIssueState: async () => 'closed',
+      invokeTrigger: { trigger: async () => outcomes.shift() },
+      eventLog: makeEventLog(),
+      log: { info: () => {}, error: () => {}, warn: () => {} },
+    });
+
+    await runExecute(spec, await runGate(spec));
+    comments.push({ id: 101, author: 'maintainer', body: 'arrived while wake was pending' });
+
+    await runExecute(spec, await runGate(spec));
+    const afterAcceptedRetry = taskStore.tasks.get('task-1');
+    assert.equal(afterAcceptedRetry.status, 'active', 'an accepted stale wake must not close tracking');
+    assert.equal(afterAcceptedRetry.automationState.issue.pendingWake, null);
+    assert.equal(fetchCalls, 1, 'the retry gate reuses the persisted wake before collecting new activity');
+
+    const refetched = await runGate(spec);
+    assert.equal(fetchCalls, 2, 'the gate after acknowledgement must refetch issue activity');
+    assert.equal(refetched.run, true);
+    assert.deepEqual(
+      refetched.workItems[0].signal.newComments.map((comment) => comment.id),
+      [101],
+      'the comment that arrived during the pending wake must be routed',
+    );
+  });
+
+  it('accepted final wake rechecks a reopened issue instead of applying its stale close decision', async () => {
+    const taskStore = makeTaskStore();
+    taskStore.addTask(makeTask());
+    let issueState = 'closed';
+    let stateFetches = 0;
+    const outcomes = ['full', 'dispatched'];
+    const spec = createIssueCommentTaskSpec({
+      taskStore,
+      issueCommentRouter: makeIssueCommentRouter(),
+      fetchComments: async (_repo, _issue, since) =>
+        since < 100 ? [{ id: 100, author: 'maintainer', body: 'closing note' }] : [],
+      fetchIssueState: async () => {
+        stateFetches += 1;
+        return issueState;
+      },
+      invokeTrigger: { trigger: async () => outcomes.shift() },
+      eventLog: makeEventLog(),
+      log: { info: () => {}, error: () => {}, warn: () => {} },
+    });
+
+    await runExecute(spec, await runGate(spec));
+    issueState = 'open';
+    await runExecute(spec, await runGate(spec));
+
+    const afterAcceptedRetry = taskStore.tasks.get('task-1');
+    assert.equal(afterAcceptedRetry.status, 'active');
+    const rechecked = await runGate(spec);
+    assert.equal(rechecked.run, false);
+    assert.equal(stateFetches, 2, 'the gate after acknowledgement must refetch the reopened state');
+    assert.equal(taskStore.tasks.get('task-1').status, 'active');
+  });
+
+  it('closed mixed batch advances delivery through a trailing echo before terminal completion', async () => {
+    const taskStore = makeTaskStore();
+    taskStore.addTask(makeTask());
+    const router = makeIssueCommentRouter();
+    const comments = [
+      { id: 100, author: 'maintainer', body: 'closing note' },
+      { id: 101, author: 'self', body: 'automation echo' },
+    ];
+    const spec = createIssueCommentTaskSpec({
+      taskStore,
+      issueCommentRouter: router,
+      fetchComments: async (_repo, _issue, since) => comments.filter((comment) => comment.id > since),
+      fetchIssueState: async () => 'closed',
+      isEchoComment: (comment) => comment.author === 'self',
+      invokeTrigger: { trigger: async () => 'dispatched' },
+      eventLog: makeEventLog(),
+      log: { info: () => {}, error: () => {}, warn: () => {} },
+    });
+
+    await runExecute(spec, await runGate(spec));
+
+    assert.deepEqual(
+      router.calls[0].signal.newComments.map((comment) => comment.id),
+      [100],
+      'the echo remains suppressed from the routed message',
+    );
+    assert.equal(
+      taskStore.tasks.get('task-1').automationState.issue.lastDeliveredCursor,
+      101,
+      'the delivery boundary includes the successfully processed trailing echo',
+    );
+  });
+
+  it('open mixed batch uses the same routed-or-suppressed delivery boundary', async () => {
+    const taskStore = makeTaskStore();
+    taskStore.addTask(makeTask());
+    const comments = [
+      { id: 200, author: 'maintainer', body: 'actionable update' },
+      { id: 201, author: 'self', body: 'automation echo' },
+    ];
+    const spec = createIssueCommentTaskSpec({
+      taskStore,
+      issueCommentRouter: makeIssueCommentRouter(),
+      fetchComments: async (_repo, _issue, since) => comments.filter((comment) => comment.id > since),
+      fetchIssueState: async () => 'open',
+      isEchoComment: (comment) => comment.author === 'self',
+      eventLog: makeEventLog(),
+      log: { info: () => {}, error: () => {}, warn: () => {} },
+    });
+
+    await runExecute(spec, await runGate(spec));
+
+    assert.equal(taskStore.tasks.get('task-1').automationState.issue.lastDeliveredCursor, 201);
+  });
+
+  it('closed echo-only batch advances the delivery cursor without writing lastNotifiedAt', async () => {
+    const taskStore = makeTaskStore();
+    taskStore.addTask(makeTask());
+    const spec = createIssueCommentTaskSpec({
+      taskStore,
+      issueCommentRouter: makeIssueCommentRouter(),
+      fetchComments: async () => [{ id: 100, author: 'self', body: 'echo', createdAt: '2026-07-19T13:50:00Z' }],
+      fetchIssueState: async () => 'closed',
+      isEchoComment: (comment) => comment.author === 'self',
+      eventLog: makeEventLog(),
+      log: { info: () => {}, error: () => {}, warn: () => {} },
+    });
+
+    const result = await runGate(spec);
+    assert.equal(result.run, false);
+    const completed = taskStore.tasks.get('task-1');
+    assert.equal(completed.status, 'done');
+    assert.equal(completed.automationState.issue.lastDeliveredCursor, 100);
+    assert.equal(completed.automationState.issue.lastNotifiedAt, undefined);
   });
 });
 

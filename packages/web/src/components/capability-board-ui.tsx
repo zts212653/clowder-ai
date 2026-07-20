@@ -9,6 +9,7 @@
 'use client';
 
 import { type CSSProperties, type ReactNode, useState } from 'react';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 import { HubIcon } from './hub-icons';
 import { EcosystemBadge } from './marketplace/marketplace-badges';
 
@@ -393,6 +394,7 @@ function CatFamilyToggles({
   onToggle: ToggleHandler;
 }) {
   const [openFamily, setOpenFamily] = useState<string | null>(null);
+  const resolveCatName = useCatNameResolver();
 
   return (
     <div className="pt-2 border-t border-conn-indigo-bg/30">
@@ -435,7 +437,7 @@ function CatFamilyToggles({
                     if (!(catId in item.cats)) {
                       return (
                         <div key={catId} className="flex items-center justify-between py-0.5">
-                          <span className="text-xs text-cafe-secondary font-mono">{catId}</span>
+                          <span className="text-xs text-cafe-secondary">{resolveCatName(catId)}</span>
                           <span className="text-xs text-cafe-muted select-none" title="该 Skill 对此猫不适用">
                             –
                           </span>
@@ -446,7 +448,7 @@ function CatFamilyToggles({
                     const isCatToggling = toggling === `${item.type}:${item.id}:${catId}`;
                     return (
                       <div key={catId} className="flex items-center justify-between py-0.5">
-                        <span className="text-xs text-cafe-secondary font-mono">{catId}</span>
+                        <span className="text-xs text-cafe-secondary">{resolveCatName(catId)}</span>
                         <ToggleSwitch
                           enabled={catEnabled}
                           disabled={isCatToggling}

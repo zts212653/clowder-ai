@@ -779,7 +779,12 @@ describe('ReviewFeedbackTaskSpec', () => {
       { repoFullName: 'owner/repo', prNumber: 42, catId: 'opus', threadId: 'th-1', userId: 'u-1' },
       {
         automationState: {
-          review: { lastCommentCursor: 5, lastDecisionCursor: 3 },
+          review: {
+            lastCommentCursor: 5,
+            lastInlineCommentCursor: 5,
+            lastConversationCommentCursor: 5,
+            lastDecisionCursor: 3,
+          },
         },
       },
     );
@@ -807,6 +812,47 @@ describe('ReviewFeedbackTaskSpec', () => {
     assert.equal(result.workItems[0].signal.newDecisions.length, 0);
   });
 
+  it('PR #1181 P1: a later inline comment is not hidden by a higher conversation-comment cursor', async () => {
+    const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
+    const { router } = stubRouter();
+    const taskWithLegacyCursor = mockTask(
+      { repoFullName: 'owner/repo', prNumber: 1128, catId: 'opus', threadId: 'th-1', userId: 'u-1' },
+      {
+        automationState: {
+          review: { lastCommentCursor: 5_015_000_000, lastDecisionCursor: 0 },
+        },
+      },
+    );
+    const seenCursors = [];
+    const spec = createReviewFeedbackTaskSpec({
+      taskStore: mockTaskStore([taskWithLegacyCursor]),
+      fetchComments: async (_repo, _pr, cursors) => {
+        seenCursors.push(cursors);
+        return [
+          {
+            id: 3_611_000_000,
+            author: 'maintainer',
+            body: 'later inline finding',
+            createdAt: '2026-07-19T13:49:00Z',
+            commentType: 'inline',
+          },
+        ];
+      },
+      fetchReviews: async () => [],
+      reviewFeedbackRouter: router,
+      log: noopLog,
+    });
+
+    const result = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
+    assert.equal(result.run, true, 'independent inline cursor must admit the later inline comment');
+    assert.equal(result.workItems[0].signal.newComments[0].id, 3_611_000_000);
+    assert.deepEqual(
+      seenCursors[0],
+      { inline: 0, conversation: 0 },
+      'legacy combined cursors must migrate by replaying each independent source safely',
+    );
+  });
+
   it('gate prefers advanced persisted cursors over stale in-memory cursors (#406 sibling)', async () => {
     const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
     const { router } = stubRouter();
@@ -814,7 +860,12 @@ describe('ReviewFeedbackTaskSpec', () => {
       { repoFullName: 'owner/repo', prNumber: 43, catId: 'opus', threadId: 'th-1', userId: 'u-1' },
       {
         automationState: {
-          review: { lastCommentCursor: 5, lastDecisionCursor: 3 },
+          review: {
+            lastCommentCursor: 5,
+            lastInlineCommentCursor: 5,
+            lastConversationCommentCursor: 5,
+            lastDecisionCursor: 3,
+          },
         },
       },
     );
@@ -822,9 +873,9 @@ describe('ReviewFeedbackTaskSpec', () => {
     const reviewSinceIds = [];
     const spec = createReviewFeedbackTaskSpec({
       taskStore: mockTaskStore([taskWithCursors]),
-      fetchComments: async (_repoFullName, _prNumber, sinceId) => {
-        commentSinceIds.push(sinceId);
-        return sinceId === 5
+      fetchComments: async (_repoFullName, _prNumber, cursors) => {
+        commentSinceIds.push(cursors);
+        return cursors.conversation === 5
           ? [{ id: 7, author: 'alice', body: 'new comment', createdAt: '2026-01-02', commentType: 'conversation' }]
           : [];
       },
@@ -842,11 +893,21 @@ describe('ReviewFeedbackTaskSpec', () => {
     assert.equal(first.run, true);
     await first.workItems[0].signal.commitCursor();
 
-    taskWithCursors.automationState = { review: { lastCommentCursor: 10, lastDecisionCursor: 9 } };
+    taskWithCursors.automationState = {
+      review: {
+        lastCommentCursor: 10,
+        lastInlineCommentCursor: 10,
+        lastConversationCommentCursor: 10,
+        lastDecisionCursor: 9,
+      },
+    };
 
     const second = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 2 });
     assert.equal(second.run, false);
-    assert.deepEqual(commentSinceIds, [5, 10]);
+    assert.deepEqual(commentSinceIds, [
+      { inline: 5, conversation: 5 },
+      { inline: 10, conversation: 10 },
+    ]);
     assert.deepEqual(reviewSinceIds, [3, 9]);
   });
 
@@ -980,7 +1041,12 @@ describe('ReviewFeedbackTaskSpec', () => {
       { repoFullName: 'owner/repo', prNumber: 42, catId: 'opus', threadId: 'th-1', userId: 'u-1' },
       {
         automationState: {
-          review: { lastCommentCursor: 10, lastDecisionCursor: 5 },
+          review: {
+            lastCommentCursor: 10,
+            lastInlineCommentCursor: 10,
+            lastConversationCommentCursor: 10,
+            lastDecisionCursor: 5,
+          },
         },
       },
     );

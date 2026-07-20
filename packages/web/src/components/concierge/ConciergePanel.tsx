@@ -29,6 +29,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
+import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { useConciergeStore } from '@/stores/conciergeStore';
 import { apiFetch } from '@/utils/api-client';
 import { CafeIcon } from '../rich/CafeIcons';
@@ -70,8 +71,8 @@ export function ConciergePanel() {
   // so isComposing is already false. The hook keeps a ref true for one extra rAF frame.
   const ime = useIMEGuard();
   // FIX-4 R2: resolve dutyCatProfileId → human-readable display name from cat roster
-  const { cats } = useCatData();
-  const dutyCatDisplayName = cats.find((c) => c.id === dutyCatProfileId)?.displayName;
+  const { getCatById } = useCatData();
+  const dutyCatDisplayName = dutyCatProfileId ? resolveCatDisplayName(dutyCatProfileId, getCatById) : undefined;
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);

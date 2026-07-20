@@ -8,6 +8,7 @@
  */
 
 import type { SettledApprovalItem } from '@cat-cafe/shared';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 
 const FEATURE_LABELS: Record<string, string> = {
   F128: '线程',
@@ -33,6 +34,7 @@ interface SettledHistoryCardProps {
 }
 
 export function SettledHistoryCard({ item }: SettledHistoryCardProps) {
+  const resolveCatName = useCatNameResolver();
   const featureLabel = FEATURE_LABELS[item.sourceFeatureId] ?? item.sourceFeatureId;
   const isApproved = item.status === 'approved';
 
@@ -71,7 +73,7 @@ export function SettledHistoryCard({ item }: SettledHistoryCardProps) {
 
       {/* Requester */}
       <p className="text-micro text-cafe-interactive/40">
-        来自 <span className="font-medium">{item.requesterCatId}</span>
+        来自 <span className="font-medium">{resolveCatName(item.requesterCatId)}</span>
       </p>
     </div>
   );

@@ -14,6 +14,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useCallback, useState } from 'react';
+import { useCatTechnicalLabelResolver } from '@/hooks/useCatNameResolver';
 import type { RichCardBlock } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
 
@@ -47,6 +48,7 @@ function formatRelative(failedAt: number): string {
 }
 
 export function CallbackAuthFailureBlock({ block }: { block: RichCardBlock }) {
+  const resolveCatName = useCatTechnicalLabelResolver();
   const meta = block.meta as CallbackAuthMeta | undefined;
   const [hidden, setHidden] = useState(false);
   const [hideError, setHideError] = useState<string | null>(null);
@@ -137,7 +139,7 @@ export function CallbackAuthFailureBlock({ block }: { block: RichCardBlock }) {
         </span>
         <span>
           <span style={{ color: 'var(--cafe-text-muted)' }}>CAT · </span>
-          <span className="font-mono">{meta.catId}</span>
+          <span className="font-mono">{resolveCatName(meta.catId)}</span>
         </span>
         <span>
           <span style={{ color: 'var(--cafe-text-muted)' }}>WHEN · </span>

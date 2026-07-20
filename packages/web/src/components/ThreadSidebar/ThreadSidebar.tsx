@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { type Thread, useChatStore } from '@/stores/chatStore';
 import { useLabelStore } from '@/stores/label-store';
 import { useToastStore } from '@/stores/toastStore';
@@ -58,7 +59,19 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     updateThreadTitle,
     getThreadState,
     threadStates,
-  } = useChatStore();
+  } = useChatStore(
+    useShallow((s) => ({
+      threads: s.threads,
+      currentThreadId: s.currentThreadId,
+      setThreads: s.setThreads,
+      setCurrentProject: s.setCurrentProject,
+      isLoadingThreads: s.isLoadingThreads,
+      setLoadingThreads: s.setLoadingThreads,
+      updateThreadTitle: s.updateThreadTitle,
+      getThreadState: s.getThreadState,
+      threadStates: s.threadStates,
+    })),
+  );
   const [isCreating, setIsCreating] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');

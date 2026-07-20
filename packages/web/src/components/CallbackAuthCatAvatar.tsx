@@ -13,6 +13,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useCallback } from 'react';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 import { useCallbackAuthAggregate, useCallbackAuthAvailable, useCallbackAuthByCat } from '@/stores/callbackAuthStore';
 import { CatAvatar } from './CatAvatar';
 
@@ -28,6 +29,7 @@ export function CallbackAuthCatAvatar({ catId, size = 32, status }: CallbackAuth
   const aggregate = useCallbackAuthAggregate();
   const isAvailable = useCallbackAuthAvailable();
   const router = useRouter();
+  const resolveCatName = useCatNameResolver();
 
   const handleOpenDetails = useCallback(() => {
     router.push('/settings?s=ops&ops=observability&obs=callback-auth');
@@ -51,7 +53,8 @@ export function CallbackAuthCatAvatar({ catId, size = 32, status }: CallbackAuth
 
   const cbaStatus = cba?.status ?? 'unknown';
   const cbaFailures = cba?.failures24h ?? 0;
-  const label = cba ? `${catId}: ${cbaStatus} · ${cbaFailures} fails (24h)` : `${catId}: 24h 内无失败记录`;
+  const catName = resolveCatName(catId);
+  const label = cba ? `${catName}: ${cbaStatus} · ${cbaFailures} fails (24h)` : `${catName}: 24h 内无失败记录`;
   const popover = (
     <div className="space-y-2 text-cafe">
       <div className="font-semibold">{label}</div>

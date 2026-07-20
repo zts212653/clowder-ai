@@ -14,6 +14,7 @@
 
 import type { ApprovalItem } from '@cat-cafe/shared';
 import { useCallback, useMemo } from 'react';
+import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import type { Thread } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
@@ -49,6 +50,7 @@ function jumpToApproval(threadId: string, messageId?: string): void {
 
 export function ApprovalItemCard({ item }: { item: ApprovalItem }) {
   const close = useApprovalHubStore((s) => s.close);
+  const resolveCatName = useCatNameResolver();
 
   // Thread title lookup for F193 dispatch context (Bug 1 fix).
   // Called unconditionally (Rules of Hooks); value used only when sourceFeatureId === 'F193'.
@@ -130,7 +132,7 @@ export function ApprovalItemCard({ item }: { item: ApprovalItem }) {
       <p className="text-sm font-medium">{item.summary}</p>
 
       {/* Requester */}
-      <p className="text-micro opacity-60">by {item.requesterCatId}</p>
+      <p className="text-micro opacity-60">by {resolveCatName(item.requesterCatId)}</p>
 
       {/* F128: detail excerpt */}
       {item.sourceFeatureId === 'F128' && item.detail.reason != null && (
@@ -161,7 +163,9 @@ export function ApprovalItemCard({ item }: { item: ApprovalItem }) {
             <p>
               Target:{' '}
               {Array.isArray(item.detail.targetCats)
-                ? item.detail.targetCats.join(', ')
+                ? item.detail.targetCats
+                    .map((catId) => (typeof catId === 'string' ? resolveCatName(catId) : String(catId)))
+                    .join(', ')
                 : String(item.detail.targetCats)}
             </p>
           )}

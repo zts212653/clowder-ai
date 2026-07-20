@@ -147,14 +147,44 @@ export class ConnectorInvokeTrigger {
       );
     }
 
-    // AC-2+3: dispatch with acquired controller (no separate start() call)
+    // Admission is not accepted until the idempotent InvocationRecord exists.
+    // Creating it inside the detached background promise used to let callers observe
+    // `dispatched` even when durable admission subsequently failed.
+    let invocationId: string;
+    try {
+      const createResult = await this.opts.invocationRecordStore.create({
+        threadId,
+        userId,
+        targetCats: [catId],
+        intent: 'execute',
+        idempotencyKey: `connector-${messageId}`,
+      });
+      if (createResult.outcome === 'duplicate') {
+        invocationTracker.complete(threadId, catId, controller);
+        this.opts.log.info(`[ConnectorInvokeTrigger] Duplicate invocation for message ${messageId}, skipping`);
+        return 'dispatched';
+      }
+      invocationId = createResult.invocationId;
+    } catch (err) {
+      invocationTracker.complete(threadId, catId, controller);
+      this.opts.queueProcessor?.onInvocationComplete(threadId, catId, 'failed').catch(() => {
+        /* best-effort: release any queued work after failed direct admission */
+      });
+      this.opts.log.error(
+        { err, threadId, catId, messageId },
+        '[ConnectorInvokeTrigger] Durable invocation admission failed',
+      );
+      throw err;
+    }
+
+    // AC-2+3: dispatch with acquired controller and already-durable invocation record.
     this.executeInBackground(
       threadId,
       catId,
       userId,
       message,
       messageId,
-      undefined,
+      invocationId,
       contentBlocks,
       policy?.suggestedSkill,
       sender,
@@ -266,7 +296,6 @@ export class ConnectorInvokeTrigger {
     const { router, socketManager, invocationRecordStore, invocationTracker, invocationQueue, log } = this.opts;
     const targetCats: CatId[] = [catId];
     let finalStatus: 'succeeded' | 'failed' | 'canceled' = 'failed';
-    let skipOnComplete = false;
 
     // R1-P1 fix: move controller before try so finally always releases it (even if create() throws)
     const controller = preAcquiredController ?? invocationTracker.start(threadId, catId, userId, targetCats);
@@ -279,22 +308,12 @@ export class ConnectorInvokeTrigger {
     let streamStartPromise: Promise<void> | undefined;
 
     try {
-      // ① Atomic create InvocationRecord (inside try so finally releases controller on throw)
-      const createResult = existingInvocationId
-        ? { outcome: 'created' as const, invocationId: existingInvocationId }
-        : await invocationRecordStore.create({
-            threadId,
-            userId,
-            targetCats,
-            intent: 'execute',
-            idempotencyKey: `connector-${messageId}`,
-          });
-
-      if (createResult.outcome === 'duplicate') {
-        log.info(`[ConnectorInvokeTrigger] Duplicate invocation for message ${messageId}, skipping`);
-        skipOnComplete = true;
-        return; // finally releases controller
+      // ① InvocationRecord was created synchronously by trigger() before it reported
+      // `dispatched`. QueueProcessor owns the separate queued-admission path.
+      if (!existingInvocationId) {
+        throw new Error('Connector invocation reached execution without a durable invocation record');
       }
+      const createResult = { outcome: 'created' as const, invocationId: existingInvocationId };
 
       invocationId = createResult.invocationId;
 
@@ -783,12 +802,9 @@ export class ConnectorInvokeTrigger {
       if (heartbeatInterval) clearInterval(heartbeatInterval);
       invocationTracker.complete(threadId, catId, controller);
       // F39 P1 fix: Notify queue processor for auto-dequeue chain
-      // R2-P1-B: skip for duplicates — no real invocation happened, notifying 'failed' would pause the slot
-      if (!skipOnComplete) {
-        this.opts.queueProcessor?.onInvocationComplete(threadId, catId, finalStatus).catch(() => {
-          /* best-effort, don't crash background task */
-        });
-      }
+      this.opts.queueProcessor?.onInvocationComplete(threadId, catId, finalStatus).catch(() => {
+        /* best-effort, don't crash background task */
+      });
       // F151: Signal adapters that this invocation's delivery batch is complete.
       // Fires on both success AND failure — failed invocations must close the task
       // immediately instead of waiting for TASK_TIMEOUT_MS (P2-1 review fix).

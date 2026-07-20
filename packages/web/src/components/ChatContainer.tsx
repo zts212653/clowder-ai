@@ -3,10 +3,11 @@
 import type { CapabilityTipContext } from '@cat-cafe/shared';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useShallow } from 'zustand/react/shallow';
 import { useAgentHookHealth } from '@/hooks/useAgentHookHealth';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
 import { useAuthorization } from '@/hooks/useAuthorization';
-import { useCatData } from '@/hooks/useCatData';
+import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { useChatHistory } from '@/hooks/useChatHistory';
 import { useChatSocketCallbacks } from '@/hooks/useChatSocketCallbacks';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
@@ -97,7 +98,26 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     rightPanelMode,
     setRightPanelMode,
     closeRightPanel,
-  } = useChatStore();
+    showVoteModal,
+    setShowVoteModal,
+    addMessage,
+  } = useChatStore(
+    useShallow((s) => ({
+      setCurrentThread: s.setCurrentThread,
+      viewMode: s.viewMode,
+      setViewMode: s.setViewMode,
+      isLoading: s.isLoading,
+      clearUnread: s.clearUnread,
+      confirmUnreadAck: s.confirmUnreadAck,
+      armUnreadSuppression: s.armUnreadSuppression,
+      rightPanelMode: s.rightPanelMode,
+      setRightPanelMode: s.setRightPanelMode,
+      closeRightPanel: s.closeRightPanel,
+      showVoteModal: s.showVoteModal,
+      setShowVoteModal: s.setShowVoteModal,
+      addMessage: s.addMessage,
+    })),
+  );
   // F173 Phase C Task 3 — full read-side migration. All thread liveness +
   // messages now flow through thread-scoped selectors keyed off this
   // component's `threadId` prop, not the flat current-thread mirror. Closes
@@ -278,9 +298,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   }, [handleSend]);
 
   // F079: Vote modal
-  const showVoteModal = useChatStore((s) => s.showVoteModal);
-  const setShowVoteModal = useChatStore((s) => s.setShowVoteModal);
-  const { addMessage } = useChatStore();
   const handleVoteSubmit = useCallback(
     async (config: VoteConfig) => {
       setShowVoteModal(false);
@@ -1329,7 +1346,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         const isLifecyclePhase = /^phase-(5|6|7|8|9|10|11)-/.test(phase);
         if (!isLifecyclePhase && messages.length > 0) return null;
         const leadCat = cats.find((c) => c.id === raw.leadCat) ?? cats[0];
-        const catName = leadCat?.displayName ?? leadCat?.nickname ?? leadCat?.name;
+        const catName = leadCat ? formatCatName(leadCat) : undefined;
         if (!catName) return null;
         return <BootcampGuideOverlay phase={phase} catName={catName} hasMessages={messages.length > 0} />;
       })()}

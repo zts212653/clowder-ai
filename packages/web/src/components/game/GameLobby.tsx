@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import type { CatData } from '@/hooks/useCatData';
+import { formatCatDisplayName } from '@/lib/cat-display-name';
 import { catColorVar } from '@/lib/cat-slug';
 
 /** Available board presets — mirrors WEREWOLF_PRESETS on backend */
@@ -147,13 +148,13 @@ export function GameLobby({ mode, cats, onConfirm, onCancel }: GameLobbyProps) {
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={cat.avatar}
-                  alt={cat.displayName}
+                  alt={formatCatDisplayName(cat)}
                   className="w-5 h-5 rounded-full"
                   onError={(e) => {
                     (e.target as HTMLImageElement).style.display = 'none';
                   }}
                 />
-                {cat.displayName}
+                {formatCatDisplayName(cat)}
               </button>
             ))}
           </div>
@@ -181,13 +182,13 @@ export function GameLobby({ mode, cats, onConfirm, onCancel }: GameLobbyProps) {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={cat.avatar}
-                    alt={cat.displayName}
+                    alt={formatCatDisplayName(cat)}
                     className="w-5 h-5 rounded-full"
                     onError={(e) => {
                       (e.target as HTMLImageElement).style.display = 'none';
                     }}
                   />
-                  {cat.displayName}
+                  {formatCatDisplayName(cat)}
                 </button>
               ))}
             </div>

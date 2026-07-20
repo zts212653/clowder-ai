@@ -16,7 +16,8 @@ vi.mock('@/hooks/useThreadArtifacts', () => ({
 }));
 vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({
-    getCatById: (id: string) => (id === 'opus-48' ? { nickname: '宪宪' } : undefined),
+    getCatById: (id: string) =>
+      id === 'opus-48' ? { displayName: '布偶猫', variantLabel: '4.8', nickname: '宪宪' } : undefined,
   }),
 }));
 
@@ -85,12 +86,12 @@ describe('F232 AC-A7 ArtifactsPanel 内容查看交互', () => {
     expect(container.querySelector('input'), '返回后回到列表（搜索框再现）').toBeTruthy();
   });
 
-  it('AC-A5: 列表项显示猫昵称 + 相对时间（不是原始 catId）', () => {
+  it('AC-A5: 列表项显示标准成员名称 + 相对时间（不是原始 catId）', () => {
     mockState.artifacts = [
       { type: 'pr', name: 'PR #1', catId: 'opus-48', createdAt: Date.now(), sourceMessageId: null, ref: 'o/r#1' },
     ];
     const { container } = renderPanel();
-    expect(container.textContent).toContain('宪宪'); // 昵称映射
+    expect(container.textContent).toContain('布偶猫（4.8）'); // runtime roster 标准映射
     expect(container.textContent).not.toContain('opus-48'); // 不显示原始 catId
     expect(container.textContent).toContain('刚刚'); // 相对时间
   });
