@@ -2,6 +2,7 @@
 
 import type { CliDiagnostics, ReplyPreview } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { deriveBubbleId, getBubbleInvocationId } from '@/debug/bubbleIdentity';
 import { recordBubbleInvariantViolation } from '@/debug/bubbleInvariantDiagnostics';
 import { recordDebugEvent } from '@/debug/invocationEventDebug';
@@ -2736,7 +2737,33 @@ export function useAgentMessages() {
     setMessageStreamInvocation,
     requestStreamCatchUp,
     replaceThreadTargetCats,
-  } = useChatStore();
+  } = useChatStore(
+    useShallow((s) => ({
+      addMessage: s.addMessage,
+      appendToMessage: s.appendToMessage,
+      appendToolEvent: s.appendToolEvent,
+      appendRichBlock: s.appendRichBlock,
+      replaceMessageId: s.replaceMessageId,
+      patchMessage: s.patchMessage,
+      removeMessage: s.removeMessage,
+      setStreaming: s.setStreaming,
+      setLoading: s.setLoading,
+      setHasActiveInvocation: s.setHasActiveInvocation,
+      removeActiveInvocation: s.removeActiveInvocation,
+      addActiveInvocation: s.addActiveInvocation,
+      clearAllActiveInvocations: s.clearAllActiveInvocations,
+      setIntentMode: s.setIntentMode,
+      setCatStatus: s.setCatStatus,
+      clearCatStatuses: s.clearCatStatuses,
+      setCatInvocation: s.setCatInvocation,
+      setMessageUsage: s.setMessageUsage,
+      setMessageMetadata: s.setMessageMetadata,
+      setMessageThinking: s.setMessageThinking,
+      setMessageStreamInvocation: s.setMessageStreamInvocation,
+      requestStreamCatchUp: s.requestStreamCatchUp,
+      replaceThreadTargetCats: s.replaceThreadTargetCats,
+    })),
+  );
 
   // F173 Phase E: bg-message processing refs (moved from useSocket).
   // useAgentMessages 现在是 single dispatch entry — 这些 refs 给 background-thread
