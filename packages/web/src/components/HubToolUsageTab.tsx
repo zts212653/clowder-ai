@@ -1,7 +1,7 @@
 'use client';
 
 import type React from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { apiFetch } from '@/utils/api-client';
@@ -66,6 +66,12 @@ export function HubToolUsageTab() {
 
   const total = report?.summary.totalCalls ?? 0;
   const byCat = report?.summary.byCategory ?? { native: 0, mcp: 0, skill: 0 };
+  const catOptionIds = useMemo(() => {
+    const ids = new Set(cats.map((cat) => cat.id));
+    for (const catId of Object.keys(report?.byCat ?? {})) ids.add(catId);
+    if (catFilter) ids.add(catFilter);
+    return [...ids];
+  }, [cats, report?.byCat, catFilter]);
 
   return (
     <div className="space-y-4" style={DATAVIZ_TOKENS}>
@@ -82,9 +88,9 @@ export function HubToolUsageTab() {
             className="console-form-input text-xs"
           >
             <option value="">全部猫猫</option>
-            {cats.map((cat) => (
-              <option key={cat.id} value={cat.id}>
-                {resolveCatName(cat.id)}
+            {catOptionIds.map((catId) => (
+              <option key={catId} value={catId}>
+                {resolveCatName(catId)}
               </option>
             ))}
           </select>
