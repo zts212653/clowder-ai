@@ -34,19 +34,14 @@ vi.mock('@/utils/userId', () => ({
 // ── Mock chatStore with a known currentThreadId ──
 // Note: vi.mock is hoisted, so values must be inlined (no top-level refs)
 vi.mock('@/stores/chatStore', () => {
+  const addMessage = vi.fn();
   const state = {
     currentThreadId: 'store-current-thread',
+    addMessage,
   };
-  const addMsg = vi.fn();
-  const hook = Object.assign(
-    (selector?: (s: typeof state) => unknown) => {
-      if (selector) return selector(state);
-      return { ...state, addMessage: addMsg };
-    },
-    {
-      getState: () => ({ ...state, addMessage: addMsg }),
-    },
-  );
+  const hook = Object.assign((selector?: (s: typeof state) => unknown) => (selector ? selector(state) : state), {
+    getState: () => state,
+  });
   return { useChatStore: hook };
 });
 

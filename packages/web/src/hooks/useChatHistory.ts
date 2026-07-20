@@ -2,6 +2,7 @@
 
 import type { CliDiagnostics, ReplyPreview, SchedulerMessageExtra } from '@cat-cafe/shared';
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { getBubbleInvocationId, shouldForceReplaceHydrationForCachedMessages } from '@/debug/bubbleIdentity';
 import { recordDebugEvent } from '@/debug/invocationEventDebug';
 import { projectCanonicalBubbles } from '@/stores/bubble-projection';
@@ -688,7 +689,24 @@ export function useChatHistory(threadId: string) {
     setQueue,
     setQueuePaused,
     isOfflineSnapshot,
-  } = useChatStore();
+  } = useChatStore(
+    useShallow((s) => ({
+      messages: s.messages,
+      isLoadingHistory: s.isLoadingHistory,
+      hasMore: s.hasMore,
+      prependHistory: s.prependHistory,
+      replaceMessages: s.replaceMessages,
+      hydrateThread: s.hydrateThread,
+      setLoadingHistory: s.setLoadingHistory,
+      clearMessages: s.clearMessages,
+      setCatInvocation: s.setCatInvocation,
+      replaceThreadTargetCats: s.replaceThreadTargetCats,
+      updateThreadCatStatus: s.updateThreadCatStatus,
+      setQueue: s.setQueue,
+      setQueuePaused: s.setQueuePaused,
+      isOfflineSnapshot: s.isOfflineSnapshot,
+    })),
+  );
   const { setTasks } = useTaskStore();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);

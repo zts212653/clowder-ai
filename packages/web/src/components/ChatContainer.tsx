@@ -3,6 +3,7 @@
 import type { CapabilityTipContext } from '@cat-cafe/shared';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useShallow } from 'zustand/react/shallow';
 import { useAgentHookHealth } from '@/hooks/useAgentHookHealth';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
 import { useAuthorization } from '@/hooks/useAuthorization';
@@ -97,7 +98,26 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     rightPanelMode,
     setRightPanelMode,
     closeRightPanel,
-  } = useChatStore();
+    showVoteModal,
+    setShowVoteModal,
+    addMessage,
+  } = useChatStore(
+    useShallow((s) => ({
+      setCurrentThread: s.setCurrentThread,
+      viewMode: s.viewMode,
+      setViewMode: s.setViewMode,
+      isLoading: s.isLoading,
+      clearUnread: s.clearUnread,
+      confirmUnreadAck: s.confirmUnreadAck,
+      armUnreadSuppression: s.armUnreadSuppression,
+      rightPanelMode: s.rightPanelMode,
+      setRightPanelMode: s.setRightPanelMode,
+      closeRightPanel: s.closeRightPanel,
+      showVoteModal: s.showVoteModal,
+      setShowVoteModal: s.setShowVoteModal,
+      addMessage: s.addMessage,
+    })),
+  );
   // F173 Phase C Task 3 — full read-side migration. All thread liveness +
   // messages now flow through thread-scoped selectors keyed off this
   // component's `threadId` prop, not the flat current-thread mirror. Closes
@@ -278,9 +298,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   }, [handleSend]);
 
   // F079: Vote modal
-  const showVoteModal = useChatStore((s) => s.showVoteModal);
-  const setShowVoteModal = useChatStore((s) => s.setShowVoteModal);
-  const { addMessage } = useChatStore();
   const handleVoteSubmit = useCallback(
     async (config: VoteConfig) => {
       setShowVoteModal(false);
