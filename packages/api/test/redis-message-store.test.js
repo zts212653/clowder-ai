@@ -269,6 +269,42 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(before[1].content, 'msg4');
   });
 
+  it('legacy fractional cursors remain exclusive in global and thread pagination', async () => {
+    const threadId = 'thread-legacy-fractional-before';
+    const earlierTimestamp = Date.now();
+    const cursorTimestamp = earlierTimestamp + 0.5;
+    const earlier = await store.append({
+      userId: 'u',
+      catId: null,
+      content: 'earlier',
+      mentions: [],
+      timestamp: earlierTimestamp,
+      threadId,
+    });
+    const cursorId = generateSortableId(cursorTimestamp);
+    await redis.hset(`msg:${cursorId}`, {
+      id: cursorId,
+      threadId,
+      userId: 'u',
+      catId: '',
+      content: 'legacy fractional cursor',
+      mentions: '[]',
+      timestamp: String(cursorTimestamp),
+    });
+    await redis.zadd('msg:timeline', String(cursorTimestamp), cursorId);
+    await redis.zadd(`msg:user:u`, String(cursorTimestamp), cursorId);
+    await redis.zadd(`msg:thread:${threadId}`, String(cursorTimestamp), cursorId);
+
+    assert.deepEqual(
+      (await store.getBefore(cursorTimestamp, 10, undefined, cursorId)).map((message) => message.id),
+      [earlier.id],
+    );
+    assert.deepEqual(
+      (await store.getByThreadBefore(threadId, cursorTimestamp, 10, cursorId)).map((message) => message.id),
+      [earlier.id],
+    );
+  });
+
   it('augmentStreamMetadata() persists stream-only metadata onto callback messages', async () => {
     const msg = await store.append({
       userId: 'u',
