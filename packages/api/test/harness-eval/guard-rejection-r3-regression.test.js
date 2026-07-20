@@ -21,82 +21,7 @@ import {
 } from '../../dist/infrastructure/harness-eval/guard-ledger-registry.js';
 import { checkGuardThreshold } from '../../dist/infrastructure/harness-eval/guard-threshold-escalation.js';
 import { createHarnessLedgerGeneratorAdapter } from '../../dist/infrastructure/harness-eval/publish-verdict/harness-ledger-generator-adapter.js';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const T = 1700000000000;
-
-function rawEvent(over = {}) {
-  return {
-    eventId: `evt-${over.timestamp ?? T}-${over.seq ?? 0}`,
-    kind: 'http_rate_limit',
-    threadId: 'thread_1',
-    catId: 'cat_1',
-    guardId: 'hold_ball_rate_limit',
-    timestamp: T,
-    correlationConfidence: 'window',
-    currentCount: 5,
-    maxAllowed: 5,
-    windowMs: 3600000,
-    ...over,
-  };
-}
-
-/**
- * Combined Redis fake: key-value (set/get/del) + ZSET (zadd/zrangebyscore).
- * Supports ZRANGEBYSCORE LIMIT for pagewise counter testing.
- */
-function createFakeRedis(seedEvents = []) {
-  const store = new Map();
-  const zset = seedEvents
-    .map((e) => ({ score: e.timestamp, member: JSON.stringify(e) }))
-    .sort((a, b) => a.score - b.score);
-  return {
-    get: async (key) => store.get(key) ?? null,
-    set: async (key, value, ...args) => {
-      const hasNX = args.includes('NX');
-      if (hasNX && store.has(key)) return null;
-      store.set(key, value);
-      return 'OK';
-    },
-    del: async (key) => {
-      store.delete(key);
-      return 1;
-    },
-    expire: async () => 1,
-    zrangebyscore: async (_key, min, max, ...args) => {
-      let offset = 0;
-      let count = zset.length;
-      for (let i = 0; i < args.length; i++) {
-        if (String(args[i]).toUpperCase() === 'LIMIT') {
-          offset = Number(args[i + 1]);
-          count = Number(args[i + 2]);
-          break;
-        }
-      }
-      return zset
-        .filter((m) => m.score >= Number(min) && m.score <= Number(max))
-        .slice(offset, offset + count)
-        .map((m) => m.member);
-    },
-    _store: store,
-    _zset: zset,
-  };
-}
-
-function triggerSuccess() {
-  return {
-    ok: true,
-    domainId: 'eval:harness-ledger',
-    threadId: 't1',
-    messageId: 'm1',
-    evalCatId: 'c1',
-    invocationTriggered: true,
-    triggerOutcome: 'dispatched',
-  };
-}
+import { createFakeEventSource, createFakeRedis, rawEvent, T, triggerSuccess } from './_guard-test-helpers.js';
 
 // ---------------------------------------------------------------------------
 // P2-2: isRegisteredLedgerId — reverse whitelist
@@ -139,10 +64,14 @@ describe('P2-4④: truncated window → conservative-true threshold (pagewise)',
     const events = Array.from({ length: 10_001 }, (_, i) =>
       rawEvent({ timestamp: T + i, seq: i, eventId: `cap-evt-${i}` }),
     );
-    const redis = createFakeRedis(events);
+    const { redis, guardRejectionLog } = await createFakeEventSource(events);
     const triggerEval = mock.fn(async () => triggerSuccess());
 
-    const result = await checkGuardThreshold(rawEvent({ timestamp: T + 10_001 }), { redis, triggerEval });
+    const result = await checkGuardThreshold(rawEvent({ timestamp: T + 10_001 }), {
+      redis,
+      guardRejectionLog,
+      triggerEval,
+    });
 
     assert.equal(result.episodeCount, 1, 'all events chain into 1 episode (1ms gaps)');
     assert.equal(result.thresholdMet, true, 'hard cap → conservative-true regardless of count');
@@ -157,10 +86,14 @@ describe('P2-4④: truncated window → conservative-true threshold (pagewise)',
     const events = Array.from({ length: 5 }, (_, i) =>
       rawEvent({ timestamp: T + i * 120_000, seq: i, eventId: `early-${i}` }),
     );
-    const redis = createFakeRedis(events);
+    const { redis, guardRejectionLog } = await createFakeEventSource(events);
     const triggerEval = mock.fn(async () => triggerSuccess());
 
-    const result = await checkGuardThreshold(rawEvent({ timestamp: T + 700_000 }), { redis, triggerEval });
+    const result = await checkGuardThreshold(rawEvent({ timestamp: T + 700_000 }), {
+      redis,
+      guardRejectionLog,
+      triggerEval,
+    });
 
     assert.equal(result.episodeCount, 3, 'early-stopped at k=3 (not actual 5)');
     assert.equal(result.episodeCountIsLowerBound, true, 'explicitly marked as lower bound');
@@ -175,10 +108,14 @@ describe('P2-4④: truncated window → conservative-true threshold (pagewise)',
     const events = Array.from({ length: 1001 }, (_, i) =>
       rawEvent({ timestamp: T + i * 120_000, seq: i, eventId: `dk-${i}`, threadId: `thread_${i}` }),
     );
-    const redis = createFakeRedis(events);
+    const { redis, guardRejectionLog } = await createFakeEventSource(events);
     const triggerEval = mock.fn(async () => triggerSuccess());
 
-    const result = await checkGuardThreshold(rawEvent({ timestamp: T + 200_000_000 }), { redis, triggerEval });
+    const result = await checkGuardThreshold(rawEvent({ timestamp: T + 200_000_000 }), {
+      redis,
+      guardRejectionLog,
+      triggerEval,
+    });
 
     assert.equal(result.episodeCount, 3, 'early-stopped at k=3');
     assert.equal(result.episodeCountIsLowerBound, true, 'marked as lower bound');
@@ -191,10 +128,14 @@ describe('P2-4④: truncated window → conservative-true threshold (pagewise)',
   it('exact count when episodes < threshold (no lower bound)', async () => {
     // 2 separated events → 2 episodes < threshold 3
     const events = [rawEvent({ timestamp: T, seq: 0 }), rawEvent({ timestamp: T + 120_000, seq: 1 })];
-    const redis = createFakeRedis(events);
+    const { redis, guardRejectionLog } = await createFakeEventSource(events);
     const triggerEval = mock.fn(async () => triggerSuccess());
 
-    const result = await checkGuardThreshold(rawEvent({ timestamp: T + 240_000 }), { redis, triggerEval });
+    const result = await checkGuardThreshold(rawEvent({ timestamp: T + 240_000 }), {
+      redis,
+      guardRejectionLog,
+      triggerEval,
+    });
 
     assert.equal(result.episodeCount, 2, 'exact count reported');
     assert.equal(result.episodeCountIsLowerBound, undefined, 'NOT marked as lower bound');

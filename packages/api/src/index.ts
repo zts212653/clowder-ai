@@ -2181,6 +2181,7 @@ async function main(): Promise<void> {
     guardRejectionLog.setPostAppendHook(
       createThresholdEscalationHook({
         redis,
+        guardRejectionLog,
         triggerEval: (input) => handleTriggerNow(escalationTriggerDeps, input),
       }),
     );

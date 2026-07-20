@@ -1,39 +1,23 @@
 /**
- * F257 GuardRejectionEventLog — Phase A Line B
+ * F257 GuardRejectionEventLog — append-only ZSET event log for guard rejections.
  *
- * Append-only event log for structured guard rejection events.
- * Communication channel between emit points (HTTP routes + route-serial)
- * and the harness evaluation layer (eval:harness-ledger domain).
- *
- * Uses Redis ZSET with timestamp scores for time-windowed discovery
- * (unlike F254 FreshnessAttentionEventLog which uses LIST per-invocation).
- * ZSET enables `queryWindow({since, until})` without knowing which keys
- * to scan — critical for weekly eval batch processing.
- *
- * **Fail-open**: observation layer failures NEVER block business calls.
- * All Redis operations are wrapped in try/catch with silent fallback.
+ * Uses Redis ZSET (timestamp scores) for time-windowed discovery. Fail-open:
+ * observation layer failures never block business calls.
  *
  * Closed union type with `kind` discriminator (F257 spec §2.1b).
- * V2/Phase B implements all 6 event kinds:
- *   http_rate_limit | route_decision_block | http_schema_reject |
- *   http_policy_reject | publish_policy_reject | route_decision_skip
+ * V2/Phase B: 6 event kinds + octet contract (ledgerId/catId/threadId/
+ * invocationId/sourceTool/normalizedReason/layer/timestamp).
  *
- * V2 octet contract (spec Phase B): every event carries
- *   ledgerId / catId / threadId / invocationId / sourceTool /
- *   normalizedReason / layer / timestamp
- * Migration note: pre-V2 events in Redis lack the five new fields; they
- * roll out of the 7-day retention window naturally — read-path consumers
- * of the new fields must tolerate `undefined` until then.
+ * `iterateWindow()` is the UNIQUE scan/parse/filter primitive — consumed by
+ * both internal `fetchWindow` and external pagewise episode counter
+ * (via PagewiseEventSource interface). No duplicate pagination logic.
  *
- * Storage layout:
- *   ZSET  guard-rejection:events        — { eventJSON → timestamp }
- *   (single ZSET; partition per-guardId later if volume demands)
- *
+ * Storage: ZSET `guard-rejection:events` { eventJSON → timestamp }.
  * Retention: 7 days (pruned on each append via ZREMRANGEBYSCORE).
  */
 
 import type { RedisClient } from '@cat-cafe/shared/utils';
-import { EVENTS_ZSET, HARD_QUERY_CAP } from './guard-rejection-constants.js';
+import { EVENTS_ZSET, HARD_QUERY_CAP, WINDOW_PAGE_SIZE } from './guard-rejection-constants.js';
 
 // ---------------------------------------------------------------------------
 // Event type definitions (closed union)
@@ -159,9 +143,6 @@ export interface GuardRejectionQueryOpts {
   limit?: number;
 }
 
-/** Redis page size for windowed scans (sol R2 P2: no full-window memory load). */
-const FETCH_BATCH = 1000;
-
 // ---------------------------------------------------------------------------
 // Event Log
 // ---------------------------------------------------------------------------
@@ -219,20 +200,8 @@ export class GuardRejectionEventLog {
   }
 
   /**
-   * Query events within a time window, optionally filtered by guardId/threadId/catId.
-   *
-   * **Fail-open**: returns empty array on any error.
-   *
-   * Fetches ALL events in the time window from Redis, then filters in-app.
-   * LIMIT is applied AFTER filtering to prevent non-matching events from
-   * consuming result slots (P2 fix: codex review 629795f29).
-   *
-   * @param opts.since - Window start (inclusive), Unix epoch ms.
-   * @param opts.until - Window end (exclusive), Unix epoch ms. Defaults to now.
-   * @param opts.guardId - Filter by guard identifier.
-   * @param opts.threadId - Filter by thread.
-   * @param opts.catId - Filter by cat.
-   * @param opts.limit - Max results after filtering (default 200).
+   * Query events in a time window. Fail-open (returns [] on error).
+   * LIMIT applied AFTER in-app filter (P2 fix: codex review 629795f29).
    */
   async queryWindow(opts: GuardRejectionQueryOpts): Promise<GuardRejectionEvent[]> {
     try {
@@ -303,25 +272,36 @@ export class GuardRejectionEventLog {
   }
 
   /**
-   * Shared window fetch: ZRANGEBYSCORE pulls the whole time window (no Redis
-   * LIMIT), parse + in-app filter, then cap at HARD_QUERY_CAP with an
-   * explicit truncation marker. Filters include ledgerId (sol P1-4 — the
-   * spec acceptance step queries BY LEDGER ID).
+   * Pagewise async generator: the UNIQUE scan/parse/filter primitive.
+   * Both `fetchWindow` (internal) and the pagewise episode counter
+   * (external, via PagewiseEventSource) consume this — no duplicate
+   * pagination logic (Fable ruling: single scan implementation).
+   *
+   * Yields matching events in timestamp order. Callers impose their own
+   * caps (HARD_QUERY_CAP, early-stop at k episodes, etc.) by breaking
+   * out of the `for await` loop — the generator stops further Redis I/O.
+   *
+   * @param stats - Optional mutable stats object; `pagesFetched` is
+   *   incremented after each Redis page call (preserves test assertions).
    */
-  private async fetchWindow(
+  async *iterateWindow(
     opts: Omit<GuardRejectionQueryOpts, 'limit'>,
-  ): Promise<{ events: GuardRejectionEvent[]; truncated: boolean }> {
+    stats?: { pagesFetched: number },
+  ): AsyncGenerator<GuardRejectionEvent> {
     const until = opts.until ?? Date.now();
     // Exclusive upper bound: subtract 1ms from until (ZRANGEBYSCORE is inclusive).
     // This aligns with PromptSegmentsSourceSelector [windowStartMs, windowEndMs).
     const upperBound = until - 1;
-    const events: GuardRejectionEvent[] = [];
-    let truncated = false;
-    // True Redis-side pagination (sol R2 P2: an unbounded ZRANGEBYSCORE loads
-    // the whole window into memory before capping). Matching events accumulate
-    // up to HARD_QUERY_CAP; one extra fetched row proves overflow.
-    for (let offset = 0; ; offset += FETCH_BATCH) {
-      const raw = await this.redis.zrangebyscore(EVENTS_ZSET, opts.since, upperBound, 'LIMIT', offset, FETCH_BATCH);
+    for (let offset = 0; ; offset += WINDOW_PAGE_SIZE) {
+      const raw = await this.redis.zrangebyscore(
+        EVENTS_ZSET,
+        opts.since,
+        upperBound,
+        'LIMIT',
+        offset,
+        WINDOW_PAGE_SIZE,
+      );
+      if (stats) stats.pagesFetched++;
       for (const s of raw) {
         let parsed: GuardRejectionEvent;
         try {
@@ -334,13 +314,27 @@ export class GuardRejectionEventLog {
         if (opts.threadId && parsed.threadId !== opts.threadId) continue;
         if (opts.catId && parsed.catId !== opts.catId) continue;
         if (opts.ownerUserId && parsed.ownerUserId !== opts.ownerUserId) continue;
-        if (events.length >= HARD_QUERY_CAP) {
-          truncated = true;
-          break;
-        }
-        events.push(parsed);
+        yield parsed;
       }
-      if (truncated || raw.length < FETCH_BATCH) break;
+      if (raw.length < WINDOW_PAGE_SIZE) break;
+    }
+  }
+
+  /**
+   * Shared window fetch: consumes `iterateWindow` up to HARD_QUERY_CAP,
+   * returning all matching events with an explicit `truncated` marker.
+   */
+  private async fetchWindow(
+    opts: Omit<GuardRejectionQueryOpts, 'limit'>,
+  ): Promise<{ events: GuardRejectionEvent[]; truncated: boolean }> {
+    const events: GuardRejectionEvent[] = [];
+    let truncated = false;
+    for await (const event of this.iterateWindow(opts)) {
+      if (events.length >= HARD_QUERY_CAP) {
+        truncated = true;
+        break;
+      }
+      events.push(event);
     }
     return { events, truncated };
   }

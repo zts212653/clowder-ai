@@ -23,7 +23,7 @@
 
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { GuardRejectionEvent } from './GuardRejectionEventLog.js';
-import { countEpisodesPagewise } from './guard-episode-coalescing.js';
+import { countEpisodesPagewise, type PagewiseEventSource } from './guard-episode-coalescing.js';
 import type { TriggerNowInput, TriggerNowSkipped, TriggerNowSuccess } from './manual-trigger/trigger-now.js';
 import type { HandlerError } from './manual-trigger/types.js';
 
@@ -90,6 +90,8 @@ export interface EscalationCheckResult {
 
 export interface GuardThresholdEscalationDeps {
   redis: RedisClient;
+  /** Event source for pagewise episode counting (Fable ruling: restore EventLog dep). */
+  guardRejectionLog: PagewiseEventSource;
   /**
    * Trigger function — typically a partial application of handleTriggerNow
    * with all deps pre-bound. Returns narrowed result so we can distinguish
@@ -147,7 +149,7 @@ export async function checkGuardThreshold(
   // (upperBound = until - 1). Without +1 the just-appended event at event.timestamp
   // is excluded and the threshold fires one episode late.
   const pagewiseResult = await countEpisodesPagewise(
-    deps.redis,
+    deps.guardRejectionLog,
     { since, until: event.timestamp + 1, guardId },
     ESCALATION_THRESHOLD,
   );

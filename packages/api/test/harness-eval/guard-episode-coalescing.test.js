@@ -11,6 +11,7 @@ import {
 import { checkGuardThreshold } from '../../dist/infrastructure/harness-eval/guard-threshold-escalation.js';
 import { produceHarnessLedgerRunSnapshot } from '../../dist/infrastructure/harness-eval/harness-ledger-snapshot-provider.js';
 import { createHarnessLedgerGeneratorAdapter } from '../../dist/infrastructure/harness-eval/publish-verdict/harness-ledger-generator-adapter.js';
+import { createFakeEventSource, createFakeRedis, rawEvent, T, triggerSuccess } from './_guard-test-helpers.js';
 
 // ---------------------------------------------------------------------------
 // F257 V2/Phase B — PR #41 verdict regression (episode coalescing).
@@ -35,24 +36,6 @@ import { createHarnessLedgerGeneratorAdapter } from '../../dist/infrastructure/h
 //   - adjacent gap ≤ EPISODE_GAP_MS (named constant, 60s, no per-guard config
 //     surface in V2) chains events into one episode
 // ---------------------------------------------------------------------------
-
-const T = 1700000000000;
-
-function rawEvent(over = {}) {
-  return {
-    eventId: `evt-${over.timestamp ?? T}-${over.seq ?? 0}`,
-    kind: 'http_rate_limit',
-    threadId: 'thread_1',
-    catId: 'cat_1',
-    guardId: 'hold_ball_rate_limit',
-    timestamp: T,
-    correlationConfidence: 'window',
-    currentCount: 5,
-    maxAllowed: 5,
-    windowMs: 3600000,
-    ...over,
-  };
-}
 
 /** The PR #41 burst: 4 hold_ball 429s spanning 7.044 seconds. */
 function verdictBurst(base = T) {
@@ -80,27 +63,7 @@ function a2aBlockEvent(over = {}) {
   };
 }
 
-function createFakeRedis() {
-  const store = new Map();
-  return {
-    get: async (key) => store.get(key) ?? null,
-    set: async (key, value, ...args) => {
-      const hasNX = args.includes('NX');
-      if (hasNX && store.has(key)) return null;
-      store.set(key, value);
-      return 'OK';
-    },
-    del: async (key) => {
-      const existed = store.has(key);
-      store.delete(key);
-      return existed ? 1 : 0;
-    },
-    expire: async () => 1,
-    _store: store,
-  };
-}
-
-/** Fake event log backed by a fixed event array; filters like the real one. */
+/** Fake event log backed by a fixed event array; used by Part 3 (snapshot/bundle). */
 function createFakeLogWithEvents(events) {
   const filter = (opts) =>
     events.filter(
@@ -118,18 +81,6 @@ function createFakeLogWithEvents(events) {
     queryWindowStrictComplete: mock.fn(async (opts) => ({ events: filter(opts), truncated: false })),
     countByGuard: mock.fn(async (guardId, since, until) => filter({ guardId, since, until }).length),
     append: async () => {},
-  };
-}
-
-function triggerSuccess() {
-  return {
-    ok: true,
-    domainId: 'eval:harness-ledger',
-    threadId: 't1',
-    messageId: 'm1',
-    evalCatId: 'c1',
-    invocationTriggered: true,
-    triggerOutcome: 'dispatched',
   };
 }
 
@@ -244,17 +195,21 @@ describe('coalesceGuardEpisodes — canonical coalescer', () => {
 
 // ---------------------------------------------------------------------------
 // Part 2 — escalation accounting uses episodeCount (verdict R1/R2/R3)
+//
+// sol R7 P1-1: these tests now use the canonical ZSET-aware createFakeRedis
+// from _guard-test-helpers.js (shared with threshold suite). Events are seeded
+// into the ZSET so countEpisodesPagewise reads them via iterateWindow.
+// guardRejectionLog RESTORED to deps (Fable ruling: restore EventLog dep).
 // ---------------------------------------------------------------------------
 
 describe('checkGuardThreshold — episode-based 3-per-7d accounting', () => {
   it('R1: four 429s in one 7s episode do NOT trigger (raw=4, episode=1)', async () => {
     const burst = verdictBurst();
-    const log = createFakeLogWithEvents(burst);
-    const redis = createFakeRedis();
+    const { redis, guardRejectionLog } = await createFakeEventSource(burst);
     const triggerEval = mock.fn(async () => triggerSuccess());
 
     // Check fires on the 4th (latest) event of the burst.
-    const result = await checkGuardThreshold(burst[3], { redis, guardRejectionLog: log, triggerEval });
+    const result = await checkGuardThreshold(burst[3], { redis, guardRejectionLog, triggerEval });
 
     assert.equal(result.rawEventCount, 4, 'rawEventCount preserved in result');
     assert.equal(result.episodeCount, 1, 'burst counts as one episode');
@@ -269,11 +224,10 @@ describe('checkGuardThreshold — episode-based 3-per-7d accounting', () => {
       rawEvent({ timestamp: T + 3_600_000, seq: 1 }),
       rawEvent({ timestamp: T + 7_200_000, seq: 2 }),
     ];
-    const log = createFakeLogWithEvents(events);
-    const redis = createFakeRedis();
+    const { redis, guardRejectionLog } = await createFakeEventSource(events);
     const triggerEval = mock.fn(async () => triggerSuccess());
 
-    const result = await checkGuardThreshold(events[2], { redis, guardRejectionLog: log, triggerEval });
+    const result = await checkGuardThreshold(events[2], { redis, guardRejectionLog, triggerEval });
 
     assert.equal(result.episodeCount, 3);
     assert.equal(result.thresholdMet, true, 'three separated episodes meet the threshold');
@@ -287,11 +241,10 @@ describe('checkGuardThreshold — episode-based 3-per-7d accounting', () => {
       rawEvent({ timestamp: T + 5000, seq: 1, catId: 'cat_b', threadId: 'th_b' }),
       rawEvent({ timestamp: T + 9000, seq: 2, catId: 'cat_c', threadId: 'th_c' }),
     ];
-    const log = createFakeLogWithEvents(events);
-    const redis = createFakeRedis();
+    const { redis, guardRejectionLog } = await createFakeEventSource(events);
     const triggerEval = mock.fn(async () => triggerSuccess());
 
-    const result = await checkGuardThreshold(events[2], { redis, guardRejectionLog: log, triggerEval });
+    const result = await checkGuardThreshold(events[2], { redis, guardRejectionLog, triggerEval });
 
     assert.equal(result.episodeCount, 3, 'distributed incidents are real distinct episodes');
     assert.equal(result.escalated, true);
@@ -299,20 +252,20 @@ describe('checkGuardThreshold — episode-based 3-per-7d accounting', () => {
 
   it('R3: isolated A2A streak-4 block is independently attributable and does not trigger alone', async () => {
     // Window contains the hold_ball burst AND one isolated A2A block.
+    // Both are seeded into the same ZSET — pagewise guardId filter separates them.
     const all = [...verdictBurst(), a2aBlockEvent({ timestamp: T + 3000 })];
-    const log = createFakeLogWithEvents(all);
-    const redis = createFakeRedis();
+    const { redis, guardRejectionLog } = await createFakeEventSource(all);
     const triggerEval = mock.fn(async () => triggerSuccess());
 
     // Escalation check for the A2A guard sees ONLY its own guard's events.
-    const a2aResult = await checkGuardThreshold(all[4], { redis, guardRejectionLog: log, triggerEval });
+    const a2aResult = await checkGuardThreshold(all[4], { redis, guardRejectionLog, triggerEval });
     assert.equal(a2aResult.guardId, 'a2a_pingpong_block');
     assert.equal(a2aResult.rawEventCount, 1, 'A2A accounting unaffected by hold_ball burst');
     assert.equal(a2aResult.episodeCount, 1);
     assert.equal(a2aResult.escalated, false, 'single A2A episode must not trigger');
 
     // And the hold_ball check in the same window still sees episode=1 (R1).
-    const hbResult = await checkGuardThreshold(all[3], { redis, guardRejectionLog: log, triggerEval });
+    const hbResult = await checkGuardThreshold(all[3], { redis, guardRejectionLog, triggerEval });
     assert.equal(hbResult.episodeCount, 1);
     assert.equal(hbResult.escalated, false);
     assert.equal(triggerEval.mock.callCount(), 0, 'neither guard triggers from this window');
@@ -325,11 +278,10 @@ describe('checkGuardThreshold — episode-based 3-per-7d accounting', () => {
       rawEvent({ timestamp: T + 200_000, seq: 2 }),
       rawEvent({ timestamp: T + 400_000, seq: 3 }),
     ];
-    const log = createFakeLogWithEvents(events);
-    const redis = createFakeRedis();
+    const { redis, guardRejectionLog } = await createFakeEventSource(events);
     const triggerEval = mock.fn(async () => triggerSuccess());
 
-    const result = await checkGuardThreshold(events[3], { redis, guardRejectionLog: log, triggerEval });
+    const result = await checkGuardThreshold(events[3], { redis, guardRejectionLog, triggerEval });
     assert.equal(result.rawEventCount, 4);
     assert.equal(result.episodeCount, 3, '2-event burst + 2 separated = 3 episodes');
     assert.equal(result.escalated, true);

@@ -11,3 +11,6 @@ export const EVENTS_ZSET = 'guard-rejection:events';
 
 /** Maximum events before truncation — shared between EventLog and pagewise counter. */
 export const HARD_QUERY_CAP = 10_000;
+
+/** Redis page size for windowed scans — single source for EventLog + pagewise counter. */
+export const WINDOW_PAGE_SIZE = 1000;
