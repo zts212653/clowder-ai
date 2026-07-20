@@ -14,7 +14,9 @@ import { afterEach, describe, it, mock } from 'node:test';
 const { AcpAgentService: GeminiAcpAdapter } = await import(
   '../../dist/domains/cats/services/agents/providers/acp/AcpAgentService.js'
 );
-const { AcpProcessPool } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js');
+const { AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS } = await import(
+  '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+);
 const { AcpClient } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpClient.js');
 
 const TEST_POOL_KEY = { projectPath: '/tmp', providerProfile: 'test' };
@@ -2947,7 +2949,7 @@ describe('#1186: idleTtlMs propagation (AcpAgentService → promptStream)', () =
     assert.equal(capturedPromptStreamOpts.timeoutMs, 1_800_000, 'timeoutMs = configured idleTtlMs');
   });
 
-  it('omits promptStream options when idleTtlMs is not configured (uses client defaults)', async () => {
+  it('resolves DEFAULT_ACP_IDLE_TTL_MS (30m) when idleTtlMs is omitted from config', async () => {
     let capturedPromptStreamOpts = 'NOT_CALLED';
     const fakeClient = {
       recentCapacitySignal: null,
@@ -2977,19 +2979,29 @@ describe('#1186: idleTtlMs propagation (AcpAgentService → promptStream)', () =
       closeAll: async () => {},
     };
 
-    // Without idleTtlMs — should NOT pass options to promptStream
+    // Without idleTtlMs — service resolves to DEFAULT_ACP_IDLE_TTL_MS (30m)
     const adapter = new GeminiAcpAdapter({
       catId: 'gemini',
       pool: mockPool,
       poolKey: TEST_POOL_KEY,
       projectRoot: '/tmp',
-      // no idleTtlMs
+      // no idleTtlMs — should resolve to 30m default
     });
 
     for await (const _ of adapter.invoke('hello')) {
       /* drain */
     }
 
-    assert.equal(capturedPromptStreamOpts, undefined, 'promptStream receives undefined options when no idleTtlMs');
+    assert.ok(capturedPromptStreamOpts, 'promptStream must receive options even without explicit idleTtlMs');
+    assert.equal(
+      capturedPromptStreamOpts.idleStallMs,
+      DEFAULT_ACP_IDLE_TTL_MS,
+      `idleStallMs should be DEFAULT_ACP_IDLE_TTL_MS (${DEFAULT_ACP_IDLE_TTL_MS}), got ${capturedPromptStreamOpts.idleStallMs}`,
+    );
+    assert.equal(
+      capturedPromptStreamOpts.timeoutMs,
+      DEFAULT_ACP_IDLE_TTL_MS,
+      `timeoutMs should be DEFAULT_ACP_IDLE_TTL_MS (${DEFAULT_ACP_IDLE_TTL_MS}), got ${capturedPromptStreamOpts.timeoutMs}`,
+    );
   });
 });

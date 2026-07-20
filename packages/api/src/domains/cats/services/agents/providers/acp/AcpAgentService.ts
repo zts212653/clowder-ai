@@ -23,7 +23,7 @@ import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import { createPromptDigest } from '../../../context/prompt-digest.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
 import { type AcpCapacitySignal, AcpProtocolError, AcpTimeoutError } from './AcpClient.js';
-import type { AcpLease, AcpProcessPool, PoolKey } from './AcpProcessPool.js';
+import { type AcpLease, type AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS, type PoolKey } from './AcpProcessPool.js';
 import {
   bindSessionCredentialFile,
   type PreparedCredentialEnv,
@@ -85,8 +85,12 @@ export class AcpAgentService implements AgentService {
   private readonly modelName: string;
   private readonly sessionModel?: string;
   private readonly mcpSupportEnabled: boolean;
-  /** #1186: Configured ACP idle TTL — authoritative threshold for all no-event termination. */
-  private readonly idleTtlMs: number | undefined;
+  /**
+   * #1186: Resolved ACP idle TTL — authoritative threshold for all no-event termination.
+   * Always concrete: defaults to DEFAULT_ACP_IDLE_TTL_MS (30m) when config omits it,
+   * so promptStream never falls back to the client's hardcoded 90s/15m defaults.
+   */
+  private readonly idleTtlMs: number;
 
   constructor(config: AcpAgentServiceConfig) {
     this.catId = config.catId;
@@ -99,7 +103,7 @@ export class AcpAgentService implements AgentService {
     this.modelName = config.modelName ?? config.sessionModel ?? 'acp';
     this.sessionModel = config.sessionModel?.trim() || undefined;
     this.mcpSupportEnabled = config.mcpSupport !== false;
-    this.idleTtlMs = config.idleTtlMs;
+    this.idleTtlMs = config.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS;
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
@@ -387,9 +391,9 @@ export class AcpAgentService implements AgentService {
       promptStreamStartedAt = Date.now();
       // Prompt digest: length + hash only (snippets gated by AUDIT_LOG_INCLUDE_PROMPT_SNIPPETS)
       const promptDigest = createPromptDigest(effectivePrompt);
-      // #1186: Thread configured idle TTL to promptStream so the watchdog respects
-      // the member's ACP Idle TTL instead of using hardcoded 90s/180s defaults.
-      const promptStreamOpts = this.idleTtlMs ? { idleStallMs: this.idleTtlMs, timeoutMs: this.idleTtlMs } : undefined;
+      // #1186: Thread resolved idle TTL to promptStream so the watchdog respects
+      // the member's ACP Idle TTL (or 30m default) instead of hardcoded 90s/180s.
+      const promptStreamOpts = { idleStallMs: this.idleTtlMs, timeoutMs: this.idleTtlMs };
       log.info({ ...ctx, sessionId, promptDigest, idleTtlMs: this.idleTtlMs }, 'ACP promptStream starting');
       eventCount = 0;
       for await (const event of client.promptStream(sessionId, effectivePrompt, promptStreamOpts)) {
