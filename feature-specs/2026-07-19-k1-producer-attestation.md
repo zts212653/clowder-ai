@@ -2,11 +2,11 @@
 
 **Feature:** F258 / #1165 producer-owned closure follow-up
 **Goal:** Establish testable source-side guarantees for message identifiers, thread identifiers, actor identifiers, and message timestamps without inventing an unreviewed wire bound or silently excluding stored messages.
-**Acceptance Criteria:** Future message writes reject invalid JavaScript `Date` timestamps before persistence; every proposed identifier bound is traced to a producer or admission source; memory and Redis stores share one admission rule; legacy stored data has an explicit read-only audit and reconciliation decision before any bound is claimed compatible; #1165 receives only claims backed by tests and an exact core commit.
+**Acceptance Criteria:** Until D2 decouples cursor order from ID text, future message writes admit only non-negative integral JavaScript `Date` timestamps and reject all other values before persistence; every proposed identifier bound is traced to a producer or admission source; memory and Redis stores share one admission rule; legacy stored data has an explicit read-only audit and reconciliation decision before any bound is claimed compatible; #1165 receives only claims backed by tests and an exact core commit.
 **Architecture cell:** `identity-session` (actor identity) with `thread-navigation` as an adjacent owner (thread identity)
 **Map delta:** none
 **Map delta why:** This hardens existing producer/admission boundaries; it does not move ownership or introduce a new runtime component.
-**Architecture:** A pure admission helper will be the single write-side policy consumed by both message stores. A separate read-only audit reports legacy violations; it does not mutate persistent data. K-1 projection remains fail-closed and may rely on a bound only after admission, legacy compatibility, and the corresponding #1165 shape delta are all reviewed.
+**Architecture:** A pure admission helper is the single write-side policy consumed by both message stores. It temporarily matches the domain that the current lexical sortable-ID/cursor encoding can preserve; D2 will replace that coupling before the full valid-Date domain can be restored. A separate read-only audit reports legacy violations; it does not mutate persistent data. K-1 projection remains fail-closed and may rely on a bound only after admission, legacy compatibility, and the corresponding #1165 shape delta are all reviewed.
 **Tech Stack:** TypeScript, Node test runner, in-memory message store, Redis message store
 **前端验证:** No
 
@@ -55,7 +55,7 @@ Not in scope:
 
 - **INV-1 — pre-write admission:** Invalid identity/timestamp input is rejected before idempotency claims, Redis commands, in-memory append, indexes, or append listeners change.
 - **INV-2 — store parity:** Memory and Redis stores call the same pure policy and return the same error class for the same invalid input.
-- **INV-3 — valid-Date domain:** Every newly persisted timestamp survives ECMAScript `Date` TimeClip (including valid fractional input), so `toISOString()` cannot throw.
+- **INV-3 — sortable valid-Date domain:** Every newly persisted timestamp is a non-negative integer inside ECMAScript `Date` TimeClip, so both `toISOString()` and the current timestamp-prefixed ID ordering remain valid. Full valid-Date admission waits for D2 explicit cursor order.
 - **INV-4 — generated-id bound:** Every newly minted message ID satisfies a documented finite maximum; generator state cannot silently escape that maximum.
 - **INV-5 — scalar compatibility:** A bound is not called wire-compatible unless the admitted string domain also excludes isolated UTF-16 surrogates required by the compact wire profile.
 - **INV-6 — legacy honesty:** New-write admission does not prove historical compatibility. Legacy closure requires a read-only audit result or an explicit migration/reconciliation policy.
@@ -65,7 +65,7 @@ Not in scope:
 
 | Existing behavior | Protection |
 |---|---|
-| message IDs remain lexicographically sortable for admitted timestamps | extend `message-store.test.js` with same-ms and increasing-time cases |
+| message IDs remain lexicographically sortable for admitted timestamps | paired boundary classes plus delivery-cursor and memory/Redis expired-cursor tests |
 | idempotent append returns the original message | retain existing memory and Redis idempotency tests |
 | Redis and memory stores persist the same canonical fields | paired admission cases in `message-store.test.js` and `redis-message-store.test.js` |
 | existing route-generated thread/user/cat identifiers continue to append | boundary-success fixtures at the selected maxima |
@@ -91,10 +91,10 @@ Not in scope:
 - Test: `packages/api/test/message-store.test.js`
 - Test: `packages/api/test/redis-message-store.test.js`
 
-1. Add RED cases for `NaN`, `Infinity`, `-Infinity`, and values outside `±8_640_000_000_000_000`; add a fractional-millisecond success case to prevent an invented integer-only constraint.
+1. Add RED cases for negative/fractional values, `NaN`, `Infinity`, `-Infinity`, and values outside `±8_640_000_000_000_000`.
 2. Assert rejection occurs before an append listener or Redis write is observable.
 3. Add one pure `assertValidStoredMessageTimestamp()` helper and call it before any store side effect.
-4. Add boundary-success cases for the minimum/maximum ECMAScript Date values, fractional milliseconds, and an ordinary `Date.now()` value.
+4. Add boundary-success cases for zero, an ordinary integral value, and the positive ECMAScript Date maximum; prove chronological ID order, delivery-cursor monotonicity, and memory/Redis expired-cursor recovery across that admitted class.
 5. Build and run the focused memory/Redis suites.
 
 ### Task A2: Producer inventory and generated-ID proof

@@ -26,10 +26,12 @@ describe('MessageStore', () => {
     assert.equal(store.size, 1);
   });
 
-  test('append() rejects invalid Date timestamps before mutating memory or notifying listeners', async () => {
+  test('append() rejects timestamps outside the sortable-ID-safe Date domain before side effects', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
     const invalidTimestamps = [
+      -1,
+      1.5,
       Number.NaN,
       Number.POSITIVE_INFINITY,
       Number.NEGATIVE_INFINITY,
@@ -51,18 +53,18 @@ describe('MessageStore', () => {
             timestamp,
             idempotencyKey: 'invalid-date',
           }),
-        { name: 'RangeError', message: /valid ECMAScript Date/ },
+        { name: 'RangeError', message: /non-negative integer ECMAScript Date/ },
       );
       assert.equal(store.size, 0, `timestamp ${String(timestamp)} must not append`);
       assert.equal(listenerCalls, 0, `timestamp ${String(timestamp)} must not notify`);
     }
   });
 
-  test('append() admits ECMAScript Date boundaries and fractional milliseconds', async () => {
+  test('append() admits non-negative integer ECMAScript Date boundaries', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const store = new MessageStore();
 
-    for (const timestamp of [-8_640_000_000_000_000, 1.5, 8_640_000_000_000_000]) {
+    for (const timestamp of [0, 1, 8_640_000_000_000_000]) {
       const stored = store.append({
         userId: 'user-1',
         catId: null,
@@ -73,6 +75,44 @@ describe('MessageStore', () => {
       assert.equal(stored.timestamp, timestamp);
     }
     assert.equal(store.size, 3);
+  });
+
+  test('admitted timestamp classes preserve chronological ID and delivery-cursor order', async () => {
+    const { generateSortableId } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
+    const timestamps = [0, 1, 8_640_000_000_000_000];
+    const ids = timestamps.map((timestamp) => generateSortableId(timestamp));
+
+    assert.deepEqual([...ids].sort(), ids, 'IDs must sort in the same order as admitted timestamps');
+
+    const cursorStore = new DeliveryCursorStore();
+    for (const id of ids) {
+      await cursorStore.ackCursor('user-1', 'opus', 'thread-sortable-domain', id);
+      assert.equal(await cursorStore.getCursor('user-1', 'opus', 'thread-sortable-domain'), id);
+    }
+  });
+
+  test('expired cursor recovery preserves order across admitted timestamp boundaries', async () => {
+    const { MessageStore, generateSortableId } = await import(
+      '../dist/domains/cats/services/stores/ports/MessageStore.js'
+    );
+    const store = new MessageStore();
+    const later = [2, 8_640_000_000_000_000].map((timestamp) =>
+      store.append({
+        userId: 'user-1',
+        catId: null,
+        content: `timestamp ${timestamp}`,
+        mentions: [],
+        timestamp,
+        threadId: 'thread-expired-cursor',
+      }),
+    );
+    const expiredCursor = generateSortableId(1);
+
+    assert.deepEqual(
+      store.getByThreadAfter('thread-expired-cursor', expiredCursor).map((message) => message.id),
+      later.map((message) => message.id),
+    );
   });
 
   test('augmentStreamMetadata() enriches callback messages without replacing canonical content', async () => {
