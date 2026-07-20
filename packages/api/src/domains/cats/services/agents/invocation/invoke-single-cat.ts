@@ -3110,6 +3110,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       // breaking from the loop (retry path, abort, error) leaves the generator suspended
       // at its last yield, so AcpAgentService.invoke()'s finally { lease.release() } never
       // executes → leaked lease → "Pool at capacity" after maxLiveProcesses invocations.
+      let iterExitedNormally = false;
       try {
         for (;;) {
           const iterResult = await abortableNext(serviceIter, signal);
@@ -3349,11 +3350,26 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             }
           }
         }
+        iterExitedNormally = true;
       } finally {
         // #1186: Close the service generator so its finally block executes (lease.release()).
         // This is the critical fix — without it, every manual-iteration break leaks a lease.
-        // Safe to call even if the generator already returned (no-op in 'completed' state).
-        await serviceIter.return?.();
+        //
+        // Two paths:
+        // 1. Normal/retry break: generator is suspended at a yield — .return() resolves
+        //    immediately (sync finally in AcpAgentService runs lease.release() inline).
+        //    MUST await so lease is released before any retry attempt acquires a new one.
+        // 2. Abort/error: abortableNext() rejected while .next() is still pending.
+        //    Async generator operations are serialized — .return() queues behind the
+        //    pending .next() and may block until cancelSession resolves the underlying
+        //    stream. Awaiting would reintroduce the stuck behavior abortableNext was
+        //    designed to prevent. Fire-and-forget; the lease releases asynchronously
+        //    when the cancel propagates.
+        if (iterExitedNormally) {
+          await serviceIter.return?.();
+        } else {
+          serviceIter.return?.()?.catch(() => {});
+        }
       }
 
       if (shouldRetryWithoutSession && attempt + 1 < maxAttempts) {
