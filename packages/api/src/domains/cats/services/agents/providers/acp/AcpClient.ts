@@ -469,14 +469,13 @@ export class AcpClient {
           }
           scheduleIdleCheck(); // Schedule stall check (remaining time)
         } else if (pendingTool) {
-          // Tool still executing — allow extra time, but cap at TOOL_EXECUTION_CEILING_MS.
-          // Before this fix, pendingTool suppressed stall indefinitely without rescheduling,
-          // causing sessions (esp. kimi-acp) to block for up to 15min turn budget on hung tools.
-          const TOOL_EXECUTION_CEILING_MS = 180_000; // 3 minutes max for a single tool call
-          if (idleSinceMs >= TOOL_EXECUTION_CEILING_MS) {
+          // #1186: Tool execution ceiling follows the configured idleStallMs (from member's
+          // ACP Idle TTL), not a hardcoded constant. Previously TOOL_EXECUTION_CEILING_MS=180s
+          // killed tools that legitimately needed more time, ignoring user-configured idle TTL.
+          if (idleSinceMs >= idleStallMs) {
             log.error(
-              { sessionId, idleSinceMs, eventCount, pendingTool },
-              'Stream idle watchdog: tool execution exceeded ceiling — terminating',
+              { sessionId, idleSinceMs, eventCount, pendingTool, idleStallMs },
+              'Stream idle watchdog: tool execution exceeded configured idle TTL — terminating',
             );
             this.cancelSession(sessionId);
             promptError = new AcpStreamIdleError(sessionId, idleSinceMs, eventCount);
@@ -488,7 +487,7 @@ export class AcpClient {
             }
           } else {
             log.info(
-              { sessionId, idleSinceMs, eventCount, pendingTool },
+              { sessionId, idleSinceMs, eventCount, pendingTool, idleStallMs },
               'Stream idle watchdog: tool still pending, scheduling follow-up check',
             );
             scheduleIdleCheck(); // Reschedule — don't dead-end

@@ -265,5 +265,8 @@ export async function createAcpServiceForConfig(
     modelName: spawn.sessionModel ?? config.defaultModel ?? 'acp',
     sessionModel: spawn.sessionModel,
     mcpSupport: config.mcpSupport,
+    // #1186: Thread the member's configured idle TTL to AcpAgentService so
+    // promptStream uses it as the authoritative no-event termination threshold.
+    idleTtlMs: acpConfig.pool?.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS,
   });
 }

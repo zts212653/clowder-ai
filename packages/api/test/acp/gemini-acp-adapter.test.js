@@ -2735,3 +2735,164 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
     }
   });
 });
+
+// #1186: Iterator lifecycle / lease cleanup tests
+// Root cause: invoke-single-cat.ts uses manual .next() iteration (abortableNext)
+// instead of `for await...of`. When the loop breaks, .return() is never called,
+// so AcpAgentService.invoke()'s finally { lease.release() } never executes.
+// This leaks leases and eventually causes "Pool at capacity" errors.
+describe('#1186: iterator lease cleanup (Pool at capacity regression)', () => {
+  /**
+   * Helper: create a mock client whose promptStream yields one text chunk + done,
+   * and a constrained pool (maxLiveProcesses=1) that tracks lease release.
+   */
+  function createConstrainedPoolSetup() {
+    let releaseCallCount = 0;
+    const fakeClient = {
+      recentCapacitySignal: null,
+      async newSession() {
+        return { sessionId: 'sess-constrained' };
+      },
+      async loadSession(sessionId) {
+        return { sessionId };
+      },
+      async setSessionConfigOption() {},
+      cancelSession() {},
+      async *promptStream(sessionId) {
+        yield {
+          sessionId,
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'reply' },
+          },
+        };
+        // Generator returns here — done
+      },
+      onCapacity() {},
+      offCapacity() {},
+      clearRecentCapacitySignal() {},
+    };
+
+    // Constrained pool: maxLiveProcesses=1, tracks release calls
+    let activeLease = false;
+    const mockPool = {
+      async acquire() {
+        if (activeLease) throw new Error('Pool at capacity — all processes have active leases');
+        activeLease = true;
+        return {
+          client: fakeClient,
+          release() {
+            releaseCallCount++;
+            activeLease = false;
+          },
+        };
+      },
+      rememberSession() {},
+      closeAll: async () => {
+        activeLease = false;
+      },
+    };
+
+    return { mockPool, getReleaseCount: () => releaseCallCount };
+  }
+
+  it('#1186: manual .next() iteration + .return() releases lease for next invocation', async () => {
+    const { mockPool, getReleaseCount } = createConstrainedPoolSetup();
+
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: mockPool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+    });
+
+    // First invocation: manual iteration (simulating invoke-single-cat's abortableNext pattern)
+    const iter = adapter.invoke('first prompt')[Symbol.asyncIterator]();
+    const collected = [];
+    for (;;) {
+      const result = await iter.next();
+      if (result.done) break;
+      collected.push(result.value);
+      // Simulate invoke-single-cat: break when 'done' message received
+      if (result.value.type === 'done') break;
+    }
+    // Key: call .return() after breaking (the fix)
+    await iter.return();
+    assert.ok(collected.length > 0, 'Should have received messages');
+    assert.equal(getReleaseCount(), 1, 'Lease must be released after .return()');
+
+    // Second invocation: should succeed because lease was released
+    const secondMessages = [];
+    for await (const msg of adapter.invoke('second prompt')) {
+      secondMessages.push(msg);
+    }
+    assert.ok(
+      secondMessages.some((m) => m.type === 'text'),
+      'Second invocation should succeed when lease was properly released',
+    );
+    assert.equal(getReleaseCount(), 2, 'Second lease also released');
+  });
+
+  it('#1186: `for await...of` auto-closes generator and releases lease', async () => {
+    const { mockPool, getReleaseCount } = createConstrainedPoolSetup();
+
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: mockPool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+    });
+
+    // Normal `for await` — auto-calls .return() on break/completion
+    for await (const _ of adapter.invoke('first prompt')) {
+      /* drain */
+    }
+    assert.equal(getReleaseCount(), 1, 'Lease released after for-await completes');
+
+    // Second invoke should succeed
+    const secondMessages = [];
+    for await (const msg of adapter.invoke('second prompt')) {
+      secondMessages.push(msg);
+    }
+    assert.ok(
+      secondMessages.some((m) => m.type === 'text'),
+      'Second invoke succeeds with for-await (baseline)',
+    );
+    assert.equal(getReleaseCount(), 2);
+  });
+
+  it('#1186: constrained pool rejects when lease leaked by missing .return()', async () => {
+    const { mockPool, getReleaseCount } = createConstrainedPoolSetup();
+
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: mockPool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+    });
+
+    // First invocation: manual iteration WITHOUT .return() — the bug
+    const iter = adapter.invoke('first prompt')[Symbol.asyncIterator]();
+    for (;;) {
+      const result = await iter.next();
+      if (result.done) break;
+      if (result.value.type === 'done') break; // early break, no .return()
+    }
+    // Intentionally NOT calling iter.return() — this is the bug scenario
+
+    // When the done message was yielded but we broke without .return(),
+    // the generator's finally block hasn't run yet.
+    // The lease should still be active (not released).
+    assert.equal(getReleaseCount(), 0, 'Lease NOT released without .return() — bug confirmed');
+
+    // Second invocation should fail because the lease is still held
+    const secondIter = adapter.invoke('second prompt')[Symbol.asyncIterator]();
+    const firstResult = await secondIter.next();
+    // The error surfaces as an init_failure error message
+    assert.equal(firstResult.value.type, 'error', 'Should get error from constrained pool');
+    assert.ok(
+      firstResult.value.error.includes('Pool at capacity'),
+      `Error should mention pool capacity, got: ${firstResult.value.error}`,
+    );
+  });
+});

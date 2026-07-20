@@ -336,6 +336,23 @@ export class AcpHttpStreamClient {
           promptError = new AcpStreamIdleError(sessionId, idleSinceMs, eventCount);
           done = true;
           wakeConsumer();
+        } else {
+          // #1186: pendingTool — tool execution ceiling follows configured idleStallMs
+          // (parity with stdio AcpClient). Previously pendingTool suppressed stall
+          // indefinitely, causing sessions to block until the turn budget fired.
+          if (idleSinceMs >= idleStallMs) {
+            log.error(
+              { sessionId, idleSinceMs, eventCount, pendingTool: true, idleStallMs },
+              'HTTP stream idle watchdog: tool execution exceeded configured idle TTL — terminating',
+            );
+            this.cancelSession(sessionId);
+            controller.abort();
+            promptError = new AcpStreamIdleError(sessionId, idleSinceMs, eventCount);
+            done = true;
+            wakeConsumer();
+          } else {
+            scheduleIdleCheck(); // Reschedule follow-up check
+          }
         }
       }, nextMs);
     };

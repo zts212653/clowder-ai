@@ -937,7 +937,7 @@ describe('AcpClient', () => {
     try {
       for await (const event of client.promptStream('tool-sess', 'hello', {
         idleWarningMs: 30,
-        idleStallMs: 100,
+        idleStallMs: 500, // #1186: must exceed tool execution time (250ms) since ceiling now follows idleStallMs
         timeoutMs: 5000,
       })) {
         events.push(event);
@@ -1010,7 +1010,7 @@ describe('AcpClient', () => {
     try {
       for await (const event of client.promptStream('flat-sess', 'hello', {
         idleWarningMs: 30,
-        idleStallMs: 100,
+        idleStallMs: 500, // #1186: must exceed tool execution time (250ms) since ceiling now follows idleStallMs
         timeoutMs: 5000,
       })) {
         events.push(event);
@@ -1181,7 +1181,7 @@ describe('AcpClient', () => {
     try {
       for await (const event of client.promptStream('perm-stall-sess', 'hello', {
         idleWarningMs: 60,
-        idleStallMs: 200,
+        idleStallMs: 500, // #1186: must exceed tool execution time (250ms) since ceiling now follows idleStallMs
         timeoutMs: 5000,
       })) {
         events.push(event);
@@ -1247,7 +1247,7 @@ describe('AcpClient', () => {
     try {
       for await (const event of client.promptStream('thought-tool-sess', 'hello', {
         idleWarningMs: 30,
-        idleStallMs: 100,
+        idleStallMs: 500, // #1186: must exceed tool execution time (250ms) since ceiling now follows idleStallMs
         timeoutMs: 5000,
       })) {
         events.push(event);
@@ -1380,5 +1380,126 @@ describe('AcpClient', () => {
       [50, 70],
       `Idle watchdog should schedule warning then remaining stall delay, got ${scheduledDelays.join(', ')}`,
     );
+  });
+
+  // ─── #1186: Tool execution ceiling follows configured idleStallMs ───
+
+  it('#1186: pendingTool terminates at configured idleStallMs, not hardcoded 180s', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const capturedMessages = [];
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        capturedMessages.push(msg);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'tool-ceil-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Send tool_call event, then go silent — never complete
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'tool-ceil-sess',
+              update: { sessionUpdate: 'tool_call', content: { type: 'text', text: 'slow_tool' } },
+            });
+          });
+          // Never send response — tool stays pending forever
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const events = [];
+    let thrownError = null;
+    try {
+      for await (const event of client.promptStream('tool-ceil-sess', 'hello', {
+        idleWarningMs: 20,
+        idleStallMs: 150, // Configured idle TTL — tool ceiling must follow this
+        timeoutMs: 5000, // High outer timeout — should NOT fire first
+      })) {
+        events.push(event);
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+
+    // With fix: should throw AcpStreamIdleError at ~150ms (configured idleStallMs)
+    // Without fix: TOOL_EXECUTION_CEILING_MS=180_000 would never fire; timeoutMs would fire instead
+    assert.ok(thrownError, 'Should throw an error on tool execution exceeding idleStallMs');
+    assert.match(
+      thrownError.message,
+      /[Ss]tream idle|STREAM_IDLE/,
+      `Expected AcpStreamIdleError, got: ${thrownError.message}`,
+    );
+
+    // Should have tool_wait_warning before stall
+    const toolWaits = events.filter((e) => e.update?.sessionUpdate === 'stream_tool_wait_warning');
+    assert.ok(toolWaits.length >= 1, 'Should emit tool_wait_warning before termination');
+
+    // Should have sent session/cancel
+    const cancelMsgs = capturedMessages.filter((m) => m.method === 'session/cancel');
+    assert.equal(cancelMsgs.length, 1, 'Should send session/cancel when tool ceiling exceeded');
+  });
+
+  it('#1186: pendingTool does NOT terminate before configured idleStallMs', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'tool-safe-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Send tool_call, wait a while, then complete successfully
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'tool-safe-sess',
+              update: { sessionUpdate: 'tool_call', content: { type: 'text', text: 'slow_tool' } },
+            });
+          });
+          // Complete AFTER warning but BEFORE idleStallMs
+          setTimeout(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'tool-safe-sess',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'result' } },
+            });
+            agentRespond(agentStdout, msg.id, { stopReason: 'end_turn' });
+          }, 200); // 200ms: past warning (50ms) but before idleStallMs (400ms)
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const events = [];
+    let thrownError = null;
+    try {
+      for await (const event of client.promptStream('tool-safe-sess', 'hello', {
+        idleWarningMs: 50,
+        idleStallMs: 400, // Configured idle TTL — tool should survive within this
+        timeoutMs: 5000,
+      })) {
+        events.push(event);
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+
+    // Tool completed within idleStallMs — should NOT throw
+    assert.equal(thrownError, null, `Should not terminate tool within idleStallMs, got: ${thrownError?.message}`);
+
+    // Should have real events
+    const toolEvents = events.filter((e) => e.update?.sessionUpdate === 'tool_call');
+    assert.equal(toolEvents.length, 1, 'Should have 1 tool_call event');
+    const textEvents = events.filter((e) => e.update?.sessionUpdate === 'agent_message_chunk');
+    assert.equal(textEvents.length, 1, 'Should have 1 text event after tool completes');
   });
 });

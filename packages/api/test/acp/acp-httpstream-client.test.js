@@ -643,4 +643,115 @@ describe('AcpHttpStreamClient', () => {
     assert.equal(final.done, true);
     assert.equal(final.value, 'end_turn');
   });
+
+  // ─── #1186: Tool execution ceiling parity with stdio client ───
+
+  it('#1186: pendingTool terminates at configured idleStallMs (parity with stdio)', async () => {
+    let promptResponse = null;
+    let resolvePromptSeen;
+    const promptSeen = new Promise((resolve) => {
+      resolvePromptSeen = resolve;
+    });
+
+    server = await startJsonRpcServer((message, res) => {
+      if (message.method === 'initialize') {
+        return { jsonrpc: '2.0', id: message.id, result: INIT_RESULT };
+      }
+      if (message.method === 'session/new') {
+        return { jsonrpc: '2.0', id: message.id, result: { sessionId: 'http-tool-ceil' } };
+      }
+      if (message.method === 'session/prompt') {
+        promptResponse = res;
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+        res.flushHeaders();
+        resolvePromptSeen();
+        return undefined;
+      }
+      if (message.method === 'session/cancel') {
+        // End the prompt stream when cancel arrives — simulates agent reacting to cancel
+        if (promptResponse && !promptResponse.writableEnded) {
+          promptResponse.end();
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{}');
+        return undefined;
+      }
+      return { jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'not found' } };
+    });
+    const { child, agentStdout } = createMockChild();
+    const port = serverPort(server);
+
+    client = new AcpHttpStreamClient({
+      command: 'fake-http-acp',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => {
+        setImmediate(() => agentStdout.write(`Listening on port ${port}\n`));
+        return child;
+      },
+      portDiscoveryTimeoutMs: 500,
+    });
+
+    await client.initialize();
+    const session = await client.newSession();
+
+    const events = [];
+    let thrownError = null;
+
+    const iterator = client.promptStream(session.sessionId, 'hello', {
+      idleWarningMs: 20,
+      idleStallMs: 150, // Configured idle TTL — tool ceiling must follow this
+      timeoutMs: 5000, // High outer timeout — should NOT fire first
+    });
+
+    // Start the generator (sends HTTP request) and capture first result promise
+    const firstResult = iterator.next();
+
+    // Wait for prompt request to reach mock server
+    await promptSeen;
+
+    // Send tool_call event, then go silent — never complete
+    promptResponse.write(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'session/update',
+        params: {
+          sessionId: 'http-tool-ceil',
+          update: { sessionUpdate: 'tool_call', content: { type: 'text', text: 'slow_tool' } },
+        },
+      })}\n`,
+    );
+
+    try {
+      // Consume first result and continue draining
+      const first = await withTimeout(firstResult, 3000, 'HTTP first event did not arrive');
+      if (!first.done) events.push(first.value);
+
+      while (!first.done) {
+        const result = await withTimeout(iterator.next(), 3000, 'HTTP promptStream did not terminate');
+        if (result.done) break;
+        events.push(result.value);
+      }
+    } catch (err) {
+      thrownError = err;
+    } finally {
+      // Ensure prompt response is always closed to prevent test hanging
+      if (promptResponse && !promptResponse.writableEnded) {
+        promptResponse.end();
+      }
+    }
+
+    // With fix: should throw AcpStreamIdleError at ~150ms (configured idleStallMs)
+    // Without fix: pendingTool suppresses stall indefinitely → timeoutMs fires at 5000ms
+    assert.ok(thrownError, 'Should throw an error on tool execution exceeding idleStallMs');
+    assert.match(
+      thrownError.message,
+      /[Ss]tream idle|STREAM_IDLE/,
+      `Expected AcpStreamIdleError, got: ${thrownError.message}`,
+    );
+
+    // Should have tool_wait_warning before stall
+    const toolWaits = events.filter((e) => e.update?.sessionUpdate === 'stream_tool_wait_warning');
+    assert.ok(toolWaits.length >= 1, 'Should emit tool_wait_warning before termination');
+  });
 });

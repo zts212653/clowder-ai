@@ -60,6 +60,13 @@ export interface AcpAgentServiceConfig {
   sessionModel?: string;
   /** When false, disables ALL MCP servers (base + per-project) for this member. */
   mcpSupport?: boolean;
+  /**
+   * #1186: Configured ACP Idle TTL from member's pool config (ms).
+   * Used as the authoritative idle stall threshold for all "no events" termination
+   * paths in promptStream (both tool and non-tool idle). Previously, hardcoded
+   * constants (90s stall, 180s tool ceiling) overrode the user's configured value.
+   */
+  idleTtlMs?: number;
 }
 
 /** @deprecated Use AcpAgentServiceConfig. Kept for backward compat during transition. */
@@ -78,6 +85,8 @@ export class AcpAgentService implements AgentService {
   private readonly modelName: string;
   private readonly sessionModel?: string;
   private readonly mcpSupportEnabled: boolean;
+  /** #1186: Configured ACP idle TTL — authoritative threshold for all no-event termination. */
+  private readonly idleTtlMs: number | undefined;
 
   constructor(config: AcpAgentServiceConfig) {
     this.catId = config.catId;
@@ -90,6 +99,7 @@ export class AcpAgentService implements AgentService {
     this.modelName = config.modelName ?? config.sessionModel ?? 'acp';
     this.sessionModel = config.sessionModel?.trim() || undefined;
     this.mcpSupportEnabled = config.mcpSupport !== false;
+    this.idleTtlMs = config.idleTtlMs;
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
@@ -140,7 +150,11 @@ export class AcpAgentService implements AgentService {
       loadSession(sessionId: string, cwd: string, mcpServers?: AcpMcpServer[]): Promise<AcpNewSessionResult>;
       setSessionConfigOption(sessionId: string, configId: string, value: string): Promise<void>;
       cancelSession(sessionId: string): void;
-      promptStream(sessionId: string, text: string): AsyncGenerator<import('./types.js').AcpSessionUpdate>;
+      promptStream(
+        sessionId: string,
+        text: string,
+        options?: { timeoutMs?: number; idleWarningMs?: number; idleStallMs?: number },
+      ): AsyncGenerator<import('./types.js').AcpSessionUpdate>;
       onCapacity(fn: (signal: AcpCapacitySignal) => void): void;
       offCapacity(fn: (signal: AcpCapacitySignal) => void): void;
       readonly recentCapacitySignal: AcpCapacitySignal | null;
@@ -373,9 +387,12 @@ export class AcpAgentService implements AgentService {
       promptStreamStartedAt = Date.now();
       // Prompt digest: length + hash only (snippets gated by AUDIT_LOG_INCLUDE_PROMPT_SNIPPETS)
       const promptDigest = createPromptDigest(effectivePrompt);
-      log.info({ ...ctx, sessionId, promptDigest }, 'ACP promptStream starting');
+      // #1186: Thread configured idle TTL to promptStream so the watchdog respects
+      // the member's ACP Idle TTL instead of using hardcoded 90s/180s defaults.
+      const promptStreamOpts = this.idleTtlMs ? { idleStallMs: this.idleTtlMs, timeoutMs: this.idleTtlMs } : undefined;
+      log.info({ ...ctx, sessionId, promptDigest, idleTtlMs: this.idleTtlMs }, 'ACP promptStream starting');
       eventCount = 0;
-      for await (const event of client.promptStream(sessionId, effectivePrompt)) {
+      for await (const event of client.promptStream(sessionId, effectivePrompt, promptStreamOpts)) {
         // F149: Capacity signal injected by AcpClient.promptStream from stderr.
         // Breaks through zero-event stalls where the old listener-only path couldn't.
         if (event.update?.sessionUpdate === 'provider_capacity_signal') {
@@ -526,7 +543,7 @@ export class AcpAgentService implements AgentService {
           const retryState = createAcpSessionState();
           let retryEventCount = 0;
           log.info({ ...ctx, sessionId: freshSessionId }, '#1091: retry promptStream on fresh session');
-          for await (const event of client.promptStream(freshSessionId, retryPrompt)) {
+          for await (const event of client.promptStream(freshSessionId, retryPrompt, promptStreamOpts)) {
             // Skip synthetic events (capacity/idle/tool-wait warnings)
             if (event.update?.sessionUpdate === 'provider_capacity_signal') continue;
             if (event.update?.sessionUpdate === 'stream_idle_warning') continue;
