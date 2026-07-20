@@ -102,7 +102,8 @@ const STATS_KEY_PREFIX = 'guard-ledger:stats:';
  * eventId is idempotent, so dedup/replay never double-counts.
  *
  * how_counted: 'scard guard-ledger:stats:{ledgerId}:anomaly-refs —
- * distinct referencing deviation eventIds'. Fail-open both ways.
+ * distinct referencing deviation eventIds'. Write fail-open (observation
+ * loss acceptable), read fail-closed (fake zero misleads operators — sol P2-3).
  */
 export class GuardLedgerStats {
   constructor(private readonly redis: StatsRedis) {}

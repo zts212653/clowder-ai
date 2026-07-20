@@ -23,7 +23,7 @@
 
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { GuardRejectionEvent, GuardRejectionEventLog } from './GuardRejectionEventLog.js';
-import { coalesceGuardEpisodes } from './guard-episode-coalescing.js';
+import { countEpisodesAtLeast } from './guard-episode-coalescing.js';
 import type { TriggerNowInput, TriggerNowSkipped, TriggerNowSuccess } from './manual-trigger/trigger-now.js';
 import type { HandlerError } from './manual-trigger/types.js';
 
@@ -146,7 +146,13 @@ export async function checkGuardThreshold(
     console.warn(`[F257] escalation window truncated at hard cap for guard=${guardId}; episodeCount is a lower bound`);
   }
   const rawEventCount = windowEvents.length;
-  const episodeCount = coalesceGuardEpisodes(windowEvents).length;
+  // sol R4 P2-2: use early-stop counter instead of full coalescer — saves
+  // episode-object allocation, SHA-256 hashes, and anchor arrays. Early-stops
+  // at ESCALATION_THRESHOLD (k=3) so a 10k-event window doesn't process past
+  // the 3rd distinct episode. Returns min(actual, k) which is exactly what the
+  // threshold comparison needs. Redis paging is already handled by fetchWindow's
+  // LIMIT-based pagination; this optimizes the in-memory coalescing step.
+  const episodeCount = countEpisodesAtLeast(windowEvents, ESCALATION_THRESHOLD);
   // sol R2 P2: when the window is truncated the count is a LOWER BOUND — we
   // cannot prove "below threshold", so we must not return thresholdMet=false.
   // A truncated window at the hard cap trivially warrants an eval look anyway.

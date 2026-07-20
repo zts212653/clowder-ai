@@ -18,17 +18,13 @@ import { describe, it, mock } from 'node:test';
 import {
   coalesceGuardEpisodes,
   countEpisodesAtLeast,
-  EPISODE_GAP_MS,
 } from '../../dist/infrastructure/harness-eval/guard-episode-coalescing.js';
 import {
   GUARD_LEDGER_IDS,
   isRegisteredGuardId,
   isRegisteredLedgerId,
 } from '../../dist/infrastructure/harness-eval/guard-ledger-registry.js';
-import {
-  checkGuardThreshold,
-  ESCALATION_THRESHOLD,
-} from '../../dist/infrastructure/harness-eval/guard-threshold-escalation.js';
+import { checkGuardThreshold } from '../../dist/infrastructure/harness-eval/guard-threshold-escalation.js';
 import { createHarnessLedgerGeneratorAdapter } from '../../dist/infrastructure/harness-eval/publish-verdict/harness-ledger-generator-adapter.js';
 
 // ---------------------------------------------------------------------------

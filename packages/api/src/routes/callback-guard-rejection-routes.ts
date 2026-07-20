@@ -32,6 +32,7 @@ import {
   GUARD_LEDGER_IDS,
   type GuardLedgerStats,
   isRegisteredGuardId,
+  isRegisteredLedgerId,
   ledgerIdForGuard,
 } from '../infrastructure/harness-eval/guard-ledger-registry.js';
 import { requireCallbackPrincipal } from './callback-auth-prehandler.js';
@@ -174,6 +175,17 @@ export function registerCallbackGuardRejectionRoutes(app: FastifyInstance, deps:
         issues: parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`),
       };
     }
+    // sol R4 P2-1: reject unregistered ledgerIds at the API boundary — without
+    // this check, GET accepts arbitrary `ledgerId` after only Zod length validation,
+    // letting spoofed pot coordinates through to the query layer.
+    if (!isRegisteredLedgerId(parsed.data.ledgerId)) {
+      reply.status(400);
+      return {
+        error: `unregistered ledgerId '${parsed.data.ledgerId}'`,
+        registered: Object.values(GUARD_LEDGER_IDS),
+      };
+    }
+
     if (!deps.guardRejectionLog) {
       reply.status(503);
       return { error: 'guard_rejection_log_unavailable', message: 'GuardRejectionEventLog requires Redis' };
