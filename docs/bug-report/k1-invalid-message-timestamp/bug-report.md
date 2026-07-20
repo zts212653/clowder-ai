@@ -10,3 +10,16 @@
 | **6. 预警策略** | 若修复开始需要选择 `messageId`/`threadId`/`actor.id` 的公开最大值、Unicode scalar 策略或存量迁移方案，立即停止：这些属于 #1165 shape/compatibility 决策，不是本 bug 的 valid-Date 修复。 |
 | **7. 用户可见交互修正** | 超出当前 sortable-ID 安全域的 producer 输入会在 append 边界以稳定的 `RangeError` 立即失败，不留下记录、幂等状态或 listener 副作用。 |
 | **8. 验收** | 内存与隔离 Redis 均覆盖负数、小数、NaN、无穷、Date 越界值的零副作用拒绝；零、普通正整数、Date 正上界成功；另证明生成 ID 时间顺序、delivery cursor 单调性与两种 store 的 expired-cursor 恢复。 |
+
+### Follow-up 诊断胶囊：legacy fractional before-cursor 重复
+
+| 栏位 | 内容 |
+|------|------|
+| **1. 现象** | 期望：`getBefore()` 与 `getByThreadBefore()` 对 legacy fractional cursor 保持排他性。实际：cursor 自身会再次出现在结果中，分页调用方可能重复页面。 |
+| **2. 证据** | Cloud exact-HEAD review `bf04e637` 指出 hydration 已保留 `1.5`，但两个 Redis cursor helper 仍以 `parseInt(score, 10)` 判断同分边界。`parseInt('1.5', 10) !== 1.5`，因此 `id >= beforeId` 的排除分支不会执行。 |
+| **3. 问题假设或根因** | 已确认根因：before-cursor 边界比较把 Redis 的浮点 score 截断为整数，违反“hydrated cursor timestamp 与 zset score 数值等价”的分页不变量。 |
+| **4. 诊断策略** | 直接写入 legacy fractional hash + timeline/thread zset fixture，分别调用两个公开 before API；扫描本 PR 中所有 `parseInt(score)` sibling call sites。 |
+| **5. 超时策略** | 若 15 分钟内 fixture 不能稳定复现，改用带 `keyPrefix` 的原始 zset/hash probe 并记录完整成员与 score；不连接运行实例 Redis。 |
+| **6. 预警策略** | 若修复需要改变新写入 admission、ID 编码或迁移历史数据则立即停止；这些属于 D2/D3，不是本次分页等价修复。 |
+| **7. 用户可见交互修正** | Legacy fractional cursor 在全局与 thread 分页中恢复严格排他，不再把 cursor 自身作为下一页首/尾项返回。 |
+| **8. 验收** | 隔离 Redis RED 先证明两个公开 API 都重复 cursor；将两个同型 score 比较改为非截断数值等价后 GREEN，并运行完整 RedisMessageStore suite 与 quality gate。 |

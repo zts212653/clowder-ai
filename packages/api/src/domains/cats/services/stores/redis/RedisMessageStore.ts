@@ -657,7 +657,7 @@ export class RedisMessageStore {
       for (const id of chunk) {
         if (filtered.length >= limit) break;
         const score = await this.redis.zscore(key, id);
-        if (score !== null && parseInt(score, 10) === timestamp && id >= beforeId) {
+        if (score !== null && Number(score) === timestamp && id >= beforeId) {
           continue;
         }
         filtered.push(id);
@@ -693,7 +693,7 @@ export class RedisMessageStore {
       const validIds: string[] = [];
       for (const id of chunk) {
         const score = await this.redis.zscore(key, id);
-        if (score !== null && Number.parseInt(score, 10) === timestamp && id >= beforeId) {
+        if (score !== null && Number(score) === timestamp && id >= beforeId) {
           continue;
         }
         validIds.push(id);
