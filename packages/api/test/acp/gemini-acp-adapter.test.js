@@ -2896,3 +2896,100 @@ describe('#1186: iterator lease cleanup (Pool at capacity regression)', () => {
     );
   });
 });
+
+// #1186: TTL propagation — AcpAgentService threads idleTtlMs to promptStream
+describe('#1186: idleTtlMs propagation (AcpAgentService → promptStream)', () => {
+  it('passes configured idleTtlMs as idleStallMs + timeoutMs to promptStream', async () => {
+    let capturedPromptStreamOpts = null;
+    const fakeClient = {
+      recentCapacitySignal: null,
+      async newSession() {
+        return { sessionId: 'ttl-prop-sess' };
+      },
+      async loadSession(sessionId) {
+        return { sessionId };
+      },
+      async setSessionConfigOption() {},
+      cancelSession() {},
+      async *promptStream(sessionId, text, options) {
+        capturedPromptStreamOpts = options;
+        yield {
+          sessionId,
+          update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ok' } },
+        };
+      },
+      onCapacity() {},
+      offCapacity() {},
+      clearRecentCapacitySignal() {},
+    };
+
+    const mockPool = {
+      acquire: async () => ({ client: fakeClient, release: () => {} }),
+      rememberSession() {},
+      closeAll: async () => {},
+    };
+
+    // With explicit idleTtlMs
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: mockPool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      idleTtlMs: 1_800_000, // 30 minutes
+    });
+
+    for await (const _ of adapter.invoke('hello')) {
+      /* drain */
+    }
+
+    assert.ok(capturedPromptStreamOpts, 'promptStream must receive options');
+    assert.equal(capturedPromptStreamOpts.idleStallMs, 1_800_000, 'idleStallMs = configured idleTtlMs');
+    assert.equal(capturedPromptStreamOpts.timeoutMs, 1_800_000, 'timeoutMs = configured idleTtlMs');
+  });
+
+  it('omits promptStream options when idleTtlMs is not configured (uses client defaults)', async () => {
+    let capturedPromptStreamOpts = 'NOT_CALLED';
+    const fakeClient = {
+      recentCapacitySignal: null,
+      async newSession() {
+        return { sessionId: 'no-ttl-sess' };
+      },
+      async loadSession(sessionId) {
+        return { sessionId };
+      },
+      async setSessionConfigOption() {},
+      cancelSession() {},
+      async *promptStream(sessionId, text, options) {
+        capturedPromptStreamOpts = options;
+        yield {
+          sessionId,
+          update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ok' } },
+        };
+      },
+      onCapacity() {},
+      offCapacity() {},
+      clearRecentCapacitySignal() {},
+    };
+
+    const mockPool = {
+      acquire: async () => ({ client: fakeClient, release: () => {} }),
+      rememberSession() {},
+      closeAll: async () => {},
+    };
+
+    // Without idleTtlMs — should NOT pass options to promptStream
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: mockPool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      // no idleTtlMs
+    });
+
+    for await (const _ of adapter.invoke('hello')) {
+      /* drain */
+    }
+
+    assert.equal(capturedPromptStreamOpts, undefined, 'promptStream receives undefined options when no idleTtlMs');
+  });
+});

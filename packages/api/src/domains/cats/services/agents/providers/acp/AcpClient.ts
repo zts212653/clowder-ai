@@ -112,8 +112,13 @@ export class AcpStreamIdleError extends Error {
     public readonly sessionId: string,
     public readonly idleSinceMs: number,
     public readonly eventCount: number,
+    /** #1186: The configured threshold that triggered termination (ms). */
+    public readonly configuredIdleStallMs?: number,
   ) {
-    super(`Stream idle: no events for ${idleSinceMs}ms after ${eventCount} events received`);
+    super(
+      `Stream idle: no events for ${idleSinceMs}ms after ${eventCount} events received` +
+        (configuredIdleStallMs != null ? ` (configured threshold: ${configuredIdleStallMs}ms)` : ''),
+    );
     this.name = 'AcpStreamIdleError';
   }
 }
@@ -478,7 +483,7 @@ export class AcpClient {
               'Stream idle watchdog: tool execution exceeded configured idle TTL — terminating',
             );
             this.cancelSession(sessionId);
-            promptError = new AcpStreamIdleError(sessionId, idleSinceMs, eventCount);
+            promptError = new AcpStreamIdleError(sessionId, idleSinceMs, eventCount, idleStallMs);
             done = true;
             if (waitResolve) {
               const r = waitResolve;
@@ -496,7 +501,7 @@ export class AcpClient {
           // Stall — terminate the stream and cancel the upstream session
           log.error({ sessionId, idleSinceMs, eventCount }, 'Stream idle watchdog: stall — terminating');
           this.cancelSession(sessionId); // P1-fix: actually cancel the upstream session
-          promptError = new AcpStreamIdleError(sessionId, idleSinceMs, eventCount);
+          promptError = new AcpStreamIdleError(sessionId, idleSinceMs, eventCount, idleStallMs);
           done = true;
           if (waitResolve) {
             const r = waitResolve;

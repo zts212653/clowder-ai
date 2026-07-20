@@ -749,9 +749,101 @@ describe('AcpHttpStreamClient', () => {
       /[Ss]tream idle|STREAM_IDLE/,
       `Expected AcpStreamIdleError, got: ${thrownError.message}`,
     );
+    // #1186 P2: structured error includes configured threshold
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL');
+    assert.equal(thrownError.configuredIdleStallMs, 150, 'HTTP error must carry configured idleStallMs');
 
     // Should have tool_wait_warning before stall
     const toolWaits = events.filter((e) => e.update?.sessionUpdate === 'stream_tool_wait_warning');
     assert.ok(toolWaits.length >= 1, 'Should emit tool_wait_warning before termination');
+  });
+
+  it('#1186: ordinary silence (no pendingTool) terminates at configured idleStallMs', async () => {
+    let promptResponse = null;
+    let resolvePromptSeen;
+    const promptSeen = new Promise((resolve) => {
+      resolvePromptSeen = resolve;
+    });
+
+    server = await startJsonRpcServer((message, res) => {
+      if (message.method === 'initialize') {
+        return { jsonrpc: '2.0', id: message.id, result: INIT_RESULT };
+      }
+      if (message.method === 'session/new') {
+        return { jsonrpc: '2.0', id: message.id, result: { sessionId: 'http-silence-sess' } };
+      }
+      if (message.method === 'session/prompt') {
+        promptResponse = res;
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+        res.flushHeaders();
+        resolvePromptSeen();
+        return undefined;
+      }
+      if (message.method === 'session/cancel') {
+        if (promptResponse && !promptResponse.writableEnded) promptResponse.end();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{}');
+        return undefined;
+      }
+      return { jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'not found' } };
+    });
+    const { child, agentStdout } = createMockChild();
+    const port = serverPort(server);
+
+    client = new AcpHttpStreamClient({
+      command: 'fake-http-acp',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => {
+        setImmediate(() => agentStdout.write(`Listening on port ${port}\n`));
+        return child;
+      },
+      portDiscoveryTimeoutMs: 500,
+    });
+
+    await client.initialize();
+    const session = await client.newSession();
+
+    let thrownError = null;
+    const events = [];
+    const iterator = client.promptStream(session.sessionId, 'hello', {
+      idleWarningMs: 20,
+      idleStallMs: 100,
+      timeoutMs: 5000,
+    });
+
+    // Start generator (sends HTTP request)
+    const firstResult = iterator.next();
+    await promptSeen;
+
+    // Send ONE text event, then go silent (ordinary silence, no tool_call)
+    promptResponse.write(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'session/update',
+        params: {
+          sessionId: 'http-silence-sess',
+          update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'partial' } },
+        },
+      })}\n`,
+    );
+
+    try {
+      const first = await withTimeout(firstResult, 3000, 'HTTP first event did not arrive');
+      if (!first.done) events.push(first.value);
+      while (!first.done) {
+        const result = await withTimeout(iterator.next(), 3000, 'HTTP ordinary silence did not terminate');
+        if (result.done) break;
+        events.push(result.value);
+      }
+    } catch (err) {
+      thrownError = err;
+    } finally {
+      if (promptResponse && !promptResponse.writableEnded) promptResponse.end();
+    }
+
+    assert.ok(thrownError, 'Ordinary silence should throw AcpStreamIdleError');
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL');
+    assert.equal(thrownError.configuredIdleStallMs, 100, 'HTTP ordinary silence error carries configured threshold');
   });
 });

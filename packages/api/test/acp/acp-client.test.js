@@ -1303,6 +1303,7 @@ describe('AcpClient', () => {
     await client.initialize();
     await client.newSession();
 
+    let thrownError = null;
     try {
       for await (const _ of client.promptStream('cancel-sess', 'hello', {
         idleWarningMs: 30,
@@ -1311,14 +1312,17 @@ describe('AcpClient', () => {
       })) {
         // drain
       }
-    } catch {
-      // expected AcpStreamIdleError
+    } catch (err) {
+      thrownError = err;
     }
 
     // P1: session/cancel MUST be sent when idle stall fires
     const cancelMsgs = capturedMessages.filter((m) => m.method === 'session/cancel');
     assert.equal(cancelMsgs.length, 1, `Expected 1 session/cancel, got ${cancelMsgs.length}`);
     assert.equal(cancelMsgs[0].params.sessionId, 'cancel-sess');
+    // #1186 P2: structured error carries configured threshold
+    assert.ok(thrownError, 'Should throw AcpStreamIdleError');
+    assert.equal(thrownError.configuredIdleStallMs, 80, 'Ordinary silence error carries configured threshold');
   });
 
   it('F149-P1: stall fires at ~idleStallMs total idle (not warning + stall)', async () => {
@@ -1435,6 +1439,9 @@ describe('AcpClient', () => {
       /[Ss]tream idle|STREAM_IDLE/,
       `Expected AcpStreamIdleError, got: ${thrownError.message}`,
     );
+    // #1186 P2: structured error must include configured threshold
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL');
+    assert.equal(thrownError.configuredIdleStallMs, 150, 'Error must carry the configured idleStallMs');
 
     // Should have tool_wait_warning before stall
     const toolWaits = events.filter((e) => e.update?.sessionUpdate === 'stream_tool_wait_warning');

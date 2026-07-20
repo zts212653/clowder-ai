@@ -333,7 +333,7 @@ export class AcpHttpStreamClient {
           log.error({ sessionId, idleSinceMs, eventCount }, 'HTTP stream idle stall — terminating');
           this.cancelSession(sessionId);
           controller.abort();
-          promptError = new AcpStreamIdleError(sessionId, idleSinceMs, eventCount);
+          promptError = new AcpStreamIdleError(sessionId, idleSinceMs, eventCount, idleStallMs);
           done = true;
           wakeConsumer();
         } else {
@@ -347,7 +347,7 @@ export class AcpHttpStreamClient {
             );
             this.cancelSession(sessionId);
             controller.abort();
-            promptError = new AcpStreamIdleError(sessionId, idleSinceMs, eventCount);
+            promptError = new AcpStreamIdleError(sessionId, idleSinceMs, eventCount, idleStallMs);
             done = true;
             wakeConsumer();
           } else {
