@@ -846,6 +846,7 @@ export type {
   CreateTaskInput,
   DispatchGateState,
   IssueAutomationState,
+  IssuePendingWake,
   ReviewAutomationState,
   SuggestedCrossPostAction,
   SuggestedCrossPostActionSource,

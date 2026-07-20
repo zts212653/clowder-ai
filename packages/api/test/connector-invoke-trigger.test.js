@@ -290,7 +290,7 @@ describe('ConnectorInvokeTrigger', () => {
 
   it('updates InvocationRecord through lifecycle: userMessageId → running → succeeded', async () => {
     const trigger = createTrigger();
-    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
+    await trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
     await waitForTrigger();
 
     // Check update sequence
@@ -396,7 +396,10 @@ describe('ConnectorInvokeTrigger', () => {
     };
 
     const trigger = createTrigger();
-    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
+    await assert.rejects(
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1'),
+      /create boom/,
+    );
     await waitForTrigger();
 
     // start() not called (F185: tryStartThread used instead)
@@ -408,6 +411,21 @@ describe('ConnectorInvokeTrigger', () => {
     // Should NOT call routeExecution
     assert.strictEqual(routerMock.calls.length, 0);
     // No unhandledRejection = test process survives
+  });
+
+  it('PR #1181 P1: dispatched is returned only after the invocation record is durable', async () => {
+    recordMock.store.create = async () => {
+      throw new Error('record store unavailable');
+    };
+
+    const trigger = createTrigger();
+    await assert.rejects(
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-durable-admission'),
+      /record store unavailable/,
+    );
+
+    assert.strictEqual(routerMock.calls.length, 0, 'execution must not start without a durable invocation record');
+    assert.strictEqual(trackerMock.completes.length, 1, 'failed admission must release the pre-acquired controller');
   });
 
   it('R1-P1 regression: userMessageId backfill throws → tracker completes, status=failed', async () => {

@@ -18,6 +18,7 @@ import type {
   CatId,
   CreateTaskInput,
   IssueAutomationState,
+  ReviewAutomationState,
   TaskItem,
   TaskKind,
   UpdateTaskInput,
@@ -493,8 +494,29 @@ export class RedisTaskStore implements ITaskStore {
       ...patch,
       ci: patch.ci ? { ...existing?.ci, ...patch.ci } : existing?.ci,
       conflict: patch.conflict ? { ...existing?.conflict, ...patch.conflict } : existing?.conflict,
-      review: patch.review ? { ...existing?.review, ...patch.review } : existing?.review,
+      review: patch.review ? this.mergeReviewAutomationState(existing?.review, patch.review) : existing?.review,
       issue: patch.issue ? this.mergeIssueAutomationState(existing?.issue, patch.issue) : existing?.issue,
+    };
+  }
+
+  /** Review cursor sources are monotonic and must not regress on task re-registration. */
+  private mergeReviewAutomationState(
+    existing: ReviewAutomationState | undefined,
+    patch: ReviewAutomationState,
+  ): ReviewAutomationState {
+    const merged: ReviewAutomationState = { ...existing, ...patch };
+    const monotonic = (current: number | undefined, next: number | undefined) =>
+      current !== undefined && next !== undefined ? Math.max(current, next) : (next ?? current);
+    const legacy = monotonic(existing?.lastCommentCursor, patch.lastCommentCursor);
+    const inline = monotonic(existing?.lastInlineCommentCursor, patch.lastInlineCommentCursor);
+    const conversation = monotonic(existing?.lastConversationCommentCursor, patch.lastConversationCommentCursor);
+    const decision = monotonic(existing?.lastDecisionCursor, patch.lastDecisionCursor);
+    return {
+      ...merged,
+      ...(legacy !== undefined ? { lastCommentCursor: legacy } : {}),
+      ...(inline !== undefined ? { lastInlineCommentCursor: inline } : {}),
+      ...(conversation !== undefined ? { lastConversationCommentCursor: conversation } : {}),
+      ...(decision !== undefined ? { lastDecisionCursor: decision } : {}),
     };
   }
 

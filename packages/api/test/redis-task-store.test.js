@@ -1015,4 +1015,46 @@ describe('RedisTaskStore unit behavior', () => {
       'lastDeliveredCursor must NOT be regressed to 50 — existing 90 must be preserved (I5)',
     );
   });
+
+  it('upsertBySubject preserves independent review cursor monotonicity', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 0 });
+
+    await store.upsertBySubject({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#901',
+      threadId: 'thread-review-cursors',
+      title: 'PR tracking: owner/repo#901',
+      why: 'track review',
+      createdBy: 'system',
+      automationState: {
+        review: {
+          lastInlineCommentCursor: 300,
+          lastConversationCommentCursor: 500,
+          lastDecisionCursor: 400,
+        },
+      },
+    });
+
+    const result = await store.upsertBySubject({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#901',
+      threadId: 'thread-review-cursors',
+      title: 'PR tracking: owner/repo#901',
+      why: 'stale registration',
+      createdBy: 'system',
+      automationState: {
+        review: {
+          lastInlineCommentCursor: 30,
+          lastConversationCommentCursor: 50,
+          lastDecisionCursor: 40,
+        },
+      },
+    });
+
+    assert.equal(result.automationState.review.lastInlineCommentCursor, 300);
+    assert.equal(result.automationState.review.lastConversationCommentCursor, 500);
+    assert.equal(result.automationState.review.lastDecisionCursor, 400);
+  });
 });
