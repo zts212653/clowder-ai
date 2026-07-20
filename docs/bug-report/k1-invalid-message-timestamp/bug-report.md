@@ -90,7 +90,7 @@ tips_exempt:
 
 - `fetchBeforeWithCursor()` and `fetchDeliveredBeforeCursor()` perform JavaScript numeric cursor-boundary equality; both use the shared Redis-number decoder.
 - Four user/thread filtering sites only test `score === null` for membership; they do not interpret the score numerically.
-- User-ownership reassignment forwards the raw score back to `ZADD`, preserving Redis's representation without a JavaScript comparison.
+- User-ownership reassignment normally forwards the raw score back to `ZADD`, preserving Redis's representation without a JavaScript comparison. If the source user-index score is missing, its fallback hydrates `deliveredAt ?? timestamp`; future admitted integers remain exact, while any incompatible historical fallback remains D3 audit/reconciliation evidence.
 - `getByThreadAfter()` passes the raw score back to Redis range commands; Redis, rather than JavaScript, interprets that bound.
 
 No remaining `zscore` consumer converts a sorted-set score for JavaScript numeric equality outside the shared decoder.
@@ -101,6 +101,7 @@ No remaining `zscore` consumer converts a sorted-set score for JavaScript numeri
 - In-memory `markDelivered` stores the exact value on the message object. Redis stores the same text in the hash and re-scores global, user, and thread indexes; all three are effective-history-order indexes.
 - The mention index intentionally retains append-time `timestamp` ordering and is not re-scored or reused by effective-history before cursors.
 - `getById()` and `hydrateMessages()` are the two Redis hash hydration paths. Future admitted `deliveredAt` values need no coercive fallback: decimal integer parsing is exact throughout the admitted TimeClip domain.
+- `reassignUserId()` preserves that effective order both when forwarding an existing user-index score and when reconstructing a missing score from a future-admitted hydrated value; isolated Redis tests cover zero and the positive TimeClip boundary.
 - Effective before-cursor consumers were re-audited: `routes/messages.ts`, `AgentRouter.findRecentUserMentionFallback`, `collectAllThreadMessages`, duty-briefing pagination, and the paw-feel adapter all derive cursor/window time from `deliveredAt ?? timestamp` (the paw-feel adapter additionally de-duplicates IDs and stops on non-progress).
 - Non-pagination effective-time consumers `routes/callbacks.ts`, duty-briefing mention collection, and briefing day projection use the same projection and never serialize it into a Redis range bound.
 - Freshness consumers that compare message IDs explicitly retain creation-order semantics; their comments already document the delivered-score/ID split, and they do not parse or reuse `deliveredAt` numerically.

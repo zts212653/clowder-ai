@@ -869,8 +869,9 @@ export class RedisMessageStore {
     return augmented;
   }
 
-  /** F098-D: Mark a queued message as delivered (set deliveredAt timestamp). */
+  /** F098-D: Mark a queued message as delivered at an admitted non-negative integral Date value. */
   async markDelivered(id: string, deliveredAt: number): Promise<StoredMessage | null> {
+    assertValidStoredMessageTimestamp(deliveredAt);
     const msg = await this.getById(id);
     if (!msg) return null;
     if (msg.deliveryStatus !== 'queued') return msg; // only transition queued → delivered
