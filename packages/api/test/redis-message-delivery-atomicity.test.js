@@ -234,7 +234,7 @@ describe('delivery-order transition atomicity (PR #1193)', { skip: redisIsolatio
     assert.equal(oldScore, null, 'old user must not have entry');
   });
 
-  // ── Fable's 3 supplementary RED test cases ──
+  // ── Supplementary test cases (guard/idempotency) ──
 
   // 7. markCanceled on delivered message → must be no-op (DETERMINISTIC RED)
   it('markCanceled on delivered message is no-op (guard: queued-only transition)', async () => {
