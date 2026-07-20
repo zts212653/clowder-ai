@@ -874,8 +874,11 @@ export class RedisMessageStore {
   async markDelivered(id: string, deliveredAt: number): Promise<StoredMessage | null> {
     assertValidStoredMessageTimestamp(deliveredAt);
     const hashKey = MessageKeys.detail(id);
-    // Lua handles missing hash (HGET returns nil → no-op); getById returns null
-    await this.redis.eval(DELIVER_LUA, 1, hashKey, id, String(deliveredAt), this.keyPrefix);
+    // Atomic CAS: queued → delivered, anything else → no-op.
+    // Returns the transitioned message ONLY when this call won the CAS;
+    // null means no-op (already delivered / canceled / not found).
+    const applied = (await this.redis.eval(DELIVER_LUA, 1, hashKey, id, String(deliveredAt), this.keyPrefix)) as number;
+    if (applied === 0) return null;
     return this.getById(id);
   }
 

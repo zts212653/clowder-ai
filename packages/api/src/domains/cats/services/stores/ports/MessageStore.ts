@@ -770,7 +770,7 @@ export class MessageStore {
     assertValidStoredMessageTimestamp(deliveredAt);
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
-    if (!isQueuedForDeliveryTransition(msg)) return msg;
+    if (!isQueuedForDeliveryTransition(msg)) return null; // CAS no-op: not queued
     msg.deliveredAt = deliveredAt;
     msg.deliveryStatus = 'delivered';
     return msg;
