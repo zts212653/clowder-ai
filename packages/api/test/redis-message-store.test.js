@@ -16,6 +16,7 @@ const REDIS_URL = process.env.REDIS_URL;
 describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisMessageStore;
   let generateSortableId;
+  let collectAllThreadMessages;
   let createRedisClient;
   let redis;
   let store;
@@ -27,6 +28,9 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     const storeModule = await import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js');
     RedisMessageStore = storeModule.RedisMessageStore;
     ({ generateSortableId } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js'));
+    ({ collectAllThreadMessages } = await import(
+      '../dist/domains/cats/services/agents/routing/thread-artifacts-aggregator.js'
+    ));
     const redisModule = await import('@cat-cafe/shared/utils');
     createRedisClient = redisModule.createRedisClient;
 
@@ -302,6 +306,50 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.deepEqual(
       (await store.getByThreadBefore(threadId, cursorTimestamp, 10, cursorId)).map((message) => message.id),
       [earlier.id],
+    );
+  });
+
+  it('bounded multi-page consumer makes progress across a legacy fractional cursor', async () => {
+    const threadId = 'thread-legacy-fractional-collector';
+    const earlierTimestamp = Date.now();
+    const cursorTimestamp = earlierTimestamp + 0.5;
+    const earlier = await store.append({
+      userId: 'u',
+      catId: null,
+      content: 'earlier',
+      mentions: [],
+      timestamp: earlierTimestamp,
+      threadId,
+    });
+    const cursorId = generateSortableId(cursorTimestamp);
+    await redis.hset(`msg:${cursorId}`, {
+      id: cursorId,
+      threadId,
+      userId: 'u',
+      catId: '',
+      content: 'legacy fractional cursor',
+      mentions: '[]',
+      timestamp: String(cursorTimestamp),
+    });
+    await redis.zadd('msg:timeline', String(cursorTimestamp), cursorId);
+    await redis.zadd(`msg:user:u`, String(cursorTimestamp), cursorId);
+    await redis.zadd(`msg:thread:${threadId}`, String(cursorTimestamp), cursorId);
+
+    let beforeCalls = 0;
+    const boundedStore = {
+      getByThread: (...args) => store.getByThread(...args),
+      getByThreadBefore: (...args) => {
+        beforeCalls += 1;
+        if (beforeCalls > 3) throw new Error('before-cursor pagination did not make progress');
+        return store.getByThreadBefore(...args);
+      },
+    };
+    const collected = await collectAllThreadMessages(boundedStore, threadId, undefined, 1);
+    assert.equal(beforeCalls, 2, 'one full legacy page plus the terminal empty page');
+    assert.deepEqual(
+      new Set(collected.map((message) => message.id)),
+      new Set([earlier.id, cursorId]),
+      'bounded pagination must terminate without replaying its cursor',
     );
   });
 
