@@ -20,22 +20,69 @@ const path = require('node:path');
 
 // ── Semver parsing & comparison ────────────────────────────────────────
 
-const VERSION_RE = /^v?(\d+)\.(\d+)\.(\d+)$/;
+const VERSION_RE = /^v?(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9]+(?:\.[a-zA-Z0-9]+)*))?$/;
 
 /**
  * Parse a version string (with or without 'v' prefix) into components.
- * @param {string} tag — e.g. 'v0.11.1' or '0.11.1'
- * @returns {{ major: number, minor: number, patch: number } | null}
+ * Supports optional pre-release suffix per semver spec (e.g. -rc.1, -beta.2).
+ *
+ * @param {string} tag — e.g. 'v0.11.1', '0.12.0-rc.1'
+ * @returns {{ major: number, minor: number, patch: number, prerelease: string[] | null } | null}
  */
 function parseVersion(tag) {
   if (typeof tag !== 'string') return null;
   const m = tag.match(VERSION_RE);
   if (!m) return null;
-  return { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]) };
+  return {
+    major: Number(m[1]),
+    minor: Number(m[2]),
+    patch: Number(m[3]),
+    prerelease: m[4] ? m[4].split('.') : null,
+  };
+}
+
+/**
+ * Compare two pre-release identifier arrays per semver §11:
+ *   - null (no pre-release) > any pre-release  (1.0.0 > 1.0.0-rc.1)
+ *   - numeric identifiers compared as integers  (rc.2 > rc.1)
+ *   - string identifiers compared lexically      (beta < rc)
+ *   - numeric < string                           (1 < alpha)
+ *   - shorter < longer (if all preceding equal)  (alpha < alpha.1)
+ *
+ * @param {string[] | null} a
+ * @param {string[] | null} b
+ * @returns {number}
+ */
+function comparePrerelease(a, b) {
+  if (a === null && b === null) return 0;
+  // No pre-release > any pre-release
+  if (a === null) return 1;
+  if (b === null) return -1;
+
+  const len = Math.min(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    const ai = a[i];
+    const bi = b[i];
+    if (ai === bi) continue;
+    const aNum = /^\d+$/.test(ai);
+    const bNum = /^\d+$/.test(bi);
+    // Both numeric → integer comparison
+    if (aNum && bNum) return Number(ai) - Number(bi);
+    // Numeric < string
+    if (aNum) return -1;
+    if (bNum) return 1;
+    // Both string → lexical
+    if (ai < bi) return -1;
+    return 1;
+  }
+  // All shared identifiers equal → shorter array is lower
+  return a.length - b.length;
 }
 
 /**
  * Compare two version strings. Returns positive if a > b, negative if a < b, 0 if equal.
+ * Handles pre-release suffixes per semver spec (e.g. 0.12.0-rc.1 < 0.12.0).
+ *
  * @param {string} a
  * @param {string} b
  * @returns {number}
@@ -48,7 +95,8 @@ function compareSemver(a, b) {
   if (!pb) throw new Error(`Invalid version: ${b}`);
   if (pa.major !== pb.major) return pa.major - pb.major;
   if (pa.minor !== pb.minor) return pa.minor - pb.minor;
-  return pa.patch - pb.patch;
+  if (pa.patch !== pb.patch) return pa.patch - pb.patch;
+  return comparePrerelease(pa.prerelease, pb.prerelease);
 }
 
 // ── Asset name resolution ──────────────────────────────────────────────

@@ -79,19 +79,55 @@ const FIXTURE_RELEASES = [
 
 describe('parseVersion', () => {
   test('parses v-prefixed tag', () => {
-    assert.deepEqual(parseVersion('v0.11.1'), { major: 0, minor: 11, patch: 1 });
+    assert.deepEqual(parseVersion('v0.11.1'), { major: 0, minor: 11, patch: 1, prerelease: null });
   });
 
   test('parses bare version string', () => {
-    assert.deepEqual(parseVersion('0.11.1'), { major: 0, minor: 11, patch: 1 });
+    assert.deepEqual(parseVersion('0.11.1'), { major: 0, minor: 11, patch: 1, prerelease: null });
   });
 
   test('parses major version', () => {
-    assert.deepEqual(parseVersion('v1.0.0'), { major: 1, minor: 0, patch: 0 });
+    assert.deepEqual(parseVersion('v1.0.0'), { major: 1, minor: 0, patch: 0, prerelease: null });
   });
 
   test('parses double-digit components', () => {
-    assert.deepEqual(parseVersion('v12.34.56'), { major: 12, minor: 34, patch: 56 });
+    assert.deepEqual(parseVersion('v12.34.56'), { major: 12, minor: 34, patch: 56, prerelease: null });
+  });
+
+  test('parses pre-release suffix', () => {
+    assert.deepEqual(parseVersion('0.12.0-rc.1'), {
+      major: 0,
+      minor: 12,
+      patch: 0,
+      prerelease: ['rc', '1'],
+    });
+  });
+
+  test('parses pre-release with v-prefix', () => {
+    assert.deepEqual(parseVersion('v0.13.0-beta.2'), {
+      major: 0,
+      minor: 13,
+      patch: 0,
+      prerelease: ['beta', '2'],
+    });
+  });
+
+  test('parses single-identifier pre-release', () => {
+    assert.deepEqual(parseVersion('1.0.0-alpha'), {
+      major: 1,
+      minor: 0,
+      patch: 0,
+      prerelease: ['alpha'],
+    });
+  });
+
+  test('parses multi-identifier pre-release', () => {
+    assert.deepEqual(parseVersion('1.0.0-alpha.beta.3'), {
+      major: 1,
+      minor: 0,
+      patch: 0,
+      prerelease: ['alpha', 'beta', '3'],
+    });
   });
 
   test('returns null for invalid input', () => {
@@ -133,6 +169,42 @@ describe('compareSemver', () => {
   test('throws on invalid version', () => {
     assert.throws(() => compareSemver('invalid', '0.11.1'));
     assert.throws(() => compareSemver('0.11.1', 'garbage'));
+  });
+
+  // ── Pre-release ordering (semver §11) ──
+  test('release > same version pre-release', () => {
+    assert.ok(compareSemver('0.12.0', '0.12.0-rc.1') > 0);
+  });
+
+  test('pre-release < same version release', () => {
+    assert.ok(compareSemver('0.12.0-rc.1', '0.12.0') < 0);
+  });
+
+  test('pre-release with higher major.minor.patch wins', () => {
+    assert.ok(compareSemver('0.12.0-rc.1', '0.11.99') > 0);
+    assert.ok(compareSemver('0.13.0-rc.1', '0.12.0') > 0);
+  });
+
+  test('pre-release numeric ordering: rc.2 > rc.1', () => {
+    assert.ok(compareSemver('0.12.0-rc.2', '0.12.0-rc.1') > 0);
+  });
+
+  test('pre-release string ordering: rc > beta > alpha', () => {
+    assert.ok(compareSemver('0.12.0-rc.1', '0.12.0-beta.1') > 0);
+    assert.ok(compareSemver('0.12.0-beta.1', '0.12.0-alpha.1') > 0);
+  });
+
+  test('pre-release equal', () => {
+    assert.equal(compareSemver('0.12.0-rc.1', '0.12.0-rc.1'), 0);
+  });
+
+  test('pre-release longer > shorter when prefix equal', () => {
+    assert.ok(compareSemver('0.12.0-alpha.1', '0.12.0-alpha') > 0);
+  });
+
+  test('pre-release numeric < string identifier', () => {
+    // semver: numeric identifiers always have lower precedence than string
+    assert.ok(compareSemver('0.12.0-1', '0.12.0-alpha') < 0);
   });
 });
 
@@ -306,6 +378,27 @@ describe('selectUpdateTarget', () => {
   test('handles malformed tag_name gracefully', () => {
     const badTags = [{ tag_name: 'not-a-version', draft: false, prerelease: false, body: '', assets: [] }];
     const result = selectUpdateTarget(badTags, '0.10.1', 'win32', 'x64');
+    assert.equal(result, null);
+  });
+
+  // ── Pre-release currentVersion scenarios ──
+  test('finds update when current is pre-release of available release', () => {
+    // User has 0.12.0-rc.1 installed, v0.12.0 release exists → update available
+    const result = selectUpdateTarget(FIXTURE_RELEASES, '0.12.0-rc.1', 'win32', 'x64');
+    assert.notEqual(result, null);
+    assert.equal(result.version, '0.12.0');
+  });
+
+  test('no update when current pre-release is higher than all releases', () => {
+    // User has 0.13.0-rc.1 installed, highest release is v0.12.0 → no update
+    const result = selectUpdateTarget(FIXTURE_RELEASES, '0.13.0-rc.1', 'win32', 'x64');
+    assert.equal(result, null);
+  });
+
+  test('pre-release current does not downgrade to lower release', () => {
+    // User has 0.12.0-rc.1, v0.11.1 exists but is lower → should not offer
+    const onlyOlder = FIXTURE_RELEASES.filter((r) => r.tag_name === 'v0.11.1');
+    const result = selectUpdateTarget(onlyOlder, '0.12.0-rc.1', 'win32', 'x64');
     assert.equal(result, null);
   });
 });
