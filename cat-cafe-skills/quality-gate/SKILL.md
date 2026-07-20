@@ -159,6 +159,10 @@ Step 5: PEN CHECK — 自动化设计稿对照（不可跳过！）
   ④ 此步骤不依赖猫猫"记得"——必须执行 glob 命令，用输出决定是否进入对照
 
 Step 6: RUN — 运行验证命令（必须这次真实运行）
+  # Python 临时目录安全检查（commit 前检查本分支改动和未跟踪文件，必须零命中）
+  git diff --name-only -z --diff-filter=ACMR origin/main -- '*.py' | xargs -0 -r rg -n '\btempfile\.mktemp\s*\(|^\s*from\s+tempfile\s+import\b.*\bmktemp\b'
+  git ls-files --others --exclude-standard -z -- '*.py' | xargs -0 -r rg -n '\btempfile\.mktemp\s*\(|^\s*from\s+tempfile\s+import\b.*\bmktemp\b'
+  # 任一命中都阻断提交；创建临时目录时改用 tempfile.mkdtemp()
   pnpm test                              # 必须全部通过
   pnpm lint                              # 0 errors
   pnpm check                             # 0 errors（biome 格式 + lint）
@@ -204,6 +208,7 @@ Step 8: REPORT — 输出合规报告 + 证据
 | 测试通过 | 这次运行输出：0 failures | "上次跑过"、"应该通过" |
 | lint 干净 | lint 输出：0 errors | 部分检查、推断 |
 | biome 干净 | pnpm check：0 errors | "先跑通再说"、"回头再改格式" |
+| Python 临时目录安全 | commit 前扫描改动及未跟踪 Python 文件，`tempfile.mktemp` 零命中；目录改用 `tempfile.mkdtemp()` | `mktemp()` 只生成可预测路径，存在竞态创建风险 |
 | 构建成功 | build 命令：exit 0 | lint 通过不代表编译通过 |
 | Bug 修了 | 原症状测试：通过 | 代码改了，以为修了 |
 | 需求满足 | spec + Discussion 逐项打勾 | 测试通过就完事 |
@@ -251,6 +256,7 @@ Scope verdict: ✅ 必做 / 🆗 可豁免（理由）
 pnpm test → 34/34 pass ✅
 pnpm lint → 0 errors ✅
 pnpm check → 0 errors ✅ (biome format + lint)
+Python `tempfile.mktemp` scan → 0 matches ✅
 pnpm -r --if-present run build → exit 0 ✅
 ```
 
@@ -271,6 +277,7 @@ pnpm -r --if-present run build → exit 0 ✅
 | 拿 runtime 的 `3003/3004` 页面当成当前 worktree 的验证结果 | 报告里同时写明 `pwd/worktree` 和目标 URL；如果 URL 是 `3003/3004`，默认这是 runtime 证据，不是未合入改动证据 |
 | 截图/录屏/设计稿顺手掉进仓库根目录 | Step 7.5 必查；先移到 `${TMPDIR}/cat-cafe-evidence/...` 或正式归档目录，再继续 |
 | Redis 改动用默认测试命令 | 必须跑 `test:redis`，禁止直连 6399 |
+| Python 测试用 `tempfile.mktemp()` 生成目录路径 | commit 前对改动及未跟踪 Python 文件执行 Step 6 安全扫描；改用原子创建目录的 `tempfile.mkdtemp()` |
 | 产出了 skill/MCP 但没审查质量 | 加载 `writing-skills`，用 T0 六要素审查（软硬同检） |
 | 只看 spec checkbox 就声称完成/未完成 | 核实 `git log --grep` + `gh pr list` + 实际 commit（LL-029）|
 | AC 全 ✅ 就声明 phase close（机制 ship 但用户感受不到）| Step 4.5 Dogfood-Your-Slice：必做 feature 跑一条真实端到端 query 写进报告；豁免必须显式写理由（F209 反思 2026-05-23）|
