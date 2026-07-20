@@ -41,6 +41,16 @@ export function isRegisteredGuardId(guardId: string): boolean {
   return Object.hasOwn(GUARD_LEDGER_IDS, guardId);
 }
 
+/**
+ * Reverse whitelist: checks whether a given ledgerId is among the registered
+ * values (not a guardId key). Prototype-safe (sol P2-2).
+ * Validates incoming ledgerIds at API query boundaries — rejects spoofed
+ * pot coordinates that don't map to any known guard.
+ */
+export function isRegisteredLedgerId(ledgerId: string): boolean {
+  return Object.values(GUARD_LEDGER_IDS).includes(ledgerId);
+}
+
 /** Resolve a guard's ledger coordinate; unregistered guards are fail-visible. */
 export function ledgerIdForGuard(guardId: string): string {
   return Object.hasOwn(GUARD_LEDGER_IDS, guardId) ? GUARD_LEDGER_IDS[guardId] : `unregistered/${guardId}`;
@@ -106,11 +116,11 @@ export class GuardLedgerStats {
     }
   }
 
+  /**
+   * Read-side: propagates Redis errors (sol P2-3 — fake zero hides infra
+   * failures from operators). Caller must catch and surface `{ available: false }`.
+   */
   async anomalyReferenceCount(ownerUserId: string, ledgerId: string): Promise<number> {
-    try {
-      return await this.redis.scard(`${STATS_KEY_PREFIX}${ownerUserId}:${ledgerId}:anomaly-refs`);
-    } catch {
-      return 0;
-    }
+    return await this.redis.scard(`${STATS_KEY_PREFIX}${ownerUserId}:${ledgerId}:anomaly-refs`);
   }
 }

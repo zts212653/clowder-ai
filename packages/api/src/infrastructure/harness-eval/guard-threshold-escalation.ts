@@ -249,6 +249,7 @@ export async function checkGuardThreshold(
     count: rawEventCount,
     rawEventCount,
     episodeCount,
+    ...(truncated ? { truncated } : {}),
     thresholdMet: true,
     alreadyEscalated: false,
     escalated: true,

@@ -196,20 +196,29 @@ export function registerCallbackGuardRejectionRoutes(app: FastifyInstance, deps:
         ledgerId: parsed.data.ledgerId,
         ownerUserId: principal.userId,
       });
-      const anomalyRefCount = deps.ledgerStats
-        ? await deps.ledgerStats.anomalyReferenceCount(principal.userId, parsed.data.ledgerId)
-        : 0;
+      // sol P2-3: stats error → explicit `{ available: false }`, not fake zero.
+      // Query events are already fetched; a stats-only SCARD failure must not
+      // 503 the whole response (events are still valid).
+      let stats: Record<string, unknown>;
+      try {
+        const anomalyRefCount = deps.ledgerStats
+          ? await deps.ledgerStats.anomalyReferenceCount(principal.userId, parsed.data.ledgerId)
+          : 0;
+        stats = {
+          anomalyRefCount,
+          howCounted:
+            'scard guard-ledger:stats:{ownerUserId}:{ledgerId}:anomaly-refs — distinct deviation eventIds whose note references this pot',
+        };
+      } catch {
+        stats = { available: false, reason: 'scard_error' };
+      }
 
       return {
         ledgerId: parsed.data.ledgerId,
         window: { sinceMs: since, untilMs: until },
         events,
         truncated,
-        stats: {
-          anomalyRefCount,
-          howCounted:
-            'scard guard-ledger:stats:{ownerUserId}:{ledgerId}:anomaly-refs — distinct deviation eventIds whose note references this pot',
-        },
+        stats,
       };
     } catch (err) {
       request.log.warn({ err, ledgerId: parsed.data.ledgerId }, 'F257 guard-rejection query failed (infra)');

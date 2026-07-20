@@ -184,7 +184,7 @@ describe('GuardLedgerStats — idempotent AC-B2 writeback', () => {
     assert.equal(await stats.anomalyReferenceCount('default-user', 'mcp/never-referenced'), 0);
   });
 
-  test('fail-open: redis errors neither throw nor break counts', async () => {
+  test('write-side fail-open: redis sadd errors do not reject', async () => {
     const stats = new GuardLedgerStats({
       async sadd() {
         throw new Error('down');
@@ -194,6 +194,19 @@ describe('GuardLedgerStats — idempotent AC-B2 writeback', () => {
       },
     });
     await assert.doesNotReject(() => stats.recordAnomalyReference('default-user', 'mcp/hold-ball-rate-limit', 'dev-1'));
-    assert.equal(await stats.anomalyReferenceCount('default-user', 'mcp/hold-ball-rate-limit'), 0);
+  });
+
+  test('read-side fail-closed: redis scard errors propagate (sol P2-3)', async () => {
+    const stats = new GuardLedgerStats({
+      async sadd() {
+        return 1;
+      },
+      async scard() {
+        throw new Error('READONLY: Redis failover');
+      },
+    });
+    await assert.rejects(() => stats.anomalyReferenceCount('default-user', 'mcp/hold-ball-rate-limit'), {
+      message: 'READONLY: Redis failover',
+    });
   });
 });

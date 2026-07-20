@@ -305,6 +305,9 @@ describe('KD-17 snapshot-first error paths (eval:harness-ledger)', () => {
       queryWindowStrict: async () => {
         throw new Error('READONLY: Redis failover in progress');
       },
+      queryWindowStrictComplete: async () => {
+        throw new Error('READONLY: Redis failover in progress');
+      },
       queryWindow: async () => [],
     };
 
@@ -339,6 +342,10 @@ describe('KD-17 snapshot-first error paths (eval:harness-ledger)', () => {
       queryWindowStrict: async () => [
         { eventId: 'e1', kind: 'hold_ball_429', guardId: 'guard-1', timestamp: Date.now(), rawPayload: {} },
       ],
+      queryWindowStrictComplete: async () => ({
+        events: [{ eventId: 'e1', kind: 'hold_ball_429', guardId: 'guard-1', timestamp: Date.now(), rawPayload: {} }],
+        truncated: false,
+      }),
       queryWindow: async () => [],
     };
 
@@ -417,6 +424,7 @@ describe('F257 sub-item 1: zero events → skip invocation (eval:harness-ledger)
     const tmpRoot = mkdtempSync(join(tmpdir(), 'kd17-zero-'));
     const emptyLog = {
       queryWindowStrict: async () => [],
+      queryWindowStrictComplete: async () => ({ events: [], truncated: false }),
       queryWindow: async () => [],
     };
 
@@ -456,6 +464,7 @@ describe('F257 sub-item 1: zero events → skip invocation (eval:harness-ledger)
     const tmpRoot = mkdtempSync(join(tmpdir(), 'kd17-zero-snap-'));
     const emptyLog = {
       queryWindowStrict: async () => [],
+      queryWindowStrictComplete: async () => ({ events: [], truncated: false }),
       queryWindow: async () => [],
     };
 
