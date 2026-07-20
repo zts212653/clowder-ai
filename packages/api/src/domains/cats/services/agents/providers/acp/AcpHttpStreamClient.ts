@@ -318,12 +318,13 @@ export class AcpHttpStreamClient {
     const isAgentRequest = (method: string | undefined, msgId: string | undefined) =>
       !!method && (!!msgId || method === ACP_METHODS.requestPermission);
 
+    /** #1186: Active from prompt start — covers zero-first-event. */
     const scheduleIdleCheck = () => {
       if (idleTimer) clearTimeout(idleTimer);
       if (done) return;
       const nextMs = idleWarningFired ? Math.max(0, idleStallMs - idleWarningMs) : idleWarningMs;
       idleTimer = setTimeout(() => {
-        if (done || eventCount === 0) return;
+        if (done) return;
         const rawIdle = Date.now() - lastEventAt;
         const idleSinceMs = Math.max(rawIdle, idleWarningFired ? idleStallMs : idleWarningMs);
         if (!idleWarningFired) {
@@ -380,7 +381,13 @@ export class AcpHttpStreamClient {
     };
     this.sessionCancelCallbacks.set(sessionId, cancelCb);
 
+    // #1186: Initialize lastEventAt for zero-first-event idle watchdog
+    lastEventAt = Date.now();
+
     resetBudget();
+
+    // #1186: Start idle watchdog at prompt start — covers zero-first-event
+    scheduleIdleCheck();
 
     const streamPromise = (async () => {
       try {

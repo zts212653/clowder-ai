@@ -846,7 +846,9 @@ describe('AcpClient', () => {
     assert.match(thrownError.message, /[Ss]tream idle|STREAM_IDLE/);
   });
 
-  it('F149: idle watchdog does NOT fire before first event (eventCount=0)', async () => {
+  // #1186: Zero-first-event now produces AcpStreamIdleError at the configured TTL,
+  // not AcpTimeoutError at the later budget. The idle watchdog starts at prompt start.
+  it('#1186: zero-first-event produces AcpStreamIdleError at configured idleStallMs', async () => {
     const { child, clientStdin, agentStdout } = createMockChild();
 
     clientStdin.on('data', (chunk) => {
@@ -857,14 +859,8 @@ describe('AcpClient', () => {
         } else if (msg.method === 'session/new') {
           agentRespond(agentStdout, msg.id, { sessionId: 'zero-sess' });
         } else if (msg.method === 'session/prompt') {
-          // Delay first event longer than idle thresholds — but watchdog should NOT fire
-          setTimeout(() => {
-            agentNotify(agentStdout, 'session/update', {
-              sessionId: 'zero-sess',
-              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hello' } },
-            });
-            agentRespond(agentStdout, msg.id, { stopReason: 'end_turn' });
-          }, 200);
+          // Never send any events — zero-first-event scenario
+          // promptResponse stays pending — idle stall should terminate
         }
       }
     });
@@ -874,22 +870,93 @@ describe('AcpClient', () => {
     await client.newSession();
 
     const events = [];
-    for await (const event of client.promptStream('zero-sess', 'hello', {
-      idleWarningMs: 50,
-      idleStallMs: 100,
-    })) {
-      events.push(event);
+    let thrownError = null;
+    try {
+      for await (const event of client.promptStream('zero-sess', 'hello', {
+        idleWarningMs: 30,
+        idleStallMs: 100,
+        timeoutMs: 5000, // Budget much higher — must NOT fire first
+      })) {
+        events.push(event);
+      }
+    } catch (err) {
+      thrownError = err;
     }
 
-    // No idle events should fire — eventCount was 0 when the threshold passed
-    const idleEvents = events.filter(
-      (e) => e.update?.sessionUpdate === 'stream_idle_warning' || e.update?.sessionUpdate === 'stream_idle_stall',
-    );
-    assert.equal(idleEvents.length, 0, `Expected 0 idle events (eventCount=0), got ${idleEvents.length}`);
+    // Idle warning should fire even with zero events
+    const warningEvents = events.filter((e) => e.update?.sessionUpdate === 'stream_idle_warning');
+    assert.ok(warningEvents.length >= 1, `Expected at least 1 idle warning, got ${warningEvents.length}`);
 
-    // The real event should be present
-    const realEvents = events.filter((e) => e.update?.sessionUpdate === 'agent_message_chunk');
-    assert.equal(realEvents.length, 1, 'Should have 1 real event');
+    // Should throw AcpStreamIdleError, NOT AcpTimeoutError
+    assert.ok(thrownError, 'Should throw an error on zero-event stall');
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL', `Expected STREAM_IDLE_STALL, got ${thrownError.code}`);
+    assert.equal(thrownError.configuredIdleStallMs, 100, 'Should carry configured idleStallMs');
+  });
+
+  it('#1186: cancel settles prompt stream via sessionCancelCallbacks (real transport)', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'cancel-cb-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Send one event, then go silent — provider never responds to cancel
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'cancel-cb-sess',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'start' } },
+            });
+          });
+          // Deliberately never complete — cancel must break us out
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const events = [];
+    let thrownError = null;
+    const startMs = Date.now();
+
+    // Start streaming
+    const iter = client.promptStream('cancel-cb-sess', 'hello', {
+      idleWarningMs: 500,
+      idleStallMs: 5000, // Very high — cancel must fire before this
+      timeoutMs: 10000,
+    });
+
+    try {
+      // Get the first real event
+      const first = await iter.next();
+      if (!first.done) events.push(first.value);
+
+      // Cancel the session — this should settle promptStream immediately
+      client.cancelSession('cancel-cb-sess');
+
+      // The next .next() should resolve promptly (not wait for idle/budget)
+      for (;;) {
+        const result = await iter.next();
+        if (result.done) break;
+        events.push(result.value);
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+
+    const elapsed = Date.now() - startMs;
+
+    // Should throw AcpStreamIdleError (from cancel callback)
+    assert.ok(thrownError, 'Should throw after cancel');
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL', `Expected STREAM_IDLE_STALL, got ${thrownError.code}`);
+
+    // Should settle promptly — not wait for idle stall (5000ms) or budget (10000ms)
+    assert.ok(elapsed < 2000, `Cancel should settle within 2s, took ${elapsed}ms`);
   });
 
   // ─── pendingTool: suppress stall during MCP tool execution ──

@@ -452,7 +452,11 @@ export class AcpClient {
       }
     };
 
-    /** Schedule the next idle check. Only active after first real event. */
+    /** Schedule the next idle check. Active from prompt start — covers zero-first-event.
+     *  #1186: Previously only started after the first real event, so zero-event stalls
+     *  could only be caught by the budget timer (at idleTtlMs + 60s) with AcpTimeoutError.
+     *  Now the idle watchdog owns the terminal transition for all silence, including
+     *  zero-first-event, producing AcpStreamIdleError at the configured TTL. */
     const scheduleIdleCheck = () => {
       if (idleTimer) clearTimeout(idleTimer);
       if (done) return;
@@ -460,7 +464,7 @@ export class AcpClient {
       // With warning at 20s and stall at 45s, the stall timer fires 25s after warning.
       const nextMs = idleWarningFired ? Math.max(0, idleStallMs - idleWarningMs) : idleWarningMs;
       idleTimer = setTimeout(() => {
-        if (done || eventCount === 0) return;
+        if (done) return;
         // Clamp to at least the threshold that triggered this timer — a threshold
         // event must never report a duration smaller than its own trigger point.
         const rawIdle = Date.now() - lastEventAt;
@@ -599,8 +603,17 @@ export class AcpClient {
     };
     this.sessionCancelCallbacks.set(sessionId, cancelCb);
 
+    // #1186: Initialize lastEventAt so idle watchdog measures from prompt start for
+    // zero-first-event case. When real events arrive, lastEventAt is updated in the listener.
+    lastEventAt = Date.now();
+
     // Start activity-based budget timer — resets on each event from listener
     resetBudget();
+
+    // #1186: Start idle watchdog at prompt start — covers zero-first-event path.
+    // Previously only started from the listener (on first real event), leaving zero-event
+    // stalls uncovered until the budget timer fired at idleTtlMs + 60s.
+    scheduleIdleCheck();
 
     // Fire prompt request — don't await, we'll drain the queue concurrently.
     // sendRequest uses hard ceiling (1h); actual budget is managed by resetBudget().

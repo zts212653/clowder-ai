@@ -3010,32 +3010,55 @@ describe('#1186: idleTtlMs propagation (AcpAgentService → promptStream)', () =
   });
 });
 
-// #1186 P1: Cancel + constrained pool — lease released promptly after cancel
+// #1186 P1: Cancel + constrained pool — lease released promptly after cancel.
+// Real transport-level cancel tests exercising sessionCancelCallbacks are in:
+//   - acp-client.test.js: '#1186: cancel settles prompt stream via sessionCancelCallbacks (real transport)'
+//   - acp-httpstream-client.test.js: '#1186: cancel settles HTTP prompt stream via sessionCancelCallbacks'
+// This test verifies the service-level lease lifecycle: cancel → release → reacquire.
 describe('#1186: cancel settles prompt stream and releases lease (P1)', () => {
   it('cancel releases lease so next invoke succeeds on constrained pool', async () => {
-    const cancelFn = null;
     let releaseCalls = 0;
-    const fakeClient = {
+    // Track cancel callbacks the same way the real clients do
+    const cancelCallbacks = new Map();
+
+    const makeFakeClient = () => ({
       recentCapacitySignal: null,
       onCapacity() {},
       offCapacity() {},
       async newSession() {
-        return { sessionId: 'cancel-lease-sess' };
+        return { sessionId: `sess-${Date.now()}` };
       },
       cancelSession(sessionId) {
-        // This should now settle the prompt stream via cancel callback
-        cancelFn?.(sessionId);
+        // Invoke the cancel callback — same as real AcpClient/AcpHttpStreamClient
+        const cb = cancelCallbacks.get(sessionId);
+        if (cb) cb();
       },
       async *promptStream(sessionId, text, options) {
-        // Simulate a stream that never produces events — waits forever
-        yield {
-          sessionId,
-          update: { sessionUpdate: 'session_init', agentInfo: { name: 'test' } },
+        // Register cancel callback (mirrors real transport implementation)
+        let settledByCancel = false;
+        const cancelCb = () => {
+          settledByCancel = true;
         };
-        // Block forever — cancel must break us out
-        await new Promise(() => {});
+        cancelCallbacks.set(sessionId, cancelCb);
+        try {
+          yield {
+            sessionId,
+            update: { sessionUpdate: 'session_init', agentInfo: { name: 'test' } },
+          };
+          // Block until cancel settles us
+          while (!settledByCancel) {
+            await new Promise((r) => setTimeout(r, 10));
+          }
+          // Cancel callback was invoked — throw like the real implementation
+          const { AcpStreamIdleError } = await import(
+            '../../dist/domains/cats/services/agents/providers/acp/AcpClient.js'
+          );
+          throw new AcpStreamIdleError(sessionId, 0, 0, options?.idleStallMs ?? 1000);
+        } finally {
+          cancelCallbacks.delete(sessionId);
+        }
       },
-    };
+    });
 
     const release1 = () => {
       releaseCalls++;
@@ -3048,7 +3071,7 @@ describe('#1186: cancel settles prompt stream and releases lease (P1)', () => {
           // Second acquire — lease must have been released
           return {
             client: {
-              ...fakeClient,
+              ...makeFakeClient(),
               async *promptStream() {
                 yield {
                   sessionId: 'second-sess',
@@ -3059,7 +3082,7 @@ describe('#1186: cancel settles prompt stream and releases lease (P1)', () => {
             release: () => {},
           };
         }
-        return { client: fakeClient, release: release1 };
+        return { client: makeFakeClient(), release: release1 };
       },
       rememberSession() {},
       closeAll: async () => {},
@@ -3081,7 +3104,7 @@ describe('#1186: cancel settles prompt stream and releases lease (P1)', () => {
     const first = await iter1.next();
     assert.ok(!first.done, 'Should get first event');
 
-    // Abort — this triggers cancelSession which should settle promptStream
+    // Abort — this triggers cancelSession which invokes cancel callback
     ac.abort();
 
     // Drain remaining events (error + done)
@@ -3105,10 +3128,17 @@ describe('#1186: cancel settles prompt stream and releases lease (P1)', () => {
   });
 });
 
-// #1186 P2: idle stall fires before turn budget when thresholds differ
+// #1186 P2: idle stall fires before turn budget when thresholds differ.
+// Real transport-level timer race tests are in:
+//   - acp-client.test.js: '#1186: zero-first-event produces AcpStreamIdleError at configured idleStallMs'
+//   - acp-httpstream-client.test.js: '#1186: zero-first-event produces AcpStreamIdleError at configured idleStallMs (HTTP)'
+//   - acp-client.test.js: 'F149: idle watchdog injects stream_idle_stall and terminates stream'
+// This test verifies the service-level wiring: idleTtlMs + 60s stagger and error mapping.
 describe('#1186: idle stall fires before turn budget (P2)', () => {
-  it('produces AcpStreamIdleError (not AcpTimeoutError) when idle exceeds configured TTL', async () => {
+  it('service passes timeoutMs > idleStallMs and maps idle stall to stream_idle_stall error', async () => {
+    let capturedOpts = null;
     const { AcpStreamIdleError } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpClient.js');
+
     const adapter = new GeminiAcpAdapter({
       catId: 'gemini',
       pool: {
@@ -3118,27 +3148,23 @@ describe('#1186: idle stall fires before turn budget (P2)', () => {
             onCapacity() {},
             offCapacity() {},
             async newSession() {
-              return { sessionId: 'idle-race-sess' };
+              return { sessionId: 'race-opts-sess' };
             },
             cancelSession() {},
             async *promptStream(sessionId, text, options) {
-              // Verify budget > stall
+              capturedOpts = options;
+              // Verify the stagger invariant
               assert.ok(
                 options.timeoutMs > options.idleStallMs,
                 `timeoutMs (${options.timeoutMs}) must exceed idleStallMs (${options.idleStallMs})`,
               );
-              // Emit one event then go silent — idle stall should fire first
+              assert.equal(options.timeoutMs - options.idleStallMs, 60_000, 'Stagger must be exactly 60s');
+              // Simulate idle stall (what the real transport would do)
               yield {
                 sessionId,
                 update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'start' } },
               };
-              // Wait for idle stall to terminate us
-              await new Promise((_, reject) => {
-                setTimeout(
-                  () => reject(new AcpStreamIdleError(sessionId, options.idleStallMs, 1, options.idleStallMs)),
-                  options.idleStallMs + 50,
-                );
-              });
+              throw new AcpStreamIdleError(sessionId, options.idleStallMs, 1, options.idleStallMs);
             },
           },
           release: () => {},
@@ -3156,9 +3182,14 @@ describe('#1186: idle stall fires before turn budget (P2)', () => {
       msgs.push(msg);
     }
 
+    // Verify opts passed correctly
+    assert.ok(capturedOpts, 'promptStream must receive options');
+    assert.equal(capturedOpts.idleStallMs, 200, 'idleStallMs = idleTtlMs');
+    assert.equal(capturedOpts.timeoutMs, 60_200, 'timeoutMs = idleTtlMs + 60_000');
+
+    // Error should map to stream_idle_stall (not turn_budget_exceeded)
     const errorMsg = msgs.find((m) => m.type === 'error');
     assert.ok(errorMsg, 'Should yield error');
-    // The error should be stream_idle_stall, NOT turn_budget_exceeded
     assert.equal(
       errorMsg.errorCode,
       'stream_idle_stall',
