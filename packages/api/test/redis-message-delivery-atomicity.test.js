@@ -145,25 +145,41 @@ describe('delivery-order transition atomicity (PR #1193)', { skip: redisIsolatio
     }
   });
 
-  // 3. cancel vs deliver: exactly one winner
-  it('concurrent cancel+deliver on queued msg: exactly one transition wins', async () => {
+  // 3. cancel vs deliver: exactly one CAS winner (applied-result contract)
+  it('concurrent cancel+deliver on queued msg: exactly one transition wins, return values prove it', async () => {
     const base = Date.now();
     const threadId = 'thread-dlv-cd-3';
     const msg = await createQueued('userA', threadId, base);
 
-    await Promise.all([store.markCanceled(msg.id), store.markDelivered(msg.id, base + 100)]);
+    const [cancelResult, deliverResult] = await Promise.all([
+      store.markCanceled(msg.id),
+      store.markDelivered(msg.id, base + 100),
+    ]);
 
+    // Exactly one CAS transition must return non-null — the loser gets null
+    const winners = [cancelResult, deliverResult].filter(Boolean);
+    assert.equal(winners.length, 1, 'exactly one CAS transition must return non-null');
+
+    // The non-null winner must match canonical delivery status
     const canonical = await store.getById(msg.id);
     assert.ok(
       canonical.deliveryStatus === 'delivered' || canonical.deliveryStatus === 'canceled',
       `status must be delivered or canceled, got: ${canonical.deliveryStatus}`,
     );
 
-    // If delivered, zset scores updated; if canceled, score unchanged from timestamp
+    if (cancelResult) {
+      assert.equal(deliverResult, null, 'deliver must return null when cancel wins');
+      assert.equal(canonical.deliveryStatus, 'canceled', 'cancel winner matches canonical state');
+    } else {
+      assert.equal(cancelResult, null, 'cancel must return null when deliver wins');
+      assert.equal(canonical.deliveryStatus, 'delivered', 'deliver winner matches canonical state');
+      assert.equal(canonical.deliveredAt, base + 100, 'deliveredAt matches the winning delivery');
+    }
+
+    // Zset consistency: delivered → scores updated; canceled → scores unchanged
     if (canonical.deliveryStatus === 'delivered') {
       await assertConsistency(msg.id, 'cancel-loses-to-deliver');
     } else {
-      // canceled: score stays at original timestamp
       const threadScore = await redis.zscore(MessageKeys.thread(threadId), msg.id);
       assert.equal(threadScore, String(base), 'canceled msg score must be original timestamp');
     }
