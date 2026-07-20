@@ -83,6 +83,9 @@ return 1
  * ARGV[1] = message id
  * ARGV[2] = nextUserId
  * ARGV[3] = keyPrefix (e.g. "cat-cafe:") — for constructing user zset keys inside Lua
+ * ARGV[4] = ttlSeconds (string number, "0" = no expiry) — applied atomically to the
+ *           new user zset key, eliminating the crash window between ownership transfer
+ *           and TTL application (codex P2 fix)
  *
  * Derives currentUserId and effectiveOrder (deliveredAt ?? timestamp) from
  * the hash INSIDE the script — never from a stale JS snapshot.
@@ -90,13 +93,14 @@ return 1
  * Returns: applied (-1 | 0 | 1)
  * - -1 → message not found (hash missing)
  * -  0 → currentUserId already equals nextUserId (no-op)
- * -  1 → ownership transferred, user zset membership moved
+ * -  1 → ownership transferred, user zset membership moved, TTL applied
  */
 export const REASSIGN_LUA = `
 local hash = KEYS[1]
 local msgId = ARGV[1]
 local nextUserId = ARGV[2]
 local kp = ARGV[3]
+local ttl = tonumber(ARGV[4])
 
 local curUserId = redis.call('HGET', hash, 'userId')
 if not curUserId then
@@ -113,7 +117,12 @@ end
 
 redis.call('HSET', hash, 'userId', nextUserId)
 redis.call('ZREM', kp .. 'msg:user:' .. curUserId, msgId)
-redis.call('ZADD', kp .. 'msg:user:' .. nextUserId, tonumber(eff), msgId)
+local newUserKey = kp .. 'msg:user:' .. nextUserId
+redis.call('ZADD', newUserKey, tonumber(eff), msgId)
+
+if ttl > 0 then
+  redis.call('EXPIRE', newUserKey, ttl)
+end
 
 return 1
 `;

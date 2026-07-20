@@ -342,15 +342,11 @@ export class RedisMessageStore {
    */
   async reassignUserId(id: string, nextUserId: string): Promise<StoredMessage | null> {
     const hashKey = MessageKeys.detail(id);
-    const applied = (await this.redis.eval(REASSIGN_LUA, 1, hashKey, id, nextUserId, this.keyPrefix)) as number;
+    const ttlArg = String(this.ttlSeconds ?? 0);
+    const applied = (await this.redis.eval(REASSIGN_LUA, 1, hashKey, id, nextUserId, this.keyPrefix, ttlArg)) as number;
 
     // -1 = message not found in hash
     if (applied === -1) return null;
-
-    // Apply TTL to the new user key if configured
-    if (applied === 1 && this.ttlSeconds !== null) {
-      await this.redis.expire(MessageKeys.user(nextUserId), this.ttlSeconds);
-    }
 
     // Always return canonical state from Redis (not stale JS object)
     return this.getById(id);
