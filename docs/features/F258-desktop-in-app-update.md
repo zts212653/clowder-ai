@@ -244,3 +244,13 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
   - P2 fix: portable 用户在下载前检查 installType，避免浪费 600+ MB 带宽
   - 新增 4 条 release cache 单测（round-trip / missing / corrupt / mkdir）
   - 全量 70 tests 通过（58 update-checker + 12 generate-desktop-config）
+- **r4b (2026-07-21, 缅因猫 Sol re-review → 布偶猫 Opus fix)**:
+  - Sol focused re-review of r4 fix: REQUEST CHANGES — 4×P1 + 2×P2
+  - P1-A fix: settle 作用域 — settle/settled 从 response 回调提升到 Promise 作用域，防止 request-error ReferenceError 崩溃主进程
+  - P1-B fix: Windows 安装器路径 — `/LOG=` 含空格路径加双引号；`_spawnInstaller` 改 async 等待 PowerShell exit code 再退出应用
+  - P1-C fix: Redis 全面 fail-closed — 移除 `$env:CI` 特判，所有构建缺 Redis 均失败；`.iss` 移除 `skipifsourcedoesntexist`
+  - P1-D fix: app 外恢复路径 — recovery dialog 显示安装包固定路径 + README 写明路径 + release-notes 模板
+  - P2-A fix: StartsWith 加尾部反斜杠防止误杀兄弟目录进程
+  - P2-B fix: verifyFileIntegrity 改 streaming SHA-256（createReadStream），避免 600-800MB readFileSync
+  - 新增 request-error regression test；downloader tests 改 async
+  - 全量 94 tests 通过（58 checker + 16 downloader + 8 installer + 12 config）
