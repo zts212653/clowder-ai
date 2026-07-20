@@ -51,6 +51,10 @@ Not in scope:
 | plugin `actor.id` | K-1 `PluginCallContext.pluginInstanceId` | K-1 plugin actor | plugin payload parser caps at 256 | producer context must reject before persistence, not fail during projection |
 | `occurredAt` | `StoredMessage.timestamp` projected through `new Date(timestamp).toISOString()` | K-1 envelope/event readers | ordinary producers use `Date.now()` | stores accept `NaN`, infinities, and out-of-Date-range numbers; projection can throw |
 
+### Redis persisted-number representation audit
+
+The executable hash-value versus `ZSCORE` wire matrix and the complete eight-call-site `zscore` consumer audit are recorded in the [bug capsule](../docs/bug-report/k1-invalid-message-timestamp/bug-report.md#persisted-number-representation-matrix). They are acceptance evidence for INV-6 and INV-8: blank/missing hash semantics stay distinct, while finite fractions and Redis's canonical `inf` / `-inf` spellings decode into the same numeric domain used by hydrated cursors.
+
 ## Core invariants
 
 - **INV-1 — pre-write admission:** Invalid identity/timestamp input is rejected before idempotency claims, Redis commands, in-memory append, indexes, or append listeners change.
