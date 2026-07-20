@@ -73,6 +73,7 @@ jobs:
       - name: Build Windows installer
         env:
           CATCAFE_VERSION: ${{ inputs.version }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
           .\desktop\scripts\build-desktop.ps1

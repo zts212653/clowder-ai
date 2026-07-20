@@ -123,9 +123,11 @@ Source: "..\..\.claude\hooks\user-level\*";      DestDir: "{app}\.claude\hooks\u
 ; Desktop assets (icon used by uninstaller entry)
 Source: "..\assets\*";                           DestDir: "{app}\desktop\assets"; \
   Flags: recursesubdirs createallsubdirs
-; Portable Redis for Windows
+; Portable Redis for Windows — skipifsourcedoesntexist because the CI Redis
+; download may fail (GitHub API rate-limit without token). When absent, the
+; service-manager falls back to system Redis or memory store at runtime.
 Source: "..\..\bundled\redis\*";                 DestDir: "{app}\.cat-cafe\redis\windows"; \
-  Flags: recursesubdirs createallsubdirs
+  Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 [Icons]
 Name: "{group}\{#MyAppName}";        Filename: "{app}\desktop-dist\{#MyAppExeName}"

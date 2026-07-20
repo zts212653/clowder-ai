@@ -230,6 +230,10 @@ if (Test-Path (Join-Path $bundledRedis "redis-server.exe")) {
     New-Item -ItemType Directory -Path $bundledRedis -Force | Out-Null
     Write-Host "  Downloading Redis for Windows..."
     $headers = @{ "User-Agent" = "ClowderAI-Build" }
+    # Use GITHUB_TOKEN when available (CI) to avoid API rate-limit (60 req/hr unauthenticated).
+    if ($env:GITHUB_TOKEN) {
+        $headers["Authorization"] = "Bearer $($env:GITHUB_TOKEN)"
+    }
     $releaseApi = "https://api.github.com/repos/redis-windows/redis-windows/releases/latest"
     try {
         $release = Invoke-RestMethod -Uri $releaseApi -Headers $headers -TimeoutSec 30
