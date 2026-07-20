@@ -31,9 +31,9 @@
  * ARGV[2] = deliveredAt (string number)
  * ARGV[3] = keyPrefix (e.g. "cat-cafe:") — for constructing zset keys inside Lua
  *
- * Returns: [applied (0|1), status, userId, deliveredAt]
- * - applied=0 → status was not 'queued', no change made
- * - applied=1 → transitioned to 'delivered', zsets updated
+ * Returns: [applied (0|1)]
+ * JS side discards the return — canonical state is re-read via getById().
+ * Lua handles missing hash: HGET returns false → status ~= 'queued' → no-op.
  */
 export const DELIVER_LUA = `
 local hash = KEYS[1]
@@ -43,9 +43,7 @@ local kp = ARGV[3]
 
 local status = redis.call('HGET', hash, 'deliveryStatus')
 if status ~= 'queued' then
-  local curUserId = redis.call('HGET', hash, 'userId') or ''
-  local curDeliveredAt = redis.call('HGET', hash, 'deliveredAt') or ''
-  return {0, status or '', curUserId, curDeliveredAt}
+  return 0
 end
 
 local userId = redis.call('HGET', hash, 'userId')
@@ -53,12 +51,11 @@ local threadId = redis.call('HGET', hash, 'threadId')
 
 redis.call('HSET', hash, 'deliveredAt', deliveredAt, 'deliveryStatus', 'delivered')
 
-local score = deliveredAt
-redis.call('ZADD', kp .. 'msg:thread:' .. threadId, score, msgId)
-redis.call('ZADD', kp .. 'msg:timeline', score, msgId)
-redis.call('ZADD', kp .. 'msg:user:' .. userId, score, msgId)
+redis.call('ZADD', kp .. 'msg:thread:' .. threadId, tonumber(deliveredAt), msgId)
+redis.call('ZADD', kp .. 'msg:timeline', tonumber(deliveredAt), msgId)
+redis.call('ZADD', kp .. 'msg:user:' .. userId, tonumber(deliveredAt), msgId)
 
-return {1, 'delivered', userId, deliveredAt}
+return 1
 `;
 
 /**
@@ -66,18 +63,17 @@ return {1, 'delivered', userId, deliveredAt}
  *
  * KEYS[1] = detail hash key (auto-prefixed by ioredis)
  *
- * Returns: [applied (0|1), status]
- * - applied=0 → status was not 'queued', no change (protects delivered state)
- * - applied=1 → transitioned to 'canceled', no zset change (score stays at timestamp)
+ * Returns: [applied (0|1)]
+ * Lua handles missing hash: HGET returns false → status ~= 'queued' → no-op.
  */
 export const CANCEL_LUA = `
 local hash = KEYS[1]
 local status = redis.call('HGET', hash, 'deliveryStatus')
 if status ~= 'queued' then
-  return {0, status or ''}
+  return 0
 end
 redis.call('HSET', hash, 'deliveryStatus', 'canceled')
-return {1, 'canceled'}
+return 1
 `;
 
 /**
@@ -91,10 +87,10 @@ return {1, 'canceled'}
  * Derives currentUserId and effectiveOrder (deliveredAt ?? timestamp) from
  * the hash INSIDE the script — never from a stale JS snapshot.
  *
- * Returns: [applied (0|1), userId, effectiveOrder]
- * - applied=-1 → message not found
- * - applied=0 → currentUserId already equals nextUserId
- * - applied=1 → ownership transferred, user zset membership moved
+ * Returns: applied (-1 | 0 | 1)
+ * - -1 → message not found (hash missing)
+ * -  0 → currentUserId already equals nextUserId (no-op)
+ * -  1 → ownership transferred, user zset membership moved
  */
 export const REASSIGN_LUA = `
 local hash = KEYS[1]
@@ -104,11 +100,10 @@ local kp = ARGV[3]
 
 local curUserId = redis.call('HGET', hash, 'userId')
 if not curUserId then
-  return {-1, '', ''}
+  return -1
 end
 if curUserId == nextUserId then
-  local eff = redis.call('HGET', hash, 'deliveredAt') or redis.call('HGET', hash, 'timestamp')
-  return {0, curUserId, eff or ''}
+  return 0
 end
 
 local eff = redis.call('HGET', hash, 'deliveredAt')
@@ -120,5 +115,5 @@ redis.call('HSET', hash, 'userId', nextUserId)
 redis.call('ZREM', kp .. 'msg:user:' .. curUserId, msgId)
 redis.call('ZADD', kp .. 'msg:user:' .. nextUserId, tonumber(eff), msgId)
 
-return {1, nextUserId, eff}
+return 1
 `;

@@ -342,17 +342,13 @@ export class RedisMessageStore {
    */
   async reassignUserId(id: string, nextUserId: string): Promise<StoredMessage | null> {
     const hashKey = MessageKeys.detail(id);
-    const result = (await this.redis.eval(REASSIGN_LUA, 1, hashKey, id, nextUserId, this.keyPrefix)) as [
-      number,
-      string,
-      string,
-    ];
+    const applied = (await this.redis.eval(REASSIGN_LUA, 1, hashKey, id, nextUserId, this.keyPrefix)) as number;
 
     // -1 = message not found in hash
-    if (result[0] === -1) return null;
+    if (applied === -1) return null;
 
     // Apply TTL to the new user key if configured
-    if (result[0] === 1 && this.ttlSeconds !== null) {
+    if (applied === 1 && this.ttlSeconds !== null) {
       await this.redis.expire(MessageKeys.user(nextUserId), this.ttlSeconds);
     }
 
@@ -882,18 +878,8 @@ export class RedisMessageStore {
   async markDelivered(id: string, deliveredAt: number): Promise<StoredMessage | null> {
     assertValidStoredMessageTimestamp(deliveredAt);
     const hashKey = MessageKeys.detail(id);
-    const exists = await this.redis.exists(hashKey);
-    if (!exists) return null;
-
-    const result = (await this.redis.eval(DELIVER_LUA, 1, hashKey, id, String(deliveredAt), this.keyPrefix)) as [
-      number,
-      string,
-      string,
-      string,
-    ];
-
-    // applied=0 means status was not 'queued' — return canonical state
-    // applied=1 means transition succeeded — return canonical state
+    // Lua handles missing hash (HGET returns nil → no-op); getById returns null
+    await this.redis.eval(DELIVER_LUA, 1, hashKey, id, String(deliveredAt), this.keyPrefix);
     return this.getById(id);
   }
 
@@ -905,13 +891,9 @@ export class RedisMessageStore {
    */
   async markCanceled(id: string): Promise<StoredMessage | null> {
     const hashKey = MessageKeys.detail(id);
-    const exists = await this.redis.exists(hashKey);
-    if (!exists) return null;
-
     // Atomic CAS: queued → canceled, anything else → no-op
+    // Lua handles missing hash (HGET returns nil → no-op); getById returns null
     await this.redis.eval(CANCEL_LUA, 1, hashKey);
-
-    // Return canonical state (reflects whether the transition actually applied)
     return this.getById(id);
   }
 
