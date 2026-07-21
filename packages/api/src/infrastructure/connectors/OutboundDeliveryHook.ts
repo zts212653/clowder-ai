@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type CatId, catRegistry, type RichBlock } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
-
+import { resolveInternalRouteUrl } from '../../utils/upload-paths.js';
+import { type ChannelIdentity, type ChannelIdentityRegistry } from './channel-identity.js';
 import { ConnectorMessageFormatter, type MessageEnvelope, type MessageOrigin } from './ConnectorMessageFormatter.js';
 import type { IConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
 import { renderAllRichBlocksPlaintext } from './rich-block-plaintext.js';
@@ -87,12 +88,63 @@ export interface OutboundDeliveryHookOptions {
     | undefined;
   /** Resolve audio blocks with text but no url (voiceMode frontend-only blocks) by synthesizing TTS. */
   readonly resolveVoiceBlocks?: ((blocks: RichBlock[], catId: string) => Promise<RichBlock[]>) | undefined;
+  /** F267: Channel-level identity override registry. Optional — when missing,
+   *  no override is applied (legacy behavior preserved for cat-cafe homes). */
+  readonly channelIdentityRegistry?: ChannelIdentityRegistry | undefined;
+}
+
+/** F267: Result of resolving a per-binding channel identity. */
+export interface ResolvedChannelIdentity {
+  readonly displayName: string;
+  readonly emoji: string;
+  readonly exposeInternalNames: boolean;
+  /** True when override was applied (vs. natural cat displayName). */
+  readonly overridden: boolean;
 }
 
 export class OutboundDeliveryHook {
   private readonly formatter = new ConnectorMessageFormatter();
 
   constructor(private readonly opts: OutboundDeliveryHookOptions) {}
+
+  /**
+   * F267: Resolve the effective identity for a single outbound target.
+   * Pure function (no I/O) so it can be unit-tested without mocks.
+   *
+   * Returns the natural cat identity when no override is configured.
+   */
+  resolveBindingIdentity(
+    binding: { connectorId: string; externalChatId: string },
+    naturalCatDisplayName: string,
+  ): ResolvedChannelIdentity {
+    const natural = naturalCatDisplayName || 'Cat';
+    if (!this.opts.channelIdentityRegistry) {
+      return {
+        displayName: natural,
+        emoji: '🐱',
+        exposeInternalNames: true,
+        overridden: false,
+      };
+    }
+    const override = this.opts.channelIdentityRegistry.resolve(
+      binding.connectorId,
+      binding.externalChatId,
+    );
+    if (!override) {
+      return {
+        displayName: natural,
+        emoji: '🐱',
+        exposeInternalNames: true,
+        overridden: false,
+      };
+    }
+    return {
+      displayName: override.displayName,
+      emoji: override.emoji ?? '🐱',
+      exposeInternalNames: override.exposeInternalNames ?? false,
+      overridden: override.displayName !== natural,
+    };
+  }
 
   /**
    * Return the set of connectorIds bound to a thread.
@@ -154,10 +206,7 @@ export class OutboundDeliveryHook {
     }
 
     const entry = catId ? catRegistry.tryGet(catId) : undefined;
-    const catDisplayName = entry?.config.displayName ?? '';
-    const catEmoji = '🐱';
-    const textPrefix = catDisplayName ? `【${catDisplayName}🐱】\n` : '';
-    const finalContent = `${textPrefix}${content}`;
+    const naturalCatDisplayName = entry?.config.displayName ?? '';
 
     // Resolve audio blocks that have text but no url (voiceMode frontend-only blocks).
     // Without resolution, these would be silently dropped by Phase 6's url check.
@@ -194,10 +243,29 @@ export class OutboundDeliveryHook {
           this.opts.log.warn({ connectorId: binding.connectorId }, 'No adapter registered for connector');
           return;
         }
+        // F267: Per-binding identity resolution. Same thread may bind to multiple
+        // connectors with different identities (e.g. feishu → 咖啡猫; telegram → 砚砚).
+        const bindingIdentity = this.resolveBindingIdentity(binding, naturalCatDisplayName);
+        const catDisplayName = bindingIdentity.displayName;
+        const catEmoji = bindingIdentity.emoji;
+        if (bindingIdentity.overridden) {
+          this.opts.log.info(
+            {
+              connectorId: binding.connectorId,
+              externalChatId: binding.externalChatId,
+              naturalCat: naturalCatDisplayName,
+              effectiveIdentity: catDisplayName,
+              catId,
+            },
+            '[OutboundDeliveryHook] F267: channel identity override applied',
+          );
+        }
+        const textPrefix = catDisplayName ? `【${catDisplayName}${catEmoji}】\n` : '';
+        const finalContent = `${textPrefix}${content}`;
         try {
-          // Phase E: Always prefer sendFormattedReply (interactive card) when adapter supports it.
-          // This ensures each cat's reply is a distinct card with identity header,
-          // preventing Feishu from merging multiple cats' plain-text into one bubble.
+          // Phase E / F230: Prefer sendFormattedReply when adapter supports it.
+          // For Feishu, this now sends plain text (msg_type: 'text') to support @mentions.
+          // Previously was interactive card — changed in F230 per multi-bot feedback.
           if (adapter.sendFormattedReply && !hasRichBlocks) {
             const envelope = threadMeta
               ? this.formatter.format({
@@ -324,21 +392,16 @@ export class OutboundDeliveryHook {
                       const absPath = resolve?.(item.url);
                       if (absPath) {
                         await adapter.sendMedia(binding.externalChatId, { type: 'image', absPath });
-                      } else if (item.url.startsWith('https://')) {
-                        // External HTTPS URL: adapter can download + upload to platform
+                      } else if (
+                        item.url.startsWith('https://') ||
+                        item.url.startsWith('/uploads/') ||
+                        item.url.startsWith('/api/connector-media/')
+                      ) {
+                        const resolvedUrl = resolveInternalRouteUrl(item.url);
                         await adapter.sendMedia(binding.externalChatId, {
                           type: 'image',
-                          url: item.url,
+                          url: resolvedUrl,
                         });
-                      } else if (item.url.startsWith('/uploads/') || item.url.startsWith('/api/connector-media/')) {
-                        // Internal route URL — resolver failed (file not found or resolver not configured).
-                        // Converting to http://localhost is NOT usable by external platforms (e.g. Feishu's
-                        // SSRF protection blocks http:// + localhost). Skip with warning instead of sending
-                        // an unusable localhost URL as text fallback.
-                        this.opts.log.warn(
-                          { blockKind: block.kind, url: item.url, hasResolver: !!resolve },
-                          '[OutboundDeliveryHook] media_gallery image skipped — local file not found (resolver returned undefined)',
-                        );
                       } else {
                         this.opts.log.warn(
                           { blockKind: block.kind, url: item.url },
