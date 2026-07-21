@@ -1,0 +1,78 @@
+{
+  "schemaVersion": "lf-0001.admission-profile-bank.v1",
+  "defaults": {
+    "isolatedWorktree": true,
+    "recoveryWithinOneCommit": true,
+    "productionUserDataInScope": false,
+    "objectiveOutcomeCheck": true,
+    "mutatingWork": true,
+    "crossIndividualReviewPlanned": true,
+    "p1p2ClearancePlanned": true
+  },
+  "profiles": [
+    {
+      "id": "contained-doc-change",
+      "testDataIsolated": "not_applicable",
+      "protectedEffects": [],
+      "expectedAdmission": { "status": "admitted" }
+    },
+    {
+      "id": "runtime-behavior-change",
+      "testDataIsolated": true,
+      "protectedEffects": ["runtimeDelta"],
+      "expectedAdmission": { "status": "blocked", "fallback": "operator" }
+    },
+    {
+      "id": "destructive-history-change",
+      "testDataIsolated": "not_applicable",
+      "protectedEffects": ["destructiveOrIrreversible"],
+      "expectedAdmission": { "status": "blocked", "fallback": "operator" }
+    },
+    {
+      "id": "persistent-data-behavior-change",
+      "testDataIsolated": true,
+      "protectedEffects": ["persistentDataDelta"],
+      "expectedAdmission": { "status": "blocked", "fallback": "operator" }
+    },
+    {
+      "id": "external-delivery-change",
+      "testDataIsolated": true,
+      "protectedEffects": ["externalUserEffect", "runtimeDelta"],
+      "expectedAdmission": { "status": "blocked", "fallback": "operator" }
+    },
+    {
+      "id": "external-persistent-delivery-change",
+      "testDataIsolated": true,
+      "protectedEffects": ["externalUserEffect", "persistentDataDelta"],
+      "expectedAdmission": { "status": "blocked", "fallback": "operator" }
+    },
+    {
+      "id": "public-contract-change",
+      "testDataIsolated": true,
+      "protectedEffects": ["publicContractDelta"],
+      "expectedAdmission": { "status": "blocked", "fallback": "operator" }
+    }
+  ],
+  "assignments": [
+    { "fixtureId": "sop-replay-wire-budget-doc-contract", "profileId": "contained-doc-change" },
+    { "fixtureId": "sop-replay-persistent-governance-root", "profileId": "runtime-behavior-change" },
+    { "fixtureId": "sop-replay-pwa-reconnect-input", "profileId": "runtime-behavior-change" },
+    { "fixtureId": "sop-replay-privacy-spec-removal", "profileId": "destructive-history-change" },
+    { "fixtureId": "sop-replay-home-skill-link-removal", "profileId": "runtime-behavior-change" },
+    { "fixtureId": "sop-replay-invocation-interrupt-self-heal", "profileId": "runtime-behavior-change" },
+    {
+      "fixtureId": "sop-replay-disposable-checkout-writes",
+      "profileId": "persistent-data-behavior-change"
+    },
+    { "fixtureId": "sop-replay-pr-terminal-delivery", "profileId": "external-delivery-change" },
+    { "fixtureId": "sop-replay-coalescer-update-depth", "profileId": "runtime-behavior-change" },
+    { "fixtureId": "sop-replay-chat-store-subscriptions", "profileId": "runtime-behavior-change" },
+    { "fixtureId": "sop-replay-provider-native-effort", "profileId": "public-contract-change" },
+    {
+      "fixtureId": "sop-replay-github-delivery-truth",
+      "profileId": "external-persistent-delivery-change"
+    },
+    { "fixtureId": "sop-replay-platform-lockfile-drift", "profileId": "runtime-behavior-change" },
+    { "fixtureId": "sop-replay-batch-cleanup-review-reversal", "profileId": "runtime-behavior-change" }
+  ]
+}
