@@ -301,11 +301,13 @@
             "scripts/install.ps1",
             "scripts/install-windows-helpers.ps1",
             "packages/api/test/governance/setup-skills-sync.test.js",
-            "packages/api/test/install-script-error-classification.test.js"
+            "packages/api/test/install-script-error-classification.test.js",
+            "packages/api/test/windows-portable-redis-tools.test.js"
           ],
           "testPaths": [
             "packages/api/test/governance/setup-skills-sync.test.js",
-            "packages/api/test/install-script-error-classification.test.js"
+            "packages/api/test/install-script-error-classification.test.js",
+            "packages/api/test/windows-portable-redis-tools.test.js"
           ]
         },
         "strategyFlexibility": {
@@ -477,7 +479,8 @@
             "packages/api/src/infrastructure/email/ci-message-content.ts",
             "packages/api/test/cicd-router.test.js",
             "packages/api/test/scheduler/cicd-check-spec.test.js",
-            "packages/api/test/scheduler/review-feedback-spec.test.js"
+            "packages/api/test/scheduler/review-feedback-spec.test.js",
+            "packages/shared/src/types/task.ts"
           ],
           "testPaths": [
             "packages/api/test/cicd-router.test.js",
@@ -595,9 +598,17 @@
             "packages/web/src/components/SplitPaneView.tsx",
             "packages/web/src/components/ThreadSidebar/ThreadSidebar.tsx",
             "packages/web/src/components/__tests__/chat-store-subscription-scope.test.tsx",
+            "packages/web/src/hooks/__tests__/useChatCommands-override.test.ts",
+            "packages/web/src/hooks/useAgentMessages.ts",
+            "packages/web/src/hooks/useChatCommands.ts",
+            "packages/web/src/hooks/useChatHistory.ts",
+            "packages/web/src/hooks/useChatSocketCallbacks.ts",
             "packages/web/src/hooks/useSendMessage.ts"
           ],
-          "testPaths": ["packages/web/src/components/__tests__/chat-store-subscription-scope.test.tsx"]
+          "testPaths": [
+            "packages/web/src/components/__tests__/chat-store-subscription-scope.test.tsx",
+            "packages/web/src/hooks/__tests__/useChatCommands-override.test.ts"
+          ]
         },
         "strategyFlexibility": {
           "safeOmissions": [],

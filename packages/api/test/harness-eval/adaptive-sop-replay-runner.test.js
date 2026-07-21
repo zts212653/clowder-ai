@@ -143,7 +143,7 @@ function buildPorts(observations = {}) {
             id: dimension.id,
             score: 3,
             rationale: `Synthetic wiring score for ${dimension.id}.`,
-            evidenceRefs: [],
+            evidenceRefs: [`model-grade:${dimension.id}`],
           })),
           unnecessaryProcess: [],
           missingEvidence: [],
@@ -238,5 +238,52 @@ describe('LF-0001 adaptive SOP replay runner', () => {
     assert.equal(artifact.summary.failedTrials, 1);
     assert.equal(artifact.trials[1].status, 'planner_contract_error');
     assert.equal(artifact.eligibleForCapabilityVerdict, false);
+  });
+
+  it('fails rubric and capability eligibility for each failed-check or missing-evidence mode', async () => {
+    const oneCandidateManifest = { ...manifest, candidates: [manifest.candidates[0]] };
+    const buildDeterministicGrader = ({ status = 'pass', evidenceRefs = ['review:receipt'] } = {}) => ({
+      async grade() {
+        return { checks: [{ id: 'review-receipt', status, evidenceRefs }], hardInvariantMisses: [] };
+      },
+    });
+    const buildModelGrader = ({ evidenceRefs = ['model:grade'], missingEvidence = [] } = {}) => ({
+      identity: graderIdentity,
+      async grade(input) {
+        return {
+          dimensions: input.rubric.dimensions.map((dimension) => ({
+            id: dimension.id,
+            score: 4,
+            rationale: 'A high score cannot replace missing evidence.',
+            evidenceRefs,
+          })),
+          unnecessaryProcess: [],
+          missingEvidence,
+        };
+      },
+    });
+
+    for (const ports of [
+      { deterministicGrader: buildDeterministicGrader({ status: 'fail' }), modelGrader: buildModelGrader() },
+      {
+        deterministicGrader: buildDeterministicGrader({ evidenceRefs: [] }),
+        modelGrader: buildModelGrader(),
+      },
+      {
+        deterministicGrader: buildDeterministicGrader(),
+        modelGrader: buildModelGrader({ evidenceRefs: [] }),
+      },
+      {
+        deterministicGrader: buildDeterministicGrader(),
+        modelGrader: buildModelGrader({ missingEvidence: ['independent review receipt'] }),
+      },
+    ]) {
+      const artifact = await runAdaptiveSopReplay(
+        buildRunInput({ manifest: oneCandidateManifest, runMode: 'model_replay', ...ports }),
+      );
+      assert.equal(artifact.summary.rubricPassingTrials, 0);
+      assert.equal(artifact.summary.rubricFailingTrials, 3);
+      assert.equal(artifact.eligibleForCapabilityVerdict, false);
+    }
   });
 });

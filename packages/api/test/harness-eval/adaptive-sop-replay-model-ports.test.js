@@ -193,7 +193,14 @@ describe('LF-0001 structured replay model ports', () => {
       rubric,
       plan: { schemaVersion: 'adaptive-sop-plan.v1' },
       facts: { schemaVersion: 'sop-admission-facts.v1' },
-      admission: { schemaVersion: 'sop-admission-decision.v1', status: 'blocked' },
+      admission: {
+        schemaVersion: 'sop-admission-decision.v1',
+        status: 'blocked',
+        episodeId: 'fixture-one-trial-0',
+        envelopeFingerprint: 'b'.repeat(64),
+        invariant: 'protected surface: effects.authDelta',
+        fallback: 'operator',
+      },
       deterministicGrade: { checks: [], hardInvariantMisses: [] },
       environment: { runnerVersion: 'test' },
     });

@@ -204,7 +204,7 @@ function validateEpisodeSemantics(episode: SopTrialEpisode): string[] {
   const issues: string[] = [];
   collectDuplicateIssues('missingFields', episode.missingFields, issues);
 
-  if (episode.admission.status === 'admitted' && episode.admission.episodeId !== episode.plan.episodeId) {
+  if (episode.admission.episodeId !== episode.plan.episodeId) {
     issues.push('admission.episodeId must match plan.episodeId');
   }
 

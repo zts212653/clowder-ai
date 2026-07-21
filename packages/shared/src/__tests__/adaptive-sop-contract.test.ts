@@ -90,6 +90,29 @@ describe('LF-0001 adaptive SOP shared schemas', () => {
       {
         schemaVersion: SOP_ADMISSION_DECISION_SCHEMA_VERSION,
         status: 'revise',
+        episodeId: 'episode-001',
+        envelopeFingerprint: 'c'.repeat(64),
+        violations: ['worktree isolation is unknown'],
+        requiredFacts: ['worktreeRoot'],
+      },
+      {
+        schemaVersion: SOP_ADMISSION_DECISION_SCHEMA_VERSION,
+        status: 'blocked',
+        episodeId: 'episode-001',
+        envelopeFingerprint: 'd'.repeat(64),
+        invariant: 'production data is in scope',
+        fallback: 'operator',
+      },
+    ]) {
+      expect(SopAdmissionDecisionSchema.safeParse(decision).success).toBe(true);
+    }
+  });
+
+  it('rejects revise and blocked decisions without episode and facts bindings', () => {
+    for (const decision of [
+      {
+        schemaVersion: SOP_ADMISSION_DECISION_SCHEMA_VERSION,
+        status: 'revise',
         violations: ['worktree isolation is unknown'],
         requiredFacts: ['worktreeRoot'],
       },
@@ -100,7 +123,7 @@ describe('LF-0001 adaptive SOP shared schemas', () => {
         fallback: 'operator',
       },
     ]) {
-      expect(SopAdmissionDecisionSchema.safeParse(decision).success).toBe(true);
+      expect(SopAdmissionDecisionSchema.safeParse(decision).success).toBe(false);
     }
   });
 
@@ -111,6 +134,8 @@ describe('LF-0001 adaptive SOP shared schemas', () => {
       admission: {
         schemaVersion: SOP_ADMISSION_DECISION_SCHEMA_VERSION,
         status: 'revise',
+        episodeId: 'episode-001',
+        envelopeFingerprint: 'c'.repeat(64),
         violations: ['diff fingerprint is missing'],
         requiredFacts: ['repositoryFacts.diffFingerprint'],
       },

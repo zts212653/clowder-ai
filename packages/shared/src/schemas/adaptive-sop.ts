@@ -76,6 +76,8 @@ const ReviseDecisionSchema = z
   .object({
     schemaVersion: z.literal(SOP_ADMISSION_DECISION_SCHEMA_VERSION),
     status: z.literal('revise'),
+    episodeId: NonEmptyStringSchema,
+    envelopeFingerprint: Sha256Schema,
     violations: z.array(NonEmptyStringSchema).min(1),
     requiredFacts: z.array(NonEmptyStringSchema).min(1),
   })
@@ -85,6 +87,8 @@ const BlockedDecisionSchema = z
   .object({
     schemaVersion: z.literal(SOP_ADMISSION_DECISION_SCHEMA_VERSION),
     status: z.literal('blocked'),
+    episodeId: NonEmptyStringSchema,
+    envelopeFingerprint: Sha256Schema,
     invariant: NonEmptyStringSchema,
     fallback: z.enum(['full_sop', 'operator']),
   })

@@ -112,21 +112,28 @@ export function parseSopAdmissionFacts(input: unknown): SopAdmissionFacts {
 export function evaluateSopAdmission(planInput: unknown, factsInput: unknown): SopAdmissionDecision {
   const plan = parseAdaptiveSopPlan(planInput);
   const facts = parseSopAdmissionFacts(factsInput);
+  const envelopeFingerprint = buildEnvelopeFingerprint(plan, facts);
 
   const identityBlock = evaluateIdentityAndFactConsistency(plan, facts);
-  if (identityBlock) return blocked(identityBlock, 'full_sop');
+  if (identityBlock) return blocked(plan.episodeId, envelopeFingerprint, identityBlock, 'full_sop');
 
   const protectedFact = firstTrueProtectedFact(facts);
-  if (protectedFact) return blocked(`protected surface: ${protectedFact}`, 'operator');
+  if (protectedFact) {
+    return blocked(plan.episodeId, envelopeFingerprint, `protected surface: ${protectedFact}`, 'operator');
+  }
 
   const containmentFailure = firstContainmentFailure(facts);
-  if (containmentFailure) return blocked(`containment failed: ${containmentFailure}`, 'full_sop');
+  if (containmentFailure) {
+    return blocked(plan.episodeId, envelopeFingerprint, `containment failed: ${containmentFailure}`, 'full_sop');
+  }
 
   const revision = collectRevisionNeeds(facts);
   if (revision.requiredFacts.length > 0) {
     return {
       schemaVersion: SOP_ADMISSION_DECISION_SCHEMA_VERSION,
       status: 'revise',
+      episodeId: plan.episodeId,
+      envelopeFingerprint,
       violations: revision.violations,
       requiredFacts: revision.requiredFacts,
     };
@@ -136,7 +143,7 @@ export function evaluateSopAdmission(planInput: unknown, factsInput: unknown): S
     schemaVersion: SOP_ADMISSION_DECISION_SCHEMA_VERSION,
     status: 'admitted',
     episodeId: plan.episodeId,
-    envelopeFingerprint: buildEnvelopeFingerprint(plan, facts),
+    envelopeFingerprint,
   };
 }
 
@@ -246,10 +253,17 @@ function addRevision(path: string, violation: string, violations: string[], requ
   if (!violations.includes(violation)) violations.push(violation);
 }
 
-function blocked(invariant: string, fallback: 'full_sop' | 'operator'): SopAdmissionDecision {
+function blocked(
+  episodeId: string,
+  envelopeFingerprint: string,
+  invariant: string,
+  fallback: 'full_sop' | 'operator',
+): SopAdmissionDecision {
   return {
     schemaVersion: SOP_ADMISSION_DECISION_SCHEMA_VERSION,
     status: 'blocked',
+    episodeId,
+    envelopeFingerprint,
     invariant,
     fallback,
   };

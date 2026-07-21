@@ -153,6 +153,32 @@ describe('LF-0001 adaptive SOP semantic contract validator', () => {
     assertContractError(() => parseSopTrialEpisode(episode), 'semantic_invariant_violation');
   });
 
+  it('binds revise and blocked decisions to the same episode and observed-facts fingerprint', () => {
+    for (const admission of [
+      {
+        schemaVersion: 'sop-admission-decision.v1',
+        status: 'revise',
+        episodeId: 'other-episode',
+        envelopeFingerprint: 'c'.repeat(64),
+        violations: ['diff fingerprint is missing'],
+        requiredFacts: ['repository.diffFingerprint'],
+      },
+      {
+        schemaVersion: 'sop-admission-decision.v1',
+        status: 'blocked',
+        episodeId: 'other-episode',
+        envelopeFingerprint: 'd'.repeat(64),
+        invariant: 'protected surface: effects.authDelta',
+        fallback: 'operator',
+      },
+    ]) {
+      assertContractError(
+        () => parseSopTrialEpisode({ ...validEpisode(), admission }),
+        'semantic_invariant_violation',
+      );
+    }
+  });
+
   it('keeps telemetryComplete consistent with missing values and paths', () => {
     const episode = validEpisode();
     episode.cost.inputTokens = 'missing';

@@ -253,7 +253,10 @@ export async function runAdaptiveSopReplay(input: AdaptiveSopReplayRunInput): Pr
 
   const summary = summarizeTrials(run.manifest.candidates.length, run.trialsPerCandidate, trials);
   const eligibleForCapabilityVerdict =
-    run.runMode === 'model_replay' && summary.failedTrials === 0 && summary.hardInvariantMisses === 0;
+    run.runMode === 'model_replay' &&
+    summary.failedTrials === 0 &&
+    summary.hardInvariantMisses === 0 &&
+    summary.rubricFailingTrials === 0;
 
   return {
     schemaVersion: ADAPTIVE_SOP_REPLAY_ARTIFACT_SCHEMA_VERSION,
@@ -447,9 +450,18 @@ function passesRubric(
 ): boolean {
   return (
     deterministicGrade.hardInvariantMisses.length === 0 &&
+    deterministicGrade.checks.every(
+      (check) => check.status !== 'fail' && (check.status === 'not_applicable' || hasEvidence(check.evidenceRefs)),
+    ) &&
+    modelGrade.missingEvidence.length === 0 &&
+    modelGrade.dimensions.every((dimension) => hasEvidence(dimension.evidenceRefs)) &&
     weightedScore >= rubric.gradingProtocol.passingScore &&
     modelGrade.dimensions.every((dimension) => dimension.score >= rubric.gradingProtocol.minimumDimensionScore)
   );
+}
+
+function hasEvidence(evidenceRefs: readonly string[]): boolean {
+  return evidenceRefs.some((reference) => reference.trim().length > 0);
 }
 
 function summarizeTrials(

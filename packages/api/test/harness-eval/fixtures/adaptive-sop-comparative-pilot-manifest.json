@@ -6,20 +6,28 @@
   "baseCommit": "8335b91253f690324f29739ef12ad8575fdb897b",
   "modelInputSha256": "9fc41f80bd6c5ce1d92208d02e372129a99af663dc72b2950193401eadd81ce4",
   "model": { "provider": "openai", "modelId": "gpt-5.6-sol" },
+  "fixture": {
+    "mutatingWork": true,
+    "protectedSurface": false,
+    "objectiveOutcomeCheck": true
+  },
   "trialsPerArm": 3,
   "arms": [
     {
       "id": "full_sop",
+      "harnessVersion": "lf-0001.full-sop-v1",
       "planContract": "not_applicable",
       "executionPolicy": "current development SOP"
     },
     {
       "id": "free_plan_hard_gates",
+      "harnessVersion": "lf-0001.free-plan-hard-gates-v1",
       "planContract": "not_applicable",
       "executionPolicy": "model-directed strategy with the same deterministic hard gates"
     },
     {
       "id": "adaptive_plan_hard_gates",
+      "harnessVersion": "lf-0001.adaptive-plan-hard-gates-v1",
       "planContract": "lf-0001.plan-body-response.v2",
       "executionPolicy": "structured adaptive plan with the same deterministic hard gates"
     }

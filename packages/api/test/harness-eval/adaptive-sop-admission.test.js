@@ -108,6 +108,8 @@ describe('LF-0001 deterministic SOP admission envelope', () => {
     });
 
     assert.equal(decision.status, 'revise');
+    assert.equal(decision.episodeId, validPlan.episodeId);
+    assert.match(decision.envelopeFingerprint, /^[0-9a-f]{64}$/);
     assert.ok(decision.requiredFacts.includes('repository.diffFingerprint'));
     assert.ok(decision.requiredFacts.includes('effects.authDelta'));
   });
@@ -118,12 +120,12 @@ describe('LF-0001 deterministic SOP admission envelope', () => {
       effects: { ...validFacts.effects, authDelta: true },
     });
 
-    assert.deepEqual(decision, {
-      schemaVersion: 'sop-admission-decision.v1',
-      status: 'blocked',
-      invariant: 'protected surface: effects.authDelta',
-      fallback: 'operator',
-    });
+    assert.equal(decision.schemaVersion, 'sop-admission-decision.v1');
+    assert.equal(decision.status, 'blocked');
+    assert.equal(decision.episodeId, validPlan.episodeId);
+    assert.match(decision.envelopeFingerprint, /^[0-9a-f]{64}$/);
+    assert.equal(decision.invariant, 'protected surface: effects.authDelta');
+    assert.equal(decision.fallback, 'operator');
   });
 
   it('falls back to the full SOP outside worktree or rollback containment', () => {
@@ -146,12 +148,12 @@ describe('LF-0001 deterministic SOP admission envelope', () => {
       validFacts,
     );
 
-    assert.deepEqual(decision, {
-      schemaVersion: 'sop-admission-decision.v1',
-      status: 'blocked',
-      invariant: 'contradictory repository fact: branch',
-      fallback: 'full_sop',
-    });
+    assert.equal(decision.schemaVersion, 'sop-admission-decision.v1');
+    assert.equal(decision.status, 'blocked');
+    assert.equal(decision.episodeId, validPlan.episodeId);
+    assert.match(decision.envelopeFingerprint, /^[0-9a-f]{64}$/);
+    assert.equal(decision.invariant, 'contradictory repository fact: branch');
+    assert.equal(decision.fallback, 'full_sop');
   });
 
   it('requires objective verification and mutating-work review plans', () => {

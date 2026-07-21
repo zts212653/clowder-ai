@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { fingerprintAdaptiveSopComparativePilotManifest } from '../../dist/infrastructure/harness-eval/sop/adaptive-sop-comparative-pilot.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtureRoot = join(here, 'fixtures');
+const repositoryRoot = resolve(here, '../../../..');
 
 function readJson(name) {
   return JSON.parse(readFileSync(join(fixtureRoot, name), 'utf8'));
@@ -71,6 +74,41 @@ describe('LF-0001 adaptive SOP replay manifest', () => {
     }
   });
 
+  it('resolves every provenance commit and proves complete scopes against the Git diff', () => {
+    for (const candidate of manifest.candidates) {
+      const { baseCommit, outcomeCommit } = candidate.graderOnly.provenance;
+      for (const commit of [baseCommit, outcomeCommit]) {
+        assert.equal(
+          spawnSync('git', ['cat-file', '-e', `${commit}^{commit}`], { cwd: repositoryRoot }).status,
+          0,
+          `${candidate.fixtureId} references missing commit ${commit}`,
+        );
+      }
+      assert.equal(
+        spawnSync('git', ['merge-base', '--is-ancestor', baseCommit, outcomeCommit], {
+          cwd: repositoryRoot,
+        }).status,
+        0,
+        `${candidate.fixtureId} base is not an ancestor of outcome`,
+      );
+
+      if (candidate.graderOnly.outcomeEvidence.scope !== 'complete') continue;
+      const actualPaths = execFileSync('git', ['diff', '--name-only', `${baseCommit}..${outcomeCommit}`], {
+        cwd: repositoryRoot,
+        encoding: 'utf8',
+      })
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .sort();
+      assert.deepEqual(
+        actualPaths,
+        [...candidate.graderOnly.outcomeEvidence.changedPaths].sort(),
+        `${candidate.fixtureId} complete scope must equal its Git diff`,
+      );
+    }
+  });
+
   it('projects only modelInput and keeps answer-bearing fields grader-only', () => {
     assert.equal(manifest.modelProjection.candidatePath, 'candidates[].modelInput');
     assert.deepEqual(manifest.modelProjection.excludedSiblingFields, ['graderOnly']);
@@ -129,6 +167,7 @@ describe('LF-0001 adaptive SOP replay manifest', () => {
     const candidate = manifest.candidates.find((entry) => entry.fixtureId === comparativePilot.fixtureId);
     assert.ok(candidate);
     assert.equal(comparativePilot.schemaVersion, 'lf-0001.comparative-pilot-manifest.v1');
+    assert.match(fingerprintAdaptiveSopComparativePilotManifest(comparativePilot), /^[0-9a-f]{64}$/);
     assert.equal(comparativePilot.sourcePullRequest, candidate.graderOnly.provenance.sourcePullRequest);
     assert.equal(comparativePilot.baseCommit, candidate.graderOnly.provenance.baseCommit);
     assert.equal(
@@ -136,6 +175,7 @@ describe('LF-0001 adaptive SOP replay manifest', () => {
       createHash('sha256').update(canonicalJson(candidate.modelInput)).digest('hex'),
     );
     assert.equal(comparativePilot.trialsPerArm, 3);
+    assert.ok(comparativePilot.arms.every((arm) => arm.harnessVersion.length > 0));
     assert.deepEqual(
       comparativePilot.arms.map((arm) => arm.id),
       ['full_sop', 'free_plan_hard_gates', 'adaptive_plan_hard_gates'],
