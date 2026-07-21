@@ -3341,3 +3341,138 @@ describe('#1186: idle stall fires before turn budget (P2)', () => {
     );
   });
 });
+
+// #1186 P1: Cancel must settle the pending prompt sendRequest so a non-multiplexed
+// process can be safely reused. Without the fix, the sendRequest promise stays alive
+// with a 1h timer after the generator exits, leaving a stale entry in `pending`.
+describe('#1186: cancel settles pending prompt request for safe non-multiplexed reuse', () => {
+  let pool = null;
+
+  afterEach(async () => {
+    if (pool) {
+      await pool.closeAll();
+      pool = null;
+    }
+  });
+
+  it('second prompt succeeds on same single-flight process after cancelled prompt is settled', async () => {
+    const { child, clientStdin, agentStdout, ee } = createMockChild();
+    let sessionCounter = 0;
+    const capturedCancels = [];
+    const promptsBySession = new Map();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          setImmediate(() =>
+            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT }) + '\n'),
+          );
+        } else if (msg.method === 'session/new') {
+          sessionCounter++;
+          const sid = `sess-${sessionCounter}`;
+          setImmediate(() =>
+            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: sid } }) + '\n'),
+          );
+        } else if (msg.method === 'session/prompt') {
+          const sid = msg.params.sessionId;
+          promptsBySession.set(sid, msg.id);
+
+          if (sid === 'sess-1') {
+            // Emit one event then go silent — never resolve prompt A.
+            // Provider ignores session/cancel — the worst case.
+            setImmediate(() => {
+              agentStdout.write(
+                JSON.stringify({
+                  jsonrpc: '2.0',
+                  method: 'session/update',
+                  params: {
+                    sessionId: sid,
+                    update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'start-A' } },
+                  },
+                }) + '\n',
+              );
+            });
+            // Deliberately NEVER send the prompt response for sess-1
+          } else if (sid === 'sess-2') {
+            // Second prompt — respond normally
+            setImmediate(() => {
+              agentStdout.write(
+                JSON.stringify({
+                  jsonrpc: '2.0',
+                  method: 'session/update',
+                  params: {
+                    sessionId: sid,
+                    update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'result-B' } },
+                  },
+                }) + '\n',
+              );
+              setTimeout(
+                () =>
+                  agentStdout.write(
+                    JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } }) + '\n',
+                  ),
+                10,
+              );
+            });
+          }
+        } else if (msg.method === 'session/cancel') {
+          capturedCancels.push(msg.params?.sessionId);
+          // Provider IGNORES cancel — does NOT resolve the pending prompt
+        }
+      }
+    });
+
+    // Non-multiplexed pool with maxLiveProcesses=1 — forces process reuse
+    pool = new AcpProcessPool(
+      { maxLiveProcesses: 1, idleTtlMs: 999_999, healthCheckIntervalMs: 999_999 },
+      {},
+      () => new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child }),
+    );
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      providerName: 'google',
+      modelName: 'gemini-acp',
+    });
+
+    // --- Invocation A: start, get one event, then abort ---
+    const ac1 = new AbortController();
+    const msgs1 = [];
+    const invoke1 = (async () => {
+      for await (const msg of adapter.invoke('task-A', { signal: ac1.signal })) {
+        msgs1.push(msg);
+        // Abort after receiving the first real text event
+        if (msg.type === 'text') {
+          ac1.abort();
+        }
+      }
+    })();
+    await invoke1;
+
+    // Verify cancel was sent
+    assert.ok(capturedCancels.includes('sess-1'), `Should cancel sess-1, got: ${JSON.stringify(capturedCancels)}`);
+
+    // After cancel + lease release, the pending prompt request must be settled.
+    const metrics = pool.getMetrics();
+    assert.equal(metrics.activeLeaseCount, 0, 'All leases should be released after cancel');
+
+    // --- Invocation B: should reuse the same process and succeed ---
+    const msgs2 = [];
+    for await (const msg of adapter.invoke('task-B')) {
+      msgs2.push(msg);
+    }
+
+    const types2 = msgs2.map((m) => m.type);
+    assert.ok(types2.includes('text'), `Invocation B should have text, got: ${JSON.stringify(types2)}`);
+    assert.ok(types2.includes('done'), `Invocation B should have done, got: ${JSON.stringify(types2)}`);
+
+    // The critical assertion: invocation B got sess-2, proving the process was
+    // reused (not stuck) and the second prompt was sent cleanly without the
+    // first prompt's stale pending entry interfering.
+    assert.equal(promptsBySession.size, 2, 'Both prompts should have been received by the provider');
+    assert.ok(promptsBySession.has('sess-2'), 'Provider should have received prompt for sess-2');
+  });
+});

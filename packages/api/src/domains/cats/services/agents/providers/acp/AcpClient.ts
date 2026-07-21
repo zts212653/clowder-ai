@@ -150,6 +150,14 @@ export class AcpClient {
    * the lease pinned for the full TTL.
    */
   private readonly sessionCancelCallbacks = new Map<string, () => void>();
+  /**
+   * #1186 P1: Track the pending request ID for each session's prompt so that
+   * cancelSession() can settle (reject) the underlying sendRequest promise.
+   * Without this, the promise + its 1h timer stay alive after the generator
+   * exits, leaving a stale entry in `pending` — a non-multiplexed process
+   * could be reused while the old request is unresolved.
+   */
+  private readonly sessionPromptPendingIds = new Map<string, string>();
   /** Client-level capacity signal — always captured regardless of listeners.
    *  Fallback for delayed stderr arriving after invoke listener is removed. */
   private _recentCapacitySignal: AcpCapacitySignal | null = null;
@@ -618,7 +626,17 @@ export class AcpClient {
 
     // Fire prompt request — don't await, we'll drain the queue concurrently.
     // sendRequest uses hard ceiling (1h); actual budget is managed by resetBudget().
-    this.sendRequest(ACP_METHODS.sessionPrompt, { sessionId, prompt: [{ type: 'text', text }] }, HARD_CEILING_MS)
+    // #1186 P1: Pre-generate the request ID so cancelSession() can settle the pending
+    // entry. Without this, the sendRequest promise stays alive after generator exit,
+    // leaving a stale entry in `pending` that blocks safe non-multiplexed reuse.
+    const promptRequestId = randomUUID();
+    this.sessionPromptPendingIds.set(sessionId, promptRequestId);
+    this.sendRequest(
+      ACP_METHODS.sessionPrompt,
+      { sessionId, prompt: [{ type: 'text', text }] },
+      HARD_CEILING_MS,
+      promptRequestId,
+    )
       .then((resp) => {
         const result = resp.result as unknown as AcpPromptResult;
         stopReason = result.stopReason;
@@ -656,6 +674,7 @@ export class AcpClient {
       if (idleTimer) clearTimeout(idleTimer);
       if (budgetTimer) clearTimeout(budgetTimer);
       this.sessionCancelCallbacks.delete(sessionId);
+      this.sessionPromptPendingIds.delete(sessionId);
       this.capacityListeners.delete(capacityInjector);
       const idx = this.notificationListeners.indexOf(listener);
       if (idx >= 0) this.notificationListeners.splice(idx, 1);
@@ -679,6 +698,23 @@ export class AcpClient {
     // Settle the local prompt stream immediately
     const cb = this.sessionCancelCallbacks.get(sessionId);
     if (cb) cb();
+    // #1186 P1: Settle the pending sendRequest promise for this session's prompt.
+    // The cancel callback above exits the generator, which releases the lease.
+    // But without settling the underlying request, the sendRequest promise stays
+    // alive with its 1h timer, leaving a stale entry in `pending`. For a non-
+    // multiplexed process that gets reused after lease release, the stale entry
+    // means the old prompt response (if it ever arrives) would be misrouted.
+    // Rejecting here clears the timer and removes the entry, making the process
+    // safe for immediate reuse.
+    const promptReqId = this.sessionPromptPendingIds.get(sessionId);
+    if (promptReqId) {
+      const entry = this.pending.get(promptReqId);
+      if (entry) {
+        this.pending.delete(promptReqId);
+        entry.reject(new Error(`Session ${sessionId} cancelled — prompt request settled`));
+      }
+      this.sessionPromptPendingIds.delete(sessionId);
+    }
   }
 
   async close(): Promise<void> {
@@ -721,6 +757,12 @@ export class AcpClient {
   /** Unregister a capacity-signal listener. */
   offCapacity(fn: (signal: AcpCapacitySignal) => void): void {
     this.capacityListeners.delete(fn);
+  }
+
+  /** Number of pending (unresolved) sendRequest entries. Used by tests to verify
+   *  cancel settles the underlying prompt request and doesn't leave stale entries. */
+  get pendingRequestCount(): number {
+    return this.pending.size;
   }
 
   /** Most recent capacity signal observed on this client (provider-level, not per-invoke). */
@@ -827,12 +869,18 @@ export class AcpClient {
     });
   }
 
-  private sendRequest(method: string, params: Record<string, unknown>, timeoutMs = 60_000): Promise<AcpResponse> {
+  private sendRequest(
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs = 60_000,
+    /** Pre-generated request ID — used by promptStream to enable cancel-time settlement. */
+    preGeneratedId?: string,
+  ): Promise<AcpResponse> {
     if (!this.child?.stdin?.writable) {
       return Promise.reject(new Error('ACP process stdin not writable'));
     }
 
-    const id = randomUUID();
+    const id = preGeneratedId ?? randomUUID();
     const msg = { jsonrpc: '2.0', method, id, params };
     const payload = JSON.stringify(msg);
     log.info(

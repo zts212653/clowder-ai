@@ -959,6 +959,115 @@ describe('AcpClient', () => {
     assert.ok(elapsed < 2000, `Cancel should settle within 2s, took ${elapsed}ms`);
   });
 
+  it('#1186: short TTL regression — idleStallMs < idleWarningMs terminates at stall threshold (stdio)', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'short-ttl-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Never send events — zero-first-event with short TTL
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const startMs = Date.now();
+    let thrownError = null;
+    try {
+      // idleStallMs (100ms) < idleWarningMs (20_000ms default).
+      // Without Math.min fix, initial check schedules at 20_000ms — way too late.
+      // With fix, initial check schedules at Math.min(20_000, 100) = 100ms.
+      for await (const _event of client.promptStream('short-ttl-sess', 'hello', {
+        idleStallMs: 100,
+        // idleWarningMs defaults to 20_000
+        timeoutMs: 30_000,
+      })) {
+        // Should not receive any events
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+    const elapsed = Date.now() - startMs;
+
+    assert.ok(thrownError, 'Should throw on short-TTL zero-event stall');
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL', `Expected STREAM_IDLE_STALL, got ${thrownError.code}`);
+    assert.equal(thrownError.configuredIdleStallMs, 100, 'Error should carry configured 100ms threshold');
+    // Must terminate near 100ms, not at 20_000ms (the warning interval)
+    assert.ok(elapsed < 2000, `Should terminate near 100ms, took ${elapsed}ms`);
+  });
+
+  it('#1186: cancel settles pending sendRequest — no stale entries in pending map (stdio)', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'pending-check-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Emit one event, then go silent — never resolve prompt
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'pending-check-sess',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hello' } },
+            });
+          });
+          // Provider ignores cancel, never resolves prompt
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const iter = client.promptStream('pending-check-sess', 'test', {
+      idleWarningMs: 500,
+      idleStallMs: 5000,
+      timeoutMs: 10000,
+    });
+
+    // Get the first event
+    const first = await iter.next();
+    assert.ok(!first.done, 'Should receive first event');
+
+    // Before cancel: there should be a pending prompt request
+    assert.ok(
+      client.pendingRequestCount >= 1,
+      `Should have pending request before cancel, got ${client.pendingRequestCount}`,
+    );
+
+    // Cancel — should settle both the generator AND the pending request
+    client.cancelSession('pending-check-sess');
+
+    // Drain the iterator
+    try {
+      for (;;) {
+        const result = await iter.next();
+        if (result.done) break;
+      }
+    } catch (_err) {
+      // Expected — cancel throws AcpStreamIdleError
+    }
+
+    // After cancel: no stale entries should remain
+    assert.equal(
+      client.pendingRequestCount,
+      0,
+      `No pending requests should remain after cancel, got ${client.pendingRequestCount}`,
+    );
+  });
+
   // ─── pendingTool: suppress stall during MCP tool execution ──
 
   it('pendingTool: tool_call suppresses stall, resumes watchdog on non-tool event', async () => {

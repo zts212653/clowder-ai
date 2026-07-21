@@ -1026,4 +1026,66 @@ describe('AcpHttpStreamClient', () => {
     // Should settle promptly — not wait for idle stall (5s) or budget (10s)
     assert.ok(elapsed < 2000, `HTTP cancel should settle within 2s, took ${elapsed}ms`);
   });
+
+  it('#1186: short TTL regression — idleStallMs < idleWarningMs terminates at stall threshold (HTTP)', async () => {
+    let promptResponse = null;
+
+    server = await startJsonRpcServer((message, res) => {
+      if (message.method === 'initialize') {
+        return { jsonrpc: '2.0', id: message.id, result: INIT_RESULT };
+      }
+      if (message.method === 'session/new') {
+        return { jsonrpc: '2.0', id: message.id, result: { sessionId: 'http-short-ttl' } };
+      }
+      if (message.method === 'session/prompt') {
+        promptResponse = res;
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+        res.flushHeaders();
+        // Never send any events — zero-first-event with short TTL
+        return undefined;
+      }
+      return { jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'not found' } };
+    });
+    const { child, agentStdout } = createMockChild();
+    const port = serverPort(server);
+
+    client = new AcpHttpStreamClient({
+      command: 'fake-http-acp',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => {
+        setImmediate(() => agentStdout.write(`Listening on port ${port}\n`));
+        return child;
+      },
+      portDiscoveryTimeoutMs: 500,
+    });
+
+    await client.initialize();
+    const session = await client.newSession();
+
+    const startMs = Date.now();
+    let thrownError = null;
+    try {
+      // idleStallMs (100ms) < idleWarningMs (20_000ms default).
+      // Without Math.min fix, initial check schedules at 20_000ms — way too late.
+      for await (const _event of client.promptStream(session.sessionId, 'hello', {
+        idleStallMs: 100,
+        // idleWarningMs defaults to 20_000
+        timeoutMs: 30_000,
+      })) {
+        // Should not receive any events
+      }
+    } catch (err) {
+      thrownError = err;
+    } finally {
+      if (promptResponse && !promptResponse.writableEnded) promptResponse.end();
+    }
+    const elapsed = Date.now() - startMs;
+
+    assert.ok(thrownError, 'Should throw on short-TTL zero-event stall (HTTP)');
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL', `Expected STREAM_IDLE_STALL, got ${thrownError.code}`);
+    assert.equal(thrownError.configuredIdleStallMs, 100, 'Error should carry configured 100ms threshold');
+    // Must terminate near 100ms, not at 20_000ms (the warning interval)
+    assert.ok(elapsed < 2000, `Should terminate near 100ms, took ${elapsed}ms`);
+  });
 });
