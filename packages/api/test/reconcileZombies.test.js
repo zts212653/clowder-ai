@@ -698,6 +698,122 @@ describe('F220 Phase 2a: buildQueueConvergence real adapter (Sol P2-3)', () => {
     assert.equal(processingAfter[0].id, liveEntryId, 'surviving entry must be the live one');
   });
 
+  it('#972: batch siblings rolled back during zombie convergence (codex R10 P1)', async () => {
+    // Scenario: executeEntry batched 2 sibling user messages (same targetCats + intent).
+    // The primary becomes a zombie. removeStaleProcessing removes the primary and
+    // rolls back siblings (batchParentId === primary.id) to 'queued' so they retry.
+    const queue = new InvocationQueue();
+    const { qp } = buildQueueProcessorWithQueue(queue);
+
+    // Enqueue primary entry
+    const primaryResult = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: '@codex first message',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+    const primaryId = primaryResult.entry.id;
+    queue.markProcessingById('t1', primaryId);
+
+    // Enqueue two sibling entries (simulating collectUserBatch)
+    const sib1Result = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: '@codex second message',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+    const sib1Id = sib1Result.entry.id;
+    // Mark processing with batchParentId = primary entry ID (as executeEntry does)
+    queue.markProcessingById('t1', sib1Id, primaryId);
+
+    const sib2Result = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: '@codex third message',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+    const sib2Id = sib2Result.entry.id;
+    queue.markProcessingById('t1', sib2Id, primaryId);
+
+    // Verify: 3 processing entries
+    const before = queue.list('t1', 'u1');
+    assert.equal(before.filter((e) => e.status === 'processing').length, 3, '3 processing before');
+
+    // Call adapter — remove primary entry
+    const adapter = qp.buildQueueConvergence();
+    const result = adapter.removeStaleProcessing('t1', 'codex', 'u1', `queue-${primaryId}`);
+
+    assert.equal(result.removed, true, 'primary removed');
+    assert.equal(result.entryId, primaryId);
+    assert.deepEqual(result.rolledBackSiblings.sort(), [sib1Id, sib2Id].sort(), 'both siblings rolled back');
+
+    // Verify: primary gone, siblings back to 'queued'
+    const after = queue.list('t1', 'u1');
+    assert.equal(after.filter((e) => e.id === primaryId).length, 0, 'primary entry removed');
+    const sib1After = after.find((e) => e.id === sib1Id);
+    const sib2After = after.find((e) => e.id === sib2Id);
+    assert.equal(sib1After.status, 'queued', 'sibling 1 rolled back to queued');
+    assert.equal(sib2After.status, 'queued', 'sibling 2 rolled back to queued');
+  });
+
+  it('#972: batch sibling rollback does NOT affect non-sibling processing entries', async () => {
+    // Ensure that processing entries without batchParentId (independently dispatched)
+    // are NOT rolled back — only entries with matching batchParentId are affected.
+    const queue = new InvocationQueue();
+    const { qp } = buildQueueProcessorWithQueue(queue);
+
+    // Primary zombie entry
+    const primaryResult = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: '@codex zombie message',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+    const primaryId = primaryResult.entry.id;
+    queue.markProcessingById('t1', primaryId);
+
+    // Independent live entry (no batchParentId — dispatched by winner)
+    const liveResult = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: '@codex live follow-up',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+    const liveId = liveResult.entry.id;
+    queue.markProcessingById('t1', liveId); // No batchParentId
+
+    const adapter = qp.buildQueueConvergence();
+    const result = adapter.removeStaleProcessing('t1', 'codex', 'u1', `queue-${primaryId}`);
+
+    assert.equal(result.removed, true);
+    assert.deepEqual(result.rolledBackSiblings, [], 'no siblings rolled back');
+
+    // Live entry must remain processing
+    const after = queue.list('t1', 'u1');
+    const liveAfter = after.find((e) => e.id === liveId);
+    assert.equal(liveAfter.status, 'processing', 'independent entry stays processing');
+  });
+
   it('P1-1: no idempotencyKey → removed=false (safe default)', async () => {
     const queue = new InvocationQueue();
     const { qp } = buildQueueProcessorWithQueue(queue);

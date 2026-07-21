@@ -60,7 +60,7 @@ export interface QueueConvergence {
     catId: string,
     userId: string,
     idempotencyKey?: string,
-  ): { removed: boolean; entryId?: string; primaryCatId?: string };
+  ): { removed: boolean; entryId?: string; primaryCatId?: string; rolledBackSiblings?: string[] };
   /** Release the in-memory processing slot for this thread+cat. */
   releaseSlot(threadId: string, catId: string): void;
   /** Kick the queue: dispatch waiting entries now that the slot is free.
@@ -198,7 +198,13 @@ async function processZombie(
               deps.queueConvergence.releaseSlot(current.threadId, slotCat);
               deps.queueConvergence.tryDispatchNext(current.threadId, slotCat);
               log.info(
-                { threadId: current.threadId, catId: zombie.catId, slotCat, entryId: qr.entryId },
+                {
+                  threadId: current.threadId,
+                  catId: zombie.catId,
+                  slotCat,
+                  entryId: qr.entryId,
+                  rolledBackSiblings: qr.rolledBackSiblings?.length ?? 0,
+                },
                 '[reconcile-zombies] terminal-path queue convergence: removed stale entry + released slot + kicked queue',
               );
             }

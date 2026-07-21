@@ -383,8 +383,30 @@ export class QueueProcessor {
         const removed = this.deps.queue.removeProcessed(threadId, userId, entry.id);
         if (!removed) return { removed: false };
         const primaryCatId = entry.targetCats[0];
+        // F220 2a (codex R10 P1): roll back batch siblings. When executeEntry
+        // batches adjacent user messages, siblings are marked processing with
+        // batchParentId = primary entry ID. If the primary becomes a zombie,
+        // the hung executeEntry's finally block never runs, leaving siblings
+        // stuck in 'processing'. Roll them back to 'queued' so they can retry.
+        const rolledBackSiblings: string[] = [];
+        const remainingEntries = this.deps.queue.list(threadId, userId);
+        for (const sib of remainingEntries) {
+          if (sib.status === 'processing' && sib.batchParentId === entry.id) {
+            if (this.deps.queue.rollbackProcessing(threadId, sib.id)) {
+              rolledBackSiblings.push(sib.id);
+            }
+          }
+        }
         this.deps.log.info(
-          { threadId, catId, userId, entryId: entry.id, primaryCatId, idempotencyKey },
+          {
+            threadId,
+            catId,
+            userId,
+            entryId: entry.id,
+            primaryCatId,
+            idempotencyKey,
+            rolledBackSiblings: rolledBackSiblings.length,
+          },
           '[F220 2a] removed stale processing queue entry (precise entry identity)',
         );
         // Emit per-user queue_updated so the frontend reflects the removal.
@@ -397,7 +419,7 @@ export class QueueProcessor {
           this.deps.messageStore,
           'zombie_convergence',
         ).catch(() => {});
-        return { removed: true, entryId: entry.id, primaryCatId };
+        return { removed: true, entryId: entry.id, primaryCatId, rolledBackSiblings };
       },
       releaseSlot: (threadId: string, catId: string) => {
         const key = QueueProcessor.slotKey(threadId, catId);
@@ -1072,7 +1094,7 @@ export class QueueProcessor {
             [...e.targetCats].sort().every((t, i) => t === sortedTargets[i]),
         );
         for (const be of matching) {
-          if (!queue.markProcessingById(threadId, be.id)) continue;
+          if (!queue.markProcessingById(threadId, be.id, entry.id)) continue;
           batchedEntryIds.push(be.id);
           if (be.messageId) batchedMessageIds.push(be.messageId);
           content = content + '\n' + be.content;
