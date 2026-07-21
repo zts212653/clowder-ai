@@ -1167,6 +1167,98 @@ describe('F220 Phase 2a: buildQueueConvergence real adapter (Sol P2-3)', () => {
     assert.equal(successLog[0].attempt, 2, 'attempt 2 (0-indexed) logged on success');
   });
 
+  it('#972: durable retry also rolls back batch siblings (codex R11 P2)', async (t) => {
+    // When the initial convergence fails and scheduleRetry succeeds later,
+    // the retry path must also roll back batch siblings (batchParentId match).
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+
+    const queue = new InvocationQueue();
+    const log = makeRecordingLogger();
+
+    const qp = new QueueProcessor({
+      queue,
+      invocationTracker: {
+        start: () => ({}),
+        startAll: () => ({}),
+        complete: () => {},
+        completeAll: () => {},
+        has: () => false,
+      },
+      invocationRecordStore: {
+        create: async () => ({ outcome: 'created', invocationId: 'test-inv' }),
+        update: async () => {},
+      },
+      router: {
+        routeExecution: async () => ({ status: 'succeeded', response: '' }),
+      },
+      socketManager: {
+        broadcastAgentMessage: () => {},
+        broadcastToRoom: () => {},
+        emitToUser: () => {},
+      },
+      messageStore: {
+        list: () => [],
+        get: () => null,
+        create: async () => ({ id: 'm1' }),
+        update: async () => {},
+        delete: async () => {},
+      },
+      log,
+    });
+
+    // Primary stale entry
+    const primaryResult = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: '@codex primary',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+    const primaryId = primaryResult.entry.id;
+    queue.markProcessingById('t1', primaryId);
+
+    // Batch sibling (batchParentId = primary)
+    const sibResult = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: '@codex sibling',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+    const sibId = sibResult.entry.id;
+    queue.markProcessingById('t1', sibId, primaryId);
+
+    assert.equal(queue.list('t1', 'u1').filter((e) => e.status === 'processing').length, 2, '2 processing before');
+
+    const adapter = qp.buildQueueConvergence();
+    adapter.scheduleRetry('t1', 'codex', 'u1', `queue-${primaryId}`);
+
+    // Fire retry at 30s
+    t.mock.timers.tick(30_000);
+
+    // Primary must be removed
+    const after = queue.list('t1', 'u1');
+    assert.equal(after.filter((e) => e.id === primaryId).length, 0, 'primary removed by retry');
+
+    // Sibling was rolled back to 'queued', then immediately re-dispatched to
+    // 'processing' by tryExecuteNextAcrossUsers (the dispatch kick). Verify via
+    // the log that rollback happened — rolledBackSiblings=1 proves the sibling
+    // was successfully rolled back before dispatch re-claimed it.
+    const retryLog = log.records.info.find((a) => a[1]?.includes?.('durable retry: removed stale'));
+    assert.ok(retryLog, 'retry success logged');
+    assert.equal(retryLog[0].rolledBackSiblings, 1, 'rolledBackSiblings=1 proves sibling was rolled back');
+
+    // Sibling still exists in queue (re-dispatched by kick)
+    const sibAfter = after.find((e) => e.id === sibId);
+    assert.ok(sibAfter, 'sibling still in queue (re-dispatched by kick)');
+  });
+
   it('Sol R4 P2: durable retry dedup — concurrent scheduleRetry for different keys both run', async (t) => {
     // Two different idempotencyKeys must both schedule independently (no cross-key dedup).
     t.mock.timers.enable({ apis: ['setTimeout'] });

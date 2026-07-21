@@ -469,10 +469,29 @@ export class QueueProcessor {
                 this.convergenceRetryRegistry.delete(registryKey);
                 return;
               }
+              // F220 2a (codex R11 P2): roll back batch siblings in retry path too.
+              // Same logic as removeStaleProcessing — find siblings by batchParentId.
+              const retryRolledBack: string[] = [];
+              const retryRemaining = this.deps.queue.list(threadId, userId);
+              for (const sib of retryRemaining) {
+                if (sib.status === 'processing' && sib.batchParentId === entry.id) {
+                  if (this.deps.queue.rollbackProcessing(threadId, sib.id)) {
+                    retryRolledBack.push(sib.id);
+                  }
+                }
+              }
               const slotCat = entry.targetCats[0] ?? catId;
               this.processingSlots.delete(QueueProcessor.slotKey(threadId, slotCat));
               this.deps.log.info(
-                { threadId, catId, userId, entryId: entry.id, idempotencyKey, attempt },
+                {
+                  threadId,
+                  catId,
+                  userId,
+                  entryId: entry.id,
+                  idempotencyKey,
+                  attempt,
+                  rolledBackSiblings: retryRolledBack.length,
+                },
                 '[F220 2a] durable retry: removed stale processing entry + released slot',
               );
               emitQueueUpdated(
