@@ -473,6 +473,14 @@ export class QueueProcessor {
         // Dedup: skip if already registered (existing backoff chain handles it)
         if (this.convergenceRetryRegistry.has(registryKey)) return;
 
+        // F220 2a (R16 P1): capture the stale slot reservation at schedule-time.
+        // During the 30s+ backoff, sweepZombieSlots/cancelAll may release the slot
+        // and tryDispatchNext may reclaim it for a replacement. The retry must use
+        // compare-and-release (not unconditional delete) to avoid killing the
+        // replacement's slot.
+        const staleSlotKey = QueueProcessor.slotKey(threadId, catId);
+        const staleReservation = this.processingSlots.get(staleSlotKey)?.reservation;
+
         const attemptRetry = (attempt: number) => {
           const BASE_DELAY_MS = 30_000;
           const MAX_DELAY_MS = 120_000;
@@ -507,7 +515,16 @@ export class QueueProcessor {
                 }
               }
               const slotCat = entry.targetCats[0] ?? catId;
-              this.processingSlots.delete(QueueProcessor.slotKey(threadId, slotCat));
+              // F220 2a (R16 P1): compare-and-release — only release if the
+              // slot still holds the stale reservation captured at schedule-time.
+              // If sweepZombieSlots/cancelAll released it and tryDispatchNext
+              // reclaimed it during the backoff window, the reservation won't
+              // match and we leave the replacement's slot untouched.
+              const retrySlotKey = QueueProcessor.slotKey(threadId, slotCat);
+              let slotReleased = false;
+              if (staleReservation !== undefined && retrySlotKey === staleSlotKey) {
+                slotReleased = this.releaseSlotIfOwned(retrySlotKey, staleReservation);
+              }
               this.deps.log.info(
                 {
                   threadId,
@@ -517,6 +534,7 @@ export class QueueProcessor {
                   idempotencyKey,
                   attempt,
                   rolledBackSiblings: retryRolledBack.length,
+                  slotReleased,
                 },
                 '[F220 2a] durable retry: removed stale processing entry + released slot',
               );
@@ -1814,9 +1832,23 @@ export class QueueProcessor {
       }
 
       queue.removeProcessedAcrossUsers(threadId, entry.id);
+      // F220 2a (R16 P1): snapshot which siblings are still owned by this
+      // batch before operating. Convergence clears batchParentId on rollback
+      // (InvocationQueue.rollbackProcessing), so if a sibling was rolled back
+      // and re-dispatched by tryDispatchNext, its batchParentId no longer
+      // matches entry.id — the old finalizer skips it, protecting the
+      // replacement execution's queue entry from removal or rollback.
+      let ownedSiblings: Set<string> | undefined;
+      if (batchedEntryIds.length > 0) {
+        const currentEntries = queue.list(threadId, userId);
+        ownedSiblings = new Set(
+          batchedEntryIds.filter((bid) => currentEntries.some((e) => e.id === bid && e.batchParentId === entry.id)),
+        );
+      }
       // F175: on success remove batched entries; on failure/cancel rollback so they can retry
       if (finalStatus === 'succeeded') {
         for (const bid of batchedEntryIds) {
+          if (!ownedSiblings?.has(bid)) continue;
           queue.removeProcessedAcrossUsers(threadId, bid);
         }
         // #815 + Cloud Codex P2: now that the batch succeeded, actually consume
@@ -1838,6 +1870,7 @@ export class QueueProcessor {
         }
       } else {
         for (const bid of batchedEntryIds) {
+          if (!ownedSiblings?.has(bid)) continue;
           queue.rollbackProcessing(threadId, bid);
         }
         // Cloud Codex P2: deferred A2A entries stay in queue on failure — no rollback needed.

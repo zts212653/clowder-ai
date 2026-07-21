@@ -391,6 +391,13 @@ export class InvocationQueue {
       const entry = q.find((e) => e.id === entryId && e.status === 'processing');
       if (entry) {
         entry.status = 'queued';
+        // F220 2a (R16 P1): sever batch association on rollback. The batch is
+        // dissolved — the entry re-enters the queue as a standalone candidate.
+        // This prevents a stale executeEntry finalizer from removing or rolling
+        // back a sibling that was re-dispatched by tryDispatchNext after
+        // convergence: the finalizer checks batchParentId before operating, and
+        // a cleared batchParentId signals "no longer part of the old batch".
+        delete entry.batchParentId;
         return true;
       }
     }
