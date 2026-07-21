@@ -27,7 +27,7 @@ K-1 projects `StoredMessage.timestamp` through `Date#toISOString()`, but both st
 > “Required correction: either ... mark M7 RESERVED pending a K-1 valid-Date admission plus stored-data attestation/migration invariant, or ... provide that source invariant now.”
 > New-write admission must not be represented as proof for historical stored data.
 
-- Primary bug intake issue: `https://github.com/zts212653/clowder-ai/issues/1200` (maintainer triage pending)
+- Accepted bug intake: `https://github.com/zts212653/clowder-ai/issues/1200` (`bug`, `triaged`, and `accepted` labels; maintainer verdict recorded in issue comment 5037044903)
 - Related M7 reservation provenance only: `https://github.com/zts212653/clowder-ai/issues/1165#issuecomment-5011835675`
 - Local grounding/plan: `feature-specs/2026-07-19-k1-producer-attestation.md`
 - **Please judge whether the diff closes future-write valid-Date admission without overclaiming M7 or choosing identifier/migration policy.**
@@ -245,7 +245,7 @@ root media/artifact gate (working tree + committed diff)
 
 - Plan: `feature-specs/2026-07-19-k1-producer-attestation.md`
 - Bug capsule: `docs/bug-report/k1-invalid-message-timestamp/bug-report.md`
-- Primary tracking bug: issue `#1200` (maintainer triage pending)
+- Primary tracking bug: accepted issue `#1200`
 - Related reservation provenance only: issue `#1165` (M7; no implementation authorization)
 
 [砚砚/GPT-5.6 Sol🐾]
