@@ -14,6 +14,7 @@ code_anchors:
   - packages/api/src/infrastructure/harness-eval/eval-a2a-adapter.ts
   - packages/api/src/infrastructure/harness-eval/eval-hub-read-model.ts
   - packages/api/src/infrastructure/harness-eval/sop/adaptive-sop-contract.ts
+  - packages/api/src/infrastructure/harness-eval/sop/adaptive-sop-admission.ts
   - packages/api/src/infrastructure/harness-eval/friction/friction-signal-source.ts
   - packages/api/src/infrastructure/harness-eval/friction/paw-feel-marker.ts
   - packages/api/src/infrastructure/harness-eval/friction/paw-feel-adapter.ts
@@ -41,7 +42,7 @@ doc_anchors:
   - docs/harness-feedback/
   - feature-discussions/2026-05-21-f192-phase-e-eval-hub-kickoff/README.md
   - sop-definitions/README.md
-static_scan_hints: [harness-eval, VerdictHandoffPacket, eval-domain, reeval, harness-fit-digest, Eval Hub, SopDefinition, sop-definitions, AdaptiveSopPlan, SopAdmissionDecision, SopTrialEpisode, predicate, friction, paw-feel, FrictionSignal]
+static_scan_hints: [harness-eval, VerdictHandoffPacket, eval-domain, reeval, harness-fit-digest, Eval Hub, SopDefinition, sop-definitions, AdaptiveSopPlan, SopAdmissionFacts, SopAdmissionDecision, SopTrialEpisode, predicate, friction, paw-feel, FrictionSignal]
 cited_by:
   - F192 Phase E-pilot
   - F245 Phase A (paw-feel friction collector) + Phase B (cancel/user-feedback/eval-domain adapters + aggregator + clusterer + rollup input; domain registration + rollup sink land in Phase C)
@@ -79,4 +80,4 @@ F192 owns the socio-technical harness evaluation contract: harnesses declare exp
 
 ## Static Scan Hints
 
-Watch for new `eval:*` domains, `VerdictHandoffPacket`, `harness-fit-digest`, `delete_sunset`, `reeval`, `legacy scheduled task`, `harness-feedback`, `SopDefinition`, `sop-definitions`, `AdaptiveSopPlan`, `SopAdmissionDecision`, `SopTrialEpisode`, and `predicate` artifacts.
+Watch for new `eval:*` domains, `VerdictHandoffPacket`, `harness-fit-digest`, `delete_sunset`, `reeval`, `legacy scheduled task`, `harness-feedback`, `SopDefinition`, `sop-definitions`, `AdaptiveSopPlan`, `SopAdmissionFacts`, `SopAdmissionDecision`, `SopTrialEpisode`, and `predicate` artifacts.

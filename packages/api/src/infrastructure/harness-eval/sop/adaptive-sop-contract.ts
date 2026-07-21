@@ -16,7 +16,7 @@ export type AdaptiveSopContractErrorCode =
   | 'invalid_contract'
   | 'semantic_invariant_violation';
 
-type AdaptiveSopContractName = 'AdaptiveSopPlan' | 'SopAdmissionDecision' | 'SopTrialEpisode';
+type AdaptiveSopContractName = 'AdaptiveSopPlan' | 'SopAdmissionDecision' | 'SopTrialEpisode' | 'SopAdmissionFacts';
 
 export class AdaptiveSopContractError extends Error {
   readonly code: AdaptiveSopContractErrorCode;
