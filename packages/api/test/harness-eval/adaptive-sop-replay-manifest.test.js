@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { parse as parseYaml } from 'yaml';
 import { fingerprintAdaptiveSopComparativePilotManifest } from '../../dist/infrastructure/harness-eval/sop/adaptive-sop-comparative-pilot.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -107,6 +108,13 @@ describe('LF-0001 adaptive SOP replay manifest', () => {
         `${candidate.fixtureId} complete scope must equal its Git diff`,
       );
     }
+  });
+
+  it('checks out full history in Public Test before validating Git provenance', () => {
+    const workflow = parseYaml(readFileSync(join(repositoryRoot, '.github/workflows/ci.yml'), 'utf8'));
+    const checkout = workflow.jobs.test.steps.find((step) => step.uses === 'actions/checkout@v4');
+    assert.ok(checkout, 'Public Test must include actions/checkout');
+    assert.equal(checkout.with?.['fetch-depth'], 0, 'Public Test provenance validation requires full Git history');
   });
 
   it('projects only modelInput and keeps answer-bearing fields grader-only', () => {

@@ -2,13 +2,21 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
 export const ADAPTIVE_SOP_COMPARATIVE_PILOT_SCHEMA_VERSION = 'lf-0001.comparative-pilot.v1' as const;
-export const ADAPTIVE_SOP_COMPARATIVE_PILOT_MANIFEST_SCHEMA_VERSION =
-  'lf-0001.comparative-pilot-manifest.v1' as const;
-export const ADAPTIVE_SOP_COMPARATIVE_TRIAL_RECEIPT_SCHEMA_VERSION =
-  'lf-0001.comparative-trial-receipt.v1' as const;
+export const ADAPTIVE_SOP_COMPARATIVE_PILOT_MANIFEST_SCHEMA_VERSION = 'lf-0001.comparative-pilot-manifest.v1' as const;
+export const ADAPTIVE_SOP_COMPARATIVE_TRIAL_RECEIPT_SCHEMA_VERSION = 'lf-0001.comparative-trial-receipt.v1' as const;
+export const ADAPTIVE_SOP_COMPARATIVE_EVIDENCE_SCHEMA_VERSION = 'lf-0001.comparative-evidence.v1' as const;
 
 const ARM_IDS = ['full_sop', 'free_plan_hard_gates', 'adaptive_plan_hard_gates'] as const;
+const EVIDENCE_KINDS = [
+  'execution_provenance',
+  'diff_and_verification',
+  'review_and_outcome',
+  'safety',
+  'harness_tax',
+  'telemetry',
+] as const;
 const ArmSchema = z.enum(ARM_IDS);
+const EvidenceKindSchema = z.enum(EVIDENCE_KINDS);
 const NonEmptyStringSchema = z.string().trim().min(1);
 const NonNegativeIntegerSchema = z.number().int().nonnegative();
 const Sha1Schema = z.string().regex(/^[0-9a-f]{40}$/);
@@ -56,7 +64,7 @@ const ComparativePilotManifestSchema = z
       )
       .length(ARM_IDS.length),
     controls: ControlsSchema.extend({ projection: NonEmptyStringSchema }),
-    requiredTrialEvidence: z.array(NonEmptyStringSchema).min(1),
+    requiredTrialEvidence: z.array(EvidenceKindSchema).length(EVIDENCE_KINDS.length),
     stopConditions: z.array(NonEmptyStringSchema).min(1),
     notClaimed: z.array(NonEmptyStringSchema).min(1),
   })
@@ -97,6 +105,10 @@ const CostSchema = z
   })
   .strict();
 
+const SafetySchema = z
+  .object({ hardInvariantMisses: z.array(NonEmptyStringSchema), p1p2Escapes: NonNegativeIntegerSchema })
+  .strict();
+
 const TrialEvidencePayloadSchema = z
   .object({
     arm: ArmSchema,
@@ -104,12 +116,15 @@ const TrialEvidencePayloadSchema = z
     model: z.object({ provider: NonEmptyStringSchema, modelId: NonEmptyStringSchema }).strict(),
     harnessVersion: NonEmptyStringSchema,
     provenance: z
-      .object({ baseSha: Sha1Schema, modelInputSha256: Sha256Schema, environmentFingerprint: Sha256Schema })
+      .object({
+        baseSha: Sha1Schema,
+        finalSha: Sha1Schema,
+        modelInputSha256: Sha256Schema,
+        environmentFingerprint: Sha256Schema,
+      })
       .strict(),
     outcome: OutcomeSchema,
-    safety: z
-      .object({ hardInvariantMisses: z.array(NonEmptyStringSchema), p1p2Escapes: NonNegativeIntegerSchema })
-      .strict(),
+    safety: SafetySchema,
     harnessTax: HarnessTaxSchema,
     cost: CostSchema,
     telemetryComplete: z.boolean(),
@@ -128,6 +143,7 @@ const TrialEvidenceReceiptSchema = z
           .object({
             uri: z.string().url(),
             sha256: Sha256Schema,
+            kind: EvidenceKindSchema,
           })
           .strict(),
       )
@@ -138,6 +154,100 @@ const TrialEvidenceReceiptSchema = z
 const TrialSchema = TrialEvidencePayloadSchema.extend({
   evidenceReceipt: TrialEvidenceReceiptSchema,
 });
+
+const EvidenceBindingSchema = {
+  schemaVersion: z.literal(ADAPTIVE_SOP_COMPARATIVE_EVIDENCE_SCHEMA_VERSION),
+  pilotId: NonEmptyStringSchema,
+  arm: ArmSchema,
+  trialIndex: NonNegativeIntegerSchema,
+};
+
+const ResolvedEvidenceSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      ...EvidenceBindingSchema,
+      kind: z.literal('execution_provenance'),
+      payload: z
+        .object({
+          baseSha: Sha1Schema,
+          finalSha: Sha1Schema,
+          modelInputSha256: Sha256Schema,
+          environmentFingerprint: Sha256Schema,
+          model: z.object({ provider: NonEmptyStringSchema, modelId: NonEmptyStringSchema }).strict(),
+          harnessVersion: NonEmptyStringSchema,
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...EvidenceBindingSchema,
+      kind: z.literal('diff_and_verification'),
+      payload: z
+        .object({
+          baseSha: Sha1Schema,
+          finalSha: Sha1Schema,
+          changedPaths: z.array(NonEmptyStringSchema).min(1),
+          diffFingerprint: Sha256Schema,
+          verification: z
+            .array(
+              z
+                .object({
+                  commandOrTool: NonEmptyStringSchema,
+                  exitCode: z.number().int(),
+                  evidenceSha256: Sha256Schema,
+                })
+                .strict(),
+            )
+            .min(1),
+          gate: z
+            .object({
+              commandOrTool: NonEmptyStringSchema,
+              exitCode: z.number().int(),
+              finalSha: Sha1Schema,
+              evidenceSha256: Sha256Schema,
+            })
+            .strict(),
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...EvidenceBindingSchema,
+      kind: z.literal('review_and_outcome'),
+      payload: z
+        .object({
+          outcome: OutcomeSchema,
+          review: z
+            .object({
+              finalSha: Sha1Schema,
+              authorId: NonEmptyStringSchema,
+              reviewerId: NonEmptyStringSchema,
+              reviewArtifactSha256: Sha256Schema,
+              p1p2Cleared: z.boolean(),
+            })
+            .strict(),
+        })
+        .strict(),
+    })
+    .strict(),
+  z.object({ ...EvidenceBindingSchema, kind: z.literal('safety'), payload: SafetySchema }).strict(),
+  z.object({ ...EvidenceBindingSchema, kind: z.literal('harness_tax'), payload: HarnessTaxSchema }).strict(),
+  z
+    .object({
+      ...EvidenceBindingSchema,
+      kind: z.literal('telemetry'),
+      payload: z
+        .object({
+          cost: CostSchema,
+          telemetryComplete: z.boolean(),
+          missingFields: z.array(NonEmptyStringSchema),
+        })
+        .strict(),
+    })
+    .strict(),
+]);
 
 const ComparativePilotSchema = z
   .object({
@@ -164,7 +274,14 @@ const ComparativePilotSchema = z
 type ComparativePilot = z.infer<typeof ComparativePilotSchema>;
 type ComparativePilotManifest = z.infer<typeof ComparativePilotManifestSchema>;
 type ComparativeTrial = z.infer<typeof TrialSchema>;
+type ComparativeResolvedEvidence = z.infer<typeof ResolvedEvidenceSchema>;
 type ArmId = z.infer<typeof ArmSchema>;
+
+export type AdaptiveSopComparativeEvidenceReference = ComparativeTrial['evidenceReceipt']['evidence'][number];
+
+export interface AdaptiveSopComparativeEvidenceResolver {
+  resolve(reference: AdaptiveSopComparativeEvidenceReference): unknown | undefined;
+}
 
 interface ArmSummary {
   readonly trialCount: number;
@@ -215,9 +332,14 @@ export function fingerprintAdaptiveSopComparativeTrialEvidence(input: unknown): 
   return sha256(TrialEvidencePayloadSchema.parse(payload));
 }
 
+export function fingerprintAdaptiveSopComparativeResolvedEvidence(input: unknown): string {
+  return sha256(ResolvedEvidenceSchema.parse(input));
+}
+
 export function evaluateAdaptiveSopComparativePilot(
   input: unknown,
   manifestInput: unknown,
+  evidenceResolver?: AdaptiveSopComparativeEvidenceResolver,
 ): AdaptiveSopComparativePilotResult {
   assertManifestBoundReceiptsPresent(input);
   const manifest = parseComparativePilotManifest(manifestInput);
@@ -226,8 +348,10 @@ export function evaluateAdaptiveSopComparativePilot(
   const trialsPerArm = assertComparableTrialMatrix(pilot);
   assertPilotManifestBinding(pilot, manifest, manifestSha256, trialsPerArm);
   assertComparableIdentityAndProvenance(pilot, manifest);
+  const receiptIncompleteReasons: string[] = [];
   for (const trial of pilot.trials) {
-    assertTrialReceiptBinding(trial, manifestSha256);
+    assertTrialReceiptBinding(trial, manifest, manifestSha256);
+    receiptIncompleteReasons.push(...resolveTrialEvidence(trial, pilot.pilotId, evidenceResolver));
     assertContractMetricApplicability(trial);
     assertTelemetryDeclaration(trial);
   }
@@ -236,7 +360,7 @@ export function evaluateAdaptiveSopComparativePilot(
     ARM_IDS.map((arm) => [arm, summarizeArm(pilot.trials.filter((trial) => trial.arm === arm))]),
   ) as Record<ArmId, ArmSummary>;
   const stopReasons = collectStopReasons(pilot, arms);
-  const incompleteReasons = collectIncompleteReasons(arms);
+  const incompleteReasons = [...new Set([...collectIncompleteReasons(arms), ...receiptIncompleteReasons])];
   const status =
     stopReasons.length > 0
       ? 'stop'
@@ -269,6 +393,10 @@ function parseComparativePilotManifest(input: unknown): ComparativePilotManifest
   const receivedArms = new Set(manifest.arms.map((arm) => arm.id));
   if (receivedArms.size !== ARM_IDS.length || ARM_IDS.some((arm) => !receivedArms.has(arm))) {
     throw new Error('pinned pilot manifest must define every comparative arm exactly once');
+  }
+  const receivedEvidence = new Set(manifest.requiredTrialEvidence);
+  if (receivedEvidence.size !== EVIDENCE_KINDS.length || EVIDENCE_KINDS.some((kind) => !receivedEvidence.has(kind))) {
+    throw new Error('pinned pilot manifest must require every comparative evidence kind exactly once');
   }
   return manifest;
 }
@@ -334,10 +462,7 @@ function assertComparableTrialMatrix(pilot: ComparativePilot): number {
   return baseline.length;
 }
 
-function assertComparableIdentityAndProvenance(
-  pilot: ComparativePilot,
-  manifest: ComparativePilotManifest,
-): void {
+function assertComparableIdentityAndProvenance(pilot: ComparativePilot, manifest: ComparativePilotManifest): void {
   const modelIdentities = new Set(pilot.trials.map((trial) => `${trial.model.provider}:${trial.model.modelId}`));
   if (modelIdentities.size !== 1) throw new Error('every arm must use the same model identity');
   if (![...modelIdentities][0] || [...modelIdentities][0] !== `${manifest.model.provider}:${manifest.model.modelId}`) {
@@ -369,7 +494,11 @@ function assertComparableIdentityAndProvenance(
   }
 }
 
-function assertTrialReceiptBinding(trial: ComparativeTrial, manifestSha256: string): void {
+function assertTrialReceiptBinding(
+  trial: ComparativeTrial,
+  manifest: ComparativePilotManifest,
+  manifestSha256: string,
+): void {
   if (trial.evidenceReceipt.pilotManifestSha256 !== manifestSha256) {
     throw new Error('trial receipt must bind to the pinned pilot manifest');
   }
@@ -377,8 +506,102 @@ function assertTrialReceiptBinding(trial: ComparativeTrial, manifestSha256: stri
   if (trial.evidenceReceipt.trialEvidenceSha256 !== trialEvidenceSha256) {
     throw new Error('trial receipt fingerprint does not match the comparative evidence');
   }
-  if (!trial.evidenceReceipt.evidence.some((reference) => reference.sha256 === trialEvidenceSha256)) {
-    throw new Error('trial receipt must contain a content-addressed reference to the comparative evidence');
+  const receivedKinds = new Set(trial.evidenceReceipt.evidence.map((reference) => reference.kind));
+  if (
+    trial.evidenceReceipt.evidence.length !== manifest.requiredTrialEvidence.length ||
+    receivedKinds.size !== manifest.requiredTrialEvidence.length ||
+    manifest.requiredTrialEvidence.some((kind) => !receivedKinds.has(kind))
+  ) {
+    throw new Error('trial receipt must reference every evidence kind required by the pinned manifest exactly once');
+  }
+}
+
+function resolveTrialEvidence(
+  trial: ComparativeTrial,
+  pilotId: string,
+  resolver: AdaptiveSopComparativeEvidenceResolver | undefined,
+): string[] {
+  if (!resolver) return ['one or more trial evidence receipts were not independently resolved'];
+
+  for (const reference of trial.evidenceReceipt.evidence) {
+    let raw: unknown;
+    try {
+      raw = resolver.resolve(reference);
+    } catch {
+      return ['one or more trial evidence receipts could not be resolved'];
+    }
+    if (raw === undefined) return ['one or more trial evidence receipts could not be resolved'];
+    if (sha256(raw) !== reference.sha256) {
+      throw new Error(`resolved ${reference.kind} evidence does not match its content fingerprint`);
+    }
+    const evidence = ResolvedEvidenceSchema.parse(raw);
+    if (
+      evidence.kind !== reference.kind ||
+      evidence.pilotId !== pilotId ||
+      evidence.arm !== trial.arm ||
+      evidence.trialIndex !== trial.trialIndex
+    ) {
+      throw new Error(`resolved ${reference.kind} evidence is bound to a different comparative trial`);
+    }
+    assertResolvedEvidenceMatchesTrial(evidence, trial);
+  }
+  return [];
+}
+
+function assertResolvedEvidenceMatchesTrial(evidence: ComparativeResolvedEvidence, trial: ComparativeTrial): void {
+  switch (evidence.kind) {
+    case 'execution_provenance':
+      if (
+        evidence.payload.baseSha !== trial.provenance.baseSha ||
+        evidence.payload.finalSha !== trial.provenance.finalSha ||
+        evidence.payload.modelInputSha256 !== trial.provenance.modelInputSha256 ||
+        evidence.payload.environmentFingerprint !== trial.provenance.environmentFingerprint ||
+        canonicalJson(evidence.payload.model) !== canonicalJson(trial.model) ||
+        evidence.payload.harnessVersion !== trial.harnessVersion
+      ) {
+        throw new Error('resolved execution provenance does not match the comparative trial');
+      }
+      return;
+    case 'diff_and_verification':
+      if (
+        evidence.payload.baseSha !== trial.provenance.baseSha ||
+        evidence.payload.finalSha !== trial.provenance.finalSha ||
+        evidence.payload.gate.finalSha !== trial.provenance.finalSha ||
+        (trial.outcome.testsPassed === true && evidence.payload.gate.exitCode !== 0) ||
+        (trial.outcome.testsPassed === true && evidence.payload.verification.some((check) => check.exitCode !== 0))
+      ) {
+        throw new Error('resolved diff or verification evidence does not match the comparative trial');
+      }
+      return;
+    case 'review_and_outcome':
+      if (
+        evidence.payload.review.finalSha !== trial.provenance.finalSha ||
+        evidence.payload.review.authorId === evidence.payload.review.reviewerId ||
+        evidence.payload.review.p1p2Cleared !==
+          (trial.outcome.reviewFindingCounts.p1 === 0 && trial.outcome.reviewFindingCounts.p2 === 0)
+      ) {
+        throw new Error('resolved review evidence does not preserve cross-individual P1/P2 clearance');
+      }
+      assertSameResolvedPayload(evidence.kind, evidence.payload.outcome, trial.outcome);
+      return;
+    case 'safety':
+      assertSameResolvedPayload(evidence.kind, evidence.payload, trial.safety);
+      return;
+    case 'harness_tax':
+      assertSameResolvedPayload(evidence.kind, evidence.payload, trial.harnessTax);
+      return;
+    case 'telemetry':
+      assertSameResolvedPayload(evidence.kind, evidence.payload, {
+        cost: trial.cost,
+        telemetryComplete: trial.telemetryComplete,
+        missingFields: trial.missingFields,
+      });
+  }
+}
+
+function assertSameResolvedPayload(kind: string, resolved: unknown, reported: unknown): void {
+  if (canonicalJson(resolved) !== canonicalJson(reported)) {
+    throw new Error(`resolved ${kind} evidence does not match the comparative trial`);
   }
 }
 
@@ -466,12 +689,7 @@ function summarizeArm(trials: readonly ComparativeTrial[]): ArmSummary {
 
 function sumKnownContractMetric(
   trials: readonly ComparativeTrial[],
-  key:
-    | 'planContractAttempts'
-    | 'schemaRejections'
-    | 'semanticRejections'
-    | 'externalSchemaPatches'
-    | 'responseRepairs',
+  key: 'planContractAttempts' | 'schemaRejections' | 'semanticRejections' | 'externalSchemaPatches' | 'responseRepairs',
 ): number {
   return trials.reduce((total, trial) => {
     const value = trial.harnessTax[key];

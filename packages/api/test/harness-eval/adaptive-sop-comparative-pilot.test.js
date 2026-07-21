@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   evaluateAdaptiveSopComparativePilot,
   fingerprintAdaptiveSopComparativePilotManifest,
+  fingerprintAdaptiveSopComparativeResolvedEvidence,
   fingerprintAdaptiveSopComparativeTrialEvidence,
 } from '../../dist/infrastructure/harness-eval/sop/adaptive-sop-comparative-pilot.js';
 
@@ -17,6 +18,7 @@ function buildTrial(arm, trialIndex, overrides = {}) {
     harnessVersion: adaptive ? 'lf-0001.adaptive-v1' : `lf-0001.${arm}-v1`,
     provenance: {
       baseSha: 'a'.repeat(40),
+      finalSha: 'd'.repeat(40),
       modelInputSha256: 'b'.repeat(64),
       environmentFingerprint: 'c'.repeat(64),
     },
@@ -108,7 +110,14 @@ function buildPilotManifest(overrides = {}) {
       sameReviewBoundary: true,
       projection: 'executors receive only pinned model input',
     },
-    requiredTrialEvidence: ['content-addressed execution receipt'],
+    requiredTrialEvidence: [
+      'execution_provenance',
+      'diff_and_verification',
+      'review_and_outcome',
+      'safety',
+      'harness_tax',
+      'telemetry',
+    ],
     stopConditions: ['any hard-invariant miss'],
     notClaimed: ['No automatic promotion.'],
     ...overrides,
@@ -119,25 +128,108 @@ function signTrial(trial) {
   const { evidenceReceipt: _evidenceReceipt, evidenceRefs: _evidenceRefs, ...payload } = trial;
   const manifestSha256 = fingerprintAdaptiveSopComparativePilotManifest(buildPilotManifest());
   const trialEvidenceSha256 = fingerprintAdaptiveSopComparativeTrialEvidence(payload);
+  const resolvedEvidence = buildResolvedEvidence(payload);
   return {
     ...payload,
     evidenceReceipt: {
       schemaVersion: 'lf-0001.comparative-trial-receipt.v1',
       pilotManifestSha256: manifestSha256,
       trialEvidenceSha256,
-      evidence: [
-        {
-          uri: `https://evidence.invalid/lf-0001/${payload.arm}/${payload.trialIndex}`,
-          sha256: trialEvidenceSha256,
-        },
-      ],
+      evidence: resolvedEvidence.map((evidence) => ({
+        kind: evidence.kind,
+        uri: evidenceUri(payload, evidence.kind),
+        sha256: fingerprintAdaptiveSopComparativeResolvedEvidence(evidence),
+      })),
     },
   };
 }
 
+function buildResolvedEvidence(trial) {
+  const binding = {
+    schemaVersion: 'lf-0001.comparative-evidence.v1',
+    pilotId: 'lf-0001-contained-code-pilot-001',
+    arm: trial.arm,
+    trialIndex: trial.trialIndex,
+  };
+  return [
+    {
+      ...binding,
+      kind: 'execution_provenance',
+      payload: {
+        ...trial.provenance,
+        model: trial.model,
+        harnessVersion: trial.harnessVersion,
+      },
+    },
+    {
+      ...binding,
+      kind: 'diff_and_verification',
+      payload: {
+        baseSha: trial.provenance.baseSha,
+        finalSha: trial.provenance.finalSha,
+        changedPaths: ['packages/api/test/telegram-html-formatter.test.js'],
+        diffFingerprint: 'e'.repeat(64),
+        verification: [
+          {
+            commandOrTool: 'node --test telegram-html-formatter.test.js',
+            exitCode: trial.outcome.testsPassed === true ? 0 : 1,
+            evidenceSha256: 'f'.repeat(64),
+          },
+        ],
+        gate: {
+          commandOrTool: 'pnpm gate --no-rebase --skip-install',
+          exitCode: trial.outcome.testsPassed === true ? 0 : 1,
+          finalSha: trial.provenance.finalSha,
+          evidenceSha256: '1'.repeat(64),
+        },
+      },
+    },
+    {
+      ...binding,
+      kind: 'review_and_outcome',
+      payload: {
+        outcome: trial.outcome,
+        review: {
+          finalSha: trial.provenance.finalSha,
+          authorId: 'cat-author',
+          reviewerId: 'cat-reviewer',
+          reviewArtifactSha256: '2'.repeat(64),
+          p1p2Cleared: trial.outcome.reviewFindingCounts.p1 === 0 && trial.outcome.reviewFindingCounts.p2 === 0,
+        },
+      },
+    },
+    { ...binding, kind: 'safety', payload: trial.safety },
+    { ...binding, kind: 'harness_tax', payload: trial.harnessTax },
+    {
+      ...binding,
+      kind: 'telemetry',
+      payload: {
+        cost: trial.cost,
+        telemetryComplete: trial.telemetryComplete,
+        missingFields: trial.missingFields,
+      },
+    },
+  ];
+}
+
+function evidenceUri(trial, kind) {
+  return `memory://trusted-runner/${trial.arm}/${trial.trialIndex}/${kind}`;
+}
+
+function buildEvidenceResolver(artifact, transform = (evidence) => evidence) {
+  const store = new Map();
+  for (const trial of artifact.trials) {
+    for (const evidence of buildResolvedEvidence(trial)) {
+      store.set(evidenceUri(trial, evidence.kind), transform(evidence));
+    }
+  }
+  return { resolve: (reference) => store.get(reference.uri) };
+}
+
 describe('LF-0001 three-arm comparative pilot evidence', () => {
   it('accepts three comparable arms without turning the summary into an automatic promotion verdict', () => {
-    const result = evaluateAdaptiveSopComparativePilot(buildArtifact(), buildPilotManifest());
+    const artifact = buildArtifact();
+    const result = evaluateAdaptiveSopComparativePilot(artifact, buildPilotManifest(), buildEvidenceResolver(artifact));
 
     assert.equal(result.status, 'ready_for_operator_comparison');
     assert.equal(result.trialsPerArm, 3);
@@ -188,7 +280,8 @@ describe('LF-0001 three-arm comparative pilot evidence', () => {
         harnessTax: { ...trial.harnessTax, externalSchemaPatches: 1, responseRepairs: 1 },
       });
     });
-    const result = evaluateAdaptiveSopComparativePilot(buildArtifact({ trials }), buildPilotManifest());
+    const artifact = buildArtifact({ trials });
+    const result = evaluateAdaptiveSopComparativePilot(artifact, buildPilotManifest(), buildEvidenceResolver(artifact));
 
     assert.equal(result.status, 'stop');
     assert.ok(result.stopReasons.includes('hard invariant miss observed'));
@@ -207,7 +300,8 @@ describe('LF-0001 three-arm comparative pilot evidence', () => {
           })
         : trial,
     );
-    const result = evaluateAdaptiveSopComparativePilot(buildArtifact({ trials }), buildPilotManifest());
+    const artifact = buildArtifact({ trials });
+    const result = evaluateAdaptiveSopComparativePilot(artifact, buildPilotManifest(), buildEvidenceResolver(artifact));
 
     assert.equal(result.status, 'insufficient_evidence');
     assert.ok(result.incompleteReasons.includes('one or more trials have incomplete telemetry or unknown outcomes'));
@@ -250,19 +344,15 @@ describe('LF-0001 three-arm comparative pilot evidence', () => {
       signTrial({ ...trial, model: { provider: 'openai', modelId: 'other-model' } }),
     );
     assert.throws(
-      () =>
-        evaluateAdaptiveSopComparativePilot(buildArtifact({ trials: wrongModelTrials }), buildPilotManifest()),
+      () => evaluateAdaptiveSopComparativePilot(buildArtifact({ trials: wrongModelTrials }), buildPilotManifest()),
       /trial model identity must match the pinned pilot manifest/,
     );
 
     const wrongHarnessTrials = buildArtifact().trials.map((trial) =>
-      trial.arm === 'adaptive_plan_hard_gates'
-        ? signTrial({ ...trial, harnessVersion: 'lf-0001.adaptive-v2' })
-        : trial,
+      trial.arm === 'adaptive_plan_hard_gates' ? signTrial({ ...trial, harnessVersion: 'lf-0001.adaptive-v2' }) : trial,
     );
     assert.throws(
-      () =>
-        evaluateAdaptiveSopComparativePilot(buildArtifact({ trials: wrongHarnessTrials }), buildPilotManifest()),
+      () => evaluateAdaptiveSopComparativePilot(buildArtifact({ trials: wrongHarnessTrials }), buildPilotManifest()),
       /harness version for adaptive_plan_hard_gates must match the pinned pilot manifest/,
     );
   });
@@ -277,6 +367,157 @@ describe('LF-0001 three-arm comparative pilot evidence', () => {
     assert.throws(
       () => evaluateAdaptiveSopComparativePilot(artifact, buildPilotManifest()),
       /manifest-bound content receipt/,
+    );
+  });
+
+  it('keeps self-signed receipts insufficient until an independent resolver verifies every evidence kind', () => {
+    const artifact = buildArtifact();
+    const unresolved = evaluateAdaptiveSopComparativePilot(artifact, buildPilotManifest());
+    assert.equal(unresolved.status, 'insufficient_evidence');
+    assert.ok(
+      unresolved.incompleteReasons.includes('one or more trial evidence receipts were not independently resolved'),
+    );
+
+    artifact.trials[0] = {
+      ...artifact.trials[0],
+      evidenceReceipt: {
+        ...artifact.trials[0].evidenceReceipt,
+        evidence: artifact.trials[0].evidenceReceipt.evidence.slice(1),
+      },
+    };
+    assert.throws(
+      () => evaluateAdaptiveSopComparativePilot(artifact, buildPilotManifest()),
+      /every evidence kind required by the pinned manifest exactly once/,
+    );
+  });
+
+  it('keeps comparison insufficient when the independent resolver cannot load a referenced receipt', () => {
+    const artifact = buildArtifact();
+    const unresolved = evaluateAdaptiveSopComparativePilot(artifact, buildPilotManifest(), {
+      resolve: () => undefined,
+    });
+
+    assert.equal(unresolved.status, 'insufficient_evidence');
+    assert.ok(unresolved.incompleteReasons.includes('one or more trial evidence receipts could not be resolved'));
+  });
+
+  it('rejects resolver content that does not match its trusted fingerprint', () => {
+    const artifact = buildArtifact();
+    const resolver = buildEvidenceResolver(artifact, (evidence) =>
+      evidence.kind === 'review_and_outcome'
+        ? { ...evidence, payload: { ...evidence.payload, requestedOutcomeMet: false } }
+        : evidence,
+    );
+    assert.throws(
+      () => evaluateAdaptiveSopComparativePilot(artifact, buildPilotManifest(), resolver),
+      /resolved review_and_outcome evidence does not match its content fingerprint/,
+    );
+  });
+
+  it('rejects resolved review content that is validly hashed but contradicts the reported trial', () => {
+    const artifact = buildArtifact();
+    const target = artifact.trials[0];
+    const transform = (evidence) =>
+      evidence.kind === 'review_and_outcome' && evidence.arm === target.arm && evidence.trialIndex === target.trialIndex
+        ? {
+            ...evidence,
+            payload: {
+              ...evidence.payload,
+              outcome: { ...evidence.payload.outcome, requestedOutcomeMet: false },
+            },
+          }
+        : evidence;
+    const mismatchedReview = transform(
+      buildResolvedEvidence(target).find((evidence) => evidence.kind === 'review_and_outcome'),
+    );
+    artifact.trials[0] = {
+      ...target,
+      evidenceReceipt: {
+        ...target.evidenceReceipt,
+        evidence: target.evidenceReceipt.evidence.map((reference) =>
+          reference.kind === 'review_and_outcome'
+            ? { ...reference, sha256: fingerprintAdaptiveSopComparativeResolvedEvidence(mismatchedReview) }
+            : reference,
+        ),
+      },
+    };
+
+    assert.throws(
+      () =>
+        evaluateAdaptiveSopComparativePilot(artifact, buildPilotManifest(), buildEvidenceResolver(artifact, transform)),
+      /resolved review_and_outcome evidence does not match the comparative trial/,
+    );
+  });
+
+  it('rejects a validly hashed failed gate receipt when the trial reports passing tests', () => {
+    const artifact = buildArtifact();
+    const target = artifact.trials[0];
+    const transform = (evidence) =>
+      evidence.kind === 'diff_and_verification' &&
+      evidence.arm === target.arm &&
+      evidence.trialIndex === target.trialIndex
+        ? {
+            ...evidence,
+            payload: {
+              ...evidence.payload,
+              gate: { ...evidence.payload.gate, exitCode: 1 },
+            },
+          }
+        : evidence;
+    const failedGate = transform(
+      buildResolvedEvidence(target).find((evidence) => evidence.kind === 'diff_and_verification'),
+    );
+    artifact.trials[0] = {
+      ...target,
+      evidenceReceipt: {
+        ...target.evidenceReceipt,
+        evidence: target.evidenceReceipt.evidence.map((reference) =>
+          reference.kind === 'diff_and_verification'
+            ? { ...reference, sha256: fingerprintAdaptiveSopComparativeResolvedEvidence(failedGate) }
+            : reference,
+        ),
+      },
+    };
+
+    assert.throws(
+      () =>
+        evaluateAdaptiveSopComparativePilot(artifact, buildPilotManifest(), buildEvidenceResolver(artifact, transform)),
+      /resolved diff or verification evidence does not match the comparative trial/,
+    );
+  });
+
+  it('rejects a validly hashed review receipt without cross-individual clearance', () => {
+    const artifact = buildArtifact();
+    const target = artifact.trials[0];
+    const transform = (evidence) =>
+      evidence.kind === 'review_and_outcome' && evidence.arm === target.arm && evidence.trialIndex === target.trialIndex
+        ? {
+            ...evidence,
+            payload: {
+              ...evidence.payload,
+              review: { ...evidence.payload.review, reviewerId: evidence.payload.review.authorId },
+            },
+          }
+        : evidence;
+    const sameIndividualReview = transform(
+      buildResolvedEvidence(target).find((evidence) => evidence.kind === 'review_and_outcome'),
+    );
+    artifact.trials[0] = {
+      ...target,
+      evidenceReceipt: {
+        ...target.evidenceReceipt,
+        evidence: target.evidenceReceipt.evidence.map((reference) =>
+          reference.kind === 'review_and_outcome'
+            ? { ...reference, sha256: fingerprintAdaptiveSopComparativeResolvedEvidence(sameIndividualReview) }
+            : reference,
+        ),
+      },
+    };
+
+    assert.throws(
+      () =>
+        evaluateAdaptiveSopComparativePilot(artifact, buildPilotManifest(), buildEvidenceResolver(artifact, transform)),
+      /resolved review evidence does not preserve cross-individual P1\/P2 clearance/,
     );
   });
 

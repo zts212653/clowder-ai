@@ -41,12 +41,12 @@
     "projection": "executors receive only the replay candidate modelInput and pinned base checkout"
   },
   "requiredTrialEvidence": [
-    "base/model-input/environment fingerprints",
-    "actual diff and affected verification",
-    "review findings and escaped-regression state",
-    "hard-invariant misses and P1/P2 escapes",
-    "plan contract attempts, schema/semantic rejections, external schema patches, and response repairs",
-    "planning/execution time plus invocation/tool/token/gate telemetry with missing preserved"
+    "execution_provenance",
+    "diff_and_verification",
+    "review_and_outcome",
+    "safety",
+    "harness_tax",
+    "telemetry"
   ],
   "stopConditions": [
     "any hard-invariant miss",

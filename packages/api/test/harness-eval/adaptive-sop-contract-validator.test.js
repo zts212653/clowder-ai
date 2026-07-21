@@ -172,10 +172,7 @@ describe('LF-0001 adaptive SOP semantic contract validator', () => {
         fallback: 'operator',
       },
     ]) {
-      assertContractError(
-        () => parseSopTrialEpisode({ ...validEpisode(), admission }),
-        'semantic_invariant_violation',
-      );
+      assertContractError(() => parseSopTrialEpisode({ ...validEpisode(), admission }), 'semantic_invariant_violation');
     }
   });
 
