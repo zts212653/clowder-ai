@@ -322,7 +322,8 @@ export class AcpHttpStreamClient {
     const scheduleIdleCheck = () => {
       if (idleTimer) clearTimeout(idleTimer);
       if (done) return;
-      const nextMs = idleWarningFired ? Math.max(0, idleStallMs - idleWarningMs) : idleWarningMs;
+      // Cap initial delay at idleStallMs so short TTLs (< idleWarningMs) fire on time
+      const nextMs = idleWarningFired ? Math.max(0, idleStallMs - idleWarningMs) : Math.min(idleWarningMs, idleStallMs);
       idleTimer = setTimeout(() => {
         if (done) return;
         const rawIdle = Date.now() - lastEventAt;

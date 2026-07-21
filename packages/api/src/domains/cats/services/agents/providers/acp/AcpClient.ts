@@ -462,7 +462,8 @@ export class AcpClient {
       if (done) return;
       // P1-fix: stall delay is relative to lastEventAt, not relative to warning.
       // With warning at 20s and stall at 45s, the stall timer fires 25s after warning.
-      const nextMs = idleWarningFired ? Math.max(0, idleStallMs - idleWarningMs) : idleWarningMs;
+      // Cap initial delay at idleStallMs so short TTLs (< idleWarningMs) still fire on time.
+      const nextMs = idleWarningFired ? Math.max(0, idleStallMs - idleWarningMs) : Math.min(idleWarningMs, idleStallMs);
       idleTimer = setTimeout(() => {
         if (done) return;
         // Clamp to at least the threshold that triggered this timer — a threshold
