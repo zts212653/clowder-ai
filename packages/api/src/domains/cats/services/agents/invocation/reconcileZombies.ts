@@ -175,8 +175,9 @@ async function processZombie(
       }
       const isTerminal = current.status === 'succeeded' || current.status === 'failed' || current.status === 'canceled';
       if (isTerminal) {
-        const tp = await clearTaskProgress(deps.taskProgressStore, current.threadId, zombie, log);
         // P2-1 (Sol review): retry queue convergence in the terminal path.
+        // Run convergence BEFORE TaskProgress cleanup (codex R12 P2): convergence
+        // is critical (unblocks dispatch), TaskProgress is cosmetic.
         // GUARD (codex R6 P2): only converge records terminalized by zombie
         // reconciliation (error='zombie_record_detected'). If the record was
         // terminalized by normal completion (succeeded/canceled/failed-with-agent-error),
@@ -228,6 +229,8 @@ async function processZombie(
             }
           }
         }
+        // TaskProgress cleanup AFTER convergence (codex R12 P2)
+        const tp = await clearTaskProgress(deps.taskProgressStore, current.threadId, zombie, log);
         log.info(
           { invocationId: zombie.invocationId, currentStatus: current.status, reason: zombie.reason },
           '[reconcile-zombies] skipped (already terminal); re-attempted cleanup',
@@ -271,8 +274,11 @@ async function processZombie(
       .catch((err) =>
         log.warn({ invocationId: zombie.invocationId, err }, '[reconcile-zombies] failed to record invocation.died'),
       );
-    const tp = await clearTaskProgress(deps.taskProgressStore, updated.threadId, zombie, log);
-    // F220 Phase 2a (#972): converge queue state — remove stale processing entry + slot.
+    // F220 Phase 2a (#972): converge queue state BEFORE TaskProgress cleanup (codex R12 P2).
+    // Queue convergence is the critical path (unblocks dispatch); TaskProgress cleanup
+    // is cosmetic (clears phantom progress bar). If deleteSnapshot() hangs on an
+    // unavailable Redis connection, convergence must still run — the record is already
+    // 'failed' so future zombie sweeps won't rediscover it.
     // - Raw idempotencyKey passed to adapter for precise identity (Sol R2 P1-1 + R3 P2):
     //   "queue-${entry.id}" → match by entry.id; "connector-${messageId}" → match by
     //   entry.messageId. No time-based approximation.
@@ -316,6 +322,9 @@ async function processZombie(
         }
       }
     }
+    // TaskProgress cleanup AFTER convergence (codex R12 P2): cosmetic cleanup
+    // that can hang on Redis stall. Not blocking the critical dispatch path.
+    const tp = await clearTaskProgress(deps.taskProgressStore, updated.threadId, zombie, log);
     return {
       reconciled: true,
       alreadyTerminal: false,
