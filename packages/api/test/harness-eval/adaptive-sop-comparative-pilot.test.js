@@ -102,6 +102,19 @@ describe('LF-0001 three-arm comparative pilot evidence', () => {
     );
   });
 
+  it('requires one stable harness version within each arm', () => {
+    const mixedAdaptiveHarness = buildArtifact().trials.map((trial) =>
+      trial.arm === 'adaptive_plan_hard_gates' && trial.trialIndex === 2
+        ? { ...trial, harnessVersion: 'lf-0001.adaptive-v2' }
+        : trial,
+    );
+
+    assert.throws(
+      () => evaluateAdaptiveSopComparativePilot(buildArtifact({ trials: mixedAdaptiveHarness })),
+      /every trial within an arm must use the same harness version/,
+    );
+  });
+
   it('stops on hard-invariant misses, escaped P1/P2, or adaptive response repair', () => {
     const trials = buildArtifact().trials.map((trial) => {
       if (trial.arm !== 'adaptive_plan_hard_gates' || trial.trialIndex !== 0) return trial;

@@ -182,6 +182,15 @@ function assertComparableIdentityAndProvenance(pilot: ComparativePilot): void {
   const modelIdentities = new Set(pilot.trials.map((trial) => `${trial.model.provider}:${trial.model.modelId}`));
   if (modelIdentities.size !== 1) throw new Error('every arm must use the same model identity');
 
+  for (const arm of ARM_IDS) {
+    const harnessVersions = new Set(
+      pilot.trials.filter((trial) => trial.arm === arm).map((trial) => trial.harnessVersion),
+    );
+    if (harnessVersions.size !== 1) {
+      throw new Error('every trial within an arm must use the same harness version');
+    }
+  }
+
   for (const trial of pilot.trials) {
     if (
       trial.provenance.baseSha !== pilot.fixture.baseSha ||
