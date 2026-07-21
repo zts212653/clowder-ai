@@ -3,6 +3,35 @@
  * 导出所有 Zod schemas
  */
 
+// LF-0001 / F192 adaptive development SOP contracts
+export type {
+  AdaptiveSopDecision,
+  AdaptiveSopModel,
+  AdaptiveSopPlan,
+  AdaptiveSopRepositoryFacts,
+  AdaptiveSopRisk,
+  SopActualStep,
+  SopAdmissionDecision,
+  SopTrialCost,
+  SopTrialEpisode,
+  SopTrialOutcome,
+} from './adaptive-sop.js';
+export {
+  ADAPTIVE_SOP_PLAN_SCHEMA_VERSION,
+  AdaptiveSopDecisionSchema,
+  AdaptiveSopModelSchema,
+  AdaptiveSopPlanSchema,
+  AdaptiveSopRepositoryFactsSchema,
+  AdaptiveSopRiskSchema,
+  SOP_ADMISSION_DECISION_SCHEMA_VERSION,
+  SOP_TRIAL_EPISODE_SCHEMA_VERSION,
+  SopActualStepSchema,
+  SopAdmissionDecisionSchema,
+  SopTrialCostSchema,
+  SopTrialEpisodeSchema,
+  SopTrialOutcomeSchema,
+} from './adaptive-sop.js';
+
 // F142 Command schemas (slash command manifest validation)
 export type { ManifestSlashCommand } from './command.schema.js';
 export {

@@ -3,6 +3,19 @@
  * 导出所有类型定义
  */
 
+// LF-0001 / F192 adaptive development SOP contracts
+export type {
+  AdaptiveSopDecision,
+  AdaptiveSopModel,
+  AdaptiveSopPlan,
+  AdaptiveSopRepositoryFacts,
+  AdaptiveSopRisk,
+  SopActualStep,
+  SopAdmissionDecision,
+  SopTrialCost,
+  SopTrialEpisode,
+  SopTrialOutcome,
+} from '../schemas/adaptive-sop.js';
 // F093 World Engine types (re-exported from schemas for convenience)
 export type {
   CanonPromotionRecord,

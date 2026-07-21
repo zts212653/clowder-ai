@@ -1,7 +1,7 @@
 ---
 cell_id: harness-eval
 title: Harness Eval Control Plane
-summary: Harness contract、runtime eval、verdict handoff、domain registry、legacy scheduled-task migration 与 re-eval closure。
+summary: Harness contract、adaptive SOP plan/admission contract、runtime eval、verdict handoff、domain registry、legacy scheduled-task migration 与 re-eval closure。
 canonical_features: [F192]
 code_anchors:
   - packages/api/src/infrastructure/harness-eval/f167-eval.ts
@@ -13,6 +13,7 @@ code_anchors:
   - packages/api/src/infrastructure/harness-eval/reeval-closure.ts
   - packages/api/src/infrastructure/harness-eval/eval-a2a-adapter.ts
   - packages/api/src/infrastructure/harness-eval/eval-hub-read-model.ts
+  - packages/api/src/infrastructure/harness-eval/sop/adaptive-sop-contract.ts
   - packages/api/src/infrastructure/harness-eval/friction/friction-signal-source.ts
   - packages/api/src/infrastructure/harness-eval/friction/paw-feel-marker.ts
   - packages/api/src/infrastructure/harness-eval/friction/paw-feel-adapter.ts
@@ -24,6 +25,7 @@ code_anchors:
   - packages/api/src/infrastructure/harness-eval/friction/friction-rollup-input.ts
   - packages/api/src/infrastructure/harness-eval/friction/friction-rollup-report.ts
   - packages/shared/src/types/friction-signal.ts
+  - packages/shared/src/schemas/adaptive-sop.ts
   - packages/api/src/routes/eval-hub.ts
   - packages/web/src/components/HubEvalTab.tsx
   - sop-definitions/development.yaml
@@ -39,7 +41,7 @@ doc_anchors:
   - docs/harness-feedback/
   - feature-discussions/2026-05-21-f192-phase-e-eval-hub-kickoff/README.md
   - sop-definitions/README.md
-static_scan_hints: [harness-eval, VerdictHandoffPacket, eval-domain, reeval, harness-fit-digest, Eval Hub, SopDefinition, sop-definitions, predicate, friction, paw-feel, FrictionSignal]
+static_scan_hints: [harness-eval, VerdictHandoffPacket, eval-domain, reeval, harness-fit-digest, Eval Hub, SopDefinition, sop-definitions, AdaptiveSopPlan, SopAdmissionDecision, SopTrialEpisode, predicate, friction, paw-feel, FrictionSignal]
 cited_by:
   - F192 Phase E-pilot
   - F245 Phase A (paw-feel friction collector) + Phase B (cancel/user-feedback/eval-domain adapters + aggregator + clusterer + rollup input; domain registration + rollup sink land in Phase C)
@@ -55,6 +57,7 @@ F192 owns the socio-technical harness evaluation contract: harnesses declare exp
 
 - Adding or changing an Eval Contract for a harness, skill, MCP tool, SOP, or shared rule.
 - Adding or changing a SOP stage definition or predicate-backed hard rule.
+- Adding or changing model-authored SOP plan、admission decision 或 trial episode contracts.
 - Adding an eval domain registry entry such as `eval:a2a` or `eval:memory`.
 - Producing or validating Verdict Handoff Packets.
 - Migrating legacy scheduled tasks into unified eval runtime.
@@ -63,6 +66,7 @@ F192 owns the socio-technical harness evaluation contract: harnesses declare exp
 ## Extend By
 
 - Add domain-specific adapters under `packages/api/src/infrastructure/harness-eval/`.
+- Keep adaptive task strategy model-authored; this cell validates its stable contract and admission evidence but does not become a second workflow engine.
 - Keep raw telemetry ownership in F153; this cell consumes telemetry and produces derived verdicts.
 - Keep domain thread text as working context only; registry, snapshots, verdicts, and closure records are the state source of truth.
 - Require dry-run evidence before disabling or redirecting legacy scheduled tasks.
@@ -75,4 +79,4 @@ F192 owns the socio-technical harness evaluation contract: harnesses declare exp
 
 ## Static Scan Hints
 
-Watch for new `eval:*` domains, `VerdictHandoffPacket`, `harness-fit-digest`, `delete_sunset`, `reeval`, `legacy scheduled task`, `harness-feedback`, `SopDefinition`, `sop-definitions`, and `predicate` artifacts.
+Watch for new `eval:*` domains, `VerdictHandoffPacket`, `harness-fit-digest`, `delete_sunset`, `reeval`, `legacy scheduled task`, `harness-feedback`, `SopDefinition`, `sop-definitions`, `AdaptiveSopPlan`, `SopAdmissionDecision`, `SopTrialEpisode`, and `predicate` artifacts.
