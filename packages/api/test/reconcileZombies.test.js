@@ -1424,4 +1424,213 @@ describe('F220 Phase 2a: buildQueueConvergence real adapter (Sol P2-3)', () => {
     assert.equal(entriesAfter[0].status, 'processing', 'follow-up status unchanged');
     assert.equal(entriesAfter[0].content, 'older user @codex follow-up', 'follow-up content preserved');
   });
+
+  it('Sol maintainer P1: stale execution callback cannot steal replacement slot (reservation fence)', async () => {
+    // Reproduced race from maintainer review:
+    // 1. Old execution A owns slot S — executeEntry Promise still settling
+    // 2. Zombie convergence deletes S and dispatches replacement B into S
+    // 3. Old A's .then callback calls releaseSlotIfOwned(sk, old_reservation)
+    // 4. MUST NOT delete B's slot: reservation mismatch → no-op
+    //
+    // We test through the full dispatch pipeline by using an async-generator
+    // routeExecution mock that we can hold open and settle on demand.
+    const queue = new InvocationQueue();
+    const log = makeRecordingLogger();
+
+    // Each routeExecution call adds a hold/resolve pair
+    const holdResolvers = [];
+    const qp = new QueueProcessor({
+      queue,
+      invocationTracker: {
+        start: () => ({ signal: new AbortController().signal }),
+        startAll: () => new AbortController(),
+        complete: () => {},
+        completeAll: () => {},
+        has: () => false,
+        getController: () => undefined,
+      },
+      invocationRecordStore: {
+        create: async () => ({ outcome: 'created', invocationId: `inv-${holdResolvers.length}` }),
+        update: async () => {},
+      },
+      router: {
+        routeExecution: async function* () {
+          // Hold open until manually resolved — simulates long-running execution
+          await new Promise((resolve) => holdResolvers.push(resolve));
+        },
+        ackCollectedCursors: async () => {},
+      },
+      socketManager: {
+        broadcastAgentMessage: () => {},
+        broadcastToRoom: () => {},
+        emitToUser: () => {},
+      },
+      messageStore: {
+        list: () => [],
+        get: () => null,
+        create: async () => ({ id: 'm1' }),
+        update: async () => {},
+        delete: async () => {},
+        markDelivered: async () => null,
+      },
+      log,
+    });
+
+    // Enqueue entries A (zombie) and B (replacement)
+    const aResult = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'entry A',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'entry B',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+
+    // Start A via processNext — captures slot reservation_A in closure
+    const dispatchA = await qp.processNext('t1', 'u1');
+    assert.equal(dispatchA.started, true, 'A must start');
+    // Wait for executeEntry to reach routeExecution (async generator)
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(holdResolvers.length, 1, 'A routeExecution reached');
+
+    // Convergence: remove A, release slot, dispatch B
+    const adapter = qp.buildQueueConvergence();
+    const rmResult = adapter.removeStaleProcessing('t1', 'codex', 'u1', `queue-${aResult.entry.id}`);
+    assert.equal(rmResult.removed, true, 'A entry removed by convergence');
+    adapter.releaseSlot('t1', 'codex');
+    adapter.tryDispatchNext('t1', 'codex');
+
+    // Wait for B's dispatch (fire-and-forget async path)
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(holdResolvers.length, 2, 'B routeExecution reached — replacement dispatched');
+
+    // Now: B is executing (held open), slot owned by reservation_B.
+    // Resolve old A — its stale callback tries releaseSlotIfOwned(sk, reservation_A)
+    holdResolvers[0](); // resolve A's routeExecution
+    await new Promise((r) => setTimeout(r, 100)); // let A's .then callback fire
+
+    // CRITICAL: B's slot must survive — trying to start C must fail (slot busy)
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'canary C',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+    const dispatchC = await qp.processNext('t1', 'u1');
+    assert.equal(dispatchC.started, false, 'C must NOT start — B still owns the slot (reservation fence)');
+    // Without reservation fence: A's .then does processingSlots.delete(sk) → B's slot gone → C starts
+
+    // Cleanup: resolve B
+    holdResolvers[1]();
+    await new Promise((r) => setTimeout(r, 100));
+  });
+});
+
+// ── Sol maintainer review P2: deferred TaskProgress cleanup regression ──
+
+describe('Sol maintainer review: deferred cleanup', () => {
+  it('P2: zombie B converges before zombie A cleanup resolves (two-zombie deferred-cleanup)', async () => {
+    // Reproduced from maintainer review:
+    // Before fix: processZombie awaits clearTaskProgress serially → A's hanging
+    // Redis delete prevents B from reaching convergence (record update + queue cleanup).
+    // After fix: clearTaskProgress deferred → all zombies converge first, cleanup in parallel.
+    const store = new InvocationRecordStore();
+    const recA = store.create({
+      threadId: 't1',
+      userId: 'u1',
+      targetCats: ['codex'],
+      intent: 'execute',
+      idempotencyKey: 'queue-a',
+    });
+    store.update(recA.invocationId, { status: 'running' });
+
+    const recB = store.create({
+      threadId: 't1',
+      userId: 'u1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'queue-b',
+    });
+    store.update(recB.invocationId, { status: 'running' });
+
+    // Track operation order — A's cleanup hangs via controlled promise
+    const opLog = [];
+    let resolveACleanup;
+    const taskProgressStore = {
+      deleteSnapshot: async (_threadId, catId) => {
+        opLog.push(`${catId}-cleanup-start`);
+        if (catId === 'codex') {
+          // A's cleanup — hangs until manually resolved (simulates Redis stall)
+          await new Promise((r) => {
+            resolveACleanup = r;
+          });
+        }
+        opLog.push(`${catId}-cleanup-done`);
+      },
+    };
+
+    const convergenceCalls = [];
+    const queueConvergence = {
+      removeStaleProcessing: (_threadId, catId) => {
+        opLog.push(`${catId}-convergence`);
+        convergenceCalls.push(catId);
+        return { removed: true, entryId: `e-${catId}`, primaryCatId: catId };
+      },
+      releaseSlot: () => {},
+      tryDispatchNext: () => {},
+    };
+
+    const resultPromise = reconcileZombies(
+      [
+        makeZombie({ invocationId: recA.invocationId, catId: 'codex' }),
+        makeZombie({ invocationId: recB.invocationId, catId: 'opus' }),
+      ],
+      {
+        invocationRecordStore: store,
+        taskProgressStore,
+        log: makeRecordingLogger(),
+        queueConvergence,
+      },
+    );
+
+    // Wait for async operations to settle (convergence is sync per zombie,
+    // but deleteSnapshot calls fire as the deferred promises are created)
+    await new Promise((r) => setTimeout(r, 50));
+
+    // CRITICAL: B MUST have converged even though A's cleanup is still hanging
+    assert.ok(convergenceCalls.includes('opus'), 'B convergence must have run');
+    assert.ok(convergenceCalls.includes('codex'), 'A convergence must have run');
+    const bConvergenceIdx = opLog.indexOf('opus-convergence');
+    assert.ok(bConvergenceIdx >= 0, 'B convergence in opLog');
+    assert.ok(!opLog.includes('codex-cleanup-done'), 'A cleanup must NOT have resolved yet');
+
+    // Both records are already terminal (convergence complete for both)
+    assert.equal(store.get(recA.invocationId).status, 'failed', 'A record failed');
+    assert.equal(store.get(recB.invocationId).status, 'failed', 'B record failed');
+
+    // Resolve A's cleanup so reconcileZombies can complete
+    resolveACleanup();
+    const result = await resultPromise;
+
+    assert.equal(result.reconciled, 2, 'both zombies reconciled');
+    assert.equal(result.taskProgressCleared, 2, 'both TaskProgress cleared');
+    assert.equal(result.errors, 0, 'no errors');
+    assert.ok(opLog.includes('codex-cleanup-done'), 'A cleanup eventually resolved');
+  });
 });

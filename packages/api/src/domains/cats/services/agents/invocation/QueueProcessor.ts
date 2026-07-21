@@ -199,8 +199,12 @@ export type ContinuationEnqueueOutcome =
 export class QueueProcessor {
   private deps: QueueProcessorDeps;
   /** F108: Per-slot mutex — prevents concurrent double-start per (thread, cat) pair.
-   *  F118 D4: Map value = processingStartedAt for zombie detection. */
-  private processingSlots = new Map<string, number>();
+   *  F118 D4: Map value includes processingStartedAt for zombie detection.
+   *  Sol maintainer review P1: reservation token prevents stale executeEntry callbacks
+   *  from deleting a replacement's slot after zombie convergence dispatches a new entry. */
+  private processingSlots = new Map<string, { startedAt: number; reservation: number }>();
+  /** Monotonically increasing counter for slot reservation tokens. */
+  private nextSlotReservation = 0;
   /** F108: Per-slot pause tracking (set on canceled/failed, cleared on next execution) */
   private pausedSlots = new Map<string, 'canceled' | 'failed'>();
   private pauseEpoch = new Map<string, number>();
@@ -324,6 +328,25 @@ export class QueueProcessor {
     return null;
   }
 
+  /** Claim a processing slot; returns the reservation token for compare-and-release.
+   *  Sol maintainer review P1: stale executeEntry callbacks must not delete a replacement's slot. */
+  private claimSlot(key: string): number {
+    const reservation = ++this.nextSlotReservation;
+    this.processingSlots.set(key, { startedAt: Date.now(), reservation });
+    return reservation;
+  }
+
+  /** Release a slot only if the caller still owns it (compare-and-release).
+   *  Returns true if released, false if slot is absent or owned by a different reservation. */
+  private releaseSlotIfOwned(key: string, reservation: number): boolean {
+    const slot = this.processingSlots.get(key);
+    if (slot && slot.reservation === reservation) {
+      this.processingSlots.delete(key);
+      return true;
+    }
+    return false;
+  }
+
   /**
    * F118 D4: Sweep zombie processingSlots.
    * A slot is zombie when: age > TTL AND invocationTracker has no active slot for the same key.
@@ -332,15 +355,18 @@ export class QueueProcessor {
   private sweepZombieSlots(threadId: string): void {
     const now = Date.now();
     const ttl = this.processingSlotTtlMs;
-    for (const [key, startedAt] of this.processingSlots) {
+    for (const [key, slot] of this.processingSlots) {
       if (!QueueProcessor.slotMatchesThread(key, threadId)) continue;
-      if (now - startedAt <= ttl) continue;
+      if (now - slot.startedAt <= ttl) continue;
       // Only release if tracker also has no active invocation — double-confirm zombie
       const catId = QueueProcessor.parseSlotKey(key)?.catId;
       if (!catId) continue;
       if (!this.deps.invocationTracker.has(threadId, catId)) {
         this.processingSlots.delete(key);
-        this.deps.log.warn({ threadId, catId, ageMs: now - startedAt }, '[F118 D4] zombie processingSlot released');
+        this.deps.log.warn(
+          { threadId, catId, ageMs: now - slot.startedAt },
+          '[F118 D4] zombie processingSlot released',
+        );
       }
     }
   }
@@ -579,8 +605,8 @@ export class QueueProcessor {
 
   /** #555: Cat-specific busy check — covers processingSlots + queue entries for this cat. */
   isCatBusy(threadId: string, catId: string): boolean {
-    const startedAt = this.processingSlots.get(QueueProcessor.slotKey(threadId, catId));
-    if (startedAt !== undefined && Date.now() - startedAt < this.processingSlotTtlMs) return true;
+    const slot = this.processingSlots.get(QueueProcessor.slotKey(threadId, catId));
+    if (slot !== undefined && Date.now() - slot.startedAt < this.processingSlotTtlMs) return true;
     return this.deps.queue.hasQueuedOrProcessingForCat(threadId, catId);
   }
 
@@ -702,9 +728,9 @@ export class QueueProcessor {
     if (this.deps.invocationTracker.has(threadId)) return true;
     this.sweepZombieSlots(threadId);
     const now = Date.now();
-    for (const [key, startedAt] of this.processingSlots) {
+    for (const [key, slot] of this.processingSlots) {
       if (!QueueProcessor.slotMatchesThread(key, threadId)) continue;
-      if (now - startedAt < this.processingSlotTtlMs) return true;
+      if (now - slot.startedAt < this.processingSlotTtlMs) return true;
     }
     return false;
   }
@@ -916,15 +942,15 @@ export class QueueProcessor {
 
       // Guard: markProcessingById may fail if entry was consumed between snapshot and now
       if (!this.deps.queue.markProcessingById(threadId, entry.id)) continue;
-      this.processingSlots.set(sk, Date.now());
+      const reservation = this.claimSlot(sk);
       void this.executeEntry(entry).then(
         (status) => {
-          this.processingSlots.delete(sk);
+          this.releaseSlotIfOwned(sk, reservation);
           this.onInvocationComplete(threadId, entryCat, status).catch(() => {});
           this.signalDeliveryBatchDone(threadId, status);
         },
         () => {
-          this.processingSlots.delete(sk);
+          this.releaseSlotIfOwned(sk, reservation);
           this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
           this.signalDeliveryBatchDone(threadId, 'failed');
         },
@@ -978,15 +1004,15 @@ export class QueueProcessor {
         continue;
       }
 
-      this.processingSlots.set(entrySk, Date.now());
+      const entryReservation = this.claimSlot(entrySk);
       void this.executeEntry(entry).then(
         (status) => {
-          this.processingSlots.delete(entrySk);
+          this.releaseSlotIfOwned(entrySk, entryReservation);
           this.onInvocationComplete(threadId, entryCat, status).catch(() => {});
           this.signalDeliveryBatchDone(threadId, status);
         },
         () => {
-          this.processingSlots.delete(entrySk);
+          this.releaseSlotIfOwned(entrySk, entryReservation);
           this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
           this.signalDeliveryBatchDone(threadId, 'failed');
         },
@@ -1032,16 +1058,16 @@ export class QueueProcessor {
     const entry = this.deps.queue.markProcessing(threadId, userId);
     if (!entry) return { started: false };
 
-    this.processingSlots.set(sk, Date.now());
+    const userReservation = this.claimSlot(sk);
     // Fire-and-forget execution — chain onInvocationComplete AFTER mutex release
     void this.executeEntry(entry).then(
       (status) => {
-        this.processingSlots.delete(sk);
+        this.releaseSlotIfOwned(sk, userReservation);
         this.onInvocationComplete(threadId, entryCat, status).catch(() => {});
         this.signalDeliveryBatchDone(threadId, status);
       },
       () => {
-        this.processingSlots.delete(sk);
+        this.releaseSlotIfOwned(sk, userReservation);
         this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
         this.signalDeliveryBatchDone(threadId, 'failed');
       },

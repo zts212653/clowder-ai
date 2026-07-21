@@ -117,6 +117,10 @@ interface PerZombieOutcome {
   alreadyTerminal: boolean;
   taskProgressCleared: boolean;
   errors: number;
+  /** Sol maintainer review P2: deferred TaskProgress cleanup. Convergence runs
+   *  synchronously per-zombie; cleanup awaited in parallel AFTER all zombies converge
+   *  so one pending Redis delete cannot block later zombies from reaching convergence. */
+  deferredCleanup?: Promise<{ cleared: boolean; errors: number }>;
 }
 
 async function clearTaskProgress(
@@ -229,8 +233,9 @@ async function processZombie(
             }
           }
         }
-        // TaskProgress cleanup AFTER convergence (codex R12 P2)
-        const tp = await clearTaskProgress(deps.taskProgressStore, current.threadId, zombie, log);
+        // Sol maintainer review P2: defer TaskProgress cleanup so it doesn't serially
+        // block later zombies from reaching convergence. Caller awaits all deferred
+        // cleanups in parallel after all zombies have converged.
         log.info(
           { invocationId: zombie.invocationId, currentStatus: current.status, reason: zombie.reason },
           '[reconcile-zombies] skipped (already terminal); re-attempted cleanup',
@@ -238,8 +243,9 @@ async function processZombie(
         return {
           reconciled: false,
           alreadyTerminal: true,
-          taskProgressCleared: tp.cleared,
-          errors: tp.errors + convergenceErrors,
+          taskProgressCleared: false,
+          errors: convergenceErrors,
+          deferredCleanup: clearTaskProgress(deps.taskProgressStore, current.threadId, zombie, log),
         };
       }
       // Record still alive (queued/running) but CAS update returned null — could be
@@ -322,14 +328,15 @@ async function processZombie(
         }
       }
     }
-    // TaskProgress cleanup AFTER convergence (codex R12 P2): cosmetic cleanup
-    // that can hang on Redis stall. Not blocking the critical dispatch path.
-    const tp = await clearTaskProgress(deps.taskProgressStore, updated.threadId, zombie, log);
+    // Sol maintainer review P2: defer TaskProgress cleanup so it doesn't serially
+    // block later zombies from reaching convergence. Caller awaits all deferred
+    // cleanups in parallel after all zombies have converged.
     return {
       reconciled: true,
       alreadyTerminal: false,
-      taskProgressCleared: tp.cleared,
-      errors: tp.errors + convergenceErrors,
+      taskProgressCleared: false,
+      errors: convergenceErrors,
+      deferredCleanup: clearTaskProgress(deps.taskProgressStore, updated.threadId, zombie, log),
     };
   } catch (err) {
     log.warn(
@@ -358,12 +365,30 @@ export async function reconcileZombies(
   let taskProgressCleared = 0;
   let errors = 0;
 
+  // Sol maintainer review P2: two-pass approach.
+  // Pass 1: converge all zombies (record update + queue cleanup). Each zombie's
+  // convergence is awaited serially (safe, single-threaded), but TaskProgress
+  // cleanup is deferred so one pending Redis delete cannot block later zombies.
+  const deferredCleanups: Array<Promise<{ cleared: boolean; errors: number }>> = [];
   for (const zombie of zombies) {
     const outcome = await processZombie(zombie, deps, log);
     if (outcome.reconciled) reconciled += 1;
     if (outcome.alreadyTerminal) alreadyTerminal += 1;
-    if (outcome.taskProgressCleared) taskProgressCleared += 1;
     errors += outcome.errors;
+    if (outcome.deferredCleanup) deferredCleanups.push(outcome.deferredCleanup);
+  }
+
+  // Pass 2: await all deferred TaskProgress cleanups in parallel.
+  // All zombie convergence is complete — dispatch is unblocked for all threads.
+  // Now safely await cosmetic cleanup without blocking critical paths.
+  const cleanupResults = await Promise.allSettled(deferredCleanups);
+  for (const result of cleanupResults) {
+    if (result.status === 'fulfilled') {
+      if (result.value.cleared) taskProgressCleared += 1;
+      errors += result.value.errors;
+    } else {
+      errors += 1;
+    }
   }
 
   const result: ReconcileZombieResult = {
