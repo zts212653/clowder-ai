@@ -245,7 +245,7 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, ti
  * Spawn the installer with proper elevation.
  * Resolves when the launcher confirms the process started; rejects on failure.
  *
- * Windows: PowerShell Start-Process -Verb RunAs triggers UAC.
+ * Windows: PowerShell Start-Process; Inno self-elevates via PrivilegesRequired=admin.
  * macOS: Finder opens the DMG via `open`.
  *
  * @param {Function} spawn — child_process.spawn (injectable for testing)
@@ -261,7 +261,10 @@ function spawnInstaller(spawn, platform, dbg, installerPath, logPath) {
       if (logPath) innoArgs.push(`"/LOG=${logPath}"`);
       const escPath = installerPath.replace(/'/g, "''");
       const escArgs = innoArgs.join(' ').replace(/'/g, "''");
-      const psCmd = `Start-Process -FilePath '${escPath}' -ArgumentList '${escArgs}' -Verb RunAs`;
+      // Let Inno handle elevation (PrivilegesRequired=admin) instead of -Verb RunAs, so
+      // runasoriginaluser in [Run] can de-elevate the post-install restart to the original user.
+      // -Wait captures the non-elevated stub's exit code (0=UAC accepted, 1=declined).
+      const psCmd = `$p = Start-Process -FilePath '${escPath}' -ArgumentList '${escArgs}' -PassThru -Wait; exit $p.ExitCode`;
       const child = spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', psCmd], {
         stdio: 'ignore',
       });

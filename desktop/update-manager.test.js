@@ -96,7 +96,7 @@ describe('Windows launcher (_spawnInstaller)', () => {
     await assert.rejects(() => m._spawnInstaller('C:\\Setup.exe', null), /ENOENT/);
   });
 
-  test('passes -Verb RunAs and quoted /LOG= to PowerShell', async () => {
+  test('lets Inno self-elevate (no -Verb RunAs) and quotes /LOG=', async () => {
     let captured;
     const m = new UpdateManager(
       baseDeps(td, {
@@ -109,7 +109,8 @@ describe('Windows launcher (_spawnInstaller)', () => {
     await m._spawnInstaller('C:\\Clowder AI\\Setup.exe', 'C:\\Clowder AI\\log.txt');
     assert.equal(captured[0], 'powershell.exe');
     const cmd = captured[1].find((a) => a.includes('Start-Process'));
-    assert.ok(cmd.includes('-Verb RunAs'), 'must request elevation');
+    assert.ok(!cmd.includes('-Verb RunAs'), 'must NOT pre-elevate — Inno handles UAC');
+    assert.ok(cmd.includes('-PassThru -Wait'), 'must wait for Inno stub exit code');
     assert.ok(cmd.includes('"/LOG='), '/LOG= must be double-quoted');
   });
 });
