@@ -77,6 +77,76 @@ describe('LF-0001 structured replay model ports', () => {
     assert.deepEqual(requests[0].payload.modelInput, modelInput);
     assert.equal(JSON.stringify(requests[0]).includes('graderOnly'), false);
     assert.equal(JSON.stringify(requests[0]).includes('outcomeCommit'), false);
+    assert.deepEqual(requests[0].responseContract, {
+      schemaVersion: 'lf-0001.plan-body-response.v2',
+      format: 'json_schema',
+      name: 'adaptive_sop_plan_body',
+      strict: true,
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'taskUnderstanding',
+          'desiredOutcome',
+          'repositoryFacts',
+          'risks',
+          'decisions',
+          'executionOrder',
+          'outcomeChecks',
+          'replanTriggers',
+          'rollbackPlan',
+        ],
+        properties: {
+          taskUnderstanding: { type: 'string' },
+          desiredOutcome: { type: 'array', items: { type: 'string' } },
+          repositoryFacts: {
+            type: 'object',
+            additionalProperties: false,
+            required: [],
+            properties: {},
+          },
+          risks: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['claim', 'evidence', 'uncertainty'],
+              properties: {
+                claim: { type: 'string' },
+                evidence: { type: 'array', items: { type: 'string' } },
+                uncertainty: { type: 'array', items: { type: 'string' } },
+              },
+            },
+          },
+          decisions: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['stepId', 'action', 'reason', 'residualRisk', 'replacementEvidence'],
+              properties: {
+                stepId: { type: 'string' },
+                action: { type: 'string', enum: ['include', 'omit', 'replace'] },
+                reason: { type: 'string' },
+                residualRisk: { type: 'string' },
+                replacementEvidence: { type: 'array', items: { type: 'string' } },
+              },
+            },
+          },
+          executionOrder: { type: 'array', items: { type: 'string' } },
+          outcomeChecks: { type: 'array', items: { type: 'string' } },
+          replanTriggers: { type: 'array', items: { type: 'string' } },
+          rollbackPlan: { type: 'string' },
+        },
+      },
+      semanticInvariants: [
+        'each risk has evidence or explicit uncertainty',
+        'omit and replace decisions have non-empty replacementEvidence',
+        'decision stepId values are unique',
+        'executionOrder contains every non-omitted decision exactly once and no omitted or unknown stepId',
+      ],
+    });
+    assert.match(requests[0].instructions, /Return repositoryFacts as an empty object/);
     assert.equal(plan.schemaVersion, 'adaptive-sop-plan.v1');
     assert.equal(plan.episodeId, 'fixture-one-trial-2');
     assert.deepEqual(plan.model, {
@@ -133,6 +203,36 @@ describe('LF-0001 structured replay model ports', () => {
     assert.equal(requests[0].payload.modelInput.taskPrompt, 'Do the task.');
     assert.equal(requests[0].instructions.includes('canonical tool sequence'), true);
     assert.equal(requests[0].instructions.includes('Small score differences'), true);
+    assert.deepEqual(requests[0].responseContract, {
+      schemaVersion: 'lf-0001.model-grade-response.v2',
+      format: 'json_schema',
+      name: 'adaptive_sop_model_grade',
+      strict: true,
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['dimensions', 'unnecessaryProcess', 'missingEvidence'],
+        properties: {
+          dimensions: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['id', 'score', 'rationale', 'evidenceRefs'],
+              properties: {
+                id: { type: 'string', enum: ['goal'] },
+                score: { type: 'integer' },
+                rationale: { type: 'string' },
+                evidenceRefs: { type: 'array', items: { type: 'string' } },
+              },
+            },
+          },
+          unnecessaryProcess: { type: 'array', items: { type: 'string' } },
+          missingEvidence: { type: 'array', items: { type: 'string' } },
+        },
+      },
+      semanticInvariants: ['return every rubric dimension exactly once', 'dimension scores are integers from 0 to 4'],
+    });
     assert.deepEqual(result.dimensions[0], {
       id: 'goal',
       score: 3,

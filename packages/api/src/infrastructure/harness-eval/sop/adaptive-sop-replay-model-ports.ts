@@ -17,34 +17,82 @@ export interface StructuredReplayCompletionPort {
 }
 
 const PLAN_BODY_RESPONSE_CONTRACT = {
-  schemaVersion: 'lf-0001.plan-body-response.v1',
-  requiredFields: [
-    'taskUnderstanding',
-    'desiredOutcome',
-    'repositoryFacts',
-    'risks',
-    'decisions',
-    'executionOrder',
-    'outcomeChecks',
-    'replanTriggers',
-    'rollbackPlan',
+  schemaVersion: 'lf-0001.plan-body-response.v2',
+  format: 'json_schema',
+  name: 'adaptive_sop_plan_body',
+  strict: true,
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: [
+      'taskUnderstanding',
+      'desiredOutcome',
+      'repositoryFacts',
+      'risks',
+      'decisions',
+      'executionOrder',
+      'outcomeChecks',
+      'replanTriggers',
+      'rollbackPlan',
+    ],
+    properties: {
+      taskUnderstanding: { type: 'string' },
+      desiredOutcome: { type: 'array', items: { type: 'string' } },
+      repositoryFacts: {
+        type: 'object',
+        additionalProperties: false,
+        required: [],
+        properties: {},
+      },
+      risks: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['claim', 'evidence', 'uncertainty'],
+          properties: {
+            claim: { type: 'string' },
+            evidence: { type: 'array', items: { type: 'string' } },
+            uncertainty: { type: 'array', items: { type: 'string' } },
+          },
+        },
+      },
+      decisions: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['stepId', 'action', 'reason', 'residualRisk', 'replacementEvidence'],
+          properties: {
+            stepId: { type: 'string' },
+            action: { type: 'string', enum: ['include', 'omit', 'replace'] },
+            reason: { type: 'string' },
+            residualRisk: { type: 'string' },
+            replacementEvidence: { type: 'array', items: { type: 'string' } },
+          },
+        },
+      },
+      executionOrder: { type: 'array', items: { type: 'string' } },
+      outcomeChecks: { type: 'array', items: { type: 'string' } },
+      replanTriggers: { type: 'array', items: { type: 'string' } },
+      rollbackPlan: { type: 'string' },
+    },
+  },
+  semanticInvariants: [
+    'each risk has evidence or explicit uncertainty',
+    'omit and replace decisions have non-empty replacementEvidence',
+    'decision stepId values are unique',
+    'executionOrder contains every non-omitted decision exactly once and no omitted or unknown stepId',
   ],
-  decisionActions: ['include', 'omit', 'replace'],
-  omissionRule: 'omit and replace decisions require replacementEvidence',
-} as const;
-
-const MODEL_GRADE_RESPONSE_CONTRACT = {
-  schemaVersion: 'lf-0001.model-grade-response.v1',
-  requiredFields: ['dimensions', 'unnecessaryProcess', 'missingEvidence'],
-  dimensionScoreRange: [0, 4],
-  dimensionRule: 'return every rubric dimension exactly once',
 } as const;
 
 const PLANNER_INSTRUCTIONS = [
   'Author a proportional development plan from only the supplied sanitized modelInput.',
   'Treat missing repository facts as uncertainty. Do not infer safety from missing facts.',
+  'Return repositoryFacts as an empty object; a separate observer supplies repository and risk facts.',
   'Choose include, omit, or replace per step based on outcome and risk; do not reproduce a fixed SOP.',
-  'Every risk needs evidence or explicit uncertainty. Every omission or replacement needs alternative evidence.',
+  'Every risk needs evidence or explicit uncertainty. Return replacementEvidence for every decision; it must be non-empty for omit or replace.',
+  'executionOrder must contain each non-omitted decision stepId exactly once and must not contain omitted or unknown stepIds.',
   'Return only the response-contract JSON body. The adapter supplies schema, episode, and model provenance.',
 ].join(' ');
 
@@ -109,10 +157,43 @@ export function createStructuredReplayModelGrader(input: {
           deterministicGrade: gradeInput.deterministicGrade,
           environment: gradeInput.environment,
         },
-        responseContract: MODEL_GRADE_RESPONSE_CONTRACT,
+        responseContract: buildModelGradeResponseContract(gradeInput.rubric),
       });
     },
   };
+}
+
+function buildModelGradeResponseContract(rubric: Readonly<{ dimensions: readonly { id: string }[] }>) {
+  return {
+    schemaVersion: 'lf-0001.model-grade-response.v2',
+    format: 'json_schema',
+    name: 'adaptive_sop_model_grade',
+    strict: true,
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['dimensions', 'unnecessaryProcess', 'missingEvidence'],
+      properties: {
+        dimensions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['id', 'score', 'rationale', 'evidenceRefs'],
+            properties: {
+              id: { type: 'string', enum: rubric.dimensions.map((dimension) => dimension.id) },
+              score: { type: 'integer' },
+              rationale: { type: 'string' },
+              evidenceRefs: { type: 'array', items: { type: 'string' } },
+            },
+          },
+        },
+        unnecessaryProcess: { type: 'array', items: { type: 'string' } },
+        missingEvidence: { type: 'array', items: { type: 'string' } },
+      },
+    },
+    semanticInvariants: ['return every rubric dimension exactly once', 'dimension scores are integers from 0 to 4'],
+  } as const;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
