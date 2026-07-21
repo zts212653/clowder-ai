@@ -18,6 +18,7 @@ code_anchors:
   - packages/api/src/infrastructure/harness-eval/sop/adaptive-sop-replay-runner.ts
   - packages/api/src/infrastructure/harness-eval/sop/adaptive-sop-replay-fixture-grader.ts
   - packages/api/src/infrastructure/harness-eval/sop/adaptive-sop-replay-model-ports.ts
+  - packages/api/src/infrastructure/harness-eval/sop/adaptive-sop-comparative-pilot.ts
   - packages/api/src/infrastructure/harness-eval/friction/friction-signal-source.ts
   - packages/api/src/infrastructure/harness-eval/friction/paw-feel-marker.ts
   - packages/api/src/infrastructure/harness-eval/friction/paw-feel-adapter.ts
@@ -45,7 +46,7 @@ doc_anchors:
   - docs/harness-feedback/
   - feature-discussions/2026-05-21-f192-phase-e-eval-hub-kickoff/README.md
   - sop-definitions/README.md
-static_scan_hints: [harness-eval, VerdictHandoffPacket, eval-domain, reeval, harness-fit-digest, Eval Hub, SopDefinition, sop-definitions, AdaptiveSopPlan, SopAdmissionFacts, SopAdmissionDecision, SopTrialEpisode, AdaptiveSopReplayArtifact, predicate, friction, paw-feel, FrictionSignal]
+static_scan_hints: [harness-eval, VerdictHandoffPacket, eval-domain, reeval, harness-fit-digest, Eval Hub, SopDefinition, sop-definitions, AdaptiveSopPlan, SopAdmissionFacts, SopAdmissionDecision, SopTrialEpisode, AdaptiveSopReplayArtifact, AdaptiveSopComparativePilot, predicate, friction, paw-feel, FrictionSignal]
 cited_by:
   - F192 Phase E-pilot
   - F245 Phase A (paw-feel friction collector) + Phase B (cancel/user-feedback/eval-domain adapters + aggregator + clusterer + rollup input; domain registration + rollup sink land in Phase C)
@@ -63,6 +64,7 @@ F192 owns the socio-technical harness evaluation contract: harnesses declare exp
 - Adding or changing a SOP stage definition or predicate-backed hard rule.
 - Adding or changing model-authored SOP plan、admission decision 或 trial episode contracts.
 - Adding or changing the pinned adaptive-SOP replay runner or its leakage-safe artifact.
+- Adding or changing the three-arm adaptive-SOP comparative pilot evidence contract.
 - Adding an eval domain registry entry such as `eval:a2a` or `eval:memory`.
 - Producing or validating Verdict Handoff Packets.
 - Migrating legacy scheduled tasks into unified eval runtime.
@@ -85,4 +87,4 @@ F192 owns the socio-technical harness evaluation contract: harnesses declare exp
 
 ## Static Scan Hints
 
-Watch for new `eval:*` domains, `VerdictHandoffPacket`, `harness-fit-digest`, `delete_sunset`, `reeval`, `legacy scheduled task`, `harness-feedback`, `SopDefinition`, `sop-definitions`, `AdaptiveSopPlan`, `SopAdmissionFacts`, `SopAdmissionDecision`, `SopTrialEpisode`, `AdaptiveSopReplayArtifact`, and `predicate` artifacts.
+Watch for new `eval:*` domains, `VerdictHandoffPacket`, `harness-fit-digest`, `delete_sunset`, `reeval`, `legacy scheduled task`, `harness-feedback`, `SopDefinition`, `sop-definitions`, `AdaptiveSopPlan`, `SopAdmissionFacts`, `SopAdmissionDecision`, `SopTrialEpisode`, `AdaptiveSopReplayArtifact`, `AdaptiveSopComparativePilot`, and `predicate` artifacts.

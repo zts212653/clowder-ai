@@ -168,7 +168,7 @@ function buildRunInput(overrides = {}) {
 }
 
 describe('LF-0001 adaptive SOP replay runner', () => {
-  it('runs all fourteen candidates three times without exposing grader-only data to the planner', async () => {
+  it('runs all fifteen candidates three times without exposing grader-only data to the planner', async () => {
     const observations = { plannerInputs: [], plannerContexts: [], modelGraderInputs: [] };
     const artifact = await runAdaptiveSopReplay({
       ...buildRunInput(),
@@ -176,14 +176,14 @@ describe('LF-0001 adaptive SOP replay runner', () => {
     });
 
     assert.equal(artifact.schemaVersion, 'lf-0001.replay-run.v1');
-    assert.equal(artifact.summary.candidateCount, 14);
-    assert.equal(artifact.summary.plannedTrials, 42);
-    assert.equal(artifact.summary.completedTrials, 42);
-    assert.equal(artifact.trials.length, 42);
+    assert.equal(artifact.summary.candidateCount, 15);
+    assert.equal(artifact.summary.plannedTrials, 45);
+    assert.equal(artifact.summary.completedTrials, 45);
+    assert.equal(artifact.trials.length, 45);
     assert.equal(artifact.runMode, 'synthetic_wiring');
     assert.equal(artifact.eligibleForCapabilityVerdict, false);
-    assert.equal(observations.plannerInputs.length, 42);
-    assert.equal(observations.modelGraderInputs.length, 42);
+    assert.equal(observations.plannerInputs.length, 45);
+    assert.equal(observations.modelGraderInputs.length, 45);
 
     for (const input of observations.plannerInputs) {
       assert.equal(Object.hasOwn(input, 'graderOnly'), false);

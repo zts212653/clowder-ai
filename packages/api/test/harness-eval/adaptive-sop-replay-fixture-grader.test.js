@@ -99,7 +99,7 @@ describe('LF-0001 provenance-backed replay facts and deterministic grader', () =
       );
     }
 
-    assert.deepEqual(counts, { admitted: 1, revise: 0, blocked: 13 });
+    assert.deepEqual(counts, { admitted: 2, revise: 0, blocked: 13 });
   });
 
   it('produces stable facts for a pinned profile bank and observation time', async () => {

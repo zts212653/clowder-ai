@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -25,9 +26,21 @@ function collectKeys(value, keys = []) {
   return keys;
 }
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
 describe('LF-0001 adaptive SOP replay manifest', () => {
   const manifest = readJson('adaptive-sop-replay-manifest.json');
   const rubric = readJson('adaptive-sop-grader-rubric.json');
+  const comparativePilot = readJson('adaptive-sop-comparative-pilot-manifest.json');
 
   it('contains at least twelve unique provenance-backed candidates', () => {
     assert.equal(manifest.schemaVersion, 'lf-0001.replay-manifest.v1');
@@ -93,6 +106,43 @@ describe('LF-0001 adaptive SOP replay manifest', () => {
     assert.deepEqual(privacyFixture.modelInput.repositorySnapshot.visiblePaths, []);
     assert.equal(privacyFixture.graderOnly.provenance.materializeBaseCommit, false);
     assert.doesNotMatch(JSON.stringify(privacyFixture.modelInput), /account|balance|income|asset/i);
+  });
+
+  it('includes a provenance-backed contained code-changing pilot candidate', () => {
+    const candidate = manifest.candidates.find((entry) => entry.fixtureId === 'sop-replay-stale-formatter-regression');
+    assert.ok(candidate);
+    assert.equal(candidate.graderOnly.provenance.sourcePullRequest, 655);
+    assert.equal(candidate.graderOnly.provenance.baseCommit, '8335b91253f690324f29739ef12ad8575fdb897b');
+    assert.deepEqual(candidate.graderOnly.outcomeEvidence.changedPaths, [
+      'packages/api/test/telegram-html-formatter.test.js',
+    ]);
+    assert.deepEqual(candidate.graderOnly.outcomeEvidence.testPaths, [
+      'packages/api/test/telegram-html-formatter.test.js',
+    ]);
+    assert.ok(candidate.graderOnly.challengeTags.includes('code-changing'));
+    assert.ok(candidate.graderOnly.challengeTags.includes('test-only'));
+    assert.match(candidate.modelInput.taskPrompt, /formatter regression/i);
+    assert.ok(candidate.modelInput.constraints.includes('Do not modify formatter or adapter runtime code.'));
+  });
+
+  it('pins the three-arm pilot without projecting trusted outcomes to executors', () => {
+    const candidate = manifest.candidates.find((entry) => entry.fixtureId === comparativePilot.fixtureId);
+    assert.ok(candidate);
+    assert.equal(comparativePilot.schemaVersion, 'lf-0001.comparative-pilot-manifest.v1');
+    assert.equal(comparativePilot.sourcePullRequest, candidate.graderOnly.provenance.sourcePullRequest);
+    assert.equal(comparativePilot.baseCommit, candidate.graderOnly.provenance.baseCommit);
+    assert.equal(
+      comparativePilot.modelInputSha256,
+      createHash('sha256').update(canonicalJson(candidate.modelInput)).digest('hex'),
+    );
+    assert.equal(comparativePilot.trialsPerArm, 3);
+    assert.deepEqual(
+      comparativePilot.arms.map((arm) => arm.id),
+      ['full_sop', 'free_plan_hard_gates', 'adaptive_plan_hard_gates'],
+    );
+    assert.equal(comparativePilot.controls.trustedOutcomeHiddenFromExecutors, true);
+    assert.equal(comparativePilot.controls.sameHardGates, true);
+    assert.equal(JSON.stringify(comparativePilot).includes(candidate.graderOnly.provenance.outcomeCommit), false);
   });
 
   it('defines a weighted rubric with hard invariant vetoes and leakage controls', () => {

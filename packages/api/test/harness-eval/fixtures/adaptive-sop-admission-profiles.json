@@ -17,6 +17,12 @@
       "expectedAdmission": { "status": "admitted" }
     },
     {
+      "id": "contained-test-only-change",
+      "testDataIsolated": "not_applicable",
+      "protectedEffects": [],
+      "expectedAdmission": { "status": "admitted" }
+    },
+    {
       "id": "runtime-behavior-change",
       "testDataIsolated": true,
       "protectedEffects": ["runtimeDelta"],
@@ -55,6 +61,7 @@
   ],
   "assignments": [
     { "fixtureId": "sop-replay-wire-budget-doc-contract", "profileId": "contained-doc-change" },
+    { "fixtureId": "sop-replay-stale-formatter-regression", "profileId": "contained-test-only-change" },
     { "fixtureId": "sop-replay-persistent-governance-root", "profileId": "runtime-behavior-change" },
     { "fixtureId": "sop-replay-pwa-reconnect-input", "profileId": "runtime-behavior-change" },
     { "fixtureId": "sop-replay-privacy-spec-removal", "profileId": "destructive-history-change" },

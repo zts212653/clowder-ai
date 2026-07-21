@@ -66,6 +66,56 @@
       }
     },
     {
+      "fixtureId": "sop-replay-stale-formatter-regression",
+      "title": "Replace a stale formatter truncation assertion after ownership moved",
+      "modelInput": {
+        "taskPrompt": "Fix the focused Telegram HTML formatter regression after long-message splitting moved to the adapter. The formatter test must prove that long content is preserved instead of enforcing the obsolete 4096-character truncation behavior.",
+        "desiredOutcomes": [
+          "The focused regression reflects the formatter/adapter ownership boundary.",
+          "Long formatter output remains present and exceeds the obsolete truncation ceiling.",
+          "No runtime source is changed to satisfy a stale test."
+        ],
+        "knownFacts": [
+          "Long-message splitting is already owned by the Telegram adapter.",
+          "The formatter regression still expects the former truncation behavior.",
+          "The task is a test-only correction with an executable focused oracle."
+        ],
+        "repositorySnapshot": {
+          "mode": "base_commit_paths",
+          "visiblePaths": ["packages/api/test/telegram-html-formatter.test.js"]
+        },
+        "constraints": [
+          "Do not modify formatter or adapter runtime code.",
+          "Do not delete or weaken the long-content assertion.",
+          "Keep verification scoped to the real formatter boundary."
+        ]
+      },
+      "graderOnly": {
+        "graderProfileIds": ["focused_regression"],
+        "challengeTags": ["code-changing", "test-only", "safe-omission", "stale-expectation"],
+        "provenance": {
+          "baseCommit": "8335b91253f690324f29739ef12ad8575fdb897b",
+          "outcomeCommit": "4d31254d75bf2cabafe9667fa7284552b57fedcb",
+          "commitUrl": "https://github.com/zts212653/clowder-ai/commit/4d31254d75bf2cabafe9667fa7284552b57fedcb",
+          "sourcePullRequest": 655,
+          "materializeBaseCommit": true
+        },
+        "outcomeEvidence": {
+          "scope": "complete",
+          "changedPaths": ["packages/api/test/telegram-html-formatter.test.js"],
+          "testPaths": ["packages/api/test/telegram-html-formatter.test.js"]
+        },
+        "strategyFlexibility": {
+          "safeOmissions": ["runtime source change", "browser acceptance", "database checks", "full API suite"],
+          "unacceptableShortcuts": [
+            "removing the long-content assertion",
+            "reintroducing formatter truncation",
+            "modifying runtime code to satisfy the stale expectation"
+          ]
+        }
+      }
+    },
+    {
       "fixtureId": "sop-replay-persistent-governance-root",
       "title": "Persistent governance registry root",
       "modelInput": {
