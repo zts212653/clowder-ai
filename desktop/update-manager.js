@@ -17,7 +17,7 @@ const GITHUB_OWNER = 'zts212653';
 const GITHUB_REPO = 'clowder-ai';
 
 class UpdateManager {
-  /** @param {object} deps — injected Electron deps (app, net, showDialog, setProgressBar, openExternal, openPath, quitApp, dbg, userDataRoot, platform, arch) */
+  /** @param {object} deps — injected Electron deps (app, net, showDialog, setProgressBar, openExternal, openPath, quitApp, stopServices, dbg, userDataRoot, platform, arch) */
   constructor(deps) {
     this._d = deps;
     this._updatesDir = dl.updatesDir(deps.userDataRoot);
@@ -225,27 +225,32 @@ class UpdateManager {
     fs.mkdirSync(this._updatesDir, { recursive: true });
 
     try {
-      await downloadAsset(this._d.net, target.asset, destPath, this._d.app.getVersion(), setProgressBar, dbg);
-      const valid = await dl.verifyFileIntegrity(destPath, target.asset.digest, target.asset.size);
-      if (!valid) {
-        dbg('Integrity check FAILED');
-        try {
-          fs.unlinkSync(destPath);
-        } catch {}
-        setProgressBar(-1);
-        const r = await this._d.showDialog({
-          type: 'error',
-          buttons: ['Retry', 'Cancel'],
-          title: 'Download Failed',
-          message: 'Integrity verification failed',
-          detail: 'The file may be corrupted.',
-        });
-        if (r === 0) {
-          // Reset guard before retry — recursive call checks _downloading
-          this._downloading = false;
-          await this.downloadAndInstall(target);
+      // P2: Reuse verified download from previous "Later" deferral (avoids 600MB re-download)
+      let valid = await dl.verifyFileIntegrity(destPath, target.asset.digest, target.asset.size);
+      if (valid) {
+        dbg('Reusing previously verified download');
+      } else {
+        await downloadAsset(this._d.net, target.asset, destPath, this._d.app.getVersion(), setProgressBar, dbg);
+        valid = await dl.verifyFileIntegrity(destPath, target.asset.digest, target.asset.size);
+        if (!valid) {
+          dbg('Integrity check FAILED');
+          try {
+            fs.unlinkSync(destPath);
+          } catch {}
+          setProgressBar(-1);
+          const r = await this._d.showDialog({
+            type: 'error',
+            buttons: ['Retry', 'Cancel'],
+            title: 'Download Failed',
+            message: 'Integrity verification failed',
+            detail: 'The file may be corrupted.',
+          });
+          if (r === 0) {
+            this._downloading = false;
+            await this.downloadAndInstall(target);
+          }
+          return;
         }
-        return;
       }
       setProgressBar(-1);
       await this._executeInstall(target, destPath);
@@ -258,15 +263,8 @@ class UpdateManager {
   }
 
   async _executeInstall(target, installerPath) {
-    const { platform, dbg, showDialog, quitApp, openExternal } = this._d;
+    const { platform, dbg, showDialog, quitApp } = this._d;
     const isWin = platform === 'win32';
-
-    if (isWin && dl.getInstallType(this._d.app.getAppPath(), this._d.userDataRoot) !== 'installer') {
-      dbg('Non-installer — opening release page');
-      openExternal(`https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/tag/v${target.version}`);
-      return;
-    }
-
     const msg = isWin
       ? {
           buttons: ['Restart & Upgrade', 'Later'],
@@ -292,6 +290,10 @@ class UpdateManager {
       startedAt: new Date().toISOString(),
     });
     try {
+      // P1: Orderly service shutdown before installer — Windows Inno Setup PrepareToInstall
+      // force-kills all processes under {app}, so services must be stopped first to avoid
+      // corrupting Redis or interrupting persistent-store writes.
+      if (isWin && this._d.stopServices) await this._d.stopServices();
       await this._spawnInstaller(installerPath, logPath || null);
       await quitApp();
     } catch (err) {
@@ -326,6 +328,7 @@ class UpdateManager {
       return;
     }
     try {
+      if (this._d.platform === 'win32' && this._d.stopServices) await this._d.stopServices();
       await this._spawnInstaller(journal.installerPath, journal.logPath || null);
       await this._d.quitApp();
       return 'quitting';

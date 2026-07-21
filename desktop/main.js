@@ -291,6 +291,12 @@ app.on('ready', async () => {
     openExternal: (url) => shell.openExternal(url),
     openPath: (p) => shell.openPath(p),
     quitApp,
+    stopServices: async () => {
+      if (services) {
+        await services.stopAll();
+        services = null;
+      }
+    },
     dbg,
     userDataRoot,
     platform: process.platform,
