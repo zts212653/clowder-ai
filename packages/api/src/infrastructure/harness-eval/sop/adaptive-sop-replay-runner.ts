@@ -46,6 +46,13 @@ const HardInvariantSchema = z
   })
   .strict();
 
+const RequiredDeterministicCheckSchema = z
+  .object({
+    id: z.string().trim().min(1),
+    rule: z.string().trim().min(1),
+  })
+  .strict();
+
 const GraderRubricSchema = z
   .object({
     schemaVersion: z.literal('lf-0001.grader-rubric.v1'),
@@ -56,6 +63,7 @@ const GraderRubricSchema = z
       })
       .passthrough(),
     dimensions: z.array(RubricDimensionSchema).min(1),
+    requiredDeterministicChecks: z.array(RequiredDeterministicCheckSchema).min(1),
     hardInvariantVetoes: z.array(HardInvariantSchema).min(1),
   })
   .passthrough();
@@ -399,6 +407,14 @@ function validateRunInput(input: AdaptiveSopReplayRunInput): ValidatedRunInput {
     rubric.hardInvariantVetoes.map((veto) => veto.id),
     'rubric hard-invariant id',
   );
+  assertUniqueStrings(
+    rubric.requiredDeterministicChecks.map((check) => check.id),
+    'rubric required deterministic check id',
+  );
+  const requiredCheckIds = new Set(rubric.requiredDeterministicChecks.map((check) => check.id));
+  if (rubric.hardInvariantVetoes.some((veto) => !requiredCheckIds.has(veto.id))) {
+    throw new Error('every hard-invariant veto must be included in required deterministic coverage');
+  }
   const totalWeight = rubric.dimensions.reduce((total, dimension) => total + dimension.weight, 0);
   if (totalWeight !== 100) throw new Error('rubric dimension weights must total 100');
 
@@ -411,10 +427,22 @@ function parseDeterministicGrade(input: unknown, rubric: GraderRubric): Determin
     grade.checks.map((check) => check.id),
     'deterministic check id',
   );
+  const expectedChecks = rubric.requiredDeterministicChecks.map((check) => check.id).sort();
+  const receivedChecks = grade.checks.map((check) => check.id).sort();
+  if (JSON.stringify(expectedChecks) !== JSON.stringify(receivedChecks)) {
+    throw new Error('deterministic checks must exactly match the pinned rubric coverage');
+  }
   assertUniqueStrings(grade.hardInvariantMisses, 'hard-invariant miss');
   const knownVetoes = new Set(rubric.hardInvariantVetoes.map((veto) => veto.id));
   for (const miss of grade.hardInvariantMisses) {
     if (!knownVetoes.has(miss)) throw new Error(`unknown hard-invariant miss: ${miss}`);
+  }
+  const misses = new Set(grade.hardInvariantMisses);
+  for (const veto of rubric.hardInvariantVetoes) {
+    const check = grade.checks.find((candidate) => candidate.id === veto.id);
+    if (!check || (check.status === 'fail') !== misses.has(veto.id)) {
+      throw new Error('hard-invariant check failures must exactly match hardInvariantMisses');
+    }
   }
   return grade;
 }

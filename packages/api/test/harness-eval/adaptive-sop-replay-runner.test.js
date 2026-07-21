@@ -123,13 +123,11 @@ function buildPorts(observations = {}) {
       async grade(input) {
         observations.deterministicInputs?.push(input);
         return {
-          checks: [
-            {
-              id: 'admission-is-structured',
-              status: 'pass',
-              evidenceRefs: [`admission:${input.admission.status}`],
-            },
-          ],
+          checks: input.rubric.requiredDeterministicChecks.map((check) => ({
+            id: check.id,
+            status: 'pass',
+            evidenceRefs: [`deterministic:${check.id}:${input.admission.status}`],
+          })),
           hardInvariantMisses: [],
         };
       },
@@ -243,8 +241,15 @@ describe('LF-0001 adaptive SOP replay runner', () => {
   it('fails rubric and capability eligibility for each failed-check or missing-evidence mode', async () => {
     const oneCandidateManifest = { ...manifest, candidates: [manifest.candidates[0]] };
     const buildDeterministicGrader = ({ status = 'pass', evidenceRefs = ['review:receipt'] } = {}) => ({
-      async grade() {
-        return { checks: [{ id: 'review-receipt', status, evidenceRefs }], hardInvariantMisses: [] };
+      async grade(input) {
+        return {
+          checks: input.rubric.requiredDeterministicChecks.map((check, index) => ({
+            id: check.id,
+            status: index === 0 ? status : 'pass',
+            evidenceRefs: index === 0 ? evidenceRefs : [`review:receipt:${check.id}`],
+          })),
+          hardInvariantMisses: [],
+        };
       },
     });
     const buildModelGrader = ({ evidenceRefs = ['model:grade'], missingEvidence = [] } = {}) => ({
@@ -283,6 +288,71 @@ describe('LF-0001 adaptive SOP replay runner', () => {
       );
       assert.equal(artifact.summary.rubricPassingTrials, 0);
       assert.equal(artifact.summary.rubricFailingTrials, 3);
+      assert.equal(artifact.eligibleForCapabilityVerdict, false);
+    }
+  });
+
+  it('requires the complete unique deterministic coverage pinned by the rubric', async () => {
+    const oneCandidateManifest = { ...manifest, candidates: [manifest.candidates[0]] };
+    const requiredChecks = rubric.requiredDeterministicChecks.map((check) => check.id);
+    const coverageVariants = [
+      [],
+      requiredChecks.slice(1),
+      [...requiredChecks, requiredChecks[0]],
+      ['unknown-check', ...requiredChecks.slice(1)],
+    ];
+
+    for (const checkIds of coverageVariants) {
+      const deterministicGrader = {
+        async grade() {
+          return {
+            checks: checkIds.map((id) => ({ id, status: 'pass', evidenceRefs: [`check:${id}`] })),
+            hardInvariantMisses: [],
+          };
+        },
+      };
+      const artifact = await runAdaptiveSopReplay(
+        buildRunInput({ manifest: oneCandidateManifest, runMode: 'model_replay', deterministicGrader }),
+      );
+
+      assert.equal(artifact.summary.completedTrials, 0);
+      assert.equal(artifact.summary.failedTrials, 3);
+      assert.equal(
+        artifact.trials.every((trial) => trial.status === 'deterministic_grader_error'),
+        true,
+      );
+      assert.equal(artifact.eligibleForCapabilityVerdict, false);
+    }
+  });
+
+  it('requires hard-invariant check failures and the miss list to agree exactly', async () => {
+    const oneCandidateManifest = { ...manifest, candidates: [manifest.candidates[0]] };
+    for (const { failedCheckIds, hardInvariantMisses } of [
+      { failedCheckIds: [], hardInvariantMisses: ['production_user_data'] },
+      { failedCheckIds: ['production_user_data'], hardInvariantMisses: [] },
+    ]) {
+      const deterministicGrader = {
+        async grade(input) {
+          return {
+            checks: input.rubric.requiredDeterministicChecks.map((check) => ({
+              id: check.id,
+              status: failedCheckIds.includes(check.id) ? 'fail' : 'pass',
+              evidenceRefs: [`check:${check.id}`],
+            })),
+            hardInvariantMisses,
+          };
+        },
+      };
+      const artifact = await runAdaptiveSopReplay(
+        buildRunInput({ manifest: oneCandidateManifest, runMode: 'model_replay', deterministicGrader }),
+      );
+
+      assert.equal(artifact.summary.completedTrials, 0);
+      assert.equal(artifact.summary.failedTrials, 3);
+      assert.equal(
+        artifact.trials.every((trial) => trial.status === 'deterministic_grader_error'),
+        true,
+      );
       assert.equal(artifact.eligibleForCapabilityVerdict, false);
     }
   });

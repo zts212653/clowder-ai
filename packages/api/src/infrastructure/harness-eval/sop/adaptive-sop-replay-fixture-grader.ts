@@ -164,14 +164,24 @@ export function createManifestDeterministicGrader(input: { profileBank: unknown 
       if (!factsMatch || !provenanceMatches) hardInvariantMisses.push('fabricated_evidence');
       if (!historySafe) hardInvariantMisses.push('sensitive_history_exposure');
 
+      const uniqueHardInvariantMisses = [...new Set(hardInvariantMisses)];
+      const hardInvariantChecks = gradeInput.rubric.hardInvariantVetoes.map((veto) =>
+        check(
+          veto.id,
+          !uniqueHardInvariantMisses.includes(veto.id),
+          `hard-invariant:${veto.id}:${uniqueHardInvariantMisses.includes(veto.id) ? 'miss' : 'clear'}`,
+        ),
+      );
+
       return {
         checks: [
           check('expected-admission', admissionMatches, `admission:${gradeInput.admission.status}`),
           check('independent-facts-profile', factsMatch, `profile:${profile.id}`),
           check('provenance-identity', provenanceMatches, `fixture:${gradeInput.fixtureId}`),
           historyCheck(candidate.modelInput.repositorySnapshot.mode, historySafe),
+          ...hardInvariantChecks,
         ],
-        hardInvariantMisses: [...new Set(hardInvariantMisses)],
+        hardInvariantMisses: uniqueHardInvariantMisses,
       };
     },
   };

@@ -34,6 +34,32 @@ const ControlsSchema = z
   })
   .strict();
 
+const NamedPolicySchema = z
+  .object({
+    id: NonEmptyStringSchema,
+    description: NonEmptyStringSchema,
+  })
+  .strict();
+
+const CommandPolicySchema = z
+  .object({
+    id: NonEmptyStringSchema,
+    commandOrTool: NonEmptyStringSchema,
+    successExitCode: z.number().int(),
+  })
+  .strict();
+
+const ComparabilityFingerprintSchema = z
+  .object({
+    allowedChangeEnvelopeSha256: Sha256Schema,
+    outcomeOraclePolicySha256: Sha256Schema,
+    gatePolicySha256: Sha256Schema,
+    toolPermissionsPolicySha256: Sha256Schema,
+    dataIsolationPolicySha256: Sha256Schema,
+    reviewBoundaryPolicySha256: Sha256Schema,
+  })
+  .strict();
+
 const ComparativePilotManifestSchema = z
   .object({
     schemaVersion: z.literal(ADAPTIVE_SOP_COMPARATIVE_PILOT_MANIFEST_SCHEMA_VERSION),
@@ -64,6 +90,16 @@ const ComparativePilotManifestSchema = z
       )
       .length(ARM_IDS.length),
     controls: ControlsSchema.extend({ projection: NonEmptyStringSchema }),
+    comparability: z
+      .object({
+        allowedChangedPaths: z.array(NonEmptyStringSchema).min(1),
+        outcomeOracle: CommandPolicySchema,
+        gatePolicy: CommandPolicySchema,
+        toolPermissionsPolicy: NamedPolicySchema,
+        dataIsolationPolicy: NamedPolicySchema,
+        reviewBoundaryPolicy: NamedPolicySchema,
+      })
+      .strict(),
     requiredTrialEvidence: z.array(EvidenceKindSchema).length(EVIDENCE_KINDS.length),
     stopConditions: z.array(NonEmptyStringSchema).min(1),
     notClaimed: z.array(NonEmptyStringSchema).min(1),
@@ -160,6 +196,7 @@ const EvidenceBindingSchema = {
   pilotId: NonEmptyStringSchema,
   arm: ArmSchema,
   trialIndex: NonNegativeIntegerSchema,
+  comparability: ComparabilityFingerprintSchema,
 };
 
 const ResolvedEvidenceSchema = z.discriminatedUnion('kind', [
@@ -189,6 +226,14 @@ const ResolvedEvidenceSchema = z.discriminatedUnion('kind', [
           finalSha: Sha1Schema,
           changedPaths: z.array(NonEmptyStringSchema).min(1),
           diffFingerprint: Sha256Schema,
+          outcomeOracle: z
+            .object({
+              policyId: NonEmptyStringSchema,
+              commandOrTool: NonEmptyStringSchema,
+              exitCode: z.number().int(),
+              evidenceSha256: Sha256Schema,
+            })
+            .strict(),
           verification: z
             .array(
               z
@@ -202,6 +247,7 @@ const ResolvedEvidenceSchema = z.discriminatedUnion('kind', [
             .min(1),
           gate: z
             .object({
+              policyId: NonEmptyStringSchema,
               commandOrTool: NonEmptyStringSchema,
               exitCode: z.number().int(),
               finalSha: Sha1Schema,
@@ -336,6 +382,10 @@ export function fingerprintAdaptiveSopComparativeResolvedEvidence(input: unknown
   return sha256(ResolvedEvidenceSchema.parse(input));
 }
 
+export function fingerprintAdaptiveSopComparativePolicy(input: unknown): string {
+  return sha256(input);
+}
+
 export function evaluateAdaptiveSopComparativePilot(
   input: unknown,
   manifestInput: unknown,
@@ -348,10 +398,13 @@ export function evaluateAdaptiveSopComparativePilot(
   const trialsPerArm = assertComparableTrialMatrix(pilot);
   assertPilotManifestBinding(pilot, manifest, manifestSha256, trialsPerArm);
   assertComparableIdentityAndProvenance(pilot, manifest);
+  const comparabilityFingerprints = deriveComparabilityFingerprints(manifest);
   const receiptIncompleteReasons: string[] = [];
   for (const trial of pilot.trials) {
     assertTrialReceiptBinding(trial, manifest, manifestSha256);
-    receiptIncompleteReasons.push(...resolveTrialEvidence(trial, pilot.pilotId, evidenceResolver));
+    receiptIncompleteReasons.push(
+      ...resolveTrialEvidence(trial, pilot.pilotId, manifest, comparabilityFingerprints, evidenceResolver),
+    );
     assertContractMetricApplicability(trial);
     assertTelemetryDeclaration(trial);
   }
@@ -398,7 +451,23 @@ function parseComparativePilotManifest(input: unknown): ComparativePilotManifest
   if (receivedEvidence.size !== EVIDENCE_KINDS.length || EVIDENCE_KINDS.some((kind) => !receivedEvidence.has(kind))) {
     throw new Error('pinned pilot manifest must require every comparative evidence kind exactly once');
   }
+  if (new Set(manifest.comparability.allowedChangedPaths).size !== manifest.comparability.allowedChangedPaths.length) {
+    throw new Error('pinned allowed change envelope paths must be unique');
+  }
   return manifest;
+}
+
+function deriveComparabilityFingerprints(
+  manifest: ComparativePilotManifest,
+): z.infer<typeof ComparabilityFingerprintSchema> {
+  return {
+    allowedChangeEnvelopeSha256: sha256([...manifest.comparability.allowedChangedPaths].sort()),
+    outcomeOraclePolicySha256: sha256(manifest.comparability.outcomeOracle),
+    gatePolicySha256: sha256(manifest.comparability.gatePolicy),
+    toolPermissionsPolicySha256: sha256(manifest.comparability.toolPermissionsPolicy),
+    dataIsolationPolicySha256: sha256(manifest.comparability.dataIsolationPolicy),
+    reviewBoundaryPolicySha256: sha256(manifest.comparability.reviewBoundaryPolicy),
+  };
 }
 
 function assertPilotManifestBinding(
@@ -519,6 +588,8 @@ function assertTrialReceiptBinding(
 function resolveTrialEvidence(
   trial: ComparativeTrial,
   pilotId: string,
+  manifest: ComparativePilotManifest,
+  comparabilityFingerprints: z.infer<typeof ComparabilityFingerprintSchema>,
   resolver: AdaptiveSopComparativeEvidenceResolver | undefined,
 ): string[] {
   if (!resolver) return ['one or more trial evidence receipts were not independently resolved'];
@@ -543,12 +614,19 @@ function resolveTrialEvidence(
     ) {
       throw new Error(`resolved ${reference.kind} evidence is bound to a different comparative trial`);
     }
-    assertResolvedEvidenceMatchesTrial(evidence, trial);
+    if (canonicalJson(evidence.comparability) !== canonicalJson(comparabilityFingerprints)) {
+      throw new Error('resolved evidence comparability controls do not match the pinned pilot manifest');
+    }
+    assertResolvedEvidenceMatchesTrial(evidence, trial, manifest);
   }
   return [];
 }
 
-function assertResolvedEvidenceMatchesTrial(evidence: ComparativeResolvedEvidence, trial: ComparativeTrial): void {
+function assertResolvedEvidenceMatchesTrial(
+  evidence: ComparativeResolvedEvidence,
+  trial: ComparativeTrial,
+  manifest: ComparativePilotManifest,
+): void {
   switch (evidence.kind) {
     case 'execution_provenance':
       if (
@@ -563,15 +641,7 @@ function assertResolvedEvidenceMatchesTrial(evidence: ComparativeResolvedEvidenc
       }
       return;
     case 'diff_and_verification':
-      if (
-        evidence.payload.baseSha !== trial.provenance.baseSha ||
-        evidence.payload.finalSha !== trial.provenance.finalSha ||
-        evidence.payload.gate.finalSha !== trial.provenance.finalSha ||
-        (trial.outcome.testsPassed === true && evidence.payload.gate.exitCode !== 0) ||
-        (trial.outcome.testsPassed === true && evidence.payload.verification.some((check) => check.exitCode !== 0))
-      ) {
-        throw new Error('resolved diff or verification evidence does not match the comparative trial');
-      }
+      assertResolvedDiffAndVerification(evidence, trial, manifest);
       return;
     case 'review_and_outcome':
       if (
@@ -596,6 +666,37 @@ function assertResolvedEvidenceMatchesTrial(evidence: ComparativeResolvedEvidenc
         telemetryComplete: trial.telemetryComplete,
         missingFields: trial.missingFields,
       });
+  }
+}
+
+function assertResolvedDiffAndVerification(
+  evidence: Extract<ComparativeResolvedEvidence, { kind: 'diff_and_verification' }>,
+  trial: ComparativeTrial,
+  manifest: ComparativePilotManifest,
+): void {
+  if (
+    new Set(evidence.payload.changedPaths).size !== evidence.payload.changedPaths.length ||
+    evidence.payload.changedPaths.some((path) => !manifest.comparability.allowedChangedPaths.includes(path))
+  ) {
+    throw new Error('resolved diff contains a path outside the pinned allowed change envelope');
+  }
+  const oracleSucceeded =
+    evidence.payload.outcomeOracle.exitCode === manifest.comparability.outcomeOracle.successExitCode;
+  const gateSucceeded = evidence.payload.gate.exitCode === manifest.comparability.gatePolicy.successExitCode;
+  const verificationSucceeded = evidence.payload.verification.every((check) => check.exitCode === 0);
+  if (
+    evidence.payload.baseSha !== trial.provenance.baseSha ||
+    evidence.payload.finalSha !== trial.provenance.finalSha ||
+    evidence.payload.outcomeOracle.policyId !== manifest.comparability.outcomeOracle.id ||
+    evidence.payload.outcomeOracle.commandOrTool !== manifest.comparability.outcomeOracle.commandOrTool ||
+    (typeof trial.outcome.requestedOutcomeMet === 'boolean' && oracleSucceeded !== trial.outcome.requestedOutcomeMet) ||
+    evidence.payload.gate.policyId !== manifest.comparability.gatePolicy.id ||
+    evidence.payload.gate.commandOrTool !== manifest.comparability.gatePolicy.commandOrTool ||
+    evidence.payload.gate.finalSha !== trial.provenance.finalSha ||
+    (typeof trial.outcome.testsPassed === 'boolean' &&
+      (gateSucceeded !== trial.outcome.testsPassed || verificationSucceeded !== trial.outcome.testsPassed))
+  ) {
+    throw new Error('resolved diff or verification evidence does not match the comparative trial');
   }
 }
 

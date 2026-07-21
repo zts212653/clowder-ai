@@ -40,6 +40,31 @@
     "sameReviewBoundary": true,
     "projection": "executors receive only the replay candidate modelInput and pinned base checkout"
   },
+  "comparability": {
+    "allowedChangedPaths": ["packages/api/test/telegram-html-formatter.test.js"],
+    "outcomeOracle": {
+      "id": "focused-formatter-regression-v1",
+      "commandOrTool": "node --test packages/api/test/telegram-html-formatter.test.js",
+      "successExitCode": 0
+    },
+    "gatePolicy": {
+      "id": "clowder-pre-review-gate-v1",
+      "commandOrTool": "pnpm gate --no-rebase --skip-install",
+      "successExitCode": 0
+    },
+    "toolPermissionsPolicy": {
+      "id": "isolated-code-trial-tools-v1",
+      "description": "All arms receive the same repository and verification tool permissions."
+    },
+    "dataIsolationPolicy": {
+      "id": "isolated-worktree-test-data-v1",
+      "description": "All arms run in isolated worktrees without production user data."
+    },
+    "reviewBoundaryPolicy": {
+      "id": "cross-individual-p1p2-clearance-v1",
+      "description": "Every mutating trial requires cross-individual review and P1/P2 clearance."
+    }
+  },
   "requiredTrialEvidence": [
     "execution_provenance",
     "diff_and_verification",

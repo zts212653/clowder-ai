@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   evaluateAdaptiveSopComparativePilot,
   fingerprintAdaptiveSopComparativePilotManifest,
+  fingerprintAdaptiveSopComparativePolicy,
   fingerprintAdaptiveSopComparativeResolvedEvidence,
   fingerprintAdaptiveSopComparativeTrialEvidence,
 } from '../../dist/infrastructure/harness-eval/sop/adaptive-sop-comparative-pilot.js';
@@ -110,6 +111,31 @@ function buildPilotManifest(overrides = {}) {
       sameReviewBoundary: true,
       projection: 'executors receive only pinned model input',
     },
+    comparability: {
+      allowedChangedPaths: ['packages/api/test/telegram-html-formatter.test.js'],
+      outcomeOracle: {
+        id: 'focused-formatter-regression-v1',
+        commandOrTool: 'node --test telegram-html-formatter.test.js',
+        successExitCode: 0,
+      },
+      gatePolicy: {
+        id: 'clowder-pre-review-gate-v1',
+        commandOrTool: 'pnpm gate --no-rebase --skip-install',
+        successExitCode: 0,
+      },
+      toolPermissionsPolicy: {
+        id: 'isolated-code-trial-tools-v1',
+        description: 'All arms receive the same repository and verification tool permissions.',
+      },
+      dataIsolationPolicy: {
+        id: 'isolated-worktree-test-data-v1',
+        description: 'All arms run in isolated worktrees without production user data.',
+      },
+      reviewBoundaryPolicy: {
+        id: 'cross-individual-p1p2-clearance-v1',
+        description: 'Every mutating trial requires cross-individual review and P1/P2 clearance.',
+      },
+    },
     requiredTrialEvidence: [
       'execution_provenance',
       'diff_and_verification',
@@ -145,11 +171,13 @@ function signTrial(trial) {
 }
 
 function buildResolvedEvidence(trial) {
+  const manifest = buildPilotManifest();
   const binding = {
     schemaVersion: 'lf-0001.comparative-evidence.v1',
     pilotId: 'lf-0001-contained-code-pilot-001',
     arm: trial.arm,
     trialIndex: trial.trialIndex,
+    comparability: buildComparabilityFingerprints(manifest),
   };
   return [
     {
@@ -169,6 +197,12 @@ function buildResolvedEvidence(trial) {
         finalSha: trial.provenance.finalSha,
         changedPaths: ['packages/api/test/telegram-html-formatter.test.js'],
         diffFingerprint: 'e'.repeat(64),
+        outcomeOracle: {
+          policyId: manifest.comparability.outcomeOracle.id,
+          commandOrTool: manifest.comparability.outcomeOracle.commandOrTool,
+          exitCode: trial.outcome.requestedOutcomeMet === true ? 0 : 1,
+          evidenceSha256: '3'.repeat(64),
+        },
         verification: [
           {
             commandOrTool: 'node --test telegram-html-formatter.test.js',
@@ -177,7 +211,8 @@ function buildResolvedEvidence(trial) {
           },
         ],
         gate: {
-          commandOrTool: 'pnpm gate --no-rebase --skip-install',
+          policyId: manifest.comparability.gatePolicy.id,
+          commandOrTool: manifest.comparability.gatePolicy.commandOrTool,
           exitCode: trial.outcome.testsPassed === true ? 0 : 1,
           finalSha: trial.provenance.finalSha,
           evidenceSha256: '1'.repeat(64),
@@ -210,6 +245,19 @@ function buildResolvedEvidence(trial) {
       },
     },
   ];
+}
+
+function buildComparabilityFingerprints(manifest) {
+  return {
+    allowedChangeEnvelopeSha256: fingerprintAdaptiveSopComparativePolicy(
+      [...manifest.comparability.allowedChangedPaths].sort(),
+    ),
+    outcomeOraclePolicySha256: fingerprintAdaptiveSopComparativePolicy(manifest.comparability.outcomeOracle),
+    gatePolicySha256: fingerprintAdaptiveSopComparativePolicy(manifest.comparability.gatePolicy),
+    toolPermissionsPolicySha256: fingerprintAdaptiveSopComparativePolicy(manifest.comparability.toolPermissionsPolicy),
+    dataIsolationPolicySha256: fingerprintAdaptiveSopComparativePolicy(manifest.comparability.dataIsolationPolicy),
+    reviewBoundaryPolicySha256: fingerprintAdaptiveSopComparativePolicy(manifest.comparability.reviewBoundaryPolicy),
+  };
 }
 
 function evidenceUri(trial, kind) {
@@ -474,6 +522,121 @@ describe('LF-0001 three-arm comparative pilot evidence', () => {
         evidence: target.evidenceReceipt.evidence.map((reference) =>
           reference.kind === 'diff_and_verification'
             ? { ...reference, sha256: fingerprintAdaptiveSopComparativeResolvedEvidence(failedGate) }
+            : reference,
+        ),
+      },
+    };
+
+    assert.throws(
+      () =>
+        evaluateAdaptiveSopComparativePilot(artifact, buildPilotManifest(), buildEvidenceResolver(artifact, transform)),
+      /resolved diff or verification evidence does not match the comparative trial/,
+    );
+  });
+
+  it('rejects a validly hashed diff that escapes the pinned test-only change envelope', () => {
+    const artifact = buildArtifact();
+    const target = artifact.trials.find((trial) => trial.arm === 'adaptive_plan_hard_gates' && trial.trialIndex === 0);
+    const transform = (evidence) =>
+      evidence.kind === 'diff_and_verification' &&
+      evidence.arm === target.arm &&
+      evidence.trialIndex === target.trialIndex
+        ? {
+            ...evidence,
+            payload: {
+              ...evidence.payload,
+              changedPaths: ['packages/api/src/runtime-escape.ts'],
+            },
+          }
+        : evidence;
+    const escapedDiff = transform(
+      buildResolvedEvidence(target).find((evidence) => evidence.kind === 'diff_and_verification'),
+    );
+    artifact.trials = artifact.trials.map((trial) =>
+      trial === target
+        ? {
+            ...trial,
+            evidenceReceipt: {
+              ...trial.evidenceReceipt,
+              evidence: trial.evidenceReceipt.evidence.map((reference) =>
+                reference.kind === 'diff_and_verification'
+                  ? { ...reference, sha256: fingerprintAdaptiveSopComparativeResolvedEvidence(escapedDiff) }
+                  : reference,
+              ),
+            },
+          }
+        : trial,
+    );
+
+    assert.throws(
+      () =>
+        evaluateAdaptiveSopComparativePilot(artifact, buildPilotManifest(), buildEvidenceResolver(artifact, transform)),
+      /outside the pinned allowed change envelope/,
+    );
+  });
+
+  it('rejects a validly hashed receipt whose cross-arm control fingerprints diverge from the manifest', () => {
+    const artifact = buildArtifact();
+    const target = artifact.trials[0];
+    const transform = (evidence) =>
+      evidence.kind === 'execution_provenance' &&
+      evidence.arm === target.arm &&
+      evidence.trialIndex === target.trialIndex
+        ? {
+            ...evidence,
+            comparability: {
+              ...evidence.comparability,
+              toolPermissionsPolicySha256: '9'.repeat(64),
+            },
+          }
+        : evidence;
+    const divergentControls = transform(
+      buildResolvedEvidence(target).find((evidence) => evidence.kind === 'execution_provenance'),
+    );
+    artifact.trials[0] = {
+      ...target,
+      evidenceReceipt: {
+        ...target.evidenceReceipt,
+        evidence: target.evidenceReceipt.evidence.map((reference) =>
+          reference.kind === 'execution_provenance'
+            ? { ...reference, sha256: fingerprintAdaptiveSopComparativeResolvedEvidence(divergentControls) }
+            : reference,
+        ),
+      },
+    };
+
+    assert.throws(
+      () =>
+        evaluateAdaptiveSopComparativePilot(artifact, buildPilotManifest(), buildEvidenceResolver(artifact, transform)),
+      /comparability controls do not match the pinned pilot manifest/,
+    );
+  });
+
+  it('rejects a validly hashed outcome oracle that differs from the pinned cross-arm policy', () => {
+    const artifact = buildArtifact();
+    const target = artifact.trials[0];
+    const transform = (evidence) =>
+      evidence.kind === 'diff_and_verification' &&
+      evidence.arm === target.arm &&
+      evidence.trialIndex === target.trialIndex
+        ? {
+            ...evidence,
+            payload: {
+              ...evidence.payload,
+              outcomeOracle: { ...evidence.payload.outcomeOracle, commandOrTool: 'forged-outcome-oracle' },
+            },
+          }
+        : evidence;
+    const divergentOracle = transform(
+      buildResolvedEvidence(target).find((evidence) => evidence.kind === 'diff_and_verification'),
+    );
+    artifact.trials[0] = {
+      ...target,
+      evidenceReceipt: {
+        ...target.evidenceReceipt,
+        evidence: target.evidenceReceipt.evidence.map((reference) =>
+          reference.kind === 'diff_and_verification'
+            ? { ...reference, sha256: fingerprintAdaptiveSopComparativeResolvedEvidence(divergentOracle) }
             : reference,
         ),
       },

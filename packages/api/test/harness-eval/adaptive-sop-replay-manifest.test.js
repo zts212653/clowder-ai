@@ -190,6 +190,15 @@ describe('LF-0001 adaptive SOP replay manifest', () => {
     );
     assert.equal(comparativePilot.controls.trustedOutcomeHiddenFromExecutors, true);
     assert.equal(comparativePilot.controls.sameHardGates, true);
+    assert.deepEqual(
+      comparativePilot.comparability.allowedChangedPaths,
+      candidate.graderOnly.outcomeEvidence.changedPaths,
+    );
+    assert.equal(comparativePilot.comparability.outcomeOracle.successExitCode, 0);
+    assert.equal(comparativePilot.comparability.gatePolicy.successExitCode, 0);
+    assert.ok(comparativePilot.comparability.toolPermissionsPolicy.description.length > 0);
+    assert.ok(comparativePilot.comparability.dataIsolationPolicy.description.length > 0);
+    assert.ok(comparativePilot.comparability.reviewBoundaryPolicy.description.length > 0);
     assert.equal(JSON.stringify(comparativePilot).includes(candidate.graderOnly.provenance.outcomeCommit), false);
   });
 
@@ -199,6 +208,16 @@ describe('LF-0001 adaptive SOP replay manifest', () => {
       rubric.dimensions.reduce((sum, dimension) => sum + dimension.weight, 0),
       100,
     );
+    const requiredCheckIds = new Set(rubric.requiredDeterministicChecks.map((check) => check.id));
+    for (const id of [
+      'expected-admission',
+      'independent-facts-profile',
+      'provenance-identity',
+      'sensitive-history-projection',
+    ]) {
+      assert.equal(requiredCheckIds.has(id), true);
+    }
+    for (const veto of rubric.hardInvariantVetoes) assert.equal(requiredCheckIds.has(veto.id), true);
     assert.ok(rubric.hardInvariantVetoes.length >= 6);
     assert.equal(rubric.gradingProtocol.hardInvariantMiss, 'fail');
     assert.equal(rubric.leakageControls.modelReceives, 'candidate.modelInput only');

@@ -97,6 +97,10 @@ describe('LF-0001 provenance-backed replay facts and deterministic grader', () =
         grade.checks.every((check) => check.status !== 'fail'),
         true,
       );
+      assert.deepEqual(
+        grade.checks.map((check) => check.id).sort(),
+        rubric.requiredDeterministicChecks.map((check) => check.id).sort(),
+      );
     }
 
     assert.deepEqual(counts, { admitted: 2, revise: 0, blocked: 13 });
