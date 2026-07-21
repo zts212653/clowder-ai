@@ -161,7 +161,7 @@ function checkDiskSpace(dir, assetSize) {
     const available = stat.bavail * stat.bsize;
     return available >= assetSize * 2;
   } catch {
-    return true; // can't check — proceed optimistically
+    return false; // can't confirm space — fail-closed is safer than downloading 800MB blind
   }
 }
 

@@ -29,21 +29,27 @@ const RELEASES_URL = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO
 function fetchReleases(net, appVersion, etag, timeoutMs) {
   return new Promise((resolve) => {
     let settled = false;
+    let timer = null;
+    let request = null;
     const settle = (val) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      if (request && typeof request.abort === 'function') request.abort();
       resolve(val);
     };
     try {
-      const request = net.request(RELEASES_URL);
+      request = net.request(RELEASES_URL);
       request.setHeader('Accept', 'application/vnd.github+json');
       request.setHeader('User-Agent', `ClowderAI/${appVersion}`);
       if (etag) request.setHeader('If-None-Match', etag);
 
       let body = '';
       request.on('response', (response) => {
-        if (settled) return;
+        if (settled) {
+          response.destroy();
+          return;
+        }
         if (response.statusCode === 304) {
           settle('not-modified');
           return;
@@ -68,7 +74,7 @@ function fetchReleases(net, appVersion, etag, timeoutMs) {
       });
       request.on('error', () => settle(null));
       // 30s timeout — feed fetch should be fast; prevents permanent hang
-      const timer = setTimeout(() => settle(null), timeoutMs || 30_000);
+      timer = setTimeout(() => settle(null), timeoutMs || 30_000);
       request.end();
     } catch {
       settle(null);

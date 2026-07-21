@@ -282,6 +282,11 @@ app.on('ready', async () => {
       try {
         mainWindow?.setProgressBar(p);
       } catch {}
+      try {
+        if (!tray) return;
+        if (p >= 0 && p <= 1) tray.setToolTip(`Clowder AI — Downloading update ${Math.round(p * 100)}%`);
+        else tray.setToolTip('Clowder AI');
+      } catch {}
     },
     openExternal: (url) => shell.openExternal(url),
     openPath: (p) => shell.openPath(p),
