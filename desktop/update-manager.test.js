@@ -54,10 +54,21 @@ function setupInstallType(tempDir, type) {
   writeFileSync(path.join(dir, 'desktop-config.json'), JSON.stringify({ installType: type }));
 }
 
+const FAKE_CONTENT = Buffer.from('FAKE-INSTALLER');
+const FAKE_HASH = createHash('sha256').update(FAKE_CONTENT).digest('hex');
 const fakeTarget = {
   version: '0.12.0',
-  asset: { id: 1, name: 'Setup.exe', digest: 'sha256:abc' },
+  asset: { id: 1, name: 'Setup.exe', digest: `sha256:${FAKE_HASH}`, size: FAKE_CONTENT.length },
 };
+
+/** Create a fake installer file matching fakeTarget's digest + size. */
+function writeFakeInstaller(tempDir) {
+  const updDir = dl.updatesDir(tempDir);
+  mkdirSync(updDir, { recursive: true });
+  const ip = path.join(updDir, 'Setup.exe');
+  writeFileSync(ip, FAKE_CONTENT);
+  return ip;
+}
 
 // ── Windows launcher ──────────────────────────────────────────────────
 
@@ -144,7 +155,7 @@ describe('journal preservation on launcher failure', () => {
 
   test('_executeInstall: launcher fail does NOT clear journal (AC-3)', async () => {
     const m = new UpdateManager(baseDeps(td, { spawn: mockSpawn({ closeCode: 1 }) }));
-    const ip = path.join(dl.updatesDir(td), 'Setup.exe');
+    const ip = writeFakeInstaller(td);
     await m._executeInstall(fakeTarget, ip);
     // Journal MUST survive launcher failure — next startup shows recovery dialog
     const j = dl.readJournal(dl.updatesDir(td));
@@ -162,7 +173,7 @@ describe('journal preservation on launcher failure', () => {
         },
       }),
     );
-    await m._executeInstall(fakeTarget, path.join(dl.updatesDir(td), 'Setup.exe'));
+    await m._executeInstall(fakeTarget, writeFakeInstaller(td));
     assert.ok(quit, 'quitApp must be called on success');
   });
 
@@ -178,6 +189,7 @@ describe('journal preservation on launcher failure', () => {
       assetId: 1,
       assetName: 'Setup.exe',
       digest: `sha256:${h}`,
+      assetSize: 4,
       installerPath: ip,
       logPath: '',
       startedAt: '2026-07-20T00:00:00Z',
@@ -206,6 +218,7 @@ describe('journal preservation on launcher failure', () => {
       assetId: 1,
       assetName: 'Setup.exe',
       digest: `sha256:${h}`,
+      assetSize: 4,
       installerPath: ip,
       logPath: '',
       startedAt: '2026-07-20T00:00:00Z',

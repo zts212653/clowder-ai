@@ -17,7 +17,7 @@ const GITHUB_OWNER = 'zts212653';
 const GITHUB_REPO = 'clowder-ai';
 
 class UpdateManager {
-  /** @param {object} deps — injected Electron deps (app, net, showDialog, setProgressBar, openExternal, openPath, quitApp, stopServices, dbg, userDataRoot, platform, arch) */
+  /** @param {object} deps — injected Electron deps (app, net, showDialog, setProgressBar, openExternal, openPath, quitApp, stopServices, startServices, dbg, userDataRoot, platform, arch) */
   constructor(deps) {
     this._d = deps;
     this._updatesDir = dl.updatesDir(deps.userDataRoot);
@@ -265,19 +265,19 @@ class UpdateManager {
   async _executeInstall(target, installerPath) {
     const { platform, dbg, showDialog, quitApp } = this._d;
     const isWin = platform === 'win32';
-    const msg = isWin
-      ? {
-          buttons: ['Restart & Upgrade', 'Later'],
-          message: `v${target.version} is ready`,
-          detail: 'The app will close and the installer will run.\nYour data will be preserved.',
-        }
-      : {
-          buttons: ['Quit & Install', 'Later'],
-          message: `v${target.version} downloaded`,
-          detail: 'Drag Clowder AI into Applications to replace the old version.\nYour data will not be affected.',
-        };
+    const msg = {
+      buttons: [isWin ? 'Restart & Upgrade' : 'Quit & Install', 'Later'],
+      message: `v${target.version} ${isWin ? 'is ready' : 'downloaded'}`,
+      detail: isWin
+        ? 'The app will close and the installer will run.\nYour data will be preserved.'
+        : 'Drag Clowder AI into Applications to replace the old version.\nYour data will not be affected.',
+    };
     const btn = await showDialog({ type: 'info', defaultId: 0, cancelId: 1, title: 'Ready to Install', ...msg });
     if (btn !== 0) return;
+    if (!(await dl.verifyFileIntegrity(installerPath, target.asset.digest, target.asset.size))) {
+      dbg('Installer modified after confirmation (TOCTOU) — aborting');
+      return;
+    }
 
     const logPath = isWin ? path.join(this._updatesDir, 'install.log') : '';
     dl.writeJournal(this._updatesDir, {
@@ -285,6 +285,7 @@ class UpdateManager {
       assetId: target.asset.id,
       assetName: target.asset.name,
       digest: target.asset.digest,
+      assetSize: target.asset.size,
       installerPath,
       logPath,
       startedAt: new Date().toISOString(),
@@ -298,7 +299,8 @@ class UpdateManager {
       await quitApp();
     } catch (err) {
       dbg(`Installer launch failed: ${err.message}`);
-      // Journal preserved — next startup checkPendingUpgrade() shows recovery dialog (AC-3)
+      // Restore services so the UI isn't left running with no backend (UAC declined / spawn error)
+      if (this._d.startServices) await this._d.startServices().catch(() => {});
       await showDialog({
         type: 'error',
         buttons: ['OK'],
@@ -322,8 +324,9 @@ class UpdateManager {
       dl.clearJournal(this._updatesDir);
       return;
     }
-    const stat = fs.statSync(journal.installerPath);
-    if (!(await dl.verifyFileIntegrity(journal.installerPath, journal.digest, stat.size))) {
+    // Use stored assetSize (not stat.size which self-validates); fall back for pre-assetSize journals
+    const expectedSize = journal.assetSize ?? fs.statSync(journal.installerPath).size;
+    if (!(await dl.verifyFileIntegrity(journal.installerPath, journal.digest, expectedSize))) {
       dl.clearJournal(this._updatesDir);
       return;
     }
@@ -334,7 +337,7 @@ class UpdateManager {
       return 'quitting';
     } catch (err) {
       this._d.dbg(`Retry install failed: ${err.message}`);
-      // Journal preserved — next startup recovery dialog will offer retry again
+      if (this._d.startServices) await this._d.startServices().catch(() => {});
     }
   }
 

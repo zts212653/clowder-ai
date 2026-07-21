@@ -255,6 +255,16 @@ begin
   if Copy(AppDir, Length(AppDir), 1) <> '\' then
     AppDir := AppDir + '\';
   StringChange(AppDir, '''', '''''');
+  // Phase 1: Graceful — send WM_CLOSE to windowed processes (triggers Electron before-quit → stopAll)
+  Cmd := 'Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith(''' +
+         AppDir +
+         ''') -and $_.MainWindowHandle -ne 0 } | ForEach-Object { $_.CloseMainWindow() | Out-Null }';
+  Exec('powershell.exe',
+       '-NoProfile -ExecutionPolicy Bypass -Command "' + Cmd + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
+  // Wait for graceful shutdown (services.stopAll + process exit)
+  Sleep(5000);
+  // Phase 2: Force-kill anything still running (timeout / orphaned child processes)
   Cmd := 'Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith(''' +
          AppDir +
          ''') } | Stop-Process -Force -ErrorAction SilentlyContinue';

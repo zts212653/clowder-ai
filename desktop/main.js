@@ -211,9 +211,7 @@ async function quitApp() {
 }
 
 function sendSplashStatus(msg) {
-  if (splashWindow && !splashWindow.isDestroyed()) {
-    splashWindow.webContents.send('splash-status', msg);
-  }
+  if (splashWindow && !splashWindow.isDestroyed()) splashWindow.webContents.send('splash-status', msg);
 }
 
 app.on('second-instance', () => {
@@ -296,6 +294,10 @@ app.on('ready', async () => {
         await services.stopAll();
         services = null;
       }
+    },
+    startServices: async () => {
+      services = new ServiceManager(PROJECT_ROOT, { frontendPort: FRONTEND_PORT, apiPort: API_PORT });
+      await services.startAll();
     },
     dbg,
     userDataRoot,
