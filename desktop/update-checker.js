@@ -193,12 +193,13 @@ function selectUpdateTarget(releases, currentVersion, platform, arch, options) {
     return b.parsed.patch - a.parsed.patch;
   });
 
-  // Step 4: find first valid
+  // Step 4: find first valid (highest complete release)
   for (const c of candidates) {
     // 4a: skip if not newer
     if (compareSemver(c.version, currentVersion) <= 0) continue;
-    // 4b: skip if user chose to skip this version
-    if (skipped && c.version === stripV(skipped)) continue;
+    // 4b: release completeness — all platform assets must exist with digests
+    // to prevent offering half-published releases still being uploaded
+    if (!isReleaseComplete(c.release, c.version)) continue;
     // 4c: find platform asset
     const expectedName = resolveAssetName(c.version, platform, arch);
     const apiAsset = c.release.assets.find((a) => a.name === expectedName);
@@ -206,7 +207,10 @@ function selectUpdateTarget(releases, currentVersion, platform, arch, options) {
     // 4d: extract quad (requires digest)
     const quad = extractAssetQuad(apiAsset);
     if (!quad) continue;
-    // 4e: found!
+    // 4e: skip check — if highest complete version is skipped, stop
+    // (don't fall back to older versions; "Skip" means "wait for newer")
+    if (skipped && c.version === stripV(skipped)) return null;
+    // 4f: found!
     return {
       version: c.version,
       asset: quad,
@@ -215,6 +219,22 @@ function selectUpdateTarget(releases, currentVersion, platform, arch, options) {
   }
 
   return null;
+}
+
+/**
+ * Check if a release has all expected platform assets with digests.
+ * Prevents offering half-published releases still being uploaded.
+ */
+function isReleaseComplete(release, version) {
+  const required = [
+    resolveAssetName(version, 'win32', 'x64'),
+    resolveAssetName(version, 'darwin', 'arm64'),
+    resolveAssetName(version, 'darwin', 'x64'),
+  ];
+  return required.every((name) => {
+    const asset = release.assets.find((a) => a.name === name);
+    return asset && extractAssetQuad(asset);
+  });
 }
 
 // ── Settings persistence ───────────────────────────────────────────────

@@ -26,8 +26,15 @@ const RELEASES_URL = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO
  * @param {string|null} etag — If-None-Match
  * @returns {Promise<{ data: Array, etag: string|null } | 'not-modified' | null>}
  */
-function fetchReleases(net, appVersion, etag) {
+function fetchReleases(net, appVersion, etag, timeoutMs) {
   return new Promise((resolve) => {
+    let settled = false;
+    const settle = (val) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(val);
+    };
     try {
       const request = net.request(RELEASES_URL);
       request.setHeader('Accept', 'application/vnd.github+json');
@@ -36,12 +43,13 @@ function fetchReleases(net, appVersion, etag) {
 
       let body = '';
       request.on('response', (response) => {
+        if (settled) return;
         if (response.statusCode === 304) {
-          resolve('not-modified');
+          settle('not-modified');
           return;
         }
         if (response.statusCode !== 200) {
-          resolve(null);
+          settle(null);
           return;
         }
         const newEtag = response.headers.etag || null;
@@ -50,16 +58,20 @@ function fetchReleases(net, appVersion, etag) {
         });
         response.on('end', () => {
           try {
-            resolve({ data: JSON.parse(body), etag: newEtag });
+            settle({ data: JSON.parse(body), etag: newEtag });
           } catch {
-            resolve(null);
+            settle(null);
           }
         });
+        response.on('error', () => settle(null));
+        response.on('aborted', () => settle(null));
       });
-      request.on('error', () => resolve(null));
+      request.on('error', () => settle(null));
+      // 30s timeout — feed fetch should be fast; prevents permanent hang
+      const timer = setTimeout(() => settle(null), timeoutMs || 30_000);
       request.end();
     } catch {
-      resolve(null);
+      settle(null);
     }
   });
 }

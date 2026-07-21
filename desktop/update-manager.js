@@ -12,6 +12,7 @@ const dl = require('./update-downloader');
 const { fetchReleases, downloadAsset, spawnInstaller } = require('./update-installer');
 
 const CHECK_DELAY_MS = 3 * 60 * 1000;
+const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h periodic re-check
 const GITHUB_OWNER = 'zts212653';
 const GITHUB_REPO = 'clowder-ai';
 
@@ -23,6 +24,7 @@ class UpdateManager {
     this._settingsPath = path.join(deps.userDataRoot, 'update-settings.json');
     this._spawn = deps.spawn || require('node:child_process').spawn;
     this._checkTimer = null;
+    this._intervalTimer = null;
     this._downloading = false;
   }
 
@@ -35,7 +37,7 @@ class UpdateManager {
     if (result === 'success') {
       dbg(`Upgrade to ${currentVersion} succeeded`);
       dl.clearJournal(this._updatesDir);
-      this._cleanOldFiles();
+      dl.cleanUpdatesDir(this._updatesDir);
       showNotification('Clowder AI Updated', `Updated to v${currentVersion}`);
       return;
     }
@@ -54,8 +56,10 @@ class UpdateManager {
       detail: `The update was interrupted. You can retry, or run the installer manually from:\n${this._updatesDir}\n\nThe installer is preserved — you can rerun it without opening the app.`,
     });
 
-    if (btn === 0) await this._retryInstall(journal);
-    else if (btn === 1) openPath(this._updatesDir);
+    if (btn === 0) {
+      const r = await this._retryInstall(journal);
+      if (r === 'quitting') return 'quitting';
+    } else if (btn === 1) openPath(this._updatesDir);
     else if (btn === 2) openPath(journal?.logPath || this._updatesDir);
     else {
       dl.clearJournal(this._updatesDir);
@@ -74,12 +78,18 @@ class UpdateManager {
       this._checkTimer = null;
       this.checkForUpdates();
     }, CHECK_DELAY_MS);
+    // P2-4: periodic re-check every 6 hours for long-running sessions
+    this._intervalTimer = setInterval(() => this.checkForUpdates(), CHECK_INTERVAL_MS);
   }
 
   stopSchedule() {
     if (this._checkTimer) {
       clearTimeout(this._checkTimer);
       this._checkTimer = null;
+    }
+    if (this._intervalTimer) {
+      clearInterval(this._intervalTimer);
+      this._intervalTimer = null;
     }
   }
 
@@ -193,9 +203,20 @@ class UpdateManager {
     if (this._downloading) return;
     // P2: check install type BEFORE downloading — don't waste 600+ MB bandwidth
     // for portable users who'll just get redirected to the release page.
-    if (this._d.platform === 'win32' && this._getInstallType() !== 'installer') {
+    const installType = dl.getInstallType(this._d.app.getAppPath(), this._d.userDataRoot);
+    if (this._d.platform === 'win32' && installType !== 'installer') {
       this._d.dbg('Non-installer — opening release page (skipping download)');
       this._d.openExternal(`https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/tag/v${target.version}`);
+      return;
+    }
+    if (!dl.checkDiskSpace(this._updatesDir, target.asset.size)) {
+      this._d.dbg('Insufficient disk space');
+      await this._d.showDialog({
+        type: 'warning',
+        buttons: ['OK'],
+        title: 'Not Enough Space',
+        message: 'Insufficient disk space to download the update',
+      });
       return;
     }
     this._downloading = true;
@@ -240,7 +261,7 @@ class UpdateManager {
     const { platform, dbg, showDialog, quitApp, openExternal } = this._d;
     const isWin = platform === 'win32';
 
-    if (isWin && this._getInstallType() !== 'installer') {
+    if (isWin && dl.getInstallType(this._d.app.getAppPath(), this._d.userDataRoot) !== 'installer') {
       dbg('Non-installer — opening release page');
       openExternal(`https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/tag/v${target.version}`);
       return;
@@ -307,6 +328,7 @@ class UpdateManager {
     try {
       await this._spawnInstaller(journal.installerPath, journal.logPath || null);
       await this._d.quitApp();
+      return 'quitting';
     } catch (err) {
       this._d.dbg(`Retry install failed: ${err.message}`);
       // Journal preserved — next startup recovery dialog will offer retry again
@@ -316,34 +338,6 @@ class UpdateManager {
   /** Delegate to update-installer.spawnInstaller (extracted for file-size compliance). */
   _spawnInstaller(installerPath, logPath) {
     return spawnInstaller(this._spawn, this._d.platform, this._d.dbg, installerPath, logPath);
-  }
-
-  _getInstallType() {
-    // app.getAppPath() → {installDir}/desktop-dist/resources/app.asar
-    // dirname → {installDir}/desktop-dist/resources
-    // ../.. → {installDir}  (where .cat-cafe/desktop-config.json lives)
-    const appPath = this._d.app.getAppPath();
-    const candidates = [
-      path.join(path.dirname(appPath), '..', '..', '.cat-cafe', 'desktop-config.json'),
-      path.join(this._d.userDataRoot, '.cat-cafe', 'desktop-config.json'),
-    ];
-    for (const p of candidates) {
-      try {
-        const c = JSON.parse(fs.readFileSync(p, 'utf-8'));
-        if (c.installType) return c.installType;
-      } catch {}
-    }
-    return 'unknown'; // fail-safe: don't auto-install
-  }
-
-  _cleanOldFiles() {
-    try {
-      for (const f of fs.readdirSync(this._updatesDir)) {
-        try {
-          fs.unlinkSync(path.join(this._updatesDir, f));
-        } catch {}
-      }
-    } catch {}
   }
 }
 

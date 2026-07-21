@@ -291,7 +291,8 @@ app.on('ready', async () => {
     platform: process.platform,
     arch: process.arch,
   });
-  await updater.checkPendingUpgrade();
+  const upgradeResult = await updater.checkPendingUpgrade();
+  if (upgradeResult === 'quitting') return; // P1-2: installer launched — skip startAll
 
   try {
     dbg('startAll() called');

@@ -147,6 +147,55 @@ function verifyFileIntegrity(filePath, expectedDigest, expectedSize) {
   });
 }
 
+/**
+ * Check available disk space before downloading.
+ * Requires space ≥ 2× asset size (download + extraction headroom).
+ * @param {string} dir — target download directory
+ * @param {number} assetSize — expected asset size in bytes
+ * @returns {boolean}
+ */
+function checkDiskSpace(dir, assetSize) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const stat = fs.statfsSync(dir);
+    const available = stat.bavail * stat.bsize;
+    return available >= assetSize * 2;
+  } catch {
+    return true; // can't check — proceed optimistically
+  }
+}
+
+/**
+ * Read the install type from desktop-config.json.
+ * @param {string} appPath — app.getAppPath()
+ * @param {string} userDataRoot
+ * @returns {string} 'installer' | 'portable' | 'unknown'
+ */
+function getInstallType(appPath, userDataRoot) {
+  const candidates = [
+    path.join(path.dirname(appPath), '..', '..', '.cat-cafe', 'desktop-config.json'),
+    path.join(userDataRoot, '.cat-cafe', 'desktop-config.json'),
+  ];
+  for (const p of candidates) {
+    try {
+      const c = JSON.parse(fs.readFileSync(p, 'utf-8'));
+      if (c.installType) return c.installType;
+    } catch {}
+  }
+  return 'unknown';
+}
+
+/** Remove all files in the updates directory (post-success cleanup). */
+function cleanUpdatesDir(dir) {
+  try {
+    for (const f of fs.readdirSync(dir)) {
+      try {
+        fs.unlinkSync(path.join(dir, f));
+      } catch {}
+    }
+  } catch {}
+}
+
 module.exports = {
   JOURNAL_FILENAME,
   updatesDir,
@@ -155,4 +204,7 @@ module.exports = {
   clearJournal,
   checkUpgradeResult,
   verifyFileIntegrity,
+  checkDiskSpace,
+  getInstallType,
+  cleanUpdatesDir,
 };
