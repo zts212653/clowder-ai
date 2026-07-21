@@ -337,7 +337,7 @@ class UpdateManager {
       return 'quitting';
     } catch (err) {
       this._d.dbg(`Retry install failed: ${err.message}`);
-      if (this._d.startServices) await this._d.startServices().catch(() => {});
+      // Don't startServices here — _retryInstall runs at startup before main.js startAll()
     }
   }
 

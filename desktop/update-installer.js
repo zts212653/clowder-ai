@@ -113,6 +113,19 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, ti
     } catch {
       existingSize = 0;
     }
+    // Discard full-sized invalid partial — prevents 416 loop when download completed
+    // but integrity check failed (corrupt file at full size)
+    if (existingSize > 0 && existingSize >= asset.size) {
+      dbg('Full-sized invalid partial — discarding for clean download');
+      try {
+        fs.unlinkSync(destPath);
+      } catch {}
+      try {
+        fs.unlinkSync(metaPath);
+      } catch {}
+      existingSize = 0;
+      savedEtag = null;
+    }
 
     // State tracked at Promise scope so timeout, request-error, response-error,
     // and aborted handlers all share a single settle+cleanup path.
