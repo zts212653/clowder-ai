@@ -1,12 +1,12 @@
 # K-1 Producer Attestation Implementation Plan
 
-**Feature:** F258 / #1165 producer-owned closure follow-up
+**Tracking issue:** #1200 — invalid stored-message timestamp admission
 **Goal:** Establish testable source-side guarantees for message identifiers, thread identifiers, actor identifiers, and message timestamps without inventing an unreviewed wire bound or silently excluding stored messages.
-**Acceptance Criteria:** Until D2 decouples cursor order from ID text, future message writes admit only non-negative integral JavaScript `Date` timestamps and reject all other values before persistence; `append()` may initialize only legacy-immediate or queued delivery state and cannot seed transition-owned `deliveredAt`/terminal status; `markCanceled()` may transition only queued records and is a no-op for legacy-immediate, delivered, or already-canceled records; every proposed identifier bound is traced to a producer or admission source; memory and Redis stores share one admission rule; legacy stored data has an explicit read-only audit and reconciliation decision before any bound is claimed compatible; #1165 receives only claims backed by tests and an exact core commit.
+**Acceptance Criteria:** Until D2 decouples cursor order from ID text, future message writes admit only non-negative integral JavaScript `Date` timestamps and reject all other values before persistence; `append()` may initialize only legacy-immediate or queued delivery state and cannot seed transition-owned `deliveredAt`/terminal status; `markCanceled()` may transition only queued records and is a no-op for legacy-immediate, delivered, or already-canceled records; every proposed identifier bound is traced to a producer or admission source; memory and Redis stores share one admission rule; legacy stored data has an explicit read-only audit and reconciliation decision before any bound is claimed compatible; #1200 receives only claims backed by tests and an exact core commit. #1165 remains M7 reservation provenance only and does not authorize this implementation.
 **Architecture cell:** `identity-session` (actor identity) with `thread-navigation` as an adjacent owner (thread identity)
 **Map delta:** none
 **Map delta why:** This hardens existing producer/admission boundaries; it does not move ownership or introduce a new runtime component.
-**Architecture:** A pure admission helper is the single write-side policy consumed by both message stores. It temporarily matches the domain that the current lexical sortable-ID/cursor encoding can preserve; D2 will replace that coupling before the full valid-Date domain can be restored. A separate read-only audit reports legacy violations; it does not mutate persistent data. K-1 projection remains fail-closed and may rely on a bound only after admission, legacy compatibility, and the corresponding #1165 shape delta are all reviewed.
+**Architecture:** A pure admission helper is the single write-side policy consumed by both message stores. It temporarily matches the domain that the current lexical sortable-ID/cursor encoding can preserve; D2 will replace that coupling before the full valid-Date domain can be restored. A separate read-only audit reports legacy violations; it does not mutate persistent data. K-1 projection remains fail-closed and may rely on a bound only after admission and legacy compatibility are reviewed. Any later wire-shape delta requires independent authorization; #1165 is cited here only for its M7 reservation record.
 **Tech Stack:** TypeScript, Node test runner, in-memory message store, Redis message store
 **前端验证:** No
 
@@ -16,7 +16,7 @@
 
 The work is valid, but the original task summary is not sufficient authorization to choose public maxima.
 
-- #1165 revision 6 explicitly leaves `messageId`, `threadId`, and `actor.id` reserved pending a K-1 attested bound or admission gate.
+- #1165 revision 6 is related provenance that explicitly leaves `messageId`, `threadId`, and `actor.id` reserved pending a K-1 attested bound or admission gate; it is not the accepted issue for this patch.
 - The same revision says that the resulting wire bound enters as a reviewed shape delta.
 - `occurredAt` additionally requires valid-Date admission and stored-data attestation/migration.
 - The roadmap identifies the work but supplies no exact identifier maxima or legacy-data disposition.
@@ -30,7 +30,7 @@ Terminal state:
 1. all new messages satisfy one source-owned identity/timestamp policy before any storage side effect, and generic append cannot bypass delivery-transition ownership;
 2. memory and Redis stores behave identically;
 3. a read-only legacy audit can prove whether persisted values fit the proposed policy;
-4. K-1 can cite exact tests and a commit when proposing the corresponding #1165 shape delta.
+4. #1200 can cite exact tests and a commit for this source-side fix; any later K-1 wire-shape proposal remains a separately reviewed change.
 
 Not in scope:
 
@@ -184,7 +184,7 @@ Task A2 may document the gap, but its behavior change waits for Decision D1.
 
 This is a contract/compatibility choice, not a code-style choice.
 
-- **Closure-first:** introduce canonical store-level maxima for `threadId`, user actor IDs, and cat actor IDs, audit historical data, reconcile violations, then propose matching #1165 bounds. This unlocks reserved leaves but can reject previously accepted identities.
+- **Closure-first:** introduce canonical store-level maxima for `threadId`, user actor IDs, and cat actor IDs, audit historical data, reconcile violations, then separately propose matching K-1 bounds. #1165 records the related reservation but does not authorize that future implementation. This unlocks reserved leaves but can reject previously accepted identities.
 - **Compatibility-first:** attest only internally minted IDs now; keep externally sourced `threadId` and actor IDs reserved until their owning ingress paths have independent migration plans. This changes less behavior but does not fully unlock M1/M2/M5.
 
 Recommended default: compatibility-first until a read-only audit shows the closure-first maxima have no legacy violations.
@@ -208,7 +208,9 @@ pnpm test:api:redis
 pnpm check
 ```
 
-## Handoff evidence required for #1165
+## Reservation-provenance handoff for #1165
+
+#1165 is retained only as the source of the M7 RESERVED record. It is not the accepted issue for this patch, does not authorize implementation, and must not be closed by #1185. The following evidence would be required before a separate wire-shape proposal could cite this work:
 
 - exact core commit SHA;
 - source-owned maxima and their producer/admission paths;

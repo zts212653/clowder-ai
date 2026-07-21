@@ -3,6 +3,7 @@
 Review-Target-ID: `fix-k1-producer-attestation`
 Branch: `fix/k1-producer-attestation`
 Pre-fix review SHA: `05ad80c6f789477bf313b76210dc6657e0edc577`
+Primary tracking issue: [#1200](https://github.com/zts212653/clowder-ai/issues/1200)
 
 ## What
 
@@ -18,7 +19,7 @@ Pre-fix review SHA: `05ad80c6f789477bf313b76210dc6657e0edc577`
 
 ## Why
 
-K-1 projects `StoredMessage.timestamp` through `Date#toISOString()`, but both stores previously accepted numbers that make that projection throw. Redis history order is later materialized from `deliveredAt` when a queued message is delivered, so future-write safety must cover both producers rather than only append-time `timestamp`. #1165 revision 6 correctly keeps M7 RESERVED until valid-Date admission and stored-data attestation/migration exist. This slice closes only the future-write admission half and deliberately leaves historical compatibility and public identifier bounds unresolved.
+K-1 projects `StoredMessage.timestamp` through `Date#toISOString()`, but both stores previously accepted numbers that make that projection throw. Redis history order is later materialized from `deliveredAt` when a queued message is delivered, so future-write safety must cover both producers rather than only append-time `timestamp`. #1200 tracks this implementation. Separately, #1165 records that M7 stays RESERVED until valid-Date admission and stored-data attestation/migration exist; it is provenance, not implementation authorization. This slice closes only the future-write admission half and deliberately leaves historical compatibility and public identifier bounds unresolved.
 
 ## Original Requirements
 
@@ -26,7 +27,8 @@ K-1 projects `StoredMessage.timestamp` through `Date#toISOString()`, but both st
 > “Required correction: either ... mark M7 RESERVED pending a K-1 valid-Date admission plus stored-data attestation/migration invariant, or ... provide that source invariant now.”
 > New-write admission must not be represented as proof for historical stored data.
 
-- Source: `https://github.com/zts212653/clowder-ai/issues/1165#issuecomment-5011835675`
+- Primary bug intake issue: `https://github.com/zts212653/clowder-ai/issues/1200` (maintainer triage pending)
+- Related M7 reservation provenance only: `https://github.com/zts212653/clowder-ai/issues/1165#issuecomment-5011835675`
 - Local grounding/plan: `feature-specs/2026-07-19-k1-producer-attestation.md`
 - **Please judge whether the diff closes future-write valid-Date admission without overclaiming M7 or choosing identifier/migration policy.**
 
@@ -112,7 +114,7 @@ Reported: 1 P1, 1 P3
 
 - Finding: P1 new `docs/` bug report omitted ADR-011 YAML frontmatter (`[FC:new]`).
 - Verified mechanism: `docs/SOP.md` requires frontmatter for every `docs/**/*.md`; `scripts/check-frontmatter.mjs` listed this exact path as missing.
-- Red→Green: the target moved from `missingFrontmatter` index `4` to no missing frontmatter, `doc_kind`, or `created` entry after adding F258 bug-report metadata.
+- Red→Green: the target moved from `missingFrontmatter` index `4` to no missing frontmatter, `doc_kind`, or `created` entry after adding ADR-011-compliant bug-report metadata.
 - Maintainer acceptance tail: added a bounded real-Redis `collectAllThreadMessages()` regression. With the old two score-truncation sites restored, it fails after three before-page calls with “pagination did not make progress”; with full numeric score equality it terminates in two calls with two unique records.
 
 ## Remote review follow-up — `50f45244d`
@@ -243,6 +245,7 @@ root media/artifact gate (working tree + committed diff)
 
 - Plan: `feature-specs/2026-07-19-k1-producer-attestation.md`
 - Bug capsule: `docs/bug-report/k1-invalid-message-timestamp/bug-report.md`
-- External shape anchor: issue `#1165`, M7 remains RESERVED
+- Primary tracking bug: issue `#1200` (maintainer triage pending)
+- Related reservation provenance only: issue `#1165` (M7; no implementation authorization)
 
 [砚砚/GPT-5.6 Sol🐾]
