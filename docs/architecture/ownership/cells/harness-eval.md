@@ -17,6 +17,7 @@ code_anchors:
   - packages/api/src/infrastructure/harness-eval/sop/adaptive-sop-admission.ts
   - packages/api/src/infrastructure/harness-eval/sop/adaptive-sop-replay-runner.ts
   - packages/api/src/infrastructure/harness-eval/sop/adaptive-sop-replay-fixture-grader.ts
+  - packages/api/src/infrastructure/harness-eval/sop/adaptive-sop-replay-model-ports.ts
   - packages/api/src/infrastructure/harness-eval/friction/friction-signal-source.ts
   - packages/api/src/infrastructure/harness-eval/friction/paw-feel-marker.ts
   - packages/api/src/infrastructure/harness-eval/friction/paw-feel-adapter.ts
