@@ -175,7 +175,7 @@ function showAboutDialog() {
       ].join('\n'),
     })
     .then((result) => {
-      if (result.response === 0) updater?.checkForUpdates();
+      if (result.response === 0) updater?.checkForUpdates({ manual: true });
     });
 }
 
@@ -190,7 +190,7 @@ function createTray() {
     { label: 'Show Clowder AI', click: () => mainWindow?.show() },
     { type: 'separator' },
     { label: 'About', click: () => showAboutDialog() },
-    { label: 'Check for Updates', click: () => updater?.checkForUpdates() },
+    { label: 'Check for Updates', click: () => updater?.checkForUpdates({ manual: true }) },
     { type: 'separator' },
     { label: 'Quit', click: () => quitApp() },
   ]);
@@ -252,7 +252,7 @@ app.on('ready', async () => {
         label: app.name,
         submenu: [
           { label: 'About Clowder AI', click: () => showAboutDialog() },
-          { label: 'Check for Updates…', click: () => updater?.checkForUpdates() },
+          { label: 'Check for Updates…', click: () => updater?.checkForUpdates({ manual: true }) },
           { type: 'separator' },
           { role: 'quit' },
         ],

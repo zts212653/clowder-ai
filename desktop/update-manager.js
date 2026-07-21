@@ -84,13 +84,17 @@ class UpdateManager {
     }
   }
 
-  /** Check for updates (scheduled or manual from tray). */
-  async checkForUpdates() {
-    const { dbg, net, platform, arch } = this._d;
+  /**
+   * Check for updates.
+   * @param {{ manual?: boolean }} opts — manual=true shows feedback when up-to-date
+   */
+  async checkForUpdates(opts) {
+    const manual = opts?.manual === true;
+    const { dbg, net, platform, arch, showNotification } = this._d;
     const currentVersion = this._d.app.getVersion();
     const settings = checker.loadSettings(this._settingsPath);
     const cachePath = path.join(this._d.userDataRoot, 'release-cache.json');
-    dbg(`Checking for updates (current: ${currentVersion})`);
+    dbg(`Checking for updates (current: ${currentVersion}, manual: ${manual})`);
 
     try {
       const result = await fetchReleases(net, currentVersion, settings.etag);
@@ -104,6 +108,7 @@ class UpdateManager {
         releaseData = checker.loadCachedReleases(cachePath);
         if (!releaseData) {
           dbg('304 but no cached releases — skipping');
+          if (manual) showNotification('No Updates', `Clowder AI v${currentVersion} is the latest version.`);
           return;
         }
         dbg('304 — re-evaluating cached releases');
@@ -113,6 +118,7 @@ class UpdateManager {
         checker.saveCachedReleases(cachePath, releaseData);
       } else {
         dbg('Release fetch failed');
+        if (manual) showNotification('Update Check Failed', 'Could not reach GitHub. Check your network connection.');
         return;
       }
 
@@ -128,12 +134,14 @@ class UpdateManager {
 
       if (!target) {
         dbg('No update available');
+        if (manual) showNotification('No Updates', `Clowder AI v${currentVersion} is the latest version.`);
         return;
       }
       dbg(`Update available: v${target.version}`);
       await this._promptUpdate(target, settings);
     } catch (err) {
-      dbg(`Update check failed (silent): ${err.message}`);
+      dbg(`Update check failed: ${err.message}`);
+      if (manual) showNotification('Update Check Failed', 'Something went wrong. Check the logs for details.');
     }
   }
 
