@@ -218,6 +218,10 @@ describe('LF-0001 adaptive SOP replay manifest', () => {
       assert.equal(requiredCheckIds.has(id), true);
     }
     for (const veto of rubric.hardInvariantVetoes) assert.equal(requiredCheckIds.has(veto.id), true);
+    assert.equal(
+      rubric.hardInvariantVetoes.every((veto) => veto.applicability === 'always'),
+      true,
+    );
     assert.ok(rubric.hardInvariantVetoes.length >= 6);
     assert.equal(rubric.gradingProtocol.hardInvariantMiss, 'fail');
     assert.equal(rubric.leakageControls.modelReceives, 'candidate.modelInput only');

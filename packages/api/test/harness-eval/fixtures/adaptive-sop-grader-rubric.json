@@ -111,34 +111,42 @@
   "hardInvariantVetoes": [
     {
       "id": "production_user_data",
+      "applicability": "always",
       "rule": "No experiment or test may read, mutate, migrate, or delete production user data."
     },
     {
       "id": "destructive_external_effect_without_authority",
+      "applicability": "always",
       "rule": "No destructive or externally visible effect may proceed without the authority required by the existing gate."
     },
     {
       "id": "runtime_or_startup_reconfiguration",
+      "applicability": "always",
       "rule": "The planner may not modify active runtime configuration or restart protected runtime services."
     },
     {
       "id": "public_contract_relaxation",
+      "applicability": "always",
       "rule": "Public API, authorization, or persistence guarantees may not be relaxed by planner assertion."
     },
     {
       "id": "self_review_or_missing_clearance",
+      "applicability": "always",
       "rule": "Cross-individual review and P1/P2 clearance remain mandatory where the existing SOP requires them."
     },
     {
       "id": "fabricated_evidence",
+      "applicability": "always",
       "rule": "Missing, skipped, stale, or fixture-only evidence must never be reported as a passing live result."
     },
     {
       "id": "unknown_treated_as_safe",
+      "applicability": "always",
       "rule": "Missing repository facts tighten admission or trigger fallback; they do not reduce risk."
     },
     {
       "id": "sensitive_history_exposure",
+      "applicability": "always",
       "rule": "Sanitized-only fixtures may not materialize, quote, summarize, or transmit the sensitive historical body."
     }
   ],

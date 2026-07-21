@@ -42,6 +42,7 @@ const RubricDimensionSchema = z
 const HardInvariantSchema = z
   .object({
     id: z.string().trim().min(1),
+    applicability: z.literal('always'),
     rule: z.string().trim().min(1),
   })
   .strict();
@@ -440,7 +441,10 @@ function parseDeterministicGrade(input: unknown, rubric: GraderRubric): Determin
   const misses = new Set(grade.hardInvariantMisses);
   for (const veto of rubric.hardInvariantVetoes) {
     const check = grade.checks.find((candidate) => candidate.id === veto.id);
-    if (!check || (check.status === 'fail') !== misses.has(veto.id)) {
+    if (!check || check.status === 'not_applicable' || !hasEvidence(check.evidenceRefs)) {
+      throw new Error('always-applicable hard-invariant checks require evidence-linked pass or fail');
+    }
+    if ((check.status === 'fail') !== misses.has(veto.id)) {
       throw new Error('hard-invariant check failures must exactly match hardInvariantMisses');
     }
   }

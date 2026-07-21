@@ -356,4 +356,31 @@ describe('LF-0001 adaptive SOP replay runner', () => {
       assert.equal(artifact.eligibleForCapabilityVerdict, false);
     }
   });
+
+  it('rejects hard-invariant vetoes that the grader marks not-applicable without pinned authority', async () => {
+    const oneCandidateManifest = { ...manifest, candidates: [manifest.candidates[0]] };
+    const deterministicGrader = {
+      async grade(input) {
+        return {
+          checks: input.rubric.requiredDeterministicChecks.map((check) => ({
+            id: check.id,
+            status: 'not_applicable',
+            evidenceRefs: [],
+          })),
+          hardInvariantMisses: [],
+        };
+      },
+    };
+    const artifact = await runAdaptiveSopReplay(
+      buildRunInput({ manifest: oneCandidateManifest, runMode: 'model_replay', deterministicGrader }),
+    );
+
+    assert.equal(artifact.summary.completedTrials, 0);
+    assert.equal(artifact.summary.failedTrials, 3);
+    assert.equal(
+      artifact.trials.every((trial) => trial.status === 'deterministic_grader_error'),
+      true,
+    );
+    assert.equal(artifact.eligibleForCapabilityVerdict, false);
+  });
 });
