@@ -1,5 +1,4 @@
 // F258: Desktop In-App Update — orchestrator (Electron main process)
-//
 // Lifecycle: startup check → scheduled checks → download → install
 // Pure logic: update-checker.js | Journal/verify: update-downloader.js
 // Install execution: update-installer.js
@@ -90,7 +89,7 @@ class UpdateManager {
    */
   async checkForUpdates(opts) {
     const manual = opts?.manual === true;
-    const { dbg, net, platform, arch, showNotification } = this._d;
+    const { dbg, net, platform, arch, showDialog } = this._d;
     const currentVersion = this._d.app.getVersion();
     const settings = checker.loadSettings(this._settingsPath);
     const cachePath = path.join(this._d.userDataRoot, 'release-cache.json');
@@ -108,7 +107,7 @@ class UpdateManager {
         releaseData = checker.loadCachedReleases(cachePath);
         if (!releaseData) {
           dbg('304 but no cached releases — skipping');
-          if (manual) showNotification('No Updates', `Clowder AI v${currentVersion} is the latest version.`);
+          if (manual) await this._showUpToDate(currentVersion);
           return;
         }
         dbg('304 — re-evaluating cached releases');
@@ -118,7 +117,14 @@ class UpdateManager {
         checker.saveCachedReleases(cachePath, releaseData);
       } else {
         dbg('Release fetch failed');
-        if (manual) showNotification('Update Check Failed', 'Could not reach GitHub. Check your network connection.');
+        if (manual)
+          await showDialog({
+            type: 'warning',
+            buttons: ['OK'],
+            title: 'Update Check Failed',
+            message: 'Could not check for updates',
+            detail: 'Could not reach GitHub. Please check your network connection and try again.',
+          });
         return;
       }
 
@@ -134,15 +140,32 @@ class UpdateManager {
 
       if (!target) {
         dbg('No update available');
-        if (manual) showNotification('No Updates', `Clowder AI v${currentVersion} is the latest version.`);
+        if (manual) await this._showUpToDate(currentVersion);
         return;
       }
       dbg(`Update available: v${target.version}`);
       await this._promptUpdate(target, settings);
     } catch (err) {
       dbg(`Update check failed: ${err.message}`);
-      if (manual) showNotification('Update Check Failed', 'Something went wrong. Check the logs for details.');
+      if (manual)
+        await this._d.showDialog({
+          type: 'warning',
+          buttons: ['OK'],
+          title: 'Update Check Failed',
+          message: 'Something went wrong',
+          detail: 'Check the logs for details.',
+        });
     }
+  }
+
+  async _showUpToDate(currentVersion) {
+    await this._d.showDialog({
+      type: 'info',
+      buttons: ['OK'],
+      title: 'No Updates Available',
+      message: `Clowder AI v${currentVersion} is up to date`,
+      detail: 'You are running the latest version.',
+    });
   }
 
   async _promptUpdate(target, settings) {
