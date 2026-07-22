@@ -1983,7 +1983,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               ballCustody: opts.ballCustody,
               log: request.log,
               // F220 Phase 2a (#972): converge queue state when zombies are cleaned up
-              queueConvergence: opts.queueProcessor?.buildQueueConvergence(),
+              queueConvergence: opts.queueProcessor?.buildQueueConvergence?.(),
             }).catch((err) => request.log.warn({ err, feature: 'F194' }, 'reconcileZombies failed'));
           }
           if (orphanDrafts.length > 0) {

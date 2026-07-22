@@ -61,8 +61,22 @@ export interface QueueConvergence {
     userId: string,
     idempotencyKey?: string,
   ):
-    | { removed: true; entryId: string; primaryCatId?: string; rolledBackSiblings?: string[] }
-    | { removed: false; entryId?: undefined; primaryCatId?: undefined; rolledBackSiblings?: undefined };
+    | {
+        removed: true;
+        entryId: string;
+        primaryCatId?: string;
+        rolledBackSiblings?: string[];
+        /** Resolves after the removal snapshot is published. Redispatch must be
+         *  chained behind this promise so an older full snapshot cannot arrive last. */
+        queueUpdate: Promise<void>;
+      }
+    | {
+        removed: false;
+        entryId?: undefined;
+        primaryCatId?: undefined;
+        rolledBackSiblings?: undefined;
+        queueUpdate?: undefined;
+      };
   /** Release the in-memory processing slot for this thread+cat, ONLY if it is
    *  still owned by ownerEntryId (Sol maintainer R17 P1: owner-bound reservation).
    *  The adapter binds each slot reservation to its owning queue entry at
@@ -73,7 +87,7 @@ export interface QueueConvergence {
   /** Kick the queue: dispatch waiting entries now that the slot is free.
    *  Uses the normal completion path (cross-user fair drain + auto-execute scan)
    *  so both user/connector and agent entries get dispatched. */
-  tryDispatchNext(threadId: string, catId: string): void;
+  tryDispatchNext(threadId: string, catId: string, waitForQueueUpdate?: Promise<void>): void;
   /** Schedule durable retry of queue convergence with exponential backoff (Sol R4 P2).
    *  Called when removeStaleProcessing fails transiently. The adapter implements:
    *  - Dedup registry keyed by (threadId, userId, idempotencyKey) — no double-scheduling
@@ -138,8 +152,8 @@ async function clearTaskProgress(
 ): Promise<{ cleared: boolean; errors: number }> {
   if (!taskProgressStore || !zombie.catId) return { cleared: false, errors: 0 };
   try {
-    await taskProgressStore.deleteSnapshot(threadId, zombie.catId as CatId);
-    return { cleared: true, errors: 0 };
+    const cleared = await taskProgressStore.deleteSnapshotIfOwner(threadId, zombie.catId as CatId, zombie.invocationId);
+    return { cleared, errors: 0 };
   } catch (err) {
     log.warn(
       {
@@ -208,7 +222,7 @@ async function processZombie(
             if (qr.removed) {
               const slotCat = qr.primaryCatId ?? zombie.catId;
               deps.queueConvergence.releaseSlot(current.threadId, slotCat, qr.entryId);
-              deps.queueConvergence.tryDispatchNext(current.threadId, slotCat);
+              deps.queueConvergence.tryDispatchNext(current.threadId, slotCat, qr.queueUpdate);
               log.info(
                 {
                   threadId: current.threadId,
@@ -318,7 +332,7 @@ async function processZombie(
           deps.queueConvergence.releaseSlot(updated.threadId, slotCat, qr.entryId);
           // Kick the queue: mirrors normal onInvocationComplete path (cross-user
           // fair drain + auto-execute scan). Fire-and-forget.
-          deps.queueConvergence.tryDispatchNext(updated.threadId, slotCat);
+          deps.queueConvergence.tryDispatchNext(updated.threadId, slotCat, qr.queueUpdate);
           log.info(
             { threadId: updated.threadId, catId: zombie.catId, slotCat, userId: updated.userId, entryId: qr.entryId },
             '[reconcile-zombies] #972 queue convergence: removed stale entry + released slot + kicked queue',

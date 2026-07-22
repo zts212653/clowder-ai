@@ -459,17 +459,24 @@ export class QueueProcessor {
           },
           '[F220 2a] removed stale processing queue entry (precise entry identity)',
         );
-        // Emit per-user queue_updated so the frontend reflects the removal.
-        // Fire-and-forget — best-effort UI consistency.
-        emitQueueUpdated(
+        // Publish the removal snapshot before redispatch is allowed to emit a
+        // newer processing/completed snapshot. The promise is returned to the
+        // convergence coordinator instead of awaited here, so slow enrichment
+        // does not block other zombies from reaching their critical mutation.
+        const queueUpdate = emitQueueUpdated(
           this.deps.socketManager,
           userId,
           threadId,
           this.deps.queue.list(threadId, userId),
           this.deps.messageStore,
           'zombie_convergence',
-        ).catch(() => {});
-        return { removed: true, entryId: entry.id, primaryCatId, rolledBackSiblings };
+        ).catch((err) =>
+          this.deps.log.warn(
+            { threadId, catId, userId, entryId: entry.id, err },
+            '[F220 2a] queue update after zombie convergence failed',
+          ),
+        );
+        return { removed: true, entryId: entry.id, primaryCatId, rolledBackSiblings, queueUpdate };
       },
       releaseSlot: (threadId: string, catId: string, ownerEntryId: string) => {
         // Sol maintainer R17 P1: owner-guarded release. The reservation is bound to
@@ -489,12 +496,13 @@ export class QueueProcessor {
           );
         }
       },
-      tryDispatchNext: (threadId: string, catId: string) => {
+      tryDispatchNext: (threadId: string, catId: string, waitForQueueUpdate?: Promise<void>) => {
         // Sol P1-2: mirror normal onInvocationComplete path — cross-user fair drain
         // for ALL entry types (user/connector/agent), then auto-execute scan.
         // Without tryExecuteNextAcrossUsers, the original #972 user @codex message
         // (autoExecute=false) would remain idle after cleanup.
-        this.tryExecuteNextAcrossUsers(threadId, catId)
+        (waitForQueueUpdate ?? Promise.resolve())
+          .then(() => this.tryExecuteNextAcrossUsers(threadId, catId))
           .then(() => this.tryAutoExecute(threadId))
           .catch((err) =>
             this.deps.log.warn({ threadId, catId, err }, '[F220 2a] dispatch after zombie convergence failed'),
@@ -565,15 +573,21 @@ export class QueueProcessor {
                 },
                 '[F220 2a] durable retry: removed stale processing entry + released slot',
               );
-              emitQueueUpdated(
+              const queueUpdate = emitQueueUpdated(
                 this.deps.socketManager,
                 userId,
                 threadId,
                 this.deps.queue.list(threadId, userId),
                 this.deps.messageStore,
                 'zombie_convergence_retry',
-              ).catch(() => {});
-              this.tryExecuteNextAcrossUsers(threadId, slotCat)
+              ).catch((emitErr) =>
+                this.deps.log.warn(
+                  { threadId, catId, userId, entryId: entry.id, err: emitErr },
+                  '[F220 2a] queue update after durable convergence retry failed',
+                ),
+              );
+              queueUpdate
+                .then(() => this.tryExecuteNextAcrossUsers(threadId, slotCat))
                 .then(() => this.tryAutoExecute(threadId))
                 .catch(() => {});
               this.convergenceRetryRegistry.delete(registryKey);

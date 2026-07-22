@@ -48,6 +48,10 @@ function makeTaskProgressStore() {
     deleteSnapshot: async (threadId, catId) => {
       cleared.push({ threadId, catId });
     },
+    deleteSnapshotIfOwner: async (threadId, catId) => {
+      cleared.push({ threadId, catId });
+      return true;
+    },
   };
 }
 
@@ -62,10 +66,24 @@ function makeRecordingLogger() {
 }
 
 /** Build a minimal QueueProcessor for adapter tests. */
-function buildQueueProcessorWithQueue(queue) {
+function buildQueueProcessorWithQueue(queue, overrides = {}) {
   const log = makeRecordingLogger();
   const dispatchCalls = [];
   const socketEmits = [];
+
+  const socketManager = overrides.socketManager ?? {
+    broadcastAgentMessage: () => {},
+    broadcastToRoom: () => {},
+    emitToUser: (userId, event, data) => socketEmits.push({ userId, event, data }),
+  };
+  const messageStore = overrides.messageStore ?? {
+    list: () => [],
+    get: () => null,
+    getById: async () => null,
+    create: async () => ({ id: 'm1' }),
+    update: async () => {},
+    delete: async () => {},
+  };
 
   const qp = new QueueProcessor({
     queue,
@@ -83,18 +101,8 @@ function buildQueueProcessorWithQueue(queue) {
     router: {
       routeExecution: async () => ({ status: 'succeeded', response: '' }),
     },
-    socketManager: {
-      broadcastAgentMessage: () => {},
-      broadcastToRoom: () => {},
-      emitToUser: (userId, event, data) => socketEmits.push({ userId, event, data }),
-    },
-    messageStore: {
-      list: () => [],
-      get: () => null,
-      create: async () => ({ id: 'm1' }),
-      update: async () => {},
-      delete: async () => {},
-    },
+    socketManager,
+    messageStore,
     log,
   });
 
@@ -1070,6 +1078,11 @@ describe('F220 Phase 2a: buildQueueConvergence real adapter (Sol P2-3)', () => {
       queueConvergence: adapter,
     });
 
+    // Redispatch is intentionally chained behind the convergence queue_updated
+    // enrichment barrier. Let that ordered fire-and-forget chain settle before
+    // asserting the replacement state.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
     assert.equal(result.reconciled, 1, 'zombie must be reconciled');
     assert.equal(result.errors, 0, 'no errors');
 
@@ -1845,6 +1858,16 @@ describe('Sol maintainer review: deferred cleanup', () => {
         }
         opLog.push(`${catId}-cleanup-done`);
       },
+      deleteSnapshotIfOwner: async (_threadId, catId) => {
+        opLog.push(`${catId}-cleanup-start`);
+        if (catId === 'codex') {
+          await new Promise((r) => {
+            resolveACleanup = r;
+          });
+        }
+        opLog.push(`${catId}-cleanup-done`);
+        return true;
+      },
     };
 
     const convergenceCalls = [];
@@ -1894,5 +1917,150 @@ describe('Sol maintainer review: deferred cleanup', () => {
     assert.equal(result.taskProgressCleared, 2, 'both TaskProgress cleared');
     assert.equal(result.errors, 0, 'no errors');
     assert.ok(opLog.includes('codex-cleanup-done'), 'A cleanup eventually resolved');
+  });
+
+  it('R18 P1: deferred zombie cleanup preserves TaskProgress owned by replacement B', async () => {
+    const store = new InvocationRecordStore();
+    const recA = store.create({
+      threadId: 't1',
+      userId: 'u1',
+      targetCats: ['codex'],
+      intent: 'execute',
+      idempotencyKey: 'queue-a',
+    });
+    store.update(recA.invocationId, { status: 'running' });
+
+    let snapshot = { lastInvocationId: recA.invocationId };
+    let releaseDelete;
+    let deleteStarted;
+    const deleteStartedPromise = new Promise((resolve) => {
+      deleteStarted = resolve;
+    });
+    const taskProgressStore = {
+      deleteSnapshot: async () => {
+        deleteStarted();
+        await new Promise((resolve) => {
+          releaseDelete = resolve;
+        });
+        snapshot = null;
+      },
+      deleteSnapshotIfOwner: async (_threadId, _catId, invocationId) => {
+        deleteStarted();
+        await new Promise((resolve) => {
+          releaseDelete = resolve;
+        });
+        if (snapshot?.lastInvocationId !== invocationId) return false;
+        snapshot = null;
+        return true;
+      },
+    };
+
+    const resultPromise = reconcileZombies([makeZombie({ invocationId: recA.invocationId, catId: 'codex' })], {
+      invocationRecordStore: store,
+      taskProgressStore,
+      log: makeRecordingLogger(),
+    });
+    await deleteStartedPromise;
+
+    snapshot = { lastInvocationId: 'replacement-B' };
+    releaseDelete();
+    const result = await resultPromise;
+
+    assert.deepEqual(snapshot, { lastInvocationId: 'replacement-B' }, 'old A cleanup must preserve B snapshot');
+    assert.equal(result.taskProgressCleared, 0, 'owner mismatch is a safe no-op, not a cleared snapshot');
+    assert.equal(result.errors, 0);
+  });
+});
+
+describe('Sol maintainer R18: convergence event ordering', () => {
+  it('older zombie snapshot is emitted before replacement processing can publish newer state', async () => {
+    const invRecordStore = new InvocationRecordStore();
+    const queue = new InvocationQueue();
+    const socketEmits = [];
+    let releaseEnrichment;
+    let enrichmentStarted;
+    const enrichmentStartedPromise = new Promise((resolve) => {
+      enrichmentStarted = resolve;
+    });
+    const messageStore = {
+      list: () => [],
+      get: () => null,
+      getById: async () => {
+        enrichmentStarted();
+        await new Promise((resolve) => {
+          releaseEnrichment = resolve;
+        });
+        return null;
+      },
+      create: async () => ({ id: 'm1' }),
+      update: async () => {},
+      delete: async () => {},
+    };
+    const socketManager = {
+      broadcastAgentMessage: () => {},
+      broadcastToRoom: () => {},
+      emitToUser: (userId, event, data) => socketEmits.push({ userId, event, data }),
+    };
+    const { qp } = buildQueueProcessorWithQueue(queue, { messageStore, socketManager });
+
+    const stale = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'stale A',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+    queue.markProcessingById('t1', stale.entry.id);
+    const replacement = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'replacement B',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+      messageId: 'msg-b',
+    });
+    const recA = invRecordStore.create({
+      threadId: 't1',
+      userId: 'u1',
+      targetCats: ['codex'],
+      intent: 'execute',
+      idempotencyKey: `queue-${stale.entry.id}`,
+    });
+    invRecordStore.update(recA.invocationId, { status: 'running' });
+
+    qp.tryExecuteNextAcrossUsers = async () => {
+      queue.markProcessingById('t1', replacement.entry.id);
+      socketManager.emitToUser('u1', 'queue_updated', {
+        threadId: 't1',
+        queue: queue.list('t1', 'u1'),
+        action: 'processing',
+      });
+    };
+    qp.tryAutoExecute = async () => {};
+
+    const resultPromise = reconcileZombies([makeZombie({ invocationId: recA.invocationId, catId: 'codex' })], {
+      invocationRecordStore: invRecordStore,
+      taskProgressStore: makeTaskProgressStore(),
+      queueConvergence: qp.buildQueueConvergence(),
+      log: makeRecordingLogger(),
+    });
+    await enrichmentStartedPromise;
+    assert.deepEqual(socketEmits, [], 'replacement dispatch waits for the older convergence event');
+
+    releaseEnrichment();
+    await resultPromise;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.deepEqual(
+      socketEmits.map((event) => event.data.action),
+      ['zombie_convergence', 'processing'],
+      'full snapshots must be emitted in mutation order',
+    );
   });
 });

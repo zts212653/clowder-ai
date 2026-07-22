@@ -12,9 +12,17 @@ function threadKey(threadId: string): string {
   return `task-progress:${threadId}`;
 }
 
+const DELETE_SNAPSHOT_IF_OWNER_LUA = `
+local raw = redis.call('HGET', KEYS[1], ARGV[1])
+if not raw then return 0 end
+local ok, snapshot = pcall(cjson.decode, raw)
+if not ok or snapshot['lastInvocationId'] ~= ARGV[2] then return 0 end
+return redis.call('HDEL', KEYS[1], ARGV[1])
+`;
+
 export class RedisTaskProgressStore implements TaskProgressStore {
   constructor(
-    private readonly redis: Pick<Redis, 'hget' | 'hset' | 'hgetall' | 'hdel' | 'expire' | 'del'>,
+    private readonly redis: Pick<Redis, 'hget' | 'hset' | 'hgetall' | 'hdel' | 'expire' | 'del' | 'eval'>,
     private readonly defaultTtlSeconds: number,
   ) {}
 
@@ -37,6 +45,11 @@ export class RedisTaskProgressStore implements TaskProgressStore {
 
   async deleteSnapshot(threadId: string, catId: CatId): Promise<void> {
     await this.redis.hdel(threadKey(threadId), catId);
+  }
+
+  async deleteSnapshotIfOwner(threadId: string, catId: CatId, invocationId: string): Promise<boolean> {
+    const deleted = await this.redis.eval(DELETE_SNAPSHOT_IF_OWNER_LUA, 1, threadKey(threadId), catId, invocationId);
+    return deleted === 1;
   }
 
   async getThreadSnapshots(threadId: string): Promise<Record<string, TaskProgressSnapshot>> {
