@@ -337,7 +337,7 @@ export interface IMessageStore {
   /**
    * F098-D: CAS transition queued → delivered at an admitted non-negative integral ECMAScript Date value.
    * Returns the transitioned message when this call won the CAS;
-   * null on no-op (not found / already delivered / already canceled).
+   * null on no-op (not found / already delivered / already canceled / immediate).
    */
   markDelivered(id: string, deliveredAt: number): StoredMessage | null | Promise<StoredMessage | null>;
   /**
