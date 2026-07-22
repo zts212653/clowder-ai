@@ -15,6 +15,12 @@
  * - P2-3 (Sol review): real adapter tests (InvocationQueue + buildQueueConvergence)
  * - Sol R2 regression: pinned-continuation/older-follow-up scenario cannot delete
  *   legitimate entries dispatched by the winner's fair-drain
+ * - Sol maintainer R17 P1: owner-bound slot reservation — immediate convergence and
+ *   delayed retry release ONLY the exact stale entry's slot; a replacement that
+ *   reclaimed the slot after a TTL sweep survives, and no third dispatch can start
+ * - Sol maintainer R17 P2: explicit processingSlotTtlMs in slot tests (no
+ *   CLI_TIMEOUT_MS env inheritance) + direct regressions for the a12d1f69f
+ *   delayed-retry and late batch-finalizer fences
  */
 
 import assert from 'node:assert/strict';
@@ -97,6 +103,54 @@ function buildQueueProcessorWithQueue(queue) {
   const origTryAutoExecute = qp.tryAutoExecute?.bind(qp);
 
   return { qp, log, dispatchCalls, socketEmits };
+}
+
+/** Build a QueueProcessor whose routeExecution can be held open and settled on demand.
+ *  Each routeExecution call registers a resolver in holdResolvers (index = dispatch order).
+ *  opts are forwarded to the QueueProcessor constructor (e.g. explicit processingSlotTtlMs
+ *  so tests never inherit the environment-dependent CLI_TIMEOUT_MS default). */
+function buildHoldableQueueProcessor(queue, holdResolvers, opts) {
+  const log = makeRecordingLogger();
+  const qp = new QueueProcessor(
+    {
+      queue,
+      invocationTracker: {
+        start: () => ({ signal: new AbortController().signal }),
+        startAll: () => new AbortController(),
+        complete: () => {},
+        completeAll: () => {},
+        has: () => false,
+        getController: () => undefined,
+      },
+      invocationRecordStore: {
+        create: async () => ({ outcome: 'created', invocationId: `inv-${holdResolvers.length}` }),
+        update: async () => {},
+      },
+      router: {
+        routeExecution: async function* () {
+          // Hold open until manually resolved — simulates long-running execution
+          await new Promise((resolve) => holdResolvers.push(resolve));
+        },
+        ackCollectedCursors: async () => {},
+      },
+      socketManager: {
+        broadcastAgentMessage: () => {},
+        broadcastToRoom: () => {},
+        emitToUser: () => {},
+      },
+      messageStore: {
+        list: () => [],
+        get: () => null,
+        create: async () => ({ id: 'm1' }),
+        update: async () => {},
+        delete: async () => {},
+        markDelivered: async () => null,
+      },
+      log,
+    },
+    opts,
+  );
+  return { qp, log };
 }
 
 describe('F194 reconcileZombies — cleanup pathway', () => {
@@ -1434,47 +1488,15 @@ describe('F220 Phase 2a: buildQueueConvergence real adapter (Sol P2-3)', () => {
     //
     // We test through the full dispatch pipeline by using an async-generator
     // routeExecution mock that we can hold open and settle on demand.
+    //
+    // Sol maintainer R17 P2: pass an explicit nonzero processingSlotTtlMs — the
+    // default (2.5 × CLI_TIMEOUT_MS) is environment-dependent: with the valid
+    // local config CLI_TIMEOUT_MS=0 the TTL is 0 and tryExecuteNextForUser's
+    // sweep immediately expires the replacement's slot, failing this test for
+    // reasons unrelated to the reservation fence.
     const queue = new InvocationQueue();
-    const log = makeRecordingLogger();
-
-    // Each routeExecution call adds a hold/resolve pair
     const holdResolvers = [];
-    const qp = new QueueProcessor({
-      queue,
-      invocationTracker: {
-        start: () => ({ signal: new AbortController().signal }),
-        startAll: () => new AbortController(),
-        complete: () => {},
-        completeAll: () => {},
-        has: () => false,
-        getController: () => undefined,
-      },
-      invocationRecordStore: {
-        create: async () => ({ outcome: 'created', invocationId: `inv-${holdResolvers.length}` }),
-        update: async () => {},
-      },
-      router: {
-        routeExecution: async function* () {
-          // Hold open until manually resolved — simulates long-running execution
-          await new Promise((resolve) => holdResolvers.push(resolve));
-        },
-        ackCollectedCursors: async () => {},
-      },
-      socketManager: {
-        broadcastAgentMessage: () => {},
-        broadcastToRoom: () => {},
-        emitToUser: () => {},
-      },
-      messageStore: {
-        list: () => [],
-        get: () => null,
-        create: async () => ({ id: 'm1' }),
-        update: async () => {},
-        delete: async () => {},
-        markDelivered: async () => null,
-      },
-      log,
-    });
+    const { qp, log } = buildHoldableQueueProcessor(queue, holdResolvers, { processingSlotTtlMs: 60_000 });
 
     // Enqueue entries A (zombie) and B (replacement)
     const aResult = queue.enqueue({
@@ -1509,7 +1531,7 @@ describe('F220 Phase 2a: buildQueueConvergence real adapter (Sol P2-3)', () => {
     const adapter = qp.buildQueueConvergence();
     const rmResult = adapter.removeStaleProcessing('t1', 'codex', 'u1', `queue-${aResult.entry.id}`);
     assert.equal(rmResult.removed, true, 'A entry removed by convergence');
-    adapter.releaseSlot('t1', 'codex');
+    adapter.releaseSlot('t1', 'codex', aResult.entry.id);
     adapter.tryDispatchNext('t1', 'codex');
 
     // Wait for B's dispatch (fire-and-forget async path)
@@ -1537,6 +1559,246 @@ describe('F220 Phase 2a: buildQueueConvergence real adapter (Sol P2-3)', () => {
     // Without reservation fence: A's .then does processingSlots.delete(sk) → B's slot gone → C starts
 
     // Cleanup: resolve B
+    holdResolvers[1]();
+    await new Promise((r) => setTimeout(r, 100));
+  });
+
+  it('Sol maintainer R17 P1: immediate convergence must not delete replacement reservation (owner-bound slot)', async () => {
+    // Exact production path from maintainer review (no concurrent processes):
+    // 1. Processing entry A owns reservation 1 and becomes stale with no tracker.
+    // 2. tryExecuteNextForUser sweeps the stale slot and starts replacement B
+    //    with reservation 2. The old A queue row still exists.
+    // 3. Zombie reconciliation precisely removes row A, then releaseSlot.
+    // 4. MUST NOT delete B's slot (owner mismatch) — otherwise C starts beside B.
+    const queue = new InvocationQueue();
+    const holdResolvers = [];
+    const { qp } = buildHoldableQueueProcessor(queue, holdResolvers, { processingSlotTtlMs: 60_000 });
+    const sk = JSON.stringify(['t1', 'codex']);
+
+    // Enqueue entry A (zombie). B is enqueued AFTER A's execution starts so it
+    // is not collected into A's user-message batch (executeEntry batches adjacent
+    // queued user entries at start) — B must stay 'queued' to become the replacement.
+    const aResult = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'entry A',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+
+    // 1. Start A — owns the slot (ownerId = A's entry id, reservation 1)
+    const dispatchA = await qp.processNext('t1', 'u1');
+    assert.equal(dispatchA.started, true, 'A must start');
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(holdResolvers.length, 1, 'A routeExecution reached');
+
+    // Expire A's slot: age beyond TTL with no active tracker → sweep-eligible zombie
+    qp.processingSlots.get(sk).startedAt = Date.now() - 120_000;
+
+    // Replacement B queued behind the stale row
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'entry B',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+
+    // 2. Dispatch path sweeps the stale slot and starts replacement B (reservation 2).
+    //    A's queue row remains 'processing' (the hung executeEntry never cleaned it).
+    const dispatchB = await qp.processNext('t1', 'u1');
+    assert.equal(dispatchB.started, true, 'B must start after sweep releases the stale slot');
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(holdResolvers.length, 2, 'B routeExecution reached');
+    assert.equal(
+      queue.list('t1', 'u1').filter((e) => e.status === 'processing').length,
+      2,
+      'precondition: stale row A + replacement B both processing',
+    );
+
+    // 3. Zombie reconciliation precisely removes row A, then owner-guarded releaseSlot
+    const adapter = qp.buildQueueConvergence();
+    const rmResult = adapter.removeStaleProcessing('t1', 'codex', 'u1', `queue-${aResult.entry.id}`);
+    assert.equal(rmResult.removed, true, 'A entry removed by convergence');
+    assert.equal(rmResult.entryId, aResult.entry.id);
+    adapter.releaseSlot('t1', 'codex', aResult.entry.id);
+
+    // 4. CRITICAL: B's slot must survive — its ownerId is B's entry, not A's
+    assert.ok(qp.processingSlots.has(sk), 'replacement slot must survive convergence of the old row');
+
+    // Canary C must NOT start — B still owns the slot
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'canary C',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+    const dispatchC = await qp.processNext('t1', 'u1');
+    assert.equal(dispatchC.started, false, 'C must NOT start beside B (owner-bound reservation)');
+
+    // Positive control: owner-matched release still works — releasing B's own
+    // reservation frees the slot (proves the guard is ownership, not "never release").
+    adapter.releaseSlot('t1', 'codex', dispatchB.entry.id);
+    assert.equal(qp.processingSlots.has(sk), false, 'owner-matched release frees the slot');
+
+    // Cleanup: resolve held executions
+    holdResolvers.forEach((r) => r());
+    await new Promise((r) => setTimeout(r, 100));
+  });
+
+  it('Sol maintainer R17 P1: delayed retry must not delete replacement slot reclaimed during backoff', async (t) => {
+    // a12d1f69f retry-slot fence, regression per maintainer R17 P2.
+    // 1. Stale entry A owns the slot; convergence fails → scheduleRetry (30s backoff).
+    // 2. During the backoff window the slot is released (steer/cancel/sweep) and
+    //    reclaimed by replacement B.
+    // 3. The retry fires, removes stale row A — MUST NOT release B's slot.
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+
+    const queue = new InvocationQueue();
+    const holdResolvers = [];
+    const { qp, log } = buildHoldableQueueProcessor(queue, holdResolvers, { processingSlotTtlMs: 60_000 });
+    const sk = JSON.stringify(['t1', 'codex']);
+
+    const aResult = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'stale A',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+
+    // 1. A starts and owns the slot (B enqueued later so it is not batched into A)
+    const dispatchA = await qp.processNext('t1', 'u1');
+    assert.equal(dispatchA.started, true, 'A must start and own the slot');
+
+    const adapter = qp.buildQueueConvergence();
+    adapter.scheduleRetry('t1', 'codex', 'u1', `queue-${aResult.entry.id}`);
+
+    // 2. Backoff window: replacement B queued; slot force-released (steer/cancel
+    //    path) and reclaimed by B
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'replacement B',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+    qp.releaseSlot('t1', 'codex');
+    const dispatchB = await qp.processNext('t1', 'u1');
+    assert.equal(dispatchB.started, true, 'B must reclaim the slot during the backoff window');
+
+    // 3. Retry fires — removes stale row A, must preserve B's slot
+    t.mock.timers.tick(30_000);
+    assert.equal(
+      queue.list('t1', 'u1').some((e) => e.id === aResult.entry.id),
+      false,
+      'stale row A removed by retry',
+    );
+    assert.ok(qp.processingSlots.has(sk), 'replacement slot must survive the delayed retry');
+    const retryLog = log.records.info.find((a) => a[1]?.includes?.('durable retry: removed stale'));
+    assert.ok(retryLog, 'retry success logged');
+    assert.equal(retryLog[0].slotReleased, false, 'owner mismatch → retry must not release the slot');
+
+    // Canary C must NOT start beside B
+    queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'canary C',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+    const dispatchC = await qp.processNext('t1', 'u1');
+    assert.equal(dispatchC.started, false, 'C must NOT start beside B');
+
+    // Cleanup
+    holdResolvers.forEach((r) => r());
+  });
+
+  it('Sol maintainer R17 P2: late batch finalizer must not touch the re-dispatched sibling (a12d1f69f fence)', async () => {
+    // a12d1f69f sibling fence, regression per maintainer R17 P2.
+    // 1. Primary A executing; sibling S batched in (processing, batchParentId = A).
+    // 2. Zombie convergence removes A, rolls back S (batch dissolved — batchParentId
+    //    cleared), and tryDispatchNext re-dispatches S as a standalone execution.
+    // 3. Old A's executeEntry finally settles: its late finalizer still holds S in
+    //    batchedEntryIds — on success it would REMOVE S's queue row, on failure it
+    //    would ROLL BACK S to queued. Both are fenced by the batchParentId ownership
+    //    check; S must stay processing and its replacement execution untouched.
+    const queue = new InvocationQueue();
+    const holdResolvers = [];
+    const { qp } = buildHoldableQueueProcessor(queue, holdResolvers, { processingSlotTtlMs: 60_000 });
+
+    const aResult = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'primary A',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+    const sResult = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'sibling S',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+
+    // 1. Start A — executeEntry batches the adjacent sibling S
+    const dispatchA = await qp.processNext('t1', 'u1');
+    assert.equal(dispatchA.started, true, 'A must start');
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(holdResolvers.length, 1, 'A routeExecution reached');
+    const sBatched = queue.list('t1', 'u1').find((e) => e.id === sResult.entry.id);
+    assert.equal(sBatched.status, 'processing', 'S batched into A execution');
+    assert.equal(sBatched.batchParentId, aResult.entry.id, 'S owned by A batch');
+
+    // 2. Zombie convergence: remove A, roll back S, re-dispatch S standalone
+    const adapter = qp.buildQueueConvergence();
+    const rmResult = adapter.removeStaleProcessing('t1', 'codex', 'u1', `queue-${aResult.entry.id}`);
+    assert.equal(rmResult.removed, true, 'A removed by convergence');
+    assert.deepEqual(rmResult.rolledBackSiblings, [sResult.entry.id], 'S rolled back (batch dissolved)');
+    adapter.releaseSlot('t1', 'codex', aResult.entry.id);
+    adapter.tryDispatchNext('t1', 'codex');
+
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(holdResolvers.length, 2, 'S re-dispatched as standalone execution');
+    const sRedispatched = queue.list('t1', 'u1').find((e) => e.id === sResult.entry.id);
+    assert.equal(sRedispatched.status, 'processing', 'S re-dispatched');
+
+    // 3. Old A's execution finally settles — late finalizer must skip re-dispatched S
+    holdResolvers[0]();
+    await new Promise((r) => setTimeout(r, 100));
+
+    const sFinal = queue.list('t1', 'u1').find((e) => e.id === sResult.entry.id);
+    assert.ok(sFinal, 'S queue row must survive old A finalizer (success-path removal fenced)');
+    assert.equal(sFinal.status, 'processing', 'S must stay processing (failure-path rollback fenced)');
+    assert.equal(holdResolvers.length, 2, 'S replacement execution untouched');
+
+    // Cleanup
     holdResolvers[1]();
     await new Promise((r) => setTimeout(r, 100));
   });

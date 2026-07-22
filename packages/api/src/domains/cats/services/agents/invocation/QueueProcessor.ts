@@ -201,8 +201,12 @@ export class QueueProcessor {
   /** F108: Per-slot mutex — prevents concurrent double-start per (thread, cat) pair.
    *  F118 D4: Map value includes processingStartedAt for zombie detection.
    *  Sol maintainer review P1: reservation token prevents stale executeEntry callbacks
-   *  from deleting a replacement's slot after zombie convergence dispatches a new entry. */
-  private processingSlots = new Map<string, { startedAt: number; reservation: number }>();
+   *  from deleting a replacement's slot after zombie convergence dispatches a new entry.
+   *  Sol maintainer R17 P1: ownerId binds the reservation to its owning queue entry,
+   *  so zombie convergence can release ONLY the exact stale entry's reservation —
+   *  a monotonic token held in a dispatch closure cannot identify entry A versus
+   *  replacement entry B when reconciliation runs after a TTL sweep + re-dispatch. */
+  private processingSlots = new Map<string, { startedAt: number; reservation: number; ownerId?: string }>();
   /** Monotonically increasing counter for slot reservation tokens. */
   private nextSlotReservation = 0;
   /** F108: Per-slot pause tracking (set on canceled/failed, cleared on next execution) */
@@ -329,10 +333,12 @@ export class QueueProcessor {
   }
 
   /** Claim a processing slot; returns the reservation token for compare-and-release.
-   *  Sol maintainer review P1: stale executeEntry callbacks must not delete a replacement's slot. */
-  private claimSlot(key: string): number {
+   *  Sol maintainer review P1: stale executeEntry callbacks must not delete a replacement's slot.
+   *  Sol maintainer R17 P1: ownerId binds the reservation to the owning queue entry so
+   *  zombie convergence can verify it releases the exact stale entry's slot. */
+  private claimSlot(key: string, ownerId?: string): number {
     const reservation = ++this.nextSlotReservation;
-    this.processingSlots.set(key, { startedAt: Date.now(), reservation });
+    this.processingSlots.set(key, { startedAt: Date.now(), reservation, ownerId });
     return reservation;
   }
 
@@ -341,6 +347,21 @@ export class QueueProcessor {
   private releaseSlotIfOwned(key: string, reservation: number): boolean {
     const slot = this.processingSlots.get(key);
     if (slot && slot.reservation === reservation) {
+      this.processingSlots.delete(key);
+      return true;
+    }
+    return false;
+  }
+
+  /** Release a slot only if it is owned by the given queue entry (owner identity check).
+   *  Sol maintainer R17 P1: zombie convergence must release ONLY the reservation owned
+   *  by the exact stale entry it removed. If a TTL sweep released the stale slot and a
+   *  replacement entry reclaimed it, ownerId no longer matches and the replacement's
+   *  slot is preserved. A slot without ownerId (legacy/unknown claim) is never deleted
+   *  here — sweepZombieSlots' TTL+tracker double-confirm covers that cleanup. */
+  private releaseSlotIfOwner(key: string, ownerId: string): boolean {
+    const slot = this.processingSlots.get(key);
+    if (slot && slot.ownerId !== undefined && slot.ownerId === ownerId) {
       this.processingSlots.delete(key);
       return true;
     }
@@ -383,7 +404,10 @@ export class QueueProcessor {
    *  1. removeStaleProcessing — find + remove the stale processing queue entry,
    *     scoped to userId (prevents cross-user deletion) and filtered by
    *     zombieCreatedAt age guard (Sol P1-1: prevents deleting newer live entries)
-   *  2. releaseSlot — delete the in-memory processingSlot
+   *  2. releaseSlot — release the in-memory processingSlot ONLY if it is still
+   *     owned by the exact stale entry that was removed (Sol maintainer R17 P1:
+   *     owner-bound reservation — a replacement entry that reclaimed the slot
+   *     after a TTL sweep must survive convergence of the old queue row)
    *  3. tryDispatchNext — mirrors normal onInvocationComplete: cross-user fair drain
    *     (tryExecuteNextAcrossUsers) + auto-execute scan, so BOTH user/connector and
    *     agent entries get dispatched (Sol P1-2: #972's blocked @codex is a user entry)
@@ -447,11 +471,22 @@ export class QueueProcessor {
         ).catch(() => {});
         return { removed: true, entryId: entry.id, primaryCatId, rolledBackSiblings };
       },
-      releaseSlot: (threadId: string, catId: string) => {
+      releaseSlot: (threadId: string, catId: string, ownerEntryId: string) => {
+        // Sol maintainer R17 P1: owner-guarded release. The reservation is bound to
+        // its owning queue entry at claim-time; convergence releases the slot ONLY
+        // when it still belongs to the exact stale entry it just removed. If a TTL
+        // sweep released the stale slot and a replacement entry reclaimed it before
+        // reconciliation ran, ownerId no longer matches and the replacement's slot
+        // is preserved (an unconditional delete would let a third dispatch start
+        // beside the replacement).
         const key = QueueProcessor.slotKey(threadId, catId);
-        if (this.processingSlots.has(key)) {
-          this.processingSlots.delete(key);
-          this.deps.log.info({ threadId, catId }, '[F220 2a] released stale processingSlot');
+        if (this.releaseSlotIfOwner(key, ownerEntryId)) {
+          this.deps.log.info({ threadId, catId, ownerEntryId }, '[F220 2a] released stale processingSlot');
+        } else if (this.processingSlots.has(key)) {
+          this.deps.log.info(
+            { threadId, catId, ownerEntryId },
+            '[F220 2a] processingSlot owned by another entry — preserved',
+          );
         }
       },
       tryDispatchNext: (threadId: string, catId: string) => {
@@ -472,14 +507,6 @@ export class QueueProcessor {
         const registryKey = `${threadId}:${userId}:${idempotencyKey}`;
         // Dedup: skip if already registered (existing backoff chain handles it)
         if (this.convergenceRetryRegistry.has(registryKey)) return;
-
-        // F220 2a (R16 P1): capture the stale slot reservation at schedule-time.
-        // During the 30s+ backoff, sweepZombieSlots/cancelAll may release the slot
-        // and tryDispatchNext may reclaim it for a replacement. The retry must use
-        // compare-and-release (not unconditional delete) to avoid killing the
-        // replacement's slot.
-        const staleSlotKey = QueueProcessor.slotKey(threadId, catId);
-        const staleReservation = this.processingSlots.get(staleSlotKey)?.reservation;
 
         const attemptRetry = (attempt: number) => {
           const BASE_DELAY_MS = 30_000;
@@ -515,16 +542,16 @@ export class QueueProcessor {
                 }
               }
               const slotCat = entry.targetCats[0] ?? catId;
-              // F220 2a (R16 P1): compare-and-release — only release if the
-              // slot still holds the stale reservation captured at schedule-time.
-              // If sweepZombieSlots/cancelAll released it and tryDispatchNext
-              // reclaimed it during the backoff window, the reservation won't
-              // match and we leave the replacement's slot untouched.
+              // F220 2a (Sol maintainer R17 P1): owner-guarded release — only
+              // release if the slot still belongs to the exact stale entry this
+              // retry just removed. If sweepZombieSlots/cancelAll released it and
+              // tryDispatchNext reclaimed it for a replacement during the backoff
+              // window, ownerId won't match and the replacement's slot is left
+              // untouched. Owner identity (not a schedule-time reservation capture)
+              // also covers the secondary-target primary-slot path: slotCat is the
+              // entry's primary target, which may differ from the zombie's catId.
               const retrySlotKey = QueueProcessor.slotKey(threadId, slotCat);
-              let slotReleased = false;
-              if (staleReservation !== undefined && retrySlotKey === staleSlotKey) {
-                slotReleased = this.releaseSlotIfOwned(retrySlotKey, staleReservation);
-              }
+              const slotReleased = this.releaseSlotIfOwner(retrySlotKey, entry.id);
               this.deps.log.info(
                 {
                   threadId,
@@ -960,7 +987,7 @@ export class QueueProcessor {
 
       // Guard: markProcessingById may fail if entry was consumed between snapshot and now
       if (!this.deps.queue.markProcessingById(threadId, entry.id)) continue;
-      const reservation = this.claimSlot(sk);
+      const reservation = this.claimSlot(sk, entry.id);
       void this.executeEntry(entry).then(
         (status) => {
           this.releaseSlotIfOwned(sk, reservation);
@@ -1022,7 +1049,7 @@ export class QueueProcessor {
         continue;
       }
 
-      const entryReservation = this.claimSlot(entrySk);
+      const entryReservation = this.claimSlot(entrySk, entry.id);
       void this.executeEntry(entry).then(
         (status) => {
           this.releaseSlotIfOwned(entrySk, entryReservation);
@@ -1076,7 +1103,7 @@ export class QueueProcessor {
     const entry = this.deps.queue.markProcessing(threadId, userId);
     if (!entry) return { started: false };
 
-    const userReservation = this.claimSlot(sk);
+    const userReservation = this.claimSlot(sk, entry.id);
     // Fire-and-forget execution — chain onInvocationComplete AFTER mutex release
     void this.executeEntry(entry).then(
       (status) => {

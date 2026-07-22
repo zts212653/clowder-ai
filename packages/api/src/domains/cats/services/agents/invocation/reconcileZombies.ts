@@ -60,9 +60,16 @@ export interface QueueConvergence {
     catId: string,
     userId: string,
     idempotencyKey?: string,
-  ): { removed: boolean; entryId?: string; primaryCatId?: string; rolledBackSiblings?: string[] };
-  /** Release the in-memory processing slot for this thread+cat. */
-  releaseSlot(threadId: string, catId: string): void;
+  ):
+    | { removed: true; entryId: string; primaryCatId?: string; rolledBackSiblings?: string[] }
+    | { removed: false; entryId?: undefined; primaryCatId?: undefined; rolledBackSiblings?: undefined };
+  /** Release the in-memory processing slot for this thread+cat, ONLY if it is
+   *  still owned by ownerEntryId (Sol maintainer R17 P1: owner-bound reservation).
+   *  The adapter binds each slot reservation to its owning queue entry at
+   *  claim-time; a slot reclaimed by a replacement entry has a different owner
+   *  and MUST be preserved — an unconditional delete would let another dispatch
+   *  start beside the replacement. */
+  releaseSlot(threadId: string, catId: string, ownerEntryId: string): void;
   /** Kick the queue: dispatch waiting entries now that the slot is free.
    *  Uses the normal completion path (cross-user fair drain + auto-execute scan)
    *  so both user/connector and agent entries get dispatched. */
@@ -200,7 +207,7 @@ async function processZombie(
             );
             if (qr.removed) {
               const slotCat = qr.primaryCatId ?? zombie.catId;
-              deps.queueConvergence.releaseSlot(current.threadId, slotCat);
+              deps.queueConvergence.releaseSlot(current.threadId, slotCat, qr.entryId);
               deps.queueConvergence.tryDispatchNext(current.threadId, slotCat);
               log.info(
                 {
@@ -304,8 +311,11 @@ async function processZombie(
         if (qr.removed) {
           // Release by primaryCatId — processingSlots are keyed by targetCats[0],
           // which may differ from zombie.catId for multi-cat entries (codex R4 P2).
+          // Owner-guarded (Sol maintainer R17 P1): releases ONLY if the slot still
+          // belongs to the exact entry just removed — a replacement that reclaimed
+          // the slot after a TTL sweep is preserved.
           const slotCat = qr.primaryCatId ?? zombie.catId;
-          deps.queueConvergence.releaseSlot(updated.threadId, slotCat);
+          deps.queueConvergence.releaseSlot(updated.threadId, slotCat, qr.entryId);
           // Kick the queue: mirrors normal onInvocationComplete path (cross-user
           // fair drain + auto-execute scan). Fire-and-forget.
           deps.queueConvergence.tryDispatchNext(updated.threadId, slotCat);
