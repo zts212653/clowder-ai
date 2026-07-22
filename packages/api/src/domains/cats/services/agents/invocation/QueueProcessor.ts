@@ -199,8 +199,16 @@ export type ContinuationEnqueueOutcome =
 export class QueueProcessor {
   private deps: QueueProcessorDeps;
   /** F108: Per-slot mutex — prevents concurrent double-start per (thread, cat) pair.
-   *  F118 D4: Map value = processingStartedAt for zombie detection. */
-  private processingSlots = new Map<string, number>();
+   *  F118 D4: Map value includes processingStartedAt for zombie detection.
+   *  Sol maintainer review P1: reservation token prevents stale executeEntry callbacks
+   *  from deleting a replacement's slot after zombie convergence dispatches a new entry.
+   *  Sol maintainer R17 P1: ownerId binds the reservation to its owning queue entry,
+   *  so zombie convergence can release ONLY the exact stale entry's reservation —
+   *  a monotonic token held in a dispatch closure cannot identify entry A versus
+   *  replacement entry B when reconciliation runs after a TTL sweep + re-dispatch. */
+  private processingSlots = new Map<string, { startedAt: number; reservation: number; ownerId?: string }>();
+  /** Monotonically increasing counter for slot reservation tokens. */
+  private nextSlotReservation = 0;
   /** F108: Per-slot pause tracking (set on canceled/failed, cleared on next execution) */
   private pausedSlots = new Map<string, 'canceled' | 'failed'>();
   private pauseEpoch = new Map<string, number>();
@@ -215,6 +223,10 @@ export class QueueProcessor {
   /** F118 D4: max age before a processingSlot is considered zombie (default 2.5× CLI timeout = 75min) */
   private processingSlotTtlMs: number;
   private readonly sessionContinuationCoordinator?: SessionContinuationCoordinatorLike;
+  /** F220 2a (Sol R4): pending convergence retries, deduped by (threadId:userId:idempotencyKey).
+   *  Entries persist in memory until success or process restart (StartupReconciler covers that).
+   *  Exponential backoff: 30s → 60s → 120s (cap). Timers use unref(). */
+  private convergenceRetryRegistry = new Map<string, { attempt: number; timerId: ReturnType<typeof setTimeout> }>();
   /** #502 PR2: bounded auto-continuation guard, in-memory per process. */
   private continuationWindows = new Map<string, number[]>();
   private static readonly CONTINUATION_WINDOW_MS = 60 * 60 * 1000;
@@ -258,6 +270,22 @@ export class QueueProcessor {
         },
       },
     });
+  }
+
+  private publishConvergenceQueueUpdate(
+    threadId: string,
+    userId: string,
+    entries: QueueEntry[],
+    action: 'zombie_convergence' | 'zombie_convergence_retry',
+    logContext: Record<string, unknown>,
+  ): Promise<void> {
+    return emitQueueUpdated(this.deps.socketManager, userId, threadId, entries, this.deps.messageStore, action).catch(
+      (err) =>
+        this.deps.log.warn(
+          { ...logContext, threadId, userId, action, err },
+          '[F220 2a] queue update after zombie convergence failed',
+        ),
+    );
   }
 
   /** F088 fix: Late-bind outbound hook (set after gateway bootstrap). */
@@ -320,6 +348,42 @@ export class QueueProcessor {
     return null;
   }
 
+  /** Claim a processing slot; returns the reservation token for compare-and-release.
+   *  Sol maintainer review P1: stale executeEntry callbacks must not delete a replacement's slot.
+   *  Sol maintainer R17 P1: ownerId binds the reservation to the owning queue entry so
+   *  zombie convergence can verify it releases the exact stale entry's slot. */
+  private claimSlot(key: string, ownerId?: string): number {
+    const reservation = ++this.nextSlotReservation;
+    this.processingSlots.set(key, { startedAt: Date.now(), reservation, ownerId });
+    return reservation;
+  }
+
+  /** Release a slot only if the caller still owns it (compare-and-release).
+   *  Returns true if released, false if slot is absent or owned by a different reservation. */
+  private releaseSlotIfOwned(key: string, reservation: number): boolean {
+    const slot = this.processingSlots.get(key);
+    if (slot && slot.reservation === reservation) {
+      this.processingSlots.delete(key);
+      return true;
+    }
+    return false;
+  }
+
+  /** Release a slot only if it is owned by the given queue entry (owner identity check).
+   *  Sol maintainer R17 P1: zombie convergence must release ONLY the reservation owned
+   *  by the exact stale entry it removed. If a TTL sweep released the stale slot and a
+   *  replacement entry reclaimed it, ownerId no longer matches and the replacement's
+   *  slot is preserved. A slot without ownerId (legacy/unknown claim) is never deleted
+   *  here — sweepZombieSlots' TTL+tracker double-confirm covers that cleanup. */
+  private releaseSlotIfOwner(key: string, ownerId: string): boolean {
+    const slot = this.processingSlots.get(key);
+    if (slot && slot.ownerId !== undefined && slot.ownerId === ownerId) {
+      this.processingSlots.delete(key);
+      return true;
+    }
+    return false;
+  }
+
   /**
    * F118 D4: Sweep zombie processingSlots.
    * A slot is zombie when: age > TTL AND invocationTracker has no active slot for the same key.
@@ -328,17 +392,233 @@ export class QueueProcessor {
   private sweepZombieSlots(threadId: string): void {
     const now = Date.now();
     const ttl = this.processingSlotTtlMs;
-    for (const [key, startedAt] of this.processingSlots) {
+    for (const [key, slot] of this.processingSlots) {
       if (!QueueProcessor.slotMatchesThread(key, threadId)) continue;
-      if (now - startedAt <= ttl) continue;
+      if (now - slot.startedAt <= ttl) continue;
       // Only release if tracker also has no active invocation — double-confirm zombie
       const catId = QueueProcessor.parseSlotKey(key)?.catId;
       if (!catId) continue;
       if (!this.deps.invocationTracker.has(threadId, catId)) {
         this.processingSlots.delete(key);
-        this.deps.log.warn({ threadId, catId, ageMs: now - startedAt }, '[F118 D4] zombie processingSlot released');
+        this.deps.log.warn(
+          { threadId, catId, ageMs: now - slot.startedAt },
+          '[F118 D4] zombie processingSlot released',
+        );
       }
     }
+  }
+
+  /**
+   * F220 Phase 2a (#972): Build a QueueConvergence adapter for reconcileZombies.
+   *
+   * reconcileZombies marks zombie InvocationRecords as `failed`, but previously
+   * did NOT touch the InvocationQueue entries or processingSlots. This left stale
+   * `processing` entries blocking subsequent dispatch — the #972 split-brain bug.
+   *
+   * This method returns a minimal interface that reconcileZombies can call to
+   * converge queue state after marking a zombie failed:
+   *  1. removeStaleProcessing — find + remove the stale processing queue entry,
+   *     scoped to userId (prevents cross-user deletion) and filtered by
+   *     zombieCreatedAt age guard (Sol P1-1: prevents deleting newer live entries)
+   *  2. releaseSlot — release the in-memory processingSlot ONLY if it is still
+   *     owned by the exact stale entry that was removed (Sol maintainer R17 P1:
+   *     owner-bound reservation — a replacement entry that reclaimed the slot
+   *     after a TTL sweep must survive convergence of the old queue row)
+   *  3. tryDispatchNext — mirrors normal onInvocationComplete: cross-user fair drain
+   *     (tryExecuteNextAcrossUsers) + auto-execute scan, so BOTH user/connector and
+   *     agent entries get dispatched (Sol P1-2: #972's blocked @codex is a user entry)
+   */
+  buildQueueConvergence(): import('./reconcileZombies.js').QueueConvergence {
+    return {
+      removeStaleProcessing: (threadId: string, catId: string, userId: string, idempotencyKey?: string) => {
+        // Sol R2 P1-1 + R3 P2: precise entry identity from raw idempotencyKey.
+        // Parse two formats:
+        //   "queue-${entry.id}"       → match by entry.id (user/agent entries)
+        //   "connector-${messageId}"  → match by entry.messageId (connector entries)
+        if (!idempotencyKey) return { removed: false };
+        const entries = this.deps.queue.list(threadId, userId);
+        let entry: (typeof entries)[number] | undefined;
+        if (idempotencyKey.startsWith('queue-')) {
+          const entryId = idempotencyKey.slice(6);
+          entry = entries.find((e) => e.status === 'processing' && e.id === entryId);
+        } else if (idempotencyKey.startsWith('connector-')) {
+          const messageId = idempotencyKey.slice(10);
+          entry = entries.find((e) => e.status === 'processing' && e.messageId === messageId);
+        }
+        if (!entry) return { removed: false };
+        const removed = this.deps.queue.removeProcessed(threadId, userId, entry.id);
+        if (!removed) return { removed: false };
+        const primaryCatId = entry.targetCats[0];
+        // F220 2a (codex R10 P1): roll back batch siblings. When executeEntry
+        // batches adjacent user messages, siblings are marked processing with
+        // batchParentId = primary entry ID. If the primary becomes a zombie,
+        // the hung executeEntry's finally block never runs, leaving siblings
+        // stuck in 'processing'. Roll them back to 'queued' so they can retry.
+        const rolledBackSiblings: string[] = [];
+        const remainingEntries = this.deps.queue.list(threadId, userId);
+        for (const sib of remainingEntries) {
+          if (sib.status === 'processing' && sib.batchParentId === entry.id) {
+            if (this.deps.queue.rollbackProcessing(threadId, sib.id)) {
+              rolledBackSiblings.push(sib.id);
+            }
+          }
+        }
+        this.deps.log.info(
+          {
+            threadId,
+            catId,
+            userId,
+            entryId: entry.id,
+            primaryCatId,
+            idempotencyKey,
+            rolledBackSiblings: rolledBackSiblings.length,
+          },
+          '[F220 2a] removed stale processing queue entry (precise entry identity)',
+        );
+        // Publish the removal snapshot before redispatch is allowed to emit a
+        // newer processing/completed snapshot. The promise is returned to the
+        // convergence coordinator instead of awaited here, so slow enrichment
+        // does not block other zombies from reaching their critical mutation.
+        const queueUpdate = this.publishConvergenceQueueUpdate(
+          threadId,
+          userId,
+          this.deps.queue.list(threadId, userId),
+          'zombie_convergence',
+          { catId, entryId: entry.id },
+        );
+        return { removed: true, entryId: entry.id, primaryCatId, rolledBackSiblings, queueUpdate };
+      },
+      releaseSlot: (threadId: string, catId: string, ownerEntryId: string) => {
+        // Sol maintainer R17 P1: owner-guarded release. The reservation is bound to
+        // its owning queue entry at claim-time; convergence releases the slot ONLY
+        // when it still belongs to the exact stale entry it just removed. If a TTL
+        // sweep released the stale slot and a replacement entry reclaimed it before
+        // reconciliation ran, ownerId no longer matches and the replacement's slot
+        // is preserved (an unconditional delete would let a third dispatch start
+        // beside the replacement).
+        const key = QueueProcessor.slotKey(threadId, catId);
+        if (this.releaseSlotIfOwner(key, ownerEntryId)) {
+          this.deps.log.info({ threadId, catId, ownerEntryId }, '[F220 2a] released stale processingSlot');
+        } else if (this.processingSlots.has(key)) {
+          this.deps.log.info(
+            { threadId, catId, ownerEntryId },
+            '[F220 2a] processingSlot owned by another entry — preserved',
+          );
+        }
+      },
+      tryDispatchNext: (threadId: string, catId: string, waitForQueueUpdate?: Promise<void>) => {
+        // Sol P1-2: mirror normal onInvocationComplete path — cross-user fair drain
+        // for ALL entry types (user/connector/agent), then auto-execute scan.
+        // Without tryExecuteNextAcrossUsers, the original #972 user @codex message
+        // (autoExecute=false) would remain idle after cleanup.
+        (waitForQueueUpdate ?? Promise.resolve())
+          .then(() => this.tryExecuteNextAcrossUsers(threadId, catId))
+          .then(() => this.tryAutoExecute(threadId))
+          .catch((err) =>
+            this.deps.log.warn({ threadId, catId, err }, '[F220 2a] dispatch after zombie convergence failed'),
+          );
+      },
+      // Sol R4 P2 durable retry: exponential backoff with dedup registry.
+      // Record is already terminal → no future zombie sweep; retries must be self-sustaining.
+      // Backoff: 30s → 60s → 120s (cap). Retries continue until entry cleaned or process restart.
+      scheduleRetry: (threadId: string, catId: string, userId: string, idempotencyKey: string) => {
+        const registryKey = `${threadId}:${userId}:${idempotencyKey}`;
+        // Dedup: skip if already registered (existing backoff chain handles it)
+        if (this.convergenceRetryRegistry.has(registryKey)) return;
+
+        const attemptRetry = (attempt: number) => {
+          const BASE_DELAY_MS = 30_000;
+          const MAX_DELAY_MS = 120_000;
+          const delay = Math.min(BASE_DELAY_MS * 2 ** attempt, MAX_DELAY_MS);
+          const timerId = setTimeout(() => {
+            try {
+              const entries = this.deps.queue.list(threadId, userId);
+              let entry: (typeof entries)[number] | undefined;
+              if (idempotencyKey.startsWith('queue-')) {
+                entry = entries.find((e) => e.status === 'processing' && e.id === idempotencyKey.slice(6));
+              } else if (idempotencyKey.startsWith('connector-')) {
+                entry = entries.find((e) => e.status === 'processing' && e.messageId === idempotencyKey.slice(10));
+              }
+              if (!entry) {
+                this.convergenceRetryRegistry.delete(registryKey);
+                return; // already cleaned up by another path
+              }
+              const removed = this.deps.queue.removeProcessed(threadId, userId, entry.id);
+              if (!removed) {
+                this.convergenceRetryRegistry.delete(registryKey);
+                return;
+              }
+              // F220 2a (codex R11 P2): roll back batch siblings in retry path too.
+              // Same logic as removeStaleProcessing — find siblings by batchParentId.
+              const retryRolledBack: string[] = [];
+              const retryRemaining = this.deps.queue.list(threadId, userId);
+              for (const sib of retryRemaining) {
+                if (sib.status === 'processing' && sib.batchParentId === entry.id) {
+                  if (this.deps.queue.rollbackProcessing(threadId, sib.id)) {
+                    retryRolledBack.push(sib.id);
+                  }
+                }
+              }
+              const slotCat = entry.targetCats[0] ?? catId;
+              // F220 2a (Sol maintainer R17 P1): owner-guarded release — only
+              // release if the slot still belongs to the exact stale entry this
+              // retry just removed. If sweepZombieSlots/cancelAll released it and
+              // tryDispatchNext reclaimed it for a replacement during the backoff
+              // window, ownerId won't match and the replacement's slot is left
+              // untouched. Owner identity (not a schedule-time reservation capture)
+              // also covers the secondary-target primary-slot path: slotCat is the
+              // entry's primary target, which may differ from the zombie's catId.
+              const retrySlotKey = QueueProcessor.slotKey(threadId, slotCat);
+              const slotReleased = this.releaseSlotIfOwner(retrySlotKey, entry.id);
+              this.deps.log.info(
+                {
+                  threadId,
+                  catId,
+                  userId,
+                  entryId: entry.id,
+                  idempotencyKey,
+                  attempt,
+                  rolledBackSiblings: retryRolledBack.length,
+                  slotReleased,
+                },
+                '[F220 2a] durable retry: removed stale processing entry + released slot',
+              );
+              const queueUpdate = this.publishConvergenceQueueUpdate(
+                threadId,
+                userId,
+                this.deps.queue.list(threadId, userId),
+                'zombie_convergence_retry',
+                { catId, entryId: entry.id, attempt },
+              );
+              queueUpdate
+                .then(() => this.tryExecuteNextAcrossUsers(threadId, slotCat))
+                .then(() => this.tryAutoExecute(threadId))
+                .catch(() => {});
+              this.convergenceRetryRegistry.delete(registryKey);
+            } catch (err) {
+              this.deps.log.warn(
+                {
+                  threadId,
+                  catId,
+                  userId,
+                  idempotencyKey,
+                  attempt,
+                  err: err instanceof Error ? err.message : String(err),
+                },
+                '[F220 2a] durable retry attempt failed — rescheduling with backoff',
+              );
+              // Re-schedule with incremented attempt (backoff increases)
+              attemptRetry(attempt + 1);
+            }
+          }, delay);
+          // unref() so timer doesn't prevent Node.js process exit (Sol R4)
+          if (typeof timerId === 'object' && typeof timerId.unref === 'function') timerId.unref();
+          this.convergenceRetryRegistry.set(registryKey, { attempt, timerId });
+        };
+
+        attemptRetry(0);
+      },
+    };
   }
 
   /** Check if a slot's queue is paused (canceled/failed AND has queued entries). */
@@ -388,8 +668,8 @@ export class QueueProcessor {
 
   /** #555: Cat-specific busy check — covers processingSlots + queue entries for this cat. */
   isCatBusy(threadId: string, catId: string): boolean {
-    const startedAt = this.processingSlots.get(QueueProcessor.slotKey(threadId, catId));
-    if (startedAt !== undefined && Date.now() - startedAt < this.processingSlotTtlMs) return true;
+    const slot = this.processingSlots.get(QueueProcessor.slotKey(threadId, catId));
+    if (slot !== undefined && Date.now() - slot.startedAt < this.processingSlotTtlMs) return true;
     return this.deps.queue.hasQueuedOrProcessingForCat(threadId, catId);
   }
 
@@ -511,9 +791,9 @@ export class QueueProcessor {
     if (this.deps.invocationTracker.has(threadId)) return true;
     this.sweepZombieSlots(threadId);
     const now = Date.now();
-    for (const [key, startedAt] of this.processingSlots) {
+    for (const [key, slot] of this.processingSlots) {
       if (!QueueProcessor.slotMatchesThread(key, threadId)) continue;
-      if (now - startedAt < this.processingSlotTtlMs) return true;
+      if (now - slot.startedAt < this.processingSlotTtlMs) return true;
     }
     return false;
   }
@@ -725,15 +1005,15 @@ export class QueueProcessor {
 
       // Guard: markProcessingById may fail if entry was consumed between snapshot and now
       if (!this.deps.queue.markProcessingById(threadId, entry.id)) continue;
-      this.processingSlots.set(sk, Date.now());
+      const reservation = this.claimSlot(sk, entry.id);
       void this.executeEntry(entry).then(
         (status) => {
-          this.processingSlots.delete(sk);
+          this.releaseSlotIfOwned(sk, reservation);
           this.onInvocationComplete(threadId, entryCat, status).catch(() => {});
           this.signalDeliveryBatchDone(threadId, status);
         },
         () => {
-          this.processingSlots.delete(sk);
+          this.releaseSlotIfOwned(sk, reservation);
           this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
           this.signalDeliveryBatchDone(threadId, 'failed');
         },
@@ -787,15 +1067,15 @@ export class QueueProcessor {
         continue;
       }
 
-      this.processingSlots.set(entrySk, Date.now());
+      const entryReservation = this.claimSlot(entrySk, entry.id);
       void this.executeEntry(entry).then(
         (status) => {
-          this.processingSlots.delete(entrySk);
+          this.releaseSlotIfOwned(entrySk, entryReservation);
           this.onInvocationComplete(threadId, entryCat, status).catch(() => {});
           this.signalDeliveryBatchDone(threadId, status);
         },
         () => {
-          this.processingSlots.delete(entrySk);
+          this.releaseSlotIfOwned(entrySk, entryReservation);
           this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
           this.signalDeliveryBatchDone(threadId, 'failed');
         },
@@ -841,16 +1121,16 @@ export class QueueProcessor {
     const entry = this.deps.queue.markProcessing(threadId, userId);
     if (!entry) return { started: false };
 
-    this.processingSlots.set(sk, Date.now());
+    const userReservation = this.claimSlot(sk, entry.id);
     // Fire-and-forget execution — chain onInvocationComplete AFTER mutex release
     void this.executeEntry(entry).then(
       (status) => {
-        this.processingSlots.delete(sk);
+        this.releaseSlotIfOwned(sk, userReservation);
         this.onInvocationComplete(threadId, entryCat, status).catch(() => {});
         this.signalDeliveryBatchDone(threadId, status);
       },
       () => {
-        this.processingSlots.delete(sk);
+        this.releaseSlotIfOwned(sk, userReservation);
         this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
         this.signalDeliveryBatchDone(threadId, 'failed');
       },
@@ -922,7 +1202,7 @@ export class QueueProcessor {
             [...e.targetCats].sort().every((t, i) => t === sortedTargets[i]),
         );
         for (const be of matching) {
-          if (!queue.markProcessingById(threadId, be.id)) continue;
+          if (!queue.markProcessingById(threadId, be.id, entry.id)) continue;
           batchedEntryIds.push(be.id);
           if (be.messageId) batchedMessageIds.push(be.messageId);
           content = content + '\n' + be.content;
@@ -1597,9 +1877,23 @@ export class QueueProcessor {
       }
 
       queue.removeProcessedAcrossUsers(threadId, entry.id);
+      // F220 2a (R16 P1): snapshot which siblings are still owned by this
+      // batch before operating. Convergence clears batchParentId on rollback
+      // (InvocationQueue.rollbackProcessing), so if a sibling was rolled back
+      // and re-dispatched by tryDispatchNext, its batchParentId no longer
+      // matches entry.id — the old finalizer skips it, protecting the
+      // replacement execution's queue entry from removal or rollback.
+      let ownedSiblings: Set<string> | undefined;
+      if (batchedEntryIds.length > 0) {
+        const currentEntries = queue.list(threadId, userId);
+        ownedSiblings = new Set(
+          batchedEntryIds.filter((bid) => currentEntries.some((e) => e.id === bid && e.batchParentId === entry.id)),
+        );
+      }
       // F175: on success remove batched entries; on failure/cancel rollback so they can retry
       if (finalStatus === 'succeeded') {
         for (const bid of batchedEntryIds) {
+          if (!ownedSiblings?.has(bid)) continue;
           queue.removeProcessedAcrossUsers(threadId, bid);
         }
         // #815 + Cloud Codex P2: now that the batch succeeded, actually consume
@@ -1613,14 +1907,18 @@ export class QueueProcessor {
             { threadId, consumedCount: consumedA2A.length },
             '[QueueProcessor] #815: consumed deferred A2A entries after successful batch',
           );
-          socketManager.emitToUser(userId, 'queue_updated', {
+          await emitQueueUpdated(
+            socketManager,
+            userId,
             threadId,
-            queue: queue.list(threadId, userId),
-            action: 'a2a_subsumed',
-          });
+            queue.list(threadId, userId),
+            messageStore,
+            'a2a_subsumed',
+          );
         }
       } else {
         for (const bid of batchedEntryIds) {
+          if (!ownedSiblings?.has(bid)) continue;
           queue.rollbackProcessing(threadId, bid);
         }
         // Cloud Codex P2: deferred A2A entries stay in queue on failure — no rollback needed.

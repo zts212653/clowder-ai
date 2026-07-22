@@ -142,6 +142,8 @@ async function resolveActiveInvocations(
   taskProgressStore?: TaskProgressStore,
   ballCustody?: IBallCustodyIngest,
   invocationRegistry?: QueueRoutesOptions['invocationRegistry'],
+  /** F220 Phase 2a (#972): queue convergence adapter for zombie cleanup. */
+  queueConvergence?: import('../domains/cats/services/agents/invocation/reconcileZombies.js').QueueConvergence,
 ): Promise<Array<{ catId: string; startedAt: number }>> {
   if (!recordStore || !draftStore) {
     return invocationTracker.getActiveSlots(threadId);
@@ -185,6 +187,8 @@ async function resolveActiveInvocations(
         taskProgressStore,
         ballCustody,
         log,
+        // F220 Phase 2a (#972): converge queue state when zombies are cleaned up
+        queueConvergence,
       }).catch((err) => log.warn({ err, feature: 'F194' }, 'reconcileZombies failed'));
     }
     // 砚砚 R5 P2: filter null catId — frontend turns queue.activeInvocations[].catId into a
@@ -234,6 +238,9 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       opts.taskProgressStore,
       opts.ballCustody,
       opts.invocationRegistry,
+      // F220 Phase 2a (#972): pass queue convergence so zombie cleanup converges queue state.
+      // Guard: legacy/test stubs may not have buildQueueConvergence (codex R5 P2).
+      queueProcessor.buildQueueConvergence?.(),
     );
     const enrichedQueue = await enrichQueueEntries(invocationQueue.list(threadId, guard.userId), messageStore);
     return {

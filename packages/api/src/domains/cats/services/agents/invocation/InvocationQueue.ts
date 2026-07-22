@@ -49,6 +49,10 @@ export interface QueueEntry {
   callerTraceContext?: CallerTraceContext;
   /** Explicit A2A trigger message for stream reply threading. */
   a2aTriggerMessageId?: string;
+  /** F220 2a: ID of the primary queue entry that batched this sibling via collectUserBatch.
+   *  Set by markProcessingById when called from executeEntry's batch collection.
+   *  Used by zombie convergence to roll back batch siblings after the primary is removed. */
+  batchParentId?: string;
 }
 
 export interface EnqueueResult {
@@ -387,6 +391,13 @@ export class InvocationQueue {
       const entry = q.find((e) => e.id === entryId && e.status === 'processing');
       if (entry) {
         entry.status = 'queued';
+        // F220 2a (R16 P1): sever batch association on rollback. The batch is
+        // dissolved — the entry re-enters the queue as a standalone candidate.
+        // This prevents a stale executeEntry finalizer from removing or rolling
+        // back a sibling that was re-dispatched by tryDispatchNext after
+        // convergence: the finalizer checks batchParentId before operating, and
+        // a cleared batchParentId signals "no longer part of the old batch".
+        delete entry.batchParentId;
         return true;
       }
     }
@@ -750,13 +761,14 @@ export class InvocationQueue {
   }
 
   /** F122B: Mark a specific entry as processing by ID (cross-user). */
-  markProcessingById(threadId: string, entryId: string): boolean {
+  markProcessingById(threadId: string, entryId: string, batchParentId?: string): boolean {
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId)) continue;
       const entry = q.find((e) => e.id === entryId && e.status === 'queued');
       if (entry) {
         entry.status = 'processing';
         entry.processingStartedAt = Date.now();
+        if (batchParentId) entry.batchParentId = batchParentId;
         return true;
       }
     }
