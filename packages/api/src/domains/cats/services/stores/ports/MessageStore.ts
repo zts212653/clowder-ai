@@ -358,9 +358,6 @@ const MAX_MESSAGES = 2000;
 /** Default limit for queries */
 const DEFAULT_LIMIT = 50;
 
-/** D2-A defensive upper bound for generated sortable message IDs. */
-const MAX_ID_LENGTH = 128;
-
 /**
  * Fail closed before persisting a timestamp that the current sortable-ID
  * encoding cannot order. Until D2 replaces lexical message-ID cursors with an
@@ -378,10 +375,7 @@ export function assertValidStoredMessageTimestamp(timestamp: number): void {
  */
 /**
  * Generate a sortable message ID: zero-padded timestamp + sequence + UUID suffix.
- *
- * D2-A Phase 1 keeps the existing sequence model, while enforcing the shared
- * new-write timestamp domain and a defensive output-length bound. Sequence
- * exhaustion, restart collisions, and cross-process ordering remain reserved.
+ * Lexicographic order matches insertion order even within the same millisecond.
  */
 let _seq = 0;
 export function generateSortableId(timestamp: number): string {
@@ -389,12 +383,7 @@ export function generateSortableId(timestamp: number): string {
   const ts = String(timestamp).padStart(16, '0');
   const seq = String(_seq++).padStart(6, '0');
   const suffix = randomUUID().slice(0, 8);
-  const id = `${ts}-${seq}-${suffix}`;
-  /* istanbul ignore next -- defensive: only fires if format constants drift */
-  if (id.length > MAX_ID_LENGTH) {
-    throw new RangeError(`generated message ID exceeds ${MAX_ID_LENGTH} characters: ${id.length}`);
-  }
-  return id;
+  return `${ts}-${seq}-${suffix}`;
 }
 
 export class MessageStore {
