@@ -9,7 +9,7 @@ tips_exempt: "Internal reliability/convergence — no user-facing capability tip
 
 # F220: A2A 协作的可观测 · 可靠 · 可恢复
 
-> **Status**: spec | **Owner**: Ragdoll (Opus-4.8，已接 own + 驱动) | **Priority**: P1 | **Source**: internal
+> **Status**: in-progress | **Owner**: Ragdoll (Opus-4.8，已接 own + 驱动) | **Priority**: P1 | **Source**: internal
 >
 > **Thread legend**：`[thread-id]` = 驱动/owner thread（Layer 1 现场调查 + 落地，Ragdoll Opus-4.8）｜`[thread-id]` = 立项 thread（平行 opus-48：立项 + 设计沉淀 + 交接，已收工）。
 
@@ -73,7 +73,7 @@ bug 链：opus parent 结束本轮 → tracker 没了/无 fresh draft → 过 gr
 - **Phase 2a（局部修，自决实现，不上 operator）**：① `/active-pane` tracker fallback 移除（maintainer 确认无 UI 消费者，简化为 bgCarrier-only）；② `reconcileZombies` 收敛匹配 queue 条目（精确 entry identity via `idempotencyKey=queue-${entry.id}` + emit `queue_updated` + cross-user fair drain dispatch）；③ QueueProcessor in-memory slot ↔ 持久 queue 状态一致；④ 回归测：valid opus `@codex` → serial child active → parent zombie sweep → 无 stale `processing` blocker → 后到 user `@codex` 能跑 or 明确 blocked。均在 F220 已祝福方向内（可观测·可靠·可恢复）、可逆、TDD + 跨族 review → 自决。
 - **Phase 2b（架构级 seam → 根因报告 + operator Decision Packet）**：serial-continuation-child ↔ parent/queue **liveness 桥接**（F224 轴 child 为何让 F220 轴 liveness/queue 失明）——牵动是否需"统一 liveness SoT" + F220/F224 轴边界是否要重画。这正是下方 OQ 的架构级问题，**operator 拍板**：收敛模型是否独立成 feat、还是留 F220。**遵 KD-3：2b 不在出报告+repro 前动手大改。**
 
-#### Phase 2a Stateful Object Gate（PR #1150 高轮次 review 收敛）
+#### Phase 2a Stateful Object Gate（PR #1150 in review，高轮次 review 收敛）
 
 | 对象 | 所有权 | 允许的 zombie 转换 | 禁止跨越的不变量 |
 |------|--------|--------------------|------------------|
@@ -106,8 +106,8 @@ bug 链：opus parent 结束本轮 → tracker 没了/无 fresh draft → 过 gr
 - [x] AC-1.3: human 路径占位不回归。→ 只改 QueueProcessor 队列路径，未动 direct/route-serial；全 web 测试无回归。
 
 **Phase 2（可靠）**
-- [~] AC-2.1: 根因报告（5 件套）✅ drafted from #972 runtime evidence + 代码确认（`reconcileZombies.ts` / `terminal.ts:319` active-pane / `getThreadLiveInvocations` 模型），见上方「Phase 2 根因报告：#972 split-brain」。**红测 repro 待补**：作为 Phase 2a worktree 首个 TDD red step（valid opus `@codex` → serial child active → parent zombie sweep → stale `processing` blocker 复现）。
-- [ ] AC-2.2: 修复按 seam 切两层——**2a 局部修自决实现**（active-pane tracker fallback 移除 / reconcileZombies→queue 精确 entry-identity 收敛 / slot↔queue 一致 / 回归）；**2b 架构 seam**（serial-child↔parent liveness 桥接）需 Decision Packet → operator 拍板拆 feat。
+- [~] AC-2.1: 根因报告（5 件套）✅ drafted from #972 runtime evidence + 代码确认（`reconcileZombies.ts` / `terminal.ts:319` active-pane / `getThreadLiveInvocations` 模型），见上方「Phase 2 根因报告：#972 split-brain」。PR #1150 已加入 AC 级 TDD 回归（valid opus `@codex` → serial child active → parent zombie sweep → stale `processing` blocker 收敛）；待 merge 后标记完成。
+- [~] AC-2.2: 修复按 seam 切两层——**2a 局部修**的代码与回归已在 PR #1150 完成并通过 review，待 merge（active-pane tracker fallback 移除 / reconcileZombies→queue 精确 entry-identity 收敛 / slot↔queue 一致 / 回归）；**2b 架构 seam**（serial-child↔parent liveness 桥接）仍需 Decision Packet → operator 拍板拆 feat。
 
 **Phase 3（可恢复）✅ code+test done @ main 4e80ec889（PR #2065 squash）；runtime 截图验收 → operator quickpath**
 - [x] AC-3.1: 卡死/有活跃调用时 thread 出现情境化 force-reset 入口（非常驻）。→ `ThreadExecutionBar` 内 `ForceResetEntry`，有猫在跑才显示，`suspected_stall`/`alive_but_silent` 时上浮升级（`data-escalated`）。测试 4 绿。
