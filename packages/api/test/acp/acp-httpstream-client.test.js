@@ -1022,6 +1022,11 @@ describe('AcpHttpStreamClient', () => {
     // Should throw AcpStreamIdleError (from cancel callback)
     assert.ok(thrownError, 'HTTP cancel should throw');
     assert.equal(thrownError.code, 'STREAM_IDLE_STALL', `Expected STREAM_IDLE_STALL, got ${thrownError.code}`);
+    assert.equal(
+      client.isSafeForSingleFlightReuse,
+      false,
+      'cancelled HTTP prompt must mark a single-flight carrier unsafe for warm reuse',
+    );
 
     // Should settle promptly — not wait for idle stall (5s) or budget (10s)
     assert.ok(elapsed < 2000, `HTTP cancel should settle within 2s, took ${elapsed}ms`);

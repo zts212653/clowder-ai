@@ -78,6 +78,8 @@ export class AcpHttpStreamClient {
   private child: ChildProcess | null = null;
   private closed = false;
   private exited = false;
+  /** False once an upstream prompt was cancelled without a completion acknowledgement. */
+  private singleFlightReusable = true;
   private port: number | null = null;
   private baseUrl = '';
   private initResult: AcpInitializeResult | null = null;
@@ -367,6 +369,9 @@ export class AcpHttpStreamClient {
     // #1186 P1: Register cancel callback so cancelSession() settles this stream
     const cancelCb = () => {
       if (done) return;
+      // Aborting the local HTTP stream does not prove the provider stopped the
+      // prompt. The pool uses this only for single-flight retirement.
+      this.singleFlightReusable = false;
       log.info({ sessionId, eventCount }, 'HTTP cancel settled local prompt stream');
       promptError = new AcpStreamIdleError(
         sessionId,
@@ -529,17 +534,20 @@ export class AcpHttpStreamClient {
 
   /**
    * #1186 P1: Cancel also settles the local prompt stream so the pending .next()
-   * resolves immediately and the lease is released without waiting for the provider.
+   * resolves immediately. The callback marks the carrier unsafe for single-flight
+   * reuse so the pool retires non-multiplexed clients after lease release.
    */
   cancelSession(sessionId: string): void {
-    if (!this.port || this.closed || this.exited) return;
-    const body = JSON.stringify({ jsonrpc: '2.0', method: ACP_METHODS.sessionCancel, params: { sessionId } });
-    fetch(this.baseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }).catch((err) => {
-      log.warn({ sessionId, err: err instanceof Error ? err.message : String(err) }, 'ACP HTTP cancel failed');
-    });
-    log.info('Sent HTTP session/cancel for %s', sessionId);
-    // Settle the local prompt stream immediately
     const cb = this.sessionCancelCallbacks.get(sessionId);
+
+    if (this.port && !this.closed && !this.exited) {
+      const body = JSON.stringify({ jsonrpc: '2.0', method: ACP_METHODS.sessionCancel, params: { sessionId } });
+      fetch(this.baseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }).catch((err) => {
+        log.warn({ sessionId, err: err instanceof Error ? err.message : String(err) }, 'ACP HTTP cancel failed');
+      });
+      log.info('Sent HTTP session/cancel for %s', sessionId);
+    }
+    // Settle the local prompt stream immediately
     if (cb) cb();
   }
 
@@ -567,6 +575,9 @@ export class AcpHttpStreamClient {
   }
   get isAlive(): boolean {
     return this.child !== null && !this.child.killed && !this.closed && !this.exited;
+  }
+  get isSafeForSingleFlightReuse(): boolean {
+    return this.singleFlightReusable;
   }
 
   onCapacity(fn: (signal: AcpCapacitySignal) => void): void {

@@ -18,10 +18,14 @@ function createMockClient() {
   const id = ++clientIdCounter;
   let alive = false;
   let closed = false;
+  let safeForSingleFlightReuse = true;
   return {
     id,
     get isAlive() {
       return alive && !closed;
+    },
+    get isSafeForSingleFlightReuse() {
+      return safeForSingleFlightReuse;
     },
     async initialize() {
       alive = true;
@@ -41,6 +45,9 @@ function createMockClient() {
     }, // simulate process death
     _isClosed() {
       return closed;
+    },
+    _markUnsafeForSingleFlightReuse() {
+      safeForSingleFlightReuse = false;
     },
   };
 }
@@ -188,6 +195,72 @@ describe('AcpProcessPool', () => {
       const lease2 = await pool.acquire(key1);
       assert.strictEqual(lease2.client, client);
       assert.strictEqual(pool.getMetrics().liveProcessCount, 1);
+      lease2.release();
+    });
+
+    test('non-multiplexed carrier is retired after a cancelled prompt may still be running', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(defaultPoolConfig, nonMultiplexedVariantConfig, createMockClient);
+
+      const lease1 = await pool.acquire(key1);
+      const unsafeClient = lease1.client;
+      unsafeClient._markUnsafeForSingleFlightReuse();
+      lease1.release();
+
+      assert.equal(unsafeClient._isClosed(), true, 'unsafe single-flight client must be closed');
+      assert.deepEqual(pool.getMetrics(), {
+        liveProcessCount: 0,
+        activeLeaseCount: 0,
+        idleProcessCount: 0,
+        warmHitCount: 0,
+        coldStartCount: 1,
+        evictionCount: 1,
+        zombieCleanupCount: 0,
+      });
+
+      const lease2 = await pool.acquire(key1);
+      assert.notStrictEqual(lease2.client, unsafeClient, 'next acquire must cold-start a fresh client');
+      lease2.release();
+    });
+
+    test('multiplexed carrier is not retired when one cancelled session is unsafe', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(defaultPoolConfig, defaultVariantConfig, createMockClient);
+
+      const lease1 = await pool.acquire(key1);
+      const sharedClient = lease1.client;
+      sharedClient._markUnsafeForSingleFlightReuse();
+      lease1.release();
+
+      assert.equal(sharedClient._isClosed(), false, 'one cancelled session must not close a multiplexed carrier');
+      const lease2 = await pool.acquire(key1);
+      assert.strictEqual(lease2.client, sharedClient, 'multiplexed carrier remains available to unrelated sessions');
+      lease2.release();
+    });
+
+    test('unsafe session owner is retired instead of stale-lease force reuse', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(defaultPoolConfig, nonMultiplexedVariantConfig, createMockClient);
+
+      const lease1 = await pool.acquire(key1);
+      const unsafeClient = lease1.client;
+      pool.rememberSession(key1, 'cancelled-sess', lease1);
+      unsafeClient._markUnsafeForSingleFlightReuse();
+
+      const lease2 = await pool.acquire(key1, { sessionId: 'cancelled-sess' });
+      assert.notStrictEqual(lease2.client, unsafeClient, 'resume must not reuse an unquiesced session owner');
+      assert.equal(unsafeClient._isClosed(), true);
+      assert.equal(pool.getMetrics().activeLeaseCount, 1, 'only replacement lease should remain active');
+
+      // The retired lease was generation-invalidated; its late release is a no-op.
+      lease1.release();
+      assert.equal(pool.getMetrics().activeLeaseCount, 1);
       lease2.release();
     });
 

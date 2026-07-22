@@ -52,6 +52,12 @@ export interface AcpAcquireOptions {
 /** Minimal AcpClient interface needed by the pool. */
 export interface AcpPoolClient {
   readonly isAlive: boolean;
+  /**
+   * False after a cancelled prompt may still be running upstream. The pool only
+   * acts on this for non-multiplexed carriers; multiplexed clients can keep
+   * serving unrelated sessions.
+   */
+  readonly isSafeForSingleFlightReuse?: boolean;
   initialize(): Promise<unknown>;
   close(): Promise<void>;
 }
@@ -143,25 +149,29 @@ export class AcpProcessPool {
       const sessionKey = serializeSessionKey(poolKey, sessionId);
       const owner = this.sessionOwners.get(sessionKey);
       if (owner && owner.state === 'ready' && owner.client.isAlive) {
-        if (this.supportsMultiplexing || owner.leaseCount === 0) {
+        if (!this.supportsMultiplexing && owner.client.isSafeForSingleFlightReuse === false) {
+          this.retireEntry(owner, poolKey, 'cancelled prompt still unquiesced');
+        } else {
+          if (this.supportsMultiplexing || owner.leaseCount === 0) {
+            return this.leaseReadyEntry(owner, poolKey);
+          }
+          // #992: Stale lease recovery — the previous lease holder is a zombie (e.g. Windows
+          // console disconnect where the async generator finally block never ran). Since the
+          // caller is re-acquiring the SAME sessionId, the previous consumer is necessarily
+          // gone. Force-release the orphaned lease so the process can be reused.
+          log.warn(
+            { poolKey, sessionId, staleLeaseCount: owner.leaseCount },
+            'ACP stale lease detected — force-releasing zombie lease for session re-acquire',
+          );
+          this._metrics.activeLeaseCount -= owner.leaseCount;
+          owner.leaseCount = 0;
+          // Transition to idle so leaseReadyEntry's idleProcessCount-- is balanced.
+          this._metrics.idleProcessCount++;
+          // Bump generation so any late-arriving release() from the old lease becomes a
+          // no-op (the old closure captured the previous generation value).
+          owner.leaseGeneration++;
           return this.leaseReadyEntry(owner, poolKey);
         }
-        // #992: Stale lease recovery — the previous lease holder is a zombie (e.g. Windows
-        // console disconnect where the async generator finally block never ran). Since the
-        // caller is re-acquiring the SAME sessionId, the previous consumer is necessarily
-        // gone. Force-release the orphaned lease so the process can be reused.
-        log.warn(
-          { poolKey, sessionId, staleLeaseCount: owner.leaseCount },
-          'ACP stale lease detected — force-releasing zombie lease for session re-acquire',
-        );
-        this._metrics.activeLeaseCount -= owner.leaseCount;
-        owner.leaseCount = 0;
-        // Transition to idle so leaseReadyEntry's idleProcessCount-- is balanced.
-        this._metrics.idleProcessCount++;
-        // Bump generation so any late-arriving release() from the old lease becomes a
-        // no-op (the old closure captured the previous generation value).
-        owner.leaseGeneration++;
-        return this.leaseReadyEntry(owner, poolKey);
       }
       if (owner) this.sessionOwners.delete(sessionKey);
     }
@@ -298,6 +308,14 @@ export class AcpProcessPool {
         // Stale lease guard: generation mismatch means this lease was force-released
         // and a new lease has been issued on the same entry. The old release is a no-op.
         if (entry.leaseGeneration !== creationGeneration) return;
+        // A local cancel can settle the JavaScript iterator before the provider
+        // actually stops the upstream prompt. Reusing that same non-multiplexed
+        // process would overlap two prompts on a single-flight carrier. Retire it
+        // while the lease is still counted active, then let the next acquire spawn.
+        if (!this.supportsMultiplexing && entry.client.isSafeForSingleFlightReuse === false) {
+          this.retireEntry(entry, poolKey, 'cancelled prompt still unquiesced');
+          return;
+        }
         entry.leaseCount--;
         this._metrics.activeLeaseCount--;
         if (entry.leaseCount <= 0) {
@@ -307,6 +325,33 @@ export class AcpProcessPool {
         }
       },
     };
+  }
+
+  private retireEntry(entry: PoolEntry, poolKey: PoolKey, reason: string): void {
+    const key = serializeKey(poolKey);
+    const entries = this.entries.get(key);
+    const idx = entries?.indexOf(entry) ?? -1;
+    if (!entries || idx < 0 || entry.state === 'closing') return;
+
+    this.clearIdleTimer(entry);
+    this.forgetSessionsForEntry(entry);
+    entry.state = 'closing';
+
+    if (entry.leaseCount > 0) {
+      this._metrics.activeLeaseCount -= entry.leaseCount;
+      entry.leaseCount = 0;
+      // Any late release from an already-retired lease must not touch metrics.
+      entry.leaseGeneration++;
+    } else {
+      this._metrics.idleProcessCount--;
+    }
+
+    entries.splice(idx, 1);
+    if (entries.length === 0) this.entries.delete(key);
+    this._metrics.liveProcessCount--;
+    this._metrics.evictionCount++;
+    entry.client.close().catch(() => {});
+    log.warn({ poolKey, reason }, 'Retired unsafe ACP process');
   }
 
   private async spawnEntry(poolKey: PoolKey): Promise<PoolEntry> {

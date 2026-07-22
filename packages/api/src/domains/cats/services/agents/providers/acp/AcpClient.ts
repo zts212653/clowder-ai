@@ -141,6 +141,8 @@ export class AcpClient {
   private initResult: AcpInitializeResult | null = null;
   private closed = false;
   private exited = false;
+  /** False once an upstream prompt was cancelled without a completion acknowledgement. */
+  private singleFlightReusable = true;
   private readonly capacityListeners = new Set<(signal: AcpCapacitySignal) => void>();
   /**
    * #1186 P1: Per-session cancel callbacks — when cancelSession() is called,
@@ -594,6 +596,9 @@ export class AcpClient {
     // immediately instead of waiting for the provider or idle watchdog.
     const cancelCb = () => {
       if (done) return;
+      // The local stream can settle before the provider acknowledges prompt
+      // termination. The pool uses this only for single-flight retirement.
+      this.singleFlightReusable = false;
       log.info({ sessionId, eventCount }, 'Session cancel settled local prompt stream');
       promptError = new AcpStreamIdleError(
         sessionId,
@@ -683,30 +688,33 @@ export class AcpClient {
 
   /**
    * Send session/cancel notification (fire-and-forget, no response expected).
-   * Does NOT close the shared AcpClient — safe for concurrent sessions.
    *
    * #1186 P1: Also settles the local prompt stream via the registered cancel
    * callback so the pending .next() resolves immediately. Without this, the
    * generator stays suspended until the provider cooperates or the idle watchdog
-   * fires — leaving the lease pinned for the full TTL.
+   * fires — leaving the lease pinned for the full TTL. The callback also marks
+   * the carrier unsafe for single-flight reuse; the pool retires non-multiplexed
+   * clients while leaving multiplexed clients available to unrelated sessions.
    */
   cancelSession(sessionId: string): void {
-    if (!this.child?.stdin?.writable) return;
-    const msg = { jsonrpc: '2.0', method: ACP_METHODS.sessionCancel, params: { sessionId } };
-    this.child.stdin.write(`${JSON.stringify(msg)}\n`);
-    log.info('Sent session/cancel for %s', sessionId);
-    // Settle the local prompt stream immediately
+    const promptReqId = this.sessionPromptPendingIds.get(sessionId);
     const cb = this.sessionCancelCallbacks.get(sessionId);
+
+    if (this.child?.stdin?.writable) {
+      const msg = { jsonrpc: '2.0', method: ACP_METHODS.sessionCancel, params: { sessionId } };
+      this.child.stdin.write(`${JSON.stringify(msg)}\n`);
+      log.info('Sent session/cancel for %s', sessionId);
+    }
+    // Settle the local prompt stream immediately
     if (cb) cb();
     // #1186 P1: Settle the pending sendRequest promise for this session's prompt.
     // The cancel callback above exits the generator, which releases the lease.
     // But without settling the underlying request, the sendRequest promise stays
     // alive with its 1h timer, leaving a stale entry in `pending`. For a non-
-    // multiplexed process that gets reused after lease release, the stale entry
-    // means the old prompt response (if it ever arrives) would be misrouted.
-    // Rejecting here clears the timer and removes the entry, making the process
-    // safe for immediate reuse.
-    const promptReqId = this.sessionPromptPendingIds.get(sessionId);
+    // multiplexed process that remains alive after lease release, the stale entry
+    // would retain its timer and could consume a late response. Rejecting here
+    // clears local bookkeeping; the pool separately retires non-multiplexed
+    // carriers because local cleanup does not prove upstream quiescence.
     if (promptReqId) {
       const entry = this.pending.get(promptReqId);
       if (entry) {
@@ -747,6 +755,10 @@ export class AcpClient {
 
   get isAlive(): boolean {
     return this.child !== null && !this.child.killed && !this.closed && !this.exited;
+  }
+
+  get isSafeForSingleFlightReuse(): boolean {
+    return this.singleFlightReusable;
   }
 
   /** Register a capacity-signal listener scoped to a prompt's lifetime. */

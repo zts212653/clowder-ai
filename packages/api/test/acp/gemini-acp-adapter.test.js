@@ -22,14 +22,14 @@ const { AcpClient } = await import('../../dist/domains/cats/services/agents/prov
 const TEST_POOL_KEY = { projectPath: '/tmp', providerProfile: 'test' };
 
 /** Create a minimal mock child process */
-function createMockChild() {
+function createMockChild(pid = 12345) {
   const clientStdin = new PassThrough();
   const agentStdout = new PassThrough();
   const agentStderr = new PassThrough();
 
   const ee = new EventEmitter();
   const child = {
-    pid: 12345,
+    pid,
     stdin: clientStdin,
     stdout: agentStdout,
     stderr: agentStderr,
@@ -146,10 +146,10 @@ function createPoolWithAutoRespond() {
 /**
  * Create a pool backed by a custom spawn function.
  */
-function createPoolWithSpawn(spawnFn) {
+function createPoolWithSpawn(spawnFn, variantConfig = {}) {
   return new AcpProcessPool(
     { maxLiveProcesses: 5, idleTtlMs: 999_999, healthCheckIntervalMs: 999_999 },
-    {},
+    variantConfig,
     () => new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn }),
   );
 }
@@ -1018,7 +1018,10 @@ describe('GeminiAcpAdapter integration', () => {
       }
     });
 
-    pool = createPoolWithSpawn(() => child);
+    // This fixture intentionally runs two concurrent sessions on one process;
+    // declare the carrier multiplexed so cancelling sess-1 must not retire it
+    // while sess-2 remains live.
+    pool = createPoolWithSpawn(() => child, { supportsMultiplexing: true });
     const adapter = new GeminiAcpAdapter({
       catId: 'gemini',
       pool,
@@ -3342,10 +3345,10 @@ describe('#1186: idle stall fires before turn budget (P2)', () => {
   });
 });
 
-// #1186 P1: Cancel must settle the pending prompt sendRequest so a non-multiplexed
-// process can be safely reused. Without the fix, the sendRequest promise stays alive
-// with a 1h timer after the generator exits, leaving a stale entry in `pending`.
-describe('#1186: cancel settles pending prompt request for safe non-multiplexed reuse', () => {
+// #1186 P1: Releasing a local lease does not prove that an ignored upstream
+// session/cancel stopped the prompt. A single-flight carrier with an unresolved
+// cancelled prompt must be retired rather than returned to warm reuse.
+describe('#1186: cancel retires an unquiesced non-multiplexed carrier', () => {
   let pool = null;
 
   afterEach(async () => {
@@ -3355,79 +3358,86 @@ describe('#1186: cancel settles pending prompt request for safe non-multiplexed 
     }
   });
 
-  it('second prompt succeeds on same single-flight process after cancelled prompt is settled', async () => {
-    const { child, clientStdin, agentStdout, ee } = createMockChild();
+  it('runs the next prompt on a fresh process when the provider ignores cancel', async () => {
     let sessionCounter = 0;
     const capturedCancels = [];
-    const promptsBySession = new Map();
+    const prompts = [];
+    const children = [];
 
-    clientStdin.on('data', (chunk) => {
-      for (const line of chunk.toString().trim().split('\n')) {
-        const msg = JSON.parse(line);
-        if (msg.method === 'initialize') {
-          setImmediate(() =>
-            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT }) + '\n'),
-          );
-        } else if (msg.method === 'session/new') {
-          sessionCounter++;
-          const sid = `sess-${sessionCounter}`;
-          setImmediate(() =>
-            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: sid } }) + '\n'),
-          );
-        } else if (msg.method === 'session/prompt') {
-          const sid = msg.params.sessionId;
-          promptsBySession.set(sid, msg.id);
+    const createClient = () => {
+      const pid = 12_345 + children.length;
+      const { child, clientStdin, agentStdout } = createMockChild(pid);
+      children.push(child);
 
-          if (sid === 'sess-1') {
-            // Emit one event then go silent — never resolve prompt A.
-            // Provider ignores session/cancel — the worst case.
-            setImmediate(() => {
-              agentStdout.write(
-                JSON.stringify({
-                  jsonrpc: '2.0',
-                  method: 'session/update',
-                  params: {
-                    sessionId: sid,
-                    update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'start-A' } },
-                  },
-                }) + '\n',
-              );
-            });
-            // Deliberately NEVER send the prompt response for sess-1
-          } else if (sid === 'sess-2') {
-            // Second prompt — respond normally
-            setImmediate(() => {
-              agentStdout.write(
-                JSON.stringify({
-                  jsonrpc: '2.0',
-                  method: 'session/update',
-                  params: {
-                    sessionId: sid,
-                    update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'result-B' } },
-                  },
-                }) + '\n',
-              );
-              setTimeout(
-                () =>
-                  agentStdout.write(
-                    JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } }) + '\n',
-                  ),
-                10,
-              );
-            });
+      clientStdin.on('data', (chunk) => {
+        for (const line of chunk.toString().trim().split('\n')) {
+          const msg = JSON.parse(line);
+          if (msg.method === 'initialize') {
+            setImmediate(() =>
+              agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT }) + '\n'),
+            );
+          } else if (msg.method === 'session/new') {
+            sessionCounter++;
+            const sid = `sess-${sessionCounter}`;
+            setImmediate(() =>
+              agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: sid } }) + '\n'),
+            );
+          } else if (msg.method === 'session/prompt') {
+            const sid = msg.params.sessionId;
+            prompts.push({ sessionId: sid, pid });
+
+            if (sid === 'sess-1') {
+              // Emit one event then remain unresolved forever. The provider also
+              // ignores session/cancel below, so this process is not quiescent.
+              setImmediate(() => {
+                agentStdout.write(
+                  JSON.stringify({
+                    jsonrpc: '2.0',
+                    method: 'session/update',
+                    params: {
+                      sessionId: sid,
+                      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'start-A' } },
+                    },
+                  }) + '\n',
+                );
+              });
+            } else if (sid === 'sess-2') {
+              setImmediate(() => {
+                agentStdout.write(
+                  JSON.stringify({
+                    jsonrpc: '2.0',
+                    method: 'session/update',
+                    params: {
+                      sessionId: sid,
+                      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'result-B' } },
+                    },
+                  }) + '\n',
+                );
+                setTimeout(
+                  () =>
+                    agentStdout.write(
+                      JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } }) + '\n',
+                    ),
+                  10,
+                );
+              });
+            }
+          } else if (msg.method === 'session/cancel') {
+            capturedCancels.push({ sessionId: msg.params?.sessionId, pid });
+            // Deliberately ignore cancel and never resolve prompt A.
           }
-        } else if (msg.method === 'session/cancel') {
-          capturedCancels.push(msg.params?.sessionId);
-          // Provider IGNORES cancel — does NOT resolve the pending prompt
         }
-      }
-    });
+      });
 
-    // Non-multiplexed pool with maxLiveProcesses=1 — forces process reuse
+      return new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    };
+
+    // maxLiveProcesses=1: retiring A must synchronously free the logical slot so
+    // B can cold-start a replacement instead of overlapping on A's process.
     pool = new AcpProcessPool(
       { maxLiveProcesses: 1, idleTtlMs: 999_999, healthCheckIntervalMs: 999_999 },
       {},
-      () => new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child }),
+      createClient,
     );
     const adapter = new GeminiAcpAdapter({
       catId: 'gemini',
@@ -3453,13 +3463,16 @@ describe('#1186: cancel settles pending prompt request for safe non-multiplexed 
     await invoke1;
 
     // Verify cancel was sent
-    assert.ok(capturedCancels.includes('sess-1'), `Should cancel sess-1, got: ${JSON.stringify(capturedCancels)}`);
+    assert.ok(
+      capturedCancels.some((entry) => entry.sessionId === 'sess-1'),
+      `Should cancel sess-1, got: ${JSON.stringify(capturedCancels)}`,
+    );
 
-    // After cancel + lease release, the pending prompt request must be settled.
+    // After cancel + retirement, no lease may remain pinned to the old carrier.
     const metrics = pool.getMetrics();
     assert.equal(metrics.activeLeaseCount, 0, 'All leases should be released after cancel');
 
-    // --- Invocation B: should reuse the same process and succeed ---
+    // --- Invocation B: must cold-start a fresh process and succeed ---
     const msgs2 = [];
     for await (const msg of adapter.invoke('task-B')) {
       msgs2.push(msg);
@@ -3469,10 +3482,12 @@ describe('#1186: cancel settles pending prompt request for safe non-multiplexed 
     assert.ok(types2.includes('text'), `Invocation B should have text, got: ${JSON.stringify(types2)}`);
     assert.ok(types2.includes('done'), `Invocation B should have done, got: ${JSON.stringify(types2)}`);
 
-    // The critical assertion: invocation B got sess-2, proving the process was
-    // reused (not stuck) and the second prompt was sent cleanly without the
-    // first prompt's stale pending entry interfering.
-    assert.equal(promptsBySession.size, 2, 'Both prompts should have been received by the provider');
-    assert.ok(promptsBySession.has('sess-2'), 'Provider should have received prompt for sess-2');
+    const promptA = prompts.find((entry) => entry.sessionId === 'sess-1');
+    const promptB = prompts.find((entry) => entry.sessionId === 'sess-2');
+    assert.ok(promptA, 'Provider should have received prompt A');
+    assert.ok(promptB, 'Provider should have received prompt B');
+    assert.notEqual(promptB.pid, promptA.pid, "Prompt B must not reach A's still-busy single-flight process");
+    assert.equal(children.length, 2, 'Pool should spawn one replacement process');
+    assert.equal(children[0].killed, true, 'The unquiesced first process must be retired');
   });
 });
