@@ -17,13 +17,14 @@ import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import {
   assertRedisIsolationOrThrow,
-  cleanupPrefixedRedisKeys,
+  cleanupClientKeyspace,
   redisIsolationSkipReason,
 } from './helpers/redis-test-helpers.js';
 
 const REDIS_URL = process.env.REDIS_URL;
 
-const MSG_PATTERNS = ['msg:*'];
+/** Per-file unique keyPrefix isolates this suite from concurrent redis-message-store / f232 tests. */
+const TEST_KEY_PREFIX = 'cat-cafe-f258:';
 
 describe('F258: delivery-order transition atomicity', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisMessageStore;
@@ -43,7 +44,7 @@ describe('F258: delivery-order transition atomicity', { skip: redisIsolationSkip
     const redisModule = await import('@cat-cafe/shared/utils');
     createRedisClient = redisModule.createRedisClient;
 
-    redis = createRedisClient({ url: REDIS_URL });
+    redis = createRedisClient({ url: REDIS_URL, keyPrefix: TEST_KEY_PREFIX });
     try {
       await redis.ping();
       connected = true;
@@ -57,14 +58,14 @@ describe('F258: delivery-order transition atomicity', { skip: redisIsolationSkip
 
   after(async () => {
     if (redis && connected) {
-      await cleanupPrefixedRedisKeys(redis, MSG_PATTERNS);
+      await cleanupClientKeyspace(redis);
       await redis.quit();
     }
   });
 
   beforeEach(async (t) => {
     if (!connected) return t.skip('Redis not connected');
-    await cleanupPrefixedRedisKeys(redis, MSG_PATTERNS);
+    await cleanupClientKeyspace(redis);
   });
 
   // ── Helper: create a queued message for testing ──
@@ -258,7 +259,7 @@ describe('F258: delivery-order transition atomicity', { skip: redisIsolationSkip
     const threadId = 'thread-f258-zset-8';
     // Run 5 rounds to increase chance of hitting the race
     for (let round = 0; round < 5; round++) {
-      await cleanupPrefixedRedisKeys(redis, MSG_PATTERNS);
+      await cleanupClientKeyspace(redis);
       const msg = await createQueued('userA', threadId, base + round * 1000);
 
       await Promise.all([
