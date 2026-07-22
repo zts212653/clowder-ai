@@ -2276,6 +2276,75 @@ describe('Sol maintainer R18: convergence event ordering', () => {
     assert.deepEqual(emittedActions, ['second']);
   });
 
+  it('R21 P2: stalled enrichment falls back to raw and releases the same-scope tail', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const emitted = [];
+    let enrichmentStarted;
+    const enrichmentStartedPromise = new Promise((resolve) => {
+      enrichmentStarted = resolve;
+    });
+    const messageStore = {
+      getById: async () => {
+        enrichmentStarted();
+        return new Promise(() => {});
+      },
+    };
+    const socketManager = {
+      emitToUser: (_userId, _event, data) => emitted.push(data),
+    };
+    const stalledEntry = {
+      id: 'q-stalled',
+      messageId: 'msg-stalled',
+      mergedMessageIds: [],
+      targetCats: ['codex'],
+      status: 'queued',
+    };
+
+    const stalled = emitQueueUpdated(socketManager, 'u1', 't1', [stalledEntry], messageStore, 'stalled');
+    await enrichmentStartedPromise;
+    const following = emitQueueUpdated(socketManager, 'u1', 't1', [], messageStore, 'following');
+
+    t.mock.timers.tick(2_000);
+    await stalled;
+    await following;
+
+    assert.deepEqual(
+      emitted.map((event) => ({ action: event.action, queue: event.queue })),
+      [
+        { action: 'stalled', queue: [stalledEntry] },
+        { action: 'following', queue: [] },
+      ],
+      'the head publisher must emit raw and release its tail after the enrichment deadline',
+    );
+  });
+
+  it('R21 P2: enrichment that settles before the deadline still publishes its preview', async () => {
+    const emittedQueues = [];
+    const socketManager = {
+      emitToUser: (_userId, _event, data) => emittedQueues.push(data.queue),
+    };
+    const messageStore = {
+      getById: async () => ({
+        contentBlocks: [{ kind: 'text', text: 'preview text' }],
+        replyTo: 'msg-parent',
+      }),
+    };
+    const entry = {
+      id: 'q-enriched',
+      messageId: 'msg-enriched',
+      mergedMessageIds: [],
+      targetCats: ['codex'],
+      status: 'queued',
+    };
+
+    await emitQueueUpdated(socketManager, 'u1', 't1', [entry], messageStore, 'enriched');
+
+    assert.deepEqual(emittedQueues[0][0].messagePreview, {
+      contentBlocks: [{ kind: 'text', text: 'preview text' }],
+      replyTo: 'msg-parent',
+    });
+  });
+
   it('R20 P1: freezes legacy partial queue projections without requiring array fields', async () => {
     const emittedQueues = [];
     const socketManager = {

@@ -25,6 +25,7 @@ export interface EnrichedQueueEntry extends QueueEntry {
 }
 
 type QueueUpdateEmitter = Pick<SocketManager, 'emitToUser'>;
+const QUEUE_ENRICHMENT_TIMEOUT_MS = 2_000;
 
 /**
  * Full queue snapshots replace frontend state, so every publisher sharing a
@@ -109,6 +110,25 @@ export async function enrichQueueEntries(
   }
 }
 
+async function enrichQueueEntriesWithinDeadline(
+  entries: QueueEntry[],
+  messageStore: IMessageStore | null | undefined,
+): Promise<QueueEntry[] | EnrichedQueueEntry[]> {
+  if (!messageStore || entries.length === 0) return entries;
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), QUEUE_ENRICHMENT_TIMEOUT_MS);
+    timer.unref?.();
+  });
+  try {
+    const enriched = await Promise.race([enrichQueueEntries(entries, messageStore), deadline]);
+    return enriched ?? entries;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
  * Emit an enriched queue_updated SSE event.
  *
@@ -128,12 +148,7 @@ export function emitQueueUpdated(
   const tails = publicationTailsFor(socketManager);
   const previous = tails.get(scopeKey) ?? Promise.resolve();
   const publication = previous.then(async () => {
-    let payload: QueueEntry[] | EnrichedQueueEntry[] = snapshot;
-    try {
-      payload = await enrichQueueEntries(snapshot, messageStore);
-    } catch {
-      // Enrichment is best-effort; emit the frozen raw snapshot on failure.
-    }
+    const payload = await enrichQueueEntriesWithinDeadline(snapshot, messageStore);
     socketManager.emitToUser(userId, 'queue_updated', {
       threadId,
       queue: payload,
