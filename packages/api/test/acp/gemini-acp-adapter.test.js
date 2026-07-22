@@ -351,6 +351,7 @@ describe('GeminiAcpAdapter', () => {
       loadSessionCalls: [],
       newSessionCalls: 0,
       promptedSessionIds: [],
+      promptedTexts: [],
       recentCapacitySignal: null,
       async newSession() {
         client.newSessionCalls++;
@@ -362,8 +363,9 @@ describe('GeminiAcpAdapter', () => {
       },
       async setSessionConfigOption() {},
       cancelSession() {},
-      async *promptStream(sessionId) {
+      async *promptStream(sessionId, text) {
         client.promptedSessionIds.push(sessionId);
+        client.promptedTexts.push(text);
         yield {
           sessionId,
           update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'fresh result' } },
@@ -397,13 +399,21 @@ describe('GeminiAcpAdapter', () => {
     });
 
     const messages = [];
-    for await (const msg of adapter.invoke('continue safely', { sessionId: 'cancelled-sess' })) {
+    for await (const msg of adapter.invoke('continue safely', {
+      sessionId: 'cancelled-sess',
+      resumeFallbackSystemPrompt: 'Static identity prompt',
+    })) {
       messages.push(msg);
     }
 
     assert.deepEqual(client.loadSessionCalls, [], 'sealed session must never reach loadSession');
     assert.equal(client.newSessionCalls, 1);
     assert.deepEqual(client.promptedSessionIds, ['fresh-after-cancel']);
+    assert.deepEqual(
+      client.promptedTexts,
+      ['Static identity prompt\n\ncontinue safely'],
+      'sealed resume replacement must restore the omitted static identity exactly once',
+    );
     assert.deepEqual(rememberedSessions, ['fresh-after-cancel']);
     assert.ok(messages.some((msg) => msg.type === 'session_init' && msg.sessionId === 'fresh-after-cancel'));
   });
@@ -454,6 +464,154 @@ describe('GeminiAcpAdapter', () => {
       new Set(['persisted-session', 'runtime-session-alias']),
       'all aliases of the unquiesced logical session must be sealed',
     );
+  });
+
+  describe('session sealing follows the prompt acknowledgement boundary', () => {
+    function createBoundaryHarness({ loadSession, promptStream, onCancel }) {
+      const sealedSessions = [];
+      const cancelCalls = [];
+      const client = {
+        recentCapacitySignal: null,
+        async newSession() {
+          throw new Error('boundary harness must resume the requested session');
+        },
+        loadSession,
+        async setSessionConfigOption() {},
+        cancelSession(sessionId) {
+          cancelCalls.push(sessionId);
+          onCancel?.(sessionId);
+        },
+        promptStream,
+        onCapacity() {},
+        offCapacity() {},
+        clearRecentCapacitySignal() {},
+      };
+      const pool = {
+        async acquire(poolKey) {
+          return { client, poolKey, release() {} };
+        },
+        rememberSession() {},
+        sealSession(_poolKey, sessionId) {
+          sealedSessions.push(sessionId);
+        },
+      };
+      return {
+        adapter: new GeminiAcpAdapter({
+          catId: 'gemini',
+          pool,
+          poolKey: TEST_POOL_KEY,
+          projectRoot: '/tmp',
+        }),
+        cancelCalls,
+        sealedSessions,
+      };
+    }
+
+    it('does not seal when abort fires during resumed-session setup', async () => {
+      const controller = new AbortController();
+      const harness = createBoundaryHarness({
+        async loadSession(sessionId) {
+          controller.abort();
+          return { sessionId };
+        },
+        async *promptStream() {
+          assert.fail('promptStream must not start after setup abort');
+        },
+      });
+
+      for await (const _msg of harness.adapter.invoke('stop during setup', {
+        sessionId: 'safe-setup-session',
+        signal: controller.signal,
+      })) {
+        // Drain terminal messages.
+      }
+
+      assert.deepEqual(harness.sealedSessions, []);
+      assert.deepEqual(harness.cancelCalls, []);
+    });
+
+    it('does not seal when abort fires while session_init is yielded', async () => {
+      const controller = new AbortController();
+      const harness = createBoundaryHarness({
+        async loadSession(sessionId) {
+          return { sessionId };
+        },
+        async *promptStream() {
+          assert.fail('promptStream must not start after session_init abort');
+        },
+      });
+
+      for await (const msg of harness.adapter.invoke('stop at session init', {
+        sessionId: 'safe-session-init',
+        signal: controller.signal,
+      })) {
+        if (msg.type === 'session_init') controller.abort();
+      }
+
+      assert.deepEqual(harness.sealedSessions, []);
+      assert.deepEqual(harness.cancelCalls, []);
+    });
+
+    it('seals persisted and runtime aliases when abort terminates an active prompt', async () => {
+      const controller = new AbortController();
+      let settlePrompt;
+      const promptSettled = new Promise((resolve) => {
+        settlePrompt = resolve;
+      });
+      const harness = createBoundaryHarness({
+        async loadSession() {
+          return { sessionId: 'runtime-active-session' };
+        },
+        async *promptStream(sessionId) {
+          yield {
+            sessionId,
+            update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'active' } },
+          };
+          await promptSettled;
+        },
+        onCancel() {
+          settlePrompt();
+        },
+      });
+
+      for await (const msg of harness.adapter.invoke('stop active prompt', {
+        sessionId: 'persisted-active-session',
+        signal: controller.signal,
+      })) {
+        if (msg.type === 'text') controller.abort();
+      }
+
+      assert.deepEqual(
+        new Set(harness.sealedSessions),
+        new Set(['persisted-active-session', 'runtime-active-session']),
+      );
+      assert.deepEqual(harness.cancelCalls, ['runtime-active-session']);
+    });
+
+    it('does not seal when abort fires after provider acknowledgement', async () => {
+      const controller = new AbortController();
+      const harness = createBoundaryHarness({
+        async loadSession(sessionId) {
+          return { sessionId };
+        },
+        async *promptStream(sessionId) {
+          yield {
+            sessionId,
+            update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'complete' } },
+          };
+        },
+      });
+
+      for await (const msg of harness.adapter.invoke('finish safely', {
+        sessionId: 'safe-completed-session',
+        signal: controller.signal,
+      })) {
+        if (msg.type === 'done') controller.abort();
+      }
+
+      assert.deepEqual(harness.sealedSessions, []);
+      assert.deepEqual(harness.cancelCalls, []);
+    });
   });
 
   it('falls back to session/new when resumed ACP session cannot be loaded', async () => {
