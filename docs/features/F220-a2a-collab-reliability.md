@@ -80,9 +80,9 @@ bug 链：opus parent 结束本轮 → tracker 没了/无 fresh draft → 过 gr
 | `processingSlots[(thread, cat)]` | 精确 queue `entry.id` | 仅 stale entry owner 可 compare-and-release；随后 dispatch replacement | A 的迟到 callback / retry / immediate convergence 都不能释放 B 的 reservation |
 | batch sibling `QueueEntry` | `batchParentId=primary.id` | zombie primary 移除时只 rollback 仍归 A 的 siblings；rollback 同时断开 owner | A 的迟到 finalizer 不能 remove/rollback 已由 B 重领的 sibling |
 | `TaskProgress[(thread, cat)]` | `lastInvocationId` | Redis Lua / memory 原子 compare-and-delete，仅删除 zombie invocation 自己的 snapshot | A 的延迟 cleanup 不能删除同 cat replacement B 的 snapshot；非原子 read→delete 不合规 |
-| `queue_updated` 全量快照 | queue mutation 顺序 | removal snapshot 的 publish promise 先于 replacement redispatch | 较旧的 zombie snapshot 不能晚到并覆盖较新的 processing/completed state |
+| `queue_updated` 全量快照 | `(threadId,userId)` publication tail | immediate / retry removal 在 mutation 时冻结 snapshot，按同 scope tail 串行发布；各自 publish promise 先于 replacement redispatch | 较旧 zombie A 的慢 enrichment 不能晚于同 scope zombie B 或 replacement 的较新 processing/completed state；不同 scope 不互相阻塞 |
 
-收敛顺序固定为：`InvocationRecord CAS failed` → 精确移除 stale queue row / rollback owned siblings → owner-guarded slot release → **发布 removal snapshot** → dispatch replacement；TaskProgress cleanup 与后续 zombie 的关键收敛解耦并行执行，但自身必须按 invocation owner 原子删除。
+收敛顺序固定为：`InvocationRecord CAS failed` → 精确移除 stale queue row / rollback owned siblings → owner-guarded slot release → snapshot 入 `(thread,user)` publication tail → **按 mutation 顺序发布 removal snapshot** → dispatch replacement；queue mutation、record/slot 收敛与其他 scope 不等待 enrichment，TaskProgress cleanup 与后续 zombie 的关键收敛解耦并行执行，但自身必须按 invocation owner 原子删除。
 
 ### Phase 3 — 可恢复：force-reset 逃生口 UI（Layer 3）
 把已有的 `force-reset` 端点接到一个**情境化、带确认弹窗**的 UI 入口。**设计稿见下方 §设计稿（operator 2026-06-02 已审过概念 + 确认要弹窗确认）**。
@@ -131,7 +131,7 @@ bug 链：opus parent 结束本轮 → tracker 没了/无 fresh draft → 过 gr
 - KD-3（2026-06-02 Ragdoll，接 own 时定）：**Phase 2 设 scope 闸门**——先出根因报告，需架构级重构则 operator 拍板拆独立 feat，不在 F220 内硬扛（见 Phase 2 段）。接手 5 点调整（Phase 2 闸门 / force-reset 守 LL-048 / force-reset vs orphaned slot 实测 / Phase 1 取证优先级校准 / thread legend）经立项方平行 opus-48 确认（thread `[thread-id]`）。
 - KD-4（2026-06-02 Maine Coon）：Phase 1 不用新前端协议、不滥用 `a2a_handoff`。`a2a_handoff` 会迁移 active slot，适合 serial handoff；callback/queue path 应补 F118 D2 既有 `spawn_started`，表达"启动中"且保留 #768 的 `intent_mode` 延迟语义。
 - KD-5（2026-06-17 Ragdoll opus-48，接 Maine Coon routing #972）：Phase 2 答案按 **F220↔F224 轴接缝**切两层——**2a 局部修**（active-pane tracker fallback 移除 / reconcileZombies→queue 精确 entry-identity 收敛 / slot↔queue 一致 / 回归）= F220 已祝福方向内、可逆 → **自决实现，不上 operator**；**2b 架构 seam**（serial-continuation-child ↔ parent/queue liveness 桥接，牵动"统一 liveness SoT"+ 轴边界重画）= 架构级 → 出 Decision Packet 交 **operator 拍板拆 feat**。遵 KD-3：2b 不在根因报告+repro 前动手大改。**#972 是"两轴不共享根因"假设的反例**（轴在此 failure mode 交互）——若 2b operator 决定重画边界，序言断言需同步修订。
-- KD-6（2026-07-22 Maine Coon，PR #1150 R18）：Phase 2a 的 stale cleanup 统一采用**对象所有权 + 有序发布**模型。slot owner=`entry.id`、batch owner=`batchParentId`、TaskProgress owner=`lastInvocationId`；任何迟到路径只能 compare-and-release 自己的对象。`queue_updated` 是全量替换事件，故 removal publish 必须作为 replacement dispatch 的 ordering barrier，同时不得阻塞其他 zombie 的关键收敛。
+- KD-6（2026-07-22 Maine Coon，PR #1150 R18-R19）：Phase 2a 的 stale cleanup 统一采用**对象所有权 + 有序发布**模型。slot owner=`entry.id`、batch owner=`batchParentId`、TaskProgress owner=`lastInvocationId`；任何迟到路径只能 compare-and-release 自己的对象。`queue_updated` 是全量替换事件，故 immediate / retry removal 都必须进入 `(threadId,userId)` publication tail，既作为 replacement dispatch 的 ordering barrier，也保证并发 zombie 快照按 mutation 顺序到达；mutation 与其他 scope 不被 enrichment 阻塞。
 
 ## 设计稿（Phase 3 — force-reset 逃生口 UI，operator 2026-06-02 已审概念）
 

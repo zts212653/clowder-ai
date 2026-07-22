@@ -223,6 +223,10 @@ export class QueueProcessor {
   /** F118 D4: max age before a processingSlot is considered zombie (default 2.5× CLI timeout = 75min) */
   private processingSlotTtlMs: number;
   private readonly sessionContinuationCoordinator?: SessionContinuationCoordinatorLike;
+  /** F220 2a R19: serialize zombie full-snapshot publications per (thread,user).
+   *  Queue mutations stay synchronous, but an older slow enrichment must finish
+   *  publishing before a newer removal snapshot for the same frontend scope. */
+  private readonly convergenceQueueUpdateTails = new Map<string, Promise<void>>();
   /** F220 2a (Sol R4): pending convergence retries, deduped by (threadId:userId:idempotencyKey).
    *  Entries persist in memory until success or process restart (StartupReconciler covers that).
    *  Exponential backoff: 30s → 60s → 120s (cap). Timers use unref(). */
@@ -270,6 +274,38 @@ export class QueueProcessor {
         },
       },
     });
+  }
+
+  private publishConvergenceQueueUpdate(
+    threadId: string,
+    userId: string,
+    entries: QueueEntry[],
+    action: 'zombie_convergence' | 'zombie_convergence_retry',
+    logContext: Record<string, unknown>,
+  ): Promise<void> {
+    const scopeKey = JSON.stringify([threadId, userId]);
+    const snapshot = entries.map((entry) => ({
+      ...entry,
+      targetCats: [...entry.targetCats],
+      ...(entry.mergedMessageIds ? { mergedMessageIds: [...entry.mergedMessageIds] } : {}),
+    }));
+    const previous = this.convergenceQueueUpdateTails.get(scopeKey) ?? Promise.resolve();
+    const publication = previous.then(() =>
+      emitQueueUpdated(this.deps.socketManager, userId, threadId, snapshot, this.deps.messageStore, action),
+    );
+    const tail = publication.catch((err) =>
+      this.deps.log.warn(
+        { ...logContext, threadId, userId, action, err },
+        '[F220 2a] queue update after zombie convergence failed',
+      ),
+    );
+    this.convergenceQueueUpdateTails.set(scopeKey, tail);
+    void tail.then(() => {
+      if (this.convergenceQueueUpdateTails.get(scopeKey) === tail) {
+        this.convergenceQueueUpdateTails.delete(scopeKey);
+      }
+    });
+    return tail;
   }
 
   /** F088 fix: Late-bind outbound hook (set after gateway bootstrap). */
@@ -463,18 +499,12 @@ export class QueueProcessor {
         // newer processing/completed snapshot. The promise is returned to the
         // convergence coordinator instead of awaited here, so slow enrichment
         // does not block other zombies from reaching their critical mutation.
-        const queueUpdate = emitQueueUpdated(
-          this.deps.socketManager,
-          userId,
+        const queueUpdate = this.publishConvergenceQueueUpdate(
           threadId,
+          userId,
           this.deps.queue.list(threadId, userId),
-          this.deps.messageStore,
           'zombie_convergence',
-        ).catch((err) =>
-          this.deps.log.warn(
-            { threadId, catId, userId, entryId: entry.id, err },
-            '[F220 2a] queue update after zombie convergence failed',
-          ),
+          { catId, entryId: entry.id },
         );
         return { removed: true, entryId: entry.id, primaryCatId, rolledBackSiblings, queueUpdate };
       },
@@ -573,18 +603,12 @@ export class QueueProcessor {
                 },
                 '[F220 2a] durable retry: removed stale processing entry + released slot',
               );
-              const queueUpdate = emitQueueUpdated(
-                this.deps.socketManager,
-                userId,
+              const queueUpdate = this.publishConvergenceQueueUpdate(
                 threadId,
+                userId,
                 this.deps.queue.list(threadId, userId),
-                this.deps.messageStore,
                 'zombie_convergence_retry',
-              ).catch((emitErr) =>
-                this.deps.log.warn(
-                  { threadId, catId, userId, entryId: entry.id, err: emitErr },
-                  '[F220 2a] queue update after durable convergence retry failed',
-                ),
+                { catId, entryId: entry.id, attempt },
               );
               queueUpdate
                 .then(() => this.tryExecuteNextAcrossUsers(threadId, slotCat))

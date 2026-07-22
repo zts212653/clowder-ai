@@ -2063,4 +2063,104 @@ describe('Sol maintainer R18: convergence event ordering', () => {
       'full snapshots must be emitted in mutation order',
     );
   });
+
+  it('R19 P1: serializes concurrent zombie removal snapshots for the same thread and user', async () => {
+    const queue = new InvocationQueue();
+    const socketEmits = [];
+    let releaseFirstEnrichment;
+    let firstEnrichmentStarted;
+    const firstEnrichmentStartedPromise = new Promise((resolve) => {
+      firstEnrichmentStarted = resolve;
+    });
+    const messageStore = {
+      list: () => [],
+      get: () => null,
+      getById: async (messageId) => {
+        if (messageId === 'msg-b') {
+          firstEnrichmentStarted();
+          await new Promise((resolve) => {
+            releaseFirstEnrichment = resolve;
+          });
+        }
+        return null;
+      },
+      create: async () => ({ id: 'm1' }),
+      update: async () => {},
+      delete: async () => {},
+    };
+    const socketManager = {
+      broadcastAgentMessage: () => {},
+      broadcastToRoom: () => {},
+      emitToUser: (userId, event, data) => socketEmits.push({ userId, event, data }),
+    };
+    const { qp } = buildQueueProcessorWithQueue(queue, { messageStore, socketManager });
+
+    const zombieA = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'zombie A',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+      messageId: 'msg-a',
+    });
+    const zombieB = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'zombie B',
+      source: 'user',
+      targetCats: ['opus'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+      messageId: 'msg-b',
+    });
+    const independentZombie = queue.enqueue({
+      threadId: 't1',
+      userId: 'u2',
+      content: 'independent zombie',
+      source: 'user',
+      targetCats: ['gemini'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+      messageId: 'msg-c',
+    });
+    queue.markProcessingById('t1', zombieA.entry.id);
+    queue.markProcessingById('t1', zombieB.entry.id);
+    queue.markProcessingById('t1', independentZombie.entry.id);
+
+    const convergence = qp.buildQueueConvergence();
+    const removedA = convergence.removeStaleProcessing('t1', 'codex', 'u1', `queue-${zombieA.entry.id}`);
+    assert.equal(removedA.removed, true);
+    await firstEnrichmentStartedPromise;
+
+    const removedB = convergence.removeStaleProcessing('t1', 'opus', 'u1', `queue-${zombieB.entry.id}`);
+    assert.equal(removedB.removed, true);
+    const removedIndependent = convergence.removeStaleProcessing(
+      't1',
+      'gemini',
+      'u2',
+      `queue-${independentZombie.entry.id}`,
+    );
+    assert.equal(removedIndependent.removed, true);
+    await removedIndependent.queueUpdate;
+    assert.deepEqual(
+      socketEmits.filter((event) => event.userId === 'u1'),
+      [],
+      'newer B snapshot must wait behind slow older A publication',
+    );
+    assert.equal(socketEmits.filter((event) => event.userId === 'u2').length, 1, 'a different scope stays independent');
+
+    releaseFirstEnrichment();
+    await Promise.all([removedA.queueUpdate, removedB.queueUpdate]);
+
+    assert.deepEqual(
+      socketEmits.filter((event) => event.userId === 'u1').map((event) => event.data.queue.map((entry) => entry.id)),
+      [[zombieB.entry.id], []],
+      'same-scope full snapshots must publish in queue mutation order',
+    );
+  });
 });
