@@ -116,14 +116,15 @@ describe('F117: getByThread filters undelivered messages', () => {
     // legacy message (no deliveryStatus) — should appear
     store.append({ userId: 'u1', catId: null, content: 'legacy', mentions: [], timestamp: now });
     // delivered message — should appear
-    store.append({
+    const delivered = store.append({
       userId: 'u1',
       catId: null,
       content: 'delivered',
       mentions: [],
       timestamp: now + 1,
-      deliveryStatus: 'delivered',
+      deliveryStatus: 'queued',
     });
+    store.markDelivered(delivered.id, now + 1);
     // queued message — should NOT appear
     store.append({
       userId: 'u1',
@@ -134,14 +135,15 @@ describe('F117: getByThread filters undelivered messages', () => {
       deliveryStatus: 'queued',
     });
     // canceled message — should NOT appear
-    store.append({
+    const canceled = store.append({
       userId: 'u1',
       catId: null,
       content: 'canceled',
       mentions: [],
       timestamp: now + 3,
-      deliveryStatus: 'canceled',
+      deliveryStatus: 'queued',
     });
+    store.markCanceled(canceled.id);
 
     const results = store.getByThread('default', 50, 'u1');
     const contents = results.map((m) => m.content);
@@ -165,8 +167,9 @@ describe('F117: getByThreadAfter filters undelivered messages', () => {
       content: 'delivered',
       mentions: [],
       timestamp: now,
-      deliveryStatus: 'delivered',
+      deliveryStatus: 'queued',
     });
+    store.markDelivered(m1.id, now);
     store.append({
       userId: 'u1',
       catId: null,
@@ -175,14 +178,15 @@ describe('F117: getByThreadAfter filters undelivered messages', () => {
       timestamp: now + 1,
       deliveryStatus: 'queued',
     });
-    store.append({
+    const canceled = store.append({
       userId: 'u1',
       catId: null,
       content: 'canceled',
       mentions: [],
       timestamp: now + 2,
-      deliveryStatus: 'canceled',
+      deliveryStatus: 'queued',
     });
+    store.markCanceled(canceled.id);
     store.append({
       userId: 'u1',
       catId: null,
@@ -265,14 +269,15 @@ describe('F117: getMentionsFor filters undelivered messages', () => {
     const now = Date.now();
 
     // delivered mention — should appear
-    store.append({
+    const delivered = store.append({
       userId: 'u1',
       catId: null,
       content: '@gpt52 delivered',
       mentions: ['gpt52'],
       timestamp: now,
-      deliveryStatus: 'delivered',
+      deliveryStatus: 'queued',
     });
+    store.markDelivered(delivered.id, now);
     // queued mention — should NOT appear
     store.append({
       userId: 'u1',
@@ -283,14 +288,15 @@ describe('F117: getMentionsFor filters undelivered messages', () => {
       deliveryStatus: 'queued',
     });
     // canceled mention — should NOT appear
-    store.append({
+    const canceled = store.append({
       userId: 'u1',
       catId: null,
       content: '@gpt52 canceled',
       mentions: ['gpt52'],
       timestamp: now + 2,
-      deliveryStatus: 'canceled',
+      deliveryStatus: 'queued',
     });
+    store.markCanceled(canceled.id);
     // legacy mention (no deliveryStatus) — should appear
     store.append({ userId: 'u1', catId: null, content: '@gpt52 legacy', mentions: ['gpt52'], timestamp: now + 3 });
 
@@ -307,14 +313,15 @@ describe('F117: getMentionsFor filters undelivered messages', () => {
     const store = new MessageStore();
     const now = Date.now();
 
-    store.append({
+    const delivered = store.append({
       userId: 'u1',
       catId: null,
       content: '@gpt52 delivered',
       mentions: ['gpt52'],
       timestamp: now,
-      deliveryStatus: 'delivered',
+      deliveryStatus: 'queued',
     });
+    store.markDelivered(delivered.id, now);
     store.append({
       userId: 'u1',
       catId: null,

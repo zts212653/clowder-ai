@@ -26,6 +26,246 @@ describe('MessageStore', () => {
     assert.equal(store.size, 1);
   });
 
+  test('append() rejects timestamps outside the sortable-ID-safe Date domain before side effects', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const invalidTimestamps = [
+      -1,
+      1.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      8_640_000_000_000_001,
+      -8_640_000_000_000_001,
+    ];
+    for (const timestamp of invalidTimestamps) {
+      let listenerCalls = 0;
+      const store = new MessageStore({ onAppend: () => listenerCalls++ });
+
+      assert.throws(
+        () =>
+          store.append({
+            userId: 'user-1',
+            catId: null,
+            content: 'must not persist',
+            mentions: [],
+            timestamp,
+            idempotencyKey: 'invalid-date',
+          }),
+        { name: 'RangeError', message: /non-negative integer ECMAScript Date/ },
+      );
+      assert.equal(store.size, 0, `timestamp ${String(timestamp)} must not append`);
+      assert.equal(listenerCalls, 0, `timestamp ${String(timestamp)} must not notify`);
+    }
+  });
+
+  test('append() admits non-negative integer ECMAScript Date boundaries', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = new MessageStore();
+
+    for (const timestamp of [0, 1, 8_640_000_000_000_000]) {
+      const stored = store.append({
+        userId: 'user-1',
+        catId: null,
+        content: 'valid Date input',
+        mentions: [],
+        timestamp,
+      });
+      assert.equal(stored.timestamp, timestamp);
+    }
+    assert.equal(store.size, 3);
+  });
+
+  test('append() rejects transition-owned delivery metadata before side effects and permits a queued retry', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    let listenerCalls = 0;
+    const store = new MessageStore({ onAppend: () => listenerCalls++ });
+    const base = {
+      userId: 'user-1',
+      catId: null,
+      content: 'delivery ownership probe',
+      mentions: [],
+      timestamp: 100,
+      threadId: 'thread-append-delivery-owner',
+      idempotencyKey: 'append-delivery-owner',
+    };
+    const invalidMetadata = [
+      { deliveredAt: undefined },
+      { deliveredAt: 100.5, deliveryStatus: 'delivered' },
+      { deliveredAt: Number.POSITIVE_INFINITY, deliveryStatus: 'delivered' },
+      { deliveredAt: 101, deliveryStatus: 'delivered' },
+      { deliveryStatus: 'delivered' },
+      { deliveryStatus: 'canceled' },
+    ];
+
+    for (const metadata of invalidMetadata) {
+      assert.throws(() => store.append({ ...base, ...metadata }), {
+        name: 'TypeError',
+        message: /append.*delivery metadata|transition owner/i,
+      });
+      assert.equal(store.size, 0, 'ownership rejection must not append');
+      assert.equal(listenerCalls, 0, 'ownership rejection must not notify listeners');
+    }
+
+    const queued = store.append({ ...base, deliveryStatus: 'queued' });
+    assert.equal(queued.deliveryStatus, 'queued');
+    assert.equal(queued.deliveredAt, undefined);
+    assert.deepEqual(store.getById(queued.id), queued);
+    assert.equal(store.size, 1);
+    assert.equal(listenerCalls, 1);
+  });
+
+  test('markCanceled() transitions only queued messages and preserves legacy/delivered state', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = new MessageStore();
+    const base = {
+      userId: 'user-cancel-owner',
+      catId: null,
+      mentions: [],
+      threadId: 'thread-cancel-owner',
+    };
+    const queued = store.append({ ...base, content: 'queued', timestamp: 100, deliveryStatus: 'queued' });
+    const legacy = store.append({ ...base, content: 'legacy', timestamp: 110 });
+    const delivered = store.append({ ...base, content: 'delivered', timestamp: 120, deliveryStatus: 'queued' });
+    store.markDelivered(delivered.id, 200);
+
+    const legacyBefore = { ...legacy };
+    const deliveredBefore = { ...delivered };
+
+    const canceled = store.markCanceled(queued.id);
+    assert.equal(canceled.deliveryStatus, 'canceled');
+    assert.equal(canceled.deliveredAt, undefined);
+
+    assert.deepEqual(store.markCanceled(legacy.id), legacyBefore, 'legacy-immediate must remain unchanged');
+    assert.deepEqual(store.getById(legacy.id), legacyBefore);
+    assert.deepEqual(store.markCanceled(delivered.id), deliveredBefore, 'delivered state must remain unchanged');
+    assert.deepEqual(store.getById(delivered.id), deliveredBefore);
+
+    const canceledBefore = { ...canceled };
+    assert.deepEqual(store.markCanceled(queued.id), canceledBefore, 'repeated cancellation must be a no-op');
+  });
+
+  test('markDelivered() rejects unsafe order timestamps before state transition and permits a valid retry', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const invalidTimestamps = [
+      -1,
+      1.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      8_640_000_000_000_001,
+      -8_640_000_000_000_001,
+    ];
+    const validTimestamps = [0, 8_640_000_000_000_000];
+
+    for (const [index, deliveredAt] of invalidTimestamps.entries()) {
+      const store = new MessageStore();
+      const queued = store.append({
+        userId: 'user-1',
+        catId: null,
+        content: `queued ${index}`,
+        mentions: [],
+        timestamp: 100 + index,
+        threadId: 'thread-delivery-admission',
+        deliveryStatus: 'queued',
+      });
+      const before = { ...queued };
+
+      assert.throws(() => store.markDelivered(queued.id, deliveredAt), {
+        name: 'RangeError',
+        message: /non-negative integer ECMAScript Date/,
+      });
+      assert.deepEqual(store.getById(queued.id), before, `invalid ${String(deliveredAt)} must not mutate message`);
+      assert.equal(queued.deliveryStatus, 'queued');
+      assert.equal(queued.deliveredAt, undefined);
+
+      const validDeliveredAt = validTimestamps[index] ?? 1_000 + index;
+      const delivered = store.markDelivered(queued.id, validDeliveredAt);
+      assert.equal(delivered.deliveryStatus, 'delivered');
+      assert.equal(delivered.deliveredAt, validDeliveredAt);
+
+      const afterDelivery = { ...delivered };
+      assert.throws(() => store.markDelivered(queued.id, deliveredAt), RangeError);
+      assert.deepEqual(store.getById(queued.id), afterDelivery, 'invalid input must not be state-dependent');
+    }
+  });
+
+  test('markDelivered() recovery preserves bounded effective-order pagination', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const { collectAllThreadMessages } = await import(
+      '../dist/domains/cats/services/agents/routing/thread-artifacts-aggregator.js'
+    );
+    const store = new MessageStore();
+    const threadId = 'thread-delivery-admission-pagination';
+    const first = store.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'first',
+      mentions: [],
+      timestamp: 100,
+      threadId,
+      deliveryStatus: 'queued',
+    });
+    const second = store.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'second',
+      mentions: [],
+      timestamp: 200,
+      threadId,
+      deliveryStatus: 'queued',
+    });
+
+    assert.throws(() => store.markDelivered(first.id, Number.POSITIVE_INFINITY), RangeError);
+    store.markDelivered(first.id, 300);
+    store.markDelivered(second.id, 400);
+
+    const collected = await collectAllThreadMessages(store, threadId, undefined, 1);
+    assert.deepEqual(
+      collected.map((message) => message.id),
+      [second.id, first.id],
+      'one-record pages must return both messages exactly once after a valid retry',
+    );
+  });
+
+  test('admitted timestamp classes preserve chronological ID and delivery-cursor order', async () => {
+    const { generateSortableId } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
+    const timestamps = [0, 1, 8_640_000_000_000_000];
+    const ids = timestamps.map((timestamp) => generateSortableId(timestamp));
+
+    assert.deepEqual([...ids].sort(), ids, 'IDs must sort in the same order as admitted timestamps');
+
+    const cursorStore = new DeliveryCursorStore();
+    for (const id of ids) {
+      await cursorStore.ackCursor('user-1', 'opus', 'thread-sortable-domain', id);
+      assert.equal(await cursorStore.getCursor('user-1', 'opus', 'thread-sortable-domain'), id);
+    }
+  });
+
+  test('expired cursor recovery preserves order across admitted timestamp boundaries', async () => {
+    const { MessageStore, generateSortableId } = await import(
+      '../dist/domains/cats/services/stores/ports/MessageStore.js'
+    );
+    const store = new MessageStore();
+    const later = [2, 8_640_000_000_000_000].map((timestamp) =>
+      store.append({
+        userId: 'user-1',
+        catId: null,
+        content: `timestamp ${timestamp}`,
+        mentions: [],
+        timestamp,
+        threadId: 'thread-expired-cursor',
+      }),
+    );
+    const expiredCursor = generateSortableId(1);
+
+    assert.deepEqual(
+      store.getByThreadAfter('thread-expired-cursor', expiredCursor).map((message) => message.id),
+      later.map((message) => message.id),
+    );
+  });
+
   test('augmentStreamMetadata() enriches callback messages without replacing canonical content', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 

@@ -18,9 +18,12 @@ import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { AppendMessageInput, StoredMessage, StreamMetadataAugmentInput } from '../ports/MessageStore.js';
 import {
   applyStreamMetadataAugment,
+  assertValidAppendDeliveryMetadata,
+  assertValidStoredMessageTimestamp,
   DEFAULT_THREAD_ID,
   generateSortableId,
   isDelivered,
+  isQueuedForDeliveryTransition,
 } from '../ports/MessageStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import { isSystemUserMessage } from '../visibility.js';
@@ -38,6 +41,22 @@ const log = createModuleLogger('redis-message-store');
 
 const DEFAULT_LIMIT = 50;
 const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
+
+const REDIS_NUMBER_ALIASES = new Map<string, number>([
+  ['', Number.NaN],
+  ['inf', Number.POSITIVE_INFINITY],
+  ['+inf', Number.POSITIVE_INFINITY],
+  ['-inf', Number.NEGATIVE_INFINITY],
+]);
+
+function parseRedisNumber(raw: string): number {
+  const value = raw.trim();
+  return REDIS_NUMBER_ALIASES.get(value) ?? Number(value);
+}
+
+function parseStoredMessageTimestamp(raw: string | undefined): number {
+  return parseRedisNumber(raw ?? '0');
+}
 
 export class RedisMessageStore {
   private readonly redis: RedisClient;
@@ -75,6 +94,8 @@ export class RedisMessageStore {
   }
 
   async append(msg: AppendMessageInput): Promise<StoredMessage> {
+    assertValidAppendDeliveryMetadata(msg);
+    assertValidStoredMessageTimestamp(msg.timestamp);
     const threadId = msg.threadId ?? DEFAULT_THREAD_ID;
     const id = generateSortableId(msg.timestamp);
     const idempotencyIndexKey = msg.idempotencyKey
@@ -224,7 +245,7 @@ export class RedisMessageStore {
       ...(parsedMetadata ? { metadata: parsedMetadata } : {}),
       ...(parsedExtra ? { extra: parsedExtra } : {}),
       mentions: safeParseMentions(data.mentions),
-      timestamp: parseInt(data.timestamp ?? '0', 10),
+      timestamp: parseStoredMessageTimestamp(data.timestamp),
       ...(deletedAt ? { deletedAt, deletedBy: data.deletedBy ?? '' } : {}),
       ...(data._tombstone === '1' ? { _tombstone: true as const } : {}),
       ...(data.thinking ? { thinking: data.thinking } : {}),
@@ -655,7 +676,7 @@ export class RedisMessageStore {
       for (const id of chunk) {
         if (filtered.length >= limit) break;
         const score = await this.redis.zscore(key, id);
-        if (score !== null && parseInt(score, 10) === timestamp && id >= beforeId) {
+        if (score !== null && parseRedisNumber(score) === timestamp && id >= beforeId) {
           continue;
         }
         filtered.push(id);
@@ -691,7 +712,7 @@ export class RedisMessageStore {
       const validIds: string[] = [];
       for (const id of chunk) {
         const score = await this.redis.zscore(key, id);
-        if (score !== null && Number.parseInt(score, 10) === timestamp && id >= beforeId) {
+        if (score !== null && parseRedisNumber(score) === timestamp && id >= beforeId) {
           continue;
         }
         validIds.push(id);
@@ -851,11 +872,12 @@ export class RedisMessageStore {
     return augmented;
   }
 
-  /** F098-D: Mark a queued message as delivered (set deliveredAt timestamp). */
+  /** F098-D: Mark a queued message as delivered at an admitted non-negative integral Date value. */
   async markDelivered(id: string, deliveredAt: number): Promise<StoredMessage | null> {
+    assertValidStoredMessageTimestamp(deliveredAt);
     const msg = await this.getById(id);
     if (!msg) return null;
-    if (msg.deliveryStatus !== 'queued') return msg; // only transition queued → delivered
+    if (!isQueuedForDeliveryTransition(msg)) return msg;
     const pipeline = this.redis.multi();
     pipeline.hset(MessageKeys.detail(id), {
       deliveredAt: String(deliveredAt),
@@ -877,6 +899,7 @@ export class RedisMessageStore {
   async markCanceled(id: string): Promise<StoredMessage | null> {
     const msg = await this.getById(id);
     if (!msg) return null;
+    if (!isQueuedForDeliveryTransition(msg)) return msg;
     await this.redis.hset(MessageKeys.detail(id), { deliveryStatus: 'canceled' });
     msg.deliveryStatus = 'canceled';
     return msg;
@@ -963,7 +986,7 @@ export class RedisMessageStore {
         ...(parsedMetadata ? { metadata: parsedMetadata } : {}),
         ...(parsedExtra ? { extra: parsedExtra } : {}),
         mentions: safeParseMentions(d.mentions),
-        timestamp: parseInt(d.timestamp ?? '0', 10),
+        timestamp: parseStoredMessageTimestamp(d.timestamp),
         ...(deletedAt ? { deletedAt, deletedBy: d.deletedBy ?? '' } : {}),
         ...(d._tombstone === '1' ? { _tombstone: true as const } : {}),
         ...(d.thinking ? { thinking: d.thinking } : {}),

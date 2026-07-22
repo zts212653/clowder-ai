@@ -279,8 +279,9 @@ describe('POST /api/messages — replyTo validation', () => {
       mentions: [],
       timestamp: 1000,
       threadId: thread.id,
-      deliveryStatus: 'canceled',
+      deliveryStatus: 'queued',
     });
+    messageStore.markCanceled(canceled.id);
 
     const res = await app.inject({
       method: 'POST',

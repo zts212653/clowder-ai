@@ -28,6 +28,11 @@ export function isDelivered(msg: StoredMessage): boolean {
   return !msg.deliveryStatus || msg.deliveryStatus === 'delivered';
 }
 
+/** Terminal delivery transitions are valid only while the message is queued. */
+export function isQueuedForDeliveryTransition(msg: Pick<StoredMessage, 'deliveryStatus'>): boolean {
+  return msg.deliveryStatus === 'queued';
+}
+
 /**
  * A tool event recorded during agent invocation (tool_use / tool_result).
  * Persisted alongside the assistant message so history reload can display them.
@@ -150,14 +155,30 @@ export interface StoredMessage {
 /**
  * Input for appending a message. threadId is optional (defaults to 'default').
  */
-export type AppendMessageInput = Omit<StoredMessage, 'id' | 'threadId'> & {
+export type AppendMessageInput = Omit<StoredMessage, 'id' | 'threadId' | 'deliveredAt' | 'deliveryStatus'> & {
   threadId?: string;
+  /** Append may initialize only queued state; terminal delivery metadata belongs to transition methods. */
+  deliveryStatus?: 'queued';
   /**
    * Optional idempotency token scoped to (userId + threadId + key).
    * Reusing the same token returns the original stored message.
    */
   idempotencyKey?: string;
 };
+
+/**
+ * Enforce delivery lifecycle ownership for JavaScript callers that can bypass
+ * the structural AppendMessageInput boundary.
+ */
+export function assertValidAppendDeliveryMetadata(msg: AppendMessageInput): void {
+  const runtimeInput = msg as AppendMessageInput & Partial<Pick<StoredMessage, 'deliveredAt' | 'deliveryStatus'>>;
+  if (
+    'deliveredAt' in runtimeInput ||
+    (runtimeInput.deliveryStatus !== undefined && runtimeInput.deliveryStatus !== 'queued')
+  ) {
+    throw new TypeError('append() delivery metadata is transition-owned; only queued status may be initialized');
+  }
+}
 
 /**
  * Stream-only metadata collected by route-serial after a callback message was
@@ -313,7 +334,7 @@ export interface IMessageStore {
     id: string,
     patch: StreamMetadataAugmentInput,
   ): StoredMessage | null | Promise<StoredMessage | null>;
-  /** F098-D: Mark a queued message as delivered (set deliveredAt). Returns null if not found. */
+  /** F098-D: Deliver a queued message at a non-negative integral ECMAScript Date value. Null if not found. */
   markDelivered(id: string, deliveredAt: number): StoredMessage | null | Promise<StoredMessage | null>;
   /** F117: Mark a queued message as canceled (withdraw/clear). Returns null if not found. */
   markCanceled(id: string): StoredMessage | null | Promise<StoredMessage | null>;
@@ -336,6 +357,18 @@ const MAX_MESSAGES = 2000;
 
 /** Default limit for queries */
 const DEFAULT_LIMIT = 50;
+
+/**
+ * Fail closed before persisting a timestamp that the current sortable-ID
+ * encoding cannot order. Until D2 replaces lexical message-ID cursors with an
+ * explicit order key, new writes are restricted to non-negative integral
+ * ECMAScript Date values. Historical hydration remains unchanged.
+ */
+export function assertValidStoredMessageTimestamp(timestamp: number): void {
+  if (!Number.isInteger(timestamp) || timestamp < 0 || Number.isNaN(new Date(timestamp).getTime())) {
+    throw new RangeError('message timestamp must be a non-negative integer ECMAScript Date value');
+  }
+}
 
 /**
  * In-memory bounded message store.
@@ -388,6 +421,8 @@ export class MessageStore {
    * Append a message to the store. Returns the stored message with generated id.
    */
   append(msg: AppendMessageInput): StoredMessage {
+    assertValidAppendDeliveryMetadata(msg);
+    assertValidStoredMessageTimestamp(msg.timestamp);
     const threadId = msg.threadId ?? DEFAULT_THREAD_ID;
     const idempotencyIndexKey = this.buildIdempotencyIndexKey(msg.userId, threadId, msg.idempotencyKey);
     if (idempotencyIndexKey) {
@@ -728,12 +763,13 @@ export class MessageStore {
   }
 
   /**
-   * F098-D: Mark a queued message as delivered (set deliveredAt timestamp).
+   * F098-D: Mark a queued message as delivered at an admitted non-negative integral Date value.
    */
   markDelivered(id: string, deliveredAt: number): StoredMessage | null {
+    assertValidStoredMessageTimestamp(deliveredAt);
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
-    if (msg.deliveryStatus !== 'queued') return msg; // only transition queued → delivered
+    if (!isQueuedForDeliveryTransition(msg)) return msg;
     msg.deliveredAt = deliveredAt;
     msg.deliveryStatus = 'delivered';
     return msg;
@@ -743,6 +779,7 @@ export class MessageStore {
   markCanceled(id: string): StoredMessage | null {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
+    if (!isQueuedForDeliveryTransition(msg)) return msg;
     msg.deliveryStatus = 'canceled';
     return msg;
   }

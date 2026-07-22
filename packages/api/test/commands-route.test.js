@@ -3,7 +3,8 @@
  */
 
 import assert from 'node:assert/strict';
-import { beforeEach, describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
+import { catRegistry } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { TaskStore } from '../dist/domains/cats/services/stores/ports/TaskStore.js';
@@ -24,6 +25,8 @@ const mockSocketManager = {
   broadcastToRoom: () => {},
 };
 
+const TEST_MESSAGE_TIMESTAMP = Date.now();
+
 describe('Commands Routes', () => {
   let app;
   let messageStore;
@@ -33,6 +36,8 @@ describe('Commands Routes', () => {
   let otherThreadId;
 
   beforeEach(async () => {
+    catRegistry.reset();
+    catRegistry.register('opus', { id: 'opus', name: 'Opus', client: 'anthropic' });
     app = Fastify();
     messageStore = new MessageStore();
     taskStore = new TaskStore();
@@ -50,12 +55,15 @@ describe('Commands Routes', () => {
     await app.ready();
   });
 
+  afterEach(() => catRegistry.reset());
+
   it('POST /api/commands/extract-tasks creates tasks', async () => {
     // Add some messages first
     await messageStore.append({
       content: 'TODO: write tests',
       userId: 'test-user',
       threadId: ownThreadId,
+      timestamp: TEST_MESSAGE_TIMESTAMP,
     });
 
     const res = await app.inject({
@@ -105,6 +113,7 @@ describe('Commands Routes', () => {
       content: 'TODO: header identity should win',
       userId: 'test-user',
       threadId: ownThreadId,
+      timestamp: TEST_MESSAGE_TIMESTAMP,
     });
 
     const res = await app.inject({
@@ -139,6 +148,7 @@ describe('Commands Routes', () => {
       content: 'TODO: should not be visible',
       userId: 'other-user',
       threadId: otherThreadId,
+      timestamp: TEST_MESSAGE_TIMESTAMP,
     });
 
     const res = await app.inject({
