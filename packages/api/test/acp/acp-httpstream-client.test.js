@@ -1027,6 +1027,8 @@ describe('AcpHttpStreamClient', () => {
       false,
       'cancelled HTTP prompt must mark a single-flight carrier unsafe for warm reuse',
     );
+    assert.equal(client.isSessionSafeForReuse('http-cancel-cb'), false);
+    assert.equal(client.isSessionSafeForReuse('unrelated-sess'), true);
 
     // Should settle promptly — not wait for idle stall (5s) or budget (10s)
     assert.ok(elapsed < 2000, `HTTP cancel should settle within 2s, took ${elapsed}ms`);

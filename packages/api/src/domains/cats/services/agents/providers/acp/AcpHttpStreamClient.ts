@@ -78,8 +78,8 @@ export class AcpHttpStreamClient {
   private child: ChildProcess | null = null;
   private closed = false;
   private exited = false;
-  /** False once an upstream prompt was cancelled without a completion acknowledgement. */
-  private singleFlightReusable = true;
+  /** Sessions whose local prompt ended before provider completion was acknowledged. */
+  private readonly unquiescedSessionIds = new Set<string>();
   private port: number | null = null;
   private baseUrl = '';
   private initResult: AcpInitializeResult | null = null;
@@ -371,7 +371,7 @@ export class AcpHttpStreamClient {
       if (done) return;
       // Aborting the local HTTP stream does not prove the provider stopped the
       // prompt. The pool uses this only for single-flight retirement.
-      this.singleFlightReusable = false;
+      this.unquiescedSessionIds.add(sessionId);
       log.info({ sessionId, eventCount }, 'HTTP cancel settled local prompt stream');
       promptError = new AcpStreamIdleError(
         sessionId,
@@ -577,7 +577,10 @@ export class AcpHttpStreamClient {
     return this.child !== null && !this.child.killed && !this.closed && !this.exited;
   }
   get isSafeForSingleFlightReuse(): boolean {
-    return this.singleFlightReusable;
+    return this.unquiescedSessionIds.size === 0;
+  }
+  isSessionSafeForReuse(sessionId: string): boolean {
+    return !this.unquiescedSessionIds.has(sessionId);
   }
 
   onCapacity(fn: (signal: AcpCapacitySignal) => void): void {

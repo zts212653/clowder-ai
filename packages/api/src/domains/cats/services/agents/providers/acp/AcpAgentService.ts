@@ -22,7 +22,7 @@ import { readCapabilitiesConfig } from '../../../../../../config/capabilities/ca
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import { createPromptDigest } from '../../../context/prompt-digest.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
-import { type AcpCapacitySignal, AcpProtocolError, AcpTimeoutError } from './AcpClient.js';
+import { type AcpCapacitySignal, AcpProtocolError, AcpStreamIdleError, AcpTimeoutError } from './AcpClient.js';
 import { type AcpLease, type AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS, type PoolKey } from './AcpProcessPool.js';
 import {
   bindSessionCredentialFile,
@@ -167,6 +167,15 @@ export class AcpAgentService implements AgentService {
     const cwd = options?.workingDirectory ?? this.projectRoot;
     let sessionId: string | undefined;
 
+    const sealUnquiescedSession = (activeSessionId: string) => {
+      const sessionIds = new Set([activeSessionId, options?.sessionId].filter((id): id is string => Boolean(id)));
+      for (const id of sessionIds) this.pool.sealSession?.(this.poolKey, id);
+    };
+    const cancelUnquiescedSession = (activeSessionId: string) => {
+      sealUnquiescedSession(activeSessionId);
+      client.cancelSession(activeSessionId);
+    };
+
     // Per-invoke capacity listener — covers the entire invoke lifecycle (newSession + prompt + grace).
     // This is intentionally invoke-level, not prompt-level: capacity is a provider-level property
     // (same process = same API key = same quota), so signals from any phase are relevant.
@@ -183,7 +192,7 @@ export class AcpAgentService implements AgentService {
       ? () => {
           log.info({ ...ctx, sessionId }, 'ACP session cancelled via abort signal');
           if (sessionId && client) {
-            client.cancelSession(sessionId);
+            cancelUnquiescedSession(sessionId);
           }
         }
       : undefined;
@@ -267,7 +276,13 @@ export class AcpAgentService implements AgentService {
       // Session reuse: if options.sessionId is provided (from session chain), try to
       // reuse the existing ACP session for multi-turn memory. The agent keeps conversation
       // history server-side, so reusing the session avoids "amnesia" across turns.
-      const resumeSessionId = options?.sessionId;
+      const resumeSessionId = lease.canResumeRequestedSession === false ? undefined : options?.sessionId;
+      if (options?.sessionId && !resumeSessionId) {
+        log.warn(
+          { ...ctx, sealedSessionId: options.sessionId },
+          'ACP cancelled session is sealed; creating a fresh replacement session',
+        );
+      }
       let isResumedSession = false;
       let resumeSessionLoadFailed = false;
 
@@ -347,7 +362,7 @@ export class AcpAgentService implements AgentService {
 
       // Window 2: abort may have fired during newSession
       if (options?.signal?.aborted) {
-        client.cancelSession(sessionId);
+        cancelUnquiescedSession(sessionId);
         yield {
           type: 'error',
           catId: this.catId,
@@ -371,7 +386,7 @@ export class AcpAgentService implements AgentService {
 
       // Window 3: consumer may abort during the yield above
       if (options?.signal?.aborted) {
-        client.cancelSession(sessionId);
+        cancelUnquiescedSession(sessionId);
         yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
         return;
       }
@@ -459,7 +474,7 @@ export class AcpAgentService implements AgentService {
               { ...ctx, sessionId, eventCount, scratchpadSuppressedEvents },
               'ACP compaction auto-continue loop detected — cancelling session',
             );
-            client.cancelSession(sessionId);
+            cancelUnquiescedSession(sessionId);
             throw new Error(
               `ACP compaction auto-continue loop cancelled after ${scratchpadSuppressedEvents} suppressed events`,
             );
@@ -504,7 +519,7 @@ export class AcpAgentService implements AgentService {
 
           // Abort may have fired during the fresh newSession (mirrors Window 2)
           if (options?.signal?.aborted) {
-            client.cancelSession(freshSessionId);
+            cancelUnquiescedSession(freshSessionId);
             yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
             return;
           }
@@ -534,7 +549,7 @@ export class AcpAgentService implements AgentService {
 
           // Consumer may abort during the yield above (mirrors Window 3)
           if (options?.signal?.aborted) {
-            client.cancelSession(freshSessionId);
+            cancelUnquiescedSession(freshSessionId);
             yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
             return;
           }
@@ -573,6 +588,9 @@ export class AcpAgentService implements AgentService {
           yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
           return; // Exit — retry path handled completion
         } catch (retryErr) {
+          if (sessionId && (retryErr instanceof AcpTimeoutError || retryErr instanceof AcpStreamIdleError)) {
+            sealUnquiescedSession(sessionId);
+          }
           const retryErrMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
           log.error({ ...ctx, sessionId, err: retryErrMsg }, '#1091: retry with fresh session also failed');
           yield {
@@ -596,6 +614,9 @@ export class AcpAgentService implements AgentService {
 
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
     } catch (err) {
+      if (sessionId && (err instanceof AcpTimeoutError || err instanceof AcpStreamIdleError)) {
+        sealUnquiescedSession(sessionId);
+      }
       const waitedMs = promptStreamStartedAt ? Date.now() - promptStreamStartedAt : 0;
       // P1: stderr may arrive after timeout — give a grace window for late capacity signals
       if (!capacitySignal && err instanceof AcpTimeoutError) {

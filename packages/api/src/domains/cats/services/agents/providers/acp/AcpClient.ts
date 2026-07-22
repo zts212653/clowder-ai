@@ -141,8 +141,8 @@ export class AcpClient {
   private initResult: AcpInitializeResult | null = null;
   private closed = false;
   private exited = false;
-  /** False once an upstream prompt was cancelled without a completion acknowledgement. */
-  private singleFlightReusable = true;
+  /** Sessions whose local prompt ended before provider completion was acknowledged. */
+  private readonly unquiescedSessionIds = new Set<string>();
   private readonly capacityListeners = new Set<(signal: AcpCapacitySignal) => void>();
   /**
    * #1186 P1: Per-session cancel callbacks — when cancelSession() is called,
@@ -598,7 +598,7 @@ export class AcpClient {
       if (done) return;
       // The local stream can settle before the provider acknowledges prompt
       // termination. The pool uses this only for single-flight retirement.
-      this.singleFlightReusable = false;
+      this.unquiescedSessionIds.add(sessionId);
       log.info({ sessionId, eventCount }, 'Session cancel settled local prompt stream');
       promptError = new AcpStreamIdleError(
         sessionId,
@@ -647,6 +647,7 @@ export class AcpClient {
         stopReason = result.stopReason;
       })
       .catch((err: Error) => {
+        if (err instanceof AcpTimeoutError) this.unquiescedSessionIds.add(sessionId);
         promptError = err;
       })
       .finally(() => {
@@ -758,7 +759,11 @@ export class AcpClient {
   }
 
   get isSafeForSingleFlightReuse(): boolean {
-    return this.singleFlightReusable;
+    return this.unquiescedSessionIds.size === 0;
+  }
+
+  isSessionSafeForReuse(sessionId: string): boolean {
+    return !this.unquiescedSessionIds.has(sessionId);
   }
 
   /** Register a capacity-signal listener scoped to a prompt's lifetime. */

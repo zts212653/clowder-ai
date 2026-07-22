@@ -959,6 +959,8 @@ describe('AcpClient', () => {
       false,
       'cancelled stdio prompt must mark a single-flight carrier unsafe for warm reuse',
     );
+    assert.equal(client.isSessionSafeForReuse('cancel-cb-sess'), false);
+    assert.equal(client.isSessionSafeForReuse('unrelated-sess'), true);
 
     // Should settle promptly — not wait for idle stall (5000ms) or budget (10000ms)
     assert.ok(elapsed < 2000, `Cancel should settle within 2s, took ${elapsed}ms`);

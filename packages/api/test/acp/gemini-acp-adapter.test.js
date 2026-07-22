@@ -346,6 +346,116 @@ describe('GeminiAcpAdapter', () => {
     assert.ok(messages.some((m) => m.type === 'text' && m.content === 'resumed via owner'));
   });
 
+  it('creates and publishes a fresh session when the pool seals a cancelled resume target', async () => {
+    const client = {
+      loadSessionCalls: [],
+      newSessionCalls: 0,
+      promptedSessionIds: [],
+      recentCapacitySignal: null,
+      async newSession() {
+        client.newSessionCalls++;
+        return { sessionId: 'fresh-after-cancel' };
+      },
+      async loadSession(sessionId) {
+        client.loadSessionCalls.push(sessionId);
+        return { sessionId };
+      },
+      async setSessionConfigOption() {},
+      cancelSession() {},
+      async *promptStream(sessionId) {
+        client.promptedSessionIds.push(sessionId);
+        yield {
+          sessionId,
+          update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'fresh result' } },
+        };
+      },
+      onCapacity() {},
+      offCapacity() {},
+      clearRecentCapacitySignal() {},
+    };
+    const rememberedSessions = [];
+    const fakePool = {
+      async acquire(poolKey) {
+        return {
+          client,
+          poolKey,
+          canResumeRequestedSession: false,
+          release() {},
+        };
+      },
+      rememberSession(_poolKey, sessionId) {
+        rememberedSessions.push(sessionId);
+      },
+    };
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: fakePool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      providerName: 'google',
+      modelName: 'gemini-acp',
+    });
+
+    const messages = [];
+    for await (const msg of adapter.invoke('continue safely', { sessionId: 'cancelled-sess' })) {
+      messages.push(msg);
+    }
+
+    assert.deepEqual(client.loadSessionCalls, [], 'sealed session must never reach loadSession');
+    assert.equal(client.newSessionCalls, 1);
+    assert.deepEqual(client.promptedSessionIds, ['fresh-after-cancel']);
+    assert.deepEqual(rememberedSessions, ['fresh-after-cancel']);
+    assert.ok(messages.some((msg) => msg.type === 'session_init' && msg.sessionId === 'fresh-after-cancel'));
+  });
+
+  it('seals both persisted and runtime session ids when a resumed prompt terminates locally', async () => {
+    const { AcpStreamIdleError } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpClient.js');
+    const sealedSessions = [];
+    const client = {
+      recentCapacitySignal: null,
+      async newSession() {
+        throw new Error('must not create before resume');
+      },
+      async loadSession() {
+        return { sessionId: 'runtime-session-alias' };
+      },
+      async setSessionConfigOption() {},
+      cancelSession() {},
+      async *promptStream(sessionId) {
+        throw new AcpStreamIdleError(sessionId, 100, 0, 100);
+      },
+      onCapacity() {},
+      offCapacity() {},
+      clearRecentCapacitySignal() {},
+    };
+    const fakePool = {
+      async acquire(poolKey) {
+        return { client, poolKey, release() {} };
+      },
+      rememberSession() {},
+      sealSession(_poolKey, sessionId) {
+        sealedSessions.push(sessionId);
+      },
+    };
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: fakePool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      idleTtlMs: 100,
+    });
+
+    for await (const _msg of adapter.invoke('resume then stall', { sessionId: 'persisted-session' })) {
+      // Drain terminal messages.
+    }
+
+    assert.deepEqual(
+      new Set(sealedSessions),
+      new Set(['persisted-session', 'runtime-session-alias']),
+      'all aliases of the unquiesced logical session must be sealed',
+    );
+  });
+
   it('falls back to session/new when resumed ACP session cannot be loaded', async () => {
     const { child, clientStdin, agentStdout } = createMockChild();
     const captured = [];
@@ -3489,5 +3599,108 @@ describe('#1186: cancel retires an unquiesced non-multiplexed carrier', () => {
     assert.notEqual(promptB.pid, promptA.pid, "Prompt B must not reach A's still-busy single-flight process");
     assert.equal(children.length, 2, 'Pool should spawn one replacement process');
     assert.equal(children[0].killed, true, 'The unquiesced first process must be retired');
+  });
+});
+
+describe('#1186: multiplexed cancel seals only the affected logical session', () => {
+  let pool = null;
+
+  afterEach(async () => {
+    if (pool) {
+      await pool.closeAll();
+      pool = null;
+    }
+  });
+
+  it('remaps the cancelled session on the same live carrier without calling session/load', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild(22_222);
+    let sessionCounter = 0;
+    const loads = [];
+    const prompts = [];
+    let unsafeSameSessionOverlap = false;
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          setImmediate(() =>
+            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT }) + '\n'),
+          );
+        } else if (msg.method === 'session/new') {
+          sessionCounter++;
+          const sessionId = `mux-sess-${sessionCounter}`;
+          setImmediate(() =>
+            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId } }) + '\n'),
+          );
+        } else if (msg.method === 'session/load') {
+          loads.push(msg.params.sessionId);
+          setImmediate(() =>
+            agentStdout.write(
+              JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: msg.params.sessionId } }) + '\n',
+            ),
+          );
+        } else if (msg.method === 'session/prompt') {
+          const sessionId = msg.params.sessionId;
+          prompts.push({ sessionId, pid: child.pid });
+          if (sessionId === 'mux-sess-1' && prompts.filter((entry) => entry.sessionId === sessionId).length > 1) {
+            unsafeSameSessionOverlap = true;
+          }
+          setImmediate(() => {
+            agentStdout.write(
+              JSON.stringify({
+                jsonrpc: '2.0',
+                method: 'session/update',
+                params: {
+                  sessionId,
+                  update: {
+                    sessionUpdate: 'agent_message_chunk',
+                    content: { type: 'text', text: sessionId === 'mux-sess-1' ? 'start-A' : 'result-B' },
+                  },
+                },
+              }) + '\n',
+            );
+            if (sessionId !== 'mux-sess-1' || unsafeSameSessionOverlap) {
+              agentStdout.write(
+                JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } }) + '\n',
+              );
+            }
+          });
+        }
+        // session/cancel is deliberately ignored; prompt A remains unresolved.
+      }
+    });
+
+    pool = new AcpProcessPool(
+      { maxLiveProcesses: 1, idleTtlMs: 999_999, healthCheckIntervalMs: 999_999 },
+      { supportsMultiplexing: true },
+      () => new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child }),
+    );
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+    });
+
+    const abortController = new AbortController();
+    for await (const msg of adapter.invoke('task-A', { signal: abortController.signal })) {
+      if (msg.type === 'text') abortController.abort();
+    }
+
+    const secondMessages = [];
+    for await (const msg of adapter.invoke('task-B', { sessionId: 'mux-sess-1' })) {
+      secondMessages.push(msg);
+    }
+
+    assert.deepEqual(loads, [], 'sealed multiplexed session must not call session/load');
+    assert.equal(unsafeSameSessionOverlap, false);
+    assert.deepEqual(
+      prompts.map((entry) => entry.sessionId),
+      ['mux-sess-1', 'mux-sess-2'],
+      'replacement prompt must use a fresh logical session',
+    );
+    assert.ok(secondMessages.some((msg) => msg.type === 'session_init' && msg.sessionId === 'mux-sess-2'));
+    assert.equal(child.killed, false, 'unrelated sessions keep the multiplexed carrier alive');
+    assert.deepEqual(pool.getActivePids(), [22_222]);
   });
 });
