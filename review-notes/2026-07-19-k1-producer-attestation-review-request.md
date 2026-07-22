@@ -38,9 +38,9 @@ The shared helper admits only non-negative integral TimeClip values for append-t
 
 ## Architecture Ownership
 
-Architecture cell: `identity-session` with `thread-navigation` as the adjacent owner for the plan's later identity decisions; this Phase A1 slice reuses the existing `IMessageStore.append` and `IMessageStore.markDelivered` boundaries.
+Architecture cell: `dispatch`, grounded in F117's message-delivery lifecycle. The current map has no dedicated message-timeline storage cell, so this Phase A1 slice stays with the nearest existing delivery owner while reusing `IMessageStore.append`, `IMessageStore.markDelivered`, and `IMessageStore.markCanceled` boundaries. `bubble-pipeline` is an adjacent projection consumer only; it does not own persistence or terminal transitions.
 Map delta: `none`
-Why: this adds a pure admission invariant to two existing store implementations; it creates no parallel Store/Queue/Router/Adapter/Dispatcher/Binding and moves no ownership boundary.
+Why: this adds admission and source-state invariants to two existing store implementations inside the F117 delivery lifecycle; it creates no parallel Store/Queue/Router/Adapter/Dispatcher/Binding, moves no ownership boundary, and does not invent a new cell in a hotfix.
 
 Please reviewer check:
 
