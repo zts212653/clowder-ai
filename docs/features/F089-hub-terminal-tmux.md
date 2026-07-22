@@ -5,6 +5,7 @@ related_decisions: [012]
 topics: [terminal, tmux, workspace, xterm, pty, agent-observability]
 doc_kind: spec
 created: 2026-03-09
+tips_exempt: documentation-only gate repair — no new user-visible capability or interaction surface
 ---
 
 # F089 Hub Terminal & tmux Integration — 浏览器终端 + 猫猫可观测性
@@ -24,6 +25,21 @@ created: 2026-03-09
 
 > 终态是 tmux 管理所有 session，所以从 Day 1 底层就是 tmux。
 > "先做纯 PTY 再叠 tmux" = 脚手架（Phase 1 PTY 在 Phase 3 被推翻），违反 P1。
+
+## User Journey
+
+**Scope unit**：一个 workspace/worktree 及其对应的 tmux server。
+
+### 当前旅程（Phase 1–3a）
+
+1. Operator 在 Hub 的 Workspace Terminal 打开当前 workspace 的 shell，不需要切换到外部终端。
+2. 启用 tmux agent runtime 后，agent invocation 出现在同一 workspace 的 pane 列表中；operator 选择 pane，以只读方式观察 agent 正在执行的真实进程输出。
+3. Agent 异常退出时，`remain-on-exit` 保留 pane 现场，operator 可以回看最后输出并据此诊断，而不是只能重启后猜测原因。
+
+### 目标旅程（Phase 3 剩余项）
+
+1. Operator 从 watch 切换到 takeover，系统暂停机器侧 NDJSON 消费，避免人工输入与自动解析互相干扰。
+2. Operator 在同一 pane 中继续操作，并通过进程树查看、定位和管理 agent 启动的子进程。
 
 ## What
 
