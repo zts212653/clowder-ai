@@ -678,6 +678,11 @@ export class AcpClient {
         stopReason = result.stopReason;
       })
       .catch((err: Error) => {
+        // Local termination (idle watchdog, activity budget, or explicit cancel)
+        // rejects the pending protocol request as cleanup. Preserve the terminal
+        // cause that already settled the stream instead of replacing it with the
+        // generic cancellation rejection while queued events are still draining.
+        if (done && promptError) return;
         if (err instanceof AcpTimeoutError) this.unquiescedSessionIds.add(sessionId);
         promptError = err;
       })

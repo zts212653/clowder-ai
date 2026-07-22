@@ -846,6 +846,66 @@ describe('AcpClient', () => {
     assert.match(thrownError.message, /[Ss]tream idle|STREAM_IDLE/);
   });
 
+  it('#1186: delayed warning drain preserves the watchdog idle error', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'delayed-drain-sess' });
+        } else if (msg.method === 'session/prompt') {
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'delayed-drain-sess',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'start' } },
+            });
+          });
+          // Leave the prompt pending so the watchdog owns termination.
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const iter = client.promptStream('delayed-drain-sess', 'hello', {
+      idleWarningMs: 30,
+      idleStallMs: 100,
+      timeoutMs: 5000,
+    });
+    const first = await iter.next();
+    assert.equal(first.value?.update?.sessionUpdate, 'agent_message_chunk');
+
+    // Let both warning and stall fire while the async generator is paused at the
+    // first yield. The pending request rejection must not replace the watchdog's
+    // structured terminal error before the consumer drains the queued warning.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    const remainingEvents = [];
+    let thrownError = null;
+    try {
+      for (;;) {
+        const result = await iter.next();
+        if (result.done) break;
+        remainingEvents.push(result.value);
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+
+    assert.ok(
+      remainingEvents.some((event) => event.update?.sessionUpdate === 'stream_idle_warning'),
+      'queued idle warning should still be delivered',
+    );
+    assert.ok(thrownError, 'watchdog stall should terminate the stream');
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL');
+    assert.equal(thrownError.configuredIdleStallMs, 100);
+  });
+
   // #1186: Zero-first-event now produces AcpStreamIdleError at the configured TTL,
   // not AcpTimeoutError at the later budget. The idle watchdog starts at prompt start.
   it('#1186: zero-first-event produces AcpStreamIdleError at configured idleStallMs', async () => {
