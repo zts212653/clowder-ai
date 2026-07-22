@@ -21,6 +21,8 @@
  * - Sol maintainer R17 P2: explicit processingSlotTtlMs in slot tests (no
  *   CLI_TIMEOUT_MS env inheritance) + direct regressions for the a12d1f69f
  *   delayed-retry and late batch-finalizer fences
+ * - Cloud R18-R20: all full queue snapshots publish in mutation-time call order
+ *   for the same runtime/thread/user scope without blocking independent scopes
  */
 
 import assert from 'node:assert/strict';
@@ -30,6 +32,7 @@ const { reconcileZombies } = await import('../dist/domains/cats/services/agents/
 const { InvocationRecordStore } = await import('../dist/domains/cats/services/stores/ports/InvocationRecordStore.js');
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 const { QueueProcessor } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
+const { emitQueueUpdated } = await import('../dist/utils/queue-enrichment.js');
 
 function makeZombie({ invocationId, catId = 'opus', recordUpdatedAt = Date.now() - 700_000 }) {
   return {
@@ -2162,5 +2165,126 @@ describe('Sol maintainer R18: convergence event ordering', () => {
       [[zombieB.entry.id], []],
       'same-scope full snapshots must publish in queue mutation order',
     );
+  });
+
+  it('R20 P1: serializes route removal behind an older same-scope zombie snapshot', async () => {
+    const queue = new InvocationQueue();
+    const socketEmits = [];
+    let releaseZombieEnrichment;
+    let zombieEnrichmentStarted;
+    const zombieEnrichmentStartedPromise = new Promise((resolve) => {
+      zombieEnrichmentStarted = resolve;
+    });
+    const messageStore = {
+      list: () => [],
+      get: () => null,
+      getById: async (messageId) => {
+        if (messageId === 'msg-b') {
+          zombieEnrichmentStarted();
+          await new Promise((resolve) => {
+            releaseZombieEnrichment = resolve;
+          });
+        }
+        return null;
+      },
+      create: async () => ({ id: 'm1' }),
+      update: async () => {},
+      delete: async () => {},
+    };
+    const socketManager = {
+      broadcastAgentMessage: () => {},
+      broadcastToRoom: () => {},
+      emitToUser: (userId, event, data) => socketEmits.push({ userId, event, data }),
+    };
+    const { qp } = buildQueueProcessorWithQueue(queue, { messageStore, socketManager });
+
+    const zombieA = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'zombie A',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+      messageId: 'msg-a',
+    });
+    const queuedB = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'queued B',
+      source: 'user',
+      targetCats: ['opus'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+      messageId: 'msg-b',
+    });
+    queue.markProcessingById('t1', zombieA.entry.id);
+
+    const convergence = qp.buildQueueConvergence();
+    const removedA = convergence.removeStaleProcessing('t1', 'codex', 'u1', `queue-${zombieA.entry.id}`);
+    assert.equal(removedA.removed, true);
+    await zombieEnrichmentStartedPromise;
+
+    assert.ok(queue.remove('t1', 'u1', queuedB.entry.id));
+    const routeRemovalUpdate = emitQueueUpdated(
+      socketManager,
+      'u1',
+      't1',
+      queue.list('t1', 'u1'),
+      messageStore,
+      'removed',
+    );
+    await Promise.resolve();
+    assert.deepEqual(socketEmits, [], 'newer route snapshot must wait behind the older zombie publication');
+
+    releaseZombieEnrichment();
+    await Promise.all([removedA.queueUpdate, routeRemovalUpdate]);
+
+    assert.deepEqual(
+      socketEmits.map((event) => ({
+        action: event.data.action,
+        queueIds: event.data.queue.map((entry) => entry.id),
+      })),
+      [
+        { action: 'zombie_convergence', queueIds: [queuedB.entry.id] },
+        { action: 'removed', queueIds: [] },
+      ],
+      'all same-scope full snapshots must publish in queue mutation order',
+    );
+  });
+
+  it('R20 P1: a failed publisher does not poison later same-scope publications', async () => {
+    const emittedActions = [];
+    let failFirst = true;
+    const socketManager = {
+      emitToUser: (_userId, _event, data) => {
+        if (failFirst) {
+          failFirst = false;
+          throw new Error('synthetic emit failure');
+        }
+        emittedActions.push(data.action);
+      },
+    };
+
+    const failed = emitQueueUpdated(socketManager, 'u1', 't1', [], null, 'first');
+    const following = emitQueueUpdated(socketManager, 'u1', 't1', [], null, 'second');
+
+    await assert.rejects(failed, /synthetic emit failure/);
+    await following;
+    assert.deepEqual(emittedActions, ['second']);
+  });
+
+  it('R20 P1: freezes legacy partial queue projections without requiring array fields', async () => {
+    const emittedQueues = [];
+    const socketManager = {
+      emitToUser: (_userId, _event, data) => emittedQueues.push(data.queue),
+    };
+    const legacyProjection = { id: 'q-legacy', status: 'queued' };
+
+    await emitQueueUpdated(socketManager, 'u1', 't1', [legacyProjection], null, 'enqueued');
+
+    assert.deepEqual(emittedQueues, [[legacyProjection]]);
   });
 });

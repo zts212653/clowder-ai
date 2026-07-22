@@ -223,10 +223,6 @@ export class QueueProcessor {
   /** F118 D4: max age before a processingSlot is considered zombie (default 2.5× CLI timeout = 75min) */
   private processingSlotTtlMs: number;
   private readonly sessionContinuationCoordinator?: SessionContinuationCoordinatorLike;
-  /** F220 2a R19: serialize zombie full-snapshot publications per (thread,user).
-   *  Queue mutations stay synchronous, but an older slow enrichment must finish
-   *  publishing before a newer removal snapshot for the same frontend scope. */
-  private readonly convergenceQueueUpdateTails = new Map<string, Promise<void>>();
   /** F220 2a (Sol R4): pending convergence retries, deduped by (threadId:userId:idempotencyKey).
    *  Entries persist in memory until success or process restart (StartupReconciler covers that).
    *  Exponential backoff: 30s → 60s → 120s (cap). Timers use unref(). */
@@ -283,29 +279,13 @@ export class QueueProcessor {
     action: 'zombie_convergence' | 'zombie_convergence_retry',
     logContext: Record<string, unknown>,
   ): Promise<void> {
-    const scopeKey = JSON.stringify([threadId, userId]);
-    const snapshot = entries.map((entry) => ({
-      ...entry,
-      targetCats: [...entry.targetCats],
-      ...(entry.mergedMessageIds ? { mergedMessageIds: [...entry.mergedMessageIds] } : {}),
-    }));
-    const previous = this.convergenceQueueUpdateTails.get(scopeKey) ?? Promise.resolve();
-    const publication = previous.then(() =>
-      emitQueueUpdated(this.deps.socketManager, userId, threadId, snapshot, this.deps.messageStore, action),
+    return emitQueueUpdated(this.deps.socketManager, userId, threadId, entries, this.deps.messageStore, action).catch(
+      (err) =>
+        this.deps.log.warn(
+          { ...logContext, threadId, userId, action, err },
+          '[F220 2a] queue update after zombie convergence failed',
+        ),
     );
-    const tail = publication.catch((err) =>
-      this.deps.log.warn(
-        { ...logContext, threadId, userId, action, err },
-        '[F220 2a] queue update after zombie convergence failed',
-      ),
-    );
-    this.convergenceQueueUpdateTails.set(scopeKey, tail);
-    void tail.then(() => {
-      if (this.convergenceQueueUpdateTails.get(scopeKey) === tail) {
-        this.convergenceQueueUpdateTails.delete(scopeKey);
-      }
-    });
-    return tail;
   }
 
   /** F088 fix: Late-bind outbound hook (set after gateway bootstrap). */
@@ -1927,11 +1907,14 @@ export class QueueProcessor {
             { threadId, consumedCount: consumedA2A.length },
             '[QueueProcessor] #815: consumed deferred A2A entries after successful batch',
           );
-          socketManager.emitToUser(userId, 'queue_updated', {
+          await emitQueueUpdated(
+            socketManager,
+            userId,
             threadId,
-            queue: queue.list(threadId, userId),
-            action: 'a2a_subsumed',
-          });
+            queue.list(threadId, userId),
+            messageStore,
+            'a2a_subsumed',
+          );
         }
       } else {
         for (const bid of batchedEntryIds) {
