@@ -41,6 +41,20 @@ class MockRedisHash {
     return existed ? 1 : 0;
   }
 
+  /** @param {string} _script @param {number} _numKeys @param {string} key @param {string} field @param {string} invocationId */
+  async eval(_script, _numKeys, key, field, invocationId) {
+    const raw = await this.hget(key, field);
+    if (!raw) return 0;
+    let snapshot;
+    try {
+      snapshot = JSON.parse(raw);
+    } catch {
+      return 0;
+    }
+    if (snapshot.lastInvocationId !== invocationId) return 0;
+    return this.hdel(key, field);
+  }
+
   /** @param {string} key @param {number} ttl */
   async expire(key, ttl) {
     this.expireCalls.push({ key, ttl });
@@ -145,5 +159,51 @@ describe('RedisTaskProgressStore', () => {
 
     await store.deleteThread('thread_3');
     assert.deepEqual(await store.getThreadSnapshots('thread_3'), {});
+  });
+
+  test('deleteSnapshotIfOwner atomically preserves a replacement invocation snapshot', async () => {
+    const { RedisTaskProgressStore } = await import(
+      '../dist/domains/cats/services/agents/invocation/RedisTaskProgressStore.js'
+    );
+
+    const redis = new MockRedisHash();
+    const store = new RedisTaskProgressStore(redis, 0);
+    const replacement = {
+      threadId: 'thread_owner',
+      catId: 'opus',
+      tasks: [],
+      status: 'running',
+      updatedAt: 2,
+      lastInvocationId: 'replacement-B',
+    };
+    await store.setSnapshot(replacement);
+
+    assert.equal(await store.deleteSnapshotIfOwner('thread_owner', 'opus', 'zombie-A'), false);
+    assert.deepEqual(await store.getSnapshot('thread_owner', 'opus'), replacement);
+    assert.equal(await store.deleteSnapshotIfOwner('thread_owner', 'opus', 'replacement-B'), true);
+    assert.equal(await store.getSnapshot('thread_owner', 'opus'), null);
+  });
+});
+
+describe('MemoryTaskProgressStore', () => {
+  test('deleteSnapshotIfOwner preserves a replacement invocation snapshot', async () => {
+    const { MemoryTaskProgressStore } = await import(
+      '../dist/domains/cats/services/agents/invocation/MemoryTaskProgressStore.js'
+    );
+    const store = new MemoryTaskProgressStore();
+    const replacement = {
+      threadId: 'thread_owner',
+      catId: 'opus',
+      tasks: [],
+      status: 'running',
+      updatedAt: 2,
+      lastInvocationId: 'replacement-B',
+    };
+    await store.setSnapshot(replacement);
+
+    assert.equal(await store.deleteSnapshotIfOwner('thread_owner', 'opus', 'zombie-A'), false);
+    assert.deepEqual(await store.getSnapshot('thread_owner', 'opus'), replacement);
+    assert.equal(await store.deleteSnapshotIfOwner('thread_owner', 'opus', 'replacement-B'), true);
+    assert.equal(await store.getSnapshot('thread_owner', 'opus'), null);
   });
 });

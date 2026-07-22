@@ -24,6 +24,36 @@ export interface EnrichedQueueEntry extends QueueEntry {
   messagePreview?: QueueEntryMessagePreview;
 }
 
+type QueueUpdateEmitter = Pick<SocketManager, 'emitToUser'>;
+const QUEUE_ENRICHMENT_TIMEOUT_MS = 2_000;
+
+/**
+ * Full queue snapshots replace frontend state, so every publisher sharing a
+ * SocketManager must preserve mutation-time call order for each user scope.
+ * Weak ownership keeps independent runtime/test SocketManagers isolated and
+ * allows their publication maps to be collected with the manager instance.
+ */
+const queueUpdatePublicationTails = new WeakMap<QueueUpdateEmitter, Map<string, Promise<void>>>();
+
+function freezeQueueSnapshot(entries: QueueEntry[]): QueueEntry[] {
+  return entries.map((entry) => ({
+    ...entry,
+    ...(Array.isArray(entry.targetCats) ? { targetCats: [...entry.targetCats] } : {}),
+    ...(Array.isArray(entry.mergedMessageIds) ? { mergedMessageIds: [...entry.mergedMessageIds] } : {}),
+    ...(entry.senderMeta ? { senderMeta: { ...entry.senderMeta } } : {}),
+    ...(entry.callerTraceContext ? { callerTraceContext: { ...entry.callerTraceContext } } : {}),
+  }));
+}
+
+function publicationTailsFor(socketManager: QueueUpdateEmitter): Map<string, Promise<void>> {
+  let tails = queueUpdatePublicationTails.get(socketManager);
+  if (!tails) {
+    tails = new Map();
+    queueUpdatePublicationTails.set(socketManager, tails);
+  }
+  return tails;
+}
+
 /** Collect all message IDs associated with a queue entry (primary + merged). */
 function collectMessageIds(entry: QueueEntry): string[] {
   return [entry.messageId, ...(entry.mergedMessageIds ?? [])].filter(
@@ -80,29 +110,57 @@ export async function enrichQueueEntries(
   }
 }
 
+async function enrichQueueEntriesWithinDeadline(
+  entries: QueueEntry[],
+  messageStore: IMessageStore | null | undefined,
+): Promise<QueueEntry[] | EnrichedQueueEntry[]> {
+  if (!messageStore || entries.length === 0) return entries;
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), QUEUE_ENRICHMENT_TIMEOUT_MS);
+    timer.unref?.();
+  });
+  try {
+    const enriched = await Promise.race([enrichQueueEntries(entries, messageStore), deadline]);
+    return enriched ?? entries;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
  * Emit an enriched queue_updated SSE event.
  *
  * Convenience wrapper: enriches entries then emits. All 14+ emit points
  * should use this instead of raw socketManager.emitToUser('queue_updated', ...).
  */
-export async function emitQueueUpdated(
-  socketManager: Pick<SocketManager, 'emitToUser'>,
+export function emitQueueUpdated(
+  socketManager: QueueUpdateEmitter,
   userId: string,
   threadId: string,
   entries: QueueEntry[],
   messageStore: IMessageStore | null | undefined,
   action: string,
 ): Promise<void> {
-  let payload: QueueEntry[] | EnrichedQueueEntry[] = entries;
-  try {
-    payload = await enrichQueueEntries(entries, messageStore);
-  } catch {
-    // Enrichment is best-effort; emit raw entries on failure.
-  }
-  socketManager.emitToUser(userId, 'queue_updated', {
-    threadId,
-    queue: payload,
-    action,
+  const snapshot = freezeQueueSnapshot(entries);
+  const scopeKey = JSON.stringify([threadId, userId]);
+  const tails = publicationTailsFor(socketManager);
+  const previous = tails.get(scopeKey) ?? Promise.resolve();
+  const publication = previous.then(async () => {
+    const payload = await enrichQueueEntriesWithinDeadline(snapshot, messageStore);
+    socketManager.emitToUser(userId, 'queue_updated', {
+      threadId,
+      queue: payload,
+      action,
+    });
   });
+  // A failed publisher must reject to its own caller without poisoning later
+  // same-scope publications. The stored tail is therefore failure-neutral.
+  const tail: Promise<void> = publication.catch(() => undefined);
+  tails.set(scopeKey, tail);
+  void tail.then(() => {
+    if (tails.get(scopeKey) === tail) tails.delete(scopeKey);
+  });
+  return publication;
 }

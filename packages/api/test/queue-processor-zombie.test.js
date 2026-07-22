@@ -62,7 +62,7 @@ describe('QueueProcessor zombie defense (F118 D4)', () => {
 
     // Simulate a zombie: slot added to processingSlots at T0 but never cleaned
     const slotKey = 't1:opus';
-    /** @type {any} */ (processor).processingSlots.set(slotKey, T0);
+    /** @type {any} */ (processor).processingSlots.set(slotKey, { startedAt: T0, reservation: 0 });
 
     // tracker.has() returns false — invocation already expired/completed on tracker side
     deps.invocationTracker.has.mock.mockImplementation(() => false);
@@ -85,7 +85,7 @@ describe('QueueProcessor zombie defense (F118 D4)', () => {
     const processor = new QueueProcessor(deps, { processingSlotTtlMs: SHORT_TTL });
 
     const slotKey = 't1:opus';
-    /** @type {any} */ (processor).processingSlots.set(slotKey, T0);
+    /** @type {any} */ (processor).processingSlots.set(slotKey, { startedAt: T0, reservation: 0 });
 
     // tracker.has() returns true — invocation is genuinely still running (just slow)
     deps.invocationTracker.has.mock.mockImplementation(() => true);
@@ -104,7 +104,7 @@ describe('QueueProcessor zombie defense (F118 D4)', () => {
 
     // Slot added at current time — still fresh
     const slotKey = 't1:opus';
-    /** @type {any} */ (processor).processingSlots.set(slotKey, T0);
+    /** @type {any} */ (processor).processingSlots.set(slotKey, { startedAt: T0, reservation: 0 });
     deps.invocationTracker.has.mock.mockImplementation(() => false);
 
     // Advance less than threshold
@@ -120,10 +120,10 @@ describe('QueueProcessor zombie defense (F118 D4)', () => {
     const processor = new QueueProcessor(deps, { processingSlotTtlMs: SHORT_TTL });
 
     // Zombie slot (old)
-    /** @type {any} */ (processor).processingSlots.set('t1:catA', T0);
+    /** @type {any} */ (processor).processingSlots.set('t1:catA', { startedAt: T0, reservation: 0 });
     // Fresh slot (just started)
     t.mock.timers.tick(SHORT_TTL + 1);
-    /** @type {any} */ (processor).processingSlots.set('t1:catB', Date.now());
+    /** @type {any} */ (processor).processingSlots.set('t1:catB', { startedAt: Date.now(), reservation: 0 });
 
     deps.invocationTracker.has.mock.mockImplementation(() => false);
 
@@ -151,7 +151,7 @@ describe('QueueProcessor zombie defense (F118 D4)', () => {
     });
 
     // Simulate zombie slot blocking the same cat
-    /** @type {any} */ (processor).processingSlots.set('t1:opus', T0);
+    /** @type {any} */ (processor).processingSlots.set('t1:opus', { startedAt: T0, reservation: 0 });
     deps.invocationTracker.has.mock.mockImplementation(() => false);
 
     t.mock.timers.tick(SHORT_TTL + 1);
@@ -167,7 +167,7 @@ describe('QueueProcessor zombie defense (F118 D4)', () => {
     const deps = stubDeps();
     const processor = new QueueProcessor(deps, { processingSlotTtlMs: SHORT_TTL });
 
-    /** @type {any} */ (processor).processingSlots.set('t1:opus', T0);
+    /** @type {any} */ (processor).processingSlots.set('t1:opus', { startedAt: T0, reservation: 0 });
     deps.invocationTracker.has.mock.mockImplementation(() => false);
 
     t.mock.timers.tick(SHORT_TTL + 1);
@@ -185,7 +185,7 @@ describe('QueueProcessor zombie defense (F118 D4)', () => {
     const deps = stubDeps();
     const processor = new QueueProcessor(deps, { processingSlotTtlMs: SHORT_TTL });
 
-    /** @type {any} */ (processor).processingSlots.set('t1:opus', T0);
+    /** @type {any} */ (processor).processingSlots.set('t1:opus', { startedAt: T0, reservation: 0 });
     deps.invocationTracker.has.mock.mockImplementation(() => true);
 
     t.mock.timers.tick(SHORT_TTL + 1);
