@@ -379,6 +379,7 @@ export function assertValidStoredMessageTimestamp(timestamp: number): void {
  */
 let _seq = 0;
 export function generateSortableId(timestamp: number): string {
+  assertValidStoredMessageTimestamp(timestamp);
   const ts = String(timestamp).padStart(16, '0');
   const seq = String(_seq++).padStart(6, '0');
   const suffix = randomUUID().slice(0, 8);
