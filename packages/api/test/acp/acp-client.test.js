@@ -1744,4 +1744,83 @@ describe('AcpClient', () => {
       'the legacy one-hour request ceiling must not precede a valid two-hour idle policy',
     );
   });
+
+  it('#1186: stdio request ceiling resets after real prompt activity', async (t) => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    let promptRequestId = null;
+    let resolvePromptSeen;
+    const promptSeen = new Promise((resolve) => {
+      resolvePromptSeen = resolve;
+    });
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'sliding-ceiling-sess' });
+        } else if (msg.method === 'session/prompt') {
+          promptRequestId = msg.id;
+          resolvePromptSeen();
+          // Keep the provider request pending until the test has crossed the
+          // original-start request ceiling.
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const idleStallMs = 2 * 60 * 60 * 1000;
+    const activityBudgetMs = idleStallMs + 60_000;
+    const requestCeilingMs = activityBudgetMs + 60_000;
+    const eventAtMs = 90 * 60 * 1000;
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 0 });
+    t.after(() => t.mock.timers.reset());
+
+    const iterator = client.promptStream('sliding-ceiling-sess', 'hello', {
+      idleStallMs,
+      timeoutMs: activityBudgetMs,
+    });
+    const firstEventPromise = iterator.next();
+    await promptSeen;
+
+    t.mock.timers.tick(eventAtMs);
+    agentNotify(agentStdout, 'session/update', {
+      sessionId: 'sliding-ceiling-sess',
+      update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'still working' } },
+    });
+    const warningEvent = await firstEventPromise;
+    const activityEvent = await iterator.next();
+
+    t.mock.timers.tick(requestCeilingMs - eventAtMs + 1);
+    await Promise.resolve();
+    await Promise.resolve();
+    const pendingAtOriginalCeiling = client.pendingRequestCount;
+
+    agentRespond(agentStdout, promptRequestId, { stopReason: 'end_turn' });
+    await new Promise((resolve) => setImmediate(resolve));
+    const terminal = await (async () => {
+      try {
+        while (true) {
+          const next = await iterator.next();
+          if (next.done) return { value: next };
+        }
+      } catch (error) {
+        return { error };
+      }
+    })();
+
+    assert.equal(warningEvent.value?.update?.sessionUpdate, 'stream_idle_warning');
+    assert.equal(activityEvent.value?.update?.sessionUpdate, 'agent_thought_chunk');
+    assert.equal(
+      pendingAtOriginalCeiling,
+      1,
+      'real activity must rearm the request ceiling beyond its original-start deadline',
+    );
+    assert.equal(terminal.error, undefined);
+    assert.equal(terminal.value?.done, true);
+  });
 });
