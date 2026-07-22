@@ -2688,6 +2688,89 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.ok(sessionStores.includes('new-sess'), 'new session should be stored after recovery');
   });
 
+  // #1186: Active-lease guard regression — proves invoke-single-cat.ts:3368-3369
+  // calls .return() on the first service iterator (releasing the ACP lease) BEFORE
+  // starting the second service.invoke() (which acquires a new lease).
+  // Without this, constrained pools hit "Pool at capacity" on the retry.
+  it('#1186: self-heal releases first lease before retry acquire (active-lease guard)', async () => {
+    let invokeCount = 0;
+    const timeline = [];
+    let activeLease = false;
+
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        invokeCount++;
+        const label = invokeCount === 1 ? 'first' : 'second';
+
+        // Simulate constrained pool: reject if a lease is already active
+        if (activeLease) {
+          throw new Error('Pool at capacity — all processes have active leases');
+        }
+        activeLease = true;
+        timeline.push(`acquire:${label}`);
+
+        try {
+          if (label === 'first') {
+            // First attempt: yield missing-session error + done
+            yield {
+              type: 'error',
+              catId: 'opus',
+              error: 'No conversation found with session ID: lease-sess',
+              timestamp: Date.now(),
+            };
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+            return;
+          }
+          // Second attempt: succeed
+          yield { type: 'session_init', catId: 'opus', sessionId: 'fresh-sess', timestamp: Date.now() };
+          yield { type: 'text', catId: 'opus', content: 'recovered', timestamp: Date.now() };
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        } finally {
+          // Release lease in finally — mirrors AcpAgentService.invoke() line 630
+          activeLease = false;
+          timeline.push(`release:${label}`);
+        }
+      },
+    };
+
+    const deps = makeDeps();
+    deps.sessionManager = {
+      get: async () => 'lease-sess',
+      store: async () => {},
+      delete: async () => {},
+    };
+
+    const msgs = await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'test',
+        userId: 'user-lease',
+        threadId: 'thread-lease',
+        isLastCat: true,
+      }),
+    );
+
+    // Self-heal should succeed
+    assert.equal(invokeCount, 2, 'should invoke service twice (initial + retry)');
+    assert.ok(
+      msgs.some((m) => m.type === 'text' && m.content === 'recovered'),
+      'retry should produce recovered content',
+    );
+
+    // Ordering: release:first MUST precede acquire:second
+    // This protects invoke-single-cat.ts:3368-3369 (await serviceIter.return())
+    const releaseFirstIdx = timeline.indexOf('release:first');
+    const acquireSecondIdx = timeline.indexOf('acquire:second');
+    assert.ok(releaseFirstIdx >= 0, 'first lease must be released');
+    assert.ok(acquireSecondIdx >= 0, 'second lease must be acquired');
+    assert.ok(
+      releaseFirstIdx < acquireSecondIdx,
+      `release:first (${releaseFirstIdx}) must precede acquire:second (${acquireSecondIdx}). Timeline: ${timeline.join(' → ')}`,
+    );
+  });
+
   it('F118 P2-fix: self-heal retry clears cliSessionId from baseOptions', async () => {
     const optionsSeen = [];
     let invokeCount = 0;

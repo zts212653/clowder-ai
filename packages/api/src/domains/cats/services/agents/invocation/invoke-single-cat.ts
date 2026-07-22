@@ -3104,242 +3104,271 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       // F089: Use abortableNext instead of `for await` so the invocation timeout
       // can break out even when the service generator is stuck on an unresolvable await.
       const serviceIter = service.invoke(effectivePrompt, options)[Symbol.asyncIterator]();
-      for (;;) {
-        const iterResult = await abortableNext(serviceIter, signal);
-        if (iterResult.done) break;
-        const msg = iterResult.value;
-        // F149: provider_signal / liveness_signal must NOT reset timeout — prevents "续命"
-        // F198 Phase C P2-1: status (daemon detail progress) also must NOT reset timeout —
-        // a daemon sending frequent status updates must not evade the 30-min kill deadline.
-        if (msg.type !== 'provider_signal' && msg.type !== 'liveness_signal' && msg.type !== 'status')
-          resetInvocationTimeout();
-        if (shouldTrackGeminiResumeFailures && options.sessionId && msg.type === 'error') {
-          const failureKind = classifyResumeFailure(msg.error);
-          if (failureKind) {
-            resumeFailureCounts[failureKind] = (resumeFailureCounts[failureKind] ?? 0) + 1;
-          }
-        }
-
-        if (
-          allowSessionRetry &&
-          msg.type === 'error' &&
-          (isMissingClaudeSessionError(msg.error) || isSessionNotFoundDiagnostic(msg.metadata))
-        ) {
-          suppressedMissingSessionError = msg;
-          continue;
-        }
-        if (
-          allowSessionRetry &&
-          !attemptHasContentOutput &&
-          msg.type === 'error' &&
-          isPromptTokenLimitExceededError(msg.error)
-        ) {
-          suppressedPromptLimitError = msg;
-          continue;
-        }
-        if (
-          allowSessionRetry &&
-          !attemptHasContentOutput &&
-          msg.type === 'error' &&
-          isContextWindowOverflowError(msg.error)
-        ) {
-          suppressedContextOverflowError = msg;
-          continue;
-        }
-        if (
-          allowTransientRetry &&
-          !attemptHasContentOutput &&
-          msg.type === 'error' &&
-          (isTransientCliExitCode1(msg.error) || isTransientAcpPromptFailure(msg.error))
-        ) {
-          suppressedTransientCliError = msg;
-          continue;
-        }
-        // #774 self-heal: CLI timeout during session resume with no substantive output
-        // → likely stale/unreachable session. Suppress and retry without session.
-        // Uses attemptHasSubstantiveOutput (not attemptHasContentOutput) because
-        // timeout_diagnostics (system_info) must NOT block the retry path.
-        if (
-          allowSessionRetry &&
-          options.sessionId &&
-          !attemptHasSubstantiveOutput &&
-          msg.type === 'error' &&
-          isCliTimeoutError(msg.error)
-        ) {
-          suppressedTimeoutError = msg;
-          continue;
-        }
-        // F215 AC-C1/C2: Suppress malformed tool-call error + preceding system_info signal
-        // → seal session + fresh-context retry (sessionId=undefined).
-        // Applies on all attempts (even without session) so a retried invocation that still
-        // produces malformed output also enters the fallback chain.
-        //
-        // BLOCKING 2 fix: malformed_toolcall_detected is emitted BEFORE the error, so we
-        // must suppress it unconditionally (not gated on suppressedMalformedError being set).
-        if (
-          msg.type === 'system_info' &&
-          (() => {
-            try {
-              return JSON.parse(msg.content ?? '{}').type === 'malformed_toolcall_detected';
-            } catch {
-              return false;
+      // #1186: Ensure service generator's finally block runs (lease.release()) on ALL exit paths.
+      // Manual .next() iteration does NOT auto-close the generator on break/throw — unlike
+      // `for await...of` which calls .return() on early exit. Without this try/finally,
+      // breaking from the loop (retry path, abort, error) leaves the generator suspended
+      // at its last yield, so AcpAgentService.invoke()'s finally { lease.release() } never
+      // executes → leaked lease → "Pool at capacity" after maxLiveProcesses invocations.
+      let iterExitedNormally = false;
+      try {
+        for (;;) {
+          const iterResult = await abortableNext(serviceIter, signal);
+          if (iterResult.done) break;
+          const msg = iterResult.value;
+          // F149: provider_signal / liveness_signal must NOT reset timeout — prevents "续命"
+          // F198 Phase C P2-1: status (daemon detail progress) also must NOT reset timeout —
+          // a daemon sending frequent status updates must not evade the 30-min kill deadline.
+          if (msg.type !== 'provider_signal' && msg.type !== 'liveness_signal' && msg.type !== 'status')
+            resetInvocationTimeout();
+          if (shouldTrackGeminiResumeFailures && options.sessionId && msg.type === 'error') {
+            const failureKind = classifyResumeFailure(msg.error);
+            if (failureKind) {
+              resumeFailureCounts[failureKind] = (resumeFailureCounts[failureKind] ?? 0) + 1;
             }
-          })()
-        ) {
-          // Internal detection signal — always suppress; never reaches user.
-          continue;
-        }
-        // P1 7th fix: only suppress malformed error (and retry) when NO content was emitted yet.
-        // Other self-heal paths (prompt limit, context overflow) all guard on !attemptHasContentOutput.
-        // Without this guard, a multi-step run that used a tool then ended with a malformed turn
-        // would re-run the original prompt from scratch — duplicating tool actions.
-        if (msg.type === 'error' && isMalformedToolCallError(msg.error) && !attemptHasContentOutput) {
-          suppressedMalformedError = msg;
-          continue;
-        }
-        // F215 AC-B6 UX fix: when content was already emitted, the malformed error must NOT reach
-        // the user with "系统已触发恢复流程" (a lie — no retry fires when attemptHasContentOutput=true).
-        // Replace the raw error with an honest partial-output text notice.
-        if (msg.type === 'error' && isMalformedToolCallError(msg.error) && attemptHasContentOutput) {
-          log.warn(
-            { catId, error: msg.error },
-            '[F215] Malformed after content output — replacing misleading error with partial-output notice',
-          );
-          const notice: AgentMessage = {
-            type: 'text',
-            catId: catId as CatId,
-            content: `\n\n🐾 手抖了——最后一步没完成。上面的内容已经送到了，可以追问或让其他猫猫接着做。`,
-            timestamp: Date.now(),
-          };
-          for await (const out of streamProcessedOutputs(notice)) {
+          }
+
+          if (
+            allowSessionRetry &&
+            msg.type === 'error' &&
+            (isMissingClaudeSessionError(msg.error) || isSessionNotFoundDiagnostic(msg.metadata))
+          ) {
+            suppressedMissingSessionError = msg;
+            continue;
+          }
+          if (
+            allowSessionRetry &&
+            !attemptHasContentOutput &&
+            msg.type === 'error' &&
+            isPromptTokenLimitExceededError(msg.error)
+          ) {
+            suppressedPromptLimitError = msg;
+            continue;
+          }
+          if (
+            allowSessionRetry &&
+            !attemptHasContentOutput &&
+            msg.type === 'error' &&
+            isContextWindowOverflowError(msg.error)
+          ) {
+            suppressedContextOverflowError = msg;
+            continue;
+          }
+          if (
+            allowTransientRetry &&
+            !attemptHasContentOutput &&
+            msg.type === 'error' &&
+            (isTransientCliExitCode1(msg.error) || isTransientAcpPromptFailure(msg.error))
+          ) {
+            suppressedTransientCliError = msg;
+            continue;
+          }
+          // #774 self-heal: CLI timeout during session resume with no substantive output
+          // → likely stale/unreachable session. Suppress and retry without session.
+          // Uses attemptHasSubstantiveOutput (not attemptHasContentOutput) because
+          // timeout_diagnostics (system_info) must NOT block the retry path.
+          if (
+            allowSessionRetry &&
+            options.sessionId &&
+            !attemptHasSubstantiveOutput &&
+            msg.type === 'error' &&
+            isCliTimeoutError(msg.error)
+          ) {
+            suppressedTimeoutError = msg;
+            continue;
+          }
+          // F215 AC-C1/C2: Suppress malformed tool-call error + preceding system_info signal
+          // → seal session + fresh-context retry (sessionId=undefined).
+          // Applies on all attempts (even without session) so a retried invocation that still
+          // produces malformed output also enters the fallback chain.
+          //
+          // BLOCKING 2 fix: malformed_toolcall_detected is emitted BEFORE the error, so we
+          // must suppress it unconditionally (not gated on suppressedMalformedError being set).
+          if (
+            msg.type === 'system_info' &&
+            (() => {
+              try {
+                return JSON.parse(msg.content ?? '{}').type === 'malformed_toolcall_detected';
+              } catch {
+                return false;
+              }
+            })()
+          ) {
+            // Internal detection signal — always suppress; never reaches user.
+            continue;
+          }
+          // P1 7th fix: only suppress malformed error (and retry) when NO content was emitted yet.
+          // Other self-heal paths (prompt limit, context overflow) all guard on !attemptHasContentOutput.
+          // Without this guard, a multi-step run that used a tool then ended with a malformed turn
+          // would re-run the original prompt from scratch — duplicating tool actions.
+          if (msg.type === 'error' && isMalformedToolCallError(msg.error) && !attemptHasContentOutput) {
+            suppressedMalformedError = msg;
+            continue;
+          }
+          // F215 AC-B6 UX fix: when content was already emitted, the malformed error must NOT reach
+          // the user with "系统已触发恢复流程" (a lie — no retry fires when attemptHasContentOutput=true).
+          // Replace the raw error with an honest partial-output text notice.
+          if (msg.type === 'error' && isMalformedToolCallError(msg.error) && attemptHasContentOutput) {
+            log.warn(
+              { catId, error: msg.error },
+              '[F215] Malformed after content output — replacing misleading error with partial-output notice',
+            );
+            const notice: AgentMessage = {
+              type: 'text',
+              catId: catId as CatId,
+              content: `\n\n🐾 手抖了——最后一步没完成。上面的内容已经送到了，可以追问或让其他猫猫接着做。`,
+              timestamp: Date.now(),
+            };
+            for await (const out of streamProcessedOutputs(notice)) {
+              yield out;
+            }
+            continue;
+          }
+
+          if (
+            suppressedMissingSessionError ||
+            suppressedPromptLimitError ||
+            suppressedContextOverflowError ||
+            suppressedTransientCliError ||
+            suppressedTimeoutError ||
+            suppressedMalformedError
+          ) {
+            if (msg.type === 'done') {
+              // F215 AC-C1: Seal malformed session before fresh retry.
+              if (suppressedMalformedError && deps.sessionSealer && deps.sessionChainStore) {
+                try {
+                  const activeRec = await deps.sessionChainStore.getActive(catId as CatId, threadId);
+                  if (activeRec) {
+                    const sealResult = await deps.sessionSealer.requestSeal({
+                      sessionId: activeRec.id,
+                      reason: 'malformed_toolcall',
+                    });
+                    if (sealResult.accepted) {
+                      sessionManager.delete(userId, catId, threadId).catch(() => {});
+                      deps.sessionSealer.finalize({ sessionId: activeRec.id }).catch(() => {});
+                      log.info(
+                        { catId, threadId, invocationId, sessionId: activeRec.id },
+                        '[F215] Sealed malformed session for fresh-context retry',
+                      );
+                    }
+                  }
+                } catch {
+                  /* best-effort seal */
+                }
+              }
+              shouldRetryWithoutSession = Boolean(
+                suppressedMissingSessionError ||
+                  suppressedPromptLimitError ||
+                  suppressedContextOverflowError ||
+                  suppressedTimeoutError ||
+                  suppressedMalformedError,
+              );
+              shouldRetryOnTransientCliExit = Boolean(suppressedTransientCliError);
+              break;
+            }
+
+            if (suppressedMissingSessionError) {
+              for await (const out of streamProcessedOutputs(suppressedMissingSessionError)) {
+                yield out;
+              }
+              suppressedMissingSessionError = undefined;
+            }
+            if (suppressedPromptLimitError) {
+              for await (const out of streamProcessedOutputs(suppressedPromptLimitError)) {
+                yield out;
+              }
+              suppressedPromptLimitError = undefined;
+            }
+            if (suppressedContextOverflowError) {
+              for await (const out of streamProcessedOutputs(suppressedContextOverflowError)) {
+                yield out;
+              }
+              suppressedContextOverflowError = undefined;
+            }
+            if (suppressedTransientCliError) {
+              for await (const out of streamProcessedOutputs(suppressedTransientCliError)) {
+                yield out;
+              }
+              suppressedTransientCliError = undefined;
+            }
+            if (suppressedTimeoutError) {
+              for await (const out of streamProcessedOutputs(suppressedTimeoutError)) {
+                yield out;
+              }
+              suppressedTimeoutError = undefined;
+            }
+            // F215: Clear malformed error — will be re-evaluated on retry.
+            if (suppressedMalformedError) {
+              suppressedMalformedError = undefined;
+            }
+          }
+
+          // F149: Map provider_signal / liveness_signal → system_info for frontend delivery
+          const deliveryMsg =
+            msg.type === 'provider_signal' || msg.type === 'liveness_signal'
+              ? { ...msg, type: 'system_info' as const }
+              : msg;
+          for await (const out of streamProcessedOutputs(deliveryMsg)) {
             yield out;
           }
-          continue;
-        }
-
-        if (
-          suppressedMissingSessionError ||
-          suppressedPromptLimitError ||
-          suppressedContextOverflowError ||
-          suppressedTransientCliError ||
-          suppressedTimeoutError ||
-          suppressedMalformedError
-        ) {
-          if (msg.type === 'done') {
-            // F215 AC-C1: Seal malformed session before fresh retry.
-            if (suppressedMalformedError && deps.sessionSealer && deps.sessionChainStore) {
+          if (
+            msg.type !== 'error' &&
+            msg.type !== 'done' &&
+            msg.type !== 'session_init' &&
+            msg.type !== 'provider_signal' &&
+            msg.type !== 'liveness_signal' &&
+            msg.type !== 'status'
+          ) {
+            // F215 hotfix: attemptHasContentOutput must only be set by replay-sensitive types
+            // (text / tool_use / tool_result). system_info (rate_limit_event / agent_loop /
+            // timeout_diagnostics) and other metadata MUST NOT prevent malformed recovery —
+            // they carry no model output that would be duplicated on retry.
+            // Bug: system_info from rate_limit_event precedes malformed turn → sets
+            // attemptHasContentOutput=true → malformed suppress guard !attemptHasContentOutput
+            // fails → seal/fresh-retry/46接力 all skipped → bare malformed error leaks to user.
+            if (isUserVisibleSessionOutput(msg)) {
+              attemptHasContentOutput = true;
+            }
+            // Substantive = real model output, excludes system_info (e.g. timeout_diagnostics).
+            if (msg.type !== 'system_info') {
+              attemptHasSubstantiveOutput = true;
+            }
+            // F118 AC-C6: Reset consecutive restore failure counter on successful content
+            if (deps.sessionChainStore && !didResetRestoreFailures) {
+              didResetRestoreFailures = true; // only reset once per invocation
               try {
                 const activeRec = await deps.sessionChainStore.getActive(catId as CatId, threadId);
-                if (activeRec) {
-                  const sealResult = await deps.sessionSealer.requestSeal({
-                    sessionId: activeRec.id,
-                    reason: 'malformed_toolcall',
+                if (activeRec && (activeRec.consecutiveRestoreFailures ?? 0) > 0) {
+                  await deps.sessionChainStore.update(activeRec.id, {
+                    consecutiveRestoreFailures: 0,
+                    updatedAt: Date.now(),
                   });
-                  if (sealResult.accepted) {
-                    sessionManager.delete(userId, catId, threadId).catch(() => {});
-                    deps.sessionSealer.finalize({ sessionId: activeRec.id }).catch(() => {});
-                    log.info(
-                      { catId, threadId, invocationId, sessionId: activeRec.id },
-                      '[F215] Sealed malformed session for fresh-context retry',
-                    );
-                  }
                 }
               } catch {
-                /* best-effort seal */
+                /* best-effort reset */
               }
             }
-            shouldRetryWithoutSession = Boolean(
-              suppressedMissingSessionError ||
-                suppressedPromptLimitError ||
-                suppressedContextOverflowError ||
-                suppressedTimeoutError ||
-                suppressedMalformedError,
-            );
-            shouldRetryOnTransientCliExit = Boolean(suppressedTransientCliError);
-            break;
-          }
-
-          if (suppressedMissingSessionError) {
-            for await (const out of streamProcessedOutputs(suppressedMissingSessionError)) {
-              yield out;
-            }
-            suppressedMissingSessionError = undefined;
-          }
-          if (suppressedPromptLimitError) {
-            for await (const out of streamProcessedOutputs(suppressedPromptLimitError)) {
-              yield out;
-            }
-            suppressedPromptLimitError = undefined;
-          }
-          if (suppressedContextOverflowError) {
-            for await (const out of streamProcessedOutputs(suppressedContextOverflowError)) {
-              yield out;
-            }
-            suppressedContextOverflowError = undefined;
-          }
-          if (suppressedTransientCliError) {
-            for await (const out of streamProcessedOutputs(suppressedTransientCliError)) {
-              yield out;
-            }
-            suppressedTransientCliError = undefined;
-          }
-          if (suppressedTimeoutError) {
-            for await (const out of streamProcessedOutputs(suppressedTimeoutError)) {
-              yield out;
-            }
-            suppressedTimeoutError = undefined;
-          }
-          // F215: Clear malformed error — will be re-evaluated on retry.
-          if (suppressedMalformedError) {
-            suppressedMalformedError = undefined;
           }
         }
-
-        // F149: Map provider_signal / liveness_signal → system_info for frontend delivery
-        const deliveryMsg =
-          msg.type === 'provider_signal' || msg.type === 'liveness_signal'
-            ? { ...msg, type: 'system_info' as const }
-            : msg;
-        for await (const out of streamProcessedOutputs(deliveryMsg)) {
-          yield out;
-        }
-        if (
-          msg.type !== 'error' &&
-          msg.type !== 'done' &&
-          msg.type !== 'session_init' &&
-          msg.type !== 'provider_signal' &&
-          msg.type !== 'liveness_signal' &&
-          msg.type !== 'status'
-        ) {
-          // F215 hotfix: attemptHasContentOutput must only be set by replay-sensitive types
-          // (text / tool_use / tool_result). system_info (rate_limit_event / agent_loop /
-          // timeout_diagnostics) and other metadata MUST NOT prevent malformed recovery —
-          // they carry no model output that would be duplicated on retry.
-          // Bug: system_info from rate_limit_event precedes malformed turn → sets
-          // attemptHasContentOutput=true → malformed suppress guard !attemptHasContentOutput
-          // fails → seal/fresh-retry/46接力 all skipped → bare malformed error leaks to user.
-          if (isUserVisibleSessionOutput(msg)) {
-            attemptHasContentOutput = true;
-          }
-          // Substantive = real model output, excludes system_info (e.g. timeout_diagnostics).
-          if (msg.type !== 'system_info') {
-            attemptHasSubstantiveOutput = true;
-          }
-          // F118 AC-C6: Reset consecutive restore failure counter on successful content
-          if (deps.sessionChainStore && !didResetRestoreFailures) {
-            didResetRestoreFailures = true; // only reset once per invocation
-            try {
-              const activeRec = await deps.sessionChainStore.getActive(catId as CatId, threadId);
-              if (activeRec && (activeRec.consecutiveRestoreFailures ?? 0) > 0) {
-                await deps.sessionChainStore.update(activeRec.id, {
-                  consecutiveRestoreFailures: 0,
-                  updatedAt: Date.now(),
-                });
-              }
-            } catch {
-              /* best-effort reset */
-            }
-          }
+        iterExitedNormally = true;
+      } finally {
+        // #1186: Close the service generator so its finally block executes (lease.release()).
+        // This is the critical fix — without it, every manual-iteration break leaks a lease.
+        //
+        // Two paths:
+        // 1. Normal/retry break: generator is suspended at a yield — .return() resolves
+        //    immediately (sync finally in AcpAgentService runs lease.release() inline).
+        //    MUST await so lease is released before any retry attempt acquires a new one.
+        // 2. Abort/error: abortableNext() rejected while .next() is still pending.
+        //    Async generator operations are serialized — .return() queues behind the
+        //    pending .next() and may block until cancelSession resolves the underlying
+        //    stream. Awaiting would reintroduce the stuck behavior abortableNext was
+        //    designed to prevent. Fire-and-forget; the lease releases asynchronously
+        //    when the cancel propagates.
+        if (iterExitedNormally) {
+          await serviceIter.return?.();
+        } else {
+          serviceIter.return?.()?.catch(() => {});
         }
       }
 

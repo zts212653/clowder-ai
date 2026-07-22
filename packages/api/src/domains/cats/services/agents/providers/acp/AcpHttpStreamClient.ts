@@ -78,10 +78,14 @@ export class AcpHttpStreamClient {
   private child: ChildProcess | null = null;
   private closed = false;
   private exited = false;
+  /** Sessions whose local prompt ended before provider completion was acknowledged. */
+  private readonly unquiescedSessionIds = new Set<string>();
   private port: number | null = null;
   private baseUrl = '';
   private initResult: AcpInitializeResult | null = null;
   private readonly capacityListeners = new Set<(signal: AcpCapacitySignal) => void>();
+  /** #1186 P1: Per-session cancel callbacks — settles the local prompt stream on cancel. */
+  private readonly sessionCancelCallbacks = new Map<string, () => void>();
   private _recentCapacitySignal: AcpCapacitySignal | null = null;
 
   constructor(private readonly config: AcpHttpStreamClientConfig) {}
@@ -316,12 +320,14 @@ export class AcpHttpStreamClient {
     const isAgentRequest = (method: string | undefined, msgId: string | undefined) =>
       !!method && (!!msgId || method === ACP_METHODS.requestPermission);
 
+    /** #1186: Active from prompt start — covers zero-first-event. */
     const scheduleIdleCheck = () => {
       if (idleTimer) clearTimeout(idleTimer);
       if (done) return;
-      const nextMs = idleWarningFired ? Math.max(0, idleStallMs - idleWarningMs) : idleWarningMs;
+      // Cap initial delay at idleStallMs so short TTLs (< idleWarningMs) fire on time
+      const nextMs = idleWarningFired ? Math.max(0, idleStallMs - idleWarningMs) : Math.min(idleWarningMs, idleStallMs);
       idleTimer = setTimeout(() => {
-        if (done || eventCount === 0) return;
+        if (done) return;
         const rawIdle = Date.now() - lastEventAt;
         const idleSinceMs = Math.max(rawIdle, idleWarningFired ? idleStallMs : idleWarningMs);
         if (!idleWarningFired) {
@@ -333,16 +339,61 @@ export class AcpHttpStreamClient {
           log.error({ sessionId, idleSinceMs, eventCount }, 'HTTP stream idle stall — terminating');
           this.cancelSession(sessionId);
           controller.abort();
-          promptError = new AcpStreamIdleError(sessionId, idleSinceMs, eventCount);
+          promptError = new AcpStreamIdleError(sessionId, idleSinceMs, eventCount, idleStallMs);
           done = true;
           wakeConsumer();
+        } else {
+          // #1186: pendingTool — tool execution ceiling follows configured idleStallMs
+          // (parity with stdio AcpClient). Previously pendingTool suppressed stall
+          // indefinitely, causing sessions to block until the turn budget fired.
+          if (idleSinceMs >= idleStallMs) {
+            log.error(
+              { sessionId, idleSinceMs, eventCount, pendingTool: true, idleStallMs },
+              'HTTP stream idle watchdog: tool execution exceeded configured idle TTL — terminating',
+            );
+            this.cancelSession(sessionId);
+            controller.abort();
+            promptError = new AcpStreamIdleError(sessionId, idleSinceMs, eventCount, idleStallMs);
+            done = true;
+            wakeConsumer();
+          } else {
+            scheduleIdleCheck(); // Reschedule follow-up check
+          }
         }
       }, nextMs);
     };
 
     // Start HTTP streaming request
     this.capacityListeners.add(capacityInjector);
+
+    // #1186 P1: Register cancel callback so cancelSession() settles this stream
+    const cancelCb = () => {
+      if (done) return;
+      // Aborting the local HTTP stream does not prove the provider stopped the
+      // prompt. The pool uses this only for single-flight retirement.
+      this.unquiescedSessionIds.add(sessionId);
+      log.info({ sessionId, eventCount }, 'HTTP cancel settled local prompt stream');
+      promptError = new AcpStreamIdleError(
+        sessionId,
+        Date.now() - (lastEventAt || Date.now()),
+        eventCount,
+        idleStallMs,
+      );
+      done = true;
+      if (idleTimer) clearTimeout(idleTimer);
+      if (budgetTimer) clearTimeout(budgetTimer);
+      controller.abort();
+      wakeConsumer();
+    };
+    this.sessionCancelCallbacks.set(sessionId, cancelCb);
+
+    // #1186: Initialize lastEventAt for zero-first-event idle watchdog
+    lastEventAt = Date.now();
+
     resetBudget();
+
+    // #1186: Start idle watchdog at prompt start — covers zero-first-event
+    scheduleIdleCheck();
 
     const streamPromise = (async () => {
       try {
@@ -476,17 +527,28 @@ export class AcpHttpStreamClient {
     } finally {
       if (idleTimer) clearTimeout(idleTimer);
       if (budgetTimer) clearTimeout(budgetTimer);
+      this.sessionCancelCallbacks.delete(sessionId);
       this.capacityListeners.delete(capacityInjector);
     }
   }
 
+  /**
+   * #1186 P1: Cancel also settles the local prompt stream so the pending .next()
+   * resolves immediately. The callback marks the carrier unsafe for single-flight
+   * reuse so the pool retires non-multiplexed clients after lease release.
+   */
   cancelSession(sessionId: string): void {
-    if (!this.port || this.closed || this.exited) return;
-    const body = JSON.stringify({ jsonrpc: '2.0', method: ACP_METHODS.sessionCancel, params: { sessionId } });
-    fetch(this.baseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }).catch((err) => {
-      log.warn({ sessionId, err: err instanceof Error ? err.message : String(err) }, 'ACP HTTP cancel failed');
-    });
-    log.info('Sent HTTP session/cancel for %s', sessionId);
+    const cb = this.sessionCancelCallbacks.get(sessionId);
+
+    if (this.port && !this.closed && !this.exited) {
+      const body = JSON.stringify({ jsonrpc: '2.0', method: ACP_METHODS.sessionCancel, params: { sessionId } });
+      fetch(this.baseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }).catch((err) => {
+        log.warn({ sessionId, err: err instanceof Error ? err.message : String(err) }, 'ACP HTTP cancel failed');
+      });
+      log.info('Sent HTTP session/cancel for %s', sessionId);
+    }
+    // Settle the local prompt stream immediately
+    if (cb) cb();
   }
 
   async close(): Promise<void> {
@@ -513,6 +575,12 @@ export class AcpHttpStreamClient {
   }
   get isAlive(): boolean {
     return this.child !== null && !this.child.killed && !this.closed && !this.exited;
+  }
+  get isSafeForSingleFlightReuse(): boolean {
+    return this.unquiescedSessionIds.size === 0;
+  }
+  isSessionSafeForReuse(sessionId: string): boolean {
+    return !this.unquiescedSessionIds.has(sessionId);
   }
 
   onCapacity(fn: (signal: AcpCapacitySignal) => void): void {

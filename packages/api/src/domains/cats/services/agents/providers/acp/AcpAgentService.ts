@@ -22,8 +22,14 @@ import { readCapabilitiesConfig } from '../../../../../../config/capabilities/ca
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import { createPromptDigest } from '../../../context/prompt-digest.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
-import { type AcpCapacitySignal, AcpProtocolError, AcpTimeoutError } from './AcpClient.js';
-import type { AcpLease, AcpProcessPool, PoolKey } from './AcpProcessPool.js';
+import {
+  ACP_PROMPT_TIMEOUT_MARGIN_MS,
+  type AcpCapacitySignal,
+  AcpProtocolError,
+  AcpStreamIdleError,
+  AcpTimeoutError,
+} from './AcpClient.js';
+import { type AcpLease, type AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS, type PoolKey } from './AcpProcessPool.js';
 import {
   bindSessionCredentialFile,
   type PreparedCredentialEnv,
@@ -37,6 +43,14 @@ import { callbackEnvDiagnostic, materializeSessionMcpServers } from './acp-sessi
 import type { AcpMcpServer, AcpNewSessionResult } from './types.js';
 
 const log = createModuleLogger('acp-agent');
+
+type ResumeDisposition = 'fresh_without_resume' | 'resume_requested' | 'resumed' | 'load_failed_fresh' | 'sealed_fresh';
+
+type PromptPhase =
+  | 'not_started'
+  | 'active_unacknowledged'
+  | 'provider_acknowledged'
+  | 'locally_terminated_unacknowledged';
 
 export interface AcpAgentServiceConfig {
   catId: CatId;
@@ -60,6 +74,13 @@ export interface AcpAgentServiceConfig {
   sessionModel?: string;
   /** When false, disables ALL MCP servers (base + per-project) for this member. */
   mcpSupport?: boolean;
+  /**
+   * #1186: Configured ACP Idle TTL from member's pool config (ms).
+   * Used as the authoritative idle stall threshold for all "no events" termination
+   * paths in promptStream (both tool and non-tool idle). Previously, hardcoded
+   * constants (90s stall, 180s tool ceiling) overrode the user's configured value.
+   */
+  idleTtlMs?: number;
 }
 
 /** @deprecated Use AcpAgentServiceConfig. Kept for backward compat during transition. */
@@ -78,6 +99,12 @@ export class AcpAgentService implements AgentService {
   private readonly modelName: string;
   private readonly sessionModel?: string;
   private readonly mcpSupportEnabled: boolean;
+  /**
+   * #1186: Resolved ACP idle TTL — authoritative threshold for all no-event termination.
+   * Always concrete: defaults to DEFAULT_ACP_IDLE_TTL_MS (30m) when config omits it,
+   * so promptStream never falls back to the client's hardcoded 90s/15m defaults.
+   */
+  private readonly idleTtlMs: number;
 
   constructor(config: AcpAgentServiceConfig) {
     this.catId = config.catId;
@@ -90,6 +117,7 @@ export class AcpAgentService implements AgentService {
     this.modelName = config.modelName ?? config.sessionModel ?? 'acp';
     this.sessionModel = config.sessionModel?.trim() || undefined;
     this.mcpSupportEnabled = config.mcpSupport !== false;
+    this.idleTtlMs = config.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS;
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
@@ -140,7 +168,11 @@ export class AcpAgentService implements AgentService {
       loadSession(sessionId: string, cwd: string, mcpServers?: AcpMcpServer[]): Promise<AcpNewSessionResult>;
       setSessionConfigOption(sessionId: string, configId: string, value: string): Promise<void>;
       cancelSession(sessionId: string): void;
-      promptStream(sessionId: string, text: string): AsyncGenerator<import('./types.js').AcpSessionUpdate>;
+      promptStream(
+        sessionId: string,
+        text: string,
+        options?: { timeoutMs?: number; idleWarningMs?: number; idleStallMs?: number },
+      ): AsyncGenerator<import('./types.js').AcpSessionUpdate>;
       onCapacity(fn: (signal: AcpCapacitySignal) => void): void;
       offCapacity(fn: (signal: AcpCapacitySignal) => void): void;
       readonly recentCapacitySignal: AcpCapacitySignal | null;
@@ -148,6 +180,23 @@ export class AcpAgentService implements AgentService {
     };
     const cwd = options?.workingDirectory ?? this.projectRoot;
     let sessionId: string | undefined;
+    let promptPhase: PromptPhase = 'not_started';
+
+    const sealActivePromptSession = (activeSessionId: string): boolean => {
+      if (promptPhase !== 'active_unacknowledged') return false;
+      promptPhase = 'locally_terminated_unacknowledged';
+      const sessionIds = new Set([activeSessionId, options?.sessionId].filter((id): id is string => Boolean(id)));
+      for (const id of sessionIds) this.pool.sealSession?.(this.poolKey, id);
+      return true;
+    };
+    const cancelActivePromptSession = (activeSessionId: string): boolean => {
+      if (!sealActivePromptSession(activeSessionId)) return false;
+      client.cancelSession(activeSessionId);
+      return true;
+    };
+    const markPromptAcknowledged = () => {
+      if (promptPhase === 'active_unacknowledged') promptPhase = 'provider_acknowledged';
+    };
 
     // Per-invoke capacity listener — covers the entire invoke lifecycle (newSession + prompt + grace).
     // This is intentionally invoke-level, not prompt-level: capacity is a provider-level property
@@ -163,10 +212,9 @@ export class AcpAgentService implements AgentService {
     // Abort handler: cancels the specific session, not the shared client
     const onAbort = options?.signal
       ? () => {
-          log.info({ ...ctx, sessionId }, 'ACP session cancelled via abort signal');
-          if (sessionId && client) {
-            client.cancelSession(sessionId);
-          }
+          const phaseAtAbort = promptPhase;
+          const cancelledActivePrompt = sessionId ? cancelActivePromptSession(sessionId) : false;
+          log.info({ ...ctx, sessionId, phaseAtAbort, cancelledActivePrompt }, 'ACP invocation abort signal observed');
         }
       : undefined;
     if (onAbort && options?.signal) {
@@ -249,9 +297,18 @@ export class AcpAgentService implements AgentService {
       // Session reuse: if options.sessionId is provided (from session chain), try to
       // reuse the existing ACP session for multi-turn memory. The agent keeps conversation
       // history server-side, so reusing the session avoids "amnesia" across turns.
-      const resumeSessionId = options?.sessionId;
-      let isResumedSession = false;
-      let resumeSessionLoadFailed = false;
+      let resumeDisposition: ResumeDisposition = options?.sessionId
+        ? lease.canResumeRequestedSession === false
+          ? 'sealed_fresh'
+          : 'resume_requested'
+        : 'fresh_without_resume';
+      const resumeSessionId = resumeDisposition === 'resume_requested' ? options?.sessionId : undefined;
+      if (resumeDisposition === 'sealed_fresh') {
+        log.warn(
+          { ...ctx, sealedSessionId: options?.sessionId },
+          'ACP cancelled session is sealed; creating a fresh replacement session',
+        );
+      }
 
       if (resumeSessionId) {
         const resumeCreds = resolveSessionCredentialFile(options?.callbackEnv, resumeSessionId);
@@ -279,10 +336,10 @@ export class AcpAgentService implements AgentService {
           sessionMcpServers = resumeConfig.mcpServers;
           envDiag = resumeConfig.envDiag;
           metadata.sessionId = sessionId;
-          isResumedSession = true;
+          resumeDisposition = 'resumed';
           log.info({ ...ctx, sessionId, requestedSessionId: resumeSessionId }, 'ACP session resume completed');
         } catch (err) {
-          resumeSessionLoadFailed = true;
+          resumeDisposition = 'load_failed_fresh';
           const errorMsg = err instanceof Error ? err.message : String(err);
           log.warn(
             { ...ctx, sessionId: resumeSessionId, cwd, err: errorMsg },
@@ -291,7 +348,7 @@ export class AcpAgentService implements AgentService {
         }
       }
 
-      if (!isResumedSession) {
+      if (resumeDisposition !== 'resumed') {
         const freshCreds = prepareSessionCredentialFile(options?.callbackEnv);
         const freshConfig = buildSessionConfig(freshCreds);
         sessionMcpServers = freshConfig.mcpServers;
@@ -329,7 +386,6 @@ export class AcpAgentService implements AgentService {
 
       // Window 2: abort may have fired during newSession
       if (options?.signal?.aborted) {
-        client.cancelSession(sessionId);
         yield {
           type: 'error',
           catId: this.catId,
@@ -353,16 +409,16 @@ export class AcpAgentService implements AgentService {
 
       // Window 3: consumer may abort during the yield above
       if (options?.signal?.aborted) {
-        client.cancelSession(sessionId);
         yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
         return;
       }
 
       // Prepend system prompt (ACP agents have no system prompt flag).
-      // If a resume load failed, the outer invocation skipped identity because it
-      // expected session memory; the fresh fallback session must receive it once.
+      // Any resumed turn that had to create a fresh session lost the identity it
+      // expected session memory to carry, so restore the fallback exactly once.
+      const restoresResumeIdentity = resumeDisposition === 'load_failed_fresh' || resumeDisposition === 'sealed_fresh';
       const fallbackSystemPrompt =
-        resumeSessionLoadFailed && options?.resumeFallbackSystemPrompt ? options.resumeFallbackSystemPrompt : undefined;
+        restoresResumeIdentity && options?.resumeFallbackSystemPrompt ? options.resumeFallbackSystemPrompt : undefined;
       const effectivePrompt = options?.systemPrompt
         ? `${options.systemPrompt}\n\n${prompt}`
         : fallbackSystemPrompt
@@ -373,9 +429,18 @@ export class AcpAgentService implements AgentService {
       promptStreamStartedAt = Date.now();
       // Prompt digest: length + hash only (snippets gated by AUDIT_LOG_INCLUDE_PROMPT_SNIPPETS)
       const promptDigest = createPromptDigest(effectivePrompt);
-      log.info({ ...ctx, sessionId, promptDigest }, 'ACP promptStream starting');
+      // #1186: Thread resolved idle TTL to promptStream so the watchdog respects
+      // the member's ACP Idle TTL (or 30m default) instead of hardcoded 90s/180s.
+      // Turn budget (timeoutMs) must exceed idle stall so AcpStreamIdleError fires
+      // first with configuredIdleStallMs. Add 60s margin to avoid timer races.
+      const promptStreamOpts = {
+        idleStallMs: this.idleTtlMs,
+        timeoutMs: this.idleTtlMs + ACP_PROMPT_TIMEOUT_MARGIN_MS,
+      };
+      log.info({ ...ctx, sessionId, promptDigest, idleTtlMs: this.idleTtlMs }, 'ACP promptStream starting');
       eventCount = 0;
-      for await (const event of client.promptStream(sessionId, effectivePrompt)) {
+      promptPhase = 'active_unacknowledged';
+      for await (const event of client.promptStream(sessionId, effectivePrompt, promptStreamOpts)) {
         // F149: Capacity signal injected by AcpClient.promptStream from stderr.
         // Breaks through zero-event stalls where the old listener-only path couldn't.
         if (event.update?.sessionUpdate === 'provider_capacity_signal') {
@@ -436,7 +501,7 @@ export class AcpAgentService implements AgentService {
               { ...ctx, sessionId, eventCount, scratchpadSuppressedEvents },
               'ACP compaction auto-continue loop detected — cancelling session',
             );
-            client.cancelSession(sessionId);
+            cancelActivePromptSession(sessionId);
             throw new Error(
               `ACP compaction auto-continue loop cancelled after ${scratchpadSuppressedEvents} suppressed events`,
             );
@@ -450,6 +515,7 @@ export class AcpAgentService implements AgentService {
           yield result;
         }
       }
+      markPromptAcknowledged();
       log.info({ ...ctx, sessionId, eventCount }, 'ACP promptStream completed');
 
       // #1091: Zero-event resume detection. Some ACP providers (e.g. kimi) return
@@ -458,12 +524,13 @@ export class AcpAgentService implements AgentService {
       // Detect this and retry with a fresh session so the cat isn't silently dead.
       const promptElapsedMs = Date.now() - promptStreamStartedAt;
       const RESUME_EMPTY_THRESHOLD_MS = 3_000;
-      if (isResumedSession && eventCount === 0 && promptElapsedMs < RESUME_EMPTY_THRESHOLD_MS) {
+      if (resumeDisposition === 'resumed' && eventCount === 0 && promptElapsedMs < RESUME_EMPTY_THRESHOLD_MS) {
         log.warn(
           { ...ctx, sessionId, promptElapsedMs },
           '#1091: ACP resumed session produced zero events in <3s — retrying with fresh session',
         );
         // Create fresh session and retry promptStream once (not recursive — single retry)
+        promptPhase = 'not_started';
         try {
           const retryCreds = prepareSessionCredentialFile(options?.callbackEnv);
           const retryConfig = buildSessionConfig(retryCreds);
@@ -481,7 +548,6 @@ export class AcpAgentService implements AgentService {
 
           // Abort may have fired during the fresh newSession (mirrors Window 2)
           if (options?.signal?.aborted) {
-            client.cancelSession(freshSessionId);
             yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
             return;
           }
@@ -511,7 +577,6 @@ export class AcpAgentService implements AgentService {
 
           // Consumer may abort during the yield above (mirrors Window 3)
           if (options?.signal?.aborted) {
-            client.cancelSession(freshSessionId);
             yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
             return;
           }
@@ -526,7 +591,8 @@ export class AcpAgentService implements AgentService {
           const retryState = createAcpSessionState();
           let retryEventCount = 0;
           log.info({ ...ctx, sessionId: freshSessionId }, '#1091: retry promptStream on fresh session');
-          for await (const event of client.promptStream(freshSessionId, retryPrompt)) {
+          promptPhase = 'active_unacknowledged';
+          for await (const event of client.promptStream(freshSessionId, retryPrompt, promptStreamOpts)) {
             // Skip synthetic events (capacity/idle/tool-wait warnings)
             if (event.update?.sessionUpdate === 'provider_capacity_signal') continue;
             if (event.update?.sessionUpdate === 'stream_idle_warning') continue;
@@ -541,6 +607,7 @@ export class AcpAgentService implements AgentService {
               yield result;
             }
           }
+          markPromptAcknowledged();
           log.info({ ...ctx, sessionId: freshSessionId, retryEventCount }, '#1091: retry promptStream completed');
 
           // Flush trailing thinking from retry
@@ -550,6 +617,9 @@ export class AcpAgentService implements AgentService {
           yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
           return; // Exit — retry path handled completion
         } catch (retryErr) {
+          if (sessionId && (retryErr instanceof AcpTimeoutError || retryErr instanceof AcpStreamIdleError)) {
+            sealActivePromptSession(sessionId);
+          }
           const retryErrMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
           log.error({ ...ctx, sessionId, err: retryErrMsg }, '#1091: retry with fresh session also failed');
           yield {
@@ -573,6 +643,9 @@ export class AcpAgentService implements AgentService {
 
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
     } catch (err) {
+      if (sessionId && (err instanceof AcpTimeoutError || err instanceof AcpStreamIdleError)) {
+        sealActivePromptSession(sessionId);
+      }
       const waitedMs = promptStreamStartedAt ? Date.now() - promptStreamStartedAt : 0;
       // P1: stderr may arrive after timeout — give a grace window for late capacity signals
       if (!capacitySignal && err instanceof AcpTimeoutError) {
@@ -767,8 +840,13 @@ function toUserFacingError(providerName: string, errorCode: string, errorMsg: st
       return `${base}\n⚠️ ${label} 服务端容量不足（服务器繁忙），非 Clowder AI 系统故障。`;
     case 'stream_idle_stall':
       return `${base}\n⚠️ ${label} 服务端响应中断（服务器可能繁忙或不稳定），非 Clowder AI 系统故障。`;
-    case 'turn_budget_exceeded':
-      return `${base}\n⚠️ 本轮对话时间预算用完（${Math.round(900 / 60)}分钟），agent 可能在执行复杂工具链。非故障，可重试。`;
+    case 'turn_budget_exceeded': {
+      // #1186: Derive actual timeout from error message instead of hardcoding 15m.
+      // AcpTimeoutError format: "...did not respond within ${ms}ms"
+      const budgetMatch = errorMsg.match(/within (\d+)ms/);
+      const budgetMinutes = budgetMatch ? Math.round(Number(budgetMatch[1]) / 60_000) : '?';
+      return `${base}\n⚠️ 本轮对话时间预算用完（${budgetMinutes}分钟），agent 可能在执行复杂工具链。非故障，可重试。`;
+    }
     case 'mcp_pollution':
       return `${base}\n⚠️ ${label} 工具调用异常（MCP 服务端错误）。`;
     case 'init_failure':

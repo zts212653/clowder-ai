@@ -643,4 +643,456 @@ describe('AcpHttpStreamClient', () => {
     assert.equal(final.done, true);
     assert.equal(final.value, 'end_turn');
   });
+
+  // ─── #1186: Tool execution ceiling parity with stdio client ───
+
+  it('#1186: pendingTool terminates at configured idleStallMs (parity with stdio)', async () => {
+    let promptResponse = null;
+    let resolvePromptSeen;
+    const promptSeen = new Promise((resolve) => {
+      resolvePromptSeen = resolve;
+    });
+
+    server = await startJsonRpcServer((message, res) => {
+      if (message.method === 'initialize') {
+        return { jsonrpc: '2.0', id: message.id, result: INIT_RESULT };
+      }
+      if (message.method === 'session/new') {
+        return { jsonrpc: '2.0', id: message.id, result: { sessionId: 'http-tool-ceil' } };
+      }
+      if (message.method === 'session/prompt') {
+        promptResponse = res;
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+        res.flushHeaders();
+        resolvePromptSeen();
+        return undefined;
+      }
+      if (message.method === 'session/cancel') {
+        // End the prompt stream when cancel arrives — simulates agent reacting to cancel
+        if (promptResponse && !promptResponse.writableEnded) {
+          promptResponse.end();
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{}');
+        return undefined;
+      }
+      return { jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'not found' } };
+    });
+    const { child, agentStdout } = createMockChild();
+    const port = serverPort(server);
+
+    client = new AcpHttpStreamClient({
+      command: 'fake-http-acp',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => {
+        setImmediate(() => agentStdout.write(`Listening on port ${port}\n`));
+        return child;
+      },
+      portDiscoveryTimeoutMs: 500,
+    });
+
+    await client.initialize();
+    const session = await client.newSession();
+
+    const events = [];
+    let thrownError = null;
+
+    const iterator = client.promptStream(session.sessionId, 'hello', {
+      idleWarningMs: 20,
+      idleStallMs: 150, // Configured idle TTL — tool ceiling must follow this
+      timeoutMs: 5000, // High outer timeout — should NOT fire first
+    });
+
+    // Start the generator (sends HTTP request) and capture first result promise
+    const firstResult = iterator.next();
+
+    // Wait for prompt request to reach mock server
+    await promptSeen;
+
+    // Send tool_call event, then go silent — never complete
+    promptResponse.write(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'session/update',
+        params: {
+          sessionId: 'http-tool-ceil',
+          update: { sessionUpdate: 'tool_call', content: { type: 'text', text: 'slow_tool' } },
+        },
+      })}\n`,
+    );
+
+    try {
+      // Consume first result and continue draining
+      const first = await withTimeout(firstResult, 3000, 'HTTP first event did not arrive');
+      if (!first.done) events.push(first.value);
+
+      while (!first.done) {
+        const result = await withTimeout(iterator.next(), 3000, 'HTTP promptStream did not terminate');
+        if (result.done) break;
+        events.push(result.value);
+      }
+    } catch (err) {
+      thrownError = err;
+    } finally {
+      // Ensure prompt response is always closed to prevent test hanging
+      if (promptResponse && !promptResponse.writableEnded) {
+        promptResponse.end();
+      }
+    }
+
+    // With fix: should throw AcpStreamIdleError at ~150ms (configured idleStallMs)
+    // Without fix: pendingTool suppresses stall indefinitely → timeoutMs fires at 5000ms
+    assert.ok(thrownError, 'Should throw an error on tool execution exceeding idleStallMs');
+    assert.match(
+      thrownError.message,
+      /[Ss]tream idle|STREAM_IDLE/,
+      `Expected AcpStreamIdleError, got: ${thrownError.message}`,
+    );
+    // #1186 P2: structured error includes configured threshold
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL');
+    assert.equal(thrownError.configuredIdleStallMs, 150, 'HTTP error must carry configured idleStallMs');
+
+    // Should have tool_wait_warning before stall
+    const toolWaits = events.filter((e) => e.update?.sessionUpdate === 'stream_tool_wait_warning');
+    assert.ok(toolWaits.length >= 1, 'Should emit tool_wait_warning before termination');
+  });
+
+  it('#1186: ordinary silence (no pendingTool) terminates at configured idleStallMs', async () => {
+    let promptResponse = null;
+    let resolvePromptSeen;
+    const promptSeen = new Promise((resolve) => {
+      resolvePromptSeen = resolve;
+    });
+
+    server = await startJsonRpcServer((message, res) => {
+      if (message.method === 'initialize') {
+        return { jsonrpc: '2.0', id: message.id, result: INIT_RESULT };
+      }
+      if (message.method === 'session/new') {
+        return { jsonrpc: '2.0', id: message.id, result: { sessionId: 'http-silence-sess' } };
+      }
+      if (message.method === 'session/prompt') {
+        promptResponse = res;
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+        res.flushHeaders();
+        resolvePromptSeen();
+        return undefined;
+      }
+      if (message.method === 'session/cancel') {
+        if (promptResponse && !promptResponse.writableEnded) promptResponse.end();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{}');
+        return undefined;
+      }
+      return { jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'not found' } };
+    });
+    const { child, agentStdout } = createMockChild();
+    const port = serverPort(server);
+
+    client = new AcpHttpStreamClient({
+      command: 'fake-http-acp',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => {
+        setImmediate(() => agentStdout.write(`Listening on port ${port}\n`));
+        return child;
+      },
+      portDiscoveryTimeoutMs: 500,
+    });
+
+    await client.initialize();
+    const session = await client.newSession();
+
+    let thrownError = null;
+    const events = [];
+    const iterator = client.promptStream(session.sessionId, 'hello', {
+      idleWarningMs: 20,
+      idleStallMs: 100,
+      timeoutMs: 5000,
+    });
+
+    // Start generator (sends HTTP request)
+    const firstResult = iterator.next();
+    await promptSeen;
+
+    // Send ONE text event, then go silent (ordinary silence, no tool_call)
+    promptResponse.write(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'session/update',
+        params: {
+          sessionId: 'http-silence-sess',
+          update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'partial' } },
+        },
+      })}\n`,
+    );
+
+    try {
+      const first = await withTimeout(firstResult, 3000, 'HTTP first event did not arrive');
+      if (!first.done) events.push(first.value);
+      while (!first.done) {
+        const result = await withTimeout(iterator.next(), 3000, 'HTTP ordinary silence did not terminate');
+        if (result.done) break;
+        events.push(result.value);
+      }
+    } catch (err) {
+      thrownError = err;
+    } finally {
+      if (promptResponse && !promptResponse.writableEnded) promptResponse.end();
+    }
+
+    assert.ok(thrownError, 'Ordinary silence should throw AcpStreamIdleError');
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL');
+    assert.equal(thrownError.configuredIdleStallMs, 100, 'HTTP ordinary silence error carries configured threshold');
+  });
+
+  it('#1186: zero-first-event produces AcpStreamIdleError at configured idleStallMs (HTTP)', async () => {
+    let promptResponse = null;
+    let resolvePromptSeen;
+    const promptSeen = new Promise((resolve) => {
+      resolvePromptSeen = resolve;
+    });
+
+    server = await startJsonRpcServer((message, res) => {
+      if (message.method === 'initialize') {
+        return { jsonrpc: '2.0', id: message.id, result: INIT_RESULT };
+      }
+      if (message.method === 'session/new') {
+        return { jsonrpc: '2.0', id: message.id, result: { sessionId: 'http-zero-evt' } };
+      }
+      if (message.method === 'session/prompt') {
+        promptResponse = res;
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+        res.flushHeaders();
+        resolvePromptSeen();
+        // Never send any events — zero-first-event scenario
+        return undefined;
+      }
+      if (message.method === 'session/cancel') {
+        if (promptResponse && !promptResponse.writableEnded) promptResponse.end();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{}');
+        return undefined;
+      }
+      return { jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'not found' } };
+    });
+    const { child, agentStdout } = createMockChild();
+    const port = serverPort(server);
+
+    client = new AcpHttpStreamClient({
+      command: 'fake-http-acp',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => {
+        setImmediate(() => agentStdout.write(`Listening on port ${port}\n`));
+        return child;
+      },
+      portDiscoveryTimeoutMs: 500,
+    });
+
+    await client.initialize();
+    const session = await client.newSession();
+
+    let thrownError = null;
+    const events = [];
+    const iterator = client.promptStream(session.sessionId, 'hello', {
+      idleWarningMs: 30,
+      idleStallMs: 100, // Should fire at ~100ms
+      timeoutMs: 5000, // Budget much higher — must NOT fire first
+    });
+
+    const firstResult = iterator.next();
+    await promptSeen;
+
+    // No events sent — zero-first-event
+    try {
+      const first = await withTimeout(firstResult, 3000, 'HTTP zero-event did not start');
+      if (!first.done) events.push(first.value);
+      while (!first.done) {
+        const result = await withTimeout(iterator.next(), 3000, 'HTTP zero-event did not terminate');
+        if (result.done) break;
+        events.push(result.value);
+      }
+    } catch (err) {
+      thrownError = err;
+    } finally {
+      if (promptResponse && !promptResponse.writableEnded) promptResponse.end();
+    }
+
+    // Should throw AcpStreamIdleError (not AcpTimeoutError)
+    assert.ok(thrownError, 'Zero-first-event should throw AcpStreamIdleError');
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL', `Expected STREAM_IDLE_STALL, got ${thrownError.code}`);
+    assert.equal(thrownError.configuredIdleStallMs, 100, 'HTTP zero-event error carries configured threshold');
+  });
+
+  it('#1186: cancel settles HTTP prompt stream via sessionCancelCallbacks', async () => {
+    let promptResponse = null;
+    let resolvePromptSeen;
+    const promptSeen = new Promise((resolve) => {
+      resolvePromptSeen = resolve;
+    });
+
+    server = await startJsonRpcServer((message, res) => {
+      if (message.method === 'initialize') {
+        return { jsonrpc: '2.0', id: message.id, result: INIT_RESULT };
+      }
+      if (message.method === 'session/new') {
+        return { jsonrpc: '2.0', id: message.id, result: { sessionId: 'http-cancel-cb' } };
+      }
+      if (message.method === 'session/prompt') {
+        promptResponse = res;
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+        res.flushHeaders();
+        // Send one event, then go silent — provider never responds to cancel
+        setImmediate(() => {
+          res.write(
+            `${JSON.stringify({
+              jsonrpc: '2.0',
+              method: 'session/update',
+              params: {
+                sessionId: 'http-cancel-cb',
+                update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'start' } },
+              },
+            })}\n`,
+          );
+        });
+        resolvePromptSeen();
+        return undefined;
+      }
+      if (message.method === 'session/cancel') {
+        // Provider acknowledges cancel but does NOT end the prompt stream
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{}');
+        return undefined;
+      }
+      return { jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'not found' } };
+    });
+    const { child, agentStdout } = createMockChild();
+    const port = serverPort(server);
+
+    client = new AcpHttpStreamClient({
+      command: 'fake-http-acp',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => {
+        setImmediate(() => agentStdout.write(`Listening on port ${port}\n`));
+        return child;
+      },
+      portDiscoveryTimeoutMs: 500,
+    });
+
+    await client.initialize();
+    const session = await client.newSession();
+
+    const events = [];
+    let thrownError = null;
+    const startMs = Date.now();
+    const iterator = client.promptStream(session.sessionId, 'hello', {
+      idleWarningMs: 500,
+      idleStallMs: 5000, // Very high — cancel must fire before this
+      timeoutMs: 10000,
+    });
+
+    const firstResult = iterator.next();
+    await promptSeen;
+
+    try {
+      // Get the first real event
+      const first = await withTimeout(firstResult, 3000, 'HTTP cancel-cb first event');
+      if (!first.done) events.push(first.value);
+
+      // Cancel the session — should settle promptStream immediately via callback
+      client.cancelSession(session.sessionId);
+
+      // The next .next() should resolve promptly
+      while (true) {
+        const result = await withTimeout(iterator.next(), 3000, 'HTTP cancel-cb did not settle');
+        if (result.done) break;
+        events.push(result.value);
+      }
+    } catch (err) {
+      thrownError = err;
+    } finally {
+      if (promptResponse && !promptResponse.writableEnded) promptResponse.end();
+    }
+
+    const elapsed = Date.now() - startMs;
+
+    // Should throw AcpStreamIdleError (from cancel callback)
+    assert.ok(thrownError, 'HTTP cancel should throw');
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL', `Expected STREAM_IDLE_STALL, got ${thrownError.code}`);
+    assert.equal(
+      client.isSafeForSingleFlightReuse,
+      false,
+      'cancelled HTTP prompt must mark a single-flight carrier unsafe for warm reuse',
+    );
+    assert.equal(client.isSessionSafeForReuse('http-cancel-cb'), false);
+    assert.equal(client.isSessionSafeForReuse('unrelated-sess'), true);
+
+    // Should settle promptly — not wait for idle stall (5s) or budget (10s)
+    assert.ok(elapsed < 2000, `HTTP cancel should settle within 2s, took ${elapsed}ms`);
+  });
+
+  it('#1186: short TTL regression — idleStallMs < idleWarningMs terminates at stall threshold (HTTP)', async () => {
+    let promptResponse = null;
+
+    server = await startJsonRpcServer((message, res) => {
+      if (message.method === 'initialize') {
+        return { jsonrpc: '2.0', id: message.id, result: INIT_RESULT };
+      }
+      if (message.method === 'session/new') {
+        return { jsonrpc: '2.0', id: message.id, result: { sessionId: 'http-short-ttl' } };
+      }
+      if (message.method === 'session/prompt') {
+        promptResponse = res;
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+        res.flushHeaders();
+        // Never send any events — zero-first-event with short TTL
+        return undefined;
+      }
+      return { jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'not found' } };
+    });
+    const { child, agentStdout } = createMockChild();
+    const port = serverPort(server);
+
+    client = new AcpHttpStreamClient({
+      command: 'fake-http-acp',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => {
+        setImmediate(() => agentStdout.write(`Listening on port ${port}\n`));
+        return child;
+      },
+      portDiscoveryTimeoutMs: 500,
+    });
+
+    await client.initialize();
+    const session = await client.newSession();
+
+    const startMs = Date.now();
+    let thrownError = null;
+    try {
+      // idleStallMs (100ms) < idleWarningMs (20_000ms default).
+      // Without Math.min fix, initial check schedules at 20_000ms — way too late.
+      for await (const _event of client.promptStream(session.sessionId, 'hello', {
+        idleStallMs: 100,
+        // idleWarningMs defaults to 20_000
+        timeoutMs: 30_000,
+      })) {
+        // Should not receive any events
+      }
+    } catch (err) {
+      thrownError = err;
+    } finally {
+      if (promptResponse && !promptResponse.writableEnded) promptResponse.end();
+    }
+    const elapsed = Date.now() - startMs;
+
+    assert.ok(thrownError, 'Should throw on short-TTL zero-event stall (HTTP)');
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL', `Expected STREAM_IDLE_STALL, got ${thrownError.code}`);
+    assert.equal(thrownError.configuredIdleStallMs, 100, 'Error should carry configured 100ms threshold');
+    // Must terminate near 100ms, not at 20_000ms (the warning interval)
+    assert.ok(elapsed < 2000, `Should terminate near 100ms, took ${elapsed}ms`);
+  });
 });
