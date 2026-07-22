@@ -1692,4 +1692,56 @@ describe('AcpClient', () => {
     const textEvents = events.filter((e) => e.update?.sessionUpdate === 'agent_message_chunk');
     assert.equal(textEvents.length, 1, 'Should have 1 text event after tool completes');
   });
+
+  it('#1186: stdio request ceiling stays above a configured activity budget over one hour', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'long-ttl-sess' });
+        } else if (msg.method === 'session/prompt') {
+          agentRespond(agentStdout, msg.id, { stopReason: 'end_turn' });
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const idleStallMs = 2 * 60 * 60 * 1000;
+    const activityBudgetMs = idleStallMs + 60_000;
+    const expectedRequestCeilingMs = activityBudgetMs + 60_000;
+    const scheduledDelays = [];
+    const originalSetTimeout = globalThis.setTimeout;
+    const setTimeoutMock = mock.method(globalThis, 'setTimeout', (callback, delay, ...args) => {
+      scheduledDelays.push(delay);
+      return originalSetTimeout(callback, delay, ...args);
+    });
+
+    try {
+      for await (const _event of client.promptStream('long-ttl-sess', 'hello', {
+        idleStallMs,
+        timeoutMs: activityBudgetMs,
+      })) {
+        // No updates expected; the provider acknowledges immediately.
+      }
+    } finally {
+      setTimeoutMock.mock.restore();
+    }
+
+    assert.ok(
+      scheduledDelays.includes(expectedRequestCeilingMs),
+      `session/prompt request ceiling must be ${expectedRequestCeilingMs}ms, got ${scheduledDelays.join(', ')}`,
+    );
+    assert.equal(
+      scheduledDelays.includes(3_600_000),
+      false,
+      'the legacy one-hour request ceiling must not precede a valid two-hour idle policy',
+    );
+  });
 });

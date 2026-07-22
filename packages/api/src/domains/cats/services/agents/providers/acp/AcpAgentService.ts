@@ -22,7 +22,13 @@ import { readCapabilitiesConfig } from '../../../../../../config/capabilities/ca
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import { createPromptDigest } from '../../../context/prompt-digest.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
-import { type AcpCapacitySignal, AcpProtocolError, AcpStreamIdleError, AcpTimeoutError } from './AcpClient.js';
+import {
+  ACP_PROMPT_TIMEOUT_MARGIN_MS,
+  type AcpCapacitySignal,
+  AcpProtocolError,
+  AcpStreamIdleError,
+  AcpTimeoutError,
+} from './AcpClient.js';
 import { type AcpLease, type AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS, type PoolKey } from './AcpProcessPool.js';
 import {
   bindSessionCredentialFile,
@@ -427,7 +433,10 @@ export class AcpAgentService implements AgentService {
       // the member's ACP Idle TTL (or 30m default) instead of hardcoded 90s/180s.
       // Turn budget (timeoutMs) must exceed idle stall so AcpStreamIdleError fires
       // first with configuredIdleStallMs. Add 60s margin to avoid timer races.
-      const promptStreamOpts = { idleStallMs: this.idleTtlMs, timeoutMs: this.idleTtlMs + 60_000 };
+      const promptStreamOpts = {
+        idleStallMs: this.idleTtlMs,
+        timeoutMs: this.idleTtlMs + ACP_PROMPT_TIMEOUT_MARGIN_MS,
+      };
       log.info({ ...ctx, sessionId, promptDigest, idleTtlMs: this.idleTtlMs }, 'ACP promptStream starting');
       eventCount = 0;
       promptPhase = 'active_unacknowledged';

@@ -38,6 +38,27 @@ const log = createModuleLogger('acp-client');
 
 const IS_WINDOWS = process.platform === 'win32';
 const KILL_GRACE_MS = 3_000;
+export const ACP_PROMPT_TIMEOUT_MARGIN_MS = 60_000;
+const MIN_ACP_PROMPT_REQUEST_CEILING_MS = 3_600_000;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+/**
+ * Keep the absolute protocol request ceiling strictly above the resettable
+ * activity budget without exceeding Node's representable timer range.
+ */
+export function resolveAcpPromptRequestCeilingMs(activityBudgetMs: number): number {
+  if (!Number.isSafeInteger(activityBudgetMs) || activityBudgetMs <= 0) {
+    throw new RangeError(`ACP prompt activity budget must be a positive safe integer, got ${activityBudgetMs}`);
+  }
+  const requestCeilingMs = Math.max(MIN_ACP_PROMPT_REQUEST_CEILING_MS, activityBudgetMs + ACP_PROMPT_TIMEOUT_MARGIN_MS);
+  if (requestCeilingMs > MAX_TIMER_DELAY_MS) {
+    throw new RangeError(
+      `ACP prompt timeout policy exceeds Node timer range: activityBudgetMs=${activityBudgetMs}, ` +
+        `max=${MAX_TIMER_DELAY_MS - ACP_PROMPT_TIMEOUT_MARGIN_MS}`,
+    );
+  }
+  return requestCeilingMs;
+}
 
 // ─── Config ──────────────────────────────────────────────���─────
 
@@ -412,13 +433,15 @@ export class AcpClient {
     // If agent produces events continuously, budget never fires. Only triggers
     // after timeoutMs of SILENCE (no events). Idle stall (90s) catches true hangs
     // faster; this is the wider safety net for slow-but-alive sessions.
-    // sendRequest gets a hard ceiling (1h) as absolute last-resort guard.
+    // sendRequest gets a wider absolute ceiling as a last-resort guard. The
+    // ceiling is derived from timeoutMs so a configured idle policy over one
+    // hour is never preempted by the legacy fixed request timer.
     const timeoutMs = options?.timeoutMs ?? 900_000;
     const idleWarningMs = options?.idleWarningMs ?? 20_000;
     // Idle stall catches true hangs. Gemini CLI doesn't emit tool_call for MCP
     // tools, so pendingTool never activates. 90s covers most MCP calls (10-30s).
     const idleStallMs = options?.idleStallMs ?? 90_000;
-    const HARD_CEILING_MS = 3_600_000; // 1h — absolute last-resort for sendRequest promise
+    const requestCeilingMs = resolveAcpPromptRequestCeilingMs(timeoutMs);
     const queue: AcpSessionUpdate[] = [];
     let waitResolve: (() => void) | null = null;
     let done = false;
@@ -639,7 +662,7 @@ export class AcpClient {
     this.sendRequest(
       ACP_METHODS.sessionPrompt,
       { sessionId, prompt: [{ type: 'text', text }] },
-      HARD_CEILING_MS,
+      requestCeilingMs,
       promptRequestId,
     )
       .then((resp) => {
