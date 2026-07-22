@@ -215,16 +215,15 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(await redis.zscore(`msg:user:${userId}`, queued.id), '100');
     assert.equal(await redis.zscore(`msg:thread:${threadId}`, queued.id), '100');
 
-    assert.deepEqual(await admissionStore.markCanceled(legacy.id), legacyBefore.message);
+    assert.equal(await admissionStore.markCanceled(legacy.id), null);
     assert.deepEqual(await snapshot(legacy), legacyBefore, 'legacy-immediate hash and scores must remain unchanged');
 
     const deliveredResult = await admissionStore.markCanceled(delivered.id);
-    assert.equal(deliveredResult.deliveryStatus, 'delivered');
-    assert.equal(deliveredResult.deliveredAt, 200);
+    assert.equal(deliveredResult, null);
     assert.deepEqual(await snapshot(delivered), deliveredBefore, 'delivered hash and scores must remain unchanged');
 
     const canceledBefore = await snapshot(queued);
-    assert.deepEqual(await admissionStore.markCanceled(queued.id), canceledBefore.message);
+    assert.equal(await admissionStore.markCanceled(queued.id), null);
     assert.deepEqual(await snapshot(queued), canceledBefore, 'repeated cancellation must be a no-op');
   });
 

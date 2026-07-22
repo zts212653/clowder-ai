@@ -136,13 +136,14 @@ describe('MessageStore', () => {
     assert.equal(canceled.deliveryStatus, 'canceled');
     assert.equal(canceled.deliveredAt, undefined);
 
-    assert.deepEqual(store.markCanceled(legacy.id), legacyBefore, 'legacy-immediate must remain unchanged');
+    assert.equal(store.markCanceled(legacy.id), null);
     assert.deepEqual(store.getById(legacy.id), legacyBefore);
-    assert.deepEqual(store.markCanceled(delivered.id), deliveredBefore, 'delivered state must remain unchanged');
+    assert.equal(store.markCanceled(delivered.id), null);
     assert.deepEqual(store.getById(delivered.id), deliveredBefore);
 
     const canceledBefore = { ...canceled };
-    assert.deepEqual(store.markCanceled(queued.id), canceledBefore, 'repeated cancellation must be a no-op');
+    assert.equal(store.markCanceled(queued.id), null);
+    assert.deepEqual(store.getById(queued.id), canceledBefore, 'repeated cancellation must preserve state');
   });
 
   test('markDelivered() rejects unsafe order timestamps before state transition and permits a valid retry', async () => {
