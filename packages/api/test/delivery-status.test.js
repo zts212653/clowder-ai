@@ -80,9 +80,12 @@ describe('F117: deliveryStatus + isDelivered', () => {
     assert.equal(msg.deliveryStatus, undefined, 'precondition: no deliveryStatus');
 
     const result = store.markDelivered(msg.id, Date.now());
-    // undefined is not queued — no-op, prevents timeline re-scoring
-    assert.equal(result?.deliveryStatus, undefined, 'must not overwrite undefined to delivered');
-    assert.equal(result?.deliveredAt, undefined, 'must not set deliveredAt');
+    // CAS no-op: deliveryStatus is undefined (not 'queued') → returns null (PR #1193)
+    assert.equal(result, null, 'CAS no-op: legacy message must return null');
+    // Canonical stored state must be unchanged
+    const stored = store.getById(msg.id);
+    assert.equal(stored.deliveryStatus, undefined, 'must not overwrite undefined to delivered');
+    assert.equal(stored.deliveredAt, undefined, 'must not set deliveredAt');
   });
 
   test('markDelivered is no-op for already-delivered messages', async () => {
@@ -100,9 +103,13 @@ describe('F117: deliveryStatus + isDelivered', () => {
     store.markDelivered(msg.id, firstDeliveredAt);
     assert.equal(msg.deliveryStatus, 'delivered');
 
-    // Second call should be no-op
+    // Second call is CAS no-op — already delivered → returns null (PR #1193)
     const result = store.markDelivered(msg.id, Date.now());
-    assert.equal(result?.deliveredAt, firstDeliveredAt, 'must not overwrite deliveredAt');
+    assert.equal(result, null, 'CAS no-op: already-delivered message must return null');
+    // Canonical stored state retains original deliveredAt
+    const stored = store.getById(msg.id);
+    assert.equal(stored.deliveredAt, firstDeliveredAt, 'stored deliveredAt must not be overwritten');
+    assert.equal(stored.deliveryStatus, 'delivered', 'stored status must remain delivered');
   });
 });
 

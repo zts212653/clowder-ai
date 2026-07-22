@@ -746,7 +746,10 @@ describe('StartupReconciler', () => {
       },
       markDelivered(id, deliveredAt) {
         deliveredIds.push({ id, deliveredAt });
-        return { id, deliveryStatus: 'delivered', deliveredAt };
+        // CAS contract (PR #1193): running invocation's message is already visible →
+        // markDelivered returns null (CAS no-op). Only queued orphans actually transition.
+        if (id === 'umsg-1') return null; // already visible (running invocation)
+        return { id, deliveryStatus: 'delivered', deliveredAt }; // queued orphan → CAS wins
       },
     };
 
@@ -759,13 +762,13 @@ describe('StartupReconciler', () => {
 
     const result = await reconciler.reconcileOrphans();
 
-    // Both umsg-1 (running) and umsg-2 (queued) get markDelivered called.
-    // The store's guard (deliveryStatus !== 'queued' → no-op) protects already-visible messages.
-    assert.equal(result.messagesRecovered, 2, 'ensureMessageVisible called for both');
+    // Both get markDelivered called, but CAS decides: umsg-1 (already visible) = no-op,
+    // umsg-2 (queued orphan) = recovered. Only the CAS winner counts.
+    assert.equal(result.messagesRecovered, 1, 'only queued orphan counts as recovered (running = CAS no-op)');
     assert.deepEqual(
       deliveredIds.map((d) => d.id).sort(),
       ['umsg-1', 'umsg-2'],
-      'markDelivered called for both (store decides actual effect)',
+      'markDelivered called for both (CAS decides actual effect)',
     );
   });
 
@@ -847,8 +850,8 @@ describe('StartupReconciler', () => {
       },
       markDelivered(id) {
         markDeliveredCallCount++;
-        // Simulates store guard: message is already delivered → return as-is
-        return { id, deliveryStatus: 'delivered', deliveredAt: Date.now() - 60_000 };
+        // CAS no-op: message already delivered → returns null (PR #1193 contract)
+        return null;
       },
     };
 
@@ -861,11 +864,10 @@ describe('StartupReconciler', () => {
 
     const result = await reconciler.reconcileOrphans();
 
-    // markDelivered is called, but the store's !== 'queued' guard makes it a no-op
-    // for already-visible messages. This is safe AND catches the edge case where
-    // process crashed between invocation→running and markDelivered.
+    // markDelivered IS called (ensures crash-recovery path is exercised), but CAS
+    // returns null for already-visible messages → not counted as recovered.
     assert.equal(markDeliveredCallCount, 1, 'markDelivered should be called');
-    assert.equal(result.messagesRecovered, 1);
+    assert.equal(result.messagesRecovered, 0, 'CAS no-op: already-visible message not counted as recovered');
     assert.equal(result.running, 1);
   });
 
