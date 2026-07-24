@@ -14,20 +14,22 @@ import { afterEach, describe, it, mock } from 'node:test';
 const { AcpAgentService: GeminiAcpAdapter } = await import(
   '../../dist/domains/cats/services/agents/providers/acp/AcpAgentService.js'
 );
-const { AcpProcessPool } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js');
+const { AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS } = await import(
+  '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+);
 const { AcpClient } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpClient.js');
 
 const TEST_POOL_KEY = { projectPath: '/tmp', providerProfile: 'test' };
 
 /** Create a minimal mock child process */
-function createMockChild() {
+function createMockChild(pid = 12345) {
   const clientStdin = new PassThrough();
   const agentStdout = new PassThrough();
   const agentStderr = new PassThrough();
 
   const ee = new EventEmitter();
   const child = {
-    pid: 12345,
+    pid,
     stdin: clientStdin,
     stdout: agentStdout,
     stderr: agentStderr,
@@ -144,10 +146,10 @@ function createPoolWithAutoRespond() {
 /**
  * Create a pool backed by a custom spawn function.
  */
-function createPoolWithSpawn(spawnFn) {
+function createPoolWithSpawn(spawnFn, variantConfig = {}) {
   return new AcpProcessPool(
     { maxLiveProcesses: 5, idleTtlMs: 999_999, healthCheckIntervalMs: 999_999 },
-    {},
+    variantConfig,
     () => new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn }),
   );
 }
@@ -342,6 +344,274 @@ describe('GeminiAcpAdapter', () => {
     assert.deepEqual(owningClient.promptedSessionIds, ['sess-owned']);
     assert.deepEqual(rememberedSessions, [{ sessionId: 'sess-owned', client: 'owner' }]);
     assert.ok(messages.some((m) => m.type === 'text' && m.content === 'resumed via owner'));
+  });
+
+  it('creates and publishes a fresh session when the pool seals a cancelled resume target', async () => {
+    const client = {
+      loadSessionCalls: [],
+      newSessionCalls: 0,
+      promptedSessionIds: [],
+      promptedTexts: [],
+      recentCapacitySignal: null,
+      async newSession() {
+        client.newSessionCalls++;
+        return { sessionId: 'fresh-after-cancel' };
+      },
+      async loadSession(sessionId) {
+        client.loadSessionCalls.push(sessionId);
+        return { sessionId };
+      },
+      async setSessionConfigOption() {},
+      cancelSession() {},
+      async *promptStream(sessionId, text) {
+        client.promptedSessionIds.push(sessionId);
+        client.promptedTexts.push(text);
+        yield {
+          sessionId,
+          update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'fresh result' } },
+        };
+      },
+      onCapacity() {},
+      offCapacity() {},
+      clearRecentCapacitySignal() {},
+    };
+    const rememberedSessions = [];
+    const fakePool = {
+      async acquire(poolKey) {
+        return {
+          client,
+          poolKey,
+          canResumeRequestedSession: false,
+          release() {},
+        };
+      },
+      rememberSession(_poolKey, sessionId) {
+        rememberedSessions.push(sessionId);
+      },
+    };
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: fakePool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      providerName: 'google',
+      modelName: 'gemini-acp',
+    });
+
+    const messages = [];
+    for await (const msg of adapter.invoke('continue safely', {
+      sessionId: 'cancelled-sess',
+      resumeFallbackSystemPrompt: 'Static identity prompt',
+    })) {
+      messages.push(msg);
+    }
+
+    assert.deepEqual(client.loadSessionCalls, [], 'sealed session must never reach loadSession');
+    assert.equal(client.newSessionCalls, 1);
+    assert.deepEqual(client.promptedSessionIds, ['fresh-after-cancel']);
+    assert.deepEqual(
+      client.promptedTexts,
+      ['Static identity prompt\n\ncontinue safely'],
+      'sealed resume replacement must restore the omitted static identity exactly once',
+    );
+    assert.deepEqual(rememberedSessions, ['fresh-after-cancel']);
+    assert.ok(messages.some((msg) => msg.type === 'session_init' && msg.sessionId === 'fresh-after-cancel'));
+  });
+
+  it('seals both persisted and runtime session ids when a resumed prompt terminates locally', async () => {
+    const { AcpStreamIdleError } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpClient.js');
+    const sealedSessions = [];
+    const client = {
+      recentCapacitySignal: null,
+      async newSession() {
+        throw new Error('must not create before resume');
+      },
+      async loadSession() {
+        return { sessionId: 'runtime-session-alias' };
+      },
+      async setSessionConfigOption() {},
+      cancelSession() {},
+      async *promptStream(sessionId) {
+        throw new AcpStreamIdleError(sessionId, 100, 0, 100);
+      },
+      onCapacity() {},
+      offCapacity() {},
+      clearRecentCapacitySignal() {},
+    };
+    const fakePool = {
+      async acquire(poolKey) {
+        return { client, poolKey, release() {} };
+      },
+      rememberSession() {},
+      sealSession(_poolKey, sessionId) {
+        sealedSessions.push(sessionId);
+      },
+    };
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: fakePool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      idleTtlMs: 100,
+    });
+
+    for await (const _msg of adapter.invoke('resume then stall', { sessionId: 'persisted-session' })) {
+      // Drain terminal messages.
+    }
+
+    assert.deepEqual(
+      new Set(sealedSessions),
+      new Set(['persisted-session', 'runtime-session-alias']),
+      'all aliases of the unquiesced logical session must be sealed',
+    );
+  });
+
+  describe('session sealing follows the prompt acknowledgement boundary', () => {
+    function createBoundaryHarness({ loadSession, promptStream, onCancel }) {
+      const sealedSessions = [];
+      const cancelCalls = [];
+      const client = {
+        recentCapacitySignal: null,
+        async newSession() {
+          throw new Error('boundary harness must resume the requested session');
+        },
+        loadSession,
+        async setSessionConfigOption() {},
+        cancelSession(sessionId) {
+          cancelCalls.push(sessionId);
+          onCancel?.(sessionId);
+        },
+        promptStream,
+        onCapacity() {},
+        offCapacity() {},
+        clearRecentCapacitySignal() {},
+      };
+      const pool = {
+        async acquire(poolKey) {
+          return { client, poolKey, release() {} };
+        },
+        rememberSession() {},
+        sealSession(_poolKey, sessionId) {
+          sealedSessions.push(sessionId);
+        },
+      };
+      return {
+        adapter: new GeminiAcpAdapter({
+          catId: 'gemini',
+          pool,
+          poolKey: TEST_POOL_KEY,
+          projectRoot: '/tmp',
+        }),
+        cancelCalls,
+        sealedSessions,
+      };
+    }
+
+    it('does not seal when abort fires during resumed-session setup', async () => {
+      const controller = new AbortController();
+      const harness = createBoundaryHarness({
+        async loadSession(sessionId) {
+          controller.abort();
+          return { sessionId };
+        },
+        async *promptStream() {
+          assert.fail('promptStream must not start after setup abort');
+        },
+      });
+
+      for await (const _msg of harness.adapter.invoke('stop during setup', {
+        sessionId: 'safe-setup-session',
+        signal: controller.signal,
+      })) {
+        // Drain terminal messages.
+      }
+
+      assert.deepEqual(harness.sealedSessions, []);
+      assert.deepEqual(harness.cancelCalls, []);
+    });
+
+    it('does not seal when abort fires while session_init is yielded', async () => {
+      const controller = new AbortController();
+      const harness = createBoundaryHarness({
+        async loadSession(sessionId) {
+          return { sessionId };
+        },
+        async *promptStream() {
+          assert.fail('promptStream must not start after session_init abort');
+        },
+      });
+
+      for await (const msg of harness.adapter.invoke('stop at session init', {
+        sessionId: 'safe-session-init',
+        signal: controller.signal,
+      })) {
+        if (msg.type === 'session_init') controller.abort();
+      }
+
+      assert.deepEqual(harness.sealedSessions, []);
+      assert.deepEqual(harness.cancelCalls, []);
+    });
+
+    it('seals persisted and runtime aliases when abort terminates an active prompt', async () => {
+      const controller = new AbortController();
+      let settlePrompt;
+      const promptSettled = new Promise((resolve) => {
+        settlePrompt = resolve;
+      });
+      const harness = createBoundaryHarness({
+        async loadSession() {
+          return { sessionId: 'runtime-active-session' };
+        },
+        async *promptStream(sessionId) {
+          yield {
+            sessionId,
+            update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'active' } },
+          };
+          await promptSettled;
+        },
+        onCancel() {
+          settlePrompt();
+        },
+      });
+
+      for await (const msg of harness.adapter.invoke('stop active prompt', {
+        sessionId: 'persisted-active-session',
+        signal: controller.signal,
+      })) {
+        if (msg.type === 'text') controller.abort();
+      }
+
+      assert.deepEqual(
+        new Set(harness.sealedSessions),
+        new Set(['persisted-active-session', 'runtime-active-session']),
+      );
+      assert.deepEqual(harness.cancelCalls, ['runtime-active-session']);
+    });
+
+    it('does not seal when abort fires after provider acknowledgement', async () => {
+      const controller = new AbortController();
+      const harness = createBoundaryHarness({
+        async loadSession(sessionId) {
+          return { sessionId };
+        },
+        async *promptStream(sessionId) {
+          yield {
+            sessionId,
+            update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'complete' } },
+          };
+        },
+      });
+
+      for await (const msg of harness.adapter.invoke('finish safely', {
+        sessionId: 'safe-completed-session',
+        signal: controller.signal,
+      })) {
+        if (msg.type === 'done') controller.abort();
+      }
+
+      assert.deepEqual(harness.sealedSessions, []);
+      assert.deepEqual(harness.cancelCalls, []);
+    });
   });
 
   it('falls back to session/new when resumed ACP session cannot be loaded', async () => {
@@ -1016,7 +1286,10 @@ describe('GeminiAcpAdapter integration', () => {
       }
     });
 
-    pool = createPoolWithSpawn(() => child);
+    // This fixture intentionally runs two concurrent sessions on one process;
+    // declare the carrier multiplexed so cancelling sess-1 must not retire it
+    // while sess-2 remains live.
+    pool = createPoolWithSpawn(() => child, { supportsMultiplexing: true });
     const adapter = new GeminiAcpAdapter({
       catId: 'gemini',
       pool,
@@ -1979,7 +2252,7 @@ describe('GeminiAcpAdapter integration', () => {
 
   // ─── F149: Stream Idle Watchdog Tests ─────────────────────────
 
-  it('F149: stream idle warning after events yields liveness_signal', async () => {
+  it('F149/#1203: ordinary stream idle warning stays internal — no liveness bubble', async () => {
     const fakeClient = {
       isAlive: true,
       initialize: async () => ({}),
@@ -2032,17 +2305,15 @@ describe('GeminiAcpAdapter integration', () => {
       messages.push(msg);
     }
 
-    // Should have a liveness_signal warning
+    // #1203: Ordinary (non-terminal) idle warnings are internal watchdog
+    // telemetry — the CLI shows no such bubble, and in the zero-first-event
+    // case the '已开始回复但后续停滞' text was factually wrong.
     const warnings = messages.filter((m) => m.type === 'liveness_signal');
     assert.equal(
       warnings.length,
-      1,
-      `Expected 1 liveness_signal, got ${warnings.length}: ${JSON.stringify(messages.map((m) => m.type))}`,
+      0,
+      `Expected 0 liveness_signal bubbles, got ${warnings.length}: ${JSON.stringify(messages.map((m) => m.type))}`,
     );
-
-    const parsed = JSON.parse(warnings[0].content);
-    assert.equal(parsed.type, 'warning');
-    assert.match(parsed.message, /停滞|idle|silent/i);
 
     // Normal text should still be present
     const texts = messages.filter((m) => m.type === 'text');
@@ -2229,7 +2500,7 @@ describe('GeminiAcpAdapter integration', () => {
     assert.ok(doneIdx > errorIdx, 'done should be emitted only after the compaction error');
   });
 
-  it('F149: liveness_signal warning appears before stream_idle_stall error', async () => {
+  it('F149/#1203: terminal stream_idle_stall still errors — no preceding liveness bubble', async () => {
     const fakeClient = {
       isAlive: true,
       initialize: async () => ({}),
@@ -2280,18 +2551,16 @@ describe('GeminiAcpAdapter integration', () => {
       messages.push(msg);
     }
 
-    const warningIdx = messages.findIndex((m) => m.type === 'liveness_signal');
+    // #1203: No user-visible warning bubble; the terminal stall error must
+    // still surface unchanged (#1189 TTL semantics preserved).
+    const warnings = messages.filter((m) => m.type === 'liveness_signal');
+    assert.equal(warnings.length, 0, `Expected 0 liveness_signal bubbles, got ${warnings.length}`);
     const errorIdx = messages.findIndex((m) => m.type === 'error');
-    assert.ok(
-      warningIdx >= 0,
-      `Should have liveness_signal, got types: ${JSON.stringify(messages.map((m) => m.type))}`,
-    );
     assert.ok(errorIdx >= 0, 'Should have error');
-    assert.ok(warningIdx < errorIdx, `Warning (idx ${warningIdx}) should come before error (idx ${errorIdx})`);
     assert.equal(messages[errorIdx].errorCode, 'stream_idle_stall');
   });
 
-  it('F149: stream idle warning is deduped (only one liveness_signal per invoke)', async () => {
+  it('F149/#1203: multiple ordinary idle warnings produce zero liveness bubbles', async () => {
     const fakeClient = {
       isAlive: true,
       initialize: async () => ({}),
@@ -2348,13 +2617,67 @@ describe('GeminiAcpAdapter integration', () => {
     }
 
     const warnings = messages.filter((m) => m.type === 'liveness_signal');
-    assert.equal(warnings.length, 1, `Expected exactly 1 liveness_signal (deduped), got ${warnings.length}`);
+    assert.equal(warnings.length, 0, `Expected 0 liveness_signal bubbles, got ${warnings.length}`);
 
     const texts = messages.filter((m) => m.type === 'text');
     assert.equal(texts.length, 3, `Expected 3 text messages, got ${texts.length}`);
   });
 
-  it('stream_tool_wait_warning yields info liveness_signal (not error)', async () => {
+  it('#1203: zero-first-event idle warning produces no bubble and no error', async () => {
+    // The reported incident: kimi's first real ACP event arrived at +61s, but
+    // the watchdog fired at +20s with eventCount=0 — the '已开始回复但后续停滞'
+    // bubble was factually wrong. Zero-first-event warnings stay internal too.
+    const fakeClient = {
+      isAlive: true,
+      initialize: async () => ({}),
+      close: async () => {},
+      onCapacity: () => {},
+      offCapacity: () => {},
+      recentCapacitySignal: null,
+      clearRecentCapacitySignal: () => {},
+      newSession: async () => ({ sessionId: 'idle-zero-sess' }),
+      cancelSession: () => {},
+      async *promptStream() {
+        // Watchdog fires BEFORE any real event (zero-first-event)
+        yield {
+          sessionId: 'idle-zero-sess',
+          update: { sessionUpdate: 'stream_idle_warning', idleSinceMs: 20000, eventCount: 0, timestamp: Date.now() },
+        };
+        // First real event finally arrives
+        yield {
+          sessionId: 'idle-zero-sess',
+          update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'late first chunk' } },
+        };
+        return 'end_turn';
+      },
+    };
+
+    const mockPool = {
+      acquire: async () => ({ client: fakeClient, release: () => {} }),
+      closeAll: async () => {},
+    };
+
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: mockPool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+    });
+
+    const messages = [];
+    for await (const msg of adapter.invoke('hello')) {
+      messages.push(msg);
+    }
+
+    const warnings = messages.filter((m) => m.type === 'liveness_signal');
+    assert.equal(warnings.length, 0, `Expected 0 liveness_signal bubbles, got ${warnings.length}`);
+    const errors = messages.filter((m) => m.type === 'error');
+    assert.equal(errors.length, 0, 'Zero-first-event warning must not error the stream');
+    const texts = messages.filter((m) => m.type === 'text');
+    assert.equal(texts.length, 1, `Expected 1 text message, got ${texts.length}`);
+  });
+
+  it('stream_tool_wait_warning stays internal — no chat bubble, no error (#1203)', async () => {
     const fakeClient = {
       isAlive: true,
       initialize: async () => ({}),
@@ -2370,12 +2693,23 @@ describe('GeminiAcpAdapter integration', () => {
           sessionId: 'tool-wait-sess',
           update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'thinking...' } },
         };
-        // Gemini calls a tool — idle watchdog fires tool_wait instead of idle_warning
+        // Gemini calls a tool — idle watchdog fires tool_wait instead of idle_warning.
+        // #1203: inject TWO consecutive warnings (the real watchdog re-fires every
+        // 20s while the tool runs) — none of them may produce a chat bubble.
         yield {
           sessionId: 'tool-wait-sess',
           update: {
             sessionUpdate: 'stream_tool_wait_warning',
             idleSinceMs: 20000,
+            eventCount: 2,
+            timestamp: Date.now(),
+          },
+        };
+        yield {
+          sessionId: 'tool-wait-sess',
+          update: {
+            sessionUpdate: 'stream_tool_wait_warning',
+            idleSinceMs: 40000,
             eventCount: 2,
             timestamp: Date.now(),
           },
@@ -2406,11 +2740,14 @@ describe('GeminiAcpAdapter integration', () => {
       messages.push(msg);
     }
 
+    // #1203: Tool-wait is an internal watchdog signal — the CLI shows no such
+    // bubble, so the chat surface must stay silent while the stream continues.
     const liveness = messages.filter((m) => m.type === 'liveness_signal');
-    assert.equal(liveness.length, 1, `Expected 1 tool wait liveness_signal, got ${liveness.length}`);
-    const parsed = JSON.parse(liveness[0].content);
-    assert.equal(parsed.type, 'info', 'Tool wait should be info, not warning');
-    assert.ok(parsed.message.includes('等待工具'), `Message should mention tool wait: ${parsed.message}`);
+    assert.equal(liveness.length, 0, `Expected 0 liveness_signal bubbles for tool wait, got ${liveness.length}`);
+
+    // Stream content still flows after the suppressed tool-wait signal
+    const texts = messages.filter((m) => m.type === 'text');
+    assert.ok(texts.length >= 1, 'Tool wait must not swallow subsequent text output');
 
     // No error — tool wait doesn't kill the stream
     const errors = messages.filter((m) => m.type === 'error');
@@ -2733,5 +3070,859 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
       rmSync(projectRoot, { recursive: true, force: true });
       rmSync(userRoot, { recursive: true, force: true });
     }
+  });
+});
+
+// #1186: Iterator lifecycle / lease cleanup tests
+// Root cause: invoke-single-cat.ts uses manual .next() iteration (abortableNext)
+// instead of `for await...of`. When the loop breaks, .return() is never called,
+// so AcpAgentService.invoke()'s finally { lease.release() } never executes.
+// This leaks leases and eventually causes "Pool at capacity" errors.
+describe('#1186: iterator lease cleanup (Pool at capacity regression)', () => {
+  /**
+   * Helper: create a mock client whose promptStream yields one text chunk + done,
+   * and a constrained pool (maxLiveProcesses=1) that tracks lease release.
+   */
+  function createConstrainedPoolSetup() {
+    let releaseCallCount = 0;
+    const fakeClient = {
+      recentCapacitySignal: null,
+      async newSession() {
+        return { sessionId: 'sess-constrained' };
+      },
+      async loadSession(sessionId) {
+        return { sessionId };
+      },
+      async setSessionConfigOption() {},
+      cancelSession() {},
+      async *promptStream(sessionId) {
+        yield {
+          sessionId,
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'reply' },
+          },
+        };
+        // Generator returns here — done
+      },
+      onCapacity() {},
+      offCapacity() {},
+      clearRecentCapacitySignal() {},
+    };
+
+    // Constrained pool: maxLiveProcesses=1, tracks release calls
+    let activeLease = false;
+    const mockPool = {
+      async acquire() {
+        if (activeLease) throw new Error('Pool at capacity — all processes have active leases');
+        activeLease = true;
+        return {
+          client: fakeClient,
+          release() {
+            releaseCallCount++;
+            activeLease = false;
+          },
+        };
+      },
+      rememberSession() {},
+      closeAll: async () => {
+        activeLease = false;
+      },
+    };
+
+    return { mockPool, getReleaseCount: () => releaseCallCount };
+  }
+
+  it('#1186: manual .next() iteration + .return() releases lease for next invocation', async () => {
+    const { mockPool, getReleaseCount } = createConstrainedPoolSetup();
+
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: mockPool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+    });
+
+    // First invocation: manual iteration (simulating invoke-single-cat's abortableNext pattern)
+    const iter = adapter.invoke('first prompt')[Symbol.asyncIterator]();
+    const collected = [];
+    for (;;) {
+      const result = await iter.next();
+      if (result.done) break;
+      collected.push(result.value);
+      // Simulate invoke-single-cat: break when 'done' message received
+      if (result.value.type === 'done') break;
+    }
+    // Key: call .return() after breaking (the fix)
+    await iter.return();
+    assert.ok(collected.length > 0, 'Should have received messages');
+    assert.equal(getReleaseCount(), 1, 'Lease must be released after .return()');
+
+    // Second invocation: should succeed because lease was released
+    const secondMessages = [];
+    for await (const msg of adapter.invoke('second prompt')) {
+      secondMessages.push(msg);
+    }
+    assert.ok(
+      secondMessages.some((m) => m.type === 'text'),
+      'Second invocation should succeed when lease was properly released',
+    );
+    assert.equal(getReleaseCount(), 2, 'Second lease also released');
+  });
+
+  it('#1186: `for await...of` auto-closes generator and releases lease', async () => {
+    const { mockPool, getReleaseCount } = createConstrainedPoolSetup();
+
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: mockPool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+    });
+
+    // Normal `for await` — auto-calls .return() on break/completion
+    for await (const _ of adapter.invoke('first prompt')) {
+      /* drain */
+    }
+    assert.equal(getReleaseCount(), 1, 'Lease released after for-await completes');
+
+    // Second invoke should succeed
+    const secondMessages = [];
+    for await (const msg of adapter.invoke('second prompt')) {
+      secondMessages.push(msg);
+    }
+    assert.ok(
+      secondMessages.some((m) => m.type === 'text'),
+      'Second invoke succeeds with for-await (baseline)',
+    );
+    assert.equal(getReleaseCount(), 2);
+  });
+
+  it('#1186: constrained pool rejects when lease leaked by missing .return()', async () => {
+    const { mockPool, getReleaseCount } = createConstrainedPoolSetup();
+
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: mockPool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+    });
+
+    // First invocation: manual iteration WITHOUT .return() — the bug
+    const iter = adapter.invoke('first prompt')[Symbol.asyncIterator]();
+    for (;;) {
+      const result = await iter.next();
+      if (result.done) break;
+      if (result.value.type === 'done') break; // early break, no .return()
+    }
+    // Intentionally NOT calling iter.return() — this is the bug scenario
+
+    // When the done message was yielded but we broke without .return(),
+    // the generator's finally block hasn't run yet.
+    // The lease should still be active (not released).
+    assert.equal(getReleaseCount(), 0, 'Lease NOT released without .return() — bug confirmed');
+
+    // Second invocation should fail because the lease is still held
+    const secondIter = adapter.invoke('second prompt')[Symbol.asyncIterator]();
+    const firstResult = await secondIter.next();
+    // The error surfaces as an init_failure error message
+    assert.equal(firstResult.value.type, 'error', 'Should get error from constrained pool');
+    assert.ok(
+      firstResult.value.error.includes('Pool at capacity'),
+      `Error should mention pool capacity, got: ${firstResult.value.error}`,
+    );
+  });
+});
+
+// #1186: TTL propagation — AcpAgentService threads idleTtlMs to promptStream
+describe('#1186: idleTtlMs propagation (AcpAgentService → promptStream)', () => {
+  it('passes configured idleTtlMs as idleStallMs, timeoutMs = idleTtlMs + 60s to promptStream', async () => {
+    let capturedPromptStreamOpts = null;
+    const fakeClient = {
+      recentCapacitySignal: null,
+      async newSession() {
+        return { sessionId: 'ttl-prop-sess' };
+      },
+      async loadSession(sessionId) {
+        return { sessionId };
+      },
+      async setSessionConfigOption() {},
+      cancelSession() {},
+      async *promptStream(sessionId, text, options) {
+        capturedPromptStreamOpts = options;
+        yield {
+          sessionId,
+          update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ok' } },
+        };
+      },
+      onCapacity() {},
+      offCapacity() {},
+      clearRecentCapacitySignal() {},
+    };
+
+    const mockPool = {
+      acquire: async () => ({ client: fakeClient, release: () => {} }),
+      rememberSession() {},
+      closeAll: async () => {},
+    };
+
+    // With explicit idleTtlMs
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: mockPool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      idleTtlMs: 1_800_000, // 30 minutes
+    });
+
+    for await (const _ of adapter.invoke('hello')) {
+      /* drain */
+    }
+
+    assert.ok(capturedPromptStreamOpts, 'promptStream must receive options');
+    assert.equal(capturedPromptStreamOpts.idleStallMs, 1_800_000, 'idleStallMs = configured idleTtlMs');
+    assert.equal(
+      capturedPromptStreamOpts.timeoutMs,
+      1_800_000 + 60_000,
+      'timeoutMs = idleTtlMs + 60s margin (budget must exceed stall)',
+    );
+  });
+
+  it('resolves DEFAULT_ACP_IDLE_TTL_MS (30m) when idleTtlMs is omitted from config', async () => {
+    let capturedPromptStreamOpts = 'NOT_CALLED';
+    const fakeClient = {
+      recentCapacitySignal: null,
+      async newSession() {
+        return { sessionId: 'no-ttl-sess' };
+      },
+      async loadSession(sessionId) {
+        return { sessionId };
+      },
+      async setSessionConfigOption() {},
+      cancelSession() {},
+      async *promptStream(sessionId, text, options) {
+        capturedPromptStreamOpts = options;
+        yield {
+          sessionId,
+          update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ok' } },
+        };
+      },
+      onCapacity() {},
+      offCapacity() {},
+      clearRecentCapacitySignal() {},
+    };
+
+    const mockPool = {
+      acquire: async () => ({ client: fakeClient, release: () => {} }),
+      rememberSession() {},
+      closeAll: async () => {},
+    };
+
+    // Without idleTtlMs — service resolves to DEFAULT_ACP_IDLE_TTL_MS (30m)
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: mockPool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      // no idleTtlMs — should resolve to 30m default
+    });
+
+    for await (const _ of adapter.invoke('hello')) {
+      /* drain */
+    }
+
+    assert.ok(capturedPromptStreamOpts, 'promptStream must receive options even without explicit idleTtlMs');
+    assert.equal(
+      capturedPromptStreamOpts.idleStallMs,
+      DEFAULT_ACP_IDLE_TTL_MS,
+      `idleStallMs should be DEFAULT_ACP_IDLE_TTL_MS (${DEFAULT_ACP_IDLE_TTL_MS}), got ${capturedPromptStreamOpts.idleStallMs}`,
+    );
+    assert.equal(
+      capturedPromptStreamOpts.timeoutMs,
+      DEFAULT_ACP_IDLE_TTL_MS + 60_000,
+      `timeoutMs should be DEFAULT_ACP_IDLE_TTL_MS + 60s (${DEFAULT_ACP_IDLE_TTL_MS + 60_000}), got ${capturedPromptStreamOpts.timeoutMs}`,
+    );
+  });
+});
+
+// #1186 P1: Cancel + constrained pool — lease released promptly after cancel.
+// Real transport-level cancel tests exercising sessionCancelCallbacks are in:
+//   - acp-client.test.js: '#1186: cancel settles prompt stream via sessionCancelCallbacks (real transport)'
+//   - acp-httpstream-client.test.js: '#1186: cancel settles HTTP prompt stream via sessionCancelCallbacks'
+// This test verifies the SERVICE-LEVEL lifecycle: cancel during active promptStream →
+// cancel callback → stream settles → catch → finally { lease.release() } → second invoke succeeds.
+describe('#1186: cancel settles prompt stream and releases lease (P1)', () => {
+  it('cancel DURING active promptStream releases lease for next invoke', async () => {
+    const { AcpStreamIdleError } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpClient.js');
+    const timeline = []; // ordered event log for lifecycle assertions
+    const cancelCallbacks = new Map();
+
+    const makeFakeClient = (clientLabel) => ({
+      recentCapacitySignal: null,
+      onCapacity() {},
+      offCapacity() {},
+      clearRecentCapacitySignal() {},
+      async newSession() {
+        return { sessionId: `sess-cancel-${clientLabel}` };
+      },
+      cancelSession(sessionId) {
+        timeline.push(`cancel:${clientLabel}`);
+        const cb = cancelCallbacks.get(sessionId);
+        if (cb) cb();
+      },
+      async *promptStream(sessionId, text, options) {
+        // Register cancel callback (mirrors real transport)
+        let settledByCancel = false;
+        cancelCallbacks.set(sessionId, () => {
+          settledByCancel = true;
+        });
+        timeline.push(`promptStream:start:${clientLabel}`);
+        try {
+          // Yield a real content event — test MUST receive this before aborting.
+          // This proves promptStream is running and the cancel callback is registered.
+          yield {
+            sessionId,
+            update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'working...' } },
+          };
+          // Block until cancel settles us (provider never cooperates)
+          while (!settledByCancel) {
+            await new Promise((r) => setTimeout(r, 5));
+          }
+          // Cancel callback was invoked — throw like the real transport
+          throw new AcpStreamIdleError(sessionId, 0, 1, options?.idleStallMs ?? 1000);
+        } finally {
+          cancelCallbacks.delete(sessionId);
+          timeline.push(`promptStream:finally:${clientLabel}`);
+        }
+      },
+    });
+
+    let releaseCalls = 0;
+    let acquireCount = 0;
+    const mockPool = {
+      acquire: async () => {
+        acquireCount++;
+        const label = acquireCount === 1 ? 'first' : 'second';
+        timeline.push(`acquire:${label}`);
+        if (acquireCount > 1) {
+          // Second acquire — lease must have been released.
+          // This client completes normally (no cancel-blocking).
+          return {
+            client: {
+              recentCapacitySignal: null,
+              onCapacity() {},
+              offCapacity() {},
+              clearRecentCapacitySignal() {},
+              async newSession() {
+                return { sessionId: 'sess-cancel-second' };
+              },
+              cancelSession() {},
+              async *promptStream(sessionId) {
+                timeline.push('promptStream:start:second');
+                yield {
+                  sessionId,
+                  update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ok' } },
+                };
+              },
+            },
+            release: () => {
+              timeline.push('release:second');
+            },
+          };
+        }
+        return {
+          client: makeFakeClient('first'),
+          release: () => {
+            releaseCalls++;
+            timeline.push('release:first');
+          },
+        };
+      },
+      rememberSession() {},
+      closeAll: async () => {},
+    };
+
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: mockPool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      idleTtlMs: 60_000,
+    });
+
+    // --- First invoke with abort ---
+    const ac = new AbortController();
+    const iter1 = adapter.invoke('hello', { signal: ac.signal })[Symbol.asyncIterator]();
+
+    // Event 1: service-level session_init (before promptStream starts)
+    const e1 = await iter1.next();
+    assert.ok(!e1.done);
+    assert.equal(e1.value.type, 'session_init', 'First event must be session_init');
+
+    // Event 2: real content from promptStream — proves promptStream is active
+    // and cancel callback IS registered in cancelCallbacks map
+    const e2 = await iter1.next();
+    assert.ok(!e2.done);
+    assert.equal(e2.value.type, 'text', `Second event must be text from promptStream, got ${e2.value.type}`);
+
+    // NOW abort — promptStream is running, cancel callback is registered
+    ac.abort();
+
+    // Drain remaining events (error + done)
+    const remaining = [];
+    for (;;) {
+      const r = await iter1.next();
+      remaining.push(r);
+      if (r.done) break;
+    }
+
+    // --- Assertions on first invoke ---
+    assert.equal(releaseCalls, 1, 'Lease must be released after cancel');
+    assert.ok(
+      timeline.includes('promptStream:start:first'),
+      'promptStream must have started (not Window 3 early return)',
+    );
+    assert.ok(timeline.includes('cancel:first'), 'cancelSession must have been called');
+
+    // Ordering: release:first must come AFTER promptStream:finally:first
+    const finallyIdx = timeline.indexOf('promptStream:finally:first');
+    const releaseIdx = timeline.indexOf('release:first');
+    assert.ok(finallyIdx >= 0, 'promptStream finally must run');
+    assert.ok(releaseIdx >= 0, 'release must run');
+
+    // --- Second invoke must succeed (lease was released) ---
+    const msgs2 = [];
+    for await (const msg of adapter.invoke('world')) {
+      msgs2.push(msg);
+    }
+    assert.ok(msgs2.length > 0, 'Second invoke must succeed after first lease released');
+    assert.equal(acquireCount, 2, 'Pool must have been acquired twice');
+
+    // Ordering: release:first must come before acquire:second
+    const releaseFirstIdx = timeline.indexOf('release:first');
+    const acquireSecondIdx = timeline.indexOf('acquire:second');
+    assert.ok(
+      releaseFirstIdx < acquireSecondIdx,
+      `release:first (${releaseFirstIdx}) must precede acquire:second (${acquireSecondIdx}). Timeline: ${timeline.join(' → ')}`,
+    );
+  });
+});
+
+// #1186: Error-driven lease cleanup — promptStream throws an error, finally releases lease.
+// Proves that when promptStream fails (e.g., idle stall), the generator's finally block
+// releases the lease WITHOUT manual .return() — the production path for #1186.
+describe('#1186: error-driven lease cleanup (finally releases without manual .return())', () => {
+  it('promptStream error → catch → finally { lease.release() } → second invoke succeeds', async () => {
+    const { AcpStreamIdleError } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpClient.js');
+    const timeline = [];
+
+    let releaseCalls = 0;
+    let acquireCount = 0;
+    const mockPool = {
+      acquire: async () => {
+        acquireCount++;
+        const label = acquireCount === 1 ? 'first' : 'second';
+        timeline.push(`acquire:${label}`);
+        const fakeClient = {
+          recentCapacitySignal: null,
+          onCapacity() {},
+          offCapacity() {},
+          clearRecentCapacitySignal() {},
+          async newSession() {
+            return { sessionId: `sess-err-${label}` };
+          },
+          cancelSession() {},
+          async *promptStream(sessionId, text, options) {
+            timeline.push(`promptStream:start:${label}`);
+            // First invoke: yield one event then throw (simulating idle stall)
+            // Second invoke: complete normally
+            if (label === 'first') {
+              yield {
+                sessionId,
+                update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'partial' } },
+              };
+              // Simulate idle stall error — the exact production failure path
+              throw new AcpStreamIdleError(sessionId, 100, 1, options?.idleStallMs ?? 100);
+            }
+            yield {
+              sessionId,
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'recovered' } },
+            };
+          },
+        };
+        return {
+          client: fakeClient,
+          release: () => {
+            releaseCalls++;
+            timeline.push(`release:${label}`);
+          },
+        };
+      },
+      rememberSession() {},
+      closeAll: async () => {},
+    };
+
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: mockPool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      idleTtlMs: 200,
+    });
+
+    // First invoke: promptStream throws AcpStreamIdleError
+    // The generator's catch block yields error+done, finally releases lease
+    // NO manual .return() — this is the production path
+    const msgs1 = [];
+    for await (const msg of adapter.invoke('first')) {
+      msgs1.push(msg);
+    }
+
+    // First invoke should have yielded error (stream_idle_stall)
+    const errorMsg = msgs1.find((m) => m.type === 'error');
+    assert.ok(errorMsg, 'First invoke should yield error');
+    assert.equal(errorMsg.errorCode, 'stream_idle_stall', 'Error should be stream_idle_stall');
+
+    // Lease must have been released by finally block
+    assert.equal(releaseCalls, 1, 'First lease released via finally (no manual .return())');
+
+    // Second invoke: should succeed because lease was released
+    const msgs2 = [];
+    for await (const msg of adapter.invoke('second')) {
+      msgs2.push(msg);
+    }
+    assert.ok(
+      msgs2.some((m) => m.type === 'text'),
+      'Second invoke must succeed (lease released)',
+    );
+    assert.equal(releaseCalls, 2, 'Both leases released');
+
+    // Ordering: release:first before acquire:second
+    const releaseFirstIdx = timeline.indexOf('release:first');
+    const acquireSecondIdx = timeline.indexOf('acquire:second');
+    assert.ok(
+      releaseFirstIdx < acquireSecondIdx,
+      `release:first (${releaseFirstIdx}) must precede acquire:second (${acquireSecondIdx}). Timeline: ${timeline.join(' → ')}`,
+    );
+  });
+});
+
+// #1186 P2: idle stall fires before turn budget when thresholds differ.
+// Real transport-level timer race tests are in:
+//   - acp-client.test.js: '#1186: zero-first-event produces AcpStreamIdleError at configured idleStallMs'
+//   - acp-httpstream-client.test.js: '#1186: zero-first-event produces AcpStreamIdleError at configured idleStallMs (HTTP)'
+//   - acp-client.test.js: 'F149: idle watchdog injects stream_idle_stall and terminates stream'
+// This test verifies the service-level wiring: idleTtlMs + 60s stagger and error mapping.
+describe('#1186: idle stall fires before turn budget (P2)', () => {
+  it('service passes timeoutMs > idleStallMs and maps idle stall to stream_idle_stall error', async () => {
+    let capturedOpts = null;
+    const { AcpStreamIdleError } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpClient.js');
+
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: {
+        acquire: async () => ({
+          client: {
+            recentCapacitySignal: null,
+            onCapacity() {},
+            offCapacity() {},
+            async newSession() {
+              return { sessionId: 'race-opts-sess' };
+            },
+            cancelSession() {},
+            async *promptStream(sessionId, text, options) {
+              capturedOpts = options;
+              // Verify the stagger invariant
+              assert.ok(
+                options.timeoutMs > options.idleStallMs,
+                `timeoutMs (${options.timeoutMs}) must exceed idleStallMs (${options.idleStallMs})`,
+              );
+              assert.equal(options.timeoutMs - options.idleStallMs, 60_000, 'Stagger must be exactly 60s');
+              // Simulate idle stall (what the real transport would do)
+              yield {
+                sessionId,
+                update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'start' } },
+              };
+              throw new AcpStreamIdleError(sessionId, options.idleStallMs, 1, options.idleStallMs);
+            },
+          },
+          release: () => {},
+        }),
+        rememberSession() {},
+        closeAll: async () => {},
+      },
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      idleTtlMs: 200, // Short for testing
+    });
+
+    const msgs = [];
+    for await (const msg of adapter.invoke('hello')) {
+      msgs.push(msg);
+    }
+
+    // Verify opts passed correctly
+    assert.ok(capturedOpts, 'promptStream must receive options');
+    assert.equal(capturedOpts.idleStallMs, 200, 'idleStallMs = idleTtlMs');
+    assert.equal(capturedOpts.timeoutMs, 60_200, 'timeoutMs = idleTtlMs + 60_000');
+
+    // Error should map to stream_idle_stall (not turn_budget_exceeded)
+    const errorMsg = msgs.find((m) => m.type === 'error');
+    assert.ok(errorMsg, 'Should yield error');
+    assert.equal(
+      errorMsg.errorCode,
+      'stream_idle_stall',
+      `Expected stream_idle_stall, got ${errorMsg.errorCode}: ${errorMsg.error}`,
+    );
+  });
+});
+
+// #1186 P1: Releasing a local lease does not prove that an ignored upstream
+// session/cancel stopped the prompt. A single-flight carrier with an unresolved
+// cancelled prompt must be retired rather than returned to warm reuse.
+describe('#1186: cancel retires an unquiesced non-multiplexed carrier', () => {
+  let pool = null;
+
+  afterEach(async () => {
+    if (pool) {
+      await pool.closeAll();
+      pool = null;
+    }
+  });
+
+  it('runs the next prompt on a fresh process when the provider ignores cancel', async () => {
+    let sessionCounter = 0;
+    const capturedCancels = [];
+    const prompts = [];
+    const children = [];
+
+    const createClient = () => {
+      const pid = 12_345 + children.length;
+      const { child, clientStdin, agentStdout } = createMockChild(pid);
+      children.push(child);
+
+      clientStdin.on('data', (chunk) => {
+        for (const line of chunk.toString().trim().split('\n')) {
+          const msg = JSON.parse(line);
+          if (msg.method === 'initialize') {
+            setImmediate(() =>
+              agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT }) + '\n'),
+            );
+          } else if (msg.method === 'session/new') {
+            sessionCounter++;
+            const sid = `sess-${sessionCounter}`;
+            setImmediate(() =>
+              agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: sid } }) + '\n'),
+            );
+          } else if (msg.method === 'session/prompt') {
+            const sid = msg.params.sessionId;
+            prompts.push({ sessionId: sid, pid });
+
+            if (sid === 'sess-1') {
+              // Emit one event then remain unresolved forever. The provider also
+              // ignores session/cancel below, so this process is not quiescent.
+              setImmediate(() => {
+                agentStdout.write(
+                  JSON.stringify({
+                    jsonrpc: '2.0',
+                    method: 'session/update',
+                    params: {
+                      sessionId: sid,
+                      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'start-A' } },
+                    },
+                  }) + '\n',
+                );
+              });
+            } else if (sid === 'sess-2') {
+              setImmediate(() => {
+                agentStdout.write(
+                  JSON.stringify({
+                    jsonrpc: '2.0',
+                    method: 'session/update',
+                    params: {
+                      sessionId: sid,
+                      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'result-B' } },
+                    },
+                  }) + '\n',
+                );
+                setTimeout(
+                  () =>
+                    agentStdout.write(
+                      JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } }) + '\n',
+                    ),
+                  10,
+                );
+              });
+            }
+          } else if (msg.method === 'session/cancel') {
+            capturedCancels.push({ sessionId: msg.params?.sessionId, pid });
+            // Deliberately ignore cancel and never resolve prompt A.
+          }
+        }
+      });
+
+      return new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    };
+
+    // maxLiveProcesses=1: retiring A must synchronously free the logical slot so
+    // B can cold-start a replacement instead of overlapping on A's process.
+    pool = new AcpProcessPool(
+      { maxLiveProcesses: 1, idleTtlMs: 999_999, healthCheckIntervalMs: 999_999 },
+      {},
+      createClient,
+    );
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      providerName: 'google',
+      modelName: 'gemini-acp',
+    });
+
+    // --- Invocation A: start, get one event, then abort ---
+    const ac1 = new AbortController();
+    const msgs1 = [];
+    const invoke1 = (async () => {
+      for await (const msg of adapter.invoke('task-A', { signal: ac1.signal })) {
+        msgs1.push(msg);
+        // Abort after receiving the first real text event
+        if (msg.type === 'text') {
+          ac1.abort();
+        }
+      }
+    })();
+    await invoke1;
+
+    // Verify cancel was sent
+    assert.ok(
+      capturedCancels.some((entry) => entry.sessionId === 'sess-1'),
+      `Should cancel sess-1, got: ${JSON.stringify(capturedCancels)}`,
+    );
+
+    // After cancel + retirement, no lease may remain pinned to the old carrier.
+    const metrics = pool.getMetrics();
+    assert.equal(metrics.activeLeaseCount, 0, 'All leases should be released after cancel');
+
+    // --- Invocation B: must cold-start a fresh process and succeed ---
+    const msgs2 = [];
+    for await (const msg of adapter.invoke('task-B')) {
+      msgs2.push(msg);
+    }
+
+    const types2 = msgs2.map((m) => m.type);
+    assert.ok(types2.includes('text'), `Invocation B should have text, got: ${JSON.stringify(types2)}`);
+    assert.ok(types2.includes('done'), `Invocation B should have done, got: ${JSON.stringify(types2)}`);
+
+    const promptA = prompts.find((entry) => entry.sessionId === 'sess-1');
+    const promptB = prompts.find((entry) => entry.sessionId === 'sess-2');
+    assert.ok(promptA, 'Provider should have received prompt A');
+    assert.ok(promptB, 'Provider should have received prompt B');
+    assert.notEqual(promptB.pid, promptA.pid, "Prompt B must not reach A's still-busy single-flight process");
+    assert.equal(children.length, 2, 'Pool should spawn one replacement process');
+    assert.equal(children[0].killed, true, 'The unquiesced first process must be retired');
+  });
+});
+
+describe('#1186: multiplexed cancel seals only the affected logical session', () => {
+  let pool = null;
+
+  afterEach(async () => {
+    if (pool) {
+      await pool.closeAll();
+      pool = null;
+    }
+  });
+
+  it('remaps the cancelled session on the same live carrier without calling session/load', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild(22_222);
+    let sessionCounter = 0;
+    const loads = [];
+    const prompts = [];
+    let unsafeSameSessionOverlap = false;
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          setImmediate(() =>
+            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT }) + '\n'),
+          );
+        } else if (msg.method === 'session/new') {
+          sessionCounter++;
+          const sessionId = `mux-sess-${sessionCounter}`;
+          setImmediate(() =>
+            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId } }) + '\n'),
+          );
+        } else if (msg.method === 'session/load') {
+          loads.push(msg.params.sessionId);
+          setImmediate(() =>
+            agentStdout.write(
+              JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: msg.params.sessionId } }) + '\n',
+            ),
+          );
+        } else if (msg.method === 'session/prompt') {
+          const sessionId = msg.params.sessionId;
+          prompts.push({ sessionId, pid: child.pid });
+          if (sessionId === 'mux-sess-1' && prompts.filter((entry) => entry.sessionId === sessionId).length > 1) {
+            unsafeSameSessionOverlap = true;
+          }
+          setImmediate(() => {
+            agentStdout.write(
+              JSON.stringify({
+                jsonrpc: '2.0',
+                method: 'session/update',
+                params: {
+                  sessionId,
+                  update: {
+                    sessionUpdate: 'agent_message_chunk',
+                    content: { type: 'text', text: sessionId === 'mux-sess-1' ? 'start-A' : 'result-B' },
+                  },
+                },
+              }) + '\n',
+            );
+            if (sessionId !== 'mux-sess-1' || unsafeSameSessionOverlap) {
+              agentStdout.write(
+                JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } }) + '\n',
+              );
+            }
+          });
+        }
+        // session/cancel is deliberately ignored; prompt A remains unresolved.
+      }
+    });
+
+    pool = new AcpProcessPool(
+      { maxLiveProcesses: 1, idleTtlMs: 999_999, healthCheckIntervalMs: 999_999 },
+      { supportsMultiplexing: true },
+      () => new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child }),
+    );
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+    });
+
+    const abortController = new AbortController();
+    for await (const msg of adapter.invoke('task-A', { signal: abortController.signal })) {
+      if (msg.type === 'text') abortController.abort();
+    }
+
+    const secondMessages = [];
+    for await (const msg of adapter.invoke('task-B', { sessionId: 'mux-sess-1' })) {
+      secondMessages.push(msg);
+    }
+
+    assert.deepEqual(loads, [], 'sealed multiplexed session must not call session/load');
+    assert.equal(unsafeSameSessionOverlap, false);
+    assert.deepEqual(
+      prompts.map((entry) => entry.sessionId),
+      ['mux-sess-1', 'mux-sess-2'],
+      'replacement prompt must use a fresh logical session',
+    );
+    assert.ok(secondMessages.some((msg) => msg.type === 'session_init' && msg.sessionId === 'mux-sess-2'));
+    assert.equal(child.killed, false, 'unrelated sessions keep the multiplexed carrier alive');
+    assert.deepEqual(pool.getActivePids(), [22_222]);
   });
 });

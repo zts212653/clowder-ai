@@ -19,6 +19,7 @@ import { createInterface, type Interface as ReadlineInterface } from 'node:readl
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import { resolveCliCommandOrBare } from '../../../../../../utils/cli-resolve.js';
 import { resolveWindowsSpawnPlan } from '../../../../../../utils/cli-spawn-win.js';
+import { AcpCwdIdentityTracker } from './acp-cwd-identity.js';
 import type {
   AcpAgentRequest,
   AcpContentBlock,
@@ -38,6 +39,27 @@ const log = createModuleLogger('acp-client');
 
 const IS_WINDOWS = process.platform === 'win32';
 const KILL_GRACE_MS = 3_000;
+export const ACP_PROMPT_TIMEOUT_MARGIN_MS = 60_000;
+const MIN_ACP_PROMPT_REQUEST_CEILING_MS = 3_600_000;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+/**
+ * Keep the protocol request inactivity window strictly above the activity
+ * budget without exceeding Node's representable timer range.
+ */
+export function resolveAcpPromptRequestCeilingMs(activityBudgetMs: number): number {
+  if (!Number.isSafeInteger(activityBudgetMs) || activityBudgetMs <= 0) {
+    throw new RangeError(`ACP prompt activity budget must be a positive safe integer, got ${activityBudgetMs}`);
+  }
+  const requestCeilingMs = Math.max(MIN_ACP_PROMPT_REQUEST_CEILING_MS, activityBudgetMs + ACP_PROMPT_TIMEOUT_MARGIN_MS);
+  if (requestCeilingMs > MAX_TIMER_DELAY_MS) {
+    throw new RangeError(
+      `ACP prompt timeout policy exceeds Node timer range: activityBudgetMs=${activityBudgetMs}, ` +
+        `max=${MAX_TIMER_DELAY_MS - ACP_PROMPT_TIMEOUT_MARGIN_MS}`,
+    );
+  }
+  return requestCeilingMs;
+}
 
 // ─── Config ──────────────────────────────────────────────���─────
 
@@ -112,8 +134,13 @@ export class AcpStreamIdleError extends Error {
     public readonly sessionId: string,
     public readonly idleSinceMs: number,
     public readonly eventCount: number,
+    /** #1186: The configured threshold that triggered termination (ms). */
+    public readonly configuredIdleStallMs?: number,
   ) {
-    super(`Stream idle: no events for ${idleSinceMs}ms after ${eventCount} events received`);
+    super(
+      `Stream idle: no events for ${idleSinceMs}ms after ${eventCount} events received` +
+        (configuredIdleStallMs != null ? ` (configured threshold: ${configuredIdleStallMs}ms)` : ''),
+    );
     this.name = 'AcpStreamIdleError';
   }
 }
@@ -128,20 +155,48 @@ export interface AcpCapacitySignal {
 
 const CAPACITY_RE = /MODEL_CAPACITY_EXHAUSTED|No capacity available|status 429.*Retrying/i;
 
+interface PendingAcpRequest {
+  resolve: (response: AcpResponse) => void;
+  reject: (error: Error) => void;
+  refreshTimeout: () => void;
+}
+
 export class AcpClient {
   private child: ChildProcess | null = null;
   private rl: ReadlineInterface | null = null;
-  private readonly pending = new Map<string, { resolve: (v: AcpResponse) => void; reject: (e: Error) => void }>();
+  private readonly pending = new Map<string, PendingAcpRequest>();
   private readonly notificationListeners: Array<(n: AcpNotification) => void> = [];
   private initResult: AcpInitializeResult | null = null;
   private closed = false;
   private exited = false;
+  /** Sessions whose local prompt ended before provider completion was acknowledged. */
+  private readonly unquiescedSessionIds = new Set<string>();
   private readonly capacityListeners = new Set<(signal: AcpCapacitySignal) => void>();
+  /**
+   * #1186 P1: Per-session cancel callbacks — when cancelSession() is called,
+   * invoke the registered callback to settle the local prompt stream immediately.
+   * Without this, cancel only sends a JSONRPC notification; the pending .next()
+   * blocks until the provider cooperates or the idle watchdog fires, leaving
+   * the lease pinned for the full TTL.
+   */
+  private readonly sessionCancelCallbacks = new Map<string, () => void>();
+  /**
+   * #1186 P1: Track the pending request ID for each session's prompt so that
+   * cancelSession() can settle (reject) the underlying sendRequest promise.
+   * Without this, the promise + its request timer stay alive after the generator
+   * exits, leaving a stale entry in `pending` — a non-multiplexed process
+   * could be reused while the old request is unresolved.
+   */
+  private readonly sessionPromptPendingIds = new Map<string, string>();
   /** Client-level capacity signal — always captured regardless of listeners.
    *  Fallback for delayed stderr arriving after invoke listener is removed. */
   private _recentCapacitySignal: AcpCapacitySignal | null = null;
+  /** #1203: Directory identity captured at spawn. */
+  private readonly cwdIdentityTracker: AcpCwdIdentityTracker;
 
-  constructor(private readonly config: AcpClientConfig) {}
+  constructor(private readonly config: AcpClientConfig) {
+    this.cwdIdentityTracker = new AcpCwdIdentityTracker(this.config.cwd);
+  }
 
   // ── Lifecycle ────────────────────────────────────────────────
 
@@ -168,6 +223,9 @@ export class AcpClient {
     if (!this.config.spawnFn) {
       mkdirSync(this.config.cwd, { recursive: true, mode: 0o700 });
     }
+    // #1203: Capture the cwd's directory identity at spawn so isCwdIntact can
+    // detect delete→recreate at the same path, not just deletion.
+    this.cwdIdentityTracker.capture();
 
     const spawnOpts: SpawnOptions & { stdio: ['pipe', 'pipe', 'pipe'] } = {
       cwd: this.config.cwd,
@@ -389,13 +447,15 @@ export class AcpClient {
     // If agent produces events continuously, budget never fires. Only triggers
     // after timeoutMs of SILENCE (no events). Idle stall (90s) catches true hangs
     // faster; this is the wider safety net for slow-but-alive sessions.
-    // sendRequest gets a hard ceiling (1h) as absolute last-resort guard.
+    // sendRequest gets a wider inactivity window as a last-resort guard. The
+    // window is derived from timeoutMs and resets on real prompt activity, so it
+    // cannot preempt either the configured idle policy or its sliding budget.
     const timeoutMs = options?.timeoutMs ?? 900_000;
     const idleWarningMs = options?.idleWarningMs ?? 20_000;
     // Idle stall catches true hangs. Gemini CLI doesn't emit tool_call for MCP
     // tools, so pendingTool never activates. 90s covers most MCP calls (10-30s).
     const idleStallMs = options?.idleStallMs ?? 90_000;
-    const HARD_CEILING_MS = 3_600_000; // 1h — absolute last-resort for sendRequest promise
+    const requestCeilingMs = resolveAcpPromptRequestCeilingMs(timeoutMs);
     const queue: AcpSessionUpdate[] = [];
     let waitResolve: (() => void) | null = null;
     let done = false;
@@ -409,6 +469,7 @@ export class AcpClient {
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     let pendingTool = false; // true while Gemini is waiting for MCP tool result
     let budgetTimer: ReturnType<typeof setTimeout> | null = null;
+    const promptRequestId = randomUUID();
 
     /** Reset (or start) the activity-based turn budget timer.
      *  Called once at prompt start and again on every incoming event. */
@@ -439,15 +500,20 @@ export class AcpClient {
       }
     };
 
-    /** Schedule the next idle check. Only active after first real event. */
+    /** Schedule the next idle check. Active from prompt start — covers zero-first-event.
+     *  #1186: Previously only started after the first real event, so zero-event stalls
+     *  could only be caught by the budget timer (at idleTtlMs + 60s) with AcpTimeoutError.
+     *  Now the idle watchdog owns the terminal transition for all silence, including
+     *  zero-first-event, producing AcpStreamIdleError at the configured TTL. */
     const scheduleIdleCheck = () => {
       if (idleTimer) clearTimeout(idleTimer);
       if (done) return;
       // P1-fix: stall delay is relative to lastEventAt, not relative to warning.
       // With warning at 20s and stall at 45s, the stall timer fires 25s after warning.
-      const nextMs = idleWarningFired ? Math.max(0, idleStallMs - idleWarningMs) : idleWarningMs;
+      // Cap initial delay at idleStallMs so short TTLs (< idleWarningMs) still fire on time.
+      const nextMs = idleWarningFired ? Math.max(0, idleStallMs - idleWarningMs) : Math.min(idleWarningMs, idleStallMs);
       idleTimer = setTimeout(() => {
-        if (done || eventCount === 0) return;
+        if (done) return;
         // Clamp to at least the threshold that triggered this timer — a threshold
         // event must never report a duration smaller than its own trigger point.
         const rawIdle = Date.now() - lastEventAt;
@@ -469,17 +535,16 @@ export class AcpClient {
           }
           scheduleIdleCheck(); // Schedule stall check (remaining time)
         } else if (pendingTool) {
-          // Tool still executing — allow extra time, but cap at TOOL_EXECUTION_CEILING_MS.
-          // Before this fix, pendingTool suppressed stall indefinitely without rescheduling,
-          // causing sessions (esp. kimi-acp) to block for up to 15min turn budget on hung tools.
-          const TOOL_EXECUTION_CEILING_MS = 180_000; // 3 minutes max for a single tool call
-          if (idleSinceMs >= TOOL_EXECUTION_CEILING_MS) {
+          // #1186: Tool execution ceiling follows the configured idleStallMs (from member's
+          // ACP Idle TTL), not a hardcoded constant. Previously TOOL_EXECUTION_CEILING_MS=180s
+          // killed tools that legitimately needed more time, ignoring user-configured idle TTL.
+          if (idleSinceMs >= idleStallMs) {
             log.error(
-              { sessionId, idleSinceMs, eventCount, pendingTool },
-              'Stream idle watchdog: tool execution exceeded ceiling — terminating',
+              { sessionId, idleSinceMs, eventCount, pendingTool, idleStallMs },
+              'Stream idle watchdog: tool execution exceeded configured idle TTL — terminating',
             );
             this.cancelSession(sessionId);
-            promptError = new AcpStreamIdleError(sessionId, idleSinceMs, eventCount);
+            promptError = new AcpStreamIdleError(sessionId, idleSinceMs, eventCount, idleStallMs);
             done = true;
             if (waitResolve) {
               const r = waitResolve;
@@ -488,7 +553,7 @@ export class AcpClient {
             }
           } else {
             log.info(
-              { sessionId, idleSinceMs, eventCount, pendingTool },
+              { sessionId, idleSinceMs, eventCount, pendingTool, idleStallMs },
               'Stream idle watchdog: tool still pending, scheduling follow-up check',
             );
             scheduleIdleCheck(); // Reschedule — don't dead-end
@@ -497,7 +562,7 @@ export class AcpClient {
           // Stall — terminate the stream and cancel the upstream session
           log.error({ sessionId, idleSinceMs, eventCount }, 'Stream idle watchdog: stall — terminating');
           this.cancelSession(sessionId); // P1-fix: actually cancel the upstream session
-          promptError = new AcpStreamIdleError(sessionId, idleSinceMs, eventCount);
+          promptError = new AcpStreamIdleError(sessionId, idleSinceMs, eventCount, idleStallMs);
           done = true;
           if (waitResolve) {
             const r = waitResolve;
@@ -545,6 +610,7 @@ export class AcpClient {
       }
       scheduleIdleCheck();
       resetBudget(); // Activity-based: any event resets the turn budget
+      this.pending.get(promptRequestId)?.refreshTimeout();
       if (waitResolve) {
         const r = waitResolve;
         waitResolve = null;
@@ -565,17 +631,67 @@ export class AcpClient {
     };
     this.capacityListeners.add(capacityInjector);
 
+    // #1186 P1: Register cancel callback so cancelSession() settles this stream
+    // immediately instead of waiting for the provider or idle watchdog.
+    const cancelCb = () => {
+      if (done) return;
+      // The local stream can settle before the provider acknowledges prompt
+      // termination. The pool uses this only for single-flight retirement.
+      this.unquiescedSessionIds.add(sessionId);
+      log.info({ sessionId, eventCount }, 'Session cancel settled local prompt stream');
+      promptError = new AcpStreamIdleError(
+        sessionId,
+        Date.now() - (lastEventAt || Date.now()),
+        eventCount,
+        idleStallMs,
+      );
+      done = true;
+      if (idleTimer) clearTimeout(idleTimer);
+      if (budgetTimer) clearTimeout(budgetTimer);
+      if (waitResolve) {
+        const r = waitResolve;
+        waitResolve = null;
+        r();
+      }
+    };
+    this.sessionCancelCallbacks.set(sessionId, cancelCb);
+
+    // #1186: Initialize lastEventAt so idle watchdog measures from prompt start for
+    // zero-first-event case. When real events arrive, lastEventAt is updated in the listener.
+    lastEventAt = Date.now();
+
     // Start activity-based budget timer — resets on each event from listener
     resetBudget();
 
+    // #1186: Start idle watchdog at prompt start — covers zero-first-event path.
+    // Previously only started from the listener (on first real event), leaving zero-event
+    // stalls uncovered until the budget timer fired at idleTtlMs + 60s.
+    scheduleIdleCheck();
+
     // Fire prompt request — don't await, we'll drain the queue concurrently.
-    // sendRequest uses hard ceiling (1h); actual budget is managed by resetBudget().
-    this.sendRequest(ACP_METHODS.sessionPrompt, { sessionId, prompt: [{ type: 'text', text }] }, HARD_CEILING_MS)
+    // The request timeout is a last-resort inactivity window that is wider than
+    // the activity budget and rearmed by the listener on every real event.
+    // #1186 P1: Pre-generate the request ID so cancelSession() can settle the pending
+    // entry. Without this, the sendRequest promise stays alive after generator exit,
+    // leaving a stale entry in `pending` that blocks safe non-multiplexed reuse.
+    this.sessionPromptPendingIds.set(sessionId, promptRequestId);
+    this.sendRequest(
+      ACP_METHODS.sessionPrompt,
+      { sessionId, prompt: [{ type: 'text', text }] },
+      requestCeilingMs,
+      promptRequestId,
+    )
       .then((resp) => {
         const result = resp.result as unknown as AcpPromptResult;
         stopReason = result.stopReason;
       })
       .catch((err: Error) => {
+        // Local termination (idle watchdog, activity budget, or explicit cancel)
+        // rejects the pending protocol request as cleanup. Preserve the terminal
+        // cause that already settled the stream instead of replacing it with the
+        // generic cancellation rejection while queued events are still draining.
+        if (done && promptError) return;
+        if (err instanceof AcpTimeoutError) this.unquiescedSessionIds.add(sessionId);
         promptError = err;
       })
       .finally(() => {
@@ -607,6 +723,8 @@ export class AcpClient {
     } finally {
       if (idleTimer) clearTimeout(idleTimer);
       if (budgetTimer) clearTimeout(budgetTimer);
+      this.sessionCancelCallbacks.delete(sessionId);
+      this.sessionPromptPendingIds.delete(sessionId);
       this.capacityListeners.delete(capacityInjector);
       const idx = this.notificationListeners.indexOf(listener);
       if (idx >= 0) this.notificationListeners.splice(idx, 1);
@@ -615,13 +733,41 @@ export class AcpClient {
 
   /**
    * Send session/cancel notification (fire-and-forget, no response expected).
-   * Does NOT close the shared AcpClient — safe for concurrent sessions.
+   *
+   * #1186 P1: Also settles the local prompt stream via the registered cancel
+   * callback so the pending .next() resolves immediately. Without this, the
+   * generator stays suspended until the provider cooperates or the idle watchdog
+   * fires — leaving the lease pinned for the full TTL. The callback also marks
+   * the carrier unsafe for single-flight reuse; the pool retires non-multiplexed
+   * clients while leaving multiplexed clients available to unrelated sessions.
    */
   cancelSession(sessionId: string): void {
-    if (!this.child?.stdin?.writable) return;
-    const msg = { jsonrpc: '2.0', method: ACP_METHODS.sessionCancel, params: { sessionId } };
-    this.child.stdin.write(`${JSON.stringify(msg)}\n`);
-    log.info('Sent session/cancel for %s', sessionId);
+    const promptReqId = this.sessionPromptPendingIds.get(sessionId);
+    const cb = this.sessionCancelCallbacks.get(sessionId);
+
+    if (this.child?.stdin?.writable) {
+      const msg = { jsonrpc: '2.0', method: ACP_METHODS.sessionCancel, params: { sessionId } };
+      this.child.stdin.write(`${JSON.stringify(msg)}\n`);
+      log.info('Sent session/cancel for %s', sessionId);
+    }
+    // Settle the local prompt stream immediately
+    if (cb) cb();
+    // #1186 P1: Settle the pending sendRequest promise for this session's prompt.
+    // The cancel callback above exits the generator, which releases the lease.
+    // But without settling the underlying request, the sendRequest promise stays
+    // alive with its request timer, leaving a stale entry in `pending`. For a non-
+    // multiplexed process that remains alive after lease release, the stale entry
+    // would retain its timer and could consume a late response. Rejecting here
+    // clears local bookkeeping; the pool separately retires non-multiplexed
+    // carriers because local cleanup does not prove upstream quiescence.
+    if (promptReqId) {
+      const entry = this.pending.get(promptReqId);
+      if (entry) {
+        this.pending.delete(promptReqId);
+        entry.reject(new Error(`Session ${sessionId} cancelled — prompt request settled`));
+      }
+      this.sessionPromptPendingIds.delete(sessionId);
+    }
   }
 
   async close(): Promise<void> {
@@ -656,6 +802,25 @@ export class AcpClient {
     return this.child !== null && !this.child.killed && !this.closed && !this.exited;
   }
 
+  /**
+   * #1203: False when the bootstrap cwd was deleted after spawn (e.g. by an
+   * external cleaner emptying the shared /tmp bootstrap root) — including the
+   * delete→recreate case where the path exists again but the child still holds
+   * the dead inode, so getcwd() keeps failing. The pool retires cwd-less
+   * processes and cold-starts fresh ones (initialize re-creates the cwd).
+   */
+  get isCwdIntact(): boolean {
+    return this.cwdIdentityTracker.isIntact;
+  }
+
+  get isSafeForSingleFlightReuse(): boolean {
+    return this.unquiescedSessionIds.size === 0;
+  }
+
+  isSessionSafeForReuse(sessionId: string): boolean {
+    return !this.unquiescedSessionIds.has(sessionId);
+  }
+
   /** Register a capacity-signal listener scoped to a prompt's lifetime. */
   onCapacity(fn: (signal: AcpCapacitySignal) => void): void {
     this.capacityListeners.add(fn);
@@ -664,6 +829,12 @@ export class AcpClient {
   /** Unregister a capacity-signal listener. */
   offCapacity(fn: (signal: AcpCapacitySignal) => void): void {
     this.capacityListeners.delete(fn);
+  }
+
+  /** Number of pending (unresolved) sendRequest entries. Used by tests to verify
+   *  cancel settles the underlying prompt request and doesn't leave stale entries. */
+  get pendingRequestCount(): number {
+    return this.pending.size;
   }
 
   /** Most recent capacity signal observed on this client (provider-level, not per-invoke). */
@@ -770,38 +941,59 @@ export class AcpClient {
     });
   }
 
-  private sendRequest(method: string, params: Record<string, unknown>, timeoutMs = 60_000): Promise<AcpResponse> {
-    if (!this.child?.stdin?.writable) {
+  private sendRequest(
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs = 60_000,
+    /** Pre-generated request ID — used by promptStream to enable cancel-time settlement. */
+    preGeneratedId?: string,
+  ): Promise<AcpResponse> {
+    const child = this.child;
+    const stdin = child?.stdin;
+    if (!child || !stdin?.writable) {
       return Promise.reject(new Error('ACP process stdin not writable'));
     }
 
-    const id = randomUUID();
+    const id = preGeneratedId ?? randomUUID();
     const msg = { jsonrpc: '2.0', method, id, params };
     const payload = JSON.stringify(msg);
     log.info(
-      { method, id, timeoutMs, pid: this.child?.pid, payloadBytes: payload.length },
+      { method, id, timeoutMs, pid: child.pid, payloadBytes: payload.length },
       'ACP sendRequest: writing to stdin',
     );
-    this.child.stdin.write(payload + '\n');
 
     return new Promise<AcpResponse>((resolve, reject) => {
       const sentAt = Date.now();
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        log.error(
-          { method, id, timeoutMs, pid: this.child?.pid, elapsedMs: Date.now() - sentAt, exited: this.exited },
-          'ACP sendRequest: TIMEOUT — no response from agent process',
-        );
-        // For prompt timeouts, send session/cancel to stop the agent's internal retry loop
-        if (method === ACP_METHODS.sessionPrompt && params.sessionId) {
-          this.cancelSession(params.sessionId as string);
-        }
-        reject(new AcpTimeoutError(method, timeoutMs));
-      }, timeoutMs);
+      let timeoutStartedAt = sentAt;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const armTimeout = () => {
+        if (timer) clearTimeout(timer);
+        timeoutStartedAt = Date.now();
+        timer = setTimeout(() => {
+          this.pending.delete(id);
+          log.error(
+            {
+              method,
+              id,
+              timeoutMs,
+              pid: child.pid,
+              elapsedMs: Date.now() - sentAt,
+              inactiveMs: Date.now() - timeoutStartedAt,
+              exited: this.exited,
+            },
+            'ACP sendRequest: TIMEOUT — no response from agent process',
+          );
+          // For prompt timeouts, send session/cancel to stop the agent's internal retry loop
+          if (method === ACP_METHODS.sessionPrompt && params.sessionId) {
+            this.cancelSession(params.sessionId as string);
+          }
+          reject(new AcpTimeoutError(method, timeoutMs));
+        }, timeoutMs);
+      };
 
-      this.pending.set(id, {
+      const pendingRequest: PendingAcpRequest = {
         resolve: (resp) => {
-          clearTimeout(timer);
+          if (timer) clearTimeout(timer);
           log.info(
             { method, id, durationMs: Date.now() - sentAt, hasError: !!resp.error },
             'ACP sendRequest: response received',
@@ -813,11 +1005,15 @@ export class AcpClient {
           }
         },
         reject: (err) => {
-          clearTimeout(timer);
+          if (timer) clearTimeout(timer);
           log.error({ method, id, durationMs: Date.now() - sentAt, error: err.message }, 'ACP sendRequest: rejected');
           reject(err);
         },
-      });
+        refreshTimeout: armTimeout,
+      };
+      this.pending.set(id, pendingRequest);
+      armTimeout();
+      stdin.write(`${payload}\n`);
     });
   }
 

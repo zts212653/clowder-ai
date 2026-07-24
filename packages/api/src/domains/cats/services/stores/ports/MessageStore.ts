@@ -334,9 +334,17 @@ export interface IMessageStore {
     id: string,
     patch: StreamMetadataAugmentInput,
   ): StoredMessage | null | Promise<StoredMessage | null>;
-  /** F098-D: Deliver a queued message at a non-negative integral ECMAScript Date value. Null if not found. */
+  /**
+   * F098-D: CAS transition queued → delivered at an admitted non-negative integral ECMAScript Date value.
+   * Returns the transitioned message when this call won the CAS;
+   * null on no-op (not found / already delivered / already canceled / immediate).
+   */
   markDelivered(id: string, deliveredAt: number): StoredMessage | null | Promise<StoredMessage | null>;
-  /** F117: Mark a queued message as canceled (withdraw/clear). Returns null if not found. */
+  /**
+   * F117: CAS transition queued → canceled (withdraw/clear).
+   * Returns the transitioned message when this call won the CAS;
+   * null on no-op (not found / already canceled / already delivered / immediate).
+   */
   markCanceled(id: string): StoredMessage | null | Promise<StoredMessage | null>;
   /**
    * Atomic content-dedup claim. Returns true if this fingerprint was newly claimed
@@ -770,17 +778,21 @@ export class MessageStore {
     assertValidStoredMessageTimestamp(deliveredAt);
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
-    if (!isQueuedForDeliveryTransition(msg)) return msg;
+    if (!isQueuedForDeliveryTransition(msg)) return null; // CAS no-op: not queued
     msg.deliveredAt = deliveredAt;
     msg.deliveryStatus = 'delivered';
     return msg;
   }
 
-  /** F117: Mark a queued message as canceled (withdraw/clear). */
+  /**
+   * F117: Mark a queued message as canceled (withdraw/clear).
+   * PR #1193: CAS guard — only transitions queued → canceled. Delivered or
+   * immediate messages are left untouched, matching Redis Lua behavior.
+   */
   markCanceled(id: string): StoredMessage | null {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
-    if (!isQueuedForDeliveryTransition(msg)) return msg;
+    if (!isQueuedForDeliveryTransition(msg)) return null; // CAS no-op: not queued
     msg.deliveryStatus = 'canceled';
     return msg;
   }

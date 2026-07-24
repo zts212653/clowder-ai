@@ -10,8 +10,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative, resolve, win32 } from 'node:path';
-import { afterEach, describe, it } from 'node:test';
+import { isAbsolute, join, relative, resolve, win32 } from 'node:path';
+import { after, afterEach, before, describe, it } from 'node:test';
 
 const {
   isPathWithinRoot,
@@ -23,9 +23,56 @@ const {
 
 describe('acp bootstrap cwd', () => {
   const createdDirs = new Set();
+  // #1203: Tests MUST run under a throwaway bootstrap root, injected explicitly
+  // into resolveAcpBootstrapCwd(). The production root
+  // (/tmp/cat-cafe-acp-bootstrap-uid-*) is shared with every running Clowder AI
+  // instance on this machine — deleting it (the previous afterEach did exactly
+  // that) pulls the cwd out from under live pooled ACP processes and the next
+  // prompt dies with ACP -32603 getcwd ENOENT.
+  let testBootstrapRoot;
+  // Explicit deletion allowlist: afterEach may only rmSync paths inside one of
+  // these roots. Anything else — above all the uid-shared production bootstrap
+  // root — throws instead of deleting.
+  const cleanupAllowlist = new Set();
+
+  const allowCleanup = (root) => cleanupAllowlist.add(resolve(root));
+
+  const assertSafeCleanupDir = (dir) => {
+    const resolved = resolve(dir);
+    for (const root of cleanupAllowlist) {
+      // Platform-aware containment (PR #1207 codex P2): a hard-coded `/` prefix
+      // fails on Windows, where resolve() produces backslash paths.
+      if (isPathWithinRoot(root, resolved, { relative, isAbsolute })) return;
+    }
+    throw new Error(`REFUSING to delete path outside test cleanup allowlist: ${dir}`);
+  };
+
+  const makeTmpDir = (prefix) => {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
+    allowCleanup(dir);
+    return dir;
+  };
+
+  // All resolveAcpBootstrapCwd() calls in this suite go through the injected
+  // throwaway root — the production root is never created, listed, or deleted.
+  const testBootstrapCwd = (projectRoot, profile) => resolveAcpBootstrapCwd(projectRoot, profile, testBootstrapRoot);
+
+  before(() => {
+    // Portable throwaway root — never a hard-coded '/tmp' (PR #1207 sweep):
+    // os.tmpdir() exists on every platform, '/tmp' does not on Windows.
+    testBootstrapRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-acp-bootstrap-test-'));
+    allowCleanup(testBootstrapRoot);
+  });
+
+  after(() => {
+    // Final teardown goes through the same safety guard as afterEach.
+    assertSafeCleanupDir(testBootstrapRoot);
+    rmSync(testBootstrapRoot, { recursive: true, force: true });
+  });
 
   afterEach(() => {
     for (const dir of createdDirs) {
+      assertSafeCleanupDir(dir);
       rmSync(dir, { recursive: true, force: true });
     }
     createdDirs.clear();
@@ -33,32 +80,29 @@ describe('acp bootstrap cwd', () => {
 
   it('creates a deterministic bootstrap dir outside the project root', () => {
     const projectRoot = resolve('/tmp/cat-cafe-project');
-    const bootstrapRoot = resolveAcpBootstrapRoot();
 
-    const first = resolveAcpBootstrapCwd(projectRoot, 'gemini-default');
-    const second = resolveAcpBootstrapCwd(projectRoot, 'gemini-default');
+    const first = testBootstrapCwd(projectRoot, 'gemini-default');
+    const second = testBootstrapCwd(projectRoot, 'gemini-default');
     createdDirs.add(first);
-    createdDirs.add(bootstrapRoot);
 
     assert.equal(first, second, 'same project/profile should reuse the same bootstrap dir');
     assert.ok(
-      first.startsWith('/tmp/cat-cafe-acp-bootstrap-'),
-      `bootstrap dir should live under /tmp/cat-cafe-acp-bootstrap-*, got ${first}`,
+      isPathWithinRoot(testBootstrapRoot, first, { relative, isAbsolute }),
+      `bootstrap dir should live under the injected test root ${testBootstrapRoot}, got ${first}`,
     );
     assert.ok(existsSync(first), 'bootstrap dir should be created eagerly');
     assert.ok(
-      !first.startsWith(`${projectRoot}/`) && first !== projectRoot,
+      !isPathWithinRoot(projectRoot, first, { relative, isAbsolute }),
       'bootstrap dir must not resolve inside the project root',
     );
   });
 
   it('recreates the deterministic bootstrap dir when it was cleaned up between cold starts', () => {
     const projectRoot = resolve('/tmp/cat-cafe-project');
-    createdDirs.add(resolveAcpBootstrapRoot());
 
-    const first = resolveAcpBootstrapCwd(projectRoot, 'recreate-guard');
+    const first = testBootstrapCwd(projectRoot, 'recreate-guard');
     rmSync(first, { recursive: true, force: true });
-    const second = resolveAcpBootstrapCwd(projectRoot, 'recreate-guard');
+    const second = testBootstrapCwd(projectRoot, 'recreate-guard');
     createdDirs.add(second);
 
     assert.equal(first, second, 'bootstrap path should stay deterministic across cold starts');
@@ -67,21 +111,20 @@ describe('acp bootstrap cwd', () => {
 
   it('enforces owner-only permissions on the bootstrap cwd', () => {
     const projectRoot = resolve('/tmp/cat-cafe-project');
-    const dir = resolveAcpBootstrapCwd(projectRoot, 'mode-guard');
+    const dir = testBootstrapCwd(projectRoot, 'mode-guard');
     createdDirs.add(dir);
-    createdDirs.add(resolveAcpBootstrapRoot());
 
     chmodSync(dir, 0o755);
-    resolveAcpBootstrapCwd(projectRoot, 'mode-guard');
+    testBootstrapCwd(projectRoot, 'mode-guard');
 
     assert.equal(statSync(dir).mode & 0o777, 0o700);
   });
 
   it('sanitizes provider profile so it cannot escape the bootstrap root', () => {
     const projectRoot = resolve('/tmp/cat-cafe-project');
-    const bootstrapRoot = resolveAcpBootstrapRoot();
+    const bootstrapRoot = testBootstrapRoot;
 
-    const escaped = resolveAcpBootstrapCwd(projectRoot, '../rogue/profile');
+    const escaped = testBootstrapCwd(projectRoot, '../rogue/profile');
     createdDirs.add(escaped);
 
     const relativeToBootstrapRoot = relative(bootstrapRoot, escaped);
@@ -98,16 +141,14 @@ describe('acp bootstrap cwd', () => {
 
   it('rejects a pre-created symlink at the bootstrap cwd path', () => {
     const projectRoot = resolve('/tmp/cat-cafe-project');
-    const bootstrapRoot = resolveAcpBootstrapRoot();
-    const target = mkdtempSync(join(tmpdir(), 'gemini-acp-target-'));
-    const bootstrapPath = resolveAcpBootstrapCwd(projectRoot, 'symlink-guard');
+    const target = makeTmpDir('gemini-acp-target-');
+    const bootstrapPath = testBootstrapCwd(projectRoot, 'symlink-guard');
     createdDirs.add(target);
     rmSync(bootstrapPath, { recursive: true, force: true });
     symlinkSync(target, bootstrapPath);
     createdDirs.add(bootstrapPath);
-    createdDirs.add(bootstrapRoot);
 
-    assert.throws(() => resolveAcpBootstrapCwd(projectRoot, 'symlink-guard'), /must not be a symlink/);
+    assert.throws(() => testBootstrapCwd(projectRoot, 'symlink-guard'), /must not be a symlink/);
   });
 
   it('uses platform-safe containment checks for Windows-style paths', () => {
@@ -120,7 +161,7 @@ describe('acp bootstrap cwd', () => {
   });
 
   it('resolves relative ACP commands against the project root', () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), 'acp-project-'));
+    const projectRoot = makeTmpDir('acp-project-');
     writeFileSync(join(projectRoot, 'agent.js'), 'console.log("ok");\n');
     writeFileSync(join(projectRoot, 'gemini'), 'echo hijack\n');
     createdDirs.add(projectRoot);
@@ -133,7 +174,7 @@ describe('acp bootstrap cwd', () => {
   });
 
   it('resolves path-like startupArgs against the project root', () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), 'acp-project-'));
+    const projectRoot = makeTmpDir('acp-project-');
     writeFileSync(join(projectRoot, 'settings.json'), '{}\n');
     writeFileSync(join(projectRoot, 'runner.js'), 'console.log("ok");\n');
     writeFileSync(join(projectRoot, 'yolo'), 'not-a-path\n');
@@ -159,7 +200,7 @@ describe('acp bootstrap cwd', () => {
   });
 
   it('expands model templates in startupArgs before spawning ACP clients', () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), 'acp-project-'));
+    const projectRoot = makeTmpDir('acp-project-');
     createdDirs.add(projectRoot);
 
     assert.deepEqual(
@@ -171,10 +212,31 @@ describe('acp bootstrap cwd', () => {
   });
 
   it('scopes bootstrap root by current uid or equivalent user identity', () => {
+    // Pure path computation — no directories are created on the production root.
     const root = resolveAcpBootstrapRoot();
     assert.ok(
       root.startsWith('/tmp/cat-cafe-acp-bootstrap-'),
       `bootstrap root should match /tmp/cat-cafe-acp-bootstrap-*, got ${root}`,
+    );
+    assert.notEqual(root, testBootstrapRoot, 'default root must not collapse into the test root');
+  });
+
+  it('cleanup allowlist refuses the uid-shared production bootstrap root (#1203 sentinel)', () => {
+    // The production root is the sentinel for every running instance on this
+    // machine. The afterEach guard must reject it — and any path outside the
+    // registered test roots — instead of deleting it.
+    const productionRoot = resolveAcpBootstrapRoot();
+    assert.throws(() => assertSafeCleanupDir(productionRoot), /outside test cleanup allowlist/);
+    assert.throws(() => assertSafeCleanupDir('/tmp'), /outside test cleanup allowlist/);
+    assert.throws(() => assertSafeCleanupDir(resolve('/')), /outside test cleanup allowlist/);
+    // Registered test roots (and their children) are allowed.
+    assertSafeCleanupDir(testBootstrapRoot);
+    assertSafeCleanupDir(join(testBootstrapRoot, 'some-child-dir'));
+    // A sibling sharing the root's path prefix is NOT inside it (prefix trap).
+    assert.throws(
+      () => assertSafeCleanupDir(`${testBootstrapRoot}-evil`),
+      /outside test cleanup allowlist/,
+      'sibling directory sharing a path prefix must be rejected',
     );
   });
 

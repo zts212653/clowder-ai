@@ -18,10 +18,21 @@ function createMockClient() {
   const id = ++clientIdCounter;
   let alive = false;
   let closed = false;
+  let cwdIntact = true;
+  const unsafeSessionIds = new Set();
   return {
     id,
     get isAlive() {
       return alive && !closed;
+    },
+    get isCwdIntact() {
+      return cwdIntact;
+    },
+    get isSafeForSingleFlightReuse() {
+      return unsafeSessionIds.size === 0;
+    },
+    isSessionSafeForReuse(sessionId) {
+      return !unsafeSessionIds.has('*') && !unsafeSessionIds.has(sessionId);
     },
     async initialize() {
       alive = true;
@@ -42,6 +53,12 @@ function createMockClient() {
     _isClosed() {
       return closed;
     },
+    _markUnsafeForSingleFlightReuse(sessionId = '*') {
+      unsafeSessionIds.add(sessionId);
+    },
+    _deleteCwd() {
+      cwdIntact = false;
+    }, // #1203: simulate external deletion of the bootstrap cwd
   };
 }
 
@@ -188,6 +205,113 @@ describe('AcpProcessPool', () => {
       const lease2 = await pool.acquire(key1);
       assert.strictEqual(lease2.client, client);
       assert.strictEqual(pool.getMetrics().liveProcessCount, 1);
+      lease2.release();
+    });
+
+    test('non-multiplexed carrier is retired after a cancelled prompt may still be running', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(defaultPoolConfig, nonMultiplexedVariantConfig, createMockClient);
+
+      const lease1 = await pool.acquire(key1);
+      const unsafeClient = lease1.client;
+      unsafeClient._markUnsafeForSingleFlightReuse();
+      lease1.release();
+
+      assert.equal(unsafeClient._isClosed(), true, 'unsafe single-flight client must be closed');
+      assert.deepEqual(pool.getMetrics(), {
+        liveProcessCount: 0,
+        activeLeaseCount: 0,
+        idleProcessCount: 0,
+        warmHitCount: 0,
+        coldStartCount: 1,
+        evictionCount: 1,
+        zombieCleanupCount: 0,
+      });
+
+      const lease2 = await pool.acquire(key1);
+      assert.notStrictEqual(lease2.client, unsafeClient, 'next acquire must cold-start a fresh client');
+      lease2.release();
+    });
+
+    test('multiplexed carrier keeps unrelated session affinity after another session is cancelled', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(defaultPoolConfig, defaultVariantConfig, createMockClient);
+
+      const cancelledLease = await pool.acquire(key1);
+      const sharedClient = cancelledLease.client;
+      pool.rememberSession(key1, 'cancelled-sess', cancelledLease);
+      const unrelatedLease = await pool.acquire(key1);
+      pool.rememberSession(key1, 'unrelated-sess', unrelatedLease);
+      sharedClient._markUnsafeForSingleFlightReuse('cancelled-sess');
+      cancelledLease.release();
+      unrelatedLease.release();
+
+      assert.equal(sharedClient._isClosed(), false, 'one cancelled session must not close a multiplexed carrier');
+      const resumedUnrelated = await pool.acquire(key1, { sessionId: 'unrelated-sess' });
+      assert.strictEqual(
+        resumedUnrelated.client,
+        sharedClient,
+        'multiplexed carrier remains available to unrelated sessions',
+      );
+      assert.notEqual(resumedUnrelated.canResumeRequestedSession, false);
+      resumedUnrelated.release();
+    });
+
+    test('multiplexed carrier seals an unquiesced cancelled session instead of resuming it', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(defaultPoolConfig, defaultVariantConfig, createMockClient);
+
+      const cancelledLease = await pool.acquire(key1);
+      const sharedClient = cancelledLease.client;
+      pool.rememberSession(key1, 'cancelled-sess', cancelledLease);
+      sharedClient._markUnsafeForSingleFlightReuse('cancelled-sess');
+      cancelledLease.release();
+
+      const replacementLease = await pool.acquire(key1, { sessionId: 'cancelled-sess' });
+      assert.equal(
+        replacementLease.canResumeRequestedSession,
+        false,
+        'same logical session must be remapped instead of resumed while its prior prompt is unresolved',
+      );
+      assert.strictEqual(
+        replacementLease.client,
+        sharedClient,
+        'the multiplexed carrier may host the replacement as a distinct fresh session',
+      );
+      assert.equal(sharedClient._isClosed(), false);
+      replacementLease.release();
+    });
+
+    test('unsafe session owner is retired instead of stale-lease force reuse', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(defaultPoolConfig, nonMultiplexedVariantConfig, createMockClient);
+
+      const lease1 = await pool.acquire(key1);
+      const unsafeClient = lease1.client;
+      pool.rememberSession(key1, 'cancelled-sess', lease1);
+      unsafeClient._markUnsafeForSingleFlightReuse();
+
+      const lease2 = await pool.acquire(key1, { sessionId: 'cancelled-sess' });
+      assert.notStrictEqual(lease2.client, unsafeClient, 'resume must not reuse an unquiesced session owner');
+      assert.equal(
+        lease2.canResumeRequestedSession,
+        false,
+        'replacement process must create a fresh session rather than load the still-running logical session',
+      );
+      assert.equal(unsafeClient._isClosed(), true);
+      assert.equal(pool.getMetrics().activeLeaseCount, 1, 'only replacement lease should remain active');
+
+      // The retired lease was generation-invalidated; its late release is a no-op.
+      lease1.release();
+      assert.equal(pool.getMetrics().activeLeaseCount, 1);
       lease2.release();
     });
 
@@ -423,6 +547,109 @@ describe('AcpProcessPool', () => {
       assert.notStrictEqual(lease2.client, deadClient);
       assert.strictEqual(pool.getMetrics().coldStartCount, 2);
       lease2.release();
+    });
+  });
+
+  describe('bootstrap cwd loss (#1203)', () => {
+    test('warm process whose bootstrap cwd was deleted is retired and cold-started on acquire', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(
+        { ...defaultPoolConfig, healthCheckIntervalMs: 999_999, idleTtlMs: 999_999 },
+        defaultVariantConfig,
+        createMockClient,
+      );
+      const lease1 = await pool.acquire(key1);
+      const staleClient = lease1.client;
+      lease1.release();
+
+      // External cleaner (e.g. a stray test) deletes the shared bootstrap root —
+      // the child process is alive but its cwd is gone, so any prompt dies with
+      // getcwd ENOENT. The pool must not hand this process out again.
+      staleClient._deleteCwd();
+
+      const lease2 = await pool.acquire(key1);
+      assert.notStrictEqual(lease2.client, staleClient, 'must cold-start instead of reusing cwd-less process');
+      assert.ok(lease2.client.isAlive);
+      assert.ok(staleClient._isClosed(), 'retired process must be closed');
+      const m = pool.getMetrics();
+      assert.strictEqual(m.coldStartCount, 2);
+      assert.strictEqual(m.liveProcessCount, 1);
+      lease2.release();
+    });
+
+    test('session owner whose bootstrap cwd was deleted is retired — re-acquire cold-starts', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(
+        { ...defaultPoolConfig, healthCheckIntervalMs: 999_999, idleTtlMs: 999_999 },
+        defaultVariantConfig,
+        createMockClient,
+      );
+      const lease1 = await pool.acquire(key1);
+      const staleClient = lease1.client;
+      pool.rememberSession(key1, 'sess-cwd-lost', lease1);
+      lease1.release();
+
+      staleClient._deleteCwd();
+
+      const lease2 = await pool.acquire(key1, { sessionId: 'sess-cwd-lost' });
+      assert.notStrictEqual(lease2.client, staleClient, 'must not resume on a cwd-less owner');
+      assert.ok(staleClient._isClosed(), 'retired owner must be closed');
+      assert.strictEqual(pool.getMetrics().coldStartCount, 2);
+      lease2.release();
+    });
+
+    test('health check proactively cleans alive-but-cwd-less processes', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(
+        { ...defaultPoolConfig, healthCheckIntervalMs: 30, idleTtlMs: 999_999 },
+        defaultVariantConfig,
+        createMockClient,
+      );
+      const lease = await pool.acquire(key1);
+      const client = lease.client;
+      lease.release();
+
+      client._deleteCwd();
+
+      await new Promise((r) => setTimeout(r, 80));
+      const m = pool.getMetrics();
+      assert.strictEqual(m.liveProcessCount, 0);
+      // FC-1: cwd-less retirement must close the process, not just unlink it
+      assert.ok(client._isClosed(), 'retired cwd-less process must be closed');
+    });
+
+    test('health check retires cwd-less process with active lease — late release() is a no-op (FC-1)', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(
+        { ...defaultPoolConfig, healthCheckIntervalMs: 30, idleTtlMs: 999_999 },
+        defaultVariantConfig,
+        createMockClient,
+      );
+      const lease = await pool.acquire(key1);
+      const client = lease.client;
+      // Do NOT release — the lease is still active when the cwd disappears
+      // (e.g. mid-prompt). Retirement must invalidate the lease generation.
+      client._deleteCwd();
+
+      await new Promise((r) => setTimeout(r, 80));
+      assert.strictEqual(pool.getMetrics().liveProcessCount, 0);
+      assert.strictEqual(pool.getMetrics().activeLeaseCount, 0);
+      assert.ok(client._isClosed(), 'retired cwd-less process must be closed');
+
+      // The in-flight consumer's finally block releases the stale lease — it
+      // must not decrement metrics a second time.
+      lease.release();
+      const m = pool.getMetrics();
+      assert.strictEqual(m.activeLeaseCount, 0, 'stale release must not double-decrement activeLeaseCount');
+      assert.strictEqual(m.liveProcessCount, 0);
     });
   });
 

@@ -4,6 +4,9 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, it, mock } from 'node:test';
 
@@ -104,6 +107,36 @@ describe('AcpClient', () => {
     assert.equal(result.protocolVersion, 1);
     assert.equal(result.agentInfo.name, 'test');
     assert.ok(client.isAlive);
+  });
+
+  it('isCwdIntact detects deletion and delete→recreate of the bootstrap cwd (#1203)', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        }
+      }
+    });
+
+    const cwd = mkdtempSync(join(tmpdir(), 'acp-cwd-identity-'));
+    client = new AcpClient({ command: 'fake', args: [], cwd, spawnFn: () => child });
+    await client.initialize();
+
+    assert.equal(client.isCwdIntact, true, 'untouched cwd must be intact');
+
+    rmSync(cwd, { recursive: true, force: true });
+    assert.equal(client.isCwdIntact, false, 'deleted cwd must be reported as lost');
+
+    // A later cold start recreates the same path — but the pooled child still
+    // holds the dead inode, so getcwd() inside it keeps failing. Existence is
+    // not enough; the directory identity must mismatch.
+    mkdirSync(cwd);
+    assert.equal(client.isCwdIntact, false, 'recreated cwd at same path is a different inode — still lost');
+
+    rmSync(cwd, { recursive: true, force: true });
   });
 
   it('newSession sends cwd and mcpServers', async () => {
@@ -846,7 +879,69 @@ describe('AcpClient', () => {
     assert.match(thrownError.message, /[Ss]tream idle|STREAM_IDLE/);
   });
 
-  it('F149: idle watchdog does NOT fire before first event (eventCount=0)', async () => {
+  it('#1186: delayed warning drain preserves the watchdog idle error', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'delayed-drain-sess' });
+        } else if (msg.method === 'session/prompt') {
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'delayed-drain-sess',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'start' } },
+            });
+          });
+          // Leave the prompt pending so the watchdog owns termination.
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const iter = client.promptStream('delayed-drain-sess', 'hello', {
+      idleWarningMs: 30,
+      idleStallMs: 100,
+      timeoutMs: 5000,
+    });
+    const first = await iter.next();
+    assert.equal(first.value?.update?.sessionUpdate, 'agent_message_chunk');
+
+    // Let both warning and stall fire while the async generator is paused at the
+    // first yield. The pending request rejection must not replace the watchdog's
+    // structured terminal error before the consumer drains the queued warning.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    const remainingEvents = [];
+    let thrownError = null;
+    try {
+      for (;;) {
+        const result = await iter.next();
+        if (result.done) break;
+        remainingEvents.push(result.value);
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+
+    assert.ok(
+      remainingEvents.some((event) => event.update?.sessionUpdate === 'stream_idle_warning'),
+      'queued idle warning should still be delivered',
+    );
+    assert.ok(thrownError, 'watchdog stall should terminate the stream');
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL');
+    assert.equal(thrownError.configuredIdleStallMs, 100);
+  });
+
+  // #1186: Zero-first-event now produces AcpStreamIdleError at the configured TTL,
+  // not AcpTimeoutError at the later budget. The idle watchdog starts at prompt start.
+  it('#1186: zero-first-event produces AcpStreamIdleError at configured idleStallMs', async () => {
     const { child, clientStdin, agentStdout } = createMockChild();
 
     clientStdin.on('data', (chunk) => {
@@ -857,14 +952,8 @@ describe('AcpClient', () => {
         } else if (msg.method === 'session/new') {
           agentRespond(agentStdout, msg.id, { sessionId: 'zero-sess' });
         } else if (msg.method === 'session/prompt') {
-          // Delay first event longer than idle thresholds — but watchdog should NOT fire
-          setTimeout(() => {
-            agentNotify(agentStdout, 'session/update', {
-              sessionId: 'zero-sess',
-              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hello' } },
-            });
-            agentRespond(agentStdout, msg.id, { stopReason: 'end_turn' });
-          }, 200);
+          // Never send any events — zero-first-event scenario
+          // promptResponse stays pending — idle stall should terminate
         }
       }
     });
@@ -874,22 +963,209 @@ describe('AcpClient', () => {
     await client.newSession();
 
     const events = [];
-    for await (const event of client.promptStream('zero-sess', 'hello', {
-      idleWarningMs: 50,
-      idleStallMs: 100,
-    })) {
-      events.push(event);
+    let thrownError = null;
+    try {
+      for await (const event of client.promptStream('zero-sess', 'hello', {
+        idleWarningMs: 30,
+        idleStallMs: 100,
+        timeoutMs: 5000, // Budget much higher — must NOT fire first
+      })) {
+        events.push(event);
+      }
+    } catch (err) {
+      thrownError = err;
     }
 
-    // No idle events should fire — eventCount was 0 when the threshold passed
-    const idleEvents = events.filter(
-      (e) => e.update?.sessionUpdate === 'stream_idle_warning' || e.update?.sessionUpdate === 'stream_idle_stall',
-    );
-    assert.equal(idleEvents.length, 0, `Expected 0 idle events (eventCount=0), got ${idleEvents.length}`);
+    // Idle warning should fire even with zero events
+    const warningEvents = events.filter((e) => e.update?.sessionUpdate === 'stream_idle_warning');
+    assert.ok(warningEvents.length >= 1, `Expected at least 1 idle warning, got ${warningEvents.length}`);
 
-    // The real event should be present
-    const realEvents = events.filter((e) => e.update?.sessionUpdate === 'agent_message_chunk');
-    assert.equal(realEvents.length, 1, 'Should have 1 real event');
+    // Should throw AcpStreamIdleError, NOT AcpTimeoutError
+    assert.ok(thrownError, 'Should throw an error on zero-event stall');
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL', `Expected STREAM_IDLE_STALL, got ${thrownError.code}`);
+    assert.equal(thrownError.configuredIdleStallMs, 100, 'Should carry configured idleStallMs');
+  });
+
+  it('#1186: cancel settles prompt stream via sessionCancelCallbacks (real transport)', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'cancel-cb-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Send one event, then go silent — provider never responds to cancel
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'cancel-cb-sess',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'start' } },
+            });
+          });
+          // Deliberately never complete — cancel must break us out
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const events = [];
+    let thrownError = null;
+    const startMs = Date.now();
+
+    // Start streaming
+    const iter = client.promptStream('cancel-cb-sess', 'hello', {
+      idleWarningMs: 500,
+      idleStallMs: 5000, // Very high — cancel must fire before this
+      timeoutMs: 10000,
+    });
+
+    try {
+      // Get the first real event
+      const first = await iter.next();
+      if (!first.done) events.push(first.value);
+
+      // Cancel the session — this should settle promptStream immediately
+      client.cancelSession('cancel-cb-sess');
+
+      // The next .next() should resolve promptly (not wait for idle/budget)
+      for (;;) {
+        const result = await iter.next();
+        if (result.done) break;
+        events.push(result.value);
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+
+    const elapsed = Date.now() - startMs;
+
+    // Should throw AcpStreamIdleError (from cancel callback)
+    assert.ok(thrownError, 'Should throw after cancel');
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL', `Expected STREAM_IDLE_STALL, got ${thrownError.code}`);
+    assert.equal(
+      client.isSafeForSingleFlightReuse,
+      false,
+      'cancelled stdio prompt must mark a single-flight carrier unsafe for warm reuse',
+    );
+    assert.equal(client.isSessionSafeForReuse('cancel-cb-sess'), false);
+    assert.equal(client.isSessionSafeForReuse('unrelated-sess'), true);
+
+    // Should settle promptly — not wait for idle stall (5000ms) or budget (10000ms)
+    assert.ok(elapsed < 2000, `Cancel should settle within 2s, took ${elapsed}ms`);
+  });
+
+  it('#1186: short TTL regression — idleStallMs < idleWarningMs terminates at stall threshold (stdio)', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'short-ttl-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Never send events — zero-first-event with short TTL
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const startMs = Date.now();
+    let thrownError = null;
+    try {
+      // idleStallMs (100ms) < idleWarningMs (20_000ms default).
+      // Without Math.min fix, initial check schedules at 20_000ms — way too late.
+      // With fix, initial check schedules at Math.min(20_000, 100) = 100ms.
+      for await (const _event of client.promptStream('short-ttl-sess', 'hello', {
+        idleStallMs: 100,
+        // idleWarningMs defaults to 20_000
+        timeoutMs: 30_000,
+      })) {
+        // Should not receive any events
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+    const elapsed = Date.now() - startMs;
+
+    assert.ok(thrownError, 'Should throw on short-TTL zero-event stall');
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL', `Expected STREAM_IDLE_STALL, got ${thrownError.code}`);
+    assert.equal(thrownError.configuredIdleStallMs, 100, 'Error should carry configured 100ms threshold');
+    // Must terminate near 100ms, not at 20_000ms (the warning interval)
+    assert.ok(elapsed < 2000, `Should terminate near 100ms, took ${elapsed}ms`);
+  });
+
+  it('#1186: cancel settles pending sendRequest — no stale entries in pending map (stdio)', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'pending-check-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Emit one event, then go silent — never resolve prompt
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'pending-check-sess',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hello' } },
+            });
+          });
+          // Provider ignores cancel, never resolves prompt
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const iter = client.promptStream('pending-check-sess', 'test', {
+      idleWarningMs: 500,
+      idleStallMs: 5000,
+      timeoutMs: 10000,
+    });
+
+    // Get the first event
+    const first = await iter.next();
+    assert.ok(!first.done, 'Should receive first event');
+
+    // Before cancel: there should be a pending prompt request
+    assert.ok(
+      client.pendingRequestCount >= 1,
+      `Should have pending request before cancel, got ${client.pendingRequestCount}`,
+    );
+
+    // Cancel — should settle both the generator AND the pending request
+    client.cancelSession('pending-check-sess');
+
+    // Drain the iterator
+    try {
+      for (;;) {
+        const result = await iter.next();
+        if (result.done) break;
+      }
+    } catch (_err) {
+      // Expected — cancel throws AcpStreamIdleError
+    }
+
+    // After cancel: no stale entries should remain
+    assert.equal(
+      client.pendingRequestCount,
+      0,
+      `No pending requests should remain after cancel, got ${client.pendingRequestCount}`,
+    );
   });
 
   // ─── pendingTool: suppress stall during MCP tool execution ──
@@ -937,7 +1213,7 @@ describe('AcpClient', () => {
     try {
       for await (const event of client.promptStream('tool-sess', 'hello', {
         idleWarningMs: 30,
-        idleStallMs: 100,
+        idleStallMs: 500, // #1186: must exceed tool execution time (250ms) since ceiling now follows idleStallMs
         timeoutMs: 5000,
       })) {
         events.push(event);
@@ -1010,7 +1286,7 @@ describe('AcpClient', () => {
     try {
       for await (const event of client.promptStream('flat-sess', 'hello', {
         idleWarningMs: 30,
-        idleStallMs: 100,
+        idleStallMs: 500, // #1186: must exceed tool execution time (250ms) since ceiling now follows idleStallMs
         timeoutMs: 5000,
       })) {
         events.push(event);
@@ -1181,7 +1457,7 @@ describe('AcpClient', () => {
     try {
       for await (const event of client.promptStream('perm-stall-sess', 'hello', {
         idleWarningMs: 60,
-        idleStallMs: 200,
+        idleStallMs: 500, // #1186: must exceed tool execution time (250ms) since ceiling now follows idleStallMs
         timeoutMs: 5000,
       })) {
         events.push(event);
@@ -1247,7 +1523,7 @@ describe('AcpClient', () => {
     try {
       for await (const event of client.promptStream('thought-tool-sess', 'hello', {
         idleWarningMs: 30,
-        idleStallMs: 100,
+        idleStallMs: 500, // #1186: must exceed tool execution time (250ms) since ceiling now follows idleStallMs
         timeoutMs: 5000,
       })) {
         events.push(event);
@@ -1303,6 +1579,7 @@ describe('AcpClient', () => {
     await client.initialize();
     await client.newSession();
 
+    let thrownError = null;
     try {
       for await (const _ of client.promptStream('cancel-sess', 'hello', {
         idleWarningMs: 30,
@@ -1311,14 +1588,17 @@ describe('AcpClient', () => {
       })) {
         // drain
       }
-    } catch {
-      // expected AcpStreamIdleError
+    } catch (err) {
+      thrownError = err;
     }
 
     // P1: session/cancel MUST be sent when idle stall fires
     const cancelMsgs = capturedMessages.filter((m) => m.method === 'session/cancel');
     assert.equal(cancelMsgs.length, 1, `Expected 1 session/cancel, got ${cancelMsgs.length}`);
     assert.equal(cancelMsgs[0].params.sessionId, 'cancel-sess');
+    // #1186 P2: structured error carries configured threshold
+    assert.ok(thrownError, 'Should throw AcpStreamIdleError');
+    assert.equal(thrownError.configuredIdleStallMs, 80, 'Ordinary silence error carries configured threshold');
   });
 
   it('F149-P1: stall fires at ~idleStallMs total idle (not warning + stall)', async () => {
@@ -1380,5 +1660,260 @@ describe('AcpClient', () => {
       [50, 70],
       `Idle watchdog should schedule warning then remaining stall delay, got ${scheduledDelays.join(', ')}`,
     );
+  });
+
+  // ─── #1186: Tool execution ceiling follows configured idleStallMs ───
+
+  it('#1186: pendingTool terminates at configured idleStallMs, not hardcoded 180s', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const capturedMessages = [];
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        capturedMessages.push(msg);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'tool-ceil-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Send tool_call event, then go silent — never complete
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'tool-ceil-sess',
+              update: { sessionUpdate: 'tool_call', content: { type: 'text', text: 'slow_tool' } },
+            });
+          });
+          // Never send response — tool stays pending forever
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const events = [];
+    let thrownError = null;
+    try {
+      for await (const event of client.promptStream('tool-ceil-sess', 'hello', {
+        idleWarningMs: 20,
+        idleStallMs: 150, // Configured idle TTL — tool ceiling must follow this
+        timeoutMs: 5000, // High outer timeout — should NOT fire first
+      })) {
+        events.push(event);
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+
+    // With fix: should throw AcpStreamIdleError at ~150ms (configured idleStallMs)
+    // Without fix: TOOL_EXECUTION_CEILING_MS=180_000 would never fire; timeoutMs would fire instead
+    assert.ok(thrownError, 'Should throw an error on tool execution exceeding idleStallMs');
+    assert.match(
+      thrownError.message,
+      /[Ss]tream idle|STREAM_IDLE/,
+      `Expected AcpStreamIdleError, got: ${thrownError.message}`,
+    );
+    // #1186 P2: structured error must include configured threshold
+    assert.equal(thrownError.code, 'STREAM_IDLE_STALL');
+    assert.equal(thrownError.configuredIdleStallMs, 150, 'Error must carry the configured idleStallMs');
+
+    // Should have tool_wait_warning before stall
+    const toolWaits = events.filter((e) => e.update?.sessionUpdate === 'stream_tool_wait_warning');
+    assert.ok(toolWaits.length >= 1, 'Should emit tool_wait_warning before termination');
+
+    // Should have sent session/cancel
+    const cancelMsgs = capturedMessages.filter((m) => m.method === 'session/cancel');
+    assert.equal(cancelMsgs.length, 1, 'Should send session/cancel when tool ceiling exceeded');
+  });
+
+  it('#1186: pendingTool does NOT terminate before configured idleStallMs', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'tool-safe-sess' });
+        } else if (msg.method === 'session/prompt') {
+          // Send tool_call, wait a while, then complete successfully
+          setImmediate(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'tool-safe-sess',
+              update: { sessionUpdate: 'tool_call', content: { type: 'text', text: 'slow_tool' } },
+            });
+          });
+          // Complete AFTER warning but BEFORE idleStallMs
+          setTimeout(() => {
+            agentNotify(agentStdout, 'session/update', {
+              sessionId: 'tool-safe-sess',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'result' } },
+            });
+            agentRespond(agentStdout, msg.id, { stopReason: 'end_turn' });
+          }, 200); // 200ms: past warning (50ms) but before idleStallMs (400ms)
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const events = [];
+    let thrownError = null;
+    try {
+      for await (const event of client.promptStream('tool-safe-sess', 'hello', {
+        idleWarningMs: 50,
+        idleStallMs: 400, // Configured idle TTL — tool should survive within this
+        timeoutMs: 5000,
+      })) {
+        events.push(event);
+      }
+    } catch (err) {
+      thrownError = err;
+    }
+
+    // Tool completed within idleStallMs — should NOT throw
+    assert.equal(thrownError, null, `Should not terminate tool within idleStallMs, got: ${thrownError?.message}`);
+
+    // Should have real events
+    const toolEvents = events.filter((e) => e.update?.sessionUpdate === 'tool_call');
+    assert.equal(toolEvents.length, 1, 'Should have 1 tool_call event');
+    const textEvents = events.filter((e) => e.update?.sessionUpdate === 'agent_message_chunk');
+    assert.equal(textEvents.length, 1, 'Should have 1 text event after tool completes');
+  });
+
+  it('#1186: stdio request ceiling stays above a configured activity budget over one hour', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'long-ttl-sess' });
+        } else if (msg.method === 'session/prompt') {
+          agentRespond(agentStdout, msg.id, { stopReason: 'end_turn' });
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const idleStallMs = 2 * 60 * 60 * 1000;
+    const activityBudgetMs = idleStallMs + 60_000;
+    const expectedRequestCeilingMs = activityBudgetMs + 60_000;
+    const scheduledDelays = [];
+    const originalSetTimeout = globalThis.setTimeout;
+    const setTimeoutMock = mock.method(globalThis, 'setTimeout', (callback, delay, ...args) => {
+      scheduledDelays.push(delay);
+      return originalSetTimeout(callback, delay, ...args);
+    });
+
+    try {
+      for await (const _event of client.promptStream('long-ttl-sess', 'hello', {
+        idleStallMs,
+        timeoutMs: activityBudgetMs,
+      })) {
+        // No updates expected; the provider acknowledges immediately.
+      }
+    } finally {
+      setTimeoutMock.mock.restore();
+    }
+
+    assert.ok(
+      scheduledDelays.includes(expectedRequestCeilingMs),
+      `session/prompt request ceiling must be ${expectedRequestCeilingMs}ms, got ${scheduledDelays.join(', ')}`,
+    );
+    assert.equal(
+      scheduledDelays.includes(3_600_000),
+      false,
+      'the legacy one-hour request ceiling must not precede a valid two-hour idle policy',
+    );
+  });
+
+  it('#1186: stdio request ceiling resets after real prompt activity', async (t) => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    let promptRequestId = null;
+    let resolvePromptSeen;
+    const promptSeen = new Promise((resolve) => {
+      resolvePromptSeen = resolve;
+    });
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'sliding-ceiling-sess' });
+        } else if (msg.method === 'session/prompt') {
+          promptRequestId = msg.id;
+          resolvePromptSeen();
+          // Keep the provider request pending until the test has crossed the
+          // original-start request ceiling.
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+
+    const idleStallMs = 2 * 60 * 60 * 1000;
+    const activityBudgetMs = idleStallMs + 60_000;
+    const requestCeilingMs = activityBudgetMs + 60_000;
+    const eventAtMs = 90 * 60 * 1000;
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 0 });
+    t.after(() => t.mock.timers.reset());
+
+    const iterator = client.promptStream('sliding-ceiling-sess', 'hello', {
+      idleStallMs,
+      timeoutMs: activityBudgetMs,
+    });
+    const firstEventPromise = iterator.next();
+    await promptSeen;
+
+    t.mock.timers.tick(eventAtMs);
+    agentNotify(agentStdout, 'session/update', {
+      sessionId: 'sliding-ceiling-sess',
+      update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'still working' } },
+    });
+    const warningEvent = await firstEventPromise;
+    const activityEvent = await iterator.next();
+
+    t.mock.timers.tick(requestCeilingMs - eventAtMs + 1);
+    await Promise.resolve();
+    await Promise.resolve();
+    const pendingAtOriginalCeiling = client.pendingRequestCount;
+
+    agentRespond(agentStdout, promptRequestId, { stopReason: 'end_turn' });
+    await new Promise((resolve) => setImmediate(resolve));
+    const terminal = await (async () => {
+      try {
+        while (true) {
+          const next = await iterator.next();
+          if (next.done) return { value: next };
+        }
+      } catch (error) {
+        return { error };
+      }
+    })();
+
+    assert.equal(warningEvent.value?.update?.sessionUpdate, 'stream_idle_warning');
+    assert.equal(activityEvent.value?.update?.sessionUpdate, 'agent_thought_chunk');
+    assert.equal(
+      pendingAtOriginalCeiling,
+      1,
+      'real activity must rearm the request ceiling beyond its original-start deadline',
+    );
+    assert.equal(terminal.error, undefined);
+    assert.equal(terminal.value?.done, true);
   });
 });
