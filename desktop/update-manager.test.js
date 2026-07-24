@@ -588,11 +588,18 @@ describe('main process update-schedule lifecycle', () => {
     assert.match(mainSource, /QUIT_FOR_UPDATE_ARG\s*=\s*'--quit-for-update'/);
     assert.match(secondInstanceBody, /commandLine\.includes\(QUIT_FOR_UPDATE_ARG\)/);
     assert.match(secondInstanceBody, /quitApp\(\)/);
-    assert.match(installerSource, /ExecAsOriginalUser[\s\S]*--quit-for-update/);
+    assert.match(installerSource, /ExecAsOriginalUser[\s\S]*--quit-for-update[\s\S]*ewNoWait/);
     assert.doesNotMatch(installerSource, /CloseMainWindow/);
     assert.ok(
       installerSource.indexOf('--quit-for-update') < installerSource.indexOf('Stop-Process -Force'),
       'coordinated app quit must precede the bounded force-cleanup fallback',
     );
+  });
+
+  test('macOS application menu retains standard editing roles', () => {
+    const source = readFileSync(path.join(__dirname, 'main.js'), 'utf8');
+    for (const role of ['undo', 'redo', 'cut', 'copy', 'paste', 'selectAll']) {
+      assert.match(source, new RegExp(`role: '${role}'`), `macOS menu must preserve the ${role} role`);
+    }
   });
 });

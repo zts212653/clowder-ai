@@ -4,7 +4,6 @@
 const { app, BrowserWindow, Menu, Tray, dialog, net, shell, Notification } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
-const os = require('node:os');
 const { resolveProjectRootFromDir } = require('./project-root');
 const ServiceManager = require('./service-manager');
 const UpdateManager = require('./update-manager');
@@ -272,6 +271,18 @@ app.on('ready', async () => {
           { label: 'Check for Updates…', click: () => updater?.checkForUpdates({ manual: true }) },
           { type: 'separator' },
           { role: 'quit' },
+        ],
+      },
+      {
+        label: 'Edit',
+        submenu: [
+          { role: 'undo' },
+          { role: 'redo' },
+          { type: 'separator' },
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          { role: 'selectAll' },
         ],
       },
     ]);

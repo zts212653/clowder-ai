@@ -260,7 +260,7 @@ begin
   // WM_CLOSE is not sufficient because the tray close handler hides the window.
   ExecAsOriginalUser(
     ExpandConstant('{app}\desktop-dist\{#MyAppExeName}'),
-    '--quit-for-update', '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
+    '--quit-for-update', '', SW_HIDE, ewNoWait, ExitCode);
   // Wait only while install-directory processes remain, up to 15 seconds.
   Cmd := '$deadline=(Get-Date).AddSeconds(15); while ((Get-Date) -lt $deadline) { ' +
          '$running=@(Get-Process -ErrorAction SilentlyContinue | Where-Object { ' +
