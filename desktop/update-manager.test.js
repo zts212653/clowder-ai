@@ -102,6 +102,22 @@ function writeFakeInstaller(tempDir) {
   return ip;
 }
 
+function writeRetryJournal(tempDir) {
+  const updDir = dl.updatesDir(tempDir);
+  const installerPath = writeFakeInstaller(tempDir);
+  dl.writeJournal(updDir, {
+    targetVersion: fakeTarget.version,
+    assetId: fakeTarget.asset.id,
+    assetName: fakeTarget.asset.name,
+    digest: fakeTarget.asset.digest,
+    assetSize: fakeTarget.asset.size,
+    installerPath,
+    logPath: '',
+    startedAt: '2026-07-20T00:00:00Z',
+  });
+  return dl.readJournal(updDir);
+}
+
 // ── Windows launcher ──────────────────────────────────────────────────
 
 describe('Windows launcher (_spawnInstaller)', () => {
@@ -212,23 +228,39 @@ describe('journal preservation on launcher failure', () => {
 
   test('_retryInstall: launcher fail does NOT clear journal', async () => {
     const m = new UpdateManager(baseDeps(td, { spawn: mockSpawn({ closeCode: 1 }) }));
-    const updDir = dl.updatesDir(td);
-    const ip = path.join(updDir, 'Setup.exe');
-    mkdirSync(updDir, { recursive: true });
-    writeFileSync(ip, 'FAKE');
-    const h = createHash('sha256').update(Buffer.from('FAKE')).digest('hex');
-    dl.writeJournal(updDir, {
-      targetVersion: '0.12.0',
-      assetId: 1,
-      assetName: 'Setup.exe',
-      digest: `sha256:${h}`,
-      assetSize: 4,
-      installerPath: ip,
-      logPath: '',
-      startedAt: '2026-07-20T00:00:00Z',
-    });
-    await m._retryInstall(dl.readJournal(updDir));
-    assert.notEqual(dl.readJournal(updDir), null, 'journal must survive retry failure');
+    await m._retryInstall(writeRetryJournal(td));
+    assert.notEqual(dl.readJournal(dl.updatesDir(td)), null, 'journal must survive retry failure');
+  });
+
+  test('_retryInstall: launcher failure leaves startup service lifecycle to main', async () => {
+    let stopCalls = 0;
+    const m = new UpdateManager(
+      baseDeps(td, {
+        spawn: mockSpawn({ closeCode: 1 }),
+        stopServices: async () => {
+          stopCalls += 1;
+        },
+      }),
+    );
+    await m._retryInstall(writeRetryJournal(td));
+    assert.equal(stopCalls, 0, 'startup recovery must not null main-owned services before normal startup');
+  });
+
+  test('_retryInstall: launcher failure reports the error', async () => {
+    const dialogs = [];
+    const m = new UpdateManager(
+      baseDeps(td, {
+        spawn: mockSpawn({ closeCode: 1 }),
+        showDialog: async (options) => {
+          dialogs.push(options);
+          return 0;
+        },
+      }),
+    );
+    await m._retryInstall(writeRetryJournal(td));
+    assert.equal(dialogs.length, 1);
+    assert.equal(dialogs[0].title, 'Install Failed');
+    assert.equal(dialogs[0].message, 'Could not start the installer');
   });
 
   test('_retryInstall: launcher success calls quitApp', async () => {
@@ -241,23 +273,37 @@ describe('journal preservation on launcher failure', () => {
         },
       }),
     );
-    const updDir = dl.updatesDir(td);
-    const ip = path.join(updDir, 'Setup.exe');
-    mkdirSync(updDir, { recursive: true });
-    writeFileSync(ip, 'FAKE');
-    const h = createHash('sha256').update(Buffer.from('FAKE')).digest('hex');
-    dl.writeJournal(updDir, {
-      targetVersion: '0.12.0',
-      assetId: 1,
-      assetName: 'Setup.exe',
-      digest: `sha256:${h}`,
-      assetSize: 4,
-      installerPath: ip,
-      logPath: '',
-      startedAt: '2026-07-20T00:00:00Z',
-    });
-    await m._retryInstall(dl.readJournal(updDir));
+    await m._retryInstall(writeRetryJournal(td));
     assert.ok(quit, 'quitApp must be called on success');
+  });
+});
+
+describe('download failures', () => {
+  let td;
+  beforeEach(() => {
+    td = mkdtempSync(path.join(tmpdir(), 'mgr-download-'));
+    setupInstallType(td, 'installer');
+  });
+  afterEach(() => {
+    rmSync(td, { recursive: true, force: true });
+  });
+
+  test('transport failure offers Retry or Cancel', async () => {
+    const dialogs = [];
+    const m = new UpdateManager(
+      baseDeps(td, {
+        showDialog: async (options) => {
+          dialogs.push(options);
+          return 1;
+        },
+      }),
+    );
+    await m.downloadAndInstall(fakeTarget);
+    assert.equal(dialogs.length, 1);
+    assert.equal(dialogs[0].title, 'Download Failed');
+    assert.equal(dialogs[0].message, 'Could not download update');
+    assert.deepEqual(dialogs[0].buttons, ['Retry', 'Cancel']);
+    assert.match(dialogs[0].detail, /net\.request/);
   });
 });
 

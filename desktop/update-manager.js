@@ -200,8 +200,6 @@ class UpdateManager {
   /** Download, verify, then prompt install. */
   async downloadAndInstall(target) {
     if (this._downloading) return;
-    // P2: check install type BEFORE downloading — don't waste 600+ MB bandwidth
-    // for portable users who'll just get redirected to the release page.
     const installType = dl.getInstallType(this._d.app.getAppPath(), this._d.userDataRoot);
     if (this._d.platform === 'win32' && installType !== 'installer') {
       this._d.dbg('Non-installer — opening release page (skipping download)');
@@ -224,7 +222,6 @@ class UpdateManager {
     fs.mkdirSync(this._updatesDir, { recursive: true });
 
     try {
-      // P2: Reuse verified download from previous "Later" deferral (avoids 600MB re-download)
       let valid = await dl.verifyFileIntegrity(destPath, target.asset.digest, target.asset.size);
       if (valid) {
         dbg('Reusing previously verified download');
@@ -237,17 +234,7 @@ class UpdateManager {
             fs.unlinkSync(destPath);
           } catch {}
           setProgressBar(-1);
-          const r = await this._d.showDialog({
-            type: 'error',
-            buttons: ['Retry', 'Cancel'],
-            title: 'Download Failed',
-            message: 'Integrity verification failed',
-            detail: 'The file may be corrupted.',
-          });
-          if (r === 0) {
-            this._downloading = false;
-            await this.downloadAndInstall(target);
-          }
+          await this._offerDownloadRetry(target, 'Integrity verification failed', 'The file may be corrupted.');
           return;
         }
       }
@@ -256,11 +243,24 @@ class UpdateManager {
     } catch (err) {
       dbg(`Download failed: ${err.message}`);
       setProgressBar(-1);
+      await this._offerDownloadRetry(target, 'Could not download update', err.message);
     } finally {
       this._downloading = false;
     }
   }
 
+  async _offerDownloadRetry(target, message, detail) {
+    const retry = await this._d.showDialog({
+      type: 'error',
+      buttons: ['Retry', 'Cancel'],
+      title: 'Download Failed',
+      message,
+      detail,
+    });
+    if (retry !== 0) return;
+    this._downloading = false;
+    await this.downloadAndInstall(target);
+  }
   async _executeInstall(target, installerPath) {
     const { platform, dbg, showDialog, quitApp } = this._d;
     const isWin = platform === 'win32';
@@ -290,9 +290,7 @@ class UpdateManager {
       startedAt: new Date().toISOString(),
     });
     try {
-      // P1: Orderly service shutdown before installer — Windows Inno Setup PrepareToInstall
-      // force-kills all processes under {app}, so services must be stopped first to avoid
-      // corrupting Redis or interrupting persistent-store writes.
+      // Stop live services before Windows Inno Setup force-kills processes under {app}.
       if (isWin && this._d.stopServices) await this._d.stopServices();
       await this._spawnInstaller(installerPath, logPath || null);
       await quitApp();
@@ -300,14 +298,18 @@ class UpdateManager {
       dbg(`Installer launch failed: ${err.message}`);
       // Restore services so the UI isn't left running with no backend (UAC declined / spawn error)
       if (this._d.startServices) await this._d.startServices().catch(() => {});
-      await showDialog({
-        type: 'error',
-        buttons: ['OK'],
-        title: 'Install Failed',
-        message: 'Could not start the installer',
-        detail: err.message,
-      });
+      await this._showInstallFailure(err);
     }
+  }
+
+  _showInstallFailure(err) {
+    return this._d.showDialog({
+      type: 'error',
+      buttons: ['OK'],
+      title: 'Install Failed',
+      message: 'Could not start the installer',
+      detail: err.message,
+    });
   }
 
   async _retryInstall(journal) {
@@ -330,13 +332,12 @@ class UpdateManager {
       return;
     }
     try {
-      if (this._d.platform === 'win32' && this._d.stopServices) await this._d.stopServices();
       await this._spawnInstaller(journal.installerPath, journal.logPath || null);
       await this._d.quitApp();
       return 'quitting';
     } catch (err) {
       this._d.dbg(`Retry install failed: ${err.message}`);
-      // Don't startServices here — _retryInstall runs at startup before main.js startAll()
+      await this._showInstallFailure(err);
     }
   }
 
