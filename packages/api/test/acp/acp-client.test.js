@@ -4,6 +4,9 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, it, mock } from 'node:test';
 
@@ -104,6 +107,36 @@ describe('AcpClient', () => {
     assert.equal(result.protocolVersion, 1);
     assert.equal(result.agentInfo.name, 'test');
     assert.ok(client.isAlive);
+  });
+
+  it('isCwdIntact detects deletion and delete→recreate of the bootstrap cwd (#1203)', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        }
+      }
+    });
+
+    const cwd = mkdtempSync(join(tmpdir(), 'acp-cwd-identity-'));
+    client = new AcpClient({ command: 'fake', args: [], cwd, spawnFn: () => child });
+    await client.initialize();
+
+    assert.equal(client.isCwdIntact, true, 'untouched cwd must be intact');
+
+    rmSync(cwd, { recursive: true, force: true });
+    assert.equal(client.isCwdIntact, false, 'deleted cwd must be reported as lost');
+
+    // A later cold start recreates the same path — but the pooled child still
+    // holds the dead inode, so getcwd() inside it keeps failing. Existence is
+    // not enough; the directory identity must mismatch.
+    mkdirSync(cwd);
+    assert.equal(client.isCwdIntact, false, 'recreated cwd at same path is a different inode — still lost');
+
+    rmSync(cwd, { recursive: true, force: true });
   });
 
   it('newSession sends cwd and mcpServers', async () => {

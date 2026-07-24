@@ -19,6 +19,7 @@ import { createInterface, type Interface as ReadlineInterface } from 'node:readl
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import { resolveCliCommandOrBare } from '../../../../../../utils/cli-resolve.js';
 import { resolveWindowsSpawnPlan } from '../../../../../../utils/cli-spawn-win.js';
+import { AcpCwdIdentityTracker } from './acp-cwd-identity.js';
 import type {
   AcpAgentRequest,
   AcpContentBlock,
@@ -190,8 +191,12 @@ export class AcpClient {
   /** Client-level capacity signal — always captured regardless of listeners.
    *  Fallback for delayed stderr arriving after invoke listener is removed. */
   private _recentCapacitySignal: AcpCapacitySignal | null = null;
+  /** #1203: Directory identity captured at spawn. */
+  private readonly cwdIdentityTracker: AcpCwdIdentityTracker;
 
-  constructor(private readonly config: AcpClientConfig) {}
+  constructor(private readonly config: AcpClientConfig) {
+    this.cwdIdentityTracker = new AcpCwdIdentityTracker(this.config.cwd);
+  }
 
   // ── Lifecycle ────────────────────────────────────────────────
 
@@ -218,6 +223,9 @@ export class AcpClient {
     if (!this.config.spawnFn) {
       mkdirSync(this.config.cwd, { recursive: true, mode: 0o700 });
     }
+    // #1203: Capture the cwd's directory identity at spawn so isCwdIntact can
+    // detect delete→recreate at the same path, not just deletion.
+    this.cwdIdentityTracker.capture();
 
     const spawnOpts: SpawnOptions & { stdio: ['pipe', 'pipe', 'pipe'] } = {
       cwd: this.config.cwd,
@@ -792,6 +800,17 @@ export class AcpClient {
 
   get isAlive(): boolean {
     return this.child !== null && !this.child.killed && !this.closed && !this.exited;
+  }
+
+  /**
+   * #1203: False when the bootstrap cwd was deleted after spawn (e.g. by an
+   * external cleaner emptying the shared /tmp bootstrap root) — including the
+   * delete→recreate case where the path exists again but the child still holds
+   * the dead inode, so getcwd() keeps failing. The pool retires cwd-less
+   * processes and cold-starts fresh ones (initialize re-creates the cwd).
+   */
+  get isCwdIntact(): boolean {
+    return this.cwdIdentityTracker.isIntact;
   }
 
   get isSafeForSingleFlightReuse(): boolean {
