@@ -54,7 +54,35 @@ test('generateSortableId fails closed on six-digit sequence exhaustion', async (
   );
 
   // Rejection must not advance the sequence further.
-  assert.equal(getSortableIdSequence(), MAX_SEQUENCE + 1);
+  assert.equal(getSortableIdSequence(1), MAX_SEQUENCE + 1);
+});
+
+test('generateSortableId sequences are independent per timestamp', async () => {
+  const { generateSortableId, resetSortableIdSequence, getSortableIdSequence } = await import(
+    '../dist/domains/cats/services/stores/ports/MessageStore.js?sortable-id-per-ts'
+  );
+  resetSortableIdSequence();
+
+  const tsA = 1_000;
+  const tsB = 2_000;
+
+  // Advance tsA several times.
+  const a1 = generateSortableId(tsA);
+  const a2 = generateSortableId(tsA);
+  const a3 = generateSortableId(tsA);
+  assert.equal(a1.split('-')[1], '000000');
+  assert.equal(a2.split('-')[1], '000001');
+  assert.equal(a3.split('-')[1], '000002');
+  assert.equal(getSortableIdSequence(tsA), 3);
+
+  // tsB starts from the default (0), not from tsA's next sequence.
+  const b1 = generateSortableId(tsB);
+  assert.equal(b1.split('-')[1], '000000', 'independent timestamp starts from default sequence');
+  assert.equal(getSortableIdSequence(tsB), 1);
+
+  // Revisiting tsA continues from where it left off.
+  const a4 = generateSortableId(tsA);
+  assert.equal(a4.split('-')[1], '000003');
 });
 
 test('generateSortableId output length is bounded', async () => {
@@ -108,4 +136,30 @@ test('generateSortableId documents that sequence reset at the same timestamp reg
   const prefix = (id) => id.slice(0, id.lastIndexOf('-'));
   assert.ok(prefix(afterReset) < prefix(highSequence), 'reset sequence at same timestamp regresses order');
   assert.equal(prefix(beforeReset), prefix(afterReset), 'reset returns sequence to zero');
+});
+
+test('generateSortableId keeps per-timestamp sequence monotonic across clock rollback', async () => {
+  const { generateSortableId, resetSortableIdSequence } = await import(
+    '../dist/domains/cats/services/stores/ports/MessageStore.js?sortable-id-rollback'
+  );
+  resetSortableIdSequence();
+
+  // Scenario from D2 review: clock rolls back and forth within the admitted
+  // Date domain. Each timestamp must keep its own independent next-sequence.
+  const timestamps = [1_000, 1_001, 1_000, 1_002, 1_000];
+  const ids = timestamps.map((ts) => generateSortableId(ts));
+
+  // Expected per-timestamp sequences:
+  // 1000 -> 0, 1001 -> 0, 1000 -> 1, 1002 -> 0, 1000 -> 2
+  const expectedSequences = ['000000', '000000', '000001', '000000', '000002'];
+  for (let i = 0; i < ids.length; i++) {
+    assert.equal(ids[i].split('-')[1], expectedSequences[i], `sequence for append ${i}`);
+  }
+
+  // Same-timestamp prefixes must advance monotonically (the D2 cursor-order
+  // invariant). Cross-timestamp order is governed by the timestamp component
+  // and is intentionally not tied to append order when the clock rolls back.
+  const prefix = (id) => id.slice(0, id.lastIndexOf('-'));
+  assert.ok(prefix(ids[2]) > prefix(ids[0]), 'second 1000 append sorts after first 1000 append');
+  assert.ok(prefix(ids[4]) > prefix(ids[2]), 'third 1000 append sorts after second 1000 append');
 });

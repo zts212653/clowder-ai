@@ -384,33 +384,56 @@ export function assertValidStoredMessageTimestamp(timestamp: number): void {
 /**
  * Generate a bounded sortable message ID: fixed-width timestamp + six-digit
  * sequence + UUID suffix. Lexicographic order matches insertion order within
- * the admitted non-negative integral Date domain. The sequence is capped at
- * MAX_SEQUENCE; exhaustion throws a RangeError before width expansion or wrap.
+ * the admitted non-negative integral Date domain. The sequence is per-timestamp
+ * and capped at MAX_SEQUENCE; exhaustion throws a RangeError before width
+ * expansion or wrap.
  */
 /** Maximum sequence value that keeps the sortable-ID middle component at six decimal digits. */
 export const MAX_SEQUENCE = 999_999;
 
-let _seq = 0;
+/**
+ * Per-timestamp next-sequence state. A timestamp maps to the sequence value
+ * that the next call for that timestamp will use.
+ */
+const _sequenceByTimestamp = new Map<number, number>();
 
-/** Test-only hook: reset the module-global sequence counter. */
+/**
+ * Default starting sequence for timestamps not yet present in the map.
+ * Tests can reset this to simulate an exhausted or partially-advanced epoch.
+ */
+let _defaultSequence = 0;
+
+/**
+ * Test-only hook: reset sequence state. Clears per-timestamp memory and sets
+ * the default starting sequence for all timestamps.
+ */
 export function resetSortableIdSequence(value = 0): void {
-  _seq = value;
+  _sequenceByTimestamp.clear();
+  _defaultSequence = value;
 }
 
-/** Test-only hook: read the current module-global sequence counter. */
-export function getSortableIdSequence(): number {
-  return _seq;
+/**
+ * Test-only hook: read the current next-sequence for a timestamp.
+ * Returns the default starting sequence if the timestamp has no state.
+ */
+export function getSortableIdSequence(timestamp?: number): number {
+  if (timestamp === undefined) {
+    return _defaultSequence;
+  }
+  return _sequenceByTimestamp.get(timestamp) ?? _defaultSequence;
 }
 
 export function generateSortableId(timestamp: number): string {
   assertValidStoredMessageTimestamp(timestamp);
-  if (_seq > MAX_SEQUENCE) {
+  const seq = _sequenceByTimestamp.get(timestamp) ?? _defaultSequence;
+  if (seq > MAX_SEQUENCE) {
     throw new RangeError('sortable-ID sequence exhausted');
   }
   const ts = String(timestamp).padStart(16, '0');
-  const seq = String(_seq++).padStart(6, '0');
+  const seqStr = String(seq).padStart(6, '0');
   const suffix = randomUUID().slice(0, 8);
-  return `${ts}-${seq}-${suffix}`;
+  _sequenceByTimestamp.set(timestamp, seq + 1);
+  return `${ts}-${seqStr}-${suffix}`;
 }
 
 export class MessageStore {

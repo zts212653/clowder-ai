@@ -97,11 +97,13 @@ export class RedisMessageStore {
     assertValidAppendDeliveryMetadata(msg);
     assertValidStoredMessageTimestamp(msg.timestamp);
     const threadId = msg.threadId ?? DEFAULT_THREAD_ID;
-    const id = generateSortableId(msg.timestamp);
     const idempotencyIndexKey = msg.idempotencyKey
       ? MessageKeys.idempotency(msg.userId, threadId, msg.idempotencyKey)
       : null;
 
+    // Idempotency fast path must run before ID generation so that replaying
+    // the same key does not consume sequence space (P1: sequence exhaustion
+    // must not break idempotent replay).
     if (idempotencyIndexKey) {
       const existingId = await this.redis.get(idempotencyIndexKey);
       if (existingId) {
@@ -111,7 +113,11 @@ export class RedisMessageStore {
         }
         await this.redis.del(idempotencyIndexKey);
       }
+    }
 
+    const id = generateSortableId(msg.timestamp);
+
+    if (idempotencyIndexKey) {
       const claimed =
         this.ttlSeconds === null
           ? await this.redis.set(idempotencyIndexKey, id, 'NX')

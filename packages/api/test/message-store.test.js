@@ -267,6 +267,41 @@ describe('MessageStore', () => {
     );
   });
 
+  test('idempotent replay returns the original message without consuming extra sequence', async (t) => {
+    const { MessageStore, resetSortableIdSequence, getSortableIdSequence, MAX_SEQUENCE } = await import(
+      '../dist/domains/cats/services/stores/ports/MessageStore.js'
+    );
+    t.after(() => {
+      resetSortableIdSequence(0);
+    });
+    resetSortableIdSequence(MAX_SEQUENCE);
+    const store = new MessageStore();
+
+    // This call consumes the last valid six-digit sequence.
+    const first = store.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'idempotent',
+      mentions: [],
+      timestamp: 1,
+      idempotencyKey: 'idem-seq-exhaustion-memory',
+    });
+    assert.equal(getSortableIdSequence(1), MAX_SEQUENCE + 1);
+
+    // Replaying the same idempotency key must return the original message and
+    // must not throw sequence-exhausted, even though the generator is at its limit.
+    const replay = store.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'idempotent',
+      mentions: [],
+      timestamp: 1,
+      idempotencyKey: 'idem-seq-exhaustion-memory',
+    });
+    assert.equal(replay.id, first.id, 'idempotent replay must return the original ID');
+    assert.equal(getSortableIdSequence(1), MAX_SEQUENCE + 1, 'replay must not advance sequence');
+  });
+
   test('augmentStreamMetadata() enriches callback messages without replacing canonical content', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 

@@ -18,6 +18,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
   let generateSortableId;
   let collectAllThreadMessages;
   let createRedisClient;
+  let MessageKeys;
   let redis;
   let store;
   let connected = false;
@@ -33,6 +34,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     ));
     const redisModule = await import('@cat-cafe/shared/utils');
     createRedisClient = redisModule.createRedisClient;
+    ({ MessageKeys } = await import('../dist/domains/cats/services/stores/redis-keys/message-keys.js'));
 
     redis = createRedisClient({ url: REDIS_URL });
     // Connectivity check: skip all tests if Redis is unreachable
@@ -1078,10 +1080,13 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.ok(!queuedIds.includes(m1.id), 'should not find canceled message in queued scan');
   });
 
-  it('append() fails closed when the shared sortable-ID sequence is exhausted', async () => {
+  it('append() fails closed when the shared sortable-ID sequence is exhausted', async (t) => {
     const { resetSortableIdSequence, MAX_SEQUENCE } = await import(
       '../dist/domains/cats/services/stores/ports/MessageStore.js'
     );
+    t.after(() => {
+      resetSortableIdSequence(0);
+    });
     resetSortableIdSequence(MAX_SEQUENCE);
 
     const lastValid = await store.append({
@@ -1109,8 +1114,11 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.ok(!timelineIds.some((id) => id.includes('-1000000-')), 'no seven-digit seq ID persisted');
   });
 
-  it('legacy and new six-digit sortable IDs order consistently in thread pagination', async () => {
+  it('legacy and new six-digit sortable IDs order consistently in thread pagination', async (t) => {
     const { resetSortableIdSequence } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    t.after(() => {
+      resetSortableIdSequence(0);
+    });
     resetSortableIdSequence(0);
 
     // Use timestamps around now so the default 60s TTL does not prune them.
@@ -1143,8 +1151,59 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       'mixed-epoch IDs must order by timestamp component',
     );
 
-    // Expired cursor recovery using the newer ID must not return the newer ID itself.
-    const afterNewer = await store.getByThreadAfter(threadId, newer.id);
-    assert.deepEqual(afterNewer, []);
+    // Expired-cursor recovery: remove the newer member from the thread ZSET so
+    // getByThreadAfter must fall back to lexical comparison rather than score.
+    await redis.zrem(MessageKeys.thread(threadId), newer.id);
+
+    // Append a still-later message; the expired cursor should recover it.
+    const afterExpiry = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'after expiry',
+      mentions: [],
+      timestamp: baseTs + 2,
+      threadId,
+    });
+
+    const afterNewer = await store.getByThreadAfter(threadId, newer.id, 10);
+    assert.deepEqual(
+      afterNewer.map((m) => m.id),
+      [afterExpiry.id],
+      'expired cursor must recover later mixed-epoch messages lexically after the cursor',
+    );
+  });
+
+  it('idempotent replay returns the original message without consuming extra sequence', async (t) => {
+    const { resetSortableIdSequence, getSortableIdSequence, MAX_SEQUENCE } = await import(
+      '../dist/domains/cats/services/stores/ports/MessageStore.js'
+    );
+    t.after(() => {
+      resetSortableIdSequence(0);
+    });
+    resetSortableIdSequence(MAX_SEQUENCE);
+
+    // This call consumes the last valid six-digit sequence.
+    const first = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'idempotent',
+      mentions: [],
+      timestamp: 1,
+      idempotencyKey: 'idem-seq-exhaustion',
+    });
+    assert.equal(getSortableIdSequence(1), MAX_SEQUENCE + 1);
+
+    // Replaying the same idempotency key must return the original message and
+    // must not throw sequence-exhausted, even though the generator is at its limit.
+    const replay = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'idempotent',
+      mentions: [],
+      timestamp: 1,
+      idempotencyKey: 'idem-seq-exhaustion',
+    });
+    assert.equal(replay.id, first.id, 'idempotent replay must return the original ID');
+    assert.equal(getSortableIdSequence(1), MAX_SEQUENCE + 1, 'replay must not advance sequence');
   });
 });
