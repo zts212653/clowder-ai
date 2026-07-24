@@ -14,6 +14,7 @@ import { afterEach, describe, it, mock } from 'node:test';
 const { AcpHttpStreamClient } = await import(
   '../../dist/domains/cats/services/agents/providers/acp/AcpHttpStreamClient.js'
 );
+const { AcpProviderBusyError } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpClient.js');
 
 const INIT_RESULT = {
   protocolVersion: 1,
@@ -1132,5 +1133,62 @@ describe('AcpHttpStreamClient', () => {
     assert.equal(client.isCwdIntact, false, 'recreated cwd at same path is a different inode — still lost');
 
     rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('#1211: HTTP promptStream turns -32600 active-turn error into AcpProviderBusyError and marks carrier unsafe', async () => {
+    server = await startJsonRpcServer((message, res) => {
+      if (message.method === 'initialize') {
+        return { jsonrpc: '2.0', id: message.id, result: INIT_RESULT };
+      }
+      if (message.method === 'session/new') {
+        return { jsonrpc: '2.0', id: message.id, result: { sessionId: 'http-busy' } };
+      }
+      if (message.method === 'session/prompt') {
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+        res.write(
+          `${JSON.stringify({
+            jsonrpc: '2.0',
+            id: message.id,
+            error: {
+              code: -32600,
+              message: 'Invalid request: Cannot launch a new turn while another turn (ID 6) is active',
+            },
+          })}\n`,
+        );
+        res.end();
+        return undefined;
+      }
+      return { jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'not found' } };
+    });
+    const { child, agentStdout } = createMockChild();
+    const port = serverPort(server);
+
+    client = new AcpHttpStreamClient({
+      command: 'fake-http-acp',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => {
+        setImmediate(() => agentStdout.write(`Listening on port ${port}\n`));
+        return child;
+      },
+      portDiscoveryTimeoutMs: 500,
+    });
+
+    await client.initialize();
+    const session = await client.newSession();
+
+    let caught = null;
+    try {
+      for await (const _event of client.promptStream(session.sessionId, 'hello')) {
+        // no events expected
+      }
+    } catch (err) {
+      caught = err;
+    }
+
+    assert.ok(caught instanceof AcpProviderBusyError, `expected AcpProviderBusyError, got ${caught}`);
+    assert.equal(caught.sessionId, 'http-busy');
+    assert.equal(client.isSafeForSingleFlightReuse, false, 'HTTP carrier must be marked unsafe for reuse');
+    assert.equal(client.isSessionSafeForReuse('http-busy'), false);
   });
 });

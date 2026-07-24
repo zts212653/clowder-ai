@@ -144,6 +144,27 @@ export class AcpStreamIdleError extends Error {
     this.name = 'AcpStreamIdleError';
   }
 }
+/** #1211: Provider signalled that the requested session still has an active turn
+ *  and cannot accept a new prompt. Carries the original protocol error so callers
+ *  can log the structured reason. */
+export class AcpProviderBusyError extends Error {
+  public readonly code = 'PROVIDER_BUSY';
+  constructor(
+    public readonly sessionId: string,
+    message: string,
+    public readonly underlying?: Error,
+  ) {
+    super(message);
+    this.name = 'AcpProviderBusyError';
+  }
+}
+
+/** Pattern for Kimi/ACP providers reporting an overlapping turn. */
+const PROVIDER_BUSY_RE = /Cannot launch a new turn|another turn.*active|turn\.agent_busy/i;
+
+export function isAcpProviderBusyProtocolError(err: Error): err is AcpProtocolError {
+  return err instanceof AcpProtocolError && err.code === -32600 && PROVIDER_BUSY_RE.test(err.message);
+}
 
 // ─── Client ─────────────────────���──────────────────────────���───
 
@@ -692,6 +713,14 @@ export class AcpClient {
         // generic cancellation rejection while queued events are still draining.
         if (done && promptError) return;
         if (err instanceof AcpTimeoutError) this.unquiescedSessionIds.add(sessionId);
+        // #1211: Kimi/ACP providers may reject session/prompt with -32600 because an
+        // earlier turn is still active. Convert this structured error into a dedicated
+        // exception and mark the carrier unsafe for single-flight reuse.
+        if (isAcpProviderBusyProtocolError(err)) {
+          this.unquiescedSessionIds.add(sessionId);
+          promptError = new AcpProviderBusyError(sessionId, err.message, err);
+          return;
+        }
         promptError = err;
       })
       .finally(() => {

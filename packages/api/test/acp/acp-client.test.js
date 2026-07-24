@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, it, mock } from 'node:test';
 
-const { AcpClient, AcpProtocolError, buildAcpSpawnLogFields } = await import(
+const { AcpClient, AcpProtocolError, AcpProviderBusyError, buildAcpSpawnLogFields } = await import(
   '../../dist/domains/cats/services/agents/providers/acp/AcpClient.js'
 );
 
@@ -1915,5 +1915,58 @@ describe('AcpClient', () => {
     );
     assert.equal(terminal.error, undefined);
     assert.equal(terminal.value?.done, true);
+  });
+
+  it('#1211: promptStream turns -32600 active-turn error into AcpProviderBusyError and marks carrier unsafe', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/new') {
+          agentRespond(agentStdout, msg.id, { sessionId: 'busy-sess' });
+        } else if (msg.method === 'session/prompt') {
+          setImmediate(() =>
+            agentStdout.write(
+              JSON.stringify({
+                jsonrpc: '2.0',
+                id: msg.id,
+                error: {
+                  code: -32600,
+                  message: 'Invalid request: Cannot launch a new turn while another turn (ID 6) is active',
+                },
+              }) + '\n',
+            ),
+          );
+        }
+      }
+    });
+
+    client = new AcpClient({
+      command: 'fake',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => child,
+    });
+
+    await client.initialize();
+    await client.newSession();
+
+    let caught = null;
+    try {
+      for await (const _event of client.promptStream('busy-sess', 'hello')) {
+        // no events expected
+      }
+    } catch (err) {
+      caught = err;
+    }
+
+    assert.ok(caught instanceof AcpProviderBusyError, `expected AcpProviderBusyError, got ${caught}`);
+    assert.equal(caught.sessionId, 'busy-sess');
+    assert.ok(caught.underlying instanceof AcpProtocolError);
+    assert.equal(client.isSafeForSingleFlightReuse, false, 'carrier must be marked unsafe for reuse');
+    assert.equal(client.isSessionSafeForReuse('busy-sess'), false);
   });
 });

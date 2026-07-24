@@ -26,6 +26,7 @@ import {
   ACP_PROMPT_TIMEOUT_MARGIN_MS,
   type AcpCapacitySignal,
   AcpProtocolError,
+  AcpProviderBusyError,
   AcpStreamIdleError,
   AcpTimeoutError,
 } from './AcpClient.js';
@@ -222,11 +223,22 @@ export class AcpAgentService implements AgentService {
 
     let promptStreamStartedAt = 0;
     let eventCount = 0;
+    // #1211: Provider-busy recovery is allowed exactly once per invoke, and only
+    // when the failing prompt produced zero real events. Prevents infinite retry
+    // loops when the provider repeatedly reports an active turn.
+    let busyRecoveryAttempted = false;
     // Circuit breaker: compaction auto-continue loop detection.
     // After scratchpad is detected by the transformer, count events still arriving.
     // If they exceed the threshold, OpenCode is in a compaction → auto-continue loop.
     let scratchpadSuppressedEvents = 0;
     const MAX_SCRATCHPAD_SUPPRESSED_EVENTS = 50;
+
+    // #1091 / #1211: shared fresh-session retry body. Declared here so the catch
+    // block can reach it; the actual closure is assigned inside the try block once
+    // buildSessionConfig and the active client are available.
+    let runFreshSessionRetry:
+      | ((reasonLabel: string, fallbackSystemPrompt?: string) => AsyncGenerator<AgentMessage, number>)
+      | undefined;
 
     try {
       // #712 P1-1: resolve MCP servers at invoke time from capabilities.json
@@ -290,6 +302,93 @@ export class AcpAgentService implements AgentService {
           mcpServers: materializeSessionMcpServers(invokeServers, sessionCallbackEnv),
           envDiag: callbackEnvDiagnostic(sessionCallbackEnv),
         };
+      };
+      // #1091 / #1211: shared fresh-session retry body. Caller decides when to use it.
+      const self = this;
+      runFreshSessionRetry = async function* (
+        reasonLabel: string,
+        fallbackSystemPrompt?: string,
+      ): AsyncGenerator<AgentMessage, number> {
+        const retryCreds = prepareSessionCredentialFile(options?.callbackEnv);
+        const retryConfig = buildSessionConfig(retryCreds);
+        const freshSession = await client.newSession(cwd, retryConfig.mcpServers);
+        const freshSessionId = freshSession.sessionId;
+        self.pool.rememberSession?.(self.poolKey, freshSessionId, lease);
+        if (retryCreds) bindSessionCredentialFile(freshSessionId, retryCreds.path);
+        metadata.sessionId = freshSessionId;
+        sessionId = freshSessionId;
+
+        // Abort may have fired during the fresh newSession (mirrors Window 2)
+        if (options?.signal?.aborted) {
+          yield { type: 'done', catId: self.catId, metadata, timestamp: Date.now() };
+          return 0;
+        }
+
+        // Apply session model if configured
+        const sessionModel = self.sessionModel;
+        const modelConfig = sessionModel ? resolveSessionModelConfigOption(freshSession, sessionModel) : null;
+        if (modelConfig && sessionModel) {
+          try {
+            await client.setSessionConfigOption(freshSessionId, modelConfig.configId, sessionModel);
+          } catch {
+            /* best-effort — continue with agent default */
+          }
+        }
+
+        // Announce the replacement session so the invocation layer rebinds the
+        // session chain to the fresh sessionId.
+        yield {
+          type: 'session_init',
+          catId: self.catId,
+          sessionId: freshSessionId,
+          ephemeralSession: false,
+          metadata,
+          timestamp: Date.now(),
+        };
+
+        // Consumer may abort during the yield above (mirrors Window 3)
+        if (options?.signal?.aborted) {
+          yield { type: 'done', catId: self.catId, metadata, timestamp: Date.now() };
+          return 0;
+        }
+
+        // Build effective prompt with system prompt (fresh session has no memory)
+        const retryPrompt = options?.systemPrompt
+          ? `${options.systemPrompt}\n\n${prompt}`
+          : fallbackSystemPrompt
+            ? `${fallbackSystemPrompt}\n\n${prompt}`
+            : prompt;
+
+        const retryState = createAcpSessionState();
+        let retryEventCount = 0;
+        log.info({ ...ctx, sessionId: freshSessionId }, `${reasonLabel}: retry promptStream on fresh session`);
+        promptPhase = 'active_unacknowledged';
+        for await (const event of client.promptStream(freshSessionId, retryPrompt, promptStreamOpts)) {
+          // Skip synthetic events (capacity/idle/tool-wait warnings)
+          if (event.update?.sessionUpdate === 'provider_capacity_signal') continue;
+          if (event.update?.sessionUpdate === 'stream_idle_warning') continue;
+          if (event.update?.sessionUpdate === 'stream_tool_wait_warning') continue;
+
+          retryEventCount++;
+          const result = transformAcpEvent(event, self.catId, metadata, retryState);
+          if (!result) continue;
+          if (Array.isArray(result)) {
+            for (const msg of result) yield msg;
+          } else {
+            yield result;
+          }
+        }
+        markPromptAcknowledged();
+        log.info(
+          { ...ctx, sessionId: freshSessionId, retryEventCount },
+          `${reasonLabel}: retry promptStream completed`,
+        );
+
+        // Flush trailing thinking from retry
+        const retryThinking = flushAcpThinking(retryState, self.catId, metadata);
+        if (retryThinking) yield retryThinking;
+        client.clearRecentCapacitySignal();
+        return retryEventCount;
       };
       let sessionMcpServers: AcpMcpServer[] = invokeServers;
       let envDiag = callbackEnvDiagnostic(options?.callbackEnv);
@@ -529,91 +628,10 @@ export class AcpAgentService implements AgentService {
           { ...ctx, sessionId, promptElapsedMs },
           '#1091: ACP resumed session produced zero events in <3s — retrying with fresh session',
         );
-        // Create fresh session and retry promptStream once (not recursive — single retry)
-        promptPhase = 'not_started';
         try {
-          const retryCreds = prepareSessionCredentialFile(options?.callbackEnv);
-          const retryConfig = buildSessionConfig(retryCreds);
-          const freshSession = await client.newSession(cwd, retryConfig.mcpServers);
-          const freshSessionId = freshSession.sessionId;
-          this.pool.rememberSession?.(this.poolKey, freshSessionId, lease);
-          // Replacement retry is a NEW ACP session, so it must get a fresh
-          // credential file path. Reusing the failed resume path would let the
-          // dead session read future replacement-session credentials.
-          if (retryCreds) bindSessionCredentialFile(freshSessionId, retryCreds.path);
-          metadata.sessionId = freshSessionId;
-          // Repoint the outer sessionId so the abort handler cancels the fresh
-          // session, not the dead resumed one.
-          sessionId = freshSessionId;
-
-          // Abort may have fired during the fresh newSession (mirrors Window 2)
-          if (options?.signal?.aborted) {
-            yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
-            return;
+          for await (const msg of runFreshSessionRetry!('#1091', options?.resumeFallbackSystemPrompt)) {
+            yield msg;
           }
-
-          // Apply session model if configured
-          const sessionModel = this.sessionModel;
-          const modelConfig = sessionModel ? resolveSessionModelConfigOption(freshSession, sessionModel) : null;
-          if (modelConfig && sessionModel) {
-            try {
-              await client.setSessionConfigOption(freshSessionId, modelConfig.configId, sessionModel);
-            } catch {
-              /* best-effort — continue with agent default */
-            }
-          }
-
-          // Announce the replacement session so the invocation layer rebinds the
-          // session chain to the fresh sessionId. Without this, the next resume
-          // would target the dead session and hit the zero-event path again.
-          yield {
-            type: 'session_init',
-            catId: this.catId,
-            sessionId: freshSessionId,
-            ephemeralSession: false,
-            metadata,
-            timestamp: Date.now(),
-          };
-
-          // Consumer may abort during the yield above (mirrors Window 3)
-          if (options?.signal?.aborted) {
-            yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
-            return;
-          }
-
-          // Build effective prompt with system prompt (fresh session has no memory)
-          const retryPrompt = options?.systemPrompt
-            ? `${options.systemPrompt}\n\n${prompt}`
-            : options?.resumeFallbackSystemPrompt
-              ? `${options.resumeFallbackSystemPrompt}\n\n${prompt}`
-              : prompt;
-
-          const retryState = createAcpSessionState();
-          let retryEventCount = 0;
-          log.info({ ...ctx, sessionId: freshSessionId }, '#1091: retry promptStream on fresh session');
-          promptPhase = 'active_unacknowledged';
-          for await (const event of client.promptStream(freshSessionId, retryPrompt, promptStreamOpts)) {
-            // Skip synthetic events (capacity/idle/tool-wait warnings)
-            if (event.update?.sessionUpdate === 'provider_capacity_signal') continue;
-            if (event.update?.sessionUpdate === 'stream_idle_warning') continue;
-            if (event.update?.sessionUpdate === 'stream_tool_wait_warning') continue;
-
-            retryEventCount++;
-            const result = transformAcpEvent(event, this.catId, metadata, retryState);
-            if (!result) continue;
-            if (Array.isArray(result)) {
-              for (const msg of result) yield msg;
-            } else {
-              yield result;
-            }
-          }
-          markPromptAcknowledged();
-          log.info({ ...ctx, sessionId: freshSessionId, retryEventCount }, '#1091: retry promptStream completed');
-
-          // Flush trailing thinking from retry
-          const retryThinking = flushAcpThinking(retryState, this.catId, metadata);
-          if (retryThinking) yield retryThinking;
-          client.clearRecentCapacitySignal();
           yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
           return; // Exit — retry path handled completion
         } catch (retryErr) {
@@ -645,6 +663,44 @@ export class AcpAgentService implements AgentService {
     } catch (err) {
       if (sessionId && (err instanceof AcpTimeoutError || err instanceof AcpStreamIdleError)) {
         sealActivePromptSession(sessionId);
+      }
+      // #1211: Provider reports an active turn on the session. Cancel the unsafe
+      // prompt, seal the session, and retire the carrier. If we have not produced
+      // any real events yet, attempt exactly one fresh-session recovery.
+      if (err instanceof AcpProviderBusyError) {
+        if (sessionId) {
+          cancelActivePromptSession(sessionId);
+        }
+        if (eventCount === 0 && !busyRecoveryAttempted) {
+          busyRecoveryAttempted = true;
+          log.warn(
+            { ...ctx, sessionId, err: err.message },
+            '#1211: provider busy with zero events — attempting fresh session recovery',
+          );
+          try {
+            for await (const msg of runFreshSessionRetry!('#1211', options?.resumeFallbackSystemPrompt)) {
+              yield msg;
+            }
+            yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+            return; // Recovery succeeded
+          } catch (retryErr) {
+            if (sessionId && (retryErr instanceof AcpTimeoutError || retryErr instanceof AcpStreamIdleError)) {
+              sealActivePromptSession(sessionId);
+            }
+            const retryErrMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+            log.error({ ...ctx, sessionId, err: retryErrMsg }, '#1211: fresh session recovery also failed');
+            yield {
+              type: 'error',
+              catId: this.catId,
+              error: `provider_busy_recovery_failed: ${retryErrMsg}`,
+              errorCode: 'prompt_failure',
+              metadata,
+              timestamp: Date.now(),
+            };
+            yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+            return;
+          }
+        }
       }
       const waitedMs = promptStreamStartedAt ? Date.now() - promptStreamStartedAt : 0;
       // P1: stderr may arrive after timeout — give a grace window for late capacity signals

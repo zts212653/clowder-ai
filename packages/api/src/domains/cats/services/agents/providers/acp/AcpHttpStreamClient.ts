@@ -30,9 +30,11 @@ import {
   type AcpCapacitySignal,
   type AcpClientConfig,
   AcpProtocolError,
+  AcpProviderBusyError,
   AcpStreamIdleError,
   AcpTimeoutError,
   buildAcpSpawnLogFields,
+  isAcpProviderBusyProtocolError,
 } from './AcpClient.js';
 import { AcpCwdIdentityTracker } from './acp-cwd-identity.js';
 import type {
@@ -451,7 +453,13 @@ export class AcpHttpStreamClient {
               finalResponseReceived = true;
               const resp = msg as unknown as AcpResponse;
               if (resp.error) {
-                promptError = new AcpProtocolError(resp.error.code, resp.error.message, resp.error.data);
+                const protoErr = new AcpProtocolError(resp.error.code, resp.error.message, resp.error.data);
+                if (isAcpProviderBusyProtocolError(protoErr)) {
+                  this.unquiescedSessionIds.add(sessionId);
+                  promptError = new AcpProviderBusyError(sessionId, protoErr.message, protoErr);
+                } else {
+                  promptError = protoErr;
+                }
               } else {
                 const result = resp.result as unknown as AcpPromptResult;
                 stopReason = result.stopReason;
@@ -488,7 +496,13 @@ export class AcpHttpStreamClient {
               finalResponseReceived = true;
               const resp = msg as unknown as AcpResponse;
               if (resp.error) {
-                promptError = new AcpProtocolError(resp.error.code, resp.error.message, resp.error.data);
+                const protoErr = new AcpProtocolError(resp.error.code, resp.error.message, resp.error.data);
+                if (isAcpProviderBusyProtocolError(protoErr)) {
+                  this.unquiescedSessionIds.add(sessionId);
+                  promptError = new AcpProviderBusyError(sessionId, protoErr.message, protoErr);
+                } else {
+                  promptError = protoErr;
+                }
               } else {
                 const result = resp.result as unknown as AcpPromptResult;
                 stopReason = result.stopReason;
