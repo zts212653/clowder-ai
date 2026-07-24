@@ -465,6 +465,42 @@ test(
 );
 
 test(
+  'resolveCliCommand prefers official Kimi Code binary over legacy PATH hit (Unix)',
+  { skip: process.platform === 'win32' && 'Unix-only (Kimi Code PATH priority)' },
+  () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'cli-resolve-kimi-code-path-priority-'));
+    const pathBin = join(tempRoot, 'path-bin');
+    const officialBin = join(tempRoot, '.kimi-code', 'bin');
+    mkdirSync(pathBin, { recursive: true });
+    mkdirSync(officialBin, { recursive: true });
+
+    const pathKimi = join(pathBin, 'kimi');
+    const officialKimi = join(officialBin, 'kimi');
+    writeFileSync(pathKimi, '#!/bin/sh\necho path-legacy\n', { mode: 0o755 });
+    writeFileSync(officialKimi, '#!/bin/sh\necho official\n', { mode: 0o755 });
+
+    const originalHome = process.env.HOME;
+    const originalPath = process.env.PATH;
+    try {
+      process.env.HOME = tempRoot;
+      // PATH contains a legacy `kimi`; official layout is also present.
+      process.env.PATH = pathBin;
+      invalidateCliCommand('kimi');
+
+      const result = resolveCliCommand('kimi');
+      assert.equal(result, officialKimi, 'should prefer official ~/.kimi-code/bin/kimi over legacy PATH hit');
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+      invalidateCliCommand('kimi');
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   'resolveCliCommand does not search HOME/.kimi-code/bin for non-kimi commands (Unix)',
   { skip: process.platform === 'win32' && 'Unix-only (command-specific fallback isolation)' },
   () => {

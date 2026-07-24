@@ -111,6 +111,23 @@ export function resolveCliCommand(command: string, opts?: { skipPathProbe?: bool
     resolvedCache.delete(command);
   }
 
+  // #1173: For the bare `kimi` command, probe the official Kimi Code layout
+  // before PATH. The official installer lays down `~/.kimi-code/bin/kimi`,
+  // while legacy `kimi-cli` users may still have a bare `kimi` on PATH that
+  // does not support ACP. Treating `kimi` as the official binary name keeps
+  // ACP `kimi acp` from silently selecting the legacy PATH hit. Users who want
+  // to force a specific PATH binary can still use a distinct command name.
+  if (!IS_WINDOWS && command === 'kimi') {
+    const home = process.env.HOME ?? '';
+    if (home) {
+      const kimiCodeCandidate = resolve(home, KIMI_CODE_UNIX_DIR, command);
+      if (existsSync(kimiCodeCandidate)) {
+        resolvedCache.set(command, kimiCodeCandidate);
+        return kimiCodeCandidate;
+      }
+    }
+  }
+
   // Fast path: already in PATH
   // #894: caller can skip this when PATH was already probed (e.g. client-detection
   // does its own `command -v`; repeating `which` is redundant + slower).
@@ -160,18 +177,6 @@ export function resolveCliCommand(command: string, opts?: { skipPathProbe?: bool
   } else {
     const home = process.env.HOME ?? '';
     if (home) {
-      // #1173: Kimi Code's official installer lays down `~/.kimi-code/bin/kimi`.
-      // Probe this command-specific directory first so ACP `kimi acp` does not
-      // silently fall back to a legacy `~/.local/bin/kimi` that lacks ACP support.
-      // PATH still wins if the caller explicitly put a `kimi` on PATH — this only
-      // governs the fallback search order.
-      if (command === 'kimi') {
-        const kimiCodeCandidate = resolve(home, KIMI_CODE_UNIX_DIR, command);
-        if (existsSync(kimiCodeCandidate)) {
-          resolvedCache.set(command, kimiCodeCandidate);
-          return kimiCodeCandidate;
-        }
-      }
       // Static well-known directories (relative to $HOME)
       for (const dir of UNIX_SEARCH_DIRS) {
         const candidate = resolve(home, dir, command);
