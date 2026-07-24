@@ -55,7 +55,8 @@ class UpdateManager {
       const r = await this._retryInstall(journal);
       if (r === 'quitting') return 'quitting';
     } else if (btn === 1) openPath(this._updatesDir);
-    else if (btn === 2) openPath(journal?.logPath || this._updatesDir);
+    else if (btn === 2)
+      openPath(this._d.platform === 'win32' ? path.join(this._updatesDir, 'install.log') : this._updatesDir);
     else {
       dl.clearJournal(this._updatesDir);
       dbg('User cleared failed journal');
@@ -273,7 +274,6 @@ class UpdateManager {
       digest: target.asset.digest,
       assetSize: target.asset.size,
       installerPath,
-      logPath,
       startedAt: new Date().toISOString(),
     });
     try {
@@ -291,7 +291,6 @@ class UpdateManager {
       await this._showInstallFailure(err);
     }
   }
-
   _showInstallFailure(err) {
     return this._d.showDialog({
       type: 'error',
@@ -301,20 +300,8 @@ class UpdateManager {
       detail: err.message,
     });
   }
-
   async _retryInstall(journal) {
-    if (!journal?.installerPath) return;
-    if (!fs.existsSync(journal.installerPath)) {
-      await this._d.showDialog({
-        type: 'error',
-        buttons: ['OK'],
-        title: 'Cannot Retry',
-        message: 'Installer file not found',
-        detail: `Expected: ${journal.installerPath}`,
-      });
-      dl.clearJournal(this._updatesDir);
-      return;
-    }
+    if (!journal?.targetVersion) return;
     const releases = await fetchReleases(this._d.net, this._d.app.getVersion());
     const target = checker.selectUpdateTarget(
       releases?.data ?? [],
@@ -323,17 +310,30 @@ class UpdateManager {
       this._d.arch,
       { requiredVersion: journal.targetVersion },
     );
-    if (target?.asset.name !== path.basename(journal.installerPath)) {
+    if (!target) {
       this._d.dbg('Retry install metadata could not be authenticated');
       await this._showInstallFailure(new Error('Could not verify installer release metadata'));
       return;
     }
-    if (!(await dl.verifyFileIntegrity(journal.installerPath, target.asset.digest, target.asset.size))) {
+    const installerPath = path.join(this._updatesDir, target.asset.name);
+    if (!fs.existsSync(installerPath)) {
+      await this._d.showDialog({
+        type: 'error',
+        buttons: ['OK'],
+        title: 'Cannot Retry',
+        message: 'Installer file not found',
+        detail: `Expected: ${installerPath}`,
+      });
+      dl.clearJournal(this._updatesDir);
+      return;
+    }
+    if (!(await dl.verifyFileIntegrity(installerPath, target.asset.digest, target.asset.size))) {
       dl.clearJournal(this._updatesDir);
       return;
     }
     try {
-      await this._spawnInstaller(journal.installerPath, journal.logPath || null);
+      const logPath = this._d.platform === 'win32' ? path.join(this._updatesDir, 'install.log') : null;
+      await this._spawnInstaller(installerPath, logPath);
       await this._d.quitApp();
       return 'quitting';
     } catch (err) {

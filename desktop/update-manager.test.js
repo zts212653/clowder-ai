@@ -207,7 +207,7 @@ describe('Windows launcher (_spawnInstaller)', () => {
     await assert.rejects(() => m._spawnInstaller('C:\\Setup.exe', null), /ENOENT/);
   });
 
-  test('lets Inno self-elevate (no -Verb RunAs) and quotes /LOG=', async () => {
+  test('passes Inno switches as separate child arguments without PowerShell re-parsing', async () => {
     let captured;
     const m = new UpdateManager(
       baseDeps(td, {
@@ -218,11 +218,15 @@ describe('Windows launcher (_spawnInstaller)', () => {
       }),
     );
     await m._spawnInstaller('C:\\Clowder AI\\Setup.exe', 'C:\\Clowder AI\\log.txt');
-    assert.equal(captured[0], 'powershell.exe');
-    const cmd = captured[1].find((a) => a.includes('Start-Process'));
-    assert.ok(!cmd.includes('-Verb RunAs'), 'must NOT pre-elevate — Inno handles UAC');
-    assert.ok(cmd.includes('-PassThru -Wait'), 'must wait for Inno stub exit code');
-    assert.ok(cmd.includes('"/LOG='), '/LOG= must be double-quoted');
+    assert.equal(captured[0], 'C:\\Clowder AI\\Setup.exe');
+    assert.deepEqual(captured[1], [
+      '/SILENT',
+      '/SUPPRESSMSGBOXES',
+      '/NORESTART',
+      '/SP-',
+      '/LOG=C:\\Clowder AI\\log.txt',
+    ]);
+    assert.deepEqual(captured[2], { stdio: 'ignore' });
   });
 });
 
@@ -356,6 +360,52 @@ describe('journal preservation on launcher failure', () => {
     );
     await m._retryInstall(writeRetryJournal(td));
     assert.ok(quit, 'quitApp must be called on success');
+  });
+
+  test('_retryInstall: ignores journal-controlled elevated arguments and derives the log path locally', async () => {
+    const journal = writeRetryJournal(td);
+    const expectedInstallerPath = journal.installerPath;
+    journal.installerPath = 'C:\\Users\\me\\Setup.exe" /DIR="C:\\Windows\\Temp\\Hijack';
+    journal.logPath = 'C:\\Users\\me\\x" /DIR="C:\\Windows\\Temp\\Hijack';
+    dl.writeJournal(dl.updatesDir(td), journal);
+    let captured;
+    const m = new UpdateManager(
+      retryDeps(td, {
+        spawn: (...args) => {
+          captured = args;
+          return mockSpawn({ closeCode: 0 })();
+        },
+      }),
+    );
+
+    await m._retryInstall(dl.readJournal(dl.updatesDir(td)));
+
+    assert.equal(captured[0], expectedInstallerPath);
+    assert.deepEqual(captured[1], [
+      '/SILENT',
+      '/SUPPRESSMSGBOXES',
+      '/NORESTART',
+      '/SP-',
+      `/LOG=${path.join(dl.updatesDir(td), 'install.log')}`,
+    ]);
+    assert.ok(!captured[1].some((arg) => arg.startsWith('/DIR=')), 'journal data must not add Inno switches');
+  });
+
+  test('failed-upgrade View Log ignores a journal-controlled path', async () => {
+    const journal = writeRetryJournal(td);
+    journal.logPath = 'C:\\Windows\\System32\\drivers\\etc\\hosts';
+    dl.writeJournal(dl.updatesDir(td), journal);
+    const opened = [];
+    const m = new UpdateManager(
+      retryDeps(td, {
+        showDialog: async () => 2,
+        openPath: (targetPath) => opened.push(targetPath),
+      }),
+    );
+
+    await m.checkPendingUpgrade();
+
+    assert.deepEqual(opened, [path.join(dl.updatesDir(td), 'install.log')]);
   });
 
   test('_retryInstall: rejects a journal digest not present in fresh release metadata', async () => {

@@ -8,7 +8,7 @@ created: 2026-07-07
 
 # F273: Desktop In-App Update — 应用内检查更新 + 原地升级（无签名约束版）
 
-> **Status**: approved — ready for dev（r2 经 Codex 复核放行 2026-07-07） | **方案设计**: 宪宪（Fable/Ragdoll） | **开发 Owner**: 布偶猫（Opus） | **Reviewer**: 缅因猫（Codex：r1 REQUEST CHANGES → r2 放行） | **Priority**: P1
+> **Status**: in-progress（Phase A–D 已实现；Phase E 合入前 isolated release-candidate E2E 与合入后首次 upstream stable release field validation 待完成） | **方案设计**: 宪宪（Fable/Ragdoll） | **开发 Owner**: 布偶猫（Opus） | **Reviewer**: 缅因猫（Codex） | **Priority**: P1
 
 ## Why
 
@@ -90,7 +90,7 @@ downloader 完成+四元组校验通过
   → dialog [稍后 / 重启并升级]
   → 写 pendingUpdate journal（见 3.2）
   → spawn(setupExe, ['/SILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/LOG={userData}\updates\install.log'],
-          { detached: true, stdio: 'ignore' }).unref()
+          { stdio: 'ignore' })  // 每个 Inno switch 独立 argv；不经 PowerShell 拼串重解析
   → quitApp()  // stopAll() 干净关闭 redis/api/exe → 释放全部文件锁
   → UAC 弹窗一次（PrivilegesRequired=admin，不可避免，用户点一次"是"）
   → Inno Setup 原地覆盖安装 → 静默模式装完自动以原用户权限重启 app（iss 改造 b）
@@ -105,8 +105,10 @@ spawn 前落盘 `{userData}/updates/pending-update.json`：
 ```json
 { "targetVersion": "0.12.0", "assetId": 123, "assetName": "ClowderAI-Setup-0.12.0.exe",
   "digest": "sha256:…", "installerPath": "…\\updates\\ClowderAI-Setup-0.12.0.exe",
-  "logPath": "…\\updates\\install.log", "startedAt": "…" }
+  "startedAt": "…" }
 ```
+
+journal 是同用户可写的恢复状态，不能授权提权参数。重试时安装包路径由 fresh GitHub release 的认证 asset name + 固定 `updates/` 目录推导，`install.log` 也只由本地固定路径推导；journal 中遗留或伪造的路径字段一律不进入 installer argv。
 
 **下次启动时状态机**（main.js 早期、服务启动前检测）：
 
@@ -201,7 +203,7 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
 - **Phase B — Win 全链路**：downloader（进度/四元组校验/断点续传一致性）+ pendingUpdate journal 状态机 + iss 四处改造 + spawn→quit 时序 + portable/installType 开发项（含 config 脚本参数化修硬编码）。**实现注意（Codex）**：app 外恢复路径是硬要求——最坏情形下用户必须能在不打开 app 的前提下从 `updates/` 目录重跑 installer 修复（§3.2）
 - **Phase C — mac 半自动链路**：arch 选择 + 下载校验 + open dmg + 指引 dialog + quit + journal 成功/失败态
 - **Phase D — UX 与文档**：tray「检查更新」菜单 + skip version + 进度展示 + README 双语 Upgrading + release notes 模板 + 撤版运维说明
-- **Phase E — 验收**：本地 mock feed 端到端（真实旧版安装 → mock releases → 完整升级链 + 全部失败注入场景）+ 下个正式 release 的 field validation（沿 F179 Phase B 模式）
+- **Phase E — 验收（待完成）**：合入前用 isolated release candidate 做真实旧版安装 → mock/staging releases → 完整升级链 + 全部失败注入场景；合入后首个 upstream stable release 再做 field validation 与 incident ownership 验证（沿 F179 Phase B 模式）
 
 ## Acceptance Criteria
 

@@ -258,7 +258,7 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, ti
  * Spawn the installer with proper elevation.
  * Resolves when the launcher confirms the process started; rejects on failure.
  *
- * Windows: PowerShell Start-Process; Inno self-elevates via PrivilegesRequired=admin.
+ * Windows: spawn Inno directly; it self-elevates via PrivilegesRequired=admin.
  * macOS: Finder opens the DMG via `open`.
  *
  * @param {Function} spawn — child_process.spawn (injectable for testing)
@@ -271,16 +271,10 @@ function spawnInstaller(spawn, platform, dbg, installerPath, logPath) {
   return new Promise((resolve, reject) => {
     if (platform === 'win32') {
       const innoArgs = ['/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'];
-      if (logPath) innoArgs.push(`"/LOG=${logPath}"`);
-      const escPath = installerPath.replace(/'/g, "''");
-      const escArgs = innoArgs.join(' ').replace(/'/g, "''");
-      // Let Inno handle elevation (PrivilegesRequired=admin) instead of -Verb RunAs, so
-      // runasoriginaluser in [Run] can de-elevate the post-install restart to the original user.
-      // -Wait captures the non-elevated stub's exit code (0=UAC accepted, 1=declined).
-      const psCmd = `$p = Start-Process -FilePath '${escPath}' -ArgumentList '${escArgs}' -PassThru -Wait; exit $p.ExitCode`;
-      const child = spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', psCmd], {
-        stdio: 'ignore',
-      });
+      if (logPath) innoArgs.push(`/LOG=${logPath}`);
+      // Keep every switch in a distinct argv slot. Inno handles UAC itself, preserving
+      // the original-user token used by the post-install restart.
+      const child = spawn(installerPath, innoArgs, { stdio: 'ignore' });
       child.on('error', (err) => {
         dbg(`Install spawn error: ${err.message}`);
         reject(err);
