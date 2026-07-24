@@ -4,7 +4,7 @@
 // spawn is injected via deps for testability.
 
 const assert = require('node:assert/strict');
-const { mkdtempSync, rmSync, writeFileSync, mkdirSync } = require('node:fs');
+const { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
@@ -272,5 +272,32 @@ describe('automatic update schedule', () => {
     }
 
     assert.equal(clearedHandle, intervalHandle);
+  });
+});
+
+describe('main process update-schedule lifecycle', () => {
+  test('stops the schedule before service shutdown on every quit path', () => {
+    const source = readFileSync(path.join(__dirname, 'main.js'), 'utf8');
+    const quitStart = source.indexOf('async function quitApp() {');
+    const quitEnd = source.indexOf('\nfunction sendSplashStatus', quitStart);
+    const quitBody = source.slice(quitStart, quitEnd);
+    const beforeQuitStart = source.indexOf("app.on('before-quit'");
+    const beforeQuitBody = source.slice(beforeQuitStart);
+
+    assert.ok(quitStart >= 0 && quitEnd > quitStart, 'quitApp lifecycle must be present');
+    assert.ok(beforeQuitStart >= 0, 'before-quit lifecycle must be present');
+
+    for (const [name, body] of [
+      ['quitApp', quitBody],
+      ['before-quit', beforeQuitBody],
+    ]) {
+      const stopScheduleAt = body.indexOf('updater?.stopSchedule()');
+      const stopServicesAt = body.indexOf('services.stopAll()');
+      assert.ok(stopScheduleAt >= 0, `${name} must stop the update schedule`);
+      assert.ok(
+        stopServicesAt < 0 || stopScheduleAt < stopServicesAt,
+        `${name} must stop the schedule before stopping services`,
+      );
+    }
   });
 });

@@ -200,6 +200,7 @@ function createTray() {
 }
 
 async function quitApp() {
+  updater?.stopSchedule();
   if (services) {
     await services.stopAll();
   }
@@ -328,10 +329,10 @@ app.on('window-all-closed', () => {
   // keep running in tray on Windows
   if (process.platform !== 'win32') quitApp();
 });
-
 app.on('before-quit', (e) => {
   // Signal close handlers to stop hiding windows to tray.
   isQuitting = true;
+  updater?.stopSchedule();
   // Electron does NOT await async event handlers. Without blocking here,
   // the app exits before stopAll() finishes → orphaned node/redis processes.
   // Prevent default, run cleanup, then quit when done.
