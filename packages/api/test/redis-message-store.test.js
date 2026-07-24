@@ -1077,4 +1077,74 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     const queuedIds = await store.scanByDeliveryStatus('queued');
     assert.ok(!queuedIds.includes(m1.id), 'should not find canceled message in queued scan');
   });
+
+  it('append() fails closed when the shared sortable-ID sequence is exhausted', async () => {
+    const { resetSortableIdSequence, MAX_SEQUENCE } = await import(
+      '../dist/domains/cats/services/stores/ports/MessageStore.js'
+    );
+    resetSortableIdSequence(MAX_SEQUENCE);
+
+    const lastValid = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'last valid',
+      mentions: [],
+      timestamp: 1,
+    });
+    assert.match(lastValid.id, /^\d{16}-999999-[0-9a-f]{8}$/);
+
+    await assert.rejects(
+      store.append({
+        userId: 'u1',
+        catId: null,
+        content: 'must fail',
+        mentions: [],
+        timestamp: 1,
+      }),
+      { name: 'RangeError', message: /sequence exhausted/i },
+    );
+
+    // Rejection must not leave partial Redis state.
+    const timelineIds = await redis.zrange('cat-cafe:msg:timeline', 0, -1);
+    assert.ok(!timelineIds.some((id) => id.includes('-1000000-')), 'no seven-digit seq ID persisted');
+  });
+
+  it('legacy and new six-digit sortable IDs order consistently in thread pagination', async () => {
+    const { resetSortableIdSequence } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    resetSortableIdSequence(0);
+
+    // Use timestamps around now so the default 60s TTL does not prune them.
+    const baseTs = Date.now();
+    const threadId = 'thread-legacy-new-order';
+    const legacy = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'legacy',
+      mentions: [],
+      timestamp: baseTs,
+      threadId,
+    });
+
+    // Simulate a later producer epoch at a higher timestamp.
+    resetSortableIdSequence(0);
+    const newer = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'newer',
+      mentions: [],
+      timestamp: baseTs + 1,
+      threadId,
+    });
+
+    const page = await store.getByThread(threadId, 10);
+    assert.deepEqual(
+      page.map((m) => m.id),
+      [legacy.id, newer.id],
+      'mixed-epoch IDs must order by timestamp component',
+    );
+
+    // Expired cursor recovery using the newer ID must not return the newer ID itself.
+    const afterNewer = await store.getByThreadAfter(threadId, newer.id);
+    assert.deepEqual(afterNewer, []);
+  });
 });

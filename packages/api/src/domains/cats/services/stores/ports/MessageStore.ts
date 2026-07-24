@@ -382,12 +382,31 @@ export function assertValidStoredMessageTimestamp(timestamp: number): void {
  * In-memory bounded message store.
  */
 /**
- * Generate a sortable message ID: zero-padded timestamp + sequence + UUID suffix.
- * Lexicographic order matches insertion order even within the same millisecond.
+ * Generate a bounded sortable message ID: fixed-width timestamp + six-digit
+ * sequence + UUID suffix. Lexicographic order matches insertion order within
+ * the admitted non-negative integral Date domain. The sequence is capped at
+ * MAX_SEQUENCE; exhaustion throws a RangeError before width expansion or wrap.
  */
+/** Maximum sequence value that keeps the sortable-ID middle component at six decimal digits. */
+export const MAX_SEQUENCE = 999_999;
+
 let _seq = 0;
+
+/** Test-only hook: reset the module-global sequence counter. */
+export function resetSortableIdSequence(value = 0): void {
+  _seq = value;
+}
+
+/** Test-only hook: read the current module-global sequence counter. */
+export function getSortableIdSequence(): number {
+  return _seq;
+}
+
 export function generateSortableId(timestamp: number): string {
   assertValidStoredMessageTimestamp(timestamp);
+  if (_seq > MAX_SEQUENCE) {
+    throw new RangeError('sortable-ID sequence exhausted');
+  }
   const ts = String(timestamp).padStart(16, '0');
   const seq = String(_seq++).padStart(6, '0');
   const suffix = randomUUID().slice(0, 8);
