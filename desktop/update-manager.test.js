@@ -228,3 +228,49 @@ describe('journal preservation on launcher failure', () => {
     assert.ok(quit, 'quitApp must be called on success');
   });
 });
+
+describe('automatic update schedule', () => {
+  let td;
+  beforeEach(() => {
+    td = mkdtempSync(path.join(tmpdir(), 'mgr-schedule-'));
+  });
+  afterEach(() => {
+    rmSync(td, { recursive: true, force: true });
+  });
+
+  test('checks at startup and then once every 24 hours', () => {
+    let intervalCallback;
+    let intervalMs;
+    let clearedHandle;
+    const intervalHandle = { kind: 'daily-update-check' };
+    const calls = [];
+    const m = new UpdateManager(
+      baseDeps(td, {
+        setInterval: (callback, ms) => {
+          intervalCallback = callback;
+          intervalMs = ms;
+          return intervalHandle;
+        },
+        clearInterval: (handle) => {
+          clearedHandle = handle;
+        },
+      }),
+    );
+    m.checkForUpdates = (opts) => {
+      calls.push(opts);
+    };
+
+    try {
+      m.startSchedule();
+      assert.deepEqual(calls, [undefined], 'startup check must run immediately and remain silent');
+      assert.equal(intervalMs, 24 * 60 * 60 * 1000);
+
+      intervalCallback();
+      assert.deepEqual(calls, [undefined, undefined], 'daily check must remain automatic/silent');
+    } finally {
+      m.stopSchedule();
+    }
+
+    assert.equal(clearedHandle, intervalHandle);
+  });
+});

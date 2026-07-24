@@ -130,7 +130,7 @@ Open `http://localhost:3003` → go to **Hub → System Settings → Account Con
 
 ### Desktop App (In-App Update)
 
-The desktop app checks for updates automatically at startup. When a new version is available, a dialog lets you **Download**, **Skip**, or decide **Later**.
+The desktop app checks for updates at startup and once every 24 hours while it remains running. Automatic checks stay silent unless a new version is available; then a dialog lets you **Download**, **Skip**, or decide **Later**.
 
 - **Windows (installer)**: the update downloads the new `.exe` and runs it with elevation (UAC prompt) — the app closes, the installer runs silently, and the app restarts automatically.
 - **macOS**: the update downloads the new `.dmg` — drag it to Applications to replace the old version.

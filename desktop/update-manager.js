@@ -11,8 +11,7 @@ const checker = require('./update-checker');
 const dl = require('./update-downloader');
 const { fetchReleases, downloadAsset, spawnInstaller } = require('./update-installer');
 
-const CHECK_DELAY_MS = 3 * 60 * 1000;
-const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h periodic re-check
+const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const GITHUB_OWNER = 'zts212653';
 const GITHUB_REPO = 'clowder-ai';
 
@@ -23,7 +22,8 @@ class UpdateManager {
     this._updatesDir = dl.updatesDir(deps.userDataRoot);
     this._settingsPath = path.join(deps.userDataRoot, 'update-settings.json');
     this._spawn = deps.spawn || require('node:child_process').spawn;
-    this._checkTimer = null;
+    this._setInterval = deps.setInterval || setInterval;
+    this._clearInterval = deps.clearInterval || clearInterval;
     this._intervalTimer = null;
     this._downloading = false;
   }
@@ -67,28 +67,20 @@ class UpdateManager {
     }
   }
 
-  /** Run a single startup update check after a short delay (3min). */
+  /** Check once at startup, then once daily while the app remains running. */
   startSchedule() {
     const settings = checker.loadSettings(this._settingsPath);
     if (!settings.autoCheck) {
       this._d.dbg('Auto-check disabled');
       return;
     }
-    this._checkTimer = setTimeout(() => {
-      this._checkTimer = null;
-      this.checkForUpdates();
-    }, CHECK_DELAY_MS);
-    // P2-4: periodic re-check every 6 hours for long-running sessions
-    this._intervalTimer = setInterval(() => this.checkForUpdates(), CHECK_INTERVAL_MS);
+    this.checkForUpdates();
+    this._intervalTimer = this._setInterval(() => this.checkForUpdates(), CHECK_INTERVAL_MS);
   }
 
   stopSchedule() {
-    if (this._checkTimer) {
-      clearTimeout(this._checkTimer);
-      this._checkTimer = null;
-    }
     if (this._intervalTimer) {
-      clearInterval(this._intervalTimer);
+      this._clearInterval(this._intervalTimer);
       this._intervalTimer = null;
     }
   }

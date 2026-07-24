@@ -33,7 +33,7 @@ created: 2026-07-07
 **Scope unit**：桌面安装包用户的版本升级旅程（Win installer / mac dmg / Win portable 三类用户 + 失败恢复）。
 
 **Journey 1 — Win installer 用户（主路径，准全自动）**
-1. 正常使用中，新版本发布后 ≤6h（或点 tray「检查更新」）弹窗：「发现新版本 vX.Y.Z」+ release notes 摘要 + [跳过此版本 / 稍后 / 下载]
+1. 启动/重新登录时检查一次；持续运行期间，新版本发布后 ≤24h（或点 tray「检查更新」）弹窗：「发现新版本 vX.Y.Z」+ release notes 摘要 + [跳过此版本 / 稍后 / 下载]
 2. 点 [下载] → 任务栏进度条 + tray tooltip 百分比，期间正常使用不受影响
 3. 下载完成（digest+size 校验通过）→ [稍后 / 重启并升级] → 确认 → UAC 点一次「是」
 4. 看到安装进度条跑完 → app 自动以原用户权限重开新版本 → 「已更新到 vX.Y.Z」通知 → 聊天记录/数据完好
@@ -65,7 +65,7 @@ created: 2026-07-07
   - 不用 `releases/latest`：latest 按发布时间选最近 release，不是 semver 选择器（GitHub 官方语义，Codex review 指出）。max-semver 选择器下 backport hotfix（如 v0.12.0 之后发 v0.11.2）不会误导新版本用户；撤版运维 = 把坏 release 标 prerelease 或删除，选择器自动回退到上一稳定版。
   - 仅当 target > current（`app.getVersion()`）才提示，天然不提示降级。
 - 每个候选 asset 记录 **四元组 `{ id, name, size, digest }`**（digest 直接来自 API response），作为后续下载与校验的绑定凭据。
-- 触发时机：启动后延迟 3min 首查（不抢启动带宽）→ 之后每 6h → tray 菜单「检查更新」手动触发。带 `If-None-Match` ETag 缓存；匿名限额 60 req/h/IP，频率远低于此。
+- 触发时机：启动/重新登录后立即首查 → 持续运行期间每 24h → tray 菜单「检查更新」手动触发。自动检查只在发现新版本时提示；无更新和网络失败均静默。带 `If-None-Match` ETag 缓存；匿名限额 60 req/h/IP，频率远低于此。
 - 版本比较：自写 semver 比较（支持 `vX.Y.Z` 及 pre-release 后缀如 `-rc.1`、`-beta.2`，按 semver §11 规范排序；不引第三方依赖）。
 - 平台 asset 解析：win → `ClowderAI-Setup-{v}.exe`；mac → `ClowderAI-{v}-{arm64|x64}.dmg`（按 `process.arch`）。
 - 设置持久化 `{userData}/update-settings.json`：`{ autoCheck: true, skippedVersion: null, lastCheckAt, etag }`。
@@ -192,7 +192,7 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
 3. **断点续传** → 进 MVP，配 ETag/Content-Range 一致性校验，不匹配全量重下（Range 206 已实测）。
 4. **checksum** → GitHub API digest 为主校验源（四元组绑定），威胁边界如 §2 声明，不上 minisign。
 5. **feed 选择器** → MVP 直接 `/releases` + max semver（放弃 latest，成本差异极小，消除对发布顺序的隐含假设）。
-6. **频率/UI** → 启动 +3min、每 6h、tray 手动检查；UI 只用 Electron 原生（tray/dialog/taskbar progress），不动 preload/web UI。
+6. **频率/UI** → 启动/重新登录立即检查、持续运行每 24h、tray 手动检查；自动检查仅发现更新时提示；UI 只用 Electron 原生（tray/dialog/taskbar progress），不动 preload/web UI。
 
 ## Phase 拆分（开发：布偶猫 Opus）
 
@@ -204,7 +204,7 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
 
 ## Acceptance Criteria
 
-- [ ] AC-1: 旧版运行中出现新版本（mock `/releases`）→ ≤6h 自动或手动检查提示；`skippedVersion` 不再提示，更新的版本恢复提示；feed 含更高 semver 的 prerelease/draft 或 asset 不全的 release 时被正确跳过
+- [ ] AC-1: 启动/重新登录时立即检查；旧版持续运行中出现新版本（mock `/releases`）→ ≤24h 自动或手动检查提示；自动检查无更新/失败时静默；`skippedVersion` 不再提示，更新的版本恢复提示；feed 含更高 semver 的 prerelease/draft 或 asset 不全的 release 时被正确跳过
 - [ ] AC-2 (Win): 真实旧版安装 → 一键升级端到端：下载(进度可见)→四元组校验→UAC→静默覆盖装→自动以原用户权限重启新版→userData 数据完好→旧 tar 残留已清理→junction 重建正确
 - [ ] AC-3 (Win 失败恢复): ① UAC 取消 → 下次启动恢复 dialog，重试安装成功且不重新下载；② 安装中途杀死 installer → 下次可达路径上恢复 dialog 或按文档重跑 installer 修复
 - [ ] AC-4: 篡改下载文件（digest 不符）或截断（size 不符）→ 拒绝安装 + 可重试；断点续传中 ETag 变化 → 丢弃 partial 全量重下
