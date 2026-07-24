@@ -1,10 +1,4 @@
-// F258: Desktop In-App Update — orchestrator (Electron main process)
-// Lifecycle: startup check → scheduled checks → download → install
-// Pure logic: update-checker.js | Journal/verify: update-downloader.js
-// Install execution: update-installer.js
-
-'use strict';
-
+// F258: Desktop In-App Update — Electron main-process orchestrator
 const path = require('node:path');
 const fs = require('node:fs');
 const checker = require('./update-checker');
@@ -86,10 +80,6 @@ class UpdateManager {
     }
   }
 
-  /**
-   * Check for updates.
-   * @param {{ manual?: boolean }} opts — manual=true shows feedback when up-to-date
-   */
   checkForUpdates(opts) {
     const run = () => this._runUpdateCheck(opts);
     this._checkQueue = this._checkQueue.then(run, run);
@@ -101,7 +91,6 @@ class UpdateManager {
     const { dbg, net, platform, arch, showDialog } = this._d;
     const currentVersion = this._d.app.getVersion();
     const settings = checker.loadSettings(this._settingsPath);
-    const cachePath = path.join(this._d.userDataRoot, 'release-cache.json');
     dbg(`Checking for updates (current: ${currentVersion}, manual: ${manual})`);
 
     try {
@@ -111,19 +100,17 @@ class UpdateManager {
       let newEtag = settings.etag;
 
       if (result === 'not-modified') {
-        // P1-4: 304 = feed unchanged, but re-evaluate cached data — user may
-        // have changed their skip/later choice since the last check.
-        releaseData = checker.loadCachedReleases(cachePath);
-        if (!releaseData) {
-          dbg('304 but no cached releases — skipping');
-          if (manual) await this._showUpToDate(currentVersion);
+        const fresh = await fetchReleases(net, currentVersion);
+        if (!fresh || fresh === 'not-modified') {
+          dbg('304 metadata refresh failed');
           return;
         }
-        dbg('304 — re-evaluating cached releases');
+        releaseData = fresh.data;
+        newEtag = fresh.etag;
+        dbg('304 — using unconditionally refreshed release metadata');
       } else if (result) {
         releaseData = result.data;
         newEtag = result.etag || settings.etag;
-        checker.saveCachedReleases(cachePath, releaseData);
       } else {
         dbg('Release fetch failed');
         if (manual)
@@ -206,16 +193,6 @@ class UpdateManager {
       this._d.openExternal(`https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/tag/v${target.version}`);
       return;
     }
-    if (!dl.checkDiskSpace(this._updatesDir, target.asset.size)) {
-      this._d.dbg('Insufficient disk space');
-      await this._d.showDialog({
-        type: 'warning',
-        buttons: ['OK'],
-        title: 'Not Enough Space',
-        message: 'Insufficient disk space to download the update',
-      });
-      return;
-    }
     this._downloading = true;
     const { dbg, setProgressBar } = this._d;
     const destPath = path.join(this._updatesDir, target.asset.name);
@@ -226,6 +203,16 @@ class UpdateManager {
       if (valid) {
         dbg('Reusing previously verified download');
       } else {
+        if (!dl.checkDiskSpace(this._updatesDir, target.asset.size)) {
+          dbg('Insufficient disk space');
+          await this._d.showDialog({
+            type: 'warning',
+            buttons: ['OK'],
+            title: 'Not Enough Space',
+            message: 'Insufficient disk space to download the update',
+          });
+          return;
+        }
         await downloadAsset(this._d.net, target.asset, destPath, this._d.app.getVersion(), setProgressBar, dbg);
         valid = await dl.verifyFileIntegrity(destPath, target.asset.digest, target.asset.size);
         if (!valid) {
@@ -325,9 +312,20 @@ class UpdateManager {
       dl.clearJournal(this._updatesDir);
       return;
     }
-    // Use stored assetSize (not stat.size which self-validates); fall back for pre-assetSize journals
-    const expectedSize = journal.assetSize ?? fs.statSync(journal.installerPath).size;
-    if (!(await dl.verifyFileIntegrity(journal.installerPath, journal.digest, expectedSize))) {
+    const releases = await fetchReleases(this._d.net, this._d.app.getVersion());
+    const target = checker.selectUpdateTarget(
+      releases?.data ?? [],
+      this._d.app.getVersion(),
+      this._d.platform,
+      this._d.arch,
+      { requiredVersion: journal.targetVersion },
+    );
+    if (target?.asset.name !== path.basename(journal.installerPath)) {
+      this._d.dbg('Retry install metadata could not be authenticated');
+      await this._showInstallFailure(new Error('Could not verify installer release metadata'));
+      return;
+    }
+    if (!(await dl.verifyFileIntegrity(journal.installerPath, target.asset.digest, target.asset.size))) {
       dl.clearJournal(this._updatesDir);
       return;
     }

@@ -17,9 +17,9 @@ const RELEASES_URL = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO
  * Fetch releases from GitHub API.
  * Returns { data, etag } on 200, 'not-modified' on 304, null on error.
  *
- * Callers MUST distinguish 304 from error — 304 means the cached feed is
- * still valid and the caller should re-evaluate cached data (the user may
- * have changed their "Later" / "Skip" choice since the last check).
+ * Callers MUST distinguish 304 from error. Before release metadata can
+ * authorize an installer, a 304 must be followed by an unconditional fetch:
+ * same-user-writable persistent cache data is never an execution authority.
  *
  * @param {object} net — Electron net module
  * @param {string} appVersion — for User-Agent

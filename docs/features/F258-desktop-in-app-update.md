@@ -65,7 +65,7 @@ created: 2026-07-07
   - 不用 `releases/latest`：latest 按发布时间选最近 release，不是 semver 选择器（GitHub 官方语义，Codex review 指出）。max-semver 选择器下 backport hotfix（如 v0.12.0 之后发 v0.11.2）不会误导新版本用户；撤版运维 = 把坏 release 标 prerelease 或删除，选择器自动回退到上一稳定版。
   - 仅当 target > current（`app.getVersion()`）才提示，天然不提示降级。
 - 每个候选 asset 记录 **四元组 `{ id, name, size, digest }`**（digest 直接来自 API response），作为后续下载与校验的绑定凭据。
-- 触发时机：启动/重新登录后立即首查 → 持续运行期间每 24h → tray 菜单「检查更新」手动触发。自动检查只在发现新版本时提示；无更新和网络失败均静默。带 `If-None-Match` ETag 缓存；匿名限额 60 req/h/IP，频率远低于此。
+- 触发时机：启动/重新登录后立即首查 → 持续运行期间每 24h → tray 菜单「检查更新」手动触发。自动检查只在发现新版本时提示；无更新和网络失败均静默。带 `If-None-Match` ETag 条件请求；收到 304 后，任何提示或安装决策前必须再做一次无条件请求取得新鲜的 GitHub 元数据，`userData` 下同用户可写的持久缓存不得作为安装授权来源。匿名限额 60 req/h/IP，频率远低于此。
 - 版本比较：自写 semver 比较（支持 `vX.Y.Z` 及 pre-release 后缀如 `-rc.1`、`-beta.2`，按 semver §11 规范排序；不引第三方依赖）。
 - 平台 asset 解析：win → `ClowderAI-Setup-{v}.exe`；mac → `ClowderAI-{v}-{arm64|x64}.dmg`（按 `process.arch`）。
 - 设置持久化 `{userData}/update-settings.json`：`{ autoCheck: true, skippedVersion: null, lastCheckAt, etag }`。
@@ -75,7 +75,7 @@ created: 2026-07-07
 
 - Electron `net` 模块（走系统代理设置，对国内用户重要）下载到 `{userData}/updates/`。
 - 下载前检查磁盘空间 ≥ 2× asset size；下载中主窗口 `setProgressBar()` + tray tooltip 显示百分比。
-- **校验 = 四元组绑定**：完成后 `node:crypto` streaming sha256 对照 API `digest` + 字节数对照 `size`，任一不匹配 → 删除 + 提示重试。
+- **校验 = 四元组绑定**：完成后 `node:crypto` streaming sha256 对照 API `digest` + 字节数对照 `size`，任一不匹配 → 删除 + 提示重试。安装恢复也必须重新拉取对应版本的 GitHub release，并以新鲜响应中的 asset name/digest/size 复核已下载文件；本地 journal 只记录恢复状态，不授权执行。
 - **威胁边界（明确声明）**：digest 来自 api.github.com，asset 字节来自下载域（objects.githubusercontent.com 等），跨源比对可防传输损坏与下载链路篡改；**不防 GitHub 账号/release 本身被替换**——该威胁下源码同样可投毒，信任等级与源码信任一致。不引入 minisign/ed25519（见 Resolved Questions #4）。
 - **断点续传（MVP 含）**：首次响应记录 `ETag` + total size；中断重试用 `Range` + `If-Range: <etag>`；若响应非 206、或 `Content-Range`/ETag 与记录不一致 → **丢弃 partial 全量重下**（正确性优先于流量）。
 - 清理策略：升级成功确认后（见 journal 状态机）清空 `updates/` 内旧文件。

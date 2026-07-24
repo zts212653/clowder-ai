@@ -171,11 +171,12 @@ function extractAssetQuad(apiAsset) {
  * @param {string} currentVersion — e.g. '0.10.1'
  * @param {'win32' | 'darwin'} platform
  * @param {'arm64' | 'x64'} arch
- * @param {{ skippedVersion?: string | null }} [options]
+ * @param {{ skippedVersion?: string | null, requiredVersion?: string | null }} [options]
  * @returns {{ version: string, asset: { id, name, size, digest }, releaseNotes: string } | null}
  */
 function selectUpdateTarget(releases, currentVersion, platform, arch, options) {
   const skipped = options?.skippedVersion || null;
+  const required = options?.requiredVersion ? stripV(options.requiredVersion) : null;
 
   // Step 1-2: filter + parse
   const candidates = [];
@@ -195,6 +196,7 @@ function selectUpdateTarget(releases, currentVersion, platform, arch, options) {
 
   // Step 4: find first valid (highest complete release)
   for (const c of candidates) {
+    if (required && c.version !== required) continue;
     // 4a: skip if not newer
     if (compareSemver(c.version, currentVersion) <= 0) continue;
     // 4b: release completeness — all platform assets must exist with digests
@@ -277,35 +279,6 @@ function saveSettings(settingsPath, settings) {
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
 }
 
-// ── Release feed cache (P1-4: ETag/304 must not suppress "Later" re-prompt) ──
-
-/**
- * Load cached release feed data. Returns null on missing/corrupt file.
- * The cache sits alongside settings so 304 responses can re-evaluate
- * against the user's current skip/later state without re-fetching.
- *
- * @param {string} cachePath — absolute path to release-cache.json
- * @returns {Array | null}
- */
-function loadCachedReleases(cachePath) {
-  try {
-    return JSON.parse(fs.readFileSync(cachePath, 'utf-8'));
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Save release feed data to cache.
- * @param {string} cachePath
- * @param {Array} data — GitHub releases API response array
- */
-function saveCachedReleases(cachePath, data) {
-  const dir = path.dirname(cachePath);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(cachePath, JSON.stringify(data), 'utf-8');
-}
-
 module.exports = {
   parseVersion,
   compareSemver,
@@ -314,6 +287,4 @@ module.exports = {
   selectUpdateTarget,
   loadSettings,
   saveSettings,
-  loadCachedReleases,
-  saveCachedReleases,
 };

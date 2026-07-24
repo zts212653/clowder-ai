@@ -79,6 +79,40 @@ function controlledReleaseNet(releases) {
   };
 }
 
+function conditionalReleaseNet(releases) {
+  const requests = [];
+  return {
+    requests,
+    net: {
+      request() {
+        const req = new EventEmitter();
+        const headers = {};
+        req.setHeader = (name, value) => {
+          headers[name.toLowerCase()] = value;
+        };
+        req.abort = () => {};
+        req.end = () => {
+          requests.push(headers);
+          process.nextTick(() => {
+            const res = new EventEmitter();
+            res.statusCode = headers['if-none-match'] ? 304 : 200;
+            res.headers = res.statusCode === 200 ? { etag: '"fresh-etag"' } : {};
+            res.destroy = () => {};
+            req.emit('response', res);
+            if (res.statusCode === 200) {
+              process.nextTick(() => {
+                res.emit('data', Buffer.from(JSON.stringify(releases)));
+                process.nextTick(() => res.emit('end'));
+              });
+            }
+          });
+        };
+        return req;
+      },
+    },
+  };
+}
+
 /** Create desktop-config.json so _getInstallType returns the given type. */
 function setupInstallType(tempDir, type) {
   const dir = path.join(tempDir, '.cat-cafe');
@@ -90,14 +124,39 @@ const FAKE_CONTENT = Buffer.from('FAKE-INSTALLER');
 const FAKE_HASH = createHash('sha256').update(FAKE_CONTENT).digest('hex');
 const fakeTarget = {
   version: '0.12.0',
-  asset: { id: 1, name: 'Setup.exe', digest: `sha256:${FAKE_HASH}`, size: FAKE_CONTENT.length },
+  asset: {
+    id: 1,
+    name: 'ClowderAI-Setup-0.12.0.exe',
+    digest: `sha256:${FAKE_HASH}`,
+    size: FAKE_CONTENT.length,
+  },
 };
+
+function completeRelease(version = fakeTarget.version, winDigest = fakeTarget.asset.digest) {
+  return {
+    tag_name: `v${version}`,
+    draft: false,
+    prerelease: false,
+    body: '',
+    assets: [
+      {
+        id: 1,
+        name: `ClowderAI-Setup-${version}.exe`,
+        size: FAKE_CONTENT.length,
+        digest: winDigest,
+        browser_download_url: `https://github.com/zts212653/clowder-ai/releases/download/v${version}/win.exe`,
+      },
+      { id: 2, name: `ClowderAI-${version}-arm64.dmg`, size: 1, digest: 'sha256:b' },
+      { id: 3, name: `ClowderAI-${version}-x64.dmg`, size: 1, digest: 'sha256:c' },
+    ],
+  };
+}
 
 /** Create a fake installer file matching fakeTarget's digest + size. */
 function writeFakeInstaller(tempDir) {
   const updDir = dl.updatesDir(tempDir);
   mkdirSync(updDir, { recursive: true });
-  const ip = path.join(updDir, 'Setup.exe');
+  const ip = path.join(updDir, fakeTarget.asset.name);
   writeFileSync(ip, FAKE_CONTENT);
   return ip;
 }
@@ -116,6 +175,10 @@ function writeRetryJournal(tempDir) {
     startedAt: '2026-07-20T00:00:00Z',
   });
   return dl.readJournal(updDir);
+}
+
+function retryDeps(tempDir, overrides = {}) {
+  return baseDeps(tempDir, { net: conditionalReleaseNet([completeRelease()]).net, ...overrides });
 }
 
 // ── Windows launcher ──────────────────────────────────────────────────
@@ -227,7 +290,7 @@ describe('journal preservation on launcher failure', () => {
   });
 
   test('_retryInstall: launcher fail does NOT clear journal', async () => {
-    const m = new UpdateManager(baseDeps(td, { spawn: mockSpawn({ closeCode: 1 }) }));
+    const m = new UpdateManager(retryDeps(td, { spawn: mockSpawn({ closeCode: 1 }) }));
     await m._retryInstall(writeRetryJournal(td));
     assert.notEqual(dl.readJournal(dl.updatesDir(td)), null, 'journal must survive retry failure');
   });
@@ -235,7 +298,7 @@ describe('journal preservation on launcher failure', () => {
   test('_retryInstall: launcher failure leaves startup service lifecycle to main', async () => {
     let stopCalls = 0;
     const m = new UpdateManager(
-      baseDeps(td, {
+      retryDeps(td, {
         spawn: mockSpawn({ closeCode: 1 }),
         stopServices: async () => {
           stopCalls += 1;
@@ -249,7 +312,7 @@ describe('journal preservation on launcher failure', () => {
   test('_retryInstall: launcher failure reports the error', async () => {
     const dialogs = [];
     const m = new UpdateManager(
-      baseDeps(td, {
+      retryDeps(td, {
         spawn: mockSpawn({ closeCode: 1 }),
         showDialog: async (options) => {
           dialogs.push(options);
@@ -266,7 +329,7 @@ describe('journal preservation on launcher failure', () => {
   test('_retryInstall: launcher success calls quitApp', async () => {
     let quit = false;
     const m = new UpdateManager(
-      baseDeps(td, {
+      retryDeps(td, {
         spawn: mockSpawn({ closeCode: 0 }),
         quitApp: async () => {
           quit = true;
@@ -275,6 +338,26 @@ describe('journal preservation on launcher failure', () => {
     );
     await m._retryInstall(writeRetryJournal(td));
     assert.ok(quit, 'quitApp must be called on success');
+  });
+
+  test('_retryInstall: rejects a journal digest not present in fresh release metadata', async () => {
+    const malicious = Buffer.from('MALICIOUS-INSTALLER');
+    const journal = writeRetryJournal(td);
+    writeFileSync(journal.installerPath, malicious);
+    journal.digest = `sha256:${createHash('sha256').update(malicious).digest('hex')}`;
+    journal.assetSize = malicious.length;
+    dl.writeJournal(dl.updatesDir(td), journal);
+    let spawnCalls = 0;
+    const m = new UpdateManager(
+      retryDeps(td, {
+        spawn: () => {
+          spawnCalls += 1;
+          return mockSpawn({ closeCode: 0 })();
+        },
+      }),
+    );
+    await m._retryInstall(dl.readJournal(dl.updatesDir(td)));
+    assert.equal(spawnCalls, 0, 'journal metadata must not authorize an installer launch');
   });
 });
 
@@ -304,6 +387,57 @@ describe('download failures', () => {
     assert.equal(dialogs[0].message, 'Could not download update');
     assert.deepEqual(dialogs[0].buttons, ['Retry', 'Cancel']);
     assert.match(dialogs[0].detail, /net\.request/);
+  });
+
+  test('verified installer reuse bypasses the new-download disk-space gate', async () => {
+    const originalCheckDiskSpace = dl.checkDiskSpace;
+    const dialogs = [];
+    dl.checkDiskSpace = () => false;
+    try {
+      const m = new UpdateManager(
+        baseDeps(td, {
+          showDialog: async (options) => {
+            dialogs.push(options);
+            return 1;
+          },
+        }),
+      );
+      writeFakeInstaller(td);
+      await m.downloadAndInstall(fakeTarget);
+      assert.equal(dialogs[0]?.title, 'Ready to Install');
+    } finally {
+      dl.checkDiskSpace = originalCheckDiskSpace;
+    }
+  });
+});
+
+describe('release metadata trust boundary', () => {
+  let td;
+  beforeEach(() => {
+    td = mkdtempSync(path.join(tmpdir(), 'mgr-release-cache-'));
+  });
+  afterEach(() => {
+    rmSync(td, { recursive: true, force: true });
+  });
+
+  test('304 response re-fetches metadata instead of trusting the persistent release cache', async () => {
+    writeFileSync(path.join(td, 'update-settings.json'), JSON.stringify({ autoCheck: true, etag: '"cached-etag"' }));
+    writeFileSync(path.join(td, 'release-cache.json'), JSON.stringify([completeRelease('9.9.9', 'sha256:attacker')]));
+    const feed = conditionalReleaseNet([]);
+    let dialogCount = 0;
+    const m = new UpdateManager(
+      baseDeps(td, {
+        net: feed.net,
+        showDialog: async () => {
+          dialogCount += 1;
+          return 1;
+        },
+      }),
+    );
+    await m.checkForUpdates();
+    assert.equal(feed.requests.length, 2, '304 must be followed by an unconditional metadata fetch');
+    assert.equal(feed.requests[1]['if-none-match'], undefined);
+    assert.equal(dialogCount, 0, 'persistent cache contents must not reach the update prompt');
   });
 });
 

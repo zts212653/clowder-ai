@@ -1,17 +1,11 @@
-// F258 Phase A — selectUpdateTarget + settings/cache persistence tests
+// F258 Phase A — selectUpdateTarget + settings persistence tests
 const assert = require('node:assert/strict');
 const { mkdtempSync, rmSync, readFileSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { describe, test, beforeEach, afterEach } = require('node:test');
 
-const {
-  selectUpdateTarget,
-  loadSettings,
-  saveSettings,
-  loadCachedReleases,
-  saveCachedReleases,
-} = require('./update-checker');
+const { selectUpdateTarget, loadSettings, saveSettings } = require('./update-checker');
 
 function makeAsset(name, id, size, digest) {
   return { id, name, size, browser_download_url: `https://github.com/download/${name}`, digest };
@@ -149,6 +143,14 @@ describe('selectUpdateTarget', () => {
     assert.equal(result, null);
   });
 
+  test('requiredVersion selects the exact release for recovery validation', () => {
+    const result = selectUpdateTarget(FIXTURE_RELEASES, '0.10.1', 'win32', 'x64', {
+      requiredVersion: '0.11.1',
+    });
+    assert.equal(result?.version, '0.11.1');
+    assert.equal(result?.asset.digest, 'sha256:jjj000');
+  });
+
   test('handles empty releases array', () => {
     assert.equal(selectUpdateTarget([], '0.10.1', 'win32', 'x64'), null);
   });
@@ -229,41 +231,5 @@ describe('settings persistence', () => {
     saveSettings(settingsPath, data);
     const content = JSON.parse(readFileSync(settingsPath, 'utf-8'));
     assert.equal(content.autoCheck, true);
-  });
-});
-
-describe('release cache (P1-4: ETag/304 must not suppress Later re-prompt)', () => {
-  let tempDir;
-
-  beforeEach(() => {
-    tempDir = mkdtempSync(path.join(tmpdir(), 'release-cache-'));
-  });
-
-  afterEach(() => {
-    rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  test('loadCachedReleases returns null when file missing', () => {
-    assert.equal(loadCachedReleases(path.join(tempDir, 'nope.json')), null);
-  });
-
-  test('saveCachedReleases + loadCachedReleases round-trip', () => {
-    const cachePath = path.join(tempDir, 'release-cache.json');
-    const releases = [{ tag_name: 'v0.12.0', draft: false, prerelease: false, body: 'test', assets: [] }];
-    saveCachedReleases(cachePath, releases);
-    const loaded = loadCachedReleases(cachePath);
-    assert.deepEqual(loaded, releases);
-  });
-
-  test('loadCachedReleases tolerates corrupted JSON', () => {
-    const cachePath = path.join(tempDir, 'release-cache.json');
-    writeFileSync(cachePath, '{{bad json');
-    assert.equal(loadCachedReleases(cachePath), null);
-  });
-
-  test('saveCachedReleases creates parent directory', () => {
-    const cachePath = path.join(tempDir, 'sub', 'release-cache.json');
-    saveCachedReleases(cachePath, []);
-    assert.deepEqual(loadCachedReleases(cachePath), []);
   });
 });
