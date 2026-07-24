@@ -289,6 +289,24 @@ describe('journal preservation on launcher failure', () => {
     assert.ok(quit, 'quitApp must be called on success');
   });
 
+  test('_executeInstall: re-verifies after service shutdown before spawning', async () => {
+    const installerPath = writeFakeInstaller(td);
+    let spawnCalls = 0;
+    const m = new UpdateManager(
+      baseDeps(td, {
+        stopServices: async () => {
+          writeFileSync(installerPath, Buffer.from('REPLACED-DURING-SHUTDOWN'));
+        },
+        spawn: () => {
+          spawnCalls += 1;
+          return mockSpawn({ closeCode: 0 })();
+        },
+      }),
+    );
+    await m._executeInstall(fakeTarget, installerPath);
+    assert.equal(spawnCalls, 0, 'a post-verification replacement must never reach the elevation boundary');
+  });
+
   test('_retryInstall: launcher fail does NOT clear journal', async () => {
     const m = new UpdateManager(retryDeps(td, { spawn: mockSpawn({ closeCode: 1 }) }));
     await m._retryInstall(writeRetryJournal(td));
@@ -558,5 +576,23 @@ describe('main process update-schedule lifecycle', () => {
         `${name} must stop the schedule before stopping services`,
       );
     }
+  });
+
+  test('installer-requested quit reaches the same service shutdown lifecycle', () => {
+    const mainSource = readFileSync(path.join(__dirname, 'main.js'), 'utf8');
+    const installerSource = readFileSync(path.join(__dirname, 'installer', 'cat-cafe.iss'), 'utf8');
+    const secondInstanceStart = mainSource.indexOf("app.on('second-instance'");
+    const secondInstanceEnd = mainSource.indexOf("\napp.on('ready'", secondInstanceStart);
+    const secondInstanceBody = mainSource.slice(secondInstanceStart, secondInstanceEnd);
+
+    assert.match(mainSource, /QUIT_FOR_UPDATE_ARG\s*=\s*'--quit-for-update'/);
+    assert.match(secondInstanceBody, /commandLine\.includes\(QUIT_FOR_UPDATE_ARG\)/);
+    assert.match(secondInstanceBody, /quitApp\(\)/);
+    assert.match(installerSource, /ExecAsOriginalUser[\s\S]*--quit-for-update/);
+    assert.doesNotMatch(installerSource, /CloseMainWindow/);
+    assert.ok(
+      installerSource.indexOf('--quit-for-update') < installerSource.indexOf('Stop-Process -Force'),
+      'coordinated app quit must precede the bounded force-cleanup fallback',
+    );
   });
 });

@@ -235,9 +235,10 @@ Type: filesandordirs; Name: "{app}\bundled"
 Type: filesandordirs; Name: "{app}\scripts\node_modules"
 
 ; ── F258: Defensive process cleanup before upgrade ────────────────────
-; The in-app updater calls quitApp() → stopAll() before spawning the installer,
-; but if stopAll() times out or the user manually reruns Setup.exe, child
-; processes (node, redis-server) may still hold file locks in {app}\.
+; The in-app updater calls quitApp() → stopAll() before spawning the installer.
+; For a manually launched Setup.exe, request the same coordinated shutdown
+; through Electron's single-instance channel, then retain a bounded fallback
+; for orphaned processes that still hold file locks in {app}\.
 ; PrepareToInstall kills ONLY processes whose executable path is under {app} —
 ; no risk of killing the user's own node/redis instances running elsewhere.
 [Code]
@@ -255,20 +256,27 @@ begin
   if Copy(AppDir, Length(AppDir), 1) <> '\' then
     AppDir := AppDir + '\';
   StringChange(AppDir, '''', '''''');
-  // Phase 1: Graceful — send WM_CLOSE to windowed processes (triggers Electron before-quit → stopAll)
-  Cmd := 'Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith(''' +
-         AppDir +
-         ''') -and $_.MainWindowHandle -ne 0 } | ForEach-Object { $_.CloseMainWindow() | Out-Null }';
+  // Phase 1: ask the non-elevated app to enter quitApp() → stopAll().
+  // WM_CLOSE is not sufficient because the tray close handler hides the window.
+  ExecAsOriginalUser(
+    ExpandConstant('{app}\desktop-dist\{#MyAppExeName}'),
+    '--quit-for-update', '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
+  // Wait only while install-directory processes remain, up to 15 seconds.
+  Cmd := '$deadline=(Get-Date).AddSeconds(15); while ((Get-Date) -lt $deadline) { ' +
+         '$running=@(Get-Process -ErrorAction SilentlyContinue | Where-Object { ' +
+         '$_.Path -and $_.Path.StartsWith(''' + AppDir + ''') }); ' +
+         'if ($running.Count -eq 0) { exit 0 }; Start-Sleep -Milliseconds 250 }; exit 1';
   Exec('powershell.exe',
        '-NoProfile -ExecutionPolicy Bypass -Command "' + Cmd + '"',
        '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
-  // Wait for graceful shutdown (services.stopAll + process exit)
-  Sleep(5000);
-  // Phase 2: Force-kill anything still running (timeout / orphaned child processes)
-  Cmd := 'Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith(''' +
-         AppDir +
-         ''') } | Stop-Process -Force -ErrorAction SilentlyContinue';
-  Exec('powershell.exe',
-       '-NoProfile -ExecutionPolicy Bypass -Command "' + Cmd + '"',
-       '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
+  // Phase 2: force-clean only after coordinated shutdown exceeded its bound.
+  if ExitCode <> 0 then
+  begin
+    Cmd := 'Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith(''' +
+           AppDir +
+           ''') } | Stop-Process -Force -ErrorAction SilentlyContinue';
+    Exec('powershell.exe',
+         '-NoProfile -ExecutionPolicy Bypass -Command "' + Cmd + '"',
+         '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
+  end;
 end;

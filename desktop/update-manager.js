@@ -277,8 +277,11 @@ class UpdateManager {
       startedAt: new Date().toISOString(),
     });
     try {
-      // Stop live services before Windows Inno Setup force-kills processes under {app}.
       if (isWin && this._d.stopServices) await this._d.stopServices();
+      if (!(await dl.verifyFileIntegrity(installerPath, target.asset.digest, target.asset.size))) {
+        dl.clearJournal(this._updatesDir);
+        throw new Error('Installer changed before launch');
+      }
       await this._spawnInstaller(installerPath, logPath || null);
       await quitApp();
     } catch (err) {
@@ -339,7 +342,6 @@ class UpdateManager {
     }
   }
 
-  /** Delegate to update-installer.spawnInstaller (extracted for file-size compliance). */
   _spawnInstaller(installerPath, logPath) {
     return spawnInstaller(this._spawn, this._d.platform, this._d.dbg, installerPath, logPath);
   }

@@ -76,6 +76,7 @@ created: 2026-07-07
 - Electron `net` 模块（走系统代理设置，对国内用户重要）下载到 `{userData}/updates/`。
 - 下载前检查磁盘空间 ≥ 2× asset size；下载中主窗口 `setProgressBar()` + tray tooltip 显示百分比。
 - **校验 = 四元组绑定**：完成后 `node:crypto` streaming sha256 对照 API `digest` + 字节数对照 `size`，任一不匹配 → 删除 + 提示重试。安装恢复也必须重新拉取对应版本的 GitHub release，并以新鲜响应中的 asset name/digest/size 复核已下载文件；本地 journal 只记录恢复状态，不授权执行。
+- Windows 提权边界前，在服务停止完成后必须立即再次校验 installer；手动运行 Setup 时由 installer 通过单实例参数请求桌面端执行同一 `quitApp() → stopAll()` 生命周期，确认进程退出后才安装，超时强制清理仅作有界兜底。
 - **威胁边界（明确声明）**：digest 来自 api.github.com，asset 字节来自下载域（objects.githubusercontent.com 等），跨源比对可防传输损坏与下载链路篡改；**不防 GitHub 账号/release 本身被替换**——该威胁下源码同样可投毒，信任等级与源码信任一致。不引入 minisign/ed25519（见 Resolved Questions #4）。
 - **断点续传（MVP 含）**：首次响应记录 `ETag` + total size；中断重试用 `Range` + `If-Range: <etag>`；若响应非 206、或 `Content-Range`/ETag 与记录不一致 → **丢弃 partial 全量重下**（正确性优先于流量）。
 - 清理策略：升级成功确认后（见 journal 状态机）清空 `updates/` 内旧文件。

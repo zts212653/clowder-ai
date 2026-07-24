@@ -68,6 +68,7 @@ const PROJECT_ROOT = resolveProjectRootFromDir(__dirname);
 const FRONTEND_PORT = 3003;
 const API_PORT = 3004;
 const APP_URL = `http://localhost:${FRONTEND_PORT}`;
+const QUIT_FOR_UPDATE_ARG = '--quit-for-update';
 // Main process log in the user data directory alongside API + desktop logs.
 // Single source of truth: service-manager.js resolveUserDataDir() reads
 // electron-builder productName and handles legacy data directory migration.
@@ -94,6 +95,7 @@ let tray = null;
 let services = null;
 let updater = null;
 let isQuitting = false;
+let quitPromise = null;
 
 function createSplashWindow() {
   splashWindow = new BrowserWindow({
@@ -200,23 +202,35 @@ function createTray() {
 }
 
 async function quitApp() {
-  updater?.stopSchedule();
-  if (services) {
-    await services.stopAll();
+  if (!quitPromise) {
+    isQuitting = true;
+    updater?.stopSchedule();
+    quitPromise = (async () => {
+      if (services) {
+        const activeServices = services;
+        services = null;
+        await activeServices.stopAll();
+      }
+      if (tray) {
+        tray.destroy();
+        tray = null;
+      }
+      app.quit();
+    })();
   }
-  if (tray) {
-    tray.destroy();
-    tray = null;
-  }
-  app.quit();
+  return quitPromise;
 }
 
 function sendSplashStatus(msg) {
   if (splashWindow && !splashWindow.isDestroyed()) splashWindow.webContents.send('splash-status', msg);
 }
 
-app.on('second-instance', () => {
-  // Another instance tried to launch — bring the existing window to front
+app.on('second-instance', (_event, commandLine) => {
+  if (commandLine.includes(QUIT_FOR_UPDATE_ARG)) {
+    dbg('Installer requested coordinated shutdown');
+    void quitApp();
+    return;
+  }
   if (mainWindow) {
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
@@ -238,6 +252,10 @@ app.on('ready', async () => {
   const gotTheLock = app.requestSingleInstanceLock();
   if (!gotTheLock) {
     app.quit();
+    return;
+  }
+  if (process.argv.includes(QUIT_FOR_UPDATE_ARG)) {
+    await quitApp();
     return;
   }
 
