@@ -47,6 +47,38 @@ function baseDeps(tempDir, overrides = {}) {
   };
 }
 
+function controlledReleaseNet(releases) {
+  const pending = [];
+  return {
+    net: {
+      request() {
+        const req = new EventEmitter();
+        req.setHeader = () => {};
+        req.abort = () => {};
+        req.end = () => {
+          pending.push(() => {
+            const res = new EventEmitter();
+            res.statusCode = 200;
+            res.headers = {};
+            res.destroy = () => {};
+            req.emit('response', res);
+            process.nextTick(() => {
+              res.emit('data', Buffer.from(JSON.stringify(releases)));
+              process.nextTick(() => res.emit('end'));
+            });
+          });
+        };
+        return req;
+      },
+    },
+    respondNext() {
+      const respond = pending.shift();
+      assert.ok(respond, 'expected a pending release request');
+      respond();
+    },
+  };
+}
+
 /** Create desktop-config.json so _getInstallType returns the given type. */
 function setupInstallType(tempDir, type) {
   const dir = path.join(tempDir, '.cat-cafe');
@@ -272,6 +304,53 @@ describe('automatic update schedule', () => {
     }
 
     assert.equal(clearedHandle, intervalHandle);
+  });
+});
+
+describe('overlapping update checks', () => {
+  let td;
+  beforeEach(() => {
+    td = mkdtempSync(path.join(tmpdir(), 'mgr-check-'));
+  });
+  afterEach(() => {
+    rmSync(td, { recursive: true, force: true });
+  });
+
+  test('serializes checks so a later check observes the persisted Skip choice', async () => {
+    const release = {
+      tag_name: 'v0.12.0',
+      draft: false,
+      prerelease: false,
+      body: '',
+      assets: [
+        { id: 1, name: 'ClowderAI-Setup-0.12.0.exe', size: 1, digest: 'sha256:a' },
+        { id: 2, name: 'ClowderAI-0.12.0-arm64.dmg', size: 1, digest: 'sha256:b' },
+        { id: 3, name: 'ClowderAI-0.12.0-x64.dmg', size: 1, digest: 'sha256:c' },
+      ],
+    };
+    const controlled = controlledReleaseNet([release]);
+    let dialogCount = 0;
+    const m = new UpdateManager(
+      baseDeps(td, {
+        net: controlled.net,
+        showDialog: async () => {
+          dialogCount += 1;
+          return dialogCount === 1 ? 2 : 1;
+        },
+      }),
+    );
+
+    const first = m.checkForUpdates();
+    const second = m.checkForUpdates();
+    await new Promise((resolve) => setImmediate(resolve));
+    controlled.respondNext();
+    await first;
+    controlled.respondNext();
+    await second;
+
+    const settings = JSON.parse(readFileSync(path.join(td, 'update-settings.json'), 'utf8'));
+    assert.equal(dialogCount, 1, 'the queued check must not show a duplicate update prompt');
+    assert.equal(settings.skippedVersion, '0.12.0', 'the queued check must not overwrite the Skip choice');
   });
 });
 

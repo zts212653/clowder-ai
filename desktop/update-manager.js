@@ -25,6 +25,7 @@ class UpdateManager {
     this._setInterval = deps.setInterval || setInterval;
     this._clearInterval = deps.clearInterval || clearInterval;
     this._intervalTimer = null;
+    this._checkQueue = Promise.resolve();
     this._downloading = false;
   }
 
@@ -89,7 +90,13 @@ class UpdateManager {
    * Check for updates.
    * @param {{ manual?: boolean }} opts — manual=true shows feedback when up-to-date
    */
-  async checkForUpdates(opts) {
+  checkForUpdates(opts) {
+    const run = () => this._runUpdateCheck(opts);
+    this._checkQueue = this._checkQueue.then(run, run);
+    return this._checkQueue;
+  }
+
+  async _runUpdateCheck(opts) {
     const manual = opts?.manual === true;
     const { dbg, net, platform, arch, showDialog } = this._d;
     const currentVersion = this._d.app.getVersion();
