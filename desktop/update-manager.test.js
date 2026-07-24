@@ -1,4 +1,4 @@
-// F258 — update-manager unit tests
+// F273 — update-manager unit tests
 // Covers: launcher failure modes (spawn-error, nonzero, success) for
 // Windows/macOS, and journal preservation on launcher failure (P1 regression).
 // spawn is injected via deps for testability.

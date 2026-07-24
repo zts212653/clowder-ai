@@ -1,4 +1,4 @@
-// F258: Desktop In-App Update — Electron main-process orchestrator
+// F273: Desktop In-App Update — Electron main-process orchestrator
 const path = require('node:path');
 const fs = require('node:fs');
 const checker = require('./update-checker');

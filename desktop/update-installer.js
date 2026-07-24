@@ -1,4 +1,4 @@
-// F258: Desktop In-App Update — install execution layer
+// F273: Desktop In-App Update — install execution layer
 //
 // Separated from update-manager.js for file-size compliance (350 line limit).
 // HTTP transport: Electron `net` module with system proxy support.

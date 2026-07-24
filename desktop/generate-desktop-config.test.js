@@ -127,12 +127,12 @@ test('#1107: no JSON file is written with BOM-emitting Out-File -Encoding utf8',
   }
 });
 
-// ── F258: Plugin packaging source path regression (F204 migration) ──────
+// ── F273: Plugin packaging source path regression (F204 migration) ──────
 // After F204, plugins moved from root plugins/ to packages/api/src/plugins/.
 // These tests ensure all three packaging configs point to the actual source
 // and that the source directory contains the expected plugin manifests.
 
-test('F258: Inno Setup plugins source points to packages/api/src/plugins', () => {
+test('F273: Inno Setup plugins source points to packages/api/src/plugins', () => {
   const iss = readFileSync(path.join(INSTALLER_DIR, 'cat-cafe.iss'), 'utf8');
   assert.match(
     iss,
@@ -142,7 +142,7 @@ test('F258: Inno Setup plugins source points to packages/api/src/plugins', () =>
   assert.match(iss, /DestDir:.*\{app\}\\plugins/, 'Inno Setup must install plugins to {app}/plugins');
 });
 
-test('F258: electron-builder extraResources plugins source is packages/api/src/plugins', () => {
+test('F273: electron-builder extraResources plugins source is packages/api/src/plugins', () => {
   const pkg = JSON.parse(readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
   const pluginResource = pkg.build?.extraResources?.find((r) => r.to === 'plugins');
   assert.ok(pluginResource, 'extraResources must include a plugins entry');
@@ -152,7 +152,7 @@ test('F258: electron-builder extraResources plugins source is packages/api/src/p
   );
 });
 
-test('F258: build-desktop.ps1 plugins source is packages/api/src/plugins', () => {
+test('F273: build-desktop.ps1 plugins source is packages/api/src/plugins', () => {
   const ps1 = readFileSync(path.join(SCRIPTS_DIR, 'build-desktop.ps1'), 'utf8');
   assert.match(
     ps1,
@@ -161,7 +161,7 @@ test('F258: build-desktop.ps1 plugins source is packages/api/src/plugins', () =>
   );
 });
 
-test('F258: plugin source directory exists and contains github plugin manifest', () => {
+test('F273: plugin source directory exists and contains github plugin manifest', () => {
   const pluginsSrc = path.join(__dirname, '..', 'packages', 'api', 'src', 'plugins');
   assert.ok(existsSync(pluginsSrc), `Plugin source directory must exist: ${pluginsSrc}`);
   const entries = readdirSync(pluginsSrc);

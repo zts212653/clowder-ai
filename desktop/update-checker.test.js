@@ -1,4 +1,4 @@
-// F258 Phase A — update-checker unit tests: parsing, comparison, asset naming
+// F273 Phase A — update-checker unit tests: parsing, comparison, asset naming
 // Selection + persistence tests: see update-checker-selection.test.js
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
