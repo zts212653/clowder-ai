@@ -163,3 +163,33 @@ test('generateSortableId keeps per-timestamp sequence monotonic across clock rol
   assert.ok(prefix(ids[2]) > prefix(ids[0]), 'second 1000 append sorts after first 1000 append');
   assert.ok(prefix(ids[4]) > prefix(ids[2]), 'third 1000 append sorts after second 1000 append');
 });
+
+test('generateSortableId sequence state is bounded regardless of process lifetime', async () => {
+  const { generateSortableId, resetSortableIdSequence, getSortableIdSequence, MAX_TRACKED_TIMESTAMPS } = await import(
+    '../dist/domains/cats/services/stores/ports/MessageStore.js?sortable-id-bounded'
+  );
+  resetSortableIdSequence();
+
+  // Generate IDs for more distinct timestamps than the cache can hold.
+  const overflow = MAX_TRACKED_TIMESTAMPS + 100;
+  for (let i = 0; i < overflow; i++) {
+    generateSortableId(i + 1);
+  }
+
+  // Count how many timestamps still have cached sequence state.
+  let trackedCount = 0;
+  for (let i = 1; i <= overflow; i++) {
+    if (getSortableIdSequence(i) > 0) {
+      trackedCount++;
+    }
+  }
+
+  assert.ok(
+    trackedCount <= MAX_TRACKED_TIMESTAMPS,
+    `tracked timestamps ${trackedCount} exceed capacity ${MAX_TRACKED_TIMESTAMPS}`,
+  );
+
+  // Recent timestamps must remain usable: the most recent distinct timestamp
+  // should have advanced its sequence by one.
+  assert.equal(getSortableIdSequence(overflow), 1);
+});

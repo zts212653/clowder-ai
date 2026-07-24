@@ -8,7 +8,7 @@
 
 ## Decision in one paragraph
 
-Keep the existing `timestamp-seq-uuid` lexical ID layout and treat it as the explicit cursor-order key. Because #1185 already restricts future writes to non-negative integral ECMAScript Date values, the timestamp component is a fixed 16-digit decimal string and the sequence component can be bounded to six decimal digits per timestamp. The producer now fails closed (`RangeError`) when the per-timestamp sequence would exceed `MAX_SEQUENCE`, preventing the `999999 → 1000000` lexicographic inversion and guaranteeing a 32-character output ceiling. Memory and Redis continue to share the same producer, so they implement the same ordering relation without a separate order-key field.
+Keep the existing `timestamp-seq-uuid` lexical ID layout and treat it as the explicit cursor-order key. Because #1185 already restricts future writes to non-negative integral ECMAScript Date values, the timestamp component is a fixed 16-digit decimal string and the sequence component can be bounded to six decimal digits per timestamp. Per-timestamp sequence state lives in a fixed-capacity LRU cache (`MAX_TRACKED_TIMESTAMPS`), giving it a provable memory lifecycle. The producer fails closed (`RangeError`) when the per-timestamp sequence would exceed `MAX_SEQUENCE`, preventing the `999999 → 1000000` lexicographic inversion and guaranteeing a 32-character output ceiling. Memory and Redis continue to share the same producer, so they implement the same ordering relation without a separate order-key field.
 
 ## Why this satisfies D2-A
 
@@ -41,8 +41,9 @@ Keep the existing `timestamp-seq-uuid` lexical ID layout and treat it as the exp
 - **No historical data scan or migration.** This is a future-write producer boundary only; D3 raw audit and M7 historical compatibility remain RESERVED per the D-Gate.
 - **No `threadId`, `actor.id`, or Unicode-scalar bounds.** Those identifiers have alternate ingress paths and remain RESERVED pending source-specific inventory.
 - **No shared CAS between concurrent processes.** The sequence state is local to a single Node.js process and keyed by timestamp; cross-process monotonicity depends on the caller supplying monotonic timestamps.
-- **Sequence reset at the same timestamp can regress order.** The producer has no memory of prior process epochs; production callers must not reset or restart within the same millisecond. The per-timestamp Map also grows unbounded over the process lifetime; pruning is RESERVED for a future operational boundary.
-- **Clock rollback within the admitted Date domain is safe.** Because each timestamp maintains its own next-sequence, appends at `1000 → 1001 → 1000 → 1002 → 1000` advance their respective counters and retain lexicographic append order.
+- **Sequence reset at the same timestamp can regress order.** The producer has no memory of prior process epochs; production callers must not reset or restart within the same millisecond.
+- **Per-timestamp sequence state is bounded by an LRU cache.** `MAX_TRACKED_TIMESTAMPS` caps memory regardless of process lifetime. Evicted timestamps may reset their sequence on next use; production `Date.now()` timestamps are monotonic, so evicted timestamps do not produce comparable cursors. Clock rollback within the admitted Date domain is safe for timestamps that remain in the cache; heavy rollback outside the cache window may regress order.
+- **Clock rollback within the admitted Date domain is safe while cached.** Because each timestamp maintains its own next-sequence, appends at `1000 → 1001 → 1000 → 1002 → 1000` advance their respective counters and preserve order for the cached scope.
 
 ## Test evidence
 

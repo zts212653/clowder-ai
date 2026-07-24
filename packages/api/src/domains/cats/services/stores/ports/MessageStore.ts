@@ -392,20 +392,64 @@ export function assertValidStoredMessageTimestamp(timestamp: number): void {
 export const MAX_SEQUENCE = 999_999;
 
 /**
+ * Maximum number of timestamps for which sequence state is retained.
+ * This bounds the producer's memory footprint regardless of process lifetime.
+ * Production callers pass monotonic Date.now()-style timestamps, so the least-
+ * recently-used entries are the ones least likely to produce future cursors.
+ */
+export const MAX_TRACKED_TIMESTAMPS = 100_000;
+
+/**
+ * Bounded LRU cache for per-timestamp next-sequence state.
+ * Access order is used as recency; eviction drops the least-recently-used
+ * timestamp when the capacity is exceeded.
+ */
+class SequenceCache extends Map<number, number> {
+  private readonly maxSize: number;
+
+  constructor(maxSize: number) {
+    super();
+    this.maxSize = maxSize;
+  }
+
+  override get(key: number): number | undefined {
+    const value = super.get(key);
+    if (value !== undefined) {
+      // Move to most-recent position.
+      super.delete(key);
+      super.set(key, value);
+    }
+    return value;
+  }
+
+  override set(key: number, value: number): this {
+    if (super.has(key)) {
+      super.delete(key);
+    } else if (super.size >= this.maxSize) {
+      // Evict the least-recently-used entry (first key in insertion order).
+      const oldestKey = super.keys().next().value as number;
+      super.delete(oldestKey);
+    }
+    super.set(key, value);
+    return this;
+  }
+}
+
+/**
  * Per-timestamp next-sequence state. A timestamp maps to the sequence value
  * that the next call for that timestamp will use.
  */
-const _sequenceByTimestamp = new Map<number, number>();
+const _sequenceByTimestamp = new SequenceCache(MAX_TRACKED_TIMESTAMPS);
 
 /**
- * Default starting sequence for timestamps not yet present in the map.
+ * Default starting sequence for timestamps not yet present in the cache.
  * Tests can reset this to simulate an exhausted or partially-advanced epoch.
  */
 let _defaultSequence = 0;
 
 /**
- * Test-only hook: reset sequence state. Clears per-timestamp memory and sets
- * the default starting sequence for all timestamps.
+ * Test-only hook: reset sequence state. Clears the bounded cache and sets the
+ * default starting sequence for all timestamps.
  */
 export function resetSortableIdSequence(value = 0): void {
   _sequenceByTimestamp.clear();
@@ -414,7 +458,7 @@ export function resetSortableIdSequence(value = 0): void {
 
 /**
  * Test-only hook: read the current next-sequence for a timestamp.
- * Returns the default starting sequence if the timestamp has no state.
+ * Returns the default starting sequence if the timestamp has no cached state.
  */
 export function getSortableIdSequence(timestamp?: number): number {
   if (timestamp === undefined) {
