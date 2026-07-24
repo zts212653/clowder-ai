@@ -179,6 +179,7 @@ import {
   isMalformedToolCallError,
   isMissingClaudeSessionError,
   isPromptTokenLimitExceededError,
+  isProviderBusyError,
   isSessionNotFoundDiagnostic,
   isTransientAcpPromptFailure,
   isTransientCliExitCode1,
@@ -3091,6 +3092,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       let suppressedContextOverflowError: AgentMessage | undefined;
       let suppressedTransientCliError: AgentMessage | undefined;
       let suppressedTimeoutError: AgentMessage | undefined;
+      // #1211: Suppress provider-busy error so the unsafe carrier is released
+      // before invoke-single-cat retries with a fresh session/process.
+      let suppressedProviderBusyError: AgentMessage | undefined;
       // F215: Suppress malformed tool-call error for seal+fresh-retry (AC-C1/C2).
       // Also suppress the system_info malformed_toolcall_detected signal that precedes the error.
       let suppressedMalformedError: AgentMessage | undefined;
@@ -3177,6 +3181,13 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             suppressedTimeoutError = msg;
             continue;
           }
+          // #1211 self-heal: ACP provider reports an active turn on the current session/carrier.
+          // Suppress and retry without session only when no substantive output was produced,
+          // so already-emitted content is never replayed on a fresh session.
+          if (!attemptHasSubstantiveOutput && msg.type === 'error' && isProviderBusyError(msg.error)) {
+            suppressedProviderBusyError = msg;
+            continue;
+          }
           // F215 AC-C1/C2: Suppress malformed tool-call error + preceding system_info signal
           // → seal session + fresh-context retry (sessionId=undefined).
           // Applies on all attempts (even without session) so a retried invocation that still
@@ -3231,6 +3242,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             suppressedContextOverflowError ||
             suppressedTransientCliError ||
             suppressedTimeoutError ||
+            suppressedProviderBusyError ||
             suppressedMalformedError
           ) {
             if (msg.type === 'done') {
@@ -3261,6 +3273,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                   suppressedPromptLimitError ||
                   suppressedContextOverflowError ||
                   suppressedTimeoutError ||
+                  suppressedProviderBusyError ||
                   suppressedMalformedError,
               );
               shouldRetryOnTransientCliExit = Boolean(suppressedTransientCliError);
@@ -3296,6 +3309,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                 yield out;
               }
               suppressedTimeoutError = undefined;
+            }
+            if (suppressedProviderBusyError) {
+              for await (const out of streamProcessedOutputs(suppressedProviderBusyError)) {
+                yield out;
+              }
+              suppressedProviderBusyError = undefined;
             }
             // F215: Clear malformed error — will be re-evaluated on retry.
             if (suppressedMalformedError) {
@@ -3379,9 +3398,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             ? 'context_window_overflow'
             : suppressedTimeoutError
               ? 'cli_timeout'
-              : suppressedMalformedError
-                ? 'malformed_toolcall'
-                : 'missing_session';
+              : suppressedProviderBusyError
+                ? 'provider_busy'
+                : suppressedMalformedError
+                  ? 'malformed_toolcall'
+                  : 'missing_session';
         log.info(
           {
             catId,
@@ -3463,6 +3484,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
       if (suppressedTransientCliError) {
         for await (const out of streamProcessedOutputs(suppressedTransientCliError)) {
+          yield out;
+        }
+      }
+      if (suppressedProviderBusyError) {
+        for await (const out of streamProcessedOutputs(suppressedProviderBusyError)) {
           yield out;
         }
       }

@@ -159,11 +159,21 @@ export class AcpProviderBusyError extends Error {
   }
 }
 
-/** Pattern for Kimi/ACP providers reporting an overlapping turn. */
+/** Pattern for Kimi/ACP providers reporting an overlapping turn (message fallback). */
 const PROVIDER_BUSY_RE = /Cannot launch a new turn|another turn.*active|turn\.agent_busy/i;
 
+function hasProviderBusyCode(data: unknown): boolean {
+  return typeof data === 'object' && data !== null && (data as Record<string, unknown>).code === 'turn.agent_busy';
+}
+
+/** #1211: Prefer the structured provider code (`data.code === 'turn.agent_busy'`);
+ *  fall back to the message regex for older CLI versions that omit `data`. */
 export function isAcpProviderBusyProtocolError(err: Error): err is AcpProtocolError {
-  return err instanceof AcpProtocolError && err.code === -32600 && PROVIDER_BUSY_RE.test(err.message);
+  return (
+    err instanceof AcpProtocolError &&
+    err.code === -32600 &&
+    (hasProviderBusyCode(err.data) || PROVIDER_BUSY_RE.test(err.message))
+  );
 }
 
 // ─── Client ─────────────────────���──────────────────────────���───

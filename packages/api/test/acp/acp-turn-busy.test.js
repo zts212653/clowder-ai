@@ -5,9 +5,9 @@
  * turn is still active, AcpAgentService must:
  *  - cancel + seal the unsafe session,
  *  - retire the carrier so it is not reused for single-flight sessions,
- *  - retry exactly once with a fresh session when zero real events were produced,
- *  - rebind the session chain via a second session_init,
- *  - fail directly when any real output has already been yielded.
+ *  - NOT attempt an internal fresh-session retry (that retry is owned by
+ *    invoke-single-cat so the unsafe carrier is released first),
+ *  - surface a provider_busy error that invoke-single-cat can recognize.
  */
 
 import assert from 'node:assert/strict';
@@ -18,7 +18,7 @@ const { AcpProviderBusyError } = await import('../../dist/domains/cats/services/
 
 const TEST_POOL_KEY = { projectPath: '/tmp', providerProfile: 'test' };
 
-function makeClient({ firstEvents = [], firstError = null, retryEvents = [], retryError = null } = {}) {
+function makeClient({ firstEvents = [], firstError = null } = {}) {
   const unquiesced = new Set();
   const client = {
     newSessionCalls: 0,
@@ -47,16 +47,13 @@ function makeClient({ firstEvents = [], firstError = null, retryEvents = [], ret
     },
     async *promptStream(sessionId, text) {
       client.prompts.push({ sessionId, text });
-      const isFirst = client.prompts.length === 1;
-      const events = isFirst ? firstEvents : retryEvents;
-      for (const chunk of events) {
+      for (const chunk of firstEvents) {
         yield {
           sessionId,
           update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: chunk } },
         };
       }
-      if (isFirst && firstError) throw firstError;
-      if (!isFirst && retryError) throw retryError;
+      if (firstError) throw firstError;
     },
     onCapacity() {},
     offCapacity() {},
@@ -111,29 +108,26 @@ function busyError(sessionId) {
 }
 
 describe('AcpAgentService provider-busy handling (#1211)', () => {
-  it('zero-event busy recovers with a fresh session and rebinds the session chain', async () => {
+  it('zero-event busy cancels/seals session and surfaces provider_busy error', async () => {
     const sessionId = 'sess-busy';
-    const client = makeClient({ firstError: busyError(sessionId), retryEvents: ['recovery reply'] });
+    const client = makeClient({ firstError: busyError(sessionId) });
     const pool = makePool(client);
     const adapter = makeAdapter(pool);
 
     const messages = [];
-    for await (const msg of adapter.invoke('hello again', {
-      sessionId,
-      resumeFallbackSystemPrompt: 'FALLBACK-IDENTITY',
-    })) {
+    for await (const msg of adapter.invoke('hello again', { sessionId })) {
       messages.push(msg);
     }
 
     const inits = messages.filter((m) => m.type === 'session_init');
-    assert.equal(inits.length, 2, 'retry must announce the replacement session via a second session_init');
+    assert.equal(inits.length, 1, 'must not internally retry with a fresh session');
     assert.equal(inits[0].sessionId, sessionId);
-    assert.equal(inits[1].sessionId, 'fresh-1');
 
-    assert.ok(
-      messages.some((m) => m.type === 'text' && m.content === 'recovery reply'),
-      'recovery promptStream output must reach the consumer',
-    );
+    const err = messages.find((m) => m.type === 'error');
+    assert.ok(err, 'busy must surface an error event');
+    assert.equal(err.errorCode, 'prompt_failure');
+    assert.ok(err.error.includes('provider_busy:'), `expected provider_busy marker, got: ${err.error}`);
+    assert.ok(err.error.includes('Cannot launch a new turn'), `unexpected error: ${err.error}`);
     assert.equal(messages.at(-1).type, 'done');
 
     // Unsafe session must be cancelled + sealed, and the carrier retired.
@@ -141,23 +135,19 @@ describe('AcpAgentService provider-busy handling (#1211)', () => {
     assert.ok(pool.remembered.includes(`sealed:${sessionId}`), 'busy session must be sealed');
     assert.ok(pool.retired.includes('unsafe'), 'unsafe carrier must be retired after lease release');
 
-    // Fresh session must be remembered for pool affinity.
-    assert.ok(pool.remembered.includes('fresh-1'), 'fresh session must be remembered on the pool');
-
-    // Exactly one recovery attempt.
-    assert.equal(client.newSessionCalls, 1, 'only one fresh session may be created for recovery');
-    assert.equal(client.prompts.length, 2);
-    assert.equal(client.prompts[0].sessionId, sessionId);
-    assert.equal(client.prompts[1].sessionId, 'fresh-1');
-    assert.ok(
-      client.prompts[1].text.startsWith('FALLBACK-IDENTITY'),
-      'retry prompt must re-inject the fallback system prompt',
-    );
+    // No internal retry means no extra session or prompt attempts.
+    assert.equal(client.newSessionCalls, 0, 'must not create a fresh session internally');
+    assert.equal(client.prompts.length, 1, 'must only attempt the original prompt');
   });
 
-  it('busy after real output does not retry and surfaces prompt_failure', async () => {
+  it('busy after stale/previous turn output does not retry (fail closed)', async () => {
+    // AC4: Kimi may drain events from the previous turn before rejecting the
+    // new prompt with -32600. Those events must not be treated as a reason to
+    // internally retry, because AcpAgentService cannot reliably attribute them
+    // to the current turn. The output is still delivered; retry is delegated to
+    // invoke-single-cat only when no substantive output has occurred.
     const sessionId = 'sess-busy-partial';
-    const client = makeClient({ firstEvents: ['partial'], firstError: busyError(sessionId) });
+    const client = makeClient({ firstEvents: ['stale turn output'], firstError: busyError(sessionId) });
     const pool = makePool(client);
     const adapter = makeAdapter(pool);
 
@@ -168,49 +158,27 @@ describe('AcpAgentService provider-busy handling (#1211)', () => {
 
     const inits = messages.filter((m) => m.type === 'session_init');
     assert.equal(inits.length, 1, 'no replacement session when output already produced');
-    assert.equal(client.newSessionCalls, 0, 'no fresh session created');
+    assert.equal(client.newSessionCalls, 0, 'no fresh session created internally');
+
+    // Stale output must still be delivered to the user (we cannot safely replay
+    // it, but we also must not silently drop user-visible content).
+    assert.ok(
+      messages.some((m) => m.type === 'text' && m.content === 'stale turn output'),
+      'stale/previous turn output must still be delivered',
+    );
 
     const err = messages.find((m) => m.type === 'error');
     assert.ok(err, 'busy after output must surface an error event');
     assert.equal(err.errorCode, 'prompt_failure');
-    assert.ok(err.error.includes('Cannot launch a new turn'), `unexpected error: ${err.error}`);
+    assert.ok(err.error.includes('provider_busy:'), `expected provider_busy marker, got: ${err.error}`);
     assert.equal(messages.at(-1).type, 'done');
 
     assert.ok(client.cancelledSessions.includes(sessionId), 'busy session must still be cancelled');
     assert.ok(pool.retired.includes('unsafe'), 'carrier must still be retired');
   });
 
-  it('recovery is attempted exactly once even if the fresh session is also busy', async () => {
-    const sessionId = 'sess-busy-twice';
-    const client = makeClient({
-      firstError: busyError(sessionId),
-      retryEvents: [],
-      retryError: busyError('fresh-1'),
-    });
-    const pool = makePool(client);
-    const adapter = makeAdapter(pool);
-
-    const messages = [];
-    for await (const msg of adapter.invoke('hello', { sessionId })) {
-      messages.push(msg);
-    }
-
-    assert.equal(client.newSessionCalls, 1, 'only one recovery session may be created');
-    assert.equal(client.prompts.length, 2, 'only two prompt attempts may occur');
-
-    const err = messages.find((m) => m.type === 'error');
-    assert.ok(err, 'second busy must surface an error event');
-    assert.equal(err.errorCode, 'prompt_failure');
-    assert.ok(
-      err.error.includes('provider_busy_recovery_failed'),
-      `expected recovery failure label, got: ${err.error}`,
-    );
-    assert.equal(messages.at(-1).type, 'done');
-  });
-
-  it('fresh non-resumed session busy with zero events also recovers once', async () => {
-    // No sessionId means resumeDisposition === 'fresh_without_resume'.
-    const client = makeClient({ firstError: busyError('fresh-sess'), retryEvents: ['ok'] });
+  it('fresh non-resumed session busy also cancels/seals and surfaces error', async () => {
+    const client = makeClient({ firstError: busyError('fresh-sess') });
     const pool = makePool(client);
     const adapter = makeAdapter(pool);
 
@@ -220,10 +188,13 @@ describe('AcpAgentService provider-busy handling (#1211)', () => {
     }
 
     const inits = messages.filter((m) => m.type === 'session_init');
-    assert.equal(inits.length, 2, 'fresh-session busy must also rebind to a replacement session');
+    assert.equal(inits.length, 1, 'must not internally retry even for fresh-session busy');
     assert.equal(inits[0].sessionId, 'fresh-1');
-    assert.equal(inits[1].sessionId, 'fresh-2');
-    assert.equal(client.newSessionCalls, 2);
+    assert.equal(client.newSessionCalls, 1, 'only the original newSession');
+
+    const err = messages.find((m) => m.type === 'error');
+    assert.ok(err, 'busy must surface an error event');
+    assert.ok(err.error.includes('provider_busy:'), `expected provider_busy marker, got: ${err.error}`);
     assert.equal(messages.at(-1).type, 'done');
   });
 });

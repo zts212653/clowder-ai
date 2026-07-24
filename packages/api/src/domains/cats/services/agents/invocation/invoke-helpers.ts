@@ -141,6 +141,12 @@ export function isCliTimeoutError(message: string | undefined): boolean {
   return /CLI (?:响应超时|idle-silent 超时)/i.test(message);
 }
 
+/** #1211: Detect provider-busy error emitted by AcpAgentService. */
+export function isProviderBusyError(message: string | undefined): boolean {
+  if (!message) return false;
+  return message.startsWith('provider_busy:');
+}
+
 /** F215: Detect malformed tool-call error emitted by ClaudeAgentService (form A / B).
  *  Used in invoke-single-cat to trigger seal+fresh-context+46接力 fallback chain. */
 export function isMalformedToolCallError(message: string | undefined): boolean {

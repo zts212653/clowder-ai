@@ -223,10 +223,6 @@ export class AcpAgentService implements AgentService {
 
     let promptStreamStartedAt = 0;
     let eventCount = 0;
-    // #1211: Provider-busy recovery is allowed exactly once per invoke, and only
-    // when the failing prompt produced zero real events. Prevents infinite retry
-    // loops when the provider repeatedly reports an active turn.
-    let busyRecoveryAttempted = false;
     // Circuit breaker: compaction auto-continue loop detection.
     // After scratchpad is detected by the transformer, count events still arriving.
     // If they exceed the threshold, OpenCode is in a compaction → auto-continue loop.
@@ -665,42 +661,17 @@ export class AcpAgentService implements AgentService {
         sealActivePromptSession(sessionId);
       }
       // #1211: Provider reports an active turn on the session. Cancel the unsafe
-      // prompt, seal the session, and retire the carrier. If we have not produced
-      // any real events yet, attempt exactly one fresh-session recovery.
+      // prompt and seal the session. The fresh-session retry is delegated to
+      // invoke-single-cat so the unsafe carrier is released and retired before a
+      // new process/lease is acquired.
       if (err instanceof AcpProviderBusyError) {
         if (sessionId) {
           cancelActivePromptSession(sessionId);
         }
-        if (eventCount === 0 && !busyRecoveryAttempted) {
-          busyRecoveryAttempted = true;
-          log.warn(
-            { ...ctx, sessionId, err: err.message },
-            '#1211: provider busy with zero events — attempting fresh session recovery',
-          );
-          try {
-            for await (const msg of runFreshSessionRetry!('#1211', options?.resumeFallbackSystemPrompt)) {
-              yield msg;
-            }
-            yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
-            return; // Recovery succeeded
-          } catch (retryErr) {
-            if (sessionId && (retryErr instanceof AcpTimeoutError || retryErr instanceof AcpStreamIdleError)) {
-              sealActivePromptSession(sessionId);
-            }
-            const retryErrMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-            log.error({ ...ctx, sessionId, err: retryErrMsg }, '#1211: fresh session recovery also failed');
-            yield {
-              type: 'error',
-              catId: this.catId,
-              error: `provider_busy_recovery_failed: ${retryErrMsg}`,
-              errorCode: 'prompt_failure',
-              metadata,
-              timestamp: Date.now(),
-            };
-            yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
-            return;
-          }
-        }
+        log.info(
+          { ...ctx, sessionId, err: err.message },
+          '#1211: provider busy — delegating retry to invocation self-heal',
+        );
       }
       const waitedMs = promptStreamStartedAt ? Date.now() - promptStreamStartedAt : 0;
       // P1: stderr may arrive after timeout — give a grace window for late capacity signals
@@ -799,6 +770,12 @@ function classifyError(
   capacitySignal: AcpCapacitySignal | null | undefined,
   clientRecentSignal?: AcpCapacitySignal | null,
 ): { errorCode: string; errorMsg: string } {
+  // #1211: Provider-busy errors are retried by invoke-single-cat after the
+  // unsafe carrier is released. Prefix the message so the invocation layer
+  // can recognize them without relying on the full provider text.
+  if (err instanceof AcpProviderBusyError) {
+    return { errorCode: 'prompt_failure', errorMsg: `provider_busy: ${err.message}` };
+  }
   if (err instanceof AcpProtocolError) {
     // JSON-RPC data.error carries the real cause (e.g. Kimi wraps exceptions
     // as -32603 "Internal error" with the detail in data). Surface it.
