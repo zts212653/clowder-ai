@@ -8,16 +8,16 @@
 
 ## Decision in one paragraph
 
-Keep the existing `timestamp-seq-uuid` lexical ID layout and treat it as the explicit cursor-order key. Because #1185 already restricts future writes to non-negative integral ECMAScript Date values, the timestamp component is a fixed 16-digit decimal string and the sequence component can be bounded to six decimal digits per timestamp. Per-timestamp sequence state lives in a fixed-capacity LRU cache (`MAX_TRACKED_TIMESTAMPS`), giving it a provable memory lifecycle. The producer fails closed (`RangeError`) when the per-timestamp sequence would exceed `MAX_SEQUENCE`, preventing the `999999 → 1000000` lexicographic inversion and guaranteeing a 32-character output ceiling. Memory and Redis continue to share the same producer, so they implement the same ordering relation without a separate order-key field.
+Keep the existing `timestamp-seq-uuid` lexical ID layout and treat it as the explicit cursor-order key. Because #1185 already restricts future writes to non-negative integral ECMAScript Date values, the timestamp component is a fixed 16-digit decimal string and the sequence component can be bounded to six decimal digits per logical timestamp. The producer tracks a single *logical* high-water timestamp and a per-logical-timestamp sequence counter; advancing the high-water mark resets the counter, so there is no process-lifetime sequence ceiling. The logical timestamp is derived from admitted timestamps: it moves forward when the caller supplies a larger timestamp and stays unchanged for smaller or equal inputs. This preserves exact lexical cursor order using only bounded local state while still admitting out-of-order timestamps (for example, a queued message with an earlier timestamp appended after a later one). The producer fails closed (`RangeError`) when the per-timestamp sequence would exceed `MAX_SEQUENCE`, preventing the `999999 → 1000000` lexicographic inversion and guaranteeing a 32-character output ceiling. Memory and Redis continue to share the same producer, so they implement the same ordering relation without a separate order-key field.
 
 ## Why this satisfies D2-A
 
 | Required terminal invariant | How this implementation closes it |
 |---|---|
-| A later append at the same effective score never compares at or before an earlier cursor | Each timestamp keeps an independent monotonic next-sequence; the 6-digit zero-padded form preserves lexicographic order for same-timestamp IDs up to `MAX_SEQUENCE`, and cross-timestamp order is preserved by the fixed-width timestamp prefix. |
+| A later append at the same effective score never compares at or before an earlier cursor | The producer keeps a monotonic logical timestamp and a per-logical-timestamp sequence counter. The 6-digit zero-padded form preserves lexicographic order for IDs sharing the same logical timestamp up to `MAX_SEQUENCE`, and cross-timestamp order is preserved by the fixed-width logical-timestamp prefix. Out-of-order input timestamps are promoted to the current logical timestamp, so generation order still matches lexical order. |
 | Expired-cursor recovery is defined for mixed legacy/new IDs | The ID format is unchanged; legacy six-digit IDs and new bounded IDs order consistently by timestamp first, then by sequence. Tests cover `getByThreadAfter` with a mixed-epoch cursor. |
 | Finite, enforced output maximum | `MAX_SEQUENCE = 999_999` plus 16-digit timestamp plus 8-character UUID gives a hard 32-character ceiling. |
-| Sequence exhaustion/restart/concurrency is explicit and fail-closed | Exhaustion throws `RangeError: sortable-ID sequence exhausted` before width expansion or wrap. Restart clears per-timestamp state and sets a default starting sequence; this is documented as a known boundary that production callers must mitigate with monotonic timestamps. |
+| Sequence exhaustion/restart/concurrency is explicit and fail-closed | Exhaustion throws `RangeError: sortable-ID sequence exhausted` before width expansion or wrap. Advancing the high-water timestamp resets the sequence counter, so there is no process-lifetime ceiling. Restart resets both high-water and sequence; this is documented as a known boundary that production callers must mitigate with monotonic timestamps. |
 | Memory and Redis implement the same ordering relation | Both stores import `generateSortableId` from the same module and rely on Redis ZSET ordering for score ties. |
 
 ## Files changed
@@ -37,13 +37,13 @@ Keep the existing `timestamp-seq-uuid` lexical ID layout and treat it as the exp
 
 ## Explicit boundaries and reservations
 
-- **No change to timestamp admission.** #1185's non-negative integral Date domain is preserved; this implementation does not narrow or widen it.
+- **Logical timestamp in the ID prefix.** The 16-digit timestamp component of the sortable ID is a process-local logical ordering timestamp, not necessarily the message's stored timestamp. It advances to the maximum admitted timestamp and never decreases, so the lexical cursor order is always well-defined.
+- **Out-of-order timestamps are admitted but promoted.** #1185's non-negative integral Date domain is still validated. Timestamps lower than the current high-water mark are admitted using the current logical timestamp as the ID prefix, so they still sort after all earlier IDs generated in the process.
 - **No historical data scan or migration.** This is a future-write producer boundary only; D3 raw audit and M7 historical compatibility remain RESERVED per the D-Gate.
 - **No `threadId`, `actor.id`, or Unicode-scalar bounds.** Those identifiers have alternate ingress paths and remain RESERVED pending source-specific inventory.
-- **No shared CAS between concurrent processes.** The sequence state is local to a single Node.js process and keyed by timestamp; cross-process monotonicity depends on the caller supplying monotonic timestamps.
-- **Sequence reset at the same timestamp can regress order.** The producer has no memory of prior process epochs; production callers must not reset or restart within the same millisecond.
-- **Per-timestamp sequence state is bounded by an LRU cache.** `MAX_TRACKED_TIMESTAMPS` caps memory regardless of process lifetime. Evicted timestamps may reset their sequence on next use; production `Date.now()` timestamps are monotonic, so evicted timestamps do not produce comparable cursors. Clock rollback within the admitted Date domain is safe for timestamps that remain in the cache; heavy rollback outside the cache window may regress order.
-- **Clock rollback within the admitted Date domain is safe while cached.** Because each timestamp maintains its own next-sequence, appends at `1000 → 1001 → 1000 → 1002 → 1000` advance their respective counters and preserve order for the cached scope.
+- **No shared CAS between concurrent processes.** The sequence state is local to a single Node.js process (one high-water logical timestamp + one sequence counter); cross-process order is only guaranteed for callers that supply monotonically non-decreasing timestamps.
+- **Sequence reset at the same logical timestamp can regress order.** The producer has no memory of prior process epochs; production callers must not reset or restart within the same millisecond.
+- **Extreme clock rollback is bounded.** A caller-supplied timestamp far below the current high-water mark still produces an ordered ID, but its ID prefix no longer matches its stored timestamp. Consumers that decode the ID prefix as a timestamp would observe the logical value, not the original input.
 
 ## Test evidence
 

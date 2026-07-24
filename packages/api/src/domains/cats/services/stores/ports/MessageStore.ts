@@ -382,101 +382,57 @@ export function assertValidStoredMessageTimestamp(timestamp: number): void {
  * In-memory bounded message store.
  */
 /**
- * Generate a bounded sortable message ID: fixed-width timestamp + six-digit
- * sequence + UUID suffix. Lexicographic order matches insertion order within
- * the admitted non-negative integral Date domain. The sequence is per-timestamp
- * and capped at MAX_SEQUENCE; exhaustion throws a RangeError before width
- * expansion or wrap.
+ * Generate a bounded sortable message ID: fixed-width logical timestamp +
+ * six-digit sequence + UUID suffix. Lexicographic order matches insertion
+ * order within this process: the logical timestamp is a monotonic high-water
+ * mark derived from admitted timestamps, and the sequence advances within the
+ * current logical timestamp. Advancing the high-water mark resets the
+ * sequence, so there is no process-lifetime ceiling. Exhaustion throws a
+ * RangeError before width expansion or wrap.
  */
 /** Maximum sequence value that keeps the sortable-ID middle component at six decimal digits. */
 export const MAX_SEQUENCE = 999_999;
 
 /**
- * Maximum number of timestamps for which sequence state is retained.
- * This bounds the producer's memory footprint regardless of process lifetime.
- * Production callers pass monotonic Date.now()-style timestamps, so the least-
- * recently-used entries are the ones least likely to produce future cursors.
+ * Highest logical timestamp that has been admitted by this process.
+ * This is the ID prefix; it may be greater than the caller's input timestamp
+ * when the input is not larger than the current high-water mark.
  */
-export const MAX_TRACKED_TIMESTAMPS = 100_000;
+let _highWaterTimestamp = 0;
 
-/**
- * Bounded LRU cache for per-timestamp next-sequence state.
- * Access order is used as recency; eviction drops the least-recently-used
- * timestamp when the capacity is exceeded.
- */
-class SequenceCache extends Map<number, number> {
-  private readonly maxSize: number;
-
-  constructor(maxSize: number) {
-    super();
-    this.maxSize = maxSize;
-  }
-
-  override get(key: number): number | undefined {
-    const value = super.get(key);
-    if (value !== undefined) {
-      // Move to most-recent position.
-      super.delete(key);
-      super.set(key, value);
-    }
-    return value;
-  }
-
-  override set(key: number, value: number): this {
-    if (super.has(key)) {
-      super.delete(key);
-    } else if (super.size >= this.maxSize) {
-      // Evict the least-recently-used entry (first key in insertion order).
-      const oldestKey = super.keys().next().value as number;
-      super.delete(oldestKey);
-    }
-    super.set(key, value);
-    return this;
-  }
-}
-
-/**
- * Per-timestamp next-sequence state. A timestamp maps to the sequence value
- * that the next call for that timestamp will use.
- */
-const _sequenceByTimestamp = new SequenceCache(MAX_TRACKED_TIMESTAMPS);
-
-/**
- * Default starting sequence for timestamps not yet present in the cache.
- * Tests can reset this to simulate an exhausted or partially-advanced epoch.
- */
+/** Starting sequence value for the next newly-admitted logical timestamp. */
 let _defaultSequence = 0;
 
-/**
- * Test-only hook: reset sequence state. Clears the bounded cache and sets the
- * default starting sequence for all timestamps.
- */
-export function resetSortableIdSequence(value = 0): void {
-  _sequenceByTimestamp.clear();
-  _defaultSequence = value;
-}
+/** Next sequence value for the current high-water logical timestamp. */
+let _seq = 0;
 
 /**
- * Test-only hook: read the current next-sequence for a timestamp.
- * Returns the default starting sequence if the timestamp has no cached state.
+ * Test-only hook: reset the producer's ordering state.
+ * Resets the high-water timestamp and sets the starting/default sequence value.
  */
-export function getSortableIdSequence(timestamp?: number): number {
-  if (timestamp === undefined) {
-    return _defaultSequence;
-  }
-  return _sequenceByTimestamp.get(timestamp) ?? _defaultSequence;
+export function resetSortableIdSequence(value = 0): void {
+  _highWaterTimestamp = 0;
+  _defaultSequence = value;
+  _seq = value;
+}
+
+/** Test-only hook: read the current next-sequence value. */
+export function getSortableIdSequence(): number {
+  return _seq;
 }
 
 export function generateSortableId(timestamp: number): string {
   assertValidStoredMessageTimestamp(timestamp);
-  const seq = _sequenceByTimestamp.get(timestamp) ?? _defaultSequence;
-  if (seq > MAX_SEQUENCE) {
+  if (timestamp > _highWaterTimestamp) {
+    _highWaterTimestamp = timestamp;
+    _seq = _defaultSequence;
+  }
+  if (_seq > MAX_SEQUENCE) {
     throw new RangeError('sortable-ID sequence exhausted');
   }
-  const ts = String(timestamp).padStart(16, '0');
-  const seqStr = String(seq).padStart(6, '0');
+  const ts = String(_highWaterTimestamp).padStart(16, '0');
+  const seqStr = String(_seq++).padStart(6, '0');
   const suffix = randomUUID().slice(0, 8);
-  _sequenceByTimestamp.set(timestamp, seq + 1);
   return `${ts}-${seqStr}-${suffix}`;
 }
 

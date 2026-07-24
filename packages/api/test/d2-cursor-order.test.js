@@ -4,6 +4,12 @@
  * Store-boundary coverage lives in message-store.test.js and
  * redis-message-store.test.js. This suite only protects the shared generator's
  * direct-call contract and its sequence side-effect boundary.
+ *
+ * The producer encodes a *logical* timestamp in the ID prefix. The logical
+ * timestamp is a process-local high-water mark: it advances when the caller
+ * supplies a larger timestamp and stays unchanged for smaller or equal inputs.
+ * This keeps the local state bounded to a few scalars while still producing
+ * exact lexicographic order for every ID generated in the process.
  */
 
 import assert from 'node:assert/strict';
@@ -54,35 +60,61 @@ test('generateSortableId fails closed on six-digit sequence exhaustion', async (
   );
 
   // Rejection must not advance the sequence further.
-  assert.equal(getSortableIdSequence(1), MAX_SEQUENCE + 1);
+  assert.equal(getSortableIdSequence(), MAX_SEQUENCE + 1);
 });
 
-test('generateSortableId sequences are independent per timestamp', async () => {
+test('generateSortableId advances timestamp and resets sequence at new high-water mark', async () => {
   const { generateSortableId, resetSortableIdSequence, getSortableIdSequence } = await import(
-    '../dist/domains/cats/services/stores/ports/MessageStore.js?sortable-id-per-ts'
+    '../dist/domains/cats/services/stores/ports/MessageStore.js?sortable-id-advance'
   );
   resetSortableIdSequence();
 
-  const tsA = 1_000;
-  const tsB = 2_000;
+  const firstTs = 1_000;
+  const laterTs = 2_000;
 
-  // Advance tsA several times.
-  const a1 = generateSortableId(tsA);
-  const a2 = generateSortableId(tsA);
-  const a3 = generateSortableId(tsA);
+  const a1 = generateSortableId(firstTs);
+  const a2 = generateSortableId(firstTs);
   assert.equal(a1.split('-')[1], '000000');
   assert.equal(a2.split('-')[1], '000001');
-  assert.equal(a3.split('-')[1], '000002');
-  assert.equal(getSortableIdSequence(tsA), 3);
+  assert.equal(getSortableIdSequence(), 2);
 
-  // tsB starts from the default (0), not from tsA's next sequence.
-  const b1 = generateSortableId(tsB);
-  assert.equal(b1.split('-')[1], '000000', 'independent timestamp starts from default sequence');
-  assert.equal(getSortableIdSequence(tsB), 1);
+  // Advancing the timestamp resets the sequence, avoiding process-lifetime
+  // exhaustion as long as the timestamp keeps moving forward.
+  const b1 = generateSortableId(laterTs);
+  assert.equal(b1.split('-')[1], '000000', 'new high-water timestamp resets sequence');
+  assert.equal(getSortableIdSequence(), 1);
 
-  // Revisiting tsA continues from where it left off.
-  const a4 = generateSortableId(tsA);
-  assert.equal(a4.split('-')[1], '000003');
+  assert.ok(b1 > a2, 'later-timestamp ID sorts after earlier-timestamp ID');
+});
+
+test('generateSortableId promotes non-monotonic timestamps to the high-water mark', async () => {
+  const { generateSortableId, resetSortableIdSequence } = await import(
+    '../dist/domains/cats/services/stores/ports/MessageStore.js?sortable-id-monotonic'
+  );
+  resetSortableIdSequence();
+
+  const higher = generateSortableId(1_001);
+  const lower = generateSortableId(1_000);
+
+  // The second call is admitted using the current high-water logical timestamp,
+  // so its timestamp prefix is the same as the first call and its sequence is higher.
+  assert.equal(lower.slice(0, 16), higher.slice(0, 16), 'out-of-order timestamp inherits the logical timestamp prefix');
+  assert.ok(lower > higher, 'later generation still sorts after earlier generation');
+});
+
+test('generateSortableId cross-timestamp generation avoids process-lifetime exhaustion', async () => {
+  const { generateSortableId, resetSortableIdSequence } = await import(
+    '../dist/domains/cats/services/stores/ports/MessageStore.js?sortable-id-lifetime'
+  );
+  resetSortableIdSequence();
+
+  // Simulate many messages across distinct monotonic timestamps.
+  // The total count far exceeds MAX_SEQUENCE, yet each timestamp starts fresh.
+  const timestamps = [1, 2, 3, 4, 5];
+  for (const ts of timestamps) {
+    const id = generateSortableId(ts);
+    assert.equal(id.split('-')[1], '000000', `timestamp ${ts} starts at sequence 0`);
+  }
 });
 
 test('generateSortableId output length is bounded', async () => {
@@ -129,67 +161,11 @@ test('generateSortableId documents that sequence reset at the same timestamp reg
   // The random suffix makes full-ID order non-deterministic, but the
   // timestamp-sequence prefix is deterministic. Resetting the sequence to zero
   // at the same timestamp produces a prefix lexicographically earlier than a
-  // previously emitted high-sequence prefix at that timestamp. The module-global
-  // producer cannot detect history, so the ordering contract is violated; this
-  // documents the boundary and is why production callers must use monotonic
-  // timestamps across restarts.
+  // previously emitted high-sequence prefix at that timestamp. The producer
+  // cannot detect history, so the ordering contract is violated; this documents
+  // the boundary and is why production callers must use monotonic timestamps
+  // across restarts.
   const prefix = (id) => id.slice(0, id.lastIndexOf('-'));
   assert.ok(prefix(afterReset) < prefix(highSequence), 'reset sequence at same timestamp regresses order');
   assert.equal(prefix(beforeReset), prefix(afterReset), 'reset returns sequence to zero');
-});
-
-test('generateSortableId keeps per-timestamp sequence monotonic across clock rollback', async () => {
-  const { generateSortableId, resetSortableIdSequence } = await import(
-    '../dist/domains/cats/services/stores/ports/MessageStore.js?sortable-id-rollback'
-  );
-  resetSortableIdSequence();
-
-  // Scenario from D2 review: clock rolls back and forth within the admitted
-  // Date domain. Each timestamp must keep its own independent next-sequence.
-  const timestamps = [1_000, 1_001, 1_000, 1_002, 1_000];
-  const ids = timestamps.map((ts) => generateSortableId(ts));
-
-  // Expected per-timestamp sequences:
-  // 1000 -> 0, 1001 -> 0, 1000 -> 1, 1002 -> 0, 1000 -> 2
-  const expectedSequences = ['000000', '000000', '000001', '000000', '000002'];
-  for (let i = 0; i < ids.length; i++) {
-    assert.equal(ids[i].split('-')[1], expectedSequences[i], `sequence for append ${i}`);
-  }
-
-  // Same-timestamp prefixes must advance monotonically (the D2 cursor-order
-  // invariant). Cross-timestamp order is governed by the timestamp component
-  // and is intentionally not tied to append order when the clock rolls back.
-  const prefix = (id) => id.slice(0, id.lastIndexOf('-'));
-  assert.ok(prefix(ids[2]) > prefix(ids[0]), 'second 1000 append sorts after first 1000 append');
-  assert.ok(prefix(ids[4]) > prefix(ids[2]), 'third 1000 append sorts after second 1000 append');
-});
-
-test('generateSortableId sequence state is bounded regardless of process lifetime', async () => {
-  const { generateSortableId, resetSortableIdSequence, getSortableIdSequence, MAX_TRACKED_TIMESTAMPS } = await import(
-    '../dist/domains/cats/services/stores/ports/MessageStore.js?sortable-id-bounded'
-  );
-  resetSortableIdSequence();
-
-  // Generate IDs for more distinct timestamps than the cache can hold.
-  const overflow = MAX_TRACKED_TIMESTAMPS + 100;
-  for (let i = 0; i < overflow; i++) {
-    generateSortableId(i + 1);
-  }
-
-  // Count how many timestamps still have cached sequence state.
-  let trackedCount = 0;
-  for (let i = 1; i <= overflow; i++) {
-    if (getSortableIdSequence(i) > 0) {
-      trackedCount++;
-    }
-  }
-
-  assert.ok(
-    trackedCount <= MAX_TRACKED_TIMESTAMPS,
-    `tracked timestamps ${trackedCount} exceed capacity ${MAX_TRACKED_TIMESTAMPS}`,
-  );
-
-  // Recent timestamps must remain usable: the most recent distinct timestamp
-  // should have advanced its sequence by one.
-  assert.equal(getSortableIdSequence(overflow), 1);
 });

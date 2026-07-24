@@ -81,6 +81,12 @@ describe('MessageStore.getByThreadAfter', () => {
       mentions: [],
       timestamp: 1000,
     });
+    // Synthesize a missing cursor whose logical timestamp sorts between the
+    // first message (1000) and the second message (2000). Because the producer
+    // encodes a logical high-water timestamp, the cursor must be generated
+    // before the high-water advances past 1500.
+    const missingCursor = generateSortableId(1500);
+
     const afterCursor = store.append({
       threadId: 'thread-a',
       userId: 'u1',
@@ -98,7 +104,6 @@ describe('MessageStore.getByThreadAfter', () => {
       timestamp: 3000,
     });
 
-    const missingCursor = generateSortableId(1500);
     const results = store.getByThreadAfter('thread-a', missingCursor, 5, 'u1');
 
     assert.deepEqual(

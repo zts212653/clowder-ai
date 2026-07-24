@@ -5,6 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
+import { resetSortableIdSequence } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import {
   assertRedisIsolationOrThrow,
   cleanupPrefixedRedisKeys,
@@ -58,6 +59,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
 
   beforeEach(async (t) => {
     if (!connected) return t.skip('Redis not connected');
+    resetSortableIdSequence();
     await cleanupPrefixedRedisKeys(redis, ['msg:*']);
   });
 
@@ -384,6 +386,9 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
   it('expired cursor recovery preserves order across admitted timestamp boundaries', async () => {
     const roundTripStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
     const threadId = 'thread-expired-cursor-domain';
+    // Generate the cursor before advancing the high-water timestamp so the
+    // monotonic producer admits it.
+    const expiredCursor = generateSortableId(1);
     const later = [];
     for (const timestamp of [2, 8_640_000_000_000_000]) {
       later.push(
@@ -397,7 +402,6 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
         }),
       );
     }
-    const expiredCursor = generateSortableId(1);
 
     assert.deepEqual(
       (await roundTripStore.getByThreadAfter(threadId, expiredCursor)).map((message) => message.id),
@@ -1191,7 +1195,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       timestamp: 1,
       idempotencyKey: 'idem-seq-exhaustion',
     });
-    assert.equal(getSortableIdSequence(1), MAX_SEQUENCE + 1);
+    assert.equal(getSortableIdSequence(), MAX_SEQUENCE + 1);
 
     // Replaying the same idempotency key must return the original message and
     // must not throw sequence-exhausted, even though the generator is at its limit.
@@ -1204,6 +1208,6 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       idempotencyKey: 'idem-seq-exhaustion',
     });
     assert.equal(replay.id, first.id, 'idempotent replay must return the original ID');
-    assert.equal(getSortableIdSequence(1), MAX_SEQUENCE + 1, 'replay must not advance sequence');
+    assert.equal(getSortableIdSequence(), MAX_SEQUENCE + 1, 'replay must not advance sequence');
   });
 });
