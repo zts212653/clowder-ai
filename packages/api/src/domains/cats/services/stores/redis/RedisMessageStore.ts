@@ -138,7 +138,10 @@ export class RedisMessageStore {
     const { idempotencyKey, ...payload } = msg;
     void idempotencyKey;
     const stored: StoredMessage = { ...payload, id, threadId };
-    const score = msg.timestamp;
+    // Use the logical order key embedded in the ID prefix as the Redis score so
+    // that cursor queries agree with the sortable-ID producer even when the
+    // admitted timestamp is far-future or out-of-order.
+    const score = Number(id.slice(0, 16));
 
     const hashKey = MessageKeys.detail(id);
     const pipeline = this.redis.multi();

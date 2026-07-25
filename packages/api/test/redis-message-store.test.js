@@ -409,6 +409,40 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     );
   });
 
+  it('far-future cursor does not omit later normal appends', async () => {
+    const roundTripStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
+    const threadId = 'thread-far-future-cursor';
+    const now = Date.now();
+
+    // A far-future admitted timestamp is capped in the ID prefix; the Redis
+    // index must use that same logical order key as the score so a subsequent
+    // ordinary append is still returned after the far-future cursor.
+    const farFuture = now + 1_000_000_000;
+    const farFutureMsg = await roundTripStore.append({
+      userId: 'user1',
+      catId: null,
+      content: 'far-future timestamp',
+      mentions: [],
+      timestamp: farFuture,
+      threadId,
+    });
+
+    const normalMsg = await roundTripStore.append({
+      userId: 'user1',
+      catId: null,
+      content: 'normal timestamp',
+      mentions: [],
+      timestamp: now,
+      threadId,
+    });
+
+    assert.deepEqual(
+      (await roundTripStore.getByThreadAfter(threadId, farFutureMsg.id)).map((message) => message.id),
+      [normalMsg.id],
+      'ordinary append after a far-future cursor must not be lost',
+    );
+  });
+
   it('claimContentDedupKey() is atomic: first wins, live duplicate loses, distinct keys independent', async () => {
     const first = await store.claimContentDedupKey('fp-abc', 5000);
     assert.equal(first, true, 'first claim of a fingerprint succeeds');

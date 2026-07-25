@@ -18,7 +18,7 @@ Keep the existing `timestamp-seq-uuid` lexical ID layout and treat it as the exp
 | Expired-cursor recovery is defined for mixed legacy/new IDs | The ID format is unchanged; legacy six-digit IDs and new bounded IDs order consistently by timestamp first, then by sequence. Tests cover `getByThreadAfter` with a mixed-epoch cursor. |
 | Finite, enforced output maximum | `MAX_SEQUENCE = 999_999` plus 16-digit timestamp plus 8-character UUID gives a hard 32-character ceiling. |
 | Sequence exhaustion/restart/concurrency is explicit and fail-closed | Exhaustion throws `RangeError: sortable-ID sequence exhausted` before width expansion or wrap. Advancing the high-water timestamp resets the sequence counter, so there is no process-lifetime ceiling. Restart resets both high-water and sequence; this is documented as a known boundary that production callers must mitigate with monotonic timestamps. |
-| Memory and Redis implement the same ordering relation | Both stores import `generateSortableId` from the same module and rely on Redis ZSET ordering for score ties. |
+| Memory and Redis implement the same ordering relation | Both stores import `generateSortableId` from the same module. Redis stores use the ID's 16-digit logical timestamp prefix as the ZSET score, so Redis cursor queries and Memory/ID lexical ordering agree even when the admitted `timestamp` is out-of-order or far-future. |
 
 ## Files changed
 

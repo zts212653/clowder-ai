@@ -225,15 +225,30 @@ test('generateSortableId does not ratchet forward on repeated far-future timesta
   generateSortableId(base);
 
   const farFuture = base + 1_000_000_000;
+
+  const beforeFirst = Date.now();
   const first = generateSortableId(farFuture);
   const firstPrefix = Number(first.slice(0, 16));
+  const afterFirst = Date.now();
+  assert.ok(
+    firstPrefix >= beforeFirst && firstPrefix <= afterFirst + MAX_HIGH_WATER_ADVANCE_MS,
+    'first far-future prefix is bounded by wall-clock + MAX',
+  );
 
+  const beforeSecond = Date.now();
   const second = generateSortableId(farFuture);
   const secondPrefix = Number(second.slice(0, 16));
-
+  const afterSecond = Date.now();
   assert.ok(
-    secondPrefix - firstPrefix <= MAX_HIGH_WATER_ADVANCE_MS,
-    'repeated far-future timestamp must not advance the prefix by more than wall-clock skew',
+    secondPrefix >= beforeSecond && secondPrefix <= afterSecond + MAX_HIGH_WATER_ADVANCE_MS,
+    'second far-future prefix is still bounded by wall-clock + MAX',
+  );
+
+  // A high-water-relative cap would advance by exactly MAX on the second call;
+  // the wall-clock cap prevents that ratchet.
+  assert.ok(
+    secondPrefix - firstPrefix < MAX_HIGH_WATER_ADVANCE_MS,
+    'repeated far-future timestamp must not advance the prefix by a full MAX step',
   );
 });
 
