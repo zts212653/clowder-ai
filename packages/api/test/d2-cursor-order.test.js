@@ -196,3 +196,32 @@ test('generateSortableId rate-limits high-water advancement so a far-future time
   generateSortableId(ordinary);
   assert.equal(getSortableIdSequence(), 1, 'ordinary timestamp advances high-water and resets sequence');
 });
+
+test('generateSortableId does not pin normal writes after a far-future timestamp', async () => {
+  const { generateSortableId, resetSortableIdSequence, getSortableIdSequence, MAX_HIGH_WATER_ADVANCE_MS } =
+    await import('../dist/domains/cats/services/stores/ports/MessageStore.js?sortable-id-no-pin');
+  resetSortableIdSequence();
+
+  const base = 1_000_000;
+  generateSortableId(base);
+  assert.equal(getSortableIdSequence(), 1);
+
+  // A far-future timestamp advances the high-water mark by at most one bounded step.
+  const farFuture = base + MAX_HIGH_WATER_ADVANCE_MS * 100;
+  generateSortableId(farFuture);
+  const highWaterAfterFuture = base + MAX_HIGH_WATER_ADVANCE_MS;
+
+  // An ordinary timestamp that is still behind the new high-water mark is
+  // admitted using the current logical timestamp, so normal writes keep flowing
+  // and the sequence continues instead of being stuck in a single bucket.
+  const normalBehindHighWater = base;
+  const behindId = generateSortableId(normalBehindHighWater);
+  assert.equal(Number(behindId.slice(0, 16)), highWaterAfterFuture, 'normal timestamp inherits current logical prefix');
+  assert.equal(getSortableIdSequence(), 2, 'sequence continues within the same logical timestamp');
+
+  // Once the caller supplies a timestamp that has caught up, the high-water
+  // mark advances again and the sequence resets, proving the bucket is not pinned.
+  const caughtUp = base + MAX_HIGH_WATER_ADVANCE_MS + 1;
+  generateSortableId(caughtUp);
+  assert.equal(getSortableIdSequence(), 1, 'caught-up timestamp advances high-water and resets sequence');
+});
