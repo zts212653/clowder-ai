@@ -33,6 +33,20 @@ test('generateSortableId rejects invalid timestamps before consuming sequence st
   assert.equal(firstValidId.split('-')[1], '000000', 'rejected input must not advance the sequence');
 });
 
+test('generateSortableId admits timestamp zero and advances sequence normally', async () => {
+  const { generateSortableId, resetSortableIdSequence, getSortableIdSequence } = await import(
+    '../dist/domains/cats/services/stores/ports/MessageStore.js?sortable-id-zero'
+  );
+  resetSortableIdSequence();
+
+  const a = generateSortableId(0);
+  const b = generateSortableId(0);
+
+  assert.equal(a.slice(0, 16), b.slice(0, 16), 'timestamp zero uses the same logical prefix');
+  assert.ok(b > a, 'second ID at timestamp zero sorts after the first');
+  assert.equal(getSortableIdSequence(), 2, 'sequence advances normally at timestamp zero');
+});
+
 test('generateSortableId preserves lexicographic order within the same timestamp', async () => {
   const { generateSortableId, resetSortableIdSequence } = await import(
     '../dist/domains/cats/services/stores/ports/MessageStore.js?sortable-id-same-ts'
@@ -175,26 +189,52 @@ test('generateSortableId rate-limits high-water advancement so a far-future time
     await import('../dist/domains/cats/services/stores/ports/MessageStore.js?sortable-id-rate-limit');
   resetSortableIdSequence();
 
-  const base = 1_000_000;
+  const base = Date.now();
   generateSortableId(base);
   assert.equal(getSortableIdSequence(), 1);
 
-  // A far-future timestamp is capped to high-water + MAX_HIGH_WATER_ADVANCE_MS,
-  // so it advances the high-water mark by only one bounded step.
-  const farFuture = base + MAX_HIGH_WATER_ADVANCE_MS * 100;
+  // A far-future timestamp is capped to wall-clock + MAX_HIGH_WATER_ADVANCE_MS.
+  const beforeFuture = Date.now();
+  const farFuture = beforeFuture + MAX_HIGH_WATER_ADVANCE_MS * 100;
   const futureId = generateSortableId(farFuture);
   const futurePrefix = Number(futureId.slice(0, 16));
-  assert.equal(
-    futurePrefix,
-    base + MAX_HIGH_WATER_ADVANCE_MS,
-    'far-future timestamp advances high-water by at most MAX_HIGH_WATER_ADVANCE_MS',
+  const afterFuture = Date.now();
+  assert.ok(futurePrefix > base, 'far-future timestamp advances the high-water mark');
+  assert.ok(
+    futurePrefix <= afterFuture + MAX_HIGH_WATER_ADVANCE_MS,
+    'advance is capped at wall-clock + MAX_HIGH_WATER_ADVANCE_MS',
   );
 
-  // Subsequent ordinary timestamps can still advance the high-water mark,
-  // proving the global sequence bucket is not permanently pinned.
-  const ordinary = base + MAX_HIGH_WATER_ADVANCE_MS + 1;
+  // After the cap, ordinary wall-clock timestamps resume flowing: they are
+  // admitted using the current logical prefix and the sequence continues rather
+  // than being stuck. Once wall-clock has moved past the capped high-water mark,
+  // the next timestamp can advance it again.
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const ordinary = Date.now() + MAX_HIGH_WATER_ADVANCE_MS;
   generateSortableId(ordinary);
-  assert.equal(getSortableIdSequence(), 1, 'ordinary timestamp advances high-water and resets sequence');
+  assert.equal(getSortableIdSequence(), 1, 'ordinary wall-clock timestamp advances high-water and resets sequence');
+});
+
+test('generateSortableId does not ratchet forward on repeated far-future timestamps', async () => {
+  const { generateSortableId, resetSortableIdSequence, MAX_HIGH_WATER_ADVANCE_MS } = await import(
+    '../dist/domains/cats/services/stores/ports/MessageStore.js?sortable-id-no-ratchet'
+  );
+  resetSortableIdSequence();
+
+  const base = Date.now();
+  generateSortableId(base);
+
+  const farFuture = base + 1_000_000_000;
+  const first = generateSortableId(farFuture);
+  const firstPrefix = Number(first.slice(0, 16));
+
+  const second = generateSortableId(farFuture);
+  const secondPrefix = Number(second.slice(0, 16));
+
+  assert.ok(
+    secondPrefix - firstPrefix <= MAX_HIGH_WATER_ADVANCE_MS,
+    'repeated far-future timestamp must not advance the prefix by more than wall-clock skew',
+  );
 });
 
 test('generateSortableId does not pin normal writes after a far-future timestamp', async () => {
@@ -202,26 +242,32 @@ test('generateSortableId does not pin normal writes after a far-future timestamp
     await import('../dist/domains/cats/services/stores/ports/MessageStore.js?sortable-id-no-pin');
   resetSortableIdSequence();
 
-  const base = 1_000_000;
+  const base = Date.now();
   generateSortableId(base);
   assert.equal(getSortableIdSequence(), 1);
 
   // A far-future timestamp advances the high-water mark by at most one bounded step.
-  const farFuture = base + MAX_HIGH_WATER_ADVANCE_MS * 100;
-  generateSortableId(farFuture);
-  const highWaterAfterFuture = base + MAX_HIGH_WATER_ADVANCE_MS;
+  const farFuture = Date.now() + MAX_HIGH_WATER_ADVANCE_MS * 100;
+  const futureId = generateSortableId(farFuture);
+  const highWaterAfterFuture = Number(futureId.slice(0, 16));
 
   // An ordinary timestamp that is still behind the new high-water mark is
   // admitted using the current logical timestamp, so normal writes keep flowing
   // and the sequence continues instead of being stuck in a single bucket.
-  const normalBehindHighWater = base;
+  const normalBehindHighWater = Date.now();
   const behindId = generateSortableId(normalBehindHighWater);
-  assert.equal(Number(behindId.slice(0, 16)), highWaterAfterFuture, 'normal timestamp inherits current logical prefix');
+  assert.equal(
+    Number(behindId.slice(0, 16)),
+    highWaterAfterFuture,
+    'normal wall-clock timestamp inherits current logical prefix',
+  );
   assert.equal(getSortableIdSequence(), 2, 'sequence continues within the same logical timestamp');
 
-  // Once the caller supplies a timestamp that has caught up, the high-water
-  // mark advances again and the sequence resets, proving the bucket is not pinned.
-  const caughtUp = base + MAX_HIGH_WATER_ADVANCE_MS + 1;
+  // Once wall-clock has moved past the capped high-water mark, the next
+  // timestamp advances it again and resets the sequence, proving the bucket is
+  // not permanently pinned.
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const caughtUp = Date.now() + MAX_HIGH_WATER_ADVANCE_MS;
   generateSortableId(caughtUp);
   assert.equal(getSortableIdSequence(), 1, 'caught-up timestamp advances high-water and resets sequence');
 });

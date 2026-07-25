@@ -416,6 +416,11 @@ export const MAX_HIGH_WATER_ADVANCE_MS = 5_000;
  */
 let _highWaterTimestamp = 0;
 
+/** Whether the high-water mark has been seeded. Timestamp `0` is a valid
+ * admitted value, so a separate sentinel is required.
+ */
+let _isSeeded = false;
+
 /** Starting sequence value for the next newly-admitted logical timestamp. */
 let _defaultSequence = 0;
 
@@ -428,6 +433,7 @@ let _seq = 0;
  */
 export function resetSortableIdSequence(value = 0): void {
   _highWaterTimestamp = 0;
+  _isSeeded = false;
   _defaultSequence = value;
   _seq = value;
 }
@@ -439,24 +445,23 @@ export function getSortableIdSequence(): number {
 
 export function generateSortableId(timestamp: number): string {
   assertValidStoredMessageTimestamp(timestamp);
-  if (_highWaterTimestamp === 0) {
-    // Seed the logical high-water mark from the first admitted timestamp, but
-    // do not let a far-future first call pin the global sequence bucket for an
-    // extended interval. A current Date.now() input seeds to the real wall
-    // clock, so post-restart IDs do not sort before legacy IDs that carry real
-    // modern timestamps.
-    const seedCeiling = Date.now() + MAX_HIGH_WATER_ADVANCE_MS;
-    _highWaterTimestamp = timestamp > seedCeiling ? seedCeiling : timestamp;
+  // Cap against the current wall clock (plus a small skew window) rather than
+  // against the previous high-water mark. This prevents a burst of repeated
+  // far-future timestamps from ratcheting the logical prefix forward
+  // cumulatively, and it bounds how long a single future input can pin the
+  // global sequence bucket.
+  const wallCeiling = Date.now() + MAX_HIGH_WATER_ADVANCE_MS;
+  const effectiveTimestamp = timestamp > wallCeiling ? wallCeiling : timestamp;
+  if (!_isSeeded) {
+    // Seed the logical high-water mark from the first admitted timestamp. A
+    // current Date.now() input seeds to the real wall clock, so post-restart
+    // IDs do not sort before legacy IDs that carry real modern timestamps.
+    _highWaterTimestamp = effectiveTimestamp;
+    _isSeeded = true;
     _seq = _defaultSequence;
-  } else {
-    // Rate-limit subsequent high-water advances so a single far-future
-    // timestamp cannot pin the global sequence bucket for an extended interval.
-    const allowedAdvance = _highWaterTimestamp + MAX_HIGH_WATER_ADVANCE_MS;
-    const effectiveTimestamp = timestamp > allowedAdvance ? allowedAdvance : timestamp;
-    if (effectiveTimestamp > _highWaterTimestamp) {
-      _highWaterTimestamp = effectiveTimestamp;
-      _seq = _defaultSequence;
-    }
+  } else if (effectiveTimestamp > _highWaterTimestamp) {
+    _highWaterTimestamp = effectiveTimestamp;
+    _seq = _defaultSequence;
   }
   if (_seq > MAX_SEQUENCE) {
     throw new RangeError('sortable-ID sequence exhausted');
