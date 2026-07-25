@@ -129,11 +129,12 @@ class UpdateManager {
         skippedVersion: settings.skippedVersion,
       });
 
-      checker.saveSettings(this._settingsPath, {
+      const refreshedSettings = {
         ...settings,
         lastCheckAt: new Date().toISOString(),
         etag: newEtag,
-      });
+      };
+      checker.saveSettings(this._settingsPath, refreshedSettings);
 
       if (!target) {
         dbg('No update available');
@@ -141,7 +142,7 @@ class UpdateManager {
         return;
       }
       dbg(`Update available: v${target.version}`);
-      await this._promptUpdate(target, settings);
+      await this._promptUpdate(target, refreshedSettings);
     } catch (err) {
       dbg(`Update check failed: ${err.message}`);
       if (manual)

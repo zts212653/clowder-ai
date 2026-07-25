@@ -600,6 +600,28 @@ describe('overlapping update checks', () => {
     assert.equal(dialogCount, 1, 'the queued check must not show a duplicate update prompt');
     assert.equal(settings.skippedVersion, '0.12.0', 'the queued check must not overwrite the Skip choice');
   });
+
+  test('Skip preserves the refreshed ETag and last-check timestamp', async () => {
+    writeFileSync(
+      path.join(td, 'update-settings.json'),
+      JSON.stringify({ autoCheck: true, skippedVersion: null, etag: '"stale-etag"', lastCheckAt: null }),
+    );
+    const feed = conditionalReleaseNet([completeRelease()]);
+    const m = new UpdateManager(
+      baseDeps(td, {
+        net: feed.net,
+        showDialog: async () => 2,
+      }),
+    );
+
+    await m.checkForUpdates();
+
+    const settings = JSON.parse(readFileSync(path.join(td, 'update-settings.json'), 'utf8'));
+    assert.equal(feed.requests.length, 2, '304 must be followed by an unconditional metadata refresh');
+    assert.equal(settings.skippedVersion, fakeTarget.version);
+    assert.equal(settings.etag, '"fresh-etag"', 'Skip must not restore the stale ETag snapshot');
+    assert.ok(settings.lastCheckAt, 'Skip must preserve the timestamp from the completed check');
+  });
 });
 
 describe('main process update-schedule lifecycle', () => {
