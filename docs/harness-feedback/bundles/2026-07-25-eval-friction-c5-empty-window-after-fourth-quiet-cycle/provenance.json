@@ -1,0 +1,15 @@
+{
+  "verdictId": "2026-07-25-eval-friction-c5-empty-window-after-fourth-quiet-cycle",
+  "rawInputs": [
+    {
+      "path": "docs/harness-feedback/bundles/2026-07-25-eval-friction-c5-empty-window-after-fourth-quiet-cycle/raw/rollup-report.json",
+      "sha256": "9a4107199b957b8cf1c208a1afb9939c95550176b8905c5ce491436ed62ce24c"
+    }
+  ],
+  "generatedAt": "2026-07-25T03:05:02.313Z",
+  "generator": {
+    "name": "eval-friction-live-verdict",
+    "version": "1"
+  },
+  "sanitizeRulesVersion": "f245-friction-rollup-v1"
+}
