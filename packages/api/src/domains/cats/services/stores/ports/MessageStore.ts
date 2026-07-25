@@ -389,9 +389,23 @@ export function assertValidStoredMessageTimestamp(timestamp: number): void {
  * current logical timestamp. Advancing the high-water mark resets the
  * sequence, so there is no process-lifetime ceiling. Exhaustion throws a
  * RangeError before width expansion or wrap.
+ *
+ * The high-water mark is rate-limited: a single admitted timestamp cannot
+ * advance it by more than MAX_HIGH_WATER_ADVANCE_MS. This prevents one
+ * far-future input (e.g. the valid ECMAScript Date maximum) from pinning the
+ * global sequence bucket for the remaining process lifetime.
  */
 /** Maximum sequence value that keeps the sortable-ID middle component at six decimal digits. */
 export const MAX_SEQUENCE = 999_999;
+
+/**
+ * Maximum amount by which a single admitted timestamp may advance the logical
+ * high-water mark. This bounds how long a single future/skewed timestamp can
+ * pin the global sequence bucket. Chosen as 24 hours to absorb NTP skew and
+ * scheduler future-fire windows without materially affecting ordinary Date.now()
+ * message ordering.
+ */
+export const MAX_HIGH_WATER_ADVANCE_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Highest logical timestamp that has been admitted by this process.
@@ -423,8 +437,12 @@ export function getSortableIdSequence(): number {
 
 export function generateSortableId(timestamp: number): string {
   assertValidStoredMessageTimestamp(timestamp);
-  if (timestamp > _highWaterTimestamp) {
-    _highWaterTimestamp = timestamp;
+  // Rate-limit the high-water advance so a single far-future timestamp cannot
+  // pin the global sequence bucket.
+  const allowedAdvance = _highWaterTimestamp + MAX_HIGH_WATER_ADVANCE_MS;
+  const effectiveTimestamp = timestamp > allowedAdvance ? allowedAdvance : timestamp;
+  if (effectiveTimestamp > _highWaterTimestamp) {
+    _highWaterTimestamp = effectiveTimestamp;
     _seq = _defaultSequence;
   }
   if (_seq > MAX_SEQUENCE) {

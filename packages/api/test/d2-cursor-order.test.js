@@ -169,3 +169,30 @@ test('generateSortableId documents that sequence reset at the same timestamp reg
   assert.ok(prefix(afterReset) < prefix(highSequence), 'reset sequence at same timestamp regresses order');
   assert.equal(prefix(beforeReset), prefix(afterReset), 'reset returns sequence to zero');
 });
+
+test('generateSortableId rate-limits high-water advancement so a far-future timestamp cannot pin the sequence', async () => {
+  const { generateSortableId, resetSortableIdSequence, getSortableIdSequence, MAX_HIGH_WATER_ADVANCE_MS } =
+    await import('../dist/domains/cats/services/stores/ports/MessageStore.js?sortable-id-rate-limit');
+  resetSortableIdSequence();
+
+  const base = 1_000_000;
+  generateSortableId(base);
+  assert.equal(getSortableIdSequence(), 1);
+
+  // A far-future timestamp is capped to high-water + MAX_HIGH_WATER_ADVANCE_MS,
+  // so it advances the high-water mark by only one bounded step.
+  const farFuture = base + MAX_HIGH_WATER_ADVANCE_MS * 100;
+  const futureId = generateSortableId(farFuture);
+  const futurePrefix = Number(futureId.slice(0, 16));
+  assert.equal(
+    futurePrefix,
+    base + MAX_HIGH_WATER_ADVANCE_MS,
+    'far-future timestamp advances high-water by at most MAX_HIGH_WATER_ADVANCE_MS',
+  );
+
+  // Subsequent ordinary timestamps can still advance the high-water mark,
+  // proving the global sequence bucket is not permanently pinned.
+  const ordinary = base + MAX_HIGH_WATER_ADVANCE_MS + 1;
+  generateSortableId(ordinary);
+  assert.equal(getSortableIdSequence(), 1, 'ordinary timestamp advances high-water and resets sequence');
+});
