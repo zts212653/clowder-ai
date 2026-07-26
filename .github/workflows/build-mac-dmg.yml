@@ -92,7 +92,7 @@ jobs:
         if: inputs.upload-to-release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/CatCafe-*-${{ matrix.arch }}.dmg
+          files: dist/ClowderAI-*-${{ matrix.arch }}.dmg
           fail_on_unmatched_files: true
 
       - name: Upload DMG as workflow artifact
@@ -100,5 +100,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-dmg-${{ matrix.arch }}-${{ inputs.version }}
-          path: dist/CatCafe-*-${{ matrix.arch }}.dmg
+          path: dist/ClowderAI-*-${{ matrix.arch }}.dmg
           if-no-files-found: error
