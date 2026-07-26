@@ -25,6 +25,10 @@ const UNIX_SEARCH_DIRS = [
   '.nix-profile/bin',
 ];
 
+/** Official Kimi Code installer layout (macOS / Linux). Kept command-specific
+ *  so other CLIs do not probe a Kimi-private directory. */
+const KIMI_CODE_UNIX_DIR = '.kimi-code/bin';
+
 /** Discover nvm-managed Node.js bin directories under ~/.nvm/versions/node/. */
 function collectNvmBinDirs(): string[] {
   const home = process.env.HOME ?? '';
@@ -105,6 +109,23 @@ export function resolveCliCommand(command: string, opts?: { skipPathProbe?: bool
   if (cached !== undefined) {
     if (existsSync(cached)) return cached;
     resolvedCache.delete(command);
+  }
+
+  // #1173: For the bare `kimi` command, probe the official Kimi Code layout
+  // before PATH. The official installer lays down `~/.kimi-code/bin/kimi`,
+  // while legacy `kimi-cli` users may still have a bare `kimi` on PATH that
+  // does not support ACP. Treating `kimi` as the official binary name keeps
+  // ACP `kimi acp` from silently selecting the legacy PATH hit. Users who want
+  // to force a specific PATH binary can still use a distinct command name.
+  if (!IS_WINDOWS && command === 'kimi') {
+    const home = process.env.HOME ?? '';
+    if (home) {
+      const kimiCodeCandidate = resolve(home, KIMI_CODE_UNIX_DIR, command);
+      if (existsSync(kimiCodeCandidate)) {
+        resolvedCache.set(command, kimiCodeCandidate);
+        return kimiCodeCandidate;
+      }
+    }
   }
 
   // Fast path: already in PATH
@@ -199,7 +220,10 @@ export function formatCliNotFoundError(command: string, platform: NodeJS.Platfor
       platform === 'win32'
         ? 'curl.exe -fsSL https://antigravity.google/cli/install.cmd -o install.cmd && install.cmd && del install.cmd'
         : 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
-    kimi: 'uv tool install --python 3.13 kimi-cli',
+    kimi:
+      platform === 'win32'
+        ? 'irm https://code.kimi.com/kimi-code/install.ps1 | iex'
+        : 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash',
     opencode: 'npm install -g opencode-ai',
   };
   const hint = installHints[command] ?? `install the "${command}" CLI`;

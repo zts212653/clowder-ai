@@ -2252,7 +2252,7 @@ describe('GeminiAcpAdapter integration', () => {
 
   // ─── F149: Stream Idle Watchdog Tests ─────────────────────────
 
-  it('F149: stream idle warning after events yields liveness_signal', async () => {
+  it('F149/#1203: ordinary stream idle warning stays internal — no liveness bubble', async () => {
     const fakeClient = {
       isAlive: true,
       initialize: async () => ({}),
@@ -2305,17 +2305,15 @@ describe('GeminiAcpAdapter integration', () => {
       messages.push(msg);
     }
 
-    // Should have a liveness_signal warning
+    // #1203: Ordinary (non-terminal) idle warnings are internal watchdog
+    // telemetry — the CLI shows no such bubble, and in the zero-first-event
+    // case the '已开始回复但后续停滞' text was factually wrong.
     const warnings = messages.filter((m) => m.type === 'liveness_signal');
     assert.equal(
       warnings.length,
-      1,
-      `Expected 1 liveness_signal, got ${warnings.length}: ${JSON.stringify(messages.map((m) => m.type))}`,
+      0,
+      `Expected 0 liveness_signal bubbles, got ${warnings.length}: ${JSON.stringify(messages.map((m) => m.type))}`,
     );
-
-    const parsed = JSON.parse(warnings[0].content);
-    assert.equal(parsed.type, 'warning');
-    assert.match(parsed.message, /停滞|idle|silent/i);
 
     // Normal text should still be present
     const texts = messages.filter((m) => m.type === 'text');
@@ -2502,7 +2500,7 @@ describe('GeminiAcpAdapter integration', () => {
     assert.ok(doneIdx > errorIdx, 'done should be emitted only after the compaction error');
   });
 
-  it('F149: liveness_signal warning appears before stream_idle_stall error', async () => {
+  it('F149/#1203: terminal stream_idle_stall still errors — no preceding liveness bubble', async () => {
     const fakeClient = {
       isAlive: true,
       initialize: async () => ({}),
@@ -2553,18 +2551,16 @@ describe('GeminiAcpAdapter integration', () => {
       messages.push(msg);
     }
 
-    const warningIdx = messages.findIndex((m) => m.type === 'liveness_signal');
+    // #1203: No user-visible warning bubble; the terminal stall error must
+    // still surface unchanged (#1189 TTL semantics preserved).
+    const warnings = messages.filter((m) => m.type === 'liveness_signal');
+    assert.equal(warnings.length, 0, `Expected 0 liveness_signal bubbles, got ${warnings.length}`);
     const errorIdx = messages.findIndex((m) => m.type === 'error');
-    assert.ok(
-      warningIdx >= 0,
-      `Should have liveness_signal, got types: ${JSON.stringify(messages.map((m) => m.type))}`,
-    );
     assert.ok(errorIdx >= 0, 'Should have error');
-    assert.ok(warningIdx < errorIdx, `Warning (idx ${warningIdx}) should come before error (idx ${errorIdx})`);
     assert.equal(messages[errorIdx].errorCode, 'stream_idle_stall');
   });
 
-  it('F149: stream idle warning is deduped (only one liveness_signal per invoke)', async () => {
+  it('F149/#1203: multiple ordinary idle warnings produce zero liveness bubbles', async () => {
     const fakeClient = {
       isAlive: true,
       initialize: async () => ({}),
@@ -2621,13 +2617,67 @@ describe('GeminiAcpAdapter integration', () => {
     }
 
     const warnings = messages.filter((m) => m.type === 'liveness_signal');
-    assert.equal(warnings.length, 1, `Expected exactly 1 liveness_signal (deduped), got ${warnings.length}`);
+    assert.equal(warnings.length, 0, `Expected 0 liveness_signal bubbles, got ${warnings.length}`);
 
     const texts = messages.filter((m) => m.type === 'text');
     assert.equal(texts.length, 3, `Expected 3 text messages, got ${texts.length}`);
   });
 
-  it('stream_tool_wait_warning yields info liveness_signal (not error)', async () => {
+  it('#1203: zero-first-event idle warning produces no bubble and no error', async () => {
+    // The reported incident: kimi's first real ACP event arrived at +61s, but
+    // the watchdog fired at +20s with eventCount=0 — the '已开始回复但后续停滞'
+    // bubble was factually wrong. Zero-first-event warnings stay internal too.
+    const fakeClient = {
+      isAlive: true,
+      initialize: async () => ({}),
+      close: async () => {},
+      onCapacity: () => {},
+      offCapacity: () => {},
+      recentCapacitySignal: null,
+      clearRecentCapacitySignal: () => {},
+      newSession: async () => ({ sessionId: 'idle-zero-sess' }),
+      cancelSession: () => {},
+      async *promptStream() {
+        // Watchdog fires BEFORE any real event (zero-first-event)
+        yield {
+          sessionId: 'idle-zero-sess',
+          update: { sessionUpdate: 'stream_idle_warning', idleSinceMs: 20000, eventCount: 0, timestamp: Date.now() },
+        };
+        // First real event finally arrives
+        yield {
+          sessionId: 'idle-zero-sess',
+          update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'late first chunk' } },
+        };
+        return 'end_turn';
+      },
+    };
+
+    const mockPool = {
+      acquire: async () => ({ client: fakeClient, release: () => {} }),
+      closeAll: async () => {},
+    };
+
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool: mockPool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+    });
+
+    const messages = [];
+    for await (const msg of adapter.invoke('hello')) {
+      messages.push(msg);
+    }
+
+    const warnings = messages.filter((m) => m.type === 'liveness_signal');
+    assert.equal(warnings.length, 0, `Expected 0 liveness_signal bubbles, got ${warnings.length}`);
+    const errors = messages.filter((m) => m.type === 'error');
+    assert.equal(errors.length, 0, 'Zero-first-event warning must not error the stream');
+    const texts = messages.filter((m) => m.type === 'text');
+    assert.equal(texts.length, 1, `Expected 1 text message, got ${texts.length}`);
+  });
+
+  it('stream_tool_wait_warning stays internal — no chat bubble, no error (#1203)', async () => {
     const fakeClient = {
       isAlive: true,
       initialize: async () => ({}),
@@ -2643,12 +2693,23 @@ describe('GeminiAcpAdapter integration', () => {
           sessionId: 'tool-wait-sess',
           update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'thinking...' } },
         };
-        // Gemini calls a tool — idle watchdog fires tool_wait instead of idle_warning
+        // Gemini calls a tool — idle watchdog fires tool_wait instead of idle_warning.
+        // #1203: inject TWO consecutive warnings (the real watchdog re-fires every
+        // 20s while the tool runs) — none of them may produce a chat bubble.
         yield {
           sessionId: 'tool-wait-sess',
           update: {
             sessionUpdate: 'stream_tool_wait_warning',
             idleSinceMs: 20000,
+            eventCount: 2,
+            timestamp: Date.now(),
+          },
+        };
+        yield {
+          sessionId: 'tool-wait-sess',
+          update: {
+            sessionUpdate: 'stream_tool_wait_warning',
+            idleSinceMs: 40000,
             eventCount: 2,
             timestamp: Date.now(),
           },
@@ -2679,11 +2740,14 @@ describe('GeminiAcpAdapter integration', () => {
       messages.push(msg);
     }
 
+    // #1203: Tool-wait is an internal watchdog signal — the CLI shows no such
+    // bubble, so the chat surface must stay silent while the stream continues.
     const liveness = messages.filter((m) => m.type === 'liveness_signal');
-    assert.equal(liveness.length, 1, `Expected 1 tool wait liveness_signal, got ${liveness.length}`);
-    const parsed = JSON.parse(liveness[0].content);
-    assert.equal(parsed.type, 'info', 'Tool wait should be info, not warning');
-    assert.ok(parsed.message.includes('等待工具'), `Message should mention tool wait: ${parsed.message}`);
+    assert.equal(liveness.length, 0, `Expected 0 liveness_signal bubbles for tool wait, got ${liveness.length}`);
+
+    // Stream content still flows after the suppressed tool-wait signal
+    const texts = messages.filter((m) => m.type === 'text');
+    assert.ok(texts.length >= 1, 'Tool wait must not swallow subsequent text output');
 
     // No error — tool wait doesn't kill the stream
     const errors = messages.filter((m) => m.type === 'error');

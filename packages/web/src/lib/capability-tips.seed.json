@@ -809,5 +809,17 @@
       "sourceRef": { "path": "docs/features/F205-video-provider-plugins.md", "anchor": "User Journey" }
     },
     "owner": "opus"
+  },
+  {
+    "id": "feature-f204-weixin-mp-plugin",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/features/F204-weixin-mp-publisher-plugin.md", "anchor": "User Journey" },
+    "structureSource": { "path": "docs/features/F204-weixin-mp-publisher-plugin.md", "anchor": "What" },
+    "bodySource": { "path": "docs/features/F204-weixin-mp-publisher-plugin.md", "anchor": "User Journey" },
+    "contexts": ["thinking", "long_running"],
+    "audience": ["cvo"],
+    "body": "微信公众号插件已就绪：设置 → 插件 → weixin-mp → 配置 App ID 和 App Secret 并启用。猫猫可以帮你把 Markdown 转成微信格式、上传图片、创建草稿、一键发布文章。",
+    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "owner": "opus"
   }
 ]

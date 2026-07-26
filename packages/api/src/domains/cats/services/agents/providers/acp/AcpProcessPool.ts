@@ -55,6 +55,15 @@ export interface AcpAcquireOptions {
 export interface AcpPoolClient {
   readonly isAlive: boolean;
   /**
+   * #1203: False when the process's bootstrap cwd was deleted after spawn (e.g.
+   * by an external cleaner). The child stays alive but any prompt dies with
+   * getcwd ENOENT, so the pool must retire it and cold-start a fresh process
+   * (cold start re-creates the cwd before spawn). Required: transports without
+   * a local cwd must explicitly return true; undefined is no longer allowed to
+   * silently escape retirement.
+   */
+  readonly isCwdIntact: boolean;
+  /**
    * False after a cancelled prompt may still be running upstream. The pool only
    * acts on this for non-multiplexed carriers; multiplexed clients can keep
    * serving unrelated sessions.
@@ -78,6 +87,7 @@ interface AcpPoolVariantConfig {
 
 interface PoolEntry {
   client: AcpPoolClient;
+  poolKey: PoolKey;
   leaseCount: number;
   /** Bumped on stale-lease force-release so old lease closures become no-ops (#992). */
   leaseGeneration: number;
@@ -151,6 +161,17 @@ export class AcpProcessPool {
     const entries = this.entries.get(key) ?? [];
     const sessionId = options.sessionId?.trim();
     let canResumeRequestedSession = true;
+
+    // #1203: Retire ready processes whose bootstrap cwd was deleted after spawn.
+    // The child is still alive, but getcwd() inside it fails — the next prompt
+    // would surface ACP -32603 ENOENT. Retiring here covers both the warm-reuse
+    // path and the session-owner path (retireEntry forgets owned sessions), so
+    // the caller cold-starts a fresh process that re-creates the cwd at spawn.
+    for (const entry of [...entries]) {
+      if (entry.state === 'ready' && entry.client.isAlive && entry.client.isCwdIntact === false) {
+        this.retireEntry(entry, poolKey, 'bootstrap cwd missing');
+      }
+    }
 
     if (sessionId) {
       const sessionKey = serializeSessionKey(poolKey, sessionId);
@@ -406,6 +427,7 @@ export class AcpProcessPool {
     const client = this.clientFactory();
     const entry: PoolEntry = {
       client,
+      poolKey,
       leaseCount: 0, // caller manages lease count after spawn
       leaseGeneration: 0,
       lastUsedAt: Date.now(),
@@ -502,6 +524,12 @@ export class AcpProcessPool {
             }
             this._metrics.zombieCleanupCount++;
             log.warn({ key }, 'Zombie process cleaned up');
+          } else if (entry.client.isCwdIntact === false) {
+            // #1203: Alive but cwd-less — full retirement semantics, not the
+            // zombie shortcut: the process must actually be closed, and an
+            // active lease's generation must be invalidated so its late
+            // release() becomes a no-op instead of double-decrementing metrics.
+            this.retireEntry(entry, entry.poolKey, 'bootstrap cwd missing');
           }
         }
         if (entries.length === 0) this.entries.delete(key);

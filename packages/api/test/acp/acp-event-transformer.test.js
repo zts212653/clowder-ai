@@ -424,6 +424,24 @@ describe('transformAcpEvent', () => {
     assert.equal(parsed.text, 'Step 1: Read file\nStep 2: Edit');
   });
 
+  it('plan with empty/whitespace/missing text → null (#1203)', () => {
+    // The frontend has no plan formatter — empty plans used to leak as raw
+    // `{"type":"plan","text":""}` JSON bubbles in chat.
+    for (const text of ['', '   ', '\n\t ']) {
+      const update = {
+        sessionId: 's1',
+        update: { sessionUpdate: 'plan', content: { type: 'text', text } },
+      };
+      assert.equal(
+        transformAcpEvent(update, catId, metadata),
+        null,
+        `empty plan text ${JSON.stringify(text)} must be dropped`,
+      );
+    }
+    const noContent = { sessionId: 's1', update: { sessionUpdate: 'plan' } };
+    assert.equal(transformAcpEvent(noContent, catId, metadata), null, 'plan without content must be dropped');
+  });
+
   it('user_message_chunk → null (skip echo)', () => {
     const update = {
       sessionId: 's1',

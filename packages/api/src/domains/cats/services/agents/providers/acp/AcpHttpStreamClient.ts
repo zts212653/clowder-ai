@@ -34,6 +34,7 @@ import {
   AcpTimeoutError,
   buildAcpSpawnLogFields,
 } from './AcpClient.js';
+import { AcpCwdIdentityTracker } from './acp-cwd-identity.js';
 import type {
   AcpAgentRequest,
   AcpInitializeResult,
@@ -87,8 +88,12 @@ export class AcpHttpStreamClient {
   /** #1186 P1: Per-session cancel callbacks — settles the local prompt stream on cancel. */
   private readonly sessionCancelCallbacks = new Map<string, () => void>();
   private _recentCapacitySignal: AcpCapacitySignal | null = null;
+  /** #1203: Directory identity captured at spawn. */
+  private readonly cwdIdentityTracker: AcpCwdIdentityTracker;
 
-  constructor(private readonly config: AcpHttpStreamClientConfig) {}
+  constructor(private readonly config: AcpHttpStreamClientConfig) {
+    this.cwdIdentityTracker = new AcpCwdIdentityTracker(this.config.cwd);
+  }
 
   // ── Lifecycle ────────────────────────────────────────────────
 
@@ -108,6 +113,9 @@ export class AcpHttpStreamClient {
     if (!this.config.spawnFn) {
       mkdirSync(this.config.cwd, { recursive: true, mode: 0o700 });
     }
+    // #1203: Capture the cwd's directory identity at spawn so isCwdIntact can
+    // detect delete→recreate at the same path, not just deletion.
+    this.cwdIdentityTracker.capture();
 
     const spawnOpts: SpawnOptions & { stdio: ['pipe', 'pipe', 'pipe'] } = {
       cwd: this.config.cwd,
@@ -575,6 +583,14 @@ export class AcpHttpStreamClient {
   }
   get isAlive(): boolean {
     return this.child !== null && !this.child.killed && !this.closed && !this.exited;
+  }
+  /**
+   * #1203: False when the bootstrap cwd was deleted after spawn — including the
+   * delete→recreate case. HTTP-stream carriers also spawn a local child with a
+   * local cwd, so they must participate in the same retirement contract as stdio.
+   */
+  get isCwdIntact(): boolean {
+    return this.cwdIdentityTracker.isIntact;
   }
   get isSafeForSingleFlightReuse(): boolean {
     return this.unquiescedSessionIds.size === 0;

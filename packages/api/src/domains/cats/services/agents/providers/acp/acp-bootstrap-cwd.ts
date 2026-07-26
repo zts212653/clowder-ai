@@ -78,12 +78,17 @@ function enforceOwnerOnlyPermissions(path: string): void {
  * launched directly from repo cwd. Bootstrap from an isolated tmp dir, then pass
  * the real project cwd + MCP servers later via session/new.
  */
-export function resolveAcpBootstrapCwd(projectRoot: string, providerProfile: string): string {
+export function resolveAcpBootstrapCwd(
+  projectRoot: string,
+  providerProfile: string,
+  // #1203: Test-isolation injection point — tests pass a throwaway root so
+  // their fixtures and cleanup never touch the uid-shared production root.
+  bootstrapRoot: string = resolveAcpBootstrapRoot(),
+): string {
   const normalizedProjectRoot = resolve(projectRoot);
   const projectSlug = sanitizeSegment(basename(normalizedProjectRoot), 'project');
   const providerSlug = sanitizeSegment(providerProfile, 'profile');
   const digest = createHash('sha1').update(`${normalizedProjectRoot}::${providerProfile}`).digest('hex').slice(0, 12);
-  const bootstrapRoot = resolveAcpBootstrapRoot();
   mkdirSync(bootstrapRoot, { recursive: true, mode: OWNER_ONLY_MODE });
   assertRealDirectory(bootstrapRoot, 'ACP bootstrap root');
   enforceOwnerOnlyPermissions(bootstrapRoot);

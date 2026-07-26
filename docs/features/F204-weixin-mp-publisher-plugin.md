@@ -44,6 +44,21 @@ Expected scope:
 - Health check and configuration surface for `APP_ID` / `APP_SECRET`.
 - Platform-aware limb adapter only where the F202 generic limb contract cannot express Weixin MP behavior.
 
+## User Journey
+
+**Scope unit**: Plugin settings → Limb tool invocation → WeChat Official Account article
+
+1. User enables the `weixin-mp` plugin in the Plugin settings tab and enters their WeChat Official Account credentials (`App ID` / `App Secret`).
+2. Plugin registers its limb declaration; the health check (`check_status`) verifies API connectivity and access-token acquisition via the WeChat token endpoint.
+3. Cats discover the `weixin-mp` limb tools through `limb_list_available` / `limb_list_tools` and can invoke publishing workflows during conversations.
+4. Typical publish flow driven by cats:
+   - `convert_markdown` — convert Markdown content to WeChat-compatible inline-styled HTML
+   - `upload_image` / `upload_material` — upload inline images and permanent cover-art media to the WeChat CDN
+   - `create_draft` — assemble a draft article in the WeChat drafts box
+   - `submit_publish` — submit the draft for publication
+5. User can review draft status (`list_drafts`, `publish_status`) and manage published articles (`list_articles`, `delete_article`) through cat-invoked limb commands.
+6. Errors (expired tokens, invalid credentials, content-safety rejections) surface as actionable messages in the conversation — the plugin auto-refreshes tokens on `40001`/`40014`/`42001` error codes.
+
 ## Non-Goals
 
 - Do not reopen personal WeChat iLink Bot messaging from F137.

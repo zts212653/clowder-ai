@@ -4,7 +4,10 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, it, mock } from 'node:test';
 
@@ -1094,5 +1097,40 @@ describe('AcpHttpStreamClient', () => {
     assert.equal(thrownError.configuredIdleStallMs, 100, 'Error should carry configured 100ms threshold');
     // Must terminate near 100ms, not at 20_000ms (the warning interval)
     assert.ok(elapsed < 2000, `Should terminate near 100ms, took ${elapsed}ms`);
+  });
+
+  it('isCwdIntact detects deletion and delete→recreate of the bootstrap cwd (#1203)', async () => {
+    server = await startJsonRpcServer((message) => {
+      if (message.method === 'initialize') {
+        return { jsonrpc: '2.0', id: message.id, result: INIT_RESULT };
+      }
+      return { jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'not found' } };
+    });
+    const { child, agentStdout } = createMockChild();
+    const port = serverPort(server);
+    const cwd = mkdtempSync(join(tmpdir(), 'acp-http-cwd-identity-'));
+
+    client = new AcpHttpStreamClient({
+      command: 'fake-http-acp',
+      args: [],
+      cwd,
+      spawnFn: () => {
+        setImmediate(() => agentStdout.write(`Listening on port ${port}\n`));
+        return child;
+      },
+      portDiscoveryTimeoutMs: 500,
+    });
+
+    await client.initialize();
+
+    assert.equal(client.isCwdIntact, true, 'untouched cwd must be intact');
+
+    rmSync(cwd, { recursive: true, force: true });
+    assert.equal(client.isCwdIntact, false, 'deleted cwd must be reported as lost');
+
+    mkdirSync(cwd);
+    assert.equal(client.isCwdIntact, false, 'recreated cwd at same path is a different inode — still lost');
+
+    rmSync(cwd, { recursive: true, force: true });
   });
 });

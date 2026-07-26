@@ -203,7 +203,6 @@ export class AcpAgentService implements AgentService {
     // (same process = same API key = same quota), so signals from any phase are relevant.
     let capacitySignal: AcpCapacitySignal | null = null;
     let capacityWarningYielded = false; // F149: dedup — at most one warning per invoke
-    let idleWarningYielded = false; // F149: dedup — at most one idle warning per invoke
     const onCapacity = (signal: AcpCapacitySignal) => {
       capacitySignal = signal;
     };
@@ -453,24 +452,25 @@ export class AcpAgentService implements AgentService {
           continue; // Not a real ACP event — don't count, don't transform
         }
         // F149: Stream idle warning injected by AcpClient idle watchdog.
+        // #1203: Internal telemetry only — in the zero-first-event case this
+        // fires before any reply exists, making the '已开始回复但后续停滞' bubble
+        // factually wrong. The terminal stall still errors via AcpStreamIdleError.
         if (event.update?.sessionUpdate === 'stream_idle_warning') {
-          if (!idleWarningYielded) {
-            idleWarningYielded = true;
-            log.info(
-              { ...ctx, sessionId, idleSinceMs: event.update.idleSinceMs },
-              'Stream idle warning yielded to frontend',
-            );
-            yield makeIdleWarning(this.catId, this.providerName, event, metadata);
-          }
+          log.info(
+            { ...ctx, sessionId, idleSinceMs: event.update.idleSinceMs },
+            'Stream idle warning (suppressed — internal telemetry)',
+          );
           continue; // Not a real ACP event — don't count, don't transform
         }
-        // Tool wait warning — agent is waiting for MCP tool result, idle is expected
+        // Tool wait warning — agent is waiting for MCP tool result, idle is expected.
+        // #1203: Internal watchdog telemetry only — the CLI shows no such bubble,
+        // so don't surface one in chat. The client-side watchdog + stall ceiling
+        // still protect against genuinely hung tools.
         if (event.update?.sessionUpdate === 'stream_tool_wait_warning') {
           log.info(
             { ...ctx, sessionId, idleSinceMs: event.update.idleSinceMs },
             'Stream tool wait warning (idle suppressed — tool executing)',
           );
-          yield makeToolWaitWarning(this.catId, this.providerName, event, metadata);
           continue;
         }
         // F149: Fallback — capacity signal captured before promptStream started
@@ -726,46 +726,6 @@ function makeCapacityWarning(
     content: JSON.stringify({
       type: 'warning',
       message: `${providerName} 服务端容量不足，正在重试 (${signal.message.slice(0, 100)})`,
-    }),
-    metadata,
-    timestamp: Date.now(),
-  };
-}
-
-/** F149: Build a liveness_signal warning for stream idle watchdog. */
-function makeIdleWarning(
-  catId: CatId,
-  providerName: string,
-  event: import('./types.js').AcpSessionUpdate,
-  metadata: MessageMetadata,
-): AgentMessage {
-  const idleSinceMs = (event.update?.idleSinceMs as number) ?? 0;
-  return {
-    type: 'liveness_signal',
-    catId,
-    content: JSON.stringify({
-      type: 'warning',
-      message: `${providerName} 已开始回复但后续停滞 (idle ${Math.round(idleSinceMs / 1000)}s)`,
-    }),
-    metadata,
-    timestamp: Date.now(),
-  };
-}
-
-/** Build a liveness_signal info for tool wait — agent is executing MCP tool, idle is expected. */
-function makeToolWaitWarning(
-  catId: CatId,
-  providerName: string,
-  event: import('./types.js').AcpSessionUpdate,
-  metadata: MessageMetadata,
-): AgentMessage {
-  const idleSinceMs = (event.update?.idleSinceMs as number) ?? 0;
-  return {
-    type: 'liveness_signal',
-    catId,
-    content: JSON.stringify({
-      type: 'info',
-      message: `${providerName} 正在等待工具返回 (${Math.round(idleSinceMs / 1000)}s)`,
     }),
     metadata,
     timestamp: Date.now(),
