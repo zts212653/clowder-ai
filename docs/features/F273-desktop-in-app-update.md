@@ -8,7 +8,7 @@ created: 2026-07-07
 
 # F273: Desktop In-App Update — 应用内检查更新 + 原地升级（无签名约束版）
 
-> **Status**: in-progress（Phase A–D 已实现；Phase E 合入前 isolated release-candidate E2E 与合入后首次 upstream stable release field validation 待完成） | **方案设计**: 宪宪（Fable/Ragdoll） | **开发 Owner**: 布偶猫（Opus） | **Reviewer**: 缅因猫（Codex） | **Priority**: P1
+> **Status**: in-progress（Phase A–D 已通过 PR #1105 合入；exact-head RC package verification 与 macOS arm64 isolated old-install 验收通过；Phase E 首次 upstream stable release field validation 待完成） | **方案设计**: 宪宪（Fable/Ragdoll） | **开发 Owner**: 布偶猫（Opus） | **Reviewer**: 缅因猫（Codex） | **Priority**: P1
 
 ## Why
 
@@ -199,11 +199,11 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
 
 ## Phase 拆分（开发：布偶猫 Opus）
 
-- **Phase A — update-core**：checker + `/releases` max-semver 选择器 + semver compare + asset 四元组解析 + settings 持久化，`node --test` 单测（沿用 `desktop/*.test.js` 既有模式），mock API fixture
-- **Phase B — Win 全链路**：downloader（进度/四元组校验/断点续传一致性）+ pendingUpdate journal 状态机 + iss 四处改造 + spawn→quit 时序 + portable/installType 开发项（含 config 脚本参数化修硬编码）。**实现注意（Codex）**：app 外恢复路径是硬要求——最坏情形下用户必须能在不打开 app 的前提下从 `updates/` 目录重跑 installer 修复（§3.2）
-- **Phase C — mac 半自动链路**：arch 选择 + 下载校验 + open dmg + 指引 dialog + quit + journal 成功/失败态
-- **Phase D — UX 与文档**：tray「检查更新」菜单 + skip version + 进度展示 + README 双语 Upgrading + release notes 模板 + 撤版运维说明
-- **Phase E — 验收（待完成）**：合入前用 isolated release candidate 做真实旧版安装 → mock/staging releases → 完整升级链 + 全部失败注入场景；合入后首个 upstream stable release 再做 field validation 与 incident ownership 验证（沿 F179 Phase B 模式）
+- **Phase A — update-core（✅ PR #1105）**：checker + `/releases` max-semver 选择器 + semver compare + asset 四元组解析 + settings 持久化，`node --test` 单测（沿用 `desktop/*.test.js` 既有模式），mock API fixture
+- **Phase B — Win 全链路（✅ PR #1105）**：downloader（进度/四元组校验/断点续传一致性）+ pendingUpdate journal 状态机 + iss 四处改造 + spawn→quit 时序 + portable/installType 开发项（含 config 脚本参数化修硬编码）。**实现注意（Codex）**：app 外恢复路径是硬要求——最坏情形下用户必须能在不打开 app 的前提下从 `updates/` 目录重跑 installer 修复（§3.2）
+- **Phase C — mac 半自动链路（✅ PR #1105）**：arch 选择 + 下载校验 + open dmg + 指引 dialog + quit + journal 成功/失败态
+- **Phase D — UX 与文档（✅ PR #1105）**：tray「检查更新」菜单 + skip version + 进度展示 + README 双语 Upgrading + release notes 模板 + 撤版运维说明
+- **Phase E — 验收（🚧 post-merge）**：maintainer/CVO 已接受既有 Windows 安装验证作为 pre-merge evidence；真实 old-install → 首次 upstream stable release 升级、失败恢复与 incident ownership 验证移至合入后 field validation（沿 F179 Phase B 模式）。该 sequencing override 不改变安全、完整性、恢复、portable fail-safe、数据持久化或平台契约。
 
 ## Acceptance Criteria
 
@@ -214,10 +214,10 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
 - [ ] AC-5 (mac): 下载→校验→打开 dmg→指引 dialog→退出；拖拽替换后新版启动、数据完好、journal 判定成功并清理
 - [ ] AC-6: 断网/API 5xx/rate limit → 静默降级，desktop.log 可查，无用户打扰
 - [ ] AC-7 (portable/fail-safe): `installType=portable` 或字段缺失 → 仅提示 + 引导 release 页，绝不自动安装
-- [ ] AC-8: `generate-desktop-config.ps1` 参数化（-Version/-InstallType），iss 与 portable bat 正确传参，硬编码 0.10.1 修复
+- [x] AC-8: `generate-desktop-config.ps1` 参数化（-Version/-InstallType），iss 与 portable bat 正确传参，硬编码 0.10.1 修复
 - [ ] AC-9: 升级路径复用 post-install hook sync（F180）并生效
-- [ ] AC-10: README 双语 Upgrading 章节 + release notes 模板含升级指引与中断恢复说明
-- [ ] AC-11: 全程无签名新增告警面（不引入任何清 quarantine / 绕 Gatekeeper 行为）
+- [x] AC-10: README 双语 Upgrading 章节 + release notes 模板含升级指引与中断恢复说明
+- [x] AC-11: 全程无签名新增告警面（不引入任何清 quarantine / 绕 Gatekeeper 行为）
 
 ## Dependencies
 
@@ -279,3 +279,10 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
   - 更新 mid-download 测试：mock abort 触发 aborted 事件、验证 progressCount=1（无迟写）、验证文件不含超时后数据
   - 代码净减 3 行（settle+cleanup 整合消除了分散的手动 cleanup）
   - 全量 113 tests 通过（58 checker + 16 downloader + 12 installer + 15 manager + 12 config）
+
+## Timeline
+
+| Date | Event |
+|------|-------|
+| 2026-07-26 | Phase A–D merged via PR #1105 at `d908aa265`; exact-head installer/portable/DMG artifacts package-verified and the macOS arm64 isolated `.0 → .1` old-install path passed. |
+| 2026-07-26 | Maintainer/CVO acceptance override accepted the existing Windows installation validation for pre-merge sequencing; the real old-install → first upstream stable release upgrade moved to post-merge Phase E field validation. |
