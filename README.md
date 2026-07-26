@@ -126,6 +126,33 @@ Open `http://localhost:3003` → go to **Hub → System Settings → Account Con
 
 ![CVO Bootcamp onboarding](https://github.com/user-attachments/assets/9d9c8d89-27fe-4788-812a-ffc28f47d3f9)
 
+## Upgrading
+
+### Desktop App (In-App Update)
+
+The desktop app checks for updates at startup and once every 24 hours while it remains running. Automatic checks stay silent unless a new version is available; then a dialog lets you **Download**, **Skip**, or decide **Later**.
+
+- **Windows (installer)**: the update downloads the new `.exe` and runs it with elevation (UAC prompt) — the app closes, the installer runs silently, and the app restarts automatically.
+- **macOS**: the update downloads the new `.dmg` — drag it to Applications to replace the old version.
+- **Windows (portable)**: in-app update opens the release page — download and extract the new zip manually.
+
+**If an update fails:**
+
+1. On next launch, a recovery dialog appears with **Retry Install**, **Open Installer Location**, **View Log**, or **Ignore**.
+2. The downloaded installer is preserved at a fixed location — you can rerun it manually **without opening the app**:
+   - **Windows**: `%LOCALAPPDATA%\Clowder AI\updates\` (e.g. `ClowderAI-Setup-0.12.0.exe`)
+   - **macOS**: `~/Library/Application Support/Clowder AI/updates/`
+3. You can also manually download the latest release from the [Releases page](https://github.com/zts212653/clowder-ai/releases) and install it over the existing version. User data (threads, memories, configuration) is preserved across upgrades.
+
+### Source Setup
+
+```bash
+git pull origin main
+pnpm install
+pnpm build
+pnpm start
+```
+
 ## The Iron Laws
 
 Four promises we made — enforced at both prompt and code layer:

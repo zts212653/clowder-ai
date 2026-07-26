@@ -108,7 +108,8 @@ Source: "..\..\guides\*";                          DestDir: "{app}\guides"; \
   Flags: recursesubdirs createallsubdirs
 ; Plugin manifests/resources — loaded by PluginRegistry for pluginized schedules.
 ; Missing → GitHub schedule plugin and migrated pollers are unavailable.
-Source: "..\..\plugins\*";                         DestDir: "{app}\plugins"; \
+; Source: F204 moved plugins from root plugins/ into packages/api/src/plugins/.
+Source: "..\..\packages\api\src\plugins\*";        DestDir: "{app}\plugins"; \
   Flags: recursesubdirs createallsubdirs
 ; (Node.js runtime is shipped as node.tar.gz in bulk archives above)
 ; Desktop scripts (post-install config generation)
@@ -122,7 +123,9 @@ Source: "..\..\.claude\hooks\user-level\*";      DestDir: "{app}\.claude\hooks\u
 ; Desktop assets (icon used by uninstaller entry)
 Source: "..\assets\*";                           DestDir: "{app}\desktop\assets"; \
   Flags: recursesubdirs createallsubdirs
-; Portable Redis for Windows
+; Portable Redis for Windows — fail-closed: any publishable installer MUST
+; include Redis. The build script retries download 3× and verifies
+; redis-server.exe; Inno Setup will abort here if bundled/redis/ is empty.
 Source: "..\..\bundled\redis\*";                 DestDir: "{app}\.cat-cafe\redis\windows"; \
   Flags: recursesubdirs createallsubdirs
 
@@ -195,9 +198,26 @@ Filename: "powershell.exe"; \
   StatusMsg: "Generating desktop configuration..."; \
   Flags: runhidden waituntilterminated
 
-; Offer to launch after install
+; Offer to launch after interactive install
 Filename: "{app}\desktop-dist\{#MyAppExeName}"; \
   Description: "Launch {#MyAppName}"; Flags: postinstall nowait skipifsilent
+; F273: Auto-restart after silent upgrade (in-app updater uses /SILENT).
+; runasoriginaluser is critical — without it, the app + Redis + API all run
+; as elevated admin, which breaks user-data paths and is a security concern.
+Filename: "{app}\desktop-dist\{#MyAppExeName}"; \
+  Flags: nowait runasoriginaluser; Check: WizardSilent
+
+; ── F273: Clean previous version's tar-extracted dirs before upgrade ───
+; These are NOT tracked by Inno's file registry (created by tar.exe in [Run]).
+; Without this, old module files / deleted packages persist across upgrades —
+; an extremely hard-to-debug class of staleness bugs.
+; The junction must be removed first (rmdir only deletes the link, not target).
+; Recovery: if install fails after delete, rerunning the installer restores everything.
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\scripts\node_modules"
+Type: filesandordirs; Name: "{app}\packages"
+Type: filesandordirs; Name: "{app}\desktop-dist"
+Type: filesandordirs; Name: "{app}\node"
 
 [UninstallRun]
 Filename: "powershell.exe"; \
@@ -213,3 +233,50 @@ Type: filesandordirs; Name: "{app}\node"
 Type: filesandordirs; Name: "{app}\bundled"
 ; scripts/node_modules junction created by mklink /J in [Run]
 Type: filesandordirs; Name: "{app}\scripts\node_modules"
+
+; ── F273: Defensive process cleanup before upgrade ────────────────────
+; The in-app updater calls quitApp() → stopAll() before spawning the installer.
+; For a manually launched Setup.exe, request the same coordinated shutdown
+; through Electron's single-instance channel, then retain a bounded fallback
+; for orphaned processes that still hold file locks in {app}\.
+; PrepareToInstall kills ONLY processes whose executable path is under {app} —
+; no risk of killing the user's own node/redis instances running elsewhere.
+[Code]
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ExitCode: Integer;
+  Cmd, AppDir: String;
+begin
+  Result := '';
+  NeedsRestart := False;
+  // Escape {app} path for PowerShell single-quoted strings and ensure
+  // trailing backslash for directory boundary (prevents killing processes
+  // in sibling dirs like "ClowderAI-Beta" when app is "ClowderAI").
+  AppDir := ExpandConstant('{app}');
+  if Copy(AppDir, Length(AppDir), 1) <> '\' then
+    AppDir := AppDir + '\';
+  StringChange(AppDir, '''', '''''');
+  // Phase 1: ask the non-elevated app to enter quitApp() → stopAll().
+  // WM_CLOSE is not sufficient because the tray close handler hides the window.
+  ExecAsOriginalUser(
+    ExpandConstant('{app}\desktop-dist\{#MyAppExeName}'),
+    '--quit-for-update', '', SW_HIDE, ewNoWait, ExitCode);
+  // Wait only while install-directory processes remain, up to 15 seconds.
+  Cmd := '$deadline=(Get-Date).AddSeconds(15); while ((Get-Date) -lt $deadline) { ' +
+         '$running=@(Get-Process -ErrorAction SilentlyContinue | Where-Object { ' +
+         '$_.Path -and $_.Path.StartsWith(''' + AppDir + ''') }); ' +
+         'if ($running.Count -eq 0) { exit 0 }; Start-Sleep -Milliseconds 250 }; exit 1';
+  Exec('powershell.exe',
+       '-NoProfile -ExecutionPolicy Bypass -Command "' + Cmd + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
+  // Phase 2: force-clean only after coordinated shutdown exceeded its bound.
+  if ExitCode <> 0 then
+  begin
+    Cmd := 'Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith(''' +
+           AppDir +
+           ''') } | Stop-Process -Force -ErrorAction SilentlyContinue';
+    Exec('powershell.exe',
+         '-NoProfile -ExecutionPolicy Bypass -Command "' + Cmd + '"',
+         '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
+  end;
+end;

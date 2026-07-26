@@ -57,6 +57,10 @@
       "preload.js",
       "project-root.js",
       "service-manager.js",
+      "update-checker.js",
+      "update-downloader.js",
+      "update-installer.js",
+      "update-manager.js",
       "splash.html",
       "assets/**/*"
     ],
@@ -120,7 +124,7 @@
         "to": "assets"
       },
       {
-        "from": "../plugins",
+        "from": "../packages/api/src/plugins",
         "to": "plugins"
       }
     ],

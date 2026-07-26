@@ -17,6 +17,10 @@ const os = require('node:os');
 
 const IS_WINDOWS = os.platform() === 'win32';
 const SCRIPT = path.join(__dirname, 'scripts', 'generate-desktop-config.ps1');
+// GitHub-hosted Windows runners can spend more than 15s cold-starting the
+// first Windows PowerShell 5.1 process (Defender/profile initialization). Keep
+// a finite guard, but leave enough headroom for that one-time startup cost.
+const POWERSHELL_TIMEOUT_MS = 60_000;
 
 /**
  * Run generate-desktop-config.ps1 with given parameters.
@@ -31,7 +35,7 @@ function runGenerator(appDir, opts = {}) {
   const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', SCRIPT, '-AppDir', appDir];
   if (opts.version) args.push('-Version', opts.version);
   if (opts.installType) args.push('-InstallType', opts.installType);
-  execFileSync('powershell', args, { stdio: 'pipe', timeout: 15000 });
+  execFileSync('powershell', args, { stdio: 'pipe', timeout: POWERSHELL_TIMEOUT_MS });
   const configPath = path.join(appDir, '.cat-cafe', 'desktop-config.json');
   const raw = fs.readFileSync(configPath, 'utf8');
   return JSON.parse(raw);

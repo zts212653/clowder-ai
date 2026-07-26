@@ -821,5 +821,21 @@
     "body": "微信公众号插件已就绪：设置 → 插件 → weixin-mp → 配置 App ID 和 App Secret 并启用。猫猫可以帮你把 Markdown 转成微信格式、上传图片、创建草稿、一键发布文章。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "opus"
+  },
+  {
+    "id": "feature-f273-desktop-in-app-update",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/features/F273-desktop-in-app-update.md", "anchor": "User Journey" },
+    "structureSource": { "path": "docs/features/F273-desktop-in-app-update.md", "anchor": "What — 架构设计" },
+    "bodySource": { "path": "docs/features/F273-desktop-in-app-update.md", "anchor": "Why" },
+    "contexts": ["feature_dev"],
+    "audience": ["all"],
+    "body": "桌面版会在启动或重新登录时检查更新，也可从托盘手动检查。Windows 安装版在用户确认下载与安装后校验文件并请求一次 UAC；macOS 只下载、校验并打开未签名 DMG，引导用户手动拖拽替换。用户数据保存在安装目录外。",
+    "action": {
+      "type": "open_source",
+      "label": "打开 F273 spec",
+      "sourceRef": { "path": "docs/features/F273-desktop-in-app-update.md", "anchor": "User Journey" }
+    },
+    "owner": "opus"
   }
 ]
