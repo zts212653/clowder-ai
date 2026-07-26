@@ -106,7 +106,7 @@ bug 链：opus parent 结束本轮 → tracker 没了/无 fresh draft → 过 gr
 - [x] AC-1.3: human 路径占位不回归。→ 只改 QueueProcessor 队列路径，未动 direct/route-serial；全 web 测试无回归。
 
 **Phase 2（可靠）**
-- [x] AC-2.1: 根因报告（5 件套）✅ drafted from #972 runtime evidence + 代码确认（`reconcileZombies.ts` / `terminal.ts:319` active-pane / `getThreadLiveInvocations` 模型），见上方「Phase 2 根因报告：#972 split-brain」。PR #1150 已合入 queue-state TDD：手工构造 zombie record、精确关联的 stale `processing` row 与 post-dispatch continuation 状态，验证 stale blocker 收敛且合法 older follow-up 不被误删；未覆盖 live serial child + Opus parent sweep 的 seam E2E，该边界保留在 Phase 2b。
+- [~] AC-2.1: 根因报告（5 件套）✅ drafted from #972 runtime evidence + 代码确认（`reconcileZombies.ts` / `terminal.ts:319` active-pane / `getThreadLiveInvocations` 模型），见上方「Phase 2 根因报告：#972 split-brain」。PR #1150 已合入 queue-state TDD：手工构造 zombie record、精确关联的 stale `processing` row 与 post-dispatch continuation 状态，验证 stale blocker 收敛且合法 older follow-up 不被误删；未覆盖 live serial child + Opus parent sweep 的 seam E2E，该边界保留在 Phase 2b，因此 AC 维持 partial。
 - [~] AC-2.2: 修复按 seam 切两层——**2a 局部修**的代码与回归已于 main `7563c9be0`（PR #1150）合入（active-pane tracker fallback 移除 / reconcileZombies→queue 精确 entry-identity 收敛 / slot↔queue 一致 / 回归）；**2b 架构 seam**（serial-child↔parent liveness 桥接）仍需 Decision Packet → operator 拍板拆 feat。
 
 **Phase 3（可恢复）✅ code+test done @ main 4e80ec889（PR #2065 squash）；runtime 截图验收 → operator quickpath**
