@@ -1,12 +1,12 @@
 // Clowder AI Desktop — Electron main process
 // Launches backend services (Redis, API, Web) then shows the web UI.
 
-const { app, BrowserWindow, Menu, Tray, dialog } = require('electron');
+const { app, BrowserWindow, Menu, Tray, dialog, net, shell, Notification } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
-const os = require('node:os');
 const { resolveProjectRootFromDir } = require('./project-root');
 const ServiceManager = require('./service-manager');
+const UpdateManager = require('./update-manager');
 
 // macOS install-location guard.
 //
@@ -67,11 +67,11 @@ const PROJECT_ROOT = resolveProjectRootFromDir(__dirname);
 const FRONTEND_PORT = 3003;
 const API_PORT = 3004;
 const APP_URL = `http://localhost:${FRONTEND_PORT}`;
+const QUIT_FOR_UPDATE_ARG = '--quit-for-update';
 // Main process log in the user data directory alongside API + desktop logs.
-const IS_MAC_MAIN = process.platform === 'darwin';
-const userDataRoot = IS_MAC_MAIN
-  ? path.join(process.env.HOME || os.homedir(), 'Library', 'Application Support', 'Clowder AI')
-  : path.join(process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local'), 'Clowder AI');
+// Single source of truth: service-manager.js resolveUserDataDir() reads
+// electron-builder productName and handles legacy data directory migration.
+const userDataRoot = ServiceManager.USER_DATA_DIR;
 const mainLogDir = path.join(userDataRoot, 'data', 'logs');
 try {
   fs.mkdirSync(mainLogDir, { recursive: true });
@@ -92,7 +92,9 @@ let mainWindow = null;
 let splashWindow = null;
 let tray = null;
 let services = null;
+let updater = null;
 let isQuitting = false;
+let quitPromise = null;
 
 function createSplashWindow() {
   splashWindow = new BrowserWindow({
@@ -152,6 +154,32 @@ function createMainWindow() {
   });
 }
 
+function showAboutDialog() {
+  const version = app.getVersion();
+  dialog
+    .showMessageBox({
+      type: 'info',
+      buttons: ['Check for Updates', 'OK'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'About Clowder AI',
+      message: `Clowder AI v${version}`,
+      detail: [
+        'Multi-Agent Collaboration Platform',
+        '',
+        `Version: ${version}`,
+        `Electron: ${process.versions.electron}`,
+        `Node: ${process.versions.node}`,
+        '',
+        'License: AGPL-3.0',
+        'https://github.com/zts212653/clowder-ai',
+      ].join('\n'),
+    })
+    .then((result) => {
+      if (result.response === 0) updater?.checkForUpdates({ manual: true });
+    });
+}
+
 function createTray() {
   const iconPath = path.join(__dirname, 'assets', 'icon.ico');
   try {
@@ -162,6 +190,9 @@ function createTray() {
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Show Clowder AI', click: () => mainWindow?.show() },
     { type: 'separator' },
+    { label: 'About', click: () => showAboutDialog() },
+    { label: 'Check for Updates', click: () => updater?.checkForUpdates({ manual: true }) },
+    { type: 'separator' },
     { label: 'Quit', click: () => quitApp() },
   ]);
   tray.setToolTip('Clowder AI');
@@ -170,24 +201,35 @@ function createTray() {
 }
 
 async function quitApp() {
-  if (services) {
-    await services.stopAll();
+  if (!quitPromise) {
+    isQuitting = true;
+    updater?.stopSchedule();
+    quitPromise = (async () => {
+      if (services) {
+        const activeServices = services;
+        services = null;
+        await activeServices.stopAll();
+      }
+      if (tray) {
+        tray.destroy();
+        tray = null;
+      }
+      app.quit();
+    })();
   }
-  if (tray) {
-    tray.destroy();
-    tray = null;
-  }
-  app.quit();
+  return quitPromise;
 }
 
 function sendSplashStatus(msg) {
-  if (splashWindow && !splashWindow.isDestroyed()) {
-    splashWindow.webContents.send('splash-status', msg);
-  }
+  if (splashWindow && !splashWindow.isDestroyed()) splashWindow.webContents.send('splash-status', msg);
 }
 
-app.on('second-instance', () => {
-  // Another instance tried to launch — bring the existing window to front
+app.on('second-instance', (_event, commandLine) => {
+  if (commandLine.includes(QUIT_FOR_UPDATE_ARG)) {
+    dbg('Installer requested coordinated shutdown');
+    void quitApp();
+    return;
+  }
   if (mainWindow) {
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
@@ -211,9 +253,41 @@ app.on('ready', async () => {
     app.quit();
     return;
   }
+  if (process.argv.includes(QUIT_FOR_UPDATE_ARG)) {
+    await quitApp();
+    return;
+  }
 
   createSplashWindow();
   createTray();
+
+  // macOS: set application menu with About entry (standard mac UX)
+  if (process.platform === 'darwin') {
+    const appMenu = Menu.buildFromTemplate([
+      {
+        label: app.name,
+        submenu: [
+          { label: 'About Clowder AI', click: () => showAboutDialog() },
+          { label: 'Check for Updates…', click: () => updater?.checkForUpdates({ manual: true }) },
+          { type: 'separator' },
+          { role: 'quit' },
+        ],
+      },
+      {
+        label: 'Edit',
+        submenu: [
+          { role: 'undo' },
+          { role: 'redo' },
+          { type: 'separator' },
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          { role: 'selectAll' },
+        ],
+      },
+    ]);
+    Menu.setApplicationMenu(appMenu);
+  }
 
   services = new ServiceManager(PROJECT_ROOT, {
     frontendPort: FRONTEND_PORT,
@@ -221,11 +295,55 @@ app.on('ready', async () => {
     onStatus: sendSplashStatus,
   });
 
+  // F273: Initialize updater — check pending upgrade result BEFORE services
+  // (spec §3.2: "main.js 早期、服务启动前检测")
+  updater = new UpdateManager({
+    app,
+    net,
+    showDialog: (opts) => dialog.showMessageBox(opts).then((r) => r.response),
+    showNotification: (title, body) => {
+      try {
+        new Notification({ title, body }).show();
+      } catch {}
+    },
+    setProgressBar: (p) => {
+      try {
+        mainWindow?.setProgressBar(p);
+      } catch {}
+      try {
+        if (!tray) return;
+        if (p >= 0 && p <= 1) tray.setToolTip(`Clowder AI — Downloading update ${Math.round(p * 100)}%`);
+        else tray.setToolTip('Clowder AI');
+      } catch {}
+    },
+    openExternal: (url) => shell.openExternal(url),
+    openPath: (p) => shell.openPath(p),
+    quitApp,
+    stopServices: async () => {
+      if (services) {
+        await services.stopAll();
+        services = null;
+      }
+    },
+    startServices: async () => {
+      services = new ServiceManager(PROJECT_ROOT, { frontendPort: FRONTEND_PORT, apiPort: API_PORT });
+      await services.startAll();
+    },
+    dbg,
+    userDataRoot,
+    platform: process.platform,
+    arch: process.arch,
+  });
+  const upgradeResult = await updater.checkPendingUpgrade();
+  if (upgradeResult === 'quitting') return; // P1-2: installer launched — skip startAll
+
   try {
     dbg('startAll() called');
     await services.startAll();
     dbg('startAll() done — creating main window');
     createMainWindow();
+    // F273: Start update check after services are up
+    updater.startSchedule();
   } catch (err) {
     dbg(`startAll() FAILED: ${err.message}`);
     dialog.showErrorBox(
@@ -240,10 +358,10 @@ app.on('window-all-closed', () => {
   // keep running in tray on Windows
   if (process.platform !== 'win32') quitApp();
 });
-
 app.on('before-quit', (e) => {
   // Signal close handlers to stop hiding windows to tray.
   isQuitting = true;
+  updater?.stopSchedule();
   // Electron does NOT await async event handlers. Without blocking here,
   // the app exits before stopAll() finishes → orphaned node/redis processes.
   // Prevent default, run cleanup, then quit when done.

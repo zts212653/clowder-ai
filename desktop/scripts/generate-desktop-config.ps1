@@ -41,6 +41,11 @@ $config = @{
     installedAt = (Get-Date -Format "o")
 }
 
+# Only write installType if explicitly provided (fail-safe: missing = no auto-install)
+if ($InstallType -ne "") {
+    $config.installType = $InstallType
+}
+
 $configPath = Join-Path $AppDir ".cat-cafe\desktop-config.json"
 $configDir = Split-Path -Parent $configPath
 if (-not (Test-Path $configDir)) {

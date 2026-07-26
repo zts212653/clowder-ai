@@ -7,7 +7,7 @@
  * generate-desktop-config-behavior.test.js (Windows Smoke CI).
  */
 const assert = require('node:assert/strict');
-const { readFileSync } = require('node:fs');
+const { existsSync, readFileSync, readdirSync } = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
@@ -125,6 +125,49 @@ test('#1107: no JSON file is written with BOM-emitting Out-File -Encoding utf8',
       `${name} must not use Out-File -Encoding utf8 for JSON files (emits BOM on PS 5.1)`,
     );
   }
+});
+
+// ── F273: Plugin packaging source path regression (F204 migration) ──────
+// After F204, plugins moved from root plugins/ to packages/api/src/plugins/.
+// These tests ensure all three packaging configs point to the actual source
+// and that the source directory contains the expected plugin manifests.
+
+test('F273: Inno Setup plugins source points to packages/api/src/plugins', () => {
+  const iss = readFileSync(path.join(INSTALLER_DIR, 'cat-cafe.iss'), 'utf8');
+  assert.match(
+    iss,
+    /Source:.*packages\\api\\src\\plugins/,
+    'Inno Setup must source plugins from packages/api/src/plugins',
+  );
+  assert.match(iss, /DestDir:.*\{app\}\\plugins/, 'Inno Setup must install plugins to {app}/plugins');
+});
+
+test('F273: electron-builder extraResources plugins source is packages/api/src/plugins', () => {
+  const pkg = JSON.parse(readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+  const pluginResource = pkg.build?.extraResources?.find((r) => r.to === 'plugins');
+  assert.ok(pluginResource, 'extraResources must include a plugins entry');
+  assert.ok(
+    pluginResource.from.includes('packages/api/src/plugins'),
+    `plugins "from" must reference packages/api/src/plugins, got: ${pluginResource.from}`,
+  );
+});
+
+test('F273: build-desktop.ps1 plugins source is packages/api/src/plugins', () => {
+  const ps1 = readFileSync(path.join(SCRIPTS_DIR, 'build-desktop.ps1'), 'utf8');
+  assert.match(
+    ps1,
+    /packages\\api\\src\\plugins/,
+    'build-desktop.ps1 must source plugins from packages/api/src/plugins',
+  );
+});
+
+test('F273: plugin source directory exists and contains github plugin manifest', () => {
+  const pluginsSrc = path.join(__dirname, '..', 'packages', 'api', 'src', 'plugins');
+  assert.ok(existsSync(pluginsSrc), `Plugin source directory must exist: ${pluginsSrc}`);
+  const entries = readdirSync(pluginsSrc);
+  assert.ok(entries.includes('github'), 'Plugin source must contain github plugin');
+  const githubManifest = path.join(pluginsSrc, 'github', 'plugin.yaml');
+  assert.ok(existsSync(githubManifest), 'github/plugin.yaml must exist');
 });
 
 test('#1107: desktop/package.json version differs from root', () => {

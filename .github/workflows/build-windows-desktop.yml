@@ -1,7 +1,7 @@
 name: Build Windows Desktop
 
 # Reusable workflow: builds Windows installer (.exe) and portable zip for
-# Clowder AI. Produces both CatCafe-Setup-*.exe and CatCafe-*.zip.
+# Clowder AI. Produces both ClowderAI-Setup-*.exe and ClowderAI-*.zip.
 #
 # Called by: release-desktop.yml (orchestrator)
 # Standalone: workflow_dispatch for dry-run verification
@@ -73,6 +73,7 @@ jobs:
       - name: Build Windows installer
         env:
           CATCAFE_VERSION: ${{ inputs.version }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
           .\desktop\scripts\build-desktop.ps1
@@ -86,8 +87,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/CatCafe-Setup-*.exe
-            dist/CatCafe-*.zip
+            dist/ClowderAI-Setup-*.exe
+            dist/ClowderAI-*.zip
           fail_on_unmatched_files: true
 
       - name: Upload installer as workflow artifact
@@ -95,7 +96,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer-${{ inputs.version }}
-          path: dist/CatCafe-Setup-*.exe
+          path: dist/ClowderAI-Setup-*.exe
           if-no-files-found: error
 
       - name: Upload portable zip as workflow artifact
@@ -103,5 +104,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-portable-${{ inputs.version }}
-          path: dist/CatCafe-*.zip
+          path: dist/ClowderAI-*.zip
           if-no-files-found: error

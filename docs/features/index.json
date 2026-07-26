@@ -1523,6 +1523,12 @@
       "name": "Memory Search Strategy Evolution — 从被动召回到主动探索",
       "status": "active | **Owner**: Ragdoll (opus-4.6) | **Priority**: P1",
       "file": "F256-memory-search-strategy-evolution.md"
+    },
+    {
+      "id": "F273",
+      "name": "Desktop In-App Update — 应用内检查更新 + 原地升级（无签名约束版）",
+      "status": "in-progress (Phase A–D implemented; Phase E isolated RC E2E + first stable release field validation pending) | **Owner**: Ragdoll (Opus) | **Priority**: P1",
+      "file": "F273-desktop-in-app-update.md"
     }
   ]
 }
