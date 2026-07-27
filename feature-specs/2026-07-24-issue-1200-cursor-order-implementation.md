@@ -1,7 +1,6 @@
-# F258 D2: Bounded Sortable-ID Producer — Implementation Design v5
+# Issue #1200: Thread Cursor Order Correctness — Implementation Design
 
-**Feature:** F258 / K-1 messaging producer attestation
-**Scope:** D2-A "opaque bounded ID + explicit cursor order" from [K-1 Producer Attestation D-Gate](2026-07-19-k1-producer-attestation.md)
+**Scope:** Part of #1200. Thread-level cursor order correctness, atomic append/delivery transitions, idempotency hygiene, TTL index cleanup, and Memory/Redis parity. This PR does **not** establish system-wide cursor decoupling for delivery, mention, seen, or freshness consumers; those remain on lexical message-ID comparison and are left for a separate design effort.
 **Baseline:** `upstream/main@e3770ef219` (includes #1185, #1192, #1193)
 **Worktree:** `/Users/lang/workspace/github-lab/clowder-ai-f258-d2-cursor`
 **Branch:** `feat/f258-d2-cursor-order`
@@ -11,7 +10,7 @@
 
 Keep the existing `timestamp-seq-uuid` lexical ID layout, but **decouple cursor order from the ID**. The sortable ID remains an opaque bounded identity; thread-level visibility order is maintained by a store-owned monotonic **`orderKey`** stored as the Redis thread-ZSET score (and by an equivalent private `Map` in the in-memory store). The orderKey allocator is single-threaded inside Redis: `candidate = max(zsetMaxScore + 1, redisServerTimeMs)`, guarded to be finite, strictly greater than `maxScore`, and not above `Number.MAX_SAFE_INTEGER`; otherwise it fails closed. `timeline`, `user`, and `mentions` ZSETs keep their existing time semantics (`timestamp` for queued/legacy, `deliveredAt` after delivery). Thread pagination uses the orderKey; callers continue to pass a message-ID cursor, and the store resolves the cursor's current score internally. Both `getByThreadAfter` and `getByThreadBefore` are implemented as chunked scans with a **dual-state** (boundary + scanCursor): the boundary only advances when a message is actually returned, while the scanCursor always advances to the raw chunk end; a constant predicate filters any entries at or behind the boundary, making fallback recovery safe without skip counters or offset state. Expired/missing cursors replay from the visibility-order start (allow duplicates, forbid loss). Memory implements the same orderKey invariant via `Map<messageId, orderKey>` and `Map<threadId, maxOrderKey>`.
 
-## Terminal invariants (D2-A)
+## Terminal invariants
 
 | Required terminal invariant | How v5 closes it |
 |---|---|
