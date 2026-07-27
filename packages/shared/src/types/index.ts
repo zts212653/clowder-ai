@@ -698,6 +698,7 @@ export type {
   HookManifest,
   HookResolver,
   HookStage,
+  HookVariableDef,
   PingPongInput,
   PromptPatch,
   RegisteredHook,

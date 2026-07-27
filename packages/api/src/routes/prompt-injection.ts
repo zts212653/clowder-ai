@@ -12,6 +12,7 @@
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import type { HookVariableDef } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import YAML from 'yaml';
 import {
@@ -29,7 +30,7 @@ import {
 } from '../domains/cats/services/context/prompt-template-loader.js';
 import { RICH_BLOCK_SHORT } from '../domains/cats/services/context/rich-block-rules.js';
 import { resolveUserId } from '../utils/request-identity.js';
-import { resolveHookContent } from './prompt-injection-hooks.js';
+import { getHookVariableDefs, resolveHookContent } from './prompt-injection-hooks.js';
 
 /**
  * Session-only auth for write operations — reads sessionUserId directly
@@ -124,12 +125,37 @@ function invalidateNativeL0CacheForSegment(segmentId: string): void {
   }
 }
 
+/** Extract {{NAME}} placeholders from a template source string. */
+function extractPlaceholders(content: string): string[] {
+  const vars: string[] = [];
+  for (const m of content.matchAll(/\{\{(\w+)\}\}/g)) {
+    if (!vars.includes(m[1])) vars.push(m[1]);
+  }
+  return vars;
+}
+
+/**
+ * Reject content that has replaced runtime-expanded values back into the source.
+ * The saved source must retain every {{NAME}} placeholder present in the
+ * current effective content (base or existing overlay).
+ */
+function validateSourcePlaceholders(content: string, referenceContent: string): string | null {
+  const required = extractPlaceholders(referenceContent);
+  if (required.length === 0) return null;
+  const present = new Set(extractPlaceholders(content));
+  const missing = required.filter((name) => !present.has(name));
+  if (missing.length === 0) return null;
+  return `Missing required placeholders: ${missing.map((n) => `{{${n}}}`).join(', ')}`;
+}
+
 // ── Dynamic segment metadata (derived from TEMPLATE_FILES registry) ──
 
 interface SegmentMeta {
   allowLocalOverride: boolean;
   ext: 'yaml' | 'md';
+  templateRef: string;
   vars: string[];
+  variableDefs: HookVariableDef[];
 }
 
 /** Known runtime values for template variable preview rendering */
@@ -150,7 +176,15 @@ function resolveSegmentMeta(id: string): SegmentMeta | null {
       if (!vars.includes(m[1])) vars.push(m[1]);
     }
   }
-  return { allowLocalOverride: !!fileInfo.local, ext, vars };
+  // Canonical variable definitions come from the hook manifest registry.
+  const variableDefs = getHookVariableDefs(id) ?? [];
+  return {
+    allowLocalOverride: !!fileInfo.local,
+    ext,
+    templateRef: fileInfo.base,
+    vars,
+    variableDefs,
+  };
 }
 
 function resolveVars(segmentId: string): Record<string, string> {
@@ -199,7 +233,9 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
       hasBackup,
       content: content ?? '',
       baseContent: baseContent ?? '',
+      templateRef: meta.templateRef,
       vars: meta.vars,
+      variableDefs: meta.variableDefs,
     };
   });
 
@@ -292,6 +328,14 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
           reply.status(400);
           return { error: yamlErr };
         }
+      }
+
+      // Reject runtime-expanded values being written back as source.
+      const referenceContent = getTemplateRawContent(id, true) ?? '';
+      const placeholderErr = validateSourcePlaceholders(content, referenceContent);
+      if (placeholderErr) {
+        reply.status(400);
+        return { error: placeholderErr };
       }
 
       const fileInfo = getTemplateFileInfo(id);

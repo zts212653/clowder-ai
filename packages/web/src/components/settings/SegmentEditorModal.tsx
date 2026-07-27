@@ -1,12 +1,18 @@
 'use client';
 
 /**
- * F237 Checkpoint C — Segment overlay editor modal.
+ * F237 Checkpoint C + F257 Console 判据⑤ — Segment overlay editor modal.
  * Portal-based modal matching SkillPreviewModal pattern.
  * Edits template-backed segments via .local overlay files.
+ *
+ * Criterion ⑤ separation:
+ *   - Template reference is shown as read-only provenance.
+ *   - Variable definitions come from the canonical hook manifest registry.
+ *   - The editable area contains ONLY source text with {{VAR}} placeholders.
+ *   - Runtime-expanded values cannot be saved back into the override.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { apiFetch } from '@/utils/api-client';
 import { SettingsPrimaryButton, SettingsSecondaryButton, SettingsText } from './primitives';
@@ -20,11 +26,37 @@ function stripDisplayComments(content: string): string {
     .trim();
 }
 
+/** Extract {{NAME}} placeholders from a source string. */
+function extractPlaceholders(content: string): string[] {
+  const vars: string[] = [];
+  for (const m of content.matchAll(/\{\{(\w+)\}\}/g)) {
+    if (!vars.includes(m[1])) vars.push(m[1]);
+  }
+  return vars;
+}
+
+/**
+ * Compare placeholders in the current draft against the original source.
+ * Returns the names of placeholders that are missing from the draft.
+ */
+function missingPlaceholders(draft: string, reference: string): string[] {
+  const required = extractPlaceholders(reference);
+  if (required.length === 0) return [];
+  const present = new Set(extractPlaceholders(draft));
+  return required.filter((name) => !present.has(name));
+}
+
 interface SegmentEditorModalProps {
   segmentId: string;
   segmentName: string;
   allowLocalOverride: boolean;
   onClose: () => void;
+}
+
+interface VariableDef {
+  name: string;
+  description?: string;
+  placeholder?: string;
 }
 
 interface ContentResponse {
@@ -34,7 +66,9 @@ interface ContentResponse {
   hasBackup: boolean;
   content: string;
   baseContent: string;
+  templateRef: string;
   vars: string[];
+  variableDefs: VariableDef[];
 }
 
 export function SegmentEditorModal({ segmentId, segmentName, allowLocalOverride, onClose }: SegmentEditorModalProps) {
@@ -153,7 +187,8 @@ export function SegmentEditorModal({ segmentId, segmentName, allowLocalOverride,
   }, [segmentId, fetchContent]);
 
   const isReadonly = !allowLocalOverride;
-  const isDirty = data ? draft !== data.content : false;
+  const missing = useMemo(() => (data ? missingPlaceholders(draft, data.content) : []), [draft, data]);
+  const canSave = missing.length === 0 && !saving;
 
   return createPortal(
     <div
@@ -164,7 +199,7 @@ export function SegmentEditorModal({ segmentId, segmentName, allowLocalOverride,
         role="dialog"
         aria-modal="true"
         aria-labelledby="segment-editor-title"
-        className="relative flex max-h-[calc(100vh-32px)] w-full max-w-[680px] flex-col overflow-hidden rounded-2xl bg-[var(--console-card-bg)] p-[26px] shadow-[0_20px_48px_rgba(43,33,26,0.14)]"
+        className="relative flex max-h-[calc(100vh-32px)] w-full max-w-[760px] flex-col overflow-hidden rounded-2xl bg-[var(--console-card-bg)] p-[26px] shadow-[0_20px_48px_rgba(43,33,26,0.14)]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -177,11 +212,6 @@ export function SegmentEditorModal({ segmentId, segmentName, allowLocalOverride,
               <span className="font-mono text-base text-cafe-muted">{segmentId}</span>
               {segmentName}
             </h2>
-            {data?.vars && data.vars.length > 0 && (
-              <SettingsText as="p" variant="xs" tone="muted" className="mt-1">
-                变量：{data.vars.map((v) => `{{${v}}}`).join('、')}
-              </SettingsText>
-            )}
           </div>
           <button
             type="button"
@@ -214,8 +244,70 @@ export function SegmentEditorModal({ segmentId, segmentName, allowLocalOverride,
 
           {data && (
             <>
-              {/* Editor */}
+              {/* Template reference — read-only provenance */}
               <div className="rounded-2xl bg-[var(--console-panel-bg)] p-4">
+                <SettingsText as="h3" variant="xs" tone="muted" className="mb-1 font-semibold">
+                  模板来源
+                </SettingsText>
+                <SettingsText as="p" variant="xs" tone="secondary" className="font-mono">
+                  {data.templateRef}
+                </SettingsText>
+              </div>
+
+              {/* Variable definitions — canonical manifest metadata */}
+              {data.variableDefs.length > 0 ? (
+                <div className="rounded-2xl bg-[var(--console-panel-bg)] p-4">
+                  <SettingsText as="h3" variant="xs" tone="muted" className="mb-2 font-semibold">
+                    变量说明
+                  </SettingsText>
+                  <div className="grid gap-2">
+                    {data.variableDefs.map((v) => (
+                      <div key={v.name} className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-2">
+                          <code className="rounded bg-[var(--console-card-bg)] px-1.5 py-0.5 font-mono text-xs text-cafe-secondary">
+                            {'{{'} {v.name} {'}}'}
+                          </code>
+                          {v.placeholder && (
+                            <SettingsText as="span" variant="xs" tone="muted">
+                              示例：{v.placeholder}
+                            </SettingsText>
+                          )}
+                        </div>
+                        {v.description && (
+                          <SettingsText as="p" variant="xs" tone="secondary">
+                            {v.description}
+                          </SettingsText>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : data.vars.length > 0 ? (
+                <div className="rounded-2xl bg-[var(--console-panel-bg)] p-4">
+                  <SettingsText as="h3" variant="xs" tone="muted" className="mb-1 font-semibold">
+                    变量
+                  </SettingsText>
+                  <SettingsText as="p" variant="xs" tone="secondary">
+                    {data.vars.map((v) => `{{${v}}}`).join('、')}
+                  </SettingsText>
+                  <SettingsText as="p" variant="xs" tone="muted" className="mt-1 italic">
+                    说明待补充
+                  </SettingsText>
+                </div>
+              ) : null}
+
+              {/* Source editor — must retain placeholders */}
+              <div className="rounded-2xl bg-[var(--console-panel-bg)] p-4">
+                <div className="mb-2 flex items-center justify-between">
+                  <SettingsText as="h3" variant="xs" tone="muted" className="font-semibold">
+                    可编辑源文本
+                  </SettingsText>
+                  {missing.length > 0 && (
+                    <SettingsText as="p" variant="xs" tone="red">
+                      缺少占位符：{missing.map((n) => `{{${n}}}`).join(', ')}
+                    </SettingsText>
+                  )}
+                </div>
                 <textarea
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
@@ -239,7 +331,7 @@ export function SegmentEditorModal({ segmentId, segmentName, allowLocalOverride,
                   {data.hasOverride && (
                     <SettingsSecondaryButton onClick={handleReset}>恢复默认</SettingsSecondaryButton>
                   )}
-                  <SettingsPrimaryButton onClick={handleSave} disabled={!isDirty || saving}>
+                  <SettingsPrimaryButton onClick={handleSave} disabled={!canSave} data-testid="segment-editor-save">
                     {saving ? '保存中...' : '保存'}
                   </SettingsPrimaryButton>
                 </div>
