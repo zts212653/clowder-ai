@@ -443,6 +443,42 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     );
   });
 
+  it('getByThreadAfter with limit returns IDs in lexicographic append order, not score order', async () => {
+    const roundTripStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
+    const threadId = 'thread-after-lex-order';
+
+    // Out-of-order timestamps: A is appended first with a higher timestamp,
+    // B is appended second with a lower timestamp.  ZSET score is raw
+    // timestamp, so score order is B-then-A, but append/ID order is A-then-B.
+    const a = await roundTripStore.append({
+      userId: 'user1',
+      catId: null,
+      content: 'first append, higher timestamp',
+      mentions: [],
+      timestamp: 300,
+      threadId,
+    });
+    const b = await roundTripStore.append({
+      userId: 'user1',
+      catId: null,
+      content: 'second append, lower timestamp',
+      mentions: [],
+      timestamp: 200,
+      threadId,
+    });
+
+    assert.deepEqual(
+      (await roundTripStore.getByThreadAfter(threadId, undefined, 1)).map((message) => message.id),
+      [a.id],
+      'first page must be the lexicographically earliest ID',
+    );
+    assert.deepEqual(
+      (await roundTripStore.getByThreadAfter(threadId, a.id, 1)).map((message) => message.id),
+      [b.id],
+      'page after A must be B, even though B has a lower ZSET score',
+    );
+  });
+
   it('claimContentDedupKey() is atomic: first wins, live duplicate loses, distinct keys independent', async () => {
     const first = await store.claimContentDedupKey('fp-abc', 5000);
     assert.equal(first, true, 'first claim of a fingerprint succeeds');

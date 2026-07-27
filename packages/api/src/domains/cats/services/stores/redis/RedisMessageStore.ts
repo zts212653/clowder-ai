@@ -567,23 +567,21 @@ export class RedisMessageStore {
   ): Promise<StoredMessage[]> {
     const key = MessageKeys.thread(threadId);
 
-    let ids: string[];
-    if (!afterId) {
-      if (limit && limit > 0) {
-        ids = await this.redis.zrange(key, 0, limit - 1);
-      } else {
-        ids = await this.redis.zrange(key, 0, -1);
-      }
-    } else {
-      // Use lexicographic ID filtering: sortable IDs are monotonically
-      // increasing by append sequence regardless of the raw timestamp.  This
-      // handles far-future timestamps (whose ZSET score is high but whose ID
-      // prefix is near wall-clock) without coupling to the score scheme.
-      ids = await this.redis.zrange(key, 0, -1);
+    // Sortable IDs are monotonically increasing by append sequence regardless
+    // of the raw timestamp, so use lexicographic ID filtering rather than
+    // score-based range queries.  This handles far-future timestamps (whose
+    // ZSET score is high but whose ID prefix is near wall-clock) without
+    // coupling to the score scheme.
+    let ids: string[] = await this.redis.zrange(key, 0, -1);
+    if (afterId) {
       ids = ids.filter((id) => id > afterId);
-      if (limit && limit > 0 && ids.length > limit) {
-        ids = ids.slice(0, limit);
-      }
+    }
+    // ZRANGE returns candidates in score order; sort lexicographically before
+    // applying the page limit so pagination follows the same cursor order as
+    // the in-memory store.
+    ids.sort();
+    if (limit && limit > 0 && ids.length > limit) {
+      ids = ids.slice(0, limit);
     }
 
     if (ids.length === 0) return [];
