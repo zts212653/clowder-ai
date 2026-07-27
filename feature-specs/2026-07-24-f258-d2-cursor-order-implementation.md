@@ -30,7 +30,7 @@ Keep the existing `timestamp-seq-uuid` lexical ID layout, but **decouple cursor 
 - **ID** = `timestamp-seq-uuid` produced by `generateSortableId`. It is an opaque identity; no store code decodes `id.slice(0,16)` for ordering.
 - **Thread visibility score** = `orderKey`, a per-thread monotonic number managed by the store.
 - **Timeline/user/mention scores** = `deliveredAt ?? timestamp` (existing time semantics, unchanged).
-- `getByThreadAfter(threadId, afterId?)` and `getByThreadBefore(threadId, timestamp, limit?, beforeId?, userId?)` use the thread orderKey for cursor resolution. When `beforeId` is present its score is authoritative and the `timestamp` argument is ignored; when `beforeId` is absent the `timestamp` is used as an exclusive effective-time bound for backward compatibility.
+- `getByThreadAfter(threadId, afterId?)` and `getByThreadBefore(threadId, timestamp, limit?, beforeId?, userId?)` use the thread orderKey for cursor resolution. `getByThreadAfter` follows the visibility order only (no timestamp ceiling). `getByThreadBefore` always applies the `timestamp` argument as an **effective-time AND guard** on top of the orderKey boundary: a candidate is returned only if its `deliveredAt ?? timestamp` is `< cursorTimestamp`, or if it is `== cursorTimestamp` **and** the cursor message itself sits at that same effective time and the candidate's id is lexically smaller than `beforeId`. When `beforeId` is absent the same guard degenerates to the legacy exclusive effective-time bound.
 
 ## Append atomicity
 
@@ -90,13 +90,15 @@ loop until result.length >= want or exhausted:
 return result
 ```
 
-### Before (strict mirror)
+### Before (structural mirror with effective-time AND guard)
 
 ```
 boundary   = beforeId ? (ZSCORE(beforeId), beforeId) : nil
 scanCursor = boundary
 result     = []
 want       = limit ?? DEFAULT_LIMIT
+cursorMsg  = beforeId ? getById(beforeId) : null
+cursorMsgTs = cursorMsg ? (cursorMsg.deliveredAt ?? cursorMsg.timestamp) : timestamp
 
 loop until result.length >= want or exhausted:
   chunk = GET_THREAD_CHUNK(key, scanCursor, 'before', CHUNK)
@@ -109,7 +111,13 @@ loop until result.length >= want or exhausted:
     if msg.deletedAt: continue
     if !isDelivered(msg): continue
     if userId && !userFilter(msg): continue
-    if !boundary && (msg.deliveredAt ?? msg.timestamp) >= timestamp: continue
+    effectiveTs = msg.deliveredAt ?? msg.timestamp
+    if effectiveTs > timestamp: continue
+    if effectiveTs == timestamp:
+      if cursorMsgTs == timestamp:
+        if msg.id >= beforeId: continue           -- exclude cursor and lexically at/after it within same ts
+      else:
+        continue                                   -- strict bound when cursor is anchored at a different effective time
     result.push(msg)
     boundary = (score,id)
     if result.length >= want: break
@@ -119,6 +127,14 @@ return result.reverse()
 `GET_THREAD_CHUNK` is a thin Lua that atomically resolves the start rank and returns the next `CHUNK` entries with `WITHSCORES`. It has two modes:
 - `after`: `ZRANK` fast path or `ZCOUNT -inf (cursorScore` fallback; then `ZRANGE ... WITHSCORES`.
 - `before`: `ZREVRANK` fast path or `ZCOUNT (cursorScore +inf` fallback; then `ZREVRANGE ... WITHSCORES`.
+
+### Before/after asymmetry and mismatched-cursor behavior
+
+- **`getByThreadAfter`** follows visibility order (`orderKey`) only. It has no effective-time ceiling, so a far-future delivered message is fully visible when paging forward. This matches the unseen-loss fix that motivated D2.
+- **`getByThreadBefore`** keeps the visibility-order boundary **and** an always-active effective-time guard. This preserves the historical "before timestamp" paging contract: a message whose `deliveredAt ?? timestamp` is strictly greater than the cursor timestamp is never returned, even if its `orderKey` is before the cursor.
+- **Composite-cursor tie break** (`cursorMsgTs == timestamp`): when the cursor message itself sits at the passed timestamp, same-timestamp candidates with lexically smaller ids are included. This prevents same-millisecond burst messages from falling into a gap.
+- **Mismatched cursor** (`cursorMsgTs != timestamp`, e.g. a legacy fractional numeric cursor anchored to a real message at a different time): the effective-time guard becomes strict for that exact timestamp. Same-timestamp candidates are conservatively excluded. The result set is smaller but never repeats and never crosses the cursor boundary.
+- **Missing/expired cursor** (`boundary == null`): `getByThreadBefore` replays from the visibility start and applies the strict effective-time guard, avoiding unbounded growth of the result window.
 
 ## Memory parity
 
@@ -192,7 +208,7 @@ CAT_CAFE_REDIS_TEST_ISOLATED=1 REDIS_URL=redis://localhost:6379/15 \
 
 ## Quality-gate checklist before PR
 
-- [ ] `pnpm --filter @cat-cafe/api test:public` passes.
-- [ ] Cross-family review by Maine Coon / sol (`@codex`).
+- [x] `pnpm --filter @cat-cafe/api test:public` passes (16723/16723).
+- [x] Cross-family review by Maine Coon / sol (`@codex`) — completed in thread.
 - [ ] No changes to runtime config, Redis data, or operator data stores.
 - [ ] No claims that close M1/M2/M5/M6/M7 or #1200/#1165.
