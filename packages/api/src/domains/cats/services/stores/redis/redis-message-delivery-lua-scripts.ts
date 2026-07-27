@@ -107,12 +107,9 @@ if curUserId == nextUserId then
   return 0
 end
 
-local id = redis.call('HGET', hash, 'id')
 local eff = redis.call('HGET', hash, 'deliveredAt')
 if not eff or eff == '' then
-  -- Queued messages are indexed by the logical order key in the ID prefix,
-  -- not by the original admitted timestamp.
-  eff = string.sub(id, 1, 16)
+  eff = redis.call('HGET', hash, 'timestamp')
 end
 
 redis.call('HSET', hash, 'userId', nextUserId)
