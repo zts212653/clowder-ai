@@ -30,7 +30,7 @@ import {
   APPEND_LUA,
   CANCEL_LUA,
   DELIVER_LUA,
-  GET_THREAD_CHUNK_LUA,
+  GET_BY_THREAD_AFTER_LUA,
   REASSIGN_LUA,
 } from './redis-message-delivery-lua-scripts.js';
 import {
@@ -274,34 +274,6 @@ export class RedisMessageStore {
     return this.hydrateHash(data);
   }
 
-  /**
-   * F258 D2: atomically resolve cursor rank and fetch the next chunk from the
-   * thread visibility ZSET. Returns entries in the requested direction with
-   * parsed numeric scores.
-   */
-  private async fetchThreadChunk(
-    key: string,
-    cursor: { score: number; id: string } | null,
-    direction: 'after' | 'before',
-    chunkSize: number,
-  ): Promise<Array<{ id: string; score: number }>> {
-    const entries = (await this.redis.eval(
-      GET_THREAD_CHUNK_LUA,
-      1,
-      key,
-      cursor ? cursor.id : '',
-      cursor ? String(cursor.score) : '',
-      direction,
-      String(chunkSize),
-    )) as string[];
-
-    const out: Array<{ id: string; score: number }> = [];
-    for (let i = 0; i < entries.length; i += 2) {
-      out.push({ id: entries[i]!, score: parseRedisNumber(entries[i + 1]!) });
-    }
-    return out;
-  }
-
   /** Scan all stored message hashes (Redis-only repair helper). */
   async scanAll(): Promise<StoredMessage[]> {
     const matchPattern = `${this.keyPrefix}${MessageKeys.detail('*')}`;
@@ -506,44 +478,31 @@ export class RedisMessageStore {
   async getBefore(timestamp: number, limit?: number, userId?: string, beforeId?: string): Promise<StoredMessage[]> {
     const n = limit ?? DEFAULT_LIMIT;
     const key = userId ? MessageKeys.user(userId) : MessageKeys.TIMELINE;
-    const CHUNK = Math.max(n, 50);
 
-    let boundary: { score: number; id: string } | null = null;
-    if (beforeId) {
-      const scoreRaw = await this.redis.zscore(key, beforeId);
-      if (scoreRaw !== null) {
-        boundary = { score: parseRedisNumber(scoreRaw), id: beforeId };
+    if (!beforeId) {
+      // F117: Chunked scan (desc) to collect N delivered messages
+      const CHUNK = Math.max(n, 50);
+      const result: StoredMessage[] = []; // desc order (newest first)
+      let offset = 0;
+      while (result.length < n) {
+        const ids = await this.redis.zrevrangebyscore(key, `(${timestamp}`, '-inf', 'LIMIT', offset, CHUNK);
+        if (ids.length === 0) break;
+        // Keep desc order — don't reverse
+        const messages = await this.hydrateMessages(ids);
+        for (const msg of messages) {
+          if (isDelivered(msg)) result.push(msg);
+          if (result.length >= n) break;
+        }
+        if (ids.length < CHUNK) break;
+        offset += CHUNK;
       }
+      // Take first N (newest) and reverse to ascending
+      return result.slice(0, n).reverse();
     }
 
-    const result: StoredMessage[] = []; // desc order (newest first)
-    let offset = 0;
-    while (result.length < n) {
-      const ids = boundary
-        ? await this.redis.zrevrangebyscore(key, String(boundary.score), '-inf', 'LIMIT', offset, CHUNK)
-        : await this.redis.zrevrangebyscore(key, `(${timestamp}`, '-inf', 'LIMIT', offset, CHUNK);
-      if (ids.length === 0) break;
-
-      const messages = await this.hydrateMessages(ids);
-      for (const msg of messages) {
-        if (!isDelivered(msg)) continue;
-        if (boundary && msg.id >= boundary.id && (msg.deliveredAt ?? msg.timestamp) === boundary.score) {
-          // Same-score cursor boundary: skip the cursor and any lexically at/after it.
-          continue;
-        }
-        if (!boundary && (msg.deliveredAt ?? msg.timestamp) >= timestamp) {
-          continue;
-        }
-        result.push(msg);
-        if (result.length >= n) break;
-      }
-
-      if (ids.length < CHUNK) break;
-      offset += CHUNK;
-    }
-
-    // Take first N (newest) and reverse to ascending
-    return result.slice(0, n).reverse();
+    // F117: Scan cursor path with integrated isDelivered filtering
+    const result = await this.fetchDeliveredBeforeCursor(key, timestamp, beforeId, n);
+    return result.reverse();
   }
 
   async getByThread(threadId: string, limit?: number, userId?: string): Promise<StoredMessage[]> {
@@ -580,12 +539,7 @@ export class RedisMessageStore {
   /**
    * Get messages in a thread after a cursor ID (exclusive), oldest first.
    * If afterId is undefined, returns from thread start.
-   * If limit is undefined or <= 0, returns all matches.
-   *
-   * F258 D2: scans by thread orderKey (not ID prefix) with a dual-state
-   * (boundary + scanCursor) chunked algorithm. Boundary only advances on
-   * returned messages; scanCursor advances to the raw chunk end so fallback
-   * recovery cannot skip or loop.
+   * If limit is undefined, returns all matches.
    */
   async getByThreadAfter(
     threadId: string,
@@ -594,56 +548,39 @@ export class RedisMessageStore {
     userId?: string,
   ): Promise<StoredMessage[]> {
     const key = MessageKeys.thread(threadId);
-    const want = limit !== undefined && limit > 0 ? limit : Number.MAX_SAFE_INTEGER;
-    const CHUNK = 50;
 
-    let boundary: { score: number; id: string } | null = null;
-    if (afterId) {
-      const scoreRaw = await this.redis.zscore(key, afterId);
-      if (scoreRaw !== null) {
-        boundary = { score: parseRedisNumber(scoreRaw), id: afterId };
+    let ids: string[];
+    if (!afterId) {
+      // No cursor: just take the earliest N IDs by lexicographic (append) order.
+      ids = await this.redis.zrange(key, 0, -1);
+      ids.sort();
+      if (limit && limit > 0 && ids.length > limit) {
+        ids = ids.slice(0, limit);
       }
-    }
-    let scanCursor = boundary;
-    const result: StoredMessage[] = [];
-
-    while (result.length < want) {
-      const chunk = await this.fetchThreadChunk(key, scanCursor, 'after', CHUNK);
-      if (chunk.length === 0) break;
-
-      scanCursor = { score: chunk[chunk.length - 1]!.score, id: chunk[chunk.length - 1]!.id };
-
-      const ids = chunk.map((entry) => entry.id);
-      const messages = await this.hydrateMessages(ids, { includeDeleted: true });
-      const byId = new Map(messages.map((m) => [m.id, m]));
-
-      for (const entry of chunk) {
-        if (boundary && (entry.score < boundary.score || (entry.score === boundary.score && entry.id <= boundary.id))) {
-          continue;
-        }
-        const msg = byId.get(entry.id);
-        if (!msg) continue;
-        if (!isDelivered(msg)) continue;
-        if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
-
-        result.push(msg);
-        boundary = { score: entry.score, id: entry.id };
-        if (result.length >= want) break;
-      }
-
-      if (chunk.length < CHUNK) break;
+    } else {
+      // Use a Lua script so the union filter, sort and limit run inside Redis.
+      // We need messages whose ID is lexicographically after the cursor (append
+      // order, covering far-future / out-of-order timestamps) OR whose effective
+      // score is higher than the cursor's score (covering queued messages that
+      // were created before the cursor but delivered afterward).
+      ids = (await this.redis.eval(
+        GET_BY_THREAD_AFTER_LUA,
+        1,
+        key,
+        afterId,
+        String(limit && limit > 0 ? limit : 0),
+      )) as string[];
     }
 
-    return result;
+    if (ids.length === 0) return [];
+
+    // ADR-008 D3: cursor path must include deleted messages (tombstones)
+    const messages = await this.hydrateMessages(ids, { includeDeleted: true });
+    const delivered = messages.filter(isDelivered);
+    if (!userId) return delivered;
+    return delivered.filter((m) => m.userId === userId || isSystemUserMessage(m));
   }
 
-  /**
-   * Get messages in a thread before a cursor, oldest first.
-   *
-   * F258 D2: when beforeId is present the cursor's thread orderKey is
-   * authoritative and timestamp is ignored. When beforeId is absent, timestamp
-   * is used as an exclusive effective-time bound for backward compatibility.
-   */
   async getByThreadBefore(
     threadId: string,
     timestamp: number,
@@ -654,76 +591,32 @@ export class RedisMessageStore {
     const n = limit ?? DEFAULT_LIMIT;
     const key = MessageKeys.thread(threadId);
     const userFilter = userId ? (m: StoredMessage) => m.userId === userId || isSystemUserMessage(m) : undefined;
-    const CHUNK = 50;
 
-    let boundary: { score: number; id: string } | null = null;
-    if (beforeId) {
-      const scoreRaw = await this.redis.zscore(key, beforeId);
-      if (scoreRaw !== null) {
-        boundary = { score: parseRedisNumber(scoreRaw), id: beforeId };
-      }
-    }
-    let scanCursor = boundary;
-    const result: StoredMessage[] = [];
-
-    // The cursor message tells us whether the caller positioned the cursor by
-    // effective time (cursorMsg.effectiveTs == timestamp) or supplied a legacy
-    // numeric cursor where beforeId is merely an orderKey anchor. Same-effective-
-    // timestamp id tie-breaking applies only in the former case.
-    const cursorMsg = beforeId ? await this.getById(beforeId) : null;
-    const cursorMsgTs = cursorMsg ? (cursorMsg.deliveredAt ?? cursorMsg.timestamp) : timestamp;
-    // Composite cursor requires the message to exist AND its boundary to be
-    // resolvable. Missing/expired cursors fall back to the strict effective-time
-    // bound to avoid returning messages at or above the requested timestamp.
-    const isCompositeCursor = cursorMsg !== null && boundary !== null && cursorMsgTs === timestamp;
-
-    while (result.length < n) {
-      const chunk = await this.fetchThreadChunk(key, scanCursor, 'before', CHUNK);
-      if (chunk.length === 0) break;
-
-      scanCursor = { score: chunk[chunk.length - 1]!.score, id: chunk[chunk.length - 1]!.id };
-
-      const ids = chunk.map((entry) => entry.id);
-      const messages = await this.hydrateMessages(ids);
-      const byId = new Map(messages.map((m) => [m.id, m]));
-
-      for (const entry of chunk) {
-        if (boundary && (entry.score > boundary.score || (entry.score === boundary.score && entry.id >= boundary.id))) {
-          continue;
+    if (!beforeId) {
+      // F117: Chunked desc scan — collect N delivered, scan until full or exhausted
+      const CHUNK = Math.max(n, 50);
+      const result: StoredMessage[] = []; // desc order (newest first)
+      let offset = 0;
+      while (result.length < n) {
+        const ids = await this.redis.zrevrangebyscore(key, `(${timestamp}`, '-inf', 'LIMIT', offset, CHUNK);
+        if (ids.length === 0) break;
+        // Keep desc order — don't reverse
+        const messages = await this.hydrateMessages(ids);
+        for (const msg of messages) {
+          if (!isDelivered(msg)) continue;
+          if (userFilter && !userFilter(msg)) continue;
+          result.push(msg);
+          if (result.length >= n) break;
         }
-        const msg = byId.get(entry.id);
-        if (!msg) continue;
-        if (msg.deletedAt) continue;
-        if (!isDelivered(msg)) continue;
-        if (userFilter && !userFilter(msg)) continue;
-
-        const effectiveTs = msg.deliveredAt ?? msg.timestamp;
-        if (beforeId) {
-          // When the cursor message itself sits at the passed timestamp, this is a
-          // proper composite cursor: the visibility-order boundary is authoritative
-          // and no effective-time guard is applied. That lets thread enumeration
-          // walk over legacy members whose orderKey is before the cursor even if
-          // their stored timestamp is higher (e.g. fractional legacy cursors).
-          // When the cursor message's effective time differs from the passed
-          // timestamp, or the cursor/boundary could not be resolved, timestamp is a
-          // strict effective-time upper bound.
-          if (!isCompositeCursor) {
-            if (effectiveTs > timestamp) continue;
-            if (effectiveTs === timestamp) continue;
-          }
-        } else {
-          if (effectiveTs >= timestamp) continue;
-        }
-
-        result.push(msg);
-        boundary = { score: entry.score, id: entry.id };
-        if (result.length >= n) break;
+        if (ids.length < CHUNK) break;
+        offset += CHUNK;
       }
-
-      if (chunk.length < CHUNK) break;
+      return result.slice(0, n).reverse();
     }
 
-    return result.slice(0, n).reverse();
+    // F117: Scan cursor path with integrated isDelivered + user filtering
+    const result = await this.fetchDeliveredBeforeCursor(key, timestamp, beforeId, n, userFilter);
+    return result.reverse();
   }
 
   /**
@@ -760,6 +653,87 @@ export class RedisMessageStore {
 
     // Take first N (newest) and reverse to ascending order
     return result.slice(0, n).reverse();
+  }
+
+  /**
+   * Fetch IDs before a composite cursor (timestamp + beforeId) using chunked scanning.
+   * Loops until we have `limit` results or exhaust the sorted set.
+   */
+  private async fetchBeforeWithCursor(
+    key: string,
+    timestamp: number,
+    beforeId: string,
+    limit: number,
+  ): Promise<string[]> {
+    const CHUNK = 50;
+    const filtered: string[] = [];
+    let offset = 0;
+
+    while (filtered.length < limit) {
+      const chunk = await this.redis.zrevrangebyscore(key, String(timestamp), '-inf', 'LIMIT', offset, CHUNK);
+      if (chunk.length === 0) break;
+
+      for (const id of chunk) {
+        if (filtered.length >= limit) break;
+        const score = await this.redis.zscore(key, id);
+        if (score !== null && parseRedisNumber(score) === timestamp && id >= beforeId) {
+          continue;
+        }
+        filtered.push(id);
+      }
+
+      offset += CHUNK;
+    }
+
+    return filtered;
+  }
+
+  /**
+   * F117: Scan before a cursor (desc), hydrate + filter by isDelivered + optional extra,
+   * collecting exactly N delivered messages or until sorted set exhausted.
+   * Returns messages in desc order (newest first). Caller must reverse for asc.
+   */
+  private async fetchDeliveredBeforeCursor(
+    key: string,
+    timestamp: number,
+    beforeId: string,
+    n: number,
+    extraFilter?: (msg: StoredMessage) => boolean,
+  ): Promise<StoredMessage[]> {
+    const CHUNK = 50;
+    const result: StoredMessage[] = [];
+    let offset = 0;
+
+    while (result.length < n) {
+      const chunk = await this.redis.zrevrangebyscore(key, String(timestamp), '-inf', 'LIMIT', offset, CHUNK);
+      if (chunk.length === 0) break;
+
+      // Filter cursor boundary (same logic as fetchBeforeWithCursor)
+      const validIds: string[] = [];
+      for (const id of chunk) {
+        const score = await this.redis.zscore(key, id);
+        if (score !== null && parseRedisNumber(score) === timestamp && id >= beforeId) {
+          continue;
+        }
+        validIds.push(id);
+      }
+
+      if (validIds.length > 0) {
+        // Hydrate in desc order (don't reverse)
+        const messages = await this.hydrateMessages(validIds);
+        for (const msg of messages) {
+          if (!isDelivered(msg)) continue;
+          if (extraFilter && !extraFilter(msg)) continue;
+          result.push(msg);
+          if (result.length >= n) break;
+        }
+      }
+
+      if (chunk.length < CHUNK) break;
+      offset += CHUNK;
+    }
+
+    return result;
   }
 
   /**

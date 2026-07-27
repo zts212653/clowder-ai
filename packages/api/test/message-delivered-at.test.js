@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-const { MessageStore, generateSortableId } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
 describe('MessageStore.markDelivered', () => {
   test('sets deliveredAt on a queued message', () => {
@@ -67,49 +67,5 @@ describe('MessageStore.markDelivered', () => {
 
     // Immediate messages should NOT have deliveredAt
     assert.equal(msg.deliveredAt, undefined);
-  });
-});
-
-describe('MessageStore.getByThreadAfter', () => {
-  test('replays from thread start when cursor message is missing', () => {
-    const store = new MessageStore();
-    const beforeCursor = store.append({
-      threadId: 'thread-a',
-      userId: 'u1',
-      catId: null,
-      content: 'before cursor',
-      mentions: [],
-      timestamp: 1000,
-    });
-    // Synthesize a missing cursor whose logical timestamp sorts between the
-    // first message (1000) and the second message (2000). With explicit
-    // visibility orderKeys, an unknown cursor cannot be safely positioned by
-    // opaque ID chronology; the store replays from the start of the thread
-    // (allows duplicate, prohibits loss).
-    const missingCursor = generateSortableId(1500);
-
-    const afterCursor = store.append({
-      threadId: 'thread-a',
-      userId: 'u1',
-      catId: null,
-      content: 'after missing cursor',
-      mentions: [],
-      timestamp: 2000,
-    });
-    store.append({
-      threadId: 'thread-b',
-      userId: 'u1',
-      catId: null,
-      content: 'other thread',
-      mentions: [],
-      timestamp: 3000,
-    });
-
-    const results = store.getByThreadAfter('thread-a', missingCursor, 5, 'u1');
-
-    assert.deepEqual(
-      results.map((m) => m.id),
-      [beforeCursor.id, afterCursor.id],
-    );
   });
 });

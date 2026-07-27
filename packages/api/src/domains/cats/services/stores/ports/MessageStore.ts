@@ -478,10 +478,6 @@ export class MessageStore {
   private readonly idempotencyIndex = new Map<string, string>();
   /** Content-dedup claims: fingerprint key → expiry timestamp (ms). Bounds the callback exact-duplicate race. */
   private readonly contentDedupIndex = new Map<string, number>();
-  /** F258 D2: per-message thread visibility orderKey (private — never exposed). */
-  private readonly messageOrderKeys = new Map<string, number>();
-  /** F258 D2: per-thread max orderKey for monotonic allocation. */
-  private readonly threadMaxOrderKeys = new Map<string, number>();
   /** F102 KD-34: Listener called after every successful append (fire-and-forget) */
   onAppend?: (msg: Pick<StoredMessage, 'id' | 'threadId' | 'timestamp' | 'content'>) => void;
 
@@ -506,42 +502,6 @@ export class MessageStore {
         this.idempotencyIndex.delete(key);
       }
     }
-    for (const id of removedIds) {
-      this.messageOrderKeys.delete(id);
-    }
-  }
-
-  /** F258 D2: allocate the next strictly-monotonic orderKey for a thread. */
-  private allocateOrderKey(threadId: string): number {
-    const now = Date.now();
-    const currentMax = this.threadMaxOrderKeys.get(threadId) ?? Number.NEGATIVE_INFINITY;
-    const candidate = Math.max(currentMax + 1, now);
-    if (!Number.isFinite(candidate) || candidate > Number.MAX_SAFE_INTEGER || candidate <= currentMax) {
-      throw new RangeError('thread order key exhausted or non-monotonic');
-    }
-    this.threadMaxOrderKeys.set(threadId, candidate);
-    return candidate;
-  }
-
-  /**
-   * F258 D2: shared thread view sorted by (orderKey, id).
-   * Missing orderKey is a hard invariant failure.
-   */
-  private threadView(threadId: string): Array<{ msg: StoredMessage; orderKey: number }> {
-    const view: Array<{ msg: StoredMessage; orderKey: number }> = [];
-    for (const msg of this.messages) {
-      if (msg.threadId !== threadId) continue;
-      const orderKey = this.messageOrderKeys.get(msg.id);
-      if (orderKey === undefined) {
-        throw new Error(`invariant: missing orderKey for message ${msg.id}`);
-      }
-      view.push({ msg, orderKey });
-    }
-    view.sort((a, b) => {
-      if (a.orderKey !== b.orderKey) return a.orderKey - b.orderKey;
-      return a.msg.id.localeCompare(b.msg.id);
-    });
-    return view;
   }
 
   /**
@@ -570,8 +530,6 @@ export class MessageStore {
       id: generateSortableId(msg.timestamp),
       threadId,
     };
-    const orderKey = this.allocateOrderKey(threadId);
-    this.messageOrderKeys.set(stored.id, orderKey);
     this.messages.push(stored);
     if (idempotencyIndexKey) {
       this.idempotencyIndex.set(idempotencyIndexKey, stored.id);
@@ -582,15 +540,6 @@ export class MessageStore {
       const removed = this.messages.slice(0, this.messages.length - this.maxMessages);
       this.messages = this.messages.slice(-this.maxMessages);
       this.pruneIdempotencyIndexForMessageIds(removed.map((entry) => entry.id));
-      // Drop thread maxima for threads that are no longer represented in the
-      // retained window, preventing the per-thread map from growing without
-      // bound as new thread IDs continuously arrive.
-      const retainedThreadIds = new Set(this.messages.map((m) => m.threadId));
-      for (const entry of removed) {
-        if (!retainedThreadIds.has(entry.threadId)) {
-          this.threadMaxOrderKeys.delete(entry.threadId);
-        }
-      }
     }
 
     // F102 KD-34: fire-and-forget append listener for thread index updates
@@ -709,16 +658,15 @@ export class MessageStore {
   }
 
   /**
-   * Get the most recent N delivered messages in a specific thread.
-   * F258 D2: ordered by the private thread orderKey.
+   * Get the most recent N messages in a specific thread.
    */
   getByThread(threadId: string, limit?: number, userId?: string): StoredMessage[] {
     const n = limit ?? DEFAULT_LIMIT;
-    const view = this.threadView(threadId);
     const matches: StoredMessage[] = [];
 
-    for (let i = view.length - 1; i >= 0 && matches.length < n; i--) {
-      const { msg } = view[i]!;
+    for (let i = this.messages.length - 1; i >= 0 && matches.length < n; i--) {
+      const msg = this.messages[i]!;
+      if (msg.threadId !== threadId) continue;
       if (msg.deletedAt) continue;
       if (!isDelivered(msg)) continue; // F117: exclude queued/canceled
       if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
@@ -727,17 +675,13 @@ export class MessageStore {
     return matches.reverse();
   }
 
-  /**
-   * Get the most recent N messages in a thread, including queued but excluding
-   * canceled and deleted. F258 D2: ordered by the private thread orderKey.
-   */
   getByThreadIncludingQueued(threadId: string, limit?: number, userId?: string): StoredMessage[] {
     const n = limit ?? DEFAULT_LIMIT;
-    const view = this.threadView(threadId);
     const matches: StoredMessage[] = [];
 
-    for (let i = view.length - 1; i >= 0 && matches.length < n; i--) {
-      const { msg } = view[i]!;
+    for (let i = this.messages.length - 1; i >= 0 && matches.length < n; i--) {
+      const msg = this.messages[i]!;
+      if (msg.threadId !== threadId) continue;
       if (msg.deletedAt) continue;
       if (msg.deliveryStatus === 'canceled') continue;
       if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
@@ -749,41 +693,42 @@ export class MessageStore {
   /**
    * Get messages in a thread after a specific message ID (exclusive), oldest first.
    * If afterId is undefined, returns messages from thread start.
-   * If limit is undefined or <= 0, returns all matches.
-   *
-   * F258 D2: dual-state scan using the thread orderKey. Boundary only advances
-   * on returned messages; scanCursor follows raw order so re-scored anchors
-   * recover without skips or loops.
+   * If limit is undefined, returns all matches.
    */
   getByThreadAfter(threadId: string, afterId?: string, limit?: number, userId?: string): StoredMessage[] {
-    const want = limit !== undefined && limit > 0 ? limit : Number.MAX_SAFE_INTEGER;
-    const view = this.threadView(threadId);
-    const result: StoredMessage[] = [];
+    const bounded = Number.isFinite(limit as number) && (limit as number) > 0;
+    const max = bounded ? (limit as number) : Number.MAX_SAFE_INTEGER;
+    const matches: StoredMessage[] = [];
+    let cursorSeen = !afterId;
 
-    let boundary: { score: number; id: string } | null = null;
-    if (afterId) {
-      const score = this.messageOrderKeys.get(afterId);
-      if (score !== undefined) boundary = { score, id: afterId };
-    }
-
-    for (const { msg, orderKey: score } of view) {
-      if (boundary && (score < boundary.score || (score === boundary.score && msg.id <= boundary.id))) continue;
+    for (let i = 0; i < this.messages.length && matches.length < max; i++) {
+      const msg = this.messages[i]!;
+      if (msg.threadId !== threadId) continue;
+      if (!cursorSeen) {
+        if (msg.id === afterId) cursorSeen = true;
+        continue;
+      }
       if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
       if (!isDelivered(msg)) continue;
-      result.push(msg);
-      boundary = { score, id: msg.id };
-      if (result.length >= want) break;
+      matches.push(msg);
     }
 
-    return result;
+    if (!cursorSeen && afterId) {
+      for (let i = 0; i < this.messages.length && matches.length < max; i++) {
+        const msg = this.messages[i]!;
+        if (msg.threadId !== threadId) continue;
+        if (msg.id <= afterId) continue;
+        if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
+        if (!isDelivered(msg)) continue;
+        matches.push(msg);
+      }
+    }
+
+    return matches;
   }
 
   /**
-   * Get messages in a thread before a given cursor, oldest first.
-   *
-   * F258 D2: when beforeId is present its orderKey is authoritative and
-   * timestamp is ignored. When beforeId is absent, timestamp is used as an
-   * exclusive effective-time bound.
+   * Get messages in a thread before a given cursor (cursor-based pagination).
    */
   getByThreadBefore(
     threadId: string,
@@ -793,54 +738,26 @@ export class MessageStore {
     userId?: string,
   ): StoredMessage[] {
     const n = limit ?? DEFAULT_LIMIT;
-    const view = this.threadView(threadId);
-    const result: StoredMessage[] = [];
+    const matches: StoredMessage[] = [];
 
-    let boundary: { score: number; id: string } | null = null;
-    if (beforeId) {
-      const score = this.messageOrderKeys.get(beforeId);
-      if (score !== undefined) boundary = { score, id: beforeId };
-    }
-
-    // The cursor message tells us whether the caller positioned the cursor by
-    // effective time (cursorMsg.effectiveTs == timestamp) or supplied a legacy
-    // numeric cursor where beforeId is merely an orderKey anchor. Same-effective-
-    // timestamp id tie-breaking applies only in the former case.
-    const cursorMsg = beforeId ? this.getById(beforeId) : null;
-    const cursorMsgTs = cursorMsg ? (cursorMsg.deliveredAt ?? cursorMsg.timestamp) : timestamp;
-    // Composite cursor requires the message to exist AND its boundary to be
-    // resolvable. Missing/expired cursors fall back to the strict effective-time
-    // bound to avoid returning messages at or above the requested timestamp.
-    const isCompositeCursor = cursorMsg !== null && boundary !== null && cursorMsgTs === timestamp;
-
-    for (let i = view.length - 1; i >= 0 && result.length < n; i--) {
-      const { msg, orderKey: score } = view[i]!;
-      if (boundary && (score > boundary.score || (score === boundary.score && msg.id >= boundary.id))) continue;
+    for (let i = this.messages.length - 1; i >= 0 && matches.length < n; i--) {
+      const msg = this.messages[i]!;
+      if (msg.threadId !== threadId) continue;
       if (msg.deletedAt) continue;
-      if (!isDelivered(msg)) continue;
+      if (!isDelivered(msg)) continue; // F117: exclude queued/canceled
       if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
-
+      // F232 P1 (cloud review): 游标按 effective order time（deliveredAt ?? timestamp）比较，
+      // 与 RedisMessageStore 的 zset score 语义一致——queued 消息投递后 markDelivered 会把其
+      // effective order time 推到 deliveredAt。若仍按 raw timestamp 比较，传入 deliveredAt 游标时
+      // 游标消息自身（timestamp < deliveredAt）会被重复包含 → collectAllThreadMessages 同页无限循环。
       const effectiveTs = msg.deliveredAt ?? msg.timestamp;
-      if (beforeId) {
-        // When the cursor message itself sits at the passed timestamp, this is a
-        // proper composite cursor: the visibility-order boundary is authoritative
-        // and no effective-time guard is applied. That lets thread enumeration
-        // walk over legacy members whose orderKey is before the cursor even if
-        // their stored timestamp is higher (e.g. fractional legacy cursors).
-        // When the cursor message's effective time differs from the passed
-        // timestamp, or the cursor/boundary could not be resolved, timestamp is a
-        // strict effective-time upper bound.
-        if (!isCompositeCursor) {
-          if (effectiveTs > timestamp) continue;
-          if (effectiveTs === timestamp) continue;
-        }
-      } else {
-        if (effectiveTs >= timestamp) continue;
+      if (effectiveTs > timestamp) continue;
+      if (effectiveTs === timestamp) {
+        if (!beforeId || msg.id >= beforeId) continue;
       }
-      result.push(msg);
+      matches.push(msg);
     }
-
-    return result.reverse();
+    return matches.reverse();
   }
 
   /**
@@ -851,7 +768,6 @@ export class MessageStore {
     const before = this.messages.length;
     this.messages = this.messages.filter((m) => m.threadId !== threadId);
     this.pruneIdempotencyIndexForMessageIds(removed.map((entry) => entry.id));
-    this.threadMaxOrderKeys.delete(threadId);
     return before - this.messages.length;
   }
 
@@ -884,9 +800,7 @@ export class MessageStore {
     msg.deletedAt = Date.now();
     msg.deletedBy = deletedBy;
     msg._tombstone = true;
-    // NOTE: hard delete keeps the tombstone skeleton in the message array
-    // (ADR-008 D3), so its orderKey must remain for threadView. Only
-    // deleteByThread and capacity trimming may drop orderKeys.
+    this.pruneIdempotencyIndexForMessageIds([id]);
     return msg;
   }
 
@@ -943,13 +857,8 @@ export class MessageStore {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
     if (!isQueuedForDeliveryTransition(msg)) return null; // CAS no-op: not queued
-    // F258 D2: validate the next thread orderKey BEFORE mutating the message.
-    // If allocation throws (exhausted/non-monotonic), the queued state stays
-    // unchanged and the caller can retry.
-    const orderKey = this.allocateOrderKey(msg.threadId);
     msg.deliveredAt = deliveredAt;
     msg.deliveryStatus = 'delivered';
-    this.messageOrderKeys.set(msg.id, orderKey);
     return msg;
   }
 
