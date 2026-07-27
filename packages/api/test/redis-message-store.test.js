@@ -1008,6 +1008,60 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     );
   });
 
+  it('getByThreadAfter() includes late-delivered queued messages even with a page limit', async () => {
+    const base = Date.now();
+    const threadId = 'thread-cursor-deliver-limit';
+
+    const agentReply = await store.append({
+      userId: 'u',
+      catId: 'opus',
+      content: 'agent-reply',
+      mentions: [],
+      timestamp: base,
+      threadId,
+    });
+
+    // Two queued messages created before the cursor, both delivered after it.
+    const late1 = await store.append({
+      userId: 'u',
+      catId: null,
+      content: 'late-1',
+      mentions: [],
+      timestamp: base - 20,
+      threadId,
+      deliveryStatus: 'queued',
+    });
+    const late2 = await store.append({
+      userId: 'u',
+      catId: null,
+      content: 'late-2',
+      mentions: [],
+      timestamp: base - 10,
+      threadId,
+      deliveryStatus: 'queued',
+    });
+
+    await store.markDelivered(late1.id, base + 100);
+    await store.markDelivered(late2.id, base + 200);
+
+    // limit=1 should still return the first late message; using only id filtering
+    // would return nothing because both late IDs are lexicographically before agentReply.id.
+    const page = await store.getByThreadAfter(threadId, agentReply.id, 1);
+    assert.equal(page.length, 1, 'page limit is respected');
+    assert.ok(
+      page[0].id === late1.id || page[0].id === late2.id,
+      'late-delivered queued message must appear in the first page',
+    );
+
+    // Full result should include both late messages in deliveredAt order.
+    const all = await store.getByThreadAfter(threadId, agentReply.id, 10);
+    assert.deepEqual(
+      all.map((m) => m.id),
+      [late1.id, late2.id],
+      'late-delivered messages sort by deliveredAt',
+    );
+  });
+
   it('F148: origin=briefing survives append → getById round-trip', async () => {
     const msg = await store.append({
       userId: 'system',

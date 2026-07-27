@@ -123,3 +123,46 @@ end
 
 return redis.call('HGETALL', hash)
 `;
+
+/**
+ * GET_BY_THREAD_AFTER: return IDs in a thread that follow a cursor message.
+ *
+ * KEYS[1] = thread sorted-set key (auto-prefixed by ioredis)
+ * ARGV[1] = afterId (cursor message ID)
+ * ARGV[2] = limit as a string number, or "0" for unlimited
+ *
+ * A message qualifies if either:
+ *   - its sortable ID is lexicographically greater than afterId (append order), or
+ *   - its ZSET score (effective timestamp) is greater than afterId's score
+ *     (handles queued messages created before the cursor but delivered after it).
+ *
+ * Results are sorted lexicographically by ID and limited in Redis so only the
+ * requested window is transferred to the caller.
+ */
+export const GET_BY_THREAD_AFTER_LUA = `
+local key = KEYS[1]
+local afterId = ARGV[1]
+local limit = tonumber(ARGV[2])
+
+local entries = redis.call('ZRANGE', key, 0, -1, 'WITHSCORES')
+local afterScore = redis.call('ZSCORE', key, afterId)
+local afterScoreNum = afterScore and tonumber(afterScore) or nil
+
+local matches = {}
+for i = 1, #entries, 2 do
+  local id = entries[i]
+  local score = tonumber(entries[i + 1])
+  if id ~= afterId and (id > afterId or (afterScoreNum and score > afterScoreNum)) then
+    table.insert(matches, id)
+  end
+end
+
+table.sort(matches)
+if limit and limit > 0 and #matches > limit then
+  for i = #matches, limit + 1, -1 do
+    matches[i] = nil
+  end
+end
+
+return matches
+`;

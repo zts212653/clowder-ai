@@ -26,7 +26,12 @@ import {
 } from '../ports/MessageStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import { isSystemUserMessage } from '../visibility.js';
-import { CANCEL_LUA, DELIVER_LUA, REASSIGN_LUA } from './redis-message-delivery-lua-scripts.js';
+import {
+  CANCEL_LUA,
+  DELIVER_LUA,
+  GET_BY_THREAD_AFTER_LUA,
+  REASSIGN_LUA,
+} from './redis-message-delivery-lua-scripts.js';
 import {
   safeParseConnectorSource,
   safeParseContentBlocks,
@@ -567,21 +572,27 @@ export class RedisMessageStore {
   ): Promise<StoredMessage[]> {
     const key = MessageKeys.thread(threadId);
 
-    // Sortable IDs are monotonically increasing by append sequence regardless
-    // of the raw timestamp, so use lexicographic ID filtering rather than
-    // score-based range queries.  This handles far-future timestamps (whose
-    // ZSET score is high but whose ID prefix is near wall-clock) without
-    // coupling to the score scheme.
-    let ids: string[] = await this.redis.zrange(key, 0, -1);
-    if (afterId) {
-      ids = ids.filter((id) => id > afterId);
-    }
-    // ZRANGE returns candidates in score order; sort lexicographically before
-    // applying the page limit so pagination follows the same cursor order as
-    // the in-memory store.
-    ids.sort();
-    if (limit && limit > 0 && ids.length > limit) {
-      ids = ids.slice(0, limit);
+    let ids: string[];
+    if (!afterId) {
+      // No cursor: just take the earliest N IDs by lexicographic (append) order.
+      ids = await this.redis.zrange(key, 0, -1);
+      ids.sort();
+      if (limit && limit > 0 && ids.length > limit) {
+        ids = ids.slice(0, limit);
+      }
+    } else {
+      // Use a Lua script so the union filter, sort and limit run inside Redis.
+      // We need messages whose ID is lexicographically after the cursor (append
+      // order, covering far-future / out-of-order timestamps) OR whose effective
+      // score is higher than the cursor's score (covering queued messages that
+      // were created before the cursor but delivered afterward).
+      ids = (await this.redis.eval(
+        GET_BY_THREAD_AFTER_LUA,
+        1,
+        key,
+        afterId,
+        String(limit && limit > 0 ? limit : 0),
+      )) as string[];
     }
 
     if (ids.length === 0) return [];
