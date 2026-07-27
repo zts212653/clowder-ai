@@ -808,6 +808,10 @@ export class MessageStore {
     // timestamp id tie-breaking applies only in the former case.
     const cursorMsg = beforeId ? this.getById(beforeId) : null;
     const cursorMsgTs = cursorMsg ? (cursorMsg.deliveredAt ?? cursorMsg.timestamp) : timestamp;
+    // Composite cursor requires the message to exist AND its boundary to be
+    // resolvable. Missing/expired cursors fall back to the strict effective-time
+    // bound to avoid returning messages at or above the requested timestamp.
+    const isCompositeCursor = cursorMsg !== null && boundary !== null && cursorMsgTs === timestamp;
 
     for (let i = view.length - 1; i >= 0 && result.length < n; i--) {
       const { msg, orderKey: score } = view[i]!;
@@ -824,9 +828,9 @@ export class MessageStore {
         // walk over legacy members whose orderKey is before the cursor even if
         // their stored timestamp is higher (e.g. fractional legacy cursors).
         // When the cursor message's effective time differs from the passed
-        // timestamp, beforeId is only an orderKey anchor and the timestamp is a
+        // timestamp, or the cursor/boundary could not be resolved, timestamp is a
         // strict effective-time upper bound.
-        if (cursorMsgTs !== timestamp) {
+        if (!isCompositeCursor) {
           if (effectiveTs > timestamp) continue;
           if (effectiveTs === timestamp) continue;
         }

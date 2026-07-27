@@ -31,8 +31,8 @@ Keep the existing `timestamp-seq-uuid` lexical ID layout, but **decouple cursor 
 - **Thread visibility score** = `orderKey`, a per-thread monotonic number managed by the store.
 - **Timeline/user/mention scores** = `deliveredAt ?? timestamp` (existing time semantics, unchanged).
 - `getByThreadAfter(threadId, afterId?)` and `getByThreadBefore(threadId, timestamp, limit?, beforeId?, userId?)` use the thread orderKey for cursor resolution. `getByThreadAfter` follows the visibility order only (no timestamp ceiling). `getByThreadBefore` uses the orderKey boundary as the primary cursor, and applies `timestamp` as an effective-time guard whose strictness depends on the cursor kind:
-  - **Composite cursor** (`cursorMsgTs == timestamp`): the cursor message itself sits at the passed effective time, so the orderKey boundary is authoritative. Same-effective-time candidates are accepted; the boundary predicate excludes the cursor and any member at or beyond it in `(score, id)` order. This preserves legacy thread enumeration that walks by orderKey even when stored timestamps differ.
-  - **Legacy/numeric anchor** (`cursorMsgTs != timestamp`) or missing cursor: `timestamp` is a strict effective-time upper bound. Candidates with `deliveredAt ?? timestamp > timestamp` are excluded, and candidates with `== timestamp` are also excluded to avoid crossing into the caller's requested window.
+  - **Composite cursor** (`cursorMsg != null && boundary != null && cursorMsgTs == timestamp`): the cursor message exists, its boundary is resolvable, and it sits at the passed effective time. The orderKey boundary is authoritative. Same-effective-time candidates are accepted; the boundary predicate excludes the cursor and any member at or beyond it in `(score, id)` order. This preserves legacy thread enumeration that walks by orderKey even when stored timestamps differ.
+  - **Legacy/numeric anchor or unresolved cursor** (`cursorMsgTs != timestamp`, or the cursor message/boundary could not be resolved): `timestamp` is a strict effective-time upper bound. Candidates with `deliveredAt ?? timestamp > timestamp` are excluded, and candidates with `== timestamp` are also excluded to avoid crossing into the caller's requested window.
   - When `beforeId` is absent the guard degenerates to the legacy exclusive effective-time bound (`effectiveTs < timestamp`).
 
 ## Append atomicity
@@ -102,6 +102,8 @@ result     = []
 want       = limit ?? DEFAULT_LIMIT
 cursorMsg  = beforeId ? getById(beforeId) : null
 cursorMsgTs = cursorMsg ? (cursorMsg.deliveredAt ?? cursorMsg.timestamp) : timestamp
+-- Composite cursor requires the message to exist AND its boundary to be resolvable.
+isCompositeCursor = cursorMsg != null && boundary != null && cursorMsgTs == timestamp
 
 loop until result.length >= want or exhausted:
   chunk = GET_THREAD_CHUNK(key, scanCursor, 'before', CHUNK)
@@ -116,11 +118,11 @@ loop until result.length >= want or exhausted:
     if userId && !userFilter(msg): continue
     effectiveTs = msg.deliveredAt ?? msg.timestamp
     if beforeId:
-      if cursorMsgTs != timestamp:
-        -- legacy/numeric anchor: timestamp is a strict effective-time upper bound
+      if !isCompositeCursor:
+        -- missing/expired cursor or mismatched effective time: timestamp is strict
         if effectiveTs > timestamp: continue
         if effectiveTs == timestamp: continue
-      -- else cursorMsgTs == timestamp: composite cursor; orderKey boundary is authoritative
+      -- else: composite cursor; orderKey boundary is authoritative
     else:
       -- no cursor: legacy exclusive effective-time bound
       if effectiveTs >= timestamp: continue
@@ -138,8 +140,8 @@ return result.reverse()
 
 - **`getByThreadAfter`** follows visibility order (`orderKey`) only. It has no effective-time ceiling, so a far-future delivered message is fully visible when paging forward. This matches the unseen-loss fix that motivated D2.
 - **`getByThreadBefore`** keeps the visibility-order boundary as the primary cursor and applies `timestamp` as a conditional effective-time guard.
-- **Composite cursor** (`cursorMsgTs == timestamp`): the cursor message itself sits at the passed effective time, so the orderKey boundary is authoritative and same-timestamp candidates are returned normally. This prevents same-millisecond burst messages from falling into a gap while still allowing thread enumeration to walk by orderKey.
-- **Legacy/numeric anchor** (`cursorMsgTs != timestamp`, e.g. a fractional numeric cursor anchored to a real message at a different time): `timestamp` is a strict effective-time upper bound. Candidates with `effectiveTs >= timestamp` are excluded. The result set is smaller but never repeats and never crosses the cursor boundary.
+- **Composite cursor** (`cursorMsg != null && boundary != null && cursorMsgTs == timestamp`): the cursor message exists, its boundary is resolvable, and it sits at the passed effective time. The orderKey boundary is authoritative and same-timestamp candidates are returned normally. This prevents same-millisecond burst messages from falling into a gap while still allowing thread enumeration to walk by orderKey.
+- **Legacy/numeric anchor or unresolved cursor** (`cursorMsgTs != timestamp`, or the cursor message/boundary could not be resolved): `timestamp` is a strict effective-time upper bound. Candidates with `effectiveTs >= timestamp` are excluded. The result set is smaller but never repeats and never crosses the cursor boundary.
 - **Missing/expired cursor** (`boundary == null`): `getByThreadBefore` replays from the visibility start and applies the strict effective-time guard, avoiding unbounded growth of the result window.
 
 ## Memory parity
