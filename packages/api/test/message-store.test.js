@@ -4,13 +4,9 @@
  */
 
 import assert from 'node:assert/strict';
-import { beforeEach, describe, test } from 'node:test';
-import { resetSortableIdSequence } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { describe, test } from 'node:test';
 
 describe('MessageStore', () => {
-  beforeEach(() => {
-    resetSortableIdSequence();
-  });
   test('append() stores message and returns with id', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
@@ -253,9 +249,6 @@ describe('MessageStore', () => {
       '../dist/domains/cats/services/stores/ports/MessageStore.js'
     );
     const store = new MessageStore();
-    // Generate the cursor before advancing the high-water timestamp so the
-    // monotonic producer admits it.
-    const expiredCursor = generateSortableId(1);
     const later = [2, 8_640_000_000_000_000].map((timestamp) =>
       store.append({
         userId: 'user-1',
@@ -266,46 +259,12 @@ describe('MessageStore', () => {
         threadId: 'thread-expired-cursor',
       }),
     );
+    const expiredCursor = generateSortableId(1);
 
     assert.deepEqual(
       store.getByThreadAfter('thread-expired-cursor', expiredCursor).map((message) => message.id),
       later.map((message) => message.id),
     );
-  });
-
-  test('idempotent replay returns the original message without consuming extra sequence', async (t) => {
-    const { MessageStore, resetSortableIdSequence, getSortableIdSequence, MAX_SEQUENCE } = await import(
-      '../dist/domains/cats/services/stores/ports/MessageStore.js'
-    );
-    t.after(() => {
-      resetSortableIdSequence(0);
-    });
-    resetSortableIdSequence(MAX_SEQUENCE);
-    const store = new MessageStore();
-
-    // This call consumes the last valid six-digit sequence.
-    const first = store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'idempotent',
-      mentions: [],
-      timestamp: 1,
-      idempotencyKey: 'idem-seq-exhaustion-memory',
-    });
-    assert.equal(getSortableIdSequence(), MAX_SEQUENCE + 1);
-
-    // Replaying the same idempotency key must return the original message and
-    // must not throw sequence-exhausted, even though the generator is at its limit.
-    const replay = store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'idempotent',
-      mentions: [],
-      timestamp: 1,
-      idempotencyKey: 'idem-seq-exhaustion-memory',
-    });
-    assert.equal(replay.id, first.id, 'idempotent replay must return the original ID');
-    assert.equal(getSortableIdSequence(), MAX_SEQUENCE + 1, 'replay must not advance sequence');
   });
 
   test('augmentStreamMetadata() enriches callback messages without replacing canonical content', async () => {
@@ -672,7 +631,7 @@ describe('MessageStore', () => {
     store.append({ userId: 'u', catId: null, content: 'A', mentions: [], timestamp: 100, threadId: 'th-1' });
     store.append({ userId: 'u', catId: null, content: 'B', mentions: [], timestamp: 200, threadId: 'th-1' });
     store.append({ userId: 'u', catId: null, content: 'C', mentions: [], timestamp: 300, threadId: 'th-1' });
-    store.append({ userId: 'u', catId: null, content: 'X', mentions: [], timestamp: 350, threadId: 'th-2' }); // different thread
+    store.append({ userId: 'u', catId: null, content: 'X', mentions: [], timestamp: 250, threadId: 'th-2' }); // different thread
 
     const before300 = store.getByThreadBefore('th-1', 300, 10);
     assert.equal(before300.length, 2);

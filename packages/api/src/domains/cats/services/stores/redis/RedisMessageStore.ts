@@ -26,13 +26,7 @@ import {
 } from '../ports/MessageStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import { isSystemUserMessage } from '../visibility.js';
-import {
-  APPEND_LUA,
-  CANCEL_LUA,
-  DELIVER_LUA,
-  GET_BY_THREAD_AFTER_LUA,
-  REASSIGN_LUA,
-} from './redis-message-delivery-lua-scripts.js';
+import { APPEND_LUA, CANCEL_LUA, DELIVER_LUA, REASSIGN_LUA } from './redis-message-delivery-lua-scripts.js';
 import {
   safeParseConnectorSource,
   safeParseContentBlocks,
@@ -107,9 +101,8 @@ export class RedisMessageStore {
       ? MessageKeys.idempotency(msg.userId, threadId, msg.idempotencyKey)
       : null;
 
-    // Idempotency fast path must run before ID generation so that replaying
-    // the same key does not consume sequence space (P1: sequence exhaustion
-    // must not break idempotent replay).
+    // Keep the common replay path ahead of ID generation; the Lua check below
+    // remains the authoritative claim for concurrent callers.
     if (idempotencyIndexKey) {
       const existingId = await this.redis.get(idempotencyIndexKey);
       if (existingId) {
@@ -137,10 +130,10 @@ export class RedisMessageStore {
       timestamp: String(msg.timestamp),
     };
 
-    if (msg.contentBlocks && msg.contentBlocks.length > 0) {
+    if (msg.contentBlocks !== undefined) {
       hashFields.contentBlocks = JSON.stringify(msg.contentBlocks);
     }
-    if (msg.toolEvents && msg.toolEvents.length > 0) {
+    if (msg.toolEvents !== undefined) {
       hashFields.toolEvents = JSON.stringify(msg.toolEvents);
     }
     if (msg.metadata) {
@@ -158,7 +151,7 @@ export class RedisMessageStore {
     if (msg.visibility) {
       hashFields.visibility = msg.visibility;
     }
-    if (msg.whisperTo && msg.whisperTo.length > 0) {
+    if (msg.whisperTo !== undefined) {
       hashFields.whisperTo = JSON.stringify(msg.whisperTo);
     }
     if (msg.source) {
@@ -551,25 +544,31 @@ export class RedisMessageStore {
 
     let ids: string[];
     if (!afterId) {
-      // No cursor: just take the earliest N IDs by lexicographic (append) order.
-      ids = await this.redis.zrange(key, 0, -1);
-      ids.sort();
+      if (limit && limit > 0) {
+        ids = await this.redis.zrange(key, 0, limit - 1);
+      } else {
+        ids = await this.redis.zrange(key, 0, -1);
+      }
+    } else {
+      const afterScore = await this.redis.zscore(key, afterId);
+      if (afterScore === null) {
+        // Cursor message may have expired; fall back to lexicographic ID filtering.
+        ids = await this.redis.zrange(key, 0, -1);
+        ids = ids.filter((id) => id > afterId);
+      } else {
+        // Split into two ranges to avoid filtering by ID across different
+        // scores — deliveredAt can shift a message's score forward while
+        // its ID still embeds the original send timestamp.
+        // 1) Same score as cursor: use ID as tiebreaker
+        const sameScore = await this.redis.zrangebyscore(key, afterScore, afterScore);
+        const sameFiltered = sameScore.filter((id) => id !== afterId && id > afterId);
+        // 2) Strictly higher scores: include all (no ID filter needed)
+        const higherScore = await this.redis.zrangebyscore(key, `(${afterScore}`, '+inf');
+        ids = [...sameFiltered, ...higherScore];
+      }
       if (limit && limit > 0 && ids.length > limit) {
         ids = ids.slice(0, limit);
       }
-    } else {
-      // Use a Lua script so the union filter, sort and limit run inside Redis.
-      // We need messages whose ID is lexicographically after the cursor (append
-      // order, covering far-future / out-of-order timestamps) OR whose effective
-      // score is higher than the cursor's score (covering queued messages that
-      // were created before the cursor but delivered afterward).
-      ids = (await this.redis.eval(
-        GET_BY_THREAD_AFTER_LUA,
-        1,
-        key,
-        afterId,
-        String(limit && limit > 0 ? limit : 0),
-      )) as string[];
     }
 
     if (ids.length === 0) return [];

@@ -5,7 +5,6 @@
 
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
-import { resetSortableIdSequence } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import {
   assertRedisIsolationOrThrow,
   cleanupPrefixedRedisKeys,
@@ -59,7 +58,6 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
 
   beforeEach(async (t) => {
     if (!connected) return t.skip('Redis not connected');
-    resetSortableIdSequence();
     await cleanupPrefixedRedisKeys(redis, ['msg:*']);
   });
 
@@ -386,9 +384,6 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
   it('expired cursor recovery preserves order across admitted timestamp boundaries', async () => {
     const roundTripStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
     const threadId = 'thread-expired-cursor-domain';
-    // Generate the cursor before advancing the high-water timestamp so the
-    // monotonic producer admits it.
-    const expiredCursor = generateSortableId(1);
     const later = [];
     for (const timestamp of [2, 8_640_000_000_000_000]) {
       later.push(
@@ -402,80 +397,11 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
         }),
       );
     }
+    const expiredCursor = generateSortableId(1);
 
     assert.deepEqual(
       (await roundTripStore.getByThreadAfter(threadId, expiredCursor)).map((message) => message.id),
       later.map((message) => message.id),
-    );
-  });
-
-  it('far-future cursor does not omit later normal appends', async () => {
-    const roundTripStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
-    const threadId = 'thread-far-future-cursor';
-    const now = Date.now();
-
-    // A far-future admitted timestamp is capped in the ID prefix; the Redis
-    // index must use that same logical order key as the score so a subsequent
-    // ordinary append is still returned after the far-future cursor.
-    const farFuture = now + 1_000_000_000;
-    const farFutureMsg = await roundTripStore.append({
-      userId: 'user1',
-      catId: null,
-      content: 'far-future timestamp',
-      mentions: [],
-      timestamp: farFuture,
-      threadId,
-    });
-
-    const normalMsg = await roundTripStore.append({
-      userId: 'user1',
-      catId: null,
-      content: 'normal timestamp',
-      mentions: [],
-      timestamp: now,
-      threadId,
-    });
-
-    assert.deepEqual(
-      (await roundTripStore.getByThreadAfter(threadId, farFutureMsg.id)).map((message) => message.id),
-      [normalMsg.id],
-      'ordinary append after a far-future cursor must not be lost',
-    );
-  });
-
-  it('getByThreadAfter with limit returns IDs in lexicographic append order, not score order', async () => {
-    const roundTripStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
-    const threadId = 'thread-after-lex-order';
-
-    // Out-of-order timestamps: A is appended first with a higher timestamp,
-    // B is appended second with a lower timestamp.  ZSET score is raw
-    // timestamp, so score order is B-then-A, but append/ID order is A-then-B.
-    const a = await roundTripStore.append({
-      userId: 'user1',
-      catId: null,
-      content: 'first append, higher timestamp',
-      mentions: [],
-      timestamp: 300,
-      threadId,
-    });
-    const b = await roundTripStore.append({
-      userId: 'user1',
-      catId: null,
-      content: 'second append, lower timestamp',
-      mentions: [],
-      timestamp: 200,
-      threadId,
-    });
-
-    assert.deepEqual(
-      (await roundTripStore.getByThreadAfter(threadId, undefined, 1)).map((message) => message.id),
-      [a.id],
-      'first page must be the lexicographically earliest ID',
-    );
-    assert.deepEqual(
-      (await roundTripStore.getByThreadAfter(threadId, a.id, 1)).map((message) => message.id),
-      [b.id],
-      'page after A must be B, even though B has a lower ZSET score',
     );
   });
 
@@ -1008,60 +934,6 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     );
   });
 
-  it('getByThreadAfter() includes late-delivered queued messages even with a page limit', async () => {
-    const base = Date.now();
-    const threadId = 'thread-cursor-deliver-limit';
-
-    const agentReply = await store.append({
-      userId: 'u',
-      catId: 'opus',
-      content: 'agent-reply',
-      mentions: [],
-      timestamp: base,
-      threadId,
-    });
-
-    // Two queued messages created before the cursor, both delivered after it.
-    const late1 = await store.append({
-      userId: 'u',
-      catId: null,
-      content: 'late-1',
-      mentions: [],
-      timestamp: base - 20,
-      threadId,
-      deliveryStatus: 'queued',
-    });
-    const late2 = await store.append({
-      userId: 'u',
-      catId: null,
-      content: 'late-2',
-      mentions: [],
-      timestamp: base - 10,
-      threadId,
-      deliveryStatus: 'queued',
-    });
-
-    await store.markDelivered(late1.id, base + 100);
-    await store.markDelivered(late2.id, base + 200);
-
-    // limit=1 should still return the first late message; using only id filtering
-    // would return nothing because both late IDs are lexicographically before agentReply.id.
-    const page = await store.getByThreadAfter(threadId, agentReply.id, 1);
-    assert.equal(page.length, 1, 'page limit is respected');
-    assert.ok(
-      page[0].id === late1.id || page[0].id === late2.id,
-      'late-delivered queued message must appear in the first page',
-    );
-
-    // Full result should include both late messages in deliveredAt order.
-    const all = await store.getByThreadAfter(threadId, agentReply.id, 10);
-    assert.deepEqual(
-      all.map((m) => m.id),
-      [late1.id, late2.id],
-      'late-delivered messages sort by deliveredAt',
-    );
-  });
-
   it('F148: origin=briefing survives append → getById round-trip', async () => {
     const msg = await store.append({
       userId: 'system',
@@ -1208,130 +1080,93 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.ok(!queuedIds.includes(m1.id), 'should not find canceled message in queued scan');
   });
 
-  it('append() fails closed when the shared sortable-ID sequence is exhausted', async (t) => {
-    const { resetSortableIdSequence, MAX_SEQUENCE } = await import(
-      '../dist/domains/cats/services/stores/ports/MessageStore.js'
-    );
-    t.after(() => {
-      resetSortableIdSequence(0);
-    });
-    resetSortableIdSequence(MAX_SEQUENCE);
+  it('concurrent idempotent append creates exactly one thread member', async () => {
+    const threadId = 'thread-concurrent-idem';
+    const key = MessageKeys.thread(threadId);
+    const timestamp = Date.now();
 
-    const lastValid = await store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'last valid',
-      mentions: [],
-      timestamp: 1,
-    });
-    assert.match(lastValid.id, /^\d{16}-999999-[0-9a-f]{8}$/);
-
-    await assert.rejects(
+    const [a, b] = await Promise.all([
       store.append({
         userId: 'u1',
         catId: null,
-        content: 'must fail',
+        content: 'concurrent',
         mentions: [],
-        timestamp: 1,
+        timestamp,
+        threadId,
+        idempotencyKey: 'concurrent-idem',
       }),
-      { name: 'RangeError', message: /sequence exhausted/i },
-    );
+      store.append({
+        userId: 'u1',
+        catId: null,
+        content: 'concurrent',
+        mentions: [],
+        timestamp,
+        threadId,
+        idempotencyKey: 'concurrent-idem',
+      }),
+    ]);
 
-    // Rejection must not leave partial Redis state.
-    const timelineIds = await redis.zrange('cat-cafe:msg:timeline', 0, -1);
-    assert.ok(!timelineIds.some((id) => id.includes('-1000000-')), 'no seven-digit seq ID persisted');
+    assert.equal(a.id, b.id, 'both concurrent callers must observe the same message id');
+    const members = await redis.zrange(key, 0, -1);
+    assert.deepEqual(members, [a.id], 'thread zset must contain exactly the created message');
   });
 
-  it('legacy and new six-digit sortable IDs order consistently in thread pagination', async (t) => {
-    const { resetSortableIdSequence } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
-    t.after(() => {
-      resetSortableIdSequence(0);
+  it('idempotent replay does not refire onAppend', async () => {
+    let calls = 0;
+    const timestamp = Date.now();
+    const watchedStore = new RedisMessageStore(redis, {
+      ttlSeconds: 60,
+      onAppend: () => {
+        calls++;
+      },
     });
-    resetSortableIdSequence(0);
 
-    // Use timestamps around now so the default 60s TTL does not prune them.
-    const baseTs = Date.now();
-    const threadId = 'thread-legacy-new-order';
-    const legacy = await store.append({
+    const first = await watchedStore.append({
       userId: 'u1',
       catId: null,
-      content: 'legacy',
+      content: 'idem',
       mentions: [],
-      timestamp: baseTs,
-      threadId,
+      timestamp,
+      threadId: 'thread-redis-onappend',
+      idempotencyKey: 'redis-onappend',
     });
+    assert.equal(calls, 1);
 
-    // Simulate a later producer epoch at a higher timestamp.
-    resetSortableIdSequence(0);
-    const newer = await store.append({
+    const replay = await watchedStore.append({
       userId: 'u1',
       catId: null,
-      content: 'newer',
+      content: 'idem retry',
       mentions: [],
-      timestamp: baseTs + 1,
-      threadId,
+      timestamp: timestamp + 1,
+      threadId: 'thread-redis-onappend',
+      idempotencyKey: 'redis-onappend',
     });
-
-    const page = await store.getByThread(threadId, 10);
-    assert.deepEqual(
-      page.map((m) => m.id),
-      [legacy.id, newer.id],
-      'mixed-epoch IDs must order by timestamp component',
-    );
-
-    // Expired-cursor recovery: remove the newer member from the thread ZSET so
-    // getByThreadAfter must fall back to lexical comparison rather than score.
-    await redis.zrem(MessageKeys.thread(threadId), newer.id);
-
-    // Append a still-later message; the expired cursor should recover it.
-    const afterExpiry = await store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'after expiry',
-      mentions: [],
-      timestamp: baseTs + 2,
-      threadId,
-    });
-
-    const afterNewer = await store.getByThreadAfter(threadId, newer.id, 10);
-    assert.deepEqual(
-      afterNewer.map((m) => m.id),
-      [afterExpiry.id],
-      'expired cursor must recover later mixed-epoch messages lexically after the cursor',
-    );
+    assert.equal(replay.id, first.id);
+    assert.equal(calls, 1, 'idempotent replay must not refire onAppend');
   });
 
-  it('idempotent replay returns the original message without consuming extra sequence', async (t) => {
-    const { resetSortableIdSequence, getSortableIdSequence, MAX_SEQUENCE } = await import(
-      '../dist/domains/cats/services/stores/ports/MessageStore.js'
-    );
-    t.after(() => {
-      resetSortableIdSequence(0);
-    });
-    resetSortableIdSequence(MAX_SEQUENCE);
-
-    // This call consumes the last valid six-digit sequence.
-    const first = await store.append({
+  it('idempotent replay preserves explicitly empty optional arrays', async () => {
+    const input = {
       userId: 'u1',
       catId: null,
-      content: 'idempotent',
+      content: 'empty arrays',
+      contentBlocks: [],
+      toolEvents: [],
       mentions: [],
-      timestamp: 1,
-      idempotencyKey: 'idem-seq-exhaustion',
-    });
-    assert.equal(getSortableIdSequence(), MAX_SEQUENCE + 1);
+      timestamp: Date.now(),
+      threadId: 'thread-empty-arrays',
+      whisperTo: [],
+      idempotencyKey: 'empty-arrays',
+    };
 
-    // Replaying the same idempotency key must return the original message and
-    // must not throw sequence-exhausted, even though the generator is at its limit.
-    const replay = await store.append({
-      userId: 'u1',
-      catId: null,
-      content: 'idempotent',
-      mentions: [],
-      timestamp: 1,
-      idempotencyKey: 'idem-seq-exhaustion',
-    });
-    assert.equal(replay.id, first.id, 'idempotent replay must return the original ID');
-    assert.equal(getSortableIdSequence(), MAX_SEQUENCE + 1, 'replay must not advance sequence');
+    const first = await store.append(input);
+    const replay = await store.append(input);
+    const hydrated = await store.getById(first.id);
+
+    for (const message of [first, replay, hydrated]) {
+      assert.deepEqual(message?.contentBlocks, []);
+      assert.deepEqual(message?.toolEvents, []);
+      assert.deepEqual(message?.whisperTo, []);
+    }
   });
 });

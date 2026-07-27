@@ -382,94 +382,16 @@ export function assertValidStoredMessageTimestamp(timestamp: number): void {
  * In-memory bounded message store.
  */
 /**
- * Generate a bounded sortable message ID: fixed-width logical timestamp +
- * six-digit sequence + UUID suffix. Lexicographic order matches insertion
- * order within this process: the logical timestamp is a monotonic high-water
- * mark derived from admitted timestamps, and the sequence advances within the
- * current logical timestamp. Advancing the high-water mark resets the
- * sequence, so there is no process-lifetime ceiling. Exhaustion throws a
- * RangeError before width expansion or wrap.
- *
- * The high-water mark is seeded from the first admitted timestamp and is
- * rate-limited thereafter: a single admitted timestamp cannot advance it by
- * more than MAX_HIGH_WATER_ADVANCE_MS. This prevents one far-future input
- * (e.g. the valid ECMAScript Date maximum) from pinning the global sequence
- * bucket for an extended interval.
+ * Generate a sortable message ID: zero-padded timestamp + sequence + UUID suffix.
+ * Lexicographic order matches insertion order even within the same millisecond.
  */
-/** Maximum sequence value that keeps the sortable-ID middle component at six decimal digits. */
-export const MAX_SEQUENCE = 999_999;
-
-/**
- * Maximum amount by which a single admitted timestamp may advance the logical
- * high-water mark after the initial seed. This bounds how long a single
- * future/skewed timestamp can pin the global sequence bucket. Chosen as a few
- * seconds to absorb clock jitter and small scheduler skew while ensuring
- * ordinary Date.now() messages resume advancing the high-water mark well
- * before the per-timestamp sequence can exhaust.
- */
-export const MAX_HIGH_WATER_ADVANCE_MS = 5_000;
-
-/**
- * Highest logical timestamp that has been admitted by this process.
- * This is the ID prefix; it may be greater than the caller's input timestamp
- * when the input is not larger than the current high-water mark.
- */
-let _highWaterTimestamp = 0;
-
-/** Whether the high-water mark has been seeded. Timestamp `0` is a valid
- * admitted value, so a separate sentinel is required.
- */
-let _isSeeded = false;
-
-/** Starting sequence value for the next newly-admitted logical timestamp. */
-let _defaultSequence = 0;
-
-/** Next sequence value for the current high-water logical timestamp. */
 let _seq = 0;
-
-/**
- * Test-only hook: reset the producer's ordering state.
- * Resets the high-water timestamp and sets the starting/default sequence value.
- */
-export function resetSortableIdSequence(value = 0): void {
-  _highWaterTimestamp = 0;
-  _isSeeded = false;
-  _defaultSequence = value;
-  _seq = value;
-}
-
-/** Test-only hook: read the current next-sequence value. */
-export function getSortableIdSequence(): number {
-  return _seq;
-}
-
 export function generateSortableId(timestamp: number): string {
   assertValidStoredMessageTimestamp(timestamp);
-  // Cap against the current wall clock (plus a small skew window) rather than
-  // against the previous high-water mark. This prevents a burst of repeated
-  // far-future timestamps from ratcheting the logical prefix forward
-  // cumulatively, and it bounds how long a single future input can pin the
-  // global sequence bucket.
-  const wallCeiling = Date.now() + MAX_HIGH_WATER_ADVANCE_MS;
-  const effectiveTimestamp = timestamp > wallCeiling ? wallCeiling : timestamp;
-  if (!_isSeeded) {
-    // Seed the logical high-water mark from the first admitted timestamp. A
-    // current Date.now() input seeds to the real wall clock, so post-restart
-    // IDs do not sort before legacy IDs that carry real modern timestamps.
-    _highWaterTimestamp = effectiveTimestamp;
-    _isSeeded = true;
-    _seq = _defaultSequence;
-  } else if (effectiveTimestamp > _highWaterTimestamp) {
-    _highWaterTimestamp = effectiveTimestamp;
-    _seq = _defaultSequence;
-  }
-  if (_seq > MAX_SEQUENCE) {
-    throw new RangeError('sortable-ID sequence exhausted');
-  }
-  const ts = String(_highWaterTimestamp).padStart(16, '0');
-  const seqStr = String(_seq++).padStart(6, '0');
+  const ts = String(timestamp).padStart(16, '0');
+  const seq = String(_seq++).padStart(6, '0');
   const suffix = randomUUID().slice(0, 8);
-  return `${ts}-${seqStr}-${suffix}`;
+  return `${ts}-${seq}-${suffix}`;
 }
 
 export class MessageStore {
