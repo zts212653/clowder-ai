@@ -575,22 +575,12 @@ export class RedisMessageStore {
         ids = await this.redis.zrange(key, 0, -1);
       }
     } else {
-      const afterScore = await this.redis.zscore(key, afterId);
-      if (afterScore === null) {
-        // Cursor message may have expired; fall back to lexicographic ID filtering.
-        ids = await this.redis.zrange(key, 0, -1);
-        ids = ids.filter((id) => id > afterId);
-      } else {
-        // Split into two ranges to avoid filtering by ID across different
-        // scores — deliveredAt can shift a message's score forward while
-        // its ID still embeds the original send timestamp.
-        // 1) Same score as cursor: use ID as tiebreaker
-        const sameScore = await this.redis.zrangebyscore(key, afterScore, afterScore);
-        const sameFiltered = sameScore.filter((id) => id !== afterId && id > afterId);
-        // 2) Strictly higher scores: include all (no ID filter needed)
-        const higherScore = await this.redis.zrangebyscore(key, `(${afterScore}`, '+inf');
-        ids = [...sameFiltered, ...higherScore];
-      }
+      // Use lexicographic ID filtering: sortable IDs are monotonically
+      // increasing by append sequence regardless of the raw timestamp.  This
+      // handles far-future timestamps (whose ZSET score is high but whose ID
+      // prefix is near wall-clock) without coupling to the score scheme.
+      ids = await this.redis.zrange(key, 0, -1);
+      ids = ids.filter((id) => id > afterId);
       if (limit && limit > 0 && ids.length > limit) {
         ids = ids.slice(0, limit);
       }
