@@ -177,7 +177,12 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(hydrated.deliveredAt, undefined);
     assert.equal(await redis.zscore('msg:timeline', queued.id), String(timestamp));
     assert.equal(await redis.zscore(`msg:user:${userId}`, queued.id), String(timestamp));
-    assert.equal(await redis.zscore(`msg:thread:${threadId}`, queued.id), String(timestamp));
+    const threadScore = await redis.zscore(`msg:thread:${threadId}`, queued.id);
+    assert.ok(
+      Number.isFinite(Number(threadScore)) && Number(threadScore) > 0,
+      'thread score must be a finite orderKey',
+    );
+    assert.notEqual(threadScore, String(timestamp), 'thread score is orderKey, not timestamp');
     assert.equal(listenerCalls, 1);
   });
 
@@ -217,7 +222,11 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal((await redis.hgetall(`msg:${queued.id}`)).deliveryStatus, 'canceled');
     assert.equal(await redis.zscore('msg:timeline', queued.id), '100');
     assert.equal(await redis.zscore(`msg:user:${userId}`, queued.id), '100');
-    assert.equal(await redis.zscore(`msg:thread:${threadId}`, queued.id), '100');
+    const queuedThreadScore = await redis.zscore(`msg:thread:${threadId}`, queued.id);
+    assert.ok(
+      Number.isFinite(Number(queuedThreadScore)) && Number(queuedThreadScore) > 0,
+      'thread score must be a finite orderKey',
+    );
 
     assert.equal(await admissionStore.markCanceled(legacy.id), null);
     assert.deepEqual(await snapshot(legacy), legacyBefore, 'legacy-immediate hash and scores must remain unchanged');
@@ -291,7 +300,11 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       assert.equal(delivered.deliveredAt, validDeliveredAt);
       assert.equal(await redis.zscore(keys.timeline, queued.id), String(validDeliveredAt));
       assert.equal(await redis.zscore(keys.user, queued.id), String(validDeliveredAt));
-      assert.equal(await redis.zscore(keys.thread, queued.id), String(validDeliveredAt));
+      const threadScoreAfter = await redis.zscore(keys.thread, queued.id);
+      assert.ok(
+        Number.isFinite(Number(threadScoreAfter)) && Number(threadScoreAfter) > Number(before.thread),
+        'delivery must advance the thread orderKey',
+      );
       assert.equal(await redis.zscore(keys.mention, queued.id), before.mention, 'mention order remains append-time');
       assert.equal((await admissionStore.getById(queued.id)).deliveredAt, validDeliveredAt);
 
@@ -699,8 +712,25 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
         expectedIds,
         `global ${fixture.label} cursor must remain exclusive`,
       );
+
+      // Thread scores are opaque orderKeys; fractional timestamp cursors are not
+      // comparable, so use a real message cursor for that case.
+      let threadCursorId = cursorId;
+      if (fixture.label === 'fractional') {
+        const threadCursorMsg = await store.append({
+          userId,
+          catId: null,
+          content: 'fractional thread cursor',
+          mentions: [],
+          timestamp: base + 100,
+          threadId,
+        });
+        threadCursorId = threadCursorMsg.id;
+      }
       assert.deepEqual(
-        (await store.getByThreadBefore(threadId, fixture.cursorTimestamp, 10, cursorId)).map((message) => message.id),
+        (await store.getByThreadBefore(threadId, fixture.cursorTimestamp, 10, threadCursorId)).map(
+          (message) => message.id,
+        ),
         expectedIds,
         `thread ${fixture.label} cursor must remain exclusive`,
       );
@@ -1276,14 +1306,9 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.deepEqual(
       page.map((m) => m.id),
       [legacy.id, newer.id],
-      'mixed-epoch IDs must order by timestamp component',
+      'mixed-epoch IDs must order by append/delivery order',
     );
 
-    // Expired-cursor recovery: remove the newer member from the thread ZSET so
-    // getByThreadAfter must fall back to lexical comparison rather than score.
-    await redis.zrem(MessageKeys.thread(threadId), newer.id);
-
-    // Append a still-later message; the expired cursor should recover it.
     const afterExpiry = await store.append({
       userId: 'u1',
       catId: null,
@@ -1293,11 +1318,13 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       threadId,
     });
 
-    const afterNewer = await store.getByThreadAfter(threadId, newer.id, 10);
+    // Expired/missing cursor replays from the visibility start: no loss,
+    // duplicates allowed (the cursor itself is not in the thread ZSET).
+    const afterMissing = await store.getByThreadAfter(threadId, 'cursor-that-does-not-exist', 10);
     assert.deepEqual(
-      afterNewer.map((m) => m.id),
-      [afterExpiry.id],
-      'expired cursor must recover later mixed-epoch messages lexically after the cursor',
+      afterMissing.map((m) => m.id),
+      [legacy.id, newer.id, afterExpiry.id],
+      'missing cursor must replay from thread start without loss',
     );
   });
 
@@ -1333,5 +1360,322 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     });
     assert.equal(replay.id, first.id, 'idempotent replay must return the original ID');
     assert.equal(getSortableIdSequence(), MAX_SEQUENCE + 1, 'replay must not advance sequence');
+  });
+
+  it('F258 D2: concurrent idempotent append creates exactly one thread member', async () => {
+    const threadId = 'thread-concurrent-idem';
+    const key = MessageKeys.thread(threadId);
+
+    const [a, b] = await Promise.all([
+      store.append({
+        userId: 'u1',
+        catId: null,
+        content: 'concurrent',
+        mentions: [],
+        timestamp: 100,
+        threadId,
+        idempotencyKey: 'concurrent-idem',
+      }),
+      store.append({
+        userId: 'u1',
+        catId: null,
+        content: 'concurrent',
+        mentions: [],
+        timestamp: 100,
+        threadId,
+        idempotencyKey: 'concurrent-idem',
+      }),
+    ]);
+
+    assert.equal(a.id, b.id, 'both concurrent callers must observe the same message id');
+    const members = await redis.zrange(key, 0, -1);
+    assert.equal(members.length, 1, 'thread zset must contain exactly one member');
+    assert.equal(members[0], a.id);
+  });
+
+  it('F258 D2: idempotent replay does not refire onAppend', async () => {
+    let calls = 0;
+    const watchedStore = new RedisMessageStore(redis, {
+      ttlSeconds: 60,
+      onAppend: () => {
+        calls++;
+      },
+    });
+
+    const first = await watchedStore.append({
+      userId: 'u1',
+      catId: null,
+      content: 'idem',
+      mentions: [],
+      timestamp: 100,
+      threadId: 'thread-redis-onappend',
+      idempotencyKey: 'redis-onappend',
+    });
+    assert.equal(calls, 1);
+
+    const replay = await watchedStore.append({
+      userId: 'u1',
+      catId: null,
+      content: 'idem',
+      mentions: [],
+      timestamp: 200,
+      threadId: 'thread-redis-onappend',
+      idempotencyKey: 'redis-onappend',
+    });
+    assert.equal(replay.id, first.id);
+    assert.equal(calls, 1, 'idempotent replay must not refire onAppend');
+  });
+
+  it('F258 D2: equal-score bucket pages by lexicographic order', async () => {
+    const threadId = 'thread-equal-score';
+    const key = MessageKeys.thread(threadId);
+
+    const a = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'a',
+      mentions: [],
+      timestamp: 100,
+      threadId,
+    });
+    const b = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'b',
+      mentions: [],
+      timestamp: 101,
+      threadId,
+    });
+    const c = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'c',
+      mentions: [],
+      timestamp: 102,
+      threadId,
+    });
+
+    // Force a legacy equal-score bucket for all three messages.
+    await redis.zadd(key, 1000, a.id, 1000, b.id, 1000, c.id);
+
+    const page1 = await store.getByThreadAfter(threadId, a.id, 2);
+    assert.deepEqual(
+      page1.map((m) => m.id),
+      [b.id, c.id],
+      'within an equal-score bucket ZRANK+chunk must return lexicographic successors',
+    );
+
+    const page2 = await store.getByThreadAfter(threadId, b.id, 1);
+    assert.deepEqual(
+      page2.map((m) => m.id),
+      [c.id],
+      'continuing from a middle bucket member must return only later lexicographic members',
+    );
+  });
+
+  it('F258 D2: getByThreadAfter skips a filtered gap to find the next delivered message', async () => {
+    const threadId = 'thread-gap-after';
+    const cursor = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'cursor',
+      mentions: [],
+      timestamp: 100,
+      threadId,
+    });
+    await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'queued',
+      mentions: [],
+      timestamp: 101,
+      threadId,
+      deliveryStatus: 'queued',
+    });
+    const canceled = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'canceled',
+      mentions: [],
+      timestamp: 102,
+      threadId,
+      deliveryStatus: 'queued',
+    });
+    await store.markCanceled(canceled.id);
+    await store.append({
+      userId: 'u2',
+      catId: null,
+      content: 'other user',
+      mentions: [],
+      timestamp: 103,
+      threadId,
+    });
+    const target = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'target',
+      mentions: [],
+      timestamp: 104,
+      threadId,
+    });
+
+    const result = await store.getByThreadAfter(threadId, cursor.id, 1, 'u1');
+    assert.equal(result.length, 1, 'must not report exhausted because of a filtered gap');
+    assert.equal(result[0].id, target.id);
+  });
+
+  it('F258 D2: getByThreadBefore skips a filtered gap to find the previous delivered message', async () => {
+    const threadId = 'thread-gap-before';
+    const target = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'target',
+      mentions: [],
+      timestamp: 100,
+      threadId,
+    });
+    await store.append({
+      userId: 'u2',
+      catId: null,
+      content: 'other user',
+      mentions: [],
+      timestamp: 101,
+      threadId,
+    });
+    const canceled = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'canceled',
+      mentions: [],
+      timestamp: 102,
+      threadId,
+      deliveryStatus: 'queued',
+    });
+    await store.markCanceled(canceled.id);
+    await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'queued',
+      mentions: [],
+      timestamp: 103,
+      threadId,
+      deliveryStatus: 'queued',
+    });
+    const cursor = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'cursor',
+      mentions: [],
+      timestamp: 104,
+      threadId,
+    });
+
+    const result = await store.getByThreadBefore(threadId, 104, 1, cursor.id, 'u1');
+    assert.equal(result.length, 1, 'must not report exhausted because of a filtered gap');
+    assert.equal(result[0].id, target.id);
+  });
+
+  it('F258 D2: append fails closed when thread maxScore is at MAX_SAFE_INTEGER', async () => {
+    const threadId = 'thread-append-exhaust';
+    const key = MessageKeys.thread(threadId);
+
+    // Seed the thread with a member at the safe-integer ceiling.
+    await redis.zadd(key, Number.MAX_SAFE_INTEGER, 'placeholder');
+
+    await assert.rejects(
+      store.append({
+        userId: 'u1',
+        catId: null,
+        content: 'overflow',
+        mentions: [],
+        timestamp: 100,
+        threadId,
+      }),
+      /thread order key exhausted/i,
+    );
+  });
+
+  it('F258 D2: markDelivered fails closed when thread maxScore is at MAX_SAFE_INTEGER', async () => {
+    const threadId = 'thread-deliver-exhaust';
+    const key = MessageKeys.thread(threadId);
+
+    const queued = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'queued',
+      mentions: [],
+      timestamp: 100,
+      threadId,
+      deliveryStatus: 'queued',
+    });
+
+    await redis.zadd(key, Number.MAX_SAFE_INTEGER, 'placeholder');
+
+    await assert.rejects(store.markDelivered(queued.id, 200), /thread order key exhausted/i);
+  });
+
+  it('F258 D2: Memory and Redis produce identical thread pagination for the same sequence', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const memory = new MessageStore();
+    const threadId = 'thread-parity';
+
+    const m1 = memory.append({
+      userId: 'u1',
+      catId: null,
+      content: 'first',
+      mentions: [],
+      timestamp: 100,
+      threadId,
+      deliveryStatus: 'queued',
+    });
+    const m2 = memory.append({
+      userId: 'u1',
+      catId: null,
+      content: 'second',
+      mentions: [],
+      timestamp: 200,
+      threadId,
+      deliveryStatus: 'queued',
+    });
+    memory.markDelivered(m1.id, 300);
+    memory.markDelivered(m2.id, 400);
+
+    const r1 = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'first',
+      mentions: [],
+      timestamp: 100,
+      threadId,
+      deliveryStatus: 'queued',
+    });
+    const r2 = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'second',
+      mentions: [],
+      timestamp: 200,
+      threadId,
+      deliveryStatus: 'queued',
+    });
+    await store.markDelivered(r1.id, 300);
+    await store.markDelivered(r2.id, 400);
+
+    assert.deepEqual(
+      memory.getByThread(threadId, 10).map((m) => m.content),
+      (await store.getByThread(threadId, 10)).map((m) => m.content),
+      'getByThread order must match across stores',
+    );
+    assert.deepEqual(
+      memory.getByThreadAfter(threadId, m1.id, 10).map((m) => m.content),
+      (await store.getByThreadAfter(threadId, r1.id, 10)).map((m) => m.content),
+      'getByThreadAfter order must match across stores',
+    );
+    assert.deepEqual(
+      memory.getByThreadBefore(threadId, 500, 10).map((m) => m.content),
+      (await store.getByThreadBefore(threadId, 500, 10)).map((m) => m.content),
+      'getByThreadBefore order must match across stores',
+    );
   });
 });

@@ -71,9 +71,9 @@ describe('MessageStore.markDelivered', () => {
 });
 
 describe('MessageStore.getByThreadAfter', () => {
-  test('falls back to lexicographic ID filtering when cursor message is missing', () => {
+  test('replays from thread start when cursor message is missing', () => {
     const store = new MessageStore();
-    store.append({
+    const beforeCursor = store.append({
       threadId: 'thread-a',
       userId: 'u1',
       catId: null,
@@ -82,9 +82,10 @@ describe('MessageStore.getByThreadAfter', () => {
       timestamp: 1000,
     });
     // Synthesize a missing cursor whose logical timestamp sorts between the
-    // first message (1000) and the second message (2000). Because the producer
-    // encodes a logical high-water timestamp, the cursor must be generated
-    // before the high-water advances past 1500.
+    // first message (1000) and the second message (2000). With explicit
+    // visibility orderKeys, an unknown cursor cannot be safely positioned by
+    // opaque ID chronology; the store replays from the start of the thread
+    // (allows duplicate, prohibits loss).
     const missingCursor = generateSortableId(1500);
 
     const afterCursor = store.append({
@@ -108,7 +109,7 @@ describe('MessageStore.getByThreadAfter', () => {
 
     assert.deepEqual(
       results.map((m) => m.id),
-      [afterCursor.id],
+      [beforeCursor.id, afterCursor.id],
     );
   });
 });

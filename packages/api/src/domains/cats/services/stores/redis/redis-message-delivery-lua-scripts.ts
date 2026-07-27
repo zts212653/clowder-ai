@@ -1,5 +1,5 @@
 /**
- * Lua scripts for atomic delivery-order transitions (PR #1193).
+ * Lua scripts for atomic delivery-order transitions and append (PR #1193 + F258 D2).
  *
  * Bug: reassignUserId / markDelivered / markCanceled each read a JS snapshot
  * then write via independent MULTI — no shared atomic boundary. Two concurrent
@@ -23,8 +23,114 @@
  * restructured with hash tags.
  */
 
+const MAX_SAFE_INTEGER = '9007199254740991';
+
 /**
- * DELIVER: transition queued → delivered.
+ * APPEND: atomic idempotency claim + orderKey allocation + hash + all indexes.
+ *
+ * KEYS[1] = detail hash key (auto-prefixed by ioredis)
+ * ARGV[1] = message id
+ * ARGV[2] = JSON object of hash fields (id, threadId, userId, timestamp, content, ...)
+ * ARGV[3] = JSON array of mention catIds
+ * ARGV[4] = timeline/user/mentions score (stringified message timestamp)
+ * ARGV[5] = idempotency key raw suffix (empty string if none)
+ * ARGV[6] = keyPrefix (e.g. "cat-cafe:")
+ * ARGV[7] = ttlSeconds as string ("0" = no expiry)
+ *
+ * Returns: existing message id on idempotency replay, otherwise the new message id.
+ */
+export const APPEND_LUA = `
+redis.replicate_commands()
+
+local hash = KEYS[1]
+local msgId = ARGV[1]
+local hashFields = cjson.decode(ARGV[2])
+local mentions = cjson.decode(ARGV[3])
+local timelineScore = tonumber(ARGV[4])
+local idemKeyRaw = ARGV[5]
+local kp = ARGV[6]
+local ttl = tonumber(ARGV[7])
+
+local idemKey = idemKeyRaw ~= '' and (kp .. idemKeyRaw) or nil
+
+-- Idempotency: if key points to a live hash, replay.
+if idemKey then
+  local existingId = redis.call('GET', idemKey)
+  if existingId then
+    if redis.call('EXISTS', kp .. 'msg:' .. existingId) == 1 then
+      return existingId
+    end
+    -- stale reference: fall through to reclaim
+  end
+end
+
+-- Allocate a strictly-monotonic thread orderKey.
+local threadId = hashFields.threadId
+local threadKey = kp .. 'msg:thread:' .. threadId
+local maxScoreArr = redis.call('ZREVRANGE', threadKey, 0, 0, 'WITHSCORES')
+local maxScore = 0
+if #maxScoreArr > 0 then
+  maxScore = tonumber(maxScoreArr[2])
+end
+local timeArr = redis.call('TIME')
+local timeMs = tonumber(timeArr[1]) * 1000 + math.floor(tonumber(timeArr[2]) / 1000)
+local candidate = math.max(maxScore + 1, timeMs)
+if not (candidate < math.huge and candidate <= ${MAX_SAFE_INTEGER} and candidate > maxScore) then
+  error('thread order key exhausted or non-monotonic')
+end
+
+-- Write hash.
+local flat = {}
+for k, v in pairs(hashFields) do
+  table.insert(flat, k)
+  table.insert(flat, v)
+end
+redis.call('HSET', hash, unpack(flat))
+
+-- Write time-semantic indexes.
+local userKey = kp .. 'msg:user:' .. hashFields.userId
+local timelineKey = kp .. 'msg:timeline'
+redis.call('ZADD', timelineKey, timelineScore, msgId)
+redis.call('ZADD', userKey, timelineScore, msgId)
+for _, catId in ipairs(mentions) do
+  redis.call('ZADD', kp .. 'msg:mentions:' .. catId, timelineScore, msgId)
+end
+
+-- Write thread visibility index with the opaque orderKey.
+redis.call('ZADD', threadKey, candidate, msgId)
+
+-- Claim idempotency key and apply TTLs.
+if idemKey then
+  redis.call('SET', idemKey, msgId, 'NX')
+  if ttl > 0 then
+    redis.call('EXPIRE', idemKey, ttl)
+  end
+end
+
+if ttl > 0 then
+  redis.call('EXPIRE', hash, ttl)
+  redis.call('EXPIRE', timelineKey, ttl)
+  redis.call('EXPIRE', userKey, ttl)
+  redis.call('EXPIRE', threadKey, ttl)
+  for _, catId in ipairs(mentions) do
+    redis.call('EXPIRE', kp .. 'msg:mentions:' .. catId, ttl)
+  end
+
+  local cutoff = timeMs - ttl * 1000
+  redis.call('ZREMRANGEBYSCORE', timelineKey, '-inf', cutoff)
+  redis.call('ZREMRANGEBYSCORE', userKey, '-inf', cutoff)
+  for _, catId in ipairs(mentions) do
+    redis.call('ZREMRANGEBYSCORE', kp .. 'msg:mentions:' .. catId, '-inf', cutoff)
+  end
+  -- NOTE: thread ZSET is scored by opaque orderKey, not wall time;
+  -- it expires as a whole via EXPIRE above rather than score pruning.
+end
+
+return msgId
+`;
+
+/**
+ * DELIVER: transition queued → delivered and re-score the thread orderKey.
  *
  * KEYS[1] = detail hash key (auto-prefixed by ioredis)
  * ARGV[1] = message id
@@ -32,11 +138,10 @@
  * ARGV[3] = keyPrefix (e.g. "cat-cafe:") — for constructing zset keys inside Lua
  *
  * Returns: 0 on CAS no-op (not queued / missing), or HGETALL flat array on CAS win.
- * Returning HGETALL eliminates the separate getById round-trip — the winning caller
- * receives the post-mutation hash atomically, with no gap where a transient Redis
- * failure could lose the CAS receipt.
  */
 export const DELIVER_LUA = `
+redis.replicate_commands()
+
 local hash = KEYS[1]
 local msgId = ARGV[1]
 local deliveredAt = ARGV[2]
@@ -52,7 +157,23 @@ local threadId = redis.call('HGET', hash, 'threadId')
 
 redis.call('HSET', hash, 'deliveredAt', deliveredAt, 'deliveryStatus', 'delivered')
 
-redis.call('ZADD', kp .. 'msg:thread:' .. threadId, tonumber(deliveredAt), msgId)
+-- Allocate a fresh thread orderKey so delivery moves the message to the
+-- visibility tail atomically.
+local threadKey = kp .. 'msg:thread:' .. threadId
+local maxScoreArr = redis.call('ZREVRANGE', threadKey, 0, 0, 'WITHSCORES')
+local maxScore = 0
+if #maxScoreArr > 0 then
+  maxScore = tonumber(maxScoreArr[2])
+end
+local timeArr = redis.call('TIME')
+local timeMs = tonumber(timeArr[1]) * 1000 + math.floor(tonumber(timeArr[2]) / 1000)
+local candidate = math.max(maxScore + 1, timeMs)
+if not (candidate < math.huge and candidate <= ${MAX_SAFE_INTEGER} and candidate > maxScore) then
+  error('thread order key exhausted or non-monotonic on deliver')
+end
+redis.call('ZADD', threadKey, candidate, msgId)
+
+-- Timeline/user keep their time semantics.
 redis.call('ZADD', kp .. 'msg:timeline', tonumber(deliveredAt), msgId)
 redis.call('ZADD', kp .. 'msg:user:' .. userId, tonumber(deliveredAt), msgId)
 
@@ -125,44 +246,48 @@ return redis.call('HGETALL', hash)
 `;
 
 /**
- * GET_BY_THREAD_AFTER: return IDs in a thread that follow a cursor message.
+ * GET_THREAD_CHUNK: atomically resolve cursor rank and return the next chunk.
  *
  * KEYS[1] = thread sorted-set key (auto-prefixed by ioredis)
- * ARGV[1] = afterId (cursor message ID)
- * ARGV[2] = limit as a string number, or "0" for unlimited
+ * ARGV[1] = cursorId (empty string means "from start/end")
+ * ARGV[2] = cursorScore string (empty string means "from start/end")
+ * ARGV[3] = direction: 'after' (ascending) or 'before' (descending)
+ * ARGV[4] = chunk size
  *
- * A message qualifies if either:
- *   - its sortable ID is lexicographically greater than afterId (append order), or
- *   - its ZSET score (effective timestamp) is greater than afterId's score
- *     (handles queued messages created before the cursor but delivered after it).
- *
- * Results are sorted lexicographically by ID and limited in Redis so only the
- * requested window is transferred to the caller.
+ * Returns: flat array [id, score, id, score, ...] in the requested direction.
  */
-export const GET_BY_THREAD_AFTER_LUA = `
+export const GET_THREAD_CHUNK_LUA = `
 local key = KEYS[1]
-local afterId = ARGV[1]
-local limit = tonumber(ARGV[2])
+local cursorId = ARGV[1]
+local cursorScoreStr = ARGV[2]
+local direction = ARGV[3]
+local chunk = tonumber(ARGV[4])
 
-local entries = redis.call('ZRANGE', key, 0, -1, 'WITHSCORES')
-local afterScore = redis.call('ZSCORE', key, afterId)
-local afterScoreNum = afterScore and tonumber(afterScore) or nil
+local startRank = 0
 
-local matches = {}
-for i = 1, #entries, 2 do
-  local id = entries[i]
-  local score = tonumber(entries[i + 1])
-  if id ~= afterId and (id > afterId or (afterScoreNum and score > afterScoreNum)) then
-    table.insert(matches, id)
+if cursorId ~= '' then
+  local actualScore = redis.call('ZSCORE', key, cursorId)
+  local cursorScore = tonumber(cursorScoreStr)
+  if actualScore and tonumber(actualScore) == cursorScore then
+    if direction == 'after' then
+      local rank = redis.call('ZRANK', key, cursorId)
+      startRank = rank + 1
+    else
+      local rank = redis.call('ZREVRANK', key, cursorId)
+      startRank = rank + 1
+    end
+  else
+    if direction == 'after' then
+      startRank = redis.call('ZCOUNT', key, '-inf', '(' .. cursorScoreStr)
+    else
+      startRank = redis.call('ZCOUNT', key, '(' .. cursorScoreStr, '+inf')
+    end
   end
 end
 
-table.sort(matches)
-if limit and limit > 0 and #matches > limit then
-  for i = #matches, limit + 1, -1 do
-    matches[i] = nil
-  end
+if direction == 'after' then
+  return redis.call('ZRANGE', key, startRank, startRank + chunk - 1, 'WITHSCORES')
+else
+  return redis.call('ZREVRANGE', key, startRank, startRank + chunk - 1, 'WITHSCORES')
 end
-
-return matches
 `;

@@ -869,4 +869,182 @@ describe('MessageStore', () => {
     assert.equal(msgs[1].userId, 'system');
     assert.equal(msgs[1].catId, null);
   });
+
+  test('F258 D2: idempotent replay does not refire onAppend', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    let calls = 0;
+    const store = new MessageStore({
+      onAppend: () => {
+        calls++;
+      },
+    });
+
+    const first = store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'idem',
+      mentions: [],
+      timestamp: 10,
+      threadId: 'thread-idem-onappend',
+      idempotencyKey: 'idem-onappend',
+    });
+    assert.equal(calls, 1);
+
+    const replay = store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'idem',
+      mentions: [],
+      timestamp: 20,
+      threadId: 'thread-idem-onappend',
+      idempotencyKey: 'idem-onappend',
+    });
+    assert.equal(replay.id, first.id, 'replay must return the original message');
+    assert.equal(calls, 1, 'idempotent replay must not refire onAppend');
+  });
+
+  test('F258 D2: getByThreadAfter skips a filtered gap to find the next delivered message', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const store = new MessageStore();
+    const cursor = store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'cursor',
+      mentions: [],
+      timestamp: 100,
+      threadId: 't-gap-after',
+    });
+    store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'queued',
+      mentions: [],
+      timestamp: 101,
+      threadId: 't-gap-after',
+      deliveryStatus: 'queued',
+    });
+    const canceled = store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'canceled',
+      mentions: [],
+      timestamp: 102,
+      threadId: 't-gap-after',
+      deliveryStatus: 'queued',
+    });
+    store.markCanceled(canceled.id);
+    store.append({
+      userId: 'u2',
+      catId: null,
+      content: 'other user',
+      mentions: [],
+      timestamp: 103,
+      threadId: 't-gap-after',
+    });
+    const target = store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'target',
+      mentions: [],
+      timestamp: 104,
+      threadId: 't-gap-after',
+    });
+
+    const result = store.getByThreadAfter('t-gap-after', cursor.id, 1, 'u1');
+    assert.equal(result.length, 1, 'must not report exhausted because of a filtered gap');
+    assert.equal(result[0].id, target.id);
+  });
+
+  test('F258 D2: getByThreadBefore enforces timestamp bound even when cursor is present', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const store = new MessageStore();
+    const earlier = store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'earlier',
+      mentions: [],
+      timestamp: 100,
+      threadId: 't-bound-before',
+    });
+    const cursor = store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'cursor',
+      mentions: [],
+      timestamp: 150,
+      threadId: 't-bound-before',
+    });
+
+    const result = store.getByThreadBefore('t-bound-before', 150, 10, cursor.id, 'u1');
+    assert.deepEqual(
+      result.map((m) => m.id),
+      [earlier.id],
+      'cursor message itself must be excluded and timestamp bound must hold',
+    );
+  });
+
+  test('F258 D2: append fails closed when thread orderKey would exceed MAX_SAFE_INTEGER', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const store = new MessageStore();
+    // Pre-seed the thread maxOrderKey to the safe-integer ceiling.
+    store['threadMaxOrderKeys'].set('t-exhaust', Number.MAX_SAFE_INTEGER - 1);
+
+    const ok = store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'last safe',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 't-exhaust',
+    });
+    assert.ok(ok.id);
+
+    assert.throws(
+      () =>
+        store.append({
+          userId: 'u1',
+          catId: null,
+          content: 'overflow',
+          mentions: [],
+          timestamp: Date.now(),
+          threadId: 't-exhaust',
+        }),
+      /thread order key exhausted/i,
+    );
+  });
+
+  test('F258 D2: hardDelete preserves tombstone orderKey for threadView', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const store = new MessageStore();
+    const a = store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'a',
+      mentions: [],
+      timestamp: 100,
+      threadId: 't-tomb-order',
+    });
+    const b = store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'b',
+      mentions: [],
+      timestamp: 101,
+      threadId: 't-tomb-order',
+    });
+
+    store.hardDelete(a.id, 'u1');
+
+    // Must not throw invariant: missing orderKey, and tombstone must remain
+    // visible in the after-cursor path.
+    assert.deepEqual(
+      store.getByThreadAfter('t-tomb-order', a.id).map((m) => m.id),
+      [b.id],
+    );
+  });
 });

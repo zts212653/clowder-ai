@@ -1,69 +1,198 @@
-# F258 D2: Bounded Sortable-ID Producer — Implementation Design
+# F258 D2: Bounded Sortable-ID Producer — Implementation Design v5
 
 **Feature:** F258 / K-1 messaging producer attestation
 **Scope:** D2-A "opaque bounded ID + explicit cursor order" from [K-1 Producer Attestation D-Gate](2026-07-19-k1-producer-attestation.md)
 **Baseline:** `upstream/main@e3770ef219` (includes #1185, #1192, #1193)
 **Worktree:** `/Users/lang/workspace/github-lab/clowder-ai-f258-d2-cursor`
 **Branch:** `feat/f258-d2-cursor-order`
+**Frozen HEAD:** `a7724b348b84fce8adf38cdfb2b1a70e99e4587c`
 
 ## Decision in one paragraph
 
-Keep the existing `timestamp-seq-uuid` lexical ID layout and treat it as the explicit cursor-order key. Because #1185 already restricts future writes to non-negative integral ECMAScript Date values, the timestamp component is a fixed 16-digit decimal string and the sequence component can be bounded to six decimal digits per logical timestamp. The producer tracks a single *logical* high-water timestamp and a per-logical-timestamp sequence counter; advancing the high-water mark resets the counter, so there is no process-lifetime sequence ceiling. The logical timestamp is derived from admitted timestamps: on the first call in a process it is seeded from the admitted timestamp (clamped to wall-clock + `MAX_HIGH_WATER_ADVANCE_MS` so a far-future first call cannot pin the bucket), and thereafter it moves forward when the caller supplies a larger timestamp and stays unchanged for smaller or equal inputs. Every admitted timestamp is first clamped to `Date.now() + MAX_HIGH_WATER_ADVANCE_MS`; this bounds each advance against wall time rather than the previous high-water, so repeated far-future timestamps cannot ratchet the prefix forward cumulatively. `MAX_HIGH_WATER_ADVANCE_MS` is a few seconds, which prevents one far-future input from pinning the global sequence bucket for an extended interval. This preserves exact lexical cursor order using only bounded local state while still admitting out-of-order timestamps (for example, a queued message with an earlier timestamp appended after a later one). The producer fails closed (`RangeError`) when the per-timestamp sequence would exceed `MAX_SEQUENCE`, preventing the `999999 → 1000000` lexicographic inversion and guaranteeing a 32-character output ceiling. Memory and Redis continue to share the same producer, so they implement the same ordering relation without a separate order-key field.
+Keep the existing `timestamp-seq-uuid` lexical ID layout, but **decouple cursor order from the ID**. The sortable ID remains an opaque bounded identity; thread-level visibility order is maintained by a store-owned monotonic **`orderKey`** stored as the Redis thread-ZSET score (and by an equivalent private `Map` in the in-memory store). The orderKey allocator is single-threaded inside Redis: `candidate = max(zsetMaxScore + 1, redisServerTimeMs)`, guarded to be finite, strictly greater than `maxScore`, and not above `Number.MAX_SAFE_INTEGER`; otherwise it fails closed. `timeline`, `user`, and `mentions` ZSETs keep their existing time semantics (`timestamp` for queued/legacy, `deliveredAt` after delivery). Thread pagination uses the orderKey; callers continue to pass a message-ID cursor, and the store resolves the cursor's current score internally. Both `getByThreadAfter` and `getByThreadBefore` are implemented as chunked scans with a **dual-state** (boundary + scanCursor): the boundary only advances when a message is actually returned, while the scanCursor always advances to the raw chunk end; a constant predicate filters any entries at or behind the boundary, making fallback recovery safe without skip counters or offset state. Expired/missing cursors replay from the visibility-order start (allow duplicates, forbid loss). Memory implements the same orderKey invariant via `Map<messageId, orderKey>` and `Map<threadId, maxOrderKey>`.
 
-## Why this satisfies D2-A
+## Terminal invariants (D2-A)
 
-| Required terminal invariant | How this implementation closes it |
+| Required terminal invariant | How v5 closes it |
 |---|---|
-| A later append at the same effective score never compares at or before an earlier cursor | The producer keeps a monotonic logical timestamp and a per-logical-timestamp sequence counter. The 6-digit zero-padded form preserves lexicographic order for IDs sharing the same logical timestamp up to `MAX_SEQUENCE`, and cross-timestamp order is preserved by the fixed-width logical-timestamp prefix. Out-of-order input timestamps are promoted to the current logical timestamp, so generation order still matches lexical order. |
-| Expired-cursor recovery is defined for mixed legacy/new IDs | The ID format is unchanged; legacy six-digit IDs and new bounded IDs order consistently by timestamp first, then by sequence. Tests cover `getByThreadAfter` with a mixed-epoch cursor. |
-| Finite, enforced output maximum | `MAX_SEQUENCE = 999_999` plus 16-digit timestamp plus 8-character UUID gives a hard 32-character ceiling. |
-| Sequence exhaustion/restart/concurrency is explicit and fail-closed | Exhaustion throws `RangeError: sortable-ID sequence exhausted` before width expansion or wrap. Advancing the high-water timestamp resets the sequence counter, so there is no process-lifetime ceiling. Restart resets both high-water and sequence; this is documented as a known boundary that production callers must mitigate with monotonic timestamps. |
-| Memory and Redis implement the same ordering relation | Both stores import `generateSortableId` from the same module. Redis stores use the ID's 16-digit logical timestamp prefix as the ZSET score, so Redis cursor queries and Memory/ID lexical ordering agree even when the admitted `timestamp` is out-of-order or far-future. |
+| Cursor order is decoupled from opaque ID internals | Cursor is a message ID; its order position is the thread ZSET score (`orderKey`), never `id.slice(0,16)`. |
+| Later append/delivery never compares at or before an earlier cursor | `orderKey` is strictly monotonic per thread; re-delivery assigns a fresh orderKey > all existing ones. |
+| Expired-cursor recovery is defined | Missing cursor score → replay from start; boundary predicate prevents duplicates; finite ZSET guarantees termination. |
+| Strict full-order tie handling | ZSET ranks by `(score, lex(member))`; equal-score buckets are scanned and filtered with `(score,id)` boundary. |
+| No false exhaustion across filtered gaps | Chunk scan continues until enough delivered/user-visible messages are collected or the ZSET is exhausted. |
+| Finite, enforced output maximum | `MAX_SEQUENCE = 999_999` plus 16-digit timestamp plus 8-char UUID keeps IDs ≤ 32 chars. |
+| Memory/Redis parity | Both use the same orderKey allocation semantics; Memory keeps private maps, Redis keeps thread ZSET scores. |
+| Idempotency is atomic | JS pre-ID read-only fast path + `APPEND_LUA` atomic claim/write; stale cleanup happens inside the Lua linearization point. |
+| `+inf`/numerical edge cases fail closed | `APPEND_LUA` and `DELIVER_LUA` validate `candidate` finite, `≤ MAX_SAFE_INTEGER`, and `> maxScore` before any mutation. |
+
+## Score/ID decoupling
+
+- **ID** = `timestamp-seq-uuid` produced by `generateSortableId`. It is an opaque identity; no store code decodes `id.slice(0,16)` for ordering.
+- **Thread visibility score** = `orderKey`, a per-thread monotonic number managed by the store.
+- **Timeline/user/mention scores** = `deliveredAt ?? timestamp` (existing time semantics, unchanged).
+- `getByThreadAfter(threadId, afterId?)` and `getByThreadBefore(threadId, timestamp, limit?, beforeId?, userId?)` use the thread orderKey for cursor resolution. When `beforeId` is present its score is authoritative and the `timestamp` argument is ignored; when `beforeId` is absent the `timestamp` is used as an exclusive effective-time bound for backward compatibility.
+
+## Append atomicity
+
+Two layers, no layer removed:
+
+1. **JS pre-ID fast path** (read-only): if `idempotencyKey` maps to an existing message, return it immediately. This protects the bounded sortable-ID sequence from being consumed by replays. If the mapped message is missing, do **not** mutate Redis; fall through.
+2. **`APPEND_LUA`** (single linearization point): handles stale idempotency cleanup, idempotency claim, orderKey allocation, hash write, all ZSET writes, and TTL/EXPIRE in one script.
+
+`APPEND_LUA` behavior:
+- `redis.replicate_commands()` at the top.
+- If idempotency key exists and its message hash exists → return that message id.
+- If idempotency key exists but hash is missing → treat as stale, allow this call to claim.
+- Claim idempotency key with `SET NX`; if lost, re-read and return the winner.
+- Compute `orderKey = max(maxThreadScore + 1, redisServerTimeMs)` with guards.
+- `HMSET` the hash, `ZADD` timeline/user/mentions with `timestamp`, `ZADD` thread with `orderKey`.
+- Apply TTL/EXPIRE and prune expired timeline/user/mentions/thread entries if `ttlSeconds > 0`.
+- Return the new message id.
+
+`onAppend` fires **only on created** paths; idempotent replays must not re-fire it (Memory and Redis).
+
+## OrderKey allocation
+
+```
+candidate = max(maxScore + 1, serverTimeMs)
+assert finite(candidate)
+assert candidate <= Number.MAX_SAFE_INTEGER
+assert candidate > maxScore       -- strict monotonicity
+```
+
+- `serverTimeMs` comes from `redis.call('TIME')` inside the Lua script (Redis) or `Date.now()` (Memory).
+- `maxScore` is the current maximum score of the thread ZSET / Memory `threadMaxOrderKeys`.
+- Legacy `+inf` / `-inf` scores are read-only compat; writing into a thread whose `maxScore` is `+inf` fails closed instead of silently producing `inf+1 = inf`.
+
+## Thread pagination state machines
+
+### After
+
+```
+boundary   = afterId ? (ZSCORE(afterId), afterId) : nil
+scanCursor = boundary
+result     = []
+want       = limit > 0 ? limit : unbounded
+
+loop until result.length >= want or exhausted:
+  chunk = GET_THREAD_CHUNK(key, scanCursor, 'after', CHUNK)
+  if chunk empty: break
+  scanCursor = (chunk.lastScore, chunk.lastId)
+  for (id, score) in chunk.entries:
+    if boundary && (score,id) <= boundary: continue
+    msg = hydrate(id, {includeDeleted:true})
+    if !msg: continue
+    if !isDelivered(msg): continue
+    if userId && !userFilter(msg): continue
+    result.push(msg)
+    boundary = (score,id)
+    if result.length >= want: break
+return result
+```
+
+### Before (strict mirror)
+
+```
+boundary   = beforeId ? (ZSCORE(beforeId), beforeId) : nil
+scanCursor = boundary
+result     = []
+want       = limit ?? DEFAULT_LIMIT
+
+loop until result.length >= want or exhausted:
+  chunk = GET_THREAD_CHUNK(key, scanCursor, 'before', CHUNK)
+  if chunk empty: break
+  scanCursor = (chunk.lastScore, chunk.lastId)    -- descending raw end
+  for (id, score) in chunk.entries:
+    if boundary && (score,id) >= boundary: continue
+    msg = hydrate(id)                              -- no tombstones for before
+    if !msg: continue
+    if msg.deletedAt: continue
+    if !isDelivered(msg): continue
+    if userId && !userFilter(msg): continue
+    if !boundary && (msg.deliveredAt ?? msg.timestamp) >= timestamp: continue
+    result.push(msg)
+    boundary = (score,id)
+    if result.length >= want: break
+return result.reverse()
+```
+
+`GET_THREAD_CHUNK` is a thin Lua that atomically resolves the start rank and returns the next `CHUNK` entries with `WITHSCORES`. It has two modes:
+- `after`: `ZRANK` fast path or `ZCOUNT -inf (cursorScore` fallback; then `ZRANGE ... WITHSCORES`.
+- `before`: `ZREVRANK` fast path or `ZCOUNT (cursorScore +inf` fallback; then `ZREVRANGE ... WITHSCORES`.
+
+## Memory parity
+
+- `messageOrderKeys: Map<messageId, number>` — only append and physical removal mutate it.
+- `threadMaxOrderKeys: Map<threadId, number>` — allocator writes it; `deleteByThread` deletes it.
+- `markCanceled` does **not** delete `messageOrderKeys[id]`.
+- Missing orderKey is a hard invariant failure (`throw`).
+- All four thread read surfaces (`getByThread`, `getByThreadIncludingQueued`, `getByThreadAfter`, `getByThreadBefore`) share a single view sorted by `(orderKey, id)`.
+
+## Redis version
+
+All write scripts that call `redis.call('TIME')` begin with `redis.replicate_commands()`. This is a no-op on Redis 7+ and enables the required effects replication on Redis 3.2+. Tested locally on Redis 8.6.1; recommended production minimum is 7.0.
 
 ## Files changed
 
+- `packages/api/src/domains/cats/services/stores/redis/redis-message-delivery-lua-scripts.ts`
+  - Add `APPEND_LUA`.
+  - Add `GET_THREAD_CHUNK_LUA` (after/before shared).
+  - Update `DELIVER_LUA` to allocate a fresh thread orderKey and guard numerics.
+  - Remove `GET_BY_THREAD_AFTER_LUA`.
+  - Keep `CANCEL_LUA` and `REASSIGN_LUA` semantics aligned (cancel does not remove thread member; reassign does not touch thread orderKey).
+- `packages/api/src/domains/cats/services/stores/redis/RedisMessageStore.ts`
+  - `append`: use `APPEND_LUA`; keep read-only JS idempotency fast path; remove JS `redis.del(idempotencyKey)`.
+  - `getByThreadAfter`, `getByThreadBefore`: dual-state chunked scan.
+  - `getByThread` / `getByThreadIncludingQueued`: continue to scan the thread ZSET by orderKey; filter semantics unchanged.
+  - `deleteByThread`: unchanged (deletes thread ZSET; orderKey allocator restarts from `TIME` on next append).
 - `packages/api/src/domains/cats/services/stores/ports/MessageStore.ts`
-  - Export `MAX_SEQUENCE`.
-  - Export test-only `resetSortableIdSequence` and `getSortableIdSequence` hooks.
-  - Add fail-closed exhaustion guard in `generateSortableId`.
-- `packages/api/test/d2-cursor-order.test.js`
-  - Admission regressions (existing).
-  - Same-timestamp lexicographic order.
-  - Six-digit sequence exhaustion and bounded length.
-  - Restart boundary documentation.
+  - Add orderKey maps to `MessageStore`.
+  - Update append/markDelivered/deleteByThread/trim to maintain maps.
+  - Reimplement thread read surfaces over the `(orderKey,id)` view.
+  - Ensure `onAppend` fires only on created messages.
+- `packages/api/test/message-store.test.js`
+  - Add RED tests for orderKey ordering, filtered-gap after/before, cancel parity, idempotency replay without `onAppend` re-fire.
 - `packages/api/test/redis-message-store.test.js`
-  - Redis exhaustion fail-closed and zero-partial-state proof.
-  - Mixed-epoch legacy/new ID ordering and expired-cursor recovery.
+  - Update score assertions to orderKey semantics.
+  - Add RED tests for `+inf`/numerical guards, equal-score fallback, filtered gap, idempotency atomicity, Memory/Redis parity.
 
-## Explicit boundaries and reservations
+## RED matrix
 
-- **Logical timestamp in the ID prefix.** The 16-digit timestamp component of the sortable ID is a process-local logical ordering timestamp, not necessarily the message's stored timestamp. It is seeded from the first admitted timestamp and advances when the caller supplies a larger timestamp; it never decreases, so the lexical cursor order is always well-defined. Initialization is tracked separately from the timestamp value so admitted timestamp `0` advances the sequence normally.
-- **High-water advancement is rate-limited against wall time.** Every admitted timestamp is first clamped to `Date.now() + MAX_HIGH_WATER_ADVANCE_MS` (a few seconds). A single admitted timestamp can therefore advance the logical high-water mark by at most the wall-clock elapsed since the previous advance plus the small skew window, preventing repeated far-future timestamps from ratcheting the prefix forward cumulatively and preventing a single future input from pinning the global sequence bucket for an extended interval.
-- **Out-of-order timestamps are admitted but promoted.** #1185's non-negative integral Date domain is still validated. Timestamps lower than the current high-water mark are admitted using the current logical timestamp as the ID prefix, so they still sort after all earlier IDs generated in the process.
-- **No historical data scan or migration.** This is a future-write producer boundary only; D3 raw audit and M7 historical compatibility remain RESERVED per the D-Gate.
-- **No `threadId`, `actor.id`, or Unicode-scalar bounds.** Those identifiers have alternate ingress paths and remain RESERVED pending source-specific inventory.
-- **No shared CAS between concurrent processes.** The sequence state is local to a single Node.js process (one high-water logical timestamp + one sequence counter); cross-process order is only guaranteed for callers that supply monotonically non-decreasing timestamps.
-- **Sequence reset at the same logical timestamp can regress order.** The producer has no memory of prior process epochs; production callers must not reset or restart within the same millisecond.
-- **Extreme clock rollback is bounded.** A caller-supplied timestamp far below the current high-water mark still produces an ordered ID, but its ID prefix no longer matches its stored timestamp. Consumers that decode the ID prefix as a timestamp would observe the logical value, not the original input.
+| # | RED statement | Verification |
+|---|---|---|
+| 1 | `generateSortableId` still rejects invalid timestamps and bounds length/sequence. | `d2-cursor-order.test.js` |
+| 2 | `append` rejects transition-owned `deliveredAt`/`deliveryStatus`. | existing ownership tests |
+| 3 | `append` is atomic: after any outcome, either the message hash + all indexes exist, or no Redis keys are created. | invalid-timestamp / ownership tests |
+| 4 | `APPEND_LUA` idempotency: concurrent same-key appends produce exactly one hash, one thread member, and both callers return the same message. | new Redis RED test |
+| 5 | `onAppend` fires only on `created`; idempotent replay does not re-fire (Memory and Redis). | new RED test |
+| 6 | Thread ZSET score is `orderKey`, not `timestamp`/`deliveredAt`; timeline/user keep time semantics. | updated score assertions |
+| 7 | `markDelivered` assigns a strictly larger thread orderKey than any existing member. | new Redis RED test |
+| 8 | `markDelivered`/`append` fail closed when the thread max score is `+inf` or near `2^53`. | new numerical-guard RED test |
+| 9 | `markCanceled` does not remove the thread member and does not delete Memory `messageOrderKeys[id]`. | existing cancel parity test |
+| 10 | `getByThreadAfter` returns messages after the cursor in thread order, including across queued→delivered re-score. | existing + new filtered-gap test |
+| 11 | `getByThreadAfter` does not falsely exhaust when the first raw item after the cursor is queued/canceled/another-user. | new filtered-gap RED test |
+| 12 | `getByThreadAfter` equal-score fallback recovers correctly when the anchor member is re-scored or removed. | new equal-bucket RED test |
+| 13 | `getByThreadBefore` is the exact structural mirror: no reverse-rank math errors, excludes deleted, respects cursor boundary. | new + existing before tests |
+| 14 | `getByThreadBefore` with missing/expired cursor replays from start without loss. | existing expired-cursor tests |
+| 15 | Memory and Redis return the same thread order for identical append/deliver/cancel sequences. | parity RED test |
+| 16 | `_orderKey` or any internal score is not exposed on returned `StoredMessage` objects. | JSON projection test |
 
 ## Test evidence
 
-Run the targeted suites:
-
 ```bash
-# memory + producer
-cd packages/api && node --test test/d2-cursor-order.test.js test/message-store.test.js
+# producer + memory
+cd packages/api
+pnpm run build
+node --test test/d2-cursor-order.test.js test/message-store.test.js
 
 # redis (isolated DB 15)
 CAT_CAFE_REDIS_TEST_ISOLATED=1 REDIS_URL=redis://localhost:6379/15 \
   node --test test/redis-message-store.test.js
 ```
 
-All listed suites pass at the current HEAD.
-
 ## Quality-gate checklist before PR
 
-- [ ] `pnpm --filter @cat-cafe/api test:public` or equivalent public gate passes.
+- [ ] `pnpm --filter @cat-cafe/api test:public` passes.
 - [ ] Cross-family review by Maine Coon / sol (`@codex`).
 - [ ] No changes to runtime config, Redis data, or operator data stores.
 - [ ] No claims that close M1/M2/M5/M6/M7 or #1200/#1165.
