@@ -101,7 +101,11 @@ redis.call('ZADD', threadKey, candidate, msgId)
 
 -- Claim idempotency key and apply TTLs.
 if idemKey then
-  redis.call('SET', idemKey, msgId, 'NX')
+  -- Overwrite stale mappings (e.g., after deleteByThread deleted the hash but
+  -- left the idempotency key behind) as well as claiming a fresh key. At this
+  -- point the key either does not exist or points to a missing hash, so
+  -- unconditional SET is safe and prevents duplicate creation on retries.
+  redis.call('SET', idemKey, msgId)
   if ttl > 0 then
     redis.call('EXPIRE', idemKey, ttl)
   end
@@ -122,8 +126,11 @@ if ttl > 0 then
   for _, catId in ipairs(mentions) do
     redis.call('ZREMRANGEBYSCORE', kp .. 'msg:mentions:' .. catId, '-inf', cutoff)
   end
-  -- NOTE: thread ZSET is scored by opaque orderKey, not wall time;
-  -- it expires as a whole via EXPIRE above rather than score pruning.
+  -- Thread ZSET is scored by opaque orderKey, which is allocated >= serverTimeMs.
+  -- Prune members whose orderKey is older than the TTL window so active threads
+  -- do not accumulate unhydratable IDs indefinitely. Whole-key EXPIRE remains as
+  -- a backstop for idle threads.
+  redis.call('ZREMRANGEBYSCORE', threadKey, '-inf', cutoff)
 end
 
 return msgId
@@ -155,10 +162,9 @@ end
 local userId = redis.call('HGET', hash, 'userId')
 local threadId = redis.call('HGET', hash, 'threadId')
 
-redis.call('HSET', hash, 'deliveredAt', deliveredAt, 'deliveryStatus', 'delivered')
-
--- Allocate a fresh thread orderKey so delivery moves the message to the
--- visibility tail atomically.
+-- Allocate and validate the fresh thread orderKey BEFORE mutating the hash.
+-- Redis Lua does not roll back earlier commands on error; validating first
+-- keeps the CAS transition atomic even when the thread orderKey is exhausted.
 local threadKey = kp .. 'msg:thread:' .. threadId
 local maxScoreArr = redis.call('ZREVRANGE', threadKey, 0, 0, 'WITHSCORES')
 local maxScore = 0
@@ -171,6 +177,10 @@ local candidate = math.max(maxScore + 1, timeMs)
 if not (candidate < math.huge and candidate <= ${MAX_SAFE_INTEGER} and candidate > maxScore) then
   error('thread order key exhausted or non-monotonic on deliver')
 end
+
+-- Now mutate: the orderKey guard has passed, so this transition will complete.
+redis.call('HSET', hash, 'deliveredAt', deliveredAt, 'deliveryStatus', 'delivered')
+
 redis.call('ZADD', threadKey, candidate, msgId)
 
 -- Timeline/user keep their time semantics.

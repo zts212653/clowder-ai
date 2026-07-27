@@ -691,18 +691,17 @@ export class RedisMessageStore {
 
         const effectiveTs = msg.deliveredAt ?? msg.timestamp;
         if (beforeId) {
-          // orderKey boundary is authoritative for visibility position; timestamp
-          // is an additional effective-time guard. When the cursor message itself
-          // sits at the passed timestamp, allow same-timestamp messages with
-          // lexically smaller ids (composite cursor). Otherwise the numeric cursor
-          // is a legacy bound and effectiveTs must be strictly less.
-          if (effectiveTs > timestamp) continue;
-          if (effectiveTs === timestamp) {
-            if (cursorMsgTs === timestamp) {
-              if (msg.id >= beforeId) continue;
-            } else {
-              continue;
-            }
+          // When the cursor message itself sits at the passed timestamp, this is a
+          // proper composite cursor: the visibility-order boundary is authoritative
+          // and no effective-time guard is applied. That lets thread enumeration
+          // walk over legacy members whose orderKey is before the cursor even if
+          // their stored timestamp is higher (e.g. fractional legacy cursors).
+          // When the cursor message's effective time differs from the passed
+          // timestamp, beforeId is only an orderKey anchor and the timestamp is a
+          // strict effective-time upper bound.
+          if (cursorMsgTs !== timestamp) {
+            if (effectiveTs > timestamp) continue;
+            if (effectiveTs === timestamp) continue;
           }
         } else {
           if (effectiveTs >= timestamp) continue;

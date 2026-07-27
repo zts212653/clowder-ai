@@ -582,6 +582,15 @@ export class MessageStore {
       const removed = this.messages.slice(0, this.messages.length - this.maxMessages);
       this.messages = this.messages.slice(-this.maxMessages);
       this.pruneIdempotencyIndexForMessageIds(removed.map((entry) => entry.id));
+      // Drop thread maxima for threads that are no longer represented in the
+      // retained window, preventing the per-thread map from growing without
+      // bound as new thread IDs continuously arrive.
+      const retainedThreadIds = new Set(this.messages.map((m) => m.threadId));
+      for (const entry of removed) {
+        if (!retainedThreadIds.has(entry.threadId)) {
+          this.threadMaxOrderKeys.delete(entry.threadId);
+        }
+      }
     }
 
     // F102 KD-34: fire-and-forget append listener for thread index updates
@@ -809,18 +818,17 @@ export class MessageStore {
 
       const effectiveTs = msg.deliveredAt ?? msg.timestamp;
       if (beforeId) {
-        // orderKey boundary is authoritative for visibility position; timestamp
-        // is an additional effective-time guard. When the cursor message itself
-        // sits at the passed timestamp, allow same-timestamp messages with
-        // lexically smaller ids (composite cursor). Otherwise the numeric cursor
-        // is a legacy bound and effectiveTs must be strictly less.
-        if (effectiveTs > timestamp) continue;
-        if (effectiveTs === timestamp) {
-          if (cursorMsgTs === timestamp) {
-            if (msg.id >= beforeId) continue;
-          } else {
-            continue;
-          }
+        // When the cursor message itself sits at the passed timestamp, this is a
+        // proper composite cursor: the visibility-order boundary is authoritative
+        // and no effective-time guard is applied. That lets thread enumeration
+        // walk over legacy members whose orderKey is before the cursor even if
+        // their stored timestamp is higher (e.g. fractional legacy cursors).
+        // When the cursor message's effective time differs from the passed
+        // timestamp, beforeId is only an orderKey anchor and the timestamp is a
+        // strict effective-time upper bound.
+        if (cursorMsgTs !== timestamp) {
+          if (effectiveTs > timestamp) continue;
+          if (effectiveTs === timestamp) continue;
         }
       } else {
         if (effectiveTs >= timestamp) continue;
@@ -931,10 +939,12 @@ export class MessageStore {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
     if (!isQueuedForDeliveryTransition(msg)) return null; // CAS no-op: not queued
+    // F258 D2: validate the next thread orderKey BEFORE mutating the message.
+    // If allocation throws (exhausted/non-monotonic), the queued state stays
+    // unchanged and the caller can retry.
+    const orderKey = this.allocateOrderKey(msg.threadId);
     msg.deliveredAt = deliveredAt;
     msg.deliveryStatus = 'delivered';
-    // F258 D2: delivery advances the thread visibility orderKey.
-    const orderKey = this.allocateOrderKey(msg.threadId);
     this.messageOrderKeys.set(msg.id, orderKey);
     return msg;
   }
