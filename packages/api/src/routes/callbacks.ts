@@ -2785,36 +2785,47 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // cursor store, ensuring consistent ordering semantics across all
     // cursor comparison points. Cross-format (v1/v2) uses the version
     // boundary heuristic: v2 always > v1 (tracked era postdates untracked).
-    const isMentionAcked = (item: StoredMessage): boolean => {
+    // #1200 Sol R6 P2-1: async canonicalization for cross-format safety.
+    // Redis getRecentMentionsFor may return items without visibilitySeq
+    // (pre-migration data), making cursorFor emit v1 while lastAckId is v2.
+    // Canonicalize via messageStore to resolve to same-format before comparing.
+    const isMentionAcked = async (item: StoredMessage): Promise<boolean> => {
       if (!lastAckId) return false;
-      const ic = cursorFor(item);
+      let ic = cursorFor(item);
+      // Canonicalize v1 cursors to v2 via visibility index lookup
+      if (!ic.startsWith('v2:') && messageStore.canonicalizeCursor) {
+        try {
+          ic = await messageStore.canonicalizeCursor(item.id, record.threadId);
+        } catch {
+          // Resolver failed (pruned message) — keep v1, indeterminate comparison below
+        }
+      }
       // #1200 Sol R5 P1-3: Distinguish true equality from cross-format indeterminate.
-      // compareCursors returns 0 for BOTH "truly equal" AND "cross-format indeterminate".
-      // `<= 0` treats indeterminate as "acked" — wrong (drops pending mentions).
-      // Fix: `cmp < 0 || (cmp === 0 && ic === lastAckId)` — only true string equality counts.
       const cmp = compareCursors(ic, lastAckId);
       return cmp < 0 || (cmp === 0 && ic === lastAckId);
     };
     const payload = {
-      mentions: mentions.map((item) => {
-        if (isMentionFullMode) {
-          // F236 Track-1 full mode: return complete mention content, no truncation
-          return {
-            id: item.id,
+      mentions: await Promise.all(
+        mentions.map(async (item) => {
+          if (isMentionFullMode) {
+            // F236 Track-1 full mode: return complete mention content, no truncation
+            return {
+              id: item.id,
+              from: getSenderName(item.catId),
+              message: item.content,
+              timestamp: item.timestamp,
+              contentLength: item.content.length,
+              requiresDrill: false,
+              ...(shouldIncludeAcked ? { acked: await isMentionAcked(item) } : {}),
+            };
+          }
+          // F236 AC-A3: anchor-first — head+tail excerpt + requiresDrill, full body one hop away.
+          return anchorPendingMention(item, {
             from: getSenderName(item.catId),
-            message: item.content,
-            timestamp: item.timestamp,
-            contentLength: item.content.length,
-            requiresDrill: false,
-            ...(shouldIncludeAcked ? { acked: isMentionAcked(item) } : {}),
-          };
-        }
-        // F236 AC-A3: anchor-first — head+tail excerpt + requiresDrill, full body one hop away.
-        return anchorPendingMention(item, {
-          from: getSenderName(item.catId),
-          ...(shouldIncludeAcked ? { acked: isMentionAcked(item) } : {}),
-        });
-      }),
+            ...(shouldIncludeAcked ? { acked: await isMentionAcked(item) } : {}),
+          });
+        }),
+      ),
     };
     // F236 AC-A1 (R1/砚砚 P1): emit returnedChars for eval-layer payload-shrink accounting.
     const pendingMentionsReturnedChars = JSON.stringify(payload).length;
@@ -3461,12 +3472,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           return true;
         };
 
-        // #1200 Sol R5 P1-2: Target-bounded visibility scan.
-        // Old approach (maxChunks=3) truncates when self-message gaps exceed
-        // 3 × chunkSize (e.g. 151 self messages at chunkSize=50 → never reaches
-        // the cat's actual read position). Fix: scan until we pass the cat's
-        // maximum read position (maxSeenPosition), or hit an unseen message,
-        // with a safety cap on total messages scanned for pre-migration data.
+        // #1200 Sol R6 P1-2: Target-bounded visibility scan.
+        // Scan until we pass the cat's maximum read position (maxSeenPosition),
+        // or hit an unseen freshness-relevant message. The target position is
+        // the CORRECTNESS bound — arbitrary total-count caps truncate semantics
+        // (501 self messages + 1 external → cap at 500 = permanent false hold).
+        // Safety cap only applies when no target position (pre-migration data
+        // where all visibilitySeq are null → maxSeenPosition = 0).
         const maxSeenPosition = filtered.reduce((max, m) => {
           const seq = m.visibilitySeq;
           return seq != null && seq > max ? seq : max;
@@ -3475,12 +3487,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         let advanceTo: { id: string; visibilitySeq?: number } | null = null;
         let scanAfter: string | undefined = currentSeen ?? undefined;
         let foundStop = false;
-        // Safety cap: limit total messages scanned (not chunk count).
-        // Pre-migration messages without visibilitySeq fall through to this cap.
-        const maxScanTotal = 500;
+        // Safety cap: ONLY for pre-migration (no target position). With a target,
+        // the scan is bounded by maxSeenPosition (terminates in finite time).
+        const maxScanFallback = 500;
         let scannedTotal = 0;
 
-        while (!foundStop && scannedTotal < maxScanTotal) {
+        while (!foundStop) {
+          // Pre-migration safety cap: when no target position, limit total scan
+          if (maxSeenPosition === 0 && scannedTotal >= maxScanFallback) break;
           const visWindow = await messageStore.getByThreadAfter(
             effectiveThreadId,
             scanAfter,

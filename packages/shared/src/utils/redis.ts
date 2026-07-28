@@ -62,13 +62,18 @@ export const SessionKeys = {
  * CAS on old value: SET newValue IF current === oldValue, preserving TTL.
  * Used by DeliveryCursorStore before SET_IF_GREATER_LUA to ensure
  * same-format comparison (Lua CAS is fail-closed on cross-format).
+ *
+ * Sol R6 P1-1: Uses PTTL (milliseconds) + PX to preserve sub-second TTLs.
+ * TTL (seconds) returns 0 for keys with <1s remaining, which would
+ * incorrectly permanentize opt-in expiring cursors (Iron Law 5 violation).
+ * PTTL returns -1 (persistent), -2 (missing), or positive ms remaining.
  */
 const RECONCILE_CURSOR_FORMAT_LUA = `
 local cur = redis.call('GET', KEYS[1])
 if cur == ARGV[1] then
-  local ttl = redis.call('TTL', KEYS[1])
-  if ttl > 0 then
-    redis.call('SET', KEYS[1], ARGV[2], 'EX', ttl)
+  local pttl = redis.call('PTTL', KEYS[1])
+  if pttl > 0 then
+    redis.call('SET', KEYS[1], ARGV[2], 'PX', pttl)
   else
     redis.call('SET', KEYS[1], ARGV[2])
   end

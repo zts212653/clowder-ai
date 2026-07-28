@@ -55,6 +55,10 @@ interface NoticeAttachedEvent extends FreshnessEventBase {
   unseenSenders: string[];
   noticeId: string;
   maxMessageId: string;
+  /** #1200 Sol R6 P2-2: v2 cursor for maxMessageId position.
+   *  New events always set this. Absent on legacy events — consumers
+   *  must fall back to canonicalizing maxMessageId or conservatively keep. */
+  maxCursor?: string;
 }
 
 interface NoticeImplicitAckedEvent extends FreshnessEventBase {

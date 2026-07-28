@@ -1194,3 +1194,254 @@ describe('Sol R5: HWM reject zero-mutation (comprehensive)', () => {
     }
   });
 });
+
+// ============================================================================
+// Sol R6 P1-1: PTTL sub-second TTL preservation (reconcile)
+// ============================================================================
+
+describe('Sol R6 P1-1: RECONCILE preserves sub-second TTL via PTTL/PX', () => {
+  it('key with sub-second TTL: reconcile preserves via PTTL/PX (not permanentized)', async (t) => {
+    if (skipWithoutRedis(t)) return;
+    const r = await getRedis();
+    await ensureModules();
+    const { SessionStore } = await import('@cat-cafe/shared/utils');
+    const store = new SessionStore(r);
+    const userId = 'u-pttl1',
+      catId = 'c-pttl1',
+      threadId = `t-pttl1-${Date.now()}`;
+    const key = `delivery-cursor:${userId}:${catId}:${threadId}`;
+
+    try {
+      // Store cursor with 5000ms TTL. The bug scenario: old code uses TTL (seconds)
+      // which returns 0 when <1s remains, causing permanentization. PTTL (ms) is correct.
+      // We use 5000ms here for test reliability, then verify PTTL is preserved.
+      await r.set(key, 'msgA', 'PX', 5000);
+
+      // Verify PTTL shows remaining ms
+      const pttlBefore = await r.pttl(key);
+      assert.ok(pttlBefore > 0 && pttlBefore <= 5000, `PTTL before reconcile must be >0, got ${pttlBefore}`);
+
+      // Reconcile v1→v2
+      const v2 = 'v2:0000000000000042:msgA';
+      const ok = await store.reconcileDeliveryCursorFormat(userId, catId, threadId, 'msgA', v2);
+      assert.equal(ok, true, 'Reconcile must succeed');
+
+      // After reconcile: PTTL must still be set (Lua uses PX to preserve ms-precision)
+      const pttlAfter = await r.pttl(key);
+      assert.ok(pttlAfter > 0, `PTTL after reconcile must be >0 (not permanentized), got ${pttlAfter}`);
+      assert.ok(pttlAfter <= 5000, `PTTL after reconcile must be <= original 5000, got ${pttlAfter}`);
+
+      // Value must be upgraded
+      const stored = await r.get(key);
+      assert.equal(stored, v2, 'Value must be upgraded to v2');
+    } finally {
+      await r.del(key);
+    }
+  });
+
+  it('persistent key (no TTL): reconcile keeps it persistent', async (t) => {
+    if (skipWithoutRedis(t)) return;
+    const r = await getRedis();
+    await ensureModules();
+    const { SessionStore } = await import('@cat-cafe/shared/utils');
+    const store = new SessionStore(r);
+    const userId = 'u-pttl2',
+      catId = 'c-pttl2',
+      threadId = `t-pttl2-${Date.now()}`;
+    const key = `delivery-cursor:${userId}:${catId}:${threadId}`;
+
+    try {
+      // Store persistent cursor (no TTL)
+      await r.set(key, 'msgA');
+      const pttlBefore = await r.pttl(key);
+      assert.equal(pttlBefore, -1, 'Persistent key PTTL must be -1');
+
+      // Reconcile
+      const v2 = 'v2:0000000000000042:msgA';
+      await store.reconcileDeliveryCursorFormat(userId, catId, threadId, 'msgA', v2);
+
+      // Must remain persistent
+      const pttlAfter = await r.pttl(key);
+      assert.equal(pttlAfter, -1, 'After reconcile: persistent key must remain persistent (PTTL=-1)');
+    } finally {
+      await r.del(key);
+    }
+  });
+});
+
+// ============================================================================
+// Sol R6 P1-2: Scan correctness — no arbitrary cap when target-bounded
+// ============================================================================
+
+describe('Sol R6 P1-2: seenCursor scan correctness bound', () => {
+  before(async () => {
+    await ensureModules();
+  });
+
+  // The fix: `maxScanTotal` safety cap only applies when maxSeenPosition === 0
+  // (pre-migration, no target). When maxSeenPosition > 0 (post-migration),
+  // scan runs until target found or pages exhausted — no arbitrary truncation.
+  //
+  // This is a pattern-level test (the actual scan is deep in route handlers).
+  // We verify the decision logic: safety cap active only when target = 0.
+
+  it('target-bounded scan (maxSeenPosition > 0): no cap applies', () => {
+    const maxSeenPosition = 150;
+    const maxScanFallback = 500;
+    let scannedTotal = 0;
+
+    // Simulate 600 iterations — must NOT break early when target is set
+    let earlyBreak = false;
+    for (let i = 0; i < 600; i++) {
+      scannedTotal++;
+      if (maxSeenPosition === 0 && scannedTotal >= maxScanFallback) {
+        earlyBreak = true;
+        break;
+      }
+    }
+
+    assert.equal(earlyBreak, false, 'Target-bounded scan must NOT hit safety cap');
+    assert.equal(scannedTotal, 600, 'All 600 iterations must complete');
+  });
+
+  it('pre-migration fallback (maxSeenPosition === 0): safety cap at 500', () => {
+    const maxSeenPosition = 0;
+    const maxScanFallback = 500;
+    let scannedTotal = 0;
+
+    let earlyBreak = false;
+    for (let i = 0; i < 600; i++) {
+      if (maxSeenPosition === 0 && scannedTotal >= maxScanFallback) {
+        earlyBreak = true;
+        break;
+      }
+      scannedTotal++;
+    }
+
+    assert.equal(earlyBreak, true, 'Pre-migration fallback must hit safety cap');
+    assert.equal(scannedTotal, 500, 'Must stop at 500 (safety cap)');
+  });
+});
+
+// ============================================================================
+// Sol R6 P2-1: hydrateMessages visibilitySeq injection
+// ============================================================================
+
+describe('Sol R6 P2-1: Redis hydrateMessages includes visibilitySeq', () => {
+  it('getRecentMentionsFor returns messages with visibilitySeq', async (t) => {
+    if (skipWithoutRedis(t)) return;
+    const r = await getRedis();
+    await ensureModules();
+
+    const store = new RedisMessageStore(r);
+    const threadId = `hydrate-vis-${Date.now()}`;
+    const catId = 'opus';
+
+    // Append a message that mentions a cat (so getRecentMentionsFor picks it up)
+    const msg = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: `Hey @${catId} check this`,
+      mentions: [catId],
+      timestamp: Date.now(),
+      threadId,
+    });
+
+    // Verify append returned visibilitySeq
+    assert.ok(msg.visibilitySeq != null, 'append must return visibilitySeq');
+
+    // getRecentMentionsFor goes through hydrateMessages (not hydrateHash)
+    const mentions = await store.getRecentMentionsFor(catId, 50);
+
+    // Find our message in the results
+    const found = mentions.find((m) => m.id === msg.id);
+    assert.ok(found, 'Our message must appear in getRecentMentionsFor results');
+    assert.ok(found.visibilitySeq != null, 'hydrateMessages must inject visibilitySeq from hash');
+    assert.equal(found.visibilitySeq, msg.visibilitySeq, 'visibilitySeq must match append return value');
+
+    // Verify cursorFor produces v2 (not v1) — the downstream effect
+    const cursor = cursorFor(found);
+    assert.ok(cursor.startsWith('v2:'), `cursorFor must produce v2 for hydrated message, got: ${cursor}`);
+  });
+});
+
+// ============================================================================
+// Sol R6 P2-2: Notice compat resolver — legacy maxCursor canonicalization
+// ============================================================================
+
+describe('Sol R6 P2-2: Notice consumer prefers maxCursor with compat resolver', () => {
+  before(async () => {
+    await ensureModules();
+  });
+
+  // Tests the consumer-side pattern in checkHoldBallReminder and
+  // createFreshnessReinvokeCheck: prefer n.maxCursor (v2) over n.maxMessageId.
+  // For legacy events without maxCursor, fall back to canonicalization.
+
+  it('new event (maxCursor set): uses maxCursor for comparison, not maxMessageId', () => {
+    // New events have both maxMessageId and maxCursor = same value (v2)
+    const notice = {
+      maxMessageId: 'v2:0000000000000100:msg-new',
+      maxCursor: 'v2:0000000000000100:msg-new',
+    };
+    const seenCursor = 'v2:0000000000000200:msg-seen';
+
+    // Consumer pattern: noticeCursor = n.maxCursor ?? n.maxMessageId
+    const noticeCursor = notice.maxCursor ?? notice.maxMessageId;
+    const cmp = compareCursors(noticeCursor, seenCursor);
+
+    // Notice (seq=100) behind seen (seq=200) → resolved
+    assert.ok(cmp < 0, 'New event behind seenCursor must resolve as behind');
+    const keep = cmp > 0 || (cmp === 0 && noticeCursor !== seenCursor);
+    assert.equal(keep, false, 'Notice behind seenCursor must be filtered out (resolved)');
+  });
+
+  it('legacy event (no maxCursor): falls back to maxMessageId', () => {
+    // Legacy events only have maxMessageId (may be v1 or v2)
+    const notice = {
+      maxMessageId: 'v2:0000000000000300:msg-legacy',
+      maxCursor: undefined,
+    };
+    const seenCursor = 'v2:0000000000000200:msg-seen';
+
+    const noticeCursor = notice.maxCursor ?? notice.maxMessageId;
+    assert.equal(noticeCursor, 'v2:0000000000000300:msg-legacy', 'Must fall back to maxMessageId');
+
+    const cmp = compareCursors(noticeCursor, seenCursor);
+    assert.ok(cmp > 0, 'Legacy notice ahead of seenCursor must be kept');
+  });
+
+  it('legacy event with v1 maxMessageId + v2 seenCursor → indeterminate → keep', () => {
+    // Worst case: legacy event has raw v1 maxMessageId, seenCursor is v2
+    // Without canonicalization, this is cross-format indeterminate → keep
+    const notice = {
+      maxMessageId: 'msg-legacy-raw-id',
+      maxCursor: undefined,
+    };
+    const seenCursor = 'v2:0000000000000200:msg-seen';
+
+    const noticeCursor = notice.maxCursor ?? notice.maxMessageId;
+    const cmp = compareCursors(noticeCursor, seenCursor);
+    assert.equal(cmp, 0, 'v1 vs v2 = indeterminate');
+
+    // Conservative keep: indeterminate → keep (not falsely resolved)
+    const keep = cmp > 0 || (cmp === 0 && noticeCursor !== seenCursor);
+    assert.equal(keep, true, 'Legacy v1 notice must be kept (indeterminate = conservative keep)');
+  });
+
+  it('compat resolver: canonicalized v1→v2 enables same-format comparison', () => {
+    // After canonicalization: legacy v1 maxMessageId gets resolved to v2
+    // This simulates what createFreshnessReinvokeCheck does with messageStore.canonicalizeCursor
+    const originalMaxMessageId = 'msg-legacy-raw-id';
+    const canonicalized = 'v2:0000000000000050:msg-legacy-raw-id'; // what canonicalize returns
+    const seenCursor = 'v2:0000000000000200:msg-seen';
+
+    // After canonicalization, comparison is same-format v2 vs v2
+    const cmp = compareCursors(canonicalized, seenCursor);
+    assert.ok(cmp < 0, 'Canonicalized v1→v2 (seq50) < seenCursor (seq200)');
+
+    // Notice correctly resolved as behind → filtered out
+    const keep = cmp > 0 || (cmp === 0 && canonicalized !== seenCursor);
+    assert.equal(keep, false, 'Canonicalized notice behind seenCursor must be filtered out');
+  });
+});

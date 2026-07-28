@@ -1683,6 +1683,10 @@ export class RedisMessageStore {
         ...(parsedSource ? { source: parsedSource } : {}),
         ...(d.mentionsUser === '1' ? { mentionsUser: true } : {}),
         ...(d.replyTo ? { replyTo: d.replyTo } : {}),
+        // #1200 Sol R6 P2-1: Inject visibilitySeq from hash (parity with hydrateHash).
+        // Without this, getRecentMentionsFor returns items without visibilitySeq,
+        // causing cursorFor to emit v1 while getter cursors are v2 → cross-format.
+        ...(d.visibilitySeq ? { visibilitySeq: parseInt(d.visibilitySeq, 10) } : {}),
       });
     }
     return messages;

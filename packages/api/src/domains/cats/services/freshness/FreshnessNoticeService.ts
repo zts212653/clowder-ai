@@ -144,6 +144,9 @@ export class FreshnessNoticeService {
     await this.stateStore.recordNoticeDelivered(invocationId, toolCallCount);
 
     // Record cold path event
+    // #1200 Sol R6 P2-2: store maxCursor (v2) alongside maxMessageId for
+    // forward-compat. ThreadUnseenChecker already emits v2 via cursorFor,
+    // so maxCursor = maxMessageId for new events. Legacy events lack maxCursor.
     await this.eventLog.append({
       kind: 'notice_attached',
       threadId,
@@ -154,6 +157,7 @@ export class FreshnessNoticeService {
       unseenSenders: unseen.senders,
       noticeId,
       maxMessageId: unseen.maxMessageId,
+      maxCursor: unseen.maxMessageId,
     });
 
     // AC-B5: OTel counter
@@ -199,8 +203,11 @@ export class FreshnessNoticeService {
     // (cmp === 0 AND strings differ = indeterminate, not truly resolved).
     if (currentSeenCursor) {
       unresolved = unresolved.filter((n) => {
-        const cmp = compareCursors(n.maxMessageId, currentSeenCursor);
-        return cmp > 0 || (cmp === 0 && n.maxMessageId !== currentSeenCursor);
+        // #1200 Sol R6 P2-2: prefer maxCursor (v2) over maxMessageId (may be v1).
+        // New events have maxCursor; legacy events fall back to maxMessageId.
+        const noticeCursor = n.maxCursor ?? n.maxMessageId;
+        const cmp = compareCursors(noticeCursor, currentSeenCursor);
+        return cmp > 0 || (cmp === 0 && noticeCursor !== currentSeenCursor);
       });
     }
 
