@@ -134,6 +134,12 @@ export class DeliveryCursorStore {
 
     if (this.sessionStore) {
       try {
+        // #1200 Sol R5: Pre-reconcile stored v1→v2 format before CAS.
+        // Lua CAS is fail-closed on cross-format (can't compare v1 vs v2).
+        // Reconcile atomically upgrades stored v1 to v2 (same position,
+        // different format), so the subsequent CAS sees same-format.
+        await this.preReconcile(userId, catId, threadId, 'delivery');
+
         // Atomic CAS in Redis — monotonic check + write in one round-trip
         const advanced = await this.sessionStore.setDeliveryCursor(userId, catId, threadId, effective);
         if (advanced) {
@@ -142,9 +148,6 @@ export class DeliveryCursorStore {
         } else {
           // CAS noop (Redis already has a higher value) — sync in-memory
           // to Redis's actual value so fallback reads don't regress.
-          // Inner try-catch: if this GET fails, we must NOT fall through
-          // to the outer catch which would write `effective` (a lower value)
-          // into memory. Instead, leave memory unchanged and return.
           try {
             const actual = await this.sessionStore.getDeliveryCursor(userId, catId, threadId);
             if (actual) this.upsertMap(this.cursors, key, actual);
@@ -218,6 +221,8 @@ export class DeliveryCursorStore {
 
     if (this.sessionStore) {
       try {
+        // #1200 Sol R5: Pre-reconcile stored v1→v2 before CAS (same pattern as ackCursor)
+        await this.preReconcile(userId, catId, threadId, 'mention');
         // Atomic CAS in Redis — monotonic check + write in one round-trip
         const advanced = await this.sessionStore.setMentionAckCursor(userId, catId, threadId, effective);
         if (advanced) {
@@ -300,6 +305,8 @@ export class DeliveryCursorStore {
 
     if (this.sessionStore) {
       try {
+        // #1200 Sol R5: Pre-reconcile stored v1→v2 before CAS (same pattern as ackCursor)
+        await this.preReconcile(userId, catId, threadId, 'seen');
         const advanced = await this.sessionStore.setSeenCursor(userId, catId, threadId, effective);
         if (advanced) {
           this.upsertMap(this.seenCursors, key, effective);
@@ -324,6 +331,53 @@ export class DeliveryCursorStore {
       if (cmp <= 0) return;
     }
     this.upsertMap(this.seenCursors, key, effective);
+  }
+
+  // ---- Pre-reconciliation (#1200 Sol R5) ----
+
+  /**
+   * Pre-reconcile stored v1 cursor to v2 format before CAS.
+   *
+   * Lua CAS is fail-closed on cross-format (stored v1 vs incoming v2 returns 0).
+   * This method reads the stored cursor, canonicalizes v1→v2 via MessageStore
+   * lookup, and atomically upgrades in Redis using RECONCILE_CURSOR_FORMAT_LUA.
+   * After reconciliation, the subsequent CAS sees same-format (v2 vs v2).
+   *
+   * Best-effort: failure here means CAS will fail-closed, which is safe
+   * (no incorrect advancement) but blocks cursor progress until migration.
+   */
+  private async preReconcile(
+    userId: string,
+    catId: CatId,
+    threadId: string,
+    namespace: 'delivery' | 'mention' | 'seen',
+  ): Promise<void> {
+    if (!this.sessionStore || !this.canonicalizer) return;
+    try {
+      let stored: string | null = null;
+      if (namespace === 'delivery') {
+        stored = await this.sessionStore.getDeliveryCursor(userId, catId, threadId);
+      } else if (namespace === 'mention') {
+        stored = await this.sessionStore.getMentionAckCursor(userId, catId, threadId);
+      } else {
+        stored = await this.sessionStore.getSeenCursor(userId, catId, threadId);
+      }
+      if (!stored || stored.startsWith('v2:')) return;
+
+      const canonical = await this.canonicalize(stored, threadId);
+      if (canonical === stored) return; // Couldn't resolve or already same
+
+      if (namespace === 'delivery') {
+        await this.sessionStore.reconcileDeliveryCursorFormat(userId, catId, threadId, stored, canonical);
+      } else if (namespace === 'mention') {
+        await this.sessionStore.reconcileMentionAckCursorFormat(userId, catId, threadId, stored, canonical);
+      } else {
+        await this.sessionStore.reconcileSeenCursorFormat(userId, catId, threadId, stored, canonical);
+      }
+    } catch (err) {
+      // Best-effort: reconciliation failure → CAS handles cross-format via fail-closed
+      log.debug({ err, namespace }, 'preReconcile failed, CAS will fail-closed on cross-format');
+    }
   }
 
   // ---- Helpers ----

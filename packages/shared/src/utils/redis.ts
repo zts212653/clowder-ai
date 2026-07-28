@@ -57,6 +57,27 @@ export const SessionKeys = {
 } as const;
 
 /**
+ * #1200 Sol R5: Atomic cursor format reconciliation.
+ * Upgrades stored v1 cursor to v2 WITHOUT advancing position.
+ * CAS on old value: SET newValue IF current === oldValue, preserving TTL.
+ * Used by DeliveryCursorStore before SET_IF_GREATER_LUA to ensure
+ * same-format comparison (Lua CAS is fail-closed on cross-format).
+ */
+const RECONCILE_CURSOR_FORMAT_LUA = `
+local cur = redis.call('GET', KEYS[1])
+if cur == ARGV[1] then
+  local ttl = redis.call('TTL', KEYS[1])
+  if ttl > 0 then
+    redis.call('SET', KEYS[1], ARGV[2], 'EX', ttl)
+  else
+    redis.call('SET', KEYS[1], ARGV[2])
+  end
+  return 1
+end
+return 0
+`;
+
+/**
  * Lua script: atomic compare-and-set for monotonic cursor advancement.
  * Compares in the visibility-seq domain (NOT raw message ID or lex order).
  *
@@ -77,7 +98,7 @@ export const SessionKeys = {
  * stored cursor of B (created later, lower visibilitySeq). Only (seq, id)
  * pair comparison is correct. Lua resolves v1 cursors via message hash
  * HGET visibilitySeq; v2 cursors carry seq in the token. Unresolvable v1
- * (pruned message) falls back to lex comparison (best-effort).
+ * (pruned message) → fail-closed (Sol R5: no ID lex fallback).
  */
 const SET_IF_GREATER_LUA = `
 local ttl = tonumber(ARGV[2])
@@ -117,16 +138,15 @@ if cur then
     if ttl == 0 then redis.call('PERSIST', KEYS[1]) end
     return 0
   elseif not curSeq and newSeq then
-    -- Stored v1 unresolvable (message hash pruned), incoming v2 resolvable.
-    -- Fallback to message ID lex comparison (same strategy as both-unresolvable).
-    -- Conservative: only advances when incoming message ID is lex-later than
-    -- stored raw ID. Handles Sol R4 P1-1 counterexample (stored=msgB > incoming
-    -- v2's msgA → reject). DeliveryCursorStore canonicalization + getters
-    -- handle the common case where stored message hash still exists.
-    if newId <= curId then
-      if ttl == 0 then redis.call('PERSIST', KEYS[1]) end
-      return 0
-    end
+    -- Stored v1 unresolvable (message hash fully pruned), incoming v2 resolvable.
+    -- FAIL-CLOSED: cannot determine stored position → cannot prove advancement.
+    -- ID lex comparison is WRONG here: late-delivered Q has old ID but high seq,
+    -- so ID order ≠ visibility order (#1200 core disease).
+    -- App layer (DeliveryCursorStore) pre-reconciles stored v1→v2 via
+    -- RECONCILE_CURSOR_FORMAT before reaching this branch. Fully-pruned is
+    -- the residual case where no resolver can help → freeze until migration.
+    if ttl == 0 then redis.call('PERSIST', KEYS[1]) end
+    return 0
   else
     -- Both unresolvable: lex comparison fallback (best-effort for pruned v1-vs-v1)
     if ARGV[1] <= cur then
@@ -279,6 +299,49 @@ export class SessionStore {
   /** Delete a seen cursor (F254) */
   async deleteSeenCursor(userId: string, catId: string, threadId: string): Promise<number> {
     return this.redis.del(SessionKeys.seenCursor(userId, catId, threadId));
+  }
+
+  // ---- Cursor Format Reconciliation (#1200 Sol R5) ----
+  // Atomically upgrades stored v1 cursor to v2 format without advancing position.
+  // Used by DeliveryCursorStore before CAS to ensure same-format comparison.
+
+  async reconcileDeliveryCursorFormat(
+    userId: string,
+    catId: string,
+    threadId: string,
+    oldValue: string,
+    newValue: string,
+  ): Promise<boolean> {
+    return this.reconcileFormat(SessionKeys.deliveryCursor(userId, catId, threadId), oldValue, newValue);
+  }
+
+  async reconcileMentionAckCursorFormat(
+    userId: string,
+    catId: string,
+    threadId: string,
+    oldValue: string,
+    newValue: string,
+  ): Promise<boolean> {
+    return this.reconcileFormat(SessionKeys.mentionAck(userId, catId, threadId), oldValue, newValue);
+  }
+
+  async reconcileSeenCursorFormat(
+    userId: string,
+    catId: string,
+    threadId: string,
+    oldValue: string,
+    newValue: string,
+  ): Promise<boolean> {
+    return this.reconcileFormat(SessionKeys.seenCursor(userId, catId, threadId), oldValue, newValue);
+  }
+
+  /**
+   * Atomic format upgrade: SET newValue IF current === oldValue.
+   * Preserves TTL. No position advancement — only format change (v1→v2).
+   */
+  private async reconcileFormat(key: string, oldValue: string, newValue: string): Promise<boolean> {
+    const result = (await this.redis.eval(RECONCILE_CURSOR_FORMAT_LUA, 1, key, oldValue, newValue)) as number;
+    return result === 1;
   }
 
   async getCatState(catId: string): Promise<Record<string, unknown> | null> {

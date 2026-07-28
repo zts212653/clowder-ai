@@ -2788,7 +2788,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const isMentionAcked = (item: StoredMessage): boolean => {
       if (!lastAckId) return false;
       const ic = cursorFor(item);
-      return compareCursors(ic, lastAckId) <= 0;
+      // #1200 Sol R5 P1-3: Distinguish true equality from cross-format indeterminate.
+      // compareCursors returns 0 for BOTH "truly equal" AND "cross-format indeterminate".
+      // `<= 0` treats indeterminate as "acked" — wrong (drops pending mentions).
+      // Fix: `cmp < 0 || (cmp === 0 && ic === lastAckId)` — only true string equality counts.
+      const cmp = compareCursors(ic, lastAckId);
+      return cmp < 0 || (cmp === 0 && ic === lastAckId);
     };
     const payload = {
       mentions: mentions.map((item) => {
@@ -2893,9 +2898,15 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       ? await messageStore.canonicalizeCursor(upToMessageId, record.threadId)
       : upToMessageId;
     const currentCursor = await deliveryCursorStore.getMentionAckCursor(record.userId, catId, record.threadId);
-    // #1200 P2-3: use pair-domain comparison (both sides canonicalized)
-    if (currentCursor && compareCursors(canonicalCursor, currentCursor) <= 0) {
-      return { status: 'noop', reason: 'already acknowledged' };
+    // #1200 Sol R5 P1-3: use pair-domain comparison with indeterminate awareness.
+    // compareCursors returns 0 for both "truly equal" and "cross-format indeterminate".
+    // `<= 0` treats indeterminate as "already acked" — wrong (blocks legitimate ack).
+    // Fix: noop only on strict less-than OR true string equality.
+    if (currentCursor) {
+      const cmp = compareCursors(canonicalCursor, currentCursor);
+      if (cmp < 0 || (cmp === 0 && canonicalCursor === currentCursor)) {
+        return { status: 'noop', reason: 'already acknowledged' };
+      }
     }
 
     // Validation 4: window — upToMessageId must be within current pending window
@@ -3450,15 +3461,26 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           return true;
         };
 
-        // Chunked visibility scan: walk in chunks to handle gaps of
-        // irrelevant messages (self, deleted, briefing) larger than one page.
-        // Cap total scan to avoid unbounded iteration.
+        // #1200 Sol R5 P1-2: Target-bounded visibility scan.
+        // Old approach (maxChunks=3) truncates when self-message gaps exceed
+        // 3 × chunkSize (e.g. 151 self messages at chunkSize=50 → never reaches
+        // the cat's actual read position). Fix: scan until we pass the cat's
+        // maximum read position (maxSeenPosition), or hit an unseen message,
+        // with a safety cap on total messages scanned for pre-migration data.
+        const maxSeenPosition = filtered.reduce((max, m) => {
+          const seq = m.visibilitySeq;
+          return seq != null && seq > max ? seq : max;
+        }, 0);
+
         let advanceTo: { id: string; visibilitySeq?: number } | null = null;
         let scanAfter: string | undefined = currentSeen ?? undefined;
-        const maxChunks = 3;
         let foundStop = false;
+        // Safety cap: limit total messages scanned (not chunk count).
+        // Pre-migration messages without visibilitySeq fall through to this cap.
+        const maxScanTotal = 500;
+        let scannedTotal = 0;
 
-        for (let chunk = 0; chunk < maxChunks && !foundStop; chunk++) {
+        while (!foundStop && scannedTotal < maxScanTotal) {
           const visWindow = await messageStore.getByThreadAfter(
             effectiveThreadId,
             scanAfter,
@@ -3466,6 +3488,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             principalUserId,
           );
           if (visWindow.length === 0) break;
+          scannedTotal += visWindow.length;
 
           for (const msg of visWindow) {
             if (!isFreshnessRelevant(msg)) {
@@ -3484,9 +3507,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           }
 
           if (!foundStop && visWindow.length > 0) {
-            // All messages in chunk were seen or irrelevant — continue scanning
             const lastMsg = visWindow[visWindow.length - 1]!;
             scanAfter = cursorFor(lastMsg);
+            // Target-bounded: stop scanning once we've passed the cat's
+            // maximum read position — no more page messages to match beyond here.
+            const lastSeq = lastMsg.visibilitySeq;
+            if (maxSeenPosition > 0 && lastSeq != null && lastSeq >= maxSeenPosition) {
+              break;
+            }
           }
         }
 

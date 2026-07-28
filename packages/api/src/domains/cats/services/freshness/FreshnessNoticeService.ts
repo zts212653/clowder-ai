@@ -192,12 +192,16 @@ export class FreshnessNoticeService {
     // P1-2 fix: filter out notices that the cat has already read past
     // (seenCursor advanced beyond notice.maxMessageId = implicitly resolved).
     //
-    // #1200 P1-4: use compareCursors for cross-format safety.
-    // Raw `>` fails when maxMessageId is v1 and seenCursor is v2 (or vice versa).
-    // compareCursors handles same-format correctly; cross-format returns 0
-    // which `> 0` rejects (fail-closed: keep the notice if indeterminate).
+    // #1200 Sol R5 P1-3: cross-format indeterminate → conservatively KEEP notice.
+    // compareCursors returns 0 for both "truly equal" (same string) and
+    // "cross-format indeterminate" (v1 vs v2). `> 0` alone removes
+    // indeterminate notices — wrong direction. Fix: keep if cmp > 0 OR
+    // (cmp === 0 AND strings differ = indeterminate, not truly resolved).
     if (currentSeenCursor) {
-      unresolved = unresolved.filter((n) => compareCursors(n.maxMessageId, currentSeenCursor) > 0);
+      unresolved = unresolved.filter((n) => {
+        const cmp = compareCursors(n.maxMessageId, currentSeenCursor);
+        return cmp > 0 || (cmp === 0 && n.maxMessageId !== currentSeenCursor);
+      });
     }
 
     if (unresolved.length === 0) return null;

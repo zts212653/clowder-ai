@@ -110,13 +110,18 @@ export function createFreshnessReinvokeCheck(deps: FreshnessReinvokeCheckDeps): 
       // 3b. Filter out notices the cat has already read past (GPT52 R2 P1).
       // Matches B2 FreshnessNoticeService pattern: notices with
       // maxMessageId <= seenCursor are implicitly resolved (cat advanced past them).
-      // #1200 P1-4: use compareCursors for cross-format safety.
-      // Raw `>` fails when maxMessageId is v1 and seenCursor is v2 (or vice versa).
-      // compareCursors handles same-format correctly; cross-format returns 0
-      // which `> 0` rejects (fail-closed: keep the notice if indeterminate).
+      // #1200 Sol R5 P1-3: cross-format indeterminate → conservatively KEEP notice.
+      // compareCursors returns 0 for both "truly equal" (same string) and
+      // "cross-format indeterminate" (v1 vs v2, can't compare). `> 0` alone
+      // incorrectly removes indeterminate notices. Fix: keep if cmp > 0 OR
+      // (cmp === 0 AND strings differ = indeterminate, not truly resolved).
+      // True equality (same string) = notice maxMessageId matches seenCursor exactly → resolved.
       const preFilterNoticeCount = unresolvedNotices.length;
       if (seenCursor) {
-        unresolvedNotices = unresolvedNotices.filter((n) => compareCursors(n.maxMessageId, seenCursor) > 0);
+        unresolvedNotices = unresolvedNotices.filter((n) => {
+          const cmp = compareCursors(n.maxMessageId, seenCursor);
+          return cmp > 0 || (cmp === 0 && n.maxMessageId !== seenCursor);
+        });
       }
       // Count of notices implicitly acked by cursor advancement (removed by filter).
       // Used for unified ack counting regardless of subsequent reinvoke/skip decision

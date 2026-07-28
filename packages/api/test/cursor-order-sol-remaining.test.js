@@ -1,5 +1,5 @@
 /**
- * Cursor Order — Tests for Sol R1-R3 findings
+ * Cursor Order — Tests for Sol R1-R5 findings
  *
  * RED tests BEFORE fixes (TDD discipline):
  *   P2-4: v1→v2 CAS cross-format regression (SET_IF_GREATER_LUA)
@@ -9,6 +9,13 @@
  *   P1-3: Dormant TTL migration (integration — Redis-only)
  *   Lua hwm guard: NaN/fractional hwm blocks mutations
  *   compareCursors: pair-domain + cross-format indeterminate (#1200 P2-3)
+ *
+ * Sol R5 additions:
+ *   Lua CAS fail-closed on cross-format (no ID lex fallback)
+ *   Reconcile cursor format (v1→v2 atomic upgrade)
+ *   Late-delivery CAS: Q(old ID, high seq) vs B(new ID, low seq)
+ *   Notice filter indeterminate handling (cross-format conservatively keeps)
+ *   Comprehensive HWM zero-mutation (hash/ZSET/timeline/message-state)
  *
  * Architecture ref: docs/architecture/1200-cursor-order-analysis.md §8.8
  */
@@ -128,7 +135,11 @@ describe('P2-4: SET_IF_GREATER cross-format CAS regression', () => {
     await r.del(`delivery-cursor:${userId}:${catId}:${threadId}`);
   });
 
-  it('stored v1 earlier + incoming v2 with later ID → MUST advance (ID lex fallback)', async (t) => {
+  // Sol R5: fail-closed on cross-format (no ID lex fallback).
+  // Previously this test expected advance via ID lex comparison. But late-delivered
+  // Q has old ID + high seq — ID lex would wrongly place it behind B. Pure fail-closed
+  // forces app-layer pre-reconciliation before CAS.
+  it('stored v1 unresolvable + incoming v2 → MUST NOT advance (fail-closed)', async (t) => {
     if (skipWithoutRedis(t)) return;
     const r = await getRedis();
     await ensureModules();
@@ -136,19 +147,18 @@ describe('P2-4: SET_IF_GREATER cross-format CAS regression', () => {
     const { SessionStore } = await import('@cat-cafe/shared/utils');
     const store = new SessionStore(r);
 
-    // When stored v1 message hash is pruned, Lua falls back to ID lex comparison.
-    // stored raw ID 'msgA' < incoming embedded ID 'msgB' → accept (advance).
     const userId = 'u-cas3',
       catId = 'c-cas3',
       threadId = 't-cas3-' + Date.now();
     await r.set(`delivery-cursor:${userId}:${catId}:${threadId}`, 'msgA');
 
     const advanced = await store.setDeliveryCursor(userId, catId, threadId, 'v2:0000000000999999:msgB');
-    assert.equal(advanced, true, 'v1→v2 with later ID: ID lex fallback must advance');
+    // R5: fail-closed — can't determine stored position without message hash
+    assert.equal(advanced, false, 'Stored unresolvable v1 + incoming v2 → fail-closed (no ID lex fallback)');
 
-    // Verify stored value was updated to v2
+    // Stored cursor must remain unchanged
     const stored = await store.getDeliveryCursor(userId, catId, threadId);
-    assert.equal(stored, 'v2:0000000000999999:msgB', 'Stored must be updated to v2 cursor');
+    assert.equal(stored, 'msgA', 'Stored must remain at v1 msgA (fail-closed)');
 
     await r.del(`delivery-cursor:${userId}:${catId}:${threadId}`);
   });
@@ -694,5 +704,493 @@ describe('compareCursors: pair-domain comparison', () => {
     const incoming = 'msgZ';
     // Cross-format returns 0, so compareCursors(incoming, stored) <= 0 → no advance
     assert.equal(compareCursors(incoming, stored), 0, 'v1 incoming vs v2 stored = indeterminate');
+  });
+});
+
+// ============================================================================
+// Sol R5: Late-delivery CAS — Q(old ID, high seq) vs B(new ID, low seq)
+// ============================================================================
+
+describe('Sol R5: Late-delivery CAS — visibility order ≠ ID order', () => {
+  // Core #1200 disease: Q was created early (old ID) but delivered late (high seq).
+  // B was created later (new ID) but delivered first (low seq).
+  // Same-format v2 comparison uses (seq, id) pair — seq wins over ID.
+
+  it('delivery: Q(old ID, seq200) advances past B(new ID, seq100)', async (t) => {
+    if (skipWithoutRedis(t)) return;
+    const r = await getRedis();
+    await ensureModules();
+
+    const { SessionStore } = await import('@cat-cafe/shared/utils');
+    const store = new SessionStore(r);
+    const userId = 'u-ld1',
+      catId = 'c-ld1',
+      threadId = `t-ld1-${Date.now()}`;
+
+    // B: new ID, low seq (delivered first)
+    const cursorB = 'v2:0000000000000100:msg-2025-01-01T00:00:01-001';
+    await r.set(`delivery-cursor:${userId}:${catId}:${threadId}`, cursorB);
+
+    // Q: old ID, high seq (late delivery)
+    const cursorQ = 'v2:0000000000000200:msg-2025-01-01T00:00:00-001';
+    const advanced = await store.setDeliveryCursor(userId, catId, threadId, cursorQ);
+    assert.equal(advanced, true, 'Late-delivered Q (seq200) must advance past B (seq100)');
+
+    const stored = await store.getDeliveryCursor(userId, catId, threadId);
+    assert.equal(stored, cursorQ, 'Stored must be Q cursor');
+
+    await r.del(`delivery-cursor:${userId}:${catId}:${threadId}`);
+  });
+
+  it('delivery: B(new ID, seq100) must NOT regress past Q(old ID, seq200)', async (t) => {
+    if (skipWithoutRedis(t)) return;
+    const r = await getRedis();
+    await ensureModules();
+
+    const { SessionStore } = await import('@cat-cafe/shared/utils');
+    const store = new SessionStore(r);
+    const userId = 'u-ld2',
+      catId = 'c-ld2',
+      threadId = `t-ld2-${Date.now()}`;
+
+    // Q already stored at seq 200
+    const cursorQ = 'v2:0000000000000200:msg-2025-01-01T00:00:00-001';
+    await r.set(`delivery-cursor:${userId}:${catId}:${threadId}`, cursorQ);
+
+    // B tries to advance but has lower seq
+    const cursorB = 'v2:0000000000000100:msg-2025-01-01T00:00:01-001';
+    const advanced = await store.setDeliveryCursor(userId, catId, threadId, cursorB);
+    assert.equal(advanced, false, 'B (seq100) must NOT regress past Q (seq200)');
+
+    await r.del(`delivery-cursor:${userId}:${catId}:${threadId}`);
+  });
+
+  it('mention-ack: late-delivery Q advances past B', async (t) => {
+    if (skipWithoutRedis(t)) return;
+    const r = await getRedis();
+    await ensureModules();
+    const { SessionStore } = await import('@cat-cafe/shared/utils');
+    const store = new SessionStore(r);
+    const userId = 'u-ld3',
+      catId = 'c-ld3',
+      threadId = `t-ld3-${Date.now()}`;
+
+    const cursorB = 'v2:0000000000000100:msg-B';
+    await r.set(`mention-ack:${userId}:${catId}:${threadId}`, cursorB);
+    const cursorQ = 'v2:0000000000000200:msg-Q-old-id';
+    const advanced = await store.setMentionAckCursor(userId, catId, threadId, cursorQ);
+    assert.equal(advanced, true, 'Mention-ack: Q(seq200) must advance past B(seq100)');
+    await r.del(`mention-ack:${userId}:${catId}:${threadId}`);
+  });
+
+  it('seen-cursor: late-delivery Q advances past B', async (t) => {
+    if (skipWithoutRedis(t)) return;
+    const r = await getRedis();
+    await ensureModules();
+    const { SessionStore } = await import('@cat-cafe/shared/utils');
+    const store = new SessionStore(r);
+    const userId = 'u-ld4',
+      catId = 'c-ld4',
+      threadId = `t-ld4-${Date.now()}`;
+
+    const cursorB = 'v2:0000000000000100:msg-B';
+    await r.set(`seen-cursor:${userId}:${catId}:${threadId}`, cursorB);
+    const cursorQ = 'v2:0000000000000200:msg-Q-old-id';
+    const advanced = await store.setSeenCursor(userId, catId, threadId, cursorQ);
+    assert.equal(advanced, true, 'Seen-cursor: Q(seq200) must advance past B(seq100)');
+    await r.del(`seen-cursor:${userId}:${catId}:${threadId}`);
+  });
+});
+
+// ============================================================================
+// Sol R5: Reconcile cursor format — atomic v1→v2 upgrade
+// ============================================================================
+
+describe('Sol R5: RECONCILE_CURSOR_FORMAT atomicity', () => {
+  it('reconcile upgrades stored v1 to v2 when CAS matches', async (t) => {
+    if (skipWithoutRedis(t)) return;
+    const r = await getRedis();
+    await ensureModules();
+    const { SessionStore } = await import('@cat-cafe/shared/utils');
+    const store = new SessionStore(r);
+    const userId = 'u-rc1',
+      catId = 'c-rc1',
+      threadId = `t-rc1-${Date.now()}`;
+
+    // Store v1 cursor
+    await r.set(`delivery-cursor:${userId}:${catId}:${threadId}`, 'msgA');
+    // Reconcile v1→v2 (same position, different format)
+    const v2 = 'v2:0000000000000042:msgA';
+    const ok = await store.reconcileDeliveryCursorFormat(userId, catId, threadId, 'msgA', v2);
+    assert.equal(ok, true, 'Reconcile must succeed when stored matches oldValue');
+    const stored = await store.getDeliveryCursor(userId, catId, threadId);
+    assert.equal(stored, v2, 'Stored must be upgraded to v2');
+
+    await r.del(`delivery-cursor:${userId}:${catId}:${threadId}`);
+  });
+
+  it('reconcile rejects when stored has already changed (CAS miss)', async (t) => {
+    if (skipWithoutRedis(t)) return;
+    const r = await getRedis();
+    await ensureModules();
+    const { SessionStore } = await import('@cat-cafe/shared/utils');
+    const store = new SessionStore(r);
+    const userId = 'u-rc2',
+      catId = 'c-rc2',
+      threadId = `t-rc2-${Date.now()}`;
+
+    // Store a different value than what reconcile expects
+    await r.set(`delivery-cursor:${userId}:${catId}:${threadId}`, 'msgB');
+    const ok = await store.reconcileDeliveryCursorFormat(userId, catId, threadId, 'msgA', 'v2:0000000000000042:msgA');
+    assert.equal(ok, false, 'Reconcile must reject when stored ≠ oldValue (concurrent change)');
+    const stored = await store.getDeliveryCursor(userId, catId, threadId);
+    assert.equal(stored, 'msgB', 'Stored must remain unchanged');
+
+    await r.del(`delivery-cursor:${userId}:${catId}:${threadId}`);
+  });
+
+  it('reconcile preserves TTL on expiring cursors', async (t) => {
+    if (skipWithoutRedis(t)) return;
+    const r = await getRedis();
+    await ensureModules();
+    const { SessionStore } = await import('@cat-cafe/shared/utils');
+    const store = new SessionStore(r);
+    const userId = 'u-rc3',
+      catId = 'c-rc3',
+      threadId = `t-rc3-${Date.now()}`;
+
+    // Store v1 with TTL
+    await r.set(`delivery-cursor:${userId}:${catId}:${threadId}`, 'msgA', 'EX', 3600);
+    const ttlBefore = await r.ttl(`delivery-cursor:${userId}:${catId}:${threadId}`);
+    assert.ok(ttlBefore > 3500, `TTL before reconcile should be ~3600, got ${ttlBefore}`);
+
+    const v2 = 'v2:0000000000000042:msgA';
+    await store.reconcileDeliveryCursorFormat(userId, catId, threadId, 'msgA', v2);
+
+    const ttlAfter = await r.ttl(`delivery-cursor:${userId}:${catId}:${threadId}`);
+    assert.ok(ttlAfter > 3500, `TTL after reconcile should be preserved (~3600), got ${ttlAfter}`);
+
+    await r.del(`delivery-cursor:${userId}:${catId}:${threadId}`);
+  });
+
+  it('reconcile + CAS flow: pre-reconcile v1→v2 then CAS succeeds', async (t) => {
+    if (skipWithoutRedis(t)) return;
+    const r = await getRedis();
+    await ensureModules();
+    const { SessionStore } = await import('@cat-cafe/shared/utils');
+    const store = new SessionStore(r);
+    const userId = 'u-rc4',
+      catId = 'c-rc4',
+      threadId = `t-rc4-${Date.now()}`;
+
+    // Simulate: stored v1 'msgA' with message hash that has visibilitySeq=42
+    await r.set(`delivery-cursor:${userId}:${catId}:${threadId}`, 'msgA');
+    // Create message hash so Lua can resolve v1
+    await r.hset(`msg:msgA`, 'visibilitySeq', '42');
+
+    // Step 1: Reconcile v1→v2 (what DeliveryCursorStore.preReconcile does)
+    const v2Old = 'v2:0000000000000042:msgA';
+    const ok = await store.reconcileDeliveryCursorFormat(userId, catId, threadId, 'msgA', v2Old);
+    assert.equal(ok, true, 'Reconcile must succeed');
+
+    // Step 2: CAS with v2 incoming (higher seq) — now same-format v2 vs v2
+    const v2New = 'v2:0000000000000100:msgB';
+    const advanced = await store.setDeliveryCursor(userId, catId, threadId, v2New);
+    assert.equal(advanced, true, 'After reconcile, CAS v2→v2 with higher seq must advance');
+
+    const stored = await store.getDeliveryCursor(userId, catId, threadId);
+    assert.equal(stored, v2New, 'Stored must be updated to new v2 cursor');
+
+    await r.del(`delivery-cursor:${userId}:${catId}:${threadId}`);
+    await r.del(`msg:msgA`);
+  });
+
+  it('mention-ack reconcile works across namespaces', async (t) => {
+    if (skipWithoutRedis(t)) return;
+    const r = await getRedis();
+    await ensureModules();
+    const { SessionStore } = await import('@cat-cafe/shared/utils');
+    const store = new SessionStore(r);
+    const userId = 'u-rc5',
+      catId = 'c-rc5',
+      threadId = `t-rc5-${Date.now()}`;
+
+    await r.set(`mention-ack:${userId}:${catId}:${threadId}`, 'msgX');
+    const v2 = 'v2:0000000000000077:msgX';
+    const ok = await store.reconcileMentionAckCursorFormat(userId, catId, threadId, 'msgX', v2);
+    assert.equal(ok, true, 'Mention-ack reconcile must succeed');
+    const stored = await store.getMentionAckCursor(userId, catId, threadId);
+    assert.equal(stored, v2, 'Mention-ack must be upgraded to v2');
+
+    await r.del(`mention-ack:${userId}:${catId}:${threadId}`);
+  });
+
+  it('seen-cursor reconcile works across namespaces', async (t) => {
+    if (skipWithoutRedis(t)) return;
+    const r = await getRedis();
+    await ensureModules();
+    const { SessionStore } = await import('@cat-cafe/shared/utils');
+    const store = new SessionStore(r);
+    const userId = 'u-rc6',
+      catId = 'c-rc6',
+      threadId = `t-rc6-${Date.now()}`;
+
+    await r.set(`seen-cursor:${userId}:${catId}:${threadId}`, 'msgY');
+    const v2 = 'v2:0000000000000099:msgY';
+    const ok = await store.reconcileSeenCursorFormat(userId, catId, threadId, 'msgY', v2);
+    assert.equal(ok, true, 'Seen-cursor reconcile must succeed');
+    const stored = await store.getSeenCursor(userId, catId, threadId);
+    assert.equal(stored, v2, 'Seen-cursor must be upgraded to v2');
+
+    await r.del(`seen-cursor:${userId}:${catId}:${threadId}`);
+  });
+});
+
+// ============================================================================
+// Sol R5: Notice filter indeterminate — cross-format conservatively KEEPS
+// ============================================================================
+
+describe('Sol R5: Notice filter cross-format indeterminate handling', () => {
+  before(async () => {
+    await ensureModules();
+  });
+
+  // This tests the consumer-side pattern:
+  //   cmp > 0 || (cmp === 0 && n.maxMessageId !== seenCursor)
+  // which keeps notices when comparison is indeterminate (cross-format).
+
+  it('v1 maxMessageId + v2 seenCursor → notice must be KEPT (indeterminate)', () => {
+    const maxMessageId = 'msg-legacy-raw-id'; // v1
+    const seenCursor = 'v2:0000000000000100:msg-modern'; // v2
+
+    // compareCursors returns 0 for cross-format
+    const cmp = compareCursors(maxMessageId, seenCursor);
+    assert.equal(cmp, 0, 'Cross-format comparison must return 0 (indeterminate)');
+
+    // Old filter `> 0` would REMOVE this notice — WRONG
+    const oldFilter = cmp > 0;
+    assert.equal(oldFilter, false, 'Old filter incorrectly removes indeterminate notice');
+
+    // New filter keeps it because strings differ (not truly equal)
+    const newFilter = cmp > 0 || (cmp === 0 && maxMessageId !== seenCursor);
+    assert.equal(newFilter, true, 'New filter must KEEP notice (indeterminate = unresolved)');
+  });
+
+  it('v2 maxMessageId + v1 seenCursor → notice must be KEPT (indeterminate)', () => {
+    const maxMessageId = 'v2:0000000000000200:msg-modern';
+    const seenCursor = 'msg-legacy-raw-id';
+
+    const cmp = compareCursors(maxMessageId, seenCursor);
+    assert.equal(cmp, 0, 'Cross-format v2 vs v1 = indeterminate');
+
+    const newFilter = cmp > 0 || (cmp === 0 && maxMessageId !== seenCursor);
+    assert.equal(newFilter, true, 'Reverse cross-format must also KEEP notice');
+  });
+
+  it('truly equal maxMessageId + seenCursor → notice resolved (removed)', () => {
+    const cursor = 'v2:0000000000000100:msg-same';
+
+    const cmp = compareCursors(cursor, cursor);
+    assert.equal(cmp, 0, 'Same string comparison = 0');
+
+    // Strings are identical → truly equal, notice is resolved
+    // biome-ignore lint/suspicious/noSelfCompare: intentional — testing same-string identity semantics
+    const newFilter = cmp > 0 || (cmp === 0 && cursor !== cursor);
+    assert.equal(newFilter, false, 'Truly equal = notice resolved, must be REMOVED');
+  });
+
+  it('maxMessageId ahead of seenCursor → notice kept (unresolved)', () => {
+    const maxMessageId = 'v2:0000000000000200:msg-ahead';
+    const seenCursor = 'v2:0000000000000100:msg-behind';
+
+    const cmp = compareCursors(maxMessageId, seenCursor);
+    assert.ok(cmp > 0, 'Same-format v2: ahead must be > 0');
+
+    const newFilter = cmp > 0 || (cmp === 0 && maxMessageId !== seenCursor);
+    assert.equal(newFilter, true, 'Ahead notice must be KEPT (unresolved)');
+  });
+
+  it('maxMessageId behind seenCursor → notice resolved (removed)', () => {
+    const maxMessageId = 'v2:0000000000000050:msg-behind';
+    const seenCursor = 'v2:0000000000000100:msg-ahead';
+
+    const cmp = compareCursors(maxMessageId, seenCursor);
+    assert.ok(cmp < 0, 'Same-format v2: behind must be < 0');
+
+    const newFilter = cmp > 0 || (cmp === 0 && maxMessageId !== seenCursor);
+    assert.equal(newFilter, false, 'Behind notice must be REMOVED (resolved)');
+  });
+});
+
+// ============================================================================
+// Sol R5: isMentionAcked indeterminate-aware comparison
+// ============================================================================
+
+describe('Sol R5: isMentionAcked cross-format indeterminate', () => {
+  before(async () => {
+    await ensureModules();
+  });
+
+  it('v1 mention cursor + v2 ack cursor → NOT acked (indeterminate)', () => {
+    // Simulates: getter canonicalized ack to v2, but cursorFor(item) returns v1
+    // (pre-migration message without visibilitySeq)
+    const ic = 'msg-legacy-mention'; // v1
+    const lastAckId = 'v2:0000000000000100:msg-acked'; // v2
+
+    const cmp = compareCursors(ic, lastAckId);
+    assert.equal(cmp, 0, 'Cross-format = indeterminate');
+
+    // Old: `<= 0` treats as acked — WRONG (drops pending mention)
+    const oldResult = cmp <= 0;
+    assert.equal(oldResult, true, 'Old filter incorrectly marks as acked');
+
+    // New: only true string equality counts
+    const newResult = cmp < 0 || (cmp === 0 && ic === lastAckId);
+    assert.equal(newResult, false, 'New filter: cross-format indeterminate = NOT acked');
+  });
+
+  it('same-format v2 earlier mention → correctly acked', () => {
+    const ic = 'v2:0000000000000050:msg-early';
+    const lastAckId = 'v2:0000000000000100:msg-ack-point';
+
+    const cmp = compareCursors(ic, lastAckId);
+    assert.ok(cmp < 0, 'Earlier mention must be < ack point');
+
+    const newResult = cmp < 0 || (cmp === 0 && ic === lastAckId);
+    assert.equal(newResult, true, 'Earlier same-format mention = correctly acked');
+  });
+
+  it('identical cursor strings → correctly acked (true equality)', () => {
+    const cursor = 'v2:0000000000000100:msg-exact';
+
+    const cmp = compareCursors(cursor, cursor);
+    // biome-ignore lint/suspicious/noSelfCompare: intentional — testing same-string identity semantics
+    const newResult = cmp < 0 || (cmp === 0 && cursor === cursor);
+    assert.equal(newResult, true, 'Identical strings = truly equal = acked');
+  });
+});
+
+// ============================================================================
+// Sol R5: Comprehensive HWM zero-mutation — hash/ZSET/timeline/message-state
+// ============================================================================
+
+describe('Sol R5: HWM reject zero-mutation (comprehensive)', () => {
+  it('DELIVER reject: message hash unchanged (deliveryStatus, no visibilitySeq)', async (t) => {
+    if (skipWithoutRedis(t)) return;
+    const r = await getRedis();
+    await ensureModules();
+
+    const threadId = `zmut-deliver-${Date.now()}`;
+    const metaKey = `msg:visibility-meta:${threadId}`;
+    const store = new RedisMessageStore(r);
+
+    try {
+      // Trigger migration flag
+      await store.append({
+        userId: 'u1',
+        catId: null,
+        content: 'trigger',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+        threadId,
+      });
+
+      // Queued message
+      const msg = await store.append({
+        userId: 'u1',
+        catId: 'opus',
+        content: 'queued-msg',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+        deliveryStatus: 'queued',
+      });
+
+      // Snapshot pre-rejection state
+      const hashBefore = await r.hgetall(`msg:${msg.id}`);
+      const threadZsetBefore = await r.zrangebyscore(`msg:thread:${threadId}`, '-inf', '+inf', 'WITHSCORES');
+      const visZsetBefore = await r.zrangebyscore(`msg:visibility:${threadId}`, '-inf', '+inf', 'WITHSCORES');
+
+      // Poison hwm
+      await r.hset(metaKey, 'hwm', 'nan');
+
+      // Deliver should reject
+      await assert.rejects(() => store.markDelivered(msg.id, Date.now()), /VISIBILITY_HWM_NAN/);
+
+      // Comprehensive zero-mutation checks
+      const hashAfter = await r.hgetall(`msg:${msg.id}`);
+      assert.deepEqual(hashAfter, hashBefore, 'Message hash must be unchanged after rejected deliver');
+      assert.equal(hashAfter.deliveryStatus, 'queued', 'deliveryStatus must remain queued');
+      assert.equal(hashAfter.visibilitySeq, undefined, 'visibilitySeq must NOT be set');
+      assert.equal(hashAfter.deliveredAt, undefined, 'deliveredAt must NOT be set');
+
+      const threadZsetAfter = await r.zrangebyscore(`msg:thread:${threadId}`, '-inf', '+inf', 'WITHSCORES');
+      assert.deepEqual(threadZsetAfter, threadZsetBefore, 'Thread ZSET must be unchanged');
+
+      const visZsetAfter = await r.zrangebyscore(`msg:visibility:${threadId}`, '-inf', '+inf', 'WITHSCORES');
+      assert.deepEqual(visZsetAfter, visZsetBefore, 'Visibility ZSET must be unchanged');
+
+      const hwmAfter = await r.hget(metaKey, 'hwm');
+      assert.equal(hwmAfter, 'nan', 'HWM must remain poisoned');
+    } finally {
+      await r.del(metaKey);
+    }
+  });
+
+  it('APPEND reject: no new hash/ZSET/timeline entries created', async (t) => {
+    if (skipWithoutRedis(t)) return;
+    const r = await getRedis();
+    await ensureModules();
+
+    const threadId = `zmut-append-${Date.now()}`;
+    const metaKey = `msg:visibility-meta:${threadId}`;
+    const store = new RedisMessageStore(r);
+
+    try {
+      // Trigger migration
+      const seed = await store.append({
+        userId: 'u1',
+        catId: null,
+        content: 'seed',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+        threadId,
+      });
+
+      // Snapshot post-seed state
+      const threadZsetBefore = await r.zrangebyscore(`msg:thread:${threadId}`, '-inf', '+inf', 'WITHSCORES');
+      const visZsetBefore = await r.zrangebyscore(`msg:visibility:${threadId}`, '-inf', '+inf', 'WITHSCORES');
+      const hwmBefore = await r.hget(metaKey, 'hwm');
+
+      // Poison hwm
+      await r.hset(metaKey, 'hwm', 'nan');
+
+      // Append should reject
+      await assert.rejects(
+        () =>
+          store.append({
+            userId: 'u1',
+            catId: null,
+            content: 'rejected',
+            mentions: [],
+            timestamp: Date.now(),
+            threadId,
+          }),
+        /VISIBILITY_HWM_NAN/,
+      );
+
+      // Thread ZSET should have no new entries
+      const threadZsetAfter = await r.zrangebyscore(`msg:thread:${threadId}`, '-inf', '+inf', 'WITHSCORES');
+      assert.equal(threadZsetAfter.length, threadZsetBefore.length, 'Thread ZSET must not grow');
+
+      // Visibility ZSET should have no new entries
+      const visZsetAfter = await r.zrangebyscore(`msg:visibility:${threadId}`, '-inf', '+inf', 'WITHSCORES');
+      assert.equal(visZsetAfter.length, visZsetBefore.length, 'Visibility ZSET must not grow');
+
+      // Restore hwm for cleanup
+      await r.hset(metaKey, 'hwm', hwmBefore || '0');
+    } finally {
+      await r.del(metaKey);
+    }
   });
 });
