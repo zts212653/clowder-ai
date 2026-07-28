@@ -704,16 +704,17 @@ describe('F254 Queue-Aware Freshness Gate', async () => {
 
       const result = await checker.checkUnseen({ threadId, catId });
       assert.ok(result, 'should return unseen result');
-      // maxMessageId must NOT start with 'queued:' — it must be a sortable ID
+      // maxMessageId must NOT start with 'queued:' — it must be a sortable cursor
       assert.ok(
         !result.maxMessageId.startsWith('queued:'),
         `maxMessageId must be sortable, got: ${result.maxMessageId}`,
       );
-      // Must be a zero-padded numeric prefix (same format as generateSortableId)
+      // #1200: maxMessageId is now a v2 cursor (cursorFor wraps the synthetic ID).
+      // Accept either raw sortable ID or v2 cursor format.
       assert.match(
         result.maxMessageId,
-        /^\d{16}-\d{6}-/,
-        `maxMessageId must match sortable ID format: ${result.maxMessageId}`,
+        /^(?:v2:\d{16}:\d{16}-\d{6}-|\d{16}-\d{6}-)/,
+        `maxMessageId must match sortable ID or v2 cursor format: ${result.maxMessageId}`,
       );
     });
 

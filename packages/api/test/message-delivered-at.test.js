@@ -71,9 +71,13 @@ describe('MessageStore.markDelivered', () => {
 });
 
 describe('MessageStore.getByThreadAfter', () => {
-  test('falls back to lexicographic ID filtering when cursor message is missing', () => {
+  test('full rescan from visibility origin when cursor message is pruned (#1200 FM-3 fix)', () => {
+    // #1200: When a v1 cursor references a pruned message, getByThreadAfter
+    // does a full rescan instead of lex-ID filtering. This prevents FM-3
+    // where a far-future-timestamped message that later gets pruned would
+    // permanently hide all normally-timestamped messages.
     const store = new MessageStore();
-    store.append({
+    const beforeCursor = store.append({
       threadId: 'thread-a',
       userId: 'u1',
       catId: null,
@@ -101,9 +105,10 @@ describe('MessageStore.getByThreadAfter', () => {
     const missingCursor = generateSortableId(1500);
     const results = store.getByThreadAfter('thread-a', missingCursor, 5, 'u1');
 
+    // All visible messages in thread-a returned (full rescan — FM-3 safety)
     assert.deepEqual(
       results.map((m) => m.id),
-      [afterCursor.id],
+      [beforeCursor.id, afterCursor.id],
     );
   });
 });
