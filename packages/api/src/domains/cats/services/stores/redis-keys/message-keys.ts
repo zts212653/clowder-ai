@@ -24,4 +24,19 @@ export const MessageKeys = {
 
   /** Callback content-dedup claim (race-safe exact-duplicate gate): msg:cbdedup:{fingerprint} */
   contentDedup: (fingerprint: string) => `msg:cbdedup:${fingerprint}`,
+
+  /**
+   * #1200 Visibility index: per-thread sorted set, member=messageId, score=visibilitySeq.
+   * Queued messages are NOT members until delivered. The thread ZSET (raw-time) is unchanged.
+   * See: docs/architecture/1200-cursor-order-analysis.md §8.2
+   */
+  threadVisibility: (threadId: string) => `msg:visibility:${threadId}`,
+
+  /**
+   * #1200 Visibility metadata: per-thread hash { migrated: '1', hwm: '<seq>' }.
+   * Source of truth for the allocator high-water and migration state.
+   * NEVER TTL'd, NEVER EXPIRE'd — removed only by deleteByThread.
+   * See: docs/architecture/1200-cursor-order-analysis.md §8.2
+   */
+  threadVisibilityMeta: (threadId: string) => `msg:visibility-meta:${threadId}`,
 } as const;

@@ -1157,10 +1157,12 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     let advancedCount = 0;
 
     for (const thread of threads) {
-      const messages = await messageStore.getByThread(thread.id, undefined, undefined, PUBLISHED_TIMELINE_READ);
-      if (messages.length === 0) continue;
-      const latestId = messages[messages.length - 1]?.id;
-      const advanced = await opts.readStateStore.ack(userId, thread.id, latestId);
+      // #1200: Use visibility-domain latest, not time-domain latest.
+      // Late-delivered Q after C has higher visibilitySeq than C — mark-all
+      // must ack to Q's v2 cursor, not C's raw ID.
+      const latest = await messageStore.getLatestVisibleCursor(thread.id);
+      if (!latest) continue;
+      const advanced = await opts.readStateStore.ack(userId, thread.id, latest.cursor);
       if (advanced) advancedCount++;
     }
 
@@ -1198,15 +1200,22 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     }
 
     // P1-3: Validate upToMessageId belongs to this thread
+    // #1200: Also canonicalize raw v1 ID → v2 cursor for correct CAS lex comparison.
+    // Without canonicalization, a raw v1 ID permanently loses to any v2 cursor
+    // in SET_IF_GREATER because 'v' (0x76) > any digit — the ack silently no-ops.
+    let cursorToken = parseResult.data.upToMessageId;
     if (messageStore) {
       const msg = await messageStore.getById(parseResult.data.upToMessageId);
       if (!msg || msg.threadId !== id) {
         reply.status(400);
         return { error: 'upToMessageId does not belong to this thread' };
       }
+      if (messageStore.canonicalizeCursor) {
+        cursorToken = await messageStore.canonicalizeCursor(parseResult.data.upToMessageId, id);
+      }
     }
 
-    const advanced = await opts.readStateStore.ack(userId, id, parseResult.data.upToMessageId);
+    const advanced = await opts.readStateStore.ack(userId, id, cursorToken);
     return { advanced };
   });
 
@@ -1237,13 +1246,15 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Thread not found' };
     }
 
-    const messages = await messageStore.getByThread(id, 1, undefined, PUBLISHED_TIMELINE_READ);
-    if (messages.length === 0) {
+    // #1200: Use visibility-domain latest, not time-domain latest.
+    // getByThread returns time-order; getLatestVisibleCursor returns the
+    // visibility-domain tail — correct when late-delivered Q follows C.
+    const latest = await messageStore.getLatestVisibleCursor(id);
+    if (!latest) {
       return { advanced: false, reason: 'no messages' };
     }
 
-    const latestId = messages[messages.length - 1]?.id;
-    const advanced = await opts.readStateStore.ack(userId, id, latestId);
-    return { advanced, messageId: latestId };
+    const advanced = await opts.readStateStore.ack(userId, id, latest.cursor);
+    return { advanced, messageId: latest.messageId };
   });
 };

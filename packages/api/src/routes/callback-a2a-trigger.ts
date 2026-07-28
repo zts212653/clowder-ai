@@ -170,6 +170,9 @@ export async function enqueueA2ATargets(
     }
     persistedCrossThreadTrigger = persistedTrigger;
   }
+  // #1200 note: mention-ack cursors stay as raw message IDs (not v2 tokens).
+  // The mention cursor domain uses lex-ID comparison (getMentionsFor, FreshnessNoticeService)
+  // and does not flow through parseCursor / getByThreadAfter.
 
   // F167 Phase E (KD-20): L3 role-gate retired. Role-based handoff permission is
   // no longer harness-enforced — cat-config.restrictions flows into sender & target

@@ -2876,6 +2876,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
 
     // Validation 3: monotonic (noop if backwards)
+    // #1200 note: mention-ack cursors stay as raw message IDs (not v2 tokens).
+    // The mention cursor domain (getMentionsFor, getMentionAckCursor) uses lex-ID
+    // comparison throughout and does NOT flow through getByThreadAfter / parseCursor.
+    // Canonicalizing to v2 here would break getMentionsFor's `msg.id <= afterId` filter.
     const currentCursor = await deliveryCursorStore.getMentionAckCursor(record.userId, catId, record.threadId);
     if (currentCursor && upToMessageId <= currentCursor) {
       return { status: 'noop', reason: 'already acknowledged' };
@@ -2890,12 +2894,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       currentCursor,
     );
     if (pendingWindow.length > 0) {
-      const windowLastId = pendingWindow[pendingWindow.length - 1]?.id;
-      if (upToMessageId > windowLastId) {
+      const windowLastMsg = pendingWindow[pendingWindow.length - 1];
+      if (windowLastMsg && upToMessageId > windowLastMsg.id) {
         reply.status(400);
         return {
           error: 'upToMessageId exceeds current pending window, ack only within fetched batch',
-          windowLastId,
+          windowLastId: windowLastMsg.id,
         };
       }
     }
@@ -3374,6 +3378,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     if (deliveryCursorStore && filtered.length > 0 && principal.kind === 'invocation' && isContiguousRead) {
       const latestSeen = filtered[filtered.length - 1];
       try {
+        // #1200 note: seenCursor stays as raw message ID (not v2 token).
+        // The seenCursor domain (FreshnessNoticeService.maxMessageId comparison)
+        // uses lex-ID comparison and doesn't flow through parseCursor.
         await deliveryCursorStore.ackSeenCursor(
           principalUserId,
           principalCatId as CatId,
