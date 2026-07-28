@@ -272,6 +272,30 @@ describe('#1200 canonicalizeCursor (§8.7 CAS ingress)', () => {
     assert.equal(cursor, 'nonexistent-id', 'Unknown message should return raw ID');
   });
 
+  it('refuses to sign v2 cursor for message in wrong thread', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = new MessageStore();
+    const threadA = `canon-xthread-a-${Date.now()}`;
+    const threadB = `canon-xthread-b-${Date.now()}`;
+
+    const m = store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'in-thread-A',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: threadA,
+    });
+
+    // Canonicalize with correct thread → v2
+    const correct = store.canonicalizeCursor(m.id, threadA);
+    assert.ok(correct.startsWith('v2:'), 'Correct thread should produce v2');
+
+    // Canonicalize with wrong thread → raw ID fallback (not v2)
+    const wrong = store.canonicalizeCursor(m.id, threadB);
+    assert.equal(wrong, m.id, 'Wrong thread must return raw ID, not v2');
+  });
+
   it('v2 cursor from canonicalize beats v1 raw ID in lex comparison', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const store = new MessageStore();

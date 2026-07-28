@@ -1101,8 +1101,14 @@ export class MessageStore {
     };
   }
 
-  /** #1200: Canonicalize a raw message ID to a v2 cursor token. */
-  canonicalizeCursor(messageId: string, _threadId: string): string {
+  /** #1200: Canonicalize a raw message ID to a v2 cursor token.
+   * Validates thread membership — refuses to sign a v2 cursor for a message
+   * that doesn't belong to the specified thread (returns raw ID fallback).
+   * (#1200 P1-4 fix: prevents cross-thread cursor signing) */
+  canonicalizeCursor(messageId: string, threadId: string): string {
+    // Verify the message exists and belongs to the specified thread
+    const msg = this.messages.find((m) => m.id === messageId);
+    if (!msg || msg.threadId !== threadId) return messageId;
     const seq = this.visibilitySeq.get(messageId);
     if (seq == null) return messageId;
     return cursorFor({ id: messageId, visibilitySeq: seq });

@@ -8,7 +8,6 @@
  *
  * Scripts:
  *   APPEND_WITH_VISIBILITY_LUA — shape (a) atomic append (replaces MULTI pipeline)
- *   ALLOC_VISIBILITY_SEQ_FRAGMENT — inlinable allocator (used by DELIVER extension)
  *   DELIVER_WITH_VISIBILITY_LUA — DELIVER + visibilitySeq allocation
  *   CANCEL_WITH_VISIBILITY_LUA — CANCEL + visibility ZREM
  *   BACKFILL_VISIBILITY_LUA — one-shot rank-normalize backfill for legacy threads
@@ -76,28 +75,13 @@ for i = 0, hfPairCount * 2 - 1 do
   hsetArgs[i + 1] = ARGV[hfStart + i]
 end
 
--- 1. Write message hash (all fields at once)
-redis.call('HSET', hash, unpack(hsetArgs))
-
--- 2. ZADDs: timeline, user, thread
-redis.call('ZADD', kp .. 'msg:timeline', score, msgId)
-redis.call('ZADD', kp .. 'msg:user:' .. userId, score, msgId)
-redis.call('ZADD', kp .. 'msg:thread:' .. threadId, score, msgId)
-
--- 3. Mention ZADDs
-for i = 1, mentionCount do
-  redis.call('ZADD', kp .. 'msg:mentions:' .. mentions[i], score, msgId)
-end
-
--- 4. Visibility: non-queued messages get immediate visibilitySeq
---    seq = max(hwm+1, serverTimeMs) — uses Redis server TIME(), NOT the payload
---    timestamp. This prevents far-future timestamps from corrupting the hwm and
---    eating 96% of the safe-integer headroom. (#1200 P1-A fix)
+-- 1. Pre-mutation guard: compute visibilitySeq and check exhaustion BEFORE
+--    any writes. Redis Lua error_reply does NOT rollback prior mutations, so
+--    all fail-closed checks must precede the first write. (#1200 P1-2 fix)
 local seq = 0
+local metaKey = kp .. 'msg:visibility-meta:' .. threadId
+local visKey = kp .. 'msg:visibility:' .. threadId
 if not isQueued then
-  local metaKey = kp .. 'msg:visibility-meta:' .. threadId
-  local visKey = kp .. 'msg:visibility:' .. threadId
-
   local hwmRaw = redis.call('HGET', metaKey, 'hwm')
   local hwm = tonumber(hwmRaw) or 0
 
@@ -105,11 +89,26 @@ if not isQueued then
   local now_ms = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
   seq = math.max(hwm + 1, now_ms)
 
-  -- Fail-closed: seq must be a safe integer (< 2^53 - 10000 headroom)
   if seq > 9007199254730991 then
     return redis.error_reply('VISIBILITY_SEQ_EXHAUSTED: seq=' .. tostring(seq))
   end
+end
 
+-- 2. Write message hash (all fields at once)
+redis.call('HSET', hash, unpack(hsetArgs))
+
+-- 3. ZADDs: timeline, user, thread
+redis.call('ZADD', kp .. 'msg:timeline', score, msgId)
+redis.call('ZADD', kp .. 'msg:user:' .. userId, score, msgId)
+redis.call('ZADD', kp .. 'msg:thread:' .. threadId, score, msgId)
+
+-- 4. Mention ZADDs
+for i = 1, mentionCount do
+  redis.call('ZADD', kp .. 'msg:mentions:' .. mentions[i], score, msgId)
+end
+
+-- 5. Visibility: write pre-validated seq (exhaustion already checked above)
+if not isQueued then
   redis.call('ZADD', visKey, seq, msgId)
   redis.call('HSET', metaKey, 'hwm', tostring(seq))
   redis.call('HSETNX', metaKey, 'migrated', '1')
@@ -145,48 +144,11 @@ return seq
 `;
 
 /**
- * ALLOC_VISIBILITY_SEQ: inlinable Lua fragment (NOT standalone).
- * Requires locals: kp, threadId, msgId. Allocates seq = max(hwm+1, serverTimeMs),
- * writes ZADD visibility + HSET meta hwm + HSET hash visibilitySeq.
- * Used only by DELIVER_WITH_VISIBILITY_LUA (inlined via template literal).
- * The append Lua has its own inline copy to avoid duplicate variable declarations.
- */
-export const ALLOC_VISIBILITY_SEQ_FRAGMENT = `
--- ALLOC_VISIBILITY_SEQ: allocate seq for msgId in threadId
--- Requires: kp, threadId, msgId as local variables
-local metaKey = kp .. 'msg:visibility-meta:' .. threadId
-local visKey = kp .. 'msg:visibility:' .. threadId
-local hashKey = kp .. 'msg:' .. msgId
-
-local hwmRaw = redis.call('HGET', metaKey, 'hwm')
-local hwm = tonumber(hwmRaw) or 0
-
--- Server time in ms (Redis TIME returns [seconds, microseconds])
-local timeArr = redis.call('TIME')
-local nowMs = tonumber(timeArr[1]) * 1000 + math.floor(tonumber(timeArr[2]) / 1000)
-
-local seq = math.max(hwm + 1, nowMs)
-
--- Fail-closed: seq must be a safe integer (< 2^53 - 10000 headroom)
-if seq > 9007199254730991 then
-  return redis.error_reply('VISIBILITY_SEQ_EXHAUSTED: seq=' .. tostring(seq))
-end
-
--- Atomic: ZADD + meta update + hash field
-redis.call('ZADD', visKey, seq, msgId)
-redis.call('HSET', metaKey, 'hwm', tostring(seq))
--- Set migrated if not already (first append to a new thread)
-redis.call('HSETNX', metaKey, 'migrated', '1')
-redis.call('HSET', hashKey, 'visibilitySeq', tostring(seq))
-`;
-
-/**
- * DELIVER_LUA extension: extends the existing DELIVER_LUA to allocate
- * visibilitySeq on delivery of a queued message.
+ * DELIVER_LUA extension: allocates visibilitySeq on delivery of a queued message.
  *
  * This is the FULL replacement DELIVER_LUA — not a fragment.
- * Uses deliveredAt (not server TIME()) as the time input so relative ordering
- * is correct even when operations execute within 1ms (parity with Memory mirror).
+ * Uses Redis TIME() (not deliveredAt) as the time source to prevent far-future
+ * timestamps from corrupting the hwm. (#1200 P1-A fix)
  *
  * KEYS[1] = detail hash key (auto-prefixed by ioredis)
  * ARGV[1] = message id
@@ -201,6 +163,7 @@ local msgId = ARGV[1]
 local deliveredAt = ARGV[2]
 local kp = ARGV[3]
 
+-- CAS guard: only queued → delivered transition
 local status = redis.call('HGET', hash, 'deliveryStatus')
 if status ~= 'queued' then
   return 0
@@ -209,15 +172,9 @@ end
 local userId = redis.call('HGET', hash, 'userId')
 local threadId = redis.call('HGET', hash, 'threadId')
 
--- Original delivery writes
-redis.call('HSET', hash, 'deliveredAt', deliveredAt, 'deliveryStatus', 'delivered')
-redis.call('ZADD', kp .. 'msg:thread:' .. threadId, tonumber(deliveredAt), msgId)
-redis.call('ZADD', kp .. 'msg:timeline', tonumber(deliveredAt), msgId)
-redis.call('ZADD', kp .. 'msg:user:' .. userId, tonumber(deliveredAt), msgId)
-
--- #1200: Allocate visibilitySeq using Redis server TIME(), NOT deliveredAt.
--- deliveredAt is server-controlled but using Redis TIME() keeps the allocator
--- immune to any upstream caller passing a wrong value. (#1200 P1-A fix)
+-- Pre-mutation guard: compute visibilitySeq and check exhaustion BEFORE
+-- any writes. Redis Lua error_reply does NOT rollback prior mutations.
+-- (#1200 P1-2 fix)
 local metaKey = kp .. 'msg:visibility-meta:' .. threadId
 local visKey = kp .. 'msg:visibility:' .. threadId
 
@@ -232,6 +189,13 @@ if seq > 9007199254730991 then
   return redis.error_reply('VISIBILITY_SEQ_EXHAUSTED: seq=' .. tostring(seq))
 end
 
+-- All guards passed — write delivery status + ZSETs + visibility atomically
+redis.call('HSET', hash, 'deliveredAt', deliveredAt, 'deliveryStatus', 'delivered')
+redis.call('ZADD', kp .. 'msg:thread:' .. threadId, tonumber(deliveredAt), msgId)
+redis.call('ZADD', kp .. 'msg:timeline', tonumber(deliveredAt), msgId)
+redis.call('ZADD', kp .. 'msg:user:' .. userId, tonumber(deliveredAt), msgId)
+
+-- Visibility: write pre-validated seq
 redis.call('ZADD', visKey, seq, msgId)
 redis.call('HSET', metaKey, 'hwm', tostring(seq))
 redis.call('HSETNX', metaKey, 'migrated', '1')

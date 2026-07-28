@@ -1264,7 +1264,6 @@ export class RedisMessageStore {
 
     // Get all message IDs in this thread
     const ids = await this.redis.zrange(key, 0, -1);
-    if (ids.length === 0) return 0;
 
     const pipeline = this.redis.multi();
 
@@ -1273,10 +1272,12 @@ export class RedisMessageStore {
       pipeline.del(MessageKeys.detail(id));
     }
 
-    // Delete the thread sorted set
+    // Delete the thread sorted set (even if empty — may still exist as empty key)
     pipeline.del(key);
 
-    // #1200: Delete visibility ZSET + metadata hash (these are permanent — no TTL)
+    // #1200: Delete visibility ZSET + metadata hash (these are permanent — no TTL).
+    // Must run even when ids.length === 0: a thread may have migrated metadata
+    // but no messages (e.g. after all messages were individually deleted).
     pipeline.del(MessageKeys.threadVisibility(threadId));
     pipeline.del(MessageKeys.threadVisibilityMeta(threadId));
 
