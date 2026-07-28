@@ -74,6 +74,58 @@ tips_exempt:
 | **7. 用户可见交互修正** | 初始化完成立即以新请求复检，初始化前错误即使晚到也不会重新出现。 |
 | **8. 验收** | Red→Green 竞态测试验证 refresh 强制新请求且旧响应无法覆盖；项目切换、缓存、400/403、sync 测试全绿。 |
 
+### 补充诊断胶囊：Drift 读侧写权限必须复用完整授权门禁
+
+| 栏位 | 内容 |
+|------|------|
+| **1. 现象** | 直接 localhost 页面在会话失效或当前用户不是 owner 时仍显示 Skill/MCP 写控件；真正调用 resolve 才返回 401/403。期望 check 保持可读，但 `syncAllowed` 与 resolve 的认证、localhost、owner 判据完全一致。 |
+| **2. 证据** | 精确 HEAD `c3f0b84dc` 上，`/api/drift/check` 仅调用 `isLocalCapabilityWriteRequest()`，而 `/api/drift/resolve` 依次调用 `resolveSessionUserId()`、localhost 门禁和 `resolveOwnerGate()`。 |
+| **3. 根因** | 同一写权限被拆成两个不同真相源：check 只暴露网络局部判据，resolve 才执行完整授权；客户端无法区分“本机但未认证/非 owner”。 |
+| **4. 诊断策略** | 抽取无副作用的统一授权评估函数；check 只读取 allowed 布尔值，resolve 再把同一评估结果映射为 HTTP 状态。 |
+| **5. 超时策略** | 若读取端复用授权会改变 check 的 200 语义，停止复用 reply 写入逻辑，保留纯评估结果与响应映射两层。 |
+| **6. 预警策略** | 若实现仍在 check 内单独判断 hostname、session 或 owner，说明权限第二真相源仍存在。 |
+| **7. 用户可见交互修正** | 会话失效或非 owner 仍可查看异常，但所有写控件保持只读；本机有效 owner 的操作不受影响。 |
+| **8. 验收** | API 回归覆盖无会话、非 owner、有效 owner、forwarded 和非 loopback bind；check 均保持可读并返回与 resolve 一致的 `syncAllowed`。 |
+
+### 补充诊断胶囊：MCP 弹窗写权限异步定案
+
+| 栏位 | 内容 |
+|------|------|
+| **1. 现象** | 本机用户在写权限 check 尚未返回时打开外部 MCP，弹窗会永久停在只读状态；即使服务端随后返回 `syncAllowed=true`，也必须关闭重开才可编辑。 |
+| **2. 证据** | 精确 HEAD `c3f0b84dc` 上，`handleCardClick()` 把当时的 `!driftSync.canSync` 写入 `modal.readOnly`；渲染时只把最新权限传给 `allowLocalActions`，没有重新计算 `readOnly`。 |
+| **3. 根因** | 服务端权威权限的异步结果被错误地快照进弹窗状态；state 混合了 MCP 自身不可编辑属性与会变化的请求授权。 |
+| **4. 诊断策略** | 弹窗 state 只保存 MCP 自身的只读属性；渲染时再与最新 `canSync` 合成最终 `readOnly`。 |
+| **5. 超时策略** | 若 modal 内部初始化仍锁住旧 props，停止在父组件补 key，改为审计 modal effect 的依赖并保持同一实例响应 prop 更新。 |
+| **6. 预警策略** | 任何把 `canSync` 再次写入 `useState`、或靠关闭重开恢复的方案，都说明权威状态仍被复制。 |
+| **7. 用户可见交互修正** | 本机权限确认后，已经打开的外部 MCP 弹窗会原地恢复保存、探测与项目恢复操作；远程仍只读。 |
+| **8. 验收** | Web 回归在 drift check pending 时打开弹窗，随后返回 `syncAllowed=true`，无需重开即可看到保存控件。 |
+
+### 补充诊断胶囊：Thread detail 对账必须 latest-request-wins
+
+| 栏位 | 内容 |
+|------|------|
+| **1. 现象** | mount 触发的 thread detail GET 与 invocation-end 触发的 GET 重叠时，较旧响应可能最后到达并把新的 `projectPath` 覆盖回旧值。 |
+| **2. 证据** | 精确 HEAD `c3f0b84dc` 上，两个触发点共用 `syncThreadState()`，每个成功响应都会无条件调用 `syncThreadDetailToLocalState()`，没有 abort 或 generation 检查。 |
+| **3. 根因** | 对同一权威资源的并发读取缺少请求世代；网络完成顺序被误当成数据新旧顺序。 |
+| **4. 诊断策略** | 在唯一 `syncThreadState()` 入口递增 generation；只有当前最新请求允许写 store，线程切换自然使旧 generation 失效。 |
+| **5. 超时策略** | 若组件级 generation 无法覆盖 thread 切换，改为带 threadId 的 token，而不是在每个触发 effect 增加独立布尔值。 |
+| **6. 预警策略** | 若只保护 `setCurrentProject` 或只保护 threads 数组，另一份镜像仍会回退；必须在调用统一对账函数前整体拦截旧响应。 |
+| **7. 用户可见交互修正** | invocation 结束后的最新项目绑定不会再被较早的 mount 请求回滚。 |
+| **8. 验收** | Web 回归让第二次 GET 先返回新路径、第一次 GET 后返回旧路径，最终 store 与 current project 都保持新路径。 |
+
+### 补充诊断胶囊：Skill 源根必须指向持久 workspace
+
+| 栏位 | 内容 |
+|------|------|
+| **1. 现象** | Nalo 的 `anime-forge` 四个 provider 均链接到 `/Volumes/WorkSSD/clowder-ai/cat-cafe-skills/anime-forge`，runtime 却把它们报告为同名冲突，并警告立即同步会覆盖已有内容。 |
+| **2. 证据** | 四个实际链接均解析到持久 workspace 的 tracked `anime-forge` 目录；`/api/drift/check` 返回四个 conflict。`resolveCatCafeSkillsSource()` 只返回当前 runtime worktree 的 `cat-cafe-skills`，没有 runtime→workspace 重定向。 |
+| **3. 根因** | Skill 的 canonical source 仍绑定可丢弃 runtime checkout，而 capability 配置和既有项目链接以持久 workspace 为真相源；相同内容的不同绝对路径被 symlink 检测器正确地视为冲突。 |
+| **4. 诊断策略** | 让中央 `resolveCatCafeSkillsSource()` 对当前 worktree source 复用 `redirectRuntimeProjectPath()`；开发 worktree 保持自身 source，runtime 映射到 workspace 同相对路径。 |
+| **5. 超时策略** | 若中央重定向影响开发 worktree，停止在 route 层特判，给源根解析器注入 runtime/workspace 根并用纯单元测试钉住两种模式。 |
+| **6. 预警策略** | 若方案改写 Nalo 链接、复制 skill 内容或让 conflict 同步继续覆盖，说明在修数据而不是修坐标系。 |
+| **7. 用户可见交互修正** | Nalo 的四个合法 `anime-forge` 挂载不再显示冲突；无需备份或重新同步现有链接。 |
+| **8. 验收** | 路由回归模拟 runtime 与 workspace 分离，项目链接指向 workspace；`anime-forge` 不产生 drift。实际 Nalo 只读复查四个 provider 均为 configured。 |
+
 ## Bug report 五件套
 
 1. **报告人**：co-creator 在 cpolar 远程使用时发现 Agent 同步状态异常。

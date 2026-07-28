@@ -116,19 +116,16 @@ export function McpManageContent() {
     enabled: activeTab === 'global' && !cap.loading,
   });
 
-  const handleCardClick = useCallback(
-    (item: CapabilityBoardItem) => {
-      const readOnly = !driftSync.canSync || item.source !== 'external' || !!item.pluginId;
-      setModal({
-        editId: item.id,
-        readOnly,
-        // Local modal auto-probes on mount; remote read-only access must not trigger localhost-only probes.
-        tools: undefined,
-        editData: buildEditData(item),
-      });
-    },
-    [driftSync.canSync],
-  );
+  const handleCardClick = useCallback((item: CapabilityBoardItem) => {
+    const readOnly = item.source !== 'external' || !!item.pluginId;
+    setModal({
+      editId: item.id,
+      readOnly,
+      // Local modal auto-probes on mount; remote read-only access must not trigger localhost-only probes.
+      tools: undefined,
+      editData: buildEditData(item),
+    });
+  }, []);
 
   const handleCreate = useCallback(() => setModal({}), []);
 
@@ -384,7 +381,7 @@ export function McpManageContent() {
           projectPath={cap.projectPath ?? undefined}
           editId={modal.editId}
           editData={modal.editData}
-          readOnly={modal.readOnly}
+          readOnly={!driftSync.canSync || modal.readOnly}
           allowLocalActions={driftSync.canSync}
           tools={modal.tools}
           onSaved={handleSaved}

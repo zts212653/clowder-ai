@@ -14,10 +14,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { withCapabilityLock } from '../config/capabilities/capability-orchestrator.js';
-import {
-  isLocalCapabilityWriteRequest,
-  requireLocalCapabilityWriteRequest,
-} from '../config/capabilities/capability-write-guards.js';
+import { requireLocalCapabilityWriteRequest } from '../config/capabilities/capability-write-guards.js';
 import { checkMcpProject } from '../mcp/mcp-drift-detector.js';
 import type { McpDriftResolution } from '../mcp/mcp-drift-resolver.js';
 import { syncMcpDrift, VALID_MCP_DRIFT_DECISIONS } from '../mcp/mcp-drift-resolver.js';
@@ -46,23 +43,22 @@ interface DriftIssue {
   hasOverride?: boolean;
 }
 
-function requireDriftWriteAccess(request: FastifyRequest, reply: FastifyReply): { userId?: string; error?: string } {
+type DriftWriteAccess = { allowed: true; userId: string } | { allowed: false; status: number; error: string };
+
+function resolveDriftWriteAccess(request: FastifyRequest): DriftWriteAccess {
   const userId = resolveSessionUserId(request);
   if (!userId) {
-    reply.status(401);
-    return { error: 'Authentication required' };
+    return { allowed: false, status: 401, error: 'Authentication required' };
   }
   const localError = requireLocalCapabilityWriteRequest(request);
   if (localError) {
-    reply.status(localError.status);
-    return { error: localError.error };
+    return { allowed: false, status: localError.status, error: localError.error };
   }
   const ownerError = resolveOwnerGate(userId, { errorMessage: 'Drift resolution requires owner authorization' });
   if (ownerError) {
-    reply.status(ownerError.status);
-    return { error: ownerError.error };
+    return { allowed: false, status: ownerError.status, error: ownerError.error };
   }
-  return { userId };
+  return { allowed: true, userId };
 }
 
 function parseType(body: Record<string, unknown>): DriftType | null {
@@ -102,7 +98,7 @@ export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const projectPath = typeof body.projectPath === 'string' ? body.projectPath : undefined;
-    const syncAllowed = isLocalCapabilityWriteRequest(request);
+    const syncAllowed = resolveDriftWriteAccess(request).allowed;
 
     if (type === 'skill') {
       const ctx = await computeSkillDrift(projectPath);
@@ -155,8 +151,11 @@ export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
 
   // ── POST /api/drift/resolve ──
   app.post('/api/drift/resolve', async (request, reply) => {
-    const access = requireDriftWriteAccess(request, reply);
-    if (!access.userId) return { error: access.error };
+    const access = resolveDriftWriteAccess(request);
+    if (!access.allowed) {
+      reply.status(access.status);
+      return { error: access.error };
+    }
 
     const body = (request.body ?? {}) as Record<string, unknown>;
     const type = parseType(body);

@@ -427,4 +427,54 @@ describe('ChatContainer governance refetch', () => {
     expect(storeState.setCurrentProject).toHaveBeenCalledWith(reboundProjectPath);
     expect(storeState.threads.find((thread) => thread.id === 'thread-a')?.projectPath).toBe(reboundProjectPath);
   });
+
+  it('ignores an older thread detail response after a newer reconciliation succeeds', async () => {
+    type ThreadPayload = { id: string; projectPath: string };
+    let resolveOlder!: (value: ThreadPayload) => void;
+    let resolveNewer!: (value: ThreadPayload) => void;
+    const older = new Promise<ThreadPayload>((resolve) => {
+      resolveOlder = resolve;
+    });
+    const newer = new Promise<ThreadPayload>((resolve) => {
+      resolveNewer = resolve;
+    });
+    let threadReads = 0;
+    vi.mocked(apiFetch).mockImplementation(
+      async (path) =>
+        ({
+          ok: true,
+          json: () => {
+            if (path !== '/api/threads/thread-a') return Promise.resolve({ threads: [] });
+            threadReads += 1;
+            return threadReads === 1 ? older : newer;
+          },
+        }) as Response,
+    );
+
+    await act(async () => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-a' }));
+    });
+    storeState.hasActiveInvocation = true;
+    await act(async () => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-a' }));
+    });
+    storeState.hasActiveInvocation = false;
+    await act(async () => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-a' }));
+    });
+
+    await act(async () => {
+      resolveNewer({ id: 'thread-a', projectPath: '/tmp/newer-project' });
+      await newer;
+    });
+    expect(storeState.threads.find((thread) => thread.id === 'thread-a')?.projectPath).toBe('/tmp/newer-project');
+
+    await act(async () => {
+      resolveOlder({ id: 'thread-a', projectPath: '/tmp/older-project' });
+      await older;
+    });
+
+    expect(storeState.threads.find((thread) => thread.id === 'thread-a')?.projectPath).toBe('/tmp/newer-project');
+    expect(storeState.setCurrentProject).not.toHaveBeenCalledWith('/tmp/older-project');
+  });
 });

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { lstat, mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { describe, it } from 'node:test';
@@ -47,6 +47,78 @@ function expectedSymlinkTarget(linkPath, sourcePath) {
 }
 
 describe('Skills Drift Route (F228)', () => {
+  it('accepts project links to the persistent workspace skill source in runtime mode', async () => {
+    const prevRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    const prevWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    const runtimeRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+    const workspaceRoot = await realpath(await mkdtemp(join(tmpdir(), 'skills-drift-persistent-source-workspace-')));
+    const projectDir = await realpath(await mkdtemp(join(tmpdir(), 'skills-drift-persistent-source-project-')));
+    const skillName = 'anime-forge';
+    const persistentSkill = join(workspaceRoot, 'cat-cafe-skills', skillName);
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+
+    await mkdir(persistentSkill, { recursive: true });
+    await writeFile(join(workspaceRoot, 'cat-cafe-skills', 'manifest.yaml'), 'version: 1\n');
+    await writeFile(join(persistentSkill, 'SKILL.md'), '# Anime Forge\n');
+    await writeCapabilitiesConfig(workspaceRoot, {
+      version: 2,
+      capabilities: [
+        {
+          id: skillName,
+          type: 'skill',
+          enabled: true,
+          globalEnabled: true,
+          source: 'cat-cafe',
+          mountPaths: ['claude', 'codex', 'gemini', 'kimi'],
+        },
+      ],
+    });
+    await writeCapabilitiesConfig(projectDir, {
+      version: 2,
+      capabilities: [
+        {
+          id: skillName,
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          mountPaths: ['claude', 'codex', 'gemini', 'kimi'],
+        },
+      ],
+    });
+    for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
+      const linkPath = join(projectDir, `.${provider}`, 'skills', skillName);
+      await mkdir(dirname(linkPath), { recursive: true });
+      await symlink(expectedSymlinkTarget(linkPath, persistentSkill), linkPath);
+    }
+
+    const app = await buildSkillsDriftApp({ mainProjectRoot: workspaceRoot });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/skills/drift-check',
+        headers: { 'x-cat-cafe-user': 'default-user' },
+        payload: { projectPath: projectDir },
+      });
+
+      assert.equal(res.statusCode, 200, res.body);
+      const body = JSON.parse(res.body);
+      assert.equal(
+        body.result.issues.some((issue) => issue.skill === skillName),
+        false,
+        'a project link to the persistent workspace source must not be reported as conflict',
+      );
+    } finally {
+      if (prevRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = prevRuntimeRoot;
+      if (prevWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = prevWorkspaceRoot;
+      await app.close();
+      await rm(workspaceRoot, { recursive: true, force: true });
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
   it('POST /api/skills/drift-check reads runtime selections from the persistent workspace', async () => {
     const prevRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
     const prevWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;

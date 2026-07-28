@@ -493,15 +493,24 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // MCP callbacks update Redis directly; the companion WebSocket `thread_updated`
   // may not reach this frontend (e.g. worktree port isolation). Re-fetching the
   // thread ensures the store stays in sync.
+  const threadDetailSyncGenerationRef = useRef(0);
   const syncThreadState = useCallback(() => {
+    const generation = ++threadDetailSyncGenerationRef.current;
     apiFetch(`/api/threads/${threadId}`)
       .then((res) => (res.ok ? (res.json() as Promise<ThreadDetailSyncPayload>) : null))
       .then((thread) => {
-        if (!thread) return;
+        if (!thread || generation !== threadDetailSyncGenerationRef.current) return;
         syncThreadDetailToLocalState(threadId, thread, setCurrentProject);
       })
       .catch(() => {});
   }, [threadId, setCurrentProject]);
+
+  useEffect(
+    () => () => {
+      threadDetailSyncGenerationRef.current += 1;
+    },
+    [threadId],
+  );
 
   // Sync on invocation end (active → inactive transition)
   const prevInvocationRef = useRef(hasActiveInvocation);

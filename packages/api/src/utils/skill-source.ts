@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import { readSkillsSyncState } from '../skills/skill-sync-config.js';
+import { redirectRuntimeProjectPath } from './persistent-project-path.js';
 
 function resolveCurrentWorktreeSkillsSource(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
@@ -18,7 +19,12 @@ function resolveCurrentWorktreeSkillsSource(): string {
 
 /** Canonical Clowder AI skill source used by capability writeback and drift resolution. */
 export async function resolveCatCafeSkillsSource(): Promise<string> {
-  return resolveCurrentWorktreeSkillsSource();
+  const worktreeSource = resolveCurrentWorktreeSkillsSource();
+  const persistentSource = await redirectRuntimeProjectPath(worktreeSource);
+  if (!persistentSource) {
+    throw new Error('Unable to resolve persistent Clowder AI skill source');
+  }
+  return persistentSource;
 }
 
 /**

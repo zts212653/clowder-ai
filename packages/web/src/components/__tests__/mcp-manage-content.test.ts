@@ -277,6 +277,43 @@ describe('McpManageContent', () => {
     ).toBe(true);
   });
 
+  it('reacts when write permission resolves after an external MCP modal opens', async () => {
+    let resolveDrift!: (value: { result: { issues: never[]; driftHash: string; syncAllowed: boolean } }) => void;
+    const driftPayload = new Promise<{
+      result: { issues: never[]; driftHash: string; syncAllowed: boolean };
+    }>((resolve) => {
+      resolveDrift = resolve;
+    });
+    mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/drift/check') {
+        return {
+          ok: true,
+          json: () => driftPayload,
+        };
+      }
+      return ITEMS_RESPONSE;
+    });
+
+    await renderContent();
+    await flushEffects();
+    await act(async () => {
+      buttonByText('custom-mcp').click();
+    });
+
+    expect(document.body.textContent).toContain('只读预览');
+    expect(document.body.textContent).not.toContain('保存');
+
+    await act(async () => {
+      resolveDrift({
+        result: { issues: [], driftHash: 'local-drift', syncAllowed: true },
+      });
+      await driftPayload;
+    });
+    await flushEffects();
+
+    expect(document.body.textContent).toContain('保存');
+  });
+
   it('opens plugin-owned MCP in readOnly modal (managed by plugin)', async () => {
     await renderContent();
 

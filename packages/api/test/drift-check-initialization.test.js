@@ -76,7 +76,7 @@ describe('/api/drift — project initialization boundary', () => {
     assert.equal(response.json().result.initialized, true);
   });
 
-  it('reports direct-local capability writes as allowed', async () => {
+  it('keeps direct-local reads without a session read-only', async () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/drift/check',
@@ -85,7 +85,35 @@ describe('/api/drift — project initialization boundary', () => {
     });
 
     assert.equal(response.statusCode, 200);
+    assert.equal(response.json().result.syncAllowed, false);
+  });
+
+  it('reports direct-local owner capability writes as allowed', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/drift/check',
+      headers: AUTH_HEADERS,
+      payload: { type: 'skill' },
+    });
+
+    assert.equal(response.statusCode, 200);
     assert.equal(response.json().result.syncAllowed, true);
+  });
+
+  it('keeps direct-local non-owner reads read-only', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/drift/check',
+      headers: {
+        'x-test-session-user': 'someone-else',
+        host: 'localhost:3004',
+        origin: 'http://localhost:3003',
+      },
+      payload: { type: 'skill' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().result.syncAllowed, false);
   });
 
   it('reports forwarded localhost requests as read-only', async () => {
