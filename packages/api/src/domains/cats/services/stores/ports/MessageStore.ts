@@ -760,6 +760,9 @@ export class MessageStore {
     if (stored.deliveryStatus !== 'queued') {
       this.visibilitySeqCounter = Math.max(this.visibilitySeqCounter + 1, Date.now());
       this.visibilitySeq.set(stored.id, this.visibilitySeqCounter);
+      // #1200 P2-6: Inject visibilitySeq into returned message so callers
+      // get the canonical position without a re-read.
+      stored.visibilitySeq = this.visibilitySeqCounter;
     }
 
     // Trim oldest if over capacity
@@ -1043,6 +1046,7 @@ export class MessageStore {
     const visible: Array<{ msg: StoredMessage; seq: number }> = [];
     for (const msg of this.messages) {
       if (msg.threadId !== threadId) continue;
+      if (msg.deletedAt) continue; // #1200 P2-5: tombstone parity with Redis hydrateAndFilter
       if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
       if (!isVisible(msg)) continue;
       const seq = this.visibilitySeq.get(msg.id);

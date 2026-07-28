@@ -316,7 +316,12 @@ export class RedisMessageStore {
     }
 
     try {
-      await this.redis.eval(APPEND_WITH_VISIBILITY_LUA, 1, hashKey, ...argv);
+      // #1200 P2-6: Lua returns allocated visibilitySeq (number) or 0 for queued.
+      // Inject into returned message so callers get canonical position without re-read.
+      const seq = (await this.redis.eval(APPEND_WITH_VISIBILITY_LUA, 1, hashKey, ...argv)) as number;
+      if (seq > 0) {
+        stored.visibilitySeq = seq;
+      }
     } catch (error) {
       if (idempotencyIndexKey) {
         const existingId = await this.redis.get(idempotencyIndexKey);

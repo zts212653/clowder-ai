@@ -74,7 +74,7 @@ import {
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { EventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { IRuntimeSessionStore } from '../domains/cats/services/runtime-session/RuntimeSessionStore.js';
-import { cursorFor } from '../domains/cats/services/stores/cursor.js';
+import { cursorFor, parseCursor } from '../domains/cats/services/stores/cursor.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
@@ -2780,17 +2780,24 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // F35: Filter out whispers not intended for this cat
     const mentionViewer = { type: 'cat' as const, catId };
     const mentions = rawMentions.filter((m) => canViewMessage(m, mentionViewer));
-    // #1200: cross-format acked guard — getRecentMentionsFor returns messages via
-    // hydrateMessages (no WITHSCORES injection), so legacy hashes lack visibilitySeq.
-    // cursorFor(item) → v1 raw ID, but lastAckId may be v2. Since 'v' > any digit,
-    // v1 <= v2 is always true → all mentions falsely appear acked. Guard: when
-    // cursor formats differ, treat as unacked (conservative — shows extra mentions
-    // rather than hiding unprocessed ones).
+    // #1200 P2-8: cross-format acked resolution.
+    // When cursor formats differ (v1 ack + v2 mention or vice versa), extract
+    // the raw message ID from whichever side is v2 and compare raw IDs.
+    // Raw sortable IDs (generateSortableId) are timestamp-prefixed → lex ≡ time.
+    // This resolves the conservative false-unacked behavior from the v1/v2 guard.
     const isMentionAcked = (item: StoredMessage): boolean => {
       if (!lastAckId) return false;
       const ic = cursorFor(item);
-      if (ic.startsWith('v2:') !== lastAckId.startsWith('v2:')) return false;
-      return ic <= lastAckId;
+      const icIsV2 = ic.startsWith('v2:');
+      const ackIsV2 = lastAckId.startsWith('v2:');
+      if (icIsV2 === ackIsV2) {
+        // Same format: lex compare is correct
+        return ic <= lastAckId;
+      }
+      // Cross-format: extract raw message IDs and compare
+      const icId = icIsV2 ? parseCursor(ic)!.id : ic;
+      const ackId = ackIsV2 ? parseCursor(lastAckId)!.id : lastAckId;
+      return icId <= ackId;
     };
     const payload = {
       mentions: mentions.map((item) => {

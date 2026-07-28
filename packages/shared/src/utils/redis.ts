@@ -58,7 +58,7 @@ export const SessionKeys = {
 
 /**
  * Lua script: atomic compare-and-set for monotonic cursor advancement.
- * SET key to value only if value > current (lexicographic).
+ * SET key to value only if value > current.
  * KEYS[1] = cursor key, ARGV[1] = new value, ARGV[2] = TTL seconds (0 = persistent).
  * Returns 1 if set, 0 if noop.
  *
@@ -68,16 +68,50 @@ export const SessionKeys = {
  *   PERSIST-before-compare: on noop path, PERSIST the existing key to heal
  *   any accidental TTL left by a prior ttl>0 write (cutover migration).
  *   On advance path, SET without EX is already persistent.
+ *
+ * #1200 P2-4: Cross-format v1↔v2 comparison.
+ * Pure lex comparison is correct within same format but WRONG across formats:
+ *   'v' (0x76) > any digit → ALL v2 tokens lex-exceed ALL v1 raw IDs.
+ *   stored v1("msgB-later") + incoming v2("v2:...:msgA-earlier") → false advance.
+ * Fix: detect format mismatch, extract messageId from v2, compare raw IDs.
+ * Raw sortable IDs (generateSortableId) are timestamp-prefixed → lex ≡ time order.
+ *   - Same format → lex compare (correct)
+ *   - stored v2 + incoming v1 → always reject (v2→v1 regression never valid)
+ *   - stored v1 + incoming v2 → extract v2 messageId, compare vs stored v1
  */
 const SET_IF_GREATER_LUA = `
 local ttl = tonumber(ARGV[2])
 local cur = redis.call('GET', KEYS[1])
-if cur and ARGV[1] <= cur then
-  if ttl == 0 then
-    redis.call('PERSIST', KEYS[1])
+if cur then
+  local curIsV2 = (string.sub(cur, 1, 3) == 'v2:')
+  local newIsV2 = (string.sub(ARGV[1], 1, 3) == 'v2:')
+
+  if curIsV2 == newIsV2 then
+    -- Same format: lex compare is correct (v2 lex = seq order; v1 lex = sortable-ID time)
+    if ARGV[1] <= cur then
+      if ttl == 0 then redis.call('PERSIST', KEYS[1]) end
+      return 0
+    end
+  elseif curIsV2 then
+    -- stored v2, incoming v1: v2->v1 regression is never valid
+    if ttl == 0 then redis.call('PERSIST', KEYS[1]) end
+    return 0
+  else
+    -- stored v1, incoming v2: extract messageId from v2 token for raw ID comparison.
+    -- v2 format: "v2:<seq16>:<messageId>" — find second ':' after pos 4
+    local sep = string.find(ARGV[1], ':', 4)
+    if sep then
+      local newId = string.sub(ARGV[1], sep + 1)
+      if #newId > 0 and newId <= cur then
+        -- v2 cursor's underlying message was created at-or-before stored v1 cursor
+        if ttl == 0 then redis.call('PERSIST', KEYS[1]) end
+        return 0
+      end
+    end
+    -- newId > cur OR malformed: advance (upgrade to v2 format)
   end
-  return 0
 end
+
 if ttl > 0 then
   redis.call('SET', KEYS[1], ARGV[1], 'EX', ttl)
 else
