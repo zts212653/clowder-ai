@@ -778,7 +778,12 @@ export class AgentRouter {
     this.registry = options.registry;
     this.messageStore = options.messageStore;
     this.sessionManager = new SessionManager(options.sessionStore);
-    this.deliveryCursorStore = options.deliveryCursorStore ?? new DeliveryCursorStore(options.sessionStore);
+    // #1200 P2-3: wire cursor canonicalizer for v1→v2 async resolution
+    const canonicalizer = options.messageStore.canonicalizeCursor
+      ? (msgId: string, threadId: string) => Promise.resolve(options.messageStore.canonicalizeCursor!(msgId, threadId))
+      : undefined;
+    this.deliveryCursorStore =
+      options.deliveryCursorStore ?? new DeliveryCursorStore(options.sessionStore, canonicalizer);
     this.threadStore = options.threadStore ?? null;
     this.sessionChainStore = options.sessionChainStore;
     this.runtimeSessionStore = options.runtimeSessionStore;

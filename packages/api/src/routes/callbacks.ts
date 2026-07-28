@@ -74,11 +74,7 @@ import {
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { EventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { IRuntimeSessionStore } from '../domains/cats/services/runtime-session/RuntimeSessionStore.js';
-import {
-  compareCursors,
-  computeVisibilityContiguousAdvance,
-  cursorFor,
-} from '../domains/cats/services/stores/cursor.js';
+import { compareCursors, cursorFor, parseCursor } from '../domains/cats/services/stores/cursor.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
@@ -2897,7 +2893,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       ? await messageStore.canonicalizeCursor(upToMessageId, record.threadId)
       : upToMessageId;
     const currentCursor = await deliveryCursorStore.getMentionAckCursor(record.userId, catId, record.threadId);
-    if (currentCursor && canonicalCursor <= currentCursor) {
+    // #1200 P2-3: use pair-domain comparison (both sides canonicalized)
+    if (currentCursor && compareCursors(canonicalCursor, currentCursor) <= 0) {
       return { status: 'noop', reason: 'already acknowledged' };
     }
 
@@ -2916,7 +2913,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         const windowLastCursor = messageStore.canonicalizeCursor
           ? await messageStore.canonicalizeCursor(windowLastMsg.id, record.threadId)
           : windowLastMsg.id;
-        if (canonicalCursor > windowLastCursor) {
+        // #1200 P2-3: use pair-domain comparison (both sides canonicalized)
+        if (compareCursors(canonicalCursor, windowLastCursor) > 0) {
           reply.status(400);
           return {
             error: 'upToMessageId exceeds current pending window, ack only within fetched batch',
@@ -3392,7 +3390,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       modeSource,
       catId: principal.catId,
     });
-    // #1200 P1-2 (Sol R2 restore): visibility-contiguous seenCursor advancement.
+    // #1200 Sol R3: visibility-domain seenCursor advancement.
     //
     // F254 AC-A2: seenCursor must advance when cat reads via thread-context.
     // Disabling it causes repeated freshness hold/reinvoke — it's a regression.
@@ -3400,17 +3398,19 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // Safety: time-domain pages from getByThreadBefore are NOT visibility-contiguous.
     // Late-delivered Q may have older timestamp but higher visibilitySeq. With limit=N,
     // the page can skip Q (returning [C,D], missing Q/101 between them).
-    // seenCursor is a scalar prefix promise — advancing it past unseen Q creates a
-    // false "seen" claim that permanently suppresses freshness for Q.
     //
-    // Fix: computeVisibilityContiguousAdvance walks through returned messages in
-    // visibilitySeq order, advancing ONLY through a contiguous run starting from
-    // the current cursor. Gaps stop the advance — no false "seen" claims.
+    // Sol R3 P1-1: post-hoc contiguous check on time-domain pages is fundamentally
+    // flawed — invisible messages (deleted/briefing/whisper) create permanent gaps.
+    // Fix: do a separate VISIBILITY-DOMAIN read via getByThreadAfter, then walk through
+    // results checking whether each freshness-relevant message was in the cat's page.
+    // Skip freshness-irrelevant messages (deleted, briefing, invisible whispers) —
+    // these don't trigger the freshness gate, so advancing past them is safe.
     //
     // #1200 Sol R2: seenCursor re-enabled with visibility-contiguous advance.
     // computeVisibilityContiguousAdvance walks through returned messages in
     // visibilitySeq order, advancing ONLY through a contiguous run from the
     // current cursor. Gaps stop the advance — no false "seen" claims.
+    // Only advance on plain thread reads (no keyword filter, no messageId window).
     if (deliveryCursorStore && !keyword && !messageId) {
       try {
         const currentSeen = await deliveryCursorStore.getSeenCursor(
@@ -3418,13 +3418,58 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           createCatId(principalCatId),
           effectiveThreadId,
         );
-        const safeAdvance = computeVisibilityContiguousAdvance(filtered, currentSeen);
-        if (safeAdvance) {
+
+        // Build set of message IDs the cat actually saw in this time-domain page
+        const seenIds = new Set(filtered.map((m) => m.id));
+
+        // Visibility-domain read: messages after current cursor in visibilitySeq order.
+        // getByThreadAfter returns messages sorted by visibilitySeq (not timestamp),
+        // includes tombstones (tombstone-keep), filters by isDelivered + userId.
+        const afterId = currentSeen ? parseCursor(currentSeen)?.id : undefined;
+        const windowSize = Math.max(filtered.length, 20);
+        const visWindow = await messageStore.getByThreadAfter(effectiveThreadId, afterId, windowSize, principalUserId);
+
+        // Freshness relevance filter — mirrors the freshness gate's messageFilter.
+        // Messages that don't pass this filter are NOT counted as "unseen" by the
+        // freshness gate, so advancing the seenCursor past them is safe.
+        const isFreshnessRelevant = (msg: Awaited<ReturnType<typeof messageStore.getByThread>>[number]): boolean => {
+          if (msg.deletedAt) return false;
+          if (!isDelivered(msg)) return false;
+          if (msg.origin === 'briefing') return false;
+          if (needsPlayFilter) {
+            if (!canViewMessage(msg, viewer)) return false;
+            const isOtherCat = msg.catId && msg.catId !== principalCatId;
+            if (isOtherCat && msg.origin === 'stream') return false;
+          }
+          return true;
+        };
+
+        // Walk through visibility-ordered messages:
+        // - Freshness-irrelevant (deleted, briefing, invisible) → skip past (safe)
+        // - Freshness-relevant AND in seenIds → cat saw it → advance
+        // - Freshness-relevant AND NOT in seenIds → cat hasn't seen it → STOP
+        let advanceTo: { id: string; visibilitySeq?: number } | null = null;
+        for (const msg of visWindow) {
+          if (!isFreshnessRelevant(msg)) {
+            // Not counted by freshness gate → safe to advance past
+            advanceTo = msg;
+            continue;
+          }
+          if (seenIds.has(msg.id)) {
+            // Freshness-relevant AND cat saw it in this read → safe to advance
+            advanceTo = msg;
+            continue;
+          }
+          // Freshness-relevant but NOT in current page → cat hasn't seen it → STOP
+          break;
+        }
+
+        if (advanceTo?.visibilitySeq != null) {
           await deliveryCursorStore.ackSeenCursor(
             principalUserId,
             createCatId(principalCatId),
             effectiveThreadId,
-            safeAdvance,
+            cursorFor(advanceTo),
           );
         }
       } catch (err) {
@@ -3432,7 +3477,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         // the freshness gate may re-hold but no data is lost.
         app.log.warn(
           { err, catId: principalCatId, threadId: effectiveThreadId },
-          '[#1200] seenCursor contiguous advance failed, fail-open',
+          '[#1200] seenCursor visibility-domain advance failed, fail-open',
         );
       }
     }

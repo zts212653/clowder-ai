@@ -663,7 +663,11 @@ async function main(): Promise<void> {
   });
   const invocationRecordStore = createInvocationRecordStore(redis);
   const sessionStore = redis ? new SessionStore(redis) : undefined;
-  const deliveryCursorStore = new DeliveryCursorStore(sessionStore);
+  // #1200 P2-3: wire cursor canonicalizer for v1→v2 async resolution
+  const cursorCanonicalizer = messageStore.canonicalizeCursor
+    ? (msgId: string, threadId: string) => Promise.resolve(messageStore.canonicalizeCursor!(msgId, threadId))
+    : undefined;
+  const deliveryCursorStore = new DeliveryCursorStore(sessionStore, cursorCanonicalizer);
   const threadStore = createThreadStore(redis);
   const proposalStore = createProposalStore(redis);
   const handoffProposalStore = createSessionHandoffProposalStore(redis);

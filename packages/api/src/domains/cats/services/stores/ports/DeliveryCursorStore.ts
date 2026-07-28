@@ -4,6 +4,12 @@
  * Tracks per-user/per-cat/per-thread last delivered message ID.
  * IDs are lexicographically sortable (timestamp+seq prefix), so monotonic
  * progression can be enforced with string comparison.
+ *
+ * #1200 P2-3: Async cursor canonicalization.
+ * All cursor comparisons require same-format inputs (v2-v2 or v1-v1).
+ * The optional cursorCanonicalizer resolves v1 raw IDs → v2 cursors via
+ * MessageStore visibility index lookup. Without it, v1 values pass through
+ * unchanged and compareCursors returns 0 for cross-format (safe no-advance).
  */
 
 import type { CatId } from '@cat-cafe/shared';
@@ -27,8 +33,16 @@ function cursorKey(userId: string, catId: CatId, threadId: string): string {
   return `${userId}:${catId}:${threadId}`;
 }
 
+/**
+ * Async resolver that canonicalizes a raw message ID (v1 cursor) to a v2 cursor
+ * by looking up the message's visibilitySeq from the store.
+ * Returns the v2 cursor if resolution succeeds, or the original value unchanged.
+ */
+export type CursorCanonicalizer = (messageId: string, threadId: string) => Promise<string>;
+
 export class DeliveryCursorStore {
   private readonly sessionStore: SessionStore | null;
+  private readonly canonicalizer: CursorCanonicalizer | null;
   private readonly cursors: Map<string, string> = new Map();
   /** Mention-ack cursors — separate namespace from delivery cursors (#77) */
   private readonly mentionAckCursors: Map<string, string> = new Map();
@@ -36,8 +50,36 @@ export class DeliveryCursorStore {
    *  MUST NOT affect delivery cursor or incremental injection (AC-A9). */
   private readonly seenCursors: Map<string, string> = new Map();
 
-  constructor(sessionStore?: SessionStore) {
+  constructor(sessionStore?: SessionStore, canonicalizer?: CursorCanonicalizer) {
     this.sessionStore = sessionStore ?? null;
+    this.canonicalizer = canonicalizer ?? null;
+  }
+
+  /**
+   * Canonicalize a cursor value: v2 passes through, v1 is resolved via
+   * the injected canonicalizer (MessageStore visibility index lookup).
+   * Returns the original value if no canonicalizer or resolution fails.
+   */
+  private async canonicalize(cursor: string, threadId: string): Promise<string> {
+    if (!cursor || cursor.startsWith('v2:')) return cursor;
+    if (!this.canonicalizer) return cursor;
+    try {
+      return await this.canonicalizer(cursor, threadId);
+    } catch {
+      // Resolver failed (message pruned, store error) — keep v1
+      return cursor;
+    }
+  }
+
+  /**
+   * Compare two cursor values after async canonicalization.
+   * Both sides are resolved to v2 before comparison when possible.
+   * Falls back to compareCursors which returns 0 for cross-format.
+   */
+  private async compareCanonical(a: string, b: string, threadId: string): Promise<number> {
+    const ca = await this.canonicalize(a, threadId);
+    const cb = await this.canonicalize(b, threadId);
+    return compareCursors(ca, cb);
   }
 
   async getCursor(userId: string, catId: CatId, threadId: string): Promise<string | undefined> {
@@ -49,8 +91,12 @@ export class DeliveryCursorStore {
         if (redisValue != null) {
           // Return max(redis, memory) — Redis may hold a stale value if a
           // prior ack succeeded in-memory but failed to write to Redis.
-          // #1200: pair-domain comparison (v2 seq > v1 raw ID boundary)
-          return memValue && compareCursors(memValue, redisValue) > 0 ? memValue : redisValue;
+          // #1200 P2-3: canonicalize before comparison (async resolver)
+          if (memValue) {
+            const cmp = await this.compareCanonical(memValue, redisValue, threadId);
+            return cmp > 0 ? memValue : redisValue;
+          }
+          return redisValue;
         }
         // Redis returned null — fall through to return memValue below
       } catch (err) {
@@ -63,17 +109,24 @@ export class DeliveryCursorStore {
   /**
    * Monotonic ack: cursor only moves forward.
    * Redis path uses atomic compare-and-set (Lua script) to prevent
-   * concurrent regression. In-memory path is safe because Node.js is
-   * single-threaded with no await between read and write.
+   * concurrent regression. In-memory path canonicalizes via async
+   * resolver before comparison (#1200 P2-3).
    */
   async ackCursor(userId: string, catId: CatId, threadId: string, deliveredToId: string): Promise<void> {
     const key = cursorKey(userId, catId, threadId);
-    // Use max(deliveredToId, in-memory cursor) as effective value.
+    // #1200 P2-3: canonicalize input before comparison
+    const canonDelivered = await this.canonicalize(deliveredToId, threadId);
+    // Use max(canonicalized input, in-memory cursor) as effective value.
     // This prevents Redis-recovery regression: if Redis was down and
     // in-memory has a higher cursor, we seed Redis with that floor.
-    // #1200: pair-domain comparison (v2 seq > v1 raw ID boundary)
     const memCursor = this.cursors.get(key);
-    const effective = memCursor && compareCursors(memCursor, deliveredToId) > 0 ? memCursor : deliveredToId;
+    let effective: string;
+    if (memCursor) {
+      const cmp = await this.compareCanonical(memCursor, canonDelivered, threadId);
+      effective = cmp > 0 ? memCursor : canonDelivered;
+    } else {
+      effective = canonDelivered;
+    }
 
     if (this.sessionStore) {
       try {
@@ -101,11 +154,11 @@ export class DeliveryCursorStore {
       }
     }
 
-    // In-memory fallback: monotonic check then write (no await gap = safe)
-    // #1200: pair-domain comparison
+    // In-memory fallback: canonicalized comparison
     const current = this.cursors.get(key);
-    if (current && compareCursors(effective, current) <= 0) {
-      return;
+    if (current) {
+      const cmp = await this.compareCanonical(effective, current, threadId);
+      if (cmp <= 0) return;
     }
     this.upsertMap(this.cursors, key, effective);
   }
@@ -123,9 +176,12 @@ export class DeliveryCursorStore {
       try {
         const redisValue = await this.sessionStore.getMentionAckCursor(userId, catId, threadId);
         if (redisValue != null) {
-          // Return max(redis, memory) — same rationale as getCursor
-          // #1200: pair-domain comparison
-          return memValue && compareCursors(memValue, redisValue) > 0 ? memValue : redisValue;
+          // #1200 P2-3: canonicalize before comparison
+          if (memValue) {
+            const cmp = await this.compareCanonical(memValue, redisValue, threadId);
+            return cmp > 0 ? memValue : redisValue;
+          }
+          return redisValue;
         }
         // Redis returned null — fall through to return memValue below
       } catch (err) {
@@ -138,15 +194,21 @@ export class DeliveryCursorStore {
   /**
    * Acknowledge mentions up to a message ID (monotonic forward only).
    * Redis path uses atomic compare-and-set (Lua script) to prevent
-   * concurrent regression. In-memory path is safe (no await gap).
+   * concurrent regression. In-memory path canonicalizes via async
+   * resolver before comparison (#1200 P2-3).
    */
   async ackMentionCursor(userId: string, catId: CatId, threadId: string, messageId: string): Promise<void> {
     const key = cursorKey(userId, catId, threadId);
-    // Use max(messageId, in-memory cursor) as effective value.
-    // Prevents Redis-recovery regression (same as ackCursor).
-    // #1200: pair-domain comparison
+    // #1200 P2-3: canonicalize input
+    const canonMsg = await this.canonicalize(messageId, threadId);
     const memCursor = this.mentionAckCursors.get(key);
-    const effective = memCursor && compareCursors(memCursor, messageId) > 0 ? memCursor : messageId;
+    let effective: string;
+    if (memCursor) {
+      const cmp = await this.compareCanonical(memCursor, canonMsg, threadId);
+      effective = cmp > 0 ? memCursor : canonMsg;
+    } else {
+      effective = canonMsg;
+    }
 
     if (this.sessionStore) {
       try {
@@ -171,11 +233,11 @@ export class DeliveryCursorStore {
       }
     }
 
-    // In-memory fallback: monotonic check then write (no await gap = safe)
-    // #1200: pair-domain comparison
+    // In-memory fallback: canonicalized comparison
     const current = this.mentionAckCursors.get(key);
-    if (current && compareCursors(effective, current) <= 0) {
-      return;
+    if (current) {
+      const cmp = await this.compareCanonical(effective, current, threadId);
+      if (cmp <= 0) return;
     }
     this.upsertMap(this.mentionAckCursors, key, effective);
   }
@@ -196,8 +258,12 @@ export class DeliveryCursorStore {
       try {
         const redisValue = await this.sessionStore.getSeenCursor(userId, catId, threadId);
         if (redisValue != null) {
-          // #1200: pair-domain comparison
-          return memValue && compareCursors(memValue, redisValue) > 0 ? memValue : redisValue;
+          // #1200 P2-3: canonicalize before comparison
+          if (memValue) {
+            const cmp = await this.compareCanonical(memValue, redisValue, threadId);
+            return cmp > 0 ? memValue : redisValue;
+          }
+          return redisValue;
         }
       } catch (err) {
         log.warn({ err }, 'getSeenCursor failed, fallback to in-memory');
@@ -213,9 +279,16 @@ export class DeliveryCursorStore {
    */
   async ackSeenCursor(userId: string, catId: CatId, threadId: string, messageId: string): Promise<void> {
     const key = cursorKey(userId, catId, threadId);
-    // #1200: pair-domain comparison
+    // #1200 P2-3: canonicalize input
+    const canonMsg = await this.canonicalize(messageId, threadId);
     const memCursor = this.seenCursors.get(key);
-    const effective = memCursor && compareCursors(memCursor, messageId) > 0 ? memCursor : messageId;
+    let effective: string;
+    if (memCursor) {
+      const cmp = await this.compareCanonical(memCursor, canonMsg, threadId);
+      effective = cmp > 0 ? memCursor : canonMsg;
+    } else {
+      effective = canonMsg;
+    }
 
     if (this.sessionStore) {
       try {
@@ -236,11 +309,11 @@ export class DeliveryCursorStore {
       }
     }
 
-    // In-memory fallback: monotonic check then write (no await gap = safe)
-    // #1200: pair-domain comparison
+    // In-memory fallback: canonicalized comparison
     const current = this.seenCursors.get(key);
-    if (current && compareCursors(effective, current) <= 0) {
-      return;
+    if (current) {
+      const cmp = await this.compareCanonical(effective, current, threadId);
+      if (cmp <= 0) return;
     }
     this.upsertMap(this.seenCursors, key, effective);
   }

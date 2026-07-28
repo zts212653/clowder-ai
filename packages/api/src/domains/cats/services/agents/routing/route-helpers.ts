@@ -8,6 +8,7 @@ import { isCrossThreadProvenance } from '@cat-cafe/shared';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { DEFAULT_HIERARCHICAL_CONTEXT } from '../../../../../config/hierarchical-context-config.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import { compareCursors } from '../../stores/cursor.js';
 
 const log = createModuleLogger('context-transport');
 
@@ -498,11 +499,13 @@ export function collectExactPromptMessageIds(...groups: ReadonlyArray<ReadonlyAr
  * observe fewer relevant messages and produce an older boundary; this helper
  * prevents regressing the deferred ack boundary.
  *
- * Assumes message IDs are lexicographically monotonic (timestamp+seq prefix).
+ * #1200 P2-3: uses compareCursors for pair-domain comparison instead of raw lex `>`.
+ * Both v2-v2 and v1-v1 comparisons are correct; cross-format returns 0 (no-advance)
+ * which is safe — new writes should be canonicalized to v2 by the cursor store.
  */
 export function upsertMaxBoundary(cursorBoundaries: Map<string, string>, catId: string, boundaryId: string): void {
   const current = cursorBoundaries.get(catId);
-  if (!current || boundaryId > current) {
+  if (!current || compareCursors(boundaryId, current) > 0) {
     cursorBoundaries.set(catId, boundaryId);
   }
 }

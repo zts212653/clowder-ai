@@ -46,9 +46,12 @@ export interface PersistResult {
 /**
  * Scan and PERSIST all cursor keys that still have a TTL.
  *
- * Uses a raw (unprefixed) Redis client for SCAN to see actual key names,
- * then strips the prefix before passing to ioredis TTL/PERSIST (which
- * auto-prefix). This avoids double-prefixing.
+ * ioredis keyPrefix caveat: SCAN MATCH is NOT auto-prefixed (MATCH is not
+ * a key-position argument), so we manually prepend keyPrefix to the pattern.
+ * However, TTL/PERSIST ARE auto-prefixed (ioredis recognizes them as known
+ * commands with key at position 1). SCAN returns raw keys WITH the prefix,
+ * so we must STRIP the prefix before passing to TTL/PERSIST to avoid
+ * double-prefixing (e.g., `cat-cafe:cat-cafe:delivery-cursor:...`).
  *
  * @param redis - Connected ioredis client (with keyPrefix configured)
  * @param batchSize - SCAN COUNT hint per iteration (default 200)
@@ -68,11 +71,11 @@ export async function persistDormantCursors(redis: RedisClient, batchSize = 200)
   for (const ns of CURSOR_NAMESPACES) {
     const patternResult = { persisted: 0, total: 0 };
     // SCAN MATCH needs the full key name including ioredis prefix
+    // (SCAN MATCH is NOT auto-prefixed by ioredis)
     const scanPattern = `${keyPrefix}${ns}:*`;
     let cursor = '0';
 
     do {
-      // Use sendCommand to bypass ioredis auto-prefixing for SCAN
       const [nextCursor, rawKeys] = (await redis.call(
         'SCAN',
         cursor,
@@ -88,11 +91,13 @@ export async function persistDormantCursors(redis: RedisClient, batchSize = 200)
         result.scanned++;
 
         try {
-          // Use redis.call() to bypass ioredis auto-prefixing — rawKey is already
-          // the full key name as it appears in Redis (includes keyPrefix).
-          const ttl = (await redis.call('TTL', rawKey)) as number;
+          // Strip keyPrefix from rawKey: SCAN returns full key names (with prefix),
+          // but ioredis auto-prefixes TTL/PERSIST arguments. Passing rawKey directly
+          // would cause double-prefixing. Strip → ioredis re-adds → correct key.
+          const strippedKey = keyPrefix && rawKey.startsWith(keyPrefix) ? rawKey.slice(keyPrefix.length) : rawKey;
+          const ttl = (await redis.call('TTL', strippedKey)) as number;
           if (ttl > 0) {
-            await redis.call('PERSIST', rawKey);
+            await redis.call('PERSIST', strippedKey);
             patternResult.persisted++;
             result.persisted++;
           } else {
