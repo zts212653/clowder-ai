@@ -24,6 +24,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import {
   assertRedisIsolationOrThrow,
+  cleanupClientKeyspace,
   cleanupPrefixedRedisKeys,
   redisIsolationSkipReason,
 } from './helpers/redis-test-helpers.js';
@@ -1622,7 +1623,9 @@ describe('Codex R9 P1: getLatestVisibleCursor skips soft-deleted (tombstoned) me
 
   let redis;
   let redisStore;
-  const PREFIX = 'test:tombstone-latest:';
+  // #1200 codex R10 P2: keyPrefix must be on the ioredis CLIENT, not RedisMessageStore
+  // (which reads redis.options.keyPrefix). Use cleanupClientKeyspace for teardown.
+  const TOMBSTONE_PREFIX = 'test-tombstone-latest:';
 
   before(async () => {
     await ensureModules();
@@ -1632,13 +1635,13 @@ describe('Codex R9 P1: getLatestVisibleCursor skips soft-deleted (tombstoned) me
       return;
     }
     assertRedisIsolationOrThrow(REDIS_URL, 'tombstone-latest');
-    redis = createRedisClient({ url: REDIS_URL });
-    redisStore = new RedisMessageStore(redis, { keyPrefix: PREFIX });
+    redis = createRedisClient({ url: REDIS_URL, keyPrefix: TOMBSTONE_PREFIX });
+    redisStore = new RedisMessageStore(redis);
   });
 
   after(async () => {
     if (redis) {
-      await cleanupPrefixedRedisKeys(redis, PREFIX);
+      await cleanupClientKeyspace(redis);
       await redis.quit();
     }
   });

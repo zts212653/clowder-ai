@@ -3458,6 +3458,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         const isFreshnessRelevant = (msg: Awaited<ReturnType<typeof messageStore.getByThread>>[number]): boolean => {
           if (msg.deletedAt) return false;
           if (!isDelivered(msg)) return false;
+          // #1200 codex R10 P1: system-generated messages (persisted error badges)
+          // are display-only — route-helpers.ts:744-745 excludes them from freshness.
+          // Without this, system badges between cursor and real messages stall the scan.
+          if (msg.userId === 'system') return false;
           if (msg.origin === 'briefing') return false;
           // #1200 P1-2: Exclude self messages — freshness gate excludes self
           // (route-helpers.ts:750-752). Without this, a self message not in the
