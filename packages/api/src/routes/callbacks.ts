@@ -3422,20 +3422,26 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         // Build set of message IDs the cat actually saw in this time-domain page
         const seenIds = new Set(filtered.map((m) => m.id));
 
-        // Visibility-domain read: messages after current cursor in visibilitySeq order.
-        // getByThreadAfter returns messages sorted by visibilitySeq (not timestamp),
-        // includes tombstones (tombstone-keep), filters by isDelivered + userId.
-        const afterId = currentSeen ? parseCursor(currentSeen)?.id : undefined;
-        const windowSize = Math.max(filtered.length, 20);
-        const visWindow = await messageStore.getByThreadAfter(effectiveThreadId, afterId, windowSize, principalUserId);
+        // #1200 P1-2: Pass full cursor token to getByThreadAfter, not extracted ID.
+        // getByThreadAfter natively handles v2 tokens (extracts seq from token),
+        // so v2 cursors work even when the anchor message hash is pruned.
+        // Passing only parseCursor(currentSeen)?.id loses the seq and forces
+        // a message hash lookup that fails on pruned anchors → scan from origin.
+        const chunkSize = Math.max(filtered.length, 50);
 
-        // Freshness relevance filter — mirrors the freshness gate's messageFilter.
+        // Freshness relevance filter — mirrors the freshness gate's messageFilter
+        // (route-helpers.ts:743-757). Must match EXACTLY to avoid false-hold.
         // Messages that don't pass this filter are NOT counted as "unseen" by the
         // freshness gate, so advancing the seenCursor past them is safe.
         const isFreshnessRelevant = (msg: Awaited<ReturnType<typeof messageStore.getByThread>>[number]): boolean => {
           if (msg.deletedAt) return false;
           if (!isDelivered(msg)) return false;
           if (msg.origin === 'briefing') return false;
+          // #1200 P1-2: Exclude self messages — freshness gate excludes self
+          // (route-helpers.ts:750-752). Without this, a self message not in the
+          // current page causes STOP, permanently stalling the cursor.
+          // F052: exempt cross-posted messages (same catId from another thread).
+          if (!msg.extra?.crossPost && msg.catId !== null && msg.catId === principalCatId) return false;
           if (needsPlayFilter) {
             if (!canViewMessage(msg, viewer)) return false;
             const isOtherCat = msg.catId && msg.catId !== principalCatId;
@@ -3444,24 +3450,44 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           return true;
         };
 
-        // Walk through visibility-ordered messages:
-        // - Freshness-irrelevant (deleted, briefing, invisible) → skip past (safe)
-        // - Freshness-relevant AND in seenIds → cat saw it → advance
-        // - Freshness-relevant AND NOT in seenIds → cat hasn't seen it → STOP
+        // Chunked visibility scan: walk in chunks to handle gaps of
+        // irrelevant messages (self, deleted, briefing) larger than one page.
+        // Cap total scan to avoid unbounded iteration.
         let advanceTo: { id: string; visibilitySeq?: number } | null = null;
-        for (const msg of visWindow) {
-          if (!isFreshnessRelevant(msg)) {
-            // Not counted by freshness gate → safe to advance past
-            advanceTo = msg;
-            continue;
+        let scanAfter: string | undefined = currentSeen ?? undefined;
+        const maxChunks = 3;
+        let foundStop = false;
+
+        for (let chunk = 0; chunk < maxChunks && !foundStop; chunk++) {
+          const visWindow = await messageStore.getByThreadAfter(
+            effectiveThreadId,
+            scanAfter,
+            chunkSize,
+            principalUserId,
+          );
+          if (visWindow.length === 0) break;
+
+          for (const msg of visWindow) {
+            if (!isFreshnessRelevant(msg)) {
+              // Not counted by freshness gate → safe to advance past
+              advanceTo = msg;
+              continue;
+            }
+            if (seenIds.has(msg.id)) {
+              // Freshness-relevant AND cat saw it in this read → safe to advance
+              advanceTo = msg;
+              continue;
+            }
+            // Freshness-relevant but NOT in current page → cat hasn't seen it → STOP
+            foundStop = true;
+            break;
           }
-          if (seenIds.has(msg.id)) {
-            // Freshness-relevant AND cat saw it in this read → safe to advance
-            advanceTo = msg;
-            continue;
+
+          if (!foundStop && visWindow.length > 0) {
+            // All messages in chunk were seen or irrelevant — continue scanning
+            const lastMsg = visWindow[visWindow.length - 1]!;
+            scanAfter = cursorFor(lastMsg);
           }
-          // Freshness-relevant but NOT in current page → cat hasn't seen it → STOP
-          break;
         }
 
         if (advanceTo?.visibilitySeq != null) {

@@ -128,7 +128,7 @@ describe('P2-4: SET_IF_GREATER cross-format CAS regression', () => {
     await r.del(`delivery-cursor:${userId}:${catId}:${threadId}`);
   });
 
-  it('stored v1 earlier + incoming v2 later → MUST advance', async (t) => {
+  it('stored v1 earlier + incoming v2 with later ID → MUST advance (ID lex fallback)', async (t) => {
     if (skipWithoutRedis(t)) return;
     const r = await getRedis();
     await ensureModules();
@@ -136,13 +136,19 @@ describe('P2-4: SET_IF_GREATER cross-format CAS regression', () => {
     const { SessionStore } = await import('@cat-cafe/shared/utils');
     const store = new SessionStore(r);
 
+    // When stored v1 message hash is pruned, Lua falls back to ID lex comparison.
+    // stored raw ID 'msgA' < incoming embedded ID 'msgB' → accept (advance).
     const userId = 'u-cas3',
       catId = 'c-cas3',
       threadId = 't-cas3-' + Date.now();
     await r.set(`delivery-cursor:${userId}:${catId}:${threadId}`, 'msgA');
 
     const advanced = await store.setDeliveryCursor(userId, catId, threadId, 'v2:0000000000999999:msgB');
-    assert.equal(advanced, true, 'v1→v2: later message cursor must advance');
+    assert.equal(advanced, true, 'v1→v2 with later ID: ID lex fallback must advance');
+
+    // Verify stored value was updated to v2
+    const stored = await store.getDeliveryCursor(userId, catId, threadId);
+    assert.equal(stored, 'v2:0000000000999999:msgB', 'Stored must be updated to v2 cursor');
 
     await r.del(`delivery-cursor:${userId}:${catId}:${threadId}`);
   });
@@ -164,6 +170,39 @@ describe('P2-4: SET_IF_GREATER cross-format CAS regression', () => {
     assert.equal(advanced, false, 'v2→v2 same-format: earlier cursor must NOT advance');
 
     await r.del(`delivery-cursor:${userId}:${catId}:${threadId}`);
+  });
+
+  // Sol R4 P1-1 next-action 1: three-namespace CAS coverage (mention-ack, seen-cursor)
+  it('mention-ack: stored v1 later + incoming v2 earlier → must NOT advance', async (t) => {
+    if (skipWithoutRedis(t)) return;
+    const r = await getRedis();
+    await ensureModules();
+    const { SessionStore } = await import('@cat-cafe/shared/utils');
+    const store = new SessionStore(r);
+
+    const userId = 'u-mac1',
+      catId = 'c-mac1',
+      threadId = `t-mac1-${Date.now()}`;
+    await r.set(`mention-ack:${userId}:${catId}:${threadId}`, 'msgB');
+    const advanced = await store.setMentionAckCursor(userId, catId, threadId, 'v2:0000000000000001:msgA');
+    assert.equal(advanced, false, 'Mention-ack CAS: v1 msgB > v2 msgA → reject');
+    await r.del(`mention-ack:${userId}:${catId}:${threadId}`);
+  });
+
+  it('seen-cursor: stored v1 later + incoming v2 earlier → must NOT advance', async (t) => {
+    if (skipWithoutRedis(t)) return;
+    const r = await getRedis();
+    await ensureModules();
+    const { SessionStore } = await import('@cat-cafe/shared/utils');
+    const store = new SessionStore(r);
+
+    const userId = 'u-sc1',
+      catId = 'c-sc1',
+      threadId = `t-sc1-${Date.now()}`;
+    await r.set(`seen-cursor:${userId}:${catId}:${threadId}`, 'msgB');
+    const advanced = await store.setSeenCursor(userId, catId, threadId, 'v2:0000000000000001:msgA');
+    assert.equal(advanced, false, 'Seen-cursor CAS: v1 msgB > v2 msgA → reject');
+    await r.del(`seen-cursor:${userId}:${catId}:${threadId}`);
   });
 });
 
@@ -322,22 +361,38 @@ describe('P2-6: append return value must include visibilitySeq', () => {
 // ============================================================================
 
 describe('P2-8: includeAcked cross-format pair resolution', () => {
-  it('v1 ack + v2 mention: same-ID should resolve as acked via ID extraction', async () => {
+  it('v1 ack + v2 mention: production isMentionAcked path resolves correctly', async () => {
     await ensureModules();
 
-    const lastAckId = 'msgA'; // v1 cursor
+    // Production isMentionAcked uses: compareCursors(cursorFor(item), lastAckId) <= 0
+    // With getter canonicalization (P1-4 fix), lastAckId from getter is v2.
+    // Test: when both sides have same message ID, comparison must resolve as acked.
+    const lastAckCursor = cursorFor({ id: 'msgA', visibilitySeq: 100 }); // "v2:0000000000000100:msgA"
     const mentionMsg = { id: 'msgA', visibilitySeq: 100 };
-    const mentionCursor = cursorFor(mentionMsg); // → "v2:0000000000000100:msgA"
+    const mentionCursor = cursorFor(mentionMsg); // "v2:0000000000000100:msgA"
 
-    // After ingress canonicalization, compareCursors returns 0 for cross-format.
-    // But the isMentionAcked path should use cursorFor on BOTH sides.
-    // For same messageId, ID extraction from v2 cursor resolves the comparison.
-    const parsedMention = parseCursor(mentionCursor);
-    assert.equal(parsedMention.version, 2);
-    assert.equal(parsedMention.id, 'msgA');
-    // With canonicalized ack cursor: cursorFor({id:'msgA', visibilitySeq:100}) would
-    // produce the same v2 cursor. The DeliveryCursorStore canonicalizer handles this.
-    assert.ok(parsedMention.id <= lastAckId, 'Mention ID resolved from v2 cursor must compare as acked');
+    // Same-format v2 vs v2: compareCursors resolves correctly
+    assert.ok(compareCursors(mentionCursor, lastAckCursor) <= 0, 'Same message: must resolve as acked');
+  });
+
+  it('v2 ack + v2 mention: earlier mention correctly marked as acked', async () => {
+    await ensureModules();
+
+    const lastAckCursor = cursorFor({ id: 'msgB', visibilitySeq: 200 }); // ack up to seq=200
+    const mentionMsg = { id: 'msgA', visibilitySeq: 100 }; // mention at seq=100 (earlier)
+    const mentionCursor = cursorFor(mentionMsg);
+
+    assert.ok(compareCursors(mentionCursor, lastAckCursor) <= 0, 'Earlier mention: must be acked');
+  });
+
+  it('v2 ack + v2 mention: later mention NOT marked as acked', async () => {
+    await ensureModules();
+
+    const lastAckCursor = cursorFor({ id: 'msgA', visibilitySeq: 100 }); // ack up to seq=100
+    const mentionMsg = { id: 'msgC', visibilitySeq: 300 }; // mention at seq=300 (later)
+    const mentionCursor = cursorFor(mentionMsg);
+
+    assert.ok(compareCursors(mentionCursor, lastAckCursor) > 0, 'Later mention: must NOT be acked');
   });
 });
 
@@ -395,6 +450,30 @@ describe('P1-3: Dormant TTL migration', () => {
 });
 
 // ============================================================================
+// P1-3: CLI entry point resolves to actual script
+// ============================================================================
+
+describe('P1-3: CLI entry point validation', () => {
+  it('persist-dormant-cursors script file exists at scripts/ path', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const scriptPath = resolve(import.meta.dirname, '..', 'scripts', 'persist-dormant-cursors.mjs');
+    assert.ok(existsSync(scriptPath), `CLI script must exist at ${scriptPath}`);
+  });
+
+  it('persist-dormant-cursors script is importable (dist/ dependency built)', async (t) => {
+    if (skipWithoutRedis(t)) return;
+    // Verify the CLI script's dynamic import resolves (needs dist/ built)
+    try {
+      const mod = await import('../dist/domains/cats/services/stores/redis/persist-dormant-cursors.js');
+      assert.ok(typeof mod.persistDormantCursors === 'function', 'Module must export persistDormantCursors');
+    } catch (err) {
+      assert.fail(`persist-dormant-cursors dist import failed: ${err.message}`);
+    }
+  });
+});
+
+// ============================================================================
 // Lua guard: NaN/fractional hwm blocks ALL mutations
 // ============================================================================
 
@@ -442,6 +521,10 @@ describe('Lua hwm guard: NaN and fractional rejection', () => {
         },
         'Append with NaN hwm must throw VISIBILITY_HWM_NAN',
       );
+
+      // Zero-mutation assertion: HWM must remain poisoned (reject = no side effects)
+      const hwmAfter = await r.hget(metaKey, 'hwm');
+      assert.equal(hwmAfter, 'nan', 'HWM must remain poisoned after rejected append');
     } finally {
       // Cleanup all keys for this thread
       const metaKey = `msg:visibility-meta:${threadId}`;
@@ -488,6 +571,10 @@ describe('Lua hwm guard: NaN and fractional rejection', () => {
         },
         'Append with fractional hwm must throw VISIBILITY_HWM_INVALID',
       );
+
+      // Zero-mutation assertion
+      const hwmAfter = await r.hget(metaKey, 'hwm');
+      assert.equal(hwmAfter, '1.5', 'HWM must remain poisoned after rejected append');
     } finally {
       const metaKey = `msg:visibility-meta:${threadId}`;
       await r.del(metaKey);
@@ -505,7 +592,20 @@ describe('Lua hwm guard: NaN and fractional rejection', () => {
       await ensureModules();
       const store = new RedisMessageStore(r);
 
-      // First append a queued message (triggers migration)
+      // Step 1: Direct append to trigger ensureVisibilityMigrated and set the
+      // migration-complete flag. Without this, markDelivered's internal call
+      // to ensureVisibilityMigrated re-runs migration and overwrites the
+      // poisoned hwm (Sol R4 P2-5: queued append may not set the flag).
+      await store.append({
+        userId: 'u1',
+        catId: null,
+        content: 'trigger-migration',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+        threadId,
+      });
+
+      // Step 2: Queued append (the message to be delivered)
       const msg = await store.append({
         userId: 'u1',
         catId: 'opus',
@@ -516,10 +616,10 @@ describe('Lua hwm guard: NaN and fractional rejection', () => {
         deliveryStatus: 'queued',
       });
 
-      // Poison hwm after append (migration already ran)
+      // Step 3: Poison hwm AFTER migration flag is set
       await r.hset(metaKey, 'hwm', 'nan');
 
-      // Deliver should fail-closed
+      // Step 4: Deliver should hit the poisoned hwm guard
       await assert.rejects(
         () => store.markDelivered(msg.id, Date.now()),
         (err) => {
@@ -528,6 +628,11 @@ describe('Lua hwm guard: NaN and fractional rejection', () => {
         },
         'Deliver with NaN hwm must throw VISIBILITY_HWM_NAN',
       );
+
+      // Zero-mutation assertion: verify the queued message was NOT advanced
+      // (hash, ZSET, HWM should be unchanged from poisoned state)
+      const hwmAfter = await r.hget(metaKey, 'hwm');
+      assert.equal(hwmAfter, 'nan', 'HWM must remain poisoned (zero mutation on reject)');
     } finally {
       await r.del(metaKey);
     }

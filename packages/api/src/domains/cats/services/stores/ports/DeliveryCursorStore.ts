@@ -94,16 +94,20 @@ export class DeliveryCursorStore {
           // #1200 P2-3: canonicalize before comparison (async resolver)
           if (memValue) {
             const cmp = await this.compareCanonical(memValue, redisValue, threadId);
-            return cmp > 0 ? memValue : redisValue;
+            const winner = cmp > 0 ? memValue : redisValue;
+            // #1200 P1-4: canonicalize return value so consumers never see raw v1.
+            // Without this, compareCursors(v2, rawV1) returns 0 (indeterminate),
+            // which consumers using `<= 0` interpret as "already processed".
+            return this.canonicalize(winner, threadId);
           }
-          return redisValue;
+          return this.canonicalize(redisValue, threadId);
         }
         // Redis returned null — fall through to return memValue below
       } catch (err) {
         log.warn({ err }, 'getDeliveryCursor failed, fallback to in-memory cursor');
       }
     }
-    return memValue;
+    return memValue ? this.canonicalize(memValue, threadId) : memValue;
   }
 
   /**
@@ -179,16 +183,18 @@ export class DeliveryCursorStore {
           // #1200 P2-3: canonicalize before comparison
           if (memValue) {
             const cmp = await this.compareCanonical(memValue, redisValue, threadId);
-            return cmp > 0 ? memValue : redisValue;
+            const winner = cmp > 0 ? memValue : redisValue;
+            // #1200 P1-4: canonicalize return — prevent cross-format 0 leak to consumers
+            return this.canonicalize(winner, threadId);
           }
-          return redisValue;
+          return this.canonicalize(redisValue, threadId);
         }
         // Redis returned null — fall through to return memValue below
       } catch (err) {
         log.warn({ err }, 'getMentionAckCursor failed, fallback to in-memory');
       }
     }
-    return memValue;
+    return memValue ? this.canonicalize(memValue, threadId) : memValue;
   }
 
   /**
@@ -261,15 +267,17 @@ export class DeliveryCursorStore {
           // #1200 P2-3: canonicalize before comparison
           if (memValue) {
             const cmp = await this.compareCanonical(memValue, redisValue, threadId);
-            return cmp > 0 ? memValue : redisValue;
+            const winner = cmp > 0 ? memValue : redisValue;
+            // #1200 P1-4: canonicalize return — prevent cross-format 0 leak to consumers
+            return this.canonicalize(winner, threadId);
           }
-          return redisValue;
+          return this.canonicalize(redisValue, threadId);
         }
       } catch (err) {
         log.warn({ err }, 'getSeenCursor failed, fallback to in-memory');
       }
     }
-    return memValue;
+    return memValue ? this.canonicalize(memValue, threadId) : memValue;
   }
 
   /**

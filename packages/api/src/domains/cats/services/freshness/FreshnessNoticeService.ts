@@ -18,6 +18,7 @@
 
 import type { CatId } from '@cat-cafe/shared';
 import { freshnessNoticeAttached, freshnessNoticeDeferred } from '../../../../infrastructure/telemetry/instruments.js';
+import { compareCursors } from '../stores/cursor.js';
 import type { FreshnessAttentionEvent, NoticeAttachedEvent } from './FreshnessAttentionEventLog.js';
 import type { FreshnessInvocationState } from './FreshnessInvocationStateStore.js';
 import type { RuntimeCapabilityDescriptor } from './RuntimeCapabilityDescriptor.js';
@@ -191,11 +192,12 @@ export class FreshnessNoticeService {
     // P1-2 fix: filter out notices that the cat has already read past
     // (seenCursor advanced beyond notice.maxMessageId = implicitly resolved).
     //
-    // #1200 §8.7: Both maxMessageId and seenCursor are now v2 cursors
-    // (visibility-domain), so lex comparison correctly handles late-delivered
-    // queued messages (previous P2-R4-1 limitation resolved by v2 migration).
+    // #1200 P1-4: use compareCursors for cross-format safety.
+    // Raw `>` fails when maxMessageId is v1 and seenCursor is v2 (or vice versa).
+    // compareCursors handles same-format correctly; cross-format returns 0
+    // which `> 0` rejects (fail-closed: keep the notice if indeterminate).
     if (currentSeenCursor) {
-      unresolved = unresolved.filter((n) => n.maxMessageId > currentSeenCursor);
+      unresolved = unresolved.filter((n) => compareCursors(n.maxMessageId, currentSeenCursor) > 0);
     }
 
     if (unresolved.length === 0) return null;

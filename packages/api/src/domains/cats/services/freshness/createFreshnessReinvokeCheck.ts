@@ -20,6 +20,7 @@ import {
   freshnessReinvokeSkipped,
   freshnessReinvokeTriggered,
 } from '../../../../infrastructure/telemetry/instruments.js';
+import { compareCursors } from '../stores/cursor.js';
 import type { IMessageStore } from '../stores/ports/MessageStore.js';
 import { FreshnessAttentionEventLog } from './FreshnessAttentionEventLog.js';
 import { FreshnessInvocationStateStore } from './FreshnessInvocationStateStore.js';
@@ -109,11 +110,13 @@ export function createFreshnessReinvokeCheck(deps: FreshnessReinvokeCheckDeps): 
       // 3b. Filter out notices the cat has already read past (GPT52 R2 P1).
       // Matches B2 FreshnessNoticeService pattern: notices with
       // maxMessageId <= seenCursor are implicitly resolved (cat advanced past them).
-      // #1200 §8.7: Both maxMessageId and seenCursor are now v2 cursors
-      // (visibility-domain), so lex comparison correctly orders late-delivered messages.
+      // #1200 P1-4: use compareCursors for cross-format safety.
+      // Raw `>` fails when maxMessageId is v1 and seenCursor is v2 (or vice versa).
+      // compareCursors handles same-format correctly; cross-format returns 0
+      // which `> 0` rejects (fail-closed: keep the notice if indeterminate).
       const preFilterNoticeCount = unresolvedNotices.length;
       if (seenCursor) {
-        unresolvedNotices = unresolvedNotices.filter((n) => n.maxMessageId > seenCursor);
+        unresolvedNotices = unresolvedNotices.filter((n) => compareCursors(n.maxMessageId, seenCursor) > 0);
       }
       // Count of notices implicitly acked by cursor advancement (removed by filter).
       // Used for unified ack counting regardless of subsequent reinvoke/skip decision

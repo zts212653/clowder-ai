@@ -28,7 +28,7 @@
     "test:integration": "bash ./scripts/with-test-home.sh node --test test/integration/*.test.js",
     "test:pty": "pnpm run build && node --import $(pwd)/test/helpers/setup-cat-registry.js --test --test-timeout=120000 test/f230-pty-driver.test.js",
     "test:cli": "node --import tsx --test test/cli/*.test.ts",
-    "persist-dormant-cursors": "pnpm run build && node dist/scripts/persist-dormant-cursors.mjs",
+    "persist-dormant-cursors": "pnpm run build && node scripts/persist-dormant-cursors.mjs",
     "lint": "tsc --noEmit",
     "clean": "rm -rf dist"
   },

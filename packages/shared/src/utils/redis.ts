@@ -117,8 +117,16 @@ if cur then
     if ttl == 0 then redis.call('PERSIST', KEYS[1]) end
     return 0
   elseif not curSeq and newSeq then
-    -- Stored unresolvable (pruned v1), incoming resolvable: accept (upgrade)
-    -- Safe: new cursor has known position; old cursor's message is gone
+    -- Stored v1 unresolvable (message hash pruned), incoming v2 resolvable.
+    -- Fallback to message ID lex comparison (same strategy as both-unresolvable).
+    -- Conservative: only advances when incoming message ID is lex-later than
+    -- stored raw ID. Handles Sol R4 P1-1 counterexample (stored=msgB > incoming
+    -- v2's msgA → reject). DeliveryCursorStore canonicalization + getters
+    -- handle the common case where stored message hash still exists.
+    if newId <= curId then
+      if ttl == 0 then redis.call('PERSIST', KEYS[1]) end
+      return 0
+    end
   else
     -- Both unresolvable: lex comparison fallback (best-effort for pruned v1-vs-v1)
     if ARGV[1] <= cur then
