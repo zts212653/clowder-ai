@@ -83,14 +83,22 @@ local metaKey = kp .. 'msg:visibility-meta:' .. threadId
 local visKey = kp .. 'msg:visibility:' .. threadId
 if not isQueued then
   local hwmRaw = redis.call('HGET', metaKey, 'hwm')
-  local hwm = tonumber(hwmRaw) or 0
-
-  -- #1200 Sol R1 P1: guard NaN/fractional/negative hwm (defense-in-depth)
-  if hwm ~= hwm then
-    return redis.error_reply('VISIBILITY_HWM_NAN: metaKey=' .. metaKey)
-  end
-  if hwm ~= math.floor(hwm) or hwm < 0 then
-    return redis.error_reply('VISIBILITY_HWM_INVALID: hwm=' .. tostring(hwm) .. ' metaKey=' .. metaKey)
+  local hwm
+  if hwmRaw == false then
+    hwm = 0  -- field genuinely missing (fresh thread)
+  else
+    hwm = tonumber(hwmRaw)
+    -- #1200 Sol R1+R2: fail-closed for ALL non-integer states, not just NaN.
+    -- tonumber('garbage')→nil, tonumber('nan')→nan, tonumber('1.5')→1.5
+    if hwm == nil then
+      return redis.error_reply('VISIBILITY_HWM_UNPARSEABLE: raw=' .. tostring(hwmRaw) .. ' metaKey=' .. metaKey)
+    end
+    if hwm ~= hwm then
+      return redis.error_reply('VISIBILITY_HWM_NAN: metaKey=' .. metaKey)
+    end
+    if hwm ~= math.floor(hwm) or hwm < 0 then
+      return redis.error_reply('VISIBILITY_HWM_INVALID: hwm=' .. tostring(hwm) .. ' metaKey=' .. metaKey)
+    end
   end
 
   local t = redis.call('TIME')
@@ -187,14 +195,20 @@ local metaKey = kp .. 'msg:visibility-meta:' .. threadId
 local visKey = kp .. 'msg:visibility:' .. threadId
 
 local hwmRaw = redis.call('HGET', metaKey, 'hwm')
-local hwm = tonumber(hwmRaw) or 0
-
--- #1200 Sol R1 P1: guard NaN/fractional/negative hwm (defense-in-depth)
-if hwm ~= hwm then
-  return redis.error_reply('VISIBILITY_HWM_NAN: metaKey=' .. metaKey)
-end
-if hwm ~= math.floor(hwm) or hwm < 0 then
-  return redis.error_reply('VISIBILITY_HWM_INVALID: hwm=' .. tostring(hwm) .. ' metaKey=' .. metaKey)
+local hwm
+if hwmRaw == false then
+  hwm = 0  -- field genuinely missing (fresh thread)
+else
+  hwm = tonumber(hwmRaw)
+  if hwm == nil then
+    return redis.error_reply('VISIBILITY_HWM_UNPARSEABLE: raw=' .. tostring(hwmRaw) .. ' metaKey=' .. metaKey)
+  end
+  if hwm ~= hwm then
+    return redis.error_reply('VISIBILITY_HWM_NAN: metaKey=' .. metaKey)
+  end
+  if hwm ~= math.floor(hwm) or hwm < 0 then
+    return redis.error_reply('VISIBILITY_HWM_INVALID: hwm=' .. tostring(hwm) .. ' metaKey=' .. metaKey)
+  end
 end
 
 local t = redis.call('TIME')

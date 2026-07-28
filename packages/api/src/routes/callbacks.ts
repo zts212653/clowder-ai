@@ -3395,31 +3395,25 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // Sparse reads (keyword filter, messageId window, catId subset) return non-contiguous
     // subsets — advancing cursor to the last result would mark skipped messages as "seen"
     // and suppress future freshness holds for messages the cat never read (gpt52 R1-P1-2, R2-P1-2).
+    //
+    // #1200 P1-2 DISABLED: time-domain pages from getByThreadBefore are NOT
+    // visibility-contiguous. Late-delivered Q may have older timestamp than C/D but
+    // higher visibilitySeq. With limit=N, the time-domain page can skip Q entirely
+    // (returning [C,D] and missing Q/101 between them). Neither filtered[-1] (misses
+    // Q permanently) nor max(cursorFor) (acks D/102 past unseen Q/101) is safe.
+    // seenCursor is a scalar prefix promise — only a visibility-contiguous read can
+    // advance it without creating false "seen" claims.
+    //
+    // TODO(#1200): Re-enable once thread-context has a visibility-contiguous mode,
+    // OR computes the "max visibility prefix actually covered by the returned set."
+    // Until then, seenCursor advances via GET /read/latest (visibility-domain)
+    // and manual PATCH /read (explicit canonicalized ack).
     if (deliveryCursorStore && filtered.length > 0 && principal.kind === 'invocation' && isContiguousRead) {
       try {
-        // #1200 Sol R1 P1: use visibility-domain max, NOT time-domain tail.
-        // Play-mode `filtered` is time-sorted (getByThreadBefore), but late-delivered
-        // Q may have older timestamp than C while having higher visibilitySeq.
-        // Taking filtered[-1] (time-tail = C) would miss Q's higher visibility position,
-        // causing Q to remain permanently unread. Instead, find the max v2 cursor
-        // across ALL returned messages — this is the visibility-contiguous high-water mark.
-        let maxSeenCursor = '';
-        for (const msg of filtered) {
-          let c = cursorFor(msg);
-          if (!c.startsWith('v2:') && effectiveThreadId && messageStore.canonicalizeCursor) {
-            const canon = await messageStore.canonicalizeCursor(msg.id, effectiveThreadId);
-            if (canon) c = canon;
-          }
-          if (c > maxSeenCursor) maxSeenCursor = c;
-        }
-        if (maxSeenCursor) {
-          await deliveryCursorStore.ackSeenCursor(
-            principalUserId,
-            principalCatId as CatId,
-            effectiveThreadId,
-            maxSeenCursor,
-          );
-        }
+        // #1200 P1-2: DISABLED — seenCursor cannot be safely advanced from
+        // time-domain pages. See TODO above. seenCursor still advances via
+        // GET /read/latest and PATCH /read (both use visibility-domain).
+        void 0; // no-op; block kept for structural clarity + easy re-enable
       } catch (err) {
         // Fail-open: don't block thread-context on seenCursor push failure
         app.log.warn(
