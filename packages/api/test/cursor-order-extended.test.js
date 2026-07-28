@@ -309,4 +309,26 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const result = store.markDelivered(q.id, Date.now() + 1000);
     assert.equal(result, null, 'Second delivery should be no-op (CAS guard)');
   });
+
+  // ---- Pruned v1 cursor fallback: FM-4 parity ----
+  // When a v1 cursor's message is not found, Memory must rescan from start
+  // (same as Redis), NOT filter by id > cursor.id (that reintroduces FM-3).
+  it('Pruned v1 cursor fallback rescans from start, not lex-filter', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = new MessageStore();
+    const threadId = `pruned-v1-${Date.now()}`;
+
+    // Create 3 messages
+    store.append({ userId: 'u1', catId: null, content: 'M1', mentions: [], timestamp: Date.now() - 2000, threadId });
+    store.append({ userId: 'u1', catId: null, content: 'M2', mentions: [], timestamp: Date.now() - 1000, threadId });
+    store.append({ userId: 'u1', catId: null, content: 'M3', mentions: [], timestamp: Date.now(), threadId });
+
+    // Use a fake cursor ID that doesn't exist (simulates pruned message)
+    const fakeCursor = 'zzz-pruned-cursor-id';
+    const page = store.getByThreadAfter(threadId, fakeCursor);
+
+    // Pruned fallback must return ALL messages (rescan from start), not filter by lex
+    assert.equal(page.length, 3, 'Pruned v1 cursor must rescan from start');
+    assert.equal(page[0].content, 'M1');
+  });
 });

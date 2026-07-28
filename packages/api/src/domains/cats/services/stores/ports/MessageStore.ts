@@ -1061,15 +1061,12 @@ export class MessageStore {
       return visible.slice(cursorIdx + 1, cursorIdx + 1 + max).map((v) => v.msg);
     }
 
-    // Pruned v1 cursor fallback (§8.4 step 3): scan from start with id filter
-    const matches: StoredMessage[] = [];
-    for (const v of visible) {
-      if (v.msg.id > cursor.id) {
-        matches.push(v.msg);
-        if (matches.length >= max) break;
-      }
-    }
-    return matches;
+    // Pruned v1 cursor fallback (§8.4 step 3): full rescan from visibility origin.
+    // #1200 codex P1: do NOT filter by `id > cursor.id` — that reintroduces FM-3
+    // (lex-ID ordering disease). A far-future message that is later pruned would
+    // permanently hide all normally-timestamped messages. Redis rescans from start
+    // for pruned cursors; Memory must do the same for FM-4 parity.
+    return visible.slice(0, max).map((v) => v.msg);
   }
 
   /**

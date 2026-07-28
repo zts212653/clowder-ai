@@ -308,6 +308,13 @@ export class RedisMessageStore {
       ...hashFields, // [10+N..] hash field pairs
     ];
 
+    // #1200 codex P1: ensure visibility migration is complete BEFORE the append
+    // Lua marks the thread as migrated via HSETNX. Without this, the first
+    // post-deploy append to a legacy thread would skip backfilling legacy members.
+    if (msg.deliveryStatus !== 'queued') {
+      await this.ensureVisibilityMigrated(threadId);
+    }
+
     try {
       await this.redis.eval(APPEND_WITH_VISIBILITY_LUA, 1, hashKey, ...argv);
     } catch (error) {
@@ -800,16 +807,12 @@ export class RedisMessageStore {
         await this.hydrateAndFilter(sameFiltered, userId, maxResults, result, staleIds, sameScores);
       }
       // Strict segment: visibilitySeq > afterSeq (chunked)
+      // #1200 codex P2: pass maxResults (absolute total), not maxResults - result.length.
+      // scanVisibilityChunked's while loop uses `result.length < maxCollect` — result
+      // already contains items from the same-score segment, so passing the absolute
+      // target lets the shared accumulator stop at the right total.
       if (result.length < maxResults) {
-        await this.scanVisibilityChunked(
-          visKey,
-          `(${afterSeq}`,
-          '+inf',
-          maxResults - result.length,
-          userId,
-          result,
-          staleIds,
-        );
+        await this.scanVisibilityChunked(visKey, `(${afterSeq}`, '+inf', maxResults, userId, result, staleIds);
       }
     }
 
@@ -947,8 +950,13 @@ export class RedisMessageStore {
       // #1200 P1-B fix: NO lex-ID filtering. Pruned-cursor fallback = full rescan
       // from (0,"") per §8.4 step 3. The old `afterId ? ids.filter(id > afterId) : ids`
       // reintroduced FM-3 (lex ID ordering disease). Score-range params handle positioning.
+      //
+      // #1200 codex P2: pass `maxCollect` directly (not `maxCollect - result.length`).
+      // hydrateAndFilter checks `result.length < maxCollect` internally — result is
+      // a shared accumulator, so subtracting result.length here double-counts and
+      // causes under-return on multi-chunk pages.
       if (ids.length > 0) {
-        await this.hydrateAndFilter(ids, userId, maxCollect - result.length, result, staleIds, scores);
+        await this.hydrateAndFilter(ids, userId, maxCollect, result, staleIds, scores);
       }
 
       if (ids.length < CHUNK) break;
@@ -1268,6 +1276,10 @@ export class RedisMessageStore {
     // Delete the thread sorted set
     pipeline.del(key);
 
+    // #1200: Delete visibility ZSET + metadata hash (these are permanent — no TTL)
+    pipeline.del(MessageKeys.threadVisibility(threadId));
+    pipeline.del(MessageKeys.threadVisibilityMeta(threadId));
+
     // Note: We don't clean up global timeline, user timeline, or mention sets
     // as those will auto-expire via TTL. Cleaning them would be O(n) expensive.
 
@@ -1421,6 +1433,15 @@ export class RedisMessageStore {
   async markDelivered(id: string, deliveredAt: number): Promise<MarkDeliveredResult | null> {
     assertValidStoredMessageTimestamp(deliveredAt);
     const hashKey = MessageKeys.detail(id);
+
+    // #1200 codex P1: ensure visibility migration before DELIVER Lua marks migrated.
+    // We need threadId for ensureVisibilityMigrated — get it from the hash.
+    // The extra HGET is acceptable: delivery is a one-time operation per message.
+    const threadId = await this.redis.hget(hashKey, 'threadId');
+    if (threadId) {
+      await this.ensureVisibilityMigrated(threadId);
+    }
+
     // Atomic CAS: queued → delivered + visibilitySeq allocation.
     // #1200: DELIVER_WITH_VISIBILITY_LUA extends the original to atomically allocate
     // a visibilitySeq and ZADD into the visibility index upon delivery.
