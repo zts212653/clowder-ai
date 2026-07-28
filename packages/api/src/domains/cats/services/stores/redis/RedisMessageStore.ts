@@ -623,7 +623,7 @@ export class RedisMessageStore {
         await this.hydrateAndFilter(sameFiltered, userId, n, result, staleIds, sameScores, mentionFilter);
       }
       if (result.length < n) {
-        await this.scanVisibilityChunked(visKey, `(${afterSeq})`, '+inf', n, userId, result, staleIds, mentionFilter);
+        await this.scanVisibilityChunked(visKey, `(${afterSeq}`, '+inf', n, userId, result, staleIds, mentionFilter);
       }
     }
 
@@ -1008,7 +1008,8 @@ export class RedisMessageStore {
         staleIds.push(ids[i]!);
         continue;
       }
-      // Filter: isDelivered (skip queued/canceled), userId visibility, extra predicate
+      // Filter: soft-deleted, isDelivered (skip queued/canceled), userId visibility, extra predicate
+      if (msg.deletedAt) continue;
       if (!isDelivered(msg)) continue;
       if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
       if (extraFilter && !extraFilter(msg)) continue;
