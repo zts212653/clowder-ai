@@ -13,6 +13,20 @@ resolver: D4CrossThreadResolver
 inputs:
   - crossThreadReplyHint
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: SOURCE_THREAD
+    description: 来源 thread ID
+    placeholder: ""
+  - name: SENDER_CAT
+    description: 发送猫 ID
+    placeholder: ""
+  - name: EFFECT_LABEL
+    description: 跨线程回复效果标签
+    placeholder: ""
+  - name: CONSTRAINT_TEXT
+    description: 跨线程约束文本
+    placeholder: ""
 # Override constraints
 disableable: true
 

@@ -13,6 +13,11 @@ resolver: D13RoutingPolicyResolver
 inputs:
   - routingPolicy
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: ROUTING_PARTS
+    description: 路由策略组成部分
+    placeholder: ""
 # Override constraints
 disableable: true
 

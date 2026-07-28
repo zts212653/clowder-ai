@@ -14,6 +14,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { HookVariableDef } from '@cat-cafe/shared';
 import YAML from 'yaml';
 import { findMonorepoRoot } from '../../../../utils/monorepo-root.js';
 
@@ -173,8 +174,11 @@ export interface OverrideStatus {
 
 /** Known template-backed segments and their file mappings.
  *  Tier A (F237 template unification): simple {{VAR}} substitution.
- *  Existing: S6, S13, D8, D21. New Tier A: S1, S2, S8, D1, D5, D9-D11, D14, D16. */
-const TEMPLATE_FILES: Record<string, { base: string; local: string }> = {
+ *  Existing: S6, S13, D8, D21. New Tier A: S1, S2, S8, D1, D5, D9-D11, D14, D16.
+ *  Exported so parity checks between placeholders and hook manifest variables
+ *  can be enforced as a fail-closed invariant (F257 Console 判据⑤).
+ */
+export const TEMPLATE_FILES: Record<string, { base: string; local: string; variables?: HookVariableDef[] }> = {
   // ── L0 section templates (compiled by compile-system-prompt-l0.mjs) ──
   L1: { base: 'l1-parallel-world.md', local: '' },
   L2: { base: 'l2-carry-over.md', local: '' },
@@ -184,8 +188,26 @@ const TEMPLATE_FILES: Record<string, { base: string; local: string }> = {
   L6: { base: 'l6-capability-wakeup.md', local: '' },
   L7: { base: 'l7-collaboration-philosophy.md', local: '' },
   // ── Non-Builder segments (M/C/N/B — migrated to template) ──
-  M1: { base: 'm1-dispatch-mission.md', local: '' },
-  M2: { base: 'm2-transcript-hints.md', local: '' },
+  M1: {
+    base: 'm1-dispatch-mission.md',
+    local: '',
+    variables: [
+      { name: 'MISSION', description: '当前任务名称' },
+      { name: 'WORK_ITEM', description: '当前工作项' },
+      { name: 'PHASE', description: '当前阶段' },
+      { name: 'DONE_WHEN_BLOCK', description: '完成条件块' },
+      { name: 'LINKS_BLOCK', description: '相关链接块' },
+    ],
+  },
+  M2: {
+    base: 'm2-transcript-hints.md',
+    local: '',
+    variables: [
+      { name: 'TRANSCRIPT_PATH', description: '会议转录文件路径' },
+      { name: 'LATEST_RANGE_LINE', description: '最新时间范围行' },
+      { name: 'PARTICIPANTS_LINE', description: '参会者行' },
+    ],
+  },
   C1: { base: 'c1-mcp-callback.md', local: 'c1-mcp-callback.local.md' },
   N1: { base: 'n1-navigation.md', local: '' },
   // ── Existing templates ──
@@ -274,7 +296,9 @@ export function getTemplateRawContent(segmentId: string, useOverride: boolean): 
 }
 
 /** Get the base filename for a template-backed segment */
-export function getTemplateFileInfo(segmentId: string): { base: string; local: string } | null {
+export function getTemplateFileInfo(
+  segmentId: string,
+): { base: string; local: string; variables?: HookVariableDef[] } | null {
   return TEMPLATE_FILES[segmentId] ?? null;
 }
 

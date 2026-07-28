@@ -13,6 +13,11 @@ resolver: D9RoutingFeedbackResolver
 inputs:
   - routingFeedback
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: UNROUTED_MENTIONS
+    description: 未路由的 @ 提及
+    placeholder: ""
 # Override constraints
 disableable: true
 

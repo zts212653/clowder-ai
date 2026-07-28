@@ -92,9 +92,9 @@ export function SegmentEditorModal({ segmentId, segmentName, allowLocalOverride,
         return;
       }
       const payload = (await res.json()) as ContentResponse;
-      const cleaned = stripDisplayComments(payload.content);
-      setData({ ...payload, content: cleaned });
-      setDraft(cleaned);
+      // Keep raw source intact; stripping is only for preview rendering.
+      setData(payload);
+      setDraft(payload.content);
     } catch {
       if (id === reqRef.current) setError('网络错误');
     } finally {
@@ -187,8 +187,11 @@ export function SegmentEditorModal({ segmentId, segmentName, allowLocalOverride,
   }, [segmentId, fetchContent]);
 
   const isReadonly = !allowLocalOverride;
-  const missing = useMemo(() => (data ? missingPlaceholders(draft, data.content) : []), [draft, data]);
-  const canSave = missing.length === 0 && !saving;
+  const isDirty = data ? draft !== data.content : false;
+  // Validate against immutable base template, not the current effective overlay.
+  const missing = useMemo(() => (data ? missingPlaceholders(draft, data.baseContent) : []), [draft, data]);
+  const preview = useMemo(() => stripDisplayComments(draft), [draft]);
+  const canSave = isDirty && missing.length === 0 && !saving;
 
   return createPortal(
     <div
@@ -312,14 +315,27 @@ export function SegmentEditorModal({ segmentId, segmentName, allowLocalOverride,
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   disabled={isReadonly}
-                  rows={16}
+                  rows={12}
                   className="w-full rounded-md border-0 bg-transparent p-0 font-mono text-xs leading-relaxed focus:outline-none focus:ring-0"
                   style={{
                     color: 'var(--cafe-text-secondary)',
                     resize: 'vertical',
-                    minHeight: '200px',
+                    minHeight: '160px',
                   }}
                 />
+                {preview && preview !== draft.trim() && (
+                  <div
+                    className="mt-3 rounded-xl border border-dashed border-[var(--console-border)] p-3"
+                    data-testid="segment-editor-preview"
+                  >
+                    <SettingsText as="h4" variant="xs" tone="muted" className="mb-1 font-semibold">
+                      渲染预览（仅剥离注释）
+                    </SettingsText>
+                    <SettingsText as="pre" variant="xs" tone="secondary" className="whitespace-pre-wrap font-mono">
+                      {preview}
+                    </SettingsText>
+                  </div>
+                )}
               </div>
 
               {/* Actions */}

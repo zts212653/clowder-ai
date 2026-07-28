@@ -58,8 +58,8 @@ describe('SegmentEditorModal (F257 Console 判据⑤)', () => {
     allowLocalOverride: true,
     hasOverride: false,
     hasBackup: false,
-    content: 'Source with {{CALLABLE_MENTIONS}} and {{EXAMPLE_TARGET}}.',
-    baseContent: 'Source with {{CALLABLE_MENTIONS}} and {{EXAMPLE_TARGET}}.',
+    content: '<!-- S4: 协作格式 -->\nSource with {{CALLABLE_MENTIONS}} and {{EXAMPLE_TARGET}}.',
+    baseContent: '<!-- S4: 协作格式 -->\nSource with {{CALLABLE_MENTIONS}} and {{EXAMPLE_TARGET}}.',
     templateRef: 's4-collaboration.md',
     vars: ['CALLABLE_MENTIONS', 'EXAMPLE_TARGET'],
     variableDefs: [
@@ -89,7 +89,7 @@ describe('SegmentEditorModal (F257 Console 判据⑤)', () => {
     expect(document.body.textContent).toContain('@opus');
   });
 
-  it('loads source with placeholders into the editor', async () => {
+  it('loads raw source with HTML comments into the editor', async () => {
     apiFetch.mockResolvedValueOnce({ ok: true, json: async () => baseContentResponse });
 
     act(() => {
@@ -99,8 +99,36 @@ describe('SegmentEditorModal (F257 Console 判据⑤)', () => {
 
     const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
     expect(textarea).toBeTruthy();
+    expect(textarea.value).toContain('<!-- S4: 协作格式 -->');
     expect(textarea.value).toContain('{{CALLABLE_MENTIONS}}');
-    expect(textarea.value).toContain('{{EXAMPLE_TARGET}}');
+  });
+
+  it('shows stripped preview but keeps raw source untouched', async () => {
+    apiFetch.mockResolvedValueOnce({ ok: true, json: async () => baseContentResponse });
+
+    act(() => {
+      root.render(<SegmentEditorModal segmentId="S4" segmentName="协作格式" allowLocalOverride onClose={() => {}} />);
+    });
+    await flush();
+
+    const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
+    expect(textarea.value).toContain('<!-- S4: 协作格式 -->');
+    const preview = document.querySelector('[data-testid="segment-editor-preview"]') as HTMLPreElement;
+    expect(preview).toBeTruthy();
+    expect(preview.textContent).toContain('Source with {{CALLABLE_MENTIONS}}');
+    expect(preview.textContent).not.toContain('<!-- S4: 协作格式 -->');
+  });
+
+  it('disables save until source is edited (dirty guard)', async () => {
+    apiFetch.mockResolvedValueOnce({ ok: true, json: async () => baseContentResponse });
+
+    act(() => {
+      root.render(<SegmentEditorModal segmentId="S4" segmentName="协作格式" allowLocalOverride onClose={() => {}} />);
+    });
+    await flush();
+
+    const saveBtn = document.querySelector('[data-testid="segment-editor-save"]') as HTMLButtonElement;
+    expect(saveBtn.disabled).toBe(true);
   });
 
   it('PUTs only source content with placeholders, not expanded runtime values', async () => {
@@ -112,8 +140,14 @@ describe('SegmentEditorModal (F257 Console 判据⑤)', () => {
     });
     await flush();
 
+    const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
+    act(() => {
+      typeInto(textarea, '<!-- edited -->\nSource with {{CALLABLE_MENTIONS}} and {{EXAMPLE_TARGET}}.');
+    });
+    await flush();
+
     const saveBtn = document.querySelector('[data-testid="segment-editor-save"]') as HTMLButtonElement;
-    expect(saveBtn).toBeTruthy();
+    expect(saveBtn.disabled).toBe(false);
     act(() => saveBtn.click());
     await flush();
 
@@ -123,6 +157,7 @@ describe('SegmentEditorModal (F257 Console 判据⑤)', () => {
     if (!putCall) throw new Error('PUT call not found');
     const body = JSON.parse((putCall[1] as { body: string }).body);
     expect(body.content).toContain('{{CALLABLE_MENTIONS}}');
+    expect(body.content).toContain('<!-- edited -->');
     expect(body.content).not.toContain('@布偶猫');
   });
 
@@ -136,7 +171,7 @@ describe('SegmentEditorModal (F257 Console 判据⑤)', () => {
 
     const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
     act(() => {
-      typeInto(textarea, 'Source with @布偶猫 and @opus.');
+      typeInto(textarea, '<!-- edited -->\nSource with @布偶猫 and @opus.');
     });
     await flush();
 

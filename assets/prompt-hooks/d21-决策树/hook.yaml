@@ -13,6 +13,11 @@ resolver: D21DecisionTreeResolver
 inputs:
   - handoffDecisionTree
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: CC_MENTION
+    description: co-creator mention pattern (e.g. @co-creator)
+    placeholder: ""
 # Override constraints
 disableable: false
 

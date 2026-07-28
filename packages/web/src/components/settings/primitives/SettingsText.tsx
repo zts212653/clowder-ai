@@ -29,6 +29,7 @@ interface SettingsTextProps {
   className?: string;
   title?: string;
   id?: string;
+  'data-testid'?: string;
   style?: CSSProperties;
   children: ReactNode;
 }
@@ -40,6 +41,7 @@ export function SettingsText({
   className,
   title,
   id,
+  'data-testid': dataTestId,
   style,
   children,
 }: SettingsTextProps) {
@@ -48,6 +50,7 @@ export function SettingsText({
       className={`${variantMap[variant]} ${toneMap[tone]}${className ? ` ${className}` : ''}`}
       title={title}
       id={id}
+      data-testid={dataTestId}
       style={style}
     >
       {children}

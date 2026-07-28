@@ -13,6 +13,14 @@ resolver: D5PingPongResolver
 inputs:
   - pingPongWarning
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: OTHER_LABEL
+    description: 对方标签
+    placeholder: ""
+  - name: STREAK_COUNT
+    description: 连续互相 @ 轮数
+    placeholder: ""
 # Override constraints
 disableable: true
 

@@ -137,7 +137,8 @@ function extractPlaceholders(content: string): string[] {
 /**
  * Reject content that has replaced runtime-expanded values back into the source.
  * The saved source must retain every {{NAME}} placeholder present in the
- * current effective content (base or existing overlay).
+ * immutable base template. Using the current effective overlay as reference
+ * would let a legacy expanded overlay be re-saved without placeholders.
  */
 function validateSourcePlaceholders(content: string, referenceContent: string): string | null {
   const required = extractPlaceholders(referenceContent);
@@ -176,8 +177,9 @@ function resolveSegmentMeta(id: string): SegmentMeta | null {
       if (!vars.includes(m[1])) vars.push(m[1]);
     }
   }
-  // Canonical variable definitions come from the hook manifest registry.
-  const variableDefs = getHookVariableDefs(id) ?? [];
+  // Canonical variable definitions come from the hook manifest registry first,
+  // then fall back to the TEMPLATE_FILES registry for non-hook template-backed segments.
+  const variableDefs = getHookVariableDefs(id) ?? (fileInfo.variables || []);
   return {
     allowLocalOverride: !!fileInfo.local,
     ext,
@@ -331,8 +333,10 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
       }
 
       // Reject runtime-expanded values being written back as source.
-      const referenceContent = getTemplateRawContent(id, true) ?? '';
-      const placeholderErr = validateSourcePlaceholders(content, referenceContent);
+      // Use the immutable base template as reference, not the current effective
+      // overlay — otherwise a legacy expanded overlay could be re-saved.
+      const baseContent = getTemplateRawContent(id, false) ?? '';
+      const placeholderErr = validateSourcePlaceholders(content, baseContent);
       if (placeholderErr) {
         reply.status(400);
         return { error: placeholderErr };

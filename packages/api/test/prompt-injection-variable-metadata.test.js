@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import {
   getTemplateFileInfo,
@@ -83,6 +85,17 @@ async function withPreservedOverlay(segmentId, fn) {
   }
 }
 
+const ROOT = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))));
+const HOOKS_DIR = join(ROOT, 'assets', 'prompt-hooks');
+
+function extractPlaceholders(content) {
+  const names = new Set();
+  for (const m of content.matchAll(/\{\{(\w+)\}\}/g)) {
+    names.add(m[1]);
+  }
+  return [...names];
+}
+
 describe('prompt-injection variable metadata', () => {
   describe('GET /api/prompt-injection/segment/:id/content', () => {
     it('returns templateRef and variableDefs for a template-backed segment', async () => {
@@ -120,6 +133,26 @@ describe('prompt-injection variable metadata', () => {
         assert.equal(body.segmentId, 'S1');
         assert.equal(body.templateRef, 's1-identity.md');
         assert.ok(Array.isArray(body.variableDefs));
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('returns variableDefs from TEMPLATE_FILES registry for non-hook template-backed segments', async () => {
+      const app = await buildApp();
+      try {
+        const res = await app.inject({
+          method: 'GET',
+          url: '/api/prompt-injection/segment/M1/content',
+          headers: AUTH_HEADERS,
+        });
+        assert.equal(res.statusCode, 200, `expected 200, got ${res.statusCode}: ${res.body}`);
+        const body = JSON.parse(res.body);
+        assert.equal(body.segmentId, 'M1');
+        assert.ok(Array.isArray(body.variableDefs));
+        const missionDef = body.variableDefs.find((v) => v.name === 'MISSION');
+        assert.ok(missionDef, 'MISSION variable def should come from TEMPLATE_FILES registry');
+        assert.ok(missionDef.description && missionDef.description.length > 0, 'description should be present');
       } finally {
         await app.close();
       }
@@ -166,7 +199,9 @@ describe('prompt-injection variable metadata', () => {
         await withPreservedOverlay('S13', async () => {
           const app = await buildSessionApp();
           try {
-            const sourceWithPlaceholder = 'Rich block short: {{RICH_BLOCK_SHORT}}';
+            // Raw source must retain HTML comment bytes; stripping is a UI preview concern only.
+            const sourceWithPlaceholder =
+              '<!-- @segment S13 --><!-- Variable: {{RICH_BLOCK_SHORT}} -->\nRich block short: {{RICH_BLOCK_SHORT}}';
             const expandedValue = 'Rich block short: <xml/>';
 
             const saveRes = await app.inject({
@@ -177,7 +212,7 @@ describe('prompt-injection variable metadata', () => {
             });
             assert.equal(saveRes.statusCode, 200, `expected 200, got ${saveRes.statusCode}: ${saveRes.body}`);
 
-            // Now verify GET still returns the source with placeholder
+            // Now verify GET still returns the source with placeholder and comment bytes
             const getRes = await app.inject({
               method: 'GET',
               url: '/api/prompt-injection/segment/S13/content',
@@ -185,6 +220,7 @@ describe('prompt-injection variable metadata', () => {
             });
             const body = JSON.parse(getRes.body);
             assert.ok(body.content.includes('{{RICH_BLOCK_SHORT}}'), 'saved content should retain placeholder');
+            assert.ok(body.content.includes('<!-- @segment S13 -->'), 'saved content should retain HTML comment bytes');
 
             // Expanded value should not be persisted as override
             const badSaveRes = await app.inject({
@@ -198,6 +234,50 @@ describe('prompt-injection variable metadata', () => {
               400,
               `expected 400 for expanded value, got ${badSaveRes.statusCode}: ${badSaveRes.body}`,
             );
+          } finally {
+            await app.close();
+          }
+        });
+      });
+    });
+
+    it('rejects a legacy expanded overlay without placeholders and allows recovery with canonical source', async () => {
+      await withDefaultOwnerUserId(TEST_USER_ID, async () => {
+        await withPreservedOverlay('S13', async () => {
+          const app = await buildSessionApp();
+          try {
+            const localPath = getTemplateOverlayPath('S13');
+            assert.ok(localPath);
+            // Simulate a legacy overlay that already contains an expanded runtime value.
+            const expandedOverlay = 'Rich block short: <xml/>';
+            writeFileSync(localPath, expandedOverlay, 'utf-8');
+
+            // Re-saving the expanded value must be rejected against the canonical base template.
+            const badRes = await app.inject({
+              method: 'PUT',
+              url: '/api/prompt-injection/segment/S13/override',
+              headers: LOCAL_WRITE_HEADERS,
+              payload: { content: expandedOverlay },
+            });
+            assert.equal(badRes.statusCode, 400, `expected 400, got ${badRes.statusCode}: ${badRes.body}`);
+
+            // Recovery: saving canonical source with the required placeholder succeeds.
+            const canonicalSource = '<!-- S13 source -->\nRich block short: {{RICH_BLOCK_SHORT}}';
+            const goodRes = await app.inject({
+              method: 'PUT',
+              url: '/api/prompt-injection/segment/S13/override',
+              headers: LOCAL_WRITE_HEADERS,
+              payload: { content: canonicalSource },
+            });
+            assert.equal(goodRes.statusCode, 200, `expected 200, got ${goodRes.statusCode}: ${goodRes.body}`);
+
+            const getRes = await app.inject({
+              method: 'GET',
+              url: '/api/prompt-injection/segment/S13/content',
+              headers: AUTH_HEADERS,
+            });
+            const body = JSON.parse(getRes.body);
+            assert.ok(body.content.includes('{{RICH_BLOCK_SHORT}}'), 'recovered content should retain placeholder');
           } finally {
             await app.close();
           }
@@ -304,6 +384,37 @@ variables:
       } finally {
         unlinkSync(yamlPath);
       }
+    });
+  });
+
+  describe('hook variable metadata parity', () => {
+    it('every {{VAR}} placeholder in a hook template has a canonical variable definition', async () => {
+      const entries = await readdir(HOOKS_DIR);
+      const missing = [];
+      const emptyDesc = [];
+      for (const entry of entries) {
+        const yamlPath = join(HOOKS_DIR, entry, 'hook.yaml');
+        if (!existsSync(yamlPath)) continue;
+        const result = parseHookManifest(yamlPath);
+        if (!result.ok) continue;
+        const { manifest } = result;
+        if (!manifest.template) continue;
+        let templatePath = join(HOOKS_DIR, entry, manifest.template);
+        if (!existsSync(templatePath)) templatePath = join(TEMPLATES_DIR, manifest.template);
+        if (!existsSync(templatePath)) continue;
+        const template = readFileSync(templatePath, 'utf-8');
+        const placeholders = extractPlaceholders(template);
+        if (placeholders.length === 0) continue;
+        const defs = new Map((manifest.variables || []).map((v) => [v.name, v]));
+        for (const name of placeholders) {
+          const def = defs.get(name);
+          if (!def) missing.push({ hook: manifest.id, var: name });
+          else if (!def.description || def.description.trim().length === 0)
+            emptyDesc.push({ hook: manifest.id, var: name });
+        }
+      }
+      assert.deepEqual(missing, [], 'all placeholders must have variable definitions');
+      assert.deepEqual(emptyDesc, [], 'all variable definitions must have non-empty descriptions');
     });
   });
 });

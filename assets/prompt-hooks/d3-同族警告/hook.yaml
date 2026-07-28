@@ -13,6 +13,20 @@ resolver: D3SameBreedResolver
 inputs:
   - sameBreedWarning
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: FROM_VARIANT
+    description: 消息发送方变体名
+    placeholder: ""
+  - name: FROM_MODEL
+    description: 消息发送方模型
+    placeholder: ""
+  - name: SELF_VARIANT
+    description: 当前猫变体名
+    placeholder: ""
+  - name: SELF_MODEL
+    description: 当前猫模型
+    placeholder: ""
 # Override constraints
 disableable: true
 
