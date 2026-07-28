@@ -18,12 +18,12 @@ variables:
   - name: CALLABLE_MENTIONS
     description: 当前可 @ 的队友句柄列表
     placeholder: "@布偶猫 @缅因猫"
-  - name: EXAMPLE_TARGET
-    description: 一个具体队友句柄示例，用于展示正确/错误 @ 格式
-    placeholder: "@opus"
   - name: DUPLICATE_NAMES_HINT
     description: 当出现同名队友时的额外提示（可为空）
     placeholder: ""
+  - name: EXAMPLE_TARGET
+    description: 一个具体队友句柄示例，用于展示正确/错误 @ 格式
+    placeholder: "@opus"
 
 # Override constraints
 disableable: true

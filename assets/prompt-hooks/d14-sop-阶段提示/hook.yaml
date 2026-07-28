@@ -13,6 +13,20 @@ resolver: D14SopStageResolver
 inputs:
   - sopStageHint
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: FEATURE_ID
+    description: 功能 ID
+    placeholder: ""
+  - name: STAGE
+    description: SOP 阶段
+    placeholder: ""
+  - name: SUGGESTED_SKILL
+    description: 建议加载的 skill
+    placeholder: ""
+  - name: SOURCE_PART
+    description: 来源信息片段
+    placeholder: ""
 # Override constraints
 disableable: true
 

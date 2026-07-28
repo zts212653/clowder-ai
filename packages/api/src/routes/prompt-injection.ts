@@ -443,13 +443,21 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
     }
 
     // Validate backup content before restoring (P2-7: same gate as save path)
+    const bakContent = readFileSync(bakPath, 'utf-8');
     if (meta.ext === 'yaml') {
-      const bakContent = readFileSync(bakPath, 'utf-8');
       const yamlErr = validateYamlStringMapping(bakContent);
       if (yamlErr) {
         reply.status(400);
         return { error: `Backup file is invalid — ${yamlErr}` };
       }
+    }
+
+    // Reject backups that contain runtime-expanded values instead of placeholders.
+    const baseContent = getTemplateRawContent(id, false) ?? '';
+    const placeholderErr = validateSourcePlaceholders(bakContent, baseContent);
+    if (placeholderErr) {
+      reply.status(400);
+      return { error: `Backup file is invalid — ${placeholderErr}` };
     }
 
     atomicCopyFileSync(bakPath, localPath);

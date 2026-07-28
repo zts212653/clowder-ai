@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Populate hook.yaml `variables` metadata from template {{PLACEHOLDER}} usage.
- * Preserves original file content/comments by inserting the variables block
- * before the `# Override constraints` section.
- * Run from repo root.
+ * Populate/merge hook.yaml `variables` metadata from the runtime TEMPLATE_FILES
+ * template (the same source the Console uses). Preserves original file
+ * content/comments by replacing/inserting only the variables block.
+ * Run from repo root after building packages/api.
  */
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -13,7 +13,10 @@ import YAML from 'yaml';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
 const hooksDir = join(root, 'assets', 'prompt-hooks');
-const templatesDir = join(root, 'assets', 'prompt-templates');
+
+const { TEMPLATE_FILES, getTemplateRawContent } = await import(
+  join(root, 'packages', 'api', 'dist', 'domains', 'cats', 'services', 'context', 'prompt-template-loader.js')
+);
 
 const knownDescriptions = {
   CALLABLE_MENTIONS: '当前可 @ 的队友句柄列表',
@@ -125,6 +128,9 @@ function buildVariablesBlock(placeholders, comments, existingDefs) {
   return `${lines.join('\n')}\n`;
 }
 
+const variablesBlockPattern =
+  /\n# Variable metadata \(canonical source for Console editor\)\nvariables:\n(?: {2}- name:[^\n]*\n(?: {4}[^\n]*\n)*)*/s;
+
 async function main() {
   const entries = await readdir(hooksDir);
   for (const entry of entries) {
@@ -137,55 +143,46 @@ async function main() {
       continue;
     }
 
-    // Skip files that already have a variables block.
-    if (/\nvariables:\s*\n/.test(original)) continue;
-
     let yaml;
     try {
       yaml = YAML.parse(original);
     } catch {
       continue;
     }
-    if (!yaml.template) continue;
+    const id = yaml.id;
+    if (!id || !TEMPLATE_FILES[id]) continue;
 
-    let templatePath = join(hookDir, yaml.template);
-    try {
-      await readFile(templatePath, 'utf8');
-    } catch {
-      templatePath = join(templatesDir, yaml.template);
-    }
-
-    let template;
-    try {
-      template = await readFile(templatePath, 'utf8');
-    } catch {
-      console.warn(`Missing template for ${yaml.id}: ${yaml.template}`);
+    const raw = getTemplateRawContent(id, false);
+    if (!raw) {
+      console.warn(`No runtime template for ${id}`);
       continue;
     }
 
-    const placeholders = extractPlaceholders(template);
+    const placeholders = extractPlaceholders(raw);
     if (placeholders.length === 0) continue;
 
-    const comments = extractVarComments(template);
+    const comments = extractVarComments(raw);
     const block = buildVariablesBlock(placeholders, comments, yaml.variables ?? []);
 
-    let inserted = false;
-    // Insert before the Override constraints section to keep metadata grouped.
-    if (original.includes('\n# Override constraints\n')) {
-      original = original.replace('\n# Override constraints\n', `${block}# Override constraints\n`);
-      inserted = true;
+    let updated;
+    if (variablesBlockPattern.test(original)) {
+      updated = original.replace(variablesBlockPattern, block);
+    } else if (original.includes('\n# Override constraints\n')) {
+      updated = original.replace('\n# Override constraints\n', `${block}# Override constraints\n`);
     } else if (original.includes('\ndisableable:')) {
-      original = original.replace('\ndisableable:', `${block}disableable:`);
-      inserted = true;
-    }
-
-    if (!inserted) {
-      console.warn(`Could not find insertion point for ${yaml.id}`);
+      updated = original.replace('\ndisableable:', `${block}disableable:`);
+    } else {
+      console.warn(`Could not find insertion point for ${id}`);
       continue;
     }
 
-    await writeFile(yamlPath, original);
-    console.log(`Updated ${yaml.id}: ${placeholders.length} variables`);
+    if (updated === original) {
+      console.log(`Skipped ${id}: already synced`);
+      continue;
+    }
+
+    await writeFile(yamlPath, updated);
+    console.log(`Updated ${id}: ${placeholders.length} variables`);
   }
 }
 

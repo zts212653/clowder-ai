@@ -13,6 +13,11 @@ resolver: D12ActiveParticipantsResolver
 inputs:
   - activeParticipants
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: ACTIVE_LABEL
+    description: 当前活跃参与者标签
+    placeholder: ""
 # Override constraints
 disableable: true
 

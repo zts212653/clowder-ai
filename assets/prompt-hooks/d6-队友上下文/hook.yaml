@@ -13,6 +13,11 @@ resolver: D6TeammatesContextResolver
 inputs:
   - teammatesContext
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: TEAMMATES_LIST
+    description: 队友列表
+    placeholder: ""
 # Override constraints
 disableable: true
 

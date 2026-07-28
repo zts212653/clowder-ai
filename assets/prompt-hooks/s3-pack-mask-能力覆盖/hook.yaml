@@ -13,6 +13,11 @@ resolver: S3PackMaskResolver
 inputs:
   - packMasks
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: PACK_MASKS_BLOCK
+    description: pack 能力覆盖块
+    placeholder: ""
 # Override constraints
 disableable: true
 

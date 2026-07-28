@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -8,10 +7,13 @@ import Fastify from 'fastify';
 import {
   getTemplateFileInfo,
   getTemplateOverlayPath,
+  getTemplateRawContent,
+  TEMPLATE_FILES,
   TEMPLATES_DIR,
 } from '../dist/domains/cats/services/context/prompt-template-loader.js';
 import { parseHookManifest } from '../dist/domains/prompt-hooks/hook-manifest-parser.js';
 import { promptInjectionRoutes } from '../dist/routes/prompt-injection.js';
+import { getHookVariableDefs } from '../dist/routes/prompt-injection-hooks.js';
 
 const TEST_USER_ID = 'test-user';
 const AUTH_HEADERS = { 'x-cat-cafe-user': TEST_USER_ID };
@@ -84,9 +86,6 @@ async function withPreservedOverlay(segmentId, fn) {
     restoreFile(assetBakPath, assetBakSnapshot);
   }
 }
-
-const ROOT = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))));
-const HOOKS_DIR = join(ROOT, 'assets', 'prompt-hooks');
 
 function extractPlaceholders(content) {
   const names = new Set();
@@ -284,6 +283,50 @@ describe('prompt-injection variable metadata', () => {
         });
       });
     });
+
+    it('rejects restore-backup when .bak contains expanded runtime values', async () => {
+      await withDefaultOwnerUserId(TEST_USER_ID, async () => {
+        await withPreservedOverlay('S13', async () => {
+          const app = await buildSessionApp();
+          try {
+            const localPath = getTemplateOverlayPath('S13');
+            assert.ok(localPath);
+            const canonicalSource = 'Rich block short: {{RICH_BLOCK_SHORT}}';
+            const expandedBackup = 'Rich block short: <legacy-expanded/>';
+
+            // Save canonical source so a .bak file is created on the next save.
+            await app.inject({
+              method: 'PUT',
+              url: '/api/prompt-injection/segment/S13/override',
+              headers: LOCAL_WRITE_HEADERS,
+              payload: { content: canonicalSource },
+            });
+
+            // Overwrite .bak with a legacy expanded value.
+            writeFileSync(`${localPath}.bak`, expandedBackup, 'utf-8');
+
+            // Restore must reject the expanded backup against the immutable base template.
+            const restoreRes = await app.inject({
+              method: 'POST',
+              url: '/api/prompt-injection/segment/S13/restore-backup',
+              headers: LOCAL_WRITE_HEADERS,
+            });
+            assert.equal(restoreRes.statusCode, 400, `expected 400, got ${restoreRes.statusCode}: ${restoreRes.body}`);
+
+            // Current overlay must remain canonical.
+            const getRes = await app.inject({
+              method: 'GET',
+              url: '/api/prompt-injection/segment/S13/content',
+              headers: AUTH_HEADERS,
+            });
+            const body = JSON.parse(getRes.body);
+            assert.ok(body.content.includes('{{RICH_BLOCK_SHORT}}'), 'overlay should still contain placeholder');
+          } finally {
+            await app.close();
+          }
+        });
+      });
+    });
   });
 
   describe('hook-manifest-parser variables', () => {
@@ -387,34 +430,36 @@ variables:
     });
   });
 
-  describe('hook variable metadata parity', () => {
-    it('every {{VAR}} placeholder in a hook template has a canonical variable definition', async () => {
-      const entries = await readdir(HOOKS_DIR);
+  describe('TEMPLATE_FILES variable metadata parity', () => {
+    it('every {{VAR}} placeholder in the runtime template has a canonical variable definition', () => {
       const missing = [];
       const emptyDesc = [];
-      for (const entry of entries) {
-        const yamlPath = join(HOOKS_DIR, entry, 'hook.yaml');
-        if (!existsSync(yamlPath)) continue;
-        const result = parseHookManifest(yamlPath);
-        if (!result.ok) continue;
-        const { manifest } = result;
-        if (!manifest.template) continue;
-        let templatePath = join(HOOKS_DIR, entry, manifest.template);
-        if (!existsSync(templatePath)) templatePath = join(TEMPLATES_DIR, manifest.template);
-        if (!existsSync(templatePath)) continue;
-        const template = readFileSync(templatePath, 'utf-8');
-        const placeholders = extractPlaceholders(template);
+      const duplicate = [];
+      for (const [id, fileInfo] of Object.entries(TEMPLATE_FILES)) {
+        const raw = getTemplateRawContent(id, false);
+        if (!raw) continue;
+        const placeholders = extractPlaceholders(raw);
         if (placeholders.length === 0) continue;
-        const defs = new Map((manifest.variables || []).map((v) => [v.name, v]));
+
+        // Same resolver order as the production route: hook manifest first, then TEMPLATE_FILES.
+        const defs = getHookVariableDefs(id) ?? fileInfo.variables ?? [];
+        const seen = new Set();
+        const defMap = new Map();
+        for (const v of defs) {
+          if (seen.has(v.name)) duplicate.push({ id, name: v.name });
+          seen.add(v.name);
+          defMap.set(v.name, v);
+        }
+
         for (const name of placeholders) {
-          const def = defs.get(name);
-          if (!def) missing.push({ hook: manifest.id, var: name });
-          else if (!def.description || def.description.trim().length === 0)
-            emptyDesc.push({ hook: manifest.id, var: name });
+          const def = defMap.get(name);
+          if (!def) missing.push({ id, var: name });
+          else if (!def.description || def.description.trim().length === 0) emptyDesc.push({ id, var: name });
         }
       }
-      assert.deepEqual(missing, [], 'all placeholders must have variable definitions');
+      assert.deepEqual(missing, [], 'all runtime placeholders must have variable definitions');
       assert.deepEqual(emptyDesc, [], 'all variable definitions must have non-empty descriptions');
+      assert.deepEqual(duplicate, [], 'variable definitions must not contain duplicate names');
     });
   });
 });
