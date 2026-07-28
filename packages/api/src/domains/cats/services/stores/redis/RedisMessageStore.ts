@@ -907,8 +907,12 @@ export class RedisMessageStore {
           staleIds.push(id);
           continue;
         }
-        // Same filter chain as getByThreadAfter: skip non-delivered
+        // Skip non-delivered and soft-deleted messages.
+        // #1200 codex R7 P2: read/latest and mark-all need the latest REAL message,
+        // not a tombstone. getByThreadAfter keeps tombstones for cursor pagination,
+        // but this method is for "latest live content" — different contract.
         if (!isDelivered(msg)) continue;
+        if (msg.deletedAt) continue;
 
         // Found the latest visible message — build v2 cursor
         // Lazy null-ZREM for stale members encountered before this one
