@@ -3396,23 +3396,30 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // subsets — advancing cursor to the last result would mark skipped messages as "seen"
     // and suppress future freshness holds for messages the cat never read (gpt52 R1-P1-2, R2-P1-2).
     if (deliveryCursorStore && filtered.length > 0 && principal.kind === 'invocation' && isContiguousRead) {
-      const latestSeen = filtered[filtered.length - 1];
       try {
-        // #1200 §8.7: canonicalize to v2 cursor for visibility-domain comparison.
-        // Play-mode filtered comes from getByThreadBefore — messages may lack
-        // visibilitySeq in hash (legacy backfill). Canonicalize to v2 so CAS
-        // doesn't reject a v1 ID against an existing v2 seen cursor.
-        let seenCursor = cursorFor(latestSeen);
-        if (!seenCursor.startsWith('v2:') && effectiveThreadId && messageStore.canonicalizeCursor) {
-          const canon = await messageStore.canonicalizeCursor(latestSeen.id, effectiveThreadId);
-          if (canon) seenCursor = canon;
+        // #1200 Sol R1 P1: use visibility-domain max, NOT time-domain tail.
+        // Play-mode `filtered` is time-sorted (getByThreadBefore), but late-delivered
+        // Q may have older timestamp than C while having higher visibilitySeq.
+        // Taking filtered[-1] (time-tail = C) would miss Q's higher visibility position,
+        // causing Q to remain permanently unread. Instead, find the max v2 cursor
+        // across ALL returned messages — this is the visibility-contiguous high-water mark.
+        let maxSeenCursor = '';
+        for (const msg of filtered) {
+          let c = cursorFor(msg);
+          if (!c.startsWith('v2:') && effectiveThreadId && messageStore.canonicalizeCursor) {
+            const canon = await messageStore.canonicalizeCursor(msg.id, effectiveThreadId);
+            if (canon) c = canon;
+          }
+          if (c > maxSeenCursor) maxSeenCursor = c;
         }
-        await deliveryCursorStore.ackSeenCursor(
-          principalUserId,
-          principalCatId as CatId,
-          effectiveThreadId,
-          seenCursor,
-        );
+        if (maxSeenCursor) {
+          await deliveryCursorStore.ackSeenCursor(
+            principalUserId,
+            principalCatId as CatId,
+            effectiveThreadId,
+            maxSeenCursor,
+          );
+        }
       } catch (err) {
         // Fail-open: don't block thread-context on seenCursor push failure
         app.log.warn(

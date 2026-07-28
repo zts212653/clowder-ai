@@ -85,6 +85,14 @@ if not isQueued then
   local hwmRaw = redis.call('HGET', metaKey, 'hwm')
   local hwm = tonumber(hwmRaw) or 0
 
+  -- #1200 Sol R1 P1: guard NaN/fractional/negative hwm (defense-in-depth)
+  if hwm ~= hwm then
+    return redis.error_reply('VISIBILITY_HWM_NAN: metaKey=' .. metaKey)
+  end
+  if hwm ~= math.floor(hwm) or hwm < 0 then
+    return redis.error_reply('VISIBILITY_HWM_INVALID: hwm=' .. tostring(hwm) .. ' metaKey=' .. metaKey)
+  end
+
   local t = redis.call('TIME')
   local now_ms = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
   seq = math.max(hwm + 1, now_ms)
@@ -181,6 +189,14 @@ local visKey = kp .. 'msg:visibility:' .. threadId
 local hwmRaw = redis.call('HGET', metaKey, 'hwm')
 local hwm = tonumber(hwmRaw) or 0
 
+-- #1200 Sol R1 P1: guard NaN/fractional/negative hwm (defense-in-depth)
+if hwm ~= hwm then
+  return redis.error_reply('VISIBILITY_HWM_NAN: metaKey=' .. metaKey)
+end
+if hwm ~= math.floor(hwm) or hwm < 0 then
+  return redis.error_reply('VISIBILITY_HWM_INVALID: hwm=' .. tostring(hwm) .. ' metaKey=' .. metaKey)
+end
+
 local t = redis.call('TIME')
 local now_ms = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 local seq = math.max(hwm + 1, now_ms)
@@ -270,9 +286,8 @@ if migrated then
   return 0
 end
 
--- Get all members in rank order (legacy (score, id) total order)
-local members = redis.call('ZRANGE', threadKey, 0, -1)
-local count = #members
+-- #1200 Sol R1 P2: ZCARD first to avoid materializing huge thread in Lua memory
+local count = redis.call('ZCARD', threadKey)
 
 -- Empty thread → mark migrated, no backfill needed
 if count == 0 then
@@ -280,7 +295,7 @@ if count == 0 then
   return 0
 end
 
--- Bound check: fail-visible if too large
+-- Bound check: fail-visible BEFORE materializing members
 if count > maxMembers then
   return redis.error_reply(
     'VISIBILITY_BACKFILL_TOO_LARGE: threadId=' .. threadId ..
@@ -288,6 +303,9 @@ if count > maxMembers then
     ' max=' .. tostring(maxMembers)
   )
 end
+
+-- Get all members in rank order (legacy (score, id) total order)
+local members = redis.call('ZRANGE', threadKey, 0, -1)
 
 -- Rank-normalize: assign seq = BASE + rank_index
 -- BASE = 1 (smallest positive integer, leaves 0 as sentinel)
