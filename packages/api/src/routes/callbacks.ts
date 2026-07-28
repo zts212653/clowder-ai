@@ -1981,6 +1981,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           // Baseline visibility (applies in ALL modes):
           if (msg.deletedAt) return false;
           if (!isDelivered(msg as unknown as Parameters<typeof isDelivered>[0])) return false;
+          // #1200 codex R11 P1: system-generated messages (persisted error badges)
+          // are display-only — route-helpers.ts:744-745 excludes them from freshness.
+          if (msg.userId === 'system') return false;
           if (msg.origin === 'briefing') return false;
           // Play-mode visibility:
           if (needsFreshnessPlayFilter) {
@@ -5183,6 +5186,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       const messageFilter = (msg: Record<string, unknown>): boolean => {
         if (msg.deletedAt) return false;
         if (!isDelivered(msg as unknown as Parameters<typeof isDelivered>[0])) return false;
+        // #1200 codex R11 P1: system-generated messages (persisted error badges)
+        // are display-only — route-helpers.ts:744-745 excludes them from freshness.
+        if (msg.userId === 'system') return false;
         if (msg.origin === 'briefing') return false;
         if (needsPlayFilter) {
           if (!canViewMessage(msg as unknown as Parameters<typeof canViewMessage>[0], freshnessViewer)) return false;
