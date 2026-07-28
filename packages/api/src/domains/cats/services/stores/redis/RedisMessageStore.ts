@@ -613,8 +613,10 @@ export class RedisMessageStore {
       }
     }
 
-    // Match-counted scan with mention predicate
-    const mentionFilter = (msg: StoredMessage) => msg.mentions.includes(catId);
+    // Match-counted scan with mention predicate + soft-delete exclusion.
+    // #1200 Sol R2: hydrateAndFilter no longer filters deletedAt (tombstone-keep parity).
+    // Mention scan explicitly excludes deleted messages here.
+    const mentionFilter = (msg: StoredMessage) => !msg.deletedAt && msg.mentions.includes(catId);
     const result: StoredMessage[] = [];
     const staleIds: string[] = [];
 
@@ -664,7 +666,8 @@ export class RedisMessageStore {
 
     if (eligible.length === 0) return [];
     const messages = await this.hydrateMessages(eligible);
-    return messages.filter(isDelivered).slice(0, n);
+    // #1200 Sol R2: explicit deletedAt filter for mentions (hydrateAndFilter no longer filters)
+    return messages.filter((m) => isDelivered(m) && !m.deletedAt).slice(0, n);
   }
 
   /**
@@ -1034,8 +1037,10 @@ export class RedisMessageStore {
         staleIds.push(ids[i]!);
         continue;
       }
-      // Filter: soft-deleted, isDelivered (skip queued/canceled), userId visibility, extra predicate
-      if (msg.deletedAt) continue;
+      // #1200 Sol R2 P2-5: tombstones (deletedAt) are KEPT per binding doc
+      // (tombstone-keep / null-skip / canceled-skip / isDelivered). Parity with
+      // Memory store: both stores return tombstones in getByThreadAfter.
+      // Mention-scan callers that need to exclude deleted use extraFilter.
       if (!isDelivered(msg)) continue;
       if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
       if (extraFilter && !extraFilter(msg)) continue;

@@ -16,7 +16,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { after, describe, it } from 'node:test';
+import { after, before, describe, it } from 'node:test';
 import {
   assertRedisIsolationOrThrow,
   cleanupPrefixedRedisKeys,
@@ -30,6 +30,8 @@ let RedisMessageStore;
 let createRedisClient;
 let cursorFor;
 let parseCursor;
+let compareCursors;
+let computeVisibilityContiguousAdvance;
 
 let modulesLoaded = false;
 async function ensureModules() {
@@ -43,7 +45,19 @@ async function ensureModules() {
   const cursor = await import('../dist/domains/cats/services/stores/cursor.js');
   cursorFor = cursor.cursorFor;
   parseCursor = cursor.parseCursor;
+  compareCursors = cursor.compareCursors;
+  computeVisibilityContiguousAdvance = cursor.computeVisibilityContiguousAdvance;
   modulesLoaded = true;
+}
+
+/** Skip Redis tests properly instead of false-green `if (!r) return` (Sol R2 P2) */
+function skipWithoutRedis(t) {
+  const reason = redisIsolationSkipReason(REDIS_URL);
+  if (reason) {
+    t.skip(reason);
+    return true;
+  }
+  return false;
 }
 
 // Redis connection for tests that need it
@@ -84,9 +98,9 @@ describe('P2-4: SET_IF_GREATER cross-format CAS regression', () => {
   // Tests use SessionStore methods which wrap the Lua script.
   // This validates the ACTUAL deployed script, not an inlined copy.
 
-  it('stored v1 later + incoming v2 earlier → must NOT advance', async () => {
+  it('stored v1 later + incoming v2 earlier → must NOT advance', async (t) => {
+    if (skipWithoutRedis(t)) return;
     const r = await getRedis();
-    if (!r) return;
     await ensureModules();
 
     const { SessionStore } = await import('@cat-cafe/shared/utils');
@@ -108,9 +122,9 @@ describe('P2-4: SET_IF_GREATER cross-format CAS regression', () => {
     await r.del(`delivery-cursor:${userId}:${catId}:${threadId}`);
   });
 
-  it('stored v2 + incoming v1 → must NOT advance (v2→v1 regression)', async () => {
+  it('stored v2 + incoming v1 → must NOT advance (v2→v1 regression)', async (t) => {
+    if (skipWithoutRedis(t)) return;
     const r = await getRedis();
-    if (!r) return;
     await ensureModules();
 
     const { SessionStore } = await import('@cat-cafe/shared/utils');
@@ -128,9 +142,9 @@ describe('P2-4: SET_IF_GREATER cross-format CAS regression', () => {
     await r.del(`delivery-cursor:${userId}:${catId}:${threadId}`);
   });
 
-  it('stored v1 earlier + incoming v2 later → MUST advance', async () => {
+  it('stored v1 earlier + incoming v2 later → MUST advance', async (t) => {
+    if (skipWithoutRedis(t)) return;
     const r = await getRedis();
-    if (!r) return;
     await ensureModules();
 
     const { SessionStore } = await import('@cat-cafe/shared/utils');
@@ -148,9 +162,9 @@ describe('P2-4: SET_IF_GREATER cross-format CAS regression', () => {
     await r.del(`delivery-cursor:${userId}:${catId}:${threadId}`);
   });
 
-  it('same-format v2: earlier cursor must NOT advance', async () => {
+  it('same-format v2: earlier cursor must NOT advance', async (t) => {
+    if (skipWithoutRedis(t)) return;
     const r = await getRedis();
-    if (!r) return;
     await ensureModules();
 
     const { SessionStore } = await import('@cat-cafe/shared/utils');
@@ -169,19 +183,19 @@ describe('P2-4: SET_IF_GREATER cross-format CAS regression', () => {
 });
 
 // ============================================================================
-// P2-5: Tombstone store parity (getByThreadAfter)
+// P2-5: Tombstone store parity (getByThreadAfter) — Sol R2 corrected direction
 // ============================================================================
-// Bug: Memory getByThreadAfter does NOT filter deletedAt.
-//      Redis hydrateAndFilter DOES filter deletedAt.
-//      Dual-store parity violation: same operation returns different results.
+// Binding doc: tombstone-keep / null-skip / canceled-skip / isDelivered.
+// Both Memory and Redis KEEP tombstones in getByThreadAfter. Parity direction
+// is to fix Redis to keep (not Memory to filter).
 
-describe('P2-5: Tombstone store parity — getByThreadAfter', () => {
-  it('RED — Memory: soft-deleted message excluded from getByThreadAfter', async () => {
+describe('P2-5: Tombstone store parity — getByThreadAfter keeps tombstones', () => {
+  it('Memory: soft-deleted message KEPT in getByThreadAfter', async () => {
     await ensureModules();
     const store = new MessageStore();
     const threadId = `tombstone-mem-${Date.now()}`;
 
-    const m1 = store.append({
+    const _m1 = store.append({
       userId: 'u1',
       catId: null,
       content: 'keep',
@@ -206,14 +220,13 @@ describe('P2-5: Tombstone store parity — getByThreadAfter', () => {
       threadId,
     });
 
-    // Soft-delete m2
     store.softDelete(m2.id, 'admin');
 
-    // getByThreadAfter should NOT include deleted m2
+    // getByThreadAfter KEEPS deleted messages (tombstone-keep per binding doc)
     const page = store.getByThreadAfter(threadId);
     const ids = page.map((m) => m.id);
-    assert.ok(!ids.includes(m2.id), 'Soft-deleted message must NOT appear in getByThreadAfter (Memory)');
-    assert.equal(page.length, 2, 'Only 2 non-deleted messages should remain');
+    assert.ok(ids.includes(m2.id), 'Soft-deleted message must be KEPT in getByThreadAfter (tombstone-keep)');
+    assert.equal(page.length, 3, 'All 3 messages including deleted should remain');
   });
 });
 
@@ -263,9 +276,9 @@ describe('P2-6: append return value must include visibilitySeq', () => {
     assert.equal(msg.visibilitySeq, undefined, 'Queued append must NOT have visibilitySeq');
   });
 
-  it('RED — Redis: direct append returns message with visibilitySeq', async () => {
+  it('RED — Redis: direct append returns message with visibilitySeq', async (t) => {
+    if (skipWithoutRedis(t)) return;
     const r = await getRedis();
-    if (!r) return;
     await ensureModules();
 
     const store = new RedisMessageStore(r);
@@ -340,9 +353,9 @@ describe('P2-8: includeAcked cross-format pair resolution', () => {
 // Need a one-shot SCAN/PERSIST cutover script.
 
 describe('P1-3: Dormant TTL migration', () => {
-  it('RED — cursor keys with accidental TTL are healed to persistent', async () => {
+  it('RED — cursor keys with accidental TTL are healed to persistent', async (t) => {
+    if (skipWithoutRedis(t)) return;
     const r = await getRedis();
-    if (!r) return;
 
     const prefix = 'test:dormant:';
     const keys = [
@@ -386,9 +399,9 @@ describe('P1-3: Dormant TTL migration', () => {
 // NaN and fractional hwm values (not just the missing case).
 
 describe('Lua hwm guard: NaN and fractional rejection', () => {
-  it('RED — APPEND rejects NaN hwm', async () => {
+  it('RED — APPEND rejects NaN hwm', async (t) => {
+    if (skipWithoutRedis(t)) return;
     const r = await getRedis();
-    if (!r) return;
 
     const threadId = `nan-hwm-${Date.now()}`;
     const metaKey = `msg:visibility-meta:${threadId}`;
@@ -422,9 +435,9 @@ describe('Lua hwm guard: NaN and fractional rejection', () => {
     }
   });
 
-  it('RED — APPEND rejects fractional hwm', async () => {
+  it('RED — APPEND rejects fractional hwm', async (t) => {
+    if (skipWithoutRedis(t)) return;
     const r = await getRedis();
-    if (!r) return;
 
     const threadId = `frac-hwm-${Date.now()}`;
     const metaKey = `msg:visibility-meta:${threadId}`;
@@ -456,9 +469,9 @@ describe('Lua hwm guard: NaN and fractional rejection', () => {
     }
   });
 
-  it('RED — DELIVER rejects NaN hwm', async () => {
+  it('RED — DELIVER rejects NaN hwm', async (t) => {
+    if (skipWithoutRedis(t)) return;
     const r = await getRedis();
-    if (!r) return;
 
     const threadId = `nan-deliver-${Date.now()}`;
     const metaKey = `msg:visibility-meta:${threadId}`;
@@ -493,5 +506,162 @@ describe('Lua hwm guard: NaN and fractional rejection', () => {
     } finally {
       await r.del(metaKey);
     }
+  });
+});
+
+// ============================================================================
+// Sol R2: compareCursors pair-domain comparison
+// ============================================================================
+
+describe('compareCursors: pair-domain comparison', () => {
+  before(async () => {
+    await ensureModules();
+  });
+
+  it('v2 vs v2: higher seq wins', () => {
+    const a = 'v2:0000000000000100:msgA';
+    const b = 'v2:0000000000000200:msgB';
+    assert.ok(compareCursors(a, b) < 0, 'seq 100 < seq 200');
+    assert.ok(compareCursors(b, a) > 0, 'seq 200 > seq 100');
+  });
+
+  it('v2 vs v2: same seq, id tiebreaker', () => {
+    const a = 'v2:0000000000000100:aaa';
+    const b = 'v2:0000000000000100:bbb';
+    assert.ok(compareCursors(a, b) < 0, 'same seq: aaa < bbb');
+    assert.ok(compareCursors(b, a) > 0, 'same seq: bbb > aaa');
+  });
+
+  it('v2 vs v2: identical = 0', () => {
+    const a = 'v2:0000000000000100:msgA';
+    assert.equal(compareCursors(a, a), 0);
+  });
+
+  it('v1 vs v1: lex comparison on raw IDs', () => {
+    assert.ok(compareCursors('aaa', 'bbb') < 0);
+    assert.ok(compareCursors('bbb', 'aaa') > 0);
+    assert.equal(compareCursors('aaa', 'aaa'), 0);
+  });
+
+  it('v1 vs v2: v2 always wins (version boundary)', () => {
+    // Even seq=1 v2 > any v1 — version boundary heuristic
+    assert.ok(compareCursors('v2:0000000000000001:a', 'zzzzzzzzzzzzz') > 0);
+    assert.ok(compareCursors('zzzzzzzzzzzzz', 'v2:0000000000000001:a') < 0);
+  });
+
+  it('Sol R2 counterexample: late-Q advance', () => {
+    // stored v1 '0000000000000200-B' + incoming v2 seq=999 (late-delivered Q)
+    // compareCursors: v2 > v1 → advance. Correct for cursor store monotonic advance.
+    const stored = '0000000000000200-B';
+    const incoming = 'v2:0000000000000999:0000000000000100-Q';
+    assert.ok(compareCursors(incoming, stored) > 0, 'v2 incoming must be "later" than v1 stored');
+  });
+
+  it('v2→v1 regression rejected', () => {
+    const stored = 'v2:0000000000000100:msgB';
+    const incoming = 'msgZ';
+    assert.ok(compareCursors(incoming, stored) < 0, 'v1 incoming must be "earlier" than v2 stored');
+  });
+});
+
+// ============================================================================
+// Sol R2: computeVisibilityContiguousAdvance
+// ============================================================================
+
+describe('computeVisibilityContiguousAdvance: safe seenCursor advancement', () => {
+  before(async () => {
+    await ensureModules();
+  });
+
+  it('contiguous run from start → advance to end', () => {
+    const messages = [
+      { id: 'a', visibilitySeq: 1 },
+      { id: 'b', visibilitySeq: 2 },
+      { id: 'c', visibilitySeq: 3 },
+    ];
+    const result = computeVisibilityContiguousAdvance(messages, undefined);
+    assert.ok(result !== null);
+    const parsed = parseCursor(result);
+    assert.equal(parsed.version, 2);
+    assert.equal(parsed.seq, 3);
+    assert.equal(parsed.id, 'c');
+  });
+
+  it('gap stops advancement', () => {
+    // C(100), D(102) — gap at 101 (late-delivered Q)
+    const messages = [
+      { id: 'C', visibilitySeq: 100 },
+      { id: 'D', visibilitySeq: 102 },
+    ];
+    const current = cursorFor({ id: 'prev', visibilitySeq: 99 }); // seq 99
+    const result = computeVisibilityContiguousAdvance(messages, current);
+    assert.ok(result !== null);
+    const parsed = parseCursor(result);
+    assert.equal(parsed.seq, 100, 'Must stop at C(100), not advance to D(102)');
+  });
+
+  it('no messages with visibilitySeq → null', () => {
+    const messages = [{ id: 'legacy', visibilitySeq: undefined }];
+    const result = computeVisibilityContiguousAdvance(messages, undefined);
+    assert.equal(result, null);
+  });
+
+  it('all messages already seen → null', () => {
+    const messages = [
+      { id: 'a', visibilitySeq: 1 },
+      { id: 'b', visibilitySeq: 2 },
+    ];
+    const current = cursorFor({ id: 'x', visibilitySeq: 5 }); // already past seq 2
+    const result = computeVisibilityContiguousAdvance(messages, current);
+    assert.equal(result, null);
+  });
+
+  it('v1 cursor → null (cannot establish contiguity)', () => {
+    const messages = [{ id: 'a', visibilitySeq: 1 }];
+    const result = computeVisibilityContiguousAdvance(messages, 'raw-v1-cursor');
+    assert.equal(result, null);
+  });
+
+  it('Sol R2 counterexample: C→Q→D limit=2 returns [C,D]', () => {
+    // Thread has C(100), Q(101, late timestamp), D(102)
+    // Time-domain limit=2 returns [C, D] (Q has older timestamp, pushed out)
+    // seenCursor at 99 → must advance to C(100) only, NOT D(102)
+    const page = [
+      { id: 'C', visibilitySeq: 100 },
+      { id: 'D', visibilitySeq: 102 },
+    ];
+    const current = cursorFor({ id: 'B', visibilitySeq: 99 });
+    const result = computeVisibilityContiguousAdvance(page, current);
+    assert.ok(result !== null);
+    const parsed = parseCursor(result);
+    assert.equal(parsed.seq, 100, 'Must stop at C(100) — Q(101) is missing from page');
+    assert.equal(parsed.id, 'C');
+  });
+
+  it('unsorted input is handled correctly', () => {
+    // Messages arrive in timestamp order, not seq order
+    const messages = [
+      { id: 'D', visibilitySeq: 3 },
+      { id: 'A', visibilitySeq: 1 },
+      { id: 'C', visibilitySeq: 2 },
+    ];
+    const result = computeVisibilityContiguousAdvance(messages, undefined);
+    assert.ok(result !== null);
+    const parsed = parseCursor(result);
+    assert.equal(parsed.seq, 3, 'Full contiguous run 1→2→3');
+  });
+
+  it('partial advance from mid-cursor', () => {
+    // Current at seq 5, page has [6, 7, 9] — gap at 8
+    const messages = [
+      { id: 'f', visibilitySeq: 6 },
+      { id: 'g', visibilitySeq: 7 },
+      { id: 'i', visibilitySeq: 9 },
+    ];
+    const current = cursorFor({ id: 'e', visibilitySeq: 5 });
+    const result = computeVisibilityContiguousAdvance(messages, current);
+    assert.ok(result !== null);
+    const parsed = parseCursor(result);
+    assert.equal(parsed.seq, 7, 'Advance to 7, stop at gap before 9');
   });
 });

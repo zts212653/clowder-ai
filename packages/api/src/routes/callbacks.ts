@@ -74,7 +74,11 @@ import {
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { EventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { IRuntimeSessionStore } from '../domains/cats/services/runtime-session/RuntimeSessionStore.js';
-import { cursorFor, parseCursor } from '../domains/cats/services/stores/cursor.js';
+import {
+  compareCursors,
+  computeVisibilityContiguousAdvance,
+  cursorFor,
+} from '../domains/cats/services/stores/cursor.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
@@ -2780,24 +2784,15 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // F35: Filter out whispers not intended for this cat
     const mentionViewer = { type: 'cat' as const, catId };
     const mentions = rawMentions.filter((m) => canViewMessage(m, mentionViewer));
-    // #1200 P2-8: cross-format acked resolution.
-    // When cursor formats differ (v1 ack + v2 mention or vice versa), extract
-    // the raw message ID from whichever side is v2 and compare raw IDs.
-    // Raw sortable IDs (generateSortableId) are timestamp-prefixed → lex ≡ time.
-    // This resolves the conservative false-unacked behavior from the v1/v2 guard.
+    // #1200 P2-8 (Sol R2): pair-domain acked resolution via compareCursors.
+    // Uses the same (seq, id) pair comparison as the Lua CAS and in-memory
+    // cursor store, ensuring consistent ordering semantics across all
+    // cursor comparison points. Cross-format (v1/v2) uses the version
+    // boundary heuristic: v2 always > v1 (tracked era postdates untracked).
     const isMentionAcked = (item: StoredMessage): boolean => {
       if (!lastAckId) return false;
       const ic = cursorFor(item);
-      const icIsV2 = ic.startsWith('v2:');
-      const ackIsV2 = lastAckId.startsWith('v2:');
-      if (icIsV2 === ackIsV2) {
-        // Same format: lex compare is correct
-        return ic <= lastAckId;
-      }
-      // Cross-format: extract raw message IDs and compare
-      const icId = icIsV2 ? parseCursor(ic)!.id : ic;
-      const ackId = ackIsV2 ? parseCursor(lastAckId)!.id : lastAckId;
-      return icId <= ackId;
+      return compareCursors(ic, lastAckId) <= 0;
     };
     const payload = {
       mentions: mentions.map((item) => {
@@ -3397,25 +3392,50 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       modeSource,
       catId: principal.catId,
     });
-    // #1200 P1-2 DISABLED (Sol R1+R2): thread-context seenCursor advancement removed.
+    // #1200 P1-2 (Sol R2 restore): visibility-contiguous seenCursor advancement.
     //
-    // Problem: time-domain pages from getByThreadBefore are NOT visibility-contiguous.
+    // F254 AC-A2: seenCursor must advance when cat reads via thread-context.
+    // Disabling it causes repeated freshness hold/reinvoke — it's a regression.
+    //
+    // Safety: time-domain pages from getByThreadBefore are NOT visibility-contiguous.
     // Late-delivered Q may have older timestamp but higher visibilitySeq. With limit=N,
-    // the time-domain page can skip Q (returning [C,D], missing Q/101 between them).
+    // the page can skip Q (returning [C,D], missing Q/101 between them).
     // seenCursor is a scalar prefix promise — advancing it past unseen Q creates a
     // false "seen" claim that permanently suppresses freshness for Q.
     //
-    // Neither filtered[-1] (time-tail, misses Q permanently) nor max(cursorFor)
-    // (acks D/102 past unseen Q/101) is safe on time-domain pages.
+    // Fix: computeVisibilityContiguousAdvance walks through returned messages in
+    // visibilitySeq order, advancing ONLY through a contiguous run starting from
+    // the current cursor. Gaps stop the advance — no false "seen" claims.
     //
-    // Note: GET /read/latest and PATCH /read use readStateStore (user-level unread
-    // state), NOT DeliveryCursorStore.ackSeenCursor (cat-level freshness cursor).
-    // These are different namespaces and cannot substitute for each other.
-    //
-    // TODO(#1200): implement visibility-contiguous thread-context read mode that
-    // can safely advance cat-scoped ackSeenCursor. Until then, mid-turn
-    // thread-context reads do NOT advance the freshness seen cursor.
-    // seenCursor push DISABLED — see #1200 P1-2 comment above.
+    // #1200 Sol R2: seenCursor re-enabled with visibility-contiguous advance.
+    // computeVisibilityContiguousAdvance walks through returned messages in
+    // visibilitySeq order, advancing ONLY through a contiguous run from the
+    // current cursor. Gaps stop the advance — no false "seen" claims.
+    if (deliveryCursorStore && !keyword && !messageId) {
+      try {
+        const currentSeen = await deliveryCursorStore.getSeenCursor(
+          principalUserId,
+          createCatId(principalCatId),
+          effectiveThreadId,
+        );
+        const safeAdvance = computeVisibilityContiguousAdvance(filtered, currentSeen);
+        if (safeAdvance) {
+          await deliveryCursorStore.ackSeenCursor(
+            principalUserId,
+            createCatId(principalCatId),
+            effectiveThreadId,
+            safeAdvance,
+          );
+        }
+      } catch (err) {
+        // Fail-open: seenCursor advancement is best-effort. If it fails,
+        // the freshness gate may re-hold but no data is lost.
+        app.log.warn(
+          { err, catId: principalCatId, threadId: effectiveThreadId },
+          '[#1200] seenCursor contiguous advance failed, fail-open',
+        );
+      }
+    }
     if (opts.redis && principal.kind === 'invocation' && isFullMode && isContiguousRead && filtered.length > 0) {
       try {
         await new FreshnessAttentionEventLog(opts.redis).markProviderNoticesSeen({

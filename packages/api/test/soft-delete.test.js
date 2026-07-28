@@ -150,17 +150,18 @@ describe('Read path filtering (skip soft-deleted)', () => {
     assert.ok(!result.some((m) => m.id === msgs[1].id));
   });
 
-  // #1200 P2-5: getByThreadAfter now filters deleted messages (parity with Redis hydrateAndFilter)
-  it('getByThreadAfter skips soft-deleted messages (cursor path)', () => {
+  // #1200 Sol R2 P2-5: getByThreadAfter KEEPS deleted messages (tombstone-keep per binding doc).
+  // Parity direction: both Memory and Redis keep tombstones in cursor pagination.
+  it('getByThreadAfter does NOT skip deleted (cursor path)', () => {
     const store = new MessageStore();
     const msgs = seedMessages(store);
 
     store.softDelete(msgs[2].id, 'user-1');
 
-    // After msg[0], should return msgs 1,3,4 — excluding deleted msg[2]
+    // After msg[0], should return msgs 1-4 including deleted msg[2]
     const result = store.getByThreadAfter('thread-sd', msgs[0].id);
-    assert.equal(result.length, 3, 'Soft-deleted message must be excluded from cursor pagination');
-    assert.ok(!result.some((m) => m.id === msgs[2].id), 'Deleted msg must not appear');
+    assert.equal(result.length, 4);
+    assert.ok(result.some((m) => m.id === msgs[2].id));
   });
 
   it('getById still returns deleted messages', () => {
@@ -321,16 +322,18 @@ describe('MessageStore.hardDelete()', () => {
     assert.ok(!result.some((m) => m.id === msgs[3].id));
   });
 
-  // #1200 P2-5: tombstones are now EXCLUDED from getByThreadAfter (parity with Redis).
-  // Previously they leaked through because Memory's getByThreadAfter didn't check deletedAt.
-  it('tombstone is excluded from getByThreadAfter (cursor path)', () => {
+  // #1200 Sol R2 P2-5: tombstones are KEPT in getByThreadAfter per binding doc.
+  // Both Memory and Redis preserve tombstones for cursor pagination parity.
+  it('tombstone is visible in getByThreadAfter (cursor path)', () => {
     const store = new MessageStore();
     const msgs = seedMessages(store);
 
     store.hardDelete(msgs[2].id, 'user-1');
     const result = store.getByThreadAfter('thread-sd', msgs[0].id);
-    assert.equal(result.length, 3, 'Hard-deleted message must be excluded from cursor pagination');
-    assert.ok(!result.some((m) => m.id === msgs[2].id), 'Tombstone must not appear in results');
+    assert.equal(result.length, 4);
+    const tombstone = result.find((m) => m.id === msgs[2].id);
+    assert.ok(tombstone);
+    assert.equal(tombstone._tombstone, true);
   });
 
   it('restore rejects tombstone', () => {

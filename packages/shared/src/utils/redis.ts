@@ -58,57 +58,73 @@ export const SessionKeys = {
 
 /**
  * Lua script: atomic compare-and-set for monotonic cursor advancement.
- * SET key to value only if value > current.
- * KEYS[1] = cursor key, ARGV[1] = new value, ARGV[2] = TTL seconds (0 = persistent).
+ * Compares in the visibility-seq domain (NOT raw message ID or lex order).
+ *
+ * KEYS[1] = cursor key
+ * ARGV[1] = new cursor value (v1 raw ID or v2 token)
+ * ARGV[2] = TTL seconds (0 = persistent)
+ * ARGV[3] = key prefix for message hash lookup (e.g. 'cat-cafe:')
+ *
  * Returns 1 if set, 0 if noop.
  *
  * #1200 §8.7 cursor TTL flip (Iron Law 5 compliance):
  * - ttl > 0 → SET with EX (expiring cursor)
  * - ttl = 0 → SET without EX + PERSIST-before-compare (persistent cursor).
- *   PERSIST-before-compare: on noop path, PERSIST the existing key to heal
- *   any accidental TTL left by a prior ttl>0 write (cutover migration).
- *   On advance path, SET without EX is already persistent.
  *
- * #1200 P2-4: Cross-format v1↔v2 comparison.
- * Pure lex comparison is correct within same format but WRONG across formats:
- *   'v' (0x76) > any digit → ALL v2 tokens lex-exceed ALL v1 raw IDs.
- *   stored v1("msgB-later") + incoming v2("v2:...:msgA-earlier") → false advance.
- * Fix: detect format mismatch, extract messageId from v2, compare raw IDs.
- * Raw sortable IDs (generateSortableId) are timestamp-prefixed → lex ≡ time order.
- *   - Same format → lex compare (correct)
- *   - stored v2 + incoming v1 → always reject (v2→v1 regression never valid)
- *   - stored v1 + incoming v2 → extract v2 messageId, compare vs stored v1
+ * #1200 Sol R2 P2-4: Pair-domain comparison.
+ * Raw ID or lex comparison conflates creation order with visibility order.
+ * Late-delivered Q (created early, high visibilitySeq) must advance past
+ * stored cursor of B (created later, lower visibilitySeq). Only (seq, id)
+ * pair comparison is correct. Lua resolves v1 cursors via message hash
+ * HGET visibilitySeq; v2 cursors carry seq in the token. Unresolvable v1
+ * (pruned message) falls back to lex comparison (best-effort).
  */
 const SET_IF_GREATER_LUA = `
 local ttl = tonumber(ARGV[2])
+local kp = ARGV[3] or ''
 local cur = redis.call('GET', KEYS[1])
-if cur then
-  local curIsV2 = (string.sub(cur, 1, 3) == 'v2:')
-  local newIsV2 = (string.sub(ARGV[1], 1, 3) == 'v2:')
 
-  if curIsV2 == newIsV2 then
-    -- Same format: lex compare is correct (v2 lex = seq order; v1 lex = sortable-ID time)
+-- Resolve a cursor to (seq, id). Returns seq (number|nil), id (string).
+local function resolveSeq(cursor)
+  if string.sub(cursor, 1, 3) == 'v2:' then
+    local sep = string.find(cursor, ':', 4)
+    if sep then
+      return tonumber(string.sub(cursor, 4, sep - 1)), string.sub(cursor, sep + 1)
+    end
+    return nil, cursor
+  end
+  -- v1: look up visibilitySeq from message hash
+  local seqRaw = redis.call('HGET', kp .. 'msg:' .. cursor, 'visibilitySeq')
+  if seqRaw then
+    local s = tonumber(seqRaw)
+    if s then return s, cursor end
+  end
+  return nil, cursor
+end
+
+if cur then
+  local curSeq, curId = resolveSeq(cur)
+  local newSeq, newId = resolveSeq(ARGV[1])
+
+  if curSeq and newSeq then
+    -- Both resolved to (seq, id): pair-domain compare
+    if newSeq < curSeq or (newSeq == curSeq and newId <= curId) then
+      if ttl == 0 then redis.call('PERSIST', KEYS[1]) end
+      return 0
+    end
+  elseif curSeq and not newSeq then
+    -- Stored resolvable, incoming unresolvable: reject (can't prove advancement)
+    if ttl == 0 then redis.call('PERSIST', KEYS[1]) end
+    return 0
+  elseif not curSeq and newSeq then
+    -- Stored unresolvable (pruned v1), incoming resolvable: accept (upgrade)
+    -- Safe: new cursor has known position; old cursor's message is gone
+  else
+    -- Both unresolvable: lex comparison fallback (best-effort for pruned v1-vs-v1)
     if ARGV[1] <= cur then
       if ttl == 0 then redis.call('PERSIST', KEYS[1]) end
       return 0
     end
-  elseif curIsV2 then
-    -- stored v2, incoming v1: v2->v1 regression is never valid
-    if ttl == 0 then redis.call('PERSIST', KEYS[1]) end
-    return 0
-  else
-    -- stored v1, incoming v2: extract messageId from v2 token for raw ID comparison.
-    -- v2 format: "v2:<seq16>:<messageId>" — find second ':' after pos 4
-    local sep = string.find(ARGV[1], ':', 4)
-    if sep then
-      local newId = string.sub(ARGV[1], sep + 1)
-      if #newId > 0 and newId <= cur then
-        -- v2 cursor's underlying message was created at-or-before stored v1 cursor
-        if ttl == 0 then redis.call('PERSIST', KEYS[1]) end
-        return 0
-      end
-    end
-    -- newId > cur OR malformed: advance (upgrade to v2 format)
   end
 end
 
@@ -121,7 +137,11 @@ return 1
 `;
 
 export class SessionStore {
-  constructor(private redis: RedisClient) {}
+  private readonly keyPrefix: string;
+  constructor(private redis: RedisClient) {
+    // Read ioredis keyPrefix for Lua scripts that need to construct keys manually
+    this.keyPrefix = ((redis.options as Record<string, unknown>).keyPrefix as string) ?? '';
+  }
 
   async getSessionId(userId: string, catId: string, threadId: string): Promise<string | null> {
     return this.redis.get(SessionKeys.session(userId, catId, threadId));
@@ -161,7 +181,14 @@ export class SessionStore {
     ttlSeconds = 0, // #1200: persistent by default (Iron Law 5)
   ): Promise<boolean> {
     const key = SessionKeys.deliveryCursor(userId, catId, threadId);
-    const result = (await this.redis.eval(SET_IF_GREATER_LUA, 1, key, messageId, String(ttlSeconds))) as number;
+    const result = (await this.redis.eval(
+      SET_IF_GREATER_LUA,
+      1,
+      key,
+      messageId,
+      String(ttlSeconds),
+      this.keyPrefix,
+    )) as number;
     return result === 1;
   }
 
@@ -189,7 +216,14 @@ export class SessionStore {
     ttlSeconds = 0, // #1200: persistent by default (Iron Law 5)
   ): Promise<boolean> {
     const key = SessionKeys.mentionAck(userId, catId, threadId);
-    const result = (await this.redis.eval(SET_IF_GREATER_LUA, 1, key, messageId, String(ttlSeconds))) as number;
+    const result = (await this.redis.eval(
+      SET_IF_GREATER_LUA,
+      1,
+      key,
+      messageId,
+      String(ttlSeconds),
+      this.keyPrefix,
+    )) as number;
     return result === 1;
   }
 
@@ -223,7 +257,14 @@ export class SessionStore {
     ttlSeconds = 0, // #1200: persistent by default (Iron Law 5)
   ): Promise<boolean> {
     const key = SessionKeys.seenCursor(userId, catId, threadId);
-    const result = (await this.redis.eval(SET_IF_GREATER_LUA, 1, key, messageId, String(ttlSeconds))) as number;
+    const result = (await this.redis.eval(
+      SET_IF_GREATER_LUA,
+      1,
+      key,
+      messageId,
+      String(ttlSeconds),
+      this.keyPrefix,
+    )) as number;
     return result === 1;
   }
 

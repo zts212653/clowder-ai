@@ -10,6 +10,7 @@ import type { CatId } from '@cat-cafe/shared';
 import { catRegistry, createCatId } from '@cat-cafe/shared';
 import type { SessionStore } from '@cat-cafe/shared/utils';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import { compareCursors } from '../cursor.js';
 
 const log = createModuleLogger('delivery-cursor-store');
 
@@ -47,8 +48,9 @@ export class DeliveryCursorStore {
         const redisValue = await this.sessionStore.getDeliveryCursor(userId, catId, threadId);
         if (redisValue != null) {
           // Return max(redis, memory) — Redis may hold a stale value if a
-          // prior ack succeeded in-memory but failed to write to Redis
-          return memValue && memValue > redisValue ? memValue : redisValue;
+          // prior ack succeeded in-memory but failed to write to Redis.
+          // #1200: pair-domain comparison (v2 seq > v1 raw ID boundary)
+          return memValue && compareCursors(memValue, redisValue) > 0 ? memValue : redisValue;
         }
         // Redis returned null — fall through to return memValue below
       } catch (err) {
@@ -69,8 +71,9 @@ export class DeliveryCursorStore {
     // Use max(deliveredToId, in-memory cursor) as effective value.
     // This prevents Redis-recovery regression: if Redis was down and
     // in-memory has a higher cursor, we seed Redis with that floor.
+    // #1200: pair-domain comparison (v2 seq > v1 raw ID boundary)
     const memCursor = this.cursors.get(key);
-    const effective = memCursor && memCursor > deliveredToId ? memCursor : deliveredToId;
+    const effective = memCursor && compareCursors(memCursor, deliveredToId) > 0 ? memCursor : deliveredToId;
 
     if (this.sessionStore) {
       try {
@@ -99,8 +102,9 @@ export class DeliveryCursorStore {
     }
 
     // In-memory fallback: monotonic check then write (no await gap = safe)
+    // #1200: pair-domain comparison
     const current = this.cursors.get(key);
-    if (current && effective <= current) {
+    if (current && compareCursors(effective, current) <= 0) {
       return;
     }
     this.upsertMap(this.cursors, key, effective);
@@ -120,7 +124,8 @@ export class DeliveryCursorStore {
         const redisValue = await this.sessionStore.getMentionAckCursor(userId, catId, threadId);
         if (redisValue != null) {
           // Return max(redis, memory) — same rationale as getCursor
-          return memValue && memValue > redisValue ? memValue : redisValue;
+          // #1200: pair-domain comparison
+          return memValue && compareCursors(memValue, redisValue) > 0 ? memValue : redisValue;
         }
         // Redis returned null — fall through to return memValue below
       } catch (err) {
@@ -139,8 +144,9 @@ export class DeliveryCursorStore {
     const key = cursorKey(userId, catId, threadId);
     // Use max(messageId, in-memory cursor) as effective value.
     // Prevents Redis-recovery regression (same as ackCursor).
+    // #1200: pair-domain comparison
     const memCursor = this.mentionAckCursors.get(key);
-    const effective = memCursor && memCursor > messageId ? memCursor : messageId;
+    const effective = memCursor && compareCursors(memCursor, messageId) > 0 ? memCursor : messageId;
 
     if (this.sessionStore) {
       try {
@@ -166,8 +172,9 @@ export class DeliveryCursorStore {
     }
 
     // In-memory fallback: monotonic check then write (no await gap = safe)
+    // #1200: pair-domain comparison
     const current = this.mentionAckCursors.get(key);
-    if (current && effective <= current) {
+    if (current && compareCursors(effective, current) <= 0) {
       return;
     }
     this.upsertMap(this.mentionAckCursors, key, effective);
@@ -189,7 +196,8 @@ export class DeliveryCursorStore {
       try {
         const redisValue = await this.sessionStore.getSeenCursor(userId, catId, threadId);
         if (redisValue != null) {
-          return memValue && memValue > redisValue ? memValue : redisValue;
+          // #1200: pair-domain comparison
+          return memValue && compareCursors(memValue, redisValue) > 0 ? memValue : redisValue;
         }
       } catch (err) {
         log.warn({ err }, 'getSeenCursor failed, fallback to in-memory');
@@ -205,8 +213,9 @@ export class DeliveryCursorStore {
    */
   async ackSeenCursor(userId: string, catId: CatId, threadId: string, messageId: string): Promise<void> {
     const key = cursorKey(userId, catId, threadId);
+    // #1200: pair-domain comparison
     const memCursor = this.seenCursors.get(key);
-    const effective = memCursor && memCursor > messageId ? memCursor : messageId;
+    const effective = memCursor && compareCursors(memCursor, messageId) > 0 ? memCursor : messageId;
 
     if (this.sessionStore) {
       try {
@@ -228,8 +237,9 @@ export class DeliveryCursorStore {
     }
 
     // In-memory fallback: monotonic check then write (no await gap = safe)
+    // #1200: pair-domain comparison
     const current = this.seenCursors.get(key);
-    if (current && effective <= current) {
+    if (current && compareCursors(effective, current) <= 0) {
       return;
     }
     this.upsertMap(this.seenCursors, key, effective);

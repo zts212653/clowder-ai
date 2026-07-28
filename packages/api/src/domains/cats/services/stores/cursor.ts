@@ -89,6 +89,124 @@ export function parseCursor(token: string | undefined | null): ParsedCursor | nu
 }
 
 // --------------------------------------------------------------------------
+// compareCursors — pair-domain comparison (§8.4)
+// --------------------------------------------------------------------------
+
+/**
+ * Compare two cursor values using pair-domain semantics.
+ *
+ * Returns:
+ *   - negative if a < b (a is "earlier")
+ *   - 0        if a === b
+ *   - positive if a > b (a is "later")
+ *
+ * Domain rules:
+ *   - v2 vs v2: compare (seq, id) pairs — seq first, id as tiebreaker
+ *   - v1 vs v1: lex compare raw message IDs (timestamp-prefixed → lex ≡ time)
+ *   - v1 vs v2: v2 is always considered "later" than v1.
+ *     Rationale: v2 issuance requires visibilitySeq, which is only assigned
+ *     by the append path post-#1200. v1 cursors are legacy tokens from before
+ *     visibility tracking. In the monotonic cursor-advance domain, a v2 cursor
+ *     always represents a position in the tracked era, which postdates all
+ *     untracked (v1) positions. The Lua CAS (redis.ts) resolves v1→seq via
+ *     HGET for stronger ordering; this TypeScript comparison is the in-memory
+ *     fallback that uses the version boundary as a safe proxy.
+ *
+ * Throws on malformed v2 tokens (via parseCursor).
+ */
+export function compareCursors(a: string, b: string): number {
+  if (a === b) return 0;
+
+  const pa = parseCursor(a);
+  const pb = parseCursor(b);
+  if (!pa || !pb) return a < b ? -1 : 1; // null = no cursor, shouldn't happen
+
+  // Same format: direct comparison
+  if (pa.version === 2 && pb.version === 2) {
+    if (pa.seq !== pb.seq) return pa.seq - pb.seq;
+    // Tiebreaker: raw message ID (same seq = same message ideally, but be safe)
+    return pa.id < pb.id ? -1 : pa.id > pb.id ? 1 : 0;
+  }
+
+  if (pa.version === 1 && pb.version === 1) {
+    return pa.id < pb.id ? -1 : pa.id > pb.id ? 1 : 0;
+  }
+
+  // Cross-format: v2 always > v1 (version-boundary heuristic, see docstring)
+  return pa.version === 2 ? 1 : -1;
+}
+
+// --------------------------------------------------------------------------
+// computeVisibilityContiguousAdvance — safe seenCursor advancement (§8.5)
+// --------------------------------------------------------------------------
+
+/**
+ * Compute the furthest safe seenCursor advancement from a page of messages.
+ *
+ * seenCursor is a scalar prefix promise: "I have seen all messages up to seq N."
+ * Advancing past a gap (unseen message between two seen ones) would create a
+ * false "seen" claim that permanently suppresses freshness for the skipped message.
+ *
+ * Algorithm:
+ *   1. Extract messages with visibilitySeq, sorted ascending
+ *   2. Starting from currentSeq (parsed from current cursor), walk forward
+ *   3. Only advance through messages where seq === expectedNext (no gaps)
+ *   4. Return the cursor for the last contiguous message, or null if no advance
+ *
+ * Conservative by design: stops at ANY gap, even if the gap is an invisible
+ * message (whisper to another cat). This prevents false seen claims at the cost
+ * of slower cursor advancement when invisible messages create gaps.
+ *
+ * @param messages - Page of messages returned to the cat (already visibility-filtered)
+ * @param currentCursor - Current seenCursor value (undefined = never advanced)
+ * @returns New cursor value to advance to, or null if no safe advance possible
+ */
+export function computeVisibilityContiguousAdvance(
+  messages: ReadonlyArray<{ id: string; visibilitySeq?: number }>,
+  currentCursor: string | undefined,
+): string | null {
+  // Extract messages with visibilitySeq, sorted by seq ascending
+  const withSeq = messages
+    .filter((m): m is { id: string; visibilitySeq: number } => m.visibilitySeq != null)
+    .sort((a, b) => a.visibilitySeq - b.visibilitySeq);
+
+  if (withSeq.length === 0) return null;
+
+  // Parse current cursor's seq (0 if no cursor = start of thread)
+  let currentSeq = 0;
+  if (currentCursor) {
+    const parsed = parseCursor(currentCursor);
+    if (parsed?.version === 2) {
+      currentSeq = parsed.seq;
+    }
+    // v1 cursor: we don't know its seq position, so we can't establish
+    // contiguity. Return null (no safe advance from a v1 cursor).
+    // The cursor will be "upgraded" to v2 when the routing boundary
+    // (route-serial/route-parallel) writes a v2 seenCursor.
+    else if (parsed?.version === 1) {
+      return null;
+    }
+  }
+
+  // Walk through messages in visibility order, advancing through contiguous seqs
+  let advanceTo: { id: string; visibilitySeq: number } | null = null;
+  for (const msg of withSeq) {
+    if (msg.visibilitySeq <= currentSeq) continue; // already seen
+    if (msg.visibilitySeq === currentSeq + 1) {
+      // Contiguous: advance
+      advanceTo = msg;
+      currentSeq = msg.visibilitySeq;
+    } else {
+      // Gap detected: stop — there's an unseen message between currentSeq and this msg
+      break;
+    }
+  }
+
+  if (!advanceTo) return null;
+  return cursorFor(advanceTo);
+}
+
+// --------------------------------------------------------------------------
 // cursorFor — graded issuance (§8.7)
 // --------------------------------------------------------------------------
 

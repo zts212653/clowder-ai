@@ -1046,7 +1046,9 @@ export class MessageStore {
     const visible: Array<{ msg: StoredMessage; seq: number }> = [];
     for (const msg of this.messages) {
       if (msg.threadId !== threadId) continue;
-      if (msg.deletedAt) continue; // #1200 P2-5: tombstone parity with Redis hydrateAndFilter
+      // #1200 Sol R2 P2-5: tombstones (deletedAt) are KEPT in getByThreadAfter per binding
+      // doc (tombstone-keep / null-skip / canceled-skip / isDelivered). Parity direction:
+      // fix Redis to keep tombstones (like Memory), not Memory to filter them.
       if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
       if (!isVisible(msg)) continue;
       const seq = this.visibilitySeq.get(msg.id);
