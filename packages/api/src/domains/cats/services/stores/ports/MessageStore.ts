@@ -1109,6 +1109,9 @@ export class MessageStore {
       const seq = this.visibilitySeq.get(msg.id);
       if (seq === undefined) continue;
       if (!isDelivered(msg)) continue;
+      // #1200 codex P1: skip tombstones — same contract as Redis impl.
+      // getLatestVisibleCursor returns the latest LIVE message, not a tombstone.
+      if (msg.deletedAt) continue;
       visible.push({ id: msg.id, seq });
     }
     if (visible.length === 0) return null;

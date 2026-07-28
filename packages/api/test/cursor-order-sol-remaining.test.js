@@ -1552,23 +1552,88 @@ describe('Sol R6/R7 P2-2: Notice consumer — dual-field + compat resolver', () 
   });
 });
 
-// --- Codex R8 P2: getLatestVisibleCursor must skip tombstones ---
+// --- Codex R9 P1: getLatestVisibleCursor must skip tombstones (both impls) ---
 
-describe('Codex R8 P2: getLatestVisibleCursor skips soft-deleted (tombstoned) messages', () => {
+describe('Codex R9 P1: getLatestVisibleCursor skips soft-deleted (tombstoned) messages', () => {
+  // --- In-memory implementation tests (always run) ---
+
+  it('in-memory: latest cursor points to newest NON-deleted message', async () => {
+    await ensureModules();
+    const memStore = new MessageStore();
+    const threadId = `tombstone-mem-latest-${Date.now()}`;
+
+    const _msgA = memStore.append({
+      userId: 'u1',
+      catId: null,
+      content: 'message A (live)',
+      mentions: [],
+      timestamp: Date.now() - 2000,
+      threadId,
+    });
+    const msgB = memStore.append({
+      userId: 'u1',
+      catId: null,
+      content: 'message B (live)',
+      mentions: [],
+      timestamp: Date.now() - 1000,
+      threadId,
+    });
+    const msgC = memStore.append({
+      userId: 'u1',
+      catId: null,
+      content: 'message C (will be tombstoned)',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
+    });
+
+    // Soft-delete C
+    memStore.softDelete(msgC.id, 'admin');
+
+    const result = memStore.getLatestVisibleCursor(threadId);
+    assert.ok(result, 'Must return a result (at least B is live)');
+
+    const parsed = parseCursor(result.cursor);
+    assert.ok(parsed, 'Must be parseable');
+    assert.equal(parsed.id, msgB.id, 'Latest cursor must be B (not the tombstoned C)');
+    assert.equal(result.messageId, msgB.id, 'messageId must also be B');
+  });
+
+  it('in-memory: returns null when all messages are tombstoned', async () => {
+    await ensureModules();
+    const memStore = new MessageStore();
+    const threadId = `tombstone-mem-all-del-${Date.now()}`;
+
+    const msgOnly = memStore.append({
+      userId: 'u1',
+      catId: null,
+      content: 'sole message',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
+    });
+    memStore.softDelete(msgOnly.id, 'admin');
+
+    const result = memStore.getLatestVisibleCursor(threadId);
+    assert.equal(result, null, 'All tombstoned → no latest cursor');
+  });
+
+  // --- Redis implementation tests (require isolation) ---
+
   let redis;
-  let store;
+  let redisStore;
   const PREFIX = 'test:tombstone-latest:';
 
   before(async () => {
     await ensureModules();
     const skipReason = redisIsolationSkipReason(REDIS_URL);
     if (skipReason) {
-      console.log(`SKIP (getLatestVisibleCursor tombstone): ${skipReason}`);
+      console.log(`SKIP (getLatestVisibleCursor tombstone Redis): ${skipReason}`);
       return;
     }
-    redis = createRedisClient(REDIS_URL);
-    await assertRedisIsolationOrThrow(redis);
-    store = new RedisMessageStore(redis, { keyPrefix: PREFIX });
+    assertRedisIsolationOrThrow(REDIS_URL, 'tombstone-latest');
+    redis = createRedisClient({ url: REDIS_URL });
+    redisStore = new RedisMessageStore(redis, { keyPrefix: PREFIX });
   });
 
   after(async () => {
@@ -1578,54 +1643,64 @@ describe('Codex R8 P2: getLatestVisibleCursor skips soft-deleted (tombstoned) me
     }
   });
 
-  it('latest cursor points to newest NON-deleted message, not a tombstone', async () => {
-    if (!store) return; // skipped — no Redis
+  it('Redis: latest cursor points to newest NON-deleted message', async () => {
+    if (!redisStore) return; // skipped — no Redis
 
-    const threadId = `tombstone-latest-${Date.now()}`;
+    const threadId = `tombstone-redis-latest-${Date.now()}`;
 
-    // Append 3 messages: A (live), B (live), C (will be deleted)
-    const msgA = await store.append(threadId, {
-      role: 'assistant',
+    const _msgA = await redisStore.append({
+      userId: 'u1',
+      catId: null,
       content: 'message A (live)',
-      catId: 'opus',
+      mentions: [],
+      timestamp: Date.now() - 2000,
+      threadId,
     });
-    const msgB = await store.append(threadId, {
-      role: 'assistant',
+    const msgB = await redisStore.append({
+      userId: 'u1',
+      catId: null,
       content: 'message B (live)',
-      catId: 'opus',
+      mentions: [],
+      timestamp: Date.now() - 1000,
+      threadId,
     });
-    const msgC = await store.append(threadId, {
-      role: 'assistant',
+    const msgC = await redisStore.append({
+      userId: 'u1',
+      catId: null,
       content: 'message C (will be tombstoned)',
-      catId: 'opus',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
     });
 
-    // Soft-delete C (tombstone it)
-    await store.softDelete(threadId, msgC.id);
+    // Soft-delete C: softDelete(id, deletedBy)
+    await redisStore.softDelete(msgC.id, 'admin');
 
-    // getLatestVisibleCursor should return B's cursor (skip C)
-    const latestCursor = await store.getLatestVisibleCursor(threadId);
-    assert.ok(latestCursor, 'Must return a cursor (at least B is live)');
+    const result = await redisStore.getLatestVisibleCursor(threadId);
+    assert.ok(result, 'Must return a result (at least B is live)');
 
-    const parsed = parseCursor(latestCursor);
+    const parsed = parseCursor(result.cursor);
     assert.ok(parsed, 'Must be parseable');
     assert.equal(parsed.id, msgB.id, 'Latest cursor must be B (not the tombstoned C)');
+    assert.equal(result.messageId, msgB.id, 'messageId must also be B');
   });
 
-  it('returns null when all messages are tombstoned', async () => {
-    if (!store) return;
+  it('Redis: returns null when all messages are tombstoned', async () => {
+    if (!redisStore) return;
 
-    const threadId = `tombstone-all-del-${Date.now()}`;
+    const threadId = `tombstone-redis-all-del-${Date.now()}`;
 
-    const msgOnly = await store.append(threadId, {
-      role: 'assistant',
+    const msgOnly = await redisStore.append({
+      userId: 'u1',
+      catId: null,
       content: 'sole message',
-      catId: 'opus',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
     });
-    await store.softDelete(threadId, msgOnly.id);
+    await redisStore.softDelete(msgOnly.id, 'admin');
 
-    const latestCursor = await store.getLatestVisibleCursor(threadId);
-    // No live messages → should return null (or undefined)
-    assert.equal(latestCursor ?? null, null, 'All tombstoned → no latest cursor');
+    const result = await redisStore.getLatestVisibleCursor(threadId);
+    assert.equal(result ?? null, null, 'All tombstoned → no latest cursor');
   });
 });
