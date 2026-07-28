@@ -2780,6 +2780,18 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // F35: Filter out whispers not intended for this cat
     const mentionViewer = { type: 'cat' as const, catId };
     const mentions = rawMentions.filter((m) => canViewMessage(m, mentionViewer));
+    // #1200: cross-format acked guard — getRecentMentionsFor returns messages via
+    // hydrateMessages (no WITHSCORES injection), so legacy hashes lack visibilitySeq.
+    // cursorFor(item) → v1 raw ID, but lastAckId may be v2. Since 'v' > any digit,
+    // v1 <= v2 is always true → all mentions falsely appear acked. Guard: when
+    // cursor formats differ, treat as unacked (conservative — shows extra mentions
+    // rather than hiding unprocessed ones).
+    const isMentionAcked = (item: StoredMessage): boolean => {
+      if (!lastAckId) return false;
+      const ic = cursorFor(item);
+      if (ic.startsWith('v2:') !== lastAckId.startsWith('v2:')) return false;
+      return ic <= lastAckId;
+    };
     const payload = {
       mentions: mentions.map((item) => {
         if (isMentionFullMode) {
@@ -2791,13 +2803,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             timestamp: item.timestamp,
             contentLength: item.content.length,
             requiresDrill: false,
-            ...(shouldIncludeAcked ? { acked: Boolean(lastAckId && cursorFor(item) <= lastAckId) } : {}),
+            ...(shouldIncludeAcked ? { acked: isMentionAcked(item) } : {}),
           };
         }
         // F236 AC-A3: anchor-first — head+tail excerpt + requiresDrill, full body one hop away.
         return anchorPendingMention(item, {
           from: getSenderName(item.catId),
-          ...(shouldIncludeAcked ? { acked: Boolean(lastAckId && cursorFor(item) <= lastAckId) } : {}),
+          ...(shouldIncludeAcked ? { acked: isMentionAcked(item) } : {}),
         });
       }),
     };
@@ -3387,12 +3399,19 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       const latestSeen = filtered[filtered.length - 1];
       try {
         // #1200 §8.7: canonicalize to v2 cursor for visibility-domain comparison.
-        // latestSeen from getByThreadAfter carries visibilitySeq → cursorFor produces v2.
+        // Play-mode filtered comes from getByThreadBefore — messages may lack
+        // visibilitySeq in hash (legacy backfill). Canonicalize to v2 so CAS
+        // doesn't reject a v1 ID against an existing v2 seen cursor.
+        let seenCursor = cursorFor(latestSeen);
+        if (!seenCursor.startsWith('v2:') && effectiveThreadId && messageStore.canonicalizeCursor) {
+          const canon = await messageStore.canonicalizeCursor(latestSeen.id, effectiveThreadId);
+          if (canon) seenCursor = canon;
+        }
         await deliveryCursorStore.ackSeenCursor(
           principalUserId,
           principalCatId as CatId,
           effectiveThreadId,
-          cursorFor(latestSeen),
+          seenCursor,
         );
       } catch (err) {
         // Fail-open: don't block thread-context on seenCursor push failure
