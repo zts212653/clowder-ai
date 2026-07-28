@@ -15,6 +15,7 @@
 import type { CatId, PublishedFreshnessAnnotation } from '@cat-cafe/shared';
 import { freshnessGateForward, freshnessGateHeld } from '../../../../infrastructure/telemetry/instruments.js';
 import { getSourceDisplayName } from '../context/ContextAssembler.js';
+import { cursorFor } from '../stores/cursor.js';
 import type { DeliveryCursorStore } from '../stores/ports/DeliveryCursorStore.js';
 import type { FreshnessAttentionEventLog } from './FreshnessAttentionEventLog.js';
 import { type FreshnessDecision, FreshnessGateService, type UnseenMessage } from './FreshnessGateService.js';
@@ -28,6 +29,8 @@ export interface FreshnessReadableMessage {
   threadId?: string;
   catId: string | null;
   content: string;
+  /** #1200: visibility-domain sequence number (injected by store). */
+  visibilitySeq?: number;
   mentions?: readonly string[];
   replyTo?: string;
   source?: { label: string; connector?: string; sender?: { id: string; name?: string } };
@@ -378,7 +381,8 @@ export async function checkFreshnessForPostMessage(input: CheckFreshnessInput): 
     }
 
     // Advance cursor past this batch for next round
-    paginationCursor = batch[batch.length - 1].id;
+    // #1200 §8.7: use v2 cursor (visibility-domain) for precise positioning
+    paginationCursor = cursorFor(batch[batch.length - 1]);
     round++;
   }
 
@@ -424,8 +428,8 @@ export async function checkFreshnessForPostMessage(input: CheckFreshnessInput): 
     selfSource: isFreshnessSelfSourceMessage(msg, catId, threadId),
   }));
 
-  // The latest message ID is the last visible message in the unseen list
-  const latestMessageId = allVisibleMessages[allVisibleMessages.length - 1].id;
+  // #1200 §8.7: v2 cursor for seen-cursor domain comparison (matches ackSeenCursor format)
+  const latestMessageId = cursorFor(allVisibleMessages[allVisibleMessages.length - 1]);
 
   const result = await gate.checkFreshness({
     userId,

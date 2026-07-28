@@ -13,6 +13,7 @@
  */
 
 import type { CatId } from '@cat-cafe/shared';
+import { cursorFor } from '../stores/cursor.js';
 import type { DeliveryCursorStore } from '../stores/ports/DeliveryCursorStore.js';
 import { generateSortableId } from '../stores/ports/MessageStore.js';
 import {
@@ -91,8 +92,9 @@ export class ThreadUnseenChecker implements UnseenChecker {
     const senderSet = new Set(nonSelf.map((msg) => getFreshnessSenderLabel(msg)));
     const senders = [...senderSet];
 
-    // maxMessageId = last message in batch (for event log)
-    const maxMessageId = nonSelf[nonSelf.length - 1].id;
+    // #1200 §8.7: maxMessageId as v2 cursor for seen-cursor domain comparison.
+    // Messages from getByThreadAfter carry visibilitySeq → cursorFor produces v2.
+    const maxMessageId = cursorFor(nonSelf[nonSelf.length - 1]);
 
     return {
       count: nonSelf.length,
@@ -141,12 +143,11 @@ export class ThreadUnseenChecker implements UnseenChecker {
     return {
       count: nonSelf.length,
       senders,
-      // Use a sortable synthetic ID at current timestamp so the notice resolves
-      // once the cat's seenCursor advances past this point (after the queued
-      // message is delivered and read). Cloud review P2: `queued:${threadId}`
-      // sorts after all real IDs ('q' > '0'), making the notice permanently
-      // unresolved in FreshnessNoticeService.checkHoldBallReminder.
-      maxMessageId: generateSortableId(Date.now()),
+      // #1200 §8.7: synthetic v2 cursor at current timestamp so the notice resolves
+      // once the cat's seenCursor (also v2) advances past this point. Uses cursorFor
+      // with Date.now() as visibilitySeq to produce a valid v2 cursor that sorts
+      // correctly against real v2 seenCursors.
+      maxMessageId: cursorFor({ id: generateSortableId(Date.now()), visibilitySeq: Date.now() }),
       // Re-checking the same queued entry generates a fresh synthetic cursor.
       // Coalesce by durable, content-free Queue identity instead; a newly
       // merged message ID changes this key and permits exactly one new notice.

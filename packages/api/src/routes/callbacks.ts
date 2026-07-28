@@ -74,6 +74,7 @@ import {
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { EventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { IRuntimeSessionStore } from '../domains/cats/services/runtime-session/RuntimeSessionStore.js';
+import { cursorFor } from '../domains/cats/services/stores/cursor.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
@@ -2790,13 +2791,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             timestamp: item.timestamp,
             contentLength: item.content.length,
             requiresDrill: false,
-            ...(shouldIncludeAcked ? { acked: Boolean(lastAckId && item.id <= lastAckId) } : {}),
+            ...(shouldIncludeAcked ? { acked: Boolean(lastAckId && cursorFor(item) <= lastAckId) } : {}),
           };
         }
         // F236 AC-A3: anchor-first — head+tail excerpt + requiresDrill, full body one hop away.
         return anchorPendingMention(item, {
           from: getSenderName(item.catId),
-          ...(shouldIncludeAcked ? { acked: Boolean(lastAckId && item.id <= lastAckId) } : {}),
+          ...(shouldIncludeAcked ? { acked: Boolean(lastAckId && cursorFor(item) <= lastAckId) } : {}),
         });
       }),
     };
@@ -2876,12 +2877,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
 
     // Validation 3: monotonic (noop if backwards)
-    // #1200 note: mention-ack cursors stay as raw message IDs (not v2 tokens).
-    // The mention cursor domain (getMentionsFor, getMentionAckCursor) uses lex-ID
-    // comparison throughout and does NOT flow through getByThreadAfter / parseCursor.
-    // Canonicalizing to v2 here would break getMentionsFor's `msg.id <= afterId` filter.
+    // #1200 §8.7 migration: canonicalize to v2 for visibility-ordered comparison.
+    // DeliveryCursorStore lex comparison is v2-safe (v2 always lex-exceeds v1).
+    const canonicalCursor = messageStore.canonicalizeCursor
+      ? await messageStore.canonicalizeCursor(upToMessageId, record.threadId)
+      : upToMessageId;
     const currentCursor = await deliveryCursorStore.getMentionAckCursor(record.userId, catId, record.threadId);
-    if (currentCursor && upToMessageId <= currentCursor) {
+    if (currentCursor && canonicalCursor <= currentCursor) {
       return { status: 'noop', reason: 'already acknowledged' };
     }
 
@@ -2895,16 +2897,22 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     );
     if (pendingWindow.length > 0) {
       const windowLastMsg = pendingWindow[pendingWindow.length - 1];
-      if (windowLastMsg && upToMessageId > windowLastMsg.id) {
-        reply.status(400);
-        return {
-          error: 'upToMessageId exceeds current pending window, ack only within fetched batch',
-          windowLastId: windowLastMsg.id,
-        };
+      // Compare using canonicalized cursor (visibility position, not raw ID lex)
+      if (windowLastMsg) {
+        const windowLastCursor = messageStore.canonicalizeCursor
+          ? await messageStore.canonicalizeCursor(windowLastMsg.id, record.threadId)
+          : windowLastMsg.id;
+        if (canonicalCursor > windowLastCursor) {
+          reply.status(400);
+          return {
+            error: 'upToMessageId exceeds current pending window, ack only within fetched batch',
+            windowLastId: windowLastMsg.id,
+          };
+        }
       }
     }
 
-    await deliveryCursorStore.ackMentionCursor(record.userId, catId, record.threadId, upToMessageId);
+    await deliveryCursorStore.ackMentionCursor(record.userId, catId, record.threadId, canonicalCursor);
     return { status: 'ok', ackedUpTo: upToMessageId };
   });
 
@@ -3378,14 +3386,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     if (deliveryCursorStore && filtered.length > 0 && principal.kind === 'invocation' && isContiguousRead) {
       const latestSeen = filtered[filtered.length - 1];
       try {
-        // #1200 note: seenCursor stays as raw message ID (not v2 token).
-        // The seenCursor domain (FreshnessNoticeService.maxMessageId comparison)
-        // uses lex-ID comparison and doesn't flow through parseCursor.
+        // #1200 §8.7: canonicalize to v2 cursor for visibility-domain comparison.
+        // latestSeen from getByThreadAfter carries visibilitySeq → cursorFor produces v2.
         await deliveryCursorStore.ackSeenCursor(
           principalUserId,
           principalCatId as CatId,
           effectiveThreadId,
-          latestSeen.id,
+          cursorFor(latestSeen),
         );
       } catch (err) {
         // Fail-open: don't block thread-context on seenCursor push failure

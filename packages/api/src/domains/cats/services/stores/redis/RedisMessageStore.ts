@@ -568,8 +568,10 @@ export class RedisMessageStore {
 
   /**
    * Get mentions for a cat, ascending (oldest first after cursor).
-   * When afterMessageId is provided, only returns mentions after that ID.
-   * Cursor fallback: if afterMessageId not in sorted set (TTL/delete), falls back to full scan (#77 R2 P2).
+   * #1200 §8.7 migration: scans INSIDE the visibility relation with match-counted
+   * discipline — chunks visibility ZSET until `limit` MENTION matches collected or
+   * thread exhausted. Accepts v1 + v2 cursors. Per-cat mentions ZSET is NOT used
+   * for cursor advance (remains a time-domain display/backfill surface).
    */
   async getMentionsFor(
     catId: CatId,
@@ -578,57 +580,65 @@ export class RedisMessageStore {
     threadId?: string,
     afterMessageId?: string,
   ): Promise<StoredMessage[]> {
+    if (!threadId) {
+      // Global mention query without threadId: fall back to mention ZSET scan.
+      // §8.7 audit: no cursor-advance call sites use the global path.
+      return this.getMentionsForLegacy(catId, limit, userId);
+    }
+    const n = limit ?? DEFAULT_LIMIT;
+    await this.ensureVisibilityMigrated(threadId);
+    const visKey = MessageKeys.threadVisibility(threadId);
+
+    // Parse cursor + resolve to visibility position (same as getByThreadAfter)
+    const cursor = parseCursor(afterMessageId);
+    let afterSeq: number | null = null;
+    let cursorId: string | null = null;
+
+    if (cursor) {
+      cursorId = cursor.id;
+      if (cursor.version === 2) {
+        afterSeq = cursor.seq;
+      } else {
+        const seqRaw = await this.redis.hget(MessageKeys.detail(cursor.id), 'visibilitySeq');
+        if (seqRaw) afterSeq = Number(seqRaw);
+        else {
+          const score = await this.redis.zscore(visKey, cursor.id);
+          if (score !== null) afterSeq = Number(score);
+        }
+      }
+    }
+
+    // Match-counted scan with mention predicate
+    const mentionFilter = (msg: StoredMessage) => msg.mentions.includes(catId);
+    const result: StoredMessage[] = [];
+    const staleIds: string[] = [];
+
+    if (!cursor || afterSeq === null) {
+      await this.scanVisibilityChunked(visKey, '-inf', '+inf', n, userId, result, staleIds, mentionFilter);
+    } else {
+      const sameRaw = await this.redis.zrangebyscore(visKey, String(afterSeq), String(afterSeq));
+      const sameFiltered = sameRaw.filter((id) => id > cursorId!);
+      if (sameFiltered.length > 0) {
+        const sameScores = new Map(sameFiltered.map((id) => [id, afterSeq!]));
+        await this.hydrateAndFilter(sameFiltered, userId, n, result, staleIds, sameScores, mentionFilter);
+      }
+      if (result.length < n) {
+        await this.scanVisibilityChunked(visKey, `(${afterSeq})`, '+inf', n, userId, result, staleIds, mentionFilter);
+      }
+    }
+
+    if (staleIds.length > 0) this.redis.zrem(visKey, ...staleIds).catch(() => {});
+    return result;
+  }
+
+  /** Legacy global mention scan (no threadId). Not used by cursor-advance paths. */
+  private async getMentionsForLegacy(catId: CatId, limit?: number, userId?: string): Promise<StoredMessage[]> {
     const n = limit ?? DEFAULT_LIMIT;
     const mentionKey = MessageKeys.mentions(catId);
-
-    // Cursor fallback: verify afterMessageId exists in the sorted set
-    let effectiveAfter = afterMessageId;
-    if (effectiveAfter) {
-      const rank = await this.redis.zrank(mentionKey, effectiveAfter);
-      if (rank === null) {
-        log.warn({ cursor: effectiveAfter, catId }, 'cursor not in mention set, falling back to full pending');
-        effectiveAfter = undefined;
-      }
-    }
-
-    // Ascending scan: collect oldest N mentions after cursor
-    const CHUNK = 50;
-    const ids: string[] = [];
-    let startIndex = 0;
-
-    if (effectiveAfter) {
-      // Find the rank of afterMessageId and start scanning after it
-      const rank = await this.redis.zrank(mentionKey, effectiveAfter);
-      if (rank !== null) {
-        startIndex = rank + 1; // Start after the cursor
-      }
-    }
-
-    // Scan forward (ascending) in chunks
-    let offset = startIndex;
-    while (ids.length < n) {
-      const chunk = await this.redis.zrange(mentionKey, offset, offset + CHUNK - 1);
-      if (chunk.length === 0) break;
-      for (const id of chunk) {
-        if (ids.length >= n) break;
-        // Extra safety: skip IDs <= afterMessageId (handles edge cases)
-        if (effectiveAfter && id <= effectiveAfter) continue;
-        if (userId) {
-          const score = await this.redis.zscore(MessageKeys.user(userId), id);
-          if (score === null) continue;
-        }
-        if (threadId) {
-          const score = await this.redis.zscore(MessageKeys.thread(threadId), id);
-          if (score === null) continue;
-        }
-        ids.push(id);
-      }
-      offset += CHUNK;
-    }
-
+    const ids = await this.redis.zrange(mentionKey, 0, n - 1);
     if (ids.length === 0) return [];
-    const messages = await this.hydrateMessages(ids); // Already ascending
-    return messages.filter(isDelivered);
+    const messages = await this.hydrateMessages(ids);
+    return messages.filter(isDelivered).slice(0, n);
   }
 
   /**
@@ -929,6 +939,7 @@ export class RedisMessageStore {
     userId: string | undefined,
     result: StoredMessage[],
     staleIds: string[],
+    extraFilter?: (msg: StoredMessage) => boolean,
   ): Promise<void> {
     const CHUNK = Math.max(maxCollect, 50);
     let offset = 0;
@@ -947,16 +958,11 @@ export class RedisMessageStore {
         scores.set(id, score);
       }
 
-      // #1200 P1-B fix: NO lex-ID filtering. Pruned-cursor fallback = full rescan
-      // from (0,"") per §8.4 step 3. The old `afterId ? ids.filter(id > afterId) : ids`
-      // reintroduced FM-3 (lex ID ordering disease). Score-range params handle positioning.
-      //
-      // #1200 codex P2: pass `maxCollect` directly (not `maxCollect - result.length`).
-      // hydrateAndFilter checks `result.length < maxCollect` internally — result is
-      // a shared accumulator, so subtracting result.length here double-counts and
-      // causes under-return on multi-chunk pages.
+      // #1200 P1-B: NO lex-ID filtering. Score-range params handle positioning.
+      // #1200 codex P2: pass maxCollect directly — hydrateAndFilter checks
+      // result.length < maxCollect with the shared accumulator.
       if (ids.length > 0) {
-        await this.hydrateAndFilter(ids, userId, maxCollect, result, staleIds, scores);
+        await this.hydrateAndFilter(ids, userId, maxCollect, result, staleIds, scores, extraFilter);
       }
 
       if (ids.length < CHUNK) break;
@@ -976,6 +982,7 @@ export class RedisMessageStore {
     result: StoredMessage[],
     staleIds: string[],
     scores?: Map<string, number>,
+    extraFilter?: (msg: StoredMessage) => boolean,
   ): Promise<void> {
     const pipeline = this.redis.multi();
     for (const id of ids) {
@@ -1001,9 +1008,10 @@ export class RedisMessageStore {
         staleIds.push(ids[i]!);
         continue;
       }
-      // Filter: isDelivered (skip queued/canceled), userId visibility
+      // Filter: isDelivered (skip queued/canceled), userId visibility, extra predicate
       if (!isDelivered(msg)) continue;
       if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
+      if (extraFilter && !extraFilter(msg)) continue;
       // §8.7: Inject visibilitySeq from WITHSCORES (authoritative over hash field
       // for backfilled legacy messages that lack the hash field). Binding by ID.
       if (scores) {

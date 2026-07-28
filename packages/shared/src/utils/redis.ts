@@ -58,16 +58,31 @@ export const SessionKeys = {
 
 /**
  * Lua script: atomic compare-and-set for monotonic cursor advancement.
- * SET key to value only if value > current (lexicographic). Sets TTL on success.
- * KEYS[1] = cursor key, ARGV[1] = new value, ARGV[2] = TTL seconds.
+ * SET key to value only if value > current (lexicographic).
+ * KEYS[1] = cursor key, ARGV[1] = new value, ARGV[2] = TTL seconds (0 = persistent).
  * Returns 1 if set, 0 if noop.
+ *
+ * #1200 §8.7 cursor TTL flip (Iron Law 5 compliance):
+ * - ttl > 0 → SET with EX (expiring cursor)
+ * - ttl = 0 → SET without EX + PERSIST-before-compare (persistent cursor).
+ *   PERSIST-before-compare: on noop path, PERSIST the existing key to heal
+ *   any accidental TTL left by a prior ttl>0 write (cutover migration).
+ *   On advance path, SET without EX is already persistent.
  */
 const SET_IF_GREATER_LUA = `
+local ttl = tonumber(ARGV[2])
 local cur = redis.call('GET', KEYS[1])
 if cur and ARGV[1] <= cur then
+  if ttl == 0 then
+    redis.call('PERSIST', KEYS[1])
+  end
   return 0
 end
-redis.call('SET', KEYS[1], ARGV[1], 'EX', tonumber(ARGV[2]))
+if ttl > 0 then
+  redis.call('SET', KEYS[1], ARGV[1], 'EX', ttl)
+else
+  redis.call('SET', KEYS[1], ARGV[1])
+end
 return 1
 `;
 
@@ -100,13 +115,16 @@ export class SessionStore {
    * Atomically set delivery cursor only if messageId > current value.
    * Uses Lua script for atomic compare-and-set to prevent concurrent regression.
    * Returns true if cursor was advanced, false if noop.
+   *
+   * #1200 Iron Law 5: default persistent (ttl=0). Pass ttl>0 only for
+   * explicitly TTL-enabled threads.
    */
   async setDeliveryCursor(
     userId: string,
     catId: string,
     threadId: string,
     messageId: string,
-    ttlSeconds = 604800, // 7 days (#40)
+    ttlSeconds = 0, // #1200: persistent by default (Iron Law 5)
   ): Promise<boolean> {
     const key = SessionKeys.deliveryCursor(userId, catId, threadId);
     const result = (await this.redis.eval(SET_IF_GREATER_LUA, 1, key, messageId, String(ttlSeconds))) as number;
@@ -126,13 +144,15 @@ export class SessionStore {
    * Atomically set mention ack cursor only if messageId > current value.
    * Uses Lua script for atomic compare-and-set to prevent concurrent regression.
    * Returns true if cursor was advanced, false if noop (already at or past messageId).
+   *
+   * #1200 Iron Law 5: default persistent (ttl=0).
    */
   async setMentionAckCursor(
     userId: string,
     catId: string,
     threadId: string,
     messageId: string,
-    ttlSeconds = 604800, // 7 days, same as delivery cursor
+    ttlSeconds = 0, // #1200: persistent by default (Iron Law 5)
   ): Promise<boolean> {
     const key = SessionKeys.mentionAck(userId, catId, threadId);
     const result = (await this.redis.eval(SET_IF_GREATER_LUA, 1, key, messageId, String(ttlSeconds))) as number;
@@ -158,13 +178,15 @@ export class SessionStore {
    * Atomically set seen cursor only if messageId > current value (F254).
    * Uses same Lua CAS script as delivery/mention cursors.
    * Returns true if cursor was advanced, false if noop.
+   *
+   * #1200 Iron Law 5: default persistent (ttl=0).
    */
   async setSeenCursor(
     userId: string,
     catId: string,
     threadId: string,
     messageId: string,
-    ttlSeconds = 604800, // 7 days, same as other cursors
+    ttlSeconds = 0, // #1200: persistent by default (Iron Law 5)
   ): Promise<boolean> {
     const key = SessionKeys.seenCursor(userId, catId, threadId);
     const result = (await this.redis.eval(SET_IF_GREATER_LUA, 1, key, messageId, String(ttlSeconds))) as number;

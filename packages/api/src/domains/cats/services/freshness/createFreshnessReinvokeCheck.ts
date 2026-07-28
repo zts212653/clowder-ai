@@ -107,13 +107,10 @@ export function createFreshnessReinvokeCheck(deps: FreshnessReinvokeCheckDeps): 
       }
 
       // 3b. Filter out notices the cat has already read past (GPT52 R2 P1).
-      // Matches B2 FreshnessNoticeService.ts:157-172 pattern: notices with
+      // Matches B2 FreshnessNoticeService pattern: notices with
       // maxMessageId <= seenCursor are implicitly resolved (cat advanced past them).
-      // Without this filter, a stale high-priority notice can trigger spurious
-      // re-invoke when a newer low-priority message arrives (seenCursorCaughtUp=false
-      // due to the new message, but the notice's original message was already read).
-      // ID comparison is safe here: maxMessageId and seenCursor are both creation-time
-      // IDs (generateSortableId), so lexicographic order = creation order.
+      // #1200 §8.7: Both maxMessageId and seenCursor are now v2 cursors
+      // (visibility-domain), so lex comparison correctly orders late-delivered messages.
       const preFilterNoticeCount = unresolvedNotices.length;
       if (seenCursor) {
         unresolvedNotices = unresolvedNotices.filter((n) => n.maxMessageId > seenCursor);

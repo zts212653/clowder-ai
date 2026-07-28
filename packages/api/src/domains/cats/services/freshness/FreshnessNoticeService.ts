@@ -189,17 +189,11 @@ export class FreshnessNoticeService {
     let unresolved = await this.eventLog.getUnresolvedNotices(invocationId);
 
     // P1-2 fix: filter out notices that the cat has already read past
-    // (seenCursor advanced beyond notice.maxMessageId = implicitly resolved)
+    // (seenCursor advanced beyond notice.maxMessageId = implicitly resolved).
     //
-    // Known limitation (P2-R4-1): message IDs embed creation timestamp
-    // (generateSortableId), so lexicographic comparison matches creation
-    // order. However, queued messages (F117) can have their sorted-set
-    // score re-assigned via markDelivered() without changing the ID.
-    // If a queued message is delivered late, its ID may be lexicographically
-    // older than seenCursor even though it's unseen. This is acceptable
-    // because: (a) B1 already delivered the original notice, (b) this is
-    // an advisory reminder, (c) Phase B scope doesn't cover queued-message
-    // delivery interactions. Fix if Phase C integrates queued messages.
+    // #1200 §8.7: Both maxMessageId and seenCursor are now v2 cursors
+    // (visibility-domain), so lex comparison correctly handles late-delivered
+    // queued messages (previous P2-R4-1 limitation resolved by v2 migration).
     if (currentSeenCursor) {
       unresolved = unresolved.filter((n) => n.maxMessageId > currentSeenCursor);
     }

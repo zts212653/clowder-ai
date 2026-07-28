@@ -17,6 +17,8 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 
+const { parseCursor } = await import('../dist/domains/cats/services/stores/cursor.js');
+
 function createMockSocketManager() {
   return {
     broadcastAgentMessage() {},
@@ -352,9 +354,12 @@ describe('Mention Ack (#77)', () => {
     const sess = await registry.create('user-1', 'opus', 'thread-A');
     await ackMentions(app, sess.invocationId, sess.callbackToken, m1.id);
 
-    // Verify cursor exists
+    // Verify cursor exists and is v2 (#1200: ack-mentions now canonicalizes to v2)
     const cursor = await deliveryCursorStore.getMentionAckCursor('user-1', 'opus', 'thread-A');
-    assert.equal(cursor, m1.id);
+    assert.ok(cursor, 'cursor should exist');
+    const parsed = parseCursor(cursor);
+    assert.equal(parsed.version, 2, 'cursor should be v2');
+    assert.equal(parsed.id, m1.id, 'cursor should reference m1');
 
     // Cascade delete (simulates thread deletion)
     const deleted = await deliveryCursorStore.deleteByThreadForUser('user-1', 'thread-A');
@@ -476,8 +481,12 @@ describe('Mention Ack (#77)', () => {
       const [triggerMessage] = messageStore.getRecent(1, 'user-1');
       assert.ok(triggerMessage);
 
+      // #1200: cursor is now v2 after canonicalization
       const cursor = await deliveryCursorStore.getMentionAckCursor('user-1', 'opus', threadId);
-      assert.equal(cursor, triggerMessage.id);
+      assert.ok(cursor, 'cursor should exist');
+      const parsedCursor = parseCursor(cursor);
+      assert.equal(parsedCursor.version, 2, 'auto-ack cursor should be v2');
+      assert.equal(parsedCursor.id, triggerMessage.id, 'cursor should reference trigger message');
 
       const opus = await registry.create('user-1', 'opus', threadId);
       const pending = await getPending(app, opus.invocationId, opus.callbackToken);
@@ -515,8 +524,12 @@ describe('Mention Ack (#77)', () => {
       assert.ok(trigger1);
       assert.ok(owner.list.includes('opus'));
 
+      // #1200: cursor is now v2 after canonicalization
       const cursor1 = await deliveryCursorStore.getMentionAckCursor('user-1', 'opus', threadId);
-      assert.equal(cursor1, trigger1.id);
+      assert.ok(cursor1, 'cursor should exist');
+      const parsed1 = parseCursor(cursor1);
+      assert.equal(parsed1.version, 2, 'cursor should be v2');
+      assert.equal(parsed1.id, trigger1.id, 'cursor should reference trigger1');
 
       const opus1 = await registry.create('user-1', 'opus', threadId);
       const pending1 = await getPending(app, opus1.invocationId, opus1.callbackToken);

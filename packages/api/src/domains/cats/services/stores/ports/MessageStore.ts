@@ -887,8 +887,8 @@ export class MessageStore {
 
   /**
    * Get mentions for a specific cat, ascending (oldest first after cursor).
-   * When afterMessageId is provided, only returns mentions with id > afterMessageId.
-   * Returns the oldest N matches (ascending) — R4 P1 contract.
+   * #1200 §8.7 migration: scans visibility ordering, match-counted (collects
+   * `limit` MENTION matches, not limit total messages). Accepts v1 + v2 cursors.
    */
   getMentionsFor(
     catId: CatId,
@@ -898,21 +898,37 @@ export class MessageStore {
     afterMessageId?: string,
   ): StoredMessage[] {
     const n = limit ?? DEFAULT_LIMIT;
-    const matches: StoredMessage[] = [];
 
-    // Walk forward (ascending) to collect oldest-first after cursor
-    for (let i = 0; i < this.messages.length && matches.length < n; i++) {
-      const msg = this.messages[i]!;
+    // Collect all visible mentions in matching threads, sorted by visibility
+    const visible: Array<{ msg: StoredMessage; seq: number }> = [];
+    for (const msg of this.messages) {
       if (msg.deletedAt) continue;
-      if (!isDelivered(msg)) continue; // F117: exclude queued/canceled
-      if (afterMessageId && msg.id <= afterMessageId) continue;
+      if (!isDelivered(msg)) continue;
       if (threadId && msg.threadId !== threadId) continue;
-      if (msg.mentions.includes(catId) && (!userId || msg.userId === userId)) {
-        matches.push(msg);
-      }
+      if (!msg.mentions.includes(catId)) continue;
+      if (userId && msg.userId !== userId) continue;
+      const seq = this.visibilitySeq.get(msg.id);
+      if (seq === undefined) continue; // not yet visible
+      visible.push({ msg: { ...msg, visibilitySeq: seq }, seq });
+    }
+    visible.sort((a, b) => (a.seq !== b.seq ? a.seq - b.seq : a.msg.id < b.msg.id ? -1 : 1));
+
+    // Apply cursor filter using visibility ordering (not raw-ID lex)
+    if (!afterMessageId) return visible.slice(0, n).map((v) => v.msg);
+    const cursor = parseCursor(afterMessageId);
+    if (!cursor) return visible.slice(0, n).map((v) => v.msg);
+
+    let afterSeq: number | null = null;
+    if (cursor.version === 2) {
+      afterSeq = cursor.seq;
+    } else {
+      afterSeq = this.visibilitySeq.get(cursor.id) ?? null;
     }
 
-    return matches; // Already ascending
+    if (afterSeq === null) return visible.slice(0, n).map((v) => v.msg); // pruned → full scan
+    const startIdx = visible.findIndex((v) => v.seq > afterSeq! || (v.seq === afterSeq! && v.msg.id > cursor.id));
+    if (startIdx === -1) return [];
+    return visible.slice(startIdx, startIdx + n).map((v) => v.msg);
   }
 
   /**
@@ -929,7 +945,10 @@ export class MessageStore {
       if (!isDelivered(msg)) continue; // F117: exclude queued/canceled
       if (threadId && msg.threadId !== threadId) continue;
       if (msg.mentions.includes(catId) && (!userId || msg.userId === userId)) {
-        matches.push(msg);
+        // #1200 §8.7: inject visibilitySeq so callers can use cursorFor()
+        // for acked flag comparison (same pattern as getMentionsFor)
+        const seq = this.visibilitySeq.get(msg.id);
+        matches.push(seq !== undefined ? { ...msg, visibilitySeq: seq } : msg);
       }
     }
 
