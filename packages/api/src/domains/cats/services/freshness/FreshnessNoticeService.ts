@@ -18,7 +18,7 @@
 
 import type { CatId } from '@cat-cafe/shared';
 import { freshnessNoticeAttached, freshnessNoticeDeferred } from '../../../../infrastructure/telemetry/instruments.js';
-import { compareCursors } from '../stores/cursor.js';
+import { compareCursors, parseCursor } from '../stores/cursor.js';
 import type { FreshnessAttentionEvent, NoticeAttachedEvent } from './FreshnessAttentionEventLog.js';
 import type { FreshnessInvocationState } from './FreshnessInvocationStateStore.js';
 import type { RuntimeCapabilityDescriptor } from './RuntimeCapabilityDescriptor.js';
@@ -144,9 +144,10 @@ export class FreshnessNoticeService {
     await this.stateStore.recordNoticeDelivered(invocationId, toolCallCount);
 
     // Record cold path event
-    // #1200 Sol R6 P2-2: store maxCursor (v2) alongside maxMessageId for
-    // forward-compat. ThreadUnseenChecker already emits v2 via cursorFor,
-    // so maxCursor = maxMessageId for new events. Legacy events lack maxCursor.
+    // #1200 Sol R7 P2: store raw message ID in maxMessageId, v2 cursor in maxCursor.
+    // ThreadUnseenChecker emits v2 via cursorFor — extract raw ID via parseCursor.
+    // Legacy events have raw v1 in maxMessageId and no maxCursor.
+    const parsed = parseCursor(unseen.maxMessageId);
     await this.eventLog.append({
       kind: 'notice_attached',
       threadId,
@@ -156,7 +157,7 @@ export class FreshnessNoticeService {
       toolName,
       unseenSenders: unseen.senders,
       noticeId,
-      maxMessageId: unseen.maxMessageId,
+      maxMessageId: parsed?.id ?? unseen.maxMessageId,
       maxCursor: unseen.maxMessageId,
     });
 
@@ -188,6 +189,9 @@ export class FreshnessNoticeService {
     catId: CatId;
     /** Current seenCursor — notices with maxMessageId <= cursor are resolved */
     currentSeenCursor?: string | null;
+    /** #1200 Sol R7: async canonicalize v1 raw ID → v2 cursor for legacy events.
+     *  Shared resolver with createFreshnessReinvokeCheck (same messageStore.canonicalizeCursor). */
+    canonicalizeCursor?: (messageId: string, threadId: string) => Promise<string>;
   }): Promise<{ text: string } | null> {
     const { invocationId, threadId, catId, currentSeenCursor } = params;
 
@@ -196,19 +200,26 @@ export class FreshnessNoticeService {
     // P1-2 fix: filter out notices that the cat has already read past
     // (seenCursor advanced beyond notice.maxMessageId = implicitly resolved).
     //
-    // #1200 Sol R5 P1-3: cross-format indeterminate → conservatively KEEP notice.
-    // compareCursors returns 0 for both "truly equal" (same string) and
-    // "cross-format indeterminate" (v1 vs v2). `> 0` alone removes
-    // indeterminate notices — wrong direction. Fix: keep if cmp > 0 OR
-    // (cmp === 0 AND strings differ = indeterminate, not truly resolved).
+    // #1200 Sol R7: prefer maxCursor (v2) for same-format comparison.
+    // Legacy events lack maxCursor — canonicalize maxMessageId via injected resolver.
+    // Canonicalization failure → keep v1 → indeterminate → conservative keep (correct).
     if (currentSeenCursor) {
-      unresolved = unresolved.filter((n) => {
-        // #1200 Sol R6 P2-2: prefer maxCursor (v2) over maxMessageId (may be v1).
-        // New events have maxCursor; legacy events fall back to maxMessageId.
-        const noticeCursor = n.maxCursor ?? n.maxMessageId;
-        const cmp = compareCursors(noticeCursor, currentSeenCursor);
-        return cmp > 0 || (cmp === 0 && noticeCursor !== currentSeenCursor);
-      });
+      const resolved = await Promise.all(
+        unresolved.map(async (n) => {
+          let noticeCursor = n.maxCursor ?? n.maxMessageId;
+          if (!n.maxCursor && params.canonicalizeCursor) {
+            try {
+              noticeCursor = await params.canonicalizeCursor(n.maxMessageId, threadId);
+            } catch {
+              /* keep v1 — indeterminate is conservative-keep */
+            }
+          }
+          const cmp = compareCursors(noticeCursor, currentSeenCursor);
+          const keep = cmp > 0 || (cmp === 0 && noticeCursor !== currentSeenCursor);
+          return keep ? n : null;
+        }),
+      );
+      unresolved = resolved.filter((n): n is NonNullable<typeof n> => n !== null);
     }
 
     if (unresolved.length === 0) return null;

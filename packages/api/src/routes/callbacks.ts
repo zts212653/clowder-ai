@@ -5304,11 +5304,19 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         ? await deliveryCursorStore.getSeenCursor(principal.userId, principal.catId, principal.threadId)
         : undefined;
 
+      // #1200 Sol R7: pass canonicalizeCursor so legacy events (v1 maxMessageId,
+      // no maxCursor) get resolved via messageStore lookup — same resolver as
+      // createFreshnessReinvokeCheck. Both consumers now share the same path.
+      const canonicalize = messageStore.canonicalizeCursor
+        ? (msgId: string, tid: string) => Promise.resolve(messageStore.canonicalizeCursor!(msgId, tid))
+        : undefined;
+
       const reminder = await service.checkHoldBallReminder({
         invocationId: principal.invocationId,
         threadId: principal.threadId,
         catId: principal.catId,
         currentSeenCursor: currentSeenCursor ?? null,
+        canonicalizeCursor: canonicalize,
       });
 
       return { reminder };

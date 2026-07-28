@@ -1369,35 +1369,30 @@ describe('Sol R6 P2-1: Redis hydrateMessages includes visibilitySeq', () => {
 // Sol R6 P2-2: Notice compat resolver — legacy maxCursor canonicalization
 // ============================================================================
 
-describe('Sol R6 P2-2: Notice consumer prefers maxCursor with compat resolver', () => {
+describe('Sol R6/R7 P2-2: Notice consumer — dual-field + compat resolver', () => {
   before(async () => {
     await ensureModules();
   });
 
-  // Tests the consumer-side pattern in checkHoldBallReminder and
-  // createFreshnessReinvokeCheck: prefer n.maxCursor (v2) over n.maxMessageId.
-  // For legacy events without maxCursor, fall back to canonicalization.
+  // --- Pattern-level tests (consumer expression correctness) ---
 
   it('new event (maxCursor set): uses maxCursor for comparison, not maxMessageId', () => {
-    // New events have both maxMessageId and maxCursor = same value (v2)
+    // New events: maxMessageId = raw ID, maxCursor = v2 cursor
     const notice = {
-      maxMessageId: 'v2:0000000000000100:msg-new',
+      maxMessageId: 'msg-new',
       maxCursor: 'v2:0000000000000100:msg-new',
     };
     const seenCursor = 'v2:0000000000000200:msg-seen';
 
-    // Consumer pattern: noticeCursor = n.maxCursor ?? n.maxMessageId
     const noticeCursor = notice.maxCursor ?? notice.maxMessageId;
     const cmp = compareCursors(noticeCursor, seenCursor);
 
-    // Notice (seq=100) behind seen (seq=200) → resolved
     assert.ok(cmp < 0, 'New event behind seenCursor must resolve as behind');
     const keep = cmp > 0 || (cmp === 0 && noticeCursor !== seenCursor);
     assert.equal(keep, false, 'Notice behind seenCursor must be filtered out (resolved)');
   });
 
   it('legacy event (no maxCursor): falls back to maxMessageId', () => {
-    // Legacy events only have maxMessageId (may be v1 or v2)
     const notice = {
       maxMessageId: 'v2:0000000000000300:msg-legacy',
       maxCursor: undefined,
@@ -1411,37 +1406,148 @@ describe('Sol R6 P2-2: Notice consumer prefers maxCursor with compat resolver', 
     assert.ok(cmp > 0, 'Legacy notice ahead of seenCursor must be kept');
   });
 
-  it('legacy event with v1 maxMessageId + v2 seenCursor → indeterminate → keep', () => {
-    // Worst case: legacy event has raw v1 maxMessageId, seenCursor is v2
-    // Without canonicalization, this is cross-format indeterminate → keep
-    const notice = {
-      maxMessageId: 'msg-legacy-raw-id',
-      maxCursor: undefined,
-    };
-    const seenCursor = 'v2:0000000000000200:msg-seen';
-
-    const noticeCursor = notice.maxCursor ?? notice.maxMessageId;
-    const cmp = compareCursors(noticeCursor, seenCursor);
-    assert.equal(cmp, 0, 'v1 vs v2 = indeterminate');
-
-    // Conservative keep: indeterminate → keep (not falsely resolved)
-    const keep = cmp > 0 || (cmp === 0 && noticeCursor !== seenCursor);
-    assert.equal(keep, true, 'Legacy v1 notice must be kept (indeterminate = conservative keep)');
-  });
-
   it('compat resolver: canonicalized v1→v2 enables same-format comparison', () => {
-    // After canonicalization: legacy v1 maxMessageId gets resolved to v2
-    // This simulates what createFreshnessReinvokeCheck does with messageStore.canonicalizeCursor
-    const originalMaxMessageId = 'msg-legacy-raw-id';
-    const canonicalized = 'v2:0000000000000050:msg-legacy-raw-id'; // what canonicalize returns
+    const canonicalized = 'v2:0000000000000050:msg-legacy-raw-id';
     const seenCursor = 'v2:0000000000000200:msg-seen';
 
-    // After canonicalization, comparison is same-format v2 vs v2
     const cmp = compareCursors(canonicalized, seenCursor);
     assert.ok(cmp < 0, 'Canonicalized v1→v2 (seq50) < seenCursor (seq200)');
 
-    // Notice correctly resolved as behind → filtered out
     const keep = cmp > 0 || (cmp === 0 && canonicalized !== seenCursor);
     assert.equal(keep, false, 'Canonicalized notice behind seenCursor must be filtered out');
+  });
+
+  // --- Sol R7 required: service-level regression test ---
+  // Production path: legacy event(maxMessageId=raw v1, no maxCursor) at same
+  // position as v2 seenCursor → checkHoldBallReminder must return null (resolved),
+  // NOT emit notice_deferred. This exercises the actual service code, not just
+  // the comparison expression.
+
+  it('service: legacy event + v2 seenCursor → resolved via canonicalize (no false reminder)', async () => {
+    await ensureModules();
+    const { FreshnessNoticeService } = await import(
+      '../dist/domains/cats/services/freshness/FreshnessNoticeService.js'
+    );
+    const { FreshnessAttentionEventLog } = await import(
+      '../dist/domains/cats/services/freshness/FreshnessAttentionEventLog.js'
+    );
+
+    // Build in-memory event log stub that returns a legacy notice_attached event
+    const legacyEvent = {
+      kind: 'notice_attached',
+      threadId: 't-service-legacy',
+      catId: 'opus',
+      invocationId: 'inv-legacy-test',
+      timestamp: Date.now() - 60000,
+      toolName: 'list_recent',
+      unseenSenders: ['lang'],
+      noticeId: 'notice-inv-legacy-test-1',
+      maxMessageId: 'msg-raw-legacy-id', // v1 raw ID (legacy — no maxCursor)
+      // maxCursor: absent — this is the legacy case
+    };
+
+    const eventLogStub = {
+      append: async () => {},
+      getUnresolvedNotices: async () => [legacyEvent],
+    };
+    const noopStateStore = {
+      get: async () => null,
+      incrementToolCallCount: async () => 0,
+      recordNoticeDelivered: async () => {},
+    };
+    const noopUnseenChecker = { checkUnseen: async () => null };
+
+    const service = new FreshnessNoticeService(noopStateStore, eventLogStub, noopUnseenChecker);
+
+    // seenCursor is v2 at same position as the legacy event's message
+    const seenCursor = 'v2:0000000000000100:msg-raw-legacy-id';
+
+    // Canonicalize stub: simulates messageStore.canonicalizeCursor resolving
+    // raw v1 "msg-raw-legacy-id" to v2 cursor at seq=100
+    const canonicalize = async (msgId, _threadId) => {
+      if (msgId === 'msg-raw-legacy-id') return 'v2:0000000000000100:msg-raw-legacy-id';
+      return msgId; // fallback: identity
+    };
+
+    const result = await service.checkHoldBallReminder({
+      invocationId: 'inv-legacy-test',
+      threadId: 't-service-legacy',
+      catId: 'opus',
+      currentSeenCursor: seenCursor,
+      canonicalizeCursor: canonicalize,
+    });
+
+    // With canonicalization: v2:...100:msg vs v2:...100:msg → truly equal → resolved
+    assert.equal(result, null, 'Legacy event at same position must resolve (null = no reminder)');
+  });
+
+  it('service: legacy event without canonicalize → indeterminate → conservative keep (reminder)', async () => {
+    await ensureModules();
+    const { FreshnessNoticeService } = await import(
+      '../dist/domains/cats/services/freshness/FreshnessNoticeService.js'
+    );
+
+    const legacyEvent = {
+      kind: 'notice_attached',
+      threadId: 't-service-nocanon',
+      catId: 'opus',
+      invocationId: 'inv-nocanon-test',
+      timestamp: Date.now() - 60000,
+      toolName: 'list_recent',
+      unseenSenders: ['lang'],
+      noticeId: 'notice-inv-nocanon-test-1',
+      maxMessageId: 'msg-raw-no-canon',
+    };
+
+    const deferredEvents = [];
+    const eventLogStub = {
+      append: async (e) => deferredEvents.push(e),
+      getUnresolvedNotices: async () => [legacyEvent],
+    };
+    const noopStateStore = {
+      get: async () => null,
+      incrementToolCallCount: async () => 0,
+      recordNoticeDelivered: async () => {},
+    };
+    const noopUnseenChecker = { checkUnseen: async () => null };
+
+    const service = new FreshnessNoticeService(noopStateStore, eventLogStub, noopUnseenChecker);
+    const seenCursor = 'v2:0000000000000200:msg-seen';
+
+    // No canonicalizeCursor provided — cross-format indeterminate → conservative keep
+    const result = await service.checkHoldBallReminder({
+      invocationId: 'inv-nocanon-test',
+      threadId: 't-service-nocanon',
+      catId: 'opus',
+      currentSeenCursor: seenCursor,
+      // canonicalizeCursor: not provided
+    });
+
+    // Without canonicalization, v1 vs v2 = indeterminate → keep → reminder returned
+    assert.ok(result !== null, 'Without canonicalize: legacy event must be kept (conservative)');
+    assert.ok(result.text.includes('未读'), 'Reminder text must mention unread');
+    assert.equal(deferredEvents.length, 1, 'Must emit notice_deferred event');
+    assert.equal(deferredEvents[0].kind, 'notice_deferred', 'Deferred event must be notice_deferred');
+  });
+
+  // --- Sol R7 required: new event dual-field semantics ---
+
+  it('new event stores raw ID in maxMessageId, v2 cursor in maxCursor', async () => {
+    await ensureModules();
+    const { parseCursor: pc } = await import('../dist/domains/cats/services/stores/cursor.js');
+
+    // Simulate what FreshnessNoticeService.checkAndMaybeNotice does:
+    // unseen.maxMessageId from ThreadUnseenChecker is already v2
+    const v2FromChecker = 'v2:0000000000000100:msg-2025-01-01T00:00:00-001';
+    const parsed = pc(v2FromChecker);
+
+    assert.ok(parsed, 'parseCursor must parse v2 cursor');
+    assert.equal(parsed.id, 'msg-2025-01-01T00:00:00-001', 'parsed.id must be raw message ID');
+    assert.notEqual(parsed.id, v2FromChecker, 'Raw ID must differ from v2 cursor');
+
+    // Event creation would use:
+    // maxMessageId: parsed.id (raw)
+    // maxCursor: v2FromChecker (v2)
+    assert.equal(parsed.id, 'msg-2025-01-01T00:00:00-001');
   });
 });
