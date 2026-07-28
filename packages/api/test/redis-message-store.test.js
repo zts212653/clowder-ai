@@ -1169,4 +1169,126 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
       assert.deepEqual(message?.whisperTo, []);
     }
   });
+
+  it('atomically reclaims an idempotency key whose message hash is missing', async () => {
+    const userId = 'u1';
+    const threadId = 'thread-stale-idem';
+    const idempotencyKey = 'stale-idem';
+    const redisKey = MessageKeys.idempotency(userId, threadId, idempotencyKey);
+    const missingId = generateSortableId(Date.now() - 1);
+    await redis.set(redisKey, missingId);
+
+    const created = await store.append({
+      userId,
+      catId: null,
+      content: 'replacement',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
+      idempotencyKey,
+    });
+    const replay = await store.append({
+      userId,
+      catId: null,
+      content: 'must replay replacement',
+      mentions: [],
+      timestamp: Date.now() + 1,
+      threadId,
+      idempotencyKey,
+    });
+
+    assert.notEqual(created.id, missingId);
+    assert.equal(await redis.get(redisKey), created.id, 'stale mapping must be replaced by the new winner');
+    assert.equal(replay.id, created.id, 'the replacement mapping must remain idempotent');
+    assert.deepEqual(await redis.zrange(MessageKeys.thread(threadId), 0, -1), [created.id]);
+  });
+
+  it('fails closed when an idempotency winner vanishes before hydration', async () => {
+    const userId = 'u1';
+    const threadId = 'thread-vanished-winner';
+    const idempotencyKey = 'vanished-winner';
+    const winner = await store.append({
+      userId,
+      catId: null,
+      content: 'winner',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
+      idempotencyKey,
+    });
+
+    let listenerCalls = 0;
+    const watchedStore = new RedisMessageStore(redis, {
+      ttlSeconds: 60,
+      onAppend: () => {
+        listenerCalls++;
+      },
+    });
+    const redisKey = MessageKeys.idempotency(userId, threadId, idempotencyKey);
+    const originalGet = redis.get;
+    const originalEval = redis.eval;
+    let bypassFastPath = true;
+    let removeWinnerAfterLua = true;
+
+    redis.get = async function (key, ...args) {
+      if (bypassFastPath && key === redisKey) {
+        bypassFastPath = false;
+        return null;
+      }
+      return originalGet.call(this, key, ...args);
+    };
+    redis.eval = async function (...args) {
+      const result = await originalEval.apply(this, args);
+      if (removeWinnerAfterLua && result === winner.id) {
+        removeWinnerAfterLua = false;
+        await this.del(MessageKeys.detail(winner.id));
+      }
+      return result;
+    };
+
+    try {
+      await assert.rejects(
+        watchedStore.append({
+          userId,
+          catId: null,
+          content: 'loser',
+          mentions: [],
+          timestamp: Date.now() + 1,
+          threadId,
+          idempotencyKey,
+        }),
+        /Idempotency winner .* vanished before hydration/,
+      );
+    } finally {
+      redis.get = originalGet;
+      redis.eval = originalEval;
+    }
+
+    assert.equal(listenerCalls, 0, 'a non-persisted loser must not fire onAppend');
+    assert.deepEqual(await redis.zrange(MessageKeys.thread(threadId), 0, -1), [winner.id]);
+  });
+
+  it('prunes stale members from an active TTL-backed thread index', async () => {
+    const threadId = 'thread-active-ttl-prune';
+    const threadKey = MessageKeys.thread(threadId);
+    const staleId = generateSortableId(Date.now() - 120_000);
+    await redis.zadd(threadKey, Date.now() - 120_000, staleId);
+
+    const ttlStore = new RedisMessageStore(redis, { ttlSeconds: 60 });
+    const current = await ttlStore.append({
+      userId: 'u1',
+      catId: null,
+      content: 'keeps thread active',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
+    });
+
+    assert.deepEqual(
+      await redis.zrange(threadKey, 0, -1),
+      [current.id],
+      'append must remove expired-score members even while refreshing the thread key TTL',
+    );
+    assert.ok((await redis.ttl(threadKey)) > 0, 'thread index must remain active after member pruning');
+  });
 });
