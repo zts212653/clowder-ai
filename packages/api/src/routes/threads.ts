@@ -1255,6 +1255,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     }
 
     const advanced = await opts.readStateStore.ack(userId, id, latest.cursor);
-    return { advanced, messageId: latest.messageId };
+    // #1200 RED #23b: return both raw messageId and canonical v2 cursor
+    return { advanced, messageId: latest.messageId, cursor: latest.cursor };
   });
 };

@@ -635,9 +635,30 @@ export class RedisMessageStore {
   private async getMentionsForLegacy(catId: CatId, limit?: number, userId?: string): Promise<StoredMessage[]> {
     const n = limit ?? DEFAULT_LIMIT;
     const mentionKey = MessageKeys.mentions(catId);
-    const ids = await this.redis.zrange(mentionKey, 0, n - 1);
-    if (ids.length === 0) return [];
-    const messages = await this.hydrateMessages(ids);
+
+    // #1200 codex R5 P2: apply userId filtering (match getRecentMentionsFor behavior).
+    // Scan in chunks so filtered-out entries don't consume the limit.
+    const CHUNK = 50;
+    const eligible: string[] = [];
+    let offset = 0;
+
+    while (eligible.length < n) {
+      const chunk = await this.redis.zrange(mentionKey, offset, offset + CHUNK - 1);
+      if (chunk.length === 0) break;
+      for (const id of chunk) {
+        if (eligible.length >= n) break;
+        if (userId) {
+          const score = await this.redis.zscore(MessageKeys.user(userId), id);
+          if (score === null) continue;
+        }
+        eligible.push(id);
+      }
+      if (chunk.length < CHUNK) break;
+      offset += CHUNK;
+    }
+
+    if (eligible.length === 0) return [];
+    const messages = await this.hydrateMessages(eligible);
     return messages.filter(isDelivered).slice(0, n);
   }
 
