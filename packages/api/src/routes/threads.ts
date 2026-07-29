@@ -1215,6 +1215,29 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       }
     }
 
+    // #1200 codex R13: Pre-reconcile stored read cursor before CAS.
+    // If stored is legacy v1 and incoming is v2, string comparison in ACK_CAS_LUA
+    // would always accept v2 (because 'v' > any digit), even if the v2 represents
+    // an EARLIER message. Upgrade stored v1 → v2 first so CAS compares same-format.
+    if (cursorToken.startsWith('v2:') && messageStore?.canonicalizeCursor) {
+      const stored = await opts.readStateStore.get(userId, id);
+      if (stored && !stored.lastReadMessageId.startsWith('v2:')) {
+        try {
+          const storedV2 = await messageStore.canonicalizeCursor(stored.lastReadMessageId, id);
+          if (storedV2 !== stored.lastReadMessageId && 'reconcileReadCursor' in opts.readStateStore) {
+            await (
+              opts.readStateStore as {
+                reconcileReadCursor: (u: string, t: string, o: string, n: string) => Promise<boolean>;
+              }
+            ).reconcileReadCursor(userId, id, stored.lastReadMessageId, storedV2);
+          }
+        } catch {
+          // Best-effort: reconciliation failure → CAS will use string comparison
+          // which may falsely advance, but this is a migration edge case
+        }
+      }
+    }
+
     const advanced = await opts.readStateStore.ack(userId, id, cursorToken);
     return { advanced };
   });

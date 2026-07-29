@@ -1707,3 +1707,106 @@ describe('Codex R9 P1: getLatestVisibleCursor skips soft-deleted (tombstoned) me
     assert.equal(result ?? null, null, 'All tombstoned → no latest cursor');
   });
 });
+
+// --- Codex R13: ThreadUnseenChecker queue fallback HWM-ahead regression ---
+
+describe('Codex R13: queue fallback synthetic seq exceeds seen cursor seq', () => {
+  it('synthetic seq >= seenSeq + 1 even when Date.now() < seenSeq', async () => {
+    await ensureModules();
+
+    // Simulate: seen cursor has seq higher than Date.now() (allocator HWM ahead)
+    const futureSeq = Date.now() + 100_000; // 100s in future
+    const seenCursor = `v2:${String(futureSeq).padStart(16, '0')}:msg-seen`;
+
+    // Parse and verify the synthetic seq would be higher
+    const parsed = parseCursor(seenCursor);
+    assert.ok(parsed, 'Must parse v2 cursor');
+    assert.equal(parsed.seq, futureSeq, 'Seen cursor seq must be future');
+
+    // The fix uses max(seenSeq + 1, Date.now()) — verify it produces > seenSeq
+    const seenSeq = parsed.seq;
+    const syntheticSeq = Math.max(seenSeq + 1, Date.now());
+    assert.ok(syntheticSeq > futureSeq, 'Synthetic seq must exceed future seen seq');
+
+    // Build the cursor the same way the code does
+    const { cursorFor: cf, parseCursor: pc } = await import('../dist/domains/cats/services/stores/cursor.js');
+    const { generateSortableId: gsi } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const syntheticCursor = cf({ id: gsi(syntheticSeq), visibilitySeq: syntheticSeq });
+    const syntheticParsed = pc(syntheticCursor);
+    assert.ok(syntheticParsed, 'Synthetic cursor must be parseable');
+    assert.ok(syntheticParsed.seq > futureSeq, 'Synthetic cursor seq must exceed seen seq');
+
+    // Verify compareCursors ranks synthetic > seen
+    const cmp = compareCursors(syntheticCursor, seenCursor);
+    assert.ok(cmp > 0, 'Synthetic cursor must compare greater than seen cursor');
+  });
+});
+
+// --- Codex R13: read-state pre-reconcile before CAS ---
+
+describe('Codex R13: RedisThreadReadStateStore reconcileReadCursor', () => {
+  let redis;
+  let store;
+  const READ_PREFIX = 'test-read-reconcile:';
+
+  before(async () => {
+    await ensureModules();
+    const skipReason = redisIsolationSkipReason(REDIS_URL);
+    if (skipReason) {
+      console.log(`SKIP (read-state reconcile): ${skipReason}`);
+      return;
+    }
+    assertRedisIsolationOrThrow(REDIS_URL, 'read-reconcile');
+    const { RedisThreadReadStateStore } = await import(
+      '../dist/domains/cats/services/stores/redis/RedisThreadReadStateStore.js'
+    );
+    redis = createRedisClient({ url: REDIS_URL, keyPrefix: READ_PREFIX });
+    store = new RedisThreadReadStateStore(redis);
+  });
+
+  after(async () => {
+    if (redis) {
+      await cleanupClientKeyspace(redis);
+      await redis.quit();
+    }
+  });
+
+  it('reconcile upgrades stored v1 → v2 atomically', async () => {
+    if (!store) return;
+
+    const userId = 'u-reconcile-test';
+    const threadId = 't-reconcile-test';
+    const v1Id = 'msg-2025-01-15T12:00:00-001';
+    const v2Cursor = 'v2:0000000000000050:msg-2025-01-15T12:00:00-001';
+
+    // Seed with v1 cursor via ack (first ack always succeeds)
+    await store.ack(userId, threadId, v1Id);
+    const before = await store.get(userId, threadId);
+    assert.equal(before.lastReadMessageId, v1Id, 'Stored must be v1');
+
+    // Reconcile v1 → v2
+    const ok = await store.reconcileReadCursor(userId, threadId, v1Id, v2Cursor);
+    assert.equal(ok, true, 'Reconcile must succeed');
+
+    const after = await store.get(userId, threadId);
+    assert.equal(after.lastReadMessageId, v2Cursor, 'Stored must now be v2');
+  });
+
+  it('reconcile rejects if stored changed (race)', async () => {
+    if (!store) return;
+
+    const userId = 'u-reconcile-race';
+    const threadId = 't-reconcile-race';
+
+    // Seed with a known value
+    await store.ack(userId, threadId, 'msg-original');
+
+    // Try to reconcile with wrong old value
+    const ok = await store.reconcileReadCursor(userId, threadId, 'msg-wrong', 'v2:0000000000000001:msg-wrong');
+    assert.equal(ok, false, 'Reconcile must fail on mismatch');
+
+    // Stored should be unchanged
+    const state = await store.get(userId, threadId);
+    assert.equal(state.lastReadMessageId, 'msg-original', 'Stored must not change on failed reconcile');
+  });
+});

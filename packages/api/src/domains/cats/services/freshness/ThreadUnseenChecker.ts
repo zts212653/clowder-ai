@@ -13,7 +13,7 @@
  */
 
 import type { CatId } from '@cat-cafe/shared';
-import { cursorFor } from '../stores/cursor.js';
+import { cursorFor, parseCursor } from '../stores/cursor.js';
 import type { DeliveryCursorStore } from '../stores/ports/DeliveryCursorStore.js';
 import { generateSortableId } from '../stores/ports/MessageStore.js';
 import {
@@ -64,7 +64,7 @@ export class ThreadUnseenChecker implements UnseenChecker {
 
     // If no delivered messages, check queue as fallback (F254 queue-aware gate)
     if (!batch || batch.length === 0) {
-      return this.checkQueueFallback(threadId, catId);
+      return this.checkQueueFallback(threadId, catId, seenCursor);
     }
 
     // Apply visibility filter (P0: must reuse Phase A's messageFilter)
@@ -73,7 +73,7 @@ export class ThreadUnseenChecker implements UnseenChecker {
       ? routable.filter((msg) => messageFilter(msg as unknown as Record<string, unknown>))
       : routable;
     if (visible.length === 0) {
-      return this.checkQueueFallback(threadId, catId);
+      return this.checkQueueFallback(threadId, catId, seenCursor);
     }
 
     // Filter out self-messages (consistent with Phase A) and expected A2A replies
@@ -85,7 +85,7 @@ export class ThreadUnseenChecker implements UnseenChecker {
       nonSelf.push(msg);
     }
     if (nonSelf.length === 0) {
-      return this.checkQueueFallback(threadId, catId);
+      return this.checkQueueFallback(threadId, catId, seenCursor);
     }
 
     // Extract unique senders (content-free — no message body)
@@ -113,7 +113,7 @@ export class ThreadUnseenChecker implements UnseenChecker {
    *
    * (Bug fix: operator live test 2026-06-29)
    */
-  private async checkQueueFallback(threadId: string, catId: CatId): Promise<UnseenResult | null> {
+  private async checkQueueFallback(threadId: string, catId: CatId, seenCursor: string): Promise<UnseenResult | null> {
     const { userId, queueChecker } = this.deps;
     if (!queueChecker) return null;
 
@@ -140,14 +140,21 @@ export class ThreadUnseenChecker implements UnseenChecker {
       messageIds: [...correlationMessageIds].sort(),
     });
 
+    // #1200 codex R13: synthetic seq must exceed current seen cursor's seq.
+    // Redis allocator HWM can be ahead of process clock (sub-ms multi-allocation,
+    // clock skew). Using Date.now() alone risks producing a v2 cursor with lower
+    // seq than the seen cursor, causing the queued unseen notice to be immediately
+    // filtered as "already resolved". Fix: max(seenSeq + 1, Date.now()).
+    const parsed = parseCursor(seenCursor);
+    const seenSeq = parsed?.version === 2 && parsed.seq ? parsed.seq : 0;
+    const syntheticSeq = Math.max(seenSeq + 1, Date.now());
+
     return {
       count: nonSelf.length,
       senders,
-      // #1200 §8.7: synthetic v2 cursor at current timestamp so the notice resolves
-      // once the cat's seenCursor (also v2) advances past this point. Uses cursorFor
-      // with Date.now() as visibilitySeq to produce a valid v2 cursor that sorts
-      // correctly against real v2 seenCursors.
-      maxMessageId: cursorFor({ id: generateSortableId(Date.now()), visibilitySeq: Date.now() }),
+      // #1200 codex R13 HWM fix: use syntheticSeq = max(seenSeq+1, Date.now())
+      // so the synthetic v2 cursor always exceeds the current seen cursor.
+      maxMessageId: cursorFor({ id: generateSortableId(syntheticSeq), visibilitySeq: syntheticSeq }),
       // Re-checking the same queued entry generates a fresh synthetic cursor.
       // Coalesce by durable, content-free Queue identity instead; a newly
       // merged message ID changes this key and permits exactly one new notice.

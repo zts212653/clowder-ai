@@ -22,6 +22,20 @@ redis.call('HSET', KEYS[1], 'lastReadMessageId', ARGV[1], 'updatedAt', ARGV[2])
 return 1
 `;
 
+/**
+ * #1200 codex R13: Atomic reconcile of read-state cursor format.
+ * CAS: if stored lastReadMessageId == ARGV[1] (old v1), upgrade to ARGV[2] (v2).
+ * Returns 1 if reconciled, 0 if stored changed (race) or didn't match.
+ */
+const RECONCILE_READ_CURSOR_LUA = `
+local cur = redis.call('HGET', KEYS[1], 'lastReadMessageId')
+if cur == ARGV[1] then
+  redis.call('HSET', KEYS[1], 'lastReadMessageId', ARGV[2])
+  return 1
+end
+return 0
+`;
+
 export class RedisThreadReadStateStore implements IThreadReadStateStore {
   constructor(private readonly redis: RedisClient) {}
 
@@ -48,6 +62,17 @@ export class RedisThreadReadStateStore implements IThreadReadStateStore {
   async ack(userId: string, threadId: string, messageId: string): Promise<boolean> {
     const key = ReadStateKeys.cursor(userId, threadId);
     const result = await this.redis.eval(ACK_CAS_LUA, 1, key, messageId, String(Date.now()));
+    return result === 1;
+  }
+
+  /**
+   * #1200: Atomically reconcile stored v1 read cursor → v2.
+   * Same pattern as DeliveryCursorStore.preReconcile: CAS on old value
+   * so concurrent writes don't lose data.
+   */
+  async reconcileReadCursor(userId: string, threadId: string, oldV1: string, newV2: string): Promise<boolean> {
+    const key = ReadStateKeys.cursor(userId, threadId);
+    const result = await this.redis.eval(RECONCILE_READ_CURSOR_LUA, 1, key, oldV1, newV2);
     return result === 1;
   }
 
