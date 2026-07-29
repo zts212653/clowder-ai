@@ -1810,3 +1810,179 @@ describe('Codex R13: RedisThreadReadStateStore reconcileReadCursor', () => {
     assert.equal(state.lastReadMessageId, 'msg-original', 'Stored must not change on failed reconcile');
   });
 });
+
+// ============================================================================
+// Codex R14 + Sol R14: ACK_CAS_LUA cross-format fail-closed
+// ============================================================================
+
+describe('Codex R14 + Sol R14: ACK_CAS_LUA fail-closed on cross-format', () => {
+  let redis;
+  let store;
+  const ACK_CAS_PREFIX = 'test-ack-cas-xfmt:';
+
+  before(async () => {
+    await ensureModules();
+    const skipReason = redisIsolationSkipReason(REDIS_URL);
+    if (skipReason) {
+      console.log(`SKIP (ack-cas cross-format): ${skipReason}`);
+      return;
+    }
+    assertRedisIsolationOrThrow(REDIS_URL, 'ack-cas-xfmt');
+    const { RedisThreadReadStateStore } = await import(
+      '../dist/domains/cats/services/stores/redis/RedisThreadReadStateStore.js'
+    );
+    redis = createRedisClient({ url: REDIS_URL, keyPrefix: ACK_CAS_PREFIX });
+    store = new RedisThreadReadStateStore(redis);
+  });
+
+  after(async () => {
+    if (redis) {
+      await cleanupClientKeyspace(redis);
+      await redis.quit();
+    }
+  });
+
+  it('v2 incoming + v1 stored → ack REJECTS (fail-closed, no string compare)', async () => {
+    if (!store) return;
+
+    const userId = 'u-xfmt-1';
+    const threadId = 't-xfmt-1';
+
+    // Seed with v1 cursor
+    await store.ack(userId, threadId, 'msg-2025-01-01T00:00:00-001');
+    const before = await store.get(userId, threadId);
+    assert.ok(!before.lastReadMessageId.startsWith('v2:'), 'Stored must be v1');
+
+    // Attempt ack with v2 cursor — MUST reject (cross-format)
+    const advanced = await store.ack(userId, threadId, 'v2:0000000000000001:msg-earlier');
+    assert.equal(advanced, false, 'Cross-format v2→v1 must be REJECTED (fail-closed)');
+
+    // Stored must not change
+    const after = await store.get(userId, threadId);
+    assert.equal(
+      after.lastReadMessageId,
+      before.lastReadMessageId,
+      'Stored cursor must not change on cross-format rejection',
+    );
+  });
+
+  it('v1 incoming + v2 stored → ack REJECTS (fail-closed)', async () => {
+    if (!store) return;
+
+    const userId = 'u-xfmt-2';
+    const threadId = 't-xfmt-2';
+
+    // Seed with v2 cursor (use reconcile path: ack v1, then reconcile to v2)
+    await store.ack(userId, threadId, 'msg-seed');
+    await store.reconcileReadCursor(userId, threadId, 'msg-seed', 'v2:0000000000000100:msg-seed');
+
+    const before = await store.get(userId, threadId);
+    assert.ok(before.lastReadMessageId.startsWith('v2:'), 'Stored must be v2');
+
+    // Attempt ack with v1 cursor — MUST reject
+    const advanced = await store.ack(userId, threadId, 'msg-later-v1');
+    assert.equal(advanced, false, 'Cross-format v1→v2 must be REJECTED (fail-closed)');
+  });
+
+  it('same-format v2: newer cursor advances correctly', async () => {
+    if (!store) return;
+
+    const userId = 'u-xfmt-3';
+    const threadId = 't-xfmt-3';
+
+    // Seed with v2 via ack v1 + reconcile
+    await store.ack(userId, threadId, 'msg-base');
+    await store.reconcileReadCursor(userId, threadId, 'msg-base', 'v2:0000000000000050:msg-base');
+
+    // Ack with newer v2 cursor — MUST succeed (same-format)
+    const advanced = await store.ack(userId, threadId, 'v2:0000000000000100:msg-newer');
+    assert.equal(advanced, true, 'Same-format v2 newer cursor must advance');
+
+    const after = await store.get(userId, threadId);
+    assert.equal(after.lastReadMessageId, 'v2:0000000000000100:msg-newer', 'Stored must be updated');
+  });
+
+  it('same-format v2: older cursor rejected', async () => {
+    if (!store) return;
+
+    const userId = 'u-xfmt-4';
+    const threadId = 't-xfmt-4';
+
+    // Seed with v2 via ack v1 + reconcile
+    await store.ack(userId, threadId, 'msg-base');
+    await store.reconcileReadCursor(userId, threadId, 'msg-base', 'v2:0000000000000200:msg-base');
+
+    // Ack with older v2 cursor — MUST reject (not advancing)
+    const advanced = await store.ack(userId, threadId, 'v2:0000000000000100:msg-older');
+    assert.equal(advanced, false, 'Same-format v2 older cursor must be rejected');
+  });
+
+  it('pre-reconcile + ack flow: v1 stored → reconcile → v2 ack succeeds', async () => {
+    if (!store) return;
+
+    const userId = 'u-xfmt-5';
+    const threadId = 't-xfmt-5';
+
+    // Seed with v1
+    await store.ack(userId, threadId, 'msg-legacy');
+
+    // Without reconcile: v2 ack must fail (cross-format)
+    const failedWithout = await store.ack(userId, threadId, 'v2:0000000000000200:msg-newer');
+    assert.equal(failedWithout, false, 'v2 ack without reconcile must fail (cross-format)');
+
+    // Reconcile v1 → v2
+    const reconciled = await store.reconcileReadCursor(
+      userId,
+      threadId,
+      'msg-legacy',
+      'v2:0000000000000100:msg-legacy',
+    );
+    assert.equal(reconciled, true, 'Reconcile must succeed');
+
+    // Now v2 ack should succeed (same-format, newer)
+    const succeeded = await store.ack(userId, threadId, 'v2:0000000000000200:msg-newer');
+    assert.equal(succeeded, true, 'v2 ack AFTER reconcile must succeed (same-format)');
+  });
+});
+
+// ============================================================================
+// Codex R14: Synthetic sentinel ID sorts below real message IDs
+// ============================================================================
+
+describe('Codex R14: queue fallback sentinel ID sorts below real messages', () => {
+  before(async () => {
+    await ensureModules();
+  });
+
+  it('sentinel cursor v2:seq:0 sorts below any real message cursor at same seq', () => {
+    const seq = 1234567890123;
+    const paddedSeq = String(seq).padStart(16, '0');
+
+    // Sentinel cursor (what checkQueueFallback now produces)
+    const sentinelCursor = cursorFor({ id: '0', visibilitySeq: seq });
+    assert.equal(sentinelCursor, `v2:${paddedSeq}:0`, 'Sentinel cursor format');
+
+    // Real message cursor at same seq (various ID patterns)
+    const realIds = [
+      '0001234567890000-000001-a1b2c3d4', // typical generateSortableId output
+      '0000000000000001-000000-00000000', // minimum real ID
+      'a', // single-char ID above '0'
+    ];
+
+    for (const realId of realIds) {
+      const realCursor = cursorFor({ id: realId, visibilitySeq: seq });
+      const cmp = compareCursors(sentinelCursor, realCursor);
+      assert.ok(cmp < 0, `Sentinel '0' must sort below real ID '${realId}' at same seq, got cmp=${cmp}`);
+    }
+  });
+
+  it('sentinel cursor sorts below real cursor at HIGHER seq', () => {
+    const sentinelSeq = 100;
+    const realSeq = 200;
+    const sentinelCursor = cursorFor({ id: '0', visibilitySeq: sentinelSeq });
+    const realCursor = cursorFor({ id: 'msg-real', visibilitySeq: realSeq });
+
+    const cmp = compareCursors(sentinelCursor, realCursor);
+    assert.ok(cmp < 0, 'Sentinel at lower seq must sort below real at higher seq');
+  });
+});

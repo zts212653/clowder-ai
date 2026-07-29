@@ -15,7 +15,6 @@
 import type { CatId } from '@cat-cafe/shared';
 import { cursorFor, parseCursor } from '../stores/cursor.js';
 import type { DeliveryCursorStore } from '../stores/ports/DeliveryCursorStore.js';
-import { generateSortableId } from '../stores/ports/MessageStore.js';
 import {
   type FreshnessMessageReader,
   getFreshnessSenderLabel,
@@ -152,9 +151,10 @@ export class ThreadUnseenChecker implements UnseenChecker {
     return {
       count: nonSelf.length,
       senders,
-      // #1200 codex R13 HWM fix: use syntheticSeq = max(seenSeq+1, Date.now())
-      // so the synthetic v2 cursor always exceeds the current seen cursor.
-      maxMessageId: cursorFor({ id: generateSortableId(syntheticSeq), visibilitySeq: syntheticSeq }),
+      // #1200 codex R14: sentinel ID '0' sorts below ALL real message IDs.
+      // syntheticSeq = max(seenSeq+1, Date.now()) ensures the cursor exceeds
+      // the current seen cursor (codex R13 HWM fix).
+      maxMessageId: cursorFor({ id: '0', visibilitySeq: syntheticSeq }),
       // Re-checking the same queued entry generates a fresh synthetic cursor.
       // Coalesce by durable, content-free Queue identity instead; a newly
       // merged message ID changes this key and permits exactly one new notice.

@@ -52,6 +52,39 @@ const log = createModuleLogger('routes/threads');
 const WRITE_OPS = new Set(['edit', 'create', 'delete']);
 const PUBLISHED_TIMELINE_READ = { includeQueuedCatMessages: true } as const;
 
+/**
+ * #1200: Pre-reconcile stored read cursor before CAS ack.
+ * Converts stored v1 → v2 atomically so ACK_CAS_LUA can compare same-format.
+ * Without this, the CAS correctly fails-closed on cross-format but the ack
+ * silently no-ops. Pre-reconcile makes the ack succeed when it should.
+ *
+ * Best-effort: canonicalization or CAS failure is silent — the Lua script
+ * enforces fail-closed at the store boundary, preventing read-state regression.
+ */
+async function preReconcileReadCursor(
+  readStateStore: IThreadReadStateStore,
+  messageStore: IMessageStore | null | undefined,
+  userId: string,
+  threadId: string,
+  incomingCursor: string,
+): Promise<void> {
+  if (!incomingCursor.startsWith('v2:')) return;
+  if (!messageStore?.canonicalizeCursor) return;
+  if (!readStateStore.reconcileReadCursor) return;
+
+  const stored = await readStateStore.get(userId, threadId);
+  if (!stored || stored.lastReadMessageId.startsWith('v2:')) return;
+
+  try {
+    const storedV2 = await messageStore.canonicalizeCursor(stored.lastReadMessageId, threadId);
+    if (storedV2 !== stored.lastReadMessageId) {
+      await readStateStore.reconcileReadCursor(userId, threadId, stored.lastReadMessageId, storedV2);
+    }
+  } catch {
+    // Silent: ACK_CAS_LUA will fail-closed on cross-format, preventing regression.
+  }
+}
+
 interface ThreadIndexBuilder {
   markThreadDirty(threadId: string): void;
   flushDirtyThreads?(): number | Promise<number>;
@@ -1162,7 +1195,9 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       // must ack to Q's v2 cursor, not C's raw ID.
       const latest = await messageStore.getLatestVisibleCursor(thread.id);
       if (!latest) continue;
-      const advanced = await opts.readStateStore.ack(userId, thread.id, latest.cursor);
+      // #1200: Unified pre-reconcile before CAS (all 3 ingress points).
+      await preReconcileReadCursor(opts.readStateStore!, messageStore, userId, thread.id, latest.cursor);
+      const advanced = await opts.readStateStore!.ack(userId, thread.id, latest.cursor);
       if (advanced) advancedCount++;
     }
 
@@ -1215,28 +1250,8 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       }
     }
 
-    // #1200 codex R13: Pre-reconcile stored read cursor before CAS.
-    // If stored is legacy v1 and incoming is v2, string comparison in ACK_CAS_LUA
-    // would always accept v2 (because 'v' > any digit), even if the v2 represents
-    // an EARLIER message. Upgrade stored v1 → v2 first so CAS compares same-format.
-    if (cursorToken.startsWith('v2:') && messageStore?.canonicalizeCursor) {
-      const stored = await opts.readStateStore.get(userId, id);
-      if (stored && !stored.lastReadMessageId.startsWith('v2:')) {
-        try {
-          const storedV2 = await messageStore.canonicalizeCursor(stored.lastReadMessageId, id);
-          if (storedV2 !== stored.lastReadMessageId && 'reconcileReadCursor' in opts.readStateStore) {
-            await (
-              opts.readStateStore as {
-                reconcileReadCursor: (u: string, t: string, o: string, n: string) => Promise<boolean>;
-              }
-            ).reconcileReadCursor(userId, id, stored.lastReadMessageId, storedV2);
-          }
-        } catch {
-          // Best-effort: reconciliation failure → CAS will use string comparison
-          // which may falsely advance, but this is a migration edge case
-        }
-      }
-    }
+    // #1200: Unified pre-reconcile before CAS (all 3 ingress points).
+    await preReconcileReadCursor(opts.readStateStore, messageStore, userId, id, cursorToken);
 
     const advanced = await opts.readStateStore.ack(userId, id, cursorToken);
     return { advanced };
@@ -1277,6 +1292,8 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { advanced: false, reason: 'no messages' };
     }
 
+    // #1200: Unified pre-reconcile before CAS (all 3 ingress points).
+    await preReconcileReadCursor(opts.readStateStore, messageStore, userId, id, latest.cursor);
     const advanced = await opts.readStateStore.ack(userId, id, latest.cursor);
     // #1200 RED #23b: return both raw messageId and canonical v2 cursor
     return { advanced, messageId: latest.messageId, cursor: latest.cursor };
