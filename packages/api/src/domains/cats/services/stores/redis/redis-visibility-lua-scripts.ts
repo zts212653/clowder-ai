@@ -24,10 +24,11 @@ export const MAX_BACKFILL_MEMBERS = 50_000;
 /**
  * APPEND_WITH_VISIBILITY: shape (a) atomic append — replaces MULTI pipeline.
  *
- * All data writes (hash, ZSETs) and visibility writes (visibilitySeq allocation,
- * visibility index ZADD, meta hwm update) execute in a single Lua linearization
- * point. This is the §8.6 shape (a) guarantee: no partial-write failure window
- * where a message exists in the thread ZSET but not the visibility index.
+ * All data writes (hash, ZSETs), visibility writes (visibilitySeq allocation,
+ * visibility index ZADD, meta hwm update), and #1210 idempotency (claim/reclaim)
+ * execute in a single Lua linearization point. This is the §8.6 shape (a)
+ * guarantee: no partial-write failure window where a message exists in the
+ * thread ZSET but not the visibility index, and no idempotency race.
  *
  * Queued messages get NO visibilitySeq and NO visibility ZADD. Their visibility
  * allocation is deferred to DELIVER_WITH_VISIBILITY_LUA.
@@ -42,12 +43,15 @@ export const MAX_BACKFILL_MEMBERS = 50_000;
  *   [5]  userId
  *   [6]  isQueued ('1' if deliveryStatus=queued, '' otherwise)
  *   [7]  ttlSeconds ('0' = no TTL)
- *   [8]  mentionCount (string number)
- *   [9 .. 8+N]  mention catIds (N = mentionCount)
- *   [9+N]  hashFieldPairCount (string number, M pairs = 2*M values)
- *   [10+N .. 10+N+2*M-1]  hash fields as key1, val1, key2, val2, ...
+ *   [8]  idemKeyRaw (idempotency key suffix, '' if none — #1210)
+ *   [9]  mentionCount (string number)
+ *   [10 .. 9+N]  mention catIds (N = mentionCount)
+ *   [10+N]  hashFieldPairCount (string number, M pairs = 2*M values)
+ *   [11+N .. 11+N+2*M-1]  hash fields as key1, val1, key2, val2, ...
  *
- * Returns: allocated visibilitySeq (number), or 0 for queued messages.
+ * Returns:
+ *   - string (existing msgId) → idempotency replay, concurrent winner
+ *   - number (visibilitySeq) → new message, allocated seq (0 for queued)
  */
 export const APPEND_WITH_VISIBILITY_LUA = `
 local hash = KEYS[1]
