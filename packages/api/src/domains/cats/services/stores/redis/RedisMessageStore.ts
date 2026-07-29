@@ -241,7 +241,7 @@ export class RedisMessageStore {
         }
       }
       // Stale reference: do NOT delete here (avoids a check-then-act race).
-      // APPEND_LUA will reclaim it atomically.
+      // APPEND_WITH_VISIBILITY_LUA will reclaim it atomically (#1210).
     }
 
     const id = generateSortableId(msg.timestamp);
@@ -289,11 +289,12 @@ export class RedisMessageStore {
     const mentionCatIds = msg.mentions as readonly string[];
     const ttlSec = this.ttlSeconds ?? 0;
 
-    // Shape (a) atomic append: all data writes + visibility writes in one Lua
-    // linearization point. See §8.6 of 1200-cursor-order-analysis.md.
+    // Shape (a) atomic append: all data writes + visibility writes + idempotency
+    // in one Lua linearization point. Combines #1200 visibility and #1210 atomic
+    // idempotency. See §8.6 of 1200-cursor-order-analysis.md.
     //
     // ARGV layout: kp, id, threadId, score, userId, isQueued, ttlSeconds,
-    //   mentionCount, ...mentionCatIds, hashFieldPairCount, ...hashFieldPairs
+    //   idemKeyRaw, mentionCount, ...mentionCatIds, hashFieldPairCount, ...hashFieldPairs
     const argv: (string | number)[] = [
       this.keyPrefix, // [1] keyPrefix
       id, // [2] msgId
@@ -302,10 +303,11 @@ export class RedisMessageStore {
       msg.userId, // [5] userId
       msg.deliveryStatus === 'queued' ? '1' : '', // [6] isQueued
       String(ttlSec), // [7] ttlSeconds
-      String(mentionCatIds.length), // [8] mentionCount
-      ...mentionCatIds, // [9..8+N] mention catIds
-      String(hashFields.length / 2), // [9+N] hashFieldPairCount
-      ...hashFields, // [10+N..] hash field pairs
+      idempotencyIndexKey ?? '', // [8] idemKeyRaw ('' if none)
+      String(mentionCatIds.length), // [9] mentionCount
+      ...mentionCatIds, // [10..9+N] mention catIds
+      String(hashFields.length / 2), // [10+N] hashFieldPairCount
+      ...hashFields, // [11+N..] hash field pairs
     ];
 
     // #1200 codex P1: ensure visibility migration is complete BEFORE the append
@@ -315,27 +317,28 @@ export class RedisMessageStore {
       await this.ensureVisibilityMigrated(threadId);
     }
 
-    try {
-      // #1200 P2-6: Lua returns allocated visibilitySeq (number) or 0 for queued.
-      // Inject into returned message so callers get canonical position without re-read.
-      const seq = (await this.redis.eval(APPEND_WITH_VISIBILITY_LUA, 1, hashKey, ...argv)) as number;
-      if (seq > 0) {
-        stored.visibilitySeq = seq;
+    // Lua returns:
+    // - string (existing msgId) → idempotency replay, return existing message
+    // - number (visibilitySeq) → new message created, seq > 0 for non-queued
+    const result = await this.redis.eval(APPEND_WITH_VISIBILITY_LUA, 1, hashKey, ...argv);
+
+    // #1210 idempotency: if Lua returned a string, a concurrent caller won.
+    if (typeof result === 'string' && result !== String(0)) {
+      const existingMessage = await this.getById(result);
+      if (existingMessage) {
+        return existingMessage;
       }
-    } catch (error) {
-      if (idempotencyIndexKey) {
-        const existingId = await this.redis.get(idempotencyIndexKey);
-        if (existingId === id) {
-          await this.redis.del(idempotencyIndexKey);
-        }
-      }
-      throw error;
+      // The concurrent winner's hash vanished (deleteByThread / TTL) between the
+      // Lua claim and this hydration. Do not fall through to the created path,
+      // which would fire onAppend for a message that was never persisted.
+      throw new Error(`Idempotency winner ${result} for key ${idempotencyKey} vanished before hydration`);
     }
 
-    // Idempotency key TTL refresh (outside Lua — already has TTL from SET EX NX,
-    // this refresh is defensive for the case where the append Lua takes measurable time)
-    if (idempotencyIndexKey && ttlSec > 0) {
-      await this.redis.expire(idempotencyIndexKey, ttlSec).catch(() => {});
+    // #1200 P2-6: Lua returns allocated visibilitySeq (number) or 0 for queued.
+    // Inject into returned message so callers get canonical position without re-read.
+    const seq = typeof result === 'number' ? result : Number(result);
+    if (seq > 0) {
+      stored.visibilitySeq = seq;
     }
 
     // F102 KD-34: fire-and-forget append listener for thread index updates

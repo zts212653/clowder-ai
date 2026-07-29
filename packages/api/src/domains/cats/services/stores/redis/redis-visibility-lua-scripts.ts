@@ -58,21 +58,34 @@ local score = tonumber(ARGV[4])
 local userId = ARGV[5]
 local isQueued = ARGV[6] == '1'
 local ttlSec = tonumber(ARGV[7])
-local mentionCount = tonumber(ARGV[8])
+local idemKeyRaw = ARGV[8]
+local mentionCount = tonumber(ARGV[9])
 
 -- Collect mention catIds
 local mentions = {}
 for i = 1, mentionCount do
-  mentions[i] = ARGV[8 + i]
+  mentions[i] = ARGV[9 + i]
 end
 
 -- Collect hash field pairs (variable-length tail of ARGV)
-local hfCountIdx = 9 + mentionCount
+local hfCountIdx = 10 + mentionCount
 local hfPairCount = tonumber(ARGV[hfCountIdx])
 local hfStart = hfCountIdx + 1
 local hsetArgs = {}
 for i = 0, hfPairCount * 2 - 1 do
   hsetArgs[i + 1] = ARGV[hfStart + i]
+end
+
+-- #1210 idempotency: if key points to a live hash, replay (return winner ID).
+-- If key exists but hash vanished, fall through to reclaim atomically.
+local idemKey = (idemKeyRaw ~= '' and idemKeyRaw ~= nil) and (kp .. idemKeyRaw) or nil
+if idemKey then
+  local existingId = redis.call('GET', idemKey)
+  if existingId then
+    if redis.call('EXISTS', kp .. 'msg:' .. existingId) == 1 then
+      return existingId
+    end
+  end
 end
 
 -- 1. Pre-mutation guard: compute visibilitySeq and check exhaustion BEFORE
@@ -131,7 +144,17 @@ if not isQueued then
   redis.call('HSET', hash, 'visibilitySeq', tostring(seq))
 end
 
--- 5. TTL management (does NOT apply to visibility index or meta)
+-- 6. Idempotency claim (#1210): unconditional SET reclaims stale keys
+--    and claims fresh ones. At this point idemKey either doesn't exist or
+--    points to a missing hash, so SET is safe.
+if idemKey then
+  redis.call('SET', idemKey, msgId)
+  if ttlSec > 0 then
+    redis.call('EXPIRE', idemKey, ttlSec)
+  end
+end
+
+-- 7. TTL management (does NOT apply to visibility index or meta)
 if ttlSec > 0 then
   -- EXPIRE on hash
   redis.call('EXPIRE', hash, ttlSec)
