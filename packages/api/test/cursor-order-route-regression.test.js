@@ -375,50 +375,124 @@ describe('#1200 R14 route: PATCH /read cross-format', () => {
 });
 
 // ============================================================================
-// Sentinel notice lifecycle: synthetic → delivery → resolved
+// Sentinel notice lifecycle: real ThreadUnseenChecker → FreshnessNoticeService
 // ============================================================================
 
-describe('#1200 R14: sentinel notice lifecycle (queue → delivery → resolved)', () => {
-  it('sentinel cursor is resolved by real delivery at same or higher seq', async () => {
-    const { cursorFor, compareCursors, parseCursor } = await import('../dist/domains/cats/services/stores/cursor.js');
+describe('#1200 R14: sentinel production lifecycle (checker → service → resolved)', () => {
+  it('queue fallback sentinel from real ThreadUnseenChecker resolves via checkHoldBallReminder', async () => {
+    const { ThreadUnseenChecker } = await import('../dist/domains/cats/services/freshness/ThreadUnseenChecker.js');
+    const { FreshnessNoticeService } = await import(
+      '../dist/domains/cats/services/freshness/FreshnessNoticeService.js'
+    );
+    const { cursorFor, parseCursor } = await import('../dist/domains/cats/services/stores/cursor.js');
 
-    // Queue fallback produces sentinel cursor: v2:<seq>:0
-    const seq = Date.now();
-    const sentinelCursor = cursorFor({ id: '0', visibilitySeq: seq });
+    const threadId = 't-sentinel-lifecycle';
+    const catId = 'opus';
+    const userId = 'u-sentinel';
+    const invocationId = 'inv-sentinel-test';
 
-    // Real delivery at same seq has a real message ID
-    const realId = `${String(seq).padStart(16, '0')}-000001-abcdef12`;
-    const deliveryCursor = cursorFor({ id: realId, visibilitySeq: seq });
+    // Simulate: seen cursor at seq 5000 (allocator HWM ahead of clock)
+    const seenSeq = Date.now() + 5000;
+    const seenCursor = cursorFor({ id: 'msg-seen-base', visibilitySeq: seenSeq });
 
-    // Sentinel must sort below delivery
-    const cmp = compareCursors(sentinelCursor, deliveryCursor);
-    assert.ok(cmp < 0, `Sentinel must sort below delivery at same seq: cmp=${cmp}`);
+    // --- Step 1: ThreadUnseenChecker produces sentinel via queue fallback ---
+    const checker = new ThreadUnseenChecker({
+      userId,
+      cursorStore: {
+        getSeenCursor: async () => seenCursor,
+      },
+      messageStore: {
+        // Empty batch → triggers queue fallback
+        getByThreadAfter: async () => [],
+      },
+      queueChecker: {
+        getQueuedForThread: () => [{ source: 'user', content: 'queued msg from user', callerCatId: undefined }],
+      },
+    });
 
-    // FreshnessNoticeService resolution check: is notice behind seenCursor?
-    // If seenCursor advances to deliveryCursor, the sentinel notice resolves.
-    const seenCursor = deliveryCursor;
-    const noticeCmp = compareCursors(sentinelCursor, seenCursor);
-    const resolved = noticeCmp < 0 || (noticeCmp === 0 && sentinelCursor === seenCursor);
-    assert.equal(resolved, true, 'Sentinel notice must resolve when seen cursor >= delivery');
+    const unseen = await checker.checkUnseen({ threadId, catId });
+    assert.ok(unseen, 'Queue fallback must return unseen result');
+    assert.ok(unseen.maxMessageId.startsWith('v2:'), 'maxMessageId must be v2 cursor');
 
-    // Also verify sentinel cursor is parseable
-    const parsed = parseCursor(sentinelCursor);
-    assert.ok(parsed, 'Sentinel cursor must be parseable');
-    assert.equal(parsed.version, 2, 'Sentinel must be v2');
-    assert.equal(parsed.seq, seq, 'Sentinel seq must match');
-    assert.equal(parsed.id, '0', 'Sentinel id must be sentinel value');
+    // Verify the sentinel uses '0' as ID (production code, not hand-constructed)
+    const sentinelParsed = parseCursor(unseen.maxMessageId);
+    assert.equal(sentinelParsed.id, '0', 'Production sentinel must use ID "0"');
+    assert.ok(sentinelParsed.seq > seenSeq, 'Sentinel seq must exceed seen seq');
+
+    // --- Step 2: FreshnessNoticeService records the sentinel as notice_attached ---
+    const events = [];
+    const eventLog = {
+      append: async (e) => events.push(e),
+      getUnresolvedNotices: async () => events.filter((e) => e.kind === 'notice_attached'),
+    };
+    const stateStore = {
+      get: async () => null,
+      incrementToolCallCount: async () => 1,
+      recordNoticeDelivered: async () => {},
+    };
+
+    const service = new FreshnessNoticeService(stateStore, eventLog, checker);
+
+    const notice = await service.checkAndMaybeNotice({
+      invocationId,
+      threadId,
+      catId,
+      toolName: 'list_recent',
+      isReadOnly: true,
+    });
+    assert.ok(notice, 'Service must emit notice from queue fallback');
+    assert.equal(events.length, 1, 'Must record one notice_attached event');
+    assert.ok(events[0].maxCursor, 'Event must have maxCursor (v2)');
+
+    // --- Step 3: Simulate real delivery at same seq with a real message ID ---
+    // A real message queued earlier has a lower-timestamp ID (e.g. created 10s ago).
+    // After delivery, its visibilitySeq = sentinelParsed.seq (same allocator).
+    const realMsgId = `${String(Date.now() - 10000).padStart(16, '0')}-000001-abcdef12`;
+    const deliveryCursor = cursorFor({ id: realMsgId, visibilitySeq: sentinelParsed.seq });
+
+    // --- Step 4: checkHoldBallReminder with delivery cursor as seenCursor ---
+    const reminder = await service.checkHoldBallReminder({
+      invocationId,
+      threadId,
+      catId,
+      currentSeenCursor: deliveryCursor,
+    });
+
+    // The sentinel cursor must sort BELOW the delivery cursor (same seq, '0' < realMsgId)
+    // → notice is resolved → no reminder
+    assert.equal(
+      reminder,
+      null,
+      'Sentinel notice must resolve when seen cursor is at real delivery (same seq, real ID > "0")',
+    );
+
+    // Verify no notice_deferred was recorded (resolved = no deferred event)
+    const deferred = events.filter((e) => e.kind === 'notice_deferred');
+    assert.equal(deferred.length, 0, 'No notice_deferred when sentinel is resolved');
   });
 
-  it('sentinel cursor resolves when delivery is at higher seq', async () => {
+  it('would FAIL if sentinel used generateSortableId (sorts above real delivery)', async () => {
+    // This test proves the fix is necessary by showing the OLD behavior.
+    // generateSortableId(syntheticSeq) produces an ID with syntheticSeq as timestamp,
+    // which sorts ABOVE a real message ID created at an earlier timestamp.
     const { cursorFor, compareCursors } = await import('../dist/domains/cats/services/stores/cursor.js');
+    const { generateSortableId } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
-    const sentinelSeq = Date.now();
-    const deliverySeq = sentinelSeq + 100;
+    const syntheticSeq = Date.now() + 5001; // seenSeq + 1 (same as production)
+    const oldSentinelId = generateSortableId(syntheticSeq);
+    const oldSentinelCursor = cursorFor({ id: oldSentinelId, visibilitySeq: syntheticSeq });
 
-    const sentinelCursor = cursorFor({ id: '0', visibilitySeq: sentinelSeq });
-    const deliveryCursor = cursorFor({ id: 'msg-real', visibilitySeq: deliverySeq });
+    // Real message created 10s ago (typical queue scenario)
+    const realMsgId = `${String(Date.now() - 10000).padStart(16, '0')}-000001-abcdef12`;
+    const deliveryCursor = cursorFor({ id: realMsgId, visibilitySeq: syntheticSeq });
 
-    const cmp = compareCursors(sentinelCursor, deliveryCursor);
-    assert.ok(cmp < 0, 'Sentinel at lower seq must resolve when delivery is at higher seq');
+    // OLD behavior: sentinel with generateSortableId sorts ABOVE real delivery
+    const oldCmp = compareCursors(oldSentinelCursor, deliveryCursor);
+    assert.ok(oldCmp > 0, 'OLD sentinel (generateSortableId) sorts ABOVE real delivery — BUG');
+
+    // NEW behavior: sentinel with '0' sorts BELOW real delivery
+    const newSentinelCursor = cursorFor({ id: '0', visibilitySeq: syntheticSeq });
+    const newCmp = compareCursors(newSentinelCursor, deliveryCursor);
+    assert.ok(newCmp < 0, 'NEW sentinel ("0") sorts BELOW real delivery — FIXED');
   });
 });
