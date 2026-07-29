@@ -710,10 +710,11 @@ describe('F254 Queue-Aware Freshness Gate', async () => {
         `maxMessageId must be sortable, got: ${result.maxMessageId}`,
       );
       // #1200: maxMessageId is now a v2 cursor (cursorFor wraps the synthetic ID).
-      // Accept either raw sortable ID or v2 cursor format.
+      // Accept either raw sortable ID, v2 cursor with real ID, or v2 sentinel
+      // cursor (id='0', used for queue fallback — sorts below all real IDs at same seq).
       assert.match(
         result.maxMessageId,
-        /^(?:v2:\d{16}:\d{16}-\d{6}-|\d{16}-\d{6}-)/,
+        /^(?:v2:\d{16}:(?:\d{16}-\d{6}-|0$)|\d{16}-\d{6}-)/,
         `maxMessageId must match sortable ID or v2 cursor format: ${result.maxMessageId}`,
       );
     });
