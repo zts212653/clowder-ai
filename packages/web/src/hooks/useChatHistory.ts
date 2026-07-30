@@ -44,6 +44,10 @@ type SavedScrollState = {
 const scrollPositionsByThread = new Map<string, SavedScrollState>();
 const taskCacheByThread = new Map<string, TaskItem[]>();
 const SCROLL_BOTTOM_THRESHOLD_PX = 24;
+// A genuine user scroll-up moves scrollTop by tens of px; sub-pixel layout jitter and
+// browser scroll-anchoring nudges are much smaller. Only a decrease past this margin counts
+// as "the user chose to leave the bottom".
+const SCROLL_UP_INTENT_PX = 4;
 const MAX_RESTORE_FRAMES = 90;
 const CHAT_LAYOUT_CHANGED_EVENT = 'catcafe:chat-layout-changed';
 
@@ -66,14 +70,45 @@ export function deriveQueueHydrationTargetCats({
   return activeCatIds;
 }
 
-function isNearBottom(el: HTMLElement): boolean {
-  return el.scrollHeight - el.clientHeight - el.scrollTop <= SCROLL_BOTTOM_THRESHOLD_PX;
+/**
+ * Decide the bottom-follow anchor from a scroll observation, direction-aware.
+ *
+ * The old rule ("near bottom ? bottom : offset") flipped to `offset` on any frame where the
+ * viewport was not within the threshold — including the transient frames a smooth scroll-to-bottom
+ * or a streaming height increase produces. Once flipped, both the append follow and
+ * `followBottomAnchor` give up permanently, freezing scrollTop in a low-content region and leaving
+ * the thread visually blank during streaming (clowder-ai#1234).
+ *
+ * Fix: demote a bottom anchor to `offset` ONLY when the user scrolls UP (scrollTop decreases past
+ * SCROLL_UP_INTENT_PX). Programmatic downward scrolls and content growth move scrollTop down or
+ * grow scrollHeight — never up — so they can no longer break the follow. Returning into the
+ * near-bottom band always re-anchors to `bottom`.
+ */
+export function resolveScrollAnchor(params: {
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+  prevTop: number | null;
+  prevAnchor: 'bottom' | 'offset' | null;
+}): 'bottom' | 'offset' {
+  const { scrollTop, scrollHeight, clientHeight, prevTop, prevAnchor } = params;
+  if (scrollHeight - clientHeight - scrollTop <= SCROLL_BOTTOM_THRESHOLD_PX) return 'bottom';
+  const scrolledUp = prevTop !== null && scrollTop < prevTop - SCROLL_UP_INTENT_PX;
+  if (scrolledUp) return 'offset';
+  return prevAnchor ?? 'offset';
 }
 
 function rememberScrollState(threadId: string, el: HTMLElement) {
+  const prev = scrollPositionsByThread.get(threadId);
   scrollPositionsByThread.set(threadId, {
     top: el.scrollTop,
-    anchor: isNearBottom(el) ? 'bottom' : 'offset',
+    anchor: resolveScrollAnchor({
+      scrollTop: el.scrollTop,
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+      prevTop: prev?.top ?? null,
+      prevAnchor: prev?.anchor ?? null,
+    }),
   });
 }
 
