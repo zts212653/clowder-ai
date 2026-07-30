@@ -13,6 +13,7 @@ import {
   OC_API_KEY_ENV,
   OC_BASE_URL_ENV,
   parseOpenCodeModel,
+  resolveOpenCodeUpstreamModel,
   summarizeOpenCodeRuntimeConfigForDebug,
 } from '../dist/domains/cats/services/agents/providers/opencode-config-template.js';
 import {
@@ -222,6 +223,20 @@ describe('parseOpenCodeModel', () => {
   });
 });
 
+describe('resolveOpenCodeUpstreamModel', () => {
+  test('maps Kimi Code aliases to upstream model ids', () => {
+    assert.equal(resolveOpenCodeUpstreamModel('kimi-code/k3'), 'kimi-k3');
+    assert.equal(resolveOpenCodeUpstreamModel('kimi-code/kimi-for-coding'), 'kimi-k2.7-code');
+    assert.equal(resolveOpenCodeUpstreamModel('kimi-code/kimi-for-coding-highspeed'), 'kimi-k3');
+  });
+
+  test('keeps upstream and unknown model ids unchanged', () => {
+    assert.equal(resolveOpenCodeUpstreamModel('kimi-k3'), 'kimi-k3');
+    assert.equal(resolveOpenCodeUpstreamModel('gemini-3.1-pro'), 'gemini-3.1-pro');
+    assert.equal(resolveOpenCodeUpstreamModel('vendor/custom-model'), 'vendor/custom-model');
+  });
+});
+
 describe('deriveOpenCodeApiType', () => {
   test('derives apiType solely from providerName', () => {
     const scenarios = [
@@ -359,6 +374,21 @@ describe('generateOpenCodeRuntimeConfig', () => {
     assert.equal(config.provider.maas.npm, '@ai-sdk/openai-compatible');
     assert.equal(config.provider.maas.options.baseURL, `{env:${OC_BASE_URL_ENV}}`);
     assert.equal(config.provider.maas.options.apiKey, `{env:${OC_API_KEY_ENV}}`);
+  });
+
+  test('maps Kimi aliases only in the upstream model name', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'kimi',
+      models: ['kimi-code/k3'],
+      defaultModel: 'kimi/kimi-code/k3',
+      apiType: 'openai',
+      hasBaseUrl: true,
+    });
+
+    assert.equal(config.model, 'kimi/kimi-code/k3');
+    assert.deepStrictEqual(config.provider.kimi.models, {
+      'kimi-code/k3': { name: 'kimi-k3' },
+    });
   });
 
   test('apiType maps to correct npm adapters', () => {

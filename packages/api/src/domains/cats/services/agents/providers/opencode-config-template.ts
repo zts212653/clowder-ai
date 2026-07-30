@@ -180,6 +180,21 @@ function stripOwnProviderPrefix(modelName: string, providerName: string): string
 }
 
 /**
+ * OpenCode model keys are local aliases, while the compatible API receives the
+ * upstream model id from the model's `name` field. Kimi Code publishes
+ * namespaced aliases but kitcoding expects the raw ids.
+ */
+const OPENCODE_UPSTREAM_MODEL_ALIASES: Readonly<Record<string, string>> = {
+  'kimi-code/k3': 'kimi-k3',
+  'kimi-code/kimi-for-coding': 'kimi-k2.7-code',
+  'kimi-code/kimi-for-coding-highspeed': 'kimi-k3',
+};
+
+export function resolveOpenCodeUpstreamModel(modelName: string): string {
+  return OPENCODE_UPSTREAM_MODEL_ALIASES[modelName] ?? modelName;
+}
+
+/**
  * OpenCode treats certain provider names as built-in and forces its own SDK
  * handling (e.g. 'openai' → Responses API via sdk.responses()), ignoring the
  * npm adapter field.  Remap these names so the config's npm adapter is used.
@@ -229,7 +244,7 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
   const modelsToRegister = defaultModel ? [...models, defaultModel] : [...models];
   for (const rawModel of modelsToRegister) {
     const modelName = stripOwnProviderPrefix(rawModel, providerName);
-    modelsMap[modelName] = { name: modelName };
+    modelsMap[modelName] = { name: resolveOpenCodeUpstreamModel(modelName) };
   }
 
   let configDefaultModel = defaultModel;
