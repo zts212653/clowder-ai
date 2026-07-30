@@ -1,7 +1,7 @@
 ---
 name: image-generation
 description: >
-  AI 图片生成：原生 tool call（Codex/Antigravity）或浏览器自动化（Gemini/ChatGPT）。
+  AI 图片生成：原生 tool call（Codex/Antigravity）、OpenAI 兼容图像网关（curl，无原生 tool 的猫首选）或浏览器自动化（Gemini/ChatGPT）。
   Use when: 需要 AI 生成概念图、UI 参考、像素画素材、完整 PPT 页面、复杂架构图、信息图或视觉 mock。
   Not for: 已有图片的展示（用 media_gallery rich block）、硬要求可编辑/native text 的 PPT/图表（用 PPT/HTML 管线）。
   Output: 生成图片自动发布，或作为完整视觉 mock / 图像素材进入后续交付。
@@ -9,7 +9,7 @@ description: >
 
 # AI 图片生成 Skill
 
-> 用途：生成 AI 图片——优先原生 tool call，降级浏览器自动化
+> 用途：生成 AI 图片——优先原生 tool call，无原生 tool 走 API 网关，最后降级浏览器自动化
 > 适用猫猫：所有猫
 
 ## 何时使用
@@ -73,9 +73,12 @@ Codex `image_gen` 不只是“概念图/素材生成器”。当前实测能力�
 ├─ 是（Codex / Antigravity）→ 用原生 tool call（§ 原生路径）
 │   优势：快、自动发布到气泡、无需浏览器
 │
-├─ 否（Claude / 其他）→ 能 shell out 到有能力的 CLI 吗？
-│   ├─ 是 → 借用（§ 跨引擎借用）
-│   └─ 否 → 浏览器自动化（§ 浏览器路径）
+├─ 否（Claude / Kimi / 其他）→ 部署配置了图像网关 key 吗？
+│   ├─ 是 → API 网关出图（§ API 网关路径）
+│   │   优势：纯 curl，无浏览器依赖，可脚本化批量出图
+│   ├─ 否 → 能 shell out 到有能力的 CLI 吗？
+│   │   ├─ 是 → 借用（§ 跨引擎借用）
+│   │   └─ 否 → 浏览器自动化（§ 浏览器路径）
 │
 └─ 需要特定风格控制 / inpainting / 局部编辑？
     └─ 是 → 即使有原生能力也走浏览器路径
@@ -86,6 +89,7 @@ Codex `image_gen` 不只是“概念图/素材生成器”。当前实测能力�
 |------|------|------|---------|-------------|
 | **原生** | **Codex CLI** | 内置 `image_gen` tool call | `~/.codex/generated_images/<sessionId>/` | ✅ scanner 自动拾取 |
 | **原生** | **Antigravity** | 内置 `generate_image` tool call | `~/.gemini/antigravity/brain/<cascadeId>/` | ✅ GENERATE_IMAGE step 自动拾取 |
+| **API 网关** | OpenAI 兼容网关 | `curl /v1/images/generations` | 直接写入 uploadDir | 需手动发 `media_gallery` 富块 |
 | 浏览器 | Gemini Web | Chrome MCP 自动化 | 本地下载目录 | 需手动 `publishGeneratedImage()` |
 | 浏览器 | ChatGPT Web | Chrome MCP 自动化 | 本地下载目录 | 需手动 `publishGeneratedImage()` |
 
@@ -141,6 +145,58 @@ codex exec "生成一张猫咖全景图，手绘水彩风格"
 ```
 
 注意：跨引擎借用目前只适合**离线资产生成**。它会创建另一个 Codex session，产物通常不会被当前猫的 F172 scanner 自动拾取，也不会自动出现在当前气泡里。需要气泡内展示时，优先把球权交给有原生能力的猫，或显式走 artifact promotion / rich block 路径。
+
+---
+
+## API 网关路径（无原生 tool 的猫首选）
+
+**谁能用**：任何能跑 Bash 的猫（Claude / Kimi / opencode 系），前提是部署配置了图像网关。
+
+**前提检查**（缺一即停，向 operator 报告缺口，不要猜 key）：
+
+```bash
+# 网关地址与 key 由部署者通过账号 envVars 或系统环境注入
+[ -n "$IMAGE_GATEWAY_BASE_URL" ] && [ -n "$IMAGE_GATEWAY_API_KEY" ] || echo "缺少 IMAGE_GATEWAY_BASE_URL / IMAGE_GATEWAY_API_KEY，无法走 API 网关路径"
+```
+
+**模型分工**（以 `GET $IMAGE_GATEWAY_BASE_URL/models` 实际返回为准——key 属于哪个分组决定能用哪些模型，用错报 `model_not_found`）：
+
+| 模型 | 引擎 | 何时选 |
+|------|------|--------|
+| `gpt-image-2` | OpenAI 系 | 默认；含中文文字必选（Google 系中文乱码，实测） |
+| `gpt-image-gemini-3-flash` | Gemini 系 | 快速草图 / 批量变体 |
+| `gpt-image-gemini-3-pro` | Gemini 系 | 高质量成稿、无中文文字 |
+
+**出图脚本**（实测单张 ~100s、响应 >1.5MB，务必管道落盘，禁止把 b64 echo 进上下文）：
+
+```bash
+UPLOAD_DIR="${UPLOAD_DIR:-packages/api/uploads}"   # /uploads/ 静态服务的根
+STEM="gen-$(date +%s)-$RANDOM"
+curl -sS --max-time 300 "$IMAGE_GATEWAY_BASE_URL/images/generations" \
+  -H "Authorization: Bearer $IMAGE_GATEWAY_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-image-2","prompt":"<你的完整 prompt>","n":1,"size":"1024x1024"}' \
+  -o /tmp/imggen-resp.json
+python -c "
+import json,base64,sys
+d=json.load(open('/tmp/imggen-resp.json'))
+if 'error' in d: sys.exit('imggen failed: '+d['error'].get('message','?')+' — check model name via GET /models, or key group')
+b=base64.b64decode(d['data'][0]['b64_json'])
+open('$UPLOAD_DIR/$STEM.png','wb').write(b)
+print('/uploads/$STEM.png', len(b), 'bytes')
+"
+```
+
+**进气泡**：拿到 `/uploads/<文件名>.png` 后，用 `cat_cafe_create_rich_block` 发 media_gallery（url 必须是 `/uploads/` 相对路径，不要本地绝对路径）：
+
+```json
+{ "v": 1, "id": "<唯一id>", "kind": "media_gallery", "items": [{ "url": "/uploads/<文件名>.png", "alt": "<描述>" }] }
+```
+
+**GOTCHA**：
+- 出图慢是常态（~100s/张），`--max-time` 给 300s；120s 会在下载途中被掐断
+- `model_not_found` ≠ 网关挂了：是**这把 key 的分组**没有该模型渠道，先 `GET /models` 核对（不要重试硬闯——参见 clowder-ai#1236 的卡死教训）
+- 失败要向 operator 报三要素：什么失败（模型/端点）、为什么（网关错误原文）、如何修（换模型名 / 核对 key 分组）
 
 ---
 

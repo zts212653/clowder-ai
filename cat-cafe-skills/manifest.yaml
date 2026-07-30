@@ -1133,10 +1133,11 @@ skills:
   image-generation:
     category: "创作与媒体"
     description: >
-      通过 Chrome MCP 浏览器自动化，在 Gemini / ChatGPT 上生成图片并下载。
+      AI 图片生成三路径：原生 tool call（Codex/Antigravity）、OpenAI 兼容图像网关
+      （curl /v1/images/generations，无原生 tool 的猫首选）、Chrome MCP 浏览器自动化（Gemini/ChatGPT）。
       Use when: 需要生成概念图、UI 参考图、像素画素材、猫猫头像、任何图片资产。
       Not for: Pencil .pen 文件内的简单形状/布局（用 pencil-design）。
-      Output: 生成的图片文件（PNG）保存到项目 assets/ 目录。
+      Output: 生成的图片发布到 /uploads/ 并以 media_gallery 进气泡，或保存到项目 assets/ 目录。
     triggers:
       - "生成图片"
       - "画一张"
@@ -1147,7 +1148,7 @@ skills:
     not_for:
       - "Pencil 内部设计"
       - "简单形状布局"
-    output: "Generated PNG saved to assets/"
+    output: "Generated image published to /uploads/ (media_gallery) or saved to assets/"
     next: []
     sop_step: null
     merged_from: null
