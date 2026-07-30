@@ -1,5 +1,5 @@
 /**
- * Lua scripts for atomic delivery-order transitions (PR #1193).
+ * Lua scripts for atomic delivery-order transitions and append (PR #1193 + #1200).
  *
  * Bug: reassignUserId / markDelivered / markCanceled each read a JS snapshot
  * then write via independent MULTI — no shared atomic boundary. Two concurrent
@@ -122,4 +122,102 @@ if ttl > 0 then
 end
 
 return redis.call('HGETALL', hash)
+`;
+
+/**
+ * APPEND: atomic idempotency claim + hash + all indexes + TTL cleanup.
+ *
+ * KEYS[1] = detail hash key (auto-prefixed by ioredis)
+ * ARGV[1] = message id
+ * ARGV[2] = JSON object of hash fields (id, threadId, userId, timestamp, content, ...)
+ * ARGV[3] = JSON array of mention catIds
+ * ARGV[4] = timeline/user/mentions/thread score (stringified message timestamp)
+ * ARGV[5] = idempotency key raw suffix (empty string if none)
+ * ARGV[6] = keyPrefix (e.g. "cat-cafe:")
+ * ARGV[7] = ttlSeconds as string ("0" = no expiry)
+ *
+ * Returns: existing message id on idempotency replay, otherwise the new message id.
+ */
+export const APPEND_LUA = `
+redis.replicate_commands()
+
+local hash = KEYS[1]
+local msgId = ARGV[1]
+local hashFields = cjson.decode(ARGV[2])
+local mentions = cjson.decode(ARGV[3])
+local score = tonumber(ARGV[4])
+local idemKeyRaw = ARGV[5]
+local kp = ARGV[6]
+local ttl = tonumber(ARGV[7])
+
+local idemKey = idemKeyRaw ~= '' and (kp .. idemKeyRaw) or nil
+
+-- Idempotency: if key points to a live hash, replay.
+if idemKey then
+  local existingId = redis.call('GET', idemKey)
+  if existingId then
+    if redis.call('EXISTS', kp .. 'msg:' .. existingId) == 1 then
+      return existingId
+    end
+    -- stale reference: fall through to reclaim
+  end
+end
+
+-- Write hash.
+local flat = {}
+for k, v in pairs(hashFields) do
+  table.insert(flat, k)
+  table.insert(flat, v)
+end
+redis.call('HSET', hash, unpack(flat))
+
+-- Write time-semantic indexes.
+local threadId = hashFields.threadId
+local threadKey = kp .. 'msg:thread:' .. threadId
+local userKey = kp .. 'msg:user:' .. hashFields.userId
+local timelineKey = kp .. 'msg:timeline'
+redis.call('ZADD', timelineKey, score, msgId)
+redis.call('ZADD', userKey, score, msgId)
+redis.call('ZADD', threadKey, score, msgId)
+for _, catId in ipairs(mentions) do
+  redis.call('ZADD', kp .. 'msg:mentions:' .. catId, score, msgId)
+end
+
+-- Claim idempotency key and apply TTLs.
+if idemKey then
+  -- Overwrite stale mappings (e.g., after deleteByThread deleted the hash but
+  -- left the idempotency key behind) as well as claiming a fresh key. At this
+  -- point the key either does not exist or points to a missing hash, so
+  -- unconditional SET is safe and prevents duplicate creation on retries.
+  redis.call('SET', idemKey, msgId)
+  if ttl > 0 then
+    redis.call('EXPIRE', idemKey, ttl)
+  end
+end
+
+if ttl > 0 then
+  redis.call('EXPIRE', hash, ttl)
+  redis.call('EXPIRE', timelineKey, ttl)
+  redis.call('EXPIRE', userKey, ttl)
+  redis.call('EXPIRE', threadKey, ttl)
+  for _, catId in ipairs(mentions) do
+    redis.call('EXPIRE', kp .. 'msg:mentions:' .. catId, ttl)
+  end
+
+  local timeArr = redis.call('TIME')
+  local timeMs = tonumber(timeArr[1]) * 1000 + math.floor(tonumber(timeArr[2]) / 1000)
+  local cutoff = timeMs - ttl * 1000
+  redis.call('ZREMRANGEBYSCORE', timelineKey, '-inf', cutoff)
+  redis.call('ZREMRANGEBYSCORE', userKey, '-inf', cutoff)
+  for _, catId in ipairs(mentions) do
+    redis.call('ZREMRANGEBYSCORE', kp .. 'msg:mentions:' .. catId, '-inf', cutoff)
+  end
+  -- Thread ZSET is scored by timestamp (queued) or deliveredAt. Prune members
+  -- whose score is older than the TTL window so active threads do not accumulate
+  -- unhydratable IDs indefinitely. Whole-key EXPIRE remains as a backstop for
+  -- idle threads.
+  redis.call('ZREMRANGEBYSCORE', threadKey, '-inf', cutoff)
+end
+
+return msgId
 `;

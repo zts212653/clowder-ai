@@ -26,7 +26,7 @@ import {
 } from '../ports/MessageStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import { isSystemUserMessage } from '../visibility.js';
-import { CANCEL_LUA, DELIVER_LUA, REASSIGN_LUA } from './redis-message-delivery-lua-scripts.js';
+import { APPEND_LUA, CANCEL_LUA, DELIVER_LUA, REASSIGN_LUA } from './redis-message-delivery-lua-scripts.js';
 import {
   safeParseConnectorSource,
   safeParseContentBlocks,
@@ -97,11 +97,12 @@ export class RedisMessageStore {
     assertValidAppendDeliveryMetadata(msg);
     assertValidStoredMessageTimestamp(msg.timestamp);
     const threadId = msg.threadId ?? DEFAULT_THREAD_ID;
-    const id = generateSortableId(msg.timestamp);
     const idempotencyIndexKey = msg.idempotencyKey
       ? MessageKeys.idempotency(msg.userId, threadId, msg.idempotencyKey)
       : null;
 
+    // Keep the common replay path ahead of ID generation; the Lua check below
+    // remains the authoritative claim for concurrent callers.
     if (idempotencyIndexKey) {
       const existingId = await this.redis.get(idempotencyIndexKey);
       if (existingId) {
@@ -109,110 +110,90 @@ export class RedisMessageStore {
         if (existingMessage) {
           return existingMessage;
         }
-        await this.redis.del(idempotencyIndexKey);
       }
-
-      const claimed =
-        this.ttlSeconds === null
-          ? await this.redis.set(idempotencyIndexKey, id, 'NX')
-          : await this.redis.set(idempotencyIndexKey, id, 'EX', this.ttlSeconds, 'NX');
-
-      if (claimed !== 'OK') {
-        const claimedId = await this.redis.get(idempotencyIndexKey);
-        if (claimedId) {
-          const existingMessage = await this.getById(claimedId);
-          if (existingMessage) {
-            return existingMessage;
-          }
-        }
-        throw new Error('message idempotency key contention');
-      }
+      // Stale reference: do NOT delete here (avoids a check-then-act race).
+      // APPEND_LUA will reclaim it atomically.
     }
 
+    const id = generateSortableId(msg.timestamp);
     const { idempotencyKey, ...payload } = msg;
     void idempotencyKey;
     const stored: StoredMessage = { ...payload, id, threadId };
-    const score = msg.timestamp;
 
-    const hashKey = MessageKeys.detail(id);
-    const pipeline = this.redis.multi();
-
-    // Store message hash (including threadId, contentBlocks, toolEvents, metadata)
-    pipeline.hset(hashKey, {
+    const hashFields: Record<string, string> = {
       id,
       threadId,
       userId: msg.userId,
       catId: msg.catId ?? '',
       content: msg.content,
-      contentBlocks: msg.contentBlocks ? JSON.stringify(msg.contentBlocks) : '',
-      toolEvents: msg.toolEvents ? JSON.stringify(msg.toolEvents) : '',
-      metadata: msg.metadata ? JSON.stringify(msg.metadata) : '',
-      extra: msg.extra ? serializeExtra(msg.extra) : '',
       mentions: JSON.stringify(msg.mentions),
       timestamp: String(msg.timestamp),
-      ...(msg.thinking ? { thinking: msg.thinking } : {}),
-      ...(msg.origin ? { origin: msg.origin } : {}),
-      ...(msg.visibility ? { visibility: msg.visibility } : {}),
-      ...(msg.whisperTo ? { whisperTo: JSON.stringify(msg.whisperTo) } : {}),
-      ...(msg.source ? { source: JSON.stringify(msg.source) } : {}),
-      ...(msg.mentionsUser ? { mentionsUser: '1' } : {}),
-      ...(msg.deliveryStatus ? { deliveryStatus: msg.deliveryStatus } : {}),
-      ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
-    });
-    if (this.ttlSeconds !== null) {
-      pipeline.expire(hashKey, this.ttlSeconds);
+    };
+
+    if (msg.contentBlocks !== undefined) {
+      hashFields.contentBlocks = JSON.stringify(msg.contentBlocks);
+    }
+    if (msg.toolEvents !== undefined) {
+      hashFields.toolEvents = JSON.stringify(msg.toolEvents);
+    }
+    if (msg.metadata) {
+      hashFields.metadata = JSON.stringify(msg.metadata);
+    }
+    if (msg.extra) {
+      hashFields.extra = serializeExtra(msg.extra);
+    }
+    if (msg.thinking) {
+      hashFields.thinking = msg.thinking;
+    }
+    if (msg.origin) {
+      hashFields.origin = msg.origin;
+    }
+    if (msg.visibility) {
+      hashFields.visibility = msg.visibility;
+    }
+    if (msg.whisperTo !== undefined) {
+      hashFields.whisperTo = JSON.stringify(msg.whisperTo);
+    }
+    if (msg.source) {
+      hashFields.source = JSON.stringify(msg.source);
+    }
+    if (msg.mentionsUser) {
+      hashFields.mentionsUser = '1';
+    }
+    if (msg.deliveryStatus) {
+      hashFields.deliveryStatus = msg.deliveryStatus;
+    }
+    if (msg.replyTo) {
+      hashFields.replyTo = msg.replyTo;
     }
 
-    // Add to global timeline
-    pipeline.zadd(MessageKeys.TIMELINE, String(score), id);
+    const returnedId = (await this.redis.eval(
+      APPEND_LUA,
+      1,
+      MessageKeys.detail(id),
+      id,
+      JSON.stringify(hashFields),
+      JSON.stringify(msg.mentions),
+      String(msg.timestamp),
+      idempotencyIndexKey ?? '',
+      this.keyPrefix,
+      String(this.ttlSeconds ?? 0),
+    )) as string;
 
-    // Add to user timeline
-    pipeline.zadd(MessageKeys.user(msg.userId), String(score), id);
-
-    // Add to thread timeline
-    pipeline.zadd(MessageKeys.thread(threadId), String(score), id);
-
-    // Add to per-cat mention sets
-    for (const catId of msg.mentions) {
-      pipeline.zadd(MessageKeys.mentions(catId), String(score), id);
-    }
-
-    if (this.ttlSeconds !== null) {
-      // Prune expired entries from sorted sets (score < now - TTL).
-      const cutoff = String(Date.now() - this.ttlSeconds * 1000);
-      pipeline.zremrangebyscore(MessageKeys.TIMELINE, '-inf', cutoff);
-      pipeline.zremrangebyscore(MessageKeys.user(msg.userId), '-inf', cutoff);
-      pipeline.zremrangebyscore(MessageKeys.thread(threadId), '-inf', cutoff);
-      for (const catId of msg.mentions) {
-        pipeline.zremrangebyscore(MessageKeys.mentions(catId), '-inf', cutoff);
+    // If a concurrent caller with the same idempotency key won, return the
+    // message they created without firing our onAppend.
+    if (returnedId !== id) {
+      const existingMessage = await this.getById(returnedId);
+      if (existingMessage) {
+        return existingMessage;
       }
-
-      // Set EXPIRE on index zsets so "silent" keys eventually disappear
-      pipeline.expire(MessageKeys.TIMELINE, this.ttlSeconds);
-      pipeline.expire(MessageKeys.user(msg.userId), this.ttlSeconds);
-      pipeline.expire(MessageKeys.thread(threadId), this.ttlSeconds);
-      if (idempotencyIndexKey) {
-        pipeline.expire(idempotencyIndexKey, this.ttlSeconds);
-      }
-      for (const catId of msg.mentions) {
-        pipeline.expire(MessageKeys.mentions(catId), this.ttlSeconds);
-      }
-    }
-
-    try {
-      await pipeline.exec();
-    } catch (error) {
-      if (idempotencyIndexKey) {
-        const existingId = await this.redis.get(idempotencyIndexKey);
-        if (existingId === id) {
-          await this.redis.del(idempotencyIndexKey);
-        }
-      }
-      throw error;
+      // The concurrent winner's hash vanished (deleteByThread / TTL) between the
+      // Lua claim and this hydration. Do not fall through to the created path,
+      // which would fire onAppend for a message that was never persisted.
+      throw new Error(`Idempotency winner ${returnedId} for key ${idempotencyKey} vanished before hydration`);
     }
 
     // F102 KD-34: fire-and-forget append listener for thread index updates
-    // P2 fix: wrap in try-catch to handle sync throws (Promise.resolve only catches async rejections)
     if (this.onAppend) {
       try {
         void Promise.resolve(this.onAppend(stored)).catch(() => {});

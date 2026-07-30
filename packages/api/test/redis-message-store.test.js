@@ -18,6 +18,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
   let generateSortableId;
   let collectAllThreadMessages;
   let createRedisClient;
+  let MessageKeys;
   let redis;
   let store;
   let connected = false;
@@ -33,6 +34,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     ));
     const redisModule = await import('@cat-cafe/shared/utils');
     createRedisClient = redisModule.createRedisClient;
+    ({ MessageKeys } = await import('../dist/domains/cats/services/stores/redis-keys/message-keys.js'));
 
     redis = createRedisClient({ url: REDIS_URL });
     // Connectivity check: skip all tests if Redis is unreachable
@@ -1076,5 +1078,217 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
 
     const queuedIds = await store.scanByDeliveryStatus('queued');
     assert.ok(!queuedIds.includes(m1.id), 'should not find canceled message in queued scan');
+  });
+
+  it('concurrent idempotent append creates exactly one thread member', async () => {
+    const threadId = 'thread-concurrent-idem';
+    const key = MessageKeys.thread(threadId);
+    const timestamp = Date.now();
+
+    const [a, b] = await Promise.all([
+      store.append({
+        userId: 'u1',
+        catId: null,
+        content: 'concurrent',
+        mentions: [],
+        timestamp,
+        threadId,
+        idempotencyKey: 'concurrent-idem',
+      }),
+      store.append({
+        userId: 'u1',
+        catId: null,
+        content: 'concurrent',
+        mentions: [],
+        timestamp,
+        threadId,
+        idempotencyKey: 'concurrent-idem',
+      }),
+    ]);
+
+    assert.equal(a.id, b.id, 'both concurrent callers must observe the same message id');
+    const members = await redis.zrange(key, 0, -1);
+    assert.deepEqual(members, [a.id], 'thread zset must contain exactly the created message');
+  });
+
+  it('idempotent replay does not refire onAppend', async () => {
+    let calls = 0;
+    const timestamp = Date.now();
+    const watchedStore = new RedisMessageStore(redis, {
+      ttlSeconds: 60,
+      onAppend: () => {
+        calls++;
+      },
+    });
+
+    const first = await watchedStore.append({
+      userId: 'u1',
+      catId: null,
+      content: 'idem',
+      mentions: [],
+      timestamp,
+      threadId: 'thread-redis-onappend',
+      idempotencyKey: 'redis-onappend',
+    });
+    assert.equal(calls, 1);
+
+    const replay = await watchedStore.append({
+      userId: 'u1',
+      catId: null,
+      content: 'idem retry',
+      mentions: [],
+      timestamp: timestamp + 1,
+      threadId: 'thread-redis-onappend',
+      idempotencyKey: 'redis-onappend',
+    });
+    assert.equal(replay.id, first.id);
+    assert.equal(calls, 1, 'idempotent replay must not refire onAppend');
+  });
+
+  it('idempotent replay preserves explicitly empty optional arrays', async () => {
+    const input = {
+      userId: 'u1',
+      catId: null,
+      content: 'empty arrays',
+      contentBlocks: [],
+      toolEvents: [],
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 'thread-empty-arrays',
+      whisperTo: [],
+      idempotencyKey: 'empty-arrays',
+    };
+
+    const first = await store.append(input);
+    const replay = await store.append(input);
+    const hydrated = await store.getById(first.id);
+
+    for (const message of [first, replay, hydrated]) {
+      assert.deepEqual(message?.contentBlocks, []);
+      assert.deepEqual(message?.toolEvents, []);
+      assert.deepEqual(message?.whisperTo, []);
+    }
+  });
+
+  it('atomically reclaims an idempotency key whose message hash is missing', async () => {
+    const userId = 'u1';
+    const threadId = 'thread-stale-idem';
+    const idempotencyKey = 'stale-idem';
+    const redisKey = MessageKeys.idempotency(userId, threadId, idempotencyKey);
+    const missingId = generateSortableId(Date.now() - 1);
+    await redis.set(redisKey, missingId);
+
+    const created = await store.append({
+      userId,
+      catId: null,
+      content: 'replacement',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
+      idempotencyKey,
+    });
+    const replay = await store.append({
+      userId,
+      catId: null,
+      content: 'must replay replacement',
+      mentions: [],
+      timestamp: Date.now() + 1,
+      threadId,
+      idempotencyKey,
+    });
+
+    assert.notEqual(created.id, missingId);
+    assert.equal(await redis.get(redisKey), created.id, 'stale mapping must be replaced by the new winner');
+    assert.equal(replay.id, created.id, 'the replacement mapping must remain idempotent');
+    assert.deepEqual(await redis.zrange(MessageKeys.thread(threadId), 0, -1), [created.id]);
+  });
+
+  it('fails closed when an idempotency winner vanishes before hydration', async () => {
+    const userId = 'u1';
+    const threadId = 'thread-vanished-winner';
+    const idempotencyKey = 'vanished-winner';
+    const winner = await store.append({
+      userId,
+      catId: null,
+      content: 'winner',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
+      idempotencyKey,
+    });
+
+    let listenerCalls = 0;
+    const watchedStore = new RedisMessageStore(redis, {
+      ttlSeconds: 60,
+      onAppend: () => {
+        listenerCalls++;
+      },
+    });
+    const redisKey = MessageKeys.idempotency(userId, threadId, idempotencyKey);
+    const originalGet = redis.get;
+    const originalEval = redis.eval;
+    let bypassFastPath = true;
+    let removeWinnerAfterLua = true;
+
+    redis.get = async function (key, ...args) {
+      if (bypassFastPath && key === redisKey) {
+        bypassFastPath = false;
+        return null;
+      }
+      return originalGet.call(this, key, ...args);
+    };
+    redis.eval = async function (...args) {
+      const result = await originalEval.apply(this, args);
+      if (removeWinnerAfterLua && result === winner.id) {
+        removeWinnerAfterLua = false;
+        await this.del(MessageKeys.detail(winner.id));
+      }
+      return result;
+    };
+
+    try {
+      await assert.rejects(
+        watchedStore.append({
+          userId,
+          catId: null,
+          content: 'loser',
+          mentions: [],
+          timestamp: Date.now() + 1,
+          threadId,
+          idempotencyKey,
+        }),
+        /Idempotency winner .* vanished before hydration/,
+      );
+    } finally {
+      redis.get = originalGet;
+      redis.eval = originalEval;
+    }
+
+    assert.equal(listenerCalls, 0, 'a non-persisted loser must not fire onAppend');
+    assert.deepEqual(await redis.zrange(MessageKeys.thread(threadId), 0, -1), [winner.id]);
+  });
+
+  it('prunes stale members from an active TTL-backed thread index', async () => {
+    const threadId = 'thread-active-ttl-prune';
+    const threadKey = MessageKeys.thread(threadId);
+    const staleId = generateSortableId(Date.now() - 120_000);
+    await redis.zadd(threadKey, Date.now() - 120_000, staleId);
+
+    const ttlStore = new RedisMessageStore(redis, { ttlSeconds: 60 });
+    const current = await ttlStore.append({
+      userId: 'u1',
+      catId: null,
+      content: 'keeps thread active',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
+    });
+
+    assert.deepEqual(
+      await redis.zrange(threadKey, 0, -1),
+      [current.id],
+      'append must remove expired-score members even while refreshing the thread key TTL',
+    );
+    assert.ok((await redis.ttl(threadKey)) > 0, 'thread index must remain active after member pruning');
   });
 });
