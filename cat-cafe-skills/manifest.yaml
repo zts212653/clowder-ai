@@ -1134,7 +1134,7 @@ skills:
     category: "创作与媒体"
     description: >
       AI 图片生成三路径：原生 tool call（Codex/Antigravity）、OpenAI 兼容图像网关
-      （curl /v1/images/generations，无原生 tool 的猫首选）、Chrome MCP 浏览器自动化（Gemini/ChatGPT）。
+      （需部署注入网关 key）、Chrome MCP 浏览器自动化（Gemini/ChatGPT）。
       Use when: 需要生成概念图、UI 参考图、像素画素材、猫猫头像、任何图片资产。
       Not for: Pencil .pen 文件内的简单形状/布局（用 pencil-design）。
       Output: 生成的图片发布到 /uploads/ 并以 media_gallery 进气泡，或保存到项目 assets/ 目录。

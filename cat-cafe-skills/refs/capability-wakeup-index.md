@@ -78,7 +78,7 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 - PPT 内容页配图
 - 信息图 / 像素画素材
 
-**Backend 路由**：原生 tool call (Codex/Antigravity) / 浏览器自动化 (Gemini/ChatGPT)
+**Backend 路由**：原生 tool call (Codex/Antigravity) / API 图像网关（需部署注入网关 key）/ 浏览器自动化 (Gemini/ChatGPT)
 **边界**：硬要求可编辑 / native text → 用 PPT/HTML 管线，不用 image-generation
 
 ### 4. `workspace-navigator` — 程式打开文件到 Workspace panel
