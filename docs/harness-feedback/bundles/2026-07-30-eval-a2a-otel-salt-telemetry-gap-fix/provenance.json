@@ -1,0 +1,19 @@
+{
+  "verdictId": "2026-07-30-eval-a2a-otel-salt-telemetry-gap-fix",
+  "rawInputs": [
+    {
+      "path": "docs/harness-feedback/snapshots/2026-07-30T03-06-12-246Z-F167-eval.yaml",
+      "sha256": "f9aceccc80d3afa82c9685b8ac2cd6073e1e072a38d2f4ef41de95161130fc2b"
+    },
+    {
+      "path": "docs/harness-feedback/attributions/2026-07-30T03-06-12-248Z-F167-attribution.yaml",
+      "sha256": "d9535ae000335a2a11927982f1760d139e56f39c68c28f7dd49b199629f92d06"
+    }
+  ],
+  "generatedAt": "2026-07-30T03:06:12.248Z",
+  "generator": {
+    "name": "eval-a2a-live-verdict",
+    "version": "1"
+  },
+  "sanitizeRulesVersion": "f192-e-pilot-v1"
+}
