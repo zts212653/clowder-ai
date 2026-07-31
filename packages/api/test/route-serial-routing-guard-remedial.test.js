@@ -264,6 +264,48 @@ describe('F177 Phase H — route-serial routing guard remedial invoke', () => {
     );
   });
 
+  test('confirmed remedial callback preserves the completed first pass alongside the handoff', async () => {
+    const codexService = createSequenceService('codex', [
+      'I completed the investigation and documented the verified root cause.',
+      [
+        {
+          type: 'tool_use',
+          toolName: 'cat_cafe_post_message',
+          toolInput: { content: '@opus\n\nPlease continue from the completed investigation.' },
+        },
+        {
+          type: 'tool_result',
+          toolName: 'cat_cafe_post_message',
+          content: JSON.stringify({
+            status: 'ok',
+            messageId: 'msg-remedial-callback',
+            threadId: 'thread-routing-guard-remedial-callback',
+          }),
+        },
+      ],
+    ]);
+    const opusService = createSequenceService('opus', ['ack from opus'], { needsGuard: false });
+
+    const { appended, calls, yielded } = await runRoute(codexService, 'thread-routing-guard-remedial-callback', {
+      opus: opusService,
+    });
+
+    assert.equal(calls.length, 2, 'the first-pass no-exit text should trigger one remedial invocation');
+    assert.equal(opusService.calls.length, 1, 'the confirmed remedial callback must still route to opus');
+    const codexMessages = appended.filter((m) => m.catId === 'codex' && m.origin === 'stream');
+    assert.equal(codexMessages.length, 1, 'the callback message must not deduplicate the completed first pass');
+    assert.equal(codexMessages[0].content, 'I completed the investigation and documented the verified root cause.');
+    assert.deepEqual(codexMessages[0].extra?.stream, {
+      invocationId: 'outer-inv-1',
+      turnInvocationId: 'outer-inv-1',
+    });
+    assert.deepEqual(
+      yielded.filter((m) => m.type === 'text' && m.catId === 'codex').map((m) => [m.content, m.invocationId]),
+      [['I completed the investigation and documented the verified root cause.', 'outer-inv-1']],
+      'live output and persistence must retain the same first-pass content and identity',
+    );
+  });
+
   test('guarded first pass streams lifecycle and tool events while withholding invalid text', async () => {
     const service = createSequenceService('codex', [
       [

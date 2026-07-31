@@ -1062,6 +1062,7 @@ export async function* routeSerial(
       // F22 R2 P1-1: Capture own invocationId from stream (not getLatestId)
       let ownInvocationId: string | undefined;
       let visibleContentInvocationIdOverride: string | undefined;
+      let preservedFirstPassVisibleContent = false;
       // F111 Phase B: Streaming TTS chunker for real-time voice (voiceMode only)
       let voiceChunker: StreamingTtsChunker | undefined;
       let deferredVoiceInvocationId: string | undefined;
@@ -1905,6 +1906,7 @@ export async function* routeSerial(
           originalStoredContentBeforeRemedial.length > 0 ||
           originalRichBlocksBeforeRemedial.length > 0 ||
           originalToolEventsBeforeRemedial.length > 0;
+        preservedFirstPassVisibleContent = preservesOriginalVisibleContent;
         visibleContentInvocationIdOverride = preservesOriginalVisibleContent
           ? originalVisibleInvocationIdBeforeRemedial
           : undefined;
@@ -2495,8 +2497,11 @@ export async function* routeSerial(
           (storedContent ? detectUserMention(storedContent) : false) || localCvoHasCoCreatorLineStartMention,
         );
 
-        // #573: skip stream store only when callback confirmed persistence (not just invocation)
+        // #573: a confirmed callback owns its canonical callback message. A synthetic remedial
+        // callback does not, however, own the completed first-pass result that the guard preserved;
+        // store that result separately so F5/history matches the live replay.
         const callbackAlreadyStored = callbackPostConfirmed;
+        const callbackDeduplicatesStreamStore = callbackAlreadyStored && !preservedFirstPassVisibleContent;
 
         // Store with actual mentions — degrade on failure to ensure done reaches frontend
         // (缅因猫 review P1-2: Redis failure must not block done yield)
@@ -2559,7 +2564,7 @@ export async function* routeSerial(
             }
           }
 
-          if (!callbackAlreadyStored) {
+          if (!callbackDeduplicatesStreamStore) {
             const storedMsg = await deps.messageStore.append({
               userId,
               catId,
