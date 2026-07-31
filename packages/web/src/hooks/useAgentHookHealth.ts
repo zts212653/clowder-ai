@@ -47,6 +47,13 @@ let hasCachedHealth = false;
 let inFlightProjectPath: string | undefined;
 let inFlightStatus: Promise<AgentHookStatusResponse> | null = null;
 
+function cacheStatus(status: AgentHookStatusResponse, projectPath?: string): AgentHookStatusResponse {
+  cachedHealth = status;
+  cachedProjectPath = projectPath;
+  hasCachedHealth = true;
+  return status;
+}
+
 function isAgentHookStatusResponse(value: unknown): value is AgentHookStatusResponse {
   return (
     !!value &&
@@ -65,10 +72,7 @@ function isAgentHookStatusResponse(value: unknown): value is AgentHookStatusResp
  */
 async function readUninitialisedProject(res: Response): Promise<AgentHookStatusResponse | null> {
   if (res.status !== 400) return null;
-  const reason = await res
-    .json()
-    .then((body: unknown) => (body as { error?: unknown })?.error)
-    .catch(() => undefined);
+  const { error: reason } = (await res.json().catch(() => ({}))) as { error?: unknown };
   if (typeof reason !== 'string' || !reason.includes('missing .cat-cafe/')) return null;
   return {
     status: 'unsupported',
@@ -96,12 +100,7 @@ async function readAgentHookStatus(projectPath?: string): Promise<AgentHookStatu
       if (!isAgentHookStatusResponse(status)) throw new Error('agent hook status response is invalid');
       return status;
     })
-    .then((status) => {
-      cachedHealth = status;
-      cachedProjectPath = projectPath;
-      hasCachedHealth = true;
-      return status;
-    })
+    .then((status) => cacheStatus(status, projectPath))
     .finally(() => {
       inFlightStatus = null;
     });
@@ -115,20 +114,14 @@ async function postAgentHookSync(projectPath?: string): Promise<AgentHookStatusR
     headers: projectPath ? { 'Content-Type': 'application/json' } : undefined,
     body: projectPath ? JSON.stringify({ projectPath }) : undefined,
   });
-  const uninitialised = res.ok ? null : await readUninitialisedProject(res);
-  if (uninitialised) {
-    cachedHealth = uninitialised;
-    cachedProjectPath = projectPath;
-    hasCachedHealth = true;
-    return uninitialised;
+  if (!res.ok) {
+    const uninitialised = await readUninitialisedProject(res);
+    if (!uninitialised) throw new Error(`agent hook sync failed (${res.status})`);
+    return cacheStatus(uninitialised, projectPath);
   }
-  if (!res.ok) throw new Error(`agent hook sync failed (${res.status})`);
   const status = await res.json();
   if (!isAgentHookStatusResponse(status)) throw new Error('agent hook sync response is invalid');
-  cachedHealth = status;
-  cachedProjectPath = projectPath;
-  hasCachedHealth = true;
-  return status;
+  return cacheStatus(status, projectPath);
 }
 
 function errorMessage(error: unknown): string {
