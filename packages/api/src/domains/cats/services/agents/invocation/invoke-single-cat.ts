@@ -2020,6 +2020,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       const runtimeConfigOptions = {
         providerName: effectiveProviderName,
         models: rawModels,
+        ...(resolvedAccount.modelAliases ? { modelAliases: resolvedAccount.modelAliases } : {}),
         defaultModel: effectiveModel,
         apiType,
         hasBaseUrl: Boolean(resolvedAccount.baseUrl),

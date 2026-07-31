@@ -16,7 +16,7 @@ interface OpenCodeConfigOptions {
 
 type OpenCodeProviderConfig = {
   npm?: string;
-  models?: Record<string, { name: string }>;
+  models?: Record<string, { id?: string; name: string }>;
   options: {
     apiKey?: string;
     baseURL?: string;
@@ -114,6 +114,7 @@ export function deriveOpenCodeApiType(providerName: string | undefined): OpenCod
 export interface OpenCodeRuntimeConfigOptions {
   providerName: string;
   models: readonly string[];
+  modelAliases?: Readonly<Record<string, string>>;
   defaultModel?: string;
   apiType?: OpenCodeApiType;
   hasBaseUrl?: boolean;
@@ -157,6 +158,7 @@ export interface OpenCodeRuntimeConfigDebugSummary {
     {
       npm?: string;
       modelKeys: string[];
+      modelMappings: Record<string, string>;
       hasBaseUrl: boolean;
       apiKeySource: string;
       baseUrlSource?: string;
@@ -177,21 +179,6 @@ export function parseOpenCodeModel(model: string): { providerName: string; model
 function stripOwnProviderPrefix(modelName: string, providerName: string): string {
   const prefix = `${providerName}/`;
   return modelName.startsWith(prefix) ? modelName.slice(prefix.length) : modelName;
-}
-
-/**
- * OpenCode model keys are local aliases, while the compatible API receives the
- * upstream model id from the model's `name` field. Kimi Code publishes
- * namespaced aliases but kitcoding expects the raw ids.
- */
-const OPENCODE_UPSTREAM_MODEL_ALIASES: Readonly<Record<string, string>> = {
-  'kimi-code/k3': 'kimi-k3',
-  'kimi-code/kimi-for-coding': 'kimi-k2.7-code',
-  'kimi-code/kimi-for-coding-highspeed': 'kimi-k3',
-};
-
-export function resolveOpenCodeUpstreamModel(modelName: string): string {
-  return OPENCODE_UPSTREAM_MODEL_ALIASES[modelName] ?? modelName;
 }
 
 /**
@@ -224,6 +211,7 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
   const {
     providerName,
     models,
+    modelAliases,
     defaultModel,
     apiType = 'openai',
     hasBaseUrl = false,
@@ -240,11 +228,15 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
 
   const configName = safeProviderName(providerName);
 
-  const modelsMap: Record<string, { name: string }> = {};
+  const modelsMap: Record<string, { id?: string; name: string }> = {};
   const modelsToRegister = defaultModel ? [...models, defaultModel] : [...models];
   for (const rawModel of modelsToRegister) {
     const modelName = stripOwnProviderPrefix(rawModel, providerName);
-    modelsMap[modelName] = { name: resolveOpenCodeUpstreamModel(modelName) };
+    const upstreamId = modelAliases?.[modelName]?.trim();
+    modelsMap[modelName] = {
+      ...(upstreamId ? { id: upstreamId } : {}),
+      name: modelName,
+    };
   }
 
   let configDefaultModel = defaultModel;
@@ -320,6 +312,11 @@ export function summarizeOpenCodeRuntimeConfigForDebug(
         {
           npm: providerConfig.npm,
           modelKeys: Object.keys(providerConfig.models ?? {}).sort(),
+          modelMappings: Object.fromEntries(
+            Object.entries(providerConfig.models ?? {})
+              .sort(([left], [right]) => left.localeCompare(right))
+              .map(([modelKey, modelConfig]) => [modelKey, modelConfig.id ?? modelKey]),
+          ),
           hasBaseUrl: Boolean(providerConfig.options.baseURL),
           apiKeySource: summarizeEnvPlaceholder(providerConfig.options.apiKey) ?? '(unset)',
           ...(providerConfig.options.baseURL

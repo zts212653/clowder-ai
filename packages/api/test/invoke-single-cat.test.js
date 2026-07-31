@@ -5855,6 +5855,10 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       models: ['maas/glm-5'],
       setActive: false,
     });
+    const accountsPath = join(root, '.cat-cafe', 'accounts.json');
+    const accounts = JSON.parse(await readFile(accountsPath, 'utf-8'));
+    accounts[customProfile.id].modelAliases = { 'glm-5': 'upstream-glm-5' };
+    await writeFile(accountsPath, `${JSON.stringify(accounts, null, 2)}\n`, 'utf-8');
 
     const registrySnapshot = catRegistry.getAllConfigs();
     const originalConfig = catRegistry.tryGet('opencode')?.config;
@@ -5914,7 +5918,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(callbackEnv.CAT_CAFE_OC_BASE_URL, 'https://maas.example/v1');
     assert.equal(seenRuntimeConfig?.model, 'maas/glm-5');
     assert.equal(seenRuntimeConfig?.provider?.maas?.npm, '@ai-sdk/openai-compatible');
-    assert.deepStrictEqual(seenRuntimeConfig?.provider?.maas?.models, { 'glm-5': { name: 'glm-5' } });
+    assert.deepStrictEqual(seenRuntimeConfig?.provider?.maas?.models, {
+      'glm-5': { id: 'upstream-glm-5', name: 'glm-5' },
+    });
     await assert.rejects(readFile(seenConfigPath, 'utf-8'));
   });
 

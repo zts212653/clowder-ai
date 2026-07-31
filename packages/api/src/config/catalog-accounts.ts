@@ -117,17 +117,31 @@ function normalizeModels(models: readonly string[] | undefined): string[] | unde
   return normalized.length > 0 ? normalized.sort() : undefined;
 }
 
+function normalizeModelAliases(value: unknown): Record<string, string> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const normalized = Object.entries(value as Record<string, unknown>)
+    .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    .map(([key, upstreamId]) => [key.trim(), upstreamId.trim()] as const)
+    .filter(([key, upstreamId]) => key.length > 0 && upstreamId.length > 0)
+    .sort(([left], [right]) => left.localeCompare(right));
+  return normalized.length > 0 ? Object.fromEntries(normalized) : undefined;
+}
+
 function canonicalizeAccount(account: AccountConfig): {
   authType: 'oauth' | 'api_key';
   baseUrl?: string;
   displayName?: string;
   models?: string[];
+  modelAliases?: Record<string, string>;
 } {
   return {
     authType: account.authType,
     ...(normalizeBaseUrl(account.baseUrl) ? { baseUrl: normalizeBaseUrl(account.baseUrl) } : {}),
     ...(normalizeDisplayName(account.displayName) ? { displayName: normalizeDisplayName(account.displayName) } : {}),
     ...(normalizeModels(account.models) ? { models: normalizeModels(account.models) } : {}),
+    ...(normalizeModelAliases(account.modelAliases)
+      ? { modelAliases: normalizeModelAliases(account.modelAliases) }
+      : {}),
   };
 }
 
@@ -145,6 +159,11 @@ function describeAccountConflict(existing: AccountConfig, incoming: AccountConfi
   }
   if (JSON.stringify(current.models ?? []) !== JSON.stringify(next.models ?? [])) {
     diffs.push(`models ${JSON.stringify(current.models ?? [])} vs ${JSON.stringify(next.models ?? [])}`);
+  }
+  if (JSON.stringify(current.modelAliases ?? {}) !== JSON.stringify(next.modelAliases ?? {})) {
+    diffs.push(
+      `modelAliases ${JSON.stringify(current.modelAliases ?? {})} vs ${JSON.stringify(next.modelAliases ?? {})}`,
+    );
   }
 
   return diffs.join('; ');
@@ -294,12 +313,14 @@ function migrateLegacyFrom(
     const displayName = normalizeDisplayName(typeof p.displayName === 'string' ? p.displayName : undefined);
     const baseUrl = normalizeBaseUrl(typeof p.baseUrl === 'string' ? p.baseUrl : undefined);
     const models = normalizeModels(Array.isArray(p.models) ? p.models.map(String) : undefined);
+    const modelAliases = normalizeModelAliases(p.modelAliases);
     // clowder-ai#340: protocol not migrated — derived at runtime from well-known account IDs.
     const account: AccountConfig = {
       authType: inferLegacyAuthType(p),
       ...(displayName ? { displayName } : {}),
       ...(baseUrl ? { baseUrl } : {}),
       ...(models ? { models } : {}),
+      ...(modelAliases ? { modelAliases } : {}),
     };
     if (opts?.shouldImportAccount && !opts.shouldImportAccount(id, account)) continue;
     accounts[id] = account;

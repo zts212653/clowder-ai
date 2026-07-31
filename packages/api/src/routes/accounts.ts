@@ -54,6 +54,9 @@ function accountToView(id: string, account: AccountConfig, apiKeyPresent: boolea
     ...(clientId ? { clientId } : {}),
     ...(account.baseUrl ? { baseUrl: account.baseUrl } : {}),
     models: account.models ? [...account.models] : [],
+    ...(account.modelAliases && Object.keys(account.modelAliases).length > 0
+      ? { modelAliases: { ...account.modelAliases } }
+      : {}),
     hasApiKey: apiKeyPresent,
     mode: account.authType === 'api_key' ? ('api_key' as const) : ('subscription' as const),
     ...(account.envVars && Object.keys(account.envVars).length > 0 ? { envVars: { ...account.envVars } } : {}),
@@ -122,6 +125,27 @@ const envVarsSchema = z
     }
     return Object.keys(filtered).length > 0 ? filtered : undefined;
   });
+const modelAliasKeySchema = z.string().refine((key) => key.trim().length > 0, 'model alias key cannot be blank');
+const modelAliasesSchema = z
+  .record(modelAliasKeySchema, z.string().trim().min(1))
+  .superRefine((aliases, ctx) => {
+    const normalizedKeys = new Set<string>();
+    for (const key of Object.keys(aliases)) {
+      const normalizedKey = key.trim();
+      if (normalizedKeys.has(normalizedKey)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: 'model alias keys must be unique after trimming',
+        });
+      }
+      normalizedKeys.add(normalizedKey);
+    }
+  })
+  .transform((aliases) =>
+    Object.fromEntries(Object.entries(aliases).map(([key, upstreamId]) => [key.trim(), upstreamId])),
+  )
+  .optional();
 
 const authTypeEnum = z.enum(['oauth', 'api_key']);
 const modeEnum = z.enum(['subscription', 'api_key']);
@@ -155,6 +179,7 @@ const createBodySchema = z
           .pipe(z.string().min(1)),
       )
       .optional(),
+    modelAliases: modelAliasesSchema,
     /** F171: User-defined env vars injected into agent subprocess. */
     envVars: envVarsSchema,
   })
@@ -189,6 +214,7 @@ const updateBodySchema = z.object({
         .pipe(z.string().min(1)),
     )
     .optional(),
+  modelAliases: modelAliasesSchema,
   /** F171: User-defined env vars injected into agent subprocess. */
   envVars: envVarsSchema,
 });
@@ -279,6 +305,7 @@ export const accountsRoutes: FastifyPluginAsync = async (app) => {
         ...(body.clientId ? { clientId: body.clientId } : {}),
         ...(body.baseUrl ? { baseUrl: body.baseUrl } : {}),
         ...(body.models ? { models: body.models } : {}),
+        ...(body.modelAliases && Object.keys(body.modelAliases).length > 0 ? { modelAliases: body.modelAliases } : {}),
         ...((body.displayName ?? body.name) ? { displayName: body.displayName ?? body.name } : {}),
         ...(body.envVars && Object.keys(body.envVars).length > 0 ? { envVars: body.envVars } : {}),
       };
@@ -348,6 +375,13 @@ export const accountsRoutes: FastifyPluginAsync = async (app) => {
           ? { models: parsed.data.models }
           : existing.models
             ? { models: [...existing.models] }
+            : {}),
+        ...('modelAliases' in parsed.data
+          ? parsed.data.modelAliases && Object.keys(parsed.data.modelAliases).length > 0
+            ? { modelAliases: parsed.data.modelAliases }
+            : {}
+          : existing.modelAliases && Object.keys(existing.modelAliases).length > 0
+            ? { modelAliases: { ...existing.modelAliases } }
             : {}),
         ...('envVars' in parsed.data
           ? parsed.data.envVars && Object.keys(parsed.data.envVars).length > 0

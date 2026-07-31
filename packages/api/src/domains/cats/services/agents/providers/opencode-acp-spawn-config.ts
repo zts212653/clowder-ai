@@ -14,6 +14,7 @@ export interface OpenCodeAcpSpawnAccount {
   apiKey?: string;
   baseUrl?: string;
   models?: readonly string[];
+  modelAliases?: Readonly<Record<string, string>>;
 }
 
 export interface OpenCodeAcpSpawnConfigOptions {
@@ -92,6 +93,7 @@ export async function prepareOpenCodeAcpSpawnConfig(
   const runtimeConfigOptions = {
     providerName: effective.providerName,
     models: account?.models?.length ? account.models : [effective.model],
+    ...(account?.modelAliases ? { modelAliases: account.modelAliases } : {}),
     defaultModel: effective.model,
     apiType: deriveOpenCodeApiType(effective.providerName),
     hasBaseUrl: Boolean(account?.baseUrl),

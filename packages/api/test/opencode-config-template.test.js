@@ -13,7 +13,6 @@ import {
   OC_API_KEY_ENV,
   OC_BASE_URL_ENV,
   parseOpenCodeModel,
-  resolveOpenCodeUpstreamModel,
   summarizeOpenCodeRuntimeConfigForDebug,
 } from '../dist/domains/cats/services/agents/providers/opencode-config-template.js';
 import {
@@ -223,20 +222,6 @@ describe('parseOpenCodeModel', () => {
   });
 });
 
-describe('resolveOpenCodeUpstreamModel', () => {
-  test('maps Kimi Code aliases to upstream model ids', () => {
-    assert.equal(resolveOpenCodeUpstreamModel('kimi-code/k3'), 'kimi-k3');
-    assert.equal(resolveOpenCodeUpstreamModel('kimi-code/kimi-for-coding'), 'kimi-k2.7-code');
-    assert.equal(resolveOpenCodeUpstreamModel('kimi-code/kimi-for-coding-highspeed'), 'kimi-k3');
-  });
-
-  test('keeps upstream and unknown model ids unchanged', () => {
-    assert.equal(resolveOpenCodeUpstreamModel('kimi-k3'), 'kimi-k3');
-    assert.equal(resolveOpenCodeUpstreamModel('gemini-3.1-pro'), 'gemini-3.1-pro');
-    assert.equal(resolveOpenCodeUpstreamModel('vendor/custom-model'), 'vendor/custom-model');
-  });
-});
-
 describe('deriveOpenCodeApiType', () => {
   test('derives apiType solely from providerName', () => {
     const scenarios = [
@@ -283,6 +268,7 @@ describe('prepareOpenCodeAcpSpawnConfig', () => {
           apiKey: 'sk-test-secret',
           baseUrl: 'https://proxy.example/v1',
           models: ['claude-opus-4-6'],
+          modelAliases: { 'claude-opus-4-6': 'claude-opus-4-6-20260101' },
         },
       });
 
@@ -296,7 +282,17 @@ describe('prepareOpenCodeAcpSpawnConfig', () => {
       assert.equal(config.small_model, 'anthropic/claude-opus-4-6');
       assert.equal(config.provider.anthropic.options.apiKey, `{env:${OC_API_KEY_ENV}}`);
       assert.equal(config.provider.anthropic.options.baseURL, `{env:${OC_BASE_URL_ENV}}`);
+      assert.deepEqual(config.provider.anthropic.models, {
+        'claude-opus-4-6': { id: 'claude-opus-4-6-20260101', name: 'claude-opus-4-6' },
+      });
+      assert.deepEqual(prepared.runtimeConfigSummary.providerSummary.anthropic.modelMappings, {
+        'claude-opus-4-6': 'claude-opus-4-6-20260101',
+      });
       assert.ok(!JSON.stringify(config).includes('sk-test-secret'), 'runtime config must not write secrets');
+      assert.ok(
+        !JSON.stringify(prepared.runtimeConfigSummary).includes('sk-test-secret'),
+        'debug summary must not include secrets',
+      );
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }
@@ -376,18 +372,32 @@ describe('generateOpenCodeRuntimeConfig', () => {
     assert.equal(config.provider.maas.options.apiKey, `{env:${OC_API_KEY_ENV}}`);
   });
 
-  test('maps Kimi aliases only in the upstream model name', () => {
+  test('uses account model aliases as upstream ids while preserving local keys', () => {
     const config = generateOpenCodeRuntimeConfig({
       providerName: 'kimi',
       models: ['kimi-code/k3'],
       defaultModel: 'kimi/kimi-code/k3',
       apiType: 'openai',
       hasBaseUrl: true,
+      modelAliases: { 'kimi-code/k3': 'kimi-k3' },
     });
 
     assert.equal(config.model, 'kimi/kimi-code/k3');
     assert.deepStrictEqual(config.provider.kimi.models, {
-      'kimi-code/k3': { name: 'kimi-k3' },
+      'kimi-code/k3': { id: 'kimi-k3', name: 'kimi-code/k3' },
+    });
+  });
+
+  test('keeps unknown models on identity routing without guessing aliases', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'vendor',
+      models: ['vendor/custom-model'],
+      defaultModel: 'vendor/custom-model',
+      apiType: 'openai',
+    });
+
+    assert.deepStrictEqual(config.provider.vendor.models, {
+      'custom-model': { name: 'custom-model' },
     });
   });
 
@@ -642,6 +652,7 @@ describe('generateOpenCodeRuntimeConfig', () => {
       defaultModel: 'anthropic/minimax-m2.7',
       apiType: 'anthropic',
       hasBaseUrl: true,
+      modelAliases: { 'minimax-m2.7': 'upstream-minimax-m2.7' },
     });
 
     assert.equal(summary.model, 'anthropic/minimax-m2.7');
@@ -651,6 +662,10 @@ describe('generateOpenCodeRuntimeConfig', () => {
       anthropic: {
         npm: '@ai-sdk/anthropic',
         modelKeys: ['minimax-m2.7', 'minimax-text-01'],
+        modelMappings: {
+          'minimax-m2.7': 'upstream-minimax-m2.7',
+          'minimax-text-01': 'minimax-text-01',
+        },
         hasBaseUrl: true,
         apiKeySource: `env:${OC_API_KEY_ENV}`,
         baseUrlSource: `env:${OC_BASE_URL_ENV}`,

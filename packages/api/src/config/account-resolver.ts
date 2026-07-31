@@ -29,6 +29,7 @@ export interface RuntimeProviderProfile {
   baseUrl?: string;
   apiKey?: string;
   models?: string[];
+  modelAliases?: Record<string, string>;
   /** F171: User-defined env vars for agent subprocess injection. */
   envVars?: Record<string, string>;
 }
@@ -263,6 +264,9 @@ function accountToRuntimeProfile(ref: string, account: AccountConfig, projectRoo
     ...(account.baseUrl ? { baseUrl: account.baseUrl } : {}),
     ...(apiKey ? { apiKey } : {}),
     ...(account.models && account.models.length > 0 ? { models: [...account.models] } : {}),
+    ...(account.modelAliases && Object.keys(account.modelAliases).length > 0
+      ? { modelAliases: { ...account.modelAliases } }
+      : {}),
     ...(account.envVars && Object.keys(account.envVars).length > 0 ? { envVars: { ...account.envVars } } : {}),
   };
 }

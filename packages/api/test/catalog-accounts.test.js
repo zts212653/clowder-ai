@@ -323,7 +323,13 @@ describe('global accounts (clowder-ai#340)', () => {
         anthropic: {
           activeProfileId: 'my-proxy',
           profiles: [
-            { id: 'my-proxy', displayName: 'My Proxy', authType: 'api_key', baseUrl: 'https://proxy.example/v1' },
+            {
+              id: 'my-proxy',
+              displayName: 'My Proxy',
+              authType: 'api_key',
+              baseUrl: 'https://proxy.example/v1',
+              modelAliases: { 'kimi-code/k3': 'kimi-k3' },
+            },
             { id: 'team-key', displayName: 'Team Key', authType: 'api_key' },
           ],
         },
@@ -353,6 +359,7 @@ describe('global accounts (clowder-ai#340)', () => {
     assert.equal(result['my-proxy'].authType, 'api_key');
     assert.equal(result['my-proxy'].displayName, 'My Proxy');
     assert.equal(result['my-proxy'].baseUrl, 'https://proxy.example/v1');
+    assert.deepEqual(result['my-proxy'].modelAliases, { 'kimi-code/k3': 'kimi-k3' });
     assert.ok(result['team-key'], 'team-key account should exist');
     assert.equal(result['team-key'].authType, 'api_key');
     // Must NOT create an "anthropic" shell account from the parent key
@@ -430,6 +437,51 @@ describe('global accounts (clowder-ai#340)', () => {
     const credRaw = await readFile(join(globalRoot, '.cat-cafe', 'credentials.json'), 'utf-8');
     const creds = JSON.parse(credRaw);
     assert.equal(creds['my-custom'].apiKey, 'sk-retry-key', 'credential must be imported on retry');
+  });
+
+  it('treats different model aliases as a legacy account conflict', async () => {
+    const { readCatalogAccounts, resetMigrationState, writeCatalogAccount } = await import(
+      '../dist/config/catalog-accounts.js'
+    );
+    resetMigrationState();
+
+    writeCatalogAccount(projectRoot, 'shared', {
+      authType: 'api_key',
+      baseUrl: 'https://proxy.example/v1',
+      models: ['kimi-code/k3'],
+      modelAliases: { 'kimi-code/k3': 'kimi-k3' },
+    });
+    resetMigrationState();
+
+    await writeFile(
+      join(projectRoot, '.cat-cafe', 'provider-profiles.json'),
+      JSON.stringify({
+        version: 2,
+        providers: [
+          {
+            id: 'shared',
+            authType: 'api_key',
+            baseUrl: 'https://proxy.example/v1',
+            models: ['kimi-code/k3'],
+            modelAliases: { 'kimi-code/k3': 'different-upstream-id' },
+          },
+        ],
+      }),
+      'utf-8',
+    );
+    await writeFile(
+      join(projectRoot, '.cat-cafe', 'provider-profiles.secrets.local.json'),
+      JSON.stringify({ profiles: { shared: { apiKey: 'sk-wrong-source' } } }),
+      'utf-8',
+    );
+
+    const result = readCatalogAccounts(projectRoot);
+    assert.deepEqual(result.shared.modelAliases, { 'kimi-code/k3': 'kimi-k3' });
+    const credentialPath = join(globalRoot, '.cat-cafe', 'credentials.json');
+    if (existsSync(credentialPath)) {
+      const credentials = JSON.parse(await readFile(credentialPath, 'utf-8'));
+      assert.equal(credentials.shared, undefined);
+    }
   });
 
   it('skips legacy secret when colliding with pre-existing global OAuth account', async () => {
