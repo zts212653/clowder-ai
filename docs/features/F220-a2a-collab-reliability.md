@@ -87,6 +87,17 @@ bug 链：opus parent 结束本轮 → tracker 没了/无 fresh draft → 过 gr
 - **Phase 2a（局部修，自决实现，不上 operator）**：① ~~`/active-pane` 改查 canonical liveness~~ **→ 已证伪，撤销，见 KD-6**；② `reconcileZombies` 收敛匹配 queue 条目 ✅ **merged via PR #2917 (`83962deb3`)**（messageId join + processing-only exact-id remove；两个 production caller 均已接线）；③ tracker / in-memory slot recovery 已由 F194 PR #2928 合入；④ clowder-ai#1150 的 intake hardening 增加 TaskProgress owner-CAS 删除与同 scope 全量 queue snapshot 有序/有界发布；⑤ 2026-08-04 closure audit 补齐 TTL-only pre-start 边界：reservation 明确记录 tracker 是否安装，只把从未进入 provider ownership 的 exact row 回滚到 `queued`，已启动过的 row 仍只接受 #2917/#2928 lifecycle proof。
 - **Phase 2b（后续证据已决，不再需要 operator 二选一）**：PR #3047 (`d1b5a978c`, 2026-07-18) 已在既有 F194 canonical read model 内接入 `TurnExecutionStore.listByParent()`：child 在 provider 启动前先持久化 `running`，finally 写终态；`/messages` 与 `/queue` 都把同 parent/thread/user 的 running child 作为 parent 正向 liveness，store 读取失败则 fail-open、绝不制造 zombie。2026-08-04 核验公开 `clowder-ai/main` 的 read model 与两 route blob 均与家里一致，公开 `invoke-single-cat` 也包含 `createRunning` / `transitionTerminal`。因此旧 Decision Packet 的两个选项已由后续事故修复塌缩：**复用现有 F194 + TurnExecutionStore 边界，不新立 feat、不重画 F220/F224 ownership**。
 
+#### Phase 2a Stateful Object Gate（✅ merged @ main 7563c9be0，PR #1150；高轮次 review 收敛）
+
+| 对象 | 所有权 | 允许的 zombie 转换 | 禁止跨越的不变量 |
+|------|--------|--------------------|------------------|
+| `processingSlots[(thread, cat)]` | 精确 queue `entry.id` | 仅 stale entry owner 可 compare-and-release；随后 dispatch replacement | A 的迟到 callback / retry / immediate convergence 都不能释放 B 的 reservation |
+| batch sibling `QueueEntry` | `batchParentId=primary.id` | zombie primary 移除时只 rollback 仍归 A 的 siblings；rollback 同时断开 owner | A 的迟到 finalizer 不能 remove/rollback 已由 B 重领的 sibling |
+| `TaskProgress[(thread, cat)]` | `lastInvocationId` | Redis Lua / memory 原子 compare-and-delete，仅删除 zombie invocation 自己的 snapshot | A 的延迟 cleanup 不能删除同 cat replacement B 的 snapshot；非原子 read→delete 不合规 |
+| `queue_updated` 全量快照 | `(SocketManager instance,threadId,userId)` publication tail（唯一入口=`emitQueueUpdated`） | **所有** publisher 在 mutation 后调用唯一入口；入口同步冻结 snapshot，等待 predecessor 后进入有 deadline 的 enrichment；deadline 内成功则发 enriched snapshot，超时/读取失败则发 frozen raw snapshot，再推进 tail | zombie / route / messages / connector / callback / processing / completed 任一路径都不能越过同 scope 较早快照；每个 publisher 成为 head 后必须在一个 enrichment deadline 内释放 tail，不能因 MessageStore stall 永久阻塞；最终到达顺序等于 mutation 后的调用顺序；不同 scope / runtime instance 不互相阻塞 |
+
+收敛顺序固定为：`InvocationRecord CAS failed` → 精确移除 stale queue row / rollback owned siblings → owner-guarded slot release → snapshot 进入 `emitQueueUpdated` 的 `(socket,thread,user)` publication tail → predecessor settled → **在 enrichment deadline 内按调用顺序发布 enriched 或 frozen raw removal snapshot** → dispatch replacement；所有其他 queue publisher 也必须进入同一 tail，queue mutation、record/slot 收敛与其他 scope 不等待 enrichment，任何单次 enrichment stall 不能无限保留 tail，TaskProgress cleanup 与后续 zombie 的关键收敛解耦并行执行，但自身必须按 invocation owner 原子删除。
+
 ### Phase 3 — 可恢复：force-reset 逃生口 UI（Layer 3）
 把已有的 `force-reset` 端点接到一个**情境化、带确认弹窗**的 UI 入口。**设计稿见下方 §设计稿（operator 2026-06-02 已审过概念 + 确认要弹窗确认）**。
 
@@ -127,6 +138,12 @@ bug 链：opus parent 结束本轮 → tracker 没了/无 fresh draft → 过 gr
 - KD-6（2026-07-13 Ragdoll opus-48，实现 Phase 2a 时**证伪 issue 的建议修法**）：**撤销 Phase 2a ①（`/active-pane` 改查 canonical liveness）——它是 no-op 补丁。** 证据（grep 消费方，不是推断）：`/active-pane` 的**唯一**消费者是 `ChatContainerHeader.tsx:114`，它 **完全忽略 `active` 字段**，只取 `daemonShortId`；`:134` `if (!daemonShortId) return null` → 无 daemonShortId 就什么都不渲染；`:141` 标题是「Daemon X 运行中 · 点击查看后台会话」。**所以 `/active-pane` 驱动的是 tmux daemon 附着徽章，不是"猫在跑"的 liveness chrome。** serial child 是 `-p` provider 进程、没有 daemonShortId → 就算让它返回 `active:true`，前端仍 `setDaemonShortId(null)` → **零用户可见变化**；若伪造一个 daemonShortId 让徽章出现，点击会跳到不存在的后台会话 = **制造新 bug**。真正的"猫在跑"信号是 `chatStore.activeInvocations`（源自 `/queue.activeInvocations` canonical liveness）。**教训**：issue 里的 suggested fix（连同 maintainer 接受的 scope + 吴浪的实施计划）三方都照抄了这条错误前提——**改契约前先 grep 消费方**（LL `feedback_grep_consumers_before_contract_change`）。Maine Coon"别当成纯 active-pane 显示补丁"的直觉是对的，且比他自己知道的更对。
 - KD-5（2026-06-17 Ragdoll opus-48，接 Maine Coon routing #972）：Phase 2 答案按 **F220↔F224 轴接缝**切两层——**2a 局部修**（active-pane canonical-liveness SoT / reconcileZombies→queue 收敛 / slot↔queue 一致 / 回归）= F220 已祝福方向内、可逆 → **自决实现，不上 operator**；**2b 架构 seam**（serial-continuation-child ↔ parent/queue liveness 桥接，牵动"统一 liveness SoT"+ 轴边界重画）= 架构级 → 出 Decision Packet 交 **operator 拍板拆 feat**。遵 KD-3：2b 不在根因报告+repro 前动手大改。**#972 是"两轴不共享根因"假设的反例**（轴在此 failure mode 交互）——若 2b operator 决定重画边界，序言断言需同步修订。
 - KD-7（2026-08-04 小太阳·Maine Coon，operator 接管后 closure audit）：KD-5 的 Decision Packet 前提已被 2026-07-18 PR #3047 的后续事实消解。child lifecycle 继续由既有 `TurnExecutionStore` 持有，F194 canonical read 只消费它；没有新增 store、extension point 或 ownership cell。结论是 **不拆新 feat、不改 `/active-pane`、不再向 operator提交过期的架构 A/B 题**，直接按已合入证据同步 truth。
+
+## Timeline
+
+| Date | Event |
+|------|-------|
+| 2026-07-22 | Phase 2a merged (PR #1150, main `7563c9be0`) |
 
 ## 设计稿（Phase 3 — force-reset 逃生口 UI，operator 2026-06-02 已审概念）
 
