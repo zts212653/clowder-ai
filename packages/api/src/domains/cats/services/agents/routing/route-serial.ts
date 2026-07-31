@@ -216,21 +216,13 @@ function emitBallInvocationHeartbeat(
     .catch((err) => log.warn({ threadId, invocationId, catId, err }, 'invocation.heartbeat ingest failed'));
 }
 const routeSerialTracer = trace.getTracer('cat-cafe-api', '0.1.0');
-const ROUTE_ONLY_REMEDIAL_TEXT_RE =
-  /^@[\p{L}\p{N}_.-]+(?:[\s,.:;!?()[\]{}<>，。！？、：；（）【】《》「」『』〈〉]+)?$/u;
 
-function stripMarkdownRoutePrefix(line: string): string {
-  return line.replace(/^(?:[-*+]\s+|>\s*|\d+[.)]\s+)/, '').trim();
-}
-
-function normalizeRouteOnlyRemedialText(text: string): string | null {
-  const lines = text
+function normalizeRemedialRoutingText(text: string): string {
+  return text
     .trim()
     .split(/\r?\n/)
-    .map((line) => stripMarkdownRoutePrefix(line))
-    .filter((line) => line.length > 0);
-  if (lines.length !== 1) return null;
-  return ROUTE_ONLY_REMEDIAL_TEXT_RE.test(lines[0]) ? lines[0] : null;
+    .map((line) => line.replace(/^(?:[-*+]\s+|>\s*|\d+[.)]\s+)/, '').trim())
+    .join('\n');
 }
 
 function collectStructuredTargetCatsFromInput(input: unknown): string[] {
@@ -1909,24 +1901,25 @@ export async function* routeSerial(
         const remedialSanitized = sanitizeInjectedContent(textContent);
         const remedialExtracted = extractRichFromText(remedialSanitized);
         const remedialCleanText = remedialExtracted.cleanText;
-        const remedialRouteOnlyContent = remedialCleanText ? normalizeRouteOnlyRemedialText(remedialCleanText) : null;
-        const remedialIsRouteOnly = remedialRouteOnlyContent !== null;
-        // Route-only remedial text (`@cat` / `@co-creator`) is an exit patch, not a replacement artifact.
-        // Use it for routing validation, but keep first-pass visible content so F5/history hydration
-        // does not replace generated work with a bare route outlet.
         const preservesOriginalVisibleContent =
-          (!remedialCleanText || remedialIsRouteOnly) && originalStoredContentBeforeRemedial.length > 0;
+          originalStoredContentBeforeRemedial.length > 0 ||
+          originalRichBlocksBeforeRemedial.length > 0 ||
+          originalToolEventsBeforeRemedial.length > 0;
         visibleContentInvocationIdOverride = preservesOriginalVisibleContent
           ? originalVisibleInvocationIdBeforeRemedial
           : undefined;
         const remedialStoredContent = preservesOriginalVisibleContent
           ? originalStoredContentBeforeRemedial
           : remedialCleanText;
-        const remedialRoutingContent = remedialRouteOnlyContent ?? (remedialCleanText || remedialStoredContent);
-        const baseRichBlocks = !remedialCleanText || remedialIsRouteOnly ? originalRichBlocksBeforeRemedial : [];
-        let remedialAllRichBlocks = [...baseRichBlocks, ...remedialExtracted.blocks, ...streamRichBlocks];
-        // Replacement text becomes a new persisted message and discards invalid first-pass evidence.
-        // Exit-only remedials keep the original visible content, so preserve original tool evidence too.
+        const remedialRoutingContent = remedialCleanText
+          ? normalizeRemedialRoutingText(remedialCleanText)
+          : remedialStoredContent;
+        let remedialAllRichBlocks = preservesOriginalVisibleContent
+          ? originalRichBlocksBeforeRemedial
+          : [...remedialExtracted.blocks, ...streamRichBlocks];
+        // A remedial invocation is a synthetic control turn. Once the first pass produced visible
+        // text, rich output, or tool evidence, the remedial may supply routing evidence but cannot
+        // replace that user-visible result.
         if (preservesOriginalVisibleContent && originalToolEventsBeforeRemedial.length > 0) {
           const remedialToolEvents = [...collectedToolEvents];
           collectedToolEvents.splice(
@@ -1937,7 +1930,7 @@ export async function* routeSerial(
           );
         }
         textContent = remedialStoredContent;
-        if (preservesOriginalVisibleContent && originalDeferredVoiceTextChunksBeforeRemedial.length > 0) {
+        if (preservesOriginalVisibleContent) {
           resetDeferredVoice();
           deferredVoiceInvocationId = originalDeferredVoiceInvocationIdBeforeRemedial;
           deferredVoiceTextChunks.push(...originalDeferredVoiceTextChunksBeforeRemedial);
@@ -1969,8 +1962,12 @@ export async function* routeSerial(
             return false;
           }
         };
-        const visibleRemedialSourceStreamEvents = remedialIsRouteOnly
-          ? remedialStreamEvents.filter((event) => event.type !== 'text')
+        const visibleRemedialSourceStreamEvents = preservesOriginalVisibleContent
+          ? remedialStreamEvents.filter(
+              (event) =>
+                event.type !== 'text' &&
+                !(event.type === 'system_info' && event.content && isUserFacingSystemInfoContent(event.content)),
+            )
           : remedialStreamEvents;
         const visibleRemedialEvidenceStreamEvents: AgentMessage[] = [];
         const remedialLifecycleStreamEvents: AgentMessage[] = [];
@@ -2002,8 +1999,8 @@ export async function* routeSerial(
           a2aMentions: remedialA2aMentions,
           hasCoCreatorLineStartMention: remedialHasCoCreatorLineStartMention,
           hasLocalCoCreatorLineStartMention: remedialHasLocalCoCreatorLineStartMention,
-          // Exit-only remedials validate preserved content instead of replacing it; replay the visible
-          // text and routing-exit evidence before the remedial boundary can replace that turn.
+          // Synthetic remedials validate preserved content instead of replacing it; replay the
+          // first-pass text and routing evidence before the remedial lifecycle boundary.
           streamEvents: preservesOriginalVisibleContent
             ? [
                 ...originalVisibleStreamEventsForRemedialTurn,
@@ -3213,11 +3210,15 @@ export async function* routeSerial(
                 ...(noTextBlocks.length > 0 ? { rich: { v: 1 as const, blocks: noTextBlocks } } : {}),
                 // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId
                 // (= ownInvocationId, else parent fallback).
-                ...((options.parentInvocationId ?? ownInvocationId)
+                ...((options.parentInvocationId ?? visibleContentInvocationIdOverride ?? ownInvocationId)
                   ? {
                       stream: {
-                        invocationId: (options.parentInvocationId ?? ownInvocationId) as string,
-                        turnInvocationId: (ownInvocationId ?? options.parentInvocationId) as string,
+                        invocationId: (options.parentInvocationId ??
+                          visibleContentInvocationIdOverride ??
+                          ownInvocationId) as string,
+                        turnInvocationId: (visibleContentInvocationIdOverride ??
+                          ownInvocationId ??
+                          options.parentInvocationId) as string,
                       },
                     }
                   : {}),

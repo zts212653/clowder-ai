@@ -4,8 +4,8 @@
  * Pure decision coverage lives in `routing-guard-remedial.test.js`. This suite
  * locks the route-serial side effect: codex-family cats that cannot use native
  * Stop hooks get one inline remedial invoke when they end without a routing
- * exit. Exit-only remedials route the original visible content instead of
- * replacing it with a bare outlet.
+ * exit. Synthetic remedials route the original visible evidence instead of
+ * replacing it with a shorter control response.
  */
 
 import assert from 'node:assert/strict';
@@ -156,7 +156,7 @@ async function loadRealRoster() {
 
 async function runRoute(service, threadId, extraServices = {}, mockOptions = {}) {
   return withCatRegistryLock(async () => {
-    const { thinkingMode = 'play', ...depsOptions } = mockOptions;
+    const { thinkingMode = 'play', routeOptions = {}, ...depsOptions } = mockOptions;
     const original = catRegistry.getAllConfigs();
     await loadRealRoster();
     const appended = [];
@@ -167,6 +167,7 @@ async function runRoute(service, threadId, extraServices = {}, mockOptions = {})
       const yielded = [];
       for await (const msg of routeSerial(deps, ['codex'], 'guard test', 'user1', threadId, {
         thinkingMode,
+        ...routeOptions,
       })) {
         yielded.push(msg);
       }
@@ -227,6 +228,39 @@ describe('F177 Phase H — route-serial routing guard remedial invoke', () => {
       yieldedTextEvents[0]?.invocationId,
       done?.invocationId,
       'route-only remedial must not retag original visible text as the remedial turn',
+    );
+  });
+
+  test('action-bearing co-creator remedial cannot replace completed first-pass content', async () => {
+    const service = createSequenceService('codex', [
+      'I completed the investigation and documented the verified root cause.',
+      '@co-creator 请确认方案方向；认可后再进入立项与实现拆分。',
+    ]);
+
+    const { appended, calls, yielded } = await runRoute(service, 'thread-routing-guard-action-remedial');
+
+    assert.equal(calls.length, 2, 'first-pass no-exit text should trigger exactly one remedial invoke');
+    const codexMessages = appended.filter((m) => m.catId === 'codex' && m.origin === 'stream');
+    assert.equal(codexMessages.length, 1);
+    assert.equal(
+      codexMessages[0].content,
+      'I completed the investigation and documented the verified root cause.',
+      'synthetic remedial prose must not replace completed first-pass content',
+    );
+    assert.equal(codexMessages[0].mentionsUser, true);
+    assert.deepEqual(codexMessages[0].extra?.stream, {
+      invocationId: 'outer-inv-1',
+      turnInvocationId: 'outer-inv-1',
+    });
+    assert.deepEqual(
+      yielded.filter((m) => m.type === 'text').map((m) => [m.content, m.invocationId]),
+      [['I completed the investigation and documented the verified root cause.', 'outer-inv-1']],
+      'live output must retain only the first-pass text and identity',
+    );
+    assert.equal(
+      appended.find((m) => m.source?.connector === 'routing-guard-failure'),
+      undefined,
+      'action-bearing co-creator remedial is still a valid routing exit',
     );
   });
 
@@ -359,7 +393,10 @@ describe('F177 Phase H — route-serial routing guard remedial invoke', () => {
   });
 
   test('remedial line-start cat mention flows through existing A2A worklist enqueue', async () => {
-    const codexService = createSequenceService('codex', ['I will keep going from here.', '@opus']);
+    const codexService = createSequenceService('codex', [
+      'I will keep going from here.',
+      '@opus 请继续处理这个已经完成首轮分析的任务。',
+    ]);
     const opusService = createSequenceService('opus', ['ack from opus'], { needsGuard: false });
 
     const { appended, calls } = await runRoute(codexService, 'thread-routing-guard-1b', { opus: opusService });
@@ -427,7 +464,7 @@ describe('F177 Phase H — route-serial routing guard remedial invoke', () => {
     );
   });
 
-  test('tool-only no-text initial output still gets the remedial guard instead of silent completion', async () => {
+  test('tool-only no-text first pass is preserved when remedial routing includes action prose', async () => {
     const service = createSequenceService('codex', [
       [
         {
@@ -436,7 +473,7 @@ describe('F177 Phase H — route-serial routing guard remedial invoke', () => {
           toolInput: { q: 'thread opus' },
         },
       ],
-      '@co-creator',
+      '@co-creator 请确认后续方向。',
     ]);
 
     const { appended, calls, yielded } = await runRoute(service, 'thread-routing-guard-1d');
@@ -451,12 +488,73 @@ describe('F177 Phase H — route-serial routing guard remedial invoke', () => {
           return false;
         }
       }),
-      false,
-      'guarded tool-only turns should be remediated, not surfaced as silent_completion',
+      true,
+      'a preserved tool-only first pass should retain its normal silent-completion surface',
     );
     const codexMessages = appended.filter((m) => m.catId === 'codex' && m.origin === 'stream');
     assert.equal(codexMessages.length, 1);
-    assert.equal(codexMessages[0].content, '@co-creator');
+    assert.equal(codexMessages[0].content, '');
+    assert.deepEqual(
+      codexMessages[0].toolEvents?.map((event) => [event.type, event.toolName ?? null]),
+      [['tool_use', 'cat_cafe_search_evidence']],
+      'synthetic remedial prose must not replace or discard first-pass tool evidence',
+    );
+    assert.deepEqual(codexMessages[0].extra?.stream, {
+      invocationId: 'outer-inv-1',
+      turnInvocationId: 'outer-inv-1',
+    });
+    assert.deepEqual(
+      yielded.filter((m) => m.type === 'text').map((m) => m.content),
+      [],
+      'synthetic remedial prose must stay out of the live stream when first-pass tool evidence exists',
+    );
+  });
+
+  test('rich-only first pass is preserved when remedial routing includes action prose', async () => {
+    const richBlock = {
+      id: 'first-pass-rich-only',
+      kind: 'card',
+      v: 1,
+      title: 'Completed first-pass artifact',
+      bodyMarkdown: 'This card is the first-pass result.',
+    };
+    const service = createSequenceService('codex', [
+      [
+        {
+          type: 'system_info',
+          content: JSON.stringify({ type: 'rich_block', block: richBlock }),
+        },
+      ],
+      '@co-creator 请确认后续方向。',
+    ]);
+    const persistenceContext = {};
+
+    const { appended, calls, yielded } = await runRoute(
+      service,
+      'thread-routing-guard-rich-only-action-remedial',
+      {},
+      { routeOptions: { persistenceContext } },
+    );
+
+    assert.equal(calls.length, 2);
+    const codexMessages = appended.filter((m) => m.catId === 'codex' && m.origin === 'stream');
+    assert.equal(codexMessages.length, 1);
+    assert.equal(codexMessages[0].content, '');
+    assert.deepEqual(codexMessages[0].extra?.rich?.blocks, [richBlock]);
+    assert.deepEqual(
+      persistenceContext.richBlocks,
+      [richBlock],
+      'outbound persistence must retain the first-pass rich evidence',
+    );
+    assert.deepEqual(codexMessages[0].extra?.stream, {
+      invocationId: 'outer-inv-1',
+      turnInvocationId: 'outer-inv-1',
+    });
+    assert.deepEqual(
+      yielded.filter((m) => m.type === 'text').map((m) => m.content),
+      [],
+      'synthetic remedial prose must stay out of the live stream when first-pass rich evidence exists',
+    );
   });
 
   test('confirmed callback post with line-start cat mention counts as the routing exit', async () => {
@@ -884,9 +982,9 @@ describe('F177 Phase H — route-serial routing guard remedial invoke', () => {
     );
   });
 
-  test('voice-mode route-only remediation speaks the validated first-pass text', async () => {
+  test('voice-mode action-bearing remediation speaks the validated first-pass text', async () => {
     await installFakeStreamingTtsRegistry();
-    const service = createSequenceService('codex', ['Invalid first-pass response.', '@co-creator']);
+    const service = createSequenceService('codex', ['Invalid first-pass response.', '@co-creator 请确认后续方向。']);
     const socketEvents = [];
 
     const { calls } = await runRoute(service, 'thread-routing-guard-voice', {}, { voiceMode: true, socketEvents });
@@ -899,9 +997,9 @@ describe('F177 Phase H — route-serial routing guard remedial invoke', () => {
       'voice TTS must follow the same validated visible text as live/persistence',
     );
     assert.equal(
-      spokenChunks.includes('@co-creator'),
+      spokenChunks.includes('@co-creator 请确认后续方向。'),
       false,
-      'route-only remedial text must not be synthesized as user-visible speech',
+      'synthetic remedial prose must not be synthesized as user-visible speech',
     );
   });
 
