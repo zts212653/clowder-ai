@@ -1,0 +1,25 @@
+{
+  "verdictId": "2026-07-31-eval-a2a-stale-source-contract-fix",
+  "evalSnapshotId": "eval-F167-2026-07-30",
+  "featureId": "F167",
+  "generatedAt": "2026-07-30T03:06:12.246Z",
+  "window": {
+    "startMs": 1785380772246,
+    "endMs": 1785380772246,
+    "durationHours": 0
+  },
+  "counterWindow": {
+    "startMs": 1785307398230,
+    "endMs": 1785380772246,
+    "durationHours": 20.38167111111111
+  },
+  "components": [
+    {
+      "id": "L1",
+      "name": "WorklistRegistry (ping-pong breaker)",
+      "confidence": "no-data",
+      "activationCounts": {},
+      "frictionCounts": {}
+    }
+  ]
+}

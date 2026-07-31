@@ -1,0 +1,36 @@
+{
+  "verdictId": "2026-07-31-eval-a2a-stale-source-contract-fix",
+  "featureId": "F167",
+  "evalSnapshotId": "eval-F167-2026-07-30",
+  "generatedAt": "2026-07-30T03:06:12.248Z",
+  "findings": [
+    {
+      "id": "AR-2026-07-30-001",
+      "relatedFeature": "F167",
+      "frictionSignal": {
+        "type": "observability-gap",
+        "severity": "medium",
+        "confidence": 0.9
+      },
+      "attribution": {
+        "primaryLayer": "environment_drift",
+        "pipelineOrHuman": "pipeline",
+        "evidence": [
+          {
+            "type": "telemetry-gap",
+            "anchor": "L1/streak_warn_count",
+            "excerpt": "No counter: OTel is disabled because TELEMETRY_HMAC_SALT is not configured; L1 activation frequency cannot be measured."
+          }
+        ]
+      },
+      "proposedAction": [
+        {
+          "action": "restore-telemetry",
+          "target": "L1/streak_warn_count",
+          "rationale": "Restore the telemetry initialization prerequisite before evaluating L1 rates."
+        }
+      ],
+      "status": "open"
+    }
+  ]
+}
