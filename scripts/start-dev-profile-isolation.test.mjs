@@ -539,6 +539,73 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
     );
   });
 
+  it('start-windows.ps1 fails closed when an external Redis URL is unreachable', () => {
+    const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+
+    assert.match(
+      ps1,
+      /function Stop-RedisStartup\s*\{[\s\S]*?Get-Job -Name "redis-bootstrap"[\s\S]*?Stop-Job[\s\S]*?Remove-Job[\s\S]*?install\.ps1[\s\S]*?REDIS_URL[\s\S]*?-Memory[\s\S]*?exit 1[\s\S]*?\}/,
+      'the shared failure path must clean the bootstrap job, explain both persistent-storage repairs, and exit non-zero',
+    );
+
+    assert.match(
+      ps1,
+      /Stop-RedisStartup\s+-Reason\s+"Redis is not reachable at \$safeConfiguredRedisUrl\."/,
+      'an unreachable external REDIS_URL must stop startup instead of selecting memory storage',
+    );
+    assert.ok(
+      ps1.lastIndexOf('Stop-RedisStartup -Reason') < ps1.indexOf('Start-Job -Name "api"'),
+      'every Redis failure path must run before API startup',
+    );
+  });
+
+  it('start-windows.ps1 fails closed when managed Redis does not start', () => {
+    const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+
+    assert.match(
+      ps1,
+      /Stop-RedisStartup\s+-Reason\s+"Managed Redis failed to start on port \$RedisPort\. Check \$redisLogFile for details\."/,
+      'a failed managed Redis start must stop startup before the API and web jobs are created',
+    );
+  });
+
+  it('start-windows.ps1 fails closed when no Redis binary is installed', () => {
+    const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+
+    assert.match(
+      ps1,
+      /Stop-RedisStartup\s+-Reason\s+"Redis is not installed\."/,
+      'a missing Redis binary must stop startup instead of silently choosing volatile storage',
+    );
+  });
+
+  it('start-windows.ps1 fails closed on an unexpected Redis bootstrap exception', () => {
+    const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+
+    assert.match(
+      ps1,
+      /catch\s*\{[\s\S]*?Write-InstallerExceptionDetails\s+-Context\s+"Redis start"[\s\S]*?Stop-RedisStartup\s+-Reason\s+"Redis bootstrap failed\."/,
+      'an unexpected Redis bootstrap exception must stop startup after printing its diagnostic details',
+    );
+  });
+
+  it('start-windows.ps1 enables volatile storage only for explicit -Memory mode', () => {
+    const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+    const assignments = ps1.match(/\$env:MEMORY_STORE\s*=\s*["']1["']/g) ?? [];
+
+    assert.equal(assignments.length, 1, 'the launcher must have exactly one MEMORY_STORE opt-in');
+    assert.match(
+      ps1,
+      /if\s*\(\$Memory\)\s*\{[\s\S]*?Remove-Item Env:REDIS_URL[\s\S]*?\$env:MEMORY_STORE\s*=\s*["']1["'][\s\S]*?\}/,
+      'MEMORY_STORE=1 must be scoped to the explicit -Memory switch',
+    );
+    assert.doesNotMatch(
+      ps1,
+      /\$useRedis\s*=\s*\$false/,
+      'Redis failure branches must not converge on an implicit memory fallback',
+    );
+  });
+
   it('start-windows.ps1 reapplies profile defaults inside Start-Job after .env reload', () => {
     const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
 

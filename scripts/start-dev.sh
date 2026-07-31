@@ -1115,7 +1115,7 @@ configure_mcp_server_path() {
 }
 
 # 检查/启动 Redis
-# USE_REDIS=true (默认): 尝试启动 Redis, 失败则回退内存
+# USE_REDIS=true (默认): 尝试启动 Redis, 失败则拒绝启动
 # USE_REDIS=false (--memory): 跳过 Redis, 强制内存存储
 setup_storage() {
     if [ "$USE_REDIS" = false ]; then
