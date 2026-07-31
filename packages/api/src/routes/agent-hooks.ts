@@ -85,16 +85,30 @@ function isTrustedLocalApiRequest(request: FastifyRequest): boolean {
  */
 async function validateExplicitProjectPath(
   rawPath: string | null,
-): Promise<{ ok: true; path: string | null } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; path: string | null }
+  | { ok: false; code: 'INVALID_PROJECT_PATH' | 'PROJECT_NOT_INITIALIZED'; error: string }
+> {
   if (!rawPath) return { ok: true, path: null };
 
   const validated = await resolvePersistentProjectPath(rawPath);
   if (!validated) {
-    return { ok: false, error: `Invalid project path: not found, denied, or not a directory: ${rawPath}` };
+    return {
+      ok: false,
+      code: 'INVALID_PROJECT_PATH',
+      error: `Invalid project path: not found, denied, or not a directory: ${rawPath}`,
+    };
   }
 
   if (!existsSync(join(validated, '.cat-cafe'))) {
-    return { ok: false, error: `Project not initialized (missing .cat-cafe/): ${validated}` };
+    // Fail-loud guard (#1049): an uninitialised project must never fall back to
+    // host capabilities. The code lets clients tell this expected state apart
+    // from genuine failures without parsing the message.
+    return {
+      ok: false,
+      code: 'PROJECT_NOT_INITIALIZED',
+      error: `Project not initialized (missing .cat-cafe/): ${validated}`,
+    };
   }
 
   return { ok: true, path: validated };
@@ -128,7 +142,7 @@ export const agentHooksRoutes: FastifyPluginAsync<AgentHooksRouteOptions> = asyn
     const projectValidation = await validateExplicitProjectPath(nonEmptyString(query.projectPath));
     if (!projectValidation.ok) {
       reply.status(400);
-      return { error: projectValidation.error };
+      return { error: projectValidation.error, code: projectValidation.code };
     }
     const resolved = resolveOptions(options, request, projectValidation.path);
     if (!resolved) {
@@ -150,7 +164,7 @@ export const agentHooksRoutes: FastifyPluginAsync<AgentHooksRouteOptions> = asyn
     const projectValidation = await validateExplicitProjectPath(nonEmptyString(body?.projectPath));
     if (!projectValidation.ok) {
       reply.status(400);
-      return { error: projectValidation.error };
+      return { error: projectValidation.error, code: projectValidation.code };
     }
     const resolved = resolveOptions(options, request, projectValidation.path);
     if (!resolved) {

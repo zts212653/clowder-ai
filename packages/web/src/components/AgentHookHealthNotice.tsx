@@ -22,7 +22,7 @@ interface RenderProbe {
 }
 
 type AgentHookHealthDisplayStatus = AgentHookHealthStatus | 'unknown';
-type AgentHookNoticeStatus = AgentHookHealthStatus | 'syncing' | 'synced' | 'partial-sync' | 'error';
+type AgentHookNoticeStatus = AgentHookHealthStatus | 'syncing' | 'synced' | 'partial-sync' | 'error' | 'uninitialised';
 
 const STATUS_LABELS: Record<AgentHookHealthDisplayStatus, string> = {
   configured: '正常',
@@ -128,6 +128,14 @@ function toneFor(status: AgentHookNoticeStatus) {
       classes: 'border-conn-slate-ring bg-conn-slate-bg text-conn-slate-text',
     };
   }
+  if (status === 'uninitialised') {
+    return {
+      icon: 'info',
+      title: '该项目尚未初始化',
+      body: '项目缺少 .cat-cafe/ 目录，因此不会套用本机的 Hook、Skills 和 MCP 配置。先初始化该项目，再回来同步。',
+      classes: 'border-conn-slate-ring bg-conn-slate-bg text-conn-slate-text',
+    };
+  }
   return {
     icon: 'alert-triangle',
     title: 'Agent 运行环境需要同步',
@@ -158,6 +166,7 @@ function resolveNoticeStatus({ health, error, syncing, synced, syncAttempted }: 
   if (error) return 'error';
   if (syncing) return 'syncing';
   if (synced) return 'synced';
+  if (health?.uninitialised) return 'uninitialised';
   if (syncAttempted && health?.status !== 'configured') return 'partial-sync';
   return health ? health.status : 'error';
 }
@@ -217,7 +226,7 @@ export function AgentHookHealthNotice({
   const currentStatus = resolveNoticeStatus({ health, error, syncing, synced, syncAttempted });
   const tone = toneFor(currentStatus);
   const problematicTargets = previewTargets(health);
-  const canSync = !syncing && currentStatus !== 'synced';
+  const canSync = !syncing && currentStatus !== 'synced' && currentStatus !== 'uninitialised';
   const body = currentStatus === 'partial-sync' ? partialSyncBody(problematicTargets) : (error ?? tone.body);
 
   return (
