@@ -232,7 +232,9 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
   const modelsToRegister = defaultModel ? [...models, defaultModel] : [...models];
   for (const rawModel of modelsToRegister) {
     const modelName = stripOwnProviderPrefix(rawModel, providerName);
-    const upstreamId = modelAliases?.[modelName]?.trim();
+    const configuredAlias =
+      modelAliases && Object.hasOwn(modelAliases, modelName) ? modelAliases[modelName] : undefined;
+    const upstreamId = typeof configuredAlias === 'string' ? configuredAlias.trim() : undefined;
     modelsMap[modelName] = {
       ...(upstreamId ? { id: upstreamId } : {}),
       name: modelName,

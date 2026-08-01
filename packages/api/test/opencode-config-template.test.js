@@ -401,6 +401,19 @@ describe('generateOpenCodeRuntimeConfig', () => {
     });
   });
 
+  test('keeps prototype-named local models on identity routing without inherited aliases', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'vendor',
+      models: ['toString', 'constructor'],
+      modelAliases: { configured: 'upstream-configured' },
+    });
+
+    assert.deepStrictEqual(config.provider.vendor.models, {
+      toString: { name: 'toString' },
+      constructor: { name: 'constructor' },
+    });
+  });
+
   test('apiType maps to correct npm adapters', () => {
     const cases = [
       { apiType: 'openai', expectedNpm: '@ai-sdk/openai-compatible' },

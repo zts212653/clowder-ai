@@ -12,6 +12,7 @@ import {
 } from '../dist/domains/cats/services/agents/providers/opencode-config-template.js';
 
 const requiredOpenCodeVersion = '1.18.9';
+const requireOpenCode = process.env.REQUIRE_OPENCODE_MODEL_ID_TEST === '1';
 
 function resolveOpenCodeExecutable() {
   if (process.platform !== 'win32') return 'opencode';
@@ -28,6 +29,15 @@ function resolveOpenCodeExecutable() {
 
 const openCodeExecutable = resolveOpenCodeExecutable();
 const openCodeVersion = installedOpenCodeVersion();
+
+if (requireOpenCode) {
+  assert.ok(openCodeExecutable, `OpenCode ${requiredOpenCodeVersion} is required for this test`);
+  assert.equal(
+    openCodeVersion,
+    requiredOpenCodeVersion,
+    'OpenCode schema baseline changed; revalidate model id routing',
+  );
+}
 
 function installedOpenCodeVersion() {
   if (!openCodeExecutable) return null;
@@ -51,12 +61,22 @@ function close(server) {
 }
 
 function startOpenCode(args, options) {
-  const child = spawn(openCodeExecutable, args, {
-    ...options,
+  const { executable = openCodeExecutable, ...spawnOptions } = options;
+  const child = spawn(executable, args, {
+    detached: process.platform !== 'win32',
+    ...spawnOptions,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stdout = '';
   let stderr = '';
+  const exited = new Promise((resolve) => {
+    child.once('error', (error) => {
+      resolve({ code: null, signal: null, error });
+    });
+    child.once('exit', (code, signal) => {
+      resolve({ code, signal });
+    });
+  });
   const completed = new Promise((resolve, reject) => {
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
@@ -73,7 +93,7 @@ function startOpenCode(args, options) {
       resolve({ code, signal, stdout, stderr });
     });
   });
-  return { child, completed, output: () => ({ stdout, stderr }) };
+  return { child, exited, completed, output: () => ({ stdout, stderr }) };
 }
 
 function timeoutAfter(milliseconds, message) {
@@ -81,6 +101,108 @@ function timeoutAfter(milliseconds, message) {
     setTimeout(() => reject(new Error(typeof message === 'function' ? message() : message)), milliseconds).unref();
   });
 }
+
+function processIsRunning(child) {
+  return child.exitCode === null && child.signalCode === null;
+}
+
+async function terminateWindowsProcessTree(child, exited) {
+  const result = spawnSync('taskkill.exe', ['/pid', String(child.pid), '/T', '/F'], {
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  if (result.status === 0 || !processIsRunning(child)) return;
+
+  const exitedDuringTaskkill = await Promise.race([
+    exited.then(() => true),
+    new Promise((resolve) => setTimeout(() => resolve(false), 100)),
+  ]);
+  if (!exitedDuringTaskkill) {
+    throw new Error(`taskkill failed for OpenCode process ${child.pid}: ${result.stderr || result.stdout}`);
+  }
+}
+
+async function terminatePosixProcessGroup(child, exited) {
+  try {
+    process.kill(-child.pid, 'SIGTERM');
+  } catch (error) {
+    if (error?.code !== 'ESRCH') throw error;
+  }
+  const exitedAfterTerm = await Promise.race([
+    exited.then(() => true),
+    new Promise((resolve) => setTimeout(() => resolve(false), 1_000)),
+  ]);
+  if (exitedAfterTerm) return;
+
+  try {
+    process.kill(-child.pid, 'SIGKILL');
+  } catch (error) {
+    if (error?.code !== 'ESRCH') throw error;
+  }
+}
+
+async function terminateOpenCodeProcess(processHandle) {
+  const { child, exited, completed } = processHandle;
+
+  if (processIsRunning(child)) {
+    if (process.platform === 'win32') {
+      await terminateWindowsProcessTree(child, exited);
+    } else {
+      await terminatePosixProcessGroup(child, exited);
+    }
+  }
+
+  await Promise.race([exited, timeoutAfter(5_000, `OpenCode process tree ${child.pid} did not exit`)]);
+  child.stdout.destroy();
+  child.stderr.destroy();
+
+  return Promise.race([completed, timeoutAfter(5_000, `OpenCode process tree ${child.pid} did not close its stdio`)]);
+}
+
+function waitForReportedPid(processHandle) {
+  let poll;
+  const reported = new Promise((resolve) => {
+    poll = setInterval(() => {
+      const pid = Number.parseInt(processHandle.output().stdout.trim(), 10);
+      if (Number.isInteger(pid)) resolve(pid);
+    }, 10);
+  });
+  return Promise.race([reported, timeoutAfter(5_000, 'test process did not report its child pid')]).finally(() =>
+    clearInterval(poll),
+  );
+}
+
+function bestEffortKill(pid) {
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch {
+    // Preserve the original test failure if cleanup races with process exit.
+  }
+}
+
+test('terminates an OpenCode process tree after request capture', async () => {
+  const childScript = [
+    "const { spawn } = require('node:child_process');",
+    "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });",
+    'console.log(child.pid);',
+    'setInterval(() => {}, 1000);',
+  ].join('');
+  const processHandle = startOpenCode(['-e', childScript], {
+    executable: process.execPath,
+  });
+  let descendantPid;
+
+  try {
+    descendantPid = await waitForReportedPid(processHandle);
+    await terminateOpenCodeProcess(processHandle);
+    const result = await Promise.race([processHandle.completed, timeoutAfter(5_000, 'test process did not terminate')]);
+    assert.notEqual(result.signal ?? result.code, null);
+    assert.throws(() => process.kill(descendantPid, 0), { code: 'ESRCH' });
+  } finally {
+    if (processHandle.child.exitCode === null) bestEffortKill(processHandle.child.pid);
+    if (descendantPid) bestEffortKill(descendantPid);
+  }
+});
 
 test(
   'OpenCode v1.18.9 sends the configured upstream model id',
@@ -174,13 +296,7 @@ test(
       assert.equal(capturedRequest.url, '/v1/chat/completions');
       assert.equal(capturedRequest.body.model, 'kimi-k3');
     } finally {
-      if (openCodeProcess?.child.exitCode === null) openCodeProcess.child.kill();
-      if (openCodeProcess) {
-        await Promise.race([
-          openCodeProcess.completed,
-          timeoutAfter(5_000, 'OpenCode did not terminate after capture'),
-        ]);
-      }
+      if (openCodeProcess) await terminateOpenCodeProcess(openCodeProcess);
       server.closeAllConnections?.();
       await close(server);
       rmSync(tempRoot, { recursive: true, force: true });
