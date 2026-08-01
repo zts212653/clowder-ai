@@ -1,0 +1,63 @@
+{
+  "verdictId": "2026-08-01-eval-a2a-source-adapter-stalled-build",
+  "evalSnapshotId": "eval-F167-2026-08-01",
+  "featureId": "F167",
+  "generatedAt": "2026-08-01T03:07:39.296Z",
+  "window": {
+    "startMs": 1785553200866,
+    "endMs": 1785553200882,
+    "durationHours": 0.000004444444444444444
+  },
+  "counterWindow": {
+    "startMs": 1785423445939,
+    "endMs": 1785553659264,
+    "durationHours": 36.170368095405
+  },
+  "components": [
+    {
+      "id": "route-serial",
+      "name": "route-serial (A2A handoff routing)",
+      "confidence": "high",
+      "activationCounts": {
+        "inline_action.checked": 2,
+        "route.span_count": 2,
+        "route.total_cats_invoked": 0
+      },
+      "frictionCounts": {
+        "route.error_count": 2
+      }
+    },
+    {
+      "id": "grounding-phase-o",
+      "name": "claim grounding (Phase O shadow)",
+      "confidence": "medium",
+      "activationCounts": {
+        "grounding.check_total": 0,
+        "grounding.verdict_total": 0,
+        "grounding.resolver_total": 0,
+        "grounding.cache_hit_total": 0,
+        "grounding.sample_count": 0,
+        "grounding.mismatch_sample_count": 0
+      },
+      "frictionCounts": {
+        "grounding.budget_exhausted_total": 0
+      }
+    },
+    {
+      "id": "source-adapter",
+      "name": "f167-runtime-eval daily source adapter",
+      "confidence": "high",
+      "activationCounts": {
+        "scheduled_cycle_count": 4,
+        "delivered_cycle_count": 4,
+        "source_pair_count": 0,
+        "verdict_count": 0,
+        "counter_window.duration_hours": 36.170368095405,
+        "legacy_scheduled_task_count": 0
+      },
+      "frictionCounts": {
+        "missing_source_pair_count": 4
+      }
+    }
+  ]
+}

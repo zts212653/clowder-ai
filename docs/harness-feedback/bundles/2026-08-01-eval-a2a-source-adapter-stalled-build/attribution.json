@@ -1,0 +1,61 @@
+{
+  "verdictId": "2026-08-01-eval-a2a-source-adapter-stalled-build",
+  "featureId": "F167",
+  "evalSnapshotId": "eval-F167-2026-08-01",
+  "generatedAt": "2026-08-01T03:07:39.296Z",
+  "findings": [
+    {
+      "id": "AR-2026-08-01-001",
+      "relatedFeature": "F167",
+      "frictionSignal": {
+        "type": "daily_source_artifact_missing",
+        "severity": "high",
+        "confidence": 0.98
+      },
+      "attribution": {
+        "primaryLayer": "execution_gap",
+        "pipelineOrHuman": "pipeline",
+        "evidence": [
+          {
+            "type": "schedule-ledger",
+            "anchor": "source-adapter/missing_source_pair_count",
+            "excerpt": "Four eval:a2a cycles were delivered on 2026-07-28, 2026-07-29, 2026-07-31, and 2026-08-01; all invocation contexts had empty trendRefs/verdictRefs and the live harness root had zero snapshot/attribution source pairs."
+          },
+          {
+            "type": "code-path",
+            "anchor": "source-adapter/scheduled_cycle_count",
+            "excerpt": "eval-domain-daily builds the eval invocation with trendRefs=[] and verdictRefs=[] and contains no f167-runtime-eval source-adapter call before invoking the eval cat."
+          },
+          {
+            "type": "counter-window",
+            "anchor": "source-adapter/counter_window.duration_hours",
+            "excerpt": "Live process-info exposes counter_window.duration_hours=36.170368095405, so counter-derived confidence is not downgraded; the runtime telemetry requested by the 2026-06-30 verdict is now reachable."
+          },
+          {
+            "type": "trace-metadata",
+            "anchor": "route-serial/route.error_count",
+            "excerpt": "The current trace window contains two route spans and both failed with Unknown cat ID: opus-47; route.total_cats_invoked remained 0."
+          },
+          {
+            "type": "grounding-shadow",
+            "anchor": "grounding-phase-o/grounding.check_total",
+            "excerpt": "Grounding counters and the sample endpoint are wired, but check_total=0, verdict_total=0, mismatch_sample_count=0 and stored samples=0; this is no-observation data, not evidence for a healthy mismatch distribution or fail-closed escalation."
+          }
+        ]
+      },
+      "proposedAction": [
+        {
+          "action": "build-source-adapter",
+          "target": "F192/eval-domain-daily",
+          "rationale": "Run the existing telemetry adapter, F167 snapshot generator, attribution generator, and YAML serializer before eval-cat invocation; pass the generated source basenames into the invocation context and keep the source pair in the live gitignored harness root for publish_verdict."
+        },
+        {
+          "action": "repair-eval-cat-registry",
+          "target": "F192/eval-domains",
+          "rationale": "Replace disabled/unregistered opus-47 evalCat and ownerCatId entries with an active catalog cat so scheduled invocations and actionable handoffs do not route into Unknown cat ID failures."
+        }
+      ],
+      "status": "open"
+    }
+  ]
+}

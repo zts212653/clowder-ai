@@ -1,0 +1,19 @@
+{
+  "verdictId": "2026-08-01-eval-a2a-source-adapter-stalled-build",
+  "rawInputs": [
+    {
+      "path": "docs/harness-feedback/snapshots/2026-08-01T03-07-39-296Z-F167-eval.yaml",
+      "sha256": "bd6b167db8fc0427f7098537928e3767bd16b0ecbef22fbf421839748081705d"
+    },
+    {
+      "path": "docs/harness-feedback/attributions/2026-08-01T03-07-39-296Z-F167-attribution.yaml",
+      "sha256": "69064b2056ae32b6c47cab6caaa3dcb90e38bfbe80e0fe81e8cf47a4417fd669"
+    }
+  ],
+  "generatedAt": "2026-08-01T03:07:39.296Z",
+  "generator": {
+    "name": "eval-a2a-live-verdict",
+    "version": "1"
+  },
+  "sanitizeRulesVersion": "f192-e-pilot-v1"
+}
