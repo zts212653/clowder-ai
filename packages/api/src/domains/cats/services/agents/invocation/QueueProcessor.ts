@@ -7,7 +7,6 @@
  * - processNext（用户级）：co-creator手动触发处理自己的下一条
  */
 
-import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { emitQueueUpdated, enrichQueueEntries } from '../../../../../utils/queue-enrichment.js';
 import { hydrateReplyPreview, type IMessageStore } from '../../stores/ports/MessageStore.js';
 import { mergeTokenUsage, type TokenUsage } from '../../types.js';
@@ -25,6 +24,7 @@ import {
 } from './CollaborationContinuityCapsule.js';
 import { type EnsureTerminalDeps, ensureTerminalStatus, RouteChainCompletionTracker } from './ensureTerminalStatus.js';
 import type { InvocationQueue, QueueEntry } from './InvocationQueue.js';
+import { DEFAULT_INVOCATION_SLOT_TTL_MS } from './InvocationTracker.js';
 import {
   type CommitInvocationInput,
   type ConsumedContinuationToken,
@@ -220,7 +220,7 @@ export class QueueProcessor {
   private static readonly SUPPRESS_TTL_MS = 60_000;
   /** F122B B6: Per-entry completion hooks (for multi-mention response aggregation). */
   private entryCompleteHooks = new Map<string, EntryCompleteHook>();
-  /** F118 D4: max age before a processingSlot is considered zombie (default 2.5× CLI timeout = 75min) */
+  /** F118 D4: independent owner-liveness backstop before a processingSlot is considered zombie (default 75min). */
   private processingSlotTtlMs: number;
   private readonly sessionContinuationCoordinator?: SessionContinuationCoordinatorLike;
   /** F220 2a (Sol R4): pending convergence retries, deduped by (threadId:userId:idempotencyKey).
@@ -238,7 +238,7 @@ export class QueueProcessor {
 
   constructor(deps: QueueProcessorDeps, opts?: { processingSlotTtlMs?: number }) {
     this.deps = deps;
-    this.processingSlotTtlMs = opts?.processingSlotTtlMs ?? 2.5 * resolveCliTimeoutMs(undefined);
+    this.processingSlotTtlMs = opts?.processingSlotTtlMs ?? DEFAULT_INVOCATION_SLOT_TTL_MS;
     this.sessionContinuationCoordinator =
       deps.sessionContinuationCoordinator ?? QueueProcessor.createSessionContinuationCoordinator(deps.threadStore);
   }

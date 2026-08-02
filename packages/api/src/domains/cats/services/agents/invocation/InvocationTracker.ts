@@ -10,9 +10,9 @@
  */
 
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
-import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 
 const log = createModuleLogger('invocation-tracker');
+export const DEFAULT_INVOCATION_SLOT_TTL_MS = 75 * 60_000;
 
 interface ActiveInvocation {
   controller: AbortController;
@@ -62,11 +62,11 @@ export class InvocationTracker {
   /** Key: `${threadId}:${catId}` (slotKey) */
   private active = new Map<string, ActiveInvocation>();
   private deleting = new Set<string>();
-  /** F118 D3: max age before a slot is considered stale (default 2.5× CLI timeout = 75min) */
+  /** F118 D3: max age before a slot is considered stale (default 75min). */
   private maxSlotTtlMs: number;
 
   constructor(opts?: { maxSlotTtlMs?: number }) {
-    this.maxSlotTtlMs = opts?.maxSlotTtlMs ?? 2.5 * resolveCliTimeoutMs(undefined);
+    this.maxSlotTtlMs = opts?.maxSlotTtlMs ?? DEFAULT_INVOCATION_SLOT_TTL_MS;
   }
 
   private slotKey(threadId: string, catId: string): string {

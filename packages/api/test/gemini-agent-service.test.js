@@ -462,7 +462,14 @@ describe('GeminiAgentService (gemini-cli adapter)', () => {
 // ===== antigravity-cli adapter tests =====
 
 describe('GeminiAgentService (antigravity-cli adapter)', () => {
-  test('spawns agy print mode with repo access and maps plain stdout to text', async () => {
+  test('spawns agy print mode with repo access and maps plain stdout to text', async (t) => {
+    const savedTimeout = process.env.CLI_TIMEOUT_MS;
+    process.env.CLI_TIMEOUT_MS = '0';
+    t.after(() => {
+      if (savedTimeout === undefined) delete process.env.CLI_TIMEOUT_MS;
+      else process.env.CLI_TIMEOUT_MS = savedTimeout;
+    });
+
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new GeminiAgentService({
@@ -491,7 +498,7 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
     assert.ok(call.arguments[0] === 'agy' || call.arguments[0].endsWith('/agy'));
     const args = call.arguments[1];
     assert.ok(args.includes('--print'));
-    assert.ok(args.includes('--print-timeout'));
+    assert.equal(args.includes('--print-timeout'), false, 'manual-cancel-only default must not arm AGY print timeout');
     assert.equal(
       args.includes('--dangerously-skip-permissions'),
       false,
@@ -503,6 +510,33 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
     const modelIdx = args.indexOf('--model');
     assert.ok(modelIdx >= 0, 'agy now supports per-session --model and runtime should pass the cat model');
     assert.equal(args[modelIdx + 1], 'Gemini 3.5 Flash (High)');
+  });
+
+  test('passes an explicitly configured positive CLI timeout to agy print mode', async (t) => {
+    const savedTimeout = process.env.CLI_TIMEOUT_MS;
+    process.env.CLI_TIMEOUT_MS = '1500';
+    t.after(() => {
+      if (savedTimeout === undefined) delete process.env.CLI_TIMEOUT_MS;
+      else process.env.CLI_TIMEOUT_MS = savedTimeout;
+    });
+
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({
+      spawnFn,
+      adapter: 'antigravity-cli',
+      model: 'gemini-3.5-flash',
+    });
+    const workDir = mkdtempSync(join(tmpdir(), 'agy-timeout-workdir-'));
+
+    const promise = collect(service.invoke('Say hi', { workingDirectory: workDir }));
+    emitPlainText(proc, 'AGY_OK\n');
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const timeoutIdx = args.indexOf('--print-timeout');
+    assert.ok(timeoutIdx >= 0, 'positive CLI_TIMEOUT_MS must preserve the opt-in AGY timeout');
+    assert.equal(args[timeoutIdx + 1], '2s');
   });
 
   test('normalizes legacy Gemini model ids before agy --model spawn', async () => {

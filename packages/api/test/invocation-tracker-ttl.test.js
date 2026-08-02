@@ -10,11 +10,29 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
-
 const SHORT_TTL = 1000; // 1s for testing
+const DEFAULT_SLOT_TTL = 75 * 60_000;
 const T0 = 100_000; // arbitrary start time
 
 describe('InvocationTracker TTL Guard (F118 D3)', () => {
+  it('keeps the default slot alive for 75 minutes when CLI auto-timeout is disabled', (t) => {
+    const savedTimeout = process.env.CLI_TIMEOUT_MS;
+    process.env.CLI_TIMEOUT_MS = '0';
+    t.after(() => {
+      if (savedTimeout === undefined) delete process.env.CLI_TIMEOUT_MS;
+      else process.env.CLI_TIMEOUT_MS = savedTimeout;
+    });
+    t.mock.timers.enable({ apis: ['Date'], now: T0 });
+    const tracker = new InvocationTracker();
+    tracker.start('t1', 'opus', 'user1');
+
+    t.mock.timers.tick(1);
+    assert.equal(tracker.has('t1', 'opus'), true, 'disabled CLI timeout must not collapse slot TTL to zero');
+
+    t.mock.timers.tick(DEFAULT_SLOT_TTL);
+    assert.equal(tracker.has('t1', 'opus'), false, 'independent 75-minute zombie guard must still expire the slot');
+  });
+
   // ── AC-D6: expired slot auto-cleanup ──
 
   it('has(threadId, catId) returns false for slot exceeding TTL', (t) => {
