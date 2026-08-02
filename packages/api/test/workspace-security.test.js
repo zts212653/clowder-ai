@@ -86,6 +86,33 @@ describe('workspace-security', () => {
     );
   });
 
+  it('rejects .cat-cafe directory (project config storage)', async () => {
+    await assert.rejects(
+      () => mod.resolveWorkspacePath(testRoot, '.cat-cafe/credentials.json'),
+      (err) => err.code === 'DENIED',
+    );
+    await assert.rejects(
+      () => mod.resolveWorkspacePath(testRoot, '.cat-cafe/cat-catalog.json'),
+      (err) => err.code === 'DENIED',
+    );
+  });
+
+  it('allows data directory at any path (not a reserved namespace)', async () => {
+    // Root-level data/ and nested src/data/ are normal project content.
+    // Runtime stores belong under .cat-cafe/ (already denied).
+    await mkdir(join(testRoot, 'data'), { recursive: true });
+    await writeFile(join(testRoot, 'data', 'fixture.json'), '{}');
+    const result = await mod.resolveWorkspacePath(testRoot, 'data/fixture.json');
+    assert.ok(result.endsWith('data/fixture.json'));
+  });
+
+  it('allows nested data directories (src/data/)', async () => {
+    await mkdir(join(testRoot, 'src', 'data'), { recursive: true });
+    await writeFile(join(testRoot, 'src', 'data', 'input.json'), '{}');
+    const result = await mod.resolveWorkspacePath(testRoot, 'src/data/input.json');
+    assert.ok(result.endsWith('src/data/input.json'));
+  });
+
   // -- Symlink escape --
 
   it('rejects symlink that escapes root', async () => {
@@ -115,6 +142,35 @@ describe('workspace-security', () => {
     }
   });
 
+  // -- Protected root (linked root pointing at .cat-cafe / .git / secrets) --
+
+  it('rejects resolveWorkspacePath when root is a protected directory and target does not exist', async () => {
+    // Regression: when the target does not exist, realpath(resolved) throws
+    // ENOENT. A naive Promise.all([realpath(resolved), realpath(root)]) would
+    // reject before assertRootNotProtected fires, letting a linked root at
+    // .cat-cafe serve non-existent paths (e.g. create credentials.json).
+    const protectedRoot = join(testRoot, '.cat-cafe');
+    await mkdir(protectedRoot, { recursive: true });
+
+    await assert.rejects(
+      () => mod.resolveWorkspacePath(protectedRoot, 'credentials.json'),
+      (err) => err.code === 'DENIED' && /protected segment/i.test(err.message),
+      'Must reject even when target does not exist',
+    );
+  });
+
+  it('rejects resolveWorkspacePath when root is a protected directory and target exists', async () => {
+    const protectedRoot = join(testRoot, '.cat-cafe');
+    await mkdir(protectedRoot, { recursive: true });
+    await writeFile(join(protectedRoot, 'existing.json'), '{}');
+
+    await assert.rejects(
+      () => mod.resolveWorkspacePath(protectedRoot, 'existing.json'),
+      (err) => err.code === 'DENIED' && /protected segment/i.test(err.message),
+      'Must reject even when target exists',
+    );
+  });
+
   // -- isDenylisted (P2: search result filtering) --
 
   it('isDenylisted blocks .env files', () => {
@@ -140,6 +196,19 @@ describe('workspace-security', () => {
     assert.ok(mod.isDenylisted('.git/HEAD'));
   });
 
+  it('isDenylisted blocks .cat-cafe config storage', () => {
+    assert.ok(mod.isDenylisted('.cat-cafe/credentials.json'));
+    assert.ok(mod.isDenylisted('.cat-cafe/cat-catalog.json'));
+    assert.ok(mod.isDenylisted('.cat-cafe/linked-roots.json'));
+  });
+
+  it('isDenylisted allows data directory (not reserved)', () => {
+    assert.ok(!mod.isDenylisted('data/sqlite.db'));
+    assert.ok(!mod.isDenylisted('data/evidence/index.json'));
+    assert.ok(!mod.isDenylisted('src/data/fixture.json'));
+    assert.ok(!mod.isDenylisted('packages/foo/data/input.json'));
+  });
+
   it('isDenylisted blocks normalized POSIX paths on every host platform', () => {
     assert.ok(mod.isDenylisted('secrets/nested/token.txt'));
     assert.ok(mod.isDenylisted('.git/hooks/pre-commit'));
@@ -149,6 +218,17 @@ describe('workspace-security', () => {
     assert.ok(!mod.isDenylisted('src/index.ts'));
     assert.ok(!mod.isDenylisted('packages/api/src/routes/workspace.ts'));
     assert.ok(!mod.isDenylisted('docs/README.md'));
+  });
+
+  it('isDenylisted blocks mixed-case filename variants (case-insensitive FS bypass)', () => {
+    assert.ok(mod.isDenylisted('.ENV'));
+    assert.ok(mod.isDenylisted('.Env.Local'));
+    assert.ok(mod.isDenylisted('certs/SERVER.PEM'));
+    assert.ok(mod.isDenylisted('ID_RSA'));
+    assert.ok(mod.isDenylisted('keys/Deploy.Key'));
+    assert.ok(mod.isDenylisted('.CAT-CAFE/config.json'));
+    assert.ok(mod.isDenylisted('.Git/HEAD'));
+    assert.ok(mod.isDenylisted('Secrets/token.txt'));
   });
 
   // -- Worktree listing --

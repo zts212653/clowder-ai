@@ -67,6 +67,7 @@ export function HubAccountsTab() {
       displayName: profile.displayName,
       baseUrl: profile.baseUrl,
       clientId: profile.clientId,
+      clientFamily: profile.clientFamily,
       authType: profile.authType,
       models: profile.models,
       envVars: profile.envVars,

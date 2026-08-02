@@ -60,6 +60,14 @@ const contextBudgetSchema = z.object({
   maxContentLengthPerMsg: z.number().positive(),
 });
 
+const commandPolicyEntrySchema = z.object({
+  binary: z.string().min(1),
+  allowedSubcommands: z.array(z.string().min(1)).optional(),
+  allowedFlags: z.array(z.string().min(1)).optional(),
+  allowedArgPatterns: z.array(z.string().min(1)).optional(),
+  deniedFlags: z.array(z.string().min(1)).optional(),
+});
+
 const agyProfileSchema = z
   .object({
     enabled: z.boolean().optional(),
@@ -114,6 +122,9 @@ const catVariantSchema = z.object({
   avatar: z.string().min(1).optional(), // F32-b P4c: override breed avatar
   color: colorSchema.optional(), // F32-b P4c: override breed color
   contextBudget: contextBudgetSchema.optional(),
+  nativeToolLevel: z.enum(['L0', 'L1', 'L2']).optional(), // F159 Phase F
+  commandPolicy: z.array(commandPolicyEntrySchema).optional(), // F159 Phase F
+  catAgentProtocol: z.enum(['anthropic-messages', 'openai-chat']).optional(), // F159 Phase G2
   voiceConfig: z // F103: per-cat TTS voice configuration
     .object({
       voice: z.string().min(1),
@@ -627,6 +638,9 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         ...(variant.cli != null ? { cli: variant.cli } : {}),
         ...(variant.provider != null ? { provider: variant.provider } : {}),
         ...(variant.contextBudget != null ? { contextBudget: variant.contextBudget } : {}),
+        ...(variant.nativeToolLevel != null ? { nativeToolLevel: variant.nativeToolLevel } : {}),
+        ...(variant.commandPolicy != null ? { commandPolicy: variant.commandPolicy } : {}),
+        ...(variant.catAgentProtocol != null ? { catAgentProtocol: variant.catAgentProtocol } : {}),
         ...(variant.voiceConfig != null ? { voiceConfig: variant.voiceConfig } : {}),
         roleDescription: variant.roleDescription ?? breed.roleDescription,
         personality: variant.personality ?? defaultVariant?.personality ?? '',

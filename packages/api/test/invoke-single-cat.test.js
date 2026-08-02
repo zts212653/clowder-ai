@@ -364,6 +364,202 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(payload.invocationId, 'inv-1');
   });
 
+  it('passes CatAgent current-task callback only for the CatAgent provider', async () => {
+    const { MemoryTaskProgressStore } = await import(
+      '../dist/domains/cats/services/agents/invocation/MemoryTaskProgressStore.js'
+    );
+    // Register a temporary CatAgent-provider cat for this test
+    const testCatId = 'test-catagent-cb';
+    catRegistry.register(testCatId, { clientId: 'catagent', catAgentProtocol: 'anthropic' });
+    try {
+      let task = {
+        id: 'task-current',
+        kind: 'work',
+        threadId: 'thread-current-task',
+        subjectKey: null,
+        title: 'Selected task',
+        ownerCatId: testCatId,
+        status: 'todo',
+        why: '',
+        createdBy: 'user',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      const taskStore = {
+        get: async (id) => (id === task.id ? task : null),
+        update: async (id, input) => {
+          if (id !== task.id) return null;
+          task = { ...task, ...input, updatedAt: Date.now() };
+          return task;
+        },
+      };
+      const threadStore = {
+        get: async () => ({
+          id: 'thread-current-task',
+          projectPath: 'default',
+          title: null,
+          createdBy: 'user1',
+          participants: [testCatId],
+          lastActiveAt: Date.now(),
+          createdAt: Date.now(),
+          firstRunQuestState: {
+            v: 1,
+            phase: 'quest-4-task-running',
+            startedAt: Date.now(),
+            selectedTaskId: 'task-current',
+          },
+        }),
+        isRebornSession: async () => false,
+      };
+      const taskProgressStore = new MemoryTaskProgressStore();
+      const deps = { ...makeDeps(), threadStore, taskStore, taskProgressStore };
+      let callbackOptions;
+      const service = {
+        l0CompilerFn: dummyL0CompilerFn,
+        async *invoke(_prompt, options) {
+          callbackOptions = options.catAgentScopedCallbacks;
+          await callbackOptions.currentTask.updateCurrentTaskStatus({
+            status: 'doing',
+            progress: 42,
+            summary: 'Halfway done',
+          });
+          yield { type: 'done', catId: testCatId, timestamp: Date.now() };
+        },
+      };
+
+      await collect(
+        invokeSingleCat(deps, {
+          catId: testCatId,
+          service,
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-current-task',
+          isLastCat: true,
+        }),
+      );
+
+      assert.equal(callbackOptions.currentTask.currentTaskId, 'task-current');
+      assert.equal(task.status, 'doing');
+      assert.equal(task.why, 'Halfway done');
+      const snapshot = await taskProgressStore.getSnapshot('thread-current-task', testCatId);
+      assert.equal(snapshot.tasks[0].id, 'task-current');
+      assert.equal(snapshot.tasks[0].status, 'in_progress');
+      assert.equal(snapshot.tasks[0].activeForm, 'Halfway done');
+    } finally {
+      catRegistry.unregister?.(testCatId);
+    }
+  });
+
+  it('does not pass CatAgent callbacks for non-CatAgent providers', async () => {
+    const { MemoryTaskProgressStore } = await import(
+      '../dist/domains/cats/services/agents/invocation/MemoryTaskProgressStore.js'
+    );
+    const threadStore = {
+      get: async () => ({
+        id: 'thread-no-cb',
+        projectPath: 'default',
+        title: null,
+        createdBy: 'user1',
+        participants: ['codex'],
+        lastActiveAt: Date.now(),
+        createdAt: Date.now(),
+        firstRunQuestState: {
+          v: 1,
+          phase: 'quest-4-task-running',
+          startedAt: Date.now(),
+          selectedTaskId: 'task-no-cb',
+        },
+      }),
+      isRebornSession: async () => false,
+    };
+    const taskStore = {
+      get: async () => ({ id: 'task-no-cb', kind: 'work', status: 'todo' }),
+      update: async () => null,
+    };
+    const taskProgressStore = new MemoryTaskProgressStore();
+    const deps = { ...makeDeps(), threadStore, taskStore, taskProgressStore };
+    let callbackOptions = 'SENTINEL';
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        callbackOptions = options.catAgentScopedCallbacks;
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'codex',
+        service,
+        prompt: 'test',
+        userId: 'user1',
+        threadId: 'thread-no-cb',
+        isLastCat: true,
+      }),
+    );
+
+    // Non-CatAgent provider must NOT receive scoped callbacks
+    assert.equal(callbackOptions, undefined);
+  });
+
+  it('does not pass CatAgent current-task callback for another cat owner', async () => {
+    const taskStore = {
+      get: async () => ({
+        id: 'task-owned-by-gemini',
+        kind: 'work',
+        threadId: 'thread-current-task-owner',
+        subjectKey: null,
+        title: 'Other owner task',
+        ownerCatId: 'gemini',
+        status: 'todo',
+        why: '',
+        createdBy: 'user',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }),
+    };
+    const threadStore = {
+      get: async () => ({
+        id: 'thread-current-task-owner',
+        projectPath: 'default',
+        title: null,
+        createdBy: 'user1',
+        participants: ['codex'],
+        lastActiveAt: Date.now(),
+        createdAt: Date.now(),
+        firstRunQuestState: {
+          v: 1,
+          phase: 'quest-4-task-running',
+          startedAt: Date.now(),
+          selectedTaskId: 'task-owned-by-gemini',
+        },
+      }),
+      isRebornSession: async () => false,
+    };
+    const deps = { ...makeDeps(), threadStore, taskStore };
+    let callbackOptions = 'not-called';
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        callbackOptions = options.catAgentScopedCallbacks;
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'codex',
+        service,
+        prompt: 'test',
+        userId: 'user1',
+        threadId: 'thread-current-task-owner',
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal(callbackOptions, undefined);
+  });
+
   it('persists task progress snapshot with completed status on done even when tasks are not all completed', async () => {
     const { MemoryTaskProgressStore } = await import(
       '../dist/domains/cats/services/agents/invocation/MemoryTaskProgressStore.js'
@@ -494,6 +690,103 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       msgs.some((m) => m.type === 'done'),
       'done should still be yielded',
     );
+  });
+
+  it('update_current_task_status succeeds even when taskProgressStore.getSnapshot throws (best-effort snapshot)', async () => {
+    const testCatId = 'test-catagent-snapshot-throws';
+    catRegistry.register(testCatId, { clientId: 'catagent', catAgentProtocol: 'anthropic' });
+    try {
+      let task = {
+        id: 'task-snap-throws',
+        kind: 'work',
+        threadId: 'thread-snap-throws',
+        subjectKey: null,
+        title: 'Snapshot boom task',
+        ownerCatId: testCatId,
+        status: 'todo',
+        why: '',
+        createdBy: 'user',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      const taskStore = {
+        get: async (id) => (id === task.id ? task : null),
+        update: async (id, input) => {
+          if (id !== task.id) return null;
+          task = { ...task, ...input, updatedAt: Date.now() };
+          return task;
+        },
+      };
+      const threadStore = {
+        get: async () => ({
+          id: 'thread-snap-throws',
+          projectPath: 'default',
+          title: null,
+          createdBy: 'user1',
+          participants: [testCatId],
+          lastActiveAt: Date.now(),
+          createdAt: Date.now(),
+          firstRunQuestState: {
+            v: 1,
+            phase: 'quest-4-task-running',
+            startedAt: Date.now(),
+            selectedTaskId: 'task-snap-throws',
+          },
+        }),
+        isRebornSession: async () => false,
+      };
+      // Snapshot store that always throws — simulates store degradation
+      const taskProgressStore = {
+        async getSnapshot() {
+          throw new Error('snapshot store down');
+        },
+        async setSnapshot() {
+          throw new Error('snapshot store down');
+        },
+        async getThreadSnapshots() {
+          return {};
+        },
+        async deleteSnapshot() {},
+        async deleteThread() {},
+      };
+      const deps = { ...makeDeps(), threadStore, taskStore, taskProgressStore };
+      let callbackOptions;
+      const service = {
+        l0CompilerFn: dummyL0CompilerFn,
+        async *invoke(_prompt, options) {
+          callbackOptions = options.catAgentScopedCallbacks;
+          // This must NOT throw even though snapshot store is down
+          await callbackOptions.currentTask.updateCurrentTaskStatus({
+            status: 'doing',
+            summary: 'Working despite snapshot failure',
+          });
+          yield { type: 'done', catId: testCatId, timestamp: Date.now() };
+        },
+      };
+
+      const msgs = await collect(
+        invokeSingleCat(deps, {
+          catId: testCatId,
+          service,
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-snap-throws',
+          isLastCat: true,
+        }),
+      );
+
+      // Canonical task mutation must have committed despite snapshot failure
+      assert.equal(task.status, 'doing', 'task status should be updated');
+      assert.equal(task.why, 'Working despite snapshot failure', 'task summary should be updated');
+      // Invocation should complete successfully (no error events)
+      assert.equal(msgs.filter((m) => m.type === 'error').length, 0, 'snapshot failure must not surface as error');
+      assert.ok(
+        msgs.some((m) => m.type === 'done'),
+        'done should still be yielded',
+      );
+    } finally {
+      catRegistry.unregister?.(testCatId);
+    }
   });
 
   it('finalize marks snapshot interrupted when invocation is aborted after progress (early iterator return)', async () => {

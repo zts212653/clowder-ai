@@ -6,9 +6,90 @@ import { resolveStartupProjectRoot } from '../../utils/startup-root.js';
 
 const execFileAsync = promisify(execFile);
 
-const DENYLIST_PATTERNS = [/^\.env/, /\.pem$/, /\.key$/, /^id_rsa/];
+const DENYLIST_PATTERNS = [/^\.env/i, /\.pem$/i, /\.key$/i, /^id_rsa/i];
 
-const DENYLIST_DIRS = new Set(['.git', 'secrets']);
+const DENYLIST_DIRS = new Set(['.git', 'secrets', '.cat-cafe']);
+
+/** Case-insensitive segment match for protected directories. */
+function isProtectedDirSegment(seg: string): boolean {
+  return DENYLIST_DIRS.has(seg.toLowerCase());
+}
+
+function assertDenylistAllowed(relPath: string): void {
+  for (const seg of relPath.split(sep)) {
+    if (!seg) continue;
+    if (isProtectedDirSegment(seg)) {
+      throw new WorkspaceSecurityError(`Access denied: ${seg}`, 'DENIED');
+    }
+    for (const pat of DENYLIST_PATTERNS) {
+      if (pat.test(seg)) {
+        throw new WorkspaceSecurityError(`Access denied: ${seg}`, 'DENIED');
+      }
+    }
+  }
+}
+
+/**
+ * Reject if the canonical workspace root itself is inside a protected namespace.
+ * This closes the attack where workDir = .../project/.cat-cafe and relative paths
+ * from it bypass the segment denylist.
+ */
+function assertRootNotProtected(canonicalRoot: string): void {
+  for (const seg of canonicalRoot.split(/[\\/]/)) {
+    if (seg && isProtectedDirSegment(seg)) {
+      throw new WorkspaceSecurityError(`Workspace root contains protected segment: ${seg}`, 'DENIED');
+    }
+  }
+}
+
+function assertInsideRoot(root: string, resolved: string): string {
+  const relFromRoot = relative(root, resolved);
+  if (relFromRoot.startsWith('..') || resolve(root, relFromRoot) !== resolved) {
+    throw new WorkspaceSecurityError('Path outside workspace root', 'TRAVERSAL');
+  }
+  return relFromRoot;
+}
+
+function assertRealPathInside(realRoot: string, real: string): void {
+  if (!real.startsWith(realRoot + sep) && real !== realRoot) {
+    throw new WorkspaceSecurityError('Symlink escapes workspace root', 'TRAVERSAL');
+  }
+}
+
+async function isExistingDirectory(path: string): Promise<boolean> {
+  try {
+    const pathStat = await stat(path);
+    if (!pathStat.isDirectory()) {
+      throw new WorkspaceSecurityError('Parent path is not a directory', 'TRAVERSAL');
+    }
+    return true;
+  } catch (err) {
+    if (err instanceof WorkspaceSecurityError) throw err;
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw err;
+  }
+}
+
+async function findExistingDirectoryAncestor(resolvedRoot: string, initialAncestor: string): Promise<string> {
+  let ancestor = initialAncestor;
+  for (;;) {
+    const relAncestor = assertInsideRoot(resolvedRoot, ancestor);
+    assertDenylistAllowed(relAncestor);
+
+    if (await isExistingDirectory(ancestor)) {
+      return ancestor;
+    }
+
+    if (ancestor === resolvedRoot) {
+      throw new WorkspaceSecurityError('Workspace root does not exist', 'NOT_FOUND');
+    }
+    const parent = dirname(ancestor);
+    if (parent === ancestor) {
+      throw new WorkspaceSecurityError('Path outside workspace root', 'TRAVERSAL');
+    }
+    ancestor = parent;
+  }
+}
 
 /**
  * In-memory registry: worktreeId → absolute root path.
@@ -39,56 +120,69 @@ export class WorkspaceSecurityError extends Error {
 export async function resolveWorkspacePath(root: string, userPath: string): Promise<string> {
   const decoded = decodeURIComponent(userPath);
   const resolved = resolve(root, decoded);
-  const relFromRoot = relative(root, resolved);
-
-  if (relFromRoot.startsWith('..') || resolve(root, relFromRoot) !== resolved) {
-    throw new WorkspaceSecurityError('Path outside workspace root', 'TRAVERSAL');
-  }
-
-  const segments = relFromRoot.split(sep);
-  for (const seg of segments) {
-    if (DENYLIST_DIRS.has(seg)) {
-      throw new WorkspaceSecurityError(`Access denied: ${seg}`, 'DENIED');
-    }
-    for (const pat of DENYLIST_PATTERNS) {
-      if (pat.test(seg)) {
-        throw new WorkspaceSecurityError(`Access denied: ${seg}`, 'DENIED');
-      }
-    }
-  }
+  const relFromRoot = assertInsideRoot(root, resolved);
+  assertDenylistAllowed(relFromRoot);
 
   // Symlink escape check: resolve the FULL real path (follows all symlinks
   // in every segment, not just the final one). This catches both
   // "final segment is symlink" AND "intermediate directory is symlink".
   // Also realpath the root to handle cases where root itself traverses
   // symlinks (e.g. macOS /tmp → /private/tmp).
+  //
+  // The root is resolved INDEPENDENTLY before the target so that
+  // assertRootNotProtected always fires — even when the target does not
+  // exist yet (realpath(resolved) would throw ENOENT and a Promise.all
+  // would reject before the root check runs). Matches the pattern in
+  // resolveWorkspaceCreatePath.
   try {
-    const [real, realRoot] = await Promise.all([realpath(resolved), realpath(root)]);
-    if (!real.startsWith(realRoot + sep) && real !== realRoot) {
-      throw new WorkspaceSecurityError('Symlink escapes workspace root', 'TRAVERSAL');
-    }
-    // Re-check denylist on the realpath result — a symlink named "safe"
-    // pointing to ".env" would pass the pre-realpath check above but the
-    // resolved target must still be denied.
-    const realRel = relative(realRoot, real);
-    for (const seg of realRel.split(sep)) {
-      if (DENYLIST_DIRS.has(seg)) {
-        throw new WorkspaceSecurityError(`Access denied: ${seg}`, 'DENIED');
-      }
-      for (const pat of DENYLIST_PATTERNS) {
-        if (pat.test(seg)) {
-          throw new WorkspaceSecurityError(`Access denied: ${seg}`, 'DENIED');
-        }
-      }
+    const realRoot = await realpath(root);
+    // Canonical root must not itself be inside a protected namespace.
+    assertRootNotProtected(realRoot);
+
+    try {
+      const real = await realpath(resolved);
+      assertRealPathInside(realRoot, real);
+      // Re-check denylist on the realpath result — a symlink named "safe"
+      // pointing to ".env" would pass the pre-realpath check above but the
+      // resolved target must still be denied.
+      const realRel = relative(realRoot, real);
+      assertDenylistAllowed(realRel);
+    } catch (e) {
+      if (e instanceof WorkspaceSecurityError) throw e;
+      // ENOENT = target file doesn't exist yet; lexical traversal check above covers it
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
     }
   } catch (e) {
     if (e instanceof WorkspaceSecurityError) throw e;
-    // ENOENT = file doesn't exist yet; traversal check above covers it
-    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw e;
-    }
+    // ENOENT from realpath(root) = root doesn't exist; lexical checks above cover it
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
   }
 
+  return resolved;
+}
+
+/**
+ * Resolve a path that may be created by a write operation.
+ *
+ * Unlike resolveWorkspacePath(), this validates the nearest existing ancestor
+ * instead of accepting ENOENT after only lexical traversal checks. That closes
+ * the "workspace/safe-link/new.txt" case where "safe-link" is a symlink to a
+ * directory outside the workspace.
+ */
+export async function resolveWorkspaceCreatePath(root: string, userPath: string): Promise<string> {
+  const decoded = decodeURIComponent(userPath);
+  const resolvedRoot = resolve(root);
+  const resolved = resolve(resolvedRoot, decoded);
+  const relFromRoot = assertInsideRoot(resolvedRoot, resolved);
+  assertDenylistAllowed(relFromRoot);
+
+  const realRoot = await realpath(resolvedRoot);
+  // Canonical root must not itself be inside a protected namespace.
+  assertRootNotProtected(realRoot);
+  const ancestor = await findExistingDirectoryAncestor(resolvedRoot, dirname(resolved));
+  const realAncestor = await realpath(ancestor);
+  assertRealPathInside(realRoot, realAncestor);
+  assertDenylistAllowed(relative(realRoot, realAncestor));
   return resolved;
 }
 
@@ -99,12 +193,25 @@ export async function resolveWorkspacePath(root: string, userPath: string): Prom
 export function isDenylisted(relPath: string): boolean {
   const segments = relPath.split(/[\\/]/);
   for (const seg of segments) {
-    if (DENYLIST_DIRS.has(seg)) return true;
+    if (isProtectedDirSegment(seg)) return true;
     for (const pat of DENYLIST_PATTERNS) {
       if (pat.test(seg)) return true;
     }
   }
   return false;
+}
+
+/**
+ * Check if an absolute path contains a protected namespace segment.
+ * Case-insensitive to prevent .CAT-CAFE / .Git / Secrets bypass.
+ *
+ * Returns the first matched protected segment, or null if the path is safe.
+ */
+export function containsProtectedSegment(absolutePath: string): string | null {
+  for (const seg of absolutePath.split(/[\\/]/)) {
+    if (seg && isProtectedDirSegment(seg)) return seg;
+  }
+  return null;
 }
 
 export interface WorktreeEntry {

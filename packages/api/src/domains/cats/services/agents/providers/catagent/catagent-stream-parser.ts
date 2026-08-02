@@ -1,23 +1,46 @@
 /**
- * CatAgent SSE Stream Parser — F159 Phase E
+ * CatAgent SSE Stream Parser — F159 Phase E (G1: now yields neutral events)
  *
- * Parses Anthropic Messages API SSE stream into typed events.
+ * Parses Anthropic Messages API SSE stream into protocol-neutral
+ * `CatAgentStreamEvent`s. Anthropic-shaped types (`AnthropicContentBlock`,
+ * `AnthropicUsage`) stay strictly inside this file as Anthropic-specific
+ * intermediate types; the parser maps them to neutral
+ * `CatAgentNeutralBlock` / `CatAgentUsageDelta` before yielding.
+ *
+ * G1 design note: This file is logically a private implementation detail of
+ * `AnthropicMessagesAdapter` — but is kept at this path to minimise rename
+ * churn during the refactor. The grep verifier (AC-G12) treats this file as
+ * adapter-owned, not service-layer, so `Anthropic*` imports here are
+ * expected and allowed.
+ *
  * Handles proper SSE framing (multi-line data, CRLF, comments, event:error).
  * No @anthropic-ai/sdk dependency — raw fetch + TextDecoder.
  */
 
 import type { AnthropicContentBlock, AnthropicUsage } from './catagent-event-bridge.js';
+import { mapAnthropicUsage } from './catagent-event-bridge.js';
+import type { CatAgentNeutralBlock, CatAgentStreamEvent, CatAgentUsageDelta } from './catagent-protocol-types.js';
 
 const MAX_TOOL_INPUT_BYTES = 65_536;
 
-// ── Stream event types ──
+// ── Neutral block / usage normalisation (Anthropic → neutral, adapter-private) ──
 
-export type CatAgentStreamEvent =
-  | { type: 'text_delta'; text: string; blockIndex: number }
-  | { type: 'content_block_complete'; block: AnthropicContentBlock; blockIndex: number }
-  | { type: 'usage_update'; inputUsage?: AnthropicUsage; outputTokens?: number }
-  | { type: 'stop'; stopReason: string | null }
-  | { type: 'stream_error'; error: string };
+function anthropicBlockToNeutral(block: AnthropicContentBlock): CatAgentNeutralBlock {
+  if (block.type === 'text') return { type: 'text', text: block.text };
+  // block.type === 'tool_use'
+  return { type: 'tool_call', id: block.id, name: block.name, input: block.input };
+}
+
+function anthropicInputUsageToNeutral(usage: AnthropicUsage): CatAgentUsageDelta {
+  // Reuse mapAnthropicUsage to keep the cache-aware totalInput convention
+  // (raw + cache_read + cache_creation) — single source of truth for
+  // Anthropic prompt-cache observability normalisation.
+  const tokenUsage = mapAnthropicUsage(usage);
+  const delta: CatAgentUsageDelta = { inputTokens: tokenUsage.inputTokens };
+  if (tokenUsage.cacheReadTokens !== undefined) delta.cacheReadTokens = tokenUsage.cacheReadTokens;
+  if (tokenUsage.cacheCreationTokens !== undefined) delta.cacheCreationTokens = tokenUsage.cacheCreationTokens;
+  return delta;
+}
 
 // ── SSE line parser state ──
 
@@ -43,6 +66,8 @@ interface StreamContext {
   blocks: Map<number, BlockAccumulator>;
   sawMessageStop: boolean;
   sawAnyEvent: boolean;
+  /** Set when a data frame fails to parse — terminates the stream fail-closed. */
+  parseError?: string;
 }
 
 /** Parse an Anthropic SSE stream into CatAgentStreamEvents. */
@@ -71,11 +96,15 @@ export async function* parseAnthropicSSE(
 
       for (const line of lines) {
         yield* processAndHandle(line, sseState, ctx);
+        if (ctx.parseError) break;
       }
+      if (ctx.parseError) break;
     }
-    if (buffer.trim()) yield* processAndHandle(buffer, sseState, ctx);
-    const final = flushSSEState(sseState);
-    if (final) yield* handleSSEEvent(final, ctx);
+    if (!ctx.parseError && buffer.trim()) yield* processAndHandle(buffer, sseState, ctx);
+    if (!ctx.parseError) {
+      const final = flushSSEState(sseState);
+      if (final) yield* handleSSEEvent(final, ctx);
+    }
 
     // P1: EOF must be message_stop with no unclosed blocks (check specific first)
     if (ctx.blocks.size > 0) {
@@ -147,7 +176,12 @@ function* handleSSEEvent(evt: ParsedSSEEvent, ctx: StreamContext): Iterable<CatA
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(evt.data);
-  } catch {
+  } catch (err) {
+    // Fail closed: a malformed frame must not be silently dropped. If it were,
+    // a later message_stop would end the stream "cleanly" and any tool_use blocks
+    // accumulated from earlier deltas would be emitted and executed.
+    ctx.parseError = err instanceof Error ? err.message : String(err);
+    yield { type: 'stream_error', error: `Malformed Anthropic data frame: ${ctx.parseError}` };
     return;
   }
 
@@ -157,7 +191,7 @@ function* handleSSEEvent(evt: ParsedSSEEvent, ctx: StreamContext): Iterable<CatA
   if (eventType === 'message_start') {
     const message = parsed.message as Record<string, unknown> | undefined;
     const usage = message?.usage as AnthropicUsage | undefined;
-    if (usage) yield { type: 'usage_update', inputUsage: usage };
+    if (usage) yield { type: 'usage_update', usage: anthropicInputUsageToNeutral(usage) };
     return;
   }
 
@@ -202,23 +236,44 @@ function* handleSSEEvent(evt: ParsedSSEEvent, ctx: StreamContext): Iterable<CatA
     ctx.blocks.delete(index);
 
     if (block.type === 'text') {
-      yield { type: 'content_block_complete', block: { type: 'text', text: block.text }, blockIndex: index };
+      yield {
+        type: 'content_block_complete',
+        block: anthropicBlockToNeutral({ type: 'text', text: block.text }),
+        blockIndex: index,
+      };
     } else {
       let input: Record<string, unknown> = {};
       if (block.toolInputBytes > MAX_TOOL_INPUT_BYTES) {
         input = { _error: 'Tool input exceeded size limit' };
       } else {
         try {
-          input = JSON.parse(block.toolInputJson || '{}');
+          const parsed2 = JSON.parse(block.toolInputJson || '{}');
+          // Normalize non-object JSON (null, [], string, number) to a sentinel
+          // so encodeAssistantTurn doesn't echo a non-object as tool_use.input,
+          // violating the Anthropic API contract (Codex R10 P2).
+          if (parsed2 == null || typeof parsed2 !== 'object' || Array.isArray(parsed2)) {
+            input = { _error: 'Non-object tool input' };
+          } else {
+            input = parsed2;
+          }
         } catch {
           input = { _error: 'Invalid tool input JSON' };
         }
       }
-      yield {
-        type: 'content_block_complete',
-        block: { type: 'tool_use', id: block.toolId, name: block.toolName, input },
-        blockIndex: index,
-      };
+      // Fail-closed: reject tool_use blocks whose upstream never provided an id.
+      // Parity with OpenAI adapter's missing-id guard (Codex R9 P2).
+      if (!block.toolId) {
+        yield {
+          type: 'stream_error',
+          error: `Anthropic tool_use block at index ${index} missing upstream id — suppressed to prevent unverified execution`,
+        };
+      } else {
+        yield {
+          type: 'content_block_complete',
+          block: anthropicBlockToNeutral({ type: 'tool_use', id: block.toolId, name: block.toolName, input }),
+          blockIndex: index,
+        };
+      }
     }
     return;
   }
@@ -227,7 +282,7 @@ function* handleSSEEvent(evt: ParsedSSEEvent, ctx: StreamContext): Iterable<CatA
     const delta = parsed.delta as Record<string, unknown> | undefined;
     const usage = parsed.usage as Record<string, unknown> | undefined;
     const outputTokens = usage?.output_tokens as number | undefined;
-    if (outputTokens !== undefined) yield { type: 'usage_update', outputTokens };
+    if (outputTokens !== undefined) yield { type: 'usage_update', usage: { outputTokens } };
     const stopReason = delta?.stop_reason as string | null | undefined;
     if (stopReason !== undefined) yield { type: 'stop', stopReason };
     return;

@@ -365,4 +365,35 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     assert.equal(profile.mode, 'api_key');
     assert.equal(profile.apiKey, 'sk-real-installer-key');
   });
+
+  // ── F159 G2: api_key clientFamily mismatch rejection ──
+
+  it('F159 G2: validateRuntimeProviderBinding rejects api_key profile with mismatched clientFamily', async () => {
+    const { validateRuntimeProviderBinding } = await import('../dist/config/account-resolver.js');
+
+    // api_key profile with clientFamily='openai' bound to an anthropic client → reject
+    const mismatchError = validateRuntimeProviderBinding('anthropic', {
+      id: 'my-openai-key',
+      authType: 'api_key',
+      client: 'openai', // from clientFamily
+    });
+    assert.ok(mismatchError, 'must reject api_key profile with mismatched clientFamily');
+    assert.ok(mismatchError.includes('incompatible'), `error should say incompatible: ${mismatchError}`);
+
+    // api_key profile with clientFamily='anthropic' bound to anthropic client → allow
+    const matchResult = validateRuntimeProviderBinding('anthropic', {
+      id: 'my-anthropic-key',
+      authType: 'api_key',
+      client: 'anthropic',
+    });
+    assert.equal(matchResult, null, 'matching clientFamily must pass validation');
+
+    // api_key profile WITHOUT clientFamily (legacy) → allow (best-effort passthrough)
+    const legacyResult = validateRuntimeProviderBinding('anthropic', {
+      id: 'legacy-key',
+      authType: 'api_key',
+      // no client field — legacy api_key without clientFamily
+    });
+    assert.equal(legacyResult, null, 'legacy api_key without clientFamily must still pass');
+  });
 });

@@ -78,6 +78,17 @@ function mockFetchAbortable() {
 
 // Save original fetch
 const originalFetch = globalThis.fetch;
+let prevCatOpusModel;
+
+before(() => {
+  prevCatOpusModel = process.env.CAT_OPUS_MODEL;
+  process.env.CAT_OPUS_MODEL = 'claude-opus-4-6';
+});
+
+after(() => {
+  if (prevCatOpusModel !== undefined) process.env.CAT_OPUS_MODEL = prevCatOpusModel;
+  else delete process.env.CAT_OPUS_MODEL;
+});
 
 // Mock resolveApiCredentials by patching the module
 // Since CatAgentService imports resolveApiCredentials, we test via the service

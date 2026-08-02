@@ -5,7 +5,6 @@
 
 import type { CliConfig, ContextBudget } from './cat-breed.js';
 import type { CatId, SessionId } from './ids.js';
-import { createCatId } from './ids.js';
 import type { VoiceConfig } from './tts.js';
 
 /**
@@ -25,6 +24,37 @@ export type ClientId =
 
 /** @deprecated clowder-ai#340: Use {@link ClientId} instead. Kept as alias for backward compatibility. */
 export type CatProvider = ClientId;
+
+/** F159 Phase F: native CatAgent tool capability tier. */
+export type NativeToolLevel = 'L0' | 'L1' | 'L2';
+
+/**
+ * F159 Phase G G2: CatAgent wire protocol selection.
+ *
+ * Selects which `CatAgentProtocolAdapter` the factory dispatches for a
+ * `clientId='catagent'` member:
+ * - `anthropic-messages` → `AnthropicMessagesAdapter` (G1 default, Anthropic
+ *   Messages API `POST /v1/messages` + `x-api-key` + `anthropic-version`)
+ * - `openai-chat` → `OpenAIChatAdapter` (G2 new, OpenAI Chat Completions
+ *   `POST /v1/chat/completions` + `Authorization: Bearer`)
+ *
+ * Omitted defaults to `'anthropic-messages'` to preserve G1 catagent members'
+ * behavior across the G2 rollout. Only meaningful when `clientId === 'catagent'`;
+ * persistence is gated to catagent-only at runtime catalog / route / Hub layers.
+ *
+ * See AC-G13 + KD-20 (fail-closed dispatch, no runtime protocol guessing).
+ */
+export type CatAgentProtocol = 'anthropic-messages' | 'openai-chat';
+
+/** F159 Phase F: allowlist-first command policy for CatAgent run_command. */
+export interface CommandPolicyEntry {
+  readonly binary: string;
+  readonly allowedSubcommands?: readonly string[];
+  readonly allowedFlags?: readonly string[];
+  readonly allowedArgPatterns?: readonly string[];
+  /** Defense-in-depth only; never grants permission by itself. */
+  readonly deniedFlags?: readonly string[];
+}
 
 /**
  * Cat status in the system
@@ -73,6 +103,14 @@ export interface CatConfig {
   readonly agyProfile?: AgyProfileConfig;
   readonly commandArgs?: readonly string[];
   readonly contextBudget?: ContextBudget;
+  /** F159 Phase F: CatAgent native tool level. Omitted = L0. */
+  readonly nativeToolLevel?: NativeToolLevel;
+  /** F159 Phase F: allowlist-first command policy for L2 run_command. */
+  readonly commandPolicy?: readonly CommandPolicyEntry[];
+  /** F159 Phase G G2 (AC-G13): CatAgent wire protocol selection. Only
+   *  meaningful when `clientId === 'catagent'`; omitted defaults to
+   *  `'anthropic-messages'` (G1 catagent behavior preserved). */
+  readonly catAgentProtocol?: CatAgentProtocol;
   readonly roleDescription: string;
   readonly personality: string;
   /** F32-b: Which breed this cat belongs to (for frontend grouping) */

@@ -19,6 +19,8 @@ export interface ProfileItem {
   oauthLikeClient?: string;
   /** F171: User-defined env vars injected into agent subprocess. */
   envVars?: Record<string, string>;
+  /** F159 G2 (AC-G20): typed client family for api_key accounts — drives adapter routing. */
+  clientFamily?: 'anthropic' | 'openai' | 'google' | 'kimi' | 'opencode';
   hasApiKey: boolean;
   createdAt: string;
   updatedAt: string;

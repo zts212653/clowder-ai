@@ -3,7 +3,7 @@
  * Agent 服务的共享类型定义
  */
 
-import type { CatId, MessageContent, ReplyPreview } from '@cat-cafe/shared';
+import type { CatId, MessageContent, ReplyPreview, TaskStatus } from '@cat-cafe/shared';
 import type { Span } from '@opentelemetry/api';
 import type { CliDiagnostics } from '../../../utils/cli-diagnostics.js';
 import type { CliSpawnOptions } from '../../../utils/cli-types.js';
@@ -116,6 +116,19 @@ export interface AuditContext {
   threadId: string;
   userId: string;
   catId: CatId;
+}
+
+/** F159 Phase F: scoped host-native callbacks available to CatAgent tools. */
+export interface CatAgentScopedCallbackOptions {
+  currentTask?: {
+    invocationId: string;
+    currentTaskId: string;
+    updateCurrentTaskStatus: (patch: {
+      status?: TaskStatus;
+      progress?: number;
+      summary?: string;
+    }) => void | Promise<void>;
+  };
 }
 
 /**
@@ -269,6 +282,8 @@ export interface AgentServiceOptions {
   signal?: AbortSignal;
   /** Correlation context for audit logging and raw trace linking */
   auditContext?: AuditContext;
+  /** F159 Phase F: host-owned scoped callbacks for CatAgent native tools. */
+  catAgentScopedCallbacks?: CatAgentScopedCallbackOptions;
   /** Static identity prompt (Claude: --append-system-prompt, others: prepend to prompt) */
   systemPrompt?: string;
   /** Static identity prompt used only if a resumed carrier creates a fresh fallback session. */

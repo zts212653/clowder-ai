@@ -254,11 +254,21 @@ function accountToRuntimeProfile(ref: string, account: AccountConfig, projectRoo
   const builtinProtocol = builtinClient ? protocolForClient(builtinClient) : null;
   const isOAuth = account.authType === 'oauth';
   const isBuiltin = !!builtinClient && isOAuth;
+  // F159 G2 AC-G21: api_key accounts with explicit `account.clientFamily` set
+  // `profile.client` to that family — enables the fail-closed family guard in
+  // catagent-credentials.ts (AC-G22) so that e.g. an api_key account marked
+  // `clientFamily='openai'` cannot satisfy an Anthropic adapter request.
+  // Strictly read from `clientFamily` only — never from legacy F171 `clientId`
+  // (which is freeform display, not authoritative routing/security identity).
+  // Legacy api_key accounts without `clientFamily` fall through with
+  // `profile.client=undefined`, preserving pre-G2 best-effort resolution.
+  const apiKeyClient = !isOAuth ? account.clientFamily : undefined;
+  const resolvedClient = isBuiltin ? builtinClient : apiKeyClient;
   return {
     id: ref,
     authType: account.authType,
     kind: isBuiltin ? 'builtin' : 'api_key',
-    ...(isBuiltin && builtinClient ? { client: builtinClient } : {}),
+    ...(resolvedClient ? { client: resolvedClient } : {}),
     ...(builtinProtocol ? { protocol: builtinProtocol } : {}),
     ...(account.baseUrl ? { baseUrl: account.baseUrl } : {}),
     ...(apiKey ? { apiKey } : {}),
@@ -274,6 +284,16 @@ export function validateRuntimeProviderBinding(
   profile: RuntimeProviderProfile,
   _defaultModel?: string | null,
 ): string | null {
+  // F159 G2: reject profiles whose client family doesn't match — before any
+  // per-client early returns (Google gateway, ACP) that would bypass this
+  // guard. For api_key accounts this fires only when `clientFamily` was
+  // explicitly set (profile.client populated from account.clientFamily in
+  // accountToRuntimeProfile). Codex R6 P2: moved up from below the Google
+  // branch to prevent family-mismatch bypass through third-party gateways.
+  const expectedClient = resolveBuiltinClientForProvider(clientId);
+  if (expectedClient && profile.client && profile.client !== expectedClient) {
+    return `bound provider profile "${profile.id}" (family "${profile.client}") is incompatible with client "${clientId}"`;
+  }
   // Allow api_key accounts for google only when using third-party gateways.
   if (clientId === 'google' && profile.authType !== 'oauth') {
     const trimmedBaseUrl = profile.baseUrl?.trim();
@@ -291,10 +311,6 @@ export function validateRuntimeProviderBinding(
   }
   // F161: Generic ACP is a transport, not a provider — any account is valid.
   if (clientId === 'acp') return null;
-  const expectedClient = resolveBuiltinClientForProvider(clientId);
-  if (expectedClient && profile.authType === 'oauth' && profile.client && profile.client !== expectedClient) {
-    return `bound provider profile "${profile.id}" is incompatible with client "${clientId}"`;
-  }
   // Protocol matching removed: protocol is now provider-determined, not an
   // account-level attribute. Runtime env injection uses provider directly.
   return null;

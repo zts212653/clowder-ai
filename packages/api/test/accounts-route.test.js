@@ -151,6 +151,115 @@ describe('accounts routes', () => {
     }
   });
 
+  // ── F159 G2: clientFamily round-trip (Hub Accounts path regression) ──
+
+  it('F159 G2: POST with clientFamily persists and returns it in GET', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { accountsRoutes } = await import('../dist/routes/accounts.js');
+    const app = Fastify();
+    await app.register(accountsRoutes);
+    await app.ready();
+
+    const projectDir = await makeTmpDir('clientfamily-create');
+    setGlobalRoot(projectDir);
+    try {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/accounts',
+        headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          projectPath: projectDir,
+          displayName: 'OpenAI Key',
+          authType: 'api_key',
+          clientId: 'openai',
+          clientFamily: 'openai',
+          baseUrl: 'https://api.openai.com/v1',
+          apiKey: 'sk-test-openai',
+          models: ['gpt-5.4'],
+        }),
+      });
+      assert.equal(createRes.statusCode, 200);
+      const created = createRes.json();
+      assert.equal(created.profile.clientFamily, 'openai', 'clientFamily must be returned on create');
+      assert.equal(created.profile.clientId, 'openai', 'clientId must be returned on create');
+
+      // Verify via GET
+      const listRes = await app.inject({
+        method: 'GET',
+        url: `/api/accounts?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+      const listed = listRes.json().providers.find((p) => p.id === created.profile.id);
+      assert.ok(listed, 'profile should appear in list');
+      assert.equal(listed.clientFamily, 'openai', 'clientFamily must persist across GET');
+      assert.equal(listed.clientId, 'openai', 'clientId must persist across GET');
+    } finally {
+      restoreGlobalRoot();
+      await rm(projectDir, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
+  it('F159 G2: PATCH updates clientFamily on an existing api_key account', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { accountsRoutes } = await import('../dist/routes/accounts.js');
+    const app = Fastify();
+    await app.register(accountsRoutes);
+    await app.ready();
+
+    const projectDir = await makeTmpDir('clientfamily-patch');
+    setGlobalRoot(projectDir);
+    try {
+      // Create with anthropic family
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/accounts',
+        headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          projectPath: projectDir,
+          displayName: 'Switchable Key',
+          authType: 'api_key',
+          clientId: 'anthropic',
+          clientFamily: 'anthropic',
+          baseUrl: 'https://api.anthropic.com',
+          apiKey: 'sk-ant-test',
+          models: ['claude-opus-4-6'],
+        }),
+      });
+      assert.equal(createRes.statusCode, 200);
+      const profileId = createRes.json().profile.id;
+
+      // PATCH to openai family
+      const patchRes = await app.inject({
+        method: 'PATCH',
+        url: `/api/accounts/${profileId}`,
+        headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          projectPath: projectDir,
+          clientId: 'openai',
+          clientFamily: 'openai',
+          baseUrl: 'https://api.openai.com/v1',
+        }),
+      });
+      assert.equal(patchRes.statusCode, 200);
+      assert.equal(patchRes.json().profile.clientFamily, 'openai', 'clientFamily must update on PATCH');
+      assert.equal(patchRes.json().profile.clientId, 'openai', 'clientId must update on PATCH');
+
+      // Verify via GET
+      const listRes = await app.inject({
+        method: 'GET',
+        url: `/api/accounts?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+      const listed = listRes.json().providers.find((p) => p.id === profileId);
+      assert.equal(listed.clientFamily, 'openai', 'clientFamily must persist after PATCH');
+    } finally {
+      restoreGlobalRoot();
+      await rm(projectDir, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
   // clowder-ai#340: POST /api/accounts/:id/test route removed — incomplete feature with no frontend entry.
   // Probe/heuristic protocol inference deleted alongside.
 

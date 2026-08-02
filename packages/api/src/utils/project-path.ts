@@ -12,6 +12,7 @@ import { realpathSync } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
 import { homedir, platform, tmpdir } from 'node:os';
 import { delimiter, relative, resolve, win32 } from 'node:path';
+import { containsProtectedSegment } from '../domains/workspace/workspace-security.js';
 
 // ---------------------------------------------------------------------------
 // Denylist: known system directories that should never be project roots
@@ -141,6 +142,15 @@ export async function validateProjectPathDetailed(
     const realPath = await realpathFn(absPath);
 
     if (!isUnderAllowedRoot(realPath)) return { ok: false, reason: 'denied_root' };
+
+    // Reject paths that are inside (or are) a workspace-protected namespace.
+    // A protected root makes the segment denylist ineffective — tools using
+    // it as workDir can reach protected files via relative paths with no
+    // protected segment (e.g. .cat-cafe/credentials.json → "credentials.json").
+    const protectedSeg = containsProtectedSegment(realPath);
+    if (protectedSeg) {
+      return { ok: false, reason: 'denied_root', message: `path contains protected segment "${protectedSeg}"` };
+    }
 
     const info = await statFn(realPath);
     if (!info.isDirectory()) return { ok: false, reason: 'not_directory' };

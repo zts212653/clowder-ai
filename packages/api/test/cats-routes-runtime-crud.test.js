@@ -3179,4 +3179,448 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const fetched = JSON.parse(getRes.body).cats.find((cat) => cat.id === 'transition-cat');
     assert.equal(fetched.cli, undefined, 'GET confirms cli removed after PATCH cli:null');
   });
+
+  // ── F159 G2: CatAgent catAgentProtocol route regression ───────────────────
+
+  it('F159 G2: POST catagent persists catAgentProtocol, PATCH updates it, client-switch cleans up', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // 1. POST catagent with openai-chat protocol — must use codex (openai family) account
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'runtime-catagent',
+        name: 'CatAgent 猫',
+        displayName: 'CatAgent 猫',
+        avatar: '/avatars/catagent.png',
+        color: { primary: '#6366f1', secondary: '#e0e7ff' },
+        mentionPatterns: ['@runtime-catagent'],
+        roleDescription: 'CatAgent 协议验证',
+        clientId: 'catagent',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
+        catAgentProtocol: 'openai-chat',
+      }),
+    });
+    assert.equal(createRes.statusCode, 201, `POST catagent failed: ${createRes.body}`);
+    const createdBody = JSON.parse(createRes.body);
+    assert.equal(createdBody.cat.catAgentProtocol, 'openai-chat', 'POST response should include catAgentProtocol');
+
+    // 2. GET confirms the field persisted
+    const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    assert.equal(listRes.statusCode, 200);
+    const listed = JSON.parse(listRes.body).cats.find((cat) => cat.id === 'runtime-catagent');
+    assert.ok(listed, 'runtime-catagent should appear in GET /api/cats');
+    assert.equal(listed.catAgentProtocol, 'openai-chat', 'GET should return persisted catAgentProtocol');
+
+    // 3. PATCH to change catAgentProtocol to 'anthropic-messages' + switch account to claude
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-catagent',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catAgentProtocol: 'anthropic-messages',
+        accountRef: 'claude',
+        defaultModel: 'claude-sonnet-4-6',
+      }),
+    });
+    assert.equal(patchRes.statusCode, 200, `PATCH catAgentProtocol failed: ${patchRes.body}`);
+    const patchedBody = JSON.parse(patchRes.body);
+    assert.equal(
+      patchedBody.cat.catAgentProtocol,
+      'anthropic-messages',
+      'PATCH response should reflect updated protocol',
+    );
+
+    // 4. GET confirms the update
+    const listAfterPatchRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    const listedAfterPatch = JSON.parse(listAfterPatchRes.body).cats.find((cat) => cat.id === 'runtime-catagent');
+    assert.equal(listedAfterPatch.catAgentProtocol, 'anthropic-messages', 'GET should confirm catAgentProtocol update');
+
+    // 5. PATCH switching clientId away from catagent → catAgentProtocol cleaned up
+    const switchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-catagent',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        clientId: 'openai',
+        defaultModel: 'gpt-5.4',
+      }),
+    });
+    assert.equal(switchRes.statusCode, 200, `client switch failed: ${switchRes.body}`);
+    const switchedBody = JSON.parse(switchRes.body);
+    assert.equal(switchedBody.cat.clientId, 'openai', 'should be openai after switch');
+    assert.equal(switchedBody.cat.catAgentProtocol, undefined, 'catAgentProtocol must be cleaned up on client switch');
+
+    // 6. GET confirms catAgentProtocol is gone
+    const listAfterSwitchRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    const listedAfterSwitch = JSON.parse(listAfterSwitchRes.body).cats.find((cat) => cat.id === 'runtime-catagent');
+    assert.equal(
+      listedAfterSwitch.catAgentProtocol,
+      undefined,
+      'GET should confirm catAgentProtocol cleaned up after client switch',
+    );
+
+    // 7. Also verify on-disk catalog: catAgentProtocol must not linger
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+    const persisted = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const variant = persisted.breeds.find((breed) => breed.catId === 'runtime-catagent')?.variants?.[0];
+    assert.equal(variant?.catAgentProtocol, undefined, 'on-disk catalog must not retain stale catAgentProtocol');
+  });
+
+  it('F159 G2: POST catagent rejects protocol-account family mismatch', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // openai-chat + claude (anthropic) → must reject (family mismatch)
+    const rejectRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'runtime-catagent-mismatch',
+        name: 'Mismatched CatAgent',
+        displayName: 'Mismatched CatAgent',
+        avatar: '/avatars/catagent.png',
+        color: { primary: '#6366f1', secondary: '#e0e7ff' },
+        mentionPatterns: ['@runtime-catagent-mismatch'],
+        roleDescription: 'Family mismatch test',
+        clientId: 'catagent',
+        accountRef: 'claude',
+        defaultModel: 'claude-sonnet-4-6',
+        catAgentProtocol: 'openai-chat',
+      }),
+    });
+    assert.equal(rejectRes.statusCode, 400, 'openai-chat + claude should be rejected (family mismatch)');
+    assert.match(JSON.parse(rejectRes.body).error, /incompatible/i);
+
+    // anthropic-messages + codex (openai) → must reject (family mismatch)
+    const rejectRes2 = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'runtime-catagent-mismatch2',
+        name: 'Mismatched CatAgent 2',
+        displayName: 'Mismatched CatAgent 2',
+        avatar: '/avatars/catagent.png',
+        color: { primary: '#6366f1', secondary: '#e0e7ff' },
+        mentionPatterns: ['@runtime-catagent-mismatch2'],
+        roleDescription: 'Family mismatch test 2',
+        clientId: 'catagent',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
+        catAgentProtocol: 'anthropic-messages',
+      }),
+    });
+    assert.equal(rejectRes2.statusCode, 400, 'anthropic-messages + codex should be rejected (family mismatch)');
+
+    // anthropic-messages + claude → must pass (correct family)
+    const acceptRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'runtime-catagent-correct',
+        name: 'Correct CatAgent',
+        displayName: 'Correct CatAgent',
+        avatar: '/avatars/catagent.png',
+        color: { primary: '#6366f1', secondary: '#e0e7ff' },
+        mentionPatterns: ['@runtime-catagent-correct'],
+        roleDescription: 'Correct family test',
+        clientId: 'catagent',
+        accountRef: 'claude',
+        defaultModel: 'claude-sonnet-4-6',
+        catAgentProtocol: 'anthropic-messages',
+      }),
+    });
+    assert.equal(acceptRes.statusCode, 201, `anthropic-messages + claude should pass: ${acceptRes.body}`);
+  });
+
+  it('F159 G2: PATCH-only catAgentProtocol rejects family mismatch', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // Setup: create catagent with openai-chat + codex (valid combo)
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'runtime-patch-proto',
+        name: 'Patch Protocol Test',
+        displayName: 'Patch Protocol Test',
+        avatar: '/avatars/catagent.png',
+        color: { primary: '#6366f1', secondary: '#e0e7ff' },
+        mentionPatterns: ['@runtime-patch-proto'],
+        roleDescription: 'PATCH protocol-only mismatch test',
+        clientId: 'catagent',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
+        catAgentProtocol: 'openai-chat',
+      }),
+    });
+    assert.equal(createRes.statusCode, 201, `setup POST failed: ${createRes.body}`);
+
+    // PATCH only catAgentProtocol to anthropic-messages — codex is OpenAI family → must 400
+    const mismatchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-patch-proto',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ catAgentProtocol: 'anthropic-messages' }),
+    });
+    assert.equal(mismatchRes.statusCode, 400, 'PATCH-only protocol to anthropic with codex account must reject');
+    assert.match(JSON.parse(mismatchRes.body).error, /incompatible/i);
+
+    // Reverse: create catagent with anthropic-messages + claude (valid combo)
+    const createRes2 = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'runtime-patch-proto2',
+        name: 'Patch Protocol Test 2',
+        displayName: 'Patch Protocol Test 2',
+        avatar: '/avatars/catagent.png',
+        color: { primary: '#6366f1', secondary: '#e0e7ff' },
+        mentionPatterns: ['@runtime-patch-proto2'],
+        roleDescription: 'PATCH protocol-only mismatch test 2',
+        clientId: 'catagent',
+        accountRef: 'claude',
+        defaultModel: 'claude-sonnet-4-6',
+        catAgentProtocol: 'anthropic-messages',
+      }),
+    });
+    assert.equal(createRes2.statusCode, 201, `setup POST 2 failed: ${createRes2.body}`);
+
+    // PATCH only catAgentProtocol to openai-chat — claude is Anthropic family → must 400
+    const mismatchRes2 = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-patch-proto2',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ catAgentProtocol: 'openai-chat' }),
+    });
+    assert.equal(mismatchRes2.statusCode, 400, 'PATCH-only protocol to openai with claude account must reject');
+
+    // Sanity: PATCH protocol + account together (valid switch) → must pass
+    const validRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-patch-proto',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catAgentProtocol: 'anthropic-messages',
+        accountRef: 'claude',
+        defaultModel: 'claude-sonnet-4-6',
+      }),
+    });
+    assert.equal(validRes.statusCode, 200, `PATCH protocol + account together should pass: ${validRes.body}`);
+  });
+
+  it('F159 G2: POST non-catagent with catAgentProtocol silently ignores the field', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // POST an openai member with catAgentProtocol → schema accepts but route should NOT persist
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'runtime-non-catagent',
+        name: '非 CatAgent 猫',
+        displayName: '非 CatAgent 猫',
+        avatar: '/avatars/default.png',
+        color: { primary: '#334155', secondary: '#cbd5e1' },
+        mentionPatterns: ['@runtime-non-catagent'],
+        roleDescription: '验证非 catagent 忽略 catAgentProtocol',
+        clientId: 'openai',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
+        catAgentProtocol: 'openai-chat',
+      }),
+    });
+    assert.equal(createRes.statusCode, 201, `POST non-catagent failed: ${createRes.body}`);
+    const createdBody = JSON.parse(createRes.body);
+    assert.equal(createdBody.cat.catAgentProtocol, undefined, 'non-catagent POST must not persist catAgentProtocol');
+
+    // GET confirms no leakage
+    const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    const listed = JSON.parse(listRes.body).cats.find((cat) => cat.id === 'runtime-non-catagent');
+    assert.equal(
+      listed.catAgentProtocol,
+      undefined,
+      'GET should confirm catAgentProtocol not persisted for non-catagent',
+    );
+  });
+
+  // ── F159 G2 Fix 1: nativeToolLevel + commandPolicy plumbed through API ──
+
+  it('F159 Phase F: POST catagent persists nativeToolLevel + commandPolicy, GET returns them', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'test' },
+      body: JSON.stringify({
+        catId: 'catagent-l2',
+        name: 'L2 Agent',
+        displayName: 'L2 Agent',
+        avatar: '/avatars/l2.png',
+        color: { primary: '#6366f1', secondary: '#e0e7ff' },
+        mentionPatterns: ['@l2'],
+        roleDescription: 'L2 catagent with command policy',
+        clientId: 'catagent',
+        accountRef: 'claude',
+        defaultModel: 'claude-sonnet-4-6',
+        nativeToolLevel: 'L2',
+        commandPolicy: [{ binary: 'pnpm', allowedSubcommands: ['test', 'lint'], allowedFlags: ['--reporter'] }],
+      }),
+    });
+    assert.equal(createRes.statusCode, 201, `POST failed: ${createRes.body}`);
+    const body = JSON.parse(createRes.body);
+    assert.equal(body.cat.nativeToolLevel, 'L2', 'POST response includes nativeToolLevel');
+    assert.ok(Array.isArray(body.cat.commandPolicy), 'POST response includes commandPolicy array');
+    assert.equal(body.cat.commandPolicy[0].binary, 'pnpm');
+
+    const getRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    const listed = JSON.parse(getRes.body).cats.find((c) => c.id === 'catagent-l2');
+    assert.equal(listed.nativeToolLevel, 'L2', 'GET returns persisted nativeToolLevel');
+    assert.equal(listed.commandPolicy[0].binary, 'pnpm', 'GET returns persisted commandPolicy');
+  });
+
+  it('F159 Phase F: PATCH updates nativeToolLevel, nullable commandPolicy clears it', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // Create L1 catagent
+    await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'test' },
+      body: JSON.stringify({
+        catId: 'catagent-patch-level',
+        name: 'Patch Level',
+        displayName: 'Patch Level',
+        avatar: '/avatars/p.png',
+        color: { primary: '#6366f1', secondary: '#e0e7ff' },
+        mentionPatterns: ['@pl'],
+        roleDescription: 'Level patch test',
+        clientId: 'catagent',
+        accountRef: 'claude',
+        defaultModel: 'claude-sonnet-4-6',
+        nativeToolLevel: 'L1',
+        commandPolicy: [{ binary: 'git', allowedSubcommands: ['status'] }],
+      }),
+    });
+
+    // PATCH nativeToolLevel to L2
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/catagent-patch-level',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'test' },
+      body: JSON.stringify({ nativeToolLevel: 'L2' }),
+    });
+    assert.equal(patchRes.statusCode, 200, `PATCH nativeToolLevel failed: ${patchRes.body}`);
+    assert.equal(JSON.parse(patchRes.body).cat.nativeToolLevel, 'L2');
+
+    // PATCH commandPolicy to null → clears it
+    const clearRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/catagent-patch-level',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'test' },
+      body: JSON.stringify({ commandPolicy: null }),
+    });
+    assert.equal(clearRes.statusCode, 200, `PATCH commandPolicy null failed: ${clearRes.body}`);
+    const cleared = JSON.parse(clearRes.body).cat;
+    assert.ok(!cleared.commandPolicy || cleared.commandPolicy === null, 'commandPolicy cleared');
+  });
+
+  // ── F159 G2 Fix 4: PATCH rebase builtins is protocol-aware ──
+
+  it('F159 G2: PATCH openai→catagent+openai-chat keeps codex builtin (no rebase to claude)', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // Create an openai member bound to codex builtin
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'test' },
+      body: JSON.stringify({
+        catId: 'rebase-proto',
+        name: 'Rebase Proto',
+        displayName: 'Rebase Proto',
+        avatar: '/avatars/rp.png',
+        color: { primary: '#6366f1', secondary: '#e0e7ff' },
+        mentionPatterns: ['@rp'],
+        roleDescription: 'Protocol-aware rebase test',
+        clientId: 'openai',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
+      }),
+    });
+    assert.equal(createRes.statusCode, 201, `POST openai member failed: ${createRes.body}`);
+
+    // PATCH to catagent + openai-chat — accountRef still codex
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/rebase-proto',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'test' },
+      body: JSON.stringify({
+        clientId: 'catagent',
+        catAgentProtocol: 'openai-chat',
+        accountRef: 'codex',
+      }),
+    });
+    assert.equal(patchRes.statusCode, 200, `PATCH to catagent+openai-chat failed: ${patchRes.body}`);
+    const patched = JSON.parse(patchRes.body).cat;
+    assert.equal(patched.clientId, 'catagent', 'clientId should be catagent');
+    assert.equal(patched.catAgentProtocol, 'openai-chat', 'catAgentProtocol should be openai-chat');
+    // The critical assertion: accountRef must NOT be rebased from codex → claude
+    // (would happen without protocol-aware rebase and then fail validation)
+  });
 });

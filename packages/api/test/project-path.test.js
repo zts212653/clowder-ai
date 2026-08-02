@@ -177,13 +177,68 @@ describe('validateProjectPath', () => {
   it('rejects symlinks that escape to denied paths', async () => {
     const linkPath = join(testDir, 'link-to-dev');
     if (existsSync(linkPath)) rmSync(linkPath);
+    let linkCreated = false;
     try {
       symlinkSync('/dev', linkPath);
-      const result = await validateProjectPath(linkPath);
-      assert.strictEqual(result, null);
+      linkCreated = true;
     } catch {
       // symlink creation may fail in sandboxed environments
     }
+    if (linkCreated) {
+      const result = await validateProjectPath(linkPath);
+      assert.strictEqual(result, null);
+    }
+  });
+
+  it('rejects .cat-cafe directory as project path (protected namespace)', async () => {
+    const catCafeDir = join(testDir, '.cat-cafe');
+    mkdirSync(catCafeDir, { recursive: true });
+    const result = await validateProjectPathDetailed(catCafeDir);
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.reason, 'denied_root');
+    assert.ok(result.message?.includes('.cat-cafe'));
+  });
+
+  it('rejects .git directory as project path (protected namespace)', async () => {
+    const gitDir = join(testDir, '.git');
+    mkdirSync(gitDir, { recursive: true });
+    const result = await validateProjectPathDetailed(gitDir);
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.reason, 'denied_root');
+  });
+
+  it('rejects symlink alias resolving to .cat-cafe', async () => {
+    const catCafeDir = join(testDir, '.cat-cafe');
+    mkdirSync(catCafeDir, { recursive: true });
+    const linkPath = join(testDir, 'sneaky-link');
+    if (existsSync(linkPath)) rmSync(linkPath);
+    // Separate symlink creation from assertions — catch only covers creation
+    let linkCreated = false;
+    try {
+      symlinkSync(catCafeDir, linkPath);
+      linkCreated = true;
+    } catch {
+      // symlink creation may fail in sandboxed environments — skip
+    }
+    if (linkCreated) {
+      const result = await validateProjectPathDetailed(linkPath);
+      assert.strictEqual(result.ok, false);
+      assert.strictEqual(result.reason, 'denied_root');
+    }
+  });
+
+  it('rejects case-insensitive .CAT-CAFE directory (P2 mixed-case bypass)', async () => {
+    const mixedCaseDir = join(testDir, '.CAT-CAFE');
+    mkdirSync(mixedCaseDir, { recursive: true });
+    const result = await validateProjectPathDetailed(mixedCaseDir);
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.reason, 'denied_root');
+  });
+
+  it('allows normal project with .cat-cafe descendant', async () => {
+    // testDir itself is valid — its .cat-cafe child is protected separately
+    const result = await validateProjectPathDetailed(testDir);
+    assert.strictEqual(result.ok, true);
   });
 });
 

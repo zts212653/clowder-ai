@@ -10,6 +10,8 @@ import { TagEditor } from './hub-tag-editor';
 import { formInputClass } from './mcp-form-helpers';
 
 const CLIENT_OPTIONS: BuiltinAccountClient[] = ['anthropic', 'openai', 'google', 'kimi', 'opencode', 'acp'];
+/** Client options for API-key mode — acp is OAuth-only (callback auth protocol). */
+const API_KEY_CLIENT_OPTIONS: BuiltinAccountClient[] = ['anthropic', 'openai', 'google', 'kimi', 'opencode'];
 
 /** Suggested models per client — kept in sync with cat-template.json clientDefaults. */
 const MODEL_SUGGESTIONS: Partial<Record<BuiltinAccountClient, string[]>> = {
@@ -30,6 +32,8 @@ export interface UnifiedAuthEditData {
   displayName?: string;
   baseUrl?: string;
   clientId?: BuiltinAccountClient;
+  /** Authoritative routing family — used as clientId fallback for accounts that have clientFamily but no clientId. */
+  clientFamily?: BuiltinAccountClient;
   authType?: ProfileAuthType;
   models?: string[];
   envVars?: Record<string, string>;
@@ -48,7 +52,14 @@ interface UnifiedAuthModalProps {
 
 export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initialClientId }: UnifiedAuthModalProps) {
   const isEdit = Boolean(editProfile);
-  const defaultClientId = editProfile?.clientId ?? initialClientId ?? 'anthropic';
+  // F159 AC-G21: clientFamily is authoritative for API-key accounts; prefer it
+  // over legacy clientId to prevent silent family rewrite on no-op edits.
+  const defaultClientId =
+    (editProfile?.authType === 'api_key' ? editProfile?.clientFamily : undefined) ??
+    editProfile?.clientId ??
+    editProfile?.clientFamily ??
+    initialClientId ??
+    'anthropic';
   const [authMode, setAuthMode] = useState<AuthMode>(editProfile?.authType === 'api_key' ? 'api_key' : 'oauth');
   const [clientId, setClientId] = useState<BuiltinAccountClient>(defaultClientId);
   const [displayName, setDisplayName] = useState(editProfile?.displayName ?? '');
@@ -68,7 +79,12 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
   const prevOpenRef = useRef(open);
   useEffect(() => {
     if (open && !prevOpenRef.current) {
-      const cid = editProfile?.clientId ?? initialClientId ?? 'anthropic';
+      const cid =
+        (editProfile?.authType === 'api_key' ? editProfile?.clientFamily : undefined) ??
+        editProfile?.clientId ??
+        editProfile?.clientFamily ??
+        initialClientId ??
+        'anthropic';
       setClientId(cid);
       setAuthMode(editProfile?.authType === 'api_key' ? 'api_key' : 'oauth');
       setDisplayName(editProfile?.displayName ?? '');
@@ -136,8 +152,20 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
           models,
           envVars: envVars ?? {},
         };
-        if (editProfile?.clientId) {
+        // Guard both clientId and clientFamily: only write when the profile already
+        // had the field or the user explicitly changed the client selector.
+        // Legacy untyped accounts (e.g. Kimi/Moonshot with no clientId/clientFamily)
+        // rely on name-based heuristics in legacyProfileClient(); stamping the modal
+        // default 'anthropic' overwrites that inference and drops them from their
+        // family picker.
+        const hadClientId = editProfile?.clientId != null;
+        const hadClientFamily = editProfile?.clientFamily != null;
+        const userChangedClient = clientId !== defaultClientId;
+        if (hadClientId || userChangedClient) {
           patch.clientId = clientId;
+        }
+        if (API_KEY_CLIENT_OPTIONS.includes(clientId) && (hadClientFamily || userChangedClient)) {
+          patch.clientFamily = clientId;
         }
         if (baseUrl.trim()) patch.baseUrl = baseUrl.trim();
         if (apiKey.trim()) patch.apiKey = apiKey.trim();
@@ -182,7 +210,8 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
           body: JSON.stringify({
             displayName: displayName.trim(),
             authType: 'api_key',
-            ...(initialClientId ? { clientId: initialClientId } : {}),
+            clientId: initialClientId ?? clientId,
+            clientFamily: initialClientId ?? clientId,
             baseUrl: baseUrl.trim(),
             apiKey: apiKey.trim(),
             models,
@@ -271,27 +300,27 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
             />
           </div>
 
-          {/* OAuth mode: Client dropdown */}
-          {isOAuth && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-cafe-secondary">Client</label>
-              {initialClientId ? (
-                <p className={formInputClass}>{builtinClientLabel(initialClientId)}</p>
-              ) : (
-                <select
-                  value={clientId}
-                  onChange={(e) => setClientId(e.target.value as BuiltinAccountClient)}
-                  className={formInputClass}
-                >
-                  {CLIENT_OPTIONS.map((c) => (
-                    <option key={c} value={c}>
-                      {builtinClientLabel(c)}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-          )}
+          {/* Client selector — shown in both OAuth and API-key modes */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-cafe-secondary">
+              {isOAuth ? 'Client' : 'Client Family'}
+            </label>
+            {initialClientId ? (
+              <p className={formInputClass}>{builtinClientLabel(initialClientId)}</p>
+            ) : (
+              <select
+                value={clientId}
+                onChange={(e) => setClientId(e.target.value as BuiltinAccountClient)}
+                className={formInputClass}
+              >
+                {(isOAuth ? CLIENT_OPTIONS : API_KEY_CLIENT_OPTIONS).map((c) => (
+                  <option key={c} value={c}>
+                    {builtinClientLabel(c)}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
 
           {/* API Key mode: Base URL + API Key */}
           {!isOAuth && (

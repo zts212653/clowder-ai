@@ -7,7 +7,14 @@
  * Phase 4-F: 支持多 Variant（多版本猫召唤）
  */
 
-import type { AgyProfileConfig, CatColor, ClientId } from './cat.js';
+import type {
+  AgyProfileConfig,
+  CatAgentProtocol,
+  CatColor,
+  ClientId,
+  CommandPolicyEntry,
+  NativeToolLevel,
+} from './cat.js';
 import type { CatId } from './ids.js';
 import type { VoiceConfig } from './tts.js';
 
@@ -90,6 +97,14 @@ export interface CatVariant {
   readonly color?: CatColor;
   /** Per-cat context budget (optional, falls back to defaults) */
   readonly contextBudget?: ContextBudget;
+  /** F159 Phase F: CatAgent native tool level. Omitted = L0. */
+  readonly nativeToolLevel?: NativeToolLevel;
+  /** F159 Phase F: allowlist-first command policy for L2 run_command. */
+  readonly commandPolicy?: readonly CommandPolicyEntry[];
+  /** F159 Phase G G2 (AC-G13): CatAgent wire protocol selection. Only
+   *  meaningful when `clientId === 'catagent'`; omitted defaults to
+   *  `'anthropic-messages'` (G1 catagent behavior preserved). */
+  readonly catAgentProtocol?: CatAgentProtocol;
   /** Optional per-variant override for sessionChain; falls back to breed.features.sessionChain. */
   readonly sessionChain?: boolean;
   /** F34: Per-cat TTS voice (optional, falls back to defaults in cat-voices.ts) */
@@ -221,8 +236,18 @@ export type AccountProtocol = 'anthropic' | 'openai' | 'openai-responses' | 'goo
  */
 export interface AccountConfig {
   readonly authType: 'oauth' | 'api_key';
-  /** F171: Explicit client identity for API key accounts (e.g. 'anthropic', 'openai'). */
+  /** F171 (legacy display): freeform client identity surfaced in Hub UI.
+   *  Do NOT use for routing/security decisions — prefer `clientFamily`,
+   *  which is typed and drives `profile.client` in `accountToRuntimeProfile`.
+   *  TODO(F159 G3+): sunset once Hub UI migrates fully to `clientFamily`. */
   readonly clientId?: string;
+  /** F159 G2 (AC-G20): typed client family for api_key accounts.
+   *  Authoritative source for adapter routing. When set on api_key accounts,
+   *  drives `profile.client` in `accountToRuntimeProfile`, which enables the
+   *  family fail-closed guard in `catagent-credentials.ts` (AC-G22).
+   *  Optional: existing api_key accounts without `clientFamily` continue to
+   *  resolve best-effort (no `profile.client` set → guard falls through). */
+  readonly clientFamily?: 'anthropic' | 'openai' | 'google' | 'kimi' | 'opencode';
   readonly baseUrl?: string;
   readonly models?: readonly string[];
   readonly displayName?: string;
