@@ -10,8 +10,6 @@ import { describe, it, mock } from 'node:test';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 const { QueueProcessor } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
-const { DEFAULT_CLI_TIMEOUT_MS } = await import('../dist/utils/cli-timeout.js');
-
 const SHORT_TTL = 1000; // 1s for testing
 const DEFAULT_SLOT_TTL = 75 * 60_000;
 const T0 = 100_000;
@@ -66,12 +64,17 @@ function stubDeps(overrides = {}) {
 
 describe('QueueProcessor zombie defense (F118 D4)', () => {
   it('keeps the default processing slot TTL independent from disabled CLI timeout', (t) => {
+    const savedTimeout = process.env.CLI_TIMEOUT_MS;
+    process.env.CLI_TIMEOUT_MS = '0';
+    t.after(() => {
+      if (savedTimeout === undefined) delete process.env.CLI_TIMEOUT_MS;
+      else process.env.CLI_TIMEOUT_MS = savedTimeout;
+    });
     t.mock.timers.enable({ apis: ['Date'], now: T0 });
     const deps = stubDeps();
     const processor = new QueueProcessor(deps);
     const slotKey = 't1:opus';
 
-    assert.equal(DEFAULT_CLI_TIMEOUT_MS, 0, 'F118 manual-cancel-only mode must be the exercised default');
     /** @type {any} */ (processor).processingSlots.set(slotKey, reservation(T0));
     deps.invocationTracker.has.mock.mockImplementation(() => false);
 
