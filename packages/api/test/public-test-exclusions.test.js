@@ -9,13 +9,11 @@ const packageRoot = resolve(__dirname, '..');
 const registryPath = resolve(packageRoot, 'config/public-test-exclusions.json');
 const resolverModuleUrl = pathToFileURL(resolve(packageRoot, 'scripts/resolve-public-test-files.mjs')).href;
 
-const LEGACY_EXCLUSIONS = [
+const RECONCILED_EXCLUSIONS = [
   'redis-',
-  'concurrent-fault-drill',
   'task-progress-store',
   'session-strategy-phase3',
   'signal-article-store',
-  'persistence-fault-drill',
   'cursor-store-atomicity',
   'workflow-sop-store',
   'codex-agent-service',
@@ -37,7 +35,6 @@ const LEGACY_EXCLUSIONS = [
   'governance-pack\\.test',
   'pack-integration\\.test',
   'project-setup-flow\\.test',
-  'process-liveness-probe\\.test',
   'expedition-bootstrap\\.test',
   'rules-route\\.test',
   'root-md-slim\\.test',
@@ -46,7 +43,6 @@ const LEGACY_EXCLUSIONS = [
   'f188-harness-consistency\\.test',
   'orphan-chrome-cleaner\\.test',
   'capabilities-route\\.test',
-  'antigravity-run-command-executor\\.test',
   'f203-phase-i-opencode-l0\\.test',
   'f236-cc-anchor-hook\\.test',
   'github-schedule-factories\\.test',
@@ -71,12 +67,12 @@ async function listTestFiles(rootDir, relDir = '') {
   return files.sort();
 }
 
-function applyLegacySelection(files) {
-  const patterns = LEGACY_EXCLUSIONS.map((value) => new RegExp(value));
+function applyReconciledSelection(files) {
+  const patterns = RECONCILED_EXCLUSIONS.map((value) => new RegExp(value));
   return files.filter((file) => patterns.every((pattern) => !pattern.test(file))).sort();
 }
 
-test('registry preserves metadata for active legacy exclusions and drops stale ones', async () => {
+test('registry preserves metadata for reconciled exclusions and drops retired ones', async () => {
   const { loadPublicTestExclusions } = await import(resolverModuleUrl);
   const registry = await loadPublicTestExclusions({ configPath: registryPath });
 
@@ -98,15 +94,15 @@ test('registry preserves metadata for active legacy exclusions and drops stale o
       category: 'source_only',
       owner: '@zts212653',
       introducedBy: '069d0f0fb',
-      expiresOn: '2026-07-31',
+      expiresOn: '2026-08-31',
     },
   );
 });
 
-test('resolver preserves legacy public test file selection parity', async () => {
+test('resolver preserves the reconciled public test file selection', async () => {
   const { resolvePublicTestFiles } = await import(resolverModuleUrl);
   const allTestFiles = await listTestFiles(resolve(packageRoot, 'test'));
-  const expected = applyLegacySelection(allTestFiles);
+  const expected = applyReconciledSelection(allTestFiles);
 
   const resolved = await resolvePublicTestFiles({
     packageRoot,
