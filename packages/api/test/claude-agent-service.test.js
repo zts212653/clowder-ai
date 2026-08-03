@@ -505,18 +505,18 @@ test('handles mixed text and tool_use in single assistant message', async () => 
   assert.equal(contentMsgs[2].content, 'Done reading.');
 });
 
-test('passes --resume flag when sessionId is provided', async () => {
+test('passes --resume flag when sessionId is a valid UUID', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
   const service = createClaudeAgentService({ spawnFn });
 
-  const promise = collect(service.invoke('continue', { sessionId: 'resume-123' }));
+  const promise = collect(service.invoke('continue', { sessionId: '550e8400-e29b-41d4-a716-446655440000' }));
   emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
   await promise;
 
   const args = spawnFn.mock.calls[0].arguments[1];
   assert.ok(args.includes('--resume'));
-  assert.ok(args.includes('resume-123'));
+  assert.ok(args.includes('550e8400-e29b-41d4-a716-446655440000'));
 });
 
 test('does not include --resume when no sessionId', async () => {
@@ -530,6 +530,20 @@ test('does not include --resume when no sessionId', async () => {
 
   const args = spawnFn.mock.calls[0].arguments[1];
   assert.ok(!args.includes('--resume'));
+});
+
+test('skips --resume when sessionId is not a UUID (e.g. catagent-XXX)', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({ spawnFn });
+
+  const promise = collect(service.invoke('continue', { sessionId: 'catagent-1782963968527-9hw36e' }));
+  emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  assert.ok(!args.includes('--resume'));
+  assert.ok(!args.includes('catagent-'));
 });
 
 test('passes cwd from workingDirectory option', async () => {
@@ -790,7 +804,7 @@ test('yields actionable rescue hint on invalid thinking signature resume failure
   const spawnFn = createMockSpawnFn(proc);
   const service = createClaudeAgentService({ spawnFn });
 
-  const promise = collect(service.invoke('resume me', { sessionId: 'sess-bad-thinking' }));
+  const promise = collect(service.invoke('resume me', { sessionId: '550e8400-e29b-41d4-a716-446655440000' }));
 
   proc.stderr.write(
     'API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.0: Invalid `signature` in `thinking` block"}}\n',
@@ -803,7 +817,7 @@ test('yields actionable rescue hint on invalid thinking signature resume failure
   assert.ok(errMsg);
   assert.ok(errMsg.error.includes('thinking signature'));
   assert.ok(errMsg.error.includes('pnpm rescue:claude:thinking'));
-  assert.ok(errMsg.error.includes('sess-bad-thinking'));
+  assert.ok(errMsg.error.includes('550e8400-e29b-41d4-a716-446655440000'));
   assert.ok(!errMsg.error.includes('messages.1.content.0'));
 });
 

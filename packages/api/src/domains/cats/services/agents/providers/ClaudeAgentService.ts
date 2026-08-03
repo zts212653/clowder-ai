@@ -56,6 +56,12 @@ const RESERVED_SYSTEM_PROMPT_FLAGS = new Set([
   '--append-system-prompt-file',
 ]);
 
+// F198 Bug #3: `claude --resume <id>` requires a valid session UUID when
+// used with --print. Guard sessionId before forwarding it as --resume.
+// Consumers (ClaudeBgCarrierService) should import from here for single
+// source of truth.
+export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // F198: exported so other Claude carriers (e.g. ClaudeBgCarrierService) can
 // reuse the single source of truth for profile mode routing.
 export const ANTHROPIC_PROFILE_MODE_KEY = 'CAT_CAFE_ANTHROPIC_PROFILE_MODE';
@@ -385,7 +391,12 @@ export class ClaudeAgentService implements AgentService {
       '--chrome',
     ];
 
-    if (options?.sessionId) {
+    // F198 Bug #3 + Coffee regression 2026-07-02: catagent-XXX from
+    // CatAgentService (or any non-UUID source) must NOT be forwarded as
+    // --resume — Claude Code rejects non-UUID values when used with --print.
+    // Mirror ClaudeBgCarrierService UUID guard so resume never enters Claude
+    // Code with a stale / wrong-format id.
+    if (options?.sessionId && UUID_PATTERN.test(options.sessionId)) {
       args.push('--resume', options.sessionId);
     }
     for (const dir of imageAccessDirs) {
