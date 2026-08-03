@@ -165,7 +165,7 @@ function wakeFor(input, index) {
     handoff: {
       sourceEventId: `route:metric-message-${index}:codex`,
       messageId: `metric-message-${index}`,
-      fromCatId: 'opus',
+      fromCatId: 'opus-5',
     },
   };
 }
@@ -174,7 +174,7 @@ async function runCase(input, index) {
   const effectClass =
     input.sourceSemantic === 'not_recorded' ? undefined : input.sourceSemantic.replace('cross_thread_', '');
   await runTurnCustodyRoute({
-    output: [input.checkpoint === 'next_turn_boundary' ? '@opus' : '@co-creator'],
+    output: [input.checkpoint === 'next_turn_boundary' ? '@opus-5' : '@co-creator'],
     triggerMessage: turnCustodyTriggerMessage(`metric-message-${index}`, `metric-thread-${index}`, effectClass),
     wake: wakeFor(input, index),
     projection: {

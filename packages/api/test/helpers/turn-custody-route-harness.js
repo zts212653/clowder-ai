@@ -91,7 +91,7 @@ export async function runTurnCustodyRoute({ output, triggerMessage, wake, projec
   try {
     const services = {
       codex: createSequenceService(output),
-      opus: createSequenceService(['@co-creator']),
+      'opus-5': createSequenceService(['@co-creator']),
     };
     const deps = createMockDeps(services, triggerMessage, projection);
     for await (const _message of routeSerial(
@@ -122,7 +122,7 @@ export function turnCustodyTriggerMessage(id, threadId, effectClass) {
   return {
     id,
     threadId,
-    catId: 'opus',
+    catId: 'opus-5',
     content: 'typed trigger',
     extra: {
       crossPost: {
