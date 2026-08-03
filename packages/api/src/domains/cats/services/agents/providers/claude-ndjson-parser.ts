@@ -198,6 +198,11 @@ export function transformClaudeEvent(
     const skipFinalText = Boolean(messageId && streamState.partialTextMessageIds.has(messageId));
     const content = message?.content;
     if (!Array.isArray(content)) return null;
+    const hasTextBlock = content.some((block) => {
+      if (typeof block !== 'object' || block === null) return false;
+      const candidate = block as Record<string, unknown>;
+      return candidate.type === 'text' && typeof candidate.text === 'string' && candidate.text.length > 0;
+    });
 
     // F230: Claude CLI can synthesize local assistant entries without an LLM
     // response. Keep that provider provenance structured here, before ordinary
@@ -252,7 +257,11 @@ export function transformClaudeEvent(
         messages.push(msg);
       }
     }
-    if (messageId && skipFinalText) {
+    // #1272: Claude can split one message ID across thinking/text/tool assistant
+    // envelopes. A thinking-only or tool-only envelope is not proof that the
+    // text-bearing final snapshot has arrived; clearing here makes that later
+    // snapshot look new and re-emits text already delivered by text_delta.
+    if (messageId && skipFinalText && hasTextBlock) {
       streamState.partialTextMessageIds.delete(messageId);
     }
     // #778: thinking-only final message — emit thinking as system_info so the
@@ -287,6 +296,13 @@ export function transformClaudeEvent(
       content: JSON.stringify({ type: 'rate_limit', catId, utilization, resetsAt }),
       timestamp: Date.now(),
     };
+  }
+
+  // #1272: result is the invocation terminal boundary. Clear any IDs that had
+  // partial text but no later text-bearing assistant envelope so state cannot
+  // leak into a subsequent invocation/session.
+  if (e.type === 'result') {
+    streamState.partialTextMessageIds.clear();
   }
 
   // result/error → error message (F045: include errorSubtype)
