@@ -2242,6 +2242,40 @@ async function main(): Promise<void> {
   const limbPairingStore = new LimbPairingStore();
   registerLimbNodeRoutes(app, { limbRegistry, pairingStore: limbPairingStore });
 
+  // F270 Phase A: macOS CoreBluetooth Limb. Persistent bindings fail closed
+  // without Redis; the helper itself stays lazy and is not spawned at startup.
+  const { registerBleRoutes } = await import('./routes/ble-routes.js');
+  if (process.platform === 'darwin' && redis) {
+    const [{ BleHelperClient }, { RedisBleBindingStore }, { BleDeviceManager }] = await Promise.all([
+      import('./domains/limb/ble/BleHelperClient.js'),
+      import('./domains/limb/ble/BleBindingStore.js'),
+      import('./domains/limb/ble/BleDeviceManager.js'),
+    ]);
+    const bleHelper = new BleHelperClient({ logger: app.log });
+    const bleManager = new BleDeviceManager({
+      helper: bleHelper,
+      store: new RedisBleBindingStore(redis, app.log),
+      registry: limbRegistry,
+      logger: app.log,
+    });
+    await bleManager.initialize();
+    registerBleRoutes(app, { manager: bleManager, platform: process.platform });
+    app.addHook('onClose', async () => {
+      bleManager.dispose();
+      await bleHelper.shutdown();
+    });
+    app.log.info(`[api] F270: hydrated ${bleManager.status().bindingCount} persistent BLE binding(s)`);
+  } else {
+    registerBleRoutes(app, {
+      manager: null,
+      platform: process.platform,
+      unavailableReason:
+        process.platform === 'darwin'
+          ? 'Redis is required for persistent BLE bindings'
+          : 'BLE helper is only available on macOS in Phase A',
+    });
+  }
+
   // F202-2B: Hoisted for late-binding GitHub schedule rehydration (closure set inside F202 block)
   let rehydrateGitHubSchedules: ((githubDeps: Record<string, unknown>) => Promise<void>) | undefined;
   let getGitHubPluginEnv: () => Record<string, string | undefined> = () => ({});

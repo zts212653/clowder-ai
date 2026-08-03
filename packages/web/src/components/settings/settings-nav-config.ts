@@ -99,6 +99,13 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     description: '推送订阅、提醒策略与设备联动。',
   },
   {
+    id: 'devices',
+    label: '设备与 Limb',
+    icon: 'activity',
+    color: 'var(--color-gemini-primary)',
+    description: 'BLE 设备发现、显式绑定和类型化 Limb 能力。',
+  },
+  {
     id: 'ops',
     label: '运维监控',
     icon: 'activity',

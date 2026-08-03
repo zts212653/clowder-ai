@@ -38,6 +38,10 @@
       "identity": null,
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
+      "extendInfo": {
+        "NSBluetoothAlwaysUsageDescription": "Clowder AI uses Bluetooth to discover and read devices explicitly bound by the operator.",
+        "NSBluetoothPeripheralUsageDescription": "Clowder AI uses Bluetooth to read devices explicitly bound by the operator."
+      },
       "extraResources": [
         {
           "from": "../bundled/node-darwin-${arch}",
@@ -46,6 +50,10 @@
         {
           "from": "../bundled/redis-darwin-${arch}",
           "to": ".cat-cafe/redis/darwin-${arch}"
+        },
+        {
+          "from": "../bundled/ble-helper-darwin-${arch}",
+          "to": "packages/api/ble-helper"
         }
       ]
     },

@@ -14,6 +14,7 @@ import { HubEnvFilesTab } from '../HubEnvFilesTab';
 import { PushSettingsPanel } from '../PushSettingsPanel';
 import { useConfirm } from '../useConfirm';
 import { VoiceSettingsPanel } from '../VoiceSettingsPanel';
+import { BleDevicesContent } from './BleDevicesContent';
 import { CatDossierContent } from './CatDossierContent';
 import { ConciergeSettingsContent } from './ConciergeSettingsContent';
 import { MarketplaceContent } from './MarketplaceContent';
@@ -207,6 +208,8 @@ export function SettingsContent({ section, initialEditCatId }: SettingsContentPr
         return <HubEnvFilesTab excludeCategories={['connector']} />;
       case 'notify':
         return <PushSettingsPanel />;
+      case 'devices':
+        return <BleDevicesContent />;
       case 'ops':
         return <OpsContent />;
       case 'rules':

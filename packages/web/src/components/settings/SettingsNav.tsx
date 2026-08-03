@@ -78,6 +78,7 @@ const SECTION_KEYWORDS: Record<string, string> = {
   rules: '规则 家规 提示词 system prompt SOP 协作 governance',
   system: '配置 环境 .env bubble A2A codex',
   notify: '推送 通知 push web',
+  devices: '设备 Limb 蓝牙 Bluetooth BLE GATT 传感器 按钮 hardware',
   ops: '运维 监控 排行 记忆 健康 命令 救援 usage',
   concierge: '猫猫球 悬浮球 值班猫 前台 主动性 proactive ball persona',
 };

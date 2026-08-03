@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>ai.clowderai.ble-helper</string>
+  <key>CFBundleName</key>
+  <string>Clowder AI BLE Helper</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>LSBackgroundOnly</key>
+  <true/>
+  <key>NSBluetoothAlwaysUsageDescription</key>
+  <string>Clowder AI uses Bluetooth to discover and read devices explicitly bound by the operator.</string>
+  <key>NSBluetoothPeripheralUsageDescription</key>
+  <string>Clowder AI uses Bluetooth to read devices explicitly bound by the operator.</string>
+</dict>
+</plist>

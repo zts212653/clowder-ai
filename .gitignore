@@ -149,6 +149,7 @@ assets/prototypes/
 desktop/node_modules/
 desktop-dist/
 bundled/
+native/ble-helper/macos/.build/
 docs/bug-report/werewolf-investigation/poster-screenshot.png
 .worktrees/
 .review-worktrees/

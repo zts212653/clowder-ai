@@ -196,6 +196,40 @@ for arch in "${ARCHS[@]}"; do
   build_redis "$arch"
 done
 
+# Build the native CoreBluetooth helper for each packaged architecture.
+# The helper carries its own Bluetooth usage description and communicates
+# with the API only through the versioned NDJSON protocol on stdio.
+build_ble_helper() {
+  local arch="$1"
+  local target_arch="$arch"
+  if [[ "$arch" == "x64" ]]; then target_arch="x86_64"; fi
+  local source_dir="${PROJECT_ROOT}/native/ble-helper/macos"
+  local out_dir="${BUNDLED_DIR}/ble-helper-darwin-${arch}"
+  mkdir -p "$out_dir"
+  swiftc \
+    -target "${target_arch}-apple-macos13.0" \
+    -O \
+    -whole-module-optimization \
+    -framework CoreBluetooth \
+    -Xlinker -sectcreate \
+    -Xlinker __TEXT \
+    -Xlinker __info_plist \
+    -Xlinker "${source_dir}/Info.plist" \
+    "${source_dir}/Protocol.swift" \
+    "${source_dir}/BleSupport.swift" \
+    "${source_dir}/BleController.swift" \
+    "${source_dir}/BleController+Delegates.swift" \
+    "${source_dir}/main.swift" \
+    -o "${out_dir}/ble-helper" \
+    || die "BLE helper ${arch} build failed"
+  chmod +x "${out_dir}/ble-helper"
+  ok "ble-helper-darwin-${arch} built"
+}
+
+for arch in "${ARCHS[@]}"; do
+  build_ble_helper "$arch"
+done
+
 # ─── Step 5: (macOS skips CLI tarball bundling) ──────────────────────────
 bold "Step 5/6 — CLI tools (skipped on macOS)"
 # macOS DMG has no post-install execution phase (unlike Windows Inno Setup),

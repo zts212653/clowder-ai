@@ -41,4 +41,15 @@ describe('SettingsShell deep-link routing', () => {
     expect(html).toContain('data-section="members"');
     expect(html).toContain('data-active="members"');
   });
+
+  it('restores the devices deep link without routing it into notifications or ops', () => {
+    mockSearchParams = new URLSearchParams('s=devices');
+
+    const html = renderToStaticMarkup(<SettingsShell />);
+
+    expect(html).toContain('data-section="devices"');
+    expect(html).toContain('data-active="devices"');
+    expect(html).not.toContain('data-section="notify"');
+    expect(html).not.toContain('data-section="ops"');
+  });
 });
