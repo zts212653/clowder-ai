@@ -51,6 +51,12 @@ None.
 
 Please review the exact branch HEAD supplied in the current-thread handoff. Give every finding P1/P2/P3 and a clear disposition; if no P1/P2 remains, state `APPROVE` with the full SHA.
 
+## Review Round 1 Repair
+
+- P2 fixed: terminal own-signature samples inside four-space/Tab indented code and bare unordered, ordered, or task-list items are now preserved as content. The finalizer still strips a signature after actual prose, so the 16-turn progress path remains unchanged.
+- Red→Green: the new structure-preservation test failed on the indented-code sample (`42 pass / 1 fail`) before the fix and passes after it in the 114-test focused chain.
+- P3 disposition: no abnormal-termination fallback was added. Without a proven `turn.completed` boundary, appending a signature would also alter timeout/error/cancel reply semantics; #1272 does not define that failure-state contract. This remains a disclosed non-blocking risk rather than an unverified fallback layer.
+
 ## Review Sandbox
 
 - Path: `/tmp/cat-cafe-review/fix-1272-codex-signature-finalization/codex`
@@ -86,7 +92,7 @@ node --import ./packages/api/test/helpers/setup-cat-registry.js --test \
   packages/api/test/codex-agent-service.test.js \
   packages/api/test/codex-agent-service-l0.test.js \
   packages/api/test/issue-1272-codex-route-persistence.test.js
-# 113 passed, 0 failed
+# 114 passed, 0 failed
 
 pnpm --filter @cat-cafe/api run test:public
 # 16,763 tests; 16,732 pass; 0 fail; 31 skipped

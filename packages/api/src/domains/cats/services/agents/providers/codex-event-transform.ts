@@ -30,6 +30,8 @@ interface StrippedTurnSignature {
   signature?: string;
 }
 
+const BARE_LIST_SIGNATURE_PREFIX_RE = /^[ \t]{0,3}(?:[-+*]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?$/u;
+
 const TRAILING_PAW_SIGNATURE_RE = /`?(\[([^[\]/\n]+)\/[^[\]\n]+🐾\])`?[ \t]*$/u;
 
 function isOwnSignatureIdentity(candidate: string, expected: string): boolean {
@@ -53,6 +55,14 @@ function isInsideFencedCode(text: string, candidateIndex: number): boolean {
   return openFence !== undefined;
 }
 
+function isMarkdownSignatureSampleContext(text: string, candidateIndex: number): boolean {
+  const lineStart = text.lastIndexOf('\n', Math.max(0, candidateIndex - 1)) + 1;
+  const linePrefix = text.slice(lineStart, candidateIndex);
+  if (/^[ \t]*>/u.test(linePrefix)) return true;
+  if (/^(?: {4,}|\t)/u.test(linePrefix)) return true;
+  return BARE_LIST_SIGNATURE_PREFIX_RE.test(linePrefix);
+}
+
 /**
  * Remove only this cat's signature when it is the terminal token of one complete
  * Codex `agent_message` turn. Quoted/fenced examples and teammate signatures are
@@ -65,9 +75,9 @@ function stripOwnTrailingTurnSignature(text: string, signatureIdentity: string |
   const candidateIdentity = match[2];
   if (!candidateIdentity || !isOwnSignatureIdentity(candidateIdentity, signatureIdentity)) return { content: text };
 
-  const lineStart = text.lastIndexOf('\n', Math.max(0, match.index - 1)) + 1;
-  const linePrefix = text.slice(lineStart, match.index).trimStart();
-  if (linePrefix.startsWith('>') || isInsideFencedCode(text, match.index)) return { content: text };
+  if (isMarkdownSignatureSampleContext(text, match.index) || isInsideFencedCode(text, match.index)) {
+    return { content: text };
+  }
 
   return {
     content: text.slice(0, match.index).trimEnd(),
