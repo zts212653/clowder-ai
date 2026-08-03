@@ -27,6 +27,11 @@ const nativeSourcePaths = [
 const accuracyFixturePath = fileURLToPath(
   new URL('../src/plugins/wechat-visible-reader/native/WeChatVisibleReaderAccuracyFixture.swift', import.meta.url),
 );
+const macOsSelfTestOptions = {
+  timeout: 30_000,
+  skip: process.platform !== 'darwin' && 'requires macOS xcrun/Swift toolchain',
+};
+const macOsAccuracyTestOptions = { ...macOsSelfTestOptions, timeout: 60_000 };
 
 function successfulRead(overrides = {}) {
   return {
@@ -256,7 +261,7 @@ describe('WeChat visible reader native runner', () => {
     assert.equal(result.messageUnits[1].indicator, 'voice_placeholder');
   });
 
-  it('passes the deterministic crop-before-OCR self-test without writing image files', { timeout: 30_000 }, () => {
+  it('passes the deterministic crop-before-OCR self-test without writing image files', macOsSelfTestOptions, () => {
     const tempDirectory = mkdtempSync(join(tmpdir(), 'f265-native-self-test-'));
     const executable = join(tempDirectory, 'wechat-reader-self-test');
     try {
@@ -291,7 +296,7 @@ describe('WeChat visible reader native runner', () => {
     }
   });
 
-  it('passes 100+ Chinese dialogue units at 90% or better without image files', { timeout: 60_000 }, () => {
+  it('passes 100+ Chinese dialogue units at 90% or better without image files', macOsAccuracyTestOptions, () => {
     const tempDirectory = mkdtempSync(join(tmpdir(), 'f265-native-accuracy-'));
     try {
       const processResult = spawnSync('/usr/bin/xcrun', ['swift', accuracyFixturePath], {

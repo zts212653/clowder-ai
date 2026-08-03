@@ -16,7 +16,11 @@ async function collect(iterable) {
 test('CodexAgentService adds interrupt-first without mutating the caller liveness config', async () => {
   const seen = [];
   const callerConfig = { stallAutoKill: true, stallWarningMs: 420_000 };
-  const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, model: 'gpt-5.3-codex' });
+  const service = new CodexAgentService({
+    cliCommand: process.execPath,
+    l0CompilerFn: fakeL0Compiler,
+    model: 'gpt-5.3-codex',
+  });
 
   await collect(
     service.invoke('test stall policy', {

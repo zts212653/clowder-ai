@@ -17,9 +17,13 @@ const sourcePaths = [
   fileURLToPath(new URL('../src/plugins/wechat-visible-reader/native/WeChatNavigationFixtures.swift', import.meta.url)),
   fileURLToPath(new URL('../src/plugins/wechat-visible-reader/native/WeChatVisibleReader.swift', import.meta.url)),
 ];
+const macOsFixtureOptions = {
+  timeout: 60_000,
+  skip: process.platform !== 'darwin' && 'requires macOS xcrun/Swift toolchain',
+};
 
 describe('WeChat conversation navigation fixtures', () => {
-  it('passes fail-closed navigation, stitching, restore, and layout fixtures', { timeout: 60_000 }, () => {
+  it('passes fail-closed navigation, stitching, restore, and layout fixtures', macOsFixtureOptions, () => {
     const directory = mkdtempSync(join(tmpdir(), 'f265-navigation-fixtures-'));
     const executable = join(directory, 'wechat-reader-fixture');
     try {

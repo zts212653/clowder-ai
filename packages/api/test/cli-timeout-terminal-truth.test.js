@@ -118,13 +118,17 @@ test('__cliTimeout snapshots cause before kill and keeps exit=0 in terminalConte
   assert.equal(Object.hasOwn(timeout.cliDiagnostics.debugRef, 'exitCode'), false);
   assert.equal(timeout.terminalContext.kind, 'response_timeout');
   assert.equal(timeout.terminalContext.configuredTimeoutMs, 15);
-  assert.ok(timeout.terminalContext.observedSilenceDurationMs >= 15);
+  const minimumObservedSilenceMs = timeout.terminalContext.configuredTimeoutMs - 5;
+  assert.ok(
+    timeout.terminalContext.observedSilenceDurationMs >= minimumObservedSilenceMs,
+    `millisecond clock granularity may report slightly below the configured timeout: ${timeout.terminalContext.observedSilenceDurationMs}ms`,
+  );
   assert.equal(timeout.terminalContext.processAliveAtTimeout, true);
   assert.equal(timeout.terminalContext.postKillExitCode, 0);
   const timeoutLog = diagnosticCalls.find((call) => call.message === 'CLI timeout');
   assert.ok(timeoutLog);
   assert.equal(timeoutLog.payload.reasonCode, 'cli_response_timeout');
-  assert.equal(timeoutLog.payload.observedSilenceDurationMs >= 15, true);
+  assert.equal(timeoutLog.payload.observedSilenceDurationMs >= minimumObservedSilenceMs, true);
   assert.deepEqual(timeoutLog.payload.signalsSent, ['SIGTERM']);
   assert.doesNotMatch(JSON.stringify(timeoutLog), /secret-prompt|callbackToken|must-not-log/);
 });
