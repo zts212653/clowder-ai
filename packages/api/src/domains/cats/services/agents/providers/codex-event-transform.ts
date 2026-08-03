@@ -30,8 +30,9 @@ interface StrippedTurnSignature {
   signature?: string;
 }
 
-const BARE_LIST_SIGNATURE_PREFIX_RE = /^[ \t]{0,3}(?:[-+*]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?$/u;
-const BLOCKQUOTE_SIGNATURE_PREFIX_RE = /^[ \t]{0,3}(?:(?:[-+*]|\d+[.)])[ \t]+)*>[ \t]*/u;
+const MARKDOWN_CONTAINER_ONLY_PREFIX_RE =
+  /^[ \t]{0,3}(?:(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)|(?:>[ \t]*))+(?:\[[ xX]\][ \t]+)?$/u;
+const FENCE_RUN_RE = /(`{3,}|~{3,})/u;
 
 const TRAILING_PAW_SIGNATURE_RE = /`?(\[([^[\]/\n]+)\/[^[\]\n]+🐾\])`?[ \t]*$/u;
 
@@ -41,17 +42,62 @@ function isOwnSignatureIdentity(candidate: string, expected: string): boolean {
   return normalizedCandidate === normalizedExpected || normalizedCandidate.endsWith(`·${normalizedExpected}`);
 }
 
+interface MarkdownFence {
+  marker: '`' | '~';
+  length: number;
+  continuationIndent: number;
+}
+
+interface MarkdownFenceLine extends MarkdownFence {
+  suffix: string;
+}
+
+function isAllowedFencePrefix(prefix: string, openFence: MarkdownFence | undefined, isContainer: boolean): boolean {
+  if (!openFence) return (/^ *$/u.test(prefix) && prefix.length <= 3) || isContainer;
+  if (prefix.includes('>') && isContainer) return true;
+  if (!/^ *$/u.test(prefix)) return false;
+  if (openFence.continuationIndent === 0) return prefix.length <= 3;
+  return prefix.length >= openFence.continuationIndent && prefix.length <= openFence.continuationIndent + 3;
+}
+
+function parseMarkdownFenceLine(line: string, openFence?: MarkdownFence): MarkdownFenceLine | undefined {
+  const match = FENCE_RUN_RE.exec(line);
+  if (!match || match.index === undefined) return undefined;
+
+  const prefix = line.slice(0, match.index);
+  const isContainerPrefix = MARKDOWN_CONTAINER_ONLY_PREFIX_RE.test(prefix);
+  if (!isAllowedFencePrefix(prefix, openFence, isContainerPrefix)) return undefined;
+
+  const run = match[0];
+  const marker = run[0];
+  if (marker !== '`' && marker !== '~') return undefined;
+  return {
+    marker,
+    length: run.length,
+    continuationIndent: isContainerPrefix ? prefix.length : 0,
+    suffix: line.slice(match.index + run.length),
+  };
+}
+
 function isInsideFencedCode(text: string, candidateIndex: number): boolean {
-  let openFence: '```' | '~~~' | undefined;
+  let openFence: MarkdownFence | undefined;
   const prefixLines = text.slice(0, candidateIndex).split(/\r?\n/);
   for (const line of prefixLines) {
-    const trimmed = line.trimStart();
     if (!openFence) {
-      if (trimmed.startsWith('```')) openFence = '```';
-      else if (trimmed.startsWith('~~~')) openFence = '~~~';
+      const opening = parseMarkdownFenceLine(line);
+      if (!opening || (opening.marker === '`' && opening.suffix.includes('`'))) continue;
+      openFence = opening;
       continue;
     }
-    if (trimmed.startsWith(openFence)) openFence = undefined;
+
+    const closing = parseMarkdownFenceLine(line, openFence);
+    if (
+      closing?.marker === openFence.marker &&
+      closing.length >= openFence.length &&
+      /^[ \t]*$/u.test(closing.suffix)
+    ) {
+      openFence = undefined;
+    }
   }
   return openFence !== undefined;
 }
@@ -59,9 +105,9 @@ function isInsideFencedCode(text: string, candidateIndex: number): boolean {
 function isMarkdownSignatureSampleContext(text: string, candidateIndex: number): boolean {
   const lineStart = text.lastIndexOf('\n', Math.max(0, candidateIndex - 1)) + 1;
   const linePrefix = text.slice(lineStart, candidateIndex);
-  if (BLOCKQUOTE_SIGNATURE_PREFIX_RE.test(linePrefix)) return true;
+  if (MARKDOWN_CONTAINER_ONLY_PREFIX_RE.test(linePrefix)) return true;
   if (/^(?: {4,}| {0,3}\t)/u.test(linePrefix)) return true;
-  return BARE_LIST_SIGNATURE_PREFIX_RE.test(linePrefix);
+  return false;
 }
 
 /**

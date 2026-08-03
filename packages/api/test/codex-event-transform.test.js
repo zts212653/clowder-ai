@@ -776,6 +776,62 @@ test('#1272 review P2 negative control: list progress still strips its own termi
   assert.equal(`${body?.content}${done?.content}`, '- 正在检查。\n\n[砚砚/gpt-5.6-sol🐾]');
 });
 
+test('#1272 cloud P1: open fences and nested bare lists preserve terminal signature samples', () => {
+  const samples = [
+    '反引号伪关闭：\n\n```text\n```not-a-close\n[砚砚/example-model🐾]',
+    '较短反引号：\n\n````text\n```\n[砚砚/example-model🐾]',
+    '较短波浪线：\n\n~~~~text\n~~~\n[砚砚/example-model🐾]',
+    '不同 closing marker：\n\n```text\n~~~\n[砚砚/example-model🐾]',
+    '嵌套无序列表：\n\n- - [砚砚/example-model🐾]',
+    '嵌套有序任务列表：\n\n1. - [ ] `[砚砚/example-model🐾]`',
+    '列表内开放 fence：\n\n- ````text\n  ```not-a-close\n  [砚砚/example-model🐾]',
+  ];
+
+  for (const sample of samples) {
+    const state = {
+      hadPriorTextTurn: false,
+      signatureIdentity: '砚砚',
+      canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+    };
+    const body = transformCodexEvent(
+      { type: 'item.completed', item: { type: 'agent_message', text: sample } },
+      CAT,
+      state,
+    );
+    const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+
+    assert.equal(`${body?.content}${done?.content}`, `${sample}\n\n[砚砚/gpt-5.6-sol🐾]`);
+  }
+});
+
+test('#1272 cloud P1 negative control: legal fence closes before a decorative signature', () => {
+  const samples = [
+    '````text\n正文\n`````',
+    '- ````text\n  正文\n  ````',
+    '~~~~text\n正文\n~~~~',
+    '```invalid`info\n正文',
+  ];
+
+  for (const sample of samples) {
+    const state = {
+      hadPriorTextTurn: false,
+      signatureIdentity: '砚砚',
+      canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+    };
+    const body = transformCodexEvent(
+      {
+        type: 'item.completed',
+        item: { type: 'agent_message', text: `${sample}\n[砚砚/raw-model🐾]` },
+      },
+      CAT,
+      state,
+    );
+    const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+
+    assert.equal(`${body?.content}${done?.content}`, `${sample}\n\n[砚砚/gpt-5.6-sol🐾]`);
+  }
+});
+
 test('mcp_tool_call mixed valid/invalid images → only valid included', () => {
   const event = {
     type: 'item.completed',

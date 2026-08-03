@@ -64,6 +64,14 @@ Please review the exact branch HEAD supplied in the current-thread handoff. Give
 - Red→Green: the expanded structure-preservation test failed before the fix (`43 pass / 1 fail`), while its list-prose negative control already passed. After the fix, the complete focused provider/service/route chain passes `115 / 115`.
 - P3 disposition is unchanged from Round 1; no abnormal-termination semantics were added.
 
+## Cloud Review P1 Repair
+
+- Verified against exact reviewed SHA `3a028e8b18cb9ce7bbd71b16d9bd6bb159836636`: a fence line with trailing text, a shorter same-character run, and a nested bare-list signature sample all lost user-visible content.
+- Red→Green: the cloud reproductions plus the same-family legal-close negative control failed before the fix (`44 pass / 2 fail`). The final focused provider/service/route chain passes `117 / 117`.
+- Failure-mode audit invariant: an open fence closes only on the same marker character, with a run at least as long as the opener and a whitespace-only suffix. The sweep covers backtick/tilde markers, shorter/different/invalid closers, longer legal closers, nested-list continuation indentation, invalid backtick info strings, nested bare lists, and the existing prose/list decoration negatives.
+- Coordinate correction: the prior `startsWith` toggling and separate one-marker list regexes were replaced by one explicit fence-state scanner plus one container-only prefix invariant. No Markdown dependency or fallback stack was added. The public checkout does not export `check-fallback-layers`; manual analysis found one fence state and zero fallback layers.
+- P3 disposition is unchanged from Round 1; no abnormal-termination semantics were added.
+
 ## Review Sandbox
 
 - Path: `/tmp/cat-cafe-review/fix-1272-codex-signature-finalization/codex`
@@ -99,7 +107,7 @@ node --import ./packages/api/test/helpers/setup-cat-registry.js --test \
   packages/api/test/codex-agent-service.test.js \
   packages/api/test/codex-agent-service-l0.test.js \
   packages/api/test/issue-1272-codex-route-persistence.test.js
-# 115 passed, 0 failed
+# 117 passed, 0 failed
 
 pnpm --filter @cat-cafe/api run test:public
 # 16,763 tests; 16,732 pass; 0 fail; 31 skipped
