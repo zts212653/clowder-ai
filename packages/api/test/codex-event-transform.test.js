@@ -569,6 +569,164 @@ test('item.completed agent_message with empty text after prior turn → null (no
   assert.equal(msg, null, 'empty text after prior turn should not produce newline content');
 });
 
+test('#1272: completed Codex turns keep all prose but emit one canonical final signature', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  const events = [
+    {
+      type: 'item.completed',
+      item: { type: 'agent_message', text: '第一段进度。 `[砚砚/GPT-5.6 Sol🐾]`' },
+    },
+    {
+      type: 'item.completed',
+      item: { type: 'agent_message', text: '第二段进度。\n\n[砚砚/gpt-5.6-sol🐾]' },
+    },
+    { type: 'turn.completed', usage: {} },
+  ];
+
+  const text = events
+    .flatMap((event) => {
+      const result = transformCodexEvent(event, CAT, state);
+      if (result === null) return [];
+      return Array.isArray(result) ? result : [result];
+    })
+    .filter((msg) => msg.type === 'text')
+    .map((msg) => msg.content)
+    .join('');
+
+  assert.equal(text, '第一段进度。\n\n第二段进度。\n\n[砚砚/gpt-5.6-sol🐾]');
+});
+
+test('#1272: Codex finalization preserves quoted, fenced, and other-cat signature-like text', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  const textWithExamples = [
+    '引用保持：',
+    '> [砚砚/example-model🐾]',
+    '',
+    '```text',
+    '[砚砚/example-model🐾]',
+    '```',
+    '',
+    '另一只猫：[宪宪/claude-opus-4-8🐾]',
+    '',
+    '[砚砚/raw-model-name🐾]',
+  ].join('\n');
+
+  const first = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: textWithExamples } },
+    CAT,
+    state,
+  );
+  const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+  const text = [first, done]
+    .flatMap((result) => (result === null ? [] : Array.isArray(result) ? result : [result]))
+    .filter((msg) => msg.type === 'text')
+    .map((msg) => msg.content)
+    .join('');
+
+  assert.equal(
+    text,
+    [
+      '引用保持：',
+      '> [砚砚/example-model🐾]',
+      '',
+      '```text',
+      '[砚砚/example-model🐾]',
+      '```',
+      '',
+      '另一只猫：[宪宪/claude-opus-4-8🐾]',
+      '',
+      '[砚砚/gpt-5.6-sol🐾]',
+    ].join('\n'),
+  );
+});
+
+test('#1272: unsigned Codex content receives one canonical signature at turn completion', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: '只有正文。' } },
+    CAT,
+    state,
+  );
+  const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+
+  assert.equal(body?.content, '只有正文。');
+  assert.equal(done?.type, 'text');
+  assert.equal(done?.content, '\n\n[砚砚/gpt-5.6-sol🐾]');
+});
+
+test('#1272: a signature-only provider turn still finalizes to one canonical signature', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: '[砚砚/raw-model🐾]' } },
+    CAT,
+    state,
+  );
+  const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+
+  assert.equal(body, null);
+  assert.equal(done?.content, '\n\n[砚砚/gpt-5.6-sol🐾]');
+});
+
+test('#1272: one already-canonical Codex turn is byte-stable after finalization', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  const original = '单回合正文。\n\n[砚砚/gpt-5.6-sol🐾]';
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: original } },
+    CAT,
+    state,
+  );
+  const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+
+  assert.equal(`${body?.content}${done?.content}`, original);
+});
+
+test('#1272: terminal teammate and legacy signatures remain content beside one canonical signature', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  const teammate = transformCodexEvent(
+    {
+      type: 'item.completed',
+      item: { type: 'agent_message', text: '引用另一只猫的签名： [宪宪/claude-opus-4-8🐾]' },
+    },
+    CAT,
+    state,
+  );
+  const legacy = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: '保留 legacy： [砚砚/Codex]' } },
+    CAT,
+    state,
+  );
+  const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+
+  assert.equal(
+    `${teammate?.content}${legacy?.content}${done?.content}`,
+    '引用另一只猫的签名： [宪宪/claude-opus-4-8🐾]\n\n保留 legacy： [砚砚/Codex]\n\n[砚砚/gpt-5.6-sol🐾]',
+  );
+});
+
 test('mcp_tool_call mixed valid/invalid images → only valid included', () => {
   const event = {
     type: 'item.completed',
