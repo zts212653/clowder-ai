@@ -35,6 +35,17 @@ import { registerHoldBallCancelRoutes } from './callback-hold-ball-cancel-routes
 import { deriveCallbackActor } from './callback-scope-helpers.js';
 import { type CrossStoreTaskStore, detectEventCallback } from './gate-keeping-cross-store.js';
 import { checkGateKeepingGuard } from './gate-keeping-guard.js';
+import {
+  HOLD_WINDOW_MS as COUNTER_WINDOW_MS,
+  getCommandHoldCount,
+  getTimerHoldCount,
+  HOLD_MODE_COMMAND,
+  HOLD_MODE_TIMER,
+  incrementCommandHoldCount,
+  incrementTimerHoldCount,
+  MAX_COMMAND_HOLDS_PER_WINDOW,
+  MAX_TIMER_HOLDS_PER_WINDOW,
+} from './hold-ball-counter.js';
 import { HOLD_BALL_SOURCE } from './hold-ball-source.js';
 
 const log = createModuleLogger('routes/callback-hold-ball');
@@ -49,33 +60,24 @@ const log = createModuleLogger('routes/callback-hold-ball');
  */
 const HOLD_BALL_TASK_ID_PREFIX = 'hold-ball-';
 
-export const MAX_HOLDS_PER_WINDOW = 3;
-export const HOLD_WINDOW_MS = 3_600_000;
-
-const holdCounts = new Map<string, { count: number; lastAt: number }>();
-
-export function getHoldCount(threadId: string, catId: string, now: number = Date.now()): number {
-  const key = `${threadId}:${catId}`;
-  const entry = holdCounts.get(key);
-  if (!entry) return 0;
-  if (now - entry.lastAt > HOLD_WINDOW_MS) {
-    holdCounts.delete(key);
-    return 0;
-  }
-  return entry.count;
-}
-
-export function incrementHoldCount(threadId: string, catId: string, now: number = Date.now()): number {
-  const key = `${threadId}:${catId}`;
-  const entry = holdCounts.get(key);
-  if (!entry || now - entry.lastAt > HOLD_WINDOW_MS) {
-    holdCounts.set(key, { count: 1, lastAt: now });
-    return 1;
-  }
-  entry.count++;
-  entry.lastAt = now;
-  return entry.count;
-}
+export type { HoldMode } from './hold-ball-counter.js';
+// ── Re-exports from hold-ball-counter.ts (backward compat) ──────────────────
+// Counter logic extracted to hold-ball-counter.ts for mode-aware separation.
+// Re-export deprecated aliases so existing consumers don't break.
+export {
+  getCommandHoldCount,
+  getHoldCount,
+  getTimerHoldCount,
+  HOLD_MODE_COMMAND,
+  HOLD_MODE_TIMER,
+  HOLD_WINDOW_MS,
+  incrementCommandHoldCount,
+  incrementHoldCount,
+  incrementTimerHoldCount,
+  MAX_COMMAND_HOLDS_PER_WINDOW,
+  MAX_HOLDS_PER_WINDOW,
+  MAX_TIMER_HOLDS_PER_WINDOW,
+} from './hold-ball-counter.js';
 
 /**
  * F167 Phase P review P1-1 fix: active wakeWhen runner registry.
@@ -530,10 +532,15 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       return { ...guardResult.blockedResponse, ledgerId: ledgerIdForGuard('gate_keeping_thread_default') };
     }
 
-    const currentCount = getHoldCount(threadId, catIdStr);
-    if (currentCount >= MAX_HOLDS_PER_WINDOW) {
+    // ── Mode-aware rate limit (PR #1274 redo: separate timer/command counters) ──
+    const holdMode = wakeWhen ? HOLD_MODE_COMMAND : HOLD_MODE_TIMER;
+    const currentCount =
+      holdMode === HOLD_MODE_TIMER ? getTimerHoldCount(threadId, catIdStr) : getCommandHoldCount(threadId, catIdStr);
+    const maxForMode = holdMode === HOLD_MODE_TIMER ? MAX_TIMER_HOLDS_PER_WINDOW : MAX_COMMAND_HOLDS_PER_WINDOW;
+
+    if (currentCount >= maxForMode) {
       log.warn(
-        { threadId, catId: catIdStr, currentCount, windowMs: HOLD_WINDOW_MS },
+        { threadId, catId: catIdStr, currentCount, holdMode, maxForMode, windowMs: COUNTER_WINDOW_MS },
         'F167 C1: hold_ball rejected — maxHoldsPerWindow reached',
       );
       reply.status(429);
@@ -557,21 +564,21 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
             timestamp: Date.now(),
             correlationConfidence: record.invocationId ? 'exact' : 'window',
             currentCount,
-            maxAllowed: MAX_HOLDS_PER_WINDOW,
-            windowMs: HOLD_WINDOW_MS,
+            maxAllowed: maxForMode,
+            windowMs: COUNTER_WINDOW_MS,
+            holdMode,
           })
           .catch(() => {});
       }
       return {
         error:
-          `maxHoldsPerWindow (${MAX_HOLDS_PER_WINDOW} per ~1h window) reached. ` +
+          `maxHoldsPerWindow (${maxForMode} per ~1h window, mode=${holdMode}) reached. ` +
           'You MUST pass the ball now: @ another cat or @co-creator.',
-        // F257 in-context observability: which pot rejected you — quote this
-        // ledgerId when filing an anomaly report (report_harness_signal).
         ledgerId: rateLimitLedgerId,
+        holdMode,
         holdsInWindow: currentCount,
-        maxHoldsPerWindow: MAX_HOLDS_PER_WINDOW,
-        windowMs: HOLD_WINDOW_MS,
+        maxHoldsPerWindow: maxForMode,
+        windowMs: COUNTER_WINDOW_MS,
       };
     }
 
@@ -725,7 +732,10 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       }
     }
 
-    const newCount = incrementHoldCount(threadId, catIdStr);
+    const newCount =
+      holdMode === HOLD_MODE_TIMER
+        ? incrementTimerHoldCount(threadId, catIdStr)
+        : incrementCommandHoldCount(threadId, catIdStr);
 
     const wakeAtStr = new Date(fireAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
     const holdMessage = wakeWhen
@@ -784,8 +794,10 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
         wakeAfterMs,
         wakeWhen: wakeWhen ? { command: wakeWhen.command, timeoutMs: wakeWhen.timeoutMs } : undefined,
         taskId,
+        holdMode,
         holdsInWindow: newCount,
-        windowMs: HOLD_WINDOW_MS,
+        maxHoldsPerWindow: maxForMode,
+        windowMs: COUNTER_WINDOW_MS,
       },
       'F167 C1: hold_ball registered — wake-up scheduled',
     );
@@ -794,9 +806,10 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       status: 'ok',
       held: true,
       taskId,
+      holdMode,
       holdsInWindow: newCount,
-      maxHoldsPerWindow: MAX_HOLDS_PER_WINDOW,
-      windowMs: HOLD_WINDOW_MS,
+      maxHoldsPerWindow: maxForMode,
+      windowMs: COUNTER_WINDOW_MS,
       wakeAt: new Date(fireAt).toISOString(),
       ...(wakeWhen ? { wakeWhen: { command: wakeWhen.command, pid: null } } : {}),
     };

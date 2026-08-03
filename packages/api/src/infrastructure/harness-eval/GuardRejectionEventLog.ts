@@ -71,6 +71,8 @@ export interface HttpRateLimitEvent extends GuardRejectionEventBase {
   maxAllowed: number;
   /** Window duration in ms. */
   windowMs: number;
+  /** Hold mode that triggered the rate limit (timer = wakeAfterMs, command = wakeWhen). */
+  holdMode?: 'timer' | 'command';
 }
 
 /** A2A block_pingpong — streak termination (generator layer). */
