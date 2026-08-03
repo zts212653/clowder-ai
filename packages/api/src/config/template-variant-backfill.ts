@@ -27,6 +27,11 @@ function templateBreedKey({ breedId, catId }: Pick<TemplateBreedBackfillInput, '
 
 const TEMPLATE_VARIANT_BACKFILL_ALLOWLIST = new Set([
   templateVariantKey({
+    breedId: 'ragdoll',
+    variantId: 'opus-5',
+    catId: 'opus-5',
+  }),
+  templateVariantKey({
     breedId: 'bengal',
     variantId: 'agy-opus',
     catId: 'agy-opus',

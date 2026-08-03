@@ -8,6 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import './helpers/setup-cat-registry.js';
 
 describe('McpPromptInjector', () => {
   // F041: parameter is now mcpAvailable (was mcpSupport), same boolean logic
@@ -101,6 +102,42 @@ describe('McpPromptInjector', () => {
 
     assert.ok(instructions.includes('@codex'), 'should use teammate handle as example');
     assert.ok(!instructions.includes('@opus 请帮我 review'), 'should avoid self-mention example');
+  });
+
+  it('buildMcpCallbackInstructions resolves an available default teammate when the active worklist is empty', async () => {
+    const { buildMcpCallbackInstructions } = await import(
+      '../dist/domains/cats/services/agents/invocation/McpPromptInjector.js'
+    );
+    const instructions = buildMcpCallbackInstructions({ currentCatId: 'codex', teammates: [] });
+
+    assert.ok(instructions.includes('@opus-5'), 'should use the available configured successor');
+    assert.ok(!instructions.includes('@opus`'), 'should not recommend the disabled legacy handle');
+  });
+
+  it('prefers a historical teammate successor over an unrelated runtime default', async () => {
+    const { clearRuntimeDefaultCatId, setRuntimeDefaultCatId } = await import('../dist/config/cat-config-loader.js');
+    const { buildMcpCallbackInstructions } = await import(
+      '../dist/domains/cats/services/agents/invocation/McpPromptInjector.js'
+    );
+
+    setRuntimeDefaultCatId('codex');
+    try {
+      const instructions = buildMcpCallbackInstructions({ currentCatId: 'gemini', teammates: ['opus'] });
+      assert.ok(instructions.includes('@opus-5'), 'should preserve teammate priority through the successor');
+      assert.ok(!instructions.includes('`@codex`'), 'should not replace the teammate with an unrelated default');
+    } finally {
+      clearRuntimeDefaultCatId();
+    }
+  });
+
+  it('ignores unknown teammate ids instead of synthesizing an unroutable handle', async () => {
+    const { buildMcpCallbackInstructions } = await import(
+      '../dist/domains/cats/services/agents/invocation/McpPromptInjector.js'
+    );
+    const instructions = buildMcpCallbackInstructions({ currentCatId: 'codex', teammates: ['missing-cat'] });
+
+    assert.ok(!instructions.includes('@missing-cat'), 'should not synthesize a handle for an unregistered cat');
+    assert.ok(instructions.includes('@opus-5'), 'should fall back to a registered available teammate');
   });
 
   it('buildMcpCallbackInstructions includes @teammate rules', async () => {

@@ -718,21 +718,17 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       whisperVisibility === 'whisper' && whisperRecipients?.length
         ? [...new Set(whisperRecipients)]
         : [...resolvedTargetCats];
-    if (targetCats.length === 0) {
-      reply.status(400);
-      return { error: '没有可用的猫猫成员，请先在设置中添加一只猫猫', code: 'NO_TARGETS' };
-    }
-    const primaryCat = targetCats[0] ?? 'unknown';
 
     // F-invocation-stale-recovery P1-2: Surface routing_warnings when user's explicit @mention
     // silently fell back (e.g., @kimi → cat_not_found → default cat, user sees no feedback).
     // Non-whisper only (whisper targets are overridden above; warning is not meaningful there).
     if (routing_warnings && routing_warnings.length > 0 && whisperVisibility !== 'whisper') {
       const warningMsg = formatRoutingWarnings(routing_warnings);
+      const disabledWarning = routing_warnings.find((warning) => warning.kind === 'cat_disabled');
       opts.socketManager.broadcastAgentMessage(
         {
           type: 'system_info',
-          catId: primaryCat,
+          catId: targetCats[0] ?? disabledWarning?.catId ?? getDefaultCatId(),
           // Use 'warning' type — recognized by system-info-visible.ts (reads parsed.message)
           content: JSON.stringify({
             type: 'warning',
@@ -743,6 +739,16 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         resolvedThreadId,
       );
     }
+
+    if (targetCats.length === 0) {
+      reply.status(400);
+      return {
+        error: '没有可用的猫猫成员，请先在设置中添加一只猫猫',
+        code: 'NO_TARGETS',
+        ...(routing_warnings.length > 0 ? { routing_warnings } : {}),
+      };
+    }
+    const primaryCat = targetCats[0] ?? 'unknown';
 
     // Server-generated idempotency key if client didn't provide one
     const resolvedIdempotencyKey = idempotencyKey ?? randomUUID();

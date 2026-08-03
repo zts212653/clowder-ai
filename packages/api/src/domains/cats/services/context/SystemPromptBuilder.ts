@@ -22,6 +22,7 @@ import {
   getRoster,
   isCatAvailable,
   isCatLead,
+  resolveCatSuccessor,
 } from '../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../config/cat-models.js';
 import { findMonorepoRoot } from '../../../../utils/monorepo-root.js';
@@ -246,9 +247,11 @@ function pickVariantMention(id: string, config: CatConfig): string {
 }
 
 /** @internal F237 — exported for AssembleBridge routing policy parity (cloud P2-1 fix) */
-export function pickVariantMentionForBridge(id: string): string {
-  const config = getConfig(id);
-  return config ? pickVariantMention(id, config) : `@${id}`;
+export function pickVariantMentionForBridge(id: string): string | null {
+  const routableId = isCatAvailable(id) ? id : resolveCatSuccessor(id);
+  if (!routableId) return null;
+  const config = getConfig(routableId);
+  return config ? pickVariantMention(routableId, config) : null;
 }
 
 function pickDisplayNameMention(config: CatConfig): string | null {
@@ -387,7 +390,9 @@ function ensureMergeGateSourceProvenanceTrigger(content: string): string {
 /** @internal F237 — exported for ContextAssembler bridge */
 export function buildTeammateRoster(currentCatId: CatId): string | null {
   const allConfigs = getAllConfigs();
-  const entries = Object.entries(allConfigs).filter(([id]) => id !== currentCatId && isCatAvailable(id));
+  const currentSuccessor = resolveCatSuccessor(currentCatId);
+  const selfIds = new Set<string>([currentCatId, ...(currentSuccessor ? [currentSuccessor] : [])]);
+  const entries = Object.entries(allConfigs).filter(([id]) => !selfIds.has(id) && isCatAvailable(id));
   if (entries.length === 0) return null;
 
   const rows: string[] = [];

@@ -196,6 +196,8 @@ export interface RosterEntry {
   readonly lead: boolean;
   /** Whether this cat is available (has quota). co-creator 40 美刀教训！ */
   readonly available: boolean;
+  /** Explicit replacement catId when this member is disabled or renamed. */
+  readonly successor?: string;
   /** co-creator's evaluation of this cat */
   readonly evaluation: string;
 }

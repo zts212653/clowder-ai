@@ -119,8 +119,8 @@ Action Needed 必须标注级别。**这些标签只描述期望/紧急度，不
 ```
 → cat_cafe_cross_post_message(
     threadId: "<target_thread_id>",
-    targetCats: ["opus"],
-    content: "## 🔄 Cross-Thread Sync\n\n### What Changed\n...\n\n### Impact on You\n...\n\n### Action Needed\n[ACTION] ...\n\n@opus"
+    targetCats: ["opus-5"],
+    content: "## 🔄 Cross-Thread Sync\n\n### What Changed\n...\n\n### Impact on You\n...\n\n### Action Needed\n[ACTION] ...\n\n@opus-5"
   )
 ```
 

@@ -16,16 +16,37 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function buildPolicy(params: {
+interface RoutingCat {
+  id: string;
+  mentionPatterns?: string[];
+  roster: {
+    available: boolean;
+    successor?: string;
+  } | null;
+}
+
+export function resolveRoutingTarget(cats: RoutingCat[], legacyCatId: string): { id: string; mention: string } | null {
+  const legacy = cats.find((cat) => cat.id === legacyCatId);
+  const targetId = legacy?.roster?.available !== false ? legacyCatId : legacy.roster.successor;
+  const target = targetId ? cats.find((cat) => cat.id === targetId && cat.roster?.available !== false) : undefined;
+  if (!target) return null;
+
+  const canonical = `@${target.id}`;
+  const mention = target.mentionPatterns?.find((pattern) => pattern.toLowerCase() === canonical.toLowerCase());
+  return { id: target.id, mention: mention ?? canonical };
+}
+
+export function buildPolicy(params: {
   reviewAvoidOpus: boolean;
   architecturePreferOpus: boolean;
+  routingCatId: string;
 }): ThreadRoutingPolicyV1 | null {
   const scopes: NonNullable<ThreadRoutingPolicyV1['scopes']> = {};
   if (params.reviewAvoidOpus) {
-    scopes.review = { avoidCats: ['opus'], reason: 'budget' };
+    scopes.review = { avoidCats: [params.routingCatId], reason: 'budget' };
   }
   if (params.architecturePreferOpus) {
-    scopes.architecture = { preferCats: ['opus'] };
+    scopes.architecture = { preferCats: [params.routingCatId] };
   }
   return Object.keys(scopes).length > 0 ? { v: 1, scopes } : null;
 }
@@ -36,8 +57,8 @@ export function HubRoutingPolicyTab() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [routingTarget, setRoutingTarget] = useState<{ id: string; mention: string } | null>(null);
 
-  // UI toggles (v1: only controls Opus, but model is extensible)
   const [reviewAvoidOpus, setReviewAvoidOpus] = useState(false);
   const [architecturePreferOpus, setArchitecturePreferOpus] = useState(false);
 
@@ -49,20 +70,29 @@ export function HubRoutingPolicyTab() {
 
   const fetchThread = useCallback(async () => {
     setError(null);
+    setRoutingTarget(null);
     try {
-      const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}`);
-      if (!res.ok) {
+      const [threadRes, catsRes] = await Promise.all([
+        apiFetch(`/api/threads/${encodeURIComponent(threadId)}`),
+        apiFetch('/api/cats'),
+      ]);
+      if (!threadRes.ok || !catsRes.ok) {
         setError('线程信息加载失败');
         return;
       }
-      const t = (await res.json()) as Thread;
+      const t = (await threadRes.json()) as Thread;
+      const catsBody = (await catsRes.json()) as { cats?: RoutingCat[] };
+      const target = resolveRoutingTarget(catsBody.cats ?? [], 'opus');
       setThread(t);
+      setRoutingTarget(target);
+      if (!target) setError('未找到可用的架构猫替代者');
 
       const policy = t.routingPolicy;
       const avoid = policy?.scopes?.review?.avoidCats ?? [];
       const prefer = policy?.scopes?.architecture?.preferCats ?? [];
-      setReviewAvoidOpus(avoid.includes('opus'));
-      setArchitecturePreferOpus(prefer.includes('opus'));
+      const recognizedIds = target ? ['opus', target.id] : ['opus'];
+      setReviewAvoidOpus(recognizedIds.some((id) => avoid.includes(id)));
+      setArchitecturePreferOpus(recognizedIds.some((id) => prefer.includes(id)));
     } catch {
       setError('网络错误');
     }
@@ -73,10 +103,15 @@ export function HubRoutingPolicyTab() {
   }, [fetchThread]);
 
   const onSave = useCallback(async () => {
+    if (!routingTarget) return;
     setSaving(true);
     setError(null);
     try {
-      const routingPolicy = buildPolicy({ reviewAvoidOpus, architecturePreferOpus });
+      const routingPolicy = buildPolicy({
+        reviewAvoidOpus,
+        architecturePreferOpus,
+        routingCatId: routingTarget.id,
+      });
       const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -94,7 +129,9 @@ export function HubRoutingPolicyTab() {
     } finally {
       setSaving(false);
     }
-  }, [threadId, reviewAvoidOpus, architecturePreferOpus]);
+  }, [threadId, reviewAvoidOpus, architecturePreferOpus, routingTarget]);
+
+  const routingMention = routingTarget?.mention ?? '不可用';
 
   return (
     <div className="space-y-4">
@@ -114,8 +151,13 @@ export function HubRoutingPolicyTab() {
               <div className="text-xs text-cafe-secondary">当消息明显是 review/合入/PR 场景时生效</div>
             </div>
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={reviewAvoidOpus} onChange={(e) => setReviewAvoidOpus(e.target.checked)} />
-              避开 @opus（budget）
+              <input
+                type="checkbox"
+                checked={reviewAvoidOpus}
+                disabled={!routingTarget}
+                onChange={(e) => setReviewAvoidOpus(e.target.checked)}
+              />
+              避开 {routingMention}（budget）
             </label>
           </div>
 
@@ -128,9 +170,10 @@ export function HubRoutingPolicyTab() {
               <input
                 type="checkbox"
                 checked={architecturePreferOpus}
+                disabled={!routingTarget}
                 onChange={(e) => setArchitecturePreferOpus(e.target.checked)}
               />
-              优先 @opus
+              优先 {routingMention}
             </label>
           </div>
 
@@ -140,8 +183,9 @@ export function HubRoutingPolicyTab() {
               {savedAt ? ` · 已保存 ${new Date(savedAt).toLocaleTimeString()}` : ''}
             </div>
             <button
+              type="button"
               onClick={onSave}
-              disabled={saving}
+              disabled={saving || !routingTarget}
               className="px-3 py-2 text-sm rounded-lg bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-interactive disabled:opacity-60"
             >
               {saving ? '保存中...' : '保存'}

@@ -56,7 +56,19 @@ describe('getDefaultCatId runtime override (F154 AC-A4)', () => {
   it('returns breeds[0] by default', () => {
     const id = getDefaultCatId();
     assert.ok(id, 'should return a catId');
+    assert.equal(id, 'opus-5');
     assert.equal(id, originalDefault);
+  });
+
+  it('resolves a disabled runtime override through its explicit successor', () => {
+    process.env.DEFAULT_CAT_ID = 'codex';
+    try {
+      setRuntimeDefaultCatId('opus');
+      assert.equal(getDefaultCatId(), 'opus-5');
+    } finally {
+      clearRuntimeDefaultCatId();
+      delete process.env.DEFAULT_CAT_ID;
+    }
   });
 
   it('returns runtime override when set', () => {

@@ -1,23 +1,25 @@
 import type { CatAlternative, CatId, CatRoutingError } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
-import { getRoster } from '../../../../../config/cat-config-loader.js';
+import { getRoster, resolveCatSuccessor } from '../../../../../config/cat-config-loader.js';
+import { primaryMentionHandleForCatId } from '../../../../../utils/cat-mention-handle.js';
 
-function buildAlts(excludeId: string | null, preferFamily?: string): CatAlternative[] {
+function buildAlts(excludeId: string | null, preferFamily?: string, preferredId?: CatId | null): CatAlternative[] {
   const roster = getRoster();
   const configs = catRegistry.getAllConfigs();
   return Object.entries(roster)
     .filter(([id, e]) => id !== excludeId && e.available && catRegistry.has(id))
     .map(([id, e]) => ({
       catId: id as CatId,
-      mention: configs[id]?.mentionPatterns[0] ?? `@${id}`,
+      mention: primaryMentionHandleForCatId(id) ?? `@${id}`,
       displayName: configs[id]?.displayName ?? id,
       family: e.family,
     }))
     .sort((a, b) => {
+      const pd = +(a.catId !== preferredId) - +(b.catId !== preferredId);
       const fd = +(a.family !== preferFamily) - +(b.family !== preferFamily);
       const la = roster[a.catId]?.lead ? 0 : 1;
       const lb = roster[b.catId]?.lead ? 0 : 1;
-      return fd || la - lb || a.catId.localeCompare(b.catId);
+      return pd || fd || la - lb || a.catId.localeCompare(b.catId);
     });
 }
 
@@ -40,12 +42,13 @@ export function resolveCatTarget(mentionOrId: string): { ok: CatId } | { error: 
   // cats not in roster = available (backward compat); only explicit available:false = disabled
   const entry = getRoster()[catId];
   if (entry && entry.available === false) {
+    const successor = resolveCatSuccessor(catId);
     return {
       error: {
         kind: 'cat_disabled',
         catId: catId as CatId,
         displayName: configs[catId]?.displayName ?? catId,
-        alternatives: buildAlts(catId, entry.family),
+        alternatives: buildAlts(catId, entry.family, successor),
       },
     };
   }

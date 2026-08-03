@@ -203,7 +203,7 @@ https://github.com/user-attachments/assets/8e470aba-8fe6-4aa5-a476-c2cd81d1630f
 
 主界面是一个多线程聊天空间，你的 AI 团队在这里工作。每个线程是独立的工作区 — 一个功能一个线程。
 
-- **@mention 路由** — `@opus` 做架构、`@codex` 做 review、`@gemini` 做设计，消息自动路由到对的猫
+- **@mention 路由** — `@opus-5` 做架构、`@codex` 做 review、`@gemini` 做设计，消息自动路由到对的猫
 - **线程隔离** — 上下文不会串。登录重构的线程不会污染落地页的讨论
 - **Rich Blocks** — 猫猫用结构化卡片回复：代码 diff、checklist、交互式决策，不是一堵文字墙
 

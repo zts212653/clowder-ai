@@ -22,7 +22,7 @@ import type { CatId, CatRoutingError, MessageContent } from '@cat-cafe/shared';
 import { catRegistry, escapeRegExp } from '@cat-cafe/shared';
 import type { SessionStore } from '@cat-cafe/shared/utils';
 import { context as ctxApi, SpanStatusCode, trace } from '@opentelemetry/api';
-import { getDefaultCatId, isCatAvailable } from '../../../../../config/cat-config-loader.js';
+import { getDefaultCatId, isCatAvailable, resolveCatSuccessor } from '../../../../../config/cat-config-loader.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import {
@@ -831,16 +831,55 @@ export class AgentRouter {
     return typeof catId === 'string' && Object.hasOwn(this.services, catId) && isCatAvailable(catId);
   }
 
+  /**
+   * Resolve persisted legacy identities to an executable successor.
+   * Explicit @mentions do not use this helper: they must remain fail-closed and
+   * return a routing warning instead of silently changing the user's target.
+   */
+  private resolveRoutableCatId(catId: string | null | undefined): CatId | null {
+    if (this.isRoutableCat(catId)) return catId;
+    if (typeof catId !== 'string') return null;
+    const successor = resolveCatSuccessor(catId);
+    return successor && this.isRoutableCat(successor) ? successor : null;
+  }
+
   private filterRoutableCats(catIds: Iterable<string | null | undefined>): CatId[] {
     const filtered: CatId[] = [];
     const seen = new Set<string>();
     for (const catId of catIds) {
-      if (!this.isRoutableCat(catId)) continue;
-      if (seen.has(catId)) continue;
-      seen.add(catId);
-      filtered.push(catId);
+      const routableId = this.resolveRoutableCatId(catId);
+      if (!routableId) continue;
+      if (seen.has(routableId)) continue;
+      seen.add(routableId);
+      filtered.push(routableId);
     }
     return filtered;
+  }
+
+  private pickParticipantFallback(
+    participants: readonly {
+      catId: CatId;
+      messageCount: number;
+      lastResponseHealthy?: boolean;
+    }[],
+    preferredSet: ReadonlySet<string>,
+  ): CatId | null {
+    const routableParticipants = participants.flatMap((participant) => {
+      const catId = this.resolveRoutableCatId(participant.catId);
+      return catId ? [{ ...participant, catId }] : [];
+    });
+    const isHealthy = (participant: { lastResponseHealthy?: boolean }) =>
+      participant.lastResponseHealthy !== false;
+    const healthyReplier = routableParticipants.find(
+      (participant) => participant.messageCount > 0 && isHealthy(participant),
+    );
+    if (healthyReplier) return healthyReplier.catId;
+
+    const preferredFallback = routableParticipants.find(
+      (participant) => isHealthy(participant) && preferredSet.has(participant.catId),
+    );
+    const anyFallback = routableParticipants.find(isHealthy);
+    return preferredFallback?.catId ?? anyFallback?.catId ?? null;
   }
 
   /**
@@ -975,18 +1014,22 @@ export class AgentRouter {
     // Defensive guard: data might be malformed from external persistence.
     const avoidList = Array.isArray(rule.avoidCats) ? rule.avoidCats : [];
     const preferList = Array.isArray(rule.preferCats) ? rule.preferCats : [];
-    const avoid = new Set(avoidList.map((id) => String(id)));
-    const prefer = preferList.map((id) => String(id)).filter((id) => !avoid.has(id));
+    const avoid = new Set(
+      avoidList.map((id) => this.resolveRoutableCatId(String(id)) ?? String(id)),
+    );
+    const prefer = preferList
+      .map((id) => this.resolveRoutableCatId(String(id)))
+      .filter((id): id is CatId => id !== null)
+      .filter((id) => !avoid.has(id));
 
     const filtered = routableCandidates.filter((id) => !avoid.has(id as string));
     const out: CatId[] = [];
     const seen = new Set<string>();
 
     for (const id of prefer) {
-      if (!this.isRoutableCat(id)) continue;
       if (seen.has(id)) continue;
       seen.add(id);
-      out.push(id as CatId);
+      out.push(id);
     }
 
     for (const id of filtered) {
@@ -1240,8 +1283,9 @@ export class AgentRouter {
    * Does NOT mutate thread participants.
    */
   private async peekTargets(message: string, threadId: string): Promise<CatId[]> {
-    const { mentions: mentionedCats } = await this.parseAllMentions(message, threadId);
+    const { mentions: mentionedCats, routing_warnings } = await this.parseAllMentions(message, threadId);
     if (mentionedCats.length > 0) return mentionedCats;
+    if (routing_warnings.some((warning) => warning.kind === 'cat_disabled')) return [];
 
     if (this.threadStore) {
       const thread = await this.threadStore.get(threadId);
@@ -1281,19 +1325,9 @@ export class AgentRouter {
       // #267: three-tier fallback — (1) any healthy replier (unscoped),
       //   (2) preferred non-errored participant, (3) any non-errored participant.
       const participantsWithActivity = await this.threadStore.getParticipantsWithActivity(threadId);
-      const isRoutable = (p: { catId: CatId }) => this.isRoutableCat(p.catId);
-      const isHealthy = (p: { lastResponseHealthy?: boolean }) => p.lastResponseHealthy !== false;
-      const healthyReplier = participantsWithActivity.find((p) => p.messageCount > 0 && isHealthy(p) && isRoutable(p));
-      if (healthyReplier) {
-        return this.applyThreadRoutingPolicy(thread, message, [healthyReplier.catId]);
-      }
-      const preferredFallback = participantsWithActivity.find(
-        (p) => isHealthy(p) && isRoutable(p) && preferredSet.has(p.catId as string),
-      );
-      const anyFallback = participantsWithActivity.find((p) => isHealthy(p) && isRoutable(p));
-      const fallbackParticipant = preferredFallback ?? anyFallback;
+      const fallbackParticipant = this.pickParticipantFallback(participantsWithActivity, preferredSet);
       if (fallbackParticipant) {
-        return this.applyThreadRoutingPolicy(thread, message, [fallbackParticipant.catId]);
+        return this.applyThreadRoutingPolicy(thread, message, [fallbackParticipant]);
       }
 
       // No healthy participant at all: use first preferred cat
@@ -1309,7 +1343,7 @@ export class AgentRouter {
 
   /** Resolve target cats and persist new mentions as thread participants */
   private async resolveTargets(message: string, threadId: string): Promise<CatId[]> {
-    const { mentions: mentionedCats } = await this.parseAllMentions(message, threadId);
+    const { mentions: mentionedCats, routing_warnings } = await this.parseAllMentions(message, threadId);
 
     if (mentionedCats.length > 0) {
       if (this.threadStore) {
@@ -1317,6 +1351,7 @@ export class AgentRouter {
       }
       return mentionedCats;
     }
+    if (routing_warnings.some((warning) => warning.kind === 'cat_disabled')) return [];
 
     if (this.threadStore) {
       const thread = await this.threadStore.get(threadId);
@@ -1350,19 +1385,9 @@ export class AgentRouter {
       // F078 + #58: last-replier takes priority over preferred cats (user mental model)
       // #267: three-tier fallback (same as peekTargets)
       const participantsWithActivity = await this.threadStore.getParticipantsWithActivity(threadId);
-      const isRoutable = (p: { catId: CatId }) => this.isRoutableCat(p.catId);
-      const isHealthy = (p: { lastResponseHealthy?: boolean }) => p.lastResponseHealthy !== false;
-      const healthyReplier = participantsWithActivity.find((p) => p.messageCount > 0 && isHealthy(p) && isRoutable(p));
-      if (healthyReplier) {
-        return this.applyThreadRoutingPolicy(thread, message, [healthyReplier.catId]);
-      }
-      const preferredFallback = participantsWithActivity.find(
-        (p) => isHealthy(p) && isRoutable(p) && preferredSet.has(p.catId as string),
-      );
-      const anyFallback = participantsWithActivity.find((p) => isHealthy(p) && isRoutable(p));
-      const fallbackParticipant = preferredFallback ?? anyFallback;
+      const fallbackParticipant = this.pickParticipantFallback(participantsWithActivity, preferredSet);
       if (fallbackParticipant) {
-        return this.applyThreadRoutingPolicy(thread, message, [fallbackParticipant.catId]);
+        return this.applyThreadRoutingPolicy(thread, message, [fallbackParticipant]);
       }
 
       // No healthy participant at all: use first preferred cat

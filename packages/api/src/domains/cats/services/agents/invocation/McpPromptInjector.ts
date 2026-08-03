@@ -9,6 +9,9 @@
  * HTTP endpoints preserved as fallback only.
  */
 
+import { catRegistry } from '@cat-cafe/shared';
+import { getDefaultCatId, isCatAvailable, resolveCatSuccessor } from '../../../../../config/cat-config-loader.js';
+import { primaryMentionHandleForCatId } from '../../../../../utils/cat-mention-handle.js';
 import { renderSegment } from '../../context/prompt-template-loader.js';
 
 export interface McpCallbackOptions {
@@ -45,13 +48,18 @@ export function needsMcpInjection(mcpAvailable: boolean, clientId?: string): boo
 }
 
 function resolveExampleHandle(opts: McpCallbackOptions): string {
-  return (
-    opts.exampleHandle ??
-    (() => {
-      const teammate = opts.teammates?.find((id) => id && id !== opts.currentCatId);
-      return teammate ? `@${teammate}` : '@opus';
-    })()
-  );
+  if (opts.exampleHandle) return opts.exampleHandle;
+
+  const resolveCandidate = (id: string | null | undefined): string | null => {
+    if (!id || id === opts.currentCatId) return null;
+    if (catRegistry.has(id) && isCatAvailable(id)) return id;
+    const successor = resolveCatSuccessor(id);
+    return successor && successor !== opts.currentCatId ? successor : null;
+  };
+  const fallback = [...(opts.teammates ?? []), getDefaultCatId() as string, ...catRegistry.getAllIds()]
+    .map(resolveCandidate)
+    .find((id): id is string => id !== null);
+  return fallback ? (primaryMentionHandleForCatId(fallback) ?? `@${fallback}`) : '@co-creator';
 }
 
 /**
