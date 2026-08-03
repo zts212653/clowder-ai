@@ -46,6 +46,8 @@ let hasCachedHealth = false;
 let inFlightProjectPath: string | undefined;
 let inFlightStatus: Promise<AgentHookStatusResponse> | null = null;
 
+type AgentHookRequestKind = 'status' | 'sync';
+
 function isAgentHookStatusResponse(value: unknown): value is AgentHookStatusResponse {
   return (
     !!value &&
@@ -53,6 +55,33 @@ function isAgentHookStatusResponse(value: unknown): value is AgentHookStatusResp
     typeof (value as { status?: unknown }).status === 'string' &&
     Array.isArray((value as { targets?: unknown }).targets)
   );
+}
+
+async function readErrorDetail(res: Response): Promise<string | null> {
+  try {
+    const payload = await res.json();
+    const message = payload && typeof payload === 'object' ? (payload as { error?: unknown }).error : null;
+    return typeof message === 'string' && message.trim() ? message.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function formatAgentHookError(kind: AgentHookRequestKind, status: number, detail: string | null): string {
+  const normalized = detail?.toLowerCase() ?? '';
+
+  if (status === 403 && normalized.includes('local api host')) {
+    return kind === 'status'
+      ? 'Agent Hook 只支持从本机 localhost 直接访问的 Hub 检测。请改用 http://localhost:3003 打开后重试。'
+      : 'Agent Hook 同步只支持从本机 localhost 直接访问的 Hub 发起。请改用 http://localhost:3003 打开后重试。';
+  }
+
+  if (status === 401) {
+    return 'Agent Hook 请求需要有效会话。请刷新页面后重试。';
+  }
+
+  if (detail) return detail;
+  return `agent hook ${kind} failed (${status})`;
 }
 
 async function readAgentHookStatus(projectPath?: string): Promise<AgentHookStatusResponse> {
@@ -66,7 +95,10 @@ async function readAgentHookStatus(projectPath?: string): Promise<AgentHookStatu
   inFlightProjectPath = projectPath;
   inFlightStatus = apiFetch(url)
     .then(async (res) => {
-      if (!res.ok) throw new Error(`agent hook status failed (${res.status})`);
+      if (!res.ok) {
+        const detail = await readErrorDetail(res);
+        throw new Error(formatAgentHookError('status', res.status, detail));
+      }
       const status = await res.json();
       if (!isAgentHookStatusResponse(status)) throw new Error('agent hook status response is invalid');
       return status;
@@ -90,7 +122,10 @@ async function postAgentHookSync(projectPath?: string): Promise<AgentHookStatusR
     headers: projectPath ? { 'Content-Type': 'application/json' } : undefined,
     body: projectPath ? JSON.stringify({ projectPath }) : undefined,
   });
-  if (!res.ok) throw new Error(`agent hook sync failed (${res.status})`);
+  if (!res.ok) {
+    const detail = await readErrorDetail(res);
+    throw new Error(formatAgentHookError('sync', res.status, detail));
+  }
   const status = await res.json();
   if (!isAgentHookStatusResponse(status)) throw new Error('agent hook sync response is invalid');
   cachedHealth = status;

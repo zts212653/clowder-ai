@@ -25,11 +25,33 @@ function flushPromises() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-function Probe({ onStatus }: { onStatus: (status: string | null) => void }) {
-  const { health } = useAgentHookHealth({ enabled: true });
+function Probe({
+  onStatus,
+  onError,
+}: {
+  onStatus?: (status: string | null) => void;
+  onError?: (error: string | null) => void;
+}) {
+  const { health, error } = useAgentHookHealth({ enabled: true });
   useEffect(() => {
-    onStatus(health?.status ?? null);
+    onStatus?.(health?.status ?? null);
   }, [health?.status, onStatus]);
+  useEffect(() => {
+    onError?.(error);
+  }, [error, onError]);
+  return null;
+}
+
+function SyncProbe({ onError }: { onError: (error: string | null) => void }) {
+  const { error, sync } = useAgentHookHealth({ enabled: false });
+
+  useEffect(() => {
+    void sync();
+  }, [sync]);
+
+  useEffect(() => {
+    onError(error);
+  }, [error, onError]);
   return null;
 }
 
@@ -85,5 +107,43 @@ describe('useAgentHookHealth', () => {
     expect(apiFetch).toHaveBeenCalledTimes(1);
     expect(apiFetch).toHaveBeenCalledWith('/api/agent-hooks/status');
     expect(statuses).toContain('configured');
+  });
+
+  it('maps localhost-only 403 status failures to an actionable hint', async () => {
+    const errors: Array<string | null> = [];
+    vi.mocked(apiFetch).mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({ error: 'Agent hook health requires an explicit targetRoot or a local API host' }),
+    } as Response);
+
+    await act(async () => {
+      root.render(<Probe onError={(error) => errors.push(error)} />);
+      await flushPromises();
+      await flushPromises();
+    });
+
+    expect(errors).toContain(
+      'Agent Hook 只支持从本机 localhost 直接访问的 Hub 检测。请改用 http://localhost:3003 打开后重试。',
+    );
+  });
+
+  it('maps localhost-only 403 sync failures to an actionable hint', async () => {
+    const errors: Array<string | null> = [];
+    vi.mocked(apiFetch).mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({ error: 'Agent hook sync requires an explicit targetRoot or a local API host' }),
+    } as Response);
+
+    await act(async () => {
+      root.render(<SyncProbe onError={(error) => errors.push(error)} />);
+      await flushPromises();
+      await flushPromises();
+    });
+
+    expect(errors).toContain(
+      'Agent Hook 同步只支持从本机 localhost 直接访问的 Hub 发起。请改用 http://localhost:3003 打开后重试。',
+    );
   });
 });
