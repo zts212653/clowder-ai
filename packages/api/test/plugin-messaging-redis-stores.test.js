@@ -1,5 +1,5 @@
 /**
- * K-1 / F258 — Redis store implementations (plan Task 8)
+ * K-1 / F288 — Redis store implementations (plan Task 8)
  * Mirrors the memory-impl assertion matrix against real Redis.
  * Runs only under the isolated Redis runner (pnpm --filter @cat-cafe/api test:redis);
  * skipped in the default suite. Unique keyPrefix — no wildcard cleanup (per LL in

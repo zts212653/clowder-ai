@@ -1,5 +1,5 @@
 /**
- * Plugin Messaging — envelope pure projection (K-1 / F258, D-1)
+ * Plugin Messaging — envelope pure projection (K-1 / F288, D-1)
  *
  * MessageEnvelope is a PROJECTION of StoredMessage — the message store stays
  * the single truth source (P4); no second envelope store exists. Plugin-sent

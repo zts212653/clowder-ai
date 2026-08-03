@@ -1,5 +1,5 @@
 /**
- * K-1 / F258 — host-issued handles (plan Task 3, §4c)
+ * K-1 / F288 — host-issued handles (plan Task 3, §4c)
  * AC-2 addressing: no bare threadId; INV-8 cross-instance/revoked rejection;
  * revoke cascades to subscriptions.
  */

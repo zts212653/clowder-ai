@@ -1,5 +1,5 @@
 /**
- * Plugin Messaging — Redis key builders (K-1 / F258)
+ * Plugin Messaging — Redis key builders (K-1 / F288)
  *
  * Namespace: plugmsg:* — collision-free with existing cat-cafe keyspaces.
  * Caller-supplied segments (instanceId, subscriptionId, ledger keys already

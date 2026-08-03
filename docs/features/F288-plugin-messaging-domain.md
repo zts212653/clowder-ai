@@ -1,5 +1,5 @@
 ---
-feature_ids: [F258]
+feature_ids: [F288]
 related_features: [F088, F202, F240]
 topics: [plugin, messaging, envelope, event-stream, idempotency]
 doc_kind: spec
@@ -7,7 +7,7 @@ created: 2026-07-14
 tips_exempt: K-1 establishes the kernel contract; the user-facing broker and configuration surface belong to K-2
 ---
 
-# F258: Plugin Messaging Domain（K-1 messaging 域收敛）
+# F288: Plugin Messaging Domain（K-1 messaging 域收敛）
 
 > F 号 tentative——若与并行分配冲突，maintainer review 时可重命名。
 
@@ -165,6 +165,6 @@ Scope verdict: ✅ 必做（plugin developer 可感知的 kernel contract）
 - 350 行硬限：append output coordinator 与 strict parser helpers 按单一职责拆分；K-1 本轮 source/test 单文件最大 349 行 ✅。
 - upstream delta：`01bf27f..591a9dc` 的 3 个提交仅触及 desktop、provider effort、cat config/web/governance，未触及 messaging/Redis event log slice；本轮无需带脏树 rebase。
 - Architecture cell：建议新增 `plugin-messaging`；ownership map 尚未更新，留给 reviewer/maintainer 判定（warning-only）。
-- 编号冲突：本 upstream 镜像的 F258 是 K-1；fork `develop_base` 已有同号 Desktop In-App Update。未擅自改号，需 maintainer 在上游 review 时裁定。
+- 编号冲突：本 upstream 镜像的 F288 是 K-1；fork `develop_base` 已有同号 Desktop In-App Update。未擅自改号，需 maintainer 在上游 review 时裁定。
 
 [砚砚/GPT-5.6 Sol🐾]

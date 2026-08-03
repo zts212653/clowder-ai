@@ -1,5 +1,5 @@
 /**
- * Plugin Messaging — messaging.send orchestration (K-1 / F258, AC-1/AC-2)
+ * Plugin Messaging — messaging.send orchestration (K-1 / F288, AC-1/AC-2)
  *
  * Order (D-3): validate shape → ledger claim → (permission/state checks) →
  * persist → emit publish event → settle. The claim runs BEFORE handle/
@@ -14,7 +14,7 @@
  * eventId (at-least-once — the §3.1 contract). Failure before settle releases
  * the claim (retry re-executes).
  *
- * Whisper boundary (v0, F258 doc): whisper sends are NOT event-streamed —
+ * Whisper boundary (v0, F288 doc): whisper sends are NOT event-streamed —
  * fail-closed against leaking restricted content to subscribers.
  */
 

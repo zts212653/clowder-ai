@@ -161,13 +161,13 @@ function hydrateExtra(rawExtra: string | undefined, rawPluginMessage: string | u
   const parsedExtra = safeParseExtra(rawExtra);
   const { hostExtra, pluginMessage: legacyPluginMessage } = splitMessageExtra(parsedExtra);
   // Once the independent field exists it is authoritative, including when
-  // malformed (fail-closed); fall back only for pre-F258 embedded records.
+  // malformed (fail-closed); fall back only for pre-F288 embedded records.
   if (rawPluginMessage === undefined) {
-    // Pre-F258 path: no independent field, fall back to legacy embedded record.
+    // Pre-F288 path: no independent field, fall back to legacy embedded record.
     if (Object.keys(hostExtra).length === 0 && legacyPluginMessage === undefined) return undefined;
     return { ...hostExtra, ...(legacyPluginMessage ? { pluginMessage: legacyPluginMessage } : {}) };
   }
-  // F258 path: independent field exists. Preserve it even when invalid so
+  // F288 path: independent field exists. Preserve it even when invalid so
   // projectEnvelope enters the plugin branch and fail-closes (codex P1 fix).
   const pluginMessage = safeParsePluginMessage(rawPluginMessage);
   // When pluginMessage parsed to undefined (malformed), keep an invalid marker
@@ -1065,7 +1065,7 @@ export class RedisMessageStore {
     const merged = { ...current, ...extra };
     const pipeline = this.redis.multi();
     pipeline.hset(MessageKeys.detail(id), { extra: serializeExtra(merged) });
-    // Lazy migration for a pre-F258 record whose plugin payload still lives in
+    // Lazy migration for a pre-F288 record whose plugin payload still lives in
     // the legacy extra JSON. HSETNX cannot overwrite a concurrent newer write.
     if (pluginMessage) {
       pipeline.hsetnx(MessageKeys.detail(id), 'pluginMessage', JSON.stringify(pluginMessage));

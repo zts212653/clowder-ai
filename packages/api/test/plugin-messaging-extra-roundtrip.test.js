@@ -1,5 +1,5 @@
 /**
- * K-1 / F258 — `safeParseExtra` MUST preserve `extra.pluginMessage`.
+ * K-1 / F288 — `safeParseExtra` MUST preserve `extra.pluginMessage`.
  *
  * Bug class twin of F194 Z9 (turnInvocationId): safeParseExtra is a
  * field-whitelist parser; pluginMessage was written by serializeExtra but
@@ -22,7 +22,7 @@ const PLUGIN_MESSAGE = {
   appendOps: [{ operationId: 'op-1', elementIds: ['el-2'] }],
 };
 
-describe('F258 — safeParseExtra preserves pluginMessage (Redis read path)', () => {
+describe('F288 — safeParseExtra preserves pluginMessage (Redis read path)', () => {
   it('independent-field parser preserves empty arrays without Lua re-encoding', async () => {
     const { safeParsePluginMessage } = await import(
       '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'

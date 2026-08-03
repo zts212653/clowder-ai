@@ -1,5 +1,5 @@
 ---
-feature_ids: [F258]
+feature_ids: [F288]
 topics: [plugin-messaging, contract-parity, snapshot-consistency, capability-handles]
 doc_kind: implementation-plan
 created: 2026-07-15
@@ -104,7 +104,7 @@ Commit the snapshot-consistency slice with a body explaining the persist-before-
 - Test: `packages/api/test/plugin-messaging-validate.test.js`
 - Test: `packages/api/test/plugin-messaging-event-stream.test.js`
 - Test: `packages/api/test/plugin-messaging-append.test.js`
-- Modify: `docs/features/F258-plugin-messaging-domain.md`
+- Modify: `docs/features/F288-plugin-messaging-domain.md`
 - Modify: `review-notes/2026-07-15-k1-plugin-messaging-review-request.md`
 
 **Step 1: Write failing tests**

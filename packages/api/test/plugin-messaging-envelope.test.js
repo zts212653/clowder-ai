@@ -1,5 +1,5 @@
 /**
- * K-1 / F258 — envelope pure projection (plan Task 4, D-1)
+ * K-1 / F288 — envelope pure projection (plan Task 4, D-1)
  * MessageEnvelope is a projection of StoredMessage — no second truth source.
  */
 import assert from 'node:assert/strict';

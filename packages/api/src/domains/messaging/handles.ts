@@ -1,5 +1,5 @@
 /**
- * Plugin Messaging — host-issued address handles (K-1 / F258, AC-2, §4c)
+ * Plugin Messaging — host-issued address handles (K-1 / F288, AC-2, §4c)
  *
  * Handles are the ONLY addressing channel for drafts — schema-level there is
  * no bare-threadId path (§3.1). A handle binds pluginInstance + grant scope +

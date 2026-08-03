@@ -1,5 +1,5 @@
 /**
- * Plugin Messaging — domain facade (K-1 / F258)
+ * Plugin Messaging — domain facade (K-1 / F288)
  *
  * The single consumption surface for the K-2 Host Broker: handle issuance
  * (control plane takes over the entry point in K-2), messaging.send,

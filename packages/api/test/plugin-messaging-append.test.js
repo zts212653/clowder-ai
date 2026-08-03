@@ -1,5 +1,5 @@
 /**
- * K-1 / F258 — messaging.appendElements (plan Task 7, §4d)
+ * K-1 / F288 — messaging.appendElements (plan Task 7, §4d)
  * AC-4: atomic append, no rewriting (INV-6), no provenance whitewashing
  * (INV-7), baseRevision conflicts (INV-10), idempotent replay (INV-12).
  */

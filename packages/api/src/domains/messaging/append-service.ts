@@ -1,5 +1,5 @@
 /**
- * Plugin Messaging — messaging.appendElements (K-1 / F258, AC-4, §4d)
+ * Plugin Messaging — messaging.appendElements (K-1 / F288, AC-4, §4d)
  *
  * Atomicity: per-message owner-token lock serializes appends; the
  * read-check-write on extra.pluginMessage happens entirely inside the lock.

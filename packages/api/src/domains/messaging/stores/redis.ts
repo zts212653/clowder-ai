@@ -1,5 +1,5 @@
 /**
- * Plugin Messaging — Redis store implementations (K-1 / F258)
+ * Plugin Messaging — Redis store implementations (K-1 / F288)
  *
  * Atomicity strategy:
  * - Ledger claim/settle/release: single Lua scripts (state machine §4a).

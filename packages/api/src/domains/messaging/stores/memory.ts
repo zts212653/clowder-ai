@@ -1,5 +1,5 @@
 /**
- * Plugin Messaging — in-memory store implementations (K-1 / F258)
+ * Plugin Messaging — in-memory store implementations (K-1 / F288)
  *
  * Dev/test semantics: process-lifetime state (consistent with the in-memory
  * MessageStore — KL-2 in the plan). Redis implementations carry production

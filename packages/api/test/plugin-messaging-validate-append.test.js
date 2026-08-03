@@ -1,4 +1,4 @@
-/** K-1 / F258 — append input contract validation. */
+/** K-1 / F288 — append input contract validation. */
 import assert from 'node:assert/strict';
 import { before, describe, test } from 'node:test';
 

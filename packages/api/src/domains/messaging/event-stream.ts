@@ -1,12 +1,12 @@
 /**
- * Plugin Messaging — event stream subscriptions (K-1 / F258, AC-3, §4b)
+ * Plugin Messaging — event stream subscriptions (K-1 / F288, AC-3, §4b)
  *
  * Cursor scope = (pluginInstanceId × subscription); ack cursors are durable.
  * Delivery = at-least-once for unacked events (INV-4); consumers dedupe by
  * eventId. The ack token is subscription-local and opaque (INV-5) — v0
  * opacity is contractual, enforcement is server-side subscription matching
  * plus the delivered watermark (the guard, not the token, is load-bearing;
- * cryptographic tokens are a F258 non-goal until K-2's untrusted transport).
+ * cryptographic tokens are a F288 non-goal until K-2's untrusted transport).
  *
  * Stale (INV-9): cursor behind the retention floor → read returns
  * { stale: true } with zero events; snapshot() catches up from the message

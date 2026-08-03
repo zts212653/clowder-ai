@@ -1,5 +1,5 @@
 /**
- * K-1 / F258 — contract/validate fail-closed tests (plan Task 1)
+ * K-1 / F288 — contract/validate fail-closed tests (plan Task 1)
  * INV-2 (draft cannot express system audience) structural half + D-6 bounds.
  */
 import assert from 'node:assert/strict';

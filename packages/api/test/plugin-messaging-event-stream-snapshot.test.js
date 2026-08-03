@@ -1,5 +1,5 @@
 /**
- * K-1 / F258 — event stream subscriptions (plan Task 6, §4b)
+ * K-1 / F288 — event stream subscriptions (plan Task 6, §4b)
  * AC-3: durable ack cursor, at-least-once redelivery (INV-4), opaque
  * subscription-local token (INV-5), stale + snapshot catch-up (INV-9).
  * Real stack; events produced via real SendService.

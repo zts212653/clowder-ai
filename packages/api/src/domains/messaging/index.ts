@@ -1,5 +1,5 @@
 /**
- * Plugin Messaging domain (K-1 / F258) — public surface.
+ * Plugin Messaging domain (K-1 / F288) — public surface.
  * Truth source: clowder-ai-plugins proposal §3.1 (189f25d).
  */
 

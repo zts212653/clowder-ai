@@ -53,4 +53,4 @@ Rejected alternatives:
 
 ## Verification record
 
-The strict append-history regression reproduced Terra's counterexample at 10/11 RED and moved to 11/11 GREEN. The focused append/envelope/Redis-parser consumer set passes 21/21; the non-Redis messaging set passes 149/149; Redis independent-field parity, concurrent host/plugin updates, hard delete, and lease fencing pass 18/18 in the official isolated runner. Final gate commands are recorded in the F258 quality-gate report.
+The strict append-history regression reproduced Terra's counterexample at 10/11 RED and moved to 11/11 GREEN. The focused append/envelope/Redis-parser consumer set passes 21/21; the non-Redis messaging set passes 149/149; Redis independent-field parity, concurrent host/plugin updates, hard delete, and lease fencing pass 18/18 in the official isolated runner. Final gate commands are recorded in the F288 quality-gate report.

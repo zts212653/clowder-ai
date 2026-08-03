@@ -23,7 +23,7 @@ function parsePluginMessage(value: unknown): StoredPluginMessage | undefined {
   return (parsePluginMessageExtra(value) as StoredPluginMessage | null) ?? undefined;
 }
 
-/** Parse the F258 payload stored in its own Redis hash field (fail-closed). */
+/** Parse the F288 payload stored in its own Redis hash field (fail-closed). */
 export function safeParsePluginMessage(raw: string | undefined): StoredPluginMessage | undefined {
   if (!raw) return undefined;
   try {
@@ -142,7 +142,7 @@ export function safeParseExtra(raw: string | undefined):
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
       systemKind?: 'a2a_routing' | 'context_briefing';
       a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string };
-      /** F258 (K-1): plugin messaging canonical payload — structural mirror of MessageStore.ts extra typing. */
+      /** F288 (K-1): plugin messaging canonical payload — structural mirror of MessageStore.ts extra typing. */
       pluginMessage?: {
         instanceId: string;
         revision: number;
@@ -192,7 +192,7 @@ export function safeParseExtra(raw: string | undefined):
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
       systemKind?: 'a2a_routing' | 'context_briefing';
       a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string };
-      /** F258 (K-1): plugin messaging canonical payload — structural mirror of MessageStore.ts extra typing. */
+      /** F288 (K-1): plugin messaging canonical payload — structural mirror of MessageStore.ts extra typing. */
       pluginMessage?: {
         instanceId: string;
         revision: number;
@@ -442,7 +442,7 @@ export function safeParseExtra(raw: string | undefined):
       hasField = true;
     }
 
-    // F258 (K-1 plugin messaging): preserve pluginMessage through the Redis
+    // F288 (K-1 plugin messaging): preserve pluginMessage through the Redis
     // round-trip — twin of the Z9 turnInvocationId lesson: this parser is a
     // whitelist, every new extra key MUST be copied explicitly or Redis reads
     // silently drop it (append-service would then reject its own messages).

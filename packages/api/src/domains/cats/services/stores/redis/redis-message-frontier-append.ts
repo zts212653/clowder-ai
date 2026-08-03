@@ -91,7 +91,7 @@ export async function appendMessageIfThreadFrontier(input: {
   assertQueueCustodyMessageBinding(message);
   const threadId = message.threadId ?? DEFAULT_THREAD_ID;
   const id = generateSortableId(message.timestamp);
-  // F258: split pluginMessage from host extra — stored as independent hash field
+  // F288: split pluginMessage from host extra — stored as independent hash field
   const { pluginMessage, ...hostExtra } = message.extra ?? {};
   const hasHostExtra = Object.keys(hostExtra).length > 0;
   const hashFields: Record<string, string> = {
@@ -180,7 +180,7 @@ export async function appendMessageAndObservePriorFrontier(input: {
   assertQueueCustodyMessageBinding(message);
   const threadId = message.threadId ?? DEFAULT_THREAD_ID;
   const id = generateSortableId(message.timestamp);
-  // F258: split pluginMessage from host extra — stored as independent hash field
+  // F288: split pluginMessage from host extra — stored as independent hash field
   const { pluginMessage: pm2, ...hostExtra2 } = message.extra ?? {};
   const hasHostExtra2 = Object.keys(hostExtra2).length > 0;
   const hashFields: Record<string, string> = {

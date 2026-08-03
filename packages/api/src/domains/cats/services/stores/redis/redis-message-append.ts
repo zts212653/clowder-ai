@@ -68,7 +68,7 @@ return {'committed', messageId}
 `;
 
 function serializeMessage(message: AppendMessageInput, id: string, threadId: string): Record<string, string> {
-  // F258: split pluginMessage from host extra — stored as independent hash field
+  // F288: split pluginMessage from host extra — stored as independent hash field
   const { pluginMessage, ...hostExtra } = message.extra ?? {};
   const hasHostExtra = Object.keys(hostExtra).length > 0;
   return {

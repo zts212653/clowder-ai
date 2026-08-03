@@ -1,5 +1,5 @@
 /**
- * K-1 / F258 — append-event lease fencing substrate.
+ * K-1 / F288 — append-event lease fencing substrate.
  * INV-14: lease validation and event insertion are one atomic store action.
  */
 import assert from 'node:assert/strict';

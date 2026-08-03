@@ -1,5 +1,5 @@
 /**
- * K-1 / F258 — MessagingService facade end-to-end (plan Task 9)
+ * K-1 / F288 — MessagingService facade end-to-end (plan Task 9)
  * The K-2 broker consumption surface: one object, full chain
  * issue → send → subscribe → read → ack → append → read → snapshot.
  */

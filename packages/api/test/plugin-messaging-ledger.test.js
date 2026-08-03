@@ -1,5 +1,5 @@
 /**
- * K-1 / F258 — idempotent settlement ledger state machine (plan Task 2, §4a)
+ * K-1 / F288 — idempotent settlement ledger state machine (plan Task 2, §4a)
  * unclaimed → inflight → settled | released; claim-TTL expiry; instance scoping (AC-5).
  */
 import assert from 'node:assert/strict';

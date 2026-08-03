@@ -1,5 +1,5 @@
 /**
- * K-1 / F258 — messaging.send (plan Task 5)
+ * K-1 / F288 — messaging.send (plan Task 5)
  * AC-1 single send entry + idempotent receipt (INV-1); AC-2 host-bound
  * envelope; D-4 origin stamping; whisper grant enforcement; §4a error paths.
  * Real stack: MessageStore (memory) + HandleService + MessagingLedger + event log. No mocks.

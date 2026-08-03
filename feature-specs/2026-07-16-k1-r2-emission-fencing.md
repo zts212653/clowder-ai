@@ -1,11 +1,11 @@
 # K-1 R2 Emission Fencing Implementation Plan
 
-**Feature:** F258 — `docs/features/F258-plugin-messaging-domain.md`
+**Feature:** F288 — `docs/features/F288-plugin-messaging-domain.md`
 **Goal:** Close Terra's two P1 and one P2 findings by making append authority, output ordering, and stored-envelope validation share explicit persistent truth sources.
 **Acceptance Criteria:** (1) a send-only parent handle cannot append; (2) after a successor emits revision 3, a stale revision-2 emitter cannot append a new event even when revision 2 has left retention; (3) stored plugin payload hydration rejects every closed-schema/bounds violation named by C-1; (4) existing send, replay, snapshot, whisper, memory, and Redis paths remain green.
-**Architecture cell:** `plugin-messaging` (proposed by F258; not yet present in the upstream ownership map)
+**Architecture cell:** `plugin-messaging` (proposed by F288; not yet present in the upstream ownership map)
 **Map delta:** none
-**Map delta why:** This repair stays inside F258's already-proposed messaging cell and does not add a new cross-domain owner.
+**Map delta why:** This repair stays inside F288's already-proposed messaging cell and does not add a new cross-domain owner.
 **Architecture:** The message store remains the canonical content/outbox state, while the event log remains the canonical sequence log. A host-issued append lease becomes an explicit capability passed to event insertion; the event store validates that lease atomically with insertion, so an expired holder cannot mutate the log. Hydration uses the same closed-object and bound invariants as the C-1 contract mirror.
 **Tech Stack:** TypeScript, Node test runner, in-memory stores, Redis Lua, `IMessageStore` revision CAS.
 **前端验证:** No — domain-only change.
@@ -182,7 +182,7 @@ Bypass rule: Redis-specific parsers may delegate to, but may not weaken, `parseP
 **Files:**
 - Modify: `docs/bug-report/append-event-order-after-lock-expiry/bug-report.md`
 - Modify: `docs/bug-report/redis-plugin-message-array-collapse/bug-report.md`
-- Modify: `docs/features/F258-plugin-messaging-domain.md`
+- Modify: `docs/features/F288-plugin-messaging-domain.md`
 - Modify: `review-notes/2026-07-15-k1-plugin-messaging-review-request.md`
 
 1. Run K-1 non-Redis, isolated Redis, build/check/lint, architecture/fallback scans, and `git diff --check`.

@@ -123,7 +123,7 @@ R3 is an internal canonical-hydration correction with no new user-facing surface
 ### Technical OQ（for reviewer）
 
 1. **Ownership cell:** should `plugin-messaging` become a new cell as proposed, with F088 retaining connector transport, or should the map express a parent/child relationship?
-2. **Feature number collision:** this upstream-mirror branch uses tentative F258, while fork `develop_base` already uses F258 for Desktop In-App Update. Please choose the final upstream feature number; the implementation intentionally did not guess or rewrite history.
+2. **Feature number collision:** this upstream-mirror branch uses tentative F288, while fork `develop_base` already uses F288 for Desktop In-App Update. Please choose the final upstream feature number; the implementation intentionally did not guess or rewrite history.
 3. **Append outbox window:** `appendOps` repairs every committed predecessor before a successor write; event-key dedupe is retention-window bounded, so an old crash replay may re-emit the same `eventId` at a new sequence under the documented at-least-once contract. Please verify that this boundary and bounded, non-compacting operation history are acceptable for v0.1.
 
 ### Value OQ（for operator）
@@ -169,7 +169,7 @@ This request is `review-ready`, not `shape-approved`. A reviewer pass is require
 
 Full `pnpm test` and full API `test:redis` still encounter upstream-mirror fork-only baseline failures. A branch/base comparison established identical failing sets before the final audit; neither run contains a K-1 failure. The focused Redis runner is green and uses isolated DB 15 on a non-reserved random port.
 
-Related evidence: `docs/features/F258-plugin-messaging-domain.md` and the two bug reports under `docs/bug-report/`.
+Related evidence: `docs/features/F288-plugin-messaging-domain.md` and the two bug reports under `docs/bug-report/`.
 
 Upstream audit: the three commits after merge base `01bf27f` through `591a9dc` touch desktop, provider effort, cat config/web, and governance only; none overlaps the messaging/Redis event-log slice, so no dirty-tree reconciliation was needed before re-review.
 

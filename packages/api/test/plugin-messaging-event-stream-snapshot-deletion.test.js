@@ -1,4 +1,4 @@
-/** K-1 / F258 — deleted current state must not poison snapshot output fences. */
+/** K-1 / F288 — deleted current state must not poison snapshot output fences. */
 import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 

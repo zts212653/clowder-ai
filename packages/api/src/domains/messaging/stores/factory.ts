@@ -1,5 +1,5 @@
 /**
- * Plugin Messaging — store factory (K-1 / F258)
+ * Plugin Messaging — store factory (K-1 / F288)
  * Same convention as MessageStoreFactory: Redis client present → Redis
  * implementations (production durability), absent → in-memory (dev semantics).
  */

@@ -1,5 +1,5 @@
 /**
- * Plugin Messaging — idempotent settlement ledger (K-1 / F258, AC-5)
+ * Plugin Messaging — idempotent settlement ledger (K-1 / F288, AC-5)
  *
  * Key spaces (instance-scoped; reinstalled instances get fresh instanceIds so
  * old key spaces are never reused):

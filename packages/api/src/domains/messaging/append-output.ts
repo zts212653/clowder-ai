@@ -1,5 +1,5 @@
 /**
- * Durable append-output state machine (F258 D-3, INV-14..18).
+ * Durable append-output state machine (F288 D-3, INV-14..18).
  *
  * The message store owns revision/outbox state; the event store owns sequence
  * assignment. Every append event carries the live AppendLease so Redis can

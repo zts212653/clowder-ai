@@ -1,5 +1,5 @@
 /**
- * K-1 / F258 — rollback safety + no-plugin dormancy evidence.
+ * K-1 / F288 — rollback safety + no-plugin dormancy evidence.
  *
  * Required by maintainer direction intake (#1271): executable evidence that
  * the additive plugin fields are inert under rollback and that deployments

@@ -1,5 +1,5 @@
 /**
- * K-1 / F258 — adversarial append emitter fencing.
+ * K-1 / F288 — adversarial append emitter fencing.
  * A stale lease holder must never add revision N after a successor exposed N+1.
  */
 import assert from 'node:assert/strict';

@@ -1,5 +1,5 @@
 /**
- * Plugin Messaging — store ports (K-1 / F258)
+ * Plugin Messaging — store ports (K-1 / F288)
  *
  * Small persistence seams behind the messaging domain services.
  * Two implementations each: memory (dev, process-lifetime — consistent with

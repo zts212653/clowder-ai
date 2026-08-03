@@ -216,7 +216,7 @@ export interface StoredMessage {
     a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string };
     /** F264: derived browser projection; canonical truth remains queueCustody. */
     queueReceipt?: QueueMessageReceipt;
-    /** F258 (K-1 plugin messaging): canonical plugin payload — the envelope is a pure
+    /** F288 (K-1 plugin messaging): canonical plugin payload — the envelope is a pure
      *  projection of this (single truth source). Strict shape owned by
      *  domains/messaging/envelope.ts (PluginMessageExtra); kept structural here so the
      *  cats domain does not depend on the messaging domain. */
@@ -309,7 +309,7 @@ export interface BoundedThreadMessagePage {
   nextCursor?: { timestamp: number; id: string };
 }
 
-/** Canonical F258 payload stored independently from host-owned extra metadata. */
+/** Canonical F288 payload stored independently from host-owned extra metadata. */
 export type StoredPluginMessage = NonNullable<NonNullable<StoredMessage['extra']>['pluginMessage']>;
 
 /** Host-owned metadata patch. Plugin payload revisions use updatePluginMessage(). */
@@ -564,7 +564,7 @@ export interface IMessageStore {
   revealWhispers(threadId: string, userId: string): number | Promise<number>;
   /** F096: Update message extra data (for interactive block state persistence). Returns null if not found. */
   updateExtra(id: string, extra: HostMessageExtra): StoredMessage | null | Promise<StoredMessage | null>;
-  /** F258: replace only the canonical plugin payload, independently of host extra metadata. */
+  /** F288: replace only the canonical plugin payload, independently of host extra metadata. */
   updatePluginMessage(
     id: string,
     pluginMessage: StoredPluginMessage,

@@ -1,5 +1,5 @@
 /**
- * K-1 / F258 — event log store (plan Task 6 substrate)
+ * K-1 / F288 — event log store (plan Task 6 substrate)
  * INV-3 per-thread monotonic sequence; D-3 eventKey dedupe; retention trim floor.
  */
 import assert from 'node:assert/strict';

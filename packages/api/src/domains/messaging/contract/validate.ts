@@ -1,5 +1,5 @@
 /**
- * Plugin Messaging — draft/append input validation (K-1 / F258, plan Task 1)
+ * Plugin Messaging — draft/append input validation (K-1 / F288, plan Task 1)
  *
  * Fail-closed: anything not positively recognized is rejected with
  * MessagingError('VALIDATION'). Bounds per MESSAGING_BOUNDS (D-6).
