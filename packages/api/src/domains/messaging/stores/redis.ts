@@ -25,6 +25,7 @@ import type {
   LedgerClaimResult,
   LedgerStore,
   MessageHandleRecord,
+  SettleResult,
 } from './ports.js';
 import { MessagingKeys } from './redis-keys.js';
 
@@ -39,12 +40,12 @@ return false
 
 const LEDGER_SETTLE_LUA = `
 local v = redis.call('GET', KEYS[1])
-if not v then return -1 end
+if not v then return {-1, ''} end
 local decoded = cjson.decode(v)
-if decoded.status == 'settled' then return 0 end
-if decoded.status ~= 'inflight' or decoded.claimToken ~= ARGV[1] then return -1 end
+if decoded.status == 'settled' then return {0, v} end
+if decoded.status ~= 'inflight' or decoded.claimToken ~= ARGV[1] then return {-1, ''} end
 redis.call('SET', KEYS[1], ARGV[2], 'PX', ARGV[3])
-return 1
+return {1, ''}
 `;
 
 const LEDGER_RELEASE_LUA = `
@@ -78,7 +79,7 @@ export class RedisLedgerStore implements LedgerStore {
     return { status: 'inflight' };
   }
 
-  async settle(key: string, claimToken: string, receipt: unknown, retentionMs: number): Promise<boolean> {
+  async settle(key: string, claimToken: string, receipt: unknown, retentionMs: number): Promise<SettleResult> {
     const result = (await this.redis.eval(
       LEDGER_SETTLE_LUA,
       1,
@@ -86,9 +87,14 @@ export class RedisLedgerStore implements LedgerStore {
       claimToken,
       JSON.stringify({ status: 'settled', receipt }),
       String(retentionMs),
-    )) as number;
-    // Lua returns: 1 = freshly settled, 0 = already settled, -1 = rejected
-    return result >= 0;
+    )) as [number, string];
+    // Lua returns: {1,''} = freshly settled, {0,json} = already settled, {-1,''} = rejected
+    if (result[0] === 1) return { status: 'freshly_settled' };
+    if (result[0] === 0 && result[1]) {
+      const parsed = JSON.parse(result[1]) as { receipt: unknown };
+      return { status: 'already_settled', receipt: parsed.receipt };
+    }
+    return { status: 'rejected' };
   }
 
   async release(key: string, claimToken: string): Promise<void> {
@@ -107,14 +113,22 @@ export class RedisLedgerStore implements LedgerStore {
  * KEYS[2] = new-handle record key (plugmsg:handle:{newHandleId})
  * ARGV[1] = newHandleId (suffix of KEYS[2])
  * ARGV[2] = serialized HandleRecord JSON for the new handle
- * Returns: {record_json, '0'|'1'} — '0' = existing, '1' = created
+ * ARGV[3] = requested messageId (for index-hit validation)
+ * Returns: {record_json, '0'|'1'|'-1'}
+ *   '0' = existing validated, '1' = created, '-1' = index mismatch (fail-closed)
  */
 const HANDLE_GET_OR_CREATE_LUA = `
 local handlePrefix = string.sub(KEYS[2], 1, #KEYS[2] - #ARGV[1])
 local existingId = redis.call('GET', KEYS[1])
 if existingId then
   local raw = redis.call('GET', handlePrefix .. existingId)
-  if raw then return {raw, '0'} end
+  if raw then
+    local decoded = cjson.decode(raw)
+    if decoded.kind ~= 'message_handle' or decoded.messageId ~= ARGV[3] then
+      return {raw, '-1'}
+    end
+    return {raw, '0'}
+  end
 end
 redis.call('SET', KEYS[2], ARGV[2])
 redis.call('SET', KEYS[1], ARGV[1])
@@ -147,7 +161,13 @@ export class RedisHandleStore implements HandleStore {
       MessagingKeys.handle(record.handleId),
       record.handleId,
       JSON.stringify(record),
+      record.messageId,
     )) as [string, string];
+    if (result[1] === '-1') {
+      throw new Error(
+        `handle index corruption: indexed record does not match ` + `requested messageId=${record.messageId}`,
+      );
+    }
     return {
       record: JSON.parse(result[0]) as MessageHandleRecord,
       created: result[1] === '1',

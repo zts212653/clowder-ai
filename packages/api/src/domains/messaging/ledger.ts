@@ -14,7 +14,7 @@
  */
 
 import type { AppendReceipt, SendReceipt } from '@clowder-ai/plugin-contract';
-import type { LedgerStore } from './stores/ports.js';
+import type { LedgerStore, SettleResult } from './stores/ports.js';
 
 export const LEDGER_CLAIM_TTL_MS = 60_000;
 export const LEDGER_RETENTION_MS = 7 * 24 * 3600 * 1000;
@@ -59,7 +59,7 @@ export class MessagingLedger {
     idempotencyKey: string,
     claimToken: string,
     receipt: SendReceipt,
-  ): Promise<boolean> {
+  ): Promise<SettleResult> {
     return this.store.settle(
       MessagingLedger.sendKey(instanceId, idempotencyKey),
       claimToken,
@@ -85,7 +85,7 @@ export class MessagingLedger {
     operationId: string,
     claimToken: string,
     receipt: AppendReceipt,
-  ): Promise<boolean> {
+  ): Promise<SettleResult> {
     return this.store.settle(
       MessagingLedger.appendKey(instanceId, messageId, operationId),
       claimToken,

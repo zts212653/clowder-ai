@@ -219,19 +219,18 @@ export class SendService {
         handle: { kind: 'message' as const, token: msgHandle.handleId },
         ...(publishSequence !== undefined ? { publishSequence } : {}),
       };
-      const settled = await this.deps.ledger.settleSend(
+      const result = await this.deps.ledger.settleSend(
         ctx.pluginInstanceId,
         draft.idempotencyKey,
         claim.claimToken,
         receipt,
       );
-      if (!settled) {
-        // Our claim expired or was superseded — re-claim to get the canonical receipt.
-        const canonical = await this.deps.ledger.claimSend(ctx.pluginInstanceId, draft.idempotencyKey);
-        if (canonical.status === 'settled') return canonical.receipt;
-        throw new MessagingError('RETRYABLE_INFLIGHT', 'send settlement was superseded — retry');
-      }
-      return receipt;
+      if (result.status === 'freshly_settled') return receipt;
+      if (result.status === 'already_settled') return result.receipt as SendReceipt;
+      // rejected — re-claim to get the canonical receipt.
+      const canonical = await this.deps.ledger.claimSend(ctx.pluginInstanceId, draft.idempotencyKey);
+      if (canonical.status === 'settled') return canonical.receipt;
+      throw new MessagingError('RETRYABLE_INFLIGHT', 'send settlement was superseded — retry');
     } catch (err) {
       await this.deps.ledger.releaseSend(ctx.pluginInstanceId, draft.idempotencyKey, claim.claimToken);
       throw err;

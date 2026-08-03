@@ -80,19 +80,19 @@ export class AppendService {
       }
       try {
         const receipt = await this.applyLocked(ctx, parsed, messageId, lease);
-        const settled = await this.deps.ledger.settleAppend(
+        const result = await this.deps.ledger.settleAppend(
           ctx.pluginInstanceId,
           messageId,
           parsed.operationId,
           claim.claimToken,
           receipt,
         );
-        if (!settled) {
-          const canonical = await this.deps.ledger.claimAppend(ctx.pluginInstanceId, messageId, parsed.operationId);
-          if (canonical.status === 'settled') return canonical.receipt;
-          throw new MessagingError('RETRYABLE_INFLIGHT', 'append settlement was superseded — retry');
-        }
-        return receipt;
+        if (result.status === 'freshly_settled') return receipt;
+        if (result.status === 'already_settled') return result.receipt as AppendReceipt;
+        // rejected — re-claim to get the canonical receipt.
+        const canonical = await this.deps.ledger.claimAppend(ctx.pluginInstanceId, messageId, parsed.operationId);
+        if (canonical.status === 'settled') return canonical.receipt;
+        throw new MessagingError('RETRYABLE_INFLIGHT', 'append settlement was superseded — retry');
       } finally {
         await this.deps.appendLock.release(messageId, lease);
       }

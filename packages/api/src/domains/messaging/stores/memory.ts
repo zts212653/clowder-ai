@@ -21,6 +21,7 @@ import type {
   LedgerClaimResult,
   LedgerStore,
   MessageHandleRecord,
+  SettleResult,
   SubscriptionRecord,
 } from './ports.js';
 
@@ -43,14 +44,15 @@ export class MemoryLedgerStore implements LedgerStore {
     return { status: 'new', claimToken };
   }
 
-  async settle(key: string, claimToken: string, receipt: unknown, retentionMs: number): Promise<boolean> {
+  async settle(key: string, claimToken: string, receipt: unknown, retentionMs: number): Promise<SettleResult> {
     const now = Date.now();
     const entry = this.entries.get(key);
-    if (entry && entry.status === 'settled' && entry.expiresAt > now) return true; // first receipt sticks
+    if (entry && entry.status === 'settled' && entry.expiresAt > now)
+      return { status: 'already_settled', receipt: entry.receipt };
     if (!entry || entry.status !== 'inflight' || entry.expiresAt <= now || entry.claimToken !== claimToken)
-      return false;
+      return { status: 'rejected' };
     this.entries.set(key, { status: 'settled', receipt, expiresAt: now + retentionMs });
-    return true;
+    return { status: 'freshly_settled' };
   }
 
   async release(key: string, claimToken: string): Promise<void> {
@@ -79,6 +81,12 @@ export class MemoryHandleStore implements HandleStore {
    * so the single-threaded event loop guarantees atomicity. A concurrent
    * `Promise.all` of two `getOrCreateMessageHandle` calls for the same
    * messageId converges on one canonical record.
+   *
+   * Validates the index invariant (kind + messageId) before returning any
+   * indexed record. Mismatched durable state fails closed (throws) rather
+   * than silently returning a wrong capability. Authority-level checks
+   * (pluginInstanceId, parentHandleId) are the caller's responsibility
+   * (HandleService) — the store only guards the index → record binding.
    */
   async getOrCreateMessageHandle(
     record: MessageHandleRecord,
@@ -87,6 +95,12 @@ export class MemoryHandleStore implements HandleStore {
     if (existingId) {
       const existing = this.records.get(existingId);
       if (existing?.kind === 'message_handle') {
+        if (existing.messageId !== record.messageId) {
+          throw new Error(
+            `handle index corruption: indexed record ${existing.handleId} has ` +
+              `messageId=${existing.messageId} but index key is for messageId=${record.messageId}`,
+          );
+        }
         return { record: existing, created: false };
       }
     }

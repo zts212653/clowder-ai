@@ -157,89 +157,88 @@ describe('MessagingLedger key scoping (AC-5)', () => {
   });
 });
 
-describe('Claim-expiry overlap — settle boolean (§4a stale-claimant)', () => {
-  test('settle returns false when claim has expired', async () => {
-    const store = new memory.MemoryLedgerStore();
-    const claim = await store.claim('k-stale', CLAIM_TTL);
-    // Advance past claim expiry.
-    now += CLAIM_TTL + 1;
-    const settled = await store.settle('k-stale', claim.claimToken, { messageId: 'late' }, RETENTION);
-    assert.equal(settled, false, 'expired claimToken must be rejected');
-  });
-
-  test('settle returns true for fresh claimant and already-settled key', async () => {
+describe('Claim-expiry overlap — discriminated SettleResult (§4a stale-claimant)', () => {
+  test('settle returns freshly_settled for the owning claimant', async () => {
     const store = new memory.MemoryLedgerStore();
     const claim = await store.claim('k-fresh', CLAIM_TTL);
-    const first = await store.settle('k-fresh', claim.claimToken, { messageId: 'winner' }, RETENTION);
-    assert.equal(first, true, 'first settle must succeed');
-    // Idempotent settle on already-settled key returns true (first receipt sticks).
-    const second = await store.settle('k-fresh', claim.claimToken, { messageId: 'ignored' }, RETENTION);
-    assert.equal(second, true, 'already-settled must return true');
+    const result = await store.settle('k-fresh', claim.claimToken, { messageId: 'mine' }, RETENTION);
+    assert.equal(result.status, 'freshly_settled');
   });
 
-  test('stale claimant settle rejected while successor is still inflight', async () => {
-    // Simulates the claim-expiry overlap: A claims → expires → B claims
-    // (inflight) → A tries to settle → rejected (B's token owns the slot).
+  test('settle returns already_settled with canonical receipt on re-settle', async () => {
+    const store = new memory.MemoryLedgerStore();
+    const claim = await store.claim('k-idem', CLAIM_TTL);
+    const first = await store.settle('k-idem', claim.claimToken, { messageId: 'winner' }, RETENTION);
+    assert.equal(first.status, 'freshly_settled');
+    // Re-settle on already-settled key returns the canonical receipt, not the new one.
+    const second = await store.settle('k-idem', claim.claimToken, { messageId: 'ignored' }, RETENTION);
+    assert.equal(second.status, 'already_settled');
+    assert.deepEqual(second.receipt, { messageId: 'winner' }, 'first receipt sticks');
+  });
+
+  test('settle returns rejected when claim has expired', async () => {
+    const store = new memory.MemoryLedgerStore();
+    const claim = await store.claim('k-stale', CLAIM_TTL);
+    now += CLAIM_TTL + 1;
+    const result = await store.settle('k-stale', claim.claimToken, { messageId: 'late' }, RETENTION);
+    assert.equal(result.status, 'rejected');
+  });
+
+  test('stale claimant rejected while successor inflight; successor settles canonical', async () => {
     const store = new memory.MemoryLedgerStore();
     const claimA = await store.claim('k-race', CLAIM_TTL);
-    // Claim A expires.
     now += CLAIM_TTL + 1;
-    // Successor B claims (A is expired, so B gets a fresh claim).
     const claimB = await store.claim('k-race', CLAIM_TTL);
     assert.equal(claimB.status, 'new');
-    // Stale claimant A tries to settle while B is still inflight — rejected.
-    const settledA = await store.settle('k-race', claimA.claimToken, { messageId: 'stale' }, RETENTION);
-    assert.equal(settledA, false, 'stale claimant must be rejected while successor is inflight');
-    // A re-claims → inflight (B still holds).
-    const reClaim = await store.claim('k-race', CLAIM_TTL);
-    assert.equal(reClaim.status, 'inflight');
-    // B settles successfully.
-    const settledB = await store.settle('k-race', claimB.claimToken, { messageId: 'canonical' }, RETENTION);
-    assert.equal(settledB, true);
-    // Now a re-claim returns the canonical receipt.
+    // A tries to settle while B owns the slot — rejected.
+    const resultA = await store.settle('k-race', claimA.claimToken, { messageId: 'stale' }, RETENTION);
+    assert.equal(resultA.status, 'rejected');
+    // B settles — freshly settled.
+    const resultB = await store.settle('k-race', claimB.claimToken, { messageId: 'canonical' }, RETENTION);
+    assert.equal(resultB.status, 'freshly_settled');
+    // Re-claim returns canonical receipt.
     const final = await store.claim('k-race', CLAIM_TTL);
     assert.equal(final.status, 'settled');
     assert.deepEqual(final.receipt, { messageId: 'canonical' });
   });
 
-  test('settle on already-settled key returns true regardless of token (idempotent)', async () => {
-    // Once settled, settle() returns true for any caller — "entry is settled" is the
-    // only signal. The first receipt is sticky (second receipt ignored).
+  test('B settles first, stale A settle returns already_settled with B canonical receipt', async () => {
+    // End-to-end claim-expiry overlap: A expires → B claims+settles → A calls
+    // settle → already_settled with B's receipt (not A's local value).
     const store = new memory.MemoryLedgerStore();
-    const claimA = await store.claim('k-idem', CLAIM_TTL);
-    await store.settle('k-idem', claimA.claimToken, { messageId: 'winner' }, RETENTION);
-    // Advance time but within retention.
+    const claimA = await store.claim('k-e2e', CLAIM_TTL);
     now += CLAIM_TTL + 1;
-    // Stale token settle on already-settled → true (idempotent; receipt is winner's).
-    const settled = await store.settle('k-idem', 'totally-bogus-token', { messageId: 'ignored' }, RETENTION);
-    assert.equal(settled, true, 'already-settled must return true');
-    const check = await store.claim('k-idem', CLAIM_TTL);
-    assert.deepEqual(check.receipt, { messageId: 'winner' }, 'first receipt sticks');
+    const claimB = await store.claim('k-e2e', CLAIM_TTL);
+    await store.settle('k-e2e', claimB.claimToken, { messageId: 'canonical' }, RETENTION);
+    // A's settle sees already_settled → gets B's canonical receipt.
+    const resultA = await store.settle('k-e2e', claimA.claimToken, { messageId: 'stale-local' }, RETENTION);
+    assert.equal(resultA.status, 'already_settled');
+    assert.deepEqual(resultA.receipt, { messageId: 'canonical' }, 'stale A must get B canonical receipt');
   });
 
-  test('settle boolean propagates through MessagingLedger.settleSend', async () => {
+  test('SettleResult propagates through MessagingLedger.settleSend', async () => {
     const ledger = new ledgerMod.MessagingLedger(new memory.MemoryLedgerStore(), { claimTtlMs: CLAIM_TTL });
     const claim = await ledger.claimSend('inst-a', 'idem-expire');
     assert.equal(claim.status, 'new');
     now += CLAIM_TTL + 1;
-    const settled = await ledger.settleSend('inst-a', 'idem-expire', claim.claimToken, {
+    const result = await ledger.settleSend('inst-a', 'idem-expire', claim.claimToken, {
       messageId: 'm-1',
       threadId: 't',
       revision: 1,
     });
-    assert.equal(settled, false, 'expired claim must return false through ledger');
+    assert.equal(result.status, 'rejected');
   });
 
-  test('settle boolean propagates through MessagingLedger.settleAppend', async () => {
+  test('SettleResult propagates through MessagingLedger.settleAppend', async () => {
     const ledger = new ledgerMod.MessagingLedger(new memory.MemoryLedgerStore(), { claimTtlMs: CLAIM_TTL });
     const claim = await ledger.claimAppend('inst-a', 'msg-1', 'op-expire');
     assert.equal(claim.status, 'new');
     now += CLAIM_TTL + 1;
-    const settled = await ledger.settleAppend('inst-a', 'msg-1', 'op-expire', claim.claimToken, {
+    const result = await ledger.settleAppend('inst-a', 'msg-1', 'op-expire', claim.claimToken, {
       messageId: 'msg-1',
       revision: 2,
       appliedElementIds: [],
     });
-    assert.equal(settled, false, 'expired claim must return false through ledger');
+    assert.equal(result.status, 'rejected');
   });
 });

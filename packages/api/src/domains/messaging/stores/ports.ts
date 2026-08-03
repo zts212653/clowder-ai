@@ -27,13 +27,21 @@ export type LedgerClaimResult =
   | { readonly status: 'inflight' }
   | { readonly status: 'settled'; readonly receipt: unknown };
 
+/** Discriminated settlement outcome — preserves whether the caller's receipt or
+ *  a predecessor's canonical receipt won the race. */
+export type SettleResult =
+  | { readonly status: 'freshly_settled' }
+  | { readonly status: 'already_settled'; readonly receipt: unknown }
+  | { readonly status: 'rejected' };
+
 export interface LedgerStore {
   /** Atomic: unclaimed → inflight (returns new); inflight → inflight; settled → settled+receipt. */
   claim(key: string, claimTtlMs: number): Promise<LedgerClaimResult>;
-  /** inflight → settled (first receipt sticks; idempotent). Returns true when the
-   *  entry is now settled (either freshly or already); false when the claimToken
-   *  is stale/expired/mismatched and the settle was rejected. */
-  settle(key: string, claimToken: string, receipt: unknown, retentionMs: number): Promise<boolean>;
+  /** inflight → settled. Returns a discriminated outcome:
+   *  - `freshly_settled`: this call committed the receipt.
+   *  - `already_settled`: a predecessor already committed; `.receipt` is theirs.
+   *  - `rejected`: claimToken stale/expired/mismatched. */
+  settle(key: string, claimToken: string, receipt: unknown, retentionMs: number): Promise<SettleResult>;
   /** inflight → unclaimed (failure path; no-op when settled). */
   release(key: string, claimToken: string): Promise<void>;
 }
