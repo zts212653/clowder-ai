@@ -336,9 +336,9 @@
     },
     {
       "id": "f254-private-evidence-contracts",
-      "match": "f254-(?:freshness-replay-provider|manual-reminder-scope)\\.test",
+      "match": "f254-(?:freshness-replay-provider|manual-reminder-scope|provider-native-freshness)\\.test",
       "category": "private_fixture",
-      "reason": "F254 replay and scope checks require home-only incident fixtures and operator discussion evidence; public runtime behavior is covered independently.",
+      "reason": "F254 replay, scope, and native-provider checks require home-only evidence or carrier credentials; public runtime behavior is covered independently.",
       "owner": "@zts212653",
       "introducedBy": "bfa9e2c8f",
       "expiresOn": "2026-08-31"

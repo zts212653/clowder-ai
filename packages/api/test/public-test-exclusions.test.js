@@ -48,7 +48,7 @@ const RECONCILED_EXCLUSIONS = [
   'github-schedule-factories\\.test',
   'harness-eval/eval-hub-read-model\\.test',
   'harness-eval/merge-gate-provenance-contract\\.test',
-  'f254-(?:freshness-replay-provider|manual-reminder-scope)\\.test',
+  'f254-(?:freshness-replay-provider|manual-reminder-scope|provider-native-freshness)\\.test',
   'harness-eval/eval-hub-(?:lifecycle-summary-route|metric-glossary-coverage|read-model-f248-phase-b2|route)\\.test',
   'harness-eval/(?:friction-measurement-bundle|measurement-bundle-census|measurement-independent-rejudge(?:-adjudication|-judgment)?)\\.test',
   'harness-eval/publish-verdict-(?:capability-wakeup(?:-owner-scope)?|freshness|friction|measurement-validity-gate|memory|pipeline|task-outcome(?:-writeback-guard)?)\\.test',
@@ -136,6 +136,7 @@ test('resolver excludes private evidence consumers but keeps self-contained publ
 
   for (const file of [
     'test/f254-freshness-replay-provider.test.js',
+    'test/f254-provider-native-freshness.test.js',
     'test/harness-eval/measurement-bundle-census.test.js',
     'test/harness-eval/publish-verdict-memory.test.js',
   ]) {
