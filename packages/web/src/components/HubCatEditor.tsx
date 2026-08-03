@@ -298,7 +298,7 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
   if (!open) return null;
 
   const createAccountClient: BuiltinAccountClient | undefined =
-    form.clientId === 'antigravity' || form.clientId === 'catagent' ? undefined : form.clientId;
+    form.clientId === 'antigravity' ? undefined : form.clientId === 'catagent' ? 'anthropic' : form.clientId;
   const hasEmptyCreatableAccounts =
     !cat && !loadingProfiles && createAccountClient !== undefined && availableProfiles.length === 0;
   const saveBlockedByProfileBinding = hasEmptyCreatableAccounts;

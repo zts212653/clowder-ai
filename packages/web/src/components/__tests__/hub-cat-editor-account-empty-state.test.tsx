@@ -82,6 +82,46 @@ describe('HubCatEditor zero-account onboarding', () => {
     vi.clearAllMocks();
   });
 
+  it('offers the Anthropic account flow when CatAgent has no account', async () => {
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      if (path === '/api/accounts' && method === 'GET') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: null,
+            providers: [],
+          }),
+        );
+      }
+      if (path === '/api/cat-templates' && method === 'GET') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      throw new Error(`Unexpected apiFetch request: ${path}:${method}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
+    });
+    await flushEffects();
+
+    await changeField(queryField<HTMLSelectElement>('select[aria-label="Client"]'), 'catagent', 'change');
+    await flushEffects();
+
+    expect(document.body.textContent).toContain('当前没有可用的认证账号');
+    const createAccountButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '新建 / 登录账号',
+    );
+    expect(createAccountButton).toBeTruthy();
+
+    await act(async () => {
+      createAccountButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const authDetails = queryField<HTMLElement>('[data-guide-id="accounts.create-details"]');
+    expect(authDetails.textContent).toContain('Claude');
+  });
+
   it('creates authentication from the empty state and continues saving the member', async () => {
     const onSaved = vi.fn(() => Promise.resolve());
     let accountCreated = false;
