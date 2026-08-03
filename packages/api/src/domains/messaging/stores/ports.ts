@@ -30,8 +30,10 @@ export type LedgerClaimResult =
 export interface LedgerStore {
   /** Atomic: unclaimed → inflight (returns new); inflight → inflight; settled → settled+receipt. */
   claim(key: string, claimTtlMs: number): Promise<LedgerClaimResult>;
-  /** inflight → settled (first receipt sticks; idempotent). */
-  settle(key: string, claimToken: string, receipt: unknown, retentionMs: number): Promise<void>;
+  /** inflight → settled (first receipt sticks; idempotent). Returns true when the
+   *  entry is now settled (either freshly or already); false when the claimToken
+   *  is stale/expired/mismatched and the settle was rejected. */
+  settle(key: string, claimToken: string, receipt: unknown, retentionMs: number): Promise<boolean>;
   /** inflight → unclaimed (failure path; no-op when settled). */
   release(key: string, claimToken: string): Promise<void>;
 }
@@ -65,8 +67,14 @@ export type HandleRecord = AddressHandleRecord | MessageHandleRecord;
 export interface HandleStore {
   put(record: HandleRecord): Promise<void>;
   get(handleId: string): Promise<HandleRecord | null>;
-  /** Reverse lookup: find a message handle by the messageId it was minted for (ensureMessageHandle idempotency). */
-  findByMessageId(messageId: string): Promise<MessageHandleRecord | null>;
+  /**
+   * Atomic get-or-create for message handles. Returns the existing handle if
+   * one is already minted for `record.messageId`; otherwise persists `record`
+   * and its reverse index in one atomic step (Memory: synchronous critical
+   * section; Redis: Lua script). `created` is true only when a new record was
+   * written.
+   */
+  getOrCreateMessageHandle(record: MessageHandleRecord): Promise<{ record: MessageHandleRecord; created: boolean }>;
   /** active → revoked (idempotent). Returns false when the handle does not exist. */
   revoke(handleId: string, revokedAt: number): Promise<boolean>;
 }

@@ -59,8 +59,13 @@ export class MessagingLedger {
     idempotencyKey: string,
     claimToken: string,
     receipt: SendReceipt,
-  ): Promise<void> {
-    await this.store.settle(MessagingLedger.sendKey(instanceId, idempotencyKey), claimToken, receipt, this.retentionMs);
+  ): Promise<boolean> {
+    return this.store.settle(
+      MessagingLedger.sendKey(instanceId, idempotencyKey),
+      claimToken,
+      receipt,
+      this.retentionMs,
+    );
   }
 
   async releaseSend(instanceId: string, idempotencyKey: string, claimToken: string): Promise<void> {
@@ -80,8 +85,8 @@ export class MessagingLedger {
     operationId: string,
     claimToken: string,
     receipt: AppendReceipt,
-  ): Promise<void> {
-    await this.store.settle(
+  ): Promise<boolean> {
+    return this.store.settle(
       MessagingLedger.appendKey(instanceId, messageId, operationId),
       claimToken,
       receipt,

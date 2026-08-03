@@ -78,15 +78,17 @@ export class RedisLedgerStore implements LedgerStore {
     return { status: 'inflight' };
   }
 
-  async settle(key: string, claimToken: string, receipt: unknown, retentionMs: number): Promise<void> {
-    await this.redis.eval(
+  async settle(key: string, claimToken: string, receipt: unknown, retentionMs: number): Promise<boolean> {
+    const result = (await this.redis.eval(
       LEDGER_SETTLE_LUA,
       1,
       MessagingKeys.ledger(key),
       claimToken,
       JSON.stringify({ status: 'settled', receipt }),
       String(retentionMs),
-    );
+    )) as number;
+    // Lua returns: 1 = freshly settled, 0 = already settled, -1 = rejected
+    return result >= 0;
   }
 
   async release(key: string, claimToken: string): Promise<void> {
@@ -95,6 +97,29 @@ export class RedisLedgerStore implements LedgerStore {
 }
 
 // ── Handles ──
+
+/**
+ * Atomic get-or-create for message handle minting (Lua script).
+ * Derives the handle-record key prefix from KEYS[2] by stripping ARGV[1]
+ * (the new handleId suffix), so the script works regardless of keyPrefix.
+ *
+ * KEYS[1] = reverse-index key (plugmsg:mhidx:{messageId})
+ * KEYS[2] = new-handle record key (plugmsg:handle:{newHandleId})
+ * ARGV[1] = newHandleId (suffix of KEYS[2])
+ * ARGV[2] = serialized HandleRecord JSON for the new handle
+ * Returns: {record_json, '0'|'1'} — '0' = existing, '1' = created
+ */
+const HANDLE_GET_OR_CREATE_LUA = `
+local handlePrefix = string.sub(KEYS[2], 1, #KEYS[2] - #ARGV[1])
+local existingId = redis.call('GET', KEYS[1])
+if existingId then
+  local raw = redis.call('GET', handlePrefix .. existingId)
+  if raw then return {raw, '0'} end
+end
+redis.call('SET', KEYS[2], ARGV[2])
+redis.call('SET', KEYS[1], ARGV[1])
+return {ARGV[2], '1'}
+`;
 
 export class RedisHandleStore implements HandleStore {
   private readonly redis: RedisClient;
@@ -105,9 +130,6 @@ export class RedisHandleStore implements HandleStore {
 
   async put(record: HandleRecord): Promise<void> {
     await this.redis.set(MessagingKeys.handle(record.handleId), JSON.stringify(record));
-    if (record.kind === 'message_handle') {
-      await this.redis.set(MessagingKeys.handleByMessage(record.messageId), record.handleId);
-    }
   }
 
   async get(handleId: string): Promise<HandleRecord | null> {
@@ -115,11 +137,21 @@ export class RedisHandleStore implements HandleStore {
     return raw ? (JSON.parse(raw) as HandleRecord) : null;
   }
 
-  async findByMessageId(messageId: string): Promise<MessageHandleRecord | null> {
-    const handleId = await this.redis.get(MessagingKeys.handleByMessage(messageId));
-    if (!handleId) return null;
-    const record = await this.get(handleId);
-    return record?.kind === 'message_handle' ? record : null;
+  async getOrCreateMessageHandle(
+    record: MessageHandleRecord,
+  ): Promise<{ record: MessageHandleRecord; created: boolean }> {
+    const result = (await this.redis.eval(
+      HANDLE_GET_OR_CREATE_LUA,
+      2,
+      MessagingKeys.handleByMessage(record.messageId),
+      MessagingKeys.handle(record.handleId),
+      record.handleId,
+      JSON.stringify(record),
+    )) as [string, string];
+    return {
+      record: JSON.parse(result[0]) as MessageHandleRecord,
+      created: result[1] === '1',
+    };
   }
 
   async revoke(handleId: string, revokedAt: number): Promise<boolean> {

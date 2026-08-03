@@ -110,19 +110,14 @@ export class HandleService {
   /**
    * Send mints a host-opaque message capability before returning its receipt.
    * The token is a random `mh_` prefixed id — distinct from and not derivable
-   * from the messageId (#1165 contract). The persisted record binds the opaque
-   * token to the original address handle, caller instance, and thread.
-   * Idempotent: a retry finds the existing handle via messageId secondary index.
+   * from the messageId (#1165 contract). The store's `getOrCreateMessageHandle`
+   * provides atomicity: concurrent callers converge on one canonical record
+   * (Memory: synchronous critical section; Redis: Lua script). A retry after
+   * crash or claim expiry finds the existing handle and returns it without
+   * creating an orphan.
    */
   async ensureMessageHandle(parent: AddressHandleRecord, messageId: string): Promise<MessageHandleRecord> {
-    const existing = await this.handles.findByMessageId(messageId);
-    if (existing) {
-      if (existing.pluginInstanceId !== parent.pluginInstanceId || existing.parentHandleId !== parent.handleId) {
-        throw new MessagingError('CONFLICT', 'message handle is already bound to different authority');
-      }
-      return existing;
-    }
-    const record: MessageHandleRecord = {
+    const candidate: MessageHandleRecord = {
       handleId: `mh_${randomUUID()}`,
       kind: 'message_handle',
       pluginInstanceId: parent.pluginInstanceId,
@@ -133,7 +128,12 @@ export class HandleService {
       parentHandleId: parent.handleId,
       issuedAt: Date.now(),
     };
-    await this.handles.put(record);
+    const { record, created } = await this.handles.getOrCreateMessageHandle(candidate);
+    if (!created) {
+      if (record.pluginInstanceId !== parent.pluginInstanceId || record.parentHandleId !== parent.handleId) {
+        throw new MessagingError('CONFLICT', 'message handle is already bound to different authority');
+      }
+    }
     return record;
   }
 

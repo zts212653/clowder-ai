@@ -43,12 +43,14 @@ export class MemoryLedgerStore implements LedgerStore {
     return { status: 'new', claimToken };
   }
 
-  async settle(key: string, claimToken: string, receipt: unknown, retentionMs: number): Promise<void> {
+  async settle(key: string, claimToken: string, receipt: unknown, retentionMs: number): Promise<boolean> {
     const now = Date.now();
     const entry = this.entries.get(key);
-    if (entry && entry.status === 'settled' && entry.expiresAt > now) return; // first receipt sticks
-    if (!entry || entry.status !== 'inflight' || entry.expiresAt <= now || entry.claimToken !== claimToken) return;
+    if (entry && entry.status === 'settled' && entry.expiresAt > now) return true; // first receipt sticks
+    if (!entry || entry.status !== 'inflight' || entry.expiresAt <= now || entry.claimToken !== claimToken)
+      return false;
     this.entries.set(key, { status: 'settled', receipt, expiresAt: now + retentionMs });
+    return true;
   }
 
   async release(key: string, claimToken: string): Promise<void> {
@@ -66,20 +68,31 @@ export class MemoryHandleStore implements HandleStore {
 
   async put(record: HandleRecord): Promise<void> {
     this.records.set(record.handleId, record);
-    if (record.kind === 'message_handle') {
-      this.messageIndex.set(record.messageId, record.handleId);
-    }
   }
 
   async get(handleId: string): Promise<HandleRecord | null> {
     return this.records.get(handleId) ?? null;
   }
 
-  async findByMessageId(messageId: string): Promise<MessageHandleRecord | null> {
-    const handleId = this.messageIndex.get(messageId);
-    if (!handleId) return null;
-    const record = this.records.get(handleId);
-    return record?.kind === 'message_handle' ? record : null;
+  /**
+   * Synchronous critical section: check + write with no awaits between,
+   * so the single-threaded event loop guarantees atomicity. A concurrent
+   * `Promise.all` of two `getOrCreateMessageHandle` calls for the same
+   * messageId converges on one canonical record.
+   */
+  async getOrCreateMessageHandle(
+    record: MessageHandleRecord,
+  ): Promise<{ record: MessageHandleRecord; created: boolean }> {
+    const existingId = this.messageIndex.get(record.messageId);
+    if (existingId) {
+      const existing = this.records.get(existingId);
+      if (existing?.kind === 'message_handle') {
+        return { record: existing, created: false };
+      }
+    }
+    this.records.set(record.handleId, record);
+    this.messageIndex.set(record.messageId, record.handleId);
+    return { record, created: true };
   }
 
   async revoke(handleId: string, revokedAt: number): Promise<boolean> {
