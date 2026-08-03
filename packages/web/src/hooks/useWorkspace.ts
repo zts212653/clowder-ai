@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
+import { fetchWorktreesPreservingSelection, workspaceWorktreesUrl } from '@/utils/workspace-worktrees';
 import { buildWorktreeAliasMap, resolveListedWorktreeId } from '@/utils/worktree-id-alias';
 
 export interface WorktreeEntry {
@@ -71,29 +72,23 @@ export function useWorkspace() {
 
   // Fetch worktrees — re-fetches when project changes
   const fetchWorktrees = useCallback(async () => {
-    try {
-      const params = new URLSearchParams();
-      if (projectPath && projectPath !== 'default') {
-        params.set('repoRoot', projectPath);
+    const { url, isScoped } = workspaceWorktreesUrl(projectPath);
+    const newList = await fetchWorktreesPreservingSelection<WorktreeEntry>(
+      url,
+      isScoped ? worktreeId : null,
+      projectPath,
+    );
+    if (newList) {
+      setWorktrees(newList);
+      const worktreeAliases = buildWorktreeAliasMap(newList);
+      setWorktreeAliases(worktreeAliases, projectPath);
+      // Auto-select first worktree if none selected or current was removed
+      const listedWorktreeId = resolveListedWorktreeId(newList, worktreeId, worktreeAliases);
+      if (listedWorktreeId && listedWorktreeId !== worktreeId) {
+        normalizeWorktreeId(listedWorktreeId);
+      } else if (!listedWorktreeId && newList.length > 0) {
+        setWorktreeId(newList[0].id);
       }
-      const qs = params.toString();
-      const res = await apiFetch(`/api/workspace/worktrees${qs ? `?${qs}` : ''}`);
-      if (res.ok) {
-        const data = await res.json();
-        const newList: typeof worktrees = data.worktrees ?? [];
-        setWorktrees(newList);
-        const worktreeAliases = buildWorktreeAliasMap(newList);
-        setWorktreeAliases(worktreeAliases, projectPath);
-        // Auto-select first worktree if none selected or current was removed
-        const listedWorktreeId = resolveListedWorktreeId(newList, worktreeId, worktreeAliases);
-        if (listedWorktreeId && listedWorktreeId !== worktreeId) {
-          normalizeWorktreeId(listedWorktreeId);
-        } else if (!listedWorktreeId && newList.length > 0) {
-          setWorktreeId(newList[0].id);
-        }
-      }
-    } catch {
-      /* ignore */
     }
   }, [worktreeId, setWorktreeId, normalizeWorktreeId, setWorktreeAliases, projectPath]);
 

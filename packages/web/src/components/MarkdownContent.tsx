@@ -8,7 +8,12 @@ import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
 import { getMentionColor, getMentionRe, getMentionToCat } from '@/lib/mention-highlight';
 import { useChatStore } from '@/stores/chatStore';
 import { MermaidDiagram } from './MermaidDiagram';
-import { createWorkspaceImageComponent, createWorkspaceLinkComponent } from './workspace-md-components';
+import {
+  createChatLinkComponent,
+  createWorkspaceImageComponent,
+  createWorkspaceLinkComponent,
+  workspaceMarkdownUrlTransform,
+} from './workspace-md-components';
 
 /* ── @mention highlighting ─────────────────────────────────── */
 
@@ -283,16 +288,7 @@ function buildMdComponents(tp?: (children: ReactNode) => ReactNode): Components 
     blockquote: ({ children }) => (
       <blockquote className="border-l-[3px] border-cafe pl-3 my-2 italic opacity-80">{children}</blockquote>
     ),
-    a: ({ href, children }) => (
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-conn-blue-text hover:underline break-all"
-      >
-        {m(children)}
-      </a>
-    ),
+    a: createChatLinkComponent(m),
     hr: () => <hr className="my-3 border-cafe" />,
 
     /* Code blocks with copy button — textProcessor intentionally excluded */
@@ -383,7 +379,11 @@ export function MarkdownContent({
   return (
     <div className={`markdown-content text-sm break-words ${className ?? ''}`}>
       {cmdMatch && <span className="font-semibold text-[var(--semantic-info)]">{cmdMatch[1]}</span>}
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkBreaks]}
+        components={components}
+        urlTransform={workspaceMarkdownUrlTransform}
+      >
         {md}
       </ReactMarkdown>
     </div>
