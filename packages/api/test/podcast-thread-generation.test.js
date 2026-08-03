@@ -182,6 +182,67 @@ describe('F091 Phase 6: generateScriptViaThread — real production function', (
     assert.equal(dynamicCompletions[0].controller, routeController);
   });
 
+  it('routes the legacy podcast target through the available Opus successor service', async () => {
+    const { AgentRegistry } = await import('../dist/domains/cats/services/agents/registry/AgentRegistry.js');
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+    const { generateScriptViaThread } = await import('../dist/domains/signals/services/podcast-generator.js');
+    const legacyCalls = [];
+    const successorCalls = [];
+    const agentRegistry = new AgentRegistry();
+    agentRegistry.register('opus', {
+      async *invoke() {
+        legacyCalls.push('opus');
+        yield { type: 'text', catId: 'opus', content: VALID_PODCAST_JSON, timestamp: Date.now() };
+      },
+    });
+    agentRegistry.register('opus-5', {
+      async *invoke() {
+        successorCalls.push('opus-5');
+        yield { type: 'text', catId: 'opus-5', content: VALID_PODCAST_JSON, timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus-5', timestamp: Date.now() };
+      },
+    });
+
+    const callLog = [];
+    const deps = buildFakeDeps(callLog);
+    const storedMessages = [];
+    deps.messageStore = {
+      append(message) {
+        const stored = { id: `msg-${storedMessages.length + 1}`, ...message };
+        storedMessages.push(stored);
+        return stored;
+      },
+      getByThread: () => [],
+      getByThreadBefore: () => [],
+      getById: (id) => storedMessages.find((message) => message.id === id) ?? null,
+      getRecent: () => [],
+      getMentionsFor: () => [],
+      getBefore: () => [],
+      getByThreadAfter: () => [],
+      deleteByThread: () => 0,
+      updateExtra: () => null,
+    };
+    deps.router = new AgentRouter({
+      agentRegistry,
+      registry: { create: () => ({ invocationId: 'router-inv', callbackToken: 'router-token' }) },
+      messageStore: deps.messageStore,
+      threadStore: {
+        get: async (threadId) => ({ id: threadId, participants: [] }),
+        getParticipants: async () => [],
+        getParticipantsWithActivity: async () => [],
+        addParticipants: async () => {},
+        updateParticipantActivity: async () => {},
+        updateLastActive: async () => {},
+        consumeMentionRoutingFeedback: () => null,
+      },
+    });
+
+    await generateScriptViaThread(makeRequest(), 'thread-successor', deps);
+
+    assert.deepEqual(legacyCalls, [], 'disabled legacy Opus service must not execute');
+    assert.deepEqual(successorCalls, ['opus-5']);
+  });
+
   it('full lifecycle call sequence is correct', async () => {
     const { generateScriptViaThread } = await import('../dist/domains/signals/services/podcast-generator.js');
     const callLog = [];

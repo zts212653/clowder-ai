@@ -1,6 +1,6 @@
 import type { CatId, ReviewPolicy, Roster } from '@cat-cafe/shared';
 import { createCatId } from '@cat-cafe/shared';
-import { getDefaultCatId, getReviewPolicy, getRoster } from '../../config/cat-config-loader.js';
+import { getReviewPolicy, getRoster } from '../../config/cat-config-loader.js';
 
 export interface GuardianMatchOptions {
   author: CatId;
@@ -17,7 +17,7 @@ export interface GuardianMatchOptions {
 }
 
 export interface GuardianMatchResult {
-  guardian: CatId;
+  guardian: CatId | null;
   isDegraded: boolean;
   degradeReason?: string;
   candidates: readonly CatId[];
@@ -32,7 +32,7 @@ export async function resolveGuardian(options: GuardianMatchOptions): Promise<Gu
   const authorEntry = roster[authorId];
 
   if (!authorEntry) {
-    return { guardian: getDefaultCatId(), isDegraded: false, candidates: [] };
+    return { guardian: null, isDegraded: true, degradeReason: 'Author is not in roster', candidates: [] };
   }
 
   const eligible = Object.entries(roster).filter(
@@ -72,7 +72,7 @@ export async function resolveGuardian(options: GuardianMatchOptions): Promise<Gu
   }
 
   return {
-    guardian: getDefaultCatId(),
+    guardian: null,
     isDegraded: true,
     degradeReason: 'No guardians available',
     candidates: allIds,

@@ -13,6 +13,8 @@ Review target: PR #1283 latest HEAD（正式请求中附精确 SHA）
 - 显式 `@opus` 不静默改投，继续返回 `cat_disabled`；alternatives 首项提供 canonical `@opus-5`。
 - Hub 路由策略、系统提示、MCP 示例与当前教学入口统一展示和持久化 `opus-5`。
 - feat-index 的隐式 owner metadata 在旧身份禁用后按唯一有效 successor 迁移，不影响显式 mention 的 fail-closed 行为。
+- pre-resolved 系统调用在 `routeExecution()` admission 统一规范化，podcast/scheduler 不再绕过 availability。
+- 无 successor 时不再降级到任意服务，也不会把 `__none__` 持久化为 guardian。
 
 ## Why
 
@@ -69,7 +71,18 @@ Why: 本次只扩展现有 roster metadata、默认/历史目标 resolver 和既
 
 - PR 创建后已按项目规则调用 `/simplify`；独立 Codex 会话 10 分钟超时，无 final 输出、无工作区改动。
 - 随后调用只读 `codex exec review --base upstream/main`；5 分钟超时，无 final 输出、无工作区改动。
-- 因此没有可转交的 fresh-context finding；这两次调用不构成 approval，正式 verdict 完全由本次 named reviewer 独立产生。
+- HEAD `dea8da35b` 另启 fresh-context session，产出 1 个 P2 finding：无效 runtime/env default 的 `__none__` 会被 `pickFallbackCat()` 替换为任意服务。
+- 处理：已补 runtime/env fail-closed 与 AgentRouter 端到端红测并修复；该 finding 不构成 approval，正式 verdict 仍由 named reviewer 独立产生。
+
+## Review Feedback Closure
+
+| Finding | 处理 | Red → Green |
+|---|---|---|
+| P1：pre-resolved target 可执行 disabled `opus` | `routeExecution()` 进入 strategy 前统一解析 availability/successor；无目标抛错 | AgentRouter admission + podcast producer-to-service：FAIL → PASS |
+| P1：`__none__` 可持久化为 guardian | `GuardianMatchResult.guardian` 支持 null；request-guardian 无候选返回 409，创建 token 前退出 | GuardianMatcher + community route：FAIL → PASS |
+| FC-1 P2：无 successor 会挑任意 fallback | 无效 runtime/env default 立即返回 `__none__`；`pickFallbackCat()` 对 sentinel 返回 null | default config + AgentRouter no-target：FAIL → PASS |
+
+Failure-mode sweep：三项都属于“隐式/预解析目标绕过 availability 边界”。扫描所有 production `routeSerial` / `routeParallel` / `getService` 调用后，唯一执行入口均由 `AgentRouter.route()` 或 `routeExecution()` 持有；本轮在后者补中央 admission，不逐个修 producer。
 
 ## Review Sandbox
 
@@ -84,13 +97,16 @@ Why: 本次只扩展现有 roster metadata、默认/历史目标 resolver 和既
 - Public CI 受影响 fixture（19 文件）：402/402；旧 HEAD 的 74 个失败已全部覆盖。
 - feat-index 聚焦集：16/16；旧身份标签可解析到唯一有效 successor。
 - 受影响 20 文件合并回归：537/538；唯一失败为 `callback-routes.test.js` 的既有 Windows absolute-path 断言（实际 `G:\...`，测试只接受 Unix `/...`）。
+- Review finding + Public fixture 扩大回归（24 文件）：643/644；review-fix 新路径全部通过，唯一失败仍为 `callback-routes.test.js` 的既有 Windows absolute-path 断言。
+- Red→Green 聚焦集（5 文件）：初始 8 个预期失败 → 修复后 131/131。
+- GitHub `Test (Public)`（HEAD `dea8da35b`）：通过；新 review-fix HEAD 仍需 CI 复验。
 - 核心路由聚焦集：17/17；Hub successor Vitest：4/4。
 - `pnpm lint`：exit 0，仅既有 warning。
 - `pnpm build`：exit 0。
 - `pnpm check:capability-tips`、`check:skills:manifest`、`check:skills:surfaces`：通过。
 - 改动代码/JSON Biome lint：exit 0；14 个 LF-safe 文件 formatter：exit 0。
 - `git diff --check upstream/main...HEAD`：通过；仓库根目录无媒体/设计工件。
-- 全仓 `pnpm check` 被 Windows checkout 的 4499 个既有 CRLF formatter 错误阻塞；包级全量 API/Web test runner 另有 Windows env/参数长度/spawn 基线问题，详见 bug report。
+- 全仓 `pnpm check` 被 Windows checkout 的 4469 个既有 CRLF formatter 错误阻塞；包级全量 API/Web test runner 另有 Windows env/参数长度/spawn 基线问题，详见 bug report。
 - Dogfood：隔离 Web 3101 / API 3102 验证正常 successor、真实 policy 保存、无 successor fail-closed、桌面/移动端布局；证据位于系统临时目录。
 
 ## Next Action

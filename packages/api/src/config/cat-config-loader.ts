@@ -910,7 +910,8 @@ export function getDefaultCatId(): CatId {
     if (isKnownAvailableDefaultCat(_runtimeDefaultCatId)) return _runtimeDefaultCatId;
     const successor = resolveCatSuccessor(_runtimeDefaultCatId);
     if (successor) return successor;
-    log.warn({ catId: _runtimeDefaultCatId }, 'Runtime default cat is unavailable or unknown, falling back');
+    log.warn({ catId: _runtimeDefaultCatId }, 'Runtime default cat is unavailable with no valid successor');
+    return createCatId('__none__');
   }
 
   const envCatId = process.env.DEFAULT_CAT_ID?.trim();
@@ -919,7 +920,8 @@ export function getDefaultCatId(): CatId {
     if (isKnownAvailableDefaultCat(id)) return id;
     const successor = resolveCatSuccessor(id);
     if (successor) return successor;
-    log.warn({ envCatId }, 'DEFAULT_CAT_ID references unavailable or unknown cat, falling back');
+    log.warn({ envCatId }, 'DEFAULT_CAT_ID references unavailable or unknown cat with no valid successor');
+    return createCatId('__none__');
   }
 
   if (_defaultCatId) return _defaultCatId;

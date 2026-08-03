@@ -969,6 +969,7 @@ export class AgentRouter {
   /** Pick a deterministic fallback cat when policy filters out all candidates. */
   private pickFallbackCat(exclude: Set<string>): CatId | null {
     const def = getDefaultCatId() as string;
+    if (def === '__none__') return null;
     if (!exclude.has(def) && this.isRoutableCat(def)) return def as CatId;
 
     for (const id of Object.keys(this.services).sort()) {
@@ -1681,6 +1682,11 @@ export class AgentRouter {
       toolExecutionPolicy?: RouteOptions['toolExecutionPolicy'];
     },
   ): AsyncIterable<AgentMessage> {
+    targetCats = this.filterRoutableCats(targetCats);
+    if (targetCats.length === 0) {
+      throw new Error('No routable target cats available');
+    }
+
     const cleanMessage = stripIntentTags(message);
     const strategy = intent.intent === 'ideate' && targetCats.length > 1 ? 'parallel' : 'serial';
 

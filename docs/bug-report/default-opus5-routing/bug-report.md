@@ -38,6 +38,8 @@ tips_exempt: existing routing-policy bugfix; no new user-facing capability or di
 3. prompt、MCP 示例和 Hub policy 直接保存/显示旧 catId，认知层会继续先写已禁用句柄。
 4. 投递层虽然会返回 disabled warning，但 alternatives 没有 roster 级 successor 真相源，只能在错误发生后补救。
 5. feat-index 的隐式 owner metadata 仍按旧身份标签解析；旧猫禁用后，`owner: 布偶猫` 会失去 `ownerCatId` 和建议路由。
+6. `routeExecution()` 信任调用方传入的 pre-resolved targets；podcast/scheduler 等系统生产者可绕过 availability 检查，直接执行已禁用服务。
+7. 无有效 successor 时，`__none__` 仍可能被任意 fallback 覆盖或被持久化为 guardian，fail-closed 只停留在 loader 返回值，没有守住消费边界。
 
 canonical mention 由 `pickVariantMention()` 优先精确匹配 `@${catId}`，因此 `opus-5` 的稳定显示句柄是 `@opus-5`；`@opus5` 仅保留为兼容 alias。
 
@@ -64,8 +66,10 @@ canonical mention 由 `pickVariantMention()` 优先精确匹配 `@${catId}`，�
 
 - 配置：共享类型和 loader 支持 `roster[*].successor`；公开 seed 增加 Opus 5 variant/roster/model，并禁用旧 `opus`。
 - resolver：默认猫、目标 alternatives、prompt roster、MCP 示例统一按显式 successor 和 availability 解析。
+- 执行边界：`routeExecution()` 在进入 serial/parallel strategy 前统一规范化 pre-resolved targets；无可路由目标直接失败。
 - API/UI：`GET /api/cats` 透传 roster metadata；Hub 读取 successor、保存 canonical catId，并提供无替代者错误态。
 - 协作 metadata：feat-index 的隐式 owner 标签只在存在唯一显式有效 successor 时迁移；显式 `@opus` 路由语义不变。
+- fail-closed 消费者：无效 runtime/env default 返回 `__none__` 后不再挑任意服务；guardian 无候选时返回 409，不创建 assignment/token。
 - 认知入口：README 三语、`docs/TIPS.md`、callback prompt 与 `cross-thread-sync` 当前示例改为 `@opus-5`。
 - 回归：覆盖正常 successor、未知/禁用 successor、默认 override、A2A mention、MCP prompt、API metadata 与 Hub policy。
 
@@ -86,6 +90,8 @@ canonical mention 由 `pickVariantMention()` 优先精确匹配 `@${catId}`，�
 | Public CI 受影响 fixture（19 文件） | 402/402 通过；旧 HEAD 的 74 个失败已全部覆盖 |
 | feat-index 隐式 owner 聚焦集 | 16/16 通过；`布偶猫` 等旧身份标签解析到唯一有效 successor |
 | 受影响 20 文件合并回归 | 537/538；唯一失败为 `callback-routes.test.js` 的既有 Windows absolute-path 断言（实际 `G:\...`，测试只接受 Unix `/...`） |
+| Review finding + Public fixture 扩大回归（24 文件） | 643/644；review-fix 新路径全部通过，唯一失败仍为 `callback-routes.test.js` 的既有 Windows absolute-path 断言 |
+| GitHub `Test (Public)`（HEAD `dea8da35b`） | 通过，14m04s；证明旧 HEAD 的 74 个 Public fixture 失败已清零，后续 review-fix HEAD 继续由 CI 复验 |
 | `pnpm lint` | exit 0；仅仓库既有 warning |
 | 改动代码 Biome | 25 个代码/JSON 文件 lint exit 0；14 个 LF-safe 文件 formatter exit 0 |
 | Skill 门禁 | `check:skills:manifest` + `check:skills:surfaces` 通过；5 个既有 MCP advisory；完整 `check:skills` 另被 worktree 的 185 个 skill mount 异常阻塞 |
@@ -93,7 +99,7 @@ canonical mention 由 `pickVariantMention()` 优先精确匹配 `@${catId}`，�
 | `pnpm build` | 清除继承的 `NODE_ENV` 后 exit 0 |
 | `git diff --check` | exit 0 |
 
-全仓 `pnpm check` 在 Windows checkout 上被 4499 个 CRLF 格式错误阻塞，命中大量未改文件。包级 `pnpm --filter @cat-cafe/api test` 在进入测试前被 Windows 不支持的 `VAR=... command` 语法阻塞；改用 Bash 后又分别命中参数列表过长和长时 callback/hold-ball 基线用例，已终止并清理仅属于本 worktree 的残留测试进程。`pnpm --filter @cat-cafe/web test` 的包装脚本也存在既有 `spawn pnpm ENOENT`。本 PR 用 355/356 受影响 API 集、17/17 核心路由聚焦集、4/4 Hub Vitest、TypeScript lint、改动文件 Biome 和全构建覆盖对应风险，不声称这些 Windows runner 基线问题已修复。
+全仓 `pnpm check` 在 Windows checkout 上被 4469 个 CRLF 格式错误阻塞，命中大量未改文件。包级 `pnpm --filter @cat-cafe/api test` 在进入测试前被 Windows 不支持的 `VAR=... command` 语法阻塞；改用 Bash 后又分别命中参数列表过长和长时 callback/hold-ball 基线用例，已终止并清理仅属于本 worktree 的残留测试进程。`pnpm --filter @cat-cafe/web test` 的包装脚本也存在既有 `spawn pnpm ENOENT`。本 PR 用 355/356 受影响 API 集、17/17 核心路由聚焦集、4/4 Hub Vitest、TypeScript lint、改动文件 Biome 和全构建覆盖对应风险，不声称这些 Windows runner 基线问题已修复。
 
 ### Dogfood-Your-Slice
 
@@ -111,6 +117,7 @@ Scope verdict: 必做；这是用户和猫都可感知的路由 bugfix。
 
 - 原始需求覆盖：动态 successor 优先、单一真相源、无替代 fail-closed、canonical handle、历史 preferred policy/participant/last-replier/MCP teammate 迁移、回归与活跃入口全部落实。
 - Public CI 回归：旧 HEAD 暴露的 74 个禁用 `opus` fixture 已迁移到当前可路由 `opus-5`；旧 `@opus` 的显式 fail-closed 用例保留。
+- Review feedback closure：中央执行 admission 阻止 disabled service；`__none__` 不再变成任意默认或持久化 guardian；fresh-context 的“无 successor 仍静默路由” finding 已同轮关闭。
 - 交付完整性：本次修复已闭环，不依赖另一个 PR 或重写。
 - Architecture cell：现有 cat config / dispatch routing；Map delta: none。新增 roster 字段，不新增 Store/Queue/Router 边界。
 - Fallback audit：产品代码没有同文件新增三层 fallback；successor 解析是单一显式契约，未知/不可用直接返回 null。

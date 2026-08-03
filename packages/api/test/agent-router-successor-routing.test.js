@@ -31,6 +31,7 @@ function createMockMessageStore() {
     getBefore: () => [],
     getByThreadAfter: () => [],
     deleteByThread: () => 0,
+    updateExtra: () => null,
     _rows: rows,
   };
 }
@@ -126,5 +127,39 @@ describe('AgentRouter successor routing', () => {
       persist: true,
     });
     assert.deepEqual(persisted.targetCats, ['opus-5']);
+  });
+
+  test('normalizes pre-resolved disabled targets before executing a service', async () => {
+    const legacyService = createMockAgentService('opus', 'Legacy response');
+    const successorService = createMockAgentService('opus-5', 'Opus 5 response');
+    const router = await createRouter({ services: { opus: legacyService, 'opus-5': successorService } });
+
+    const streamed = [];
+    for await (const message of router.routeExecution(
+      'user-1',
+      'system-generated architecture request',
+      'thread-pre-resolved',
+      'msg-pre-resolved',
+      ['opus'],
+      { intent: 'execute', explicit: false, promptTags: [] },
+    )) {
+      streamed.push(message);
+    }
+
+    assert.equal(legacyService.invoke.mock.callCount(), 0, 'disabled legacy service must not execute');
+    assert.equal(successorService.invoke.mock.callCount(), 1, 'configured successor must execute exactly once');
+    assert.ok(streamed.some((message) => message.catId === 'opus-5'));
+  });
+
+  test('does not choose an unrelated fallback when an implicit default has no successor', async () => {
+    const { clearRuntimeDefaultCatId, setRuntimeDefaultCatId } = await import('../dist/config/cat-config-loader.js');
+    setRuntimeDefaultCatId('antigravity');
+    try {
+      const router = await createRouter();
+      const result = await router.resolveTargetsAndIntent('continue without an explicit target', 'thread-no-default');
+      assert.deepEqual(result.targetCats, []);
+    } finally {
+      clearRuntimeDefaultCatId();
+    }
   });
 });
