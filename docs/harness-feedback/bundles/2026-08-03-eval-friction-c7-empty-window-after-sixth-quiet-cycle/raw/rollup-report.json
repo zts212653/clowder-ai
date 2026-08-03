@@ -1,0 +1,39 @@
+{
+  "verdictId": "2026-08-03-eval-friction-c7-empty-window-after-sixth-quiet-cycle",
+  "selector": {
+    "kind": "friction-rollup-snapshot",
+    "windowStartMs": 1785466800000,
+    "windowEndMs": 1785726000000,
+    "topN": 10,
+    "tokenCap": 4000
+  },
+  "window": {
+    "sinceMs": 1785466800000,
+    "untilMs": 1785726000000
+  },
+  "signalCount": 0,
+  "clusterCount": 0,
+  "degraded": true,
+  "droppedChannels": [],
+  "report": {
+    "window": {
+      "sinceMs": 1785466800000,
+      "untilMs": 1785726000000
+    },
+    "generatedAt": "2026-08-03T03:05:20.702Z",
+    "topClusters": [],
+    "actionableCandidates": [],
+    "referenceOnly": [],
+    "tailSummary": {
+      "clusterCount": 0,
+      "signalCount": 0,
+      "byChannel": {}
+    },
+    "degraded": true,
+    "droppedChannels": [],
+    "tokenBudget": {
+      "cap": 4000,
+      "estimated": 78
+    }
+  }
+}

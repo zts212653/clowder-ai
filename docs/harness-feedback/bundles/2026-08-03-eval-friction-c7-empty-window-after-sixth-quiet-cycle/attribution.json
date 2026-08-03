@@ -1,0 +1,11 @@
+{
+  "verdictId": "2026-08-03-eval-friction-c7-empty-window-after-sixth-quiet-cycle",
+  "featureId": "F245",
+  "evalSnapshotId": "eval-F245-2026-08-03",
+  "generatedAt": "2026-08-03T03:05:20.702Z",
+  "findings": [],
+  "noFindingRecord": {
+    "reason": "no friction cluster surfaced in the selected window",
+    "evidence": "friction-rollup/cluster_count"
+  }
+}
