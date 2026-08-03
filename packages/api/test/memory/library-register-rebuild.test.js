@@ -109,6 +109,7 @@ describe('library register + rebuild endpoints', () => {
     const lateDataDir = mkdtempSync(join(tmpdir(), 'lib-api-late-embed-'));
     const lateApp = Fastify();
     let embeddingService;
+    const embedOptions = [];
     await lateApp.register(libraryRoutes, {
       catalog: lateCatalog,
       stores: lateStores,
@@ -139,7 +140,10 @@ describe('library register + rebuild endpoints', () => {
       embeddingService = {
         isReady: () => true,
         reprobeIfNeeded: async () => {},
-        embed: async (texts) => texts.map(() => new Float32Array([1, 0, 0, 0])),
+        embed: async (texts, options) => {
+          embedOptions.push(options);
+          return texts.map(() => new Float32Array([1, 0, 0, 0]));
+        },
         getModelInfo: () => ({ modelId: 'test-model', modelRev: 'test', dim: 4 }),
       };
       const rebuild = await lateApp.inject({
@@ -149,6 +153,7 @@ describe('library register + rebuild endpoints', () => {
       assert.equal(rebuild.statusCode, 200, rebuild.payload);
       const db = lateStores.get('domain:late-embed').getDb();
       assert.equal(db.prepare('SELECT count(*) AS c FROM evidence_vectors').get().c, 1);
+      assert.deepEqual(embedOptions, [{ timeoutMs: 120_000 }]);
     } finally {
       for (const store of lateStores.values()) store.close?.();
       await lateApp.close();
