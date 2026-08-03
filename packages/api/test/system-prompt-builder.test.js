@@ -1669,7 +1669,11 @@ describe('SystemPromptBuilder', () => {
       },
     });
     assert.match(ctx, /Routing:.*review.*avoid.*@opus-5/, 'Should resolve disabled review target to @opus-5');
-    assert.match(ctx, /Routing:.*architecture.*prefer.*@opus-5/, 'Should resolve disabled architecture target to @opus-5');
+    assert.match(
+      ctx,
+      /Routing:.*architecture.*prefer.*@opus-5/,
+      'Should resolve disabled architecture target to @opus-5',
+    );
   });
 
   test('buildInvocationContext omits disabled policy targets without a valid successor', async () => {

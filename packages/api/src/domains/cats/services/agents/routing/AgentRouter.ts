@@ -868,8 +868,7 @@ export class AgentRouter {
       const catId = this.resolveRoutableCatId(participant.catId);
       return catId ? [{ ...participant, catId }] : [];
     });
-    const isHealthy = (participant: { lastResponseHealthy?: boolean }) =>
-      participant.lastResponseHealthy !== false;
+    const isHealthy = (participant: { lastResponseHealthy?: boolean }) => participant.lastResponseHealthy !== false;
     const healthyReplier = routableParticipants.find(
       (participant) => participant.messageCount > 0 && isHealthy(participant),
     );
@@ -1014,9 +1013,7 @@ export class AgentRouter {
     // Defensive guard: data might be malformed from external persistence.
     const avoidList = Array.isArray(rule.avoidCats) ? rule.avoidCats : [];
     const preferList = Array.isArray(rule.preferCats) ? rule.preferCats : [];
-    const avoid = new Set(
-      avoidList.map((id) => this.resolveRoutableCatId(String(id)) ?? String(id)),
-    );
+    const avoid = new Set(avoidList.map((id) => this.resolveRoutableCatId(String(id)) ?? String(id)));
     const prefer = preferList
       .map((id) => this.resolveRoutableCatId(String(id)))
       .filter((id): id is CatId => id !== null)

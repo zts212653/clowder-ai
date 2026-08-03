@@ -905,7 +905,9 @@ describe('F32-b: getDefaultCatId', () => {
   });
 
   it('fails closed when a disabled default has no valid explicit successor', () => {
-    const cfg = JSON.parse(readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../cat-template.json')));
+    const cfg = JSON.parse(
+      readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../cat-template.json')),
+    );
     const ragdoll = cfg.breeds.find((breed) => breed.id === 'ragdoll');
     ragdoll.defaultVariantId = 'opus-default';
     cfg.roster.opus.available = false;
