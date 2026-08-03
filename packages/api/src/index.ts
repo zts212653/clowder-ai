@@ -2229,9 +2229,19 @@ async function main(): Promise<void> {
   const { LimbAccessPolicy } = await import('./domains/limb/LimbAccessPolicy.js');
   const { LimbLeaseManager } = await import('./domains/limb/LimbLeaseManager.js');
   const { LimbActionLog } = await import('./domains/limb/LimbActionLog.js');
+
+  // #331: SQLite persistence for limb pairings + access policies
+  const { SqliteLimbPersistence } = await import('./domains/limb/SqliteLimbPersistence.js');
+  const limbDbPath = process.env.LIMB_DB ?? resolve(repoRoot, 'limb.sqlite');
+  const limbPersistence = new SqliteLimbPersistence(limbDbPath);
+  limbPersistence.initialize();
+
+  const limbAccessPolicy = new LimbAccessPolicy(limbPersistence);
+  limbAccessPolicy.initialize();
+
   const limbRegistry = new LimbRegistry();
   limbRegistry.setDeps({
-    accessPolicy: new LimbAccessPolicy(),
+    accessPolicy: limbAccessPolicy,
     leaseManager: new LimbLeaseManager(),
     actionLog: new LimbActionLog(),
   });
@@ -2239,7 +2249,25 @@ async function main(): Promise<void> {
   // F126 Phase C: Pairing store + limb node routes for remote devices
   const { LimbPairingStore } = await import('./domains/limb/LimbPairingStore.js');
   const { registerLimbNodeRoutes } = await import('./routes/limb-node-routes.js');
-  const limbPairingStore = new LimbPairingStore();
+  const limbPairingStore = new LimbPairingStore(limbPersistence);
+  limbPairingStore.initialize();
+
+  // #331: Recover approved pairings as offline RemoteLimbNode stubs
+  const { RemoteLimbNode } = await import('./domains/limb/RemoteLimbNode.js');
+  for (const pairing of limbPairingStore.getApproved()) {
+    if (!limbRegistry.getNode(pairing.nodeId)) {
+      const stub = new RemoteLimbNode({
+        nodeId: pairing.nodeId,
+        displayName: pairing.displayName,
+        platform: pairing.platform,
+        capabilities: pairing.capabilities,
+        endpointUrl: pairing.endpointUrl,
+        apiKey: pairing.apiKey,
+      });
+      await limbRegistry.register(stub);
+      limbRegistry.updateStatus(pairing.nodeId, 'offline');
+    }
+  }
   registerLimbNodeRoutes(app, { limbRegistry, pairingStore: limbPairingStore });
 
   // F202-2B: Hoisted for late-binding GitHub schedule rehydration (closure set inside F202 block)

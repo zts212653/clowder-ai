@@ -7,6 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { LimbCapability } from '@cat-cafe/shared';
+import type { SqliteLimbPersistence } from './SqliteLimbPersistence.js';
 
 export interface PairingRequest {
   requestId: string;
@@ -32,6 +33,19 @@ export interface CreatePairingParams {
 
 export class LimbPairingStore {
   private readonly requests = new Map<string, PairingRequest>();
+  private readonly persistence?: SqliteLimbPersistence;
+
+  constructor(persistence?: SqliteLimbPersistence) {
+    this.persistence = persistence;
+  }
+
+  /** Load persisted pairings into memory (call after persistence.initialize()) */
+  initialize(): void {
+    if (!this.persistence) return;
+    for (const p of this.persistence.loadPairings()) {
+      this.requests.set(p.requestId, p);
+    }
+  }
 
   createRequest(params: CreatePairingParams): PairingRequest {
     // Check for duplicate nodeId in pending/approved
@@ -50,6 +64,7 @@ export class LimbPairingStore {
     };
 
     this.requests.set(request.requestId, request);
+    this.persistence?.upsertPairing(request);
     return request;
   }
 
@@ -59,6 +74,7 @@ export class LimbPairingStore {
     if (req.status === 'approved') return req; // Idempotent
     req.status = 'approved';
     req.decidedAt = Date.now();
+    this.persistence?.upsertPairing(req);
     return req;
   }
 
@@ -67,6 +83,7 @@ export class LimbPairingStore {
     if (!req) return false;
     req.status = 'rejected';
     req.decidedAt = Date.now();
+    this.persistence?.upsertPairing(req);
     return true;
   }
 

@@ -6,9 +6,23 @@
  */
 
 import type { LimbAccessEntry, LimbAuthLevel, LimbCapability } from '@cat-cafe/shared';
+import type { SqliteLimbPersistence } from './SqliteLimbPersistence.js';
 
 export class LimbAccessPolicy {
   private readonly policies = new Map<string, LimbAccessEntry>();
+  private readonly persistence?: SqliteLimbPersistence;
+
+  constructor(persistence?: SqliteLimbPersistence) {
+    this.persistence = persistence;
+  }
+
+  /** Load persisted policies into memory (call after persistence.initialize()) */
+  initialize(): void {
+    if (!this.persistence) return;
+    for (const e of this.persistence.loadAccessPolicies()) {
+      this.policies.set(LimbAccessPolicy.key(e.catId, e.nodeId, e.capability), e);
+    }
+  }
 
   private static key(catId: string, nodeId: string, capability: string): string {
     return `${catId}:${nodeId}:${capability}`;
@@ -17,6 +31,7 @@ export class LimbAccessPolicy {
   /** 设置权限条目（覆盖已有） */
   setPolicy(entry: LimbAccessEntry): void {
     this.policies.set(LimbAccessPolicy.key(entry.catId, entry.nodeId, entry.capability), entry);
+    this.persistence?.upsertAccessPolicy(entry);
   }
 
   /** 检查显式策略（未配置返回 null） */
