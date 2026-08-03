@@ -51,29 +51,68 @@ const HOLD_BALL_TASK_ID_PREFIX = 'hold-ball-';
 export const MAX_HOLDS_PER_WINDOW = 3;
 export const HOLD_WINDOW_MS = 3_600_000;
 
-const holdCounts = new Map<string, { count: number; lastAt: number }>();
+/**
+ * F167 mode-aware quota (eval:harness-ledger verdict C5/C6):
+ * holdMode discriminates timer (wakeAfterMs) from command (wakeWhen).
+ * Timer is frequency-gated (3/~1h); command is bounded by single-active-
+ * runner + timeout — different risk dimensions, different constraints.
+ */
+export const HOLD_MODE_TIMER = 'timer' as const;
+export const HOLD_MODE_COMMAND = 'command' as const;
+export type HoldMode = typeof HOLD_MODE_TIMER | typeof HOLD_MODE_COMMAND;
 
-export function getHoldCount(threadId: string, catId: string, now: number = Date.now()): number {
+/**
+ * Timer hold counter — only tracks wakeAfterMs calls.
+ * wakeWhen (command custody) does NOT consume this counter; its safety
+ * comes from single-active-runner + bounded timeout, not call frequency.
+ *
+ * Invariant: single-active registry owner + bounded eventual cleanup
+ * (≤5s overlap). Not strict single-live-process.
+ */
+const timerHoldCounts = new Map<string, { count: number; lastAt: number }>();
+
+export function getTimerHoldCount(threadId: string, catId: string, now: number = Date.now()): number {
   const key = `${threadId}:${catId}`;
-  const entry = holdCounts.get(key);
+  const entry = timerHoldCounts.get(key);
   if (!entry) return 0;
   if (now - entry.lastAt > HOLD_WINDOW_MS) {
-    holdCounts.delete(key);
+    timerHoldCounts.delete(key);
     return 0;
   }
   return entry.count;
 }
 
-export function incrementHoldCount(threadId: string, catId: string, now: number = Date.now()): number {
+export function incrementTimerHoldCount(threadId: string, catId: string, now: number = Date.now()): number {
   const key = `${threadId}:${catId}`;
-  const entry = holdCounts.get(key);
+  const entry = timerHoldCounts.get(key);
   if (!entry || now - entry.lastAt > HOLD_WINDOW_MS) {
-    holdCounts.set(key, { count: 1, lastAt: now });
+    timerHoldCounts.set(key, { count: 1, lastAt: now });
     return 1;
   }
   entry.count++;
   entry.lastAt = now;
   return entry.count;
+}
+
+/**
+ * Command hold is always allowed — frequency cap is the wrong constraint
+ * for command custody. Safety is enforced by:
+ * 1. Single-active runner registry (cancelWakeWhenRunner cancel-replace)
+ * 2. Bounded timeout (wakeWhen.timeoutMs)
+ * 3. SIGTERM→5s→SIGKILL process group cleanup
+ */
+export function isCommandHoldAllowed(_threadId: string, _catId: string): boolean {
+  return true;
+}
+
+/** @deprecated Use getTimerHoldCount — legacy alias for backward compatibility. */
+export function getHoldCount(threadId: string, catId: string, now: number = Date.now()): number {
+  return getTimerHoldCount(threadId, catId, now);
+}
+
+/** @deprecated Use incrementTimerHoldCount — legacy alias for backward compatibility. */
+export function incrementHoldCount(threadId: string, catId: string, now: number = Date.now()): number {
+  return incrementTimerHoldCount(threadId, catId, now);
 }
 
 /**
@@ -476,22 +515,31 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       return guardResult.blockedResponse;
     }
 
-    const currentCount = getHoldCount(threadId, catIdStr);
-    if (currentCount >= MAX_HOLDS_PER_WINDOW) {
-      log.warn(
-        { threadId, catId: catIdStr, currentCount, windowMs: HOLD_WINDOW_MS },
-        'F167 C1: hold_ball rejected — maxHoldsPerWindow reached',
-      );
-      reply.status(429);
-      return {
-        error:
-          `maxHoldsPerWindow (${MAX_HOLDS_PER_WINDOW} per ~1h window) reached. ` +
-          'You MUST pass the ball now: @ another cat or @co-creator.',
-        holdsInWindow: currentCount,
-        maxHoldsPerWindow: MAX_HOLDS_PER_WINDOW,
-        windowMs: HOLD_WINDOW_MS,
-      };
+    // F167 mode-aware quota: frequency cap only applies to timer (wakeAfterMs).
+    // wakeWhen (command custody) is bounded by single-active-runner + timeout,
+    // not by call frequency. (eval:harness-ledger verdict C5/C6)
+    const holdMode: HoldMode = wakeWhen ? HOLD_MODE_COMMAND : HOLD_MODE_TIMER;
+
+    if (holdMode === HOLD_MODE_TIMER) {
+      const currentCount = getTimerHoldCount(threadId, catIdStr);
+      if (currentCount >= MAX_HOLDS_PER_WINDOW) {
+        log.warn(
+          { threadId, catId: catIdStr, currentCount, windowMs: HOLD_WINDOW_MS, holdMode },
+          'F167 C1: hold_ball rejected — maxHoldsPerWindow reached (timer mode)',
+        );
+        reply.status(429);
+        return {
+          error:
+            `maxHoldsPerWindow (${MAX_HOLDS_PER_WINDOW} per ~1h window) reached for timer holds. ` +
+            'You MUST pass the ball now: @ another cat or @co-creator.',
+          holdMode,
+          holdsInWindow: currentCount,
+          maxHoldsPerWindow: MAX_HOLDS_PER_WINDOW,
+          windowMs: HOLD_WINDOW_MS,
+        };
+      }
     }
+    // Command mode: no frequency gate — single-runner + timeout is the constraint.
 
     const template = templateRegistry.get('reminder');
     if (!template) {
@@ -642,7 +690,8 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       }
     }
 
-    const newCount = incrementHoldCount(threadId, catIdStr);
+    // Only increment timer counter for timer mode; command mode doesn't consume frequency quota.
+    const newCount = holdMode === HOLD_MODE_TIMER ? incrementTimerHoldCount(threadId, catIdStr) : 0;
 
     const wakeAtStr = new Date(fireAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
     const holdMessage = wakeWhen
@@ -700,6 +749,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
         wakeAfterMs,
         wakeWhen: wakeWhen ? { command: wakeWhen.command, timeoutMs: wakeWhen.timeoutMs } : undefined,
         taskId,
+        holdMode,
         holdsInWindow: newCount,
         windowMs: HOLD_WINDOW_MS,
       },
@@ -710,6 +760,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       status: 'ok',
       held: true,
       taskId,
+      holdMode,
       holdsInWindow: newCount,
       maxHoldsPerWindow: MAX_HOLDS_PER_WINDOW,
       windowMs: HOLD_WINDOW_MS,
