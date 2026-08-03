@@ -155,17 +155,44 @@ function Test-SourceMode {
     # "corp-proxy reaches Tsinghua even though it can't reach pypi" case:
     # Sync-SystemProxy no longer gates the candidate on a single pypi probe,
     # so per-source decisions in Assert-Network always see the candidate.
-    param([string]$Url, [int]$TimeoutSec = 5, [string]$CandidateProxy = $null)
+    param(
+        [string]$Url,
+        [int]$TimeoutSec = 5,
+        [string]$CandidateProxy = $null,
+        [ValidateSet("HEAD", "GET")][string]$Method = "HEAD"
+    )
+
+    $probe = {
+        param($Proxy)
+        $resp = $null
+        $stream = $null
+        try {
+            $req = [System.Net.HttpWebRequest]::Create($Url)
+            $req.Proxy = $Proxy
+            $req.Method = $Method
+            $req.Timeout = $TimeoutSec * 1000
+            $req.ReadWriteTimeout = $TimeoutSec * 1000
+            $req.AllowAutoRedirect = $true
+            $req.UserAgent = "cat-cafe-prereq-check"
+            $resp = $req.GetResponse()
+            if ($Method -eq "GET") {
+                $stream = $resp.GetResponseStream()
+                $buffer = New-Object byte[] 8192
+                while ($stream -and $stream.Read($buffer, 0, $buffer.Length) -gt 0) {}
+            }
+            return $true
+        } catch {
+            return $false
+        } finally {
+            if ($stream) { $stream.Dispose() }
+            if ($resp) { $resp.Close() }
+        }
+    }
+
     # 1. Try without any proxy at all.
-    try {
-        $req = [System.Net.HttpWebRequest]::Create($Url)
-        $req.Proxy = $null
-        $req.Method = 'HEAD'
-        $req.Timeout = $TimeoutSec * 1000
-        $resp = $req.GetResponse()
-        $resp.Close()
+    if (& $probe $null) {
         return 'direct'
-    } catch {}
+    }
     # 2. Try via candidate proxy (anonymous -- DON'T let .NET auto-fill the
     #    SSPI token, that would mask auth-required corp proxies as reachable).
     $proxyUrl = $CandidateProxy
@@ -179,14 +206,12 @@ function Test-SourceMode {
             $webProxy = New-Object System.Net.WebProxy($proxyUrl)
             $webProxy.UseDefaultCredentials = $false
             $webProxy.Credentials = $null
-            $req = [System.Net.HttpWebRequest]::Create($Url)
-            $req.Proxy = $webProxy
-            $req.Method = 'HEAD'
-            $req.Timeout = $TimeoutSec * 1000
-            $resp = $req.GetResponse()
-            $resp.Close()
-            return 'proxy'
-        } catch {}
+            if (& $probe $webProxy) {
+                return 'proxy'
+            }
+        } catch {
+            return 'unreachable'
+        }
     }
     return 'unreachable'
 }
@@ -241,6 +266,11 @@ function Invoke-ModelDownloadWithRetry {
         # "fastembed"         = fastembed.TextEmbedding
         [string]$Loader = "snapshot"
     )
+
+    if ($env:OS -eq "Windows_NT") {
+        $env:HF_HUB_DISABLE_SYMLINKS = if ($env:HF_HUB_DISABLE_SYMLINKS) { $env:HF_HUB_DISABLE_SYMLINKS } else { "1" }
+        $env:HF_HUB_DISABLE_SYMLINKS_WARNING = if ($env:HF_HUB_DISABLE_SYMLINKS_WARNING) { $env:HF_HUB_DISABLE_SYMLINKS_WARNING } else { "1" }
+    }
 
     $script = switch ($Loader) {
         "snapshot" { @"
@@ -362,8 +392,34 @@ sys.exit(1)
         default { throw "Invoke-ModelDownloadWithRetry: unknown loader '$Loader'" }
     }
 
-    & $VenvPython -c $script $ModelId
-    if ($LASTEXITCODE -ne 0) { throw "Failed to download model: $ModelId" }
+    $proxyVarNames = if ($env:OS -eq "Windows_NT") {
+        @("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")
+    } else {
+        @("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy")
+    }
+    $savedProxyEnv = @{}
+    $clearProxyForDownload = ($script:CatCafeHfDownloadTransportMode -eq "direct")
+    $exitCode = $null
+    try {
+        if ($clearProxyForDownload) {
+            # HuggingFace artifacts can redirect to CDN/CAS hosts that are
+            # not covered by NO_PROXY. When Assert-Network proved artifact
+            # downloads work direct, keep this Python child direct-only.
+            foreach ($name in $proxyVarNames) {
+                $savedProxyEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+                [Environment]::SetEnvironmentVariable($name, $null, "Process")
+            }
+        }
+        & $VenvPython -c $script $ModelId
+        $exitCode = $LASTEXITCODE
+    } finally {
+        if ($clearProxyForDownload) {
+            foreach ($name in $proxyVarNames) {
+                [Environment]::SetEnvironmentVariable($name, $savedProxyEnv[$name], "Process")
+            }
+        }
+    }
+    if ($exitCode -ne 0) { throw "Failed to download model: $ModelId" }
 }
 
 function Assert-Network {
@@ -374,6 +430,7 @@ function Assert-Network {
     # decisions don't depend on whether env was already set.
     $candidate = Get-SystemProxyCandidate
     $needProxyInjection = $false
+    $script:CatCafeHfDownloadTransportMode = $null
 
     # FIRST: classify the user's PIP_INDEX_URL (if set) the same way we
     # classify public mirrors. Internal corporate mirrors typically
@@ -455,26 +512,49 @@ function Assert-Network {
         Write-Host "  Auto-set PIP_INDEX_URL = Tsinghua mirror (primary)"
     }
 
-    # Same two-mode probe for HuggingFace.
-    $hfMode = Test-SourceMode -Url "https://huggingface.co" -TimeoutSec 5 -CandidateProxy $candidate
+    # Same two-mode probe for HuggingFace. Probe a real model artifact rather
+    # than the homepage: some networks allow API/root requests but break TLS on
+    # /resolve artifact downloads, which is the path snapshot_download needs.
+    # If the user configured a custom HF endpoint, probe that same endpoint;
+    # otherwise the transport decision can clear a proxy that the actual
+    # snapshot_download target still needs.
+    $configuredHfEndpoint = $false
+    if ($env:HF_ENDPOINT) {
+        $hfEndpointBase = $env:HF_ENDPOINT.TrimEnd('/')
+        $configuredHfEndpoint = $true
+    } elseif ($env:HF_HUB_ENDPOINT) {
+        $hfEndpointBase = $env:HF_HUB_ENDPOINT.TrimEnd('/')
+        $configuredHfEndpoint = $true
+    } else {
+        $hfEndpointBase = "https://huggingface.co"
+    }
+    $hfProbeUrl = "$hfEndpointBase/BAAI/bge-small-zh-v1.5/resolve/main/config.json"
+    $hfMode = Test-SourceMode -Url $hfProbeUrl -TimeoutSec 10 -CandidateProxy $candidate -Method "GET"
     if ($hfMode -eq 'direct') {
-        Write-Host "  HuggingFace connectivity [OK] (direct)"
-        Add-NoProxyHost "huggingface.co"
+        Write-Host "  HuggingFace artifact download [OK] (direct)"
+        $script:CatCafeHfDownloadTransportMode = "direct"
     } elseif ($hfMode -eq 'proxy') {
-        Write-Host "  HuggingFace connectivity [OK] (via proxy: $candidate)"
+        Write-Host "  HuggingFace artifact download [OK] (via proxy: $candidate)"
+        $script:CatCafeHfDownloadTransportMode = "proxy"
         $needProxyInjection = $true
     } else {
-        $hfMirrorMode = Test-SourceMode -Url "https://hf-mirror.com" -TimeoutSec 5 -CandidateProxy $candidate
-        if ($hfMirrorMode -eq 'direct') {
-            Write-Host "  HuggingFace unreachable, switching to hf-mirror.com (direct)"
-            $env:HF_ENDPOINT = "https://hf-mirror.com"
-            Add-NoProxyHost "hf-mirror.com"
-        } elseif ($hfMirrorMode -eq 'proxy') {
-            Write-Host "  HuggingFace unreachable, switching to hf-mirror.com (via proxy: $candidate)"
-            $env:HF_ENDPOINT = "https://hf-mirror.com"
-            $needProxyInjection = $true
+        if ($configuredHfEndpoint) {
+            Write-ProxyGuidance -Context "configured HuggingFace endpoint artifact downloads are unreachable in both direct and via-proxy modes; model download will definitely fail."
         } else {
-            Write-ProxyGuidance -Context "huggingface.co and hf-mirror.com are unreachable in both direct and via-proxy modes; model download will definitely fail."
+            $hfMirrorProbeUrl = "https://hf-mirror.com/BAAI/bge-small-zh-v1.5/resolve/main/config.json"
+            $hfMirrorMode = Test-SourceMode -Url $hfMirrorProbeUrl -TimeoutSec 10 -CandidateProxy $candidate -Method "GET"
+            if ($hfMirrorMode -eq 'direct') {
+                Write-Host "  HuggingFace artifact download unreachable, switching to hf-mirror.com (direct)"
+                $env:HF_ENDPOINT = "https://hf-mirror.com"
+                $script:CatCafeHfDownloadTransportMode = "direct"
+            } elseif ($hfMirrorMode -eq 'proxy') {
+                Write-Host "  HuggingFace artifact download unreachable, switching to hf-mirror.com (via proxy: $candidate)"
+                $env:HF_ENDPOINT = "https://hf-mirror.com"
+                $script:CatCafeHfDownloadTransportMode = "proxy"
+                $needProxyInjection = $true
+            } else {
+                Write-ProxyGuidance -Context "huggingface.co and hf-mirror.com artifact downloads are unreachable in both direct and via-proxy modes; model download will definitely fail."
+            }
         }
     }
 

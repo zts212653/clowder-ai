@@ -161,6 +161,9 @@ export function resolveCliCommand(command: string, opts?: { skipPathProbe?: bool
     if (appData) winDirs.push(resolve(appData, 'npm'));
     if (localAppData) winDirs.push(resolve(localAppData, 'npm'));
     if (command === 'agy' && localAppData) winDirs.push(resolve(localAppData, 'agy', 'bin'));
+    // Codex's native Windows desktop app (OpenAI Codex installer) puts codex.exe
+    // under %LOCALAPPDATA%\OpenAI\Codex\bin, which is never added to PATH.
+    if (command === 'codex' && localAppData) winDirs.push(resolve(localAppData, 'OpenAI', 'Codex', 'bin'));
     for (const dir of winDirs) {
       // Prefer .cmd shim (more reliable for resolveWindowsShimSpawn)
       const cmdCandidate = resolve(dir, `${command}.cmd`);

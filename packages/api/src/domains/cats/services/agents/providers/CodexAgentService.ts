@@ -863,6 +863,8 @@ export class CodexAgentService implements AgentService {
     // /proc/<pid>/cmdline 会把完整对话历史（含跨 thread/猫/用户内容）暴露给任何
     // 并发进程。'--' 结束选项解析，'-' 让 codex 从 stdin 读取 PROMPT。
     const promptArgs = ['--', '-'];
+    // Clowder owns per-invocation config; stale user config.toml must not break backend calls.
+    const ignoreUserConfigArgs = ['--ignore-user-config'];
 
     // Dedup: skip system --config/--flag pairs that the user explicitly overrides (#567).
     const dedup = (src: string[]): string[] => {
@@ -889,6 +891,7 @@ export class CodexAgentService implements AgentService {
           'resume',
           options.sessionId,
           '--json',
+          ...ignoreUserConfigArgs,
           ...dedup(modelArgs),
           ...dedup(reasoningArgs),
           ...dedup(contextWindowArgs),
@@ -905,6 +908,7 @@ export class CodexAgentService implements AgentService {
       : [
           'exec',
           '--json',
+          ...ignoreUserConfigArgs,
           ...dedup(modelArgs),
           ...dedup(reasoningArgs),
           ...dedup(contextWindowArgs),

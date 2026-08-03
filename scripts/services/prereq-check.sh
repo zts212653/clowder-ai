@@ -152,7 +152,7 @@ _test_source_mode() {
   # in a way that matches pip's runtime path.
   local url="$1"
   local timeout="${2:-5}"
-  if curl -sf --max-time "$timeout" --noproxy '*' "$url" >/dev/null 2>&1; then
+  if curl -fsL --max-time "$timeout" --noproxy '*' "$url" >/dev/null 2>&1; then
     echo "direct"
     return
   fi
@@ -173,7 +173,7 @@ _test_source_mode() {
     candidate=$(_get_system_proxy_candidate 2>/dev/null || echo "")
   fi
   if [ -n "$candidate" ]; then
-    if curl -sf --max-time "$timeout" -x "$candidate" "$url" >/dev/null 2>&1; then
+    if curl -fsL --max-time "$timeout" -x "$candidate" "$url" >/dev/null 2>&1; then
       echo "proxy"
       return
     fi
@@ -320,36 +320,39 @@ check_network() {
     echo "  Auto-enabled Tsinghua pip mirror as primary source: $PIP_INDEX_URL"
   fi
 
+  local hf_probe_url="https://huggingface.co/BAAI/bge-small-zh-v1.5/resolve/main/config.json"
   local hf_mode
-  hf_mode=$(_test_source_mode "https://huggingface.co" "$timeout")
+  hf_mode=$(_test_source_mode "$hf_probe_url" "$timeout")
   case "$hf_mode" in
     direct)
-      echo "  HuggingFace connectivity [OK] (direct)"
-      _add_no_proxy_host "huggingface.co"
+      echo "  HuggingFace artifact download [OK] (direct)"
+      # Do not add huggingface.co to NO_PROXY. Python/huggingface_hub can
+      # behave differently from curl against model CDN/CAS artifact paths, so
+      # keep any user proxy available for the actual download.
       ;;
     proxy)
-      echo "  HuggingFace connectivity [OK] (via env proxy)"
+      echo "  HuggingFace artifact download [OK] (via env proxy)"
       ;;
     unreachable)
-      echo "WARNING: HuggingFace unreachable (https://huggingface.co); model downloads may fail"
+      echo "WARNING: HuggingFace artifact download unreachable ($hf_probe_url); model downloads may fail"
+      local hf_mirror_probe_url="https://hf-mirror.com/BAAI/bge-small-zh-v1.5/resolve/main/config.json"
       local hf_mirror_mode
-      hf_mirror_mode=$(_test_source_mode "https://hf-mirror.com" "$timeout")
+      hf_mirror_mode=$(_test_source_mode "$hf_mirror_probe_url" "$timeout")
       case "$hf_mirror_mode" in
         direct)
           if [ -z "${HF_ENDPOINT:-}" ]; then
             export HF_ENDPOINT="https://hf-mirror.com"
-            echo "  Auto-enabled HF mirror (direct): $HF_ENDPOINT"
+            echo "  Auto-enabled HF mirror for artifact downloads (direct): $HF_ENDPOINT"
           fi
-          _add_no_proxy_host "hf-mirror.com"
           ;;
         proxy)
           if [ -z "${HF_ENDPOINT:-}" ]; then
             export HF_ENDPOINT="https://hf-mirror.com"
-            echo "  Auto-enabled HF mirror (via env proxy): $HF_ENDPOINT"
+            echo "  Auto-enabled HF mirror for artifact downloads (via env proxy): $HF_ENDPOINT"
           fi
           ;;
         unreachable)
-          _print_proxy_guidance "huggingface.co and hf-mirror.com are unreachable in both direct and via-proxy modes."
+          _print_proxy_guidance "huggingface.co and hf-mirror.com artifact downloads are unreachable in both direct and via-proxy modes."
           ;;
       esac
       ;;

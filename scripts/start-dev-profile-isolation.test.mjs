@@ -785,6 +785,33 @@ describe('TTS sidecar startup guards', () => {
 });
 
 describe('Whisper sidecar startup guards', () => {
+  it('probes HuggingFace model artifacts before trusting direct downloads', () => {
+    const installTemplate = readFileSync(resolve(ROOT, 'scripts/services/prereq-check.sh'), 'utf8');
+    const prereqPs1 = readFileSync(resolve(ROOT, 'scripts/services/prereq-check.ps1'), 'utf8');
+
+    assert.match(
+      installTemplate,
+      /hf_probe_url="https:\/\/huggingface\.co\/BAAI\/bge-small-zh-v1\.5\/resolve\/main\/config\.json"/,
+    );
+    assert.match(installTemplate, /_test_source_mode "\$hf_probe_url"/);
+    assert.doesNotMatch(installTemplate, /_test_source_mode "https:\/\/huggingface\.co"/);
+    assert.doesNotMatch(installTemplate, /_add_no_proxy_host "huggingface\.co"/);
+    assert.doesNotMatch(installTemplate, /_add_no_proxy_host "hf-mirror\.com"/);
+
+    assert.match(prereqPs1, /\$env:HF_ENDPOINT/);
+    assert.match(prereqPs1, /\$env:HF_HUB_ENDPOINT/);
+    assert.match(prereqPs1, /\$hfEndpointBase = "https:\/\/huggingface\.co"/);
+    assert.match(prereqPs1, /\$hfProbeUrl = "\$hfEndpointBase\/BAAI\/bge-small-zh-v1\.5\/resolve\/main\/config\.json"/);
+    assert.match(
+      prereqPs1,
+      /Test-SourceMode -Url \$hfProbeUrl -TimeoutSec 10 -CandidateProxy \$candidate -Method "GET"/,
+    );
+    assert.doesNotMatch(prereqPs1, /Test-SourceMode -Url "https:\/\/huggingface\.co"/);
+    assert.doesNotMatch(prereqPs1, /Add-NoProxyHost "huggingface\.co"/);
+    assert.doesNotMatch(prereqPs1, /Add-NoProxyHost "hf-mirror\.com"/);
+    assert.doesNotMatch(prereqPs1, /_CATCAFE_HF_DOWNLOAD_BYPASS_PROXY/);
+  });
+
   it('preloads faster-whisper model artifacts via snapshot_download before runtime load', () => {
     const installTemplate = readFileSync(resolve(ROOT, 'scripts/services/install-template.sh'), 'utf8');
     const prereqPs1 = readFileSync(resolve(ROOT, 'scripts/services/prereq-check.ps1'), 'utf8');
