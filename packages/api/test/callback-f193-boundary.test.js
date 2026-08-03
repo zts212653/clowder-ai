@@ -149,14 +149,14 @@ describe('F193 AC-A5: KD-1 boundary regression', () => {
   });
 
   test('same-name cat cross-thread @ is NOT self-filtered (F052 exemption preserved)', async () => {
-    // Source thread has cat=opus invocation. The cat sends cross-post to
-    // target thread with @opus mentioning another opus session. The same-cat
+    // Source thread has cat=opus-5 invocation. The cat sends cross-post to
+    // target thread with @opus-5 mentioning another opus-5 session. The same-cat
     // self-reference filter MUST be skipped for cross-thread (otherwise
     // the target thread's opus session would never be triggered).
     const app = await createApp();
-    const sourceThread = threadStore.create('user-1', 'Source (has opus session)');
-    const targetThread = threadStore.create('user-1', 'Target (also has opus session)');
-    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', sourceThread.id);
+    const sourceThread = threadStore.create('user-1', 'Source (has opus-5 session)');
+    const targetThread = threadStore.create('user-1', 'Target (also has opus-5 session)');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus-5', sourceThread.id);
 
     const res = await app.inject({
       method: 'POST',
@@ -164,23 +164,23 @@ describe('F193 AC-A5: KD-1 boundary regression', () => {
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
         threadId: targetThread.id,
-        content: 'hi other opus session, ping you to coordinate\n@opus',
+        content: 'hi other opus-5 session, ping you to coordinate\n@opus-5',
         clientMessageId: 'b2',
       },
     });
 
-    assert.equal(res.statusCode, 200, 'cross-post with line-start @opus must be accepted');
-    // Verify the cross-post created an InvocationRecord for opus in target thread
+    assert.equal(res.statusCode, 200, 'cross-post with line-start @opus-5 must be accepted');
+    // Verify the cross-post created an InvocationRecord for opus-5 in target thread
     // (would be 0 if same-cat self-filter wrongly applied to cross-thread)
     const records = invocationRecordStore.getRecords();
     assert.ok(
       records.length >= 1,
-      'cross-thread @opus must trigger target-thread opus session (self-filter exemption)',
+      'cross-thread @opus-5 must trigger target-thread opus-5 session (self-filter exemption)',
     );
-    const opusRecord = records.find((r) => r.targetCats?.includes('opus'));
+    const opusRecord = records.find((r) => r.targetCats?.includes('opus-5'));
     assert.ok(
       opusRecord,
-      'InvocationRecord for opus in target thread must exist; self-filter must NOT drop @opus on cross-thread',
+      'InvocationRecord for opus-5 in target thread must exist; self-filter must NOT drop @opus-5 on cross-thread',
     );
   });
 });

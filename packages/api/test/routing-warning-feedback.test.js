@@ -53,7 +53,7 @@ function createMockMessageStore() {
 
 function buildRouter() {
   const agentRegistry = new AgentRegistry();
-  agentRegistry.register('opus', createMockService('opus'));
+  agentRegistry.register('opus-5', createMockService('opus-5'));
   agentRegistry.register('codex', createMockService('codex'));
   // NOTE: 'kimi' is intentionally NOT registered
 
@@ -77,13 +77,13 @@ describe('AgentRouter.resolveTargetsAndIntent: routing_warnings for not-found ca
     assert.ok(Array.isArray(result.routing_warnings), 'routing_warnings must be an array');
   });
 
-  it('returns empty routing_warnings for a valid @opus mention', async () => {
+  it('returns empty routing_warnings for a valid @opus-5 mention', async () => {
     const router = buildRouter();
-    const result = await router.resolveTargetsAndIntent('@opus please review this', 'thread-1');
+    const result = await router.resolveTargetsAndIntent('@opus-5 please review this', 'thread-1');
 
     assert.ok('routing_warnings' in result, 'routing_warnings field must exist');
-    assert.deepEqual(result.routing_warnings, [], 'No warnings when @opus is valid');
-    assert.deepEqual(result.targetCats.map(String), ['opus'], 'targetCats should be opus for @opus mention');
+    assert.deepEqual(result.routing_warnings, [], 'No warnings when @opus-5 is valid');
+    assert.deepEqual(result.targetCats.map(String), ['opus-5'], 'targetCats should be opus-5 for @opus-5 mention');
   });
 
   it('returns cat_not_found routing_warning for an unknown line-start handle', async () => {

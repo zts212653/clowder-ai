@@ -176,8 +176,8 @@ describe('Multi-Mention Routes', () => {
     mockInvocationTracker = createMockInvocationTracker();
     mockRouter = createMockRouter({ codex: 'Codex says hello', gemini: 'Gemini says hi' });
 
-    // Register a caller invocation (opus calling)
-    creds = mockRegistry.register('opus', 'thread-1', 'user-1');
+    // Register a caller invocation (opus-5 calling)
+    creds = mockRegistry.register('opus-5', 'thread-1', 'user-1');
 
     app = Fastify({ logger: false });
     registerCallbackAuthHook(app, mockRegistry);
@@ -210,7 +210,7 @@ describe('Multi-Mention Routes', () => {
       payload: {
         targets: ['codex'],
         question: 'What do you think?',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -369,7 +369,7 @@ describe('Multi-Mention Routes', () => {
       payload: {
         targets: ['codex'],
         question: 'test',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -384,7 +384,7 @@ describe('Multi-Mention Routes', () => {
       payload: {
         targets: ['nonexistent-cat'],
         question: 'test',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -418,7 +418,7 @@ describe('Multi-Mention Routes', () => {
       payload: {
         targets: ['codex', 'gemini'],
         question: 'Review this design',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -440,7 +440,7 @@ describe('Multi-Mention Routes', () => {
       payload: {
         targets: ['codex', 'gemini'],
         question: 'Review this design',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -478,7 +478,7 @@ describe('Multi-Mention Routes', () => {
       payload: {
         targets: ['codex'],
         question: 'What is your opinion?',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -486,7 +486,7 @@ describe('Multi-Mention Routes', () => {
 
     const executions = mockRouter.getExecutions();
     assert.equal(executions.length, 1);
-    assert.ok(executions[0].message.includes('[Multi-Mention from opus]'));
+    assert.ok(executions[0].message.includes('[Multi-Mention from opus-5]'));
     assert.ok(executions[0].message.includes('What is your opinion?'));
   });
 
@@ -498,7 +498,7 @@ describe('Multi-Mention Routes', () => {
       payload: {
         targets: ['codex'],
         question: 'test',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -513,7 +513,7 @@ describe('Multi-Mention Routes', () => {
       payload: {
         targets: ['codex'],
         question: 'test',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
         context: 'Some context',
         idempotencyKey: 'key-1',
         timeoutMinutes: 10,
@@ -535,7 +535,7 @@ describe('Multi-Mention Routes', () => {
       payload: {
         targets: ['codex'],
         question: 'test',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -589,7 +589,7 @@ describe('Multi-Mention Routes', () => {
       payload: {
         targets: ['codex'],
         question: 'Quick question',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -613,14 +613,14 @@ describe('Multi-Mention Routes', () => {
   // ── Anti-cascade ──────────────────────────────────────────────────
 
   test('rejects multi-mention from active target cat (anti-cascade)', async () => {
-    // Manually set up orchestrator state: opus created a multi-mention targeting codex
+    // Manually set up orchestrator state: opus-5 created a multi-mention targeting codex
     const { getMultiMentionOrchestrator } = await import('../dist/routes/callback-multi-mention-routes.js');
     const orch = getMultiMentionOrchestrator();
     const { createCatId } = await import('@cat-cafe/shared');
     const req = orch.create({
       threadId: 'thread-1',
-      initiator: createCatId('opus'),
-      callbackTo: createCatId('opus'),
+      initiator: createCatId('opus-5'),
+      callbackTo: createCatId('opus-5'),
       targets: [createCatId('codex')],
       question: 'First question',
       timeoutMinutes: 8,
@@ -693,7 +693,7 @@ describe('Multi-Mention Routes', () => {
       url: '/api/callbacks/multi-mention',
       headers: { 'x-invocation-id': callerCreds.invocationId, 'x-callback-token': callerCreds.callbackToken },
       payload: {
-        targets: ['opus', 'gemini'],
+        targets: ['opus-5', 'gemini'],
         question: 'Test concurrent dispatch',
         callbackTo: 'codex',
       },
@@ -706,7 +706,7 @@ describe('Multi-Mention Routes', () => {
     const stored = mockMessageStore.getMessages();
     const resultMsg = stored.find((m) => m.content.includes('Multi-Mention 结果汇总'));
     assert.ok(resultMsg, 'Should have aggregated result');
-    assert.ok(resultMsg.content.includes('Reply from opus'), `Opus response missing. Got:\n${resultMsg?.content}`);
+    assert.ok(resultMsg.content.includes('Reply from opus-5'), `Opus 5 response missing. Got:\n${resultMsg?.content}`);
     assert.ok(resultMsg.content.includes('Reply from gemini'), `Gemini response missing. Got:\n${resultMsg?.content}`);
 
     await trackerApp.close();
@@ -720,7 +720,7 @@ describe('Multi-Mention Routes', () => {
       callbackToken: creds.callbackToken,
       targets: ['codex'],
       question: 'test',
-      callbackTo: 'opus',
+      callbackTo: 'opus-5',
       idempotencyKey: 'idem-1',
     };
 
@@ -760,7 +760,7 @@ describe('Multi-Mention Routes', () => {
     });
     await crashApp.ready();
 
-    const crashCreds = mockRegistry.register('opus', 'thread-crash', 'user-1');
+    const crashCreds = mockRegistry.register('opus-5', 'thread-crash', 'user-1');
 
     const res = await crashApp.inject({
       method: 'POST',
@@ -769,7 +769,7 @@ describe('Multi-Mention Routes', () => {
       payload: {
         targets: ['codex'],
         question: 'This will crash',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -832,7 +832,7 @@ describe('Multi-Mention Routes', () => {
     });
     await preAbortApp.ready();
 
-    const preCreds = mockRegistry.register('opus', 'thread-preabort', 'user-1');
+    const preCreds = mockRegistry.register('opus-5', 'thread-preabort', 'user-1');
 
     const res = await preAbortApp.inject({
       method: 'POST',
@@ -841,7 +841,7 @@ describe('Multi-Mention Routes', () => {
       payload: {
         targets: ['codex'],
         question: 'After preempt',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -882,7 +882,7 @@ describe('Multi-Mention Routes', () => {
     });
     await capApp.ready();
 
-    const capCreds = mockRegistry.register('opus', 'thread-pid', 'user-1');
+    const capCreds = mockRegistry.register('opus-5', 'thread-pid', 'user-1');
 
     const res = await capApp.inject({
       method: 'POST',
@@ -891,7 +891,7 @@ describe('Multi-Mention Routes', () => {
       payload: {
         targets: ['codex'],
         question: 'F122 parentInvocationId test',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 

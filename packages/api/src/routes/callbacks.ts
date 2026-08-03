@@ -26,6 +26,7 @@ import {
 } from '@cat-cafe/shared';
 import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { resolveCatSuccessor } from '../config/cat-config-loader.js';
 import { resolveFrontendBaseUrl } from '../config/frontend-origin.js';
 import type { ApprovalIngress } from '../domains/approval-hub/ApprovalIngress.js';
 import {
@@ -210,6 +211,25 @@ function hasPlausibleLineStartMention(content: string): boolean {
   return false;
 }
 
+function resolveImplicitOwnerCandidate(candidate: string): CatId | undefined {
+  const resolved = resolveCatTarget(candidate);
+  if ('ok' in resolved) return resolved.ok;
+  if (resolved.error.kind === 'cat_disabled') {
+    return resolveCatSuccessor(resolved.error.catId) ?? undefined;
+  }
+
+  const normalized = (candidate.startsWith('@') ? candidate.slice(1) : candidate).trim().toLowerCase();
+  if (!normalized) return undefined;
+  const successors = new Set<CatId>();
+  for (const [catId, config] of Object.entries(catRegistry.getAllConfigs())) {
+    const identityLabels = [config.name, config.displayName, config.nickname, config.breedDisplayName];
+    if (!identityLabels.some((label) => label?.trim().toLowerCase() === normalized)) continue;
+    const successor = resolveCatSuccessor(catId);
+    if (successor) successors.add(successor);
+  }
+  return successors.size === 1 ? successors.values().next().value : undefined;
+}
+
 function resolveSlashSeparatedOwnerCatId(ownerWithoutAnnotations: string): CatId | undefined {
   const segments = ownerWithoutAnnotations
     .split(/[/／]/)
@@ -217,15 +237,15 @@ function resolveSlashSeparatedOwnerCatId(ownerWithoutAnnotations: string): CatId
     .filter((segment) => segment.length > 0);
   if (segments.length < 2) return undefined;
 
-  const firstResolved = resolveCatTarget(segments[0]);
-  if (!('ok' in firstResolved)) return undefined;
+  const firstResolved = resolveImplicitOwnerCandidate(segments[0]);
+  if (!firstResolved) return undefined;
 
   const resolved = new Set<CatId>();
   const unresolved: string[] = [];
   for (const segment of segments) {
-    const result = resolveCatTarget(segment);
-    if ('ok' in result) {
-      resolved.add(result.ok);
+    const result = resolveImplicitOwnerCandidate(segment);
+    if (result) {
+      resolved.add(result);
     } else {
       unresolved.push(segment);
     }
@@ -233,7 +253,7 @@ function resolveSlashSeparatedOwnerCatId(ownerWithoutAnnotations: string): CatId
 
   if (resolved.size !== 1) return undefined;
   if (unresolved.some((segment) => /[@\u4E00-\u9FFF]/.test(segment))) return undefined;
-  return firstResolved.ok;
+  return firstResolved;
 }
 
 function resolveFeatureOwnerCatId(owner: string | undefined): string | undefined {
@@ -256,8 +276,8 @@ function resolveFeatureOwnerCatId(owner: string | undefined): string | undefined
   ].filter((value): value is string => Boolean(value && value.trim().length > 0));
 
   for (const candidate of candidates) {
-    const resolved = resolveCatTarget(candidate);
-    if ('ok' in resolved) return resolved.ok;
+    const resolved = resolveImplicitOwnerCandidate(candidate);
+    if (resolved) return resolved;
   }
   return undefined;
 }

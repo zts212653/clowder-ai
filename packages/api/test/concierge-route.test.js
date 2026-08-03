@@ -30,16 +30,16 @@ describe('PUT /api/concierge/config', () => {
     await app.register(conciergeRoutes, { conciergeConfigStore, conciergeThreadService });
   });
 
-  it('accepts an available duty cat (opus)', async () => {
+  it('accepts an available duty cat (opus-5)', async () => {
     const res = await app.inject({
       method: 'PUT',
       url: '/api/concierge/config',
       headers: { ...USER_HEADER, 'content-type': 'application/json' },
-      payload: { dutyCatProfileId: 'opus' },
+      payload: { dutyCatProfileId: 'opus-5' },
     });
     assert.equal(res.statusCode, 200, `expected 200 for available cat, got: ${res.body}`);
     const body = JSON.parse(res.body);
-    assert.equal(body.config.dutyCatProfileId, 'opus');
+    assert.equal(body.config.dutyCatProfileId, 'opus-5');
   });
 
   it('rejects an unavailable duty cat (antigravity, available:false) with 400', async () => {

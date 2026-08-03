@@ -2396,10 +2396,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const app = Fastify();
     await app.register(catsRoutes);
 
-    // First, set a non-default CLI config (including effort) on opus (anthropic)
+    // First, set a non-default CLI config (including effort) on opus-5 (anthropic)
     const firstPatchRes = await app.inject({
       method: 'PATCH',
-      url: '/api/cats/opus',
+      url: '/api/cats/opus-5',
       headers: {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
@@ -2417,14 +2417,14 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
 
     // Verify the non-default effort was persisted
     let runtimeCatalog = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
-    let opusBreed = runtimeCatalog.breeds.find((breed) => breed.catId === 'opus');
-    let opusVariant = opusBreed.variants.find((variant) => variant.id === opusBreed.defaultVariantId);
+    const opusBreed = runtimeCatalog.breeds.find((breed) => breed.catId === 'opus');
+    let opusVariant = opusBreed.variants.find((variant) => variant.catId === 'opus-5');
     assert.equal(opusVariant.cli.effort, 'low', 'non-default effort should be persisted');
 
     // Now switch to openai provider
     const patchRes = await app.inject({
       method: 'PATCH',
-      url: '/api/cats/opus',
+      url: '/api/cats/opus-5',
       headers: {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
@@ -2442,9 +2442,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
 
     // Verify CLI was reset to openai defaults (including effort)
     runtimeCatalog = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
-    opusBreed = runtimeCatalog.breeds.find((breed) => breed.catId === 'opus');
-    opusVariant = opusBreed.variants.find((variant) => variant.id === opusBreed.defaultVariantId);
-    assert.ok(opusVariant, 'runtime opus default variant should exist');
+    opusVariant = runtimeCatalog.breeds
+      .find((breed) => breed.catId === 'opus')
+      .variants.find((variant) => variant.catId === 'opus-5');
+    assert.ok(opusVariant, 'runtime opus-5 variant should exist');
     assert.deepEqual(
       opusVariant.cli,
       {

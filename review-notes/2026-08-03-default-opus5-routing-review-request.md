@@ -3,7 +3,8 @@
 Review-Target-ID: `fix-default-opus5-routing`
 Branch: `fix/default-opus5-routing`
 PR: https://github.com/zts212653/clowder-ai/pull/1283
-Implementation commit: `72d78d1b3d3d290354837bd85f2fd46c0ee076ba`
+Implementation base commit: `72d78d1b3d3d290354837bd85f2fd46c0ee076ba`
+Review target: PR #1283 latest HEAD（正式请求中附精确 SHA）
 
 ## What
 
@@ -11,6 +12,7 @@ Implementation commit: `72d78d1b3d3d290354837bd85f2fd46c0ee076ba`
 - 默认猫、runtime/env override、历史 preferred policy、participant/last-replier 和 MCP teammate 等隐式状态统一解析 successor。
 - 显式 `@opus` 不静默改投，继续返回 `cat_disabled`；alternatives 首项提供 canonical `@opus-5`。
 - Hub 路由策略、系统提示、MCP 示例与当前教学入口统一展示和持久化 `opus-5`。
+- feat-index 的隐式 owner metadata 在旧身份禁用后按唯一有效 successor 迁移，不影响显式 mention 的 fail-closed 行为。
 
 ## Why
 
@@ -49,6 +51,7 @@ Why: 本次只扩展现有 roster metadata、默认/历史目标 resolver 和既
 3. template variant backfill 是否可能覆盖 runtime-owned 配置或制造重复 identity。
 4. participant/last-replier 的 peek 与 persist 是否始终保持相同优先级。
 5. Hub 对旧 policy 的回读和 canonical successor 保存是否一致。
+6. feat-index 的 identity-label fallback 是否只在唯一显式 successor 时放行，歧义和无 successor 是否继续 fail-closed。
 
 ## Open Questions
 
@@ -78,6 +81,9 @@ Why: 本次只扩展现有 roster metadata、默认/历史目标 resolver 和既
 ## 自检证据
 
 - 受影响 API 聚焦集：355/356；唯一失败为未改文件 `shared-rules.md` 在 Windows CRLF checkout 下的既有 governance hash 差异。
+- Public CI 受影响 fixture（19 文件）：402/402；旧 HEAD 的 74 个失败已全部覆盖。
+- feat-index 聚焦集：16/16；旧身份标签可解析到唯一有效 successor。
+- 受影响 20 文件合并回归：537/538；唯一失败为 `callback-routes.test.js` 的既有 Windows absolute-path 断言（实际 `G:\...`，测试只接受 Unix `/...`）。
 - 核心路由聚焦集：17/17；Hub successor Vitest：4/4。
 - `pnpm lint`：exit 0，仅既有 warning。
 - `pnpm build`：exit 0。

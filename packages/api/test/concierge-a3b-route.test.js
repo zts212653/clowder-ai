@@ -167,11 +167,11 @@ describe('POST /api/concierge/relay', () => {
       .split('\n')
       .map((line) => `> ${ZWNJ}${line}`)
       .join('\n');
-    const relayContent = `@opus\n\n---\n**前台猫转达的消息：**\n\n${quotedText}\n\n---\n*footer*`;
+    const relayContent = `@opus-5\n\n---\n**前台猫转达的消息：**\n\n${quotedText}\n\n---\n*footer*`;
 
-    // Parse: only @opus (the real target) should be detected, NOT @codex or @sonnet
+    // Parse: only @opus-5 (the real target) should be detected, NOT @codex or @sonnet
     const mentions = parseA2AMentions(relayContent);
-    assert.ok(mentions.includes('opus'), 'target @opus should be routed');
+    assert.ok(mentions.includes('opus-5'), 'target @opus-5 should be routed');
     assert.ok(!mentions.includes('codex'), '@codex in user text must NOT be routed');
     assert.ok(!mentions.includes('sonnet'), '@sonnet in user text must NOT be routed');
   });

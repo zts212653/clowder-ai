@@ -140,11 +140,11 @@ describe('F046 B5 runtime regression scenarios', () => {
         catRegistry.register(id, config);
       }
 
-      const opusService = createCapturingService('opus', '收到，继续处理');
+      const opusService = createCapturingService('opus-5', '收到，继续处理');
       const deps = createMockDeps({
         codex: createMockService('codex', '代码完成\n@gpt52 请 review'),
-        gpt52: createMockService('gpt52', '我看过了，先给结论\n@opus 请继续'),
-        opus: opusService,
+        gpt52: createMockService('gpt52', '我看过了，先给结论\n@opus-5 请继续'),
+        'opus-5': opusService,
       });
 
       for await (const _ of routeSerial(
@@ -157,7 +157,7 @@ describe('F046 B5 runtime regression scenarios', () => {
       )) {
       }
 
-      assert.equal(opusService.calls.length, 1, 'downstream opus should be called once');
+      assert.equal(opusService.calls.length, 1, 'downstream opus-5 should be called once');
       assert.ok(
         opusService.calls[0].includes('我看过了，先给结论'),
         'downstream prompt should still include upstream review text in debug mode',

@@ -80,13 +80,13 @@ describe('GET /api/callbacks/thread-cats', () => {
 
   it('returns participants and categorization for valid request', async () => {
     const records = new Map([
-      ['inv-1', { invocationId: 'inv-1', callbackToken: 'tok-1', threadId: 't-1', catId: 'opus' }],
+      ['inv-1', { invocationId: 'inv-1', callbackToken: 'tok-1', threadId: 't-1', catId: 'opus-5' }],
     ]);
     const threads = new Map([['t-1', { id: 't-1' }]]);
     const participants = new Map([
-      ['t-1', [{ catId: 'opus', lastMessageAt: 1000, messageCount: 5, lastResponseHealthy: true }]],
+      ['t-1', [{ catId: 'opus-5', lastMessageAt: 1000, messageCount: 5, lastResponseHealthy: true }]],
     ]);
-    const services = new Map([['opus', {}]]);
+    const services = new Map([['opus-5', {}]]);
 
     await setup({ records, threads, participants, services });
     const res = await app.inject({
@@ -99,20 +99,20 @@ describe('GET /api/callbacks/thread-cats', () => {
     const body = JSON.parse(res.body);
     assert.equal(body.threadId, 't-1');
     assert.equal(body.participants.length, 1);
-    assert.equal(body.participants[0].catId, 'opus');
+    assert.equal(body.participants[0].catId, 'opus-5');
     assert.equal(body.participants[0].messageCount, 5);
     assert.equal(body.participants[0].lastResponseHealthy, true);
-    // Categorization: opus is participant + has service → routableNow
+    // Categorization: opus-5 is participant + has service → routableNow
     assert.equal(body.routableNow.length, 1);
-    assert.equal(body.routableNow[0].catId, 'opus');
+    assert.equal(body.routableNow[0].catId, 'opus-5');
     assert.deepEqual(body.routableNotJoined, []);
     // notRoutable may include unavailable cats from the global catRegistry
     // (e.g. antigravity has available:false in the current roster).
     // Verify no unexpected routable cats appear there.
     const notRoutableCatIds = body.notRoutable.map((c) => c.catId);
     assert.ok(
-      notRoutableCatIds.every((id) => id !== 'opus'),
-      'opus must not appear in notRoutable',
+      notRoutableCatIds.every((id) => id !== 'opus-5'),
+      'opus-5 must not appear in notRoutable',
     );
   });
 

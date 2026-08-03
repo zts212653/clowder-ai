@@ -465,21 +465,21 @@ describe('Mention Ack (#77)', () => {
     const owner = registerWorklist(threadId, ['codex'], 5);
     try {
       const sender = await registry.create('user-1', 'codex', threadId);
-      const r1 = await postMessage(app, sender.invocationId, sender.callbackToken, '@opus review please take a look');
+      const r1 = await postMessage(app, sender.invocationId, sender.callbackToken, '@opus-5 review please take a look');
       assert.equal(r1.statusCode, 200);
       assert.equal(r1.body.status, 'ok');
 
       // Ensure the callback path actually enqueued to the parent worklist.
       assert.ok(owner.list.includes('codex'));
-      assert.ok(owner.list.includes('opus'));
+      assert.ok(owner.list.includes('opus-5'));
 
       const [triggerMessage] = messageStore.getRecent(1, 'user-1');
       assert.ok(triggerMessage);
 
-      const cursor = await deliveryCursorStore.getMentionAckCursor('user-1', 'opus', threadId);
+      const cursor = await deliveryCursorStore.getMentionAckCursor('user-1', 'opus-5', threadId);
       assert.equal(cursor, triggerMessage.id);
 
-      const opus = await registry.create('user-1', 'opus', threadId);
+      const opus = await registry.create('user-1', 'opus-5', threadId);
       const pending = await getPending(app, opus.invocationId, opus.callbackToken);
       assert.equal(pending.mentions.length, 0);
     } finally {
@@ -507,18 +507,18 @@ describe('Mention Ack (#77)', () => {
     try {
       const sender = await registry.create('user-1', 'codex', threadId);
 
-      const r1 = await postMessage(app, sender.invocationId, sender.callbackToken, '@opus review');
+      const r1 = await postMessage(app, sender.invocationId, sender.callbackToken, '@opus-5 review');
       assert.equal(r1.statusCode, 200);
       assert.equal(r1.body.status, 'ok');
 
       const [trigger1] = messageStore.getRecent(1, 'user-1');
       assert.ok(trigger1);
-      assert.ok(owner.list.includes('opus'));
+      assert.ok(owner.list.includes('opus-5'));
 
-      const cursor1 = await deliveryCursorStore.getMentionAckCursor('user-1', 'opus', threadId);
+      const cursor1 = await deliveryCursorStore.getMentionAckCursor('user-1', 'opus-5', threadId);
       assert.equal(cursor1, trigger1.id);
 
-      const opus1 = await registry.create('user-1', 'opus', threadId);
+      const opus1 = await registry.create('user-1', 'opus-5', threadId);
       const pending1 = await getPending(app, opus1.invocationId, opus1.callbackToken);
       assert.equal(pending1.mentions.length, 0);
 
@@ -531,8 +531,8 @@ describe('Mention Ack (#77)', () => {
           log: app.log,
         },
         {
-          targetCats: ['opus'],
-          content: '@opus review',
+          targetCats: ['opus-5'],
+          content: '@opus-5 review',
           userId: 'user-1',
           threadId,
           triggerMessage: trigger1,
@@ -540,11 +540,11 @@ describe('Mention Ack (#77)', () => {
         },
       );
 
-      const cursor2 = await deliveryCursorStore.getMentionAckCursor('user-1', 'opus', threadId);
+      const cursor2 = await deliveryCursorStore.getMentionAckCursor('user-1', 'opus-5', threadId);
       assert.ok(cursor2 >= cursor1);
       assert.ok(cursor2 >= trigger1.id);
 
-      const opus2 = await registry.create('user-1', 'opus', threadId);
+      const opus2 = await registry.create('user-1', 'opus-5', threadId);
       const pending2 = await getPending(app, opus2.invocationId, opus2.callbackToken);
       assert.equal(pending2.mentions.length, 0);
     } finally {

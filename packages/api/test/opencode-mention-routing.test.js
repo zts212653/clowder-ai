@@ -23,6 +23,7 @@ ensureFakeCliOnPath('opencode');
 /** Full pattern map including opencode — mirrors production catRegistry */
 const allPatterns = new Map([
   ['opus', ['@opus', '@布偶猫', '@布偶', '@宪宪']],
+  ['opus-5', ['@opus5', '@opus-5']],
   ['codex', ['@codex', '@缅因猫', '@缅因', '@砚砚']],
   ['gemini', ['@gemini', '@暹罗猫', '@暹罗', '@烁烁']],
   ['opencode', ['@opencode', '@金渐层', '@golden', '@golden-chinchilla']],
@@ -31,6 +32,7 @@ const allPatterns = new Map([
 /** Display names for realistic system prompt output */
 const catDisplayNames = {
   opus: '布偶猫',
+  'opus-5': '布偶猫 Opus 5',
   codex: '缅因猫',
   gemini: '暹罗猫',
   opencode: '金渐层',
@@ -139,10 +141,10 @@ describe('parseA2AMentions — opencode A2A chain', () => {
     assert.deepEqual(result, ['opencode']);
   });
 
-  it('detects @opus at line start from opencode response', () => {
-    const text = 'Done with analysis.\n@opus 结果在这里';
+  it('detects @opus-5 at line start from opencode response', () => {
+    const text = 'Done with analysis.\n@opus-5 结果在这里';
     const result = parseA2AMentions(text, 'opencode');
-    assert.deepEqual(result, ['opus']);
+    assert.deepEqual(result, ['opus-5']);
   });
 
   it('filters self-mention: opencode mentioning @opencode', () => {
@@ -526,12 +528,19 @@ describe('Fixture guard — allPatterns matches cat-template.json truth source',
     // Guard: fixture patterns must exist in the truth source — prevents phantom patterns
     // that would make tests pass for patterns that were removed from production config.
     // Note: fixture may be a subset (e.g., opus fixture omits @ragdoll for simplicity)
-    const catIdToBreed = { opus: 'ragdoll', codex: 'maine-coon', gemini: 'siamese', opencode: 'golden-chinchilla' };
+    const catIdToBreed = {
+      opus: 'ragdoll',
+      'opus-5': 'ragdoll',
+      codex: 'maine-coon',
+      gemini: 'siamese',
+      opencode: 'golden-chinchilla',
+    };
     for (const [catId, fixturePatterns] of allPatterns) {
       const breedId = catIdToBreed[catId];
       const breed = catConfig.breeds.find((b) => b.id === breedId);
       assert.ok(breed, `breed ${breedId} exists in cat-template.json`);
-      const configSet = new Set(breed.mentionPatterns.map((p) => p.toLowerCase()));
+      const variant = breed.variants?.find((candidate) => candidate.catId === catId);
+      const configSet = new Set((variant?.mentionPatterns ?? breed.mentionPatterns).map((p) => p.toLowerCase()));
       for (const pattern of fixturePatterns) {
         assert.ok(
           configSet.has(pattern.toLowerCase()),

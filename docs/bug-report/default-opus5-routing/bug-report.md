@@ -37,6 +37,7 @@ tips_exempt: existing routing-policy bugfix; no new user-facing capability or di
 2. `getDefaultCatId()` 接受 breed 默认值时没有验证 availability；runtime override 和 `DEFAULT_CAT_ID` 也没有稳定替代规则。
 3. prompt、MCP 示例和 Hub policy 直接保存/显示旧 catId，认知层会继续先写已禁用句柄。
 4. 投递层虽然会返回 disabled warning，但 alternatives 没有 roster 级 successor 真相源，只能在错误发生后补救。
+5. feat-index 的隐式 owner metadata 仍按旧身份标签解析；旧猫禁用后，`owner: 布偶猫` 会失去 `ownerCatId` 和建议路由。
 
 canonical mention 由 `pickVariantMention()` 优先精确匹配 `@${catId}`，因此 `opus-5` 的稳定显示句柄是 `@opus-5`；`@opus5` 仅保留为兼容 alias。
 
@@ -64,6 +65,7 @@ canonical mention 由 `pickVariantMention()` 优先精确匹配 `@${catId}`，�
 - 配置：共享类型和 loader 支持 `roster[*].successor`；公开 seed 增加 Opus 5 variant/roster/model，并禁用旧 `opus`。
 - resolver：默认猫、目标 alternatives、prompt roster、MCP 示例统一按显式 successor 和 availability 解析。
 - API/UI：`GET /api/cats` 透传 roster metadata；Hub 读取 successor、保存 canonical catId，并提供无替代者错误态。
+- 协作 metadata：feat-index 的隐式 owner 标签只在存在唯一显式有效 successor 时迁移；显式 `@opus` 路由语义不变。
 - 认知入口：README 三语、`docs/TIPS.md`、callback prompt 与 `cross-thread-sync` 当前示例改为 `@opus-5`。
 - 回归：覆盖正常 successor、未知/禁用 successor、默认 override、A2A mention、MCP prompt、API metadata 与 Hub policy。
 
@@ -81,7 +83,9 @@ canonical mention 由 `pickVariantMention()` 优先精确匹配 `@${catId}`，�
 | `/api/cats` successor metadata | 1/1 通过 |
 | Hub successor policy | 4/4 通过 |
 | AgentRouter successor + `POST /api/messages` disabled warning | 5/5 通过；旧 participant/last-replier 在 peek/persist 两条路径均保留优先级并解析到 `opus-5`；显式 `@opus` 无目标时先广播 successor warning，再返回 `NO_TARGETS` |
-| 受影响 API 聚焦集 | 355/356；唯一失败为未改文件 `shared-rules.md` 的 Windows CRLF governance hash 基线差异 |
+| Public CI 受影响 fixture（19 文件） | 402/402 通过；旧 HEAD 的 74 个失败已全部覆盖 |
+| feat-index 隐式 owner 聚焦集 | 16/16 通过；`布偶猫` 等旧身份标签解析到唯一有效 successor |
+| 受影响 20 文件合并回归 | 537/538；唯一失败为 `callback-routes.test.js` 的既有 Windows absolute-path 断言（实际 `G:\...`，测试只接受 Unix `/...`） |
 | `pnpm lint` | exit 0；仅仓库既有 warning |
 | 改动代码 Biome | 25 个代码/JSON 文件 lint exit 0；14 个 LF-safe 文件 formatter exit 0 |
 | Skill 门禁 | `check:skills:manifest` + `check:skills:surfaces` 通过；5 个既有 MCP advisory；完整 `check:skills` 另被 worktree 的 185 个 skill mount 异常阻塞 |
@@ -106,6 +110,7 @@ Scope verdict: 必做；这是用户和猫都可感知的路由 bugfix。
 ## Quality Gate
 
 - 原始需求覆盖：动态 successor 优先、单一真相源、无替代 fail-closed、canonical handle、历史 preferred policy/participant/last-replier/MCP teammate 迁移、回归与活跃入口全部落实。
+- Public CI 回归：旧 HEAD 暴露的 74 个禁用 `opus` fixture 已迁移到当前可路由 `opus-5`；旧 `@opus` 的显式 fail-closed 用例保留。
 - 交付完整性：本次修复已闭环，不依赖另一个 PR 或重写。
 - Architecture cell：现有 cat config / dispatch routing；Map delta: none。新增 roster 字段，不新增 Store/Queue/Router 边界。
 - Fallback audit：产品代码没有同文件新增三层 fallback；successor 解析是单一显式契约，未知/不可用直接返回 null。

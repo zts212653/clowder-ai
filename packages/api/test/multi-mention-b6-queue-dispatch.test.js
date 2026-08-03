@@ -183,7 +183,7 @@ describe('B6: multi_mention queue dispatch', () => {
         actionReturnedDeliveredCalls.push(input);
       },
     };
-    creds = mockRegistry.register('opus', 'thread-1', 'user-1');
+    creds = mockRegistry.register('opus-5', 'thread-1', 'user-1');
 
     app = Fastify({ logger: false });
     registerCallbackAuthHook(app, mockRegistry);
@@ -214,7 +214,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'What do you think?',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -555,7 +555,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Review this?',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -591,7 +591,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex', 'gemini'],
         question: 'Thoughts?',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -629,7 +629,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Something?',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -654,7 +654,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Test queue entry fields',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -666,7 +666,7 @@ describe('B6: multi_mention queue dispatch', () => {
     assert.equal(entry.autoExecute, true);
     assert.equal(entry.ownerAuthProvenance, 'strict');
     assert.deepEqual(entry.targetCats, ['codex']);
-    assert.ok(entry.content.includes('[Multi-Mention from opus]'));
+    assert.ok(entry.content.includes('[Multi-Mention from opus-5]'));
     assert.ok(entry.content.includes('Test queue entry fields'));
   });
 
@@ -691,7 +691,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Should be blocked by depth',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -994,7 +994,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Should be skipped',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -1010,7 +1010,7 @@ describe('B6: multi_mention queue dispatch', () => {
     resetMultiMentionOrchestrator();
     const fallbackRouter = createMockRouter();
     const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
-    const fallbackCreds = mockRegistry.register('opus', 'thread-2', 'user-2');
+    const fallbackCreds = mockRegistry.register('opus-5', 'thread-2', 'user-2');
 
     registerMultiMentionRoutes(fallbackApp, {
       registry: mockRegistry,
@@ -1030,7 +1030,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Fallback test',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -1324,7 +1324,7 @@ describe('B6: canceled hook skips recordResponse in dispatchViaQueue', () => {
     mockRouter = createMockRouter();
     invocationQueue = new InvocationQueue();
     mockQueueProcessor = createMockQueueProcessor();
-    creds = mockRegistry.register('opus', 'thread-1', 'user-1');
+    creds = mockRegistry.register('opus-5', 'thread-1', 'user-1');
 
     app = Fastify({ logger: false });
     registerCallbackAuthHook(app, mockRegistry);
@@ -1354,7 +1354,7 @@ describe('B6: canceled hook skips recordResponse in dispatchViaQueue', () => {
       payload: {
         targets: ['codex'],
         question: 'Abort scenario?',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -1380,7 +1380,7 @@ describe('B6: canceled hook skips recordResponse in dispatchViaQueue', () => {
       payload: {
         targets: ['codex'],
         question: 'User canceled scenario?',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -1405,7 +1405,7 @@ describe('B6: canceled hook skips recordResponse in dispatchViaQueue', () => {
       payload: {
         targets: ['codex'],
         question: 'Will be removed',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
