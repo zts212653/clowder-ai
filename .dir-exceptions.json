@@ -62,6 +62,41 @@
       "reason": "2026-08-02 public-target recount: 29 files. Redis implementations should split with their proposal/community/session domains; F23 Phase 2 owns the split.",
       "expiresAt": "2026-08-31",
       "ticket": "F23-followup"
+    },
+    {
+      "path": "packages/api/src/domains/cats/services/freshness",
+      "owner": "opus",
+      "reason": "2026-08-03 post-sync public-target recount: 30 files. Freshness needs glass-box promotion or closure/store/telemetry subdomains; F23 Phase 2 owns the split.",
+      "expiresAt": "2026-08-31",
+      "ticket": "F23-followup"
+    },
+    {
+      "path": "packages/api/src/domains/auto-dream",
+      "owner": "codex-sol",
+      "reason": "2026-08-03 post-sync public-target recount: 35 files. Auto Dream mixes cat-life settings, private seed/store operations, run lifecycle, and proactive relationship orchestration; F255/F272 own a boundary-led split.",
+      "expiresAt": "2026-08-31",
+      "ticket": "F255/F272"
+    },
+    {
+      "path": "packages/api/src/domains/ball-custody",
+      "owner": "codex-sol",
+      "reason": "2026-08-03 post-sync public-target recount: 42 files. Ball custody mixes action-successor, observability, and typed wait termination; F167/F233/F280 own a boundary-led split.",
+      "expiresAt": "2026-08-31",
+      "ticket": "F167/F233/F280"
+    },
+    {
+      "path": "packages/api/src/domains/memory/people",
+      "owner": "codex-sol",
+      "reason": "2026-08-03 post-sync public-target recount: 37 files. People memory mixes identity, proposal lifecycle, disposition proofs, and Redis persistence; F276/F281/F282 own a boundary-led split.",
+      "expiresAt": "2026-08-31",
+      "ticket": "F276/F281/F282"
+    },
+    {
+      "path": "packages/api/src/infrastructure/harness-eval",
+      "owner": "opus",
+      "reason": "2026-08-03 post-sync public-target recount: 35 files. Harness eval should split by capability-wakeup/a2a/domain/hub; F192 owns the known debt.",
+      "expiresAt": "2026-08-31",
+      "ticket": "F192"
     }
   ]
 }
