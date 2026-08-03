@@ -127,4 +127,114 @@ describe('useWorkspace worktree refresh', () => {
       .filter((url) => url.startsWith('/api/workspace/tree') || url.startsWith('/api/workspace/file'));
     expect(treeAndFileCalls.some((url) => url.includes('worktreeId=230809_cat-cafe'))).toBe(true);
   });
+
+  it('keeps an open default-repo worktree when the thread-scoped list does not contain it', async () => {
+    useChatStore.setState({
+      currentProjectPath: 'G:/AIwork/clowder-ai',
+      workspaceWorktreeId: 'research-harness-landscape-20260801',
+      workspaceOpenFilePath: 'project-research/harness/synthesis.md',
+      workspaceOpenTabs: ['project-research/harness/synthesis.md'],
+    });
+    apiFetchMock.mockImplementation(async (url) => {
+      const path = String(url);
+      if (path.includes('repoRoot=')) {
+        return {
+          ok: true,
+          json: async () => ({
+            worktrees: [{ id: 'api', root: 'G:/AIwork/clowder-ai/clowder-ai-runtime/packages/api' }],
+          }),
+        } as Response;
+      }
+      if (path === '/api/workspace/worktrees') {
+        return {
+          ok: true,
+          json: async () => ({
+            worktrees: [
+              {
+                id: 'research-harness-landscape-20260801',
+                root: 'G:/AIwork/clowder-ai/worktrees/research-harness-landscape-20260801',
+              },
+            ],
+          }),
+        } as Response;
+      }
+      if (path.startsWith('/api/workspace/tree')) {
+        return { ok: true, json: async () => ({ tree: [] }) } as Response;
+      }
+      if (path.startsWith('/api/workspace/file')) {
+        return {
+          ok: true,
+          json: async () => ({
+            path: 'project-research/harness/synthesis.md',
+            content: 'report',
+            sha256: 'sha',
+            size: 6,
+            mime: 'text/markdown',
+            truncated: false,
+          }),
+        } as Response;
+      }
+      return { ok: false, json: async () => ({ error: 'unexpected url' }) } as Response;
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost));
+    });
+    await flushEffects();
+
+    expect(apiFetchMock.mock.calls.map(([url]) => url)).toContain('/api/workspace/worktrees');
+    expect(useChatStore.getState()).toMatchObject({
+      workspaceWorktreeId: 'research-harness-landscape-20260801',
+      workspaceOpenFilePath: 'project-research/harness/synthesis.md',
+      workspaceOpenTabs: ['project-research/harness/synthesis.md'],
+    });
+  });
+
+  it('does not keep a default-repo worktree outside the current project path', async () => {
+    useChatStore.setState({
+      currentProjectPath: 'G:/other-project',
+      workspaceWorktreeId: 'research-harness-landscape-20260801',
+      workspaceOpenFilePath: 'project-research/harness/synthesis.md',
+      workspaceOpenTabs: ['project-research/harness/synthesis.md'],
+    });
+    apiFetchMock.mockImplementation(async (url) => {
+      const path = String(url);
+      if (path.includes('repoRoot=')) {
+        return {
+          ok: true,
+          json: async () => ({
+            worktrees: [{ id: 'other-project', root: 'G:/other-project' }],
+          }),
+        } as Response;
+      }
+      if (path === '/api/workspace/worktrees') {
+        return {
+          ok: true,
+          json: async () => ({
+            worktrees: [
+              {
+                id: 'research-harness-landscape-20260801',
+                root: 'G:/AIwork/clowder-ai/worktrees/research-harness-landscape-20260801',
+              },
+            ],
+          }),
+        } as Response;
+      }
+      if (path.startsWith('/api/workspace/tree')) {
+        return { ok: true, json: async () => ({ tree: [] }) } as Response;
+      }
+      return { ok: false, json: async () => ({ error: 'unexpected url' }) } as Response;
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost));
+    });
+    await flushEffects();
+
+    expect(useChatStore.getState()).toMatchObject({
+      workspaceWorktreeId: 'other-project',
+      workspaceOpenFilePath: null,
+      workspaceOpenTabs: [],
+    });
+  });
 });
