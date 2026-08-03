@@ -20,6 +20,7 @@ import type {
   HandleStore,
   LedgerClaimResult,
   LedgerStore,
+  MessageHandleRecord,
   SubscriptionRecord,
 } from './ports.js';
 
@@ -60,13 +61,25 @@ export class MemoryLedgerStore implements LedgerStore {
 
 export class MemoryHandleStore implements HandleStore {
   private readonly records = new Map<string, HandleRecord>();
+  /** Secondary index: messageId → opaque handleId (ensureMessageHandle idempotency). */
+  private readonly messageIndex = new Map<string, string>();
 
   async put(record: HandleRecord): Promise<void> {
     this.records.set(record.handleId, record);
+    if (record.kind === 'message_handle') {
+      this.messageIndex.set(record.messageId, record.handleId);
+    }
   }
 
   async get(handleId: string): Promise<HandleRecord | null> {
     return this.records.get(handleId) ?? null;
+  }
+
+  async findByMessageId(messageId: string): Promise<MessageHandleRecord | null> {
+    const handleId = this.messageIndex.get(messageId);
+    if (!handleId) return null;
+    const record = this.records.get(handleId);
+    return record?.kind === 'message_handle' ? record : null;
   }
 
   async revoke(handleId: string, revokedAt: number): Promise<boolean> {

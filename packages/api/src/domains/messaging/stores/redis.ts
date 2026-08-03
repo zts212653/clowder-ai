@@ -24,6 +24,7 @@ import type {
   HandleStore,
   LedgerClaimResult,
   LedgerStore,
+  MessageHandleRecord,
 } from './ports.js';
 import { MessagingKeys } from './redis-keys.js';
 
@@ -104,11 +105,21 @@ export class RedisHandleStore implements HandleStore {
 
   async put(record: HandleRecord): Promise<void> {
     await this.redis.set(MessagingKeys.handle(record.handleId), JSON.stringify(record));
+    if (record.kind === 'message_handle') {
+      await this.redis.set(MessagingKeys.handleByMessage(record.messageId), record.handleId);
+    }
   }
 
   async get(handleId: string): Promise<HandleRecord | null> {
     const raw = await this.redis.get(MessagingKeys.handle(handleId));
     return raw ? (JSON.parse(raw) as HandleRecord) : null;
+  }
+
+  async findByMessageId(messageId: string): Promise<MessageHandleRecord | null> {
+    const handleId = await this.redis.get(MessagingKeys.handleByMessage(messageId));
+    if (!handleId) return null;
+    const record = await this.get(handleId);
+    return record?.kind === 'message_handle' ? record : null;
   }
 
   async revoke(handleId: string, revokedAt: number): Promise<boolean> {

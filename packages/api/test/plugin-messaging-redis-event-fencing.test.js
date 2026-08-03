@@ -4,7 +4,7 @@ import { after, before, describe, test } from 'node:test';
 import { assertRedisIsolationOrThrow, redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 
 const REDIS_URL = process.env.REDIS_URL;
-const TEST_KEY_PREFIX = `f258-event-fence-${process.pid}:`;
+const TEST_KEY_PREFIX = `f288-event-fence-${process.pid}:`;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe('Redis append emission fencing', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {

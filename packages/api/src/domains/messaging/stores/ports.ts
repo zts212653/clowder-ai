@@ -65,6 +65,8 @@ export type HandleRecord = AddressHandleRecord | MessageHandleRecord;
 export interface HandleStore {
   put(record: HandleRecord): Promise<void>;
   get(handleId: string): Promise<HandleRecord | null>;
+  /** Reverse lookup: find a message handle by the messageId it was minted for (ensureMessageHandle idempotency). */
+  findByMessageId(messageId: string): Promise<MessageHandleRecord | null>;
   /** active → revoked (idempotent). Returns false when the handle does not exist. */
   revoke(handleId: string, revokedAt: number): Promise<boolean>;
 }

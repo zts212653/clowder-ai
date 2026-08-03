@@ -175,7 +175,7 @@ export class SendService {
         },
       });
 
-      await this.deps.handles.ensureMessageHandle(handle, stored.id);
+      const msgHandle = await this.deps.handles.ensureMessageHandle(handle, stored.id);
 
       let publishSequence: number | undefined;
       if (audience.kind !== 'whisper') {
@@ -216,6 +216,7 @@ export class SendService {
         messageId: stored.id,
         threadId: handle.threadId,
         revision: 1,
+        handle: { kind: 'message' as const, token: msgHandle.handleId },
         ...(publishSequence !== undefined ? { publishSequence } : {}),
       };
       await this.deps.ledger.settleSend(ctx.pluginInstanceId, draft.idempotencyKey, claim.claimToken, receipt);

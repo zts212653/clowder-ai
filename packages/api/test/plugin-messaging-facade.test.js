@@ -46,8 +46,11 @@ describe('MessagingService facade — full chain', () => {
     assert.equal(read1.events[0].type, 'message.publish');
     await service.ack(CTX, subscriptionId, read1.ackToken);
 
+    assert.ok(sendReceipt.handle, 'SendReceipt must include an opaque message handle');
+    assert.notEqual(sendReceipt.handle.token, sendReceipt.messageId, 'handle token must be opaque (not messageId)');
+
     const appendReceipt = await service.appendElements(CTX, {
-      handle: { kind: 'message', token: sendReceipt.messageId },
+      handle: sendReceipt.handle,
       operationId: 'e2e-op-1',
       baseRevision: 1,
       elements: [{ elementId: 'el-2', kind: 'text', payload: { text: 'appended e2e' }, derivedFromElementId: 'el-1' }],
@@ -107,7 +110,7 @@ describe('MessagingService facade — full chain', () => {
     await service.revokeHandle(parent.handleId);
     await assert.rejects(
       service.appendElements(CTX, {
-        handle: { kind: 'message', token: first.messageId },
+        handle: first.handle,
         operationId: 'blocked-by-parent-revoke',
         elements: [{ elementId: 'el-2', kind: 'text', payload: { text: 'blocked' } }],
       }),
@@ -128,10 +131,10 @@ describe('MessagingService facade — full chain', () => {
         elements: [{ elementId: 'el-1', kind: 'text', payload: { text: 'mine' } }],
       },
     });
-    await service.revokeHandle(second.messageId);
+    await service.revokeHandle(second.handle.token);
     await assert.rejects(
       service.appendElements(CTX, {
-        handle: { kind: 'message', token: second.messageId },
+        handle: second.handle,
         operationId: 'blocked-by-message-revoke',
         elements: [{ elementId: 'el-2', kind: 'text', payload: { text: 'blocked' } }],
       }),
@@ -158,7 +161,7 @@ describe('MessagingService facade — full chain', () => {
     await assert.rejects(service.subscribe(foreign, handleId), (err) => err.code === 'PERMISSION');
     await assert.rejects(
       service.appendElements(foreign, {
-        handle: { kind: 'message', token: sent.messageId },
+        handle: sent.handle,
         operationId: 'steal-1',
         elements: [{ elementId: 'el-x', kind: 'text', payload: { text: 'not mine' } }],
       }),

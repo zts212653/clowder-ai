@@ -146,7 +146,7 @@ describe('EventStreamService — snapshot deletion races', () => {
     });
 
     const pendingAppend = append.appendElements(CTX, {
-      handle: { kind: 'message', token: sent.messageId },
+      handle: sent.handle,
       operationId: 'delete-before-append-output',
       elements: [{ elementId: 'el-2', kind: 'text', payload: { text: 'pending append' } }],
     });

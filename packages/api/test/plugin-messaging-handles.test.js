@@ -117,9 +117,9 @@ describe('HandleService — issuance & resolution', () => {
       scope: { canSend: true, canSubscribe: false },
     });
     const parent = await service.resolveForSend('inst-a', { kind: 'thread_handle', handle: handleId });
-    await service.ensureMessageHandle(parent, 'msg-send-only');
+    const msgHandle = await service.ensureMessageHandle(parent, 'msg-send-only');
 
-    await expectCode(service.resolveForAppend('inst-a', { kind: 'message', token: 'msg-send-only' }), 'PERMISSION');
+    await expectCode(service.resolveForAppend('inst-a', { kind: 'message', token: msgHandle.handleId }), 'PERMISSION');
   });
 });
 

@@ -57,7 +57,7 @@ function createTakeoverLock() {
 
 function appendInput(operationId, elementId) {
   return {
-    handle: { kind: 'message', token: sent.messageId },
+    handle: sent.handle,
     operationId,
     elements: [{ elementId, kind: 'text', payload: { text: operationId } }],
   };

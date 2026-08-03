@@ -33,4 +33,6 @@ export const MessagingKeys = {
   subscriptionsOfHandle: (handleId: string): string => `plugmsg:subsofhandle:${handleId}`,
   /** String: lock token with PX ttl. */
   appendLock: (messageId: string): string => `plugmsg:lock:append:${messageId}`,
+  /** String: opaque handleId for a message (ensureMessageHandle idempotency). */
+  handleByMessage: (messageId: string): string => `plugmsg:mhidx:${messageId}`,
 } as const;
