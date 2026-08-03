@@ -31,6 +31,7 @@ interface StrippedTurnSignature {
 }
 
 const BARE_LIST_SIGNATURE_PREFIX_RE = /^[ \t]{0,3}(?:[-+*]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?$/u;
+const BLOCKQUOTE_SIGNATURE_PREFIX_RE = /^[ \t]{0,3}(?:(?:[-+*]|\d+[.)])[ \t]+)*>[ \t]*/u;
 
 const TRAILING_PAW_SIGNATURE_RE = /`?(\[([^[\]/\n]+)\/[^[\]\n]+🐾\])`?[ \t]*$/u;
 
@@ -58,8 +59,8 @@ function isInsideFencedCode(text: string, candidateIndex: number): boolean {
 function isMarkdownSignatureSampleContext(text: string, candidateIndex: number): boolean {
   const lineStart = text.lastIndexOf('\n', Math.max(0, candidateIndex - 1)) + 1;
   const linePrefix = text.slice(lineStart, candidateIndex);
-  if (/^[ \t]*>/u.test(linePrefix)) return true;
-  if (/^(?: {4,}|\t)/u.test(linePrefix)) return true;
+  if (BLOCKQUOTE_SIGNATURE_PREFIX_RE.test(linePrefix)) return true;
+  if (/^(?: {4,}| {0,3}\t)/u.test(linePrefix)) return true;
   return BARE_LIST_SIGNATURE_PREFIX_RE.test(linePrefix);
 }
 

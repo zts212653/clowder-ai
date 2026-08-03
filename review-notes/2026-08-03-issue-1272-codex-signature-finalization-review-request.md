@@ -57,6 +57,13 @@ Please review the exact branch HEAD supplied in the current-thread handoff. Give
 - Red→Green: the new structure-preservation test failed on the indented-code sample (`42 pass / 1 fail`) before the fix and passes after it in the 114-test focused chain.
 - P3 disposition: no abnormal-termination fallback was added. Without a proven `turn.completed` boundary, appending a signature would also alter timeout/error/cancel reply semantics; #1272 does not define that failure-state contract. This remains a disclosed non-blocking risk rather than an unverified fallback layer.
 
+## Review Round 2 Repair
+
+- P2 fixed: CommonMark indented-code prefixes containing one to three spaces followed by a Tab are preserved, as are signature samples inside list-contained blockquotes such as `- >` and `1. >`.
+- Forced same-type sweep: plain/list-contained blockquotes, fenced code, four-space/pure-Tab/mixed-space-Tab indented code, and bare unordered/ordered/task-list samples all remain content. A signature after actual list prose remains decorative and is still stripped.
+- Red→Green: the expanded structure-preservation test failed before the fix (`43 pass / 1 fail`), while its list-prose negative control already passed. After the fix, the complete focused provider/service/route chain passes `115 / 115`.
+- P3 disposition is unchanged from Round 1; no abnormal-termination semantics were added.
+
 ## Review Sandbox
 
 - Path: `/tmp/cat-cafe-review/fix-1272-codex-signature-finalization/codex`
@@ -92,7 +99,7 @@ node --import ./packages/api/test/helpers/setup-cat-registry.js --test \
   packages/api/test/codex-agent-service.test.js \
   packages/api/test/codex-agent-service-l0.test.js \
   packages/api/test/issue-1272-codex-route-persistence.test.js
-# 114 passed, 0 failed
+# 115 passed, 0 failed
 
 pnpm --filter @cat-cafe/api run test:public
 # 16,763 tests; 16,732 pass; 0 fail; 31 skipped

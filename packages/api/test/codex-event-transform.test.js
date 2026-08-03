@@ -731,9 +731,13 @@ test('#1272 review P2: indented code and bare list signature samples remain cont
   const samples = [
     '缩进代码：\n\n    [砚砚/example-model🐾]',
     '制表符代码：\n\n\t[砚砚/example-model🐾]',
+    '一空格加制表符代码：\n\n \t[砚砚/example-model🐾]',
+    '三空格加制表符代码：\n\n   \t[砚砚/example-model🐾]',
     '无序列表：\n\n- `[砚砚/example-model🐾]`',
     '有序列表：\n\n1. [砚砚/example-model🐾]',
     '任务列表：\n\n- [ ] [砚砚/example-model🐾]',
+    '列表内引用：\n\n- > [砚砚/example-model🐾]',
+    '有序列表内引用：\n\n1. > `[砚砚/example-model🐾]`',
   ];
 
   for (const sample of samples) {
@@ -751,6 +755,25 @@ test('#1272 review P2: indented code and bare list signature samples remain cont
 
     assert.equal(`${body?.content}${done?.content}`, `${sample}\n\n[砚砚/gpt-5.6-sol🐾]`);
   }
+});
+
+test('#1272 review P2 negative control: list progress still strips its own terminal signature', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  const body = transformCodexEvent(
+    {
+      type: 'item.completed',
+      item: { type: 'agent_message', text: '- 正在检查。 `[砚砚/raw-model🐾]`' },
+    },
+    CAT,
+    state,
+  );
+  const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+
+  assert.equal(`${body?.content}${done?.content}`, '- 正在检查。\n\n[砚砚/gpt-5.6-sol🐾]');
 });
 
 test('mcp_tool_call mixed valid/invalid images → only valid included', () => {
