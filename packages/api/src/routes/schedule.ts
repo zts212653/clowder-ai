@@ -14,137 +14,30 @@
  * DELETE /api/schedule/control/tasks/:id → remove task override (AC-D1)
  */
 
-import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
-import type {
-  InvocationRecord,
-  InvocationRegistry,
-} from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
-import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
-import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
-import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
-import type { GlobalControlStore } from '../infrastructure/scheduler/GlobalControlStore.js';
-import type { PackTemplateStore } from '../infrastructure/scheduler/PackTemplateStore.js';
-import {
-  notifyTaskDeleted,
-  notifyTaskPaused,
-  notifyTaskRegistered,
-  notifyTaskResumed,
-} from '../infrastructure/scheduler/schedule-notify.js';
-import type { TaskRunnerV2 } from '../infrastructure/scheduler/TaskRunnerV2.js';
-import type { ScheduleLifecycleNotifier, TriggerSpec } from '../infrastructure/scheduler/types.js';
-import { resolveHeaderUserId } from '../utils/request-identity.js';
+import type { FastifyPluginAsync } from 'fastify';
+import { f255ConfigRequired, isF255ConfigOnlyTemplate } from '../infrastructure/scheduler/f255-template-boundary.js';
+import type { TriggerSpec } from '../infrastructure/scheduler/types.js';
 import { registerCallbackAuthHook } from './callback-auth-prehandler.js';
-import { deriveCallbackActor } from './callback-scope-helpers.js';
 import { governanceRoutes } from './schedule-governance.js';
+import { scheduleMutationRoutes } from './schedule-mutation-routes.js';
+import {
+  addSubjectKeyWithAliases,
+  deriveScheduleRequestContext,
+  extractThreadId,
+  f255ManagedTask,
+  isF255ManagedTask,
+  isVisibleDynamicTaskDef,
+  mergeUnregisteredDynamicTasks,
+  normalizeOnceTrigger,
+  normalizeScheduleTargetParam,
+  resolveAgentKeyDeliveryThreadScope,
+  resolveScopedDeliveryThreadId,
+  type ScheduleRoutesOptions,
+  toPlainScheduleParams,
+} from './schedule-route-support.js';
 
-/** #415: Normalize once-trigger input — accepts delayMs (relative) or fireAt (absolute) */
-function normalizeOnceTrigger(trigger: Record<string, unknown>): TriggerSpec | { error: string } {
-  if (trigger.type !== 'once') return trigger as TriggerSpec;
-  const delayMs = typeof trigger.delayMs === 'number' ? trigger.delayMs : undefined;
-  const fireAt = typeof trigger.fireAt === 'number' ? trigger.fireAt : undefined;
-  if (delayMs != null) {
-    if (!Number.isFinite(delayMs) || delayMs < 0) return { error: 'once trigger delayMs must be a finite number >= 0' };
-    return { type: 'once', fireAt: Date.now() + delayMs };
-  }
-  if (fireAt != null) {
-    if (!Number.isFinite(fireAt) || fireAt < 0) {
-      return { error: 'once trigger fireAt must be a finite positive epoch ms' };
-    }
-    return { type: 'once', fireAt };
-  }
-  return { error: 'once trigger requires either delayMs or fireAt' };
-}
-
-export interface ScheduleRoutesOptions {
-  taskRunner: TaskRunnerV2;
-  dynamicTaskStore?: DynamicTaskStore;
-  templateRegistry?: {
-    get: (id: string) => import('../infrastructure/scheduler/templates/types.js').TaskTemplate | null;
-    list: () => import('../infrastructure/scheduler/templates/types.js').TaskTemplate[];
-    register?: (template: import('../infrastructure/scheduler/templates/types.js').TaskTemplate) => void;
-    unregister?: (templateId: string) => boolean;
-  };
-  /** Phase 3B (AC-D1): governance store */
-  globalControlStore?: GlobalControlStore;
-  /** Phase 3B (AC-D3): pack template store */
-  packTemplateStore?: PackTemplateStore;
-  /** #320: Unified task store for thread→subjectKey resolution */
-  taskStore?: ITaskStore;
-  /** Ephemeral lifecycle notifications for scheduler management actions */
-  notifyLifecycle?: ScheduleLifecycleNotifier;
-  /** Optional callback registry for inferring current thread from callback auth. */
-  registry?: InvocationRegistry;
-}
-
-/** Extract threadId from subjectKey — handles both thread-xxx (real tasks) and thread:xxx formats */
-export function extractThreadId(subjectKey: string): string | null {
-  if (subjectKey.startsWith('thread-')) return subjectKey.slice(7);
-  if (subjectKey.startsWith('thread:')) return subjectKey.slice(7);
-  return null;
-}
-
-function addSubjectKeyWithAliases(target: Set<string>, subjectKey: string): void {
-  target.add(subjectKey);
-  if (subjectKey.startsWith('pr:')) target.add(`pr-${subjectKey.slice(3)}`);
-  if (subjectKey.startsWith('pr-')) target.add(`pr:${subjectKey.slice(3)}`);
-  // F202 Phase 2D: issue subject keys have no legacy alias format
-}
-
-type DeliveryThreadResolutionCode = 'STALE_INVOCATION';
-
-interface ScheduleActor {
-  triggerUserId: string;
-  createdBy: string;
-}
-
-/** Resolve deliveryThreadId from preHandler auth (headers) or explicit body param.
- *  Panel UI requests have no auth → uses explicit deliveryThreadId or null.
- *  MCP requests have callbackAuth → infer from invocation record.
- *  Invalid credentials are rejected at the preHandler level (fail-closed, #474). */
-async function resolveScopedDeliveryThreadId(
-  callbackAuth: InvocationRecord | undefined,
-  body: { deliveryThreadId?: string },
-  registry?: InvocationRegistry,
-): Promise<{ deliveryThreadId: string | null; code: DeliveryThreadResolutionCode | null }> {
-  if (!callbackAuth) {
-    return { deliveryThreadId: body.deliveryThreadId ?? null, code: null };
-  }
-  if (registry && !(await registry.isLatest(callbackAuth.invocationId))) {
-    return { deliveryThreadId: null, code: 'STALE_INVOCATION' };
-  }
-  if (body.deliveryThreadId) return { deliveryThreadId: body.deliveryThreadId, code: null };
-  return { deliveryThreadId: callbackAuth.threadId, code: null };
-}
-
-/**
- * F174 Phase F (AC-F1): no longer reads `createdBy` from request body — that
- * was a spoofable client-asserted field. Browser/Hub-initiated schedules
- * don't have a cat in the loop, so `createdBy` becomes the literal `'user'`
- * (the human is the actor). MCP-initiated schedules continue to derive both
- * fields from the verified callback auth record (the trustworthy source).
- *
- * Pre-Phase-F bug surface: `body.createdBy ?? 'unknown'` let any client claim
- * authorship as any cat id. With the body-fallback removed, the only
- * authoritative path is `request.callbackAuth.catId` (from preHandler verify).
- */
-function deriveScheduleActor(request: FastifyRequest, _body: { createdBy?: string }): ScheduleActor {
-  if (request.callbackAuth) {
-    const actor = deriveCallbackActor(request.callbackAuth);
-    return {
-      triggerUserId: actor.userId,
-      createdBy: actor.catId,
-    };
-  }
-  return {
-    triggerUserId: resolveHeaderUserId(request) ?? 'default-user',
-    createdBy: 'user',
-  };
-}
-
-/** Test-only export — exposes deriveScheduleActor without spinning up Fastify. */
-export function deriveScheduleActorForTest(request: FastifyRequest, body: { createdBy?: string }): ScheduleActor {
-  return deriveScheduleActor(request, body);
-}
+export type { ScheduleRoutesOptions } from './schedule-route-support.js';
+export { deriveScheduleActorForTest, extractThreadId } from './schedule-route-support.js';
 
 export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (app, opts) => {
   const {
@@ -154,18 +47,24 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
     globalControlStore,
     packTemplateStore,
     taskStore,
-    notifyLifecycle,
+    threadStore,
     registry,
+    agentKeyRegistry,
   } = opts;
 
   // #476: Register callback auth preHandler for MCP-originated schedule requests
-  if (registry) registerCallbackAuthHook(app, registry);
+  if (registry) registerCallbackAuthHook(app, registry, { ...(agentKeyRegistry ? { agentKeyRegistry } : {}) });
 
   // GET /api/schedule/tasks
   // #320: Optional ?threadId= filter — resolves thread's task subjectKeys for cross-match
   app.get('/api/schedule/tasks', async (request) => {
     const { threadId } = request.query as { threadId?: string };
-    const summaries = taskRunner.getTaskSummaries();
+    const summaries = mergeUnregisteredDynamicTasks(
+      taskRunner.getTaskSummaries(),
+      taskRunner,
+      dynamicTaskStore,
+      templateRegistry,
+    );
 
     if (!threadId || !taskStore) {
       return { tasks: summaries };
@@ -193,6 +92,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
     // Also include tasks whose subjectKind matches active thread task kinds.
     const ledger = taskRunner.getLedger();
     const filtered = summaries.flatMap((s) => {
+      if (s.deliveryThreadId === threadId) return [s];
       // Quick path: if lastRun matches, include immediately
       if (s.lastRun && threadSubjectKeys.has(s.lastRun.subject_key)) return [s];
       // Slow path: check if ANY run for this task matches thread's subject keys
@@ -222,7 +122,8 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
     const maxRows = Math.min(Number(limit) || 50, 200);
 
     const registered = taskRunner.getRegisteredTasks();
-    if (!registered.includes(id)) {
+    const dynamicDef = dynamicTaskStore?.getById(id);
+    if (!registered.includes(id) && !isVisibleDynamicTaskDef(dynamicDef)) {
       reply.status(404);
       return { error: 'Task not found' };
     }
@@ -260,13 +161,22 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
   // POST /api/schedule/tasks/:id/trigger
   app.post('/api/schedule/tasks/:id/trigger', async (request, reply) => {
     const { id } = request.params as { id: string };
+    const dynamicDef = dynamicTaskStore?.getById(id);
+    if (isVisibleDynamicTaskDef(dynamicDef) && isF255ManagedTask(dynamicDef)) {
+      reply.status(409);
+      return f255ManagedTask();
+    }
     const registered = taskRunner.getRegisteredTasks();
     if (!registered.includes(id)) {
       reply.status(404);
       return { error: 'Task not found' };
     }
 
-    await taskRunner.triggerNow(id, { manual: true });
+    const outcome = await taskRunner.triggerNow(id, { manual: true });
+    if (outcome === 'cancellation_pending') {
+      reply.status(409);
+      return { error: 'Task cancellation is pending', code: 'WAIT_CANCELLATION_PENDING', taskId: id };
+    }
     return { success: true, taskId: id };
   });
 
@@ -274,14 +184,17 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
   app.get('/api/schedule/templates', async () => {
     if (!templateRegistry) return { templates: [] };
     return {
-      templates: templateRegistry.list().map((t) => ({
-        templateId: t.templateId,
-        label: t.label,
-        category: t.category,
-        description: t.description,
-        defaultTrigger: t.defaultTrigger,
-        paramSchema: t.paramSchema,
-      })),
+      templates: templateRegistry
+        .list()
+        .filter((template) => !isF255ConfigOnlyTemplate(template.templateId, packTemplateStore))
+        .map((t) => ({
+          templateId: t.templateId,
+          label: t.label,
+          category: t.category,
+          description: t.description,
+          defaultTrigger: t.defaultTrigger,
+          paramSchema: t.paramSchema,
+        })),
     };
   });
 
@@ -304,6 +217,10 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
       reply.status(400);
       return { error: 'Missing templateId' };
     }
+    if (isF255ConfigOnlyTemplate(body.templateId, packTemplateStore)) {
+      reply.status(409);
+      return f255ConfigRequired();
+    }
 
     const template = templateRegistry.get(body.templateId);
     if (!template) {
@@ -323,7 +240,18 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
     } else {
       trigger = body.trigger ?? template.defaultTrigger;
     }
-    const params = body.params ?? {};
+    const rawParams = toPlainScheduleParams(body.params ?? {});
+    if (!rawParams) {
+      reply.status(400);
+      return { error: 'params must be a plain object' };
+    }
+    const context = deriveScheduleRequestContext(request, {}, rawParams);
+    const targetResult = normalizeScheduleTargetParam(context.params);
+    if (!targetResult.ok) {
+      reply.status(400);
+      return targetResult.error;
+    }
+    const params = targetResult.params;
     const display = body.display
       ? {
           label: body.display.label,
@@ -338,6 +266,14 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
       return {
         error: 'Stale callback invocation superseded by a newer invocation',
         code: 'STALE_INVOCATION',
+      };
+    }
+    const agentKeyScope = await resolveAgentKeyDeliveryThreadScope(request, resolution.deliveryThreadId, threadStore);
+    if (!agentKeyScope.ok) {
+      reply.status(agentKeyScope.statusCode);
+      return {
+        error: agentKeyScope.error,
+        ...(agentKeyScope.code ? { code: agentKeyScope.code } : {}),
       };
     }
 
@@ -354,189 +290,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
     };
   });
 
-  // POST /api/schedule/tasks (AC-G3: create dynamic task)
-  app.post('/api/schedule/tasks', async (request, reply) => {
-    if (!dynamicTaskStore || !templateRegistry) {
-      reply.status(501);
-      return { error: 'Dynamic tasks not configured' };
-    }
-
-    const body = (request.body ?? {}) as {
-      templateId?: string;
-      trigger?: TriggerSpec;
-      params?: Record<string, unknown>;
-      display?: { label: string; category: string; description?: string };
-      deliveryThreadId?: string;
-      createdBy?: string;
-      invocationId?: string;
-      callbackToken?: string;
-    };
-
-    if (!body.templateId) {
-      reply.status(400);
-      return { error: 'Missing templateId' };
-    }
-
-    const template = templateRegistry.get(body.templateId);
-    if (!template) {
-      reply.status(400);
-      return { error: `Unknown template: ${body.templateId}` };
-    }
-
-    // #415: normalize once trigger (delayMs → fireAt)
-    let trigger: TriggerSpec;
-    if (body.trigger && (body.trigger as Record<string, unknown>).type === 'once') {
-      const result = normalizeOnceTrigger(body.trigger as Record<string, unknown>);
-      if ('error' in result) {
-        reply.status(400);
-        return { error: result.error };
-      }
-      trigger = result;
-    } else {
-      trigger = body.trigger ?? template.defaultTrigger;
-    }
-    const params = body.params ?? {};
-
-    if (typeof params !== 'object' || params === null || Array.isArray(params)) {
-      reply.status(400);
-      return { error: 'params must be a plain object' };
-    }
-
-    // F182 AC-C2: B class — validate params.targetCatId is available (contract 400 on disabled)
-    if (params.targetCatId && typeof params.targetCatId === 'string') {
-      const resolved = resolveCatTarget(params.targetCatId);
-      if ('error' in resolved) {
-        reply.status(400);
-        return resolved.error;
-      }
-      params.targetCatId = resolved.ok;
-    }
-
-    const actor = deriveScheduleActor(request, body);
-    // Server-authoritative: callback-authenticated writes derive actor fields from
-    // the verified invocation record; panel requests fall back to request identity.
-    params.triggerUserId = actor.triggerUserId;
-
-    const id = `dyn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const display = body.display
-      ? {
-          label: body.display.label,
-          category: body.display.category as import('../infrastructure/scheduler/types.js').DisplayCategory,
-          description: body.display.description,
-        }
-      : { label: template.label, category: template.category, description: template.description };
-
-    const resolution = await resolveScopedDeliveryThreadId(request.callbackAuth, body, registry);
-    if (resolution.code === 'STALE_INVOCATION') {
-      reply.status(409);
-      return {
-        error: 'Stale callback invocation superseded by a newer invocation',
-        code: 'STALE_INVOCATION',
-      };
-    }
-
-    const def = {
-      id,
-      templateId: body.templateId,
-      trigger,
-      params,
-      display,
-      deliveryThreadId: resolution.deliveryThreadId,
-      enabled: true,
-      createdBy: actor.createdBy,
-      createdAt: new Date().toISOString(),
-    };
-
-    dynamicTaskStore.insert(def);
-
-    // Register in runtime
-    const spec = template.createSpec(id, { trigger, params, deliveryThreadId: def.deliveryThreadId });
-    spec.display = display;
-    taskRunner.registerDynamic(spec, id);
-
-    // #415: lifecycle notification — task registered
-    notifyTaskRegistered(notifyLifecycle, def);
-
-    return { success: true, task: { id, ...display, trigger } };
-  });
-
-  // DELETE /api/schedule/tasks/:id (AC-G4: remove dynamic task)
-  app.delete('/api/schedule/tasks/:id', async (request, reply) => {
-    if (!dynamicTaskStore) {
-      reply.status(501);
-      return { error: 'Dynamic tasks not configured' };
-    }
-
-    const { id } = request.params as { id: string };
-    // Read def before deletion for notification
-    const defForNotify = dynamicTaskStore.getById(id);
-    const removed = dynamicTaskStore.remove(id);
-    if (!removed) {
-      reply.status(404);
-      return { error: 'Dynamic task not found' };
-    }
-
-    taskRunner.unregister(id);
-
-    // #415: lifecycle notification — task deleted
-    if (defForNotify) notifyTaskDeleted(notifyLifecycle, defForNotify);
-
-    return { success: true };
-  });
-
-  // PATCH /api/schedule/tasks/:id (AC-G4: toggle enabled — affects runtime)
-  app.patch('/api/schedule/tasks/:id', async (request, reply) => {
-    if (!dynamicTaskStore || !templateRegistry) {
-      reply.status(501);
-      return { error: 'Dynamic tasks not configured' };
-    }
-
-    const { id } = request.params as { id: string };
-    const body = (request.body ?? {}) as { enabled?: boolean };
-
-    if (typeof body.enabled !== 'boolean') {
-      reply.status(400);
-      return { error: 'Missing enabled field' };
-    }
-
-    const updated = dynamicTaskStore.setEnabled(id, body.enabled);
-    if (!updated) {
-      reply.status(404);
-      return { error: 'Dynamic task not found' };
-    }
-
-    const def = dynamicTaskStore.getById(id);
-    if (!body.enabled) {
-      // Pause: unregister from runtime
-      taskRunner.unregister(id);
-      if (def) notifyTaskPaused(notifyLifecycle, def);
-    } else {
-      // Resume: re-register in runtime
-      if (def) {
-        const template = templateRegistry.get(def.templateId);
-        if (template) {
-          const spec = template.createSpec(def.id, {
-            trigger: def.trigger,
-            params: def.params,
-            deliveryThreadId: def.deliveryThreadId,
-          });
-          spec.display = def.display;
-          try {
-            taskRunner.registerDynamic(spec, def.id);
-          } catch {
-            // Already registered — ignore
-          }
-          notifyTaskResumed(notifyLifecycle, def);
-        } else {
-          dynamicTaskStore.setEnabled(id, false); // roll back — resume failed
-          reply.status(500);
-          return { error: `Template ${def.templateId} not found — task cannot resume` };
-        }
-      }
-    }
-
-    return { success: true, enabled: body.enabled };
-  });
+  await app.register(scheduleMutationRoutes, opts);
 
   // ─── Governance + Pack Templates (AC-D1/D3) — extracted for file size ──
   await app.register(governanceRoutes, {

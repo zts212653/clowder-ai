@@ -12,13 +12,13 @@ created: 2026-04-10
 
 ## Why
 
-Kimi (Moonshot AI) 是国内主流 AI 提供商之一。社区贡献者 ZephaniaCN 提交了完整的 Kimi CLI 集成 PR（clowder-ai#361），将 Kimi 作为第五个 first-class CLI cat 接入 Cat Cafe 运行时，补齐了国产大模型的 CLI 支持。
+Kimi (Moonshot AI) 是国内主流 AI 提供商之一。社区贡献者 ZephaniaCN 提交了完整的 Kimi CLI 集成 PR（clowder-ai#361），将 Kimi 作为第五个 first-class CLI cat 接入 Clowder AI 运行时，补齐了国产大模型的 CLI 支持。
 
 ## What
 
 ### Phase A: CLI Runtime Integration
 
-将 `kimi-cli` 接入 Cat Cafe 运行时，实现与 Claude/Codex/Gemini 同等级别的 first-class 支持：
+将 `kimi-cli` 接入 Clowder AI 运行时，实现与 Claude/Codex/Gemini 同等级别的 first-class 支持：
 
 - **KimiAgentService**：基于 `kimi-cli` 的 NDJSON 流式解析，支持 session init/resume、thinking block 解析、image-aware sessions
 - **Account Resolver**：kimi 作为 builtin client，支持 OAuth 和 API Key 两种认证方式

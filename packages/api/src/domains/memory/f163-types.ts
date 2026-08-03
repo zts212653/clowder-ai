@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
 
 export type F163Authority = 'constitutional' | 'validated' | 'candidate' | 'observed';
-export type F163Activation = 'always_on' | 'scoped' | 'query' | 'backstop';
+export type F163Activation = 'always_on' | 'scoped' | 'query' | 'backstop' | 'pull_only';
 
 /** Boost source attribution (search-path, not injection) */
 export type BoostSource = 'authority_boost' | 'retrieval_rerank' | 'compression_summary' | 'legacy';
@@ -42,28 +42,13 @@ export function computeVariantId(flags: F163FlagSnapshot): string {
 export function pathToAuthority(sourcePath: string): F163Authority {
   const p = sourcePath.replace(/^doc:/, '').replace(/^docs\//, '');
   if (/^(lessons-learned|SOP)\.md$/i.test(p) || /shared-rules\.md$/i.test(p)) return 'constitutional';
-  if (/^(decisions|features)\//i.test(p)) return 'validated';
+  if (/^(decisions|features|architecture)\//i.test(p)) return 'validated';
   if (/^(discussions|plans|research|reflections)\//i.test(p)) return 'candidate';
   return 'observed';
 }
 
-/** Phase D (kept for backward compat, but no longer used in search route) */
-export function authorityToConfidence(authority: F163Authority | undefined): 'high' | 'mid' | 'low' {
-  switch (authority) {
-    case 'constitutional':
-    case 'validated':
-      return 'high';
-    case 'candidate':
-      return 'mid';
-    case 'observed':
-      return 'low';
-    default:
-      return 'mid';
-  }
-}
-
-/** Phase E: confidence = f(rank) — reflects search match quality, not document authority */
-export function rankToConfidence(rank: number): 'high' | 'mid' | 'low' {
+/** F263 AC-A2: rank-derived match label, independent from authority and retrieval score. */
+export function rankToMatchRank(rank: number): 'high' | 'mid' | 'low' {
   if (rank <= 1) return 'high';
   if (rank <= 4) return 'mid';
   return 'low';

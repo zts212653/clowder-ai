@@ -4,7 +4,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { CatCafeScanner, extractAnchor, extractFrontmatter } from './CatCafeScanner.js';
+import { CatCafeScanner, extractFrontmatter, extractSupersedes, isFeatureDocPath } from './CatCafeScanner.js';
 import { GenericRepoScanner } from './GenericRepoScanner.js';
 import type {
   ConsistencyReport,
@@ -19,8 +19,10 @@ import type {
 // Re-export for backward compatibility — external code imports KIND_DIRS from IndexBuilder
 export { KIND_DIRS } from './CatCafeScanner.js';
 
+import { mirrorDocAliases } from './doc-alias-mirror.js';
 import { extractDocLinkEdges, extractFeatureRefEdges, extractWikiLinkEdges } from './edge-extractors.js';
 import { embedIndexedItems, embedPassages, type PassageEmbeddingRow } from './embed-utils.js';
+import { isMarkdownSourcePath, MARKDOWN_DOC_PASSAGE_PREFIX } from './MarkdownPassageIndexer.js';
 import { type PassageVectorStore, passageVectorKey } from './PassageVectorStore.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 import { SIGNAL_FLAGS } from './summary-config.js';
@@ -37,16 +39,24 @@ import type { VectorStore } from './VectorStore.js';
  *   3 — Phase D: pathToAuthority backfill (authority derived from path)
  *   4 — F209 Phase B: entity mention extraction from docs/passages
  *   5 — visual artifact text indexing (SVG text + message block alt/caption)
+ *   6 — non-feature docs use path anchors instead of feature_ids anchors (#2747)
+ *   7 — architecture docs get first-class kind/authority/recency backfill
+ *   8 — Markdown docs get raw passages; summary separators are skipped
+ *   9 — temporal frontmatter fields: status/supersedes graph extraction
+ *  10 — feature assets use path anchors; top-level feature specs own Fxxx
+ *  11 — F287: approved Taste vignettes materialize complete decision passages
  */
-export const INDEXING_VERSION = 5;
+export const INDEXING_VERSION = 11;
 
 /** Higher number = higher priority for anchor ownership */
 const KIND_PRIORITY: Record<EvidenceKind, number> = {
   feature: 4,
   decision: 3,
+  architecture: 3,
   plan: 2,
   discussion: 2,
   research: 2,
+  diary: 1,
   session: 1,
   lesson: 1,
   thread: 1,
@@ -54,6 +64,11 @@ const KIND_PRIORITY: Record<EvidenceKind, number> = {
 };
 
 const PASSAGE_EMBED_SCAN_BATCH_SIZE = 256;
+
+type DocumentPassageSource = {
+  item: Pick<EvidenceItem, 'anchor' | 'sourcePath' | 'updatedAt'>;
+  passages: string[];
+};
 
 /**
  * Minimal thread snapshot for indexing — avoids coupling to full IThreadStore interface.
@@ -298,6 +313,7 @@ export class IndexBuilder implements IIndexBuilder {
     report('scanning', 15);
     const currentAnchors = new Set<string>();
     const indexedItems: EvidenceItem[] = [];
+    const documentPassageSources: DocumentPassageSource[] = [];
 
     for (const scanned of scannedItems) {
       const sourceHash = scanned.rawContent
@@ -328,18 +344,29 @@ export class IndexBuilder implements IIndexBuilder {
 
       // Kind-priority guard: don't let lower-priority docs overwrite higher-priority ones
       const existing = await this.store.getByAnchor(item.anchor);
-      if (existing) {
+      if (existing && existing.sourcePath !== item.sourcePath) {
         const existingPriority = KIND_PRIORITY[existing.kind] ?? 0;
         const newPriority = KIND_PRIORITY[item.kind] ?? 0;
         const existingFileExists = existing.sourcePath ? existsSync(join(this.docsRoot, existing.sourcePath)) : false;
-        if (newPriority < existingPriority && existingFileExists) {
-          skipped++;
-          continue;
+        if (existingFileExists) {
+          // Anchor collision warning — two distinct files claim the same anchor
+          console.warn(
+            `[IndexBuilder] anchor collision: "${item.anchor}" claimed by ` +
+              `"${item.sourcePath}" (${item.kind}, priority ${newPriority}) ` +
+              `vs existing "${existing.sourcePath}" (${existing.kind}, priority ${existingPriority})`,
+          );
+          if (newPriority < existingPriority) {
+            skipped++;
+            continue;
+          }
         }
       }
 
       await this.store.upsert([item]);
       indexedItems.push(item);
+      if (isMarkdownSourcePath(item.sourcePath)) {
+        documentPassageSources.push({ item, passages: scanned.passages });
+      }
       indexed++;
     }
 
@@ -347,10 +374,13 @@ export class IndexBuilder implements IIndexBuilder {
 
     // Phase D: auto-extract edges from frontmatter cross-references (AC-D18, KD-29)
     // Phase F: clear both legacy 'related' and normalized 'related_to'; write 'related_to' with provenance
+    // M15: clear and rebuild temporal supersedes frontmatter edges in the same pass.
     await this.store.runExclusive(() => {
       this.store
         .getDb()
-        .prepare("DELETE FROM edges WHERE relation IN ('related', 'related_to') AND provenance = 'frontmatter'")
+        .prepare(
+          "DELETE FROM edges WHERE relation IN ('related', 'related_to', 'supersedes') AND provenance = 'frontmatter'",
+        )
         .run();
     });
 
@@ -358,8 +388,21 @@ export class IndexBuilder implements IIndexBuilder {
       if (!scanned.rawContent) continue;
       const fm = extractFrontmatter(scanned.rawContent);
       if (!fm) continue;
-      const anchor = extractAnchor(fm);
+      // Use the item's already-assigned anchor (which respects path-based rules)
+      // instead of re-extracting from raw content (which could produce a stale/wrong anchor)
+      const anchor = scanned.item.anchor;
       if (!anchor) continue;
+
+      for (const ref of extractSupersedes(fm)) {
+        if (ref !== anchor) {
+          await this.store.addEdge({
+            fromAnchor: anchor,
+            toAnchor: ref,
+            relation: 'supersedes',
+            provenance: 'frontmatter',
+          });
+        }
+      }
 
       const relatedFeatures = fm.related_features;
       if (Array.isArray(relatedFeatures)) {
@@ -368,6 +411,22 @@ export class IndexBuilder implements IIndexBuilder {
             await this.store.addEdge({
               fromAnchor: anchor,
               toAnchor: ref,
+              relation: 'related_to',
+              provenance: 'frontmatter',
+            });
+          }
+        }
+      }
+
+      // Non-feature docs: promote feature_ids to graph edges (they no longer become anchors)
+      const featureIds = fm.feature_ids;
+      const sp = scanned.item.sourcePath ?? '';
+      if (Array.isArray(featureIds) && !isFeatureDocPath(sp)) {
+        for (const fid of featureIds) {
+          if (typeof fid === 'string' && fid !== anchor) {
+            await this.store.addEdge({
+              fromAnchor: anchor,
+              toAnchor: fid,
               relation: 'related_to',
               provenance: 'frontmatter',
             });
@@ -419,6 +478,8 @@ export class IndexBuilder implements IIndexBuilder {
     }
 
     report('indexing', 40);
+    await this.indexDocumentPassages(documentPassageSources);
+
     // Phase D-6: Index session digests (kind=session)
     if (this.transcriptDataDir) {
       const excludedThreadIds = this.excludeThreadIdsFn ? await this.excludeThreadIdsFn() : undefined;
@@ -545,6 +606,13 @@ export class IndexBuilder implements IIndexBuilder {
       }
     }
 
+    // F260 Phase A: mirror doc titles → doc_aliases (after stale removal, before embeddings)
+    try {
+      mirrorDocAliases(db);
+    } catch {
+      // fail-open: mirror errors don't block indexing
+    }
+
     report('embedding', 80);
     // Phase C: generate embeddings for indexed items (shared utility with batch splitting)
     if (this.embedDeps) {
@@ -611,13 +679,14 @@ export class IndexBuilder implements IIndexBuilder {
     // Two-pass: deletions first, then upserts.
     // This ensures that when a higher-priority owner is deleted and a lower-priority
     // doc is updated in the same batch, the deletion clears the way for the upsert.
-    const toUpsert: Array<{ filePath: string; parsed: EvidenceItem }> = [];
+    const toUpsert: Array<{ parsed: EvidenceItem; passages: string[]; rawContent?: string }> = [];
     const toDelete: string[] = [];
+    const documentPassageSources: DocumentPassageSource[] = [];
 
     for (const filePath of changedPaths) {
       const parsed = this.parseSingleFile(filePath);
       if (parsed) {
-        toUpsert.push({ filePath, parsed });
+        toUpsert.push(parsed);
       } else {
         toDelete.push(filePath);
       }
@@ -635,6 +704,7 @@ export class IndexBuilder implements IIndexBuilder {
       if (row) {
         await this.store.deleteByAnchor(row.anchor);
         this.embedDeps?.vectorStore.delete(row.anchor);
+        await this.refreshFrontmatterSupersedesEdges(row.anchor);
         deletedAnchors.push(row.anchor);
       }
     }
@@ -645,28 +715,29 @@ export class IndexBuilder implements IIndexBuilder {
       for (const anchor of deletedAnchors) {
         const candidates = allScanned
           .filter((s) => s.item.anchor === anchor)
-          .map(
-            (s) =>
-              ({
-                ...s.item,
-                sourceHash: s.rawContent
-                  ? createHash('sha256').update(s.rawContent).digest('hex').slice(0, 16)
-                  : undefined,
-                provenance: s.provenance,
-              }) as EvidenceItem,
-          );
+          .map((s) => ({
+            parsed: {
+              ...s.item,
+              sourceHash: s.rawContent
+                ? createHash('sha256').update(s.rawContent).digest('hex').slice(0, 16)
+                : undefined,
+              provenance: s.provenance,
+            } as EvidenceItem,
+            passages: s.passages,
+            rawContent: s.rawContent,
+          }));
         if (candidates.length > 0) {
-          candidates.sort((a, b) => (KIND_PRIORITY[b.kind] ?? 0) - (KIND_PRIORITY[a.kind] ?? 0));
-          const best = candidates[0]!;
-          if (!toUpsert.some((u) => u.parsed.anchor === anchor)) {
-            toUpsert.push({ filePath: join(this.docsRoot, best.sourcePath!), parsed: best });
+          candidates.sort((a, b) => (KIND_PRIORITY[b.parsed.kind] ?? 0) - (KIND_PRIORITY[a.parsed.kind] ?? 0));
+          const best = candidates[0];
+          if (best && !toUpsert.some((u) => u.parsed.anchor === anchor)) {
+            toUpsert.push(best);
           }
         }
       }
     }
 
     // Pass 2: upserts (with kind-priority guard) + embed new/changed docs
-    for (const { parsed } of toUpsert) {
+    for (const { parsed, passages, rawContent } of toUpsert) {
       const existing = await this.store.getByAnchor(parsed.anchor);
       if (existing) {
         const existingPriority = KIND_PRIORITY[existing.kind] ?? 0;
@@ -676,6 +747,10 @@ export class IndexBuilder implements IIndexBuilder {
         }
       }
       await this.store.upsert([parsed]);
+      await this.refreshFrontmatterSupersedesEdges(parsed.anchor, rawContent);
+      if (isMarkdownSourcePath(parsed.sourcePath)) {
+        documentPassageSources.push({ item: parsed, passages });
+      }
       // Embed the new/changed doc
       if (this.embedDeps?.embedding.isReady()) {
         try {
@@ -685,6 +760,16 @@ export class IndexBuilder implements IIndexBuilder {
           // fail-open: skip embedding on error
         }
       }
+    }
+
+    await this.indexDocumentPassages(documentPassageSources);
+
+    // F260 Phase A: refresh doc_aliases after incremental doc changes.
+    // delete-rebuild pattern is O(N) but correct; acceptable for Phase A shadow-only scope.
+    try {
+      mirrorDocAliases(this.store.getDb());
+    } catch {
+      // fail-open: mirror errors don't block incremental update
     }
   }
 
@@ -704,16 +789,47 @@ export class IndexBuilder implements IIndexBuilder {
   // ── Private ──────────────────────────────────────────────────────
 
   /** F152: Bridge — delegate single-file parsing to scanner (for incrementalUpdate) */
-  private parseSingleFile(filePath: string): EvidenceItem | null {
+  private parseSingleFile(filePath: string): {
+    parsed: EvidenceItem;
+    passages: string[];
+    rawContent: string;
+  } | null {
     if ('parseSingle' in this.scanner && typeof this.scanner.parseSingle === 'function') {
       const scanned = this.scanner.parseSingle(filePath, this.scanRoot);
       if (!scanned) return null;
       const sourceHash = scanned.rawContent
         ? createHash('sha256').update(scanned.rawContent).digest('hex').slice(0, 16)
         : undefined;
-      return { ...scanned.item, sourceHash, provenance: scanned.provenance };
+      return {
+        parsed: { ...scanned.item, sourceHash, provenance: scanned.provenance },
+        passages: scanned.passages,
+        rawContent: scanned.rawContent,
+      };
     }
     return null;
+  }
+
+  private async refreshFrontmatterSupersedesEdges(anchor: string, rawContent = ''): Promise<void> {
+    await this.store.runExclusive(() => {
+      this.store
+        .getDb()
+        .prepare("DELETE FROM edges WHERE relation = 'supersedes' AND provenance = 'frontmatter' AND from_anchor = ?")
+        .run(anchor);
+    });
+
+    const fm = extractFrontmatter(rawContent);
+    if (!fm) return;
+
+    for (const ref of extractSupersedes(fm)) {
+      if (ref !== anchor) {
+        await this.store.addEdge({
+          fromAnchor: anchor,
+          toAnchor: ref,
+          relation: 'supersedes',
+          provenance: 'frontmatter',
+        });
+      }
+    }
   }
 
   /**
@@ -1008,6 +1124,63 @@ export class IndexBuilder implements IIndexBuilder {
         }
       }
     }
+  }
+
+  private async indexDocumentPassages(sources: DocumentPassageSource[]): Promise<void> {
+    const docs = sources.filter((source) => isMarkdownSourcePath(source.item.sourcePath));
+    if (docs.length === 0) return;
+
+    const db = this.store.getDb();
+    const existingStmt = db.prepare(
+      `SELECT passage_id AS passageId, content, created_at AS createdAt
+       FROM evidence_passages
+       WHERE doc_anchor = ? AND passage_id LIKE ?`,
+    );
+    const deleteStmt = db.prepare(
+      `DELETE FROM evidence_passages
+       WHERE doc_anchor = ? AND passage_id LIKE ?`,
+    );
+    const insertStmt = db.prepare(`
+      INSERT INTO evidence_passages
+      (doc_anchor, passage_id, content, speaker, position, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    const tx = db.transaction((items: DocumentPassageSource[]) => {
+      for (const source of items) {
+        const passageLike = `${MARKDOWN_DOC_PASSAGE_PREFIX}%`;
+        const oldPassages = existingStmt.all(source.item.anchor, passageLike) as Array<{
+          passageId: string;
+          content: string;
+          createdAt: string;
+        }>;
+        const nextById = new Map<string, string>(
+          source.passages.map((content, index) => [`${MARKDOWN_DOC_PASSAGE_PREFIX}${index}`, content]),
+        );
+        const oldById = new Map(oldPassages.map((passage) => [passage.passageId, passage]));
+        for (const old of oldPassages) {
+          if (nextById.get(old.passageId) !== old.content) {
+            this.embedDeps?.passageVectorStore?.delete(passageVectorKey(source.item.anchor, old.passageId));
+          }
+        }
+        deleteStmt.run(source.item.anchor, passageLike);
+
+        for (const [position, content] of source.passages.entries()) {
+          const passageId = `${MARKDOWN_DOC_PASSAGE_PREFIX}${position}`;
+          const old = oldById.get(passageId);
+          insertStmt.run(
+            source.item.anchor,
+            passageId,
+            content,
+            null,
+            position,
+            old?.content === content ? old.createdAt : source.item.updatedAt,
+          );
+        }
+      }
+    });
+
+    await this.store.runExclusive(() => tx(docs));
+    await this.store.refreshEntityMentions(docs.map((doc) => doc.item.anchor));
   }
 
   /**

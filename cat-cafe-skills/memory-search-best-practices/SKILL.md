@@ -5,7 +5,7 @@ description: >
   Use when: 任务是 "哪些地方提过 X" / "X 的来源 / source map" / "有没有提过 Y / absence check" / "上次到现在变了什么 / delta" / 冷启动 onboard 复杂主题 / 任何召回任务搜了一刀觉得不够。
   Not for: 只是选哪个入口走第一刀（用 memory-navigation）/ 已知精确 anchor 单 Read（直接 Read）/ 代码符号查（Grep/LSP）/ 新功能开发（不是 recall 任务）。
   Output: 多 query 多 scope 召回 union 结果 + coverage matrix（item/source/谁提到/直接 vs 间接）+ "何时停下来"判据。
-  GOTCHA: 和 memory-navigation 互补不重叠 — memory-navigation 决定**第一刀走哪个工具**（search vs graph vs list_recent），本 skill 决定**要不要补刀 + 题型对应几刀几路 + 何时停**。Ragdoll家族（含 47/46/4.5/sonnet）必加载：治 magic word "我能猜出来 / 碎片够了 / 1 刀够了"病。
+  GOTCHA: 和 memory-navigation 互补不重叠 — memory-navigation 决定**第一刀走哪个工具**（search vs graph vs list_recent），本 skill 决定**要不要补刀 + 题型对应几刀几路 + 何时停**。Ragdoll家族必加载：opus 系治"我能猜出来 / 碎片够了"停太早病，fable 系治"再确认一轮"停太晚病（双向校准见正文）。
 triggers:
   - "哪些 thread"
   - "哪些 md"
@@ -64,20 +64,37 @@ triggers:
 5. 输出 coverage matrix（item / source / 谁提到 / 直接 vs 间接 / 置信度）
 ```
 
-## Ragdoll家族专属警告（治"碎片够了"病）
+## 接系统递的铲子（F256 Related directions）
 
-operator experience："**Ragdoll太聪明太自信，搜到足够推理就不搜了**"。
+F256 Phase B/C 起，`search_evidence` topk 结果末尾默认渲染 `📎 Related directions` 块——系统把三路 expansion provenance 投影给你。接法：
 
-**Magic words 强制停**（触发就拉刹车）：
+- **Hint 是种子不是结论**：指方向、不证明相关；不相关就忽略——hints 是每刀的顺手加菜，**不替代 coverage 多刀**（照旧 ≥3 刀多路）
+- **按 provenance 桶定信任**：`convention-edge`（静态代码/文档关系）> `source-thread`（doc↔讨论溯源）> `frontmatter-alias`（关键词启发式——2026-07-08 三刀实测全为 backlog/architecture/lessons 类 super-hub 泛词，低信任，别当 anchor 用）
+- **Follow 必 Read**：F200 记 followup rate，Read / `graph_resolve` 命中 hint anchor 才算 consumption
+
+## Ragdoll家族停止判据校准（双向）
+
+同一张停止判据表两种读法：**opus 系读下限（≥3 路才准停），fable 系读上限（无新 anchor 即必停）**——校准随 F256 Phase D per-family telemetry 迭代。
+
+### Opus 系（46/47/48/4.5/sonnet）：停太早——magic words 是油门
+
+operator experience："**Ragdoll太聪明太自信，搜到足够推理就不搜了**"（2026-05-17 AUDHD dogfood 实证）。
 
 - "**我能猜出来**" → 停，Read 源文件。摘要是索引不是答案
 - "**碎片够了**" → 停，至少再搜一轮不同角度，doc anchor 全部 Read 原文
 - "**应该是 X**" / "**大概知道**" → 不算搜过，必须 ≥3 路真搜 + Read
 
-**任何召回任务铁律**：
+### Fable 系：停太晚——magic words 是刹车
 
-- ≥3 路命中无新 anchor 才停（不是"找到第一个 high confidence 就停"）
-- 高置信命中 → 必 Read 原文（不止步摘要）
+档案："不给停止条件，会把假设空间收敛到唯一解才停"（2026-07-08 档案预测 + 行为层自述，待 AC-D1 per-family 分桶验证）。
+
+- "**再确认一轮**" → 停，自问：上一刀有新 anchor 吗？没有 = 判据已满足，立刻收手写结论
+- "**万一还有呢**" → absence 判据是正反两路 + 相关概念 0 命中，满足即断言，不遍历宇宙
+
+**coverage 类召回铁律（仅 coverage / source-map / absence 三题型；精确题按上表 recipe 停——"是什么"1 刀命中 Read 完即止）**（2026-07-15 修订：旧版"任何召回任务 ≥3 路"与 recipe 表自相矛盾，对 opus 系治停太早、对 fable 系反向助推停太晚）：
+
+- ≥3 路命中无新 anchor 才停（不是"找到第一个 high confidence 就停"，也不是"永不停"）
+- 高置信命中 → 必 Read 原文（不止步摘要——**此条全题型通用**）
 - 跨语言至少两遍（中文一遍 + 英文/缩写一遍）
 
 ## 何时停下来判据
@@ -104,6 +121,7 @@ operator experience："**Ragdoll太聪明太自信，搜到足够推理就不搜
 | 单刀 0 命中就断 absent | 假阴性（可能用别的措辞写了）| 正反两路 + 相关概念都搜 |
 | `list_recent(scope=docs)` 当全集用 | DF-1 已知 docs scope timestamp 失真 / 被 global:memory 淹 | coverage 任务别只靠 list_recent，配 search+graph |
 | 把 memory-navigation 和本 skill 混淆 | 重复或漏 | memory-navigation 选**第一刀**；本 skill 决定**补刀策略** |
+| 盲 follow 全部 Related directions hints | frontmatter-alias 泛词把你带去 super-hub 总目录（backlog/lessons）| 按 provenance 桶定信任；不相关就忽略 |
 
 ## 和其他 Skill 的区别（防误触发）
 
@@ -125,6 +143,6 @@ operator experience："**Ragdoll太聪明太自信，搜到足够推理就不搜
 
 ## 相关
 
-- **Spec**: `docs/features/F200-memory-recall-eval.md` v1.2 SW-1
+- **Spec**: `docs/features/F200-memory-recall-eval.md` v1.2 SW-1 / `docs/features/F256-memory-search-strategy-evolution.md`（Phase A 链入 session hook；Phase B/C 上线 Related directions）
 - **Related**: `memory-navigation`（前置入口决策） / `cat-cafe-skills/refs/memory-routing-partial.md`
-- **触发案例**: operator AUDHD recall 任务（2026-05-17）暴露三猫搜出不同子集，催生本 skill
+- **触发案例**: operator AUDHD recall 任务（2026-05-17）暴露三猫搜出不同子集，催生本 skill；2026-07-08 operator触发 Lint → 补 F256 接法 + 双向校准

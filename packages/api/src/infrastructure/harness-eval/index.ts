@@ -7,6 +7,21 @@
  */
 
 export type {
+  CapabilityTipsEnableArtifactReader,
+  CapabilityTipsEnableDomain,
+  CapabilityTipsEnableEvidence,
+} from './capability-tips/capability-tips-enable-gate.js';
+export { validateCapabilityTipsEnablement } from './capability-tips/capability-tips-enable-gate.js';
+export type {
+  CapabilityTipsUsageRow,
+  CapabilityTipsUsageSelector,
+  CapabilityTipsUsageSnapshot,
+} from './capability-tips/capability-tips-usage-adapter.js';
+export {
+  CapabilityTipsUsageAdapter,
+  validateCapabilityTipsUsageSelector,
+} from './capability-tips/capability-tips-usage-adapter.js';
+export type {
   CapabilityName,
   CapabilityPredicate,
   CapabilityPreviewAvailability,
@@ -38,6 +53,49 @@ export { createEvalDomainDailySpec, createEvalDomainWeeklySpec } from './domain/
 export type { EvalDomainRegistryEntry } from './domain/eval-domain-registry.js';
 // Domain registry
 export { parseEvalDomainRegistryEntry, parseEvalDomainRegistryFile } from './domain/eval-domain-registry.js';
+export type {
+  ExternalCaseReplayResult,
+  ExternalCaseReplayScenario,
+} from './external-case-closure-eval.js';
+export {
+  buildExternalCaseClosureHealth,
+  evaluateExternalCaseReplay,
+} from './external-case-closure-eval.js';
+export type { FrictionMeasurementBundleResultOptions } from './measurement/friction-measurement-bundle.js';
+export { buildFrictionMeasurementBundleResult } from './measurement/friction-measurement-bundle.js';
+export type { MeasurementBundleCensus } from './measurement/measurement-bundle-census.js';
+export {
+  assertMeasurementVerdictActionAllowed,
+  MeasurementBundleCensusEntrySchema,
+  MeasurementBundleCensusSchema,
+  validateMeasurementBundleCensus,
+} from './measurement/measurement-bundle-census.js';
+export type {
+  DecisionProcedureComponent,
+  InterventionCard,
+  MeasurementBundleCertificate,
+  MeasurementBundleResult,
+  MeasurementMetric,
+} from './measurement/measurement-bundle-schema.js';
+export {
+  computeDecisionProcedureVersionSetHash,
+  parseMeasurementBundleCertificate,
+  validateMeasurementBundleResult,
+} from './measurement/measurement-bundle-validation.js';
+export type {
+  SameVersionReplayOptions,
+  SameVersionReplayReport,
+} from './measurement/measurement-replay.js';
+export { buildSameVersionReplayReport, SameVersionReplayReportSchema } from './measurement/measurement-replay.js';
+export type {
+  MemoryNegativeControlCohort,
+  MemoryNegativeControlResultOptions,
+} from './measurement/memory-negative-control.js';
+export {
+  buildMemoryNegativeControlResult,
+  MemoryNegativeControlCohortSchema,
+  parseMemoryNegativeControlCohort,
+} from './measurement/memory-negative-control.js';
 export type {
   BuildSopVerdictInput,
   RuleHandoffTargetResolver,
@@ -72,6 +130,7 @@ export type {
   CancelReason,
   PermissionCancelInput,
   StoredEpisode,
+  TaskOutcomeAttribution,
   TaskOutcomeEpisode,
   TaskOutcomeVerdict,
 } from './task-outcome/index.js';
@@ -82,6 +141,7 @@ export {
   handleListEpisodes,
   handleMagicWord,
   handlePermissionCancel,
+  TASK_OUTCOME_ATTRIBUTIONS,
   TaskOutcomeEpisodeStore,
   VERDICT_CLASSES,
 } from './task-outcome/index.js';

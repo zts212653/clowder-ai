@@ -8,6 +8,15 @@ import type { EvidenceDrillDown, EvidenceKind } from './interfaces.js';
 export type CoverageMatchType = 'direct' | 'alias' | 'source-thread' | 'convention';
 export type CoverageSource = 'docs' | 'threads' | 'convention-graph';
 export type ExpansionSourceType = 'frontmatter-alias' | 'source-thread' | 'convention-edge';
+export type CoverageRequestedScope = 'docs' | 'threads' | 'all';
+export type CoverageSearchMode = 'lexical' | 'semantic' | 'hybrid';
+
+export interface CoverageSearchRequest {
+  scope?: CoverageRequestedScope;
+  mode?: CoverageSearchMode;
+  limit?: number;
+  offset?: number;
+}
 
 // ── Expansion provenance ────────────────────────────────────────────
 
@@ -15,7 +24,7 @@ export interface ExpansionProvenance {
   source: ExpansionSourceType;
   /** Human-readable trace: e.g. "F200 → topic:memory" or "thread-xxx" */
   via: string;
-  confidence: 'static' | 'heuristic';
+  edgeStrength: 'static' | 'heuristic';
 }
 
 // ── Coverage matrix output ──────────────────────────────────────────
@@ -25,13 +34,21 @@ export interface CoverageMatrixItem {
   title: string;
   kind: EvidenceKind;
   matchType: CoverageMatchType;
-  /** Search match quality score */
-  confidence: number;
+  /** Store retrieval score; directness is expressed only by matchType. */
+  retrievalScore?: number;
   source: CoverageSource;
   /** Present for indirect hits; undefined for direct hits */
   expansionProvenance?: ExpansionProvenance;
   sourcePath?: string;
   drillDown?: EvidenceDrillDown;
+  /** Bounded representation used when the original item cannot fit the response budget. */
+  representation?: 'oversize-placeholder';
+  /** Stable non-reversible identity for an oversize source item. */
+  identityDigest?: string;
+  /** Explicitly explains why an oversize placeholder cannot expose a callable drill. */
+  drillUnavailable?: {
+    code: 'source-reference-unavailable' | 'drill-exceeds-placeholder-budget';
+  };
 }
 
 export interface CoverageBySource {
@@ -50,6 +67,38 @@ export interface CoverageSearchResult {
   matrix: CoverageMatrixItem[];
   gaps: string[];
   degraded?: Array<{ source: CoverageSource; reason: string }>;
+  contract: {
+    requested: {
+      scope: CoverageRequestedScope;
+      mode: CoverageSearchMode;
+      limit: number;
+      offset: number;
+    };
+    executed: {
+      scopes: Array<'docs' | 'threads'>;
+      mode: CoverageSearchMode;
+      limit: number;
+    };
+    latency: {
+      budgetMs: number;
+      elapsedMs: number;
+      timedOut: boolean;
+      eventLoopLagMaxMs: number;
+      abortPropagated: boolean;
+    };
+    response: {
+      budgetChars: number;
+      serializedChars: number;
+      truncated: boolean;
+      omittedItems: number;
+      oversizeItems: number;
+      hasMore: boolean;
+      drillDown?: {
+        tool: 'cat_cafe_search_evidence';
+        params: Record<string, string>;
+      };
+    };
+  };
 }
 
 // ── Per-source quota config ─────────────────────────────────────────
@@ -79,4 +128,26 @@ export interface CoverageSearchEvent {
   matrixSize: number;
   timestamp: number;
   threadId?: string;
+}
+
+export type CoverageSearchStage =
+  | 'direct-docs'
+  | 'direct-threads'
+  | 'frontmatter-expansion'
+  | 'source-thread-expansion'
+  | 'convention-expansion'
+  | 'serialization';
+
+export type CoverageSearchStageOutcome = 'ok' | 'deadline' | 'aborted' | 'error';
+
+/** Bounded operational evidence. Query text and source identifiers are intentionally excluded. */
+export interface CoverageSearchStageEvent {
+  coverageId: string;
+  stage: CoverageSearchStage;
+  durationMs: number;
+  remainingBudgetMs: number;
+  eventLoopLagMs: number;
+  outcome: CoverageSearchStageOutcome;
+  abortPropagated: boolean;
+  timestamp: number;
 }

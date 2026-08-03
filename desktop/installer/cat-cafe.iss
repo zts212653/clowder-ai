@@ -192,7 +192,7 @@ Filename: "powershell.exe"; \
   StatusMsg: "Configuring Agent CLI hooks..."; \
   Flags: runhidden waituntilterminated runasoriginaluser
 
-; Generate desktop-config.json (pass version + install type for update detection, #1107)
+; Generate desktop-config.json with release metadata (clowder-ai#1107 intake)
 Filename: "powershell.exe"; \
   Parameters: "-ExecutionPolicy Bypass -Command ""& '{app}\scripts\generate-desktop-config.ps1' -AppDir '{app}' -Version '{#MyAppVersion}' -InstallType 'installer'"""; \
   StatusMsg: "Generating desktop configuration..."; \

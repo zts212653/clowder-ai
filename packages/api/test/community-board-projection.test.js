@@ -206,6 +206,27 @@ describe('Task 9 — board aggregation projection enrichment', () => {
   });
 
   it('projection-only PR (webhook, not in legacy store) appears in prItems', async () => {
+    const externalReview = {
+      mode: 'maintainer_review',
+      cloudPolicy: 'optional',
+      lifecycle: 'pending_delivery',
+      currentHeadSha: 'abcdef1234567890',
+      lastReviewedHeadSha: 'abcdef1234567890',
+      lastDeliveredHeadSha: null,
+      ci: { headSha: 'abcdef1234567890', status: 'pass', observedAt: 1_500 },
+      cloud: null,
+      wake: null,
+      delivery: {
+        kind: 'pending_delivery',
+        headSha: 'abcdef1234567890',
+        ownerCatId: 'codex-sol',
+        reason: 'GitHub temporarily unavailable',
+        createdAt: 1_800,
+      },
+      reviewerCatId: 'codex-sol',
+      reviewerThreadId: 'thread-review',
+      actionLeaseRef: null,
+    };
     const prProjection = {
       repo: 'owner/repo',
       type: 'pr',
@@ -220,6 +241,7 @@ describe('Task 9 — board aggregation projection enrichment', () => {
       linkedIssues: [],
       linkedPrs: [],
       closureWaiver: null,
+      externalReview,
       appliedEventCount: 1,
       lastRejectedEvent: null,
       deliveryCursor: null,
@@ -243,6 +265,7 @@ describe('Task 9 — board aggregation projection enrichment', () => {
     const prItem = body.prItems.find((p) => p.prNumber === 88);
     assert.ok(prItem, 'projection-only PR #88 must appear in prItems');
     assert.strictEqual(prItem.projectionState, 'new', 'projectionState must be set from projection');
+    assert.deepStrictEqual(prItem.externalReview, externalReview, 'external review custody must be visible on board');
 
     await app.close();
   });

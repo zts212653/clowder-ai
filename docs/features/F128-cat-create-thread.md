@@ -8,6 +8,8 @@ created: 2026-03-19
 source: community
 community_issue: https://github.com/zts212653/clowder-ai/issues/82
 community_pr: https://github.com/zts212653/clowder-ai/pull/85
+user_journey_exempt: "predates-journey-gate; user flow documented in Phase A-AA AC: cat proposes thread (propose_thread card) → operator approves in Hub → thread created"
+tips_exempt: "cat-internal proposal lifecycle (including requester withdrawal) is surfaced through F246 Approval Hub, not a standalone user-invokable capability"
 ---
 
 # F128: Cat-Proposed Thread Creation — 猫猫提议创建 Thread
@@ -375,3 +377,52 @@ Maine Coon code review 抓 3 个 P1（同族：projectPath 契约在非主路径
 #### Scope Boundary
 
 - 本 Phase 只允许**创建前**修改 reportingMode。已创建子 thread 若要换模式，仍需新建/重提 thread；不做运行中动态切换，也不 retroactively 改旧 thread header。
+
+### Phase AD: GitHub Target ≠ projectPath Prompt Guard（2026-07-07）
+
+> **Status**: ✅ merged via PR #2783 (squash `05edfabb2`, 2026-07-07)
+> **Source**: operator 纠正 `proposal_mrat0ol4illwebqm`：`clowder-ai` PR #1095 review/tracking child thread 的 `projectPath` 被错设为 `/home/user/projects/relay-station/clowder-ai`，正确项目归属应为家里的 `/home/user/cat-cafe`。补提 proposal `proposal_mrathde1du9ddayx` 已修正。
+> **Why**: Phase Z/AB 已解决“能传 projectPath / default parent 强提示”，`thread-orchestration`、`opensource-ops`、`repo-inbox` 也已写明目标仓不是工作区。但实际失败发生在猫调用 `cat_cafe_propose_thread` 的瞬间：常驻 MCP tools quick index 只说“跨 repo 必传”，没有把 `GitHub target repo/PR/issue`、`source truth repo`、`child thread projectPath` 三者拆开。长 session / 多次压缩后，猫没加载完整 skill，就把 GitHub PR repo 机械映射成 child cwd。
+
+#### Design Decision
+
+1. **不在 callback route 猜业务语义**：route 继续只做授权、schema、canonical path 校验；`clowder-ai` 不是非法 projectPath，公开仓 checkout 任务仍合法需要它。
+2. **硬化猫常驻提示**：S13 `assets/prompt-templates/mcp-tools.md` 与 native L0/L5 `assets/prompt-templates/l5-mcp-tools-index.md` 的 `cat_cafe_propose_thread` 条目必须显式写 `GitHub target repo/PR/issue ≠ projectPath`。
+3. **锁实际弹孔**：`system-prompt-builder.test.js` 增加 clowder-ai PR review/triage/intake 回归测试，要求常驻 prompt 明确普通社区 review/triage/intake 用 `cat-cafe` projectPath，只有公开仓 checkout 操作才用 `clowder-ai`。
+4. **F225 边界**：同一肉身 session 横跨多条 issue/PR、且连续出现 repo/source/projectPath 混淆时，应在当前干净断点加载 `context-self-management`，按“线还是树 + 是否已压多轮 + 是否有干净断点”决定 propose session handoff；不能等到下一次错 proposal 后再治理。
+
+#### Acceptance Criteria
+
+- [x] AC-AD1: S13 MCP tools quick index 明确 `GitHub target repo/PR/issue ≠ projectPath`。
+- [x] AC-AD2: native L0/L5 MCP quick index 覆盖 `cat_cafe_propose_thread`，避免 native-L0 provider 跳过 S13 后丢失 projectPath guard。
+- [x] AC-AD3: 常驻 prompt 测试覆盖 `clowder-ai` PR review/triage/intake → `cat-cafe` projectPath 的语义，并保留 triage `reportingMode=none` 提示。
+- [x] AC-AD4: 模板提取校验与 L0 compiler 回归测试同步更新，避免 prompt template、extraction fixture、native L0 surface 再次漂移。
+- [x] AC-AD5: PR #2783 经 full `pnpm gate` 与 GitHub Brand Boundary Guard 通过后合入。
+
+### Phase AE: Requester Withdrawal（2026-07-31）
+
+> **Status**: ✅ merged via PR #3337 (squash `6971b7c5c`, 2026-07-31)
+> **Source**: message `0001785279417233-000077-cfa9912c`
+> **Why**: 猫误提 F128 proposal 后没有撤回能力，只能把错误决策留给用户 reject。requester withdrawal 应是猫修正自己未生效意图的生命周期动作，而 user reject 继续表达独立的用户决策。
+> **Architecture cell**: approval-index
+> **Map delta**: none
+> **Architecture why**: 扩展既有 F128 `ThreadProposal` store / Approval Hub lifecycle，不新增组件边界或所有权关系。
+
+#### Contract
+
+- 新增 `cat_cafe_withdraw_thread_proposal({ proposalId })`。服务端从 callback auth 取得 requester user/cat；调用方不能自报身份。
+- 只有 `createdBy` 与 `sourceCatId` 都匹配当前 requester 的 proposal 可撤回。
+- store 以 CAS 执行唯一状态迁移 `pending → withdrawn`；`approving`、`approved`、`rejected` 均 409 fail closed。
+- 同一 requester 对已 `withdrawn` proposal 重试返回 canonical `withdrawn` + `deduped: true`，不重复广播；其他身份仍 fail closed。
+- `withdrawnBy` / `withdrawnAt` 与原 proposal 来源、内容、创建审计共同持久化；withdrawn proposal 从 `listPending` / Approval Hub pending 投影消失。
+- 成功迁移广播 `proposal_updated`；ProposalCard 渲染撤回终态且不再展示用户 approve/reject controls。
+- user reject endpoint 保持独立的 user-principal 决策路径，不复用 requester withdrawal。
+
+#### Acceptance Criteria
+
+- [x] AC-AE1: 精确 requester 可撤回 pending proposal；跨 cat 与跨 user 均 403。
+- [x] AC-AE2: in-memory 与 Redis store 都以单赢家语义执行 `pending → withdrawn`，并持久化撤回审计。
+- [x] AC-AE3: approve/withdraw 与 reject/withdraw 竞态都只有一个终态赢家，不产生 orphan thread 或混合审计。
+- [x] AC-AE4: 同 requester 重试幂等且只广播一次；其他非 pending 状态 fail closed。
+- [x] AC-AE5: withdrawn proposal 从 pending 投影消失，前端收到 `proposal_updated` 后显示撤回终态并移除用户决策 controls。
+- [x] AC-AE6: MCP 注册、常驻 prompt/L5 索引与 prompt size guard 覆盖新能力；user reject 语义保持独立。

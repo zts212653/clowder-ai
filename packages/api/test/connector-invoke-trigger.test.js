@@ -3,6 +3,7 @@
 import assert from 'node:assert';
 import { beforeEach, describe, it } from 'node:test';
 import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
+import { InvocationRecordStore } from '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js';
 import { ConnectorInvokeTrigger } from '../dist/infrastructure/email/ConnectorInvokeTrigger.js';
 
 // ─── Mocks ───────────────────────────────────────────────────────
@@ -25,6 +26,7 @@ function noopLog() {
  * @param {object} [opts]
  * @param {Error} [opts.throwError] - If set, routeExecution throws this error
  * @param {boolean} [opts.persistenceFail] - If set, simulates persistence failure
+ * @param {any[]} [opts.messages] - Optional exact routeExecution messages to yield
  */
 function mockRouter(opts = {}) {
   const calls =
@@ -40,6 +42,13 @@ function mockRouter(opts = {}) {
         calls.push({ userId, message, threadId, userMessageId, targetCats, intent, options });
 
         if (opts.throwError) throw opts.throwError;
+
+        if (opts.messages) {
+          for (const msg of opts.messages) {
+            yield msg;
+          }
+          return;
+        }
 
         if (opts.persistenceFail && options?.persistenceContext) {
           options.persistenceContext.failed = true;
@@ -63,6 +72,43 @@ function mockRouter(opts = {}) {
       async ackCollectedCursors(userId, threadId, _boundaries) {
         ackCalls.push({ userId, threadId });
       },
+    },
+  };
+}
+
+/**
+ * Most unit routers below model provider-visible output only. Production emits
+ * a durable child `invocation_created` event immediately before that output.
+ * Keep that lifecycle boundary explicit in the shared harness; tests for
+ * pre-invocation router events opt out and yield the full sequence themselves.
+ * @param {any} router
+ */
+function withDurableChildStart(router) {
+  return {
+    ...router,
+    async *routeExecution(...args) {
+      const targetCats = args[4];
+      const options = args[6];
+      let childStartEmitted = false;
+      for await (const message of router.routeExecution(...args)) {
+        if (!childStartEmitted) {
+          childStartEmitted = true;
+          const startedAt = Date.now();
+          yield {
+            type: 'system_info',
+            catId: targetCats[0],
+            content: JSON.stringify({
+              type: 'invocation_created',
+              invocationId: `${options.parentInvocationId}-child`,
+              parentInvocationId: options.parentInvocationId,
+              executionKind: 'foreground',
+              startedAt,
+            }),
+            timestamp: startedAt,
+          };
+        }
+        yield message;
+      }
     },
   };
 }
@@ -99,6 +145,7 @@ function mockInvocationRecordStore() {
   /** @type {(() => void) | null} */
   let beforeUpdate = null;
   let duplicateOnCreate = false;
+  const records = new Map();
 
   return {
     creates,
@@ -112,25 +159,119 @@ function mockInvocationRecordStore() {
           return { outcome: 'duplicate', invocationId: 'inv-existing' };
         }
         createCounter++;
-        return { outcome: 'created', invocationId: `inv-${createCounter}` };
+        const invocationId = `inv-${createCounter}`;
+        records.set(invocationId, {
+          id: invocationId,
+          ...input,
+          userMessageId: null,
+          status: 'queued',
+        });
+        return { outcome: 'created', invocationId };
       },
       async update(id, data) {
         beforeUpdate?.();
         updates.push({ id, data });
+        const record = records.get(id);
+        if (!record) return null;
+        if (data.expectedStatus !== undefined && record.status !== data.expectedStatus) return null;
+        const { expectedStatus: _expectedStatus, ...patch } = data;
+        Object.assign(record, patch);
+        return record;
+      },
+      async get(id) {
+        return records.get(id) ?? null;
       },
       async getByIdempotencyKey(_threadId, _userId, _key) {
-        return null;
+        return records.get('inv-existing') ?? null;
       },
     },
-    /** Force next create to return duplicate */
-    setDuplicate() {
+    /** Force next create to return a duplicate record in the requested lifecycle state. */
+    setDuplicate(statusOrOverrides = 'succeeded') {
       duplicateOnCreate = true;
+      const overrides = typeof statusOrOverrides === 'string' ? { status: statusOrOverrides } : statusOrOverrides;
+      records.set('inv-existing', {
+        id: 'inv-existing',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        userMessageId: 'msg-1',
+        targetCats: ['opus'],
+        intent: 'execute',
+        idempotencyKey: 'connector-msg-1',
+        actionLeaseCarrier: { kind: 'none' },
+        status: overrides.status ?? 'succeeded',
+        ...(overrides.status === 'running' ? { executionStartedAt: Date.now() - 500 } : {}),
+        createdAt: Date.now() - 1_000,
+        updatedAt: Date.now() - 1_000,
+        ...overrides,
+      });
+    },
+    setMissingDuplicate() {
+      duplicateOnCreate = true;
+      records.delete('inv-existing');
     },
     setBeforeCreate(cb) {
       beforeCreate = cb;
     },
     setBeforeUpdate(cb) {
       beforeUpdate = cb;
+    },
+    setRecordStatus(id, status) {
+      const record = records.get(id);
+      if (record) record.status = status;
+    },
+  };
+}
+
+function sharedQueuedRaceRecordStore() {
+  let record = {
+    id: 'inv-existing',
+    threadId: 'thread-1',
+    userId: 'user-1',
+    userMessageId: 'msg-1',
+    targetCats: ['opus'],
+    intent: 'execute',
+    status: 'queued',
+    idempotencyKey: 'connector-msg-1',
+    actionLeaseCarrier: { kind: 'none' },
+    createdAt: Date.now() - 1_000,
+    updatedAt: Date.now() - 1_000,
+  };
+  let queuedReads = 0;
+  /** @type {() => void} */
+  let releaseQueuedReads;
+  const bothReadQueued = new Promise((resolve) => {
+    releaseQueuedReads = resolve;
+  });
+
+  return {
+    /** @type {any} */
+    store: {
+      async create() {
+        return { outcome: 'duplicate', invocationId: record.id };
+      },
+      async get(id) {
+        if (id !== record.id) return null;
+        const snapshot = { ...record };
+        if (snapshot.status === 'queued') {
+          queuedReads++;
+          if (queuedReads === 2) releaseQueuedReads();
+          await bothReadQueued;
+        }
+        return snapshot;
+      },
+      async update(id, data) {
+        if (id !== record.id) return null;
+        if (data.expectedStatus !== undefined && record.status !== data.expectedStatus) return null;
+        const { expectedStatus: _expectedStatus, ...patch } = data;
+        record = { ...record, ...patch, updatedAt: Date.now() };
+        return { ...record };
+      },
+      async getByIdempotencyKey() {
+        return { ...record };
+      },
+    },
+    getRecord() {
+      return { ...record };
     },
   };
 }
@@ -139,6 +280,7 @@ function mockInvocationTracker() {
   const starts = /** @type {Array<{threadId: string, catId: string}>} */ ([]);
   const tryStartThreadCalls = /** @type {Array<{threadId: string, catId: string}>} */ ([]);
   const completes = /** @type {Array<{threadId: string, catId: string}>} */ ([]);
+  const slotCompletes = /** @type {Array<{threadId: string, catId: string, controller: AbortController}>} */ ([]);
   const cancelCalls = /** @type {Array<{threadId: string, catId: string, userId: (string|undefined)}>} */ ([]);
   let aborted = false;
   let cancelDenied = false;
@@ -149,6 +291,7 @@ function mockInvocationTracker() {
     starts,
     tryStartThreadCalls,
     completes,
+    slotCompletes,
     cancelCalls,
     setAborted(val) {
       aborted = val;
@@ -177,6 +320,12 @@ function mockInvocationTracker() {
       },
       complete(threadId, catId, _controller) {
         completes.push({ threadId, catId });
+      },
+      completeSlot(threadId, catId, controller) {
+        slotCompletes.push({ threadId, catId, controller });
+      },
+      trackExternalSlot() {
+        return true;
       },
       has(threadId, _catId) {
         return activeSlots.has(threadId);
@@ -221,14 +370,19 @@ describe('ConnectorInvokeTrigger', () => {
   });
 
   function createTrigger(overrides = {}) {
+    const {
+      router: overrideRouter = routerMock.router,
+      routerIncludesInvocationLifecycle = false,
+      ...triggerOverrides
+    } = overrides;
     return new ConnectorInvokeTrigger({
-      router: routerMock.router,
+      router: routerIncludesInvocationLifecycle ? overrideRouter : withDurableChildStart(overrideRouter),
       socketManager: socketMock.manager,
       invocationRecordStore: recordMock.store,
       invocationTracker: trackerMock.tracker,
       invocationQueue: queue,
       log: noopLog(),
-      ...overrides,
+      ...triggerOverrides,
     });
   }
 
@@ -258,6 +412,410 @@ describe('ConnectorInvokeTrigger', () => {
     assert.deepStrictEqual(routerMock.calls[0].targetCats, ['opus']);
   });
 
+  it('passes a trusted GitHub delivery-decision carrier through the direct execution path', async () => {
+    const headSha = 'a'.repeat(40);
+    const storedMessage = {
+      id: 'msg-billing',
+      threadId: 'thread-billing',
+      userId: 'user-1',
+      catId: null,
+      content: 'GitHub CI failed before any source step ran.',
+      source: { connector: 'github-ci', label: 'GitHub CI/CD' },
+      mentions: ['opus'],
+      timestamp: 1_785_600_000_000,
+      extra: {
+        memoryCue: {
+          deliveryDecision: {
+            v: 1,
+            producer: 'github_ci',
+            producerProvenance: 'server_github_ci',
+            repoFullName: 'zts212653/cat-cafe',
+            prNumber: 3276,
+            headSha,
+            phase: 'merge_gate',
+            gateOutcome: 'source_evidence_complete',
+            externalCondition: 'billing_spending_limit_zero_step',
+            candidateAction: 'merge',
+            occurredAt: 1_785_600_000_000,
+          },
+        },
+      },
+    };
+    const trigger = createTrigger({
+      messageStore: {
+        getById: async (id) => (id === storedMessage.id ? storedMessage : undefined),
+      },
+    });
+
+    await trigger.trigger(
+      storedMessage.threadId,
+      /** @type {any} */ ('opus'),
+      storedMessage.userId,
+      storedMessage.content,
+      storedMessage.id,
+      undefined,
+      { sourceCategory: 'ci' },
+    );
+    await waitForTrigger();
+
+    assert.deepStrictEqual(routerMock.calls[0].options.memoryCueOpportunitySeeds, [
+      {
+        kind: 'delivery_decision',
+        producer: 'github_ci',
+        occurredAt: 1_785_600_000_000,
+        payload: {
+          repoFullName: 'zts212653/cat-cafe',
+          prNumber: 3276,
+          headSha,
+          phase: 'merge_gate',
+          gateOutcome: 'source_evidence_complete',
+          externalCondition: 'billing_spending_limit_zero_step',
+          candidateAction: 'merge',
+          sourceMessageId: storedMessage.id,
+        },
+      },
+    ]);
+  });
+
+  it('passes an authoritative A2A slot claim and durable deferral into connector execution', async () => {
+    trackerMock.tracker.trackExternalSlot = () => false;
+    trackerMock.tracker.completeSlot = () => {};
+    const trigger = createTrigger();
+
+    trigger.trigger('thread-a2a-admission', /** @type {any} */ ('opus'), 'user-1', 'Review msg', 'msg-review');
+    await waitForTrigger();
+
+    const options = /** @type {any} */ (routerMock.calls[0].options);
+    assert.ok(options.invocationController, 'connector route must expose its tracker controller to A2A admission');
+    assert.equal(typeof options.trackA2ASlot, 'function');
+    assert.equal(typeof options.completeA2ASlots, 'function');
+    assert.equal(
+      options.trackA2ASlot('thread-a2a-admission', 'codex', 'user-1', options.invocationController),
+      false,
+      'another live owner must reject inline A2A execution',
+    );
+
+    const enqueue = options.deferA2AEnqueue({
+      threadId: 'thread-a2a-admission',
+      userId: 'user-1',
+      content: '@codex review complete',
+      source: 'agent',
+      ownerAuthProvenance: 'unknown',
+      sourceCategory: 'a2a',
+      targetCats: ['codex'],
+      callerCatId: 'opus',
+      messageId: 'msg-review',
+      a2aTriggerMessageId: 'msg-review',
+      autoExecute: true,
+      priority: 'normal',
+      intent: 'execute',
+    });
+    assert.equal(enqueue.outcome, 'enqueued');
+    assert.equal(queue.list('thread-a2a-admission', 'user-1')[0].messageId, 'msg-review');
+  });
+
+  it('releases a terminal dynamic A2A child with the connector route controller', async () => {
+    let routeController;
+    const dynamicRouter = {
+      async *routeExecution(_userId, _message, threadId, _messageId, _targetCats, _intent, options) {
+        routeController = options.invocationController;
+        assert.equal(options.trackA2ASlot(threadId, 'codex', 'user-1', routeController), true);
+        yield { type: 'done', catId: 'codex', isFinal: true, timestamp: Date.now() };
+      },
+      async ackCollectedCursors() {},
+    };
+    const trigger = createTrigger({ router: dynamicRouter });
+
+    trigger.trigger('thread-connector-child', /** @type {any} */ ('opus'), 'user-1', 'Review msg', 'msg-child');
+    await waitForTrigger();
+
+    const dynamicCompletions = trackerMock.slotCompletes.filter((call) => call.catId === 'codex');
+    assert.equal(dynamicCompletions.length, 1);
+    assert.equal(dynamicCompletions[0].threadId, 'thread-connector-child');
+    assert.equal(dynamicCompletions[0].controller, routeController);
+  });
+
+  it('projects a direct managed-command wake from its persisted hold carrier', async () => {
+    const trigger = createTrigger({
+      messageStore: {
+        getById: async (messageId) =>
+          messageId === 'msg-hold-complete' ? { source: { connector: 'hold-ball' } } : null,
+      },
+    });
+
+    await trigger.trigger(
+      'thread-1',
+      /** @type {any} */ ('opus'),
+      'user-1',
+      'Managed command completed.',
+      'msg-hold-complete',
+      undefined,
+      { sourceCategory: 'scheduled' },
+    );
+    await waitForTrigger();
+
+    assert.deepStrictEqual(routerMock.calls[0].options?.turnCustodyWake, {
+      kind: 'structured',
+      protocol: 'hold',
+      subjectKey: 'ball:thread:thread-1',
+      holderCatId: 'opus',
+    });
+  });
+
+  it('projects a direct A2A wake from the exact trigger handoff', async () => {
+    const trigger = createTrigger({
+      messageStore: {
+        getById: async (messageId) => (messageId === 'msg-a2a' ? { catId: 'codex-sol' } : null),
+      },
+    });
+
+    await trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'A2A handoff.', 'msg-a2a', undefined, {
+      sourceCategory: 'a2a',
+    });
+    await waitForTrigger();
+
+    const expected = {
+      kind: 'structured',
+      protocol: 'dispatch',
+      subjectKey: 'ball:thread:thread-1',
+      holderCatId: 'opus',
+      handoff: {
+        sourceEventId: 'route:msg-a2a:opus',
+        messageId: 'msg-a2a',
+        fromCatId: 'codex-sol',
+      },
+    };
+    assert.deepStrictEqual(routerMock.calls[0].options?.turnCustodyWake, expected);
+    assert.deepStrictEqual(routerMock.calls[0].options?.turnCustodyWakeForCat('opus'), expected);
+  });
+
+  it('binds exact incremental prompt exposure through QueueProcessor', async () => {
+    const seenCalls = [];
+    const exposingRouter = /** @type {any} */ ({
+      async *routeExecution(userId, _message, threadId, _userMessageId, targetCats, _intent, options) {
+        await options.onPromptMessagesExposed({
+          threadId,
+          userId,
+          catId: targetCats[0],
+          invocationId: options.parentInvocationId,
+          messageIds: ['queued-work-period-message'],
+        });
+        yield { type: 'done', catId: targetCats[0], content: '', timestamp: Date.now() };
+      },
+      async ackCollectedCursors() {},
+    });
+    const trigger = createTrigger({
+      router: exposingRouter,
+      queueProcessor: {
+        isThreadBusy: () => false,
+        async markPromptMessagesSeen(input) {
+          seenCalls.push(input);
+        },
+        async onInvocationComplete() {},
+      },
+    });
+
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Review msg', 'msg-1');
+    await waitForTrigger();
+
+    assert.deepStrictEqual(seenCalls, [
+      {
+        threadId: 'thread-1',
+        userId: 'user-1',
+        catId: 'opus',
+        invocationId: 'inv-1',
+        messageIds: ['queued-work-period-message'],
+      },
+    ]);
+  });
+
+  it('F254 Phase E: does not deliver a superseded draft from the direct connector path', async () => {
+    const staleRouter = /** @type {any} */ ({
+      async *routeExecution(_userId, _message, _threadId, _userMessageId, _targetCats, _intent, options) {
+        yield { type: 'text', catId: 'opus', content: 'stale draft', timestamp: Date.now() };
+        if (options?.persistenceContext) {
+          options.persistenceContext.outputCommitDecisions = {
+            opus: {
+              kind: 'superseded_positive_stale',
+              closureId: 'closure-1',
+              requiredFrontierMessageId: 'msg-newer',
+            },
+          };
+        }
+        yield { type: 'done', catId: 'opus', content: '', timestamp: Date.now() };
+      },
+      async ackCollectedCursors() {},
+    });
+    const deliverCalls = /** @type {Array<{content: string, catId: string}>} */ ([]);
+    const streamEndCalls = /** @type {string[]} */ ([]);
+    const trigger = createTrigger({
+      router: staleRouter,
+      outboundHook: {
+        async deliver(_threadId, content, catId) {
+          deliverCalls.push({ content, catId });
+        },
+      },
+      streamingHook: {
+        async onStreamStart() {},
+        async onStreamChunk() {},
+        async onStreamEnd(_threadId, content) {
+          streamEndCalls.push(content);
+        },
+        async cleanupPlaceholders() {},
+      },
+    });
+
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-f254-stale');
+    await waitForTrigger();
+
+    assert.deepStrictEqual(deliverCalls, [], 'known-stale draft must not leave through connector delivery');
+    assert.deepStrictEqual(streamEndCalls, [''], 'streaming final must not expose known-stale content');
+  });
+
+  it('ADR-042 delivers a published-with-unseen answer through the direct connector path', async () => {
+    const publishedRouter = /** @type {any} */ ({
+      async *routeExecution(_userId, _message, _threadId, _userMessageId, _targetCats, _intent, options) {
+        yield { type: 'text', catId: 'opus', content: 'published answer', timestamp: Date.now() };
+        if (options?.persistenceContext) {
+          options.persistenceContext.outputCommitDecisions = {
+            opus: {
+              kind: 'published_with_unseen',
+              messageId: 'msg-published',
+              lineageId: 'msg-published',
+              offeredSupplementId: 'f254-supplement:msg-published:1',
+              requiredFrontierMessageId: 'msg-newer',
+            },
+          };
+        }
+        yield { type: 'done', catId: 'opus', content: '', timestamp: Date.now() };
+      },
+      async ackCollectedCursors() {},
+    });
+    const deliverCalls = [];
+    const streamEndCalls = [];
+    const trigger = createTrigger({
+      router: publishedRouter,
+      outboundHook: {
+        async deliver(_threadId, content, catId) {
+          deliverCalls.push({ content, catId });
+        },
+      },
+      streamingHook: {
+        async onStreamStart() {},
+        async onStreamChunk() {},
+        async onStreamEnd(_threadId, content) {
+          streamEndCalls.push(content);
+        },
+        async cleanupPlaceholders() {},
+      },
+    });
+
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-f254-published');
+    await waitForTrigger();
+
+    assert.deepStrictEqual(deliverCalls, [{ content: 'published answer', catId: 'opus' }]);
+    assert.deepStrictEqual(streamEndCalls, ['published answer']);
+  });
+
+  for (const scenario of [
+    {
+      name: 'catching-up',
+      decision: {
+        kind: 'superseded_positive_stale',
+        closureId: 'closure-codex',
+        requiredFrontierMessageId: 'msg-newer',
+      },
+    },
+    {
+      name: 'blocked',
+      decision: {
+        kind: 'blocked_known_closure',
+        closureId: 'closure-codex',
+        reason: 'attempt_budget_exhausted',
+      },
+    },
+  ]) {
+    it(`F254 Phase E: direct connector projects a non-primary ${scenario.name} output under its owner cat`, async () => {
+      const projectionCalls = [];
+      const multiCatRouter = /** @type {any} */ ({
+        async *routeExecution(_userId, _message, _threadId, _userMessageId, _targetCats, _intent, options) {
+          yield { type: 'text', catId: 'codex', content: 'withheld codex draft', timestamp: Date.now() };
+          if (options?.persistenceContext) {
+            options.persistenceContext.outputCommitDecisions = { codex: scenario.decision };
+          }
+          yield { type: 'done', catId: 'codex', content: '', timestamp: Date.now() };
+        },
+        async ackCollectedCursors() {},
+      });
+      const trigger = createTrigger({
+        router: multiCatRouter,
+        streamingHook: {
+          async onStreamStart() {},
+          async onStreamChunk() {},
+          async onStreamEnd() {},
+          async cleanupPlaceholders() {},
+          async onClosureCatchingUp(_threadId, ownerCatId) {
+            projectionCalls.push({ kind: 'catching_up', ownerCatId });
+          },
+          async onClosureBlocked(_threadId, ownerCatId) {
+            projectionCalls.push({ kind: 'blocked', ownerCatId });
+          },
+        },
+      });
+
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', `msg-${scenario.name}`);
+      await waitForTrigger();
+
+      assert.deepStrictEqual(projectionCalls, [
+        {
+          kind: scenario.decision.kind === 'blocked_known_closure' ? 'blocked' : 'catching_up',
+          ownerCatId: 'codex',
+        },
+      ]);
+    });
+  }
+
+  it('F254 Phase E: direct connector catches enqueue a runnable closure successor', async () => {
+    const successorRouter = /** @type {any} */ ({
+      async *routeExecution(_userId, _message, threadId, _userMessageId, targetCats, _intent, options) {
+        options?.freshnessReinvokeEnqueue?.({
+          threadId,
+          userId: 'user-1',
+          content: '[Freshness Catch Closure closure-connector] replacement prompt',
+          source: 'agent',
+          ownerAuthProvenance: 'unknown',
+          sourceCategory: 'freshness',
+          targetCats,
+          callerCatId: targetCats[0],
+          autoExecute: true,
+          priority: 'normal',
+          intent: 'execute',
+          idempotencyKey: 'freshness-closure:closure-connector',
+          freshnessClosureId: 'closure-connector',
+          freshnessRequiredFrontierMessageId: 'msg-newer',
+          freshnessContext: {
+            sourceNoticeIds: [],
+            senders: ['user'],
+            reason: 'stream_output_stale',
+          },
+        });
+        yield { type: 'done', catId: targetCats[0], content: '', timestamp: Date.now() };
+      },
+      async ackCollectedCursors() {},
+    });
+    const trigger = createTrigger({ router: successorRouter });
+
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-f254-connector-catch');
+    await waitForTrigger();
+
+    const queued = queue.list('thread-1', 'user-1');
+    assert.strictEqual(queued.length, 1, 'positive-stale connector output must schedule its replacement');
+    assert.strictEqual(queued[0].freshnessClosureId, 'closure-connector');
+    assert.strictEqual(queued[0].freshnessRequiredFrontierMessageId, 'msg-newer');
+    assert.strictEqual(queued[0].autoExecute, true);
+    assert.strictEqual('freshnessContext' in queued[0], false, 'ephemeral context must not enter queue truth');
+  });
+
   it('F222 P1: connector direct routeExecution passes frustrationAutoIssueEligible=false', async () => {
     const trigger = createTrigger();
     trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Review msg', 'msg-f222');
@@ -269,6 +827,7 @@ describe('ConnectorInvokeTrigger', () => {
       false,
       'connector direct execution must suppress frustration detection',
     );
+    assert.strictEqual(routerMock.calls[0].options?.humanDispositionInvocationOrigin, 'connector');
   });
 
   it('broadcasts agent messages to WebSocket room', async () => {
@@ -276,11 +835,13 @@ describe('ConnectorInvokeTrigger', () => {
     trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Review msg', 'msg-1');
     await waitForTrigger();
 
-    // Should have broadcast text + done messages
+    // Should expose the durable child lifecycle boundary before text + done.
     const agentBroadcasts = socketMock.broadcasts.filter((b) => b.threadId === 'thread-1');
-    assert.ok(agentBroadcasts.length >= 2, `Expected at least 2 broadcasts, got ${agentBroadcasts.length}`);
-    assert.strictEqual(agentBroadcasts[0].msg.type, 'text');
-    assert.strictEqual(agentBroadcasts[1].msg.type, 'done');
+    assert.ok(agentBroadcasts.length >= 3, `Expected at least 3 broadcasts, got ${agentBroadcasts.length}`);
+    assert.strictEqual(agentBroadcasts[0].msg.type, 'system_info');
+    assert.strictEqual(JSON.parse(agentBroadcasts[0].msg.content).type, 'invocation_created');
+    assert.strictEqual(agentBroadcasts[1].msg.type, 'text');
+    assert.strictEqual(agentBroadcasts[2].msg.type, 'done');
 
     // Should have broadcast intent_mode
     const intentBroadcast = socketMock.roomBroadcasts.find((b) => b.event === 'intent_mode');
@@ -288,24 +849,24 @@ describe('ConnectorInvokeTrigger', () => {
     assert.strictEqual(intentBroadcast.data.mode, 'execute');
   });
 
-  it('updates InvocationRecord through lifecycle: userMessageId → running → succeeded', async () => {
+  it('updates InvocationRecord through lifecycle: queued → running → succeeded', async () => {
     const trigger = createTrigger();
     await trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
     await waitForTrigger();
 
     // Check update sequence
     const updates = recordMock.updates;
-    assert.ok(updates.length >= 3, `Expected at least 3 updates, got ${updates.length}`);
+    assert.ok(updates.length >= 2, `Expected at least 2 updates, got ${updates.length}`);
 
-    // First update: backfill userMessageId
+    // First update: atomically claim queued and bind the triggering message.
     assert.strictEqual(updates[0].data.userMessageId, 'msg-1');
-
-    // Second update: status running
-    assert.strictEqual(updates[1].data.status, 'running');
+    assert.strictEqual(updates[0].data.status, 'running');
+    assert.strictEqual(updates[0].data.expectedStatus, 'queued');
 
     // Last update: status succeeded
     const lastUpdate = updates[updates.length - 1];
     assert.strictEqual(lastUpdate.data.status, 'succeeded');
+    assert.deepStrictEqual(lastUpdate.data.successfulCatIds, ['opus']);
   });
 
   it('acks cursor boundaries on success', async () => {
@@ -328,22 +889,441 @@ describe('ConnectorInvokeTrigger', () => {
     assert.strictEqual(trackerMock.completes[0].threadId, 'thread-1');
   });
 
-  it('skips duplicate invocations', async () => {
+  it('does not rerun duplicate invocations already known to have succeeded', async () => {
     recordMock.setDuplicate();
     const trigger = createTrigger();
-    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
+    const outcome = await trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
     await waitForTrigger();
 
+    assert.strictEqual(outcome, 'dispatched');
     // Should not call routeExecution
     assert.strictEqual(routerMock.calls.length, 0);
     // Should not start tracker
     assert.strictEqual(trackerMock.starts.length, 0);
   });
 
+  for (const status of ['queued', 'failed']) {
+    it(`replays the same durable InvocationRecord when a duplicate is ${status}`, async () => {
+      recordMock.setDuplicate({ status, ...(status === 'failed' ? { error: 'process_restart' } : {}) });
+      const trigger = createTrigger();
+
+      assert.equal(
+        await trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1'),
+        'dispatched',
+      );
+      await waitForTrigger();
+
+      assert.equal(routerMock.calls.length, 1, `${status} carrier must be redriven`);
+      const claim = recordMock.updates.find(
+        (update) => update.id === 'inv-existing' && update.data.status === 'running',
+      );
+      assert.deepEqual(claim?.data, {
+        userMessageId: 'msg-1',
+        status: 'running',
+        expectedStatus: status,
+        ...(status === 'failed' ? { error: '' } : {}),
+      });
+    });
+  }
+
+  it('allows only one worker to recover the same queued duplicate', async () => {
+    const sharedRecordMock = sharedQueuedRaceRecordStore();
+    const trackerA = mockInvocationTracker();
+    const trackerB = mockInvocationTracker();
+    const triggerA = createTrigger({
+      invocationRecordStore: sharedRecordMock.store,
+      invocationTracker: trackerA.tracker,
+    });
+    const triggerB = createTrigger({
+      invocationRecordStore: sharedRecordMock.store,
+      invocationTracker: trackerB.tracker,
+    });
+
+    const outcomes = await Promise.allSettled([
+      triggerA.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1'),
+      triggerB.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1'),
+    ]);
+    await waitForTrigger();
+
+    assert.ok(
+      outcomes.every(
+        (outcome) =>
+          (outcome.status === 'fulfilled' && outcome.value === 'dispatched') ||
+          (outcome.status === 'rejected' && /running without execution-start receipt/.test(String(outcome.reason))),
+      ),
+      'the CAS loser may acknowledge only after observing the winner start; otherwise it must fail closed',
+    );
+    assert.ok(outcomes.some((outcome) => outcome.status === 'fulfilled' && outcome.value === 'dispatched'));
+    assert.strictEqual(routerMock.calls.length, 1, 'only the worker that atomically claims queued may execute');
+    assert.strictEqual(sharedRecordMock.getRecord().status, 'succeeded');
+    assert.strictEqual(trackerA.completes.length, 1);
+    assert.strictEqual(trackerB.completes.length, 1);
+  });
+
+  it('rejects a running duplicate until the claimed executor has a durable start receipt', async () => {
+    const sharedStore = new InvocationRecordStore();
+    const trackerA = mockInvocationTracker();
+    const trackerB = mockInvocationTracker();
+    let routeCalls = 0;
+    /** @type {() => void} */
+    let signalEntered;
+    const entered = new Promise((resolve) => {
+      signalEntered = resolve;
+    });
+    /** @type {() => void} */
+    let releaseRoute;
+    const routeReleased = new Promise((resolve) => {
+      releaseRoute = resolve;
+    });
+    const blockingRouter = /** @type {any} */ ({
+      async *routeExecution(_userId, _message, _threadId, _messageId, targetCats) {
+        routeCalls++;
+        signalEntered();
+        await routeReleased;
+        yield { type: 'text', catId: targetCats[0], content: 'started', timestamp: Date.now() };
+        yield { type: 'done', catId: targetCats[0], content: '', timestamp: Date.now() };
+      },
+      async ackCollectedCursors() {},
+    });
+    const triggerA = createTrigger({
+      router: blockingRouter,
+      invocationRecordStore: sharedStore,
+      invocationTracker: trackerA.tracker,
+    });
+    const triggerB = createTrigger({
+      router: blockingRouter,
+      invocationRecordStore: sharedStore,
+      invocationTracker: trackerB.tracker,
+    });
+
+    const firstOutcome = triggerA.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
+    await entered;
+
+    const claimed = sharedStore.getByIdempotencyKey('thread-1', 'user-1', 'connector-msg-1');
+    assert.strictEqual(claimed?.status, 'running');
+    assert.strictEqual(claimed?.executionStartedAt, undefined);
+
+    try {
+      await assert.rejects(
+        triggerB.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1'),
+        /running without execution-start receipt/,
+      );
+      assert.strictEqual(routeCalls, 1, 'duplicate worker must not execute before start receipt exists');
+    } finally {
+      releaseRoute();
+    }
+
+    assert.strictEqual(await firstOutcome, 'dispatched');
+    await waitForTrigger();
+    const completed = sharedStore.getByIdempotencyKey('thread-1', 'user-1', 'connector-msg-1');
+    assert.strictEqual(completed?.status, 'succeeded');
+    assert.strictEqual(typeof completed?.executionStartedAt, 'number');
+    assert.strictEqual(routeCalls, 1);
+  });
+
+  it('does not acknowledge a failed replay from the previous attempt receipt', async () => {
+    const sharedStore = new InvocationRecordStore();
+    const { invocationId } = await sharedStore.create({
+      threadId: 'thread-1',
+      userId: 'user-1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'connector-msg-1',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    sharedStore.update(invocationId, { status: 'running', expectedStatus: 'queued' });
+    sharedStore.update(invocationId, {
+      executionStartedAt: Date.now() - 1_000,
+      expectedStatus: 'running',
+    });
+    sharedStore.update(invocationId, {
+      status: 'failed',
+      error: 'process_restart',
+      expectedStatus: 'running',
+    });
+
+    const trackerA = mockInvocationTracker();
+    const trackerB = mockInvocationTracker();
+    let routeCalls = 0;
+    /** @type {() => void} */
+    let signalEntered;
+    const entered = new Promise((resolve) => {
+      signalEntered = resolve;
+    });
+    /** @type {() => void} */
+    let releaseChildCreation;
+    const childCreationReleased = new Promise((resolve) => {
+      releaseChildCreation = resolve;
+    });
+    const blockingRouter = /** @type {any} */ ({
+      async *routeExecution(_userId, _message, _threadId, _messageId, targetCats, _intent, options) {
+        routeCalls++;
+        signalEntered();
+        await childCreationReleased;
+        yield {
+          type: 'system_info',
+          catId: targetCats[0],
+          content: JSON.stringify({
+            type: 'invocation_created',
+            invocationId: 'child-retry-1',
+            parentInvocationId: options.parentInvocationId,
+            executionKind: 'foreground',
+            startedAt: Date.now(),
+          }),
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: targetCats[0], content: '', timestamp: Date.now() };
+      },
+      async ackCollectedCursors() {},
+    });
+    const triggerA = createTrigger({
+      router: blockingRouter,
+      routerIncludesInvocationLifecycle: true,
+      invocationRecordStore: sharedStore,
+      invocationTracker: trackerA.tracker,
+    });
+    const triggerB = createTrigger({
+      router: blockingRouter,
+      routerIncludesInvocationLifecycle: true,
+      invocationRecordStore: sharedStore,
+      invocationTracker: trackerB.tracker,
+    });
+
+    const firstOutcome = triggerA.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
+    await entered;
+
+    try {
+      const claimed = sharedStore.get(invocationId);
+      assert.strictEqual(claimed?.status, 'running');
+      assert.strictEqual(
+        claimed?.executionStartedAt,
+        undefined,
+        'a new failed-record attempt must not inherit the previous attempt receipt',
+      );
+      await assert.rejects(
+        triggerB.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1'),
+        /running without execution-start receipt/,
+      );
+      assert.strictEqual(routeCalls, 1, 'the duplicate must not execute or acknowledge before the new receipt');
+    } finally {
+      releaseChildCreation();
+      await firstOutcome;
+      await waitForTrigger();
+    }
+
+    const completed = sharedStore.get(invocationId);
+    assert.strictEqual(completed?.status, 'succeeded');
+    assert.strictEqual(typeof completed?.executionStartedAt, 'number');
+    assert.strictEqual(routeCalls, 1);
+  });
+
+  for (const [label, buildPreInvocationMessages] of [
+    [
+      'incremental degradation',
+      (_parentInvocationId, catId) => [
+        { type: 'system_info', catId, content: 'incremental context was truncated', timestamp: Date.now() },
+      ],
+    ],
+    [
+      'context briefing',
+      (_parentInvocationId, catId) => [
+        {
+          type: 'system_info',
+          catId,
+          content: JSON.stringify({ type: 'context_briefing', messageId: 'briefing-1' }),
+          timestamp: Date.now(),
+        },
+      ],
+    ],
+    [
+      'malformed or foreign invocation_created',
+      (parentInvocationId, catId) => [
+        {
+          type: 'system_info',
+          catId,
+          content: JSON.stringify({ type: 'invocation_created', invocationId: '', parentInvocationId }),
+          timestamp: Date.now(),
+        },
+        {
+          type: 'system_info',
+          catId,
+          content: JSON.stringify({
+            type: 'invocation_created',
+            invocationId: 'child-from-another-parent',
+            parentInvocationId: 'another-parent',
+            startedAt: Date.now(),
+          }),
+          timestamp: Date.now(),
+        },
+      ],
+    ],
+  ]) {
+    it(`does not acknowledge ${label} as durable child execution`, async () => {
+      const sharedStore = new InvocationRecordStore();
+      const trackerA = mockInvocationTracker();
+      const trackerB = mockInvocationTracker();
+      let routeCalls = 0;
+      /** @type {() => void} */
+      let signalPreInvocationConsumed;
+      const preInvocationConsumed = new Promise((resolve) => {
+        signalPreInvocationConsumed = resolve;
+      });
+      /** @type {() => void} */
+      let releaseChildCreation;
+      const childCreationReleased = new Promise((resolve) => {
+        releaseChildCreation = resolve;
+      });
+      const blockingRouter = /** @type {any} */ ({
+        async *routeExecution(_userId, _message, _threadId, _messageId, targetCats, _intent, options) {
+          routeCalls++;
+          for (const preInvocationMessage of buildPreInvocationMessages(options.parentInvocationId, targetCats[0])) {
+            yield preInvocationMessage;
+          }
+          signalPreInvocationConsumed();
+          await childCreationReleased;
+          yield {
+            type: 'system_info',
+            catId: targetCats[0],
+            content: JSON.stringify({
+              type: 'invocation_created',
+              invocationId: 'child-invocation-1',
+              parentInvocationId: options.parentInvocationId,
+              executionKind: 'foreground',
+              startedAt: Date.now(),
+            }),
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId: targetCats[0], content: '', timestamp: Date.now() };
+        },
+        async ackCollectedCursors() {},
+      });
+      const triggerA = createTrigger({
+        router: blockingRouter,
+        routerIncludesInvocationLifecycle: true,
+        invocationRecordStore: sharedStore,
+        invocationTracker: trackerA.tracker,
+      });
+      const triggerB = createTrigger({
+        router: blockingRouter,
+        routerIncludesInvocationLifecycle: true,
+        invocationRecordStore: sharedStore,
+        invocationTracker: trackerB.tracker,
+      });
+
+      const firstOutcome = triggerA.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
+      await preInvocationConsumed;
+
+      try {
+        const claimed = sharedStore.getByIdempotencyKey('thread-1', 'user-1', 'connector-msg-1');
+        assert.strictEqual(
+          claimed?.executionStartedAt,
+          undefined,
+          `${label} must not create an execution-start receipt`,
+        );
+        await assert.rejects(
+          triggerB.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1'),
+          /running without execution-start receipt/,
+        );
+        assert.strictEqual(routeCalls, 1, 'duplicate worker must not execute before invocation_created');
+      } finally {
+        releaseChildCreation();
+      }
+
+      assert.strictEqual(await firstOutcome, 'dispatched');
+      await waitForTrigger();
+      const completed = sharedStore.getByIdempotencyKey('thread-1', 'user-1', 'connector-msg-1');
+      assert.strictEqual(completed?.status, 'succeeded');
+      assert.strictEqual(typeof completed?.executionStartedAt, 'number');
+      assert.strictEqual(routeCalls, 1);
+    });
+  }
+
+  for (const statusAfterConflict of ['failed', 'canceled', 'missing']) {
+    it(`fails closed when a queued claim loser re-reads ${statusAfterConflict}`, async () => {
+      let reads = 0;
+      const queuedRecord = {
+        id: 'inv-existing',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        userMessageId: 'msg-1',
+        targetCats: ['opus'],
+        intent: 'execute',
+        status: 'queued',
+        idempotencyKey: 'connector-msg-1',
+        actionLeaseCarrier: { kind: 'none' },
+        createdAt: Date.now() - 1_000,
+        updatedAt: Date.now() - 1_000,
+      };
+      const conflictingStore = /** @type {any} */ ({
+        async create() {
+          return { outcome: 'duplicate', invocationId: queuedRecord.id };
+        },
+        async get() {
+          reads++;
+          if (reads === 1) return { ...queuedRecord };
+          return statusAfterConflict === 'missing' ? null : { ...queuedRecord, status: statusAfterConflict };
+        },
+        async update() {
+          return null;
+        },
+      });
+      const trigger = createTrigger({ invocationRecordStore: conflictingStore });
+
+      await assert.rejects(
+        trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1'),
+        new RegExp(`status: ${statusAfterConflict}`),
+      );
+
+      assert.strictEqual(routerMock.calls.length, 0);
+      assert.strictEqual(trackerMock.completes.length, 1);
+    });
+  }
+
+  it('acknowledges a running duplicate without starting a second execution', async () => {
+    recordMock.setDuplicate('running');
+    const trigger = createTrigger();
+
+    const outcome = await trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
+    await waitForTrigger();
+
+    assert.strictEqual(outcome, 'dispatched');
+    assert.strictEqual(routerMock.calls.length, 0);
+    assert.strictEqual(trackerMock.completes.length, 1);
+  });
+
+  it('rejects a canceled duplicate instead of claiming a fresh dispatch', async () => {
+    recordMock.setDuplicate('canceled');
+    const trigger = createTrigger();
+
+    await assert.rejects(
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1'),
+      /existing invocation inv-existing is canceled/,
+    );
+
+    assert.strictEqual(routerMock.calls.length, 0);
+    assert.strictEqual(trackerMock.completes.length, 1);
+  });
+
+  it('rejects a duplicate whose durable record cannot be loaded', async () => {
+    recordMock.setMissingDuplicate();
+    const trigger = createTrigger();
+
+    await assert.rejects(
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1'),
+      /existing invocation inv-existing is missing/,
+    );
+
+    assert.strictEqual(routerMock.calls.length, 0);
+    assert.strictEqual(trackerMock.completes.length, 1);
+  });
+
   it('cancels when thread is being deleted (aborted signal)', async () => {
     trackerMock.setAborted(true);
     const trigger = createTrigger();
-    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
+    await assert.rejects(
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1'),
+      /canceled before execution started/,
+    );
     await waitForTrigger();
 
     // Should not call routeExecution
@@ -354,10 +1334,60 @@ describe('ConnectorInvokeTrigger', () => {
     assert.ok(cancelUpdate, 'Should set status to canceled');
   });
 
-  it('handles routeExecution errors gracefully', async () => {
+  it('late-binds cancel-all suppression when direct admission is aborted before invocation ID binding', async () => {
+    const controller = new AbortController();
+    trackerMock.tracker.tryStartThread = () => controller;
+    const suppressCalls = /** @type {Array<{threadId: string, catId: string, executionIds: readonly string[]}>} */ ([]);
+    const bindCalls = /** @type {Array<{threadId: string, catId: string, executionId: string}>} */ ([]);
+    const completionCalls = /** @type {Array<{status: string, invocationId: string | undefined}>} */ ([]);
+    const mockQueueProcessor = /** @type {any} */ ({
+      isAutoResumeSuppressed: () => false,
+      isThreadBusy: () => false,
+      suppressAutoResume(threadId, catId, executionIds = []) {
+        suppressCalls.push({ threadId, catId, executionIds });
+      },
+      bindAutoResumeSuppressionExecution(threadId, catId, executionId) {
+        bindCalls.push({ threadId, catId, executionId });
+      },
+      async onInvocationComplete(_threadId, _catId, status, invocationId) {
+        completionCalls.push({ status, invocationId });
+      },
+    });
+    recordMock.setBeforeCreate(() => {
+      controller.abort('cancel_all');
+      // cancelAll/force-reset can only arm a slot fence here because the
+      // durable InvocationRecord identity does not exist until create returns.
+      mockQueueProcessor.suppressAutoResume('thread-1', 'opus');
+    });
+
+    const trigger = createTrigger({ queueProcessor: mockQueueProcessor });
+    await assert.rejects(
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-pre-bind-cancel'),
+      /canceled before execution started/,
+    );
+    await waitForTrigger();
+
+    assert.deepStrictEqual(
+      suppressCalls,
+      [{ threadId: 'thread-1', catId: 'opus', executionIds: [] }],
+      'the reset action must arm one anonymous pre-bind fence',
+    );
+    assert.deepStrictEqual(
+      bindCalls,
+      [{ threadId: 'thread-1', catId: 'opus', executionId: 'inv-1' }],
+      'durable admission must bind the canceled direct invocation without renewing the fence',
+    );
+    assert.deepStrictEqual(completionCalls, [{ status: 'canceled', invocationId: 'inv-1' }]);
+    assert.strictEqual(routerMock.calls.length, 0, 'pre-bind cancel-all must never reach routeExecution');
+  });
+
+  it('rejects when routeExecution fails before durable execution starts', async () => {
     routerMock = mockRouter({ throwError: new Error('CLI crashed') });
     const trigger = createTrigger({ router: routerMock.router });
-    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
+    await assert.rejects(
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1'),
+      /CLI crashed/,
+    );
     await waitForTrigger();
 
     // Should update status to failed
@@ -428,19 +1458,22 @@ describe('ConnectorInvokeTrigger', () => {
     assert.strictEqual(trackerMock.completes.length, 1, 'failed admission must release the pre-acquired controller');
   });
 
-  it('R1-P1 regression: userMessageId backfill throws → tracker completes, status=failed', async () => {
+  it('R1-P1 regression: durable claim throws → tracker completes without execution', async () => {
     let updateCallCount = 0;
     recordMock.store.update = async (id, data) => {
       updateCallCount++;
-      // First update is userMessageId backfill → throw
+      // First update is the queued -> running claim with userMessageId binding.
       if (updateCallCount === 1 && data.userMessageId) {
-        throw new Error('backfill boom');
+        throw new Error('claim boom');
       }
       recordMock.updates.push({ id, data });
     };
 
     const trigger = createTrigger();
-    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
+    await assert.rejects(
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1'),
+      /claim boom/,
+    );
     await waitForTrigger();
 
     // Tracker must have been started AND completed (no leak)
@@ -1306,6 +2339,81 @@ describe('ConnectorInvokeTrigger', () => {
       assert.strictEqual(qpCalls[0].status, 'succeeded');
     });
 
+    it('F254 D1.2b: connector success reports only cats with done evidence to queueProcessor', async () => {
+      const qpCalls =
+        /** @type {Array<{threadId: string, catId: string, status: string, completedCatIds?: string[]}>} */ ([]);
+      const mockQueueProcessor = /** @type {any} */ ({
+        isThreadBusy: () => false,
+        isCatBusy: () => false,
+        async onInvocationComplete(threadId, catId, status, _invocationId, completedCatIds) {
+          qpCalls.push({ threadId, catId, status, completedCatIds });
+        },
+      });
+
+      routerMock = mockRouter({
+        messages: [
+          {
+            type: 'text',
+            catId: 'opus',
+            content: 'started but no terminal done event',
+            timestamp: Date.now(),
+          },
+        ],
+      });
+      const trigger = createTrigger({ router: routerMock.router, queueProcessor: mockQueueProcessor });
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-no-done');
+      await waitForTrigger();
+
+      assert.strictEqual(qpCalls.length, 1, 'Should call onInvocationComplete once');
+      assert.strictEqual(qpCalls[0].status, 'succeeded');
+      assert.deepStrictEqual(
+        qpCalls[0].completedCatIds,
+        [],
+        'connector path must not close queued_handled without a successful done event',
+      );
+      const succeededUpdate = recordMock.updates.find((update) => update.data.status === 'succeeded');
+      assert.ok(succeededUpdate, 'expected durable succeeded update');
+      assert.deepStrictEqual(
+        succeededUpdate.data.successfulCatIds,
+        [],
+        'the persistent witness must match the exact empty done-evidence set',
+      );
+    });
+
+    it('F254 D1.2b: connector error-coded done is not successful handled evidence', async () => {
+      const qpCalls =
+        /** @type {Array<{threadId: string, catId: string, status: string, completedCatIds?: string[]}>} */ ([]);
+      const mockQueueProcessor = /** @type {any} */ ({
+        isThreadBusy: () => false,
+        isCatBusy: () => false,
+        async onInvocationComplete(threadId, catId, status, _invocationId, completedCatIds) {
+          qpCalls.push({ threadId, catId, status, completedCatIds });
+        },
+      });
+
+      routerMock = mockRouter({
+        messages: [
+          {
+            type: 'done',
+            catId: 'opus',
+            timestamp: Date.now(),
+            errorCode: 'connector_failed',
+          },
+        ],
+      });
+      const trigger = createTrigger({ router: routerMock.router, queueProcessor: mockQueueProcessor });
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-error-done');
+      await waitForTrigger();
+
+      assert.strictEqual(qpCalls.length, 1, 'Should call onInvocationComplete once');
+      assert.strictEqual(qpCalls[0].status, 'succeeded');
+      assert.deepStrictEqual(
+        qpCalls[0].completedCatIds,
+        [],
+        'connector path must not close queued_handled on error-coded done events',
+      );
+    });
+
     it('P1 fix: direct execution calls queueProcessor.onInvocationComplete on failure', async () => {
       const qpCalls = /** @type {Array<{threadId: string, catId: string, status: string}>} */ ([]);
       const mockQueueProcessor = /** @type {any} */ ({
@@ -1318,7 +2426,7 @@ describe('ConnectorInvokeTrigger', () => {
 
       routerMock = mockRouter({ throwError: new Error('boom') });
       const trigger = createTrigger({ router: routerMock.router, queueProcessor: mockQueueProcessor });
-      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
+      await assert.rejects(trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1'), /boom/);
       await waitForTrigger();
 
       assert.strictEqual(qpCalls.length, 1, 'Should call onInvocationComplete once');
@@ -1442,6 +2550,36 @@ describe('ConnectorInvokeTrigger', () => {
   // ── F185: thread-level busy gate (AC-1/AC-2) ──
 
   describe('F185: thread-level busy gate', () => {
+    it('force-reset suppression queues a late connector wake before direct admission', async () => {
+      let tryStartCalls = 0;
+      trackerMock.tracker.tryStartThread = () => {
+        tryStartCalls++;
+        return new AbortController();
+      };
+      const mockQueueProcessor = /** @type {any} */ ({
+        isAutoResumeSuppressed: () => true,
+        isThreadBusy: () => false,
+        isCatBusy: () => false,
+        async onInvocationComplete() {},
+      });
+      const trigger = createTrigger({ queueProcessor: mockQueueProcessor });
+
+      const outcome = await trigger.trigger(
+        'thread-1',
+        /** @type {any} */ ('opus'),
+        'user-1',
+        'Managed command completed after reset.',
+        'msg-late-managed-command',
+        undefined,
+        { sourceCategory: 'scheduled' },
+      );
+
+      assert.strictEqual(outcome, 'enqueued');
+      assert.strictEqual(tryStartCalls, 0, 'suppressed wake must not reach direct tracker admission');
+      assert.strictEqual(routerMock.calls.length, 0, 'suppressed wake must not dispatch');
+      assert.strictEqual(queue.list('thread-1', 'user-1').length, 1, 'late wake remains recoverable in Queue');
+    });
+
     it('AC-1: enqueues when queueProcessor.isThreadBusy returns true', async () => {
       const mockQueueProcessor = /** @type {any} */ ({
         isThreadBusy: () => true,
@@ -1534,7 +2672,7 @@ describe('ConnectorInvokeTrigger', () => {
       });
       recordMock.setDuplicate();
       const trigger = createTrigger({ queueProcessor: mockQueueProcessor });
-      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-dup');
+      await trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'msg', 'msg-1');
       await waitForTrigger();
 
       // Duplicate should NOT cause onInvocationComplete('failed')

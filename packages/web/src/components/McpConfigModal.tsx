@@ -21,6 +21,7 @@ export interface McpConfigModalProps {
   editId?: string;
   editData?: McpEditData;
   readOnly?: boolean;
+  hasProjectOverride?: boolean;
   tools?: McpTool[];
   onSaved: () => void;
   onClose: () => void;
@@ -126,6 +127,7 @@ export function McpConfigModal({
   editId,
   editData,
   readOnly = false,
+  hasProjectOverride = false,
   tools: initialTools,
   onSaved,
   onClose,
@@ -207,8 +209,12 @@ export function McpConfigModal({
 
   // Probe tools using the current form values (ad-hoc, no save required).
   const handleProbeTools = useCallback(async () => {
+    if (readOnly) {
+      await doProbe(projectPath ? { projectPath } : {});
+      return;
+    }
     await doProbe(buildProbeBody(transport, command, args, url, headers, envPairs, projectPath));
-  }, [args, command, doProbe, envPairs, headers, projectPath, transport, url]);
+  }, [args, command, doProbe, envPairs, headers, projectPath, readOnly, transport, url]);
 
   // Auto-probe on mount: use persisted config (empty body) so the server reads
   // real env values from capabilities.json. Ad-hoc form values would strip
@@ -288,7 +294,7 @@ export function McpConfigModal({
 
   // F249 §8.3: "恢复全局配置" — clear project override, restore to global config
   const [restoring, setRestoring] = useState(false);
-  const canRestoreGlobal = isEdit && !!projectPath;
+  const canRestoreGlobal = isEdit && !!projectPath && hasProjectOverride && !readOnly;
   const handleRestoreGlobal = useCallback(async () => {
     if (!editId || !projectPath) return;
     setError(null);

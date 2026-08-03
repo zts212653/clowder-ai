@@ -4,9 +4,9 @@ related_features: [F155, F020, F092, F111, F128, F226, F227, F102, F099]
 topics: [concierge, desktop-pet, pet-skin, routing, small-model, voice, memory, ux, community]
 doc_kind: spec
 created: 2026-06-09
-updated: 2026-06-20
+updated: 2026-07-16
 community_issue: "clowder-ai#841"
-tips_exempt: "UX bug fixes (PR #2474) — no new user-visible capability, only fixes to existing concierge panel behavior"
+tips_exempt: "Concierge action-provenance and UX bug fixes restore existing navigation behavior; no new capability surface"
 ---
 
 # F229: 猫猫球 — 前台猫常驻入口（Cat Ball Concierge）
@@ -15,11 +15,15 @@ tips_exempt: "UX bug fixes (PR #2474) — no new user-visible capability, only f
 >
 > **立项 signoff**：operator 2026-06-09（msg 0001781064063516-000541）："我判定是新立项 你可以把我想要的想想看 写好operator的愿景 然后立项吧？新的 feat"
 
+Architecture cell: concierge-surface
+
+Map delta: none — KD-25/KD-26/KD-27 收紧既有 marker/validator 与工具结果 provenance 契约，不新增 store、route 或 ownership 边界。
+
 ## Why
 
-Cat Café 三个多月迭代 200+ feature，"一句话的事"和"一个 feature 的事"走的是同一条重链路（开 thread → @ 猫 → 等回复）。operator experience拼出的六个痛点：
+Clowder AI 三个多月迭代 200+ feature，"一句话的事"和"一个 feature 的事"走的是同一条重链路（开 thread → @ 猫 → 等回复）。operator experience拼出的六个痛点：
 
-1. **功能发现**："Cat Café 更新太快，功能太多，用户不知道有什么功能"
+1. **功能发现**："Clowder AI 更新太快，功能太多，用户不知道有什么功能"
 2. **求助**："使用猫咖遇到的困难可能也会找猫猫球"
 3. **金鱼的记忆**："诶 我们之前讨论的xxx到底在哪里来着？"——operator是全家唯一没有 recall 工具的成员：猫有记忆三入口 + teleport，用户只能手翻 thread 列表
 4. **分诊/调查**："这个猫猫球可能帮忙发送到哪个 thread 或者自己调查"
@@ -294,7 +298,7 @@ petState = compose(
 ### Phase A（前台开张）
 - [x] AC-A1: 任意页面悬浮球唤起对话，不离开当前页面（截图 + 15s 录屏）→ R9/Why-2——证据 `assets/F229/acceptance-phase-a/ac-a1-*.png`（sonnet 验收 2026-06-12，球+toolbar+面板+拖拽）
 - [x] AC-A2: 功能发现——非作者拿 3 个"最近有什么新功能/X 怎么用"问题验收，答案与 release notes/feature docs 一致 → R1/Why-1——3/3 核对通过（F225/F226/F229/F228 答案与 docs 一致），证据 `ac-a2-*.png`
-- [x] AC-A3: 记忆导航——3 个真实历史讨论 query 给出正确 thread/message 链接，且**两种动作都可用**：跳过去（teleport）+ 原地看（卡内 inline 展开）→ R3/Why-3——**基础设施 ✅；KD-19 修复 merged（PR #2284）+ sonnet alpha 验收通过（2026-06-14）：Q1/Q2 gemini25 不遵从 marker → validator 全量兜底出 teleport ✅（命门：之前 0 actions，兜底后出按钮）；Q5 passage-level hit → marker path teleport+peek ✅；P1-A/B/C 全验证；alpha memory 稀疏（6 thread doc）故 Q1/Q2 无 peek，生产 passage-level 充足（production MCP 已验）**（证据 `ac-a3-*.png`）
+- [x] AC-A3: 记忆导航——3 个真实历史讨论 query 给出正确 thread/message 链接，且**两种动作都可用**：跳过去（teleport）+ 原地看（卡内 inline 展开）→ R3/Why-3——**基础设施 ✅；历史 alpha 验收由 KD-19 全量候选兜底完成（PR #2284，证据 `ac-a3-*.png`），该无 provenance 旁路已由 KD-26 sunset；现行普通导航 authority = 完整三字段 marker，或 KD-27 同 invocation 唯一、成功、身份匹配的 `get_thread_context` 读取。passage-level hit 保留 messageId，工具路径可生成精确 teleport；失败/多目标仍 fail-closed。**
 - [x] AC-A4: 求助场景能触发对应 F155 guide flow（录屏一条）→ R2/Why-2——intent 检测 + 9 guide 列举 + handoff 卡 ✅，证据 `ac-a4-*.png`
 - [x] AC-A5: 形象/人设/值班猫在设置页可配置，与 cat profile 解耦（截图）→ R5
 - [x] AC-A6: 安静默认——默认零主动文本弹出；低优先级事件只显示 badge（hover 才出文字）；用户可一键 hide/mute 整个球（录屏 + 设置截图）→ R8/调研红线——alpha muted 往返全链 ✅（API+UI 双确认），证据 `ac-a6-*.png`
@@ -378,7 +382,7 @@ petState = compose(
 | KD-10 | 岗位四件裁剪：身份+人设+工具面+prompt 都按岗裁剪——Phase A 工具白名单 ≈10 个（memory 三入口/get_thread_context/teleport/cross_post/guide×2/feat_index/propose_thread），排除 shell/文件/limb 等全家桶；prompt 不带 SOP/L0 全文。裁到不需要 tool-search | operator："mcp 太多了全丢给小猫调不清楚，runtime 不支持 tool search 更恐怖" + 吴浪："得控制他暴露出来的工具" | 2026-06-09 |
 | KD-11 | Phase D「小模型」重定位为「快速档」：provider-agnostic（本地 gemma 或 API flash/glm 均可作 clerk），本地权重是 opt-in 优化不是前提 | 吴浪部署现实主义："考虑其他人的使用，live model 可能合适点"——不是每家有 128GB Mac | 2026-06-09 |
 | KD-12 | clerk 零工具执行权：小模型只产 MD tool-intent candidate（显式 routing rules 必备），validator 负责 handle 映射/确认门/forbidden fail-closed，真实工具调用由可信 harness/值班猫执行；危险类（6399/runtime restart/truth-source write）refuse_or_escalate——不问确认，带原始文本升级 | Maine Coon tool-intent smoke（cat-cafe#2175）：裸描述 9 错 1（graph_resolve 偏向 feature anchor），加 routing rules 9/9 通过 | 2026-06-10 |
-| KD-13 | 前台猫产品状态自持：current route / recent handle map / pending confirmations / go·inline·relay 选择 / relay receipts / guide state / escalation 原文——全部存 Cat Cafe app code（store/Redis），**不依赖 carrier（Pi/OpenCode）或模型 context compaction**。PR-A2 conciergeStore（pending counts 入 store 零模型依赖）已是此原则第一个落点；PR-A3+ 的 handle map / relay receipts / escalation 原文按此实现 | Maine Coon carrier spike 收束（2026-06-10）：carrier 是可换的壳，产品状态进壳就会随 carrier 丢失 | 2026-06-10 |
+| KD-13 | 前台猫产品状态自持：current route / recent handle map / pending confirmations / go·inline·relay 选择 / relay receipts / guide state / escalation 原文——全部存 Clowder AI app code（store/Redis），**不依赖 carrier（Pi/OpenCode）或模型 context compaction**。PR-A2 conciergeStore（pending counts 入 store 零模型依赖）已是此原则第一个落点；PR-A3+ 的 handle map / relay receipts / escalation 原文按此实现 | Maine Coon carrier spike 收束（2026-06-10）：carrier 是可换的壳，产品状态进壳就会随 carrier 丢失 | 2026-06-10 |
 | KD-14 | 默认形象修正（operator 愿景对齐）：默认 = **家养像素猫桌宠**四选一【Ragdoll/Maine Coon/Bengal/Siamese】（家里桌宠像素风格、Maine Coon绘制——自家原创，"避版权"不再构成毛线球的立身理由），v1 默认**Ragdoll**（operator 拍板）。毛线球降为备选皮肤/过渡形态——Phase A 已实现的球先走通不返工，形象升级为独立工作项（A4 同期或之后；素材先行：定位家里既有像素素材，定位不到请Maine Coon按 codex 桌宠风格绘制四猫 + 八态动画映射） | operator 2026-06-10（msg 0001781148650752）："我们不是想要一只猫猫吗…最好做成我们曾经桌宠系统里Maine Coon画的…【Ragdoll，Maine Coon，Bengal，Siamese】当 default 可选…私心我喜欢可爱的Ragdoll…现拿球走通也可以" | 2026-06-10 |
 | KD-16 | 值班猫身份必须 UI 可见：气泡 header 显示"{displayName} · 值班：{值班猫名}"（或等效角标）——值班层是用户该看见的状态，不是实现细节 | operator runtime 首验（2026-06-12）："这个猫猫球到底什么猫啊！"——值班身份隐藏违反调研红线 No hidden state；KD-1 三层里值班层此前 UI 不可见 | 2026-06-12 |
 | KD-17 | 值班猫输出契约统一 MD-first + 短 handle：搜索工具结果（concierge 上下文）附短标记（R1/R2…），值班猫 MD 里只引用标记（`[跳过去 R1]`/`[原地看 R1]`），**服务端 validator 解析标记 → HandleMap 查真实 anchor → ID 校验 fail-closed → 注入 CardBlock actions**。废除"值班猫直接输出 actions 数组/转抄长 ID"假设——flash 档遵循性实测不可靠（验收 0/3 输出 actions；gemma 线长 ID 直抄全失效先例）。HandleMap 从 Phase D 前移（KD-13 早已点名 "recent handle map" 属产品状态）；值班猫与 Phase D clerk 输出契约就此统一，validator 复用 | sonnet Phase A 验收 P1（2026-06-12）+ gemma 线 attempt 2 实测（短 handle 9/9）+ operator"你们最会的是 md" | 2026-06-12 |
@@ -387,6 +391,9 @@ petState = compose(
 | KD-20 | go 路径 navigation gating：**marker 优先 + triage-go fallback**。"跟去"导航由 Phase A KD-19 inline marker button（PR #2295）实现——点击直跳，read-only 不经 confirm friction。triage-go 保留为 R-handle miss fallback（用户描述目标但无可匹配 HandleMap 记录时触发 triage confirm card）。原则：**triage-only-for-write**（relay/propose_thread/investigate 产生外部影响必须 gating；navigation read-only 不需要）。KD-9 三动作分叉精神 = 用户选择权，marker 直跳 UX 最直接；triage-go 重复造轮子违反 P1 面向终态。AC-B1 "跟去（teleport 跟进）"措辞兼容两种实现 | opus-47 愿景守护 verdict（Phase B intermediate）+ sonnet alpha 实测：marker path production 已验 + triage-go 路径 duty cat 未触发（自然降级为 marker 直达） | 2026-06-15 |
 | KD-21 | 四猫视觉 canon 从具体故事母图派生，不从泛用猫 prompt 重新发明。F229 的Maine Coon/yanyan-codex 皮肤上游 canon = 醋醋喵漫画母图；后续补Maine Coon/Ragdoll/Siamese/布偶等角色设定图时，先落 `docs/videos/cucu-pr-flow/character-bible-v0.1.md`，再派生 PetSkin atlas/sprite。F229 只消费 sprite/atlas 与 `conciergeState -> petState` 投影，不把角色设计权藏进猫猫球实现。 | operator 2026-06-20 对醋醋喵重制和 F229 猫猫球视觉源的收敛：原本漫画足以生成三猫设定图，Maine Coon猫设就是醋醋喵母图。 | 2026-06-20 |
 | KD-22 | ConciergePanel.tsx 文件大小 exception：origin/main 已是 550 lines（远超 350 hard limit），UX bugs PR #2474 提取 `usePanelWidth` hook 后 net +16（566 lines）。operator 批准 exception 放行，全量拆分（消息渲染/header/input area 分离）记为独立 task 不阻塞本 PR。350-line 限制无自动 gate（`pnpm gate`/`pnpm check` 不含行数检查），为 reviewer 人肉判断 | operator 2026-06-21 exception signoff；gpt52 R5 review 僵局升级后operator拍板 | 2026-06-21 |
+| KD-23 | R-handle 解析上下文改 **per-invocation 流动值**，废除 thread 级共享可变 HandleMapStore 存储形态：handle 表 = 本轮 prompt 注入的 side product，随请求作用域从注入点直传 validator（route-serial L628 写 / L2593 读实证同函数作用域可直传）；多来源（搜索 + 调查报告注入）在**注入点统一编号**，冲突源头消灭——零共享存储 = 零覆盖 = 零指代漂移（A2 ballState 纯投影药方的后端版）。跨轮引用 **fail-closed**（不渲染按钮 ≻ 跳错）+ 岗位 prompt 补"只引用本轮标记"；调查报告需 duty cat 评论时在下轮注入**重新编号**即成为本轮上下文。KD-17 的翻译职责保留（短标记→真实 ID 是 gemma 线验证的必要设施），**错的只是存储形态**。InvestigationReportCard 直用 report.anchors 的路径不动（它从未经过共享 store，一直正确——本身即佐证）。**Spec 债认领（fable-5）**：KD-17 把"某一时刻的指代上下文"建模成"thread 级单一最新版"，设计起就缺 identity 锚定维度（R1 是**哪一次注入**的 R1）——修 4-5 次全在"谁覆盖谁"层打转（#2796 worker sync 注释自称 "new authority"、search context 亦无条件覆盖，**双写入方各自认权威即病灶文本**），欠边补锅教科书案例 | operator拉闸"修了 4-5 次"（2026-07-09）+ opus-46 四方向求助 + fable-5 坐标系判决 | 2026-07-09 |
+| KD-24 | **Prompt/table co-presence 是 KD-23 的完成条件**：同一 `ConciergeSearchContextResult` 的 `contextString` 与 `handles` 必须作为一对流过一次 invocation；只要 validator 会消费非空 `handles`，对应 duty-cat 最终 prompt 就必须在所有上下文组装完成后包含同源 `contextString`，且只出现一次。serial incremental/legacy 与 parallel 三路径同一不变量；上下文预算必须计入该字符串。任何 prompt 重组不得出现"隐藏 handle 表"（猫没看到、validator 仍解析）；无法注入时 `handles=[]` fail-closed，不出按钮。零新 store / cache / fallback。 | 2026-07-09 production #2838 实证：KD-23 已运行但 serial incremental 在早期 append 后用 `parts.join()` 覆盖 prompt，落库仍持有 handles，导致 R3→f180、R1→前台猫；对照 parallel 在最终组装后 append 一直正确 | 2026-07-09 |
+| KD-25 | **三字段语义绑定是 R-handle fail-closed 的完成条件**：新生成的 inline marker 与 relay/go target 必须携带 `Rn｜normalized title｜anchor digest` 完整绑定；digest 由 `(handle, anchor type, threadId, messageId)` 确定性计算、不落库。validator 只在三者命中同一本轮 `HandleEntry` 时生成 action，因此重复标题也不能认证错序号。bare / malformed / unknown / title-mismatch / digest-mismatch 任一出现 → 零 action；完整 binding 与 bare/malformed marker 混在同一回复时也必须整组拒绝，不能让裸 marker 借用合法 binding 的 persisted action。"写了无效 marker"不得被当成"没写 marker"触发 KD-19 全量兜底。relay/go target 可直接复制搜索表展示的 bracketed 完整 marker。普通 marker/fallback scanner 的唯一输入必须是无条件剥离全部完整或悬空 triage control 的 visible projection；triage success/failure/no-deps 都不能让隐藏 marker 获得 teleport authority。frontend 只兼容渲染历史已存 bare marker，不参与 payload 纠错。零新 store/cache/namespace。 | 2026-07-10 production #2854 重启后实证：prompt 明示 R2=`f229 猫猫球功能`、R3=`猫猫球传送门bug`，模型正文命中 bug thread 却输出 `[跳过去 R2]`；旧 validator 因 R2 合法而跳去 F229。后续 duplicate-title RED 证明仅绑标题仍非终态，故加入同源 anchor digest。PR #2859 cloud R1 补齐 mixed valid+bare 整组拒绝；R2 补齐 bracketed triage target；R3 证明 success-only strip 仍会在 unresolved/multiple/dangling control states 泄漏隐藏 marker，遂升级 plan 状态表并统一 visible projection。prompt capture + stored action 双证据锁定为 ordinal semantic misbinding，不是 KD-24 复发 | 2026-07-10 |
 
 ## Review Gate / 分工（operator 拍板 2026-06-09 msg 0001781074572950）
 

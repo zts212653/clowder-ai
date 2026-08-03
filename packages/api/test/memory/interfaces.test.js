@@ -40,6 +40,8 @@ describe('memory interfaces — type exports', () => {
       'thread',
       'discussion',
       'research',
+      'architecture',
+      'diary',
       'pack-knowledge',
     ]);
   });

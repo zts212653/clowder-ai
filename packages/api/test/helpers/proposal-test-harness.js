@@ -10,9 +10,11 @@ import Fastify from 'fastify';
 export async function createProposalTestContext({
   proposalStoreOverride,
   messageStoreOverride,
+  taskStoreOverride,
   routerOverride,
   invocationQueueOverride,
   queueProcessorOverride,
+  fetchPrTrackingBoundaryOverride,
 } = {}) {
   const { InvocationRegistry } = await import(
     '../../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
@@ -20,12 +22,14 @@ export async function createProposalTestContext({
   const { ThreadStore } = await import('../../dist/domains/cats/services/stores/ports/ThreadStore.js');
   const { MessageStore } = await import('../../dist/domains/cats/services/stores/ports/MessageStore.js');
   const { InMemoryProposalStore } = await import('../../dist/domains/cats/services/stores/ports/ProposalStore.js');
+  const { TaskStore } = await import('../../dist/domains/cats/services/stores/ports/TaskStore.js');
   const { callbacksRoutes, proposalRoutes } = await import('../../dist/routes/index.js');
 
   const registry = new InvocationRegistry();
   const threadStore = new ThreadStore();
   const messageStore = messageStoreOverride ?? new MessageStore();
   const proposalStore = proposalStoreOverride ?? new InMemoryProposalStore();
+  const taskStore = taskStoreOverride ?? new TaskStore();
   const socketEvents = [];
   const socketManager = {
     emitToUser(userId, event, data) {
@@ -40,6 +44,7 @@ export async function createProposalTestContext({
   await app.register(callbacksRoutes, {
     registry,
     messageStore,
+    taskStore,
     socketManager,
     threadStore,
     proposalStore,
@@ -55,15 +60,31 @@ export async function createProposalTestContext({
   await app.register(proposalRoutes, {
     proposalStore,
     threadStore,
+    taskStore,
     messageStore,
     socketManager,
     ...(routerOverride ? { router: routerOverride } : {}),
     ...(invocationQueueOverride ? { invocationQueue: invocationQueueOverride } : {}),
     ...(queueProcessorOverride ? { queueProcessor: queueProcessorOverride } : {}),
+    ...(fetchPrTrackingBoundaryOverride ? { fetchPrTrackingBoundary: fetchPrTrackingBoundaryOverride } : {}),
   });
 
+  const originByRequest = new Map();
   async function propose({ userId, catId = 'opus', threadId, body = {} }) {
-    const { invocationId, callbackToken } = await registry.create(userId, catId, threadId);
+    const dedupKey = body.clientRequestId ? `${userId}:${catId}:${threadId}:${body.clientRequestId}` : undefined;
+    let origin = dedupKey ? originByRequest.get(dedupKey) : undefined;
+    if (!origin) {
+      origin = messageStore.append({
+        userId,
+        catId: null,
+        content: 'Please propose a child thread',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      });
+      if (dedupKey) originByRequest.set(dedupKey, origin);
+    }
+    const { invocationId, callbackToken } = await registry.create(userId, catId, threadId, undefined, origin.id);
     return app.inject({
       method: 'POST',
       url: '/api/callbacks/propose-thread',
@@ -90,12 +111,31 @@ export async function createProposalTestContext({
     });
   }
 
+  async function withdraw({ userId, catId, threadId, proposalId }) {
+    const origin = await messageStore.append({
+      userId,
+      catId: null,
+      content: `Withdraw thread proposal ${proposalId}`,
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
+    });
+    const { invocationId, callbackToken } = await registry.create(userId, catId, threadId, undefined, origin.id);
+    return app.inject({
+      method: 'POST',
+      url: '/api/callbacks/withdraw-thread-proposal',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { proposalId },
+    });
+  }
+
   return {
     app,
     registry,
     threadStore,
     messageStore,
     proposalStore,
+    taskStore,
     socketManager,
     socketEvents,
     router: routerOverride,
@@ -104,5 +144,6 @@ export async function createProposalTestContext({
     propose,
     approve,
     reject,
+    withdraw,
   };
 }

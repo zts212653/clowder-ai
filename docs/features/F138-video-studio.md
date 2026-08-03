@@ -7,7 +7,7 @@ created: 2026-03-24
 updated: 2026-04-05
 ---
 
-# F138: Cat Café Video Studio — AI 视频制作管线
+# F138: Clowder AI Video Studio — AI 视频制作管线
 
 > **Status**: in-progress (Phase 1 基建中：spec 驱动 composition + FA 集成 + showcase 素材录制) | **Owner**: Ragdoll + 金渐层 | **Priority**: P1
 
@@ -16,9 +16,9 @@ updated: 2026-04-05
 > "来吧猫猫 立项吧！link waoowaoo 和 Remotion，我们的第一个目标就是把我们的做出我们的 bilibili 的视频？比如先把我们的教程做成视频？"
 > — operator，2026-03-24
 
-Cat Café 需要**系统化的视频制作能力**，不再是一次性手搓 Remotion 代码。目标：
+Clowder AI 需要**系统化的视频制作能力**，不再是一次性手搓 Remotion 代码。目标：
 
-1. **把教程做成 B 站视频**——Cat Café 的 setup guide、bootcamp 流程、功能演示都应该有视频版
+1. **把教程做成 B 站视频**——Clowder AI 的 setup guide、bootcamp 流程、功能演示都应该有视频版
 2. **重构现有介绍视频**——V4.8 是手动分镜 + 手写代码，学习 waoowaoo 后应该能更自动化
 3. **建立可复用的视频制作管线**——operator给素材+脚本，猫猫自动排版渲染
 

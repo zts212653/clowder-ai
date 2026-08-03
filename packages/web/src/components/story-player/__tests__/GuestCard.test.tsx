@@ -1,5 +1,6 @@
 // biome-ignore lint/correctness/noUnusedImports: React must be in scope for renderToStaticMarkup JSX
-import React from 'react';
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GuestCard, type GuestCardProps } from '../GuestCard';
@@ -81,16 +82,25 @@ describe('GuestCard — rendering', () => {
 // ---------------------------------------------------------------------------
 
 describe('GuestCard — fade timer', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
   beforeEach(() => {
     vi.useFakeTimers();
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
   });
   afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
     vi.useRealTimers();
   });
 
   // Timer tests use dynamic import to avoid SSR issues with useEffect
-  it('fires onFadeComplete after FADE_DELAY_MS (2000ms)', async () => {
-    // Verify the exported FADE_DELAY_MS constant
+  it('starts compacting after FADE_DELAY_MS (2000ms)', async () => {
     const { FADE_DELAY_MS } = await import('../GuestCard');
     expect(FADE_DELAY_MS).toBe(2000);
   });
@@ -126,14 +136,29 @@ describe('GuestCard — fade timer', () => {
     expect(state.contentSnippet).toBe(state2.contentSnippet);
   });
 
-  it('P1-fix: onFadeComplete fires after FADE_DELAY_MS + FADE_TRANSITION_MS, not at FADE_DELAY_MS', async () => {
-    // This test verifies that onFadeComplete is delayed by the CSS transition
-    // duration so the opacity transition can play before the parent unmounts.
+  it('keeps a compact canonical-thread link after the visual card retires', async () => {
+    const { FADE_DELAY_MS, FADE_TRANSITION_MS } = await import('../GuestCard');
+    await act(async () => {
+      root.render(<GuestCard {...defaultProps} />);
+    });
+
+    expect(container.querySelector('[data-testid="guest-card"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="guest-card-canonical-link"]')).toBeNull();
+
+    await act(async () => {
+      vi.advanceTimersByTime(FADE_DELAY_MS + FADE_TRANSITION_MS);
+    });
+
+    expect(container.querySelector('[data-testid="guest-card"]')).toBeNull();
+    const canonicalLink = container.querySelector<HTMLAnchorElement>('[data-testid="guest-card-canonical-link"]');
+    expect(canonicalLink?.getAttribute('href')).toBe('/thread/thread_xyz');
+    expect(canonicalLink?.textContent).toContain('打开跨 Feature 全文');
+  });
+
+  it('waits for the opacity transition before switching to the persistent source link', async () => {
     const { FADE_DELAY_MS, FADE_TRANSITION_MS } = await import('../GuestCard');
     expect(typeof FADE_DELAY_MS).toBe('number');
     expect(typeof FADE_TRANSITION_MS).toBe('number');
-    // The total delay before onFadeComplete = FADE_DELAY_MS + FADE_TRANSITION_MS
-    // This ensures the CSS opacity transition (300ms) completes before unmount
     expect(FADE_TRANSITION_MS).toBeGreaterThan(0);
     expect(FADE_DELAY_MS + FADE_TRANSITION_MS).toBe(2300);
   });

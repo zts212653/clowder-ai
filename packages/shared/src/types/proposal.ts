@@ -6,15 +6,17 @@
  * approve does the backend actually create a thread.
  */
 
+import type { ApprovalPublication } from './approval-hub.js';
 import type { CatId } from './ids.js';
 
 /**
  * Status lifecycle:
  *   pending → approving → approved   (claim then finalize, atomic against reject)
  *   pending → rejected               (one-shot)
+ *   pending → withdrawn              (requester-only, one-shot)
  *   approving → pending              (rollback on thread-creation failure)
  */
-export type ProposalStatus = 'pending' | 'approving' | 'approved' | 'rejected';
+export type ProposalStatus = 'pending' | 'approving' | 'approved' | 'rejected' | 'withdrawn';
 
 /**
  * F128 reporting modes — the contract for whether (and how) a sub-thread
@@ -29,6 +31,13 @@ export type ProposalStatus = 'pending' | 'approving' | 'approved' | 'rejected';
  */
 export type ReportingMode = 'none' | 'final-only' | 'state-transitions' | 'blocking-ack';
 
+/** Canonical inbound PR context that was classified as a formal maintainer review at proposal creation. */
+export interface CommunityPrProposalContext {
+  readonly repoFullName: 'zts212653/clowder-ai';
+  readonly prNumber: number;
+  readonly mode: 'formal_review';
+}
+
 /**
  * A thread proposal created by a cat, awaiting user decision.
  */
@@ -40,6 +49,8 @@ export interface ThreadProposal {
   sourceThreadId: string;
   sourceInvocationId: string;
   sourceCatId: CatId;
+  /** Exact trigger message persisted at create time; absent only on legacy proposals. */
+  sourceMessageId?: string;
 
   // Prefilled fields (user may override at approve time)
   title: string;
@@ -55,10 +66,18 @@ export interface ThreadProposal {
    */
   reportingMode?: ReportingMode;
   projectPath: string;
+  /**
+   * F128 → F140: immutable structured context for an approved formal external-PR review child.
+   * Absent for advisory, triage, arbitrary-link, multi-PR, and unrelated proposals.
+   */
+  communityPrContext?: CommunityPrProposalContext;
 
   // Audit — creation
   createdBy: string;
   createdAt: number;
+
+  /** Phase-I publication state; absent only on pre-Phase-I records. */
+  publication?: ApprovalPublication;
 
   /**
    * Message id of the rich proposal card that was successfully appended to the source thread.
@@ -84,6 +103,10 @@ export interface ThreadProposal {
   rejectedBy?: string;
   rejectedAt?: number;
   rejectionReason?: string;
+
+  // Audit — requester withdrawal outcome
+  withdrawnBy?: CatId;
+  withdrawnAt?: number;
 }
 
 /**

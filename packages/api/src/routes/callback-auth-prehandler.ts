@@ -8,6 +8,7 @@
 import type { AgentKeyVerifyResult, CallbackPrincipal } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { InvocationRecord, VerifyResult } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
+import { toolExecutionPolicyDenial } from '../domains/cats/services/agents/invocation/tool-execution-policy.js';
 import type { CallbackAuthSystemMessageNotifier } from './callback-auth-system-message.js';
 import { recordCallbackAuthFailure, recordLegacyFallbackHit } from './callback-auth-telemetry.js';
 import { makeCallbackAuthError } from './callback-errors.js';
@@ -23,6 +24,17 @@ function callbackToolFromUrl(url: string): string {
   const path = url.split('?')[0];
   const match = path.match(/^\/api\/callbacks\/([^/]+)/);
   return match ? match[1] : 'unknown';
+}
+
+function allowToolExecution(request: FastifyRequest, reply: FastifyReply, record: InvocationRecord): boolean {
+  const denial = toolExecutionPolicyDenial(record.toolExecutionPolicy, callbackToolFromUrl(request.url));
+  if (!denial) return true;
+  reply.status(403).send({
+    error: 'tool_policy_violation',
+    reason: denial.reason,
+    tool: denial.toolName,
+  });
+  return false;
 }
 
 declare module 'fastify' {
@@ -82,7 +94,10 @@ export function registerCallbackAuthHook(
     // own atomic verifyLatest in preValidation and pre-populates callbackAuth.
     // Skip the second verify here to avoid double-slide and to preserve the
     // atomicity guarantee against the preValidation/preHandler race window.
-    if (request.callbackAuth) return;
+    if (request.callbackAuth) {
+      allowToolExecution(request, reply, request.callbackAuth);
+      return;
+    }
 
     let invocationId = firstHeaderValue(request.headers['x-invocation-id']);
     let callbackToken = firstHeaderValue(request.headers['x-callback-token']);
@@ -163,6 +178,7 @@ export function registerCallbackAuthHook(
         '[#476 DEPRECATED] Callback credentials received via body/query — migrate to X-Invocation-Id / X-Callback-Token headers',
       );
     }
+    if (!allowToolExecution(request, reply, result.record)) return;
     request.callbackAuth = result.record;
     request.callbackPrincipal = derivePrincipal(result.record);
   });

@@ -14,7 +14,7 @@ created: 2026-04-02
 
 ## 背景
 
-Cat Cafe 已通过 F088/F132/F137 接入飞书、Telegram、DingTalk、企业微信五个渠道。华为小艺是 HarmonyOS 设备的原生 AI 助手，覆盖手机/平板/手表/车机。
+Clowder AI 已通过 F088/F132/F137 接入飞书、Telegram、DingTalk、企业微信五个渠道。华为小艺是 HarmonyOS 设备的原生 AI 助手，覆盖手机/平板/手表/车机。
 
 小艺开放平台提供两种第三方智能体接入模式：
 - **多Agents模式**（原 A2A 模式）：必须绑定华为 LLM（DeepSeek/盘古）作为编排中间层
@@ -23,14 +23,14 @@ Cat Cafe 已通过 F088/F132/F137 接入飞书、Telegram、DingTalk、企业微
 选择 OpenClaw 模式的理由：
 1. 直连，无 LLM 中间层 → 低延迟、完全可控
 2. 协议已知（`@ynhcj/xiaoyi` npm 包已公开源码）
-3. Cat Cafe 自身充当 WebSocket 客户端连接 HAG，用户无需额外部署
+3. Clowder AI 自身充当 WebSocket 客户端连接 HAG，用户无需额外部署
 
 **trade-off**：OpenClaw 模式不支持快捷指令、端侧插件、账号绑定、卡片等平台侧高级功能。MVP 阶段这些不是刚需；后续可通过同时支持多Agents模式补齐。
 
 ## 架构设计
 
 ```
-用户 → 小艺 APP → 华为 HAG Server ←──WebSocket──→ XiaoYiAdapter (Cat Cafe)
+用户 → 小艺 APP → 华为 HAG Server ←──WebSocket──→ XiaoYiAdapter (Clowder AI)
                   (主域 + 备 IP)
                                       │
                                       ├→ Connector Gateway
@@ -40,7 +40,7 @@ Cat Cafe 已通过 F088/F132/F137 接入飞书、Telegram、DingTalk、企业微
                                       └→ Agent Router → Cat Agents
 ```
 
-连接方向：**Cat Cafe 主动连接华为 HAG**（类似 DingTalk Stream 模式）。
+连接方向：**Clowder AI 主动连接华为 HAG**（类似 DingTalk Stream 模式）。
 
 ### 协议栈
 
@@ -56,7 +56,7 @@ Cat Cafe 已通过 F088/F132/F137 接入飞书、Telegram、DingTalk、企业微
 
 | ID | 来源 | 生命周期 | 用途 |
 |----|------|---------|------|
-| `params.sessionId` | 华为 HAG | 跨 app 重启稳定 | 对话标识 → 映射到 Cat Cafe thread |
+| `params.sessionId` | 华为 HAG | 跨 app 重启稳定 | 对话标识 → 映射到 Clowder AI thread |
 | `msg.sessionId`（顶层） | 华为 HAG | 每次开 app 刷新 | **不用！** 不稳定 |
 | `params.id`（taskId） | 华为 HAG | 每条消息一个 | 回复路由 |
 | `agentId` | 用户配置 | 永久 | 标识智能体 + 用于认证 + externalChatId 命名空间 |

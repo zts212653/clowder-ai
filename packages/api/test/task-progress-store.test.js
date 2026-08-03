@@ -41,7 +41,13 @@ class MockRedisHash {
     return existed ? 1 : 0;
   }
 
-  /** @param {string} _script @param {number} _numKeys @param {string} key @param {string} field @param {string} invocationId */
+  /**
+   * @param {string} _script
+   * @param {number} _numKeys
+   * @param {string} key
+   * @param {string} field
+   * @param {string} invocationId
+   */
   async eval(_script, _numKeys, key, field, invocationId) {
     const raw = await this.hget(key, field);
     if (!raw) return 0;
@@ -182,6 +188,10 @@ describe('RedisTaskProgressStore', () => {
     assert.deepEqual(await store.getSnapshot('thread_owner', 'opus'), replacement);
     assert.equal(await store.deleteSnapshotIfOwner('thread_owner', 'opus', 'replacement-B'), true);
     assert.equal(await store.getSnapshot('thread_owner', 'opus'), null);
+
+    await redis.hset('task-progress:thread_owner', 'opus', '{malformed');
+    assert.equal(await store.deleteSnapshotIfOwner('thread_owner', 'opus', 'replacement-B'), false);
+    assert.equal(await redis.hget('task-progress:thread_owner', 'opus'), '{malformed');
   });
 });
 
@@ -205,5 +215,6 @@ describe('MemoryTaskProgressStore', () => {
     assert.deepEqual(await store.getSnapshot('thread_owner', 'opus'), replacement);
     assert.equal(await store.deleteSnapshotIfOwner('thread_owner', 'opus', 'replacement-B'), true);
     assert.equal(await store.getSnapshot('thread_owner', 'opus'), null);
+    assert.equal(await store.deleteSnapshotIfOwner('thread_owner', 'opus', 'replacement-B'), false);
   });
 });

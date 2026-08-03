@@ -74,7 +74,7 @@ export function ApprovalHubDrawer() {
 
           {error && (
             <div className="rounded-lg border border-[var(--semantic-critical)] p-3">
-              <p className="text-sm text-[var(--semantic-critical)]">加载失败: {error}</p>
+              <p className="text-sm text-[var(--semantic-critical)]">请求失败: {error}</p>
             </div>
           )}
 

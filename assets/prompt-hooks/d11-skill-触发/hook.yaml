@@ -21,5 +21,5 @@ safetyTier: readonly
 transparencyTier: opt-in-view
 governanceTier: human-gated
 
-# CVO-facing
+# operator-facing
 userExplanation: "自动触发的 skill 上下文"

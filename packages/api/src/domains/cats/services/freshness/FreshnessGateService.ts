@@ -18,6 +18,8 @@ export interface UnseenMessage {
   id: string;
   from: string; // catId or 'user'
   preview: string; // first ~200 chars
+  /** Explicit source classification when stable identity is finer than catId. */
+  selfSource?: boolean;
 }
 
 export interface FreshnessCheckInput {
@@ -90,7 +92,7 @@ export class FreshnessGateService {
 
     // There are unseen messages. Filter out self-messages.
     const unseenMessages = input.unseenMessages ?? [];
-    const nonSelfUnseen = unseenMessages.filter((msg) => msg.from !== catId);
+    const nonSelfUnseen = unseenMessages.filter((msg) => !(msg.selfSource ?? msg.from === catId));
 
     // All unseen are from self — don't hold
     if (nonSelfUnseen.length === 0 && unseenMessages.length > 0) {

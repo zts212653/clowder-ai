@@ -1,6 +1,6 @@
 'use client';
 
-import type { ConnectorSource } from '@cat-cafe/shared';
+import { type ConnectorSource, isPersonMemoryProposalCardBlock } from '@cat-cafe/shared';
 import type { RichBlock, RichInteractiveBlock } from '@/stores/chat-types';
 import { AudioBlock } from './AudioBlock';
 import { CallbackAuthFailureBlock } from './CallbackAuthFailureBlock';
@@ -16,7 +16,43 @@ import { HtmlWidgetBlock } from './HtmlWidgetBlock';
 import { InteractiveBlock } from './InteractiveBlock';
 import { InteractiveBlockGroup } from './InteractiveBlockGroup';
 import { MediaGalleryBlock } from './MediaGalleryBlock';
+import { PersonMemoryProposalCard } from './PersonMemoryProposalCard';
 import { isProposalCardBlock, ProposalCard } from './ProposalCard';
+import { isScheduleMutationProposalCardBlock, ScheduleMutationProposalCard } from './ScheduleMutationProposalCard';
+
+function RichCardRenderer({
+  block,
+  messageId,
+  messageSource,
+  confirmations,
+}: {
+  block: Extract<RichBlock, { kind: 'card' }>;
+  messageId?: string;
+  messageSource?: ConnectorSource;
+  confirmations?: CardConfirmationEntry[];
+}) {
+  if (isPersonMemoryProposalCardBlock(block)) {
+    return <PersonMemoryProposalCard block={block} messageId={messageId} />;
+  }
+  if (isProposalCardBlock(block)) return <ProposalCard block={block} messageId={messageId} />;
+  if (isHandoffProposalCardBlock(block)) return <HandoffProposalCard block={block} messageId={messageId} />;
+  if (isScheduleMutationProposalCardBlock(block)) {
+    return <ScheduleMutationProposalCard block={block} messageId={messageId} />;
+  }
+  if (isFrustrationIssueCardBlock(block, messageSource)) {
+    return <FrustrationIssueCard block={block} messageId={messageId} />;
+  }
+  if (isCommunityIssuePreviewBlock(block, messageSource)) {
+    return <CommunityIssuePreviewCard block={block} messageId={messageId} />;
+  }
+  if (isCommunityIssueDraftBlock(block, messageSource)) {
+    return <CommunityIssueDraftCard block={block} messageId={messageId} />;
+  }
+  const metaKind = (block.meta as { kind?: string } | undefined)?.kind;
+  const isTrustedCallbackAuth = metaKind === 'callback_auth_failure' && messageSource?.connector === 'callback-auth';
+  if (isTrustedCallbackAuth) return <CallbackAuthFailureBlock block={block} />;
+  return <CardBlock block={block} messageId={messageId} confirmations={confirmations} />;
+}
 
 function RichBlockRenderer({
   block,
@@ -35,41 +71,15 @@ function RichBlockRenderer({
   sendContext?: string;
 }) {
   switch (block.kind) {
-    case 'card': {
-      // F128: proposal cards have dedicated approval-card renderer
-      if (isProposalCardBlock(block)) return <ProposalCard block={block} messageId={messageId} />;
-      // F225: cat-initiated session handoff cards get a dedicated approve/reject renderer that wires
-      // the buttons to /api/session-handoff/:id/approve|reject (else they fall through to inert CardBlock).
-      if (isHandoffProposalCardBlock(block)) return <HandoffProposalCard block={block} messageId={messageId} />;
-      // F222: frustration auto-issue cards with trusted provenance get dedicated renderer
-      if (isFrustrationIssueCardBlock(block, messageSource)) {
-        return <FrustrationIssueCard block={block} messageId={messageId} />;
-      }
-      // F235 Phase A: community issue preview cards from connector (edit + publish flow)
-      if (isCommunityIssuePreviewBlock(block, messageSource)) {
-        return <CommunityIssuePreviewCard block={block} messageId={messageId} />;
-      }
-      // F235 Phase B: cat-initiated draft cards (R3 P2: provenance gate — only render
-      // for non-connector messages, preventing spoofed cards from connector paths)
-      if (isCommunityIssueDraftBlock(block, messageSource)) {
-        return <CommunityIssueDraftCard block={block} messageId={messageId} />;
-      }
-      // F174 D2b-1: cards tagged with meta.kind = 'callback_auth_failure' get the
-      // dedicated in-context observability renderer ("明厨亮灶" — entity carries its
-      // own state). Plain cards continue to use the default CardBlock.
-      //
-      // Cloud Codex P2 #1397: meta is opaque user-controllable data, so route
-      // ONLY when the message itself comes from a trusted source — the
-      // callback-auth connector. Otherwise a regular cat/user card with that
-      // meta.kind would spoof the system warning UI + the hide-similar button.
-      const metaKind = (block.meta as { kind?: string } | undefined)?.kind;
-      const isTrustedCallbackAuth =
-        metaKind === 'callback_auth_failure' && messageSource?.connector === 'callback-auth';
-      if (isTrustedCallbackAuth) {
-        return <CallbackAuthFailureBlock block={block} />;
-      }
-      return <CardBlock block={block} messageId={messageId} confirmations={confirmations} />;
-    }
+    case 'card':
+      return (
+        <RichCardRenderer
+          block={block}
+          messageId={messageId}
+          messageSource={messageSource}
+          confirmations={confirmations}
+        />
+      );
     case 'diff':
       return <DiffBlock block={block} />;
     case 'checklist':

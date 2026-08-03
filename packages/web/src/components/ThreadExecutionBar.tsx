@@ -4,14 +4,34 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import { catColorVar } from '@/lib/cat-slug';
-import type { CatInvocationInfo } from '@/stores/chat-types';
+import type { AppServerLifecycleSnapshot, AppServerLifecycleStage, CatInvocationInfo } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
+import { isSilentActiveTurn, isStreamingTipSuppressed } from './capability-tip-placement';
 import { ForceResetDialog } from './ForceResetDialog';
 import { deriveActiveCats } from './status-helpers';
 
 type ActiveInvocationSlots = Record<string, { catId: string; mode: string; startedAt?: number }>;
+
+const APP_SERVER_STAGE_LABELS: Record<AppServerLifecycleStage, string> = {
+  child_spawned: '启动子进程',
+  initialized: '初始化 app-server',
+  thread_ready: '会话已就绪',
+  turn_accepted: '回合已接受',
+  active: '运行回合',
+  completed: '回合完成',
+  interrupted: '回合已中断',
+  failed: '回合失败',
+  closing: '清理进程',
+  closed: '进程已关闭',
+};
+
+function formatActivityAge(lastActivityAt: number, now = Date.now()): string {
+  const seconds = Math.max(0, Math.floor((now - lastActivityAt) / 1000));
+  if (seconds < 60) return `${seconds} 秒前`;
+  return `${Math.floor(seconds / 60)} 分钟前`;
+}
 
 interface ThreadExecutionBarProps {
   threadId?: string;
@@ -40,7 +60,11 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
     activeInvocations,
     hasActiveInvocation,
     intentMode,
-  }).map((catId) => ({ catId, startedAt: getStartedAt(catId, activeInvocations, catInvocations) }));
+  }).map((catId) => ({
+    catId,
+    startedAt: getStartedAt(catId, activeInvocations, catInvocations),
+    lifecycle: catInvocations[catId]?.appServerLifecycle,
+  }));
 
   // Build display info from cat-config (dynamic, not hardcoded)
   const catDisplayMap = useMemo(() => {
@@ -80,9 +104,8 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
   }, [effectiveThreadId, activeCats, handleStopCat]);
 
   // F220 Phase 3: 升级态判定 — 任一活跃猫疑似卡死（liveness warning）→ 入口上浮变醒目。
-  const stalled = activeCats.some(({ catId }) => {
-    const s = catStatuses[catId];
-    return s === 'suspected_stall' || s === 'alive_but_silent';
+  const stalled = activeCats.some(({ catId, lifecycle }) => {
+    return isStreamingTipSuppressed(catStatuses[catId], lifecycle);
   });
   // F220 Phase 3: 确认后调 force-reset 端点（只清运行态，LL-048 不碰持久化）→ toast → 关弹窗。
   const handleForceReset = useCallback(async () => {
@@ -108,7 +131,7 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
     <div className="console-divider-b">
       <div className="flex items-center gap-2 px-4 py-1.5 text-xs">
         <span className="text-cafe-muted font-medium shrink-0">执行中</span>
-        {activeCats.map(({ catId, startedAt }) => {
+        {activeCats.map(({ catId, startedAt, lifecycle }) => {
           const info = catDisplayMap.get(catId) ?? { label: catId, color: 'var(--cafe-accent)' };
           return (
             <CatStatusChip
@@ -117,6 +140,7 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
               label={info.label}
               color={info.color}
               startedAt={startedAt}
+              lifecycle={lifecycle}
               onStop={handleStopCat}
             />
           );
@@ -220,23 +244,35 @@ function CatStatusChip({
   label,
   color,
   startedAt,
+  lifecycle,
   onStop,
 }: {
   catId: string;
   label: string;
   color: string;
   startedAt: number;
+  lifecycle?: AppServerLifecycleSnapshot;
   onStop: (catId: string) => void;
 }) {
   const elapsed = Math.floor((Date.now() - startedAt) / 1000);
   const minutes = Math.floor(elapsed / 60);
   const seconds = elapsed % 60;
   const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  const appServerStalled = isSilentActiveTurn(lifecycle);
 
   return (
-    <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-cafe-surface/50">
+    <span
+      className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-cafe-surface/50"
+      data-app-server-stalled={appServerStalled ? 'true' : undefined}
+    >
       <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: color }} />
       <span className="text-cafe-secondary font-medium">{label}</span>
+      {lifecycle && (
+        <span className={appServerStalled ? 'text-conn-amber-text' : 'text-cafe-muted'}>
+          {APP_SERVER_STAGE_LABELS[lifecycle.stage]} ·{' '}
+          {appServerStalled ? '可能在等待模型' : `活动 ${formatActivityAge(lifecycle.lastActivityAt)}`}
+        </span>
+      )}
       <span className="text-cafe-muted tabular-nums">{timeStr}</span>
       <button
         type="button"

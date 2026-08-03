@@ -44,6 +44,266 @@ function createMockOptions(storeOverrides: Record<string, unknown> = {}) {
 }
 
 describe('consumeBackgroundSystemInfo web_search', () => {
+  it('ADR-042 patches supplement lifecycle onto the published original without removing it', () => {
+    const original = {
+      id: 'msg-original',
+      type: 'assistant',
+      catId: 'codex',
+      content: 'published answer',
+      timestamp: 100,
+      extra: { freshness: { kind: 'published_with_unseen', generatedWithUnseen: ['msg-late'] } },
+    };
+    const options = createMockOptions({
+      getThreadState: vi.fn(() => ({ messages: [original], catStatuses: {}, catInvocations: {} })),
+    });
+    const projection = {
+      type: 'freshness_supplement',
+      supplementId: 'f254-supplement:msg-original:1',
+      lineageId: 'msg-original',
+      originalMessageId: 'msg-original',
+      threadId: 'thread-1',
+      catId: 'codex',
+      seq: 1,
+      status: 'declined',
+      requiredCount: 1,
+      terminalReason: 'checked_no_supplement_needed',
+      updatedAt: 200,
+    };
+
+    const result = consumeBackgroundSystemInfo(
+      {
+        type: 'system_info',
+        catId: 'codex',
+        threadId: 'thread-1',
+        content: JSON.stringify(projection),
+        timestamp: 200,
+      },
+      undefined,
+      options,
+    );
+
+    expect(result.consumed).toBe(true);
+    expect(options.store.removeThreadMessage).not.toHaveBeenCalled();
+    expect(options.store.patchThreadMessage).toHaveBeenCalledWith('thread-1', 'msg-original', {
+      extra: {
+        ...original.extra,
+        freshnessSupplement: projection,
+      },
+    });
+  });
+
+  it('ADR-042 never attaches an older supplement projection to a newer same-cat bubble', () => {
+    const newerBubble = {
+      id: 'msg-newer',
+      type: 'assistant',
+      catId: 'codex',
+      content: 'newer unrelated answer',
+      timestamp: 300,
+    };
+    const options = createMockOptions({
+      getThreadState: vi.fn(() => ({ messages: [newerBubble], catStatuses: {}, catInvocations: {} })),
+    });
+    const projection = {
+      type: 'freshness_supplement',
+      supplementId: 'f254-supplement:msg-older:1',
+      lineageId: 'msg-older',
+      originalMessageId: 'msg-older',
+      threadId: 'thread-1',
+      catId: 'codex',
+      seq: 1,
+      status: 'running',
+      requiredCount: 1,
+      updatedAt: 400,
+    };
+
+    const result = consumeBackgroundSystemInfo(
+      {
+        type: 'system_info',
+        catId: 'codex',
+        threadId: 'thread-1',
+        content: JSON.stringify(projection),
+        timestamp: 400,
+      },
+      undefined,
+      options,
+    );
+
+    expect(result.consumed).toBe(true);
+    expect(options.store.patchThreadMessage).not.toHaveBeenCalled();
+  });
+
+  it('F254 replaces a stale background stream with one identity-bound catching projection', () => {
+    const options = createMockOptions({
+      getThreadState: vi.fn(() => ({
+        messages: [
+          {
+            id: 'stale-bubble',
+            type: 'assistant',
+            catId: 'codex',
+            extra: { stream: { invocationId: 'inv-old' } },
+          },
+        ],
+        catStatuses: {},
+        catInvocations: {},
+      })),
+    });
+    options.bgStreamRefs.set('thread-1::codex', {
+      id: 'stale-bubble',
+      threadId: 'thread-1',
+      catId: 'codex',
+    });
+    const msg = {
+      type: 'system_info',
+      catId: 'codex',
+      threadId: 'thread-1',
+      content: JSON.stringify({
+        type: 'freshness_closure',
+        closureId: 'closure-1',
+        status: 'catching_up',
+        sourceInvocationId: 'inv-old',
+        updatedAt: 123,
+      }),
+      timestamp: 123,
+    };
+
+    const result = consumeBackgroundSystemInfo(
+      msg,
+      { id: 'stale-bubble', threadId: 'thread-1', catId: 'codex' },
+      options,
+    );
+
+    expect(result.consumed).toBe(true);
+    expect(options.store.removeThreadMessage).toHaveBeenCalledWith('thread-1', 'stale-bubble');
+    expect(options.store.addMessageToThread).toHaveBeenCalledWith(
+      'thread-1',
+      expect.objectContaining({ id: 'freshness-closure:closure-1', content: '正在重读新增消息…' }),
+    );
+    expect(options.bgStreamRefs.has('thread-1::codex')).toBe(false);
+  });
+
+  it('F254 background replay preserves a live successor ref while removing the stale source bubble', () => {
+    const options = createMockOptions({
+      getThreadState: vi.fn(() => ({
+        messages: [
+          {
+            id: 'live-successor',
+            type: 'assistant',
+            catId: 'codex',
+            extra: { stream: { invocationId: 'parent-shared', turnInvocationId: 'turn-live' } },
+          },
+          {
+            id: 'stale-source',
+            type: 'assistant',
+            catId: 'codex',
+            extra: { stream: { invocationId: 'parent-shared', turnInvocationId: 'turn-stale' } },
+          },
+        ],
+        catStatuses: {},
+        catInvocations: {},
+      })),
+    });
+    const liveRef = { id: 'live-successor', threadId: 'thread-1', catId: 'codex' };
+    options.bgStreamRefs.set('thread-1::codex', liveRef);
+    const msg = {
+      type: 'system_info',
+      catId: 'codex',
+      threadId: 'thread-1',
+      content: JSON.stringify({
+        type: 'freshness_closure',
+        closureId: 'closure-replayed',
+        status: 'catching_up',
+        sourceInvocationId: 'parent-shared',
+        turnInvocationId: 'turn-stale',
+        updatedAt: 300,
+      }),
+      timestamp: 300,
+    };
+
+    const result = consumeBackgroundSystemInfo(msg, liveRef, options);
+
+    expect(result.consumed).toBe(true);
+    expect(options.store.removeThreadMessage).toHaveBeenCalledWith('thread-1', 'stale-source');
+    expect(options.store.removeThreadMessage).not.toHaveBeenCalledWith('thread-1', 'live-successor');
+    expect(options.bgStreamRefs.get('thread-1::codex')).toEqual(liveRef);
+  });
+
+  it('F254 removes the catching projection when the fresh final commits', () => {
+    const options = createMockOptions();
+    const msg = {
+      type: 'system_info',
+      catId: 'codex',
+      threadId: 'thread-1',
+      content: JSON.stringify({
+        type: 'freshness_closure',
+        closureId: 'closure-1',
+        status: 'committed',
+        updatedAt: 456,
+      }),
+      timestamp: 456,
+    };
+
+    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+
+    expect(result.consumed).toBe(true);
+    expect(options.store.removeThreadMessage).toHaveBeenCalledWith('thread-1', 'freshness-closure:closure-1');
+  });
+
+  it('F254 background hydration retains legacy time and exact source anchor metadata', () => {
+    const source = {
+      id: 'legacy-source',
+      type: 'assistant',
+      catId: 'codex',
+      content: 'old draft',
+      timestamp: 100,
+      extra: { stream: { invocationId: 'inv-legacy' } },
+    };
+    const options = createMockOptions({
+      getThreadState: vi.fn(() => ({
+        messages: [source],
+        catStatuses: {},
+        catInvocations: {},
+      })),
+    });
+
+    const result = consumeBackgroundSystemInfo(
+      {
+        type: 'system_info',
+        catId: 'codex',
+        threadId: 'thread-1',
+        content: JSON.stringify({
+          type: 'freshness_closure',
+          closureId: 'closure-legacy',
+          status: 'blocked',
+          sourceInvocationId: 'inv-legacy',
+          turnInvocationId: 'turn-legacy',
+          originTriggerMessageId: null,
+          blockedReason: 'user_cancel',
+          updatedAt: 200,
+        }),
+        timestamp: 200,
+      },
+      undefined,
+      options,
+    );
+
+    expect(result.consumed).toBe(true);
+    expect(options.store.addMessageToThread).toHaveBeenCalledWith(
+      'thread-1',
+      expect.objectContaining({
+        timestamp: 200,
+        extra: expect.objectContaining({
+          systemKind: 'freshness_closure',
+          freshnessClosure: expect.objectContaining({
+            sourceInvocationId: 'inv-legacy',
+            sourceMessageId: 'legacy-source',
+            updatedAt: 200,
+            legacy: true,
+          }),
+        }),
+      }),
+    );
+  });
+
   it('consumes web_search JSON (does not fall back to raw JSON system bubble)', () => {
     const options = createMockOptions();
 
@@ -492,6 +752,9 @@ describe('consumeBackgroundSystemInfo liveness_warning', () => {
         level: 'alive_but_silent',
         cpuTimeMs: 12700,
         processAlive: true,
+        firstEventAt: 1000,
+        lastEventAt: 2000,
+        lastEventType: 'turn.started',
       }),
       timestamp: Date.now(),
     };
@@ -512,6 +775,9 @@ describe('consumeBackgroundSystemInfo liveness_warning', () => {
           silenceDurationMs: 160094,
           cpuTimeMs: 12700,
           processAlive: true,
+          firstEventAt: 1000,
+          lastEventAt: 2000,
+          lastEventType: 'turn.started',
         }),
       }),
     );

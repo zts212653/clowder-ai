@@ -1,6 +1,8 @@
 ---
 domainId: eval:task-outcome
 displayName: Task Outcome Eval
+descriptionForHuman: 猫干活结果怎么样——做完了吗、质量行吗、有没有返工
+metricGlossaryRef: eval-task-outcome.metrics.yaml
 systemThreadId: thread_eval_task_outcome
 evalCat:
   catId: opus-47

@@ -400,6 +400,12 @@ describe('F24: SessionChainPanel', () => {
     expandSealed();
     expect(container.textContent).toContain('Session #1');
     expect(container.textContent).toContain('Session #2');
+    const summaries = container.querySelectorAll<HTMLElement>('[data-testid="sealed-session-summary"]');
+    expect(summaries.length).toBe(2);
+    for (const summary of summaries) {
+      await act(async () => summary.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
+      expect(summary.querySelector('pre')?.className).toContain('overflow-auto');
+    }
     expect(container.textContent).toContain('compact');
     expect(container.textContent).toContain('threshold');
     // Both sealed sessions should have clickable ID buttons
@@ -414,6 +420,8 @@ describe('F24: SessionChainPanel', () => {
     renderPanel('thread-1');
     await flushFetch();
     expandSealed();
+    const summary = container.querySelector<HTMLElement>('[data-testid="sealed-session-summary"]');
+    await act(async () => summary?.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
     expect(container.textContent).toContain('sealing');
   });
 
@@ -1267,6 +1275,8 @@ describe('F24: SessionChainPanel', () => {
       // Expanded: sealed card visible
       expect(container.querySelector('[data-testid="session-card-sealed"]')).not.toBeNull();
       expect(container.textContent).toContain('Session #1');
+      const summary = container.querySelector<HTMLElement>('[data-testid="sealed-session-summary"]');
+      await act(async () => summary?.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
       expect(container.textContent).toContain('compact');
 
       // Click to collapse again

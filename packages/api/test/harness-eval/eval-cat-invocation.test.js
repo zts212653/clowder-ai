@@ -105,6 +105,65 @@ describe('Eval cat invocation packet', () => {
     assert.match(invocation.instructions, /miss/i);
   });
 
+  it('builds instructions for eval:sop with required changedFiles trace contract', () => {
+    const invocation = buildEvalCatInvocation({
+      domain: {
+        ...domain,
+        domainId: 'eval:sop',
+        displayName: 'SOP Eval',
+        systemThreadId: 'thread_eval_sop',
+        sourceAdapter: 'sop-trace-eval',
+        sourceRefsKind: 'sop-trace-eval',
+        frequency: 'weekly',
+        legacyScheduledTaskIds: [],
+        handoffTargetResolver: { featureId: 'F192', ownerCatId: 'opus47', threadLookup: 'feature-thread' },
+      },
+      trendRefs: [],
+      verdictRefs: [],
+      legacyCleanup: { status: 'disabled' },
+    });
+
+    assert.equal(invocation.domainId, 'eval:sop');
+    assert.match(invocation.instructions, /changedFiles/, 'eval:sop instructions must mention changedFiles');
+    assert.match(invocation.instructions, /changedFileEvents/, 'eval:sop instructions must mention ordered file edits');
+    assert.match(invocation.instructions, /eventNo|timestamp/, 'eval:sop instructions must mention ordering fields');
+    assert.match(
+      invocation.instructions,
+      /empty array|empty.*\[\]/i,
+      'eval:sop instructions must require an explicit empty changedFiles array when no files changed',
+    );
+    assert.match(
+      invocation.instructions,
+      /stdout|summary/,
+      'eval:sop instructions must mention command output evidence',
+    );
+    assert.match(
+      invocation.instructions,
+      /freshness\.stale.*false|stale.*false/i,
+      'eval:sop instructions must require fresh convention graph results',
+    );
+    assert.match(
+      invocation.instructions,
+      /targets/,
+      'eval:sop instructions must include convention graph target coverage',
+    );
+    assert.match(
+      invocation.instructions,
+      /filePath/,
+      'eval:sop instructions must include convention graph target filePath coverage',
+    );
+    assert.match(
+      invocation.instructions,
+      /packages\/mcp-server\/src\/tools\/callback-tools\.ts/,
+      'eval:sop example must show target coverage for the changed convention surface',
+    );
+    assert.match(
+      invocation.instructions,
+      /pre-edit|pre.?edit/i,
+      'eval:sop instructions must require pre-edit graph evidence',
+    );
+  });
+
   it('builds friction publish instructions with friction-rollup-snapshot selector (cloud R1 gap)', () => {
     const invocation = buildEvalCatInvocation({
       domain: {
@@ -141,6 +200,38 @@ describe('Eval cat invocation packet', () => {
     assert.match(invocation.instructions, /followupDraft|propose_thread/i);
   });
 
+  it('builds replayable publish instructions for eval:freshness', () => {
+    const invocation = buildEvalCatInvocation({
+      domain: {
+        ...domain,
+        domainId: 'eval:freshness',
+        displayName: 'Freshness Gate Eval',
+        systemThreadId: 'thread_eval_freshness',
+        sourceAdapter: 'f254-freshness-replay',
+        sourceRefsKind: 'freshness-closure-replay',
+        frequency: 'weekly',
+        legacyScheduledTaskIds: [],
+        handoffTargetResolver: { featureId: 'F254', ownerCatId: 'codex', threadLookup: 'feature-thread' },
+        enabled: true,
+      },
+      trendRefs: [],
+      verdictRefs: [],
+      legacyCleanup: { status: 'disabled' },
+    });
+
+    assert.equal(invocation.domainId, 'eval:freshness');
+    assert.match(invocation.instructions, /queued_seen/i);
+    assert.match(invocation.instructions, /queued_handled/i);
+    assert.match(invocation.instructions, /succeeded=handled|succeeded.*handled/i);
+    assert.match(invocation.instructions, /telemetry gap/i);
+    assert.match(invocation.instructions, /Publish your verdict/);
+    assert.match(invocation.instructions, /freshness-closure-replay/);
+    assert.match(invocation.instructions, /all eight AC-E9 fixtures are server-owned/i);
+    assert.match(invocation.instructions, /callers cannot select a subset/i);
+    assert.doesNotMatch(invocation.instructions, /fixtureIds/);
+    assert.match(invocation.instructions, /healthy=false/);
+  });
+
   it('eval:a2a instructions include grounding subdomain observation tokens (F167 Phase O)', () => {
     const invocation = buildEvalCatInvocation({
       domain,
@@ -158,6 +249,88 @@ describe('Eval cat invocation packet', () => {
     assert.match(invocation.instructions, /grounding\.mismatch_sample_count/, 'must reference mismatch counter');
     assert.match(invocation.instructions, /groundingSampleEvidence/, 'must reference sample evidence field');
     assert.match(invocation.instructions, /telemetry gap/, 'must reference no-data telemetry gap guidance');
+  });
+
+  it('eval:a2a instructions include single-successor carrier migration tokens', () => {
+    const invocation = buildEvalCatInvocation({
+      domain,
+      trendRefs: [],
+      verdictRefs: [],
+      legacyCleanup: { status: 'not_checked' },
+    });
+
+    assert.match(invocation.instructions, /successor\.single_target_multi_mention_rate/);
+    assert.match(invocation.instructions, /successor\.unfenced_single_target_multi_mention/);
+    assert.match(invocation.instructions, /successor\.action_fence_unavailable/);
+    assert.match(invocation.instructions, /successor\.agent_key_action_rejected/);
+    assert.match(invocation.instructions, /expected fail-closed/i);
+    assert.match(invocation.instructions, /fix verdict/i);
+  });
+
+  it('eval:a2a instructions include Phase Q hold lifecycle zero-tolerance tokens', () => {
+    const invocation = buildEvalCatInvocation({
+      domain,
+      trendRefs: [],
+      verdictRefs: [],
+      legacyCleanup: { status: 'not_checked' },
+    });
+
+    assert.match(invocation.instructions, /hold-lifecycle-phase-q/, 'must reference the Phase Q component ID');
+    assert.match(
+      invocation.instructions,
+      /hold_lifecycle\.event_retired_total/,
+      'must reference event-backed retirement activation',
+    );
+    assert.match(
+      invocation.instructions,
+      /hold_lifecycle\.stale_wake_suppressed_total/,
+      'must reference stale wake suppression activation',
+    );
+    assert.match(
+      invocation.instructions,
+      /hold_lifecycle\.expired_after_satisfied_total/,
+      'must reference the expired-after-satisfied invariant',
+    );
+    assert.match(invocation.instructions, /zero-tolerance/i, 'must call the invariant zero-tolerance');
+    assert.match(invocation.instructions, /any nonzero/i, 'must explain that any nonzero value is actionable');
+  });
+
+  it('eval:a2a instructions include F177 event-backed routing zero-tolerance tokens', () => {
+    const invocation = buildEvalCatInvocation({
+      domain,
+      trendRefs: [],
+      verdictRefs: [],
+      legacyCleanup: { status: 'not_checked' },
+    });
+
+    assert.match(invocation.instructions, /event-backed-routing-exit/);
+    assert.match(invocation.instructions, /event_wait\.bypass_total/);
+    assert.match(invocation.instructions, /event_wait\.rejected_stale_total/);
+    assert.match(invocation.instructions, /event_wait\.rejected_unrelated_total/);
+    assert.match(invocation.instructions, /event_wait\.rejected_uncovered_total/);
+    assert.match(invocation.instructions, /event_wait\.rejected_query_failed_total/);
+    assert.match(invocation.instructions, /event_wait\.rejected_other_total/);
+    assert.match(invocation.instructions, /event_wait\.redundant_hold_prevented_total/);
+    assert.match(invocation.instructions, /event_wait\.false_bypass_total/);
+    assert.match(invocation.instructions, /zero-tolerance/i);
+    assert.match(invocation.instructions, /any nonzero/i);
+  });
+
+  it('eval:a2a instructions bind Phase T correctness to the authoritative disagreement denominator', () => {
+    const invocation = buildEvalCatInvocation({
+      domain,
+      trendRefs: [],
+      verdictRefs: [],
+      legacyCleanup: { status: 'not_checked' },
+    });
+
+    assert.match(invocation.instructions, /turn-custody-stop-gate/);
+    assert.match(invocation.instructions, /turn_custody\.old_only_block_total/);
+    assert.match(invocation.instructions, /turn_custody\.new_only_block_total/);
+    assert.match(invocation.instructions, /turn_custody\.unknown_legacy_rate/);
+    assert.match(invocation.instructions, /projected_block_increase_total only as behavior-delta observation/i);
+    assert.match(invocation.instructions, /justified \+ unjustified \+ unexplained/i);
+    assert.match(invocation.instructions, /bounded trace samples explain rows but never substitute/i);
   });
 
   it('eval:a2a instructions include counter rate denominator tokens (F167 sibling-PR)', () => {

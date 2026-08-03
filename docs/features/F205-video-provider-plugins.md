@@ -9,7 +9,7 @@ community_pr: https://github.com/zts212653/clowder-ai/pull/1144
 
 # F205: MediaHub Video Provider Plugins — 视频生成/分析插件
 
-> **Status**: in-review | **Owner**: community @mindfn + Cat Cafe maintainers | **Priority**: P1
+> **Status**: in-progress | **Owner**: community @mindfn + Clowder AI maintainers | **Priority**: P1
 
 ## Source
 
@@ -20,7 +20,7 @@ community_pr: https://github.com/zts212653/clowder-ai/pull/1144
 
 ## Why
 
-F138 is Cat Cafe's end-to-end video production pipeline: spec, assets, narration, Remotion rendering, and publishing workflow.
+F138 is Clowder AI's end-to-end video production pipeline: spec, assets, narration, Remotion rendering, and publishing workflow.
 
 PR #689 is a different layer: pluginized provider access for video generation and video analysis. It can become an upstream capability that F138 consumes, but it is not the whole Video Studio. It deserves its own feature anchor so provider protocols, credentials, MCP tools, and MediaHub UI can be reviewed without overloading F138 or F202.
 
@@ -71,6 +71,9 @@ Expected scope:
 
 ## Current Maintainer Position
 
-PR #1144 is a clean rewrite addressing #689's scope concerns. Protocol engine, auth strategies, plugin manifests, and MCP integration are in review. Security hardening (credential scrubbing, plugin ownership guards, redaction) applied per maintainer R7 feedback.
+PR #1144 was merged into public `clowder-ai/main` after final-HEAD review and a
+full gate. Its protocol engine, auth strategies, plugin manifests, and MCP
+integration are now being replayed into Clowder AI through intake issue #3077.
+F205 remains open because AC-C2 still requires live provider credentials.
 
-[Updated 2026-07-15 per maintainer review on #1144]
+[小太阳·Maine Coon/GPT-5.6-Sol🐾]

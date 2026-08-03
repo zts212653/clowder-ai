@@ -338,7 +338,7 @@ describe('resolvePersistentProjectPathDetailed', () => {
     );
   });
 
-  it('rejects Cat Cafe runtime and workspace descendants as external governance targets', async () => {
+  it('rejects Clowder AI runtime and workspace descendants as external governance targets', async () => {
     for (const target of [runtimeRoot, runtimePackage, workspaceRoot, workspacePackage]) {
       const result = await validateExternalProjectPathDetailed(target, runtimeRoot, { runtimeRoot, workspaceRoot });
       assert.equal(result.ok, false, `${target} must not be treated as an external project`);
@@ -346,7 +346,7 @@ describe('resolvePersistentProjectPathDetailed', () => {
     }
   });
 
-  it('accepts a project outside both Cat Cafe checkouts as an external governance target', async () => {
+  it('accepts a project outside both Clowder AI checkouts as an external governance target', async () => {
     const result = await validateExternalProjectPathDetailed(externalProject, runtimeRoot, {
       runtimeRoot,
       workspaceRoot,

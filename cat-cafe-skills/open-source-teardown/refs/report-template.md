@@ -23,10 +23,20 @@ covers: [architecture, star-features, algorithms, comparison]
 - Commit:
 - Claims to verify:
 
-## 1. Claim Ledger
+## 1. Claim + Decision Ledger
 
-| Claim | Source wording | Evidence paths | Verdict | Caveat |
-|-------|----------------|----------------|---------|--------|
+| Claim | Measured construct / comparator | Population / denominator / exclusions | Evidence paths | Source verdict | Decision fit | Unknowns |
+|-------|---------------------------------|---------------------------------------|----------------|----------------|--------------|----------|
+
+### Performance / Cost Boundary
+
+- Target workload / user:
+- Provider + model + version:
+- Time horizon:
+- Lifecycle boundary: ingest/extract / query/retrieval / generation / cache / maintenance/human
+- Coupled outcomes: quality / coverage / latency / reliability / privacy-risk
+- Adaptive eval reuse: benchmark/holdout visibility + query count
+- Unknown or unreported items:
 
 ## 2. Architecture Map
 
@@ -61,10 +71,10 @@ entrypoint -> core loop -> tools/providers/plugins -> state stores
 | Claimed loop | signal | decision | state mutation | future behavior | verdict |
 |--------------|--------|----------|----------------|-----------------|---------|
 
-## 6. Cat Café Comparison
+## 6. Clowder AI Comparison
 
-| Dimension | Project | Cat Café | Learn / Gap / Do Not Follow | Agent User Fit (L1/L2/L3) | Reason |
-|-----------|---------|----------|-----------------------------|---------------------------|--------|
+| Decision dimension | Project evidence | Clowder AI requirement | Constraint / frontier | Learn / Gap / Do Not Follow | Agent User Fit (L1/L2/L3) | Reason / unknowns |
+|--------------------|------------------|----------------------|-----------------------|-----------------------------|---------------------------|-------------------|
 
 > Agent User Fit 列填 ✅/⚠️/❌ × L1(可继续) / L2(可分辨 observation vs generation) / L3(可闭环)；详见 [user-mind-evaluation.md](user-mind-evaluation.md)。
 

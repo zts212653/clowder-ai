@@ -20,6 +20,7 @@ import { createWriteStream, existsSync, mkdirSync, readFileSync, unlinkSync } fr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createModuleLogger } from './logger.js';
+import { buildManagedRunnerEnvironment } from './managed-runner-environment.js';
 
 const log = createModuleLogger('managed-runner');
 
@@ -105,6 +106,8 @@ export class ManagedRunner {
       const child = spawn(command, {
         shell: true,
         cwd,
+        // Keep repository-owned tools available when the API daemon has a minimal PATH.
+        env: buildManagedRunnerEnvironment(process.env),
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: true,
       });

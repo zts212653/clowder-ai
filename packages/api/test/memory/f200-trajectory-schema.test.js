@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 
 describe('F200 Phase D — task_trajectories schema V22', () => {
-  let Database, applyMigrations, SCHEMA_V1;
+  let Database, applyMigrations, SCHEMA_V1, CURRENT_SCHEMA_VERSION;
   let db;
 
   beforeEach(async () => {
@@ -10,6 +10,7 @@ describe('F200 Phase D — task_trajectories schema V22', () => {
     const schema = await import(`../../dist/domains/memory/schema.js?v=${Date.now()}`);
     applyMigrations = schema.applyMigrations;
     SCHEMA_V1 = schema.SCHEMA_V1;
+    CURRENT_SCHEMA_VERSION = schema.CURRENT_SCHEMA_VERSION;
 
     db = new Database(':memory:');
     db.exec('PRAGMA journal_mode = WAL');
@@ -97,8 +98,8 @@ describe('F200 Phase D — task_trajectories schema V22', () => {
     assert.equal(row.duration, 45000);
   });
 
-  it('reaches schema version 26', () => {
+  it('reaches current schema version', () => {
     const row = db.prepare('SELECT MAX(version) as v FROM schema_version').get();
-    assert.equal(row.v, 26);
+    assert.equal(row.v, CURRENT_SCHEMA_VERSION);
   });
 });

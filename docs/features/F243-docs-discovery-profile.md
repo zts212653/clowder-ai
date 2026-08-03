@@ -1,15 +1,23 @@
 ---
 feature_ids: [F243]
 related_features: [F236, F186, F038]
-topics: [docs, discovery, profile, frontmatter, index, okf]
+topics: [docs, discovery, profile, frontmatter, index, finalizer, okf]
 doc_kind: spec
 created: 2026-06-17
-tips_exempt: spec-only — docs index generation not yet implemented, no user-facing capability
+description: 定义知识型文档的稳定简介、来源字段和目录生成门禁。
+description_source: human
+description_author: codex
+description_updated_at: 2026-06-30T17:55:01Z
+tips_exempt: internal docs governance capability — no end-user app surface
 ---
 
 # F243: Docs Discovery Profile — OKF-inspired metadata + generated index
 
-> **Status**: spec (v2 redesigned 2026-06-29) | **Owner**: Ragdoll (Ragdoll Opus-4.7) | **Priority**: P1
+> **Status**: in-progress (Phase B/C + AC-C4 merged; Phase D baseline recorded; Phase E managed-index ownership moved to the post-merge finalizer on 2026-07-16; observation pending) | **Owner**: Ragdoll (Ragdoll Opus-4.7) | **Priority**: P1
+
+Architecture cell: `memory`
+Map delta: none
+Map delta why: 沿用 F243 scanner / profile resolver 既有归属；本 Phase 只收紧派生 index 的写侧 ownership 与 merge 后维护流程，不新增 runtime domain / store / queue。
 
 > **Co-design**: Maine Coon (gpt-5.5) co-designed scope 4+1（命名 / 4-Phase 骨架 / F236 Related 不造 taxonomy / Eval primary=冷启动 / `> Summary:` 镜像 guardrail）+ R1 review sharpen（Owner/reviewer 红线 / F186 scope creep / parser 验证）。Maine Coon是 reviewer 不是 Owner（避免同体 review 红线），具体 contribution 标注在 KD-1/3/4/5/6/7/8/9/10 + Timeline 2026-06-17 entries。
 
@@ -139,6 +147,8 @@ operator R2 sharpen (2026-06-29) 直接 question："会不会把老的给拦截�
 
 ### Phase B (v2)
 
+**Progress**: B-0 scanner discovery extraction merged in PR #2693. Phase B/C implementation merged in PR #2695: profile parser + scope resolver + diff-aware lint + generated per-directory indexes + sync gate are now in main. AC-C4 scheduled long-gap drift scan is implemented as non-blocking `--drift-scan` warnings for stale `description_updated_at` after major H1/frontmatter changes; PR #2718 completed the follow-up hardening for rename history and non-ASCII git paths.
+
 - **AC-B1-v2**: profile contract 定稿——`description` (≤ 160 char, stable identity statement) + epistemic schema 三必现字段（`description_source` / `description_author` / `description_updated_at`）+ 条件必现（`source=model` 时加 `description_generated_by` / `description_generated_at` / `description_confirmed_by`）。CI lint 对 **`profile_enforced` 集合**内新增/修改 docs 通过率 = 100%
 - **AC-B2-v2**: `cat-cafe-skills/refs/feature-doc-template.md` 更新含 description 字段 + **drift-resistant rubric (stable identity vs current state snapshot, 含正反例)**
 - **AC-B3-v2**: profile lint 实现：缺 description / 超长 / placeholder / 缺 epistemic 三必现字段 / `source=model` 时缺 confirm 字段 → CI fail（fixture 各 1 + reverse fixture 验证不误报，**lint enforce target = `profile_enforced`**，不含 `profile_exempt` / scanner-out paths）
@@ -149,13 +159,92 @@ operator R2 sharpen (2026-06-29) 直接 question："会不会把老的给拦截�
 - **AC-C1-v2 童子军 enforcement**：new doc 必有 description (CI hard fail)；大改触发 description refresh prompt（PR template + drift lint warn）；旧 doc 无 description 不阻塞（fallback "(待补)")；git log audit + epistemic schema 字段写进 frontmatter (不只 commit message)
 - **AC-C2-v2 多 index.md generated + checked-in**：`profile_enforced` grouped per-directory `index.md` 生成 + checked-in，含 description + topics 索引 + epistemic provenance + fallback entries（in-scope but missing description 显式标 `description_missing: true`，不混伪装真 description）
 - **AC-C3-v2 CI sync gate**：每个 generated `index.md` 与 source frontmatter 不同步 → PR block（fixture 验证：删 description / 改 status / source 改 description 但 index 没 regen）
-- **AC-C4-v2 Drift detection lint**：`description_updated_at` 与 doc 大改时间（commit SHA-level）gap > N months 且 doc 大改 → CI warn（不 block，提示作者 review description 是否仍 align）。N 默认 6 months，可调
+- **AC-C4-v2 Drift detection lint**：`description_updated_at` 与 doc 大改时间（commit SHA-level）gap > N months 且 doc 大改 → CI warn（不 block，提示作者 review description 是否仍 align）。N 默认 6 months，可调。Implemented via scheduled `--drift-scan`; current repo scan reports 0 warnings at implementation time.
 
 ### Phase D (v2 — Eval + Extend Go/No-Go)
 
 - **AC-D1-v2 Friction metric 实测**：dream feat 作为 first production consumer 自然产生数据（不需独立组织 3 猫盲测）—— dream 每天 read feature 变化 = 持续 friction signal source
 - **AC-D2-v2 误点率 + 漏判率 vs baseline 不增加**（sunset signal ② 变瞎子防御）—— dream 在 production 中遇到 description-doc mismatch 时反馈
 - **AC-D3-v2 扩展 Go/No-Go**：overlay/profile policy extension (如加 `docs/lessons-learned/main` 进 overlay_added, 或调整 profile_exempt 规则) 或 scope reframe (F102 scanner KIND_DIRS 改动跟随)，operator 决定
+
+**Phase D sequencing**: AC-C4 merge 后即可写 baseline eval record；真实 friction / mismatch signal 需要短观察窗（建议 3-7 天）从 dream / 实际 docs lookup 中收样，再做 AC-D3 Go/No-Go。Phase D 不再新增设计文档，记录直接回写本 spec 或对应 eval verdict。
+
+#### Phase D Baseline Eval Record (2026-07-03 UTC)
+
+**Scope**: baseline only. This records the state after AC-C4 landed; it does **not** satisfy AC-D1/AC-D2 yet because real friction / mismatch signals need an observation window.
+
+| Check | Evidence | Baseline verdict |
+|---|---|---|
+| Base commit | `071eacb30c4dbb7554a817b8e11b3262a9802ed3` (`origin/main` at 2026-07-03T04:50:25Z) | capture point |
+| Drift scan | `node scripts/docs-discovery/lint-profile.mjs --drift-scan` → `F243 drift scan passed with 0 warning(s).` | 0 stale-description warnings |
+| Generated index availability | `node scripts/docs-discovery/generate-index.mjs --check` initially flagged `docs/harness-feedback/index.md`; this baseline change refreshed it with `--write`, then `--check` passed. Managed generated indexes: 39. Hand-authored skipped index: `docs/taste/index.md`. | generated indexes available and synced after baseline refresh |
+| Feature truth guard | `node scripts/check-feature-truth.mjs` → `PASS check-feature-truth: features=264 backlog_active=75 feature_docs_scanned=264 journey_docs_checked=1` | feature doc status/timeline truth passes |
+| AC-C4 behavior | `--drift-scan` remains warning-only; default threshold remains 6 months; PR #2718 covered rename history and non-ASCII git path regressions. | AC-C4 baseline stable |
+
+**Observation window**: collect 3-7 days of dream / actual docs lookup signals before AC-D1/AC-D2. Minimum signal set for Go/No-Go: (1) any description-doc mismatch reports, (2) any lookup friction where generated index changed the path taken, (3) any fallback-description confusion where `(待补)` / `description_missing` was mistaken for confirmed description.
+
+### Known Issues (Post-Phase-B/C Production)
+
+**KI-1: Baseline drift 循环 (6 occurrences, 2026-07-10 → 2026-07-15)**
+
+Root cause: producer-side unaware of F243 index contract. 6 实际浮现:
+
+| # | Date | Producer | 类别 | Baseline sunk-cost fix |
+|---|---|---|---|---|
+| 1 | 2026-07-10 | Fable discussion writer | Case A (human) + B (auto) 混 | 别猫补 feature-discussions/index |
+| 2 | 2026-07-10 | verdict PRs #2861-2863 automation | Case B (MCP publisher) | `a719aa654` (harness-feedback) |
+| 3 | 2026-07-11 | F260 PR-6 evidence write (`a635b26b8`) | Case B (automation) | `1c525df29` (evidence) |
+| 4 | 2026-07-12 | F221 docs 车道拆错 (PR #2899 未合但源直推 main) | Case B (automation) | `c40682d5f` (features+plans) |
+| 5 | 2026-07-15 | F234 skill manifest + Harness Diet discussion | Case A + B 混 | 别猫补 (自然 recovered) |
+| 6 | (any future) | ... | ... | Phase E finalizer 目标: 0 sunk-cost 补救 |
+
+Signal 强度: 6 次 × 4 类 producer × 平均 30 min 下游 unblock 延迟 ≈ 累积 3 小时下游猫等待税. Sol / 4.6 / opus-47 (我) 三方三轮 investigate/coordinate 一致收敛 Phase E finalizer 是最短路径。
+
+**Direction (2026-07-15 Sol iterate, opus-47 lock)**:
+- **Preferred (A)**: `index.md` 退出 Git (纯 build artifact 按需生成) → 根治, 但破 dream/F255 现有 consumer 契约, 需 API redesign → **Phase F 候选**
+- **Chosen (B)**: Merge-time **finalizer bot** → 保持 index.md checked-in (consumer 契约不动) + auto sync, 覆盖所有 producer 一次性 → **Phase E scope**
+- **Rejected (C)** (原 Sol R1/R2 packet, superseded 2026-07-15): Per-producer binding + pre-commit guard → N × M 复杂, 6 次 drift 后仍会"补一个新 producer 就漏"。退役理由保留在本 operative spec，不另建无消费者 archive doc。
+
+### Phase E (Producer-Unaware Baseline Drift Root Fix — immediate P0 2026-07-15)
+
+**Trigger**: KI-1 (6 occurrences), Sol 07-15 direction pivot (finalizer > pre-commit).
+
+**Ownership contract（2026-07-16 治本收敛）**：
+
+| Index 类别 | Canonical writer | Feature branch 责任 | 判定方式 |
+|---|---|---|---|
+| F243 managed generated indexes | merge 后 `.github/workflows/f243-finalizer.yml` | 只改 source docs，禁止 add/edit/delete index | 当前 generator output models + 既有 F243 generated marker 的并集 |
+| `docs/taste/index.md` | F221 Taste runtime / approved proposal writer | 保持 F221 的 vignette + index 原子更新 | hand-authored allowlist；`writeVignette.ts` / `TasteRepository.ts` 直接消费 |
+
+后者不是 F243 派生物：把 taste 域塞进 finalizer 会破坏 F221 持久化契约，因此明确留在 managed set 之外；不是双轨 fallback。
+
+**AC-E1 Finalizer workflow**: `.github/workflows/f243-finalizer.yml` 覆盖 `push: branches: [main]`（merge commit / squash merge / rebase merge / 授权 direct push 最终都表现为 main push），并提供 `workflow_dispatch` 作为基础设施失败或 non-fast-forward 冲突后的显式恢复入口。workflow 跑 `finalizer-run.mjs --commit`；若 drift，生成 exact-path auto-commit 后以 `git push origin HEAD:main` 非 force 推送。Auto-commit signature: `docs(F243-finalizer): auto-sync {index-list} after {triggering-commit-SHA}`, Co-Authored-By 明确列 producer author。
+
+**AC-E2 Idempotency + isolation**: 无 drift → workflow no-op exit 0；有 drift → commit only affected managed `index.md` files。finalizer 要求启动时 working tree clean，拒绝把任何非 generator 变化夹进机器 commit。finalizer commit 再触发 workflow 时依靠生成结果幂等返回 `clean`，不得用可伪造的 commit message 作为机器身份或跳过条件。
+
+**AC-E3 Attribution chain**: auto-commit body 记 triggering commit SHA + producer author + affected indexes list。`git log --grep="F243-finalizer"` 可 audit 全 drift 事件历史 (Eval 数据源)。
+
+**AC-E4 Failure fail-closed**: generator/commit 失败或 finalizer push 冲突（main race）→ open GitHub Issue，workflow exit 1。**不 auto-force-push**；新 main push 会重新消费聚合 drift，亦可用 `workflow_dispatch` 恢复。
+
+**AC-E5 Retire producer-side rebuild responsibility**: `pnpm check:docs-discovery` 不再要求 feature branch `generate-index --check` 绿色，改跑 `guard-managed-index-ownership.mjs --base origin/main`：source-doc-only branch 必须通过；任何 managed index add/edit/delete 必须失败并提示“只改 source，merge 后 finalizer 重建”。这不是 per-producer pre-commit binding；是单一 ownership boundary 的 hard gate。
+
+**AC-E6 Fixture matrix (必测)**:
+- ① source-doc-only feature branch 不重建 index 仍通过 ownership gate；新增/编辑/删除 managed index 全部失败
+- ② `docs/taste/index.md` 作为 F221 hand-authored consumer 明确不被误拦
+- ③ finalizer 无 drift no-op；有 drift exact-path commit；连续运行 recursion/idempotency 成立
+- ④ working tree 预存非 F243 变化时 fail-closed，不夹带 commit
+- ⑤ workflow schema 硬测 main-push + manual recovery、`contents: write`、`--commit`、non-force push、失败 issue + exit 1
+
+**ADR-031 三层**：soft = 本 ownership contract + workflow convention；hard = `check:docs-discovery` ownership guard 与 fixture matrix；eval = workflow run/失败 issue + `git log --grep="F243-finalizer"` 的真实 drift closure 账。7 天 observation 继续统计“feature branch index 补救 commit 数”（目标 0）和 finalizer failure/recovery。
+
+**Phase E sequencing (immediate P0)**:
+1. Sol 单作者 worktree + TDD，把 ownership contract / hard guard / production finalizer 收进一个 PR
+2. Terra 覆盖 exact HEAD；仅明确 unavailable/failed 时由 GLM verified fallback，不叠双审
+3. merge 后一手检查 workflow 真跑与 auto-commit；7 天 observation 中 KI-1 新增 occurrence 目标为 0
+
+### Phase F (Long-term Root Fix Candidate — 未来 Go/No-Go)
+
+**AC-F1 Index.md 退出 Git 评估**: Phase E finalizer 稳定运行 30 天后, 评估把 `index.md` 完全从 Git 移除 (build-time only, consumer 走 pre-computed cache / API endpoint), 彻底消除 checked-in state drift 可能. Consumer 侧影响 (dream / F255 / manual lookup) 需专门 spec 迁移。**Blocked on**: Phase E stability, consumer API design.
 
 ### OQ (v2)
 
@@ -188,6 +277,16 @@ operator 2026-06-15 启动："来吧你来综合一下三只喵喵的想法的"�
 
 **价值一句话**：让"猫初次找 feature" 从 "ls + grep + search_evidence 多轮碰运气" 变成 "看 index 一眼就知道有什么、点哪篇、为什么相关"。OKF 是 lineage（lingua franca 兼容性），不是目标。
 
+## User Journey
+
+**Scope unit**: 一只刚进入 Clowder AI repo 的猫，需要从知识型文档里快速定位某个 feature / ADR / research / skill 的真实入口，而不是靠文件名记忆或多轮 grep 猜测。
+
+**Flow**:
+1. 猫打开对应目录的 generated `index.md`（如 `docs/features/index.md` 或 `docs/decisions/index.md`）。
+2. 猫按 ID / Title / Description / Topics 扫描候选项，能一眼区分真实 description 与 `(待补)` fallback。
+3. 猫点进最相关的源文档；如果要新增或大改文档，profile lint 会提示补齐 description 与 provenance。
+4. 后续 consumer（如 dream）读取同一 index 时，能区分 human/model/fallback 来源，不把 fallback H1 当成已确认简介。
+
 ## Current State / 现状基线
 
 实测证据（2026-06-17）：
@@ -218,7 +317,7 @@ operator 2026-06-15 启动："来吧你来综合一下三只喵喵的想法的"�
 - 评分维度参考 mini-spike v3 prompt 9 条 + 新增**对照评估**（与作者原写对比 + 与 baseline `H1 + 第一段` 对比）
 - **输出**：description generation 形态判定（小模型生产 / 大猫手写 / 模板任一），含数据支撑
 
-**子能力 2 — Cat Café doc profile 草案**：
+**子能力 2 — Clowder AI doc profile 草案**：
 - frontmatter 字段映射 OKF：`doc_kind → type`、`topics → tags`、`created → timestamp`、+新增 `description`
 - description 字段约束（位置 = frontmatter；长度 = ≤ 160 char；范围 = "回答这是什么" 不答 "讲了什么细节"；视角 = 读者；隐喻保留；触发节流 = H1/scope/status 改才重新生成）
 - **Non-goal**：`> Summary:` blockquote 正文镜像 v1 不进（Maine Coon guardrail，多一个漂移面）
@@ -262,18 +361,18 @@ operator 2026-06-15 启动："来吧你来综合一下三只喵喵的想法的"�
 - [ ] AC-A3: eval rubric 定稿：baseline 命令清单 + friction metric 公式 + sunset signal 两类阈值
 
 ### Phase B（Profile Contract + Template/Lint/Generator Skeleton）
-- [ ] AC-B1: profile contract 定稿（frontmatter schema 文档化 + **v2 epistemic schema 字段**：`description_generated_by` / `description_confirmed_by` / `description_generated_at` 三个 mandatory），CI lint 接入并对全仓库新增/修改 docs 通过率 = 100%
-- [ ] AC-B2: `cat-cafe-skills/refs/feature-doc-template.md` 更新含 description 字段 + **drift-resistant rubric**（含示例 + 约束 + 反面例子 + **stable identity vs current state snapshot 区分原则**——v2 新增）
-- [ ] AC-B3: profile lint 实现：缺 description / 超长 / placeholder / **缺 epistemic provenance 三字段（v2 新增）** 四类违规 → CI fail（fixture 各 1 + reverse fixture 验证不误报）
-- [ ] AC-B4: `index.md` generator 骨架实现：从 **docs/\*\*/\*.md（v2 scope 扩，不只 features/）**生成对应目录 `index.md`，含 status/topic 分组 + description + topics 索引；**输出 schema 必现 trilogy ADR §3 必现字段**（`generated: true` + `generated_from: docs/**/*.md frontmatter` + `generated_at` + `generator_version`）+ self-contained 契约 + parser fixture 验证（供未来 consumer 使用——dream feat 是 first 候选 consumer，但实际消费由对应 owner 决定，不绑定）
+- [x] AC-B1: profile contract 定稿（frontmatter schema 文档化 + **v2 epistemic schema 字段**：`description_generated_by` / `description_confirmed_by` / `description_generated_at` 三个 mandatory），CI lint 接入并对全仓库新增/修改 docs 通过率 = 100%
+- [x] AC-B2: `cat-cafe-skills/refs/feature-doc-template.md` 更新含 description 字段 + **drift-resistant rubric**（含示例 + 约束 + 反面例子 + **stable identity vs current state snapshot 区分原则**——v2 新增）
+- [x] AC-B3: profile lint 实现：缺 description / 超长 / placeholder / **缺 epistemic provenance 三字段（v2 新增）** 四类违规 → CI fail（fixture 各 1 + reverse fixture 验证不误报）
+- [x] AC-B4: `index.md` generator 骨架实现：从 **docs/\*\*/\*.md（v2 scope 扩，不只 features/）**生成对应目录 `index.md`，含 status/topic 分组 + description + topics 索引；**输出 schema 必现 trilogy ADR §3 必现字段**（`generated: true` + `generated_from: docs/**/*.md frontmatter` + `generated_at` + `generator_version`）+ self-contained 契约 + parser fixture 验证（供未来 consumer 使用——dream feat 是 first 候选 consumer，但实际消费由对应 owner 决定，不绑定）
 
 ### Phase C（Boy-Scout Rollout + Generated index.md + Sync Gate）
 
 **v1 marathon 全量回填 → v2 童子军原则 (2026-06-29 reframe)**：
 
-- [ ] AC-C1: **童子军原则 enforcement**——new doc 强制 description (CI lint hard fail) + 大改触发 refresh + 旧 doc 无 description 不阻塞（fallback "(无简介，待补)"），git log audit trail 显示每条 commit by 谁、被谁 confirmed + epistemic schema 字段
-- [ ] AC-C3: CI sync gate 实现：index.md 与 source frontmatter 不同步则 PR block（fixture 验证两种漂移：删 description + 改 status）
-- [ ] **AC-C4 (v2 新增) — Drift detection lint**：description 上次更新时间 + doc 大改时间 → 长 gap + 大改 → CI warn（不 block，提示作者 review description 是否仍 align）
+- [x] AC-C1: **童子军原则 enforcement**——new doc 强制 description (CI lint hard fail) + 大改触发 refresh + 旧 doc 无 description 不阻塞（fallback "(无简介，待补)"），git log audit trail 显示每条 commit by 谁、被谁 confirmed + epistemic schema 字段
+- [x] AC-C3: CI sync gate 实现：index.md 与 source frontmatter 不同步则 PR block（fixture 验证两种漂移：删 description + 改 status）
+- [x] **AC-C4 (v2 新增) — Drift detection lint**：description 上次更新时间 + doc 大改时间 → 长 gap + 大改 → CI warn（不 block，提示作者 review description 是否仍 align）
 
 ### Phase D（Eval Report + 扩展 Go/No-Go）
 - [ ] AC-D1: friction metric 实测：3+ 只非 author 猫冷启动盲测，找正确 feature 的 **tool calls vs baseline 下降 ≥30%** 或时间下降 ≥30%（任一即 trace Why）
@@ -377,3 +476,5 @@ operator 2026-06-15 启动："来吧你来综合一下三只喵喵的想法的"�
 - **Phase B**: 跨族 review @codex review profile contract + lint rules + generator schema（self-contained 契约，供未来 consumer candidates）
 - **Phase C**: 跨族 review @codex review generator + sync gate + rollout 批次审计
 - **Phase D**: 愿景守护猫（非作者非 reviewer 的第三只猫）做愿景对照 + 扩展 go/no-go
+- **Phase E**: **fresh peer** review (Sol + 4.6 + opus-47 三方已深度参与 = 不算 fresh, 需邀请 opus-48 or fresh Maine Coon session) + finalizer workflow security review (CI credentials + auto-push permission scope)
+- **Phase F** (未来): operator Go/No-Go pending Phase E stability data

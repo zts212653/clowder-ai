@@ -50,6 +50,15 @@ describe('F193 AC-A1: cross_post_message schema exposes targetCats', () => {
     );
   });
 
+  test('tool description exposes paw-feel single-source recovery path', async () => {
+    const { createServer } = await import('../dist/index.js');
+    const crossTool = createServer()._registeredTools.cat_cafe_cross_post_message;
+    assert.match(crossTool.description, /sourceMessageId/);
+    assert.match(crossTool.description, /verified owner/);
+    assert.match(crossTool.description, /(?:F128|propose_thread)/);
+    assert.match(crossTool.description, /assign_work/);
+  });
+
   test('handler forwards targetCats to /api/callbacks/post-message body', async () => {
     // White-box: handleCrossPostMessage source must reference targetCats
     // forwarding. Function.prototype.toString() works regardless of cwd
@@ -59,6 +68,22 @@ describe('F193 AC-A1: cross_post_message schema exposes targetCats', () => {
     assert.ok(
       source.includes('targetCats'),
       'handleCrossPostMessage must reference targetCats in its forwarded payload',
+    );
+  });
+
+  test('schema exposes structured active/terminal coordination lifecycle', async () => {
+    const { createServer } = await import('../dist/index.js');
+    const server = createServer();
+    const crossTool = server._registeredTools.cat_cafe_cross_post_message;
+    const coordinationField = crossTool.inputSchema._def.shape().coordination;
+    assert.ok(coordinationField?.isOptional(), 'coordination must be optional for legacy cross-posts');
+    const source = coordinationField.toString();
+    assert.ok(source, 'coordination schema must be registered');
+
+    const { handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
+    assert.ok(
+      handleCrossPostMessage.toString().includes('coordination'),
+      'handler must forward coordination to the callback API',
     );
   });
 });
@@ -146,6 +171,65 @@ describe('F193 AC-A4 P1 (codex review): cross_post_message fails closed at MCP l
         `targetCats present should pass routing gate, got: ${text}`,
       );
     }
+  });
+
+  test('reject copied paw-feel marker before HTTP dispatch', async () => {
+    let fetchCalled = false;
+    globalThis.fetch = async () => {
+      fetchCalled = true;
+      return { ok: true, json: async () => ({ status: 'ok' }) };
+    };
+    const { handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
+    const result = await handleCrossPostMessage({
+      threadId: 'thread-nearby-but-unverified',
+      content: 'raw relay [爪感差: rg 输出太吵]',
+      targetCats: ['codex'],
+    });
+
+    assert.equal(result.isError, true, 'literal paw-feel markers must not cross thread boundaries');
+    const text = result.content[0].text;
+    assert.match(text, /already collected|已.*采集/i);
+    assert.match(text, /sourceMessageId/);
+    assert.match(text, /verify.*owner|查证.*owner/i);
+    assert.match(text, /(?:F128|propose_thread)/i);
+    assert.equal(fetchCalled, false, 'marker relocation must fail before any HTTP dispatch');
+  });
+
+  test('allow marker-free source reference to a verified owner thread', async () => {
+    let requestBody;
+    globalThis.fetch = async (_url, init) => {
+      requestBody = JSON.parse(init.body);
+      return { ok: true, json: async () => ({ status: 'ok' }) };
+    };
+    const { handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
+    const result = await handleCrossPostMessage({
+      threadId: 'thread-verified-owner',
+      content: 'Actionable friction evidence: sourceMessageId=msg-source-1 (owner verified via feat_index).',
+      targetCats: ['codex'],
+      effectClass: 'fyi',
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.equal(requestBody.content.includes('[爪感差:'), false);
+    assert.equal(requestBody.threadId, 'thread-verified-owner');
+  });
+
+  test('forwards structured coordination lifecycle to callback API', async () => {
+    let requestBody;
+    globalThis.fetch = async (_url, init) => {
+      requestBody = JSON.parse(init.body);
+      return { ok: true, json: async () => ({ status: 'ok' }) };
+    };
+    const { handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
+    const result = await handleCrossPostMessage({
+      threadId: 'thread-target',
+      content: 'Release',
+      targetCats: ['codex'],
+      coordination: { phase: 'terminal', id: 'coord-test' },
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.deepEqual(requestBody.coordination, { phase: 'terminal', id: 'coord-test' });
   });
 
   test('accept when content has line-start @', async () => {

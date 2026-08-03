@@ -192,6 +192,24 @@ describe('F156: WebSocket Origin Security (integration)', () => {
     result.socket?.disconnect();
   });
 
+  it('F063: authenticated navigation listener can join the dedicated acknowledgement room', async () => {
+    const result = await attemptConnection(port, {
+      origin: 'http://localhost:3003',
+      transports: ['websocket'],
+    });
+    assert.strictEqual(result.connected, true);
+    const io = socketManager.getIO();
+
+    result.socket.emit('join_room', 'workspace:navigate:ack');
+    await new Promise((r) => setTimeout(r, 50));
+
+    const sockets = await io.fetchSockets();
+    const target = sockets.find((s) => s.id === result.socket.id);
+    assert.ok(target, 'Socket should exist');
+    assert.ok(target.rooms.has('workspace:navigate:ack'), 'Should be in workspace:navigate:ack');
+    result.socket?.disconnect();
+  });
+
   it('B3: authenticated socket can join preview:global', async () => {
     const result = await attemptConnection(port, {
       origin: 'http://localhost:3003',

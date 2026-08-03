@@ -29,6 +29,18 @@
     "./dossier": {
       "import": "./dist/dossier/index.js",
       "types": "./dist/dossier/index.d.ts"
+    },
+    "./scanner-discovery-pure": {
+      "import": "./dist/scanner-discovery-pure.js",
+      "types": "./dist/scanner-discovery-pure.d.ts"
+    },
+    "./profile-frontmatter-parser": {
+      "import": "./dist/profile-frontmatter-parser.js",
+      "types": "./dist/profile-frontmatter-parser.d.ts"
+    },
+    "./profile-contract": {
+      "import": "./dist/profile-contract.js",
+      "types": "./dist/profile-contract.d.ts"
     }
   },
   "scripts": {
@@ -41,6 +53,7 @@
   },
   "dependencies": {
     "ioredis": "^5.3.0",
+    "yaml": "^2.8.1",
     "zod": "^3.22.4"
   },
   "devDependencies": {

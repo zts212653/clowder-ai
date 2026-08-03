@@ -374,7 +374,11 @@ describe('Task 2 (Phase B) — new webhook event types', () => {
   it('issue_comment.created appends issue.commented with comment-based sourceEventId (no inbox notification)', async () => {
     const eventLog = makeInMemoryEventLog();
     const projector = makeInMemoryProjector();
-    const { handler, getDeliveryCalls } = await buildHandlerWithDeliveryTracker({ eventLog, projector });
+    const { handler, getDeliveryCalls } = await buildHandlerWithDeliveryTracker({
+      eventLog,
+      projector,
+      classifyIssueComment: () => ({ critical: false, suppressionReason: 'exact_setup_noise' }),
+    });
 
     const commentId = 9876;
     const bodyObj = {
@@ -416,6 +420,9 @@ describe('Task 2 (Phase B) — new webhook event types', () => {
       'sourceEventId must use comment-based key for dedup with polling path',
     );
     assert.ok(ev.subjectKey.startsWith('issue:owner/repo#42'), 'subjectKey must identify the issue');
+    assert.strictEqual(ev.payload.body, 'Any update?');
+    assert.strictEqual(ev.payload.critical, false);
+    assert.strictEqual(ev.payload.suppressionReason, 'exact_setup_noise');
 
     // Projector called
     assert.strictEqual(projector.applied.length, 1, 'projector must be called');

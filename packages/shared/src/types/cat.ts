@@ -77,6 +77,8 @@ export interface CatConfig {
   readonly personality: string;
   /** F32-b: Which breed this cat belongs to (for frontend grouping) */
   readonly breedId?: string;
+  /** F231: Stable relationship persona key. Explicitly independent from routing/model/breed grouping. */
+  readonly relationshipKey?: string;
   /** F32-b P4: Human-readable variant label (e.g. "4.5", "Sonnet") */
   readonly variantLabel?: string;
   /** F32-b P4: Whether this is the default variant for its breed */

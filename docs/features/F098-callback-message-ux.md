@@ -192,7 +192,7 @@ operator experience（2026-03-12 19:12）：
 ## Dependencies
 
 - **Evolved from**: F097（CLI Output Collapsible UX — tintedDark 品种色方案、@mention 彩色徽章）
-- **Related**: F022（Rich Blocks）、F056（Cat Café 设计语言）、F086（Cat Orchestration — multi_mention）、F088（Multi-Platform Chat Gateway — connector 消息）
+- **Related**: F022（Rich Blocks）、F056（Clowder AI 设计语言）、F086（Cat Orchestration — multi_mention）、F088（Multi-Platform Chat Gateway — connector 消息）
 
 ## Risk
 

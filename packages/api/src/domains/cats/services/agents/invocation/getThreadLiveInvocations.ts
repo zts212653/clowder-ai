@@ -2,11 +2,12 @@
  * F194: Invocation Liveness Canonical Read Model
  *
  * Read-only helper that answers "which invocations are live for (threadId, userId)?"
- * by reconciling three independent stores with non-equivalent semantics:
+ * by reconciling four independent stores with non-equivalent semantics:
  *
  * - InvocationTracker  → per-process control plane (AbortController) — NOT a lifecycle SoT
  * - InvocationRecord   → cross-process lifecycle SoT (status='running'/'done'/...) — may be zombie
  * - DraftStore         → 300s TTL content cache; draft.updatedAt is the freshness proxy
+ * - TurnExecutionStore → durable per-child lifecycle SoT; a scoped running child proves its parent live
  *
  * Decision table (KD-3, KD-6 + R1 P1-1/P1-2 from 砚砚 review 2026-05-07):
  *
@@ -39,18 +40,19 @@
  *  R3 P1 closes the loophole where two candidates' drafts both individually anchored the slot in
  *  time but only one was the true owner: timing-only `slotAssocWithDraft` was reverse-claiming.
  *
- * **Enumeration** (R1 P1-1 fix): candidate set = running records ∪ drafts (by invocationId).
+ * **Enumeration** (R1 P1-1 + F254): candidate set = running records ∪ drafts (by invocationId)
+ *  ∪ durable running child executions (by parentInvocationId).
  *  Drafts without a record can still surface as live via the 'tracker+draft' fall-back path,
  *  preserving messages.ts:1400-1406 hotfix3 behavior (AC-B5).
  *
  * `record.updatedAt` is NOT a heartbeat — it changes on status transitions only,
  * so we use `draft.updatedAt` as the freshness signal (DraftStore.touch() refreshes
  * on every stream chunk). Zombie threshold defaults to 2× DraftStore TTL = 600s
- * and ONLY applies when no fresh draft exists, so long-running streams are never
- * mistakenly killed.
+ * and ONLY applies when neither a fresh draft nor a durable running child exists, so
+ * long-running streams and no-draft handoff gaps are never mistakenly killed.
  */
 
-import type { CatId } from '@cat-cafe/shared';
+import type { CatId, TurnExecutionRecord } from '@cat-cafe/shared';
 import type { DraftRecord } from '../../stores/ports/DraftStore.js';
 import type { InvocationRecord } from '../../stores/ports/InvocationRecordStore.js';
 import type { ActiveSlotInfo } from './InvocationTracker.js';
@@ -65,7 +67,9 @@ export type LivenessSource =
   | 'tracker+draft'
   // F194 Phase Z (KD-21): namespace-aware sources — parent recordStore invocation + child registry turn
   | 'parent+child+tracker'
-  | 'parent+child-draft';
+  | 'parent+child-draft'
+  // F177/F254/F264: durable child execution truth remains live across tracker/draft handoff gaps
+  | 'parent+child-execution';
 
 export type LivenessReason =
   | 'tracker_present'
@@ -74,13 +78,18 @@ export type LivenessReason =
   | 'tracker_active_missing_record'
   // F194 Phase Z (KD-21/KD-22): parent record + linked child fresh draft = same execution chain
   | 'namespace_chain_active'
-  | 'namespace_chain_degraded';
+  | 'namespace_chain_degraded'
+  | 'child_execution_running';
 
 export interface LiveInvocation {
   /** First targetCat or draft catId; null only when record has no targetCats and no draft */
   catId: CatId | null;
+  /** Stable parent execution owner used for lifecycle/control-plane correlation. In the
+   *  legacy single-namespace path this equals invocationId; namespace-aware paths keep
+   *  invocationId as the child turn while executionId remains the parent owner. */
+  executionId: string;
   invocationId: string;
-  /** Best-effort start time: tracker slot startedAt > draft.createdAt > record.updatedAt */
+  /** Best-effort start time: tracker/child execution startedAt > draft.createdAt > record.updatedAt */
   startedAt: number;
   source: LivenessSource;
   degraded: boolean;
@@ -157,6 +166,10 @@ export interface LivenessReadDeps {
     threadId: string,
     catId: string,
   ) => Promise<string | null | undefined> | string | null | undefined;
+  /** F194/F254: durable child execution bridge. A scoped child whose canonical status is
+   *  `running` is positive liveness proof for its parent even before a tracker slot or draft
+   *  exists. Optional so legacy/embedded callers preserve the pre-ledger behavior. */
+  listTurnExecutionsByParent?: (parentInvocationId: string) => Promise<TurnExecutionRecord[]> | TurnExecutionRecord[];
 }
 
 /** F194 Phase Z (KD-22): structured turn invocation info returned by getTurnInvocation dep.
@@ -214,6 +227,7 @@ function tryRecordTracker(ctx: ClassifyContext): LiveInvocation | null {
   if (!ctx.record || !ctx.slot || !ctx.trackerOwnerMatches || !ctx.catId || !trackerAssoc) return null;
   return {
     catId: ctx.catId,
+    executionId: ctx.invocationId,
     invocationId: ctx.invocationId,
     startedAt: ctx.slot.startedAt,
     source: 'record+tracker',
@@ -228,6 +242,7 @@ function tryTrackerDraft(ctx: ClassifyContext): LiveInvocation | null {
   if (!ctx.slotClaimedByThisDraft) return null;
   return {
     catId: ctx.catId,
+    executionId: ctx.invocationId,
     invocationId: ctx.invocationId,
     startedAt: ctx.slot.startedAt,
     source: 'tracker+draft',
@@ -241,6 +256,7 @@ function tryRecordFreshDraft(ctx: ClassifyContext): LiveInvocation | null {
   if (ctx.now - ctx.draft.updatedAt > ctx.freshDraftWindowMs) return null;
   return {
     catId: ctx.catId,
+    executionId: ctx.invocationId,
     invocationId: ctx.invocationId,
     startedAt: ctx.draft.createdAt ?? ctx.draft.updatedAt,
     source: 'record+draft',
@@ -257,6 +273,7 @@ function tryRecordGraceOrZombie(ctx: ClassifyContext): Classification | null {
       kind: 'live',
       live: {
         catId: ctx.catId,
+        executionId: ctx.invocationId,
         invocationId: ctx.invocationId,
         startedAt: ctx.record.updatedAt,
         source: 'record-only',
@@ -587,7 +604,95 @@ async function buildNamespaceLink(
   return { parentToFreshChildren, childIdToParentId };
 }
 
+type RunningChildExecution = TurnExecutionRecord & { status: 'running' };
+
+function isScopedRunningChild(
+  child: TurnExecutionRecord,
+  parent: InvocationRecord,
+  threadId: string,
+  userId: string,
+): child is RunningChildExecution {
+  return (
+    child.status === 'running' &&
+    child.parentInvocationId === parent.id &&
+    child.threadId === threadId &&
+    child.userId === userId &&
+    typeof child.invocationId === 'string' &&
+    child.invocationId.length > 0 &&
+    typeof child.catId === 'string' &&
+    child.catId.length > 0 &&
+    Number.isFinite(child.startedAt) &&
+    child.startedAt >= 0
+  );
+}
+
+/** Load durable children independently per parent. A missing dep preserves legacy behavior. When
+ *  the configured canonical store fails, propagate to the route's existing fail-open path: treating
+ *  "unknown" as "no running child" could trigger an irreversible false zombie reconciliation. */
+async function buildRunningChildExecutionLink(
+  records: InvocationRecord[],
+  threadId: string,
+  userId: string,
+  listTurnExecutionsByParent: LivenessReadDeps['listTurnExecutionsByParent'],
+): Promise<Map<string, RunningChildExecution[]>> {
+  const parentToRunningChildren = new Map<string, RunningChildExecution[]>();
+  if (!listTurnExecutionsByParent) return parentToRunningChildren;
+
+  await Promise.all(
+    records.map(async (parent) => {
+      if (parent.status !== 'running' || parent.threadId !== threadId || parent.userId !== userId) return;
+      const children = await Promise.resolve(listTurnExecutionsByParent(parent.id));
+      const running = children.filter((child) => isScopedRunningChild(child, parent, threadId, userId));
+      if (running.length > 0) parentToRunningChildren.set(parent.id, running);
+    }),
+  );
+  return parentToRunningChildren;
+}
+
 type NamespaceCatChild = { catId: string; childTurnId: string; turnCreatedAt: number };
+
+function selectCanonicalChildPerCat(
+  children: NamespaceCatChild[],
+  latestTurnByCat: Map<string, string>,
+): Map<string, NamespaceCatChild> {
+  const byCatId = new Map<string, NamespaceCatChild>();
+  for (const child of children) {
+    const existing = byCatId.get(child.catId);
+    if (!existing) {
+      byCatId.set(child.catId, child);
+      continue;
+    }
+    const latestId = latestTurnByCat.get(child.catId);
+    const candidateIsLatest = latestId === child.childTurnId;
+    const existingIsLatest = latestId === existing.childTurnId;
+    if (candidateIsLatest && !existingIsLatest) byCatId.set(child.catId, child);
+    else if (!candidateIsLatest && !existingIsLatest && child.turnCreatedAt > existing.turnCreatedAt) {
+      byCatId.set(child.catId, child);
+    }
+  }
+  return byCatId;
+}
+
+function buildRunningExecutionLive(
+  children: RunningChildExecution[],
+  latestTurnByCat: Map<string, string>,
+  parentExecutionId: string,
+): LiveInvocation[] {
+  const candidates = children.map((child) => ({
+    catId: child.catId as string,
+    childTurnId: child.invocationId,
+    turnCreatedAt: child.startedAt,
+  }));
+  return Array.from(selectCanonicalChildPerCat(candidates, latestTurnByCat).values(), (entry) => ({
+    catId: entry.catId as CatId,
+    executionId: parentExecutionId,
+    invocationId: entry.childTurnId,
+    startedAt: entry.turnCreatedAt,
+    source: 'parent+child-execution' as const,
+    degraded: false,
+    reason: 'child_execution_running' as const,
+  }));
+}
 
 /** Pick the canonical child per cat: registry latest pointer wins; tiebreak fallback = newest createdAt
  *  (NOT earliest — would re-surface stale child after cleanup edge cases — 砚砚 R2 P1-C). */
@@ -595,28 +700,17 @@ function selectChildPerCat(
   children: Array<{ childTurnId: string; draft: DraftRecord; turnCreatedAt: number }>,
   latestTurnByCat: Map<string, string>,
 ): Map<string, NamespaceCatChild> {
-  const byCatId = new Map<string, NamespaceCatChild>();
+  const candidates: NamespaceCatChild[] = [];
   for (const child of children) {
     const cat = child.draft.catId;
     if (!cat) continue;
-    const candidate: NamespaceCatChild = {
+    candidates.push({
       catId: cat,
       childTurnId: child.childTurnId,
       turnCreatedAt: child.turnCreatedAt,
-    };
-    const existing = byCatId.get(cat);
-    if (!existing) {
-      byCatId.set(cat, candidate);
-      continue;
-    }
-    const latestId = latestTurnByCat.get(cat);
-    const candidateIsLatest = latestId === child.childTurnId;
-    const existingIsLatest = latestId === existing.childTurnId;
-    if (candidateIsLatest && !existingIsLatest) byCatId.set(cat, candidate);
-    else if (!candidateIsLatest && !existingIsLatest && child.turnCreatedAt > existing.turnCreatedAt)
-      byCatId.set(cat, candidate);
+    });
   }
-  return byCatId;
+  return selectCanonicalChildPerCat(candidates, latestTurnByCat);
 }
 
 interface NamespaceLiveContext {
@@ -637,12 +731,14 @@ function isTrackerSlotOwnedByUser(catId: string, ctx: NamespaceLiveContext): boo
 function materializeNamespaceLive(
   byCatId: Map<string, NamespaceCatChild>,
   ctx: NamespaceLiveContext,
+  parentExecutionId: string,
 ): LiveInvocation[] {
   const result: LiveInvocation[] = [];
   for (const [catId, entry] of byCatId) {
     const trackerOwned = isTrackerSlotOwnedByUser(catId, ctx);
     result.push({
       catId: catId as CatId,
+      executionId: parentExecutionId,
       // KD-22: invocationId = child registry id (matches DraftStore key + formal-message stamping
       // for current cat turn). Parent record id is the liveness anchor for cleanup, but the
       // identity surfaced to consumers (orphan-draft filter / queue activeInvocations dedup) is
@@ -658,7 +754,7 @@ function materializeNamespaceLive(
 }
 
 function buildNamespaceLive(
-  _parent: InvocationRecord,
+  parent: InvocationRecord,
   children: Array<{ childTurnId: string; draft: DraftRecord; turnCreatedAt: number }>,
   ctx: NamespaceLiveContext,
   latestTurnByCat: Map<string, string>,
@@ -666,7 +762,7 @@ function buildNamespaceLive(
   // One active per cat (parallel chain may have multiple cats under same parent).
   // R2 P1-C dedup → R3 P2-1 user-scoped tracker check.
   const byCatId = selectChildPerCat(children, latestTurnByCat);
-  return materializeNamespaceLive(byCatId, ctx);
+  return materializeNamespaceLive(byCatId, ctx, parent.id);
 }
 
 /** Cloud R2 P1: cat slot is "actively reused" iff some OTHER parent currently has a fresh draft for
@@ -798,6 +894,7 @@ function emitNamespaceZombieEvent(
 
 async function resolveLatestTurnByCat(
   parentToFreshChildren: Map<string, Array<{ childTurnId: string; draft: DraftRecord; turnCreatedAt: number }>>,
+  parentToRunningChildren: Map<string, RunningChildExecution[]>,
   threadId: string,
   getLatestTurnInvocationId: LivenessReadDeps['getLatestTurnInvocationId'],
 ): Promise<Map<string, string>> {
@@ -809,6 +906,9 @@ async function resolveLatestTurnByCat(
       const cat = child.draft.catId;
       if (cat) catsToResolve.add(cat);
     }
+  }
+  for (const children of parentToRunningChildren.values()) {
+    for (const child of children) catsToResolve.add(child.catId as string);
   }
   for (const cat of catsToResolve) {
     try {
@@ -830,6 +930,7 @@ interface NamespacePassDeps {
   getTurnInvocation: LivenessReadDeps['getTurnInvocation'];
   onLog?: LivenessReadDeps['onLog'];
   parentToFreshChildren: Map<string, Array<{ childTurnId: string; draft: DraftRecord; turnCreatedAt: number }>>;
+  parentToRunningChildren: Map<string, RunningChildExecution[]>;
   latestTurnByCat: Map<string, string>;
   namespaceLiveCtx: NamespaceLiveContext;
 }
@@ -842,20 +943,36 @@ async function processRecordInNamespacePass(
   zombie: ZombieRecord | null;
   handled: boolean;
 }> {
+  const candidates: Array<{ live: LiveInvocation; draft: DraftRecord | undefined; parent: InvocationRecord }> = [];
   const children = passDeps.parentToFreshChildren.get(record.id);
+  const runningChildren = passDeps.parentToRunningChildren.get(record.id);
+  if (runningChildren && runningChildren.length > 0) {
+    const liveEntries = buildRunningExecutionLive(runningChildren, passDeps.latestTurnByCat, record.id);
+    candidates.push(
+      ...liveEntries.map((live) => ({
+        live,
+        draft: children?.find((child) => child.childTurnId === live.invocationId)?.draft,
+        parent: record,
+      })),
+    );
+  }
   if (children && children.length > 0) {
     const liveEntries = buildNamespaceLive(record, children, passDeps.namespaceLiveCtx, passDeps.latestTurnByCat);
     if (liveEntries.length > 0) {
-      const candidates = liveEntries.map((live) => ({
-        live,
-        draft: children.find((c) => c.childTurnId === live.invocationId)?.draft,
-        parent: record,
-      }));
-      // Diagnostic emit happens AFTER cross-parent dedup so we don't log losers as live.
-      return { candidates, zombie: null, handled: true };
+      candidates.push(
+        ...liveEntries.map((live) => ({
+          live,
+          draft: children.find((c) => c.childTurnId === live.invocationId)?.draft,
+          parent: record,
+        })),
+      );
     }
     // children exist but selectChildPerCat suppressed all (within-parent edge case) — fall through to
     // zombie detection so we don't leave the parent dangling.
+  }
+  if (candidates.length > 0) {
+    // Diagnostic emit happens AFTER cross-parent dedup so we don't log losers as live.
+    return { candidates, zombie: null, handled: true };
   }
   const zombie = detectCatSlotReuseZombie(record, passDeps.parentToFreshChildren);
   if (zombie) {
@@ -921,6 +1038,16 @@ function buildLoserZombie(loser: NamespaceCandidate, cat: string): ZombieRecord 
   };
 }
 
+/** Durable child lifecycle is parent-level positive liveness proof, independent of which same-cat
+ *  candidate wins the UI-facing slot. During preemption the new draft may win immediately while
+ *  the old child remains `running` until its async finalizer records a terminal status. */
+function parentHasDurableRunningChild(
+  parentId: string,
+  parentToRunningChildren: Map<string, RunningChildExecution[]>,
+): boolean {
+  return (parentToRunningChildren.get(parentId)?.length ?? 0) > 0;
+}
+
 function selectWinnersAndLosers(
   byCat: Map<string, NamespaceCandidate[]>,
   latestTurnByCat: Map<string, string>,
@@ -947,6 +1074,9 @@ function aggregateParentZombies(
   for (const loser of losers) {
     // R5 P1: skip if parent still has another winning child cat — slot reuse is partial, parent still live.
     if (winningParentIds.has(loser.parent.id)) continue;
+    // Terra R1 P1 (#3047): cross-parent same-cat dedup owns only the UI slot. It cannot turn a
+    // losing candidate into parent death while the canonical child ledger still says `running`.
+    if (parentHasDurableRunningChild(loser.parent.id, passDeps.parentToRunningChildren)) continue;
     // R5 P1: dedup zombie per-parent — multi-cat parent that loses all cats only emits 1 zombie.
     if (seenParentIds.has(loser.parent.id)) continue;
     seenParentIds.add(loser.parent.id);
@@ -966,7 +1096,9 @@ function aggregateParentZombies(
  *  NO winning child across all its cats does it become a true cat_slot_reused_no_self_draft zombie.
  *  Multi-cat parent losing only one cat (other cats still winning) stays live; its losing cat slot
  *  silently moves to the new parent (the losing draft will TTL-expire). Parent zombie also
- *  deduplicates per-parent — losing N cats emits 1 zombie, not N. */
+ *  deduplicates per-parent — losing N cats emits 1 zombie, not N. A parent with any durable running
+ *  child is likewise protected even when all of its UI candidates lose; preemption becomes terminal
+ *  truth only after the child finalizer updates the canonical ledger. */
 function dedupCrossParentByCatLatest(
   candidates: NamespaceCandidate[],
   latestTurnByCat: Map<string, string>,
@@ -1063,7 +1195,18 @@ export async function getThreadLiveInvocations(
     freshDraftWindowMs,
     deps.getTurnInvocation,
   );
-  const latestTurnByCat = await resolveLatestTurnByCat(parentToFreshChildren, threadId, deps.getLatestTurnInvocationId);
+  const parentToRunningChildren = await buildRunningChildExecutionLink(
+    records,
+    threadId,
+    userId,
+    deps.listTurnExecutionsByParent,
+  );
+  const latestTurnByCat = await resolveLatestTurnByCat(
+    parentToFreshChildren,
+    parentToRunningChildren,
+    threadId,
+    deps.getLatestTurnInvocationId,
+  );
 
   const passDeps: NamespacePassDeps = {
     threadId,
@@ -1074,6 +1217,7 @@ export async function getThreadLiveInvocations(
     getTurnInvocation: deps.getTurnInvocation,
     onLog: deps.onLog,
     parentToFreshChildren,
+    parentToRunningChildren,
     latestTurnByCat,
     namespaceLiveCtx: {
       threadId,

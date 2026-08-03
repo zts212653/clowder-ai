@@ -2,7 +2,7 @@
 cell_id: thread-navigation
 title: Thread Navigation / Metadata
 summary: Thread labels、pins、favorites、sidebar filters 与用户面向的 thread 组织语义。
-canonical_features: [F057, F095, F187]
+canonical_features: [F057, F095, F187, F277]
 code_anchors:
   - packages/api/src/routes/labels.ts
   - packages/api/src/routes/threads.ts
@@ -19,11 +19,13 @@ doc_anchors:
   - docs/features/F057-thread-discoverability.md
   - docs/features/F095-sidebar-collapse-memory.md
   - docs/features/F187-thread-labels.md
+  - docs/features/F277-thread-attention-navigation.md
 static_scan_hints: [ThreadLabel, ILabelStore, LabelStore, labels, pin, favorite, ThreadSidebar, LabelFilterBar]
 cited_by:
   - {feature: F187, date: 2026-05-07, delta: new cell}
   - {feature: F191, date: 2026-05-07, delta: trial result}
   - {feature: F193, date: 2026-06-03, delta: "Phase E extends feat_index with owner catId and feature-thread suggested cross-post actions"}
+  - {feature: F277, date: 2026-07-26, delta: "Thread attention projection + Sidebar/Thread relation-aware navigation"}
 ---
 
 # Thread Navigation / Metadata

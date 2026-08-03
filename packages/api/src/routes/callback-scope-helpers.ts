@@ -2,6 +2,10 @@ import { type AgentKeyRecord, type CallbackPrincipal, type CatId, createCatId } 
 import type { InvocationRecord } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { DEFAULT_THREAD_ID, type IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 
+type DeletedThreadLookup = {
+  get(threadId: string): { deletedAt?: number | null } | null | Promise<{ deletedAt?: number | null } | null>;
+};
+
 export interface CallbackActor {
   invocationId: string;
   /** #573: parent (queue-level) invocationId — when present, is the OUTER id used for
@@ -30,6 +34,26 @@ export function deriveCallbackActor(record: InvocationRecord): CallbackActor {
  */
 export function effectiveInvocationId(actor: Pick<CallbackActor, 'invocationId' | 'parentInvocationId'>): string {
   return actor.parentInvocationId ?? actor.invocationId;
+}
+
+export async function getDeletedCallbackThreadGuard(
+  threadStore: DeletedThreadLookup | undefined,
+  threadId: string,
+): Promise<{ statusCode: 410; body: { error: string; code: 'THREAD_DELETED' } } | null> {
+  let thread: { deletedAt?: number | null } | null = null;
+  try {
+    thread = threadStore ? await threadStore.get(threadId) : null;
+  } catch {
+    return null;
+  }
+  if (!thread?.deletedAt) return null;
+  return {
+    statusCode: 410,
+    body: {
+      error: 'Thread is deleted',
+      code: 'THREAD_DELETED',
+    },
+  };
 }
 
 export function resolveBoundThreadScope(
@@ -65,14 +89,13 @@ export async function resolveScopedThreadId(
   }
 
   const targetThread = await options.threadStore.get(requestedThreadId);
-  if (!targetThread || !(await canAccessScopedThread(options.threadStore, targetThread, actor.userId))) {
+  if (!targetThread || !(await isThreadInPrincipalScope(options.threadStore, targetThread, actor.userId))) {
     return {
       ok: false,
       statusCode: 403,
       error: options.accessDeniedError ?? 'Thread access denied',
     };
   }
-
   return { ok: true, threadId: requestedThreadId };
 }
 
@@ -117,7 +140,7 @@ export async function resolvePrincipalThread(
       };
     }
     const thread = await options.threadStore.get(requestedThreadId);
-    if (!thread || !(await canAccessScopedThread(options.threadStore, thread, principal.userId))) {
+    if (!thread || !(await isThreadInPrincipalScope(options.threadStore, thread, principal.userId))) {
       return {
         ok: false,
         statusCode: 403,
@@ -130,9 +153,9 @@ export async function resolvePrincipalThread(
   return resolveScopedThreadId(principal, requestedThreadId, options);
 }
 
-async function canAccessScopedThread(
+async function isThreadInPrincipalScope(
   threadStore: Pick<IThreadStore, 'list'>,
-  targetThread: { id: string; createdBy: string },
+  targetThread: { id: string; createdBy: string; deletedAt?: number | null },
   userId: string,
 ): Promise<boolean> {
   if (targetThread.createdBy === userId) return true;

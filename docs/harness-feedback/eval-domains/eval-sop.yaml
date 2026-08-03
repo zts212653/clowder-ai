@@ -15,6 +15,7 @@
 
 domainId: eval:sop
 displayName: SOP Compliance Eval
+descriptionForHuman: 猫有没有按规矩办事——SOP 步骤跳了没、skill 该加载没加载
 systemThreadId: thread_eval_sop
 evalCat:
   catId: opus-47
@@ -35,6 +36,7 @@ handoffTargetResolver:
   featureId: F192
   ownerCatId: opus
   threadLookup: feature-thread
+metricGlossaryRef: eval-sop.metrics.yaml
 sla:
   acknowledgeHours: 48
   reevalWithinHours: 336

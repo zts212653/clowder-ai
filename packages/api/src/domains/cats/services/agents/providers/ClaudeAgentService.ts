@@ -18,7 +18,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { type CatId, createCatId } from '@cat-cafe/shared';
+import { type CatId, type CliEffortPreset, createCatId, resolveCliEffortOverride } from '@cat-cafe/shared';
 import {
   CAT_CAFE_SPLIT_ENTRYPOINTS,
   expandManagedMcpNamesForUserMerge,
@@ -28,6 +28,7 @@ import {
   resolveServersForCat,
   summarizeMcpInjection,
 } from '../../../../../config/capabilities/capability-orchestrator.js';
+import { isRetiredGithubMcpConfigEntry } from '../../../../../config/capabilities/retired-github-mcp.js';
 import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
@@ -37,12 +38,20 @@ import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import { CliRawArchive } from '../../session/CliRawArchive.js';
-import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../types.js';
+import type {
+  AgentFreshnessCarrierCapability,
+  AgentMessage,
+  AgentService,
+  AgentServiceOptions,
+  MessageMetadata,
+  ToolExecutionPolicy,
+} from '../../types.js';
 import type { RawArchiveSink } from '../providers/codex-audit-hooks.js';
 import { sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from '../providers/image-cli-bridge.js';
 import { extractImagePaths } from '../providers/image-paths.js';
 import { findGitBashPath } from './claude-agent-win.js';
+import { ClaudeNativeToolBoundaryClassifier } from './claude-native-tool-boundary.js';
 import { extractClaudeUsage, isResultErrorEvent, transformClaudeEvent } from './claude-ndjson-parser.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
 
@@ -108,6 +117,16 @@ export function resolveClaudeModelSelection(
   const isApiKeyMode = callbackEnv?.[ANTHROPIC_PROFILE_MODE_KEY] === 'api_key';
   const useEnvModelOverride = isApiKeyMode && !isKnownAnthropicModel(effectiveModel);
   return { effectiveModel, useEnvModelOverride };
+}
+
+/** Resolve the invocation effort once for every Claude carrier. */
+export function resolveClaudeEffortLevel(
+  catId: string,
+  effectiveModel: string,
+  override: CliEffortPreset | null | undefined,
+): string {
+  const inherited = getCatEffort(catId, undefined, 'anthropic', effectiveModel);
+  return resolveCliEffortOverride('anthropic', effectiveModel, inherited, override).effective;
 }
 
 function isInvalidThinkingSignatureMessage(message: string | undefined): boolean {
@@ -327,11 +346,19 @@ export class ClaudeAgentService implements AgentService {
     return true;
   }
 
-  private async compileL0ToTempFile(): Promise<string> {
+  supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
+    return policy.mode === 'read_only';
+  }
+
+  freshnessCarrierCapability(): AgentFreshnessCarrierCapability {
+    return { provider: 'anthropic', carrier: 'claude_print_sdk', deliverySemantics: 'unsupported' };
+  }
+
+  private async compileL0ToTempFile(userId?: string): Promise<string> {
     const l0Dir = mkdtempSync(join(tmpdir(), 'cat-cafe-l0-'));
     const l0Path = join(l0Dir, 'system-prompt-l0.md');
     try {
-      await this.l0CompilerFn({ catId: this.catId as string, outPath: l0Path });
+      await this.l0CompilerFn({ catId: this.catId as string, userId, outPath: l0Path });
     } catch (err) {
       removeL0TempDir(l0Path);
       throw new Error(`L0 compile failed for ${this.catId as string}: ${(err as Error).message}`);
@@ -340,6 +367,7 @@ export class ClaudeAgentService implements AgentService {
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
+    const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
     let effectivePrompt = prompt;
     const imagePaths = extractImagePaths(options?.contentBlocks, options?.uploadDir);
     const imageAccessDirs = collectImageAccessDirectories(imagePaths);
@@ -365,6 +393,11 @@ export class ClaudeAgentService implements AgentService {
     // buildClaudeEnvOverrides() and --model must be omitted so the CLI honours it.
     // Empty model (OAuth without explicit model) → let CLI use its default.
     const modelArgs = !useEnvModelOverride && effectiveModel ? ['--model', effectiveModel] : [];
+    const effortLevel = resolveClaudeEffortLevel(
+      this.catId as string,
+      effectiveModel,
+      options?.reasoningEffortOverride,
+    );
 
     const args: string[] = [
       '-p',
@@ -374,16 +407,20 @@ export class ClaudeAgentService implements AgentService {
       '--verbose',
       ...modelArgs,
       '--effort',
-      getCatEffort(this.catId as string, undefined, 'anthropic'),
+      effortLevel,
       '--permission-mode',
-      PERMISSION_MODE,
+      readOnly ? 'plan' : PERMISSION_MODE,
       // api_key mode: skip user-level ~/.claude/settings.json to prevent config pollution.
       // subscription mode: include user-level so CLI reads auth from ~/.claude/settings.json.
       '--setting-sources',
       isApiKeyMode ? 'project,local' : 'project,local,user',
       // Enable Chrome MCP integration (built-in, requires Chrome + extension running)
-      '--chrome',
+      ...(readOnly ? [] : ['--chrome']),
     ];
+
+    if (readOnly) {
+      args.push('--tools', '', '--strict-mcp-config');
+    }
 
     if (options?.sessionId) {
       args.push('--resume', options.sessionId);
@@ -395,7 +432,7 @@ export class ClaudeAgentService implements AgentService {
     // #712: Inject ALL enabled MCP servers from capabilities.json at invoke time.
     // Built-in cat-cafe servers resolve paths from distDir; externals use descriptor values.
     // On Windows, Claude CLI treats inline JSON as a file path — write to temp file.
-    if (options?.callbackEnv && this.mcpServerPath) {
+    if (!readOnly && options?.callbackEnv && this.mcpServerPath) {
       const distDir = dirname(this.mcpServerPath);
       const binaryProjectRoot = resolve(distDir, '../../..');
       const capabilitiesProjectRoot = binaryProjectRoot;
@@ -496,6 +533,7 @@ export class ClaudeAgentService implements AgentService {
                 ...Object.keys(mcpServers),
               ]);
               for (const [name, entry] of Object.entries(userMcp.mcpServers)) {
+                if (isRetiredGithubMcpConfigEntry(name, entry)) continue;
                 if (!excludedMcpServerNames.has(name) && !(name in mcpServers) && entry && typeof entry === 'object') {
                   mcpServers[name] = entry as Record<string, unknown>;
                 }
@@ -542,7 +580,7 @@ export class ClaudeAgentService implements AgentService {
     let l0Path: string | undefined;
     let appendPromptPath: string | undefined;
     try {
-      l0Path = await this.compileL0ToTempFile();
+      l0Path = await this.compileL0ToTempFile(options?.callbackEnv?.CAT_CAFE_USER_ID);
       args.push('--system-prompt-file', l0Path);
       // Route layer passes pack-only systemPrompt for native-L0 providers.
       // Keep it as an append layer, but never use it as the carrier's L0 source.
@@ -557,7 +595,7 @@ export class ClaudeAgentService implements AgentService {
       // User flags win when they overlap with ordinary system-injected flags,
       // but native L0 flags are reserved: user overrides would silently remove
       // the compression-immune identity/governance layer.
-      const cliConfigArgs = options?.cliConfigArgs;
+      const cliConfigArgs = readOnly ? undefined : options?.cliConfigArgs;
       const userParts = stripReservedSystemPromptArgs(
         cliConfigArgs ? cliConfigArgs.flatMap((arg) => arg.trim().split(/\s+/)) : [],
         this.catId as string,
@@ -604,6 +642,7 @@ export class ClaudeAgentService implements AgentService {
       if (options?.callbackEnv?.[ANTHROPIC_PROFILE_MODE_KEY] === 'subscription') {
         for (const key of SUBSCRIPTION_MODE_DENY_KEYS) envOverrides[key] = null;
       }
+      if (readOnly) envOverrides.CAT_CAFE_READONLY = 'true';
 
       // Debug: log full invocation details (env values redacted by pino redact paths)
       const safeEnvSummary: Record<string, string> = {};
@@ -678,6 +717,7 @@ export class ClaudeAgentService implements AgentService {
       let hasAssistantEvent = false;
       let lastAssistantHasToolUseBlock = false;
       let lastAssistantHasTextBlock = false;
+      const nativeToolBoundaries = new ClaudeNativeToolBoundaryClassifier();
       for await (const event of events) {
         eventCount++;
         // #780: Archive raw event for post-mortem diagnostics (fire-and-forget)
@@ -692,6 +732,20 @@ export class ClaudeAgentService implements AgentService {
             : '__unknown';
         uniqueEventTypes.add(evtType);
         log.debug({ catId: this.catId, eventIndex: eventCount, type: evtType }, 'CLI event received');
+        if (options?.activeInvocationFreshness) {
+          for (const toolSurface of nativeToolBoundaries.observe(event)) {
+            try {
+              const notice = await options.activeInvocationFreshness.prepare({
+                threadId: options.auditContext?.threadId ?? 'unknown',
+                turnId: options.invocationId ?? 'claude-print-sdk',
+                toolSurface,
+              });
+              if (notice) await options.activeInvocationFreshness.markMissed(notice, 'unsupported_carrier');
+            } catch (err) {
+              log.warn({ err, invocationId: options.invocationId }, '[F254-D2] Claude freshness telemetry failed');
+            }
+          }
+        }
         // F215: Inspect assistant events for content blocks (before transformClaudeEvent runs).
         // Reset per-turn tracking on each new assistant event so multi-turn tool-using sessions are handled
         // correctly: an earlier turn's blocks must not suppress detection on a later malformed turn.
@@ -730,6 +784,7 @@ export class ClaudeAgentService implements AgentService {
               cliSessionId: event.cliSessionId,
               invocationId: event.invocationId,
               rawArchivePath: event.rawArchivePath,
+              terminalContext: event.terminalContext,
             }),
             timestamp: Date.now(),
           };
@@ -849,6 +904,12 @@ export class ClaudeAgentService implements AgentService {
           }
           yield { ...result, metadata: resultMetadata };
         }
+      }
+
+      try {
+        await options?.activeInvocationFreshness?.markTurnCompleted(options.invocationId ?? 'claude-print-sdk');
+      } catch (err) {
+        log.warn({ err, invocationId: options?.invocationId }, '[F254-D2] Claude terminal freshness audit failed');
       }
 
       log.info(

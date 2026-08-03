@@ -5,6 +5,7 @@ import { useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useCatData } from '@/hooks/useCatData';
 import { useChatStore } from '@/stores/chatStore';
+import type { EvidenceSourceType } from '@/types/evidence';
 import { apiFetch } from '@/utils/api-client';
 import { getUserId } from '@/utils/userId';
 
@@ -382,8 +383,11 @@ export function useChatCommands() {
               title: string;
               anchor: string;
               snippet: string;
-              confidence: 'high' | 'mid' | 'low';
-              sourceType: 'decision' | 'phase' | 'discussion' | 'commit';
+              matchRank: 'high' | 'mid' | 'low';
+              retrievalScore?: number;
+              sourceType: EvidenceSourceType;
+              authority?: string;
+              updatedAt?: string;
             }>;
             degraded: boolean;
             degradeReason?: string;

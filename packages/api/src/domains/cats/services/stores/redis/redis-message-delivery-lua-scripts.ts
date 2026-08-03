@@ -1,5 +1,5 @@
 /**
- * Lua scripts for atomic delivery-order transitions and append (PR #1193 + #1200).
+ * Lua scripts for atomic delivery-order transitions (PR #1193).
  *
  * Bug: reassignUserId / markDelivered / markCanceled each read a JS snapshot
  * then write via independent MULTI — no shared atomic boundary. Two concurrent
@@ -16,7 +16,6 @@
  * ioredis keyPrefix caveat: ioredis auto-prepends keyPrefix to KEYS[] args
  * in eval(), but NOT to keys constructed dynamically inside Lua. We pass the
  * keyPrefix via ARGV so scripts can build fully-qualified keys internally.
- * (See redis-pitfalls.md for background.)
  *
  * Note: cat-cafe runs single-instance Redis (no Cluster). Lua scripts access
  * keys across slots freely. If Cluster is adopted, these scripts must be
@@ -31,10 +30,9 @@
  * ARGV[2] = deliveredAt (string number)
  * ARGV[3] = keyPrefix (e.g. "cat-cafe:") — for constructing zset keys inside Lua
  *
- * Returns: 0 on CAS no-op (not queued / missing), or HGETALL flat array on CAS win.
- * Returning HGETALL eliminates the separate getById round-trip — the winning caller
- * receives the post-mutation hash atomically, with no gap where a transient Redis
- * failure could lose the CAS receipt.
+ * Returns: {-1, {}} when missing, {0, HGETALL} on a state/custody no-op, or
+ * {1, HGETALL} on a CAS win. Returning the canonical hash with the outcome
+ * preserves Clowder AI's deliveryTransitioned receipt without a post-EVAL read gap.
  */
 export const DELIVER_LUA = `
 local hash = KEYS[1]
@@ -42,21 +40,51 @@ local msgId = ARGV[1]
 local deliveredAt = ARGV[2]
 local kp = ARGV[3]
 
+if redis.call('EXISTS', hash) == 0 then
+  return {-1, {}}
+end
+
 local status = redis.call('HGET', hash, 'deliveryStatus')
 if status ~= 'queued' then
-  return 0
+  return {0, redis.call('HGETALL', hash)}
+end
+
+-- F254: legacy markDelivered must not bypass active execution custody.
+local custody = redis.call('HGET', hash, 'queueCustody')
+if custody and custody ~= '' then
+  local custodyProjection = cjson.decode(custody)
+  if custodyProjection.status ~= 'terminal' then
+    return {0, redis.call('HGETALL', hash)}
+  end
 end
 
 local userId = redis.call('HGET', hash, 'userId')
 local threadId = redis.call('HGET', hash, 'threadId')
+local timestamp = redis.call('HGET', hash, 'timestamp')
+local catId = redis.call('HGET', hash, 'catId')
+local origin = redis.call('HGET', hash, 'origin')
+local source = redis.call('HGET', hash, 'source')
 
-redis.call('HSET', hash, 'deliveredAt', deliveredAt, 'deliveryStatus', 'delivered')
+-- Preserve Clowder AI publication order: already-published real-cat speech and
+-- owner-visible queued user receipts keep their authored timestamp; private
+-- queued work enters the timeline at delivery.
+local isRealCatSpeech = catId and catId ~= '' and catId ~= 'system'
+  and userId ~= 'system' and userId ~= 'scheduler' and origin ~= 'briefing'
+local isQueuedUserReceipt = (not catId or catId == '') and (not source or source == '')
+  and userId ~= 'system' and userId ~= 'scheduler' and origin ~= 'briefing'
+  and custody and custody ~= ''
+local timelineScore = deliveredAt
+if isRealCatSpeech or isQueuedUserReceipt then
+  timelineScore = timestamp
+end
 
-redis.call('ZADD', kp .. 'msg:thread:' .. threadId, tonumber(deliveredAt), msgId)
-redis.call('ZADD', kp .. 'msg:timeline', tonumber(deliveredAt), msgId)
-redis.call('ZADD', kp .. 'msg:user:' .. userId, tonumber(deliveredAt), msgId)
+redis.call('HSET', hash, 'deliveredAt', deliveredAt, 'timelineOrderAt', timelineScore, 'deliveryStatus', 'delivered')
 
-return redis.call('HGETALL', hash)
+redis.call('ZADD', kp .. 'msg:thread:' .. threadId, tonumber(timelineScore), msgId)
+redis.call('ZADD', kp .. 'msg:timeline', tonumber(timelineScore), msgId)
+redis.call('ZADD', kp .. 'msg:user:' .. userId, tonumber(timelineScore), msgId)
+
+return {1, redis.call('HGETALL', hash)}
 `;
 
 /**
@@ -64,16 +92,21 @@ return redis.call('HGETALL', hash)
  *
  * KEYS[1] = detail hash key (auto-prefixed by ioredis)
  *
- * Returns: 0 on CAS no-op (not queued / missing), or HGETALL flat array on CAS win.
+ * Returns: {-1, {}} when missing, {0, HGETALL} on a state no-op, or
+ * {1, HGETALL} on a CAS win.
  */
 export const CANCEL_LUA = `
 local hash = KEYS[1]
+if redis.call('EXISTS', hash) == 0 then
+  return {-1, {}}
+end
 local status = redis.call('HGET', hash, 'deliveryStatus')
 if status ~= 'queued' then
-  return 0
+  return {0, redis.call('HGETALL', hash)}
 end
 redis.call('HSET', hash, 'deliveryStatus', 'canceled')
-return redis.call('HGETALL', hash)
+redis.call('HDEL', hash, 'queueCustody', 'queueCustodyRevision')
+return {1, redis.call('HGETALL', hash)}
 `;
 
 /**
@@ -85,12 +118,14 @@ return redis.call('HGETALL', hash)
  * ARGV[3] = keyPrefix (e.g. "cat-cafe:") — for constructing user zset keys inside Lua
  * ARGV[4] = ttlSeconds (string number, "0" = no expiry) — applied atomically to the
  *           new user zset key, eliminating the crash window between ownership transfer
- *           and TTL application (codex P2 fix)
+ *           and TTL application
  *
- * Derives currentUserId and effectiveOrder (deliveredAt ?? timestamp) from
- * the hash INSIDE the script — never from a stale JS snapshot.
+ * Derives currentUserId and effectiveOrder inside the script — first from the
+ * source user zset (the existing ordering authority), then from hash fields for
+ * legacy rows without that membership. No value comes from a stale JS snapshot.
  *
- * Returns: -1 (not found), 0 (same user / no-op), or HGETALL flat array on CAS win.
+ * Returns: {-1, {}} when missing, {0, HGETALL} for same-user no-op, or
+ * {1, HGETALL} on a transfer.
  */
 export const REASSIGN_LUA = `
 local hash = KEYS[1]
@@ -101,19 +136,26 @@ local ttl = tonumber(ARGV[4])
 
 local curUserId = redis.call('HGET', hash, 'userId')
 if not curUserId then
-  return -1
+  return {-1, {}}
 end
 if curUserId == nextUserId then
-  return 0
+  return {0, redis.call('HGETALL', hash)}
 end
 
-local eff = redis.call('HGET', hash, 'deliveredAt')
+local oldUserKey = kp .. 'msg:user:' .. curUserId
+local eff = redis.call('ZSCORE', oldUserKey, msgId)
+if not eff or eff == '' then
+  eff = redis.call('HGET', hash, 'timelineOrderAt')
+end
+if not eff or eff == '' then
+  eff = redis.call('HGET', hash, 'deliveredAt')
+end
 if not eff or eff == '' then
   eff = redis.call('HGET', hash, 'timestamp')
 end
 
 redis.call('HSET', hash, 'userId', nextUserId)
-redis.call('ZREM', kp .. 'msg:user:' .. curUserId, msgId)
+redis.call('ZREM', oldUserKey, msgId)
 local newUserKey = kp .. 'msg:user:' .. nextUserId
 redis.call('ZADD', newUserKey, tonumber(eff), msgId)
 
@@ -121,103 +163,5 @@ if ttl > 0 then
   redis.call('EXPIRE', newUserKey, ttl)
 end
 
-return redis.call('HGETALL', hash)
-`;
-
-/**
- * APPEND: atomic idempotency claim + hash + all indexes + TTL cleanup.
- *
- * KEYS[1] = detail hash key (auto-prefixed by ioredis)
- * ARGV[1] = message id
- * ARGV[2] = JSON object of hash fields (id, threadId, userId, timestamp, content, ...)
- * ARGV[3] = JSON array of mention catIds
- * ARGV[4] = timeline/user/mentions/thread score (stringified message timestamp)
- * ARGV[5] = idempotency key raw suffix (empty string if none)
- * ARGV[6] = keyPrefix (e.g. "cat-cafe:")
- * ARGV[7] = ttlSeconds as string ("0" = no expiry)
- *
- * Returns: existing message id on idempotency replay, otherwise the new message id.
- */
-export const APPEND_LUA = `
-redis.replicate_commands()
-
-local hash = KEYS[1]
-local msgId = ARGV[1]
-local hashFields = cjson.decode(ARGV[2])
-local mentions = cjson.decode(ARGV[3])
-local score = tonumber(ARGV[4])
-local idemKeyRaw = ARGV[5]
-local kp = ARGV[6]
-local ttl = tonumber(ARGV[7])
-
-local idemKey = idemKeyRaw ~= '' and (kp .. idemKeyRaw) or nil
-
--- Idempotency: if key points to a live hash, replay.
-if idemKey then
-  local existingId = redis.call('GET', idemKey)
-  if existingId then
-    if redis.call('EXISTS', kp .. 'msg:' .. existingId) == 1 then
-      return existingId
-    end
-    -- stale reference: fall through to reclaim
-  end
-end
-
--- Write hash.
-local flat = {}
-for k, v in pairs(hashFields) do
-  table.insert(flat, k)
-  table.insert(flat, v)
-end
-redis.call('HSET', hash, unpack(flat))
-
--- Write time-semantic indexes.
-local threadId = hashFields.threadId
-local threadKey = kp .. 'msg:thread:' .. threadId
-local userKey = kp .. 'msg:user:' .. hashFields.userId
-local timelineKey = kp .. 'msg:timeline'
-redis.call('ZADD', timelineKey, score, msgId)
-redis.call('ZADD', userKey, score, msgId)
-redis.call('ZADD', threadKey, score, msgId)
-for _, catId in ipairs(mentions) do
-  redis.call('ZADD', kp .. 'msg:mentions:' .. catId, score, msgId)
-end
-
--- Claim idempotency key and apply TTLs.
-if idemKey then
-  -- Overwrite stale mappings (e.g., after deleteByThread deleted the hash but
-  -- left the idempotency key behind) as well as claiming a fresh key. At this
-  -- point the key either does not exist or points to a missing hash, so
-  -- unconditional SET is safe and prevents duplicate creation on retries.
-  redis.call('SET', idemKey, msgId)
-  if ttl > 0 then
-    redis.call('EXPIRE', idemKey, ttl)
-  end
-end
-
-if ttl > 0 then
-  redis.call('EXPIRE', hash, ttl)
-  redis.call('EXPIRE', timelineKey, ttl)
-  redis.call('EXPIRE', userKey, ttl)
-  redis.call('EXPIRE', threadKey, ttl)
-  for _, catId in ipairs(mentions) do
-    redis.call('EXPIRE', kp .. 'msg:mentions:' .. catId, ttl)
-  end
-
-  local timeArr = redis.call('TIME')
-  local timeMs = tonumber(timeArr[1]) * 1000 + math.floor(tonumber(timeArr[2]) / 1000)
-  local cutoff = timeMs - ttl * 1000
-  redis.call('ZREMRANGEBYSCORE', timelineKey, '-inf', cutoff)
-  redis.call('ZREMRANGEBYSCORE', userKey, '-inf', cutoff)
-  for _, catId in ipairs(mentions) do
-    redis.call('ZREMRANGEBYSCORE', kp .. 'msg:mentions:' .. catId, '-inf', cutoff)
-  end
-  -- Thread ZSET is scored by timestamp (queued) or deliveredAt. Prune members
-  -- whose score is older than the TTL window so active threads do not accumulate
-  -- unhydratable IDs indefinitely. Whole-key EXPIRE remains as a backstop for
-  -- idle threads.
-  redis.call('ZREMRANGEBYSCORE', threadKey, '-inf', cutoff)
-end
-
-return msgId
+return {1, redis.call('HGETALL', hash)}
 `;

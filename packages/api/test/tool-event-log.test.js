@@ -305,6 +305,29 @@ describe('ToolEventLog (AC-F10)', () => {
     assert.equal(call2.summary._resultMerged, true);
   });
 
+  test('F282 merges only a recognized abstention result into its provisional tool event', async () => {
+    const [{ ToolEventLog }, { deriveResultSummary }] = await Promise.all([
+      import('../dist/domains/cats/services/tool-usage/ToolEventLog.js'),
+      import('../dist/domains/cats/services/tool-usage/derive-result-summary.js'),
+    ]);
+    const eventLog = new ToolEventLog(fakeRedis);
+    await eventLog.append(
+      makeBaseEvent({
+        toolName: 'record_proactive_memory_abstention',
+        summary: { reasonCode: 'bad_timing', _toolUseId: 'tu_abstain_1' },
+      }),
+    );
+
+    const patch = deriveResultSummary('record_proactive_memory_abstention', '{"status":"recorded"}');
+    assert.deepEqual(patch, { proactiveMemoryOutcome: 'abstention_recorded' });
+    await eventLog.updateSummary('thread-A', { toolUseId: 'tu_abstain_1' }, patch);
+
+    const [event] = await eventLog.readByThread('thread-A');
+    assert.equal(event.summary.reasonCode, 'bad_timing');
+    assert.equal(event.summary.proactiveMemoryOutcome, 'abstention_recorded');
+    assert.equal(event.summary._resultMerged, true);
+  });
+
   test('listThreadIds uses SCAN cursor iteration (砚砚 cloud-5 P1: not KEYS)', async () => {
     const { ToolEventLog } = await import('../dist/domains/cats/services/tool-usage/ToolEventLog.js');
     // Track that scan was called and keys was NOT.

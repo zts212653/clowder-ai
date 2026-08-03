@@ -1,7 +1,8 @@
 #!/bin/bash
 # .githooks/pre-commit — Shared State File Guard
 #
-# 共享状态文件禁止在非 main 分支提交。
+# 共享状态文件禁止在非 main 分支创作；与 origin/main 完全一致的
+# merge/rebase carry-in 不属于 feature branch 创作，可以提交。
 # 规则来源：cat-cafe-skills/refs/shared-rules.md §14
 #
 # 共享状态文件清单（严格定义，不是整个 docs/features/）：
@@ -16,6 +17,107 @@
 
 BRANCH=$(git branch --show-current 2>/dev/null)
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+STAGED_FILES="$(git diff --cached --name-only || true)"
+VERDICT_BRANCH_DOMAIN=""
+VERDICT_ID=""
+VERDICT_ARTIFACT_ONLY=false
+BIOME_PACKAGE_PATH="$REPO_ROOT/node_modules/@biomejs/biome/package.json"
+BIOME_BINARY_PATH="$REPO_ROOT/node_modules/.bin/biome"
+VERDICT_GENERATED_PATH_REGEX=""
+
+run_biome_index_snapshot() {
+  local snapshot_dir
+  snapshot_dir="$(mktemp -d "${TMPDIR:-/tmp}/cat-cafe-precommit-index.XXXXXX")" || return 1
+  (
+    trap 'rm -rf "$snapshot_dir"' EXIT
+    cd "$REPO_ROOT" &&
+      git checkout-index --all --ignore-skip-worktree-bits --prefix="$snapshot_dir/" &&
+      pnpm run check:biome-version -- --lockfile "$snapshot_dir/pnpm-lock.yaml" &&
+      cd "$snapshot_dir" &&
+      "$BIOME_BINARY_PATH" check . --diagnostic-level=error
+  )
+}
+
+# B-3 (F234 2026-07-16): staged-scope variant — same index-snapshot semantics
+# as run_biome_index_snapshot (#2860: scan INDEX content, not worktree, so
+# unstaged WIP can't pollute the verdict), narrowed to the staged path list.
+# Rationale: Biome is a per-file linter — file A's change cannot create a
+# Biome error in file B, so full-repo scanning only lets UNRELATED repo debt
+# block unrelated commits (same reason the verdict-artifact branch already
+# got an exemption). Full-repo coverage stays owned by `pnpm check` / CI.
+run_biome_index_snapshot_staged() {
+  local snapshot_dir
+  snapshot_dir="$(mktemp -d "${TMPDIR:-/tmp}/cat-cafe-precommit-index.XXXXXX")" || return 1
+  (
+    trap 'rm -rf "$snapshot_dir"' EXIT
+    cd "$REPO_ROOT" &&
+      git checkout-index --all --ignore-skip-worktree-bits --prefix="$snapshot_dir/" &&
+      pnpm run check:biome-version -- --lockfile "$snapshot_dir/pnpm-lock.yaml" &&
+      cd "$snapshot_dir" &&
+      printf '%s\n' "$BIOME_LINTABLE_STAGED" \
+        | xargs "$BIOME_BINARY_PATH" check --files-ignore-unknown=true --no-errors-on-unmatched --diagnostic-level=error
+  )
+}
+
+# F192 Day-23: auto-published verdict artifact commits are git-backed evidence,
+# not source changes. Running a full-repo Biome gate here lets unrelated repo
+# debt block `cat_cafe_publish_verdict` even when the staged diff is strictly
+# the current verdict's artifact set.
+if [[ "$BRANCH" =~ ^verdict/auto/([^/]+)/(.+)$ ]]; then
+  VERDICT_BRANCH_DOMAIN="${BASH_REMATCH[1]}"
+  VERDICT_ID="${BASH_REMATCH[2]}"
+  case "$VERDICT_BRANCH_DOMAIN" in
+    eval-capability-wakeup) VERDICT_GENERATED_PATH_REGEX="|generated/capability-wakeup/${VERDICT_ID}/" ;;
+    eval-memory) VERDICT_GENERATED_PATH_REGEX="|generated/memory/${VERDICT_ID}/" ;;
+    eval-sop) VERDICT_GENERATED_PATH_REGEX="|generated/sop/${VERDICT_ID}/" ;;
+  esac
+fi
+if [ -n "$VERDICT_ID" ] && [ -n "$STAGED_FILES" ]; then
+  NON_VERDICT_ARTIFACT_PATHS="$(
+    printf '%s\n' "$STAGED_FILES" \
+      | grep -Ev "^(docs/harness-feedback/verdicts/${VERDICT_ID}\.md$|docs/harness-feedback/bundles/${VERDICT_ID}/${VERDICT_GENERATED_PATH_REGEX})" \
+      || true
+  )"
+  if [ -z "$NON_VERDICT_ARTIFACT_PATHS" ]; then
+    VERDICT_ARTIFACT_ONLY=true
+  fi
+fi
+
+validate_staged_artifact_json() {
+  local artifact_jsons
+  artifact_jsons="$(printf '%s\n' "$STAGED_FILES" | grep -E '\.json$' || true)"
+  while IFS= read -r relpath; do
+    [ -z "$relpath" ] && continue
+    if ! (
+      cd "$REPO_ROOT" &&
+      git show ":$relpath" \
+        | node -e "JSON.parse(require('fs').readFileSync(0, 'utf8'))" >/dev/null
+    ); then
+      echo "" >&2
+      echo "🚫 BIOME GUARD failed! Staged verdict artifact JSON is malformed: $relpath" >&2
+      return 1
+    fi
+  done <<< "$artifact_jsons"
+}
+
+validate_staged_artifact_file_types() {
+  local unexpected_artifacts
+  unexpected_artifacts="$(
+    while IFS= read -r relpath; do
+      [ -z "$relpath" ] && continue
+      if [ "$relpath" = "docs/harness-feedback/verdicts/${VERDICT_ID}.md" ] || [[ "$relpath" == *.json ]]; then
+        continue
+      fi
+      printf '%s\n' "$relpath"
+    done <<< "$STAGED_FILES"
+  )"
+  if [ -n "$unexpected_artifacts" ]; then
+    echo "" >&2
+    echo "🚫 BIOME GUARD failed! Verdict artifact-only commits may stage only the exact verdict .md plus .json evidence files." >&2
+    printf '  - %s\n' "$unexpected_artifacts" >&2
+    return 1
+  fi
+}
 
 # ── Root Hygiene Guard (F214): 白名单制拦根目录新增文件（所有分支，含 main）──
 # 规则来源：shared-rules.md §20。白名单制（不是黑名单）：根目录新增的文件，除非匹配
@@ -67,32 +169,112 @@ if [ ${#hygiene_debris[@]} -gt 0 ] || [ ${#hygiene_unknown[@]} -gt 0 ]; then
   exit 1
 fi
 
-# ── Partial Commit Guard: pre-commit Biome scans the working tree, not the index ──
-STAGED_FILES="$(git diff --cached --name-only || true)"
-UNSTAGED_FILES="$(git diff --name-only || true)"
-PARTIAL_OVERLAP="$(printf '%s\n' "$STAGED_FILES" | grep -Fxf <(printf '%s\n' "$UNSTAGED_FILES") || true)"
-if [ -n "$PARTIAL_OVERLAP" ]; then
-  echo "" >&2
-  echo "🚫 BIOME GUARD: staged/unstaged overlap detected — partial commit would bypass index validation." >&2
-  echo "重叠文件：" >&2
-  printf '  - %s\n' "$PARTIAL_OVERLAP" >&2
-  echo "" >&2
-  echo "处理：把这些文件完整 stage，或先 stash/还原未暂存改动后再 commit。" >&2
-  echo "原因：pre-commit 的 Biome 扫描读取 working tree；若 index 和 working tree 分叉，会出现假绿。" >&2
-  exit 1
-fi
-
-# ── Biome Guard: fail closed on stale local installs + full-repo error scan ──
+# ── Biome Guard: fail closed on stale local installs + full-index error scan ──
 echo "" >&2
-echo "🧭 BIOME GUARD: verifying lockfile version + full-repo error scan..." >&2
-if ! (
-  cd "$REPO_ROOT" &&
-  pnpm run check:biome-version >&2 &&
-  pnpm exec biome check . --diagnostic-level=error >&2
-); then
-  echo "" >&2
-  echo "🚫 BIOME GUARD failed! Refresh the worktree install or fix the reported Biome errors." >&2
-  exit 1
+if [ "$VERDICT_ARTIFACT_ONLY" = "true" ]; then
+  if ! validate_staged_artifact_file_types; then
+    exit 1
+  fi
+  if [ ! -f "$BIOME_PACKAGE_PATH" ]; then
+    echo "🧭 BIOME GUARD: no local Biome install in verdict artifact-only worktree; falling back to staged diff sanity check..." >&2
+    if ! (
+      cd "$REPO_ROOT" &&
+      git diff --cached --check >&2
+    ); then
+      echo "" >&2
+      echo "🚫 BIOME GUARD failed! Fix staged verdict artifact whitespace/conflict issues before publishing." >&2
+      exit 1
+    fi
+    if ! validate_staged_artifact_json; then
+      exit 1
+    fi
+  else
+    echo "🧭 BIOME GUARD: verifying lockfile version + staged-only scan for verdict artifact-only auto branch..." >&2
+    if ! (
+      cd "$REPO_ROOT" &&
+      pnpm run check:biome-version >&2 &&
+      pnpm exec biome check --staged --files-ignore-unknown=true --no-errors-on-unmatched --diagnostic-level=error >&2
+    ); then
+      echo "" >&2
+      echo "🚫 BIOME GUARD failed! Refresh the worktree install or fix the staged verdict artifacts before publishing." >&2
+      exit 1
+    fi
+  fi
+  if ! validate_staged_artifact_json; then
+    exit 1
+  fi
+else
+  # B-3 (F234 2026-07-16): scale verification to staged files / risk.
+  # Tier a — no Biome-lintable file staged (docs/shell/yaml-only commits):
+  #   skip Biome entirely (zero node_modules tax in fresh worktrees);
+  #   whitespace/conflict sanity via git alone.
+  # Tier b — lintable files staged + Biome installed:
+  #   version check + index-snapshot scan narrowed to staged paths (#2860
+  #   semantics preserved: content comes from INDEX, not worktree).
+  # Tier c — lintable files staged + no local Biome: fail closed (a JS/TS
+  #   change without its linter is exactly what this guard must block).
+  # Extension set = everything Biome 2.4.1 can lint in this repo (css/html
+  # verified live: "Checked 1 file"). Over-listing is harmless — the staged
+  # scan runs with --files-ignore-unknown; under-listing is a real bypass
+  # (Sol R1-P2: css canary escaped). Contract suite guards this list.
+  # R2-P1 (Sol): biome config is GLOBAL-scope — changing it (e.g. a rule
+  # warn→error) alters lint results for every file, so a per-file staged scan
+  # of just the config proves nothing. Config staged ⇒ full-index risk tier.
+  BIOME_CONFIG_STAGED="$(git diff --cached --name-only --diff-filter=d | grep -E '(^|/)biome\.jsonc?$' || true)"
+  BIOME_LINTABLE_STAGED="$(git diff --cached --name-only --diff-filter=d | grep -E '\.(mjs|cjs|js|jsx|mts|cts|ts|tsx|json|jsonc|css|html|vue|svelte|astro|graphql|gql)$' || true)"
+  # pnpm-lock.yaml staged = Biome version may drift via dependency change —
+  # version check must run even when no lintable source file is staged.
+  LOCKFILE_STAGED="$(git diff --cached --name-only | grep -E '^pnpm-lock\.yaml$' || true)"
+  if [ -n "$BIOME_CONFIG_STAGED" ]; then
+    if [ ! -f "$BIOME_PACKAGE_PATH" ]; then
+      echo "" >&2
+      echo "🚫 BIOME GUARD failed! biome config staged but no local Biome install (config changes need a full-index scan)." >&2
+      echo "   Run: env -u NODE_ENV pnpm install --frozen-lockfile" >&2
+      exit 1
+    fi
+    echo "🧭 BIOME GUARD: biome config staged — global scope, running full Git index snapshot scan..." >&2
+    if ! run_biome_index_snapshot >&2; then
+      echo "" >&2
+      echo "🚫 BIOME GUARD failed! Staged biome config change breaks existing files — fix them in the same commit or split the config change." >&2
+      exit 1
+    fi
+  elif [ -z "$BIOME_LINTABLE_STAGED" ] && [ -n "$LOCKFILE_STAGED" ]; then
+    echo "🧭 BIOME GUARD: pnpm-lock.yaml staged — verifying Biome version pin from INDEX content (no lintable source staged)..." >&2
+    if ! (
+      cd "$REPO_ROOT" &&
+      STAGED_LOCKFILE="$(mktemp "${TMPDIR:-/tmp}/cat-cafe-staged-lockfile.XXXXXX")" &&
+      trap 'rm -f "$STAGED_LOCKFILE"' EXIT &&
+      git show :pnpm-lock.yaml > "$STAGED_LOCKFILE" &&
+      pnpm run check:biome-version -- --lockfile "$STAGED_LOCKFILE" >&2 &&
+      git diff --cached --check >&2
+    ); then
+      echo "" >&2
+      echo "🚫 BIOME GUARD failed! Staged lockfile changes the Biome pin (or whitespace/conflict issues) — refresh install or fix before committing." >&2
+      exit 1
+    fi
+  elif [ -z "$BIOME_LINTABLE_STAGED" ]; then
+    echo "🧭 BIOME GUARD: no Biome-lintable files staged — skipping Biome, whitespace/conflict sanity only..." >&2
+    if ! (
+      cd "$REPO_ROOT" &&
+      git diff --cached --check >&2
+    ); then
+      echo "" >&2
+      echo "🚫 BIOME GUARD failed! Fix staged whitespace/conflict-marker issues before committing." >&2
+      exit 1
+    fi
+  elif [ ! -f "$BIOME_PACKAGE_PATH" ]; then
+    echo "" >&2
+    echo "🚫 BIOME GUARD failed! Biome-lintable files staged but no local Biome install." >&2
+    echo "   Run: env -u NODE_ENV pnpm install --frozen-lockfile" >&2
+    exit 1
+  else
+    echo "🧭 BIOME GUARD: verifying lockfile version + staged-scope index snapshot scan..." >&2
+    if ! run_biome_index_snapshot_staged >&2; then
+      echo "" >&2
+      echo "🚫 BIOME GUARD failed! Refresh the worktree install or fix the reported staged-file Biome errors." >&2
+      exit 1
+    fi
+  fi
 fi
 
 # ── Brand Guard: detect brand-protected staged files ──
@@ -187,18 +369,41 @@ if [ "$BRANCH" = "main" ]; then
   exit 0
 fi
 
-# 获取暂存区中的共享状态文件
+# 获取暂存区中的共享状态文件，并只拦截相对 origin/main 有差异的文件。
 SHARED_STATE_FILES=$(git diff --cached --name-only | grep -E '^(docs/BACKLOG\.md|cat-config\.json)$')
+DIVERGENT_SHARED_STATE_FILES=""
+SHARED_STATE_BASE_ERROR=""
 
 if [ -n "$SHARED_STATE_FILES" ]; then
+  if ! git rev-parse --verify --quiet origin/main >/dev/null; then
+    DIVERGENT_SHARED_STATE_FILES="$SHARED_STATE_FILES"
+    SHARED_STATE_BASE_ERROR="无法解析 origin/main，不能证明暂存内容只是上游 carry-in；按 fail-closed 拦截。"
+  else
+    while IFS= read -r shared_file; do
+      [ -z "$shared_file" ] && continue
+      if ! git diff --cached --quiet origin/main -- "$shared_file"; then
+        if [ -n "$DIVERGENT_SHARED_STATE_FILES" ]; then
+          DIVERGENT_SHARED_STATE_FILES=$(printf '%s\n%s' "$DIVERGENT_SHARED_STATE_FILES" "$shared_file")
+        else
+          DIVERGENT_SHARED_STATE_FILES="$shared_file"
+        fi
+      fi
+    done <<< "$SHARED_STATE_FILES"
+  fi
+fi
+
+if [ -n "$DIVERGENT_SHARED_STATE_FILES" ]; then
   echo "" >&2
-  echo "🚫 SHARED-STATE GUARD: 共享状态文件不能在非 main 分支提交！" >&2
+  echo "🚫 SHARED-STATE GUARD: 共享状态文件不能在非 main 分支创作！" >&2
+  if [ -n "$SHARED_STATE_BASE_ERROR" ]; then
+    echo "$SHARED_STATE_BASE_ERROR" >&2
+  fi
   echo "" >&2
   echo "被拦截的文件：" >&2
-  echo "$SHARED_STATE_FILES" | sed 's/^/  - /' >&2
+  echo "$DIVERGENT_SHARED_STATE_FILES" | sed 's/^/  - /' >&2
   echo "" >&2
   echo "正确做法：" >&2
-  echo "  1. git restore --staged $SHARED_STATE_FILES" >&2
+  echo "$DIVERGENT_SHARED_STATE_FILES" | sed 's#^#  1. git restore --staged -- #' >&2
   echo "  2. 切到 main worktree（如已有：cd <main-worktree-path>）" >&2
   echo "     或：git stash && git checkout main（如 main 未被其他 worktree 占用）" >&2
   echo "  3. 在 main 上：git pull && 编辑 → git add → commit → push" >&2

@@ -20,7 +20,8 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { type CatId, createCatId } from '@cat-cafe/shared';
+import { type CatId, createCatId, resolveCliEffortOverride } from '@cat-cafe/shared';
+import { parse as parseToml } from 'smol-toml';
 import {
   resolveBinaryRoot,
   resolvePencilCommand,
@@ -29,22 +30,47 @@ import {
 import {
   CAT_CAFE_SPLIT_ENTRYPOINTS,
   MCP_CALLBACK_ENV_KEYS,
+  MCP_SESSION_ENV_KEYS,
   resolveCatCafeNodeCommand,
 } from '../../../../../config/capabilities/mcp-constants.js';
 import { getCatContextWindowConfig, getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
-import { getCodexApprovalPolicy, getCodexSandboxMode } from '../../../../../config/codex-cli.js';
+import {
+  type CodexCarrierMode,
+  getCodexApprovalPolicy,
+  getCodexCarrierMode,
+  getCodexOAuthTransport,
+  getCodexSandboxMode,
+} from '../../../../../config/codex-cli.js';
 import { estimateCostFromTokens } from '../../../../../config/model-pricing.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import { buildCliDiagnostics } from '../../../../../utils/cli-diagnostics.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
-import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
+import {
+  isCliError,
+  isCliTimeout,
+  isLivenessWarning,
+  KILL_GRACE_MS,
+  spawnCli,
+} from '../../../../../utils/cli-spawn.js';
+import { parseCliTimeoutMs, resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
 import { sanitizeCliStderr } from '../../../../../utils/sanitize-cli-stderr.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import { CliRawArchive } from '../../session/CliRawArchive.js';
-import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata, TokenUsage } from '../../types.js';
+import type {
+  AgentCarrierSession,
+  AgentCarrierSessionOptions,
+  AgentFreshnessCarrierCapability,
+  AgentMessage,
+  AgentService,
+  AgentServiceOptions,
+  MessageMetadata,
+  TokenUsage,
+  ToolExecutionPolicy,
+} from '../../types.js';
 import type { AuditLogSink, RawArchiveSink } from '../providers/codex-audit-hooks.js';
 import { extractCommandExecutionLifecycle, sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
 import { type CodexStreamState, transformCodexEvent } from '../providers/codex-event-transform.js';
@@ -54,9 +80,117 @@ import {
   createCodexSessionContextSnapshotResolver,
 } from '../providers/codex-session-context-snapshot.js';
 import { extractImagePaths } from '../providers/image-paths.js';
+import type { CodexAppServerLifecycleEvent, CodexAppServerLifecycleSnapshot } from './CodexAppServerClient.js';
+import type { CodexAppServerHostPool } from './CodexAppServerHostPool.js';
+import { recordCodexAppServerLifecycle } from './CodexAppServerLifecycleRegistry.js';
+import {
+  type CodexAppServerRecoveryBlockedEvent,
+  type CodexAppServerRecoveryEvent,
+  runCodexAppServerWithRecovery,
+} from './CodexAppServerRunner.js';
+import {
+  appendCatCafeGithubWriteRouting,
+  CODEX_APPS_WRITE_APPROVAL_ARGS,
+  type CodexApprovalSurface,
+} from './codex-app-approval-routing.js';
+import { classifyCodexExecToolSurface } from './codex-app-server-boundary.js';
+import { buildCodexCapacityRecoveryCardMessage } from './codex-capacity-recovery-card.js';
+import { createDirectAgentCarrierSession } from './DirectAgentCarrierSession.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
+import {
+  bindSessionCredentialFile,
+  type PreparedCredentialEnv,
+  resolveSessionCredentialFile,
+  writeSessionCredentialFile,
+} from './session-credential-file.js';
 
 const log = createModuleLogger('codex-agent');
+
+function isCodexAppServerLifecycleEvent(value: unknown): value is CodexAppServerLifecycleEvent {
+  if (typeof value !== 'object' || value === null) return false;
+  return (value as { type?: unknown }).type === 'app_server.lifecycle';
+}
+
+function isCodexAppServerRecoveryEvent(value: unknown): value is CodexAppServerRecoveryEvent {
+  if (typeof value !== 'object' || value === null) return false;
+  return (value as { type?: unknown }).type === 'app_server.recovery';
+}
+
+function isCodexAppServerRecoveryBlockedEvent(value: unknown): value is CodexAppServerRecoveryBlockedEvent {
+  if (typeof value !== 'object' || value === null) return false;
+  return (value as { type?: unknown }).type === 'app_server.recovery_blocked';
+}
+
+function isCodexThreadStartedEvent(value: unknown): value is { type: 'thread.started'; thread_id: string } {
+  if (!value || typeof value !== 'object') return false;
+  const event = value as { type?: unknown; thread_id?: unknown };
+  return event.type === 'thread.started' && typeof event.thread_id === 'string';
+}
+
+function withoutFrozenInvocationCredentials(
+  env: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (!env) return undefined;
+  const safe = { ...env };
+  delete safe.CAT_CAFE_INVOCATION_ID;
+  delete safe.CAT_CAFE_CALLBACK_TOKEN;
+  return safe;
+}
+
+function withoutSessionScopedHostEnv(env: Record<string, string | null>): Record<string, string | null> {
+  const safe = { ...env };
+  for (const key of [...MCP_CALLBACK_ENV_KEYS, ...MCP_SESSION_ENV_KEYS]) delete safe[key];
+  return safe;
+}
+
+function removeCredentialFileFromMcpConfig(config: Record<string, unknown>): void {
+  visitMcpConfigEnvironments(config, (env) => delete env.CAT_CAFE_CREDENTIAL_FILE);
+}
+
+function replaceCredentialFileInMcpConfig(config: Record<string, unknown>, path: string): void {
+  visitMcpConfigEnvironments(config, (env) => {
+    if (typeof env.CAT_CAFE_CREDENTIAL_FILE === 'string') env.CAT_CAFE_CREDENTIAL_FILE = path;
+  });
+}
+
+function visitMcpConfigEnvironments(
+  config: Record<string, unknown>,
+  visit: (env: Record<string, unknown>) => void,
+): void {
+  const servers = config.mcp_servers;
+  if (!isCodexConfigObject(servers)) return;
+  for (const server of Object.values(servers)) {
+    if (!isCodexConfigObject(server)) continue;
+    if (isCodexConfigObject(server.env)) visit(server.env);
+  }
+}
+
+function resolvePooledCredentialForLease(args: {
+  current: PreparedCredentialEnv | null;
+  sessionId?: string;
+  reusedSessionHost?: boolean;
+  namespace: string;
+  callbackEnv?: Record<string, string>;
+  config: Record<string, unknown>;
+}): PreparedCredentialEnv | null {
+  if (!args.current || !args.sessionId || args.reusedSessionHost !== false) return args.current;
+  const replacement = resolveSessionCredentialFile(args.namespace, args.callbackEnv);
+  if (replacement) replaceCredentialFileInMcpConfig(args.config, replacement.path);
+  return replacement;
+}
+
+const APP_SERVER_LIFECYCLE_STATUS = {
+  child_spawned: 'thinking',
+  initialized: 'thinking',
+  thread_ready: 'thinking',
+  turn_accepted: 'streaming',
+  active: 'streaming',
+  completed: 'done',
+  interrupted: 'done',
+  failed: 'done',
+  closing: 'done',
+  closed: 'done',
+} as const satisfies Record<CodexAppServerLifecycleSnapshot['stage'], 'thinking' | 'streaming' | 'done'>;
 
 /** Redact a custom base URL for diagnostic logging — expose protocol+host only. */
 function redactUrlForLog(url: string): string {
@@ -89,6 +223,12 @@ interface CodexAgentServiceOptions {
   contextSnapshotResolver?: CodexSessionContextSnapshotResolver;
   /** Override executable name/path for Codex-family CLIs. */
   cliCommand?: string;
+  /** F254 D2 test/config seam. Default remains exec_json. */
+  carrierMode?: CodexCarrierMode;
+  /** Whether this host can synchronously present Codex App confirmations. */
+  approvalSurface?: CodexApprovalSurface;
+  /** Warm app-server host pool. Omitted keeps the per-invocation carrier. */
+  appServerHostPool?: CodexAppServerHostPool;
 }
 
 type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
@@ -142,24 +282,24 @@ function withRecentDiagnostics(base: string, recentErrors: string[]): string {
   return `${base}\n最近流错误:\n${lines.join('\n')}`;
 }
 
-function hasNonSuppressibleCodexExitOneDiagnostics(
-  event: {
-    message?: string;
-    cliDiagnostics?: { publicSummary?: string; safeExcerpt?: string };
-  },
-  recentErrors: string[],
-): boolean {
-  const diagnosticText = [
-    event.message,
-    event.cliDiagnostics?.publicSummary,
-    event.cliDiagnostics?.safeExcerpt,
-    ...recentErrors,
-  ]
-    .filter((value): value is string => Boolean(value))
-    .join('\n');
-
-  return /remote compaction failed|compact_error/i.test(diagnosticText);
-}
+// F212 Phase H (Sol runtime forensics 2026-07-09 → Sol Final确权 2026-07-10):
+// a provider-side exit-1 suppress helper + item-tracking boolean + suppress branch
+// used to live here. Sol's R3 push back forced deletion — cli-spawn / tmux-agent-
+// spawner now decide via a unified `finalSemanticDone` predicate:
+//   finalSemanticDone := localFinalTerminal === 'completed'
+//                     || (localFinalTerminal === null && semanticDone)
+// This closes the 2×2 truth table: turn.completed only → SUPPRESS; multi-turn
+// completed→failed → SURFACE; signal-only-abort (no terminal event) → SUPPRESS
+// (Group A contract); nothing → SURFACE. `turn.completed` alone does NOT prove
+// the invocation succeeded — the chronologically-LAST terminal event decides.
+// Archive witnesses: 97449e4b (cyber-safety), 7c3fd591 / 2ffa505f / 261c3754 /
+// 39f2bc4d (5 substantive completions each with turn.failed, misclassified as
+// silent success under the deleted branch).
+//
+// The deleted identifiers are enumerated in `scripts/check-no-codex-provider-exit-suppression.mjs`
+// FORBIDDEN_PATTERNS — that guard runs in `pnpm check` and MUST fail if anyone
+// re-introduces them in this provider file. Do not name the deleted symbols here;
+// point curious readers at the guard instead so the allowlist can stay tight.
 
 function toTomlString(value: string): string {
   const escaped = value.replace(/[\u0000-\u001f\u007f"\\]/g, (char) => {
@@ -532,7 +672,7 @@ async function buildCatCafeMcpArgs(
               // Append a short stable hash of the raw name for uniqueness.
               const sanitized = s.name.replace(/[^A-Za-z0-9]/g, '_').toUpperCase();
               const hash = createHash('sha256').update(s.name).digest('hex').slice(0, 8);
-              const envVarName = `CLOWDER_MCP_BEARER_${sanitized}_${hash}`;
+              const envVarName = `CAT_CAFE_MCP_BEARER_${sanitized}_${hash}`;
               bearerEnv[envVarName] = bearerMatch[1];
               args.push('--config', `mcp_servers.${tomlName}.bearer_token_env_var=${toTomlString(envVarName)}`);
             }
@@ -599,7 +739,7 @@ async function buildCatCafeMcpArgs(
             '--config',
             `mcp_servers.${tomlName}.env.ALLOWED_WORKSPACE_DIRS=${toTomlString(allowedWorkspaceDirs)}`,
           );
-          for (const key of MCP_CALLBACK_ENV_KEYS) {
+          for (const key of [...MCP_CALLBACK_ENV_KEYS, ...MCP_SESSION_ENV_KEYS]) {
             const value = callbackEnv[key];
             if (value) args.push('--config', `mcp_servers.${tomlName}.env.${key}=${toTomlString(value)}`);
           }
@@ -629,7 +769,7 @@ async function buildCatCafeMcpArgs(
         '--config',
         `mcp_servers.${serverName}.env.ALLOWED_WORKSPACE_DIRS=${toTomlString(allowedWorkspaceDirs)}`,
       );
-      for (const key of MCP_CALLBACK_ENV_KEYS) {
+      for (const key of [...MCP_CALLBACK_ENV_KEYS, ...MCP_SESSION_ENV_KEYS]) {
         const value = callbackEnv[key];
         if (!value) continue;
         args.push('--config', `mcp_servers.${serverName}.env.${key}=${toTomlString(value)}`);
@@ -675,6 +815,54 @@ function buildGitRepoArgs(workingDirectory?: string): string[] {
   return isGitRepositoryPath(repoCheckDir) ? [] : ['--skip-git-repo-check'];
 }
 
+/** Keep only app-server/global config flags; exec-only prompt/image flags use protocol params. */
+export function buildCodexAppServerArgs(args: readonly string[]): string[] {
+  const out = ['app-server', '--stdio'];
+  for (let index = 0; index < args.length; index++) {
+    const flag = args[index];
+    if (flag === '--config' || flag === '-c' || flag === '--enable' || flag === '--disable') {
+      const value = args[index + 1];
+      if (value !== undefined) {
+        out.push(flag, value);
+        index++;
+      }
+    }
+  }
+  return out;
+}
+
+/** Convert Codex CLI `--config key=<toml>` pairs into app-server thread config. */
+export function codexConfigObjectFromArgs(args: readonly string[]): Record<string, unknown> {
+  let config: Record<string, unknown> = {};
+  for (let index = 0; index < args.length; index++) {
+    const flag = args[index];
+    if (flag !== '--config' && flag !== '-c') continue;
+    const assignment = args[index + 1];
+    if (assignment !== undefined) {
+      const overlay = parseToml(assignment) as Record<string, unknown>;
+      config = mergeCodexConfig(config, overlay);
+      index++;
+    }
+  }
+  return config;
+}
+
+function mergeCodexConfig(base: Record<string, unknown>, overlay: Record<string, unknown>): Record<string, unknown> {
+  const merged = { ...base };
+  for (const [key, value] of Object.entries(overlay)) {
+    const previous = merged[key];
+    merged[key] =
+      isCodexConfigObject(previous) && isCodexConfigObject(value) ? mergeCodexConfig(previous, value) : value;
+  }
+  return merged;
+}
+
+function isCodexConfigObject(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
 /**
  * Service for invoking Codex via CLI subprocess.
  * Uses ChatGPT Plus/Pro subscription instead of API key.
@@ -687,6 +875,9 @@ export class CodexAgentService implements AgentService {
   private readonly rawArchive: RawArchiveSink;
   private readonly contextSnapshotResolver: CodexSessionContextSnapshotResolver;
   private readonly cliCommand: string;
+  private readonly carrierMode: CodexCarrierMode;
+  private readonly approvalSurface: CodexApprovalSurface;
+  private readonly appServerHostPool: CodexAppServerHostPool | undefined;
   /** F203 Phase C: compiles per-cat L0 → OpenAI developer role (-c). */
   private readonly l0CompilerFn: typeof compileL0ViaSubprocess;
 
@@ -699,6 +890,12 @@ export class CodexAgentService implements AgentService {
     this.rawArchive = options?.rawArchive ?? new CliRawArchive();
     this.contextSnapshotResolver = options?.contextSnapshotResolver ?? createCodexSessionContextSnapshotResolver();
     this.cliCommand = options?.cliCommand ?? 'codex';
+    this.carrierMode = options?.carrierMode ?? getCodexCarrierMode();
+    // Clowder AI currently has no synchronous approval request/response surface.
+    // Keep this explicit so a future interactive bridge changes provenance rather
+    // than relying on transport names or timing heuristics.
+    this.approvalSurface = options?.approvalSurface ?? 'unavailable';
+    this.appServerHostPool = options?.appServerHostPool;
   }
 
   /** F203 Phase C — this service injects L0 via `-c developer_instructions=` (Task 4). */
@@ -706,18 +903,18 @@ export class CodexAgentService implements AgentService {
     return true;
   }
 
-  /**
-   * F177 Phase H (KD-13) — codex-family runs via `codex exec --json`, which does
-   * NOT dispatch ~/.codex/hooks.json Stop hooks (H0 spike 2026-06-11), so the
-   * Claude Code F177-G routing guard never fires for codex/gpt52. The serial
-   * route layer applies a server-side remedial guard instead. Covers all
-   * CodexAgentService instances (codex GPT-5.5 + gpt52 GPT-5.4).
-   *
-   * NOTE: do NOT derive this from injectsL0Natively() — codex injects L0
-   * natively yet still needs the guard, so the two capabilities are orthogonal.
-   */
-  needsServerRoutingGuard(): boolean {
-    return true;
+  supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
+    // exec_json has the proven --ignore-user-config + empty MCP hard fence.
+    // app-server 0.144.4 exposes no equivalent ignore-user-config flag, so a
+    // read-only supplement must fail before model launch instead of trusting
+    // sandbox alone while user-configured MCP tools may still load.
+    return policy.mode === 'read_only' && this.carrierMode === 'exec_json';
+  }
+
+  freshnessCarrierCapability(): AgentFreshnessCarrierCapability {
+    return this.carrierMode === 'app_server'
+      ? { provider: 'openai_codex', carrier: 'codex_app_server', deliverySemantics: 'exact_active_turn' }
+      : { provider: 'openai_codex', carrier: 'codex_exec_json', deliverySemantics: 'unsupported' };
   }
 
   /**
@@ -729,12 +926,13 @@ export class CodexAgentService implements AgentService {
    * error + done + return, mirroring the CLI-not-found path) — a missing L0
    * = a cat with no identity/家规, strictly worse than a failed invocation.
    */
-  private async compileDeveloperInstructionsArgs(
+  private async compileDeveloperInstructions(
     cliModel: string,
-  ): Promise<{ args: string[] } | { error: string; metadata: MessageMetadata }> {
+    userId?: string,
+  ): Promise<{ value: string } | { error: string; metadata: MessageMetadata }> {
     try {
-      const compiledL0 = await this.l0CompilerFn({ catId: this.catId as string });
-      return { args: ['--config', `developer_instructions=${toTomlString(compiledL0)}`] };
+      const compiledL0 = await this.l0CompilerFn({ catId: this.catId as string, userId });
+      return { value: compiledL0 };
     } catch (err) {
       return {
         error: `L0 compile failed for ${this.catId as string}: ${(err as Error).message}`,
@@ -744,19 +942,26 @@ export class CodexAgentService implements AgentService {
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
+    const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
     // Codex CLI has no system prompt flag; prepend identity to prompt text
     const effectivePrompt = options?.systemPrompt ? `${options.systemPrompt}\n\n${prompt}` : prompt;
     const effectiveModel = options?.callbackEnv?.CAT_CAFE_OPENAI_MODEL_OVERRIDE ?? this.model;
     const imagePaths = extractImagePaths(options?.contentBlocks, options?.uploadDir);
     const imageArgs = imagePaths.flatMap((path) => ['--image', path]);
 
-    const sandboxMode = getCodexSandboxMode();
-    const approvalPolicy = getCodexApprovalPolicy();
-    const effortLevel = getCatEffort(this.catId as string, undefined, 'openai');
+    const sandboxMode = readOnly ? 'read-only' : getCodexSandboxMode();
+    const approvalPolicy = readOnly ? 'never' : getCodexApprovalPolicy();
+    const inheritedEffort = getCatEffort(this.catId as string, undefined, 'openai', effectiveModel);
+    const effortLevel = resolveCliEffortOverride(
+      'openai',
+      effectiveModel,
+      inheritedEffort,
+      options?.reasoningEffortOverride,
+    ).effective;
     const reasoningArgs = buildCodexReasoningArgs(effortLevel);
     const sandboxConfigArgs = ['--config', `sandbox_mode=${toTomlString(sandboxMode)}`];
     const approvalArgs = ['--config', `approval_policy="${approvalPolicy}"`];
-    const ctxConfig = getCatContextWindowConfig(this.catId as string);
+    const ctxConfig = getCatContextWindowConfig(this.catId as string, effectiveModel);
     const contextWindowArgs: string[] = ctxConfig
       ? [
           '--config',
@@ -766,18 +971,39 @@ export class CodexAgentService implements AgentService {
         ]
       : [];
     // #712: Inject ALL enabled MCP servers from capabilities.json at invoke time.
-    const { args: catCafeMcpArgs, bearerEnv: mcpBearerEnv } = await buildCatCafeMcpArgs(
-      options?.callbackEnv,
-      options?.workingDirectory,
-    );
-    const gitRepoArgs = buildGitRepoArgs(options?.workingDirectory);
+    const appServerHostPool = this.appServerHostPool;
+    const wantsPooledAppServer =
+      this.carrierMode === 'app_server' &&
+      process.platform !== 'win32' &&
+      !readOnly &&
+      !options?.agentCarrierSessionFactory &&
+      !!appServerHostPool;
+    const callbackHasInvocationCredentials =
+      !!options?.callbackEnv?.CAT_CAFE_INVOCATION_ID && !!options?.callbackEnv?.CAT_CAFE_CALLBACK_TOKEN;
+    const credentialNamespace = `codex:${this.catId}`;
+    let pooledCredentialEnv: PreparedCredentialEnv | null = null;
+    if (wantsPooledAppServer && callbackHasInvocationCredentials) {
+      pooledCredentialEnv = resolveSessionCredentialFile(credentialNamespace, options?.callbackEnv, options?.sessionId);
+    }
+    // If credentials were expected but the owner-only refresh file could not be
+    // prepared, retain the existing per-invocation carrier instead of launching
+    // a pooled session whose MCP callbacks would be stale or unconfigured.
+    const usePooledAppServer =
+      wantsPooledAppServer && (!callbackHasInvocationCredentials || pooledCredentialEnv !== null);
+    const mcpCallbackEnv = usePooledAppServer
+      ? withoutFrozenInvocationCredentials(pooledCredentialEnv?.env ?? options?.callbackEnv)
+      : options?.callbackEnv;
+    const { args: catCafeMcpArgs, bearerEnv: mcpBearerEnv } = readOnly
+      ? { args: [], bearerEnv: {} }
+      : await buildCatCafeMcpArgs(mcpCallbackEnv, options?.workingDirectory);
+    const gitRepoArgs = readOnly ? [] : buildGitRepoArgs(options?.workingDirectory);
     // User-defined CLI args from the member editor (#567) — passed as-is, no implicit wrapping.
     // Each entry is split by whitespace (e.g. "--config model_reasoning_effort=\"low\"").
     // F203 Phase C / 砚砚 P1: strip reserved system config keys (developer_instructions,
     // carries L0) before dedup — otherwise dedup() would skip the system push and the
     // L0 would be silently overridden by any cliConfigArgs entry with the same key.
     const userConfigArgs = stripReservedSystemConfigs(
-      (options?.cliConfigArgs ?? []).flatMap((arg) => arg.trim().split(/\s+/)),
+      (readOnly ? [] : (options?.cliConfigArgs ?? [])).flatMap((arg) => arg.trim().split(/\s+/)),
       this.catId as string,
     );
     // Collect user --config / -c keys so system-injected duplicates can be
@@ -795,6 +1021,7 @@ export class CodexAgentService implements AgentService {
         userFlagSet.add(a);
       }
     }
+    const authMode = getCodexAuthMode(options?.callbackEnv);
 
     // Codex CLI deprecated OPENAI_BASE_URL env var.
     // Configure a custom model provider via --config model_providers.*
@@ -823,6 +1050,36 @@ export class CodexAgentService implements AgentService {
           'model_providers.custom.env_key="OPENAI_API_KEY"',
         ]
       : [];
+    // Default OAuth sessions to Codex's built-in OpenAI provider so upstream
+    // transport selection and recovery behavior stay intact. Incident
+    // 2026-07-01 required an HTTPS-only workaround for repeated websocket TLS
+    // EOFs; retain that path behind CAT_CAFE_CODEX_OAUTH_TRANSPORT=https as a
+    // hot-editable operational rollback. Keep name="OpenAI" because upstream
+    // Codex gates remote compaction on provider identity. Never apply this to
+    // custom/API-key providers.
+    const oauthTransport = getCodexOAuthTransport();
+    const builtinOpenaiProviderArgs: string[] =
+      !customBaseUrl && authMode === 'oauth' && oauthTransport === 'builtin'
+        ? ['--config', 'model_provider="openai"']
+        : [];
+    const openaiHttpsProviderArgs: string[] =
+      !customBaseUrl && authMode === 'oauth' && oauthTransport === 'https'
+        ? [
+            '--config',
+            'model_provider="openai_https"',
+            '--config',
+            'model_providers.openai_https.name="OpenAI"',
+            '--config',
+            'model_providers.openai_https.wire_api="responses"',
+            '--config',
+            'model_providers.openai_https.requires_openai_auth=true',
+            '--config',
+            'model_providers.openai_https.supports_websockets=false',
+          ]
+        : [];
+    const providerArgs = customBaseUrl
+      ? customProviderArgs
+      : [...builtinOpenaiProviderArgs, ...openaiHttpsProviderArgs];
 
     // Codex CLI sends the model name verbatim to the API (model_info.slug).
     // model_provider="custom" only controls which provider entry (base_url, env_key) to use.
@@ -838,7 +1095,7 @@ export class CodexAgentService implements AgentService {
 
     // F203 Phase C: compile per-cat L0 → OpenAI `developer` role args.
     // fail-closed (generator contract, mirrors the CLI-not-found path below).
-    const l0Result = await this.compileDeveloperInstructionsArgs(cliModel);
+    const l0Result = await this.compileDeveloperInstructions(cliModel, options?.callbackEnv?.CAT_CAFE_USER_ID);
     if ('error' in l0Result) {
       yield {
         type: 'error' as const,
@@ -850,7 +1107,9 @@ export class CodexAgentService implements AgentService {
       yield { type: 'done' as const, catId: this.catId, metadata: l0Result.metadata, timestamp: Date.now() };
       return;
     }
-    const developerInstructionsArgs = l0Result.args;
+    const developerInstructions = appendCatCafeGithubWriteRouting(l0Result.value, this.approvalSurface);
+    const developerInstructionsArgs = ['--config', `developer_instructions=${toTomlString(developerInstructions)}`];
+    const appsWriteApprovalArgs = readOnly ? [] : [...CODEX_APPS_WRITE_APPROVAL_ARGS];
 
     // resume 子命令不接受 --sandbox / --add-dir, but it does accept
     // sandbox_mode through --config. Replay the configured sandbox there so
@@ -863,6 +1122,9 @@ export class CodexAgentService implements AgentService {
     // /proc/<pid>/cmdline 会把完整对话历史（含跨 thread/猫/用户内容）暴露给任何
     // 并发进程。'--' 结束选项解析，'-' 让 codex 从 stdin 读取 PROMPT。
     const promptArgs = ['--', '-'];
+    const readOnlyArgs = readOnly
+      ? ['--ignore-user-config', '--config', 'mcp_servers={}', '--config', 'apps._default.enabled=false']
+      : [];
 
     // Dedup: skip system --config/--flag pairs that the user explicitly overrides (#567).
     const dedup = (src: string[]): string[] => {
@@ -889,13 +1151,15 @@ export class CodexAgentService implements AgentService {
           'resume',
           options.sessionId,
           '--json',
+          ...readOnlyArgs,
           ...dedup(modelArgs),
           ...dedup(reasoningArgs),
           ...dedup(contextWindowArgs),
           ...dedup(sandboxConfigArgs),
           ...dedup(approvalArgs),
+          ...dedup(appsWriteApprovalArgs),
           ...dedup(developerInstructionsArgs),
-          ...dedup(customProviderArgs),
+          ...dedup(providerArgs),
           ...userConfigArgs,
           ...gitRepoArgs,
           ...catCafeMcpArgs,
@@ -905,33 +1169,45 @@ export class CodexAgentService implements AgentService {
       : [
           'exec',
           '--json',
+          ...readOnlyArgs,
           ...dedup(modelArgs),
           ...dedup(reasoningArgs),
           ...dedup(contextWindowArgs),
           '--sandbox',
           sandboxMode,
-          '--add-dir',
-          '.git',
+          ...(readOnly ? [] : ['--add-dir', '.git']),
           ...dedup(approvalArgs),
+          ...dedup(appsWriteApprovalArgs),
           ...dedup(developerInstructionsArgs),
-          ...dedup(customProviderArgs),
+          ...dedup(providerArgs),
           ...userConfigArgs,
           ...gitRepoArgs,
           ...catCafeMcpArgs,
           ...imageArgs,
           ...promptArgs,
         ];
+    const appServerArgs = buildCodexAppServerArgs([
+      ...readOnlyArgs,
+      ...dedup(modelArgs),
+      ...dedup(reasoningArgs),
+      ...dedup(contextWindowArgs),
+      ...dedup(appsWriteApprovalArgs),
+      ...dedup(providerArgs),
+      ...userConfigArgs,
+      ...(usePooledAppServer ? [] : catCafeMcpArgs),
+    ]);
+    const appServerThreadConfig = usePooledAppServer ? codexConfigObjectFromArgs(catCafeMcpArgs) : undefined;
 
     const metadata: MessageMetadata = { provider: 'openai', model: cliModel };
     const auditContext = options?.auditContext;
     const recentStreamErrors: string[] = [];
+    let capacityRecoveryBlocked: CodexAppServerRecoveryBlockedEvent | null = null;
 
     try {
       // HOME isolation: only for API Key mode.
       // OAuth mode needs real HOME (~/.codex/auth.json for token refresh).
       // API Key mode must AVOID real HOME — stale OAuth token refresh will fail
       // and abort the CLI before it reaches the custom provider config.
-      const authMode = getCodexAuthMode(options?.callbackEnv);
       const rawEnv = { ...(options?.callbackEnv ?? {}) };
       // Strip deprecated OPENAI_BASE_URL — now handled via --config model_providers
       if (customBaseUrl) {
@@ -986,6 +1262,7 @@ export class CodexAgentService implements AgentService {
       for (const [k, v] of Object.entries(mcpBearerEnv)) {
         codexEnv[k] = v;
       }
+      if (readOnly) codexEnv.CAT_CAFE_READONLY = 'true';
 
       const semanticCompletionController = new AbortController();
 
@@ -1036,24 +1313,199 @@ export class CodexAgentService implements AgentService {
         ...(options?.invocationId && this.rawArchive.getPath
           ? { rawArchivePath: this.rawArchive.getPath(options.invocationId) }
           : {}),
-        ...(options?.livenessProbe ? { livenessProbe: options.livenessProbe } : {}),
+        ...(options?.livenessProbe
+          ? {
+              livenessProbe: {
+                ...options.livenessProbe,
+                // Codex's launcher and CLI both treat SIGINT as cooperative cancellation.
+                // Keep this provider-scoped: other CLIs retain terminate-first semantics.
+                stallTerminationMode: 'interrupt-first' as const,
+              },
+            }
+          : {}),
         ...(options?.parentSpan ? { parentSpan: options.parentSpan } : {}),
         semanticCompletionSignal: semanticCompletionController.signal,
       };
-      const events = options?.spawnCliOverride
-        ? options.spawnCliOverride(cliOpts)
-        : spawnCli(cliOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);
+      const useAppServer = this.carrierMode === 'app_server';
+      const appServerEnv = usePooledAppServer ? withoutSessionScopedHostEnv(codexEnv) : codexEnv;
+      let pooledSessionInUse = false;
+      let forceDirectAppServer = false;
+      const createPooledSession = async (sessionOptions: AgentCarrierSessionOptions): Promise<AgentCarrierSession> => {
+        if (forceDirectAppServer) {
+          return createDirectAgentCarrierSession({ ...sessionOptions, env: codexEnv });
+        }
+        if (!appServerHostPool) {
+          return createDirectAgentCarrierSession({ ...sessionOptions, env: codexEnv });
+        }
+        const wire = await appServerHostPool.createSession({
+          ...sessionOptions,
+          // The protocol client owns cooperative cancellation. The pool only
+          // observes the signal to reap a lease if that cleanup path is abandoned.
+          ...(options?.signal ? { signal: options.signal } : {}),
+        });
+        pooledCredentialEnv = resolvePooledCredentialForLease({
+          current: pooledCredentialEnv,
+          sessionId: sessionOptions.sessionId,
+          reusedSessionHost: wire.reusedSessionHost,
+          namespace: credentialNamespace,
+          callbackEnv: options?.callbackEnv,
+          config: appServerThreadConfig ?? {},
+        });
+        if (callbackHasInvocationCredentials && !pooledCredentialEnv) {
+          await wire.close().catch(() => {});
+          forceDirectAppServer = true;
+          removeCredentialFileFromMcpConfig(appServerThreadConfig ?? {});
+          return createDirectAgentCarrierSession({ ...sessionOptions, env: codexEnv });
+        }
+        if (pooledCredentialEnv && !writeSessionCredentialFile(options?.callbackEnv, pooledCredentialEnv.path)) {
+          await wire.close().catch(() => {});
+          forceDirectAppServer = true;
+          removeCredentialFileFromMcpConfig(appServerThreadConfig ?? {});
+          return createDirectAgentCarrierSession({ ...sessionOptions, env: codexEnv });
+        }
+        pooledSessionInUse = true;
+        return wire;
+      };
+      const events = useAppServer
+        ? runCodexAppServerWithRecovery({
+            sessionFactory:
+              options?.agentCarrierSessionFactory ??
+              (usePooledAppServer && appServerHostPool ? createPooledSession : createDirectAgentCarrierSession),
+            sessionOptions: {
+              command: codexCommand,
+              args: appServerArgs,
+              ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
+              env: appServerEnv,
+              ...(options?.signal ? { signal: options.signal } : {}),
+              invocationId: options?.invocationId ?? `codex-app-server-${Date.now()}`,
+              ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
+            },
+            runInput: {
+              prompt: effectivePrompt,
+              thread: options?.sessionId
+                ? { kind: 'resume' as const, threadId: options.sessionId }
+                : { kind: 'start' as const },
+              model: cliModel,
+              ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
+              sandbox: sandboxMode,
+              approvalPolicy,
+              developerInstructions,
+              ...(appServerThreadConfig ? { config: appServerThreadConfig } : {}),
+              imagePaths,
+              ...(options?.signal ? { signal: options.signal } : {}),
+              timeoutMs: resolveCliTimeoutMs(parseCliTimeoutMs(codexEnv.CLI_TIMEOUT_MS ?? undefined)),
+              interruptGraceMs: KILL_GRACE_MS,
+            },
+            retryBudget: 1,
+            ...(options?.recoveryAnchor ? { recoveryAnchor: options.recoveryAnchor } : {}),
+            clientDeps: {
+              ...(options?.activeInvocationFreshness ? { freshnessController: options.activeInvocationFreshness } : {}),
+              ...(auditContext
+                ? {
+                    onLifecycle: (lifecycle: CodexAppServerLifecycleSnapshot) => {
+                      recordCodexAppServerLifecycle({
+                        threadId: auditContext.threadId,
+                        catId: auditContext.catId,
+                        invocationId: auditContext.executionId ?? auditContext.invocationId,
+                        lifecycle,
+                      });
+                    },
+                    onEnvelope: async (direction: 'inbound' | 'outbound', envelope: Record<string, unknown>) => {
+                      try {
+                        await this.rawArchive.append(auditContext.invocationId, {
+                          transport: 'codex_app_server',
+                          direction,
+                          envelope: sanitizeRawEvent(envelope),
+                        });
+                      } catch (err) {
+                        log.warn(
+                          { err, invocationId: auditContext.invocationId },
+                          '[audit] Codex app-server envelope archive write failed',
+                        );
+                      }
+                    },
+                  }
+                : {}),
+            },
+          })
+        : options?.spawnCliOverride
+          ? options.spawnCliOverride(cliOpts)
+          : spawnCli(cliOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);
 
-      // Track substantive output (item.completed with text/tool results).
-      // Used to suppress Codex CLI 0.98+ false exit-code-1 errors:
-      // thread.started alone is NOT substantive (just session init).
-      let sawSubstantiveOutput = false;
+      // F212 Phase H: item-tracking boolean deleted (see delete-block comment above).
+      // cli-spawn / tmux-agent-spawner decide via `finalSemanticDone` (see delete-block
+      // definition) — chronological last terminal decides, not just "any completion
+      // ever fired". Provider-side "did any substantive event pass through"
+      // bookkeeping is duplicate + drift-prone. Codex 0.98+ recovery quirks
+      // (compaction retry, turn.failed then new turn.started + turn.completed)
+      // are handled canonically at spawn layer via localFinalTerminal tracking.
       const codexStreamState: CodexStreamState = { hadPriorTextTurn: false };
 
       for await (const event of events) {
+        if (pooledSessionInUse && pooledCredentialEnv && isCodexThreadStartedEvent(event)) {
+          bindSessionCredentialFile(credentialNamespace, event.thread_id, pooledCredentialEnv.path);
+        }
+        if (isCodexAppServerLifecycleEvent(event)) {
+          yield {
+            // Internal carrier state must stay on the status channel. system_info
+            // is fail-open/user-visible in older browser bundles, so a runtime
+            // restart could otherwise render raw lifecycle JSON in every live thread.
+            type: 'status' as const,
+            catId: this.catId,
+            content: APP_SERVER_LIFECYCLE_STATUS[event.lifecycle.stage],
+            metadata: {
+              ...metadata,
+              diagnostics: {
+                appServerLifecycle: event.lifecycle,
+              },
+            },
+            timestamp: event.lifecycle.lastActivityAt,
+          };
+          continue;
+        }
+        if (isCodexAppServerRecoveryEvent(event)) {
+          yield {
+            type: 'status' as const,
+            catId: this.catId,
+            content: 'thinking',
+            metadata: {
+              ...metadata,
+              diagnostics: {
+                appServerRecovery: event,
+              },
+            },
+            timestamp: Date.now(),
+          };
+          continue;
+        }
+        if (isCodexAppServerRecoveryBlockedEvent(event)) {
+          capacityRecoveryBlocked = event;
+          yield buildCodexCapacityRecoveryCardMessage({
+            catId: this.catId,
+            metadata,
+            event,
+          });
+          continue;
+        }
         collectCodexStreamError(event, recentStreamErrors);
 
-        if (auditContext) {
+        if (!useAppServer && options?.activeInvocationFreshness) {
+          const toolSurface = classifyCodexExecToolSurface(event);
+          if (toolSurface) {
+            try {
+              const notice = await options.activeInvocationFreshness.prepare({
+                threadId: auditContext?.threadId ?? 'unknown',
+                turnId: options.invocationId ?? 'codex-exec-json',
+                toolSurface,
+              });
+              if (notice) await options.activeInvocationFreshness.markMissed(notice, 'unsupported_carrier');
+            } catch (err) {
+              log.warn({ err, invocationId: options.invocationId }, '[F254-D2] exec freshness telemetry failed');
+            }
+          }
+        }
+
+        if (auditContext && !useAppServer) {
           this.rawArchive.append(auditContext.invocationId, sanitizeRawEvent(event)).catch((err) => {
             log.warn(
               {
@@ -1081,6 +1533,7 @@ export class CodexAgentService implements AgentService {
               cliSessionId: event.cliSessionId,
               invocationId: event.invocationId,
               rawArchivePath: event.rawArchivePath,
+              terminalContext: event.terminalContext,
             }),
             timestamp: Date.now(),
           };
@@ -1115,21 +1568,19 @@ export class CodexAgentService implements AgentService {
           continue;
         }
         if (isCliError(event)) {
-          // Codex CLI 0.98+ returns exit code 1 after successful completion.
-          // Suppress the error ONLY if we saw substantive output (item.completed).
-          // thread.started alone is NOT enough — that just means session init.
-          if (
-            event.exitCode === 1 &&
-            event.signal === null &&
-            sawSubstantiveOutput &&
-            !hasNonSuppressibleCodexExitOneDiagnostics(event, recentStreamErrors)
-          ) {
-            log.warn(
-              {},
-              `[codex] Codex CLI exited with code 1 after substantive output (suppressing as Codex 0.98+ quirk)`,
-            );
-            continue;
-          }
+          // F212 Phase H (Sol runtime forensics 2026-07-09 → Final确权 2026-07-10):
+          // suppress branch DELETED. Provider layer previously masked exit=1-with-
+          // substantive-output as a Codex 0.98+ false-positive; empirically that
+          // masked 5 real terminal failures in 4 threads (archive pool 97449e4b /
+          // 7c3fd591 / 2ffa505f / 261c3754 / 39f2bc4d), all with real turn.failed
+          // upstream. Canonical truth source: cli-spawn synthesizes __cliError only
+          // when !finalSemanticDone (spawnCli.ts + tmux-agent-spawner.ts), where
+          //   finalSemanticDone := localFinalTerminal === 'completed'
+          //                     || (localFinalTerminal === null && semanticDone)
+          // — chronological `turn.failed` outranks a prior sticky abort (cloud R5
+          // multi-turn fix), and the `sig aborted with no terminal event` contract
+          // (Group A in cli-spawn.test.js) is preserved via the fallback. Any
+          // isCliError reaching here is authentic — pass through.
           // Diagnostic: log full error details at info level for troubleshooting
           log.info(
             {
@@ -1141,7 +1592,6 @@ export class CodexAgentService implements AgentService {
               publicSummary: event.cliDiagnostics?.publicSummary,
               safeExcerpt: event.cliDiagnostics?.safeExcerpt,
               debugRef: event.cliDiagnostics?.debugRef,
-              sawSubstantiveOutput,
               recentStreamErrors,
             },
             '[codex-diag] CLI error exit — full diagnostics',
@@ -1158,13 +1608,10 @@ export class CodexAgentService implements AgentService {
           continue;
         }
 
-        // Track substantive events: item.completed produces text/tool_result/tool_use
-        if (typeof event === 'object' && event !== null) {
-          const e = event as Record<string, unknown>;
-          if (e.type === 'item.completed') {
-            sawSubstantiveOutput = true;
-          }
-        }
+        // F212 Phase H: item.completed tracking removed (was used only for the deleted
+        // suppress branch above). turn.completed / turn.failed handling below fires
+        // semanticCompletionController.abort() → cli-spawn's `finalSemanticDone` fallback
+        // (cell 3: signal aborted with no terminal event ever seen → still suppress).
 
         if (auditContext) {
           const lifecycle = extractCommandExecutionLifecycle(event);
@@ -1203,6 +1650,13 @@ export class CodexAgentService implements AgentService {
         if (typeof event === 'object' && event !== null) {
           const raw = event as Record<string, unknown>;
           if (raw.type === 'turn.completed') {
+            if (!useAppServer && options?.activeInvocationFreshness) {
+              try {
+                await options.activeInvocationFreshness.markTurnCompleted(options.invocationId ?? 'codex-exec-json');
+              } catch (err) {
+                log.warn({ err, invocationId: options.invocationId }, '[F254-D2] exec terminal freshness audit failed');
+              }
+            }
             semanticCompletionController.abort();
             const u = raw.usage as Record<string, unknown> | undefined;
             if (u) {
@@ -1219,7 +1673,9 @@ export class CodexAgentService implements AgentService {
           }
         }
 
-        const result = transformCodexEvent(event, this.catId, codexStreamState);
+        const result = transformCodexEvent(event, this.catId, codexStreamState, {
+          approvalSurface: this.approvalSurface,
+        });
         if (result !== null) {
           if (Array.isArray(result)) {
             for (const msg of result) {
@@ -1326,15 +1782,45 @@ export class CodexAgentService implements AgentService {
 
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
     } catch (err) {
+      const rawError = err instanceof Error ? err.message : String(err);
+      const visibleError = capacityRecoveryBlocked
+        ? `自动续跑已安全停止（${capacityRecoveryBlocked.reason}）；系统已保留并显示本轮断点，没有猜测或切换任务。`
+        : rawError;
+      const errorMetadata =
+        this.carrierMode === 'app_server'
+          ? {
+              ...metadata,
+              ...(capacityRecoveryBlocked
+                ? {
+                    upstreamError: {
+                      kind: 'capacity' as const,
+                      transient: true,
+                      rawReason: rawError,
+                    },
+                  }
+                : {}),
+              cliDiagnostics: buildCliDiagnostics({
+                rawText: rawError,
+                // `structuredErrorText` is reserved for Claude result events. Raw Codex
+                // transport failures must stay on provider-neutral classifier/unknown paths.
+                debugRef: {
+                  command: 'codex app-server',
+                  exitCode: null,
+                  signal: null,
+                  ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
+                },
+              }),
+            }
+          : metadata;
       yield {
         type: 'error',
         catId: this.catId,
-        error: err instanceof Error ? err.message : String(err),
-        metadata,
+        error: visibleError,
+        metadata: errorMetadata,
         timestamp: Date.now(),
       };
       // Guarantee done after error so invoke-single-cat can set isFinal correctly
-      yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+      yield { type: 'done', catId: this.catId, metadata: errorMetadata, timestamp: Date.now() };
     }
   }
 }

@@ -1,6 +1,6 @@
 ---
 feature_ids: [F192]
-related_features: [F167, F153, F086, F188, F200, F245]
+related_features: [F167, F153, F086, F188, F200, F245, F266, F267, F275]
 topics: [harness-engineering, eval, socio-technical, observability, cat-user-feedback]
 doc_kind: spec
 created: 2026-05-07
@@ -10,7 +10,7 @@ user_journey_exempt: "Internal harness eval infrastructure — all surfaces are 
 
 # F192: Socio-Technical Harness Eval — harness 共创评估体系
 
-> **Status**: in-progress (Phase F re-eval closure + Phase G `eval:task-outcome` closure) | **Owner**: Ragdoll | **Truth sync**: 2026-06-10
+> **Status**: in-progress (Phase F re-eval closure + Phase G `eval:task-outcome` closure) | **Owner**: Ragdoll | **Truth sync**: 2026-07-03
 
 ## Architecture Ownership
 
@@ -27,7 +27,7 @@ F192 现在已经不是“某个 feature 结束后写一篇 feedback”的文档
    - 例子：
    - `eval:a2a` 读 F153 telemetry / traces / metrics
    - `eval:memory` 读 F200 recall metrics + F188 library health
-   - `eval:task-outcome` 读 `task-outcome-episodes.sqlite` + `event-memory.sqlite`
+   - `eval:task-outcome` 读 `task-outcome-episodes.sqlite` + `event-memory.sqlite`；在 F275 WorkAdmission identity landing 前，这些输入只具 event/thread-level telemetry 语义
    - 关键边界：F192 消费这些真相源，但**不拥有**它们；F192 负责解释层和 verdict 层，不负责替业务域定义 canonical data
 
 2. **Domain registry / scheduling layer**
@@ -81,13 +81,13 @@ F192 现在已经不是“某个 feature 结束后写一篇 feedback”的文档
 | `eval:a2a` | live | wired | Live verdict path established; used as the first production domain for `cat_cafe_publish_verdict`. |
 | `eval:memory` | live | wired (PR #2160, squash `46441f4c`) | `memory-recall-snapshot` selector + live verdict generator are wired. Remaining work is domain-specific finding semantics / rollup quality, not publish plumbing. |
 | `eval:capability-wakeup` | weekly live | wired (PR #2117, squash `1caa98c84`) | First live verdict exists (`2026-06-06-cap-wakeup-c1-baseline-probe`). Phase F coverage expansion now covers all 13 L0 §8 Tier 1 capabilities and supports omitted-`sessionIds` runtime-session window scan; re-eval closure remains open. |
-| `eval:task-outcome` | daily live | wired (PR #2162, squash `c9aa0e16d`) | Publish path is live. Phase G v0.5 signal chain e2e is green; 7-class episode verdict writeback is wired through explicit `sourceRefs.episodeVerdicts`. Manual runtime Eval Hub acceptance remains open. |
+| `eval:task-outcome` | daily live | wired (PR #2162, squash `c9aa0e16d`) | Publish path is live, but the current Episode estimator is thread/latest-in-progress based and has no managed-work eligibility. Until F275 + F267 migration gates pass, output is event/thread-level telemetry only; task-level success/latency/attempt conclusions are invalid. |
 | `eval:sop` | active (weekly) | wired (PR #2186) | Schema / predicate evaluator + SopTrace producer + file-writer + PUBLISH_VERDICT_INSTRUCTIONS all wired. Re-enabled 2026-06-10. |
 | `eval:anchor-first` | weekly | wired (F236 Track-2) | Preview↔drill open-rate rollup via in-memory event log. Generator adapter + live-verdict writer + provider wired. Eval design truth in F236. |
 
 ## Why
 
-Cat Cafe 的 harness（skill、SOP、MCP tool、shared rules）是猫猫和operator共同创造的社会技术系统，但目前缺少系统化的评估和反馈路径。harness 改动后无法追踪效果，不满意的 feature 无法定位归因层级（是愿景不清？翻译偏差？工具不顺手？执行不到位？），猫猫作为 harness 的一线用户没有结构化的反馈通道。
+Clowder AI 的 harness（skill、SOP、MCP tool、shared rules）是猫猫和operator共同创造的社会技术系统，但目前缺少系统化的评估和反馈路径。harness 改动后无法追踪效果，不满意的 feature 无法定位归因层级（是愿景不清？翻译偏差？工具不顺手？执行不到位？），猫猫作为 harness 的一线用户没有结构化的反馈通道。
 
 operator experience（2026-05-06 01:15）："我们必须有 tracing...当一个 feat close 了...thread id 可知道...session id 可知道 => 意味着他们的 tool call 上下文完全透明！...可选环节采访猫猫的干活体验是否才是不污染工作上下文且是一个持续性评估的可靠扩展点？"
 
@@ -270,7 +270,7 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 **Truth sync (2026-06-10)**：E-sop 全部 AC 完成。`F192-sop-wiring` PR #2186 merged：SopTrace producer + file-writer + PUBLISH_VERDICT_INSTRUCTIONS 三件套 wired，`eval-sop.yaml` re-enabled，weekly cron 恢复 live verdict 产出。AC-E20/E24 closed。
 
 #### E-community ✅
-- [x] AC-E14: Community path：支持社区实例把本地 eval finding 导出为脱敏 issue packet；也支持社区项目注册自有 eval domain，不 fork Cat Café core
+- [x] AC-E14: Community path：支持社区实例把本地 eval finding 导出为脱敏 issue packet；也支持社区项目注册自有 eval domain，不 fork Clowder AI core
 - [x] AC-E15: Community dogfood：至少 1 个 sanitized issue packet fixture + 1 个 custom domain fixture 通过 schema validation
 
 ### Phase F（`eval:capability-wakeup` — L0 §8 软提示发现率 eval）
@@ -314,6 +314,8 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 - **三信号层**：A1 世界真值（merge/post-merge rollback/test/build，自动零成本）+ A2 嵌入交互决策（act 携带可解释对象语义或 reason 时才算；纯无理由动作默认 proxy）+ Proxy（导航不判定）；这是可信度层，不与传感器类型刚性绑定
 - **执行频率**：daily（信号产生频率高于 capability-wakeup，需要更及时的观测窗口）
 
+> **2026-07-25 validity errata（F267/F275）**：这里的“任务生命周期”是 Phase G 的目标构念，不是当前 estimator 已经证明的事实。生产归属仍使用 thread 最新 `in_progress` Episode，且未过滤 managed-work eligibility；因此历史和当前 verdict 只能解释为 event/thread-level telemetry。恢复 task-level 语义必须同时满足：F275 WorkAdmission/workId/attempt canonical identity、`managed_attributed / managed_unattributed / unmanaged_not_applicable` 三桶、F267 measurement certificate/coverage gate。
+
 #### v0 骨架（PR #2074, merged 2026-06-03）
 
 - [x] AC-G1: TaskOutcomeEpisode Zod schema 定义——含 episodeId、trigger、threadId、participants、artifacts、signals（a1WorldTruth / a2InteractionDecisions / proxy）、terminalState（含 in_progress）、verdict（nullable categorical）、createdAt
@@ -327,6 +329,8 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 - [x] AC-G8b: Proposal reject 信号覆盖——F128 thread proposal reject + F225 session handoff proposal reject 接入 A2 discriminated union（`proposal_reject` type），补齐 eval:task-outcome cron 3 天 0 cancel 信号的覆盖面 gap（PR #2138）
 - [x] AC-G9: Shared types——CANCEL_REASON_OPTIONS + CancelReasonValue + PermissionCancelEvent 导出到 @cat-cafe/shared 供前端使用
 - [x] AC-G9b: env-registry + .gitignore——TASK_OUTCOME_DB 注册 + task-outcome-episodes.sqlite* gitignore
+- [ ] AC-G14: 历史与当前 task-outcome verdict 加双重失真 errata（thread-level approximation + no managed-work eligibility filter）；UI/registry 不再展示 task-level 成功率语义。
+- [ ] AC-G15: task-level generator 只消费 F275 `managed_attributed`；缺 work identity 的 admitted work 留在 `managed_unattributed` coverage guardrail，范围外会话为 `unmanaged_not_applicable`。
 
 #### v0.5 信号接线（PR #2074 v0.5 scope, merged across v0.5 + F227 归一）
 

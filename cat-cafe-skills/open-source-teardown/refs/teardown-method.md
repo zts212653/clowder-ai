@@ -13,6 +13,7 @@
 | 只读 telemetry 识别 | 防止 dashboard 被误解成治理 | 看 usage 是否被 ranking/stale 消费 |
 | Tradeoff 论证 | 防止把哲学选择误报为落后 | 写 Learn/Gap/Do Not Follow |
 | 社区情报 | 验证宣传 vs 用户实际痛点 vs 官方 roadmap | `gh issue list --search "..." --json number,title,labels,reactions` |
+| 决策边界账本 | 防止 true-but-incomplete 与跨量纲总分 | 固定 workload/时间窗，列 lifecycle cost + coupled outcomes + unknowns |
 
 ## 常用命令
 
@@ -58,3 +59,21 @@ Examples:
 - `tests failed -> reward -> model weights update -> next rollout changes`: real training loop.
 - `tool calls >= 10 -> LLM review -> SKILL.md patch -> future skill_view changes`: procedural memory loop, but quality is not proven.
 - `last_used_at displayed -> no consumer`: telemetry, not lifecycle governance.
+
+## Performance / Cost Decision Ledger
+
+不要追求不存在的“完整世界账本”，而要冻结当前决定的坐标系：
+
+```text
+workload + provider/model/version + comparator + time horizon
+  -> measured construct + numerator/denominator/exclusions
+  -> ingest/extract + query/retrieval + generation + cache + maintenance/human
+  -> quality + coverage + latency + reliability + privacy/risk
+  -> unknowns + source verdict + decision fit
+```
+
+规则：
+
+- benchmark 分数只证明其测量构念内的结果；迁移到产品决策要另判 `decision fit`。
+- cache 命中/写入/失效读取 provider usage；没有 usage 就保留 `unknown`。
+- 不同量纲保留为向量或约束；没有显式权重、单位换算和决策场景，不生成总分。

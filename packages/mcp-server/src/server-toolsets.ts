@@ -4,11 +4,14 @@ import { jsonSchemaToZod } from './json-schema-to-zod.js';
 import { callbackPost, getCallbackConfig } from './tools/callback-tools.js';
 import {
   audioTools,
+  autoDreamTools,
   callbackMemoryTools,
   callbackTools,
   distillationTools,
+  evalLifecycleTools,
   eventMemoryTools,
   evidenceTools,
+  externalReviewVerdictTools,
   externalRuntimeSessionCallbackTools,
   externalRuntimeSessionReadTools,
   fileSliceTools,
@@ -18,6 +21,8 @@ import {
   hubActionTools,
   libraryLifecycleTools,
   limbTools,
+  localReviewVerdictTools,
+  pawFeelDispositionTools,
   perspectiveTools,
   publishVerdictTools,
   recentTools,
@@ -73,15 +78,33 @@ export const READONLY_ALLOWED_TOOLS = new Set([
 
 /**
  * F178 Phase C: Tools unlocked when agent-key credentials are available in
- * READONLY mode. These are the KD-8 allowlist — callback-authenticated write
- * tools that persistent agents (Bengal) need. File/shell mutators stay blocked.
+ * READONLY mode. Only expose tools whose API routes accept callbackPrincipal
+ * or otherwise have an agent-key-safe auth path. Invocation-record-only routes
+ * stay hidden to avoid visible-but-401 phantom capabilities.
  */
 export const AGENT_KEY_TOOLS = new Set([
+  // Thread/message reads + writes that either take explicit thread IDs or are user-scoped.
   'cat_cafe_post_message',
   'cat_cafe_cross_post_message',
-  'cat_cafe_create_rich_block',
   'cat_cafe_get_thread_context',
+  'cat_cafe_get_message',
   'cat_cafe_list_threads',
+  'cat_cafe_list_labels',
+  'cat_cafe_read_profile',
+  'cat_cafe_read_diary',
+  'cat_cafe_list_diaries',
+  // F276: bounded owner-private reads accept either invocation or agent-key principals.
+  'cat_cafe_get_person_memory_proposal_status',
+  'cat_cafe_recall_person_relationship',
+  'cat_cafe_drill_person_memory',
+  // Durable scheduler setup: list/preview/register are non-destructive. F246 Wave 1
+  // turns verified-cat removal into an Approval Hub proposal, so it is also safe
+  // to expose when the caller supplies an owned sourceThreadId.
+  'cat_cafe_list_schedule_templates',
+  'cat_cafe_preview_scheduled_task',
+  'cat_cafe_register_scheduled_task',
+  'cat_cafe_remove_scheduled_task',
+  // Agent-key-safe helpers and local Hub actions.
   'cat_cafe_register_external_runtime_session',
   // F223: first-party Hub UX actions are callback-authenticated writes that
   // persistent agent-key MCP clients need when invocation credentials are absent.
@@ -95,16 +118,20 @@ export const AGENT_KEY_TOOLS = new Set([
   // without invocation/agent-key creds, so it belongs with the creds-gated tools, NOT
   // the credential-free readonly whitelist (where it'd be visible-but-unusable).
   'cat_cafe_list_events',
-  // #699: Message lookup by ID
-  'cat_cafe_get_message',
   // F192 Phase H AC-H4 (砚砚 R9 P1): shared-MCP cats can publish verdicts.
   'cat_cafe_publish_verdict',
+  'cat_cafe_record_eval_lifecycle',
+  'cat_cafe_list_paw_feel_inbox',
+  'cat_cafe_triage_paw_feel',
+  // F168: the author requests assignment and the assigned Guardian signs with server-trusted principals.
+  'cat_cafe_community_request_guardian',
+  'cat_cafe_community_guardian_signoff',
 ]);
 
 /**
  * F178 Phase D (V3, opus-47 + codex review 2026-06-13): Desktop tool profile
- * for fable-5 cowork adapter. Strict 10-tool whitelist for Phase 0
- * "messages + memory only". DOES NOT union with READONLY/AGENT_KEY (mode has
+ * for fable-5 cowork adapter. Strict 11-tool whitelist for Phase 0
+ * "messages + memory + current relationship profile". DOES NOT union with READONLY/AGENT_KEY (mode has
  * highest precedence). Any value other than 'fable-phase0' for
  * CAT_CAFE_DESKTOP_MODE → fail-fast on server startup (codex adjustment §3:
  * fail loudly, not silently empty whitelist).
@@ -126,10 +153,12 @@ export const DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS = new Set([
   'cat_cafe_list_recent',
   'cat_cafe_list_session_chain',
   'cat_cafe_read_session_digest',
+  // profile — authenticated current-persona continuity
+  'cat_cafe_read_profile',
 ]);
 
 // F238 Phase B1a: cloud-pro-phase0 mode 给云端 ChatGPT Pro 砚砚 (gpt-pro catId)。
-// 复用 fable-phase0 同 10 工具白名单 (5 collab + 5 memory)，同样 mode-precedence-
+// 复用 fable-phase0 同 11 工具白名单 (5 collab + 5 memory + 1 profile)，同样 mode-precedence-
 // highest，不与 READONLY/AGENT_KEY 取并集。两个 mode 共享白名单是有意为之——
 // 任何一只云端猫想接入只要白名单一致，逻辑就重用；future 如需 per-mode 差异化
 // 白名单，再 fork constants。
@@ -179,7 +208,7 @@ export function applyReadonlyFilter(
       return tools.filter((t) => DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS.has(t.name));
     }
     if (env.desktopMode === 'cloud-pro-phase0') {
-      // F238 Phase B1a: cloud-pro-phase0 复用 fable-phase0 同 10 工具白名单
+      // F238 Phase B1a + F231: cloud-pro-phase0 复用 fable-phase0 同 11 工具白名单
       return tools.filter((t) => DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS.has(t.name));
     }
   }
@@ -192,10 +221,15 @@ export function applyReadonlyFilter(
 // (not module load), so unknown CAT_CAFE_DESKTOP_MODE fails fast at startup.
 const COLLAB_TOOL_SOURCES: readonly ToolDef[] = [
   ...callbackTools,
+  ...autoDreamTools,
+  ...externalReviewVerdictTools, // F168 F-Step3: atomic external verdict + delivery custody
+  ...localReviewVerdictTools, // F167: persisted local verdict + exact action fence
   ...externalRuntimeSessionCallbackTools,
   ...hubActionTools,
   ...eventMemoryTools, // F227: cat_cafe_teleport
   ...publishVerdictTools, // F192 Phase H AC-H4
+  ...evalLifecycleTools, // F266: authenticated stable-case lifecycle writeback
+  ...pawFeelDispositionTools, // F278: duty-cat inbox read + cat-signed disposition write
   ...richBlockRulesTools,
   ...gameActionTools,
   ...scheduleTools,
@@ -258,7 +292,7 @@ export function buildAudioTools(env?: ToolsetEnv): readonly ToolDef[] {
  *
  * 1. EXPLICIT_TOOL_ANNOTATIONS：每个真实工具显式声明三 hint，权威 + 可审计 + 可测
  * 2. fallback 给未列出的 future tool 默认 write/non-destructive（最安全保守值）
- * 3. 配套测试：`test/server-toolsets-annotations.test.ts` 锁住 cloud-pro-phase0 10 项白名单
+ * 3. 配套测试：`test/server-toolsets-annotations.test.ts` 锁住 cloud-pro-phase0 11 项白名单
  *    + R8 7 项修正工具的 annotation 不被回退
  *
  * 设计判据：
@@ -332,6 +366,9 @@ export const EXPLICIT_TOOL_ANNOTATIONS: Record<string, Annotation> = {
   cat_cafe_read_file_slice: A_READ_LOCAL,
   cat_cafe_list_external_runtime_sessions: A_READ_LOCAL,
   cat_cafe_read_external_runtime_session: A_READ_LOCAL,
+  cat_cafe_read_profile: A_READ_LOCAL,
+  cat_cafe_read_diary: A_READ_LOCAL,
+  cat_cafe_list_diaries: A_READ_LOCAL,
   cat_cafe_get_rich_block_rules: A_READ_LOCAL,
   cat_cafe_run_perspective: A_READ_LOCAL,
   // search_evidence hits remote/external knowledge stores → openWorld
@@ -368,6 +405,8 @@ export const EXPLICIT_TOOL_ANNOTATIONS: Record<string, Annotation> = {
   cat_cafe_library_verify: A_READ_LOCAL,
   // ── Write but non-destructive: messages / tasks / rich blocks ──────
   cat_cafe_post_message: A_WRITE_SAFE,
+  cat_cafe_settle_present_loop: A_WRITE_SAFE,
+  cat_cafe_preview_cat_life_settings: A_WRITE_SAFE,
   cat_cafe_cross_post_message: A_WRITE_SAFE,
   cat_cafe_multi_mention: A_WRITE_SAFE,
   cat_cafe_ack_mentions: A_WRITE_SAFE,
@@ -377,16 +416,40 @@ export const EXPLICIT_TOOL_ANNOTATIONS: Record<string, Annotation> = {
   cat_cafe_hold_ball: A_WRITE_SAFE,
   cat_cafe_backfill_events: A_WRITE_SAFE,
   cat_cafe_community_await_external: A_WRITE_SAFE,
+  cat_cafe_community_request_guardian: A_WRITE_SAFE,
+  cat_cafe_community_guardian_signoff: A_WRITE_SAFE,
   cat_cafe_propose_thread: A_WRITE_SAFE,
+  cat_cafe_withdraw_thread_proposal: A_WRITE_SAFE,
   cat_cafe_propose_session_handoff: A_WRITE_SAFE,
   cat_cafe_propose_profile_update: A_WRITE_SAFE,
+  cat_cafe_propose_entity: A_WRITE_SAFE,
+  cat_cafe_propose_person_memory: A_WRITE_SAFE,
+  cat_cafe_record_proactive_memory_abstention: A_WRITE_SAFE,
+  cat_cafe_get_person_memory_proposal_status: A_READ_LOCAL,
+  cat_cafe_recall_person_relationship: A_READ_LOCAL,
+  cat_cafe_drill_person_memory: A_READ_LOCAL,
+  cat_cafe_drill_memory_cue: A_READ_LOCAL,
+  cat_cafe_record_memory_cue_outcome: A_WRITE_SAFE,
+  cat_cafe_correct_person_claim: A_WRITE_SAFE,
+  cat_cafe_retire_person_claim: A_WRITE_SAFE,
+  cat_cafe_amend_person_interaction: A_WRITE_SAFE,
+  cat_cafe_redact_person_memory_item: A_DESTRUCTIVE,
+  cat_cafe_forget_person: A_DESTRUCTIVE,
+  cat_cafe_forget_person_memory_proposal: A_DESTRUCTIVE,
+  cat_cafe_propose_taste: A_WRITE_SAFE,
   cat_cafe_publish_verdict: A_WRITE_SAFE,
+  cat_cafe_record_eval_lifecycle: A_WRITE_SAFE,
+  cat_cafe_capture_paw_feel: A_WRITE_SAFE,
+  cat_cafe_list_paw_feel_inbox: A_READ_LOCAL,
+  cat_cafe_triage_paw_feel: A_WRITE_SAFE,
+  cat_cafe_record_external_review_verdict: A_WRITE_SAFE,
+  cat_cafe_record_local_review_verdict: A_WRITE_SAFE,
   cat_cafe_register_pr_tracking: A_WRITE_SAFE,
   cat_cafe_register_issue_tracking: A_WRITE_SAFE,
   cat_cafe_get_thread_metadata: A_READ_LOCAL,
   cat_cafe_set_thread_metadata: A_WRITE_SAFE,
   cat_cafe_register_scheduled_task: A_WRITE_SAFE,
-  cat_cafe_remove_scheduled_task: A_DESTRUCTIVE, // R8.2: "stops the task and deletes it permanently" (schedule-tools.ts:217)
+  cat_cafe_remove_scheduled_task: A_WRITE_SAFE, // F246 Wave 1: verified cats propose; only operator approval executes deletion
   cat_cafe_register_external_runtime_session: A_WRITE_SAFE,
   cat_cafe_unregister_tracking: A_DESTRUCTIVE, // R8.2: stops all automated PR/CI/issue notifications, deletes tracking association
   cat_cafe_request_permission: A_WRITE_SAFE,
@@ -428,6 +491,7 @@ export const EXPLICIT_TOOL_ANNOTATIONS: Record<string, Annotation> = {
   // destructive ops (delete_draft, delete_material) + open-world external APIs (WeChat).
   limb_invoke_tool: A_DESTRUCTIVE_OPEN_WORLD,
   limb_pair_approve: A_WRITE_SAFE,
+  limb_bind_embodiment: A_WRITE_SAFE,
   // ── Destructive (data loss / unrecoverable) ────────────────────────
   cat_cafe_shell_exec: A_DESTRUCTIVE,
   cat_cafe_library_archive: A_DESTRUCTIVE,

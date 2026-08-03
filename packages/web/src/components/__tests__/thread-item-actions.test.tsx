@@ -37,6 +37,24 @@ vi.mock('@/components/ThreadSidebar/ThreadCatSettings', () => ({
     ),
 }));
 
+vi.mock('@/components/ThreadSidebar/ThreadEffortSettings', () => ({
+  ThreadEffortSettings: ({
+    triggerIcon,
+    triggerLabel,
+    triggerRole,
+  }: {
+    triggerIcon?: React.ReactNode;
+    triggerLabel?: string;
+    triggerRole?: 'menuitem';
+  }) =>
+    React.createElement(
+      'button',
+      { role: triggerRole, title: '思考档位', type: 'button' },
+      triggerIcon,
+      React.createElement('span', null, triggerLabel ?? '思考档位'),
+    ),
+}));
+
 vi.mock('@/components/ThreadSidebar/ThreadLabelPicker', () => ({
   ThreadLabelPicker: ({
     triggerIcon,
@@ -133,40 +151,47 @@ describe('ThreadItem actions', () => {
     return container.querySelector(`button[title="${title}"]`);
   }
 
-  it('shows one inline pin button and keeps delete inside the more menu', () => {
+  it('shows a single inline pin button in the title area, not duplicated', () => {
     renderThread();
 
-    // Pin is inline (hover-revealed for unpinned), not in the menu
-    const pinBtn = container.querySelector('[data-testid="thread-pin-toggle-thread-1"]');
-    expect(pinBtn).not.toBeNull();
-    expect(pinBtn?.className).toContain('opacity-0'); // hidden until hover
-    // a11y: keyboard and touch fallbacks for unpinned state
-    expect(pinBtn?.className).toContain('focus-visible:opacity-100');
-    expect(pinBtn?.className).toContain('[@media(hover:none)]:opacity-100');
+    // Pin button is inline in the title area (data-testid), not a separate button next to ⋮
+    const pinButton = container.querySelector('[data-testid="thread-pin-button"]');
+    expect(pinButton).not.toBeNull();
+    expect(pinButton?.getAttribute('title')).toBe('置顶');
 
-    expect(buttonByTitle('删除对话')).toBeNull(); // delete stays in menu
+    // Only ONE pin icon in the entire thread item — no duplicate
+    const allPinSvgs = container.querySelectorAll('[data-testid="thread-pin-button"]');
+    expect(allPinSvgs.length).toBe(1);
+
+    // Delete stays in the menu
+    expect(buttonByTitle('删除对话')).toBeNull();
     expect(buttonByTitle('更多操作')).not.toBeNull();
-
-    expect(buttonByTitle('设置默认猫猫')).toBeNull();
-    expect(buttonByTitle('重命名对话')).toBeNull();
-    expect(buttonByTitle('导出对话')).toBeNull();
-    expect(buttonByTitle('标签管理')).toBeNull();
-    expect(buttonByTitle('收藏')).toBeNull();
   });
 
-  it('shows inline pin button always visible when pinned', () => {
+  it('shows pin button with accent color when pinned, hover-revealed when unpinned', () => {
+    // Pinned: accent, always visible
     renderThread({ isPinned: true });
+    const pinnedBtn = container.querySelector('[data-testid="thread-pin-button"]');
+    expect(pinnedBtn?.className).toContain('text-cafe-accent');
+    expect(pinnedBtn?.className).not.toContain('opacity-0');
+    expect(pinnedBtn?.getAttribute('title')).toBe('取消置顶');
 
-    const pinBtn = container.querySelector('[data-testid="thread-pin-toggle-thread-1"]');
-    expect(pinBtn).not.toBeNull();
-    expect(pinBtn?.className).not.toContain('opacity-0'); // always visible when pinned
+    // Unpinned: hover-revealed, muted
+    renderThread({ isPinned: false });
+    const unpinnedBtn = container.querySelector('[data-testid="thread-pin-button"]');
+    expect(unpinnedBtn?.className).toContain('opacity-0');
+    expect(unpinnedBtn?.className).toContain('group-hover:opacity-100');
+    expect(unpinnedBtn?.className).toContain('focus-visible:opacity-100');
+    expect(unpinnedBtn?.className).toContain('[@media(hover:none)]:opacity-100');
+    expect(unpinnedBtn?.getAttribute('aria-label')).toBe('置顶 Thread 1');
+    expect(unpinnedBtn?.getAttribute('title')).toBe('置顶');
   });
 
-  it('renders title with two-line clamp', () => {
-    renderThread({ title: 'A very long thread title that should wrap to two lines' });
+  it('keeps a pinned indicator when pinning is read-only', () => {
+    renderThread({ isPinned: true, onTogglePin: undefined });
 
-    const titleEl = container.querySelector('[data-thread-id="thread-1"] .line-clamp-2');
-    expect(titleEl).not.toBeNull();
+    expect(container.querySelector('[data-testid="thread-pin-button"]')).toBeNull();
+    expect(container.querySelector('[role="img"][aria-label="已置顶"]')).not.toBeNull();
   });
 
   it('keeps the project path in the thread hover tooltip', () => {
@@ -184,10 +209,13 @@ describe('ThreadItem actions', () => {
     });
 
     const menu = container.querySelector('[role="menu"]');
-    // Pin is inline now, NOT in menu
+    // Pin is NOT in the menu (it's a fixed button outside)
     expect(menu?.textContent).not.toContain('置顶');
     expect(menu?.textContent).toContain('删除对话');
     expect(menu?.textContent).toContain('设置默认猫猫');
+    expect(menu?.textContent).toContain('思考档位');
+    expect(menu?.textContent?.indexOf('思考档位')).toBeGreaterThan(menu?.textContent?.indexOf('设置默认猫猫') ?? -1);
+    expect(menu?.textContent?.indexOf('思考档位')).toBeLessThan(menu?.textContent?.indexOf('重命名对话') ?? Infinity);
     expect(menu?.textContent).toContain('重命名对话');
     expect(menu?.textContent).toContain('导出对话');
     expect(menu?.textContent).toContain('标签管理');
@@ -204,14 +232,14 @@ describe('ThreadItem actions', () => {
     const menu = container.querySelector('[role="menu"]');
     expect(menu).not.toBeNull();
 
-    for (const label of ['设置默认猫猫', '重命名对话', '导出对话', '标签管理', '收藏', '删除对话']) {
-      const item = Array.from(menu!.querySelectorAll('[role="menuitem"]')).find((el) =>
+    for (const label of ['设置默认猫猫', '思考档位', '重命名对话', '导出对话', '标签管理', '收藏', '删除对话']) {
+      const item = Array.from(menu?.querySelectorAll('[role="menuitem"]') ?? []).find((el) =>
         el.textContent?.includes(label),
       );
       expect(item, `${label} menu item`).not.toBeUndefined();
-      const first = item!.firstElementChild;
+      const first = item?.firstElementChild;
       expect(first?.querySelector('svg[aria-hidden="true"]') ?? first?.matches('svg[aria-hidden="true"]')).toBeTruthy();
-      expect(item!.textContent).toContain(label);
+      expect(item?.textContent).toContain(label);
     }
   });
 
@@ -223,6 +251,15 @@ describe('ThreadItem actions', () => {
     expect(mark?.getAttribute('aria-label')).toBe('已收藏');
   });
 
+  it('shows a visible system marker for a cat bedroom', () => {
+    renderThread({ systemKind: 'cat_bedroom' });
+
+    const marker = container.querySelector('[data-testid="thread-system-kind"]');
+    expect(marker).not.toBeNull();
+    expect(marker?.textContent).toBe('猫卧室');
+    expect(marker?.getAttribute('title')).toBe('猫的私人卧室');
+  });
+
   it('renders labels as one 16px compact tag button with overflow dots', () => {
     renderThread({ threadLabels: ['product', 'architecture', 'bug', 'quality'] });
 
@@ -231,6 +268,18 @@ describe('ThreadItem actions', () => {
     expect(labelButton?.className).toContain('h-4');
     expect(labelButton?.getAttribute('title')).toBe('产品体验, 架构规划, 缺陷排查, 评测质控');
     expect(labelButton?.textContent).toContain('+1');
+  });
+
+  it('renders the title with two-line clamp at text-sm, not single-line truncate', () => {
+    renderThread({ title: 'A very long thread title that should wrap to two lines in the sidebar' });
+
+    const titleSpan = container.querySelector('[data-thread-id="thread-1"] span span:last-child');
+    expect(titleSpan).not.toBeNull();
+    expect(titleSpan?.className).toContain('line-clamp-2');
+    expect(titleSpan?.className).toContain('text-sm');
+    expect(titleSpan?.className).toContain('leading-snug');
+    expect(titleSpan?.className).not.toContain('truncate');
+    expect(titleSpan?.className).not.toContain('text-xs');
   });
 
   it('keeps the full code-compatible tooltip format on the thread item', () => {

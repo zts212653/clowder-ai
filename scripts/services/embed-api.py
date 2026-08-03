@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Embedding server for Cat Cafe memory system.
+Embedding server for Clowder AI memory system.
 
 Backends: MLX (macOS GPU) → fastembed/ONNX (CPU/CUDA) → sentence-transformers.
 Env vars: EMBED_PORT, EMBED_MODEL (MLX), EMBED_ONNX_MODEL (fastembed), EMBED_DIM.
@@ -20,13 +20,20 @@ from typing import List
 
 import numpy as np
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from embed_runtime_policy import (
+    AdmissionError,
+    EmbeddingAdmissionController,
+    MemoryBudgetExceeded,
+    MemoryMetricUnavailable,
+    MlxMemoryEnvelope,
+)
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 log = logging.getLogger("embed-api")
 
-app = FastAPI(title="Cat Cafe Embedding Server (MLX)")
+app = FastAPI(title="Clowder AI Embedding Server (MLX)")
 
 
 @app.on_event("startup")
@@ -59,12 +66,16 @@ _backend: str = "mlx-embeddings"
 _started_at: float = time.time()
 _request_count: int = 0
 _last_embed_ms: float | None = None
-
-# Serialize GPU access (same pattern as whisper-api.py / tts-api.py)
-_embed_lock = asyncio.Lock()
+_admission: EmbeddingAdmissionController | None = None
+_memory_envelope: MlxMemoryEnvelope | None = None
+_resource_exit_scheduled = False
 
 MAX_BATCH_SIZE = 64
 MAX_TEXT_LENGTH = 8192
+MAX_QUEUE_DEPTH = 8
+DEFAULT_REQUEST_TIMEOUT_MS = 3000
+MAX_REQUEST_TIMEOUT_MS = 120000
+MAX_MODEL_MEM_MB = 800
 
 # Lightweight fallback: fastembed (ONNX Runtime, no torch needed)
 _use_fastembed = False
@@ -110,9 +121,22 @@ def _process_max_rss_bytes() -> int:
 
 # ─── Request/Response models ──────────────────────────────────────
 
+
 class EmbedRequest(BaseModel):
     input: str | List[str] = Field(..., description="Text or list of texts to embed")
-    model: str = Field(default="", description="Model identifier (ignored, uses server model)")
+    model: str = Field(
+        default="", description="Model identifier (ignored, uses server model)"
+    )
+    deadline_ms: int | None = Field(
+        default=None,
+        gt=0,
+        description="Absolute Unix deadline in milliseconds; server clamps it to its maximum timeout",
+    )
+    max_model_mem_mb: int | None = Field(
+        default=None,
+        gt=0,
+        description="Per-request memory ceiling; may lower but never raise the process ceiling",
+    )
 
 
 class EmbedResponse(BaseModel):
@@ -124,64 +148,149 @@ class EmbedResponse(BaseModel):
 
 # ─── Endpoints ────────────────────────────────────────────────────
 
+
 @app.post("/v1/embeddings")
-async def create_embeddings(req: EmbedRequest):
+async def create_embeddings(req: EmbedRequest, request: Request):
     """OpenAI-compatible embedding endpoint."""
     global _request_count, _last_embed_ms
     if not model_loaded:
         raise HTTPException(503, detail="Model not loaded yet")
+    if _admission is None:
+        raise HTTPException(503, detail="Embedding admission policy not initialized")
 
     texts = [req.input] if isinstance(req.input, str) else req.input
     if len(texts) == 0:
         raise HTTPException(400, detail="Empty input")
     if len(texts) > MAX_BATCH_SIZE:
-        raise HTTPException(400, detail=f"Batch too large ({len(texts)}, max {MAX_BATCH_SIZE})")
+        raise HTTPException(
+            400, detail=f"Batch too large ({len(texts)}, max {MAX_BATCH_SIZE})"
+        )
 
     # Truncate long texts
     texts = [t[:MAX_TEXT_LENGTH] for t in texts]
 
     start_ms = time.time() * 1000
-
-    async with _embed_lock:
-        embeddings = await asyncio.to_thread(_encode, texts)
+    try:
+        async with _admission.admit(
+            deadline_ms=req.deadline_ms,
+            is_disconnected=request.is_disconnected,
+        ):
+            if _memory_envelope is not None:
+                await asyncio.to_thread(
+                    _memory_envelope.assert_within_budget,
+                    req.max_model_mem_mb,
+                )
+            embeddings = await asyncio.to_thread(_encode, texts)
+            if _memory_envelope is not None:
+                await asyncio.to_thread(
+                    _memory_envelope.assert_within_budget,
+                    req.max_model_mem_mb,
+                )
+    except AdmissionError as error:
+        raise HTTPException(
+            error.status_code,
+            detail={"code": error.code, "message": str(error)},
+        ) from error
+    except MemoryBudgetExceeded as error:
+        log.critical(
+            "Embedding memory envelope tripped: observed=%d delta=%d budget=%d; exiting sidecar",
+            error.observed_bytes,
+            error.footprint_delta_bytes,
+            error.budget_bytes,
+        )
+        _schedule_resource_exit()
+        raise HTTPException(
+            503,
+            detail={"code": "memory_budget_exceeded", "message": str(error)},
+        ) from error
+    except MemoryMetricUnavailable as error:
+        log.critical("Embedding OS-footprint guard failed: %s; exiting sidecar", error)
+        _schedule_resource_exit()
+        raise HTTPException(
+            503,
+            detail={"code": "memory_metric_unavailable", "message": str(error)},
+        ) from error
 
     elapsed_ms = time.time() * 1000 - start_ms
     _request_count += 1
     _last_embed_ms = elapsed_ms
-    log.info("Embedded %d text(s) in %.0fms (dim=%d)", len(texts), elapsed_ms, embed_dim)
+    log.info(
+        "Embedded %d text(s) in %.0fms (dim=%d)", len(texts), elapsed_ms, embed_dim
+    )
 
     data = []
     for i, emb in enumerate(embeddings):
-        data.append({
-            "object": "embedding",
-            "index": i,
-            "embedding": emb.tolist(),
-        })
+        data.append(
+            {
+                "object": "embedding",
+                "index": i,
+                "embedding": emb.tolist(),
+            }
+        )
 
     return EmbedResponse(
         data=data,
         model=model_name,
-        usage={"prompt_tokens": sum(len(t) for t in texts), "total_tokens": sum(len(t) for t in texts)},
+        usage={
+            "prompt_tokens": sum(len(t) for t in texts),
+            "total_tokens": sum(len(t) for t in texts),
+        },
     )
 
 
 @app.get("/health")
 async def health():
+    admission_health = _admission.snapshot() if _admission is not None else {}
+    memory_health = (
+        await asyncio.to_thread(_memory_envelope.snapshot, True)
+        if _memory_envelope is not None
+        else {
+            "memory_metric_scope": "process_max_rss_only",
+            "max_model_mem_mb": MAX_MODEL_MEM_MB,
+            "memory_budget_exceeded": False,
+        }
+    )
     return {
-        "status": "ok" if model_loaded else "loading",
+        "status": (
+            "degraded"
+            if memory_health.get("memory_budget_exceeded")
+            or (
+                memory_health.get("os_footprint_required")
+                and not memory_health.get("os_footprint_available")
+            )
+            else ("ok" if model_loaded else "loading")
+        ),
         "model": model_name or "none",
         "backend": _backend,
-        "device": f"onnx-{_onnx_device}" if _use_fastembed else ("mlx" if not _use_fallback else (_fallback_device or "unknown")),
+        "device": f"onnx-{_onnx_device}"
+        if _use_fastembed
+        else ("mlx" if not _use_fallback else (_fallback_device or "unknown")),
         "dim": embed_dim,
         "request_count": _request_count,
-        "last_request_ms": round(_last_embed_ms, 2) if _last_embed_ms is not None else None,
+        "last_request_ms": round(_last_embed_ms, 2)
+        if _last_embed_ms is not None
+        else None,
         "max_rss_bytes": _process_max_rss_bytes(),
+        "max_rss_metric_scope": "process_peak_rss_not_os_footprint",
         "uptime_seconds": round(time.time() - _started_at, 1),
         "fallback_allowed": _allow_sentence_transformers_fallback(),
+        **admission_health,
+        **memory_health,
     }
 
 
+def _schedule_resource_exit() -> None:
+    """Hard-exit only this disposable sidecar after returning a fail-open 503."""
+
+    global _resource_exit_scheduled
+    if _resource_exit_scheduled:
+        return
+    _resource_exit_scheduled = True
+    asyncio.get_running_loop().call_later(0.05, os._exit, 70)
+
+
 # ─── Encoding ─────────────────────────────────────────────────────
+
 
 def _encode(texts: List[str]) -> np.ndarray:
     """Encode texts to normalized embeddings with MRL truncation."""
@@ -194,7 +303,6 @@ def _encode(texts: List[str]) -> np.ndarray:
 
 def _encode_mlx(texts: List[str]) -> np.ndarray:
     """MLX-native encoding using mlx-embeddings library."""
-    import mlx.core as mx
     from mlx_embeddings.utils import generate
 
     # mlx-embeddings generate() may return an mlx array, or a BaseModelOutput
@@ -202,15 +310,15 @@ def _encode_mlx(texts: List[str]) -> np.ndarray:
     output = generate(mlx_model, mlx_tokenizer, texts)
 
     # Unwrap BaseModelOutput if present (check value, not just attribute)
-    if hasattr(output, 'text_embeds') and output.text_embeds is not None:
+    if hasattr(output, "text_embeds") and output.text_embeds is not None:
         output = output.text_embeds
-    elif hasattr(output, 'last_hidden_state') and output.last_hidden_state is not None:
+    elif hasattr(output, "last_hidden_state") and output.last_hidden_state is not None:
         output = output.last_hidden_state
 
     # Convert to numpy
-    if hasattr(output, 'numpy'):
+    if hasattr(output, "numpy"):
         raw = np.array(output)
-    elif hasattr(output, 'tolist'):
+    elif hasattr(output, "tolist"):
         raw = np.array(output.tolist())
     else:
         raw = np.array(output)
@@ -248,11 +356,13 @@ def _encode_fallback(texts: List[str]) -> np.ndarray:
 
 # ─── Startup ──────────────────────────────────────────────────────
 
+
 def main():
     global mlx_model, mlx_tokenizer, model_name, embed_dim, model_loaded
     global _use_fallback, _st_model, _backend, _fallback_device
+    global _admission, _memory_envelope
 
-    parser = argparse.ArgumentParser(description="Cat Cafe Embedding Server (MLX GPU)")
+    parser = argparse.ArgumentParser(description="Clowder AI Embedding Server (MLX GPU)")
     parser.add_argument(
         "--model",
         required=True,
@@ -261,52 +371,89 @@ def main():
         "the previous mlx-community default because it picked the wrong model on "
         "non-mac platforms when EMBED_MODEL was unset.",
     )
-    parser.add_argument("--port", type=int, default=int(os.environ.get("EMBED_PORT", "9880")))
-    parser.add_argument("--dim", type=int, default=int(os.environ.get("EMBED_DIM", "768")))
+    parser.add_argument(
+        "--port", type=int, default=int(os.environ.get("EMBED_PORT", "9880"))
+    )
+    parser.add_argument(
+        "--dim", type=int, default=int(os.environ.get("EMBED_DIM", "768"))
+    )
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s"
+    )
 
     def handle_sigterm(signum, frame):
         log.info("Received SIGTERM, shutting down...")
         sys.exit(0)
+
     signal.signal(signal.SIGTERM, handle_sigterm)
 
     model_name = args.model
     embed_dim = args.dim
+    _admission = EmbeddingAdmissionController(
+        max_queue_depth=MAX_QUEUE_DEPTH,
+        default_timeout_ms=DEFAULT_REQUEST_TIMEOUT_MS,
+        max_timeout_ms=MAX_REQUEST_TIMEOUT_MS,
+    )
 
-    log.info("=== Cat Cafe Embedding Server ===")
+    log.info("=== Clowder AI Embedding Server ===")
     log.info("Model: %s | Dim: %d | Port: %d", model_name, embed_dim, args.port)
 
     # Try MLX-native first, then fastembed. On Apple Silicon, do not silently
     # fall back to sentence-transformers: its MPS path can exhaust unified memory.
     start = time.time()
+
     def _try_mlx() -> bool:
         """Try MLX-native load + test embedding. Returns True on success."""
-        global mlx_model, mlx_tokenizer, _backend, model_loaded
+        global mlx_model, mlx_tokenizer, _backend, model_loaded, _memory_envelope
         try:
+            import mlx.core as mx
             from mlx_embeddings.utils import load as mlx_load
+
+            _memory_envelope = MlxMemoryEnvelope(
+                max_model_mem_mb=MAX_MODEL_MEM_MB,
+                mlx=mx,
+            )
+            _memory_envelope.configure_before_model_load()
             log.info("Loading model via mlx-embeddings (MLX GPU)...")
             mlx_model, mlx_tokenizer = mlx_load(model_name)
             # Smoke test: actually run one embedding to catch tokenizer bugs
             log.info("Running MLX smoke test...")
             _encode_mlx(["test"])
+            mx.clear_cache()
+            _memory_envelope.capture_baseline()
             _backend = "mlx-embeddings"
             model_loaded = True
-            log.info("MLX model loaded + verified in %.1fs! Device: Apple Silicon GPU (Metal)", time.time() - start)
+            log.info(
+                "MLX model loaded + verified in %.1fs! Device: Apple Silicon GPU (Metal), memory budget=%d MiB",
+                time.time() - start,
+                MAX_MODEL_MEM_MB,
+            )
             return True
         except ImportError:
             log.warning("mlx-embeddings not installed")
             return False
         except Exception as e:
-            log.warning("MLX load/inference failed (%s), falling back to sentence-transformers", e)
+            log.warning(
+                "MLX load/inference failed (%s), falling back to sentence-transformers",
+                e,
+            )
             mlx_model = None
             mlx_tokenizer = None
+            _memory_envelope = None
             return False
 
     def _try_fastembed() -> bool:
         """Lightweight ONNX backend via fastembed (no torch needed)."""
-        global _use_fastembed, _fe_model, _onnx_device, _backend, model_loaded, model_name, embed_dim
+        global \
+            _use_fastembed, \
+            _fe_model, \
+            _onnx_device, \
+            _backend, \
+            model_loaded, \
+            model_name, \
+            embed_dim
         try:
             from fastembed import TextEmbedding
         except ImportError:
@@ -326,6 +473,7 @@ def main():
         device_label = "CPU"
         try:
             import onnxruntime as ort
+
             avail = ort.get_available_providers()
             if "CUDAExecutionProvider" in avail:
                 providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
@@ -348,7 +496,12 @@ def main():
             _backend = "fastembed-onnx"
             model_name = fe_name
             model_loaded = True
-            log.info("fastembed loaded in %.1fs (dim=%d, ONNX %s)", time.time() - start, embed_dim, device_label)
+            log.info(
+                "fastembed loaded in %.1fs (dim=%d, ONNX %s)",
+                time.time() - start,
+                embed_dim,
+                device_label,
+            )
             return True
         except Exception as e:
             log.warning("fastembed failed (%s), trying next backend", e)
@@ -356,7 +509,13 @@ def main():
 
     def _try_sentence_transformers() -> bool:
         """Heavy fallback: sentence-transformers + MPS/CUDA/CPU (needs torch)."""
-        global _use_fallback, _st_model, _backend, model_loaded, model_name, _fallback_device
+        global \
+            _use_fallback, \
+            _st_model, \
+            _backend, \
+            model_loaded, \
+            model_name, \
+            _fallback_device
         _use_fallback = True
         _backend = "sentence-transformers"
         try:
@@ -366,7 +525,11 @@ def main():
             log.error("Fallback deps missing: pip install sentence-transformers torch")
             return False
         try:
-            fallback_model = model_name.replace("mlx-community/", "").replace("-4bit-DWQ", "").replace("-4bit", "")
+            fallback_model = (
+                model_name.replace("mlx-community/", "")
+                .replace("-4bit-DWQ", "")
+                .replace("-4bit", "")
+            )
             if "Qwen3-Embedding" in fallback_model:
                 fallback_model = "Qwen/" + fallback_model
             explicit_device = os.environ.get("EMBED_ST_DEVICE", "").strip()
@@ -374,7 +537,11 @@ def main():
                 device = explicit_device
             elif torch.cuda.is_available():
                 device = "cuda"
-            elif not _is_apple_silicon() and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            elif (
+                not _is_apple_silicon()
+                and hasattr(torch.backends, "mps")
+                and torch.backends.mps.is_available()
+            ):
                 device = "mps"
             else:
                 device = "cpu"
@@ -393,7 +560,11 @@ def main():
             _fallback_device = device
             model_name = fallback_model
             model_loaded = True
-            log.info("Fallback model loaded in %.1fs! (device: %s)", time.time() - start, device)
+            log.info(
+                "Fallback model loaded in %.1fs! (device: %s)",
+                time.time() - start,
+                device,
+            )
             return True
         except Exception:
             log.exception("Failed to load fallback model")

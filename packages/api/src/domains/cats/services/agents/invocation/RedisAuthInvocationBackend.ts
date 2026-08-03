@@ -24,6 +24,8 @@ import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import type { AuthInvocationInput, IAuthInvocationBackend } from './IAuthInvocationBackend.js';
 import type { InvocationRecord, VerifyResult } from './InvocationRegistry.js';
+import { normalizeOwnerAuthProvenance } from './owner-auth-provenance.js';
+import { parseToolExecutionPolicy } from './tool-execution-policy.js';
 
 const KEY_INV = (id: string) => `auth:inv:${id}`;
 const KEY_MSGS = (id: string) => `auth:inv:${id}:msgs`;
@@ -151,10 +153,20 @@ function parseHashArray(arr: unknown): Record<string, string> {
 
 function recordFromHash(fields: Record<string, string>, msgs: Set<string>): InvocationRecord | null {
   if (!fields.invocationId || !fields.callbackToken) return null;
+  if (Boolean(fields.managedWorkId) !== Boolean(fields.managedWorkAttemptId)) return null;
   const record: InvocationRecord = {
     invocationId: fields.invocationId,
     callbackToken: fields.callbackToken,
     userId: fields.userId ?? '',
+    ownerAuthProvenance: normalizeOwnerAuthProvenance(fields.ownerAuthProvenance),
+    ...(fields.managedWorkId && fields.managedWorkAttemptId
+      ? {
+          managedWorkBinding: Object.freeze({
+            workId: fields.managedWorkId,
+            attemptId: fields.managedWorkAttemptId,
+          }),
+        }
+      : {}),
     catId: (fields.catId ?? '') as CatId,
     threadId: fields.threadId ?? '',
     clientMessageIds: msgs,
@@ -163,6 +175,8 @@ function recordFromHash(fields: Record<string, string>, msgs: Set<string>): Invo
   };
   if (fields.parentInvocationId) record.parentInvocationId = fields.parentInvocationId;
   if (fields.a2aTriggerMessageId) record.a2aTriggerMessageId = fields.a2aTriggerMessageId;
+  if (fields.originTriggerMessageId) record.originTriggerMessageId = fields.originTriggerMessageId;
+  if (fields.toolExecutionPolicy) record.toolExecutionPolicy = parseToolExecutionPolicy(fields.toolExecutionPolicy);
   if (fields.traceId && fields.spanId) {
     record.traceContext = {
       traceId: fields.traceId,
@@ -185,6 +199,8 @@ export class RedisAuthInvocationBackend implements IAuthInvocationBackend {
       input.callbackToken,
       'userId',
       input.userId,
+      'ownerAuthProvenance',
+      normalizeOwnerAuthProvenance(input.ownerAuthProvenance),
       'catId',
       input.catId as string,
       'threadId',
@@ -195,7 +211,13 @@ export class RedisAuthInvocationBackend implements IAuthInvocationBackend {
       String(expiresAt),
     ];
     if (input.parentInvocationId) fields.push('parentInvocationId', input.parentInvocationId);
+    if (input.managedWorkBinding) {
+      fields.push('managedWorkId', input.managedWorkBinding.workId);
+      fields.push('managedWorkAttemptId', input.managedWorkBinding.attemptId);
+    }
     if (input.a2aTriggerMessageId) fields.push('a2aTriggerMessageId', input.a2aTriggerMessageId);
+    if (input.originTriggerMessageId) fields.push('originTriggerMessageId', input.originTriggerMessageId);
+    if (input.toolExecutionPolicy) fields.push('toolExecutionPolicy', JSON.stringify(input.toolExecutionPolicy));
 
     await this.redis.eval(
       CREATE_LUA,

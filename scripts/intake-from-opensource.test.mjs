@@ -918,6 +918,7 @@ function makeRecordFixture(mock = {}) {
     {
       body: mock.reviewBody ?? '',
       commit_id: mock.reviewCommitId ?? absorbPrHead,
+      state: mock.reviewState ?? 'COMMENTED',
     },
     null,
     2,
@@ -1028,18 +1029,143 @@ exit 1
   return { ...fixture, mockBin, absorbPrHead };
 }
 
+function makeVerifyMergeReadyFixture() {
+  const fixture = makeFixture();
+  git(fixture.repoRoot, 'init', '-b', 'main');
+  git(fixture.repoRoot, 'config', 'user.name', 'Clowder AI Test');
+  git(fixture.repoRoot, 'config', 'user.email', 'cat-cafe@example.com');
+
+  writeLedger(fixture.ledgerPath, '0000000000000000000000000000000000000000', [
+    {
+      pr_number: 777,
+      target_merge_commit: '1111111111111111111111111111111111111111',
+      decision: 'absorbed',
+      intake_intent_issue: 1234,
+      absorb_pr: 5678,
+      review_proof: 'https://github.com/zts212653/clowder-ai/pull/5678#pullrequestreview-461',
+    },
+  ]);
+  git(fixture.repoRoot, 'add', '-A');
+  git(fixture.repoRoot, 'commit', '-m', 'reviewed behavior head');
+  const reviewedHead = git(fixture.repoRoot, 'rev-parse', 'HEAD');
+
+  writeLedger(fixture.ledgerPath, '1111111111111111111111111111111111111111', [
+    {
+      pr_number: 777,
+      target_merge_commit: '1111111111111111111111111111111111111111',
+      decision: 'absorbed',
+      intake_intent_issue: 1234,
+      absorb_pr: 5678,
+      review_proof: 'https://github.com/zts212653/clowder-ai/pull/5678#pullrequestreview-461',
+    },
+  ]);
+  git(fixture.repoRoot, 'add', 'docs/ops/opensource-intake-ledger.json');
+  git(fixture.repoRoot, 'commit', '-m', 'record intake ledger');
+  const currentHead = git(fixture.repoRoot, 'rev-parse', 'HEAD');
+
+  const commentPath = join(fixture.sandboxRoot, 'continuity-comment.md');
+  const mockBin = join(fixture.sandboxRoot, 'mock-bin');
+  mkdirSync(mockBin, { recursive: true });
+  const ghPath = join(mockBin, 'gh');
+  writeFileSync(
+    ghPath,
+    `#!/usr/bin/env bash
+set -euo pipefail
+
+repo=""
+for ((i=1; i<=$#; i++)); do
+  if [ "\${!i}" = "--repo" ]; then
+    j=$((i + 1))
+    repo="\${!j}"
+    break
+  fi
+done
+
+if [ "\${1:-}" = "pr" ] && [ "\${2:-}" = "view" ] && [ "$repo" = "zts212653/cat-cafe" ]; then
+  cat <<'JSON'
+{"headRefOid":"${currentHead}","state":"OPEN","headRefName":"fix/intake-fixture"}
+JSON
+  exit 0
+fi
+
+if [ "\${1:-}" = "api" ] && [[ "\${2:-}" =~ ^repos/zts212653/cat-cafe/pulls/5678/reviews/461$ ]]; then
+  cat <<'JSON'
+{"commit_id":"${reviewedHead}","body":"Review pass"}
+JSON
+  exit 0
+fi
+
+if [ "\${1:-}" = "pr" ] && [ "\${2:-}" = "comment" ] && [ "\${3:-}" = "5678" ] && [ "$repo" = "zts212653/cat-cafe" ]; then
+  body_file=""
+  for ((i=1; i<=$#; i++)); do
+    if [ "\${!i}" = "--body-file" ]; then
+      j=$((i + 1))
+      body_file="\${!j}"
+      break
+    fi
+  done
+  if [ "$body_file" = "-" ]; then
+    cat > "${commentPath}"
+  else
+    cp "$body_file" "${commentPath}"
+  fi
+  exit 0
+fi
+
+exit 1
+`,
+    'utf-8',
+  );
+  chmodSync(ghPath, 0o755);
+
+  return { ...fixture, mockBin, reviewedHead, currentHead, commentPath };
+}
+
 function runRecord(repoRoot, args, extraEnv = {}) {
   return run('bash', ['scripts/intake-from-opensource.sh', '--record', ...args], repoRoot, extraEnv);
 }
 
-function captureRecordFailure(repoRoot, args, extraEnv = {}) {
+function captureRecordFailure(repoRoot, args, extraEnv = {}, failureMessage = 'expected --record to fail') {
   try {
     runRecord(repoRoot, args, extraEnv);
-    assert.fail('expected --record to fail');
   } catch (error) {
     return error;
   }
+  assert.fail(failureMessage);
 }
+
+function runVerifyMergeReady(repoRoot, absorbPr, extraEnv = {}) {
+  return run(
+    'bash',
+    ['scripts/intake-from-opensource.sh', '--verify-merge-ready', '--absorb-pr', String(absorbPr)],
+    repoRoot,
+    extraEnv,
+  );
+}
+
+describe('intake-from-opensource.sh --verify-merge-ready', () => {
+  const fixtures = [];
+
+  afterEach(() => {
+    while (fixtures.length > 0) {
+      rmSync(fixtures.pop(), { recursive: true, force: true });
+    }
+  });
+
+  it('posts explicit continuity evidence when review proof is extended by ledger-only delta', () => {
+    const f = makeVerifyMergeReadyFixture();
+    fixtures.push(f.sandboxRoot);
+
+    const output = runVerifyMergeReady(f.repoRoot, 5678, { PATH: `${f.mockBin}:${process.env.PATH}` });
+    const comment = readFileSync(f.commentPath, 'utf-8');
+
+    assert.match(output, /post-review delta is non-behavioral/);
+    assert.match(comment, /Intake Review Continuity/);
+    assert.match(comment, new RegExp(f.reviewedHead));
+    assert.match(comment, new RegExp(f.currentHead));
+    assert.match(comment, /docs\/ops\/opensource-intake-ledger\.json/);
+  });
+});
 
 describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
   const fixtures = [];
@@ -1152,6 +1278,98 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
       ].join('\n'),
       absorbPrBody: 'Closes #1234\nSource: clowder-ai#777',
       absorbPrFiles: [{ path: 'packages/api/src/foo.ts' }],
+    });
+    fixtures.push(f.sandboxRoot);
+
+    const output = runRecord(
+      f.repoRoot,
+      [
+        '--pr',
+        '777',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '5678',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/5678#issuecomment-1',
+      ],
+      { PATH: `${f.mockBin}:${process.env.PATH}` },
+    );
+
+    assert.match(output, /Absorbed intake strict guard passed/);
+  });
+
+  it('rejects A2A routing intake evidence that only runs a named subtest', () => {
+    const f = makeRecordFixture({
+      issueBody: [
+        '## 逐文件决策表',
+        '',
+        '| file | lane | decision |',
+        '| --- | --- | --- |',
+        '| packages/api/src/domains/cats/services/agents/routing/a2a-mentions.ts | manual-port | absorb |',
+        '| packages/api/test/a2a-mentions.test.js | adapt tests | absorb |',
+        '',
+        'Source PR: clowder-ai#777',
+      ].join('\n'),
+      absorbPrBody: [
+        'Closes #1234',
+        'Source: clowder-ai#777',
+        '',
+        '## Validation',
+        "- bash packages/api/scripts/with-test-home.sh node --test --test-name-pattern 'suppressed field' packages/api/test/a2a-mentions.test.js",
+      ].join('\n'),
+      absorbPrFiles: [
+        { path: 'packages/api/src/domains/cats/services/agents/routing/a2a-mentions.ts' },
+        { path: 'packages/api/test/a2a-mentions.test.js' },
+      ],
+    });
+    fixtures.push(f.sandboxRoot);
+
+    const err = captureRecordFailure(
+      f.repoRoot,
+      [
+        '--pr',
+        '777',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '5678',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/5678#issuecomment-1',
+      ],
+      { PATH: `${f.mockBin}:${process.env.PATH}` },
+    );
+
+    assert.match(err.stdout, /full a2a-mentions\.test\.js/i);
+  });
+
+  it('accepts A2A routing intake evidence with a full test file run', () => {
+    const f = makeRecordFixture({
+      issueBody: [
+        '## 逐文件决策表',
+        '',
+        '| file | lane | decision |',
+        '| --- | --- | --- |',
+        '| packages/api/src/domains/cats/services/agents/routing/a2a-mentions.ts | manual-port | absorb |',
+        '| packages/api/test/a2a-mentions.test.js | adapt tests | absorb |',
+        '',
+        'Source PR: clowder-ai#777',
+      ].join('\n'),
+      absorbPrBody: [
+        'Closes #1234',
+        'Source: clowder-ai#777',
+        '',
+        '## Validation',
+        '- bash packages/api/scripts/with-test-home.sh node --test packages/api/test/a2a-mentions.test.js',
+      ].join('\n'),
+      absorbPrFiles: [
+        { path: 'packages/api/src/domains/cats/services/agents/routing/a2a-mentions.ts' },
+        { path: 'packages/api/test/a2a-mentions.test.js' },
+      ],
     });
     fixtures.push(f.sandboxRoot);
 
@@ -1846,6 +2064,228 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
     const record = ledger.entries.find((entry) => entry.pr_number === 495);
     assert.ok(record);
     assert.equal(record.review_proof, 'https://github.com/zts212653/clowder-ai/pull/1236#pullrequestreview-42');
+  });
+
+  it('blocks CHANGES_REQUESTED pull request review proof even when commit_id matches current absorb PR head', () => {
+    const f = makeRecordFixture({
+      reviewState: 'CHANGES_REQUESTED',
+      reviewBody: 'Changes requested on this head.',
+    });
+    fixtures.push(f.sandboxRoot);
+    const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+    const err = captureRecordFailure(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#pullrequestreview-42',
+      ],
+      env,
+    );
+
+    assert.match(err.stdout, /blocking GitHub review state CHANGES_REQUESTED/);
+  });
+
+  it('blocks issue comment review proof when it mentions current head without an explicit pass verdict', () => {
+    const absorbPrHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const f = makeRecordFixture({
+      absorbPrHead,
+      reviewIssueCommentBody: `Reviewed ${absorbPrHead.slice(0, 8)}, follow-up needed.`,
+    });
+    fixtures.push(f.sandboxRoot);
+    const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+    const err = captureRecordFailure(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+      ],
+      env,
+    );
+
+    assert.match(err.stdout, /must include explicit non-blocking verdict/);
+  });
+
+  it('accepts the standard Codex clean-review issue comment for the current head', () => {
+    const absorbPrHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const f = makeRecordFixture({
+      absorbPrHead,
+      reviewIssueCommentBody: `Codex Review: Didn't find any major issues.\n\n**Reviewed commit:** \`${absorbPrHead.slice(0, 10)}\``,
+    });
+    fixtures.push(f.sandboxRoot);
+    const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+    const output = runRecord(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+      ],
+      env,
+    );
+
+    assert.match(output, /Absorbed intake strict guard passed/);
+    assert.match(output, /Recorded PR #495 → absorbed/);
+  });
+
+  it('blocks issue comment review proof with negated pass wording', () => {
+    const absorbPrHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const rejectedBodies = [
+      `Not approved yet. Covers ${absorbPrHead.slice(0, 8)}.`,
+      `Not yet approved for ${absorbPrHead.slice(0, 8)}.`,
+      `Do not approve this head ${absorbPrHead.slice(0, 8)}.`,
+      `Cannot approve this head ${absorbPrHead.slice(0, 8)}.`,
+      `No LGTM yet for ${absorbPrHead.slice(0, 8)}.`,
+      `Not passed on current head ${absorbPrHead.slice(0, 8)}.`,
+      `Approval pending on current head ${absorbPrHead.slice(0, 8)}.`,
+      `Approval withheld for ${absorbPrHead.slice(0, 8)}.`,
+      `Waiting for approval on ${absorbPrHead.slice(0, 8)}.`,
+      `Pass pending after CI for ${absorbPrHead.slice(0, 8)}.`,
+      `Didn't find any major issues, but cannot approve this head ${absorbPrHead.slice(0, 8)}.`,
+    ];
+
+    for (const reviewIssueCommentBody of rejectedBodies) {
+      const f = makeRecordFixture({
+        absorbPrHead,
+        reviewIssueCommentBody,
+      });
+      fixtures.push(f.sandboxRoot);
+      const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+      const err = captureRecordFailure(
+        f.repoRoot,
+        [
+          '--pr',
+          '495',
+          '--decision',
+          'absorbed',
+          '--intent-issue',
+          '1234',
+          '--absorb-pr',
+          '1236',
+          '--review-proof',
+          'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+        ],
+        env,
+        `expected review proof to be rejected: ${reviewIssueCommentBody}`,
+      );
+
+      assert.match(err.stdout, /contains a blocking verdict|must include explicit non-blocking verdict/);
+    }
+  });
+
+  it('blocks COMMENTED pull request review proof with negated pass wording', () => {
+    const f = makeRecordFixture({
+      reviewState: 'COMMENTED',
+      reviewBody: 'No LGTM yet; do not approve this head.',
+    });
+    fixtures.push(f.sandboxRoot);
+    const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+    const err = captureRecordFailure(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#pullrequestreview-42',
+      ],
+      env,
+    );
+
+    assert.match(err.stdout, /contains a blocking verdict|must include explicit non-blocking verdict/);
+  });
+
+  it('accepts issue comment review proof with pass verdict and ordinary block prose', () => {
+    const absorbPrHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const acceptedBodies = [
+      `APPROVED. The markdown block below is audit context for ${absorbPrHead.slice(0, 8)}.`,
+      `LGTM. Keep this shell block in the note for ${absorbPrHead.slice(0, 8)}.`,
+      `PASS on current head ${absorbPrHead.slice(0, 8)}; code block omitted here.`,
+    ];
+
+    for (const reviewIssueCommentBody of acceptedBodies) {
+      const f = makeRecordFixture({
+        absorbPrHead,
+        reviewIssueCommentBody,
+      });
+      fixtures.push(f.sandboxRoot);
+      const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+      const output = runRecord(
+        f.repoRoot,
+        [
+          '--pr',
+          '495',
+          '--decision',
+          'absorbed',
+          '--intent-issue',
+          '1234',
+          '--absorb-pr',
+          '1236',
+          '--review-proof',
+          'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+        ],
+        env,
+      );
+
+      assert.match(output, /Absorbed intake strict guard passed/);
+      assert.match(output, /Recorded PR #495 → absorbed/);
+    }
+  });
+
+  it('accepts issue comment review proof with no-blocking-finding verdict and current head', () => {
+    const absorbPrHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const f = makeRecordFixture({
+      absorbPrHead,
+      reviewIssueCommentBody: `No blocking findings. Covers ${absorbPrHead.slice(0, 8)}.`,
+    });
+    fixtures.push(f.sandboxRoot);
+    const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+    const output = runRecord(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+      ],
+      env,
+    );
+
+    assert.match(output, /Absorbed intake strict guard passed/);
+    assert.match(output, /Recorded PR #495 → absorbed/);
   });
 
   it('allows post-merge record when intake intent issue is CLOSED and absorb PR is MERGED', () => {

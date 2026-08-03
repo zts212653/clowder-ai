@@ -1,11 +1,7 @@
 ---
 name: merge-gate
 tips_exempt: harness/SOP workflow change (merge-gate Step 7.5 dev-process gate); no end-user capability
-description: >
-  合入 main 的完整流程：门禁检查 → PR → remote review → Feature Doc Truth 核对(pre-merge) → squash merge → 记录已合入(post-merge) → 清理。
-  Use when: reviewer 放行后准备合入、开 PR、触发remote review、准备 merge。
-  Not for: 开发中、review 未通过、自检未完成。
-  Output: PR merged + worktree cleaned。
+description: 合入 main：按行为 / 数据 / 安全 / 契约 / 不可逆风险选择 targeted 或 full gate，并消费一个或多个有客观触发理由的独立 review source。
 triggers:
   - "合入 main"
   - "merge"
@@ -19,23 +15,47 @@ triggers:
 
 > **SOP definition**: `sop-definitions/development.yaml` stage `merge`。
 
-合入 main 的完整流程：门禁检查 → PR → remote review → squash merge → 清理。
+合入 main 的流程：先锁定风险档、验证命令与独立 review source，再执行对应门禁。PR 是载体，不是自动触发 local + cloud + guardian 三连的理由。
+
+## Lane 0：Co-Creation Docs PR
+
+先检查是否已有成功的 `pnpm classify:co-creation-docs` 证据，且输出同时满足：
+
+- `lane=co_creation_docs`
+- `delivery=pull_request`
+- changed files 与 PR diff 完全一致
+
+满足时，直接消费 classifier 的 `validation` / `cloudReview` / `fullGate` 结论：
+
+1. 跑 classifier 返回的全部 `validation` 命令 + `git diff --check`。
+2. 新实质内容需要非作者内容 review；已有内容 verdict 或可证明机械合并用 continuityProof 复用，不为 SHA 字符串变化重开 reviewer。
+3. `cloudReview=required` 才触发 cloud；`skip` 时在 PR 留 classifier 原因。家规 / SOP / skill 纯文字通常由有状态 local reviewer 覆盖治理语义，不把“免 cloud”当需要申请的特权。
+4. `fullGate=required` 才跑 `pnpm gate`；`skip` 时 evidence manifest 记录 docs validation 命令。
+5. evidence 闭合后由在场 merge owner 执行 `gh pr merge --squash`；不再额外召唤一只猫只为按 merge 按钮。无 F 号时跳过 Feature Doc Truth post-merge sync。
+
+任一 changed file 不匹配、classifier 缺失/失败或输出 `lane=regular_development` → 退出本节，走下方风险路由。行数不能作为 Lane 0 证据。
 
 ## 核心知识
 
-### 门禁 5 硬条件（全部满足才能开 PR）
+### Risk-Routed Merge 门禁 5 条（全部满足才能合入）
 
-1. Local peer reviewer 有**明确放行信号**（"放行"/"LGTM"/"通过"/"可以合入"）
-2. **所有 P1/P2** 已修复且经对应 review source 确认（local peer / cloud / CI / PR checks 分开算）
-3. Local peer review 针对**当前分支/当前工作**（不是历史 review，且必须覆盖进入 merge-gate 的 HEAD SHA）
-4. BACKLOG 涉及条目已在 feature branch 上标 `[x]`
-5. **`pnpm gate` 全绿**（基于最新 `origin/main` rebase 后的全量 build + test + lint + check）
+1. PR body 写清五轴风险判断：行为面 / 数据 / 安全 / 契约 / 不可逆；默认最小安全动作，升档理由可查。
+2. 至少一个非作者独立 review source（local 或 cloud）有明确 verdict；仅在不同高风险面需要不同视角时叠加，愿景守护另按 feature-close 触发。
+3. **所有 P1/P2** 已修复，并由提出 finding 的活跃 source 覆盖当前 HEAD（含 Harness Diet Rebase Continuity 的 continuityProof 桥接）。
+4. 适用的 feature / BACKLOG 真相源没有过度声称，PR 载体与 changed files 匹配。
+5. 与风险匹配的 gate 全绿：低 / 中风险用 targeted commands；安全、鉴权、生产数据、迁移、外部契约或不可逆风险用 `pnpm gate` 全量。
+
+默认只选一个合适的独立 source：家里语境与治理语义优先 local；context-blind 安全 / 契约代码扫描优先 cloud。**动作类型（“开了 PR”“改了代码”）不是叠加理由。**
 
 ### Review Continuity Guard（review 是否真的覆盖当前 HEAD）
 
-`pnpm gate`、rebase、fixup、biome 格式化刷新等都可能让 HEAD 变化。**只要 HEAD 变了，旧 review 默认不自动继承。**
+`pnpm gate`、rebase、fixup、biome 格式化刷新等都可能让 HEAD 变化。**HEAD 变化只触发 provenance 判定，不自动等于 re-review**：先分清 review 后是否真的改了本 PR 的内容、base 前进是否与本 PR 有逻辑关联；两者都没有，或只有可机械证明的派生物重建 / 规范化，旧 review 用 continuityProof 桥接。只有真实的作者 delta 或相关 base delta 回 active source，而且只看那一小块。
+
+**Report 载体铁则（斩断 SHA 自噬环，operator 2026-07-15 投诉②修复）**：**review verdict 之后、merge 之前，不得再向被审分支 commit 任何 review report / handoff 信 / evidence 说明类文档**——这类内容的合法载体只有 PR comment、thread 消息、tracking 系统。被审分支的 HEAD 只应因代码内容（含 rebase）变化。病灶机制：report 进分支 → SHA 变 → 旧 APPROVE 失效 → re-review → 新 report → SHA 又变（round-10 自噬环）。review **请求**信（mailbox，reviewer 开审前已在 HEAD 内）不受此限。
 
 但 continuity 不是一个布尔 `reviewer`。进入 merge-gate 后必须维护 **Review Provenance Matrix**，先判当前 HEAD 变化由谁产生，再决定下一步 gate owner，避免把 cloud / CI / PR check 的外部 gate 投射成本地旧 reviewer。
+
+**Intake admission guard**：inbound intake 已携带有效、覆盖当前 HEAD 的独立 verdict 时，它就是 `already-consumed exact-HEAD review`；merge-gate 直接消费证据，`nextGateOwner=author|merge_owner`，不能把原 reviewer 当每个 callback 的固定下一棒。已完成 review generation 只有 `behavioral_delta`、`stale_or_blocking` 或 `explicit_matrix_route` 三类理由可用 `reviewReentry` + durable evidenceRef 重开。纯 ACK、状态复述、cloud finding 或其他 `no new information` 的消息必须 clean-stop。
 
 | 字段 | 记录内容 |
 |------|----------|
@@ -47,9 +67,10 @@ triggers:
 
 **判定规则**：
 - `headChangeCause = cloud-finding`（cloud P1/P2/COMMENTED 修复后 push 新 SHA）→ `nextGateOwner = cloud`：只重新触发 cloud review + 等 PR tracking；**禁止为了 cloud P1/P2 修复 @ 本地旧 reviewer**。
-- `headChangeCause = ci-fix` / `local-gate` 且只是非行为性 delta（纯 rebase、import order、formatter）→ 可请求 local peer 做一次 scoped continuity approval。
+- `headChangeCause = ci-fix` / `local-gate` 且声称只是非行为性 delta（import order、formatter）→ 先按 C1 证明 reviewed patch 的语义内容没变；证明成立则 author 留痕桥接，不请求 approval。仅凭“formatter / import order”标签或“命令 exit 0”不算证明；证明不了才把实际 delta 交 local peer。
 - `headChangeCause = ci-fix` / `local-gate` 且是非 cloud 的行为性 delta（代码、测试、配置、接口变化）→ local peer delta review；若超出原 review scope，按完整 local review 处理。
 - `headChangeCause = pr-meta`（只改 PR body/comment，不改 commit SHA）→ 不影响 local/cloud review coverage。
+- owned feature branch 在 `pnpm gate` / latest-main rebase 后 HEAD 变化时，发布 PR head 用 `git push --force-with-lease origin {branch}`。这是受 lease 保护的正常 rebase 发布动作，不是禁止项；禁止的是无证据 rewrite 共享/非 owned 分支或 main 历史。发布后按 Matrix `rebase` 行检查“作者 delta + base 关联 + gate”：满足则 continuity 默认有效，author 自决 + 留痕 `skip=rebase-rereview`；否则只让 active review source 覆盖真实变化部分。
 - cloud 额度/权限不可用时，才降级为另一只合格本地猫做**完整 PR review**；这不是把旧 reviewer 拉回来续签。
 
 **封板协议（LL-072，cloud re-review 循环的硬上限）**：
@@ -70,8 +91,8 @@ echo "$CURRENT_HEAD"
 
 - local/cloud 对应 source 的 review SHA = `CURRENT_HEAD` → 通过
 - local/cloud 对应 source 的 review SHA ≠ `CURRENT_HEAD` → **停止 merge-gate，先按 Review Provenance Matrix 判定 nextGateOwner**
-  - 非行为性 delta（例如纯 rebase 无代码差异、biome 格式化刷新）：
-    local peer reviewer 必须在 thread / PR 上**显式写出**“放行延续到 `{CURRENT_HEAD:0:8}`”
+  - **纯 rebase / 可证明的机械 delta（Matrix `rebase` 行 C1–C3 满足）**：`old review APPROVE + continuityProof(C1,C2,C3) ⇒ provenance 合法桥接 reviewedHead → CURRENT_HEAD` = **通过**，author 自决 + 留痕，无需 reviewer 任何表态。
+  - 其他声称非行为性的 delta（biome 格式化刷新、import order）：先做 C1 的 reviewed-patch 对照；可证明没有作者语义 delta 就桥接，证明不了才做 scoped delta review。
   - 行为性 delta（代码、测试、配置、接口变化）：
     按 source 重新 review；cloud finding 修复走 cloud re-review，非 cloud 行为 delta 走 local peer re-review
 - 只改 PR body / comment 不改 commit SHA → 不影响 review 覆盖范围
@@ -96,15 +117,16 @@ merge-gate 执行时，在 Step 7（squash merge）**之前**，猫必须**组�
 | `cloudReviewSha` | Review Provenance Matrix 已有 | remote review 覆盖的 SHA |
 | `headChangeCause` | Review Provenance Matrix 已有 | HEAD 变化原因 |
 | `nextGateOwner` | Review Provenance Matrix 已有 | 下一步门禁所有者 |
-| `gate_passed` | 适用 gate 的退出码 | 对应 gate 是否通过——完整 PR 用 `pnpm gate`（Step 0），exempt PR（SKILL.md/docs-only）用 light path（biome + check:features + git diff --check） |
-| `gate_commands` | 实际执行的命令 | 完整 PR: `["pnpm gate"]`；exempt PR: `["pnpm biome check .", "node scripts/check-feature-truth.mjs", "git diff --check"]`（按实际记录，不硬编码） |
-| `trigger_reason` | 猫判断 | PR 涉及共享代码则 "shared/ changed — full QC"，否则按触发策略表 |
-| `stale` | `head` vs **headChangeCause 决定的活跃 review 源** | 按 `headChangeCause`（不是 `nextGateOwner`）判定哪个 review 源必须覆盖 `head`：`cloud-finding` → 只看 `cloudReviewSha`；`local-gate` → 只看 `localPeerReviewSha`；`ci-fix` → 只看 `localPeerReviewSha`（ci-fix 始终路由到 local peer re-review，见 Step 5.7 判定规则——即使上一次 `headChangeCause` 是 `cloud-finding`，CI 修复后的 HEAD 由 local peer 覆盖）；`rebase` → pure rebase + 0 code delta + reviewer pre-approval = continuity 有效，否则继承上次；`pr-meta` → 不改 SHA，不影响 review 覆盖。exempt PR（无 cloud）始终只看 `localPeerReviewSha`。`nextGateOwner` 是路由字段（谁下一步行动），不参与 stale 判定 |
-| `verdict` | 猫判断 | `passed`（review APPROVE on final HEAD）/ `blocked`（未 APPROVE）/ `pending` |
+| `gate_passed` | 适用 gate 的退出码 | 选定的 targeted 或 full gate 是否通过；不是由“regular PR”自动决定 |
+| `gate_commands` | 实际执行的命令 | 逐条记录真实命令；高风险通常为 `["pnpm gate"]`，其他风险记录受影响检查 + `git diff --check` |
+| `trigger_reason` | 猫判断 | 五轴风险快照 + 为什么选择这些 gate / review source；动作类型不能单独充当理由 |
+| `stale` | `head` vs **headChangeCause 决定的活跃 review 源** | 按 `headChangeCause`（不是 `nextGateOwner`）判定哪个 review 源必须覆盖 `head`：`cloud-finding` → 只看 `cloudReviewSha`；`local-gate` / `ci-fix` → 实际作者 delta 默认回 local，除非 C1 证明只是机械规范化；`rebase` → **C1–C3 全满足时 continuity 默认有效，author 自决合入 + 留痕 `skip=rebase-rereview`，无需 reviewer pre-approval**。**条款归因**：operator directive（`[thread-id]` msg `0001783847510596-000126-50011546`）的原意是“diff 不涉及我们自己改的代码、没有相关联的逻辑关系 → 别 re-review”；C1 的证明方法与 C3 gate 是猫方实现，不得反过来静默加严原意。**C1（作者 delta）**：比较 review 时的 authored patch 与 current authored patch；逐 commit stable patch-id 全部相同只是零 delta 的**快路**。不相同时必须显式列 `postReviewDeltaPaths`，不能把它送进 C2 冒充 base 相关性：①仅 canonical 派生物路径可在运行生成器后、再次运行得到零工作树 diff 时桥接；②仅 canonical formatter / normalizer 造成的变化，必须证明“对 reviewed 内容运行该命令得到的输出 == current blob”，且 current tree 幂等重跑零 diff；③**机械三方合并**可在逐冲突路径证明 current blob 只是 reviewed authored 内容与新 base 内容的无损并集、没有改写观点或行为时桥接（记录 reviewed/base/current 三方 diff 或等价证据）；重叠处需要语义取舍就只审那个 hunk；④其余代码、测试、配置、接口或无法证明的 delta，只让 active source review 这些真实变化。**C2（base 相关性）**：`git diff --name-only <oldBase>..<newBase>`（base 前进）与本 PR 的非派生物路径无交集，并留痕 `baseDeltaDomains=<...> relation=none:<理由>`；共享契约 / schema / export / 构建配置等跨文件耦合拿不准就只审关联部分。**C3**：rebase 后风险匹配的 gate / targeted tests 绿。continuityProof 在 rebase 前固定 `reviewedHead/oldBase/newBase`，rebase 后记录 `currentHead`；任一项不满足只使对应真实 delta stale，不让无关 commit 重审。`pr-meta` 不改 SHA；local-only / cloud-only 分别消费自己选择的 source。 |
+| `continuityProof` | `reviewedHead/oldBase/newBase/currentHead` + C1 authored-patch 对照（快路 patch-id，或 `postReviewDeltaPaths` 与 canonical-output 等价证明）+ C2 base 交集与 `relation=` + C3 gate 结果 | review provenance 桥接凭证；证明“review 后没有相关作者变化”，不是要求 SHA / range-diff 字面全等 |
+| `verdict` | 猫判断 | `passed`（review APPROVE on final HEAD **或经 continuityProof 桥接的 APPROVE**）/ `blocked`（未 APPROVE）/ `pending` |
 
 **组装时机**：Step 6.9（Evidence Validation Checker）中组装，紧接在 Step 6.8 之后、Step 7 merge 之前。
 
-**与 Review Provenance Matrix 的关系**：Evidence Manifest ⊇ Review Provenance Matrix。前 5 个字段 = Matrix 原有字段（改名 `currentHead` → `head`），后 5 个是 F253 新增的 gate/evidence 字段。猫不需要维护两份——执行 merge-gate 时按 Evidence Manifest 全量检查即可，Matrix 是其子集。
+**与 Review Provenance Matrix 的关系**：Evidence Manifest ⊇ Review Provenance Matrix。前 5 个字段 = Matrix 原有字段（改名 `currentHead` → `head`），其余为 F253 新增的 gate/evidence 字段与 continuityProof 桥接凭证（准确计数随字段演进，以表为准——不再硬编码数字）。猫不需要维护两份——执行 merge-gate 时按 Evidence Manifest 全量检查即可，Matrix 是其子集。
 
 ### Evidence Validation Checker（F253 Phase A — Step 6.9）🔴
 
@@ -115,10 +137,10 @@ merge-gate 执行时，在 Step 7（squash merge）**之前**，猫必须**组�
 | # | 检查项 | 验证方式 | 失败动作 |
 |---|--------|----------|----------|
 | E1 | `head` === PR current HEAD | `git rev-parse HEAD` vs `gh pr view {PR_NUMBER} --json headRefOid --jq '.headRefOid'` | BLOCKED — HEAD 不一致，可能有 unpushed commit |
-| E2 | `stale` === false | 按 `headChangeCause` 判定的活跃 review 源覆盖当前 `head`（见上方 `stale` 字段定义的完整映射表）。`nextGateOwner=author` 时（merge-ready 态），沿用最后一次 `headChangeCause` 确定的活跃源；`nextGateOwner=ci/guardian` 时，review 覆盖规则不变（CI/guardian 是额外 gate，不改变 review 覆盖链） | BLOCKED — 活跃 review 源的 SHA 过期，需要 re-review |
-| E3 | reviewer provenance 闭合 | 至少一个 review 源（local 或 cloud）非空且覆盖 `head`（exempt PR 无 cloud 时只看 local） | BLOCKED — 缺 review provenance |
+| E2 | `stale` === false | 按 `headChangeCause` 判定的活跃 review 源覆盖当前 `head`（见上方 `stale` 字段定义的完整映射表）。`nextGateOwner=author` 时（merge-ready 态），沿用最后一次 `headChangeCause` 确定的活跃源；`nextGateOwner=ci/guardian` 时，review 覆盖规则不变（CI/guardian 是额外 gate，不改变 review 覆盖链） | BLOCKED — 补 continuityProof；只有真实新内容才 re-review |
+| E3 | reviewer provenance 闭合 | 至少一个按风险选定的 review 源（local 或 cloud）非空且覆盖 `head`；仅校验本 PR 实际选择的 source。**「覆盖」三种合法形态**：① review SHA == `head` 直接覆盖；② `old review APPROVE + continuityProof(C1,C2,C3)` 桥接 reviewedHead → `head`（Matrix `rebase` 行，桥凭证在 Evidence Manifest）；③ **对话内容审 + author 机械转录**（2026-07-16，operator 席位纠偏）：reviewer 已在 thread 对同一内容给出明确 verdict（含 message 锚点），PR diff 与已审内容一致由 **author 出机械证据**（`git diff <已审 ref>..HEAD` 为空 / patch-id 相同 / diff hash 对照）→ author 将 verdict 转录为 PR comment（带 thread 锚点 + 机械证据），**reviewer 零二次出场**。**席位原则：机械动作（对账/转录/落点确认）归 author 或机器，判断动作才归 reviewer——召唤 reviewer 的唯一合法理由是"存在需要判断力的新内容"，两个字符串的相等判断不配烧一只 reviewer invocation** | BLOCKED — 缺 review provenance |
 | E4 | `verdict` !== "blocked" | review 结果为 APPROVE（非 BLOCK / CHANGES_REQUESTED） | BLOCKED — reviewer 未放行 |
-| E5 | `gate_passed` === true | 适用 gate 通过——完整 PR: `pnpm gate`（Step 0）；exempt PR（SKILL.md/docs-only）: light path（见上方 `gate_commands` 定义） | BLOCKED — gate 未通过或未跑 |
+| E5 | `gate_passed` === true | 风险匹配的 targeted / full gate 已运行并通过，命令记录在 `gate_commands` | BLOCKED — gate 未通过、未跑或与风险不匹配 |
 
 **通过时输出**（cloud-finding 流程示例）：
 ```
@@ -131,11 +153,11 @@ merge-gate 执行时，在 Step 7（squash merge）**之前**，猫必须**组�
   verdict: passed
 ```
 
-**通过时输出**（exempt SKILL.md PR 示例）：
+**通过时输出**（local-only SKILL.md PR 示例）：
 ```
 ✅ Evidence validation passed
   head: ghi9012
-  headChangeCause: local-gate → active review source: local (exempt, no cloud)
+  headChangeCause: local-gate → active review source: local (risk-selected; no cloud)
   review coverage: local=ghi9012 ✓
   gate: passed (light path: biome + check:features + git diff --check)
   stale: false
@@ -154,21 +176,25 @@ merge-gate 执行时，在 Step 7（squash merge）**之前**，猫必须**组�
 
 **与已有 Review Continuity Guard 的关系**：Review Continuity Guard 定义了"HEAD 变了怎么判 nextGateOwner"的规则；Evidence Validation Checker 在 merge 前**执行**这些规则的最终验证。前者是政策，后者是门禁。
 
-### `pnpm gate` — Latest Main 全量门禁（Step 0，开 PR 前必跑）
+### Gate 选择 — targeted 默认，高风险 full
+
+默认运行受影响检查 + `git diff --check`；现有精确检查已经红时，它就是 RED。确定性生成物刷新不为仪式感另造测试。
+
+命中安全 / 鉴权 / 生产数据 / 数据迁移 / 外部契约 / 不可逆面，或 targeted 检查无法覆盖跨包合流风险时，运行 Latest Main 全量门禁：
 
 ```bash
 pnpm gate
 # 等价于 bash scripts/pre-merge-check.sh
 # 自动执行：fetch origin/main → rebase → build → test → lint → check
-# 全绿才能继续开 PR。任一步骤失败 → 修复后重跑
+# 高风险全绿才能继续开 PR。任一步骤失败 → 修复后重跑
 ```
 
-**为什么需要这一步**：quality-gate 和 request-review 跑的测试基于旧 base SHA。
+**为什么高风险需要这一步**：quality-gate 和 request-review 跑的测试可能基于旧 base SHA。
 并行开发中，其他猫的 PR 合入 main 后可能改变共享契约（类型/接口/store 结构），
 导致你的代码在新 main 上 break。`pnpm gate` 在最终合流点做一次全量验证，
 堵住"每只猫都说绿，合流后一堆红"的系统性漏洞。
 
-**"UT 全绿"三件套证据**（`pnpm gate` 通过后自动打印）：
+**full gate 三件套证据**（`pnpm gate` 通过后自动打印）：
 1. 命令：`pnpm gate`（全量，不是 `--filter`）
 2. SHA：基于最新 `origin/main` rebase 后的 HEAD SHA
 3. 状态：已 rebase 到最新 `origin/main`
@@ -235,7 +261,8 @@ printf '%s\n' "$PR_BODY" | rg -q '@[A-Za-z0-9_-]+ review' && \
 printf '%s\n' "$PR_BODY" | rg -q '@(codex|chatgpt-codex-connector|gpt52|opus|sonnet|gemini)\b' && \
   { echo "❌ 不合规：PR body 禁止出现任何 @句柄（含 HTML 注释中的签名）"; exit 1; }
 
-# 5. 触发remote review（极简格式，在 PR comment 中，不是 body！）
+# 5. 仅当风险路由选中 cloud 时触发remote review；local-only / guardian-only lane 跳过 5–6
+#    （极简格式，在 PR comment 中，不是 body！）
 # ⚠️ 只发 “@codex review” 一行，不带 SHA、不带规则描述、不带审查标准！
 # 详细格式会让 Codex connector 误解为代码修改请求（2026-04-20 PR #1300 确认）
 # 详见 refs/pr-template.md「云端 Review 触发 Comment 模板」
@@ -248,17 +275,25 @@ LAST_TRIGGER=”$(gh pr view {PR_NUMBER} --json comments | jq -r '
 
 gh pr comment {PR_NUMBER} --body '@codex review'
 
-# 6. 等remote review（事件驱动，不轮询）
+# 6. 已选 cloud 时等remote review（事件驱动，不轮询）
 #
 # 6.1 👀 接单检测（触发后 5 分钟查一次）
 TRIGGER_COMMENT_ID=”$(gh api repos/{OWNER}/{REPO}/issues/{PR_NUMBER}/comments \
   --jq '[.[] | select(.body | test(“^@codex\\s+review”; “m”))] | last | .id')”
 EYES=”$(gh api repos/{OWNER}/{REPO}/issues/comments/${TRIGGER_COMMENT_ID}/reactions \
-  --jq '[.[] | select(.content == “eyes”)] | length')”
-#   - EYES > 0 → 云端已接单 → 停止监控，PR tracking 会自动通知结果。
+  --jq '[.[] | select(.content == “eyes” and .user.login == “chatgpt-codex-connector[bot]” and .user.type == “Bot”)] | length')”
+#   - Codex connector EYES > 0 → 云端已接单 → 停止监控，PR tracking 会自动通知结果。
 #     ⚠️ KD-27：此时必须释放 hold_ball，禁止续约轮询。PR tracking 回调是唯一通知渠道。
-#     如果你之前 hold_ball 轮询等接单，现在 EYES > 0 = 切换到事件驱动模式，不再 hold。
-#   - EYES == 0 → 云端没接到 → 允许 re-trigger（进 6.2），可以 hold_ball 轮询等 EYES
+#     如果你之前 hold_ball 轮询等接单，现在 connector EYES > 0 = 切换到事件驱动模式，不再 hold。
+#     为让 F177 routing guard 机械证明本 invocation 的 clean stop，必须用同 PR + exact trigger comment id
+#     re-register 一次 invocation-bound event wait（server 会独立验证 comment subject/body/reaction actor）：
+#       cat_cafe_register_pr_tracking(
+#         repoFullName={OWNER}/{REPO}, prNumber={PR_NUMBER}, intent='review',
+#         eventWait={ expectedSignal: 'review_posted', triggerCommentId: Number(TRIGGER_COMMENT_ID) }
+#       )
+#     只有返回 eventWait.covered=true 才可纯事件驱动停止；covered=false / 503 均 fail closed，禁止把任意
+#     active tracker 或一句“PR tracking 会叫我”当合法出口。
+#   - connector EYES == 0 → 云端没接到 → 允许 re-trigger（进 6.2），可以 hold_ball 轮询等 EYES
 #
 # 6.2 允许再次触发的条件（满足任一即可）：
 #     a. HEAD SHA 变化（有新 commit）
@@ -350,12 +385,52 @@ node scripts/check-feature-truth.mjs
 # → 详见下方「Feature Doc Truth 核对（Step 7.5）」§ 7.5a（含人工核对项）
 
 # 7. Squash merge（GitHub 处理，禁止本地 squash！）
-gh pr merge {PR_NUMBER} --squash --delete-branch
+# ⚠️ merge 退出码双向不可信 → cleanup 只由 PR truth(state=MERGED) 授权，退出码不能单独定性：
+#    ① worktree false-fail（#2567 opus48 / #2837 Sol）：gh 删远端 branch 后切回 main 被主仓 worktree
+#       占用而拒绝（"main is already used by <path>"）→ 远端已 merged 但【非零退出】。非零 ≠ 失败。
+#    ② merge queue / auto-merge（cloud P2-2）：`gh pr merge --help` 明确 exit 0 可能只是入队 / 启用
+#       auto-merge，PR 仍 OPEN 未 merged → 【exit 0 ≠ 已 merged】。盲信 exit 0 会 cleanup 未合的 PR。
+#    ❌ 禁止凭退出码判 merge 成败或重跑 gh pr merge。
+MERGE_RC=0
+gh pr merge {PR_NUMBER} --squash --delete-branch || MERGE_RC=$?
+# 定性：脚本查 gh pr view state，仅 state=MERGED 才授权 cleanup（回归测试 classify-merge-outcome.test.mjs）。
+# 退出码三态——pending 不是失败，必须与真失败分开出口（cloud P2-4）：
+#   0 = PR truth 确认 MERGED（clean / worktree false-fail）→ 进入 7.5b/8 cleanup
+#   3 = merge_pending（merge queue / auto-merge 已入队，PR 仍 OPEN）→ 不是失败，等 PR truth=MERGED 再 cleanup
+#   1 = 真失败 / indeterminate（PR truth 不可得）→ 停下诊断，禁止盲目 retry 或 cleanup
+node scripts/classify-merge-outcome.mjs --pr {PR_NUMBER} --merge-exit-code "$MERGE_RC"
+CLASSIFY_RC=$?
+case "$CLASSIFY_RC" in
+  0) : ;;  # confirmed MERGED → 继续 7.5b/8 cleanup
+  3)  # merge_pending：PR 入队 / auto-merge，未 merged。不是失败——不 cleanup、不 retry、不 abort。
+      echo "⏳ PR 在 merge queue / auto-merge pending（未 merged）——不是失败，暂不 cleanup。"
+      echo "   等它合完再 cleanup：轮询 gh pr view {PR_NUMBER} --json state 到 MERGED，"
+      echo "   或 cat_cafe_hold_ball 等 PR state=MERGED（wakeWhen 跑 gh pr view ... 命令），MERGED 后再进 Step 7.5b/8。"
+      exit 3 ;;
+  *)  # 1（及其它非 0/3，如 2 bad-invocation）= 真失败 / indeterminate
+      echo "❌ merge 未确认成功（真失败 / PR truth 不可得）——停止 merge-gate；人工核 PR 状态"
+      echo "   gh pr view {PR_NUMBER} --json state,mergeable,mergeStateStatus  （不要盲目重跑 gh pr merge 或 cleanup）"
+      exit 1 ;;
+esac
 
-# 7.5b Post-merge: 记录已合入状态（每次 merge 必做！）🔴
-#   Phase ✅ / AC 打勾 / Timeline 记 merged / Status 推进 → commit → 复跑 check-feature-truth
+# 7.5b Post-merge: 仅当本 PR 改变 feature truth 时同步状态 🔴
+#   Phase / AC / Status 有真实 delta → 同步 + Timeline provenance → commit → 复跑 check-feature-truth
+#   仅“发生了一次 merge”不是状态 delta；无 delta 则整段跳过，不制造 doc churn
 # → 详见下方「Feature Doc Truth 核对（Step 7.5）」§ 7.5b
 ```
+
+### Step 7.5c: Runtime Activation Truth（按影响面触发）🔴
+
+PR 触及 runtime 加载面（API / Web / MCP / L0 staging 等）时，merge 只证明代码落到 `main`，不证明 live runtime 已加载。合入后必须分别声明：
+
+- `main=landed:<merge SHA>`
+- `live=dormant:<当前 runtime 未加载的证据>`，或 `live=activated:<授权与新实例验证证据>`
+
+默认终态是 `live=dormant`，不得自动同步或重启。只有operator显式授权后，才从持有 main 的 worktree 运行 ADR-039 唯一入口 `pnpm start` 完成 sync + build + restart；禁止进入 `cat-cafe-runtime` 手工 pull / build / restart。
+
+激活后的验证必须来自**新进程或新 invocation**：至少证明 runtime HEAD 包含目标 merge SHA，并验证一个该 PR 改变的真实加载面。旧进程上的源码 diff、重复 delivery receipt、或 main 文件存在都不能冒充 live 生效。
+
+尚未获授权时，带 Decision Packet 路由 `@co-creator`，把 durable 状态留为 `live=dormant`；等待人类回复不调用 `hold_ball`。只有完成授权后的启动与新实例 probe，才能改报 `live=activated`。
 
 ### Step 7.6: Hotfix 升级 Review Cron 注册（F177 Phase E）🔴
 
@@ -374,7 +449,7 @@ gh pr merge {PR_NUMBER} --squash --delete-branch
 | `category` | `"pr"` |
 | `params` | `{"message":"Hotfix PR #{PR_NUMBER} 合入已满 2 周。请三选一处置：1. 升级正式修复（开 feat）2. 接受永久方案（标记 permanent）3. 已不再相关（代码已重写/删除，标记 obsolete）"}` |
 
-**Fail-closed**：MCP 调用失败 → **停止 merge-gate，不执行 Step 8（清理）**。排查 MCP 连接后重试；连续失败 → 通知operator手动注册 reminder 后继续。
+**注册范围**（2026-07-15 修订）：仅对**明确临时债务**注册（修法自声明是权宜、欠正式方案）；走了 hotfix 流程但修法本身已是终态的，留痕 `reminder=not-needed:<理由>` 免注册。**注册失败不阻塞清理**：记 telemetry / 留痕后继续 Step 8，事后补注册——调度器故障不该扣押 worktree（旧版 fail-closed 是自噬环）。
 
 ```bash
 # 8. 更新本地 + 清理（fail-closed）
@@ -417,7 +492,7 @@ fi
 git worktree prune  # 清理 dangling worktree references
 ```
 
-### remote review 处理规则
+### remote review 选择与处理规则
 
 **⚠️ LL-033 教训：必须检查 inline code comments！**
 
@@ -425,28 +500,23 @@ remote review 的 P1/P2 可能在 **inline code comments** 里，不在 review b
 `gh pr view` 的 `--json reviews` 只返回 review body（可能显示"no major issues"），
 但 inline code comment 里可能有 P1。
 
-#### 豁免条件 — 哪些 PR 跳过remote review（operator directive 2026-05-13）🔴
+#### 什么时候选 cloud
 
-云端 codex 没有 Cat Café MCP，看不到 thread / memory / 真相源，不了解家里 SOP 演化历史。对**纯家规/SOP/skill 类文字改动**做remote review 会引入"被带歪"风险 > 价值。
+云端 Codex 没有 Clowder AI MCP，看不到 thread / memory / 家里 SOP 演化历史；它的价值是 context-blind 代码扫描，不是所有 PR 的第二张门票。
 
-**默认豁免（本地 review pass 后直接 squash merge）**：
-- `cat-cafe-skills/**/SKILL.md` 改动（家规、SOP、流程文字 — 云端看不懂语境）
-- `cat-cafe-skills/refs/*.md` 改动（共享 lessons、reference partials）
-- `project-reflections/*.md` / `feature-discussions/*.md` 纯文字改动
-- 任何 docs-only PR 且本地 reviewer 是非 author 的Maine Coon族 reviewer（跨 family）
+**优先 local、默认不选 cloud**：
+- `cat-cafe-skills/**`、家规、SOP、治理 / discussion 等依赖家里语境的改动；
+- 风险低、targeted checks 精确、local stateful reviewer 足以覆盖的实现；
+- co-creation docs classifier 返回 `cloudReview=skip`。
 
-**仍必须走remote review（不能豁免）**：
-- 任何 `packages/**` 代码改动（业务逻辑 / API / 前端）
-- 任何 test 改动（含 fixture）
-- 涉及 secret / auth / SSRF / DoS 资源边界的改动
-- inbound community PR intake（即使是 docs-only — source intent 验证需要外部视角）
+**优先 cloud**：
+- secret / auth / SSRF / DoS / 生产数据 / 外部契约等高风险代码面；
+- 跨包或陌生代码，需要独立 context-blind 扫描；
+- inbound community PR 的 source-intent / 外部边界验证。
 
-**豁免时仍要做**：
-- 本地 reviewer 跨家族 review pass（必经）
-- `pnpm gate` light path（biome + check:features + git diff --check）
-- PR comment 标注 "Cloud review skipped per operator directive: <reason>" 留决策依据
+普通 `packages/**` 或 test 改动**不因文件类型自动触发 cloud**；先看五轴风险与 targeted coverage。若 local 与 cloud 同时使用，PR body 必须分别写明两者覆盖的不同风险面。未选 cloud 时记录 `cloudReview=not-selected reason=<...>`，不是“豁免申请”。
 
-事故来源：PR #1661 (SOP 改进 docs-only) 本地Maine Coon review pass 后无意识触发remote review，operator 立刻 push back "云端不懂家里情况，会被带歪"。
+事故来源：PR #1661 的纯 SOP 改动在 local review 后又无意识触发 cloud；第二刀把“默认触发 + 申请豁免”反转为“有风险理由才选择”。
 
 #### 层级 A：通知已包含 severity（自动）
 
@@ -503,15 +573,17 @@ MAIN_WT="$(git worktree list --porcelain \
 cd "$MAIN_WT" && git pull origin main   # 取回刚 squash 的 commit，doc-sync 落点切到 main
 ```
 
-然后**在 main 上**把这个 PR 带来的增量写进 feature doc：
+然后先判断这个 PR 是否带来 **feature truth delta**：Phase 完成、AC 达成/删除/签字、Status 推进。**“PR merged”这个事实本身不是 feature truth delta**；若三者均无变化，整段 7.5b 留痕跳过，Timeline 也不追加。
+
+仅在存在上述 truth delta 时，**在 main 上**把这个 PR 带来的增量写进 feature doc：
 
 1. **更新 feature doc** `docs/features/F{NNN}-*.md`：
    - **Phase 状态**：本 PR 对应的 Phase 标记从 📋/🚧 → ✅
    - **AC 打勾**：本 PR 实际完成的 AC 项 `[ ]` → `[x]`（只勾代码真做了的 —— 7.5a 已核对）
-   - **Timeline**：加一行 `| {YYYY-MM-DD} | Phase {X} merged (PR #{N}) |`
+   - **Timeline**：为这次 truth delta 加一行 provenance：`| {YYYY-MM-DD} | Phase {X} merged (PR #{N}) |`
    - **Status 行**：第一个 Phase 完成 `spec` → `in-progress`；最后一个 Phase 视情况推进（`done` 留给 completion 愿景守护）
    - **不做**：不动 Dependencies/Risk/Links（kickoff/completion 的事）
-2. **Commit + push**：在 main 上 `git commit` + `git push origin main`，message `docs(F{NNN}): sync phase progress after PR #{N} merge`（文档同步不需走 review）。
+2. **Commit + push**：只有 Phase / AC / Status 至少一项真实变化才会进入本段；Timeline 是该变化的 provenance，**不能反过来把自己当成触发 commit 的理由**。本 PR 未改变 feature truth → 留痕跳过，不产出空 doc commit 刷 main（churn + index 竞态源，2026-07-15 修订）。派生 index 由生成器 / merge finalizer **机器独占维护**，不随手工 doc commit 顺手刷。message `docs(F{NNN}): sync phase progress after PR #{N} merge`（文档同步不需走 review）。
 3. **复验**：再跑一次 `node scripts/check-feature-truth.mjs` —— 确认 post-merge 写入没引入新 drift（例如加了 merged Timeline 却忘把 `spec` 推进成 `in-progress`，lint 会抓）。
 
 > 落点说明：7.5b 切到持有 main 的 worktree（通常是主仓）做 doc-sync；后续 Step 8 清理本就从主仓发起（`git worktree remove ../cat-cafe-{name}`），此时已在 main worktree，其 `git checkout main` 幂等 no-op。单仓无独立 feature worktree 时 `git worktree list` 只返回主仓，cd 即原地。
@@ -519,9 +591,9 @@ cd "$MAIN_WT" && git pull origin main   # 取回刚 squash 的 commit，doc-sync
 **检查清单**：
 - [ ] **(pre)** doc 标 ✅ 的 Phase / 打勾 AC 都有代码支撑（没撒谎）
 - [ ] **(pre)** `check-feature-truth` 绿（无 status↔timeline drift）
-- [ ] **(post)** 本 Phase 标 ✅ + 相关 AC 打勾
-- [ ] **(post)** Timeline 有 merged 记录 + Status 行与实际进度一致
-- [ ] **(post)** 复验 `check-feature-truth` 仍绿
+- [ ] **(post, 有 truth delta 时)** Phase / AC / Status 与现实同步，Timeline 记录同一 delta
+- [ ] **(post, 有 truth delta 时)** 复验 `check-feature-truth` 仍绿
+- [ ] **(post, 无 truth delta 时)** 已留痕跳过，未仅为 Timeline 制造 doc commit
 
 ## Quick Reference
 
@@ -530,30 +602,34 @@ cd "$MAIN_WT" && git pull origin main   # 取回刚 squash 的 commit，doc-sync
 | Reviewer 放行？ | 搜索明确信号词 |
 | P1/P2 清零？ | 检查 review 记录 |
 | BACKLOG 更新？ | `grep '\[x\]' docs/ROADMAP.md` |
-| 云端通过？ | `gh pr checks {PR}` |
+| 选中 cloud 时通过？ | review body + inline comments + `gh pr checks {PR}`；未选 cloud 记录理由 |
 | Evidence validation 通过？(Step 6.9) | E1-E5 五项全绿（head 一致 + review 不 stale + provenance 闭合 + verdict passed + gate passed） |
 | Feature doc 说真话？(pre-merge) | doc 标 ✅/打勾 AC 有代码支撑 + `node scripts/check-feature-truth.mjs` 绿 |
-| 已合入状态记录？(post-merge) | feature doc Phase ✅ + AC 打勾 + Timeline 有 merged 记录 + Status 推进 |
+| 已合入状态记录？(post-merge) | 有 Phase/AC/Status truth delta → 同步并加 Timeline provenance；无 delta → 留痕跳过 |
 
 ## Common Mistakes
 
 | 错误 | 正确 |
 |------|------|
+| 因为“regular PR / packages 改动”默认叠 local + cloud | 先做五轴风险判断，默认一个合适的独立 source；高风险才按不同风险面叠加 |
 | PR body 里写了remote review 触发句柄 | 在 PR **comment** 里写（body 里写会触发代码修改权限而非 review） |
 | PR body 或 HTML 注释里写了 `@句柄`（例如签名） | **PR body 禁止任何 @句柄**，签名改为纯文本（如 `codex` / `gpt52`） |
 | 触发 comment 带了多行描述（SHA/规则/审查标准） | **只发 `@codex review` 一行**，详细内容让 Codex 误解为代码修改请求 |
 | 同一个 commit 连续发多条触发 comment | 先做 Step 5.1 去重检查；只有新 commit 才 re-trigger |
 | 触发后立刻轮询或手动重触发 | 5 分钟后查 👀（Step 6.1）；有 👀 = PR tracking 自动通知，**释放 hold_ball 不再轮询**（KD-27）；无 👀 = 允许 re-trigger |
-| 修了 P1 不 re-trigger review | 修完 push 后**必须重新触发**remote review |
+| 修了 P1 没让 active source 覆盖新 HEAD | local finding 回 local；cloud finding 才 re-trigger cloud |
 | cloud P1/P2 修完后又 @ 本地旧 reviewer 续签 | `headChangeCause=cloud-finding` → re-trigger cloud review + 等 PR tracking；本地 peer 不是 Stage ④ 常驻 gate |
-| `pnpm gate` rebase / fixup 后沿用旧 review 直接 merge | 先对齐 `headRefOid`；**只要 HEAD 变了，先按 Review Provenance Matrix 判定 nextGateOwner** |
+| `pnpm gate` rebase / fixup 后**不做判定**就沿用旧 review 直接 merge | 先对齐 `headRefOid`；**只要 HEAD 变了，先按 Review Provenance Matrix 判定 nextGateOwner**（pure rebase 三条件全满足 = 合法 continuity + 留痕，见 `rebase` 行；未判定未留痕就沿用 = 违规） |
+| owned feature branch 被 `pnpm gate` rebase 到新 main 后不敢 push | 先用 `range-diff` / gate 输出确认 patch-equivalent 或 delta scope；然后 `git push --force-with-lease origin {branch}` 发布 PR head，再做 continuity / evidence validation |
 | 本地 `git rebase -i` 手动 squash | 用 `gh pr merge --squash`（GitHub 处理） |
 | 本地 merge 后 `gh pr close` | `gh pr close` = 放弃，`gh pr merge` = 合入 |
-| 不等remote review 直接合入 | 必须等 0 P1/P2 |
+| `gh pr merge` 非零退出就判 merge 失败 / 重跑 | worktree 里远端 merge 成功但本地切回 main 被拒也会非零退出（#2567 opus48 / #2837 Sol）；Step 7 用 `classify-merge-outcome.mjs` 查 PR truth 定性——state=MERGED 进 cleanup、**禁止重跑**；真失败才 block |
+| 把 merge queue / auto-merge pending 当 merge 失败 abort | exit 0 + PR OPEN = 入队 / auto-merge pending（不是失败，cloud P2-4）；classify 给独立 exit 3，Step 7 `case 3` 分支等 PR truth=MERGED 再 cleanup——**pending 不 cleanup、不 retry、不 abort、不标成 failure** |
+| 选了 cloud 却没等结果就合入 | 选中的 source 必须覆盖 final HEAD 且 P1/P2 已处置；未选 cloud 不等待它 |
 | 把截图/录屏/.pen 直接 commit 到仓库根目录 | Step 0.5 Root Artifact Guard 先拦截；先归档再开 PR |
 | 跳过 evidence validation 直接 merge | Step 6.9 五项 E1-E5 全过才能进 Step 7；不组装 evidence = 不知道 review 是否 stale |
 | Merge **前**不核对 feature doc 说真话 | Step 7.5a：标 ✅/打勾 AC 必须有代码支撑，`check-feature-truth` 绿，再 merge |
-| Merge **后**不记录已合入状态 | Step 7.5b：Phase ✅ + AC 打勾 + Timeline 记 merged + Status 推进 |
+| Merge **后**无条件追加 Timeline | Step 7.5b：先判 Phase/AC/Status truth delta；有才同步并记 provenance，无则整段跳过 |
 | Merge 后不清理 review 沙盒 | Step 8.5 按 review-target-id 回收 `/tmp/cat-cafe-review/` |
 
 ### **⚠️⚠️ 反面案例（PR #160）— 必须记住**
@@ -631,11 +707,11 @@ gh pr comment {PR_NUMBER} --body '@codex review'
 
 合入后判断 feature 规模：
 
-**最后一个 Phase（或小 Feature）** → **直接加载 `feat-lifecycle` completion**（§17）：
-1. 自己做愿景三问
-2. 自动 @ **非 reviewer、非作者**的猫做愿景守护（查 roster 动态选，不能 hardcode）
-3. 守护猫放行 → close feat
-4. 守护猫踢回 → 修改后重新走 quality-gate
+**最后一个 Phase（或小 Feature）** → `feat-lifecycle` completion：
+1. 自己做愿景三问。
+2. 用户可见、产品方向或愿景发生变化 → @ **非 reviewer、非作者**的猫做愿景守护；这是终态风险触发，不是每个 PR 固定第三审。
+3. 纯内部机械 change 且没有 feature-close 愿景面 → 记录 `guardian=not-triggered reason=<...>`，不为流程完整度召唤守护猫。
+4. 守护触发时：放行才 close；踢回则修改并跑与 delta 匹配的验证。
 
 **中间 Phase（大 Feature，3+ Phase）** → Phase 文档同步（Step 7.5 已做）+ **主动碰头operator**：
 1. 成果展示（截图 / demo / 关键改动）

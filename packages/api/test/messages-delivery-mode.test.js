@@ -9,9 +9,22 @@ import Fastify from 'fastify';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 const { InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
+const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
+const { QueueProcessor } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
 const { buildCapsuleFromRouteState, completeCapsuleForSeal } = await import(
   '../dist/domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js'
 );
+
+const OPUS_SLOT_KEY = JSON.stringify(['thread-1', 'opus']);
+const CODEX_SLOT_KEY = JSON.stringify(['thread-1', 'codex']);
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
 
 /** Build a complete deps object for messagesRoutes */
 function buildDeps(overrides = {}) {
@@ -50,7 +63,7 @@ function buildDeps(overrides = {}) {
       completeAll: mock.fn(),
       has: mock.fn(() => false),
       cancel: mock.fn(() => ({ cancelled: true, catIds: ['opus'] })),
-      cancelAll: mock.fn(() => ['opus']),
+      cancelAll: mock.fn(() => ({ catIds: ['opus'], executionIds: [] })),
       cancelInvocation: mock.fn(() => ['opus']),
       isDeleting: mock.fn(() => false),
     },
@@ -78,6 +91,31 @@ function buildDeps(overrides = {}) {
     },
     ...overrides,
   };
+}
+
+function wireRealExecutionOwners(deps) {
+  const tracker = new InvocationTracker();
+  deps.invocationTracker = tracker;
+  const processor = new QueueProcessor(
+    /** @type {any} */ ({
+      queue: deps.invocationQueue,
+      invocationTracker: tracker,
+      invocationRecordStore: deps.invocationRecordStore,
+      router: deps.router,
+      socketManager: deps.socketManager,
+      messageStore: {
+        ...deps.messageStore,
+        getById: mock.fn(async () => null),
+      },
+      log: {
+        info: mock.fn(),
+        warn: mock.fn(),
+        error: mock.fn(),
+      },
+    }),
+  );
+  deps.queueProcessor = processor;
+  return { tracker, processor };
 }
 
 describe('POST /api/messages deliveryMode', () => {
@@ -124,12 +162,23 @@ describe('POST /api/messages deliveryMode', () => {
 
     // Should have written user message to messageStore
     assert.equal(deps.messageStore.append.mock.calls.length, 1);
+    const queuedWrite = deps.messageStore.append.mock.calls[0].arguments[0];
+    assert.equal(queuedWrite.deliveryStatus, 'queued');
+    assert.equal(queuedWrite.queueCustody.entryId, body.entryId);
+    assert.equal(queuedWrite.queueCustody.status, 'queued');
+    assert.deepEqual(queuedWrite.queueCustody.pendingTargetCats, ['opus']);
 
     // Should have emitted queue_updated to user
     const emitCalls = deps.socketManager.emitToUser.mock.calls;
     const queueUpdate = emitCalls.find((c) => c.arguments[1] === 'queue_updated');
     assert.ok(queueUpdate, 'should emit queue_updated');
     assert.equal(queueUpdate.arguments[2].action, 'enqueued');
+    assert.equal(deps.invocationQueue.list('thread-1', 'user-1')[0].ownerAuthProvenance, 'strict');
+    assert.equal(
+      Object.hasOwn(queueUpdate.arguments[2].queue[0], 'ownerAuthProvenance'),
+      false,
+      'internal auth provenance must not enter queue_updated payloads',
+    );
   });
 
   it('queue mode replay with same idempotencyKey does not append duplicate message', async () => {
@@ -206,6 +255,7 @@ describe('POST /api/messages deliveryMode', () => {
     // Fill queue to capacity (5 entries with different targets to prevent merge)
     for (let i = 0; i < 5; i++) {
       deps.invocationQueue.enqueue({
+        ownerAuthProvenance: 'unknown',
         threadId: 'thread-1',
         userId: 'user-1',
         content: `msg ${i}`,
@@ -280,6 +330,240 @@ describe('POST /api/messages deliveryMode', () => {
 
     // Should have proceeded to create InvocationRecord (immediate path)
     assert.ok(deps.invocationRecordStore.create.mock.calls.length > 0);
+  });
+
+  it('force mode acquires the replacement through QueueProcessor joint ownership', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => true);
+    const replacement = new AbortController();
+    deps.queueProcessor.acquireExternalExecution = mock.fn((_threadId, _targetCats, _userId, options) => {
+      options.onOwnershipValidated?.();
+      return replacement;
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '原子替换', threadId: 'thread-1', deliveryMode: 'force' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(deps.queueProcessor.acquireExternalExecution.mock.calls.length, 1);
+    const acquisitionArgs = deps.queueProcessor.acquireExternalExecution.mock.calls[0].arguments;
+    assert.equal(acquisitionArgs[0], 'thread-1');
+    assert.deepEqual(acquisitionArgs[1], ['opus']);
+    assert.equal(acquisitionArgs[2], 'user-1');
+    assert.equal(acquisitionArgs[3].mode, 'replacement');
+    assert.equal(acquisitionArgs[3].executionId, 'inv-stub');
+    assert.equal(typeof acquisitionArgs[3].onOwnershipValidated, 'function');
+    assert.equal(deps.invocationTracker.cancelInvocation.mock.calls.length, 1);
+  });
+
+  it('force mode cancels a same-user invocation that arrives while record creation is pending', async () => {
+    await app.close();
+    deps = buildDeps();
+    const forceCreate = deferred();
+    deps.invocationRecordStore.create.mock.mockImplementation(async () => forceCreate.promise);
+    const { tracker } = wireRealExecutionOwners(deps);
+
+    const { messagesRoutes } = await import('../dist/routes/messages.js');
+    app = Fastify();
+    await app.register(messagesRoutes, deps);
+    await app.ready();
+
+    const responsePromise = app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '创建记录期间也要完整抢占', threadId: 'thread-1', deliveryMode: 'force' },
+    });
+    while (deps.invocationRecordStore.create.mock.calls.length === 0) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    const lateController = tracker.startAll('thread-1', ['opus', 'codex'], 'user-1', 'inv-late');
+    assert.equal(tracker.classifyExecutionId('thread-1', 'codex', 'inv-late'), 'matching');
+
+    forceCreate.resolve({ outcome: 'created', invocationId: 'inv-force' });
+    const res = await responsePromise;
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(lateController.signal.aborted, true, 'late same-user invocation must be aborted as one batch');
+    assert.equal(
+      tracker.classifyExecutionId('thread-1', 'codex', 'inv-late'),
+      'absent',
+      'the non-primary sibling must not remain owned after force replacement',
+    );
+  });
+
+  it('force mode rejects a foreign tracker owner before routing or clearing its pause state', async () => {
+    await app.close();
+    deps = buildDeps();
+    const { tracker, processor } = wireRealExecutionOwners(deps);
+    const foreignController = tracker.startAll('thread-1', ['opus'], 'user-b', 'inv-user-b');
+    /** @type {any} */ (processor).pausedSlots.set(OPUS_SLOT_KEY, 'failed');
+    /** @type {any} */ (processor).pauseEpoch.set(OPUS_SLOT_KEY, 3);
+
+    const { messagesRoutes } = await import('../dist/routes/messages.js');
+    app = Fastify();
+    await app.register(messagesRoutes, deps);
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { content: '不能抢走别人的猫', threadId: 'thread-1', deliveryMode: 'force' },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(JSON.parse(res.body).code, 'INVOCATION_OWNER_CHANGED');
+    assert.equal(deps.router.routeExecution.mock.calls.length, 0, 'rejected force request must not route');
+    assert.equal(foreignController.signal.aborted, false);
+    assert.equal(tracker.getUserId('thread-1', 'opus'), 'user-b');
+    assert.equal(tracker.classifyExecutionId('thread-1', 'opus', 'inv-user-b'), 'matching');
+    assert.equal(
+      /** @type {any} */ (processor).pausedSlots.get(OPUS_SLOT_KEY),
+      'failed',
+      'foreign pause state must remain untouched',
+    );
+    assert.equal(/** @type {any} */ (processor).pauseEpoch.get(OPUS_SLOT_KEY), 3);
+    const terminalized = deps.invocationRecordStore.update.mock.calls.find(
+      (call) => call.arguments[0] === 'inv-stub' && call.arguments[1]?.status === 'canceled',
+    );
+    assert.ok(terminalized, 'created replacement record must be terminalized before returning 409');
+  });
+
+  it('force mode rejects a mixed-user target set before canceling any requester-owned sibling', async () => {
+    await app.close();
+    deps = buildDeps();
+    deps.router.resolveTargetsAndIntent = mock.fn(async () => ({
+      targetCats: ['opus', 'codex'],
+      intent: { intent: 'execute' },
+    }));
+    const { tracker, processor } = wireRealExecutionOwners(deps);
+    const requesterController = tracker.startAll('thread-1', ['opus'], 'user-a', 'inv-user-a');
+    const foreignController = tracker.startAll('thread-1', ['codex'], 'user-b', 'inv-user-b');
+    /** @type {any} */ (processor).pausedSlots.set(OPUS_SLOT_KEY, 'failed');
+    /** @type {any} */ (processor).pauseEpoch.set(OPUS_SLOT_KEY, 5);
+    /** @type {any} */ (processor).pausedSlots.set(CODEX_SLOT_KEY, 'failed');
+    /** @type {any} */ (processor).pauseEpoch.set(CODEX_SLOT_KEY, 6);
+
+    const { messagesRoutes } = await import('../dist/routes/messages.js');
+    app = Fastify();
+    await app.register(messagesRoutes, deps);
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { content: '@opus @codex 不允许部分抢占', threadId: 'thread-1', deliveryMode: 'force' },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(JSON.parse(res.body).code, 'INVOCATION_OWNER_CHANGED');
+    assert.equal(deps.router.routeExecution.mock.calls.length, 0, 'rejected mixed-user force must not route');
+    assert.equal(requesterController.signal.aborted, false, 'requester-owned sibling must survive atomic rejection');
+    assert.equal(foreignController.signal.aborted, false, 'foreign sibling must survive atomic rejection');
+    assert.equal(tracker.classifyExecutionId('thread-1', 'opus', 'inv-user-a'), 'matching');
+    assert.equal(tracker.classifyExecutionId('thread-1', 'codex', 'inv-user-b'), 'matching');
+    assert.equal(/** @type {any} */ (processor).pausedSlots.get(OPUS_SLOT_KEY), 'failed');
+    assert.equal(/** @type {any} */ (processor).pauseEpoch.get(OPUS_SLOT_KEY), 5);
+    assert.equal(/** @type {any} */ (processor).pausedSlots.get(CODEX_SLOT_KEY), 'failed');
+    assert.equal(/** @type {any} */ (processor).pauseEpoch.get(CODEX_SLOT_KEY), 6);
+    const cancelMessages = deps.socketManager.broadcastAgentMessage.mock.calls.filter(
+      (call) => call.arguments[0]?.type === 'system_info',
+    );
+    assert.equal(cancelMessages.length, 0, 'rejected mixed-user force must not broadcast partial cancellation');
+  });
+
+  it('force mode rejects a foreign pre-start reservation without routing or partially releasing custody', async () => {
+    await app.close();
+    deps = buildDeps();
+    const foreignCreate = deferred();
+    let createCalls = 0;
+    deps.invocationRecordStore.create.mock.mockImplementation(async () => {
+      createCalls += 1;
+      if (createCalls === 1) return foreignCreate.promise;
+      return { outcome: 'created', invocationId: 'inv-user-a' };
+    });
+    const { tracker, processor } = wireRealExecutionOwners(deps);
+
+    deps.invocationQueue.enqueue({
+      ownerAuthProvenance: 'unknown',
+      threadId: 'thread-1',
+      userId: 'user-b',
+      content: 'foreign queued execution',
+      source: 'user',
+      targetCats: ['opus'],
+      intent: 'execute',
+    });
+    assert.equal((await processor.processNext('thread-1', 'user-b')).started, true);
+    const foreignReservation = /** @type {any} */ (processor).processingSlots.get(OPUS_SLOT_KEY);
+    assert.ok(foreignReservation);
+    /** @type {any} */ (processor).pausedSlots.set(OPUS_SLOT_KEY, 'failed');
+    /** @type {any} */ (processor).pauseEpoch.set(OPUS_SLOT_KEY, 4);
+
+    const { messagesRoutes } = await import('../dist/routes/messages.js');
+    app = Fastify();
+    await app.register(messagesRoutes, deps);
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { content: '不能抢走排队中的猫', threadId: 'thread-1', deliveryMode: 'force' },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(JSON.parse(res.body).code, 'INVOCATION_OWNER_CHANGED');
+    assert.equal(deps.router.routeExecution.mock.calls.length, 0, 'rejected force request must not route');
+    assert.equal(
+      /** @type {any} */ (processor).processingSlots.get(OPUS_SLOT_KEY),
+      foreignReservation,
+      'foreign reservation must remain the exact slot owner',
+    );
+    assert.equal(tracker.has('thread-1', 'opus'), false);
+    assert.equal(
+      /** @type {any} */ (processor).pausedSlots.get(OPUS_SLOT_KEY),
+      'failed',
+      'foreign pause state must remain untouched',
+    );
+    assert.equal(/** @type {any} */ (processor).pauseEpoch.get(OPUS_SLOT_KEY), 4);
+    const terminalized = deps.invocationRecordStore.update.mock.calls.find(
+      (call) => call.arguments[0] === 'inv-user-a' && call.arguments[1]?.status === 'canceled',
+    );
+    assert.ok(terminalized, 'created replacement record must be terminalized before returning 409');
+
+    foreignCreate.resolve({ outcome: 'created', invocationId: 'inv-user-b' });
+  });
+
+  it('non-preemptive immediate mode checks QueueProcessor reservation ownership before tracker start', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+    const controller = new AbortController();
+    deps.queueProcessor.acquireExternalExecution = mock.fn(() => controller);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '安全直发', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(deps.queueProcessor.acquireExternalExecution.mock.calls.length, 1);
+    assert.deepEqual(deps.queueProcessor.acquireExternalExecution.mock.calls[0].arguments, [
+      'thread-1',
+      ['opus'],
+      'user-1',
+      { mode: 'non_preemptive' },
+    ]);
   });
 
   it('immediate mode when no active → normal execution (no queue)', async () => {
@@ -361,6 +645,7 @@ describe('POST /api/messages deliveryMode', () => {
       onInvocationComplete: mock.fn(async () => {}),
     };
     deps.invocationQueue.enqueue({
+      ownerAuthProvenance: 'unknown',
       threadId: 'thread-1',
       userId: 'user-1',
       content: 'queued-leftover',
@@ -459,6 +744,7 @@ describe('POST /api/messages deliveryMode', () => {
   it('immediate execution passes queueHasQueuedMessages fairness callback to routeExecution', async () => {
     deps.invocationTracker.has.mock.mockImplementation(() => false);
     deps.invocationQueue.enqueue({
+      ownerAuthProvenance: 'unknown',
       threadId: 'thread-1',
       userId: 'user-1',
       content: 'queued-before',
@@ -479,9 +765,27 @@ describe('POST /api/messages deliveryMode', () => {
     assert.ok(deps.router.routeExecution.mock.calls.length > 0);
     const call = deps.router.routeExecution.mock.calls[0];
     const options = call.arguments[6];
+    assert.equal(options?.ownerAuthProvenance, 'strict');
+    assert.equal(options?.humanDispositionInvocationOrigin, 'direct_owner');
     assert.equal(typeof options?.queueHasQueuedMessages, 'function');
     assert.equal(options.queueHasQueuedMessages('thread-1'), true);
     assert.equal(options.queueHasQueuedMessages('thread-x'), false);
+  });
+
+  it('trusted browser compatibility fallback is carried as non-strict provenance', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { origin: 'http://localhost:3003', 'content-type': 'application/json' },
+      payload: { content: '兼容入口', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    await new Promise((r) => setTimeout(r, 20));
+    const options = deps.router.routeExecution.mock.calls[0].arguments[6];
+    assert.equal(options.ownerAuthProvenance, 'compatibility_fallback');
   });
 
   it('immediate direct execution applies pending continuation before routeExecution', async () => {
@@ -619,6 +923,7 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(call.userId, 'user-1');
     assert.equal(call.catId, 'opus');
     assert.equal(call.capsule.seal.sessionId, 'sess-1');
+    assert.equal(call.ownerAuthProvenance, 'strict');
   });
 
   it('immediate success persists produced continuation even when it was already queued', async () => {
@@ -766,6 +1071,77 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(call.capsule.seal.sessionId, 'sess-codex');
   });
 
+  it('immediate multi-cat execution notifies queue completion with every target cat', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+    deps.router.resolveTargetsAndIntent.mock.mockImplementation(async () => ({
+      targetCats: ['opus', 'codex'],
+      intent: { intent: 'execute' },
+    }));
+    deps.router.routeExecution.mock.mockImplementation(async function* () {
+      yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '@opus @codex handle queued bodies', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const completion = deps.queueProcessor.onInvocationComplete.mock.calls.find(
+      (c) => c.arguments[0] === 'thread-1' && c.arguments[1] === 'opus' && c.arguments[2] === 'succeeded',
+    );
+    assert.ok(completion, 'expected queue completion notification');
+    assert.equal(completion.arguments[3], 'inv-stub');
+    assert.deepEqual(
+      completion.arguments[4],
+      ['opus', 'codex'],
+      'queue completion must include all target cats so secondary queued_seen markers can close',
+    );
+  });
+
+  it('immediate multi-cat execution notifies queue completion only for cats with done evidence', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+    deps.invocationTracker.resolveFinalStatus = mock.fn(() => 'succeeded');
+    deps.router.resolveTargetsAndIntent.mock.mockImplementation(async () => ({
+      targetCats: ['opus', 'codex'],
+      intent: { intent: 'execute' },
+    }));
+    deps.router.routeExecution.mock.mockImplementation(async function* () {
+      yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '@opus @codex codex gets canceled', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const completion = deps.queueProcessor.onInvocationComplete.mock.calls.find(
+      (c) => c.arguments[0] === 'thread-1' && c.arguments[1] === 'opus' && c.arguments[2] === 'succeeded',
+    );
+    assert.ok(completion, 'expected queue completion notification');
+    assert.equal(completion.arguments[3], 'inv-stub');
+    assert.deepEqual(completion.arguments[4], ['opus']);
+    const succeededUpdate = deps.invocationRecordStore.update.mock.calls.find(
+      (c) => c.arguments[0] === 'inv-stub' && c.arguments[1]?.status === 'succeeded',
+    );
+    assert.ok(succeededUpdate, 'expected durable succeeded update');
+    assert.deepEqual(
+      succeededUpdate.arguments[1].successfulCatIds,
+      ['opus'],
+      'the durable parent record must carry the same exact per-target success evidence',
+    );
+  });
+
   it('immediate multi-cat execution schedules continuation for every sealed cat', async () => {
     deps.invocationTracker.has.mock.mockImplementation(() => false);
     deps.router.resolveTargetsAndIntent.mock.mockImplementation(async () => ({
@@ -881,6 +1257,7 @@ describe('POST /api/messages deliveryMode', () => {
         // Simulate concurrent request B merging into A's entry during A's await
         // B arrives while A is waiting for messageStore.append
         deps.invocationQueue.enqueue({
+          ownerAuthProvenance: 'unknown',
           threadId: 'thread-1',
           userId: 'user-1',
           content: 'B的消息不应该丢失',

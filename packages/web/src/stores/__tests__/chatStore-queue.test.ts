@@ -22,6 +22,7 @@ describe('chatStore queue state', () => {
   beforeEach(() => {
     useChatStore.setState({
       currentThreadId: 'thread-1',
+      messages: [],
       queue: [],
       queuePaused: false,
       queuePauseReason: undefined,
@@ -35,6 +36,33 @@ describe('chatStore queue state', () => {
     const entries = [makeEntry('a'), makeEntry('b')];
     useChatStore.getState().setQueue('thread-1', entries);
     expect(useChatStore.getState().queue).toEqual(entries);
+  });
+
+  it('projects live queue receipts onto the original timeline messages', () => {
+    useChatStore.setState({
+      messages: [
+        { id: 'msg-primary', type: 'user', content: 'one', timestamp: 1 },
+        { id: 'msg-merged', type: 'user', content: 'two', timestamp: 2 },
+      ],
+    });
+    const entry = {
+      ...makeEntry('receipt'),
+      messageId: 'msg-primary',
+      mergedMessageIds: ['msg-merged'],
+      queueReceipt: {
+        version: 1 as const,
+        entryId: 'receipt',
+        targets: [{ catId: 'opus', state: 'seen' as const, invocationId: 'inv-1' }],
+        reminderAttempts: [],
+      },
+    };
+
+    useChatStore.getState().setQueue('thread-1', [entry]);
+
+    expect(useChatStore.getState().messages.map((message) => message.extra?.queueReceipt)).toEqual([
+      entry.queueReceipt,
+      entry.queueReceipt,
+    ]);
   });
 
   it('setQueuePaused sets paused state', () => {

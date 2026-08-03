@@ -32,8 +32,10 @@ if ! [[ "$REPEAT" =~ ^[1-9][0-9]*$ ]]; then
 fi
 
 REGISTRY_DIR="${CAT_CAFE_REDIS_TEST_REGISTRY_DIR:-${TMPDIR:-/tmp}/cat-cafe-redis-tests}"
-REGISTRY_FILE="${REGISTRY_DIR}/registry.tsv"
+REDIS_TEST_LEASE_HELPER="${SCRIPT_DIR}/redis-test-lease-cli.mjs"
 PROTECTED_REDIS_TEST_PORTS_REGEX='^(6398|6399|6401)$'
+OWNER_PID="$$"
+LEASE_FILE=""
 
 is_protected_port() {
   [[ "$1" =~ $PROTECTED_REDIS_TEST_PORTS_REGEX ]]
@@ -109,26 +111,8 @@ stop_instance() {
 }
 
 cleanup_registry() {
-  mkdir -p "$REGISTRY_DIR"
-  if [[ ! -f "$REGISTRY_FILE" ]]; then
-    return 0
-  fi
-
-  local fresh_file="${REGISTRY_FILE}.fresh.$$"
-  : > "$fresh_file"
-  while IFS=$'\t' read -r port pid datadir started_at; do
-    [[ -z "${port:-}" ]] && continue
-    if ! [[ "$port" =~ ^[0-9]+$ ]]; then
-      echo "[redis-test] skipping invalid registry entry: $port" >&2
-      continue
-    fi
-    if is_protected_port "$port"; then
-      echo "[redis-test] skipping protected registry entry on port $port" >&2
-      continue
-    fi
-    stop_instance "$port" "$pid" "$datadir"
-  done < "$REGISTRY_FILE"
-  mv "$fresh_file" "$REGISTRY_FILE"
+  CAT_CAFE_REDIS_TEST_REGISTRY_DIR="$REGISTRY_DIR" \
+    env -u NODE_OPTIONS node "$REDIS_TEST_LEASE_HELPER" cleanup
 }
 
 register_instance() {
@@ -136,18 +120,21 @@ register_instance() {
   local pid="$2"
   local datadir="$3"
   validate_test_port "$port"
-  mkdir -p "$REGISTRY_DIR"
-  printf '%s\t%s\t%s\t%s\n' "$port" "$pid" "$datadir" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$REGISTRY_FILE"
+  LEASE_FILE="$(CAT_CAFE_REDIS_TEST_REGISTRY_DIR="$REGISTRY_DIR" \
+    env -u NODE_OPTIONS node "$REDIS_TEST_LEASE_HELPER" register \
+      --port "$port" \
+      --redis-pid "$pid" \
+      --data-dir "$datadir" \
+      --owner-pid "$OWNER_PID")"
 }
 
 remove_current_registry_entry() {
-  if [[ ! -f "$REGISTRY_FILE" || -z "${PORT:-}" || -z "${DATADIR:-}" ]]; then
+  if [[ -z "$LEASE_FILE" ]]; then
     return 0
   fi
-  local tmp_file="${REGISTRY_FILE}.tmp.$$"
-  awk -F '\t' -v OFS='\t' -v port="$PORT" -v datadir="$DATADIR" \
-    '!(($1 == port) && ($3 == datadir))' "$REGISTRY_FILE" > "$tmp_file" || true
-  mv "$tmp_file" "$REGISTRY_FILE"
+  CAT_CAFE_REDIS_TEST_REGISTRY_DIR="$REGISTRY_DIR" \
+    env -u NODE_OPTIONS node "$REDIS_TEST_LEASE_HELPER" remove --lease-file "$LEASE_FILE"
+  LEASE_FILE=""
 }
 
 if [[ -n "${REDIS_TEST_PORT:-}" ]]; then
@@ -169,6 +156,7 @@ cleanup_registry
 DATADIR="$(mktemp -d -t cat-cafe-redis-test.XXXXXX)"
 PIDFILE="${DATADIR}/redis.pid"
 LOGFILE="${DATADIR}/redis.log"
+REDIS_TEST_DB_MANIFEST="${DATADIR}/test-files.txt"
 
 cleanup() {
   local pid=""
@@ -194,6 +182,17 @@ trap cleanup EXIT
 trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
 
+find "$API_DIR/test" -type f \( \
+  -name '*.test.js' -o -name '*.test.cjs' -o -name '*.test.mjs' -o -name '*.test.ts' \
+\) -print \
+  | LC_ALL=C sort -u > "$REDIS_TEST_DB_MANIFEST"
+TEST_FILE_COUNT="$(wc -l < "$REDIS_TEST_DB_MANIFEST" | tr -d '[:space:]')"
+if ! [[ "$TEST_FILE_COUNT" =~ ^[1-9][0-9]*$ ]]; then
+  echo "[redis-test] failed to build test-file DB manifest" >&2
+  exit 1
+fi
+REDIS_TEST_DATABASES="$((15 + TEST_FILE_COUNT))"
+
 PORT="${REDIS_TEST_PORT:-}"
 if [[ -z "$PORT" ]]; then
   for _ in $(seq 1 30); do
@@ -203,6 +202,7 @@ if [[ -z "$PORT" ]]; then
     fi
     if redis-server \
       --port "$CANDIDATE" \
+      --databases "$REDIS_TEST_DATABASES" \
       --dir "$DATADIR" \
       --dbfilename dump.rdb \
       --save "" \
@@ -219,6 +219,7 @@ else
   validate_test_port "$PORT"
   redis-server \
     --port "$PORT" \
+    --databases "$REDIS_TEST_DATABASES" \
     --dir "$DATADIR" \
     --dbfilename dump.rdb \
     --save "" \
@@ -261,6 +262,9 @@ fi
 
 export REDIS_URL="redis://127.0.0.1:${PORT}/15"
 export CAT_CAFE_REDIS_TEST_ISOLATED=1
+export CAT_CAFE_REDIS_TEST_DB_MANIFEST="$REDIS_TEST_DB_MANIFEST"
+REDIS_TEST_NAMESPACE_IMPORT="--import=${SCRIPT_DIR}/redis-test-db-namespace.mjs"
+export NODE_OPTIONS="${REDIS_TEST_NAMESPACE_IMPORT}${NODE_OPTIONS:+ ${NODE_OPTIONS}}"
 
 cd "$API_DIR"
 

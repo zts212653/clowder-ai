@@ -51,9 +51,9 @@ export interface ListRecentOptions {
 
 /** Map scope filter to evidence_docs.kind values (砚砚 三审 P1-4 — true cross-surface). */
 const SCOPE_KIND_MAP: Record<string, readonly string[] | null> = {
-  docs: ['feature', 'decision', 'lesson', 'plan', 'phase', 'research', 'spec', 'adr'],
+  docs: ['feature', 'decision', 'architecture', 'lesson', 'plan', 'phase', 'research', 'spec', 'adr'],
   threads: ['discussion', 'thread', 'thread-digest', 'session'],
-  memory: ['memory', 'session-digest', 'reflection'],
+  memory: ['memory', 'session-digest', 'reflection', 'diary'],
   all: null, // no filter
 };
 

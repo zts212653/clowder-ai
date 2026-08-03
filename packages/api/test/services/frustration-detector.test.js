@@ -92,6 +92,23 @@ describe('F222: shouldTrigger — CLI error', () => {
     );
   });
 
+  // F212 Phase H AC-H5 (Sol runtime forensics 2026-07-09): upstream provider policy
+  // rejection is NOT a Clowder AI bug — auto-filing an issue against ourselves is
+  // noise. cliDiagnostics still surfaces the rephrase hint; user acts on that.
+  it('does NOT trigger on upstream_policy_reject (F212 Phase H — not Clowder AI bug)', () => {
+    assert.equal(
+      shouldTrigger({
+        type: 'cli_error',
+        diagnostics: {
+          reasonCode: 'upstream_policy_reject',
+          publicSummary: '上游 provider policy 拒绝',
+          publicHint: 'try rephrasing',
+        },
+      }),
+      false,
+    );
+  });
+
   it('does NOT trigger when reasonCode is undefined', () => {
     assert.equal(
       shouldTrigger({

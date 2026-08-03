@@ -168,11 +168,10 @@ describe('parseA2AMentions', () => {
     assert.deepEqual(result, ['kimi']);
   });
 
-  it('analyzeA2AMentions returns mentions and routing_warnings (suppression system removed)', async () => {
+  it('analyzeA2AMentions omits suppressed field (suppression system removed)', async () => {
     const { analyzeA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
-    const result = analyzeA2AMentions('@布偶猫', 'codex');
-    assert.deepEqual(result.mentions, ['opus']);
-    // suppressed field removed — no longer part of the interface
+    const result = analyzeA2AMentions('', 'codex');
+    assert.deepEqual(result.mentions, []);
     assert.equal(result.suppressed, undefined);
     assert.ok(Array.isArray(result.routing_warnings));
   });

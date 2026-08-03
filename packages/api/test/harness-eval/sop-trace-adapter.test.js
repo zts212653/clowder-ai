@@ -10,6 +10,7 @@ const validInput = {
     { command: 'pnpm gate', exitCode: 0 },
     { command: 'gh pr merge 1913 --squash --delete-branch', cwd: '/home/user/cat-cafe', exitCode: 0 },
   ],
+  changedFiles: [],
   envSnapshot: {
     REDIS_URL: 'redis://localhost:6398',
     NODE_ENV: undefined,
@@ -49,6 +50,74 @@ describe('SOP Trace Adapter (AC-E17)', () => {
   it('accepts empty commands array', () => {
     const trace = buildSopTrace({ ...validInput, commands: [] });
     assert.equal(trace.commands.length, 0);
+  });
+
+  it('preserves command stdout and parsed summary for replayable evidence', () => {
+    const trace = buildSopTrace({
+      ...validInput,
+      commands: [
+        {
+          command: 'pnpm convention-graph:code-consumers -- --repo . --domain mcp-tool',
+          exitCode: 0,
+          eventNo: 4,
+          timestamp: 1700000004000,
+          stdout: JSON.stringify({ freshness: { stale: false } }),
+          summary: { freshness: { stale: false } },
+        },
+      ],
+      changedFileEvents: [{ path: 'packages/mcp-server/src/tools/callback-tools.ts', eventNo: 5 }],
+    });
+
+    assert.equal(trace.commands[0].stdout, JSON.stringify({ freshness: { stale: false } }));
+    assert.deepEqual(trace.commands[0].summary, { freshness: { stale: false } });
+    assert.equal(trace.commands[0].eventNo, 4);
+    assert.equal(trace.commands[0].timestamp, 1700000004000);
+    assert.deepEqual(trace.changedFileEvents, [
+      { path: 'packages/mcp-server/src/tools/callback-tools.ts', eventNo: 5 },
+    ]);
+  });
+
+  it('rejects missing changedFiles instead of defaulting to a silent clean set', () => {
+    const { changedFiles: _changedFiles, ...missingChangedFiles } = validInput;
+    assert.throws(() => buildSopTrace(missingChangedFiles), /changedFiles/);
+  });
+
+  it('rejects changedFileEvents without ordering evidence', () => {
+    assert.throws(
+      () =>
+        buildSopTrace({
+          ...validInput,
+          changedFileEvents: [{ path: 'packages/mcp-server/src/tools/callback-tools.ts' }],
+        }),
+      /eventNo|timestamp/,
+    );
+  });
+
+  it('rejects convention graph command ordering that cannot be compared to changedFileEvents', () => {
+    assert.throws(
+      () =>
+        buildSopTrace({
+          ...validInput,
+          commands: [
+            {
+              command: 'pnpm convention-graph:code-consumers -- --repo . --domain mcp-tool',
+              exitCode: 0,
+              timestamp: 1700000004000,
+            },
+          ],
+          changedFileEvents: [{ path: 'packages/mcp-server/src/tools/callback-tools.ts', eventNo: 5 }],
+        }),
+      /shared eventNo or timestamp/,
+    );
+  });
+
+  it('accepts changedFileEvents when no convention graph command is present', () => {
+    const trace = buildSopTrace({
+      ...validInput,
+      commands: [{ command: 'pnpm test', exitCode: 0 }],
+      changedFileEvents: [{ path: 'packages/mcp-server/src/tools/callback-tools.ts', eventNo: 5 }],
+    });
+    assert.equal(trace.changedFileEvents[0].eventNo, 5);
   });
 
   it('accepts empty shaContext', () => {

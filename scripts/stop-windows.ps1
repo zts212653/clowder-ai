@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-  Clowder AI (Cat Cafe) - Windows Stop Script
+  Clowder AI (Clowder AI) - Windows Stop Script
 
 .DESCRIPTION
-  Stops Cat Cafe services (API, Frontend, Redis) by port.
+  Stops Clowder AI services (API, Frontend, Redis) by port.
 
 .EXAMPLE
   .\scripts\stop-windows.ps1
@@ -22,7 +22,7 @@ if ($ScriptDir) {
 $ProjectRoot = if ($ScriptDir) { Split-Path -Parent $ScriptDir } else { $null }
 $RunDir = if ($ProjectRoot) { Join-Path $ProjectRoot ".cat-cafe/run/windows" } else { $null }
 
-Write-Host "Cat Cafe - Stopping services" -ForegroundColor Cyan
+Write-Host "Clowder AI - Stopping services" -ForegroundColor Cyan
 Write-Host "============================="
 
 # Load .env for port config

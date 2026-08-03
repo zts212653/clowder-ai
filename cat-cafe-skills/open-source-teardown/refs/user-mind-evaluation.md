@@ -68,7 +68,7 @@
 
 ## 经典反例：Hindsight token 烧爆事件（Lysander 实测）
 
-**场景**：Cat Café 早期试用 hindsight 作为记忆 backend。
+**场景**：Clowder AI 早期试用 hindsight 作为记忆 backend。
 
 **症状**：token 消耗暴涨，效果稀烂。
 
@@ -83,7 +83,7 @@
 5. **每一轮都是浅层结果**，但每次都消耗一次完整 RAG token
 6. 反复 N 轮后 token 烧爆，质量没改善
 
-**对照 Cat Café search_evidence**（用三层框架推）：
+**对照 Clowder AI search_evidence**（用三层框架推）：
 - ✅ **L1 完整**：`anchor / authority / confidence / scope` 全套
 - ✅ **L2 完整**：authority 分级（constitutional/observed/candidate）= epistemic label
 - ⚠️ **L3 部分**：能 read 原文 + grep ID，但**反向写回 last_validated 还没接**（F163 该补）
@@ -95,7 +95,7 @@
 | 模式 | L1 | L2 | L3 | 评价 |
 |------|----|----|----|------|
 | hindsight 孤立 chunk | ❌ | ❌ | ❌ | ⭐ **差评**——每条返回都是死路 |
-| Cat Café search_evidence | ✅ | ✅ | ⚠️ | ⭐⭐⭐⭐ **好评**——每条都是探索入口；L3 待补 |
+| Clowder AI search_evidence | ✅ | ✅ | ⚠️ | ⭐⭐⭐⭐ **好评**——每条都是探索入口；L3 待补 |
 | 商业 memory provider（mem0/byterover）| ⚠️ | ❌ | ❌ | ⭐⭐ 假 L1（指向系统内部，非真相源），崩 |
 
 ---
@@ -173,7 +173,7 @@ agent 能用这个结果定位到错误源、修正、补查吗？
 
 - **Step 1（架构地图）后**：识别系统的真用户，标注每个 API 的调用方
 - **Step 2（明星特性追链路）中**：每个返回类型都跑 Step B/C/D 三套框架
-- **Step 5（Cat Café 对比）前**：用本 ref 的"好评/差评"重新评分维度，并在 [report-template.md](./report-template.md) §6 比较表里加 **Agent User Fit** 一栏
+- **Step 5（Clowder AI 对比）前**：用本 ref 的"好评/差评"重新评分维度，并在 [report-template.md](./report-template.md) §6 比较表里加 **Agent User Fit** 一栏
 
 如果项目宣称"可插拔/多 provider/接口齐全"但**真用户拿到结果是死路**，记入 Common Mistakes 反模式，**不要标"对方强"**。
 

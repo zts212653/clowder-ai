@@ -27,6 +27,7 @@ const MOCK_ITEMS = [
     source: 'external' as const,
     enabled: true,
     cats: { opus: true },
+    hasOverride: true,
     description: 'External MCP',
     mcpServer: {
       transport: 'stdio' as const,
@@ -194,6 +195,7 @@ describe('McpManageContent', () => {
     expect(document.body.textContent).toContain('只读预览');
     expect(document.body.textContent).not.toContain('保存');
     expect(document.body.textContent).toContain('关闭');
+    expect(document.body.textContent).not.toContain('恢复全局配置');
   });
 
   it('opens plugin-owned MCP in readOnly modal (managed by plugin)', async () => {
@@ -209,6 +211,68 @@ describe('McpManageContent', () => {
     expect(document.body.textContent).toContain('只读预览');
     expect(document.body.textContent).not.toContain('保存');
     expect(document.body.textContent).toContain('关闭');
+    expect(document.body.textContent).not.toContain('恢复全局配置');
+  });
+
+  it('read-only refresh probes persisted config instead of redacted form values', async () => {
+    await renderContent();
+
+    await act(async () => {
+      buttonByText('plugin:video-gen:protocol-server').click();
+    });
+
+    mockFetch.mockClear();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ tools: [], connectionStatus: 'connected' }),
+    });
+
+    const refresh = document.body.querySelector('button[title="探测工具列表"]') as HTMLButtonElement | null;
+    expect(refresh).toBeTruthy();
+    await act(async () => {
+      refresh?.click();
+    });
+
+    const probeCall = mockFetch.mock.calls.find(
+      (args: unknown[]) =>
+        typeof args[0] === 'string' &&
+        (args[0] as string).includes('/api/mcp/') &&
+        (args[0] as string).includes('/tools'),
+    );
+    expect(probeCall).toBeTruthy();
+    const body = JSON.parse((probeCall?.[1] as { body: string }).body) as Record<string, unknown>;
+    expect(body).toEqual({});
+  });
+
+  it('hides restore-global action for project-scoped plugin MCPs', async () => {
+    await renderContent();
+
+    await act(async () => {
+      buttonByText('项目 MCP').click();
+    });
+    await flushEffects();
+
+    await act(async () => {
+      buttonByText('plugin:video-gen:protocol-server').click();
+    });
+
+    expect(document.body.textContent).toContain('只读预览');
+    expect(document.body.textContent).not.toContain('恢复全局配置');
+  });
+
+  it('shows restore-global action only for an actual external project override', async () => {
+    await renderContent();
+
+    await act(async () => {
+      buttonByText('项目 MCP').click();
+    });
+    await flushEffects();
+
+    await act(async () => {
+      buttonByText('custom-mcp').click();
+    });
+
+    expect(document.body.textContent).toContain('恢复全局配置');
   });
 
   it('hides delete button for plugin-managed MCPs (source=plugin)', async () => {

@@ -54,6 +54,7 @@ describe('F246 Phase B: DispatchProposal type contract', () => {
       targetCats: ['opus', 'sonnet'],
       replyTo: 'msg-parent',
       clientMessageId: 'client-idempotent-key',
+      approvalOriginRef: { kind: 'message', threadId: 'thread-sender', messageId: 'msg-origin-1' },
       status: 'approved',
       deliveredMessageId: 'msg-delivered-123',
       cardMessageId: 'msg-card-456',
@@ -64,6 +65,7 @@ describe('F246 Phase B: DispatchProposal type contract', () => {
     expect(proposal.status).toBe('approved');
     expect(proposal.deliveredMessageId).toBe('msg-delivered-123');
     expect(proposal.decidedBy).toBe('user-1');
+    expect(proposal.approvalOriginRef?.kind).toBe('message');
   });
 
   it('ApprovalFeatureId includes F193', () => {
@@ -76,7 +78,6 @@ describe('F246 Phase B: DispatchProposal type contract', () => {
     const item: ApprovalItem = {
       proposalId: 'dp-001',
       sourceFeatureId: 'F193',
-      sourceThreadId: 'thread-sender',
       requesterCatId: 'opus',
       ownerUserId: 'user-1',
       status: 'pending',
@@ -86,6 +87,10 @@ describe('F246 Phase B: DispatchProposal type contract', () => {
         targetCats: ['sonnet'],
         content: 'Fix the bug in package X',
         effectClass: 'assign_work',
+      },
+      navigation: {
+        state: 'legacy_unanchored',
+        legacyThreadId: 'thread-sender',
       },
       inlineApprovable: true,
       expiresAt: Date.now() + 3 * 24 * 60 * 60 * 1000,

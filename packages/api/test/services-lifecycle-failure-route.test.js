@@ -299,10 +299,28 @@ describe('service lifecycle failure handling', () => {
     process.env.DEFAULT_OWNER_USER_ID = 'you';
     const { auditLog, events } = createAuditLog();
     let didRun = false;
+    const configs = new Map([
+      [
+        'whisper-stt',
+        {
+          installed: true,
+          enabled: true,
+          selectedModel: 'mlx-community/Qwen3-ASR-1.7B-8bit',
+        },
+      ],
+    ]);
     const resolvedScript = resolveServiceScriptPath('scripts/services/whisper-server.sh');
     const app = await buildApp({
       lifecycle: {
         auditLog,
+        serviceConfig: {
+          get: (id) => configs.get(id),
+          set: (id, patch) => {
+            const updated = { ...(configs.get(id) ?? { enabled: false }), ...patch };
+            configs.set(id, updated);
+            return updated;
+          },
+        },
         findPidsByPort: async () => [5151],
         readProcessCommand: async () => `/bin/bash ${resolvedScript}`,
         runScript: async () => {
@@ -310,7 +328,16 @@ describe('service lifecycle failure handling', () => {
           return { code: 0, output: 'started' };
         },
       },
-      fetchHealth: async () => ({ ok: true, status: 200, error: null }),
+      fetchHealth: async () => ({
+        ok: true,
+        status: 200,
+        error: null,
+        details: {
+          status: 'ok',
+          model: 'mlx-community/Qwen3-ASR-1.7B-8bit',
+          backend: 'mlx-audio',
+        },
+      }),
     });
     try {
       const res = await app.inject({
@@ -340,6 +367,154 @@ describe('service lifecycle failure handling', () => {
       );
     } finally {
       await app.close();
+      restoreOwner(previousOwner);
+    }
+  });
+
+  it('persists an explicit Qwen env contract over stale Whisper lifecycle state', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const env = buildIsolatedTestEnv(process.env);
+    delete env.CAT_CAFE_SERVICE_ASR_ENABLED;
+    delete env.ASR_ENABLED;
+    env.CAT_CAFE_SERVICE_QWEN3_ASR_ENABLED = '1';
+    const configs = new Map([
+      [
+        'whisper-stt',
+        {
+          installed: true,
+          enabled: true,
+          selectedModel: 'mlx-community/whisper-large-v3-turbo',
+        },
+      ],
+    ]);
+    let didRun = false;
+    const resolvedScript = resolveServiceScriptPath('scripts/services/whisper-server.sh');
+    const app = await buildApp({
+      env,
+      lifecycle: {
+        serviceConfig: {
+          get: (id) => configs.get(id),
+          set: (id, patch) => {
+            const updated = { ...(configs.get(id) ?? { enabled: false }), ...patch };
+            configs.set(id, updated);
+            return updated;
+          },
+        },
+        findPidsByPort: async () => [5151],
+        readProcessCommand: async () => `/bin/bash ${resolvedScript}`,
+        runScript: async () => {
+          didRun = true;
+          return { code: 0, output: 'started' };
+        },
+      },
+      fetchHealth: async () => ({
+        ok: true,
+        status: 200,
+        error: null,
+        details: {
+          status: 'ok',
+          model: 'mlx-community/Qwen3-ASR-1.7B-8bit',
+          backend: 'mlx-audio',
+        },
+      }),
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/services/whisper-stt/start',
+        headers: SESSION_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      assert.equal(didRun, false);
+      assert.equal(configs.get('whisper-stt').selectedModel, 'mlx-community/Qwen3-ASR-1.7B-8bit');
+    } finally {
+      await app.close();
+      restoreOwner(previousOwner);
+    }
+  });
+
+  it('restarts an owned ASR listener when live model or backend identity is stale', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const matrix = [
+      {
+        desiredModel: 'mlx-community/Qwen3-ASR-1.7B-8bit',
+        liveModel: 'mlx-community/whisper-large-v3-turbo',
+        liveBackend: 'mlx-whisper',
+      },
+      {
+        desiredModel: 'mlx-community/whisper-large-v3-turbo',
+        liveModel: 'mlx-community/Qwen3-ASR-1.7B-8bit',
+        liveBackend: 'mlx-audio',
+      },
+      {
+        desiredModel: 'mlx-community/Qwen3-ASR-1.7B-8bit',
+        liveModel: 'mlx-community/Qwen3-ASR-1.7B-8bit',
+        liveBackend: 'mlx-whisper',
+      },
+      {
+        desiredModel: 'mlx-community/whisper-large-v3-turbo',
+        liveModel: 'mlx-community/whisper-large-v3-turbo',
+        liveBackend: 'faster-whisper',
+      },
+      {
+        desiredModel: 'mlx-community/Qwen3-ASR-1.7B-8bit',
+        liveModel: undefined,
+        liveBackend: undefined,
+      },
+    ];
+
+    try {
+      for (const row of matrix) {
+        const configs = new Map([['whisper-stt', { installed: true, enabled: true, selectedModel: row.desiredModel }]]);
+        const killed = new Set();
+        let didRun = false;
+        const resolvedScript = resolveServiceScriptPath('scripts/services/whisper-server.sh');
+        const app = await buildApp({
+          lifecycle: {
+            startupGraceMs: 10,
+            serviceConfig: {
+              get: (id) => configs.get(id),
+              set: (id, patch) => {
+                const updated = { ...(configs.get(id) ?? { enabled: false }), ...patch };
+                configs.set(id, updated);
+                return updated;
+              },
+            },
+            findPidsByPort: async () => (killed.has(5151) ? [] : [5151]),
+            readProcessCommand: async () => `/bin/bash ${resolvedScript}`,
+            killPid: (pid) => killed.add(pid),
+            runScript: async () => {
+              didRun = true;
+              return { code: null, pid: 7001 };
+            },
+          },
+          fetchHealth: async () => ({
+            ok: true,
+            status: 200,
+            error: null,
+            details: { status: 'ok', model: row.liveModel, backend: row.liveBackend },
+          }),
+        });
+        try {
+          const res = await app.inject({
+            method: 'POST',
+            url: '/api/services/whisper-stt/start',
+            headers: SESSION_HEADERS,
+          });
+
+          assert.equal(res.statusCode, 200, res.payload);
+          assert.equal(didRun, true, `must restart stale ${row.liveBackend} listener`);
+          assert.deepEqual([...killed], [5151]);
+          assert.match(JSON.parse(res.payload).message, /start initiated/i);
+        } finally {
+          await new Promise((resolve) => setTimeout(resolve, 15));
+          await app.close();
+        }
+      }
+    } finally {
       restoreOwner(previousOwner);
     }
   });

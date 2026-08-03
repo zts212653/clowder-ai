@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
+import { useMessageDisclosureState } from '@/components/message-disclosure-state';
 import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
 import type { CliEvent, CliStatus } from '@/stores/chat-types';
 import typographyTokens from '@/styles/typography-tokens.json';
@@ -337,6 +338,7 @@ interface CliOutputBlockProps {
   thinkingMode?: 'debug' | 'play';
   defaultExpanded?: boolean;
   breedColor?: string;
+  disclosureKey?: string;
 }
 
 export function CliOutputBlock({
@@ -345,35 +347,41 @@ export function CliOutputBlock({
   thinkingMode,
   defaultExpanded = false,
   breedColor,
+  disclosureKey,
 }: CliOutputBlockProps) {
   const isExport =
     typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('export') === 'true';
   const forceExpanded = status === 'streaming' || isExport;
-  const [expanded, setExpanded] = useState(forceExpanded || defaultExpanded);
-  const userInteracted = useRef(false);
+  const { expanded, setExpanded, hasOverride } = useMessageDisclosureState(
+    disclosureKey,
+    forceExpanded || defaultExpanded,
+  );
+  const userInteracted = useRef(hasOverride);
   const hasMounted = useRef(false);
 
-  if (forceExpanded && !expanded && !userInteracted.current) {
+  if (!disclosureKey && forceExpanded && !expanded && !userInteracted.current) {
     setExpanded(true);
   }
 
   const prevStatusRef = useRef(status);
   useEffect(() => {
-    if (prevStatusRef.current !== 'streaming' && status === 'streaming') {
+    if (disclosureKey) {
+      prevStatusRef.current = status;
+    } else if (prevStatusRef.current !== 'streaming' && status === 'streaming') {
       userInteracted.current = false;
       setExpanded(true);
     } else if (prevStatusRef.current === 'streaming' && status !== 'streaming' && !userInteracted.current) {
       setExpanded(defaultExpanded);
     }
     prevStatusRef.current = status;
-  }, [status, defaultExpanded]);
+  }, [disclosureKey, status, defaultExpanded, setExpanded]);
 
   // Sync expanded state when defaultExpanded prop changes (e.g. async config load)
   useEffect(() => {
-    if (!userInteracted.current) {
+    if (!disclosureKey && !userInteracted.current) {
       setExpanded(forceExpanded || defaultExpanded);
     }
-  }, [defaultExpanded, forceExpanded]);
+  }, [defaultExpanded, disclosureKey, forceExpanded, setExpanded]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: expanded is intentional — dispatch on toggle
   useLayoutEffect(() => {

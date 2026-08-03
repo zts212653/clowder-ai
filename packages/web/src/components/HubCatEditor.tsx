@@ -627,6 +627,8 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
             modelOptions={modelOptions}
             availableProfiles={availableProfiles}
             loadingProfiles={loadingProfiles}
+            effectiveCodexCarrier={cat?.codexCarrier ?? null}
+            codexLocalCapable={cat ? cat.cli != null : true}
             onChange={patchForm}
           />
           <RoutingSection

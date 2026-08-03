@@ -36,6 +36,12 @@ const EXCLUDED_REASON_CODES = new Set([
   'server_overloaded', // transient
   'invalid_thinking_signature', // internal
   'missing_rollout', // internal
+  // F212 Phase H (Sol runtime forensics 2026-07-09, archive 97449e4b): upstream
+  // provider policy engine rejected the prompt as cyber-safety risk. This is
+  // NOT a Clowder AI bug — auto-filing an issue against ourselves adds noise
+  // and operator fatigue. F212 cliDiagnostics already surfaces the rephrase hint
+  // to the user, and the underlying decision is upstream policy (not our layer).
+  'upstream_policy_reject',
 ]);
 
 /** Minimum permission denials in CANCEL_WINDOW_MS to trigger cancel_burst. */

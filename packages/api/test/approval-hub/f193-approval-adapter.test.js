@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
+import { anchorApproval, proposedReviewAction } from './helpers.js';
 
 describe('F193ApprovalAdapter', () => {
   let InMemoryDispatchProposalStore;
@@ -20,14 +21,30 @@ describe('F193ApprovalAdapter', () => {
     ownerUserId: 'user-1',
     content: 'Fix the bug in package X',
     targetCats: ['sonnet'],
+    proposedAction: proposedReviewAction(),
+    envelopeDigest: 'sha256:action-envelope',
     cardMessageId: 'msg-card-1',
     createdAt: Date.now(),
     ...overrides,
   });
 
+  /** Create and anchor a dispatch proposal so Hub navigation projects correctly. */
+  const createAnchored = async (store, overrides = {}) => {
+    const { proposal } = await store.create(createInput(overrides));
+    await anchorApproval(store, {
+      proposalId: proposal.proposalId,
+      sourceFeatureId: 'F193',
+      ownerUserId: proposal.ownerUserId,
+      requesterCatId: proposal.senderCatId,
+      threadId: proposal.sourceThreadId,
+      createdAt: proposal.createdAt,
+    });
+    return proposal;
+  };
+
   it('maps pending DispatchProposals to ApprovalItems', async () => {
     const store = new InMemoryDispatchProposalStore();
-    await store.create(createInput());
+    await createAnchored(store);
 
     const adapter = new F193ApprovalAdapter(store);
     const items = await adapter.listPending('user-1');
@@ -41,7 +58,13 @@ describe('F193ApprovalAdapter', () => {
     assert.equal(items[0].detail.targetThreadId, 'thread-target');
     assert.deepEqual(items[0].detail.targetCats, ['sonnet']);
     assert.equal(items[0].detail.effectClass, 'assign_work');
-    assert.equal(items[0].sourceMessageId, 'msg-card-1');
+    assert.equal(items[0].detail.actionFamily, 'review');
+    assert.equal(items[0].detail.subjectRef, 'pr:owner/repo#42');
+    assert.equal(items[0].detail.successorSlot, 'reviewer');
+    assert.equal(items[0].detail.mode, 'single');
+    assert.deepEqual(items[0].detail.terminalPredicate, proposedReviewAction().terminalPredicate);
+    assert.equal(items[0].detail.envelopeDigest, 'sha256:action-envelope');
+    assert.equal(items[0].navigation.state, 'anchored');
     assert.equal(items[0].requesterCatId, 'opus');
   });
 
@@ -54,8 +77,8 @@ describe('F193ApprovalAdapter', () => {
 
   it('excludes approved/rejected proposals', async () => {
     const store = new InMemoryDispatchProposalStore();
-    await store.create(createInput({ proposalId: 'dp-1' }));
-    await store.create(createInput({ proposalId: 'dp-2' }));
+    await createAnchored(store, { proposalId: 'dp-1', targetThreadId: 'thread-A' });
+    await createAnchored(store, { proposalId: 'dp-2', targetThreadId: 'thread-B' });
     await store.approve('dp-1', 'user-1');
 
     const adapter = new F193ApprovalAdapter(store);
@@ -73,7 +96,7 @@ describe('F193ApprovalAdapter', () => {
   it('expiresAt is set (3 day stale threshold)', async () => {
     const now = Date.now();
     const store = new InMemoryDispatchProposalStore();
-    await store.create(createInput({ createdAt: now }));
+    await createAnchored(store, { createdAt: now });
 
     const adapter = new F193ApprovalAdapter(store);
     const items = await adapter.listPending('user-1');

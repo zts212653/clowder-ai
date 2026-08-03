@@ -9,7 +9,7 @@ community_pr: clowder-ai#760
 
 # F228: Multi-Project Skill Mount Management — 多项目 Skills 挂载管理
 
-> **Status**: Phase A + B done (2026-06-17) | Phase C planning | **Owner**: community @mindfn + Cat Cafe maintainers | **Priority**: P1
+> **Status**: Phase A + B done (2026-06-17) | Phase C planning | **Owner**: community @mindfn + Clowder AI maintainers | **Priority**: P1
 
 ## Source
 
@@ -19,12 +19,12 @@ community_pr: clowder-ai#760
 
 ## Why
 
-Cat Cafe already has a capability dashboard and project governance bootstrap, but skill mounting still has a gap in real multi-project usage: a skill may be globally available, project-specific, or provider-specific, while the filesystem symlinks that actual CLIs load can drift away from the intended policy. Users should be able to manage skills per project and per provider from the Console without hand-editing `.claude/skills`, `.codex/skills`, `.gemini/skills`, or repairing stale symlinks manually.
+Clowder AI already has a capability dashboard and project governance bootstrap, but skill mounting still has a gap in real multi-project usage: a skill may be globally available, project-specific, or provider-specific, while the filesystem symlinks that actual CLIs load can drift away from the intended policy. Users should be able to manage skills per project and per provider from the Console without hand-editing `.claude/skills`, `.codex/skills`, `.gemini/skills`, or repairing stale symlinks manually.
 
 ## Current State / 现状基线
 
 - F041 established `.cat-cafe/capabilities.json` as the capability truth source and shipped the capability dashboard, including multi-project management at the capability-config level.
-- F070 bootstraps project-level governance and managed skill symlinks into external projects, but it is primarily about carrying Cat Cafe methodology into projects.
+- F070 bootstraps project-level governance and managed skill symlinks into external projects, but it is primarily about carrying Clowder AI methodology into projects.
 - ADR-025 defines the canonical skill mount policy direction: managed per-skill symlinks, coexistence with external skills, conflict visibility, and Hub-operated sync.
 - `clowder-ai#876` fixed the narrow single-project bug where disabling a managed skill failed to remove provider symlinks.
 - `clowder-ai#760` proposes the broader feature: multi-project skill mount policy, per-provider mount toggles, drift visibility, and cross-project propagation. Current review state on 2026-06-09: technically promising, but not merge-ready until the feature anchor is corrected and review blockers are resolved.
@@ -43,6 +43,15 @@ Bring the accepted implementation back into cat-cafe through the normal inbound 
 
 Close the loop between the shipped UI/API behavior and ADR-025: document the final data model, migration behavior, drift/sync semantics, and what counts as managed vs user-owned skill state.
 
+## User Journey
+
+Scope unit: one registered project plus one skill provider mount point (`claude`, `codex`, `gemini`, `kimi`, or a custom path).
+
+1. You opens Settings -> Skill 管理 and starts on "全部 Skill" to see the canonical governance list, cross-project drift, and whether each skill is consistent across projects.
+2. He switches to "项目 Skill", picks a registered project, and toggles a skill or a provider mount point. The Console writes the capability policy and the managed filesystem symlink for that selected project only.
+3. If a managed symlink is missing, stale, or blocked by a user-owned file/directory, the drift banner explains the exact project/skill/mount point and offers a resolve path that never overwrites user-owned content silently.
+4. When a global skill or default mount rule changes, Clowder AI refreshes both `/api/skills` governance state and `/api/capabilities` controls so the visible list, toggles, and sync status stay aligned.
+
 ## Acceptance Criteria
 
 <!-- 立项愿景硬度自检（F216→F219）：每条 AC 必须 ① trace 回 Why 的某诉求 ② 非作者可复核（命令/数字/截图）。重构/降复杂度类须实测可量（数字下降），不是"提了可测性就算"。详见 feat-lifecycle SKILL.md。 -->
@@ -60,7 +69,7 @@ Close the loop between the shipped UI/API behavior and ADR-025: document the fin
 - [x] AC-B4: Intake Review Guard verified by Ragdoll/Sonnet 4-audit pass (PR #2347 issue comment 4729249518) — D path exclusion / reverse-sanitize / regression baseline / brand-dictionary boundary all clear. Vision Guardian (Ragdoll/Opus 4.6) confirmed three-route owner-gate preservation + F070 governance bootstrap + F193 topology heal + audit ordering + brand parity.
 
 ### Phase C（Product Hardening + ADR-025 Alignment）
-- [ ] AC-C1: Console can select a registered project and manage Cat Cafe skills per provider without hand-editing provider directories.
+- [ ] AC-C1: Console can select a registered project and manage Clowder AI skills per provider without hand-editing provider directories.
 - [ ] AC-C2: Drift visibility distinguishes managed symlink drift vs source/new-skill changes. Filesystem-level conflicts (managed skill name vs pre-existing dir/file/link in mount point) still block instead of overwriting. **`cascadeDisabledSkills` project-local disable preservation during global toggle scope is removed per KD-6** (over-design vs simplicity trade-off; low-frequency intersection).
 - [ ] AC-C3: ADR-025 is updated from draft status or given a successor note that reflects the final F228 data model and migration semantics.
 - [ ] AC-C4: Public-facing docs or release notes explain the migration/sync behavior for existing users.

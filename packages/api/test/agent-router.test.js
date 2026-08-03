@@ -1600,6 +1600,7 @@ describe('AgentRouter', () => {
     assert.ok(receivedOptions);
     assert.deepEqual(receivedOptions.auditContext, {
       invocationId: 'inv-1',
+      executionId: 'inv-1',
       threadId: 'thread-audit',
       userId: 'user-1',
       catId: 'opus',

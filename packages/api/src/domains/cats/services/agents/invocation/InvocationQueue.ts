@@ -13,11 +13,17 @@
 import { randomUUID } from 'node:crypto';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
+import type { ActionSuccessorFence } from '../../../../ball-custody/ActionSuccessorAdmissionService.js';
+import type { QueueBodyExposure } from '../../stores/ports/queued-message-custody.js';
+import type { ToolExecutionPolicy } from '../../types.js';
+import type { OwnerAuthProvenance } from './owner-auth-provenance.js';
 
 export interface QueueEntry {
   id: string;
   threadId: string;
   userId: string;
+  /** Internal-only owner authentication provenance; presentation projections must redact it. */
+  ownerAuthProvenance: OwnerAuthProvenance;
   /** Optional request-level idempotency key for API replay dedup. */
   idempotencyKey?: string;
   content: string;
@@ -25,6 +31,31 @@ export interface QueueEntry {
   mergedMessageIds: string[];
   source: 'user' | 'connector' | 'agent';
   targetCats: string[];
+  /** Stable target identity for glass-box projection after individual targets are handled. */
+  allTargetCats?: string[];
+  /** Notice reached a safe boundary, but the queued body has not been read yet. */
+  queuedNotifiedByCatIds?: string[];
+  /** Exact child invocation created for this target before prompt-body exposure. */
+  queuedAwakenedInvocationIdByCatId?: Record<string, string>;
+  /** Immutable child-creation time paired with queuedAwakenedInvocationIdByCatId. */
+  queuedAwakenedAtByCatId?: Record<string, number>;
+  /** F254 D1.2a: per-cat read marker for queued body exposure. Seen suppresses freshness nag, not work. */
+  queuedSeenByCatIds?: string[];
+  /**
+   * F254 D1.2b: per-cat invocation that read the queued body.
+   * Used only as handled evidence; queuedSeenByCatIds remains the nag-suppression marker.
+   */
+  queuedSeenInvocationIdByCatId?: Record<string, string>;
+  /** Exact, append-only child invocation body exposures for durable receipt projection. */
+  queuedBodyExposures?: QueueBodyExposure[];
+  /** The reading invocation failed/canceled; responsibility remains queued. */
+  queuedFailedByCatIds?: string[];
+  /** Historical target closure retained while sibling targets remain queued. */
+  queuedHandledByCatIds?: string[];
+  /** F264: accepted Steer awaiting replacement invocation identity. */
+  steerRequestedByCatIds?: string[];
+  /** F264: exact replacement invocation after provider-start read binding. */
+  steeredInvocationIdByCatId?: Record<string, string>;
   intent: string;
   status: 'queued' | 'processing';
   createdAt: number;
@@ -34,6 +65,8 @@ export interface QueueEntry {
   autoExecute: boolean;
   /** F122B: which cat initiated this entry (for A2A/multi_mention display) */
   callerCatId?: string;
+  /** Source invocation lineage. Parallel invocations of one cat must not coalesce with each other. */
+  a2aParentInvocationId?: string;
   /** F134: sender identity for connector group chat messages (used for UI display) */
   senderMeta?: { id: string; name?: string };
   /** F175: queue-internal priority — urgent entries sort before normal in dequeue */
@@ -42,6 +75,16 @@ export interface QueueEntry {
   sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' | 'continuation' | 'issue' | 'freshness';
   /** Queue-internal dedup key for agent control-flow work. */
   continuationKey?: string;
+  /** F254 Phase E: typed custody carrier for one persistent catch closure. */
+  freshnessClosureId?: string;
+  freshnessRequiredFrontierMessageId?: string;
+  /** ADR-042 distinct supplement carrier; never aliases freshnessClosureId. */
+  freshnessSupplementId?: string;
+  freshnessSupplementLineageId?: string;
+  freshnessSupplementSeq?: 1 | 2;
+  readOnlyToolPolicy?: ToolExecutionPolicy;
+  /** F167 Phase S: persistent action lease generation fence across queue/start/commit. */
+  actionSuccessorFence?: ActionSuccessorFence;
   /** F175: user drag-reorder position — explicit values override priority in dequeue */
   position?: number;
   /** F175: skill hint for connector triggers — flows through as promptTags on execution */
@@ -49,10 +92,6 @@ export interface QueueEntry {
   callerTraceContext?: CallerTraceContext;
   /** Explicit A2A trigger message for stream reply threading. */
   a2aTriggerMessageId?: string;
-  /** F220 2a: ID of the primary queue entry that batched this sibling via collectUserBatch.
-   *  Set by markProcessingById when called from executeEntry's batch collection.
-   *  Used by zombie convergence to roll back batch siblings after the primary is removed. */
-  batchParentId?: string;
 }
 
 export interface EnqueueResult {
@@ -63,7 +102,32 @@ export interface EnqueueResult {
   deduped?: boolean;
 }
 
+export interface QueuedHandledResult {
+  entryId: string;
+  threadId: string;
+  userId: string;
+  catId: string;
+  messageIds: string[];
+  remainingTargetCats: string[];
+  fullyConsumed: boolean;
+  /** F254 D1.2b: rollback payload used when delivery persistence fails after tentative consume. */
+  entrySnapshot?: QueueEntry;
+  queueIndex?: number;
+  originalContent?: string;
+}
+
 const MAX_QUEUE_DEPTH = 5;
+
+/**
+ * Stable InvocationRecord identity for an ActionSuccessor carrier.
+ *
+ * Queue entry ids are process-local UUIDs. An ActionSuccessor retry must instead
+ * bind durable admission to the lease/generation idempotency key that survives a
+ * restart, otherwise a lost in-memory queue can execute the same carrier twice.
+ */
+export function actionSuccessorInvocationIdempotencyKey(queueIdempotencyKey: string): string {
+  return `action-successor:${queueIdempotencyKey}`;
+}
 
 export function isSystemPinnedQueueEntry(entry: Pick<QueueEntry, 'source' | 'sourceCategory'>): boolean {
   return entry.source === 'agent' && entry.sourceCategory === 'continuation';
@@ -151,7 +215,9 @@ export class InvocationQueue {
       | 'priority'
       | 'position'
       | 'suggestedSkill'
+      | 'ownerAuthProvenance'
     > & {
+      ownerAuthProvenance: OwnerAuthProvenance;
       autoExecute?: boolean;
       callerCatId?: string;
       priority?: 'urgent' | 'normal';
@@ -161,6 +227,14 @@ export class InvocationQueue {
       dedupeProcessing?: boolean;
     },
   ): EnqueueResult {
+    const ownerAuthProvenance: unknown = input.ownerAuthProvenance;
+    if (
+      ownerAuthProvenance !== 'strict' &&
+      ownerAuthProvenance !== 'compatibility_fallback' &&
+      ownerAuthProvenance !== 'unknown'
+    ) {
+      throw new Error('ownerAuthProvenance must be explicit on every Queue producer');
+    }
     const key = this.scopeKey(input.threadId, input.userId);
     const q = this.getOrCreate(key);
     const priority = InvocationQueue.normalizedPriority(input);
@@ -210,21 +284,31 @@ export class InvocationQueue {
       id: randomUUID(),
       threadId: input.threadId,
       userId: input.userId,
+      ownerAuthProvenance,
       idempotencyKey: input.idempotencyKey,
       content: input.content,
       messageId: input.messageId ?? null,
       mergedMessageIds: [],
       source: input.source,
       targetCats: [...input.targetCats],
+      allTargetCats: [...input.targetCats],
       intent: input.intent,
       status: 'queued',
       createdAt: Date.now(),
       autoExecute: input.autoExecute ?? false,
       callerCatId: input.callerCatId,
+      a2aParentInvocationId: input.a2aParentInvocationId,
       senderMeta: input.senderMeta,
       priority,
       sourceCategory: input.sourceCategory,
       continuationKey: input.continuationKey,
+      freshnessClosureId: input.freshnessClosureId,
+      freshnessRequiredFrontierMessageId: input.freshnessRequiredFrontierMessageId,
+      freshnessSupplementId: input.freshnessSupplementId,
+      freshnessSupplementLineageId: input.freshnessSupplementLineageId,
+      freshnessSupplementSeq: input.freshnessSupplementSeq,
+      readOnlyToolPolicy: input.readOnlyToolPolicy,
+      actionSuccessorFence: input.actionSuccessorFence,
       suggestedSkill: input.suggestedSkill,
       callerTraceContext: input.callerTraceContext,
       a2aTriggerMessageId: input.a2aTriggerMessageId,
@@ -292,6 +376,523 @@ export class InvocationQueue {
     const q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q) return [];
     return [...q].sort(InvocationQueue.compareEntries);
+  }
+
+  /** Stable deep snapshot for persistence/rollback boundaries. */
+  getEntrySnapshot(threadId: string, userId: string, entryId: string): QueueEntry | null {
+    const entry = this.findEntry(threadId, userId, entryId);
+    return entry ? InvocationQueue.cloneEntry(entry) : null;
+  }
+
+  /**
+   * Restore a pre-mutation snapshot only while the exact post-mutation state is
+   * still current. This CAS boundary prevents a failed durable side effect from
+   * rolling back a later concurrent Queue update.
+   */
+  restoreEntrySnapshotIfUnchanged(expectedCurrent: QueueEntry, replacement: QueueEntry): boolean {
+    if (
+      expectedCurrent.id !== replacement.id ||
+      expectedCurrent.threadId !== replacement.threadId ||
+      expectedCurrent.userId !== replacement.userId
+    ) {
+      throw new Error('Queue snapshot restore identity mismatch');
+    }
+    const q = this.queues.get(this.scopeKey(expectedCurrent.threadId, expectedCurrent.userId));
+    const index = q?.findIndex((entry) => entry.id === expectedCurrent.id) ?? -1;
+    if (!q || index < 0) return false;
+    const current = q[index];
+    if (JSON.stringify(current) !== JSON.stringify(expectedCurrent)) return false;
+    q[index] = InvocationQueue.cloneEntry(replacement);
+    return true;
+  }
+
+  /** Remove one exact Queue snapshot while it is still current. */
+  removeEntrySnapshotIfUnchanged(expectedCurrent: QueueEntry): boolean {
+    const q = this.queues.get(this.scopeKey(expectedCurrent.threadId, expectedCurrent.userId));
+    const index = q?.findIndex((entry) => entry.id === expectedCurrent.id) ?? -1;
+    if (!q || index < 0) return false;
+    const current = q[index];
+    if (JSON.stringify(current) !== JSON.stringify(expectedCurrent)) return false;
+    q.splice(index, 1);
+    this.originalContents.delete(expectedCurrent.id);
+    return true;
+  }
+
+  /** Restore one exact TTL-0 Queue owner after process restart. Idempotent by entryId. */
+  restoreDurableEntry(entry: QueueEntry): 'restored' | 'existing' {
+    for (const q of this.queues.values()) {
+      const existing = q.find((candidate) => candidate.id === entry.id);
+      if (!existing) continue;
+      if (existing.threadId !== entry.threadId || existing.userId !== entry.userId) {
+        throw new Error(`durable Queue entry identity collision: ${entry.id}`);
+      }
+      return 'existing';
+    }
+    const restored = InvocationQueue.cloneEntry(entry);
+    this.getOrCreate(this.scopeKey(entry.threadId, entry.userId)).push(restored);
+    this.originalContents.set(entry.id, entry.content);
+    return 'restored';
+  }
+
+  /** F254 D1.1: queued freshness input scoped to the cat that would process it. */
+  getQueuedFreshnessMessagesForCat(
+    threadId: string,
+    userId: string,
+    catId: string,
+    opts?: { excludeEntryId?: string },
+  ): Array<{
+    entryId: string;
+    source: string;
+    content: string;
+    callerCatId?: string;
+    messageId?: string | null;
+    mergedMessageIds?: string[];
+    sourceCategory?: QueueEntry['sourceCategory'];
+  }> {
+    return this.list(threadId, userId)
+      .filter((entry) => entry.id !== opts?.excludeEntryId)
+      .filter((entry) => entry.status === 'queued' && entry.targetCats.includes(catId))
+      .filter((entry) => !entry.queuedSeenByCatIds?.includes(catId))
+      .map((entry) => ({
+        entryId: entry.id,
+        source: entry.source,
+        content: entry.content,
+        ...(entry.callerCatId ? { callerCatId: entry.callerCatId } : {}),
+        ...(entry.messageId !== undefined ? { messageId: entry.messageId } : {}),
+        ...(entry.mergedMessageIds.length > 0 ? { mergedMessageIds: [...entry.mergedMessageIds] } : {}),
+        ...(entry.sourceCategory ? { sourceCategory: entry.sourceCategory } : {}),
+      }));
+  }
+
+  /** F254 D1.2a: queued bodies readable by a target cat. Seen suppresses nags, not body access. */
+  getQueuedBodyMessagesForCat(
+    threadId: string,
+    userId: string,
+    catId: string,
+  ): Array<{
+    entryId: string;
+    source: string;
+    content: string;
+    callerCatId?: string;
+    messageId?: string | null;
+    mergedMessageIds?: string[];
+  }> {
+    return this.list(threadId, userId)
+      .filter((entry) => entry.status === 'queued' && entry.targetCats.includes(catId))
+      .map((entry) => ({
+        entryId: entry.id,
+        source: entry.source,
+        content: entry.content,
+        ...(entry.callerCatId ? { callerCatId: entry.callerCatId } : {}),
+        ...(entry.messageId !== undefined ? { messageId: entry.messageId } : {}),
+        ...(entry.mergedMessageIds.length > 0 ? { mergedMessageIds: [...entry.mergedMessageIds] } : {}),
+      }));
+  }
+
+  /** Record that a best-effort freshness notice reached this target's current invocation. */
+  markQueuedNotified(threadId: string, userId: string, entryId: string, catId: string): boolean {
+    const entry = this.findEntry(threadId, userId, entryId);
+    if (!entry || entry.status !== 'queued' || !entry.targetCats.includes(catId)) return false;
+    if (entry.queuedSeenByCatIds?.includes(catId)) return false;
+    const notified = new Set(entry.queuedNotifiedByCatIds ?? []);
+    const alreadyNotified = notified.has(catId);
+    notified.add(catId);
+    entry.queuedNotifiedByCatIds = [...notified];
+    return !alreadyNotified;
+  }
+
+  markSteering(threadId: string, userId: string, entryId: string, catId: string): boolean {
+    const entry = this.findEntry(threadId, userId, entryId);
+    if (!entry || entry.status !== 'queued' || !entry.targetCats.includes(catId)) return false;
+    const requested = new Set(entry.steerRequestedByCatIds ?? []);
+    const changed = !requested.has(catId);
+    requested.add(catId);
+    entry.steerRequestedByCatIds = [...requested];
+    return changed;
+  }
+
+  clearSteering(threadId: string, userId: string, entryId: string, catId: string): boolean {
+    const entry = this.findEntry(threadId, userId, entryId);
+    if (!entry) return false;
+    const hadRequested = entry.steerRequestedByCatIds?.includes(catId) ?? false;
+    const hadInvocation = !!entry.steeredInvocationIdByCatId?.[catId];
+    entry.steerRequestedByCatIds = entry.steerRequestedByCatIds?.filter((candidate) => candidate !== catId);
+    if (entry.steerRequestedByCatIds?.length === 0) entry.steerRequestedByCatIds = undefined;
+    if (entry.steeredInvocationIdByCatId) {
+      delete entry.steeredInvocationIdByCatId[catId];
+      if (Object.keys(entry.steeredInvocationIdByCatId).length === 0) {
+        entry.steeredInvocationIdByCatId = undefined;
+      }
+    }
+    return hadRequested || hadInvocation;
+  }
+
+  /**
+   * Bind the exact provider child as soon as it exists, before the queued body
+   * is exposed. This preserves "woke" independently from "read".
+   */
+  markQueuedAwakened(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    catId: string,
+    invocationId: string,
+    awakenedAt = Date.now(),
+  ): boolean {
+    const entry = this.findEntry(threadId, userId, entryId);
+    if (!entry || !entry.targetCats.includes(catId)) return false;
+    const existingInvocationId = entry.queuedAwakenedInvocationIdByCatId?.[catId];
+    const existingAwakenedAt = entry.queuedAwakenedAtByCatId?.[catId];
+    if (existingInvocationId === invocationId) {
+      if (existingAwakenedAt !== undefined && existingAwakenedAt !== awakenedAt) {
+        throw new Error('queued awakened timestamp is immutable');
+      }
+      return false;
+    }
+    entry.queuedAwakenedInvocationIdByCatId = {
+      ...(entry.queuedAwakenedInvocationIdByCatId ?? {}),
+      [catId]: invocationId,
+    };
+    entry.queuedAwakenedAtByCatId = {
+      ...(entry.queuedAwakenedAtByCatId ?? {}),
+      [catId]: awakenedAt,
+    };
+    entry.queuedNotifiedByCatIds = entry.queuedNotifiedByCatIds?.filter((candidate) => candidate !== catId);
+    if (entry.queuedNotifiedByCatIds?.length === 0) entry.queuedNotifiedByCatIds = undefined;
+    entry.queuedFailedByCatIds = entry.queuedFailedByCatIds?.filter((candidate) => candidate !== catId);
+    if (entry.queuedFailedByCatIds?.length === 0) entry.queuedFailedByCatIds = undefined;
+    return true;
+  }
+
+  /**
+   * F254 D1.2a: mark a queued entry as seen by one target cat.
+   * Does not consume or deliver the entry.
+   *
+   * Returns whether this call created the first queued_seen state transition for
+   * this cat. Invocation evidence is still refreshed on repeat reads so retry
+   * attempts can close handled evidence without double-counting queued_seen.
+   */
+  markQueuedSeen(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    catId: string,
+    invocationId?: string,
+    seenAt = Date.now(),
+  ): boolean {
+    const entry = this.findEntry(threadId, userId, entryId);
+    if (!entry || entry.status !== 'queued' || !entry.targetCats.includes(catId)) return false;
+    const seen = new Set(entry.queuedSeenByCatIds ?? []);
+    const alreadySeen = seen.has(catId);
+    seen.add(catId);
+    entry.queuedSeenByCatIds = [...seen];
+    entry.queuedNotifiedByCatIds = entry.queuedNotifiedByCatIds?.filter((candidate) => candidate !== catId);
+    if (entry.queuedNotifiedByCatIds?.length === 0) entry.queuedNotifiedByCatIds = undefined;
+    entry.queuedFailedByCatIds = entry.queuedFailedByCatIds?.filter((candidate) => candidate !== catId);
+    if (entry.queuedFailedByCatIds?.length === 0) entry.queuedFailedByCatIds = undefined;
+    if (invocationId) {
+      entry.queuedSeenInvocationIdByCatId = { ...(entry.queuedSeenInvocationIdByCatId ?? {}), [catId]: invocationId };
+      if (
+        !(entry.queuedBodyExposures ?? []).some(
+          (exposure) => exposure.targetCatId === catId && exposure.invocationId === invocationId,
+        )
+      ) {
+        entry.queuedBodyExposures = [
+          ...(entry.queuedBodyExposures ?? []),
+          { targetCatId: catId, invocationId, seenAt },
+        ];
+      }
+    }
+    return !alreadySeen;
+  }
+
+  /**
+   * Record the exact Queue bodies supplied as the current invocation prompt.
+   * Processing entries are no longer discoverable through get_thread_context,
+   * so their read evidence must be bound at the provider launch boundary.
+   */
+  markProcessingSeen(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    catIds: readonly string[],
+    invocationId: string,
+    seenAt = Date.now(),
+  ): string[] {
+    const entry = this.findEntry(threadId, userId, entryId);
+    if (!entry || entry.status !== 'processing') return [];
+    const seen = new Set(entry.queuedSeenByCatIds ?? []);
+    const notified = new Set(entry.queuedNotifiedByCatIds ?? []);
+    const failed = new Set(entry.queuedFailedByCatIds ?? []);
+    const marked: string[] = [];
+    for (const catId of catIds) {
+      if (!entry.targetCats.includes(catId)) continue;
+      seen.add(catId);
+      notified.delete(catId);
+      failed.delete(catId);
+      entry.queuedSeenInvocationIdByCatId = {
+        ...(entry.queuedSeenInvocationIdByCatId ?? {}),
+        [catId]: invocationId,
+      };
+      if (
+        !(entry.queuedBodyExposures ?? []).some(
+          (exposure) => exposure.targetCatId === catId && exposure.invocationId === invocationId,
+        )
+      ) {
+        entry.queuedBodyExposures = [
+          ...(entry.queuedBodyExposures ?? []),
+          { targetCatId: catId, invocationId, seenAt },
+        ];
+      }
+      if (entry.steerRequestedByCatIds?.includes(catId)) {
+        entry.steerRequestedByCatIds = entry.steerRequestedByCatIds.filter((candidate) => candidate !== catId);
+        if (entry.steerRequestedByCatIds.length === 0) entry.steerRequestedByCatIds = undefined;
+        entry.steeredInvocationIdByCatId = {
+          ...(entry.steeredInvocationIdByCatId ?? {}),
+          [catId]: invocationId,
+        };
+      }
+      marked.push(catId);
+    }
+    if (marked.length === 0) return [];
+    entry.queuedSeenByCatIds = [...seen];
+    entry.queuedNotifiedByCatIds = notified.size > 0 ? [...notified] : undefined;
+    entry.queuedFailedByCatIds = failed.size > 0 ? [...failed] : undefined;
+    return marked;
+  }
+
+  /** Mark exact read evidence as failed and return the responsibility to queued state. */
+  markQueuedFailedForCatAcrossUsers(
+    threadId: string,
+    catId: string,
+    invocationId: string,
+    attemptedEntryIds: ReadonlySet<string> = new Set(),
+  ): Array<{ entryId: string; userId: string }> {
+    const failed: Array<{ entryId: string; userId: string }> = [];
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
+      for (const entry of q) {
+        if (
+          entry.status !== 'queued' ||
+          !entry.targetCats.includes(catId) ||
+          (entry.queuedSeenInvocationIdByCatId?.[catId] !== invocationId && !attemptedEntryIds.has(entry.id))
+        ) {
+          continue;
+        }
+        const failedCats = new Set(entry.queuedFailedByCatIds ?? []);
+        failedCats.add(catId);
+        entry.queuedFailedByCatIds = [...failedCats];
+        if (entry.queuedSeenInvocationIdByCatId?.[catId] === invocationId) {
+          delete entry.queuedSeenInvocationIdByCatId[catId];
+          if (Object.keys(entry.queuedSeenInvocationIdByCatId).length === 0) {
+            entry.queuedSeenInvocationIdByCatId = undefined;
+          }
+        }
+        this.clearSteering(entry.threadId, entry.userId, entry.id, catId);
+        failed.push({ entryId: entry.id, userId: entry.userId });
+      }
+    }
+    return failed;
+  }
+
+  /**
+   * F254 D1.2b: retry reuses an InvocationRecord id, so clear stale handled-evidence tokens
+   * before the retry attempt starts. The read marker remains: seen still suppresses nags.
+   */
+  clearQueuedSeenInvocationForCats(threadId: string, catIds: readonly string[], invocationId: string): number {
+    const targetCats = new Set(catIds);
+    let cleared = 0;
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
+      for (const entry of q) {
+        if (
+          !entry ||
+          entry.status !== 'queued' ||
+          (!entry.queuedSeenInvocationIdByCatId && !entry.queuedAwakenedInvocationIdByCatId)
+        ) {
+          continue;
+        }
+        for (const catId of targetCats) {
+          const hadSeen = entry.queuedSeenInvocationIdByCatId?.[catId] === invocationId;
+          const hadAwakened = entry.queuedAwakenedInvocationIdByCatId?.[catId] === invocationId;
+          if (!hadSeen && !hadAwakened) continue;
+          if (hadSeen && entry.queuedSeenInvocationIdByCatId) {
+            delete entry.queuedSeenInvocationIdByCatId[catId];
+          }
+          if (hadAwakened && entry.queuedAwakenedInvocationIdByCatId) {
+            delete entry.queuedAwakenedInvocationIdByCatId[catId];
+            delete entry.queuedAwakenedAtByCatId?.[catId];
+          }
+          if (entry.steeredInvocationIdByCatId?.[catId] === invocationId) {
+            delete entry.steeredInvocationIdByCatId[catId];
+          }
+          cleared += 1;
+        }
+        if (entry.queuedSeenInvocationIdByCatId && Object.keys(entry.queuedSeenInvocationIdByCatId).length === 0) {
+          entry.queuedSeenInvocationIdByCatId = undefined;
+        }
+        if (
+          entry.queuedAwakenedInvocationIdByCatId &&
+          Object.keys(entry.queuedAwakenedInvocationIdByCatId).length === 0
+        ) {
+          entry.queuedAwakenedInvocationIdByCatId = undefined;
+          entry.queuedAwakenedAtByCatId = undefined;
+        }
+        if (entry.steeredInvocationIdByCatId && Object.keys(entry.steeredInvocationIdByCatId).length === 0) {
+          entry.steeredInvocationIdByCatId = undefined;
+        }
+      }
+    }
+    return cleared;
+  }
+
+  /** F254 D1.2b: consume only this cat's target for queued entries it already saw. */
+  markQueuedHandledForCatAcrossUsers(threadId: string, catId: string, invocationId?: string): QueuedHandledResult[] {
+    const handled: QueuedHandledResult[] = [];
+    if (!invocationId) return handled;
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
+      for (let i = 0; i < q.length; i++) {
+        const entry = q[i];
+        if (!entry || !InvocationQueue.isQueuedHandledCandidate(entry, catId, invocationId)) continue;
+
+        const result = InvocationQueue.markQueuedHandledEntry(entry, catId, i, this.originalContents.get(entry.id));
+        handled.push(result);
+
+        if (result.fullyConsumed) {
+          this.originalContents.delete(entry.id);
+          q.splice(i, 1);
+          i--;
+        }
+      }
+    }
+    return handled;
+  }
+
+  /**
+   * Detect an attempted target that remained Queue-owned after a nominally
+   * successful execution. This is the fail-closed guard for a child that
+   * reached `done` without ever binding the exact prompt-body exposure.
+   */
+  hasAttemptedQueuedTargetAcrossUsers(
+    threadId: string,
+    catId: string,
+    attemptedEntryIds: ReadonlySet<string>,
+  ): boolean {
+    if (attemptedEntryIds.size === 0) return false;
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
+      if (
+        q.some(
+          (entry) => entry.status === 'queued' && attemptedEntryIds.has(entry.id) && entry.targetCats.includes(catId),
+        )
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static isQueuedHandledCandidate(entry: QueueEntry, catId: string, invocationId: string): boolean {
+    return (
+      entry.status === 'queued' &&
+      entry.targetCats.includes(catId) &&
+      entry.queuedSeenInvocationIdByCatId?.[catId] === invocationId
+    );
+  }
+
+  restoreQueuedHandledResult(result: QueuedHandledResult): boolean {
+    if (!result.entrySnapshot) return false;
+    const key = this.scopeKey(result.threadId, result.userId);
+    const q = this.getOrCreate(key);
+    const restored = InvocationQueue.cloneEntry(result.entrySnapshot);
+    const existingIndex = q.findIndex((entry) => entry.id === result.entryId);
+    if (existingIndex >= 0) {
+      q[existingIndex] = restored;
+    } else {
+      const index = Math.max(0, Math.min(result.queueIndex ?? q.length, q.length));
+      q.splice(index, 0, restored);
+    }
+    this.originalContents.set(restored.id, result.originalContent ?? restored.content);
+    return true;
+  }
+
+  private static markQueuedHandledEntry(
+    entry: QueueEntry,
+    catId: string,
+    queueIndex: number,
+    originalContent?: string,
+  ): QueuedHandledResult {
+    const entrySnapshot = InvocationQueue.cloneEntry(entry);
+    const remainingTargetCats = entry.targetCats.filter((targetCat) => targetCat !== catId);
+    entry.targetCats = remainingTargetCats;
+    const handledCats = new Set(entry.queuedHandledByCatIds ?? []);
+    handledCats.add(catId);
+    entry.queuedHandledByCatIds = [...handledCats];
+    entry.queuedFailedByCatIds = entry.queuedFailedByCatIds?.filter((candidate) => candidate !== catId);
+    entry.queuedNotifiedByCatIds = entry.queuedNotifiedByCatIds?.filter((candidate) => candidate !== catId);
+    entry.steerRequestedByCatIds = entry.steerRequestedByCatIds?.filter((candidate) => candidate !== catId);
+    if (entry.steerRequestedByCatIds?.length === 0) entry.steerRequestedByCatIds = undefined;
+    if (entry.steeredInvocationIdByCatId) {
+      delete entry.steeredInvocationIdByCatId[catId];
+      if (Object.keys(entry.steeredInvocationIdByCatId).length === 0) entry.steeredInvocationIdByCatId = undefined;
+    }
+    if (entry.queuedSeenInvocationIdByCatId) {
+      delete entry.queuedSeenInvocationIdByCatId[catId];
+      if (Object.keys(entry.queuedSeenInvocationIdByCatId).length === 0) {
+        entry.queuedSeenInvocationIdByCatId = undefined;
+      }
+    }
+    if (entry.queuedAwakenedInvocationIdByCatId) {
+      delete entry.queuedAwakenedInvocationIdByCatId[catId];
+      delete entry.queuedAwakenedAtByCatId?.[catId];
+      if (Object.keys(entry.queuedAwakenedInvocationIdByCatId).length === 0) {
+        entry.queuedAwakenedInvocationIdByCatId = undefined;
+        entry.queuedAwakenedAtByCatId = undefined;
+      }
+    }
+    const messageIds = [entry.messageId ?? '', ...entry.mergedMessageIds].filter(Boolean);
+    return {
+      entryId: entry.id,
+      threadId: entry.threadId,
+      userId: entry.userId,
+      catId,
+      messageIds,
+      remainingTargetCats: [...remainingTargetCats],
+      fullyConsumed: remainingTargetCats.length === 0,
+      entrySnapshot,
+      queueIndex,
+      originalContent,
+    };
+  }
+
+  private static cloneEntry(entry: QueueEntry): QueueEntry {
+    return {
+      ...entry,
+      targetCats: [...entry.targetCats],
+      ...(entry.allTargetCats ? { allTargetCats: [...entry.allTargetCats] } : {}),
+      ...(entry.queuedNotifiedByCatIds ? { queuedNotifiedByCatIds: [...entry.queuedNotifiedByCatIds] } : {}),
+      ...(entry.queuedAwakenedInvocationIdByCatId
+        ? { queuedAwakenedInvocationIdByCatId: { ...entry.queuedAwakenedInvocationIdByCatId } }
+        : {}),
+      ...(entry.queuedAwakenedAtByCatId ? { queuedAwakenedAtByCatId: { ...entry.queuedAwakenedAtByCatId } } : {}),
+      mergedMessageIds: [...entry.mergedMessageIds],
+      ...(entry.queuedSeenByCatIds ? { queuedSeenByCatIds: [...entry.queuedSeenByCatIds] } : {}),
+      ...(entry.queuedSeenInvocationIdByCatId
+        ? { queuedSeenInvocationIdByCatId: { ...entry.queuedSeenInvocationIdByCatId } }
+        : {}),
+      ...(entry.queuedBodyExposures
+        ? { queuedBodyExposures: entry.queuedBodyExposures.map((exposure) => ({ ...exposure })) }
+        : {}),
+      ...(entry.queuedFailedByCatIds ? { queuedFailedByCatIds: [...entry.queuedFailedByCatIds] } : {}),
+      ...(entry.queuedHandledByCatIds ? { queuedHandledByCatIds: [...entry.queuedHandledByCatIds] } : {}),
+      ...(entry.steerRequestedByCatIds ? { steerRequestedByCatIds: [...entry.steerRequestedByCatIds] } : {}),
+      ...(entry.steeredInvocationIdByCatId
+        ? { steeredInvocationIdByCatId: { ...entry.steeredInvocationIdByCatId } }
+        : {}),
+      ...(entry.senderMeta ? { senderMeta: { ...entry.senderMeta } } : {}),
+      ...(entry.callerTraceContext ? { callerTraceContext: { ...entry.callerTraceContext } } : {}),
+    };
   }
 
   /** Count of queued (not processing) entries. */
@@ -391,13 +992,6 @@ export class InvocationQueue {
       const entry = q.find((e) => e.id === entryId && e.status === 'processing');
       if (entry) {
         entry.status = 'queued';
-        // F220 2a (R16 P1): sever batch association on rollback. The batch is
-        // dissolved — the entry re-enters the queue as a standalone candidate.
-        // This prevents a stale executeEntry finalizer from removing or rolling
-        // back a sibling that was re-dispatched by tryDispatchNext after
-        // convergence: the finalizer checks batchParentId before operating, and
-        // a cleared batchParentId signals "no longer part of the old batch".
-        delete entry.batchParentId;
         return true;
       }
     }
@@ -549,7 +1143,13 @@ export class InvocationQueue {
    * Stale processing entries (zombie invocations past STALE_PROCESSING_THRESHOLD_MS) are ignored so
    * a hung invocation never permanently swallows new handoffs. Returns a copy (never a live ref).
    */
-  findInFlightAgentEntry(threadId: string, catId: string, callerCatId?: string): QueueEntry | null {
+  findInFlightAgentEntry(
+    threadId: string,
+    catId: string,
+    callerCatId?: string,
+    a2aParentInvocationId?: string,
+    ownerAuthProvenance?: OwnerAuthProvenance,
+  ): QueueEntry | null {
     // 云端 codex R4 P1: scope to sourceCategory 'a2a'. `source: 'agent'` alone also matches
     // self-continuation entries (QueueProcessor.enqueueContinuation → source:'agent',
     // sourceCategory:'continuation'). Without this filter an A2A handoff to a cat that has a queued
@@ -560,15 +1160,23 @@ export class InvocationQueue {
     //
     // F216 c0 (砚砚 GPT-5.5 review P1): ALSO scope by callerCatId. Only the SAME caller's repeated
     // same-turn handoffs are mergeable — without this, cat A's queued handoff to a target gets
-    // coalesced/superseded by cat B's later handoff to the same target (cross-caller串味). Strict
-    // match: both sides must be defined AND equal — an entry with undefined callerCatId is never
-    // adopted by an arbitrary caller, and an undefined-caller lookup never adopts anyone (safe
-    // direction: prefer a fresh entry over a wrong merge). callerCatId omitted → caller scope off
-    // (legacy/test callers that don't care; production callback-a2a-trigger always passes it).
+    // coalesced/superseded by cat B's later handoff to the same target (cross-caller串味).
+    //
+    // Parallel invocations of one cat still share callerCatId, so callback callers additionally
+    // pass a2aParentInvocationId. Both supplied scopes use strict matching: a missing field never
+    // adopts a scoped lookup. Omitted scopes preserve compatibility for legacy/non-invocation
+    // callers, preferring a fresh entry whenever the lineage is known but does not match.
     const matches = (e: QueueEntry): boolean => {
       if (!(e.source === 'agent' && e.sourceCategory === 'a2a' && e.targetCats.includes(catId))) return false;
-      if (callerCatId === undefined) return true; // caller scope not requested
-      return e.callerCatId !== undefined && e.callerCatId === callerCatId;
+      if (callerCatId !== undefined && !(e.callerCatId !== undefined && e.callerCatId === callerCatId)) return false;
+      if (
+        a2aParentInvocationId !== undefined &&
+        !(e.a2aParentInvocationId !== undefined && e.a2aParentInvocationId === a2aParentInvocationId)
+      ) {
+        return false;
+      }
+      if (ownerAuthProvenance !== undefined && e.ownerAuthProvenance !== ownerAuthProvenance) return false;
+      return true;
     };
     // Pass 1: prefer a mergeable queued entry (in-place coalesce, no abort needed).
     for (const q of this.queues.values()) {
@@ -606,6 +1214,8 @@ export class InvocationQueue {
     content: string,
     messageId?: string,
     callerCatId?: string,
+    a2aParentInvocationId?: string,
+    ownerAuthProvenance?: OwnerAuthProvenance,
   ): boolean {
     const e = this.findEntry(threadId, userId, entryId);
     if (!e || e.status !== 'queued') return false;
@@ -613,15 +1223,26 @@ export class InvocationQueue {
     // already scopes to sourceCategory 'a2a', but guard here too so a future caller passing a
     // continuation/other entryId can never splice a handoff into unrelated control-flow content.
     if (!(e.source === 'agent' && e.sourceCategory === 'a2a')) return false;
-    // F216 c0 (砚砚 GPT-5.5 review P1): defense-in-depth caller scope — refuse cross-caller merge.
-    // findInFlightAgentEntry already caller-scopes, but guard here too so a stale/wrong entryId from
-    // a different caller can never splice content. Strict: when callerCatId is provided it must match
-    // a defined entry.callerCatId. Omitted → scope off (legacy/test callers).
+    // Defense-in-depth source scope: a stale/wrong entryId from another caller or parallel
+    // invocation can never splice content. Supplied scopes require a defined exact match; omitted
+    // scopes stay off for legacy/non-invocation callers.
     if (callerCatId !== undefined && !(e.callerCatId !== undefined && e.callerCatId === callerCatId)) return false;
+    if (
+      a2aParentInvocationId !== undefined &&
+      !(e.a2aParentInvocationId !== undefined && e.a2aParentInvocationId === a2aParentInvocationId)
+    ) {
+      return false;
+    }
+    if (ownerAuthProvenance !== undefined && e.ownerAuthProvenance !== ownerAuthProvenance) return false;
     e.content = `${e.content}\n\n${content}`;
     if (messageId && e.messageId !== messageId && !e.mergedMessageIds.includes(messageId)) {
       e.mergedMessageIds.push(messageId);
     }
+    // New queued content invalidates previous read markers; the target has not seen the appended body.
+    e.queuedNotifiedByCatIds = undefined;
+    e.queuedSeenByCatIds = undefined;
+    e.queuedSeenInvocationIdByCatId = undefined;
+    e.queuedFailedByCatIds = undefined;
     return true;
   }
 
@@ -714,6 +1335,7 @@ export class InvocationQueue {
     catId: string,
     opts?: {
       excludeEntryId?: string;
+      userId?: string;
       sources?: QueueEntry['source'][];
       sourceCategories?: NonNullable<QueueEntry['sourceCategory']>[];
       continuationKey?: string;
@@ -724,6 +1346,7 @@ export class InvocationQueue {
       if (!this.queueMatchesThread(q, threadId)) continue;
       for (const e of q) {
         if (opts?.excludeEntryId && e.id === opts.excludeEntryId) continue;
+        if (opts?.userId && e.userId !== opts.userId) continue;
         if (!e.targetCats.includes(catId)) continue;
         if (opts?.sources && !opts.sources.includes(e.source)) continue;
         if (opts?.sourceCategories) {
@@ -761,14 +1384,13 @@ export class InvocationQueue {
   }
 
   /** F122B: Mark a specific entry as processing by ID (cross-user). */
-  markProcessingById(threadId: string, entryId: string, batchParentId?: string): boolean {
+  markProcessingById(threadId: string, entryId: string): boolean {
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId)) continue;
       const entry = q.find((e) => e.id === entryId && e.status === 'queued');
       if (entry) {
         entry.status = 'processing';
         entry.processingStartedAt = Date.now();
-        if (batchParentId) entry.batchParentId = batchParentId;
         return true;
       }
     }
@@ -778,7 +1400,8 @@ export class InvocationQueue {
   /**
    * F175: Collect a batch of adjacent user entries for unified execution.
    * Non-user sources always return a single-entry batch.
-   * User entries batch while: same source, same intent, same targetCats (set equality).
+   * User entries batch while: same source, same intent, same targetCats (set equality),
+   * and the exact same server-derived owner authentication provenance.
    * Returns copies — caller is responsible for marking processing.
    */
   collectUserBatch(threadId: string, userId: string): QueueEntry[] {
@@ -797,7 +1420,12 @@ export class InvocationQueue {
     const firstTargetsSorted = sorted(first.targetCats);
     for (let i = 1; i < queued.length; i++) {
       const e = queued[i]!;
-      if (e.source !== 'user' || e.intent !== first.intent || !arraysEqual(sorted(e.targetCats), firstTargetsSorted))
+      if (
+        e.source !== 'user' ||
+        e.intent !== first.intent ||
+        e.ownerAuthProvenance !== first.ownerAuthProvenance ||
+        !arraysEqual(sorted(e.targetCats), firstTargetsSorted)
+      )
         break;
       batch.push({ ...e });
     }

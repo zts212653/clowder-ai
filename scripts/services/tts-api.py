@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TTS server for Cat Cafe voice output.
+TTS server for Clowder AI voice output.
 OpenAI-compatible endpoint: POST /v1/audio/speech
 
 Supports multiple backends via TtsAdapter:
@@ -46,7 +46,7 @@ MAX_INPUT_CHARS = 5000
 
 log = logging.getLogger("tts-api")
 
-app = FastAPI(title="Cat Cafe TTS Server")
+app = FastAPI(title="Clowder AI TTS Server")
 
 
 def resolve_cat_cafe_home() -> Path:
@@ -581,7 +581,7 @@ async def health_deep():
 def main():
     global adapter, adapter_ready
 
-    parser = argparse.ArgumentParser(description="Cat Cafe TTS Server")
+    parser = argparse.ArgumentParser(description="Clowder AI TTS Server")
     parser.add_argument(
         "--model",
         required=True,
@@ -605,7 +605,7 @@ def main():
 
     provider = os.environ.get("TTS_PROVIDER", "qwen3-clone").strip().lower()
 
-    log.info("=== Cat Cafe TTS Server ===")
+    log.info("=== Clowder AI TTS Server ===")
     log.info("Provider: %s | Port: %d", provider, args.port)
 
     try:

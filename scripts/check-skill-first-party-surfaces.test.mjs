@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -7,12 +7,45 @@ import { describe, it } from 'node:test';
 import { loadAllowlist, scanSkillSurfaceText } from './check-skill-first-party-surfaces.mjs';
 
 const REL_PATH = 'cat-cafe-skills/workspace-navigator/SKILL.md';
+const INBOUND_RUNBOOK_URL = new URL('../cat-cafe-skills/refs/opensource-ops-inbound-pr.md', import.meta.url);
 
 function scan(content, allowlist = []) {
   return scanSkillSurfaceText(content, REL_PATH, allowlist);
 }
 
 describe('check-skill-first-party-surfaces', () => {
+  it(
+    'keeps open-source intake gate claims aligned with the live package check surface',
+    { skip: !existsSync(INBOUND_RUNBOOK_URL) && 'home-only maintainer runbook is absent from public export' },
+    () => {
+      const reference = readFileSync(INBOUND_RUNBOOK_URL, 'utf8');
+      const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+
+      assert.match(reference, /`pnpm gate`/);
+      assert.match(reference, /`pnpm check`/);
+      assert.doesNotMatch(reference, /PARALLEL_CHECKS/);
+      for (const sunsetAlias of ['check:settings-primitives', 'check:source-hygiene']) {
+        assert.equal(pkg.scripts[sunsetAlias], undefined, `${sunsetAlias} is expected to remain sunset`);
+        assert.doesNotMatch(
+          reference,
+          new RegExp(`\\b${sunsetAlias.replace(':', '\\:')}\\b`),
+          `live skill reference must not claim ${sunsetAlias} runs in pnpm gate`,
+        );
+      }
+    },
+  );
+
+  it('keeps writing-plans formatting steps executable and source-derived', () => {
+    const skill = readFileSync(new URL('../cat-cafe-skills/writing-plans/SKILL.md', import.meta.url), 'utf8');
+
+    assert.match(skill, /## Formatting Command Contract/);
+    assert.match(skill, /`pnpm check:fix`/);
+    assert.match(skill, /`pnpm biome format --write <files>`/);
+    assert.match(skill, /`pnpm check`/);
+    assert.match(skill, /先从当前仓库的 `package\.json`、CI 或现有脚本确认/);
+    assert.match(skill, /禁止只写[“"](?:run formatting|格式化)[”"]/);
+  });
+
   it('blocks raw workspace navigate curl guidance', () => {
     const hits = scan(`
 Use this command:

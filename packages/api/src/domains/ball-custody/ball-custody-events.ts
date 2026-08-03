@@ -28,10 +28,14 @@ export interface HandedEventInput {
   at: number;
 }
 
+export function handedEventSourceId(messageId: string, toCatId: string): string {
+  return `route:${messageId}:${toCatId}`;
+}
+
 /** 行首 @ 路由投递 → ball.handed（holder 变更，球继续）。 */
 export function buildHandedEvent(input: HandedEventInput): BallCustodyEvent {
   return {
-    sourceEventId: `route:${input.messageId}:${input.toCatId}`,
+    sourceEventId: handedEventSourceId(input.messageId, input.toCatId),
     subjectKey: `ball:thread:${input.threadId}`,
     kind: 'ball.handed',
     classification: 'state-changing',

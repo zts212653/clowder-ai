@@ -2,7 +2,7 @@
 name: quality-gate
 description: >
   开发完成后的自检门禁：愿景对照 + spec 合规 + 验证。
-  Use when: 开发完了准备提 review、声称完成了、准备交付。
+  Use when: 准备对交付作完成声明、需要整理风险匹配的自证。
   Not for: 收到 review 反馈（用 receive-review）、merge（用 merge-gate）。
   Output: Spec 合规报告（含愿景覆盖度）。
 triggers:
@@ -14,11 +14,11 @@ triggers:
 
 > **SOP 位置**: 本 skill 是 `sop-definitions/development.yaml` stage `quality_gate` 的执行细节。
 > **SOP definition**: `sop-definitions/development.yaml` stage `quality_gate`。
-> **上一步**: `impl` stage | **下一步**: `fresh-context-review`（可选）→ `request-review`（review stage）
+> 这是按需自检车道，不绑定固定上一步 / 下一步；完成后把证据交给实际选择的独立验证源或交付载体。
 
 # Quality Gate
 
-开发完成到提 review 之间的双重关卡：对照 spec 自检 + 用真实命令输出证明你的声明。
+完成声明前做两件事：对照真实需求自检，并用与风险面匹配的真实命令输出证明声明。
 
 ## 核心知识
 
@@ -64,9 +64,9 @@ Step 2: CREATE — 建检查清单
 Step 2.5: CLOSE GATE MATRIX + FOLLOW-UP TAIL SCAN（F177 Phase A）🔴
   - 检查 CloseGateReport 是否已生成（schema: `cat-cafe-skills/refs/close-gate.md`）
   - 每个 unmet AC 是否三选一处置（immediate / delete / cvo_signoff）
-  - **Follow-up tail scan**：扫以下文本来源，命中阻塞关键词 = BLOCKED：
+  - **Follow-up tail scan**：扫以下文本来源，命中关键词 = **线索（进入语义判定），不是自动 BLOCKED**——判定标准只有一条：该词是否在把 **unmet AC 包装成已完成 / 偷偷延期**（close 借口）。正常阶段描述（"X 属 next phase 的 scope"）、风险讨论、路线图引用不触发（2026-07-15 修订：raw keyword 自动 BLOCK 误杀正常文本）：
     - 来源：close report、PR body、commit messages、spec 中 AC 注释、review 反馈回复
-    - 阻塞关键词（不区分大小写）：
+    - 线索关键词（不区分大小写；仅用于定位待语义检查处）：
       `follow-up` `followup` `deferred` `next phase` `next PR` `P2` `stub` `TD`
       `后续` `留个尾巴` `先这样` `下次一定` `回头` `以后再` `will address later`
       `out of scope`（作为 close 借口时）`MVP 先上`（作为 close 借口时）
@@ -124,6 +124,7 @@ Step 4.5: DOGFOOD-YOUR-SLICE — 用一次自己刚做的功能（F209 教训 20
     ① 跑一条**真实端到端 query / 路径**，涵盖该 slice 的核心交付能力
     ② 把命令 + 输出 / 截图证据写进 Quality Gate Report 的 "Dogfood" 块
     ③ 抓到的任何 dogfood bug 必须当轮修，不允许"post-merge 再说"
+    ④ **结构性例外**（2026-07-15）：验证路径只在合入后才存在（需 main/alpha 环境或真实外部案例，AC-F7 型）→ pre-merge 验证到能验的边界即可，剩余由**带 owner + 触发条件的持久 post-merge task** 接走，**不阻塞 pre-merge review / merge**；若它是 required AC，则 task 在 terminal PASS（或 `delete` / `cvo_signoff`）前仍阻塞 **feature close**。例外理由写进 review packet
 
   Scope（必做 vs 可豁免）：
     - **必做**：任何对最终用户 / 猫体感有变化的 feature 或 bugfix。包括但不限于：
@@ -158,16 +159,13 @@ Step 5: PEN CHECK — 自动化设计稿对照（不可跳过！）
      → 有 UI 改动但无 .pen → 在报告中标注"⚠️ 无设计稿，跳过对照"
   ④ 此步骤不依赖猫猫"记得"——必须执行 glob 命令，用输出决定是否进入对照
 
-Step 6: RUN — 运行验证命令（必须这次真实运行）
-  pnpm test                              # 必须全部通过
-  pnpm lint                              # 0 errors
-  pnpm check                             # 0 errors（biome 格式 + lint）
-  pnpm -r --if-present run build         # exit 0
-  # Redis 相关改动额外跑：
-  pnpm --filter @cat-cafe/api test:redis
-  # ⚠️ pnpm check 包含 biome format + lint 规则。
-  # 如果有 format 问题，先跑 pnpm check:fix 自动修复。
-  # 不能带着 biome errors 提 review！（2026-03-12 operator定调）
+Step 6: RUN — 运行风险匹配的验证命令（必须这次真实运行）
+  ① 先列五轴风险与受影响面；命令逐条对应 claim，不按“写了代码”机械全跑
+  ② 默认：受影响 package / schema / generator / docs checker + git diff --check
+  ③ 新行为 / bug：相关行为或回归测试；现有精确检查红可以直接作 RED
+  ④ 安全、鉴权、生产数据、迁移、外部契约、不可逆，或 targeted 无法覆盖跨包合流风险：pnpm gate
+  ⑤ Redis 相关改动额外跑：pnpm --filter @cat-cafe/api test:redis（只连 6398）
+  ⑥ 任一实际选择的检查红都先修；不得挑绿灯报告、隐去红灯
 
 Step 7: READ — 完整读输出，看 exit code，数失败数
 
@@ -183,8 +181,7 @@ Step 7.5: ARTIFACT HYGIENE CHECK — 根目录媒体垃圾闸门
 Step 8: REPORT — 输出合规报告 + 证据
 ```
 
-**前端功能额外要求**：`≤3 张截图 + 1 段 15s 录屏`，附"需求 → 截图"映射表。
-执行细则：`cat-cafe-skills/refs/vision-evidence-workflow.md`。
+**前端功能额外要求**：author 必须在正确 worktree / preview 上走关键交互，并记录 URL、操作与结果。截图、录屏、DOM assertion、Playwright 输出都是证据载体；只有视觉判断确实需要画面时才采截图 / 录屏，缺截图本身不阻塞，也不得让 operator 代采。执行细则：`cat-cafe-skills/refs/vision-evidence-workflow.md`。
 
 **有 .pen 设计稿的功能额外要求** 🔴（Step 5 匹配到 .pen 时强制执行）：
 1. 打开 .pen 文件 → `get_screenshot` 截取设计稿
@@ -202,9 +199,8 @@ Step 8: REPORT — 输出合规报告 + 证据
 | Claim | 需要 | 不够用 |
 |-------|------|--------|
 | 测试通过 | 这次运行输出：0 failures | "上次跑过"、"应该通过" |
-| lint 干净 | lint 输出：0 errors | 部分检查、推断 |
-| biome 干净 | pnpm check：0 errors | "先跑通再说"、"回头再改格式" |
-| 构建成功 | build 命令：exit 0 | lint 通过不代表编译通过 |
+| targeted checks 通过 | 与改动面对应的本轮命令 + exit 0 | 只挑一盏绿灯、隐去相关红灯 |
+| full gate 通过 | high 风险触发时本轮 `pnpm gate` exit 0 | 低风险为了报告完整机械全跑，或高风险只跑局部 |
 | Bug 修了 | 原症状测试：通过 | 代码改了，以为修了 |
 | 需求满足 | spec + Discussion 逐项打勾 | 测试通过就完事 |
 | Feature 完成/未完成 | git log + PR 状态 + spec 逐项 | 只看 spec checkbox 就下结论 |
@@ -247,11 +243,11 @@ Scope verdict: ✅ 必做 / 🆗 可豁免（理由）
 实际命令 / 输出 / 截图: ...
 发现的 bug: 无 / 列表（含修复 commit SHA）
 
-### 验证命令输出（必须是这次真实运行）
-pnpm test → 34/34 pass ✅
-pnpm lint → 0 errors ✅
-pnpm check → 0 errors ✅ (biome format + lint)
-pnpm -r --if-present run build → exit 0 ✅
+### 五轴风险与验证命令（必须是这次真实运行）
+风险: behavior=<...> data=<...> security=<...> contract=<...> irreversible=<...>
+<targeted command 1> → exit 0 ✅（覆盖 claim: ...）
+<targeted command 2> → exit 0 ✅（覆盖 claim: ...）
+pnpm gate → exit 0 ✅（仅 high 风险实际触发时填写）
 ```
 
 ## Common Mistakes
@@ -265,7 +261,7 @@ pnpm -r --if-present run build → exit 0 ✅
 | 部分实现就提 review | P1/P2 遗漏必须当轮补完再提 review |
 | 交付半成品让operator"先看看" | 交付完整 feat，步骤是内部节奏不是交付批次 |
 | 产出后续要重写而非扩展 | 如果要重写，说明绕路了（Spike 除外） |
-| 前端功能没有截图证据 | ≤3 张截图 + 15s 录屏 + 映射表 |
+| author 没跑 frontend preview，把“缺截图”扔给 operator | author 走关键交互；按视觉风险选择截图 / 录屏 / DOM / 浏览器测试证据 |
 | 有 .pen 设计稿但没对照实现 | Step 5 自动 glob 检测，匹配到就强制对照，不靠记忆 |
 | 为了截图在 runtime 会话里重跑 `pnpm start` | 先探活复用现有 runtime；确需重启必须显式授权 |
 | 拿 runtime 的 `3003/3004` 页面当成当前 worktree 的验证结果 | 报告里同时写明 `pwd/worktree` 和目标 URL；如果 URL 是 `3003/3004`，默认这是 runtime 证据，不是未合入改动证据 |
@@ -284,7 +280,7 @@ pnpm -r --if-present run build → exit 0 ✅
 
 | Skill | 关注点 | 时机 |
 |-------|--------|------|
-| **quality-gate（本 skill）** | spec 对照 + 证据验证 | 提 review 之前 |
+| **quality-gate（本 skill）** | spec 对照 + 风险匹配证据 | 作完成声明之前 |
 | `merge-gate` | reviewer 是否放行、P1/P2 是否全修 | 合入 main 之前 |
 | `receive-review` | 如何处理 reviewer 的反馈 | 收到 review 之后 |
 
@@ -292,14 +288,9 @@ pnpm -r --if-present run build → exit 0 ✅
 
 ## 下一步
 
-Quality Gate 通过后：
-
-1. **（可选）加载 `fresh-context-review`** — 非 trivial PR（≥3 files, ≥50 行 diff）推荐；trivial 跳过。Author 自判。详见 `fresh-context-review` skill 触发决策表。
-2. **加载 `request-review`** skill 请求正式 review（SOP stage `review`）。
-
-不要停下来问operator"要不要继续"（§17）。
+Quality Gate 通过后，把证据交给风险路由已选择的独立验证源：治理 / stateful 语义通常走 `request-review`；安全 / 契约的 context-blind 扫描可走 cloud；`fresh-context-review` 仅在 author 判断认知盲点收益足够时作为 finding generator，不是固定前置。
 
 Gate 未通过时：
 - **P1 遗漏** → 补完再过 gate
 - **P2 遗漏** → 必须当轮补完再提 review
-- **测试 / lint / build 失败** → 修到绿灯再提
+- **已选择的 targeted / full 检查失败** → 修到绿灯再交付

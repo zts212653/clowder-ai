@@ -851,6 +851,174 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
     assert.doesNotMatch(result.stdout, /clean -fd \.claude\/skills/);
   });
 
+  it('pins unpushed sanctuary commits to a backup branch instead of headlining a destructive reset', () => {
+    const projectDir = createTempProject('runtime-sanctuary-unpushed');
+    const runtimeDir = mkdtempSync(join(tmpdir(), 'runtime-sanctuary-unpushed-worktree-'));
+    const remoteDir = mkdtempSync(join(tmpdir(), 'runtime-sanctuary-unpushed-remote-'));
+    tempDirs.push(runtimeDir, remoteDir);
+
+    execFileSync('git', ['init', '-b', 'main'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['add', '.'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['commit', '-m', 'init'], { cwd: projectDir, stdio: 'ignore' });
+
+    execFileSync('git', ['init', '--bare', remoteDir], { stdio: 'ignore' });
+    execFileSync('git', ['remote', 'add', 'origin', remoteDir], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['push', '-u', 'origin', 'main'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['fetch', 'origin', 'main'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['worktree', 'add', runtimeDir, '-b', 'runtime/main-sync', 'origin/main'], {
+      cwd: projectDir,
+      stdio: 'ignore',
+    });
+    const normalizedRuntimeDir = realpathSync(runtimeDir);
+
+    // A cat develops directly inside the sanctuary and commits. Never pushed,
+    // no PR — exactly the 2026-07-22 incident shape (LL-045 / LL-078).
+    writeFileSync(join(normalizedRuntimeDir, 'sanctuary-work.txt'), 'in-flight work\n', 'utf8');
+    execFileSync('git', ['add', 'sanctuary-work.txt'], { cwd: normalizedRuntimeDir, stdio: 'ignore' });
+    // Pin the identity explicitly: the ambient git identity of whoever runs the
+    // suite must not leak into the assertion about *whose* work is at risk.
+    execFileSync('git', ['commit', '-m', 'feat(F269): recover remaining U1 prose'], {
+      cwd: normalizedRuntimeDir,
+      stdio: 'ignore',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'Test User',
+        GIT_AUTHOR_EMAIL: 'test@example.com',
+        GIT_COMMITTER_NAME: 'Test User',
+        GIT_COMMITTER_EMAIL: 'test@example.com',
+      },
+    });
+
+    // Meanwhile origin/main moves on, so ff-only can no longer fast-forward.
+    writeFileSync(join(projectDir, 'upstream.txt'), 'upstream\n', 'utf8');
+    execFileSync('git', ['add', 'upstream.txt'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['commit', '-m', 'upstream moves on'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['push', 'origin', 'main'], { cwd: projectDir, stdio: 'ignore' });
+
+    const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-install'], {
+      cwd: projectDir,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        CAT_CAFE_RUNTIME_DIR: normalizedRuntimeDir,
+        API_SERVER_PORT: '19898',
+      },
+    });
+
+    assert.notEqual(result.status, 0);
+    // Must surface that the commits are ahead of the sync target, not dismiss
+    // them as "auto-materialized lessons/docs".
+    assert.match(result.stdout, /ahead of origin\/main/i);
+    // Must surface whose work is at stake, so nobody resets blind.
+    assert.match(result.stdout, /recover remaining U1 prose/);
+    assert.match(result.stdout, /Test User/);
+    // A real safety net must exist — advice alone is what failed in LL-045.
+    const backupBranches = execFileSync('git', ['branch', '--list', 'runtime-sanctuary-backup-*'], {
+      cwd: projectDir,
+      encoding: 'utf8',
+    }).trim();
+    assert.notEqual(backupBranches, '', 'expected a backup branch pinning the unpushed commits');
+    // The destructive reset must not be the headline instruction here.
+    assert.doesNotMatch(result.stdout, /^\s*Resolve:\s+git .*reset --hard/m);
+    // Sanctuary contract must be stated so the next cat stops developing here.
+    assert.match(result.stdout, /sanctuary/i);
+  });
+
+  it('fails closed and still backs up when a stale remote-tracking ref falsely claims remote reachability', () => {
+    const projectDir = createTempProject('runtime-sanctuary-staleref');
+    const runtimeDir = mkdtempSync(join(tmpdir(), 'runtime-sanctuary-staleref-worktree-'));
+    const remoteDir = mkdtempSync(join(tmpdir(), 'runtime-sanctuary-staleref-remote-'));
+    tempDirs.push(runtimeDir, remoteDir);
+
+    execFileSync('git', ['init', '-b', 'main'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['add', '.'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['commit', '-m', 'init'], { cwd: projectDir, stdio: 'ignore' });
+
+    execFileSync('git', ['init', '--bare', remoteDir], { stdio: 'ignore' });
+    execFileSync('git', ['remote', 'add', 'origin', remoteDir], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['push', '-u', 'origin', 'main'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['fetch', 'origin', 'main'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['worktree', 'add', runtimeDir, '-b', 'runtime/main-sync', 'origin/main'], {
+      cwd: projectDir,
+      stdio: 'ignore',
+    });
+    const normalizedRuntimeDir = realpathSync(runtimeDir);
+
+    // A cat commits inside the sanctuary and briefly pushes it to a side branch,
+    // so a local origin/* tracking ref comes to contain the commit.
+    writeFileSync(join(normalizedRuntimeDir, 'leftover-work.txt'), 'in-flight work\n', 'utf8');
+    execFileSync('git', ['add', 'leftover-work.txt'], { cwd: normalizedRuntimeDir, stdio: 'ignore' });
+    execFileSync('git', ['commit', '-m', 'feat(F269): U1 prose still only here'], {
+      cwd: normalizedRuntimeDir,
+      stdio: 'ignore',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'Test User',
+        GIT_AUTHOR_EMAIL: 'test@example.com',
+        GIT_COMMITTER_NAME: 'Test User',
+        GIT_COMMITTER_EMAIL: 'test@example.com',
+      },
+    });
+    const atRiskSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: normalizedRuntimeDir,
+      encoding: 'utf8',
+    }).trim();
+    execFileSync('git', ['push', 'origin', 'runtime/main-sync:refs/heads/leftover'], {
+      cwd: normalizedRuntimeDir,
+      stdio: 'ignore',
+    });
+    execFileSync('git', ['fetch', 'origin', 'leftover'], { cwd: normalizedRuntimeDir, stdio: 'ignore' });
+
+    // The remote branch is deleted out-of-band (e.g. GitHub delete-on-merge, or
+    // another clone) — NOT via this repo, so no local tracking ref is cleaned.
+    // Without a prune, refs/remotes/origin/leftover survives as a stale ref,
+    // exactly the state left behind by a normal `fetch origin main`.
+    execFileSync('git', ['-C', remoteDir, 'update-ref', '-d', 'refs/heads/leftover'], { stdio: 'ignore' });
+
+    // Sanity: the stale ref really does make `branch -r --contains` lie, so the
+    // old suppression path would have skipped the backup and lost the commit.
+    const staleContains = execFileSync('git', ['branch', '-r', '--contains', atRiskSha], {
+      cwd: normalizedRuntimeDir,
+      encoding: 'utf8',
+    });
+    assert.match(staleContains, /origin\/leftover/, 'precondition: stale tracking ref must still contain the commit');
+
+    // origin/main moves on so ff-only can no longer fast-forward.
+    writeFileSync(join(projectDir, 'upstream.txt'), 'upstream\n', 'utf8');
+    execFileSync('git', ['add', 'upstream.txt'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['commit', '-m', 'upstream moves on'], { cwd: projectDir, stdio: 'ignore' });
+    execFileSync('git', ['push', 'origin', 'main'], { cwd: projectDir, stdio: 'ignore' });
+
+    const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-install'], {
+      cwd: projectDir,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        CAT_CAFE_RUNTIME_DIR: normalizedRuntimeDir,
+        API_SERVER_PORT: '19897',
+      },
+    });
+
+    assert.notEqual(result.status, 0);
+    // A stale remote-tracking ref must NOT suppress the safety net.
+    const backupBranches = execFileSync('git', ['branch', '--list', 'runtime-sanctuary-backup-*'], {
+      cwd: projectDir,
+      encoding: 'utf8',
+    }).trim();
+    assert.notEqual(backupBranches, '', 'stale remote-tracking ref must not suppress the backup branch');
+    // Must not declare the commit safe to discard on the strength of a cached ref.
+    assert.doesNotMatch(result.stdout, /loses nothing/i);
+    assert.doesNotMatch(result.stdout, /already reachable/i);
+    // The destructive reset must not be the headline instruction.
+    assert.doesNotMatch(result.stdout, /^\s*Resolve:\s+git .*reset --hard/m);
+    // The at-risk commit must still be surfaced by author + subject.
+    assert.match(result.stdout, /U1 prose still only here/);
+  });
+
   it('reports untracked directories blocking an incoming tracked file', () => {
     const projectDir = createTempProject('runtime-untracked-dir-blocker');
     const runtimeDir = mkdtempSync(join(tmpdir(), 'runtime-untracked-dir-blocker-worktree-'));

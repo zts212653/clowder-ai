@@ -1,5 +1,6 @@
 ---
 name: receive-review
+tips_exempt: harness-internal review re-entry convention; no distinct end-user capability surface
 description: >
   处理 reviewer 反馈：Red→Green 修复 + 技术论证（禁止表演性同意）。
   Use when: 收到 review 结果、reviewer 提了 P1/P2、需要处理反馈。
@@ -191,6 +192,12 @@ VERIFY 完所有 findings 之后、动手修之前，做一次 failure-mode 判�
 
 **修复完成 ≠ 可以合入。必须回到原 feedback source 确认。**
 
+### 本地 reviewer 复入载体（terminal 之后的新工作）
+
+P1/P2 修复产生的新 exact HEAD 是一轮新的、可执行的 review work，不是对上一轮 terminal verdict 的礼貌 ACK。向本地 reviewer 发修复确认前，必须重新加载 `request-review`，并用结构化 successor 载体：同 thread 用 `post_message(action.mode=single)`，跨 thread 用对应 cross-thread action；两者都带 `coordination.phase=active`、`reviewReentry`（reason + durable evidenceRef）、显式 `clientMessageId` 与唯一 reviewer `targetCats`。
+
+只用普通行首 `@reviewer`、`replyTo` 或裸 `targetCats` 回 terminal verdict，服务端会按 ACK 正确抑制；不得把正文看起来“像正式复审”当机器可判 provenance，也不得靠反复重发碰运气。最终 verdict 仍按 `request-review` 用 terminal coordination 返回。
+
 | Feedback source | 修复后动作 |
 |-----------------|------------|
 | 本地猫 reviewer | `@reviewer` 发送修复确认请求；等 reviewer 明确放行当前 SHA |
@@ -288,4 +295,4 @@ Reviewer 在 review 期间创建的沙盒：
 
 ## 下一步
 
-Reviewer 放行（"LGTM"/"通过"/"可以合入"）→ **直接加载 `merge-gate`** skill（SOP stage `merge`）。不要停下来问operator（§17）。
+Reviewer 放行（"LGTM"/"通过"/"可以合入"）→ `merge-gate`（SOP stage `merge`）。

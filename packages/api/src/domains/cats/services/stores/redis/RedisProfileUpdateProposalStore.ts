@@ -14,11 +14,12 @@
  */
 
 import type {
+  ApprovalEnvelope,
+  ApprovalPublication,
   ProfileUpdateProposal,
   ProfileUpdateProposalStatus,
-  ProfileUpdateSignalProvenance,
 } from '@cat-cafe/shared';
-import { generateProposalId, isAllowedCollectionSignal } from '@cat-cafe/shared';
+import { assertApprovalEnvelopeIdentity, generateProposalId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type {
   CreateProfileUpdateProposalInput,
@@ -26,7 +27,10 @@ import type {
   ProfileUpdateCheckpoint,
 } from '../ports/ProfileUpdateProposalStore.js';
 import { ProfileUpdateProposalKeys } from '../redis-keys/proposals/profile-update-proposal-keys.js';
+import { abortRedisStaged, commitRedisApprovalEnvelope } from './RedisApprovalPublication.js';
+import { hydrateProfileUpdateProposal, serializeProfileUpdateProposal } from './RedisProfileUpdateProposalCodec.js';
 import { CAS_TRANSITION_LUA, RECORD_CREATED_THREAD_LUA, RELEASE_DEDUP_LUA } from './RedisProposalStoreHelpers.js';
+import { CAS_FINALIZE_AND_SETTLE_LUA, CAS_REJECT_AND_SETTLE_LUA } from './redis-profile-update-lua-scripts.js';
 
 const DEFAULT_DEDUP_TTL_SECONDS = 10 * 60;
 const DEFAULT_LIST_LIMIT = 100;
@@ -60,10 +64,11 @@ export class RedisProfileUpdateProposalStore implements IProfileUpdateProposalSt
       signalProvenance: { ...input.signalProvenance },
       createdBy: input.createdBy,
       createdAt: now,
+      publication: { state: 'staged', stagedAt: now },
     };
     const key = ProfileUpdateProposalKeys.detail(proposal.proposalId);
     const pipeline = this.redis.multi();
-    pipeline.hset(key, ...serialize(proposal));
+    pipeline.hset(key, ...serializeProfileUpdateProposal(proposal));
     if (this.ttlSeconds) pipeline.expire(key, this.ttlSeconds);
     pipeline.zadd(ProfileUpdateProposalKeys.userPending(proposal.createdBy), String(now), proposal.proposalId);
     pipeline.zadd(ProfileUpdateProposalKeys.threadList(proposal.sourceThreadId), String(now), proposal.proposalId);
@@ -74,7 +79,7 @@ export class RedisProfileUpdateProposalStore implements IProfileUpdateProposalSt
   async get(proposalId: string): Promise<ProfileUpdateProposal | null> {
     const data = await this.redis.hgetall(ProfileUpdateProposalKeys.detail(proposalId));
     if (!data || !data.proposalId) return null;
-    return hydrate(data);
+    return hydrateProfileUpdateProposal(data);
   }
 
   async listPending(userId: string, limit: number = DEFAULT_LIST_LIMIT): Promise<ProfileUpdateProposal[]> {
@@ -83,6 +88,11 @@ export class RedisProfileUpdateProposalStore implements IProfileUpdateProposalSt
 
   async listByThread(threadId: string, limit: number = DEFAULT_LIST_LIMIT): Promise<ProfileUpdateProposal[]> {
     return this.loadFromIndex(ProfileUpdateProposalKeys.threadList(threadId), limit);
+  }
+
+  /** F246 Phase H: list settled (approved/rejected) proposals for a user, newest first. */
+  async listSettledByUser(userId: string, limit: number = DEFAULT_LIST_LIMIT): Promise<ProfileUpdateProposal[]> {
+    return this.loadFromIndex(ProfileUpdateProposalKeys.userSettled(userId), limit);
   }
 
   async claimForApproval(proposalId: string, approvedBy: string): Promise<ProfileUpdateProposal | null> {
@@ -120,17 +130,17 @@ export class RedisProfileUpdateProposalStore implements IProfileUpdateProposalSt
     const proposal = await this.get(proposalId);
     if (!proposal || proposal.status !== 'approving') return null;
     const now = Date.now();
-    const ok = await this.cas(proposalId, proposal.createdBy, 'approving', 'noop', '', [
-      'status',
-      'approved',
-      'approvedAt',
+    // F246 Phase H: use atomic Lua to update hash AND add to settled index in one call.
+    const result = await this.redis.eval(
+      CAS_FINALIZE_AND_SETTLE_LUA,
+      2,
+      ProfileUpdateProposalKeys.detail(proposalId),
+      ProfileUpdateProposalKeys.userSettled(proposal.createdBy),
+      'approving',
+      proposalId,
       String(now),
-      // P2 (codex re-review): clear claimedAt on terminal approval so a fresh Redis read
-      // matches InMemory / F128 semantics (hydrate treats claimedAt '0' as undefined).
-      'claimedAt',
-      '0',
-    ]);
-    if (!ok) return null;
+    );
+    if (result !== 1) return null;
     const { claimedAt: _claimedAt, ...rest } = proposal;
     return { ...rest, status: 'approved', approvedAt: now };
   }
@@ -156,10 +166,20 @@ export class RedisProfileUpdateProposalStore implements IProfileUpdateProposalSt
     const proposal = await this.get(proposalId);
     if (!proposal || proposal.status !== 'pending') return null;
     const now = Date.now();
-    const fields = ['status', 'rejected', 'rejectedBy', rejectedBy, 'rejectedAt', String(now)];
-    if (rejectionReason) fields.push('rejectionReason', rejectionReason);
-    const ok = await this.cas(proposalId, proposal.createdBy, 'pending', 'zrem', '', fields);
-    if (!ok) return null;
+    // F246 Phase H: use atomic Lua to ZREM pending, HSET hash, ZADD settled in one call.
+    const result = await this.redis.eval(
+      CAS_REJECT_AND_SETTLE_LUA,
+      3,
+      ProfileUpdateProposalKeys.detail(proposalId),
+      ProfileUpdateProposalKeys.userPending(proposal.createdBy),
+      ProfileUpdateProposalKeys.userSettled(proposal.createdBy),
+      'pending',
+      proposalId,
+      String(now),
+      rejectedBy,
+      rejectionReason ?? '',
+    );
+    if (result !== 1) return null;
     return {
       ...proposal,
       status: 'rejected',
@@ -191,6 +211,38 @@ export class RedisProfileUpdateProposalStore implements IProfileUpdateProposalSt
 
   async setCardMessageId(proposalId: string, cardMessageId: string): Promise<void> {
     await this.redis.hset(ProfileUpdateProposalKeys.detail(proposalId), 'cardMessageId', cardMessageId);
+  }
+
+  async getPublication(proposalId: string): Promise<ApprovalPublication | null> {
+    return (await this.get(proposalId))?.publication ?? null;
+  }
+
+  async commitEnvelope(proposalId: string, envelope: ApprovalEnvelope): Promise<void> {
+    const proposal = await this.get(proposalId);
+    if (!proposal) throw new Error(`proposal not found: ${proposalId}`);
+    assertApprovalEnvelopeIdentity(envelope, {
+      canonicalProposalId: proposal.proposalId,
+      sourceFeatureId: 'F231',
+      ownerUserId: proposal.createdBy,
+      requesterCatId: proposal.sourceCatId,
+      createdAt: proposal.createdAt,
+    });
+    await commitRedisApprovalEnvelope(this.redis, ProfileUpdateProposalKeys.detail(proposalId), envelope);
+  }
+
+  async abortStaged(proposalId: string, _reason: string): Promise<void> {
+    const proposal = await this.get(proposalId);
+    if (!proposal) return;
+    await abortRedisStaged(
+      this.redis,
+      ProfileUpdateProposalKeys.detail(proposalId),
+      [
+        ProfileUpdateProposalKeys.userPending(proposal.createdBy),
+        ProfileUpdateProposalKeys.userSettled(proposal.createdBy),
+        ProfileUpdateProposalKeys.threadList(proposal.sourceThreadId),
+      ],
+      proposalId,
+    );
   }
 
   async delete(proposalId: string): Promise<void> {
@@ -234,91 +286,5 @@ export class RedisProfileUpdateProposalStore implements IProfileUpdateProposalSt
       if (p) out.push(p);
     }
     return out;
-  }
-}
-
-function serialize(proposal: ProfileUpdateProposal): string[] {
-  const fields = [
-    'proposalId',
-    proposal.proposalId,
-    'status',
-    proposal.status,
-    'sourceThreadId',
-    proposal.sourceThreadId,
-    'sourceInvocationId',
-    proposal.sourceInvocationId,
-    'sourceCatId',
-    proposal.sourceCatId,
-    'targetLayer',
-    proposal.targetLayer,
-    'targetPath',
-    proposal.targetPath,
-    'beforeContent',
-    proposal.beforeContent,
-    'baseContentHash',
-    proposal.baseContentHash,
-    'afterContent',
-    proposal.afterContent,
-    'rationale',
-    proposal.rationale,
-    'signalProvenance',
-    JSON.stringify(proposal.signalProvenance),
-    'createdBy',
-    proposal.createdBy,
-    'createdAt',
-    String(proposal.createdAt),
-  ];
-  if (proposal.cardMessageId) fields.push('cardMessageId', proposal.cardMessageId);
-  return fields;
-}
-
-function hydrate(data: Record<string, string>): ProfileUpdateProposal {
-  const proposal: ProfileUpdateProposal = {
-    proposalId: requiredField(data, 'proposalId'),
-    status: (data.status ?? 'pending') as ProfileUpdateProposalStatus,
-    sourceThreadId: requiredField(data, 'sourceThreadId'),
-    sourceInvocationId: requiredField(data, 'sourceInvocationId'),
-    sourceCatId: requiredField(data, 'sourceCatId') as ProfileUpdateProposal['sourceCatId'],
-    targetLayer: 'primer',
-    targetPath: requiredField(data, 'targetPath'),
-    beforeContent: data.beforeContent ?? '',
-    baseContentHash: data.baseContentHash ?? '',
-    afterContent: data.afterContent ?? '',
-    rationale: data.rationale ?? '',
-    signalProvenance: parseSignalProvenance(data.signalProvenance),
-    createdBy: requiredField(data, 'createdBy'),
-    createdAt: parseInt(requiredField(data, 'createdAt'), 10),
-  };
-  if (data.cardMessageId) proposal.cardMessageId = data.cardMessageId;
-  if (data.approvedBy) proposal.approvedBy = data.approvedBy;
-  if (data.approvedAt) proposal.approvedAt = parseInt(data.approvedAt, 10);
-  const claimedAt = parseInt(data.claimedAt ?? '0', 10);
-  if (claimedAt > 0) proposal.claimedAt = claimedAt;
-  if (data.writtenPath) proposal.writtenPath = data.writtenPath;
-  if (data.provenancePath) proposal.provenancePath = data.provenancePath;
-  if (data.rejectedBy) proposal.rejectedBy = data.rejectedBy;
-  if (data.rejectedAt) proposal.rejectedAt = parseInt(data.rejectedAt, 10);
-  if (data.rejectionReason) proposal.rejectionReason = data.rejectionReason;
-  return proposal;
-}
-
-function requiredField(data: Record<string, string>, field: string): string {
-  const value = data[field];
-  if (value === undefined) {
-    throw new Error(`Malformed profile update proposal: missing ${field}`);
-  }
-  return value;
-}
-
-function parseSignalProvenance(raw: string | undefined): ProfileUpdateSignalProvenance {
-  try {
-    const parsed = JSON.parse(raw ?? '{}');
-    return {
-      kind: isAllowedCollectionSignal(parsed.kind) ? parsed.kind : 'cat-declared',
-      sourceThreadId: typeof parsed.sourceThreadId === 'string' ? parsed.sourceThreadId : '',
-      ...(typeof parsed.sourceMessageId === 'string' ? { sourceMessageId: parsed.sourceMessageId } : {}),
-    };
-  } catch {
-    return { kind: 'cat-declared', sourceThreadId: '' };
   }
 }

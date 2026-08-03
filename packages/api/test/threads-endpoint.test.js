@@ -291,6 +291,42 @@ describe('Thread API', () => {
     assert.ok(!titles.includes('Thread C'));
   });
 
+  it('GET /api/threads?view=sidebar omits threadMemory without changing the default thread contract', async () => {
+    const thread = threadStore.create('alice', 'Sidebar summary', '/projects/cat-cafe');
+    threadStore.updateThreadMemory(thread.id, {
+      version: 1,
+      updatedAt: Date.now(),
+      sessionsIncorporated: 3,
+      summary: 'A deliberately large memory payload that belongs in thread detail, not the sidebar list.',
+      decisions: ['Keep detailed memory out of list projections.'],
+      openQuestions: [],
+    });
+    threadStore.updatePin(thread.id, true);
+
+    const [defaultRes, sidebarRes] = await Promise.all([
+      app.inject({
+        method: 'GET',
+        url: '/api/threads',
+        headers: { 'x-cat-cafe-user': 'alice' },
+      }),
+      app.inject({
+        method: 'GET',
+        url: '/api/threads?view=sidebar',
+        headers: { 'x-cat-cafe-user': 'alice' },
+      }),
+    ]);
+
+    assert.equal(defaultRes.statusCode, 200);
+    assert.equal(sidebarRes.statusCode, 200);
+    const defaultThread = JSON.parse(defaultRes.body).threads.find((candidate) => candidate.id === thread.id);
+    const sidebarThread = JSON.parse(sidebarRes.body).threads.find((candidate) => candidate.id === thread.id);
+    assert.equal(defaultThread.threadMemory.summary.startsWith('A deliberately large'), true);
+    assert.equal('threadMemory' in sidebarThread, false);
+    assert.equal(sidebarThread.title, 'Sidebar summary');
+    assert.equal(sidebarThread.projectPath, '/projects/cat-cafe');
+    assert.equal(sidebarThread.pinned, true);
+  });
+
   it('GET /api/threads migrates legacy runtime paths before exposing project selectors', async () => {
     const runtimeRoot = await createTempWorkspace();
     const workspaceRoot = await createTempWorkspace();
@@ -952,6 +988,20 @@ describe('Thread API', () => {
     });
     assert.equal(res.statusCode, 200);
     assert.equal(JSON.parse(res.body).preferredWorkspaceMode, 'approval');
+  });
+
+  it('PATCH /api/threads/:id accepts preferredWorkspaceMode: eval (F248 Phase D)', async () => {
+    const thread = threadStore.create('alice', 'F248 Eval Thread');
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { preferredWorkspaceMode: 'eval' },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).preferredWorkspaceMode, 'eval');
+
+    const fetched = await app.inject({ method: 'GET', url: `/api/threads/${thread.id}` });
+    assert.equal(JSON.parse(fetched.body).preferredWorkspaceMode, 'eval');
   });
 });
 

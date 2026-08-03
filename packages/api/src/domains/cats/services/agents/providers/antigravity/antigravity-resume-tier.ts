@@ -41,7 +41,7 @@ const CREDENTIAL_MUTATION_PATTERN =
   /(?:^|[/\s])(?:\.env(?:\.[^\s/]*)?|credentials(?:\.json)?|secrets?)(?:$|[/\s])|(?:api[_-]?key|token|password|credential|permission|oauth)/i;
 const REDACTED_TARGET = '[REDACTED_TARGET]';
 const SHARED_DOC_SEGMENT_PATTERN =
-  /(?:^|[/\\\s"'=])(?:docs[/\\](?:features|decisions|plans|BACKLOG\.md|lessons|lessons-learned\.md|mailbox)|cat-config\.json)(?:[/\\\s"']|$)/i;
+  /(?:^|[/\\\s"'=])(?:docs[/\\](?:features|decisions|architecture|plans|BACKLOG\.md|lessons|lessons-learned\.md|mailbox)|cat-config\.json)(?:[/\\\s"']|$)/i;
 const BUSINESS_FILE_SEGMENT_PATTERN = /(?:^|[/\\\s"'=])(?:packages|apps|scripts|desktop)(?:[/\\]|$)/i;
 const GH_WRITE_PATTERN =
   /\bgh\s+(?:api|auth|cache|codespace|extension|gist|gpg-key|issue|label|org|pr|project|release|repo|ruleset|run|secret|ssh-key|variable|workflow)\b/i;

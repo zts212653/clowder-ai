@@ -30,6 +30,50 @@ describe('F194 Phase Z8 — projectCanonicalBubbles (AC-Z20)', () => {
     expect(streamBubble.extra?.stream?.invocationId).toBe('2fe279aa-255c-4d22-b3e7-a3e718c3b52e');
   });
 
+  it('keeps a recovered withheld stream beside existing callback speech from the same invocation', () => {
+    const recovery = {
+      kind: 'f254_withheld_message' as const,
+      cvoDecisionRef: 'decision-1',
+      recoveredAt: 500,
+    };
+    const records: ChatMessage[] = [
+      {
+        id: 'recovered-stream',
+        type: 'assistant',
+        catId: 'fable-5',
+        content: 'withheld stream work log',
+        origin: 'stream',
+        timestamp: 100,
+        extra: {
+          stream: { invocationId: 'inv-recovered', turnInvocationId: 'inv-recovered' },
+          recovery,
+        },
+      },
+      {
+        id: 'existing-callback',
+        type: 'assistant',
+        catId: 'fable-5',
+        content: 'callback speech that was already formal',
+        origin: 'callback',
+        timestamp: 101,
+        extra: { stream: { invocationId: 'inv-recovered', turnInvocationId: 'inv-recovered' } },
+      },
+    ];
+
+    const { messages } = projectCanonicalBubbles({ records });
+
+    expect(messages).toHaveLength(2);
+    expect(messages.find((message) => message.origin === 'stream')).toMatchObject({
+      id: 'recovered-stream',
+      content: 'withheld stream work log',
+      extra: { recovery },
+    });
+    expect(messages.find((message) => message.origin === 'callback')).toMatchObject({
+      id: 'existing-callback',
+      content: 'callback speech that was already formal',
+    });
+  });
+
   it('passes through user/system messages unchanged', () => {
     const records: ChatMessage[] = [
       { id: 'u1', type: 'user', content: 'hi', timestamp: 100 },

@@ -75,6 +75,39 @@ describe('TaskOutcomeEpisode schema (F192 Phase G)', () => {
       assert.equal(ep.trigger, 'user_ask');
       assert.equal(ep.terminalState, 'completed');
       assert.equal(ep.verdict, null);
+      assert.equal(ep.attribution, 'unmanaged_not_applicable');
+      assert.equal(ep.workId, null);
+      assert.equal(ep.attemptId, null);
+    });
+
+    it('accepts a complete managed attribution binding', () => {
+      const ep = parseTaskOutcomeEpisode({
+        ...validEpisode,
+        attribution: 'managed_attributed',
+        workId: 'wrk_a',
+        attemptId: 'wat_a_1',
+      });
+      assert.equal(ep.attribution, 'managed_attributed');
+      assert.equal(ep.workId, 'wrk_a');
+      assert.equal(ep.attemptId, 'wat_a_1');
+    });
+
+    it('rejects incomplete or misplaced managed-work identifiers', () => {
+      assert.throws(() =>
+        parseTaskOutcomeEpisode({
+          ...validEpisode,
+          attribution: 'managed_attributed',
+          workId: 'wrk_a',
+        }),
+      );
+      assert.throws(() =>
+        parseTaskOutcomeEpisode({
+          ...validEpisode,
+          attribution: 'managed_unattributed',
+          workId: 'wrk_a',
+          attemptId: 'wat_a_1',
+        }),
+      );
     });
 
     it('accepts all valid trigger types', () => {

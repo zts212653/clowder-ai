@@ -30,6 +30,13 @@ describe('chatStore workspaceMode', () => {
     expect(useChatStore.getState().rightPanelMode).toBe('workspace');
   });
 
+  it('setWorkspaceMode accepts eval mode', () => {
+    const { setWorkspaceMode } = useChatStore.getState();
+    setWorkspaceMode('eval');
+    expect(useChatStore.getState().workspaceMode).toBe('eval');
+    expect(useChatStore.getState().rightPanelMode).toBe('workspace');
+  });
+
   // 云端 round 5 P2：workspace/transcript 被 ChatContainer auto-open effect 强制开，
   // 显式关闭必须先退出这两个 mode → status，否则 effect 立即重开（关不掉）。
   it('closeRightPanel exits workspace/transcript to status, leaves status unchanged', () => {

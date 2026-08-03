@@ -15,6 +15,7 @@ import { rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import {
   type CatId,
+  type CliEffortPreset,
   type ContextHealth,
   catRegistry,
   type MessageContent,
@@ -67,7 +68,7 @@ import {
 import { ToolSpanTracker } from '../../../../../infrastructure/telemetry/tool-span-tracker.js';
 import { resolveActiveProjectRoot } from '../../../../../utils/active-project-root.js';
 import { resolveCliCommand } from '../../../../../utils/cli-resolve.js';
-import { DEFAULT_CLI_TIMEOUT_MS, resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
+import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { findMonorepoRoot, isSameProject } from '../../../../../utils/monorepo-root.js';
 import {
   redirectRuntimeProjectPath,
@@ -75,6 +76,11 @@ import {
 } from '../../../../../utils/persistent-project-path.js';
 import { pathsEqual } from '../../../../../utils/project-path.js';
 import { tcpProbe } from '../../../../../utils/tcp-probe.js';
+import {
+  type MemoryCueInvocationPromptResolver,
+  type MemoryCueOpportunitySeed,
+  memoryCueOpportunityId,
+} from '../../../../memory/cue/MemoryCueInvocationPromptService.js';
 import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry.js';
 import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
 import { resolveBootcampWorkspaceRoot } from '../../bootcamp/workspace-root.js';
@@ -101,21 +107,13 @@ import {
 } from '../providers/opencode-config-writer.js';
 import { appendTranscriptPathHints } from '../providers/transcript-path-hints.js';
 import { buildContextManagementHint, queueContextHint, takeContextHintPrefix } from './context-management-hint.js';
+import { resolveManagedWorkInvocationBinding } from './managed-work-invocation-binding.js';
 
 const log = createModuleLogger('invoke');
 const tracer = trace.getTracer('cat-cafe-api', '0.1.0');
 const TRANSCRIPT_DIR =
   process.env.TRANSCRIPT_DIR ?? resolve(findMonorepoRoot(), 'scripts', 'meeting-copilot', 'transcripts');
-// #1145: Stall auto-kill threshold is computed dynamically from the resolved
-// CLI_TIMEOUT_MS — see buildStallAutoKillConfig().  The probe cannot distinguish
-// "CLI waiting for LLM API response" from "CLI truly stuck", so the stall
-// threshold must equal the CLI timeout.  When CLI_TIMEOUT_MS=0 (disabled),
-// stallAutoKill is turned off entirely.
-export function buildStallAutoKillConfig(cliTimeoutMs: number): { stallAutoKill: boolean; stallWarningMs?: number } {
-  if (cliTimeoutMs === 0) return { stallAutoKill: false };
-  const effectiveMs = cliTimeoutMs > 0 ? cliTimeoutMs : DEFAULT_CLI_TIMEOUT_MS;
-  return { stallAutoKill: true, stallWarningMs: effectiveMs };
-}
+const CAT_INVOCATION_STALL_WARNING_MS = 30 * 60_000;
 const ANTIGRAVITY_AUTOMATIC_RETRY_FRAGMENT_REASONS = new Set([
   'model_capacity',
   'empty_response',
@@ -166,9 +164,16 @@ import type { ISessionSealer } from '../../session/SessionSealer.js';
 import type { TranscriptSessionInfo, TranscriptWriter } from '../../session/TranscriptWriter.js';
 import type { ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../../stores/ports/ThreadStore.js';
+import type {
+  ITurnExecutionStore,
+  TurnExecutionCausalRefs,
+  TurnExecutionKind,
+  TurnExecutionTerminalInput,
+} from '../../stores/ports/TurnExecutionStore.js';
 import type { AgentMessage, AgentService, AgentServiceOptions } from '../../types.js';
 import { hasL0CompilerSeam } from '../../types.js';
 import type { InvocationRegistry } from '../invocation/InvocationRegistry.js';
+import { agentSessionMutex } from './AgentSessionMutex.js';
 import { completeCapsuleForSeal, type RouteStateContinuityCapsule } from './CollaborationContinuityCapsule.js';
 import type { ResumeFailureKind } from './invoke-helpers.js';
 import {
@@ -184,11 +189,8 @@ import {
   isTransientCliExitCode1,
   preflightRace,
 } from './invoke-helpers.js';
-import { SessionMutex } from './SessionMutex.js';
 import type { TaskProgressItem, TaskProgressStatus, TaskProgressStore } from './TaskProgressStore.js';
-
-/** F118: Module-level singleton — guards per-cliSessionId serialization */
-const sessionMutex = new SessionMutex();
+import { assertToolExecutionPolicySupported } from './tool-execution-policy.js';
 
 /**
  * F089: Race an async iterator's .next() against an AbortSignal.
@@ -211,6 +213,24 @@ function abortableNext<T>(iter: AsyncIterator<T>, signal: AbortSignal): Promise<
       },
     );
   });
+}
+
+const SERVICE_ITERATOR_CLOSE_TIMEOUT_MS = 1_000;
+
+async function closeServiceIterator<T>(iter: AsyncIterator<T>): Promise<boolean> {
+  if (!iter.return) return true;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      Promise.resolve(iter.return()).then(() => true),
+      new Promise<false>((resolve) => {
+        timeout = setTimeout(() => resolve(false), SERVICE_ITERATOR_CLOSE_TIMEOUT_MS);
+        timeout.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 const ANTHROPIC_PROFILE_MODE_KEY = 'CAT_CAFE_ANTHROPIC_PROFILE_MODE';
@@ -536,6 +556,8 @@ export interface InvocationDeps {
   readonly sessionManager: SessionManager;
   readonly threadStore: IThreadStore | null;
   readonly apiUrl: string;
+  /** Durable child-execution lifecycle truth. Optional only for isolated tests/legacy wiring. */
+  readonly turnExecutionStore?: ITurnExecutionStore;
   /** F045 Gap #4: Redis-backed task progress snapshots (optional in memory mode/tests) */
   readonly taskProgressStore?: TaskProgressStore;
   /** F24: Session chain store for context health tracking */
@@ -576,8 +598,6 @@ export interface InvocationDeps {
   >;
   /** F229: Concierge config store for duty-cat岗位 prompt injection (optional, fail-open) */
   readonly conciergeConfigStore?: import('../../../../concierge/ConciergeConfigStore.js').IConciergeConfigStore;
-  /** F229 KD-17: HandleMap store for concierge R1/R2 short-handle → anchor mapping (optional, fail-open) */
-  readonly conciergeHandleMapStore?: import('../../../../concierge/ConciergeHandleMapStore.js').IConciergeHandleMapStore;
   /** F229 Phase B: TriagePlan store for triage-plan marker → confirm/cancel card actions (optional, fail-open) */
   readonly conciergeTriagePlanStore?: import('../../../../concierge/ConciergeTriagePlanStore.js').IConciergeTriagePlanStore;
   /**
@@ -609,6 +629,15 @@ export interface InvocationDeps {
    * can derive a RuntimeCapabilityDescriptor without AgentService access.
    */
   readonly freshnessStateStore?: import('../../freshness/FreshnessInvocationStateStore.js').FreshnessInvocationStateStore;
+  /** F254 D2: build one invocation-scoped provider-native freshness controller. */
+  readonly providerNativeFreshnessFactory?: (params: {
+    invocationId: string;
+    threadId: string;
+    userId: string;
+    catId: CatId;
+    provider: string;
+    capability: import('../../types.js').AgentFreshnessCarrierCapability;
+  }) => Promise<import('../../freshness/FreshnessNoticeBroker.js').ActiveInvocationFreshnessController | null>;
   readonly freshnessReinvokeCheck?: (params: {
     invocationId: string;
     threadId: string;
@@ -622,6 +651,8 @@ export interface InvocationDeps {
     senders: string[];
     reinvokePrompt?: string;
   } | null>;
+  /** F287: invocation-bound Cue resolver; receives only server-owned typed seeds. */
+  readonly memoryCuePromptService?: MemoryCueInvocationPromptResolver;
 }
 
 /**
@@ -633,6 +664,8 @@ export interface InvocationParams {
   /** The fully-orchestrated prompt (dynamic context + chain context already prepended by caller) */
   readonly prompt: string;
   readonly userId: string;
+  /** Strict owner authentication is a separate fact from the tenant-scoped userId. */
+  readonly ownerAuthProvenance: import('./owner-auth-provenance.js').OwnerAuthProvenance;
   readonly threadId: string;
   /**
    * F247 AC-B1c-2/12: For cloud-cat dispatches via the bridge, the **raw**
@@ -674,6 +707,30 @@ export interface InvocationParams {
   readonly invocationSpanRef?: { current?: import('@opentelemetry/api').Span };
   /** #502 PR2: structured route control state to persist on threshold seal. */
   readonly continuityCapsule?: RouteStateContinuityCapsule;
+  /** ADR-042 hard execution boundary for automatic supplement checks. */
+  readonly toolExecutionPolicy?: import('../../types.js').ToolExecutionPolicy;
+  /** Typed child purpose; never inferred from prompt or logs. */
+  readonly executionKind?: TurnExecutionKind;
+  /** Typed causal provenance used by history, relevance, and UI projections. */
+  readonly executionCausal?: TurnExecutionCausalRefs;
+  /** Exact persisted message bodies exposed to this child invocation's prompt. */
+  readonly promptMessageIds?: readonly string[];
+  /** Persists per-target body exposure after child identity exists and before provider start. */
+  readonly onPromptMessagesExposed?: (input: {
+    threadId: string;
+    userId: string;
+    catId: CatId;
+    invocationId: string;
+    messageIds: readonly string[];
+    seenAt: number;
+  }) => Promise<void>;
+  /** Scope-free seeds are bound only after this child invocation id exists. */
+  readonly memoryCueOpportunitySeeds?: readonly MemoryCueOpportunitySeed[];
+  /** Existing F260 prompt fragments retained when the corresponding subject cue resolves to zero. */
+  readonly memoryCueLegacyFallbacks?: readonly {
+    seed: MemoryCueOpportunitySeed;
+    promptContext: string;
+  }[];
 }
 
 /**
@@ -686,7 +743,9 @@ export interface InvocationParams {
  */
 export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationParams): AsyncIterable<AgentMessage> {
   const { registry, sessionManager, threadStore, apiUrl } = deps;
-  const { catId, service, prompt, userId, threadId, isLastCat, signal: callerSignal } = params;
+  const { catId, service, userId, threadId, isLastCat, signal: callerSignal } = params;
+  let prompt = params.prompt;
+  assertToolExecutionPolicySupported(service, params.toolExecutionPolicy);
 
   // F247 KD-17: cloud-only cats (Remote MCP) skip local CLI dispatch.
   // The mention is already persisted in the thread; the cloud cat reads it via
@@ -776,29 +835,52 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   const isBgCarrier = service.usesChainKeyResume?.() ?? false;
   const bgChainKey = isBgCarrier ? `bg:${threadId}:${catId}` : undefined;
 
+  const managedWorkBinding = await resolveManagedWorkInvocationBinding({
+    ownerAuthProvenance: params.ownerAuthProvenance,
+    ownerUserId: userId,
+    threadId,
+    executorCatId: catId,
+    threadStore,
+    ...(deps.workflowSopStore ? { workflowSopStore: deps.workflowSopStore } : {}),
+  });
+
   const { invocationId, callbackToken } = await registry.create(
     userId,
     catId,
     threadId,
     params.parentInvocationId,
     params.a2aTriggerMessageId,
+    params.toolExecutionPolicy,
+    params.executionCausal?.triggerMessageId,
+    params.ownerAuthProvenance,
+    managedWorkBinding,
   );
+  const executionKind = params.executionKind ?? 'ordinary';
+  const executionParentInvocationId = params.parentInvocationId ?? invocationId;
+  const executionStartedAt = Date.now();
+  const exposedMessageIds = [...new Set(params.promptMessageIds ?? [])];
+  let ownsTurnExecution = false;
+  let turnExecutionFailureReason: string | undefined;
+  let turnExecutionInterruptionReason: string | undefined;
+  let turnExecutionCompletedSuccessfully = false;
 
   // F153: Record cat invocation count with trigger type
   const triggerType = params.a2aTriggerMessageId ? 'mention' : params.parentInvocationId ? 'routing' : 'default';
   catInvocationCount.add(1, { [AGENT_ID]: catId, [TRIGGER]: triggerType });
 
-  // F089: Invocation-level hard timeout — independent of NDJSON stream / CLI timeout.
-  // Must be > CLI_TIMEOUT_MS to avoid racing the inner timeout.
-  // When CLI_TIMEOUT_MS=0 (disable), fall back to DEFAULT (30min) so invocation still has a ceiling.
+  // F089: Optional invocation-level timeout — independent of the NDJSON stream timeout.
+  // CLI_TIMEOUT_MS=0 means manual-cancel-only, so no automatic outer timer is armed.
   const INVOCATION_TIMEOUT_MULTIPLIER = 2;
   const cliTimeoutMs = resolveCliTimeoutMs(undefined);
-  const invocationTimeoutMs =
-    (cliTimeoutMs > 0 ? cliTimeoutMs : DEFAULT_CLI_TIMEOUT_MS) * INVOCATION_TIMEOUT_MULTIPLIER;
+  const invocationTimeoutMs = cliTimeoutMs * INVOCATION_TIMEOUT_MULTIPLIER;
   const invocationAc = new AbortController();
   let invocationTimer: ReturnType<typeof setTimeout> | null = null;
   const resetInvocationTimeout = (): void => {
     if (invocationTimer) clearTimeout(invocationTimer);
+    if (invocationTimeoutMs <= 0) {
+      invocationTimer = null;
+      return;
+    }
     invocationTimer = setTimeout(() => {
       log.error({ invocationId, catId, threadId, timeoutMs: invocationTimeoutMs }, 'Invocation hard timeout fired');
       invocationAc.abort(new Error('invocation_timeout'));
@@ -814,16 +896,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
   log.info({ invocationId, catId, threadId, userId }, 'Created invocation');
 
-  // F22 R2 P1-1: Expose invocationId to caller (route-serial/parallel) so they can
-  // use it for RichBlockBuffer.consume() instead of getLatestId() which is wrong
-  // under preemption — old invocation A would steal new invocation B's blocks.
-  yield {
-    type: 'system_info' as const,
-    catId,
-    content: JSON.stringify({ type: 'invocation_created', invocationId }),
-    timestamp: Date.now(),
-  };
-
   const callbackEnv: Record<string, string> = {
     CAT_CAFE_API_URL: apiUrl,
     CAT_CAFE_INVOCATION_ID: invocationId,
@@ -835,6 +907,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // "missing required parameter". Inject the live threadId so prompt template
     // can resolve to a concrete value.
     CAT_CAFE_THREAD_ID: threadId,
+    ...(params.toolExecutionPolicy?.mode === 'read_only' ? { CAT_CAFE_READONLY: 'true' } : {}),
     // F254 AC-C2: Runtime mode for freshness gate descriptor derivation.
     // The MCP server reads this to construct RuntimeCapabilityDescriptor,
     // which parameterizes held/notice behavior per carrier tier.
@@ -866,12 +939,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     ),
   };
 
-  // #1092 / #1099 review P1: the MCP credential refresh file is written by the ACP
-  // layer (acp-credential-file.ts), scoped per ACP session — NOT here. A deterministic
-  // per-(thread,cat) path written at invoke time lets a superseded-but-alive process
-  // read the newest invocation's credentials and defeat registry.isLatest().
-  // Non-ACP providers spawn fresh MCP subprocesses per invocation, so their env
-  // credentials are never stale and no file is needed.
+  // #1092 / #1099 review P1: persistent provider carriers (ACP and pooled Codex)
+  // allocate a nonce credential path at session acquisition — NOT here. A deterministic
+  // per-(thread,cat) path written before exclusive session ownership lets a superseded
+  // or concurrently rejected process read newer invocation credentials and defeat
+  // registry.isLatest(). Per-invocation carriers keep using their frozen env directly.
 
   // F254 AC-C2: Persist carrier tier at invocation start (fire-and-forget, fail-open).
   // Callback routes read this via FreshnessInvocationStateStore.get() to derive
@@ -883,9 +955,37 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     });
   }
 
+  if (deps.memoryCuePromptService && params.memoryCueOpportunitySeeds?.length) {
+    const serverScope = { ownerUserId: userId, threadId, invocationId };
+    try {
+      const cueResolution = await deps.memoryCuePromptService.resolve({
+        seeds: params.memoryCueOpportunitySeeds,
+        serverScope,
+        now: Date.now(),
+      });
+      if (cueResolution.promptSegment) prompt = `${prompt}\n${cueResolution.promptSegment}`;
+      if (params.memoryCueLegacyFallbacks?.length) {
+        const admitted = new Set(cueResolution.admittedOpportunityIds);
+        const fallback = params.memoryCueLegacyFallbacks
+          .filter((item) => !admitted.has(memoryCueOpportunityId(item.seed, serverScope)))
+          .map((item) => item.promptContext)
+          .filter(Boolean)
+          .join('\n');
+        if (fallback) prompt = `${prompt}\n${fallback}`;
+      }
+    } catch (err) {
+      log.warn({ err, invocationId, threadId, catId }, '[F287] memory cue prompt resolution failed closed');
+      const fallback = params.memoryCueLegacyFallbacks
+        ?.map((item) => item.promptContext)
+        .filter(Boolean)
+        .join('\n');
+      if (fallback) prompt = `${prompt}\n${fallback}`;
+    }
+  }
+
   const auditLog = getEventAuditLog();
   const promptDigest = createPromptDigest(prompt);
-  const startTime = Date.now();
+  const startTime = executionStartedAt;
 
   let threadCreatedAt: number | undefined;
 
@@ -1015,6 +1115,19 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   // F153 Phase J AC-J3: per-invocation tool span tracker (real-duration MCP tool spans).
   // Used when provider emits toolUseId; falls back to legacy recordToolUseSpan when not.
   const toolSpanTracker = new ToolSpanTracker(invocationSpan, catId as string);
+  let activeServiceIterator: AsyncIterator<AgentMessage> | null = null;
+  const closeActiveServiceIterator = async (): Promise<void> => {
+    const iterator = activeServiceIterator;
+    if (!iterator) return;
+    activeServiceIterator = null;
+    try {
+      if (!(await closeServiceIterator(iterator))) {
+        log.warn({ catId, threadId, invocationId }, 'Timed out closing abandoned provider iterator');
+      }
+    } catch (err) {
+      log.warn({ catId, threadId, invocationId, err }, 'Failed to close abandoned provider iterator');
+    }
+  };
 
   // F153: Expose invocation span to caller + persist trace context for A2A propagation
   if (params.invocationSpanRef) params.invocationSpanRef.current = invocationSpan;
@@ -1038,6 +1151,67 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
     // F152: Emit invocation start through OTel log pipeline
     emitOtelLog('INFO', 'invocation_started', { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke' }, invocationSpan);
+
+    if (deps.turnExecutionStore) {
+      const executionCausal = {
+        ...(params.executionCausal ?? {}),
+        ...(exposedMessageIds.length > 0 ? { coveredMessageIds: exposedMessageIds } : {}),
+      };
+      const created = await deps.turnExecutionStore.createRunning({
+        invocationId,
+        parentInvocationId: executionParentInvocationId,
+        threadId,
+        userId,
+        catId,
+        executionKind,
+        startedAt: executionStartedAt,
+        ...(Object.keys(executionCausal).length > 0 ? { causal: executionCausal } : {}),
+      });
+      if (created.outcome !== 'created') {
+        // Idempotent persistence does not grant a second provider lease. A
+        // replay means another attempt already owns (or owned) this child;
+        // conflict means the child id was reused for different immutable
+        // identity. In both cases fail before body exposure/provider startup.
+        throw new Error(`turn_execution_not_created:${created.outcome}:${invocationId}`);
+      }
+      ownsTurnExecution = true;
+    }
+
+    // F22 R2 P1-1 + durable child truth: expose the exact child identity only
+    // after its running record exists. Keeping this yield inside the outer try
+    // guarantees iterator.return() reaches the lifecycle terminalizer.
+    yield {
+      type: 'system_info' as const,
+      catId,
+      turnInvocationId: invocationId,
+      turnExecutionStartedAt: executionStartedAt,
+      extra: {
+        turnExecution: {
+          invocationId,
+          parentInvocationId: executionParentInvocationId,
+          executionKind,
+        },
+      },
+      content: JSON.stringify({
+        type: 'invocation_created',
+        invocationId,
+        parentInvocationId: executionParentInvocationId,
+        executionKind,
+        startedAt: executionStartedAt,
+      }),
+      timestamp: Date.now(),
+    };
+
+    if (params.onPromptMessagesExposed && exposedMessageIds.length > 0) {
+      await params.onPromptMessagesExposed({
+        threadId,
+        userId,
+        catId,
+        invocationId,
+        messageIds: exposedMessageIds,
+        seenAt: Date.now(),
+      });
+    }
 
     let sessionId: string | undefined;
     try {
@@ -1153,7 +1327,18 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const mutexKey = isBgCarrier && bgChainKey ? bgChainKey : sessionId;
     if (mutexKey) {
       try {
-        sessionMutexRelease = await sessionMutex.acquire(mutexKey, signal);
+        sessionMutexRelease = await agentSessionMutex.acquire(
+          {
+            key: mutexKey,
+            invocationId,
+            executionId: params.parentInvocationId ?? invocationId,
+            threadId,
+            catId,
+            userId,
+            acquiredAt: Date.now(),
+          },
+          signal,
+        );
       } catch (err) {
         // Abort while queued is not a runtime error — clean exit
         if (signal?.aborted) {
@@ -1412,7 +1597,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       // Project setup writes the registry under the persistent workspace when
       // the API runs from a disposable checkout. Read from that same root.
       const catCafeRoot = await redirectRuntimeProjectPath(hostProjectRoot);
-      if (!catCafeRoot) throw new Error('Unable to resolve persistent Cat Cafe root for governance preflight');
+      if (!catCafeRoot) throw new Error('Unable to resolve persistent Clowder AI root for governance preflight');
       const { checkGovernancePreflight } = await import('../../../../../config/governance/governance-preflight.js');
       const catEntry = catRegistry.tryGet(catId as string);
       const preflight = await checkGovernancePreflight(workingDirectory, catCafeRoot, catEntry?.config.clientId);
@@ -1436,6 +1621,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           timestamp: Date.now(),
         };
         // F070: done with errorCode so routes mark invocation as failed (retryable)
+        turnExecutionFailureReason = 'GOVERNANCE_BOOTSTRAP_REQUIRED';
         yield {
           type: 'done',
           catId,
@@ -1607,7 +1793,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'api_key';
         if (resolvedAccount.apiKey) callbackEnv.CAT_CAFE_ANTHROPIC_API_KEY = resolvedAccount.apiKey;
         if (resolvedAccount.models?.length && provider !== 'opencode') {
-          callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = resolvedAccount.models[0];
+          // #1086: account.models is an allowed-model list, not an implicit default.
+          // Prefer cat's defaultModel when present; fall back to account.models[0].
+          callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = defaultModel ?? resolvedAccount.models[0];
         }
         if (resolvedAccount.baseUrl) {
           const proxyPortStr = process.env.ANTHROPIC_PROXY_PORT || '9877';
@@ -1765,7 +1953,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         // the undefined branch is unreachable post-guard — avoids biome noNonNullAssertion.
         const compilerFn = (hasL0CompilerSeam(service) && service.l0CompilerFn) || compileL0ViaSubprocess;
 
-        const l0Content = await compilerFn({ catId: catId as string });
+        const l0Content = await compilerFn({ catId: catId as string, userId });
         // Write compiled L0 into the runtime config dir (created below or reused).
         const safeCatId = (catId as string).replace(/[^a-zA-Z0-9._-]+/g, '-');
         const safeInvocationId = invocationId.replace(/[^a-zA-Z0-9._-]+/g, '-');
@@ -1992,9 +2180,13 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
     // F089 Phase 2+3: Create tmux spawn override for agent-in-pane execution
     let spawnCliOverride: AgentServiceOptions['spawnCliOverride'];
+    let agentCarrierSessionFactory: AgentServiceOptions['agentCarrierSessionFactory'];
     if (deps.tmuxGateway && workingDirectory) {
       const { resolveWorktreeIdByPath } = await import('../../../../workspace/workspace-security.js');
       const { createTmuxSpawnOverride } = await import('../../../../terminal/tmux-agent-spawner.js');
+      const { createTmuxAgentCarrierSessionFactory } = await import(
+        '../../../../terminal/tmux-agent-carrier-session.js'
+      );
       try {
         const worktreeId = await resolveWorktreeIdByPath(workingDirectory);
         spawnCliOverride = createTmuxSpawnOverride(
@@ -2004,37 +2196,88 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           deps.tmuxGateway,
           deps.agentPaneRegistry,
         );
+        agentCarrierSessionFactory = createTmuxAgentCarrierSessionFactory({
+          worktreeId,
+          userId,
+          tmuxGateway: deps.tmuxGateway,
+          ...(deps.agentPaneRegistry ? { agentPaneRegistry: deps.agentPaneRegistry } : {}),
+        });
       } catch {
         log.warn({ workingDirectory }, 'resolveWorktreeIdByPath failed — skipping tmux pane');
       }
     }
 
+    let reasoningEffortOverride: CliEffortPreset | undefined;
+    if (deps.threadStore?.getMemberEffort) {
+      try {
+        reasoningEffortOverride = await deps.threadStore.getMemberEffort(threadId, catId, userId);
+      } catch (err) {
+        log.warn(
+          { catId, threadId, userId, err },
+          'Thread effort override read failed — continuing with inherited effort',
+        );
+        yield {
+          type: 'system_info' as const,
+          catId,
+          content: JSON.stringify({
+            type: 'thread_effort_override_read_failed',
+            message: 'Thread effort override could not be loaded; using the member default for this invocation.',
+          }),
+          timestamp: Date.now(),
+        };
+      }
+    }
+
+    const freshnessCarrierCapability = service.freshnessCarrierCapability?.();
+    const activeInvocationFreshness =
+      deps.providerNativeFreshnessFactory && freshnessCarrierCapability
+        ? await deps.providerNativeFreshnessFactory({
+            invocationId: params.parentInvocationId ?? invocationId,
+            threadId,
+            userId,
+            catId,
+            provider: provider ?? 'unknown',
+            capability: freshnessCarrierCapability,
+          })
+        : null;
+
     const baseOptions: AgentServiceOptions = {
       callbackEnv,
+      ...(reasoningEffortOverride ? { reasoningEffortOverride } : {}),
       ...(accountEnv ? { accountEnv } : {}),
       auditContext: {
         invocationId,
+        executionId: params.parentInvocationId ?? invocationId,
         threadId,
         userId,
         catId,
       },
+      ...(params.promptMessageIds && params.promptMessageIds.length > 0
+        ? {
+            recoveryAnchor: {
+              threadId,
+              invocationId,
+              promptMessageIds: params.promptMessageIds,
+            },
+          }
+        : {}),
       ...(workingDirectory ? { workingDirectory } : {}),
       ...(params.contentBlocks ? { contentBlocks: params.contentBlocks } : {}),
       ...(params.uploadDir ? { uploadDir: params.uploadDir } : {}),
       ...(signal ? { signal } : {}),
       ...(spawnCliOverride ? { spawnCliOverride } : {}),
+      ...(agentCarrierSessionFactory ? { agentCarrierSessionFactory } : {}),
+      ...(activeInvocationFreshness ? { activeInvocationFreshness } : {}),
       invocationId,
       ...(sessionId ? { cliSessionId: sessionId } : {}),
       ...(isResume && !injectSystemPrompt && params.systemPrompt
         ? { resumeFallbackSystemPrompt: params.systemPrompt }
         : {}),
-      // F118 Phase B: Enable liveness probe for all CLI providers.
-      // #1145: stallAutoKill threshold tracks resolved CLI_TIMEOUT_MS (default 30 min).
-      // When CLI_TIMEOUT_MS=0 (disabled), stallAutoKill is off entirely.
-      // #854: Windows cannot sample CPU; suppress suspected_stall there so CLI_TIMEOUT_MS stays binding.
-      livenessProbe: buildStallAutoKillConfig(cliTimeoutMs),
+      // F118: Keep liveness warnings visible, but leave termination to explicit user cancel.
+      livenessProbe: { stallAutoKill: false, stallWarningMs: CAT_INVOCATION_STALL_WARNING_MS },
       ...(catConfig?.cliConfigArgs?.length ? { cliConfigArgs: catConfig.cliConfigArgs } : {}),
       parentSpan: invocationSpan,
+      ...(params.toolExecutionPolicy ? { toolExecutionPolicy: params.toolExecutionPolicy } : {}),
     };
 
     let lastErrorMessage: string | undefined;
@@ -2975,8 +3218,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       for (const out of await processMessage(sourceMsg)) {
         if (out.type === 'error') {
           hadError = true;
+          turnExecutionFailureReason ??= 'provider_execution_failed';
           terminalTaskProgressStatus = 'interrupted';
           terminalInterruptReason = 'error';
+        }
+        if (out.type === 'done' && out.errorCode !== undefined) {
+          turnExecutionFailureReason ??= 'provider_execution_failed';
         }
         await maybePersistTaskProgress(out);
         if (out.type === 'done' && terminalTaskProgressStatus === null) {
@@ -2992,6 +3239,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           }
         }
         if (out.type === 'done') {
+          if (hadError && out.errorCode === undefined) {
+            out.errorCode = 'PROVIDER_EXECUTION_FAILED';
+          }
           await finalizeTaskProgress();
           if (!out.tracing) {
             const sc = invocationSpan.spanContext();
@@ -3027,6 +3277,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             } catch (err) {
               log.warn({ catId, threadId, invocationId, err }, '[F254-B3] freshness re-invoke check failed, fail-open');
             }
+          }
+          // A consumer may stop as soon as it receives the terminal `done`.
+          // Record success before yielding that boundary so iterator.return()
+          // cannot turn a completed provider execution into `interrupted`.
+          if (!hadError && out.errorCode === undefined && !signal?.aborted) {
+            turnExecutionCompletedSuccessfully = true;
           }
         }
         yield out;
@@ -3104,273 +3360,249 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       // F089: Use abortableNext instead of `for await` so the invocation timeout
       // can break out even when the service generator is stuck on an unresolvable await.
       const serviceIter = service.invoke(effectivePrompt, options)[Symbol.asyncIterator]();
-      // #1186: Ensure service generator's finally block runs (lease.release()) on ALL exit paths.
-      // Manual .next() iteration does NOT auto-close the generator on break/throw — unlike
-      // `for await...of` which calls .return() on early exit. Without this try/finally,
-      // breaking from the loop (retry path, abort, error) leaves the generator suspended
-      // at its last yield, so AcpAgentService.invoke()'s finally { lease.release() } never
-      // executes → leaked lease → "Pool at capacity" after maxLiveProcesses invocations.
-      let iterExitedNormally = false;
-      try {
-        for (;;) {
-          const iterResult = await abortableNext(serviceIter, signal);
-          if (iterResult.done) break;
-          const msg = iterResult.value;
-          // F149: provider_signal / liveness_signal must NOT reset timeout — prevents "续命"
-          // F198 Phase C P2-1: status (daemon detail progress) also must NOT reset timeout —
-          // a daemon sending frequent status updates must not evade the 30-min kill deadline.
-          if (msg.type !== 'provider_signal' && msg.type !== 'liveness_signal' && msg.type !== 'status')
-            resetInvocationTimeout();
-          if (shouldTrackGeminiResumeFailures && options.sessionId && msg.type === 'error') {
-            const failureKind = classifyResumeFailure(msg.error);
-            if (failureKind) {
-              resumeFailureCounts[failureKind] = (resumeFailureCounts[failureKind] ?? 0) + 1;
-            }
+      activeServiceIterator = serviceIter;
+      for (;;) {
+        const iterResult = await abortableNext(serviceIter, signal);
+        if (iterResult.done) {
+          activeServiceIterator = null;
+          break;
+        }
+        const msg = iterResult.value;
+        // F149: provider_signal / liveness_signal must NOT reset timeout — prevents "续命"
+        // F198 Phase C P2-1: status (daemon detail progress) also must NOT reset timeout —
+        // a daemon sending frequent status updates must not evade the 30-min kill deadline.
+        if (msg.type !== 'provider_signal' && msg.type !== 'liveness_signal' && msg.type !== 'status')
+          resetInvocationTimeout();
+        if (shouldTrackGeminiResumeFailures && options.sessionId && msg.type === 'error') {
+          const failureKind = classifyResumeFailure(msg.error);
+          if (failureKind) {
+            resumeFailureCounts[failureKind] = (resumeFailureCounts[failureKind] ?? 0) + 1;
           }
+        }
 
-          if (
-            allowSessionRetry &&
-            msg.type === 'error' &&
-            (isMissingClaudeSessionError(msg.error) || isSessionNotFoundDiagnostic(msg.metadata))
-          ) {
-            suppressedMissingSessionError = msg;
-            continue;
-          }
-          if (
-            allowSessionRetry &&
-            !attemptHasContentOutput &&
-            msg.type === 'error' &&
-            isPromptTokenLimitExceededError(msg.error)
-          ) {
-            suppressedPromptLimitError = msg;
-            continue;
-          }
-          if (
-            allowSessionRetry &&
-            !attemptHasContentOutput &&
-            msg.type === 'error' &&
-            isContextWindowOverflowError(msg.error)
-          ) {
-            suppressedContextOverflowError = msg;
-            continue;
-          }
-          if (
-            allowTransientRetry &&
-            !attemptHasContentOutput &&
-            msg.type === 'error' &&
-            (isTransientCliExitCode1(msg.error) || isTransientAcpPromptFailure(msg.error))
-          ) {
-            suppressedTransientCliError = msg;
-            continue;
-          }
-          // #774 self-heal: CLI timeout during session resume with no substantive output
-          // → likely stale/unreachable session. Suppress and retry without session.
-          // Uses attemptHasSubstantiveOutput (not attemptHasContentOutput) because
-          // timeout_diagnostics (system_info) must NOT block the retry path.
-          if (
-            allowSessionRetry &&
-            options.sessionId &&
-            !attemptHasSubstantiveOutput &&
-            msg.type === 'error' &&
-            isCliTimeoutError(msg.error)
-          ) {
-            suppressedTimeoutError = msg;
-            continue;
-          }
-          // F215 AC-C1/C2: Suppress malformed tool-call error + preceding system_info signal
-          // → seal session + fresh-context retry (sessionId=undefined).
-          // Applies on all attempts (even without session) so a retried invocation that still
-          // produces malformed output also enters the fallback chain.
-          //
-          // BLOCKING 2 fix: malformed_toolcall_detected is emitted BEFORE the error, so we
-          // must suppress it unconditionally (not gated on suppressedMalformedError being set).
-          if (
-            msg.type === 'system_info' &&
-            (() => {
-              try {
-                return JSON.parse(msg.content ?? '{}').type === 'malformed_toolcall_detected';
-              } catch {
-                return false;
-              }
-            })()
-          ) {
-            // Internal detection signal — always suppress; never reaches user.
-            continue;
-          }
-          // P1 7th fix: only suppress malformed error (and retry) when NO content was emitted yet.
-          // Other self-heal paths (prompt limit, context overflow) all guard on !attemptHasContentOutput.
-          // Without this guard, a multi-step run that used a tool then ended with a malformed turn
-          // would re-run the original prompt from scratch — duplicating tool actions.
-          if (msg.type === 'error' && isMalformedToolCallError(msg.error) && !attemptHasContentOutput) {
-            suppressedMalformedError = msg;
-            continue;
-          }
-          // F215 AC-B6 UX fix: when content was already emitted, the malformed error must NOT reach
-          // the user with "系统已触发恢复流程" (a lie — no retry fires when attemptHasContentOutput=true).
-          // Replace the raw error with an honest partial-output text notice.
-          if (msg.type === 'error' && isMalformedToolCallError(msg.error) && attemptHasContentOutput) {
-            log.warn(
-              { catId, error: msg.error },
-              '[F215] Malformed after content output — replacing misleading error with partial-output notice',
-            );
-            const notice: AgentMessage = {
-              type: 'text',
-              catId: catId as CatId,
-              content: `\n\n🐾 手抖了——最后一步没完成。上面的内容已经送到了，可以追问或让其他猫猫接着做。`,
-              timestamp: Date.now(),
-            };
-            for await (const out of streamProcessedOutputs(notice)) {
-              yield out;
+        if (
+          allowSessionRetry &&
+          msg.type === 'error' &&
+          (isMissingClaudeSessionError(msg.error) || isSessionNotFoundDiagnostic(msg.metadata))
+        ) {
+          suppressedMissingSessionError = msg;
+          continue;
+        }
+        if (
+          allowSessionRetry &&
+          !attemptHasContentOutput &&
+          msg.type === 'error' &&
+          isPromptTokenLimitExceededError(msg.error)
+        ) {
+          suppressedPromptLimitError = msg;
+          continue;
+        }
+        if (
+          allowSessionRetry &&
+          !attemptHasContentOutput &&
+          msg.type === 'error' &&
+          isContextWindowOverflowError(msg.error)
+        ) {
+          suppressedContextOverflowError = msg;
+          continue;
+        }
+        if (
+          allowTransientRetry &&
+          !attemptHasContentOutput &&
+          msg.type === 'error' &&
+          (isTransientCliExitCode1(msg.error) || isTransientAcpPromptFailure(msg.error))
+        ) {
+          suppressedTransientCliError = msg;
+          continue;
+        }
+        // #774 self-heal: CLI timeout during session resume with no substantive output
+        // → likely stale/unreachable session. Suppress and retry without session.
+        // Uses attemptHasSubstantiveOutput (not attemptHasContentOutput) because
+        // timeout_diagnostics (system_info) must NOT block the retry path.
+        if (
+          allowSessionRetry &&
+          options.sessionId &&
+          !attemptHasSubstantiveOutput &&
+          msg.type === 'error' &&
+          isCliTimeoutError(msg.error)
+        ) {
+          suppressedTimeoutError = msg;
+          continue;
+        }
+        // F215 AC-C1/C2: Suppress malformed tool-call error + preceding system_info signal
+        // → seal session + fresh-context retry (sessionId=undefined).
+        // Applies on all attempts (even without session) so a retried invocation that still
+        // produces malformed output also enters the fallback chain.
+        //
+        // BLOCKING 2 fix: malformed_toolcall_detected is emitted BEFORE the error, so we
+        // must suppress it unconditionally (not gated on suppressedMalformedError being set).
+        if (
+          msg.type === 'system_info' &&
+          (() => {
+            try {
+              return JSON.parse(msg.content ?? '{}').type === 'malformed_toolcall_detected';
+            } catch {
+              return false;
             }
-            continue;
-          }
-
-          if (
-            suppressedMissingSessionError ||
-            suppressedPromptLimitError ||
-            suppressedContextOverflowError ||
-            suppressedTransientCliError ||
-            suppressedTimeoutError ||
-            suppressedMalformedError
-          ) {
-            if (msg.type === 'done') {
-              // F215 AC-C1: Seal malformed session before fresh retry.
-              if (suppressedMalformedError && deps.sessionSealer && deps.sessionChainStore) {
-                try {
-                  const activeRec = await deps.sessionChainStore.getActive(catId as CatId, threadId);
-                  if (activeRec) {
-                    const sealResult = await deps.sessionSealer.requestSeal({
-                      sessionId: activeRec.id,
-                      reason: 'malformed_toolcall',
-                    });
-                    if (sealResult.accepted) {
-                      sessionManager.delete(userId, catId, threadId).catch(() => {});
-                      deps.sessionSealer.finalize({ sessionId: activeRec.id }).catch(() => {});
-                      log.info(
-                        { catId, threadId, invocationId, sessionId: activeRec.id },
-                        '[F215] Sealed malformed session for fresh-context retry',
-                      );
-                    }
-                  }
-                } catch {
-                  /* best-effort seal */
-                }
-              }
-              shouldRetryWithoutSession = Boolean(
-                suppressedMissingSessionError ||
-                  suppressedPromptLimitError ||
-                  suppressedContextOverflowError ||
-                  suppressedTimeoutError ||
-                  suppressedMalformedError,
-              );
-              shouldRetryOnTransientCliExit = Boolean(suppressedTransientCliError);
-              break;
-            }
-
-            if (suppressedMissingSessionError) {
-              for await (const out of streamProcessedOutputs(suppressedMissingSessionError)) {
-                yield out;
-              }
-              suppressedMissingSessionError = undefined;
-            }
-            if (suppressedPromptLimitError) {
-              for await (const out of streamProcessedOutputs(suppressedPromptLimitError)) {
-                yield out;
-              }
-              suppressedPromptLimitError = undefined;
-            }
-            if (suppressedContextOverflowError) {
-              for await (const out of streamProcessedOutputs(suppressedContextOverflowError)) {
-                yield out;
-              }
-              suppressedContextOverflowError = undefined;
-            }
-            if (suppressedTransientCliError) {
-              for await (const out of streamProcessedOutputs(suppressedTransientCliError)) {
-                yield out;
-              }
-              suppressedTransientCliError = undefined;
-            }
-            if (suppressedTimeoutError) {
-              for await (const out of streamProcessedOutputs(suppressedTimeoutError)) {
-                yield out;
-              }
-              suppressedTimeoutError = undefined;
-            }
-            // F215: Clear malformed error — will be re-evaluated on retry.
-            if (suppressedMalformedError) {
-              suppressedMalformedError = undefined;
-            }
-          }
-
-          // F149: Map provider_signal / liveness_signal → system_info for frontend delivery
-          const deliveryMsg =
-            msg.type === 'provider_signal' || msg.type === 'liveness_signal'
-              ? { ...msg, type: 'system_info' as const }
-              : msg;
-          for await (const out of streamProcessedOutputs(deliveryMsg)) {
+          })()
+        ) {
+          // Internal detection signal — always suppress; never reaches user.
+          continue;
+        }
+        // P1 7th fix: only suppress malformed error (and retry) when NO content was emitted yet.
+        // Other self-heal paths (prompt limit, context overflow) all guard on !attemptHasContentOutput.
+        // Without this guard, a multi-step run that used a tool then ended with a malformed turn
+        // would re-run the original prompt from scratch — duplicating tool actions.
+        if (msg.type === 'error' && isMalformedToolCallError(msg.error) && !attemptHasContentOutput) {
+          suppressedMalformedError = msg;
+          continue;
+        }
+        // F215 AC-B6 UX fix: when content was already emitted, the malformed error must NOT reach
+        // the user with "系统已触发恢复流程" (a lie — no retry fires when attemptHasContentOutput=true).
+        // Replace the raw error with an honest partial-output text notice.
+        if (msg.type === 'error' && isMalformedToolCallError(msg.error) && attemptHasContentOutput) {
+          log.warn(
+            { catId, error: msg.error },
+            '[F215] Malformed after content output — replacing misleading error with partial-output notice',
+          );
+          const notice: AgentMessage = {
+            type: 'text',
+            catId: catId as CatId,
+            content: `\n\n🐾 手抖了——最后一步没完成。上面的内容已经送到了，可以追问或让其他猫猫接着做。`,
+            timestamp: Date.now(),
+          };
+          for await (const out of streamProcessedOutputs(notice)) {
             yield out;
           }
-          if (
-            msg.type !== 'error' &&
-            msg.type !== 'done' &&
-            msg.type !== 'session_init' &&
-            msg.type !== 'provider_signal' &&
-            msg.type !== 'liveness_signal' &&
-            msg.type !== 'status'
-          ) {
-            // F215 hotfix: attemptHasContentOutput must only be set by replay-sensitive types
-            // (text / tool_use / tool_result). system_info (rate_limit_event / agent_loop /
-            // timeout_diagnostics) and other metadata MUST NOT prevent malformed recovery —
-            // they carry no model output that would be duplicated on retry.
-            // Bug: system_info from rate_limit_event precedes malformed turn → sets
-            // attemptHasContentOutput=true → malformed suppress guard !attemptHasContentOutput
-            // fails → seal/fresh-retry/46接力 all skipped → bare malformed error leaks to user.
-            if (isUserVisibleSessionOutput(msg)) {
-              attemptHasContentOutput = true;
-            }
-            // Substantive = real model output, excludes system_info (e.g. timeout_diagnostics).
-            if (msg.type !== 'system_info') {
-              attemptHasSubstantiveOutput = true;
-            }
-            // F118 AC-C6: Reset consecutive restore failure counter on successful content
-            if (deps.sessionChainStore && !didResetRestoreFailures) {
-              didResetRestoreFailures = true; // only reset once per invocation
+          continue;
+        }
+
+        if (
+          suppressedMissingSessionError ||
+          suppressedPromptLimitError ||
+          suppressedContextOverflowError ||
+          suppressedTransientCliError ||
+          suppressedTimeoutError ||
+          suppressedMalformedError
+        ) {
+          if (msg.type === 'done') {
+            // F215 AC-C1: Seal malformed session before fresh retry.
+            if (suppressedMalformedError && deps.sessionSealer && deps.sessionChainStore) {
               try {
                 const activeRec = await deps.sessionChainStore.getActive(catId as CatId, threadId);
-                if (activeRec && (activeRec.consecutiveRestoreFailures ?? 0) > 0) {
-                  await deps.sessionChainStore.update(activeRec.id, {
-                    consecutiveRestoreFailures: 0,
-                    updatedAt: Date.now(),
+                if (activeRec) {
+                  const sealResult = await deps.sessionSealer.requestSeal({
+                    sessionId: activeRec.id,
+                    reason: 'malformed_toolcall',
                   });
+                  if (sealResult.accepted) {
+                    sessionManager.delete(userId, catId, threadId).catch(() => {});
+                    deps.sessionSealer.finalize({ sessionId: activeRec.id }).catch(() => {});
+                    log.info(
+                      { catId, threadId, invocationId, sessionId: activeRec.id },
+                      '[F215] Sealed malformed session for fresh-context retry',
+                    );
+                  }
                 }
               } catch {
-                /* best-effort reset */
+                /* best-effort seal */
               }
+            }
+            shouldRetryWithoutSession = Boolean(
+              suppressedMissingSessionError ||
+                suppressedPromptLimitError ||
+                suppressedContextOverflowError ||
+                suppressedTimeoutError ||
+                suppressedMalformedError,
+            );
+            shouldRetryOnTransientCliExit = Boolean(suppressedTransientCliError);
+            break;
+          }
+
+          if (suppressedMissingSessionError) {
+            for await (const out of streamProcessedOutputs(suppressedMissingSessionError)) {
+              yield out;
+            }
+            suppressedMissingSessionError = undefined;
+          }
+          if (suppressedPromptLimitError) {
+            for await (const out of streamProcessedOutputs(suppressedPromptLimitError)) {
+              yield out;
+            }
+            suppressedPromptLimitError = undefined;
+          }
+          if (suppressedContextOverflowError) {
+            for await (const out of streamProcessedOutputs(suppressedContextOverflowError)) {
+              yield out;
+            }
+            suppressedContextOverflowError = undefined;
+          }
+          if (suppressedTransientCliError) {
+            for await (const out of streamProcessedOutputs(suppressedTransientCliError)) {
+              yield out;
+            }
+            suppressedTransientCliError = undefined;
+          }
+          if (suppressedTimeoutError) {
+            for await (const out of streamProcessedOutputs(suppressedTimeoutError)) {
+              yield out;
+            }
+            suppressedTimeoutError = undefined;
+          }
+          // F215: Clear malformed error — will be re-evaluated on retry.
+          if (suppressedMalformedError) {
+            suppressedMalformedError = undefined;
+          }
+        }
+
+        // F149: Map provider_signal / liveness_signal → system_info for frontend delivery
+        const deliveryMsg =
+          msg.type === 'provider_signal' || msg.type === 'liveness_signal'
+            ? { ...msg, type: 'system_info' as const }
+            : msg;
+        for await (const out of streamProcessedOutputs(deliveryMsg)) {
+          yield out;
+        }
+        if (
+          msg.type !== 'error' &&
+          msg.type !== 'done' &&
+          msg.type !== 'session_init' &&
+          msg.type !== 'provider_signal' &&
+          msg.type !== 'liveness_signal' &&
+          msg.type !== 'status'
+        ) {
+          // F215 hotfix: attemptHasContentOutput must only be set by replay-sensitive types
+          // (text / tool_use / tool_result). system_info (rate_limit_event / agent_loop /
+          // timeout_diagnostics) and other metadata MUST NOT prevent malformed recovery —
+          // they carry no model output that would be duplicated on retry.
+          // Bug: system_info from rate_limit_event precedes malformed turn → sets
+          // attemptHasContentOutput=true → malformed suppress guard !attemptHasContentOutput
+          // fails → seal/fresh-retry/46接力 all skipped → bare malformed error leaks to user.
+          if (isUserVisibleSessionOutput(msg)) {
+            attemptHasContentOutput = true;
+          }
+          // Substantive = real model output, excludes system_info (e.g. timeout_diagnostics).
+          if (msg.type !== 'system_info') {
+            attemptHasSubstantiveOutput = true;
+          }
+          // F118 AC-C6: Reset consecutive restore failure counter on successful content
+          if (deps.sessionChainStore && !didResetRestoreFailures) {
+            didResetRestoreFailures = true; // only reset once per invocation
+            try {
+              const activeRec = await deps.sessionChainStore.getActive(catId as CatId, threadId);
+              if (activeRec && (activeRec.consecutiveRestoreFailures ?? 0) > 0) {
+                await deps.sessionChainStore.update(activeRec.id, {
+                  consecutiveRestoreFailures: 0,
+                  updatedAt: Date.now(),
+                });
+              }
+            } catch {
+              /* best-effort reset */
             }
           }
         }
-        iterExitedNormally = true;
-      } finally {
-        // #1186: Close the service generator so its finally block executes (lease.release()).
-        // This is the critical fix — without it, every manual-iteration break leaks a lease.
-        //
-        // Two paths:
-        // 1. Normal/retry break: generator is suspended at a yield — .return() resolves
-        //    immediately (sync finally in AcpAgentService runs lease.release() inline).
-        //    MUST await so lease is released before any retry attempt acquires a new one.
-        // 2. Abort/error: abortableNext() rejected while .next() is still pending.
-        //    Async generator operations are serialized — .return() queues behind the
-        //    pending .next() and may block until cancelSession resolves the underlying
-        //    stream. Awaiting would reintroduce the stuck behavior abortableNext was
-        //    designed to prevent. Fire-and-forget; the lease releases asynchronously
-        //    when the cancel propagates.
-        if (iterExitedNormally) {
-          await serviceIter.return?.();
-        } else {
-          serviceIter.return?.()?.catch(() => {});
-        }
       }
+      if (activeServiceIterator === serviceIter) await closeActiveServiceIterator();
 
       if (shouldRetryWithoutSession && attempt + 1 < maxAttempts) {
         const retryReason = suppressedPromptLimitError
@@ -3549,8 +3781,25 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         yield out;
       }
     }
+    // Natural iterator exhaustion is not itself a successful child terminal.
+    // Only the typed provider `done` boundary above can establish success; an
+    // iterator that vanishes after partial output is an interrupted execution.
+    turnExecutionCompletedSuccessfully =
+      turnExecutionCompletedSuccessfully &&
+      !hadError &&
+      turnExecutionFailureReason === undefined &&
+      signal?.aborted !== true;
+    if (
+      !turnExecutionCompletedSuccessfully &&
+      !hadError &&
+      turnExecutionFailureReason === undefined &&
+      signal?.aborted !== true
+    ) {
+      turnExecutionInterruptionReason = 'provider_ended_without_terminal_done';
+    }
     didComplete = true; // F118 AC-C5: Normal completion reached
   } catch (err) {
+    await closeActiveServiceIterator();
     // F152: Record error on invocation span + OTel log
     invocationSpan.setStatus({ code: SpanStatusCode.ERROR, message: err instanceof Error ? err.message : String(err) });
     emitOtelLog('ERROR', 'invocation_error', { [AGENT_ID]: catId, [STATUS]: 'error' }, invocationSpan);
@@ -3574,6 +3823,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       });
 
     hadError = true;
+    turnExecutionFailureReason ??= 'invocation_exception';
     didWriteAudit = true; // F118 AC-C5: Catch block wrote audit, don't double-write in finally
     yield {
       type: 'error' as const,
@@ -3592,6 +3842,40 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       tracing: { traceId: sc.traceId, spanId: sc.spanId, ...(parentSid ? { parentSpanId: parentSid } : {}) },
     };
   } finally {
+    await closeActiveServiceIterator();
+    if (deps.turnExecutionStore && ownsTurnExecution) {
+      let terminal: TurnExecutionTerminalInput;
+      if (turnExecutionCompletedSuccessfully) {
+        terminal = { status: 'succeeded', endedAt: Date.now() };
+      } else if (callerSignal?.aborted) {
+        terminal = { status: 'canceled', endedAt: Date.now(), terminalReason: 'user_cancel' };
+      } else if (invocationAc.signal.aborted) {
+        terminal = { status: 'failed', endedAt: Date.now(), terminalReason: 'invocation_timeout' };
+      } else if (turnExecutionFailureReason !== undefined || hadError) {
+        terminal = {
+          status: 'failed',
+          endedAt: Date.now(),
+          terminalReason: turnExecutionFailureReason ?? 'provider_execution_failed',
+        };
+      } else {
+        terminal = {
+          status: 'interrupted',
+          endedAt: Date.now(),
+          terminalReason: turnExecutionInterruptionReason ?? 'generator_returned_without_completion',
+        };
+      }
+      try {
+        const result = await deps.turnExecutionStore.transitionTerminal(invocationId, terminal);
+        if (result.outcome === 'not_found') {
+          log.error({ invocationId, terminal }, 'Turn execution disappeared before terminal transition');
+        }
+      } catch (err) {
+        // A running record is deliberately left for startup reconciliation;
+        // never manufacture lifecycle truth from logs or the auth registry.
+        log.error({ invocationId, terminal, err }, 'Turn execution terminal transition failed');
+      }
+    }
+
     // F153 Phase J AC-J4: drain any open tool spans whose tool_result never arrived
     // (abort / error / timeout). Mirrors PR #732 mention_dispatch abort-safety pattern.
     toolSpanTracker.endAllOrphans('aborted');

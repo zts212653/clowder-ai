@@ -41,6 +41,19 @@
       "teamStrengths": "审美、前端设计风格、打破常规"
     },
     {
+      "id": "dragon-li",
+      "name": "狸花猫",
+      "nickname": "小狸花",
+      "avatar": "/avatars/glm52.png",
+      "color": {
+        "primary": "#D4A76A",
+        "secondary": "#F5EBD7"
+      },
+      "roleDescription": "GLM 对话猫；中文实证",
+      "personality": "先证后答，机警蓄势",
+      "teamStrengths": "实证"
+    },
+    {
       "id": "bengal",
       "name": "孟加拉猫",
       "nickname": "斑斑",
@@ -116,6 +129,13 @@
       "available": true,
       "evaluation": "代码审查专家，安全意识强，反应快"
     },
+    "codex-sol": {
+      "family": "maine-coon",
+      "roles": ["coding", "reasoning", "peer-reviewer"],
+      "lead": false,
+      "available": true,
+      "evaluation": "小太阳型攻坚猫，擅长复杂系统分析与实现"
+    },
     "gemini": {
       "family": "siamese",
       "roles": ["designer"],
@@ -129,6 +149,13 @@
       "lead": false,
       "available": true,
       "evaluation": "Gemini 3.5 Flash 轻量 triage/narrator，适合高频社区初筛，强 review，禁自合"
+    },
+    "glm52": {
+      "family": "dragon-li",
+      "roles": ["chat", "memory-spike", "reasoning"],
+      "lead": true,
+      "available": true,
+      "evaluation": "GLM-5.2 新猫"
     },
     "antigravity": {
       "family": "bengal",
@@ -489,11 +516,26 @@
             "instruct": "用一个简单直接的野性少年语气说话，短句为主，像狼一样直觉敏锐",
             "temperature": 0.3
           }
+        },
+        {
+          "id": "codex-sol",
+          "catId": "codex-sol",
+          "variantLabel": "Sol",
+          "clientId": "openai",
+          "defaultModel": "gpt-5.6-sol",
+          "mcpSupport": true,
+          "cli": {
+            "command": "codex",
+            "outputFormat": "json",
+            "defaultArgs": ["exec", "--json", "-m", "gpt-5.6-sol"],
+            "effort": "xhigh"
+          }
         }
       ]
     },
     {
       "id": "gpt-pro",
+      "relationshipKey": "maine-coon",
       "catId": "gpt-pro",
       "name": "缅因猫Pro (云端)",
       "displayName": "缅因猫Pro",
@@ -615,6 +657,7 @@
     },
     {
       "id": "gemini35",
+      "relationshipKey": "siamese",
       "catId": "gemini35",
       "name": "暹罗猫 Gemini 3.5 Flash",
       "displayName": "暹罗猫",
@@ -660,6 +703,61 @@
             "refText": "说实在的，我不擅长和陌生人打交道，也许是我不懂说话的技巧吧。这方面的窍门，能请你教一教我吗？",
             "instruct": "用一个有点害羞但很努力的少年语气说话，温柔可爱",
             "temperature": 0.3
+          }
+        }
+      ]
+    },
+    {
+      "id": "dragon-li",
+      "catId": "glm52",
+      "name": "狸花猫",
+      "displayName": "狸花猫",
+      "nickname": "小狸花",
+      "avatar": "/avatars/glm52.png",
+      "color": {
+        "primary": "#D4A76A",
+        "secondary": "#F5EBD7"
+      },
+      "mentionPatterns": ["@glm52", "@glm5.2", "@glm-5.2", "@狸花glm52", "@小狸花", "@狸花猫"],
+      "roleDescription": "GLM-5.2 新猫；中文实证",
+      "teamStrengths": "实证",
+      "caution": "新猫",
+      "defaultVariantId": "glm52-default",
+      "features": {
+        "sessionChain": true
+      },
+      "variants": [
+        {
+          "id": "glm52-default",
+          "catId": "glm52",
+          "name": "狸花猫",
+          "displayName": "狸花猫",
+          "nickname": "小狸花",
+          "variantLabel": "GLM-5.2",
+          "mentionPatterns": ["@glm52", "@glm5.2", "@glm-5.2", "@狸花glm52", "@小狸花"],
+          "avatar": "/avatars/glm52.png",
+          "color": {
+            "primary": "#D4A76A",
+            "secondary": "#F5EBD7"
+          },
+          "clientId": "opencode",
+          "provider": "zhipu",
+          "defaultModel": "zhipu/glm-5.2",
+          "mcpSupport": true,
+          "cli": {
+            "command": "opencode",
+            "outputFormat": "ndjson",
+            "defaultArgs": ["run", "--format", "json"]
+          },
+          "roleDescription": "GLM-5.2 新猫；中文实证",
+          "personality": "先证后答，不硬塞记忆",
+          "teamStrengths": "实证",
+          "strengths": ["memory-judgment", "chinese-context", "conservative-reasoning"],
+          "contextBudget": {
+            "maxPromptTokens": 180000,
+            "maxContextTokens": 160000,
+            "maxMessages": 200,
+            "maxContentLengthPerMsg": 100000
           }
         }
       ]
@@ -873,6 +971,7 @@
     },
     {
       "id": "opus-47",
+      "relationshipKey": "ragdoll",
       "catId": "opus-47",
       "name": "布偶猫 Opus 4.7",
       "displayName": "布偶猫",

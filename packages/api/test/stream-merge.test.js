@@ -25,6 +25,126 @@ async function collect(iterable) {
 }
 
 describe('mergeStreams', () => {
+  it('batch abort finishes even when every child next() is permanently pending', async () => {
+    let returnCalls = 0;
+    const stuck = {
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+      next() {
+        return new Promise(() => {});
+      },
+      async return() {
+        returnCalls++;
+        return { done: true, value: undefined };
+      },
+    };
+    const controller = new AbortController();
+    const iterator = mergeStreams([stuck], undefined, { signal: controller.signal })[Symbol.asyncIterator]();
+    const pending = iterator.next();
+
+    controller.abort('cancel_all');
+    const result = await Promise.race([pending, new Promise((resolve) => setTimeout(() => resolve('timeout'), 50))]);
+
+    assert.notEqual(result, 'timeout', 'batch abort must not wait for a stuck child next()');
+    assert.equal(result.done, true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(returnCalls, 1, 'aborted child iterator must be closed exactly once');
+  });
+
+  it('per-stream abort drops only the stuck child and preserves the healthy sibling', async () => {
+    let stuckReturnCalls = 0;
+    const stuck = {
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+      next() {
+        return new Promise(() => {});
+      },
+      async return() {
+        stuckReturnCalls++;
+        return { done: true, value: undefined };
+      },
+    };
+    const stuckController = new AbortController();
+    const healthyController = new AbortController();
+    const iterator = mergeStreams([stuck, delayed(['healthy'])], undefined, {
+      signalForIndex: (index) => (index === 0 ? stuckController.signal : healthyController.signal),
+    })[Symbol.asyncIterator]();
+
+    const first = await iterator.next();
+    assert.deepEqual(first, { done: false, value: 'healthy' });
+    stuckController.abort('user_cancel');
+    const terminal = await Promise.race([
+      iterator.next(),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 50)),
+    ]);
+
+    assert.notEqual(terminal, 'timeout', 'per-stream abort must remove the stuck child from the pool');
+    assert.equal(terminal.done, true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(stuckReturnCalls, 1);
+    assert.equal(healthyController.signal.aborted, false, 'healthy sibling remains untouched');
+  });
+
+  it('per-stream abort can emit a terminal value before a healthy sibling finishes', async () => {
+    const stuck = {
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+      next() {
+        return new Promise(() => {});
+      },
+      async return() {
+        return { done: true, value: undefined };
+      },
+    };
+    const aborted = new AbortController();
+    const healthy = new AbortController();
+    const iterator = mergeStreams([stuck, stuck], undefined, {
+      signalForIndex: (index) => (index === 0 ? aborted.signal : healthy.signal),
+      valueForAbort: (index) => `aborted-${index}`,
+    })[Symbol.asyncIterator]();
+    const next = iterator.next();
+
+    aborted.abort('user_cancel');
+    const terminal = await Promise.race([next, new Promise((resolve) => setTimeout(() => resolve('timeout'), 50))]);
+
+    assert.deepEqual(terminal, { done: false, value: 'aborted-0' });
+    assert.equal(healthy.signal.aborted, false, 'healthy sibling must still be running when terminal is emitted');
+    healthy.abort('test_cleanup');
+    assert.deepEqual(await iterator.next(), { done: false, value: 'aborted-1' });
+    assert.deepEqual(await iterator.next(), { done: true, value: undefined });
+  });
+
+  it('iterator close rejection is reported without blocking terminal completion', async () => {
+    const closeError = new Error('close failed');
+    const stuck = {
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+      next() {
+        return new Promise(() => {});
+      },
+      async return() {
+        throw closeError;
+      },
+    };
+    const errors = [];
+    const controller = new AbortController();
+    const pending = mergeStreams([stuck], (index, error) => errors.push({ index, error }), {
+      signal: controller.signal,
+    })
+      [Symbol.asyncIterator]()
+      .next();
+
+    controller.abort('cancel_all');
+    const result = await Promise.race([pending, new Promise((resolve) => setTimeout(() => resolve('timeout'), 50))]);
+    assert.notEqual(result, 'timeout');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(errors, [{ index: 0, error: closeError }]);
+  });
+
   it('merges two streams', async () => {
     const a = delayed([1, 2, 3]);
     const b = delayed([4, 5, 6]);

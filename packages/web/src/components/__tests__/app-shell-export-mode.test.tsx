@@ -15,6 +15,7 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/components/ActivityBar', () => ({
   ActivityBar: () => <nav data-testid="activity-bar" />,
 }));
+vi.mock('@/hooks/useWorkspaceNavigate', () => ({ useWorkspaceNavigate: vi.fn() }));
 
 import { AppShell } from '@/components/AppShell';
 

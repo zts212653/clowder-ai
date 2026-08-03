@@ -36,7 +36,7 @@ config:
   - envName: VIDEO_ANALYSIS_API_KEY
     label: API Key
     sensitive: true
-    required: false
+    required: true
   - envName: VIDEO_ANALYSIS_BASE_URL
     label: Base URL
     sensitive: false

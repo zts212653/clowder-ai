@@ -1,5 +1,6 @@
 ---
 name: debugging
+tips_exempt: existing workspace-navigator execution guidance correction; no new capability or discovery moment
 description: >
   系统化 bug 定位：根因调查 → 模式分析 → 假设验证 → 修复。
   Use when: 遇到 bug、测试失败、unexpected behavior。
@@ -204,7 +205,10 @@ Phase 1 开始时，用 **8 栏诊断胶囊** 结构化调查过程：
 右侧状态面板底部有「运行日志 → 查看日志」按钮：
 - 点击后自动切换到 Workspace 面板，展开到 `packages/api/data/logs/api/` 并打开最新日志文件
 - 日志格式：Pino JSON（每行一条），文件名 `api.YYYY-MM-DD.SEQ.log`（日轮转，14天保留）
-- 也可以通过 Navigate API 打开：`POST /api/workspace/navigate {"path":"packages/api/data/logs/api/","action":"reveal","worktreeId":"..."}`
+- 也可以加载 `workspace-navigator`，调用 typed
+  `cat_cafe_workspace_navigate({ path: "<已确认的绝对日志目录>", action: "reveal", threadId: "<当前 threadId>" })`
+- 不要手写匿名 `POST /api/workspace/navigate`：该安全边界要求 session、direct-loopback
+  identity 或已验证的 callback-token / agent-key；第一方 MCP 会携带正确认证
 - 调试时**先看日志**再分析，不要猜
 
 ## 下一步

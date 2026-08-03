@@ -1,9 +1,10 @@
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { catColorVar } from '@/lib/cat-slug';
-import type { ThreadState } from '@/stores/chat-types';
+import { DEFAULT_THREAD_STATE, type Thread, type ThreadState } from '@/stores/chat-types';
+import { useChatStore } from '@/stores/chatStore';
 import { useLabelStore } from '@/stores/label-store';
 import { API_URL, apiFetch } from '@/utils/api-client';
 // F174 D2b-2 (rev): per-cat callback-auth dot was rejected (co-creator alpha 反馈
@@ -15,6 +16,7 @@ import { HubIcon } from '../icons/HubIcon';
 import { PawIcon } from '../icons/PawIcon';
 import { ThreadCatStatus } from '../ThreadCatStatus';
 import { ThreadCatSettings } from './ThreadCatSettings';
+import { ThreadEffortSettings } from './ThreadEffortSettings';
 import { ThreadLabelPicker } from './ThreadLabelPicker';
 import { formatRelativeTime } from './thread-utils';
 
@@ -41,9 +43,10 @@ export interface ThreadItemProps {
   preferredCats?: string[];
   threadLabels?: string[];
   isHubThread?: boolean;
+  systemKind?: Thread['systemKind'];
 }
 
-export function ThreadItem({
+function ThreadItemComponent({
   id,
   title,
   participants,
@@ -64,8 +67,13 @@ export function ThreadItem({
   preferredCats,
   threadLabels,
   isHubThread,
+  systemKind,
   onReplay,
 }: ThreadItemProps) {
+  const subscribedThreadState = useChatStore(
+    useCallback((state) => state.threadStates[id] ?? DEFAULT_THREAD_STATE, [id]),
+  );
+  const itemThreadState = threadState ?? subscribedThreadState;
   const { getCatById } = useCatData();
   const canDelete = id !== 'default' && onDelete;
   const canRename = id !== 'default' && onRename;
@@ -138,7 +146,7 @@ export function ThreadItem({
 
   // Build hover tooltip: full title + participants + time (clowder-ai#29)
   const displayTitle = title ?? (id === 'default' ? '大厅' : '未命名对话');
-  const hasDraft = !isActive && (threadState?.hasDraft ?? false);
+  const hasDraft = !isActive && itemThreadState.hasDraft;
   const participantNames = participants.map((catId) => resolveCatDisplayName(catId, getCatById)).join(', ');
   const tooltipLines = [displayTitle];
   if (participantNames) tooltipLines.push(`参与: ${participantNames}`);
@@ -184,12 +192,6 @@ export function ThreadItem({
     void onToggleFavorite(id, !isFavorited);
   }, [id, isFavorited, onToggleFavorite]);
 
-  const togglePin = useCallback(() => {
-    if (!onTogglePin) return;
-    setIsMoreOpen(false);
-    void onTogglePin(id, !isPinned);
-  }, [id, isPinned, onTogglePin]);
-
   const deleteThread = useCallback(() => {
     if (!onDelete) return;
     setIsMoreOpen(false);
@@ -207,7 +209,7 @@ export function ThreadItem({
       title={tooltip}
     >
       {/* Title row */}
-      <div className="mb-1 flex items-center justify-between gap-1">
+      <div className="mb-1 flex items-start justify-between gap-1">
         {isEditing ? (
           <input
             ref={inputRef}
@@ -239,18 +241,18 @@ export function ThreadItem({
             {canPin && (
               <button
                 type="button"
-                className={`inline-flex flex-shrink-0 rounded transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-interactive ${
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void onTogglePin(id, !isPinned);
+                }}
+                className={`inline-flex flex-shrink-0 p-0.5 rounded transition-all hover:bg-[var(--console-hover-bg)] hover:text-cafe-interactive ${
                   isPinned
                     ? 'text-cafe-accent'
-                    : 'text-cafe-muted opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100'
+                    : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 text-cafe-muted hover:text-cafe-accent'
                 }`}
                 aria-label={isPinned ? `取消置顶 ${displayTitle}` : `置顶 ${displayTitle}`}
                 title={isPinned ? '取消置顶' : '置顶'}
-                data-testid={`thread-pin-toggle-${id}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  togglePin();
-                }}
+                data-testid="thread-pin-button"
               >
                 <PinIcon />
               </button>
@@ -271,8 +273,17 @@ export function ThreadItem({
               </span>
             )}
             {isHubThread && <HubIcon className="w-3.5 h-3.5 inline-block mr-1 text-cafe-accent align-text-bottom" />}
+            {systemKind === 'cat_bedroom' && (
+              <span
+                className="inline-flex shrink-0 items-center rounded-full border border-cafe-subtle bg-cafe-surface-elevated px-1.5 py-0.5 text-micro leading-none text-cafe-accent"
+                title="猫的私人卧室"
+                data-testid="thread-system-kind"
+              >
+                猫卧室
+              </span>
+            )}
             <span
-              className={`min-w-0 flex-1 line-clamp-2 text-xs leading-5 ${isActive ? 'font-medium text-cafe-black' : 'text-cafe-secondary'}`}
+              className={`min-w-0 flex-1 line-clamp-2 text-sm leading-snug ${isActive ? 'font-semibold text-cafe-black' : 'text-cafe-secondary'}`}
             >
               {title ?? (id === 'default' ? '大厅' : '未命名对话')}
             </span>
@@ -317,6 +328,13 @@ export function ThreadItem({
                       triggerRole="menuitem"
                     />
                   )}
+                  <ThreadEffortSettings
+                    threadId={id}
+                    triggerIcon={<EffortIcon />}
+                    triggerLabel="思考档位"
+                    triggerClassName={menuTriggerClassName}
+                    triggerRole="menuitem"
+                  />
                   {canRename && (
                     <ThreadActionMenuItem icon={<RenameIcon />} onClick={startRename}>
                       重命名对话
@@ -397,13 +415,11 @@ export function ThreadItem({
             </div>
           )}
           <LabelDots labels={threadLabels} />
-          {threadState && (
-            <ThreadCatStatus
-              threadState={threadState}
-              unreadCount={threadState.unreadCount}
-              hasUserMention={threadState.hasUserMention}
-            />
-          )}
+          <ThreadCatStatus
+            threadState={itemThreadState}
+            unreadCount={itemThreadState.unreadCount}
+            hasUserMention={itemThreadState.hasUserMention}
+          />
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
           {hasDraft && <span className="text-micro font-medium text-conn-red-text">[草稿]</span>}
@@ -413,6 +429,8 @@ export function ThreadItem({
     </div>
   );
 }
+
+export const ThreadItem = memo(ThreadItemComponent);
 
 // ─── Small icon components ───
 
@@ -459,6 +477,14 @@ function DefaultCatIcon() {
   return (
     <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
       <path d="M8 1C4.7 1 2 3.2 2 6c0 1.4.7 2.6 1.7 3.5-.1.8-.4 1.6-.9 2.3a.5.5 0 00.4.8c1.2 0 2.3-.5 3.1-1.1.5.1 1.1.2 1.7.2 3.3 0 6-2.2 6-5S11.3 1 8 1z" />
+    </svg>
+  );
+}
+
+function EffortIcon() {
+  return (
+    <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+      <path d="M5.2 2.6a2.7 2.7 0 00-2.1 4.4 2.7 2.7 0 001.5 4.8h.8v1.5M10.8 2.6A2.7 2.7 0 0112.9 7a2.7 2.7 0 01-1.5 4.8h-.8v1.5M8 2v12M5.1 5.1c.8.1 1.4.5 1.7 1.1M10.9 5.1c-.8.1-1.4.5-1.7 1.1M5.1 9.2c.8-.1 1.4-.5 1.7-1.1M10.9 9.2c-.8-.1-1.4-.5-1.7-1.1" />
     </svg>
   );
 }

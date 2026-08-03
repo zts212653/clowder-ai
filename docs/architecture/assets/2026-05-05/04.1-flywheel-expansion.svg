@@ -67,11 +67,11 @@
     <rect x="90" y="610" width="2020" height="385" rx="34" fill="#f5f3ff" stroke="#7c3aed" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
     <rect x="114" y="588" width="420" height="44" rx="22" fill="#7c3aed" opacity="0.96"/><text x="132" y="618" font-size="25" font-weight="800" fill="white">F152 出：把飞轮带到新地方</text>
   
-  <text x="1100" y="677" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#263238" font-weight="850" font-size="27">问题：方法论锁在 Cat Cafe 自己家，外部项目还是从零摸索</tspan></text>
-  <text x="1100" y="722" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#7c3aed" font-weight="850" font-size="25">解法：猫猫驻场冷启动，和铲屎官一起做 AI native 改造，再把经验带回来</tspan></text>
+  <text x="1100" y="677" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#263238" font-weight="850" font-size="27">问题：方法论锁在 Clowder AI 自己家，外部项目还是从零摸索</tspan></text>
+  <text x="1100" y="722" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#7c3aed" font-weight="850" font-size="25">解法：猫猫驻场冷启动，和operator一起做 AI native 改造，再把经验带回来</tspan></text>
   
     <rect x="235" y="798" width="220" height="118" rx="24" fill="white" stroke="#16a34a" stroke-width="3" filter="url(#shadow)"/>
-    <text x="345" y="842" text-anchor="middle" opacity="1" class=""><tspan x="345" dy="0" fill="#16a34a" font-weight="900" font-size="25">Cat Cafe</tspan></text>
+    <text x="345" y="842" text-anchor="middle" opacity="1" class=""><tspan x="345" dy="0" fill="#16a34a" font-weight="900" font-size="25">Clowder AI</tspan></text>
     <text x="345" y="878" text-anchor="middle" opacity="1" class=""><tspan x="345" dy="0" fill="#667085" font-weight="760" font-size="18">双飞轮方法论</tspan></text>
   
   
@@ -107,7 +107,7 @@
   <text x="1100" y="1222" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#2563eb" font-weight="850" font-size="25">解法：多域联邦检索，不统一存储，但统一发现和路由</tspan></text>
   
     <rect x="210" y="1280" width="220" height="118" rx="24" fill="white" stroke="#16a34a" stroke-width="3" filter="url(#shadow)"/>
-    <text x="320" y="1324" text-anchor="middle" opacity="1" class=""><tspan x="320" dy="0" fill="#16a34a" font-weight="900" font-size="25">Cat Cafe</tspan></text>
+    <text x="320" y="1324" text-anchor="middle" opacity="1" class=""><tspan x="320" dy="0" fill="#16a34a" font-weight="900" font-size="25">Clowder AI</tspan></text>
     <text x="320" y="1360" text-anchor="middle" opacity="1" class=""><tspan x="320" dy="0" fill="#667085" font-weight="760" font-size="18">本项目 docs</tspan></text>
   
   

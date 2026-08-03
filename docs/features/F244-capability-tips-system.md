@@ -1,9 +1,10 @@
 ---
 feature_ids: [F244]
-related_features: [F114, F155, F192, F203, F220, F223, F227, F229, F243]
+related_features: [F114, F155, F192, F203, F220, F223, F227, F229, F243, F268]
 topics: [knowledge-feed, capability-tips, waiting-state, onboarding, capability-discovery, magic-words]
 doc_kind: spec
 created: 2026-06-18
+updated: 2026-07-28
 ---
 
 # F244: Capability Tips System — 等待态 Knowledge Feed 投影
@@ -28,7 +29,7 @@ operator 2026-06-18 收敛：
 
 > "直接立项吧，反正第一个用户就是我啊！"
 
-等待态不是单纯的 dead time。用户盯着猫猫思考、执行、等待外部条件时，注意力被自然锁住；这几秒最适合把 Cat Cafe 的能力、家规、magic words、工作流边界和新 feature 用法轻量投影出来。目标不是把 loading 文案变可爱，而是把 W7 Knowledge Feed 和 F223 capability registry 变成用户能自然吸收的产品表面。
+等待态不是单纯的 dead time。用户盯着猫猫思考、执行、等待外部条件时，注意力被自然锁住；这几秒最适合把 Clowder AI 的能力、家规、magic words、工作流边界和新 feature 用法轻量投影出来。目标不是把 loading 文案变可爱，而是把 W7 Knowledge Feed 和 F223 capability registry 变成用户能自然吸收的产品表面。
 
 ## Current State / 现状基线
 
@@ -129,11 +130,13 @@ F229 猫猫球是 F244 的未来展示面，不是第二个 tips 系统：
 在等待/执行 UI 中增加 tips 投影，但与真实状态分层：
 
 - 真实状态仍由 liveness/runtime signal 驱动，`ThreadExecutionBar` / `ThinkingIndicator` 继续放状态、计时、停止与强制重置入口。
-- Tip 的第一展示面是 PendingMemberBubble（猫猫等待气泡）：tip strip 本身即为思考态指示器（operator dogfood Round 4 统一），猫猫头像/名字下直接渲染带呼吸光晕动画的 tip 气泡（`firstDelayMs=0`），不再显示独立弹跳点。Dedup bubble（`showCapabilityTip=false`）和 stall 状态降级为极简弹跳点（`· · ·`）。
-- Thread/message-list 层只选择一个 eligible pending invocation 承载 tip（`pendingTipInvocationId`，取第一个非 stall 的 pending invocation）；多猫并行等待时不得为每条 pending bubble 各自挂一个 strip，避免重复曝光和重复 action event。
-- `ThreadExecutionBar` 不承担 tip presentation；它只保留真实状态和逃生口，避免 tips 与取消/强制重置竞争。
+- Tip 的第一展示面是 `ThreadExecutionBar` 内的 neutral execution strip：无猫头像、无名字、无
+  `MessageBubble` identity；时间线只渲染服务端真实消息。
+- 一个 thread 只展示一个 execution tip strip；多猫执行不为每只猫复制 tip，也不产生
+  `pending-*` 占位消息。
 - `suspected_stall` / `alive_but_silent` 时，故障与取消入口优先；tips 不得遮挡或弱化 `卡住了？强制重置`。
-- PendingMemberBubble 中 tip 立即展示（`firstDelayMs=0`，思考态指示器无延迟）；其他 surface（如 `assistant_stream_bubble`）保留首次延迟。单条至少停留 30s，避免每几秒闪动制造噪音。
+- execution strip 中 tip 立即展示（`firstDelayMs=0`）；其他 surface（如
+  `assistant_stream_bubble`）保留首次延迟。单条至少停留 30s，避免每几秒闪动制造噪音。
 - 上下文选择优先级：当前执行阶段 > thread workflow > feature dev/review mode > 通用 capability/magic word；`ideate`/review 等待仍使用 `review` + `long_running` contexts，而不是退化成通用 `thinking` tips。
 - 支持 action：hover 提示"了解更多"；click 拉起 F229 猫猫球并把解释请求预填进输入框，不自动发送。需要直达时可附 source/guide/capability surface secondary action；没有 action 的 tip 不能冒充可执行能力。
 
@@ -230,10 +233,17 @@ Bloom filter 不用于 D1。原因：当前 inventory 量级是几十到几百�
 
 ### Phase B（Waiting-State Projection UI）
 
-- [x] AC-B1: 等待态 surface 能展示上下文 tip；component tests 覆盖。Surface 经多轮 dogfood 迭代定位：PR #2406 `ThreadExecutionBar`（位置错）→ PR #2424 `assistant_stream_bubble` → PR #2433/#2448 最终落在 `PendingMemberBubble`（"分析处理中"等待气泡，tip strip 即思考态指示器）；parallel/ideate 锁定同一线程只展示一个 strip，并保留 `review` context。
+- [x] AC-B1: 等待态 surface 能展示上下文 tip；component tests 覆盖。当前契约是
+  `PendingMemberBubble`：只在 exact active invocation 尚无真实 assistant bubble 的 pre-output
+  阶段展示，同一 thread 只展示一个 tip strip，并保留 `review` context。
 - [x] AC-B2: tips 与真实状态分层；`alive_but_silent` / `suspected_stall` 下取消、故障说明、`卡住了？强制重置` 入口不被遮挡，component tests 覆盖。
 - [x] AC-B3: Tip primary action hover 显示"了解更多"，click 拉起 F229 猫猫球并预填 tip 解释请求到输入框，默认不发送；若有 secondary source/guide/capability action，坏链接或 stale source 有可见错误，不静默失败。
 - [x] AC-B4: operator dogfood 路径可演示：等待一次猫执行时看到至少一条 capability/magic-word/workflow tip，并能点开了解来源。（5 轮 dogfood 证据见 `docs/features/F244-capability-tips-dogfood-report.md`；Round 5 operator 点击"了解更多"确认 action path 可达；Vision Guard 核实后补勾 2026-06-22）
+- [x] AC-B5: active invocation 的成员身份最多投影一次：尚无真实 assistant bubble 时允许一个
+  `pending-*` waiting bubble；一旦同一 `(catId, parent/turn invocationId)` 已有真实 bubble，
+  pending projection 立即消失。后续 msg-box user message 不得重置该关联或制造第二张头像；同猫
+  的新 invocation 仍须正常显示自己的 pending bubble。只有 hydration 合成 key、没有 causal
+  invocation identity 时 fail closed 不画头像；显式 post 也不充当该 invocation 的真实输出证据。
 
 ### Phase C（Feature Tips Contribution Gate）
 
@@ -289,9 +299,11 @@ Bloom filter 不用于 D1。原因：当前 inventory 量级是几十到几百�
 | KD-8 | F229 猫猫球是 presentation consumer，不是 tips source | F229 已拥有前台猫/功能发现职责；若猫猫球展示 tips，必须消费 F244 的 `tipId/sourceRef/action`，不能维护本地 tips 清单 | 2026-06-18 |
 | KD-9 | "了解更多"用 F229 draft，不做 help drawer 脚手架 | F229 已有 `setSurfaceState('bubble', prompt)` / `pendingPrompt` 终态 contract；F244 click 只预填输入框不自动发送，保留用户控制权 | 2026-06-18 |
 | KD-10 | 第一版是终态竖切，不叫临时版 | operator 指出临时版 framing 会诱导绕路；scope 只能减内容数量/展示范围，不能减 contract 终态性 | 2026-06-18 |
-| KD-11 | Tips 第一展示面在 assistant streaming bubble，不在 execution bar | Dogfood 截图确认执行条位置离用户注视点太远；等待态学习应贴近猫猫正在说话的气泡，同时 execution bar 保持真实状态和逃生口职责 | 2026-06-19 |
+| KD-11 | Tips 第一展示面在 pre-output `PendingMemberBubble`，不在 execution bar | 等待态学习应贴近即将产出回复的猫；pending 是有 exact invocation 身份、且会被真实 bubble 取代的临时投影，不是独立消息 | 2026-06-19 |
 | KD-12 | Seed inventory 保持 JSON 数据文件，不额外建 md 同步层 | `capability-tips.seed.json` 是独立数据文件（非组件内硬编码），有 `check-capability-tips.mjs` CI 校验；维护者是猫猫（开发者），不需要非技术编辑界面；额外 md↔JSON 同步层增加漂移风险，ROI 不足。operator 确认格式由猫猫自决 | 2026-06-21 |
 | KD-13 | #997 曝光均匀性用 Set/Map 轮转，不用 Bloom filter | tips inventory 是小集合，Set/Map 简单、可删除、可按 scope 清轮且无假阳性；Bloom filter 为百万级省内存去重设计，假阳性会漏 tip，不适合本场景 | 2026-06-22 |
+| KD-14 | ~~执行状态只能属于 execution chrome；时间线不得有 pending member projection~~（2026-07-28 superseded） | #3261 把“同一执行重复头像”误泛化成“任何 pending 头像都不合法”，删除了已 dogfood 的正常 pre-output 身份与 tip 位置 | 2026-07-27 |
+| KD-15 | Pending member projection 必须按 exact invocation 因果去重 | 正常首个等待头像有价值；真正 bug 是 later user message 切断扫描边界，使已经有真实输出的同一 invocation 再生成第二头像。去重键使用 `(catId, parent/turn invocationId)`，不使用“最后一条 user message”或单纯 catId；缺 causal identity 的 hydration slot fail closed，显式 post 不算真实输出 | 2026-07-28 |
 
 ## Review Gate
 

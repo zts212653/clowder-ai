@@ -21,6 +21,7 @@ const MAX_VARINT_BYTES = 10; // 64-bit varint 最多 10 字节
 const FIELD_ASSISTANT_MESSAGE = 20;
 const FIELD_FINAL_TEXT = 1;
 const FIELD_FINAL_TEXT_FALLBACK = 8;
+const MAX_PUBLIC_ERROR_TEXT_CHARS = 512;
 
 /** 读 varint，返回 [value, nextOffset]；越界 / 超长抛错（调用方 fail-open）。 */
 function readVarint(buf: Buffer, offset: number): [number, number] {
@@ -88,6 +89,31 @@ export function parseAgyStepFinalText(payload: Buffer): string | null {
     return text.length > 0 ? text : null;
   } catch {
     return null; // fail-open
+  }
+}
+
+/**
+ * AGY `steps.error_details` is a small proto message. Live failures prove field 1 is the
+ * user-facing summary while field 3 carries a private stack trace. Surface only the bounded
+ * summary and fail open on malformed/unknown blobs.
+ */
+export function parseAgyStepErrorDetails(details: Buffer): string | null {
+  try {
+    if (!details || details.length === 0) return null;
+    const fields = scanLengthDelimitedFields(details);
+    const summaryBytes = fields.get(1) ?? fields.get(2);
+    if (!summaryBytes || summaryBytes.length === 0) return null;
+    const summary = summaryBytes
+      .toString('utf8')
+      .replace(/\p{Cc}+/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (summary.length === 0) return null;
+    return summary.length <= MAX_PUBLIC_ERROR_TEXT_CHARS
+      ? summary
+      : `${summary.slice(0, MAX_PUBLIC_ERROR_TEXT_CHARS - 1)}…`;
+  } catch {
+    return null;
   }
 }
 

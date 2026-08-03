@@ -5,6 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import './helpers/setup-cat-registry.js';
 
 const { formatThreadAsMarkdown, formatThreadAsText } = await import('../dist/routes/export.js');
 
@@ -268,6 +269,28 @@ describe('Export Route (endpoint)', () => {
     assert.ok(res.headers['content-type'].includes('text/markdown'));
     assert.ok(res.headers['content-disposition'].includes('thread-thread-1.md'));
     assert.ok(res.body.includes('hello'));
+  });
+
+  test('GET export includes published queued cat speech but excludes queued internal work', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const thread = makeThread();
+    const messageStore = new MessageStore();
+    messageStore.append({
+      ...makeMessage({ catId: 'codex-sol', content: 'published source-cat seed' }),
+      deliveryStatus: 'queued',
+    });
+    messageStore.append({
+      ...makeMessage({ id: 'msg-system', userId: 'system', catId: 'system', content: 'queued internal event' }),
+      deliveryStatus: 'queued',
+    });
+    const app = await buildApp(mockThreadStore({ 'thread-1': thread }), messageStore);
+
+    const res = await app.inject({ method: 'GET', url: '/api/export/thread/thread-1?format=md' });
+
+    assert.equal(res.statusCode, 200);
+    assert.match(res.body, /published source-cat seed/);
+    assert.doesNotMatch(res.body, /queued internal event/);
+    await app.close();
   });
 
   test('GET non-existent thread returns 404', async () => {

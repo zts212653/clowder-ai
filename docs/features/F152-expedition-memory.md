@@ -1,14 +1,16 @@
 ---
 feature_ids: [F152]
-related_features: [F070, F102, F076]
+related_features: [F070, F102, F076, F260, F263]
+related_decisions: [ADR-020, ADR-032]
 topics: [memory, cross-project, bootstrap, knowledge-engineering, onboarding]
 doc_kind: spec
 created: 2026-04-08
+updated: 2026-07-26
 ---
 
 # F152: Expedition Memory — 外部项目记忆冷启动 + 经验回流
 
-> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1 | **Close Gate**: 2026-06-18 rerun complete — 代码链与 close 证物已补齐，仍等待 AC-C5 operator全链路终验
+> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1 | **Close Gate**: 2026-07-26 Phase C durable supply 已补牢（PR #3243）：`generalizable`、candidate queue、approved truth 均跨 rebuild；仅 AC-C5 operator全链路终验待完成。durable truth 归属为个人本地全局层，只有显式 export/share 才进入 repo/shared collection。
 
 ## Why
 
@@ -16,7 +18,7 @@ created: 2026-04-08
 
 Palantir 的核心模式是 FDE——派真人工程师驻场到客户公司，深入理解业务，定制解决方案。本质是 **平台能力 + 驻场人员的业务理解 = 交付价值**。
 
-Cat Café 的猫猫就是 AI 版 FDE：带着知识工程方法论，"部署"到用户的业务系统中，指导和完成开发。AI FDE 比人类 FDE 有一个关键优势——**跨客户知识迁移**：猫在项目 A 学到的领域模式，回流全局层后，去项目 B 的猫直接就能用。人类 FDE 很难做到这种规模化经验复用。
+Clowder AI 的猫猫就是 AI 版 FDE：带着知识工程方法论，"部署"到用户的业务系统中，指导和完成开发。AI FDE 比人类 FDE 有一个关键优势——**跨客户知识迁移**：猫在项目 A 学到的领域模式，回流全局层后，去项目 B 的猫直接就能用。人类 FDE 很难做到这种规模化经验复用。
 
 大量企业已经完成信息化（有系统、有代码、有文档、有流程），但信息化如何与 AI 结合还缺少探索。F152 就是让猫能当 AI FDE 的底层能力——**冷启动理解业务 + 经验跨项目回流**。
 
@@ -35,6 +37,16 @@ F102 已经做完了记忆引擎（6 接口 + SQLite 基座 + 全局/项目层 +
 > operator补充（2026-04-09）："很多企业都完成信息化，但是信息化如何和 AI 结合？未必有探索。"
 >
 > 社区洞察（2026-04-09）："这些小猫可以变为 Palantir 概念里面的 FDE，指导和完成业务系统的开发。"
+
+## User Journey
+
+1. 用户让猫进入一个已有项目；bootstrap 扫描仓库并把项目知识写入该项目唯一的 evidence store。
+2. 猫在工作中产出 lesson / decision。内容默认留在项目层，`generalizable` 未被显式标记时不能进入回流候选。
+3. 用户或猫基于证据显式标记可泛化内容，再走 nominate → review → approve；拒绝后修正来源可重新提名。
+4. 批准内容先脱敏并物化到 `dataDir/distilled-truths` 下的用户个人 durable truth，再由 `GlobalIndexBuilder` 编译进 `global_knowledge.sqlite`。
+5. 后续进入另一个项目时，猫能从全局检索命中这条方法论；普通项目 rebuild、服务重启和全局 rebuild 都不能让它消失。
+
+安静日或没有可泛化经验时不会产生候选。未经显式标记、未通过审核或含项目私有标识的内容不会进入个人全局层；进入 repo/shared collection 还需要额外的显式 export/share。
 
 ## What
 
@@ -187,10 +199,10 @@ interface ScannedEvidence {
 - [x] AC-B11: **摘要卡交互**：扫描完成后推结构化摘要（仓库画像 + 知识覆盖 `kindCoverage` 优先，缺失时 fallback 到 `tierCoverage` + 关键文档 Top N + 风险提示）+ CTA 按钮（搜索 / MemoryHub / 补文档建议）
 - [x] AC-B12: **安全护栏**：禁止 symlink 越界扫描、排除 secrets 路径和二进制大文件、大仓自动 skipSoftClues + 文件数/字节预算超时
 
-### Phase C（Global Lesson Distillation）✅
-- [x] AC-C1: 外部项目的 lesson/decision 可以被标记 `generalizable: true/false`
+### Phase C（Global Lesson Distillation）— 2026-07-09 re-opened
+- [x] AC-C1: 外部项目的 lesson/decision 可以被**持久**标记 `generalizable: true/false`，普通 index rebuild 保留已有标记
 - [x] AC-C2: 默认 `generalizable: false`（fail-closed）
-- [x] AC-C3: `generalizable: true` 的 candidate 走审核流程后才能写入 `global_knowledge.sqlite`
+- [x] AC-C3: `generalizable: true` 的 candidate 持久排队，走审核流程后物化到**用户拥有的本地个人全局 durable truth**，再编译进 `global_knowledge.sqlite`；只有显式 export/share 才进入 repo/shared collection
 - [x] AC-C4: 回流内容自动脱敏（移除项目私有标识）
 - [ ] AC-C5: operator亲手体验一轮完整的"出征→冷启动→干活→经验回流"链路
 
@@ -202,7 +214,7 @@ interface ScannedEvidence {
 | R1 | "别人的项目未必从零开始" — 能吃已有项目 | AC-A1, AC-A3 | test: 对一个普通 Git 仓库运行 scanner | [x] |
 | R2 | 猫去外部项目能快速理解项目现状 | AC-B1, AC-B2 | manual: bootstrap 后猫能回答项目基本问题 | [x] |
 | R3 | "用你们开发其他项目" — 不要求先搭 cat-cafe 标准目录 | AC-A1, AC-A3 | test: 无 docs/ 结构的仓库能正常扫描 | [x] |
-| R4 | 猫踩的坑能带回来下次用 | AC-C1~C4 | manual: 一条经验从外部项目回流到全局层 | [x] |
+| R4 | 猫踩的坑能带回来下次用 | AC-C1~C4 | manual: 一条经验跨 rebuild 回流到全局层 | [ ] |
 | R5 | "代码仓可能和文档分开" — 猫要能识别并提醒 | AC-02 | manual: 猫检测到文档分仓场景时给出建议 | [x] |
 | R6 | "打开某个外部 project 你们这能用吗？怎么提示？" — 老用户能力发现 | AC-B7, AC-B8 | manual: 已有项目打开后收到确认卡提示 | [x] |
 | R7 | "考虑和之前的 bootstrap 联动" — 新项目无缝串联 | AC-B4, AC-B9 | test: ProjectSetupCard 完成后自动触发记忆 bootstrap | [x] |
@@ -212,11 +224,11 @@ interface ScannedEvidence {
 - [x] 每个 AC 都有验证方式
 - [x] 前端需求已准备需求→证据映射表（若适用）
 
-## 当前进度（2026-06-18 close-gate rerun）
+## 当前进度（2026-07-26 durable supply repair）
 
 ### 已确认闭环
 
-- **主功能链已全部合入 main**：Phase 0 / A / B / C 均已 merge，且 F152 相关 hotfix 链已补齐显示层、freshness 读路径、worktree guard 与 intake 回归守护。
+- **历史实现均已合入 main**：Phase 0 / A / B / C 代码与相关 hotfix 已 merge；这只陈述 deploy history，不再等同于 Phase C 产品链有效（2026-07-09 re-audit 已重开 AC-C1/C3）。
 - **当前真相是一套记忆，不是两套记忆**：F102 evidence store 是唯一知识底座；bootstrap summary 只是其上的项目摘要 / 缓存层，不是独立第二套知识系统。
 - **显示层已经与 F102 对齐**：`BootstrapSummaryCard` 现为 `kindCoverage` 优先、`tierCoverage` fallback；只有拿不到 kind 数据时才退回 provenance 分层展示。
 - **freshness 读路径已闭环**：GET `/api/projects/index-state` 现在会在服务端计算 fingerprint，对比存储态后可把旧 summary 正确翻成 `stale`，驱动重建。
@@ -224,8 +236,9 @@ interface ScannedEvidence {
 
 ### 当前不允许宣布 done 的原因
 
+- **AC-C1/C3 已修复**：project rebuild 通过 conflict-update 保留 `generalizable`；candidate queue 落 SQLite；批准结果物化为 `dataDir/distilled-truths` 下的 durable Markdown，再由 `GlobalIndexBuilder` 编译。拒绝候选允许在修正来源后重新提名。
 - **AC-C5 仍未完成**：我们还没有拿到operator亲手走完一轮“出征 → 冷启动 → 干活 → 经验回流”的终验记录。
-- **因此本 feature 现在的真实状态是**：代码完成度已达到 close 前夜，但产品级 feat close 仍 blocked by AC-C5；在 AC-C5 完成前，F152 继续保留在 BACKLOG，不迁入 `docs/features/README.md` 的 done 表。
+- **因此本 feature 现在的真实状态是**：Phase 0/A/B 完成，Phase C durable supply 完成；F152 继续保留在 BACKLOG，等待 AC-C5 产品终验，不能宣布 feature done。
 
 ## Dependencies
 
@@ -264,6 +277,7 @@ interface ScannedEvidence {
 | KD-15 | 老用户"稍后"snooze 机制（7 天冷却）| Maine Coon护栏：不加冷却会反复打扰老用户 | 2026-04-10 |
 | KD-16 | Phase B UX 必须沿用 coral 色系（cocreator-primary #e29578），不用紫色；视觉衔接 ProjectSetupCard（PR #299）画风 | operator审核设计稿时指出：实际 UI 是 coral 色系（Anthropic 品牌色），.pen 设计稿的紫色只是 spec，实现必须对齐已有代码 | 2026-04-10 |
 | KD-17 | Phase B review 时Maine Coon必须启动 dev 截图验证前端，不能只看代码 | operator要求：前端改动必须实际打开浏览器验证，防止"代码对了但 UI 离谱" | 2026-04-10 |
+| KD-18 | 批准后的跨项目方法论默认进入**用户本地个人全局 truth collection**；进入 Clowder AI repo/shared collection 必须显式 export/share；禁止默认双写 | operator 2026-07-10 选择方案 A；符合 ADR-032 用户数据主权、外部项目隐私与 W5，且避免个人层/repo 层双真相源 | 2026-07-10 |
 
 ## Review Gate
 

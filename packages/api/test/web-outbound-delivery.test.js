@@ -25,7 +25,7 @@ describe('deliverOutboundFromWeb (F088 ISSUE-15)', () => {
 
   beforeEach(() => {
     deliverCalls = [];
-    streamCalls = { start: [], chunk: [], end: [], cleanup: [] };
+    streamCalls = { start: [], chunk: [], end: [], cleanup: [], catching: [], blocked: [] };
 
     mockOutboundHook = {
       async deliver(threadId, content, catId, richBlocks, threadMeta) {
@@ -45,6 +45,12 @@ describe('deliverOutboundFromWeb (F088 ISSUE-15)', () => {
       },
       async cleanupPlaceholders(threadId, invocationId) {
         streamCalls.cleanup.push({ threadId, invocationId });
+      },
+      async onClosureCatchingUp(threadId, catId, invocationId) {
+        streamCalls.catching.push({ threadId, catId, invocationId });
+      },
+      async onClosureBlocked(threadId, catId, reason, invocationId, recoveryUrl) {
+        streamCalls.blocked.push({ threadId, catId, reason, invocationId, recoveryUrl });
       },
     };
   });
@@ -88,6 +94,155 @@ describe('deliverOutboundFromWeb (F088 ISSUE-15)', () => {
     assert.equal(deliverCalls[1].content, 'Second cat');
     assert.equal(deliverCalls[1].catId, 'codex');
   });
+
+  it('F254 Phase E never delivers a superseded draft to connector hooks', async () => {
+    const opts = makeOpts({ outboundHook: mockOutboundHook, streamingHook: mockStreamingHook });
+    const turns = [{ catId: 'opus', textParts: ['known-stale answer'] }];
+    const ctx = {
+      failed: false,
+      errors: [],
+      outputCommitDecisions: {
+        opus: {
+          kind: 'superseded_positive_stale',
+          closureId: 'closure-1',
+          requiredFrontierMessageId: 'msg-2',
+        },
+      },
+    };
+
+    await deliverOutboundFromWeb(
+      't-1',
+      'opus',
+      'inv-1',
+      ['known-stale answer'],
+      turns,
+      ctx,
+      undefined,
+      opts,
+      noopLog(),
+    );
+
+    assert.equal(deliverCalls.length, 0);
+    assert.deepEqual(streamCalls.end, []);
+    assert.deepEqual(streamCalls.catching, [{ threadId: 't-1', catId: 'opus', invocationId: 'inv-1' }]);
+    assert.equal(streamCalls.cleanup.length, 0, 'catching-up placeholder must survive a superseded attempt');
+  });
+
+  it('ADR-042 delivers a published-with-unseen answer and closes its stream normally', async () => {
+    const opts = makeOpts({ outboundHook: mockOutboundHook, streamingHook: mockStreamingHook });
+    const ctx = {
+      failed: false,
+      errors: [],
+      outputCommitDecisions: {
+        opus: {
+          kind: 'published_with_unseen',
+          messageId: 'msg-published',
+          lineageId: 'msg-published',
+          offeredSupplementId: 'f254-supplement:msg-published:1',
+          requiredFrontierMessageId: 'msg-newer',
+        },
+      },
+    };
+
+    await deliverOutboundFromWeb(
+      't-1',
+      'opus',
+      'inv-1',
+      ['published answer'],
+      [{ catId: 'opus', textParts: ['published answer'] }],
+      ctx,
+      undefined,
+      opts,
+      noopLog(),
+    );
+
+    assert.deepEqual(
+      deliverCalls.map(({ content, catId }) => ({ content, catId })),
+      [{ content: 'published answer', catId: 'opus' }],
+    );
+    assert.deepEqual(streamCalls.end, [{ threadId: 't-1', text: 'published answer', invocationId: 'inv-1' }]);
+    assert.equal(streamCalls.cleanup.length, 1);
+    assert.deepEqual(streamCalls.catching, []);
+  });
+
+  it('F254 Phase E projects a blocked output as terminal connector state', async () => {
+    const opts = makeOpts({ outboundHook: mockOutboundHook, streamingHook: mockStreamingHook });
+    const ctx = {
+      failed: false,
+      errors: [],
+      outputCommitDecisions: {
+        opus: { kind: 'blocked_known_closure', closureId: 'closure-1', reason: 'commit_recheck_exhausted' },
+      },
+    };
+
+    await deliverOutboundFromWeb(
+      't-1',
+      'opus',
+      'inv-1',
+      ['blocked draft'],
+      [{ catId: 'opus', textParts: ['blocked draft'] }],
+      ctx,
+      undefined,
+      opts,
+      noopLog(),
+    );
+
+    assert.equal(deliverCalls.length, 0);
+    assert.deepEqual(streamCalls.blocked, [
+      {
+        threadId: 't-1',
+        catId: 'opus',
+        reason: 'commit_recheck_exhausted',
+        invocationId: 'inv-1',
+        recoveryUrl: undefined,
+      },
+    ]);
+  });
+
+  for (const scenario of [
+    {
+      name: 'catching-up',
+      decision: {
+        kind: 'superseded_positive_stale',
+        closureId: 'closure-codex',
+        requiredFrontierMessageId: 'msg-newer',
+      },
+      projectedCalls: 'catching',
+    },
+    {
+      name: 'blocked',
+      decision: {
+        kind: 'blocked_known_closure',
+        closureId: 'closure-codex',
+        reason: 'attempt_budget_exhausted',
+      },
+      projectedCalls: 'blocked',
+    },
+  ]) {
+    it(`F254 Phase E projects a non-primary ${scenario.name} output under its owner cat`, async () => {
+      const opts = makeOpts({ outboundHook: mockOutboundHook, streamingHook: mockStreamingHook });
+      const ctx = {
+        failed: false,
+        errors: [],
+        outputCommitDecisions: { codex: scenario.decision },
+      };
+
+      await deliverOutboundFromWeb(
+        't-1',
+        'opus',
+        'inv-multi',
+        ['withheld codex draft'],
+        [{ catId: 'codex', textParts: ['withheld codex draft'] }],
+        ctx,
+        undefined,
+        opts,
+        noopLog(),
+      );
+
+      assert.equal(streamCalls[scenario.projectedCalls].length, 1);
+      assert.equal(streamCalls[scenario.projectedCalls][0].catId, 'codex');
+    });
+  }
 
   it('uses turn-based aggregate for stream end when a later turn was replace-mode rewritten', async () => {
     const opts = makeOpts({

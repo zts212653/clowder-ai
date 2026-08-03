@@ -304,7 +304,13 @@ export class TranscriptReader {
    * Read ALL events from a sealed session transcript (no limit).
    * F065 Phase C: needed for handoff digest generation on long sessions.
    */
-  async readAllEvents(sessionId: string, threadId: string, catId: string): Promise<TranscriptEvent[]> {
+  async readAllEvents(
+    sessionId: string,
+    threadId: string,
+    catId: string,
+    signal?: AbortSignal,
+  ): Promise<TranscriptEvent[]> {
+    signal?.throwIfAborted();
     const jsonlPath = join(this.sessionDir(threadId, catId, sessionId), 'events.jsonl');
 
     try {
@@ -315,11 +321,12 @@ export class TranscriptReader {
 
     const events: TranscriptEvent[] = [];
     const rl = createInterface({
-      input: createReadStream(jsonlPath, 'utf-8'),
+      input: createReadStream(jsonlPath, { encoding: 'utf-8', signal }),
       crlfDelay: Infinity,
     });
 
     for await (const line of rl) {
+      signal?.throwIfAborted();
       if (line.trim().length === 0) continue;
       try {
         events.push(JSON.parse(line) as TranscriptEvent);

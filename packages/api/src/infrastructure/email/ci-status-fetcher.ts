@@ -5,19 +5,38 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { buildGhCliEnv, withHiddenGhCliWindow } from '../github/gh-cli-env.js';
-import type { CiBucket, CiCheckDetail, CiPollResult } from './CiCdRouter.js';
+import type { CiBucket, CiCheckDetail, CiPollResult } from './ci-cd-contract.js';
+import { enrichGitHubExecutionFailures } from './ci-execution-failure.js';
+
+export {
+  classifyGitHubExecutionFailure,
+  type GitHubExecutionFailureEvidence,
+} from './ci-execution-failure.js';
 
 const execFileAsync = promisify(execFile);
 const GH_TIMEOUT_MS = 15_000;
 
+export type GhExecFileAsync = (file: string, args: readonly string[], options: unknown) => Promise<{ stdout: string }>;
+
 export interface FetchPrCiStatusOptions {
   readonly ghToken?: string;
+  /** Test seam at the real gh JSON boundary; production always uses node:child_process. */
+  readonly execFileAsync?: GhExecFileAsync;
 }
 
 type MinimalLog = {
   warn: (...args: unknown[]) => void;
   debug?: (...args: unknown[]) => void;
 };
+
+async function executeGh(args: readonly string[], options: FetchPrCiStatusOptions): Promise<{ stdout: string }> {
+  const execute = options.execFileAsync ?? (execFileAsync as unknown as GhExecFileAsync);
+  return execute(
+    'gh',
+    args,
+    withHiddenGhCliWindow({ timeout: GH_TIMEOUT_MS, env: buildGhCliEnv({ token: options.ghToken }) }),
+  );
+}
 
 export async function fetchPrCiStatus(
   repoFullName: string,
@@ -27,10 +46,17 @@ export async function fetchPrCiStatus(
 ): Promise<CiPollResult | null> {
   let prViewJson: string;
   try {
-    const { stdout } = await execFileAsync(
-      'gh',
-      ['pr', 'view', String(prNumber), '-R', repoFullName, '--json', 'headRefOid,state,mergedAt,statusCheckRollup'],
-      withHiddenGhCliWindow({ timeout: GH_TIMEOUT_MS, env: buildGhCliEnv({ token: options.ghToken }) }),
+    const { stdout } = await executeGh(
+      [
+        'pr',
+        'view',
+        String(prNumber),
+        '-R',
+        repoFullName,
+        '--json',
+        'headRefOid,state,mergedAt,mergedBy,statusCheckRollup',
+      ],
+      options,
     );
     prViewJson = stdout;
   } catch (err) {
@@ -42,6 +68,7 @@ export async function fetchPrCiStatus(
     headRefOid: string;
     state: string;
     mergedAt: string | null;
+    mergedBy: { login: string } | null;
     statusCheckRollup: Array<{ name: string; status: string; conclusion: string; __typename: string }>;
   };
   try {
@@ -53,7 +80,15 @@ export async function fetchPrCiStatus(
 
   const prState = normalizePrState(prView.state, prView.mergedAt);
   if (prState === 'merged' || prState === 'closed') {
-    return { repoFullName, prNumber, headSha: prView.headRefOid, prState, aggregateBucket: 'pending', checks: [] };
+    return {
+      repoFullName,
+      prNumber,
+      headSha: prView.headRefOid,
+      prState,
+      aggregateBucket: 'pending',
+      checks: [],
+      mergedByLogin: prView.mergedBy?.login,
+    };
   }
 
   const rollup = prView.statusCheckRollup ?? [];
@@ -61,7 +96,7 @@ export async function fetchPrCiStatus(
 
   let checks: CiCheckDetail[] = [];
   if (aggregateBucket !== 'pending') {
-    checks = await fetchCheckDetails(repoFullName, prNumber, log, options);
+    checks = await fetchCheckDetails(repoFullName, prNumber, prView.headRefOid, log, options);
   }
 
   return { repoFullName, prNumber, headSha: prView.headRefOid, prState, aggregateBucket, checks };
@@ -70,6 +105,7 @@ export async function fetchPrCiStatus(
 async function fetchCheckDetails(
   repoFullName: string,
   prNumber: number,
+  headSha: string,
   log: MinimalLog,
   options: FetchPrCiStatusOptions,
 ): Promise<CiCheckDetail[]> {
@@ -86,14 +122,7 @@ async function fetchCheckDetails(
       ];
       if (requiredFlag) args.push(requiredFlag);
 
-      const { stdout } = await execFileAsync(
-        'gh',
-        args,
-        withHiddenGhCliWindow({
-          timeout: GH_TIMEOUT_MS,
-          env: buildGhCliEnv({ token: options.ghToken }),
-        }),
-      );
+      const { stdout } = await executeGh(args, options);
       const parsed: Array<{ name: string; bucket: string; link?: string; workflow?: string; description?: string }> =
         JSON.parse(stdout);
 
@@ -108,17 +137,29 @@ async function fetchCheckDetails(
         if (requiredFlag && !mapped.some((c) => c.bucket === 'fail')) {
           continue;
         }
-        return mapped;
+        return enrichGitHubExecutionFailures({
+          repoFullName,
+          headSha,
+          checks: mapped,
+          ghApiJson: (path) => ghApiJson(path, options),
+          warn: (message) => log.warn(message),
+        });
       }
 
       if (!requiredFlag) {
-        return parsed.map((c) => ({
-          name: c.name,
-          bucket: normalizeBucket(c.bucket),
-          link: c.link,
-          workflow: c.workflow,
-          description: c.description,
-        }));
+        return enrichGitHubExecutionFailures({
+          repoFullName,
+          headSha,
+          checks: parsed.map((c) => ({
+            name: c.name,
+            bucket: normalizeBucket(c.bucket),
+            link: c.link,
+            workflow: c.workflow,
+            description: c.description,
+          })),
+          ghApiJson: (path) => ghApiJson(path, options),
+          warn: (message) => log.warn(message),
+        });
       }
     } catch (err) {
       if (requiredFlag) continue;
@@ -127,6 +168,11 @@ async function fetchCheckDetails(
     }
   }
   return [];
+}
+
+async function ghApiJson<T>(path: string, options: FetchPrCiStatusOptions): Promise<T> {
+  const { stdout } = await executeGh(['api', path], options);
+  return JSON.parse(stdout) as T;
 }
 
 export function normalizePrState(state: string, mergedAt: string | null): 'open' | 'merged' | 'closed' {

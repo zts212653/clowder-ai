@@ -33,10 +33,11 @@ describe('createEvalDomainNDaySpec — execute (Redis last-dispatch update)', ()
     assert.ok(item, 'eval:friction must be in workItems');
 
     const deliverMock = mock.fn(async () => 'msg_nday_001');
+    const triggerMock = mock.fn();
     const ctx = {
       assignedCatId: null,
       deliver: deliverMock,
-      invokeTrigger: { trigger: mock.fn() },
+      invokeTrigger: { trigger: triggerMock },
     };
 
     const beforeMs = Date.now();
@@ -51,6 +52,12 @@ describe('createEvalDomainNDaySpec — execute (Redis last-dispatch update)', ()
       storedMs >= beforeMs && storedMs <= afterMs,
       `stored timestamp ${storedMs} must be within [${beforeMs}, ${afterMs}]`,
     );
+    const triggerArgs = triggerMock.mock.calls[0].arguments;
+    assert.equal(triggerArgs[5], undefined);
+    assert.deepEqual(triggerArgs[6], {
+      sourceCategory: 'scheduled',
+      reason: 'N-day eval: eval:friction',
+    });
   });
 
   it('execute does NOT update Redis when deliver is not called (no ctx.deliver)', async () => {

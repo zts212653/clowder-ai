@@ -7,7 +7,7 @@
  * disappears.
  */
 
-import { spawn } from 'node:child_process';
+import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const IS_WINDOWS = process.platform === 'win32';
@@ -57,26 +57,7 @@ async function main(): Promise<void> {
   const pollMs = parsePositiveInt(process.env.CAT_CAFE_SUPERVISOR_POLL_MS, DEFAULT_POLL_MS);
   const killGraceMs = parsePositiveInt(process.env.CAT_CAFE_SUPERVISOR_KILL_GRACE_MS, DEFAULT_KILL_GRACE_MS);
 
-  const child = spawn(command, args, {
-    detached: !IS_WINDOWS,
-    // Incident 2026-05-29 P1 (cloud codex review): stdin must be 'pipe' so the
-    // supervisor can forward its own stdin (the prompt written by spawnCli) to the
-    // supervised child. Previously 'ignore' → stdin-backed prompts (codex `-- -`)
-    // reached the supervisor but never the real CLI → empty prompt in production.
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-
-  // Forward supervisor stdin → child stdin (prompt delivery). When spawnCli did not
-  // provide stdinInput, the supervisor's own stdin is /dev/null → child sees EOF
-  // (harmless for argv-prompt CLIs like Claude/Gemini). EPIPE guard: child may exit
-  // before consuming all input.
-  if (child.stdin) {
-    child.stdin.on('error', () => {});
-    process.stdin.pipe(child.stdin);
-  }
-  child.stdout?.pipe(process.stdout);
-  child.stderr?.pipe(process.stderr);
-
+  let child: ChildProcessWithoutNullStreams | undefined;
   let childExited = false;
   let terminating = false;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
@@ -88,7 +69,7 @@ async function main(): Promise<void> {
   };
 
   const signalChild = (signal: NodeJS.Signals): void => {
-    if (child.pid === undefined) return;
+    if (child?.pid === undefined) return;
     try {
       if (!IS_WINDOWS) {
         process.kill(-child.pid, signal);
@@ -112,6 +93,44 @@ async function main(): Promise<void> {
     killTimer.unref();
   };
 
+  // Codex treats SIGINT as a cooperative cancellation request. Forward it unchanged
+  // without entering the supervisor's terminate state so a later SIGTERM can still
+  // escalate the same process group if the CLI ignores the interrupt.
+  const interruptChild = (): void => {
+    if (childExited) return;
+    signalChild('SIGINT');
+  };
+
+  // Install handlers before spawning the child. The child can become runnable on
+  // another CPU immediately after spawn() returns; if it publishes readiness before
+  // these handlers exist, an immediate Cancel uses Node's default signal action and
+  // exits the supervisor without forwarding anything to the child process group.
+  process.once('SIGINT', interruptChild);
+  process.once('SIGTERM', terminateChild);
+  process.once('SIGHUP', terminateChild);
+
+  process.once('exit', () => {
+    if (!childExited) signalChild('SIGKILL');
+  });
+
+  child = spawn(command, args, {
+    detached: !IS_WINDOWS,
+    // Incident 2026-05-29 P1 (cloud codex review): stdin must be 'pipe' so the
+    // supervisor can forward its own stdin (the prompt written by spawnCli) to the
+    // supervised child. Previously 'ignore' → stdin-backed prompts (codex `-- -`)
+    // reached the supervisor but never the real CLI → empty prompt in production.
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  // Forward supervisor stdin → child stdin (prompt delivery). When spawnCli did not
+  // provide stdinInput, the supervisor's own stdin is /dev/null → child sees EOF
+  // (harmless for argv-prompt CLIs like Claude/Gemini). EPIPE guard: child may exit
+  // before consuming all input.
+  child.stdin.on('error', () => {});
+  process.stdin.pipe(child.stdin);
+  child.stdout.pipe(process.stdout);
+  child.stderr.pipe(process.stderr);
+
   child.once('error', (err) => {
     clearTimers();
     console.error(`[cat-cafe-cli-supervisor] spawn failed: ${err.message}`);
@@ -128,14 +147,6 @@ async function main(): Promise<void> {
     if (isOriginalParentGone(parentPid)) terminateChild();
   }, pollMs);
   parentTimer.unref();
-
-  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
-    process.once(signal, () => terminateChild());
-  }
-
-  process.once('exit', () => {
-    if (!childExited) signalChild('SIGKILL');
-  });
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

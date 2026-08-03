@@ -50,6 +50,8 @@ export interface CapabilityBoardItem {
   pluginId?: string;
   mountPaths?: string[];
   requiresMcp?: Array<{ id: string; status: 'ready' | 'missing' | 'unresolved' }>;
+  /** Whether the selected project has its own MCP server override. */
+  hasOverride?: boolean;
   /** Which external config file this MCP was discovered from (e.g. "claude"). */
   discoveredFrom?: string;
 }

@@ -11,16 +11,16 @@ created: 2026-04-01
 
 > **Status**: done | **Owner**: Ragdoll | **Priority**: P1
 >
-> 在小艺开放平台创建 OpenClaw 模式智能体，由 Cat Cafe 通过 WebSocket 对接华为 HAG，
+> 在小艺开放平台创建 OpenClaw 模式智能体，由 Clowder AI 通过 WebSocket 对接华为 HAG，
 > 用户在华为手机上通过小艺 APP 即可与猫猫对话。
 >
-> Cat Cafe 不是 OpenClaw 实例 — 它是对接小艺 OpenClaw 模式协议的 connector adapter。
+> Clowder AI 不是 OpenClaw 实例 — 它是对接小艺 OpenClaw 模式协议的 connector adapter。
 
 ## Why
 
-Cat Cafe 已通过 F088/F132/F137 接入飞书、Telegram、DingTalk、WeCom、WeChat 五个渠道。
+Clowder AI 已通过 F088/F132/F137 接入飞书、Telegram、DingTalk、WeCom、WeChat 五个渠道。
 华为小艺是 HarmonyOS 设备的原生 AI 助手，覆盖手机/平板/手表/车机。
-接入小艺渠道意味着 Cat Cafe 的猫猫可以在**所有华为设备上**被用户直接使用。
+接入小艺渠道意味着 Clowder AI 的猫猫可以在**所有华为设备上**被用户直接使用。
 
 小艺开放平台提供两种第三方智能体接入模式：
 - **多Agents模式**（原 A2A 模式）：必须绑定华为 LLM（DeepSeek/盘古）作为编排中间层
@@ -29,7 +29,7 @@ Cat Cafe 已通过 F088/F132/F137 接入飞书、Telegram、DingTalk、WeCom、W
 选择对接 OpenClaw 模式的理由：
 1. 直连华为 HAG，无 LLM 中间层 → 低延迟、完全可控
 2. 协议已知 — 华为开发者文档 + `@ynhcj/xiaoyi` npm 参考实现
-3. Cat Cafe 直接作为 WebSocket 客户端连接 HAG，用户无需额外部署
+3. Clowder AI 直接作为 WebSocket 客户端连接 HAG，用户无需额外部署
 
 **trade-off**：OpenClaw 模式不支持快捷指令、端侧插件、账号绑定、卡片等平台侧高级功能。
 MVP 聚焦文本对话链路，这些高级功能不在本 feature 范围内。
@@ -39,7 +39,7 @@ MVP 聚焦文本对话链路，这些高级功能不在本 feature 范围内。
 ### 架构
 
 ```
-用户 → 小艺 APP → 华为 HAG Server ←──WebSocket──→ XiaoYiAdapter (Cat Cafe)
+用户 → 小艺 APP → 华为 HAG Server ←──WebSocket──→ XiaoYiAdapter (Clowder AI)
                   (wss://hag.cloud.huawei.com        │
                    /openclaw/v1/ws/link)              ├→ Connector Gateway
                                                       │   ├→ Principal Link
@@ -48,13 +48,13 @@ MVP 聚焦文本对话链路，这些高级功能不在本 feature 范围内。
                                                       └→ Agent Router → Cat Agents
 ```
 
-连接方向：**Cat Cafe 主动连接华为 HAG**（类似 DingTalk Stream 模式）。
+连接方向：**Clowder AI 主动连接华为 HAG**（类似 DingTalk Stream 模式）。
 
 ### 核心 ID
 
 | ID | 来源 | 生命周期 | 用途 |
 |----|------|---------|------|
-| `params.sessionId` | 华为 HAG 下发 | 跨 app 重启稳定 | 对话标识 → 映射到 Cat Cafe thread |
+| `params.sessionId` | 华为 HAG 下发 | 跨 app 重启稳定 | 对话标识 → 映射到 Clowder AI thread |
 | `msg.sessionId`（顶层） | 华为 HAG 下发 | **每次开 app 刷新** | **不用！** 不稳定，已知坑（office-claw P1-1） |
 | `params.id`（taskId） | 华为 HAG 下发 | 每条消息一个 | 回复路由 — 出站消息必须带对应 taskId |
 | `agentId` | 用户在小艺平台配置 | 永久 | 标识智能体 + 用于认证 + externalChatId 命名空间 |
@@ -166,7 +166,7 @@ HAG app 对 artifact 的 `append` 和同一 artifactId 多次更新的处理存�
 **多猫投递**（append 累积模型）：
 ```
 用户发消息 → HAG 下发 message/stream (taskId=T1)
-Cat Cafe 路由给猫 A + 猫 B:
+Clowder AI 路由给猫 A + 猫 B:
 
 立即响应:
   → status-update(working)
@@ -206,7 +206,7 @@ onDeliveryBatchDone(chainDone=true):
 
 ### Phase A: P0 MVP
 
-**目标**：跑通小艺↔Cat Cafe 文本对话链路。
+**目标**：跑通小艺↔Clowder AI 文本对话链路。
 
 1. **XiaoYiAdapter** — 新增 connector adapter
    - 实现 `IStreamableOutboundAdapter`（`sendPlaceholder`/`editMessage`/`deleteMessage` 为 no-op，仅 `sendReply` 投递内容）
@@ -277,7 +277,7 @@ onDeliveryBatchDone(chainDone=true):
 | # | Decision | Rationale | Date |
 |---|----------|-----------|------|
 | 1 | 选择 OpenClaw 模式而非多Agents模式 | 无 LLM 中间层，直连低延迟 | 2026-04-01 |
-| 2 | Cat Cafe 内置适配而非部署 OpenClaw 实例 | 减少用户运维负担，一跳直连 | 2026-04-01 |
+| 2 | Clowder AI 内置适配而非部署 OpenClaw 实例 | 减少用户运维负担，一跳直连 | 2026-04-01 |
 | 3 | `externalSenderId` 绑定 `owner:{agentId}` | OpenClaw 无用户级标识，所有对话归属 connector 配置者 | 2026-04-01 |
 | 4 | 使用 `params.sessionId` 而非顶层 `msg.sessionId` | 顶层 sessionId 每次打开 app 刷新；params 内的跨会话稳定（office-claw P1-1 实测验证） | 2026-04-01 |
 | 5 | 不做多小艺 agent 接入 | 单账号单 agent，scope 聚焦 | 2026-04-01 |

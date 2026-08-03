@@ -724,8 +724,8 @@ describe('background thread socket handling', () => {
     });
   });
 
-  describe('F148: context briefing system_info — suppressed from user timeline', () => {
-    it('suppresses context_briefing from user timeline (internal routing context for cats)', () => {
+  describe('F148: context briefing system_info — visible timeline projection', () => {
+    it('projects a typed context_briefing card into the background thread timeline', () => {
       const now = Date.now();
 
       simulateBackgroundMessage({
@@ -741,6 +741,7 @@ describe('background thread socket handling', () => {
             origin: 'briefing',
             timestamp: now,
             extra: {
+              systemKind: 'context_briefing',
               rich: {
                 v: 1,
                 blocks: [
@@ -760,11 +761,19 @@ describe('background thread socket handling', () => {
       });
 
       const ts = useChatStore.getState().getThreadState('thread-bg');
-      // Briefing is consumed silently — no message added to user-facing store
-      expect(ts.messages).toHaveLength(0);
+      expect(ts.messages).toHaveLength(1);
+      expect(ts.messages[0]).toMatchObject({
+        id: 'briefing-msg-1',
+        type: 'system',
+        origin: 'briefing',
+        extra: {
+          systemKind: 'context_briefing',
+          rich: { blocks: [expect.objectContaining({ id: 'briefing-1', kind: 'card' })] },
+        },
+      });
     });
 
-    it('also suppresses incomplete briefing payloads (no id) from user timeline', () => {
+    it('ignores an incomplete briefing payload without a stored message id', () => {
       const now = Date.now();
 
       simulateBackgroundMessage({
@@ -784,7 +793,6 @@ describe('background thread socket handling', () => {
       });
 
       const ts = useChatStore.getState().getThreadState('thread-bg');
-      // Even incomplete briefing payloads are suppressed — they are internal routing context
       expect(ts.messages).toHaveLength(0);
     });
   });
@@ -1060,6 +1068,22 @@ describe('background thread socket handling', () => {
       expect(ts.catStatuses.opus).toBe('streaming');
     });
 
+    it('preserves the complete tool input behind the collapsed tool row', () => {
+      const tail = 'TOOL_INPUT_TAIL_SENTINEL';
+      simulateBackgroundMessage({
+        type: 'tool_use',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        toolName: 'Edit',
+        toolInput: { file_path: 'src/example.ts', new_string: `${'x'.repeat(260)}${tail}` },
+        timestamp: Date.now(),
+      });
+
+      const event = useChatStore.getState().getThreadState('thread-bg').messages[0]?.toolEvents?.[0];
+      expect(event?.detail).toContain(tail);
+      expect(JSON.parse(event?.detail ?? '{}')).toMatchObject({ file_path: 'src/example.ts' });
+    });
+
     it('preserves tool_result as collapsed tool event on assistant message', () => {
       const now = Date.now();
       simulateBackgroundMessage({
@@ -1078,6 +1102,61 @@ describe('background thread socket handling', () => {
       expect(ts.messages[0]?.toolEvents?.[0]?.type).toBe('tool_result');
       expect(ts.messages[0]?.toolEvents?.[0]?.label).toContain('opus ← result');
       expect(ts.catStatuses.opus).toBe('streaming');
+    });
+
+    it('preserves the complete tool result behind the collapsed tool row', () => {
+      const tail = 'TOOL_RESULT_TAIL_SENTINEL';
+      simulateBackgroundMessage({
+        type: 'tool_result',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: `${'line\n'.repeat(80)}${tail}`,
+        timestamp: Date.now(),
+      });
+
+      const event = useChatStore.getState().getThreadState('thread-bg').messages[0]?.toolEvents?.[0];
+      expect(event?.detail).toContain(tail);
+    });
+
+    it('preserves recall-meta outside compacted visible tool_result detail', () => {
+      const now = Date.now();
+      const meta =
+        '<recall-meta>{"resultStatus":"overflow","resultCount":12,"artifactRef":{"path":"/tmp/search.txt"}}</recall-meta>';
+      simulateBackgroundMessage({
+        type: 'tool_result',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: [
+          'Evidence search request failed: Error: result exceeds maximum allowed tokens.',
+          'Full result saved to /tmp/search.txt',
+          'preview line 1',
+          'preview line 2',
+          'preview line 3',
+          meta,
+        ].join('\n'),
+        timestamp: now,
+      });
+
+      const event = useChatStore.getState().getThreadState('thread-bg').messages[0]?.toolEvents?.[0];
+      expect(event?.detail).not.toContain('<recall-meta>');
+      expect(event?.resultMeta).toBe(meta);
+    });
+
+    it('strips recall-meta from short visible tool_result detail', () => {
+      const now = Date.now();
+      const meta = '<recall-meta>{"resultStatus":"error","errorMessage":"graph failed"}</recall-meta>';
+      simulateBackgroundMessage({
+        type: 'tool_result',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: ['Graph resolve failed: graph failed', meta].join('\n'),
+        timestamp: now,
+      });
+
+      const event = useChatStore.getState().getThreadState('thread-bg').messages[0]?.toolEvents?.[0];
+      expect(event?.detail).toBe('Graph resolve failed: graph failed');
+      expect(event?.detail).not.toContain('<recall-meta>');
+      expect(event?.resultMeta).toBe(meta);
     });
 
     it('tool_use + tool_result merge into one assistant message with two tool events', () => {
@@ -2326,6 +2405,47 @@ describe('background thread socket handling', () => {
         origin: 'stream',
         extra: { stream: { invocationId: 'inv-canon-3' } },
       });
+    });
+
+    it('bg stream preserves typed child execution identity before the thread is opened', () => {
+      const now = Date.now();
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'opus',
+        threadId: 'thread-bg-execution-kind',
+        content: 'ordinary body with a guard-assisted route',
+        invocationId: 'parent-execution',
+        turnInvocationId: 'child-ordinary',
+        extra: {
+          turnExecution: {
+            invocationId: 'child-ordinary',
+            parentInvocationId: 'parent-execution',
+            executionKind: 'ordinary',
+          },
+          auxiliaryTurnExecutions: [
+            {
+              invocationId: 'child-guard',
+              parentInvocationId: 'parent-execution',
+              executionKind: 'routing_guard',
+            },
+          ],
+        },
+        timestamp: now,
+      });
+
+      const [message] = useChatStore.getState().getThreadState('thread-bg-execution-kind').messages;
+      expect(message.extra?.turnExecution).toEqual({
+        invocationId: 'child-ordinary',
+        parentInvocationId: 'parent-execution',
+        executionKind: 'ordinary',
+      });
+      expect(message.extra?.auxiliaryTurnExecutions).toEqual([
+        {
+          invocationId: 'child-guard',
+          parentInvocationId: 'parent-execution',
+          executionKind: 'routing_guard',
+        },
+      ]);
     });
 
     it('bg stream chunk with canonical invocationId appends to existing bubble via reducer', () => {

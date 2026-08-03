@@ -55,6 +55,20 @@ export interface UnseenResult {
   count: number;
   senders: string[];
   maxMessageId: string;
+  /**
+   * Stable, content-free identity for coalescing repeated notice attempts when
+   * maxMessageId is only a synthetic sortable cursor. Undefined preserves the
+   * legacy ordered-frontier coalescing path. This key is never receipt proof.
+   */
+  noticeDedupKey?: string;
+  /**
+   * Exact durable message identities represented by maxMessageId when the
+   * frontier itself is synthetic (for example, a queued-only fallback).
+   * Undefined preserves the legacy invariant that maxMessageId is exact.
+   * An explicit empty list means correlation identity is unavailable and
+   * receipt projection must fail closed.
+   */
+  correlationMessageIds?: string[];
 }
 
 // --- Output ---
@@ -148,7 +162,8 @@ export class FreshnessNoticeService {
     const text =
       `📬 提醒：你有 ${unseen.count} 条未读消息（当前 thread）\n` +
       `来自：${unseen.senders.join(', ')}\n` +
-      `调 get_thread_context 查看完整内容`;
+      `位置：threadId=${threadId}; messageId=${unseen.maxMessageId}\n` +
+      `调 get_thread_context({ threadId: "${threadId}" }) 查看完整内容`;
 
     return { text, noticeId };
   }
@@ -200,6 +215,10 @@ export class FreshnessNoticeService {
     }
     const senders = [...senderSet];
     const noticeIds = unresolved.map((n) => n.noticeId);
+    const latestMessageId = unresolved.reduce(
+      (latest, notice) => (notice.maxMessageId > latest ? notice.maxMessageId : latest),
+      '',
+    );
 
     // Record notice_deferred event (cat chose to hold despite unresolved notices)
     await this.eventLog.append({
@@ -219,7 +238,8 @@ export class FreshnessNoticeService {
     const text =
       `⚠️ 你这轮有 ${unresolved.length} 条未读消息未查看\n` +
       `来自：${senders.join(', ')}\n` +
-      `建议调 get_thread_context 先看看再退出`;
+      `位置：threadId=${threadId}; messageId=${latestMessageId}\n` +
+      `建议调 get_thread_context({ threadId: "${threadId}" }) 先看看再退出`;
 
     return { text };
   }

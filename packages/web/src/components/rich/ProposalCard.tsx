@@ -322,6 +322,12 @@ export function ProposalCard({ block }: ProposalCardProps) {
           已驳回
         </div>
       )}
+      {status === 'withdrawn' && (
+        <div className="mt-2 flex items-center gap-1 text-xs text-cafe-secondary">
+          <CafeIcon name="cross" className="h-3.5 w-3.5 shrink-0" />
+          已撤回（由发起猫）
+        </div>
+      )}
       {error && <div className="mt-1 text-xs text-conn-red-text">{error}</div>}
     </div>
   );

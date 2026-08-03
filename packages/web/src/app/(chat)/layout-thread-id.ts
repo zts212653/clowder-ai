@@ -3,7 +3,7 @@ export function resolveLayoutThreadId(
   browserThreadId: string | null,
   immediateBrowserThreadId: string | null = null,
 ): string {
-  if (browserThreadId !== null) return browserThreadId;
   if (immediateBrowserThreadId !== null) return immediateBrowserThreadId;
+  if (browserThreadId !== null) return browserThreadId;
   return pathnameThreadId;
 }

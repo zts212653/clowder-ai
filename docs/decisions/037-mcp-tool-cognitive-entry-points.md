@@ -3,7 +3,7 @@ topics: [mcp, prompt-engineering, tool-discovery, skills]
 doc_kind: decision
 created: 2026-06-05
 status: accepted
-related: [ADR-030]
+related: [ADR-030, ADR-044]
 ---
 
 # ADR-037: MCP Tool Cognitive Entry Points

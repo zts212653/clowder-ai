@@ -508,6 +508,30 @@ describe('GET /api/concierge/peek', () => {
     assert.equal(target.id, targetId);
   });
 
+  it('returns a normal window around queued cat-authored speech already published to timeline', async () => {
+    const target = messageStore.append({
+      threadId: 'peek-thread',
+      content: 'published source-cat seed',
+      userId: 'test-user',
+      catId: 'codex-sol',
+      mentions: ['opus'],
+      timestamp: Date.now() + 10_000,
+      deliveryStatus: 'queued',
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/concierge/peek?threadId=peek-thread&messageId=${target.id}&windowSize=2`,
+      headers: { 'x-cat-cafe-user': 'test-user' },
+    });
+
+    assert.equal(res.statusCode, 200, res.body);
+    const body = JSON.parse(res.body);
+    assert.equal(body.window.length, 3, 'published target should retain its two preceding timeline neighbors');
+    assert.equal(body.window.at(-1).id, target.id);
+    assert.equal(body.window.at(-1).isTarget, true);
+  });
+
   it('clamps window at thread boundaries', async () => {
     const firstId = msgIds[0]; // first message
     const res = await app.inject({

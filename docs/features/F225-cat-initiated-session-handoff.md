@@ -3,6 +3,7 @@ feature_ids: [F225]
 related_features: [F033, F065, F128, F211]
 topics: [session, handoff, session-chain, continuity, cat-initiated]
 doc_kind: spec
+tips_exempt: dogfood process note for session-boundary governance; no new user-facing capability
 created: 2026-06-05
 ---
 
@@ -175,6 +176,7 @@ Why: session 边界目前只能由 `shouldTakeAction`（context_health / 阈值�
 
 - **KD-10 — trigger 锚客观系统信号，不靠猫自我感知 context %。** 猫对自己 token 占用无可靠内省（operator："我怕你 40% 就报警'我脏了'"）。系统 `shouldTakeAction(fillRatio)` 的 `warn` band 是客观信号（阈值可配）→ 落地加 derived `context_management_hint`（仅 `action.type==='warn'` 触发；经 **prompt-injection** 注入下轮 prompt——cloud review 纠正 system_info 到不了 cat，见 memo §12）。
 - **KD-11 — handoff vs compress 是判断不是二元 trigger。** compress ≠ 坏事：干一半**连贯**任务 + 没压过 → 压缩反而保 in-flight 线索；"脏"=话题漂移（a→g 一堆不相关事）。三轴：context%（系统 warn）/ 断点 vs 中途（猫自检）/ 脏+压缩次数（猫+系统）。**系统给 WHEN，猫给 WHAT。**
+- **KD-11a — repo/source/projectPath 混淆是树状漂移摩擦锚。** 2026-07-07 dogfood：同一 session 横跨多条 `clowder-ai` issue/PR review/tracking，且把 GitHub tracker repo 误映射为 child thread `projectPath`，说明即使没有 system warn，也应加载 `context-self-management` 进入三问矩阵。若当前任务未到干净断点，先冲刺到断点；若已到断点且仍需继续跨 issue/PR 运维，propose session handoff。
 - **KD-12 — 编码 = L0 极简反射（~2 行）+ `context-self-management` skill（~30 行清单非教程）。** 不教猫怎么判漂移（LLM 本能），给清单不给结论（KD-8 线内）。skill 含三问 + 2×2 矩阵 + **冲刺模式**（中途+已压多轮 → 聚焦到断点再 handoff，warn→action 窗口=预算，F24 auto-seal 兜底）。
 - **KD-13 — cross-runtime 优雅降级；compression hook 覆盖参差，设计不依赖 hook。** （2026-06-09 Maine Coon source-audit 刷新三月旧记忆，推翻"只有 Claude 有 hook"）：Claude 有成熟 `PreCompact`（`f24-pre-compact.sh` 维护精确 `compressionCount`）；**Gemini CLI 有 `PreCompress`**（可接但本机 `~/.gemini` 未装）；Codex 有 SessionStart/UserPromptSubmit/PermissionRequest、Antigravity 有 PreToolUse/PostToolUse/PreInvocation/Stop，但二者**均无 compression hook**。即"只有 Claude 有 hook"是过时表述——但 `compressionCount` via PreCompact 确实 **Claude-as-wired specific**，非 Claude 猫当前拿不到精确压缩计数。**故 cat-facing 注入不依赖 hook**（hook 仅作 per-runtime 补充探针：有 PreCompact/PreCompress→更准，没有→token-drop 降级）；注入 channel 用 **prompt-injection**（cloud review P1 纠正 system_info 到不了 cat，见 memo §12）；`fillConfidence` 分层（`exact_token`/`approx_token`/`bytes_health`/`unavailable`），unavailable runtime 退到纯断点+漂移自检；`compressionCount` 是漂移锚（不并进 fillConfidence，两正交轴，详见 memo §10）。**实现期 drop `recentlyCompressed`**（timing 上它在 warn 恒 false，详见 memo §11）——hint 最终 `{ severity, fillConfidence, compressionCount }`。非 Claude 猫无持久压缩锚，退到纯线/树+断点自检（runtime-agnostic 持久压缩计数是未来增强）。
 - **Eval 层（capability-wakeup，operator 第①问"属于 capability 得上 eval"）**：F225 是 capability → 接 F192 `eval:capability-wakeup`——activation（warn+干净断点时 propose_session_handoff 调用率）+ friction（续接 session 第一 invocation 是否引用五件套）+ sunset（连续 N 周 0 调用 → 唤醒路径无效，重评）。

@@ -4,47 +4,132 @@
  * GET    /api/threads/:threadId/queue               → 列出队列条目
  * DELETE /api/threads/:threadId/queue/:entryId       → 撤回条目
  * POST   /api/threads/:threadId/queue/next          → 手动触发处理下一条
- * POST   /api/threads/:threadId/queue/:entryId/steer → Steer queued entry（立即执行/提到队首）
+ * POST   /api/threads/:threadId/queue/:entryId/steer → Steer queued entry（取消当前轮并以同一消息立即启动）
  * PATCH  /api/threads/:threadId/queue/:entryId/move → 重排序（上移/下移）
  * PATCH  /api/threads/:threadId/queue/reorder       → F175: 批量设置 position（拖拽重排）
  * DELETE /api/threads/:threadId/queue               → 清空队列
  * POST   /api/threads/:threadId/cancel/:catId       → F122B AC-B9: Per-cat cancel
  */
 
+import { randomUUID } from 'node:crypto';
 import type { CatId } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { IBallCustodyIngest } from '../domains/ball-custody/BallCustodyIngest.js';
+import {
+  type AgentSessionMutexLike,
+  agentSessionMutex,
+} from '../domains/cats/services/agents/invocation/AgentSessionMutex.js';
 import { getThreadLiveInvocations } from '../domains/cats/services/agents/invocation/getThreadLiveInvocations.js';
 import {
   type InvocationQueue,
   isSystemPinnedQueueEntry,
+  type QueueEntry,
 } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
+import type { QueuedMessageCustodyCoordinator } from '../domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
-import { reconcileZombies } from '../domains/cats/services/agents/invocation/reconcileZombies.js';
+import {
+  type ReconcileZombieDeps,
+  reconcileZombies,
+} from '../domains/cats/services/agents/invocation/reconcileZombies.js';
 import type { TaskProgressStore } from '../domains/cats/services/agents/invocation/TaskProgressStore.js';
+import type { CodexAppServerLifecycleSnapshot } from '../domains/cats/services/agents/providers/CodexAppServerLifecycle.js';
+import { getCodexAppServerLifecycle } from '../domains/cats/services/agents/providers/CodexAppServerLifecycleRegistry.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import type { ITurnExecutionStore } from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
-import { emitQueueUpdated, enrichQueueEntries } from '../utils/queue-enrichment.js';
+import { emitQueueUpdated, enrichQueueEntries, projectPublicQueueEntry } from '../utils/queue-enrichment.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js';
 
 interface InvocationTrackerLike {
   has(threadId: string, catId?: string): boolean;
   getUserId(threadId: string, catId: string): string | null;
+  getExecutionId?(threadId: string, catId: string): string | undefined;
   cancel(
     threadId: string,
     catId: string,
     requestUserId?: string,
     abortReason?: string,
-  ): { cancelled: boolean; catIds: string[] };
+  ): { cancelled: boolean; catIds: string[]; executionIds?: string[] };
   /** Issue #83: Get all active slots for a thread (F5 refresh recovery) */
   getActiveSlots(threadId: string): Array<{ catId: string; startedAt: number }>;
   /** F-invocation-stale-recovery: Cancel ALL active slots for a thread (abort controllers + delete slots). */
-  cancelAll?(threadId: string, requestUserId?: string, abortReason?: string): string[];
+  cancelAll?(
+    threadId: string,
+    requestUserId?: string,
+    abortReason?: string,
+  ): { catIds: string[]; executionIds: string[]; executionIdByCatId?: Readonly<Record<string, string>> };
+}
+
+interface ActiveInvocationProjection {
+  catId: string;
+  startedAt: number;
+  /** Parent/control-plane identity. Frontend keeps this as the active slot key for Cancel. */
+  executionId?: string;
+  /** Exact child/turn identity carried by F264 body-exposure receipts. */
+  turnInvocationId?: string;
+  appServerLifecycle?: CodexAppServerLifecycleSnapshot;
+}
+
+interface LifecycleProjectionCandidate {
+  catId: string;
+  startedAt: number;
+  lifecycleOwnerId?: string;
+  turnInvocationId?: string;
+}
+
+function resolveLifecycleOwnerId(
+  threadId: string,
+  userId: string,
+  catId: string,
+  canonicalExecutionId: string,
+  invocationTracker: InvocationTrackerLike,
+): string {
+  // The tracker is the current control-plane owner during replacement windows. When it has
+  // no same-user bound execution yet, the canonical read model still carries the exact parent
+  // owner. Never borrow a tracker owner from another user on a shared/default thread.
+  return getRequestOwnedTrackerExecutionId(threadId, userId, catId, invocationTracker) ?? canonicalExecutionId;
+}
+
+function getRequestOwnedTrackerExecutionId(
+  threadId: string,
+  userId: string,
+  catId: string,
+  invocationTracker: InvocationTrackerLike,
+): string | undefined {
+  if (invocationTracker.getUserId(threadId, catId) !== userId) return undefined;
+  return invocationTracker.getExecutionId?.(threadId, catId);
+}
+
+function projectActiveInvocations(
+  threadId: string,
+  slots: LifecycleProjectionCandidate[],
+): ActiveInvocationProjection[] {
+  return slots.map(({ lifecycleOwnerId, ...slot }) => {
+    const appServerLifecycle = lifecycleOwnerId
+      ? getCodexAppServerLifecycle(threadId, slot.catId, lifecycleOwnerId)
+      : undefined;
+    const projection = {
+      ...slot,
+      ...(lifecycleOwnerId ? { executionId: lifecycleOwnerId } : {}),
+    };
+    return appServerLifecycle ? { ...projection, appServerLifecycle } : projection;
+  });
+}
+
+function trackerProjectionCandidates(
+  threadId: string,
+  userId: string,
+  invocationTracker: InvocationTrackerLike,
+): LifecycleProjectionCandidate[] {
+  return invocationTracker.getActiveSlots(threadId).map((slot) => {
+    const lifecycleOwnerId = getRequestOwnedTrackerExecutionId(threadId, userId, slot.catId, invocationTracker);
+    return { ...slot, ...(lifecycleOwnerId ? { lifecycleOwnerId } : {}) };
+  });
 }
 
 export interface QueueRoutesOptions {
@@ -52,14 +137,20 @@ export interface QueueRoutesOptions {
   invocationQueue: InvocationQueue;
   queueProcessor: QueueProcessor;
   invocationTracker: InvocationTrackerLike;
+  /** Shared owner-aware session lock released by explicit terminal actions. */
+  agentSessionMutex?: AgentSessionMutexLike;
   socketManager: SocketManager;
   /** F117: MessageStore for marking queued messages as canceled on withdraw/clear */
   messageStore?: IMessageStore;
+  /** F254: persist reorder/promote mutations before acknowledging them. */
+  queueCustodyCoordinator?: QueuedMessageCustodyCoordinator;
   /** F194 Phase B: canonical liveness read sources (record + draft). When omitted,
    *  GET /queue's activeInvocations falls back to legacy tracker-only enumeration
    *  for backward compat in tests. */
   invocationRecordStore?: IInvocationRecordStore;
   draftStore?: IDraftStore;
+  /** Durable per-child lifecycle truth used to bridge tracker/draft handoff gaps. */
+  turnExecutionStore?: Pick<ITurnExecutionStore, 'listByParent'>;
   /** F233 PR3: ball-custody event sink for zombie reconciliation side effects. */
   ballCustody?: IBallCustodyIngest;
   /** F194 AC-B7: when helper detects zombies, reconcileZombies clears their
@@ -81,15 +172,65 @@ export interface QueueRoutesOptions {
     } | null>;
     getLatestId(threadId: string, catId: string): Promise<string | undefined>;
   };
+  /** Exact-owner terminal recovery wired by the composition root. */
+  onReconciledZombie?: ReconcileZombieDeps['onReconciledZombie'];
 }
 
 const moveBodySchema = z.object({
   direction: z.enum(['up', 'down']),
 });
 
-const steerBodySchema = z.object({
-  mode: z.enum(['promote', 'immediate']),
-});
+const steerBodySchema = z
+  .object({
+    mode: z.literal('immediate').optional(),
+  })
+  .strict();
+
+const remindBodySchema = z
+  .object({
+    targetCatId: z.string().min(1),
+  })
+  .strict();
+
+type ReminderRequestResolution =
+  | {
+      ok: true;
+      entry: QueueEntry;
+      invocationId: string;
+      coordinator: QueuedMessageCustodyCoordinator;
+    }
+  | { ok: false; status: 404 | 409 | 503; error: string; code: string };
+
+function projectQueueStartResult(result: { started: boolean; entry?: QueueEntry }) {
+  return result.entry ? { ...result, entry: projectPublicQueueEntry(result.entry) } : result;
+}
+
+function resolveReminderRequest(input: {
+  entry: QueueEntry | undefined;
+  targetCatId: string;
+  threadId: string;
+  userId: string;
+  invocationTracker: InvocationTrackerLike;
+  coordinator: QueuedMessageCustodyCoordinator | undefined;
+}): ReminderRequestResolution {
+  if (!input.entry) return { ok: false, status: 404, error: '队列条目不存在', code: 'ENTRY_NOT_FOUND' };
+  if (!input.entry.targetCats.includes(input.targetCatId)) {
+    return { ok: false, status: 409, error: '该猫已不再等待处理此消息', code: 'TARGET_NOT_PENDING' };
+  }
+  if (input.entry.status === 'processing') {
+    return { ok: false, status: 409, error: '该消息已经进入处理，无需提醒', code: 'ENTRY_PROCESSING' };
+  }
+  if (!input.coordinator) {
+    return { ok: false, status: 503, error: '持久回执暂不可用', code: 'RECEIPT_STORE_UNAVAILABLE' };
+  }
+  const activeUserId = input.invocationTracker.getUserId(input.threadId, input.targetCatId);
+  const invocationId = input.invocationTracker.getExecutionId?.(input.threadId, input.targetCatId);
+  const active = input.invocationTracker.has(input.threadId, input.targetCatId);
+  if (!active || activeUserId !== input.userId || !invocationId) {
+    return { ok: false, status: 409, error: '当前没有可接收提醒的工作轮次', code: 'NO_ACTIVE_INVOCATION' };
+  }
+  return { ok: true, entry: input.entry, invocationId, coordinator: input.coordinator };
+}
 
 /**
  * Auth + ownership guard.
@@ -138,15 +279,21 @@ async function resolveActiveInvocations(
   invocationTracker: InvocationTrackerLike,
   recordStore: IInvocationRecordStore | undefined,
   draftStore: IDraftStore | undefined,
+  turnExecutionStore: Pick<ITurnExecutionStore, 'listByParent'> | undefined,
   log: { info: (obj: unknown, msg?: string) => void; warn: (obj: unknown, msg?: string) => void },
   taskProgressStore?: TaskProgressStore,
   ballCustody?: IBallCustodyIngest,
   invocationRegistry?: QueueRoutesOptions['invocationRegistry'],
-  /** F220 Phase 2a (#972): queue convergence adapter for zombie cleanup. */
-  queueConvergence?: import('../domains/cats/services/agents/invocation/reconcileZombies.js').QueueConvergence,
-): Promise<Array<{ catId: string; startedAt: number }>> {
+  onReconciledZombie?: ReconcileZombieDeps['onReconciledZombie'],
+  /** F220 Phase 2a (#972): lets the zombie sweep also converge the dead invocation's
+   *  stale `processing` queue entry, so later user work stops queuing behind a corpse. */
+  invocationQueue?: InvocationQueue,
+  /** F220 Phase 2a (#972): fired only when the sweep actually removed queue entries →
+   *  caller re-broadcasts `queue_updated` so the UI unblocks without a refresh. */
+  onQueueConverged?: (info: { threadId: string; userId: string; removedEntryIds: string[] }) => void,
+): Promise<ActiveInvocationProjection[]> {
   if (!recordStore || !draftStore) {
-    return invocationTracker.getActiveSlots(threadId);
+    return projectActiveInvocations(threadId, trackerProjectionCandidates(threadId, userId, invocationTracker));
   }
   try {
     const result = await getThreadLiveInvocations(threadId, userId, {
@@ -154,6 +301,9 @@ async function resolveActiveInvocations(
       getActiveSlots: (tid) => invocationTracker.getActiveSlots(tid),
       getTrackerUserId: (tid, cid) => invocationTracker.getUserId(tid, cid),
       getDrafts: (uid, tid) => draftStore.getByThread(uid, tid),
+      ...(turnExecutionStore
+        ? { listTurnExecutionsByParent: (parentId: string) => turnExecutionStore.listByParent(parentId) }
+        : {}),
       // F194 Phase Z (KD-22): namespace bridge — parent recordStore invocation ↔ per-cat-turn
       // child registry invocation. Wraps InvocationRegistry.getRecord (parentInvocationId field)
       // + getLatestId. Optional — when absent, helper falls back to legacy single-namespace path.
@@ -187,8 +337,12 @@ async function resolveActiveInvocations(
         taskProgressStore,
         ballCustody,
         log,
-        // F220 Phase 2a (#972): converge queue state when zombies are cleaned up
-        queueConvergence,
+        onReconciledZombie,
+        // F220 Phase 2a (#972): converge the stale `processing` entry too — marking the
+        // record failed while leaving its queue entry `processing` pins the queue head
+        // forever, which is exactly how a later user @codex never runs.
+        ...(invocationQueue ? { invocationQueue } : {}),
+        ...(onQueueConverged ? { onQueueConverged } : {}),
       }).catch((err) => log.warn({ err, feature: 'F194' }, 'reconcileZombies failed'));
     }
     // 砚砚 R5 P2: filter null catId — frontend turns queue.activeInvocations[].catId into a
@@ -200,27 +354,59 @@ async function resolveActiveInvocations(
     // during recovery windows (e.g., two concurrent `running` records). Frontend
     // replaceThreadTargetCats treats activeInvocations[].catId as cat-level state, so duplicates
     // would render the same cat slot twice. Keep earliest startedAt as the canonical slot age.
-    const byCatId = new Map<string, { catId: string; startedAt: number }>();
+    const byCatId = new Map<string, LifecycleProjectionCandidate>();
     for (const s of result.active) {
       if (s.catId === null || s.catId === undefined) continue;
       const existing = byCatId.get(s.catId);
       if (!existing || s.startedAt < existing.startedAt) {
-        byCatId.set(s.catId, { catId: s.catId, startedAt: s.startedAt });
+        const lifecycleOwnerId = resolveLifecycleOwnerId(threadId, userId, s.catId, s.executionId, invocationTracker);
+        const turnInvocationId =
+          s.invocationId !== s.executionId && lifecycleOwnerId === s.executionId ? s.invocationId : undefined;
+        byCatId.set(s.catId, {
+          catId: s.catId,
+          startedAt: s.startedAt,
+          lifecycleOwnerId,
+          ...(turnInvocationId ? { turnInvocationId } : {}),
+        });
       }
     }
-    return Array.from(byCatId.values());
+    return projectActiveInvocations(threadId, Array.from(byCatId.values()));
   } catch (err) {
     // F194 AC-B13: fallback metric — split-brain protection bypassed when this fires.
     log.warn(
       { err, kind: 'liveness_fallback', threadId, userId, feature: 'F194', endpoint: '/queue' },
       'F194 helper failed, fall-back tracker-only',
     );
-    return invocationTracker.getActiveSlots(threadId);
+    return projectActiveInvocations(threadId, trackerProjectionCandidates(threadId, userId, invocationTracker));
   }
 }
 
 export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, opts) => {
   const { threadStore, invocationQueue, queueProcessor, invocationTracker, socketManager, messageStore } = opts;
+  const sessionLocks = opts.agentSessionMutex ?? agentSessionMutex;
+  const persistQueueEntries = async (threadId: string, userId: string, entryIds: readonly string[]) => {
+    if (!opts.queueCustodyCoordinator) return;
+    for (const entryId of new Set(entryIds)) {
+      const entry = invocationQueue.getEntrySnapshot(threadId, userId, entryId);
+      if (entry) await opts.queueCustodyCoordinator.persistEntry(entry);
+    }
+  };
+
+  const releaseAgentSessionLocks = (
+    scope: { threadId: string; userId: string; catId?: string },
+    request: FastifyRequest,
+    reason: 'steer' | 'cancel' | 'force-reset',
+    preserveHolderExecutionIds: readonly string[] = [],
+  ) => {
+    const result = sessionLocks.forceReleaseByScope(scope, { preserveHolderExecutionIds });
+    if (result.releasedHolders > 0 || result.rejectedWaiters > 0) {
+      request.log.warn(
+        { event: 'agent_session_mutex_force_release', reason, scope, ...result },
+        'Released stuck agent session locks after terminal action',
+      );
+    }
+    return result;
+  };
 
   // GET /api/threads/:threadId/queue
   app.get<{ Params: { threadId: string } }>('/api/threads/:threadId/queue', async (request, reply) => {
@@ -234,13 +420,25 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       invocationTracker,
       opts.invocationRecordStore,
       opts.draftStore,
+      opts.turnExecutionStore,
       request.log,
       opts.taskProgressStore,
       opts.ballCustody,
       opts.invocationRegistry,
-      // F220 Phase 2a (#972): pass queue convergence so zombie cleanup converges queue state.
-      // Guard: legacy/test stubs may not have buildQueueConvergence (codex R5 P2).
-      queueProcessor.buildQueueConvergence?.(),
+      opts.onReconciledZombie,
+      // F220 Phase 2a (#972): wire the queue into the zombie sweep, and re-broadcast
+      // `queue_updated` when (and only when) entries were actually converged.
+      invocationQueue,
+      (info) => {
+        void emitQueueUpdated(
+          opts.socketManager,
+          info.userId,
+          info.threadId,
+          invocationQueue.list(info.threadId, info.userId),
+          messageStore,
+          'zombie_converged',
+        ).catch((err) => request.log.warn({ err, feature: 'F220' }, 'zombie_converged broadcast failed'));
+      },
     );
     const enrichedQueue = await enrichQueueEntries(invocationQueue.list(threadId, guard.userId), messageStore);
     return {
@@ -280,6 +478,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       const removed = invocationQueue.remove(threadId, guard.userId, entryId);
       // F122B B6 P2: Clean up completion hook to prevent leak when entry removed before execution
       queueProcessor.unregisterEntryCompleteHook?.(entryId);
+      await queueProcessor.finalizeRemovedEntry?.(removed, 'user_cancel');
 
       await emitQueueUpdated(
         socketManager,
@@ -291,11 +490,10 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       );
 
       // F117: Mark queued messages as canceled + emit message_deleted
-      // CAS gate: markCanceled returns null on no-op (already canceled / delivered / not found)
       if (messageStore) {
         for (const msgId of messageIds) {
           const canceled = await messageStore.markCanceled(msgId);
-          if (canceled) {
+          if (canceled?.deliveryTransitioned === true) {
             socketManager.emitToUser(guard.userId, 'message_deleted', {
               messageId: msgId,
               threadId,
@@ -305,7 +503,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         }
       }
 
-      return { removed };
+      return { removed: removed ? projectPublicQueueEntry(removed) : removed };
     },
   );
 
@@ -316,8 +514,91 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     if (!guard) return;
 
     const result = await queueProcessor.processNext(threadId, guard.userId);
-    return result;
+    return projectQueueStartResult(result);
   });
+
+  // POST /api/threads/:threadId/queue/:entryId/remind
+  // Non-interrupting: records one exact attempt for the current invocation and waits
+  // for the existing safe-boundary freshness notice path to deliver it.
+  app.post<{ Params: { threadId: string; entryId: string } }>(
+    '/api/threads/:threadId/queue/:entryId/remind',
+    async (request, reply) => {
+      const { threadId, entryId } = request.params;
+      const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
+      if (!guard) return;
+      const parsed = remindBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        reply.status(400);
+        return { error: 'Invalid body', details: parsed.error.issues };
+      }
+
+      const { targetCatId } = parsed.data;
+      const resolution = resolveReminderRequest({
+        entry: invocationQueue.list(threadId, guard.userId).find((candidate) => candidate.id === entryId),
+        targetCatId,
+        threadId,
+        userId: guard.userId,
+        invocationTracker,
+        coordinator: opts.queueCustodyCoordinator,
+      });
+      if (!resolution.ok) {
+        reply.status(resolution.status);
+        return { error: resolution.error, code: resolution.code };
+      }
+
+      const existingAttempt = await resolution.coordinator.findReminderAttempt(
+        resolution.entry,
+        targetCatId,
+        resolution.invocationId,
+      );
+      if (existingAttempt) {
+        return {
+          ok: true,
+          reminderId: existingAttempt.id,
+          targetCatId,
+          invocationId: resolution.invocationId,
+          state: existingAttempt.state,
+          idempotent: true,
+        };
+      }
+
+      const reminderId = randomUUID();
+      const persisted = await resolution.coordinator.requestReminder(
+        resolution.entry,
+        targetCatId,
+        resolution.invocationId,
+        reminderId,
+      );
+      if (!persisted) {
+        const racedAttempt = await resolution.coordinator.findReminderAttempt(
+          resolution.entry,
+          targetCatId,
+          resolution.invocationId,
+        );
+        if (racedAttempt) {
+          return {
+            ok: true,
+            reminderId: racedAttempt.id,
+            targetCatId,
+            invocationId: resolution.invocationId,
+            state: racedAttempt.state,
+            idempotent: true,
+          };
+        }
+        reply.status(409);
+        return { error: '消息尚未建立可持久回执', code: 'RECEIPT_NOT_PERSISTED' };
+      }
+      await emitQueueUpdated(
+        socketManager,
+        guard.userId,
+        threadId,
+        invocationQueue.list(threadId, guard.userId),
+        messageStore,
+        'reminder_requested',
+      );
+      return { ok: true, reminderId, targetCatId, invocationId: resolution.invocationId, state: 'requested' as const };
+    },
+  );
 
   // POST /api/threads/:threadId/queue/:entryId/steer
   app.post<{ Params: { threadId: string; entryId: string } }>(
@@ -327,7 +608,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
       if (!guard) return;
 
-      const parseResult = steerBodySchema.safeParse(request.body);
+      const parseResult = steerBodySchema.safeParse(request.body ?? {});
       if (!parseResult.success) {
         reply.status(400);
         return { error: 'Invalid body', details: parseResult.error.issues };
@@ -348,21 +629,9 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         return { error: '系统续接条目不可手动调整位置', code: 'ENTRY_POSITION_LOCKED' };
       }
 
-      const { mode } = parseResult.data;
-      if (mode === 'promote') {
-        invocationQueue.promote(threadId, guard.userId, entryId);
-        await emitQueueUpdated(
-          socketManager,
-          guard.userId,
-          threadId,
-          invocationQueue.list(threadId, guard.userId),
-          messageStore,
-          'steer_promote',
-        );
-        return { ok: true };
-      }
-
-      // mode === 'immediate'
+      // Steer has exactly one meaning: cancel the current target invocation and
+      // immediately start this same durable queue entry. Reordering remains a
+      // separate drag/move interaction and is never accepted as a Steer mode.
       const steerCatId = entry.targetCats[0] ?? 'unknown';
       if (invocationTracker.has(threadId, steerCatId)) {
         const activeUserId = invocationTracker.getUserId(threadId, steerCatId);
@@ -371,6 +640,12 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
           return { error: '当前有其他用户的调用在执行，无法立即执行', code: 'INVOCATION_ACTIVE' };
         }
         const cancelResult = invocationTracker.cancel(threadId, steerCatId, guard.userId, 'preempted');
+        releaseAgentSessionLocks(
+          { threadId, userId: guard.userId, catId: steerCatId },
+          request,
+          'steer',
+          cancelResult.executionIds ?? [],
+        );
         // Broadcast cancel+done so frontend clears old invocation's "正在回复中" state.
         // Without this, activeInvocations retains the old invocationId permanently.
         // Scope to steerCatId only — cancelResult.catIds may include co-dispatched cats
@@ -391,6 +666,10 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         queueProcessor.clearPause(threadId, steerCatId);
         queueProcessor.releaseSlot(threadId, steerCatId);
       } else {
+        // A stale invocation can lose its tracker slot while retaining the
+        // resumable-session lock. Immediate steer is an explicit preemption,
+        // so clear that owner-scoped lock before starting the replacement.
+        releaseAgentSessionLocks({ threadId, userId: guard.userId, catId: steerCatId }, request, 'steer');
         // 2026-06-02 fix (Steer 无法抢占 — race-safe, 云端 codex R3 P1): tracker has NO live
         // invocation for steerCatId, but its processingSlot may still be occupied by an executeEntry
         // stuck in the PRE-START window (processingSlots.set runs before `await
@@ -421,16 +700,16 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
             Boolean,
           ) as string[];
           queueProcessor.clearPause(threadId, steerCatId);
-          invocationQueue.removeProcessedAcrossUsers(threadId, inflight.id); // tombstone → self-abort
+          const tombstoned = invocationQueue.removeProcessedAcrossUsers(threadId, inflight.id); // tombstone → self-abort
+          await queueProcessor.finalizeRemovedEntry?.(tombstoned, 'user_cancel');
           // 云端 R7 P1: mirror the withdraw/clear F117 cleanup — the tombstoned in-flight entry's
           // executeEntry self-aborts BEFORE its markDelivered block, so without this the original
           // user message stays permanently 'queued' (undelivered + excluded from context) even though
           // its queue entry is gone. Mark it canceled + emit message_deleted.
-          // CAS gate: markCanceled returns null on no-op (already canceled / delivered / not found)
           if (messageStore) {
             for (const msgId of tombstonedMsgIds) {
               const canceled = await messageStore.markCanceled(msgId);
-              if (canceled) {
+              if (canceled?.deliveryTransitioned === true) {
                 socketManager.emitToUser(guard.userId, 'message_deleted', {
                   messageId: msgId,
                   threadId,
@@ -439,7 +718,12 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
               }
             }
           }
+          if (!invocationQueue.markSteering(threadId, guard.userId, entryId, steerCatId)) {
+            reply.status(409);
+            return { error: 'Steer 状态已变化，请重试', code: 'STEER_STATE_CHANGED' };
+          }
           invocationQueue.promote(threadId, guard.userId, entryId);
+          await persistQueueEntries(threadId, guard.userId, [entryId]);
           await emitQueueUpdated(
             socketManager,
             guard.userId,
@@ -461,7 +745,12 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         queueProcessor.clearPause(threadId, steerCatId);
       }
 
+      if (!invocationQueue.markSteering(threadId, guard.userId, entryId, steerCatId)) {
+        reply.status(409);
+        return { error: 'Steer 状态已变化，请重试', code: 'STEER_STATE_CHANGED' };
+      }
       invocationQueue.promote(threadId, guard.userId, entryId);
+      await persistQueueEntries(threadId, guard.userId, [entryId]);
       await emitQueueUpdated(
         socketManager,
         guard.userId,
@@ -473,11 +762,21 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
 
       const result = await queueProcessor.processNext(threadId, guard.userId);
       if (!result.started) {
+        invocationQueue.clearSteering(threadId, guard.userId, entryId, steerCatId);
+        await persistQueueEntries(threadId, guard.userId, [entryId]);
+        await emitQueueUpdated(
+          socketManager,
+          guard.userId,
+          threadId,
+          invocationQueue.list(threadId, guard.userId),
+          messageStore,
+          'steer_failed',
+        );
         reply.status(409);
         return { error: '队列繁忙，暂无法立即执行', code: 'QUEUE_BUSY' };
       }
 
-      return result;
+      return projectQueueStartResult(result);
     },
   );
 
@@ -512,6 +811,11 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       }
 
       invocationQueue.move(threadId, guard.userId, entryId, parseResult.data.direction);
+      await persistQueueEntries(
+        threadId,
+        guard.userId,
+        invocationQueue.list(threadId, guard.userId).map((candidate) => candidate.id),
+      );
       await emitQueueUpdated(
         socketManager,
         guard.userId,
@@ -570,6 +874,11 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     for (const { entryId, position } of parseResult.data.positions) {
       invocationQueue.setPosition(threadId, guard.userId, entryId, position);
     }
+    await persistQueueEntries(
+      threadId,
+      guard.userId,
+      parseResult.data.positions.map(({ entryId }) => entryId),
+    );
 
     await emitQueueUpdated(
       socketManager,
@@ -600,14 +909,16 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     }
 
     const cleared = invocationQueue.clear(threadId, guard.userId);
+    for (const entry of cleared) {
+      await queueProcessor.finalizeRemovedEntry?.(entry, 'user_cancel');
+    }
     await emitQueueUpdated(socketManager, guard.userId, threadId, [], messageStore, 'cleared');
 
     // F117: Mark all queued messages as canceled + emit message_deleted
-    // CAS gate: markCanceled returns null on no-op (already canceled / delivered / not found)
     if (messageStore) {
       for (const msgId of allMessageIds) {
         const canceled = await messageStore.markCanceled(msgId);
-        if (canceled) {
+        if (canceled?.deliveryTransitioned === true) {
           socketManager.emitToUser(guard.userId, 'message_deleted', {
             messageId: msgId,
             threadId,
@@ -617,7 +928,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       }
     }
 
-    return { cleared };
+    return { cleared: cleared.map(projectPublicQueueEntry) };
   });
 
   // POST /api/threads/:threadId/cancel/:catId — F122B AC-B9: Per-cat cancel
@@ -645,6 +956,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
             const siblingCats = (orphanRecord.targetCats as string[]).filter((c) => c !== catId);
             const siblingStillActive = siblingCats.some((c) => invocationTracker.has(threadId, c));
             if (siblingStillActive) {
+              releaseAgentSessionLocks({ threadId, userId: guard.userId, catId }, request, 'cancel');
               // Orphan cancel skipped — a sibling cat is still active; let normal lifecycle handle it
               reply.status(404);
               return { error: '该猫当前未在执行', code: 'CAT_NOT_ACTIVE' };
@@ -657,21 +969,50 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
             // state and their processingSlots leak; and since the record is no longer running,
             // force-reset can't rediscover those siblings via listRunningByThread.
             const orphanCats = orphanRecord.targetCats as string[];
-            for (const m of buildCancelMessages({ cancelled: true, catIds: orphanCats })) {
-              socketManager.broadcastAgentMessage(m, threadId);
+            for (const orphanCat of orphanCats) {
+              releaseAgentSessionLocks({ threadId, userId: guard.userId, catId: orphanCat }, request, 'cancel');
             }
-            for (const c of orphanCats) {
+            const terminalOrphanCats = orphanCats.filter((orphanCat) =>
+              queueProcessor.canReleaseSlotForUser(threadId, orphanCat, guard.userId),
+            );
+            if (terminalOrphanCats.length > 0) {
+              for (const m of buildCancelMessages({ cancelled: true, catIds: terminalOrphanCats })) {
+                socketManager.broadcastAgentMessage(m, threadId);
+              }
+            }
+            for (const c of terminalOrphanCats) {
               queueProcessor.clearPause(threadId, c);
               queueProcessor.releaseSlot(threadId, c);
             }
             return { ok: true, cancelled: true };
           }
         }
+        const lockRelease = releaseAgentSessionLocks({ threadId, userId: guard.userId, catId }, request, 'cancel');
+        if (
+          (lockRelease.releasedHolders > 0 || lockRelease.rejectedWaiters > 0) &&
+          queueProcessor.canReleaseSlotForUser(threadId, catId, guard.userId)
+        ) {
+          for (const m of buildCancelMessages({ cancelled: true, catIds: [catId] })) {
+            socketManager.broadcastAgentMessage(m, threadId);
+          }
+          queueProcessor.clearPause(threadId, catId);
+          queueProcessor.releaseSlot(threadId, catId);
+          return { ok: true, cancelled: true };
+        }
+        if (lockRelease.releasedHolders > 0 || lockRelease.rejectedWaiters > 0) {
+          return { ok: true, cancelled: false };
+        }
         reply.status(404);
         return { error: '该猫当前未在执行', code: 'CAT_NOT_ACTIVE' };
       }
 
       const cancelResult = invocationTracker.cancel(threadId, catId, guard.userId, 'user_cancel');
+      releaseAgentSessionLocks(
+        { threadId, userId: guard.userId, catId },
+        request,
+        'cancel',
+        cancelResult.executionIds ?? [],
+      );
       if (cancelResult.cancelled) {
         const scopedResult = { ...cancelResult, catIds: [catId] };
         for (const m of buildCancelMessages(scopedResult)) {
@@ -706,38 +1047,73 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     //    only 'cancel_all' suppresses auto-resume. A custom reason falls into the plain 'canceled'
     //    branch → pause + 10s auto-recover → queued work restarts, re-busying the thread right after
     //    reset. 'cancel_all' matches force-reset's "stop everything" intent and suppresses auto-resume.
-    const cancelledCatIds = invocationTracker.cancelAll?.(threadId, guard.userId, 'cancel_all') ?? [];
+    const cancelAllResult = invocationTracker.cancelAll?.(threadId, guard.userId, 'cancel_all') ?? {
+      catIds: [],
+      executionIds: [],
+      executionIdByCatId: {},
+    };
+    const cancelledCatIds = cancelAllResult.catIds;
+    const canceledExecutionIdsByCatId = new Map<string, Set<string>>();
+    const addCanceledExecution = (catId: string, executionId: string): void => {
+      const executionIds = canceledExecutionIdsByCatId.get(catId) ?? new Set<string>();
+      executionIds.add(executionId);
+      canceledExecutionIdsByCatId.set(catId, executionIds);
+    };
+    for (const [catId, executionId] of Object.entries(cancelAllResult.executionIdByCatId ?? {})) {
+      addCanceledExecution(catId, executionId);
+    }
 
     // 2+3. Collect EVERY user-owned cat whose processingSlot may still pin hasActiveExecution:
     //    cancelledCatIds (tracker slots just aborted) ∪ running records' targetCats. The latter
     //    covers the STALE case codex flagged — when the tracker slot is already gone (so cancelAll
     //    returned []) but the processingSlot + running record persist, force-reset must still
     //    release that orphan processingSlot or hasActiveExecution stays true until TTL.
-    //    Both sources are guard.userId-scoped (cancelAll + listRunningByThread), so no cross-user
-    //    slot leak on shared/system threads.
+    //    Sources are guard.userId-scoped, but QueueProcessor slots are not; the final owner check
+    //    below prevents a stale source from colliding with a newer foreign tracker slot.
     const slotsToRelease = new Set<string>(cancelledCatIds);
     let canceledRecords = 0;
     if (opts.invocationRecordStore) {
       const runningRecords = await opts.invocationRecordStore.listRunningByThread(threadId, guard.userId);
       for (const record of runningRecords) {
-        for (const c of record.targetCats as string[]) slotsToRelease.add(c);
+        for (const c of record.targetCats as string[]) {
+          slotsToRelease.add(c);
+          addCanceledExecution(c, record.id);
+        }
         await opts.invocationRecordStore.update(record.id, { status: 'canceled' });
         canceledRecords++;
       }
     }
+    const lockRelease = releaseAgentSessionLocks(
+      { threadId, userId: guard.userId },
+      request,
+      'force-reset',
+      cancelAllResult.executionIds,
+    );
+    for (const catId of lockRelease.catIds ?? []) slotsToRelease.add(catId);
 
-    // Broadcast cancel + clear pause + release processingSlot for EVERY user-owned cat in
-    // slotsToRelease (cancelled tracker slots ∪ stale records' targetCats). P2 (opus-4.6 cross-cat
+    // QueueProcessor slots are not user-scoped. Re-check ownership at the final cleanup boundary,
+    // after all awaited record writes, so a foreign invocation that started during force-reset is
+    // never terminal-broadcast or released by this user's stale record/lock cleanup.
+    const terminalCatIds = [...slotsToRelease].filter((catId) =>
+      queueProcessor.canReleaseSlotForUser(threadId, catId, guard.userId),
+    );
+
+    // Broadcast cancel + clear pause + release processingSlot for EVERY still-owned cat in
+    // terminalCatIds. P2 (opus-4.6 cross-cat
     // review): broadcasting only cancelledCatIds left stale records' cats without a done broadcast,
     // so the frontend "正在回复中" never cleared after force-reset (user had to F5). Doing all three
-    // over the full set keeps force-reset aligned with the orphan/normal cancel paths and covers the
-    // stale case cancelAll missed.
-    if (slotsToRelease.size > 0) {
-      for (const m of buildCancelMessages({ cancelled: true, catIds: [...slotsToRelease] })) {
+    // over the owner-filtered set keeps force-reset aligned with the orphan/normal cancel paths and
+    // covers the stale case cancelAll missed without touching a foreign live slot.
+    if (terminalCatIds.length > 0) {
+      for (const m of buildCancelMessages({ cancelled: true, catIds: terminalCatIds })) {
         socketManager.broadcastAgentMessage(m, threadId);
       }
     }
-    for (const cid of slotsToRelease) {
+    for (const cid of terminalCatIds) {
+      // Force-reset means stop, not "retry in ten seconds". Fence both Queue
+      // cleanup and a late connector wake before releasing the slot. Terminal
+      // consumption is restricted to executions this reset actually canceled.
+      queueProcessor.suppressAutoResume(threadId, cid, [...(canceledExecutionIdsByCatId.get(cid) ?? [])]);
       queueProcessor.clearPause(threadId, cid);
       queueProcessor.releaseSlot(threadId, cid);
     }

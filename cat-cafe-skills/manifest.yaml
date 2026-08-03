@@ -8,9 +8,9 @@
 # 来源决策：F042 三层信息架构
 
 # ─── 开发流程链 ─────────────────────────────────────────
-# feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → tdd
-#     → quality-gate → [fresh-context-review] → request-review → receive-review
-#     → merge-gate → feat-lifecycle(完成)
+# Development stages are risk-routed lanes, not a mandatory chain. The stage catalog keeps
+# discovery/telemetry stable while behavior, data, security, contract, and irreversibility risk
+# decide which skills are loaded.
 
 skills:
 
@@ -160,28 +160,52 @@ skills:
     description: >
       创建 Git worktree 隔离开发环境，含 Redis 6398 安全配置。
       Use when: 开始任何代码修改、新功能开发、bug fix。
-      Not for: 纯文档修改（≤5 行）、不涉及代码的讨论。
+      Not for: classifier 放行的 co-creation docs direct-push lane、不涉及代码的讨论。
       Output: 隔离的 worktree + 正确的 Redis/环境配置。
     triggers:
       - "开始开发"
       - "新 worktree"
       - "开 worktree"
     not_for:
-      - "纯文档 ≤5 行"
+      - "co-creation docs direct push"
       - "不涉及代码"
     output: "Isolated worktree with Redis 6398"
     next: ["tdd"]
     sop_step: 1
     merged_from: ["using-git-worktrees"]
 
+  # ── 共创型文档交付 ──
+  co-creation-docs:
+    category: "开发流程"
+    description: >
+      共创型文档交付 lane：先区分只审阅还是授权落盘，再用冲突、治理风险、可逆性决定 direct push / PR / cloud / full gate。
+      Use when: 共创架构图、思想纲领、discussion、研究笔记或其他 docs-only 内容并准备落盘。
+      Not for: 只读 review、任何代码/脚本/skill/SOP 执行面改动、用户数据或外部契约变更。
+      Output: 风险匹配的文档校验 + 可选内容 review + commit/push 或 PR 证据。
+      GOTCHA: 行数和 Markdown diff 不是升档条件；显然 light 可自判直推，进入重载体前或拿不准时才运行 classifier。
+    triggers:
+      - "共创文档"
+      - "改 MD"
+      - "思想纲领"
+      - "架构文档"
+      - "docs-only"
+      - "co-creation docs"
+    not_for:
+      - "只 review 不落盘"
+      - "代码或脚本改动"
+      - "SOP 或 skill 实现改动"
+    output: "Risk-matched docs validation + optional content review + commit/push or PR evidence"
+    next: ["merge-gate", "writing-plans"]
+    sop_step: null
+
   # ── TDD ──
   tdd:
     category: "开发流程"
     description: >
-      Red-Green-Refactor 测试驱动开发纪律。
-      Use when: 写新功能代码、修 bug、任何实现工作。
-      Not for: 纯文档、纯调研、已有充分测试的 trivial 改动。
-      Output: 失败测试 → 最小实现 → 重构，全程有测试保护。
+      Red-Green-Refactor for changes with behavior or regression risk.
+      Use when: adding observable behavior, fixing a bug, or changing logic not already covered by a precise executable check.
+      Not for: pure docs/research, deterministic generated-artifact refreshes, or mechanical changes already covered by an existing checker.
+      Output: observed RED (new test or existing failing check) → minimal GREEN → refactor under protection.
     triggers:
       - "写代码"
       - "test first"
@@ -190,6 +214,7 @@ skills:
     not_for:
       - "纯文档"
       - "调研"
+      - "确定性生成物刷新"
     output: "Tests + implementation (red-green-refactor)"
     next: ["quality-gate"]
     sop_step: 1
@@ -225,7 +250,8 @@ skills:
       Use when: operator不满且搜证据确认历史上重复出现、连续 cancel、反复出现的陌生任务类型。
       Not for: 一次性批评（搜证据未发现重复）、玩笑式笨猫、首次代码 bug（用 debugging）、
       review 反馈（用 receive-review）、一次性新任务（直接做不建 harness）。
-      Output: Rich block 诊断卡 + 可选 F128 新 thread 提议 + 根因分类。
+      Output: 重复未确认=不强制 Rich Block；重复已确认且仍需 operator 决策=kind=interactive；
+      重复已确认且无需 operator 决策=直接行动后 kind=card。两类结构化诊断都包含根因、证据和处置/结果。
       GOTCHA: 必须先搜证据确认重复才弹卡。"又"是高频词不能字面匹配。一次性新任务先做再沉淀。
     triggers:
       - "又忘了"
@@ -241,7 +267,7 @@ skills:
       - "首次代码 bug"
       - "review 反馈"
       - "一次性新任务"
-    output: "Rich block 诊断卡 / F128 thread 提议 / 根因分类"
+    output: "重复未确认不强制 block；重复已确认后按 operator 决策需要产出 interactive 或行动后 card"
     next: ["debugging", "deep-research", "writing-skills", "self-evolution"]
     sop_step: null
 
@@ -249,8 +275,8 @@ skills:
   quality-gate:
     category: "开发流程"
     description: >
-      开发完成后的自检门禁：愿景对照 + spec 合规 + 验证。
-      Use when: 开发完了准备提 review、声称完成了、准备交付。
+      完成声明前的按需自检：愿景对照 + spec 合规 + 风险匹配验证。
+      Use when: 准备对交付作完成声明、需要整理风险匹配的自证。
       Not for: 收到 review 反馈（用 receive-review）、merge（用 merge-gate）。
       Output: Spec 合规报告（含愿景覆盖度）。
     triggers:
@@ -292,10 +318,10 @@ skills:
   request-review:
     category: "开发流程"
     description: >
-      向跨家族 peer-reviewer 发送 review 请求（含五件套）。
-      Use when: 自检通过后准备请其他猫 review。
-      Not for: 收到 review 结果（用 receive-review）、自检（用 quality-gate）。
-      Output: Review 请求信（存档到 review-notes/）。
+      Route a change to a non-author local peer when local review is the selected independent validation source.
+      Use when: risk routing chooses a stateful local reviewer for implementation, governance, or semantic context.
+      Not for: cloud as the selected source, vision-guardian acceptance, self-check, or review feedback handling.
+      Output: risk-matched review packet + provenance-matched verdict route; mailbox archive only when the change needs the full packet.
     triggers:
       - "请 review"
       - "帮我看看"
@@ -303,7 +329,7 @@ skills:
     not_for:
       - "收到 review"
       - "自检"
-    output: "Review request letter in review-notes/"
+    output: "Risk-matched local review packet in thread/PR; optional mailbox archive"
     next: ["receive-review"]
     sop_step: 3
     merged_from: ["cat-cafe-requesting-review"]
@@ -333,8 +359,8 @@ skills:
   merge-gate:
     category: "开发流程"
     description: >
-      合入 main 的完整流程：门禁检查 → PR → remote review → squash merge → 清理。
-      Use when: reviewer 放行后准备合入、开 PR、触发remote review、准备 merge。
+      合入 main：按行为 / 数据 / 安全 / 契约 / 不可逆风险选择 targeted 或 full gate，并消费有客观触发理由的独立 review source。
+      Use when: 选中的 reviewer 放行后准备合入、开 PR 或准备 merge。
       Not for: 开发中、review 未通过、自检未完成。
       Output: PR merged + worktree cleaned。
     triggers:
@@ -475,18 +501,25 @@ skills:
   cross-cat-handoff:
     category: "引导与协作"
     description: >
-      跨猫传话/交接的五件套结构（What/Why/Tradeoff/Open/Next）。
-      Use when: 交接工作给其他猫、传话、写 review 信。
-      Not for: 自己的任务、不涉及其他猫的工作。
-      Output: 结构化交接信。
+      跨猫传话/交接的五件套结构 + review entry/completion 双路由 + action successor 单飞身份。
+      Use when: 交接工作给其他猫、传话、写 review 信、选择 fallback/下一棒，或创建 exact-HEAD external PR review task / PR tracking instructions。
+      Not for: 自己的任务、不涉及其他猫的工作、纯 #ideate 并行思辨（用 collaborative-thinking）。
+      Output: 结构化交接信；review 入口先分 formal/advisory，再按 author/custody/handoff source 选择 external GitHub artifact 或 local author route；同一动作另附 subject/action/slot 与 single/parallel intent。
+      GOTCHA: formal external review 与 no-comment 指令互斥；external artifact 与 local author handoff 不能互相代偿；共享 GitHub login 不等于同一个 catId；fallback 是有证据的 replace。
     triggers:
       - "交接"
       - "传话"
       - "handoff"
+      - "fallback"
+      - "下一棒"
+      - "exact-HEAD review"
+      - "PR tracking"
+      - "advisory_read_only"
     not_for:
       - "自己的任务"
       - "不涉及其他猫"
-    output: "5-part handoff message"
+      - "纯 #ideate 并行思辨"
+    output: "5-part handoff message + action successor identity"
     next: []
     sop_step: null
     merged_from: null
@@ -583,16 +616,18 @@ skills:
   source-audit:
     category: "调研与知识"
     description: >
-      外部证据信源卫生中档闸门。
-      Use when: 准备引用外部 claim，且命中数字/百分比、benchmark、因果归因、趋势判断、模型能力对比、论文/医学/金融、或会落 docs/ADR/PPT 的高风险特征。
+      外部证据信源卫生与研究贡献中档闸门。
+      Use when: 准备引用外部 claim，且命中数字/百分比、benchmark、因果归因、趋势判断、模型能力对比、论文/医学/金融、研究贡献，或会落 docs/ADR/PPT 的高风险特征。
       Not for: 简单事实查询、只读官方一手文档且不做外推、已经进入 deep-research 的重调研。
-      Output: claim ledger + verdict（use / use-with-caveat / reject / escalate-to-deep-research）+ provenance 行。
+      Output: claim ledger + Source verdict + Non-triviality verdict + Decision fit + provenance 行。
     triggers:
       - "信源"
       - "source audit"
       - "provenance"
       - "百分比"
       - "benchmark"
+      - "论文贡献"
+      - "自进化"
       - "因果归因"
       - "趋势判断"
       - "模型能力对比"
@@ -600,8 +635,33 @@ skills:
       - "简单事实查询"
       - "官方一手文档且不外推"
       - "已进入 deep-research"
-    output: "Claim ledger + verdict + provenance"
+    output: "Claim ledger + Source verdict + Non-triviality verdict + Decision fit + provenance"
     next: ["deep-research"]
+    sop_step: null
+    merged_from: null
+
+  # ── Eval 设计与体检（Eval 纲领操作化，2026-07-17）──
+  eval-design:
+    category: "调研与知识"
+    description: >
+      指标出生证（五件套契约）+ 六公理设计自检 + 存量 eval 体检尺（摸鱼/划水/污染）。
+      Use when: 按 ADR-031 v3.4 机制选择判定 eval 该不该建、新增或修改任何指标、审计现有 eval 资产是否摸鱼划水污染。
+      Not for: 单次交付自检（用 quality-gate）、审外部 claim（用 source-audit）、摩擦诊断（用 code-as-harness）。
+      Output: 带出生证的指标定义，或带病名+处置建议的体检报告（不输出总分排行榜）。
+    triggers:
+      - "设计 eval"
+      - "定指标"
+      - "eval 指标"
+      - "指标出生证"
+      - "eval 体检"
+      - "摸鱼指标"
+      - "metric design"
+    not_for:
+      - "单次交付自检"
+      - "外部 claim 审计"
+      - "摩擦诊断"
+    output: "Metric birth certificate 或 eval 体检报告（病名 + 处置）"
+    next: ["quality-gate", "self-evolution"]
     sop_step: null
     merged_from: null
 
@@ -630,6 +690,32 @@ skills:
     sop_step: null
     merged_from: null
 
+  # ── F282 Phase D：主动人物记忆语义判断 ──
+  proactive-memory-judgment:
+    category: "调研与知识"
+    description: >
+      判断单次 continuity-valued 人物线索或 Phase A 频率 nudge 是否应进入 F276 私人记忆提案，
+      并在不提案时留下 enum-only calibrated abstention。
+      Use when: 当轮出现未来可能有用的人物事实、关系、纠正、重要互动，或收到 proactive-memory-candidate nudge。
+      Not for: 裸人名、taste、后台语料扫描、仅因重复出现就判重要、workspace alias 单独登记。
+      Output: 至多一张 F276 proposal，或一条 content-free abstention receipt；永不静默物化。
+    triggers:
+      - "continuity-valued 人物线索"
+      - "proactive-memory-candidate"
+      - "人物记忆机会"
+      - "主动记忆判断"
+      - "person memory opportunity"
+    not_for:
+      - "裸人名"
+      - "taste"
+      - "后台语料扫描"
+      - "重复即重要"
+      - "workspace alias 单独登记"
+    output: "One F276 proposal or one enum-only calibrated abstention receipt"
+    next: []
+    sop_step: null
+    feature: "F282"
+
   memory-search-best-practices:
     category: "调研与知识"
     description: >
@@ -637,7 +723,7 @@ skills:
       Use when: "哪些地方提过 X" / source-map / absence check / delta / coverage 全集 / 冷启动 onboard / 召回任务搜了 1 刀觉得不够。
       Not for: 只是选入口走第一刀（用 memory-navigation）/ 已知精确 anchor 直接 Read / 代码符号查 Grep/LSP / 新功能开发。
       Output: multi-query union 召回 + coverage matrix + "何时停下来"判据。
-      GOTCHA: 和 memory-navigation 互补不重叠 — memory-navigation 决定第一刀工具，本 skill 决定要不要补刀+几路+何时停。Ragdoll家族必加载：治"我能猜出来 / 碎片够了"病。
+      GOTCHA: 和 memory-navigation 互补不重叠 — memory-navigation 决定第一刀工具，本 skill 决定要不要补刀+几路+何时停。Ragdoll家族必加载：opus 系治"我能猜出来 / 碎片够了"停太早病，fable 系治"再确认一轮"停太晚病。
     triggers:
       - "哪些 thread"
       - "哪些 md"
@@ -747,7 +833,36 @@ skills:
     sop_step: null
     merged_from: null
 
-  # ── 视频制作 ──
+  # ── 概念演示 / 视频制作 ──
+  concept-demo-design:
+    category: "创作与媒体"
+    description: >
+      把抽象产品理念、Agent 机制或未来交互变成可录屏、可讲解、可验证的交互概念演示，并先区分家内原生体验与对外叙事展示。
+      Use when: 用户说“做个 demo 让人 get 到”“先做概念片”“把理念演出来”，或产品尚未落地但需要先让受众看见因果、形成 buy-in；也用于明确 demo 是给家里体验还是对外传播。
+      Not for: 已有真实产品页面的常规前端开发（用 console-dev）、已有素材的剪辑成片（用 video-forge）、PPT（用 ppt-forge）、纯视觉探索（用 pencil-design / image-generation）。
+      Output: 带 internal_product_gate / external_showcase 交付车道的 Demo Contract + 录屏友好的交互前端 + 验证记录。
+    triggers:
+      - "概念 demo"
+      - "概念演示"
+      - "做个 demo"
+      - "做 demo"
+      - "前端概念片"
+      - "让人 get 到"
+      - "理念可感知"
+      - "demo contract"
+      - "concept demo"
+      - "给家里看的 demo"
+      - "对外 demo"
+    not_for:
+      - "常规前端开发"
+      - "已有素材的视频剪辑"
+      - "PPT"
+      - "纯视觉探索"
+    output: "Lane-typed Demo Contract + recordable interactive concept demo + verification record"
+    next: ["worktree", "tdd", "browser-preview", "video-forge"]
+    sop_step: null
+    merged_from: null
+
   video-forge:
     category: "创作与媒体"
     description: >
@@ -794,6 +909,37 @@ skills:
       - "PPT"
     output: "Charter+shot-plan+prompt-book+ledger+EDL driven reproducible anime short"
     next: ["feat-lifecycle", "rich-messaging"]
+    sop_step: null
+    merged_from: null
+
+  sprite-forge:
+    description: >
+      角色动态 sprite / 桌宠皮肤 / atlas 状态行生产线：母图锚身份 → Frame A 首帧 →
+      AI 视频生成（人工环节）→ 截帧确定性加工 → atlas row + 三道闸。
+      Use when: 做桌宠皮肤、给猫补新状态动画行、visible-cafe/F258 猫形象素材、
+      角色小循环动画（呼吸/走路/睡觉/挥手级）、把静态角色"做成动态的"。
+      Not for: 动画短片成片（用 anime-forge）、录屏/教程视频（用 video-forge）、
+      单张静态图/头像（用 image-generation）、UI 图标。
+      Output: 192×208 atlas row strip + QA 包 → 三道闸 + operator identity veto 后接 pet.json。
+      GOTCHA: 禁止 imagegen 逐帧直出动画（帧间漂移，Spike R2 实证）——生成层必须是视频，
+      图像模型只出首帧；含人工拍视频环节（operator/云端 Gemini），不是全自动管线。
+    triggers:
+      - "桌宠皮肤"
+      - "sprite"
+      - "spritesheet"
+      - "atlas"
+      - "状态动画"
+      - "动态素材"
+      - "皮肤生产"
+      - "猫动起来"
+      - "pet skin"
+    not_for:
+      - "动画短片成片"
+      - "录屏/教程视频"
+      - "单张静态图/头像"
+      - "UI 图标"
+    output: "192x208 atlas row strip + QA pack, gated by readability/identity-diff/provenance + operator identity veto"
+    next: ["worktree", "tdd"]
     sop_step: null
     merged_from: null
 

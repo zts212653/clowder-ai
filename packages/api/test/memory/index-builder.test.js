@@ -120,6 +120,101 @@ doc_kind: spec
     assert.equal((await store.getByAnchor('F042')).title, 'F042: Updated Title');
   });
 
+  it('incrementalUpdate refreshes frontmatter supersedes graph edges', async () => {
+    const filePath = join(docsDir, 'decisions', '010-cache-v2.md');
+    writeFileSync(
+      filePath,
+      `---
+decision_id: ADR-010
+doc_kind: decision
+supersedes: ADR-001
+---
+
+# ADR-010: Cache v2
+`,
+    );
+    await builder.rebuild();
+
+    let related = await store.getRelated('ADR-010');
+    assert.ok(
+      related.some((edge) => edge.anchor === 'ADR-001' && edge.relation === 'supersedes'),
+      'rebuild should create initial supersedes edge',
+    );
+
+    writeFileSync(
+      filePath,
+      `---
+decision_id: ADR-010
+doc_kind: decision
+supersedes: ADR-002
+---
+
+# ADR-010: Cache v2
+`,
+    );
+    await builder.incrementalUpdate([filePath]);
+
+    related = await store.getRelated('ADR-010');
+    assert.ok(
+      !related.some((edge) => edge.anchor === 'ADR-001' && edge.relation === 'supersedes'),
+      'incrementalUpdate should remove stale supersedes edge',
+    );
+    assert.ok(
+      related.some((edge) => edge.anchor === 'ADR-002' && edge.relation === 'supersedes'),
+      'incrementalUpdate should create updated supersedes edge',
+    );
+
+    writeFileSync(
+      filePath,
+      `---
+decision_id: ADR-010
+doc_kind: decision
+---
+
+# ADR-010: Cache v2
+`,
+    );
+    await builder.incrementalUpdate([filePath]);
+
+    related = await store.getRelated('ADR-010');
+    assert.ok(
+      !related.some((edge) => edge.relation === 'supersedes'),
+      'incrementalUpdate should remove supersedes edges when frontmatter drops supersedes',
+    );
+  });
+
+  it('incrementalUpdate clears frontmatter supersedes graph edges when a doc is deleted', async () => {
+    const filePath = join(docsDir, 'decisions', '011-cache-v3.md');
+    writeFileSync(
+      filePath,
+      `---
+decision_id: ADR-011
+doc_kind: decision
+supersedes: ADR-003
+---
+
+# ADR-011: Cache v3
+`,
+    );
+    await builder.rebuild();
+
+    let related = await store.getRelated('ADR-011');
+    assert.ok(
+      related.some((edge) => edge.anchor === 'ADR-003' && edge.relation === 'supersedes'),
+      'rebuild should create initial frontmatter supersedes edge',
+    );
+
+    unlinkSync(filePath);
+    await builder.incrementalUpdate([filePath]);
+
+    assert.equal(await store.getByAnchor('ADR-011'), null, 'deleted doc anchor should be removed');
+    related = await store.getRelated('ADR-011');
+    assert.ok(
+      !related.some((edge) => edge.anchor === 'ADR-003' && edge.relation === 'supersedes'),
+      'incremental delete should remove frontmatter supersedes edges from the deleted anchor',
+    );
+  });
+
   it('checkConsistency reports ok when fts matches docs', async () => {
     writeFileSync(
       join(docsDir, 'features', 'F001.md'),
@@ -259,7 +354,7 @@ doc_kind: spec
     assert.equal(upper.anchor, lower.anchor);
   });
 
-  it('feature spec wins anchor collision over plan/lesson with same feature_ids', async () => {
+  it('non-feature docs with feature_ids get their own anchors (no collision)', async () => {
     mkdirSync(join(docsDir, 'plans'), { recursive: true });
     mkdirSync(join(docsDir, 'lessons'), { recursive: true });
 
@@ -275,7 +370,7 @@ doc_kind: spec
 `,
     );
 
-    // Plan that also references F042 (scanned after features)
+    // Plan that references F042 — should get its own anchor
     writeFileSync(
       join(docsDir, 'plans', 'plan-f042.md'),
       `---
@@ -287,7 +382,7 @@ doc_kind: plan
 `,
     );
 
-    // Lesson that also references F042 (scanned last)
+    // Lesson that references F042 — should get its own anchor
     writeFileSync(
       join(docsDir, 'lessons', 'lesson-f042.md'),
       `---
@@ -301,14 +396,24 @@ doc_kind: lesson
 
     await builder.rebuild({ force: true });
 
-    const item = await store.getByAnchor('F042');
-    assert.ok(item, 'F042 should exist');
-    // Feature spec should win over plan/lesson
-    assert.equal(item.kind, 'feature', 'Feature spec should win anchor collision');
-    assert.ok(item.sourcePath.includes('features/'), `Source should be features/ dir, got: ${item.sourcePath}`);
+    // Feature doc owns F042 anchor
+    const feature = await store.getByAnchor('F042');
+    assert.ok(feature, 'F042 should exist');
+    assert.equal(feature.kind, 'feature');
+    assert.ok(feature.sourcePath.includes('features/'));
+
+    // Plan gets its own path-based anchor (no collision)
+    const plan = await store.getByAnchor('doc:plans/plan-f042');
+    assert.ok(plan, 'Plan should exist with its own path-based anchor');
+    assert.equal(plan.kind, 'plan');
+
+    // Lesson gets its own path-based anchor (no collision)
+    const lesson = await store.getByAnchor('doc:lessons/lesson-f042');
+    assert.ok(lesson, 'Lesson should exist with its own path-based anchor');
+    assert.equal(lesson.kind, 'lesson');
   });
 
-  it('incrementalUpdate does not let plan overwrite feature spec anchor', async () => {
+  it('incrementalUpdate: plan with feature_ids keeps its own anchor, feature unaffected', async () => {
     mkdirSync(join(docsDir, 'plans'), { recursive: true });
 
     const featurePath = join(docsDir, 'features', 'F042-prompt.md');
@@ -335,19 +440,33 @@ doc_kind: plan
 `,
     );
 
-    // First rebuild — feature wins
     await builder.rebuild({ force: true });
-    const before = await store.getByAnchor('F042');
-    assert.equal(before.kind, 'feature', 'Feature should own anchor after rebuild');
+    assert.equal((await store.getByAnchor('F042')).kind, 'feature', 'Feature should own F042');
+    assert.ok(await store.getByAnchor('doc:plans/plan-f042'), 'Plan should have own anchor');
 
-    // Now incrementally update the plan file — should NOT overwrite feature
+    // Incrementally update the plan — should update its own anchor, not touch feature
+    writeFileSync(
+      planPath,
+      planPath.endsWith('.md')
+        ? `---
+feature_ids: [F042]
+doc_kind: plan
+---
+
+# Plan for F042 Implementation (updated)
+`
+        : '',
+    );
     await builder.incrementalUpdate([planPath]);
-    const after = await store.getByAnchor('F042');
-    assert.equal(after.kind, 'feature', 'Feature should still own anchor after plan incrementalUpdate');
-    assert.ok(after.sourcePath.includes('features/'), `Source should remain features/, got: ${after.sourcePath}`);
+
+    const feature = await store.getByAnchor('F042');
+    assert.equal(feature.kind, 'feature', 'Feature should still own F042 after plan update');
+    const plan = await store.getByAnchor('doc:plans/plan-f042');
+    assert.ok(plan, 'Plan should still exist with its own anchor');
+    assert.ok(plan.title.includes('updated'), 'Plan should be updated');
   });
 
-  it('incrementalUpdate: deleted feature + updated plan in same batch promotes plan', async () => {
+  it('incrementalUpdate: deleted feature removes anchor, plan keeps its own', async () => {
     mkdirSync(join(docsDir, 'plans'), { recursive: true });
 
     const featurePath = join(docsDir, 'features', 'F042-prompt.md');
@@ -374,22 +493,26 @@ doc_kind: plan
 `,
     );
 
-    // Rebuild — feature wins
+    // Rebuild — feature owns F042, plan has its own anchor
     await builder.rebuild({ force: true });
     assert.equal((await store.getByAnchor('F042')).kind, 'feature');
+    assert.ok(await store.getByAnchor('doc:plans/plan-f042'), 'Plan has its own anchor');
 
     // Delete the feature file
     unlinkSync(featurePath);
 
-    // incrementalUpdate with plan first, deleted feature second (worst-case ordering)
+    // incrementalUpdate — feature is removed, plan is unaffected
     await builder.incrementalUpdate([planPath, featurePath]);
 
-    const after = await store.getByAnchor('F042');
-    assert.ok(after, 'F042 should still exist — plan should take over after feature deletion');
-    assert.equal(after.kind, 'plan', 'Plan should own anchor after feature is deleted');
+    const featureGone = await store.getByAnchor('F042');
+    assert.equal(featureGone, null, 'F042 anchor should be removed when feature file is deleted');
+
+    const plan = await store.getByAnchor('doc:plans/plan-f042');
+    assert.ok(plan, 'Plan should still exist with its own anchor');
+    assert.equal(plan.kind, 'plan');
   });
 
-  it('P1-1: rebuild migrates anchor to lower-priority doc when higher-priority owner is deleted', async () => {
+  it('P1-1: rebuild removes feature anchor when spec file deleted, plan keeps own anchor', async () => {
     mkdirSync(join(docsDir, 'plans'), { recursive: true });
 
     const featurePath = join(docsDir, 'features', 'F042-prompt.md');
@@ -416,22 +539,26 @@ doc_kind: plan
 `,
     );
 
-    // First rebuild — feature wins
+    // First rebuild — feature owns F042, plan has path-based anchor
     await builder.rebuild({ force: true });
-    const before = await store.getByAnchor('F042');
-    assert.equal(before.kind, 'feature', 'Feature should own anchor initially');
+    assert.equal((await store.getByAnchor('F042')).kind, 'feature');
+    assert.ok(await store.getByAnchor('doc:plans/plan-f042'), 'Plan has own anchor');
 
     // Delete the feature file, plan still exists
     unlinkSync(featurePath);
     await builder.rebuild();
 
-    const after = await store.getByAnchor('F042');
-    assert.ok(after, 'F042 should still exist — plan should take over');
-    assert.equal(after.kind, 'plan', 'Plan should own anchor after feature deletion');
-    assert.ok(after.sourcePath.includes('plans/'), `Source should be plans/, got: ${after.sourcePath}`);
+    // Feature anchor is gone (file deleted, no other claimant)
+    const featureGone = await store.getByAnchor('F042');
+    assert.equal(featureGone, null, 'F042 anchor should be removed when spec is deleted');
+
+    // Plan survives with its own anchor
+    const plan = await store.getByAnchor('doc:plans/plan-f042');
+    assert.ok(plan, 'Plan should still exist with path-based anchor');
+    assert.equal(plan.kind, 'plan');
   });
 
-  it('P1-2: incrementalUpdate backfills anchor from candidate doc when only delete event received', async () => {
+  it('P1-2: incrementalUpdate removes feature anchor cleanly when spec deleted', async () => {
     mkdirSync(join(docsDir, 'plans'), { recursive: true });
 
     const featurePath = join(docsDir, 'features', 'F042-prompt.md');
@@ -458,17 +585,21 @@ doc_kind: plan
 `,
     );
 
-    // Rebuild — feature wins
+    // Rebuild — feature owns F042, plan has path-based anchor
     await builder.rebuild({ force: true });
     assert.equal((await store.getByAnchor('F042')).kind, 'feature');
+    assert.ok(await store.getByAnchor('doc:plans/plan-f042'), 'Plan indexed with own anchor');
 
-    // Delete feature file, but plan is NOT in changedPaths (only the delete)
+    // Delete feature file (only the delete in changedPaths)
     unlinkSync(featurePath);
     await builder.incrementalUpdate([featurePath]);
 
-    const after = await store.getByAnchor('F042');
-    assert.ok(after, 'F042 should still exist — plan should backfill after feature-only delete');
-    assert.equal(after.kind, 'plan', 'Plan should own anchor after feature-only delete');
+    // Feature anchor removed, plan unaffected
+    const featureGone = await store.getByAnchor('F042');
+    assert.equal(featureGone, null, 'F042 should be removed when spec file deleted');
+
+    const plan = await store.getByAnchor('doc:plans/plan-f042');
+    assert.ok(plan, 'Plan should still exist with own anchor after feature deletion');
   });
 
   it('incrementalUpdate deletes anchor when file no longer exists', async () => {
@@ -492,6 +623,138 @@ doc_kind: spec
 
     const stale = await store.getByAnchor('F099');
     assert.equal(stale, null, 'F099 should be removed after incremental update');
+  });
+
+  // ── Ghost bug: non-feature docs with feature_ids should NOT steal feature anchor ──
+
+  it('architecture doc with feature_ids gets path-based anchor, not feature anchor', async () => {
+    mkdirSync(join(docsDir, 'architecture'), { recursive: true });
+
+    // Feature spec for F102
+    writeFileSync(
+      join(docsDir, 'features', 'F102.md'),
+      `---
+feature_ids: [F102]
+doc_kind: spec
+---
+
+# F102: Memory System
+`,
+    );
+
+    // Architecture doc that REFERENCES F102 (should NOT steal anchor)
+    writeFileSync(
+      join(docsDir, 'architecture', 'overview.md'),
+      `---
+feature_ids: [F102, F163]
+---
+
+# Architecture Overview
+
+The memory system architecture.
+`,
+    );
+
+    await builder.rebuild({ force: true });
+
+    // Feature doc should own F102 anchor
+    const feature = await store.getByAnchor('F102');
+    assert.ok(feature, 'F102 feature doc should exist');
+    assert.equal(feature.kind, 'feature', 'F102 should be feature kind');
+    assert.ok(feature.sourcePath.includes('features/'), `Source should be features/, got: ${feature.sourcePath}`);
+
+    // Architecture doc should have its OWN path-based anchor, not F102
+    const archDoc = await store.getByAnchor('doc:architecture/overview');
+    assert.ok(archDoc, 'Architecture doc should exist with path-based anchor (not ghost)');
+    assert.ok(archDoc.title.includes('Architecture'), `Title should be about architecture, got: ${archDoc.title}`);
+  });
+
+  it('feature assets with feature_ids do not replace the canonical feature spec anchor', async () => {
+    mkdirSync(join(docsDir, 'features', 'assets', 'F088'), { recursive: true });
+
+    writeFileSync(
+      join(docsDir, 'features', 'F088-chat-gateway.md'),
+      `---
+feature_ids: [F088]
+doc_kind: spec
+---
+
+# F088 Multi-Platform Chat Gateway
+`,
+    );
+
+    writeFileSync(
+      join(docsDir, 'features', 'assets', 'F088', 'platform-selection.md'),
+      `---
+feature_ids: [F088]
+doc_kind: spec
+---
+
+# F088 Platform Selection Notes
+`,
+    );
+
+    await builder.rebuild({ force: true });
+
+    const feature = await store.getByAnchor('F088');
+    assert.ok(feature, 'F088 feature doc should exist');
+    assert.equal(feature.sourcePath, 'features/F088-chat-gateway.md');
+
+    const asset = await store.getByAnchor('doc:features/assets/F088/platform-selection');
+    assert.ok(asset, 'feature asset should remain searchable under a path-based anchor');
+    assert.ok(asset.keywords?.includes('F088'), 'feature asset should retain F088 as a discovery keyword');
+  });
+
+  it('non-feature doc feature_ids become keywords, not anchor', async () => {
+    mkdirSync(join(docsDir, 'architecture'), { recursive: true });
+
+    writeFileSync(
+      join(docsDir, 'architecture', 'deep-dive.md'),
+      `---
+feature_ids: [F102, F163, F186]
+---
+
+# Memory Deep Dive
+
+Detailed analysis.
+`,
+    );
+
+    await builder.rebuild({ force: true });
+
+    // Should get path-based anchor
+    const doc = await store.getByAnchor('doc:architecture/deep-dive');
+    assert.ok(doc, 'Should exist with path-based anchor');
+
+    // feature_ids should be in keywords for discoverability
+    assert.ok(doc.keywords?.includes('F102'), 'F102 should be in keywords');
+    assert.ok(doc.keywords?.includes('F163'), 'F163 should be in keywords');
+    assert.ok(doc.keywords?.includes('F186'), 'F186 should be in keywords');
+  });
+
+  it('decision with feature_ids and decision_id uses decision_id as anchor', async () => {
+    writeFileSync(
+      join(docsDir, 'decisions', 'ADR-042.md'),
+      `---
+decision_id: ADR-042
+feature_ids: [F159]
+doc_kind: decision
+---
+
+# ADR-042: Agent Invocation Approach
+`,
+    );
+
+    await builder.rebuild({ force: true });
+
+    // Should use decision_id, NOT feature_ids[0]
+    const decision = await store.getByAnchor('ADR-042');
+    assert.ok(decision, 'Decision should exist with decision_id anchor');
+    assert.equal(decision.kind, 'decision');
+
+    // F159 should NOT be the anchor (would collide with real F159)
+    // It should be findable via the decision_id anchor
+    assert.equal(decision.anchor.toLowerCase(), 'adr-042');
   });
 });
 
@@ -1290,6 +1553,49 @@ describe('IndexBuilder passage indexing (E3/E4/E5)', () => {
       .all('thread-thread_perm1');
     assert.equal(passagesAfterSecond.length, 3, 'second rebuild: all 3 passages must persist (AC-I2)');
     assert.equal(passagesAfterSecond[0].passage_id, 'msg-perm_001', 'expired message passage still exists');
+  });
+
+  it('I2: rebuild preserves thread passages when a thread temporarily disappears from threadListFn', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    const thread = {
+      id: 'thread_missing_once',
+      title: 'Transient thread absence',
+      participants: ['codex'],
+      threadMemory: { summary: 'Transient absence should not erase raw passages.' },
+      lastActiveAt: Date.now(),
+    };
+    const messages = [
+      {
+        id: 'missing_001',
+        content: 'transientabsencepassage should survive a missing thread list cycle',
+        catId: 'codex',
+        threadId: thread.id,
+        timestamp: Date.now(),
+      },
+    ];
+
+    let currentThreads = [thread];
+    const builder = new IndexBuilder(
+      store,
+      docsDir,
+      undefined,
+      undefined,
+      () => currentThreads,
+      (threadId) => (threadId === thread.id ? messages : []),
+    );
+    await builder.rebuild();
+    assert.equal(store.searchPassages('transientabsencepassage').length, 1);
+
+    currentThreads = [];
+    await builder.rebuild();
+
+    const passages = store
+      .getDb()
+      .prepare('SELECT * FROM evidence_passages WHERE doc_anchor = ?')
+      .all('thread-thread_missing_once');
+    assert.equal(passages.length, 1, 'thread raw passages must survive transient thread-list absence');
+    assert.equal(store.searchPassages('transientabsencepassage').length, 1);
   });
 
   it('I1: backfillPassagesFromTranscript adds passages from JSONL events', async () => {
@@ -2222,6 +2528,24 @@ describe('IndexBuilder indexing version auto-rebuild', () => {
     assert.ok(
       INDEXING_VERSION >= 5,
       'INDEXING_VERSION must stay at or above 5 so existing visual artifacts get searchable text backfilled',
+    );
+  });
+
+  it('stays at or above 10 to rebuild feature anchors after excluding feature assets', async () => {
+    const { INDEXING_VERSION } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    assert.ok(
+      INDEXING_VERSION >= 10,
+      'INDEXING_VERSION must stay at or above 10 so feature asset anchors are replaced by canonical feature specs',
+    );
+  });
+
+  it('stays at or above 11 to materialize approved Taste vignette payloads', async () => {
+    const { INDEXING_VERSION } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    assert.ok(
+      INDEXING_VERSION >= 11,
+      'INDEXING_VERSION must stay at or above 11 so frontmatter-only Taste vignettes gain complete decision passages',
     );
   });
 

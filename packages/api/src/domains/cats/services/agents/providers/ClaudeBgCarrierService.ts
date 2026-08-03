@@ -34,7 +34,7 @@ import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { resolveCliCommandOrBare } from '../../../../../utils/cli-resolve.js';
 import { buildChildEnv } from '../../../../../utils/cli-spawn.js';
-import type { AgentMessage, AgentService, AgentServiceOptions } from '../../types.js';
+import type { AgentMessage, AgentService, AgentServiceOptions, ToolExecutionPolicy } from '../../types.js';
 import {
   accumulateUsageFromEntries,
   createUsageAccumulator,
@@ -44,6 +44,7 @@ import {
 import {
   ANTHROPIC_PROFILE_MODE_KEY,
   buildClaudeEnvOverrides,
+  resolveClaudeEffortLevel,
   resolveClaudeModelSelection,
   resolveDefaultClaudeMcpServerPath,
   SUBSCRIPTION_MODE_DENY_KEYS,
@@ -174,6 +175,10 @@ export class ClaudeBgCarrierService implements AgentService {
     return true;
   }
 
+  supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
+    return policy.mode === 'read_only';
+  }
+
   /**
    * F198 Bug #3 — the bg daemon forks a fresh sessionId UUID every
    * `--bg --resume` round, so there is no stable per-conversation id. Signal
@@ -195,11 +200,11 @@ export class ClaudeBgCarrierService implements AgentService {
    * (mirrors the per-instance mcp-config temp-file pattern, also not cleaned).
    * @returns absolute path to the written L0 file.
    */
-  private async compileL0ToTempFile(): Promise<string> {
+  private async compileL0ToTempFile(userId?: string): Promise<string> {
     const l0Dir = mkdtempSync(join(tmpdir(), 'cat-cafe-l0-'));
     const l0Path = join(l0Dir, 'system-prompt-l0.md');
     try {
-      await this.l0CompilerFn({ catId: this.catId as string, outPath: l0Path });
+      await this.l0CompilerFn({ catId: this.catId as string, userId, outPath: l0Path });
     } catch (err) {
       throw new CarrierError(`L0 compile failed for ${this.catId as string}: ${(err as Error).message}`, err);
     }
@@ -214,7 +219,8 @@ export class ClaudeBgCarrierService implements AgentService {
    * reject instead of hanging.
    */
   async startJob(prompt: string, options?: AgentServiceOptions): Promise<StartJobResult> {
-    const l0Path = await this.compileL0ToTempFile();
+    const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
+    const l0Path = await this.compileL0ToTempFile(options?.callbackEnv?.CAT_CAFE_USER_ID);
     return new Promise<StartJobResult>((resolve, reject) => {
       // Critical: even with --bg, the child inherits parent env unless we
       // explicitly strip CLAUDE_CODE_ENTRYPOINT. Otherwise transcript entrypoint
@@ -251,6 +257,7 @@ export class ClaudeBgCarrierService implements AgentService {
       }
       envOverrides.CLAUDE_CODE_ENTRYPOINT = null;
       envOverrides.CLAUDECODE = null;
+      if (readOnly) envOverrides.CAT_CAFE_READONLY = 'true';
       const env = buildChildEnv(envOverrides);
 
       // F198 codex round-7 B-prime refactor: model selection delegates to
@@ -259,12 +266,18 @@ export class ClaudeBgCarrierService implements AgentService {
       // - callbackEnv MODEL_OVERRIDE_KEY (per-invocation override)
       // - api_key + non-Anthropic model → omit --model (let env drive)
       const { effectiveModel, useEnvModelOverride } = resolveClaudeModelSelection(options?.callbackEnv, this.model);
+      const effortLevel = resolveClaudeEffortLevel(
+        this.catId as string,
+        effectiveModel,
+        options?.reasoningEffortOverride,
+      );
       // #840 R2 (砚砚 review 2026-06-02): bg carrier prompt also rides argv
       // historically — same ENAMETOOLONG risk as the `-p` carrier. Spike
       // verified `claude --bg` accepts stdin prompt (supervisor reads stdin
       // before detaching worker daemon). Remove prompt positional from argv;
       // stream content via stdin (set up below).
       const args = useEnvModelOverride ? ['--bg'] : ['--bg', '--model', effectiveModel];
+      args.push('--effort', effortLevel);
       // F203 Phase C: native system role from compiled L0 file (above).
       args.push('--system-prompt-file', l0Path);
 
@@ -300,7 +313,8 @@ export class ClaudeBgCarrierService implements AgentService {
       // from web UI) → invocations hung. Realized when co-creator flipped
       // CAT_CAFE_CLAUDE_CARRIER=bg_daemon in runtime and布偶猫 cats stalled
       // on first Bash call. Parity-keep with ClaudeAgentService PERMISSION_MODE.
-      args.push('--permission-mode', 'bypassPermissions');
+      args.push('--permission-mode', readOnly ? 'plan' : 'bypassPermissions');
+      if (readOnly) args.push('--tools', '', '--strict-mcp-config');
 
       // 砚砚 Step-3 P1 (2026-05-14): inject --mcp-config when callbackEnv
       // present + mcpServerPath resolved. Mirrors ClaudeAgentService so
@@ -309,7 +323,7 @@ export class ClaudeBgCarrierService implements AgentService {
       //
       // Windows: claude CLI treats inline JSON as a file path → write JSON
       // to a temp file. POSIX: pass JSON inline (matches ClaudeAgentService).
-      if (options?.callbackEnv && this.mcpServerPath) {
+      if (!readOnly && options?.callbackEnv && this.mcpServerPath) {
         const IS_WINDOWS = process.platform === 'win32';
         if (IS_WINDOWS) {
           if (!this.mcpConfigFilePath || !existsSync(this.mcpConfigFilePath)) {

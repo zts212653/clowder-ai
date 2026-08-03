@@ -17,7 +17,10 @@ import type { CatId, ConnectorSource } from '@cat-cafe/shared';
 import type { IBallCustodyIngest } from '../../../../ball-custody/BallCustodyIngest.js';
 import { buildInvocationDiedEvent } from '../../../../ball-custody/ball-custody-events.js';
 import type { IInvocationRecordStore, InvocationRecord } from '../../stores/ports/InvocationRecordStore.js';
-import type { AppendMessageInput } from '../../stores/ports/MessageStore.js';
+import type { AppendMessageInput, IMessageStore } from '../../stores/ports/MessageStore.js';
+import type { ITurnExecutionStore } from '../../stores/ports/TurnExecutionStore.js';
+import type { InvocationQueue } from './InvocationQueue.js';
+import { QueuedMessageCustodyStartupReconciler } from './QueuedMessageCustodyStartupReconciler.js';
 import type { TaskProgressStore } from './TaskProgressStore.js';
 
 export interface StartupSweepResult {
@@ -28,6 +31,10 @@ export interface StartupSweepResult {
   /** Queued user messages made visible after orphan sweep. */
   messagesRecovered: number;
   notifiedThreads: number;
+  queueEntriesRestored: number;
+  queueEntriesResumed: number;
+  queueMessagesBackfilled: number;
+  queueMessagesTerminalized: number;
   durationMs: number;
 }
 
@@ -42,6 +49,9 @@ interface MessageAppender {
   markDelivered?(id: string, deliveredAt: number): unknown;
   /** #697: Scan for message IDs with a given deliveryStatus. */
   scanByDeliveryStatus?(status: string): string[] | Promise<string[]>;
+  getById?(id: string): unknown;
+  initializeQueueCustody?(id: string, custody: unknown): unknown;
+  transitionQueueCustody?(id: string, input: unknown): unknown;
 }
 
 interface ConnectorMessageBroadcaster {
@@ -57,6 +67,8 @@ const RECONCILER_SOURCE: ConnectorSource = {
 
 export interface StartupReconcilerDeps {
   invocationRecordStore: IInvocationRecordStore;
+  /** Durable child lifecycle truth used after callback-auth state has expired. */
+  turnExecutionStore?: ITurnExecutionStore;
   taskProgressStore: TaskProgressStore;
   log: ReconcilerLog;
   /** Only sweep records created before this timestamp (prevents sweeping new invocations from current process). */
@@ -67,6 +79,10 @@ export interface StartupReconcilerDeps {
   socketManager?: ConnectorMessageBroadcaster;
   /** Optional observability ledger for restart-killed running invocations. */
   ballCustody?: IBallCustodyIngest;
+  /** F254: exact in-memory projection rebuilt from durable queued-message custody. */
+  invocationQueue?: InvocationQueue;
+  /** F254: natural next-spawn hook, invoked once for each newly restored queue scope. */
+  resumeQueue?: (threadId: string, userId: string) => Promise<unknown>;
 }
 
 type ScanStore = IInvocationRecordStore & { scanByStatus(status: string): Promise<string[]> };
@@ -94,6 +110,10 @@ export class StartupReconciler {
         taskProgressCleared: 0,
         messagesRecovered: 0,
         notifiedThreads: 0,
+        queueEntriesRestored: 0,
+        queueEntriesResumed: 0,
+        queueMessagesBackfilled: 0,
+        queueMessagesTerminalized: 0,
         durationMs: Date.now() - start,
       };
     }
@@ -107,7 +127,27 @@ export class StartupReconciler {
     // These were persisted to MessageStore with deliveryStatus='queued' but the
     // in-memory InvocationQueue entry was lost on restart. Without this, they stay
     // invisible in timeline forever.
-    const orphanedMessageRecovery = await this.recoverOrphanedQueuedMessages(affectedThreads);
+    const queueCustodyRecovery = await this.reconcileDurableQueueCustody();
+    const orphanedMessageRecovery = queueCustodyRecovery
+      ? queueCustodyRecovery.messagesTerminalized +
+        (await this.recoverOrphanedQueuedMessages(
+          affectedThreads,
+          new Set(queueCustodyRecovery.legacyVisibilityFallbackMessageIds),
+        ))
+      : await this.recoverOrphanedQueuedMessages(affectedThreads);
+    let queueEntriesResumed = 0;
+    if (queueCustodyRecovery && this.deps.resumeQueue) {
+      for (const scope of queueCustodyRecovery.resumeScopes) {
+        try {
+          await this.deps.resumeQueue(scope.threadId, scope.userId);
+          queueEntriesResumed += 1;
+        } catch (err) {
+          this.deps.log.warn(
+            `[startup-reconciler] Failed to resume durable Queue scope ${scope.threadId}/${scope.userId}: ${String(err)}`,
+          );
+        }
+      }
+    }
 
     const notifiedThreads = await this.notifyAffectedThreads(affectedThreads);
 
@@ -122,7 +162,19 @@ export class StartupReconciler {
         `${taskProgressCleared} task-progress cleared, ${messagesRecovered} messages recovered, ` +
         `${notifiedThreads} threads notified, ${durationMs}ms`,
     );
-    return { swept, running, queued, taskProgressCleared, messagesRecovered, notifiedThreads, durationMs };
+    return {
+      swept,
+      running,
+      queued,
+      taskProgressCleared,
+      messagesRecovered,
+      notifiedThreads,
+      queueEntriesRestored: queueCustodyRecovery?.entriesRestored ?? 0,
+      queueEntriesResumed,
+      queueMessagesBackfilled: queueCustodyRecovery?.messagesBackfilled ?? 0,
+      queueMessagesTerminalized: queueCustodyRecovery?.messagesTerminalized ?? 0,
+      durationMs,
+    };
   }
 
   private async sweepRunning(
@@ -149,7 +201,9 @@ export class StartupReconciler {
         if (updated) {
           running++;
           this.recordInvocationDied(record, lastScanAt);
-          this.trackAffectedThread(affectedThreads, record);
+          if (!(await this.isDurableQueuedMessage(record.userMessageId))) {
+            this.trackAffectedThread(affectedThreads, record);
+          }
           taskProgressCleared += await this.clearTaskProgress(record.threadId, record.targetCats);
           // Safe: markDelivered is a no-op for non-queued messages (undefined/delivered/canceled),
           // so already-visible messages won't be re-scored. Only catches the edge case where
@@ -201,7 +255,9 @@ export class StartupReconciler {
         });
         if (updated) {
           queued++;
-          this.trackAffectedThread(affectedThreads, record);
+          if (!(await this.isDurableQueuedMessage(record.userMessageId))) {
+            this.trackAffectedThread(affectedThreads, record);
+          }
           if (await this.ensureMessageVisible(record)) messagesRecovered++;
         }
       } catch (err) {
@@ -298,6 +354,39 @@ export class StartupReconciler {
     return cleared;
   }
 
+  private async isDurableQueuedMessage(messageId: string | null): Promise<boolean> {
+    if (!this.deps.invocationQueue || !messageId || !this.deps.messageStore?.getById) return false;
+    try {
+      const message = await this.deps.messageStore.getById(messageId);
+      return Boolean(
+        message && typeof message === 'object' && (message as { deliveryStatus?: string }).deliveryStatus === 'queued',
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  private async reconcileDurableQueueCustody() {
+    const { invocationQueue, messageStore } = this.deps;
+    if (
+      !invocationQueue ||
+      !messageStore?.scanByDeliveryStatus ||
+      !messageStore.getById ||
+      !messageStore.initializeQueueCustody ||
+      !messageStore.transitionQueueCustody
+    ) {
+      return null;
+    }
+    const reconciler = new QueuedMessageCustodyStartupReconciler({
+      invocationRecordStore: this.deps.invocationRecordStore,
+      ...(this.deps.turnExecutionStore ? { turnExecutionStore: this.deps.turnExecutionStore } : {}),
+      invocationQueue,
+      messageStore: messageStore as IMessageStore,
+      log: this.deps.log,
+    });
+    return reconciler.reconcile();
+  }
+
   /**
    * #697: Find messages still stuck as deliveryStatus='queued' in MessageStore
    * that have no corresponding InvocationRecord (the in-memory queue entry was
@@ -310,13 +399,15 @@ export class StartupReconciler {
    */
   private async recoverOrphanedQueuedMessages(
     affectedThreads: Map<string, { catIds: CatId[]; userId: string }>,
+    onlyMessageIds?: ReadonlySet<string>,
   ): Promise<number> {
     const { messageStore } = this.deps;
     if (!messageStore?.scanByDeliveryStatus || !messageStore.markDelivered) return 0;
 
     let recovered = 0;
     try {
-      const queuedIds = await messageStore.scanByDeliveryStatus('queued');
+      const scannedIds = await messageStore.scanByDeliveryStatus('queued');
+      const queuedIds = onlyMessageIds ? scannedIds.filter((id) => onlyMessageIds.has(id)) : scannedIds;
       if (queuedIds.length === 0) return 0;
 
       this.deps.log.info(`[startup-reconciler] Found ${queuedIds.length} orphaned queued message(s) — recovering`);
@@ -405,8 +496,12 @@ export class StartupReconciler {
   private async ensureMessageVisible(record: InvocationRecord): Promise<boolean> {
     const { messageStore } = this.deps;
     if (!messageStore?.markDelivered || !record.userMessageId) return false;
+    if (await this.isDurableQueuedMessage(record.userMessageId)) return false;
     try {
       const result = await messageStore.markDelivered(record.userMessageId, Date.now());
+      if (result && typeof result === 'object' && 'deliveryTransitioned' in result) {
+        return (result as { deliveryTransitioned?: boolean }).deliveryTransitioned === true;
+      }
       return result != null;
     } catch (err) {
       this.deps.log.warn(

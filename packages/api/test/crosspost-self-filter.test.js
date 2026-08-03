@@ -66,6 +66,19 @@ describe('F052: crossPost self-filter exemption', () => {
     assert.ok(result.contextText.includes('[导航]'), 'KD-7: navigation header present even on empty delta');
   });
 
+  test('legacy self-referential crossPost metadata does not exempt a same-cat message', async () => {
+    const selfMsg = mockMsg({
+      catId: 'opus',
+      content: 'My own message with polluted provenance',
+      extra: { crossPost: { sourceThreadId: 'thread-1' } },
+    });
+    const deps = makeDeps([selfMsg]);
+
+    const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus');
+
+    assert.ok(!result.contextText.includes('polluted provenance'));
+  });
+
   test('whisper not intended for this cat is excluded from baton candidates (P1-R2)', async () => {
     const whisperMsg = mockMsg({
       catId: 'codex',

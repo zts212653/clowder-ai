@@ -57,7 +57,7 @@ function buildDeps(overrides = {}) {
         return !catId ? true : false;
       }),
       cancel: mock.fn(() => ({ cancelled: true, catIds: ['opus'] })),
-      cancelAll: mock.fn(() => ['opus']),
+      cancelAll: mock.fn(() => ({ catIds: ['opus'], executionIds: [] })),
       cancelInvocation: mock.fn(() => ['opus']),
       isDeleting: mock.fn(() => false),
       getActiveSlots: mock.fn(() => [{ catId: 'opus', startedAt: Date.now() }]),

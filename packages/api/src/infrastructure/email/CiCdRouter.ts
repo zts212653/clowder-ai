@@ -1,82 +1,64 @@
-/**
- * F133 + clowder-ai#320: CiCdRouter — route CI/CD poll results to the correct thread.
- *
- * #320: Reads from unified TaskStore instead of PrTrackingStore.
- */
-import type { ConnectorSource } from '@cat-cafe/shared';
+/** F133 + clowder-ai#320: route CI/CD results using the unified TaskStore. */
+import type { ConnectorSource, DeliveryDecisionCueCarrierV1, ManagedWorkBinding } from '@cat-cafe/shared';
 import { prSubjectKey } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
 import type { ICommunityEventLog } from '../../domains/community/CommunityEventLog.js';
+import type {
+  ExternalReviewCoordinator,
+  ExternalReviewCoordinatorResult,
+} from '../../domains/community/external-review/ExternalReviewCoordinator.js';
+import {
+  type CiPollResult,
+  type CiRouteResult,
+  getConnectorDeliveryTarget,
+  type TrackedTaskLike,
+} from './ci-cd-contract.js';
 import { buildCiMessageContent, buildLifecycleMessageContent } from './ci-message-content.js';
 import type { ConnectorDeliveryDeps } from './deliver-connector-message.js';
 import { deliverConnectorMessage } from './deliver-connector-message.js';
 
-// Re-export for existing import sites (index.ts, tests).
 export { buildCiMessageContent, buildLifecycleMessageContent };
+export type {
+  CiBucket,
+  CiCheckDetail,
+  CiExecutionFailure,
+  CiPollResult,
+  CiRouteResult,
+} from './ci-cd-contract.js';
 
-/** Minimal projector interface for optional DI — avoids importing concrete class. */
 interface ICommunityProjectorMin {
   apply(event: Parameters<ICommunityEventLog['append']>[0]): Promise<void>;
 }
 
-export type CiBucket = 'pass' | 'fail' | 'pending';
-
-export interface CiCheckDetail {
-  readonly name: string;
-  readonly bucket: CiBucket;
-  readonly link?: string;
-  readonly workflow?: string;
-  readonly description?: string;
-}
-
-export interface CiPollResult {
-  readonly repoFullName: string;
-  readonly prNumber: number;
-  readonly headSha: string;
-  readonly prState: 'open' | 'merged' | 'closed';
-  readonly aggregateBucket: CiBucket;
-  readonly checks: readonly CiCheckDetail[];
-}
-
-export type CiRouteResult =
-  | { kind: 'notified'; threadId: string; catId: string; messageId: string; bucket: CiBucket; content: string }
-  | {
-      kind: 'lifecycle';
-      threadId: string;
-      catId: string;
-      messageId: string;
-      prState: 'merged' | 'closed';
-      content: string;
-    }
-  | { kind: 'deduped'; reason: string }
-  | { kind: 'skipped'; reason: string };
-
-/** Subset of the tracked TaskItem fields the lifecycle-close path reads. */
-interface TrackedTaskLike {
-  readonly id: string;
-  readonly threadId: string;
-  readonly ownerCatId: string | null;
-  readonly userId?: string;
-  readonly title?: string;
-  readonly automationState?: {
-    readonly ci?: { readonly prState?: 'merged' | 'closed' };
-    readonly trackingInstructions?: string;
-  };
-}
-
-function getConnectorDeliveryTarget(task: Pick<TrackedTaskLike, 'threadId' | 'userId' | 'ownerCatId'>): {
-  threadId: string;
-  userId: string;
-  catId: string;
-} {
+export function buildDeliveryDecisionCueCarrier(
+  poll: CiPollResult,
+  task: Pick<TrackedTaskLike, 'automationState'>,
+  occurredAt: number,
+): DeliveryDecisionCueCarrierV1 | null {
+  if (
+    poll.prState !== 'open' ||
+    poll.aggregateBucket !== 'fail' ||
+    task.automationState?.intent !== 'merge' ||
+    task.automationState.ci?.headSha !== poll.headSha ||
+    !poll.checks.some((check) => check.executionFailure === 'billing_spending_limit_zero_step')
+  ) {
+    return null;
+  }
   return {
-    threadId: task.threadId,
-    userId: task.userId ?? '',
-    catId: task.ownerCatId ?? '',
+    v: 1,
+    producer: 'github_ci',
+    producerProvenance: 'server_github_ci',
+    repoFullName: poll.repoFullName,
+    prNumber: poll.prNumber,
+    headSha: poll.headSha,
+    phase: 'merge_gate',
+    gateOutcome: 'source_evidence_complete',
+    externalCondition: 'billing_spending_limit_zero_step',
+    candidateAction: 'merge',
+    occurredAt,
   };
 }
-
 export interface CiCdRouterOptions {
   readonly taskStore: ITaskStore;
   readonly deliveryDeps: ConnectorDeliveryDeps;
@@ -88,7 +70,8 @@ export interface CiCdRouterOptions {
     ref: string;
     outcome: 'success' | 'failure';
     threadId: string;
-  }) => void;
+    attribution: { kind: 'managed_attributed'; binding: ManagedWorkBinding } | { kind: 'managed_unattributed' };
+  }) => void | Promise<void>;
   /**
    * F168 Phase A (P1-3 fix): canonical PR lifecycle event emission point.
    * CiCdRouter is first to detect merged/closed; ReviewFeedbackTaskSpec may race.
@@ -97,6 +80,8 @@ export interface CiCdRouterOptions {
   readonly eventLog?: ICommunityEventLog;
   /** Optional projector to apply the emitted event immediately after append. */
   readonly projector?: ICommunityProjectorMin;
+  /** F168 Phase F-Step3: current-head readiness and once-per-head reviewer wake. */
+  readonly externalReviewCoordinator?: Pick<ExternalReviewCoordinator, 'recordCi'>;
   /**
    * F208 Phase E AC-E2: distillation checkpoint for feat-phase-close.
    * CiCdRouter is the canonical first-detection point for PR merge — wire here
@@ -145,6 +130,24 @@ export class CiCdRouter {
       return this.closeLifecycle(poll, task, sk);
     }
 
+    const intent = task.automationState?.intent ?? 'review';
+    let externalReviewResult: ExternalReviewCoordinatorResult | undefined;
+    if (intent === 'review' && task.ownerCatId) {
+      try {
+        externalReviewResult = await this.opts.externalReviewCoordinator?.recordCi(poll, {
+          threadId: task.threadId,
+          catId: task.ownerCatId,
+          userId: task.userId ?? '',
+          ...(task.automationState?.wakePolicy ? { wakePolicy: task.automationState.wakePolicy } : {}),
+        });
+      } catch (err) {
+        log.warn(
+          { err, repoFullName: poll.repoFullName, prNumber: poll.prNumber },
+          '[F168] CI readiness update failed',
+        );
+      }
+    }
+
     if (poll.aggregateBucket === 'pending') {
       await taskStore.patchAutomationState(task.id, {
         ci: { headSha: poll.headSha },
@@ -153,11 +156,6 @@ export class CiCdRouter {
     }
 
     const fingerprint = `${poll.headSha}:${poll.aggregateBucket}`;
-    if (task.automationState?.ci?.lastFingerprint === fingerprint) {
-      return { kind: 'deduped', reason: `Already notified for ${fingerprint}` };
-    }
-
-    const intent = task.automationState?.intent ?? 'review';
     if (poll.aggregateBucket === 'pass' && intent !== 'merge') {
       await taskStore.patchAutomationState(task.id, {
         ci: {
@@ -166,8 +164,27 @@ export class CiCdRouter {
           lastBucket: poll.aggregateBucket,
         },
       });
+      if (externalReviewResult?.kind === 'notified') {
+        return {
+          kind: 'notified',
+          threadId: externalReviewResult.threadId,
+          catId: externalReviewResult.catId,
+          messageId: externalReviewResult.messageId,
+          bucket: 'pass',
+          content: externalReviewResult.content,
+          wakeKind: 'external_review_ready',
+          headSha: externalReviewResult.headSha,
+        };
+      }
+      if (task.automationState?.ci?.lastFingerprint === fingerprint) {
+        return { kind: 'deduped', reason: `Already notified for ${fingerprint}` };
+      }
       log.info(`[CiCdRouter] CI pass for ${poll.repoFullName}#${poll.prNumber} recorded silently (intent=${intent})`);
       return { kind: 'skipped', reason: `CI pass silent for review intent (${poll.repoFullName}#${poll.prNumber})` };
+    }
+
+    if (task.automationState?.ci?.lastFingerprint === fingerprint) {
+      return { kind: 'deduped', reason: `Already notified for ${fingerprint}` };
     }
 
     return this.deliver(poll, task, fingerprint);
@@ -233,11 +250,13 @@ export class CiCdRouter {
     // Code reverts are separate git events (revert commits), not PR lifecycle.
     if (poll.prState === 'merged' && this.opts.onPrLifecycle) {
       try {
-        this.opts.onPrLifecycle({
+        const binding = await this.opts.taskStore.getManagedWorkBinding(task.id);
+        await this.opts.onPrLifecycle({
           type: 'merge',
-          ref: `PR#${poll.prNumber}`,
+          ref: sk,
           outcome: 'success',
           threadId: task.threadId,
+          attribution: binding ? { kind: 'managed_attributed', binding } : { kind: 'managed_unattributed' },
         });
       } catch (err) {
         log.warn(
@@ -313,7 +332,11 @@ export class CiCdRouter {
       threadId: string;
       ownerCatId: string | null;
       userId?: string;
-      automationState?: { trackingInstructions?: string };
+      automationState?: {
+        trackingInstructions?: string;
+        intent?: 'review' | 'merge';
+        ci?: { headSha?: string };
+      };
     },
     fingerprint: string,
   ): Promise<CiRouteResult> {
@@ -328,10 +351,12 @@ export class CiCdRouter {
       url: `https://github.com/${poll.repoFullName}/pull/${poll.prNumber}/checks`,
     };
 
+    const deliveryDecision = buildDeliveryDecisionCueCarrier(poll, task, Date.now());
     const result = await deliverConnectorMessage(this.opts.deliveryDeps, {
       ...deliveryTarget,
       content,
       source,
+      ...(deliveryDecision ? { extra: { memoryCue: { deliveryDecision } } } : {}),
     });
 
     // #320: Patch automationState.ci instead of patchCiState

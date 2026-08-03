@@ -571,6 +571,15 @@ function createRelay46Service(catId = 'opus') {
   return service;
 }
 
+function withClaimedA2ASlot(options = {}) {
+  return {
+    invocationController: new AbortController(),
+    trackA2ASlot: () => true,
+    completeA2ASlots: () => {},
+    ...options,
+  };
+}
+
 describe('F215 AC-C3: route-serial malformed relay pushes opus-4.6 to worklist', () => {
   test('when opus48 炸毛, opus-4.6 is invoked as relay and user sees no malformed error', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
@@ -590,7 +599,7 @@ describe('F215 AC-C3: route-serial malformed relay pushes opus-4.6 to worklist',
       'complete my task',
       'user-test',
       'thread-relay-test',
-      {},
+      withClaimedA2ASlot(),
     )) {
       allMsgs.push(msg);
     }
@@ -638,7 +647,7 @@ describe('F215 AC-C3: route-serial malformed relay pushes opus-4.6 to worklist',
       'complete my task',
       'user-test',
       'thread-dup-relay',
-      {},
+      withClaimedA2ASlot(),
     )) {
       allMsgs.push(msg);
     }
@@ -673,7 +682,7 @@ describe('F215 AC-C3: route-serial malformed relay pushes opus-4.6 to worklist',
       'complete my task',
       'user-test',
       'thread-executed-relay',
-      {},
+      withClaimedA2ASlot(),
     )) {
       allMsgs.push(msg);
     }

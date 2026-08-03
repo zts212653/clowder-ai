@@ -55,6 +55,7 @@ function stubDeps(overrides = {}) {
 
 function enqueueEntry(queue, overrides = {}) {
   const result = queue.enqueue({
+    ownerAuthProvenance: 'unknown',
     threadId: 't1',
     userId: 'u1',
     content: '@gemini @opus hello',

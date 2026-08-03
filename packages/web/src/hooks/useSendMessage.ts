@@ -24,7 +24,6 @@ export function useSendMessage(activeThreadId?: string) {
   const {
     addMessage,
     addMessageToThread,
-    removeMessage,
     removeThreadMessage,
     replaceThreadMessageId,
     setLoading,
@@ -35,7 +34,6 @@ export function useSendMessage(activeThreadId?: string) {
     useShallow((s) => ({
       addMessage: s.addMessage,
       addMessageToThread: s.addMessageToThread,
-      removeMessage: s.removeMessage,
       removeThreadMessage: s.removeThreadMessage,
       replaceThreadMessageId: s.replaceThreadMessageId,
       setLoading: s.setLoading,
@@ -126,8 +124,8 @@ export function useSendMessage(activeThreadId?: string) {
           })),
         ];
       }
-      // F117: Queue sends skip optimistic insert — bubble appears only on messages_delivered
-      // (prevents queued message from showing in chat timeline before delivery)
+      // Explicit queue sends wait for the durable server id before publication;
+      // normal sends remain optimistic even when the server smart-queues them.
       if (!isQueueSend) {
         if (threadId !== activeThread) {
           addMessageToThread(threadId, userMsg);
@@ -148,7 +146,7 @@ export function useSendMessage(activeThreadId?: string) {
         }
       }
 
-      const reconcileQueuedResponse = (
+      const reconcileSuccessfulResponse = (
         body: { status?: string; userMessageId?: string; gameThreadId?: string } | null,
       ) => {
         // Game started in independent thread — remove optimistic message from source
@@ -161,15 +159,19 @@ export function useSendMessage(activeThreadId?: string) {
           removeThreadMessage(threadId, optimisticMessageId);
           setThreadLoading(threadId, false);
           setThreadHasActiveInvocation(threadId, false);
-          return true;
+          return;
         }
-        if (body?.status !== 'queued' || isQueueSend) return false;
-        if (threadId !== activeThread) {
-          removeThreadMessage(threadId, optimisticMessageId);
+        if (!body?.userMessageId) return;
+        if (isQueueSend) {
+          const durableUserMessage = { ...userMsg, id: body.userMessageId };
+          if (threadId !== activeThread) {
+            addMessageToThread(threadId, durableUserMessage);
+          } else {
+            addMessage(durableUserMessage);
+          }
         } else {
-          removeMessage(optimisticMessageId);
+          replaceThreadMessageId(threadId, optimisticMessageId, body.userMessageId);
         }
-        return true;
       };
 
       try {
@@ -200,9 +202,7 @@ export function useSendMessage(activeThreadId?: string) {
             throw new Error(body?.detail ?? `Server error: ${res.status}`);
           }
           const body = await res.json().catch(() => null);
-          if (!reconcileQueuedResponse(body) && body?.userMessageId) {
-            replaceThreadMessageId(threadId, optimisticMessageId, body.userMessageId);
-          }
+          reconcileSuccessfulResponse(body);
         } else {
           const res = await apiFetch('/api/messages', {
             method: 'POST',
@@ -221,9 +221,7 @@ export function useSendMessage(activeThreadId?: string) {
             throw new Error(body?.detail ?? `Server error: ${res.status}`);
           }
           const body = await res.json().catch(() => null);
-          if (!reconcileQueuedResponse(body) && body?.userMessageId) {
-            replaceThreadMessageId(threadId, optimisticMessageId, body.userMessageId);
-          }
+          reconcileSuccessfulResponse(body);
         }
         setUploadStatus('idle');
         setUploadError(null);
@@ -265,7 +263,6 @@ export function useSendMessage(activeThreadId?: string) {
       processCommand,
       addMessage,
       addMessageToThread,
-      removeMessage,
       removeThreadMessage,
       replaceThreadMessageId,
       setLoading,

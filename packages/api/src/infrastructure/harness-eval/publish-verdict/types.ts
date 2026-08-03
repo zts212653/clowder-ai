@@ -1,6 +1,7 @@
 import type { FrictionRollupSourceSelector } from '@cat-cafe/shared';
 import type { Redis } from 'ioredis';
 import type { CapabilityWakeupSourceSelector } from '../capability-wakeup/capability-wakeup-trial-provider.js';
+import type { FreshnessReplaySelector } from '../freshness/freshness-replay-types.js';
 import type { QcMetricsSelector } from '../qc-metrics-provider.js';
 import type { SopTraceInput } from '../sop/sop-trace-adapter.js';
 import type { TaskOutcomeVerdict } from '../task-outcome/task-outcome-episode.js';
@@ -42,8 +43,25 @@ export interface PublishOnIsolatedWorktreeOpts {
   stage: (worktreeRoot: string) => Promise<StageResult>;
 }
 
+export interface RefreshPublishedVerdictPrOpts {
+  branchName: string;
+  verdictId: string;
+  expectedHeadSha: string;
+  generatedAt: string;
+  refreshDerivedCensus: (worktreeRoot: string, generatedAt: string, cleanSource: string) => string;
+}
+
+export interface RefreshPublishedVerdictPrResult {
+  outcome: 'updated' | 'already_current';
+  previousHeadSha: string;
+  commitSha: string;
+  baseSha: string;
+  prUrl: string;
+}
+
 export interface GitPublisher {
   publishOnIsolatedWorktree(opts: PublishOnIsolatedWorktreeOpts): Promise<{ commitSha: string; prUrl: string }>;
+  refreshPublishedVerdictPr?(opts: RefreshPublishedVerdictPrOpts): Promise<RefreshPublishedVerdictPrResult>;
 }
 
 /**
@@ -137,6 +155,7 @@ export interface AnchorTelemetrySourceSelector {
  * - friction branch: `FrictionRollupSourceSelector` (kind required, F245 PR1b live sink)
  * - anchor-telemetry branch: `AnchorTelemetrySourceSelector` (kind required, F236 Track-2)
  * - qc branch: `QcMetricsSelector` (kind required, F253 Phase C)
+ * - freshness branch: `FreshnessReplaySelector` (kind required, F254 AC-E9)
  *
  * 砚砚 R1 P1 #2: generator MUST receive explicit `sources` (sanitized
  * evidence refs / replayable selector); tool NEVER fabricates evidence.
@@ -149,7 +168,8 @@ export type VerdictSourceRefs =
   | SopTraceSourceSelector
   | FrictionRollupSourceSelector
   | AnchorTelemetrySourceSelector
-  | QcMetricsSelector;
+  | QcMetricsSelector
+  | FreshnessReplaySelector;
 
 /**
  * Resolved evidence source paths (a2a only — for backward-compat helpers in validation.ts).

@@ -9,14 +9,43 @@ import Fastify from 'fastify';
 
 const INVOCATION_ID = 'inv-test-001';
 const CALLBACK_TOKEN = 'token-test-001';
+const FALLBACK_INVOCATION_ID = 'inv-fallback-001';
+const FALLBACK_CALLBACK_TOKEN = 'token-fallback-001';
+const LEGACY_INVOCATION_ID = 'inv-legacy-001';
+const LEGACY_CALLBACK_TOKEN = 'token-legacy-001';
 
 // Minimal InvocationRegistry stub — returns VerifyResult (F174 Phase A)
 function createStubRegistry() {
   return {
     async verify(invId, token) {
+      if (invId === FALLBACK_INVOCATION_ID && token === FALLBACK_CALLBACK_TOKEN) {
+        return {
+          ok: true,
+          record: {
+            catId: 'opus',
+            threadId: 'thread-1',
+            userId: 'default-user',
+            ownerAuthProvenance: 'compatibility_fallback',
+          },
+        };
+      }
+      if (invId === LEGACY_INVOCATION_ID && token === LEGACY_CALLBACK_TOKEN) {
+        return {
+          ok: true,
+          record: { catId: 'opus', threadId: 'thread-1', userId: 'test-user' },
+        };
+      }
       if (invId !== INVOCATION_ID) return { ok: false, reason: 'unknown_invocation' };
       if (token !== CALLBACK_TOKEN) return { ok: false, reason: 'invalid_token' };
-      return { ok: true, record: { catId: 'opus', threadId: 'thread-1', userId: 'test-user' } };
+      return {
+        ok: true,
+        record: {
+          catId: 'opus',
+          threadId: 'thread-1',
+          userId: 'test-user',
+          ownerAuthProvenance: 'strict',
+        },
+      };
     },
   };
 }
@@ -30,7 +59,20 @@ function createStubBacklogStore() {
     title: 'F073 Test',
     summary: 'Test',
     priority: 'p1',
-    tags: ['f073'],
+    tags: ['source:docs-backlog', 'feature:f073', 'status:active'],
+    status: 'open',
+    createdBy: 'user',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    audit: [],
+  });
+  items.set('item-default-user', {
+    id: 'item-default-user',
+    userId: 'default-user',
+    title: 'F275 fallback provenance regression',
+    summary: 'Compatibility fallback must not mint managed-work identity',
+    priority: 'p1',
+    tags: ['source:docs-backlog', 'feature:f275', 'status:active'],
     status: 'open',
     createdBy: 'user',
     createdAt: Date.now(),
@@ -49,12 +91,15 @@ function createStubBacklogStore() {
 // Minimal in-memory workflow SOP store
 function createInMemoryWorkflowSopStore() {
   const store = new Map();
+  const calls = [];
   return {
     store,
+    calls,
     async get(backlogItemId) {
       return store.get(backlogItemId) ?? null;
     },
-    async upsert(backlogItemId, featureId, input, updatedBy) {
+    async upsert(backlogItemId, featureId, input, updatedBy, ownerUserId) {
+      calls.push({ backlogItemId, featureId, updatedBy, ownerUserId });
       const existing = store.get(backlogItemId);
       const now = Date.now();
       const sop = existing
@@ -115,6 +160,7 @@ describe('WorkflowSop callback route', () => {
 
   beforeEach(() => {
     workflowSopStore.store.clear();
+    workflowSopStore.calls.length = 0;
   });
 
   it('creates workflow SOP via callback with auth', async () => {
@@ -140,6 +186,48 @@ describe('WorkflowSop callback route', () => {
     assert.equal(sop.stage, 'impl');
     assert.equal(sop.updatedBy, 'opus'); // extracted from invocation context
     assert.equal(sop.version, 1);
+    assert.deepEqual(workflowSopStore.calls.at(-1), {
+      backlogItemId: 'item-1',
+      featureId: 'F073',
+      updatedBy: 'opus',
+      ownerUserId: 'test-user',
+    });
+  });
+
+  it('rejects callback admission whose owner came from compatibility fallback', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/update-workflow-sop',
+      headers: {
+        'content-type': 'application/json',
+        'x-invocation-id': FALLBACK_INVOCATION_ID,
+        'x-callback-token': FALLBACK_CALLBACK_TOKEN,
+      },
+      payload: {
+        backlogItemId: 'item-default-user',
+        featureId: 'F275',
+        stage: 'kickoff',
+      },
+    });
+
+    assert.equal(res.statusCode, 403);
+    assert.equal(workflowSopStore.calls.length, 0);
+  });
+
+  it('rejects legacy callback admission whose owner provenance is missing', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/update-workflow-sop',
+      headers: {
+        'content-type': 'application/json',
+        'x-invocation-id': LEGACY_INVOCATION_ID,
+        'x-callback-token': LEGACY_CALLBACK_TOKEN,
+      },
+      payload: { backlogItemId: 'item-1', featureId: 'F275', stage: 'kickoff' },
+    });
+
+    assert.equal(res.statusCode, 403);
+    assert.equal(workflowSopStore.calls.length, 0);
   });
 
   it('accepts runtime sopDefinitionId via callback and rejects schema-only stubs', async () => {

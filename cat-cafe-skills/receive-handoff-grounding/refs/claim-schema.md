@@ -135,6 +135,18 @@ export interface SourceRef {
 }
 ```
 
+### Authorization continuity vs subject freshness
+
+`ClaimGroundingEvent.freshnessKey` 是 resolver evidence 的兼容字段，不得把所有生命周期塞进同一
+值。merge 执行续存需要两个正交键：
+
+- **authorization key** = `actionFamily + subjectRef + T0 messageId + authorizationScope`
+- **subject freshness key** = PR HEAD / review / check identity
+
+`authorizationScope='pull_request'` 时，HEAD 变化只重新验证 subject freshness；已核验的直接 operator
+授权仍有效。`authorizationScope='exact_head'` 才把 HEAD 纳入 authorization key。repo policy
+要求的 admin transport 不改变 actionFamily，不产生第二个授权边。
+
 ### WaitSourceRef (R3.1 Maine Coon OQ-5 final)
 
 ```typescript

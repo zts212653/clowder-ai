@@ -28,7 +28,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
-import type { AgentMessage, AgentService, AgentServiceOptions, TokenUsage } from '../../types.js';
+import type { AgentMessage, AgentService, AgentServiceOptions, TokenUsage, ToolExecutionPolicy } from '../../types.js';
 import {
   cleanupSessionFiles,
   ingestEvalEntries,
@@ -39,6 +39,7 @@ import {
 import {
   ANTHROPIC_PROFILE_MODE_KEY,
   buildClaudeEnvOverrides,
+  resolveClaudeEffortLevel,
   resolveClaudeModelSelection,
   resolveDefaultClaudeMcpServerPath,
 } from './ClaudeAgentService.js';
@@ -125,6 +126,10 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
     this.hookSidecarPathOverride = options?.hookSidecarPathOverride;
   }
 
+  supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
+    return policy.mode === 'read_only';
+  }
+
   /**
    * Invoke claude via interactive PTY.
    *
@@ -135,6 +140,7 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: async generator with cancellation, multiple error paths, and inline polling loop — extracting would worsen readability
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     const { catId, model, pollIntervalMs, terminalTimeoutMs } = this;
+    const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
 
     // ─── Env construction (F230 D3 + KD-7: reuse buildClaudeEnvOverrides) ─────
     const callbackEnvWithMode: Record<string, string> = {
@@ -151,6 +157,7 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
     // These will map to env -u flags in PtyDriver.buildClaudeCommand().
     envOverrides.CLAUDE_CODE_ENTRYPOINT = null;
     envOverrides.CLAUDECODE = null;
+    if (readOnly) envOverrides.CAT_CAFE_READONLY = 'true';
 
     // PtyDriver: string → tmux -e KEY=VALUE; null → env -u. Proxy vars injected below (P2 F230 2026-06-11).
     const envDelta = envOverrides as Record<string, string | null>;
@@ -168,13 +175,16 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
     const { effectiveModel, useEnvModelOverride } = resolveClaudeModelSelection(options?.callbackEnv, model);
     const extraArgs: string[] = [];
     // --permission-mode bypassPermissions (F230 AC-B4, F198 Phase D parity)
-    extraArgs.push('--permission-mode', 'bypassPermissions');
+    extraArgs.push('--permission-mode', readOnly ? 'plan' : 'bypassPermissions');
+    if (readOnly) extraArgs.push('--tools', '', '--strict-mcp-config');
     // --model (skip if env-based override)
     if (!useEnvModelOverride) {
       extraArgs.push('--model', effectiveModel);
     }
+    const effortLevel = resolveClaudeEffortLevel(catId as string, effectiveModel, options?.reasoningEffortOverride);
+    extraArgs.push('--effort', effortLevel);
     // --mcp-config + --strict-mcp-config (F230 AC-B3): gated on callbackEnv (no callback = MCP unusable).
-    if (options?.callbackEnv && this.mcpServerPath && existsSync(this.mcpServerPath)) {
+    if (!readOnly && options?.callbackEnv && this.mcpServerPath && existsSync(this.mcpServerPath)) {
       // Write MCP config to temp file (file-based avoids inline JSON shell quoting issues).
       if (!this.mcpConfigFilePath || !existsSync(this.mcpConfigFilePath)) {
         const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-pty-mcp-'));

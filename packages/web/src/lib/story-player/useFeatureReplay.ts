@@ -8,8 +8,8 @@
  * replay with multi-cam layout and spotlight/dim state.
  *
  * Architecture: Single unified replay engine. Events are merged from all
- * threads, and visible events are partitioned by sourceThreadId for
- * per-panel rendering. detectActiveThreads() drives layout decisions.
+ * threads, planned into stable scenes, and visible events are partitioned by
+ * sourceThreadId for per-panel rendering. ScenePlan drives layout decisions.
  *
  * AC-E5: Multi-cam split screen
  * AC-E3: Spotlight + Dim (panel mode per thread)
@@ -19,7 +19,6 @@ import type { FeatureStoryRenderingDTO, SwimlaneDTO } from '@cat-cafe/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import type { ActiveThreadState, CamLayout } from './active-thread-tracker';
-import { detectActiveThreads } from './active-thread-tracker';
 import { adaptTranscriptEvents } from './adapter';
 import { annotateAdaptivePacing } from './adaptive-pacing';
 import { buildThreadPanels, type ThreadPanelData } from './build-thread-panels';
@@ -41,6 +40,7 @@ import {
   tick,
   toggleAdaptivePacing,
 } from './replay-engine';
+import { applyScenePacingCues, getSceneForIndex, planReplayScenes, sceneToActiveThreadState } from './scene-planner';
 import { fetchThreadReplayEvents } from './thread-replay-fetcher';
 import type { GuestCardState, RawTranscriptEvent, ReplayEngineState, ReplayEvent, SpeedMultiplier } from './types';
 
@@ -85,6 +85,15 @@ interface FeatureEventData {
   lanes: SwimlaneDTO[];
 }
 
+export function prepareFeatureReplayEvents(
+  events: readonly ReplayEvent[],
+  laneThreadIds: readonly string[],
+): ReplayEvent[] {
+  const compressed = compressEventTimestamps([...events]);
+  const scenePlans = planReplayScenes(compressed, laneThreadIds);
+  return applyScenePacingCues(compressed, scenePlans);
+}
+
 async function fetchFeatureReplayData(featId: string): Promise<FeatureEventData> {
   // 1. Fetch rendering DTO for thread list + metadata
   const res = await apiFetch(`/api/story/feat:${featId}/rendering`);
@@ -114,9 +123,10 @@ async function fetchFeatureReplayData(featId: string): Promise<FeatureEventData>
   // 4. Run through existing adapter pipeline
   const adapted = adaptTranscriptEvents(merged);
   const annotated = annotateAdaptivePacing(adapted);
-  const compressed = compressEventTimestamps(annotated);
+  const laneThreadIds = dto.lanes.map((lane) => lane.threadId);
+  const prepared = prepareFeatureReplayEvents(annotated, laneThreadIds);
 
-  return { events: compressed, lanes: dto.lanes };
+  return { events: prepared, lanes: dto.lanes };
 }
 
 // ---------------------------------------------------------------------------
@@ -253,11 +263,15 @@ export function useFeatureReplay({ featId }: { featId: string }): UseFeatureRepl
 
   // ── Derived state: active threads + per-panel data ──
 
-  // Detect active threads at current playback position
-  const activeState: ActiveThreadState = useMemo(
-    () => detectActiveThreads(events, engine.currentIndex),
-    [events, engine.currentIndex],
+  // Scene-driven active state. Feature Theater must not fall back to
+  // per-event detectActiveThreads(); that is the flicker source fixed by F252 AC-X.
+  const laneThreadIds = useMemo(() => lanes.map((lane) => lane.threadId), [lanes]);
+  const scenePlans = useMemo(() => planReplayScenes(events, laneThreadIds), [events, laneThreadIds]);
+  const currentScene = useMemo(
+    () => getSceneForIndex(scenePlans, engine.currentIndex),
+    [scenePlans, engine.currentIndex],
   );
+  const activeState: ActiveThreadState = useMemo(() => sceneToActiveThreadState(currentScene), [currentScene]);
 
   // Partition visible events by sourceThreadId → per-panel messages
   const visibleEvents = useMemo(() => events.slice(0, engine.currentIndex + 1), [events, engine.currentIndex]);

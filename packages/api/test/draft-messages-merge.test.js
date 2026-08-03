@@ -43,6 +43,15 @@ function makeStubSocketManager() {
   };
 }
 
+function makeTurnExecutionStore(records = {}) {
+  const byId = new Map(Object.entries(records));
+  return {
+    get: async (invocationId) => byId.get(invocationId) ?? null,
+    listByParent: async (parentInvocationId) =>
+      [...byId.values()].filter((record) => record.parentInvocationId === parentInvocationId),
+  };
+}
+
 function makeInvocationRecordStore(records = {}) {
   const byId = new Map(Object.entries(records));
   return {
@@ -97,6 +106,19 @@ describe('GET /api/messages — draft merge (#80)', () => {
       socketManager: makeStubSocketManager(),
       router: makeStubRouter(),
       draftStore,
+    });
+    return app;
+  }
+
+  async function buildAppWithTurnExecutions(records) {
+    const app = Fastify({ logger: false });
+    await app.register(messagesRoutes, {
+      registry: makeStubRegistry(),
+      messageStore,
+      socketManager: makeStubSocketManager(),
+      router: makeStubRouter(),
+      draftStore,
+      turnExecutionStore: makeTurnExecutionStore(records),
     });
     return app;
   }
@@ -806,14 +828,62 @@ describe('GET /api/messages — draft merge (#80)', () => {
 
     // Bug B: stream identity must be included for frontend reconciliation
     assert.equal(draft.origin, 'stream', 'Draft should have origin: stream');
-    // F194 Phase Z9 AC-Z25 (KD-28): draft now stamps both invocationId (parent
-    // chain) and turnInvocationId (per-visible-cat-turn). Draft has only one
-    // identity (its own invocationId) so both fields = invocationId.
+    // Legacy draft without a TurnExecution record has no parent association;
+    // preserve the prior child-only identity as a bounded compatibility path.
     assert.deepEqual(
       draft.extra?.stream,
       { invocationId: 'inv-contract', turnInvocationId: 'inv-contract' },
       'Draft should have extra.stream.invocationId + turnInvocationId (Z9 unconditional stamp)',
     );
+  });
+
+  it('projects the real parent + child identity onto an executing ACP draft', async () => {
+    const ts = Date.now();
+    const parentInvocationId = 'eefcfc03-e188-4f8c-ac6d-435e76fc8b6f';
+    const turnInvocationId = 'd2abf34d-47fb-42a6-80e2-fae40e1d18cf';
+
+    draftStore.upsert({
+      userId: 'user-1',
+      threadId: 'thread-1',
+      invocationId: turnInvocationId,
+      catId: 'kimi',
+      content: '',
+      thinking: 'Check the current git state.',
+      toolEvents: [{ id: 'tool-1', type: 'tool_use', label: 'kimi → Bash', timestamp: ts }],
+      updatedAt: ts,
+    });
+
+    const app = await buildAppWithTurnExecutions({
+      [turnInvocationId]: {
+        invocationId: turnInvocationId,
+        parentInvocationId,
+        threadId: 'thread-1',
+        userId: 'user-1',
+        catId: 'kimi',
+        executionKind: 'ordinary',
+        status: 'running',
+        startedAt: ts - 100,
+      },
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-1',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const draft = body.messages.find((message) => message.id === `draft-${turnInvocationId}`);
+    assert(draft, 'executing ACP draft should be visible');
+    assert.deepEqual(draft.extra?.stream, {
+      invocationId: parentInvocationId,
+      turnInvocationId,
+    });
+    assert.deepEqual(draft.extra?.turnExecution, {
+      invocationId: turnInvocationId,
+      parentInvocationId,
+      executionKind: 'ordinary',
+    });
   });
 
   it('multiple concurrent drafts sorted by updatedAt', async () => {

@@ -181,8 +181,9 @@ function projectGroup(records: ChatMessage[]): ChatMessage {
     if (r.thinking && r.thinking.trim().length > 0) thinkingParts.push(r.thinking);
     if (r.mentionsUser) mentionsUser = true;
     for (const ev of r.toolEvents ?? []) {
-      if (seenToolIds.has(ev.id)) continue;
-      seenToolIds.add(ev.id);
+      const toolEventKey = `${ev.type}:${ev.id}`;
+      if (seenToolIds.has(toolEventKey)) continue;
+      seenToolIds.add(toolEventKey);
       toolEvents.push(ev);
     }
     for (const b of r.extra?.rich?.blocks ?? []) {

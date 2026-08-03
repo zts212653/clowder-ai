@@ -7,6 +7,9 @@ export const DispatchProposalKeys = {
   /** Hash with proposal fields: dispatch-proposal:{proposalId} */
   detail: (id: string) => `dispatch-proposal:${id}`,
 
+  /** Key prefix for proposal detail hashes (used in Lua scripts for dynamic key construction). */
+  detailPrefix: 'dispatch-proposal:' as const,
+
   /** Sorted set of pending proposal IDs for a user (score=createdAt): dispatch-proposal-user-pending:{userId} */
   userPending: (userId: string) => `dispatch-proposal-user-pending:${userId}`,
 
@@ -19,4 +22,11 @@ export const DispatchProposalKeys = {
   /** Idempotency lookup: dispatch-proposal-clientmsg:{sourceThreadId}:{clientMessageId} → proposalId */
   clientMsg: (sourceThreadId: string, clientMessageId: string) =>
     `dispatch-proposal-clientmsg:${sourceThreadId}:${clientMessageId}`,
+
+  /**
+   * F246 Phase J (AC-J4): Lineage key K → currently pending proposalId.
+   * K = (sourceThreadId, targetThreadId, senderCatId).
+   * Same-K create atomically supersedes the previous pending proposal (INV-J5).
+   */
+  lineage: (lineageKey: string) => `dispatch-proposal-lineage:${lineageKey}`,
 } as const;

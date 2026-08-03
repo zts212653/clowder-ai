@@ -14,7 +14,7 @@
 
 import { estimateTokens } from '../../../../utils/token-counter.js';
 import { formatPromptTimeRange } from '../format-time.js';
-import type { ThreadMemoryV1 } from '../stores/ports/ThreadStore.js';
+import type { ThreadMemorySourceRef, ThreadMemoryV1 } from '../stores/ports/ThreadStore.js';
 import type { DecisionSignals } from './extractDecisionSignals.js';
 import type { ExtractiveDigestV1 } from './TranscriptWriter.js';
 
@@ -93,6 +93,33 @@ function dedupStrings(items: string[]): string[] {
   return result;
 }
 
+function mergeReferencedSignals(
+  incoming: string[],
+  incomingRefs: Array<ThreadMemorySourceRef | null> | undefined,
+  existing: string[],
+  existingRefs: ThreadMemorySourceRef[] | undefined,
+  incomingFallback: ThreadMemorySourceRef,
+  existingFallback: ThreadMemorySourceRef,
+  limit: number,
+): { values: string[]; refs: ThreadMemorySourceRef[] } {
+  const candidates = [
+    ...incoming.map((value, index) => ({ value, ref: incomingRefs?.[index] ?? incomingFallback })),
+    ...existing.map((value, index) => ({ value, ref: existingRefs?.[index] ?? existingFallback })),
+  ];
+  const values: string[] = [];
+  const refs: ThreadMemorySourceRef[] = [];
+  for (const candidate of candidates) {
+    const dominated = values.some((value) =>
+      value.length <= candidate.value.length ? candidate.value.includes(value) : value.includes(candidate.value),
+    );
+    if (dominated) continue;
+    values.push(candidate.value);
+    refs.push(candidate.ref);
+    if (values.length >= limit) break;
+  }
+  return { values, refs };
+}
+
 export function buildThreadMemory(
   existing: ThreadMemoryV1 | null,
   newDigest: ExtractiveDigestV1,
@@ -132,24 +159,60 @@ export function buildThreadMemory(
   };
 
   if (signals) {
-    const existDecisions = existing?.decisions ?? [];
-    const existQuestions = existing?.openQuestions ?? [];
+    const existDecisions = Array.isArray(existing?.decisions) ? existing.decisions : [];
+    const existQuestions = Array.isArray(existing?.openQuestions) ? existing.openQuestions : [];
     const existArtifacts = existing?.artifacts ?? [];
 
-    const mergedDecisions = dedupStrings([...signals.decisions, ...existDecisions]);
-    const mergedQuestions = dedupStrings([...signals.openQuestions, ...existQuestions]);
+    const incomingFallback: ThreadMemorySourceRef = {
+      threadId: newDigest.threadId,
+      sessionId: newDigest.sessionId,
+      ...(newDigest.invocations[0]?.invocationId ? { invocationId: newDigest.invocations[0].invocationId } : {}),
+    };
+    const existingFallback: ThreadMemorySourceRef = { threadId: newDigest.threadId };
+    const mergedDecisions = mergeReferencedSignals(
+      signals.decisions,
+      signals.decisionRefs,
+      existDecisions,
+      existing?.decisionRefs,
+      incomingFallback,
+      existingFallback,
+      MAX_DECISIONS,
+    );
+    const mergedQuestions = mergeReferencedSignals(
+      signals.openQuestions,
+      signals.openQuestionRefs,
+      existQuestions,
+      existing?.openQuestionRefs,
+      incomingFallback,
+      existingFallback,
+      MAX_OPEN_QUESTIONS,
+    );
     const mergedArtifacts = dedupStrings([...signals.artifacts, ...existArtifacts]);
 
-    if (mergedDecisions.length > 0) result.decisions = mergedDecisions.slice(0, MAX_DECISIONS);
-    if (mergedQuestions.length > 0) result.openQuestions = mergedQuestions.slice(0, MAX_OPEN_QUESTIONS);
+    if (mergedDecisions.values.length > 0) {
+      result.decisions = mergedDecisions.values;
+      result.decisionRefs = mergedDecisions.refs;
+    }
+    if (mergedQuestions.values.length > 0) {
+      result.openQuestions = mergedQuestions.values;
+      result.openQuestionRefs = mergedQuestions.refs;
+    }
     if (mergedArtifacts.length > 0) result.artifacts = mergedArtifacts.slice(0, MAX_ARTIFACTS);
   } else if (existing) {
     // P1-2 fix: carry forward existing decisions when signals extraction failed
     // Cloud-P2 fix: re-apply caps; Cloud-R2-P1 fix: Array.isArray guard for malformed data
-    if (Array.isArray(existing.decisions) && existing.decisions.length > 0)
+    if (Array.isArray(existing.decisions) && existing.decisions.length > 0) {
       result.decisions = existing.decisions.slice(0, MAX_DECISIONS);
-    if (Array.isArray(existing.openQuestions) && existing.openQuestions.length > 0)
+      result.decisionRefs = result.decisions.map(
+        (_, index) => existing.decisionRefs?.[index] ?? { threadId: newDigest.threadId },
+      );
+    }
+    if (Array.isArray(existing.openQuestions) && existing.openQuestions.length > 0) {
       result.openQuestions = existing.openQuestions.slice(0, MAX_OPEN_QUESTIONS);
+      result.openQuestionRefs = result.openQuestions.map(
+        (_, index) => existing.openQuestionRefs?.[index] ?? { threadId: newDigest.threadId },
+      );
+    }
     if (Array.isArray(existing.artifacts) && existing.artifacts.length > 0)
       result.artifacts = existing.artifacts.slice(0, MAX_ARTIFACTS);
   }

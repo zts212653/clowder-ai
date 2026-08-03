@@ -37,17 +37,17 @@
   
   
     <rect x="74" y="228" width="150" height="44" rx="22" fill="#f9731622" stroke="#f97316" stroke-width="2"/>
-  <text x="149" y="258.16" text-anchor="middle" font-size="24" font-weight="700" fill="#f97316">铲屎官</text>
+  <text x="149" y="258.16" text-anchor="middle" font-size="24" font-weight="700" fill="#f97316">operator</text>
     <line x1="260" y1="260" x2="1680" y2="260" stroke="#f97316" stroke-width="5" stroke-linecap="round" opacity="0.5"/>
   
   
     <rect x="74" y="358" width="150" height="44" rx="22" fill="#7c3aed22" stroke="#7c3aed" stroke-width="2"/>
-  <text x="149" y="388.16" text-anchor="middle" font-size="24" font-weight="700" fill="#7c3aed">宪宪</text>
+  <text x="149" y="388.16" text-anchor="middle" font-size="24" font-weight="700" fill="#7c3aed">Ragdoll</text>
     <line x1="260" y1="390" x2="1680" y2="390" stroke="#7c3aed" stroke-width="5" stroke-linecap="round" opacity="0.5"/>
   
   
     <rect x="74" y="488" width="150" height="44" rx="22" fill="#2563eb22" stroke="#2563eb" stroke-width="2"/>
-  <text x="149" y="518.16" text-anchor="middle" font-size="24" font-weight="700" fill="#2563eb">砚砚</text>
+  <text x="149" y="518.16" text-anchor="middle" font-size="24" font-weight="700" fill="#2563eb">Maine Coon</text>
     <line x1="260" y1="520" x2="1680" y2="520" stroke="#2563eb" stroke-width="5" stroke-linecap="round" opacity="0.5"/>
   
   

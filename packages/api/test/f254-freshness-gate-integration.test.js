@@ -91,6 +91,33 @@ describe('F254 Freshness Gate Integration', async () => {
     assert.equal(result.previews[0].from, 'codex');
   });
 
+  it('uses connector source label for unseen connector preview sender', async () => {
+    const cursorStore = makeMockCursorStore(msg1);
+    const messageStore = makeMockMessageStore([
+      {
+        id: msg2,
+        catId: null,
+        content: 'GitHub Review feedback',
+        threadId,
+        source: { connector: 'github-review', label: 'GitHub Review', icon: 'github' },
+      },
+    ]);
+
+    const result = await wireModule.checkFreshnessForPostMessage({
+      userId,
+      catId,
+      threadId,
+      invocationId,
+      toolName: 'post_message',
+      cursorStore,
+      messageStore,
+    });
+
+    assert.equal(result.decision, 'held');
+    assert.equal(result.unseenCount, 1);
+    assert.equal(result.previews[0].from, 'GitHub Review');
+  });
+
   // -- AC-A5: acknowledgeHeld forces forward --
 
   it('returns forward when acknowledgeHeld is true even with unseen', async () => {
@@ -153,6 +180,58 @@ describe('F254 Freshness Gate Integration', async () => {
 
     assert.equal(result.decision, 'forward');
     assert.equal(result.reason, 'all_self_messages');
+  });
+
+  it('IR-6: forwards when unseen user work explicitly targets another cat', async () => {
+    const cursorStore = makeMockCursorStore(msg1);
+    const messageStore = makeMockMessageStore([
+      { id: msg2, catId: null, content: '@fable5 only', mentions: ['fable5'], threadId },
+    ]);
+
+    const result = await wireModule.checkFreshnessForPostMessage({
+      userId,
+      catId,
+      threadId,
+      invocationId,
+      toolName: 'post_message',
+      cursorStore,
+      messageStore,
+    });
+
+    assert.equal(result.decision, 'forward');
+    assert.equal(result.reason, 'no_unseen');
+  });
+
+  it('IR-6: forwards past another cat closure replacement', async () => {
+    const cursorStore = makeMockCursorStore(msg1);
+    const messageStore = makeMockMessageStore([
+      {
+        id: msg2,
+        catId: 'fable5',
+        content: 'replacement final',
+        threadId,
+        extra: {
+          freshness: {
+            kind: 'closure_replacement',
+            closureId: 'closure-fable',
+            targetCatId: 'fable5',
+          },
+        },
+      },
+    ]);
+
+    const result = await wireModule.checkFreshnessForPostMessage({
+      userId,
+      catId,
+      threadId,
+      invocationId,
+      toolName: 'post_message',
+      cursorStore,
+      messageStore,
+    });
+
+    assert.equal(result.decision, 'forward');
+    assert.equal(result.reason, 'no_unseen');
   });
 
   // -- AC-A2: seenCursor already caught up --

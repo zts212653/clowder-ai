@@ -1,4 +1,4 @@
-// F256 Phase B: Expansion hints for default topk search
+// F256 Phase B+C: Expansion hints for default topk search
 //
 // Projects the expansion provenance from intent=coverage into intent=topk output.
 // Design: docs/discussions/2026-06-24-memory-search-strategy-evolution.md §6.4
@@ -7,9 +7,10 @@
 //   - Only top-3 hits expanded (budget: §6.4 取舍 A)
 //   - Each expansion type ≤ 3 hints
 //   - Max 5 terms probed per type (query budget — scanner keywords have no upper bound)
-//   - No convention-edge expansion (graphTraversal=0%, §7.5)
+//   - Convention-edge expansion via ConventionGraphAdapter (Phase C: l0-prompt-builder domain)
 //   - Provenance visible per hint (AC-B2)
 
+import type { ConventionGraphAdapter } from './CoverageSearchService.js';
 import type { ExpansionProvenance, ExpansionSourceType } from './coverage-search-types.js';
 import type { EvidenceItem, IEvidenceStore, SearchOptions } from './interfaces.js';
 
@@ -39,9 +40,11 @@ const MAX_TERMS_PER_TYPE = 5;
 
 export class TopkExpansionService {
   private readonly store: Pick<IEvidenceStore, 'searchWithMeta'>;
+  private readonly conventionGraph: ConventionGraphAdapter | null;
 
-  constructor(store: Pick<IEvidenceStore, 'searchWithMeta'>) {
+  constructor(store: Pick<IEvidenceStore, 'searchWithMeta'>, conventionGraph?: ConventionGraphAdapter | null) {
     this.store = store;
+    this.conventionGraph = conventionGraph ?? null;
   }
 
   async expand(topResults: EvidenceItem[], _query: string, options?: TopkExpansionOptions): Promise<ExpansionHint[]> {
@@ -62,8 +65,8 @@ export class TopkExpansionService {
     // ── Source-thread expansion ──────────────────────────────────────
     await this.expandViaSourceThreads(hitsToExpand, seen, hints, maxPerType);
 
-    // NOTE: convention-edge expansion intentionally excluded in Phase B
-    // (graphTraversal=0%, §7.5). Will be added in Phase C after F242 extractor fix.
+    // ── Convention-edge expansion (Phase C: F242 extractor + l0-prompt-builder) ──
+    await this.expandViaConventionEdges(hitsToExpand, seen, hints, maxPerType);
 
     return hints;
   }
@@ -108,7 +111,45 @@ export class TopkExpansionService {
           provenance: {
             source: 'frontmatter-alias' as ExpansionSourceType,
             via: `keyword:${term}`,
-            confidence: 'heuristic',
+            edgeStrength: 'heuristic',
+          },
+        });
+        added++;
+      }
+    }
+  }
+
+  private async expandViaConventionEdges(
+    hits: EvidenceItem[],
+    seen: Set<string>,
+    hints: ExpansionHint[],
+    maxPerType: number,
+  ): Promise<void> {
+    if (!this.conventionGraph || !this.conventionGraph.isAvailable()) return;
+
+    let added = 0;
+    for (const item of hits) {
+      if (added >= maxPerType) break;
+
+      const consumers = await this.conventionGraph.queryConsumers(item.anchor);
+      for (const consumer of consumers) {
+        if (added >= maxPerType) break;
+
+        const key = consumer.anchor.toLowerCase();
+        if (seen.has(key)) continue;
+
+        if (consumer.stale) continue;
+
+        seen.add(key);
+        hints.push({
+          anchor: consumer.anchor,
+          title: consumer.title,
+          kind: consumer.kind,
+          sourcePath: consumer.filePath,
+          provenance: {
+            source: 'convention-edge' as ExpansionSourceType,
+            via: `${item.anchor} → ${consumer.anchor}`,
+            edgeStrength: consumer.edgeStrength,
           },
         });
         added++;
@@ -165,7 +206,7 @@ export class TopkExpansionService {
           provenance: {
             source: 'source-thread' as ExpansionSourceType,
             via: ref,
-            confidence: 'heuristic',
+            edgeStrength: 'heuristic',
           },
         });
         added++;

@@ -9,7 +9,7 @@ community_pr: https://github.com/zts212653/clowder-ai/pull/688
 
 # F204: Weixin MP Publisher Plugin — 微信公众号文章发布插件
 
-> **Status**: review | **Owner**: community @mindfn + Cat Cafe maintainers | **Priority**: P1
+> **Status**: review | **Owner**: community @mindfn + Clowder AI maintainers | **Priority**: P1
 
 ## Source
 

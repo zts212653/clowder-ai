@@ -260,4 +260,119 @@ describe('F200 recall correlation integration', () => {
     const rows = db.prepare('SELECT * FROM recall_events').all();
     assert.equal(rows.length, 0, 'no RecallEvent for private collection hits');
   });
+
+  it('private pull recall does not suppress a safe push presentation from the same invocation', async () => {
+    const { triggerRecallCorrelation } = await import(
+      `../../dist/domains/memory/recall-correlation-hook.js?privatePush=${Date.now()}`
+    );
+    const now = Date.now();
+    const events = [
+      {
+        threadId: 'th-private-push',
+        catId: 'codex-sol',
+        invocationId: 'inv-private-push',
+        toolName: 'session_bootstrap',
+        summary: {
+          query: 'F263',
+          scope: 'docs',
+          resultCount: 1,
+          resultStatus: 'counted',
+          _f263PushSurface: 'session_bootstrap',
+          _f200Candidates: [{ anchor: 'F263', rank: 0, sourcePath: 'docs/features/F263.md' }],
+        },
+        timestamp: now - 6000,
+      },
+      {
+        threadId: 'th-private-push',
+        catId: 'codex-sol',
+        invocationId: 'inv-private-push',
+        toolName: 'search_evidence',
+        summary: {
+          query: 'private source',
+          resultCount: 1,
+          _f200HasPrivateHits: true,
+          _f200Candidates: [{ anchor: 'domain:user-profile/private', rank: 0 }],
+        },
+        timestamp: now - 5000,
+      },
+      {
+        threadId: 'th-private-push',
+        catId: 'codex-sol',
+        invocationId: 'inv-private-push',
+        toolName: 'Read',
+        summary: { file_path: '/repo/docs/features/F263.md' },
+        timestamp: now - 3000,
+      },
+    ];
+
+    await triggerRecallCorrelation(db, events, 'inv-private-push', 'codex-sol');
+
+    const rows = db.prepare('SELECT tool_name, source, outcome FROM recall_events').all();
+    assert.deepEqual(rows, [{ tool_name: 'session_bootstrap', source: 'push', outcome: 'used' }]);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM task_trajectories').get().count, 0);
+  });
+
+  it('F263 correlates push presentations into used/ignored events idempotently', async () => {
+    const { triggerRecallCorrelation } = await import(
+      `../../dist/domains/memory/recall-correlation-hook.js?push=${Date.now()}`
+    );
+    const now = Date.now();
+    const events = [
+      {
+        threadId: 'th-push',
+        catId: 'codex-sol',
+        invocationId: 'inv-push',
+        toolName: 'session_bootstrap',
+        summary: {
+          query: 'thread title',
+          scope: 'docs',
+          _f263PushSurface: 'session_bootstrap',
+          _f200Candidates: [
+            { anchor: 'F263', rank: 0, sourcePath: 'docs/features/F263-memory-lifecycle-repair-and-metrics.md' },
+          ],
+        },
+        timestamp: now - 5000,
+      },
+      {
+        threadId: 'th-push',
+        catId: 'codex-sol',
+        invocationId: 'inv-push',
+        toolName: 'Read',
+        summary: { file_path: '/repo/docs/features/F263-memory-lifecycle-repair-and-metrics.md' },
+        timestamp: now - 4000,
+      },
+      {
+        threadId: 'th-push',
+        catId: 'codex-sol',
+        invocationId: 'inv-push',
+        toolName: 'cold_context',
+        summary: {
+          query: 'cold context evidence',
+          scope: 'docs',
+          _f263PushSurface: 'cold_context',
+          _f200Candidates: [{ anchor: 'ADR-038', rank: 0, sourcePath: 'docs/decisions/ADR-038.md' }],
+        },
+        timestamp: now - 3000,
+      },
+    ];
+
+    await triggerRecallCorrelation(db, events, 'inv-push', 'codex-sol');
+    await triggerRecallCorrelation(db, events, 'inv-push', 'codex-sol');
+
+    const rows = db
+      .prepare(
+        `SELECT source, push_surface, presented, inspected, outcome, consumed_json
+         FROM recall_events WHERE invocation_id = ? ORDER BY timestamp`,
+      )
+      .all('inv-push');
+    assert.equal(rows.length, 2, 'route-finalization retry must not duplicate push presentations');
+    assert.deepEqual(
+      rows.map((row) => [row.source, row.push_surface, row.presented, row.inspected, row.outcome]),
+      [
+        ['push', 'session_bootstrap', 1, 1, 'used'],
+        ['push', 'cold_context', 1, 0, 'ignored'],
+      ],
+    );
+    assert.equal(JSON.parse(rows[0].consumed_json)[0].anchor, 'F263');
+  });
 });

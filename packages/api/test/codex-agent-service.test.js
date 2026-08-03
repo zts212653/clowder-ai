@@ -15,6 +15,7 @@ import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
 const { CodexAgentService, buildCodexReasoningArgs, isGitRepositoryPath } = await import(
   '../dist/domains/cats/services/agents/providers/CodexAgentService.js'
 );
+const { _resetCachedConfig } = await import('../dist/config/cat-config-loader.js');
 
 /** Helper: collect all items from async iterable */
 async function collect(iterable) {
@@ -224,6 +225,59 @@ function assertWorkspaceScopedServersUseAllowedWorkspaceDirs(args, expected, rea
 
 function makeTempDir(prefix) {
   return mkdtempSync(join(import.meta.dirname ?? '.', prefix));
+}
+
+function writeCodexEffortTemplate(projectRoot, effort, cliOverrides = {}, defaultModel = 'gpt-5.6-sol') {
+  const templatePath = join(projectRoot, 'cat-template.json');
+  writeFileSync(
+    templatePath,
+    JSON.stringify({
+      version: 2,
+      breeds: [
+        {
+          id: 'codex-sol',
+          catId: 'runtime-sol',
+          name: 'Sol',
+          displayName: 'Sol',
+          avatar: '/avatars/sol.png',
+          color: { primary: '#64843A', secondary: '#64843A' },
+          mentionPatterns: ['@runtime-sol'],
+          roleDescription: '旗舰推理与编码',
+          defaultVariantId: 'sol-default',
+          variants: [
+            {
+              id: 'sol-default',
+              clientId: 'openai',
+              defaultModel,
+              mcpSupport: true,
+              cli: { command: 'codex', outputFormat: 'json', effort, ...cliOverrides },
+            },
+          ],
+        },
+      ],
+      roster: {
+        'runtime-sol': {
+          family: 'codex-sol',
+          roles: ['assistant'],
+          lead: false,
+          available: true,
+          evaluation: 'test',
+        },
+      },
+      reviewPolicy: {
+        requireDifferentFamily: true,
+        preferActiveInThread: true,
+        preferLead: true,
+        excludeUnavailable: true,
+      },
+      coCreator: {
+        name: 'Co-creator',
+        aliases: ['owner'],
+        mentionPatterns: ['@owner'],
+      },
+    }),
+  );
+  return templatePath;
 }
 
 function writeCapabilitiesConfig(projectRoot, capabilities) {
@@ -925,11 +979,11 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
           const bearerArg = args.find((a) => a.includes('bearer_token_env_var'));
           assert.ok(bearerArg, 'must inject bearer_token_env_var config');
           assert.ok(
-            bearerArg.includes('CLOWDER_MCP_BEARER_AUTHED_REMOTE_'),
-            'bearer_token_env_var must reference CLOWDER_MCP_BEARER_AUTHED_REMOTE_<hash>',
+            bearerArg.includes('CAT_CAFE_MCP_BEARER_AUTHED_REMOTE_'),
+            'bearer_token_env_var must reference CAT_CAFE_MCP_BEARER_AUTHED_REMOTE_<hash>',
           );
           // Extract actual env var name from the config arg
-          const envVarMatch = bearerArg.match(/CLOWDER_MCP_BEARER_[A-Za-z0-9_]+/);
+          const envVarMatch = bearerArg.match(/CAT_CAFE_MCP_BEARER_[A-Za-z0-9_]+/);
           assert.ok(envVarMatch, 'bearer env var name must be extractable');
           const actualEnvVar = envVarMatch[0];
           // Token must be in process env (Codex reads bearer_token_env_var from process env)
@@ -1050,7 +1104,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
 
           // Extract env var names from the config args
           const envVarNames = bearerArgs.map((a) => {
-            const m = a.match(/CLOWDER_MCP_BEARER_[A-Za-z0-9_]+/);
+            const m = a.match(/CAT_CAFE_MCP_BEARER_[A-Za-z0-9_]+/);
             return m ? m[0] : null;
           });
           assert.ok(envVarNames[0] && envVarNames[1], 'both env var names must be extractable');
@@ -1160,7 +1214,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
           const bearerArg = args.find((a) => a.includes('bearer_token_env_var'));
           assert.ok(bearerArg, 'AUTHORIZATION (all-caps) must still map to bearer_token_env_var');
 
-          const envVarMatch = bearerArg.match(/CLOWDER_MCP_BEARER_[A-Za-z0-9_]+/);
+          const envVarMatch = bearerArg.match(/CAT_CAFE_MCP_BEARER_[A-Za-z0-9_]+/);
           assert.ok(envVarMatch, 'env var name must be extractable');
           assert.strictEqual(
             spawnOpts.env[envVarMatch[0]],
@@ -1262,7 +1316,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
           const bearerArg = args.find((a) => a.includes('bearer_token_env_var'));
           assert.ok(bearerArg, 'env-backed header must still map to bearer_token_env_var');
 
-          const envVarMatch = bearerArg.match(/CLOWDER_MCP_BEARER_[A-Za-z0-9_]+/);
+          const envVarMatch = bearerArg.match(/CAT_CAFE_MCP_BEARER_[A-Za-z0-9_]+/);
           assert.ok(envVarMatch, 'env var name must be extractable');
 
           // The child env var must contain the RESOLVED token, not the placeholder
@@ -1770,6 +1824,68 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.ok(!args.includes('approval_policy=\\"on-request\\"'), 'argv should not contain literal backslash escapes');
   });
 
+  test('unavailable approval surface keeps Apps writes gated and injects the audited GitHub route', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+      approvalSurface: 'unavailable',
+      carrierMode: 'exec_json',
+    });
+
+    const promise = collect(service.invoke('open a pull request'));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-github-route-unavailable' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(
+      args.includes('apps._default.default_tools_approval_mode="writes"'),
+      'Clowder AI must keep unconfigured Apps writes behind approval instead of auto-approving them',
+    );
+    const developerInstructions = args.find((arg) => arg.startsWith('developer_instructions='));
+    assert.match(developerInstructions ?? '', /GitHub routing/);
+    assert.match(developerInstructions ?? '', /GitHub MCP.*retired/i);
+    assert.match(developerInstructions ?? '', /confirmation_unavailable/);
+    assert.match(developerInstructions ?? '', /gh.*merge-gate/i);
+    assert.ok(
+      !args.some((arg) => /default_tools_approval_mode="approve"/.test(arg)),
+      'routing must not silently expand Apps permissions',
+    );
+  });
+
+  test('interactive approval surface still routes GitHub work to gh without a false unavailable claim', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+      approvalSurface: 'interactive',
+      carrierMode: 'exec_json',
+    });
+
+    const promise = collect(service.invoke('open a pull request'));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-github-route-interactive' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(args.includes('apps._default.default_tools_approval_mode="writes"'));
+    const developerInstructions = args.find((arg) => arg.startsWith('developer_instructions='));
+    assert.match(developerInstructions ?? '', /GitHub routing/);
+    assert.match(developerInstructions ?? '', /GitHub MCP.*retired/i);
+    assert.match(developerInstructions ?? '', /canonical.*gh/i);
+    assert.doesNotMatch(developerInstructions ?? '', /confirmation_unavailable/);
+  });
+
+  test('serializes one provider-native effort value as structured TOML argv', () => {
+    assert.deepEqual(buildCodexReasoningArgs('ultra"native\nnext'), [
+      '--config',
+      'model_reasoning_effort="ultra\\"native\\nnext"',
+    ]);
+  });
+
   test('unknown Codex cat falls back to xhigh reasoning effort for new invocations', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
@@ -1792,8 +1908,193 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     );
   });
 
-  test('passes a native Codex effort through as one safely serialized TOML value', () => {
-    assert.deepEqual(buildCodexReasoningArgs('ultra"native'), ['--config', 'model_reasoning_effort="ultra\\"native"']);
+  test('F262 applies a compatible thread reasoning effort override to Codex argv', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      catId: 'runtime-sol',
+      model: 'gpt-5.6-sol',
+    });
+
+    const promise = collect(service.invoke('hello', { reasoningEffortOverride: 'ultra' }));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-effort-thread-override' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(
+      args.includes('model_reasoning_effort="ultra"'),
+      `expected thread ultra override, got argv: ${JSON.stringify(args)}`,
+    );
+  });
+
+  test('F262 rejects a stale thread ultra override for an older effective Codex model', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      catId: 'runtime-codex',
+      model: 'gpt-5.4',
+    });
+
+    const promise = collect(service.invoke('hello', { reasoningEffortOverride: 'ultra' }));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-effort-thread-stale' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(args.includes('model_reasoning_effort="xhigh"'));
+    assert.ok(!args.includes('model_reasoning_effort="ultra"'));
+  });
+
+  test('passes persisted GPT-5.6 ultra effort to new Codex invocations', async () => {
+    const projectRoot = makeTempDir('codex-ultra-effort-');
+    const previousTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    const templatePath = writeCodexEffortTemplate(projectRoot, 'ultra', {
+      contextWindow: 372000,
+      autoCompactTokenLimit: 340000,
+    });
+
+    try {
+      process.env.CAT_TEMPLATE_PATH = templatePath;
+      _resetCachedConfig();
+
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new CodexAgentService({
+        l0CompilerFn: fakeL0Compiler,
+        spawnFn,
+        catId: 'runtime-sol',
+        model: 'gpt-5.6-sol',
+      });
+
+      const promise = collect(service.invoke('hello'));
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-effort-ultra' }]);
+      await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+      assert.ok(
+        args.includes('model_reasoning_effort="ultra"'),
+        `expected persisted ultra effort, got argv: ${JSON.stringify(args)}`,
+      );
+      assert.ok(args.includes('model_context_window=372000'));
+      assert.ok(args.includes('model_auto_compact_token_limit=340000'));
+    } finally {
+      if (previousTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = previousTemplatePath;
+      _resetCachedConfig();
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('keeps persisted context overrides for equivalent bare and provider-prefixed model slugs', async () => {
+    for (const { persistedModel, effectiveModel } of [
+      { persistedModel: 'gpt-5.6-sol', effectiveModel: 'openai/gpt-5.6-sol' },
+      { persistedModel: 'openai/gpt-5.6-sol', effectiveModel: 'gpt-5.6-sol' },
+    ]) {
+      const projectRoot = makeTempDir('codex-equivalent-model-context-');
+      const previousTemplatePath = process.env.CAT_TEMPLATE_PATH;
+      const templatePath = writeCodexEffortTemplate(
+        projectRoot,
+        'ultra',
+        {
+          contextWindow: 372000,
+          autoCompactTokenLimit: 340000,
+        },
+        persistedModel,
+      );
+
+      try {
+        process.env.CAT_TEMPLATE_PATH = templatePath;
+        _resetCachedConfig();
+
+        const proc = createMockProcess();
+        const spawnFn = createMockSpawnFn(proc);
+        const service = new CodexAgentService({
+          l0CompilerFn: fakeL0Compiler,
+          spawnFn,
+          catId: 'runtime-sol',
+          model: persistedModel,
+        });
+
+        const promise = collect(
+          service.invoke('hello', {
+            callbackEnv: { CAT_CAFE_OPENAI_MODEL_OVERRIDE: effectiveModel },
+          }),
+        );
+        emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-equivalent-model-context' }]);
+        await promise;
+
+        const args = spawnFn.mock.calls[0].arguments[1];
+        assert.ok(args.includes('model_reasoning_effort="ultra"'));
+        assert.ok(
+          args.includes('model_context_window=372000'),
+          `equivalent model slug ${effectiveModel} must keep the persisted context window`,
+        );
+        assert.ok(
+          args.includes('model_auto_compact_token_limit=340000'),
+          `equivalent model slug ${effectiveModel} must keep the persisted compaction limit`,
+        );
+      } finally {
+        if (previousTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+        else process.env.CAT_TEMPLATE_PATH = previousTemplatePath;
+        _resetCachedConfig();
+        rmSync(projectRoot, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('preserves provider-native effort across an effective invocation model override', async () => {
+    for (const configuredEffort of ['max', 'ultra']) {
+      const projectRoot = makeTempDir(`codex-${configuredEffort}-override-effort-`);
+      const previousTemplatePath = process.env.CAT_TEMPLATE_PATH;
+      const templatePath = writeCodexEffortTemplate(projectRoot, configuredEffort, {
+        contextWindow: 372000,
+        autoCompactTokenLimit: 340000,
+      });
+
+      try {
+        process.env.CAT_TEMPLATE_PATH = templatePath;
+        _resetCachedConfig();
+
+        const proc = createMockProcess();
+        const spawnFn = createMockSpawnFn(proc);
+        const service = new CodexAgentService({
+          l0CompilerFn: fakeL0Compiler,
+          spawnFn,
+          catId: 'runtime-sol',
+          model: 'gpt-5.6-sol',
+        });
+
+        const promise = collect(
+          service.invoke('hello', {
+            callbackEnv: { CAT_CAFE_OPENAI_MODEL_OVERRIDE: 'gpt-5.4-mini' },
+          }),
+        );
+        emitCodexEvents(proc, [{ type: 'thread.started', thread_id: `t-effort-${configuredEffort}-override` }]);
+        await promise;
+
+        const args = spawnFn.mock.calls[0].arguments[1];
+        assert.ok(
+          args.includes(`model_reasoning_effort="${configuredEffort}"`),
+          `expected ${configuredEffort} to reach the provider unchanged, got argv: ${JSON.stringify(args)}`,
+        );
+        assert.ok(
+          !args.includes('model_context_window=372000'),
+          'must not pass the persisted GPT-5.6 context window to the overridden older model',
+        );
+        assert.ok(
+          !args.includes('model_auto_compact_token_limit=340000'),
+          'must not pass the persisted GPT-5.6 compaction limit to the overridden older model',
+        );
+      } finally {
+        if (previousTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+        else process.env.CAT_TEMPLATE_PATH = previousTemplatePath;
+        _resetCachedConfig();
+        rmSync(projectRoot, { recursive: true, force: true });
+      }
+    }
   });
 
   test('adds --skip-git-repo-check when workingDirectory is not a git repository', async () => {
@@ -1988,6 +2289,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.ok(!args.includes('--model'), 'must NOT use --model flag for custom provider');
     assert.ok(args.includes('model="qwen-plus"'), 'model must be passed as-is via --config');
     assert.ok(args.includes('model_provider="custom"'), 'must set model_provider=custom');
+    assert.ok(!args.includes('model_provider="openai_https"'), 'custom provider must not force OpenAI OAuth provider');
   });
 
   test('custom provider: multi-segment model slug preserved as-is', async () => {
@@ -2035,6 +2337,66 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.ok(modelIdx >= 0, 'must use --model flag for non-custom provider');
     assert.equal(args[modelIdx + 1], 'gpt-5.3-codex', 'model without custom base URL stays as-is');
     assert.ok(!args.includes('model_provider="custom"'), 'must not set model_provider when no custom URL');
+  });
+
+  test('oauth default provider preserves the built-in OpenAI transport', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    const originalTransport = process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT;
+    try {
+      delete process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT;
+      const promise = collect(service.invoke('test oauth transport'));
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-oauth-transport' }]);
+      await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+      assert.ok(
+        args.includes('model_provider="openai"'),
+        'default OAuth path must explicitly select the built-in provider',
+      );
+      assert.ok(
+        !args.includes('model_provider="openai_https"'),
+        'default OAuth path must not select the HTTPS-only provider',
+      );
+      assert.ok(
+        !args.some((arg) => arg.startsWith('model_providers.openai_https.')),
+        'default OAuth path must not inject an HTTPS-only provider definition',
+      );
+      assert.ok(
+        !args.includes('model_provider="custom"'),
+        'default OAuth path must not use the custom API-key provider',
+      );
+    } finally {
+      if (originalTransport === undefined) delete process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT;
+      else process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT = originalTransport;
+    }
+  });
+
+  test('oauth HTTPS fallback remains available through an explicit transport override', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    const originalTransport = process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT;
+    try {
+      process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT = 'https';
+      const promise = collect(service.invoke('test oauth https fallback'));
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-oauth-https-fallback' }]);
+      await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+      assert.ok(args.includes('model_provider="openai_https"'), 'fallback must select the HTTPS-only provider');
+      assert.ok(args.includes('model_providers.openai_https.name="OpenAI"'));
+      assert.ok(args.includes('model_providers.openai_https.wire_api="responses"'));
+      assert.ok(args.includes('model_providers.openai_https.requires_openai_auth=true'));
+      assert.ok(args.includes('model_providers.openai_https.supports_websockets=false'));
+      assert.ok(!args.includes('model_provider="custom"'), 'OAuth fallback must not use the custom API-key provider');
+    } finally {
+      if (originalTransport === undefined) delete process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT;
+      else process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT = originalTransport;
+    }
   });
 
   test('handles multiple agent_message items', async () => {
@@ -2219,14 +2581,19 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.ok(errMsg.error.includes('Reconnecting... 2/5'), 'error should include multiple reconnect attempts');
   });
 
-  test('suppresses exit code 1 when Codex produced substantive output (item.completed)', async () => {
+  // F212 Phase H (Sol runtime forensics 2026-07-09): the canonical "silent completion"
+  // predicate is `turn.completed` seen → cli-spawn's semanticCompletionSignal.aborted → cli-spawn
+  // does NOT synthesize __cliError on exit=1 (spawnCli.ts:632). item.completed alone is NOT
+  // enough — that's a message finishing, not a semantic turn completing. Sol's archive pool
+  // (7c3fd591 / 2ffa505f / 261c3754 / 39f2bc4d) had 5 item.completed events each PLUS turn.failed
+  // + exit 1, which the deleted provider-side suppress branch masked as silent success.
+  test('exit code 1 after turn.completed does NOT yield error (semanticDone canonical)', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
     const promise = collect(service.invoke('review this'));
 
-    // Codex outputs thread.started + item.completed (agent_message) = substantive output
     proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'tx' })}\n`);
     proc.stdout.write(
       `${JSON.stringify({
@@ -2234,11 +2601,14 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
         item: { type: 'agent_message', text: 'Looks good!' },
       })}\n`,
     );
-    finishExit(proc, 1); // Codex 0.98+ quirk
+    // turn.completed → CodexAgentService aborts semanticCompletionSignal → semanticDone=true
+    // → cli-spawn skips __cliError synthesis on exit=1 (Codex 0.98+ quirk handled canonically)
+    proc.stdout.write(`${JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 10 } })}\n`);
+    finishExit(proc, 1); // Codex 0.98+ quirk — swallowed at cli-spawn layer via semanticDone
 
     const msgs = await promise;
     const errors = msgs.filter((m) => m.type === 'error');
-    assert.equal(errors.length, 0, 'exit code 1 with substantive output should be suppressed');
+    assert.equal(errors.length, 0, 'exit=1 with semanticDone (turn.completed seen) must not yield error');
     assert.ok(
       msgs.some((m) => m.type === 'text'),
       'text message should still be yielded',
@@ -2249,7 +2619,39 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     );
   });
 
-  test('suppresses exit code 1 after transient reconnect diagnostics when output completed', async () => {
+  test('exit code 1 with item.completed but NO turn.completed yields error (Sol Phase H regression)', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('review this'));
+
+    // 5-item.completed archive replay: 39f2bc4d/7c3fd591 pattern — several item.completed
+    // events, then turn.failed + exit 1 (transport/policy failure). Previously masked by
+    // provider suppress branch (sawSubstantiveOutput=true). Phase H expects error yielded.
+    proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'tx' })}\n`);
+    for (let i = 0; i < 5; i++) {
+      proc.stdout.write(
+        `${JSON.stringify({
+          type: 'item.completed',
+          item: { type: 'agent_message', text: `chunk ${i}` },
+        })}\n`,
+      );
+    }
+    proc.stdout.write(`${JSON.stringify({ type: 'turn.failed', error: { message: 'upstream disconnected' } })}\n`);
+    finishExit(proc, 1);
+
+    const msgs = await promise;
+    const errors = msgs.filter((m) => m.type === 'error');
+    assert.equal(
+      errors.length,
+      1,
+      'exit=1 without turn.completed (semanticDone=false) MUST yield error even with item.completed sequence',
+    );
+    assert.ok(errors[0].error.includes('code: 1'));
+  });
+
+  test('exit code 1 after transient reconnect + turn.completed does NOT yield error', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
@@ -2275,16 +2677,117 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
         item: { type: 'agent_message', text: 'Recovered answer.' },
       })}\n`,
     );
+    // Full recovery: transient error events during reconnect, then turn.completed →
+    // semanticDone=true → cli-spawn does NOT synthesize __cliError on exit=1.
+    proc.stdout.write(`${JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 10 } })}\n`);
     finishExit(proc, 1);
 
     const msgs = await promise;
     const errors = msgs.filter((m) => m.type === 'error');
     const sysInfos = msgs.filter((m) => m.type === 'system_info');
-    assert.equal(errors.length, 0, 'transient reconnect diagnostics should not defeat exit-code-1 suppression');
+    assert.equal(errors.length, 0, 'transient reconnect events should not defeat semanticDone silent-completion path');
     assert.equal(sysInfos.length, 2, 'reconnect status should still stream to UI');
     assert.ok(
       msgs.some((m) => m.type === 'text' && m.content === 'Recovered answer.'),
       'completed answer should still be yielded',
+    );
+  });
+
+  // F212 Phase H archive-witness regression: cyber-safety policy rejection (archive
+  // 97449e4b-0dec-433e-885a-0e37ab977b1e). 5 item.completed then upstream policy error
+  // + turn.failed + exit 1. Provider-side suppress branch would mask as silent success;
+  // Phase H requires this classifies as upstream_policy_reject via CLASSIFIER_PATTERNS.
+  test('upstream_policy_reject archive 97449e4b classifies + yields error', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('crawl HN scraper'));
+
+    proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'tx' })}\n`);
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'Let me research this task.' },
+      })}\n`,
+    );
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'error',
+        message: 'This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing',
+      })}\n`,
+    );
+    proc.stdout.write(`${JSON.stringify({ type: 'turn.failed', error: { message: 'policy reject' } })}\n`);
+    finishExit(proc, 1);
+
+    const msgs = await promise;
+    const errors = msgs.filter((m) => m.type === 'error');
+    assert.equal(errors.length, 1, 'upstream policy reject must yield error (never silently succeed)');
+    const cliDiag = errors[0].metadata?.cliDiagnostics;
+    assert.ok(cliDiag, 'error must carry cliDiagnostics');
+    assert.equal(cliDiag.reasonCode, 'upstream_policy_reject', 'must classify as upstream_policy_reject');
+  });
+
+  // F212 Phase H R1 P1-2 (Sol runtime forensics 2026-07-10): this test was previously
+  // labeled as an "archive 217969a7 recovery pattern" fixture, but Sol's second-pass
+  // forensics showed archive 217969a7 actually reflects `invoke-single-cat` transient
+  // CLI exit retry (two SEPARATE `service.invoke()` calls with two SEPARATE spawnCli
+  // processes) — NOT compaction-retry within a single spawnCli iteration. This test
+  // remains valid as a **synthetic semanticDone contract**: if turn.completed lands
+  // within the same spawnCli stream (regardless of prior turn.failed noise), semanticDone
+  // suppresses __cliError. But it is NOT the archive fixture; that lives at
+  // `invoke-single-cat-timeout-retry.test.js` "F212 Phase H R1 P1-2 archive 217969a7
+  // authentic pattern" (two-attempt integration test). Renaming clarifies provenance.
+  test('semanticDone contract: prior turn.failed noise then turn.completed in same stream = silent success', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('long research task'));
+
+    // Attempt #1: session init + upstream errors + turn.failed
+    proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'tx-1' })}\n`);
+    proc.stdout.write(`${JSON.stringify({ type: 'turn.started' })}\n`);
+    for (let i = 0; i < 6; i++) {
+      proc.stdout.write(
+        `${JSON.stringify({
+          type: 'error',
+          message: 'stream disconnected before completion',
+        })}\n`,
+      );
+    }
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'turn.failed',
+        error: { message: 'stream disconnected before completion' },
+      })}\n`,
+    );
+    // Attempt #2: fresh session start + successful completion
+    proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'tx-2' })}\n`);
+    proc.stdout.write(`${JSON.stringify({ type: 'turn.started' })}\n`);
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'Recovered result after compaction retry.' },
+      })}\n`,
+    );
+    proc.stdout.write(`${JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 50 } })}\n`);
+    finishExit(proc, 1); // Codex 0.98+ still exits 1 even after successful recovered turn
+
+    const msgs = await promise;
+    const errors = msgs.filter((m) => m.type === 'error');
+    assert.equal(
+      errors.length,
+      0,
+      'recovered turn (turn.completed after prior turn.failed) must be silent success — canonical semanticDone',
+    );
+    assert.ok(
+      msgs.some((m) => m.type === 'text' && m.content === 'Recovered result after compaction retry.'),
+      'recovered text must reach consumer',
+    );
+    assert.ok(
+      msgs.some((m) => m.type === 'done'),
+      'done signal must reach consumer',
     );
   });
 
@@ -2415,7 +2918,9 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     await promise;
 
     const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+    const args = spawnFn.mock.calls[0].arguments[1];
     assert.equal(spawnOpts.env.OPENAI_API_KEY, 'sk-test-api-mode');
+    assert.ok(!args.includes('model_provider="openai_https"'), 'api_key mode must not force OpenAI OAuth provider');
   });
 
   test('callbackEnv auth mode overrides process default when launching codex child env', async () => {

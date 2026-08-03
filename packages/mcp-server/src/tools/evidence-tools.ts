@@ -6,16 +6,23 @@
  * 不依赖 callback 鉴权 — evidence 路由是公开 GET。
  */
 
-import type { SuggestedCrossPostAction } from '@cat-cafe/shared';
+import {
+  formatRecallMeta,
+  type RecallMatchRank,
+  type RecallPreviewItem,
+  type SuggestedCrossPostAction,
+} from '@cat-cafe/shared';
 import { z } from 'zod';
 import { formatSuggestedCrossPostActionLines } from './cross-post-suggestion-format.js';
 import { composeCoverageIntentNudge } from './evidence-coverage-nudge.js';
+import { type CoverageToolData, renderCoverageToolResponse } from './evidence-coverage-response.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 
 const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
+const COVERAGE_OUTER_HTTP_BUDGET_MS = 16_000;
 
-const DOC_SOURCE_TYPES = new Set(['feature', 'decision', 'phase', 'lesson', 'plan', 'research']);
+const DOC_SOURCE_TYPES = new Set(['feature', 'decision', 'phase', 'architecture', 'lesson', 'plan', 'research']);
 const EVIDENCE_RESULT_MARKER = 'Evidence search results:';
 let searchCount = 0;
 
@@ -39,7 +46,7 @@ type EvidenceDrillDown = {
 };
 
 export const searchEvidenceInputSchema = {
-  query: z.string().min(1).describe('Search query for project knowledge'),
+  query: z.string().min(1).max(2_000).describe('Search query for project knowledge (max 2,000 characters)'),
   limit: z.number().int().min(1).max(20).optional().describe('Max results (default 5)'),
   scope: z
     .enum(['docs', 'memory', 'threads', 'sessions', 'all'])
@@ -89,6 +96,15 @@ export const searchEvidenceInputSchema = {
     .describe(
       'Search intent: topk (default, ranked list) or coverage (exhaustive multi-scope search with coverage matrix output). Use coverage for "哪些/所有/历史上" style source-map queries.',
     ),
+  coverage_offset: z
+    .number()
+    .int()
+    .min(0)
+    .max(49)
+    .optional()
+    .describe(
+      'Continuation offset from a truncated coverage response drill pointer. Only effective with intent=coverage.',
+    ),
   include_expansion: z
     .boolean()
     .optional()
@@ -97,22 +113,30 @@ export const searchEvidenceInputSchema = {
     ),
 };
 
-export async function handleSearchEvidence(input: {
-  query: string;
-  limit?: number | undefined;
-  scope?: string | undefined;
-  mode?: string | undefined;
-  depth?: string | undefined;
-  dateFrom?: string | undefined;
-  dateTo?: string | undefined;
-  contextWindow?: number | undefined;
-  threadId?: string | undefined;
-  dimension?: string | undefined;
-  collections?: string | undefined;
-  explain?: boolean | undefined;
-  intent?: 'topk' | 'coverage' | undefined;
-  include_expansion?: boolean | undefined;
-}): Promise<ToolResult> {
+export interface EvidenceToolCallExtra {
+  signal?: AbortSignal;
+}
+
+export async function handleSearchEvidence(
+  input: {
+    query: string;
+    limit?: number | undefined;
+    scope?: string | undefined;
+    mode?: string | undefined;
+    depth?: string | undefined;
+    dateFrom?: string | undefined;
+    dateTo?: string | undefined;
+    contextWindow?: number | undefined;
+    threadId?: string | undefined;
+    dimension?: string | undefined;
+    collections?: string | undefined;
+    explain?: boolean | undefined;
+    intent?: 'topk' | 'coverage' | undefined;
+    coverage_offset?: number | undefined;
+    include_expansion?: boolean | undefined;
+  },
+  extra?: EvidenceToolCallExtra,
+): Promise<ToolResult> {
   const { dimension = 'project' } = input;
   const params = new URLSearchParams({ q: input.query });
   if (input.limit != null) params.set('limit', String(input.limit));
@@ -129,71 +153,48 @@ export async function handleSearchEvidence(input: {
   if (input.collections) params.set('collections', input.collections);
   if (input.explain) params.set('explain', 'true');
   if (input.intent) params.set('intent', input.intent);
+  if (input.coverage_offset != null) params.set('coverage_offset', String(input.coverage_offset));
   if (input.include_expansion === false) params.set('include_expansion', 'false');
 
   const url = `${API_URL}/api/evidence/search?${params.toString()}`;
   const queryLabel = JSON.stringify(input.query);
+  const outerDeadlineSignal =
+    input.intent === 'coverage' ? AbortSignal.timeout(COVERAGE_OUTER_HTTP_BUDGET_MS) : undefined;
+  const requestSignal =
+    outerDeadlineSignal && extra?.signal
+      ? AbortSignal.any([outerDeadlineSignal, extra.signal])
+      : (outerDeadlineSignal ?? extra?.signal);
 
   try {
-    const response = await fetch(url);
+    const userId = process.env['CAT_CAFE_USER_ID']?.trim();
+    const internalHeaders: Record<string, string> = {};
+    if (userId) internalHeaders['x-cat-cafe-user'] = userId;
+    if (currentThreadId) internalHeaders['x-cat-cafe-thread-id'] = currentThreadId;
+    const response = await fetch(url, {
+      headers: Object.keys(internalHeaders).length > 0 ? internalHeaders : undefined,
+      signal: requestSignal,
+    });
 
     if (!response.ok) {
       const text = await response.text();
       console.error(
         `[cat-cafe-search-evidence] HTTP error ${response.status} for ${url}\n  query=${queryLabel}\n  body=${text.slice(0, 500)}`,
       );
-      return errorResult(`Evidence search failed for ${queryLabel} (${response.status}): ${text}`);
+      if (input.intent === 'coverage' && response.status === 408) {
+        return recallErrorResult(
+          `Coverage search failed for ${queryLabel}: outer HTTP 408; the upstream request was cancelled or aborted.`,
+          'Retry with a narrower scope (docs or threads) or a narrower query; inspect coverage stage telemetry if it repeats.',
+        );
+      }
+      return recallErrorResult(
+        `Evidence search failed for ${queryLabel} (${response.status}): ${text}`,
+        'Evidence search failed before results were returned. Check the API error and retry after fixing the service.',
+      );
     }
 
     // F200 HW-1: intent=coverage returns CoverageSearchResult (different shape from topk)
     if (input.intent === 'coverage') {
-      const coverageData = (await response.json()) as {
-        query: string;
-        totalHits: number;
-        bySource: Record<string, { count: number; cap: number }>;
-        matrix: Array<{
-          anchor: string;
-          title: string;
-          kind: string;
-          matchType: string;
-          confidence: number;
-          source: string;
-          sourcePath?: string;
-          expansionProvenance?: { source: string; via: string; confidence: string };
-        }>;
-        gaps: string[];
-        degraded?: Array<{ source: string; reason: string }>;
-      };
-
-      const lines: string[] = [];
-      lines.push(`📊 Coverage Search: ${coverageData.totalHits} hit(s) for ${queryLabel}`);
-      lines.push('');
-
-      for (const [src, info] of Object.entries(coverageData.bySource)) {
-        lines.push(`  ${src}: ${info.count}/${info.cap}`);
-      }
-      lines.push('');
-
-      for (const item of coverageData.matrix) {
-        const prov = item.expansionProvenance
-          ? ` [${item.expansionProvenance.source} via ${item.expansionProvenance.via}]`
-          : '';
-        lines.push(`[${item.matchType}] ${item.title}`);
-        lines.push(`  anchor: ${item.anchor}`);
-        lines.push(`  source: ${item.source} | confidence: ${item.confidence}${prov}`);
-        if (item.sourcePath) lines.push(`  sourcePath: ${item.sourcePath}`);
-        lines.push('');
-      }
-
-      if (coverageData.degraded && coverageData.degraded.length > 0) {
-        lines.push('⚠️ Degraded sources:');
-        for (const d of coverageData.degraded) {
-          lines.push(`  ${d.source}: ${d.reason}`);
-        }
-        lines.push('');
-      }
-
-      return successResult(lines.join('\n'));
+      return renderCoverageToolResponse((await response.json()) as CoverageToolData, input, queryLabel);
     }
 
     const data = (await response.json()) as {
@@ -201,9 +202,12 @@ export async function handleSearchEvidence(input: {
         title: string;
         anchor: string;
         snippet: string;
-        confidence: string;
+        matchRank: 'high' | 'mid' | 'low';
+        retrievalScore?: number;
         sourceType: string;
+        status?: string;
         authority?: string;
+        updatedAt?: string;
         boostSource?: string[];
         matchReason?: string;
         entityMatches?: EvidenceEntityMatch[];
@@ -234,13 +238,18 @@ export async function handleSearchEvidence(input: {
       degradeReason?: string;
       effectiveMode?: 'lexical' | 'semantic' | 'hybrid';
       variantId?: string;
+      filterExecution?: {
+        requestedThreadId: string;
+        executedThreadId: string;
+        outcome: 'matched' | 'authoritative_empty' | 'degraded_empty';
+      };
       /** F256 Phase B: expansion hints from TopkExpansionService */
       expansionHints?: Array<{
         anchor: string;
         title: string;
         kind: string;
         sourcePath?: string;
-        provenance?: { source: string; via: string; confidence: string };
+        provenance?: { source: string; via: string; edgeStrength: string };
       }>;
     };
 
@@ -250,7 +259,7 @@ export async function handleSearchEvidence(input: {
     searchCount++;
     const depthLine = `📊 本轮第 ${searchCount} 次搜索 | 搜到 doc anchor → Read 源文件，不要用摘要推理`;
     const docHitsForTelemetry = data.results.filter(
-      (r) => (r.confidence === 'high' || r.confidence === 'mid') && DOC_SOURCE_TYPES.has(r.sourceType),
+      (r) => (r.matchRank === 'high' || r.matchRank === 'mid') && DOC_SOURCE_TYPES.has(r.sourceType),
     );
     console.error(
       `[cat-cafe-search-depth] ${JSON.stringify({
@@ -265,9 +274,24 @@ export async function handleSearchEvidence(input: {
 
     if (data.results.length === 0) {
       const noResultMsg = `${EVIDENCE_RESULT_MARKER} No results found for: ${input.query}`;
+      const filterExecutionLine = formatThreadFilterExecution(data.filterExecution);
       const nudge = composeMemoryNavigationNudge(data); // F188 AC-F3 + KD-7
       const coverageNudge = composeCoverageIntentNudge(input.query);
-      const parts = [degradedBanner, noResultMsg, nudge, coverageNudge, depthLine].filter(Boolean);
+      const parts = [
+        degradedBanner,
+        noResultMsg,
+        filterExecutionLine,
+        nudge,
+        coverageNudge,
+        depthLine,
+        formatRecallMeta({
+          resultStatus: 'no_results',
+          resultCount: 0,
+          degraded: data.degraded,
+          ...(data.degradeReason ? { degradeReason: data.degradeReason } : {}),
+          readNextHint: 'No search results were returned. Try graph_resolve/list_recent or broaden the query.',
+        }),
+      ].filter(Boolean);
       return successResult(parts.join('\n\n'));
     }
 
@@ -283,16 +307,27 @@ export async function handleSearchEvidence(input: {
       }:`,
     );
     lines.push('');
+    const filterExecutionLine = formatThreadFilterExecution(data.filterExecution);
+    if (filterExecutionLine) {
+      lines.push(filterExecutionLine);
+      lines.push('');
+    }
 
     for (const r of data.results) {
-      lines.push(`[${r.confidence}] ${r.title}`);
+      lines.push(
+        `[match:${r.matchRank} · authority:${r.authority ?? 'unknown'} · updated:${r.updatedAt ?? 'unknown'}] ${r.title}`,
+      );
       lines.push(`  anchor: ${r.anchor}`);
       lines.push(`  type: ${r.sourceType}`);
+      if (r.status) lines.push(`  status: ${r.status}`);
       // F200 HW-4 根因②b: stable machine line so deriveSearchEvidence can
       // pair a path-based shell/Read consumption back to this candidate.
       if (r.sourcePath) lines.push(`  sourcePath: ${r.sourcePath}`);
       if (r.authority) {
         lines.push(`  authority: ${r.authority}`);
+      }
+      if (r.retrievalScore != null) {
+        lines.push(`  retrievalScore: ${r.retrievalScore}`);
       }
       if (r.boostSource && r.boostSource.length > 0 && !r.boostSource.every((s) => s === 'legacy')) {
         lines.push(`  boost: ${r.boostSource.join(', ')}`);
@@ -341,12 +376,16 @@ export async function handleSearchEvidence(input: {
       lines.push('');
     }
 
-    // Hook F-1: Read reminder for high/mid confidence doc anchors (F177 Phase F)
     const docHits = data.results.filter(
-      (r) => (r.confidence === 'high' || r.confidence === 'mid') && DOC_SOURCE_TYPES.has(r.sourceType),
+      (r) => (r.matchRank === 'high' || r.matchRank === 'mid') && DOC_SOURCE_TYPES.has(r.sourceType),
     );
+
+    // F188 Phase F AC-F3 + KD-7: deterministic nudge on low-hit (no high/mid doc anchors)
+    const nudgeText = composeMemoryNavigationNudge(data);
+
+    // Hook F-1: Read reminder for high/mid match-rank doc anchors (F177 Phase F)
     if (docHits.length > 0) {
-      lines.push(`📌 高置信度文档命中 ${docHits.length} 个：`);
+      lines.push(`📌 高匹配文档命中 ${docHits.length} 个：`);
       for (const d of docHits) {
         lines.push(`   - ${d.anchor}`);
       }
@@ -361,14 +400,17 @@ export async function handleSearchEvidence(input: {
         const source = hint.provenance?.source ?? '';
         const via = hint.provenance?.via ?? '';
         // AC-B2: provenance visible — show source type + via trace (砚砚 review P2)
-        const prov = source && via ? ` [${source}: ${via}]` : via ? ` (${via})` : '';
+        const strength = hint.provenance?.edgeStrength;
+        const prov =
+          source && via
+            ? ` [${source}: ${via}]${strength ? ` [edgeStrength:${strength}]` : ''}`
+            : via
+              ? ` (${via})`
+              : '';
         lines.push(`   - ${hint.anchor}: ${hint.title}${prov}`);
       }
       lines.push('');
     }
-
-    // F188 Phase F AC-F3 + KD-7: deterministic nudge on low-hit (no high/mid doc anchors)
-    const nudgeText = composeMemoryNavigationNudge(data);
     if (nudgeText) {
       lines.push(nudgeText);
       lines.push('');
@@ -381,6 +423,19 @@ export async function handleSearchEvidence(input: {
     }
 
     lines.push(depthLine);
+    lines.push(
+      formatRecallMeta({
+        resultStatus: 'counted',
+        resultCount: data.results.length,
+        degraded: data.degraded,
+        ...(data.degradeReason ? { degradeReason: data.degradeReason } : {}),
+        previewItems: data.results.slice(0, 3).map(toRecallPreviewItem),
+        readNextHint:
+          docHits.length > 0
+            ? `Read high/mid match-rank doc anchors directly: ${docHits.map((d) => d.anchor).join(', ')}`
+            : 'Low match-rank search result; consider graph_resolve/list_recent or a narrower query.',
+      }),
+    );
 
     return successResult(lines.join('\n'));
   } catch (err) {
@@ -390,21 +445,61 @@ export async function handleSearchEvidence(input: {
     console.error(
       `[cat-cafe-search-evidence] fetch threw for ${url}\n  query=${queryLabel}\n  err=${message}\n  cause=${JSON.stringify(cause)}\n  stack=${stack?.split('\n').slice(0, 5).join('\n')}`,
     );
-    return errorResult(`Evidence search request failed for ${queryLabel}: ${message}`);
+    if (input.intent === 'coverage' && requestSignal?.aborted) {
+      return recallErrorResult(
+        `Coverage search request was cancelled or aborted before results were returned for ${queryLabel}: ${message}`,
+        'Retry with a narrower scope (docs or threads) or inspect coverage stage telemetry for the stalled stage.',
+      );
+    }
+    return recallErrorResult(
+      `Evidence search request failed for ${queryLabel}: ${message}`,
+      'Evidence search request failed before results were returned. Check API connectivity and retry.',
+    );
   }
+}
+
+function recallErrorResult(message: string, readNextHint: string): ToolResult {
+  return errorResult(
+    [
+      message,
+      formatRecallMeta({
+        resultStatus: 'error',
+        resultCount: null,
+        readNextHint,
+      }),
+    ].join('\n'),
+  );
+}
+
+function toRecallPreviewItem(result: {
+  title: string;
+  anchor: string;
+  snippet: string;
+  matchRank: RecallMatchRank;
+  authority?: string;
+  updatedAt?: string;
+}): RecallPreviewItem {
+  return {
+    title: result.title,
+    anchor: result.anchor,
+    matchRank: result.matchRank,
+    ...(result.authority ? { authority: result.authority } : {}),
+    ...(result.updatedAt ? { updatedAt: result.updatedAt } : {}),
+    snippet: result.snippet.length > 160 ? `${result.snippet.slice(0, 160)}...` : result.snippet,
+  };
 }
 
 /**
  * F188 Phase F AC-F3 (KD-7): deterministic nudge to alternate memory entries.
  * Triggered on:
- *   - no_match (results length 0)
- *   - low_hit (no high/mid confidence doc anchors among results)
+ *   - no_results (results length 0)
+ *   - low match-rank hits (no high/mid doc anchors among results)
  *
  * Replaces PostToolUse hook (KD-7 v1 strategy). FM-5 measures effectiveness:
  * if猫 ignores nudge AND falls back to Bash grep, nudge has failed.
  */
 function composeMemoryNavigationNudge(data: {
-  results: Array<{ confidence: string; sourceType: string }>;
+  results: Array<{ matchRank: string; sourceType: string }>;
 }): string | null {
   if (data.results.length === 0) {
     return [
@@ -415,11 +510,11 @@ function composeMemoryNavigationNudge(data: {
     ].join('\n');
   }
   const hasHighOrMidDocHit = data.results.some(
-    (r) => (r.confidence === 'high' || r.confidence === 'mid') && DOC_SOURCE_TYPES.has(r.sourceType),
+    (r) => (r.matchRank === 'high' || r.matchRank === 'mid') && DOC_SOURCE_TYPES.has(r.sourceType),
   );
   if (!hasHighOrMidDocHit) {
     return [
-      '🧭 Memory navigation — low confidence hits, consider an alternate entry:',
+      '🧭 Memory navigation — low match-rank hits, consider an alternate entry:',
       '  • 看 anchor 周边关系 → cat_cafe_graph_resolve',
       '  • 时间窗口扫描 → cat_cafe_list_recent',
       '  • 换切面/多刀搜 → 加载 memory-search-best-practices skill（题型 recipe + 补刀策略）',
@@ -448,6 +543,25 @@ function formatDegradedBanner(
     return `[DEGRADED] raw passage vector search failed; fell back to lexical retrieval${modeNote}`;
   }
   return '[DEGRADED] Evidence store error — results may be incomplete';
+}
+
+function formatThreadFilterExecution(
+  execution:
+    | {
+        requestedThreadId: string;
+        executedThreadId: string;
+        outcome: 'matched' | 'authoritative_empty' | 'degraded_empty';
+      }
+    | undefined,
+): string | null {
+  if (!execution) return null;
+  const outcome =
+    execution.outcome === 'authoritative_empty'
+      ? 'authoritative empty'
+      : execution.outcome === 'degraded_empty'
+        ? 'degraded empty'
+        : 'matched';
+  return `🔒 Thread filter executed: ${execution.executedThreadId} (${outcome})`;
 }
 
 function formatEntityMatchLines(match: EvidenceEntityMatch): string[] {
@@ -491,11 +605,19 @@ export const evidenceTools = [
   {
     name: 'cat_cafe_search_evidence',
     description:
-      'Search project knowledge base — features, decisions, plans, lessons, session history. ' +
+      'Search project knowledge base — features, decisions, architecture maps, plans, lessons, session history. ' +
+      'Use when: semantically finding project knowledge, tracing a topic across docs or threads, or building a bounded coverage/source map. ' +
+      'NOT for: resolving a known exact anchor (use cat_cafe_graph_resolve), scanning recent items without a query (use cat_cafe_list_recent), or reading raw messages from a known thread (use get_thread_context). ' +
+      'Output: ranked evidence summaries with typed match, authority, freshness, provenance, degradation, and continuation metadata; this is read-only. ' +
+      'GOTCHA: matchRank is rank position, not trust; authority is document reliability, and broad coverage requires separate docs + threads searches instead of treating one all-scope query as exhaustive. ' +
       'Semantic/fuzzy find entry point for memory recall. For precise anchors (F186, ADR-019), prefer cat_cafe_graph_resolve; for zero-prior scanning, prefer cat_cafe_list_recent; when unsure, start here with mode=hybrid. ' +
       'Supports scope (docs/threads/all), mode (lexical/semantic/hybrid), and depth (summary/raw). ' +
+      'QUERY CONTRACT: query has max 2,000 characters; overlong input fails validation instead of being truncated. ' +
+      'THREAD FILTER CONTRACT: threadId is enforced at the final response boundary; results can only come from that thread, and empty responses state whether the filter was authoritative or degraded. Related-direction expansion is suppressed for exact thread searches. ' +
+      'COVERAGE CONTRACT: caller scope is executed exactly; coverage limit has max 20; latency is bounded; serialized output has a declared budget with explicit truncation and a continuation drill pointer. ' +
+      'At the 15s API deadline coverage returns an explicit partial/degraded result; the MCP HTTP caller cancels any request that outlives that boundary plus transport grace. ' +
       'SCOPE STRATEGY (decide first!): ' +
-      'docs = 结论/真相源 (features, ADRs, plans, lessons). ' +
+      'docs = 结论/真相源 (features, ADRs, architecture maps, plans, lessons). ' +
       'threads = 讨论过程 (who said what, original context). ' +
       "all = broad scan only — docs dominate due to higher BM25 density, so don't rely on all for finding threads. " +
       'Rule of thumb: "要结论 → docs, 要过程 → threads, 要全貌 → both separately". ' +
@@ -508,7 +630,7 @@ export const evidenceTools = [
       'Split broad topics into 2-3 targeted queries from different angles (e.g. "how it was built" vs "how it is governed"). ' +
       'Watch for antonym gaps: searching 记忆 misses 失忆/压缩/丢失 — search the opposite angle separately if needed. ' +
       'SEARCH TIPS — coverage/source-map tasks: this is not an exhaustive all-mentions entrypoint. If the user asks "哪些 / 所有 / 历史上 / 提过 / 沉淀", follow the memory-search-best-practices skill: expand terms yourself, search docs + threads separately, then drill into canonical docs/source threads and report coverage gaps. ' +
-      'READING RESULTS: confidence = search match quality (rank-based), authority = document reliability (path-based) — two independent dimensions. ' +
+      'READING RESULTS: matchRank = rank-based match position, retrievalScore = store score when available, authority = document reliability, updated = source freshness. These are independent axes. ' +
       'RANKING (F200 live): Results are consumption-weighted — docs that cats actually read/used after searching rank higher. Constitutional docs (ADR/lesson/canon) never get demoted. New docs have 14-day grace period. Near-duplicates are MMR-deduplicated for diversity. No action needed — ranking is automatic. ' +
       'DEPTH: Start with summary (default). Use depth=raw only after narrowing scope to drill into specific passages. ' +
       'BOUNDARY: Use this tool to FIND information across the project. For READING raw messages in a specific thread, use get_thread_context instead. ' +
@@ -517,7 +639,7 @@ export const evidenceTools = [
       'zero-prior / scan recent → cat_cafe_list_recent; ' +
       'this tool (search_evidence) = semantic/fuzzy find; ' +
       'session drill-down → list_session_chain / read_session_digest / read_session_events / read_invocation_detail. ' +
-      'When this tool returns low_hit or no_match, payload appends a deterministic nudge pointing to graph_resolve/list_recent (KD-7).',
+      'When this tool returns no results or only low match-rank hits, payload appends a deterministic nudge pointing to graph_resolve/list_recent (KD-7).',
     inputSchema: searchEvidenceInputSchema,
     handler: handleSearchEvidence,
   },

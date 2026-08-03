@@ -8,8 +8,10 @@ import type {
   DeliverOpts,
   FetchResult,
   GateCtx,
+  RunLedgerRow,
   RunOutcome,
   ScheduleInvokeTrigger,
+  ScheduleRunTiming,
   TaskSpec_P1,
 } from './types.js';
 
@@ -30,6 +32,8 @@ export interface PipelineContext {
   emissionStore?: EmissionStore;
   /** Phase 3B (AC-D1): manual triggers bypass global pause + task overrides */
   isManualTrigger?: boolean;
+  /** Wall-clock schedule metadata for this fire, if known. */
+  schedule?: ScheduleRunTiming;
   /** Phase 4 (AC-H1): deliver message to a thread */
   deliver?: (opts: DeliverOpts) => Promise<string>;
   /** Phase 4 (AC-H2): fetch web content with browser-automation routing */
@@ -40,6 +44,24 @@ export interface PipelineContext {
   ballCustody?: IBallCustodyIngest;
   /** #415: per-workItem outcome callback (used for failure notifications) */
   onItemOutcome?: (taskId: string, subjectKey: string, outcome: RunOutcome, errorSummary: string | null) => void;
+}
+
+function ledgerTimingFields(
+  task: AnyTaskSpec,
+  schedule: ScheduleRunTiming | undefined,
+  isManualTrigger: boolean | undefined,
+): Pick<
+  RunLedgerRow,
+  'scheduled_at' | 'fired_at' | 'lateness_ms' | 'missed_slots' | 'trigger_kind' | 'misfire_policy'
+> {
+  return {
+    scheduled_at: schedule?.scheduledAt ?? null,
+    fired_at: schedule?.firedAt ?? null,
+    lateness_ms: schedule?.latenessMs ?? null,
+    missed_slots: schedule?.missedSlots ?? null,
+    trigger_kind: schedule?.triggerKind ?? (isManualTrigger ? 'manual' : task.trigger.type),
+    misfire_policy: schedule?.misfirePolicy ?? null,
+  };
 }
 
 function withTimeout(promise: Promise<void>, ms: number, taskId: string): Promise<void> {
@@ -72,6 +94,7 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
     globalControlStore,
     emissionStore,
     isManualTrigger,
+    schedule,
     deliver,
     fetchContent,
     invokeTrigger,
@@ -79,6 +102,7 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
     onItemOutcome,
   } = ctx;
   const startMs = Date.now();
+  const timing = ledgerTimingFields(task, schedule, isManualTrigger);
   const tickCount = (tickCounts.get(task.id) ?? 0) + 1;
   tickCounts.set(task.id, tickCount);
 
@@ -97,6 +121,7 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
         started_at: new Date(startMs).toISOString(),
         assigned_cat_id: null,
         error_summary: null,
+        ...timing,
       });
       return;
     }
@@ -111,6 +136,7 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
         started_at: new Date(startMs).toISOString(),
         assigned_cat_id: null,
         error_summary: null,
+        ...timing,
       });
       return;
     }
@@ -128,6 +154,7 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
       started_at: new Date(startMs).toISOString(),
       assigned_cat_id: null,
       error_summary: null,
+      ...timing,
     });
     return;
   }
@@ -154,6 +181,7 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
           started_at: new Date(startMs).toISOString(),
           assigned_cat_id: null,
           error_summary: null,
+          ...timing,
         });
       }
       return;
@@ -181,6 +209,7 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
             started_at: new Date(itemStartMs).toISOString(),
             assigned_cat_id: null,
             error_summary: null,
+            ...timing,
           });
           continue;
         }
@@ -191,6 +220,7 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
       const rawExecute = task.run.execute(item.signal, item.subjectKey, {
         assignedCatId,
         context: task.context,
+        schedule,
         deliver,
         fetchContent,
         invokeTrigger,
@@ -215,6 +245,7 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
         started_at: new Date(itemStartMs).toISOString(),
         assigned_cat_id: assignedCatId,
         error_summary: errorSummary,
+        ...timing,
       });
 
       // #415: notify on outcome (used for failure notifications)

@@ -40,9 +40,56 @@ import {
 import { createAcpSessionState, flushAcpThinking, transformAcpEvent } from './acp-event-transformer.js';
 import { resolveAcpMcpServers, resolveDisabledServerIds, resolveUserProjectMcpServers } from './acp-mcp-resolver.js';
 import { callbackEnvDiagnostic, materializeSessionMcpServers } from './acp-session-env.js';
-import type { AcpMcpServer, AcpNewSessionResult } from './types.js';
+import type { AcpMcpServer, AcpNewSessionResult, AcpSessionUpdate } from './types.js';
 
 const log = createModuleLogger('acp-agent');
+
+/**
+ * turn.agent_busy: the ACP agent (e.g. kimi) rejected session/prompt because an
+ * internally-launched turn (background-task completion steer, goal continuation)
+ * still occupies the session's single-turn slot. The harness cannot see these
+ * internal turns, so the rejection arrives as -32600 with zero prior events.
+ * Such turns are usually short — retry with bounded backoff instead of failing
+ * the invocation outright. Retry is only safe because the rejected prompt never
+ * started a turn (zero events yielded).
+ */
+const DEFAULT_AGENT_BUSY_RETRY_DELAYS_MS = [2_000, 5_000, 15_000, 30_000, 60_000];
+
+/** Structural surface needed by the busy-retry wrapper (AcpClient-compatible). */
+interface PromptStreamClient {
+  promptStream(
+    sessionId: string,
+    text: string,
+    options?: { timeoutMs?: number; idleWarningMs?: number; idleStallMs?: number },
+  ): AsyncGenerator<AcpSessionUpdate>;
+}
+
+function isAgentBusyError(err: unknown): boolean {
+  if (!(err instanceof AcpProtocolError)) return false;
+  const data = err.data;
+  if (typeof data === 'object' && data !== null && (data as Record<string, unknown>).code === 'turn.agent_busy') {
+    return true;
+  }
+  return /turn\.agent_busy|another turn.*is active/i.test(err.message);
+}
+
+function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new Error('aborted'));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new Error('aborted'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
 
 type ResumeDisposition = 'fresh_without_resume' | 'resume_requested' | 'resumed' | 'load_failed_fresh' | 'sealed_fresh';
 
@@ -50,7 +97,14 @@ type PromptPhase =
   | 'not_started'
   | 'active_unacknowledged'
   | 'provider_acknowledged'
-  | 'locally_terminated_unacknowledged';
+  | 'locally_terminated_unacknowledged'
+  /**
+   * Busy-retry backoff: NO harness session/prompt is in flight — the agent is
+   * running one of its own internal turns. Abort in this window must NOT send
+   * session/cancel or seal the session: that would kill the agent-internal
+   * turn this retry is deliberately waiting out.
+   */
+  | 'busy_backoff';
 
 export interface AcpAgentServiceConfig {
   catId: CatId;
@@ -81,6 +135,13 @@ export interface AcpAgentServiceConfig {
    * constants (90s stall, 180s tool ceiling) overrode the user's configured value.
    */
   idleTtlMs?: number;
+  /**
+   * turn.agent_busy retry backoff delays (ms). Each entry is one retry wait after
+   * a zero-event busy rejection; exhaustion surfaces the error as `agent_busy`.
+   * Defaults to DEFAULT_AGENT_BUSY_RETRY_DELAYS_MS (~2min total window, covering
+   * typical agent-internal turns like background-task completion steers).
+   */
+  agentBusyRetryDelaysMs?: number[];
 }
 
 /** @deprecated Use AcpAgentServiceConfig. Kept for backward compat during transition. */
@@ -105,6 +166,8 @@ export class AcpAgentService implements AgentService {
    * so promptStream never falls back to the client's hardcoded 90s/15m defaults.
    */
   private readonly idleTtlMs: number;
+  /** turn.agent_busy retry backoff schedule — see AcpAgentServiceConfig.agentBusyRetryDelaysMs. */
+  private readonly agentBusyRetryDelaysMs: number[];
 
   constructor(config: AcpAgentServiceConfig) {
     this.catId = config.catId;
@@ -118,6 +181,48 @@ export class AcpAgentService implements AgentService {
     this.sessionModel = config.sessionModel?.trim() || undefined;
     this.mcpSupportEnabled = config.mcpSupport !== false;
     this.idleTtlMs = config.idleTtlMs ?? DEFAULT_ACP_IDLE_TTL_MS;
+    this.agentBusyRetryDelaysMs = config.agentBusyRetryDelaysMs ?? DEFAULT_AGENT_BUSY_RETRY_DELAYS_MS;
+  }
+
+  /**
+   * promptStream wrapper that absorbs turn.agent_busy rejections. The agent rejects
+   * a new prompt while one of ITS OWN internal turns (background-task completion
+   * steer, goal continuation — invisible to the harness) occupies the session.
+   * The rejection arrives before the prompt starts a turn (zero events), so
+   * retrying after a backoff is safe and cannot double-send user-visible output.
+   * Any other error — or a failure after real events flowed — propagates unchanged.
+   */
+  private async *promptStreamWithBusyRetry(
+    client: PromptStreamClient,
+    sessionId: string,
+    prompt: string,
+    opts: { timeoutMs?: number; idleWarningMs?: number; idleStallMs?: number },
+    ctx: Record<string, unknown>,
+    signal?: AbortSignal,
+    hooks?: { onAttemptStart?: () => void; onBackoff?: (attempt: number, delayMs: number) => void },
+  ): AsyncGenerator<AcpSessionUpdate> {
+    const delays = this.agentBusyRetryDelaysMs;
+    for (let attempt = 0; ; attempt++) {
+      let yieldedEvents = 0;
+      hooks?.onAttemptStart?.();
+      try {
+        for await (const event of client.promptStream(sessionId, prompt, opts)) {
+          yieldedEvents++;
+          yield event;
+        }
+        return;
+      } catch (err) {
+        if (!isAgentBusyError(err) || yieldedEvents > 0 || attempt >= delays.length) throw err;
+        const delayMs = delays[attempt];
+        if (delayMs === undefined) throw err; // unreachable: attempt < delays.length
+        log.warn(
+          { ...ctx, sessionId, busyAttempt: attempt + 1, maxRetries: delays.length, delayMs },
+          'ACP agent busy with an internal turn — backing off before prompt retry',
+        );
+        hooks?.onBackoff?.(attempt + 1, delayMs);
+        await sleepWithAbort(delayMs, signal);
+      }
+    }
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
@@ -436,10 +541,29 @@ export class AcpAgentService implements AgentService {
         idleStallMs: this.idleTtlMs,
         timeoutMs: this.idleTtlMs + ACP_PROMPT_TIMEOUT_MARGIN_MS,
       };
+      // Busy-retry phase tracking: attempts re-mark the prompt active; the
+      // backoff window downgrades to busy_backoff so abort cannot cancel/seal
+      // the agent-internal turn we are waiting out.
+      const busyRetryHooks = {
+        onAttemptStart: () => {
+          promptPhase = 'active_unacknowledged';
+        },
+        onBackoff: () => {
+          promptPhase = 'busy_backoff';
+        },
+      };
       log.info({ ...ctx, sessionId, promptDigest, idleTtlMs: this.idleTtlMs }, 'ACP promptStream starting');
       eventCount = 0;
       promptPhase = 'active_unacknowledged';
-      for await (const event of client.promptStream(sessionId, effectivePrompt, promptStreamOpts)) {
+      for await (const event of this.promptStreamWithBusyRetry(
+        client,
+        sessionId,
+        effectivePrompt,
+        promptStreamOpts,
+        ctx,
+        options?.signal,
+        busyRetryHooks,
+      )) {
         // F149: Capacity signal injected by AcpClient.promptStream from stderr.
         // Breaks through zero-event stalls where the old listener-only path couldn't.
         if (event.update?.sessionUpdate === 'provider_capacity_signal') {
@@ -592,7 +716,15 @@ export class AcpAgentService implements AgentService {
           let retryEventCount = 0;
           log.info({ ...ctx, sessionId: freshSessionId }, '#1091: retry promptStream on fresh session');
           promptPhase = 'active_unacknowledged';
-          for await (const event of client.promptStream(freshSessionId, retryPrompt, promptStreamOpts)) {
+          for await (const event of this.promptStreamWithBusyRetry(
+            client,
+            freshSessionId,
+            retryPrompt,
+            promptStreamOpts,
+            ctx,
+            options?.signal,
+            busyRetryHooks,
+          )) {
             // Skip synthetic events (capacity/idle/tool-wait warnings)
             if (event.update?.sessionUpdate === 'provider_capacity_signal') continue;
             if (event.update?.sessionUpdate === 'stream_idle_warning') continue;
@@ -752,6 +884,10 @@ function classifyError(
         : null;
     const fullMsg = dataDetail ? `${err.message} — ${dataDetail}` : err.message;
 
+    if (isAgentBusyError(err)) {
+      // turn.agent_busy after busy-retry exhaustion — agent-internal turn still active
+      return { errorCode: 'agent_busy', errorMsg: fullMsg };
+    }
     if (err.code === -32000 || fullMsg.includes('capacity')) {
       return { errorCode: 'model_capacity', errorMsg: fullMsg };
     }
@@ -796,6 +932,8 @@ function toUserFacingError(providerName: string, errorCode: string, errorMsg: st
   const label = providerName === 'acp' ? 'ACP agent' : providerName;
   const base = `${errorCode}: ${errorMsg}`;
   switch (errorCode) {
+    case 'agent_busy':
+      return `${base}\n⚠️ ${label} 正在处理内部轮次（如后台任务完成通知），自动重试后仍被占用。非 Clowder AI 系统故障，稍后重试即可。`;
     case 'model_capacity':
       return `${base}\n⚠️ ${label} 服务端容量不足（服务器繁忙），非 Clowder AI 系统故障。`;
     case 'stream_idle_stall':

@@ -104,6 +104,46 @@ describe('Callback routes: agent-key auth path', () => {
     assert.equal(body.status, 'ok');
   });
 
+  test('post-message with agent-key rejects unsupported coordination instead of silently dropping it', async () => {
+    const app = await createApp();
+    const { secret } = await issueKey();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': secret },
+      payload: {
+        content: 'agent-key cannot establish relay provenance',
+        threadId: ownedThreadId,
+        coordination: { phase: 'active' },
+      },
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.json().kind, 'coordination_agent_key_unsupported');
+    assert.equal(messageStore.getByThread(ownedThreadId, 10, TEST_USER).length, 0);
+  });
+
+  test('post-message with agent-key rejects soft-deleted owned thread without storing or broadcasting', async () => {
+    const deletedThread = await threadStore.create(TEST_USER, 'Deleted Agent-Key Target');
+    assert.equal(await threadStore.softDelete(deletedThread.id), true);
+    const app = await createApp();
+    const { secret } = await issueKey();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': secret },
+      payload: { content: 'should not land in deleted thread', threadId: deletedThread.id },
+    });
+
+    assert.equal(res.statusCode, 410);
+    const body = JSON.parse(res.body);
+    assert.equal(body.code, 'THREAD_DELETED');
+    assert.equal(messageStore.getByThread(deletedThread.id, 10, TEST_USER).length, 0);
+    assert.equal(socketManager.getMessages().length, 0);
+  });
+
   test('post-message with agent-key synthesizes text-only audio rich blocks before storing', async () => {
     const { initVoiceBlockSynthesizer } = await import('../dist/domains/cats/services/tts/VoiceBlockSynthesizer.js');
     const cacheDir = mkdtempSync(path.join(os.tmpdir(), 'cat-cafe-agent-key-audio-'));
@@ -320,6 +360,35 @@ describe('Callback routes: agent-key auth path', () => {
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.ok(Array.isArray(body.messages));
+  });
+
+  test('thread-context with agent-key can read owned soft-deleted thread tombstones', async () => {
+    const deletedThread = await threadStore.create(TEST_USER, 'Deleted Readable Thread');
+    messageStore.append({
+      userId: TEST_USER,
+      catId: TEST_CAT,
+      content: 'context survives deletion',
+      mentions: [],
+      origin: 'callback',
+      timestamp: Date.now(),
+      threadId: deletedThread.id,
+    });
+    assert.equal(await threadStore.softDelete(deletedThread.id), true);
+    const app = await createApp();
+    const { secret } = await issueKey();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/thread-context?threadId=${deletedThread.id}`,
+      headers: { 'x-agent-key-secret': secret },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.threadId, deletedThread.id);
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].preview, 'context survives deletion');
+    assert.equal('content' in body.messages[0], false);
   });
 
   // ---- GET /api/callbacks/list-threads ----

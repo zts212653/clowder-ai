@@ -55,6 +55,85 @@ describe('CallbackPrincipal helpers', () => {
     assert.equal(result.threadId, 't1');
   });
 
+  test('resolvePrincipalThread() allows scoped soft-deleted thread for read/write route policy to decide', async () => {
+    const { resolvePrincipalThread } = await import('../dist/routes/callback-scope-helpers.js');
+    const principal = { kind: 'agent_key', agentKeyId: 'ak_1', userId: 'u1', catId: 'codex', scope: 'user-bound' };
+    const result = await resolvePrincipalThread(principal, 'thread-deleted', {
+      threadStore: {
+        async get() {
+          return { id: 'thread-deleted', createdBy: 'u1', deletedAt: Date.now() };
+        },
+      },
+    });
+    assert.deepEqual(result, { ok: true, threadId: 'thread-deleted' });
+  });
+
+  test('resolvePrincipalThread() does not reveal soft-deleted threads outside agent_key scope', async () => {
+    const { resolvePrincipalThread } = await import('../dist/routes/callback-scope-helpers.js');
+    const principal = { kind: 'agent_key', agentKeyId: 'ak_1', userId: 'u1', catId: 'codex', scope: 'user-bound' };
+    const result = await resolvePrincipalThread(principal, 'thread-deleted', {
+      threadStore: {
+        async get() {
+          return { id: 'thread-deleted', createdBy: 'u2', deletedAt: Date.now() };
+        },
+      },
+      accessDeniedError: 'Thread access denied',
+    });
+    assert.deepEqual(result, {
+      ok: false,
+      statusCode: 403,
+      error: 'Thread access denied',
+    });
+  });
+
+  test('getDeletedCallbackThreadGuard() blocks known soft-deleted threads', async () => {
+    const { getDeletedCallbackThreadGuard } = await import('../dist/routes/callback-scope-helpers.js');
+    const result = await getDeletedCallbackThreadGuard(
+      {
+        async get() {
+          return { deletedAt: Date.now() };
+        },
+      },
+      'thread-deleted',
+    );
+
+    assert.deepEqual(result, {
+      statusCode: 410,
+      body: {
+        error: 'Thread is deleted',
+        code: 'THREAD_DELETED',
+      },
+    });
+  });
+
+  test('getDeletedCallbackThreadGuard() allows active threads', async () => {
+    const { getDeletedCallbackThreadGuard } = await import('../dist/routes/callback-scope-helpers.js');
+    const result = await getDeletedCallbackThreadGuard(
+      {
+        async get() {
+          return { deletedAt: null };
+        },
+      },
+      'thread-active',
+    );
+
+    assert.equal(result, null);
+  });
+
+  test('getDeletedCallbackThreadGuard() fails open when threadStore.get throws', async () => {
+    const { getDeletedCallbackThreadGuard } = await import('../dist/routes/callback-scope-helpers.js');
+    const result = await getDeletedCallbackThreadGuard(
+      {
+        async get() {
+          throw new Error('redis down');
+        },
+      },
+      'thread-unknown',
+    );
+
+    assert.equal(result, null);
+  });
+
   test('resolvePrincipalThread() allows agent_key access to indexed system threads', async () => {
     const { resolvePrincipalThread } = await import('../dist/routes/callback-scope-helpers.js');
     const principal = { kind: 'agent_key', agentKeyId: 'ak_1', userId: 'u1', catId: 'codex', scope: 'user-bound' };

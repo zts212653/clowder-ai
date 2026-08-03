@@ -86,6 +86,7 @@ export type PostSealHook = (event: {
   sessionId: string;
   catId: string;
   threadId: string;
+  ownerUserId: string;
   sealReason: string;
 }) => Promise<void>;
 
@@ -251,6 +252,7 @@ export class SessionSealer implements ISessionSealer {
         sessionId: args.sessionId,
         catId: record.catId,
         threadId: record.threadId,
+        ownerUserId: record.userId,
         sealReason: record.sealReason ?? 'unknown',
       };
       for (const hook of this.postSealHooks) {
@@ -491,6 +493,21 @@ export class SessionSealer implements ISessionSealer {
       const events = await this.transcriptReader!.readAllEvents(record.id, record.threadId, record.catId);
       const chatMessages = formatEventsChat(events);
       const transcriptText = chatMessages.map((m) => m.content).join('\n');
+      const transcriptEntries = events.flatMap((event) => {
+        const [message] = formatEventsChat([event]);
+        if (!message) return [];
+        return [
+          {
+            content: message.content,
+            sourceRef: {
+              threadId: record.threadId,
+              sessionId: record.id,
+              eventNo: event.eventNo,
+              ...(event.invocationId ? { invocationId: event.invocationId } : {}),
+            },
+          },
+        ];
+      });
 
       // Get latest ThreadSummary conclusions (if summaryStore available)
       let summaryConclusions: string[] = [];
@@ -506,7 +523,7 @@ export class SessionSealer implements ISessionSealer {
 
       if (!transcriptText && summaryConclusions.length === 0 && summaryOpenQuestions.length === 0) return undefined;
 
-      return extractDecisionSignals({ transcriptText, summaryConclusions, summaryOpenQuestions });
+      return extractDecisionSignals({ transcriptText, transcriptEntries, summaryConclusions, summaryOpenQuestions });
     } catch {
       // Fail-open: decision extraction failure doesn't affect sealing
       return undefined;

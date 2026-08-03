@@ -110,6 +110,9 @@ describe('ConnectorBubble theme', () => {
   });
 
   it('renders cancel-and-feedback for hold-ball bubbles and sends feedback cancel', async () => {
+    mockApiFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ status: 'active', cancelable: true }), { status: 200 }),
+    );
     const message: ChatMessage = {
       id: 'm-hold',
       type: 'connector',
@@ -126,6 +129,9 @@ describe('ConnectorBubble theme', () => {
     act(() => {
       root.render(React.createElement(ConnectorBubble, { message }));
     });
+    await act(async () => {
+      await Promise.resolve();
+    });
 
     const buttons = Array.from(container.querySelectorAll('button'));
     const feedbackButton = buttons.find((button) => button.textContent?.includes('取消并反馈'));
@@ -135,13 +141,15 @@ describe('ConnectorBubble theme', () => {
       feedbackButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/callbacks/hold-ball/hold-ball-123?withFeedback=1', {
+    expect(mockApiFetch).toHaveBeenNthCalledWith(1, '/api/callbacks/hold-ball/hold-ball-123/status');
+    expect(mockApiFetch).toHaveBeenNthCalledWith(2, '/api/callbacks/hold-ball/hold-ball-123?withFeedback=1', {
       method: 'DELETE',
     });
   });
 
   it('falls back to standalone feedback when hold-ball task is already stale', async () => {
     mockApiFetch
+      .mockResolvedValueOnce(new Response('{}', { status: 404 }))
       .mockResolvedValueOnce(new Response('{}', { status: 404 }))
       .mockResolvedValueOnce(new Response('{}', { status: 200 }));
     const message: ChatMessage = {
@@ -160,6 +168,9 @@ describe('ConnectorBubble theme', () => {
     act(() => {
       root.render(React.createElement(ConnectorBubble, { message, threadId: 'thread-stale' }));
     });
+    await act(async () => {
+      await Promise.resolve();
+    });
 
     const feedbackButton = Array.from(container.querySelectorAll('button')).find((button) =>
       button.textContent?.includes('取消并反馈'),
@@ -170,10 +181,11 @@ describe('ConnectorBubble theme', () => {
       feedbackButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    expect(mockApiFetch).toHaveBeenNthCalledWith(1, '/api/callbacks/hold-ball/hold-ball-stale?withFeedback=1', {
+    expect(mockApiFetch).toHaveBeenNthCalledWith(1, '/api/callbacks/hold-ball/hold-ball-stale/status');
+    expect(mockApiFetch).toHaveBeenNthCalledWith(2, '/api/callbacks/hold-ball/hold-ball-stale?withFeedback=1', {
       method: 'DELETE',
     });
-    expect(mockApiFetch).toHaveBeenNthCalledWith(2, '/api/callbacks/hold-ball/feedback', {
+    expect(mockApiFetch).toHaveBeenNthCalledWith(3, '/api/callbacks/hold-ball/feedback', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -181,6 +193,37 @@ describe('ConnectorBubble theme', () => {
         taskId: 'hold-ball-stale',
       }),
     });
+  });
+
+  it('renders retired event status without cancel controls for hold-ball bubbles', async () => {
+    mockApiFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ status: 'retired_by_event', cancelable: false }), { status: 200 }),
+    );
+    const message: ChatMessage = {
+      id: 'm-hold-retired',
+      type: 'connector',
+      content: '🏓 opus 持球中 — 等云端 review。',
+      timestamp: Date.now(),
+      source: {
+        connector: 'hold-ball',
+        label: '持球通知',
+        icon: '🏓',
+        meta: { taskId: 'hold-ball-retired' },
+      },
+    };
+
+    act(() => {
+      root.render(React.createElement(ConnectorBubble, { message }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('已被事件唤醒');
+    expect(Array.from(container.querySelectorAll('button')).map((button) => button.textContent)).not.toContain(
+      '取消持球',
+    );
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/callbacks/hold-ball/hold-ball-retired/status');
   });
 
   it('uses OKLCH-derived surface for github-review bubble', () => {

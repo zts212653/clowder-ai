@@ -1,20 +1,22 @@
 'use client';
 
+import type { EvidenceSourceType } from '@/types/evidence';
 import { ExpandableText } from './ExpandableText';
-import { CommitIcon, DecisionIcon, DiscussionIcon, PhaseIcon } from './icons/EvidenceIcons';
+import { ArchitectureIcon, CommitIcon, DecisionIcon, DiscussionIcon, PhaseIcon } from './icons/EvidenceIcons';
 
-export type EvidenceConfidence = 'high' | 'mid' | 'low';
-export type EvidenceSourceType = 'decision' | 'phase' | 'discussion' | 'commit';
+export type EvidenceMatchRank = 'high' | 'mid' | 'low';
 export type EvidenceStatus = 'draft' | 'pending' | 'published' | 'archived';
 
 export interface EvidenceResult {
   title: string;
   anchor: string;
   snippet: string;
-  confidence: EvidenceConfidence;
+  matchRank: EvidenceMatchRank;
+  retrievalScore?: number;
   sourceType: EvidenceSourceType;
   status?: EvidenceStatus;
   authority?: string;
+  updatedAt?: string;
 }
 
 const SOURCE_CONFIG: Record<
@@ -26,6 +28,11 @@ const SOURCE_CONFIG: Record<
 > = {
   decision: { icon: DecisionIcon, label: '决策' },
   phase: { icon: PhaseIcon, label: '阶段' },
+  feature: { icon: PhaseIcon, label: '功能' },
+  architecture: { icon: ArchitectureIcon, label: '架构' },
+  lesson: { icon: DecisionIcon, label: '教训' },
+  research: { icon: DiscussionIcon, label: '调研' },
+  knowledge: { icon: DiscussionIcon, label: '知识' },
   discussion: { icon: DiscussionIcon, label: '讨论' },
   commit: { icon: CommitIcon, label: '提交' },
 };
@@ -52,22 +59,41 @@ const STATUS_CONFIG: Record<
   archived: { label: '归档', className: 'grayscale-[0.5] opacity-60', badge: 'bg-conn-gray-bg text-cafe-secondary' },
 };
 
-const CONFIDENCE_STYLES: Record<
-  EvidenceConfidence,
+const MATCH_RANK_STYLES: Record<
+  EvidenceMatchRank,
   {
     bg: string;
     text: string;
     label: string;
   }
 > = {
-  high: { bg: 'bg-semantic-success-surface', text: 'text-semantic-success', label: '高置信度' },
-  mid: { bg: 'bg-semantic-warning-surface', text: 'text-semantic-warning', label: '中置信度' },
-  low: { bg: 'bg-conn-slate-bg', text: 'text-conn-slate-text', label: '低置信度' },
+  high: { bg: 'bg-semantic-success-surface', text: 'text-semantic-success', label: '高匹配' },
+  mid: { bg: 'bg-semantic-warning-surface', text: 'text-semantic-warning', label: '中匹配' },
+  low: { bg: 'bg-conn-slate-bg', text: 'text-conn-slate-text', label: '低匹配' },
 };
+
+const UNKNOWN_MATCH_RANK_STYLE = {
+  bg: 'bg-conn-slate-bg',
+  text: 'text-conn-slate-text',
+  label: '匹配未知',
+};
+
+function isEvidenceMatchRank(value: unknown): value is EvidenceMatchRank {
+  return value === 'high' || value === 'mid' || value === 'low';
+}
+
+function readPersistedMatchRank(result: EvidenceResult): EvidenceMatchRank | undefined {
+  const persisted = result as unknown as Record<string, unknown>;
+  if (isEvidenceMatchRank(persisted.matchRank)) return persisted.matchRank;
+
+  const legacyValue = persisted.confidence;
+  return isEvidenceMatchRank(legacyValue) ? legacyValue : undefined;
+}
 
 export function EvidenceCard({ result }: { result: EvidenceResult }) {
   const source = SOURCE_CONFIG[result.sourceType];
-  const conf = CONFIDENCE_STYLES[result.confidence];
+  const persistedMatchRank = readPersistedMatchRank(result);
+  const matchRank = persistedMatchRank ? MATCH_RANK_STYLES[persistedMatchRank] : UNKNOWN_MATCH_RANK_STYLE;
   const status = result.status ? STATUS_CONFIG[result.status] : null;
   const Icon = source.icon;
 
@@ -92,12 +118,16 @@ export function EvidenceCard({ result }: { result: EvidenceResult }) {
               clampClass="line-clamp-2"
               className={`text-xs font-bold text-cafe leading-snug ${result.status === 'archived' ? 'line-through decoration-cafe-muted/50' : ''}`}
             />
+            <span className="text-micro text-cafe-muted" data-testid="evidence-result-axes">
+              match:{persistedMatchRank ?? 'unknown'} · authority:{result.authority ?? 'unknown'} · updated:
+              {result.updatedAt ?? 'unknown'}
+            </span>
           </div>
           <div className="flex flex-col items-end gap-1 flex-shrink-0">
             <span
-              className={`text-micro font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider ${conf.bg} ${conf.text}`}
+              className={`text-micro font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider ${matchRank.bg} ${matchRank.text}`}
             >
-              {conf.label}
+              {matchRank.label}
             </span>
             {status?.badge && (
               <span className={`text-micro font-black px-1 py-0.25 rounded border ${status.badge}`}>

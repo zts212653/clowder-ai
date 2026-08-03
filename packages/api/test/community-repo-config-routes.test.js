@@ -54,6 +54,8 @@ describe('Community Repo Config Routes', () => {
           repo: 'zts212653/clowder-ai',
           guardThreadId: 'thread_abc',
           guardCatId: 'codex',
+          reviewMode: 'maintainer_review',
+          cloudReviewPolicy: 'required',
         },
         headers: f163OwnerHeaders(),
       });
@@ -63,6 +65,8 @@ describe('Community Repo Config Routes', () => {
       assert.equal(body.repo, 'zts212653/clowder-ai');
       assert.equal(body.guardThreadId, 'thread_abc');
       assert.equal(body.guardCatId, 'codex');
+      assert.equal(body.reviewMode, 'maintainer_review');
+      assert.equal(body.cloudReviewPolicy, 'required');
     });
 
     it('rejects missing required fields', async () => {
@@ -70,6 +74,23 @@ describe('Community Repo Config Routes', () => {
         method: 'POST',
         url: '/api/community-repo-configs',
         payload: { repo: 'zts212653/clowder-ai' },
+        headers: f163OwnerHeaders(),
+      });
+
+      assert.equal(res.statusCode, 400);
+    });
+
+    it('rejects unknown review policy values', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/community-repo-configs',
+        payload: {
+          repo: 'zts212653/clowder-ai',
+          guardThreadId: 'thread_abc',
+          guardCatId: 'codex',
+          reviewMode: 'auto_write_everything',
+          cloudReviewPolicy: 'required',
+        },
         headers: f163OwnerHeaders(),
       });
 

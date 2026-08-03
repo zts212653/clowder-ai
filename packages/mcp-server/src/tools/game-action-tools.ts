@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { getInvocationAuthSignal } from './invocation-auth.js';
 
 const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
 
@@ -10,7 +11,7 @@ function buildHeaders(): Record<string, string> {
   if (userId) headers['x-cat-cafe-user'] = userId;
   const catId = process.env['CAT_CAFE_CAT_ID'];
   if (catId) headers['x-cat-id'] = catId;
-  const invocationId = process.env['CAT_CAFE_INVOCATION_ID'];
+  const invocationId = getInvocationAuthSignal().invocationId;
   if (invocationId) headers['x-callback-invocation-id'] = invocationId;
   headers['content-type'] = 'application/json';
   return headers;
@@ -33,7 +34,7 @@ function emitGameActionTrace(
   console.error(
     `[cat-cafe-game-action] ${JSON.stringify({
       stage,
-      invocationId: process.env['CAT_CAFE_INVOCATION_ID'] ?? null,
+      invocationId: getInvocationAuthSignal().invocationId ?? null,
       catId: process.env['CAT_CAFE_CAT_ID'] ?? null,
       userId: process.env['CAT_CAFE_USER_ID'] ?? null,
       gameId: input.gameId,

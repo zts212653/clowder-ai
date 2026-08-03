@@ -8,9 +8,9 @@
 
 | 类型 | ConnectorSource | 优先级 | 触发条件 |
 |------|----------------|--------|----------|
-| CI/CD 状态 | `github-ci` | fail=urgent（总唤醒）；pass=normal**仅 intent=merge 唤醒**，intent=review 只投消息 | CI checks 完成（F133）。intent 见 cicd-tracking.md / register_pr_tracking |
+| CI/CD 状态 | `github-ci` | fail=urgent（总唤醒）；pass=normal**仅 intent=merge 唤醒**，intent=review 只记 state | CI checks 完成（F133）。intent 见 cicd-tracking.md / register_pr_tracking |
 | PR 冲突 | `github-conflict` | urgent | `mergeStateStatus` 变为 CONFLICTING（F140） |
-| Review Feedback | `github-review-feedback` | changes_requested=urgent, 其余=normal | 新 comments / review decisions（F140） |
+| Review Feedback | `github-review-feedback` | changes_requested=urgent, 其余=normal | 新 comments / review decisions（F140）；是否 delivery 受 wakePolicy 控制 |
 
 ## 通知消息格式
 
@@ -111,9 +111,20 @@ Commit: `abc1234`
 | Review Feedback | cursor-based：comment ID / review ID 单调递增，cursor 仅在 delivery 成功后推进（KD-10） |
 | CI/CD | `lastCiFingerprint = headSha:bucket`（F133） |
 
+## Actor-aware wake policy
+
+`wakePolicy` 与 `intent` 是正交契约：`intent` 决定等 review 还是等 CI-green；`wakePolicy` 决定哪些 actor 的已采集 feedback 可以产生 connector delivery / freshness unread / invocation。
+
+| wakePolicy | GitHub `User` | GitHub `Bot` | actor type 缺失/未知 |
+|------------|---------------|--------------|----------------------|
+| `all_feedback`（默认） | 唤醒 | 唤醒 | 唤醒 |
+| `human_participant_activity` | 唤醒（含 PR/issue author 与第三方人类） | state-only | fail-safe 唤醒 |
+
+state-only 不是丢弃：event log、projector、cursor 与 provenance 继续推进；只是不投递 connector，也不制造 freshness unread / 新 invocation。精确 self echo 继续按既有规则抑制。`authorAssociation=OWNER` 表示 repo 权限关系，不等于 PR/issue author，也不等于“人类”。
+
 ## 配置
 
-PR Signals 自动随 `register_pr_tracking` 生效，无需额外配置。轮询间隔：
+PR Signals 自动随 `register_pr_tracking` 生效。默认 `wakePolicy=all_feedback` 向后兼容；开源 reviewer 只想被人类参与者叫醒时，显式注册 `wakePolicy=human_participant_activity`。issue tracking 使用同一契约。轮询间隔：
 - 冲突检测：5 分钟
 - Review Feedback：1 分钟
 - CI/CD：由 F133 CiCdCheckTaskSpec 控制

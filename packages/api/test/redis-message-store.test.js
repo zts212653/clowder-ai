@@ -13,6 +13,334 @@ import {
 
 const REDIS_URL = process.env.REDIS_URL;
 
+function luaHash(fields) {
+  return Object.entries(fields).flat();
+}
+
+describe('RedisMessageStore.markDelivered atomic transition', () => {
+  it('uses Redis-side compare-and-set instead of read-check-write pipeline', async () => {
+    const { RedisMessageStore } = await import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js');
+    const evalCalls = [];
+    let multiCalls = 0;
+    const redis = {
+      options: {},
+      hgetall: async () => {
+        throw new Error('markDelivered must hydrate from the Lua receipt, not a post-EVAL read');
+      },
+      eval: async (...args) => {
+        evalCalls.push(args);
+        return [
+          1,
+          luaHash({
+            id: 'msg-atomic',
+            threadId: 't1',
+            userId: 'u1',
+            catId: '',
+            content: 'queued body',
+            mentions: '[]',
+            timestamp: '1000',
+            deliveryStatus: 'delivered',
+            deliveredAt: '2000',
+            timelineOrderAt: '2000',
+          }),
+        ];
+      },
+      multi: () => {
+        multiCalls += 1;
+        return {
+          hset() {
+            return this;
+          },
+          zadd() {
+            return this;
+          },
+          exec: async () => [],
+        };
+      },
+    };
+    const store = new RedisMessageStore(redis);
+
+    const result = await store.markDelivered('msg-atomic', 2000);
+
+    assert.equal(result?.deliveryTransitioned, true);
+    assert.equal(evalCalls.length, 1, 'delivery transition must be guarded by one Redis EVAL CAS');
+    assert.equal(evalCalls[0][1], 1, 'Lua derives all sorted-set keys from the canonical message hash');
+    assert.equal(multiCalls, 0, 'read-check-write pipeline lets concurrent callers both report transition');
+  });
+
+  it('reports non-transition when the Redis compare-and-set loses the race', async () => {
+    const { RedisMessageStore } = await import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js');
+    const canonical = {
+      id: 'msg-race',
+      threadId: 't1',
+      userId: 'u1',
+      catId: '',
+      content: 'queued body',
+      mentions: '[]',
+      timestamp: '1000',
+      deliveryStatus: 'delivered',
+      deliveredAt: '2001',
+    };
+    const redis = {
+      options: {},
+      hgetall: async () => {
+        throw new Error('lost CAS must hydrate from the Lua receipt, not a post-EVAL read');
+      },
+      eval: async () => [0, luaHash(canonical)],
+      multi: () => {
+        throw new Error('markDelivered must not fall back to non-atomic pipeline');
+      },
+    };
+    const store = new RedisMessageStore(redis);
+
+    const result = await store.markDelivered('msg-race', 2000);
+
+    assert.equal(result?.deliveryTransitioned, false);
+    assert.equal(result?.deliveryStatus, 'delivered');
+    assert.equal(result?.deliveredAt, 2001);
+  });
+});
+
+describe('RedisMessageStore.markCanceled atomic transition', () => {
+  it('uses Redis-side compare-and-set and reports whether queued actually transitioned', async () => {
+    const { RedisMessageStore } = await import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js');
+    const evalCalls = [];
+    const canonical = {
+      id: 'msg-cancel-race',
+      threadId: 't1',
+      userId: 'u1',
+      catId: '',
+      content: 'queued body',
+      mentions: '[]',
+      timestamp: '1000',
+      deliveryStatus: 'delivered',
+      deliveredAt: '2000',
+    };
+    const redis = {
+      options: {},
+      hgetall: async () => {
+        throw new Error('lost cancel CAS must hydrate from the Lua receipt, not a post-EVAL read');
+      },
+      eval: async (...args) => {
+        evalCalls.push(args);
+        return [0, luaHash(canonical)];
+      },
+      hset: async () => {
+        throw new Error('markCanceled must not use an unconditional HSET');
+      },
+    };
+    const store = new RedisMessageStore(redis);
+
+    const result = await store.markCanceled('msg-cancel-race');
+
+    assert.equal(evalCalls.length, 1);
+    assert.equal(result?.deliveryTransitioned, false);
+    assert.equal(result?.deliveryStatus, 'delivered');
+  });
+});
+
+describe('RedisMessageStore bounded forward thread reads', () => {
+  it('does not materialize the full thread index when a no-cursor read has a limit', async () => {
+    const { RedisMessageStore } = await import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js');
+    const ids = Array.from({ length: 120 }, (_, index) => `msg-${String(index).padStart(3, '0')}`);
+    const rangeCalls = [];
+    const redis = {
+      options: {},
+      zrange: async (_key, start, stop) => {
+        rangeCalls.push([start, stop]);
+        const inclusiveStop = stop === -1 ? ids.length : stop + 1;
+        return ids.slice(start, inclusiveStop);
+      },
+      multi: () => {
+        const requested = [];
+        return {
+          hgetall(key) {
+            requested.push(key.replace(/^msg:/, ''));
+            return this;
+          },
+          async exec() {
+            return requested.map((id) => {
+              const index = ids.indexOf(id);
+              return [
+                null,
+                {
+                  id,
+                  threadId: 'bounded-forward',
+                  userId: 'user-1',
+                  catId: index < 55 ? '' : 'opus',
+                  content: id,
+                  mentions: '[]',
+                  timestamp: String(index + 1),
+                  ...(index < 55 ? { deliveryStatus: 'queued' } : {}),
+                },
+              ];
+            });
+          },
+        };
+      },
+    };
+    const store = new RedisMessageStore(redis);
+
+    const messages = await store.getByThreadAfter('bounded-forward', undefined, 2, 'user-1');
+
+    assert.deepEqual(
+      messages.map((message) => message.id),
+      ['msg-055', 'msg-056'],
+    );
+    assert.ok(rangeCalls.length >= 2, 'hidden rows require bounded continuation reads');
+    assert.ok(
+      rangeCalls.every(([, stop]) => stop !== -1),
+      `bounded reads must never request the full sorted set; calls=${JSON.stringify(rangeCalls)}`,
+    );
+  });
+});
+
+describe('RedisMessageStore bounded thread scan', () => {
+  it('caps raw sorted-set candidates and Redis round-trips when rows are canceled', async () => {
+    const { RedisMessageStore } = await import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js');
+    const ids = Array.from({ length: 3_000 }, (_, index) => `msg-${String(index).padStart(4, '0')}`).reverse();
+    let rangeCalls = 0;
+    let hydrateCalls = 0;
+    let zscoreCalls = 0;
+    const redis = {
+      options: {},
+      zrevrangebyscore: async (_key, _max, _min, ...args) => {
+        rangeCalls += 1;
+        const limitIndex = args.indexOf('LIMIT');
+        const offset = Number(args[limitIndex + 1]);
+        const count = Number(args[limitIndex + 2]);
+        return ids.slice(offset, offset + count).flatMap((id, index) => [id, String(3_000 - offset - index)]);
+      },
+      zscore: async () => {
+        zscoreCalls += 1;
+        return '1';
+      },
+      multi: () => {
+        const requested = [];
+        return {
+          hgetall(key) {
+            requested.push(key.replace(/^msg:/, ''));
+            return this;
+          },
+          async exec() {
+            hydrateCalls += 1;
+            return requested.map((id) => [
+              null,
+              {
+                id,
+                threadId: 'bounded-thread',
+                userId: 'user-1',
+                catId: '',
+                content: 'canceled',
+                mentions: '[]',
+                timestamp: '1',
+                deliveryStatus: 'canceled',
+              },
+            ]);
+          },
+        };
+      },
+    };
+    const store = new RedisMessageStore(redis);
+
+    const page = await store.getByThreadBeforeBounded(
+      'bounded-thread',
+      Number.MAX_SAFE_INTEGER,
+      500,
+      undefined,
+      'user-1',
+      2_000,
+    );
+
+    assert.equal(page.messages.length, 0);
+    assert.equal(page.scannedCount, 2_000);
+    assert.equal(page.exhausted, false);
+    assert.equal(page.storageRoundTrips, 8);
+    assert.equal(rangeCalls, 4, '500-id chunks bound sorted-set reads');
+    assert.equal(hydrateCalls, 4, 'one hydration pipeline per sorted-set chunk');
+    assert.equal(zscoreCalls, 0, 'WITHSCORES must replace one ZSCORE round-trip per candidate');
+  });
+
+  it('keeps the full 2,000-candidate route window within eleven Redis round-trips', async () => {
+    const { RedisMessageStore } = await import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js');
+    const ids = Array.from({ length: 2_100 }, (_, index) => `msg-${String(index).padStart(4, '0')}`).reverse();
+    let rangeCalls = 0;
+    let rankCalls = 0;
+    let hydrateCalls = 0;
+    const withScores = (slice, baseIndex) => slice.flatMap((id, index) => [id, String(2_100 - baseIndex - index)]);
+    const redis = {
+      options: {},
+      zrevrangebyscore: async (_key, _max, _min, ...args) => {
+        rangeCalls += 1;
+        const limitIndex = args.indexOf('LIMIT');
+        const offset = Number(args[limitIndex + 1]);
+        const count = Number(args[limitIndex + 2]);
+        return withScores(ids.slice(offset, offset + count), offset);
+      },
+      zrevrank: async (_key, id) => {
+        rankCalls += 1;
+        const rank = ids.indexOf(id);
+        return rank < 0 ? null : rank;
+      },
+      zrevrange: async (_key, start, stop) => {
+        rangeCalls += 1;
+        return withScores(ids.slice(start, stop + 1), start);
+      },
+      multi: () => {
+        const requested = [];
+        return {
+          hgetall(key) {
+            requested.push(key.replace(/^msg:/, ''));
+            return this;
+          },
+          async exec() {
+            hydrateCalls += 1;
+            return requested.map((id) => [
+              null,
+              {
+                id,
+                threadId: 'bounded-thread',
+                userId: 'user-1',
+                catId: '',
+                content: 'delivered',
+                mentions: '[]',
+                timestamp: '1',
+                deliveryStatus: 'delivered',
+              },
+            ]);
+          },
+        };
+      },
+    };
+    const store = new RedisMessageStore(redis);
+    let cursorTimestamp = Number.MAX_SAFE_INTEGER;
+    let cursorId;
+    let scannedCount = 0;
+    let storageRoundTrips = 0;
+
+    while (scannedCount < 2_000) {
+      const page = await store.getByThreadBeforeBounded(
+        'bounded-thread',
+        cursorTimestamp,
+        500,
+        cursorId,
+        'user-1',
+        2_000 - scannedCount,
+      );
+      scannedCount += page.scannedCount;
+      storageRoundTrips += page.storageRoundTrips;
+      cursorTimestamp = page.nextCursor.timestamp;
+      cursorId = page.nextCursor.id;
+    }
+
+    assert.equal(scannedCount, 2_000);
+    assert.equal(rangeCalls, 4);
+    assert.equal(rankCalls, 3);
+    assert.equal(hydrateCalls, 4);
+    assert.equal(storageRoundTrips, 11);
+  });
+});
+
 describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisMessageStore;
   let generateSortableId;
@@ -74,42 +402,133 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(msg.userId, 'user1');
   });
 
-  it('append() rejects timestamps outside the sortable-ID-safe Date domain before side effects', async () => {
-    const invalidTimestamps = [
-      -1,
-      1.5,
-      Number.NaN,
-      Number.POSITIVE_INFINITY,
-      Number.NEGATIVE_INFINITY,
-      8_640_000_000_000_001,
-      -8_640_000_000_000_001,
-    ];
-    let listenerCalls = 0;
-    const admissionStore = new RedisMessageStore(redis, {
-      ttlSeconds: 60,
-      onAppend: () => listenerCalls++,
+  it('F287 rehydrates a strict delivery-decision carrier from the real Redis hash', async () => {
+    const deliveryDecision = {
+      v: 1,
+      producer: 'github_ci',
+      producerProvenance: 'server_github_ci',
+      repoFullName: 'zts212653/cat-cafe',
+      prNumber: 3276,
+      headSha: 'b'.repeat(40),
+      phase: 'merge_gate',
+      gateOutcome: 'source_evidence_complete',
+      externalCondition: 'billing_spending_limit_zero_step',
+      candidateAction: 'merge',
+      occurredAt: 1_785_600_000_000,
+    };
+    const stored = await store.append({
+      userId: 'user-f287-billing',
+      catId: null,
+      content: 'GitHub CI failed before any source step ran.',
+      mentions: ['opus'],
+      timestamp: deliveryDecision.occurredAt,
+      threadId: 'thread-f287-billing',
+      source: { connector: 'github-ci', label: 'GitHub CI/CD', icon: 'github' },
+      extra: { memoryCue: { deliveryDecision } },
     });
 
-    for (const timestamp of invalidTimestamps) {
-      await assert.rejects(
-        admissionStore.append({
-          userId: 'user1',
-          catId: null,
-          content: 'must not persist',
-          mentions: [],
-          timestamp,
-          idempotencyKey: `invalid-date-${String(timestamp)}`,
-        }),
-        { name: 'RangeError', message: /non-negative integer ECMAScript Date/ },
-      );
+    const hydrated = await store.getById(stored.id);
+
+    assert.deepEqual(hydrated?.extra?.memoryCue, { deliveryDecision });
+  });
+
+  it('listOwnerMessagesInWindow returns the exact delivered owner timeline with inclusive boundaries and no page cap', async () => {
+    const base = Date.now() - 10_000;
+    const append = (overrides) =>
+      store.append({
+        userId: 'owner-window',
+        catId: null,
+        content: 'candidate',
+        mentions: [],
+        threadId: 'thread-a',
+        ...overrides,
+      });
+
+    await append({ content: 'before', timestamp: base - 1 });
+    const lower = await append({ content: 'lower', timestamp: base });
+    await append({ content: 'other owner', timestamp: base + 1, userId: 'other-owner' });
+    await append({ content: 'queued', timestamp: base + 2, deliveryStatus: 'queued' });
+    const delivered = await append({ content: 'delivered later', timestamp: base - 2, deliveryStatus: 'queued' });
+    await store.markDelivered(delivered.id, base + 3);
+    const canceled = await append({ content: 'canceled', timestamp: base + 4, deliveryStatus: 'queued' });
+    await store.markCanceled(canceled.id);
+    const restored = await append({ content: 'restored', timestamp: base + 5 });
+    await store.softDelete(restored.id, 'owner-window');
+
+    const middle = [];
+    for (let offset = 6; offset < 81; offset += 1) {
+      middle.push(await append({ content: `middle ${offset}`, timestamp: base + offset }));
+    }
+    const upper = await append({ content: 'upper', timestamp: base + 81 });
+    await append({ content: 'after', timestamp: base + 82 });
+
+    const firstRead = await store.listOwnerMessagesInWindow('owner-window', base, base + 81);
+    assert.deepEqual(
+      firstRead.map((message) => message.id),
+      [lower.id, delivered.id, ...middle.map((message) => message.id), upper.id],
+    );
+
+    await store.restore(restored.id);
+    const restoredRead = await store.listOwnerMessagesInWindow('owner-window', base, base + 81);
+    assert.deepEqual(
+      restoredRead.map((message) => message.id),
+      [lower.id, delivered.id, restored.id, ...middle.map((message) => message.id), upper.id],
+    );
+  });
+
+  it('all Redis append entrypoints reject unsafe timestamps and transition-owned metadata before side effects', async () => {
+    const appenders = [
+      ['append', (target, message) => target.append(message)],
+      ['appendIfThreadFrontier', (target, message) => target.appendIfThreadFrontier(message, null)],
+      ['appendAndObservePriorFrontier', (target, message) => target.appendAndObservePriorFrontier(message)],
+    ];
+    let listenerCalls = 0;
+    const admissionStore = new RedisMessageStore(redis, { ttlSeconds: 0, onAppend: () => listenerCalls++ });
+
+    for (const [name, append] of appenders) {
+      for (const timestamp of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 8_640_000_000_000_001]) {
+        await assert.rejects(
+          append(admissionStore, {
+            userId: 'user1',
+            catId: null,
+            content: `${name} invalid timestamp`,
+            mentions: [],
+            timestamp,
+            threadId: `thread-${name}`,
+            idempotencyKey: `${name}-${String(timestamp)}`,
+          }),
+          { name: 'RangeError', message: /non-negative integer ECMAScript Date/ },
+        );
+      }
+      for (const metadata of [
+        { deliveredAt: undefined },
+        { timelineOrderAt: undefined },
+        { deliveredAt: 101, deliveryStatus: 'delivered' },
+        { deliveryStatus: 'delivered' },
+        { deliveryStatus: 'canceled' },
+      ]) {
+        await assert.rejects(
+          append(admissionStore, {
+            userId: 'user1',
+            catId: null,
+            content: `${name} forged terminal state`,
+            mentions: [],
+            timestamp: 100,
+            threadId: `thread-${name}`,
+            idempotencyKey: `${name}-terminal`,
+            ...metadata,
+          }),
+          { name: 'TypeError', message: /append.*delivery metadata|transition owner/i },
+        );
+      }
     }
 
     const keys = [...(await redis.keys('cat-cafe:msg:*')), ...(await redis.keys('cat-cafe:cat-cafe:msg:*'))];
-    assert.deepEqual(keys, [], 'invalid timestamps must not create Redis keys');
-    assert.equal(listenerCalls, 0, 'invalid timestamps must not notify listeners');
+    assert.deepEqual(keys, []);
+    assert.equal(listenerCalls, 0);
   });
 
-  it('append() admits non-negative integer ECMAScript Date boundaries', async () => {
+  it('append admits and rehydrates the sortable-ID-safe Date boundaries', async () => {
     const roundTripStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
     for (const timestamp of [0, 1, 8_640_000_000_000_000]) {
       const stored = await roundTripStore.append({
@@ -118,129 +537,19 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
         content: 'valid Date input',
         mentions: [],
         timestamp,
+        deliveryStatus: 'queued',
       });
-      assert.equal(stored.timestamp, timestamp);
-      assert.equal((await roundTripStore.getById(stored.id)).timestamp, timestamp);
+      const hydrated = await roundTripStore.getById(stored.id);
+      assert.equal(hydrated.timestamp, timestamp);
+      assert.equal(hydrated.deliveryStatus, 'queued');
+      assert.equal(hydrated.deliveredAt, undefined);
+      assert.equal(hydrated.timelineOrderAt, undefined);
     }
-
-    const hydrated = await roundTripStore.getRecent(10);
-    assert.deepEqual(
-      hydrated.map((message) => message.timestamp),
-      [0, 1, 8_640_000_000_000_000],
-    );
   });
 
-  it('append() rejects transition-owned delivery metadata before Redis side effects and preserves queued parity', async () => {
-    let listenerCalls = 0;
-    const admissionStore = new RedisMessageStore(redis, {
-      ttlSeconds: 0,
-      onAppend: () => listenerCalls++,
-    });
-    const userId = 'user-append-delivery-owner';
-    const threadId = 'thread-append-delivery-owner';
-    const timestamp = 100;
-    const base = {
-      userId,
-      catId: null,
-      content: 'delivery ownership probe',
-      mentions: ['opus'],
-      timestamp,
-      threadId,
-      idempotencyKey: 'append-delivery-owner',
-    };
-    const invalidMetadata = [
-      { deliveredAt: undefined },
-      { deliveredAt: 100.5, deliveryStatus: 'delivered' },
-      { deliveredAt: Number.POSITIVE_INFINITY, deliveryStatus: 'delivered' },
-      { deliveredAt: 101, deliveryStatus: 'delivered' },
-      { deliveryStatus: 'delivered' },
-      { deliveryStatus: 'canceled' },
-    ];
-
-    for (const metadata of invalidMetadata) {
-      await assert.rejects(admissionStore.append({ ...base, ...metadata }), {
-        name: 'TypeError',
-        message: /append.*delivery metadata|transition owner/i,
-      });
-      assert.equal(listenerCalls, 0, 'ownership rejection must not notify listeners');
-      const keys = [...(await redis.keys('cat-cafe:msg:*')), ...(await redis.keys('cat-cafe:cat-cafe:msg:*'))];
-      assert.deepEqual(keys, [], 'ownership rejection must not create Redis keys');
-    }
-
-    const queued = await admissionStore.append({ ...base, deliveryStatus: 'queued' });
-    const hydrated = await admissionStore.getById(queued.id);
-    assert.equal(queued.deliveryStatus, 'queued');
-    assert.equal(queued.deliveredAt, undefined);
-    assert.equal(hydrated.deliveryStatus, 'queued');
-    assert.equal(hydrated.deliveredAt, undefined);
-    assert.equal(await redis.zscore('msg:timeline', queued.id), String(timestamp));
-    assert.equal(await redis.zscore(`msg:user:${userId}`, queued.id), String(timestamp));
-    assert.equal(await redis.zscore(`msg:thread:${threadId}`, queued.id), String(timestamp));
-    assert.equal(listenerCalls, 1);
-  });
-
-  it('markCanceled() transitions only queued messages and preserves legacy/delivered hash and scores', async () => {
+  it('markDelivered rejects unsafe effective-order timestamps before hash/ZSET mutation and permits a valid retry', async () => {
     const admissionStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
-    const userId = 'user-cancel-owner';
-    const threadId = 'thread-cancel-owner';
-    const base = { userId, catId: null, mentions: [], threadId };
-    const queued = await admissionStore.append({
-      ...base,
-      content: 'queued',
-      timestamp: 100,
-      deliveryStatus: 'queued',
-    });
-    const legacy = await admissionStore.append({ ...base, content: 'legacy', timestamp: 110 });
-    const delivered = await admissionStore.append({
-      ...base,
-      content: 'delivered',
-      timestamp: 120,
-      deliveryStatus: 'queued',
-    });
-    await admissionStore.markDelivered(delivered.id, 200);
-
-    const snapshot = async (message) => ({
-      message: await admissionStore.getById(message.id),
-      hash: await redis.hgetall(`msg:${message.id}`),
-      timeline: await redis.zscore('msg:timeline', message.id),
-      user: await redis.zscore(`msg:user:${userId}`, message.id),
-      thread: await redis.zscore(`msg:thread:${threadId}`, message.id),
-    });
-    const legacyBefore = await snapshot(legacy);
-    const deliveredBefore = await snapshot(delivered);
-
-    const canceled = await admissionStore.markCanceled(queued.id);
-    assert.equal(canceled.deliveryStatus, 'canceled');
-    assert.equal(canceled.deliveredAt, undefined);
-    assert.equal((await redis.hgetall(`msg:${queued.id}`)).deliveryStatus, 'canceled');
-    assert.equal(await redis.zscore('msg:timeline', queued.id), '100');
-    assert.equal(await redis.zscore(`msg:user:${userId}`, queued.id), '100');
-    assert.equal(await redis.zscore(`msg:thread:${threadId}`, queued.id), '100');
-
-    assert.equal(await admissionStore.markCanceled(legacy.id), null);
-    assert.deepEqual(await snapshot(legacy), legacyBefore, 'legacy-immediate hash and scores must remain unchanged');
-
-    const deliveredResult = await admissionStore.markCanceled(delivered.id);
-    assert.equal(deliveredResult, null);
-    assert.deepEqual(await snapshot(delivered), deliveredBefore, 'delivered hash and scores must remain unchanged');
-
-    const canceledBefore = await snapshot(queued);
-    assert.equal(await admissionStore.markCanceled(queued.id), null);
-    assert.deepEqual(await snapshot(queued), canceledBefore, 'repeated cancellation must be a no-op');
-  });
-
-  it('markDelivered() rejects unsafe order timestamps before hash/ZSET mutation and permits a valid retry', async () => {
-    const admissionStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
-    const invalidTimestamps = [
-      -1,
-      1.5,
-      Number.NaN,
-      Number.POSITIVE_INFINITY,
-      Number.NEGATIVE_INFINITY,
-      8_640_000_000_000_001,
-      -8_640_000_000_000_001,
-    ];
-    const validTimestamps = [0, 8_640_000_000_000_000];
+    const invalidTimestamps = [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 8_640_000_000_000_001];
 
     for (const [index, deliveredAt] of invalidTimestamps.entries()) {
       const userId = `user-delivery-admission-${index}`;
@@ -273,81 +582,25 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
         name: 'RangeError',
         message: /non-negative integer ECMAScript Date/,
       });
-
-      assert.deepEqual(await redis.hgetall(keys.detail), before.hash, `invalid ${String(deliveredAt)} hash mutation`);
+      assert.deepEqual(await redis.hgetall(keys.detail), before.hash);
       assert.equal(await redis.zscore(keys.timeline, queued.id), before.timeline);
       assert.equal(await redis.zscore(keys.user, queued.id), before.user);
       assert.equal(await redis.zscore(keys.thread, queued.id), before.thread);
       assert.equal(await redis.zscore(keys.mention, queued.id), before.mention);
-      const unchanged = await admissionStore.getById(queued.id);
-      assert.equal(unchanged.deliveryStatus, 'queued');
-      assert.equal(unchanged.deliveredAt, undefined);
 
-      const validDeliveredAt = validTimestamps[index] ?? 1_000 + index;
+      const validDeliveredAt = index === 0 ? 0 : index === 1 ? 8_640_000_000_000_000 : 1_000 + index;
       const delivered = await admissionStore.markDelivered(queued.id, validDeliveredAt);
-      assert.equal(delivered.deliveryStatus, 'delivered');
+      assert.equal(delivered.deliveryTransitioned, true);
       assert.equal(delivered.deliveredAt, validDeliveredAt);
-      assert.equal(await redis.zscore(keys.timeline, queued.id), String(validDeliveredAt));
-      assert.equal(await redis.zscore(keys.user, queued.id), String(validDeliveredAt));
-      assert.equal(await redis.zscore(keys.thread, queued.id), String(validDeliveredAt));
-      assert.equal(await redis.zscore(keys.mention, queued.id), before.mention, 'mention order remains append-time');
-      assert.equal((await admissionStore.getById(queued.id)).deliveredAt, validDeliveredAt);
+      assert.equal(delivered.timelineOrderAt, validDeliveredAt);
 
-      const afterDelivery = {
-        hash: await redis.hgetall(keys.detail),
-        timeline: await redis.zscore(keys.timeline, queued.id),
-        user: await redis.zscore(keys.user, queued.id),
-        thread: await redis.zscore(keys.thread, queued.id),
-        mention: await redis.zscore(keys.mention, queued.id),
-      };
+      const afterDelivery = await redis.hgetall(keys.detail);
       await assert.rejects(admissionStore.markDelivered(queued.id, deliveredAt), RangeError);
-      assert.deepEqual(
-        await redis.hgetall(keys.detail),
-        afterDelivery.hash,
-        'invalid input must not be state-dependent',
-      );
-      assert.equal(await redis.zscore(keys.timeline, queued.id), afterDelivery.timeline);
-      assert.equal(await redis.zscore(keys.user, queued.id), afterDelivery.user);
-      assert.equal(await redis.zscore(keys.thread, queued.id), afterDelivery.thread);
-      assert.equal(await redis.zscore(keys.mention, queued.id), afterDelivery.mention);
+      assert.deepEqual(await redis.hgetall(keys.detail), afterDelivery, 'validation must not depend on current state');
     }
   });
 
-  it('markDelivered() recovery preserves bounded effective-order pagination', async () => {
-    const admissionStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
-    const threadId = 'thread-delivery-admission-pagination';
-    const first = await admissionStore.append({
-      userId: 'user-delivery-admission-pagination',
-      catId: null,
-      content: 'first',
-      mentions: [],
-      timestamp: 100,
-      threadId,
-      deliveryStatus: 'queued',
-    });
-    const second = await admissionStore.append({
-      userId: 'user-delivery-admission-pagination',
-      catId: null,
-      content: 'second',
-      mentions: [],
-      timestamp: 200,
-      threadId,
-      deliveryStatus: 'queued',
-    });
-
-    await assert.rejects(admissionStore.markDelivered(first.id, Number.POSITIVE_INFINITY), RangeError);
-    await admissionStore.markDelivered(first.id, 300);
-    await admissionStore.markDelivered(second.id, 400);
-
-    const collected = await collectAllThreadMessages(admissionStore, threadId, undefined, 1);
-    assert.deepEqual(
-      collected.map((message) => message.id),
-      [second.id, first.id],
-      'one-record pages must return both messages exactly once after a valid retry',
-    );
-  });
-
-  it('admitted delivery order stays exact through user-index forwarding and missing-score fallback', async () => {
+  it('reassignUserId preserves admitted delivery order through raw-score forwarding and hydrated fallback', async () => {
     const admissionStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
     const cases = [
       { suffix: 'forwarded', deliveredAt: 8_640_000_000_000_000, removeSourceScore: false },
@@ -355,8 +608,8 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     ];
 
     for (const { suffix, deliveredAt, removeSourceScore } of cases) {
-      const sourceUserId = `user-delivery-reassign-source-${suffix}`;
-      const targetUserId = `user-delivery-reassign-target-${suffix}`;
+      const sourceUserId = `user-delivery-source-${suffix}`;
+      const targetUserId = `user-delivery-target-${suffix}`;
       const queued = await admissionStore.append({
         userId: sourceUserId,
         catId: null,
@@ -367,42 +620,178 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
         deliveryStatus: 'queued',
       });
       await admissionStore.markDelivered(queued.id, deliveredAt);
+      if (removeSourceScore) await redis.zrem(`msg:user:${sourceUserId}`, queued.id);
 
-      if (removeSourceScore) {
-        await redis.zrem(`msg:user:${sourceUserId}`, queued.id);
-      }
       const reassigned = await admissionStore.reassignUserId(queued.id, targetUserId);
-
       assert.equal(reassigned.userId, targetUserId);
       assert.equal(reassigned.deliveredAt, deliveredAt);
+      assert.equal(reassigned.timelineOrderAt, deliveredAt);
       assert.equal(await redis.zscore(`msg:user:${sourceUserId}`, queued.id), null);
       assert.equal(await redis.zscore(`msg:user:${targetUserId}`, queued.id), String(deliveredAt));
-      assert.equal((await admissionStore.getById(queued.id)).deliveredAt, deliveredAt);
     }
   });
 
-  it('expired cursor recovery preserves order across admitted timestamp boundaries', async () => {
-    const roundTripStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
-    const threadId = 'thread-expired-cursor-domain';
-    const later = [];
-    for (const timestamp of [2, 8_640_000_000_000_000]) {
-      later.push(
-        await roundTripStore.append({
-          userId: 'user1',
-          catId: null,
-          content: `timestamp ${timestamp}`,
-          mentions: [],
-          timestamp,
-          threadId,
-        }),
-      );
-    }
-    const expiredCursor = generateSortableId(1);
+  it('markCanceled changes only queued rows and preserves legacy/delivered hashes and index scores', async () => {
+    const admissionStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
+    const userId = 'user-cancel-owner';
+    const threadId = 'thread-cancel-owner';
+    const base = { userId, catId: null, mentions: [], threadId };
+    const queued = await admissionStore.append({
+      ...base,
+      content: 'queued',
+      timestamp: 100,
+      deliveryStatus: 'queued',
+    });
+    const legacy = await admissionStore.append({ ...base, content: 'legacy', timestamp: 110 });
+    const delivered = await admissionStore.append({
+      ...base,
+      content: 'delivered',
+      timestamp: 120,
+      deliveryStatus: 'queued',
+    });
+    await admissionStore.markDelivered(delivered.id, 200);
 
+    const snapshot = async (message) => ({
+      hash: await redis.hgetall(`msg:${message.id}`),
+      timeline: await redis.zscore('msg:timeline', message.id),
+      user: await redis.zscore(`msg:user:${userId}`, message.id),
+      thread: await redis.zscore(`msg:thread:${threadId}`, message.id),
+    });
+    const legacyBefore = await snapshot(legacy);
+    const deliveredBefore = await snapshot(delivered);
+
+    const canceled = await admissionStore.markCanceled(queued.id);
+    assert.equal(canceled.deliveryTransitioned, true);
+    assert.equal(canceled.deliveryStatus, 'canceled');
+    assert.equal((await admissionStore.markCanceled(legacy.id)).deliveryTransitioned, false);
+    assert.deepEqual(await snapshot(legacy), legacyBefore);
+    assert.equal((await admissionStore.markCanceled(delivered.id)).deliveryTransitioned, false);
+    assert.deepEqual(await snapshot(delivered), deliveredBefore);
+    assert.equal((await admissionStore.markCanceled(queued.id)).deliveryTransitioned, false);
+  });
+
+  it('legacy hydration preserves blank invalid evidence, fractions, infinities, and missing epoch fallback', async () => {
+    const cases = [
+      { label: 'empty', timestamp: '', expected: Number.NaN },
+      { label: 'whitespace', timestamp: '   ', expected: Number.NaN },
+      { label: 'fractional', timestamp: '123.5', expected: 123.5 },
+      { label: 'positive-infinity', timestamp: 'Infinity', expected: Number.POSITIVE_INFINITY },
+      { label: 'negative-infinity', timestamp: '-Infinity', expected: Number.NEGATIVE_INFINITY },
+      { label: 'missing', timestamp: undefined, expected: 0 },
+    ];
+    const seeded = [];
+    for (const [index, fixture] of cases.entries()) {
+      const score = Date.now() + index;
+      const id = generateSortableId(score);
+      await redis.hset(`msg:${id}`, {
+        id,
+        threadId: 'thread-legacy-timestamp',
+        userId: 'u',
+        catId: '',
+        content: fixture.label,
+        mentions: '[]',
+        ...(fixture.timestamp === undefined ? {} : { timestamp: fixture.timestamp }),
+      });
+      await redis.zadd('msg:timeline', String(score), id);
+      seeded.push({ ...fixture, id });
+    }
+
+    for (const fixture of seeded) {
+      const actual = (await store.getById(fixture.id)).timestamp;
+      if (Number.isNaN(fixture.expected)) assert.ok(Number.isNaN(actual), fixture.label);
+      else assert.equal(actual, fixture.expected, fixture.label);
+    }
+    const recent = new Map((await store.getRecent(10)).map((message) => [message.id, message.timestamp]));
+    for (const fixture of seeded) {
+      const actual = recent.get(fixture.id);
+      if (Number.isNaN(fixture.expected)) assert.ok(Number.isNaN(actual), fixture.label);
+      else assert.equal(actual, fixture.expected, fixture.label);
+    }
+  });
+
+  it('legacy fractional and infinity cursors remain exclusive and bounded consumers make progress', async () => {
+    const base = Date.now();
+    const cases = [
+      { label: 'fractional', cursorTimestamp: base + 0.5, earlierTimestamp: base },
+      { label: 'positive-infinity', cursorTimestamp: Number.POSITIVE_INFINITY, earlierTimestamp: base + 1 },
+      { label: 'negative-infinity', cursorTimestamp: Number.NEGATIVE_INFINITY, earlierTimestamp: null },
+    ];
+
+    for (const [index, fixture] of cases.entries()) {
+      const threadId = `thread-legacy-${fixture.label}`;
+      const userId = `user-legacy-${fixture.label}`;
+      const earlier =
+        fixture.earlierTimestamp === null
+          ? null
+          : await store.append({
+              userId,
+              catId: null,
+              content: `earlier than ${fixture.label}`,
+              mentions: [],
+              timestamp: fixture.earlierTimestamp,
+              threadId,
+            });
+      const cursorId = generateSortableId(base + cases.length + index);
+      await redis.hset(`msg:${cursorId}`, {
+        id: cursorId,
+        threadId,
+        userId,
+        catId: '',
+        content: `legacy ${fixture.label} cursor`,
+        mentions: '[]',
+        timestamp: String(fixture.cursorTimestamp),
+      });
+      await redis.zadd('msg:timeline', String(fixture.cursorTimestamp), cursorId);
+      await redis.zadd(`msg:user:${userId}`, String(fixture.cursorTimestamp), cursorId);
+      await redis.zadd(`msg:thread:${threadId}`, String(fixture.cursorTimestamp), cursorId);
+      const expectedIds = earlier ? [earlier.id] : [];
+
+      assert.deepEqual(
+        (await store.getBefore(fixture.cursorTimestamp, 10, userId, cursorId)).map((message) => message.id),
+        expectedIds,
+      );
+      assert.deepEqual(
+        (await store.getByThreadBefore(threadId, fixture.cursorTimestamp, 10, cursorId)).map((message) => message.id),
+        expectedIds,
+      );
+
+      if (earlier) {
+        let beforeCalls = 0;
+        const boundedStore = {
+          getByThread: (...args) => store.getByThread(...args),
+          getByThreadBefore: (...args) => {
+            beforeCalls += 1;
+            if (beforeCalls > 3) throw new Error('before-cursor pagination did not make progress');
+            return store.getByThreadBefore(...args);
+          },
+        };
+        const collected = await collectAllThreadMessages(boundedStore, threadId, undefined, 1);
+        assert.equal(beforeCalls, 2);
+        assert.deepEqual(new Set(collected.map((message) => message.id)), new Set([earlier.id, cursorId]));
+      }
+    }
+  });
+
+  it('bounded Redis pages preserve a fractional effective-order cursor without truncation', async () => {
+    const threadId = 'thread-legacy-bounded-fraction';
+    const id = generateSortableId(Date.now());
+    await redis.hset(`msg:${id}`, {
+      id,
+      threadId,
+      userId: 'u',
+      catId: '',
+      content: 'legacy fraction',
+      mentions: '[]',
+      timestamp: '10.5',
+    });
+    await redis.zadd(`msg:thread:${threadId}`, '10.5', id);
+
+    const page = await store.getByThreadBeforeBounded(threadId, 11, 1, undefined, undefined, 1);
     assert.deepEqual(
-      (await roundTripStore.getByThreadAfter(threadId, expiredCursor)).map((message) => message.id),
-      later.map((message) => message.id),
+      page.messages.map((message) => message.id),
+      [id],
     );
+    assert.deepEqual(page.nextCursor, { timestamp: 10.5, id });
   });
 
   it('claimContentDedupKey() is atomic: first wins, live duplicate loses, distinct keys independent', async () => {
@@ -444,50 +833,6 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     const aliceOnly = await store.getRecent(10, 'alice');
     assert.equal(aliceOnly.length, 1);
     assert.equal(aliceOnly[0].content, 'alice msg');
-  });
-
-  it('legacy hydration distinguishes blank timestamps from fractional and missing values', async () => {
-    const cases = [
-      { label: 'empty', timestamp: '', expected: Number.NaN },
-      { label: 'whitespace', timestamp: '   ', expected: Number.NaN },
-      { label: 'fractional', timestamp: '123.5', expected: 123.5 },
-      { label: 'missing', timestamp: undefined, expected: 0 },
-    ];
-    const seeded = [];
-    for (const [index, fixture] of cases.entries()) {
-      const score = Date.now() + index;
-      const id = generateSortableId(score);
-      await redis.hset(`msg:${id}`, {
-        id,
-        threadId: 'thread-legacy-blank-timestamp',
-        userId: 'u',
-        catId: '',
-        content: `legacy ${fixture.label} timestamp`,
-        mentions: '[]',
-        ...(fixture.timestamp === undefined ? {} : { timestamp: fixture.timestamp }),
-      });
-      await redis.zadd('msg:timeline', String(score), id);
-      seeded.push({ ...fixture, id });
-    }
-
-    for (const fixture of seeded) {
-      const actual = (await store.getById(fixture.id)).timestamp;
-      if (Number.isNaN(fixture.expected)) {
-        assert.ok(Number.isNaN(actual), `single hydration must preserve ${fixture.label} invalid evidence`);
-      } else {
-        assert.equal(actual, fixture.expected);
-      }
-    }
-
-    const recentById = new Map((await store.getRecent(10)).map((message) => [message.id, message]));
-    for (const fixture of seeded) {
-      const actual = recentById.get(fixture.id).timestamp;
-      if (Number.isNaN(fixture.expected)) {
-        assert.ok(Number.isNaN(actual), `batch hydration must preserve ${fixture.label} invalid evidence`);
-      } else {
-        assert.equal(actual, fixture.expected);
-      }
-    }
   });
 
   it('getMentionsFor() returns messages mentioning a specific cat', async () => {
@@ -570,117 +915,45 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(before[1].content, 'msg4');
   });
 
-  it('legacy numeric cursors remain exclusive in global and thread pagination', async () => {
+  it('getByThreadBeforeBounded resumes from a real Redis rank cursor and proves exhaustion', async () => {
     const base = Date.now();
-    const cases = [
-      { label: 'fractional', cursorTimestamp: base + 0.5, earlierTimestamp: base, redisScore: null },
-      {
-        label: 'positive-infinity',
-        cursorTimestamp: Number.POSITIVE_INFINITY,
-        earlierTimestamp: base + 1,
-        redisScore: 'inf',
-      },
-      {
-        label: 'negative-infinity',
-        cursorTimestamp: Number.NEGATIVE_INFINITY,
-        earlierTimestamp: null,
-        redisScore: '-inf',
-      },
-    ];
-
-    for (const [index, fixture] of cases.entries()) {
-      const threadId = `thread-legacy-${fixture.label}-before`;
-      const userId = `user-legacy-${fixture.label}-before`;
-      const earlier =
-        fixture.earlierTimestamp !== null
-          ? await store.append({
-              userId,
-              catId: null,
-              content: `earlier than ${fixture.label}`,
-              mentions: [],
-              timestamp: fixture.earlierTimestamp,
-              threadId,
-            })
-          : null;
-      const cursorId = generateSortableId(base + cases.length + index);
-      await redis.hset(`msg:${cursorId}`, {
-        id: cursorId,
-        threadId,
-        userId,
-        catId: '',
-        content: `legacy ${fixture.label} cursor`,
-        mentions: '[]',
-        timestamp: String(fixture.cursorTimestamp),
-      });
-      await redis.zadd('msg:timeline', String(fixture.cursorTimestamp), cursorId);
-      await redis.zadd(`msg:user:${userId}`, String(fixture.cursorTimestamp), cursorId);
-      await redis.zadd(`msg:thread:${threadId}`, String(fixture.cursorTimestamp), cursorId);
-
-      if (fixture.redisScore) {
-        assert.equal(await redis.zscore(`msg:thread:${threadId}`, cursorId), fixture.redisScore);
-      }
-      const expectedIds = earlier ? [earlier.id] : [];
-      assert.deepEqual(
-        (await store.getBefore(fixture.cursorTimestamp, 10, userId, cursorId)).map((message) => message.id),
-        expectedIds,
-        `global ${fixture.label} cursor must remain exclusive`,
-      );
-      assert.deepEqual(
-        (await store.getByThreadBefore(threadId, fixture.cursorTimestamp, 10, cursorId)).map((message) => message.id),
-        expectedIds,
-        `thread ${fixture.label} cursor must remain exclusive`,
-      );
-    }
-  });
-
-  it('bounded multi-page consumer makes progress across legacy numeric cursors', async () => {
-    const base = Date.now();
-    const cases = [
-      { label: 'fractional', cursorTimestamp: base + 0.5, earlierTimestamp: base },
-      { label: 'positive-infinity', cursorTimestamp: Number.POSITIVE_INFINITY, earlierTimestamp: base + 1 },
-    ];
-
-    for (const [index, fixture] of cases.entries()) {
-      const threadId = `thread-legacy-${fixture.label}-collector`;
-      const earlier = await store.append({
-        userId: 'u',
+    for (let index = 0; index < 510; index += 1) {
+      await store.append({
+        userId: 'user-1',
         catId: null,
-        content: `earlier than ${fixture.label}`,
+        content: `bounded ${index}`,
         mentions: [],
-        timestamp: fixture.earlierTimestamp,
-        threadId,
+        timestamp: base + index,
+        threadId: 'bounded-real-redis',
       });
-      const cursorId = generateSortableId(base + cases.length + index);
-      await redis.hset(`msg:${cursorId}`, {
-        id: cursorId,
-        threadId,
-        userId: 'u',
-        catId: '',
-        content: `legacy ${fixture.label} cursor`,
-        mentions: '[]',
-        timestamp: String(fixture.cursorTimestamp),
-      });
-      await redis.zadd('msg:timeline', String(fixture.cursorTimestamp), cursorId);
-      await redis.zadd(`msg:user:u`, String(fixture.cursorTimestamp), cursorId);
-      await redis.zadd(`msg:thread:${threadId}`, String(fixture.cursorTimestamp), cursorId);
-
-      let beforeCalls = 0;
-      const boundedStore = {
-        getByThread: (...args) => store.getByThread(...args),
-        getByThreadBefore: (...args) => {
-          beforeCalls += 1;
-          if (beforeCalls > 3) throw new Error('before-cursor pagination did not make progress');
-          return store.getByThreadBefore(...args);
-        },
-      };
-      const collected = await collectAllThreadMessages(boundedStore, threadId, undefined, 1);
-      assert.equal(beforeCalls, 2, `${fixture.label}: one full legacy page plus the terminal empty page`);
-      assert.deepEqual(
-        new Set(collected.map((message) => message.id)),
-        new Set([earlier.id, cursorId]),
-        `${fixture.label}: bounded pagination must terminate without replaying its cursor`,
-      );
     }
+
+    const first = await store.getByThreadBeforeBounded(
+      'bounded-real-redis',
+      Number.MAX_SAFE_INTEGER,
+      500,
+      undefined,
+      'user-1',
+      2_000,
+    );
+    const second = await store.getByThreadBeforeBounded(
+      'bounded-real-redis',
+      first.nextCursor.timestamp,
+      500,
+      first.nextCursor.id,
+      'user-1',
+      1_500,
+    );
+
+    assert.equal(first.messages.length, 500);
+    assert.equal(first.scannedCount, 500);
+    assert.equal(first.exhausted, false);
+    assert.equal(first.storageRoundTrips, 2);
+    assert.equal(second.messages.length, 10);
+    assert.equal(second.scannedCount, 10);
+    assert.equal(second.exhausted, true);
+    assert.equal(second.storageRoundTrips, 3);
+    assert.equal(new Set([...first.messages, ...second.messages].map((message) => message.id)).size, 510);
   });
 
   it('augmentStreamMetadata() persists stream-only metadata onto callback messages', async () => {
@@ -814,6 +1087,227 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(threadMessages[0].id, first.id);
   });
 
+  it('concurrent idempotent append creates exactly one thread member', async () => {
+    const threadId = 'thread-concurrent-idem';
+    const timestamp = Date.now();
+
+    const [first, second] = await Promise.all([
+      store.append({
+        userId: 'u1',
+        catId: null,
+        content: 'concurrent',
+        mentions: [],
+        timestamp,
+        threadId,
+        idempotencyKey: 'concurrent-idem',
+      }),
+      store.append({
+        userId: 'u1',
+        catId: null,
+        content: 'concurrent',
+        mentions: [],
+        timestamp,
+        threadId,
+        idempotencyKey: 'concurrent-idem',
+      }),
+    ]);
+
+    assert.equal(first.id, second.id, 'both callers must observe the same winner');
+    assert.deepEqual(await redis.zrange(`msg:thread:${threadId}`, 0, -1), [first.id]);
+  });
+
+  it('idempotent replay does not refire onAppend', async () => {
+    let calls = 0;
+    const timestamp = Date.now();
+    const watchedStore = new RedisMessageStore(redis, {
+      ttlSeconds: 60,
+      onAppend: () => {
+        calls += 1;
+      },
+    });
+    const input = {
+      userId: 'u1',
+      catId: null,
+      content: 'idempotent listener',
+      mentions: [],
+      timestamp,
+      threadId: 'thread-redis-onappend',
+      idempotencyKey: 'redis-onappend',
+    };
+
+    const first = await watchedStore.append(input);
+    const replay = await watchedStore.append({ ...input, content: 'retry', timestamp: timestamp + 1 });
+
+    assert.equal(replay.id, first.id);
+    assert.equal(calls, 1, 'only the committed winner may fire onAppend');
+  });
+
+  it('idempotent replay preserves explicitly empty optional arrays', async () => {
+    const input = {
+      userId: 'u1',
+      catId: null,
+      content: 'empty arrays',
+      contentBlocks: [],
+      toolEvents: [],
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 'thread-empty-arrays',
+      whisperTo: [],
+      idempotencyKey: 'empty-arrays',
+    };
+
+    const first = await store.append(input);
+    const replay = await store.append(input);
+    const hydrated = await store.getById(first.id);
+
+    for (const message of [first, replay, hydrated]) {
+      assert.deepEqual(message?.contentBlocks, []);
+      assert.deepEqual(message?.toolEvents, []);
+      assert.deepEqual(message?.whisperTo, []);
+    }
+  });
+
+  it('atomically reclaims an idempotency key whose message hash is missing', async () => {
+    const userId = 'u1';
+    const threadId = 'thread-stale-idem';
+    const idempotencyKey = 'stale-idem';
+    const redisKey = MessageKeys.idempotency(userId, threadId, idempotencyKey);
+    const missingId = generateSortableId(Date.now() - 1);
+    const liveWinner = await store.append({
+      userId,
+      catId: null,
+      content: 'concurrent live winner',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
+      idempotencyKey: 'winner-seed',
+    });
+    await redis.set(redisKey, missingId);
+
+    const originalDel = redis.del;
+    const originalEval = redis.eval;
+    let injectReplacement = true;
+    const replaceStalePointer = async () => {
+      if (!injectReplacement) return;
+      injectReplacement = false;
+      await redis.set(redisKey, liveWinner.id);
+    };
+    redis.del = async function (...keys) {
+      if (keys.includes(redisKey)) await replaceStalePointer();
+      return originalDel.apply(this, keys);
+    };
+    redis.eval = async function (...args) {
+      await replaceStalePointer();
+      return originalEval.apply(this, args);
+    };
+
+    let replay;
+    try {
+      replay = await store.append({
+        userId,
+        catId: null,
+        content: 'must observe concurrent winner',
+        mentions: [],
+        timestamp: Date.now() + 1,
+        threadId,
+        idempotencyKey,
+      });
+    } finally {
+      redis.del = originalDel;
+      redis.eval = originalEval;
+    }
+
+    assert.equal(replay.id, liveWinner.id);
+    assert.equal(await redis.get(redisKey), liveWinner.id);
+    assert.deepEqual(await redis.zrange(MessageKeys.thread(threadId), 0, -1), [liveWinner.id]);
+  });
+
+  it('fails closed when an idempotency winner vanishes before hydration', async () => {
+    const userId = 'u1';
+    const threadId = 'thread-vanished-winner';
+    const idempotencyKey = 'vanished-winner';
+    const winner = await store.append({
+      userId,
+      catId: null,
+      content: 'winner',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
+      idempotencyKey,
+    });
+
+    let listenerCalls = 0;
+    const watchedStore = new RedisMessageStore(redis, {
+      ttlSeconds: 60,
+      onAppend: () => {
+        listenerCalls += 1;
+      },
+    });
+    const redisKey = MessageKeys.idempotency(userId, threadId, idempotencyKey);
+    const originalGet = redis.get;
+    const originalEval = redis.eval;
+    let bypassFastPath = true;
+    let removeWinnerAfterLua = true;
+
+    redis.get = async function (key, ...args) {
+      if (bypassFastPath && key === redisKey) {
+        bypassFastPath = false;
+        return null;
+      }
+      return originalGet.call(this, key, ...args);
+    };
+    redis.eval = async function (...args) {
+      const result = await originalEval.apply(this, args);
+      const returnedId = Array.isArray(result) ? result[1] : result;
+      if (removeWinnerAfterLua && returnedId === winner.id) {
+        removeWinnerAfterLua = false;
+        await this.del(MessageKeys.detail(winner.id));
+      }
+      return result;
+    };
+
+    try {
+      await assert.rejects(
+        watchedStore.append({
+          userId,
+          catId: null,
+          content: 'loser',
+          mentions: [],
+          timestamp: Date.now() + 1,
+          threadId,
+          idempotencyKey,
+        }),
+        /Idempotency winner .* vanished before hydration/,
+      );
+    } finally {
+      redis.get = originalGet;
+      redis.eval = originalEval;
+    }
+
+    assert.equal(listenerCalls, 0);
+    assert.deepEqual(await redis.zrange(MessageKeys.thread(threadId), 0, -1), [winner.id]);
+  });
+
+  it('prunes stale members from an active TTL-backed thread index', async () => {
+    const threadId = 'thread-active-ttl-prune';
+    const threadKey = `msg:thread:${threadId}`;
+    const staleId = generateSortableId(Date.now() - 120_000);
+    await redis.zadd(threadKey, Date.now() - 120_000, staleId);
+
+    const ttlStore = new RedisMessageStore(redis, { ttlSeconds: 60 });
+    const current = await ttlStore.append({
+      userId: 'u1',
+      catId: null,
+      content: 'keeps thread active',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
+    });
+
+    assert.deepEqual(await redis.zrange(threadKey, 0, -1), [current.id]);
+    assert.ok((await redis.ttl(threadKey)) > 0);
+  });
+
   it('F057-C2: mentionsUser round-trips through append/getById', async () => {
     const msg = await store.append({
       userId: 'u',
@@ -896,6 +1390,48 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.ok(idxA >= 0, 'msgA should be in results after delivery');
     assert.ok(idxB >= 0, 'msgB should be in results after delivery');
     assert.ok(idxB < idxA, 'msgB (deliveredAt=base+50) should sort before msgA (deliveredAt=base+200)');
+  });
+
+  it('markDelivered records actual delivery time without moving already-published cat speech', async () => {
+    const base = Date.now();
+    const threadId = 'thread-published-cat-score';
+    const speech = await store.append({
+      userId: 'u',
+      catId: 'codex-sol',
+      content: 'already-published cat speech',
+      mentions: ['opus'],
+      timestamp: base,
+      threadId,
+      deliveryStatus: 'queued',
+    });
+
+    const delivered = await store.markDelivered(speech.id, base + 500);
+
+    assert.equal(delivered.deliveredAt, base + 500, 'delivery lifecycle keeps its actual terminal timestamp');
+    assert.equal(delivered.timelineOrderAt, base, 'publication order is persisted for future readers');
+    assert.equal(
+      await redis.zscore(`msg:thread:${threadId}`, speech.id),
+      String(base),
+      'timeline order remains at authoring time because the speech was already published',
+    );
+  });
+
+  it('legacy delivered cat rows without timelineOrderAt keep their historical delivery ordering', async () => {
+    const { getTimelineOrderTime } = await import('../dist/domains/cats/services/stores/visibility.js');
+    assert.equal(
+      getTimelineOrderTime({
+        id: 'legacy-cat',
+        threadId: 'legacy-thread',
+        userId: 'u',
+        catId: 'opus',
+        content: 'legacy',
+        mentions: [],
+        timestamp: 1_000,
+        deliveredAt: 1_500,
+        deliveryStatus: 'delivered',
+      }),
+      1_500,
+    );
   });
 
   it('getByThreadAfter() uses deliveredAt score for cursor position (#557)', async () => {
@@ -1078,217 +1614,5 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
 
     const queuedIds = await store.scanByDeliveryStatus('queued');
     assert.ok(!queuedIds.includes(m1.id), 'should not find canceled message in queued scan');
-  });
-
-  it('concurrent idempotent append creates exactly one thread member', async () => {
-    const threadId = 'thread-concurrent-idem';
-    const key = MessageKeys.thread(threadId);
-    const timestamp = Date.now();
-
-    const [a, b] = await Promise.all([
-      store.append({
-        userId: 'u1',
-        catId: null,
-        content: 'concurrent',
-        mentions: [],
-        timestamp,
-        threadId,
-        idempotencyKey: 'concurrent-idem',
-      }),
-      store.append({
-        userId: 'u1',
-        catId: null,
-        content: 'concurrent',
-        mentions: [],
-        timestamp,
-        threadId,
-        idempotencyKey: 'concurrent-idem',
-      }),
-    ]);
-
-    assert.equal(a.id, b.id, 'both concurrent callers must observe the same message id');
-    const members = await redis.zrange(key, 0, -1);
-    assert.deepEqual(members, [a.id], 'thread zset must contain exactly the created message');
-  });
-
-  it('idempotent replay does not refire onAppend', async () => {
-    let calls = 0;
-    const timestamp = Date.now();
-    const watchedStore = new RedisMessageStore(redis, {
-      ttlSeconds: 60,
-      onAppend: () => {
-        calls++;
-      },
-    });
-
-    const first = await watchedStore.append({
-      userId: 'u1',
-      catId: null,
-      content: 'idem',
-      mentions: [],
-      timestamp,
-      threadId: 'thread-redis-onappend',
-      idempotencyKey: 'redis-onappend',
-    });
-    assert.equal(calls, 1);
-
-    const replay = await watchedStore.append({
-      userId: 'u1',
-      catId: null,
-      content: 'idem retry',
-      mentions: [],
-      timestamp: timestamp + 1,
-      threadId: 'thread-redis-onappend',
-      idempotencyKey: 'redis-onappend',
-    });
-    assert.equal(replay.id, first.id);
-    assert.equal(calls, 1, 'idempotent replay must not refire onAppend');
-  });
-
-  it('idempotent replay preserves explicitly empty optional arrays', async () => {
-    const input = {
-      userId: 'u1',
-      catId: null,
-      content: 'empty arrays',
-      contentBlocks: [],
-      toolEvents: [],
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: 'thread-empty-arrays',
-      whisperTo: [],
-      idempotencyKey: 'empty-arrays',
-    };
-
-    const first = await store.append(input);
-    const replay = await store.append(input);
-    const hydrated = await store.getById(first.id);
-
-    for (const message of [first, replay, hydrated]) {
-      assert.deepEqual(message?.contentBlocks, []);
-      assert.deepEqual(message?.toolEvents, []);
-      assert.deepEqual(message?.whisperTo, []);
-    }
-  });
-
-  it('atomically reclaims an idempotency key whose message hash is missing', async () => {
-    const userId = 'u1';
-    const threadId = 'thread-stale-idem';
-    const idempotencyKey = 'stale-idem';
-    const redisKey = MessageKeys.idempotency(userId, threadId, idempotencyKey);
-    const missingId = generateSortableId(Date.now() - 1);
-    await redis.set(redisKey, missingId);
-
-    const created = await store.append({
-      userId,
-      catId: null,
-      content: 'replacement',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-      idempotencyKey,
-    });
-    const replay = await store.append({
-      userId,
-      catId: null,
-      content: 'must replay replacement',
-      mentions: [],
-      timestamp: Date.now() + 1,
-      threadId,
-      idempotencyKey,
-    });
-
-    assert.notEqual(created.id, missingId);
-    assert.equal(await redis.get(redisKey), created.id, 'stale mapping must be replaced by the new winner');
-    assert.equal(replay.id, created.id, 'the replacement mapping must remain idempotent');
-    assert.deepEqual(await redis.zrange(MessageKeys.thread(threadId), 0, -1), [created.id]);
-  });
-
-  it('fails closed when an idempotency winner vanishes before hydration', async () => {
-    const userId = 'u1';
-    const threadId = 'thread-vanished-winner';
-    const idempotencyKey = 'vanished-winner';
-    const winner = await store.append({
-      userId,
-      catId: null,
-      content: 'winner',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-      idempotencyKey,
-    });
-
-    let listenerCalls = 0;
-    const watchedStore = new RedisMessageStore(redis, {
-      ttlSeconds: 60,
-      onAppend: () => {
-        listenerCalls++;
-      },
-    });
-    const redisKey = MessageKeys.idempotency(userId, threadId, idempotencyKey);
-    const originalGet = redis.get;
-    const originalEval = redis.eval;
-    let bypassFastPath = true;
-    let removeWinnerAfterLua = true;
-
-    redis.get = async function (key, ...args) {
-      if (bypassFastPath && key === redisKey) {
-        bypassFastPath = false;
-        return null;
-      }
-      return originalGet.call(this, key, ...args);
-    };
-    redis.eval = async function (...args) {
-      const result = await originalEval.apply(this, args);
-      if (removeWinnerAfterLua && result === winner.id) {
-        removeWinnerAfterLua = false;
-        await this.del(MessageKeys.detail(winner.id));
-      }
-      return result;
-    };
-
-    try {
-      await assert.rejects(
-        watchedStore.append({
-          userId,
-          catId: null,
-          content: 'loser',
-          mentions: [],
-          timestamp: Date.now() + 1,
-          threadId,
-          idempotencyKey,
-        }),
-        /Idempotency winner .* vanished before hydration/,
-      );
-    } finally {
-      redis.get = originalGet;
-      redis.eval = originalEval;
-    }
-
-    assert.equal(listenerCalls, 0, 'a non-persisted loser must not fire onAppend');
-    assert.deepEqual(await redis.zrange(MessageKeys.thread(threadId), 0, -1), [winner.id]);
-  });
-
-  it('prunes stale members from an active TTL-backed thread index', async () => {
-    const threadId = 'thread-active-ttl-prune';
-    const threadKey = MessageKeys.thread(threadId);
-    const staleId = generateSortableId(Date.now() - 120_000);
-    await redis.zadd(threadKey, Date.now() - 120_000, staleId);
-
-    const ttlStore = new RedisMessageStore(redis, { ttlSeconds: 60 });
-    const current = await ttlStore.append({
-      userId: 'u1',
-      catId: null,
-      content: 'keeps thread active',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-    });
-
-    assert.deepEqual(
-      await redis.zrange(threadKey, 0, -1),
-      [current.id],
-      'append must remove expired-score members even while refreshing the thread key TTL',
-    );
-    assert.ok((await redis.ttl(threadKey)) > 0, 'thread index must remain active after member pruning');
   });
 });

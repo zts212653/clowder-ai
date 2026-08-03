@@ -64,7 +64,7 @@ Ragdoll推荐 B：共享知识放 `cat-cafe-shared`，个人经验放 `cat-cafe-
 既然不做个人 bank，那么“避免混在一起”的能力必须由 **tags/metadata 约定**来承担，否则 Recall/Reflect 很容易跨项目/跨阶段串味。
 
 **决策**：写入 `cat-cafe-shared` 的每条 `MemoryItem`（或每个文档的 items）必须满足：
-- 至少 1 个 `project:*` tag（Cat Café 固定为 `project:cat-cafe`）
+- 至少 1 个 `project:*` tag（Clowder AI 固定为 `project:cat-cafe`）
 - 至少 1 个 `kind:*` tag（例如：`kind:decision` / `kind:phase` / `kind:discussion` / `kind:backlog`）
 - `metadata` 至少包含：
   - `anchor`：稳定证据锚点（例如 `docs/decisions/005-hindsight-integration-decisions.md` 或 `commit:<sha>`）
@@ -110,7 +110,7 @@ Ragdoll推荐 B：共享知识放 `cat-cafe-shared`，个人经验放 `cat-cafe-
 ```
 
 **MCP 封装约束**:
-- Cat Café 的 MCP 工具**只暴露 `cat-cafe-*` 开头的 bank**
+- Clowder AI 的 MCP 工具**只暴露 `cat-cafe-*` 开头的 bank**
 - 不让猫猫看到其他项目的 bank（如 `routing-shared`, `mission-control-hub` 等）
 - 原因：避免浪费猫猫上下文，聚焦当前项目
 
@@ -163,7 +163,7 @@ Hindsight Recall (语义检索)
 
 | 方案 | 描述 |
 |------|------|
-| A | Cat Café 调用层实现（Redis 存状态） |
+| A | Clowder AI 调用层实现（Redis 存状态） |
 | B | 用 Hindsight 的 metadata/tags 存状态 |
 | C | 不做门禁，全部写入即生效 |
 
@@ -171,7 +171,7 @@ Hindsight Recall (语义检索)
 
 > "可以注意做好优雅的实现，别丢东西 🤣 什么优雅停机之类的保障都搞上"
 
-### 最终决策: 方案 A（Cat Café 调用层）
+### 最终决策: 方案 A（Clowder AI 调用层）
 
 **实现要点**:
 - Redis 存状态机 (draft → pending_review → published)
@@ -181,7 +181,7 @@ Hindsight Recall (语义检索)
 ### 补充决策：安全边界与降级策略 ✅
 
 **安全边界**
-- Hindsight 当前为本地开发环境（无认证）。Cat Café 集成时应 **只允许服务端调用** Hindsight（避免浏览器直连 `localhost:8888`，也避免把无认证服务暴露到前端）。
+- Hindsight 当前为本地开发环境（无认证）。Clowder AI 集成时应 **只允许服务端调用** Hindsight（避免浏览器直连 `localhost:8888`，也避免把无认证服务暴露到前端）。
 
 **降级策略**
 - Hindsight 不可用时：检索链路降级为 `docs/` 文件搜索（grep/简单倒排），并在 UI 明确提示“已降级/结果可能不完整”。

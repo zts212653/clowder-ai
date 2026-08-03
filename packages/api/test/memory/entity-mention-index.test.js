@@ -144,4 +144,102 @@ describe('F209 entity mention indexing', () => {
     const deleteCount = db.prepare('SELECT COUNT(*) AS count FROM mention_delete_log').get().count;
     assert.equal(deleteCount, 0, 'unchanged seeds must not trigger a full entity_mentions rebuild');
   });
+
+  it('refreshes only entities changed by an F260 conflict resolution', async () => {
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+
+    const store = new SqliteEvidenceStore(':memory:');
+    await store.initialize();
+    await store.upsert([
+      {
+        anchor: 'doc:f260-targeted-refresh',
+        kind: 'feature',
+        status: 'active',
+        title: 'F260 targeted mention refresh',
+        summary: '沉迷护栏、猫猫安全护栏、稳定别名都在这里。',
+        updatedAt: '2026-07-20T00:00:00.000Z',
+      },
+    ]);
+    await store.upsertEntities(
+      [
+        {
+          entityId: 'concept:沉迷护栏',
+          type: 'concept',
+          canonicalName: '防AI沉迷护栏',
+          aliases: ['沉迷护栏'],
+          provenance: [{ source: 'proposal', anchor: 'ep-old' }],
+          stance: 'endorsed',
+          visibilityScope: 'workspace',
+          status: 'active',
+          updatedAt: '2026-07-19T00:00:00.000Z',
+        },
+        {
+          entityId: 'concept:unrelated',
+          type: 'concept',
+          canonicalName: '其他实体',
+          aliases: ['稳定别名'],
+          provenance: [{ source: 'test', anchor: 'unrelated' }],
+          stance: 'endorsed',
+          visibilityScope: 'workspace',
+          status: 'active',
+          updatedAt: '2026-07-19T00:00:00.000Z',
+        },
+      ],
+      { source: 'system' },
+    );
+
+    const db = store.getDb();
+    assert.ok(
+      db.prepare("SELECT COUNT(*) AS n FROM entity_mentions WHERE entity_id = 'concept:unrelated'").get().n > 0,
+      'fixture must start with an unrelated mention',
+    );
+    db.exec(`
+      CREATE TEMP TABLE mention_delete_log(entity_id TEXT NOT NULL);
+      CREATE TEMP TRIGGER log_f260_mention_delete
+      AFTER DELETE ON entity_mentions
+      BEGIN
+        INSERT INTO mention_delete_log(entity_id) VALUES (OLD.entity_id);
+      END;
+    `);
+
+    const incoming = {
+      entityId: 'concept:沉迷护栏',
+      type: 'concept',
+      canonicalName: '防AI沉迷护栏',
+      aliases: ['沉迷护栏', '猫猫安全护栏'],
+      provenance: [{ source: 'proposal', anchor: 'ep-targeted-refresh' }],
+      stance: 'endorsed',
+      visibilityScope: 'workspace',
+      status: 'active',
+      updatedAt: '2026-07-20T00:01:00.000Z',
+    };
+    const conflict = await store.inspectEntityConflict(incoming, 'user-1');
+    await store.resolveEntityConflict(
+      incoming,
+      { action: 'merge-aliases', fingerprint: conflict.fingerprint },
+      { source: 'proposal-approval', actorId: 'user-1', proposalId: 'ep-targeted-refresh' },
+    );
+
+    const deletedEntityIds = db
+      .prepare('SELECT DISTINCT entity_id FROM mention_delete_log ORDER BY entity_id')
+      .all()
+      .map(({ entity_id }) => entity_id);
+    assert.deepEqual(
+      deletedEntityIds,
+      ['concept:沉迷护栏'],
+      'a one-entity decision must not delete and rebuild every other entity projection',
+    );
+    assert.ok(
+      db.prepare("SELECT COUNT(*) AS n FROM entity_mentions WHERE entity_id = 'concept:unrelated'").get().n > 0,
+      'unrelated mentions must survive the targeted refresh',
+    );
+    assert.ok(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM entity_mentions WHERE entity_id = 'concept:沉迷护栏' AND surface = '猫猫安全护栏'",
+        )
+        .get().n > 0,
+      'the newly merged alias must be projected immediately',
+    );
+  });
 });

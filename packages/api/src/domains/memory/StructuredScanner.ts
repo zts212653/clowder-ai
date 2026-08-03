@@ -1,6 +1,12 @@
 // F186 Phase B: Level 1 scanner — uses existing frontmatter, WikiLinks, SUMMARY.md
 
-import { extractAnchor, extractFrontmatter } from './CatCafeScanner.js';
+import {
+  extractAnchor,
+  extractEvidenceStatus,
+  extractFeatureIdKeywords,
+  extractFrontmatter,
+  extractSupersededBy,
+} from './CatCafeScanner.js';
 import { FlatScanner } from './FlatScanner.js';
 import type { EvidenceKind, ScannedEvidence } from './interfaces.js';
 
@@ -9,6 +15,8 @@ const FRONTMATTER_KIND_MAP: Record<string, EvidenceKind> = {
   spec: 'feature',
   decision: 'decision',
   adr: 'decision',
+  architecture: 'architecture',
+  'architecture-snapshot': 'architecture',
   plan: 'plan',
   design: 'plan',
   lesson: 'lesson',
@@ -37,22 +45,29 @@ export class StructuredScanner extends FlatScanner {
 
     base.provenance = { tier: 'authoritative', source: base.item.sourcePath ?? '' };
 
-    const fmAnchor = extractAnchor(frontmatter);
+    const fmAnchor = extractAnchor(frontmatter, base.item.sourcePath);
     if (fmAnchor) base.item.anchor = `${this.collectionId}:${fmAnchor}`;
 
     const docKind = frontmatter.doc_kind;
     if (typeof docKind === 'string' && FRONTMATTER_KIND_MAP[docKind]) {
       base.item.kind = FRONTMATTER_KIND_MAP[docKind]!;
     }
+    base.item.status = extractEvidenceStatus(frontmatter);
+    const supersededBy = extractSupersededBy(frontmatter);
+    if (supersededBy) base.item.supersededBy = supersededBy;
 
     const topics = frontmatter.topics;
     const topicStrs = Array.isArray(topics) ? topics.filter((t): t is string => typeof t === 'string') : [];
+    const featureIdKw = extractFeatureIdKeywords(frontmatter, base.item.sourcePath ?? '');
     const sectionKw = base.item.keywords ?? [];
     const seen = new Set(topicStrs.map((t) => t.toLowerCase()));
+    for (const fid of featureIdKw) {
+      if (!seen.has(fid.toLowerCase())) seen.add(fid.toLowerCase());
+    }
     const dedupSection = sectionKw.filter((k) => !seen.has(k.toLowerCase()));
     for (const k of dedupSection) seen.add(k.toLowerCase());
     const dedupWiki = wikiLinks.filter((l) => !seen.has(l.toLowerCase()));
-    const merged = [...topicStrs, ...dedupSection, ...dedupWiki];
+    const merged = [...topicStrs, ...featureIdKw, ...dedupSection, ...dedupWiki];
     if (merged.length > 0) base.item.keywords = merged;
 
     return base;

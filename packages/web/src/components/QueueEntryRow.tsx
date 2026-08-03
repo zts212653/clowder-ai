@@ -1,8 +1,11 @@
 'use client';
 
+import type { QueueReminderAttempt } from '@cat-cafe/shared';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { LongFormReader } from '@/components/content-overflow';
 import type { QueueEntry } from '@/stores/chatStore';
+import { UNSETTLED_SEEN_LABEL } from './queue-receipt-projection';
 
 const SOURCE_CATEGORY_LABEL: Record<string, string> = {
   ci: 'CI',
@@ -11,7 +14,89 @@ const SOURCE_CATEGORY_LABEL: Record<string, string> = {
   issue: 'Issue',
   scheduled: 'Scheduled',
   a2a: 'A2A',
+  continuation: 'Continuation',
+  freshness: 'Freshness',
 };
+
+const TARGET_STATE_LABEL = {
+  queued: '未读 · 排队中',
+  notified: '已提醒 · 尚未读取',
+  awakened: '已唤醒，但关联回合已结束；尚未读取消息正文',
+  seen: UNSETTLED_SEEN_LABEL,
+  failed: '处理失败 · 已回队列',
+  steering: 'Steer 中',
+  handled: '已处理',
+} as const;
+
+const REMINDER_STATE_LABEL = {
+  requested: '提醒已请求',
+  delivered: '提醒已送达 · 尚未读取',
+  seen: '提醒后已读取',
+  missed: '提醒未赶上本轮',
+} as const;
+
+function queueTargetStateLabel(entry: QueueEntry, catId: string, state: keyof typeof TARGET_STATE_LABEL): string {
+  if (state !== 'handled') return TARGET_STATE_LABEL[state];
+  const disposition = entry.queueReceipt?.targets.find((target) => target.catId === catId)?.outcome?.disposition;
+  if (disposition === 'responded') return '已由回复明确处理';
+  if (disposition === 'completed_with_turn') return '已随本轮完成';
+  return '已处理 · 无可回溯证据';
+}
+
+function latestReminderForTarget(entry: QueueEntry, catId: string) {
+  return (entry.queueReceipt?.reminderAttempts ?? []).reduce<QueueReminderAttempt | undefined>(
+    (latest, attempt) =>
+      attempt.targetCatId === catId && (!latest || attempt.requestedAt > latest.requestedAt) ? attempt : latest,
+    undefined,
+  );
+}
+
+function QueueTargetReceiptStatus({
+  entry,
+  catId,
+  state,
+  activeInvocationId,
+  onRemind,
+  isReminding,
+}: {
+  entry: QueueEntry;
+  catId: string;
+  state: keyof typeof TARGET_STATE_LABEL;
+  activeInvocationId?: string;
+  onRemind: (id: string, targetCatId: string) => void;
+  isReminding: boolean;
+}) {
+  const reminderAttempts = entry.queueReceipt?.reminderAttempts ?? [];
+  const latestReminder = latestReminderForTarget(entry, catId);
+  const alreadyAttemptedInActiveTurn = activeInvocationId
+    ? reminderAttempts.some((attempt) => attempt.targetCatId === catId && attempt.invocationId === activeInvocationId)
+    : false;
+  const canRemind =
+    !!activeInvocationId && (state === 'queued' || state === 'notified') && !alreadyAttemptedInActiveTurn;
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 ${
+        state === 'seen' || state === 'awakened' ? 'text-conn-amber-text' : ''
+      }`}
+    >
+      <span>{`${catId} · ${queueTargetStateLabel(entry, catId, state)}`}</span>
+      {latestReminder && <span>· {REMINDER_STATE_LABEL[latestReminder.state]}</span>}
+      {canRemind && (
+        <button
+          type="button"
+          data-testid={`remind-${entry.id}-${catId}`}
+          disabled={isReminding}
+          onClick={() => onRemind(entry.id, catId)}
+          className="rounded-full border border-cafe px-1.5 py-px font-medium text-[var(--color-cocreator-primary)] hover:bg-cafe-surface disabled:cursor-wait disabled:opacity-60"
+          title="不打断当前工作，在安全断点提醒猫读取这条消息"
+        >
+          {isReminding ? '请求中…' : '提醒猫'}
+        </button>
+      )}
+    </span>
+  );
+}
 
 export interface QueueEntryRowProps {
   entry: QueueEntry;
@@ -23,6 +108,9 @@ export interface QueueEntryRowProps {
   onRemove: (id: string) => void;
   onRecallEdit: (id: string) => void;
   onSteer: (id: string) => void;
+  onRemind: (id: string, targetCatId: string) => void;
+  activeInvocationIdByCatId: Readonly<Record<string, string>>;
+  remindingTargetKeys: ReadonlySet<string>;
 }
 
 export function SortableQueueEntryRow(props: QueueEntryRowProps) {
@@ -47,6 +135,9 @@ function QueueEntryRow({
   onRemove,
   onRecallEdit,
   onSteer,
+  onRemind,
+  activeInvocationIdByCatId,
+  remindingTargetKeys,
   dragHandleProps,
 }: QueueEntryRowProps & { dragHandleProps?: Record<string, unknown> }) {
   const isAgent = entry.source === 'agent';
@@ -55,11 +146,15 @@ function QueueEntryRow({
   const categoryLabel = entry.sourceCategory ? SOURCE_CATEGORY_LABEL[entry.sourceCategory] : null;
   const rowToneClass = isPaused ? 'bg-conn-amber-bg/60' : isAgent ? 'bg-[var(--color-cocreator-surface)]' : '';
 
-  const sourceLabel = isAgent
-    ? `${entry.callerCatId ? resolveCatName(entry.callerCatId) : '猫猫'} → ${entry.targetCats[0] ? resolveCatName(entry.targetCats[0]) : '猫猫'}`
-    : entry.source === 'connector'
-      ? 'Connector'
-      : ownerName;
+  const targetLabel = entry.targetCats[0] ? resolveCatName(entry.targetCats[0]) : '猫猫';
+  const sourceLabel =
+    isAgent && entry.sourceCategory === 'freshness'
+      ? `Freshness → ${targetLabel}`
+      : isAgent
+        ? `${entry.callerCatId ? resolveCatName(entry.callerCatId) : '猫猫'} → ${targetLabel}`
+        : entry.source === 'connector'
+          ? 'Connector'
+          : ownerName;
 
   return (
     <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${rowToneClass}`}>
@@ -82,7 +177,14 @@ function QueueEntryRow({
 
       {/* Content preview */}
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-cafe-secondary truncate">{entry.content}</p>
+        <LongFormReader
+          title={`排队消息 · ${sourceLabel}`}
+          summary={entry.content}
+          accessibleSummary={`排队消息，来源 ${sourceLabel}。完整内容请使用查看全文按钮。`}
+          content={entry.content}
+          format="markdown"
+          density="compact"
+        />
         <div className="flex items-center gap-1 mt-0.5">
           {isAgent ? (
             <svg className="w-2.5 h-2.5 text-[var(--color-cocreator-primary)]" viewBox="0 0 24 24" fill="currentColor">
@@ -133,6 +235,24 @@ function QueueEntryRow({
             </span>
           )}
         </div>
+        {entry.targetStates && Object.keys(entry.targetStates).length > 0 && (
+          <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1 text-micro text-cafe-muted">
+            {Object.entries(entry.targetStates).map(([catId, state]) => {
+              const remindKey = `${entry.id}:${catId}`;
+              return (
+                <QueueTargetReceiptStatus
+                  key={catId}
+                  entry={entry}
+                  catId={catId}
+                  state={state}
+                  activeInvocationId={activeInvocationIdByCatId[catId]}
+                  onRemind={onRemind}
+                  isReminding={remindingTargetKeys.has(remindKey)}
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Steer button */}

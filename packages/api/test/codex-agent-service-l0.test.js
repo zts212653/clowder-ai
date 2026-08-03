@@ -94,6 +94,20 @@ function fixedL0(body) {
   return fn;
 }
 
+function assertCompiledL0Preserved(args, expectedL0) {
+  const developerInstructions = args.filter((arg) => arg.startsWith('developer_instructions='));
+  assert.equal(
+    developerInstructions.length,
+    1,
+    `argv must carry exactly one developer_instructions config; got: ${args.join(' ')}`,
+  );
+  assert.ok(
+    developerInstructions[0].startsWith(`developer_instructions="${expectedL0}`),
+    `developer_instructions must start with the compiled L0; got: ${developerInstructions[0]}`,
+  );
+  return developerInstructions[0];
+}
+
 test('Task 4: codex argv carries -c developer_instructions=<compiled L0>', async () => {
   const proc = createMockProcess();
   const spawnFn = mock.fn(() => proc);
@@ -109,10 +123,7 @@ test('Task 4: codex argv carries -c developer_instructions=<compiled L0>', async
 
   const args = spawnFn.mock.calls[0].arguments[1];
   assert.ok(args.includes('--config'), 'argv must include --config');
-  assert.ok(
-    args.includes('developer_instructions="DEV-L0-BODY"'),
-    `argv must carry TOML-encoded developer_instructions; got: ${args.join(' ')}`,
-  );
+  assertCompiledL0Preserved(args, 'DEV-L0-BODY');
 });
 
 test('P0 security: prompt 正文走 stdin 不进 argv（ps -o command= 跨进程泄露防护）', async () => {
@@ -156,8 +167,8 @@ test('Task 4: per-call argv is cat-scoped (no shared config.toml race)', async (
 
   assert.equal(a.l0CompilerFn.calls[0].catId, 'codex');
   assert.equal(b.l0CompilerFn.calls[0].catId, 'gpt52');
-  assert.ok(a.spawnFn.mock.calls[0].arguments[1].includes('developer_instructions="L0-FOR-codex"'));
-  assert.ok(b.spawnFn.mock.calls[0].arguments[1].includes('developer_instructions="L0-FOR-gpt52"'));
+  assertCompiledL0Preserved(a.spawnFn.mock.calls[0].arguments[1], 'L0-FOR-codex');
+  assertCompiledL0Preserved(b.spawnFn.mock.calls[0].arguments[1], 'L0-FOR-gpt52');
 });
 
 test('Task 4 fail-closed: L0 compile failure → error + done, codex not spawned', async () => {
@@ -204,13 +215,11 @@ test('Task 4 reserved key: cliConfigArgs CANNOT override system developer_instru
   await promise;
 
   const args = spawnFn.mock.calls[0].arguments[1];
-  assert.ok(
-    args.includes('developer_instructions="SYSTEM-L0-CONTENT"'),
-    `system L0 must remain in argv; got: ${args.join(' ')}`,
-  );
-  assert.ok(
-    !args.includes('developer_instructions="USER-OVERRIDE"'),
-    'user cliConfigArgs must NOT override system developer_instructions (fail-closed reserved key)',
+  const developerInstructions = assertCompiledL0Preserved(args, 'SYSTEM-L0-CONTENT');
+  assert.doesNotMatch(
+    developerInstructions,
+    /USER-OVERRIDE/,
+    'user cliConfigArgs must NOT enter system developer_instructions (fail-closed reserved key)',
   );
 });
 
@@ -234,12 +243,10 @@ test('Task 4 reserved key: short-form `-c` cannot override system developer_inst
   await promise;
 
   const args = spawnFn.mock.calls[0].arguments[1];
-  assert.ok(
-    args.includes('developer_instructions="SYSTEM-L0-CONTENT"'),
-    `system L0 must remain; got: ${args.join(' ')}`,
-  );
-  assert.ok(
-    !args.includes('developer_instructions="USER-OVERRIDE-SHORT"'),
-    '`-c` short-form override must be stripped same as `--config`',
+  const developerInstructions = assertCompiledL0Preserved(args, 'SYSTEM-L0-CONTENT');
+  assert.doesNotMatch(
+    developerInstructions,
+    /USER-OVERRIDE-SHORT/,
+    '`-c` short-form override must not enter system developer_instructions',
   );
 });

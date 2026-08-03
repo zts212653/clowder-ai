@@ -1,6 +1,6 @@
 ---
 feature_ids: [F168]
-related_features: [F141, F116, F140, F055, F122]
+related_features: [F141, F116, F140, F055, F122, F167, F192, F220, F233, F280]
 topics: [community, orchestration, opensource]
 doc_kind: spec
 created: 2026-04-18
@@ -9,7 +9,7 @@ tips_exempt: internal operations tool — board/reconciler/closure UX visible on
 
 # F168: Community Operations Board — 社区事务编排引擎
 
-> **Status**: infra-complete / ops-gap 🚧 — 管道精密但没流水（2026-06-20 operator review 后重新定位）| **基础设施 A→E 全部 merged ✅** | **Phase F backend + backfill + board UX merged, opus-47 vision guards PASS ✅** | **运营闭环仍在推进 🚧**（端到端生产流未完成）| **Owner**: Ragdoll (opus-4.8) | **Priority**: P1
+> **Status**: infra-complete / ops-gap 🚧 — 管道精密但没流水（2026-06-20 operator review 后重新定位）| **基础设施 A→E 全部 merged ✅** | **Phase F backend + backfill + board UX merged, opus-47 vision guards PASS ✅** | **F-Step3 External Case Closure 已收敛、实现待续 🚧**（端到端生产流未完成）| **Owner**: Ragdoll (opus-4.8) | **Priority**: P1
 
 ## Reopen（2026-06-10，operator signoff）
 
@@ -21,7 +21,7 @@ tips_exempt: internal operations tool — board/reconciler/closure UX visible on
 
 **分工（operator 拍板 2026-06-10，2026-06-14 / 2026-06-17 更新）**：Phase D/E 由Maine Coon（@codex）主导 spec/AC/failure-mode/gate；实现与 review 保持跨个体铁律（Maine Coon实现则 opus/gpt52/47 review，opus 实现则Maine Coon强 review）。Phase C 由 opus 家族接手并 closed。原分工 fable plan + sonnet 实现，实测效果不理想；fable-5 下线后 operator 确认由 opus 们全程接手 Phase C。
 
-**Phase 总览**：A 事件引擎 ✅ → B Issue Signals ✅ → C Narrator + Role Registry + 路由 ✅ → D Closure UX + Reconciler ✅ → E 看板决策队列 ✅ → **F 运营闭环上线 🚧 backend + backfill + board UX + vision guards PASS / e2e pending（2026-06-20 operator 发起）**。A→E = 基础设施全部就位；F = 把管道接上水，让 triage → 分配 → 工作 → 闭环真正在生产跑起来。原 v1 文档（下方）保留为历史语境。
+**Phase 总览**：A 事件引擎 ✅ → B Issue Signals ✅ → C Narrator + Role Registry + 路由 ✅ → D Closure UX + Reconciler ✅ → E 看板决策队列 ✅ → **F 运营闭环上线 🚧 backend + backfill + board UX + vision guards PASS / F-Step3 External Case Closure implementation pending（2026-06-20 operator 发起，2026-07-14 扩充）**。A→E = 基础设施全部就位；F = 把管道接上水，让 triage → 分配 → 作者更新 → 复审 → GitHub 送达 → 终态真正在生产跑起来。原 v1 文档（下方）保留为历史语境。
 
 **Phase A 完成（2026-06-10）**：PR #2203，commit `10c3c9bfdb`，squash-merged。Event Log + 纯函数状态机 + CommunityProjector + bootstrap CLI + 3 入口接线 + PR lifecycle + 看板 API（向后兼容）。6 轮 cloud review 全修。Phase B 由 @fable5 规划。
 
@@ -140,10 +140,11 @@ All merged, all tests green (4383 pass), all vision guards PASS.
 1. **守门猫有判断力**——有把握的直接传球（不当 rubber stamp 让operator盖章），没把握的才升级
 2. **目标猫必须验证**——不管谁路由的，目标猫都要确认"这是我的 thread 该接的活吗？"，不对就退回到 Decision Queue
 
-**三步走**：
+**四步走**：
 1. **F-Step0 per-repo config**：operator配置每个 repo 的守门 thread + 守门猫
 2. **F-Step1 存量同步**：从 per-repo config 读配置，backfill 已处理 issue 的 `assignedCatId` + `assignedThreadId`
 3. **F-Step2 置信度分流路由**：narrator triage → 置信度判断 → 直接路由 or 审批卡片 → 目标猫确认
+4. **F-Step3 External Case Closure**：目标猫接单后持续拥有作者更新 → current-HEAD readiness → 复审 → GitHub 送达 → terminal，不再依赖operator提醒
 
 **Backend PR #2445 已合入（2026-06-20）**：SO-0~SO-3 完成 per-repo config store/routes、triage confidence pure function、`/validate-route` 接/退单、`TriageOrchestrator.autoRoute` 生产接线；cloud LL-072 封板 + gpt52 final review PASS；`pnpm gate` + GitHub Brand Boundary Guard 全绿。随后 AC-F0 存量 backfill 与 AC-F6 CommunityPanel board UX 已完成；Deferred：至少 1 条生产端到端流。
 
@@ -163,7 +164,48 @@ All merged, all tests green (4383 pass), all vision guards PASS.
 - [x] AC-F4: 目标猫验证是否属于自己 thread → 接单（accept）或退回（reject）（PR #2445 `/validate-route`）
 - [x] AC-F5: 退回 → 自动进 Decision Queue → operator重新分配（PR #2445 reject clears assignment + projection returns to triaged）
 - [x] AC-F6: operator在看板上能看到 issue → thread → 猫 的分配关系并点击跳转（PR #2450：board API resolves `assignedThreadName` + CommunityPanel SVG assignment chip）
-- [ ] AC-F7: 至少 1 条 issue 跑完整流程（narrator 传球 → 目标猫接单 → 工作 → closure）
+- [ ] AC-F7: 至少 1 条真实 external issue/PR 完整跑过 narrator/accept → 作者更新 → current-HEAD readiness → 本地复审 → GitHub delivery proof → terminal closure；只完成 triage/assignment 不算
+- [x] AC-F8: `currentHeadSha` / `lastReviewedHeadSha` / `lastDeliveredHeadSha` 分离；HEAD 变化使旧 CI、cloud verdict、readiness 与 wake dedup 失效
+- [x] AC-F9: 当前 HEAD 只有 CI pass 且 cloud policy 满足时才 wake 原 reviewer；cloud running/blocking 期间严格 state-only，同一 HEAD 最多 wake 一次
+- [x] AC-F10: `verdict_ready` 当轮强制落 `delivered(proof)` 或 TTL=0 `pending_delivery(owner, reason)`；不得以 thread 文本“未代发”结束责任
+- [x] AC-F11: per-repo policy 支持 `observe_only | maintainer_review` 与 cloud `optional | required`；默认不把观察权限扩大成 GitHub 代发权限
+- [x] AC-F12: issue “已修”需关联 PR/commit/release/repro 证据才进入复审；self/bot 静默按 exact identity + trigger correlation，禁止宽泛吞掉全部 OWNER/MEMBER 回复
+- [x] AC-F13: ADR-031 三层闭环上线：软层 workflow/delivery convention、硬层 reducer/schema/head gate、Eval 层掉球/噪声/延迟指标与 fixtures
+- [x] AC-F14: 实现前与 F220 开放 PR #2918 做 delta review，避免 bot-comment 静默策略互相覆盖或回归
+
+#### F-Step3: External Case Closure（2026-07-14 operator 方案收敛）
+
+**归属决策**：不另立新 Feature，也不拆 Phase G。它直接补全 Phase F 尚未满足的 AC-F7：F168 不能只把 issue/PR 分配给猫，还要让接球猫持续拥有作者更新、复审、外部送达和终态 closure。
+
+**核心旅程**：
+
+```text
+assigned → reviewing(H) → delivered(H) / pending_delivery(H)
+  → awaiting_author → author_updated(H2) → awaiting_ci(H2)
+  → awaiting_cloud_review(H2) [if required/triggered]
+  → rereview_required(H2) → … → merged / closed / declined
+```
+
+**不打扰规则**：cloud review 在当前 HEAD 上 `running` 或 `blocking` 时，只更新 F168 状态/看板，不发 connector message、不增加 unread、不 wake 本地 reviewer；当前 HEAD 的 CI 与 cloud policy 同时满足后才 wake，且每 HEAD 至多一次。`failed_or_timeout` 进入有证据的异常队列，不能伪装成通过。
+
+**送达不变量**：产出 external review verdict 的 action successor 必须当轮写入 GitHub delivery proof，或创建 TTL=0 的 `pending_delivery`（owner + reason）。裸“未代发”不是合法终态。
+
+**真相源边界**：External Case 是概念聚合，不新建平行 store。F140 / `pr_tracking` 持有 HEAD、CI、review、conflict 原始事实；F168 `CommunityEventLog` / projection 持有运营生命周期；F167/F233 `ActionSuccessorLease` 持有当前行动责任。
+
+**Architecture cell**：`community orchestration` + `ball-custody`；不新增 cell。若实现扩展 event / lease outcome，architecture map 必须在同一实施 PR 更新。
+
+**Eval / Tracking Contract**：
+
+- Primary users / activation：守门猫或目标猫 accept external case 时激活；operator只看 Decision Queue / Board，不当提醒器。
+- Success metrics：`verdict_ready_without_delivery_total = 0`、`noisy_wake_during_cloud_review_total = 0`、`duplicate_reviewer_wake_per_head_total = 0`、`user_nudge_required_total = 0`。其中 user nudge 采用显式 provenance：reviewer 在 verdict tool 中仅对“operator 确实提醒了本 review generation”设置 `userNudgeRequired=true`，不从聊天语气猜测；因此它是可审计的 semi-automated 指标。
+- Fixtures：cloud running→clean、cloud blocking→new HEAD、GitHub 写失败→pending delivery、self/bot/maintainer 三分、issue 无修复证据五组。
+- Sunset / revise：若两个完整 external case 后仍需operator提醒，或出现第二套旁路台账，回到状态模型重审，不继续叠 prompt/cron 补丁。
+
+## User Journey
+
+**Scope unit**：一条由 Clowder AI 守门猫接住、并由目标猫确认负责的 external issue 或 PR；生命周期按 `(repo, number, currentHeadSha)` 关联结构化 GitHub 事实。
+
+**Flow**：repo policy 配置 → narrator triage / 目标猫 accept → 工作与 external verdict delivery → 等待作者新 HEAD → CI 与 cloud review 静默聚合 → 当前 HEAD ready 后单次唤醒原 reviewer → 当轮 delivery proof 或 pending delivery → 重复直至 merged / closed / declined。operator只在 Decision Queue 的权限/方向决策点介入，不再承担“对方更新了，快复审”或“结论记得发 GitHub”的提醒工作。
 
 ## Why
 
@@ -332,7 +374,7 @@ function derivePrGroup(task: TaskItem): PrBoardGroup {
 
 #### 5. 多仓库支持
 
-repo 是绑定参数，一个 Cat Café 实例可管理多个 repo。`CommunityIssueItem.repo` + `pr_tracking` 的 `subjectKey`（格式 `pr:{owner/repo}#{num}`）天然支持多仓库。
+repo 是绑定参数，一个 Clowder AI 实例可管理多个 repo。`CommunityIssueItem.repo` + `pr_tracking` 的 `subjectKey`（格式 `pr:{owner/repo}#{num}`）天然支持多仓库。
 
 #### 6. 持久化
 
@@ -531,7 +573,7 @@ TTL=0（铁律 #5），用户数据默认持久化
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | 单实例多仓库，非多租户 | 每人自建 Cat Café 实例，不做 SaaS；data model 按 repo 隔离 | 2026-04-18 |
+| KD-1 | 单实例多仓库，非多租户 | 每人自建 Clowder AI 实例，不做 SaaS；data model 按 repo 隔离 | 2026-04-18 |
 | KD-2 | Inbox 首猫分拣制 | 中央入口 + 分发，operator只看 Inbox 就知全局 | 2026-04-18 |
 | KD-3 | 方向评估必须双猫 | operator："一只猫视角大概率有偏颇"，非 bugfix 场景强制双猫交叉 | 2026-04-18 |
 | KD-4 | Intake guardian 由系统自动触发 | operator："每次 intake 都出错没有一次不是"→ 不靠叮嘱靠门禁 | 2026-04-18 |
@@ -544,6 +586,10 @@ TTL=0（铁律 #5），用户数据默认持久化
 | KD-11 | PR 不另建台账，投影自 `pr_tracking` | 现有 `TaskStore` 的 `pr_tracking` 已是 CI/review/conflict 权威数据源；双写会导致状态漂移（gpt52 review P1） | 2026-04-18 |
 | KD-12 | Phase C 需补 `community` workspace mode 基础设施 | 现有枚举只有 4 态；需扩展 `WorkspaceMode = 'dev' \| 'recall' \| 'schedule' \| 'tasks' \| 'community'`（fail-closed 有界枚举），thread metadata 用 `WorkspaceMode` 类型不用 string（gpt52 review P2） | 2026-04-18 |
 | KD-13 | Phase F: PR 发现层 `CommunityPrStore` 与 KD-11 `pr_tracking` 共存 | KD-11 解决已注册 PR 的富数据跟踪，Phase F 解决"看到所有 PR"的发现需求。board 合并两层数据，pr_tracking 优先（operator 2026-04-19 确认需要看全量 PR 回复状态） | 2026-04-19 |
+| KD-14 | External Case Closure 归入 F168 Phase F-Step3，不新立 Feature / Phase G | 用户价值轴与未完成 AC-F7 相同；拆分会把接单与闭环割裂，继续让operator做人肉路由器 | 2026-07-14 |
+| KD-15 | External Case 是概念聚合，不新增平行 store | F140 / `pr_tracking` 已是 PR 原始信号权威，F168 Event Log/Projection 可表达运营状态，F167/F233 lease 表达当前责任 | 2026-07-14 |
+| KD-16 | readiness 以 current HEAD 聚合，cloud review 中间态严格静默 | 防旧 CI/verdict 串 HEAD，并避免 cloud Codex review 阶段反复打扰本地 reviewer | 2026-07-14 |
+| KD-17 | external verdict 当轮强制 `delivered(proof)` 或持久 `pending_delivery(owner, reason)` | 消灭“结论已产出但无人送达”的双向等待；聊天声明不再充当责任真相源 | 2026-07-14 |
 
 ## Review Gate
 
@@ -551,3 +597,4 @@ TTL=0（铁律 #5），用户数据默认持久化
 - Phase B: 跨家族 review（数据模型 + API）
 - Phase C: Pencil 设计稿 → operator UX 审核 → 实现。图标 SVG 不用 emoji
 - Phase D: 跨家族 review + operator确认门禁策略
+- Phase F-Step3: operator 方向确认 + 非作者内容 review；实现必须由非作者跨个体 review，并在真实 external case 上完成 dogfood/eval

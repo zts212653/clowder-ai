@@ -6,7 +6,11 @@ import { after, before, describe, it } from 'node:test';
 import { createMemoryGeneratorAdapter } from '../../dist/infrastructure/harness-eval/publish-verdict/memory-generator-adapter.js';
 import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
 import { setupHarnessFeedback } from './eval-manual-trigger-fixtures.js';
-import { buildPacket } from './publish-verdict-fixtures.js';
+import {
+  buildPacket,
+  markMeasurementCensusDomainCertifiedUsable,
+  seedCanonicalMeasurementCensusState,
+} from './publish-verdict-fixtures.js';
 
 /**
  * F192 publish_verdict eval:memory wire-up — end-to-end test.
@@ -115,6 +119,7 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
           join(isoStub, 'docs', 'harness-feedback', 'eval-domains', 'eval-memory.yaml'),
           readFileSync(join(root, 'eval-domains', 'eval-memory.yaml'), 'utf8'),
         );
+        seedCanonicalMeasurementCensusState(isoStub);
         const stageResult = await opts.stage(isoStub);
         return {
           commitSha: 'mem-sha-1234',
@@ -199,6 +204,8 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
           join(isoStub, 'docs', 'harness-feedback', 'eval-domains', 'eval-memory.yaml'),
           readFileSync(join(root, 'eval-domains', 'eval-memory.yaml'), 'utf8'),
         );
+        seedCanonicalMeasurementCensusState(isoStub);
+        markMeasurementCensusDomainCertifiedUsable(isoStub, 'eval:memory');
         await opts.stage(isoStub);
         return { commitSha: 'mem-actionable-sha', prUrl: 'https://github.com/zts212653/clowder-ai/pull/9101' };
       },
@@ -283,6 +290,8 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
           join(isoStub, 'docs', 'harness-feedback', 'eval-domains', 'eval-memory.yaml'),
           readFileSync(join(root, 'eval-domains', 'eval-memory.yaml'), 'utf8'),
         );
+        seedCanonicalMeasurementCensusState(isoStub);
+        markMeasurementCensusDomainCertifiedUsable(isoStub, 'eval:memory');
         await opts.stage(isoStub);
         return { commitSha: 'mem-f188-sha', prUrl: 'https://github.com/zts212653/clowder-ai/pull/9102' };
       },
@@ -346,6 +355,7 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
           join(isoStub, 'docs', 'harness-feedback', 'eval-domains', 'eval-memory.yaml'),
           readFileSync(join(root, 'eval-domains', 'eval-memory.yaml'), 'utf8'),
         );
+        seedCanonicalMeasurementCensusState(isoStub);
         await opts.stage(isoStub);
         rmSync(isoStub, { recursive: true, force: true });
         return { commitSha: 'unreachable', prUrl: 'unreachable' };
@@ -471,6 +481,7 @@ describe('handlePublishVerdict end-to-end with eval:memory generator', () => {
           join(isoStub, 'docs', 'harness-feedback', 'eval-domains', 'eval-memory.yaml'),
           readFileSync(join(root, 'eval-domains', 'eval-memory.yaml'), 'utf8'),
         );
+        seedCanonicalMeasurementCensusState(isoStub);
         await opts.stage(isoStub);
         return { commitSha: 'unreachable', prUrl: 'unreachable' };
       },

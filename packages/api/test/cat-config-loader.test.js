@@ -1,6 +1,6 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
@@ -70,6 +70,38 @@ describe('cat-config-loader', () => {
       assert.equal(config.version, 1);
       assert.equal(config.breeds.length, 1);
       assert.equal(config.breeds[0].id, 'ragdoll');
+    });
+
+    it('rejects an orphan or oversized auto-compact threshold on reload', () => {
+      for (const cli of [
+        { command: 'codex', outputFormat: 'json', autoCompactTokenLimit: 90000 },
+        {
+          command: 'codex',
+          outputFormat: 'json',
+          contextWindow: 100000,
+          autoCompactTokenLimit: 100001,
+        },
+      ]) {
+        const config = validConfig();
+        config.breeds[0].variants[0].clientId = 'openai';
+        config.breeds[0].variants[0].defaultModel = 'gpt-5.6-sol';
+        config.breeds[0].variants[0].cli = cli;
+
+        assert.throws(() => loadCatConfig(writeTempConfig(config)), /autoCompactTokenLimit.*contextWindow/i);
+      }
+    });
+
+    it('rejects cli.carrier on non-openai variants but keeps it for openai', () => {
+      const bad = validConfig();
+      bad.breeds[0].variants[0].cli = { command: 'claude', outputFormat: 'stream-json', carrier: 'app_server' };
+      assert.throws(() => loadCatConfig(writeTempConfig(bad)), /codex-only/i);
+
+      const good = validConfig();
+      good.breeds[0].variants[0].clientId = 'openai';
+      good.breeds[0].variants[0].defaultModel = 'gpt-5.6-sol';
+      good.breeds[0].variants[0].cli = { command: 'codex', outputFormat: 'json', carrier: 'app_server' };
+      const loaded = loadCatConfig(writeTempConfig(good));
+      assert.equal(loaded.breeds[0].variants[0].cli.carrier, 'app_server');
     });
 
     it('loads default project config when no path/env provided', () => {
@@ -722,6 +754,43 @@ describe('F32-b: toAllCatConfigs (multi-variant)', () => {
     assert.equal(all.gemini.breedId, 'siamese');
   });
 
+  it('projects an explicit relationship key independently of breed grouping', () => {
+    const cfg = multiVariantConfig();
+    cfg.breeds[0].id = 'opus-47';
+    cfg.breeds[0].relationshipKey = 'ragdoll';
+    cfg.breeds[0].catId = 'opus-47';
+    cfg.breeds[0].defaultVariantId = 'opus-47-default';
+    cfg.breeds[0].variants = [
+      {
+        ...cfg.breeds[0].variants[0],
+        id: 'opus-47-default',
+        catId: 'opus-47',
+        defaultModel: 'claude-opus-4-7',
+      },
+    ];
+
+    const all = toAllCatConfigs(loadCatConfig(writeTempConfig(cfg)));
+    assert.equal(all['opus-47'].breedId, 'opus-47');
+    assert.equal(all['opus-47'].relationshipKey, 'ragdoll');
+  });
+
+  it('defaults relationship key to breed id for standalone personas', () => {
+    const all = toAllCatConfigs(loadCatConfig(writeTempConfig(multiVariantConfig())));
+    assert.equal(all.opus.relationshipKey, 'ragdoll');
+    assert.equal(all.gemini.relationshipKey, 'siamese');
+  });
+
+  it('keeps known standalone version cats on their relationship families in the project template', () => {
+    const repoTemplate = resolve(dirname(fileURLToPath(import.meta.url)), '../../../cat-template.json');
+    const all = toAllCatConfigs(loadCatConfig(repoTemplate));
+    assert.equal(all['opus-47'].breedId, 'opus-47');
+    assert.equal(all['opus-47'].relationshipKey, 'ragdoll');
+    assert.equal(all.gemini35.breedId, 'gemini35');
+    assert.equal(all.gemini35.relationshipKey, 'siamese');
+    assert.equal(all['gpt-pro'].breedId, 'gpt-pro');
+    assert.equal(all['gpt-pro'].relationshipKey, 'maine-coon');
+  });
+
   it('throws on duplicate catId', () => {
     const cfg = multiVariantConfig();
     // Make second variant use same catId as default (no catId override → inherits breed)
@@ -928,6 +997,47 @@ describe('getCatEffort', () => {
     assert.equal(getCatEffort('opus', config), 'xhigh');
   });
 
+  it('returns kimi provider default high when not configured', () => {
+    const cfg = validConfig();
+    cfg.breeds[0].variants[0].clientId = 'kimi';
+    cfg.breeds[0].variants[0].cli = {
+      command: 'kimi',
+      outputFormat: 'stream-json',
+    };
+    const config = loadCatConfig(writeTempConfig(cfg));
+
+    assert.equal(getCatEffort('opus', config), 'high');
+  });
+
+  it('returns kimi effort from cli config if set', () => {
+    const cfg = validConfig();
+    cfg.breeds[0].variants[0].clientId = 'kimi';
+    cfg.breeds[0].variants[0].cli = {
+      command: 'kimi',
+      outputFormat: 'stream-json',
+      effort: 'max',
+    };
+    const config = loadCatConfig(writeTempConfig(cfg));
+
+    assert.equal(getCatEffort('opus', config), 'max');
+  });
+
+  it('returns GPT-5.6 max and ultra efforts from persisted Codex config', () => {
+    for (const effort of ['max', 'ultra']) {
+      const cfg = validConfig();
+      cfg.breeds[0].variants[0].clientId = 'openai';
+      cfg.breeds[0].variants[0].defaultModel = 'gpt-5.6-sol';
+      cfg.breeds[0].variants[0].cli = {
+        command: 'codex',
+        outputFormat: 'json',
+        effort,
+      };
+      const config = loadCatConfig(writeTempConfig(cfg));
+
+      assert.equal(getCatEffort('opus', config), effort);
+    }
+  });
+
   it('does not throw for variants without cli config (F061 bridge providers)', () => {
     const config = loadCatConfig();
     // antigravity has no cli — should not throw, returns provider default
@@ -936,32 +1046,18 @@ describe('getCatEffort', () => {
     assert.ok(result, 'should return a truthy default effort');
   });
 
-  it('preserves a Codex native effort that is outside the maintained preset vocabulary', () => {
-    // `max` is not a maintained Codex preset, but newer Codex CLIs may accept it
-    // natively. The runtime catalog must retain the operator's exact choice.
+  it('preserves provider-native effort values outside the maintained preset vocabulary', () => {
     const cfg = validConfig();
     cfg.breeds[0].variants[0].clientId = 'openai';
+    cfg.breeds[0].variants[0].defaultModel = 'gpt-5.4';
     cfg.breeds[0].variants[0].cli = {
       command: 'codex',
       outputFormat: 'json',
-      effort: 'max',
+      effort: 'turbo-native',
     };
     const config = loadCatConfig(writeTempConfig(cfg));
 
-    assert.equal(getCatEffort('opus', config), 'max');
-  });
-
-  it('preserves an unfamiliar native effort value for a Codex member', () => {
-    const cfg = validConfig();
-    cfg.breeds[0].variants[0].clientId = 'openai';
-    cfg.breeds[0].variants[0].cli = {
-      command: 'codex',
-      outputFormat: 'json',
-      effort: 'ultra',
-    };
-    const config = loadCatConfig(writeTempConfig(cfg));
-
-    assert.equal(getCatEffort('opus', config), 'ultra');
+    assert.equal(getCatEffort('opus', config), 'turbo-native');
   });
 });
 describe('F32-b P4c: Sonnet variant in project config', () => {
@@ -978,6 +1074,52 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
     delete existingCatalog.roster['agy-opus'];
     const bengal = existingCatalog.breeds.find((breed) => breed.id === 'bengal');
     bengal.variants = bengal.variants.filter((variant) => variant.id !== 'agy-opus');
+    writeFileSync(join(runtimeDir, 'cat-catalog.json'), JSON.stringify(existingCatalog));
+
+    return { projectDir, templatePath };
+  }
+
+  function writeGlm52ProjectWithDareCatalog() {
+    const projectDir = mkdtempSync(join(tmpdir(), 'cat-glm52-overlay-'));
+    const templatePath = join(projectDir, 'cat-template.json');
+    const repoTemplatePath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../cat-template.json');
+    const template = JSON.parse(readFileSync(repoTemplatePath, 'utf-8'));
+    writeFileSync(templatePath, JSON.stringify(template));
+
+    const runtimeDir = join(projectDir, '.cat-cafe');
+    mkdirSync(runtimeDir, { recursive: true });
+    const existingCatalog = JSON.parse(JSON.stringify(template));
+    delete existingCatalog.roster.glm52;
+    existingCatalog.roster.dare = {
+      family: 'dragon-li',
+      roles: ['deterministic', 'reasoning'],
+      lead: true,
+      available: true,
+      evaluation: '确定性执行框架猫',
+    };
+
+    const dragonLi = existingCatalog.breeds.find((breed) => breed.id === 'dragon-li');
+    Object.assign(dragonLi, {
+      catId: 'dare',
+      name: '狸花猫',
+      displayName: '狸花猫',
+      nickname: 'DARE',
+      avatar: '/avatars/dare.png',
+      mentionPatterns: ['@dare', '@狸花dare'],
+      roleDescription: '确定性执行框架猫',
+      defaultVariantId: 'dare-default',
+    });
+    dragonLi.variants = [
+      {
+        id: 'dare-default',
+        clientId: 'zhipu',
+        provider: 'zhipu',
+        defaultModel: 'zhipu/glm-4.7',
+        mcpSupport: true,
+        cli: { command: 'dare', outputFormat: 'json' },
+        personality: '确定性执行',
+      },
+    ];
     writeFileSync(join(runtimeDir, 'cat-catalog.json'), JSON.stringify(existingCatalog));
 
     return { projectDir, templatePath };
@@ -1026,14 +1168,14 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
     assert.deepEqual(fable.mentionPatterns, ['@fable5', '@fable-5', '@claude-fable-5', '@宪宪5', '@布偶猫5']);
   });
 
-  it('total cat count is 17 (opus + sonnet + opus-45 + opus-47 + fable-5 + codex + gpt52 + spark + gpt-pro + gemini + gemini25 + gemini35 + kimi + antigravity + antig-opus + agy-opus + opencode)', () => {
+  it('total cat count is 19 (opus + sonnet + opus-45 + opus-47 + fable-5 + codex + gpt52 + spark + codex-sol + gpt-pro + gemini + gemini25 + gemini35 + glm52 + kimi + antigravity + antig-opus + agy-opus + opencode)', () => {
     // Use template directly to avoid catalog overlay pollution from earlier tests
     const templatePath =
       process.env.CAT_TEMPLATE_PATH ??
       resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
     const config = loadCatConfig(templatePath);
     const all = toAllCatConfigs(config);
-    assert.equal(Object.keys(all).length, 17);
+    assert.equal(Object.keys(all).length, 19);
     assert.ok(all.opus);
     assert.ok(all.sonnet);
     assert.ok(all['opus-45']);
@@ -1042,15 +1184,65 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
     assert.ok(all.codex);
     assert.ok(all.gpt52);
     assert.ok(all.spark); // F032 Phase E: new cat added
+    assert.ok(all['codex-sol']); // F203 Case C: Sol (gpt-5.6-sol) registered per F278 exact-source owner
     assert.ok(all['gpt-pro']); // F247: cloud pro cat added
     assert.ok(all.gemini);
     assert.ok(all.gemini25);
     assert.ok(all.gemini35); // Gemini 3.5 Flash standalone breed
+    assert.ok(all.glm52); // GLM 5.2 cat (Dragon Li)
     assert.ok(all.kimi); // Kimi CLI cat (moonshot)
     assert.ok(all.antigravity); // F061: Bengal cat (Antigravity CDP bridge)
     assert.ok(all['antig-opus']); // F061: Bengal cat Claude variant
     assert.ok(all['agy-opus']); // F210: Bengal cat AGY CLI Claude Opus variant
     assert.ok(all.opencode); // F105: OpenCode external agent
+  });
+
+  it('registers GLM 5.2 as a Dragon Li cat in project config', () => {
+    const templatePath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../cat-template.json');
+    const config = loadCatConfig(templatePath);
+    const all = toAllCatConfigs(config);
+    const glm52 = all.glm52;
+
+    assert.ok(glm52, 'glm52 cat config exists');
+    assert.equal(glm52.breedId, 'dragon-li');
+    assert.equal(glm52.displayName, '狸花猫');
+    assert.equal(glm52.variantLabel, 'GLM-5.2');
+    assert.equal(glm52.clientId, 'opencode');
+    assert.equal(glm52.defaultModel, 'zhipu/glm-5.2');
+    assert.equal(glm52.avatar, '/avatars/glm52.png');
+    assert.ok(
+      existsSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../packages/web/public/avatars/glm52.png')),
+      'glm52 avatar asset exists',
+    );
+    for (const alias of ['@glm52', '@glm5.2', '@glm-5.2', '@狸花glm52', '@小狸花']) {
+      assert.ok(glm52.mentionPatterns.includes(alias), `glm52 mentionPatterns include ${alias}`);
+    }
+  });
+
+  it('surfaces GLM 5.2 when an existing runtime catalog already has DARE as Dragon Li', () => {
+    const { templatePath } = writeGlm52ProjectWithDareCatalog();
+
+    const saved = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = templatePath;
+    try {
+      const all = toAllCatConfigs(loadCatConfig());
+
+      assert.ok(all.dare, 'existing DARE Dragon Li cat survives catalog overlay');
+      assert.ok(all.glm52, 'template GLM 5.2 Dragon Li cat backfills into existing catalog overlay');
+      assert.equal(all.glm52.breedId, 'dragon-li');
+      assert.equal(all.glm52.defaultModel, 'zhipu/glm-5.2');
+      assert.equal(all.glm52.nickname, '小狸花');
+      assert.equal(all.glm52.avatar, '/avatars/glm52.png');
+      assert.deepEqual(all.glm52.color, { primary: '#D4A76A', secondary: '#F5EBD7' });
+      assert.equal(all.glm52.roleDescription, 'GLM-5.2 新猫；中文实证');
+      assert.deepEqual(all.glm52.mentionPatterns, ['@glm52', '@glm5.2', '@glm-5.2', '@狸花glm52', '@小狸花']);
+    } finally {
+      if (saved === undefined) {
+        delete process.env.CAT_TEMPLATE_PATH;
+      } else {
+        process.env.CAT_TEMPLATE_PATH = saved;
+      }
+    }
   });
 
   it('keeps AGY CLI Opus under Bengal while preserving Antigravity IDE Opus', () => {
@@ -1825,6 +2017,38 @@ describe('#772: template breeds must not leak into runtime', () => {
     } finally {
       if (saved === undefined) delete process.env.CAT_TEMPLATE_PATH;
       else process.env.CAT_TEMPLATE_PATH = saved;
+      _resetCachedConfig();
+    }
+  });
+
+  it('bootstrapDefaultCatCatalog registers allowlisted glm52 breed when no runtime catalog exists', () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'cat-glm52-bootstrap-'));
+    const templatePath = join(projectDir, 'cat-template.json');
+    writeFileSync(
+      templatePath,
+      JSON.stringify({
+        version: 2,
+        breeds: [makeBreed('ragdoll', 'opus', ['@opus']), makeBreed('dragon-li', 'glm52', ['@glm52', '@小狸花'])],
+        roster: {
+          opus: { family: 'ragdoll', roles: ['architect'], lead: true, available: true, evaluation: 'active' },
+          glm52: { family: 'dragon-li', roles: ['chat'], lead: true, available: true, evaluation: 'GLM-5.2' },
+        },
+        reviewPolicy: {
+          requireDifferentFamily: true,
+          preferActiveInThread: true,
+          preferLead: true,
+          excludeUnavailable: true,
+        },
+      }),
+    );
+
+    _resetCachedConfig();
+    try {
+      const config = bootstrapDefaultCatCatalog(templatePath);
+      const all = toAllCatConfigs(config);
+      assert.ok(all.glm52, 'glm52 should become a runtime cat after bootstrap');
+      assert.equal(getCatFamily('glm52', config), 'dragon-li');
+    } finally {
       _resetCachedConfig();
     }
   });

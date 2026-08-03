@@ -9,9 +9,10 @@
 
 'use client';
 
-import type { CausalEdgeDTO, FeatureStoryRenderingDTO, SwimlaneDTO, TimelineMilestoneDTO } from '@cat-cafe/shared';
+import type { FeatureStoryRenderingDTO, SwimlaneDTO, TimelineMilestoneDTO } from '@cat-cafe/shared';
 import { useCallback } from 'react';
 import { KIND_VISUALS, TONE_CLASSES } from '@/components/workspace/trajectory/trajectory-kind-styles';
+import { CausalEdgeOverlay } from './CausalEdgeOverlay';
 
 // ============================================================================
 // Layout constants
@@ -92,7 +93,14 @@ export function BirdseyeView({ data, onPlayFeature }: { data: FeatureStoryRender
               />
             ))}
 
-            <CausalEdgeOverlay edges={edges} laneMap={laneMap} timeToX={timeToX} laneY={laneY} />
+            <CausalEdgeOverlay
+              edges={edges}
+              laneMap={laneMap}
+              timeToX={timeToX}
+              laneY={laneY}
+              totalHeight={totalHeight}
+              timelineWidth={timelineWidth}
+            />
 
             <MilestoneLines milestones={milestones} timeToX={timeToX} />
 
@@ -134,84 +142,6 @@ export function BirdseyeView({ data, onPlayFeature }: { data: FeatureStoryRender
         </div>
       </div>
     </div>
-  );
-}
-
-// ============================================================================
-// Causal Edge SVG Overlay
-// ============================================================================
-
-function CausalEdgeOverlay({
-  edges,
-  laneMap,
-  timeToX,
-  laneY,
-}: {
-  edges: CausalEdgeDTO[];
-  laneMap: Map<string, number>;
-  timeToX: (t: number) => number;
-  laneY: (index: number) => number;
-}) {
-  const totalHeight = laneMap.size * (LANE_HEIGHT + LANE_GAP);
-
-  return (
-    <svg
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        width: '100%',
-        height: totalHeight,
-        pointerEvents: 'none',
-      }}
-    >
-      {edges.map((edge) => {
-        const fromIdx = laneMap.get(edge.from.threadId);
-        const toIdx = laneMap.get(edge.to.threadId);
-        if (fromIdx === undefined || toIdx === undefined) return null;
-
-        const x1 = timeToX(edge.from.time);
-        const y1 = laneY(fromIdx);
-        const x2 = timeToX(edge.to.time);
-        const y2 = laneY(toIdx);
-
-        const strokeStyle = edge.confidence === 'high' ? 'none' : edge.confidence === 'medium' ? '6,4' : '2,4';
-
-        const edgeColor =
-          edge.kind === 'thread_split'
-            ? 'rgba(168, 85, 247, 0.6)' // purple
-            : 'rgba(16, 185, 129, 0.6)'; // emerald
-
-        return (
-          <g key={edge.id}>
-            <line
-              x1={x1}
-              y1={y1}
-              x2={x2}
-              y2={y2}
-              stroke={edgeColor}
-              strokeWidth={2}
-              strokeDasharray={strokeStyle}
-              markerEnd="url(#arrowhead)"
-            />
-            <text
-              x={(x1 + x2) / 2}
-              y={(y1 + y2) / 2 - 8}
-              fill="rgba(255,255,255,0.5)"
-              fontSize="var(--console-font-micro)"
-              textAnchor="middle"
-            >
-              {edge.label}
-            </text>
-          </g>
-        );
-      })}
-      <defs>
-        <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-          <polygon points="0 0, 8 3, 0 6" fill="rgba(168, 85, 247, 0.6)" />
-        </marker>
-      </defs>
-    </svg>
   );
 }
 

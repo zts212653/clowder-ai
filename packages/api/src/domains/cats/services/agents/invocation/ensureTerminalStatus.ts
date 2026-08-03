@@ -20,6 +20,7 @@
  *   - already_terminal: record already non-running OR missing → no write
  */
 
+import type { CatId } from '@cat-cafe/shared';
 import type { IInvocationRecordStore } from '../../stores/ports/InvocationRecordStore.js';
 
 export type ChainCompletionState = 'pending' | 'succeeded' | 'failed';
@@ -71,10 +72,19 @@ export interface EnsureTerminalResult {
   source: EnsureTerminalSource;
 }
 
+export class InvocationTerminalizationError extends Error {
+  readonly code = 'INVOCATION_TERMINALIZATION_REJECTED';
+
+  constructor(invocationId: string, targetStatus: string) {
+    super(`Invocation terminal update rejected and record is still running: ${invocationId} -> ${targetStatus}`);
+    this.name = 'InvocationTerminalizationError';
+  }
+}
+
 export async function ensureTerminalStatus(
   parentInvocationId: string,
   deps: EnsureTerminalDeps,
-  opts: { reqId?: string } = {},
+  opts: { reqId?: string; successfulCatIds?: readonly CatId[] } = {},
 ): Promise<EnsureTerminalResult> {
   const before = await deps.invocationRecordStore.get(parentInvocationId);
   if (!before) {
@@ -114,11 +124,13 @@ export async function ensureTerminalStatus(
     );
   }
 
-  const updated = await deps.invocationRecordStore.update(parentInvocationId, {
+  const terminalUpdate = {
     status: targetStatus,
     expectedStatus: 'running',
+    ...(targetStatus === 'succeeded' && opts.successfulCatIds ? { successfulCatIds: opts.successfulCatIds } : {}),
     ...(error ? { error } : {}),
-  });
+  } as const;
+  let updated = await deps.invocationRecordStore.update(parentInvocationId, terminalUpdate);
 
   if (updated) {
     deps.log?.info?.(
@@ -135,8 +147,30 @@ export async function ensureTerminalStatus(
     return { written: true, finalStatus: targetStatus, source };
   }
 
-  // CAS rejected — record changed status between get() and update(). Re-read to report.
-  const after = await deps.invocationRecordStore.get(parentInvocationId);
+  // CAS rejection is only benign when another writer actually terminalized the
+  // record. A still-running record means the write was rejected for some other
+  // reason; retry once to tolerate a transient store race, then surface it.
+  let after = await deps.invocationRecordStore.get(parentInvocationId);
+  if (after?.status === 'running') {
+    deps.log?.warn?.(
+      {
+        invocationId: parentInvocationId,
+        ...(opts.reqId ? { reqId: opts.reqId } : {}),
+        targetStatus,
+        source,
+        feature: 'F254',
+      },
+      'F254 terminal update rejected while invocation remains running; retrying once',
+    );
+    updated = await deps.invocationRecordStore.update(parentInvocationId, terminalUpdate);
+    if (updated) {
+      return { written: true, finalStatus: targetStatus, source };
+    }
+    after = await deps.invocationRecordStore.get(parentInvocationId);
+    if (after?.status === 'running') {
+      throw new InvocationTerminalizationError(parentInvocationId, targetStatus);
+    }
+  }
   return {
     written: false,
     finalStatus: after?.status ?? 'unknown',

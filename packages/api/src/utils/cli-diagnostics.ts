@@ -97,6 +97,14 @@ const REASON_TEXT: Record<CliErrorReasonCode, { summary: string; hint: string }>
     // Markdown version. Provider-neutral phrasing per cloud codex R2 P2.
     hint: '不是你的额度问题——是 CLI 上游 provider 服务器侧临时限流（provider 错误里通常会明示如 "not your usage limit" / "529 Overloaded"）。等 30-60 秒重试或换一只猫（不同 provider）；反复出现去你用的 provider 状态页（Anthropic / OpenAI / Google / DeepSeek 各有 status 页）。',
   },
+  cli_response_timeout: {
+    summary: 'CLI 响应超时',
+    hint: 'CLI 在配置的响应时限内没有产生新输出；系统已按有界终止流程清理进程。可用 invocationId 检索后台时序证据。',
+  },
+  cli_stall_timeout: {
+    summary: 'CLI 长时间无响应',
+    hint: 'CLI 长时间静默且进程仍存活；系统先请求优雅中断，未及时结束才逐级清理，整个退出链有硬上限。可用 invocationId 检索后台时序证据。',
+  },
   // F212 Phase G (AC-G1): silent_completion — CLI 正常完成但事件流里没有 text event
   // (e.g. OpenCode + DeepSeek 用户撞的 step_start-only NDJSON, clowder-ai#875)。NOT 真错误
   // 但走 cliDiagnostics surface 让用户拿到结构化证据替代 generic "completed without
@@ -109,6 +117,14 @@ const REASON_TEXT: Record<CliErrorReasonCode, { summary: string; hint: string }>
     // panel's expandable disclosure. debugRef only carries command / exit / signal /
     // invocationId. Previous hint sent users to debugRef — wrong place, killed UX value.
     hint: 'CLI 进程正常退出，但没有可显示的文字输出（事件流没有 text event，或 plain-text stdout 为空）。建议：换一只猫试同样 prompt；换 model；或直接在终端跑 CLI 看 raw output 判断是 upstream / auth / profile 还是 prompt 问题。展开下方"详细诊断"查看 event 类型/数量、model、session 前缀等结构化证据；debugRef.invocationId 可用于后端日志检索。',
+  },
+  // F212 Phase H (Sol runtime forensics 2026-07-09, archive 97449e4b): upstream provider
+  // policy engine (Codex 0.98+) rejected content ("flagged for possible cybersecurity risk").
+  // NOT a Clowder AI bug — the upstream policy layer made the call. User needs actionable
+  // rephrase guidance, not "unknown CLI error" fallback. Excluded from F222 auto-issue.
+  upstream_policy_reject: {
+    summary: '上游 provider policy 拒绝',
+    hint: 'CLI 上游 provider 的 policy 引擎拒绝了这次请求（例如判断为敏感内容）。这不是 Clowder AI bug — 是 provider 侧决策。建议：换个表达方式重试 prompt（provider 通常给了 "try rephrasing" 提示）；换一只不同 provider 的猫；反复触发去查你用的 provider policy 文档（Anthropic / OpenAI / DeepSeek 各有 acceptable use policy）。展开下方"详细诊断"看具体 policy 消息。',
   },
 };
 
@@ -275,6 +291,24 @@ export function formatCliStderrForLog(stderrBuffer: string, env: NodeJS.ProcessE
   return sanitizeCliStderr(stderrBuffer).slice(-1000);
 }
 
+export type CliTimeoutTerminalKind = 'response_timeout' | 'stall_timeout';
+export type CliTimeoutTerminationStage = 'none' | 'interrupt' | 'terminate' | 'kill';
+
+/**
+ * Causal timeout snapshot. postKill fields are observations made after the
+ * timeout commit and must never be projected as the terminal cause.
+ */
+export interface CliTimeoutTerminalContext {
+  kind: CliTimeoutTerminalKind;
+  configuredTimeoutMs: number;
+  observedSilenceDurationMs: number;
+  processAliveAtTimeout: boolean;
+  postKillExitCode: number | null;
+  postKillSignal: NodeJS.Signals | string | null;
+  signalsSent: readonly NodeJS.Signals[];
+  finalStage: CliTimeoutTerminationStage;
+}
+
 export function buildCliDiagnostics(args: {
   rawText: string;
   debugRef: CliDiagnostics['debugRef'];
@@ -294,7 +328,26 @@ export function buildCliDiagnostics(args: {
   safeExcerptRawText?: string;
   /** Extra HOME roots used by an isolated child CLI spawn, redacted before public excerpts. */
   additionalHomePaths?: readonly string[];
+  /** F212 hotfix: explicit timeout cause bypasses stderr classification. */
+  terminalContext?: CliTimeoutTerminalContext;
 }): CliDiagnostics {
+  if (args.terminalContext) {
+    const { exitCode: _postKillExitCode, ...causalDebugRef } = args.debugRef;
+    const terminal = args.terminalContext;
+    const reasonCode: CliErrorReasonCode =
+      terminal.kind === 'stall_timeout' ? 'cli_stall_timeout' : 'cli_response_timeout';
+    const configuredSeconds = Math.round(terminal.configuredTimeoutMs / 1000);
+    const observedSeconds = Math.round(terminal.observedSilenceDurationMs / 1000);
+    const baseText = REASON_TEXT[reasonCode];
+    const timing = `配置阈值 ${configuredSeconds}s，实际静默 ${observedSeconds}s。`;
+    return {
+      reasonCode,
+      publicSummary: baseText.summary,
+      publicHint: `${timing}${baseText.hint}`,
+      debugRef: causalDebugRef,
+    };
+  }
+
   const reasonCode = classifyCliError(args.rawText);
   const additionalHomePaths = args.additionalHomePaths;
   const excerptRawText = args.safeExcerptRawText ?? args.rawText;

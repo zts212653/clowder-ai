@@ -103,7 +103,7 @@ describe('Task Outcome API Handlers (F192 Phase G)', () => {
       assert.equal(signals[0].category, 'a1');
     });
 
-    it('auto-transitions episode to completed on merge+success', () => {
+    it('keeps the episode in progress on merge+success because merge is evidence only', () => {
       const ep = store.createEpisode({
         trigger: 'user_ask',
         threadId: 'thread_abc',
@@ -119,11 +119,13 @@ describe('Task Outcome API Handlers (F192 Phase G)', () => {
       });
 
       const updated = store.getEpisode(ep.episodeId);
-      assert.equal(updated.terminalState, 'completed');
+      assert.equal(updated.terminalState, 'in_progress');
 
-      // Episode now appears in needsVerdict queue
       const needing = store.listNeedingVerdict();
-      assert.ok(needing.some((e) => e.episodeId === ep.episodeId));
+      assert.equal(
+        needing.some((e) => e.episodeId === ep.episodeId),
+        false,
+      );
     });
 
     it('does NOT auto-close on revert (negative signal only, cat may redo work)', () => {
@@ -214,6 +216,31 @@ describe('Task Outcome API Handlers (F192 Phase G)', () => {
 
     it('returns null for non-existent episode', () => {
       assert.equal(handleGetEpisode(store, 'ep-fake'), null);
+    });
+
+    it('redacts private managed-work identifiers from episode read projections', () => {
+      const managed = store.createEpisode({
+        trigger: 'task_created',
+        threadId: 'thread_private',
+        participants: ['codex-sol'],
+        attribution: 'managed_attributed',
+        workId: 'wrk_private',
+        attemptId: 'wat_private_1',
+      });
+
+      const detail = handleGetEpisode(store, managed.episodeId);
+      const list = handleListEpisodes(store, 'thread_private');
+      const updated = handleUpdateTerminalState(store, {
+        episodeId: managed.episodeId,
+        terminalState: 'completed',
+      });
+
+      assert.equal(Object.hasOwn(detail ?? {}, 'workId'), false);
+      assert.equal(Object.hasOwn(detail ?? {}, 'attemptId'), false);
+      assert.equal(Object.hasOwn(list[0] ?? {}, 'workId'), false);
+      assert.equal(Object.hasOwn(list[0] ?? {}, 'attemptId'), false);
+      assert.equal(Object.hasOwn(updated ?? {}, 'workId'), false);
+      assert.equal(Object.hasOwn(updated ?? {}, 'attemptId'), false);
     });
   });
 

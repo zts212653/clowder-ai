@@ -77,21 +77,9 @@ export function transcriptEntriesToAgentMessages(
     const entry = raw as Record<string, unknown>;
 
     if (entry.type === 'assistant') {
-      // F230 P2-synthetic: Claude CLI synthesizes assistant entries locally for two cases:
-      //   1. "No response requested." — nothing to do (zero API calls, zero tokens)
-      //   2. "API Error: ..." — ECONNRESET / network hiccup (CLI makes it look like a reply)
-      // These must NEVER surface as cat chat bubbles. Filter before transformClaudeEvent.
-      const msg = entry.message as Record<string, unknown> | undefined;
-      if (msg?.model === '<synthetic>') {
-        const content = msg?.content as Array<{ type: string; text?: string }> | undefined;
-        const text = content?.find((c) => c.type === 'text')?.text ?? '';
-        if (text.startsWith('API Error:') || text.startsWith('Error:')) {
-          out.push({ type: 'error', catId, error: text, timestamp: Date.now() });
-        }
-        // "No response requested." and other synthetic variants → silently drop
-        continue;
-      }
       // assistant shape matches -p NDJSON assistant event → feed directly.
+      // transformClaudeEvent owns the shared `<synthetic>` provenance boundary
+      // for both foreground and background carriers.
       const result = transformClaudeEvent(entry, catId, state);
       if (result == null) continue;
       if (Array.isArray(result)) out.push(...result);

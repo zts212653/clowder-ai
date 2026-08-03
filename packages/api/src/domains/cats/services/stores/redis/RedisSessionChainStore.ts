@@ -22,6 +22,8 @@ import type {
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { CreateSessionInput, ISessionChainStore, SessionRecordPatch } from '../ports/SessionChainStore.js';
+import type { StoreReadOptions } from '../ports/StoreReadOptions.js';
+import { awaitStoreRead, throwIfStoreReadAborted } from '../ports/StoreReadOptions.js';
 import { SessionChainKeys } from '../redis-keys/session-chain-keys.js';
 
 const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
@@ -182,30 +184,34 @@ export class RedisSessionChainStore implements ISessionChainStore {
     return records.sort((a, b) => a.seq - b.seq);
   }
 
-  async getChainByThread(threadId: string): Promise<SessionRecord[]> {
+  async getChainByThread(threadId: string, options?: StoreReadOptions): Promise<SessionRecord[]> {
+    throwIfStoreReadAborted(options);
     // Scan for all session-chain:*:{threadId} keys
     // Since we can't easily enumerate by threadId with sorted sets,
     // we use a secondary approach: scan detail hashes.
     // For Phase A this is acceptable (low volume); Phase B+ can add a thread index.
     const pattern = `session-chain:*:${threadId}`;
-    const chainKeys = await this.scanKeys(pattern);
+    const chainKeys = await this.scanKeys(pattern, options);
 
     const allIds: string[] = [];
     for (const chainKey of chainKeys) {
-      const ids = await this.redis.zrange(chainKey, 0, -1);
+      throwIfStoreReadAborted(options);
+      const ids = await awaitStoreRead(this.redis.zrange(chainKey, 0, -1), options);
       allIds.push(...ids);
     }
     if (!allIds.length) return [];
 
     const pipeline = this.redis.pipeline();
     for (const id of allIds) {
+      throwIfStoreReadAborted(options);
       pipeline.hgetall(SessionChainKeys.detail(id));
     }
-    const results = await pipeline.exec();
+    const results = await awaitStoreRead(pipeline.exec(), options);
     if (!results) return [];
 
     const records: SessionRecord[] = [];
     for (const [err, data] of results) {
+      throwIfStoreReadAborted(options);
       if (err || !data) continue;
       const d = data as Record<string, string>;
       if (d.id) records.push(this.hydrate(d));
@@ -396,21 +402,44 @@ export class RedisSessionChainStore implements ISessionChainStore {
    * We must manually add the keyPrefix for matching, then strip it from results
    * so that subsequent commands (which DO auto-prefix) work correctly.
    */
-  private async scanKeys(pattern: string): Promise<string[]> {
+  private async scanKeys(pattern: string, options?: StoreReadOptions): Promise<string[]> {
+    throwIfStoreReadAborted(options);
     const prefix = (this.redis.options as { keyPrefix?: string }).keyPrefix ?? '';
     const prefixedPattern = `${prefix}${pattern}`;
     return new Promise((resolve, reject) => {
       const keys: string[] = [];
       const stream = this.redis.scanStream({ match: prefixedPattern, count: 100 });
-      stream.on('data', (batch: string[]) => {
+      let settled = false;
+      const cleanup = (): void => {
+        options?.signal?.removeEventListener('abort', onAbort);
+        stream.removeListener('data', onData);
+        stream.removeListener('end', onEnd);
+        stream.removeListener('error', onError);
+      };
+      const finish = (error?: unknown): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (error !== undefined) reject(error);
+        else resolve(keys);
+      };
+      const onData = (batch: string[]): void => {
         for (const k of batch) {
           // Strip prefix so subsequent auto-prefixing commands work
           const stripped = prefix && k.startsWith(prefix) ? k.slice(prefix.length) : k;
           keys.push(stripped);
         }
-      });
-      stream.on('end', () => resolve(keys));
-      stream.on('error', reject);
+      };
+      const onEnd = (): void => finish();
+      const onError = (error: unknown): void => finish(error);
+      const onAbort = (): void => {
+        stream.destroy();
+        finish(options?.signal?.reason);
+      };
+      stream.on('data', onData);
+      stream.on('end', onEnd);
+      stream.on('error', onError);
+      options?.signal?.addEventListener('abort', onAbort, { once: true });
     });
   }
 }

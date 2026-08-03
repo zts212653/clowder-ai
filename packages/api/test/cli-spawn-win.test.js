@@ -126,6 +126,62 @@ test(
 );
 
 test(
+  'resolveCmdShimScript cache is scoped to PATH and APPDATA for bare commands',
+  { skip: process.platform === 'win32' && 'uses fake where shell script (Unix only)' },
+  () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'cli-spawn-win-cache-env-'));
+    const originalPath = process.env.PATH;
+    const originalAppData = process.env.APPDATA;
+    const originalLocalAppData = process.env.LOCALAPPDATA;
+    const fakeBin = join(tempRoot, 'bin');
+    const pathShimDir = join(tempRoot, 'path-prefix');
+    const fallbackAppData = join(tempRoot, 'fallback-appdata');
+    const pathAppData = join(tempRoot, 'path-appdata');
+
+    mkdirSync(fakeBin, { recursive: true });
+    mkdirSync(join(pathShimDir, 'node_modules', '@openai', 'codex', 'bin'), { recursive: true });
+    mkdirSync(join(fallbackAppData, 'npm', 'node_modules', '@openai', 'codex', 'bin'), { recursive: true });
+    mkdirSync(join(pathAppData, 'npm'), { recursive: true });
+
+    const fallbackScript = join(fallbackAppData, 'npm', 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
+    const pathCmd = join(pathShimDir, 'codex.cmd');
+    const pathScript = join(pathShimDir, 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
+    const whereScript = join(fakeBin, 'where');
+
+    writeFileSync(fallbackScript, 'console.log("fallback");\n', 'utf8');
+    writeFileSync(pathCmd, '@"%dp0\\node_modules\\@openai\\codex\\bin\\codex.js" %*\n', 'utf8');
+    writeFileSync(pathScript, 'console.log("path");\n', 'utf8');
+    writeFileSync(whereScript, `#!/bin/sh\nprintf '%s\n' '${pathCmd}'\n`, 'utf8');
+    chmodSync(whereScript, 0o755);
+
+    try {
+      process.env.PATH = '';
+      process.env.APPDATA = fallbackAppData;
+      delete process.env.LOCALAPPDATA;
+      assert.equal(resolveCmdShimScript('codex'), fallbackScript);
+
+      process.env.PATH = `${fakeBin}:${originalPath ?? ''}`;
+      process.env.APPDATA = pathAppData;
+      delete process.env.LOCALAPPDATA;
+      assert.equal(resolveCmdShimScript('codex'), pathScript);
+    } finally {
+      process.env.PATH = originalPath;
+      if (originalAppData === undefined) {
+        delete process.env.APPDATA;
+      } else {
+        process.env.APPDATA = originalAppData;
+      }
+      if (originalLocalAppData === undefined) {
+        delete process.env.LOCALAPPDATA;
+      } else {
+        process.env.LOCALAPPDATA = originalLocalAppData;
+      }
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   'resolveCmdShimScript revalidates cached shim targets after upgrades move the entrypoint',
   { skip: process.platform === 'win32' && 'uses fake where shell script (Unix only)' },
   () => {

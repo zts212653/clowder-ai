@@ -111,17 +111,19 @@ export class LibraryCatalog {
   getRoutable(
     dimension: 'library' | 'collection' | 'project' | 'global' | 'all',
     explicitCollections?: string[],
+    authorizedCollections?: string[],
   ): CollectionManifest[] {
     if (dimension === 'collection') {
       if (!explicitCollections?.length) return [];
       const resolved = [...new Set(explicitCollections)]
         .map((id) => this.get(id))
         .filter((m): m is CollectionManifest => m != null && this.isRoutable(m));
+      const authorized = new Set(authorizedCollections ?? []);
       const seen = new Set<string>();
       return resolved.filter((m) => {
         if (seen.has(m.id)) return false;
         seen.add(m.id);
-        return true;
+        return m.sensitivity === 'public' || m.sensitivity === 'internal' || authorized.has(m.id);
       });
     }
     const active = this.list().filter((m) => this.isRoutable(m));

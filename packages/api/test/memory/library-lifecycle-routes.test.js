@@ -31,7 +31,7 @@ describe('library lifecycle routes', () => {
     catalog = new LibraryCatalog();
     dataDir = mkdtempSync(join(tmpdir(), 'lib-lifecycle-'));
     app = Fastify();
-    await app.register(libraryRoutes, { catalog, stores: new Map(), dataDir });
+    await app.register(libraryRoutes, { catalog, stores: new Map(), dataDir, privateOwnerUserId: 'owner-1' });
     await app.ready();
   });
 
@@ -401,6 +401,7 @@ describe('library lifecycle routes', () => {
     const body = JSON.parse(narrowRes.body);
     assert.equal(body.direction, 'narrowing');
     assert.ok(body.reindexTriggered, 'narrowing should trigger reindex');
+    assert.equal(catalog.get('domain:narrow').ownerUserId, 'owner-1');
   });
 
   it('POST /api/library/register with managed vault creates directory', async () => {

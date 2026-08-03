@@ -144,7 +144,9 @@ export const exportRoutes: FastifyPluginAsync<ExportRoutesOptions> = async (app,
       return { error: 'Thread not found' };
     }
 
-    const messages = await messageStore.getByThread(threadId, 10000);
+    const messages = await messageStore.getByThread(threadId, 10000, undefined, {
+      includeQueuedCatMessages: true,
+    });
 
     if (format === 'txt') {
       const txt = formatThreadAsText(thread, messages);

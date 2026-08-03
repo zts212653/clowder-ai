@@ -179,7 +179,7 @@ describe('check-worktree-dirty-ledger (LL-082 hard layer)', () => {
 
     it('does not match when argv[1] is a different script (test-import context)', () => {
       const metaUrl = 'file:///home/user/cat-cafe/scripts/check-worktree-dirty-ledger.mjs';
-      const argv1 = '/home/user/cat-cafe/scripts/run-checks.mjs';
+      const argv1 = '/home/user/cat-cafe/scripts/pre-merge-check.mjs';
       assert.strictEqual(isMainEntrypoint(metaUrl, argv1), false);
     });
 

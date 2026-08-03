@@ -1,6 +1,8 @@
 ---
 domainId: eval:capability-wakeup
 displayName: Capability Wakeup Eval
+descriptionForHuman: 猫该用的能力用上没——该发图没发、该开浏览器没开
+metricGlossaryRef: eval-capability-wakeup.metrics.yaml
 systemThreadId: thread_eval_capability_wakeup
 evalCat:
   catId: opus-47
@@ -30,3 +32,8 @@ fixtures:
     path: docs/harness-feedback/fixtures/source-hygiene-memu-echo-chamber.md
     skill: source-audit
     signal: high-risk external claim without provenance
+  - id: external-pr-review-route-classifier
+    featureId: F168
+    path: docs/harness-feedback/fixtures/external-pr-review-route-classifier.md
+    skill: cross-cat-handoff
+    signal: exact-head-external-pr-review-or-tracking-entry

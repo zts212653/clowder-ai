@@ -14,7 +14,7 @@ created: 2026-03-07
 
 ## Why
 
-operator和猫猫们在 Cat Café 里已经积累了大量互动数据——@ 提及、消息、review、游戏战绩。但这些数据从来没有被可视化过。一个排行榜/统计面板能让operator看到"谁是最爱猫猫"、"谁是深夜劳模"，也让猫猫之间有良性竞争的趣味性。
+operator和猫猫们在 Clowder AI 里已经积累了大量互动数据——@ 提及、消息、review、游戏战绩。但这些数据从来没有被可视化过。一个排行榜/统计面板能让operator看到"谁是最爱猫猫"、"谁是深夜劳模"，也让猫猫之间有良性竞争的趣味性。
 
 operator experience：
 > "笑我们能统计出来operatorat 过多少猫猫都分别几次吗？可以统计出operator最爱的大猫猫 leaderboard 各种排行榜哈哈哈 是一个有趣的功能"
@@ -22,21 +22,21 @@ operator experience：
 
 ## What
 
-Cat Café Hub 新增「排行榜」Tab，展示多维度猫猫统计和排名。
+Clowder AI Hub 新增「排行榜」Tab，展示多维度猫猫统计和排名。
 
 ### 分阶段交付状态
 
 #### Phase A（已完成）
 - 排行榜基础盘面：@ 互动统计 4 项 + 工作统计 3 项
 - 时间范围筛选：全部 / 7 天 / 30 天
-- 前端入口：**当前实现挂在 `Cat Café Hub` modal 的「排行榜」tab**
+- 前端入口：**当前实现挂在 `Clowder AI Hub` modal 的「排行榜」tab**
 - 后端基础：`GET /api/leaderboard/stats`
 
 #### Phase B ✅（PR #377）
 - "笨蛋猫猫"排行榜 + 关键词情绪分析（silly-stats.ts）
 - 游戏战绩面板（game-store.ts + GameArena UI）
 - 移动端响应式布局
-- 排行榜入口在 `Cat Café Hub` modal tab（runtime 更新由operator控制）
+- 排行榜入口在 `Clowder AI Hub` modal tab（runtime 更新由operator控制）
 
 #### Phase C ✅（PR #377）
 - 成就徽章系统（7 operator + 6 daily，achievement-store.ts + AchievementWall UI）
@@ -80,7 +80,7 @@ Cat Café Hub 新增「排行榜」Tab，展示多维度猫猫统计和排名。
 
 **日常成就**：
 - **夜猫子** — 凌晨 2:00 后还在 @ 猫猫
-- **连续签到** — 连续 N 天使用 Cat Café
+- **连续签到** — 连续 N 天使用 Clowder AI
 - **全猫集邮** — 和每只猫都有过互动
 - **Bug 猎人** — 发现并修复了 N 个 bug
 
@@ -108,7 +108,7 @@ Cat Café Hub 新增「排行榜」Tab，展示多维度猫猫统计和排名。
 ## Acceptance Criteria — Phase A（已完成）
 
 - [x] AC-A1: 本文档在 Phase A 收口后维持模板核心结构（Status/Why/What/Dependencies/Risk/Timeline）。
-- [x] AC-A2: `Cat Café Hub` 新增「排行榜」Tab（当前实现入口）
+- [x] AC-A2: `Clowder AI Hub` 新增「排行榜」Tab（当前实现入口）
 - [x] AC-A3: @ 互动统计面板（4 个维度：最爱猫猫 / 深夜劳模 / 连续宠幸 / 话唠猫猫）
 - [x] AC-A4: 工作统计面板（3 个维度：commit / review / bug fix）
 - [x] AC-A5: 时间范围筛选（全部 / 近 7 天 / 近 30 天）
@@ -117,7 +117,7 @@ Cat Café Hub 新增「排行榜」Tab，展示多维度猫猫统计和排名。
 
 - [x] AC-B1: "笨蛋猫猫"排行榜（含情绪分析）
 - [x] AC-B2: 游戏战绩面板（至少猫猫杀 + 谁是卧底）
-- [x] AC-B3: 排行榜入口在 Cat Café Hub modal tab（代码层面已确保可见；runtime 同步由operator操作，不属于 feat close 门禁）
+- [x] AC-B3: 排行榜入口在 Clowder AI Hub modal tab（代码层面已确保可见；runtime 同步由operator操作，不属于 feat close 门禁）
 - [x] AC-B4: 移动端适配
 
 ## Acceptance Criteria — Phase C ✅
@@ -143,7 +143,7 @@ Cat Café Hub 新增「排行榜」Tab，展示多维度猫猫统计和排名。
 
 ## Key Decisions
 
-1. **整体视觉风格：极简活力猫咖 (Minimal Vibrant Cat Café)** — 采用 `mobile-03-minimalvibrant_light` 风格指南，强调 24px 超大圆角（Pillowy Corners）和鲜艳的配色（紫色/青色/粉色）。
+1. **整体视觉风格：极简活力猫咖 (Minimal Vibrant Clowder AI)** — 采用 `mobile-03-minimalvibrant_light` 风格指南，强调 24px 超大圆角（Pillowy Corners）和鲜艳的配色（紫色/青色/粉色）。
 2. **布局架构：Bento Grid (便当盒布局)** — 信息展示采用不同尺寸的色块格子，不带边框，通过背景色区分功能区。
 3. **成就系统表现：Sticker Wall (贴纸墙)** — 成就徽章采用拟物化的“冰箱贴”设计，带有手绘感和软阴影。
 4. **"笨蛋猫猫"调性：顽皮而非冒犯** — 视觉上使用粉色调和滑稽图标（如香蕉皮、躲藏动画），将“被骂”转化为萌感。

@@ -52,6 +52,20 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
     await cleanupPrefixedRedisKeys(redis, ['invoc:*', 'idemp:*']);
   });
 
+  it('rejects an unclassified action-lease carrier before writing Redis state', async () => {
+    await assert.rejects(
+      () =>
+        store.create({
+          threadId: 'thread-unclassified',
+          userId: 'user-1',
+          targetCats: ['opus'],
+          intent: 'execute',
+          idempotencyKey: 'missing-carrier',
+        }),
+      /explicit action lease carrier classification/,
+    );
+  });
+
   it('create() returns created outcome', async () => {
     const result = await store.create({
       threadId: 'thread-1',
@@ -59,6 +73,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'redis-key-1',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     assert.equal(result.outcome, 'created');
@@ -72,6 +87,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus', 'codex'],
       intent: 'ideate',
       idempotencyKey: 'redis-key-2',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     const record = await store.get(invocationId);
@@ -86,6 +102,60 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
     assert.equal(record.error, undefined);
   });
 
+  it('create() persists ordinary and action-successor carrier classifications', async () => {
+    const { invocationId: ordinaryInvocationId } = await store.create({
+      threadId: 'thread-review',
+      userId: 'user-review',
+      targetCats: ['codex-sol'],
+      intent: 'execute',
+      idempotencyKey: 'redis-review-no-action-lease',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    const { invocationId } = await store.create({
+      threadId: 'thread-review',
+      userId: 'user-review',
+      targetCats: ['codex-sol'],
+      intent: 'execute',
+      idempotencyKey: 'redis-review-action-lease',
+      actionLeaseCarrier: {
+        kind: 'action_successor',
+        leaseId: 'lease-review-1',
+        generation: 2,
+      },
+    });
+
+    assert.deepEqual((await store.get(ordinaryInvocationId)).actionLeaseCarrier, { kind: 'none' });
+    assert.deepEqual((await store.get(invocationId)).actionLeaseCarrier, {
+      kind: 'action_successor',
+      leaseId: 'lease-review-1',
+      generation: 2,
+    });
+  });
+
+  it('hydrates the pre-classifier actionLeaseRef field as an action-successor carrier', async () => {
+    const now = String(Date.now());
+    await redis.hset('invoc:legacy-action-carrier', {
+      id: 'legacy-action-carrier',
+      threadId: 'thread-review',
+      userId: 'user-review',
+      targetCats: JSON.stringify(['codex-sol']),
+      intent: 'execute',
+      idempotencyKey: 'legacy-action-carrier',
+      status: 'running',
+      userMessageId: '',
+      error: '',
+      actionLeaseRef: JSON.stringify({ leaseId: 'lease-legacy', generation: 4 }),
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    assert.deepEqual((await store.get('legacy-action-carrier')).actionLeaseCarrier, {
+      kind: 'action_successor',
+      leaseId: 'lease-legacy',
+      generation: 4,
+    });
+  });
+
   it('Lua atomic dedup returns duplicate on same key', async () => {
     const first = await store.create({
       threadId: 'thread-1',
@@ -93,6 +163,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'dup-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
     assert.equal(first.outcome, 'created');
 
@@ -102,6 +173,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'dup-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
     assert.equal(second.outcome, 'duplicate');
     assert.equal(second.invocationId, first.invocationId);
@@ -114,6 +186,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'same-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
     const second = await store.create({
       threadId: 'thread-2',
@@ -121,6 +194,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'same-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     assert.equal(first.outcome, 'created');
@@ -140,6 +214,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'upd-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     const updated = await store.update(invocationId, { status: 'running' });
@@ -153,6 +228,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'backfill-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     const before = await store.get(invocationId);
@@ -163,6 +239,79 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
     assert.equal(after.userMessageId, 'msg-456');
   });
 
+  it('F254 Phase E persists typed closure custody fields', async () => {
+    const { invocationId } = await store.create({
+      threadId: 'thread-f254',
+      userId: 'user-f254',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'f254-custody',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await store.update(invocationId, {
+      freshnessClosureId: 'closure-1',
+      freshnessInputFrontierMessageId: 'msg-frontier',
+      freshnessClosureStatus: 'running',
+    });
+
+    const record = await store.get(invocationId);
+    assert.equal(record.freshnessClosureId, 'closure-1');
+    assert.equal(record.freshnessInputFrontierMessageId, 'msg-frontier');
+    assert.equal(record.freshnessClosureStatus, 'running');
+  });
+
+  it('persists and hydrates a durable connector execution-start receipt', async () => {
+    const { invocationId } = await store.create({
+      threadId: 'thread-connector-start',
+      userId: 'user-1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'connector-start-receipt',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await store.update(invocationId, { status: 'running', expectedStatus: 'queued' });
+
+    const updated = await store.update(invocationId, {
+      executionStartedAt: 1_700_000_000_000,
+      expectedStatus: 'running',
+    });
+    const hydrated = await store.get(invocationId);
+
+    assert.equal(updated.executionStartedAt, 1_700_000_000_000);
+    assert.equal(hydrated.executionStartedAt, 1_700_000_000_000);
+  });
+
+  it('atomically clears the previous execution-start receipt when a failed record starts a new attempt', async () => {
+    const { invocationId } = await store.create({
+      threadId: 'thread-connector-retry',
+      userId: 'user-1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'connector-retry-receipt',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await store.update(invocationId, { status: 'running', expectedStatus: 'queued' });
+    await store.update(invocationId, {
+      executionStartedAt: 1_700_000_000_000,
+      expectedStatus: 'running',
+    });
+    await store.update(invocationId, {
+      status: 'failed',
+      error: 'process_restart',
+      expectedStatus: 'running',
+    });
+
+    const retried = await store.update(invocationId, {
+      status: 'running',
+      error: '',
+      expectedStatus: 'failed',
+    });
+    const hydrated = await store.get(invocationId);
+
+    assert.equal(retried.executionStartedAt, undefined);
+    assert.equal(hydrated.executionStartedAt, undefined);
+  });
+
   it('update() sets error on failed status', async () => {
     const { invocationId } = await store.create({
       threadId: 'thread-1',
@@ -170,6 +319,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'err-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     await store.update(invocationId, { status: 'running' });
@@ -191,6 +341,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'lookup-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     const found = await store.getByIdempotencyKey('thread-1', 'user-1', 'lookup-key');
@@ -205,6 +356,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'cas-ok-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     const result = await store.update(invocationId, {
@@ -222,6 +374,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'cas-fail-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     const result = await store.update(invocationId, {
@@ -242,6 +395,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'usage-absent-guard-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
     await store.update(invocationId, { status: 'running' });
     await store.update(invocationId, {
@@ -263,6 +417,45 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
     assert.equal(record.usageRecordedAt, 1_700_000_000_000);
   });
 
+  it('persists exact successful targets for a shared invocation', async () => {
+    const { invocationId } = await store.create({
+      threadId: 'thread-f254-shared',
+      userId: 'user-f254',
+      targetCats: ['opus', 'codex'],
+      intent: 'execute',
+      idempotencyKey: 'f254-shared-success',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await store.update(invocationId, { status: 'running' });
+    await assert.rejects(
+      store.update(invocationId, {
+        status: 'succeeded',
+        successfulCatIds: ['gemini'],
+      }),
+      /successfulCatIds.*targetCats/i,
+      'invalid input must be distinguishable from a CAS rejection',
+    );
+    assert.equal((await store.get(invocationId)).status, 'running');
+    await assert.rejects(
+      store.update(invocationId, { status: 'succeeded', successfulCatIds: [] }),
+      /successfulCatIds.*non-empty/i,
+    );
+
+    await store.update(invocationId, {
+      status: 'succeeded',
+      successfulCatIds: ['opus'],
+    });
+
+    const record = await store.get(invocationId);
+    assert.deepEqual(record.successfulCatIds, ['opus']);
+
+    await assert.rejects(
+      store.update(invocationId, { successfulCatIds: ['codex'] }),
+      /successfulCatIds.*succeeded/i,
+      'the terminal witness is immutable outside the succeeded transition',
+    );
+  });
+
   it('concurrent CAS update: only one wins (Lua atomic)', async () => {
     const { invocationId } = await store.create({
       threadId: 'thread-1',
@@ -270,6 +463,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'cas-race-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     // Transition through proper lifecycle: queued → running → failed (retry starts from failed)
@@ -302,6 +496,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'guard-no-cas',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     // queued → running → succeeded (terminal)
@@ -326,6 +521,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'self-transition',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     await store.update(invocationId, { status: 'running' });
@@ -350,6 +546,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'race-no-cas',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     // Get to running state
@@ -388,6 +585,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'scoped-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     const r1 = await store.getByIdempotencyKey('thread-2', 'user-1', 'scoped-key');
@@ -405,6 +603,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'list-r1',
+      actionLeaseCarrier: { kind: 'none' },
     });
     const r2 = await store.create({
       threadId: 'thread-A',
@@ -412,6 +611,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'list-r2',
+      actionLeaseCarrier: { kind: 'none' },
     });
     const r3 = await store.create({
       threadId: 'thread-A',
@@ -419,6 +619,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'list-r3',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     await store.update(r1.invocationId, { status: 'running' });
@@ -445,6 +646,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'stale-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     // Inject stale member directly into the index (simulate update→Set race or external corruption)
@@ -617,6 +819,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'race-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
     await store.update(r.invocationId, { status: 'running' });
 
@@ -673,6 +876,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'reassign-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
     await store.update(r.invocationId, { status: 'running' });
 
@@ -714,6 +918,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'atomic-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
     await store.update(r.invocationId, { status: 'running' });
 
@@ -797,6 +1002,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'drift-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
     await store.update(r.invocationId, { status: 'running' });
 

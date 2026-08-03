@@ -3,9 +3,158 @@
  */
 
 import assert from 'node:assert/strict';
-import { describe, test } from 'node:test';
+import { describe, mock, test } from 'node:test';
 
 describe('F233 PR3: BallCustodyTaskStore', () => {
+  test('completes the exact active task lease and recovers a persisted done task idempotently', async () => {
+    const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
+    const { withBallCustodyTaskEvents } = await import('../dist/domains/ball-custody/BallCustodyTaskStore.js');
+    const { TaskActionSuccessorLifecycle } = await import(
+      '../dist/domains/ball-custody/TaskActionSuccessorLifecycle.js'
+    );
+    const rawStore = new TaskStore();
+    const task = await rawStore.create({
+      threadId: 'thread-task',
+      title: 'Implement the fix',
+      why: 'task-backed executable custody',
+      ownerCatId: 'opus',
+      userId: 'user-1',
+      createdBy: 'codex-sol',
+    });
+    const lease = {
+      leaseId: 'lease-task-1',
+      generation: 1,
+      status: 'active',
+      tenantScope: 'user-1',
+      subjectRef: `subject:task:${task.id}`,
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
+      holderCatIds: ['opus'],
+      holderThreadId: 'thread-task',
+      terminalPredicate: { kind: 'task_done' },
+    };
+    const leaseStore = {
+      getByIdentity: mock.fn(async () => lease),
+      listActiveTaskLeases: mock.fn(async () => [lease]),
+    };
+    const completionService = {
+      complete: mock.fn(async () => ({ outcome: 'committed', leaseId: lease.leaseId, generation: 1 })),
+    };
+    const lifecycle = new TaskActionSuccessorLifecycle({ leaseStore, completionService });
+    const store = withBallCustodyTaskEvents(rawStore, { async record() {} }, undefined, lifecycle);
+
+    const done = await store.update(task.id, { status: 'done' });
+    assert.equal(done.status, 'done');
+    assert.deepEqual(completionService.complete.mock.calls[0].arguments[0], {
+      leaseId: 'lease-task-1',
+      generation: 1,
+      catId: 'opus',
+      evidenceRefs: [`task:${task.id}:done:${done.updatedAt}`],
+      now: done.updatedAt,
+    });
+
+    const stats = await lifecycle.reconcileDoneTasks(rawStore);
+    assert.deepEqual(stats, { scanned: 1, attempted: 1, committed: 1, skipped: 0, errored: 0 });
+    assert.equal(
+      completionService.complete.mock.calls.length,
+      2,
+      'recovery retries through the idempotent completion service',
+    );
+  });
+
+  test('does not let task owner, thread, or deletion orphan an active task lease', async () => {
+    const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
+    const { withBallCustodyTaskEvents } = await import('../dist/domains/ball-custody/BallCustodyTaskStore.js');
+    const { TaskActionSuccessorLifecycle } = await import(
+      '../dist/domains/ball-custody/TaskActionSuccessorLifecycle.js'
+    );
+    const rawStore = new TaskStore();
+    const task = await rawStore.create({
+      threadId: 'thread-task',
+      title: 'Implement the fix',
+      why: 'task-backed executable custody',
+      ownerCatId: 'opus',
+      userId: 'user-1',
+      createdBy: 'codex-sol',
+    });
+    const leaseStore = {
+      async getByIdentity() {
+        return { status: 'active', leaseId: 'lease-task-1' };
+      },
+      async listActiveTaskLeases() {
+        return [];
+      },
+    };
+    const lifecycle = new TaskActionSuccessorLifecycle({
+      leaseStore,
+      completionService: {
+        async complete() {
+          throw new Error('not reached');
+        },
+      },
+    });
+    const store = withBallCustodyTaskEvents(rawStore, { async record() {} }, undefined, lifecycle);
+
+    await assert.rejects(store.update(task.id, { ownerCatId: 'codex-sol' }), /active task action lease/);
+    await assert.rejects(store.update(task.id, { threadId: 'thread-other' }), /active task action lease/);
+    await assert.rejects(store.delete(task.id), /active task action lease/);
+    assert.equal((await rawStore.get(task.id)).ownerCatId, 'opus');
+    assert.equal((await rawStore.get(task.id)).threadId, 'thread-task');
+  });
+
+  test('retries lease completion when the durable task was already written done', async () => {
+    const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
+    const { withBallCustodyTaskEvents } = await import('../dist/domains/ball-custody/BallCustodyTaskStore.js');
+    const { TaskActionSuccessorLifecycle } = await import(
+      '../dist/domains/ball-custody/TaskActionSuccessorLifecycle.js'
+    );
+    const rawStore = new TaskStore();
+    const task = await rawStore.create({
+      threadId: 'thread-task',
+      title: 'Retry completion',
+      why: 'cover the durable task write before completion CAS window',
+      ownerCatId: 'opus',
+      userId: 'user-1',
+      createdBy: 'codex-sol',
+    });
+    const lease = {
+      leaseId: 'lease-task-retry',
+      generation: 1,
+      status: 'active',
+      subjectRef: `subject:task:${task.id}`,
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
+      holderCatIds: ['opus'],
+      holderThreadId: 'thread-task',
+      terminalPredicate: { kind: 'task_done' },
+    };
+    let completionAttempts = 0;
+    const lifecycle = new TaskActionSuccessorLifecycle({
+      leaseStore: {
+        async getByIdentity() {
+          return lease;
+        },
+        async listActiveTaskLeases() {
+          return [lease];
+        },
+      },
+      completionService: {
+        async complete() {
+          completionAttempts += 1;
+          return completionAttempts === 1
+            ? { outcome: 'insufficient', reason: 'simulated crash-window failure' }
+            : { outcome: 'committed', leaseId: lease.leaseId, generation: 1 };
+        },
+      },
+    });
+    const store = withBallCustodyTaskEvents(rawStore, { async record() {} }, undefined, lifecycle);
+
+    await assert.rejects(store.update(task.id, { status: 'done' }), /simulated crash-window failure/);
+    assert.equal((await rawStore.get(task.id)).status, 'done', 'task write is already durable');
+    assert.equal((await store.update(task.id, { status: 'done' })).status, 'done');
+    assert.equal(completionAttempts, 2);
+  });
+
   test('records task.blocked, task.unblocked, and task.done from status transitions', async () => {
     const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
     const { withBallCustodyTaskEvents } = await import('../dist/domains/ball-custody/BallCustodyTaskStore.js');

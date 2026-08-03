@@ -10,7 +10,7 @@ You run scenarios without the skill (RED - watch agent fail), write skill addres
 
 **Core principle:** If you didn't watch an agent fail without the skill, you don't know if the skill prevents the right failures.
 
-**REQUIRED BACKGROUND:** Use Cat Café's `tdd` discipline as the RED-GREEN-REFACTOR baseline. This reference applies that cycle to process documentation and does not depend on Superpowers.
+**REQUIRED BACKGROUND:** Use Clowder AI's `tdd` discipline as the RED-GREEN-REFACTOR baseline. This reference applies that cycle to process documentation and does not depend on Superpowers.
 
 **Complete worked example:** See examples/CLAUDE_MD_TESTING.md for a full test campaign testing CLAUDE.md documentation variants.
 
@@ -21,7 +21,7 @@ Test skills that:
 - Have compliance costs (time, effort, rework)
 - Could be rationalized away ("just this once")
 - Contradict immediate goals (speed over quality)
-- Encode Cat Café historical traps, evidence standards, or behavior brakes
+- Encode Clowder AI historical traps, evidence standards, or behavior brakes
 - Make a hidden tool/truth source discoverable at the right time
 
 Don't test:

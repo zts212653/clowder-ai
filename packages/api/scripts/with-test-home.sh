@@ -30,6 +30,12 @@ unset CAT_CAFE_RUNTIME_ROOT
 unset CAT_CAFE_MCP_SERVER_PATH
 unset CAT_CAFE_WORKSPACE_ROOT
 
+# Runtime shells may select persistent transports for live agent invocations.
+# Tests rely on each provider's default carrier so spawn seams remain the only
+# process boundary; inheriting these overrides could launch a real provider CLI.
+unset CAT_CAFE_CODEX_CARRIER
+unset CAT_CAFE_CLAUDE_CARRIER
+
 # API_SERVER_HOST is a runtime binding choice. LAN/dev invocations commonly set
 # it to 0.0.0.0, but capability write tests expect localhost-only defaults unless
 # an individual test explicitly sets the host under test.

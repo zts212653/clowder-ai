@@ -108,7 +108,13 @@ CLI_ANTHROPIC_PROXY_PORT_OVERRIDE="${ANTHROPIC_PROXY_PORT-}"
 CLI_WHISPER_PORT_OVERRIDE="${WHISPER_PORT-}"
 CLI_TTS_PORT_OVERRIDE="${TTS_PORT-}"
 CLI_LLM_POSTPROCESS_PORT_OVERRIDE="${LLM_POSTPROCESS_PORT-}"
+CLI_WORKTREE_PORT_OFFSET_OVERRIDE="${WORKTREE_PORT_OFFSET-}"
+CLI_CAT_CAFE_RESPECT_DOTENV_PORTS_OVERRIDE="${CAT_CAFE_RESPECT_DOTENV_PORTS-}"
 CLI_CAT_CAFE_PROVISION_GLOBAL_SIDECAR_OVERRIDE="${CAT_CAFE_PROVISION_GLOBAL_SIDECAR-}"
+CLI_CONNECTOR_GATEWAY_AUTOSTART_OVERRIDE="${CONNECTOR_GATEWAY_AUTOSTART-}"
+CLI_CAT_CAFE_RUNTIME_ROOT_OVERRIDE="${CAT_CAFE_RUNTIME_ROOT-}"
+CLI_CAT_CAFE_WORKSPACE_ROOT_OVERRIDE="${CAT_CAFE_WORKSPACE_ROOT-}"
+CLI_CAT_CAFE_MCP_SERVER_PATH_OVERRIDE="${CAT_CAFE_MCP_SERVER_PATH-}"
 
 clear_inherited_profile_env() {
     [ "${CAT_CAFE_STRICT_PROFILE_DEFAULTS:-0}" = "1" ] || return 0
@@ -135,7 +141,7 @@ if [ -f .env.local ]; then
     set +a
 fi
 
-PREFER_DOTENV_PORTS="${CAT_CAFE_RESPECT_DOTENV_PORTS:-0}"
+PREFER_DOTENV_PORTS="${CLI_CAT_CAFE_RESPECT_DOTENV_PORTS_OVERRIDE:-${CAT_CAFE_RESPECT_DOTENV_PORTS:-0}}"
 
 restore_cli_override() {
     local name="$1"
@@ -156,12 +162,28 @@ if [ "$PREFER_DOTENV_PORTS" != "1" ]; then
     restore_cli_override "WHISPER_PORT" "$CLI_WHISPER_PORT_OVERRIDE"
     restore_cli_override "TTS_PORT" "$CLI_TTS_PORT_OVERRIDE"
     restore_cli_override "LLM_POSTPROCESS_PORT" "$CLI_LLM_POSTPROCESS_PORT_OVERRIDE"
+    restore_cli_override "WORKTREE_PORT_OFFSET" "$CLI_WORKTREE_PORT_OFFSET_OVERRIDE"
 fi
 
 if [ -n "$CLI_CAT_CAFE_PROVISION_GLOBAL_SIDECAR_OVERRIDE" ]; then
     export CAT_CAFE_PROVISION_GLOBAL_SIDECAR="$CLI_CAT_CAFE_PROVISION_GLOBAL_SIDECAR_OVERRIDE"
 else
     unset CAT_CAFE_PROVISION_GLOBAL_SIDECAR
+fi
+
+# Runtime binary/workspace ownership belongs to the launching entrypoint. A
+# checkout's dotenv may provide defaults, but must not redirect an explicit
+# alpha/runtime wrapper back into another checkout after startup begins.
+restore_cli_override "CAT_CAFE_RUNTIME_ROOT" "$CLI_CAT_CAFE_RUNTIME_ROOT_OVERRIDE"
+restore_cli_override "CAT_CAFE_WORKSPACE_ROOT" "$CLI_CAT_CAFE_WORKSPACE_ROOT_OVERRIDE"
+restore_cli_override "CAT_CAFE_MCP_SERVER_PATH" "$CLI_CAT_CAFE_MCP_SERVER_PATH_OVERRIDE"
+
+# Connector autostart is runtime lifecycle authority, not dotenv configuration.
+# Only an entrypoint's inherited environment may grant or deny it.
+if [ -n "$CLI_CONNECTOR_GATEWAY_AUTOSTART_OVERRIDE" ]; then
+    export CONNECTOR_GATEWAY_AUTOSTART="$CLI_CONNECTOR_GATEWAY_AUTOSTART_OVERRIDE"
+else
+    unset CONNECTOR_GATEWAY_AUTOSTART
 fi
 
 # === F182 大赛 / 多 worktree 并发：WORKTREE_PORT_OFFSET 派生 + 主动覆盖 ===
@@ -464,8 +486,13 @@ REDIS_DBFILE=${REDIS_DBFILE:-dump.rdb}
 REDIS_PIDFILE="${REDIS_DATA_DIR}/redis-${REDIS_PORT}.pid"
 REDIS_LOGFILE="${REDIS_DATA_DIR}/redis-${REDIS_PORT}.log"
 STARTED_REDIS=false
+F247_CLOUD_OWNER_FILE=""
 CLEANUP_RUNNING=false
 MANAGED_PIDS=()
+# The API shutdown path closes Fastify hooks, including active audio capture
+# finalization. One second was too short once Redis/telemetry cleanup preceded
+# app.close(), so managed children get a bounded graceful window before KILL.
+MANAGED_SHUTDOWN_GRACE_SECONDS="${MANAGED_SHUTDOWN_GRACE_SECONDS:-8}"
 DAEMON_STATE_DIR="${HOME}/.cat-cafe"
 DAEMON_PID_FILE="${DAEMON_STATE_DIR}/daemon.pid"
 DAEMON_LOG_PATH_FILE="${DAEMON_STATE_DIR}/daemon.log-path"
@@ -670,10 +697,16 @@ terminate_pid_tree_with_signal() {
 
 terminate_managed_pids() {
     local pid
+    local signaled=false
     for pid in "${MANAGED_PIDS[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            signaled=true
+        fi
         terminate_pid_tree_with_signal TERM "$pid"
     done
-    sleep 1
+    if [ "$signaled" = true ]; then
+        sleep "$MANAGED_SHUTDOWN_GRACE_SECONDS"
+    fi
     for pid in "${MANAGED_PIDS[@]}"; do
         if kill -0 "$pid" 2>/dev/null; then
             terminate_pid_tree_with_signal KILL "$pid"
@@ -1114,6 +1147,33 @@ configure_mcp_server_path() {
     fi
 }
 
+maybe_start_f247_cloud_services() {
+    if [ "${CAT_CAFE_F247_CLOUD_AUTOSTART:-1}" = "0" ]; then
+        echo -e "${YELLOW}  ⚠ F247 cloud supporting services auto-start disabled (CAT_CAFE_F247_CLOUD_AUTOSTART=0)${NC}"
+        return 0
+    fi
+
+    local helper="$PROJECT_DIR/scripts/f247-cloud-services.mjs"
+    if [ ! -f "$helper" ]; then
+        return 0
+    fi
+
+    echo ""
+    echo -e "${CYAN}检查 F247 云端猫 supporting services...${NC}"
+    F247_CLOUD_OWNER_FILE="$(mktemp "${TMPDIR:-/tmp}/cat-cafe-f247-owner.XXXXXX")"
+    rm -f "$F247_CLOUD_OWNER_FILE"
+    if ! node "$helper" start --optional --owner-file="$F247_CLOUD_OWNER_FILE"; then
+        rm -f "$F247_CLOUD_OWNER_FILE"
+        F247_CLOUD_OWNER_FILE=""
+        return 1
+    fi
+
+    if [ ! -s "$F247_CLOUD_OWNER_FILE" ]; then
+        rm -f "$F247_CLOUD_OWNER_FILE"
+        F247_CLOUD_OWNER_FILE=""
+    fi
+}
+
 # 检查/启动 Redis
 # USE_REDIS=true (默认): 尝试启动 Redis, 失败则拒绝启动
 # USE_REDIS=false (--memory): 跳过 Redis, 强制内存存储
@@ -1185,6 +1245,15 @@ cleanup() {
     done <<< "$(jobs -p 2>/dev/null || true)"
 
     terminate_managed_pids
+
+    # 只关闭本 launcher session 实际启动且身份仍匹配的 F247 supporting services。
+    # 全局 cloud:stop 是显式运维动作，不能由任意 start-dev cleanup 代行。
+    local cloud_helper="$PROJECT_DIR/scripts/f247-cloud-services.mjs"
+    if [ -n "$F247_CLOUD_OWNER_FILE" ] && [ -f "$cloud_helper" ]; then
+        node "$cloud_helper" stop-owned --owner-file="$F247_CLOUD_OWNER_FILE" 2>/dev/null || true
+    fi
+    [ -n "$F247_CLOUD_OWNER_FILE" ] && rm -f "$F247_CLOUD_OWNER_FILE"
+    F247_CLOUD_OWNER_FILE=""
 
     # 关闭我们启动的专属 Redis (不影响其他 Redis 实例)
     if [ "$USE_REDIS" = true ] && [ "$STARTED_REDIS" = true ] && redis_ping; then
@@ -1314,6 +1383,8 @@ main() {
     fi
 
     # 4. 检查外部依赖
+    maybe_start_f247_cloud_services
+
     echo ""
     echo -e "${CYAN}检查依赖...${NC}"
     setup_storage
@@ -1366,7 +1437,10 @@ main() {
     echo "  启动 API Server (端口 $API_PORT)..."
     background_eval_with_null_stdin "$API_LAUNCH_CMD"
     API_PID=$!
-    wait_for_port_or_exit "$API_PORT" "API Server" "$API_PID" "${API_WAIT_TIMEOUT:-60}" || exit 1
+    # 默认 120s（原 60s）：随 memory 语料/Redis 数据集增长，API 冷启动要建 evidence/embedding
+    # 索引，实测已达 ~73s（Redis 653MB/17.6万 key），60s 窗口会误判超时把整个 runtime 拆掉。
+    # 这是止血；治本（boot embedding 异步化 + dev Redis 瘦身）另开 investigation。
+    wait_for_port_or_exit "$API_PORT" "API Server" "$API_PID" "${API_WAIT_TIMEOUT:-120}" || exit 1
 
     # Frontend
     if [ "$PROD_WEB" = true ]; then

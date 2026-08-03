@@ -1,23 +1,55 @@
 'use client';
 
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { type ToastItem, useToastStore } from '@/stores/toastStore';
+import { LongFormReader } from './content-overflow';
 
 const DISMISS_DELAY = 300; // animation duration
 
-function ToastCard({ toast }: { toast: ToastItem }) {
-  const { removeToast, markExiting } = useToastStore();
+interface ToastCardProps {
+  toast: ToastItem;
+  onDismiss?: () => void;
+  stackPosition?: number;
+  stackSize?: number;
+}
+
+export function ToastCard({ toast, onDismiss, stackPosition, stackSize }: ToastCardProps) {
+  const { removeToast, markExiting, disableAutoDismiss } = useToastStore();
+  const [autoDismissDisabled, setAutoDismissDisabled] = useState(Boolean(toast.manualDismissOnly));
+  const removalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stackContext =
+    stackPosition && stackSize && stackSize > 1 ? `，第 ${stackPosition} 条，共 ${stackSize} 条` : '';
+
+  const cancelPendingRemoval = useCallback(() => {
+    if (removalTimerRef.current === null) return;
+    clearTimeout(removalTimerRef.current);
+    removalTimerRef.current = null;
+  }, []);
 
   const dismiss = useCallback(() => {
+    if (onDismiss) {
+      onDismiss();
+      return;
+    }
+    cancelPendingRemoval();
     markExiting(toast.id);
-    setTimeout(() => removeToast(toast.id), DISMISS_DELAY);
-  }, [toast.id, markExiting, removeToast]);
+    removalTimerRef.current = setTimeout(() => {
+      removalTimerRef.current = null;
+      removeToast(toast.id);
+    }, DISMISS_DELAY);
+  }, [cancelPendingRemoval, toast.id, markExiting, onDismiss, removeToast]);
+
+  useEffect(() => {
+    if (toast.manualDismissOnly) setAutoDismissDisabled(true);
+  }, [toast.manualDismissOnly]);
+
+  useEffect(() => cancelPendingRemoval, [cancelPendingRemoval]);
 
   // Use remaining lifetime so toasts that were hidden (thread-scoped, other
   // thread active) don't restart their full duration when they become visible.
   useEffect(() => {
-    if (toast.duration <= 0) return;
+    if (toast.duration <= 0 || autoDismissDisabled) return;
     const remaining = toast.duration - (Date.now() - toast.createdAt);
     if (remaining <= 0) {
       dismiss();
@@ -25,7 +57,17 @@ function ToastCard({ toast }: { toast: ToastItem }) {
     }
     const timer = setTimeout(dismiss, remaining);
     return () => clearTimeout(timer);
-  }, [toast.duration, toast.createdAt, dismiss]);
+  }, [toast.duration, toast.createdAt, dismiss, autoDismissDisabled]);
+
+  const handleReaderOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open) return;
+      cancelPendingRemoval();
+      setAutoDismissDisabled(true);
+      disableAutoDismiss(toast.id);
+    },
+    [cancelPendingRemoval, disableAutoDismiss, toast.id],
+  );
 
   const borderColor =
     toast.type === 'error'
@@ -45,7 +87,7 @@ function ToastCard({ toast }: { toast: ToastItem }) {
     <div
       className={`
         bg-cafe-surface rounded-lg shadow-lg border border-cafe-subtle border-l-4 ${borderColor}
-        px-4 py-3 max-w-xs pointer-events-auto
+        px-3 py-2.5 max-h-[70vh] max-w-xs overflow-y-auto pointer-events-auto
         ${toast.exiting ? 'animate-toast-out' : 'animate-toast-in'}
       `}
       role="alert"
@@ -54,17 +96,28 @@ function ToastCard({ toast }: { toast: ToastItem }) {
         <span className={`text-sm flex-shrink-0 mt-0.5 ${icon}`}>
           {toast.type === 'error' ? 'ᓚᘏᗢ' : toast.type === 'success' ? 'ᓚᘏᗢ' : 'ᓚᘏᗢ'}
         </span>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-cafe truncate">{toast.title}</p>
-          <p className="text-xs text-cafe-secondary mt-0.5 line-clamp-2">{toast.message}</p>
+        <div data-testid="toast-content" className="min-w-0 flex-1">
+          <p className="break-words text-sm font-medium leading-5 text-cafe">{toast.title}</p>
+          <LongFormReader
+            title={toast.title}
+            summary={toast.message}
+            accessibleSummary="通知包含较长内容，完整内容请使用查看全文按钮。"
+            content={toast.message}
+            density="compact"
+            className="mt-0.5"
+            summaryClassName="whitespace-pre-wrap break-words text-xs leading-5 text-cafe-secondary"
+            triggerAriaLabel={`查看“${toast.title}”通知全文${stackContext}`}
+            onOpenChange={handleReaderOpenChange}
+          />
         </div>
         <button
+          type="button"
           onClick={dismiss}
           className="text-cafe-muted hover:text-cafe-secondary flex-shrink-0 p-0.5"
           title="关闭"
-          aria-label="关闭"
+          aria-label={`关闭“${toast.title}”通知${stackContext}`}
         >
-          <svg className="w-3.5 h-3.5" viewBox="0 0 14 14" fill="currentColor">
+          <svg aria-hidden="true" className="w-3.5 h-3.5" viewBox="0 0 14 14" fill="currentColor">
             <path d="M4.293 4.293a1 1 0 011.414 0L7 5.586l1.293-1.293a1 1 0 111.414 1.414L8.414 7l1.293 1.293a1 1 0 01-1.414 1.414L7 8.414 5.707 9.707a1 1 0 01-1.414-1.414L5.586 7 4.293 5.707a1 1 0 010-1.414z" />
           </svg>
         </button>
@@ -78,14 +131,14 @@ function ToastCard({ toast }: { toast: ToastItem }) {
  * next one will expire.  Pure function — extracted for testability.
  */
 export function getHiddenToastExpiries(
-  toasts: ReadonlyArray<Pick<ToastItem, 'id' | 'threadId' | 'duration' | 'createdAt'>>,
+  toasts: ReadonlyArray<Pick<ToastItem, 'id' | 'threadId' | 'duration' | 'createdAt' | 'manualDismissOnly'>>,
   currentThreadId: string | null,
   now: number,
 ): { expired: string[]; nextMs: number | null } {
   const expired: string[] = [];
   let nextMs: number | null = null;
   for (const t of toasts) {
-    if (t.threadId && t.threadId !== currentThreadId && t.duration > 0) {
+    if (t.threadId && t.threadId !== currentThreadId && t.duration > 0 && !t.manualDismissOnly) {
       const remaining = t.duration - (now - t.createdAt);
       if (remaining <= 0) {
         expired.push(t.id);
@@ -131,8 +184,8 @@ export function ToastContainer() {
 
   return (
     <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
-      {visible.map((toast) => (
-        <ToastCard key={toast.id} toast={toast} />
+      {visible.map((toast, index) => (
+        <ToastCard key={toast.id} toast={toast} stackPosition={index + 1} stackSize={visible.length} />
       ))}
     </div>
   );

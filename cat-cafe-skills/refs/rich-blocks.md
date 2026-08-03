@@ -46,12 +46,26 @@
 
 | 格式 | 示例 | 说明 |
 |------|------|------|
-| `/uploads/xxx.png` | `/uploads/opus-happy.png` | **推荐**，文件在 `packages/api/uploads/` |
+| `/uploads/xxx.png` | `/uploads/opus-happy.png` | **推荐**，文件在 **runtime** `packages/api/uploads/` |
 | `/api/connector-media/xxx` | `/api/connector-media/img.jpg` | 文件在 `data/connector-media/` |
 | `data:image/png;base64,...` | 完整 base64 编码 | 小图可用，会自动转临时文件上传 |
 | `https://...` | `https://example.com/img.png` | 外部链接 |
 
 **禁止**：`/api/connector-media/../assets/...` 等含 `../` 的路径 — 会被路径遍历保护拒绝，前端裂图。
+
+> ⚠️ **落盘路径陷阱（多只猫踩过）**
+>
+> `/uploads/xxx.png` 对应的磁盘真身是 **`cat-cafe-runtime/packages/api/uploads/`**（运行中 API 的 `getDefaultUploadDir()`）。
+> 以下路径**全都是错误投放点**，文件放进去也 404：
+>
+> | 错误路径 | 为什么错 |
+> |----------|----------|
+> | `cat-cafe/uploads/` | 开发仓根目录，不被任何 server 静态路由 serve |
+> | `cat-cafe/packages/api/uploads/` | 开发仓 packages 目录，非 runtime 检出 |
+> | `cat-cafe-runtime/uploads/` | runtime 根目录，API 不 serve 这一层 |
+>
+> **正确做法**：用 `publishGeneratedImage()` 或通过 API multipart 上传——它们自动解析正确的 `uploadDir`。
+> 手动 `cp` 文件时必须确认目标是 runtime PID 对应的 `packages/api/uploads/`。
 
 ### 关于本地生成图的额外说明（F172 共享发布合约）
 
@@ -89,7 +103,7 @@ Codex `image_gen` 和 Antigravity 生成的图片现已**自动发布**：
 
 | interactiveType | 说明 | 用户操作 | 自动发送消息 |
 |-----------------|------|---------|-------------|
-| select | 单选列表 | 点一个选项 | "我选了：方案 A" |
+| select | 单选列表 | 点选→确认 | "我选了：方案 A" |
 | multi-select | 多选列表 | 勾选多个→确认 | "我选了：Node.js, pnpm" |
 | card-grid | 卡片网格 | 点一张卡片 | "我选了：🎲 猫猫盲盒" |
 | confirm | 确认/取消 | 点按钮 | "确认" / "取消" |
@@ -97,6 +111,10 @@ Codex `image_gen` 和 Antigravity 生成的图片现已**自动发布**：
 - `messageTemplate`：自定义模板，`{selection}` 占位符。例："我选了 {selection} 作为引导猫"
 - `allowRandom`：card-grid 显示"🎲 随机抽"按钮
 - `maxSelect`：multi-select 最大选择数
+- `options[].customInput: true`：点该选项后展开理由输入框；可用
+  `customInputPlaceholder` 定制提示。当前 UI 在输入为空时禁用确认，因此适合
+  “不同意【请写理由】 / 其他【请写处理方式】”。
+- 普通 option 不要求输入文字，适合“同意，按建议执行”这类免打字路径。
 - 用户选择后 block 自动变 disabled，选择结果持久化（刷新不丢）
 
 ### card tone 语义

@@ -11,9 +11,9 @@ created: 2026-03-09
 
 ## Phase 1 (MVP) — 飞书 + Telegram DM-only ✅ PR #328
 
-- [x] AC-1: 飞书 DM 发消息 → Cat Café 收到 → 触发猫猫回复 → 回复发回飞书 (integration test)
-- [x] AC-2: Telegram DM 发消息 → Cat Café 收到 → 触发猫猫回复 → 回复发回 Telegram (integration test)
-- [x] AC-3: 外部 DM 自动映射到 Cat Café thread（ConnectorThreadBinding）(7 + 6 unit tests)
+- [x] AC-1: 飞书 DM 发消息 → Clowder AI 收到 → 触发猫猫回复 → 回复发回飞书 (integration test)
+- [x] AC-2: Telegram DM 发消息 → Clowder AI 收到 → 触发猫猫回复 → 回复发回 Telegram (integration test)
+- [x] AC-3: 外部 DM 自动映射到 Clowder AI thread（ConnectorThreadBinding）(7 + 6 unit tests)
 - [x] AC-4: 飞书 webhook verification token 校验（fail-closed）/ Bot API auth（Telegram）(adapter tests)
 - [ ] AC-5: 现有 Web UI 功能不受影响 (regression pending)
 - [x] AC-6: 入站消息幂等——同一外部消息重放不触发重复 invoke（integration test）
@@ -27,8 +27,8 @@ created: 2026-03-09
 
 ## Phase 3 — 富文本卡片 ✅
 
-- [x] AC-11: Cat Café rich block → 飞书消息卡片 JSON — feishu-card-formatter + FeishuAdapter.sendRichMessage, 8 tests
-- [x] AC-12: Cat Café rich block → Telegram formatted message（HTML parse_mode）— telegram-html-formatter + TelegramAdapter.sendRichMessage, 9 tests
+- [x] AC-11: Clowder AI rich block → 飞书消息卡片 JSON — feishu-card-formatter + FeishuAdapter.sendRichMessage, 8 tests
+- [x] AC-12: Clowder AI rich block → Telegram formatted message（HTML parse_mode）— telegram-html-formatter + TelegramAdapter.sendRichMessage, 9 tests
 - [x] AC-13: OutboundDeliveryHook 自动检测 rich block 类型，选择纯文本降级 or 卡片格式, 12 tests
 - [ ] AC-14: 飞书卡片支持按钮交互回调（card action callback → ConnectorRouter）— deferred to Phase 3b
 

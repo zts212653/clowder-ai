@@ -7,7 +7,11 @@
 
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { cancelHoldTaskById, cancelPendingHoldsForThread } from '../dist/routes/hold-ball-cancel.js';
+import {
+  cancelHoldTaskById,
+  cancelPendingHoldsForThread,
+  retirePendingHoldsForSatisfiedWait,
+} from '../dist/routes/hold-ball-cancel.js';
 
 function makeTask(overrides = {}) {
   return {
@@ -37,6 +41,18 @@ function makeStubDeps(tasks = []) {
       },
       remove(id) {
         removed.push(id);
+        return true;
+      },
+      setEnabled(id, enabled) {
+        const task = tasks.find((t) => t.id === id);
+        if (!task) return false;
+        task.enabled = enabled;
+        return true;
+      },
+      updateParams(id, params) {
+        const task = tasks.find((t) => t.id === id);
+        if (!task) return false;
+        task.params = params;
         return true;
       },
     },
@@ -94,6 +110,34 @@ describe('F167 Phase J AC-J1: cancelHoldTaskById', () => {
     assert.equal(deps._unregistered.length, 0);
     assert.equal(deps._removed.length, 0);
   });
+
+  test('F167-Q cloud P2: does not cancel retired-by-event tombstones by task id', () => {
+    const retired = makeTask({
+      id: 'hold-ball-retired-by-event',
+      enabled: false,
+      params: {
+        message: 'retired wake',
+        targetCatId: 'codex',
+        triggerUserId: 'user1',
+        holdLifecycle: {
+          mode: 'timer',
+          status: 'retired_by_event',
+          subjectKey: 'pr:owner/repo#42',
+          expectedSignalKey: 'review_posted',
+          wakeAt: Date.now() + 60_000,
+          createdBy: 'hold-ball:codex',
+        },
+      },
+    });
+    const deps = makeStubDeps([retired]);
+
+    const result = cancelHoldTaskById('hold-ball-retired-by-event', deps);
+
+    assert.equal(result, null, 'terminal lifecycle tombstone is readable but no longer cancelable');
+    assert.deepEqual(deps._unregistered, []);
+    assert.deepEqual(deps._removed, []);
+    assert.equal(deps.dynamicTaskStore.getById('hold-ball-retired-by-event'), retired);
+  });
 });
 
 describe('F167 Phase J AC-J4~J6: cancelPendingHoldsForThread', () => {
@@ -114,6 +158,81 @@ describe('F167 Phase J AC-J4~J6: cancelPendingHoldsForThread', () => {
     assert.equal(cancelled.length, 0);
     assert.equal(deps._unregistered.length, 0);
     assert.equal(deps._removed.length, 0);
+  });
+
+  test('keeps a queryable completion receipt when a user message supersedes an unconsumed wake', () => {
+    const completed = makeTask({
+      id: 'hold-ball-completion-pending',
+      deliveryThreadId: 'thread-completion-pending',
+      params: {
+        message: 'fallback',
+        targetCatId: 'codex',
+        triggerUserId: 'user1',
+        holdLifecycle: {
+          mode: 'wake_when',
+          status: 'active',
+          wakeAt: Date.now() + 60_000,
+          createdBy: 'hold-ball:codex',
+          managedCommand: {
+            state: 'dispatch_pending',
+            command: 'pnpm gate',
+            startedAt: Date.now() - 10_000,
+            conditionMetAt: Date.now() - 1_000,
+            wakeContent: 'gate finished',
+            result: { exitCode: 0, timedOut: false, durationMs: 9_000 },
+            messageId: 'completion-message-1',
+          },
+        },
+      },
+    });
+    const deps = makeStubDeps([completed]);
+
+    const cancelled = cancelPendingHoldsForThread('thread-completion-pending', deps);
+
+    assert.deepEqual(
+      cancelled.map((task) => task.id),
+      ['hold-ball-completion-pending'],
+    );
+    assert.deepEqual(deps._removed, [], 'TTL=0 completion receipt must not be deleted by the user ping');
+    assert.equal(completed.enabled, false);
+    assert.equal(completed.params.holdLifecycle.status, 'cancelled_by_user');
+    assert.equal(completed.params.holdLifecycle.managedCommand.messageId, 'completion-message-1');
+  });
+
+  test('keeps a running managed command as a disabled tombstone until its terminal result arrives', () => {
+    const running = makeTask({
+      id: 'hold-ball-running-command',
+      deliveryThreadId: 'thread-running-command',
+      params: {
+        message: 'fallback',
+        targetCatId: 'codex',
+        triggerUserId: 'user1',
+        holdLifecycle: {
+          mode: 'wake_when',
+          status: 'active',
+          wakeAt: Date.now() + 60_000,
+          createdBy: 'hold-ball:codex',
+          managedCommand: {
+            state: 'command_running',
+            command: 'pnpm gate',
+            startedAt: Date.now() - 10_000,
+          },
+        },
+      },
+    });
+    const deps = makeStubDeps([running]);
+
+    const cancelled = cancelPendingHoldsForThread('thread-running-command', deps);
+
+    assert.deepEqual(
+      cancelled.map((task) => task.id),
+      ['hold-ball-running-command'],
+    );
+    assert.deepEqual(deps._removed, [], 'the runner callback still needs a durable task to record into');
+    assert.deepEqual(deps._unregistered, ['hold-ball-running-command']);
+    assert.equal(running.enabled, false);
+    assert.equal(running.params.holdLifecycle.status, 'cancelled_by_user');
+    assert.equal(running.params.holdLifecycle.managedCommand.state, 'command_running');
   });
 
   test('does not cancel tasks from other threads', () => {
@@ -150,6 +269,39 @@ describe('F167 Phase J AC-J4~J6: cancelPendingHoldsForThread', () => {
     assert.ok(!deps._unregistered.includes('hold-ball-2-fake'));
   });
 
+  test('F167-Q cloud P2: user-message auto-cancel skips retired-by-event tombstones', () => {
+    const active = makeTask({ id: 'hold-ball-active', deliveryThreadId: 'thread-retire-skip' });
+    const retired = makeTask({
+      id: 'hold-ball-retired-tombstone',
+      deliveryThreadId: 'thread-retire-skip',
+      enabled: false,
+      params: {
+        message: 'retired wake',
+        targetCatId: 'codex',
+        triggerUserId: 'user1',
+        holdLifecycle: {
+          mode: 'timer',
+          status: 'retired_by_event',
+          subjectKey: 'pr:owner/repo#42',
+          expectedSignalKey: 'review_posted',
+          wakeAt: Date.now() + 60_000,
+          createdBy: 'hold-ball:codex',
+        },
+      },
+    });
+    const deps = makeStubDeps([active, retired]);
+
+    const cancelled = cancelPendingHoldsForThread('thread-retire-skip', deps);
+
+    assert.deepEqual(
+      cancelled.map((task) => task.id),
+      ['hold-ball-active'],
+    );
+    assert.deepEqual(deps._unregistered, ['hold-ball-active']);
+    assert.deepEqual(deps._removed, ['hold-ball-active']);
+    assert.equal(deps.dynamicTaskStore.getById('hold-ball-retired-tombstone'), retired);
+  });
+
   test('AC-J6: system message does not trigger cancel (function only cancels, caller decides when)', () => {
     // cancelPendingHoldsForThread is a pure operation — the caller (messages.ts)
     // decides WHEN to call it (only on user messages, not system messages).
@@ -160,5 +312,113 @@ describe('F167 Phase J AC-J4~J6: cancelPendingHoldsForThread', () => {
     const cancelled = cancelPendingHoldsForThread('thread-other', deps);
     assert.equal(cancelled.length, 0);
     assert.equal(deps._unregistered.length, 0);
+  });
+});
+
+describe('F167 Phase Q: retirePendingHoldsForSatisfiedWait', () => {
+  test('retires only the pending hold whose subject and signal key match the satisfied event', () => {
+    const reviewHold = makeTask({
+      id: 'hold-ball-review',
+      deliveryThreadId: 'thread-Q',
+      params: {
+        message: 'review wake',
+        targetCatId: 'codex',
+        triggerUserId: 'user1',
+        holdLifecycle: {
+          mode: 'timer',
+          status: 'active',
+          subjectKey: 'pr:owner/repo#42',
+          expectedSignalKey: 'review_posted',
+          wakeAt: Date.now() + 60_000,
+          createdBy: 'hold-ball:codex',
+        },
+      },
+    });
+    const ciHold = makeTask({
+      id: 'hold-ball-ci',
+      deliveryThreadId: 'thread-Q',
+      params: {
+        message: 'ci wake',
+        targetCatId: 'codex',
+        triggerUserId: 'user1',
+        holdLifecycle: {
+          mode: 'timer',
+          status: 'active',
+          subjectKey: 'pr:owner/repo#42',
+          expectedSignalKey: 'ci_complete',
+          wakeAt: Date.now() + 60_000,
+          createdBy: 'hold-ball:codex',
+        },
+      },
+    });
+    const freeTextHold = makeTask({
+      id: 'hold-ball-free-text',
+      deliveryThreadId: 'thread-Q',
+      params: {
+        message: 'legacy wake',
+        targetCatId: 'codex',
+        triggerUserId: 'user1',
+      },
+    });
+    const deps = makeStubDeps([reviewHold, ciHold, freeTextHold]);
+
+    const retired = retirePendingHoldsForSatisfiedWait(
+      {
+        threadId: 'thread-Q',
+        subjectKey: 'pr:owner/repo#42',
+        expectedSignalKey: 'review_posted',
+        sourceKind: 'review_feedback',
+        sourceMessageId: 'msg-review-1',
+      },
+      deps,
+    );
+
+    assert.equal(retired.length, 1);
+    assert.equal(retired[0].id, 'hold-ball-review');
+    assert.deepEqual(deps._unregistered, ['hold-ball-review']);
+    assert.deepEqual(deps._removed, []);
+    assert.equal(deps.dynamicTaskStore.getById('hold-ball-review').enabled, false);
+    assert.equal(deps.dynamicTaskStore.getById('hold-ball-review').params.holdLifecycle.status, 'retired_by_event');
+    assert.equal(
+      deps.dynamicTaskStore.getById('hold-ball-review').params.holdLifecycle.resolvedBy.sourceMessageId,
+      'msg-review-1',
+    );
+    assert.equal(deps.dynamicTaskStore.getById('hold-ball-ci').enabled, true);
+    assert.equal(deps.dynamicTaskStore.getById('hold-ball-free-text').enabled, true);
+  });
+
+  test('does not retire when event signal key is missing or unstructured', () => {
+    const hold = makeTask({
+      id: 'hold-ball-review-safe',
+      deliveryThreadId: 'thread-Q-safe',
+      params: {
+        message: 'review wake',
+        targetCatId: 'codex',
+        triggerUserId: 'user1',
+        holdLifecycle: {
+          mode: 'timer',
+          status: 'active',
+          subjectKey: 'pr:owner/repo#42',
+          expectedSignalKey: 'review_posted',
+          wakeAt: Date.now() + 60_000,
+          createdBy: 'hold-ball:codex',
+        },
+      },
+    });
+    const deps = makeStubDeps([hold]);
+
+    const retired = retirePendingHoldsForSatisfiedWait(
+      {
+        threadId: 'thread-Q-safe',
+        subjectKey: 'pr:owner/repo#42',
+        expectedSignalKey: 'review complete',
+        sourceKind: 'review_feedback',
+      },
+      deps,
+    );
+
+    assert.equal(retired.length, 0);
+    assert.deepEqual(deps._unregistered, []);
+    assert.equal(deps.dynamicTaskStore.getById('hold-ball-review-safe').enabled, true);
   });
 });

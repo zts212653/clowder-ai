@@ -106,6 +106,12 @@ function buildFakeDeps(callLog, responseText = VALID_PODCAST_JSON) {
       complete(_threadId, _controller) {
         callLog.push({ op: 'tracker.complete' });
       },
+      completeSlot(threadId, catId, controller) {
+        callLog.push({ op: 'tracker.completeSlot', threadId, catId, controller });
+      },
+      trackExternalSlot() {
+        return true;
+      },
       completeAll() {},
     },
   };
@@ -152,6 +158,28 @@ describe('F091 Phase 6: generateScriptViaThread — real production function', (
     assert.ok(routeCall, 'routeExecution must be called');
     assert.equal(routeCall.hasSignal, true, 'must pass signal to routeExecution');
     assert.equal(routeCall.signalAborted, false, 'signal should not be pre-aborted');
+  });
+
+  it('releases a terminal dynamic A2A child with the podcast route controller', async () => {
+    const { generateScriptViaThread } = await import('../dist/domains/signals/services/podcast-generator.js');
+    const callLog = [];
+    const deps = buildFakeDeps(callLog);
+    let routeController;
+    deps.router = {
+      async *routeExecution(_userId, _message, threadId, _messageId, _targetCats, _intent, options) {
+        routeController = options.invocationController;
+        assert.equal(options.trackA2ASlot(threadId, 'codex', 'test-user', routeController), true);
+        yield { type: 'text', catId: 'opus', content: VALID_PODCAST_JSON, timestamp: Date.now() };
+        yield { type: 'done', catId: 'codex', isFinal: true, timestamp: Date.now() };
+      },
+    };
+
+    await generateScriptViaThread(makeRequest(), 'thread-podcast-child', deps);
+
+    const dynamicCompletions = callLog.filter((call) => call.op === 'tracker.completeSlot' && call.catId === 'codex');
+    assert.equal(dynamicCompletions.length, 1);
+    assert.equal(dynamicCompletions[0].threadId, 'thread-podcast-child');
+    assert.equal(dynamicCompletions[0].controller, routeController);
   });
 
   it('full lifecycle call sequence is correct', async () => {

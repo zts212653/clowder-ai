@@ -87,12 +87,22 @@ export interface OutboundDeliveryHookOptions {
     | undefined;
   /** Resolve audio blocks with text but no url (voiceMode frontend-only blocks) by synthesizing TTS. */
   readonly resolveVoiceBlocks?: ((blocks: RichBlock[], catId: string) => Promise<RichBlock[]>) | undefined;
+  /** Optional physical embodiment fanout. It remains downstream of Limb policy/lease/audit. */
+  readonly limbDelivery?:
+    | {
+        deliver(threadId: string, content: string, catId?: CatId, triggerMessageId?: string): Promise<void>;
+      }
+    | undefined;
 }
 
 export class OutboundDeliveryHook {
   private readonly formatter = new ConnectorMessageFormatter();
 
   constructor(private readonly opts: OutboundDeliveryHookOptions) {}
+
+  setLimbDelivery(delivery: NonNullable<OutboundDeliveryHookOptions['limbDelivery']>): void {
+    (this.opts as { limbDelivery?: OutboundDeliveryHookOptions['limbDelivery'] }).limbDelivery = delivery;
+  }
 
   /**
    * Return the set of connectorIds bound to a thread.
@@ -130,17 +140,19 @@ export class OutboundDeliveryHook {
       '[OutboundDeliveryHook] deliver() called',
     );
     const bindings = await this.opts.bindingStore.getByThread(threadId);
-    if (bindings.length === 0) {
+    if (bindings.length === 0 && !this.opts.limbDelivery) {
       this.opts.log.warn(
         { threadId },
         '[OutboundDeliveryHook] No bindings found for thread — skipping outbound delivery',
       );
       return;
     }
-    this.opts.log.info(
-      { threadId, bindingCount: bindings.length, connectors: bindings.map((b) => b.connectorId) },
-      '[OutboundDeliveryHook] Found bindings, delivering',
-    );
+    if (bindings.length > 0) {
+      this.opts.log.info(
+        { threadId, bindingCount: bindings.length, connectors: bindings.map((b) => b.connectorId) },
+        '[OutboundDeliveryHook] Found bindings, delivering',
+      );
+    }
 
     // F134: Resolve sender from the trigger message for group chat @sender replies
     let replyToSender: { id: string; name?: string } | undefined;
@@ -363,6 +375,14 @@ export class OutboundDeliveryHook {
         }
       }),
     );
+
+    if (this.opts.limbDelivery) {
+      try {
+        await this.opts.limbDelivery.deliver(threadId, content, catId, triggerMessageId);
+      } catch (err) {
+        this.opts.log.error({ err, threadId, catId }, 'Physical limb outbound delivery failed');
+      }
+    }
   }
 
   private async writeDataUriToTempFile(dataUri: string): Promise<string | null> {

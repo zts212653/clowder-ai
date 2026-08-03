@@ -1,7 +1,7 @@
 ---
 doc_kind: decision
 decision_id: 012
-title: Cat Café 第一性原理总表
+title: Clowder AI 第一性原理总表
 status: accepted
 created: 2026-03-09
 topics: [first-principles, governance, knowledge-engineering]
@@ -9,7 +9,7 @@ related_features: [F059, F086, F046, F043]
 related_decisions: [005]
 ---
 
-# ADR-012: Cat Café 第一性原理总表
+# ADR-012: Clowder AI 第一性原理总表
 
 ## Context
 
@@ -32,7 +32,7 @@ related_decisions: [005]
 
 ## Decision
 
-Cat Café 的治理结构分为三层：
+Clowder AI 的治理结构分为三层：
 
 1. **公理层（Axioms）**  
    不可从其他规则推导的底层真理。定义唯一存放在 `shared-rules.md`。

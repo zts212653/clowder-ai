@@ -411,6 +411,58 @@ describe('writeGeminiMcpConfig', () => {
     assert.ok(data.mcpServers['cat-cafe'], 'cat-cafe server should still be written');
   });
 
+  it('migrates only provenance-owned colon names and preserves unrelated user entries', async () => {
+    const file = join(dir, 'settings.json');
+    await writeFile(
+      file,
+      JSON.stringify({
+        mcpServers: {
+          'foo:bar': { command: 'user-owned', args: [] },
+          'plugin:video-gen:protocol-server': { command: 'legacy-plugin', args: [] },
+        },
+      }),
+    );
+
+    await writeGeminiMcpConfig(file, [
+      { name: 'foo__bar', command: 'external', args: [], enabled: true, source: 'external' },
+      {
+        name: 'plugin__video-gen__protocol-server',
+        capabilityId: 'plugin:video-gen:protocol-server',
+        command: 'managed-plugin',
+        args: [],
+        enabled: true,
+        source: 'plugin',
+      },
+    ]);
+
+    const data = JSON.parse(await readFile(file, 'utf-8'));
+    assert.ok(data.mcpServers['foo:bar'], 'name similarity alone must not prove ownership');
+    assert.equal(data.mcpServers['plugin:video-gen:protocol-server'], undefined);
+    assert.ok(data.mcpServers['plugin__video-gen__protocol-server']);
+  });
+
+  it('retires known GitHub MCP entries while preserving unrelated custom servers', async () => {
+    const file = join(dir, 'settings.json');
+    await writeFile(
+      file,
+      JSON.stringify({
+        mcpServers: {
+          github: { type: 'http', url: 'https://api.githubcopilot.com/mcp/' },
+          'github-custom': { command: 'node', args: ['custom-github-mcp-adapter.js'] },
+        },
+      }),
+    );
+
+    await writeGeminiMcpConfig(file, []);
+
+    const data = JSON.parse(await readFile(file, 'utf-8'));
+    assert.equal(data.mcpServers.github, undefined);
+    assert.deepEqual(data.mcpServers['github-custom'], {
+      command: 'node',
+      args: ['custom-github-mcp-adapter.js'],
+    });
+  });
+
   // F213 Phase B: L5 cleanup applied to Gemini writer (.gemini/settings.json).
 
   it('F213: removes echoLegacyShim cat-cafe entry from .gemini/settings.json', async () => {
@@ -728,6 +780,36 @@ describe('writeAntigravityMcpConfig', () => {
     const raw = JSON.parse(await readFile(file, 'utf-8'));
     assert.ok(raw.mcpServers['cat-cafe'], 'legacy entry preserved (F213 cannot prove ownership)');
     assert.ok(raw.mcpServers['cat-cafe-memory'], 'split server should be written');
+  });
+
+  it('migrates only provenance-owned colon names and preserves unrelated user entries', async () => {
+    const file = join(dir, 'mcp_config.json');
+    await writeFile(
+      file,
+      JSON.stringify({
+        mcpServers: {
+          'foo:bar': { command: 'user-owned', args: [] },
+          'plugin:video-gen:protocol-server': { command: 'legacy-plugin', args: [] },
+        },
+      }),
+    );
+
+    await writeAntigravityMcpConfig(file, [
+      { name: 'foo__bar', command: 'external', args: [], enabled: true, source: 'external' },
+      {
+        name: 'plugin__video-gen__protocol-server',
+        capabilityId: 'plugin:video-gen:protocol-server',
+        command: 'managed-plugin',
+        args: [],
+        enabled: true,
+        source: 'plugin',
+      },
+    ]);
+
+    const data = JSON.parse(await readFile(file, 'utf-8'));
+    assert.ok(data.mcpServers['foo:bar'], 'name similarity alone must not prove ownership');
+    assert.equal(data.mcpServers['plugin:video-gen:protocol-server'], undefined);
+    assert.ok(data.mcpServers['plugin__video-gen__protocol-server']);
   });
 
   it('F061 Bug-F: respects ALLOWED_WORKSPACE_DIRS env override when set', async () => {

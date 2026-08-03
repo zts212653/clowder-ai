@@ -22,7 +22,7 @@ renamed-from: deep-research-pipeline
 
 ## 两种猫，各有分工
 
-| | Web 猫（Deep Research 模式） | Coder 猫（CLI/Cat Cafe） |
+| | Web 猫（Deep Research 模式） | Coder 猫（CLI/Clowder AI） |
 |---|---|---|
 | 强项 | 搜 100+ 来源，有引用 | 读项目代码，跑测试 |
 | 弱点 | 不了解我们的 codebase | 网络搜索深度有限 |

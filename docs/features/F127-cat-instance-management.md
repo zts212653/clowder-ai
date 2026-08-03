@@ -1,9 +1,10 @@
 ---
 feature_ids: [F127]
-related_features: [F062, F032, F050]
+related_features: [F062, F032, F050, F262]
 topics: [cat-management, provider-profile, hub, alias, routing, dynamic-config]
 doc_kind: spec
 created: 2026-03-17
+updated: 2026-07-15
 community_issue: "#109"
 ---
 
@@ -197,7 +198,7 @@ community_issue: "#109"
 | R-8 | **切换认证方式（订阅↔API key）没有一键切换** — 要一只猫一只猫改 provider profile binding | 高（UX 痛点） | operator想批量切换认证方式时 | 加"一键切换所有猫的 provider profile"功能 |
 | R-9 | **nuoda.vip 代理 model name 格式混淆** — API 代理用 `claude-opus-4-6`（Anthropic 原生），但 opencode CLI 需要 `anthropic/claude-opus-4-6`（provider/model 格式），Hub 不知道该用哪个 | 中（配置困惑） | 用第三方 API 代理时 | Hub 编辑器应按 client 类型自动处理 model name 格式 |
 | R-10 | **本地反代 `anthropic-proxy.mjs` 的 upstream 配置未初始化** — `start-dev.sh` 启动的反代（端口 9877）依赖 `.cat-cafe/proxy-upstreams.json` 配置上游，但 F127 intake 后 runtime 里该文件不存在。API key profile 创建应自动注册 upstream 到反代 | 中（反代功能不可用） | 配置 API key profile 用本地反代时 | profile 创建/更新时自动写 `proxy-upstreams.json` |
-| R-11 | ~~**Hub 缺少结构化、provider-aware 的 `cli.effort` 编辑**~~ — ✅ PR #882 提供维护 preset；#315 进一步支持直接输入并原样持久化 provider 原生值（如 Codex `max` / `ultra`）。保存写 `variant.cli.effort`；只对新 invocation 生效，不强切旧 session。 | ~~高（易错 + UX 差）~~ done | — | — |
+| R-11 | ~~**Hub 缺少结构化、provider-aware 的 `cli.effort` 编辑**~~ — ✅ PR #882 提供按 provider/model 维护的建议值；clowder-ai#1152 / Clowder AI #2967 进一步允许 effort-aware 成员输入任意非空 provider 原生值并原样持久化，由 CLI 做最终校验并返回错误。成员默认只对新 invocation 生效，不强切旧 session；F262 的 thread-scoped override 仍使用严格的 model-aware 建议值集合，不随本项放宽。 | ~~高（易错 + UX 差）~~ done | — | — |
 | R-12 | ~~**跨项目 homedir legacy 账号污染 runtime 账号配置**~~ — ✅ 已修复（PR #1457）。启动迁移与 installer import 现在只导入项目显式引用的 homedir legacy account；引用源覆盖 `accountRef`、legacy `providerProfileId`、catalog `accounts` keys、credential refs，并保留 installer 内置账号 | ~~中（账号配置 UI 出现 Agent Teams / Local 等外部项目垃圾项）~~ done | — | — |
 
 ## AC-B3 验收矩阵（E2E 验证清单）

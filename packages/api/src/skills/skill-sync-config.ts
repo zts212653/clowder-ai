@@ -73,14 +73,26 @@ export async function updateSkillMountPaths(
   // should not leak into the global enabled state.
   const hasForce = opts?.forceDisabled === true || opts?.forceEnabled === true;
   const resolvedEnabled = opts?.forceDisabled === true ? false : opts?.forceEnabled === true ? true : undefined;
-  // pluginId is an identity label, not a filter. All cat-cafe skills
-  // are managed uniformly by syncProject.
   const isCatCafeSkill = (cap: (typeof config.capabilities)[number]) =>
     cap.type === 'skill' && cap.source === 'cat-cafe';
-  const existingIds = new Set(config.capabilities.filter(isCatCafeSkill).map((c) => c.id));
+  const firstPartyIds = new Set(
+    config.capabilities.filter((c) => isCatCafeSkill(c) && !c.pluginId && !c.skillsSource).map((c) => c.id),
+  );
+  const matchesTargetRow = (
+    cap: (typeof config.capabilities)[number],
+    skillName: string,
+    meta?: { skillsSource: string; pluginId?: string },
+  ): boolean => {
+    if (!isCatCafeSkill(cap) || cap.id !== skillName) return false;
+    if (meta?.pluginId) return cap.pluginId === meta.pluginId;
+    if (meta?.skillsSource) return cap.skillsSource === meta.skillsSource;
+    if (firstPartyIds.has(skillName)) return !cap.pluginId && !cap.skillsSource;
+    return true;
+  };
 
   for (const cap of config.capabilities) {
-    if (isCatCafeSkill(cap) && nameSet.has(cap.id)) {
+    const meta = opts?.customSourceMeta?.get(cap.id);
+    if (nameSet.has(cap.id) && matchesTargetRow(cap, cap.id, meta)) {
       // F228: always write mountPaths — empty = no active mount points in project scope.
       cap.mountPaths = [...mountPointIds];
       // Force flags additionally write enabled/globalEnabled (global-scope toggles).
@@ -95,8 +107,8 @@ export async function updateSkillMountPaths(
   }
 
   for (const skillName of nameSet) {
-    if (!existingIds.has(skillName)) {
-      const meta = opts?.customSourceMeta?.get(skillName);
+    const meta = opts?.customSourceMeta?.get(skillName);
+    if (!config.capabilities.some((cap) => matchesTargetRow(cap, skillName, meta))) {
       config.capabilities.push({
         id: skillName,
         type: 'skill',

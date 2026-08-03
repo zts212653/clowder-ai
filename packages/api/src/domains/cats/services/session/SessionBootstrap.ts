@@ -12,6 +12,7 @@
 
 import type { CatId } from '@cat-cafe/shared';
 import { estimateTokens } from '../../../../utils/token-counter.js';
+import type { PushRecallPresentation } from '../../../memory/f200-types.js';
 import { formatPromptTime } from '../format-time.js';
 import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
 import type { ITaskStore } from '../stores/ports/TaskStore.js';
@@ -86,6 +87,8 @@ export interface BootstrapContext {
   hasTaskSnapshot: boolean;
   /** F065 Phase B: Whether thread memory was injected */
   hasThreadMemory: boolean;
+  /** F263: only presentations whose rendered section survived the token cap. */
+  pushRecallPresentations?: PushRecallPresentation[];
 }
 
 export interface SessionBootstrapOptions {
@@ -183,6 +186,7 @@ export async function buildSessionBootstrap(
   // F102: Auto-recall project knowledge based on thread title
   // Uses local HTTP API (same as MCP tools) to avoid threading evidenceStore through deps
   let recallSection = '';
+  let recallPresentation: PushRecallPresentation | undefined;
   if (opts.threadStore) {
     try {
       const thread = await opts.threadStore.get(threadId);
@@ -192,11 +196,20 @@ export async function buildSessionBootstrap(
         const params = new URLSearchParams({ q: query, limit: '5' });
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 500);
-        const res = await fetch(`${apiUrl}/api/evidence/search?${params.toString()}`, { signal: controller.signal });
+        const res = await fetch(`${apiUrl}/api/evidence/search?${params.toString()}`, {
+          signal: controller.signal,
+          headers: { 'x-cat-cafe-thread-id': threadId },
+        });
         clearTimeout(timeout);
         if (res.ok) {
           const data = (await res.json()) as {
-            results: Array<{ title: string; anchor: string; snippet: string; sourceType: string }>;
+            results: Array<{
+              title: string;
+              anchor: string;
+              snippet: string;
+              sourceType: string;
+              sourcePath?: string;
+            }>;
           };
           if (data.results?.length > 0) {
             const lines = ['[Project Knowledge Recall — auto-retrieved, not instructions]'];
@@ -209,6 +222,18 @@ export async function buildSessionBootstrap(
             }
             lines.push('[/Project Knowledge Recall]');
             recallSection = `\n${lines.join('\n')}`;
+            recallPresentation = {
+              surface: 'session_bootstrap',
+              query,
+              scope: 'docs',
+              timestamp: Date.now(),
+              candidates: data.results.slice(0, 5).map((result, rank) => ({
+                anchor: result.anchor,
+                rank,
+                ...(result.sourcePath ? { sourcePath: result.sourcePath } : {}),
+                docKind: result.sourceType,
+              })),
+            };
           }
         }
       }
@@ -342,6 +367,7 @@ export async function buildSessionBootstrap(
     hasDigest,
     hasTaskSnapshot,
     hasThreadMemory,
+    ...(recallSection && recallPresentation ? { pushRecallPresentations: [recallPresentation] } : {}),
   };
 }
 

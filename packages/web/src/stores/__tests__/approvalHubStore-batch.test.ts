@@ -7,6 +7,7 @@
 
 import type { ApprovalItem } from '@cat-cafe/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { anchoredApprovalNavigation } from '@/test-support/approval-navigation';
 
 // Mock apiFetch for batch operation tests (batchApprove/batchReject call it)
 vi.mock('@/utils/api-client', () => ({
@@ -20,7 +21,7 @@ const NOW = Date.now();
 function makeItem(overrides: Partial<ApprovalItem> & { proposalId: string }): ApprovalItem {
   return {
     sourceFeatureId: 'F193',
-    sourceThreadId: 'thread-1',
+    navigation: anchoredApprovalNavigation('thread-1'),
     requesterCatId: 'opus',
     ownerUserId: 'user-1',
     status: 'pending',
@@ -73,6 +74,31 @@ describe('approvalHubStore — batch operations', () => {
     expect(ids.has('inline-2')).toBe(true);
     expect(ids.has('jump-1')).toBe(false);
     expect(ids.size).toBe(2);
+  });
+
+  it('resume-only recovery items cannot enter approve/reject batch selection', async () => {
+    useApprovalHubStore.setState({
+      items: [
+        makeItem({
+          proposalId: 'taste-recovery',
+          sourceFeatureId: 'F221',
+          decisionMode: 'resume-only',
+        } as Partial<ApprovalItem> & { proposalId: string }),
+      ],
+      count: 1,
+      selectedIds: new Set<string>(),
+      batchResults: [],
+      deciding: {},
+      error: null,
+    });
+
+    useApprovalHubStore.getState().toggleSelection('taste-recovery');
+    useApprovalHubStore.getState().selectAllInline();
+    expect(useApprovalHubStore.getState().selectedIds.size).toBe(0);
+
+    useApprovalHubStore.setState({ selectedIds: new Set(['taste-recovery']) });
+    expect(await useApprovalHubStore.getState().batchApprove()).toEqual([]);
+    expect(await useApprovalHubStore.getState().batchReject()).toEqual([]);
   });
 
   it('selectAllInline with visibleIds: only selects visible inline items', () => {

@@ -255,5 +255,54 @@ describe('useAgentMessages — F173 Phase E single dispatch (KD-1 handler unific
       // active path must update cat status (text event → 'streaming')
       expect(mockSetCatStatus).toHaveBeenCalledWith('opus', 'streaming');
     });
+
+    it('projects a typed context briefing into the active timeline', () => {
+      const now = Date.now();
+      storeState.currentThreadId = 'thread-active';
+      act(() => {
+        root.render(React.createElement(Harness));
+      });
+
+      act(() => {
+        captured?.handleAgentMessage({
+          type: 'system_info',
+          catId: 'opus',
+          threadId: 'thread-active',
+          content: JSON.stringify({
+            type: 'context_briefing',
+            storedMessage: {
+              id: 'briefing-active-1',
+              content: '看到 13 条 · 省略 8 条',
+              origin: 'briefing',
+              timestamp: now,
+              extra: {
+                systemKind: 'context_briefing',
+                rich: {
+                  v: 1,
+                  blocks: [{ id: 'briefing-card-active-1', kind: 'card', v: 1, title: '看到 13 条 · 省略 8 条' }],
+                },
+              },
+            },
+          }),
+          timestamp: now,
+        });
+      });
+
+      expect(mockAddMessage).toHaveBeenCalledWith({
+        id: 'briefing-active-1',
+        type: 'system',
+        content: '看到 13 条 · 省略 8 条',
+        origin: 'briefing',
+        timestamp: now,
+        extra: {
+          systemKind: 'context_briefing',
+          rich: {
+            v: 1,
+            blocks: [{ id: 'briefing-card-active-1', kind: 'card', v: 1, title: '看到 13 条 · 省略 8 条' }],
+          },
+        },
+      });
+      expect(mockAddMessageToThread).not.toHaveBeenCalled();
+    });
   });
 });

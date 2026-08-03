@@ -59,6 +59,15 @@ function createMockDeps(services, appendCalls, initialMessages = []) {
   };
 }
 
+function withClaimedA2ASlot(options = {}) {
+  return {
+    invocationController: new AbortController(),
+    trackA2ASlot: () => true,
+    completeA2ASlots: () => {},
+    ...options,
+  };
+}
+
 describe('routeSerial replyTo on stream messages', () => {
   it('attaches replyTo + replyPreview to CLI A2A stream responses', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
@@ -72,7 +81,7 @@ describe('routeSerial replyTo on stream messages', () => {
     );
 
     const yielded = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'check this', 'user1', 'thread1')) {
+    for await (const msg of routeSerial(deps, ['opus'], 'check this', 'user1', 'thread1', withClaimedA2ASlot())) {
       yielded.push(msg);
     }
 
@@ -89,7 +98,7 @@ describe('routeSerial replyTo on stream messages', () => {
     });
   });
 
-  it('attaches replyTo from explicit A2A trigger route option for queue-dispatched initial target', async () => {
+  it('attaches replyTo and persists trigger provenance for queue-dispatched initial target', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const appendCalls = [];
     const deps = createMockDeps(
@@ -109,6 +118,11 @@ describe('routeSerial replyTo on stream messages', () => {
         },
       ],
     );
+    const registryCreateCalls = [];
+    deps.invocationDeps.registry.create = (...args) => {
+      registryCreateCalls.push(args);
+      return { invocationId: 'inv-queue-trigger', callbackToken: 'tok-queue-trigger' };
+    };
 
     const yielded = [];
     for await (const msg of routeSerial(deps, ['codex'], '@缅因猫 帮忙复核', 'user1', 'thread1', {
@@ -127,6 +141,11 @@ describe('routeSerial replyTo on stream messages', () => {
       senderCatId: 'opus',
       content: '@缅因猫 帮忙复核',
     });
+    assert.equal(
+      registryCreateCalls[0]?.[4],
+      'msg-trigger',
+      'queue trigger provenance must reach the invocation auth record for terminal ACK resolution',
+    );
   });
 
   it('does not treat currentUserMessageId as stream replyTo without explicit A2A trigger', async () => {
@@ -177,10 +196,17 @@ describe('routeSerial replyTo on stream messages', () => {
     );
 
     const yielded = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'check this', 'user1', 'thread1', {
-      queueHasQueuedMessages: () => true,
-      deferA2AEnqueue: (entry) => deferred.push(entry),
-    })) {
+    for await (const msg of routeSerial(
+      deps,
+      ['opus'],
+      'check this',
+      'user1',
+      'thread1',
+      withClaimedA2ASlot({
+        queueHasQueuedMessages: () => true,
+        deferA2AEnqueue: (entry) => deferred.push(entry),
+      }),
+    )) {
       yielded.push(msg);
     }
 

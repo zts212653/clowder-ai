@@ -1,13 +1,14 @@
 /**
  * F047: QueuePanel steer UI
  * - Steer button shows only for queued entries
- * - Steer modal submits correct mode
+ * - Steer modal submits the sole cancel-and-restart action
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { QueueEntry } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
+import { apiFetch } from '@/utils/api-client';
 import { QueuePanel } from '../QueuePanel';
 
 vi.mock('@/utils/api-client', () => ({
@@ -81,7 +82,26 @@ describe('QueuePanel steer (F047)', () => {
     expect(container.querySelector('[data-testid="steer-q2"]')).toBeNull();
   });
 
-  it('submits steer mode=promote', async () => {
+  it('renders only actionable per-target queue truth hydrated from the server', () => {
+    useChatStore.setState({
+      queue: [
+        {
+          ...QUEUED_ENTRY,
+          targetCats: ['opus', 'codex'],
+          targetStates: { opus: 'seen', codex: 'failed', gpt52: 'handled' },
+        },
+      ],
+    });
+    act(() => {
+      root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
+    });
+
+    expect(container.textContent).toContain('opus · 已读，但关联回合已结束；尚未确认处理完成');
+    expect(container.textContent).toContain('codex · 处理失败 · 已回队列');
+    expect(container.textContent).not.toContain('gpt52 · 已处理');
+  });
+
+  it('submits Steer as immediate cancel-and-restart without a promote choice', async () => {
     const { apiFetch } = await import('@/utils/api-client');
     useChatStore.setState({ queue: [QUEUED_ENTRY] });
     act(() => {
@@ -92,9 +112,7 @@ describe('QueuePanel steer (F047)', () => {
     expect(steerBtn).not.toBeNull();
     act(() => steerBtn?.click());
 
-    const promote = container.querySelector('[data-testid="steer-mode-promote"]') as HTMLButtonElement | null;
-    expect(promote).not.toBeNull();
-    act(() => promote?.click());
+    expect(container.querySelector('[data-testid="steer-mode-promote"]')).toBeNull();
 
     const confirm = container.querySelector('[data-testid="steer-confirm"]') as HTMLButtonElement | null;
     expect(confirm).not.toBeNull();
@@ -111,11 +129,10 @@ describe('QueuePanel steer (F047)', () => {
       }),
     );
     const callArgs = (apiFetch as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]?.[1] as { body?: string };
-    expect(callArgs.body).toContain('"mode":"promote"');
+    expect(callArgs.body).toBeUndefined();
   });
 
-  it('defaults steer to promote so confirming does not interrupt a busy target cat', async () => {
-    const { apiFetch } = await import('@/utils/api-client');
+  it('shows the single Steer contract as cancel current then restart from this exact message', () => {
     useChatStore.setState({ queue: [QUEUED_ENTRY] });
     act(() => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
@@ -125,30 +142,81 @@ describe('QueuePanel steer (F047)', () => {
     expect(steerBtn).not.toBeNull();
     act(() => steerBtn?.click());
 
-    const confirm = container.querySelector('[data-testid="steer-confirm"]') as HTMLButtonElement | null;
-    expect(confirm).not.toBeNull();
-
-    await act(async () => {
-      confirm?.click();
-    });
-
-    const callArgs = (apiFetch as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]?.[1] as { body?: string };
-    expect(callArgs.body).toContain('"mode":"promote"');
-    expect(callArgs.body).not.toContain('"mode":"immediate"');
+    expect(container.textContent).toContain('取消当前回合');
+    expect(container.textContent).toContain('以这条消息立即重新启动');
+    expect(container.textContent).toContain('取消前已经完成的回复仍会发表');
+    expect(container.textContent).not.toContain('提到队首');
   });
 
-  it('shows conditional copy for immediate steer (only interrupts when target cat is busy)', () => {
-    useChatStore.setState({ queue: [QUEUED_ENTRY] });
+  it('offers a non-interrupting reminder for an unread target with an active turn', async () => {
+    useChatStore.setState({
+      queue: [
+        {
+          ...QUEUED_ENTRY,
+          targetStates: { opus: 'queued' },
+          queueReceipt: {
+            version: 1,
+            entryId: 'q1',
+            targets: [{ catId: 'opus', state: 'queued' }],
+            reminderAttempts: [],
+          },
+        },
+      ],
+      activeInvocations: {
+        'inv-active': { catId: 'opus', mode: 'execute', startedAt: Date.now() },
+      },
+    });
     act(() => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
     });
 
-    const steerBtn = container.querySelector('[data-testid="steer-q1"]') as HTMLButtonElement | null;
-    expect(steerBtn).not.toBeNull();
-    act(() => steerBtn?.click());
+    const remind = container.querySelector('[data-testid="remind-q1-opus"]') as HTMLButtonElement | null;
+    expect(remind).not.toBeNull();
+    expect(remind?.textContent).toContain('提醒猫');
 
-    expect(container.textContent).toContain('立即执行（必要时中断目标猫）');
-    expect(container.textContent).toContain('若目标猫正在执行，会先 cancel 该猫当前 invocation');
-    expect(container.textContent).not.toContain('会先 cancel 当前 invocation');
+    await act(async () => remind?.click());
+
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/api/threads/thread-1/queue/q1/remind',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ targetCatId: 'opus' }),
+      }),
+    );
+  });
+
+  it('shows the exact pending reminder state without offering a duplicate click', () => {
+    useChatStore.setState({
+      queue: [
+        {
+          ...QUEUED_ENTRY,
+          targetStates: { opus: 'notified' },
+          queueReceipt: {
+            version: 1,
+            entryId: 'q1',
+            targets: [{ catId: 'opus', state: 'notified' }],
+            reminderAttempts: [
+              {
+                id: 'reminder-1',
+                targetCatId: 'opus',
+                invocationId: 'inv-active',
+                state: 'delivered',
+                requestedAt: 1,
+                deliveredAt: 2,
+              },
+            ],
+          },
+        },
+      ],
+      activeInvocations: {
+        'inv-active': { catId: 'opus', mode: 'execute', startedAt: Date.now() },
+      },
+    });
+    act(() => {
+      root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
+    });
+
+    expect(container.textContent).toContain('提醒已送达 · 尚未读取');
+    expect(container.querySelector('[data-testid="remind-q1-opus"]')).toBeNull();
   });
 });

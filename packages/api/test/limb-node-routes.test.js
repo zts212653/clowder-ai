@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { MemoryApprovedLimbPairingPersistence } from '../dist/domains/limb/ApprovedLimbPairingPersistence.js';
 import { LimbPairingStore } from '../dist/domains/limb/LimbPairingStore.js';
 import { LimbRegistry } from '../dist/domains/limb/LimbRegistry.js';
 import { registerLimbNodeRoutes } from '../dist/routes/limb-node-routes.js';
@@ -75,7 +76,7 @@ describe('limb-node-routes (Fastify injection)', () => {
     const { requestId, apiKey } = JSON.parse(regRes.payload);
 
     // Approve via store directly (simulating MCP callback auth path)
-    pairingStore.approve(requestId);
+    await pairingStore.approve(requestId, 'user-1');
 
     // Need node in registry for heartbeat to have effect — re-register triggers reconnect
     await app.inject({ method: 'POST', url: '/api/limb/register', payload: { ...REG_BODY, apiKey } });
@@ -103,7 +104,7 @@ describe('limb-node-routes (Fastify injection)', () => {
     // Register + approve via store + re-register to trigger reconnect
     const regRes = await app.inject({ method: 'POST', url: '/api/limb/register', payload: REG_BODY });
     const { requestId, apiKey } = JSON.parse(regRes.payload);
-    pairingStore.approve(requestId);
+    await pairingStore.approve(requestId, 'user-1');
     await app.inject({ method: 'POST', url: '/api/limb/register', payload: { ...REG_BODY, apiKey } });
     assert.ok(limbRegistry.getNode('iphone-1'));
 
@@ -121,7 +122,7 @@ describe('limb-node-routes (Fastify injection)', () => {
   it('approved node re-register after deregister rebuilds RemoteLimbNode', async () => {
     const regRes = await app.inject({ method: 'POST', url: '/api/limb/register', payload: REG_BODY });
     const { requestId, apiKey } = JSON.parse(regRes.payload);
-    pairingStore.approve(requestId);
+    await pairingStore.approve(requestId, 'user-1');
 
     await app.inject({ method: 'POST', url: '/api/limb/register', payload: { ...REG_BODY, apiKey } });
     assert.ok(limbRegistry.getNode('iphone-1'));
@@ -138,10 +139,52 @@ describe('limb-node-routes (Fastify injection)', () => {
     assert.ok(limbRegistry.getNode('iphone-1'));
   });
 
+  it('approved node re-register after API restart keeps approval and rebuilds RemoteLimbNode', async () => {
+    const persistence = new MemoryApprovedLimbPairingPersistence();
+    const firstStore = await LimbPairingStore.restore(persistence);
+    const pending = firstStore.createRequest(REG_BODY);
+    await firstStore.approve(pending.requestId, 'user-1');
+
+    const restartedStore = await LimbPairingStore.restore(persistence);
+    const restartedRegistry = new LimbRegistry();
+    assert.equal(restartedRegistry.getNode(REG_BODY.nodeId), undefined, 'restart must not fabricate online state');
+    const restartedApp = Fastify();
+    registerLimbNodeRoutes(restartedApp, {
+      limbRegistry: restartedRegistry,
+      pairingStore: restartedStore,
+    });
+    await restartedApp.ready();
+
+    try {
+      const res = await restartedApp.inject({
+        method: 'POST',
+        url: '/api/limb/register',
+        payload: { ...REG_BODY, apiKey: pending.apiKey },
+      });
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(JSON.parse(res.payload).status, 'approved');
+      assert.ok(restartedRegistry.getNode(REG_BODY.nodeId));
+
+      const movedEndpoint = 'http://10.0.0.77:8770';
+      const updateRes = await restartedApp.inject({
+        method: 'POST',
+        url: '/api/limb/register',
+        payload: { ...REG_BODY, endpointUrl: movedEndpoint, apiKey: pending.apiKey },
+      });
+      assert.equal(updateRes.statusCode, 200);
+
+      const secondRestart = await LimbPairingStore.restore(persistence);
+      assert.equal(secondRestart.findApprovedByNodeId(REG_BODY.nodeId).endpointUrl, movedEndpoint);
+    } finally {
+      await restartedApp.close();
+    }
+  });
+
   it('reconnect with new endpointUrl updates pairing', async () => {
     const regRes = await app.inject({ method: 'POST', url: '/api/limb/register', payload: REG_BODY });
     const { requestId, apiKey } = JSON.parse(regRes.payload);
-    pairingStore.approve(requestId);
+    await pairingStore.approve(requestId, 'user-1');
     await app.inject({ method: 'POST', url: '/api/limb/register', payload: { ...REG_BODY, apiKey } });
 
     await app.inject({ method: 'POST', url: '/api/limb/deregister', payload: { apiKey, nodeId: 'iphone-1' } });
@@ -156,7 +199,7 @@ describe('limb-node-routes (Fastify injection)', () => {
   it('offline node in registry re-registers with new endpoint → handle replaced', async () => {
     const regRes = await app.inject({ method: 'POST', url: '/api/limb/register', payload: REG_BODY });
     const { requestId, apiKey } = JSON.parse(regRes.payload);
-    pairingStore.approve(requestId);
+    await pairingStore.approve(requestId, 'user-1');
     await app.inject({ method: 'POST', url: '/api/limb/register', payload: { ...REG_BODY, apiKey } });
 
     assert.equal(limbRegistry.getNode('iphone-1').status, 'online');
@@ -176,7 +219,7 @@ describe('limb-node-routes (Fastify injection)', () => {
   it('reconnect without apiKey is rejected for approved nodes', async () => {
     const regRes = await app.inject({ method: 'POST', url: '/api/limb/register', payload: REG_BODY });
     const { requestId } = JSON.parse(regRes.payload);
-    pairingStore.approve(requestId);
+    await pairingStore.approve(requestId, 'user-1');
 
     // Try reconnect without apiKey
     const res = await app.inject({ method: 'POST', url: '/api/limb/register', payload: REG_BODY });
@@ -186,7 +229,7 @@ describe('limb-node-routes (Fastify injection)', () => {
   it('reconnect with wrong apiKey is rejected', async () => {
     const regRes = await app.inject({ method: 'POST', url: '/api/limb/register', payload: REG_BODY });
     const { requestId } = JSON.parse(regRes.payload);
-    pairingStore.approve(requestId);
+    await pairingStore.approve(requestId, 'user-1');
 
     const res = await app.inject({
       method: 'POST',

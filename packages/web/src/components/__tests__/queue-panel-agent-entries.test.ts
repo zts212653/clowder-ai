@@ -65,6 +65,23 @@ const AGENT_ENTRY: QueueEntry = {
   callerCatId: 'codex',
 };
 
+const FRESHNESS_ENTRY: QueueEntry = {
+  id: 'q-freshness',
+  threadId: 'thread-1',
+  userId: 'system',
+  content: '你上一轮的回复生成时有来自 GitHub Review 的 1 条新消息尚未被你看到。',
+  messageId: null,
+  mergedMessageIds: [],
+  source: 'agent',
+  sourceCategory: 'freshness',
+  targetCats: ['opus'],
+  intent: 'execute',
+  status: 'queued',
+  createdAt: NOW + 2,
+  autoExecute: true,
+  callerCatId: 'opus',
+};
+
 describe('QueuePanel agent entry rendering (F122B AC-B7)', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -102,6 +119,16 @@ describe('QueuePanel agent entry rendering (F122B AC-B7)', () => {
 
     const text = container.textContent ?? '';
     expect(text).toContain('自动');
+  });
+
+  it('renders freshness entries as system freshness work, not self handoff', () => {
+    useChatStore.setState({ queue: [FRESHNESS_ENTRY] });
+    act(() => root.render(React.createElement(QueuePanel, { threadId: 'thread-1' })));
+
+    const text = container.textContent ?? '';
+    expect(text).toContain('Freshness');
+    expect(text).toContain('Freshness → 布偶猫（Fable）');
+    expect(text).not.toContain('布偶猫（Fable） → 布偶猫（Fable）');
   });
 
   it('agent entry has purple background class', () => {

@@ -22,6 +22,9 @@ import { afterEach, describe, it, mock } from 'node:test';
 import Fastify from 'fastify';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+const { clearCodexAppServerLifecycle, recordCodexAppServerLifecycle } = await import(
+  '../dist/domains/cats/services/agents/providers/CodexAppServerLifecycleRegistry.js'
+);
 
 const THREAD_ID = 't1';
 const USER_ID = 'user-a';
@@ -133,6 +136,26 @@ async function getQueue(app) {
   return { statusCode: res.statusCode, body: res.json() };
 }
 
+function bindForeignTrackerLifecycle(deps, slot, executionId) {
+  deps.invocationTracker.getActiveSlots = mock.fn(() => [slot]);
+  deps.invocationTracker.getUserId = mock.fn(() => 'user-b');
+  deps.invocationTracker.getExecutionId = mock.fn(() => executionId);
+  recordCodexAppServerLifecycle({
+    threadId: THREAD_ID,
+    catId: slot.catId,
+    invocationId: executionId,
+    lifecycle: {
+      stage: 'failed',
+      lastActivityAt: Date.now() - 500,
+      recoveryAttempt: 0,
+      failureReason: 'foreign-provider-failure',
+      turnStartSent: true,
+      turnAccepted: true,
+      itemObserved: true,
+    },
+  });
+}
+
 describe('F194 Phase B — /queue canonical liveness regression', () => {
   let app;
 
@@ -235,6 +258,34 @@ describe('F194 Phase B — /queue canonical liveness regression', () => {
     assert.deepEqual(body.activeInvocations, [slot], 'fall-back tracker-only on helper exception');
   });
 
+  it('F254 AC-D14a: helper-exception fallback omits lifecycle owned by another user', async () => {
+    const slot = { catId: 'codex', startedAt: Date.now() - 1_000 };
+    const foreignExecutionId = 'inv-f254-helper-fallback-foreign';
+    const deps = buildDeps({
+      invocationRecordStore: {
+        ...makeRecordStore([]),
+        listRunningByThread: () => {
+          throw new Error('redis down');
+        },
+      },
+      draftStore: makeDraftStore([]),
+    });
+    bindForeignTrackerLifecycle(deps, slot, foreignExecutionId);
+
+    try {
+      app = await makeApp(deps);
+      const { statusCode, body } = await getQueue(app);
+      assert.equal(statusCode, 200, 'system thread remains readable by the requesting user');
+      assert.deepEqual(
+        body.activeInvocations,
+        [slot],
+        'fail-open may preserve the bare slot but must not expose another user lifecycle',
+      );
+    } finally {
+      clearCodexAppServerLifecycle(THREAD_ID, 'codex', foreignExecutionId);
+    }
+  });
+
   it('legacy fallback: when stores are not wired, activeInvocations comes from tracker (backward compat)', async () => {
     const slot = { catId: 'gpt52', startedAt: Date.now() - 1_000 };
     const deps = buildDeps({
@@ -245,6 +296,227 @@ describe('F194 Phase B — /queue canonical liveness regression', () => {
     app = await makeApp(deps);
     const { body } = await getQueue(app);
     assert.deepEqual(body.activeInvocations, [slot]);
+  });
+
+  it('F254 AC-D14a: legacy fallback omits lifecycle owned by another user', async () => {
+    const slot = { catId: 'codex', startedAt: Date.now() - 1_000 };
+    const foreignExecutionId = 'inv-f254-legacy-fallback-foreign';
+    const deps = buildDeps();
+    bindForeignTrackerLifecycle(deps, slot, foreignExecutionId);
+
+    try {
+      app = await makeApp(deps);
+      const { statusCode, body } = await getQueue(app);
+      assert.equal(statusCode, 200, 'system thread remains readable by the requesting user');
+      assert.deepEqual(
+        body.activeInvocations,
+        [slot],
+        'legacy fallback may preserve the bare slot but must not expose another user lifecycle',
+      );
+    } finally {
+      clearCodexAppServerLifecycle(THREAD_ID, 'codex', foreignExecutionId);
+    }
+  });
+
+  it('F254 AC-D14a: active app-server lifecycle survives F5 through /queue hydration', async () => {
+    const slot = { catId: 'codex', startedAt: Date.now() - 1_000 };
+    const lifecycle = {
+      stage: 'active',
+      lastActivityAt: Date.now() - 500,
+      recoveryAttempt: 0,
+      threadId: 'codex-thread-1',
+      turnId: 'turn-1',
+      turnStartSent: true,
+      turnAccepted: true,
+      itemObserved: true,
+    };
+    recordCodexAppServerLifecycle({
+      threadId: THREAD_ID,
+      catId: 'codex',
+      invocationId: 'inv-f254-lifecycle',
+      lifecycle,
+    });
+    const deps = buildDeps();
+    deps.invocationTracker.getActiveSlots = mock.fn(() => [slot]);
+    deps.invocationTracker.getUserId = mock.fn(() => USER_ID);
+    deps.invocationTracker.getExecutionId = mock.fn(() => 'inv-f254-lifecycle');
+
+    try {
+      app = await makeApp(deps);
+      const { body } = await getQueue(app);
+      assert.deepEqual(body.activeInvocations, [
+        { ...slot, executionId: 'inv-f254-lifecycle', appServerLifecycle: lifecycle },
+      ]);
+    } finally {
+      clearCodexAppServerLifecycle(THREAD_ID, 'codex', 'inv-f254-lifecycle');
+    }
+  });
+
+  it('F254 AC-D14a: /queue keeps cleanup lifecycle only for the owning active execution', async () => {
+    const slot = { catId: 'codex', startedAt: Date.now() - 1_000 };
+    const ownerInvocationId = 'inv-f254-closing-owner';
+    let activeExecutionId = ownerInvocationId;
+    const deps = buildDeps();
+    deps.invocationTracker.getActiveSlots = mock.fn(() => [slot]);
+    deps.invocationTracker.getUserId = mock.fn(() => USER_ID);
+    deps.invocationTracker.getExecutionId = mock.fn(() => activeExecutionId);
+    const closing = {
+      stage: 'closing',
+      lastActivityAt: Date.now() - 100,
+      recoveryAttempt: 0,
+      threadId: 'codex-thread-closing',
+      turnId: 'turn-closing',
+      turnStartSent: true,
+      turnAccepted: true,
+      itemObserved: true,
+    };
+
+    recordCodexAppServerLifecycle({
+      threadId: THREAD_ID,
+      catId: 'codex',
+      invocationId: ownerInvocationId,
+      lifecycle: closing,
+    });
+
+    try {
+      app = await makeApp(deps);
+      const duringCleanup = await getQueue(app);
+      assert.deepEqual(
+        duringCleanup.body.activeInvocations,
+        [{ ...slot, executionId: ownerInvocationId, appServerLifecycle: closing }],
+        'F5 during bounded cleanup must hydrate the canonical closing snapshot',
+      );
+
+      const cleanupFailed = { ...closing, stage: 'closed', lastActivityAt: Date.now(), cleanupError: 'close failed' };
+      recordCodexAppServerLifecycle({
+        threadId: THREAD_ID,
+        catId: 'codex',
+        invocationId: ownerInvocationId,
+        lifecycle: cleanupFailed,
+      });
+      const afterCleanupFailure = await getQueue(app);
+      assert.deepEqual(
+        afterCleanupFailure.body.activeInvocations,
+        [{ ...slot, executionId: ownerInvocationId, appServerLifecycle: cleanupFailed }],
+        'cleanup failure remains attributable while the owning execution is still active',
+      );
+
+      activeExecutionId = 'inv-f254-replacement';
+      const afterReplacement = await getQueue(app);
+      assert.deepEqual(
+        afterReplacement.body.activeInvocations,
+        [{ ...slot, executionId: activeExecutionId }],
+        'a replacement execution must never inherit the previous execution lifecycle',
+      );
+    } finally {
+      clearCodexAppServerLifecycle(THREAD_ID, 'codex', ownerInvocationId);
+    }
+  });
+
+  it('F254 AC-D14a: canonical parent→child liveness hydrates only the current execution owner', async () => {
+    const now = 2_000_000;
+    const parentExecutionId = 'inv-f254-canonical-parent';
+    const childTurnId = 'inv-f254-canonical-child';
+    const replacementExecutionId = 'inv-f254-canonical-replacement';
+    const foreignExecutionId = 'inv-f254-canonical-foreign';
+    const canonicalStartedAt = now - 2_000;
+    const slot = { catId: 'codex', startedAt: now - 3_000 };
+    const record = makeRecord({
+      id: parentExecutionId,
+      targetCats: ['codex'],
+      createdAt: now - 4_000,
+      updatedAt: now - 100,
+    });
+    const draft = makeDraft({
+      invocationId: childTurnId,
+      catId: 'codex',
+      createdAt: canonicalStartedAt,
+      updatedAt: now - 50,
+    });
+    let activeExecutionId = parentExecutionId;
+    let trackerUserId = USER_ID;
+    const deps = buildDeps({
+      invocationRecordStore: makeRecordStore([record]),
+      draftStore: makeDraftStore([draft]),
+      invocationRegistry: {
+        getRecord: mock.fn(async (id) =>
+          id === childTurnId
+            ? {
+                parentInvocationId: parentExecutionId,
+                threadId: THREAD_ID,
+                userId: USER_ID,
+                catId: 'codex',
+                createdAt: canonicalStartedAt,
+              }
+            : null,
+        ),
+        getLatestId: mock.fn(() => childTurnId),
+      },
+    });
+    deps.invocationTracker.getActiveSlots = mock.fn(() => [slot]);
+    deps.invocationTracker.getUserId = mock.fn(() => trackerUserId);
+    deps.invocationTracker.getExecutionId = mock.fn(() => activeExecutionId);
+    const closing = {
+      stage: 'closing',
+      lastActivityAt: now - 25,
+      recoveryAttempt: 0,
+      threadId: 'codex-thread-canonical',
+      turnId: 'turn-canonical',
+      turnStartSent: true,
+      turnAccepted: true,
+      itemObserved: true,
+    };
+
+    recordCodexAppServerLifecycle({
+      threadId: THREAD_ID,
+      catId: 'codex',
+      invocationId: parentExecutionId,
+      lifecycle: closing,
+    });
+
+    const origNow = Date.now;
+    Date.now = () => now;
+    try {
+      app = await makeApp(deps);
+      const duringCleanup = await getQueue(app);
+      assert.deepEqual(duringCleanup.body.activeInvocations, [
+        {
+          catId: 'codex',
+          startedAt: canonicalStartedAt,
+          executionId: parentExecutionId,
+          turnInvocationId: childTurnId,
+          appServerLifecycle: closing,
+        },
+      ]);
+
+      activeExecutionId = replacementExecutionId;
+      const afterReplacement = await getQueue(app);
+      assert.deepEqual(
+        afterReplacement.body.activeInvocations,
+        [{ catId: 'codex', startedAt: canonicalStartedAt, executionId: replacementExecutionId }],
+        'a replacement tracker owner must inherit neither the previous child nor its lifecycle snapshot',
+      );
+
+      trackerUserId = 'user-b';
+      activeExecutionId = foreignExecutionId;
+      const withForeignTrackerOwner = await getQueue(app);
+      assert.deepEqual(
+        withForeignTrackerOwner.body.activeInvocations,
+        [
+          {
+            catId: 'codex',
+            startedAt: canonicalStartedAt,
+            executionId: parentExecutionId,
+            turnInvocationId: childTurnId,
+            appServerLifecycle: closing,
+          },
+        ],
+        'a tracker slot owned by another user must not replace the canonical lifecycle owner',
+      );
+    } finally {
+      Date.now = origNow;
+      clearCodexAppServerLifecycle(THREAD_ID, 'codex', parentExecutionId);
+    }
   });
 
   it('cloud R15 P2: duplicate catId entries deduped (keep earliest startedAt per cat)', async () => {

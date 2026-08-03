@@ -453,6 +453,53 @@
     "owner": "codex"
   },
   {
+    "id": "feature-f258-visible-cafe",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/features/F258-visible-cafe.md", "anchor": "F258: 看得见的猫咖 Visible Café" },
+    "structureSource": {
+      "path": "docs/features/F258-visible-cafe.md",
+      "anchor": "Primary Journey: 把家放在次屏上，看一晚"
+    },
+    "bodySource": { "path": "docs/features/F258-visible-cafe.md", "anchor": "Entry" },
+    "contexts": ["thinking", "concierge_idle"],
+    "audience": ["cvo"],
+    "body": "想看看猫猫在各自星球里做什么？点左侧主导航的「猫猫星球」；半透明打盹表示数据断流，不是猫不在了。",
+    "action": {
+      "type": "open_source",
+      "label": "打开 F258",
+      "sourceRef": { "path": "docs/features/F258-visible-cafe.md", "anchor": "User Journey" }
+    },
+    "owner": "codex-sol"
+  },
+  {
+    "id": "feature-f265-wechat-visible-reader",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F265-wechat-visible-reader.md",
+      "anchor": "WeChat Local Reader"
+    },
+    "structureSource": {
+      "path": "docs/features/F265-wechat-visible-reader.md",
+      "anchor": "Journey A: 不复制，直接让猫看当前微信会话"
+    },
+    "bodySource": {
+      "path": "docs/features/F265-wechat-visible-reader.md",
+      "anchor": "Success evidence"
+    },
+    "contexts": ["thinking", "concierge_idle"],
+    "audience": ["cvo"],
+    "body": "在 Mac 微信中选中目标会话并短时授权后，对猫说「看一下微信」，猫就能按需读取当前页，不用再复制粘贴。",
+    "action": {
+      "type": "open_source",
+      "label": "打开 F265",
+      "sourceRef": {
+        "path": "docs/features/F265-wechat-visible-reader.md",
+        "anchor": "WeChat Visible Reader"
+      }
+    },
+    "owner": "codex-sol"
+  },
+  {
     "id": "feature-f237-prompt-injection-visibility",
     "kind": "feature",
     "sourceRef": {
@@ -496,6 +543,34 @@
     "owner": "opus-47"
   },
   {
+    "id": "feature-f139-schedule-mutation-approval",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F139-unified-schedule-abstraction.md",
+      "anchor": "Post-close Governance: F246 Approval Gate for Schedule Mutations"
+    },
+    "structureSource": {
+      "path": "docs/features/F139-unified-schedule-abstraction.md",
+      "anchor": "Cat-proxy create and permanent-delete mutations"
+    },
+    "bodySource": {
+      "path": "docs/features/F139-unified-schedule-abstraction.md",
+      "anchor": "Pause/resume remains direct"
+    },
+    "contexts": ["thinking", "waiting_external", "feature_dev"],
+    "audience": ["cvo", "developer", "maintainer"],
+    "body": "猫调用注册或永久删除日程，只会提交 Approval Hub 审批；批准前任务不会创建或删除。暂停与恢复仍在严格身份校验后直接执行。",
+    "action": {
+      "type": "open_source",
+      "label": "查看 F139 审批边界",
+      "sourceRef": {
+        "path": "docs/features/F139-unified-schedule-abstraction.md",
+        "anchor": "Post-close Governance: F246 Approval Gate for Schedule Mutations"
+      }
+    },
+    "owner": "codex-sol"
+  },
+  {
     "id": "feature-f246-approval-hub",
     "kind": "feature",
     "sourceRef": { "path": "docs/features/F246-approval-hub.md", "anchor": "Phase A" },
@@ -506,6 +581,50 @@
     "body": "有提案等你拍板？点左侧铃铛打开审批中心——待审项一目了然。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "opus"
+  },
+  {
+    "id": "feature-f281-structured-rejection-feedback",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F281-feedback-channel-first-class.md",
+      "anchor": "Primary Journey: 拒绝一张提案卡时顺手说清为什么"
+    },
+    "structureSource": {
+      "path": "docs/features/F281-feedback-channel-first-class.md",
+      "anchor": "AC-B1"
+    },
+    "bodySource": {
+      "path": "docs/features/F281-feedback-channel-first-class.md",
+      "anchor": "不强制填写拒因"
+    },
+    "contexts": ["thinking", "concierge_idle"],
+    "audience": ["cvo"],
+    "body": "在审批中心拒绝提案时，可以顺手选择原因；选「其他」还能补充详情。不想填写也能直接跳过，不会卡住裁决。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多",
+      "draftPrompt": "请介绍审批中心拒绝提案时可选的结构化原因、其他详情和跳过方式。"
+    },
+    "owner": "codex-sol"
+  },
+  {
+    "id": "feature-f255-present-loop",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/features/F255-auto-dream.md", "anchor": "Phase A.1：猫猫星球“生活与作息”配置面" },
+    "structureSource": {
+      "path": "docs/features/F255-auto-dream.md",
+      "anchor": "产品配置面：猫的家，不是 Schedule Panel"
+    },
+    "bodySource": { "path": "docs/features/F255-auto-dream.md", "anchor": "配置旅程" },
+    "contexts": ["thinking", "concierge_open"],
+    "audience": ["cvo"],
+    "body": "想给一只猫一段不用交作业的私人时间？去猫猫星球 `/starry` 点它，打开「生活与作息」；还能在同一个房间翻它愿意留下的日记。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "帮我预览",
+      "draftPrompt": "请先帮我预览一只猫的私人时间作息和成本，等我确认后再写入；不要创建通用 Schedule 任务。"
+    },
+    "owner": "codex-sol"
   },
   {
     "id": "feature-voice-interaction",
@@ -554,6 +673,66 @@
     "body": "对话太多找不到？给 Thread 打标签（比如「重要」「待办」），方便在侧边栏筛选。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "opus"
+  },
+  {
+    "id": "feature-f127-native-cli-effort",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/features/F127-cat-instance-management.md", "anchor": "R-11" },
+    "structureSource": { "path": "docs/features/F127-cat-instance-management.md", "anchor": "遗留项" },
+    "bodySource": { "path": "docs/features/F127-cat-instance-management.md", "anchor": "R-11" },
+    "contexts": ["concierge_open", "feature_dev"],
+    "audience": ["cvo", "developer"],
+    "body": "成员的 CLI Effort 可从维护建议里选择，也可输入 provider 新增的原生值；保存后从下一次调用生效，最终由 CLI 校验。",
+    "action": {
+      "type": "open_source",
+      "label": "查看成员配置说明",
+      "sourceRef": { "path": "docs/features/F127-cat-instance-management.md", "anchor": "R-11" }
+    },
+    "owner": "codex-sol"
+  },
+  {
+    "id": "feature-thread-effort-overrides",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/features/F262-per-thread-cat-effort-overrides.md", "anchor": "User Journey" },
+    "structureSource": {
+      "path": "docs/features/F262-per-thread-cat-effort-overrides.md",
+      "anchor": "Primary Journey: 给当前对话里的猫选择思考档位"
+    },
+    "bodySource": { "path": "docs/features/F262-per-thread-cat-effort-overrides.md", "anchor": "Why" },
+    "contexts": ["thinking", "concierge_open"],
+    "audience": ["cvo", "developer"],
+    "body": "同一只猫在不同对话想得深浅不同？打开目标对话的 ⋮ → 思考档位，可按猫设置本对话专属额度。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "怎么设置",
+      "draftPrompt": "请告诉我怎么在某个对话里单独设置一只猫的思考档位，以及继承是什么意思。"
+    },
+    "owner": "codex-sol"
+  },
+  {
+    "id": "feature-per-target-message-receipt",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F264-per-target-message-receipt.md",
+      "anchor": "状态机基准"
+    },
+    "structureSource": {
+      "path": "docs/features/F264-per-target-message-receipt.md",
+      "anchor": "operator UX 放行"
+    },
+    "bodySource": {
+      "path": "docs/features/F264-per-target-message-receipt.md",
+      "anchor": "Terminal-Consumption Visible Receipt（2026-07-31）"
+    },
+    "contexts": ["thinking", "long_running"],
+    "audience": ["cvo"],
+    "body": "跨线程消息没有猫正文也不等于没唤醒：看原消息下方「系统回执」，能分清已送达、已唤醒、正文已读、静默消费或失败回队列。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "回执怎么看",
+      "draftPrompt": "请告诉我跨线程消息下方的已送达、已唤醒、静默消费和失败回队列分别是什么意思。"
+    },
+    "owner": "codex-sol"
   },
   {
     "id": "feature-voting",
@@ -763,18 +942,30 @@
     "owner": "opus-48"
   },
   {
-    "id": "feature-f127-native-cli-effort",
+    "id": "feature-f228-skill-mount-management",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F127-cat-instance-management.md", "anchor": "R-11" },
-    "structureSource": { "path": "docs/features/F127-cat-instance-management.md", "anchor": "遗留项" },
-    "bodySource": { "path": "docs/features/F127-cat-instance-management.md", "anchor": "R-11" },
-    "contexts": ["concierge_open", "feature_dev"],
-    "audience": ["cvo"],
-    "body": "在 Hub 成员的「高级运行时参数」里，CLI Effort 可选 preset，也可输入 Codex 等 CLI 的原生值（如 ultra）；保存后从下一次调用生效。",
+    "sourceRef": {
+      "path": "docs/features/F228-multi-project-skill-mount-management.md",
+      "anchor": "Multi-Project Skill Mount Management"
+    },
+    "structureSource": {
+      "path": "docs/features/F228-multi-project-skill-mount-management.md",
+      "anchor": "## User Journey"
+    },
+    "bodySource": {
+      "path": "docs/features/F228-multi-project-skill-mount-management.md",
+      "anchor": "Users should be able to manage skills per project and per provider from the Console"
+    },
+    "contexts": ["thinking", "feature_dev", "concierge_open"],
+    "audience": ["cvo", "developer"],
+    "body": "Settings 里可以按项目管理 skill 挂载：选项目、看 drift、按 provider 开关，不用手改 .codex/.claude skills。",
     "action": {
       "type": "open_source",
-      "label": "查看成员配置说明",
-      "sourceRef": { "path": "docs/features/F127-cat-instance-management.md", "anchor": "R-11" }
+      "label": "打开 spec",
+      "sourceRef": {
+        "path": "docs/features/F228-multi-project-skill-mount-management.md",
+        "anchor": "Multi-Project Skill Mount Management"
+      }
     },
     "owner": "codex"
   },
@@ -786,13 +977,97 @@
     "bodySource": { "path": "docs/features/F245-friction-signal-eval.md", "anchor": "Why" },
     "contexts": ["thinking", "feature_dev"],
     "audience": ["cvo"],
-    "body": "觉得某个地方用着别扭？去 Eval Hub 看「摩擦信号」——爪感差、cancel、反馈都汇在一起了。标「建议修复」的猫会自动跟进。",
+    "body": "觉得某个地方用着别扭？Eval Hub 会把爪感差、cancel、反馈汇成周期报告；标「建议修复」的是待判断线索，不会自动给猫派活。",
     "action": {
       "type": "open_source",
       "label": "打开 spec",
       "sourceRef": { "path": "docs/features/F245-friction-signal-eval.md", "anchor": "Friction Signal Eval" }
     },
     "owner": "gpt52"
+  },
+  {
+    "id": "feature-f260-entity-conflict-resolution",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F260-write-side-autopsy-entity-deref.md",
+      "anchor": "Post-Close entity conflict 产品闭环"
+    },
+    "structureSource": {
+      "path": "docs/features/F260-write-side-autopsy-entity-deref.md",
+      "anchor": "KD-9"
+    },
+    "bodySource": {
+      "path": "docs/features/F260-write-side-autopsy-entity-deref.md",
+      "anchor": "冲突是显式审批状态"
+    },
+    "contexts": ["thinking", "concierge_open"],
+    "audience": ["cvo"],
+    "body": "Approval Hub 的实体提案撞名时，先看 before/after 与候选，再明确选合并、替换、纠错、转移或多义；冲突不再是错误终点。",
+    "action": {
+      "type": "open_source",
+      "label": "查看裁决说明",
+      "sourceRef": {
+        "path": "docs/features/F260-write-side-autopsy-entity-deref.md",
+        "anchor": "Post-Close entity conflict 产品闭环"
+      }
+    },
+    "owner": "codex"
+  },
+  {
+    "id": "feature-f276-private-person-memory",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F276-people-relationship-memory.md",
+      "anchor": "Phase A: In-turn capture + typed private truth"
+    },
+    "structureSource": {
+      "path": "docs/features/F276-people-relationship-memory.md",
+      "anchor": "Primary Journey: 介绍一次，以后猫认得"
+    },
+    "bodySource": {
+      "path": "docs/features/F276-people-relationship-memory.md",
+      "anchor": "第一次出现当轮"
+    },
+    "contexts": ["thinking", "concierge_open"],
+    "audience": ["cvo"],
+    "body": "第一次介绍或纠正重要人物时，猫就能亮出私域人物记忆卡；你在 Approval Hub 逐项同意后才会写入，不必重复三次。",
+    "action": {
+      "type": "open_source",
+      "label": "查看人物记忆说明",
+      "sourceRef": {
+        "path": "docs/features/F276-people-relationship-memory.md",
+        "anchor": "Primary Journey: 介绍一次，以后猫认得"
+      }
+    },
+    "owner": "codex-sol"
+  },
+  {
+    "id": "feature-f281-exact-proposal-forget",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F281-feedback-channel-first-class.md",
+      "anchor": "AC-C1"
+    },
+    "structureSource": {
+      "path": "packages/mcp-server/src/tools/person-memory-lifecycle-tools.ts",
+      "anchor": "cat_cafe_forget_person_memory_proposal"
+    },
+    "bodySource": {
+      "path": "docs/features/F281-feedback-channel-first-class.md",
+      "anchor": "owner-authenticated exact"
+    },
+    "contexts": ["thinking", "concierge_open"],
+    "audience": ["cvo"],
+    "body": "拒绝一张尚未绑定人物的人物记忆提案后，如果还想连同拒因记录一起彻底删除，可以让猫按这张卡的 exact proposal ID 忘却；已绑定人物的记忆仍走整个人物关系忘却。",
+    "action": {
+      "type": "open_source",
+      "label": "查看删除边界",
+      "sourceRef": {
+        "path": "docs/features/F281-feedback-channel-first-class.md",
+        "anchor": "AC-C1"
+      }
+    },
+    "owner": "codex-sol"
   },
   {
     "id": "feature-f205-video-plugins",
@@ -837,5 +1112,33 @@
       "sourceRef": { "path": "docs/features/F273-desktop-in-app-update.md", "anchor": "User Journey" }
     },
     "owner": "opus"
+  },
+  {
+    "id": "capability-concept-demo-design",
+    "kind": "capability",
+    "sourceRef": {
+      "path": "cat-cafe-skills/concept-demo-design/SKILL.md",
+      "anchor": "Concept Demo Design — 让理念先被看见"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/concept-demo-design/SKILL.md",
+      "anchor": "先画信号路径"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/concept-demo-design/SKILL.md",
+      "anchor": "写 Demo Contract"
+    },
+    "contexts": ["thinking", "feature_dev"],
+    "audience": ["cvo", "developer"],
+    "body": "想把抽象理念讲清楚？先让猫猫冻结 Demo Contract，再做可录屏的交互概念演示；它会先画信号路径、诚实边界和灵魂画面。",
+    "action": {
+      "type": "open_source",
+      "label": "查看概念 Demo 方法",
+      "sourceRef": {
+        "path": "cat-cafe-skills/concept-demo-design/SKILL.md",
+        "anchor": "Concept Demo Design — 让理念先被看见"
+      }
+    },
+    "owner": "codex-sol"
   }
 ]

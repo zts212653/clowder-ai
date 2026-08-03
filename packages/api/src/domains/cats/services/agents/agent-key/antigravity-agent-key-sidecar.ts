@@ -6,7 +6,15 @@ import type { AgentKeyRegistry } from './AgentKeyRegistry.js';
 
 const DEFAULT_ANTIGRAVITY_AGENT_KEY_DIR = join(homedir(), '.cat-cafe', 'agent-keys');
 const DEFAULT_ANTIGRAVITY_AGENT_KEY_FILE = join(DEFAULT_ANTIGRAVITY_AGENT_KEY_DIR, 'antigravity.secret');
-const DEFAULT_ANTIGRAVITY_CAT_IDS = ['antigravity', 'antig-opus'] as const;
+// The global Antigravity/agy MCP process is shared by every cat whose CLI carrier is `agy`.
+const DEFAULT_ANTIGRAVITY_CAT_IDS = [
+  'antigravity',
+  'antig-opus',
+  'agy-opus',
+  'gemini',
+  'gemini25',
+  'gemini35',
+] as const;
 
 export interface AntigravityAgentKeySidecarOptions {
   catId?: string;

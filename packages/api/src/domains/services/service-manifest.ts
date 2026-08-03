@@ -38,6 +38,9 @@ export interface ServiceManifest {
   /** Timeout in ms for deep health probe (default 20000). Must be much longer
    *  than the standard 1500ms health timeout because synthesis probes are slow. */
   deepHealthTimeoutMs?: number;
+  /** Optional health-payload identity contract. A 2xx response is not enough
+   *  when one service id can dispatch multiple model/backend implementations. */
+  healthIdentity?: 'asr-model-backend';
   prerequisites?: {
     runtime?: string;
     venvPath?: string;
@@ -66,6 +69,7 @@ export interface ServiceHealthResult {
   ok: boolean;
   status?: number;
   error?: string | null;
+  details?: Record<string, unknown>;
 }
 
 export interface ServiceConfig {
@@ -184,6 +188,9 @@ export const SERVICE_MANIFESTS: readonly ServiceManifest[] = [
     endpointEnvVars: ['WHISPER_URL', 'NEXT_PUBLIC_WHISPER_URL'],
     defaultEndpoint: 'http://localhost:9876',
     healthPath: '/health',
+    deepHealthPath: '/health/deep',
+    deepHealthTimeoutMs: 60_000,
+    healthIdentity: 'asr-model-backend',
     prerequisites: {
       runtime: 'python3.10+',
       venvPath: '~/.cat-cafe/whisper-venv',
@@ -427,7 +434,20 @@ export function resolveEffectiveServiceConfig(
   config: ServiceConfig | undefined,
   env: NodeJS.ProcessEnv = process.env,
 ): ServiceConfig | undefined {
-  return config ?? deriveLegacyServiceConfig(service, env);
+  const legacy = deriveLegacyServiceConfig(service, env);
+  // F195 historically used QWEN3_ASR_* before qwen3-asr and Whisper were
+  // unified under whisper-stt. An explicit active Qwen contract is stronger
+  // than stale persisted model identity left by a previous backend switch.
+  // Primary ASR_ENABLED/WHISPER_MODEL still wins inside deriveLegacyServiceConfig.
+  if (
+    config &&
+    service.id === 'whisper-stt' &&
+    legacy?.selectedModel?.includes('Qwen3-ASR') &&
+    config.selectedModel !== legacy.selectedModel
+  ) {
+    return { ...config, enabled: legacy.enabled, selectedModel: legacy.selectedModel };
+  }
+  return config ?? legacy;
 }
 
 function replaceEndpointPort(endpoint: string | null, port: number): string | null {
@@ -534,10 +554,21 @@ export async function fetchServiceHealth(url: string, service?: ServiceManifest)
   const timeoutMs = isDeepProbe ? (service?.deepHealthTimeoutMs ?? 20_000) : 1500;
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    let details: Record<string, unknown> | undefined;
+    try {
+      const payload: unknown = await response.json();
+      if (typeof payload === 'object' && payload !== null && !Array.isArray(payload)) {
+        details = payload as Record<string, unknown>;
+      }
+    } catch {
+      // A malformed health response remains represented by ok/status below;
+      // identity-bound services fail closed when details are absent.
+    }
     return {
       ok: response.ok,
       status: response.status,
       error: response.ok ? null : `HTTP ${response.status}`,
+      ...(details ? { details } : {}),
     };
   } catch (error) {
     return {
@@ -545,6 +576,41 @@ export async function fetchServiceHealth(url: string, service?: ServiceManifest)
       error: error instanceof Error ? error.message : 'Service health check failed',
     };
   }
+}
+
+function expectedAsrBackend(model: string): 'mlx-audio' | 'mlx-whisper' | 'faster-whisper' {
+  if (model.includes('Qwen3-ASR')) return 'mlx-audio';
+  if (model.startsWith('mlx-community/whisper-')) return 'mlx-whisper';
+  return 'faster-whisper';
+}
+
+function logSafeIdentity(value: string): string {
+  return JSON.stringify(value.slice(0, 200));
+}
+
+export function serviceHealthIdentityMatches(
+  service: ServiceManifest,
+  config: ServiceConfig | undefined,
+  health: ServiceHealthResult,
+): { matches: boolean; reason?: string } {
+  if (!service.healthIdentity) return { matches: true };
+  const desiredModel = config?.selectedModel?.trim();
+  if (!desiredModel) return { matches: false, reason: 'desired model is not configured' };
+  const liveModel = health.details?.model;
+  const liveBackend = health.details?.backend;
+  if (typeof liveModel !== 'string' || typeof liveBackend !== 'string') {
+    return { matches: false, reason: 'health response omitted model/backend identity' };
+  }
+  const desiredBackend = expectedAsrBackend(desiredModel);
+  if (liveModel !== desiredModel || liveBackend !== desiredBackend) {
+    return {
+      matches: false,
+      reason:
+        `desired model=${logSafeIdentity(desiredModel)} backend=${logSafeIdentity(desiredBackend)}; ` +
+        `live model=${logSafeIdentity(liveModel)} backend=${logSafeIdentity(liveBackend)}`,
+    };
+  }
+  return { matches: true };
 }
 
 export async function resolveServiceState(

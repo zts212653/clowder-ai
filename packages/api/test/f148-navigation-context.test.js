@@ -335,7 +335,16 @@ describe('formatNavigationHeader', () => {
       },
       tasks: [],
     });
-    assert.ok(header.includes('co-creator本地 2026-05-31 23:20 America/Los_Angeles / 06:20 UTC'), header);
+    assert.ok(header.includes('co-creator本地 2026-05-31 23:20 America/Los_Angeles / 2026-06-01 06:20 UTC'), header);
+  });
+
+  it('injects a per-invocation temporal envelope with local and UTC dates', () => {
+    const header = formatNavigationHeader({ baton: null, tasks: [] }, { nowMs: Date.UTC(2026, 6, 6, 3, 14, 0, 0) });
+    assert.ok(
+      header.includes('当前时间: co-creator本地 2026-07-05 20:14 America/Los_Angeles / 2026-07-06 03:14 UTC'),
+      header,
+    );
+    assert.ok(header.includes('relative terms use this now'), header);
   });
 
   it('includes stale hold warning when present', () => {
@@ -382,5 +391,35 @@ describe('formatNavigationHeader', () => {
       tasks: [{ id: 't1', title: 'Deploy', status: 'todo', ownerCatId: null }],
     });
     assert.ok(header.includes('未分配'));
+  });
+
+  it('renders a structured thread lookup when truth source is not yet located', () => {
+    const header = formatNavigationHeader({
+      baton: null,
+      tasks: [],
+      threadId: 'thread-drill',
+      truthSource: null,
+    });
+
+    assert.ok(header.includes('真相源: 未定位'));
+    assert.ok(header.includes('threadId=thread-drill'), header);
+    assert.ok(header.includes('cat_cafe_get_thread_context({ threadId: "thread-drill" })'), header);
+    assert.ok(!header.includes('query: "thread-drill"'), header);
+    assert.ok(!header.includes('cat_cafe_search_evidence'), header);
+  });
+
+  it('renders the canonical source ref, not only its display label', () => {
+    const header = formatNavigationHeader({
+      baton: null,
+      tasks: [],
+      threadId: 'thread-drill',
+      truthSource: {
+        label: 'F263 spec',
+        ref: 'docs/features/F263-memory-system.md',
+        provenance: 'canonical',
+      },
+    });
+
+    assert.ok(header.includes('docs/features/F263-memory-system.md'), header);
   });
 });

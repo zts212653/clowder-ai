@@ -1,12 +1,14 @@
 // F200 Phase A: Correlates ToolEventLog entries into RecallEvents
 
 import { randomUUID } from 'node:crypto';
+import { isRecallResultStatus } from '@cat-cafe/shared';
 import type Database from 'better-sqlite3';
 import type { ConsumedEntry, RecallCandidate, RecallEvent, TargetRef } from './f200-types.js';
 import { parseShellReadPaths } from './parse-shell-read-paths.js';
+import { asPushRecallSurface, deterministicPushRecallId } from './push-recall.js';
 import { targetMatch } from './recall-target-match.js';
 
-const MEMORY_TOOLS = new Set(['search_evidence', 'graph_resolve', 'list_recent']);
+const MEMORY_TOOLS = new Set(['search_evidence', 'graph_resolve', 'list_recent', 'session_bootstrap', 'cold_context']);
 
 const CONSUMED_METHODS = new Set([
   'Read',
@@ -44,10 +46,11 @@ export class RecallEventCorrelator {
     this.insertStmt = db.prepare(`
       INSERT OR IGNORE INTO recall_events
         (recall_id, cat_id, invocation_id, tool_name, query, mode, scope,
-         candidates_json, result_count, consumed_json, reformulated, fell_back_to_grep,
+         candidates_json, result_count, result_status, consumed_json, reformulated, fell_back_to_grep,
          abandoned, next_graph_resolve_after_read, token_cost, timestamp,
-         shadow_ranking_json, result_set_id, attribution_clarity, thread_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         shadow_ranking_json, result_set_id, attribution_clarity, thread_id,
+         source, push_surface, presented, inspected, outcome, source_event_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
   }
 
@@ -109,6 +112,8 @@ export class RecallEventCorrelator {
       const fellBackToGrep = this.hasFellBackToGrep(sameCatWindow);
       const abandoned = consumed.length === 0 && !reformulated;
       const nextGraphResolveAfterRead = this.hasGraphAfterRead(sameCatWindow);
+      const pushSurface = asPushRecallSurface(event.summary._f263PushSurface);
+      const source = pushSurface ? 'push' : 'pull';
 
       const resultSetId = bundleByIndex.get(i);
       let attributionClarity: 'clean' | 'ambiguous' | undefined;
@@ -118,16 +123,42 @@ export class RecallEventCorrelator {
         attributionClarity = overlapped ? 'ambiguous' : 'clean';
       }
 
+      // F263 P1: derive stable source event identity for retry idempotency.
+      // Preferred path: _toolUseId from provider is invocation-local
+      // (tool-span-tracker.ts:7-9), namespaced with invocationId+catId.
+      // Fallback: composite of event properties that are both stable across
+      // retries AND per-event unique. event.turnIndex alone is NOT safe —
+      // route layers fall back to 0 when msg.turnIndex is undefined
+      // (route-parallel.ts:1126, route-serial.ts:1828), so multiple memory
+      // tool calls can share turnIndex=0 → collision → silent data loss.
+      // Composite: invocationId:catId:toolName:timestamp:loopIndex
+      //   - invocationId+catId scope to the invocation
+      //   - toolName+timestamp are stable event properties (same on retry)
+      //   - loopIndex (i) disambiguates same-ms same-tool events within one
+      //     correlation call; it's deterministic for a given input array
+      const rawToolUseId = (event.summary as Record<string, unknown>)?._toolUseId;
+      const sourceEventId =
+        typeof rawToolUseId === 'string'
+          ? `${event.invocationId}:${event.catId}:${rawToolUseId}`
+          : `${event.invocationId}:${event.catId}:${event.toolName}:${event.timestamp}:${i}`;
+
       results.push({
-        recallId: randomUUID(),
+        recallId: pushSurface ? deterministicPushRecallId({ ...event, surface: pushSurface }) : randomUUID(),
+        sourceEventId,
         catId: event.catId,
         invocationId: event.invocationId,
         toolName: event.toolName as RecallEvent['toolName'],
+        source,
+        ...(pushSurface ? { pushSurface } : {}),
+        presented: true,
+        inspected: consumed.length > 0,
+        outcome: consumed.length > 0 ? 'used' : 'ignored',
         query: this.extractQuery(event),
         mode: asString(event.summary.mode),
         scope: asString(event.summary.scope),
         candidates,
-        resultCount: asNumber(event.summary.resultCount),
+        resultCount: asNumber(event.summary.resultCount) ?? (pushSurface ? candidates.length : undefined),
+        resultStatus: asRecallResultStatus(event.summary),
         consumed,
         reformulated,
         fellBackToGrep,
@@ -167,6 +198,7 @@ export class RecallEventCorrelator {
           e.scope ?? null,
           JSON.stringify(e.candidates),
           e.resultCount ?? null,
+          e.resultStatus ?? null,
           JSON.stringify(e.consumed),
           e.reformulated ? 1 : 0,
           e.fellBackToGrep ? 1 : 0,
@@ -178,6 +210,12 @@ export class RecallEventCorrelator {
           e.resultSetId ?? null,
           e.attributionClarity ?? null,
           e.threadId ?? '',
+          e.source,
+          e.pushSurface ?? null,
+          e.presented ? 1 : 0,
+          e.inspected ? 1 : 0,
+          e.outcome,
+          e.sourceEventId ?? null,
         ];
         this.insertStmt.run(params);
       }
@@ -313,6 +351,14 @@ export class RecallEventCorrelator {
   private extractQuery(event: RawEvent): string {
     return asString(event.summary.query) ?? '';
   }
+}
+
+function asRecallResultStatus(summary: Record<string, unknown>): RecallEvent['resultStatus'] {
+  if (isRecallResultStatus(summary.resultStatus)) return summary.resultStatus;
+  const resultCount = asNumber(summary.resultCount);
+  if (resultCount === 0) return 'no_results';
+  if (resultCount != null && resultCount >= 1) return 'counted';
+  return summary._resultMerged === true ? 'parser_miss' : 'result_unmerged';
 }
 
 function asString(v: unknown): string | undefined {

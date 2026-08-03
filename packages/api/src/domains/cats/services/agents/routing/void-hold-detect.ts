@@ -100,6 +100,8 @@ export interface VoidHoldInput {
   readonly lineStartMentions: readonly string[];
   readonly structuredTargetCats: readonly string[];
   readonly hasCoCreatorLineStartMention?: boolean;
+  /** A server-verified callback-backed wait is already this turn's routing exit. */
+  readonly hasVerifiedEventBackedRoutingExit?: boolean;
 }
 
 export interface VoidHoldEvaluation {
@@ -126,6 +128,7 @@ export function evaluateVoidHold(input: VoidHoldInput): VoidHoldEvaluation {
   if (input.lineStartMentions.length > 0) return { shouldEmit: false, matchedPattern: matched };
   if (input.structuredTargetCats.length > 0) return { shouldEmit: false, matchedPattern: matched };
   if (input.hasCoCreatorLineStartMention) return { shouldEmit: false, matchedPattern: matched };
+  if (input.hasVerifiedEventBackedRoutingExit) return { shouldEmit: false, matchedPattern: matched };
   return { shouldEmit: true, matchedPattern: matched };
 }
 

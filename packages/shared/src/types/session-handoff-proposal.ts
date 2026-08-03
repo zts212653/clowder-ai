@@ -13,6 +13,8 @@
  *   post-commit（enqueue → finalize）只 recover-forward
  */
 
+import type { ApprovalPublication } from './approval-hub.js';
+import type { HumanDispositionFeedbackInput, HumanDispositionLedgerEntry } from './human-disposition-feedback.js';
 import type { CatId } from './ids.js';
 
 /**
@@ -56,6 +58,8 @@ export interface SessionHandoffProposal {
   /** 要封印的当前 session */
   sourceSessionId: string;
   sourceCatId: CatId;
+  /** Exact trigger message persisted at create time; absent only on legacy proposals. */
+  sourceMessageId?: string;
   userId: string;
   /** 猫亲手写的五件套留言 */
   note: CatHandoffNote;
@@ -71,6 +75,14 @@ export interface SessionHandoffProposal {
 
   /** 确认卡 messageId（可见性 gate） */
   cardMessageId?: string;
+
+  /** Phase-I publication state; absent only on pre-Phase-I records. */
+  publication?: ApprovalPublication;
+
+  /** F281: optional structured feedback captured atomically with rejection. */
+  latestHumanDisposition?: HumanDispositionFeedbackInput;
+  /** F281 Phase C: immutable producer-owned episode/envelope truth. */
+  humanDispositionLedgerEntry?: HumanDispositionLedgerEntry;
 
   createdAt: number;
   updatedAt: number;

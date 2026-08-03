@@ -59,6 +59,16 @@ export interface ReviewAutomationState {
   readonly lastCommentCursor?: number;
   readonly lastInlineCommentCursor?: number;
   readonly lastConversationCommentCursor?: number;
+  /**
+   * True while a legacy combined cursor is being replayed into the two source-specific
+   * cursors. Backfill through the frozen source targets remains state-only until durable.
+   */
+  readonly commentCursorMigrationPending?: boolean;
+  /** Snapshot frontier for the one-time legacy backfill; later source activity remains live. */
+  readonly commentCursorMigrationTargets?: {
+    readonly inline: number;
+    readonly conversation: number;
+  };
   readonly lastDecisionCursor?: number;
   readonly lastNotifiedAt?: number;
   /** Terminal PR state observed by ReviewFeedbackTaskSpec before CI lifecycle delivery. */
@@ -75,6 +85,57 @@ export interface ReviewAutomationState {
  * CI fail / review feedback / conflict always wake under both intents.
  */
 export type PrTrackingIntent = 'review' | 'merge';
+
+/**
+ * F140: which tracked GitHub activity is allowed to wake the owner.
+ *
+ * This is deliberately independent from {@link PrTrackingIntent}: intent decides
+ * which signal the owner is waiting for, while wakePolicy decides which actors may
+ * turn recorded feedback into a connector delivery.
+ */
+export type TrackingWakePolicy = 'all_feedback' | 'human_participant_activity';
+
+/** F177 Phase J: signal that can currently close a turn through an event-backed PR tracker. */
+export type PrEventWaitSignal = 'review_posted';
+
+export type PrEventWaitUncoveredReason =
+  | 'subject_mismatch'
+  | 'not_review_trigger'
+  | 'review_not_accepted'
+  | 'feedback_already_posted';
+
+export type PrEventWaitCoverage =
+  | {
+      readonly status: 'covered';
+      readonly kind: 'github_review_trigger_eyes';
+      readonly triggerCommentId: number;
+      readonly observedAt: number;
+    }
+  | {
+      readonly status: 'uncovered';
+      readonly kind: 'github_review_trigger_eyes';
+      readonly triggerCommentId: number;
+      readonly observedAt: number;
+      readonly reason: PrEventWaitUncoveredReason;
+    };
+
+/**
+ * Invocation-bound proof that one tracked PR wait is covered by a structured callback.
+ *
+ * The live TaskItem remains authoritative for owner/thread/subject/status. These copied
+ * fields are matching constraints, not an ownership override.
+ */
+export interface PrEventWaitState {
+  readonly v: 1;
+  readonly invocationId: string;
+  readonly threadId: string;
+  readonly ownerCatId: CatId;
+  readonly subjectKey: string;
+  readonly expectedSignal: PrEventWaitSignal;
+  /** HEAD observed when the external review trigger was registered. Missing on legacy records. */
+  readonly triggerHeadSha?: string;
+  readonly coverage: PrEventWaitCoverage;
+}
 
 /** Issue comment automation state for issue_tracking tasks (F202 Phase 2D) */
 export interface IssueAutomationState {
@@ -111,8 +172,12 @@ export interface AutomationState {
   readonly closedAt?: number;
   /** F140: wake intent for this tracked PR (defaults to 'review' when absent). */
   readonly intent?: PrTrackingIntent;
+  /** F140: actor-aware delivery policy (defaults to 'all_feedback' when absent). */
+  readonly wakePolicy?: TrackingWakePolicy;
   /** F202 Phase 2C: user-provided instructions appended to trigger messages. Task preference, not system override. */
   readonly trackingInstructions?: string;
+  /** F177 Phase J: server-verified, invocation-bound event-wait route state. */
+  readonly eventWait?: PrEventWaitState;
 }
 
 export type TaskProbeSpec =

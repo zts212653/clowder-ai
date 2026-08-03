@@ -17,7 +17,7 @@ operator提出一个现实用户问题：普通人不会认真分 thread，一�
 1. 摘要可能过期、漏掉 tradeoff、混淆边界。
 2. 模型会一本正经地拿摘要当真相源回答。
 
-Cat Café 现有 F102 / F188 已经走了另一条路：`search_evidence` 找候选证据，猫读原文判断。F209 立项时的代码剖面确认，当时还有一个关键缺口：`depth=raw` 仍是 lexical-only，因为 passage-level vectors 还没有做。也就是说，消息原文虽然进了 `evidence_passages`，但“没有出现精确字面词”的旧聊天仍不稳。Phase A 已在 PR #1842 关闭这条 raw passage semantic/hybrid 缺口；后续 Phase 继续补 entity、typed reader、Perspective 与 eval 闭环。
+Clowder AI 现有 F102 / F188 已经走了另一条路：`search_evidence` 找候选证据，猫读原文判断。F209 立项时的代码剖面确认，当时还有一个关键缺口：`depth=raw` 仍是 lexical-only，因为 passage-level vectors 还没有做。也就是说，消息原文虽然进了 `evidence_passages`，但“没有出现精确字面词”的旧聊天仍不稳。Phase A 已在 PR #1842 关闭这条 raw passage semantic/hybrid 缺口；后续 Phase 继续补 entity、typed reader、Perspective 与 eval 闭环。
 
 F209 的目标是把 evidence-first recall 推到终态一层：**消息级语义召回 + 实体门牌号 + typed 原文窗口 + 活查询 Perspective + retrieval eval**。它不做摘要记忆，不做算法路由，不替猫判断，只让猫更快抓到可审计原文。
 

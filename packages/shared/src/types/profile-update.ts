@@ -3,8 +3,8 @@
  *
  * Cats propose a capsule/primer update via `cat_cafe_propose_profile_update`;
  * the operator sees a card and approves/rejects. Only on approve does the backend
- * write the per-cat primer + provenance (KD-12 cost-tiered: low-cost per-cat
- * primer writes go here; high-cost shared-capsule promotion is C2 / KD-15).
+ * write the authenticated relationship-persona primer + provenance (KD-12/KD-18:
+ * low-cost persona-primer writes go here; high-cost shared-capsule promotion is C2 / KD-15).
  *
  * State machine mirrors F128 ThreadProposal (review-proven edges):
  *   pending → approving → approved   (claim then finalize, atomic against reject)
@@ -17,9 +17,10 @@
  * section against concurrent same-primer approves — see decision route, KD-15).
  */
 
+import type { ApprovalPublication } from './approval-hub.js';
 import type { CatId } from './ids.js';
 
-/** AC-C1 only writes the per-cat primer (low-cost). `'capsule'` (high-cost, shared) is C2. */
+/** AC-C1 only writes the current persona primer (low-cost). `'capsule'` (high-cost, shared) is C2. */
 export type ProfileUpdateTargetLayer = 'primer';
 
 export type ProfileUpdateProposalStatus = 'pending' | 'approving' | 'approved' | 'rejected';
@@ -78,11 +79,11 @@ export interface ProfileUpdateProposal {
   // Source / lineage
   sourceThreadId: string;
   sourceInvocationId: string;
-  sourceCatId: CatId; // owner cat (primer is per-cat)
+  sourceCatId: CatId; // proposing/routing cat; the repository derives the stable relationship persona
 
   // Target
   targetLayer: ProfileUpdateTargetLayer;
-  targetPath: string; // resolved primer file path, pinned at propose time
+  targetPath: string; // relationshipKey-relative primer target, pinned at propose time
 
   // Payload
   beforeContent: string; // current primer content at propose time (diff + audit)
@@ -94,6 +95,9 @@ export interface ProfileUpdateProposal {
   // Audit — creation
   createdBy: string;
   createdAt: number;
+
+  /** Phase-I publication state; absent only on pre-Phase-I records. */
+  publication?: ApprovalPublication;
 
   /** Visibility commit marker (same role as ThreadProposal.cardMessageId). */
   cardMessageId?: string;

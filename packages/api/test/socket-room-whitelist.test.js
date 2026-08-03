@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 // Mirror of the regex in SocketManager.ts — keep in sync!
-const JOIN_ROOM_WHITELIST = /^(thread:|worktree:|preview:global$|workspace:global$|user:)/;
+const JOIN_ROOM_WHITELIST = /^(thread:|worktree:|preview:global$|workspace:global$|workspace:navigate:ack$|user:)/;
 
 describe('Socket join_room whitelist', () => {
   const accepted = [
@@ -21,6 +21,7 @@ describe('Socket join_room whitelist', () => {
     'worktree:cat-cafe-runtime',
     'preview:global',
     'workspace:global',
+    'workspace:navigate:ack',
     'user:user-abc',
   ];
 
@@ -34,6 +35,7 @@ describe('Socket join_room whitelist', () => {
     'admin:secret',
     'global',
     'workspace:other', // only workspace:global is allowed
+    'workspace:navigate:other',
     'preview:other', // only preview:global is allowed
     'preview:global:extra', // trailing chars after exact match
     '',

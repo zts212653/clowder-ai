@@ -205,6 +205,11 @@ describe('F254 FreshnessNoticeService', () => {
     // Must contain instructions
     assert.ok(result.text.includes('get_thread_context'), 'should suggest get_thread_context');
     assert.ok(!result.text.includes('list_recent'), 'should NOT suggest list_recent (does not advance seenCursor)');
+    assert.ok(result.text.includes('threadId=thread-test'), 'notice should identify the source thread');
+    assert.ok(
+      result.text.includes('messageId=0000000000000030-000001-aaaaaaaa'),
+      'notice should identify the newest unseen message',
+    );
     // Content-free: no message body/preview (we didn't provide any, so this is inherent)
   });
 

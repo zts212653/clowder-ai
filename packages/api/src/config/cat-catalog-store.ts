@@ -8,7 +8,11 @@ import {
   pruneRosterToRuntimeBreeds,
   type RuntimeBreedWithCatIds,
 } from './cat-catalog-bootstrap-roster.js';
-import { isTemplateVariantBackfillAllowed, normalizeMentionAlias } from './template-variant-backfill.js';
+import {
+  isTemplateBreedBackfillAllowed,
+  isTemplateVariantBackfillAllowed,
+  normalizeMentionAlias,
+} from './template-variant-backfill.js';
 import { isTemplateVariantTombstoned } from './template-variant-tombstones.js';
 
 const CONFIG_SUBDIR = '.cat-cafe';
@@ -346,6 +350,93 @@ function collectRuntimeIdentityOccupancy(breeds: Record<string, unknown>[]): Run
   return { catIds, mentionAliases };
 }
 
+function hasTombstonedTemplateBreedVariant(
+  catalog: Record<string, unknown>,
+  templateBreed: Record<string, unknown>,
+): boolean {
+  const breedId = typeof templateBreed.id === 'string' ? templateBreed.id : undefined;
+  const breedCatId = typeof templateBreed.catId === 'string' ? templateBreed.catId : undefined;
+  const variants = Array.isArray(templateBreed.variants) ? (templateBreed.variants as unknown[]) : [];
+  if (!breedId) return false;
+
+  for (const variant of variants) {
+    if (!isRecord(variant)) continue;
+    if (typeof variant.id !== 'string') continue;
+    const catId = resolveVariantCatId({ catId: breedCatId }, variant);
+    if (!catId) continue;
+    if (isTemplateVariantTombstoned(catalog, { breedId, variantId: variant.id, catId })) return true;
+  }
+  return false;
+}
+
+function persistMissingTemplateBreeds(projectRoot: string, catalogPath: string, templatePath: string): boolean {
+  let catalogRaw: string;
+  let templateRaw: string;
+  try {
+    catalogRaw = readFileSync(catalogPath, 'utf-8');
+    templateRaw = readFileSync(templatePath, 'utf-8');
+  } catch {
+    return false;
+  }
+
+  const catalog = JSON.parse(catalogRaw) as CatCafeConfig;
+  const template = JSON.parse(templateRaw) as CatCafeConfig;
+  const next = structuredClone(catalog) as CatCafeConfig;
+  const nextBreeds = next.breeds as unknown as Record<string, unknown>[];
+  const existingBreedIds = new Set(
+    nextBreeds.map((breed) => breed.id).filter((id): id is string => typeof id === 'string'),
+  );
+  const templateRoster =
+    template.version === 2 ? (template.roster as unknown as Record<string, unknown>) : ({} as Record<string, unknown>);
+  const nextRoster =
+    next.version === 2 ? (next.roster as unknown as Record<string, unknown>) : ({} as Record<string, unknown>);
+  const occupancy = collectRuntimeIdentityOccupancy(nextBreeds);
+  const existingCatIds = new Set(occupancy.catIds);
+  const backfilledCatIds: string[] = [];
+
+  let dirty = false;
+  for (const templateBreed of template.breeds as unknown as Record<string, unknown>[]) {
+    if (typeof templateBreed.id !== 'string') continue;
+    if (typeof templateBreed.catId !== 'string') continue;
+    if (existingBreedIds.has(templateBreed.id)) continue;
+    if (hasTombstonedTemplateBreedVariant(catalog as unknown as Record<string, unknown>, templateBreed)) continue;
+
+    const templateBreedOccupancy = collectRuntimeIdentityOccupancy([templateBreed]);
+    const templateBreedCatIds = [...templateBreedOccupancy.catIds];
+    const templateBreedAliases = [...templateBreedOccupancy.mentionAliases];
+    if (
+      !isTemplateBreedBackfillAllowed(
+        {
+          breedId: templateBreed.id,
+          catId: templateBreed.catId,
+          catIds: templateBreedCatIds,
+          mentionPatterns: templateBreedAliases,
+        },
+        occupancy,
+      )
+    ) {
+      continue;
+    }
+
+    nextBreeds.push(structuredClone(templateBreed));
+    existingBreedIds.add(templateBreed.id);
+    for (const catId of templateBreedCatIds) {
+      occupancy.catIds.add(catId);
+      backfilledCatIds.push(catId);
+      if (next.version === 2 && !nextRoster[catId] && templateRoster[catId]) {
+        nextRoster[catId] = structuredClone(templateRoster[catId]);
+      }
+    }
+    for (const alias of templateBreedAliases) occupancy.mentionAliases.add(alias);
+    dirty = true;
+  }
+
+  if (!dirty) return false;
+  writeFileAtomic(catalogPath, `${JSON.stringify(next, null, 2)}\n`);
+  inheritFullyBlockedMcpCapabilitiesForNewCatsSync(projectRoot, backfilledCatIds, existingCatIds);
+  return true;
+}
+
 function persistMissingTemplateVariants(projectRoot: string, catalogPath: string, templatePath: string): boolean {
   let catalogRaw: string;
   let templateRaw: string;
@@ -521,6 +612,9 @@ export function bootstrapCatCatalog(projectRoot: string, templatePath: string): 
     stripLegacySourceField(catalogPath);
     // Ensure owner is always present in roster.
     ensureOwnerInRoster(catalogPath);
+    // Persist allowlisted template-added breeds so promoted house cats become
+    // runtime members without reopening the template-only breed leak fixed by #772.
+    persistMissingTemplateBreeds(projectRoot, catalogPath, templatePath);
     // Persist template-added variants into already-enabled runtime breeds so
     // read and write paths agree after upgrades.
     persistMissingTemplateVariants(projectRoot, catalogPath, templatePath);
@@ -559,6 +653,7 @@ export function bootstrapCatCatalog(projectRoot: string, templatePath: string): 
 
   mkdirSync(dirname(catalogPath), { recursive: true });
   writeFileAtomic(catalogPath, `${JSON.stringify(runtimeCatalog, null, 2)}\n`);
+  persistMissingTemplateBreeds(projectRoot, catalogPath, templatePath);
   return catalogPath;
 }
 

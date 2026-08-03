@@ -67,7 +67,7 @@ if [ -n "$ROOT_IMAGES" ]; then
   WARNINGS="${WARNINGS}
 ⚠️ 收尾检查：根目录有图片文件（截图应放 assets/screenshots/）：
 ${ROOT_IMAGES}
-→ 别走！先向co-creator汇报，商量移走还是删除
+→ 别走！首个发现者直接收拾，不跨线程协调、不问 operator：截图 mv assets/screenshots/（不 commit）；设计稿 → designs/；未知文件不删
 "
 fi
 

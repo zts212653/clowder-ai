@@ -77,7 +77,7 @@ describe('POST /api/messages — replyTo validation', () => {
         completeAll: mock.fn(),
         has: mock.fn(() => false),
         cancel: mock.fn(() => ({ cancelled: true, catIds: [] })),
-        cancelAll: mock.fn(() => []),
+        cancelAll: mock.fn(() => ({ catIds: [], executionIds: [] })),
         cancelInvocation: mock.fn(() => []),
         isDeleting: mock.fn(() => false),
       },
@@ -267,6 +267,36 @@ describe('POST /api/messages — replyTo validation', () => {
     const sent = messages.find((m) => m.content === 'reply to queued');
     assert.ok(sent, 'message should be stored');
     assert.equal(sent.replyTo, undefined, 'queued-message replyTo should be dropped');
+  });
+
+  test('preserves replyTo referencing queued cat speech already published to the timeline', async () => {
+    const thread = await createThread();
+    const published = messageStore.append({
+      userId: 'default-user',
+      catId: 'codex',
+      content: 'published source-cat seed',
+      mentions: ['opus'],
+      timestamp: 1000,
+      threadId: thread.id,
+      deliveryStatus: 'queued',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      payload: {
+        content: 'reply to published cat speech',
+        threadId: thread.id,
+        replyTo: published.id,
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const sent = messageStore
+      .getByThread(thread.id)
+      .find((message) => message.content === 'reply to published cat speech');
+    assert.ok(sent, 'message should be stored');
+    assert.equal(sent.replyTo, published.id);
   });
 
   test('silently drops replyTo referencing canceled message', async () => {

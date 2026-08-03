@@ -16,7 +16,7 @@ import type { IInvocationRecordStore } from '../stores/ports/InvocationRecordSto
 import type { IMessageStore } from '../stores/ports/MessageStore.js';
 import type { ITaskStore } from '../stores/ports/TaskStore.js';
 import type { IThreadStore } from '../stores/ports/ThreadStore.js';
-import { isSystemUserMessage } from '../stores/visibility.js';
+import { getTimelineOrderTime, isSystemUserMessage } from '../stores/visibility.js';
 import type {
   AggregatorExpiredHold,
   AggregatorMentionCandidate,
@@ -227,7 +227,7 @@ async function collectMentionCandidates(
       messageId: last.id,
       catId: last.catId,
       title: deriveTitle(last.content, thread.title),
-      timestamp: last.deliveredAt ?? last.timestamp,
+      timestamp: getTimelineOrderTime(last),
     });
   }
   return candidates;

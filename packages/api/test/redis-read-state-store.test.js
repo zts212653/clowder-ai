@@ -10,6 +10,7 @@
 
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
+import { makeQueuedMessageCustody } from './helpers/queued-message-custody.js';
 import {
   assertRedisIsolationOrThrow,
   cleanupPrefixedRedisKeys,
@@ -148,6 +149,135 @@ describe('RedisThreadReadStateStore', { skip: redisIsolationSkipReason(REDIS_URL
     assert.equal(summaries[0].threadId, tid);
     assert.equal(summaries[0].unreadCount, 2);
     assert.equal(summaries[0].hasUserMention, false);
+  });
+
+  it('getUnreadSummaries() counts published queued cat speech but not queued user or system work', async () => {
+    const tid = uniqueId('t-published');
+    const anchor = await messageStore.append({
+      userId: 'user1',
+      catId: 'opus',
+      content: 'read anchor',
+      mentions: [],
+      timestamp: Date.now() - 4000,
+      threadId: tid,
+    });
+    await messageStore.append({
+      userId: 'user1',
+      catId: null,
+      content: 'queued user work',
+      mentions: ['opus'],
+      timestamp: Date.now() - 3000,
+      threadId: tid,
+      deliveryStatus: 'queued',
+    });
+    await messageStore.append({
+      userId: 'user1',
+      catId: 'codex-sol',
+      content: 'published source-cat seed',
+      mentions: ['opus'],
+      timestamp: Date.now() - 2000,
+      threadId: tid,
+      deliveryStatus: 'queued',
+      mentionsUser: true,
+    });
+    await messageStore.append({
+      userId: 'system',
+      catId: 'system',
+      content: 'queued internal system event',
+      mentions: [],
+      timestamp: Date.now() - 1000,
+      threadId: tid,
+      deliveryStatus: 'queued',
+    });
+    await store.ack('user1', tid, anchor.id);
+
+    const [summary] = await store.getUnreadSummaries('user1', [tid], messageStore);
+    assert.equal(summary.unreadCount, 1);
+    assert.equal(summary.hasUserMention, true);
+  });
+
+  it('keeps a read published cat seed before replies when its execution custody terminalizes', async () => {
+    const tid = uniqueId('t-published-cursor');
+    const base = Date.now();
+    const seed = await messageStore.append({
+      userId: 'user1',
+      catId: 'codex-sol',
+      content: 'published source-cat seed',
+      mentions: ['opus'],
+      timestamp: base,
+      threadId: tid,
+      deliveryStatus: 'queued',
+      queueCustody: makeQueuedMessageCustody({
+        entryId: 'entry-published-cursor',
+        allTargetCats: ['opus'],
+        pendingTargetCats: ['opus'],
+        createdAt: base,
+        updatedAt: base,
+      }),
+    });
+    await store.ack('user1', tid, seed.id);
+    const firstReply = await messageStore.append({
+      userId: 'user1',
+      catId: 'opus',
+      content: 'first reply',
+      mentions: [],
+      timestamp: base + 10,
+      threadId: tid,
+    });
+    const secondReply = await messageStore.append({
+      userId: 'user1',
+      catId: 'opus',
+      content: 'second reply',
+      mentions: [],
+      timestamp: base + 20,
+      threadId: tid,
+    });
+
+    const terminal = makeQueuedMessageCustody({
+      entryId: 'entry-published-cursor',
+      revision: 2,
+      status: 'terminal',
+      allTargetCats: ['opus'],
+      pendingTargetCats: [],
+      seenByCatIds: ['opus'],
+      seenInvocationIdByCatId: { opus: 'inv-published-cursor' },
+      bodyExposures: [{ targetCatId: 'opus', invocationId: 'inv-published-cursor', seenAt: base + 25 }],
+      handledByCatIds: ['opus'],
+      targetOutcomeByCatId: {
+        opus: {
+          invocationId: 'inv-published-cursor',
+          disposition: 'completed_with_turn',
+          evidenceRef: { kind: 'invocation_lineage', invocationId: 'inv-published-cursor' },
+          handledAt: base + 50,
+        },
+      },
+      createdAt: base,
+      updatedAt: base + 50,
+    });
+    const transitioned = await messageStore.transitionQueueCustody(seed.id, {
+      expectedRevision: 1,
+      next: terminal,
+      deliveredAt: base + 50,
+    });
+
+    assert.equal(transitioned.kind, 'updated');
+    assert.equal(transitioned.message.deliveredAt, base + 50, 'execution delivery keeps its actual terminal time');
+    assert.equal(transitioned.message.timelineOrderAt, base, 'publication order is persisted separately');
+    assert.equal(
+      await redis.zscore(`msg:thread:${tid}`, seed.id),
+      String(base),
+      'timeline score keeps the original publication position',
+    );
+    const [summary] = await store.getUnreadSummaries('user1', [tid], messageStore);
+    assert.equal(summary.unreadCount, 2);
+    assert.deepEqual(
+      (
+        await messageStore.getByThreadAfter(tid, seed.id, undefined, 'user1', {
+          includeQueuedCatMessages: true,
+        })
+      ).map((message) => message.id),
+      [firstReply.id, secondReply.id],
+    );
   });
 
   it('getUnreadSummaries() excludes user own messages (catId=null)', async () => {

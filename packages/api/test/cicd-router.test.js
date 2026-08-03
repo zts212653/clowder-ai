@@ -24,6 +24,7 @@ function mockMessageStore() {
         mentions: msg.mentions ?? [],
         timestamp: msg.timestamp ?? Date.now(),
         source: msg.source,
+        extra: msg.extra,
       });
       return { id: `msg-${counter}`, ...msg, timestamp: msg.timestamp ?? Date.now() };
     },
@@ -137,6 +138,61 @@ describe('CiCdRouter', () => {
       assert.strictEqual(messageMock.messages[0].source.connector, 'github-ci');
     });
 
+    it('writes a delivery_decision carrier only for exact-head merge intent plus typed billing evidence', async () => {
+      const router = createRouter();
+      const task = prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
+      const headSha = 'a'.repeat(40);
+      prTracking.taskStore.patchAutomationState(task.id, { intent: 'merge', ci: { headSha } });
+      const exactCheck = {
+        name: 'gate',
+        bucket: 'fail',
+        executionFailure: 'billing_spending_limit_zero_step',
+      };
+
+      await router.route(makePollResult({ headSha, checks: [exactCheck] }));
+      assert.deepEqual(messageMock.messages[0].extra?.memoryCue?.deliveryDecision, {
+        v: 1,
+        producer: 'github_ci',
+        producerProvenance: 'server_github_ci',
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        headSha,
+        phase: 'merge_gate',
+        gateOutcome: 'source_evidence_complete',
+        externalCondition: 'billing_spending_limit_zero_step',
+        candidateAction: 'merge',
+        occurredAt: messageMock.messages[0].extra.memoryCue.deliveryDecision.occurredAt,
+      });
+
+      for (const taskPatch of [
+        { intent: 'review', ci: { headSha } },
+        { intent: 'merge', ci: { headSha: 'b'.repeat(40) } },
+      ]) {
+        const fresh = createPrTrackingTaskStore();
+        const freshMessage = mockMessageStore();
+        const freshTask = fresh.register({
+          repoFullName: 'zts212653/cat-cafe',
+          prNumber: 42,
+          catId: 'opus',
+          threadId: 'thread-abc',
+          userId: 'user-1',
+        });
+        fresh.taskStore.patchAutomationState(freshTask.id, taskPatch);
+        await new CiCdRouter({
+          taskStore: fresh.taskStore,
+          deliveryDeps: { messageStore: freshMessage.store },
+          log: noopLog(),
+        }).route(makePollResult({ headSha, checks: [exactCheck] }));
+        assert.equal(freshMessage.messages[0].extra?.memoryCue, undefined);
+      }
+    });
+
     it('suppresses CI success delivery for review intent while preserving CI state', async () => {
       const router = createRouter();
       const task = prTracking.register({
@@ -177,6 +233,45 @@ describe('CiCdRouter', () => {
       assert.strictEqual(result.kind, 'skipped');
       assert.ok(result.reason.includes('review intent'));
       assert.strictEqual(messageMock.messages.length, 0);
+    });
+
+    it('returns an external-review-ready notification when the F168 coordinator opens the current HEAD', async () => {
+      const calls = [];
+      const router = new CiCdRouter({
+        taskStore: prTracking.taskStore,
+        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
+        log: noopLog(),
+        externalReviewCoordinator: {
+          recordCi: async (poll, target) => {
+            calls.push({ poll, target });
+            return {
+              kind: 'notified',
+              threadId: target.threadId,
+              catId: target.catId,
+              messageId: 'ready-message-1',
+              content: 'current head ready',
+              headSha: poll.headSha,
+            };
+          },
+        },
+      });
+      const task = prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
+      prTracking.taskStore.patchAutomationState(task.id, { intent: 'review' });
+
+      const result = await router.route(makePollResult({ aggregateBucket: 'pass', checks: [] }));
+
+      assert.equal(result.kind, 'notified');
+      assert.equal(result.wakeKind, 'external_review_ready');
+      assert.equal(result.messageId, 'ready-message-1');
+      assert.equal(result.headSha, 'abc1234567890');
+      assert.equal(calls.length, 1);
+      assert.deepEqual(calls[0].target, { threadId: 'thread-abc', catId: 'opus', userId: 'user-1' });
     });
 
     it('delivers CI success message to tracked thread for merge intent (AC-A3)', async () => {
@@ -324,14 +419,15 @@ describe('CiCdRouter', () => {
     it('merged PR marks task done AND delivers terminal lifecycle notification', async () => {
       const router = createRouter();
       prTracking.register({
-        repoFullName: 'zts212653/clowder-ai',
+        repoFullName: 'zts212653/cat-cafe',
         prNumber: 42,
         catId: 'opus',
         threadId: 'thread-abc',
         userId: 'user-1',
       });
 
-      const result = await router.route(makePollResult({ repoFullName: 'zts212653/clowder-ai', prState: 'merged' }));
+      const poll = makePollResult({ prState: 'merged' });
+      const result = await router.route(poll);
 
       assert.strictEqual(result.kind, 'lifecycle');
       if (result.kind === 'lifecycle') {
@@ -342,7 +438,7 @@ describe('CiCdRouter', () => {
       }
 
       // #320: merged/closed sets status=done (not delete)
-      const entry = prTracking.taskStore.getBySubject('pr:zts212653/clowder-ai#42');
+      const entry = prTracking.taskStore.getBySubject('pr:zts212653/cat-cafe#42');
       assert.ok(entry, 'task should still exist');
       assert.strictEqual(entry.status, 'done');
 
@@ -352,7 +448,7 @@ describe('CiCdRouter', () => {
       assert.ok(msg.mentions.includes('opus'));
       assert.ok(msg.content.includes('merge'), 'content should state the PR merged');
       assert.ok(msg.content.includes('#42'));
-      assert.strictEqual(msg.source.url, 'https://github.com/zts212653/clowder-ai/pull/42');
+      assert.strictEqual(msg.source.url, `https://github.com/${poll.repoFullName}/pull/${poll.prNumber}`);
     });
 
     it('closed PR marks task done AND delivers closed (unmerged) notification', async () => {
@@ -507,7 +603,37 @@ describe('CiCdRouter', () => {
       assert.strictEqual(events[0].type, 'merge');
       assert.strictEqual(events[0].outcome, 'success');
       assert.strictEqual(events[0].threadId, 'thread-abc');
-      assert.strictEqual(events[0].ref, 'PR#42');
+      assert.strictEqual(events[0].ref, 'pr:zts212653/cat-cafe#42');
+      assert.deepEqual(events[0].attribution, { kind: 'managed_unattributed' });
+    });
+
+    it('reads the private task binding and carries only that identity into the merge event', async () => {
+      const events = [];
+      const router = new CiCdRouter({
+        taskStore: prTracking.taskStore,
+        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
+        log: noopLog(),
+        onPrLifecycle: (e) => events.push(e),
+      });
+      const task = prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
+      prTracking.taskStore.bindManagedWorkBinding(task.id, {
+        workId: 'wrk_work_a',
+        attemptId: 'wat_work_a_1',
+      });
+
+      await router.route(makePollResult({ prState: 'merged' }));
+
+      assert.strictEqual(events.length, 1);
+      assert.deepEqual(events[0].attribution, {
+        kind: 'managed_attributed',
+        binding: { workId: 'wrk_work_a', attemptId: 'wat_work_a_1' },
+      });
     });
 
     it('does NOT emit on closed PR (closed ≠ revert)', async () => {
@@ -988,6 +1114,11 @@ describe('buildLifecycleMessageContent', () => {
     assert.ok(content.includes('PR #10'));
     assert.ok(content.includes('Tracking Instructions'));
     assert.ok(content.includes('verify main and close task'));
+    assert.match(content, /main.*live runtime|live runtime.*main/i);
+    assert.match(content, /dormant|未加载|未生效/i);
+    assert.match(content, /co-creator.*授权|显式授权/);
+    assert.match(content, /pnpm start/);
+    assert.match(content, /fresh.*(?:invocation|process)|新.*(?:invocation|进程)/i);
   });
 
   it('formats closed lifecycle message as unmerged', () => {
@@ -1000,5 +1131,6 @@ describe('buildLifecycleMessageContent', () => {
     assert.ok(content.includes('PR 已关闭'));
     assert.ok(content.includes('未合并'));
     assert.ok(content.includes('PR #11'));
+    assert.ok(!content.includes('pnpm start'));
   });
 });

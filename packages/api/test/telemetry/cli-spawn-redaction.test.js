@@ -123,6 +123,7 @@ test('F152: metric attribute allowlist', async () => {
   assert.ok(ALLOWED_METRIC_ATTRIBUTES.has('agent.id'));
   assert.ok(ALLOWED_METRIC_ATTRIBUTES.has('gen_ai.system'));
   assert.ok(ALLOWED_METRIC_ATTRIBUTES.has('status'));
+  assert.ok(ALLOWED_METRIC_ATTRIBUTES.has('action_successor.mode'));
 
   // Forbidden attributes must NOT be in the allowlist
   assert.ok(!ALLOWED_METRIC_ATTRIBUTES.has('threadId'));

@@ -199,33 +199,57 @@ Why: 一句话
 
 答不出来 → Design Gate 不放行。禁止用新 Feature 私造 `Store` / `Queue` / `Router` / `Adapter` 来绕开已有 cell。
 
+**主动交互反馈出生三问（F281 / ADR-038）🔴**：
+
+当 Feature 新增或改造“猫主动发起 proposal / candidate / wait，人类作 disposition”的交互面时，
+Design Gate 必须记录以下三项：
+
+```yaml
+human_disposition_feedback:
+  feedback_expression: structured reasons + other + optional skip
+  episode_truth: canonical owner-scoped TTL=0 store + authenticated query + deletion closure
+  consumer: named consumer + exact scope + invalidator
+```
+
+- `feedback_expression` 只有 binary approve/reject → 不通过；跳过 feedback 可以，但不得生成空 envelope。
+- `episode_truth` 只有 UI toast / log / transient callback → 不通过。
+- `consumer` 未点名，或 scope 允许从一个 subject 泛化为 lane/global policy → 不通过；别采死遥测。
+- auth/ownership 4xx、CAS/race conflict、内部 retry、`AbortController` 终止、纯 UI dismiss 不属于此触发器。
+
+确定契约用 schema/test/guard；运行健康走 F153；只有不确定效用且有明确
+keep/tune/sunset consumer 时才走 eval-design。完整判据与 F281 dogfood 见
+`docs/decisions/038-l0-staging-protocol.md`「主动交互面的反馈出生三件套」。
+
 **Eval Contract 门禁（F192）🔴**：
 
-harness / skill / MCP / shared-rules 类 feature 的 spec **必须含 `## Eval / Tracking Contract` 节**，否则 Design Gate 不通过。
+harness / skill / MCP / shared-rules 类 feature 的 spec，**若含"不确定效用"类 claim（ADR-031 v3.4 机制选择第三行：效果未知 + 明确 consumer + keep/tune/sunset 决策），必须含 `## Eval / Tracking Contract` 节**，否则 Design Gate 不通过。
 
-**触发条件**（判断标准：改动会改变猫猫行为模式 → 填）：
-- 新增 skill / 新增 MCP tool / 新增 shared-rules section / 新增 SOP step
-- 现有规则/工具的显著行为变更
+**触发条件**（两问都 yes 才填）：
+- 改动会改变猫猫行为模式？（新增 skill / MCP tool / shared-rules section / SOP step / 显著行为变更）
+- 存在效用不确定、且有明确 verdict consumer 的 claim？
 
-**不触发**：typo / wording 微调 / 纯重构（行为不变）/ 文档补充
+**不触发**：typo / wording 微调 / 纯重构（行为不变）/ 文档补充 / 只有确定契约或原始运行健康信号。未触发时不要创建空白或 N/A Eval 节。
 
-**4 项必填**（模板见 *(internal reference removed)*）：
+**触发即 4 项必填**（模板见 *(internal reference removed)*）：
 1. Primary Users + Activation Signal
 2. Friction Metric
 3. Regression Fixture（最少 1 条，建议 2-5）
 4. Sunset Signal（**空填 = 不通过，不设 reviewer 签字降级**——KD-4）
 
-**Harness 方法论教学（F218 / ADR-031）🔴**：
+**Harness 方法论教学（F218 / ADR-031 v3.4 机制选择）🔴**：
 
-凡是 harness / skill / MCP / shared-rules / SOP / L0 等会改变猫猫行为模式的 feature，Design Gate 必须写出 **软+硬+eval** 三层计划；不是每层都要很重，但漏掉任何一层都要说明理由。
+凡是 harness / skill / MCP / shared-rules / SOP / L0 等会改变猫猫行为模式的 feature，Design Gate 对需要机制保障的 claim/decision 逐项记录 `claim → 选中机制 → 验证证据或 consumer`。**只记录实际选中的机制，不枚举未选类别、不填 N/A**。同一 feature 可含多类 claim，逐项选，不给整项贴单一标签。
 
-| 层 | 承重 | 常见载体 |
+ADR-031 v3.4 选择器速查：
+
+| 机制 | 承重 | 常见载体 |
 |----|------|----------|
-| Soft | 让猫在正确认知路径上想起该动作 | L0 触发句 / skill description / SOP 教学 |
-| Hard | 不靠自觉也能挡住或暴露错误 | test / linter / schema / runtime guard / compile gate |
-| Eval | 持续检验这条 harness 是否真的让行为变好 | F192 fixture / regression case / friction metric / sunset signal |
+| Convention/skill | 让猫在正确认知路径上想起该动作 | L0 触发句 / skill description / SOP 教学 |
+| Test/guard | 不靠自觉也能挡住或暴露错误 | test / linter / schema / runtime guard / compile gate |
+| Eval | 检验"效用不确定"的机制是否真的让行为变好 | F192 fixture / regression case / friction metric / sunset signal |
+| Observability | 原始运行健康信号供诊断与 SLO | logs / traces / metrics（默认留在 F153；若升为带 utility claim + consumer + verdict 的估计量，再走 Eval Contract） |
 
-一句话判断：只写 Soft = 希望猫下次记得；只有 Soft + Hard = 修了但不知道会不会长期有效；Soft + Hard + Eval 才是 ADR-031 的完整 harness loop。
+一句话判断：**机制是按问题选的工具箱，不是待填清单**——claim 配错机制（工程 telemetry 硬挂 Eval Hub / 确定契约硬造 friction metric）和该配未配同样是 Design Gate 打回理由（LL-095）。
 
 **在地设计检查 (Design in Context) 🔴**：
 凡是改动或往已有页面/组件添加新 UI 元素，必须逐项过 `cat-cafe-skills/refs/design-in-context-checklist.md`。禁止在真空中凭想象画已有页面的布局。

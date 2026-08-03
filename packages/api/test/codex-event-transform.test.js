@@ -234,6 +234,67 @@ test('item.completed mcp_tool_call → tool_result', () => {
   assert.ok(msg?.content?.includes('mcp:cat-cafe/post_message'));
 });
 
+test('GitHub App approval failure without an interactive surface becomes confirmation_unavailable', () => {
+  const event = {
+    type: 'item.completed',
+    item: {
+      type: 'mcp_tool_call',
+      server: 'codex_apps',
+      tool: 'github.create_pull_request',
+      status: 'failed',
+      result: { Err: 'user rejected MCP tool call' },
+    },
+  };
+
+  const msg = transformCodexEvent(event, CAT, undefined, { approvalSurface: 'unavailable' });
+
+  assert.equal(msg?.type, 'tool_result');
+  assert.equal(msg?.toolResultStatus, 'error');
+  assert.equal(msg?.toolResultErrorCode, 'confirmation_unavailable');
+  assert.match(msg?.content ?? '', /\[confirmation_unavailable\]/);
+  assert.match(msg?.content ?? '', /gh.*merge-gate/i);
+  assert.doesNotMatch(msg?.content ?? '', /\[user_rejected\]/);
+});
+
+test('GitHub App approval failure with an interactive surface remains user_rejected', () => {
+  const event = {
+    type: 'item.completed',
+    item: {
+      type: 'mcp_tool_call',
+      server: 'codex_apps',
+      tool: 'github.create_pull_request',
+      status: 'failed',
+      result: { Err: 'user rejected MCP tool call' },
+    },
+  };
+
+  const msg = transformCodexEvent(event, CAT, undefined, { approvalSurface: 'interactive' });
+
+  assert.equal(msg?.type, 'tool_result');
+  assert.equal(msg?.toolResultErrorCode, 'user_rejected');
+  assert.match(msg?.content ?? '', /\[user_rejected\]/);
+  assert.doesNotMatch(msg?.content ?? '', /\[confirmation_unavailable\]/);
+});
+
+test('unrelated MCP Err payload stays unclassified and visible', () => {
+  const event = {
+    type: 'item.completed',
+    item: {
+      type: 'mcp_tool_call',
+      server: 'filesystem',
+      tool: 'write_file',
+      status: 'failed',
+      result: { Err: 'permission denied' },
+    },
+  };
+
+  const msg = transformCodexEvent(event, CAT, undefined, { approvalSurface: 'unavailable' });
+
+  assert.equal(msg?.type, 'tool_result');
+  assert.equal(msg?.toolResultErrorCode, undefined);
+  assert.match(msg?.content ?? '', /permission denied/);
+});
+
 // ── F045: web_search → system_info(web_search) ──
 
 test('item.completed web_search → system_info(web_search)', () => {

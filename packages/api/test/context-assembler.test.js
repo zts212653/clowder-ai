@@ -448,6 +448,18 @@ describe('F052: cross-thread source annotation', () => {
     assert.ok(!result.includes('← from thread:'), 'local message should NOT have annotation');
   });
 
+  test('formatMessage ignores legacy self-referential crossPost metadata', async () => {
+    const { formatMessage } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
+    const msg = mockMsg({
+      threadId: 'thread-same',
+      catId: 'codex',
+      content: 'Same-thread coordination message',
+      extra: { crossPost: { sourceThreadId: 'thread-same' } },
+    });
+    const result = formatMessage(msg);
+    assert.ok(!result.includes('← from thread:'), 'same-thread metadata must not claim cross-thread provenance');
+  });
+
   test('formatMessage handles crossPost without sourceThreadId gracefully', async () => {
     const { formatMessage } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
     const msg = mockMsg({

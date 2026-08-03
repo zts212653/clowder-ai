@@ -22,5 +22,5 @@ safetyTier: readonly
 transparencyTier: opt-in-view
 governanceTier: human-gated
 
-# CVO-facing
+# operator-facing
 userExplanation: "新会话的初始化引导信息"

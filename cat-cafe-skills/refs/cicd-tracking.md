@@ -10,7 +10,7 @@ F133 实现了 GitHub CI/CD 执行结果自动追踪：注册 PR 后，系统每
 状态变化时自动投递通知到对话 thread。**CI 失败始终唤醒猫；CI 成功是否唤醒取决于
 tracking 的 wake intent**（F140）：
 
-- `intent=review`（默认，"我在等 review"）→ CI 成功只投递消息、**不唤醒**（你看 thread 就知道）。
+- `intent=review`（默认，"我在等 review"）→ CI 成功只记录 `automationState.ci`，**不投递消息、不唤醒**（主动看 PR checks / task CI state 即可）。
 - `intent=merge`（"我在等 CI 绿去 merge"）→ CI 成功**唤醒**（→ merge-gate）。
 
 intent 在 `register_pr_tracking` 时声明、re-register 时翻转，是**任务意图、不是 repo 类型**
@@ -28,13 +28,13 @@ register_pr_tracking (MCP tool, 带 intent)
   CiCdCheckTaskSpec (scheduler poller, 60s)
         │  fetchPrCiStatus: gh pr view --json statusCheckRollup
         ▼
-  CiCdRouter (去重 + 投递)
+  CiCdRouter (去重 + 投递/静默记录)
         │  fingerprint = headSha:aggregateBucket
         ▼
-  deliverConnectorMessage()   ◄── 共享投递（connector: github-ci）
+  deliverConnectorMessage()   ◄── 仅需要通知时共享投递（connector: github-ci）
         │
         ├─ CI fail → ConnectorInvokeTrigger (urgent) → 唤醒猫（两种 intent 都唤醒）
-        └─ CI pass → 始终投递消息；仅 intent=merge 时唤醒（normal → merge-gate）
+        └─ CI pass → intent=review/default 只记录 CI state，不投递消息；intent=merge 投递 + 唤醒（normal → merge-gate）
 ```
 
 ## 通知格式
@@ -112,9 +112,9 @@ Commit: `abc1234`
    - test 失败 → 回归 bug（本地复现 → 修复）
 4. **修复后 push** → CiCdCheckTaskSpec 自动检测新 headSha，重新轮询
 
-### 收到 CI 成功通知
+### CI 成功后的处理
 
-- `intent=review`（默认）：**不会被唤醒**，只有 thread 里一条消息。你主动来看时确认 CI 绿即可。
+- `intent=review`（默认）：**不会被唤醒，也不会有 thread 消息**；CI 绿只记录在 `automationState.ci`，你主动来看时用 PR checks 或 task CI state 确认即可。
 - `intent=merge`：会被唤醒到 merge-gate —— 这是"CI 绿了，可以去 merge"的动作信号。
 - 想让"等 CI 绿 merge"被唤醒，注册/重注册时传 `intent=merge`（见 merge-gate skill）。
 

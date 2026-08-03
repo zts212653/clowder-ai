@@ -6,7 +6,7 @@ doc_kind: feature-spec
 created: 2026-03-04
 ---
 
-# F059: Cat Café 开源计划
+# F059: Clowder AI 开源计划
 
 > **Status**: done | **Owner**: Ragdoll | **Priority**: P2 | **Target**: 2026-03-30（operator定）| **Completed**: 2026-03-30
 
@@ -93,9 +93,9 @@ and collaborative discipline.
 
 ## Why
 
-Cat Café 的架构能力（多 Agent 协作、MCP 集成、CLI 子进程调度）有通用价值，但主仓包含大量敏感内容不能直接公开。
+Clowder AI 的架构能力（多 Agent 协作、MCP 集成、CLI 子进程调度）有通用价值，但主仓包含大量敏感内容不能直接公开。
 
-Cat Café 内部实践已验证的核心增量（vs 裸 API / 单 Agent CLI）：
+Clowder AI 内部实践已验证的核心增量（vs 裸 API / 单 Agent CLI）：
 - **跨模型 review**：打破单模型盲区（F32-b Maine Coon 12 轮 review，F33 云端 5 轮）
 - **身份常驻注入**：抗 compact 漂移（F042）
 - **愿景守护**：跨猫签收 + 证据链（F046）

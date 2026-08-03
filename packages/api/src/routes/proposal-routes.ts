@@ -1,37 +1,19 @@
 /** F128 user-side proposal endpoints. Cat-side propose lives in callback-propose-thread-routes.ts. */
 
-import { catIdSchema } from '@cat-cafe/shared';
+import { catIdSchema, type ThreadProposal } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
-import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
-import type { AgentRouter } from '../domains/cats/services/index.js';
-import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
-import type { IProposalStore } from '../domains/cats/services/stores/ports/ProposalStore.js';
-import type { IThreadStore, Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import type { SocketManager } from '../infrastructure/websocket/index.js';
-import { resolveUserId } from '../utils/request-identity.js';
+import { requireAnchoredPublication } from '../domains/approval-hub/requireAnchoredPublication.js';
+import type { Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
 import { appendApprovedInitialMessage } from './proposal-approve-dispatch.js';
 import { resolveApproveOverrides } from './proposal-approve-overrides.js';
+import { reconcileApprovedCommunityPrTransition } from './proposal-community-pr-transition.js';
+import type { ProposalRoutesOptions } from './proposal-route-options.js';
 import { handleApproveStaleClaim, handleRejectStaleClaim } from './proposal-stale-recovery.js';
+import { replyToProposalTerminalConflict } from './proposal-terminal-conflict.js';
 
-export interface ProposalRoutesOptions {
-  proposalStore: IProposalStore;
-  threadStore: IThreadStore;
-  messageStore: IMessageStore;
-  socketManager: SocketManager;
-  router?: Pick<AgentRouter, 'resolveTargetsAndIntent'>;
-  invocationQueue?: Pick<InvocationQueue, 'enqueue' | 'backfillMessageId' | 'rollbackEnqueue'>;
-  queueProcessor?: Pick<QueueProcessor, 'processNext'>;
-  /** F192: Record proposal rejection as task outcome A2 signal. */
-  onProposalReject?: (input: {
-    proposalId: string;
-    catId: string;
-    threadId: string;
-    proposalTitle?: string;
-    rejectionReason?: string;
-  }) => void;
-}
+export type { ProposalRoutesOptions } from './proposal-route-options.js';
 
 const approveBodySchema = z
   .object({
@@ -58,6 +40,14 @@ const proposalParamsSchema = z.object({
 
 export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (app, opts) => {
   const { proposalStore, threadStore, messageStore, socketManager, onProposalReject } = opts;
+  const reconcileTransition = (proposal: ThreadProposal, threadId: string) =>
+    reconcileApprovedCommunityPrTransition({
+      proposal,
+      threadId,
+      threadStore,
+      taskStore: opts.taskStore,
+      fetchPrTrackingBoundary: opts.fetchPrTrackingBoundary,
+    });
 
   app.post('/api/proposals/:proposalId/approve', async (request, reply) => {
     const paramsParse = proposalParamsSchema.safeParse(request.params);
@@ -75,6 +65,7 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
       reply.status(401);
       return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
     }
+    const ownerAuthProvenance = resolveStrictUserId(request) === userId ? 'strict' : 'compatibility_fallback';
 
     const proposal = await proposalStore.get(paramsParse.data.proposalId);
     if (!proposal) {
@@ -85,18 +76,18 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
       reply.status(403);
       return { error: 'Proposal does not belong to the current user' };
     }
-    if (proposal.status === 'rejected') {
-      reply.status(409);
-      return { error: 'Proposal already rejected', status: proposal.status };
-    }
+    if (replyToProposalTerminalConflict(proposal, 'approve', reply)) return;
     if (proposal.status === 'approved' && proposal.createdThreadId) {
+      const warnings = await reconcileTransition(proposal, proposal.createdThreadId);
       return {
         proposalId: proposal.proposalId,
         threadId: proposal.createdThreadId,
         status: proposal.status,
         deduped: true,
+        ...(warnings.length > 0 ? { warnings } : {}),
       };
     }
+    await requireAnchoredPublication(proposalStore, proposal.proposalId);
     if (proposal.status === 'approving') {
       const outcome = await handleApproveStaleClaim({
         proposal,
@@ -105,11 +96,14 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
         threadStore,
         socketManager,
         reply,
+        reconcileRecoveredProposal: reconcileTransition,
       });
       if (outcome.kind === 'in_flight') {
         return { error: 'Proposal is being approved by another request; retry shortly', status: proposal.status };
       }
-      if (outcome.kind === 'recoveredBody') return outcome.body;
+      if (outcome.kind === 'recoveredBody') {
+        return outcome.body;
+      }
       if (outcome.kind === 'race_retry') {
         return { error: 'Proposal status changed concurrently — retry approve' };
       }
@@ -192,20 +186,16 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
         warnings.push(`updatePreferredCats failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
+    warnings.push(...(await reconcileTransition(finalized, thread.id)));
     if (finalInitialMessage) {
       try {
-        // F128 round-9 plan-based: routes pass raw user input + parent
-        // metadata only; dispatch is the single owner of router resolve,
-        // parseIntent, plan computation (targetCats / intent / reporter),
-        // enrichWithParentThreadHeader, and enqueue. This closes the
-        // round-7/8 補锅匠 trap where enrich had to recover the parallel
-        // reporter from a raw `@<token>` regex (which kept missing handle
-        // shapes — CJK, dotted, hyphenated).
+        // Dispatch owns routing, intent, enrichment, and enqueue for the raw approved message.
         const sourceThread = await threadStore.get(proposal.sourceThreadId);
 
         const result = await appendApprovedInitialMessage({
           proposalId: proposal.proposalId,
           userId,
+          ownerAuthProvenance,
           threadId: thread.id,
           rawInitialMessage: finalInitialMessage,
           sourceThreadId: proposal.sourceThreadId,
@@ -264,12 +254,16 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
       reply.status(403);
       return { error: 'Proposal does not belong to the current user' };
     }
-    if (proposal.status === 'approved') {
-      reply.status(409);
-      return { error: 'Proposal already approved', status: proposal.status };
-    }
+    if (replyToProposalTerminalConflict(proposal, 'reject', reply)) return;
+    await requireAnchoredPublication(proposalStore, proposal.proposalId);
     if (proposal.status === 'approving') {
-      const outcome = await handleRejectStaleClaim({ proposal, proposalStore, threadStore, reply });
+      const outcome = await handleRejectStaleClaim({
+        proposal,
+        proposalStore,
+        threadStore,
+        reply,
+        reconcileRecoveredProposal: reconcileTransition,
+      });
       if (outcome.kind === 'in_flight') {
         return {
           error: 'Proposal is being approved — wait for the in-flight approve to settle',

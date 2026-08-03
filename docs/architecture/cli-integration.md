@@ -1,5 +1,5 @@
 ---
-feature_ids: []
+feature_ids: [F118, F212]
 topics: [architecture, cli, integration]
 doc_kind: note
 created: 2026-02-26
@@ -7,12 +7,12 @@ created: 2026-02-26
 
 # CLI 集成架构：Claude Code / Codex / Google CLI
 
-> Cat Cafe 项目如何对接三个不同厂商的 AI CLI / adapter 工具
-> 作者：Ragdoll | 最后更新：2026-05-23
+> Clowder AI 项目如何对接三个不同厂商的 AI CLI / adapter 工具
+> 作者：Ragdoll | 最后更新：2026-07-13
 
 ## 概述
 
-Cat Cafe 需要调用三个不同厂商的 AI Agent：
+Clowder AI 需要调用三个不同厂商的 AI Agent：
 - **Ragdoll** → Claude Code CLI (`claude`)
 - **Maine Coon** → OpenAI Codex CLI (`codex`)
 - **Siamese** → Google Antigravity CLI (`agy`，Gemini 模型默认) / Gemini CLI (`gemini`，显式 fallback)
@@ -40,7 +40,12 @@ Cat Cafe 需要调用三个不同厂商的 AI Agent：
                                 ▼
                     ┌───────────────────────┐
                     │      spawnCli()       │
-                    │  (通用子进程管理器)     │
+                    │ lifecycle + liveness │
+                    └───────────┬───────────┘
+                                │
+                    ┌───────────▼───────────┐
+                    │ cli-supervisor (Unix) │
+                    │ process-group signals │
                     └───────────┬───────────┘
                                 │
               ┌─────────────────┴─────────────────┐
@@ -95,12 +100,13 @@ export async function* parseNDJSON(stream: Readable): AsyncGenerator<unknown> {
 
 ```typescript
 export async function* spawnCli(options: CliSpawnOptions): AsyncGenerator<unknown> {
-  const child = spawn(options.command, options.args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawnSupervisor(options);
 
-  // ... 超时、取消、清理逻辑
+  // valid stdout activity resets the response timer;
+  // ProcessLivenessProbe independently samples PID/CPU.
 
   for await (const event of parseNDJSON(child.stdout)) {
-    resetTimeout();  // 每次输出重置超时计时器
+    resetTimeout();
     yield event;
   }
 }
@@ -110,19 +116,22 @@ export async function* spawnCli(options: CliSpawnOptions): AsyncGenerator<unknow
 
 | 问题 | 解决方案 |
 |------|----------|
-| 进程超时 | 可配置超时 (`CLI_TIMEOUT_MS`)，默认 30 分钟，`0` 禁用 |
-| 优雅终止 | 先 SIGTERM，3 秒后 SIGKILL |
+| 进程超时 | 默认 `CLI_TIMEOUT_MS=0`，不自动终止；显式正数配置才 opt in response timeout 与 bounded extension |
+| Stall 处理 | `alive_but_silent` / `suspected_stall` 只告警；不自动发信号，由用户 Cancel 决定是否终止 |
+| 有界返回 | 终止提交后停止等待新 stdout；等 child exit 或最终 SIGKILL attempt，再给 100ms stdio drain，不依赖 wrapper 永远正确 close |
+| 活性检测 | CPU/PID 每 60s sample；warning queue 每 ≤1s drain，避免 threshold 后再拖两个 sample interval |
+| Unix 进程组 | `cli-supervisor` 原样转发 SIGINT；SIGTERM 进入 supervisor 自有 SIGTERM→SIGKILL orphan cleanup |
 | 僵尸进程 | `process.on('exit')` 钩子强制清理 |
-| 用户取消 | 支持 `AbortSignal` |
-| 错误上报 | CLI 退出码非零时 yield `{ __cliError: true, ... }` |
+| 用户取消 | `AbortSignal` 是默认唯一终止入口；取消后才进入既有有界清理链 |
+| 错误上报 | timeout 固定为 `cli_response_timeout` / `cli_stall_timeout`；kill 后 exit 只放 `terminalContext.postKill*`，不覆盖 timeout cause |
 
-**重要教训：stderr 活跃也算"活着"**
+**重要教训：stderr 是诊断证据，不是续命信号**
 
 ```typescript
-// Bug: Claude CLI 的 thinking/工具调用输出到 stderr，不是 stdout
-// 如果只监听 stdout，会误判为"超时无响应"
-child.stderr?.on('data', () => {
-  resetTimeout();  // stderr 有输出也重置超时！
+// reconnect/debug chatter 曾让真正卡死的 CLI 永远重置 timeout。
+// 现在只缓存 stderr；有效 stdout + PID/CPU probe 共同判断活性。
+child.stderr?.on('data', (chunk) => {
+  stderrBuffer += chunk.toString();
 });
 ```
 
@@ -178,7 +187,7 @@ claude -p "prompt" \
 ```
 
 **特殊处理：**
-- **MCP 支持**：通过 `--mcp-config` 注入我们的 MCP Server，让 Claude 能回调 Cat Cafe
+- **MCP 支持**：通过 `--mcp-config` 注入我们的 MCP Server，让 Claude 能回调 Clowder AI
 - **图片传递**：通过 `--images` flag 传递本地图片路径
 - **Session 恢复**：通过 `--resume <sessionId>` 恢复上下文
 
@@ -280,11 +289,11 @@ agy \
 ```
 
 **antigravity-cli 关键边界：**
-- `agy` 2026-06-28 local refresh exposes a top-level `--model` flag. Cat Cafe owns that flag and strips user-supplied `--model` from freeform args.
+- `agy` 2026-06-28 local refresh exposes a top-level `--model` flag. Clowder AI owns that flag and strips user-supplied `--model` from freeform args.
 - Model identity is not the same as carrier identity: AGY + Gemini selector routes to Siamese; AGY + `Claude Opus 4.6 (Thinking)` routes to Bengal.
 - resume stdout 可能回放旧回复 + 新回复，因此 resumed text 事件使用 `textMode: "replace"`。
 - timeout / missing selected model 可能以 exit code 0 + stdout error 文本出现，必须由 plain-text parser 分类。
-- fresh conversation 的 `Warning: conversation "agy-..." not found.` 是可清理噪音，只能锚定 Cat Cafe 生成的 `agy-*` session id。
+- fresh conversation 的 `Warning: conversation "agy-..." not found.` 是可清理噪音，只能锚定 Clowder AI 生成的 `agy-*` session id。
 
 **gemini-cli 调用方式：**
 ```bash
@@ -344,15 +353,15 @@ function transformGeminiEvent(event, catId): AgentMessage | null {
 
 ## 踩坑记录
 
-### 1. stderr 不是错误，是 thinking
+### 1. stderr chatter 不能无限延长 invocation
 
-**问题**：Claude CLI 的 thinking 输出和工具调用日志都走 stderr，不是 stdout。如果只监听 stdout 来判断"CLI 是否活着"，会导致误杀正在工作的进程。
+**问题**：部分 CLI 会把 thinking、重连或 transport debug 写到 stderr。把任意 stderr 当活动曾让重连 chatter 不断重置 timer，真实卡死 invocation 最长拖到约 30 分钟。
 
-**解决**：stderr 有输出时也重置超时计时器。
+**解决**：stderr 只缓存作脱敏诊断，不重置 response timer，也不调用 `probe.notifyActivity()`。长工具/思考期由 PID + CPU growth 判为 `busy-silent`，可以 bounded extension，但不能无限续命。
 
 ```typescript
-child.stderr?.on('data', () => {
-  resetTimeout();  // stderr 活跃 = CLI 还在工作
+child.stderr?.on('data', (chunk) => {
+  stderrBuffer += chunk.toString();
 });
 ```
 
@@ -391,14 +400,13 @@ const args = options?.sessionId
 
 **问题**：stderr 可能包含 debug 信息、API key 或内部 trace。
 
-**解决**：stderr 只写 `console.error` 供开发调试，不 yield 给前端。错误消息用脱敏的固定文案。
+**解决**：raw stderr 永不进入用户消息。只有 `LOG_CLI_STDERR=1` 时才把经过共享 sanitizer 且截断后的 excerpt 写后台日志；前端只接收 whitelist reason、humanized text 与安全的 `debugRef`。
 
 ```typescript
-// 日志（开发用）
-console.error(`[cli-spawn] ${command} stderr (debug only):\n${stderrBuffer}`);
+const stderrForLog = formatCliStderrForLog(stderrBuffer);
+if (stderrForLog) diagnosticLogger.error({ command, stderr: stderrForLog }, 'CLI stderr');
 
-// yield 给用户（脱敏）
-yield { __cliError: true, message: `CLI 异常退出 (code: ${exitCode})` };
+yield { __cliError: true, message: humanizedMessage, cliDiagnostics };
 ```
 
 ---
@@ -460,7 +468,7 @@ const service = new GeminiAgentService({ spawnFn: mockSpawn });
 
 1. **进程池**：避免每次 spawn 的 500ms-2s 启动开销
 2. **CLI 版本检测**：不同版本 NDJSON 格式可能变化，需要版本锁定或适配
-3. **Cancel 协议**：目前是 SIGTERM/SIGKILL 硬杀，理想情况应该有优雅取消协议
+3. **Provider capability negotiation**：Codex stall 已支持 SIGINT-first；若其他 CLI 也提供稳定 cooperative cancel，再按 provider 显式 opt in，不扩大全局默认
 4. **MCP 双向通信**：让非 Claude 猫也能通过 MCP 回传（目前用 HTTP callback 模拟）
 
 ---
@@ -471,6 +479,8 @@ const service = new GeminiAgentService({ spawnFn: mockSpawn });
 packages/api/src/
 ├── utils/
 │   ├── cli-spawn.ts          # 通用子进程管理
+│   ├── CliTerminationController.ts # 单向有界信号状态机
+│   ├── cli-supervisor.ts     # Unix 进程组守护 + 原样信号转发
 │   ├── cli-types.ts          # 类型定义
 │   ├── cli-format.ts         # 错误格式化
 │   └── ndjson-parser.ts      # NDJSON 解析

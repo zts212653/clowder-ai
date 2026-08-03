@@ -6,6 +6,7 @@ description: >
   Not for: 普通资料搜索（用 deep-research）、社区 issue/PR 运营（用 opensource-ops）、只需要架构头脑风暴（用 collaborative-thinking）。
   Output: feature-discussions/YYYY-MM-DD-{project}-deep-dive/ 下的代码证据报告 + 对比结论 + 候选 lesson/skill。
   GOTCHA: 不许只看 README 下判断；每个明星特性必须追到代码路径、状态突变点、反馈闭环和算法输入输出。
+tips_exempt: Existing teardown quality contract refinement; no new user-facing capability or discovery moment.
 triggers:
   - "拆解明星开源项目"
   - "拆解开源项目"
@@ -40,11 +41,11 @@ triggers:
 最小合格产物必须包含：
 
 - source repo URL、local path、commit SHA、更新时间。
-- 宣传 claims ledger：claim / evidence files / verdict / caveat。
+- 宣传 claims ledger：claim / evidence files / Source verdict / Decision fit / unknowns。
 - 架构图或模块地图：entrypoints、state stores、extension points、empty dirs；用 ASCII tree 或 Mermaid，参考 *(internal reference removed)*。
 - 明星特性深挖：每个特性都写到代码路径和运行链路。
 - 算法剥皮表：真算法 / LLM judge / 启发式 / 规则 / 外部服务。
-- Cat Café 对比：能学、不能学、我们因为 tradeoff 不 follow 的理由。
+- Clowder AI 对比：能学、不能学、我们因为 tradeoff 不 follow 的理由。
 
 报告模板见 [refs/report-template.md](refs/report-template.md)；八审计镜头 + 命令见 [refs/teardown-method.md](refs/teardown-method.md)；用户视角第一性原理（第 9 镜头）见 [refs/user-mind-evaluation.md](refs/user-mind-evaluation.md)。
 
@@ -90,6 +91,20 @@ signal -> decision -> state mutation -> future behavior
 
 断一环，就只能写“有 UX/telemetry/CRUD”，不能写“闭环进化”。
 
+**scoped ledger 审计（性能/成本类 claim 必做）**：宣称“节约 token / 更快 / 更省”的
+claim，追完链路真实性后，还要重建**足以支持当前决定的边界账本**，而不是宣称掌握了
+“完整总账”：
+
+- 固定目标 workload、provider/model、版本、时间窗与 comparator；
+- 写清 numerator、denominator、排除项和 benchmark 是否被反复用于挑方案；
+- 分开统计 ingest/extract、query/retrieval、generation、cache write/read/miss、维护和人审；
+- 并列报告 quality、coverage/abstention、latency、reliability、privacy/risk；
+- 未报告或无法复核的项写 `unknown`，不得用常识猜成 0。
+
+Context 变短可能减少输入，也可能改变可复用前缀和缓存经济性；结果取决于供应商规则、
+breakpoint、请求序列和实际命中率。必须读取 usage/billing 或做配对实验，不能把“中间
+context 变化”直接写成“cache 全 miss”或固定倍率。**claim 真实 ≠ 足以支持产品决定。**
+
 ### Step 3 — 算法剥皮
 
 把被宣传成“算法”的点分栏：真算法 / LLM judge / 启发式 / 规则 / 外部服务。
@@ -113,13 +128,27 @@ signal -> decision -> state mutation -> future behavior
 
 如果项目把三层都压给同一个模型自评，要明确写风险：它可能能沉淀步骤，但不能证明质量提升。
 
-### Step 5 — 和 Cat Café 对比
+### Step 5 — 和 Clowder AI 对比
 
 不要写“我们有/没有”流水账。每个维度都写价值函数：
 
 - **Learn**：立刻值得学的工程手法。
 - **Gap**：我们承认缺口，需要立项或排优先级。
 - **Do Not Follow**：我们不做，并写清哲学理由。
+
+**按决策向量重新判适用性**：外部 SOTA / benchmark 分数是它所测构念的证据，不是
+产品总效用，也不能因为不覆盖我们的病灶就贬成“只是线索”。先写清它实际测了什么，
+再映射到当前目标 workload 的决策向量：
+
+```text
+quality/correctness | coverage/abstention | lifecycle cost | latency
+reliability | operability | privacy/risk
+```
+
+用约束或 Pareto frontier 做 Learn / Gap / Do Not Follow 判断（例如“污染率不超 ε 时
+最大化 coverage”）。不同量纲不得直接相乘成一个“猫咖总 loss”；只有 operator 明确给出
+权重、单位换算和决策场景时，才允许生成标量总分。若 benchmark 与目标只部分重合，
+写 `partial` 和未覆盖维度，不得写“高分证明产品强”或“与我们正交所以分数无效”。
 
 ### Step 6 — 沉淀
 
@@ -138,6 +167,9 @@ signal -> decision -> state mutation -> future behavior
 | 把 telemetry 当治理 | `last_used_at` 被过度解读 | 看它是否进入排序/淘汰/晋升 |
 | 只看源码不看社区 | 错过用户真实痛点和官方 roadmap | 查高赞 issue / bug / enhancement |
 | 用”我们没有”替代 tradeoff / 用”对方有”误报为”对方强” | 把设计选择误报成缺口 / 接口齐全度误读为质量 | 写清价值函数 + 用户视角第一性原理（refs/user-mind-evaluation.md）|
+| 把不同量纲乘成“总 loss” | 权重和单位被藏进公式，结论任意 | 保留决策向量；有明确权重和场景才标量化 |
+| 把缓存风险写成固定倍率 | provider / model / workload 一换就失真 | 读 usage/billing，报告 cache read/write/miss 与请求序列 |
+| 把“不覆盖我们的病灶”写成“benchmark 无效” | 否定了它在原测量构念上的证据价值 | 分开写 source validity 与 decision fit |
 | 一只猫写完不找 review | 方法论未经挑战 | skill/report 交对口猫 review |
 
 ## 和其他 Skill 的区别

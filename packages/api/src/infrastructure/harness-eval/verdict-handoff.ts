@@ -4,11 +4,15 @@ import { evalDomainIdSchema } from './domain/eval-domain-registry.js';
 const stringRefArray = z.array(z.string().min(1));
 const nonEmptyStringArray = stringRefArray.min(1);
 const isoDateTime = z.string().datetime({ offset: true });
+const findingKeySchema = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9._-]{0,127}$/, 'findingKey must be a stable lowercase domain-local slug');
 
 const verdictHandoffPacketSchema = z
   .object({
     id: z.string().min(1),
     domainId: evalDomainIdSchema,
+    findingKey: findingKeySchema.optional(),
     createdAt: isoDateTime,
     phenomenon: z.string().min(1),
     harnessUnderEval: z.object({

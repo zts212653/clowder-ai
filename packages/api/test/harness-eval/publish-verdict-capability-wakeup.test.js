@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { createCapabilityWakeupGeneratorAdapter } from '../../dist/infrastructure/harness-eval/publish-verdict/capability-wakeup-generator-adapter.js';
 import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
+import { seedCanonicalMeasurementCensusState } from './publish-verdict-fixtures.js';
 
 /**
  * F192 Phase H 收尾 PR-2 — end-to-end test: handler dispatches to capability-wakeup
@@ -133,18 +134,25 @@ function buildClassifiedTrial() {
   };
 }
 
+function createMockGitPublisher(isolatedDir, published = { commitSha: 'unreachable', prUrl: 'unreachable' }) {
+  return {
+    async publishOnIsolatedWorktree(opts) {
+      const isolatedRoot = join(root, '..', isolatedDir);
+      seedCanonicalMeasurementCensusState(isolatedRoot);
+      await opts.stage(isolatedRoot);
+      return published;
+    },
+  };
+}
+
 describe('handlePublishVerdict end-to-end with capability-wakeup generator', () => {
   it('happy path: handler dispatches to cw adapter, returns verdict path + commit/PR', async () => {
     const provider = { resolve: async () => [buildClassifiedTrial()] };
     const cwGenerator = createCapabilityWakeupGeneratorAdapter(provider);
-    const mockGitPublisher = {
-      async publishOnIsolatedWorktree(opts) {
-        // Stage callback runs generator inside isolated worktree.
-        // For e2e, run stage against the LIVE root so generator can find registry + write artifacts.
-        await opts.stage(join(root, '..', 'cw-e2e-iso-stub'));
-        return { commitSha: 'cw-sha-1234', prUrl: 'https://github.com/zts212653/clowder-ai/pull/9000' };
-      },
-    };
+    const mockGitPublisher = createMockGitPublisher('cw-e2e-iso-stub', {
+      commitSha: 'cw-sha-1234',
+      prUrl: 'https://github.com/zts212653/clowder-ai/pull/9000',
+    });
     // Pre-create the isolated stub so cw generator's loadDomains() works
     const isoStub = join(root, '..', 'cw-e2e-iso-stub');
     mkdirSync(join(isoStub, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
@@ -216,12 +224,7 @@ sla:
       },
     };
     const cwGenerator = createCapabilityWakeupGeneratorAdapter(provider);
-    const mockGitPublisher = {
-      async publishOnIsolatedWorktree(opts) {
-        await opts.stage(join(root, '..', 'cw-e2e-nofound-iso'));
-        return { commitSha: 'unreachable', prUrl: 'unreachable' };
-      },
-    };
+    const mockGitPublisher = createMockGitPublisher('cw-e2e-nofound-iso');
     mkdirSync(join(root, '..', 'cw-e2e-nofound-iso', 'docs', 'harness-feedback'), { recursive: true });
 
     const result = await handlePublishVerdict(
@@ -251,12 +254,7 @@ sla:
   it('returns 404 no_trials_in_window when provider yields zero trials (PR-2 4xx mapping)', async () => {
     const emptyProvider = { resolve: async () => [] };
     const cwGenerator = createCapabilityWakeupGeneratorAdapter(emptyProvider);
-    const mockGitPublisher = {
-      async publishOnIsolatedWorktree(opts) {
-        await opts.stage(join(root, '..', 'cw-e2e-empty2-iso'));
-        return { commitSha: 'unreachable', prUrl: 'unreachable' };
-      },
-    };
+    const mockGitPublisher = createMockGitPublisher('cw-e2e-empty2-iso');
     mkdirSync(join(root, '..', 'cw-e2e-empty2-iso', 'docs', 'harness-feedback'), { recursive: true });
 
     const result = await handlePublishVerdict(
@@ -312,12 +310,7 @@ sla:
   it('returns 404 when cw provider yields zero trials (no_trials_in_window propagates)', async () => {
     const emptyProvider = { resolve: async () => [] };
     const cwGenerator = createCapabilityWakeupGeneratorAdapter(emptyProvider);
-    const mockGitPublisher = {
-      async publishOnIsolatedWorktree(opts) {
-        await opts.stage(join(root, '..', 'cw-e2e-empty-iso'));
-        return { commitSha: 'unreachable', prUrl: 'unreachable' };
-      },
-    };
+    const mockGitPublisher = createMockGitPublisher('cw-e2e-empty-iso');
     mkdirSync(join(root, '..', 'cw-e2e-empty-iso', 'docs', 'harness-feedback'), { recursive: true });
 
     const result = await handlePublishVerdict(

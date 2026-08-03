@@ -243,6 +243,13 @@ describe('F212 CliDiagnosticsPanel (AC-B2/B3/B4)', () => {
       'invalid_thinking_signature',
       'tool_call_parse_failed',
       'server_overloaded',
+      'cli_response_timeout',
+      'cli_stall_timeout',
+      // F212 Phase G (clowder-ai#875): silent_completion — CLI clean exit, no text event.
+      'silent_completion',
+      // F212 Phase H (Sol runtime forensics 2026-07-09, archive 97449e4b): upstream
+      // provider policy engine (Codex 0.98+ cyber-safety flag) rejected the prompt.
+      'upstream_policy_reject',
     ];
 
     for (const reasonCode of reasonCodes) {
@@ -377,6 +384,31 @@ describe('F212 CliDiagnosticsPanel (AC-B2/B3/B4)', () => {
     expect(ref?.textContent).toContain('invocationId:');
     // truncation: middle ellipsis "…" present for long invocationId
     expect(ref?.textContent).toMatch(/…/);
+  });
+
+  it('timeout debugRef omits the exit label when post-kill exitCode is causally absent', async () => {
+    const { CliDiagnosticsPanel } = await import('../CliDiagnosticsPanel');
+    const diag = build({
+      reasonCode: 'cli_stall_timeout',
+      debugRef: {
+        command: 'codex',
+        signal: null,
+        invocationId: 'inv-timeout-without-exit',
+      },
+    });
+
+    act(() => {
+      root.render(
+        React.createElement(CliDiagnosticsPanel, {
+          errorMessage: 'Error: timeout',
+          diagnostics: diag,
+        }),
+      );
+    });
+
+    const ref = container.querySelector('[data-testid="cli-diagnostics-debug-ref"]');
+    expect(ref?.textContent).toContain('command:');
+    expect(ref?.textContent).not.toContain('exit:');
   });
 
   it('debugRef strip surfaces path-safe provider spawn context', async () => {

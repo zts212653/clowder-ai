@@ -1,6 +1,6 @@
 ---
 feature_ids: [F066]
-related_features: [F034, F021, F054]
+related_features: [F034, F021, F054, F279]
 topics: [voice, tts, audio, pipeline, streaming, mlx-audio, kokoro]
 doc_kind: spec
 created: 2026-03-05
@@ -240,7 +240,7 @@ TTS 服务可能因瞬时不可用（OOM / 模型重载 / 请求竞争）导致�
 ### 坑 3: GPT-SoVITS 英文处理是结构性缺陷
 - **现象**：81 个 wav 中，所有含英文的文本都出现乱码/断裂
 - **根因**：GPT-SoVITS 以中文/日文为主训练，英文 phonemizer 基本不可用
-- **教训**：Cat Café 内容中英混杂频率高（代码术语、猫名等），GPT-SoVITS 不适合做在线引擎。降级为离线声库工具
+- **教训**：Clowder AI 内容中英混杂频率高（代码术语、猫名等），GPT-SoVITS 不适合做在线引擎。降级为离线声库工具
 
 ### 坑 4: Clone 合成超时导致语音降级
 - **现象**：长文本（~200 字"坏猫计划"）发送后显示 `🔇 语音合成失败`

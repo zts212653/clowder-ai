@@ -9,6 +9,7 @@
 
 import type { FeatTrajectoryEntry, GitRefSnapshot } from '@cat-cafe/shared';
 import { useState } from 'react';
+import { CompactLabel } from '../../content-overflow';
 import { isCarryingBag, KIND_VISUALS, SOURCE_LABELS, TONE_CLASSES } from './trajectory-kind-styles';
 
 /* ── payload 安全提取 helper（payload 是 Record<string, unknown>，不裸用 any）── */
@@ -136,7 +137,11 @@ export function TrajectoryCard({
 
         {/* Payload summary */}
         <p className="text-xs text-neutral-300 leading-relaxed">{summary.title}</p>
-        {summary.detail && <p className="text-micro font-mono text-neutral-500 mt-0.5 truncate">{summary.detail}</p>}
+        {summary.detail && (
+          <div data-testid="trajectory-detail" className="mt-1 min-w-0">
+            <CompactLabel label="轨迹详情" value={summary.detail} className="font-mono text-micro text-neutral-500" />
+          </div>
+        )}
 
         {/* Meta: 时间 + 作者 + provenance 下钻入口 */}
         <div className="mt-2 flex items-center gap-2 text-micro text-neutral-500">

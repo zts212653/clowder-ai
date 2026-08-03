@@ -49,7 +49,7 @@ function verifyBiomeVersion({
       lockedVersion,
       installedVersion: null,
       message:
-        `Biome ${lockedVersion} is required by pnpm-lock.yaml but is not installed locally. ` +
+        `Biome ${lockedVersion} is required by ${lockfilePath} but is not installed locally. ` +
         'Run `env -u NODE_ENV pnpm install --frozen-lockfile` to refresh this worktree.',
     };
   }
@@ -60,7 +60,7 @@ function verifyBiomeVersion({
       lockedVersion,
       installedVersion,
       message:
-        `Biome version mismatch: expected ${lockedVersion} from pnpm-lock.yaml, found ${installedVersion} in node_modules. ` +
+        `Biome version mismatch: expected ${lockedVersion} from ${lockfilePath}, found ${installedVersion} in node_modules. ` +
         'Run `env -u NODE_ENV pnpm install --frozen-lockfile` before trusting local Biome results.',
     };
   }
@@ -73,9 +73,32 @@ function verifyBiomeVersion({
   };
 }
 
+function parseArgs(argv) {
+  const options = {};
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--') {
+      continue;
+    }
+
+    if (arg === '--lockfile') {
+      const value = argv[i + 1];
+      if (!value) {
+        throw new Error('Usage: check-biome-version.mjs [--lockfile <path>]');
+      }
+      options.lockfilePath = path.resolve(value);
+      i += 1;
+      continue;
+    }
+
+    throw new Error(`Unknown argument: ${arg}\nUsage: check-biome-version.mjs [--lockfile <path>]`);
+  }
+  return options;
+}
+
 function main() {
   try {
-    const result = verifyBiomeVersion();
+    const result = verifyBiomeVersion(parseArgs(process.argv.slice(2)));
     if (!result.ok) {
       console.error(result.message);
       process.exit(1);

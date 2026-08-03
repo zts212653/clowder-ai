@@ -23,6 +23,7 @@ interface ProjectSetupCardProps {
   agentHookHealthError?: string | null;
   agentHookSyncing?: boolean;
   agentHookSynced?: boolean;
+  agentHookSyncAttempted?: boolean;
   onSyncAgentHooks?: () => void | Promise<void>;
 }
 
@@ -48,6 +49,7 @@ export function ProjectSetupCard({
   agentHookHealthError,
   agentHookSyncing,
   agentHookSynced,
+  agentHookSyncAttempted,
   onSyncAgentHooks,
 }: ProjectSetupCardProps) {
   const [state, setState] = useState<CardState>('idle');
@@ -181,6 +183,7 @@ export function ProjectSetupCard({
                 error={agentHookHealthError}
                 syncing={agentHookSyncing}
                 synced={agentHookSynced}
+                syncAttempted={agentHookSyncAttempted}
                 onSync={onSyncAgentHooks}
               />
             )}

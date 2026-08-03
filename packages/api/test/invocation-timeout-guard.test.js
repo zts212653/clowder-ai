@@ -211,6 +211,51 @@ describe('invocation-level hard timeout (F089)', () => {
     );
   });
 
+  it('user cancel closes the abandoned service iterator exactly once', async () => {
+    const ac = new AbortController();
+    let returnCalls = 0;
+    let emitted = false;
+    const service = {
+      invoke() {
+        return {
+          [Symbol.asyncIterator]() {
+            return {
+              async next() {
+                if (!emitted) {
+                  emitted = true;
+                  return {
+                    done: false,
+                    value: { type: 'text', catId: 'codex', content: 'started', timestamp: Date.now() },
+                  };
+                }
+                return new Promise(() => {});
+              },
+              async return() {
+                returnCalls++;
+                return { done: true, value: undefined };
+              },
+            };
+          },
+        };
+      },
+    };
+
+    setTimeout(() => ac.abort('user_cancel'), 50);
+    await collect(
+      invokeSingleCat(makeDeps(), {
+        catId: 'codex',
+        service,
+        prompt: 'test',
+        userId: 'user1',
+        threadId: 'thread-cancel-cleanup',
+        isLastCat: true,
+        signal: ac.signal,
+      }),
+    );
+
+    assert.equal(returnCalls, 1, 'abortableNext rejection must not abandon the provider iterator');
+  });
+
   it('active invocations with steady progress should not hit invocation_timeout', async () => {
     const progressiveService = {
       async *invoke() {

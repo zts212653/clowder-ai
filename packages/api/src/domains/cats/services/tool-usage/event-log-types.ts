@@ -16,6 +16,8 @@
  * future eval needing tool call sequences.
  */
 
+import type { RecallResultStatus } from '@cat-cafe/shared';
+
 export type ToolStatus = 'success' | 'low_hit' | 'no_match' | 'error';
 
 /** Base fields shared by every tool event. */
@@ -33,6 +35,7 @@ export interface BaseToolEvent {
 /** search_evidence summary — supports FM-5 (nudge effectiveness) + F256 expansion tracking. */
 export interface SearchEvidenceSummary {
   resultCount: number;
+  resultStatus: RecallResultStatus;
   topScore: number | null;
   nudgeEmitted: boolean;
   /** F256 Phase B: expansion hints emitted in this search result */
@@ -47,6 +50,7 @@ export interface SearchEvidenceSummary {
  * position in rankedCandidateAnchors — don't just record candidateCount.
  */
 export interface GraphResolveSummary {
+  resultStatus: RecallResultStatus;
   candidateCount: number;
   rankedCandidateAnchors: string[];
   selectedCandidateIndex?: number;
@@ -56,6 +60,7 @@ export interface GraphResolveSummary {
 /** list_recent summary — supports FM-3 (cold-start adoption). */
 export interface ListRecentSummary {
   resultCount: number;
+  resultStatus: RecallResultStatus;
   scope: string;
   since: string;
 }

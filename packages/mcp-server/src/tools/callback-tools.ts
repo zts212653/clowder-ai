@@ -1,6 +1,6 @@
 /**
  * MCP Callback Tools — core callbacks
- * 鉴权: process.env CAT_CAFE_INVOCATION_ID + CAT_CAFE_CALLBACK_TOKEN
+ * 鉴权: CAT_CAFE_CREDENTIAL_FILE refresh file, with process.env fallback
  *
  * #1092 credential refresh: When CAT_CAFE_CREDENTIAL_FILE is set, invocationId
  * and callbackToken are re-read from the file on each callback call. This lets
@@ -11,10 +11,17 @@
 
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import type { CallbackAuthFailureReason, DispatchGateState, SuggestedCrossPostAction } from '@cat-cafe/shared';
+import type {
+  ActionSuccessorRequestMetadata,
+  CallbackAuthFailureReason,
+  DispatchGateState,
+  SuggestedCrossPostAction,
+} from '@cat-cafe/shared';
 import {
+  actionSuccessorMetadataSchema,
   CALLBACK_AUTH_FAILURE_REASONS,
   DEVELOPMENT_SOP_STAGE_IDS,
+  dispatchProposedActionInputSchema,
   extractFeatureIds,
   isCallbackAuthFailureReason,
   isValidRichBlock,
@@ -28,6 +35,14 @@ import { formatSuggestedCrossPostActionLines } from './cross-post-suggestion-for
 import { withDegradation } from './degradation.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { getInvocationAuthSignal, resolveInvocationCredentials } from './invocation-auth.js';
+import { createMemoryCueTools } from './memory-cue-tools.js';
+import { createPersonMemoryLifecycleTools } from './person-memory-lifecycle-tools.js';
+import { createPersonMemoryProposalTool } from './person-memory-proposal-tool.js';
+import {
+  handleRecordProactiveMemoryAbstention,
+  proactiveMemoryOpportunityTool,
+} from './proactive-memory-opportunity-tool.js';
 
 /**
  * F174 Phase A — reason taxonomy lives in @cat-cafe/shared (single source of
@@ -66,6 +81,31 @@ interface CallbackConfig {
 interface AgentKeyOptions {
   agentKeyCatId?: string;
   forceAgentKey?: boolean;
+}
+
+interface CallbackTransportOptions {
+  enableOutbox?: boolean;
+  retryDelaysMs?: number[];
+  fetchTimeoutMs?: number;
+}
+
+// VoiceBlockSynthesizer may run two provider attempts. Each provider attempt
+// has a 10-minute default hard cap, with a 2-second retry delay between them.
+// Keep the one HTTP request alive for that full server-owned retry envelope.
+const SYNTHESIZED_AUDIO_CALLBACK_FETCH_TIMEOUT_MS = 21 * 60_000;
+const SYNTHESIZED_AUDIO_CALLBACK_TRANSPORT: CallbackTransportOptions = {
+  enableOutbox: false,
+  retryDelaysMs: [],
+  fetchTimeoutMs: SYNTHESIZED_AUDIO_CALLBACK_FETCH_TIMEOUT_MS,
+};
+
+function requiresInlineAudioSynthesis(block: unknown): boolean {
+  if (!block) return false;
+  if (typeof block !== 'object') return false;
+  const record = block as Record<string, unknown>;
+  const text = typeof record.text === 'string' ? record.text.trim() : '';
+  const url = typeof record.url === 'string' ? record.url.trim() : '';
+  return record.kind === 'audio' && text.length > 0 && url.length === 0;
 }
 
 function readAgentKeyFile(path: string | undefined): string | undefined {
@@ -111,31 +151,6 @@ function resolveAgentKeySecret(options?: AgentKeyOptions): string | undefined {
   return readAgentKeyFile(process.env.CAT_CAFE_AGENT_KEY_FILE);
 }
 
-/**
- * #1092: Read fresh invocation credentials from a file.
- * The API writes { invocationId, callbackToken } to this file before each
- * invocation. The MCP server re-reads it on every callback call so that
- * a long-lived subprocess (persisting across ACP session resume) always
- * sends the current invocationId — not the stale one from process.env.
- *
- * Returns null on any error (missing file, bad JSON, missing fields) —
- * callers fall back to process.env values.
- */
-function readCredentialFile(): { invocationId: string; callbackToken: string } | null {
-  const filePath = process.env.CAT_CAFE_CREDENTIAL_FILE;
-  if (!filePath) return null;
-  try {
-    const raw = readFileSync(filePath, 'utf-8');
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const invocationId = typeof parsed.invocationId === 'string' ? parsed.invocationId : '';
-    const callbackToken = typeof parsed.callbackToken === 'string' ? parsed.callbackToken : '';
-    if (invocationId && callbackToken) return { invocationId, callbackToken };
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 export function getCallbackConfig(options?: AgentKeyOptions): CallbackConfig | null {
   const apiUrl = process.env.CAT_CAFE_API_URL;
   if (!apiUrl) return null;
@@ -149,9 +164,7 @@ export function getCallbackConfig(options?: AgentKeyOptions): CallbackConfig | n
   // #1092: Prefer credential file over process.env for invocation creds.
   // The file is updated per-invocation by the API; process.env is set once
   // at subprocess spawn and goes stale after session resume.
-  const fileCreds = readCredentialFile();
-  const invocationId = fileCreds?.invocationId ?? process.env.CAT_CAFE_INVOCATION_ID;
-  const callbackToken = fileCreds?.callbackToken ?? process.env.CAT_CAFE_CALLBACK_TOKEN;
+  const { invocationId, callbackToken } = resolveInvocationCredentials();
 
   if (!invocationId && !callbackToken && !agentKeySecret) return null;
 
@@ -211,12 +224,9 @@ export function formatCatRoutingErrorPrefix(body: {
 export async function callbackPost(
   path: string,
   body: Record<string, unknown>,
-  options?: {
-    enableOutbox?: boolean;
+  options?: CallbackTransportOptions & {
     agentKeyCatId?: string;
     forceAgentKey?: boolean;
-    retryDelaysMs?: number[];
-    fetchTimeoutMs?: number;
   },
 ): Promise<ToolResult> {
   const config = getCallbackConfig({
@@ -293,6 +303,25 @@ const agentKeyCatIdSchema = z
     'Persistent-agent identity selector. Required for shared Antigravity MCP (antigravity or antig-opus) so agent-key auth uses the matching sidecar key; otherwise callback config fails closed. Ignored when full invocation credentials are present.',
   );
 
+type AgentKeySelectable = { agentKeyCatId?: string | undefined };
+type WithAgentKey<T> = T & AgentKeySelectable;
+
+const agentKeyInputShape = {
+  agentKeyCatId: agentKeyCatIdSchema,
+};
+
+function agentKeyOptions(input: AgentKeySelectable): { agentKeyCatId?: string | undefined } {
+  return { agentKeyCatId: input.agentKeyCatId };
+}
+
+const ACTION_SUBJECT_REF_DESCRIPTION =
+  'subjectRef must use pr:<owner>/<repo>#<positive-number> (for example pr:zts212653/cat-cafe#2943) ' +
+  'or subject:<namespace>:<opaque-id>. GitHub URL forms and SHA suffixes such as github:owner/repo#2943@abc123 are invalid.';
+
+const PROPOSED_ACTION_EXECUTABLE_CONTRACT_DESCRIPTION =
+  'Executable pairs are closed: review + reviewer + review_delivered requires pr:<owner>/<repo>#<positive-number>; ' +
+  'implement + implementer + task_done requires subject:task:<taskId>. Other family, slot, predicate, or subject combinations are rejected before publication.';
+
 export const postMessageInputSchema = {
   content: z.string().min(1).describe('The message content to post'),
   threadId: z
@@ -316,6 +345,35 @@ export const postMessageInputSchema = {
       'Optional explicit target cat IDs. Merged with @mentions parsed from content. Use get_thread_cats to discover valid catIds. ' +
         'F182: disabled cats are dropped (soft degradation) — check routing_warnings in response for cat_disabled entries and read alternatives[] to find replacements. ' +
         'Response always includes message field (human-readable routing summary).',
+    ),
+  coordination: z
+    .object({
+      phase: z
+        .enum(['active', 'terminal'])
+        .describe('active continues a direct coordination chain; terminal closes it after one final routed delivery.'),
+      id: z
+        .string()
+        .min(1)
+        .max(128)
+        .regex(/^[A-Za-z0-9._:-]+$/)
+        .optional()
+        .describe('Existing coordination id to continue explicitly. Usually omit: the server mints/inherits it.'),
+    })
+    .optional()
+    .describe(
+      'Invocation-token same-thread coordination lifecycle. Use active for a real handoff and terminal for the final result. ' +
+        'A courtesy reply to terminal is persisted without waking the prior cat.',
+    ),
+  action: actionSuccessorMetadataSchema
+    .optional()
+    .describe(
+      'Optional same-thread structured successor identity. New dispatches require mode=single; a parallel holder may use returnToPredecessor with one predecessor target to record only its rejected-ownership terminal. Requires explicit clientMessageId and exactly one targetCats entry. ' +
+        'Use claimOrigin=existing_standing plus groundingEvidenceRef to claim verified standing through the same custody CAS. ' +
+        'New claims require terminalPredicate typed parameters; server catalog owns completion semantics, and carrier exit/text never counts as action success. ' +
+        'A completed review lease can continue on a fresh exact HEAD only with reviewReentry reason behavioral_delta, stale_or_blocking, or explicit_matrix_route plus durable evidenceRef; omit reviewReentry for the initial review. ' +
+        'A mismatched current holder returns with returnToPredecessor={leaseId, expectedGeneration, groundingEvidenceRef}; targetCats must name the persisted predecessor. ' +
+        'Use multi_mention for deliberate parallel review/ideation. ' +
+        ACTION_SUBJECT_REF_DESCRIPTION,
     ),
   agentKeyCatId: agentKeyCatIdSchema,
   // F254 Phase A: acknowledge held — force send even when there are unseen messages
@@ -396,10 +454,10 @@ export const getThreadContextInputSchema = {
     .enum(['anchor', 'full'])
     .optional()
     .describe(
-      'Response projection mode. "anchor" (DEFAULT — omit for normal use): token-lean previews with drillDown pointers to full content. ' +
+      'Response projection mode. "anchor" (DEFAULT — omit for normal browsing): token-lean previews with drillDown pointers to full content. ' +
         '"full": returns complete message bodies (no truncation, no drillDown). ' +
-        'Use "full" ONLY when you already know you need every message body (e.g. bulk analysis, export). ' +
-        'Anchor mode saves ~60-80% tokens on long threads; prefer it unless you have a concrete reason for full.',
+        'Use "full" for bulk/export AND whenever a freshness catch asks you to consume the contiguous unread set: only full exposes same-target queued bodies and advances queued-read evidence. ' +
+        'GOTCHA: anchor previews are not a freshness closure and cannot prove queued messages were handled.',
     ),
   agentKeyCatId: agentKeyCatIdSchema,
 };
@@ -543,7 +601,12 @@ export const updateTaskInputSchema = {
 
 export const crossPostMessageInputSchema = {
   threadId: z.string().min(1).describe('Target thread ID to post into'),
-  content: z.string().min(1).describe('The message content to post'),
+  content: z
+    .string()
+    .min(1)
+    .describe(
+      'The message content to post. Do not copy a literal [爪感差: ...] marker across threads; reference its sourceMessageId instead.',
+    ),
   targetCats: z
     .array(z.string().min(1))
     .optional()
@@ -566,6 +629,47 @@ export const crossPostMessageInputSchema = {
       'F246 Phase B: Effect-class of the cross-thread dispatch. ' +
         'fyi/coordinate/investigate → auto-deliver (default). ' +
         'assign_work → held as a DispatchProposal pending operator approval in the Approval Hub.',
+    ),
+  coordination: z
+    .object({
+      phase: z
+        .enum(['active', 'terminal'])
+        .describe('active continues coordination; terminal releases/closes it after one final routed delivery.'),
+      id: z
+        .string()
+        .min(1)
+        .max(128)
+        .regex(/^[A-Za-z0-9._:-]+$/)
+        .optional()
+        .describe('Existing coordination id to continue explicitly. Usually omit: the server mints/inherits it.'),
+    })
+    .optional()
+    .describe(
+      'F167 invocation-token cross-hop coordination lifecycle. Use phase=active for Claim/work hops and phase=terminal for Release/final handoff. ' +
+        'Not available to agent-key target-thread writes because they have no source relay provenance. ' +
+        'GOTCHA: Do not combine coordination with effectClass="assign_work"; approval proposals intentionally do not carry relay provenance.',
+    ),
+  action: actionSuccessorMetadataSchema
+    .optional()
+    .describe(
+      'Optional durable subject/action/slot successor identity for this cross-thread dispatch. ' +
+        'Requires explicit clientMessageId and targetCats. mode=single allows exactly one target; ' +
+        'mode=parallel requires at least two targets plus parallelIntent. A duplicate active action returns safe_wait. ' +
+        'Use claimOrigin=existing_standing plus groundingEvidenceRef for a verified self-claim. ' +
+        'New claims require terminalPredicate typed parameters; server catalog owns completion semantics and exact revision freshness. ' +
+        'A completed review lease can continue on a fresh exact HEAD only with reviewReentry reason behavioral_delta, stale_or_blocking, or explicit_matrix_route plus durable evidenceRef; omit reviewReentry for the initial review. ' +
+        'Use returnToPredecessor for rejected custody: single mode returns the generation to the persisted predecessor; parallel mode records only the rejecting holder terminal and does not enqueue a whole-lease return. ' +
+        ACTION_SUBJECT_REF_DESCRIPTION,
+    ),
+  proposedAction: dispatchProposedActionInputSchema
+    .optional()
+    .describe(
+      'Server-validated action identity proposed for operator approval with effectClass="assign_work". ' +
+        'Use when new cross-thread responsibility must be reviewed before F167 custody exists. ' +
+        'NOT for direct handoff (use action) or replacement/return/existing-standing transitions. ' +
+        'Output: a pending Approval Hub card; approval atomically promotes this identity into one fenced lease. ' +
+        'Requires explicit clientMessageId and targetCats. ' +
+        PROPOSED_ACTION_EXECUTABLE_CONTRACT_DESCRIPTION,
     ),
   agentKeyCatId: agentKeyCatIdSchema,
   // F254 Phase A: acknowledge held — force send even when there are unseen messages
@@ -614,22 +718,32 @@ function hasPlausibleLineStartMention(content: string): boolean {
   return false;
 }
 
+function containsPawFeelMarker(content: string): boolean {
+  return /\[爪感差[:：]/.test(content);
+}
+
 /**
  * F193: Internal post-message dispatcher (no KD-1 guard).
  * Used by both handlePostMessage (with KD-1 guard prepended) and
  * handleCrossPostMessage (cross-thread relay path, bypasses guard
  * because cross_post_message is the legitimate cross-thread tool).
  */
-async function _executePostMessage(input: {
-  content: string;
-  threadId?: string | undefined;
-  replyTo?: string | undefined;
-  clientMessageId?: string | undefined;
-  targetCats?: string[] | undefined;
-  agentKeyCatId?: string | undefined;
-  effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work' | undefined;
-  acknowledgeHeld?: boolean | undefined;
-}): Promise<ToolResult> {
+async function _executePostMessage(
+  input: {
+    content: string;
+    threadId?: string | undefined;
+    replyTo?: string | undefined;
+    clientMessageId?: string | undefined;
+    targetCats?: string[] | undefined;
+    agentKeyCatId?: string | undefined;
+    effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work' | undefined;
+    coordination?: { phase: 'active' | 'terminal'; id?: string | undefined } | undefined;
+    action?: ActionSuccessorRequestMetadata | undefined;
+    proposedAction?: ActionSuccessorRequestMetadata | undefined;
+    acknowledgeHeld?: boolean | undefined;
+  },
+  transportOptions?: CallbackTransportOptions,
+): Promise<ToolResult> {
   // F174 Phase E (AC-E2/E5): explicit kind:'none' policy. There's no useful
   // local fallback for post_message — losing the message is preferable to
   // re-creating server state on a stale invocation. Cats see the structured
@@ -646,9 +760,16 @@ async function _executePostMessage(input: {
           clientMessageId: input.clientMessageId ?? randomUUID(),
           ...(input.targetCats?.length ? { targetCats: input.targetCats } : {}),
           ...(input.effectClass ? { effectClass: input.effectClass } : {}),
+          ...(input.coordination ? { coordination: input.coordination } : {}),
+          ...(input.action ? { action: input.action } : {}),
+          ...(input.proposedAction ? { proposedAction: input.proposedAction } : {}),
           ...(input.acknowledgeHeld ? { acknowledgeHeld: true } : {}),
         },
-        { enableOutbox: true, agentKeyCatId: input.agentKeyCatId },
+        {
+          enableOutbox: true,
+          agentKeyCatId: input.agentKeyCatId,
+          ...transportOptions,
+        },
       ),
     policy: { kind: 'none' },
   });
@@ -734,8 +855,8 @@ async function _executePostMessage(input: {
  * agents have no default thread context.
  *
  * Principal detection MUST follow buildAuthHeaders precedence (line 122):
- * if BOTH CAT_CAFE_INVOCATION_ID and CAT_CAFE_CALLBACK_TOKEN env vars are
- * present, the request will be sent with x-invocation-id headers — regardless
+ * if the credential refresh file or legacy env contains a complete invocation
+ * pair, the request will be sent with x-invocation-id headers — regardless
  * of whether the caller passed input.agentKeyCatId. The input field is a
  * sidecar selector for shared Antigravity MCP, NOT an auth principal.
  *
@@ -743,15 +864,21 @@ async function _executePostMessage(input: {
  * trivially bypassed by an invocation-token caller passing any agentKeyCatId
  * value. The fix gates on the actual auth headers that will be sent.
  */
-export async function handlePostMessage(input: {
-  content: string;
-  threadId?: string | undefined;
-  replyTo?: string | undefined;
-  clientMessageId?: string | undefined;
-  targetCats?: string[] | undefined;
-  agentKeyCatId?: string | undefined;
-}): Promise<ToolResult> {
-  const hasInvocationCreds = !!process.env.CAT_CAFE_INVOCATION_ID && !!process.env.CAT_CAFE_CALLBACK_TOKEN;
+export async function handlePostMessage(
+  input: {
+    content: string;
+    threadId?: string | undefined;
+    replyTo?: string | undefined;
+    clientMessageId?: string | undefined;
+    targetCats?: string[] | undefined;
+    coordination?: { phase: 'active' | 'terminal'; id?: string | undefined } | undefined;
+    agentKeyCatId?: string | undefined;
+    action?: ActionSuccessorRequestMetadata | undefined;
+    acknowledgeHeld?: boolean | undefined;
+  },
+  transportOptions?: CallbackTransportOptions,
+): Promise<ToolResult> {
+  const hasInvocationCreds = getInvocationAuthSignal().hasFullCredentials;
   if (input.threadId && hasInvocationCreds) {
     return errorResult(
       'post_message rejects threadId from invocation-token callers (F193 KD-1). ' +
@@ -759,23 +886,60 @@ export async function handlePostMessage(input: {
         'For same-thread delivery, omit threadId entirely (defaults to invocation thread).',
     );
   }
-  return _executePostMessage(input);
+  if (input.action) {
+    const parsedAction = actionSuccessorMetadataSchema.safeParse(input.action);
+    if (!parsedAction.success) {
+      return errorResult(
+        `invalid post_message action metadata: ${parsedAction.error.issues.map((issue) => issue.message).join('; ')}`,
+      );
+    }
+    if (!input.clientMessageId) {
+      return errorResult(
+        'post_message action metadata requires clientMessageId. Example: clientMessageId="review-owner-repo-2915".',
+      );
+    }
+    if (!input.targetCats?.length) {
+      return errorResult(
+        'post_message action metadata requires targetCats with exactly one cat. Example: targetCats=["codex"].',
+      );
+    }
+    if (input.action.mode !== 'single') {
+      return errorResult(
+        'post_message only carries a same-thread single successor. Use cat_cafe_multi_mention with mode="parallel" and parallelIntent for deliberate independent fan-out.',
+      );
+    }
+    if (input.targetCats.length !== 1) {
+      return errorResult(
+        'post_message single action requires exactly one targetCats entry. Example: targetCats=["codex"].',
+      );
+    }
+  }
+  return _executePostMessage(input, transportOptions);
 }
 
 export async function handleGetPendingMentions(input: {
   includeAcked?: boolean | undefined;
   responseMode?: 'anchor' | 'full' | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
-  return callbackGet('/api/callbacks/pending-mentions', {
-    ...(input.includeAcked ? { includeAcked: '1' } : {}),
-    ...(input.responseMode ? { responseMode: input.responseMode } : {}),
-  });
+  return callbackGet(
+    '/api/callbacks/pending-mentions',
+    {
+      ...(input.includeAcked ? { includeAcked: '1' } : {}),
+      ...(input.responseMode ? { responseMode: input.responseMode } : {}),
+    },
+    agentKeyOptions(input),
+  );
 }
 
-export async function handleAckMentions(input: { upToMessageId: string }): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/ack-mentions', {
-    upToMessageId: input.upToMessageId,
-  });
+export async function handleAckMentions(input: WithAgentKey<{ upToMessageId: string }>): Promise<ToolResult> {
+  return callbackPost(
+    '/api/callbacks/ack-mentions',
+    {
+      upToMessageId: input.upToMessageId,
+    },
+    agentKeyOptions(input),
+  );
 }
 
 export async function handleGetThreadContext(input: {
@@ -857,12 +1021,17 @@ export async function handleFeatIndex(input: {
   limit?: number | undefined;
   featId?: string | undefined;
   query?: string | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
-  const result = await callbackGet('/api/callbacks/feat-index', {
-    ...(input.limit ? { limit: String(input.limit) } : {}),
-    ...(input.featId ? { featId: input.featId } : {}),
-    ...(input.query ? { query: input.query } : {}),
-  });
+  const result = await callbackGet(
+    '/api/callbacks/feat-index',
+    {
+      ...(input.limit ? { limit: String(input.limit) } : {}),
+      ...(input.featId ? { featId: input.featId } : {}),
+      ...(input.query ? { query: input.query } : {}),
+    },
+    agentKeyOptions(input),
+  );
   if (result.isError) return result;
   return successResult(formatFeatIndexResponse(result.content[0]?.text ?? '{}'));
 }
@@ -918,6 +1087,7 @@ export async function handleUpdateTask(input: {
   taskId: string;
   status?: string | undefined;
   why?: string | undefined;
+  agentKeyCatId?: string | undefined;
   dispatchGate?: {
     status: 'dispatched' | 'not_dispatched';
     dispatchedThreadId?: string;
@@ -930,13 +1100,17 @@ export async function handleUpdateTask(input: {
   return withDegradation({
     toolName: 'update_task',
     primary: () =>
-      callbackPost('/api/callbacks/update-task', {
-        taskId: input.taskId,
-        ...(input.status ? { status: input.status } : {}),
-        ...(input.why ? { why: input.why } : {}),
-        // F193-E1 P1-4: allow patching dispatchGate on existing tasks
-        ...(input.dispatchGate ? { dispatchGate: { ...input.dispatchGate, decidedAt: Date.now() } } : {}),
-      }),
+      callbackPost(
+        '/api/callbacks/update-task',
+        {
+          taskId: input.taskId,
+          ...(input.status ? { status: input.status } : {}),
+          ...(input.why ? { why: input.why } : {}),
+          // F193-E1 P1-4: allow patching dispatchGate on existing tasks
+          ...(input.dispatchGate ? { dispatchGate: { ...input.dispatchGate, decidedAt: Date.now() } } : {}),
+        },
+        agentKeyOptions(input),
+      ),
     policy: { kind: 'none' },
   });
 }
@@ -947,6 +1121,7 @@ export async function handleCreateTask(input: {
   ownerCatId?: string | undefined;
   relatedFeatureId?: string | undefined;
   currentFeatureId?: string | undefined;
+  agentKeyCatId?: string | undefined;
   dispatchGate?: {
     status: 'dispatched' | 'not_dispatched';
     dispatchedThreadId?: string;
@@ -987,14 +1162,18 @@ export async function handleCreateTask(input: {
     }
   }
 
-  const result = await callbackPost('/api/callbacks/create-task', {
-    title: input.title,
-    ...(input.why ? { why: input.why } : {}),
-    ...(input.ownerCatId ? { ownerCatId: input.ownerCatId } : {}),
-    ...(input.relatedFeatureId ? { relatedFeatureId: input.relatedFeatureId } : {}),
-    ...(detectedFIds.length > 0 ? { detectedFeatureIds: detectedFIds } : {}),
-    ...(computedGate ? { dispatchGate: computedGate } : {}),
-  });
+  const result = await callbackPost(
+    '/api/callbacks/create-task',
+    {
+      title: input.title,
+      ...(input.why ? { why: input.why } : {}),
+      ...(input.ownerCatId ? { ownerCatId: input.ownerCatId } : {}),
+      ...(input.relatedFeatureId ? { relatedFeatureId: input.relatedFeatureId } : {}),
+      ...(detectedFIds.length > 0 ? { detectedFeatureIds: detectedFIds } : {}),
+      ...(computedGate ? { dispatchGate: computedGate } : {}),
+    },
+    agentKeyOptions(input),
+  );
 
   // Append dispatch gate warning to successful result
   if (computedGate?.status === 'missing' && !result.isError) {
@@ -1019,8 +1198,20 @@ export async function handleCrossPostMessage(input: {
   clientMessageId?: string | undefined;
   agentKeyCatId?: string | undefined;
   effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work' | undefined;
+  coordination?: { phase: 'active' | 'terminal'; id?: string | undefined } | undefined;
+  action?: ActionSuccessorRequestMetadata | undefined;
+  proposedAction?: ActionSuccessorRequestMetadata | undefined;
   acknowledgeHeld?: boolean | undefined;
 }): Promise<ToolResult> {
+  if (containsPawFeelMarker(input.content)) {
+    return errorResult(
+      'cross_post_message rejects copied paw-feel markers: the original turn is already collected by eval:friction. ' +
+        'Keep [爪感差: ...] only in the source message. For immediate action, verify the exact owner thread via ' +
+        'feat_index/list_threads plus thread truth, then send a marker-free sourceMessageId reference. ' +
+        'If no owner thread can be verified, use cat_cafe_propose_thread (F128); do not guess a nearby thread. ' +
+        'If this creates new responsibility for an existing owner, use effectClass="assign_work" for operator approval.',
+    );
+  }
   // F193 AC-A4 closing砚砚 review P1: MCP layer fail-closed.
   // The API route layer (callbacks.ts) only triggers AC-A4 reject when
   // isCrossThread === true (effectiveThreadId !== actor.threadId), which is
@@ -1046,6 +1237,34 @@ export async function handleCrossPostMessage(input: {
         'Without routing, the cross-thread message would land in the target thread but trigger no cat session.',
     );
   }
+  if (input.action) {
+    const parsedAction = actionSuccessorMetadataSchema.safeParse(input.action);
+    if (!parsedAction.success) {
+      return errorResult(
+        `invalid cross_post_message action metadata: ${parsedAction.error.issues.map((issue) => issue.message).join('; ')}`,
+      );
+    }
+    if (!input.clientMessageId) {
+      return errorResult('cross_post_message action metadata requires an explicit clientMessageId.');
+    }
+    if (!input.targetCats?.length) {
+      return errorResult('cross_post_message action metadata requires explicit targetCats.');
+    }
+    if (input.action.mode === 'single' && input.targetCats.length !== 1) {
+      return errorResult('cross_post_message single action requires exactly one target.');
+    }
+    if (input.action.mode === 'parallel' && !input.action.returnToPredecessor && input.targetCats.length < 2) {
+      return errorResult('cross_post_message parallel action requires at least two targets.');
+    }
+    if (input.action.mode === 'parallel' && input.action.returnToPredecessor && input.targetCats.length !== 1) {
+      return errorResult('cross_post_message parallel rejected-ownership disposition requires one predecessor target.');
+    }
+    if (input.effectClass === 'assign_work') {
+      return errorResult('cross_post_message action metadata cannot be combined with effectClass="assign_work".');
+    }
+  }
+  const proposedActionError = validateCrossPostProposedAction(input);
+  if (proposedActionError) return proposedActionError;
   // cross_post_message is the legitimate cross-thread tool — bypass
   // handlePostMessage's KD-1 guard (which is meant to redirect invocation-token
   // callers AWAY from threadId on post_message). Reuse the same delivery
@@ -1059,8 +1278,59 @@ export async function handleCrossPostMessage(input: {
     ...(input.agentKeyCatId ? { agentKeyCatId: input.agentKeyCatId } : {}),
     ...(input.targetCats?.length ? { targetCats: input.targetCats } : {}),
     ...(input.effectClass ? { effectClass: input.effectClass } : {}),
+    ...(input.coordination ? { coordination: input.coordination } : {}),
+    ...(input.action ? { action: input.action } : {}),
+    ...(input.proposedAction ? { proposedAction: input.proposedAction } : {}),
     ...(input.acknowledgeHeld ? { acknowledgeHeld: true } : {}),
   });
+}
+
+function validateCrossPostProposedAction(input: {
+  effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work';
+  proposedAction?: ActionSuccessorRequestMetadata;
+  clientMessageId?: string;
+  targetCats?: string[];
+}): ToolResult | null {
+  if (input.effectClass === 'assign_work' && !input.proposedAction) {
+    return errorResult(
+      'cross_post_message effectClass="assign_work" requires proposedAction with an executable action identity.',
+    );
+  }
+  if (!input.proposedAction) return null;
+  const parsedAction = actionSuccessorMetadataSchema.safeParse(input.proposedAction);
+  if (!parsedAction.success) {
+    return errorResult(
+      `invalid cross_post_message proposedAction metadata: ${parsedAction.error.issues
+        .map((issue) => issue.message)
+        .join('; ')}`,
+    );
+  }
+  if (input.effectClass !== 'assign_work') {
+    return errorResult('cross_post_message proposedAction requires effectClass="assign_work".');
+  }
+  if (!input.clientMessageId) {
+    return errorResult('cross_post_message proposedAction requires an explicit clientMessageId.');
+  }
+  if (!input.targetCats?.length) {
+    return errorResult('cross_post_message proposedAction requires explicit targetCats.');
+  }
+  if (
+    input.proposedAction.replace ||
+    input.proposedAction.returnToPredecessor ||
+    input.proposedAction.reviewReentry ||
+    input.proposedAction.claimOrigin === 'existing_standing'
+  ) {
+    return errorResult(
+      'cross_post_message proposedAction supports only a new structured transfer; use direct action for replacement, return, re-entry, or existing standing.',
+    );
+  }
+  if (input.proposedAction.mode === 'single' && input.targetCats.length !== 1) {
+    return errorResult('cross_post_message single proposedAction requires exactly one target.');
+  }
+  if (input.proposedAction.mode === 'parallel' && input.targetCats.length < 2) {
+    return errorResult('cross_post_message parallel proposedAction requires at least two targets.');
+  }
+  return null;
 }
 
 export async function handleListTasks(input: {
@@ -1069,14 +1339,19 @@ export async function handleListTasks(input: {
   status?: 'todo' | 'doing' | 'blocked' | 'done' | undefined;
   kind?: 'work' | 'pr_tracking' | undefined;
   taskId?: string | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
-  return callbackGet('/api/callbacks/list-tasks', {
-    ...(input.threadId ? { threadId: input.threadId } : {}),
-    ...(input.catId ? { catId: input.catId } : {}),
-    ...(input.status ? { status: input.status } : {}),
-    ...(input.kind ? { kind: input.kind } : {}),
-    ...(input.taskId ? { taskId: input.taskId } : {}),
-  });
+  return callbackGet(
+    '/api/callbacks/list-tasks',
+    {
+      ...(input.threadId ? { threadId: input.threadId } : {}),
+      ...(input.catId ? { catId: input.catId } : {}),
+      ...(input.status ? { status: input.status } : {}),
+      ...(input.kind ? { kind: input.kind } : {}),
+      ...(input.taskId ? { taskId: input.taskId } : {}),
+    },
+    agentKeyOptions(input),
+  );
 }
 
 /** F22+F96: Create a rich block (card, diff, checklist, media_gallery, audio, interactive) in the current message */
@@ -1090,7 +1365,6 @@ export const createRichBlockInputSchema = {
     .min(1)
     .optional()
     .describe('Target thread ID. Required for agent-key auth because persistent MCP has no invocation thread.'),
-  agentKeyCatId: agentKeyCatIdSchema,
 };
 
 /**
@@ -1124,7 +1398,7 @@ export async function handleCreateRichBlock(input: {
     return errorResult('Invalid rich block: block does not match required fields for its kind');
   }
   const block = parsed;
-  const hasInvocationCreds = !!process.env.CAT_CAFE_INVOCATION_ID && !!process.env.CAT_CAFE_CALLBACK_TOKEN;
+  const hasInvocationCreds = getInvocationAuthSignal().hasFullCredentials;
   const hasAgentKeyCreds = !!(
     process.env.CAT_CAFE_AGENT_KEY_SECRET ||
     process.env.CAT_CAFE_AGENT_KEY_FILE ||
@@ -1132,13 +1406,20 @@ export async function handleCreateRichBlock(input: {
   );
 
   const ccRichText = `\`\`\`cc_rich\n${JSON.stringify({ v: 1, blocks: [block] })}\n\`\`\``;
+  // Inline TTS is a long-running, non-idempotent server operation. The voice
+  // synthesizer owns its one safe retry; replaying the outer callback starts
+  // duplicate generations and can saturate the shared TTS queue.
+  const transportOptions = requiresInlineAudioSynthesis(block) ? SYNTHESIZED_AUDIO_CALLBACK_TRANSPORT : undefined;
   const runRouteB = async (meta: { route: string; degraded: boolean }): Promise<ToolResult> => {
-    const fallback = await handlePostMessage({
-      content: ccRichText,
-      ...(input.threadId ? { threadId: input.threadId } : {}),
-      clientMessageId: randomUUID(),
-      agentKeyCatId: input.agentKeyCatId,
-    });
+    const fallback = await handlePostMessage(
+      {
+        content: ccRichText,
+        ...(input.threadId ? { threadId: input.threadId } : {}),
+        clientMessageId: randomUUID(),
+        agentKeyCatId: input.agentKeyCatId,
+      },
+      transportOptions,
+    );
     if (!fallback.isError) {
       // Cloud Codex P2 (PR #1384): legacy 403/not-configured branch returns
       // runRouteB() from primary, where the framework treats it as primary
@@ -1177,7 +1458,11 @@ export async function handleCreateRichBlock(input: {
       const result = await callbackPost(
         '/api/callbacks/create-rich-block',
         { block, ...(input.threadId ? { threadId: input.threadId } : {}) },
-        { enableOutbox: true, agentKeyCatId: input.agentKeyCatId },
+        {
+          enableOutbox: true,
+          agentKeyCatId: input.agentKeyCatId,
+          ...transportOptions,
+        },
       );
       if (!result.isError) return result;
       const errorText = result.content[0]?.type === 'text' ? result.content[0].text : '';
@@ -1211,12 +1496,17 @@ export async function handleGenerateDocument(input: {
   markdown: string;
   format: string;
   baseName: string;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
-  const result = await callbackPost('/api/callbacks/generate-document', {
-    markdown: input.markdown,
-    format: input.format,
-    baseName: input.baseName,
-  });
+  const result = await callbackPost(
+    '/api/callbacks/generate-document',
+    {
+      markdown: input.markdown,
+      format: input.format,
+      baseName: input.baseName,
+    },
+    agentKeyOptions(input),
+  );
   return result;
 }
 
@@ -1234,18 +1524,27 @@ export async function handleRequestPermission(input: {
   action: string;
   reason: string;
   context?: string | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/request-permission', {
-    action: input.action,
-    reason: input.reason,
-    ...(input.context ? { context: input.context } : {}),
-  });
+  return callbackPost(
+    '/api/callbacks/request-permission',
+    {
+      action: input.action,
+      reason: input.reason,
+      ...(input.context ? { context: input.context } : {}),
+    },
+    agentKeyOptions(input),
+  );
 }
 
-export async function handleCheckPermissionStatus(input: { requestId: string }): Promise<ToolResult> {
-  return callbackGet('/api/callbacks/permission-status', {
-    requestId: input.requestId,
-  });
+export async function handleCheckPermissionStatus(input: WithAgentKey<{ requestId: string }>): Promise<ToolResult> {
+  return callbackGet(
+    '/api/callbacks/permission-status',
+    {
+      requestId: input.requestId,
+    },
+    agentKeyOptions(input),
+  );
 }
 
 // TD091: PR tracking registration — server resolves threadId from invocation record
@@ -1258,7 +1557,7 @@ export const registerPrTrackingInputSchema = {
     .max(2000)
     .optional()
     .describe(
-      'Tracking instructions — appended to trigger messages when review/CI events fire. Task preference, not system override.',
+      'Tracking instructions — appended to trigger messages when review/CI events fire. Task preference, not system override. For exact-HEAD external review, run the Review Entry Mode Classifier before persisting instructions.',
     ),
   catId: z
     .string()
@@ -1273,6 +1572,32 @@ export const registerPrTrackingInputSchema = {
         '(your approved PR / an outbound PR / owner-merging someone else’s PR) → CI-pass wakes you. ' +
         'Re-call this tool to flip the intent (e.g. switch to "merge" once review is approved).',
     ),
+  wakePolicy: z
+    .enum(['all_feedback', 'human_participant_activity'])
+    .optional()
+    .describe(
+      "Optional actor policy persisted on this PR tracker, independent from intent. Use 'human_participant_activity' " +
+        'when a community reviewer wants author/third-party human activity to wake them without cloud/bot process noise. ' +
+        "'all_feedback' is the backward-compatible default. Bot activity still advances durable event/cursor state but " +
+        'produces no connector delivery or invocation; missing/unknown actor metadata fails safe to delivery.',
+    ),
+  eventWait: z
+    .object({
+      expectedSignal: z
+        .literal('review_posted')
+        .describe('Structured callback signal covered by this wait. Currently only review_posted is supported.'),
+      triggerCommentId: z
+        .number()
+        .int()
+        .positive()
+        .describe(
+          'Numeric GitHub issue-comment ID for the exact @codex review trigger that already has an eyes reaction from the Codex connector bot.',
+        ),
+    })
+    .optional()
+    .describe(
+      'Optional invocation-bound event wait. Use only after the same PR review trigger has a Codex connector EYES reaction and this turn should stop cleanly until review feedback arrives.',
+    ),
 };
 
 export async function handleRegisterPrTracking(input: {
@@ -1281,19 +1606,31 @@ export async function handleRegisterPrTracking(input: {
   instructions?: string;
   catId?: string;
   intent?: 'review' | 'merge';
+  wakePolicy?: 'all_feedback' | 'human_participant_activity';
+  eventWait?: {
+    expectedSignal: 'review_posted';
+    triggerCommentId: number;
+  };
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   // F174 Phase E (AC-E2/E5): explicit kind:'none'. PR tracking is one-shot
   // registration, no useful local fallback. Surface `[degrade]` hint.
   return withDegradation({
     toolName: 'register_pr_tracking',
     primary: () =>
-      callbackPost('/api/callbacks/register-pr-tracking', {
-        repoFullName: input.repoFullName,
-        prNumber: input.prNumber,
-        ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
-        ...(input.catId ? { catId: input.catId } : {}),
-        ...(input.intent ? { intent: input.intent } : {}),
-      }),
+      callbackPost(
+        '/api/callbacks/register-pr-tracking',
+        {
+          repoFullName: input.repoFullName,
+          prNumber: input.prNumber,
+          ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
+          ...(input.catId ? { catId: input.catId } : {}),
+          ...(input.intent ? { intent: input.intent } : {}),
+          ...(input.wakePolicy ? { wakePolicy: input.wakePolicy } : {}),
+          ...(input.eventWait ? { eventWait: input.eventWait } : {}),
+        },
+        agentKeyOptions(input),
+      ),
     policy: { kind: 'none' },
   });
 }
@@ -1307,21 +1644,37 @@ export const registerIssueTrackingInputSchema = {
     .max(2000)
     .optional()
     .describe('Tracking instructions — appended to trigger messages when issue comment events fire.'),
+  wakePolicy: z
+    .enum(['all_feedback', 'human_participant_activity'])
+    .optional()
+    .describe(
+      "Optional actor policy persisted on this issue tracker. Use 'human_participant_activity' when author and " +
+        "third-party human comments should wake the owner without bot process noise; 'all_feedback' is the default. " +
+        'Bot comments remain in durable event/cursor state but produce no connector delivery or invocation; ' +
+        'missing/unknown actor metadata fails safe to delivery.',
+    ),
 };
 
 export async function handleRegisterIssueTracking(input: {
   repoFullName: string;
   issueNumber: number;
   instructions?: string;
+  wakePolicy?: 'all_feedback' | 'human_participant_activity';
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   return withDegradation({
     toolName: 'register_issue_tracking',
     primary: () =>
-      callbackPost('/api/callbacks/register-issue-tracking', {
-        repoFullName: input.repoFullName,
-        issueNumber: input.issueNumber,
-        ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
-      }),
+      callbackPost(
+        '/api/callbacks/register-issue-tracking',
+        {
+          repoFullName: input.repoFullName,
+          issueNumber: input.issueNumber,
+          ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
+          ...(input.wakePolicy ? { wakePolicy: input.wakePolicy } : {}),
+        },
+        agentKeyOptions(input),
+      ),
     policy: { kind: 'none' },
   });
 }
@@ -1378,22 +1731,144 @@ export const communityAwaitExternalInputSchema = {
 export async function handleCommunityAwaitExternal(input: {
   subjectKey: string;
   reason?: string;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   // URL-encode subjectKey so the colon, slashes, and hash are safe in the path segment
   const encodedKey = encodeURIComponent(input.subjectKey);
   return withDegradation({
     toolName: 'community_await_external',
     primary: () =>
-      callbackPost(`/api/community-issues/${encodedKey}/await-external`, {
-        ...(input.reason !== undefined ? { reason: input.reason } : {}),
+      callbackPost(
+        `/api/community-issues/${encodedKey}/await-external`,
+        {
+          ...(input.reason !== undefined ? { reason: input.reason } : {}),
+        },
+        agentKeyOptions(input),
+      ),
+    policy: { kind: 'none' },
+  });
+}
+
+// F168 Phase D: request an independently selected Guardian for an accepted intake case.
+export const communityGuardianRequestInputSchema = {
+  caseId: z.string().min(1).describe('Internal Community Issue case ID for the accepted intake case.'),
+  author: z
+    .string()
+    .min(1)
+    .describe('Author catId. Must match the server-trusted callback or agent-key principal making this request.'),
+  reviewer: z
+    .string()
+    .min(1)
+    .describe('Independent reviewer catId to exclude, together with the author, from Guardian selection.'),
+  agentKeyCatId: agentKeyCatIdSchema,
+};
+
+export async function handleCommunityRequestGuardian(input: {
+  caseId: string;
+  author: string;
+  reviewer: string;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  const encodedCaseId = encodeURIComponent(input.caseId);
+  return withDegradation({
+    toolName: 'community_request_guardian',
+    primary: () =>
+      callbackPost(
+        `/api/community-issues/${encodedCaseId}/request-guardian`,
+        {
+          author: input.author,
+          reviewer: input.reviewer,
+        },
+        agentKeyOptions(input),
+      ),
+    policy: { kind: 'none' },
+  });
+}
+
+// F168 Phase D: persist the assigned Guardian's evidence-backed intake verdict.
+export const communityGuardianSignoffInputSchema = {
+  caseId: z
+    .string()
+    .min(1)
+    .describe('Internal Community Issue case ID returned by the intake board or request-guardian endpoint.'),
+  signoffToken: z
+    .string()
+    .min(1)
+    .describe('One-time Guardian signoff token returned by the request-guardian endpoint.'),
+  checklist: z
+    .array(
+      z.object({
+        id: z.string().min(1).describe('Stable checklist item ID from the current Guardian assignment.'),
+        label: z.string().min(1).describe('Human-readable checklist item label from the current assignment.'),
+        required: z.boolean().describe('Whether this checklist item is required for approval.'),
+        evidence: z.string().min(1).optional().describe('Concrete evidence supporting this checklist item.'),
+        verifiedAt: z
+          .number()
+          .int()
+          .nonnegative()
+          .optional()
+          .describe('Unix timestamp in milliseconds when the Guardian verified this item.'),
+        verifiedBy: z.string().min(1).optional().describe('Guardian catId that verified this checklist item.'),
       }),
+    )
+    .describe('The complete current Guardian checklist, with concrete evidence for every required item.'),
+  approved: z.boolean().describe('True only when every required intake condition is satisfied.'),
+  reason: z.string().min(1).max(1000).optional().describe('Required context when the Guardian rejects the intake.'),
+  agentKeyCatId: agentKeyCatIdSchema,
+};
+
+export async function handleCommunityGuardianSignoff(input: {
+  caseId: string;
+  signoffToken: string;
+  checklist: Array<{
+    id: string;
+    label: string;
+    required: boolean;
+    evidence?: string;
+    verifiedAt?: number;
+    verifiedBy?: string;
+  }>;
+  approved: boolean;
+  reason?: string;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  const encodedCaseId = encodeURIComponent(input.caseId);
+  return withDegradation({
+    toolName: 'community_guardian_signoff',
+    primary: () =>
+      callbackPost(
+        `/api/community-issues/${encodedCaseId}/guardian-signoff`,
+        {
+          signoffToken: input.signoffToken,
+          checklist: input.checklist,
+          approved: input.approved,
+          ...(input.reason !== undefined ? { reason: input.reason } : {}),
+        },
+        agentKeyOptions(input),
+      ),
     policy: { kind: 'none' },
   });
 }
 
 export const updateWorkflowInputSchema = {
-  backlogItemId: z.string().min(1).describe('The backlog item ID to update workflow SOP for'),
-  featureId: z.string().min(1).describe('Feature ID (e.g. "F073")'),
+  backlogItemId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'The backlog item ID. Optional — when omitted, server resolves from featureId via thread binding or user backlog scan.',
+    ),
+  taskId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Durable same-thread work task to import into Mission Hub when no backlog item exists. Required only to disambiguate multiple exact relatedFeatureId matches.',
+    ),
+  featureId: z
+    .string()
+    .min(1)
+    .describe('Feature ID (e.g. "F073"). Used as the primary identifier when backlogItemId is omitted.'),
   sopDefinitionId: z
     .enum(SOP_DEFINITION_IDS)
     .optional()
@@ -1434,7 +1909,8 @@ export const updateWorkflowInputSchema = {
 };
 
 export async function handleUpdateWorkflow(input: {
-  backlogItemId: string;
+  backlogItemId?: string | undefined;
+  taskId?: string | undefined;
   featureId: string;
   sopDefinitionId?: string | undefined;
   stage?: string | undefined;
@@ -1450,11 +1926,13 @@ export async function handleUpdateWorkflow(input: {
       }
     | undefined;
   expectedVersion?: number | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   const body: Record<string, unknown> = {
-    backlogItemId: input.backlogItemId,
     featureId: input.featureId,
   };
+  if (input.backlogItemId !== undefined) body.backlogItemId = input.backlogItemId;
+  if (input.taskId !== undefined) body.taskId = input.taskId;
   if (input.sopDefinitionId !== undefined) body.sopDefinitionId = input.sopDefinitionId;
   if (input.stage !== undefined) body.stage = input.stage;
   if (input.batonHolder !== undefined) body.batonHolder = input.batonHolder;
@@ -1462,7 +1940,7 @@ export async function handleUpdateWorkflow(input: {
   if (input.resumeCapsule !== undefined) body.resumeCapsule = input.resumeCapsule;
   if (input.checks !== undefined) body.checks = input.checks;
   if (input.expectedVersion !== undefined) body.expectedVersion = input.expectedVersion;
-  return callbackPost('/api/callbacks/update-workflow-sop', body);
+  return callbackPost('/api/callbacks/update-workflow-sop', body, agentKeyOptions(input));
 }
 
 // ============ Multi-Mention (F086) ============
@@ -1509,7 +1987,46 @@ export const multiMentionInputSchema = {
     .enum(['high-impact', 'cross-domain', 'uncertain', 'info-gap', 'recon'])
     .optional()
     .describe('Which meta-thinking trigger motivated this call'),
+  action: actionSuccessorMetadataSchema
+    .optional()
+    .describe(
+      'Optional durable action identity for successor work. Use mode=single for the default one-successor path; ' +
+        'a second call for the same subjectRef+actionFamily+successorSlot returns safe_wait instead of spawning another cat. ' +
+        'Use mode=parallel with parallelIntent only for deliberate independent review, #ideate, or explicit operator fan-out. ' +
+        'Action-scoped calls require idempotencyKey. Fallback uses replace with the active leaseId+generation and succeeds only after server-recorded terminal/unavailable/cancel evidence. ' +
+        'A grounded existing holder may self-claim with claimOrigin=existing_standing + groundingEvidenceRef. ' +
+        'New claims require terminalPredicate typed parameters; server-side Evidence→Verdict, not response text, ends the action. ' +
+        'A completed review lease can continue on a fresh exact HEAD only with reviewReentry reason behavioral_delta, stale_or_blocking, or explicit_matrix_route plus durable evidenceRef; omit reviewReentry for the initial review. ' +
+        'A mismatched single holder may atomically return to the persisted predecessor with returnToPredecessor; in parallel mode the same disposition terminates only the rejecting holder. Failed single-return delivery stays pending for recovery. ' +
+        ACTION_SUBJECT_REF_DESCRIPTION,
+    ),
 };
+
+function validateMultiMentionAction(
+  action: ActionSuccessorRequestMetadata | undefined,
+  idempotencyKey: string | undefined,
+  targetCount: number,
+): string | undefined {
+  if (!action) return undefined;
+
+  const parsedAction = actionSuccessorMetadataSchema.safeParse(action);
+  if (!parsedAction.success) {
+    return `invalid multi_mention action metadata: ${parsedAction.error.issues.map((issue) => issue.message).join('; ')}`;
+  }
+  if (!idempotencyKey) {
+    return 'multi_mention action metadata requires idempotencyKey for replay-safe single-flight admission.';
+  }
+  if (action.mode === 'single' && targetCount !== 1) {
+    return 'multi_mention single action requires exactly one target. Use mode=parallel for explicit fan-out.';
+  }
+  if (action.mode === 'parallel' && !action.returnToPredecessor && targetCount < 2) {
+    return 'multi_mention parallel action requires at least two targets.';
+  }
+  if (action.mode === 'parallel' && action.returnToPredecessor && targetCount !== 1) {
+    return 'multi_mention parallel rejected-ownership disposition requires one predecessor target.';
+  }
+  return undefined;
+}
 
 export async function handleMultiMention(input: {
   targets: string[];
@@ -1521,6 +2038,8 @@ export async function handleMultiMention(input: {
   searchEvidenceRefs?: string[] | undefined;
   overrideReason?: string | undefined;
   triggerType?: 'high-impact' | 'cross-domain' | 'uncertain' | 'info-gap' | 'recon' | undefined;
+  action?: ActionSuccessorRequestMetadata | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   // Client-side validation: searchEvidenceRefs or overrideReason required
   if (!input.searchEvidenceRefs?.length && !input.overrideReason) {
@@ -1530,18 +2049,25 @@ export async function handleMultiMention(input: {
         'This enforces the "先搜后问" principle — search before asking.',
     );
   }
+  const actionError = validateMultiMentionAction(input.action, input.idempotencyKey, input.targets.length);
+  if (actionError) return errorResult(actionError);
 
-  return callbackPost('/api/callbacks/multi-mention', {
-    targets: input.targets,
-    question: input.question,
-    callbackTo: input.callbackTo,
-    ...(input.context ? { context: input.context } : {}),
-    ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
-    ...(input.timeoutMinutes !== undefined ? { timeoutMinutes: input.timeoutMinutes } : {}),
-    ...(input.searchEvidenceRefs ? { searchEvidenceRefs: input.searchEvidenceRefs } : {}),
-    ...(input.overrideReason ? { overrideReason: input.overrideReason } : {}),
-    ...(input.triggerType ? { triggerType: input.triggerType } : {}),
-  });
+  return callbackPost(
+    '/api/callbacks/multi-mention',
+    {
+      targets: input.targets,
+      question: input.question,
+      callbackTo: input.callbackTo,
+      ...(input.context ? { context: input.context } : {}),
+      ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
+      ...(input.timeoutMinutes !== undefined ? { timeoutMinutes: input.timeoutMinutes } : {}),
+      ...(input.searchEvidenceRefs ? { searchEvidenceRefs: input.searchEvidenceRefs } : {}),
+      ...(input.overrideReason ? { overrideReason: input.overrideReason } : {}),
+      ...(input.triggerType ? { triggerType: input.triggerType } : {}),
+      ...(input.action ? { action: input.action } : {}),
+    },
+    agentKeyOptions(input),
+  );
 }
 
 // F079 Gap 4: Cat-initiated voting
@@ -1567,14 +2093,19 @@ export async function handleStartVote(input: {
   voters: string[];
   anonymous?: boolean | undefined;
   timeoutSec?: number | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/start-vote', {
-    question: input.question,
-    options: input.options,
-    voters: input.voters,
-    ...(input.anonymous !== undefined ? { anonymous: input.anonymous } : {}),
-    ...(input.timeoutSec !== undefined ? { timeoutSec: input.timeoutSec } : {}),
-  });
+  return callbackPost(
+    '/api/callbacks/start-vote',
+    {
+      question: input.question,
+      options: input.options,
+      voters: input.voters,
+      ...(input.anonymous !== undefined ? { anonymous: input.anonymous } : {}),
+      ...(input.timeoutSec !== undefined ? { timeoutSec: input.timeoutSec } : {}),
+    },
+    agentKeyOptions(input),
+  );
 }
 
 // ============ Bootcamp (F087) ============
@@ -1627,6 +2158,7 @@ export async function handleUpdateBootcampState(input: {
   advancedFeatures?: Record<string, string> | undefined;
   guideStep?: string | null | undefined;
   completedAt?: number | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   const body: Record<string, unknown> = { threadId: input.threadId };
   if (input.phase !== undefined) body.phase = input.phase;
@@ -1636,15 +2168,15 @@ export async function handleUpdateBootcampState(input: {
   if (input.advancedFeatures !== undefined) body.advancedFeatures = input.advancedFeatures;
   if (input.guideStep !== undefined) body.guideStep = input.guideStep;
   if (input.completedAt !== undefined) body.completedAt = input.completedAt;
-  return callbackPost('/api/callbacks/update-bootcamp-state', body);
+  return callbackPost('/api/callbacks/update-bootcamp-state', body, agentKeyOptions(input));
 }
 
 export const bootcampEnvCheckInputSchema = {
   threadId: z.string().min(1).describe('Thread ID — results are auto-stored in bootcampState.envCheck'),
 };
 
-export async function handleBootcampEnvCheck(input: { threadId: string }): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/bootcamp-env-check', { threadId: input.threadId });
+export async function handleBootcampEnvCheck(input: WithAgentKey<{ threadId: string }>): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/bootcamp-env-check', { threadId: input.threadId }, agentKeyOptions(input));
 }
 
 // ============ Propose Thread (F128) ============
@@ -1662,7 +2194,7 @@ export const proposeThreadInputSchema = {
     .max(4000)
     .optional()
     .describe(
-      'Optional first message body posted as the source cat (AC-AA4 source attribution) into the new thread on approve. Server injects routing credentials (threadId + @handle) into the header so downstream cats can cross-post back.',
+      'Optional first message body posted as the source cat (AC-AA4 source attribution) into the new thread on approve. Server injects routing credentials (threadId + @handle) into the header so downstream cats can cross-post back. For zts212653/clowder-ai PR proposals, the server also injects the opensource-ops maintainer five questions gate and real GitHub author/fix-custody boundary.',
     ),
   reportingMode: z
     .enum(['none', 'final-only', 'state-transitions', 'blocking-ack'])
@@ -1696,6 +2228,7 @@ export async function handleProposeThread(input: {
   parentThreadId?: string | undefined;
   projectPath?: string | undefined;
   clientRequestId?: string | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   // P2-1: always send an idempotency key — auto-generate when the caller didn't supply one,
   // so transient network retries from callbackPost never produce duplicate proposals.
@@ -1710,7 +2243,7 @@ export async function handleProposeThread(input: {
   if (input.parentThreadId) body.parentThreadId = input.parentThreadId;
   if (input.projectPath) body.projectPath = input.projectPath;
 
-  const result = await callbackPost('/api/callbacks/propose-thread', body);
+  const result = await callbackPost('/api/callbacks/propose-thread', body, agentKeyOptions(input));
   if (!result.isError) {
     try {
       const data = JSON.parse((result.content[0] as { text: string }).text);
@@ -1721,6 +2254,25 @@ export async function handleProposeThread(input: {
       }
     } catch {
       // parse failure is fine
+    }
+  }
+  return result;
+}
+
+export const withdrawThreadProposalInputSchema = {
+  proposalId: z.string().min(1).max(200).describe('Exact pending F128 proposal ID created by this authenticated cat'),
+};
+
+export async function handleWithdrawThreadProposal(input: { proposalId: string }): Promise<ToolResult> {
+  const result = await callbackPost('/api/callbacks/withdraw-thread-proposal', { proposalId: input.proposalId });
+  if (!result.isError) {
+    try {
+      const data = JSON.parse((result.content[0] as { text: string }).text);
+      if (data?.status === 'stale_ignored') {
+        return errorResult('Proposal was NOT withdrawn: this invocation has been superseded by a newer one.');
+      }
+    } catch {
+      // Preserve the callback result if the transport returned non-JSON text.
     }
   }
   return result;
@@ -1765,6 +2317,7 @@ export async function handleProposeSessionHandoff(input: {
   commits?: string[] | undefined;
   gotchas?: string | undefined;
   clientRequestId?: string | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   // P2 (云端): always send an idempotency key — auto-generate when the caller didn't supply one —
   // so callbackPost transport retries (408/429/5xx) resolve back to the original proposal instead of
@@ -1778,7 +2331,7 @@ export async function handleProposeSessionHandoff(input: {
   if (input.commits?.length) body.commits = input.commits;
   if (input.gotchas) body.gotchas = input.gotchas;
 
-  const result = await callbackPost('/api/callbacks/propose-session-handoff', body);
+  const result = await callbackPost('/api/callbacks/propose-session-handoff', body, agentKeyOptions(input));
   if (!result.isError) {
     try {
       const data = JSON.parse((result.content[0] as { text: string }).text);
@@ -1800,13 +2353,21 @@ export async function handleProposeSessionHandoff(input: {
 
 // ============ F231 Phase C: Propose Profile Update ============
 
+export const readProfileInputSchema = {
+  agentKeyCatId: agentKeyCatIdSchema,
+};
+
+export async function handleReadProfile(input: { agentKeyCatId?: string | undefined }): Promise<ToolResult> {
+  return callbackGet('/api/callbacks/profile', undefined, agentKeyOptions(input));
+}
+
 export const proposeProfileUpdateInputSchema = {
   afterContent: z
     .string()
     .min(1)
     .max(20000)
     .describe(
-      'The COMPLETE new primer content (whole-file replacement, NOT a diff/patch). On approval the server writes this verbatim into relationship/{yourCatId}-primer.md. Include everything you want kept — anything you omit is dropped.',
+      'The COMPLETE new persona primer content (whole-file replacement, NOT a diff/patch). On approval the server derives your authenticated relationshipKey and writes this verbatim into relationship/{relationshipKey}-primer.md. Include everything you want kept — anything you omit is dropped.',
     ),
   rationale: z
     .string()
@@ -1825,7 +2386,7 @@ export const proposeProfileUpdateInputSchema = {
     .min(1)
     .optional()
     .describe(
-      'Optional message ID that triggered this update (provenance trail — lets the audit log trace back to the exact message).',
+      'Optional exact message ID assertion. When omitted, the API derives the unambiguous origin from authenticated callback provenance; when supplied, it must match that origin.',
     ),
   clientRequestId: z
     .string()
@@ -1841,6 +2402,7 @@ export async function handleProposeProfileUpdate(input: {
   signalKind: 'cat-declared' | 'cvo-instructed';
   sourceMessageId?: string | undefined;
   clientRequestId?: string | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   // Always send an idempotency key — auto-generate when the caller didn't supply one, so transient
   // callbackPost retries never produce duplicate proposals (mirrors F128 handleProposeThread).
@@ -1848,11 +2410,11 @@ export async function handleProposeProfileUpdate(input: {
     afterContent: input.afterContent,
     rationale: input.rationale,
     signalKind: input.signalKind,
+    ...(input.sourceMessageId ? { sourceMessageId: input.sourceMessageId } : {}),
     clientRequestId: input.clientRequestId ?? randomUUID(),
   };
-  if (input.sourceMessageId) body.sourceMessageId = input.sourceMessageId;
 
-  const result = await callbackPost('/api/callbacks/propose-profile-update', body);
+  const result = await callbackPost('/api/callbacks/propose-profile-update', body, agentKeyOptions(input));
   if (!result.isError) {
     try {
       const data = JSON.parse((result.content[0] as { text: string }).text);
@@ -1868,12 +2430,203 @@ export async function handleProposeProfileUpdate(input: {
   return result;
 }
 
+// ============ F276: People & Relationship Memory ============
+
+const personMemoryProposalToolset = createPersonMemoryProposalTool(callbackPost);
+const personMemoryLifecycleToolset = createPersonMemoryLifecycleTools(callbackPost, callbackGet);
+const memoryCueToolset = createMemoryCueTools(callbackPost);
+export const { handleProposePersonMemory } = personMemoryProposalToolset;
+export { handleRecordProactiveMemoryAbstention };
+export const {
+  handleGetPersonMemoryProposalStatus,
+  handleRecallPersonRelationship,
+  handleDrillPersonMemory,
+  handleCorrectPersonClaim,
+  handleRetirePersonClaim,
+  handleAmendPersonInteraction,
+  handleRedactPersonMemoryItem,
+  handleForgetPerson,
+  handleForgetPersonMemoryProposal,
+} = personMemoryLifecycleToolset;
+export const { handleDrillMemoryCue, handleRecordMemoryCueOutcome } = memoryCueToolset;
+
+// ============ F260 Phase A: Propose Entity ============
+
+export const proposeEntityInputSchema = {
+  entityId: z
+    .string()
+    .min(1)
+    .max(200)
+    .describe('Entity ID in type:name format (e.g. "concept:未婚喵", "feature:F260")'),
+  entityType: z
+    .enum(['person', 'cat', 'feature', 'concept', 'external'])
+    .describe('Entity type from registry taxonomy'),
+  canonicalName: z.string().min(1).max(200).describe('Human-readable canonical name'),
+  aliases: z
+    .array(z.string().min(1).max(200))
+    .min(1)
+    .max(20)
+    .describe('Aliases to register for matching (at least one required, includes the canonical name)'),
+  stance: z
+    .enum(['endorsed', 'rejected', 'critique_target', 'deliverable_only', 'unknown'])
+    .describe(
+      'Stance: endorsed (canonical positive), rejected (explicitly not wanted), ' +
+        'critique_target (entity under critique), deliverable_only (output not concept), unknown (default)',
+    ),
+  visibilityScope: z
+    .literal('workspace')
+    .describe(
+      'Visibility: only "workspace" accepted (KD-7 gate — private scope deferred until resolver supports visibility filtering)',
+    ),
+  provenance: z
+    .array(
+      z.object({
+        source: z.string().min(1).max(200).describe('Provenance source (e.g. "cat-proposed", "nudge")'),
+        anchor: z.string().min(1).max(500).optional().describe('Thread/message anchor for traceability'),
+        note: z.string().max(500).optional().describe('Optional note'),
+        date: z.string().max(20).optional().describe('ISO date (YYYY-MM-DD)'),
+      }),
+    )
+    .min(1)
+    .max(10)
+    .describe('Provenance chain — at least one entry with source; include thread anchor for traceability'),
+  rationale: z
+    .string()
+    .min(1)
+    .max(1000)
+    .describe('Why this entity should be in the registry — shown to operator in Approval Hub'),
+  clientRequestId: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe('Optional idempotency key. Resending with the same value returns the same proposalId.'),
+};
+
+export async function handleProposeEntity(input: {
+  entityId: string;
+  entityType: 'person' | 'cat' | 'feature' | 'concept' | 'external';
+  canonicalName: string;
+  aliases: string[];
+  stance: 'endorsed' | 'rejected' | 'critique_target' | 'deliverable_only' | 'unknown';
+  visibilityScope: string;
+  provenance: Array<{ source: string; anchor?: string; note?: string; date?: string }>;
+  rationale: string;
+  clientRequestId?: string | undefined;
+}): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/propose-entity', {
+    entityId: input.entityId,
+    entityType: input.entityType,
+    canonicalName: input.canonicalName,
+    aliases: input.aliases,
+    stance: input.stance,
+    visibilityScope: input.visibilityScope,
+    provenance: input.provenance,
+    rationale: input.rationale,
+    clientRequestId: input.clientRequestId ?? randomUUID(),
+  });
+}
+
+// ============ F221: Taste Capture Loop ============
+
+export const proposeTasteInputSchema = {
+  scene: z
+    .string()
+    .min(1)
+    .max(2000)
+    .describe(
+      'The situation/context where this taste signal emerged — what was happening, ' +
+        'what triggered it (e.g. "operator said 太客服了 during code review feedback")',
+    ),
+  quote: z
+    .string()
+    .min(1)
+    .max(2000)
+    .describe(
+      'The exact or near-exact quote/expression that carries the taste signal — ' +
+        'preserve the original language and nuance',
+    ),
+  tags: z
+    .array(z.string().min(1).max(50))
+    .min(1)
+    .max(10)
+    .describe('1-10 tags capturing the taste signal essence (e.g. ["活人感", "authentic"])'),
+  dimension: z
+    .enum([
+      'relationship-stance',
+      'cognitive-honesty',
+      'architecture-aesthetics',
+      'visual-quality',
+      'authentic-expression',
+      'system-philosophy',
+      'creative-craft',
+    ])
+    .describe(
+      'Which taste dimension this signal belongs to. ' +
+        'relationship-stance: how we relate to each other. ' +
+        'cognitive-honesty: intellectual integrity standards. ' +
+        'architecture-aesthetics: code/system design preferences. ' +
+        'visual-quality: UI/visual design taste. ' +
+        'authentic-expression: voice/tone/personality. ' +
+        'system-philosophy: engineering philosophy. ' +
+        'creative-craft: writing/naming/creative standards.',
+    ),
+  privacy: z
+    .enum(['public', 'sensitive'])
+    .describe(
+      'public: vignette goes to docs/taste/vignettes/ (visible in repo). ' +
+        'sensitive: vignette goes to private/taste/ (gitignored, local only)',
+    ),
+  sourceMessageId: z.string().min(1).optional().describe('Message ID where the taste signal was observed'),
+  clientRequestId: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe('Idempotency key — same clientRequestId returns cached proposal'),
+};
+
+export async function handleProposeTaste(input: {
+  scene: string;
+  quote: string;
+  tags: string[];
+  dimension: string;
+  privacy: 'public' | 'sensitive';
+  sourceMessageId?: string;
+  clientRequestId?: string;
+}): Promise<ToolResult> {
+  const result = await callbackPost('/api/callbacks/propose-taste', {
+    scene: input.scene,
+    quote: input.quote,
+    tags: input.tags,
+    dimension: input.dimension,
+    privacy: input.privacy,
+    sourceMessageId: input.sourceMessageId,
+    clientRequestId: input.clientRequestId ?? randomUUID(),
+  });
+  // Detect stale_ignored: match thread/profile/handoff pattern — a stale invocation
+  // gets HTTP 200 with status='stale_ignored' but no proposal was actually created.
+  if (!result.isError) {
+    try {
+      const data = JSON.parse((result.content[0] as { text: string }).text);
+      if (data?.status === 'stale_ignored') {
+        return errorResult(
+          'Taste proposal NOT created: this invocation was superseded by a newer one (stale_ignored).',
+        );
+      }
+    } catch {
+      // parse failure is fine — means result is not a stale_ignored response
+    }
+  }
+  return result;
+}
+
 // ============ Thread Cats Discovery ============
 
 export const getThreadCatsInputSchema = {};
 
-export async function handleGetThreadCats(): Promise<ToolResult> {
-  return callbackGet('/api/callbacks/thread-cats');
+export async function handleGetThreadCats(input: AgentKeySelectable = {}): Promise<ToolResult> {
+  return callbackGet('/api/callbacks/thread-cats', undefined, agentKeyOptions(input));
 }
 
 // F155: Guide Engine
@@ -1894,28 +2647,29 @@ export async function handleUpdateGuideState(input: {
   guideId: string;
   status: string;
   currentStep?: number | undefined;
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   const body: Record<string, unknown> = { threadId: input.threadId, guideId: input.guideId, status: input.status };
   if (input.currentStep !== undefined) body.currentStep = input.currentStep;
-  return callbackPost('/api/callbacks/update-guide-state', body);
+  return callbackPost('/api/callbacks/update-guide-state', body, agentKeyOptions(input));
 }
 
-export async function handleStartGuide(input: { guideId: string }): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/start-guide', { guideId: input.guideId });
+export async function handleStartGuide(input: WithAgentKey<{ guideId: string }>): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/start-guide', { guideId: input.guideId }, agentKeyOptions(input));
 }
 
 export const getAvailableGuidesInputSchema = {};
 
-export async function handleGetAvailableGuides(): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/get-available-guides', {});
+export async function handleGetAvailableGuides(input: AgentKeySelectable = {}): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/get-available-guides', {}, agentKeyOptions(input));
 }
 
 // F193 Phase D AC-D2: handleGuideResolve removed — legacy alias replaced
 // by cat_cafe_get_available_guides, which lets the cat inspect catalog
 // metadata directly instead of guessing from a single intent string.
 
-export async function handleGuideControl(input: { action: string }): Promise<ToolResult> {
-  return callbackPost('/api/callbacks/guide-control', { action: input.action });
+export async function handleGuideControl(input: WithAgentKey<{ action: string }>): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/guide-control', { action: input.action }, agentKeyOptions(input));
 }
 
 export async function handleHoldBall(input: {
@@ -1923,6 +2677,7 @@ export async function handleHoldBall(input: {
   nextStep: string;
   wakeAfterMs?: number;
   wakeWhen?: { command: string; cwd?: string; timeoutMs?: number };
+  agentKeyCatId?: string | undefined;
   waitSourceRef?: {
     kind: string;
     value: string;
@@ -1966,20 +2721,28 @@ export async function handleHoldBall(input: {
       isError: true,
     };
   }
-  const result = await callbackPost('/api/callbacks/hold-ball', {
-    reason: input.reason,
-    nextStep: input.nextStep,
-    ...(hasWakeAfter ? { wakeAfterMs: input.wakeAfterMs } : {}),
-    ...(hasWakeWhen ? { wakeWhen: input.wakeWhen } : {}),
-    ...(input.waitSourceRef ? { waitSourceRef: input.waitSourceRef } : {}),
-  });
+  const result = await callbackPost(
+    '/api/callbacks/hold-ball',
+    {
+      reason: input.reason,
+      nextStep: input.nextStep,
+      ...(hasWakeAfter ? { wakeAfterMs: input.wakeAfterMs } : {}),
+      ...(hasWakeWhen ? { wakeWhen: input.wakeWhen } : {}),
+      ...(input.waitSourceRef ? { waitSourceRef: input.waitSourceRef } : {}),
+    },
+    agentKeyOptions(input),
+  );
 
   // F254 B2: Check for unresolved freshness notices after successful hold_ball.
   // If the cat has unacknowledged notices, append a reminder to the result.
   // Fail-open: reminder errors never block hold_ball.
-  if (!result.isError && getCallbackConfig()) {
+  if (!result.isError && getCallbackConfig(agentKeyOptions(input))) {
     try {
-      const reminderResult = await callbackPost('/api/callbacks/freshness-hold-ball-reminder', {});
+      const reminderResult = await callbackPost(
+        '/api/callbacks/freshness-hold-ball-reminder',
+        {},
+        agentKeyOptions(input),
+      );
       if (!reminderResult.isError) {
         const data = JSON.parse((reminderResult.content[0] as { text: string }).text);
         if (data?.reminder?.text) {
@@ -2003,7 +2766,7 @@ import { unlinkSync, writeFileSync } from 'node:fs';
  * Uses invocation ID (Clowder AI managed) or returns null.
  */
 function resolveAnchorModeFilePath(): string | null {
-  const invocationId = process.env.CAT_CAFE_INVOCATION_ID;
+  const invocationId = getInvocationAuthSignal().invocationId;
   if (invocationId) {
     return `/tmp/cat-cafe-anchor-mode-${invocationId}`;
   }
@@ -2024,7 +2787,8 @@ export async function handleSetReadMode(input: { mode: 'anchor' | 'full' }): Pro
   const modePath = resolveAnchorModeFilePath();
   if (!modePath) {
     return errorResult(
-      'Cannot set read mode: CAT_CAFE_INVOCATION_ID not set. ' + 'This tool requires a Clowder AI managed session.',
+      'Cannot set read mode: CAT_CAFE_INVOCATION_ID is unavailable from the credential file or environment. ' +
+        'This tool requires a Clowder AI managed session.',
     );
   }
 
@@ -2046,8 +2810,8 @@ export async function handleSetReadMode(input: { mode: 'anchor' | 'full' }): Pro
 }
 
 // #872: Thread Metadata MCP — get/set low-frequency metadata anchors
-export async function handleGetThreadMetadata(): Promise<ToolResult> {
-  return callbackGet('/api/callbacks/thread-metadata');
+export async function handleGetThreadMetadata(input: AgentKeySelectable = {}): Promise<ToolResult> {
+  return callbackGet('/api/callbacks/thread-metadata', undefined, agentKeyOptions(input));
 }
 
 export const setThreadMetadataInputSchema = {
@@ -2091,23 +2855,28 @@ export async function handleSetThreadMetadata(input: {
   removePrs?: Array<{ repo: string; number: number }>;
   removeIssues?: Array<{ repo: string; number: number }>;
   removeFeatures?: string[];
+  agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   return withDegradation({
     toolName: 'set_thread_metadata',
     primary: () =>
-      callbackPost('/api/callbacks/set-thread-metadata', {
-        ...(input.title !== undefined ? { title: input.title } : {}),
-        ...(input.labels !== undefined ? { labels: input.labels } : {}),
-        ...(input.worktrees !== undefined ? { worktrees: input.worktrees } : {}),
-        ...(input.prs !== undefined ? { prs: input.prs } : {}),
-        ...(input.issues !== undefined ? { issues: input.issues } : {}),
-        ...(input.features !== undefined ? { features: input.features } : {}),
-        ...(input.notes !== undefined ? { notes: input.notes } : {}),
-        ...(input.removeWorktrees !== undefined ? { removeWorktrees: input.removeWorktrees } : {}),
-        ...(input.removePrs !== undefined ? { removePrs: input.removePrs } : {}),
-        ...(input.removeIssues !== undefined ? { removeIssues: input.removeIssues } : {}),
-        ...(input.removeFeatures !== undefined ? { removeFeatures: input.removeFeatures } : {}),
-      }),
+      callbackPost(
+        '/api/callbacks/set-thread-metadata',
+        {
+          ...(input.title !== undefined ? { title: input.title } : {}),
+          ...(input.labels !== undefined ? { labels: input.labels } : {}),
+          ...(input.worktrees !== undefined ? { worktrees: input.worktrees } : {}),
+          ...(input.prs !== undefined ? { prs: input.prs } : {}),
+          ...(input.issues !== undefined ? { issues: input.issues } : {}),
+          ...(input.features !== undefined ? { features: input.features } : {}),
+          ...(input.notes !== undefined ? { notes: input.notes } : {}),
+          ...(input.removeWorktrees !== undefined ? { removeWorktrees: input.removeWorktrees } : {}),
+          ...(input.removePrs !== undefined ? { removePrs: input.removePrs } : {}),
+          ...(input.removeIssues !== undefined ? { removeIssues: input.removeIssues } : {}),
+          ...(input.removeFeatures !== undefined ? { removeFeatures: input.removeFeatures } : {}),
+        },
+        agentKeyOptions(input),
+      ),
     policy: { kind: 'none' },
   });
 }
@@ -2116,10 +2885,15 @@ export const callbackTools = [
   {
     name: 'cat_cafe_post_message',
     description:
-      'Post a proactive async message to YOUR CURRENT thread mid-task (e.g. progress updates, sharing results). ' +
-      'Always posts to the thread your invocation belongs to. To post to a DIFFERENT thread, use cat_cafe_cross_post_message instead. ' +
-      'To hand off to another cat, write @猫名 on its own line at the START of the line (sentence-internal @mention does NOT route — it is treated as narrative only). ' +
-      'Output: message appears in your current thread as a new message (separate from your invocation response). ' +
+      'Post a proactive async message to YOUR CURRENT thread, optionally waking one cat as an ordinary notification or a fenced same-thread structured single successor. ' +
+      'Use when: sharing a mid-task update, routing one ordinary @ notification, or handing one named external action to one successor with action.mode="single". ' +
+      'NOT for: another thread (use cross_post_message) or deliberate independent multi-cat review/ideation (use multi_mention with mode="parallel"). ' +
+      'Output: the message is persisted in the current thread; routed targets are queued, and action conflicts return safe_wait without creating work. ' +
+      'GOTCHA: action requires explicit clientMessageId + exactly one targetCats entry; ordinary single-cat notifications do not need action. ' +
+      'For a direct Claim/Release chain, pass coordination.phase=active on work hops and terminal on the final delivery; terminal recipients may clean-stop without another @. ' +
+      'Existing standing uses claimOrigin="existing_standing" + groundingEvidenceRef; rejected custody uses returnToPredecessor and targets the persisted predecessor. ' +
+      'GOTCHA: structured action metadata currently requires invocation-token auth; agent-key callers fail closed with the non-retryable action_agent_key_unsupported status and never send an unfenced fallback. ' +
+      'To hand off without structured action identity, write @猫名 on its own line at the START of the line (sentence-internal @mention does NOT route). ' +
       'GOTCHA: This tool uses callback credentials that expire — if it fails with 401, fall back to line-start @mention in your response text. ' +
       'GOTCHA: Do NOT use this for routine replies — only for mid-task proactive messages when you need to share something before your response completes.',
     inputSchema: postMessageInputSchema,
@@ -2145,11 +2919,11 @@ export const callbackTools = [
   {
     name: 'cat_cafe_get_thread_context',
     description:
-      'READ messages from a thread. Default returns token-lean ANCHOR previews (saves ~60-80% tokens) with drillDown pointers — drill into specific messages via cat_cafe_get_message when you need full content. ' +
-      'Pass responseMode="full" ONLY when you need complete message bodies (bulk analysis, export). ' +
-      'Pass threadId to read a DIFFERENT thread (cross-thread context); omit to read the current thread. ' +
-      'Use keyword to find and RANK messages by relevance (multi-word tokenized scoring, results sorted by match quality). ' +
-      'BOUNDARY: This tool READS one thread. For FINDING information across all project knowledge (features, decisions, plans, lessons), use search_evidence instead.',
+      'Read messages from one thread, with token-lean anchor previews by default and optional full bodies, ranked keywords, or a bounded window around messageId. ' +
+      'Use when: browsing the current conversation, reading a different known threadId, finding relevant messages inside that thread, opening context around a known messageId, or a freshness notice asks you to catch up. ' +
+      'NOT for: finding features, decisions, plans, lessons, or unknown threads across project knowledge; use search_evidence or list_threads first. ' +
+      'Output: threadId plus ordered messages; anchor mode includes drillDown pointers to cat_cafe_get_message, responseMode="full" returns complete bodies and includes same-target queued bodies, and ranked keyword reads include scanCapped. ' +
+      'GOTCHA: keyword ranking is best-effort over a bounded recent scan; scanCapped=true means older history may contain additional matches. Anchor mode does not consume queued bodies or close freshness responsibility; for a freshness catch, use responseMode="full" with no catId/keyword/messageId filters. Pass threadId only to read a different thread; omit it for the current thread.',
     inputSchema: getThreadContextInputSchema,
     handler: handleGetThreadContext,
   },
@@ -2223,7 +2997,16 @@ export const callbackTools = [
       'Output: message appears in the target thread as a new message visible to all participants. ' +
       'ROUTING: You MUST include routing credentials to wake the target cat — either set `targetCats` array with the recipient catId(s), OR put a line-start `@handle` in content. ' +
       'Messages without routing (no targetCats, no line-start @) will be REJECTED (F193 AC-A4). ' +
-      'GOTCHA: Requires threadId — use list_threads or feat_index to find the right thread first. ' +
+      'GOTCHA: Requires threadId — use feat_index/list_threads plus thread truth to verify the exact owning thread; never guess a nearby thread. ' +
+      'PAW-FEEL: The original [爪感差: ...] message is already collected. Cross-post only a marker-free sourceMessageId reference to a verified owner; if none exists, use cat_cafe_propose_thread (F128). New responsibility uses effectClass=assign_work plus proposedAction for Approval Hub review. ' +
+      'GOTCHA: For Claim/Release coordination, pass coordination.phase=active on Claim/work hops and terminal on Release. ' +
+      'The server carries a stable id across active hops; a direct courtesy ACK after terminal is recorded without waking another cat. ' +
+      'If terminal reveals genuinely new work, start a new coordination with phase=active instead of ACKing the closed chain. ' +
+      'GOTCHA: For a direct named external action, pass action + explicit clientMessageId + targetCats. For operator-gated new responsibility, pass proposedAction with effectClass=assign_work instead; action and assign_work remain mutually exclusive. ' +
+      'Output: direct action admission posts and queues one fenced carrier; assign_work publishes one pending approval card and posts nothing to the target until approval atomically acquires the fence. ' +
+      'Existing standing reuses the same CAS via claimOrigin="existing_standing" + groundingEvidenceRef. returnToPredecessor sends a rejected single generation to the server-persisted predecessor; parallel mode records only the rejecting holder terminal. ' +
+      'Structured action metadata currently requires invocation-token auth; agent-key callers fail closed with the non-retryable action_agent_key_unsupported status and never send an unfenced fallback. ' +
+      'Fallback must use replace with the active leaseId/generation after server-recorded terminal evidence. Use mode=parallel + parallelIntent only for deliberate independent review, #ideate, or explicit operator fan-out. ' +
       'TIP: The sub-thread "## 主 Thread" header includes exact routing credentials (threadId + targetCats/handle) — copy them directly.',
     inputSchema: crossPostMessageInputSchema,
     handler: handleCrossPostMessage,
@@ -2311,12 +3094,13 @@ export const callbackTools = [
   {
     name: 'cat_cafe_register_pr_tracking',
     description:
-      'Register a PR for review/CI/conflict notification routing. Call right after `gh pr create` ' +
-      'so that cloud review feedback, CI status, and merge conflicts route to your current thread. ' +
-      'The server resolves threadId and catId from your invocation identity — you only need repoFullName and prNumber. ' +
-      "Pass intent='review' (default) when you're waiting on review — CI-pass stays silent; pass intent='merge' " +
-      '(or re-call to switch) when you’re waiting on CI-green to merge — then CI-pass wakes you. ' +
-      'GOTCHA: Must be called in the same session that created the PR, while callback credentials are still valid.',
+      'Register a PR for review/CI/conflict notification routing and optionally sign an invocation-bound event-wait route grant. ' +
+      'Use when: right after `gh pr create`, when switching review/merge wake intent, or after an exact `@codex review` trigger has a Codex connector EYES reaction and this invocation should clean-stop until Review Feedback arrives. ' +
+      'NOT for: waiting for EYES to appear (use a bounded poll/hold), arbitrary webhooks, another cat’s tracker, or a different PR subject. ' +
+      'Output: upserts the current thread/cat PR tracker; eventWait additionally returns covered=true/false and only a server-verified covered result becomes a routing-guard exit. ' +
+      "Pass intent='review' (default) for review feedback; pass intent='merge' when CI-green should wake you. " +
+      'GOTCHA: For exact-HEAD external PR review, run the Review Entry Mode Classifier before registration: formal instructions containing a no-comment / do-not-comment-on-GitHub directive fail closed; only explicit advisory_read_only may stay private, and advisory must never claim review-complete. ' +
+      'GOTCHA: tracker existence alone is never a legal exit. eventWait requires intent=review, the numeric triggerCommentId from this PR, a live EYES reaction from chatgpt-codex-connector[bot], and invocation callback credentials; verification failure fails closed.',
     inputSchema: registerPrTrackingInputSchema,
     handler: handleRegisterPrTracking,
   },
@@ -2351,10 +3135,34 @@ export const callbackTools = [
     handler: handleCommunityAwaitExternal,
   },
   {
+    name: 'cat_cafe_community_request_guardian',
+    description:
+      'Request the canonical independent Guardian assignment for an accepted community intake case. ' +
+      'Use when: the named reviewer has completed review and the accepted case needs its mandatory Guardian before merge. ' +
+      'NOT for: choosing, reassigning, or bypassing a Guardian, or requesting on behalf of another author. ' +
+      'Output: the durable Guardian assignment plus its one-time signoff token. ' +
+      'GOTCHA: author must match the authenticated callback or agent-key principal; reviewer is only the independently verified reviewer excluded from Guardian selection.',
+    inputSchema: communityGuardianRequestInputSchema,
+    handler: handleCommunityRequestGuardian,
+  },
+  {
+    name: 'cat_cafe_community_guardian_signoff',
+    description:
+      "Persist the system-assigned intake Guardian's evidence-backed checklist and approve/reject verdict. " +
+      'Use only after independently verifying vision alignment, test coverage, doc/spec sync, no regression, and design fidelity when applicable. ' +
+      'NOT for requesting, choosing, or reassigning a Guardian, and never for bypassing a failed checklist. ' +
+      'The server derives Guardian identity from callback or agent-key auth; never put catId or credentials in the body. ' +
+      'Requires the internal caseId and signoffToken returned by request-guardian. ' +
+      'Output: the durable Guardian signoff state for the community case.',
+    inputSchema: communityGuardianSignoffInputSchema,
+    handler: handleCommunityGuardianSignoff,
+  },
+  {
     name: 'cat_cafe_update_workflow',
     description:
       'Update the SOP workflow stage for a Feature (Mission Hub bulletin board). ' +
       'Use to record current stage, baton holder, resume capsule, and checks. ' +
+      'When no backlog item exists, one same-user same-thread work task with explicit relatedFeatureId is imported deterministically; provide taskId only to disambiguate multiple matches. ' +
       'This is information sharing, not flow control — cats decide their own actions. ' +
       'STAGE VALUES: kickoff → impl → quality_gate → [fresh_context] → review → merge → completion. ' +
       'TIP: Always set resumeCapsule when updating stage — it helps the next cat cold-start.',
@@ -2364,12 +3172,15 @@ export const callbackTools = [
   {
     name: 'cat_cafe_multi_mention',
     description:
-      'Invoke up to 3 cats in parallel to gather perspectives on a question. ' +
-      'All responses are automatically routed back to callbackTo (usually yourself). ' +
+      'Fan out to and collect responses from up to 3 cats, with explicit parallel action leases when the reviews are intentionally independent. ' +
+      'Use when: deliberate independent multi-cat review/ideation needs aggregation. ' +
+      'NOT for: a new same-thread single successor (use post_message with action.mode="single") or simple cross-thread notification (use cross_post_message). ' +
+      'Output: returns request/status immediately; admitted responses are aggregated and routed to callbackTo, while conflicts return safe_wait without creating request/timer/queue work. ' +
       "REQUIRES: searchEvidenceRefs (list what you searched first) OR overrideReason (why you're skipping search). " +
-      'This enforces the "先搜后问" principle — always search before asking other cats. ' +
-      'Use this instead of multiple @mentions when you need structured multi-cat collaboration with guaranteed response aggregation. ' +
-      'GOTCHA: callbackTo is usually your own catId so responses come back to you.',
+      'GOTCHA: legacy action.mode="single" callers remain accepted during migration and still require one target + idempotencyKey; new single-successor calls should move to post_message. ' +
+      'GOTCHA: callbackTo is usually your own catId. For the same subjectRef+actionFamily+successorSlot, accept safe_wait. ' +
+      'Fallback must use replace with the active leaseId/generation after server-recorded failed/canceled/unavailable evidence. ' +
+      'Only deliberate independent review, #ideate, or explicit operator fan-out may use mode=parallel with parallelIntent.',
     inputSchema: multiMentionInputSchema,
     handler: handleMultiMention,
   },
@@ -2418,10 +3229,24 @@ export const callbackTools = [
       'Server normalizes known catIds to stable handles defensively, but always prefer the handle form so the proposal card reads naturally to the user. ' +
       'preferredCats accepts catIds (returned by cat_cafe_get_thread_cats). DISPATCH MODEL: when the user approves, the server wakes ONLY the FIRST cat in preferredCats (the chain starter). Subsequent cats are woken by the chain-driven @-mentions cats write in their own replies. ORDER preferredCats EXACTLY as you want the chain to start (e.g. for 接龙/轮转, put the first 棒 cat first). ' +
       'FORK-AND-RETURN pattern (thread-orchestration skill Step 5c): use `reportingMode` to set the report-back contract. Ask yourself: "做完后源 thread 是否需要结果回来？" — YES (most cases) → omit reportingMode or set `final-only` (default); NO, downstream self-governs → set `none`; need phase updates → `state-transitions`; need blocking ack → `blocking-ack`. Server auto-injects a "## 主 Thread" header with routing credentials (threadId + targetCats/handle) so the last cat knows exactly where and whom to cross-post to. ' +
+      'OPEN-SOURCE PR HARD GUARD: when title/reason/initialMessage references a zts212653/clowder-ai PR, the server automatically injects an `opensource-ops` maintainer five questions gate plus the real GitHub author/fix-custody boundary. Findings stay with the external author by default; do not route fixes to household cats unless explicit Strategy B authority is recorded. ' +
+      'FORMAL EXTERNAL PR OUTPUT: a proposal that names exactly one clowder-ai PR with formal review intent persists that canonical context. On approval, exactly one preferredCat becomes the child owner and receives `intent=review` + `human_participant_activity` PR tracking; the child also gets PR metadata. Advisory, triage, arbitrary-link, multi-PR, and zero/multi-owner proposals do not auto-track. ' +
       'PROJECT OWNERSHIP: if the current/source thread is default/未分类/eval/lobby but the child will do repo or implementation work, pass `projectPath` explicitly. Omit only when the child should inherit the current project, or when it is intentionally meta/eval/unclassified. ' +
       'INTENT — default vs #ideate: by default dispatch wakes only the first preferredCat (serial chain-starter). If you genuinely want PARALLEL independent ideation (everyone replies at once, no chain), tag the message with `#ideate`. With #ideate, dispatch wakes ALL preferredCats simultaneously.',
     inputSchema: proposeThreadInputSchema,
     handler: handleProposeThread,
+  },
+  {
+    name: 'cat_cafe_withdraw_thread_proposal',
+    description:
+      'Withdraw one exact F128 thread proposal created by the current authenticated cat. ' +
+      'Use when: your own proposal is still pending and you have determined the proposed thread should not be created. ' +
+      'Output: the canonical withdrawn status; retrying the same withdrawn proposal is idempotent. ' +
+      "NOT for: rejecting a proposal as the user, withdrawing another cat's proposal, editing a proposal, or undoing an approved thread. " +
+      'Only pending -> withdrawn is allowed; approving, approved, rejected, and withdrawn terminal conflicts fail closed except same-requester idempotent replay. ' +
+      'GOTCHA: pass the exact proposalId returned by cat_cafe_propose_thread; requester and owner identity are derived from callback authentication.',
+    inputSchema: withdrawThreadProposalInputSchema,
+    handler: handleWithdrawThreadProposal,
   },
   // F225: Cat-initiated session handoff (user approves before the current session is sealed + continued)
   {
@@ -2439,16 +3264,66 @@ export const callbackTools = [
   },
   // F231 Phase C: Cat-initiated profile-update proposal (operator approves before the primer is written)
   {
+    name: 'cat_cafe_read_profile',
+    description:
+      'Read YOUR CURRENT authenticated relationship persona primer through the stable cat-cafe-profile://relationship/current URI. ' +
+      'Use when: L0 shows that URI, you are starting a session and need relationship context, or you need to verify the currently effective primer before proposing an update. ' +
+      'NOT for: searching project knowledge or old threads (use search_evidence), reading arbitrary workspace files (use read_file_slice), or reading another user/cat/persona. ' +
+      'Output: the current persona relationshipKey and complete primer content; this is read-only and does not change profile state. ' +
+      'GOTCHA: identity is derived from callback/agent-key authentication. There is intentionally no userId, catId, path, or relationshipKey input, so do not try to target another profile.',
+    inputSchema: readProfileInputSchema,
+    handler: handleReadProfile,
+  },
+  {
     name: 'cat_cafe_propose_profile_update',
     description:
-      'Propose an update to YOUR OWN per-cat relationship primer (relationship/{yourCatId}-primer.md) — the "养熟循环" digest entry point (F231 KD-12). ' +
-      'Returns a proposalId, NOT a written file: the primer is only written after the operator approves the confirmation card (reject/expire = nothing changes). ' +
-      'Use when you have observed a STABLE relationship signal worth persisting — a durable operator preference, communication style, working boundary, or a fact the operator explicitly asked you to remember — not for one-off context. ' +
+      'Propose an update to YOUR CURRENT authenticated relationship-persona primer — the "养熟循环" digest entry point (F231 KD-12/KD-18). ' +
+      'Output: returns a proposalId, NOT a written file; the primer is only written after operator approval (reject/expire = nothing changes). ' +
+      'Use when: the content is a durable fact about the authenticated person or this persona-operator relationship — personal context, preferred address, or a relationship-specific communication boundary. ' +
+      'NOT for reusable judgments about what makes output, design, expression, architecture, or systems good (use cat_cafe_propose_taste), repeated operational/tool/process rules (use code-as-harness), or one-off context. ' +
+      'A correction, praise, or Magic Word does not choose the lane; semantic content does. ' +
       'afterContent is the COMPLETE new primer (whole-file replacement, not a diff) — include everything you want kept. ' +
-      'The target is ALWAYS your own per-cat primer, derived server-side from your authenticated identity — you cannot target another cat or the shared capsule (capsule promotion is a later phase). ' +
-      'Use sparingly: propose when a signal has clearly stabilized, not on every interaction. signalKind records provenance: cat-declared (you inferred it) vs cvo-instructed (the operator told you to).',
+      'The target is ALWAYS relationship/{relationshipKey}-primer.md, derived server-side from your authenticated cat/persona — you cannot target another user/persona or the shared capsule. ' +
+      'Use cat_cafe_read_profile first when preserving existing content matters. GOTCHA: models sharing one persona also share this primer, so afterContent must preserve relevant family continuity. signalKind records provenance: cat-declared vs cvo-instructed.',
     inputSchema: proposeProfileUpdateInputSchema,
     handler: handleProposeProfileUpdate,
+  },
+  personMemoryProposalToolset.tool,
+  proactiveMemoryOpportunityTool,
+  ...personMemoryLifecycleToolset.tools,
+  ...memoryCueToolset.tools,
+  // F260 Phase A: Entity registration proposal (operator approves via Hub, then entity enters registry)
+  {
+    name: 'cat_cafe_propose_entity',
+    description:
+      'Propose a workspace entity for the registry. Returns a proposalId — the entity is only registered ' +
+      'after the operator approves in the Approval Hub. ' +
+      'Use when: (1) responding to a registration nudge with pre-filled params; ' +
+      '(2) the operator explicitly requests entity registration; or ' +
+      '(3) the current turn verified a durable workspace name/handle/alias mapping and provenance identifies its source. ' +
+      'NOT for an unverified or bare proper name, bulk proper-noun extraction, or owner-private facts, relationships, or interactions ' +
+      '(use cat_cafe_propose_person_memory). Do not infer identity from spelling or silently write either lane. ' +
+      'GOTCHA: correcting a pending/private F276 card is not an Entity mutation; use cat_cafe_propose_person_memory with replacesProposalId, or withdraw the F276 proposal. ' +
+      'stance includes negative values: "rejected" marks terms the registry should explicitly NOT match, ' +
+      '"critique_target" marks entities under critique (e.g. architectural patterns being evaluated). ' +
+      'visibilityScope: only "workspace" accepted (KD-7 gate — private scope deferred until resolver supports visibility filtering).',
+    inputSchema: proposeEntityInputSchema,
+    handler: handleProposeEntity,
+  },
+  // F221 Phase B: Taste Capture Loop — cat proposes a taste vignette for operator approval
+  {
+    name: 'cat_cafe_propose_taste',
+    description:
+      'Propose a taste vignette capturing a operator preference/aesthetic signal (F221 Taste Capture Loop). ' +
+      'Output: returns a proposalId; the vignette is only written after operator approval in the Approval Hub. ' +
+      'Use when: the content is a reusable judgment about what makes output, design, expression, architecture, or system behavior good or bad — including positive and negative taste signals. ' +
+      'NOT for durable personal facts or relationship-specific context (use cat_cafe_propose_profile_update), repeated operational/tool/process rules (use code-as-harness), or transient reactions. ' +
+      'A correction or praise does not choose the lane; semantic content does. ' +
+      'The 7 taste dimensions cover relationship-stance, cognitive-honesty, architecture-aesthetics, ' +
+      'visual-quality, authentic-expression, system-philosophy, and creative-craft. ' +
+      'GOTCHA: relationship-stance stores a reusable stance such as partner-not-tool, not a personal fact about the current operator. Preserve original language in quote — taste signals lose meaning when paraphrased.',
+    inputSchema: proposeTasteInputSchema,
+    handler: handleProposeTaste,
   },
   // ============ F155: Guide Engine ============
   {
@@ -2517,6 +3392,7 @@ export const callbackTools = [
       'GOTCHA: hold is an EXCEPTION state, not a default exit. Most turns should end with @ someone, not hold. ' +
       'GOTCHA (F167 Phase M): only hold for harness-INVISIBLE waits — external conditions nothing will call you back about (cloud review verdict, remote CI, external webhook). Background work the harness already tracks (a background Bash command, a spawned task) AUTO-RE-INVOKES you on completion; holding for that just stacks a redundant wake on top. Ask "will something call me back already?" — if yes, do NOT hold. A co-creator or another cat sending a message into this thread IS such a callback (it re-invokes you), so "waiting for co-creator to answer" must be @co-creator, never a hold. ' +
       'GOTCHA: SINGLE-SLOT per (thread, cat) — calling hold_ball again while a previous hold is pending REPLACES the prior wake (prior taskId cancelled). This is intentional (KD-23): hold = "持一个球" exception, not a queue. If you need to track multiple waiting conditions, merge them into one nextStep (e.g. "等 CI + @co-creator 确认" 合并成一句). Rolling-window counter still ticks per call. ' +
+      'NEW (F167 Phase Q): event-backed retirement only works when waitSourceRef.expectedSignal is one of these exact structured keys: assignment, review_posted, ci_complete, comment_posted, managed_command_complete, user_message. Free-text values like "CI pass" remain valid narrative context but will NOT retire a timer by event, by design. ' +
       'NEW (F167 Phase P): wakeWhen — instead of a timed delay, specify a shell command to run. The server spawns it, captures output, and wakes you when it completes (or times out). Use for: pnpm gate, pnpm test, build commands — anything you would run_in_background and poll. wakeWhen is for LOCAL COMMANDS ONLY — it does not turn hold_ball into a universal "smart wait": waiting on a person is still @co-creator / @ that cat, waiting on a cloud event (PR / CI / issue) is still register_pr_tracking / register_issue_tracking. wakeWhen and wakeAfterMs are MUTUALLY EXCLUSIVE — provide exactly one.',
     inputSchema: {
       reason: z.string().min(1).max(500).describe('Why you need to hold the ball (e.g. "tests still running")'),
@@ -2564,7 +3440,9 @@ export const callbackTools = [
           expectedSignal: z
             .string()
             .min(1)
-            .describe('What signal will indicate the wait is over (e.g. "CI pass", "comment posted")'),
+            .describe(
+              'What signal will indicate the wait is over. For event-backed timer retirement, use an exact structured key: assignment | review_posted | ci_complete | comment_posted | managed_command_complete | user_message. Free text is allowed as narrative context but will not auto-retire.',
+            ),
           slaUntilMs: z
             .number()
             .int()

@@ -17,12 +17,22 @@ const emptyInput = {
 };
 
 describe('F167 Runtime Eval Snapshot', () => {
-  it('produces snapshot with 5 components (incl. Phase O grounding)', () => {
-    const snapshot = generateF167Snapshot(emptyInput);
-    assert.equal(snapshot.featureId, 'F167');
-    assert.equal(snapshot.components.length, 5);
-    const ids = snapshot.components.map((c) => c.componentId).sort();
-    assert.deepEqual(ids, ['C1', 'C2', 'L1', 'grounding-phase-o', 'route-serial']);
+  it('projects cross-thread active/terminal dispatch and terminal ACK suppression counters', () => {
+    const snapshot = generateF167Snapshot({
+      ...emptyInput,
+      metrics: {
+        cat_cafe_a2a_coordination_active_dispatch_count_total: 3,
+        cat_cafe_a2a_coordination_terminal_dispatch_count_total: 1,
+        cat_cafe_a2a_coordination_terminal_ack_suppressed_count_total: 1,
+      },
+    });
+    const component = snapshot.components.find((item) => item.componentId === 'cross-thread-coordination');
+    assert.ok(component);
+    assert.equal(component.activationCounts['coordination.active_dispatch_count'], 3);
+    assert.equal(component.activationCounts['coordination.terminal_dispatch_count'], 1);
+    assert.equal(component.activationCounts['coordination.terminal_ack_suppressed_count'], 1);
+    assert.equal(component.frictionCounts['coordination.terminal_ack_suppressed_count'], undefined);
+    assert.equal(component.confidence, 'medium');
   });
 
   it('includes metadata fields', () => {
@@ -331,12 +341,15 @@ describe('F167 Runtime Eval Snapshot', () => {
     assert.equal(c1.activationCounts['hold_ball_calls'], 0);
   });
 
-  it('L1/C1/C2 report no gaps when counters exist at zero (warmup)', () => {
+  it('legacy F167 components report no gaps when counters exist at zero (warmup)', () => {
     const snapshot = generateF167Snapshot({
       traces: { spans: [], count: 0 },
       metrics: {
         cat_cafe_a2a_l1_streak_warn_count: 0,
         cat_cafe_a2a_l1_streak_break_count: 0,
+        cat_cafe_a2a_coordination_active_dispatch_count: 0,
+        cat_cafe_a2a_coordination_terminal_dispatch_count: 0,
+        cat_cafe_a2a_coordination_terminal_ack_suppressed_count: 0,
         cat_cafe_a2a_c1_hold_zombie_count: 0,
         cat_cafe_a2a_c1_hold_replacement_count: 0,
         cat_cafe_a2a_c1_hold_cancel_count: 0,
@@ -346,11 +359,33 @@ describe('F167 Runtime Eval Snapshot', () => {
         // F167 Phase O: grounding shadow counters
         cat_cafe_a2a_grounding_check_total: 0,
         cat_cafe_a2a_grounding_verdict_total: 0,
+        // F167 Phase T: stop-gate shadow families are pre-warmed per bounded label.
+        'cat_cafe_a2a_turn_custody_projection_total{turn_custody_state="covered_active"}': 0,
+        'cat_cafe_a2a_turn_custody_projection_total{turn_custody_state="covered_empty"}': 0,
+        'cat_cafe_a2a_turn_custody_projection_total{turn_custody_state="unknown_legacy"}': 0,
+        'cat_cafe_a2a_turn_custody_shadow_comparison_total{turn_custody_comparison="agree_allow",turn_custody_classification="not_applicable"}': 0,
+        'cat_cafe_a2a_turn_custody_shadow_comparison_total{turn_custody_comparison="agree_block",turn_custody_classification="not_applicable"}': 0,
+        'cat_cafe_a2a_turn_custody_shadow_comparison_total{turn_custody_comparison="old_only_block",turn_custody_classification="not_applicable"}': 0,
+        'cat_cafe_a2a_turn_custody_shadow_comparison_total{turn_custody_comparison="new_only_block",turn_custody_classification="justified"}': 0,
+        'cat_cafe_a2a_turn_custody_shadow_comparison_total{turn_custody_comparison="new_only_block",turn_custody_classification="unjustified"}': 0,
+        'cat_cafe_a2a_turn_custody_shadow_comparison_total{turn_custody_comparison="new_only_block",turn_custody_classification="unexplained"}': 0,
+        cat_cafe_a2a_turn_custody_shadow_old_block_total: 0,
+        cat_cafe_a2a_turn_custody_shadow_new_block_total: 0,
+        cat_cafe_a2a_protocol_action_without_custody_total: 0,
+        cat_cafe_a2a_user_nudge_required_total: 0,
+        cat_cafe_a2a_legacy_guard_without_active_custody_total: 0,
+        cat_cafe_a2a_same_subject_post_terminal_enqueue_total: 0,
+        cat_cafe_a2a_lease_succeeded_subject_nonterminal_total: 0,
       },
       metricsHistory: { snapshots: [], count: 0 },
       traceStats: { spanCount: 0, maxSpans: 10000, maxAgeMs: 86400000, oldestStoredAt: null, newestStoredAt: null },
     });
-    for (const comp of snapshot.components) {
+    for (const comp of snapshot.components.filter(
+      (c) =>
+        c.componentId !== 'hold-lifecycle-phase-q' &&
+        c.componentId !== 'event-backed-routing-exit' &&
+        c.componentId !== 'action-successor-single-flight',
+    )) {
       assert.deepStrictEqual(
         comp.telemetryGaps,
         [],

@@ -15,6 +15,16 @@ import { dirname, join, win32 } from 'node:path';
  */
 const resolvedShimCache = new Map<string, string | null>();
 
+function buildShimCacheKey(command: string): string {
+  if (/[/\\]/.test(command)) return `path:${command}`;
+  return [
+    `bare:${command}`,
+    `PATH=${process.env.PATH ?? ''}`,
+    `APPDATA=${process.env.APPDATA ?? ''}`,
+    `LOCALAPPDATA=${process.env.LOCALAPPDATA ?? ''}`,
+  ].join('\0');
+}
+
 /**
  * Cache for system Node.js path lookup (null = not found).
  */
@@ -182,11 +192,12 @@ export function parseShimFile(cmdPath: string): string | null {
  * `where` lookup — this avoids silently resolving to a different CLI version.
  */
 export function resolveCmdShimScript(command: string): string | null {
-  const cached = resolvedShimCache.get(command);
+  const cacheKey = buildShimCacheKey(command);
+  const cached = resolvedShimCache.get(cacheKey);
   if (cached !== undefined) {
     if (cached === null) return null;
     if (existsSync(cached)) return cached;
-    resolvedShimCache.delete(command);
+    resolvedShimCache.delete(cacheKey);
   }
 
   const bareName = extractBareName(command);
@@ -196,7 +207,7 @@ export function resolveCmdShimScript(command: string): string | null {
   if (isFullPath && /\.cmd$/i.test(command)) {
     const result = parseShimFile(command);
     if (result) {
-      resolvedShimCache.set(command, result);
+      resolvedShimCache.set(cacheKey, result);
       return result;
     }
     // Full path provided but parsing failed — do NOT fall back to `where`
@@ -213,7 +224,7 @@ export function resolveCmdShimScript(command: string): string | null {
       for (const cmdPath of whereOutput.split(/\r?\n/)) {
         const result = parseShimFile(cmdPath.trim());
         if (result) {
-          resolvedShimCache.set(command, result);
+          resolvedShimCache.set(cacheKey, result);
           return result;
         }
       }
@@ -230,13 +241,13 @@ export function resolveCmdShimScript(command: string): string | null {
     for (const relPath of knownPaths) {
       const candidate = join(appData, 'npm', 'node_modules', relPath);
       if (existsSync(candidate)) {
-        resolvedShimCache.set(command, candidate);
+        resolvedShimCache.set(cacheKey, candidate);
         return candidate;
       }
     }
   }
 
-  resolvedShimCache.set(command, null);
+  resolvedShimCache.set(cacheKey, null);
   return null;
 }
 

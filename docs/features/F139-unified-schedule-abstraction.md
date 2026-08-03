@@ -1,6 +1,6 @@
 ---
 feature_ids: [F139]
-related_features: [F102, F122, F048]
+related_features: [F102, F122, F048, F246]
 debt_ids: []
 topics: [scheduler, heartbeat, task-runner, multi-agent]
 doc_kind: spec
@@ -12,6 +12,11 @@ completed: 2026-03-28
 # F139: Unified Schedule Abstraction — 统一调度抽象
 
 > **Status**: done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-03-28
+
+Architecture cell: `approval-index`
+Architecture scope: 仅 F246 Phase I 的 mutation governance 边界；TaskSpec 与 runner 仍归 F139。
+Map delta: update required（F246 Phase I Wave 1）— 新增 F139 adapter、persistent proposal/audit store 与 anchored decision routes；TaskSpec/runner 边界不变。
+Why: 猫代理此前可直接创建或永久删除动态任务，既无服务端审批事实，也无法回到原始请求；治理必须在 mutation endpoint 与 effect CAS 前 fail closed。
 
 ## Why
 

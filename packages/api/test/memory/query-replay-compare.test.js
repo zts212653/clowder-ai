@@ -15,7 +15,8 @@ describe('QueryReplayCompare (AC-E2)', () => {
         variant_id TEXT NOT NULL,
         effective_flags TEXT NOT NULL,
         payload TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        origin TEXT DEFAULT 'user'
       );
     `);
   });
@@ -270,7 +271,8 @@ describe('POST /api/f163/query-replay endpoint (AC-E2)', () => {
         variant_id TEXT NOT NULL,
         effective_flags TEXT NOT NULL,
         payload TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        origin TEXT DEFAULT 'user'
       );
     `);
   });

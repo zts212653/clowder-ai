@@ -1,6 +1,8 @@
 ---
 domainId: eval:anchor-first
 displayName: Anchor-First Context Entry Eval
+descriptionForHuman: 省 token 的 anchor 模式值不值——省多少、drill 回多少、净赚还是净亏
+metricGlossaryRef: eval-anchor-first.metrics.yaml
 systemThreadId: thread_eval_anchor_first
 # evalCat: gpt52 (Maine Coon GPT-5.4) — cross-family separation (Ragdoll authored
 # F236 anchor-first → Maine Coon evaluates). Same cost rationale as eval:friction.

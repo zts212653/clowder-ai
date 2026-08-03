@@ -169,6 +169,32 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
     assert.equal(task.createdBy, 'hold-ball:codex');
   });
 
+  test('410 on soft-deleted invocation thread — does not schedule wake task', async () => {
+    const deps = makeStubDeps({ threadStore });
+    const app = await createApp(deps);
+    const thread = await threadStore.create('user-hb-deleted', 'hb-deleted');
+    assert.equal(await threadStore.softDelete(thread.id), true);
+    const { invocationId, callbackToken } = await registry.create('user-hb-deleted', 'codex', thread.id);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        reason: 'waiting for external review',
+        nextStep: 'check the review result',
+        wakeAfterMs: 10_000,
+        waitSourceRef: VALID_WAIT_SOURCE_REF,
+      },
+    });
+
+    assert.equal(response.statusCode, 410);
+    const body = JSON.parse(response.body);
+    assert.equal(body.code, 'THREAD_DELETED');
+    assert.equal(deps._insertedTasks.length, 0, 'must not insert reminder task');
+    assert.equal(deps._registeredDynamic.length, 0, 'must not register scheduler task');
+  });
+
   test('F167-G AC-G3/G5: second hold_ball replaces first pending (single-slot semantics, KD-23)', async () => {
     // KD-23: hold_ball 是单-槽语义。同 (thread, cat) 同时只有一个 pending hold wake；
     // 二次调用覆盖前者（unregister + remove 旧 task，insert 新的）。

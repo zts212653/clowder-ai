@@ -3,8 +3,9 @@
 
 import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { extractAnchor, extractFrontmatter } from './CatCafeScanner.js';
+import { extractAnchor, extractFeatureIdKeywords, extractFrontmatter } from './CatCafeScanner.js';
 import type { EvidenceKind, ProvenanceTier, RepoScanner, ScannedEvidence } from './interfaces.js';
+import { buildMarkdownDocumentPassages, stripYamlFrontmatter } from './MarkdownPassageIndexer.js';
 
 /** Directories to always skip */
 const SKIP_DIRS = new Set([
@@ -94,6 +95,7 @@ export class GenericRepoScanner implements RepoScanner {
           },
           provenance: { tier: 'derived', source: rel },
           rawContent: content,
+          passages: [],
         };
       } catch {
         return null;
@@ -158,6 +160,7 @@ export class GenericRepoScanner implements RepoScanner {
             },
             provenance: { tier: 'derived', source: sourcePath },
             rawContent: content,
+            passages: [],
           });
           seen.add(fullPath);
         } catch {
@@ -242,12 +245,12 @@ export class GenericRepoScanner implements RepoScanner {
 
     const sourcePath = relative(root, filePath);
     const fm = extractFrontmatter(content);
-    const anchor = (fm ? extractAnchor(fm) : null) ?? `doc:${sourcePath.replace(/\.md$/, '')}`;
+    const anchor = (fm ? extractAnchor(fm, sourcePath) : null) ?? `doc:${sourcePath.replace(/\.md$/, '')}`;
 
     const titleMatch = content.match(/^#\s+(.+)$/m);
     const title = titleMatch?.[1]?.trim() ?? sourcePath;
 
-    const afterTitle = content.replace(/^---[\s\S]*?---\s*/, '').replace(/^#.*$/m, '');
+    const afterTitle = stripYamlFrontmatter(content).replace(/^#.*$/m, '');
     const paragraphs = afterTitle.split(/\n\n+/).filter((p) => {
       const t = p.trim();
       return t && !t.startsWith('#') && !t.startsWith('>') && !t.startsWith('|') && !t.startsWith('```');
@@ -255,6 +258,8 @@ export class GenericRepoScanner implements RepoScanner {
     const summary = paragraphs[0]?.trim().replace(/\n/g, ' ').slice(0, 300) || undefined;
 
     const topics = fm?.topics;
+    const featureIdKw = extractFeatureIdKeywords(fm, sourcePath);
+    const allKeywords = [...(Array.isArray(topics) ? (topics as string[]) : []), ...featureIdKw];
 
     return {
       item: {
@@ -265,10 +270,11 @@ export class GenericRepoScanner implements RepoScanner {
         sourcePath,
         updatedAt: new Date().toISOString(),
         ...(summary ? { summary } : {}),
-        ...(Array.isArray(topics) ? { keywords: topics as string[] } : {}),
+        ...(allKeywords.length > 0 ? { keywords: allKeywords } : {}),
       },
       provenance: { tier, source: sourcePath },
       rawContent: content,
+      passages: buildMarkdownDocumentPassages(content),
     };
   }
 

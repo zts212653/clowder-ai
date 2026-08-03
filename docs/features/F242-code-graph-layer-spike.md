@@ -48,6 +48,17 @@ operator experience（thread 2026-06-17）：
 
 把 Phase A 的 skill 推广到陌生 repo——猫进新 repo 第一步用 skill 建该 repo 约定图。spike 阶段只验证可行性骨架（在 1 个陌生 repo 跑通），不追通用完美（通用框架识别是 spike 后的硬骨头）。
 
+## User Journey
+
+Scope unit：一只写代码的猫准备修改 repo 的约定面（MCP tool、skill manifest、route、workflow callback）。
+
+Flow：
+1. 猫在 kickoff / implementation 阶段识别到 changed files 属于约定面，而不是普通函数调用。
+2. L0 / skill / SOP 唤醒 `convention-graph-discovery`，猫先运行 `pnpm convention-graph:index -- --repo .` 保证 graph fresh。
+3. 猫运行 `pnpm convention-graph:code-consumers -- --repo . --domain <domain> --kind <kind> --name <name>`，查看 targets / consumers / provenance / freshness。
+4. 如果 `freshness.stale=true`，猫先 reindex；如果 consumer 列表暴露额外影响面，猫在编辑前纳入修改/测试计划。
+5. PR / SOP eval / capability wakeup eval 能看到这次 usage evidence；没查图的约定面改动会变成可追踪 miss 或 blocker，而不是靠事后记忆补锅。
+
 ## Acceptance Criteria
 
 <!-- 立项愿景硬度自检（F216→F219）：每条 AC 必须 ① trace 回 Why 的某诉求 ② 非作者可复核（命令/数字/截图）。 -->
@@ -154,6 +165,49 @@ pnpm convention-graph:code-consumers -- --repo . --domain mcp-tool --kind mcp_to
 
 Still not full close: AC-C1 also requires a real post-merge code-task usage record, and AC-C4 requires a non-F242 product dogfood before editing. Those remain open.
 
+## Phase C Adoption Guard Checkpoint（2026-06-29）
+
+8 天后复盘发现：工具本体可用，但猫猫实际工作流仍可能不自然使用。此刀不扩 engine/extractor，专门补 **软 + 硬 + eval** adoption 闭环：
+
+- **Soft**：`capability-wakeup-index` 新增 `convention-graph-discovery` Tier 1 wakeup：改 MCP tool / skill manifest / route / callback 等约定面前先查约定图；`docs/SOP.md` 补充 SOP eval 会要求成功 `code-consumers` 证据；`convention-graph-discovery` skill 增加 skill manifest 查询示例。
+- **Hard**：`SopTrace` 增加 `changedFiles`；新增 `changed_files_require_command` predicate；`impl-convention-graph-before-convention-edit` 从 `manual_only` 升为 blocker：命中约定面 changed files 时必须有成功的 `pnpm convention-graph:code-consumers` / `cat-cafe-convention-graph code-consumers` 命令。
+- **Eval**：`eval:capability-wakeup` 新增 `convention-graph-before-convention-surface-edit` file-change rule；tool usage normalizer 会把成功的 convention graph CLI 命令计为 `convention-graph-discovery` usage evidence，无命令则记 miss。
+- **Usability dogfood**：真实运行 `pnpm convention-graph:index -- --repo . --domain mcp-tool,skill-manifest --format json`（`mcp-tool` 4364 files / 0 gaps；`skill-manifest` 49 files / 0 gaps）。随后查 `convention-graph-discovery` skill 影响面时发现 CLI 人类直觉 `--kind skill` 会 fresh 但空结果，已加 alias 映射到真实索引 kind `skill_manifest` 并补 CLI regression test。
+
+Verification:
+
+```text
+node --test scripts/sop-definitions.test.mjs → 7 pass
+node --test packages/api/test/harness-eval/sop-predicate-evaluator.test.js → 56 pass
+node --test packages/api/test/harness-eval/capability-wakeup-rules.test.js → 16 pass
+node --test packages/api/test/harness-eval/capability-wakeup-tool-use-mapping.test.js → 7 pass
+pnpm --filter @cat-cafe/convention-graph test -- --test-name-pattern "skill as a human-friendly alias" → 49 pass
+```
+
+Still not full close: AC-C1 still needs **post-merge** real code-task usage evidence, and AC-C4 still needs one **non-F242** product dogfood before editing. This checkpoint only closes the adoption guard gap that made "猫可能还是不用" invisible.
+
+## Open Acceptance Gap: canonical root / review worktree pollution（2026-07-11）
+
+Cross-thread dogfood from F263 found a F242 indexing boundary bug: after a fresh `pnpm convention-graph:index -- --repo .`, `code-consumers` / coverage expansion could select `.review-worktrees/pr-2529-review/.../callback-tools.ts` as the target for `cat_cafe_get_thread_context` instead of canonical `packages/mcp-server/src/tools/callback-tools.ts`.
+
+Why this blocks close:
+
+- `freshness.stale=false` is not enough if provenance points at a disposable review worktree.
+- Consumer edges can stay useful while the target node is non-canonical, which misleads impact discovery and reviewers.
+- F200/F256 coverage expansion treats F242 as a soft dependency; stale or polluted convention graph output degrades coverage to docs/threads-only or returns wrong code anchors.
+
+Close-gate requirement:
+
+1. Default indexing must treat the requested repo root as canonical and exclude repo-internal temporary worktrees such as `.review-worktrees/**`.
+2. Additional worktree/source-root indexing must be explicit opt-in, not discovered implicitly by walking the canonical repo.
+3. Node/edge provenance must preserve `sourceRoot` (or equivalent) when additional roots are indexed, so canonical paths cannot be silently replaced by temporary review paths.
+4. Regression dogfood must prove `cat_cafe_get_thread_context` resolves to `packages/mcp-server/src/tools/callback-tools.ts` by default and does not mix `.review-worktrees/**` into targets/consumer maps without explicit opt-in.
+
+Source signal:
+
+- `[thread-id]`, F263 Phase A dogfood, 2026-07-11 RED EVIDENCE READY.
+- Cross-thread coordination from `[thread-id]` accepted the boundary as F242-owned; F263 no longer owns the fix.
+
 ## operator Close Rejection（2026-06-18）
 
 operator纠偏：`"这算个锤子的feat close"` / `"愿景是只做dogfood吗"` / `"有在猫猫的认知路径上吗？现在能用吗？以后猫猫代码更新有做自动更新吗？"`
@@ -209,7 +263,7 @@ Subcell: convention-graph（首个子域，本 spike；Design Gate 钉死 2026-0
 
 ### 坐标系校正
 
-F242 不应该实现“另一个 codegraph”。它应该实现 **Convention Graph Layer**：以 Cat Café 的 MCP tool、skill、workflow callback 等约定为一等对象，补 LSP 和 grep 都抓不住的关联。代码符号图只是底座材料，不是产品形态。
+F242 不应该实现“另一个 codegraph”。它应该实现 **Convention Graph Layer**：以 Clowder AI 的 MCP tool、skill、workflow callback 等约定为一等对象，补 LSP 和 grep 都抓不住的关联。代码符号图只是底座材料，不是产品形态。
 
 ### 首刀建议
 
@@ -217,7 +271,7 @@ F242 不应该实现“另一个 codegraph”。它应该实现 **Convention Gra
 2. **Skill manifest extractor**：从 `cat-cafe-skills/*/SKILL.md` 提取 name、Use when、Not for、Output、triggers、引用的 SOP/refs。
 3. **Workflow/callback extractor**：从 `packages/mcp-server/src/tools/callback-tools.ts`、`packages/api/src/routes/*callback*.ts`、workflow update/list/create tools 抽取 invocation/callback token、route、consumer。
 
-这三类最贴 Cat Café 自身痛点，也最容易形成 dogfood：改 MCP tool schema、改 skill manifest、改 callback route 时，猫能立刻问“谁消费它、哪些 SOP/测试要看”。
+这三类最贴 Clowder AI 自身痛点，也最容易形成 dogfood：改 MCP tool schema、改 skill manifest、改 callback route 时，猫能立刻问“谁消费它、哪些 SOP/测试要看”。
 
 ### 非目标（防 scope 膨胀）
 

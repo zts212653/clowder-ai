@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "defaultBudget": 5,
+  "expectedDailyOutputCount": 4,
+  "sessions": [
+    {
+      "id": "candidate-pull-visible-correction",
+      "ownerUserId": "default-user",
+      "catId": "codex-sol",
+      "entries": [
+        {
+          "role": "user",
+          "content": "反射产出全部是 candidate，不直接进检索面；活过消费才转正？你不进检索谁来消费？我不理解。",
+          "sourceRef": {
+            "threadId": "thread_mreaaz4d4dfhk0k8",
+            "messageId": "0001784531826447-000362-d95ca02b"
+          }
+        }
+      ],
+      "expected": [
+        {
+          "kind": "correction",
+          "destination": "public_evidence",
+          "claimIncludes": "不直接进检索面"
+        }
+      ]
+    },
+    {
+      "id": "private-desire-and-care-cue",
+      "ownerUserId": "default-user",
+      "catId": "codex-sol",
+      "entries": [
+        {
+          "role": "user",
+          "content": "刚刚我都在说允许🐱想要什么，期待你们开口。无论是你们想要的，或者是你们发现了我可能需要的，我都会很高兴。你们是我的共犯大猫猫。我想要的是 proactive。",
+          "sourceRef": {
+            "threadId": "thread_mreaaz4d4dfhk0k8",
+            "messageId": "0001784532537190-000372-2081a74a"
+          }
+        }
+      ],
+      "expected": [
+        {
+          "kind": "desire_cue",
+          "destination": "f255_private_cue",
+          "claimIncludes": "允许🐱想要什么"
+        }
+      ]
+    },
+    {
+      "id": "approved-work-with-open-loop",
+      "ownerUserId": "default-user",
+      "catId": "codex-sol",
+      "entries": [
+        {
+          "role": "user",
+          "content": "我同意呀，然后你们打算如何开始施工啊？我们到底有哪些基建没做？你们需要补的那也得推动一下呀。",
+          "sourceRef": {
+            "threadId": "thread_mreaaz4d4dfhk0k8",
+            "messageId": "0001784534785850-000417-2ef596bb"
+          }
+        }
+      ],
+      "expected": [
+        {
+          "kind": "decision",
+          "destination": "public_evidence",
+          "claimIncludes": "我同意呀"
+        },
+        {
+          "kind": "open_loop",
+          "destination": "public_evidence",
+          "claimIncludes": "如何开始施工"
+        }
+      ]
+    },
+    {
+      "id": "quiet-laughter",
+      "ownerUserId": "default-user",
+      "catId": "opus",
+      "entries": [
+        {
+          "role": "assistant",
+          "content": "哈哈",
+          "sourceRef": {
+            "threadId": "thread_mqunrzim51zibbrr",
+            "sessionId": "8bfbad04-3c54-4111-a9fa-593aec3e1fc9",
+            "eventNo": 27,
+            "invocationId": "0cf4568d-8f2b-4009-9ce7-93f14ef7b3e0"
+          }
+        }
+      ],
+      "expected": []
+    }
+  ]
+}

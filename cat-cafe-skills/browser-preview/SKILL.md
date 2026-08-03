@@ -97,7 +97,7 @@ operator拍板："简单的用富文本，复杂的用猫主动打开浏览器�
 | **为什么不直连** | iframe 跨端口需要代理剥离 X-Frame-Options/CSP |
 | **iframe sandbox** | `allow-scripts allow-forms allow-popups allow-downloads allow-same-origin`（安全：独立 origin） |
 | **WebSocket/HMR** | 代理层支持 WebSocket 升级，Vite/Next/Webpack HMR 正常工作 |
-| **端口排除** | Cat Cafe 自身端口（3003/3004/6398/6399/18888 等）自动排除 |
+| **端口排除** | Clowder AI 自身端口（3003/3004/6398/6399/18888 等）自动排除 |
 | **审计** | 每次 open/close/navigate 都有审计日志 |
 | **Console 面板** | bridge script 注入到 iframe，捕获 console.log/warn/error，在面板展示 |
 | **一键截图** | SVG foreignObject + canvas 截图，上传后端，toast 展示 |
@@ -121,7 +121,7 @@ operator拍板："简单的用富文本，复杂的用猫主动打开浏览器�
 - **不要手写 `/api/preview/auto-open` 的 `curl`** — 主路径是 `cat_cafe_preview_open`
 - 不要手动去构造 gateway URL（让 Hub 前端处理）
 - 不要尝试预览外部 URL（只支持 localhost）
-- 不要预览 Cat Cafe 自身服务端口（会被端口验证拦截）
+- 不要预览 Clowder AI 自身服务端口（会被端口验证拦截）
 - 不要把临时截图顺手留在仓库根目录；要入库时再显式归档到正式目录
 
 ## 和其他 skill 的区别

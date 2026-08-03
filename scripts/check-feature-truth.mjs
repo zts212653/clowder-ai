@@ -367,6 +367,40 @@ function checkDocStatusDrift(repoRoot, generatedFeatures, errors) {
   return scanned;
 }
 
+function checkChangedAllAcceptanceCriteriaStatus(repoRoot, generatedFeatures, errors) {
+  const canonicalPaths = new Set(
+    generatedFeatures
+      .filter((feature) => typeof feature?.file === 'string')
+      .map((feature) => 'docs/features/' + feature.file),
+  );
+  const changedCanonicalDocs = getChangedFeatureDocs(repoRoot).filter((path) => canonicalPaths.has(path));
+
+  for (const relPath of changedCanonicalDocs) {
+    const filePath = join(repoRoot, relPath);
+    if (!existsSync(filePath)) continue;
+
+    const content = readFileSync(filePath, 'utf-8');
+    const status = parseStatusLine(content);
+    if (!status) continue;
+    if (isDoneStatus(status.rawStatus)) continue;
+
+    const criteria = [...content.matchAll(/^- \[([ xX])\]\s+AC-[A-Z0-9.]+:/gm)];
+    if (criteria.length === 0) continue;
+
+    if (criteria.every((criterion) => criterion[1].toLowerCase() === 'x')) {
+      const featureMatch = relPath.match(/F(\d+)/);
+      const featureId = featureMatch ? 'F' + featureMatch[1] : relPath;
+      errors.push(
+        '[all-ac-status-drift] ' +
+          featureId +
+          ': every declared AC is checked but Status="' +
+          status.rawStatus +
+          '". Mark the feature done/closed, or leave the genuinely suspended AC unchecked with its current blocker.',
+      );
+    }
+  }
+}
+
 function generateFreshIndex(outputPath) {
   if (!existsSync(generatorPath)) {
     throw new Error(`Missing generator script: ${generatorPath}`);
@@ -421,6 +455,7 @@ function main() {
 
     const featureDocsScanned = checkDocStatusDrift(repoRoot, generatedFeatures, errors);
     const journeyDocsChecked = checkUserJourneyReadiness(repoRoot, generatedFeatures, errors);
+    checkChangedAllAcceptanceCriteriaStatus(repoRoot, generatedFeatures, errors);
 
     if (errors.length > 0) {
       console.error(`FAIL check-feature-truth: ${errors.length} issue(s) found`);

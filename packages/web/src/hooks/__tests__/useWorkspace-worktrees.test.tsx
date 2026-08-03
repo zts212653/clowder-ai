@@ -127,4 +127,98 @@ describe('useWorkspace worktree refresh', () => {
       .filter((url) => url.startsWith('/api/workspace/tree') || url.startsWith('/api/workspace/file'));
     expect(treeAndFileCalls.some((url) => url.includes('worktreeId=230809_cat-cafe'))).toBe(true);
   });
+
+  it('stays on the eval repo after switching away from a foreign project before opening a file', async () => {
+    useChatStore.setState({
+      currentProjectPath: '/tmp/foreign-project',
+      workspaceWorktreeId: 'foreign-repo',
+      workspaceWorktreeAliases: {},
+      workspaceWorktreeAliasesProjectPath: null,
+      workspaceOpenFilePath: null,
+      workspaceOpenFileLine: null,
+      workspaceOpenTabs: [],
+      workspaceEditToken: null,
+      workspaceEditTokenExpiry: null,
+    });
+    apiFetchMock.mockImplementation(async (url) => {
+      const path = String(url);
+      if (path === '/api/workspace/worktrees?repoRoot=%2Ftmp%2Fforeign-project') {
+        return {
+          ok: true,
+          json: async () => ({
+            worktrees: [
+              {
+                id: '991199_foreign-repo',
+                canonicalId: 'foreign-repo',
+                root: '/tmp/foreign-project',
+                branch: 'main',
+                head: 'def5678',
+              },
+            ],
+          }),
+        } as Response;
+      }
+      if (path === '/api/workspace/worktrees?repoRoot=%2Ftmp%2Fcurrent-project') {
+        return {
+          ok: true,
+          json: async () => ({
+            worktrees: [
+              {
+                id: '230809_cat-cafe',
+                canonicalId: 'cat-cafe',
+                root: '/tmp/current-project',
+                branch: 'main',
+                head: 'abc1234',
+              },
+            ],
+          }),
+        } as Response;
+      }
+      if (path.startsWith('/api/workspace/tree')) {
+        return { ok: true, json: async () => ({ tree: [] }) } as Response;
+      }
+      if (path.startsWith('/api/workspace/file')) {
+        return {
+          ok: true,
+          json: async () => ({
+            path: 'docs/study.md',
+            content: '',
+            sha256: 'sha',
+            size: 0,
+            mime: 'text/markdown',
+            truncated: false,
+          }),
+        } as Response;
+      }
+      return { ok: false, json: async () => ({ error: 'unexpected url' }) } as Response;
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost));
+    });
+    await flushEffects();
+
+    await act(async () => {
+      const state = useChatStore.getState();
+      state.setCurrentProject('/tmp/current-project');
+      state.setWorkspaceOpenFile('docs/study.md', 7, 'cat-cafe');
+    });
+    await flushEffects();
+
+    const state = useChatStore.getState();
+    expect(state.currentProjectPath).toBe('/tmp/current-project');
+    expect(state.workspaceWorktreeId).toBe('230809_cat-cafe');
+    expect(state.workspaceOpenFilePath).toBe('docs/study.md');
+    expect(state.workspaceOpenFileLine).toBe(7);
+
+    const urls = apiFetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls).toContain('/api/workspace/worktrees?repoRoot=%2Ftmp%2Fforeign-project');
+    expect(urls).toContain('/api/workspace/worktrees?repoRoot=%2Ftmp%2Fcurrent-project');
+    expect(urls.some((url) => url.startsWith('/api/workspace/file?') && url.includes('path=docs%2Fstudy.md'))).toBe(
+      true,
+    );
+    expect(urls.some((url) => url.startsWith('/api/workspace/file?') && url.includes('worktreeId=foreign-repo'))).toBe(
+      false,
+    );
+  });
 });

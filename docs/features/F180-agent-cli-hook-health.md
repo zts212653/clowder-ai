@@ -13,7 +13,7 @@ community_issue: "https://github.com/zts212653/clowder-ai/issues/614"
 
 ## Why
 
-Cat Cafe 的用户级 SessionStart/Stop hooks 已经是我们自己出征时的基础纪律：启动时提醒 `cat_cafe_search_evidence` recall，收尾时检查闭环。但这套能力现在主要靠本机 `~/.claude/settings.json` 和 `~/.codex/hooks.json` 已经手动/同步过来维持。开源用户、桌面安装包用户、升级后的老用户都可能完全没有这层 hook。
+Clowder AI 的用户级 SessionStart/Stop hooks 已经是我们自己出征时的基础纪律：启动时提醒 `cat_cafe_search_evidence` recall，收尾时检查闭环。但这套能力现在主要靠本机 `~/.claude/settings.json` 和 `~/.codex/hooks.json` 已经手动/同步过来维持。开源用户、桌面安装包用户、升级后的老用户都可能完全没有这层 hook。
 
 operator连续确认了两点：安装流程可以补，但不能只覆盖新 clone 的源码安装；安装包和现有用户也必须能被运行时检测并一键修复。否则开源社区里的 agent 会继续看似接了 MCP，实际缺少开工 recall 和收尾纪律。
 
@@ -72,7 +72,7 @@ Phase A+B 都是后端 health contract / sync module 范围，可以在同一个
 ### Phase B（One-Click Sync API）
 
 - [x] AC-B1: Hook target 生成、drift 检测、写入逻辑从 `scripts/sync-system-prompts.ts` 抽成 `packages/api/src/agent-hooks/` 或等价可测试模块，CLI 和 API 共用 `buildTargets` / `checkDrift` / `applySync`；API 只通过 selector 过滤 `hooks/*` 与 `codex-hooks`，不重新实现 target 列表。
-- [x] AC-B2: `POST /api/agent-hooks/sync` 能写入/更新 Claude hook scripts、Claude settings hooks、Codex hooks.json；写 `~/.claude/settings.json` 时只增删 Cat Cafe managed hook command entry，保留未知 user-defined hook entries。
+- [x] AC-B2: `POST /api/agent-hooks/sync` 能写入/更新 Claude hook scripts、Claude settings hooks、Codex hooks.json；写 `~/.claude/settings.json` 时只增删 Clowder AI managed hook command entry，保留未知 user-defined hook entries。
 - [x] AC-B3: 写入 user home 前有明确 API action，不在项目 bootstrap 中静默触发。
 - [x] AC-B4: 同步后立刻重新检测，返回最新 status。
 - [x] AC-B5: `pnpm exec tsx scripts/sync-system-prompts.ts --apply` 与 `POST /api/agent-hooks/sync` 的 hook scripts / Codex hooks.json 写入结果字节级一致。
@@ -105,7 +105,7 @@ Phase A+B 都是后端 health contract / sync module 范围，可以在同一个
 | 风险 | 缓解 |
 |------|------|
 | 静默改写用户 `~/.claude/settings.json` / `~/.codex/hooks.json` 引发不信任 | Runtime 检测自动、修复必须由用户点击；source install / installer 阶段视为安装同意的延展，失败不阻塞；API 返回 diff-like summary |
-| Claude settings JSON 里已有用户自定义 hooks，被覆盖 | 合并写入，只管理 Cat Cafe 自己的 command entry，不删除未知 hooks |
+| Claude settings JSON 里已有用户自定义 hooks，被覆盖 | 合并写入，只管理 Clowder AI 自己的 command entry，不删除未知 hooks |
 | 安装包 post-install 权限或路径失败 | elevated post-install 不写 user profile；user-level hook sync 作为 original-user best-effort step 单独跑；Hub first-run health check 是兜底 |
 | Codex hooks 支持版本差异 | `hooks.json` 写入与 CLI feature 检测分离；unsupported 作为诊断状态而不是安装失败 |
 | 开源仓缺少 hook 真相源导致 health check 无模板可比 | F180 implementation 必须更新 `sync-manifest.yaml`，放行 `.claude/hooks/user-level/` 与 settings hook 模板 |

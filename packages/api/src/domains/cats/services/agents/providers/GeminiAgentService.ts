@@ -19,7 +19,18 @@
 
 import { spawn as nodeSpawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { type AgyProfileConfig, type CatId, type CliDiagnostics, createCatId } from '@cat-cafe/shared';
@@ -30,6 +41,7 @@ import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import {
   buildChildEnv,
+  type CliTimeoutEvent,
   isCliError,
   isCliPlainTextResult,
   isCliTimeout,
@@ -40,10 +52,23 @@ import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import { readJsonlTail } from '../../../../../utils/jsonl-tail-reader.js';
 import { sanitizeCliStderr } from '../../../../../utils/sanitize-cli-stderr.js';
-import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata, TokenUsage } from '../../types.js';
+import type {
+  AgentMessage,
+  AgentService,
+  AgentServiceOptions,
+  MessageMetadata,
+  TokenUsage,
+  ToolExecutionPolicy,
+} from '../../types.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from '../providers/image-cli-bridge.js';
 import { extractImagePaths } from '../providers/image-paths.js';
-import { type AgyProfile, preflightAgyProfile, resolveAgyProfile, resolveAgySpawnCwd } from './agy-profile-manager.js';
+import {
+  type AgyProfile,
+  preflightAgyProfile,
+  preflightAgyRuntimePermissions,
+  resolveAgyProfile,
+  resolveAgySpawnCwd,
+} from './agy-profile-manager.js';
 import { extractAgyFinalTextFromSteps, parseAgyStepTools, readAgyTrajectorySteps } from './agy-trajectory-extractor.js';
 import {
   type AgyProgressEvent,
@@ -330,6 +355,17 @@ function formatAgyPrintTimeout(timeoutMs: number): string | null {
   return `${Math.max(1, Math.ceil(timeoutMs / 1000))}s`;
 }
 
+function appendAgyMcpIdentityContract(prompt: string, catId: CatId, hasCallbackEnv: boolean): string {
+  if (!hasCallbackEnv) return prompt;
+  return [
+    prompt,
+    '',
+    '[Clowder AI MCP identity contract]',
+    `When a Clowder AI MCP tool schema includes \`agentKeyCatId\`, pass \`agentKeyCatId="${catId}"\`.`,
+    'Never omit that selector or substitute a guessed/default identity.',
+  ].join('\n');
+}
+
 const AGY_GEMINI_MODEL_BY_LEGACY_MODEL_ID = new Map([
   ['gemini-2.5-pro', 'Gemini 3.1 Pro (High)'],
   ['gemini-2.5-pro-preview', 'Gemini 3.1 Pro (High)'],
@@ -405,6 +441,19 @@ function removeAntigravityLogFile(logPath: string): void {
   } catch {
     // Best-effort cleanup only; provider result delivery should not fail on temp-file deletion.
   }
+}
+
+function withAgyPreflightFailure(metadata: MessageMetadata, reason: string): MessageMetadata {
+  return {
+    ...metadata,
+    diagnostics: {
+      ...(metadata.diagnostics ?? {}),
+      antigravityCli: {
+        ...((metadata.diagnostics?.antigravityCli as Record<string, unknown> | undefined) ?? {}),
+        preflight: { ok: false, reason },
+      },
+    },
+  };
 }
 
 function resolveAgyDebugHomeMode(
@@ -503,6 +552,10 @@ export class GeminiAgentService implements AgentService {
     this.agyProfileConfig = options?.agyProfile;
   }
 
+  supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
+    return policy.mode === 'read_only' && this.adapter !== 'antigravity';
+  }
+
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     if (this.adapter === 'antigravity') {
       yield* this.invokeAntigravity(prompt, options);
@@ -514,6 +567,7 @@ export class GeminiAgentService implements AgentService {
   }
 
   private async *invokeGeminiCLI(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
+    const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
     const effectiveModel = options?.callbackEnv?.CAT_CAFE_GEMINI_MODEL_OVERRIDE ?? this.model;
     const metadata: MessageMetadata = { provider: 'google', model: effectiveModel };
 
@@ -531,16 +585,37 @@ export class GeminiAgentService implements AgentService {
     // Prefer resume when sessionId is available so Gemini follows the same
     // session semantics as Claude/Codex (session-chain + self-heal).
     const modelArgs = effectiveModel ? ['--model', effectiveModel] : [];
+    let adminPolicyDir: string | undefined;
+    let executionPolicyArgs = ['-y'];
+    if (readOnly) {
+      adminPolicyDir = mkdtempSync(join(tmpdir(), 'cat-cafe-gemini-read-only-'));
+      const adminPolicyPath = join(adminPolicyDir, 'admin-policy.toml');
+      writeFileSync(
+        adminPolicyPath,
+        '[[rule]]\ntoolName = "*"\ndecision = "deny"\npriority = 1000000\nmodes = ["plan"]\n',
+        'utf8',
+      );
+      executionPolicyArgs = ['--approval-mode', 'plan', '--admin-policy', adminPolicyPath];
+    }
     const args: string[] = options?.sessionId
-      ? ['--resume', options?.sessionId!, ...modelArgs, '-p', effectivePrompt, '-o', 'stream-json', '-y']
-      : [...modelArgs, '-p', effectivePrompt, '-o', 'stream-json', '-y'];
+      ? [
+          '--resume',
+          options.sessionId,
+          ...modelArgs,
+          '-p',
+          effectivePrompt,
+          '-o',
+          'stream-json',
+          ...executionPolicyArgs,
+        ]
+      : [...modelArgs, '-p', effectivePrompt, '-o', 'stream-json', ...executionPolicyArgs];
     for (const dir of imageAccessDirs) {
       args.push('--include-directories', dir);
     }
 
     // User-defined CLI args from the member editor (#567).
     const userParts: string[] = [];
-    for (const arg of options?.cliConfigArgs ?? []) {
+    for (const arg of readOnly ? [] : (options?.cliConfigArgs ?? [])) {
       userParts.push(...arg.trim().split(/\s+/));
     }
     if (userParts.length > 0) {
@@ -576,13 +651,13 @@ export class GeminiAgentService implements AgentService {
       let sawAssistantText = false;
       let suppressCliExitError = false;
       let fullAssistantText = '';
+      const childEnv = { ...(options?.callbackEnv ?? {}), ...(options?.accountEnv ?? {}) };
+      if (readOnly) childEnv.CAT_CAFE_READONLY = 'true';
       const cliOpts = {
         command: geminiCommand,
         args,
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
-        ...(options?.callbackEnv || options?.accountEnv
-          ? { env: { ...(options?.callbackEnv ?? {}), ...(options?.accountEnv ?? {}) } }
-          : {}),
+        ...(Object.keys(childEnv).length > 0 ? { env: childEnv } : {}),
         ...(options?.signal ? { signal: options.signal } : {}),
         ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
         ...(options?.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
@@ -608,6 +683,7 @@ export class GeminiAgentService implements AgentService {
               cliSessionId: event.cliSessionId,
               invocationId: event.invocationId,
               rawArchivePath: event.rawArchivePath,
+              terminalContext: event.terminalContext,
             }),
             timestamp: Date.now(),
           };
@@ -740,10 +816,13 @@ export class GeminiAgentService implements AgentService {
       };
       // Guarantee done after error so invoke-single-cat can set isFinal correctly
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+    } finally {
+      if (adminPolicyDir) rmSync(adminPolicyDir, { recursive: true, force: true });
     }
   }
 
   private async *invokeAntigravityCLI(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
+    const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
     const yieldedToolCallIds = new Set<string>();
     const yieldedToolResults = new Set<string>();
     const requestedModelOverrideRaw = options?.callbackEnv?.CAT_CAFE_GEMINI_MODEL_OVERRIDE?.trim();
@@ -823,14 +902,16 @@ export class GeminiAgentService implements AgentService {
     const imagePaths = extractImagePaths(options?.contentBlocks, options?.uploadDir);
     const imageAccessDirs = collectImageAccessDirectories(imagePaths);
     effectivePrompt = appendLocalImagePathHints(effectivePrompt, imagePaths);
+    effectivePrompt = appendAgyMcpIdentityContract(effectivePrompt, this.catId, options?.callbackEnv !== undefined);
 
     const timeoutMs = resolveCliTimeoutMs(undefined);
     const printTimeout = formatAgyPrintTimeout(timeoutMs);
     const agyLogPath = options?.agyLogPathOverride ?? join(tmpdir(), `cat-cafe-agy-${randomUUID()}.log`);
     const args: string[] = ['--add-dir', workingDirectory];
-    if (agyProfile?.autoApprove) {
+    if (agyProfile?.autoApprove && !readOnly) {
       args.push('--dangerously-skip-permissions');
     }
+    if (readOnly) args.push('--mode', 'plan');
     for (const dir of imageAccessDirs) {
       args.push('--add-dir', dir);
     }
@@ -856,7 +937,7 @@ export class GeminiAgentService implements AgentService {
     args.push('--print', effectivePrompt);
 
     const userParts: string[] = [];
-    for (const arg of options?.cliConfigArgs ?? []) {
+    for (const arg of readOnly ? [] : (options?.cliConfigArgs ?? [])) {
       userParts.push(...arg.trim().split(/\s+/));
     }
     const filteredUserParts = removeValuedCliFlags(userParts, ANTIGRAVITY_USER_BLOCKED_FLAGS, {
@@ -898,6 +979,24 @@ export class GeminiAgentService implements AgentService {
         yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };
         return;
       }
+      const effectiveAgyHome =
+        agyProfile?.homePath ??
+        options?.accountEnv?.HOME ??
+        options?.callbackEnv?.HOME ??
+        process.env.HOME ??
+        homedir();
+      const permissionPreflight = preflightAgyRuntimePermissions(effectiveAgyHome);
+      if (!permissionPreflight.ok) {
+        yield {
+          type: 'error' as const,
+          catId: this.catId,
+          error: permissionPreflight.message,
+          metadata: withAgyPreflightFailure(metadata, permissionPreflight.reason),
+          timestamp: Date.now(),
+        };
+        yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };
+        return;
+      }
       if (agyProfile) {
         const preflight = preflightAgyProfile(agyProfile, { agyCommand, workingDirectory });
         if (!preflight.ok) {
@@ -905,19 +1004,7 @@ export class GeminiAgentService implements AgentService {
             type: 'error' as const,
             catId: this.catId,
             error: preflight.message,
-            metadata: {
-              ...metadata,
-              diagnostics: {
-                ...(metadata.diagnostics ?? {}),
-                antigravityCli: {
-                  ...((metadata.diagnostics?.antigravityCli as Record<string, unknown> | undefined) ?? {}),
-                  preflight: {
-                    ok: false,
-                    reason: preflight.reason,
-                  },
-                },
-              },
-            },
+            metadata: withAgyPreflightFailure(metadata, preflight.reason),
             timestamp: Date.now(),
           };
           yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };
@@ -926,33 +1013,17 @@ export class GeminiAgentService implements AgentService {
       }
 
       const childEnv =
-        options?.callbackEnv || options?.accountEnv || agyProfile
+        options?.callbackEnv || options?.accountEnv || agyProfile || readOnly
           ? {
               ...(options?.callbackEnv ?? {}),
               ...(options?.accountEnv ?? {}),
               ...(agyProfile ? { HOME: agyProfile.homePath } : {}),
+              ...(readOnly ? { CAT_CAFE_READONLY: 'true' } : {}),
             }
           : undefined;
       let stdout = '';
       let stderr = '';
-      let timeoutEvent:
-        | {
-            __cliTimeout: true;
-            timeoutMs: number;
-            message: string;
-            command: string;
-            silenceDurationMs?: number;
-            processAlive?: boolean;
-            lastEventType?: string;
-            firstEventAt?: number;
-            lastEventAt?: number;
-            cliSessionId?: string;
-            invocationId?: string;
-            rawArchivePath?: string;
-            // F212 Phase A (砚砚 2nd P2): cliDiagnostics piggyback on __cliTimeout
-            cliDiagnostics?: import('../../../../../utils/cli-diagnostics.js').CliDiagnostics;
-          }
-        | undefined;
+      let timeoutEvent: CliTimeoutEvent | undefined;
       let cliErrorEvent:
         | {
             __cliError: true;
@@ -1151,6 +1222,16 @@ export class GeminiAgentService implements AgentService {
               }),
               timestamp: Date.now(),
             };
+            if (progress.error) {
+              yield {
+                type: 'error' as const,
+                catId: this.catId,
+                error: progress.error,
+                errorCode: 'tool_error',
+                metadata,
+                timestamp: Date.now(),
+              };
+            }
             if (progress.payload) {
               const toolInfo = parseAgyStepTools(progress.payload, progress.idx);
               if (toolInfo && toolInfo.toolName && toolInfo.toolCallId) {
@@ -1358,6 +1439,7 @@ export class GeminiAgentService implements AgentService {
             invocationId: timeoutEvent.invocationId ?? options?.invocationId,
             cliSessionId: timeoutEvent.cliSessionId ?? options?.cliSessionId,
             rawArchivePath: timeoutEvent.rawArchivePath,
+            terminalContext: timeoutEvent.terminalContext,
           }),
           timestamp: Date.now(),
         };

@@ -705,4 +705,55 @@ describe('ThreadStore', () => {
     const store = new ThreadStore();
     assert.equal(store.isRebornSession('ghost-thread', 'catA'), false);
   });
+
+  test('F262: member effort overrides are isolated by thread and cat', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    const threadA = store.create('user-1', 'effort-a');
+    const threadB = store.create('user-1', 'effort-b');
+
+    store.updateMemberEffort(threadA.id, 'catA', 'max');
+    store.updateMemberEffort(threadA.id, 'catB', 'low');
+    store.updateMemberEffort(threadB.id, 'catA', 'xhigh');
+
+    assert.equal(store.getMemberEffort(threadA.id, 'catA', 'user-1'), 'max');
+    assert.equal(store.getMemberEffort(threadA.id, 'catB', 'user-1'), 'low');
+    assert.equal(store.getMemberEffort(threadB.id, 'catA', 'user-1'), 'xhigh');
+    assert.deepEqual(store.getMemberEfforts(threadA.id, 'user-1'), { catA: 'max', catB: 'low' });
+  });
+
+  test('F262: clearing the last member effort removes the container', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'effort-clear');
+
+    store.updateMemberEffort(thread.id, 'catA', 'max');
+    store.updateMemberEffort(thread.id, 'catA', null);
+
+    assert.equal(store.getMemberEffort(thread.id, 'catA', 'user-1'), undefined);
+    assert.deepEqual(store.getMemberEfforts(thread.id, 'user-1'), {});
+    assert.equal(store.get(thread.id).memberEffortOverrides, undefined);
+  });
+
+  test('F262: effort survives soft-delete restore and disappears on hard delete', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'effort-lifecycle');
+    store.updateMemberEffort(thread.id, 'catA', 'ultra');
+
+    store.softDelete(thread.id);
+    store.restore(thread.id);
+    assert.equal(store.getMemberEffort(thread.id, 'catA', 'user-1'), 'ultra');
+
+    store.delete(thread.id);
+    assert.equal(store.getMemberEffort(thread.id, 'catA', 'user-1'), undefined);
+    assert.deepEqual(store.getMemberEfforts(thread.id, 'user-1'), {});
+  });
+
+  test('F262: updating a missing thread is a no-op', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    store.updateMemberEffort('ghost-thread', 'catA', 'max');
+    assert.deepEqual(store.getMemberEfforts('ghost-thread', 'user-1'), {});
+  });
 });

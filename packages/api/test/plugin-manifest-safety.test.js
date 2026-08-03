@@ -8,6 +8,7 @@ import { createRequire, syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { describe, it, mock } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import { LimbRegistry } from '../dist/domains/limb/LimbRegistry.js';
 import { PluginRegistry, resourceCapId } from '../dist/domains/plugin/PluginRegistry.js';
@@ -230,6 +231,73 @@ describe('parsePluginManifest security', () => {
     };
 
     assert.equal(registry.deriveStatus(manifest, capabilities, {}), 'partial');
+  });
+
+  it('requires the bundled video-analysis API key before reporting configured', () => {
+    const registry = new PluginRegistry('/tmp/nonexistent-plugins');
+    const manifest = parsePluginManifest(
+      fileURLToPath(new URL('../src/plugins/video-analysis/plugin.yaml', import.meta.url)),
+    );
+    const env = {
+      VIDEO_ANALYSIS_PROVIDER: 'gemini',
+      VIDEO_ANALYSIS_AUTH_TYPE: 'query-param',
+    };
+
+    assert.equal(registry.deriveStatus(manifest, null, env), 'not_configured');
+  });
+
+  it('requires the credentials selected by the bundled video-gen auth type', () => {
+    const registry = new PluginRegistry('/tmp/nonexistent-plugins');
+    const manifest = parsePluginManifest(
+      fileURLToPath(new URL('../src/plugins/video-gen/plugin.yaml', import.meta.url)),
+    );
+    const enabledCapabilities = {
+      version: 1,
+      capabilities: [
+        {
+          id: resourceCapId(manifest.id, manifest.resources[0]),
+          type: 'mcp',
+          enabled: true,
+          source: 'cat-cafe',
+          pluginId: manifest.id,
+        },
+      ],
+    };
+
+    for (const env of [
+      { VIDEO_GEN_PROVIDER: 'zhipu', VIDEO_GEN_AUTH_TYPE: 'apikey' },
+      { VIDEO_GEN_PROVIDER: 'kling', VIDEO_GEN_AUTH_TYPE: 'jwt-hs256' },
+      { VIDEO_GEN_PROVIDER: 'jimeng', VIDEO_GEN_AUTH_TYPE: 'hmac-sha256-v4' },
+    ]) {
+      assert.equal(registry.deriveStatus(manifest, null, env), 'not_configured');
+      assert.equal(registry.deriveStatus(manifest, enabledCapabilities, env), 'partial');
+      assert.equal(registry.getPluginInfo(manifest, enabledCapabilities, env).configured, false);
+    }
+
+    assert.equal(
+      registry.deriveStatus(manifest, null, {
+        VIDEO_GEN_PROVIDER: 'zhipu',
+        VIDEO_GEN_AUTH_TYPE: 'apikey',
+        VIDEO_GEN_API_KEY: 'api-key',
+      }),
+      'configured',
+    );
+    for (const env of [
+      {
+        VIDEO_GEN_PROVIDER: 'kling',
+        VIDEO_GEN_AUTH_TYPE: 'jwt-hs256',
+        VIDEO_GEN_ACCESS_KEY: 'access-key',
+        VIDEO_GEN_SECRET_KEY: 'secret-key',
+      },
+      {
+        VIDEO_GEN_PROVIDER: 'jimeng',
+        VIDEO_GEN_AUTH_TYPE: 'hmac-sha256-v4',
+        VIDEO_GEN_ACCESS_KEY: 'access-key',
+        VIDEO_GEN_SECRET_KEY: 'secret-key',
+      },
+    ]) {
+      assert.equal(registry.deriveStatus(manifest, null, env), 'configured');
+    }
   });
 
   it('does not treat stale plugin capability entries as declared resources', () => {

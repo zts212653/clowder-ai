@@ -13,6 +13,7 @@ import {
   catRegistry,
   getCliEffortOptionsForProvider,
   getDefaultCliEffortForProvider,
+  normalizeCliEffortForProvider,
   type RosterEntry,
 } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
@@ -31,12 +32,15 @@ import {
 import { resolveBoundAccountRefForCat } from '../config/cat-account-binding.js';
 import { bootstrapCatCatalog } from '../config/cat-catalog-store.js';
 import {
+  assertValidCliContextWindowTuple,
+  deriveAutoCompactTokenLimit,
   getAcpConfig,
   getRoster,
   loadCatConfig,
   loadResolvedCatConfig,
   toAllCatConfigs,
 } from '../config/cat-config-loader.js';
+import { resolveCodexCarrierTruth } from '../config/codex-cli.js';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
 import { resolveProjectTemplatePath } from '../config/project-template-path.js';
 import { getResolvedCats } from '../config/resolved-cats.js';
@@ -63,6 +67,10 @@ const cliSchema = z.object({
   outputFormat: z.string().min(1).optional(),
   defaultArgs: z.array(z.string().min(1)).optional(),
   effort: cliEffortSchema.nullable().optional(),
+  contextWindow: z.number().int().positive().optional(),
+  autoCompactTokenLimit: z.number().int().positive().optional(),
+  /** F254 D2: Codex carrier override (openai only). null clears the per-cat override. */
+  carrier: z.enum(['exec_json', 'app_server']).nullable().optional(),
 });
 
 const clientSchema = z.enum(['anthropic', 'openai', 'google', 'kimi', 'antigravity', 'opencode', 'catagent', 'acp']);
@@ -281,7 +289,35 @@ function defaultCliForClient(client: ClientId): { command: string; outputFormat:
 
 type CliPatch = z.infer<typeof cliSchema>;
 
-function buildResolvedCliConfig(client: ClientId, baseCli: CliConfig, patch?: CliPatch): CliConfig {
+function resolveContextWindowFields(
+  baseCli: CliConfig,
+  patch?: CliPatch,
+): Pick<CliConfig, 'contextWindow' | 'autoCompactTokenLimit'> {
+  const contextWindowTouched = patch ? Object.hasOwn(patch, 'contextWindow') : false;
+  const autoCompactTokenLimitTouched = patch ? Object.hasOwn(patch, 'autoCompactTokenLimit') : false;
+  const contextWindow = contextWindowTouched ? patch?.contextWindow : baseCli.contextWindow;
+  const autoCompactTokenLimit = autoCompactTokenLimitTouched
+    ? patch?.autoCompactTokenLimit
+    : contextWindowTouched && contextWindow !== undefined
+      ? deriveAutoCompactTokenLimit(contextWindow)
+      : baseCli.autoCompactTokenLimit;
+
+  if (contextWindowTouched || autoCompactTokenLimitTouched) {
+    assertValidCliContextWindowTuple(contextWindow, autoCompactTokenLimit);
+  }
+
+  return {
+    ...(contextWindow !== undefined ? { contextWindow } : {}),
+    ...(autoCompactTokenLimit !== undefined ? { autoCompactTokenLimit } : {}),
+  };
+}
+
+function buildResolvedCliConfig(
+  client: ClientId,
+  defaultModel: string,
+  baseCli: CliConfig,
+  patch?: CliPatch,
+): CliConfig {
   const defaultArgs =
     patch?.defaultArgs !== undefined
       ? patch.defaultArgs.length > 0
@@ -293,20 +329,39 @@ function buildResolvedCliConfig(client: ClientId, baseCli: CliConfig, patch?: Cl
 
   const effortTouched = patch ? Object.hasOwn(patch, 'effort') : false;
   const nextEffort = effortTouched ? patch?.effort : baseCli.effort;
-
-  // Gate: only effort-aware clients (those with a real adapter that consumes
-  // getCatEffort()) may persist an effort value.  Non-effort clients would
-  // silently ignore the setting and the provider would never perform the
-  // promised native validation.
-  if (nextEffort !== undefined && nextEffort !== null && !getCliEffortOptionsForProvider(client)) {
+  if (nextEffort !== undefined && nextEffort !== null && !getCliEffortOptionsForProvider(client, defaultModel)) {
     throw new Error(`client "${client}" does not support cli.effort`);
   }
+
+  const carrierTouched = patch ? Object.hasOwn(patch, 'carrier') : false;
+  const nextCarrier = carrierTouched ? patch?.carrier : baseCli.carrier;
+  if (nextCarrier !== undefined && nextCarrier !== null && client !== 'openai') {
+    throw new Error(`client "${client}" does not support cli.carrier (codex-only)`);
+  }
+
+  const contextWindowFields = resolveContextWindowFields(baseCli, patch);
 
   return {
     command: patch?.command ?? baseCli.command,
     outputFormat: patch?.outputFormat ?? baseCli.outputFormat,
     ...(defaultArgs ? { defaultArgs } : {}),
     ...(nextEffort !== undefined && nextEffort !== null ? { effort: nextEffort } : {}),
+    ...(nextCarrier !== undefined && nextCarrier !== null ? { carrier: nextCarrier } : {}),
+    ...contextWindowFields,
+  };
+}
+
+function buildCliForModelSwitch(client: ClientId, defaultModel: string, currentCli: CliConfig): CliConfig {
+  const normalizedEffort = currentCli.effort
+    ? normalizeCliEffortForProvider(client, currentCli.effort, defaultModel)
+    : null;
+  return {
+    command: currentCli.command,
+    outputFormat: currentCli.outputFormat,
+    ...(currentCli.defaultArgs?.length ? { defaultArgs: [...currentCli.defaultArgs] } : {}),
+    ...(normalizedEffort ? { effort: normalizedEffort } : {}),
+    // Carrier is model-independent — preserve the per-cat override across model switches.
+    ...(currentCli.carrier ? { carrier: currentCli.carrier } : {}),
   };
 }
 
@@ -327,11 +382,13 @@ function resolveNextCli(params: {
   body: UpdateCatRequestBody;
   currentCat: CatConfig;
   effectiveClient: ClientId;
+  effectiveDefaultModel: string;
   hasCommandArgsPatch: boolean;
   nextCommandArgs: string[];
 }): CliConfig | null | undefined {
-  const { body, currentCat, effectiveClient, hasCommandArgsPatch, nextCommandArgs } = params;
+  const { body, currentCat, effectiveClient, effectiveDefaultModel, hasCommandArgsPatch, nextCommandArgs } = params;
   const isClientSwitch = body.clientId !== undefined && body.clientId !== currentCat.clientId;
+  const isModelSwitch = body.defaultModel !== undefined && body.defaultModel !== currentCat.defaultModel;
   const defaultCli = defaultCliForClient(effectiveClient);
   const defaultEffort = getDefaultCliEffortForProvider(effectiveClient);
 
@@ -339,14 +396,17 @@ function resolveNextCli(params: {
     // F247 KD-17: explicit null means remove cli (cloud-only mode, Remote MCP cat).
     // Forward null untouched; updateRuntimeCat will delete variant.cli.
     if (body.cli === null) return null;
-    const baseCli =
-      isClientSwitch || !currentCat.cli
-        ? {
-            ...defaultCli,
-            ...(defaultEffort ? { effort: defaultEffort } : {}),
-          }
-        : currentCat.cli;
-    return buildResolvedCliConfig(effectiveClient, baseCli, body.cli);
+    const baseCli = (() => {
+      if (isClientSwitch || !currentCat.cli) {
+        return {
+          ...defaultCli,
+          ...(defaultEffort ? { effort: defaultEffort } : {}),
+        };
+      }
+      if (isModelSwitch) return buildCliForModelSwitch(effectiveClient, effectiveDefaultModel, currentCat.cli);
+      return currentCat.cli;
+    })();
+    return buildResolvedCliConfig(effectiveClient, effectiveDefaultModel, baseCli, body.cli);
   }
 
   if (isClientSwitch) {
@@ -364,6 +424,10 @@ function resolveNextCli(params: {
       ...defaultCliForClient('antigravity'),
       ...(nextCommandArgs.length > 0 ? { defaultArgs: nextCommandArgs } : {}),
     };
+  }
+
+  if (isModelSwitch && currentCat.cli) {
+    return buildCliForModelSwitch(effectiveClient, effectiveDefaultModel, currentCat.cli);
   }
 
   return undefined;
@@ -447,6 +511,13 @@ async function toCatResponse(
     clientId: cat.clientId,
     defaultModel: cat.defaultModel,
     cli: cat.cli,
+    // F254 D2: effective carrier truth — only for cats that actually dispatch
+    // through the local Codex CLI. Generic ACP (getAcpConfig wins in the
+    // assembly) and cloud-only cats (cli removed, F247 KD-17) never reach the
+    // Codex carrier, so exposing one would be a lie.
+    ...(cat.clientId === 'openai' && !acpConfig && cat.cli != null
+      ? { codexCarrier: resolveCodexCarrierTruth(cat.cli.carrier) }
+      : {}),
     contextBudget: cat.contextBudget,
     avatar: cat.avatar,
     roleDescription: cat.roleDescription,
@@ -731,7 +802,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         const isCloudOnlyProvider = explicitProviderForCloud === 'openai-chatgpt-pro';
         const resolvedCli = isCloudOnlyProvider
           ? undefined
-          : buildResolvedCliConfig(body.clientId, defaultCliForClient(body.clientId), body.cli);
+          : buildResolvedCliConfig(body.clientId, body.defaultModel, defaultCliForClient(body.clientId), body.cli);
         createRuntimeCat(projectRoot, {
           catId: body.catId,
           name: body.name,
@@ -919,6 +990,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         body,
         currentCat,
         effectiveClient,
+        effectiveDefaultModel,
         hasCommandArgsPatch,
         nextCommandArgs,
       });

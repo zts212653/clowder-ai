@@ -1,6 +1,8 @@
 ---
 domainId: eval:memory
 displayName: Memory Recall & Library Health Eval
+descriptionForHuman: 记忆系统好不好使——recall 找得到吗、library 健康吗
+metricGlossaryRef: eval-memory.metrics.yaml
 systemThreadId: thread_eval_memory
 evalCat:
   catId: opus-47

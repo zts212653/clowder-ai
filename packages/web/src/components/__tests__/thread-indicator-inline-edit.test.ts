@@ -49,7 +49,9 @@ vi.mock('@/stores/chatStore', () => {
   return { useChatStore: hook };
 });
 
-const nativeInputSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+const inputValueDescriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+if (!inputValueDescriptor?.set) throw new Error('HTMLInputElement value setter missing');
+const nativeInputSetter = inputValueDescriptor.set;
 
 describe('ThreadIndicator inline title editing', () => {
   let container: HTMLDivElement;
@@ -84,6 +86,7 @@ describe('ThreadIndicator inline title editing', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     if (root) {
       act(() => root?.unmount());
       root = null;
@@ -98,12 +101,17 @@ describe('ThreadIndicator inline title editing', () => {
     });
   };
 
-  const titleSpan = () => container.querySelector('span.cursor-text') as HTMLElement | null;
+  const titleControl = () => container.querySelector('button.cursor-text') as HTMLButtonElement | null;
   const editInput = () => container.querySelector('input') as HTMLInputElement | null;
+  const requireEditInput = () => {
+    const input = editInput();
+    if (!input) throw new Error('edit input not found');
+    return input;
+  };
 
   const enterEditMode = async () => {
     await act(async () => {
-      titleSpan()?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      titleControl()?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
     });
   };
 
@@ -114,6 +122,17 @@ describe('ThreadIndicator inline title editing', () => {
 
   /** Flush fire-and-forget submitRename: macrotask drains the async chain (apiFetch → .json() → state updates) */
   const flushSubmitRename = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  it('maps the clowder-ai project basename to the configured brand name', async () => {
+    vi.stubEnv('NEXT_PUBLIC_BRAND_NAME', 'Clowder AI');
+    mockStore.threads = [{ ...TEST_THREADS[0], projectPath: '/projects/clowder-ai' }];
+
+    await render();
+
+    const projectChip = container.querySelector('button[aria-label^="点击复制项目路径"]') as HTMLButtonElement | null;
+    expect(projectChip?.textContent).toContain('Clowder AI');
+    expect(projectChip?.textContent).not.toContain('clowder-ai');
+  });
 
   it('enters edit mode on double-click', async () => {
     await render();
@@ -127,7 +146,7 @@ describe('ThreadIndicator inline title editing', () => {
     await render();
     expect(editInput()).toBeNull();
     await act(async () => {
-      titleSpan()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true }));
+      titleControl()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true }));
     });
     expect(editInput()).not.toBeNull();
   });
@@ -136,7 +155,7 @@ describe('ThreadIndicator inline title editing', () => {
     mockApiFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ title: '新标题' }) });
     await render();
     await enterEditMode();
-    setInputValue(editInput()!, '新标题');
+    setInputValue(requireEditInput(), '新标题');
     // Single act: dispatch + macrotask flush keeps all submitRename state updates inside one act boundary
     await act(async () => {
       editInput()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
@@ -150,7 +169,7 @@ describe('ThreadIndicator inline title editing', () => {
     mockApiFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ title: '模糊保存' }) });
     await render();
     await enterEditMode();
-    setInputValue(editInput()!, '模糊保存');
+    setInputValue(requireEditInput(), '模糊保存');
     await act(async () => {
       editInput()?.blur();
       await flushSubmitRename();
@@ -168,13 +187,13 @@ describe('ThreadIndicator inline title editing', () => {
     });
     expect(mockApiFetch).not.toHaveBeenCalled();
     expect(editInput()).toBeNull();
-    expect(titleSpan()?.textContent).toBe('讨论 F095 设计');
+    expect(titleControl()?.textContent).toBe('讨论 F095 设计');
   });
 
   it('cancels when draft is empty without calling PATCH', async () => {
     await render();
     await enterEditMode();
-    setInputValue(editInput()!, '  ');
+    setInputValue(requireEditInput(), '  ');
     await act(async () => {
       editInput()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
       await flushSubmitRename();
@@ -198,7 +217,7 @@ describe('ThreadIndicator inline title editing', () => {
     // without sending a PATCH — the useEffect([threadId]) guard sets isEditing = false.
     await render();
     await enterEditMode();
-    setInputValue(editInput()!, '改了但没保存');
+    setInputValue(requireEditInput(), '改了但没保存');
     expect(editInput()).not.toBeNull(); // still editing
 
     // Simulate switching to a different thread by re-rendering with a new threadId
@@ -223,7 +242,7 @@ describe('ThreadIndicator inline title editing', () => {
     expect(editInput()).toBeNull();
     expect(mockApiFetch).not.toHaveBeenCalled();
     // The displayed title is thread B's, not the draft from thread A
-    expect(titleSpan()?.textContent).toBe('另一个对话');
+    expect(titleControl()?.textContent).toBe('另一个对话');
   });
 
   it('in-flight PATCH for thread A does not close edit on thread B (generation guard)', async () => {
@@ -238,7 +257,7 @@ describe('ThreadIndicator inline title editing', () => {
 
     await render();
     await enterEditMode();
-    setInputValue(editInput()!, '新标题A');
+    setInputValue(requireEditInput(), '新标题A');
 
     // Trigger blur → submitRename fires, PATCH starts (unresolved)
     await act(async () => {
@@ -269,7 +288,7 @@ describe('ThreadIndicator inline title editing', () => {
 
     // User double-clicks to edit thread B
     await act(async () => {
-      titleSpan()?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      titleControl()?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
     });
     expect(editInput()).not.toBeNull(); // B's edit is open
 

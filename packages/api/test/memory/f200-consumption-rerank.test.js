@@ -133,6 +133,25 @@ describe('F200 consumption rerank integration', () => {
     assert.equal(results[0].anchor, 'adr-important', 'constitutional should not be demoted');
   });
 
+  it('architecture docs are movable by consumption rerank', () => {
+    process.env.F200_CONSUMPTION_RERANK = 'on';
+    insertDoc('stale-feature', 'feature');
+    insertDoc('architecture-map', 'architecture', 'validated');
+    insertMetric('stale-feature', 0, 50, 90);
+    insertMetric('architecture-map', 20, 30, 1);
+    insertBaseline('feature', 0.2);
+    insertBaseline('architecture', 0.2);
+
+    const results = [getDoc('stale-feature'), getDoc('architecture-map')];
+    applyConsumptionRerank(results, db);
+
+    assert.equal(
+      results[0].anchor,
+      'architecture-map',
+      'architecture should participate in rerank instead of staying pinned',
+    );
+  });
+
   it('no metrics: cold-start treatment preserves order', () => {
     process.env.F200_CONSUMPTION_RERANK = 'on';
     insertDoc('A', 'feature');

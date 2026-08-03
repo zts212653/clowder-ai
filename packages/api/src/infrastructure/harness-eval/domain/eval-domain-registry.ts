@@ -10,6 +10,23 @@ const sourceRefsKindSchema = z
   .string()
   .regex(/^[a-z0-9][a-z0-9-]*$/, 'sourceRefsKind must be a lowercase slug-like id');
 
+const metricGlossaryKeySchema = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9._-]*$/, 'metric glossary keys must be lowercase metric ids');
+
+const metricGlossaryEntrySchema = z.object({
+  label: z.string().min(1),
+  means: z.string().min(1),
+  goodDirection: z.enum(['higher', 'lower', 'neutral']),
+  category: z.enum(['activation', 'friction', 'derived', 'context']).optional(),
+  component: z.string().min(1).optional(),
+  badWhen: z.string().min(1).optional(),
+  source: z.string().min(1).optional(),
+  ownerHint: z.string().min(1).optional(),
+});
+
+const metricGlossarySchema = z.record(metricGlossaryKeySchema, metricGlossaryEntrySchema);
+
 const evalDomainFixtureSchema = z.object({
   id: z.string().min(1),
   featureId: z.string().regex(/^F\d{3}$/, 'featureId must match F followed by 3 digits'),
@@ -21,6 +38,25 @@ const evalDomainFixtureSchema = z.object({
 const evalDomainRegistryEntrySchema = z.object({
   domainId: evalDomainIdSchema,
   displayName: z.string().min(1),
+  /**
+   * F248 Phase A — one-line human-readable explanation of what this eval
+   * domain observes, surfaced in the Eval Hub so the human (not just cats/
+   * tools) can read it.
+   *
+   * OPTIONAL at the schema level on purpose: this is a display-surface field,
+   * not a functional constraint. Making it parse-required would couple every
+   * registry fixture — including description-irrelevant functional tests — to
+   * this field (23 such tests broke when it was required). Production
+   * completeness is enforced instead by a focused guard test over the shipped
+   * `docs/harness-feedback/eval-domains/*.yaml` (ADR-031 hard layer, scoped to
+   * production), not by failing unrelated unit fixtures.
+   */
+  descriptionForHuman: z.string().min(1).optional(),
+  metricGlossary: metricGlossarySchema.optional(),
+  metricGlossaryRef: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9-]*\.metrics\.yaml$/, 'metricGlossaryRef must be a local *.metrics.yaml filename')
+    .optional(),
   systemThreadId: z.string().min(1, 'systemThreadId is required'),
   evalCat: z.object({
     catId: z.string().min(1),
@@ -74,6 +110,11 @@ const evalDomainRegistryEntrySchema = z.object({
 });
 
 export type EvalDomainRegistryEntry = z.infer<typeof evalDomainRegistryEntrySchema>;
+export type EvalMetricGlossary = z.infer<typeof metricGlossarySchema>;
+
+export function isEvalDomainRegistryYamlFile(filename: string): boolean {
+  return filename.endsWith('.yaml') && !filename.endsWith('.metrics.yaml');
+}
 
 /**
  * Single source of truth for the set of registered eval domain ids.
@@ -90,4 +131,8 @@ export function parseEvalDomainRegistryEntry(input: unknown): EvalDomainRegistry
 
 export function parseEvalDomainRegistryFile(input: unknown): EvalDomainRegistryEntry {
   return parseEvalDomainRegistryEntry(input);
+}
+
+export function parseEvalMetricGlossary(input: unknown): EvalMetricGlossary {
+  return metricGlossarySchema.parse(input);
 }

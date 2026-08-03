@@ -4,22 +4,29 @@
  * Tests use PRODUCTION-REALISTIC data shapes:
  * - tool_use.label = "${catId} → ${toolName}" (e.g. "opus → search_evidence")
  * - tool_result.label = "${catId} ← result" (generic, no tool name)
- * - tool_result.detail = plain text from evidence-tools.ts, truncated by compactToolResultDetail
+ * - tool_result.detail = complete visible text from evidence-tools.ts, with recall metadata separated
  */
 
 import { describe, expect, it } from 'vitest';
 import { filterRecallEvents, parseTextResults } from '@/hooks/useRecallEvents';
 import type { ToolEvent } from '@/stores/chat-types';
+import { extractRecallMetaDetail, toolResultDetail } from '@/utils/toolPreview';
 
-const makeToolEvent = (label: string, type: 'tool_use' | 'tool_result', detail?: string): ToolEvent => ({
+const makeToolEvent = (
+  label: string,
+  type: 'tool_use' | 'tool_result',
+  detail?: string,
+  resultMeta?: string,
+): ToolEvent => ({
   id: `evt-${Math.random().toString(36).slice(2)}`,
   type,
   label,
   detail,
+  ...(resultMeta ? { resultMeta } : {}),
   timestamp: Date.now(),
 });
 
-// Production-format tool_result detail from evidence-tools.ts + compactToolResultDetail
+// Production-format tool_result detail from evidence-tools.ts + toolResultDetail
 const REALISTIC_RESULT_DETAIL = `Found 2 result(s):
 
 [high] F102 Memory Adapter
@@ -49,22 +56,22 @@ Found 6 result(s) for "猫猫杀" [variant=2ca79b599d26]:
   > Memory adapter refactor spec covering indexing, search, and knowledge feed`;
 
 describe('parseTextResults', () => {
-  it('parses production text format with confidence and title', () => {
+  it('parses production text format with match rank and title', () => {
     const results = parseTextResults(FULL_RESULT_DETAIL);
     expect(results).toHaveLength(3);
     expect(results[0].title).toBe('F102 Memory Adapter');
-    expect(results[0].confidence).toBe('high');
+    expect(results[0].matchRank).toBe('high');
     expect(results[0].sourceType).toBe('phase');
     expect(results[1].title).toBe('ADR-015 Evidence Indexing');
-    expect(results[1].confidence).toBe('mid');
-    expect(results[2].confidence).toBe('low');
+    expect(results[1].matchRank).toBe('mid');
+    expect(results[2].matchRank).toBe('low');
   });
 
-  it('parses truncated detail (compactToolResultDetail output)', () => {
+  it('parses a partial legacy detail payload', () => {
     const results = parseTextResults(REALISTIC_RESULT_DETAIL);
     expect(results).toHaveLength(1);
     expect(results[0].title).toBe('F102 Memory Adapter');
-    expect(results[0].confidence).toBe('high');
+    expect(results[0].matchRank).toBe('high');
   });
 
   it('extracts result count from header', () => {
@@ -102,7 +109,7 @@ describe('filterRecallEvents', () => {
     expect(recall[0].resultCount).toBe(3);
     expect(recall[0].results).toHaveLength(3);
     expect(recall[0].results![0].title).toBe('F102 Memory Adapter');
-    expect(recall[0].results![0].confidence).toBe('high');
+    expect(recall[0].results![0].matchRank).toBe('high');
     expect(recall[0].results![0].sourceType).toBe('phase');
     expect(recall[0].results![1].title).toBe('ADR-015 Evidence Indexing');
   });
@@ -179,6 +186,166 @@ describe('filterRecallEvents', () => {
     expect(recall[0].query).toBe('large history search');
     expect(recall[0].resultCount).toBeUndefined();
     expect(recall[0].results).toEqual([]);
+  });
+
+  it('uses recall-meta sidecar extracted before production detail compaction', () => {
+    const rawResult = [
+      'Evidence search request failed: Error: result exceeds maximum allowed tokens.',
+      'Full result saved to /tmp/cat-cafe/search-evidence-result.txt',
+      'preview line 1',
+      'preview line 2',
+      'preview line 3',
+      '<recall-meta>{"resultStatus":"overflow","resultCount":12,"artifactRef":{"path":"/tmp/cat-cafe/search-evidence-result.txt"}}</recall-meta>',
+    ].join('\n');
+    const events: ToolEvent[] = [
+      makeToolEvent('codex → cat_cafe_search_evidence', 'tool_use', '{"query":"large history search"}'),
+      makeToolEvent('codex ← result', 'tool_result', toolResultDetail(rawResult), extractRecallMetaDetail(rawResult)),
+    ];
+
+    const recall = filterRecallEvents(events);
+    expect(recall).toHaveLength(1);
+    expect(recall[0].query).toBe('large history search');
+    expect(recall[0].resultStatus).toBe('overflow');
+    expect(recall[0].resultCount).toBe(12);
+    expect(recall[0].results).toEqual([]);
+  });
+
+  it('uses the appended recall-meta when the result preview contains an unclosed marker', () => {
+    const rawResult = [
+      'Evidence search request failed: Error: result exceeds maximum allowed tokens.',
+      'Full result saved to /tmp/cat-cafe/search-evidence-result.txt',
+      'preview: reviewer mentioned a literal <recall-meta> marker in prose',
+      '<recall-meta>{"resultStatus":"overflow","resultCount":12,"artifactRef":{"path":"/tmp/cat-cafe/search-evidence-result.txt"}}</recall-meta>',
+    ].join('\n');
+    const events: ToolEvent[] = [
+      makeToolEvent('codex → cat_cafe_search_evidence', 'tool_use', '{"query":"marker collision"}'),
+      makeToolEvent('codex ← result', 'tool_result', toolResultDetail(rawResult), extractRecallMetaDetail(rawResult)),
+    ];
+
+    const recall = filterRecallEvents(events);
+    expect(recall).toHaveLength(1);
+    expect(recall[0].query).toBe('marker collision');
+    expect(recall[0].resultStatus).toBe('overflow');
+    expect(recall[0].resultCount).toBe(12);
+  });
+
+  it('does not zero-fill structured error recall-meta results', () => {
+    const rawResult = [
+      'Evidence search request failed for "broken query": database unavailable',
+      '<recall-meta>{"resultStatus":"error","resultCount":null,"readNextHint":"Retry after memory service recovers."}</recall-meta>',
+    ].join('\n');
+    const events: ToolEvent[] = [
+      makeToolEvent('codex → cat_cafe_search_evidence', 'tool_use', '{"query":"broken query"}'),
+      makeToolEvent('codex ← result', 'tool_result', toolResultDetail(rawResult), extractRecallMetaDetail(rawResult)),
+    ];
+
+    const recall = filterRecallEvents(events);
+    expect(recall).toHaveLength(1);
+    expect(recall[0].query).toBe('broken query');
+    expect(recall[0].resultStatus).toBe('error');
+    expect(recall[0].resultCount).toBeUndefined();
+    expect(recall[0].results).toEqual([]);
+  });
+
+  it('uses coverage search recall-meta in live RecallFeed', () => {
+    const rawResult = [
+      'Evidence search results: Found 4 result(s) for "coverage query" [intent=coverage]:',
+      '📊 Coverage Search',
+      '',
+      '  docs: 2/25',
+      '  threads: 2/20',
+      '',
+      '[matchType:direct] Coverage Result',
+      '  anchor: F200',
+      '  source: docs | retrievalScore: 0.92',
+      '<recall-meta>{"resultStatus":"counted","resultCount":4,"previewItems":[{"title":"Coverage Result","anchor":"F200","matchType":"direct"}],"readNextHint":"Use the coverage matrix anchors."}</recall-meta>',
+    ].join('\n');
+    const events: ToolEvent[] = [
+      makeToolEvent('codex → cat_cafe_search_evidence', 'tool_use', '{"query":"coverage query","intent":"coverage"}'),
+      makeToolEvent('codex ← result', 'tool_result', toolResultDetail(rawResult), extractRecallMetaDetail(rawResult)),
+    ];
+
+    const recall = filterRecallEvents(events);
+    expect(recall).toHaveLength(1);
+    expect(recall[0].query).toBe('coverage query');
+    expect(recall[0].resultStatus).toBe('counted');
+    expect(recall[0].resultCount).toBe(4);
+    expect(recall[0].results?.[0]).toMatchObject({
+      title: 'Coverage Result',
+      matchType: 'direct',
+      anchor: 'F200',
+    });
+    expect(recall[0].results?.[0]?.matchRank).toBeUndefined();
+  });
+
+  it('preserves known F263 axes from sidecar-only compacted topk results', () => {
+    const rawResult = [
+      '⚠️ Search degraded: semantic unavailable; used lexical fallback.',
+      'Evidence search results: Found 1 result(s) for "axes":',
+      '<recall-meta>{"resultStatus":"counted","resultCount":1,"degraded":true,"previewItems":[{"title":"Current result","anchor":"F263","matchRank":"high","authority":"validated","updatedAt":"2026-07-12T00:00:00Z"}]}</recall-meta>',
+    ].join('\n');
+    const events: ToolEvent[] = [
+      makeToolEvent('codex → cat_cafe_search_evidence', 'tool_use', '{"query":"axes"}'),
+      makeToolEvent('codex ← result', 'tool_result', toolResultDetail(rawResult), extractRecallMetaDetail(rawResult)),
+    ];
+
+    const recall = filterRecallEvents(events);
+
+    expect(recall[0].results?.[0]).toMatchObject({
+      title: 'Current result',
+      matchRank: 'high',
+      authority: 'validated',
+      updatedAt: '2026-07-12T00:00:00Z',
+    });
+  });
+
+  it('migrates legacy confidence axes from sidecar-only compacted results', () => {
+    const rawResult = [
+      'Evidence search results: Found 2 result(s) for "legacy axes":',
+      '<recall-meta>{"resultStatus":"counted","resultCount":2,"previewItems":[{"title":"Legacy ranked result","anchor":"F263","confidence":"high"},{"title":"Legacy coverage result","anchor":"F200","confidence":"direct"}]}</recall-meta>',
+    ].join('\n');
+    const events: ToolEvent[] = [
+      makeToolEvent('codex → cat_cafe_search_evidence', 'tool_use', '{"query":"legacy axes"}'),
+      makeToolEvent('codex ← result', 'tool_result', toolResultDetail(rawResult), extractRecallMetaDetail(rawResult)),
+    ];
+
+    const recall = filterRecallEvents(events);
+
+    expect(recall[0].results).toEqual([
+      expect.objectContaining({
+        title: 'Legacy ranked result',
+        anchor: 'F263',
+        matchRank: 'high',
+      }),
+      expect.objectContaining({
+        title: 'Legacy coverage result',
+        anchor: 'F200',
+        matchType: 'direct',
+      }),
+    ]);
+    expect(recall[0].results?.[0]?.matchType).toBeUndefined();
+    expect(recall[0].results?.[1]?.matchRank).toBeUndefined();
+  });
+
+  it('does not let non-evidence recall-meta consume a pending search', () => {
+    const graphMeta = '<recall-meta>{"resultStatus":"counted","resultCount":2}</recall-meta>';
+    const events: ToolEvent[] = [
+      makeToolEvent('codex → cat_cafe_search_evidence', 'tool_use', '{"query":"stale search"}'),
+      makeToolEvent('codex → graph_resolve', 'tool_use', '{"anchor":"F200"}'),
+      makeToolEvent('codex ← result', 'tool_result', 'Graph for "F200": 2 nodes, 1 edges (depth=1)', graphMeta),
+      makeToolEvent(
+        'codex ← result',
+        'tool_result',
+        'Evidence search results: Found 1 result(s) for "stale search":\n\n[high] Stale Search Result',
+      ),
+    ];
+
+    const recall = filterRecallEvents(events);
+    expect(recall).toHaveLength(1);
+    expect(recall[0].query).toBe('stale search');
+    expect(recall[0].resultStatus).toBe('counted');
+    expect(recall[0].resultCount).toBe(1);
+    expect(recall[0].results![0].title).toBe('Stale Search Result');
   });
 
   it('does not assign a later search result to an earlier stale pending search', () => {

@@ -171,6 +171,13 @@ describe('ThreadPanel visual state', () => {
     expect(html).toContain('Waiting for events...');
   });
 
+  it('active-active concurrent dialogue panels auto-scroll without requiring a spotlight panel', () => {
+    const html = renderToStaticMarkup(
+      <MultiCamStage panels={[makePanel('t1', 'active', 1), makePanel('t2', 'active', 1)]} layout="dual" />,
+    );
+    expect(html.match(/data-auto-scroll="true"/g)).toHaveLength(2);
+  });
+
   it('spotlight panel has animate-pulse activity indicator', () => {
     const html = renderToStaticMarkup(<MultiCamStage panels={[makePanel('t1', 'spotlight')]} layout="single" />);
     expect(html).toContain('animate-pulse');

@@ -54,6 +54,20 @@ export interface RichCardBlock extends RichBlockBase {
   meta?: Record<string, unknown>;
 }
 
+export interface PersonMemoryProposalCardMeta extends Record<string, unknown> {
+  kind: 'person_memory_proposal';
+  candidateId: string;
+  /** Human-visible proposal subject used to resolve natural-language status questions. */
+  subjectDisplayName?: string;
+  envelopeRef: string;
+  decisionSurface: 'approval_hub';
+  status: 'pending_approval' | 'not_now' | 'partially_materialized' | 'materialized' | 'rejected' | 'withdrawn';
+}
+
+export interface RichPersonMemoryProposalCardBlock extends RichCardBlock {
+  meta: PersonMemoryProposalCardMeta;
+}
+
 export interface RichDiffBlock extends RichBlockBase {
   kind: 'diff';
   filePath: string;
@@ -362,4 +376,40 @@ export function isValidRichBlock(b: unknown): b is RichBlock {
     default:
       return false;
   }
+}
+
+/**
+ * F276 chat cards are presentation-only. Non-terminal cards may navigate to
+ * Approval Hub, while terminal receipts may expose an undo action. Inline
+ * approve/reject actions are rejected at the shared boundary.
+ */
+export function isPersonMemoryProposalCardBlock(value: unknown): value is RichPersonMemoryProposalCardBlock {
+  if (!isValidRichBlock(value) || value.kind !== 'card' || !isRecord(value.meta)) return false;
+  const meta = value.meta;
+  if (
+    meta.kind !== 'person_memory_proposal' ||
+    !isTrimmedNonEmptyString(meta.candidateId) ||
+    (meta.subjectDisplayName !== undefined && !isTrimmedNonEmptyString(meta.subjectDisplayName)) ||
+    !isTrimmedNonEmptyString(meta.envelopeRef) ||
+    meta.decisionSurface !== 'approval_hub' ||
+    !['pending_approval', 'not_now', 'partially_materialized', 'materialized', 'rejected', 'withdrawn'].includes(
+      meta.status as string,
+    )
+  ) {
+    return false;
+  }
+
+  const actions = value.actions ?? [];
+  const actionMatchesCandidate = (action: CardAction): boolean => action.payload?.candidateId === meta.candidateId;
+  if (meta.status === 'pending_approval' || meta.status === 'not_now' || meta.status === 'partially_materialized') {
+    return (
+      actions.length === 1 &&
+      actions[0]?.action === 'person-memory:open-approval-hub' &&
+      actionMatchesCandidate(actions[0])
+    );
+  }
+  return (
+    actions.length === 0 ||
+    (actions.length === 1 && actions[0]?.action === 'person-memory:undo' && actionMatchesCandidate(actions[0]))
+  );
 }

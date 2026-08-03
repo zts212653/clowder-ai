@@ -51,6 +51,12 @@ export interface CiCdCheckTaskSpecOptions {
       sourceMessageId?: string;
     }): void | Promise<unknown>;
   };
+  /**
+   * Filter self-merges: if the GitHub login that merged the PR matches our own
+   * authenticated identity, skip the lifecycle wake (the merger already knows).
+   * Reuses the same self-login resolver as review feedback echo filtering.
+   */
+  readonly isSelfMerge?: (mergedByLogin: string) => boolean;
 }
 
 /**
@@ -157,6 +163,13 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
 
         if (routeResult.kind === 'lifecycle') {
           await retireSatisfiedCiHold(routeResult.threadId, routeResult.messageId);
+          // Skip wake when the merge was performed by our own GitHub identity —
+          // the merger already knows the PR state; waking them wastes tokens.
+          // Message delivery already happened inside CiCdRouter.closeLifecycle.
+          if (pollResult.mergedByLogin && opts.isSelfMerge?.(pollResult.mergedByLogin)) {
+            opts.log.info(`[cicd-check] PR ${routeResult.prState} by self (${pollResult.mergedByLogin}) -> skip wake`);
+            return;
+          }
           triggerLifecycleWake(opts, opts.invokeTrigger, signal, routeResult);
           return;
         }
@@ -183,6 +196,29 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
             )
             .catch((err) => opts.log.warn({ err }, '[cicd-check] trigger failed (best-effort)'));
           opts.log.info(`[cicd-check] Triggered ${routeResult.catId} for CI failure`);
+          return;
+        }
+
+        if (routeResult.wakeKind === 'external_review_ready') {
+          await retireSatisfiedCiHold(routeResult.threadId, routeResult.messageId);
+          const policy: ConnectorTriggerPolicy = {
+            priority: 'normal',
+            reason: 'github_external_review_ready',
+            sourceCategory: 'review',
+            coalesceKey: `external-review:${signal.repoFullName}#${signal.prNumber}:${routeResult.headSha ?? pollResult.headSha}`,
+          };
+          void opts.invokeTrigger
+            .trigger(
+              routeResult.threadId,
+              routeResult.catId as CatId,
+              signal.task.userId ?? '',
+              routeResult.content,
+              routeResult.messageId,
+              undefined,
+              policy,
+            )
+            .catch((err) => opts.log.warn({ err }, '[cicd-check] external review-ready trigger failed'));
+          opts.log.info(`[cicd-check] Current HEAD ready → wake ${routeResult.catId} once`);
           return;
         }
 

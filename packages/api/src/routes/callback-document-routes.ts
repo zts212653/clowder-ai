@@ -14,10 +14,12 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/RichBlockBuffer.js';
+import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { PandocService } from '../infrastructure/document/PandocService.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { getDeletedCallbackThreadGuard } from './callback-scope-helpers.js';
 
 const generateDocumentSchema = z.object({
   /** Markdown content to convert */
@@ -33,6 +35,7 @@ export function registerCallbackDocumentRoutes(
   deps: {
     registry: InvocationRegistry;
     socketManager: SocketManager;
+    threadStore?: Pick<IThreadStore, 'get'>;
   },
 ): void {
   const pandocService = new PandocService(app.log);
@@ -49,6 +52,12 @@ export function registerCallbackDocumentRoutes(
 
     const { markdown, format, baseName } = parsed.data;
     const invocationId = record.invocationId;
+
+    const deletedThreadGuard = await getDeletedCallbackThreadGuard(deps.threadStore, record.threadId);
+    if (deletedThreadGuard) {
+      reply.status(deletedThreadGuard.statusCode);
+      return deletedThreadGuard.body;
+    }
 
     if (!(await deps.registry.isLatest(invocationId))) {
       return { status: 'stale_ignored' };

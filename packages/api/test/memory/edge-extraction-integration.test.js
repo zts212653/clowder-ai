@@ -46,6 +46,125 @@ describe('IndexBuilder edge extraction integration', () => {
     store.close();
   });
 
+  it('creates supersedes edges from frontmatter during rebuild', async () => {
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+    const store = new SqliteEvidenceStore(':memory:');
+    await store.initialize();
+
+    const docsRoot = mkdtempSync(join(tmpdir(), 'm15-supersedes-docs-'));
+    mkdirSync(join(docsRoot, 'decisions'), { recursive: true });
+    writeFileSync(
+      join(docsRoot, 'decisions', 'a.md'),
+      [
+        '---',
+        'decision_id: S4-DECISION-A',
+        'doc_kind: decision',
+        'status: superseded',
+        '---',
+        '# S4 Decision A',
+        '',
+        'Old SQLite cache layer.',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(docsRoot, 'decisions', 'b.md'),
+      [
+        '---',
+        'decision_id: S4-DECISION-B',
+        'doc_kind: decision',
+        'supersedes: S4-DECISION-A # inline YAML comment should not become part of the anchor',
+        '---',
+        '# S4 Decision B',
+        '',
+        'Redis migration replaces the old cache layer.',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(docsRoot, 'decisions', 'c.md'),
+      [
+        '---',
+        'decision_id: S4-DECISION-C',
+        'doc_kind: decision',
+        'supersedes: null',
+        '---',
+        '# S4 Decision C',
+        '',
+        'No supersedes target yet.',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(docsRoot, 'decisions', 'd.md'),
+      [
+        '---',
+        'decision_id: S4-DECISION-D',
+        'doc_kind: decision',
+        'supersedes: [] # explicit empty list',
+        '---',
+        '# S4 Decision D',
+        '',
+        'Explicitly no supersedes target.',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(docsRoot, 'decisions', 'e.md'),
+      [
+        '---',
+        'decision_id: S4-DECISION-E',
+        'doc_kind: decision',
+        'supersedes:',
+        '  - S4-DECISION-A',
+        '  - S4-DECISION-B',
+        '---',
+        '# S4 Decision E',
+        '',
+        'Supersedes two earlier decisions.',
+      ].join('\n'),
+    );
+
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+    const builder = new IndexBuilder(store, docsRoot);
+
+    await builder.rebuild({ force: true });
+
+    const edges = await store.getRelated('S4-DECISION-B');
+    assert.ok(
+      edges.find((e) => e.anchor === 'S4-DECISION-A' && e.relation === 'supersedes' && e.provenance === 'frontmatter'),
+      'frontmatter supersedes should produce graph edge',
+    );
+    assert.equal(
+      edges.some((e) => e.relation === 'supersedes' && e.anchor.includes('#')),
+      false,
+      'inline YAML comments must not become part of supersedes anchors',
+    );
+
+    assert.equal(
+      (await store.getRelated('S4-DECISION-C')).some((e) => e.relation === 'supersedes'),
+      false,
+      'supersedes: null should not produce graph edges',
+    );
+    assert.equal(
+      (await store.getRelated('S4-DECISION-D')).some((e) => e.relation === 'supersedes'),
+      false,
+      'supersedes: [] should not produce graph edges',
+    );
+
+    const blockListEdges = await store.getRelated('S4-DECISION-E');
+    assert.ok(
+      blockListEdges.find(
+        (e) => e.anchor === 'S4-DECISION-A' && e.relation === 'supersedes' && e.provenance === 'frontmatter',
+      ),
+      'block-list supersedes should produce first graph edge',
+    );
+    assert.ok(
+      blockListEdges.find(
+        (e) => e.anchor === 'S4-DECISION-B' && e.relation === 'supersedes' && e.provenance === 'frontmatter',
+      ),
+      'block-list supersedes should produce second graph edge',
+    );
+
+    store.close();
+  });
+
   it('non-force rebuild preserves doc_link edges (P1-1)', async () => {
     const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
     const store = new SqliteEvidenceStore(':memory:');

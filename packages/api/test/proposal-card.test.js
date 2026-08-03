@@ -67,4 +67,22 @@ describe('F128 proposal card — reportingMode visibility (Phase Y P1-2)', () =>
       `title keeps the readable label; got ${card.title}`,
     );
   });
+
+  it('surfaces the formal external PR tracking transition on the approval card', () => {
+    const card = buildProposalCardBlock(
+      /** @type {any} */ (
+        baseProposal({
+          communityPrContext: {
+            repoFullName: 'zts212653/clowder-ai',
+            prNumber: 1210,
+            mode: 'formal_review',
+          },
+        })
+      ),
+    );
+    const field = card.fields?.find((/** @type {{label:string}} */ f) => f.label === '正式外部 PR Review');
+    assert.ok(field);
+    assert.match(field.value, /zts212653\/clowder-ai#1210/);
+    assert.match(field.value, /human-participant tracking/);
+  });
 });

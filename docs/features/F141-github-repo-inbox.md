@@ -33,7 +33,7 @@ Maine Coon分析（GPT-5.4）：
 **现状 Gap**：
 - F133/F140 解决的是"已注册 PR 后续发生了什么"（追踪层）
 - 但 maintainer 最痛的是"有个新东西出现了，系统完全没感知"（发现层）
-- 社区 contributor 不用 Cat Café，不会调 `register_pr_tracking`
+- 社区 contributor 不用 Clowder AI，不会调 `register_pr_tracking`
 - 新 PR / 新 Issue 全靠operator人肉当 webhook
 
 ## What

@@ -357,6 +357,80 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
     );
   });
 
+  it('start-dev wires F247 cloud supporting services through optional helper stage', () => {
+    const source = readFileSync(resolve(ROOT, 'scripts/start-dev.sh'), 'utf8');
+
+    assert.match(source, /f247-cloud-services\.mjs/);
+    assert.match(source, /start --optional/);
+    assert.match(source, /CAT_CAFE_F247_CLOUD_AUTOSTART/);
+    assert.match(source, /start --optional --owner-file=/);
+    assert.match(source, /stop-owned --owner-file=/);
+  });
+
+  it('official runtime launchers opt in to connector autostart without overriding explicit false', () => {
+    const runtimeScript = readFileSync(resolve(ROOT, 'scripts/runtime-worktree.sh'), 'utf8');
+    const windowsScript = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+    const unixOptIns = runtimeScript.match(
+      /export CONNECTOR_GATEWAY_AUTOSTART="\$\{CONNECTOR_GATEWAY_AUTOSTART:-1\}"/g,
+    );
+
+    assert.equal(unixOptIns?.length, 2, 'both Unix runtime paths must explicitly opt in');
+    assert.match(windowsScript, /CONNECTOR_GATEWAY_AUTOSTART\s*=\s*\$connectorGatewayAutostart/);
+    assert.match(
+      windowsScript,
+      /\$connectorGatewayAutostart\s*=\s*if\s*\(\$env:CONNECTOR_GATEWAY_AUTOSTART\)[\s\S]*?elseif\s*\(-not \$Dev\)/,
+      'Windows production runtime must compute an explicit connector opt-in',
+    );
+  });
+
+  it('Windows launcher snapshots connector authority before dotenv and restores only that wrapper decision', () => {
+    const windowsScript = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+    const snapshot =
+      '$connectorGatewayAutostartOverride = [System.Environment]::GetEnvironmentVariable("CONNECTOR_GATEWAY_AUTOSTART", "Process")';
+    const dotenvLoad = '# -- Load .env';
+    const restore = '# -- Restore connector launcher authority after dotenv';
+    const runtimeProjection = '$connectorGatewayAutostart = if ($env:CONNECTOR_GATEWAY_AUTOSTART)';
+
+    assert.ok(windowsScript.indexOf(snapshot) >= 0, 'Windows launcher must snapshot wrapper authority');
+    assert.ok(
+      windowsScript.indexOf(snapshot) < windowsScript.indexOf(dotenvLoad),
+      'wrapper authority must be captured before dotenv mutates the process environment',
+    );
+    assert.ok(
+      windowsScript.indexOf(restore) > windowsScript.indexOf(dotenvLoad) &&
+        windowsScript.indexOf(restore) < windowsScript.indexOf(runtimeProjection),
+      'dotenv-only grants must be removed before runtimeEnvOverrides are computed',
+    );
+    assert.match(
+      windowsScript,
+      /SetEnvironmentVariable\("CONNECTOR_GATEWAY_AUTOSTART", \$null, "Process"\)/,
+      'an absent wrapper decision must remain absent after dotenv loading',
+    );
+  });
+
+  it('does not advertise connector lifecycle authority through the .env template', () => {
+    const envExample = readFileSync(resolve(ROOT, '.env.example'), 'utf8');
+
+    assert.doesNotMatch(envExample, /^\s*#?\s*CONNECTOR_GATEWAY_AUTOSTART=/m);
+  });
+
+  it('runtime-only lifecycle capabilities are stripped from agent and terminal shells', () => {
+    const acpClient = readFileSync(
+      resolve(ROOT, 'packages/api/src/domains/cats/services/agents/providers/acp/AcpClient.ts'),
+      'utf8',
+    );
+    const acpHttpClient = readFileSync(
+      resolve(ROOT, 'packages/api/src/domains/cats/services/agents/providers/acp/AcpHttpStreamClient.ts'),
+      'utf8',
+    );
+    const tmuxGateway = readFileSync(resolve(ROOT, 'packages/api/src/domains/terminal/tmux-gateway.ts'), 'utf8');
+
+    assert.match(acpClient, /buildChildEnv\(this\.config\.env\)/);
+    assert.match(acpHttpClient, /buildChildEnv\(this\.config\.env\)/);
+    assert.match(tmuxGateway, /'CONNECTOR_GATEWAY_AUTOSTART'/);
+    assert.match(tmuxGateway, /'CAT_CAFE_PROVISION_GLOBAL_SIDECAR'/);
+  });
+
   it('Windows status succeeds only when required API and web PID files are running', () => {
     const sandboxDir = mkdtempSync(join(tmpdir(), 'cc-windows-status-'));
     try {

@@ -23,9 +23,11 @@ export interface TaskProgressStore {
   getSnapshot(threadId: string, catId: CatId): Promise<TaskProgressSnapshot | null>;
   setSnapshot(snapshot: TaskProgressSnapshot, options?: { ttlSeconds?: number }): Promise<void>;
   deleteSnapshot(threadId: string, catId: CatId): Promise<void>;
-  /** Delete only when the current snapshot still belongs to invocationId.
-   *  The compare-and-delete must be atomic: zombie cleanup can race with a
-   *  same-cat replacement writing a newer snapshot. */
+  /**
+   * Delete only when the current snapshot still belongs to `invocationId`.
+   * Implementations must make the comparison and deletion atomic because
+   * zombie cleanup can race with a same-cat replacement snapshot.
+   */
   deleteSnapshotIfOwner(threadId: string, catId: CatId, invocationId: string): Promise<boolean>;
   getThreadSnapshots(threadId: string): Promise<Record<string, TaskProgressSnapshot>>;
   deleteThread(threadId: string): Promise<void>;

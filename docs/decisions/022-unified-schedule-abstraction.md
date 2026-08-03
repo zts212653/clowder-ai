@@ -18,7 +18,7 @@ decision_id: ADR-022
 
 ## Context
 
-Cat Café 有多个分散的定时/周期性任务需求，但没有统一的调度抽象：
+Clowder AI 有多个分散的定时/周期性任务需求，但没有统一的调度抽象：
 
 | 现有场景 | 当前实现 | 问题 |
 |----------|----------|------|
@@ -142,7 +142,7 @@ interface DispatchReceipt {
 }
 ```
 
-**Why**：这是 Cat Café 与龙虾（OpenClaw）最根本的架构差异。龙虾是单 agent 同步 turn；我们是多猫独立进程通过 MCP 通信。
+**Why**：这是 Clowder AI 与龙虾（OpenClaw）最根本的架构差异。龙虾是单 agent 同步 turn；我们是多猫独立进程通过 MCP 通信。
 
 #### D-4: 电闸 vs 备忘录分离
 
@@ -180,7 +180,7 @@ RUN_DISPATCHED | RUN_COMPLETED | RUN_TIMEOUT | RUN_FAILED
 
 #### 兼容层
 
-| 龙虾概念 | Cat Café 对应 | 兼容程度 |
+| 龙虾概念 | Clowder AI 对应 | 兼容程度 |
 |---------|--------------|---------|
 | `HEARTBEAT.md` | checklist（备忘录层） | **格式互认** — 自然语言 checklist 可直接导入 |
 | `HEARTBEAT_OK` | `outcome.whenNoSignal: 'drop'` | **语义一致** — 我们建模为 spec 字段 |
@@ -191,7 +191,7 @@ RUN_DISPATCHED | RUN_COMPLETED | RUN_TIMEOUT | RUN_FAILED
 
 #### 差异层（我们多出来的）
 
-| 维度 | 龙虾没有 | Cat Café 有 | 根因 |
+| 维度 | 龙虾没有 | Clowder AI 有 | 根因 |
 |------|---------|-------------|------|
 | Actor/Placement | 单 agent | role + resolver + lease + MCP dispatch | 多猫 |
 | typed signal gate | 字符串 OK/alert | 结构化 signal | 消除二次扫描 |

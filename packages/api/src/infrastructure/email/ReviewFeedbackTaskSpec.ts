@@ -17,6 +17,13 @@ import {
   type Thread,
 } from '../../domains/cats/services/stores/ports/ThreadStore.js';
 import type { ICommunityEventLog } from '../../domains/community/CommunityEventLog.js';
+import { decideTrackingWake } from '../../domains/community/community-delivery-policy.js';
+import type {
+  ExternalCloudObservation,
+  ExternalReviewCoordinatorResult,
+  ExternalReviewTrackingTarget,
+} from '../../domains/community/external-review/ExternalReviewCoordinator.js';
+import { classifyExternalCloudReview } from '../../domains/community/external-review/external-cloud-review-classifier.js';
 import type { DistillationCheckpoint } from '../distillation/DistillationCheckpoint.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
 import type { ConnectorInvokeTrigger, ConnectorTriggerPolicy } from './ConnectorInvokeTrigger.js';
@@ -34,6 +41,7 @@ export interface ReviewFeedbackSignal {
   routingAudit?: ReviewFeedbackRoutingAudit;
   newComments: PrFeedbackComment[];
   newDecisions: PrReviewDecision[];
+  externalReadyNotification?: Extract<ExternalReviewCoordinatorResult, { kind: 'notified' }>;
   validateRoutingRepairFresh?: () => Promise<boolean>;
   commitRoutingRepair?: () => Promise<boolean>;
   commitCursor: () => Promise<void>;
@@ -42,6 +50,8 @@ export interface ReviewFeedbackSignal {
 export interface ReviewFeedbackPrMetadata {
   readonly headSha: string;
   readonly prState: 'open' | 'merged' | 'closed';
+  readonly authorLogin?: string;
+  readonly authorType?: string;
   /** PR title from GitHub — used by distillation checkpoint to extract featureId/phaseLabel. */
   readonly prTitle?: string;
 }
@@ -85,6 +95,16 @@ export interface ReviewFeedbackTaskSpecOptions {
    * Both predicates return `skip` — OR'd together in gate().
    */
   readonly isNoiseComment?: (comment: PrFeedbackComment) => boolean;
+  /** F168: canonical current-HEAD cloud-review state and once-per-head reviewer wake. */
+  readonly externalReviewCoordinator?: {
+    recordCloud(
+      observation: ExternalCloudObservation,
+      tracking: ExternalReviewTrackingTarget,
+    ): Promise<ExternalReviewCoordinatorResult>;
+  };
+  readonly knownCloudReviewerLogins?: readonly string[];
+  readonly cloudReviewTimeoutMs?: number;
+  readonly now?: () => number;
   /** F202-2B: Override task ID for plugin-scoped schedule instances */
   readonly id?: string;
   // F168 Phase A: community event log + projector (best-effort, optional)
@@ -104,8 +124,95 @@ export interface ReviewFeedbackTaskSpecOptions {
   };
 }
 
+const DEFAULT_CLOUD_REVIEWER_LOGINS = ['chatgpt-codex-connector[bot]'];
+const DEFAULT_CLOUD_REVIEW_TIMEOUT_MS = 30 * 60_000;
+
+interface ExternalCloudResolution {
+  readonly comments: PrFeedbackComment[];
+  readonly decisions: PrReviewDecision[];
+  readonly notification?: Extract<ExternalReviewCoordinatorResult, { kind: 'notified' }>;
+}
+
+async function resolveExternalCloudReview(input: {
+  readonly opts: ReviewFeedbackTaskSpecOptions;
+  readonly task: TaskItem;
+  readonly repoFullName: string;
+  readonly prNumber: number;
+  readonly headSha?: string;
+  readonly cloudCandidateComments: readonly PrFeedbackComment[];
+  readonly cloudCandidateReviews: readonly PrReviewDecision[];
+  readonly deliverableComments: PrFeedbackComment[];
+  readonly deliverableDecisions: PrReviewDecision[];
+}): Promise<ExternalCloudResolution> {
+  if (!input.opts.externalReviewCoordinator || !input.headSha) {
+    return { comments: input.deliverableComments, decisions: input.deliverableDecisions };
+  }
+
+  const classification = classifyExternalCloudReview({
+    currentHeadSha: input.headSha,
+    eventWait: input.task.automationState?.eventWait,
+    comments: input.cloudCandidateComments,
+    reviews: input.cloudCandidateReviews,
+    knownCloudReviewerLogins: input.opts.knownCloudReviewerLogins ?? DEFAULT_CLOUD_REVIEWER_LOGINS,
+    now: (input.opts.now ?? Date.now)(),
+    timeoutMs: input.opts.cloudReviewTimeoutMs ?? DEFAULT_CLOUD_REVIEW_TIMEOUT_MS,
+  });
+  if (!classification.observation) {
+    return { comments: input.deliverableComments, decisions: input.deliverableDecisions };
+  }
+
+  let result: ExternalReviewCoordinatorResult;
+  try {
+    result = await input.opts.externalReviewCoordinator.recordCloud(
+      {
+        repoFullName: input.repoFullName,
+        prNumber: input.prNumber,
+        ...classification.observation,
+      },
+      {
+        threadId: input.task.threadId,
+        catId: input.task.ownerCatId ?? '',
+        userId: input.task.userId ?? '',
+        ...(input.task.automationState?.wakePolicy ? { wakePolicy: input.task.automationState.wakePolicy } : {}),
+      },
+    );
+  } catch (err) {
+    input.opts.log.warn(
+      { err, repoFullName: input.repoFullName, prNumber: input.prNumber },
+      '[F168] cloud-review bookkeeping failed; delivering ordinary feedback',
+    );
+    return { comments: input.deliverableComments, decisions: input.deliverableDecisions };
+  }
+  if (result.kind === 'not_tracked') {
+    return { comments: input.deliverableComments, decisions: input.deliverableDecisions };
+  }
+  if (result.kind === 'state_only' && result.reason === 'wake_policy_state_only') {
+    // The actor policy already removed reliably typed Bot items. Keep any correlated
+    // item that survived that filter: its actor metadata was User/unknown and must
+    // fail safe to ordinary delivery even though F168 retained cloud readiness state.
+    return { comments: input.deliverableComments, decisions: input.deliverableDecisions };
+  }
+
+  const correlatedCommentIds = new Set(classification.correlatedCommentIds);
+  const correlatedReviewIds = new Set(classification.correlatedReviewIds);
+  return {
+    comments: input.deliverableComments.filter((comment) => !correlatedCommentIds.has(comment.id)),
+    decisions: input.deliverableDecisions.filter((review) => !correlatedReviewIds.has(review.id)),
+    ...(result.kind === 'notified' ? { notification: result } : {}),
+  };
+}
+
 function resolveCursor(memoryCursor: number | undefined, persistedCursor: number | undefined): number {
   return Math.max(memoryCursor ?? 0, persistedCursor ?? 0);
+}
+
+function compareFeedbackChronology(a: PrFeedbackComment, b: PrFeedbackComment): number {
+  const aTime = Date.parse(a.createdAt);
+  const bTime = Date.parse(b.createdAt);
+  if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) {
+    return aTime - bTime;
+  }
+  return 0;
 }
 
 function collectLegacyPrCommentProjectionKeys(
@@ -283,7 +390,13 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
   async function advanceCursor(
     taskId: string,
     prKey: string,
-    cursors: { inline: number; conversation: number; decision: number },
+    cursors: {
+      inline: number;
+      conversation: number;
+      decision: number;
+      commentMigrationPending?: boolean;
+      commentMigrationTargets?: PrFeedbackCommentCursors;
+    },
     policy: 'persistFirst' | 'memoryFirst',
   ): Promise<void> {
     const patch = {
@@ -293,6 +406,10 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
         lastCommentCursor: Math.max(cursors.inline, cursors.conversation),
         lastInlineCommentCursor: cursors.inline,
         lastConversationCommentCursor: cursors.conversation,
+        ...(cursors.commentMigrationPending !== undefined
+          ? { commentCursorMigrationPending: cursors.commentMigrationPending }
+          : {}),
+        ...(cursors.commentMigrationTargets ? { commentCursorMigrationTargets: cursors.commentMigrationTargets } : {}),
         lastDecisionCursor: cursors.decision,
         ...(policy === 'memoryFirst' ? { lastNotifiedAt: Date.now() } : {}),
       },
@@ -399,12 +516,17 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             }
 
             // Schema v2: each comments endpoint owns its cursor. A task with only the
-            // legacy combined cursor replays each source from zero once; duplicate
-            // delivery is preferable to permanently hiding a lower-ID future comment.
+            // legacy combined cursor replays each source from zero. That backfill is
+            // durable state migration, never live feedback: waking on it would replay
+            // historical humans after a deploy/restart. A pending marker keeps retries
+            // state-only if one endpoint fails before its initial observed frontier;
+            // activity beyond that snapshot remains live while migration retries.
             const reviewState = trackingTask.automationState?.review;
-            const needsCommentCursorMigration =
-              reviewState?.lastInlineCommentCursor === undefined ||
-              reviewState.lastConversationCommentCursor === undefined;
+            const inlineCommentCursorMissing = reviewState?.lastInlineCommentCursor === undefined;
+            const conversationCommentCursorMissing = reviewState?.lastConversationCommentCursor === undefined;
+            const commentCursorMigrationWasPending = reviewState?.commentCursorMigrationPending === true;
+            const commentCursorMigrationActive =
+              commentCursorMigrationWasPending || inlineCommentCursorMissing || conversationCommentCursorMissing;
             const inlineCommentCursor = resolveCursor(
               inlineCommentCursors.get(prKey),
               reviewState?.lastInlineCommentCursor,
@@ -424,25 +546,50 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
               opts.fetchReviews(repoFullName, prNumber, reviewCursor),
             ]);
 
-            const allNewInlineComments = comments.filter(
-              (c) => c.commentType === 'inline' && c.id > inlineCommentCursor,
-            );
-            const allNewConversationComments = comments.filter(
-              (c) => c.commentType === 'conversation' && c.id > conversationCommentCursor,
-            );
-            const allNewComments = [...allNewInlineComments, ...allNewConversationComments];
+            // The two endpoints have independent cursor spaces, but their feedback still
+            // belongs to one user-visible timeline. Keep cursor checks source-specific and
+            // order the merged stream by creation time rather than grouping by endpoint.
+            const allNewComments = comments
+              .filter((c) =>
+                c.commentType === 'inline' ? c.id > inlineCommentCursor : c.id > conversationCommentCursor,
+              )
+              .sort(compareFeedbackChronology);
+            const allNewInlineComments = allNewComments.filter((c) => c.commentType === 'inline');
+            const allNewConversationComments = allNewComments.filter((c) => c.commentType === 'conversation');
+            const inlineCommentFrontier =
+              allNewInlineComments.length > 0
+                ? Math.max(...allNewInlineComments.map((comment) => comment.id))
+                : inlineCommentCursor;
+            const conversationCommentFrontier =
+              allNewConversationComments.length > 0
+                ? Math.max(...allNewConversationComments.map((comment) => comment.id))
+                : conversationCommentCursor;
+            const commentCursorMigrationTargets: PrFeedbackCommentCursors = {
+              inline: commentCursorMigrationActive
+                ? (reviewState?.commentCursorMigrationTargets?.inline ??
+                  (inlineCommentCursorMissing ? inlineCommentFrontier : inlineCommentCursor))
+                : inlineCommentCursor,
+              conversation: commentCursorMigrationActive
+                ? (reviewState?.commentCursorMigrationTargets?.conversation ??
+                  (conversationCommentCursorMissing ? conversationCommentFrontier : conversationCommentCursor))
+                : conversationCommentCursor,
+            };
+            const isCommentMigrationBackfill = (comment: PrFeedbackComment): boolean =>
+              commentCursorMigrationActive &&
+              (comment.commentType === 'inline'
+                ? comment.id <= commentCursorMigrationTargets.inline
+                : comment.id <= commentCursorMigrationTargets.conversation);
             const allNewReviews = reviews.filter((r) => r.id > reviewCursor);
-            const freshNewInlineComments = allNewInlineComments.filter(
-              (c) => !isStaleCommitFeedback(c, prMetadata?.headSha),
+            const freshNewComments = allNewComments.filter((c) => !isStaleCommitFeedback(c, prMetadata?.headSha));
+            const durableNewComments = allNewComments.filter(
+              (comment) => isCommentMigrationBackfill(comment) || !isStaleCommitFeedback(comment, prMetadata?.headSha),
             );
-            const freshNewConversationComments = allNewConversationComments.filter(
-              (c) => !isStaleCommitFeedback(c, prMetadata?.headSha),
-            );
-            const freshNewComments = [...freshNewInlineComments, ...freshNewConversationComments];
             const freshNewReviews = allNewReviews.filter((r) => !isStaleCommitFeedback(r, prMetadata?.headSha));
 
-            // F168 Phase B (R3-P1, R4-P1-A/B, R5-P1/P2): append ALL fresh activity to event log
-            // BEFORE delivery filter — polling fallback for AC #1 dual-path (webhook + polling).
+            // F168 Phase B (R3-P1, R4-P1-A/B, R5-P1/P2): append ALL fresh activity plus
+            // legacy migration backfill to the event log BEFORE delivery filtering. Stale
+            // current-HEAD feedback stays non-deliverable, while migration history still
+            // keeps the durable truth/provenance required by the schema transition.
             //
             // Safe cursor tracking (R4-P1-B): track max ID of successfully processed items.
             // Break on first append/projector failure so cursor stays before the failing item,
@@ -474,11 +621,10 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
               // the permanent event history rather than the current task schema shape.
               // Payload commentType disambiguates equal numeric IDs from the two endpoints.
               const legacyProjectedCommentKeys =
-                freshNewComments.length > 0
+                durableNewComments.length > 0
                   ? collectLegacyPrCommentProjectionKeys(await opts.eventLog.read(subjectKey), repoFullName, prNumber)
                   : new Set<string>();
-              const processedInlineComments: typeof freshNewInlineComments = [];
-              const processedConversationComments: typeof freshNewConversationComments = [];
+              const processedComments: typeof durableNewComments = [];
               const processedReviews: typeof freshNewReviews = [];
               // Cloud R18 P1: track the id of the first fresh item that fails (break boundary).
               // The stale-cursor advancement loops must NOT advance past this boundary — otherwise
@@ -486,47 +632,47 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
               // silently dropping it from the retry queue (it would never be re-collected).
               let inlineBreakBeforeId = Infinity;
               let conversationBreakBeforeId = Infinity;
-              for (const [commentType, sourceComments] of [
-                ['inline', freshNewInlineComments],
-                ['conversation', freshNewConversationComments],
-              ] as const) {
-                for (const comment of sourceComments) {
-                  try {
-                    const communityEvent: CommunityEvent = {
-                      sourceEventId: `prcomment:${repoFullName}#${prNumber}:${commentType}:${comment.id}`,
-                      subjectKey,
-                      kind: 'pr.review_submitted',
-                      classification: 'informational',
-                      payload: {
-                        commentId: comment.id,
-                        author: comment.author,
-                        authorAssociation: comment.authorAssociation,
-                        commentType,
-                      },
-                      at: new Date(comment.createdAt).getTime(),
-                    };
-                    const legacyProjectionExists = legacyProjectedCommentKeys.has(`${commentType}:${comment.id}`);
-                    const commentAppended = legacyProjectionExists
-                      ? false
-                      : (await opts.eventLog.append(communityEvent)).appended;
-                    if (commentAppended && opts.projector) {
-                      await opts.projector.apply(communityEvent);
-                    }
-                    if (commentType === 'inline') {
-                      maxSafeInlineCommentCursor = Math.max(maxSafeInlineCommentCursor, comment.id);
-                      processedInlineComments.push(comment);
-                    } else {
-                      maxSafeConversationCommentCursor = Math.max(maxSafeConversationCommentCursor, comment.id);
-                      processedConversationComments.push(comment);
-                    }
-                  } catch {
-                    if (commentType === 'inline') inlineBreakBeforeId = comment.id;
-                    else conversationBreakBeforeId = comment.id;
-                    opts.log.warn(
-                      `[review-feedback] processing failed for ${commentType} comment ${comment.id} on ${prKey} — will retry`,
-                    );
-                    break;
+              const blockedCommentSources = new Set<'inline' | 'conversation'>();
+              for (const comment of durableNewComments) {
+                const commentType = comment.commentType;
+                // A failure blocks only its endpoint. The other endpoint has an
+                // independent cursor and can continue safely through this timeline.
+                if (blockedCommentSources.has(commentType)) continue;
+                try {
+                  const communityEvent: CommunityEvent = {
+                    sourceEventId: `prcomment:${repoFullName}#${prNumber}:${commentType}:${comment.id}`,
+                    subjectKey,
+                    kind: 'pr.review_submitted',
+                    classification: 'informational',
+                    payload: {
+                      commentId: comment.id,
+                      author: comment.author,
+                      actorType: comment.actorType,
+                      authorAssociation: comment.authorAssociation,
+                      commentType,
+                    },
+                    at: new Date(comment.createdAt).getTime(),
+                  };
+                  const legacyProjectionExists = legacyProjectedCommentKeys.has(`${commentType}:${comment.id}`);
+                  const commentAppended = legacyProjectionExists
+                    ? false
+                    : (await opts.eventLog.append(communityEvent)).appended;
+                  if (commentAppended && opts.projector) {
+                    await opts.projector.apply(communityEvent);
                   }
+                  if (commentType === 'inline') {
+                    maxSafeInlineCommentCursor = Math.max(maxSafeInlineCommentCursor, comment.id);
+                  } else {
+                    maxSafeConversationCommentCursor = Math.max(maxSafeConversationCommentCursor, comment.id);
+                  }
+                  processedComments.push(comment);
+                } catch {
+                  blockedCommentSources.add(commentType);
+                  if (commentType === 'inline') inlineBreakBeforeId = comment.id;
+                  else conversationBreakBeforeId = comment.id;
+                  opts.log.warn(
+                    `[review-feedback] processing failed for ${commentType} comment ${comment.id} on ${prKey} — will retry`,
+                  );
                 }
               }
               let reviewBreakBeforeId = Infinity;
@@ -541,6 +687,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                     payload: {
                       reviewId: review.id,
                       author: review.author,
+                      actorType: review.actorType,
                       authorAssociation: review.authorAssociation,
                       reviewState: review.state,
                     },
@@ -560,7 +707,9 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                 }
               }
               // R5-P2: narrow delivery to items that completed event-log processing without error.
-              safeDeliveryComments = [...processedInlineComments, ...processedConversationComments];
+              safeDeliveryComments = processedComments.filter(
+                (comment) => !isStaleCommitFeedback(comment, prMetadata?.headSha),
+              );
               safeDeliveryReviews = processedReviews;
 
               // Cloud R16 P2: advance cursor past stale items (those filtered by isStaleCommitFeedback).
@@ -595,18 +744,53 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             const reviewFilter = opts.isEchoReview;
             // R5-P2: use safeDeliveryXxx (items up to first failure) so items after a break are
             // not notified this round — they will be retried next poll without double-notification.
-            // #1002: decideDelivery removed — it silenced OWNER/MEMBER reviews,
-            // but PR tracking is opt-in (cat explicitly registered), so ALL reviewer
-            // feedback should be delivered. isEchoComment + isNoiseComment are sufficient.
-            const newComments = safeDeliveryComments.filter((c) => {
+            // #1002 remains the default: absent/all_feedback delivers every non-echo,
+            // non-setup-noise item. The explicit human-participant policy only suppresses
+            // actors GitHub reliably typed as Bot; unknown metadata fails safe to delivery.
+            const liveDeliveryComments = safeDeliveryComments.filter((comment) => !isCommentMigrationBackfill(comment));
+            const deliverableComments = liveDeliveryComments.filter((c) => {
               if (commentFilter?.(c)) return false;
               if (noiseFilter?.(c)) return false;
-              return true;
+              return (
+                decideTrackingWake({
+                  wakePolicy: trackingTask.automationState?.wakePolicy,
+                  actorLogin: c.author,
+                  actorType: c.actorType,
+                  subjectAuthorLogin: prMetadata?.authorLogin,
+                  authorAssociation: c.authorAssociation as
+                    | import('@cat-cafe/shared').GitHubAuthorAssociation
+                    | undefined,
+                }).decision === 'deliver'
+              );
             });
-            // #1002: same — isEchoReview is the only filter needed for review decisions.
-            const newDecisions = reviewFilter
-              ? safeDeliveryReviews.filter((r) => !reviewFilter(r))
-              : safeDeliveryReviews;
+            const deliverableDecisions = safeDeliveryReviews.filter((r) => {
+              if (reviewFilter?.(r)) return false;
+              return (
+                decideTrackingWake({
+                  wakePolicy: trackingTask.automationState?.wakePolicy,
+                  actorLogin: r.author,
+                  actorType: r.actorType,
+                  subjectAuthorLogin: prMetadata?.authorLogin,
+                  authorAssociation: r.authorAssociation as
+                    | import('@cat-cafe/shared').GitHubAuthorAssociation
+                    | undefined,
+                }).decision === 'deliver'
+              );
+            });
+            const externalCloud = await resolveExternalCloudReview({
+              opts,
+              task: trackingTask,
+              repoFullName,
+              prNumber,
+              headSha: prMetadata?.headSha,
+              // F168 must not reinterpret migration history as current cloud feedback.
+              cloudCandidateComments: liveDeliveryComments,
+              cloudCandidateReviews: safeDeliveryReviews,
+              deliverableComments,
+              deliverableDecisions,
+            });
+            const newComments = externalCloud.comments;
+            const newDecisions = externalCloud.decisions;
 
             // R4-P1-B: when eventLog is configured, cap cursor advancement at the last
             // successfully projected item (maxSafeXxxCursor). Items beyond a projection
@@ -630,15 +814,29 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                 : allNewReviews.length > 0
                   ? Math.max(...allNewReviews.map((r) => r.id))
                   : reviewCursor;
+            const commentCursorMigrationPending =
+              commentCursorMigrationActive &&
+              (maxInlineCommentId < commentCursorMigrationTargets.inline ||
+                maxConversationCommentId < commentCursorMigrationTargets.conversation);
 
             const allSkipped = newComments.length === 0 && newDecisions.length === 0;
             const hadNewItems = allNewComments.length > 0 || allNewReviews.length > 0;
-            if (allSkipped && !repairResult.routingAudit) {
-              if (hadNewItems || needsCommentCursorMigration) {
+            if (allSkipped && !repairResult.routingAudit && !externalCloud.notification) {
+              if (hadNewItems || commentCursorMigrationActive) {
                 await advanceCursor(
                   trackingTask.id,
                   prKey,
-                  { inline: maxInlineCommentId, conversation: maxConversationCommentId, decision: maxReviewId },
+                  {
+                    inline: maxInlineCommentId,
+                    conversation: maxConversationCommentId,
+                    decision: maxReviewId,
+                    ...(commentCursorMigrationActive
+                      ? {
+                          commentMigrationPending: commentCursorMigrationPending,
+                          commentMigrationTargets: commentCursorMigrationTargets,
+                        }
+                      : {}),
+                  },
                   'persistFirst',
                 );
               }
@@ -653,13 +851,24 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                 routingAudit: repairResult.routingAudit,
                 newComments,
                 newDecisions,
+                externalReadyNotification: externalCloud.notification,
                 validateRoutingRepairFresh: repairResult.validateRoutingRepairFresh,
                 commitRoutingRepair: repairResult.commitRoutingRepair,
                 commitCursor: () =>
                   advanceCursor(
                     trackingTask.id,
                     prKey,
-                    { inline: maxInlineCommentId, conversation: maxConversationCommentId, decision: maxReviewId },
+                    {
+                      inline: maxInlineCommentId,
+                      conversation: maxConversationCommentId,
+                      decision: maxReviewId,
+                      ...(commentCursorMigrationActive
+                        ? {
+                            commentMigrationPending: commentCursorMigrationPending,
+                            commentMigrationTargets: commentCursorMigrationTargets,
+                          }
+                        : {}),
+                    },
                     'memoryFirst',
                   ),
               },
@@ -691,23 +900,29 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
           return;
         }
 
-        const routeResult = await opts.reviewFeedbackRouter.route(
-          {
-            repoFullName: signal.repoFullName,
-            prNumber: signal.prNumber,
-            routingAudit: signal.routingAudit,
-            newComments: signal.newComments,
-            newDecisions: signal.newDecisions,
-          },
-          {
-            threadId: repairedTask.threadId,
-            catId: repairedTask.ownerCatId ?? '',
-            userId: repairedTask.userId ?? '',
-            trackingInstructions: repairedTask.automationState?.trackingInstructions,
-          },
-        );
-
-        if (routeResult.kind !== 'notified') return;
+        const hasOrdinaryFeedback =
+          signal.newComments.length > 0 || signal.newDecisions.length > 0 || Boolean(signal.routingAudit);
+        const ordinaryRouteResult = hasOrdinaryFeedback
+          ? await opts.reviewFeedbackRouter.route(
+              {
+                repoFullName: signal.repoFullName,
+                prNumber: signal.prNumber,
+                routingAudit: signal.routingAudit,
+                newComments: signal.newComments,
+                newDecisions: signal.newDecisions,
+              },
+              {
+                threadId: repairedTask.threadId,
+                catId: repairedTask.ownerCatId ?? '',
+                userId: repairedTask.userId ?? '',
+                trackingInstructions: repairedTask.automationState?.trackingInstructions,
+              },
+            )
+          : null;
+        const routeResult =
+          signal.externalReadyNotification ??
+          (ordinaryRouteResult?.kind === 'notified' ? ordinaryRouteResult : undefined);
+        if (!routeResult) return;
 
         const repairCommitted = await signal.commitRoutingRepair?.();
         if (repairCommitted === false) return;
@@ -728,39 +943,51 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
         }
 
         if (opts.invokeTrigger) {
-          try {
-            const hasChangesRequested = signal.newDecisions.some((d) => d.state === 'CHANGES_REQUESTED');
-            const hasApproved = !hasChangesRequested && signal.newDecisions.some((d) => d.state === 'APPROVED');
-            const suggestedSkill = hasChangesRequested ? 'receive-review' : hasApproved ? 'merge-gate' : undefined;
-            const coalesceTargetCatId = routeResult.catId || repairedTask.ownerCatId || 'unassigned';
+          const hasChangesRequested = signal.newDecisions.some((d) => d.state === 'CHANGES_REQUESTED');
+          const hasApproved = !hasChangesRequested && signal.newDecisions.some((d) => d.state === 'APPROVED');
+          const suggestedSkill = hasChangesRequested ? 'receive-review' : hasApproved ? 'merge-gate' : undefined;
+          const triggerTargets = [
+            ...(ordinaryRouteResult?.kind === 'notified'
+              ? [{ routeResult: ordinaryRouteResult, isExternalReady: false }]
+              : []),
+            ...(signal.externalReadyNotification
+              ? [{ routeResult: signal.externalReadyNotification, isExternalReady: true }]
+              : []),
+          ];
 
-            const policy: ConnectorTriggerPolicy = {
-              priority: hasChangesRequested ? 'urgent' : 'normal',
-              reason: 'github_review_feedback',
-              sourceCategory: 'review',
-              suggestedSkill,
-              coalesceKey: `${subjectKey}:review-feedback:${coalesceTargetCatId}`,
-            };
-            void opts.invokeTrigger
-              .trigger(
-                routeResult.threadId,
-                routeResult.catId as CatId,
-                repairedTask.userId ?? '',
-                routeResult.content,
-                routeResult.messageId,
-                undefined,
-                policy,
-              )
-              .catch((err) =>
-                opts.log.warn(
-                  { err },
-                  `[review-feedback] trigger failed for ${signal.repoFullName}#${signal.prNumber} (best-effort)`,
-                ),
+          for (const { routeResult: triggerResult, isExternalReady } of triggerTargets) {
+            try {
+              const coalesceTargetCatId = triggerResult.catId || repairedTask.ownerCatId || 'unassigned';
+              const policy: ConnectorTriggerPolicy = {
+                priority: hasChangesRequested ? 'urgent' : 'normal',
+                reason: isExternalReady ? 'github_external_review_ready' : 'github_review_feedback',
+                sourceCategory: 'review',
+                suggestedSkill,
+                coalesceKey: isExternalReady
+                  ? `external-review:${signal.repoFullName}#${signal.prNumber}:${signal.externalReadyNotification?.headSha}`
+                  : `${subjectKey}:review-feedback:${coalesceTargetCatId}`,
+              };
+              void opts.invokeTrigger
+                .trigger(
+                  triggerResult.threadId,
+                  triggerResult.catId as CatId,
+                  repairedTask.userId ?? '',
+                  triggerResult.content,
+                  triggerResult.messageId,
+                  undefined,
+                  policy,
+                )
+                .catch((err) =>
+                  opts.log.warn(
+                    { err },
+                    `[review-feedback] trigger failed for ${signal.repoFullName}#${signal.prNumber} (best-effort)`,
+                  ),
+                );
+            } catch {
+              opts.log.warn(
+                `[review-feedback] trigger failed for ${signal.repoFullName}#${signal.prNumber} (best-effort)`,
               );
-          } catch {
-            opts.log.warn(
-              `[review-feedback] trigger failed for ${signal.repoFullName}#${signal.prNumber} (best-effort)`,
-            );
+            }
           }
         }
 

@@ -39,8 +39,12 @@ function makeStubRouter() {
   };
 }
 
-function makeStubRegistry() {
-  return { getLatestId: () => null, register: () => {} };
+function makeStubRegistry({ turns = {}, latestByCat = {} } = {}) {
+  return {
+    getRecord: async (id) => turns[id] ?? null,
+    getLatestId: (threadId, catId) => latestByCat[`${threadId}:${catId}`] ?? null,
+    register: () => {},
+  };
 }
 
 function makeStubSocketManager() {
@@ -104,17 +108,18 @@ function makeRecord({
   };
 }
 
-async function buildPairedApp({ recordStore, draftStore, tracker }) {
+async function buildPairedApp({ recordStore, draftStore, tracker, turnExecutionStore, registry = makeStubRegistry() }) {
   const app = Fastify({ logger: false });
   const messageStore = new MessageStore();
   await app.register(messagesRoutes, {
-    registry: makeStubRegistry(),
+    registry,
     messageStore,
     socketManager: makeStubSocketManager(),
     router: makeStubRouter(),
     draftStore,
     invocationRecordStore: recordStore,
     invocationTracker: tracker,
+    ...(turnExecutionStore ? { turnExecutionStore } : {}),
   });
   // Stub thread store: any thread is public (createdBy='system')
   const threadStore = {
@@ -135,6 +140,8 @@ async function buildPairedApp({ recordStore, draftStore, tracker }) {
     socketManager: makeStubSocketManager(),
     invocationRecordStore: recordStore,
     draftStore,
+    invocationRegistry: registry,
+    ...(turnExecutionStore ? { turnExecutionStore } : {}),
   });
   await app.ready();
   return app;
@@ -245,6 +252,7 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
       },
     };
     const tracker = makeTracker();
+    const terminalEvents = [];
 
     const origNow = Date.now;
     Date.now = () => now;
@@ -267,6 +275,7 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
         invocationRecordStore: recordStore,
         draftStore,
         taskProgressStore,
+        onReconciledZombie: async (event) => terminalEvents.push(event),
       });
       await app.ready();
 
@@ -282,6 +291,15 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
       assert.equal(zombieRecord.status, 'failed', 'reconcileZombies must mark record failed');
       assert.equal(zombieRecord.error, 'zombie_record_detected');
       assert.deepEqual(cleared, [{ threadId: THREAD_ID, catId: 'opus' }], 'TaskProgress cleared');
+      assert.deepEqual(terminalEvents, [
+        {
+          invocationId: zombieRecord.id,
+          threadId: THREAD_ID,
+          catId: 'opus',
+          targetCats: ['opus'],
+          status: 'failed',
+        },
+      ]);
     } finally {
       Date.now = origNow;
       if (app) await app.close();
@@ -326,6 +344,7 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
       },
     };
     const tracker = makeTracker(); // empty
+    const terminalEvents = [];
 
     const origNow = Date.now;
     Date.now = () => now;
@@ -341,9 +360,7 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
         invocationRecordStore: recordStore,
         invocationTracker: tracker,
         taskProgressStore,
-        // R18 P2: embedded/legacy processor exists but predates buildQueueConvergence.
-        // The read path must still launch zombie reconciliation.
-        queueProcessor: { processNext: async () => ({ started: false }) },
+        onReconciledZombie: async (event) => terminalEvents.push(event),
       });
       await app.ready();
 
@@ -363,6 +380,15 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
       assert.equal(zombieRecord.status, 'failed', 'reconcileZombies must fire from /messages even without drafts');
       assert.equal(zombieRecord.error, 'zombie_record_detected');
       assert.deepEqual(cleared, [{ threadId: THREAD_ID, catId: 'opus' }], 'TaskProgress cleared via /messages path');
+      assert.deepEqual(terminalEvents, [
+        {
+          invocationId: zombieRecord.id,
+          threadId: THREAD_ID,
+          catId: 'opus',
+          targetCats: ['opus'],
+          status: 'failed',
+        },
+      ]);
     } finally {
       Date.now = origNow;
       if (app) await app.close();
@@ -400,6 +426,215 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
       // Hard consistency: both endpoints agree the invocation is NOT live
       assert.equal(draftItems.length, 0);
       assert.equal(queue.body.activeInvocations.length, 0);
+    } finally {
+      Date.now = origNow;
+      if (app) await app.close();
+    }
+  });
+
+  it('durable running child prevents read-triggered zombie reconciliation on both routes', async () => {
+    const now = 30_000_000;
+    const parentId = 'parent-handoff-gap';
+    const childId = 'child-handoff-fable';
+    const parent = makeRecord({
+      id: parentId,
+      updatedAt: now - 700_000,
+      targetCats: ['codex-sol'],
+    });
+    const updates = [];
+    const recordStore = {
+      ...makeRecordStore([parent]),
+      update: async (id, input) => {
+        updates.push({ id, input });
+        return null;
+      },
+    };
+    const turnExecutionStore = {
+      listByParent: async (requestedParentId) =>
+        requestedParentId === parentId
+          ? [
+              {
+                invocationId: childId,
+                parentInvocationId: parentId,
+                threadId: THREAD_ID,
+                userId: USER_ID,
+                catId: 'fable5',
+                executionKind: 'ordinary',
+                startedAt: now - 5_000,
+                status: 'running',
+              },
+            ]
+          : [],
+    };
+    const draftStore = new DraftStore();
+    const tracker = makeTracker();
+
+    const origNow = Date.now;
+    Date.now = () => now;
+    let app;
+    try {
+      app = await buildPairedApp({ recordStore, draftStore, tracker, turnExecutionStore });
+
+      const messages = await injectMessages(app);
+      assert.equal(messages.statusCode, 200);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.equal(updates.length, 0, '/messages must not reconcile a parent whose durable child is running');
+
+      const queue = await injectQueue(app);
+      assert.equal(queue.statusCode, 200);
+      assert.deepEqual(queue.body.activeInvocations, [
+        {
+          catId: 'fable5',
+          startedAt: now - 5_000,
+          executionId: parentId,
+          turnInvocationId: childId,
+        },
+      ]);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.equal(updates.length, 0, '/queue must not reconcile a parent whose durable child is running');
+      assert.equal(parent.status, 'running');
+    } finally {
+      Date.now = origNow;
+      if (app) await app.close();
+    }
+  });
+
+  it('running durable child prevents cross-parent same-cat UI dedup from reconciling its parent', async () => {
+    const now = 35_000_000;
+    const oldParentId = 'parent-preempted-finalizing';
+    const newParentId = 'parent-current-slot-owner';
+    const oldChildId = 'child-old-fable-running';
+    const newChildId = 'child-new-fable-draft';
+    const newChildCreatedAt = now - 4_000;
+    const oldParent = makeRecord({
+      id: oldParentId,
+      updatedAt: now - 700_000,
+      targetCats: ['codex-sol'],
+    });
+    const newParent = makeRecord({
+      id: newParentId,
+      updatedAt: now - 20_000,
+      targetCats: ['fable5'],
+    });
+    const updates = [];
+    const recordStore = {
+      ...makeRecordStore([oldParent, newParent]),
+      update: async (id, input) => {
+        updates.push({ id, input });
+        return null;
+      },
+    };
+    const draftStore = new DraftStore();
+    draftStore.upsert({
+      userId: USER_ID,
+      threadId: THREAD_ID,
+      invocationId: newChildId,
+      catId: 'fable5',
+      content: 'new owner streaming',
+      createdAt: newChildCreatedAt,
+      updatedAt: now - 100,
+    });
+    const registry = makeStubRegistry({
+      turns: {
+        [newChildId]: {
+          parentInvocationId: newParentId,
+          threadId: THREAD_ID,
+          userId: USER_ID,
+          catId: 'fable5',
+          createdAt: newChildCreatedAt,
+        },
+      },
+      latestByCat: { [`${THREAD_ID}:fable5`]: newChildId },
+    });
+    const turnExecutionStore = {
+      listByParent: async (parentId) =>
+        parentId === oldParentId
+          ? [
+              {
+                invocationId: oldChildId,
+                parentInvocationId: oldParentId,
+                threadId: THREAD_ID,
+                userId: USER_ID,
+                catId: 'fable5',
+                executionKind: 'ordinary',
+                startedAt: now - 8_000,
+                status: 'running',
+              },
+            ]
+          : [],
+    };
+
+    const origNow = Date.now;
+    Date.now = () => now;
+    let app;
+    try {
+      app = await buildPairedApp({
+        recordStore,
+        draftStore,
+        tracker: makeTracker(),
+        turnExecutionStore,
+        registry,
+      });
+
+      const messages = await injectMessages(app);
+      assert.equal(messages.statusCode, 200);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.equal(updates.length, 0, '/messages must not reconcile a parent with a durable running child');
+
+      const queue = await injectQueue(app);
+      assert.equal(queue.statusCode, 200);
+      assert.deepEqual(queue.body.activeInvocations, [
+        {
+          catId: 'fable5',
+          startedAt: newChildCreatedAt,
+          executionId: newParentId,
+          turnInvocationId: newChildId,
+        },
+      ]);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.equal(updates.length, 0, '/queue must not reconcile a parent with a durable running child');
+    } finally {
+      Date.now = origNow;
+      if (app) await app.close();
+    }
+  });
+
+  it('durable child store failure keeps both routes fail-open and never reconciles an unknown parent', async () => {
+    const now = 40_000_000;
+    const parent = makeRecord({
+      id: 'parent-ledger-unavailable',
+      updatedAt: now - 700_000,
+    });
+    const updates = [];
+    const recordStore = {
+      ...makeRecordStore([parent]),
+      update: async (id, input) => {
+        updates.push({ id, input });
+        return null;
+      },
+    };
+    const turnExecutionStore = {
+      listByParent: async () => {
+        throw new Error('ledger unavailable');
+      },
+    };
+    const draftStore = new DraftStore();
+    const tracker = makeTracker();
+
+    const origNow = Date.now;
+    Date.now = () => now;
+    let app;
+    try {
+      app = await buildPairedApp({ recordStore, draftStore, tracker, turnExecutionStore });
+
+      const messages = await injectMessages(app);
+      const queue = await injectQueue(app);
+      assert.equal(messages.statusCode, 200, '/messages uses its existing fail-open path');
+      assert.equal(queue.statusCode, 200, '/queue uses its existing tracker-only fallback');
+      assert.deepEqual(queue.body.activeInvocations, []);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.equal(updates.length, 0, 'unknown durable-child state must not produce a terminal write');
+      assert.equal(parent.status, 'running');
     } finally {
       Date.now = origNow;
       if (app) await app.close();

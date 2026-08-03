@@ -17,4 +17,7 @@ export const TaskKeys = {
 
   /** Subject → taskId unique mapping: tasks:subject:{subjectKey} (#320) */
   subject: (subjectKey: string) => `tasks:subject:${subjectKey}`,
+
+  /** Server-only managed-work identity keyed by the live PR tracking task. */
+  managedWorkBinding: (taskId: string) => `task:private:managed-work:${taskId}`,
 } as const;

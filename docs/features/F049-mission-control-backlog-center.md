@@ -17,7 +17,7 @@ created: 2026-03-01
 
 ## Why
 
-operator希望把“想法/任务”的全局调度放进 Cat Café 本体，而不是依赖 IDE 打开 `docs/`：
+operator希望把“想法/任务”的全局调度放进 Clowder AI 本体，而不是依赖 IDE 打开 `docs/`：
 
 - **低摩擦**：随手记录/分拣/派发不该要求打开 VSCode/WebStorm。
 - **跨 thread 协同**：未来可以同时开多个 thread（多组猫猫）并行作战，需要一个全局任务池承载“要做什么”。
@@ -27,7 +27,7 @@ operator希望把“想法/任务”的全局调度放进 Cat Café 本体，而
 
 ## What
 
-在 Cat Café 里新增一个 **Mission Hub / Backlog Center**：
+在 Clowder AI 里新增一个 **Mission Hub / Backlog Center**：
 
 - 作为**全局任务池（Global）**：收纳 “想法/任务/候选 Feature/Tech Debt”；
 - 支持**建议领取 → operator批准 → 自动创建执行 thread（Thread）**；

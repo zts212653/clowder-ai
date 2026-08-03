@@ -1,3 +1,4 @@
+import { buildConciergeDraftPrompt, validateCapabilityTipInventory } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -233,6 +234,11 @@ describe('F244 CapabilityTipStrip', () => {
       vi.advanceTimersByTime(0);
     });
 
+    // Read which tip was actually selected — inventory order may change as tips are added.
+    const strip = container.querySelector('[data-testid="capability-tip-strip"]');
+    const selectedTipId = strip?.getAttribute('data-tip-id');
+    expect(selectedTipId).toBeTruthy();
+
     const button = container.querySelector('[data-testid="capability-tip-learn-more"]') as HTMLButtonElement | null;
     expect(button).not.toBeNull();
     expect(button?.getAttribute('title')).toContain('不会自动发送');
@@ -243,7 +249,14 @@ describe('F244 CapabilityTipStrip', () => {
 
     const state = useConciergeStore.getState();
     expect(state.surfaceState).toBe('bubble');
-    expect(state.pendingPrompt).toContain('解释这个 tip');
-    expect(state.pendingPrompt).toContain('tipId');
+
+    // Assert the draft matches buildConciergeDraftPrompt for the actual selected tip.
+    // Covers both custom draftPrompt and fallback paths without locking into inventory order.
+    const parsedInventory = validateCapabilityTipInventory(rawTips);
+    if (!parsedInventory.success) throw new Error('Inventory is invalid');
+    const parsedTips = parsedInventory.tips ?? [];
+    const selectedTip = parsedTips.find((t) => t.id === selectedTipId);
+    if (!selectedTip) throw new Error(`Selected tip not found: ${selectedTipId}`);
+    expect(state.pendingPrompt).toBe(buildConciergeDraftPrompt(selectedTip));
   });
 });

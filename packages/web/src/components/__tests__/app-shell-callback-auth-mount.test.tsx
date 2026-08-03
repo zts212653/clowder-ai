@@ -10,11 +10,13 @@
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CHAT_THREAD_ROUTE_EVENT } from '@/components/ThreadSidebar/thread-navigation';
 
 const navState = vi.hoisted(() => ({
   pathname: '/',
   search: '',
 }));
+const useWorkspaceNavigateMock = vi.hoisted(() => vi.fn());
 
 vi.mock('next/navigation', () => ({
   usePathname: () => navState.pathname,
@@ -28,6 +30,9 @@ vi.mock('@/components/ActivityBar', () => ({
 vi.mock('@/stores/callbackAuthStore', () => ({
   CallbackAuthSnapshotMount: () => <div data-testid="callback-auth-mount" />,
 }));
+vi.mock('@/hooks/useWorkspaceNavigate', () => ({
+  useWorkspaceNavigate: useWorkspaceNavigateMock,
+}));
 
 import { AppShell } from '@/components/AppShell';
 
@@ -36,6 +41,7 @@ describe('AppShell CallbackAuthSnapshotMount presence', () => {
   let root: Root;
 
   beforeEach(() => {
+    useWorkspaceNavigateMock.mockClear();
     navState.pathname = '/';
     navState.search = '';
     window.history.replaceState(null, '', '/');
@@ -51,6 +57,9 @@ describe('AppShell CallbackAuthSnapshotMount presence', () => {
   });
 
   function renderShell() {
+    if (window.location.pathname !== navState.pathname) {
+      window.history.replaceState(null, '', navState.pathname);
+    }
     React.act(() => {
       root.render(
         <AppShell>
@@ -76,12 +85,45 @@ describe('AppShell CallbackAuthSnapshotMount presence', () => {
     navState.pathname = '/memory';
     renderShell();
     expect(container.querySelector('[data-testid="callback-auth-mount"]')).toBeTruthy();
+    expect(useWorkspaceNavigateMock).toHaveBeenCalledWith(null, {
+      isChatRoute: false,
+      isWorkspaceVisible: false,
+      enabled: true,
+    });
+  });
+
+  it('rebinds Workspace navigation when the custom thread route changes before usePathname catches up', () => {
+    navState.pathname = '/thread/thread-a';
+    window.history.replaceState(null, '', '/thread/thread-a');
+    renderShell();
+    expect(useWorkspaceNavigateMock).toHaveBeenLastCalledWith('thread-a', {
+      isChatRoute: true,
+      isWorkspaceVisible: false,
+      enabled: true,
+    });
+
+    React.act(() => {
+      window.history.pushState(null, '', '/thread/thread-b');
+      window.dispatchEvent(new Event(CHAT_THREAD_ROUTE_EVENT));
+    });
+
+    expect(navState.pathname).toBe('/thread/thread-a');
+    expect(useWorkspaceNavigateMock).toHaveBeenLastCalledWith('thread-b', {
+      isChatRoute: true,
+      isWorkspaceVisible: false,
+      enabled: true,
+    });
   });
 
   it('does NOT mount on chromeless /story route', () => {
     navState.pathname = '/story';
     renderShell();
     expect(container.querySelector('[data-testid="callback-auth-mount"]')).toBeNull();
+    expect(useWorkspaceNavigateMock).toHaveBeenCalledWith(null, {
+      isChatRoute: false,
+      isWorkspaceVisible: false,
+      enabled: true,
+    });
   });
 
   it('does NOT mount on chromeless /story-export route', () => {

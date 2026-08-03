@@ -21,5 +21,5 @@ safetyTier: readonly
 transparencyTier: visible-by-default
 governanceTier: human-gated
 
-# CVO-facing
+# operator-facing
 userExplanation: "当前的工作模式（如 voice mode、bootcamp 等）"

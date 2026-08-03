@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { CriticalText } from '../content-overflow';
 import { HubIcon } from '../hub-icons';
 import {
   SettingsResourceIconButton,
@@ -221,15 +222,22 @@ export function ServiceStatusPanel({ filterFeatures, title, anchorId, onStateCha
                 <SettingsText as="p" variant="sm" tone="default" className="font-medium">
                   {service.name}
                 </SettingsText>
-                <SettingsText as="p" tone="muted" className="mt-0.5 truncate">
-                  {service.category} · {service.statusLabel}
-                  {service.selectedModel ? ` · ${service.selectedModel}` : ''}
-                  {service.endpoint ? ` · ${service.endpoint}` : ''}
-                </SettingsText>
+                <div data-testid={`service-status-detail-${service.id}`} className="mt-1 min-w-0">
+                  <CriticalText
+                    summary={`${service.category} · ${service.statusLabel}`}
+                    details={[
+                      service.selectedModel ? `Model: ${service.selectedModel}` : null,
+                      service.endpoint ? `Endpoint: ${service.endpoint}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join('\n')}
+                    tone="info"
+                  />
+                </div>
                 {service.error && (
-                  <SettingsText as="p" tone="red" className="mt-0.5 truncate">
-                    {service.error}
-                  </SettingsText>
+                  <div data-testid={`service-error-${service.id}`} className="mt-1 min-w-0">
+                    <CriticalText summary="服务错误" details={service.error} tone="critical" />
+                  </div>
                 )}
                 {error && (
                   <SettingsText as="p" tone="red" className="mt-0.5 whitespace-pre-wrap break-words">
@@ -237,9 +245,9 @@ export function ServiceStatusPanel({ filterFeatures, title, anchorId, onStateCha
                   </SettingsText>
                 )}
                 {logLine && (
-                  <SettingsText as="p" tone="muted" className="mt-0.5 truncate font-mono">
-                    {logLine}
-                  </SettingsText>
+                  <div data-testid={`service-log-${service.id}`} className="mt-1 min-w-0">
+                    <CriticalText summary="服务操作日志" details={logLine} tone="info" />
+                  </div>
                 )}
               </div>
 

@@ -452,6 +452,170 @@ describe('TaskRunnerV2 — dynamic task first-tick deferral', () => {
   });
 });
 
+describe('TaskRunnerV2 — cron sleep/wake misfire metadata', () => {
+  let db, ledger, originalDateNow;
+  const noop = () => {};
+  const silentLogger = { info: noop, error: noop };
+
+  beforeEach(async () => {
+    db = new Database(':memory:');
+    const { applyMigrations } = await import('../../dist/domains/memory/schema.js');
+    const { RunLedger } = await import('../../dist/infrastructure/scheduler/RunLedger.js');
+    applyMigrations(db);
+    ledger = new RunLedger(db);
+    originalDateNow = Date.now;
+  });
+
+  afterEach(() => {
+    Date.now = originalDateNow;
+  });
+
+  it('watchdog merges missed cron slots into one late run with timing metadata', async () => {
+    const { TaskRunnerV2 } = await import('../../dist/infrastructure/scheduler/TaskRunnerV2.js');
+    let now = Date.UTC(2026, 6, 7, 12, 0, 30, 0);
+    Date.now = () => now;
+
+    const runner = new TaskRunnerV2({ logger: silentLogger, ledger });
+    const schedules = [];
+    runner.register({
+      id: 'cron-late',
+      profile: 'poller',
+      trigger: { type: 'cron', expression: '* * * * *', timezone: 'UTC' },
+      admission: {
+        gate: async () => ({ run: true, workItems: [{ signal: 'go', subjectKey: 'thread-sleep' }] }),
+      },
+      run: {
+        overlap: 'skip',
+        timeoutMs: 5000,
+        execute: async (_signal, _subjectKey, ctx) => {
+          schedules.push(ctx.schedule);
+        },
+      },
+      state: { runLedger: 'sqlite' },
+      outcome: { whenNoSignal: 'drop' },
+      enabled: () => true,
+    });
+
+    runner.start();
+
+    now = Date.UTC(2026, 6, 7, 12, 3, 10, 0);
+    await runner.checkCronMisfires();
+
+    assert.equal(schedules.length, 1, 'watchdog should fire one merged late run');
+    assert.deepEqual(schedules[0], {
+      triggerKind: 'cron',
+      scheduledAt: '2026-07-07T12:01:00.000Z',
+      firedAt: '2026-07-07T12:03:10.000Z',
+      latenessMs: 130000,
+      missedSlots: 2,
+      late: true,
+      misfirePolicy: 'merge_late_one',
+    });
+
+    const rows = ledger.query('cron-late', 10);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].scheduled_at, '2026-07-07T12:01:00.000Z');
+    assert.equal(rows[0].fired_at, '2026-07-07T12:03:10.000Z');
+    assert.equal(rows[0].lateness_ms, 130000);
+    assert.equal(rows[0].missed_slots, 2);
+    assert.equal(rows[0].trigger_kind, 'cron');
+    assert.equal(rows[0].misfire_policy, 'merge_late_one');
+
+    await runner.checkCronMisfires();
+    assert.equal(schedules.length, 1, 'already-fired slot must not duplicate on repeated watchdog scans');
+    runner.stop();
+  });
+
+  it('does not mark ordinary cron timer jitter as a late catch-up run', async () => {
+    const { TaskRunnerV2 } = await import('../../dist/infrastructure/scheduler/TaskRunnerV2.js');
+    let now = Date.UTC(2026, 6, 7, 12, 0, 30, 0);
+    Date.now = () => now;
+
+    const runner = new TaskRunnerV2({ logger: silentLogger, ledger });
+    const schedules = [];
+    runner.register({
+      id: 'cron-jitter',
+      profile: 'poller',
+      trigger: { type: 'cron', expression: '* * * * *', timezone: 'UTC' },
+      admission: {
+        gate: async () => ({ run: true, workItems: [{ signal: 'go', subjectKey: 'thread-jitter' }] }),
+      },
+      run: {
+        overlap: 'skip',
+        timeoutMs: 5000,
+        execute: async (_signal, _subjectKey, ctx) => {
+          schedules.push(ctx.schedule);
+        },
+      },
+      state: { runLedger: 'sqlite' },
+      outcome: { whenNoSignal: 'drop' },
+      enabled: () => true,
+    });
+
+    runner.start();
+
+    now = Date.UTC(2026, 6, 7, 12, 1, 0, 3);
+    await runner.checkCronMisfires();
+
+    assert.equal(schedules.length, 1);
+    assert.equal(schedules[0].latenessMs, 3);
+    assert.equal(schedules[0].missedSlots, 0);
+    assert.equal(schedules[0].late, false, 'sub-threshold timer jitter must not surface as catch-up copy');
+
+    const rows = ledger.query('cron-jitter', 10);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].lateness_ms, 3, 'raw lateness remains observable in ledger');
+    runner.stop();
+  });
+
+  it('does not re-arm a cron task after stop while its run is in flight', async () => {
+    const { TaskRunnerV2 } = await import('../../dist/infrastructure/scheduler/TaskRunnerV2.js');
+    let now = Date.UTC(2026, 6, 7, 12, 0, 30, 0);
+    Date.now = () => now;
+
+    const runner = new TaskRunnerV2({ logger: silentLogger, ledger });
+    let releaseExecute;
+    let executeStarted;
+    const executeStartedPromise = new Promise((resolve) => {
+      executeStarted = resolve;
+    });
+
+    runner.register({
+      id: 'cron-stop-inflight',
+      profile: 'poller',
+      trigger: { type: 'cron', expression: '* * * * *', timezone: 'UTC' },
+      admission: {
+        gate: async () => ({ run: true, workItems: [{ signal: 'go', subjectKey: 'thread-stop' }] }),
+      },
+      run: {
+        overlap: 'skip',
+        timeoutMs: 5000,
+        execute: async () => {
+          executeStarted();
+          await new Promise((resolve) => {
+            releaseExecute = resolve;
+          });
+        },
+      },
+      state: { runLedger: 'sqlite' },
+      outcome: { whenNoSignal: 'drop' },
+      enabled: () => true,
+    });
+
+    runner.start();
+
+    now = Date.UTC(2026, 6, 7, 12, 1, 0, 0);
+    const misfire = runner.checkCronMisfires();
+    await executeStartedPromise;
+    runner.stop();
+    releaseExecute();
+    await misfire;
+
+    assert.equal(runner.timers.size, 0, 'stop() must remain final even if an in-flight cron run finishes later');
+    assert.equal(runner.cronNextSlots.size, 0, 'stopped cron tasks must not publish a fresh next slot');
+  });
+});
+
 describe('TaskRunnerV2 — self-echo suppression (AC-D2)', () => {
   let db, ledger, emissionStore;
   const noop = () => {};
@@ -1059,6 +1223,62 @@ describe('TaskRunnerV2 — once trigger (#415)', () => {
       null,
       'task should be removed from DynamicTaskStore after once execution',
     );
+    runner.stop();
+  });
+
+  it('suppresses retired hold-ball once task before stale wake execution', async () => {
+    const { TaskRunnerV2 } = await import('../../dist/infrastructure/scheduler/TaskRunnerV2.js');
+    const runner = new TaskRunnerV2({ logger: silentLogger, ledger, dynamicTaskStore });
+    let executed = false;
+    const fireAt = Date.now() + 50;
+
+    dynamicTaskStore.insert({
+      id: 'hold-ball-retired-race',
+      templateId: 'reminder',
+      trigger: { type: 'once', fireAt },
+      params: {
+        message: 'should not wake',
+        holdLifecycle: {
+          mode: 'timer',
+          status: 'retired_by_event',
+          subjectKey: 'pr:owner/repo#42',
+          expectedSignalKey: 'review_posted',
+          wakeAt: fireAt,
+          createdBy: 'hold-ball:codex',
+          resolvedBy: {
+            sourceKind: 'review_feedback',
+            sourceMessageId: 'msg-review-1',
+            subjectKey: 'pr:owner/repo#42',
+            expectedSignalKey: 'review_posted',
+            at: Date.now(),
+          },
+        },
+      },
+      display: { label: '持球唤醒 (codex)', category: 'system' },
+      deliveryThreadId: 'thread-retired',
+      enabled: false,
+      createdBy: 'hold-ball:codex',
+      createdAt: new Date().toISOString(),
+    });
+
+    runner.registerDynamic(
+      makeOnceTask('hold-ball-retired-race', fireAt, {
+        run: {
+          overlap: 'skip',
+          timeoutMs: 5000,
+          execute: async () => {
+            executed = true;
+          },
+        },
+      }),
+      'hold-ball-retired-race',
+    );
+    runner.start();
+    await new Promise((r) => setTimeout(r, 200));
+
+    assert.equal(executed, false, 'retired hold must not deliver a stale wake');
+    assert.ok(!runner.getRegisteredTasks().includes('hold-ball-retired-race'), 'retired hold should leave runtime');
+    assert.equal(dynamicTaskStore.getById('hold-ball-retired-race').enabled, false, 'tombstone should remain readable');
     runner.stop();
   });
 

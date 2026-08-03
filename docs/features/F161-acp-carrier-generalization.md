@@ -31,7 +31,7 @@ operator experience（2026-06-08）：
 | ACP 路由 | 硬编码在 `case 'google'` 内（index.ts:1056-1100） | `getAcpConfig(id)` 只在 google 分支调用 |
 | Adapter 命名 | `GeminiAcpAdapter`（Gemini 绑定） | 文件名 + class 名 |
 | Env 注入 | 5 个 if/else 分支（invoke-single-cat.ts:1163-1237） | 每个 protocol 硬编码 env var 名 |
-| OpenCode CLI ACP | 原生支持 `opencode acp`，Cat Cafe 未接入 | `opencode acp --help` 输出确认 |
+| OpenCode CLI ACP | 原生支持 `opencode acp`，Clowder AI 未接入 | `opencode acp --help` 输出确认 |
 | 通用 ACP client | 不支持 | 无 `clientId: 'acp'` 选项 |
 | 底层 AcpClient/Pool | 已是 provider-agnostic | 代码审查确认无 Gemini-specific 逻辑 |
 
@@ -76,7 +76,7 @@ const BUILTIN_ENV_MAPS = {
 
 ### Phase B: OpenCode ACP 验证（spike）
 
-1. 验证 `opencode acp` 与 Cat Cafe ACP types.ts 协议兼容性
+1. 验证 `opencode acp` 与 Clowder AI ACP types.ts 协议兼容性
 2. 配置 OpenCode variant：`protocol: 'acp'` + `acp.command: 'opencode'`
 3. 端到端验证：prompt → ACP session → response streaming
 
@@ -132,7 +132,7 @@ const BUILTIN_ENV_MAPS = {
 | KD-9 | ACP session reuse via sessionId | ACP 协议通过同一 `sessionId` 跨多次 `session/prompt` 调用维持上下文，等价于 CLI 的 `--resume`；`AcpAgentService` 检测 `options.sessionId` 存在时跳过 `newSession()` 直接复用 | 2026-06-16 |
 | KD-10 | httpstream 从 UI 移除，后端保留 | httpstream 不在 ACP 官方 spec 中（目前仅 stdio），UI 暴露不成熟的传输选项增加用户困惑；后端实现 `AcpHttpStreamClient` 保留，等官方 spec 出来再开放 | 2026-06-16 |
 | KD-11 | ACP context lifecycle/handoff 作为 followup | ACP event transformer 不解析 `usage`/`contextWindow` 事件，导致 `context_health` 不触发自动 seal——需要独立 feature 设计 ACP 场景的 context 感知与 handoff 机制 | 2026-06-16 |
-| KD-12 | Compaction loop 根因：system+tools > usable threshold | OpenCode compaction 阈值 = `input - reserved`，当 Cat Cafe MCP 90+ 工具 schema (~90k tokens) 超过 usable(85k) 时每次响应都触发 compaction → auto-continue 循环。根治：全局 context 200k（阈值 185k > 90k）。followup：减少 MCP tool 暴露量 | 2026-06-16 |
+| KD-12 | Compaction loop 根因：system+tools > usable threshold | OpenCode compaction 阈值 = `input - reserved`，当 Clowder AI MCP 90+ 工具 schema (~90k tokens) 超过 usable(85k) 时每次响应都触发 compaction → auto-continue 循环。根治：全局 context 200k（阈值 185k > 90k）。followup：减少 MCP tool 暴露量 | 2026-06-16 |
 | KD-13 | ACP scratchpad defense-in-depth | acp-event-transformer 添加 `## Goal` 模式检测 + AcpAgentService 添加 50-event circuit breaker，作为 compaction loop 的 L2/L3 防御层 | 2026-06-16 |
 
 ## Followup
@@ -142,4 +142,4 @@ const BUILTIN_ENV_MAPS = {
 | FU-1 | ACP httpstream transport | httpstream（HTTP POST + NDJSON streaming）不在 ACP 官方 spec 中，后端 `AcpHttpStreamClient` 已实现并测试通过，等官方 spec 定案后再开放 UI 选项 | KD-10 |
 | FU-2 | ACP context lifecycle & handoff | ACP event transformer 当前不解析 `usage`/`contextWindow` 事件，导致 session chain 的 `context_health` 无法触发自动 seal/handoff。需要设计 ACP 场景下的 context 用量感知机制（可能需要扩展 ACP 协议或 client 上报） | KD-11 |
 | FU-3 | ACP session chain seal 策略 | `ephemeralSession` 已改为 `false`（session 持久化），但缺少基于 context 占用的自动 seal 触发——长对话可能无限增长。需要定义 ACP session 的 seal 阈值和 handoff 流程 | KD-9, KD-11 |
-| FU-4 | MCP tool schema 精简 | Cat Cafe MCP 90+ 工具 schema 占 ~60-80k tokens，是 OpenCode compaction loop 的根本原因。按 session/cat 角色过滤暴露的工具集，减少固定 token 开销 | KD-12 |
+| FU-4 | MCP tool schema 精简 | Clowder AI MCP 90+ 工具 schema 占 ~60-80k tokens，是 OpenCode compaction loop 的根本原因。按 session/cat 角色过滤暴露的工具集，减少固定 token 开销 | KD-12 |

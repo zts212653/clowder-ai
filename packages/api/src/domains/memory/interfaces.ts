@@ -1,6 +1,7 @@
 // F102: Memory component interfaces — 6 pluggable adapters
 // See docs/features/F102-memory-adapter-refactor.md for architecture
 
+import type { EntityConflictContext, EntityConflictResolutionRequest } from '@cat-cafe/shared';
 import type { CollectionSensitivity, ReviewStatus, SearchDimension } from './collection-types.js';
 import type { F163Activation, F163Authority } from './f163-types.js';
 
@@ -39,12 +40,24 @@ export const EVIDENCE_KINDS = [
   'thread',
   'discussion',
   'research',
+  'architecture',
+  'diary',
   'pack-knowledge',
 ] as const;
 
 export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
 
-export type EvidenceStatus = 'active' | 'done' | 'archived' | 'review' | 'invalidated';
+export type EvidenceStatus =
+  | 'active'
+  | 'done'
+  | 'archived'
+  | 'review'
+  | 'invalidated'
+  | 'superseded'
+  | 'drifted'
+  | 'stale'
+  | 'historical'
+  | 'retired';
 
 // ── F152 Phase A: Provenance + Scanner types ────────────────────────
 
@@ -59,6 +72,7 @@ export interface ScannedEvidence {
   item: Omit<EvidenceItem, 'sourceHash'>;
   provenance: Provenance;
   rawContent: string;
+  passages: string[];
 }
 
 export interface RepoScanner {
@@ -125,8 +139,8 @@ export interface EvidenceItem {
   matchReason?: string;
   /** F200 v1.1 DF-3: ranking factor breakdown when explain=true */
   rankingFactors?: { bm25Score?: number; consumptionPrior?: number; mmrPenalty?: number };
-  /** F200 v1.1 DF-7: calibrated relevance confidence [0,1] */
-  confidence?: number;
+  /** F263 AC-A2: calibrated retrieval score [0,1], independent from rank and authority */
+  retrievalScore?: number;
   /** F209 Phase B: entity alias / mention explanations for retrieval-anchor hits */
   entityMatches?: EntityMatch[];
   /** AC-I9: passage-level detail when depth=raw */
@@ -156,6 +170,13 @@ export type EntityType = 'person' | 'cat' | 'feature' | 'concept' | 'external';
 export interface EntityProvenance {
   source: string;
   anchor?: string;
+  sourcePath?: string;
+  threadId?: string;
+  messageId?: string;
+  messageIds?: string[];
+  sessionId?: string;
+  eventNo?: number;
+  invocationId?: string;
   note?: string;
   date?: string;
 }
@@ -166,8 +187,24 @@ export interface EntityRecord {
   canonicalName: string;
   aliases: string[];
   provenance: EntityProvenance[];
+  /** F260: entity stance from proposal approval (default 'unknown'). */
+  stance?: string;
+  /** F260: visibility scope from proposal approval (default 'workspace'). KD-7: private entities must carry through. */
+  visibilityScope?: string;
+  /** F260: entity lifecycle status (default 'active'). */
+  status?: string;
   createdAt?: string;
   updatedAt: string;
+}
+
+export type EntityMutationSource = 'proposal-approval' | 'seed-sync' | 'system';
+
+export interface EntityMutationContext {
+  source: EntityMutationSource;
+  actorId?: string;
+  proposalId?: string;
+  reason?: string;
+  conflictPolicy?: 'allow-update' | 'reject-conflict';
 }
 
 export interface QueryEntityMatch {
@@ -251,10 +288,14 @@ export interface SearchOptions {
   dimension?: SearchDimension;
   /** F186: filter to specific collection IDs when dimension=collection */
   collections?: string[];
+  /** F263: server-derived private collection grants; never copied from caller query params. */
+  authorizedCollections?: string[];
   /** F152 Phase A (AC-A6): filter by provenance tier */
   provenanceTier?: ProvenanceTier;
   /** F163 Phase B (AC-B3): include backstop docs in results (for drill-down) */
   includeBackstop?: boolean;
+  /** F271: include candidates that are deliberately visible only to pull surfaces. Default false. */
+  includePullOnly?: boolean;
   /** F093 Phase A (KD-16): filter to a specific world's derived knowledge */
   worldId?: string;
   /** F093 Phase A (KD-16): filter to a specific scene within a world */
@@ -263,6 +304,10 @@ export interface SearchOptions {
   explain?: boolean;
   /** F200 HW-1: search intent — topk (default) or coverage (exhaustive multi-scope) */
   intent?: 'topk' | 'coverage';
+  /** Internal cooperative cancellation for latency-bounded orchestrators. */
+  signal?: AbortSignal;
+  /** Internal absolute wall-clock deadline paired with signal. */
+  deadlineAt?: number;
 }
 
 export type SearchDegradeReason =
@@ -341,7 +386,13 @@ export interface IEvidenceStore {
   search(query: string, options?: SearchOptions): Promise<EvidenceItem[]>;
   searchWithMeta?(query: string, options?: SearchOptions): Promise<EvidenceSearchExecution>;
   upsert(items: EvidenceItem[]): Promise<void>;
-  upsertEntities?(entities: EntityRecord[]): Promise<void>;
+  upsertEntities?(entities: EntityRecord[], context?: EntityMutationContext): Promise<void>;
+  inspectEntityConflict?(incoming: EntityRecord, viewerUserId?: string): Promise<EntityConflictContext | null>;
+  resolveEntityConflict?(
+    incoming: EntityRecord,
+    resolution: EntityConflictResolutionRequest,
+    context: EntityMutationContext,
+  ): Promise<void>;
   getEntity?(entityId: string): Promise<EntityRecord | null>;
   resolveEntityAliases?(query: string): Promise<QueryEntityMatch[]>;
   refreshEntityMentions?(docAnchors?: string[]): Promise<void>;
@@ -409,10 +460,10 @@ export interface EmbedModelInfo {
 }
 
 export interface IEmbeddingService {
-  load(): Promise<void>;
-  embed(texts: string[]): Promise<Float32Array[]>;
+  load(signal?: AbortSignal): Promise<void>;
+  embed(texts: string[], signal?: AbortSignal): Promise<Float32Array[]>;
   isReady(): boolean;
-  reprobeIfNeeded(): Promise<void>;
+  reprobeIfNeeded(signal?: AbortSignal): Promise<void>;
   getModelInfo(): EmbedModelInfo;
   dispose(): void;
 }

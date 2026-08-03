@@ -1,6 +1,6 @@
 ---
 feature_ids: [F245]
-related_features: [F192, F222, F167, F128]
+related_features: [F192, F222, F167, F128, F267]
 topics: [friction, eval, harness-eval, aggregation, paw-feel, rollup, claw-friction]
 doc_kind: spec
 created: 2026-06-18
@@ -13,6 +13,8 @@ created: 2026-06-18
 > ✅ **Closed state**: Phase A/B/C/D all merged; Phase D PR #2504 squash `440d8942d`; capability tip seeded; F245 removed from BACKLOG (`243458651`); opus-47 vision guardian APPROVE 2026-06-22; formal close report added 2026-06-23.
 >
 > ✅ **Architecture correction resolved**: PR1a/PR1b initially shipped a hard enum-bump, which violated the 2026-06-18 Y-lite eval-domain registration decision. operator reset ownership on 2026-06-21; shared Y-lite migration merged in PR #2476 (`0822a68b4`); PR2 and Phase D then landed on top of that contract. Current final contract: registered strings + YAML registry validation + explicit code wiring + fail-closed missing wiring.
+>
+> ✅ **Post-close hardening merged (2026-07-18)**: PR #3053（squash `0e6f3afc6`）修复了“归口 thread 顺手投递”把 F245 开发 thread 诱导成爪感差邮箱的问题。当前 single-source routing：原 turn marker 已完成采集；只有立即行动才向查证后的责任 thread 投 `sourceMessageId`，不得复制 marker；归属不明走 F128；新增责任走 `assign_work` 审批。
 
 ## Architecture Ownership
 
@@ -85,6 +87,20 @@ signal 体量实证（今天 UTC 0:00 → 16:07，16 小时）：
 - **④**（eval 域摩擦）→ **只列出 + 链接**各域既有 verdict（各域自修，不重复处理）
 - Eval Hub friction rollup 视图（现场可感知，不只 dashboard 数字）
 
+### Post-close hardening: 爪感差 single-source routing
+
+Architecture cell: `harness-eval` + `transport`
+Map delta: none — 只加固既有 `PawFeelAdapter` 与 cross-post 边界，不新增 store、route 或 extension point。
+
+F245 回扫的是全局消息流，所以原 turn 的 `[爪感差: …]` 已经是 canonical signal；手工把 marker 复制到 F245 或其他 thread 既不会增加采集可靠性，反而会制造新 messageId、重复统计和“开发 thread = 样本邮箱”的错误心智。
+
+立即行动时的唯一合法路径：
+
+1. 用精确 feature/tool 身份找到候选 thread，并以 feature doc、thread context 或 standing custody 证据查证该 thread 真是责任归口；
+2. 只发送 marker-free 的 `sourceMessageId` 引用；已有责任可 FYI/coordinate，新增责任必须走 `effectClass=assign_work` 的 Approval Hub；
+3. 无法查证 owner 时调用 F128 `propose_thread` 让 operator 审批，禁止猜一个近邻 thread；
+4. F245 开发 thread 不是 raw sample inbox；`thread_eval_friction` 也永远不承接 marker 正文。它继续承接周期 rollup、verdict 与 handoff draft，并从 F278 起承接**无正文**的 duty notice 与 source-ref ledger inbox 入口。F278 是 disposition writer；F245 仍只读分析且不写逐条处置。
+
 ## Acceptance Criteria
 
 <!-- 立项愿景硬度自检（F216→F219）：每条 AC 必须 ① trace 回 Why 的某诉求 ② 非作者可复核（命令/数字/截图）。 -->
@@ -107,6 +123,11 @@ signal 体量实证（今天 UTC 0:00 → 16:07，16 小时）：
 - [x] AC-D2: ④ eval 域摩擦只列出 + 链接各域 verdict，不重复处理（referenceOnly clusters；trace Why：operator"④各自会修，只需列出"）✅ PR #2504
 - [x] AC-D3: Eval Hub friction rollup 视图（"建议修复"/"仅引用"/honest empty state；截图复核）✅ PR #2504
 
+### Post-close hardening（single-source routing）
+- [x] AC-R1: L0 + `code-as-harness` + `cross-thread-sync` 明确“原 turn marker 即完成采集”；立即行动必须查证准确 owner thread，只投 `sourceMessageId`；归属不明走 F128，新派活走 `assign_work` 审批
+- [x] AC-R2: `cat_cafe_cross_post_message` 在 HTTP dispatch 前拒绝含 literal `[爪感差: …]` 的跨 thread 消息，并返回 owner 查证 / source reference / F128 / Approval Hub 恢复路径
+- [x] AC-R3: `PawFeelAdapter` 对历史或旁路产生的 cross-post marker 不再重复产出原症状；每条 relay 只投影一个固定 routing-misuse signal，使这类 harness 误用可被下一轮 rollup 聚合
+
 ## Eval / Tracking Contract
 
 ### 1. Primary Users + Activation Signal
@@ -118,9 +139,12 @@ signal 体量实证（今天 UTC 0:00 → 16:07，16 小时）：
 - cluster 误聚合率（把不同问题折一起）
 - 可行动项 acted-on rate（F128 thread 真被修的比例）
 - 爪感差 signal 漏采率（fixture 验证）
+- 爪感差 cross-post routing misuse count（固定 symptom 聚类；验证 marker 是否仍被当邮件复制）
 
 ### 3. Regression Fixture
 - 含 N 条 `[爪感差]` 的消息样本 → 采集出 N 条结构化 signal
+- 1 条原始 marker + 1 条含两个复制 marker 的 cross-post → 1 条原始摩擦 signal + 1 条 routing-misuse signal；复制症状不重复计数
+- `cat_cafe_cross_post_message` literal marker → dispatch 前 fail-closed；marker-free `sourceMessageId` 引用正常通过
 - "rg 噪音大 ×12" 同类反馈 → 折叠成 1 个 cluster（count=12）
 - ④ eval 域摩擦 → 只列出 + 链接，不进入 F128 出口（不重复处理）
 - 正常无摩擦消息 → 不误采
@@ -133,9 +157,9 @@ signal 体量实证（今天 UTC 0:00 → 16:07，16 小时）：
 
 | 层 | 承重 | 载体 |
 |----|------|------|
-| **Soft** | 猫在正确路径上想起报摩擦 | L0 爪感差 convention（已有）+ code-as-harness skill 引导 |
-| **Hard** | 不靠自觉也能采到 + 不爆 context | 采集 precision/recall test + cluster dedup test + Top-N 配额 schema guard |
-| **Eval** | 持续检验摩擦是否真被修好 | 本 feature 自身即 eval 层（eval:friction domain）+ Sunset Signal 自检 + acted-on rate |
+| **Soft** | 猫在正确路径上想起报摩擦，并把行动引用送到准确归口 | L0 convention + `code-as-harness` + `cross-thread-sync` + MCP quick index：原 turn 完成采集；owner 查证；`sourceMessageId`；F128 / `assign_work` |
+| **Hard** | 不靠自觉也能采到、阻止 marker 跨 thread 复制且不爆 context | `cross_post_message` marker fail-closed + 采集 precision/recall test + cluster dedup test + Top-N 配额 schema guard |
+| **Eval** | 持续检验摩擦是否真被修好，也检验采集协议自身是否被误用 | eval:friction domain + cross-post routing-misuse projection + Sunset Signal 自检 + acted-on rate |
 
 ## 需求点 Checklist
 
@@ -179,6 +203,7 @@ signal 体量实证（今天 UTC 0:00 → 16:07，16 小时）：
 | KD-5 | **Port + Adapter + `FrictionSignal` 中间类型，不建统一 store** | 46 Design Gate：4 通道形态异构（消息文本/episode/issue 生命周期/数值 metric），内存聚合 ~10-30 cluster，持久化的是 verdict artifact 不是中间 store | 2026-06-18 |
 | KD-6 | **Phase A 实施接口校准**（plan 假设 → 实际，给 Phase B-D 实施者）| ① 测试框架是 `node --test`（手写 `.js` import `dist/`）非 plan 写的 vitest；② 全局时间窗扫描用 `IMessageStore.getBefore(userId=undefined)` 走全局 TIMELINE zset 游标翻页——`IThreadStore` 无全局枚举（仅 per-user），plan/handoff 的"枚举 thread"方案不可行；③ adapter 仅依赖 `getBefore`，非 plan 的 IThreadStore+RedisMessageStore 双注入；④ Redis 测试 timestamp 必须 `Date.now()` base——`append` 会 `zremrangebyscore` prune `score<now-TTL`，远古固定 ts 一存即删 | 2026-06-18 |
 | KD-7 | **Y-lite eval-domain registration 是最终共享 contract** | operator directive 2026-06-21：硬 enum-bump 造成跨 feature split-brain 与 fan-out；PR #2476 迁移为 registered string + YAML registry validation + `sourceRefsKind` + fail-closed wiring。F236 Track-2 已继承并合入。 | 2026-06-21 |
+| KD-8 | **爪感差 marker 是 single-source signal，不是跨 thread 邮件** | F245 已回扫全局消息流；复制 marker 会生成新 messageId 并重复计数。需要立即行动时只把 `sourceMessageId` 投给经证据查证的责任 thread；查不到 owner 走 F128，新责任走 `assign_work` 审批。F278 post-close evolution 只允许 `thread_eval_friction` 接收无正文 duty notice/source-ref inbox；不复制 marker，也不把 disposition ownership 交给 F245。 | 2026-07-18；F278 clarification 2026-07-26 |
 
 ## User Visibility Disclosure
 

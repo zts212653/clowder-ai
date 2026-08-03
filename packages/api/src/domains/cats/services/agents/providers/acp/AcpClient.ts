@@ -18,6 +18,7 @@ import { createInterface, type Interface as ReadlineInterface } from 'node:readl
 
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import { resolveCliCommandOrBare } from '../../../../../../utils/cli-resolve.js';
+import { buildChildEnv } from '../../../../../../utils/cli-spawn.js';
 import { resolveWindowsSpawnPlan } from '../../../../../../utils/cli-spawn-win.js';
 import { AcpCwdIdentityTracker } from './acp-cwd-identity.js';
 import type {
@@ -209,7 +210,7 @@ export class AcpClient {
     // PATH so `#!/usr/bin/env node` shims can find the node interpreter.
     let command = resolveCliCommandOrBare(this.config.command);
     let args = [...this.config.args];
-    const childEnv = { ...process.env, ...this.config.env };
+    const childEnv = buildChildEnv(this.config.env);
     if (!IS_WINDOWS && isAbsolute(command)) {
       const binDir = dirname(command);
       childEnv.PATH = childEnv.PATH ? `${binDir}:${childEnv.PATH}` : binDir;

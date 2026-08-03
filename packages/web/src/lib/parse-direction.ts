@@ -3,6 +3,8 @@
  * Priority: whisper > crossPost > @mention in content.
  */
 
+import { isCrossThreadProvenance } from '@cat-cafe/shared';
+
 export interface DirectionInfo {
   type: 'mention' | 'crossPost' | 'whisper';
   targets: string[];
@@ -23,14 +25,18 @@ interface MentionData {
   re: RegExp;
 }
 
-export function parseDirection(message: MessageLike, getMentionData: () => MentionData): DirectionInfo | null {
+export function parseDirection(
+  message: MessageLike,
+  getMentionData: () => MentionData,
+  currentThreadId?: string,
+): DirectionInfo | null {
   // Whisper — highest priority, has explicit targets
   if (message.visibility === 'whisper' && message.whisperTo?.length) {
     return { type: 'whisper', targets: message.whisperTo, arrow: '→' };
   }
 
   // CrossPost — has source thread metadata
-  if (message.extra?.crossPost?.sourceThreadId) {
+  if (isCrossThreadProvenance(message.extra?.crossPost?.sourceThreadId, currentThreadId)) {
     const shortId = message.extra.crossPost.sourceThreadId.replace(/^thread_/, '').slice(0, 8);
     return { type: 'crossPost', targets: [shortId], arrow: '↗' };
   }

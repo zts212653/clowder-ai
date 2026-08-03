@@ -15,20 +15,27 @@ describe('approveProfileUpdate service (lock + crash recovery + state machine)',
   let writeMod;
   let StoreMod;
   let MutexMod;
+  let repository;
 
   beforeEach(async () => {
-    profileDir = mkdtempSync(join(tmpdir(), 'f231-approve-'));
-    mkdirSync(join(profileDir, 'relationship'), { recursive: true });
+    const dataDir = mkdtempSync(join(tmpdir(), 'f231-approve-'));
     mod = await import('../dist/domains/cats/services/profile/approveProfileUpdate.js');
     writeMod = await import('../dist/domains/cats/services/profile/writeProfileUpdate.js');
     StoreMod = await import('../dist/domains/cats/services/stores/ports/ProfileUpdateProposalStore.js');
     MutexMod = await import('../dist/domains/cats/services/agents/invocation/SessionMutex.js');
+    const RepoMod = await import('../dist/domains/cats/services/profile/ProfileRepository.js');
+    repository = new RepoMod.FileProfileRepository({
+      dataDir,
+      relationshipKeyForCat: (catId) => ({ codex: 'maine-coon' })[catId],
+    });
+    profileDir = repository.profileDir('alice');
+    mkdirSync(join(profileDir, 'relationship'), { recursive: true });
   });
 
   afterEach(() => rmSync(profileDir, { recursive: true, force: true }));
 
-  const seedPrimer = (content, catId = 'codex') => {
-    writeFileSync(join(profileDir, 'relationship', `${catId}-primer.md`), content, 'utf8');
+  const seedPrimer = (content, relationshipKey = 'maine-coon') => {
+    writeFileSync(join(profileDir, 'relationship', `${relationshipKey}-primer.md`), content, 'utf8');
     return writeMod.hashContent(content);
   };
 
@@ -38,7 +45,7 @@ describe('approveProfileUpdate service (lock + crash recovery + state machine)',
       sourceInvocationId: 'inv_1',
       sourceCatId: 'codex',
       targetLayer: 'primer',
-      targetPath: join('relationship', 'codex-primer.md'),
+      targetPath: 'relationship/maine-coon-primer.md',
       beforeContent: 'OLD',
       baseContentHash: writeMod.hashContent('OLD'),
       afterContent: 'NEW',
@@ -48,8 +55,8 @@ describe('approveProfileUpdate service (lock + crash recovery + state machine)',
       ...over,
     });
 
-  const deps = (store, lock, over = {}) => ({ store, lock, profileDir, ...over });
-  const primerPath = () => join(profileDir, 'relationship', 'codex-primer.md');
+  const deps = (store, lock, over = {}) => ({ store, lock, repository, ...over });
+  const primerPath = () => join(profileDir, 'relationship', 'maine-coon-primer.md');
 
   it('happy path: pending → approved, writes primer (afterContent) + provenance', async () => {
     seedPrimer('OLD');
@@ -62,6 +69,27 @@ describe('approveProfileUpdate service (lock + crash recovery + state machine)',
     assert.equal(readFileSync(primerPath(), 'utf8'), 'NEW');
     assert.ok(existsSync(r.proposal.provenancePath));
     assert.ok(r.proposal.writtenPath);
+  });
+
+  it('P1: pre-KD-18 catId target fails before claim/write instead of approving an unread orphan', async () => {
+    const store = new StoreMod.InMemoryProfileUpdateProposalStore();
+    const lock = new MutexMod.SessionMutex();
+    const p = makeProposal(store, {
+      targetPath: 'relationship/codex-primer.md',
+      beforeContent: '',
+      baseContentHash: writeMod.hashContent(''),
+      afterContent: 'LEGACY-ORPHAN',
+    });
+    const legacyPath = join(profileDir, 'relationship', 'codex-primer.md');
+
+    const r = await mod.approveProfileUpdate(p.proposalId, 'alice', deps(store, lock));
+
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'write_failed');
+    assert.match(r.error, /legacy catId-keyed primer target/i);
+    assert.equal((await store.get(p.proposalId)).status, 'pending');
+    assert.equal(existsSync(legacyPath), false);
+    assert.equal(existsSync(primerPath()), false);
   });
 
   it('ADV-6a: sequential approve of two proposals on same primer — 2nd hits stale_hash, no overwrite', async () => {
@@ -220,7 +248,7 @@ describe('approveProfileUpdate service (lock + crash recovery + state machine)',
     const p = makeProposal(store);
     // Simulate crash AFTER primer write + checkpoint, BEFORE provenance.
     store.claimForApproval(p.proposalId, 'alice');
-    const { writtenPath } = writeMod.writeProfilePrimer(p, profileDir); // primer now = NEW
+    const { writtenPath } = writeMod.writeProfilePrimer(p, profileDir, 'maine-coon'); // primer now = NEW
     store.recordCheckpoint(p.proposalId, { writtenPath });
     // Recovery: primer must NOT be re-written (hash would mismatch) — inject a throwing primer writer.
     const noRewrite = () => {
@@ -257,7 +285,7 @@ describe('approveProfileUpdate service (lock + crash recovery + state machine)',
     const lock = new MutexMod.SessionMutex();
     const p = makeProposal(store);
     store.claimForApproval(p.proposalId, 'alice');
-    const { writtenPath } = writeMod.writeProfilePrimer(p, profileDir);
+    const { writtenPath } = writeMod.writeProfilePrimer(p, profileDir, 'maine-coon');
     store.recordCheckpoint(p.proposalId, { writtenPath });
     const { provenancePath } = writeMod.writeProfileProvenance(p, profileDir);
     store.recordCheckpoint(p.proposalId, { provenancePath });

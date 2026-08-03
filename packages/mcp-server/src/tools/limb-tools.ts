@@ -161,6 +161,44 @@ export async function handleLimbPairApprove(args: { requestId: string; agentKeyC
   );
 }
 
+// ─── F285: Physical embodiment binding ───────────────────────
+
+export const limbBindEmbodimentInputSchema = {
+  type: 'object' as const,
+  properties: {
+    nodeId: { type: 'string', description: '已审批且在线的物理 limb nodeId' },
+    expressionRef: { type: 'string', description: '当前猫已登记的表情映射引用' },
+    voiceProfileRef: { type: 'string', description: '当前猫已登记的声线映射引用' },
+    volumePercent: { type: 'number', minimum: 0, maximum: 100, description: '扬声器音量百分比' },
+    agentKeyCatId: {
+      type: 'string',
+      description: '共享 Antigravity MCP 时必填你自己的 catId，用于选择正确的 sidecar agent key。',
+    },
+  },
+  required: ['nodeId', 'expressionRef', 'voiceProfileRef', 'volumePercent'],
+};
+
+export async function handleLimbBindEmbodiment(args: {
+  nodeId: string;
+  expressionRef: string;
+  voiceProfileRef: string;
+  volumePercent: number;
+  agentKeyCatId?: string;
+}): Promise<ToolResult> {
+  const config = getCallbackConfig({ agentKeyCatId: args.agentKeyCatId });
+  if (!config) return errorResult(NO_CONFIG_ERROR);
+  return callbackPost(
+    '/api/callback/limb/embodiment/bind',
+    {
+      nodeId: args.nodeId,
+      expressionRef: args.expressionRef,
+      voiceProfileRef: args.voiceProfileRef,
+      volumePercent: args.volumePercent,
+    },
+    { agentKeyCatId: args.agentKeyCatId },
+  );
+}
+
 // ─── Tool Definitions ────────────────────────────────────────
 
 export const limbTools = [
@@ -216,5 +254,14 @@ export const limbTools = [
       'Shared Antigravity MCP GOTCHA: pass agentKeyCatId to select the correct variant sidecar key.',
     inputSchema: limbPairApproveInputSchema,
     handler: handleLimbPairApprove,
+  },
+  {
+    name: 'limb_bind_embodiment',
+    description:
+      'Bind one approved, online physical limb body to the current user, thread, and cat. ' +
+      'The server derives identity from callback credentials; callers cannot provide userId/threadId/catId. ' +
+      'GOTCHA: Only run after the owner explicitly asks to embody the current cat on that node.',
+    inputSchema: limbBindEmbodimentInputSchema,
+    handler: handleLimbBindEmbodiment,
   },
 ] as const;

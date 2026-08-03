@@ -41,6 +41,11 @@ const ALLOWLIST = new Map([
   ['npm_config_user_agent', 'Package-manager metadata injected by npm/pnpm; not user-configurable'],
   ['INIT_CWD', 'Package-manager metadata injected by npm/pnpm; original invocation directory'],
   ['COGVIDEO_API_KEY', 'F139 MediaHub CogVideoX provider — mcp-server-local credential'],
+  ['CLAUDE_BIN', 'F254 developer-only live fixture executable override; not a runtime setting'],
+  ['CODEX_BIN', 'F254 developer-only live fixture executable override; not a runtime setting'],
+  ['F254_CLAUDE_MODEL', 'F254 developer-only Claude capability fixture model override; not a runtime setting'],
+  ['F254_CODEX_TRANSPORT', 'F254 developer-only Codex fixture transport selector; not a runtime setting'],
+  ['CAT_OPUS_MODEL', 'Existing provider model env reused only as a developer fixture fallback'],
   // F240: Per-connector env vars migrated to YAML manifests (connector.yaml / plugin.yaml).
   // Runtime still reads process.env as fallback in resolveConnectorEnv() chain, but
   // documentation/display is now driven by the YAML config.fields declarations.

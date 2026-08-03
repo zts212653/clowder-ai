@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 
 const HELPER_PATH = resolve(process.cwd(), 'scripts/brand-dictionary-helper.mjs');
+const WORKFLOW_PATH = resolve(process.cwd(), '.github/workflows/brand-boundary-guard.yml');
 
 // ── Unit tests for the dictionary helper module ──
 
@@ -287,6 +288,23 @@ describe('brand-dictionary-helper', () => {
       assert.ok(lines.some((l) => l.includes('desktop')));
       assert.ok(lines.some((l) => l.includes('guides')));
       assert.ok(lines.some((l) => l.includes('cat-cafe-skills')));
+    });
+  });
+
+  describe('GitHub workflow live PR metadata', () => {
+    const workflow = readFileSync(WORKFLOW_PATH, 'utf-8');
+
+    it('resolves the current PR title from GitHub instead of the rerun event snapshot', () => {
+      assert.match(workflow, /gh api[^\n]+pulls\/\$\{\{ github\.event\.pull_request\.number \}\}/);
+      assert.doesNotMatch(workflow, /PR_TITLE="\$\{\{ github\.event\.pull_request\.title \}\}"/);
+    });
+
+    it('names every accepted boundary tag in remediation messages', () => {
+      assert.match(workflow, /\\\[\(intake\|brand-update\|boundary\)\\\]/);
+      assert.doesNotMatch(workflow, /\[intake\] or \[brand-update\]/);
+
+      const completeRemediations = workflow.match(/\[intake\], \[brand-update\], or \[boundary\]/g) ?? [];
+      assert.ok(completeRemediations.length >= 3, 'all error and warning paths must name the three accepted tags');
     });
   });
 });

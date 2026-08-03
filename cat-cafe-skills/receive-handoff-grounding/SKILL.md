@@ -96,8 +96,15 @@ triggers:
 #### Cache policy classed freshness
 
 - Object existence / owner / capability：短 TTL 60–300s OK
-- Authorization / freshness / conflict：**必须** `freshnessKey` invalidation
-  （SHA / messageId / PR head / check identity 变化 → cache miss；TTL 不够）
+- Authorization / freshness / conflict：**必须**结构化 key，不得把不同生命周期揉成一个
+  `freshnessKey`：
+  - **authorization key** = `actionFamily + subjectRef + T0 messageId + authorizationScope`
+  - **subject freshness key** = PR HEAD / review / check identity
+- subject freshness key 变化只让 review / CI / gate 证据 stale，**不得**让 PR-scoped
+  authorization 失效或再次询问 operator；只有授权原文明确限定 `exact-HEAD` 时，HEAD 变化才让
+  authorization key 失效。
+- `--admin` / `--force-with-lease` 等执行 transport 若已被 repo policy 定义为同一动作的标准路径，
+  不构成新的 actionFamily 或第二次授权；动作 subject / scope 扩大才需要新授权。
 
 #### Resolver budget
 
@@ -225,6 +232,11 @@ verdict=`insufficient`（T2-only 不 satisfy auth claim）→ **fail-closed**：
 在 thread 表态 messageId X。
 
 **严格匹配规则**：`author === 'you'`（catId 严格）；不接受 `'you'` / `'you'` handle variant。
+
+**授权续存规则**：验证过的直接 operator messageId 要绑定 `subjectRef + authorizationScope`。例如
+`scope=pull_request` 覆盖同一 PR 直到终态；后续 HEAD / review / CI 变化只重验 subject freshness，
+不重问授权。只有 `scope=exact_head`、PR/repo subject 改变、动作扩大或 operator 撤回时才重新询问。
+clowder-ai 的 repo policy 要求 `--admin` 时，它只是 merge transport，不是权限升级请求。
 
 ### Demo 3: `hold_ball(reason='等 reporter')` 凭空
 

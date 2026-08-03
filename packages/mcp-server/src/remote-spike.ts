@@ -20,7 +20,7 @@
  * v3 (2026-06-21 B1a): 真接 cat-cafe API + cloud-pro-phase0 mode
  *   - 删 echo + 5 mock stub tools
  *   - 注册真 collab + memory toolset (走 cloud-pro-phase0 mode
- *     收窄到 10 项白名单)
+ *     收窄到 11 项白名单)
  *
  * ⚠️  B1a vs B1 production:
  *   B1a: ?token= interim guard + 真 toolset + 真 cat-cafe API
@@ -321,7 +321,7 @@ function createSpikeServer(): McpServer {
   });
 
   // server-toolsets.applyReadonlyFilter 在 cloud-pro-phase0 mode 下
-  // 收窄到 10 项白名单. env 已被 validateB1aEnv 保证 mode 正确.
+  // 收窄到 11 项白名单. env 已被 validateB1aEnv 保证 mode 正确.
   registerCollabToolset(server);
   registerMemoryToolset(server);
 
@@ -430,7 +430,7 @@ async function main(): Promise<void> {
       `[cat-cafe-b1a] redact module: active (wraps response.write/end, ${SECRET_PATTERNS.length} patterns)`,
     );
     console.error(
-      '[cat-cafe-b1a] toolset: registerCollabToolset + registerMemoryToolset (cloud-pro-phase0 收窄到 10 项)',
+      '[cat-cafe-b1a] toolset: registerCollabToolset + registerMemoryToolset (cloud-pro-phase0 收窄到 11 项)',
     );
     console.error(
       '[cat-cafe-b1a] ⚠️  B1a interim — F247 KD-7: B1 必须 verified CF Access OAuth 或 verified header-auth',

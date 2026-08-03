@@ -7,14 +7,17 @@ import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import type { TreeNode } from '@/hooks/useWorkspace';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { isWorkspaceMode } from '@/lib/workspace-modes';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
-import { worktreeLabel } from '@/utils/worktree-label';
+import { worktreeBasename, worktreeLabel } from '@/utils/worktree-label';
 import { ApprovalPanel } from './ApprovalPanel';
 import { ArtifactsPanel } from './ArtifactsPanel';
 import { CommunityPanel } from './CommunityPanel';
+import { EvalWorkspacePanel } from './eval-workspace/EvalWorkspacePanel';
 import { EventTimeline } from './event-memory/EventTimeline';
 import { RecallFeed } from './memory/RecallFeed';
+import { RecallLedger } from './memory/RecallLedger';
 import { TaskBoardPanel } from './TaskBoardPanel';
 import { useConfirm } from './useConfirm';
 import { BrowserPanel } from './workspace/BrowserPanel';
@@ -199,8 +202,8 @@ export function WorkspacePanel() {
   );
 
   const [viewMode, setViewMode] = useState<'files' | 'changes' | 'git' | 'terminal' | 'browser'>('files');
-  // F227: recall mode sub-tab — 记忆流 (RecallFeed) vs 拉闸记录 (EventTimeline)
-  const [recallTab, setRecallTab] = useState<'feed' | 'events'>('feed');
+  // F227: recall mode sub-tab — 记忆流 (RecallFeed) vs 拉闸记录 (EventTimeline) vs 账本 (RecallLedger, F263)
+  const [recallTab, setRecallTab] = useState<'feed' | 'events' | 'ledger'>('feed');
   // Phase H: Workspace mode switcher (dev tools vs knowledge feed)
   const workspaceMode = useChatStore((s) => s.workspaceMode);
   const setWorkspaceMode = useChatStore((s) => s.setWorkspaceMode);
@@ -296,18 +299,8 @@ export function WorkspacePanel() {
       ?.then((res) => res.json())
       .then((thread: { preferredWorkspaceMode?: string }) => {
         if (cancelled) return;
-        const valid = new Set([
-          'dev',
-          'recall',
-          'schedule',
-          'tasks',
-          'community',
-          'artifacts',
-          'approval',
-          'trajectory',
-        ]);
-        if (thread.preferredWorkspaceMode && valid.has(thread.preferredWorkspaceMode)) {
-          setWorkspaceMode(thread.preferredWorkspaceMode as typeof workspaceMode);
+        if (isWorkspaceMode(thread.preferredWorkspaceMode)) {
+          setWorkspaceMode(thread.preferredWorkspaceMode);
         } else if (['community', 'artifacts'].includes(useChatStore.getState().workspaceMode)) {
           setWorkspaceMode('dev');
         }
@@ -686,7 +679,7 @@ export function WorkspacePanel() {
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-[var(--semantic-success)] flex-shrink-0" />
                 <span className="text-xs font-medium text-cafe-black truncate" title={currentWorktree.root}>
-                  {currentWorktree.root.split(/[\\/]/).pop()}
+                  {worktreeBasename(currentWorktree.root)}
                 </span>
                 <span className="text-micro font-mono text-cafe-interactive/50">{currentWorktree.head}</span>
               </div>
@@ -767,12 +760,12 @@ export function WorkspacePanel() {
           {/* F246 Phase C: responsive workspace tab bar (replaces hardcoded buttons) */}
           <WorkspaceTabBar />
 
-          {/* Knowledge / Schedule / Tasks / Artifacts / Approval / Dev mode routing */}
+          {/* Knowledge / Schedule / Tasks / Artifacts / Approval / Eval / Dev mode routing */}
           {workspaceMode === 'recall' ? (
             <div className="flex-1 min-h-0 flex flex-col">
-              {/* F227: 记忆流 vs 拉闸记录 (Event Memory timeline) */}
+              {/* F227+F263: 记忆流 vs 拉闸记录 vs 账本 */}
               <div className="flex gap-1 px-3 py-1.5 border-b border-cafe-subtle/40">
-                {(['feed', 'events'] as const).map((tab) => (
+                {(['feed', 'events', 'ledger'] as const).map((tab) => (
                   <button
                     key={tab}
                     type="button"
@@ -783,12 +776,12 @@ export function WorkspacePanel() {
                         : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
                     }`}
                   >
-                    {tab === 'feed' ? '记忆流' : '拉闸记录'}
+                    {tab === 'feed' ? '记忆流' : tab === 'events' ? '拉闸记录' : '账本'}
                   </button>
                 ))}
               </div>
               <div className="flex-1 min-h-0 overflow-y-auto">
-                {recallTab === 'feed' ? <RecallFeed /> : <EventTimeline />}
+                {recallTab === 'feed' ? <RecallFeed /> : recallTab === 'events' ? <EventTimeline /> : <RecallLedger />}
               </div>
             </div>
           ) : workspaceMode === 'schedule' ? (
@@ -807,6 +800,8 @@ export function WorkspacePanel() {
             )
           ) : workspaceMode === 'approval' ? (
             <ApprovalPanel />
+          ) : workspaceMode === 'eval' ? (
+            <EvalWorkspacePanel />
           ) : workspaceMode === 'trajectory' ? (
             <TrajectoryPanel />
           ) : (

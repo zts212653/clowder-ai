@@ -1,7 +1,7 @@
-# Cat Café Skills Bootstrap
+# Clowder AI Skills Bootstrap
 
 <EXTREMELY_IMPORTANT>
-你已加载 Cat Café Skills。路由规则定义在 `cat-cafe-skills/manifest.yaml`。
+你已加载 Clowder AI Skills。路由规则定义在 `cat-cafe-skills/manifest.yaml`。
 
 ## Skills 列表（按 manifest 路由）
 
@@ -10,6 +10,8 @@
 feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → tdd
     → quality-gate → [fresh-context-review] → request-review → receive-review
     → merge-gate → feat-lifecycle(完成)
+
+co-creation docs → co-creation-docs → direct push | merge-gate(docs PR)
 ```
 
 | Skill | 触发场景 | SOP Step |
@@ -20,6 +22,7 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `collaborative-thinking` | brainstorm/多猫讨论/收敛 | — |
 | `expert-panel` | 专家辩论团/竞品分析/技术趋势/showcase | — |
 | `writing-plans` | 写实施计划 | ① impl |
+| `co-creation-docs` | 共创型 docs-only 落盘：按冲突/治理/可逆性选择 direct push 或 PR | — |
 | `worktree` | 创建隔离开发环境 | ① impl |
 | `tdd` | 写测试+实现（红绿重构） | ① impl |
 | `code-as-harness` | 重复摩擦/陌生任务→搜证据→诊断→代码修/建 harness | — |
@@ -33,10 +36,12 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `cross-cat-handoff` | 跨猫交接/传话（五件套） | — |
 | `deep-research` | 多源深度调研 | — |
 | `source-audit` | 外部数字/benchmark/因果/趋势等高风险 claim 的信源审计与 provenance | — |
+| `eval-design` | 指标出生证（五件套）+ 六公理设计自检 + 存量 eval 体检尺（摸鱼/划水/污染） | — |
 | `ttfund-skills` | 天天基金官方 Skills 网关：基金搜索/净值/持仓/经理/指数/黄金/债市/活期宝事实数据 | — |
 | `convention-graph-discovery` | 进入陌生 repo / F242 约定图工作：定义 domain、extractor、gap/freshness/provenance 报告 | — |
 | `knowledge-engineering` | 外部项目文档重构/冷启动知识注入 | — |
 | `memory-navigation` | 项目记忆三入口路由（graph / recent / search） | — |
+| `proactive-memory-judgment` | 单次 continuity-valued 人物线索的 F276 提案 / calibrated-abstention 判断 | — |
 | `memory-search-best-practices` | 记忆系统多刀检索 + recall coverage 策略（8 类题型 recipe） | — |
 | `writing-skills` | 写新 skill | — |
 | `pencil-design` | 设计 UI / .pen 文件 | — |
@@ -56,8 +61,10 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `organize-threads` | 整理未分类 thread，建议合适标签 | — |
 | `workspace-navigator` | operator说"打开日志/看代码/打开设计图"等模糊指令 → 猫猫自己找路径 → API 导航 | — |
 | `ppt-forge` | 做 PPT/演示文稿/视觉审查（三猫流水线） | — |
+| `concept-demo-design` | 把抽象理念变成可录屏、可讲解、可验证的交互概念演示 | — |
 | `video-forge` | 做视频/showcase/教程视频/视频审查 | — |
 | `anime-forge` | 做动画短剧/角色 IP 短片/图生视频管线（素材是生成的不是录的） | — |
+| `sprite-forge` | 做桌宠皮肤/atlas 状态动画行/角色小循环动态素材（母图→首帧→视频→截帧；禁 imagegen 逐帧直出） | — |
 
 ### 参考文件（refs/，按需读取）
 

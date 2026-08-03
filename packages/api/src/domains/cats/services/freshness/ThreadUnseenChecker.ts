@@ -15,8 +15,16 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { DeliveryCursorStore } from '../stores/ports/DeliveryCursorStore.js';
 import { generateSortableId } from '../stores/ports/MessageStore.js';
-import type { FreshnessMessageReader, QueuedMessageChecker } from './checkFreshnessForPostMessage.js';
+import {
+  type FreshnessMessageReader,
+  getFreshnessSenderLabel,
+  getQueuedFreshnessSenderLabel,
+  isExpectedA2AReplyForCat,
+  isFreshnessRoutableMessage,
+  type QueuedMessageChecker,
+} from './checkFreshnessForPostMessage.js';
 import type { UnseenChecker, UnseenResult } from './FreshnessNoticeService.js';
+import { isFreshnessSelfSourceMessage, isFreshnessSelfSourceQueueEntry } from './FreshnessSourcePolicy.js';
 
 // Raised from 20 to 50 to reduce false-negative edge case where the first
 // batch contains only filtered messages (deleted/briefing/play-hidden).
@@ -59,19 +67,28 @@ export class ThreadUnseenChecker implements UnseenChecker {
     }
 
     // Apply visibility filter (P0: must reuse Phase A's messageFilter)
-    const visible = messageFilter ? batch.filter((msg) => messageFilter(msg as Record<string, unknown>)) : batch;
+    const routable = batch.filter(isFreshnessRoutableMessage);
+    const visible = messageFilter
+      ? routable.filter((msg) => messageFilter(msg as unknown as Record<string, unknown>))
+      : routable;
     if (visible.length === 0) {
       return this.checkQueueFallback(threadId, catId);
     }
 
-    // Filter out self-messages (consistent with Phase A)
-    const nonSelf = visible.filter((msg) => (msg.catId ?? 'user') !== catId);
+    // Filter out self-messages (consistent with Phase A) and expected A2A replies
+    // to this cat's own route handoff.
+    const nonSelf: typeof visible = [];
+    for (const msg of visible) {
+      if (isFreshnessSelfSourceMessage(msg, catId, threadId)) continue;
+      if (await isExpectedA2AReplyForCat(msg, catId, messageStore)) continue;
+      nonSelf.push(msg);
+    }
     if (nonSelf.length === 0) {
       return this.checkQueueFallback(threadId, catId);
     }
 
     // Extract unique senders (content-free — no message body)
-    const senderSet = new Set(nonSelf.map((msg) => msg.catId ?? 'user'));
+    const senderSet = new Set(nonSelf.map((msg) => getFreshnessSenderLabel(msg)));
     const senders = [...senderSet];
 
     // maxMessageId = last message in batch (for event log)
@@ -94,23 +111,32 @@ export class ThreadUnseenChecker implements UnseenChecker {
    *
    * (Bug fix: operator live test 2026-06-29)
    */
-  private checkQueueFallback(threadId: string, catId: CatId): UnseenResult | null {
+  private async checkQueueFallback(threadId: string, catId: CatId): Promise<UnseenResult | null> {
     const { userId, queueChecker } = this.deps;
     if (!queueChecker) return null;
 
-    const queuedEntries = queueChecker.getQueuedForThread(threadId, userId);
+    const queuedEntries = queueChecker.getQueuedForThread(threadId, userId, catId);
     if (!queuedEntries || queuedEntries.length === 0) return null;
 
     // Exclude self-source entries (same cat's own continuations)
-    const nonSelf = queuedEntries.filter((e) => {
-      if (e.source === 'agent' && e.callerCatId === catId) return false;
-      return true;
-    });
+    const nonSelf = [];
+    for (const entry of queuedEntries) {
+      if (await isFreshnessSelfSourceQueueEntry(entry, catId, threadId, this.deps.messageStore)) continue;
+      nonSelf.push(entry);
+    }
     if (nonSelf.length === 0) return null;
 
     // Extract senders from queue entries
-    const senderSet = new Set(nonSelf.map((e) => (e.source === 'user' ? 'user' : (e.callerCatId ?? 'unknown'))));
+    const senderSet = new Set(nonSelf.map((e) => getQueuedFreshnessSenderLabel(e)));
     const senders = [...senderSet];
+    const frontierEntry = nonSelf.at(-1);
+    const correlationMessageIds = [frontierEntry?.messageId ?? '', ...(frontierEntry?.mergedMessageIds ?? [])].filter(
+      (messageId, index, all) => messageId.length > 0 && all.indexOf(messageId) === index,
+    );
+    const noticeDedupKey = JSON.stringify({
+      queueEntryId: frontierEntry?.entryId ?? null,
+      messageIds: [...correlationMessageIds].sort(),
+    });
 
     return {
       count: nonSelf.length,
@@ -121,6 +147,14 @@ export class ThreadUnseenChecker implements UnseenChecker {
       // sorts after all real IDs ('q' > '0'), making the notice permanently
       // unresolved in FreshnessNoticeService.checkHoldBallReminder.
       maxMessageId: generateSortableId(Date.now()),
+      // Re-checking the same queued entry generates a fresh synthetic cursor.
+      // Coalesce by durable, content-free Queue identity instead; a newly
+      // merged message ID changes this key and permits exactly one new notice.
+      noticeDedupKey,
+      // Receipt truth must use the exact Queue identity, never the synthetic
+      // cursor frontier. If the frontier entry lacks identity, keep [] so
+      // seen/handled projections fail closed.
+      correlationMessageIds,
     };
   }
 }

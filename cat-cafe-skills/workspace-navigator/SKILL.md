@@ -1,10 +1,6 @@
 ---
 name: workspace-navigator
-description: >
-  猫猫可编程导航 Workspace 面板：operator说模糊意图，猫猫找到路径，自动打开文件/目录。
-  Use when: operator说"打开日志""看看代码""打开设计图""帮我打开那个文档"等模糊指令。
-  Not for: 打开 localhost 前端页面（用 browser-preview）、纯代码编写（不涉及展示给operator看）。
-  Output: Hub 右侧 Workspace 面板自动打开并导航到目标文件/目录。
+description: 猫猫把“打开文档、代码或日志”等模糊意图解析成本地绝对路径或 worktree 相对路径，并返回 applied、queued、blocked 或 unconfirmed 的真实 Workspace 投递状态。
 triggers:
   - "打开文件"
   - "看看代码"
@@ -34,13 +30,12 @@ Step 1: 意图解析 — operator想看什么？
   "打开那个 discussion" → 讨论文档
 
 Step 2: 路径搜索 — 用你的工具找到精确路径
-  用 glob/grep/read 找到文件的相对路径（相对于 worktree 根目录）
+  用 glob/grep/read 找到文件的精确绝对路径；已有可靠 worktreeId 时也可用相对路径
 
 Step 3: 调 typed MCP — 让 Hub 前端导航
   cat_cafe_workspace_navigate({
-    path: "找到的相对路径",
+    path: "/精确/绝对/路径",
     action: "open",
-    worktreeId: "目标worktree",
     threadId: "当前 threadId（有就传）"
   })
 ```
@@ -80,8 +75,11 @@ Step 3: 调 typed MCP — 让 Hub 前端导航
 
 ### 路径格式要求
 
-- **必须是相对路径**（相对于 worktree 根目录），不要传绝对路径
-- 例：`packages/api/data/logs/api/2026-03-21.log`，不是 `/home/user/.../2026-03-21.log`
+- **绝对路径可直接传**，这是 Codex 输出本地文件的原生格式；服务端会解析为安全的
+  `(worktreeId, repoRelativePath)` target
+- 已知目标 worktreeId 时也可传 repo-relative 路径；此时 `worktreeId` 必填
+- 例：`/home/user/cat-cafe/docs/VISION.md` 可不传 worktreeId；
+  `docs/VISION.md` 必须同时传 `worktreeId: "cat-cafe"`
 - 目录路径末尾带不带 `/` 都行
 
 ## Step 3 详解：调用 `cat_cafe_workspace_navigate`
@@ -90,9 +88,9 @@ Step 3: 调 typed MCP — 让 Hub 前端导航
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
-| `path` | **是** | 目标文件或目录的相对路径 |
+| `path` | **是** | 目标文件或目录的绝对路径；或配合 worktreeId 的 repo-relative 路径 |
 | `action` | 否 | `reveal`（展开目录树到目标，默认）或 `open`（打开文件查看器） |
-| `worktreeId` | **是** | 指定在哪个 worktree 里导航。API 需要此字段来解析路径 |
+| `worktreeId` | 条件必填 | repo-relative path 必填；absolute path 省略 |
 | `threadId` | **建议传** | 当前 thread ID，用于防止多 tab 串扰。传了只有对应 tab 响应 |
 
 ### action 选择
@@ -108,10 +106,19 @@ Step 3: 调 typed MCP — 让 Hub 前端导航
 | 场景 | 调用 |
 |------|------|
 | 打开日志目录 | `cat_cafe_workspace_navigate({ path: "packages/api/data/logs/api/", action: "reveal", worktreeId: "cat-cafe-runtime" })` |
-| 打开 Feature 文档 | `cat_cafe_workspace_navigate({ path: "docs/features/F131-workspace-navigator.md", action: "open", worktreeId: "cat-cafe" })` |
+| 打开 Feature 文档 | `cat_cafe_workspace_navigate({ path: "/home/user/cat-cafe/docs/features/F131-workspace-navigator.md", action: "open" })` |
 | 打开到某一行 | `cat_cafe_workspace_navigate({ path: "packages/web/src/stores/chatStore.ts", action: "open", worktreeId: "cat-cafe", line: 1273 })` |
 
 如果 MCP 工具不可用，先说明工具面缺失并按 F223 追踪；不要把手写第一方 `curl localhost` 当主路径。
+
+### 结果判读
+
+| deliveryStatus | 含义 | 下一步 |
+|---|---|---|
+| `applied` | 至少一个 Hub client 已写入 Workspace 状态 | 可告诉operator已经打开 |
+| `queued` | 目标 thread/route/viewport 当前不可见，已在该浏览器 session 排队 | 说明“已排队，回到目标 thread/桌面宽度会打开” |
+| `blocked` | Presentation Lock 或浏览器无法安全持久化 | 说明明确 reason，不声称已打开 |
+| `unconfirmed` | 请求合法且已发出，但没有 client 回执 | 说明未确认；不要把 `ok:true` 翻译成用户已看到 |
 
 ## 什么时候主动用
 
@@ -136,8 +143,9 @@ operator说"看日志"时，**告诉operator点右侧面板的按钮**比你调�
 - **不要只回复路径让operator自己去点** — 你的价值是「帮operator打开」，不是「告诉operator路径」
 - **不要问operator要精确路径** — 你自己能搜到，这是你的活
 - **不要和 browser-preview 混淆** — workspace-navigator 打开文件/目录；browser-preview 打开 localhost 网页
-- **不要传绝对路径** — API 只接受相对路径
+- **不要为了适配工具手工把可靠绝对路径改写成相对路径** — 绝对路径就是受支持输入
 - **不要瞎猜路径不验证** — 先 glob/grep 确认文件存在，再调 API
+- **不要把 `ok:true` 当成“operator已看到”** — 必须看 `deliveryStatus`
 
 ## 和其他 skill 的区别
 
@@ -152,7 +160,7 @@ operator说"看日志"时，**告诉operator点右侧面板的按钮**比你调�
 
 | 现象 | 原因 | 修法 |
 |------|------|------|
-| 右侧无反应 | Hub/API 没跑 / 路径不存在 / MCP callback 未配置 | 检查工具返回错误；确认路径存在 |
+| 右侧无反应 | `deliveryStatus` 是 queued/blocked/unconfirmed | 读 reason；queued 等目标 thread/桌面，blocked 解除锁，unconfirmed 重试 |
 | 打开了错误的文件 | glob 匹配到了多个，选了错的 | 列出所有匹配让operator确认 |
-| worktree 切换失败 | worktreeId 不存在 | 查看当前 Workspace worktree 列表或改传正确 worktreeId |
-| 面板没自动打开 | Socket 连接可能断了 | 刷新 Hub 页面重试 |
+| worktree 切换失败 | 相对路径的 worktreeId 不存在，或绝对路径不在注册 root | 改传可靠绝对路径，或核对 worktree 列表 |
+| 面板没自动打开 | Socket 无客户端回执 | `unconfirmed` 时确认 Hub 在线后重试 |

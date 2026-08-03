@@ -1,21 +1,17 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import type {
-  ClassifiedFrictionCluster,
-  FrictionRollupInput,
-  FrictionRollupReport,
-  FrictionRollupSourceSelector,
-} from '@cat-cafe/shared';
+import type { ClassifiedFrictionCluster, FrictionRollupReport, FrictionRollupSourceSelector } from '@cat-cafe/shared';
 import { resolveA2aEvidenceBundle } from '../a2a/eval-a2a-artifact-resolver.js';
 import type { EvalDomainRegistryEntry } from '../domain/eval-domain-registry.js';
 import { parseVerdictHandoffPacket, type VerdictHandoffPacket } from '../verdict-handoff.js';
 import { formatFrictionLiveVerdictMarkdown } from './eval-friction-renderer.js';
+import { buildFrictionMeasurementReport, type FrictionMeasurementCapture } from './friction-measurement-pilot.js';
 import { buildFrictionRollupReport } from './friction-rollup-report.js';
 import { assertFrictionSubmittedPacketMatches } from './friction-submitted-packet-guard.js';
 
 const SAFE_VERDICT_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
-const SANITIZE_RULES_VERSION = 'f245-friction-rollup-v1';
+const SANITIZE_RULES_VERSION = 'f267-friction-measurement-v1';
 /** Single bundle component id — all rollup metrics hang off it so attribution anchors validate. */
 const ROLLUP_COMPONENT_ID = 'friction-rollup';
 const ROLLUP_COMPONENT_NAME = 'friction rollup (Top-N + sensorForm)';
@@ -24,7 +20,7 @@ export interface GenerateFrictionLiveVerdictInput {
   verdictId: string;
   harnessFeedbackRoot: string;
   domain: EvalDomainRegistryEntry;
-  rollupInput: FrictionRollupInput;
+  measurementCapture: FrictionMeasurementCapture;
   selector: FrictionRollupSourceSelector;
   submittedPacket: VerdictHandoffPacket;
   generatedAt?: string;
@@ -48,8 +44,9 @@ export interface FrictionLiveVerdictArtifact {
 /**
  * F245 Phase C PR1b — friction live-verdict file-writer.
  *
- * Builds the Top-N rollup report from the resolved live input, writes the
- * task-outcome-shaped bundle (raw report under `bundleDir/raw/`, Decision 2 —
+ * Builds the Top-N rollup report from the frozen live capture, writes the
+ * rollup plus F267 measurement-validity evidence under `bundleDir/raw/`,
+ * and hashes both into provenance. The remaining task-outcome-shaped bundle (Decision 2 —
  * no extraStagedPaths / no gitignore force-add), resolves canonical bundle refs,
  * and renders verdict.md from the cat-submitted packet (Decision 3). KD-4: the
  * generator performs NO writeback (no afterPublish side effect); the only writes
@@ -61,11 +58,14 @@ export function generateFrictionLiveVerdict(input: GenerateFrictionLiveVerdictIn
   assertSafeVerdictId(input.verdictId);
   assertFrictionSubmittedPacketMatches(input.submittedPacket, input.domain);
 
-  const generatedAt = input.generatedAt ?? new Date().toISOString();
-  const report = buildFrictionRollupReport(input.rollupInput, generatedAt, {
+  assertMeasurementCapturePresent(input.measurementCapture);
+  assertMeasurementWindowMatches(input.measurementCapture, input.selector);
+  const generatedAt = input.generatedAt ?? input.measurementCapture.capturedAt;
+  const report = buildFrictionRollupReport(input.measurementCapture.rollupInput, generatedAt, {
     ...(input.selector.topN !== undefined ? { topN: input.selector.topN } : {}),
     ...(input.selector.tokenCap !== undefined ? { tokenCap: input.selector.tokenCap } : {}),
   });
+  const measurement = buildFrictionMeasurementReport({ ...input.measurementCapture, rollupReport: report });
 
   const bundleDir = join(input.harnessFeedbackRoot, 'bundles', input.verdictId);
   const verdictPath = join(input.harnessFeedbackRoot, 'verdicts', `${input.verdictId}.md`);
@@ -82,13 +82,15 @@ export function generateFrictionLiveVerdict(input: GenerateFrictionLiveVerdictIn
   writeJson(rawReportPath, {
     verdictId: input.verdictId,
     selector: input.selector,
-    window: input.rollupInput.window,
-    signalCount: input.rollupInput.signals.length,
-    clusterCount: input.rollupInput.clusters.length,
-    degraded: input.rollupInput.degraded,
-    droppedChannels: input.rollupInput.droppedChannels,
+    window: input.measurementCapture.rollupInput.window,
+    signalCount: input.measurementCapture.rollupInput.signals.length,
+    clusterCount: input.measurementCapture.rollupInput.clusters.length,
+    degraded: input.measurementCapture.rollupInput.degraded,
+    droppedChannels: input.measurementCapture.rollupInput.droppedChannels,
     report,
   });
+  const measurementPath = join(rawDir, 'measurement-validity.json');
+  writeJson(measurementPath, measurement);
 
   const provenance = {
     verdictId: input.verdictId,
@@ -97,11 +99,15 @@ export function generateFrictionLiveVerdict(input: GenerateFrictionLiveVerdictIn
         path: relative(join(input.harnessFeedbackRoot, '..', '..'), rawReportPath).replace(/\\/g, '/'),
         sha256: sha256File(rawReportPath),
       },
+      {
+        path: relative(join(input.harnessFeedbackRoot, '..', '..'), measurementPath).replace(/\\/g, '/'),
+        sha256: sha256File(measurementPath),
+      },
     ],
     generatedAt,
     generator: {
       name: 'eval-friction-live-verdict',
-      version: '1',
+      version: '2',
       ...(input.generatorCommit ? { commit: input.generatorCommit } : {}),
     },
     sanitizeRulesVersion: SANITIZE_RULES_VERSION,
@@ -302,6 +308,34 @@ function truncate(text: string): string {
 function assertSafeVerdictId(verdictId: string): void {
   if (!SAFE_VERDICT_ID_PATTERN.test(verdictId)) {
     throw new Error('verdictId must be a safe slug');
+  }
+}
+
+function assertMeasurementCapturePresent(
+  capture: FrictionMeasurementCapture | undefined,
+): asserts capture is FrictionMeasurementCapture {
+  if (
+    !capture ||
+    !capture.rollupInput ||
+    !capture.rollupReport ||
+    !capture.channelCaptures ||
+    !Array.isArray(capture.expectedCancelIds)
+  ) {
+    throw new Error('friction_measurement_capture_required');
+  }
+}
+
+function assertMeasurementWindowMatches(
+  capture: FrictionMeasurementCapture,
+  selector: FrictionRollupSourceSelector,
+): void {
+  if (
+    capture.rollupInput.window.sinceMs !== selector.windowStartMs ||
+    capture.rollupInput.window.untilMs !== selector.windowEndMs ||
+    capture.rollupReport.window.sinceMs !== selector.windowStartMs ||
+    capture.rollupReport.window.untilMs !== selector.windowEndMs
+  ) {
+    throw new Error('friction_measurement_window_mismatch');
   }
 }
 

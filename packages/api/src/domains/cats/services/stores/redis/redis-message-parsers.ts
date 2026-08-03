@@ -4,9 +4,19 @@
  * F23: 拆分以减少 RedisMessageStore.ts 行数
  */
 
-import type { CatId, ConnectorSource, MessageContent, RichMessageExtra } from '@cat-cafe/shared';
+import type {
+  CatId,
+  ConnectorSource,
+  CrossThreadCoordination,
+  MessageContent,
+  RichMessageExtra,
+} from '@cat-cafe/shared';
+import { deliveryDecisionCueCarrierV1Schema } from '@cat-cafe/shared';
 import type { MessageMetadata } from '../../types.js';
 import type { StoredMessage, StoredToolEvent } from '../ports/MessageStore.js';
+import { parseQueuedMessageCustody } from '../ports/queued-message-custody.js';
+import type { TurnExecutionMessageProjection } from '../ports/TurnExecutionStore.js';
+import { parseRecoveryMarker } from './redis-message-recovery-parser.js';
 
 export function safeParseMentions(raw: string | undefined): readonly CatId[] {
   if (!raw) return [];
@@ -38,19 +48,67 @@ export function safeParseContentBlocks(raw: string | undefined): readonly Messag
   }
 }
 
+export const safeParseQueueCustody = parseQueuedMessageCustody;
+
+function parseCrossThreadCoordination(value: unknown): CrossThreadCoordination | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const coordination = value as Record<string, unknown>;
+  if (
+    typeof coordination.id !== 'string' ||
+    coordination.id.length === 0 ||
+    coordination.id.length > 128 ||
+    !/^[A-Za-z0-9._:-]+$/.test(coordination.id) ||
+    !['active', 'terminal', 'ack'].includes(String(coordination.phase)) ||
+    !Number.isInteger(coordination.hop) ||
+    Number(coordination.hop) < 0
+  ) {
+    return undefined;
+  }
+  return {
+    id: coordination.id,
+    phase: coordination.phase as CrossThreadCoordination['phase'],
+    hop: Number(coordination.hop),
+  };
+}
+
+function parseTurnExecutionProjection(value: unknown): TurnExecutionMessageProjection | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.invocationId !== 'string' ||
+    candidate.invocationId.length === 0 ||
+    typeof candidate.parentInvocationId !== 'string' ||
+    candidate.parentInvocationId.length === 0 ||
+    !['ordinary', 'routing_guard', 'freshness_supplement'].includes(String(candidate.executionKind))
+  ) {
+    return undefined;
+  }
+  return {
+    invocationId: candidate.invocationId,
+    parentInvocationId: candidate.parentInvocationId,
+    executionKind: candidate.executionKind as TurnExecutionMessageProjection['executionKind'],
+  };
+}
+
 /** F022+F052: Parse extra field (contains rich blocks, stream metadata, cross-post origin) */
 export function safeParseExtra(raw: string | undefined):
   | {
       rich?: RichMessageExtra;
+      memoryCue?: NonNullable<StoredMessage['extra']>['memoryCue'];
       // F194 Phase Z9 hotfix: stream now carries dual id (parent + per-cat-turn).
       // Frontend `getBubbleInvocationId` uses turnInvocationId for bubble identity
       // (falls back to invocationId / parent only for legacy records).
-      stream?: { invocationId: string; turnInvocationId?: string };
+      stream?: { invocationId?: string; turnInvocationId?: string; parallelBatchId?: string };
+      causal?: { kind: 'invocation_reply'; triggerMessageId: string };
+      turnExecution?: TurnExecutionMessageProjection;
+      auxiliaryTurnExecutions?: TurnExecutionMessageProjection[];
       crossPost?: {
         sourceThreadId: string;
         sourceInvocationId?: string;
         effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work';
       };
+      coordination?: CrossThreadCoordination;
+      callbackDedup?: NonNullable<StoredMessage['extra']>['callbackDedup'];
       scheduler?: {
         hiddenTrigger?: boolean;
         toast?: {
@@ -63,6 +121,9 @@ export function safeParseExtra(raw: string | undefined):
       };
       targetCats?: string[];
       isExplicitPost?: boolean;
+      freshness?: NonNullable<StoredMessage['extra']>['freshness'];
+      supplement?: NonNullable<StoredMessage['extra']>['supplement'];
+      recovery?: NonNullable<NonNullable<StoredMessage['extra']>['recovery']>;
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
       systemKind?: 'a2a_routing' | 'context_briefing';
     }
@@ -74,12 +135,18 @@ export function safeParseExtra(raw: string | undefined):
 
     const result: {
       rich?: RichMessageExtra;
-      stream?: { invocationId: string; turnInvocationId?: string };
+      memoryCue?: NonNullable<StoredMessage['extra']>['memoryCue'];
+      stream?: { invocationId?: string; turnInvocationId?: string; parallelBatchId?: string };
+      causal?: { kind: 'invocation_reply'; triggerMessageId: string };
+      turnExecution?: TurnExecutionMessageProjection;
+      auxiliaryTurnExecutions?: TurnExecutionMessageProjection[];
       crossPost?: {
         sourceThreadId: string;
         sourceInvocationId?: string;
         effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work';
       };
+      coordination?: CrossThreadCoordination;
+      callbackDedup?: NonNullable<StoredMessage['extra']>['callbackDedup'];
       scheduler?: {
         hiddenTrigger?: boolean;
         toast?: {
@@ -92,6 +159,9 @@ export function safeParseExtra(raw: string | undefined):
       };
       targetCats?: string[];
       isExplicitPost?: boolean;
+      freshness?: NonNullable<StoredMessage['extra']>['freshness'];
+      supplement?: NonNullable<StoredMessage['extra']>['supplement'];
+      recovery?: NonNullable<NonNullable<StoredMessage['extra']>['recovery']>;
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
       systemKind?: 'a2a_routing' | 'context_briefing';
       a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string };
@@ -104,22 +174,98 @@ export function safeParseExtra(raw: string | undefined):
       hasField = true;
     }
 
+    const deliveryDecision = deliveryDecisionCueCarrierV1Schema.safeParse(parsed.memoryCue?.deliveryDecision);
+    if (deliveryDecision.success) {
+      result.memoryCue = { deliveryDecision: deliveryDecision.data };
+      hasField = true;
+    }
+
     // Validate stream sub-field shape (#80: draft dedup key)
     // F194 Phase Z9 hotfix: preserve turnInvocationId (per-cat-turn id, written
     // by Z9 backend stamping). Pre-hotfix parser rebuilt only { invocationId },
     // silently stripping turnInvocationId → frontend bubble identity fell back
     // to parent → multi-turn same-cat under shared parent collapsed (R13/R14).
-    if (parsed.stream && typeof parsed.stream === 'object' && typeof parsed.stream.invocationId === 'string') {
-      result.stream = {
-        invocationId: parsed.stream.invocationId,
+    // F254 Phase E: parallelBatchId is an independent freshness identity. It must
+    // survive Redis even if invocation metadata is absent or unavailable.
+    if (parsed.stream && typeof parsed.stream === 'object') {
+      const stream = {
+        ...(typeof parsed.stream.invocationId === 'string' ? { invocationId: parsed.stream.invocationId } : {}),
         ...(typeof parsed.stream.turnInvocationId === 'string'
           ? { turnInvocationId: parsed.stream.turnInvocationId }
           : {}),
+        ...(typeof parsed.stream.parallelBatchId === 'string'
+          ? { parallelBatchId: parsed.stream.parallelBatchId }
+          : {}),
+      };
+      if (Object.keys(stream).length > 0) {
+        result.stream = stream;
+        hasField = true;
+      }
+    }
+
+    if (
+      parsed.causal &&
+      typeof parsed.causal === 'object' &&
+      parsed.causal.kind === 'invocation_reply' &&
+      typeof parsed.causal.triggerMessageId === 'string' &&
+      parsed.causal.triggerMessageId.length > 0
+    ) {
+      result.causal = {
+        kind: 'invocation_reply',
+        triggerMessageId: parsed.causal.triggerMessageId,
       };
       hasField = true;
     }
 
-    // F52: Validate crossPost sub-field shape
+    const turnExecution = parseTurnExecutionProjection(parsed.turnExecution);
+    if (turnExecution) {
+      result.turnExecution = turnExecution;
+      hasField = true;
+    }
+
+    if (Array.isArray(parsed.auxiliaryTurnExecutions)) {
+      const seenInvocationIds = new Set<string>();
+      const auxiliaryTurnExecutions = (parsed.auxiliaryTurnExecutions as unknown[])
+        .map((value: unknown) => parseTurnExecutionProjection(value))
+        .filter((projection): projection is TurnExecutionMessageProjection => {
+          if (!projection || seenInvocationIds.has(projection.invocationId)) return false;
+          seenInvocationIds.add(projection.invocationId);
+          return true;
+        });
+      if (auxiliaryTurnExecutions.length > 0) {
+        result.auxiliaryTurnExecutions = auxiliaryTurnExecutions;
+        hasField = true;
+      }
+    }
+
+    // F167 Phase R: lifecycle state is independent of provenance. Read the
+    // legacy nested shape during migration, but always project it top-level.
+    const legacyCoordination =
+      parsed.crossPost && typeof parsed.crossPost === 'object'
+        ? parseCrossThreadCoordination(parsed.crossPost.coordination)
+        : undefined;
+    const coordination = parseCrossThreadCoordination(parsed.coordination) ?? legacyCoordination;
+    if (coordination) {
+      result.coordination = coordination;
+      hasField = true;
+    }
+
+    const validCoordinationDedupKeys = new Set(['minted-active-root', 'minted-terminal-root', 'action-active-root']);
+    if (
+      parsed.callbackDedup &&
+      typeof parsed.callbackDedup === 'object' &&
+      typeof parsed.callbackDedup.coordinationKey === 'string' &&
+      validCoordinationDedupKeys.has(parsed.callbackDedup.coordinationKey)
+    ) {
+      result.callbackDedup = {
+        coordinationKey: parsed.callbackDedup.coordinationKey as NonNullable<
+          NonNullable<StoredMessage['extra']>['callbackDedup']
+        >['coordinationKey'],
+      };
+      hasField = true;
+    }
+
+    // F52: Validate crossPost provenance shape
     if (
       parsed.crossPost &&
       typeof parsed.crossPost === 'object' &&
@@ -158,6 +304,89 @@ export function safeParseExtra(raw: string | undefined):
 
     if (parsed.isExplicitPost === true) {
       result.isExplicitPost = true;
+      hasField = true;
+    }
+
+    if (parsed.freshness && typeof parsed.freshness === 'object') {
+      const freshness = parsed.freshness as Record<string, unknown>;
+      const priorFrontierMessageId =
+        typeof freshness.priorFrontierMessageId === 'string' || freshness.priorFrontierMessageId === null
+          ? freshness.priorFrontierMessageId
+          : undefined;
+      if ((freshness.kind === 'scan_pending' || freshness.kind === 'fresh') && priorFrontierMessageId !== undefined) {
+        result.freshness = { kind: freshness.kind, priorFrontierMessageId };
+        hasField = true;
+      } else if (
+        freshness.kind === 'published_with_unseen' &&
+        priorFrontierMessageId !== undefined &&
+        Array.isArray(freshness.generatedWithUnseen) &&
+        freshness.generatedWithUnseen.every((id) => typeof id === 'string') &&
+        typeof freshness.lineageId === 'string'
+      ) {
+        result.freshness = {
+          kind: 'published_with_unseen',
+          priorFrontierMessageId,
+          generatedWithUnseen: freshness.generatedWithUnseen as string[],
+          lineageId: freshness.lineageId,
+          ...(freshness.supplementFailureReason === 'infrastructure'
+            ? { supplementFailureReason: 'infrastructure' as const }
+            : {}),
+        };
+        hasField = true;
+      } else if (
+        freshness.kind === 'freshness_unknown' &&
+        priorFrontierMessageId !== undefined &&
+        typeof freshness.reason === 'string' &&
+        ['cursor_missing', 'scan_incomplete', 'error_failopen', 'queued_identity_missing'].includes(freshness.reason)
+      ) {
+        result.freshness = {
+          kind: 'freshness_unknown',
+          priorFrontierMessageId,
+          reason: freshness.reason as
+            | 'cursor_missing'
+            | 'scan_incomplete'
+            | 'error_failopen'
+            | 'queued_identity_missing',
+        };
+        hasField = true;
+      } else if (
+        freshness.kind === 'closure_replacement' &&
+        typeof freshness.closureId === 'string' &&
+        typeof freshness.targetCatId === 'string'
+      ) {
+        result.freshness = {
+          kind: 'closure_replacement',
+          closureId: freshness.closureId,
+          targetCatId: freshness.targetCatId,
+          ...(typeof freshness.originTriggerMessageId === 'string' || freshness.originTriggerMessageId === null
+            ? { originTriggerMessageId: freshness.originTriggerMessageId }
+            : {}),
+        };
+        hasField = true;
+      }
+    }
+
+    if (
+      parsed.supplement &&
+      typeof parsed.supplement === 'object' &&
+      typeof parsed.supplement.lineageId === 'string' &&
+      typeof parsed.supplement.supplementId === 'string' &&
+      (parsed.supplement.seq === 1 || parsed.supplement.seq === 2) &&
+      typeof parsed.supplement.originalMessageId === 'string' &&
+      parsed.supplement.lineageId === parsed.supplement.originalMessageId
+    ) {
+      result.supplement = {
+        lineageId: parsed.supplement.lineageId,
+        supplementId: parsed.supplement.supplementId,
+        seq: parsed.supplement.seq,
+        originalMessageId: parsed.supplement.originalMessageId,
+      };
+      hasField = true;
+    }
+
+    const recovery = parseRecoveryMarker(parsed.recovery);
+    if (recovery) {
+      result.recovery = recovery;
       hasField = true;
     }
 

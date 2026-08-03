@@ -26,6 +26,7 @@ function stubTrace(overrides = {}) {
       { command: 'git worktree add ../wt -b feat/x', exitCode: 0 },
       { command: 'pnpm install', exitCode: 0 },
     ],
+    changedFiles: [],
     envSnapshot: { REDIS_URL: 'redis://localhost:6398' },
     gitState: {
       branch: 'feat/x',
@@ -130,6 +131,58 @@ describe('sop sourceRefs validation', () => {
     const err = validateSopTraceSelector(bad);
     assert.ok(err, 'should return error string');
     assert.ok(err.includes('trace'), err);
+  });
+
+  it('validateSopTraceSelector rejects missing trace.changedFiles', async () => {
+    const { validateSopTraceSelector } = await import(IMPORT_PATH_VALIDATION);
+    const trace = stubTrace();
+    delete trace.changedFiles;
+    const err = validateSopTraceSelector({
+      kind: 'sop-trace-eval',
+      sopDefinitionId: 'development',
+      trace,
+    });
+    assert.ok(err, 'should return error string');
+    assert.ok(err.includes('trace.changedFiles'), err);
+  });
+
+  it('validateSopTraceSelector rejects changedFileEvents without ordering evidence', async () => {
+    const { validateSopTraceSelector } = await import(IMPORT_PATH_VALIDATION);
+    const err = validateSopTraceSelector(
+      stubSopSourceRefs({
+        trace: stubTrace({
+          changedFiles: ['packages/mcp-server/src/tools/callback-tools.ts'],
+          changedFileEvents: [{ path: 'packages/mcp-server/src/tools/callback-tools.ts' }],
+        }),
+      }),
+    );
+
+    assert.ok(err, 'should return error string');
+    assert.ok(err.includes('changedFileEvents'), err);
+    assert.ok(err.includes('eventNo or timestamp'), err);
+  });
+
+  it('validateSopTraceSelector rejects convention graph commands without shared ordering coordinates', async () => {
+    const { validateSopTraceSelector } = await import(IMPORT_PATH_VALIDATION);
+    const err = validateSopTraceSelector(
+      stubSopSourceRefs({
+        trace: stubTrace({
+          commands: [
+            {
+              command: 'pnpm convention-graph:code-consumers --domain mcp-tool --name callback-tools',
+              exitCode: 0,
+              timestamp: 1000,
+            },
+          ],
+          changedFiles: ['packages/mcp-server/src/tools/callback-tools.ts'],
+          changedFileEvents: [{ path: 'packages/mcp-server/src/tools/callback-tools.ts', eventNo: 5 }],
+        }),
+      }),
+    );
+
+    assert.ok(err, 'should return error string');
+    assert.ok(err.includes('changedFileEvents'), err);
+    assert.ok(err.includes('shared eventNo or timestamp'), err);
   });
 
   it('validateSopTraceSelector accepts valid selector', async () => {

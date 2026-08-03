@@ -4,6 +4,8 @@
  * Zero LLM cost — regex patterns reuse AutoSummarizer's proven set.
  */
 
+import type { ThreadMemorySourceRef } from '../stores/ports/ThreadStore.js';
+
 const MAX_DECISIONS = 8;
 const MAX_OPEN_QUESTIONS = 5;
 const MAX_ARTIFACTS = 8;
@@ -15,12 +17,15 @@ const ARTIFACT_PATTERN = /\b(ADR-\d+|F\d{2,3})\b/g;
 
 export interface DecisionSignals {
   decisions: string[];
+  decisionRefs?: Array<ThreadMemorySourceRef | null>;
   openQuestions: string[];
+  openQuestionRefs?: Array<ThreadMemorySourceRef | null>;
   artifacts: string[];
 }
 
 export interface DecisionSignalsInput {
   transcriptText: string;
+  transcriptEntries?: Array<{ content: string; sourceRef: ThreadMemorySourceRef }>;
   summaryConclusions: string[];
   summaryOpenQuestions: string[];
 }
@@ -30,16 +35,6 @@ function overlaps(a: string, b: string): boolean {
   const short = a.length <= b.length ? a : b;
   const long = a.length <= b.length ? b : a;
   return long.includes(short);
-}
-
-function dedup(items: string[]): string[] {
-  const result: string[] = [];
-  for (const item of items) {
-    if (!result.some((existing) => overlaps(existing, item))) {
-      result.push(item);
-    }
-  }
-  return result;
 }
 
 function extractFromText(text: string, patterns: RegExp[], max: number): string[] {
@@ -55,10 +50,38 @@ function extractFromText(text: string, patterns: RegExp[], max: number): string[
   return matches;
 }
 
+interface ReferencedSignal {
+  text: string;
+  sourceRef: ThreadMemorySourceRef | null;
+}
+
+function dedupReferenced(items: ReferencedSignal[], max: number): ReferencedSignal[] {
+  const result: ReferencedSignal[] = [];
+  for (const item of items) {
+    if (!result.some((existing) => overlaps(existing.text, item.text))) result.push(item);
+    if (result.length >= max) break;
+  }
+  return result;
+}
+
+function extractReferenced(input: DecisionSignalsInput, patterns: RegExp[], max: number): ReferencedSignal[] {
+  if (!input.transcriptEntries?.length) {
+    return extractFromText(input.transcriptText, patterns, max).map((text) => ({ text, sourceRef: null }));
+  }
+  const extracted: ReferencedSignal[] = [];
+  for (const entry of input.transcriptEntries) {
+    for (const text of extractFromText(entry.content, patterns, max)) {
+      extracted.push({ text, sourceRef: entry.sourceRef });
+      if (extracted.length >= max) return extracted;
+    }
+  }
+  return extracted;
+}
+
 export function extractDecisionSignals(input: DecisionSignalsInput): DecisionSignals {
   // 1. Regex extraction from transcript
-  const regexDecisions = extractFromText(input.transcriptText, DECISION_PATTERNS, MAX_DECISIONS);
-  const regexQuestions = extractFromText(input.transcriptText, QUESTION_PATTERNS, MAX_OPEN_QUESTIONS);
+  const regexDecisions = extractReferenced(input, DECISION_PATTERNS, MAX_DECISIONS);
+  const regexQuestions = extractReferenced(input, QUESTION_PATTERNS, MAX_OPEN_QUESTIONS);
 
   // 2. Artifact references from transcript
   const artifactMatches = new Set<string>();
@@ -67,13 +90,18 @@ export function extractDecisionSignals(input: DecisionSignalsInput): DecisionSig
   }
 
   // 3. Combine with ThreadSummary (summary first — higher quality)
-  const allDecisions = [...input.summaryConclusions, ...regexDecisions];
-  const allQuestions = [...input.summaryOpenQuestions, ...regexQuestions];
+  const allDecisions = [...input.summaryConclusions.map((text) => ({ text, sourceRef: null })), ...regexDecisions];
+  const allQuestions = [...input.summaryOpenQuestions.map((text) => ({ text, sourceRef: null })), ...regexQuestions];
+
+  const decisions = dedupReferenced(allDecisions, MAX_DECISIONS);
+  const questions = dedupReferenced(allQuestions, MAX_OPEN_QUESTIONS);
 
   // 4. Dedup + cap
   return {
-    decisions: dedup(allDecisions).slice(0, MAX_DECISIONS),
-    openQuestions: dedup(allQuestions).slice(0, MAX_OPEN_QUESTIONS),
+    decisions: decisions.map((item) => item.text),
+    decisionRefs: decisions.map((item) => item.sourceRef),
+    openQuestions: questions.map((item) => item.text),
+    openQuestionRefs: questions.map((item) => item.sourceRef),
     artifacts: [...artifactMatches].slice(0, MAX_ARTIFACTS),
   };
 }

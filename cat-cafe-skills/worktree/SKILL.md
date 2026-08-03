@@ -1,10 +1,7 @@
 ---
 name: worktree
-description: >
-  创建 Git worktree 隔离开发环境，含 Redis 6398 安全配置。
-  Use when: 开始任何代码修改、新功能开发、bug fix。
-  Not for: 纯文档修改（≤5 行）、不涉及代码/脚本/API/第一方执行面的讨论。
-  Output: 隔离的 worktree + 正确的 Redis/环境配置。
+tips_exempt: Developer isolation workflow with no end-user capability or useful Hub discovery moment.
+description: 为代码、脚本、API 与第一方执行面创建隔离 Git worktree，并配置 Redis 6398；classifier 放行的 co-creation docs direct push 不进入本流程。
 triggers:
   - "开始开发"
   - "新 worktree"
@@ -15,6 +12,16 @@ renamed-from: using-git-worktrees
 # Worktree
 
 开始任何非 trivial 的功能开发前，必须拉 worktree 隔离，不要直接在 main 上改代码。Skill / MCP description 如果改到 API route、localhost、script、CLI command、第一方执行面，即使是 ≤5 行，也不按“纯文档免验证”处理：至少 commit 前跑 `pnpm check`；非 trivial 行为改动仍应开 worktree。
+
+## Co-Creation Docs 边界
+
+纯文档不再按行数决定是否进 worktree。用户授权落盘的共创文档先加载 `co-creation-docs`；显然低风险时猫可直接判定，拿不准或准备升到重载体时才运行 `pnpm classify:co-creation-docs`：
+
+- 显然 low-risk 或 `delivery=direct_push` → 不加载本 skill；走轻量文档校验 + 按内容决定 `review=required|reuse|skip` + commit/push。
+- `delivery=pull_request` 且 `lane=co_creation_docs` → 独立分支用于冲突/治理 review，但不自动升级 full gate。
+- `lane=regular_development` → 正常加载本 skill。
+
+`cat-cafe-skills/**`、`sop-definitions/**`、脚本、CLI 与其他第一方执行面始终属于 regular development；文件扩展名是 `.md` 也不例外。
 
 ## 开工前 Recall（F102 记忆系统）🔴
 
@@ -29,7 +36,7 @@ search_evidence("{topic}", scope="all")
 
 ## 目录位置（铁律）
 
-**Cat Cafe 项目：`../cat-cafe-{feature-name}`（relay-station/ 同级）**
+**Clowder AI 项目：`../cat-cafe-{feature-name}`（relay-station/ 同级）**
 
 ```bash
 git worktree add ../cat-cafe-{feature-name} -b feat/{feature-name}
@@ -67,6 +74,27 @@ echo "ahead=$AHEAD behind=$BEHIND"
 3. `git push origin main`（如果 ahead > 0，推送本地更新）
 4. 确认 ahead=0 behind=0 后再创建 worktree
 
+## 创建前：查在飞 PR（别和别的猫撞车）🔴
+
+Main 同步只保证你和 `origin/main` 一致，**不告诉你有没有别的猫正在改同一批文件**。开 worktree 修**跨 feature / 共享代码 / incident（回归 / 脏状态 / "看起来没人管的红灯"）**类问题前，查在飞的 PR——**两刀，缺一不可**：
+
+```bash
+# 刀 1：列在飞 PR，缩到和你要改的 feature/incident 关键词相关的
+gh pr list --state open --search "<关键词>" \
+  --json number,title,headRefName --jq '.[] | "#\(.number) [\(.headRefName)] \(.title)"'
+
+# 刀 2：对可疑候选，确认它到底碰没碰你要改的文件
+gh pr diff <n> --name-only          # 或 gh pr view <n> --json files --jq '.files[].path'
+```
+
+- 🔴 **刀 2 不能省**：`gh pr list` 只给标题 / 分支名，**不显示 changed files**。只跑刀 1 就下"没人在改这个文件"的结论 = 假的安心——这道 pre-flight 自己就成了"名字承诺、覆盖不到"的空门。必须刀 2 核到文件集重叠，才算查过。
+- 命中同一文件 → **先去那只猫的归口 thread 打个招呼**（cross_post 一句"我也在看 X"），别闷头重复。
+- 修 incident / 回归时补历史链路：`gh pr list --state all --limit 30 --search "<关键词>"`。
+- 诊断里列到的分支名（CI 运行表 / `git worktree list`），**凡是匹配你这次关键词 / 同代码区的**，问一句"它在修什么"——别对全仓几百个分支做无差别 triage，那噪音比省下的重复劳动还多。
+- 反过来：你开始修一个跨 feature / incident 问题后，也在归口 thread 留一句"我在改 X"。协调是双向的。
+
+> 教训（2026-07-09 intake #2816 连环事故）：两只猫同一天、修同一批 clobber、找同一个 reviewer，互相不知道。其中一只从零重推诊断 + 366 行恢复补丁**全部作废**——只因开工前没跑这两刀。`git grep` 告诉你"代码是什么样"，回答不了"谁正在改它"。
+
 ## 创建步骤
 
 ```bash
@@ -86,8 +114,9 @@ EOF
 # 4. 验证 Redis 隔离
 echo $REDIS_URL   # 必须是 redis://localhost:6398，不能是 6399
 
-# 5. 验证基线测试通过
-pnpm test
+# 5. 验证与改动风险匹配的基线（示例；不要机械跑无关全仓测试）
+pnpm check:skills   # skill surface
+pnpm test           # 仅在跨包行为 / high-assurance 需要全量 baseline 时
 ```
 
 ## Redis 隔离（数据安全红线）
@@ -222,7 +251,7 @@ Thread-Context: threadId=[thread-id] invocationId=0001780508313338 catId=codex
 - [ ] 目录放在 relay-station/ 同级（不在项目内部）
 - [ ] 不是 `*-runtime` 命名
 - [ ] `.env` 包含 `REDIS_URL=redis://localhost:6398`
-- [ ] 基线测试通过（失败了先报告再问是否继续）
+- [ ] 风险匹配的 baseline 通过（targeted 默认；高风险 / 跨包不确定才全量）
 - [ ] 当前会话不是 `cat-cafe-runtime` 的运行态验收会话（验收会话默认只读，不做重启命令）
 - [ ] 验证目标 URL 已明确；若是 `3003/3004`，你知道自己在打 runtime，而不是当前 worktree 的本地改动
 
@@ -232,4 +261,4 @@ Thread-Context: threadId=[thread-id] invocationId=0001780508313338 catId=codex
 
 ## Next Step
 
-→ **直接加载 `tdd`**（在 worktree 里开始实现）。SOP 链条自动推进（§17）。
+行为 / bug 风险 → `tdd`；确定性生成物或现有 checker 已精准覆盖 → 直接以该红灯为 RED 修到绿；复杂度需要时才补 `writing-plans`。

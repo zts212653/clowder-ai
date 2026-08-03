@@ -104,7 +104,7 @@ describe('F246 AC-D3: ApprovalPanel', () => {
     });
 
     const panel = container.querySelector('[data-testid="approval-panel"]');
-    expect(panel?.textContent).toContain('加载失败');
+    expect(panel?.textContent).toContain('请求失败');
     expect(panel?.textContent).toContain('Network failed');
   });
 

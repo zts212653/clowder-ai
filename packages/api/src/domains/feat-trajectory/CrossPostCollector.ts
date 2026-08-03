@@ -12,6 +12,8 @@
  * See docs/plans/f233-f252-trajectory-emitters.md
  */
 
+import { isCrossThreadProvenance } from '@cat-cafe/shared';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -79,7 +81,7 @@ export class CrossPostCollector {
 
       // Must have cross-post metadata with sourceThreadId
       const sourceThreadId = msg.extra?.crossPost?.sourceThreadId;
-      if (!sourceThreadId) continue;
+      if (!isCrossThreadProvenance(sourceThreadId, msg.threadId)) continue;
 
       // Look up feat association — try source thread first, fall back to target
       let featId = await this.featIndex.lookupByThreadId(sourceThreadId);

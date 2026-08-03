@@ -79,7 +79,7 @@ describe('F246 AC-D2: WorkspaceTabBar responsive modes', () => {
   });
 
   // Constants from WorkspaceTabBar.tsx
-  const TABS_COUNT = 8; // dev, recall, schedule, tasks, community, artifacts, approval, trajectory
+  const TABS_COUNT = 9; // dev, recall, schedule, tasks, community, artifacts, eval, approval, trajectory
   const TAB_FULL_WIDTH = 60;
   const TAB_ICON_WIDTH = 32;
   const GAP_WIDTH = 4;
@@ -102,7 +102,7 @@ describe('F246 AC-D2: WorkspaceTabBar responsive modes', () => {
     const bar = container.querySelector('[data-testid="workspace-tab-bar"]');
     expect(bar).not.toBeNull();
 
-    // All 8 tabs should be visible as buttons
+    // All tabs should be visible as buttons
     const tabs = container.querySelectorAll('button[data-testid^="workspace-tab-"]');
     // Filter out overflow button and overflow menu items
     const mainTabs = Array.from(tabs).filter((t) => {

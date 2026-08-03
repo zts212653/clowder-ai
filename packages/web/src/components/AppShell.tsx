@@ -1,19 +1,25 @@
 'use client';
 
 import { usePathname, useSearchParams } from 'next/navigation';
-import { Suspense, useLayoutEffect } from 'react';
+import { Suspense, useLayoutEffect, useSyncExternalStore } from 'react';
 import { useIsDesktop } from '@/hooks/useIsDesktop';
+import { useWorkspaceNavigate } from '@/hooks/useWorkspaceNavigate';
 import { CallbackAuthSnapshotMount } from '@/stores/callbackAuthStore';
 import { initSidebarWidth, useSidebarStore } from '@/stores/sidebarStore';
 import { ActivityBar } from './ActivityBar';
 import { ConciergeHost } from './concierge/ConciergeHost';
 import { ThreadSidebar } from './ThreadSidebar';
+import {
+  getBrowserThreadRoutePathname,
+  getThreadIdFromPathname,
+  subscribeBrowserThreadRoute,
+} from './ThreadSidebar/thread-navigation';
 import { FloatingPresentationSurfaceHost } from './workspace/FloatingPresentationSurfaceHost';
 import { ResizeHandle } from './workspace/ResizeHandle';
 
 const CHROMELESS_ROUTES = ['/story', '/story-export', '/pixel-brawl', '/showcase'];
 
-const SIDEBAR_HIDDEN_ROUTES = ['/settings', '/marketplace', '/signals', '/memory', '/mission'];
+const SIDEBAR_HIDDEN_ROUTES = ['/settings', '/marketplace', '/signals', '/memory', '/mission', '/starry'];
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -29,16 +35,25 @@ export function AppShell({ children }: AppShellProps) {
 
 function AppShellContent({ children }: AppShellProps) {
   const pathname = usePathname() ?? '/';
+  const livePathname = useSyncExternalStore(subscribeBrowserThreadRoute, getBrowserThreadRoutePathname, () => pathname);
   const searchParams = useSearchParams();
   const isExport = searchParams.get('export') === 'true';
   const { isOpen, width, close, handleResize, resetWidth } = useSidebarStore();
   const isDesktop = useIsDesktop();
+  const routeThreadId = getThreadIdFromPathname(livePathname);
+  const isChatRoute = livePathname === '/' || livePathname.startsWith('/thread/');
+  const isChromeless = CHROMELESS_ROUTES.some((route) => pathname.startsWith(route));
+  useWorkspaceNavigate(isChatRoute ? routeThreadId : null, {
+    isChatRoute,
+    isWorkspaceVisible: isDesktop,
+    enabled: !isExport,
+  });
 
   useLayoutEffect(() => {
     initSidebarWidth();
   }, []);
 
-  if (isExport || CHROMELESS_ROUTES.some((r) => pathname.startsWith(r))) {
+  if (isExport || isChromeless) {
     return <>{children}</>;
   }
 
@@ -59,7 +74,7 @@ function AppShellContent({ children }: AppShellProps) {
       {showSidebar && (
         <div className="flex items-stretch flex-shrink-0">
           <div style={{ width }} className="flex-shrink-0">
-            <ThreadSidebar onClose={close} className="w-full" />
+            <ThreadSidebar onClose={close} className="w-full" routeThreadId={routeThreadId} />
           </div>
           <ResizeHandle
             direction="horizontal"

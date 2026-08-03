@@ -15,7 +15,7 @@ decision_id: ADR-021
 
 ## Context
 
-Cat Café 已有 120+ features，cat-config + skills + shared-rules 体系经过验证。但这套体系目前是硬编码在项目里的，无法让用户自定义、无法分享、无法适配非 coding 场景。
+Clowder AI 已有 120+ features，cat-config + skills + shared-rules 体系经过验证。但这套体系目前是硬编码在项目里的，无法让用户自定义、无法分享、无法适配非 coding 场景。
 
 ### 核心问题
 
@@ -29,7 +29,7 @@ operator的原话：*"如果我是金融从业者？如果我是跑团爱好者�
 |------|-------------------|------------------|
 | 定义 | 一个 agent 怎么工作 | 一群 agent 怎么协作 |
 | 核心差异 | 无 | **shared-rules — 团队社会契约** |
-| 例子 | Claude Code CLAUDE.md | Cat Café shared-rules.md |
+| 例子 | Claude Code CLAUDE.md | Clowder AI shared-rules.md |
 
 单 agent 系统的 skill 只需要告诉一个 agent 怎么工作。多 agent 系统还需要定义 agent 之间的协作规范——这就是 shared-rules。目前业界（OpenClaw、SillyTavern、Cursor）的 skill/plugin 体系都停留在 single-agent 层面。
 
@@ -186,7 +186,7 @@ graph LR
         SE["Extensions<br/>Browser JS"]
     end
 
-    subgraph "Cat Café Pack"
+    subgraph "Clowder AI Pack"
         PM["masks/"]
         PW["workflows/<br/>defaults/"]
         PK["knowledge/"]
@@ -237,7 +237,7 @@ graph TB
 
 ### 9. 与业界方案的定位差异
 
-| 维度 | OpenClaw / SillyTavern | Cursor / Claude Code | **Cat Café Pack** |
+| 维度 | OpenClaw / SillyTavern | Cursor / Claude Code | **Clowder AI Pack** |
 |------|----------------------|---------------------|-------------------|
 | Agent 数量 | 单 agent | 单 agent | **多 agent** |
 | 协作规范 | 无一等公民多 agent 协作规范 | 无一等公民多 agent 协作规范 | **shared-rules 拆为 guardrails + defaults** |

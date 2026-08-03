@@ -8,6 +8,11 @@
  *   4. Build report with R-handle anchors
  *   5. Write report + transition to done
  *
+ * KD-23: No HandleMapStore sync. Investigation anchors live in the report
+ * and are rendered directly by InvestigationReportCard (frontend).
+ * The reply validator uses per-invocation flowing handle tables from
+ * buildConciergeSearchContext — no shared mutable state.
+ *
  * Fire-and-forget from dispatchInvestigateTriage — errors never propagate to HTTP.
  */
 
@@ -124,7 +129,6 @@ export async function executeInvestigation(opts: ExecuteInvestigationOptions): P
     }
 
     // 4b. Post-search deadline recheck (INV I3 fail-closed — cloud P1)
-    // If the search took longer than the deadline, cancel instead of writing results.
     if (isJobExpired(job)) {
       const expired = await jobStore.claimTransition(jobId, 'running', 'cancelled');
       if (expired) await propagatePlanStatus(triagePlanStore, job.triagePlanId, 'cancelled');
@@ -136,14 +140,13 @@ export async function executeInvestigation(opts: ExecuteInvestigationOptions): P
     const report = buildReport(job.query, items);
 
     // 6. Atomic CAS + report write (INV I2: done ⇒ report).
-    // claimDoneWithReport atomically checks status='running', then sets
-    // status='done' AND report in a single write (Lua script in Redis,
-    // synchronous in Memory). This prevents both:
-    //   - cancel-overwrite race (cloud P1 R2: setReport non-atomic GET→SET)
-    //   - done-without-report (gpt52 P1: CAS-before-report + setReport throw)
     const transitioned = await jobStore.claimDoneWithReport(jobId, report);
     if (transitioned) {
       await propagatePlanStatus(triagePlanStore, job.triagePlanId, 'completed');
+      // KD-23: No HandleMapStore sync needed. Investigation report anchors are
+      // rendered directly by InvestigationReportCard (which uses report.anchors).
+      // The reply validator now uses per-invocation handle tables from
+      // buildConciergeSearchContext — zero shared mutable state.
       log.info({ jobId, anchorCount: report.anchors.length }, 'InvestigationJob completed');
     } else {
       log.warn({ jobId }, 'InvestigationJob was cancelled during execution, report discarded');

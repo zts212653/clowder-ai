@@ -1,33 +1,20 @@
-import { basename, isAbsolute, resolve } from 'node:path';
 import type { FrictionRollupSourceSelector } from '@cat-cafe/shared';
+import type { FreshnessReplaySelector } from '../freshness/freshness-replay-types.js';
 import type { QcMetricsSelector } from '../qc-metrics-provider.js';
-import { resolveSafeRawPath } from '../safe-path.js';
-import { VERDICT_CLASSES } from '../task-outcome/task-outcome-episode.js';
 import type { VerdictHandoffPacket } from '../verdict-handoff.js';
+import { isA2aSourceRefs } from './a2a-source-ref-validation.js';
+import { isSopSourceRefs } from './sop-source-ref-validation.js';
+import { isTaskOutcomeSourceRefs } from './task-outcome-source-ref-validation.js';
 import type {
-  A2aSnapshotAttributionRefs,
   AnchorTelemetrySourceSelector,
   HandlerError,
   MemoryRecallSourceSelector,
-  ResolvedSourceRefs,
-  SopTraceSourceSelector,
-  TaskOutcomeSnapshotSourceRefs,
   VerdictSourceRefs,
 } from './types.js';
 
-/**
- * F192 Phase H 收尾 PR-2: discriminator helper for the VerdictSourceRefs union.
- * Returns true when sourceRefs is the a2a variant (or unspecified, default a2a for backward compat).
- */
-export function isA2aSourceRefs(refs: VerdictSourceRefs | undefined): refs is A2aSnapshotAttributionRefs {
-  if (!refs) return true; // empty/undefined defaults to a2a interpretation
-  if (!('kind' in refs) || refs.kind === undefined) return true;
-  return refs.kind === 'a2a-snapshot-attribution';
-}
-
-export function isTaskOutcomeSourceRefs(refs: VerdictSourceRefs | undefined): refs is TaskOutcomeSnapshotSourceRefs {
-  return Boolean(refs && 'kind' in refs && refs.kind === 'task-outcome-snapshot');
-}
+export { isA2aSourceRefs, resolveSourceRefsInRoot, validateSourceRefsFormat } from './a2a-source-ref-validation.js';
+export { isSopSourceRefs, validateSopTraceSelector } from './sop-source-ref-validation.js';
+export { isTaskOutcomeSourceRefs, validateTaskOutcomeSourceRefs } from './task-outcome-source-ref-validation.js';
 
 /**
  * F192 publish_verdict eval:memory wire-up — discriminator helper for memory selector.
@@ -36,15 +23,6 @@ export function isMemorySourceRefs(refs: VerdictSourceRefs | undefined): refs is
   if (!refs) return false;
   if (!('kind' in refs)) return false;
   return refs.kind === 'memory-recall-snapshot';
-}
-
-/**
- * F192 sop-wiring — discriminator helper for SOP trace selector.
- */
-export function isSopSourceRefs(refs: VerdictSourceRefs | undefined): refs is SopTraceSourceSelector {
-  if (!refs) return false;
-  if (!('kind' in refs)) return false;
-  return refs.kind === 'sop-trace-eval';
 }
 
 /**
@@ -76,6 +54,12 @@ export function isQcMetricsSourceRefs(refs: VerdictSourceRefs | undefined): refs
   return refs.kind === 'qc-metrics-rollup';
 }
 
+export function isFreshnessReplaySourceRefs(refs: VerdictSourceRefs | undefined): refs is FreshnessReplaySelector {
+  if (!refs) return false;
+  if (!('kind' in refs)) return false;
+  return refs.kind === 'freshness-closure-replay';
+}
+
 /**
  * F253 Phase C — structural validator for QC metrics selector.
  * Returns user-facing error detail; handler maps to 400 invalid_source_ref.
@@ -105,36 +89,11 @@ export const KNOWN_SOURCE_REFS_KINDS = [
   'sop-trace-eval',
   'task-outcome-snapshot',
   'friction-rollup-snapshot',
+  'freshness-closure-replay',
 ] as const;
 
 export function isKnownSourceRefsKind(kind: string): kind is (typeof KNOWN_SOURCE_REFS_KINDS)[number] {
   return KNOWN_SOURCE_REFS_KINDS.includes(kind as (typeof KNOWN_SOURCE_REFS_KINDS)[number]);
-}
-
-/**
- * F192 sop-wiring — structural validator for SOP trace selector.
- * Returns user-facing error detail; handler maps to 400 invalid_source_ref.
- */
-export function validateSopTraceSelector(selector: SopTraceSourceSelector): string | null {
-  if (selector.kind !== 'sop-trace-eval') {
-    return `expected kind='sop-trace-eval', got '${(selector as { kind?: string }).kind ?? '(omitted)'}'`;
-  }
-  if (typeof selector.sopDefinitionId !== 'string' || selector.sopDefinitionId.length === 0) {
-    return 'sopDefinitionId must be a non-empty string';
-  }
-  if (/[\r\n]/.test(selector.sopDefinitionId)) {
-    return 'sopDefinitionId must not contain newlines';
-  }
-  if (!selector.trace || typeof selector.trace !== 'object') {
-    return 'trace must be a non-null object (SopTraceInput)';
-  }
-  if (typeof selector.trace.sessionId !== 'string' || selector.trace.sessionId.length === 0) {
-    return 'trace.sessionId must be a non-empty string';
-  }
-  if (typeof selector.trace.observedStage !== 'string' || selector.trace.observedStage.length === 0) {
-    return 'trace.observedStage must be a non-empty string';
-  }
-  return null;
 }
 
 /**
@@ -153,11 +112,50 @@ export function inferSourceRefsKind(refs: VerdictSourceRefs | undefined): string
   if (isAnchorTelemetrySourceRefs(refs)) return 'anchor-telemetry-snapshot';
   if (isFrictionSourceRefs(refs)) return 'friction-rollup-snapshot';
   if (isQcMetricsSourceRefs(refs)) return 'qc-metrics-rollup';
+  if (isFreshnessReplaySourceRefs(refs)) return 'freshness-closure-replay';
   if (isA2aSourceRefs(refs)) return 'a2a-snapshot-attribution';
   if (refs && typeof refs === 'object' && 'kind' in refs && typeof refs.kind === 'string') {
     return refs.kind;
   }
   return 'a2a-snapshot-attribution';
+}
+
+const MAX_FRESHNESS_REPLAY_WINDOW_MS = 31 * 24 * 60 * 60 * 1_000;
+const MAX_FRESHNESS_SELECTOR_IDS = 50;
+
+/** F254 AC-E9 — bounded, server-resolved freshness replay selector. */
+export function validateFreshnessReplaySelector(selector: FreshnessReplaySelector): string | null {
+  if (selector.kind !== 'freshness-closure-replay') {
+    return `expected kind='freshness-closure-replay', got '${(selector as { kind?: string }).kind ?? '(omitted)'}'`;
+  }
+  if (typeof selector.windowStartMs !== 'number' || !Number.isFinite(selector.windowStartMs)) {
+    return 'windowStartMs must be a finite number';
+  }
+  if (typeof selector.windowEndMs !== 'number' || !Number.isFinite(selector.windowEndMs)) {
+    return 'windowEndMs must be a finite number';
+  }
+  if (selector.windowEndMs <= selector.windowStartMs) {
+    return 'windowEndMs must be greater than windowStartMs';
+  }
+  if (selector.windowEndMs - selector.windowStartMs > MAX_FRESHNESS_REPLAY_WINDOW_MS) {
+    return 'freshness replay window must not exceed 31 days';
+  }
+  const threadError = validateSelectorIds(selector.threadIds, 'threadIds');
+  if (threadError) return threadError;
+  if ('fixtureIds' in selector) return 'fixtureIds is server-owned and cannot be caller-selected';
+  return null;
+}
+
+function validateSelectorIds(values: string[] | undefined, fieldName: string): string | null {
+  if (values === undefined) return null;
+  if (!Array.isArray(values) || values.length === 0 || values.length > MAX_FRESHNESS_SELECTOR_IDS) {
+    return `${fieldName} must contain 1-${MAX_FRESHNESS_SELECTOR_IDS} ids when provided`;
+  }
+  if (values.some((value) => typeof value !== 'string' || value.length === 0 || /[\r\n]/.test(value))) {
+    return `${fieldName} entries must be non-empty strings without newlines`;
+  }
+  if (new Set(values).size !== values.length) return `${fieldName} entries must be unique`;
+  return null;
 }
 
 /**
@@ -245,222 +243,6 @@ export function validateAnchorTelemetrySelector(selector: AnchorTelemetrySourceS
     return 'windowEndMs must be greater than windowStartMs';
   }
   return null;
-}
-
-function hasParentTraversalSegment(value: string): boolean {
-  return value.split(/[\\/]+/).some((segment) => segment === '..');
-}
-
-/**
- * F192 Phase H publish-verdict validation helpers.
- * Extracted from publish-verdict.ts per AGENTS.md 350-line hard limit.
- */
-
-/**
- * Validate sourceRefs format (presence + type + basename — no path resolution).
- * Path resolution happens inside stage callback against LIVE harnessFeedbackRoot
- * (砚砚 R17 P1 cloud: snapshots/attributions are gitignored, only in live).
- */
-export function validateSourceRefsFormat(
-  sourceRefs: VerdictSourceRefs | undefined,
-): { ok: true } | { ok: false; error: HandlerError } {
-  if (!isA2aSourceRefs(sourceRefs)) {
-    return {
-      ok: false,
-      error: {
-        status: 400,
-        error: 'invalid_source_ref',
-        detail: `validateSourceRefsFormat called with non-a2a sourceRefs (kind=${(sourceRefs as { kind?: string }).kind ?? 'unknown'}); use isA2aSourceRefs guard before calling.`,
-      },
-    };
-  }
-  const snap = sourceRefs?.snapshotName;
-  const attr = sourceRefs?.attributionName;
-  if (!snap || !attr) {
-    return {
-      ok: false,
-      error: {
-        status: 400,
-        error: 'missing_evidence_refs',
-        detail:
-          'eval:a2a requires sourceRefs.snapshotName + .attributionName (basenames). Tool will not fabricate evidence.',
-      },
-    };
-  }
-  if (typeof snap !== 'string' || typeof attr !== 'string') {
-    return {
-      ok: false,
-      error: {
-        status: 400,
-        error: 'invalid_source_ref',
-        detail: `sourceRefs.snapshotName + .attributionName must be strings (got ${typeof snap}, ${typeof attr})`,
-      },
-    };
-  }
-  for (const [field, value] of [
-    ['snapshotName', snap],
-    ['attributionName', attr],
-  ] as const) {
-    if (value === '.' || value === '..' || basename(value) !== value) {
-      return {
-        ok: false,
-        error: {
-          status: 400,
-          error: 'invalid_source_ref',
-          detail: `${field} invalid: must be simple basename (no path separators, no '.' / '..')`,
-        },
-      };
-    }
-  }
-  return { ok: true };
-}
-
-export function resolveSourceRefsInRoot(
-  harnessFeedbackRoot: string,
-  snap: string,
-  attr: string,
-): { ok: true; refs: ResolvedSourceRefs } | { ok: false; reason: string } {
-  const snapResult = resolveSafeRawPath(resolve(harnessFeedbackRoot, 'snapshots'), snap);
-  if (!snapResult.ok) return { ok: false, reason: `snapshotName invalid: ${snapResult.reason}` };
-  const attrResult = resolveSafeRawPath(resolve(harnessFeedbackRoot, 'attributions'), attr);
-  if (!attrResult.ok) return { ok: false, reason: `attributionName invalid: ${attrResult.reason}` };
-  return { ok: true, refs: { snapshotPath: snapResult.path, attributionPath: attrResult.path } };
-}
-
-export function validateTaskOutcomeSourceRefs(
-  sourceRefs: VerdictSourceRefs | undefined,
-): { ok: true } | { ok: false; error: HandlerError } {
-  if (!isTaskOutcomeSourceRefs(sourceRefs)) {
-    return {
-      ok: false,
-      error: {
-        status: 400,
-        error: 'invalid_source_ref',
-        detail: `validateTaskOutcomeSourceRefs called with non-task-outcome sourceRefs (kind=${(sourceRefs as { kind?: string } | undefined)?.kind ?? 'unknown'}); use isTaskOutcomeSourceRefs guard before calling.`,
-      },
-    };
-  }
-  if (
-    typeof sourceRefs.windowStartMs !== 'number' ||
-    !Number.isFinite(sourceRefs.windowStartMs) ||
-    typeof sourceRefs.windowEndMs !== 'number' ||
-    !Number.isFinite(sourceRefs.windowEndMs)
-  ) {
-    return {
-      ok: false,
-      error: {
-        status: 400,
-        error: 'invalid_source_ref',
-        detail: 'task-outcome-snapshot requires finite numeric windowStartMs and windowEndMs',
-      },
-    };
-  }
-  if (sourceRefs.windowEndMs <= sourceRefs.windowStartMs) {
-    return {
-      ok: false,
-      error: {
-        status: 400,
-        error: 'invalid_source_ref',
-        detail: 'task-outcome-snapshot requires windowEndMs > windowStartMs',
-      },
-    };
-  }
-  for (const [field, value] of [
-    ['databasePath', sourceRefs.databasePath],
-    ['evidenceCatId', sourceRefs.evidenceCatId],
-  ] as const) {
-    if (value !== undefined && typeof value !== 'string') {
-      return {
-        ok: false,
-        error: {
-          status: 400,
-          error: 'invalid_source_ref',
-          detail: `${field} must be a string when provided`,
-        },
-      };
-    }
-    if (typeof value === 'string' && /[\r\n]/.test(value)) {
-      return {
-        ok: false,
-        error: {
-          status: 400,
-          error: 'invalid_source_ref',
-          detail: `${field} must not contain newlines`,
-        },
-      };
-    }
-    if (field === 'databasePath' && typeof value === 'string') {
-      if (isAbsolute(value)) {
-        return {
-          ok: false,
-          error: {
-            status: 400,
-            error: 'invalid_source_ref',
-            detail: 'databasePath must be repo-relative (absolute paths are forbidden)',
-          },
-        };
-      }
-      if (hasParentTraversalSegment(value)) {
-        return {
-          ok: false,
-          error: {
-            status: 400,
-            error: 'invalid_source_ref',
-            detail: 'databasePath must not contain parent-directory traversal segments ("..")',
-          },
-        };
-      }
-    }
-  }
-  const episodeVerdictsError = validateEpisodeVerdicts(sourceRefs.episodeVerdicts);
-  if (episodeVerdictsError) return episodeVerdictsError;
-  return { ok: true };
-}
-
-function validateEpisodeVerdicts(
-  episodeVerdicts: TaskOutcomeSnapshotSourceRefs['episodeVerdicts'],
-): { ok: false; error: HandlerError } | null {
-  if (episodeVerdicts === undefined) return null;
-  if (!Array.isArray(episodeVerdicts) || episodeVerdicts.length === 0) {
-    return {
-      ok: false,
-      error: {
-        status: 400,
-        error: 'invalid_source_ref',
-        detail: 'episodeVerdicts must be a non-empty array when provided',
-      },
-    };
-  }
-  const seen = new Set<string>();
-  for (const [index, entry] of episodeVerdicts.entries()) {
-    if (!entry || typeof entry !== 'object') {
-      return invalidEpisodeVerdict(index, 'must be an object');
-    }
-    const episodeId = (entry as { episodeId?: unknown }).episodeId;
-    if (typeof episodeId !== 'string' || episodeId.length === 0 || /[\r\n]/.test(episodeId)) {
-      return invalidEpisodeVerdict(index, 'episodeId must be a non-empty string without newlines');
-    }
-    if (seen.has(episodeId)) {
-      return invalidEpisodeVerdict(index, `duplicate episodeId '${episodeId}'`);
-    }
-    seen.add(episodeId);
-    const verdict = (entry as { verdict?: unknown }).verdict;
-    if (typeof verdict !== 'string' || !VERDICT_CLASSES.includes(verdict as (typeof VERDICT_CLASSES)[number])) {
-      return invalidEpisodeVerdict(index, `verdict must be one of ${VERDICT_CLASSES.join(', ')}`);
-    }
-  }
-  return null;
-}
-
-function invalidEpisodeVerdict(index: number, detail: string): { ok: false; error: HandlerError } {
-  return {
-    ok: false,
-    error: {
-      status: 400,
-      error: 'invalid_source_ref',
-      detail: `episodeVerdicts[${index}] ${detail}`,
-    },
-  };
 }
 
 /**

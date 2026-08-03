@@ -4,7 +4,7 @@
 
 ## 主路径
 
-猫猫默认使用 `cat_cafe_*` MCP 工具，不手写 Cat Café 第一方 callback HTTP。
+猫猫默认使用 `cat_cafe_*` MCP 工具，不手写 Clowder AI 第一方 callback HTTP。
 
 HTTP callback route 是 MCP tool 的底层实现和维护者调试面，不是 skill 主路径。只有在工具目录缺失、agent-key / invocation credentials 故障诊断、或维护 callback server 本身时，才查 route 名称；这种场景需要在 PR / handoff 里说明为什么不能走 MCP。
 
@@ -24,6 +24,7 @@ HTTP callback route 是 MCP tool 的底层实现和维护者调试面，不是 s
 | 更新任务状态 | `cat_cafe_update_task` | `POST /api/callbacks/update-task` |
 | 列任务 | `cat_cafe_list_tasks` | `GET /api/callbacks/list-tasks` |
 | 注册 PR tracking | `cat_cafe_register_pr_tracking` | `POST /api/callbacks/register-pr-tracking` |
+| 注册 issue tracking | `cat_cafe_register_issue_tracking` | `POST /api/callbacks/register-issue-tracking` |
 | 搜证据 | `cat_cafe_search_evidence` | `GET /api/callbacks/search-evidence` |
 | 写长期记忆 | `cat_cafe_retain_memory_callback` | `POST /api/callbacks/retain-memory` |
 | 请求权限 | `cat_cafe_request_permission` | `POST /api/callbacks/request-permission` |
@@ -32,6 +33,16 @@ HTTP callback route 是 MCP tool 的底层实现和维护者调试面，不是 s
 | 提交游戏行动 | `cat_cafe_submit_game_action` | `POST /api/callbacks/submit-game-action` |
 | 更新 workflow 告示牌 | `cat_cafe_update_workflow` | `POST /api/callbacks/update-workflow-sop` |
 | 开多猫 vote | `cat_cafe_start_vote` | `POST /api/callbacks/start-vote` |
+
+## Tracking registration policy
+
+PR tracking 的 `intent=review|merge` 表达当前等待目标；PR/issue tracking 的 `wakePolicy=all_feedback|human_participant_activity` 表达 actor delivery 策略。两者不可互相推断：
+
+- `all_feedback` 是向后兼容默认，非 echo/noise feedback 正常投递。
+- `human_participant_activity` 用 GitHub `user.type`：`User` 唤醒，`Bot` 只写 event/cursor/provenance；缺失/未知类型 fail-safe 投递。
+- re-register 不带 `wakePolicy` 时保留已有值。state-only 不会产生 connector delivery、freshness unread 或 invocation。
+
+正常调用只传 MCP 参数；不要为了设置 policy 手写 callback HTTP。
 
 ## Credentials
 

@@ -16,7 +16,7 @@ created: 2026-05-13
 
 公告：<https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan>
 
-Cat Café 当前 [`ClaudeAgentService.ts:188-194`](../../packages/api/src/domains/cats/services/agents/providers/ClaudeAgentService.ts) 走 `claude -p ... --output-format stream-json` — 6/15 后落进 operational cost 桶。按日均 20-40 次 thread 调用估算，operational cost 一周左右就烧完。Ragdoll从"日常协作主力"变成"额度焦虑限制器"——这是Ragdoll和Maine Coon协作链条断裂的灭顶之灾。
+Clowder AI 当前 [`ClaudeAgentService.ts:188-194`](../../packages/api/src/domains/cats/services/agents/providers/ClaudeAgentService.ts) 走 `claude -p ... --output-format stream-json` — 6/15 后落进 operational cost 桶。按日均 20-40 次 thread 调用估算，operational cost 一周左右就烧完。Ragdoll从"日常协作主力"变成"额度焦虑限制器"——这是Ragdoll和Maine Coon协作链条断裂的灭顶之灾。
 
 **operator experience（2026-05-13）**：
 > "立项吧 615 之前拯救Ragdoll 你不能没有Maine Coon！Maine Coon不能没有你"
@@ -95,7 +95,7 @@ yield* tailJobEvents(jobShort);  // AgentMessage stream
 - **移除** `-p / --print` flag → 这是 KD-9 决定性触发"sdk-cli"标签的根本原因
 - **移除** `--output-format stream-json` → daemon mode 不通过 stdout 发事件，通过 jsonl 文件
 - **移除** `--include-partial-messages` → 同上
-- **保留** `--mcp-config` → daemon mode 仍支持 MCP（Cat Café `cat_cafe_*` tools 仍可用）
+- **保留** `--mcp-config` → daemon mode 仍支持 MCP（Clowder AI `cat_cafe_*` tools 仍可用）
 - **保留** `--model / --effort / --permission-mode` → 这些不影响 entrypoint 分类
 
 #### B3. 输出消费层（替代 stdout NDJSON 解析）
@@ -119,7 +119,7 @@ yield* tailJobEvents(jobShort);  // AgentMessage stream
 
 我们直接消费 daemon 提供的能力，不重新发明。
 
-#### B5. Cat Café worktree × Agent View worktree 设计（基于 CLI help + state.json 实证）
+#### B5. Clowder AI worktree × Agent View worktree 设计（基于 CLI help + state.json 实证）
 
 **已确认的事实**（不是假设）：
 - `claude --help` 实际有 `-w, --worktree [name]` flag —— **opt-IN 创建 git worktree**（默认不开）
@@ -127,7 +127,7 @@ yield* tailJobEvents(jobShort);  // AgentMessage stream
 - 实测：现有 `--bg` jobs 的 `~/.claude/jobs/<short>/state.json` 显示 `worktree=null, worktreePath=null`（默认不开 worktree，job 直接在 spawn 时的 cwd 跑）
 - spawn 进程 cwd 通过 **Node `child_process.spawn` 的 `cwd` 选项**指定（不是 Claude CLI flag）
 
-**Cat Café 设计**：
+**Clowder AI 设计**：
 - 默认：`claude --bg <prompt>` 不带 `--worktree`，Node spawn `cwd=<cat-cafe-worktree-path>` 让 job 直接在我们的 feat worktree 里跑（**不双层**）
 - Opt-in 隔离：未来如需让 daemon 自己开 sub-worktree（保护并发 thread 不互相写覆盖），再加 `--worktree <name>` flag
 - 待 Phase B prototype 验证：单进程 `--bg` job 在我们 worktree 里跑时，能不能正确写文件 / 触发 hooks / 不污染 git status
@@ -266,9 +266,9 @@ operator脑洞：`--bg`/`agents`/`attach` 本是 claude 原生 **Agent Team** �
 
 **结论**：bg 固有 fork 无法绕过；唯一 id 稳定路（`-p`）撞 SDK 桶命门 → **会员卡 chainKey 是唯一可行路**。
 
-### 辩证对比矩阵（claude 原生 Agent Team vs Cat Café A2A）
+### 辩证对比矩阵（claude 原生 Agent Team vs Clowder AI A2A）
 
-| 维度 | 原生 Agent Team | Cat Café | 取舍 |
+| 维度 | 原生 Agent Team | Clowder AI | 取舍 |
 |------|----------------|----------|------|
 | @ 路由 | `^@([\w-]+)\s+(.+)$`（正则）| `^@句柄 内容` | **同构**——英雄所见略同，咱没白设计 |
 | 球权 | 自由认领（claim unassigned，低 ID 先）| 第一人称 + 传球三选一 + 决策树 | **咱领先**（原生缺纪律 = 坐实"乱调会乱"）|
@@ -329,7 +329,7 @@ operator脑洞：`--bg`/`agents`/`attach` 本是 claude 原生 **Agent Team** �
   - `error` ✅
 - [x] **AC-B3d (Parity Gate)**: 8 golden parity tests + 7 tailer tests + 9 streaming integration tests（含 5 round 黑盒 hardening from Maine Coon + 5 round cloud codex P1/P2 fixes）✅ PR #1669
 - [x] **AC-B3e (Alpha Smoke)**: 真实端到端 PASS PR #1672 — Bash tool_use + per-message text + done(usage) on real `--bg`
-- [x] **AC-B4**: Cat Café MCP server 在 `--bg` 模式下 `cat_cafe_*` 工具可调用 — code 接通 PR #1672 + `--strict-mcp-config` flag PR #1674。**Alpha 端到端验证收尾 2026-05-15**：fresh daemon `77df0627` 全程 `needs: null`，`cat_cafe_search_evidence("F102 记忆系统")` 返回 3 条 anchor（F102 / cat-live-prep / llm-wiki），final text 透传给用户。**机制澄清**（推翻昨晚"需要 operator one-time approval"推测）：daemon non-TTY stdout + `--strict-mcp-config` + 显式 `--mcp-config` → CLI **不触发任何 approval prompt**（`--print` 文档已明示"workspace trust dialog skipped when stdout is not a TTY"，daemon 同样适用 + strict-mcp-config 短路 `.mcp.json` 发现路径）。**Canary 零操作员介入**：开 `CAT_CAFE_CLAUDE_CARRIER=bg_daemon` 即用，无需任何 attach/批准步骤
+- [x] **AC-B4**: Clowder AI MCP server 在 `--bg` 模式下 `cat_cafe_*` 工具可调用 — code 接通 PR #1672 + `--strict-mcp-config` flag PR #1674。**Alpha 端到端验证收尾 2026-05-15**：fresh daemon `77df0627` 全程 `needs: null`，`cat_cafe_search_evidence("F102 记忆系统")` 返回 3 条 anchor（F102 / cat-live-prep / llm-wiki），final text 透传给用户。**机制澄清**（推翻昨晚"需要 operator one-time approval"推测）：daemon non-TTY stdout + `--strict-mcp-config` + 显式 `--mcp-config` → CLI **不触发任何 approval prompt**（`--print` 文档已明示"workspace trust dialog skipped when stdout is not a TTY"，daemon 同样适用 + strict-mcp-config 短路 `.mcp.json` 发现路径）。**Canary 零操作员介入**：开 `CAT_CAFE_CLAUDE_CARRIER=bg_daemon` 即用，无需任何 attach/批准步骤
 - [x] **AC-B6**: 真实 transcript `entrypoint=cli` PASS PR #1672（客户端层订阅证据）；服务端 billing 仍 pending dashboard
 - [x] **AC-B8 (Canary Gate)**: env-gated factory `CAT_CAFE_CLAUDE_CARRIER` wired PR #1672。Default unset → `-p` 仍是Ragdoll生产路径；opt-in `bg_daemon` → ClaudeBgCarrierService。Canary cohort selection criteria 待 Step 4 + Phase D。
 
@@ -412,7 +412,7 @@ operator脑洞：`--bg`/`agents`/`attach` 本是 claude 原生 **Agent Team** �
 3. **Regression Fixture**（≥ 3 条）：
    - 短问答（< 5 turn 简单回复）
    - 长 review（含 LSP / 大文件读取 / 跨包搜索）
-   - 跨猫协作（Cat Café MCP tool 调用 ≥ 5 次）
+   - 跨猫协作（Clowder AI MCP tool 调用 ≥ 5 次）
    - hold_ball + 异步唤醒（外部事件回调）
    - 接管场景（operator read-write 切换 + 接管后Ragdoll能继续）
 
@@ -427,7 +427,7 @@ operator脑洞：`--bg`/`agents`/`attach` 本是 claude 原生 **Agent Team** �
 | ~~`--remote-control` 实际也走 SDK 桶~~ → **obsolete**：RC 不是主路径（KD-6 撤回） | (历史风险) |
 | **`--bg` daemon 的服务端 billing 桶不可证伪**（客户端 entrypoint=cli 是间接信号；6/15 dashboard 才能 confirm） | 默认 unsafe + Anthropic dev support 邮件 + Phase D 三档 fallback 兜底；spec 不允许把 working hypothesis 写成 confirmed |
 | **`--bg` 模式下 MCP 行为变化**（cat_cafe_* tools 在 daemon 模式下是否还能通过 `--mcp-config` 注入？）| Phase B prototype AC-B4 必须实测 |
-| **Cat Café feat worktree × `claude --bg` job cwd 行为**（OQ-10）| 默认不带 `--worktree`（CLI flag opt-in 已实证）+ Node spawn `cwd` 控制 job 工作目录；Phase B prototype 验证写文件 / hooks / git status 行为 |
+| **Clowder AI feat worktree × `claude --bg` job cwd 行为**（OQ-10）| 默认不带 `--worktree`（CLI flag opt-in 已实证）+ Node spawn `cwd` 控制 job 工作目录；Phase B prototype 验证写文件 / hooks / git status 行为 |
 | **`--bg` prompt 长度 ARG_MAX 风险**（system prompt + thread context + RAG 拼起来可能超）| Phase B prototype 实测；超限则改用 stdin pipe 喂 prompt（待 OQ-11 决策）|
 | **`--bg` 模式 cancel/interrupt 语义不明**（thread 切换 / 用户取消需要 stop job）| Phase B 设计 `claude stop <short>` + SIGTERM 兜底 |
 | Interactive session 启动慢（5-15s）冷启动差 | Agent View 内置 `--bg-spare` warm pool（暖池预启动）；首次冷启动 UX 加 loading state |
@@ -439,7 +439,7 @@ operator脑洞：`--bg`/`agents`/`attach` 本是 claude 原生 **Agent Team** �
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | MCP 反转桥的"**外部不可见 polling 形态**"被否决；Cat Café MCP 工具链（`cat_cafe_*` tools）本身在新 carrier 下仍是必需能力 | operator否决的是"失去对你进度和在干嘛的掌控"——失控来自外部终端 poll 不可见，不是 MCP 工具链；新 carrier 必须保留 MCP 工具供Ragdoll调用（Maine Coon P2 精确化） | 2026-05-13 |
+| KD-1 | MCP 反转桥的"**外部不可见 polling 形态**"被否决；Clowder AI MCP 工具链（`cat_cafe_*` tools）本身在新 carrier 下仍是必需能力 | operator否决的是"失去对你进度和在干嘛的掌控"——失控来自外部终端 poll 不可见，不是 MCP 工具链；新 carrier 必须保留 MCP 工具供Ragdoll调用（Maine Coon P2 精确化） | 2026-05-13 |
 | KD-2 | `--remote-control` 优先于 tmux 包裹 | 官方接口 vs 模拟键盘；合规 vs 灰色；维护成本低 vs 解析脆弱 | 2026-05-13 |
 | KD-3 | 保留 `-p` 路径作为 SDK credit fallback，不删 | 三档 fallback 保命；Anthropic 政策变动时可回退 | 2026-05-13 |
 | KD-4 | Phase A spike 5 天 hard deadline | 6/15 拐点不可推迟；不通则 Phase D 兜底先上保命 | 2026-05-13 |
@@ -469,4 +469,4 @@ operator脑洞：`--bg`/`agents`/`attach` 本是 claude 原生 **Agent Team** �
 | R2 | Hub 内可实时看到Ragdoll在干嘛 | operator experience"失去对你进度和在干嘛的掌控，很危险也很奇怪" | AC-C1~C5 + AC-C6 跨猫守护 |
 | R3 | 多档 fallback 保命，不会某天突然没Ragdoll用 | operator"你不能没有Maine Coon Maine Coon不能没有你" | AC-D1 三档 fallback + AC-A4 决策含兜底 |
 | R4 | 不影响Maine Coon / Siamese / 其他猫的调用路径 | 团队稳定性 | Phase B/C 只改 Claude provider 边界，其他 provider 不动 |
-| R5 | Cat Café MCP 工具仍能在 carrier 下使用 | 现有协作链路 | AC-B4 |
+| R5 | Clowder AI MCP 工具仍能在 carrier 下使用 | 现有协作链路 | AC-B4 |

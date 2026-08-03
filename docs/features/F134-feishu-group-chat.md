@@ -15,7 +15,7 @@ created: 2026-03-24
 
 ## Why
 
-Cat Café 目前的飞书接入只支持 **1v1 私聊（DM）**，operator希望把机器人拉进飞书群聊，让群里的人都能 @机器人提问，且猫回复时能 @发送者，区分不同用户。
+Clowder AI 目前的飞书接入只支持 **1v1 私聊（DM）**，operator希望把机器人拉进飞书群聊，让群里的人都能 @机器人提问，且猫回复时能 @发送者，区分不同用户。
 
 operator experience：
 > *"如果我们的飞书的机器人加入多个群，比如不同的人 at 你，我们需要区分不同的用户，以及加入不同的群，我们可以优化一下 🤔 这样的话得区分到底哪个群聊给哪个 thread 发了信息？"*
@@ -102,7 +102,7 @@ export interface FeishuInboundMessage {
    }
    ```
 
-3. **messageStore 写入时携带 sender**：在 Cat Café Web UI 中展示"来自群聊的 某某人"
+3. **messageStore 写入时携带 sender**：在 Clowder AI Web UI 中展示"来自群聊的 某某人"
 
 4. **thread 创建标题**：群聊自动创建 thread 时，标题应为 `飞书群聊 {群名/群ID}` 而非 `飞书 DM`
 
@@ -140,7 +140,7 @@ export interface FeishuInboundMessage {
 > operator 2026-03-25 提出：飞书应同时支持 Webhook 和 WebSocket 长连接两种模式，由operator在 IM Hub 配置面板选择，而不是非此即彼推翻现有实现。
 
 **背景**：
-- 当前 Cat Café 飞书接入仅支持 **Webhook 模式**（需要公网 IP / 反向代理）
+- 当前 Clowder AI 飞书接入仅支持 **Webhook 模式**（需要公网 IP / 反向代理）
 - 飞书官方提供 **WebSocket 长连接模式**（不需要公网 IP，客户端主动连飞书服务器）
 - `@larksuiteoapi/node-sdk`（我们已引入的 SDK）原生支持 `WSClient` 长连接
 - Lark（飞书国际版）**不支持**长连接，只能用 Webhook
@@ -211,7 +211,7 @@ if (connectionMode === 'websocket') {
 ### Phase B（公共层 Sender 身份透传） ✅
 - [x] AC-B1: ConnectorRouter.route() 接受可选 sender 参数
 - [x] AC-B2: ConnectorSource 携带 sender 信息存入 messageStore
-- [x] AC-B3: Cat Café Web UI 展示 sender 信息（"来自飞书群聊的 You"）
+- [x] AC-B3: Clowder AI Web UI 展示 sender 信息（"来自飞书群聊的 You"）
 - [x] AC-B4: 群聊自动创建 thread 标题为 `飞书群聊` 而非 `飞书 DM`
 - [x] AC-B5: 现有 DM / Telegram / 钉钉消息路由不受影响（sender 可选，不传 = 不展示）
 

@@ -39,6 +39,17 @@ describe('Thread systemKind', () => {
     assert.equal(updated.systemKind, 'connector_hub');
   });
 
+  test('updateSystemKind supports cat_bedroom kind', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'codex-sol 的卧室');
+
+    store.updateSystemKind(thread.id, 'cat_bedroom');
+    const updated = store.get(thread.id);
+    assert.equal(updated.systemKind, 'cat_bedroom');
+  });
+
   test('updateSystemKind(null) clears systemKind', async () => {
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
 

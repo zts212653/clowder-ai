@@ -102,7 +102,14 @@ function makePrTask(id = 'pr-task-1') {
     threadId: 'thread-1',
     ownerCatId: 'cat1',
     userId: 'user1',
-    automationState: {},
+    automationState: {
+      review: {
+        lastCommentCursor: 0,
+        lastInlineCommentCursor: 0,
+        lastConversationCommentCursor: 0,
+        lastDecisionCursor: 0,
+      },
+    },
   };
 }
 
@@ -261,7 +268,7 @@ describe('ReviewFeedbackTaskSpec: event log append — polling fallback (R3-P1)'
 
     const gate = await runGate(spec);
 
-    assert.equal(gate.run, true);
+    assert.equal(gate.run, false, 'legacy split-cursor backfill is durable migration state, not live feedback');
     assert.deepEqual(
       appendCalls.map((event) => event.sourceEventId),
       ['prcomment:owner/repo#10:conversation:201'],

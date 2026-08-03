@@ -230,4 +230,136 @@ describe('Capability Wakeup Classification', () => {
     const classified = classifyCapabilityWakeupTrials(trace, trials);
     assert.equal(classified[0].label, 'unclassified');
   });
+
+  it('uses exact skill loads as how-to proof for non-F192 hardcoded capability mappings', () => {
+    const trace = buildCapabilityTrace({
+      sessionId: 'session-cap',
+      threadId: 'thread-cap',
+      catId: 'gpt52',
+      transcriptEvents: [
+        transcriptEvent(0, 'inv-load', {
+          type: 'tool_use',
+          toolName: 'Read',
+          toolInput: { file_path: 'cat-cafe-skills/convention-graph-discovery/SKILL.md' },
+        }),
+        transcriptEvent(1, 'inv-edit', {
+          type: 'tool_use',
+          toolName: 'Write',
+          toolInput: { file_path: 'cat-cafe-skills/rich-messaging/SKILL.md' },
+        }),
+      ],
+      toolEvents: [
+        toolEvent({
+          invocationId: 'inv-load',
+          toolName: 'Read',
+          turnIndex: 0,
+          summary: { file_path: 'cat-cafe-skills/convention-graph-discovery/SKILL.md' },
+        }),
+      ],
+      skillLoadEvents: [
+        {
+          invocationId: 'inv-load',
+          sessionId: 'session-cap',
+          skillId: 'convention-graph-discovery',
+          loadTrigger: 'explicit_call',
+          timestamp: Date.now(),
+        },
+      ],
+    });
+
+    const trials = evaluateCapabilityWakeupTrace(trace, [
+      {
+        id: 'convention-graph-before-convention-surface-edit',
+        capability: 'convention-graph-discovery',
+        predicate: {
+          type: 'file_change_then_capability',
+          capability: 'convention-graph-discovery',
+          evidenceWindow: 'pre_change',
+          includeGlobs: ['cat-cafe-skills/*/SKILL.md'],
+        },
+      },
+    ]);
+
+    const classified = classifyCapabilityWakeupTrials(trace, trials);
+    assert.equal(classified[0].outcome, 'miss');
+    assert.equal(classified[0].label, 'unclassified');
+  });
+
+  it('uses the capability wakeup index as how-to proof for non-F192 hardcoded capability mappings', () => {
+    const trace = buildCapabilityTrace({
+      sessionId: 'session-cap',
+      threadId: 'thread-cap',
+      catId: 'gpt52',
+      transcriptEvents: [
+        transcriptEvent(0, 'inv-read-index', {
+          type: 'tool_use',
+          toolName: 'Read',
+          toolInput: { file_path: 'cat-cafe-skills/refs/capability-wakeup-index.md' },
+        }),
+        transcriptEvent(1, 'inv-edit', {
+          type: 'tool_use',
+          toolName: 'Write',
+          toolInput: { file_path: 'cat-cafe-skills/workspace-navigator/SKILL.md' },
+        }),
+      ],
+      toolEvents: [
+        toolEvent({
+          invocationId: 'inv-read-index',
+          toolName: 'Read',
+          turnIndex: 0,
+          summary: { file_path: 'cat-cafe-skills/refs/capability-wakeup-index.md' },
+        }),
+      ],
+    });
+
+    const trials = evaluateCapabilityWakeupTrace(trace, [
+      {
+        id: 'convention-graph-before-convention-surface-edit',
+        capability: 'convention-graph-discovery',
+        predicate: {
+          type: 'file_change_then_capability',
+          capability: 'convention-graph-discovery',
+          evidenceWindow: 'pre_change',
+          includeGlobs: ['cat-cafe-skills/*/SKILL.md'],
+        },
+      },
+    ]);
+
+    const classified = classifyCapabilityWakeupTrials(trace, trials);
+    assert.equal(classified[0].outcome, 'miss');
+    assert.equal(classified[0].label, 'unclassified');
+  });
+
+  it('does not count edited skill files as how-to proof', () => {
+    const trace = buildCapabilityTrace({
+      sessionId: 'session-cap',
+      threadId: 'thread-cap',
+      catId: 'gpt52',
+      transcriptEvents: [
+        transcriptEvent(0, 'inv-edit', {
+          type: 'tool_use',
+          toolName: 'Write',
+          toolInput: { file_path: 'cat-cafe-skills/convention-graph-discovery/SKILL.md' },
+        }),
+      ],
+      toolEvents: [],
+    });
+
+    const trials = evaluateCapabilityWakeupTrace(trace, [
+      {
+        id: 'convention-graph-before-convention-surface-edit',
+        capability: 'convention-graph-discovery',
+        predicate: {
+          type: 'file_change_then_capability',
+          capability: 'convention-graph-discovery',
+          evidenceWindow: 'pre_change',
+          includeGlobs: ['cat-cafe-skills/*/SKILL.md'],
+        },
+      },
+    ]);
+
+    const classified = classifyCapabilityWakeupTrials(trace, trials);
+    assert.equal(classified[0].outcome, 'miss');
+    assert.equal(classified[0].label, 'cognitive');
+  });
 });

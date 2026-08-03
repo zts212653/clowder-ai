@@ -1,7 +1,7 @@
 /**
  * F231 Phase C ProfileUpdateProposalStore
  *
- * Cats propose a per-cat primer update; operator approves/rejects. Mirrors the
+ * Cats propose their authenticated persona-primer update; operator approves/rejects. Mirrors the
  * F128 ProposalStore state machine (review-proven edges):
  *   pending → approving → approved   (claim then finalize, atomic vs reject)
  *   pending → rejected               (one-shot)
@@ -16,12 +16,14 @@
  */
 
 import type {
+  ApprovalEnvelope,
+  ApprovalPublication,
   CatId,
   ProfileUpdateProposal,
   ProfileUpdateSignalProvenance,
   ProfileUpdateTargetLayer,
 } from '@cat-cafe/shared';
-import { generateProposalId } from '@cat-cafe/shared';
+import { assertApprovalEnvelopeIdentity, commitApprovalEnvelope, generateProposalId } from '@cat-cafe/shared';
 
 export interface CreateProfileUpdateProposalInput {
   sourceThreadId: string;
@@ -50,6 +52,8 @@ export interface IProfileUpdateProposalStore {
   get(proposalId: string): ProfileUpdateProposal | null | Promise<ProfileUpdateProposal | null>;
   listPending(userId: string, limit?: number): ProfileUpdateProposal[] | Promise<ProfileUpdateProposal[]>;
   listByThread(threadId: string, limit?: number): ProfileUpdateProposal[] | Promise<ProfileUpdateProposal[]>;
+  /** List approved/rejected proposals for a user, sorted by decision timestamp desc (F246 Phase H). */
+  listSettledByUser(userId: string, limit?: number): ProfileUpdateProposal[] | Promise<ProfileUpdateProposal[]>;
   /** CAS pending → approving. Returns claimed snapshot, or null if not pending. */
   claimForApproval(
     proposalId: string,
@@ -82,6 +86,9 @@ export interface IProfileUpdateProposalStore {
   setCardMessageId(proposalId: string, cardMessageId: string): void | Promise<void>;
   /** Hard delete (cleanup after propose partial-commit). Idempotent. */
   delete(proposalId: string): void | Promise<void>;
+  getPublication(proposalId: string): ApprovalPublication | null | Promise<ApprovalPublication | null>;
+  commitEnvelope(proposalId: string, envelope: ApprovalEnvelope): void | Promise<void>;
+  abortStaged(proposalId: string, reason: string): void | Promise<void>;
 }
 
 const DEFAULT_LIST_LIMIT = 100;
@@ -108,6 +115,7 @@ export class InMemoryProfileUpdateProposalStore implements IProfileUpdateProposa
       signalProvenance: { ...input.signalProvenance },
       createdBy: input.createdBy,
       createdAt: now,
+      publication: { state: 'staged', stagedAt: now },
     };
     this.proposals.set(proposal.proposalId, proposal);
     return clone(proposal);
@@ -124,6 +132,15 @@ export class InMemoryProfileUpdateProposalStore implements IProfileUpdateProposa
 
   listByThread(threadId: string, limit: number = DEFAULT_LIST_LIMIT): ProfileUpdateProposal[] {
     return this.collect((p) => p.sourceThreadId === threadId, limit);
+  }
+
+  listSettledByUser(userId: string, limit: number = DEFAULT_LIST_LIMIT): ProfileUpdateProposal[] {
+    return this.collect(
+      (p) => p.createdBy === userId && (p.status === 'approved' || p.status === 'rejected'),
+      limit,
+      // Sort by decision timestamp descending (approvedAt || rejectedAt)
+      (a, b) => (b.approvedAt ?? b.rejectedAt ?? 0) - (a.approvedAt ?? a.rejectedAt ?? 0),
+    );
   }
 
   claimForApproval(proposalId: string, approvedBy: string): ProfileUpdateProposal | null {
@@ -197,12 +214,39 @@ export class InMemoryProfileUpdateProposalStore implements IProfileUpdateProposa
     this.proposals.delete(proposalId);
   }
 
-  private collect(predicate: (p: ProfileUpdateProposal) => boolean, limit: number): ProfileUpdateProposal[] {
+  getPublication(proposalId: string): ApprovalPublication | null {
+    return this.proposals.get(proposalId)?.publication ?? null;
+  }
+
+  commitEnvelope(proposalId: string, envelope: ApprovalEnvelope): void {
+    const proposal = this.proposals.get(proposalId);
+    if (!proposal) throw new Error(`proposal not found: ${proposalId}`);
+    assertApprovalEnvelopeIdentity(envelope, {
+      canonicalProposalId: proposal.proposalId,
+      sourceFeatureId: 'F231',
+      ownerUserId: proposal.createdBy,
+      requesterCatId: proposal.sourceCatId,
+      createdAt: proposal.createdAt,
+    });
+    proposal.publication = commitApprovalEnvelope(proposal.publication, envelope);
+    proposal.cardMessageId = envelope.approvalCardRef.messageId;
+  }
+
+  abortStaged(proposalId: string, _reason: string): void {
+    const proposal = this.proposals.get(proposalId);
+    if (proposal?.publication?.state === 'staged') this.delete(proposalId);
+  }
+
+  private collect(
+    predicate: (p: ProfileUpdateProposal) => boolean,
+    limit: number,
+    sort: (a: ProfileUpdateProposal, b: ProfileUpdateProposal) => number = (a, b) => b.createdAt - a.createdAt,
+  ): ProfileUpdateProposal[] {
     const result: ProfileUpdateProposal[] = [];
     for (const proposal of this.proposals.values()) {
       if (predicate(proposal)) result.push(clone(proposal));
     }
-    result.sort((a, b) => b.createdAt - a.createdAt);
+    result.sort(sort);
     return result.slice(0, Math.max(0, limit));
   }
 }
@@ -212,5 +256,9 @@ function dedupKey(userId: string, clientRequestId: string): string {
 }
 
 function clone(proposal: ProfileUpdateProposal): ProfileUpdateProposal {
-  return { ...proposal, signalProvenance: { ...proposal.signalProvenance } };
+  return {
+    ...proposal,
+    signalProvenance: { ...proposal.signalProvenance },
+    ...(proposal.publication ? { publication: structuredClone(proposal.publication) } : {}),
+  };
 }

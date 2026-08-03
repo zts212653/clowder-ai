@@ -99,7 +99,7 @@ F201 关闭时，Antigravity 必须满足以下契约：
 - 不用盲 retry 重放文件写入/删除/shell。
 - 不新增 F174/F178 审计写口；side-effect journal 只服务 Antigravity recovery。
 - 不把 F172 image-only regression 作为 F201 close gate；如需跑 image 回归，挂到 F172 verify/alpha smoke。
-- 不把所有上游平台不稳定都包装成“Cat Café 已保证 100% 成功”。F201 保证的是可诊断、可恢复、可验收。
+- 不把所有上游平台不稳定都包装成“Clowder AI 已保证 100% 成功”。F201 保证的是可诊断、可恢复、可验收。
 - **Post-close split-out（2026-05-24）**：Antigravity cascade / IDE-direct session transparency 不属于 F201 reliability close gate。F201 保持 `done`；两套 session 系统、JSON shadow state、IDE-direct 反向注册、long-lived session kind 等后续工作拆到 [F211 Cross-Runtime Session Transparency](F211-cross-runtime-session-transparency.md)。F209 只作为 downstream retrieval consumer，不承载该 scope。
 
 ## Acceptance Criteria
@@ -117,7 +117,7 @@ F201 关闭时，Antigravity 必须满足以下契约：
 - [x] AC-B1: 每个 invocation/cascade 有 side-effect journal，记录 stepId、stepType、operation、target、status、idempotencyKey、observedAt；已 `done` 的 side effect 必须有 idempotencyKey。
 - [x] AC-B2: 文件写入/删除 smoke 失败时，错误卡明确列出残留路径和清理状态。Resolved in close gate as a scope correction: smoke cleanup is a CLI/report concern (`AntigravityAvailabilitySmokeReport.cleanup` + `diagnostics.preflight.cleanedLeftovers`), while runtime side-effect interruption uses the typed recovery card.
 - [x] AC-B3: post-side-effect interruption 不触发盲 retry；只输出 resumable state。
-- [x] AC-B4: resume prompt 带 journal 摘要，要求 Antigravity 继续未完成动作且不得重复已完成 side effect；若新 side effect 命中已 done 的 idempotencyKey，Cat Café 侧自动 dedup，不只依赖 prompt 约束。
+- [x] AC-B4: resume prompt 带 journal 摘要，要求 Antigravity 继续未完成动作且不得重复已完成 side effect；若新 side effect 命中已 done 的 idempotencyKey，Clowder AI 侧自动 dedup，不只依赖 prompt 约束。
 - [x] AC-B5: 现有 `executionJournal` inline metadata 被 `AntigravitySideEffectJournal` 明确 subsume 或委托，不保留两个同名不同义的 journal。
 
 ### AC-C: Availability Smoke

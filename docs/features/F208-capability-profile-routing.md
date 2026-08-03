@@ -116,7 +116,7 @@ settings 独立 section（与成员管理平级，不复用 F154 member overview
   到 `cat-dossier.md` → git commit + push（KD-18，v1 不自动 commit main）
 - **安全锁**：`baseHash` 防 stale write（dossier 是共享文件多猫并行）；`sourceId`
   幂等（同事件不重复蒸馏）；`evidenceRefs` 空 = 创建失败（fail-closed，FM-2）
-- **开源 baseline 打包**：**空模板 + Cat Café 示例档案**（示例标 demo，不作别人
+- **开源 baseline 打包**：**空模板 + Clowder AI 示例档案**（示例标 demo，不作别人
   团队默认画像——别人的猫不是我们的猫）+ cold-start routing section（OQ-7 缓解）
 
 ## Acceptance Criteria
@@ -151,7 +151,7 @@ settings 独立 section（与成员管理平级，不复用 F154 member overview
 - [x] AC-E1: `DossierDistillationProposal` schema + store（Redis TTL=0，KD-17 契约），幂等（同 sourceId 不重复创建）。**Includes state machine endpoints (enabling AC-E2/E3)**：6 REST endpoints (CRUD + state transitions)，apply 只 mark status 不 git commit（KD-18 v1）
 - [x] AC-E2: 蒸馏 checkpoint 接入 feat-lifecycle close + review-complete 流程（事件触发，非 cron）
 - [x] AC-E3: operator 在 Hub approve proposal 后，持球猫可 apply draft → cat-dossier.md → git commit + push（KD-18）
-- [x] AC-E4: 开源 baseline 打包 = 空模板 + Cat Café 示例档案（示例标 demo）+ cold-start routing section（OQ-7 缓解）
+- [x] AC-E4: 开源 baseline 打包 = 空模板 + Clowder AI 示例档案（示例标 demo）+ cold-start routing section（OQ-7 缓解）
 
 ## Dependencies
 

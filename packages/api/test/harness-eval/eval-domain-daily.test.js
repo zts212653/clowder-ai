@@ -141,6 +141,11 @@ describe('eval-domain-daily task spec', () => {
     assert.equal(triggerArgs[2], 'default-user'); // owner userId, so stream replies are visible after refresh
     assert.ok(triggerArgs[3].includes('eval:a2a'), 'reason should mention domain');
     assert.equal(triggerArgs[4], 'msg_123'); // messageId
+    assert.equal(triggerArgs[5], undefined); // no rich content blocks
+    assert.deepEqual(triggerArgs[6], {
+      sourceCategory: 'scheduled',
+      reason: 'Daily eval: eval:a2a',
+    });
   });
 
   it('execute reports "disabled" when legacy task exists but is disabled (P2 regression)', async () => {
@@ -333,5 +338,10 @@ describe('eval-domain-weekly task spec (AC-E19, AC-E20)', () => {
     const triggerArgs = triggerMock.mock.calls[0].arguments;
     assert.equal(triggerArgs[0], 'thread_eval_capability_wakeup');
     assert.ok(triggerArgs[3].includes('Weekly eval'), 'trigger reason should say Weekly');
+    assert.equal(triggerArgs[5], undefined);
+    assert.deepEqual(triggerArgs[6], {
+      sourceCategory: 'scheduled',
+      reason: 'Weekly eval: eval:capability-wakeup',
+    });
   });
 });

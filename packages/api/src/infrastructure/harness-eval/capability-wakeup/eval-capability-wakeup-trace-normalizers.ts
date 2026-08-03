@@ -1,4 +1,11 @@
 import { normalizeMcpToolName } from '../../../domains/cats/services/tool-usage/normalize-mcp-tool-name.js';
+import {
+  conventionGraphCommandCoverageKeys,
+  conventionGraphCommandHasFreshResults,
+  conventionGraphCommandTargetPaths,
+  conventionGraphDomainFromCommand,
+  isConventionGraphCodeConsumersCommand,
+} from '../convention-graph-surfaces.js';
 import type {
   CapabilityName,
   CapabilityPreviewAvailability,
@@ -40,7 +47,7 @@ export function normalizeTranscriptToolUse(
 export function normalizeToolUsageCandidate(
   event: CapabilityTraceInput['toolEvents'][number],
 ): NormalizedCapabilityUsageCandidate | null {
-  const summary = event.summary as Record<string, unknown> | undefined;
+  const summary = normalizeCommandExecutionSummary(asRecord(event.summary));
   const command = typeof summary?.command === 'string' ? summary.command : '';
   const worktreeId = typeof summary?.worktreeId === 'string' ? (summary.worktreeId as string) : undefined;
   const path = readPath(summary);
@@ -52,6 +59,7 @@ export function normalizeToolUsageCandidate(
       source: 'tool',
       sourceId: `${event.invocationId}:${event.toolName}`,
       capability: directCapability,
+      invocationId: event.invocationId,
       threadId: event.threadId,
       catId: event.catId,
       sessionId: event.sessionId,
@@ -62,11 +70,15 @@ export function normalizeToolUsageCandidate(
       successful: toolEventSucceeded(event),
     };
   }
+  if (isConventionGraphCodeConsumersCommand(command)) {
+    return normalizeConventionGraphUsageCandidate(event, summary, command, worktreeId);
+  }
   if (command.includes('/api/workspace/navigate')) {
     return {
       source: 'tool',
       sourceId: `${event.invocationId}:${event.toolName}`,
       capability: 'workspace-navigator',
+      invocationId: event.invocationId,
       threadId: event.threadId,
       catId: event.catId,
       sessionId: event.sessionId,
@@ -82,6 +94,7 @@ export function normalizeToolUsageCandidate(
       source: 'tool',
       sourceId: `${event.invocationId}:${event.toolName}`,
       capability: 'browser-preview',
+      invocationId: event.invocationId,
       threadId: event.threadId,
       catId: event.catId,
       sessionId: event.sessionId,
@@ -91,6 +104,36 @@ export function normalizeToolUsageCandidate(
     };
   }
   return null;
+}
+
+function normalizeConventionGraphUsageCandidate(
+  event: CapabilityTraceInput['toolEvents'][number],
+  summary: Record<string, unknown> | undefined,
+  command: string,
+  worktreeId: string | undefined,
+): NormalizedCapabilityUsageCandidate {
+  const conventionGraphDomain = conventionGraphDomainFromCommand(command);
+  const graphCommand = { command, summary };
+  const conventionGraphCoverageKeys = conventionGraphCommandCoverageKeys(graphCommand, conventionGraphDomain);
+  const conventionGraphTargetPaths = conventionGraphCommandTargetPaths(graphCommand, conventionGraphDomain);
+  return {
+    source: 'tool',
+    sourceId: `${event.invocationId}:${event.toolName}`,
+    capability: 'convention-graph-discovery',
+    invocationId: event.invocationId,
+    threadId: event.threadId,
+    catId: event.catId,
+    sessionId: event.sessionId,
+    worktreeId,
+    timestamp: event.timestamp,
+    ...(conventionGraphDomain ? { conventionGraphDomain } : {}),
+    ...(conventionGraphCoverageKeys.length > 0 ? { conventionGraphCoverageKeys } : {}),
+    ...(conventionGraphTargetPaths.length > 0 ? { conventionGraphTargetPaths } : {}),
+    successful:
+      shellCommandSucceeded(event, summary) &&
+      conventionGraphCommandHasFreshResults(graphCommand) &&
+      conventionGraphCoverageKeys.length > 0,
+  };
 }
 
 const MCP_TOOL_CAPABILITY: Record<string, CapabilityName> = {
@@ -220,6 +263,17 @@ function commandExecutionSucceeded(
   return summary.allowed === true || isHttpSuccess(summary);
 }
 
+function shellCommandSucceeded(
+  event: CapabilityTraceInput['toolEvents'][number],
+  summary: Record<string, unknown> | undefined,
+): boolean {
+  if (!toolEventSucceeded(event)) return false;
+  const exitCode = summary?.exitCode;
+  if (typeof exitCode === 'number') return exitCode === 0;
+  if (typeof summary?.status === 'string') return summary.status === 'success' || summary.status === 'completed';
+  return false;
+}
+
 function toolEventSucceeded(event: CapabilityTraceInput['toolEvents'][number]): boolean {
   const summary = event.summary as Record<string, unknown> | undefined;
   if (event.status && event.status !== 'success') return false;
@@ -240,4 +294,50 @@ function hasNonEmptyString(value: unknown): boolean {
 function isHttpSuccess(summary: Record<string, unknown>): boolean {
   const statusCode = summary.statusCode;
   return typeof statusCode === 'number' && statusCode >= 200 && statusCode < 300;
+}
+
+function normalizeCommandExecutionSummary(
+  summary: Record<string, unknown> | null,
+): Record<string, unknown> | undefined {
+  if (!summary) return undefined;
+  const result = asRecord(summary.result);
+  if (!result) return summary;
+  const normalized = { ...summary };
+  copyIfMissing(normalized, 'command', readString(result.command));
+  copyIfMissing(normalized, 'status', readString(result.status));
+  copyIfMissing(normalized, 'exitCode', firstDefined(readNumber(result.exitCode), readNumber(result.exit_code)));
+  copyIfMissing(normalized, 'stdout', firstDefined(readString(result.stdout), readString(result.output)));
+  copyIfMissing(normalized, 'stderr', readString(result.stderr));
+  copyIfMissing(normalized, 'error', readString(result.error));
+  copyIfMissing(
+    normalized,
+    'errorMessage',
+    firstDefined(readString(result.errorMessage), readString(result.error_message)),
+  );
+  return normalized;
+}
+
+function copyIfMissing(target: Record<string, unknown>, field: string, value: unknown): void {
+  if (target[field] === undefined && value !== undefined) target[field] = value;
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function readNumber(value: unknown): number | undefined {
+  return typeof value === 'number' ? value : undefined;
+}
+
+function firstDefined<T>(...values: (T | undefined)[]): T | undefined {
+  for (const value of values) {
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }

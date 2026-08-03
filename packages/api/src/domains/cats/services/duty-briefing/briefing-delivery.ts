@@ -9,6 +9,7 @@
 
 import type { RichCardBlock, RichMessageExtra } from '@cat-cafe/shared';
 import type { IMessageStore } from '../stores/ports/MessageStore.js';
+import { getTimelineOrderTime } from '../stores/visibility.js';
 import { BRIEFING_TIMEZONE, DUTY_BRIEFING_CARD_ID } from './constants.js';
 
 const BRIEFING_USER_ID = 'system';
@@ -57,10 +58,6 @@ function dayKeyInTimeZone(timestamp: number, timeZone: string): string {
   return `${year}-${month}-${day}`;
 }
 
-function effectiveTimestamp(msg: { timestamp: number; deliveredAt?: number }): number {
-  return msg.deliveredAt ?? msg.timestamp;
-}
-
 /**
  * INV-5: 目标 thread 当日（BRIEFING_TIMEZONE）是否已发值班简报卡（纯投影，零新存储）。
  * 简报卡 userId='system' + origin='briefing' 对 operator 可见（visibility 规则），故用 operator viewer 查。
@@ -77,7 +74,7 @@ export async function hasBriefingToday(
   while (batch.length > 0) {
     if (
       batch.some(
-        (m) => isDutyBriefingMessage(m) && dayKeyInTimeZone(effectiveTimestamp(m), BRIEFING_TIMEZONE) === todayKey,
+        (m) => isDutyBriefingMessage(m) && dayKeyInTimeZone(getTimelineOrderTime(m), BRIEFING_TIMEZONE) === todayKey,
       )
     ) {
       return true;
@@ -85,7 +82,7 @@ export async function hasBriefingToday(
 
     const oldest = batch[0];
     if (!oldest) return false;
-    const oldestEffectiveTs = effectiveTimestamp(oldest);
+    const oldestEffectiveTs = getTimelineOrderTime(oldest);
     if (dayKeyInTimeZone(oldestEffectiveTs, BRIEFING_TIMEZONE) !== todayKey) {
       return false;
     }

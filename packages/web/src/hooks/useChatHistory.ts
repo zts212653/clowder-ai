@@ -8,6 +8,7 @@ import { recordDebugEvent } from '@/debug/invocationEventDebug';
 import { projectCanonicalBubbles } from '@/stores/bubble-projection';
 import type { QueueEntry, TaskProgressItem } from '@/stores/chat-types';
 import { type CatInvocationInfo, type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
+import { getMessageTimelineOrderTime } from '@/stores/message-timeline';
 import type { TaskItem } from '@/stores/taskStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { crossesUserTurnBoundary } from '@/stores/turn-boundary';
@@ -26,6 +27,7 @@ import {
   shouldLoadOlderForTeleport,
   TELEPORT_RESOLVE_EVENT,
 } from '@/utils/teleport';
+import { hydrateQueueActiveInvocationSlots, type QueueActiveInvocationSlot } from './queue-active-invocation-hydration';
 
 type SavedScrollState = {
   top: number;
@@ -178,6 +180,10 @@ function mergeMessageExtra(
   const cliDiagnostics = preferred?.cliDiagnostics ?? fallback?.cliDiagnostics;
   const governanceBlocked = preferred?.governanceBlocked ?? fallback?.governanceBlocked;
   const systemKind = preferred?.systemKind ?? fallback?.systemKind;
+  const recovery = preferred?.recovery ?? fallback?.recovery;
+  const freshness = preferred?.freshness ?? fallback?.freshness;
+  const supplement = preferred?.supplement ?? fallback?.supplement;
+  const freshnessSupplement = preferred?.freshnessSupplement ?? fallback?.freshnessSupplement;
   // #814 P2: preserve isExplicitPost so F5/thread-switch doesn't lose the
   // "don't merge by invocation" semantic for explicit post_message callbacks.
   const isExplicitPost = preferred?.isExplicitPost ?? fallback?.isExplicitPost;
@@ -191,6 +197,10 @@ function mergeMessageExtra(
     !cliDiagnostics &&
     !governanceBlocked &&
     !systemKind &&
+    !recovery &&
+    !freshness &&
+    !supplement &&
+    !freshnessSupplement &&
     !isExplicitPost
   ) {
     return undefined;
@@ -205,12 +215,16 @@ function mergeMessageExtra(
     ...(cliDiagnostics ? { cliDiagnostics } : {}),
     ...(governanceBlocked ? { governanceBlocked } : {}),
     ...(systemKind ? { systemKind } : {}),
+    ...(recovery ? { recovery } : {}),
+    ...(freshness ? { freshness } : {}),
+    ...(supplement ? { supplement } : {}),
+    ...(freshnessSupplement ? { freshnessSupplement } : {}),
     ...(isExplicitPost ? { isExplicitPost: true as const } : {}),
   };
 }
 
 function getMessageOrderTimestamp(msg: ChatMessageData): number {
-  return msg.deliveredAt ?? msg.timestamp;
+  return getMessageTimelineOrderTime(msg);
 }
 
 function getMessageActivityTimestamp(msg: ChatMessageData): number {
@@ -480,6 +494,9 @@ function mergeSameIdHydrationMessage(history: ChatMessageData, current: ChatMess
     ...((preferred.deliveredAt ?? fallback.deliveredAt)
       ? { deliveredAt: preferred.deliveredAt ?? fallback.deliveredAt }
       : {}),
+    ...((preferred.timelineOrderAt ?? fallback.timelineOrderAt) !== undefined
+      ? { timelineOrderAt: preferred.timelineOrderAt ?? fallback.timelineOrderAt }
+      : {}),
     ...((preferred.replyTo ?? fallback.replyTo) ? { replyTo: preferred.replyTo ?? fallback.replyTo } : {}),
     ...((preferred.replyPreview ?? fallback.replyPreview)
       ? { replyPreview: preferred.replyPreview ?? fallback.replyPreview }
@@ -654,8 +671,8 @@ export function mergeReplaceHydrationMessages(
 
   return {
     messages: mergedMsgs.sort((a, b) => {
-      const ta = a.deliveredAt ?? a.timestamp;
-      const tb = b.deliveredAt ?? b.timestamp;
+      const ta = getMessageTimelineOrderTime(a);
+      const tb = getMessageTimelineOrderTime(b);
       if (ta !== tb) return ta - tb;
       return a.id.localeCompare(b.id);
     }),
@@ -891,6 +908,8 @@ export function useChatHistory(threadId: string) {
               rich?: { v: number; blocks: unknown[] };
               crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
               stream?: { invocationId?: string };
+              turnExecution?: NonNullable<ChatMessageData['extra']>['turnExecution'];
+              auxiliaryTurnExecutions?: NonNullable<ChatMessageData['extra']>['auxiliaryTurnExecutions'];
               scheduler?: SchedulerMessageExtra['scheduler'];
               systemKind?: 'a2a_routing' | 'context_briefing';
               /** #814: explicit post_message bypass — survives hydration so F5/thread-switch
@@ -901,6 +920,11 @@ export function useChatHistory(threadId: string) {
               /** F212 Phase B: history-loader path may already carry cliDiagnostics under
                *  extra (when client wrote it via active-path) — prefer it over metadata copy. */
               cliDiagnostics?: CliDiagnostics;
+              recovery?: NonNullable<ChatMessageData['extra']>['recovery'];
+              freshness?: NonNullable<ChatMessageData['extra']>['freshness'];
+              supplement?: NonNullable<ChatMessageData['extra']>['supplement'];
+              freshnessSupplement?: NonNullable<ChatMessageData['extra']>['freshnessSupplement'];
+              queueReceipt?: NonNullable<ChatMessageData['extra']>['queueReceipt'];
             };
             timestamp: number;
             summary?: { id: string; topic: string; conclusions: string[]; openQuestions: string[]; createdBy: string };
@@ -911,6 +935,7 @@ export function useChatHistory(threadId: string) {
             source?: { connector: string; label: string; icon: string; url?: string };
             mentionsUser?: boolean;
             deliveredAt?: number;
+            timelineOrderAt?: number;
             replyTo?: string;
             replyPreview?: ReplyPreview;
           }) =>
@@ -945,10 +970,17 @@ export function useChatHistory(threadId: string) {
                   m.extra?.rich ||
                   m.extra?.crossPost ||
                   m.extra?.stream ||
+                  m.extra?.turnExecution ||
+                  m.extra?.auxiliaryTurnExecutions ||
                   m.extra?.scheduler ||
                   m.extra?.systemKind ||
                   m.extra?.isExplicitPost ||
                   m.extra?.targetCats ||
+                  m.extra?.recovery ||
+                  m.extra?.freshness ||
+                  m.extra?.supplement ||
+                  m.extra?.freshnessSupplement ||
+                  m.extra?.queueReceipt ||
                   cliDiag;
                 if (!hasExtraField) return {};
                 return {
@@ -956,10 +988,19 @@ export function useChatHistory(threadId: string) {
                     ...(m.extra?.rich ? { rich: m.extra.rich } : {}),
                     ...(m.extra?.crossPost ? { crossPost: m.extra.crossPost } : {}),
                     ...(m.extra?.stream ? { stream: m.extra.stream } : {}),
+                    ...(m.extra?.turnExecution ? { turnExecution: m.extra.turnExecution } : {}),
+                    ...(m.extra?.auxiliaryTurnExecutions
+                      ? { auxiliaryTurnExecutions: m.extra.auxiliaryTurnExecutions }
+                      : {}),
                     ...(m.extra?.scheduler ? { scheduler: m.extra.scheduler } : {}),
                     ...(m.extra?.systemKind ? { systemKind: m.extra.systemKind } : {}),
                     ...(m.extra?.isExplicitPost ? { isExplicitPost: true as const } : {}),
                     ...(m.extra?.targetCats ? { targetCats: m.extra.targetCats } : {}),
+                    ...(m.extra?.recovery ? { recovery: m.extra.recovery } : {}),
+                    ...(m.extra?.freshness ? { freshness: m.extra.freshness } : {}),
+                    ...(m.extra?.supplement ? { supplement: m.extra.supplement } : {}),
+                    ...(m.extra?.freshnessSupplement ? { freshnessSupplement: m.extra.freshnessSupplement } : {}),
+                    ...(m.extra?.queueReceipt ? { queueReceipt: m.extra.queueReceipt } : {}),
                     ...(cliDiag ? { cliDiagnostics: cliDiag } : {}),
                   },
                 };
@@ -969,6 +1010,7 @@ export function useChatHistory(threadId: string) {
               ...(m.whisperTo ? { whisperTo: m.whisperTo } : {}),
               ...(m.revealedAt ? { revealedAt: m.revealedAt } : {}),
               ...(m.deliveredAt ? { deliveredAt: m.deliveredAt } : {}),
+              ...(m.timelineOrderAt !== undefined ? { timelineOrderAt: m.timelineOrderAt } : {}),
               ...(m.source ? { source: m.source } : {}),
               ...(m.mentionsUser ? { mentionsUser: true } : {}),
               ...(m.replyTo ? { replyTo: m.replyTo } : {}),
@@ -1169,7 +1211,7 @@ export function useChatHistory(threadId: string) {
         queue: QueueEntry[];
         paused: boolean;
         pauseReason?: 'canceled' | 'failed';
-        activeInvocations?: Array<{ catId: string; startedAt: number }>;
+        activeInvocations?: QueueActiveInvocationSlot[];
       };
       // Always sync server state — clears stale local data when server queue is empty
       setQueue(fetchForThread, data.queue);
@@ -1183,6 +1225,7 @@ export function useChatHistory(threadId: string) {
       const activeStateSnapshot: Record<string, { catId: string; mode: string; startedAt?: number }> = {};
       if (data.activeInvocations && data.activeInvocations.length > 0) {
         const activeCatIds = data.activeInvocations.map((s) => s.catId);
+        const activeByCatId = new Map(data.activeInvocations.map((slot) => [slot.catId, slot]));
         const livenessSnapshot =
           fetchForThread === store.currentThreadId
             ? { intentMode: store.intentMode, targetCats: store.targetCats, catStatuses: store.catStatuses }
@@ -1193,30 +1236,18 @@ export function useChatHistory(threadId: string) {
           activeCatIds,
         });
         const previousStatuses = livenessSnapshot?.catStatuses ?? {};
-        replaceThreadTargetCats(fetchForThread, hydratedTargetCats);
+        Object.assign(
+          activeStateSnapshot,
+          hydrateQueueActiveInvocationSlots({
+            threadId: fetchForThread,
+            slots: data.activeInvocations,
+            targetCatIds: hydratedTargetCats,
+          }),
+        );
         for (const catId of hydratedTargetCats) {
-          if (!activeCatIds.includes(catId) && previousStatuses[catId]) {
+          if (!activeByCatId.has(catId) && previousStatuses[catId]) {
             updateThreadCatStatus(fetchForThread, catId, previousStatuses[catId]);
           }
-        }
-        for (const catId of activeCatIds) {
-          updateThreadCatStatus(fetchForThread, catId, 'streaming');
-        }
-        // F108B P1-2: Clear stale activeInvocations before hydrating from server truth.
-        // Without this, snapshot-restored slots (e.g. codex) persist alongside
-        // server-reported slots (e.g. opus), causing ghost entries in ThreadExecutionBar.
-        store.clearThreadActiveInvocation(fetchForThread);
-        store.setThreadHasActiveInvocation(fetchForThread, true);
-        // Hydrate activeInvocations record so ThreadExecutionBar renders.
-        // Server now returns {catId, startedAt} — use server startedAt to preserve elapsed time.
-        for (const slot of data.activeInvocations) {
-          const syntheticId = `hydrated-${fetchForThread}-${slot.catId}`;
-          if (fetchForThread === store.currentThreadId) {
-            store.addActiveInvocation(syntheticId, slot.catId, 'execute', slot.startedAt);
-          } else {
-            store.addThreadActiveInvocation(fetchForThread, syntheticId, slot.catId, 'execute', slot.startedAt);
-          }
-          activeStateSnapshot[syntheticId] = { catId: slot.catId, mode: 'execute', startedAt: slot.startedAt };
         }
         // F194 Phase Z10 AC-Z28: persist for next F5.
         void saveThreadActiveState(fetchForThread, {
@@ -1571,7 +1602,7 @@ export function useChatHistory(threadId: string) {
       })
     ) {
       const oldest = messages.find((m) => !m.id.startsWith('draft-'));
-      if (oldest) void fetchHistory(`${oldest.deliveredAt ?? oldest.timestamp}:${oldest.id}`);
+      if (oldest) void fetchHistory(`${getMessageTimelineOrderTime(oldest)}:${oldest.id}`);
     }
   }, [messages, threadId, isOfflineSnapshot, hasMore, isLoadingHistory, scheduleScrollToMessage, fetchHistory]);
 
@@ -1621,7 +1652,7 @@ export function useChatHistory(threadId: string) {
       // #80 cloud R8 P2: skip draft rows — their synthetic IDs break cursor semantics
       const oldest = messages.find((m) => !m.id.startsWith('draft-'));
       if (oldest) {
-        void fetchHistory(`${oldest.deliveredAt ?? oldest.timestamp}:${oldest.id}`);
+        void fetchHistory(`${getMessageTimelineOrderTime(oldest)}:${oldest.id}`);
       }
     }
   }, [hasMore, isLoadingHistory, messages, fetchHistory]);

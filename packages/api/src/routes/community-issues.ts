@@ -46,7 +46,11 @@ import type { NarratorDriver } from '../domains/community/narrator/NarratorDrive
 import { TriageOrchestrator } from '../domains/community/TriageOrchestrator.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveUserId } from '../utils/request-identity.js';
-import { registerCallbackAuthHook } from './callback-auth-prehandler.js';
+import {
+  type AgentKeyAuthRegistry,
+  registerCallbackAuthHook,
+  requireCallbackPrincipal,
+} from './callback-auth-prehandler.js';
 import { type CommunityDecisionQueueFindingStore, communityDecisionQueueRoutes } from './community-decision-queue.js';
 
 interface CallbackAuthVerifier {
@@ -59,6 +63,7 @@ export interface CommunityIssuesRoutesOptions {
   socketManager: SocketManager;
   threadStore?: Pick<IThreadStore, 'create' | 'get'>;
   registry?: CallbackAuthVerifier;
+  agentKeyRegistry?: AgentKeyAuthRegistry;
   fetchIssues?: (repo: string) => Promise<GhIssueFull[]>;
   communityPrStore?: ICommunityPrStore;
   fetchPrs?: (repo: string) => Promise<GhPrFull[]>;
@@ -117,7 +122,7 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
   const { communityIssueStore, taskStore, socketManager } = opts;
 
   if (opts.registry) {
-    registerCallbackAuthHook(app, opts.registry);
+    registerCallbackAuthHook(app, opts.registry, { agentKeyRegistry: opts.agentKeyRegistry });
   }
 
   app.post('/api/community-issues', async (request, reply) => {
@@ -677,10 +682,8 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
   });
 
   app.post('/api/community-issues/:id/request-guardian', async (request, reply) => {
-    if (!request.callbackAuth) {
-      reply.status(401);
-      return { error: 'Callback authentication required' };
-    }
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
     const { id } = request.params as { id: string };
     const result = requestGuardianSchema.safeParse(request.body);
     if (!result.success) {
@@ -688,9 +691,20 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
       return { error: 'Invalid body', details: result.error.issues };
     }
 
-    const roster = getRoster();
     const authorId = result.data.author;
     const reviewerId = result.data.reviewer;
+    // Authorize before any roster probing or mutation (plan invariant): the
+    // server-trusted principal must equal the declared author. Failing fast on a
+    // mismatched principal also avoids leaking roster membership through the
+    // 400-vs-403 response difference.
+    const callerCatId = principal.catId as string;
+    if (callerCatId !== authorId) {
+      reply.status(403);
+      return { error: 'Author does not match authenticated principal' };
+    }
+    const roster = getRoster();
+    // Defense in depth: after the principal===author gate above, this rejects
+    // only an authenticated principal whose catId is no longer in the roster.
     if (!roster[authorId]) {
       reply.status(400);
       return { error: `Author '${authorId}' not found in roster` };
@@ -735,7 +749,7 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
         guardianCatId,
         signoffTokenHash,
         requestedAt: Date.now(),
-        requestedBy: result.data.author,
+        requestedBy: callerCatId,
         signedOff: false,
         checklist,
       },
@@ -745,7 +759,9 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
   });
 
   const guardianSignoffSchema = z.object({
-    catId: z.string().min(1),
+    // Legacy clients may still send catId, but authorization always comes from
+    // the server-trusted callback principal. A mismatch fails closed below.
+    catId: z.string().min(1).optional(),
     signoffToken: z.string().min(1),
     checklist: z.array(
       z.object({
@@ -762,15 +778,18 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
   });
 
   app.post('/api/community-issues/:id/guardian-signoff', async (request, reply) => {
-    if (!request.callbackAuth) {
-      reply.status(401);
-      return { error: 'Callback authentication required' };
-    }
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
     const { id } = request.params as { id: string };
     const result = guardianSignoffSchema.safeParse(request.body);
     if (!result.success) {
       reply.status(400);
       return { error: 'Invalid body', details: result.error.issues };
+    }
+    const callerCatId = principal.catId as string;
+    if (result.data.catId !== undefined && result.data.catId !== callerCatId) {
+      reply.status(403);
+      return { error: 'Body catId does not match authenticated principal' };
     }
 
     const issue = await communityIssueStore.get(id);
@@ -787,7 +806,6 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
       reply.status(403);
       return { error: 'Invalid signoff token' };
     }
-    const callerCatId = request.callbackAuth.catId as string;
     const signoffRoster = getRoster();
     if (!signoffRoster[callerCatId]) {
       reply.status(400);
@@ -1402,6 +1420,7 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
               nextOwner: proj.nextOwner,
               closureWaiver: proj.closureWaiver,
               closureChecklist: computeClosureChecklist(proj),
+              externalReview: proj.externalReview,
             };
           } catch {
             return item;
@@ -1448,6 +1467,7 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
               nextOwner: proj.nextOwner,
               closureWaiver: proj.closureWaiver,
               closureChecklist: computeClosureChecklist(proj),
+              externalReview: proj.externalReview,
             });
           } catch {
             /* best-effort */

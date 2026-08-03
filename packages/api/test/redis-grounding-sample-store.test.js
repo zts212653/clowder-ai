@@ -18,6 +18,18 @@ import {
 
 const REDIS_URL = process.env.REDIS_URL;
 
+/**
+ * UTC timestamp N days ago at a given hour.
+ * Always within the 8-day getSamples() rolling window,
+ * so tests don't silently break as calendar time advances.
+ */
+function daysAgoUtc(n, hours = 0) {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - n);
+  d.setUTCHours(hours, 0, 0, 0);
+  return d.getTime();
+}
+
 /** @returns {import('../dist/infrastructure/grounding/types.js').ClaimGroundingEvent} */
 function makeEvent(overrides = {}) {
   return {
@@ -102,7 +114,7 @@ describe('RedisGroundingSampleStore', { skip: redisIsolationSkipReason(REDIS_URL
   // ── Insufficient: cap 3 per resolver×thread×day ───────────
 
   it('insufficient events capped at 3 per resolver×thread×day', async () => {
-    const baseTs = new Date('2026-06-20T00:00:00Z').getTime();
+    const baseTs = daysAgoUtc(2);
     for (let i = 0; i < 10; i++) {
       await store.record(
         makeEvent({
@@ -122,7 +134,7 @@ describe('RedisGroundingSampleStore', { skip: redisIsolationSkipReason(REDIS_URL
   });
 
   it('insufficient cap is per-resolver', async () => {
-    const baseTs = new Date('2026-06-20T00:00:00Z').getTime();
+    const baseTs = daysAgoUtc(2);
     for (let i = 0; i < 5; i++) {
       await store.record(
         makeEvent({
@@ -150,8 +162,8 @@ describe('RedisGroundingSampleStore', { skip: redisIsolationSkipReason(REDIS_URL
   });
 
   it('insufficient cap resets on new day', async () => {
-    const day1 = new Date('2026-06-20T12:00:00Z').getTime();
-    const day2 = new Date('2026-06-21T12:00:00Z').getTime();
+    const day1 = daysAgoUtc(2, 12);
+    const day2 = daysAgoUtc(1, 12);
 
     for (let i = 0; i < 5; i++) {
       await store.record(

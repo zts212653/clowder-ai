@@ -12,11 +12,12 @@ import type { ApprovalItem } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { anchoredApprovalNavigation } from '@/test-support/approval-navigation';
 
 const F231_ITEM: ApprovalItem = {
   proposalId: 'badge-f231',
   sourceFeatureId: 'F231',
-  sourceThreadId: 'thread-profile-1',
+  navigation: anchoredApprovalNavigation('thread-profile-1'),
   requesterCatId: 'opus',
   ownerUserId: 'user-1',
   status: 'pending',
@@ -29,7 +30,7 @@ const F231_ITEM: ApprovalItem = {
 const F225_ITEM: ApprovalItem = {
   proposalId: 'badge-f225',
   sourceFeatureId: 'F225',
-  sourceThreadId: 'thread-handoff-1',
+  navigation: anchoredApprovalNavigation('thread-handoff-1'),
   requesterCatId: 'sonnet',
   ownerUserId: 'user-1',
   status: 'pending',

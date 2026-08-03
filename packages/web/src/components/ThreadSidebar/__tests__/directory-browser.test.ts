@@ -504,6 +504,142 @@ describe('DirectoryBrowser', () => {
     expect(container.textContent).not.toContain('Projects');
   });
 
+  it('ignores a late directory browse after entering drives view', async () => {
+    const winHome = 'C:\\Users\\test';
+    const driveRoot = 'D:\\';
+    const stalePath = 'D:\\Projects\\src';
+    let resolveBrowse: (value: unknown) => void = () => {};
+
+    mockApiFetch
+      .mockReturnValueOnce(
+        jsonOk({
+          current: 'D:\\Projects',
+          name: 'Projects',
+          parent: driveRoot,
+          homePath: winHome,
+          entries: [{ name: 'src', path: stalePath, isDirectory: true }],
+          isWindows: true,
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveBrowse = resolve;
+        }),
+      )
+      .mockReturnValueOnce(
+        jsonOk({ drives: [{ letter: 'D', path: driveRoot, label: '本地磁盘 (D:)' }], isWindows: true }),
+      );
+
+    const fns = render({ initialPath: 'D:\\Projects', onVirtualLocationChange: vi.fn() });
+    await flush();
+
+    // Start a concrete-directory browse, but leave it in flight.
+    await act(async () => {
+      findButtonByText('src')!.click();
+      await Promise.resolve();
+    });
+
+    // Move to the virtual root before the older browse resolves.
+    await act(async () => {
+      findButtonByText('此电脑')!.click();
+    });
+    await flush();
+
+    expect(fns.onVirtualLocationChange).toHaveBeenCalledTimes(1);
+    expect((container.querySelector('input[placeholder="Enter path..."]') as HTMLInputElement).value).toBe('');
+    expect(container.textContent).toContain('本地磁盘 (D:)');
+
+    // The stale response must not restore a concrete selection or path input.
+    await act(async () => {
+      resolveBrowse(
+        await jsonOk({
+          current: stalePath,
+          name: 'src',
+          parent: 'D:\\Projects',
+          homePath: winHome,
+          entries: [],
+          isWindows: true,
+        }),
+      );
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(fns.onCurrentPathChange).toHaveBeenCalledTimes(1);
+    expect(fns.onCurrentPathChange).not.toHaveBeenCalledWith(stalePath);
+    expect((container.querySelector('input[placeholder="Enter path..."]') as HTMLInputElement).value).toBe('');
+    expect(container.textContent).toContain('本地磁盘 (D:)');
+  });
+
+  it('ignores a late create-folder completion after entering drives view', async () => {
+    const winHome = 'C:\\Users\\test';
+    const driveRoot = 'D:\\';
+    const createdPath = 'D:\\Projects\\new-folder';
+    let resolveMkdir: (value: unknown) => void = () => {};
+
+    mockApiFetch
+      .mockReturnValueOnce(
+        jsonOk({
+          current: 'D:\\Projects',
+          name: 'Projects',
+          parent: driveRoot,
+          homePath: winHome,
+          entries: [],
+          isWindows: true,
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveMkdir = resolve;
+        }),
+      )
+      .mockReturnValueOnce(
+        jsonOk({ drives: [{ letter: 'D', path: driveRoot, label: '本地磁盘 (D:)' }], isWindows: true }),
+      )
+      .mockReturnValueOnce(
+        jsonOk({
+          current: createdPath,
+          name: 'new-folder',
+          parent: 'D:\\Projects',
+          homePath: winHome,
+          entries: [],
+          isWindows: true,
+        }),
+      );
+
+    const fns = render({ initialPath: 'D:\\Projects', onVirtualLocationChange: vi.fn() });
+    await flush();
+
+    act(() => findButtonByText('新建')!.click());
+    const folderInput = container.querySelector('input[placeholder="文件夹名称..."]') as HTMLInputElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(folderInput, 'new-folder');
+      folderInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flush();
+
+    await act(async () => {
+      findButtonByText('创建')!.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      findButtonByText('此电脑')!.click();
+    });
+    await flush();
+    expect(container.textContent).toContain('本地磁盘 (D:)');
+
+    await act(async () => {
+      resolveMkdir(await jsonOk({ createdPath }));
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(mockApiFetch).not.toHaveBeenCalledWith(`/api/projects/browse?path=${encodeURIComponent(createdPath)}`);
+    expect(fns.onCurrentPathChange).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain('本地磁盘 (D:)');
+  });
+
   it('hides 此电脑 entry when server capability isWindows is false', async () => {
     // R4 P2#3: server capability (not path shape) controls whether 此电脑 appears.
     // A non-Windows browse result (isWindows absent/false) must not show the entry.

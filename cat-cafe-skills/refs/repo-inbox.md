@@ -165,6 +165,13 @@ cat-cafe projectPath。只有 conflict rebase、public-only hotfix、release tar
 这类明确需要在公开仓 checkout 操作的任务，才把 proposal projectPath 设为 `clowder-ai`，并在
 handoff 中写明原因。
 
+**propose-thread 回报契约：`final-only`（默认 · 自治推进，任务闭环后回报一次）。** 社区
+守门 thread 新建下游 thread 时必须显式传
+`reportingMode: "final-only"`。下游在任务闭环前禁止向守门 thread 过程回报 FYI、checkpoint、
+测试进度、摩擦或 ACK；闭环后只 cross-post 一次最终总结。路由到已有 thread 时，handoff 也要
+写明同一契约。纯 FYI 不需要守门 thread ACK；只有要求守门 thread / operator 立即采取动作的真实
+阻塞或不可逆风险才升级。
+
 #### Direction Card（F168 台账联动）
 
 每个 verdict 确定后，**必须发 Direction Card** 到 Inbox thread（模板见 [direction-card-template.md](./direction-card-template.md)）：
@@ -196,7 +203,7 @@ cat_cafe_register_pr_tracking(repoFullName, prNumber)
 
 - 接球 thread 负责注册 PR tracking
 - 接球 thread 负责后续 CI / review feedback / conflict 的 hold 或事件驱动
-- 完成后用 `cat_cafe_cross_post_message` 回报守门 thread
+- 任务闭环后用 `cat_cafe_cross_post_message` **恰好一次**回报守门 thread；过程中不得回报
 
 **cross-post 语义精度（#796 教训）**：cross-post 消息的内容必须和 Direction Card 的"下一步"字段一致。
 
@@ -227,6 +234,7 @@ cat_cafe_register_pr_tracking(repoFullName, prNumber)
 | WELCOME 后只给 verdict，不给 owner / route | 球权掉地上 | Direction Card 必填 route、owner、next action、report-back |
 | 分发给下游 thread 后继续在守门 thread hold | 双 owner、重复轮询、死锁 | 谁接球谁 hold；守门 thread 只保留路由记录 |
 | 把 `clowder-ai#NNN` 的下游 thread projectPath 填成 `clowder-ai` | 下游猫进入错误 workspace，家里 SOP/skills/feature docs 不在 cwd | projectPath 跟工作区真相源走；普通社区 review/triage/intake 用 cat-cafe，只有公开仓 checkout 操作例外 |
+| propose 社区下游 thread 时用 `none`，或把每个 checkpoint 都 cross-post 回守门 thread | 主 thread 被过程消息与 ACK 往返污染 | 显式传 `reportingMode: "final-only"`；闭环前 0 次过程回报，闭环后恰好 1 次最终总结；纯 FYI 不 ACK |
 | PR 还没 accepted issue 就深度 code review | 方向错也浪费 reviewer | 先 issue-first；无 accepted issue 不进代码 review |
 | 有更优雅方案就立刻 @co-creator | operator 变回人肉路由 | 猫猫先 maintainer reframing；只有硬决策才升级 |
 | 明显 spam 仍开 thread 讨论 | 浪费协作带宽 | `invalid` + `triaged` + close |

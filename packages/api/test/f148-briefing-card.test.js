@@ -17,7 +17,8 @@ function makeCoverage(overrides = {}) {
     anchorIds: ['a1'],
     threadMemory: { available: true, sessionsIncorporated: 3, decisions: [], openQuestions: [] },
     retrievalHints: ['hint-1'],
-    searchSuggestions: ['search_evidence("F148")'],
+    searchSuggestions: ['search_evidence("legacy body hint")'],
+    semanticSearchTerms: ['F148'],
     ...overrides,
   };
 }
@@ -120,7 +121,7 @@ describe('F148 briefing card — navigation-first collapsed view', () => {
       });
       const card = result.extra.rich.blocks[0];
       const sourceField = card.fields.find((f) => f.label === '真相源');
-      assert.equal(sourceField.value, 'F148 spec');
+      assert.equal(sourceField.value, 'F148 spec — docs/features/F148-*.md');
     });
 
     it('真相源 field shows (推断) for regex provenance', () => {
@@ -138,7 +139,7 @@ describe('F148 briefing card — navigation-first collapsed view', () => {
       const result = buildBriefingMessage(makeCoverage(), 'thread-1', { rankedSources: [] });
       const card = result.extra.rich.blocks[0];
       const sourceField = card.fields.find((f) => f.label === '真相源');
-      assert.equal(sourceField.value, '未定位');
+      assert.equal(sourceField.value, '未定位（threadId=thread-1）');
     });
 
     it('下一步 field includes both label and ref for actionable pointer', () => {
@@ -156,25 +157,68 @@ describe('F148 briefing card — navigation-first collapsed view', () => {
       );
     });
 
-    it('下一步 field suggests search when no sources', () => {
+    it('下一步 field renders a structured semantic search when a real query is available', () => {
       const result = buildBriefingMessage(makeCoverage(), 'thread-1', {
         rankedSources: [],
       });
       const card = result.extra.rich.blocks[0];
       const nextField = card.fields.find((f) => f.label === '下一步');
-      assert.ok(
-        nextField.value.includes('search_evidence') || nextField.value.includes('搜索'),
-        `next step should suggest search, got: ${nextField.value}`,
+      assert.equal(
+        nextField.value,
+        'cat_cafe_search_evidence({ query: "F148", threadId: "thread-1", scope: "threads", mode: "hybrid" })',
+      );
+      assert.ok(!nextField.value.includes('query: "thread-1"'), nextField.value);
+    });
+
+    it('下一步 field uses a structured thread lookup when no semantic query is available', () => {
+      const result = buildBriefingMessage(
+        makeCoverage({ searchSuggestions: [], semanticSearchTerms: [] }),
+        'thread-1',
+        { rankedSources: [] },
+      );
+      const card = result.extra.rich.blocks[0];
+      const nextField = card.fields.find((f) => f.label === '下一步');
+      assert.equal(nextField.value, 'cat_cafe_get_thread_context({ threadId: "thread-1" })');
+      assert.ok(!nextField.value.includes('query: "thread-1"'), nextField.value);
+      assert.ok(!nextField.value.includes('cat_cafe_search_evidence'), nextField.value);
+    });
+
+    it('下一步 field never treats the thread identifier as a semantic query', () => {
+      const result = buildBriefingMessage(
+        makeCoverage({ searchSuggestions: [], semanticSearchTerms: ['thread-1'] }),
+        'thread-1',
+        { rankedSources: [] },
+      );
+      const card = result.extra.rich.blocks[0];
+      const nextField = card.fields.find((f) => f.label === '下一步');
+      assert.equal(nextField.value, 'cat_cafe_get_thread_context({ threadId: "thread-1" })');
+      assert.ok(!nextField.value.includes('query: "thread-1"'), nextField.value);
+    });
+
+    it('下一步 field escapes semantic queries while retaining the structured thread filter', () => {
+      const result = buildBriefingMessage(
+        makeCoverage({ searchSuggestions: [], semanticSearchTerms: ['My "Redis" notes'] }),
+        'thread-1',
+        { rankedSources: [] },
+      );
+      const card = result.extra.rich.blocks[0];
+      const nextField = card.fields.find((f) => f.label === '下一步');
+      assert.equal(
+        nextField.value,
+        'cat_cafe_search_evidence({ query: "My \\"Redis\\" notes", threadId: "thread-1", scope: "threads", mode: "hybrid" })',
       );
     });
 
     it('下一步 field sanitizes search suggestion (no backticks/newlines)', () => {
       const dirty = 'search_evidence(`F148`)\nwith newline\\backslash';
-      const result = buildBriefingMessage(makeCoverage({ searchSuggestions: [dirty] }), 'thread-1', {
-        rankedSources: [],
-      });
+      const result = buildBriefingMessage(
+        makeCoverage({ searchSuggestions: [dirty], semanticSearchTerms: ['F148\nwith newline'] }),
+        'thread-1',
+        { rankedSources: [] },
+      );
       const card = result.extra.rich.blocks[0];
       const nextField = card.fields.find((f) => f.label === '下一步');
+      assert.equal(nextField.value, 'cat_cafe_get_thread_context({ threadId: "thread-1" })');
       assert.ok(!nextField.value.includes('`'), `should not contain backticks, got: ${nextField.value}`);
       assert.ok(!nextField.value.includes('\n'), `should not contain newlines, got: ${nextField.value}`);
       assert.ok(!nextField.value.includes('\\'), `should not contain backslashes, got: ${nextField.value}`);
@@ -213,6 +257,27 @@ describe('F148 briefing card — navigation-first collapsed view', () => {
       assert.ok(result.extra.rich.v === 1);
       assert.ok(Array.isArray(result.extra.rich.blocks));
     });
+  });
+
+  it('renders a drill pointer beside every thread-memory decision and open question', () => {
+    const coverage = makeCoverage({
+      threadMemory: {
+        available: true,
+        sessionsIncorporated: 2,
+        decisions: ['采用方案B'],
+        decisionRefs: [{ threadId: 'thread-1', sessionId: 'session-7', eventNo: 42, invocationId: 'inv-9' }],
+        openQuestions: ['阈值待定'],
+        openQuestionRefs: [{ threadId: 'thread-1', sessionId: 'session-7', eventNo: 44 }],
+      },
+    });
+    const result = buildBriefingMessage(coverage, 'thread-1', {});
+    const body = result.extra.rich.blocks[0].bodyMarkdown;
+
+    assert.ok(
+      body.includes('采用方案B [provenance: threadId=thread-1; sessionId=session-7; eventNo=42; invocationId=inv-9]'),
+      body,
+    );
+    assert.ok(body.includes('阈值待定 [provenance: threadId=thread-1; sessionId=session-7; eventNo=44]'), body);
   });
 
   describe('formatContextBriefing (pure function)', () => {

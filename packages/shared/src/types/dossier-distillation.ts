@@ -6,7 +6,7 @@
  * approval (KD-3: summary layer must be peer/operator judged, not algorithm-generated).
  *
  * This is intentionally NOT F231 `propose_profile_update` (KD-16):
- *   - F231 = relationship primer, writes `private/profile/relationship/{catId}-primer.md`
+ *   - F231 = relationship primer, writes the authenticated data-root persona target
  *   - F208 = capability profile, writes `docs/team/cat-dossier.md`
  *   - Different target, different granularity, different approval semantics.
  *

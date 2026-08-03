@@ -5,11 +5,25 @@ import { CHAT_THREAD_ROUTE_EVENT } from '../ThreadSidebar/thread-navigation';
 
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: (
-    selector: (s: { threads: { id: string; title: string }[]; uiThinkingExpandedByDefault: boolean }) => unknown,
+    selector: (s: {
+      currentThreadId: string;
+      isLoadingThreads: boolean;
+      messages: never[];
+      threads: { id: string; title: string }[];
+      uiThinkingExpandedByDefault: boolean;
+      globalBubbleDefaults: Record<string, never>;
+    }) => unknown,
   ) =>
     selector({
+      currentThreadId: 'thread_target_current',
+      isLoadingThreads: false,
+      messages: [],
       uiThinkingExpandedByDefault: false,
-      threads: [{ id: 'thread_mm72eyvc12345678', title: 'F052 跨线程调度测试' }],
+      globalBubbleDefaults: {},
+      threads: [
+        { id: 'thread_target_current', title: '当前线程' },
+        { id: 'thread_mm72eyvc12345678', title: 'F052 跨线程调度测试' },
+      ],
     }),
 }));
 
@@ -160,5 +174,38 @@ describe('ChatMessage Postmark v2 source pill', () => {
       sourceInvocationId: 'inv-src-1',
       senderCatId: 'gpt52',
     });
+  });
+
+  it('does not render a direction pill or source card for legacy self-referential crossPost metadata', async () => {
+    const { ChatMessage } = await import('@/components/ChatMessage');
+    const message = {
+      id: 'm-self',
+      type: 'assistant',
+      catId: 'gpt52',
+      content: '',
+      timestamp: Date.now(),
+      isStreaming: false,
+      extra: { crossPost: { sourceThreadId: 'thread_target_current' } },
+    };
+    const getCatById = vi.fn(() => ({
+      id: 'gpt52',
+      displayName: '缅因猫',
+      variantLabel: 'GPT-5.2',
+      breedId: 'maine-coon',
+      clientId: 'openai',
+      defaultModel: 'gpt-5.2',
+      avatar: '/avatars/gpt52.png',
+      mentionPatterns: [],
+      roleDescription: '',
+      personality: '',
+      color: { primary: '#7C3AED', secondary: '#EDE9FE' },
+    }));
+
+    act(() => {
+      root.render(React.createElement(ChatMessage, { message: message as never, getCatById: getCatById as never }));
+    });
+
+    expect(container.querySelector(`a[href="/thread/thread_target_current"]`)).toBeNull();
+    expect(container.textContent).not.toContain('↗');
   });
 });

@@ -8,12 +8,24 @@ import { describe, test } from 'node:test';
 import './helpers/setup-cat-registry.js';
 import { createProposalTestContext } from './helpers/proposal-test-harness.js';
 
+async function createInvocationWithOrigin(ctx, threadId) {
+  const origin = await ctx.messageStore.append({
+    userId: 'alice',
+    catId: null,
+    content: 'Please propose this child thread',
+    mentions: [],
+    timestamp: Date.now(),
+    threadId,
+  });
+  return ctx.registry.create('alice', 'opus', threadId, undefined, origin.id);
+}
+
 describe('F128 partial-commit + dedup + self-heal', () => {
   test('initialMessage append failure does NOT roll back the thread or proposal (best-effort warning)', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     class FailingMessageStore extends MessageStore {
       append(msg) {
-        if (msg.catId === null && msg.userId === 'alice') {
+        if (String(msg.content ?? '').includes('will fail to post')) {
           throw new Error('synthetic append failure');
         }
         return super.append(msg);
@@ -36,24 +48,24 @@ describe('F128 partial-commit + dedup + self-heal', () => {
     assert.equal(ctx.threadStore.size, threadsBefore + 1, 'thread must remain');
   });
 
-  test('self-heal works even when 60+ messages have accumulated after the marker failure', async () => {
+  test('self-heal works even when 60+ messages accumulated after envelope commit failure', async () => {
     const { InMemoryProposalStore } = await import('../dist/domains/cats/services/stores/ports/ProposalStore.js');
-    class FlakyMarkerStore extends InMemoryProposalStore {
+    class FlakyEnvelopeStore extends InMemoryProposalStore {
       constructor() {
         super();
         this.failNext = true;
       }
-      setCardMessageId(proposalId, cardMessageId) {
+      commitEnvelope(proposalId, envelope) {
         if (this.failNext) {
           this.failNext = false;
-          throw new Error('synthetic marker failure');
+          throw new Error('synthetic envelope failure');
         }
-        return super.setCardMessageId(proposalId, cardMessageId);
+        return super.commitEnvelope(proposalId, envelope);
       }
     }
-    const ctx = await createProposalTestContext({ proposalStoreOverride: new FlakyMarkerStore() });
+    const ctx = await createProposalTestContext({ proposalStoreOverride: new FlakyEnvelopeStore() });
     const source = await ctx.threadStore.create('alice', 'Source');
-    const { invocationId, callbackToken } = await ctx.registry.create('alice', 'opus', source.id);
+    const { invocationId, callbackToken } = await createInvocationWithOrigin(ctx, source.id);
     const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
     const payload = {
       title: 'Old card retry',
@@ -62,7 +74,7 @@ describe('F128 partial-commit + dedup + self-heal', () => {
     };
     const send = () => ctx.app.inject({ method: 'POST', url: '/api/callbacks/propose-thread', headers, payload });
     const first = await send();
-    assert.equal(first.statusCode, 200);
+    assert.equal(first.statusCode, 500);
     for (let i = 0; i < 60; i++) {
       await ctx.messageStore.append({
         userId: 'alice',
@@ -79,26 +91,88 @@ describe('F128 partial-commit + dedup + self-heal', () => {
     assert.equal(secondBody.deduped, true);
     const healed = await ctx.proposalStore.get(secondBody.proposalId);
     assert.ok(healed.cardMessageId);
+    assert.equal(healed.publication.state, 'anchored');
   });
 
-  test('setCardMessageId failure: 200 with warning + retry self-heals via source thread scan', async () => {
+  test('dedup retries keep returning a visible pre-Phase-I proposal without publication metadata', async () => {
     const { InMemoryProposalStore } = await import('../dist/domains/cats/services/stores/ports/ProposalStore.js');
-    class FlakyMarkerStore extends InMemoryProposalStore {
+    class LegacyProposalStore extends InMemoryProposalStore {
+      get(proposalId) {
+        const proposal = super.get(proposalId);
+        if (proposal) delete proposal.publication;
+        return proposal;
+      }
+      getPublication() {
+        return null;
+      }
+    }
+    const proposalStore = new LegacyProposalStore();
+    const ctx = await createProposalTestContext({ proposalStoreOverride: proposalStore });
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const { invocationId, callbackToken } = await createInvocationWithOrigin(ctx, source.id);
+    const legacy = proposalStore.create({
+      proposalId: 'legacy-f128-proposal',
+      sourceThreadId: source.id,
+      sourceInvocationId: invocationId,
+      sourceCatId: 'opus',
+      title: 'Legacy proposal',
+      reason: 'Created before Phase I',
+      parentThreadId: source.id,
+      preferredCats: [],
+      projectPath: 'default',
+      createdBy: 'alice',
+    });
+    const legacyCard = await ctx.messageStore.append({
+      userId: 'alice',
+      catId: 'opus',
+      content: 'Legacy approval card',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: source.id,
+      extra: {
+        rich: {
+          v: 1,
+          blocks: [{ id: `proposal-${legacy.proposalId}`, kind: 'card', v: 1, title: 'Legacy proposal' }],
+        },
+      },
+    });
+    proposalStore.reserveDedup('alice', 'legacy-f128-key', legacy.proposalId);
+
+    const response = await ctx.app.inject({
+      method: 'POST',
+      url: '/api/callbacks/propose-thread',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { title: 'Ignored retry body', reason: 'Dedup should win', clientRequestId: 'legacy-f128-key' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(JSON.parse(response.body), {
+      proposalId: legacy.proposalId,
+      status: 'pending',
+      messageId: legacyCard.id,
+      deduped: true,
+    });
+    assert.equal((await proposalStore.get(legacy.proposalId)).cardMessageId, legacyCard.id);
+  });
+
+  test('envelope failure leaves staged proposal undecidable until retry anchors the existing card', async () => {
+    const { InMemoryProposalStore } = await import('../dist/domains/cats/services/stores/ports/ProposalStore.js');
+    class FlakyEnvelopeStore extends InMemoryProposalStore {
       constructor() {
         super();
         this.failNext = true;
       }
-      setCardMessageId(proposalId, cardMessageId) {
+      commitEnvelope(proposalId, envelope) {
         if (this.failNext) {
           this.failNext = false;
-          throw new Error('synthetic marker write failure');
+          throw new Error('synthetic envelope write failure');
         }
-        return super.setCardMessageId(proposalId, cardMessageId);
+        return super.commitEnvelope(proposalId, envelope);
       }
     }
-    const ctx = await createProposalTestContext({ proposalStoreOverride: new FlakyMarkerStore() });
+    const ctx = await createProposalTestContext({ proposalStoreOverride: new FlakyEnvelopeStore() });
     const source = await ctx.threadStore.create('alice', 'Source');
-    const { invocationId, callbackToken } = await ctx.registry.create('alice', 'opus', source.id);
+    const { invocationId, callbackToken } = await createInvocationWithOrigin(ctx, source.id);
     const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
     const payload = {
       title: 'Marker fail test',
@@ -107,32 +181,35 @@ describe('F128 partial-commit + dedup + self-heal', () => {
     };
     const send = () => ctx.app.inject({ method: 'POST', url: '/api/callbacks/propose-thread', headers, payload });
     const first = await send();
-    assert.equal(first.statusCode, 200);
-    const firstBody = JSON.parse(first.body);
-    assert.ok(Array.isArray(firstBody.warnings));
-    assert.ok(firstBody.warnings.some((w) => w.includes('setCardMessageId')));
-    const stored = await ctx.proposalStore.get(firstBody.proposalId);
-    assert.equal(stored.cardMessageId, undefined);
+    assert.equal(first.statusCode, 500);
+    const [stored] = await ctx.proposalStore.listPending('alice');
+    assert.equal(stored.publication.state, 'staged');
+    assert.equal((await ctx.approve('alice', stored.proposalId)).statusCode, 409);
     const second = await send();
     assert.equal(second.statusCode, 200);
     const secondBody = JSON.parse(second.body);
-    assert.equal(secondBody.proposalId, firstBody.proposalId);
+    assert.equal(secondBody.proposalId, stored.proposalId);
     assert.equal(secondBody.deduped, true);
-    const healed = await ctx.proposalStore.get(firstBody.proposalId);
-    assert.ok(healed.cardMessageId);
+    const healed = await ctx.proposalStore.get(stored.proposalId);
+    assert.equal(healed.publication.state, 'anchored');
   });
 
-  test('concurrent retry during in-flight card append returns 503 (not phantom 200 deduped)', async () => {
+  test('concurrent retry coalesces behind the in-flight card append and returns the same anchor', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     let releaseFirstAppend;
     const firstAppendBlocked = new Promise((resolve) => {
       releaseFirstAppend = resolve;
+    });
+    let signalFirstAppend;
+    const firstAppendStarted = new Promise((resolve) => {
+      signalFirstAppend = resolve;
     });
     let firstAppendSeen = false;
     class BlockingMessageStore extends MessageStore {
       async append(msg) {
         if (!firstAppendSeen && String(msg.content ?? '').startsWith('提议新建 thread')) {
           firstAppendSeen = true;
+          signalFirstAppend();
           await firstAppendBlocked;
         }
         return super.append(msg);
@@ -140,7 +217,7 @@ describe('F128 partial-commit + dedup + self-heal', () => {
     }
     const ctx = await createProposalTestContext({ messageStoreOverride: new BlockingMessageStore() });
     const source = await ctx.threadStore.create('alice', 'Source');
-    const { invocationId, callbackToken } = await ctx.registry.create('alice', 'opus', source.id);
+    const { invocationId, callbackToken } = await createInvocationWithOrigin(ctx, source.id);
     const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
     const payload = {
       title: 'In-flight test',
@@ -149,21 +226,21 @@ describe('F128 partial-commit + dedup + self-heal', () => {
     };
     const send = () => ctx.app.inject({ method: 'POST', url: '/api/callbacks/propose-thread', headers, payload });
     const firstPromise = send();
-    await new Promise((r) => setTimeout(r, 10));
-    const second = await send();
-    assert.equal(second.statusCode, 503, `expected 503 in-flight, got ${second.statusCode}: ${second.body}`);
-    const body = JSON.parse(second.body);
-    assert.equal(body.status, 'retryable');
-    assert.notEqual(body.deduped, true);
+    await firstAppendStarted;
+    let secondSettled = false;
+    const secondPromise = send().then((response) => {
+      secondSettled = true;
+      return response;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(secondSettled, false, 'retry waits for the canonical in-flight publication');
     releaseFirstAppend();
-    const first = await firstPromise;
+    const [first, second] = await Promise.all([firstPromise, secondPromise]);
     assert.equal(first.statusCode, 200);
     const winningId = JSON.parse(first.body).proposalId;
-    const third = await send();
-    assert.equal(third.statusCode, 200);
-    const thirdBody = JSON.parse(third.body);
-    assert.equal(thirdBody.proposalId, winningId);
-    assert.equal(thirdBody.deduped, true);
+    assert.equal(second.statusCode, 200);
+    assert.equal(JSON.parse(second.body).proposalId, winningId);
+    assert.equal(JSON.parse(second.body).deduped, true);
   });
 
   test('card append failure cleans up proposal + releases dedup so retry creates a visible card', async () => {
@@ -174,7 +251,7 @@ describe('F128 partial-commit + dedup + self-heal', () => {
         this.failNext = true;
       }
       append(msg) {
-        if (this.failNext && msg.content && String(msg.content).startsWith('提议新建 thread')) {
+        if (this.failNext && msg.idempotencyKey) {
           this.failNext = false;
           throw new Error('synthetic card append failure');
         }
@@ -183,7 +260,7 @@ describe('F128 partial-commit + dedup + self-heal', () => {
     }
     const ctx = await createProposalTestContext({ messageStoreOverride: new FailFirstAppendStore() });
     const source = await ctx.threadStore.create('alice', 'Source');
-    const { invocationId, callbackToken } = await ctx.registry.create('alice', 'opus', source.id);
+    const { invocationId, callbackToken } = await createInvocationWithOrigin(ctx, source.id);
     const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
     const payload = {
       title: 'Card retry test',
@@ -219,7 +296,7 @@ describe('F128 partial-commit + dedup + self-heal', () => {
     }
     const ctx = await createProposalTestContext({ proposalStoreOverride: new FailFirstCreateStore() });
     const source = await ctx.threadStore.create('alice', 'Source');
-    const { invocationId, callbackToken } = await ctx.registry.create('alice', 'opus', source.id);
+    const { invocationId, callbackToken } = await createInvocationWithOrigin(ctx, source.id);
     const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
     const payload = {
       title: 'Retry test',
@@ -248,7 +325,7 @@ describe('F128 partial-commit + dedup + self-heal', () => {
     }
     const ctx = await createProposalTestContext({ proposalStoreOverride: new SlowReserveStore() });
     const source = await ctx.threadStore.create('alice', 'Source');
-    const { invocationId, callbackToken } = await ctx.registry.create('alice', 'opus', source.id);
+    const { invocationId, callbackToken } = await createInvocationWithOrigin(ctx, source.id);
     const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
     const send = () =>
       ctx.app.inject({

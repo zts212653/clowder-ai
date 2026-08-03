@@ -391,7 +391,7 @@ operator设置 ChatGPT custom MCP connector（路径：ChatGPT Settings → Conn
 | 字段 | 填 |
 |---|---|
 | **名称** | `cat-cafe` |
-| **描述** | `Cat Café MCP - 云端Maine Coon Pro 工具集` |
+| **描述** | `Clowder AI MCP - 云端Maine Coon Pro 工具集` |
 | **连接** | 选 **服务器 URL**（dropdown）|
 | **URL** | `https://mcp.clowder-ai.com/mcp?token=<B1A_TOKEN>` |
 | **身份验证** | 选 **未授权**（dropdown）|
@@ -449,7 +449,7 @@ cloudflared tunnel create cat-cafe
 | dashboard "Hostname routes (Beta)" 是 private network 表单 | CF UI 重组，public hostname 入口藏了 | **不走 dashboard，走 §4.2 CF API PUT** |
 | Maine Coon云端 read 工具 OK，但 `cat_cafe_post_message` 返 `Unknown catId filter: gpt-pro` 或 502 | cat-cafe API catRegistry 没注册 gpt-pro | **不要重启 API**，走 `POST /api/cats` 热加载（§2.2）。详见 LL-cat-cafe-api-has-hot-reload |
 | `post_message rejects threadId from invocation-token callers (F193 KD-1)` 错误（Maine Coon云端是 agent-key，本不该 fire）| spike server 继承父 invocation 的 `CAT_CAFE_INVOCATION_ID` + `CAT_CAFE_CALLBACK_TOKEN` env，MCP server gate 误判 | spike 启动加 `env -u CAT_CAFE_INVOCATION_ID -u CAT_CAFE_CALLBACK_TOKEN`（§5）。详见 LL-spike-server-env-contamination |
-| `Cat Café callback not configured. Missing ... agent-key credentials` 但你明明设了 `CAT_CAFE_AGENT_KEY_FILE` | spike 继承父 `CAT_CAFE_AGENT_KEY_FILES` (antigravity multi-cat map)，不含 gpt-pro → `resolveAgentKeySecret()` 走 map 路径返 undefined，**屏蔽** single AGENT_KEY_FILE | spike 启动 `-u CAT_CAFE_AGENT_KEY_FILES` 后重新 set 含 gpt-pro 的 map（§5） |
+| `Clowder AI callback not configured. Missing ... agent-key credentials` 但你明明设了 `CAT_CAFE_AGENT_KEY_FILE` | spike 继承父 `CAT_CAFE_AGENT_KEY_FILES` (antigravity multi-cat map)，不含 gpt-pro → `resolveAgentKeySecret()` 走 map 路径返 undefined，**屏蔽** single AGENT_KEY_FILE | spike 启动 `-u CAT_CAFE_AGENT_KEY_FILES` 后重新 set 含 gpt-pro 的 map（§5） |
 | `threadId required for agent-key auth` (cat-cafe API 错误) | agent-key caller 模式必传 `threadId`（vs invocation-token 必禁），Maine Coon ChatGPT 端没传 | 告诉Maine Coon他是 agent-key 模式 `post_message` 必须显式带 `threadId`（短 L0 已说明）。详见 LL-agent-key-vs-invocation-token-threadId |
 | ChatGPT 端 write 工具偶尔被 OpenAI safety check 拦截，read 工具不拦 | ChatGPT 对 `readOnlyHint=false` 工具更严格 + first-time write 可能要 user 确认 | 让Maine Coon在 ChatGPT UI 点确认按钮 (如有)；或多试几次。属于 OpenAI 平台行为，**我们不可控** |
 

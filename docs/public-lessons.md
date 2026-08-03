@@ -917,7 +917,7 @@ created: 2026-02-26
 - 状态：validated
 - 更新时间：2026-04-10
 
-- 背景：Cat Cafe Hub 的 Socket.IO 实时通道被发现存在 CSWSH（Cross-Site WebSocket Hijacking）风险。`Origin: https://evil.example` 可以成功建立 WebSocket 连接到 `127.0.0.1:3004`
+- 背景：Clowder AI Hub 的 Socket.IO 实时通道被发现存在 CSWSH（Cross-Site WebSocket Hijacking）风险。`Origin: https://evil.example` 可以成功建立 WebSocket 连接到 `127.0.0.1:3004`
 
 - 影响：恶意网页可从任意 Origin 连接本机 WebSocket，冒充用户、监听消息、干扰猫猫工作
 
@@ -1694,7 +1694,7 @@ created: 2026-02-26
 - 状态：validated
 - 更新时间：2026-06-21
 - 坑：F246 Phase D PR #2477 在 local review 3 轮 + cloud review 3 轮中，累计暴露 **4 处同类 scope-mismatch**——全部是 `items`（全集）该用 `filteredItems`（当前视图）的位置写反了。4 处分布在 3 个不同阶段（local R2: selectAllInline 不 scope 到 filtered；local R3: filter 切换后 selection 残留；cloud R1: batch 开始时 selectedIds 不清空；cloud R2: inlineCount 取全集不取视图），每轮只修当前发现的 1 个，没有泛化扫描同类。
-- 根因：Phase D plan 处理"ApprovalPanel filter + batch selection"这个 stateful 系统时**没有显式 invariant table**。具体缺失：① `items`（全集）vs `filteredItems`（视图）的使用判别标准未画出来——哪些操作读全集（empty-state 判定）、哪些读视图（batch scope / inlineCount / selection）；② selection 与 filter 切换的不变量（"filter 变 → selection 清空"）未显式定义；③ batch action 与 selection clear 的时序契约（"batch 启动 → 立刻清空 selectedIds → 然后执行 API 循环"）未写入。
+- 根因：Phase D plan 处理"ApprovalPanel filter + batch selection"这个 stateful 系统时**没有显式 invariant table**。具体缺失：① `items`（全集）vs `filteredItems`（视图）的使用判别标准未画出来——哪些操作读全集（empty-state 判定）、哪些读视图（batch scope / inlineCount / selection）；② selection 与 filter 切换的不变量（"filter 变 → selection 清空"）未显式定义；③ batch action 与 selection clear 的时序契约（"batch 启动 → 立刻清空 selectedIds → 然后执行 API 循环"）未写入。**这不是 4 个 bug，是 1 个 failure class 的 4 个 symptom**——filter 引入"可见集 ≠ 全集"的状态分裂，所有 selection/count 类操作默认落在了全集上。
 - 这是 `feedback_plan_stateful_lifecycle_state_machine.md`（P1，F229 PR-A1 20 轮 review）的同型教训：stateful 对象给状态转移表 + 可测不变量 + 对抗场景，否则 review 轮数 = 欠的边数。F246 是 UI 层变体：store + component 的 state projection 关系也是 stateful 系统。
 - 触发条件：plan 涉及"全集 + 过滤视图 + 选择状态 + 批量操作"四件套的 UI 时，且 plan 没有显式 invariant table。
 - 防护：
@@ -1703,29 +1703,10 @@ created: 2026-02-26
     - 视图（`filteredItems`）：batch scope、inlineCount、selection scope、UI 列表渲染
     - 不变量：INV-1 filter 变 → selectedIds 清空；INV-2 batch 启动 → selectedIds 立刻清空（double-click guard）；INV-3 inlineCount 与 batch bar 可见性 = filteredItems 的 inlineApprovable 计数
   - **Failure-mode audit at plan time**：plan 写完后用"items vs filteredItems"做 grep 扫描模板（哪些用 items，逐个标注为何不用 filteredItems）。
+  - **filter change = state reset event**（推广形式）：切换 filter 后，所有依赖"可见集"的派生状态（selection / count / pagination）必须清空或重算——INV-1 是它的 selection 特例。
+  - **Code review checkpoint**：reviewer 看到 filter + selection 并存时，第一动作对照 invariant table，每个操作问"用的是全集还是可见集？"。
 - 来源锚点：F246 Phase D PR #2477（squash `507bf5f6d`）/ local R2 fix `8cedeacf6`（selectAllInline scope）/ local R3 fix `1fd592278`（selection clear on filter change）/ cloud R1 fix `0e3e9f3d9`（batch double-click guard）/ cloud R2 fix `326af8099`（inlineCount scope）/ opus-47 vision guard verdict（"4 处 scope-mismatch 暴露 plan 层 stateful invariant 缺口"）
-- 关联：feedback_plan_stateful_lifecycle_state_machine（P1 F229 20 轮——plan 里 stateful 对象必须三件套）| LL-072（cloud review 封板——F246 Phase D 因 100% stale replay 封板，但根因是 4 处 scope-mismatch 用了 4 轮才全清）| feedback_halt_question_but_probe_before_pivot（N 轮同向打补丁=坐标系警报——本 LL 给了具体的"filter+batch UI invariant table"作为坐标系修正工具）
-
-### LL-087: Filter+Batch UI 的 scope-mismatch failure class — plan 层补不变量表
-- 状态：validated
-- 更新时间：2026-06-21
-- 坑：F246 Phase D 引入 filter + batch 操作后，4 处独立点犯了同一类 bug：`selectAllInline` 选了全集而非 `filteredIds`；filter 切换后 `selectedIds` 未清空；batch 操作初始 set 未清空旧选择；`inlineCount` 取 `items` 而非 `filteredItems`。4 处 scope-mismatch 同类 finding，触发 `feedback_plan_stateful_lifecycle_state_machine.md`："同类 finding ≥3 轮 → 停回 plan 层补状态机"。
-- 根因：**filter 引入了"可见集 ≠ 全集"的状态分裂**，但 plan/spec 没有为此写不变量。所有与 selection/count 相关的操作默认用了 `items`（全集），而正确答案是 `filteredItems`（可见集）。这不是 4 个 bug，是 1 个 failure class 的 4 个 symptom。
-- 触发条件：① UI 引入 filter/search/排序等"可见集 ≠ 全集"的分裂点；② selection/batch/count 等操作需要"对什么集合操作"的决策；③ plan 层没有写 invariant table 明确"哪些操作走全集、哪些走可见集"。
-- 防护（plan-time invariant table 模板）：
-  - 每当 plan 引入 filter/search/sort 等可见集分裂点时，写一张 **scope invariant table**：
-    ```
-    | 操作 | 目标集 | 不变量 |
-    |------|--------|--------|
-    | selectAll | filteredItems | 只选当前可见 |
-    | count badge | filteredItems | 显示可见数 |
-    | batch approve/reject | selectedIds ∩ filteredItems | 不操作不可见项 |
-    | filter change | clear selectedIds | 旧选择可能不在新可见集 |
-    ```
-  - **filter change = state reset event**：切换 filter 后，所有依赖"可见集"的派生状态（selection/count/pagination）必须清空或重算。plan 层用 `useMemo` 依赖链 或 `useEffect` 显式重置表示。
-  - **code review checkpoint**：reviewer 看到 filter + selection 并存时，第一动作对照 invariant table，每个操作问"用的是全集还是可见集？"。
-- 来源锚点：PR #2477（F246 Phase D）/ opus-47 vision guardian Phase D verdict / 4 处 scope-mismatch 修复（selectAllInline/filter auto-clear/batch initial set/inlineCount）
-- 关联：feedback_plan_stateful_lifecycle_state_machine（同类 finding ≥3 轮→停回 plan 层）| feedback_grep_consumers_before_contract_change（改契约先 grep 消费方——scope-mismatch 是"引入 filter 改了'集合'语义但没 grep 所有消费方"）
+- 关联：feedback_plan_stateful_lifecycle_state_machine（P1 F229 20 轮——plan 里 stateful 对象必须三件套）| LL-072（cloud review 封板——F246 Phase D 因 100% stale replay 封板，但根因是 4 处 scope-mismatch 用了 4 轮才全清）| feedback_halt_question_but_probe_before_pivot（N 轮同向打补丁=坐标系警报——本 LL 给了具体的"filter+batch UI invariant table"作为坐标系修正工具）| feedback_grep_consumers_before_contract_change（引入 filter 改了"集合"语义但没 grep 所有消费方）
 
 ### LL-088: Close gate report "持续 verdict 入口" 必须列具体路径——不只写 "pnpm check"
 - 状态：validated
@@ -1739,7 +1720,7 @@ created: 2026-02-26
   - feat-lifecycle skill close-gate.md schema 加 `verdict_entrypoints` 字段：每条 verdict 必须列**具体路径 + 入口归属**（CI workflow `.yml` / Hook 文件 / 单独 `check:*` 命令 / 测试体），不允许只写 `pnpm check`。
   - 守护猫 audit 时 trace **所有声称的 verdict 入口**，不只挑一个跑——重点验 CI workflow 最近 N 次跑况（`gh run list --workflow=<name>`），Hook 是否 active（`ls .githooks/`），测试体是否绿（`node --test <script>`）。
   - 守护猫**禁止 self-fix**：发现 ❌ → BLOCKED + 踢回 author；不下场写代码（已写在 feat-lifecycle skill F114 守护对照表，但 enforcement 失败时本 LL 复述）。
-- 来源锚点：`docs/features/F238-bidirectional-boundary-symmetry.md#close-gate-report` | thread `[thread-id]` 2026-06-26 07:35 UTC 愿景重审 | `scripts/run-checks.mjs` line 21-50 引用 10 个 HEAD-missing scripts（独立工程债，operator 待决是否开 follow-up）
+- 来源锚点：`docs/features/F238-bidirectional-boundary-symmetry.md#close-gate-report` | thread `[thread-id]` 2026-06-26 07:35 UTC 愿景重审 | 当时 `scripts/run-checks.mjs` line 21-50 引用 10 个 HEAD-missing scripts；该独立工程债已由 F177 Phase I 于 2026-07-16 sunset dead runner、校正 live skill claim 并补 command-surface guard 闭环
 - 关联：feat-lifecycle skill F114 守护对照表 + 反 anti-pattern 检查 | ADR-031 软硬 eval 三层反射 | F192 verdict-loop 闭环 | feedback_gemini_35_no_longer_what_you_thought（暹罗禁写代码硬约束）
 
 ### LL-089: Spec 拆 PR scope 时 normative 单元必须按 implementation PR 边界切, 不预先 batch / 不混 scope
@@ -1768,3 +1749,137 @@ created: 2026-02-26
 - 原理：Spec 是 "deployable state declaration", 不是 "future intent declaration"。预先 batch 写 future PR 的 normative 字段, 等于 declare 不存在的 dist——sanity check 会真炸。边界混淆的代价是 implementer 在 PR 内反复踩 self-inflict 雷。同源于 R1 .mjs-only over-correction (把 scope decision 提前 batch 拍板) 也同源于 LL-087 plan-time invariant 思路 (declaration 也是 invariant 的一种, 必须 trace 真实 state)。
 
 - 关联：F243 Phase B (active) | LL-087 plan-time invariant table 同源 (declaration = invariant 的一种) | feedback_xiaci_yiding_self_diagnosis (糖衣话术"未来一次写完"=包装当下偷懒) | feedback_grep_consumers_before_contract_change (改 contract 前 grep 全消费方; 这里 dual——declare contract 前看每个 PR 的 actual deployable state)
+
+### LL-090: Owned feature branch rebase 发布用 `--force-with-lease`，不要把它误判成不可逆越权
+- 状态：validated
+- 更新时间：2026-06-30
+
+- 坑：F167 Phase Q PR #2690 merge-gate 中，`pnpm gate` 把 owned feature branch rebase 到最新 `origin/main`，五枚 patch 经 `range-diff` 证明等价，但我把后续 `git push --force-with-lease origin feat/f167-hold-lifecycle` 当成需要额外授权的不可逆操作，导致已放行 PR 卡住。
+- 根因：把"force push"四个字按字面映射到禁止项，没先判分支 ownership / lease 保护 / 是否只是发布 gate rebase 后的新 PR head。merge-gate 的风险边界不是"命令名含 force"，而是"是否 rewrite main、共享分支、他人工作，或缺少 patch-equivalence / continuity 证据"。
+- 触发条件：`pnpm gate` / conflict rebase / latest-main sync 改变 feature branch HEAD，PR head 需要更新；该分支由当前 author owns，且可用 `range-diff` 或 gate 输出证明 delta 是纯 rebase / patch-equivalent / 已审 scope。
+- 修复：本次在 operator 明确纠正后执行 `git push --force-with-lease origin feat/f167-hold-lifecycle`，PR head 更新到 `baf44e4a`；Opus 4.6 scoped continuity approval 覆盖新 head；随后 PR #2690 squash merge 到 main（`2db065548`）。
+- 防护：`merge-gate` skill 的 Review Continuity Guard + Common Mistakes 明确：owned feature branch latest-main rebase 后，用 `git push --force-with-lease origin {branch}` 发布 PR head是允许路径；发布后必须重新验证 E1 local head == PR head，并让 active review source 覆盖新 PR head（或拿 scoped continuity approval）。禁止项仍是无证据 rewrite shared/non-owned branch 或 main 历史。
+- 来源锚点：PR #2690 final branch head `baf44e4ad0c59bdccd927fc7c0f9ed0507b22aff` / squash `2db06554862ca148fc8ece68df2ddb196d7c9234` / Opus 4.6 continuity approval 2026-06-30 11:22 UTC / operator correction 2026-06-30 11:12 UTC / `cat-cafe-skills/merge-gate/SKILL.md` Review Continuity Guard update。
+- 原理：可逆性和授权边界看对象与证据，不看命令表面词。`--force-with-lease` 对 owned PR branch 是"发布 rebase 后事实"，不是"改写共享历史"；但它必须被 `range-diff` / continuity / evidence validation 夹住。
+
+- 关联：merge-gate skill | LL-079 (`FETCH_HEAD` / moving refs 要钉 SHA) | LL-082 (多 worktree 长链证据坐标) | LL-086 (cloud review/review coverage 时序必须闭合)
+
+### LL-091: 首个同类 P2 出现时先枚举 failure class，不要让 cloud 逐条采样补锅
+- 状态：validated
+- 更新时间：2026-07-05
+
+- 坑：F188 memory temporal debt PR #2755 连续 6 轮 cloud P2，每轮都是真 bug、每轮也都修对了，但修法按 cloud 当轮采样点逐条补：semantic top-k、raw top-k、hybrid top-k、raw passage ordering、incremental supersedes refresh、collection supersedes refresh。operator用“补锅匠 / 数学之美”拉闸后，Fable5 做坐标系审计才枚举出最后一个同类洞：`mergeEntityResults` 把 entity docs prepend 到已降权列表前面，旧写法在 entity 填满 `limit` 后让 active vector hit 没机会替换 stale entity hit。
+- 根因：第一条 top-k temporal demotion P2 出现时，没有把它提升成 failure class（“所有 collect/sort/slice 路径，必须在最后一次 `slice(0, limit)` 前完成 temporal demotion”）并枚举所有路径，而是按单条 review finding 修单条路径。remote reviewer 是无状态抽样信号源，路径越多，轮数越接近“欠枚举的路径数”。
+- 触发条件：任一 reviewer/cloud P1/P2 命中“同类路径不变量”而不是孤立 bug，尤其是：
+  - 多条并行检索 / ranking / merge / fallback 管道；
+  - 多个 builder/store/mutation lifecycle 写同一种派生数据；
+  - reviewer 连续两轮提出同一语义族但不同 call site 的问题。
+- 修复：Fable5 seal-board audit 将 Class A 截断前降权路径枚举到 7/7，补上 entity-merge P2；Opus final stateful review 验证 `7feae0cc` 后 PR #2755 squash merge 到 main（`17edde5e`）。F188 feature doc timeline 已记录 temporal debt fix。
+- 防护：
+  - **首个同类 P2 后停止“只修这一处”**：先写一句不变量，再用 grep/static trace 列出所有 sibling call sites；每个 call site 标 `covered / out-of-class / must-fix`。
+  - **测试形态要覆盖 class，不只覆盖路径**：至少一个参数化 regression 把同一不变量跑过 lexical / semantic / hybrid / raw / entity-merge 等现有模式；新增路径必须加入枚举表。
+  - **封板审计与点修分离**：cloud 循环达到 LL-072 阈值后，当前轮真 bug 可以修，但终局依据改为本地 stateful reviewer 的全类枚举和 final SHA review，不再 re-trigger 等 “0 P2”。
+  - **更深抽象另开 follow-up**：若正确坐标系是单一 `finalizeRanking` / mutation lifecycle 咽喉，且当前 PR 已能正确覆盖现有路径，则登记后续重构，不在封板 commit 里扩大 scope。
+- 来源锚点：PR #2755（final head `7feae0cc80fb11dbfd6a96dd830fef755b881341`，squash `17edde5e3b311cb27b271c6385fe47b22b0676c0`）/ Fable5 seal-board verdict `[thread-id]#0001783259660566-000337-62d016d2` / Opus final stateful review `[thread-id]#0001783261249985-000361-02d0dd2d` / `docs/features/F188-library-stewardship.md` timeline 2026-07-05
+- 原理：同类 bug 的最小单位不是 reviewer 当前指出的 line，而是失效的不变量类。先枚举类，再修路径；否则 review loop 会把“系统性漏面”伪装成一串独立小锅。
+
+- 关联：LL-072（cloud review 无不动点，封板协议）| LL-083（封闭集补齐 vs 开放纠缠繁殖）| LL-087（stateful UI 的 plan-time invariant table）| feedback_grep_consumers_before_contract_change | feedback_plan_stateful_lifecycle_state_machine
+
+### LL-092: 记忆摘要必须保留 stance/provenance——提到、代写、批判都不是认可
+- 状态：validated
+- 更新时间：2026-07-08
+
+- 坑：云端 ChatGPT 记忆在一次对话中把“任务毕业线”（领导/外部框架里的被批判对象）当成 You 可用概念；被纠正后，又把“可信承接 / 协作唤醒”（为了领导交付稿临时包装的表述）当成“我们家的方向”。两跳都被 operator 当场拦截，未进入 Clowder AI 长期 truth。
+- 根因：摘要记忆缺 `origin_type / stance / status / scope / source_refs / usage_policy`，把 mention、critique target、deliverable voice 压成用户画像或项目 canon。无原文、无来源、无 stance 的画像一旦被注入高权重上下文，模型会天然把它当“我认识这个用户”的事实。
+- 触发条件：① 用户让猫改写/代写别人观点或领导文档；② 用户引用概念是为了批判/吐槽；③ 对话里有“我们”的多共同体歧义；④ 记忆系统只存摘要结论，不存原文 anchor 与使用策略。
+- 防护：
+  - 任何 profile/entity/taste/event 写入涉及用户观点时，必须区分 `endorsed / rejected / requested_for_delivery / quoted / joking / unknown` 等 stance；未知就写 unknown，不得补脑。
+  - `doc_aliases` / entity nudge 只能亮候选 anchor，不能把标题命中升格成用户立场；自动镜像默认 `auto_inject=never` + `requires_drilldown=true`。
+  - 用户纠正“X 不是我的观点”后，不只 retire X，还要把同源/相邻概念临时降成 `requires_context_check`，防“删 A 推 B”的 repair overreach。
+  - 负向记忆是一等公民，但用途是阻止误用/要求回原文，不是反向注入“用户讨厌 X”的新断言。
+- 来源锚点：`docs/architecture/cloud-memory-stance-collapse-postmortem-2026-07.md`（归档云端草案 `/home/user/Downloads/memory_system_failure_postmortem.md`）/ F260 Design Gate Addendum（同日）
+- 原理：记忆系统的保真不只包括事实内容，还包括语用身份。原文词没错但“谁的观点、什么语境、能不能泛化”错了，就是语用层马东东；在 proactive/nudge 系统里会被放大。
+
+- 关联：F260 write-side autopsy / F231 profile capsule / F200 recall eval / M2 记忆是数据不是指令 / M12 provenance 全链路 / M21 两种日记两种度量 / LL-091 failure-class 枚举
+
+### LL-093: 终点库存不能证明路径流量——多 writer 共库必须用唯一指纹核 provenance
+- 状态：validated
+- 更新时间：2026-07-09
+
+- 坑：F260 写侧尸检 A5 看到 `global_knowledge.sqlite` 有 188 条文档且 mtime 当日，就写成“历史有流量走完全程（approve 后持久）”。2026-07-09 复核发现批准路径的唯一 anchor 前缀是 `distilled:`，而 live 库 193 条全部为 `global:*`、`distilled:*` 为 0；库存来自 `GlobalIndexBuilder` 扫描路径，不能证明 distillation 被用过。更深一层，global rebuild 会删除 compiler fresh set 外的 anchor，即使 approve 短暂写出 `distilled:*`，下次启动也会被清掉。
+- 根因：把 shared sink 的**总库存**当成某个 writer 的**路径流量**。同一 SQLite 同时被 compiler 与 runtime approval writer 使用，却没有先按 writer-specific provenance / namespace 分桶；mtime 也只证明库最近被某条路径写过，不证明目标路径走通。
+- 触发条件：任何“看到终点有数据，所以上游链路工作”的 claim，尤其是一个 store 有多个 importer/compiler/runtime writer，或 generated index 同时被当 truth store 时。
+- 修复：撤回 A5 “历史走完全程”claim；用 `distilled:` 路径指纹查库；同步重开 F152 AC-C1/C3；把终态收敛为 persistent workflow → durable truth → compiler → disposable index。
+- 防护：
+  - **Soft**：路径健康报告必须写 `trigger → path-unique fingerprint → sink rows → survival across rebuild`，缺一项只能说“未知”，不能说“已走通”。
+  - **Hard**：每个 writer 写入稳定 `provenance_source`/namespace；加回归测试证明 approved output 跨 restart/rebuild 存活，并禁止 compiler 静默删除非本 source namespace。
+  - **Eval**：按 writer 统计 marked→nominated→reviewed→materialized→recalled funnel；库存 count 只做容量指标，不做 adoption 指标。
+- 来源锚点：`docs/architecture/memory-write-side-autopsy-2026-07.md` A5 修正 | `packages/api/src/domains/memory/distillation-service.ts:71-89` | `packages/api/src/domains/memory/GlobalIndexBuilder.ts:37-54,89-120` | thread `[thread-id]`（fable-5 × codex-sol 交叉复核，2026-07-09）
+- 原理：**终点状态是多条因果路径的叠加，不携带路径身份。** 要证明“这条管线工作”，必须找到该管线独有的可观测指纹，并验证它穿过生命周期边界后仍存活；否则库存只是候选线索，不是 provenance。
+- 关联：ADR-031 soft/hard/eval 三层 | M3 真相源外置 | M12 provenance 全链路 | LL-091 failure-class 枚举 | F152 Phase C | F260 A5
+
+### LL-094: Carrier 健康不是 Subject 收敛——receipt / response / custody / verdict 必须分层
+- 状态：validated
+- 更新时间：2026-07-15
+
+- 坑：F234 grouped-regex main-red 与 WorkflowSopPanel UT 漂移两次都把 code-blocking 正文装进 `coordinate` envelope。接收猫严格遵守 D4“只回复确认”，`[BLOCKING]` 又在 ACK 后停止升级，红灯最终由 operator 人肉重派。复核 Phase S 还发现 `QueueProcessor` 把 invocation `succeeded` 直接写成 action holder `succeeded`。
+- 根因：多条 safety 规则（必须 ACK / non-assign 不授权 / 不信 handoff claim）的合取没有产生 liveness，反而把送达回执、语义回应、责任处置和 subject 终结压成同一个 ACK/exit 信号。effectClass 又同时被当成 sender intent 和 receiver 权限开关，导致“不偷授新权”错误扩张为“剥夺已有责任”。
+- 触发条件：任何用 carrier 生命周期信号代替 durable subject 真态的设计，包括“未 ACK 才升级”、“有回复就算接住”、“exit 0 就算 action 完成”，或用消息 metadata 取代独立 standing/custody 真相。
+- 修复：将模型收敛为四层：transport receipt 归机器；semantic response 只承载新信息；standing 经 Phase O 独立核验；custody 经 ActionSuccessorLease CAS；最后只有 action-specific Evidence → Verdict 可以终结 subject。Non-assign message 既不授新活，也不撤销接收方已有 standing。
+- 防护：
+  - **Soft**：D4 注入 `verified/mismatch/insufficient`；`cross-thread-sync` 删除“BLOCKING 必须 ACK”，拆分 ACK 三义。
+  - **Hard**：existing-standing claim 复用单账本 CAS；structured mismatch 用 `returnToPredecessor`；completion candidate 必须经 terminal predicate Verdict；QueueProcessor 不得把 exit 0 直接写 action success。
+  - **Eval**：liveness 用 unresolved/no-active-custody 与 return-delivery-overdue 扫描；integrity 用 `lease succeeded ∧ subject nonterminal` reconciliation；两类 counter 分开判定。
+- 来源锚点：`[thread-id]` | *(internal reference removed)* | F167 Phase O/S/S.1 | F246 AC-B4 | `packages/api/src/domains/cats/services/agents/invocation/QueueProcessor.ts`
+- 原理：**Safety 的合取不会自动产生 Liveness；TCP/message ACK ≠ application commit，invocation success ≠ action success。** 收敛必须定义在 subject 的终结谓词上，不定义在载体是否说过话。
+- 关联：ADR-028 权威/来源边界 | ADR-031 soft/hard/eval | Longform-005《收敛是后果的函数》 | TeamAct `State → Owner → Action → Evidence → Verdict → Route` | LL-091 failure-class 枚举
+
+### LL-095: 过宽口号 × 每轮注入放大 × 强遵从执行 = 工程问题被迫配 eval（含诊断自身的两次修正）
+- 状态：validated（v2-R1——codex-sol 独立审计 + 活跃载体收口）
+- 更新时间：2026-07-20
+
+- 坑：`[thread-id]` 修 codex CLI 卡死/取消/恢复（纯工程问题），codex-sol 在同一讨论内两次套三层（000129 首发"应按三层做……eval 统计 p95/p99"，000175 换人话重讲实施时再次"落地会覆盖三层……Eval 记录"——中间有完整机会重新分类仍复套）；fable-5（平行 session）000133/000138 受锚定后沿用"eval 层"说法无摩擦。operator嗅出"总觉得这个是工程问题"，codex-sol 用 eval-design 出生证判据自纠（"把工程 telemetry 顺手叫成了 eval"）。
+- 根因链（v2 修正版，git 考古核实）：① **口号出生即过宽**——"harness 改动按软+硬+eval三层落地；详见 ADR-031"出生于 PR #2005 `c3f6812ad`（F218，Maine Coon/GPT-5.5 签名），**出生时就无条件**，且 ADR-031 从未定义过三层（指针断链，细则实际住 eval-design §五）；② **retention 机制高频固化**——PR #2239 R5 原样 disentangle 进每轮注入的 staging，cloud reviewer 还专门要求 retention，守护测试只断言"软+硬+eval"口号字符串存在；③ **强遵从偏置执行成清单**——Sol 家族"强遵从 × 完成欲"（cat-dossier 已载）把可选方法论执行成必填三格；④ **锚定传染**——先发命名"eval"后，第二只猫沿用无阻力，说明任何一层注入里都没有刹车。**每一环都过了当时的 review**：过宽口号不是笔误，是 review 链缺"触发词定义域 ≤ 规则适用域"这个审查维度——行为注入文本的 review 和代码 review 是不同学科。
+- 诊断自身的两次翻车（同样值得沉淀）：v1 诊断（fable-5, `c76dd9ce0`）犯了两个错——**(a) 编造历史叙事**："PR #2239 压缩把边界压没了"是看到 25-token 条目就脑补的故事，没查 git（"我能猜出来"病 + 三连根因比两连"故事更完整"的滑移偏差）；**(b) case-fitted 坐标**："改猫的行为→三层；修代码的行为→不做 eval"从单一案例归纳，有真实反例（F200 recall 排序是代码行为却合法需要 eval；"@ 路由行首"是猫行为却只需 guard）。且 v1 引以为豪的"只做软层 + 两格显式写不做"**仍在盘点三格**——仪式感没消失，只是换了姿势。
+- 触发条件：任何"每轮注入的反射条目"用家族大词（harness / 质量 / 安全）做无条件触发；守护测试只断言口号字符串存在；诊断高频行为偏移时只看当前措辞不做 git 考古。
+- 修复（v2-R1 终态，principle-derived）：staging 条目换**问题类型四分类**——确定契约→test/guard；运行健康→observability（F153，默认不挂 Eval Hub，包装成带 utility claim+consumer+verdict 的估计量才升格）；不确定效用+明确 consumer+keep/tune/sunset 决策→eval（出生证走 eval-design）；教猫→convention/skill；**同一改动多类问题按 claim 逐项选，不给整项贴单一标签**（灰区规则）。**机制是按问题选的可选工具箱，不盘点未选项**。**修结论的全部活跃载体防 split-brain**（R1 review 抓到 v2 只修了 staging+ADR）：`feat-lifecycle`（Eval Contract 条件触发+只记录实际选中的机制）、`eval-design` §五（改为"选中机制后的落地约束"）、`f218-source-hygiene.test.mjs`（断言换锚）、manifest/index description 同步；历史 feature 文档不回溯改写，以 ADR-031 v3.4 supersede。
+- 防护（只记录实际选中的机制，不列未选项）：
+  - 认知路径：本次修复全部活跃载体同轴（见修复段 + PR #3094）。
+  - 确定契约：staging/f218 守护测试改守判别式锚点 + 反向断言旧"按三层落地"口号不回归；"机制误配"本身是语义级判断，lint 不可达，不硬造门禁（eval-design §五：≥2 次真实翻车才硬化）。
+- 来源锚点：`[thread-id]`（000129 首发三层套用 / 000175 同讨论二次复套 / 000133+000138 锚定沿用 / 000179 operator嗅出 / 000181 自纠 / 000255+ codex-sol 独立审计）| PR #2005 `c3f6812ad`（口号出生 commit）| `c76dd9ce0`（v1 修复）| PR #3094（v2 + R1 收口）| ADR-031 v3.4 §机制选择 | eval-design SKILL §五 | cat-dossier codex-sol 坏直觉栏
+- 原理：**高频注入 × 措辞误差 = 系统性行为偏移，而措辞误差的最常见形态是"触发词定义域 > 规则适用域"。** 修这类病要修三处：口号本身（内容）、放大器（注入措辞与守护测试）、执行偏置（dossier 自知）——只修放大器不修口号，或反之，都会复发。诊断它的人同样暴露在偏差下：归因叙事必须过 git 考古，分类坐标必须找家里的活反例对打，否则诊断本身成为下一个待修对象。
+- 关联：ADR-031 v3.4 §机制选择 | ADR-038 staging 协议（管预算守恒不管措辞质量——本 LL 是其盲点补充）| eval-design（"无 consumer 就上指标 = 摸鱼指标制造机"）| LL-082（工具箱用法正例：worktree dirty ledger 是猫行为问题，配 eval 有 consumer，合理）| F200 recall eval（代码行为合法需要 eval 的活反例）| F153 runtime observability（工程 telemetry 的正确归宿）| feedback_same_model_blind_review_copies_prior（"故事更完整"滑移指纹）
+
+### LL-096: 任务授权 ≠ 立项授权——F 号分配必须先有 operator 拍板（SOP:294）
+
+- 现象：墨墨在自留地 thread 拿到"能支持的实现之"的工作计划后，自行编号 F274、写 feature doc、把 BACKLOG 行直接推上 main，全程未请operator拍板 F 号。被operator一句"你这个f274按照sop立项了嘛？"点破。
+- 根因：把"做这个任务"的授权误读成"立这个项"的授权。SOP `docs/SOP.md:294` 明确 F 号分配 = operator拍板 → 猫执行；F262/F267/F268 先例也都是先有 operator signoff。工作计划里的"实现之"只授权了执行，不授权编号。
+- 修复：operator当场追认（成本为零路径），F274 doc 补 operator signoff 凭据段。
+- 防护：编号核验（查重）只是立项的一半，另一半是拍板凭据；以后任何猫在写 `docs/features/F*` 新文档前，先问"这个 F 号是谁拍的板"，答不出就先 @co-creator，答得出就把凭据写进 doc 的 signoff 行。
+- 关联：SOP:294 F 号分配 | F262 立项先例（operator UX signoff 先行）| F274（本次追认案例）
+
+### LL-097: Prompt 静态全绿 ≠ 行为完成——删条款前先证明替代承载与 action journey
+
+- 状态：validated
+- 更新时间：2026-08-01
+
+- 坑：F234 Phase L0-GD 的八项结构 AC、compiler/预算/ledger 测试和独立审计全部闭合后，团队一度把“prompt 优化完成”说得过满；后续真实人物提案旅程又暴露 capability/tool 虽存在，但模型没有先想到搜索与调用。与此同时，F203 #3329 注册 `codex-sol` 后让 Spark margin 红，产生继续删 prompt 的压力。
+- 根因：把三种不同 claim 压成一个完成态：①文本/编译结构正确；②canonical runtime 真正收到；③触发场景出现时发生正确行动。静态测试只能证明第一层；ToolSearch 可用也不证明 unknown-unknown 会主动唤醒。
+- 修复：F234 durable truth 改为 `structural 8/8` 与 `action journey 0/6 verified` 分账；广泛 diet 冻结。#3329 只迁出三条已有 F203 spec/audit 替代承载的历史账目，保留 active counter-prompt、F218 与 ADR-038 breadcrumb，并用语义断言 + budget guard 锁住边界。
+- 防护：每个删除候选必须回答 replacement carrier 在哪、谁是 authority、真实 delivery 如何证明、哪个 action journey 验行为、失败怎样 rollback。没有 consumer journey 的静态绿只能叫“结构通过”，不能叫“优化完成”。
+- 来源锚点：F234 `Follow-up truth split + diet freeze` | ADR-038 `Generation Diet Completion Gate` | PR #3329 | operator source `0001785553549038-001517-efe0fa4a`
+- 原理：**模型看见文字、模型能找到工具、模型在正确时机采取行动，是三件不同的事。** Prompt diet 的风险不在删了多少，而在删除后是否仍有一条可证明的认知与执行路径。
+- 关联：F234 Phase L0-GD | F203 canonical L0 delivery | F192 capability wakeup | LL-095 高频注入措辞放大
+
+### LL-098: zero-step billing/spending-limit 是外部基础设施，不是新的代码裁决
+
+- 状态：validated
+- 更新时间：2026-08-01
+
+- 坑：PR #3276 已完成 exact-HEAD review、全量 gate、mergeability 与路径安全/鉴权证据后，GitHub required check 仍返回 `runner_id=0`、`steps=[]` 的 billing/spending-limit 红灯。团队把同一外部账单状态再次升级成新的代码或合入选择，形成表演性等待；代码、重跑和本地猫都不能“变出钱”解决它。
+- 根因：把“外部执行器没有获得 runner”误读成“代码执行后失败”。zero-step job 没有 source-under-test 运行事实，只证明 GitHub 账户或 billing infrastructure 没有启动 job；它既不是代码失败，也不是绿色 CI 证据。
+- 修复：把该事件归入 operational evidence lane，保留 exact PR/head、独立 review、已完成 gate、mergeability、zero-step payload 与账户提示的 typed decision frame。若授权与 merge-gate 已闭合，billing-only 不重复制造新的等待或 operator 选择；若必需行为证据仍缺，则明确缺哪一项，不拿 zero-step 红灯替代它。
+- 防护：识别 `runner_id=0` 且 `steps=[]` 时先判 job 是否实际执行；把 billing/payment/spending-limit 与 source/test failure 分桶。只有真实 runner/step 输出才能支持代码通过或失败 claim；外部基础设施状态只影响可用证据面，不改写代码真相。
+- 来源锚点：PR #3276 / operator 原话（2026-07-29）“我也不知道为啥 billing 发生了至少几十次了……这玩意你还能变出钱解决吗？肯定只能合入啊” / 原 Taste proposal `proposal_ms5p93ykuh9worvf`（F287 Phase A 迁出误放的 Taste lane） / *(internal reference removed)*
+- 原理：**没有运行过的 job 不能裁决被测代码。** 先分清 source truth、独立验证与外部执行器 availability，再决定继续验证、合入或等待。
+- 关联：F287 operational precedent resolver | merge-gate | F153 runtime observability | LL-097 三层完成真相分账

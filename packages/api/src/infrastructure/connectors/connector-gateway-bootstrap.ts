@@ -27,6 +27,7 @@ import {
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { FastifyBaseLogger } from 'fastify';
 import { isCatAvailable } from '../../config/cat-config-loader.js';
+import type { IssueCommentClassification } from '../../domains/community/issue-analysis/issue-comment-classifier.js';
 import type { ConnectorWebhookHandler } from '../../routes/connector-webhooks.js';
 import { resolveActiveProjectRoot } from '../../utils/active-project-root.js';
 import { getDefaultUploadDir } from '../../utils/upload-paths.js';
@@ -205,6 +206,8 @@ export interface ConnectorGatewayDeps {
   readonly commandRegistry?: import('../commands/CommandRegistry.js').CommandRegistry;
   /** F142: shared binding store — if provided, gateway reuses it instead of creating a new instance */
   readonly bindingStore?: IConnectorThreadBindingStore;
+  /** Canonical GitHub issue-comment classifier shared with scheduler collection paths. */
+  readonly classifyGitHubIssueComment?: (comment: { author: string; body: string }) => IssueCommentClassification;
   /** @internal Test-only: override WSClient factory to avoid real SDK connections */
   readonly _wsClientFactory?:
     | ((opts: { appId: string; appSecret: string }) => {
@@ -273,8 +276,6 @@ export function loadConnectorGatewayConfig(): ConnectorGatewayConfig {
 type ConnectorAutostartEnv = {
   readonly [key: string]: string | undefined;
   readonly CONNECTOR_GATEWAY_AUTOSTART?: string | undefined;
-  readonly CAT_CAFE_RUNTIME_ROOT?: string | undefined;
-  readonly NODE_ENV?: string | undefined;
 };
 
 function parseBooleanOverride(value: string | undefined): boolean | undefined {
@@ -286,9 +287,7 @@ function parseBooleanOverride(value: string | undefined): boolean | undefined {
 }
 
 export function isPreconfiguredConnectorAutostartEnabled(env: ConnectorAutostartEnv = process.env): boolean {
-  const explicit = parseBooleanOverride(env.CONNECTOR_GATEWAY_AUTOSTART);
-  if (explicit !== undefined) return explicit;
-  return env.NODE_ENV === 'production' && Boolean(env.CAT_CAFE_RUNTIME_ROOT?.trim());
+  return parseBooleanOverride(env.CONNECTOR_GATEWAY_AUTOSTART) === true;
 }
 
 export function applyConnectorGatewayAutostartPolicy(
@@ -803,6 +802,7 @@ export async function startConnectorGateway(
         eventLog: ghEventLog,
         projector:
           ghProjector as import('./github-repo-event/GitHubRepoWebhookHandler.js').GitHubRepoHandlerDeps['projector'],
+        classifyIssueComment: deps.classifyGitHubIssueComment,
       },
     );
     webhookHandlers.set('github-repo-event', ghHandler);
@@ -930,6 +930,9 @@ export async function startConnectorGateway(
     bindingStore,
     adapters: streamableAdapters,
     log,
+    // F254 Phase E: connector placeholders are receipts only. Answer bytes are
+    // not edited into external messages until the atomic output commit wins.
+    receiptOnlyUntilCommit: true,
   });
 
   // Phase 5b: Media file cleanup (24h TTL, sweep every hour)

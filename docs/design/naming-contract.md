@@ -1,4 +1,4 @@
-# Naming Contract — Cat Café / Clowder AI
+# Naming Contract — Clowder AI / Clowder AI
 
 > 一页纸定死命名边界。所有公开文档、sync 脚本、UI 文案、品牌资产的命名决策，都以这一页为准。
 
@@ -18,11 +18,11 @@
 | 层面 | 用什么名字 | 例子 | 负责方 |
 |------|-----------|------|--------|
 | **内部代码** | `cat-cafe` | `@cat-cafe/api`, `cat-cafe-skills/`, `cat-cafe:session:*` | 开发者，**不改** |
-| **内部日常** | Cat Café / 猫咖 | Linear 项目名、团队沟通、内部文档 | 团队惯例，**不改** |
+| **内部日常** | Clowder AI / 猫咖 | Linear 项目名、团队沟通、内部文档 | 团队惯例，**不改** |
 | **对外品牌** | Clowder AI | GitHub org/repo README、官网标题、社交媒体 | sync 脚本 + 公开模板 |
-| **桥接语** | Clowder AI, from Cat Café | README Origin Story、About 页面 | 文档模板 |
+| **桥接语** | Clowder AI, from Clowder AI | README Origin Story、About 页面 | 文档模板 |
 | **UI 标题** | 公开版 → Clowder AI | `<title>`, header `<h1>`, PWA title | sync transform |
-| **UI 标题** | 内部版 → Cat Cafe | 保持现状 | **不改** |
+| **UI 标题** | 内部版 → Clowder AI | 保持现状 | **不改** |
 | **Logo 文件** | 源仓 `cat-cafe-logo-*` → 开源仓 `clowder-ai-logo-*` | sync script rename | sync transform |
 | **npm 包名** | `@cat-cafe/*` | `@cat-cafe/api`, `@cat-cafe/shared` | **不改** |
 | **MCP 工具前缀** | `cat_cafe_*` | `cat_cafe_post_message` | **不改** |
@@ -46,11 +46,11 @@
 - 内部路径/猫名通用化（docs 层）
 
 ### 本次新增的 transforms
-- `layout.tsx`: title "Cat Cafe" → "Clowder AI", description 通用化
-- `ChatContainerHeader.tsx`: `<h1>` "Cat Cafe" → "Clowder AI", 默认描述通用化
-- `useChatCommands.ts`: /config 显示文案 "Cat Cafe" → "Clowder AI"
+- `layout.tsx`: title "Clowder AI" → "Clowder AI", description 通用化
+- `ChatContainerHeader.tsx`: `<h1>` "Clowder AI" → "Clowder AI", 默认描述通用化
+- `useChatCommands.ts`: /config 显示文案 "Clowder AI" → "Clowder AI"
 - Logo 文件 rename: `cat-cafe-logo-*` → `clowder-ai-logo-*`
-- `_sanitize-rules.pl`: UI 文案层面的 "Cat Cafe" → "Clowder AI"（仅 .ts/.tsx 里的用户可见字符串，不碰标识符）
+- `_sanitize-rules.pl`: UI 文案层面的 "Clowder AI" → "Clowder AI"（仅 .ts/.tsx 里的用户可见字符串，不碰标识符）
 
 ## 4. 不该动的（红线）
 

@@ -3,7 +3,8 @@
 # Install dependencies for ASR service (Qwen3-ASR or Whisper backend).
 # Detects the selected model and installs the appropriate ML framework:
 #   - Qwen3-ASR models -> mlx-audio (Apple Silicon only)
-#   - Whisper models   -> mlx-whisper (arm64) / faster-whisper (other)
+#   - mlx-community/whisper-* -> mlx-whisper (Apple Silicon)
+#   - short/CTranslate2 IDs   -> faster-whisper (all platforms)
 # Pure declarative -- install-template.sh handles the actual pipeline.
 set -euo pipefail
 
@@ -19,9 +20,13 @@ _model="${WHISPER_MODEL:-}"
 if [[ "$_model" == *"Qwen3-ASR"* ]]; then
   SERVICE_LABEL="Qwen3 ASR"
   PIP_DEPS_ARM64="mlx-audio fastapi uvicorn python-multipart httpx[socks] huggingface_hub[hf_xet]"
-else
+elif [[ "$_model" == mlx-community/whisper-* ]]; then
   SERVICE_LABEL="Whisper ASR"
   PIP_DEPS_ARM64="mlx-whisper fastapi uvicorn python-multipart httpx[socks] huggingface_hub[hf_xet]"
+else
+  SERVICE_LABEL="Whisper ASR"
+  PIP_DEPS_ARM64="faster-whisper fastapi uvicorn python-multipart httpx[socks] huggingface_hub[hf_xet]"
+  MODEL_LOADER_ARM64="faster_whisper"
 fi
 
 # Non-arm64 platforms always use faster-whisper (Qwen3-ASR is MLX-only,

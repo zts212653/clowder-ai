@@ -4,8 +4,7 @@
  * Dynamic plugin discovery, configuration, and resource lifecycle management.
  */
 
-import { join } from 'node:path';
-import type { PluginInfo, PluginManifest } from '@cat-cafe/shared';
+import type { PluginInfo } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import {
@@ -29,6 +28,7 @@ interface PluginRoutesOpts {
   pluginActivator: PluginResourceActivatorType;
   limbRegistry: LimbRegistry;
   pluginsDir: string;
+  beforePluginDisable?: (pluginId: string) => void | Promise<void>;
 }
 
 function refreshPluginRegistry(pluginRegistry: PluginRegistry) {
@@ -163,6 +163,7 @@ export function registerPluginRoutes(app: FastifyInstance, opts: PluginRoutesOpt
       return { error: `Plugin '${id}' not found` };
     }
 
+    await opts.beforePluginDisable?.(id);
     const result = await pluginActivator.disablePlugin(manifest);
 
     try {

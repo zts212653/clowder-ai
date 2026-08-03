@@ -1,16 +1,20 @@
 ---
 feature_ids: [F167]
-related_features: [F064, F027, F122, F055]
+related_features: [F064, F027, F055, F122, F246, F280]
 topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
-tips_exempt: harness-internal shadow telemetry infra — no user-visible capability change
-user_journey_exempt: pure harness-internal infra (ping-pong breaker, void-pass detection, role guard) — no user-perceivable surface changes
+updated: 2026-08-01
+tips_exempt: action-custody protocol is exposed to cats through the typed MCP action schema; no separate operator-facing capability action
+user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 ---
 
 # F167: A2A Chain Quality — 乒乓球熔断 + 虚空传球检测 + 角色护栏
 
 > **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P0
+
+Architecture cell: `transport` + `harness-eval` + `ball-custody` + `dispatch`
+Map delta: updated — Phase R records structured cross-thread coordination in `transport`/`harness-eval`; Phase S gives action successor leases to `ball-custody` while `dispatch` owns carrier admission projection and queue generation preflight; Phase T binds explicit A2A and exact hold wake provenance to those existing custody owners without creating another ledger.
 
 ## Why
 
@@ -76,7 +80,7 @@ operator experience：
 - `role-gate/l3-retired` → `route-serial-pingpong.test.js`（AC-E — asserts `a2a_role_rejected` must NOT fire after KD-20 retirement）
 - `forced-pass/review-verdict-no-mention` → `route-serial-verdict-hint.test.js`（C2 verdict detection）
 - `hold-ball/zombie-hold` → Maine Coon原话 "Hold 不是对外协议状态"（C1 设计动机）
-- `hold-ball/event-satisfied-retirement` → Phase Q 待补：review/CI/issue/user event 先满足等待时，subject + normalized signal matching hold retired 且旧 timer 不再 wake；signal 不匹配时不退休；前端不再显示可取消 pending 状态
+- `hold-ball/event-satisfied-retirement` → Phase Q：review/CI/issue/user event 先满足等待时，subject + normalized signal matching hold retired 且旧 timer 不再 wake；signal 不匹配时不退休；前端不再显示可取消 pending 状态；AC-Q7 eval fixture 将 `hold_lifecycle.expired_after_satisfied_total` 设为 zero-tolerance，任何非零值标红并附抽样 evidence
 
 ### 4. Sunset Signal
 
@@ -555,7 +559,11 @@ operator experience：
 | KD-24 | `@` 路由语法校验在 harness 层做 **final routing slot** 机械校验 + one-shot repair 兜底。禁止语义 intent 分类器（KD-8 反模式）；validator 只看"出口槽位语法"，不推断"猫想不想传球"；命中只产出 `invalid_route_syntax`，不自动路由 / 不推断目标 / 不替猫决定意图；豁免只走结构边界，禁止动作词表 / 语义豁免表 | Phase F 依赖的 prompt 层教学已到天花板（4.7 三 thread 复现）；结构化工具路线被operator驳回（弱模型失败率更高）；终态 = 外部协议最简（行首 @）+ 内部机械语法校验；KD-22 prompt 层 + KD-24 harness 层双重守护 | 2026-04-24 |
 | KD-25 | 虚空持球检测 = 声明-动作一致性检查。文本含"持球"但无 `hold_ball` tool call → harness 警告。不是语义分类器（检查的是"你声称做了 X，tool call 是否存在"），KD-8 安全 | 47 反复声明"我持球"但未调工具，operator多次手动干预；feedback 已记 3 次仍复发 = prompt 层天花板，需 harness 兜底 | 2026-04-25 |
 | KD-26 | `@` 路由不做"意图提取"——保持行首=路由/其他=叙述的绝对规则。弱模型无法理解"句中 @ 有时路由有时不路由"的语义边界 | Maine Coon review 修正：K-1 不做 Slack 式宽容路由（违反 KD-24）；只做机械 repair（AC-H4 Step B）| 2026-04-25 |
-| KD-27 | hold_ball 轮询和结构化回调（PR tracking / scheduled task）覆盖同一等待对象时，轮询必须终止。传球决策树选项 2 拆分：2a 无回调覆盖→轮询，2b 有回调覆盖→纯事件驱动 | operator发现 PR tracking + hold_ball 轮询双通道重复唤醒——codex 接单后两条路同时触发，猫醒来发现前一次已经通过 PR tracking 消息处理过了。两个等待的对象不同（"有没有人接" vs "接了之后的结果"），不该重叠运行 | 2026-05-07 |
+| KD-27 | hold_ball 轮询和结构化回调（PR tracking / scheduled task）覆盖同一等待对象时，轮询必须终止。传球决策树选项 2 拆分：2a 无回调覆盖→轮询，2b 有回调覆盖→纯事件驱动 | operator发现 PR tracking + hold_ball 轮询双通道重复唤醒——codex 接单后两条路同时触发，猫醒来发现前一次已经通过 PR tracking 消息处理过了。两个等待的对象不同（"有没有人接" vs "接了之后的结果"），不该重叠运行。2026-07-10 的机械 clean-stop 实现在 [F177 Phase J](F177-harness-update.md#phase-jevent-backed-pr-tracking-clean-stop)；它签发 invocation-bound callback coverage，不扫描/绑定 hold 自由文本 | 2026-05-07 |
+| KD-28 | 跨 thread 协调链用持久 message metadata 携带稳定 `coordination.id`，Release 显式 `phase=terminal`；terminal 的直接 ACK 只记录不路由。禁止用 Claim/Release/ACK 自由文本分类器 | 跨 thread 后 `threadId + parentInvocationId/worklist` 改变，same-pair streak 必然归零。稳定 identity 必须跨 hop 持久；terminal 必须是调用方显式状态。若有新实质工作，用 `phase=active` 开新 id，保留正经多轮协作 | 2026-07-10 |
+| KD-29 | Stop gate 判据从"文本出口三选一"切换到"turn-scoped 球权账本查询"（Phase T）：裁决对象仅为**本次唤醒对应的协议球**，不是猫名下全部 open work；覆盖判定器 = 唤醒来源（机械） | 三代 guard（F064 教说话 / F167 刹车 / F177 逼表态）都在语言层加压，语言层压力必然产生语言层症状（表演性 @ / 礼貌回环 / 假 hold）→ 军备竞赛。判据换到 ground truth（账本，封闭集）才终结竞赛。backlog 毛线球若参与拦截则漫游被杀死——turn-scoped 是"管球不管猫"的必要精确化。operator 猫爬架条款：`0001784213241082` | 2026-07-16 |
+| KD-30 | 迁移用三态判据（covered_active / covered_empty / unknown_legacy），unknown 走旧 guard fail-closed；不做 big-bang cutover | 二态（有球拦/没球放）隐含"账本 day one 完备"假设——记账覆盖渐进期"查不到=放行"会把未记账真实责任放生（重演 74 分钟）。Sol 三态方案胜出 fable 二态方案的并行裁决记录：`0001784211771626` | 2026-07-16 |
+| KD-31 | 减法红线：cutover 后 guard 总拦截次数不降反升 = 方案失败回滚；礼貌不产生新工作（terminal 后 ACK 不 re-enqueue）为服务端硬保证，不识别自然语言 | operator 反补锅条款（"我害怕你们一本正经补锅"）制度化——锅变少是验收标准本身，不是愿望。ACK 抑制不依赖猫行为改变，是机制兜底 | 2026-07-16 |
 
 ## Behavioral Evidence（Phase B 观察记录）
 
@@ -612,7 +620,7 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 维度 | 内容 |
 |------|------|
 | 我以为 | 当前模式是"独立回答"，修复完成后给operator汇报即可，peer review 可以等operator再指示。 |
-| 实际要求 | 代码修复完成后仍在 Cat Café SOP 内：quality-gate → request-review → peer reviewer，而不是把球交还给operator。 |
+| 实际要求 | 代码修复完成后仍在 Clowder AI SOP 内：quality-gate → request-review → peer reviewer，而不是把球交还给operator。 |
 | 偏差根因 | **独立回答锚定 + 出口检查漏执行**：把"独立回答"理解成免除 A2A/SOP 出口；看到自己已解释清楚就停止，没有执行"下一棒谁能做"。 |
 | 纠正轮次 | operator 1 次纠正后补做：清理根目录截图、补跑 quality-gate、commit、本地 review 请求、路由给 `@opus`。 |
 | 元心智哪条没执行 | Q1 角色确认没执行到位：我当时是 author，不是只回答问题的解释器；Q3 坐标变换也漏了，没有把"修好了"转换成 SOP 的下一状态。 |
@@ -660,6 +668,16 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 纠正轮次 | 2（"少了痛点解决"误读为去解 EMF → "你理解错了！不是让你解决这个 case"才拉回 meta） |
 | 元心智哪条没执行 | Q3 坐标变换——没把"痛点"从 case 坐标系（EMF 技术）变换到 meta 坐标系（泛化能力 + harness），锚定在最显眼的技术名词上 |
 
+### Case E7: 逐项机制正确掩盖整幅隐喻的语域冲突（2026-07-11，codex-sol × fable-5）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 星空模型里“背景星空 + 船”是同一场景的环境与载体；只要 attention、softmax、Magic Word 等逐项映射诱导的机制预测正确，整体画面就已收敛。 |
+| 实际要求 | 隐喻还会让听众自动装载一整套物理世界。operator 听到“星空”自然想到第二宇宙速度；海船的龙骨、港口，再叠加鸡尾酒会与麦克风，会让多套物理同时运行，逐项都对也会吃掉整体 aha。需要把当前模型统一到飞船、信标、轨道、飞行日志这一套深空语域。 |
+| 偏差根因 | **局部正确替代全局一致**：双猫把审查拆成机制映射逐项验算，却没有在交付前让整幅画面作为一个世界运行；R3 还把“共享一个名词”误判成“共享一个坐标系”。 |
+| 纠正轮次 | 1（operator 问“这是我的问题吗”并指出星空会自动唤起宇宙级航行后，fable-5 完成深空化；codex-sol 再校准唤醒码与变轨并收敛）。 |
+| 元心智哪条没执行 | Q3 坐标变换——验证了每条映射，却没把所有元素放回听众会自动加载的同一个物理坐标系做整体预测。 |
+
 ## Review Gate
 
 - Phase 0: **多猫协作审视**（所有猫参与各自 prompt 审视）+ 现有 system-prompt-builder 测试全绿
@@ -691,4 +709,5 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | operator 2026-05-07 | hold_ball 轮询 × PR tracking 事件驱动重复唤醒（双通道叠加） | AC-L1~L4 | ✅ Phase L |
 | operator 2026-06-18 | 守门 thread 不能挂 PR/issue tracking 或 hold_ball，必须机制层拦截 | AC-N1~N5 | ✅ Phase N / PR #2384 |
 | operator 2026-06-25 | -p 下猫 run_in_background 跑 gate 后没下文 + hold_ball 缺条件唤醒 | AC-P0~P5 | ✅ Phase P (P-0 PR #2544, P1-P5 PR #2550) |
-| operator 2026-06-29 | 结构化事件已唤醒/满足等待后，旧 hold timer 仍过期唤醒；前端仍显示定时任务/可取消 | AC-Q1~Q7 | ⬜ Phase Q 设计草案 |
+| operator 2026-06-29 | 结构化事件已唤醒/满足等待后，旧 hold timer 仍过期唤醒；前端仍显示定时任务/可取消 | AC-Q1~Q7 | ✅ Phase Q PR #2690 + AC-Q7 follow-up PR #2696 merged |
+| codex-sol 2026-07-10 | grounding sample test 硬编码日期过 8 天 rolling window 导致静默失败 | Phase O test hygiene | ✅ hotfix PR #2849 (`94e1ead0d`) |

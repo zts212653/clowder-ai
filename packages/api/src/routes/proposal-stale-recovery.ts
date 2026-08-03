@@ -44,6 +44,7 @@ export async function handleApproveStaleClaim(args: {
   threadStore: IThreadStore;
   socketManager: SocketManager;
   reply: FastifyReply;
+  reconcileRecoveredProposal?: (proposal: ThreadProposal, threadId: string) => Promise<string[]>;
 }): Promise<ApproveStaleRecoveryOutcome | { kind: 'recoveredBody'; body: Record<string, unknown> }> {
   const { proposal, userId, proposalStore, threadStore, socketManager, reply } = args;
   if (proposal.status !== 'approving') return { kind: 'cleared' };
@@ -68,6 +69,9 @@ export async function handleApproveStaleClaim(args: {
       ...(recoveredThread ? { overrides: { projectPath: recoveredThread.projectPath } } : {}),
     });
     if (recovered) {
+      const warnings = args.reconcileRecoveredProposal
+        ? await args.reconcileRecoveredProposal(recovered, proposal.createdThreadId)
+        : [];
       if (recoveredThread) socketManager.emitToUser(userId, 'thread_created', recoveredThread);
       socketManager.emitToUser(userId, 'proposal_updated', recovered);
       return {
@@ -77,6 +81,7 @@ export async function handleApproveStaleClaim(args: {
           threadId: proposal.createdThreadId,
           status: recovered.status,
           recovered: true,
+          ...(warnings.length > 0 ? { warnings } : {}),
         },
       };
     }
@@ -99,6 +104,7 @@ export async function handleRejectStaleClaim(args: {
   proposalStore: IProposalStore;
   threadStore: Pick<IThreadStore, 'get'>;
   reply: FastifyReply;
+  reconcileRecoveredProposal?: (proposal: ThreadProposal, threadId: string) => Promise<string[]>;
 }): Promise<
   | { kind: 'cleared' }
   | { kind: 'in_flight'; status: 409 }
@@ -124,6 +130,10 @@ export async function handleRejectStaleClaim(args: {
       createdThreadId: proposal.createdThreadId,
       ...(recoveredThread ? { overrides: { projectPath: recoveredThread.projectPath } } : {}),
     });
+    const warnings =
+      recovered && args.reconcileRecoveredProposal
+        ? await args.reconcileRecoveredProposal(recovered, proposal.createdThreadId)
+        : [];
     reply.status(409);
     return {
       kind: 'cannot_reject',
@@ -132,6 +142,7 @@ export async function handleRejectStaleClaim(args: {
         error: 'Proposal cannot be rejected — a thread was already created by a prior approve attempt',
         status: recovered?.status ?? 'approved',
         threadId: proposal.createdThreadId,
+        ...(warnings.length > 0 ? { warnings } : {}),
       },
     };
   }

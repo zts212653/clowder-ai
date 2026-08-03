@@ -2,6 +2,7 @@
 
 import type { BacklogItem, BacklogStatus, CatId } from '@cat-cafe/shared';
 import { useState } from 'react';
+import { CompactLabel } from '@/components/content-overflow';
 
 interface ThreadSituationSummary {
   id: string;
@@ -153,12 +154,19 @@ function FeatureCard({
       className="rounded-xl bg-[var(--console-card-bg)] px-3 py-2 shadow-[0_8px_22px_rgba(43,33,26,0.04)]"
       data-testid={`mc-bird-eye-feature-${tag}`}
     >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-xs font-semibold text-cafe shrink-0">{tag}</span>
-          {featureName && <span className="text-xs text-cafe-secondary truncate">{featureName}</span>}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
+          <span className="shrink-0 text-xs font-semibold text-cafe">{tag}</span>
+          {featureName && (
+            <CompactLabel
+              label="Feature 名称"
+              value={featureName}
+              density="compact"
+              className="min-w-0 flex-1 text-xs text-cafe-secondary"
+            />
+          )}
         </div>
-        <span className="text-xs text-cafe-secondary shrink-0 ml-2">{featureItems.length} 项</span>
+        <span className="shrink-0 text-xs text-cafe-secondary">{featureItems.length} 项</span>
       </div>
       <div className="mt-1.5 flex flex-wrap gap-1">
         {(Object.entries(counts) as [BacklogStatus, number][]).map(([status, count]) => (
@@ -179,13 +187,21 @@ function FeatureCard({
 function DoneFeatureChip({ tag, featureItems }: { tag: string; featureItems: BacklogItem[] }) {
   const featureName = extractFeatureName(featureItems);
   return (
-    <span
+    <div
       className="inline-flex items-center gap-1 rounded-full bg-[var(--mc-status-done-bg)] px-2 py-0.5 text-micro text-[var(--mc-status-done-text)]"
       data-testid={`mc-bird-eye-done-chip-${tag}`}
     >
       <span className="font-medium">{tag}</span>
-      {featureName && <span className="text-[var(--mc-status-done-text)] max-w-[120px] truncate">{featureName}</span>}
+      {featureName && (
+        <CompactLabel
+          label="Feature 名称"
+          value={featureName}
+          density="compact"
+          className="min-w-0 max-w-[120px] text-[var(--mc-status-done-text)]"
+        />
+      )}
       <svg
+        aria-hidden="true"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -196,6 +212,6 @@ function DoneFeatureChip({ tag, featureItems }: { tag: string; featureItems: Bac
       >
         <path d="M20 6L9 17l-5-5" />
       </svg>
-    </span>
+    </div>
   );
 }

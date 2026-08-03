@@ -1,5 +1,7 @@
 import type { CatId, ReportingMode } from '@cat-cafe/shared';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
+import type { OwnerAuthProvenance } from '../domains/cats/services/agents/invocation/owner-auth-provenance.js';
+import { createInitialQueuedMessageCustody } from '../domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
@@ -22,6 +24,7 @@ export interface ProposalInitialMessageDispatchDeps {
 export interface AppendApprovedInitialMessageInput extends ProposalInitialMessageDispatchDeps {
   proposalId: string;
   userId: string;
+  ownerAuthProvenance: OwnerAuthProvenance;
   threadId: string;
   /**
    * Raw user-typed initialMessage. dispatch is now the single owner of the
@@ -84,6 +87,7 @@ export interface AppendApprovedInitialMessageResult {
 export async function appendApprovedInitialMessage({
   proposalId,
   userId,
+  ownerAuthProvenance,
   threadId,
   rawInitialMessage,
   sourceThreadId,
@@ -230,6 +234,7 @@ export async function appendApprovedInitialMessage({
   const enqueueResult = invocationQueue.enqueue({
     threadId,
     userId,
+    ownerAuthProvenance,
     idempotencyKey: `proposal-initial:${proposalId}`,
     content,
     source: 'user',
@@ -265,6 +270,7 @@ export async function appendApprovedInitialMessage({
         threadId,
         idempotencyKey: `proposal-initial:${proposalId}`,
         deliveryStatus: 'queued',
+        queueCustody: createInitialQueuedMessageCustody(enqueueResult.entry),
         extra: crossPostExtra, // AC-AA5
       });
       storedMessageId = stored.id;

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -456,6 +456,67 @@ describe('agent hook sync targets', () => {
     const capExists = (await readFile(capPath, 'utf8').catch(() => null)) !== null;
     assert.equal(capExists, false, 'capabilities.json should not be created when ownerAuthorized is omitted');
     assert.ok(result.targets.length > 0);
+  });
+
+  it('uses an explicit Clowder AI project as the skill and MCP truth root', async () => {
+    const catCafeRoot = await createProjectRoot();
+    const catCafeHome = await mkdtemp(join(tmpdir(), 'agent-hooks-cat-cafe-home-'));
+    const skillName = 'debugging';
+    const skillSource = join(catCafeRoot, 'cat-cafe-skills', skillName);
+    const skillLink = join(catCafeRoot, '.claude', 'skills', skillName);
+    const capDir = join(catCafeRoot, '.cat-cafe');
+
+    try {
+      await mkdir(skillSource, { recursive: true });
+      await writeFile(join(catCafeRoot, 'cat-cafe-skills', 'manifest.yaml'), 'version: 1\n', 'utf-8');
+      await writeFile(join(skillSource, 'SKILL.md'), '# debugging\n', 'utf-8');
+      await mkdir(join(catCafeRoot, '.claude', 'skills'), { recursive: true });
+      await symlink(skillSource, skillLink);
+      await mkdir(capDir, { recursive: true });
+      await writeFile(
+        join(capDir, 'capabilities.json'),
+        JSON.stringify(
+          {
+            version: 2,
+            capabilities: [
+              {
+                id: skillName,
+                type: 'skill',
+                enabled: true,
+                source: 'cat-cafe',
+                mountPaths: ['claude'],
+                globalEnabled: true,
+              },
+              {
+                id: 'local-cat-cafe-mcp',
+                type: 'mcp',
+                enabled: true,
+                source: 'cat-cafe',
+                mcpServer: { command: 'node', args: [join(catCafeRoot, 'packages/mcp-server/dist/local.js')] },
+                globalEnabled: true,
+              },
+            ],
+          },
+          null,
+          2,
+        ),
+        'utf-8',
+      );
+
+      const status = await getAgentHookStatus({
+        projectRoot,
+        targetRoot: catCafeHome,
+        capabilityProjectRoot: catCafeRoot,
+      });
+      const skills = status.targets.find((target) => target.name === 'skills');
+      const mcp = status.targets.find((target) => target.name === 'mcp');
+
+      assert.equal(skills?.status, 'configured');
+      assert.equal(mcp?.status, 'configured');
+    } finally {
+      await rm(catCafeRoot, { recursive: true, force: true });
+      await rm(catCafeHome, { recursive: true, force: true });
+    }
   });
 });
 

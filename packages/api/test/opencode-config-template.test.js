@@ -935,6 +935,7 @@ describe('writeOpenCodeRuntimeConfig', () => {
         JSON.stringify({
           mcp: {
             filesystem: { type: 'local', command: ['npx', '-y', '@mcp/fs-stale'] },
+            github: { type: 'remote', url: 'https://api.githubcopilot.com/mcp/', enabled: true },
             'cat-cafe': { type: 'local', command: ['node', 'legacy-monolith.js'] },
             'my-tool': { type: 'local', command: ['node', 'tool.js'] },
           },
@@ -958,6 +959,7 @@ describe('writeOpenCodeRuntimeConfig', () => {
 
       const content = JSON.parse(readFileSync(configPath, 'utf-8'));
       assert.equal(content.mcp.filesystem, undefined, 'disabled capability must not be re-added from opencode.json');
+      assert.equal(content.mcp.github, undefined, 'retired GitHub MCP must not be re-added from opencode.json');
       assert.equal(content.mcp['cat-cafe'], undefined, 'legacy monolith alias must not be re-added from opencode.json');
       assert.ok(content.mcp['my-tool'], 'unmanaged user server should still be merged');
       assert.ok(content.mcp['cat-cafe-memory'], 'enabled capability should still be injected');

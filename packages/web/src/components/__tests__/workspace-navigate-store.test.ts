@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { handleNavigateEvent, shouldAcceptNavigate } from '@/hooks/useWorkspaceNavigate';
+import { handleNavigateEvent } from '@/hooks/useWorkspaceNavigate';
 import { useChatStore } from '@/stores/chatStore';
 import {
   areWorktreeIdsEquivalent,
@@ -236,28 +236,6 @@ describe('worktree id aliases', () => {
     expect(scopeWorktreeAliases(repoRootAliases, '/tmp/project-a', '/tmp/project-a')).toBe(repoRootAliases);
     expect(scopeWorktreeAliases(repoRootAliases, '/tmp/project-a', '/tmp/project-b')).toEqual({});
     expect(scopeWorktreeAliases(repoRootAliases, null, '/tmp/project-a')).toEqual({});
-  });
-});
-
-describe('shouldAcceptNavigate (threadId-based session isolation)', () => {
-  it('accepts when session threadId matches event threadId', () => {
-    expect(shouldAcceptNavigate('thread-abc', 'thread-abc')).toBe(true);
-  });
-
-  it('rejects when event threadId differs from session threadId', () => {
-    expect(shouldAcceptNavigate('thread-abc', 'thread-xyz')).toBe(false);
-  });
-
-  it('accepts when event has no threadId (legacy/global)', () => {
-    expect(shouldAcceptNavigate('thread-abc', undefined)).toBe(true);
-  });
-
-  it('accepts when session has no threadId', () => {
-    expect(shouldAcceptNavigate(null, 'thread-abc')).toBe(true);
-  });
-
-  it('accepts when neither has threadId', () => {
-    expect(shouldAcceptNavigate(null, undefined)).toBe(true);
   });
 });
 

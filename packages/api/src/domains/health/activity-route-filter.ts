@@ -1,4 +1,4 @@
-const ACTIVITY_TRACKING_EXEMPT_API_PATHS = new Set(['/api/health', '/api/ready']);
+const ACTIVITY_TRACKING_EXEMPT_API_PATHS = new Set(['/api/health', '/api/ready', '/api/tip-telemetry/batch']);
 
 export function shouldTrackApiActivity(requestUrl: string): boolean {
   const [path] = requestUrl.split('?', 1);

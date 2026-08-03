@@ -75,6 +75,28 @@ describe('Community Issues Routes', () => {
     },
   };
 
+  const defaultAgentKeyRegistry = {
+    async verify(secret) {
+      const prefix = 'agent-secret-';
+      if (!secret.startsWith(prefix)) return { ok: false, reason: 'invalid_agent_key' };
+      const catId = secret.slice(prefix.length);
+      if (!(catId in catCredentials)) return { ok: false, reason: 'invalid_agent_key' };
+      return {
+        ok: true,
+        record: {
+          agentKeyId: `agent-key-${catId}`,
+          catId,
+          userId: 'system',
+          secretHash: 'hash',
+          salt: 'salt',
+          scope: 'user-bound',
+          issuedAt: Date.now(),
+          expiresAt: Date.now() + 60000,
+        },
+      };
+    },
+  };
+
   function authHeaders(catId) {
     const creds = catCredentials[catId];
     return creds ? { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken } : {};
@@ -91,6 +113,7 @@ describe('Community Issues Routes', () => {
       socketManager,
       threadStore: mockThreadStore,
       registry: defaultRegistry,
+      agentKeyRegistry: defaultAgentKeyRegistry,
       ...opts,
     });
     return app;
@@ -964,6 +987,54 @@ describe('Community Issues Routes', () => {
     assert.ok(body.signoffToken, 'signoffToken returned to authenticated caller');
   });
 
+  test('POST request-guardian accepts the author through an agent-key principal', async () => {
+    const app = await createApp();
+    const issue = await createAcceptedIssue(app, 53);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/request-guardian`,
+      headers: { 'x-agent-key-secret': 'agent-secret-opus' },
+      payload: { author: 'opus', reviewer: 'codex' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().guardianAssignment.requestedBy, 'opus');
+    assert.ok(res.json().signoffToken);
+  });
+
+  test('POST request-guardian rejects a principal that is not the declared author without assigning', async () => {
+    const app = await createApp();
+    const issue = await createAcceptedIssue(app, 54);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/request-guardian`,
+      headers: authHeaders('codex'),
+      payload: { author: 'opus', reviewer: 'codex' },
+    });
+
+    assert.equal(res.statusCode, 403);
+    assert.match(res.json().error, /author.*authenticated principal/i);
+    assert.equal((await communityIssueStore.get(issue.id)).guardianAssignment, null);
+  });
+
+  test('POST request-guardian authorizes the principal before roster checks (fail-fast, no roster leak)', async () => {
+    const app = await createApp();
+    const issue = await createAcceptedIssue(app, 55);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/request-guardian`,
+      headers: authHeaders('codex'),
+      payload: { author: 'opus', reviewer: 'nonexistent-cat-xyz' },
+    });
+
+    // Principal mismatch must be rejected before roster validation, so a caller
+    // cannot probe roster membership via the 400-vs-403 difference and no
+    // assignment is created.
+    assert.equal(res.statusCode, 403);
+    assert.match(res.json().error, /author.*authenticated principal/i);
+    assert.equal((await communityIssueStore.get(issue.id)).guardianAssignment, null);
+  });
+
   test('POST request-guardian rejects if already assigned', async () => {
     const app = await createApp();
     const issue = await createAcceptedIssue(app, 51);
@@ -1021,6 +1092,67 @@ describe('Community Issues Routes', () => {
     assert.equal(res.statusCode, 200);
     assert.equal(res.json().guardianAssignment.signedOff, true);
     assert.equal(res.json().guardianAssignment.approved, true);
+  });
+
+  test('POST guardian-signoff accepts the assigned Guardian through an agent-key principal', async () => {
+    const app = await createApp();
+    const issue = await createAcceptedIssue(app, 64);
+    const assignmentResponse = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/request-guardian`,
+      headers: authHeaders('opus'),
+      payload: { author: 'opus', reviewer: 'codex' },
+    });
+    assert.equal(assignmentResponse.statusCode, 200);
+    const assigned = assignmentResponse.json();
+    const guardianId = assigned.guardianAssignment.guardianCatId;
+    const checklist = assigned.guardianAssignment.checklist.map((item) => ({
+      ...item,
+      evidence: `verified:${item.id}`,
+      verifiedAt: Date.now(),
+      verifiedBy: guardianId,
+    }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/guardian-signoff`,
+      headers: { 'x-agent-key-secret': `agent-secret-${guardianId}` },
+      payload: { signoffToken: assigned.signoffToken, checklist, approved: true },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().guardianAssignment.signedOff, true);
+    assert.equal(res.json().guardianAssignment.approved, true);
+  });
+
+  test('POST guardian-signoff rejects a caller-controlled catId that disagrees with the principal', async () => {
+    const app = await createApp();
+    const issue = await createAcceptedIssue(app, 65);
+    const assignmentResponse = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/request-guardian`,
+      headers: authHeaders('opus'),
+      payload: { author: 'opus', reviewer: 'codex' },
+    });
+    assert.equal(assignmentResponse.statusCode, 200);
+    const assigned = assignmentResponse.json();
+    const guardianId = assigned.guardianAssignment.guardianCatId;
+    const checklist = assigned.guardianAssignment.checklist.map((item) => ({
+      ...item,
+      evidence: `verified:${item.id}`,
+      verifiedAt: Date.now(),
+      verifiedBy: guardianId,
+    }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/guardian-signoff`,
+      headers: authHeaders(guardianId),
+      payload: { catId: 'opus', signoffToken: assigned.signoffToken, checklist, approved: true },
+    });
+
+    assert.equal(res.statusCode, 403);
+    assert.match(res.json().error, /catId.*authenticated principal/i);
   });
 
   test('POST guardian-signoff rejects wrong cat even with valid token', async () => {
@@ -1128,7 +1260,7 @@ describe('Community Issues Routes', () => {
     assert.equal(body.checklistComplete, false);
   });
 
-  test('POST request-guardian rejects unknown author not in roster', async () => {
+  test('POST request-guardian rejects a declared author that differs from the principal before roster lookup, even when that author is unknown', async () => {
     const app = await createApp();
     const issue = await createAcceptedIssue(app, 80);
     const res = await app.inject({
@@ -1137,9 +1269,13 @@ describe('Community Issues Routes', () => {
       headers: authHeaders('opus'),
       payload: { author: 'nonexistent-cat', reviewer: 'codex' },
     });
-    assert.equal(res.statusCode, 400);
-    const body = res.json();
-    assert.ok(body.error.includes('roster'), 'error should mention roster');
+    // A caller may only request for itself. A declared author that differs from
+    // the authenticated principal is rejected with 403 before any roster lookup,
+    // so an unknown author stays indistinguishable from a known one and no
+    // assignment is created.
+    assert.equal(res.statusCode, 403);
+    assert.match(res.json().error, /author.*authenticated principal/i);
+    assert.equal((await communityIssueStore.get(issue.id)).guardianAssignment, null);
   });
 
   test('POST request-guardian rejects unknown reviewer not in roster', async () => {

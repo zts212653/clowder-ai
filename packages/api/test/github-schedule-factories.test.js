@@ -1459,7 +1459,13 @@ describe('F140 review-feedback factory preserves the registered thread', () => {
       updatedAt: Date.now(),
       userId: 'u-1',
       automationState: {
-        review: { lastCommentCursor: 0, lastDecisionCursor: 0, completedReviewCount: 99 },
+        review: {
+          lastCommentCursor: 0,
+          lastInlineCommentCursor: 0,
+          lastConversationCommentCursor: 0,
+          lastDecisionCursor: 0,
+          completedReviewCount: 99,
+        },
       },
     };
 
@@ -1566,7 +1572,13 @@ describe('F140 review-feedback factory preserves the registered thread', () => {
       updatedAt: Date.now(),
       userId: 'u-1',
       automationState: {
-        review: { lastCommentCursor: 0, lastDecisionCursor: 0, completedReviewCount: 1 },
+        review: {
+          lastCommentCursor: 0,
+          lastInlineCommentCursor: 0,
+          lastConversationCommentCursor: 0,
+          lastDecisionCursor: 0,
+          completedReviewCount: 1,
+        },
       },
     };
     const updateCalls = [];

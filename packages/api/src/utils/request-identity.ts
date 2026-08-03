@@ -11,6 +11,7 @@
 
 import type { FastifyRequest } from 'fastify';
 import { isOriginAllowed, PRIVATE_NETWORK_ORIGIN, resolveFrontendCorsOrigins } from '../config/frontend-origin.js';
+import { isDirectLoopbackRequest } from './loopback-request.js';
 
 export interface ResolveUserIdOptions {
   /** Optional explicit fallback (e.g., legacy body/form field). */
@@ -61,6 +62,22 @@ export function resolveHeaderUserId(request: FastifyRequest): string | null {
 export function resolveSessionUserId(request: FastifyRequest): string | null {
   const userId = (request as FastifyRequest & { sessionUserId?: string }).sessionUserId;
   return typeof userId === 'string' && userId.trim() ? userId.trim() : null;
+}
+
+/**
+ * Authorization-grade identity for sensitive read surfaces.
+ *
+ * The current session issuer creates `default-user` sessions without remote
+ * pairing, so neither a session nor the legacy explicit identity header is an
+ * authorization principal outside a direct loopback request. The header also
+ * remains unavailable to browser-originated requests.
+ */
+export function resolveDirectLocalAuthorizationUserId(request: FastifyRequest): string | null {
+  if (!isDirectLoopbackRequest(request)) return null;
+  const fromSession = resolveSessionUserId(request);
+  if (fromSession) return fromSession;
+  if (request.headers.origin) return null;
+  return nonEmptyString(request.headers['x-cat-cafe-user']);
 }
 
 export function resolveUserId(request: FastifyRequest, options?: ResolveUserIdOptions): string | null {

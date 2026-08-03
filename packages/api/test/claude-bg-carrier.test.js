@@ -150,6 +150,31 @@ test('砚砚 P1.1: callbackEnv CANNOT re-poison CLAUDE_CODE_ENTRYPOINT', async (
   assert.equal(childEnv.OTHER_VAR, 'kept', 'other callbackEnv vars must still propagate');
 });
 
+test('F254 read-only policy locks bg carrier tools, MCP, and env after account overrides', async () => {
+  const fakeSpawn = buildFakeSpawn({ stdout: 'backgrounded · abcd1234\n' });
+  const service = new ClaudeBgCarrierService({
+    l0CompilerFn: fakeL0Compiler,
+    spawnFn: fakeSpawn,
+    model: 'claude-test-model',
+    mcpServerPath: '/tmp/cat-cafe-mcp.js',
+  });
+  const policy = { mode: 'read_only', replayDeniedToolNames: ['cat_cafe_post_message'] };
+
+  await service.startJob('supplement check', {
+    toolExecutionPolicy: policy,
+    callbackEnv: { CAT_CAFE_INVOCATION_ID: 'inv-policy' },
+    accountEnv: { CAT_CAFE_READONLY: 'false' },
+  });
+
+  assert.equal(service.supportsToolExecutionPolicy(policy), true);
+  const args = fakeSpawn.lastArgs;
+  assert.equal(args[args.indexOf('--permission-mode') + 1], 'plan');
+  assert.equal(args[args.indexOf('--tools') + 1], '');
+  assert.ok(args.includes('--strict-mcp-config'));
+  assert.equal(args.includes('--mcp-config'), false);
+  assert.equal(fakeSpawn.lastEnv.CAT_CAFE_READONLY, 'true');
+});
+
 test('砚砚 guard #3: JobEventConsumer.readTimeline skips malformed jsonl lines', async () => {
   const tmpJobsDir = mkdtempSync(join(tmpdir(), 'cat-cafe-bg-test-'));
   seedJobState(tmpJobsDir, 'beef1234', {
@@ -497,6 +522,32 @@ test('codex P1.2: spawn args include --model flag from configured cat model (sub
   assert.ok(capturedArgs.includes('--model'), 'subscription + Anthropic model: --model must be passed');
   const modelIdx = capturedArgs.indexOf('--model');
   assert.equal(capturedArgs[modelIdx + 1], 'claude-opus-4-7');
+});
+
+test('F262 applies a compatible thread reasoning effort override to bg daemon argv', async () => {
+  let capturedArgs = null;
+  const fakeSpawn = (_cmd, args) => {
+    capturedArgs = args;
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    setImmediate(() => {
+      child.stdout.emit('data', Buffer.from('backgrounded · effe1234\n'));
+      child.emit('close', 0);
+    });
+    return child;
+  };
+  const service = new ClaudeBgCarrierService({
+    l0CompilerFn: fakeL0Compiler,
+    spawnFn: fakeSpawn,
+    model: 'claude-opus-4-7',
+  });
+
+  await service.startJob('hi', { reasoningEffortOverride: 'low' });
+
+  const effortIdx = capturedArgs.indexOf('--effort');
+  assert.ok(effortIdx >= 0, '--effort must be present for bg daemon');
+  assert.equal(capturedArgs[effortIdx + 1], 'low');
 });
 
 test('codex round-7 B-prime: MODEL_OVERRIDE_KEY in callbackEnv used as effective model', async () => {

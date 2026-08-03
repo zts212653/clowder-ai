@@ -1,5 +1,19 @@
 export const CHAT_THREAD_ROUTE_EVENT = 'catcafe:thread-route-change';
 
+export function getBrowserThreadRoutePathname(): string {
+  return typeof window === 'undefined' ? '/' : window.location.pathname;
+}
+
+export function subscribeBrowserThreadRoute(listener: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+  window.addEventListener('popstate', listener);
+  window.addEventListener(CHAT_THREAD_ROUTE_EVENT, listener);
+  return () => {
+    window.removeEventListener('popstate', listener);
+    window.removeEventListener(CHAT_THREAD_ROUTE_EVENT, listener);
+  };
+}
+
 export interface ThreadNavigationWindow {
   dispatchEvent: (event: Event) => boolean;
   history: {

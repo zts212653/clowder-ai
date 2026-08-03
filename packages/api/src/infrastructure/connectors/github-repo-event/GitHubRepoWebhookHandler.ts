@@ -6,6 +6,10 @@
 import type { CatId, CommunityEvent, CommunityEventKind, ConnectorSource } from '@cat-cafe/shared';
 import type { ICommunityEventLog } from '../../../domains/community/CommunityEventLog.js';
 import { issueCommentEventId } from '../../../domains/community/community-keys.js';
+import {
+  classifyIssueComment as classifyIssueCommentActivity,
+  type IssueCommentClassification,
+} from '../../../domains/community/issue-analysis/issue-comment-classifier.js';
 import type { WebhookHandleResult } from '../../../routes/connector-webhooks.js';
 import type {
   ConnectorDeliveryDeps,
@@ -72,6 +76,8 @@ export interface GitHubRepoHandlerDeps {
   // F168 Phase A: community event log + projector (best-effort, optional)
   readonly eventLog?: ICommunityEventLog;
   readonly projector?: ICommunityProjectorApply;
+  /** Canonical classifier shared with both polling collection paths. */
+  readonly classifyIssueComment?: (comment: { author: string; body: string }) => IssueCommentClassification;
 }
 
 export class GitHubRepoWebhookHandler {
@@ -404,6 +410,7 @@ export class GitHubRepoWebhookHandler {
             id: number;
             user?: { login?: string };
             author_association?: string;
+            body?: string;
           }
         | undefined;
       if (!issue || !comment) return;
@@ -417,11 +424,22 @@ export class GitHubRepoWebhookHandler {
       // for idempotent convergence — delivery ID would differ between the two paths.
       // P2-③: use shared factory so webhook + polling paths can never drift on format.
       sourceEventId = issueCommentEventId(repo, issue.number, comment.id);
+      const classifiableComment = {
+        author: comment.user?.login ?? '',
+        body: comment.body ?? '',
+      };
+      const commentClassification =
+        this.deps.classifyIssueComment?.(classifiableComment) ?? classifyIssueCommentActivity(classifiableComment);
       eventPayload = {
         commentId: comment.id,
-        authorLogin: comment.user?.login ?? '',
+        authorLogin: classifiableComment.author,
         // P1-4a: required by delivery policy to distinguish maintainer vs external activity
         authorAssociation: comment.author_association ?? 'NONE',
+        body: classifiableComment.body,
+        critical: commentClassification.critical,
+        ...(commentClassification.suppressionReason
+          ? { suppressionReason: commentClassification.suppressionReason }
+          : {}),
       };
     } else if (eventType === 'issues' && (action === 'labeled' || action === 'unlabeled')) {
       const issue = payload.issue as { number: number; title?: string } | undefined;

@@ -229,6 +229,141 @@ describe('spawnCliInTmux', () => {
     assert.equal(errEvent, undefined, 'should NOT yield __cliError on exit 0');
   });
 
+  // F212 Phase H R1 P1-1 (Sol runtime forensics 2026-07-10, cloud codex bot echo):
+  // Deleting the provider-side suppress branch (AC-H1/H2) exposed a canonical-truth-source
+  // gap: cli-spawn.ts:657 already honors semanticCompletionSignal (turn.completed → abort =
+  // silent success even if CLI exits non-zero), but tmux-agent-spawner.ts:402 did NOT. So
+  // `turn.completed → exit 1` regressed for tmux-backed cats. R1 fix mirrors the direct-spawn
+  // gate. Simulation: caller signal already aborted before iteration completes (as if
+  // CodexAgentService.turn.completed handler had fired mid-stream). Expected: no __cliError.
+  it('F212 Phase H R1 P1-1: semanticCompletionSignal.aborted suppresses __cliError on non-zero exit', async () => {
+    const events = [];
+    const controller = new AbortController();
+    // Pre-abort — simulates provider's turn.completed handler flipping the signal
+    // before the tmux stdout iteration reaches exit.
+    controller.abort();
+    const gen = spawnCliInTmux(
+      {
+        command: '/bin/sh',
+        args: ['-c', 'echo \'{"type":"turn.completed"}\'; exit 1'],
+        worktreeId: WORKTREE,
+        invocationId: 'test-inv-semantic-done',
+        cwd: '/tmp',
+        semanticCompletionSignal: controller.signal,
+      },
+      { tmuxGateway: gateway },
+    );
+
+    for await (const event of gen) {
+      events.push(event);
+    }
+
+    const errEvent = events.find((e) => e.__cliError);
+    assert.equal(
+      errEvent,
+      undefined,
+      'exit=1 with semanticDone MUST NOT yield __cliError (parity with cli-spawn.ts:657)',
+    );
+  });
+
+  // F212 Phase H cloud R5 P2 (2026-07-10): the R1 P1-1 fix originally read
+  // `semanticCompletionSignal.aborted` — but that signal is sticky. In a multi-turn
+  // tmux stream, `turn.completed` (turn 1) → signal aborted; `turn.failed` (turn 2)
+  // cannot un-abort → sticky "semanticDone=true" → exit=1 gets suppressed even
+  // when the FINAL terminal was a real failure. Fix (cloud R5): key off
+  // `localFinalTerminal` (chronological last terminal event) instead of the
+  // sticky signal. These tests lock the new contract.
+
+  it('F212 Phase H cloud R5 P2: multi-turn tmux (turn.completed then turn.failed) → __cliError surfaces', async () => {
+    // Simulates the exact multi-turn regression cloud flagged. Pre-abort the signal
+    // (so old R1 P1-1 code would have suppressed) but emit turn.completed followed by
+    // turn.failed — under the R5 fix, localFinalTerminal='failed' wins over sticky signal.
+    const events = [];
+    const controller = new AbortController();
+    controller.abort();
+    const gen = spawnCliInTmux(
+      {
+        command: '/bin/sh',
+        args: [
+          '-c',
+          'echo \'{"type":"turn.completed"}\'; echo \'{"type":"turn.failed","error":{"message":"real failure"}}\'; exit 1',
+        ],
+        worktreeId: WORKTREE,
+        invocationId: 'test-inv-multi-turn-fail',
+        cwd: '/tmp',
+        semanticCompletionSignal: controller.signal,
+      },
+      { tmuxGateway: gateway },
+    );
+
+    for await (const event of gen) {
+      events.push(event);
+    }
+
+    const errEvent = events.find((e) => e.__cliError);
+    assert.ok(errEvent, 'multi-turn where final terminal is turn.failed MUST surface __cliError');
+    assert.equal(errEvent.exitCode, 1);
+  });
+
+  it('F212 Phase H cloud R5 P2 companion: multi-turn tmux (turn.failed then recovery turn.completed) → silent success', async () => {
+    // Opposite direction: attempt #1 fails, retry succeeds. Final terminal = completed.
+    // R1 P1-1 tolerance for recovery must survive R5 fix.
+    const events = [];
+    const controller = new AbortController();
+    const gen = spawnCliInTmux(
+      {
+        command: '/bin/sh',
+        args: [
+          '-c',
+          'echo \'{"type":"turn.failed","error":{"message":"transient"}}\'; echo \'{"type":"turn.completed"}\'; exit 1',
+        ],
+        worktreeId: WORKTREE,
+        invocationId: 'test-inv-multi-turn-recover',
+        cwd: '/tmp',
+        semanticCompletionSignal: controller.signal,
+      },
+      { tmuxGateway: gateway },
+    );
+
+    for await (const event of gen) {
+      events.push(event);
+    }
+
+    const errEvent = events.find((e) => e.__cliError);
+    assert.equal(
+      errEvent,
+      undefined,
+      'recovery (final terminal = turn.completed) MUST NOT surface __cliError even after prior turn.failed',
+    );
+  });
+
+  it('F212 Phase H R1 P1-1 companion: semanticCompletionSignal NOT aborted → __cliError fires normally', async () => {
+    // Guard against over-suppression: without semanticDone, tmux still surfaces exit=1
+    // via __cliError so terminal failures are not swallowed.
+    const events = [];
+    const controller = new AbortController();
+    // NOT aborted — represents a turn that ended without turn.completed
+    const gen = spawnCliInTmux(
+      {
+        command: '/bin/sh',
+        args: ['-c', 'echo \'{"type":"item.completed"}\'; exit 1'],
+        worktreeId: WORKTREE,
+        invocationId: 'test-inv-semantic-not-done',
+        cwd: '/tmp',
+        semanticCompletionSignal: controller.signal,
+      },
+      { tmuxGateway: gateway },
+    );
+
+    for await (const event of gen) {
+      events.push(event);
+    }
+
+    const errEvent = events.find((e) => e.__cliError);
+    assert.ok(errEvent, 'exit=1 without semanticDone MUST surface __cliError');
+    assert.equal(errEvent.exitCode, 1);
+  });
+
   it('plainText mode yields raw stdout without NDJSON parsing', async () => {
     const events = [];
     const gen = spawnCliInTmux(

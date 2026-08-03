@@ -15,6 +15,8 @@ const STUB_DIR = 'sop-definitions/stubs';
 const VALID_SEVERITIES = new Set(['blocker', 'warn', 'info']);
 const VALID_OWNER_TYPES = new Set(['stage_suggested_skill', 'skill']);
 const VALID_PREDICATE_TYPES = new Set([
+  'changed_files_require_command',
+  'co_creation_docs_lane',
   'command_pattern',
   'command_sequence',
   'sha_dedup',
@@ -57,6 +59,38 @@ function toCamelRule(raw, kind, stageSuggestedSkill) {
   if (predicate && Object.hasOwn(predicate, 'before_command')) {
     predicate.beforeCommand = predicate.before_command;
     delete predicate.before_command;
+  }
+  if (predicate && Object.hasOwn(predicate, 'include_globs')) {
+    predicate.includeGlobs = predicate.include_globs;
+    delete predicate.include_globs;
+  }
+  if (predicate && Object.hasOwn(predicate, 'classifier_required_globs')) {
+    predicate.classifierRequiredGlobs = predicate.classifier_required_globs;
+    delete predicate.classifier_required_globs;
+  }
+  if (predicate && Object.hasOwn(predicate, 'exclude_globs')) {
+    predicate.excludeGlobs = predicate.exclude_globs;
+    delete predicate.exclude_globs;
+  }
+  if (predicate && Object.hasOwn(predicate, 'classifier_match')) {
+    predicate.classifierMatch = predicate.classifier_match;
+    delete predicate.classifier_match;
+  }
+  if (predicate && Object.hasOwn(predicate, 'worktree_match')) {
+    predicate.worktreeMatch = predicate.worktree_match;
+    delete predicate.worktree_match;
+  }
+  if (predicate && Object.hasOwn(predicate, 'pull_request_match')) {
+    predicate.pullRequestMatch = predicate.pull_request_match;
+    delete predicate.pull_request_match;
+  }
+  if (predicate && Object.hasOwn(predicate, 'cloud_review_match')) {
+    predicate.cloudReviewMatch = predicate.cloud_review_match;
+    delete predicate.cloud_review_match;
+  }
+  if (predicate && Object.hasOwn(predicate, 'full_gate_match')) {
+    predicate.fullGateMatch = predicate.full_gate_match;
+    delete predicate.full_gate_match;
   }
 
   return {
@@ -153,6 +187,21 @@ function validatePredicate(predicate, path, errors) {
   }
 
   switch (predicate.type) {
+    case 'changed_files_require_command':
+      requireArray(predicate.includeGlobs, `${path}.predicate.include_globs`, errors);
+      if (!hasStringOrArray(predicate.mustMatch)) {
+        errors.push(`${path}.predicate changed_files_require_command requires must_match`);
+      }
+      break;
+    case 'co_creation_docs_lane':
+      requireArray(predicate.includeGlobs, `${path}.predicate.include_globs`, errors);
+      requireArray(predicate.classifierRequiredGlobs, `${path}.predicate.classifier_required_globs`, errors);
+      requireString(predicate.classifierMatch, `${path}.predicate.classifier_match`, errors);
+      requireString(predicate.worktreeMatch, `${path}.predicate.worktree_match`, errors);
+      requireString(predicate.pullRequestMatch, `${path}.predicate.pull_request_match`, errors);
+      requireString(predicate.cloudReviewMatch, `${path}.predicate.cloud_review_match`, errors);
+      requireString(predicate.fullGateMatch, `${path}.predicate.full_gate_match`, errors);
+      break;
     case 'command_pattern':
       if (!hasStringOrArray(predicate.mustMatch) && !hasStringOrArray(predicate.mustNotMatch)) {
         errors.push(`${path}.predicate command_pattern requires must_match or must_not_match`);

@@ -7,6 +7,10 @@ import { Server as HttpServer } from 'node:http';
 import { createCatId } from '@cat-cafe/shared';
 import { Server, Socket } from 'socket.io';
 import { isOriginAllowed, resolveFrontendCorsOrigins } from '../../config/frontend-origin.js';
+import {
+  type AgentSessionMutexLike,
+  agentSessionMutex,
+} from '../../domains/cats/services/agents/invocation/AgentSessionMutex.js';
 import type {
   CancelResult,
   InvocationTracker,
@@ -19,9 +23,10 @@ import { ThreadSequencer } from './ThreadSequencer.js';
 const log = createModuleLogger('ws');
 
 interface QueueProcessorLike {
+  canReleaseSlotForUser(threadId: string, catId: string, userId: string): boolean;
   clearPause(threadId: string, catId?: string): void;
   releaseSlot(threadId: string, catId: string): void;
-  suppressAutoResume(threadId: string, catId: string): void;
+  suppressAutoResume(threadId: string, catId: string, executionIds?: readonly string[]): void;
 }
 
 /**
@@ -60,6 +65,7 @@ export class SocketManager {
   private io: Server;
   private invocationTracker: InvocationTracker | null;
   private queueProcessor: QueueProcessorLike | null;
+  private agentSessionMutex: AgentSessionMutexLike;
   private multiMentionOrchestrator: {
     abortByThread(threadId: string): number;
     abortBySlot?(threadId: string, catId: string): number;
@@ -93,6 +99,7 @@ export class SocketManager {
   ) {
     this.invocationTracker = invocationTracker ?? null;
     this.queueProcessor = null;
+    this.agentSessionMutex = agentSessionMutex;
     this.multiMentionOrchestrator = null;
     // F183 Phase C2/C3 — backpressure observability. onWarn forwards to module
     // logger as structured `broadcast_rate_warn` event (replaces unfindable
@@ -173,7 +180,7 @@ export class SocketManager {
 
       socket.on('join_room', (room: string) => {
         // Validate room name format — only allow known prefixes
-        if (!/^(thread:|worktree:|preview:global$|workspace:global$|user:)/.test(room)) {
+        if (!/^(thread:|worktree:|preview:global$|workspace:global$|workspace:navigate:ack$|user:)/.test(room)) {
           log.warn({ socketId: socket.id, room }, 'Attempted to join invalid room');
           return;
         }
@@ -185,7 +192,10 @@ export class SocketManager {
         // F156 B-3: Global rooms carry metadata (file paths, worktreeIds, preview ports).
         // Require authenticated userId. In single-user mode userId is always set;
         // F077 will add workspace membership check for multi-user.
-        if ((room === 'workspace:global' || room === 'preview:global') && !userId) {
+        if (
+          (room === 'workspace:global' || room === 'workspace:navigate:ack' || room === 'preview:global') &&
+          !userId
+        ) {
           log.warn({ socketId: socket.id, room }, 'Global room requires authentication');
           return;
         }
@@ -198,83 +208,162 @@ export class SocketManager {
         log.info({ socketId: socket.id, room }, 'Left room');
       });
 
-      socket.on('cancel_invocation', (data: { threadId: string; catId?: string }) => {
-        if (!this.invocationTracker || !data?.threadId) return;
-        // Only allow cancel if the socket is in the target thread's room
-        const room = `thread:${data.threadId}`;
-        if (!socket.rooms.has(room)) {
-          log.warn({ socketId: socket.id, threadId: data.threadId }, 'Cancel attempt without room membership');
-          return;
-        }
-        // F211-REG6 instrument (observation-only): SocketManager hardcodes 'user_cancel' for every
-        // WS cancel_invocation, but the operator reported spurious cancels he never triggered (Timeline
-        // 2026-05-29: WS flapped 6× in 2min). msSinceConnect is the discriminator — a cancel arriving
-        // milliseconds after a (re)connect is almost certainly reconnect/teardown noise, not a
-        // deliberate Stop click. Pin the real trigger before changing any attribution behavior.
-        log.info(
-          {
-            event: 'f211_reg6_ws_cancel_received',
-            socketId: socket.id,
-            threadId: data.threadId,
-            catId: data.catId ?? null,
-            scope: data.catId ? 'slot' : 'all',
-            msSinceConnect: Date.now() - socket.handshake.issued,
-            transport: socket.conn.transport.name,
-          },
-          'F211-REG6: cancel_invocation received — capturing real trigger provenance (genuine Stop vs reconnect-spurious)',
-        );
-        if (data.catId) {
-          // F108: Slot-specific cancel
-          const result = this.invocationTracker.cancel(data.threadId, data.catId, userId, 'user_cancel');
-          if (result.cancelled) {
-            // F-parallel-cancel: scope the cancel broadcast + slot cleanup to the REQUESTED cat
-            // only. result.catIds carries the whole startAll batch (per-slot stores all catIds),
-            // so broadcasting it cleared sibling cats in the UI — this is the most direct cause of
-            // "取消一只两只一起取消" from the real Stop button. Mirrors queue.ts:568-575 scoped fix.
-            const scopedResult = { ...result, catIds: [data.catId] };
-            log.info({ threadId: data.threadId, catId: data.catId }, 'Cancelled slot (scoped)');
-            for (const msg of buildCancelMessages(scopedResult)) {
-              this.broadcastAgentMessage(msg, data.threadId);
-            }
-            this.queueProcessor?.clearPause(data.threadId, data.catId);
-            this.queueProcessor?.releaseSlot(data.threadId, data.catId);
+      const seenCancelActionIds = new Set<string>();
+      socket.on(
+        'cancel_invocation',
+        (data: {
+          threadId?: string;
+          catId?: string;
+          origin?: string;
+          actionId?: string;
+          clientInstanceId?: string;
+        }) => {
+          if (!this.invocationTracker || !data?.threadId) return;
+          const hasExplicitProvenance =
+            data.origin === 'explicit_stop' &&
+            typeof data.actionId === 'string' &&
+            data.actionId.length > 0 &&
+            data.actionId.length <= 200 &&
+            typeof data.clientInstanceId === 'string' &&
+            data.clientInstanceId.length > 0 &&
+            data.clientInstanceId.length <= 200;
+          if (!hasExplicitProvenance) {
+            log.warn(
+              {
+                event: 'f254_unattributed_cancel_rejected',
+                socketId: socket.id,
+                threadId: data.threadId,
+                catId: data.catId ?? null,
+              },
+              'Rejected cancel_invocation without explicit Stop provenance',
+            );
+            return;
           }
-          // F108 + F086: Also abort multi-mention dispatches for this specific cat
-          this.multiMentionOrchestrator?.abortBySlot?.(data.threadId, data.catId);
-        } else {
-          // F156: Pass userId to cancelAll so it only cancels this user's invocations.
-          // cancelAll returns the catIds that were actually cancelled, so we can
-          // scope the orchestrator abort to just those cats — not the entire thread.
-          // Use 'cancel_all' (not 'user_cancel') so QueueProcessor.executeEntry can
-          // distinguish "stop everything" from single-cat cancel. Only 'cancel_all'
-          // triggers suppressAutoResume; single-cat 'user_cancel' still auto-resumes.
-          const cancelledCatIds = this.invocationTracker.cancelAll(data.threadId, userId, 'cancel_all');
-          if (cancelledCatIds.length > 0) {
-            for (const msg of buildCancelMessages({ cancelled: true, catIds: cancelledCatIds })) {
-              this.broadcastAgentMessage(msg, data.threadId);
-            }
-            for (const catId of cancelledCatIds) {
-              this.queueProcessor?.clearPause(data.threadId, catId);
-              this.queueProcessor?.releaseSlot(data.threadId, catId);
-              // Suppress auto-resume for BOTH paths:
-              // - Queued invocations: executeEntry also sets suppress (belt-and-suspenders)
-              // - Direct invocations (messages.ts): only this external call covers them
-              //   because they don't go through executeEntry
-              // Protected by: cancel_all reason (not single-cat), status-gate, 60s TTL
-              this.queueProcessor?.suppressAutoResume(data.threadId, catId);
-            }
+          if (seenCancelActionIds.has(data.actionId!)) {
+            log.warn(
+              { socketId: socket.id, actionId: data.actionId, clientInstanceId: data.clientInstanceId },
+              'Rejected duplicate cancel_invocation action',
+            );
+            return;
           }
-          // F156 P1-fix: Use per-cat abortBySlot instead of thread-wide abortByThread.
-          // abortByThread would kill other users' multi-mention dispatches too.
-          for (const catId of cancelledCatIds) {
-            this.multiMentionOrchestrator?.abortBySlot?.(data.threadId, catId);
+          seenCancelActionIds.add(data.actionId!);
+          // Only allow cancel if the socket is in the target thread's room
+          const room = `thread:${data.threadId}`;
+          if (!socket.rooms.has(room)) {
+            log.warn({ socketId: socket.id, threadId: data.threadId }, 'Cancel attempt without room membership');
+            return;
           }
+          // F211-REG6 instrument (observation-only): SocketManager hardcodes 'user_cancel' for every
+          // WS cancel_invocation, but the operator reported spurious cancels he never triggered (Timeline
+          // 2026-05-29: WS flapped 6× in 2min). msSinceConnect is the discriminator — a cancel arriving
+          // milliseconds after a (re)connect is almost certainly reconnect/teardown noise, not a
+          // deliberate Stop click. Pin the real trigger before changing any attribution behavior.
           log.info(
-            { threadId: data.threadId, socketId: socket.id, userId, cancelledCatIds },
-            'Cancelled all invocations',
+            {
+              event: 'f211_reg6_ws_cancel_received',
+              socketId: socket.id,
+              threadId: data.threadId,
+              catId: data.catId ?? null,
+              scope: data.catId ? 'slot' : 'all',
+              msSinceConnect: Date.now() - socket.handshake.issued,
+              transport: socket.conn.transport.name,
+              origin: data.origin,
+              actionId: data.actionId,
+              clientInstanceId: data.clientInstanceId,
+            },
+            'F211-REG6: cancel_invocation received — capturing real trigger provenance (genuine Stop vs reconnect-spurious)',
           );
-        }
-      });
+          if (data.catId) {
+            // F108: Slot-specific cancel
+            const result = this.invocationTracker.cancel(data.threadId, data.catId, userId, 'user_cancel');
+            const lockRelease = this.agentSessionMutex.forceReleaseByScope(
+              {
+                threadId: data.threadId,
+                userId,
+                catId: data.catId,
+              },
+              { preserveHolderExecutionIds: result.executionIds ?? [] },
+            );
+            if (lockRelease.releasedHolders > 0 || lockRelease.rejectedWaiters > 0) {
+              log.warn(
+                { event: 'agent_session_mutex_force_release', reason: 'ws_cancel', ...lockRelease },
+                'Released stuck agent session locks after WebSocket cancel',
+              );
+            }
+            const recoveredLockOnly =
+              (lockRelease.releasedHolders > 0 || lockRelease.rejectedWaiters > 0) &&
+              this.canReleaseSlotForUser(data.threadId, data.catId, userId);
+            if (result.cancelled || recoveredLockOnly) {
+              // F-parallel-cancel: scope the cancel broadcast + slot cleanup to the REQUESTED cat
+              // only. result.catIds carries the whole startAll batch (per-slot stores all catIds),
+              // so broadcasting it cleared sibling cats in the UI — this is the most direct cause of
+              // "取消一只两只一起取消" from the real Stop button. Mirrors queue.ts:568-575 scoped fix.
+              // A recovered mutex is itself a successful terminal action even when the tracker
+              // entry has already vanished. Preserve that outcome for buildCancelMessages so the
+              // client receives the same done signal as the REST lock-only recovery path.
+              const scopedResult = { ...result, cancelled: true, catIds: [data.catId] };
+              log.info({ threadId: data.threadId, catId: data.catId }, 'Cancelled slot (scoped)');
+              for (const msg of buildCancelMessages(scopedResult)) {
+                this.broadcastAgentMessage(msg, data.threadId);
+              }
+              this.queueProcessor?.clearPause(data.threadId, data.catId);
+              this.queueProcessor?.releaseSlot(data.threadId, data.catId);
+            }
+            // F108 + F086: Also abort multi-mention dispatches for this specific cat
+            this.multiMentionOrchestrator?.abortBySlot?.(data.threadId, data.catId);
+          } else {
+            // F156: Pass userId to cancelAll so it only cancels this user's invocations.
+            // cancelAll returns the catIds that were actually cancelled, so we can
+            // scope the orchestrator abort to just those cats — not the entire thread.
+            // Use 'cancel_all' (not 'user_cancel') so QueueProcessor.executeEntry can
+            // distinguish "stop everything" from single-cat cancel. Only 'cancel_all'
+            // triggers suppressAutoResume; single-cat 'user_cancel' still auto-resumes.
+            const cancelAllResult = this.invocationTracker.cancelAll(data.threadId, userId, 'cancel_all');
+            const cancelledCatIds = cancelAllResult.catIds;
+            const lockRelease = this.agentSessionMutex.forceReleaseByScope(
+              { threadId: data.threadId, userId },
+              { preserveHolderExecutionIds: cancelAllResult.executionIds },
+            );
+            if (lockRelease.releasedHolders > 0 || lockRelease.rejectedWaiters > 0) {
+              log.warn(
+                { event: 'agent_session_mutex_force_release', reason: 'ws_cancel_all', ...lockRelease },
+                'Released stuck agent session locks after WebSocket cancel-all',
+              );
+            }
+            const cancelThreadId = data.threadId;
+            const activeTracker = this.invocationTracker;
+            const recoveredCatIds = (lockRelease.catIds ?? []).filter((catId) =>
+              this.canReleaseSlotForUser(cancelThreadId, catId, userId, activeTracker),
+            );
+            const terminalCatIds = [...new Set([...cancelledCatIds, ...recoveredCatIds])];
+            if (terminalCatIds.length > 0) {
+              for (const msg of buildCancelMessages({ cancelled: true, catIds: terminalCatIds })) {
+                this.broadcastAgentMessage(msg, data.threadId);
+              }
+              for (const catId of terminalCatIds) {
+                this.queueProcessor?.clearPause(data.threadId, catId);
+                this.queueProcessor?.releaseSlot(data.threadId, catId);
+                // Suppress auto-resume for BOTH paths:
+                // - Queued invocations: executeEntry also sets suppress (belt-and-suspenders)
+                // - Direct invocations (messages.ts): only this external call covers them
+                //   because they don't go through executeEntry
+                // Protected by: cancel_all reason, exact canceled execution IDs, 60s TTL
+                const executionId = cancelAllResult.executionIdByCatId?.[catId];
+                this.queueProcessor?.suppressAutoResume(data.threadId, catId, executionId ? [executionId] : []);
+              }
+            }
+            // F156 P1-fix: Use per-cat abortBySlot instead of thread-wide abortByThread.
+            // abortByThread would kill other users' multi-mention dispatches too.
+            for (const catId of terminalCatIds) {
+              this.multiMentionOrchestrator?.abortBySlot?.(data.threadId, catId);
+            }
+            log.info(
+              { threadId: data.threadId, socketId: socket.id, userId, cancelledCatIds: terminalCatIds },
+              'Cancelled all invocations',
+            );
+          }
+        },
+      );
     });
   }
 
@@ -286,9 +375,25 @@ export class SocketManager {
     this.multiMentionOrchestrator = orch;
   }
 
+  private canReleaseSlotForUser(
+    threadId: string,
+    catId: string,
+    userId: string,
+    tracker: InvocationTracker | null = this.invocationTracker,
+  ): boolean {
+    if (this.queueProcessor) return this.queueProcessor.canReleaseSlotForUser(threadId, catId, userId);
+    if (!tracker) return false;
+    return !tracker.has(threadId, catId) || tracker.getUserId(threadId, catId) === userId;
+  }
+
   /** Wire QueueProcessor after bootstrap so WebSocket stop can mirror REST cancel cleanup. */
   setQueueProcessor(queueProcessor: QueueProcessorLike): void {
     this.queueProcessor = queueProcessor;
+  }
+
+  /** Override the shared agent session lock controller (bootstrap/tests). */
+  setAgentSessionMutex(sessionMutex: AgentSessionMutexLike): void {
+    this.agentSessionMutex = sessionMutex;
   }
 
   /**
@@ -329,6 +434,21 @@ export class SocketManager {
 
   broadcastToRoom(room: string, event: string, data: unknown): void {
     this.io.to(room).emit(event, data);
+  }
+
+  broadcastToRoomWithAck(room: string, event: string, data: unknown, timeoutMs = 1500): Promise<unknown[]> {
+    type AckBroadcastOperator = {
+      emit(eventName: string, payload: unknown, callback: (error: Error | null, responses: unknown[]) => void): boolean;
+    };
+    const operator = this.io.to(room).timeout(timeoutMs) as unknown as AckBroadcastOperator;
+    return new Promise((resolve) => {
+      operator.emit(event, data, (error, responses) => {
+        if (error) {
+          log.debug({ room, event, responseCount: responses?.length ?? 0 }, 'Room acknowledgement timed out');
+        }
+        resolve(Array.isArray(responses) ? responses : []);
+      });
+    });
   }
 
   /** F39: Emit to all sockets belonging to a specific user (multi-tab safe). */

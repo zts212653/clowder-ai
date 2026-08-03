@@ -6,7 +6,6 @@
  */
 
 import { execFile } from 'node:child_process';
-import { realpathSync } from 'node:fs';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, posix, resolve, win32 } from 'node:path';
@@ -100,24 +99,30 @@ export interface DriveInfo {
  * Returns [] on non-Windows platforms (single root filesystem).
  * Skips A:/B: (legacy floppy reservations) and inaccessible drives.
  */
-export function listAvailableDrives(
+export async function listAvailableDrives(
   platformName = process.platform,
-  probeRealpath: (root: string) => string = realpathSync,
-): DriveInfo[] {
+  probeRealpath: (root: string) => Promise<string> | string = realpath,
+): Promise<DriveInfo[]> {
   if (platformName !== 'win32') return [];
-  const drives: DriveInfo[] = [];
   // C-Z: skip A/B (floppy legacy), probe the rest.
+  const probes: Promise<DriveInfo | null>[] = [];
   for (let code = 'C'.charCodeAt(0); code <= 'Z'.charCodeAt(0); code++) {
     const letter = String.fromCharCode(code);
     const root = `${letter}:\\`;
-    try {
-      const real = probeRealpath(root);
-      drives.push({ letter, path: real, label: `本地磁盘 (${letter}:)` });
-    } catch {
-      // Drive not mounted / inaccessible - skip silently.
-    }
+    probes.push(
+      (async () => {
+        try {
+          const resolvedPath = await probeRealpath(root);
+          return { letter, path: resolvedPath, label: `本地磁盘 (${letter}:)` };
+        } catch {
+          // Drive not mounted / inaccessible - skip silently.
+          return null;
+        }
+      })(),
+    );
   }
-  return drives;
+  const results = await Promise.all(probes);
+  return results.filter((drive): drive is DriveInfo => drive !== null);
 }
 
 /**
@@ -335,7 +340,7 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
     if (!requireTrustedProjectIdentity(request, reply)) {
       return { error: 'Identity required (X-Cat-Cafe-User header)' };
     }
-    const allDrives = listAvailableDrives();
+    const allDrives = await listAvailableDrives();
     // Filter to drives whose root is under an allowed root (project-path policy).
     const accessibleDrives = allDrives.filter((d) => isUnderAllowedRoot(d.path));
     return { drives: accessibleDrives, isWindows: process.platform === 'win32' };

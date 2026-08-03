@@ -2,10 +2,20 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainer } from '@/components/ChatContainer';
+import type { ChatMessage as ChatMessageData, QueueEntry } from '@/stores/chat-types';
 import { useSidebarStore } from '@/stores/sidebarStore';
 
+let mockMessages: ChatMessageData[] = [];
+let mockQueue: QueueEntry[] = [];
+let mockRightPanelMode: 'status' | 'workspace' | 'transcript' = 'status';
+let mockWorkspaceMode = 'dev';
+const mockCloseRightPanel = vi.fn();
+
 const mockStoreState = () => ({
-  messages: [],
+  currentThreadId: 'test-thread',
+  threadStates: {},
+  messages: mockMessages,
+  queue: mockQueue,
   isLoading: false,
   hasActiveInvocation: false,
   intentMode: null,
@@ -34,6 +44,10 @@ const mockStoreState = () => ({
   setSplitPaneThreadIds: vi.fn(),
   setSplitPaneTarget: vi.fn(),
   threads: [],
+  rightPanelMode: mockRightPanelMode,
+  workspaceMode: mockWorkspaceMode,
+  setRightPanelMode: vi.fn(),
+  closeRightPanel: mockCloseRightPanel,
 });
 
 vi.mock('@/stores/chatStore', () => {
@@ -80,7 +94,10 @@ vi.mock('@/hooks/useChatSocketCallbacks', () => ({
 }));
 
 // Stub child components to isolate ChatContainer behavior
-vi.mock('../ChatMessage', () => ({ ChatMessage: () => null }));
+vi.mock('../ChatMessage', () => ({
+  ChatMessage: ({ message }: { message: { id: string } }) =>
+    React.createElement('div', { 'data-testid': `chat-message-${message.id}` }),
+}));
 vi.mock('../ChatInput', () => ({ ChatInput: () => null }));
 vi.mock('../ChatContainerHeader', () => ({
   ChatContainerHeader: (props: { onToggleSidebar: () => void; onOpenMobileStatus: () => void }) =>
@@ -107,6 +124,15 @@ vi.mock('../RightStatusPanel', () => ({ RightStatusPanel: () => null }));
 vi.mock('../MobileStatusSheet', () => ({
   MobileStatusSheet: (props: { open: boolean }) =>
     React.createElement('div', { 'data-testid': 'mobile-status', 'data-open': String(props.open) }),
+}));
+vi.mock('../MobileApprovalSheet', () => ({
+  MobileApprovalSheet: (props: { open: boolean; onClose: () => void }) =>
+    React.createElement('button', {
+      type: 'button',
+      'data-testid': 'mobile-approval',
+      'data-open': String(props.open),
+      onClick: props.onClose,
+    }),
 }));
 vi.mock('../ParallelStatusBar', () => ({ ParallelStatusBar: () => null }));
 vi.mock('../ThinkingIndicator', () => ({ ThinkingIndicator: () => null }));
@@ -145,6 +171,11 @@ describe('ChatContainer mobile interactions', () => {
   }
 
   beforeEach(() => {
+    mockMessages = [];
+    mockQueue = [];
+    mockRightPanelMode = 'status';
+    mockWorkspaceMode = 'dev';
+    mockCloseRightPanel.mockReset();
     useSidebarStore.setState({ isOpen: false });
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -163,6 +194,32 @@ describe('ChatContainer mobile interactions', () => {
       root.render(React.createElement(ChatContainer, { threadId: 'test-thread' }));
     });
     expect(container.querySelector('[data-testid="sidebar"]')).toBeNull();
+  });
+
+  it('keeps an untouched durable queued user message visible in the timeline', () => {
+    mockMessages = [{ id: 'queued-user', type: 'user', content: 'follow-up', timestamp: 1000 }];
+    mockQueue = [
+      {
+        id: 'entry-queued-user',
+        threadId: 'test-thread',
+        userId: 'user-1',
+        content: 'follow-up',
+        messageId: 'queued-user',
+        mergedMessageIds: [],
+        source: 'user',
+        targetCats: ['opus'],
+        intent: 'execute',
+        status: 'queued',
+        targetStates: { opus: 'queued' },
+        createdAt: 1000,
+      },
+    ];
+
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'test-thread' }));
+    });
+
+    expect(container.querySelector('[data-testid="chat-message-queued-user"]')).toBeTruthy();
   });
 
   it('opens sidebar overlay when toggle button is clicked', () => {
@@ -210,6 +267,21 @@ describe('ChatContainer mobile interactions', () => {
 
     const statusSheetAfter = container.querySelector('[data-testid="mobile-status"]') as HTMLElement;
     expect(statusSheetAfter.getAttribute('data-open')).toBe('true');
+  });
+
+  it('renders the approval workspace as a closable mobile sheet', () => {
+    mockRightPanelMode = 'workspace';
+    mockWorkspaceMode = 'approval';
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'test-thread' }));
+    });
+
+    const approvalSheet = container.querySelector('[data-testid="mobile-approval"]') as HTMLButtonElement;
+    expect(approvalSheet).toBeTruthy();
+    expect(approvalSheet.getAttribute('data-open')).toBe('true');
+
+    act(() => approvalSheet.click());
+    expect(mockCloseRightPanel).toHaveBeenCalledOnce();
   });
 
   it('auto-opens sidebar store on desktop but does not render mobile overlay', () => {

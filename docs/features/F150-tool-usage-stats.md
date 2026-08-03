@@ -1,6 +1,6 @@
 ---
 feature_ids: [F150]
-related_features: [F051, F009, F075]
+related_features: [F051, F009, F075, F286]
 topics: [observability, analytics, hub, redis]
 doc_kind: spec
 created: 2026-04-01
@@ -12,7 +12,7 @@ created: 2026-04-01
 
 ## Why
 
-Cat Cafe 的猫猫们每天调用大量 tool、skill、MCP 能力，但目前没有一个统一的地方回答：
+Clowder AI 的猫猫们每天调用大量 tool、skill、MCP 能力，但目前没有一个统一的地方回答：
 
 - 哪些工具被用得最多？哪些几乎没人碰？
 - 各只猫的工具使用分布有什么差异？

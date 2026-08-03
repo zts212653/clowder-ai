@@ -24,7 +24,7 @@ import {
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { isCatAvailable } from '../config/cat-config-loader.js';
-import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import { type IMessageStore, isTimelinePublished } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IConciergeConfigStore } from '../domains/concierge/ConciergeConfigStore.js';
 import type { IConciergeConfirmationStore } from '../domains/concierge/ConciergeConfirmationStore.js';
 import type { IConciergeInvestigationJobStore } from '../domains/concierge/ConciergeInvestigationJobStore.js';
@@ -625,7 +625,9 @@ export const conciergeRoutes: FastifyPluginAsync<ConciergeRoutesOptions> = async
     const { threadId, messageId, windowSize } = parseResult.data;
 
     // Fetch messages around the target (scoped to requesting user — cloud review P1)
-    const allMessages = await messageStore.getByThread(threadId, 200, userId);
+    const allMessages = await messageStore.getByThread(threadId, 200, userId, {
+      includeQueuedCatMessages: true,
+    });
     const targetIdx = allMessages.findIndex((m) => m.id === messageId);
 
     // Cloud R2-P2 + R3-P1 + R4-P1 fix: if target is beyond the 200-message window,
@@ -642,7 +644,7 @@ export const conciergeRoutes: FastifyPluginAsync<ConciergeRoutesOptions> = async
         return { error: 'Target message not found in thread' };
       }
       const targetMsg = await messageStore.getById(messageId);
-      if (!targetMsg || targetMsg.threadId !== threadId) {
+      if (!targetMsg || targetMsg.threadId !== threadId || targetMsg.deletedAt || !isTimelinePublished(targetMsg)) {
         reply.status(404);
         return { error: 'Target message not found in thread' };
       }

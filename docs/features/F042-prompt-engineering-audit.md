@@ -56,7 +56,7 @@ F042 的目标是纠正提示词与 skills 体系的系统性退化：信息架�
 
 ## Summary
 
-Cat Cafe 的提示词和 Skills 体系存在系统性问题：
+Clowder AI 的提示词和 Skills 体系存在系统性问题：
 
 1. **信息架构缺乏分层** — CLAUDE.md 350行百科全书 + SOP 300行手册 + 25个 skill 混杂流程/知识/参考
 2. **Skills 路由不精确** — description 是文案不是分类器，三组重叠造成选择困难，"MUST 泛滥=MUST 失效"

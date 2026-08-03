@@ -156,6 +156,40 @@ test('assistant tool_use → tool_use', () => {
   assert.equal(result[0].toolUseId, 'toolu_123');
 });
 
+test('synthetic assistant provider payload → structured error, never cat text', () => {
+  const state = makeStreamState();
+  const event = {
+    type: 'assistant',
+    message: {
+      id: 'msg-synthetic-provider-error',
+      model: '<synthetic>',
+      content: [{ type: 'text', text: 'API Error: upstream response — P1: provider-supplied diagnostic' }],
+    },
+  };
+
+  const result = transformClaudeEvent(event, CAT, state);
+
+  assert.ok(result !== null);
+  assert.ok(!Array.isArray(result));
+  assert.equal(result.type, 'error');
+  assert.equal(result.error, 'API Error: upstream response — P1: provider-supplied diagnostic');
+  assert.equal(result.errorDisposition, 'transient');
+});
+
+test('synthetic assistant no-response marker → no cat output', () => {
+  const state = makeStreamState();
+  const event = {
+    type: 'assistant',
+    message: {
+      id: 'msg-synthetic-no-response',
+      model: '<synthetic>',
+      content: [{ type: 'text', text: 'No response requested.' }],
+    },
+  };
+
+  assert.equal(transformClaudeEvent(event, CAT, state), null);
+});
+
 test('result/error → error', () => {
   const state = makeStreamState();
   const event = { type: 'result', subtype: 'error', errors: ['something went wrong'] };

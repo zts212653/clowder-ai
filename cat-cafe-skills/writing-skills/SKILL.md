@@ -1,7 +1,7 @@
 ---
 name: writing-skills
 description: >
-  创建或修改 Cat Café skill / MCP tool description 的元技能（含质量标准、范本、发布）。
+  创建或修改 Clowder AI skill / MCP tool description 的元技能（含质量标准、范本、发布）。
   Use when: 写新 skill、修改现有 skill、写/改 MCP tool description、验证 skill 质量；
   或者功能实现中产出了 SKILL.md / cat-cafe-skills/ 新目录 / manifest.yaml skill 条目。
   Not for: 使用 skill（直接触发对应 skill）。
@@ -55,7 +55,7 @@ triggers:
 | 流程型 skill | `cat-cafe-skills/tdd/SKILL.md` | 清晰的分步流程 + 红绿重构纪律 |
 | 调试型 skill | `cat-cafe-skills/debugging/SKILL.md` | 根因定位方法论 + 假设验证 |
 | 门禁型 skill | `cat-cafe-skills/quality-gate/SKILL.md` | 检查清单 + 硬门禁 + 下一步 |
-| MCP tool | `refs/mcp-tool-description-standard.md` 的好/差对比 | 五要素全覆盖 |
+| MCP tool | `refs/mcp-tool-description-standard.md` 的好/差对比 | 四项路由契约 + 有证据才写 Gotcha |
 
 > 写 MCP tool 前还要 **grep 家里现有同类 tool 的 description**，保持风格一致。
 
@@ -63,7 +63,7 @@ triggers:
 
 以下是核心原则。详细展开、案例拆解、模板见对应 ref 文件。
 
-### T0-0：Skill 价值门禁（Cat Café）
+### T0-0：Skill 价值门禁（Clowder AI）
 
 Skill 不是知识垃圾桶。写之前先选择正确载体：
 
@@ -90,10 +90,10 @@ Description 决定猫"要不要触发"。三层加载机制：
 
 ### T0-2：Gotchas 是最高价值内容（Anthropic）
 
-Skill/MCP 里最值钱的不是流程描述，是 **Common Mistakes / GOTCHA** 段落。这是猫犯过的错的沉淀。
-- 每个 skill 必须有 `Common Mistakes` 段
-- 每个 MCP tool description 必须有 `GOTCHA` 段（和相似工具的区别）
-- **持续迭代**：猫踩了新坑就补进去，不是写完就不管
+Skill/MCP 里最值钱的常常不是流程描述，而是**真实失败史**沉淀出的 Common Mistakes / GOTCHA。
+- 有已发生的误触发、易混工具或非显然陷阱 → 写 `Common Mistakes` / `GOTCHA`
+- 没有真实 failure mode → 不为满足版式编造空洞段落；先让 Use / Not for / Output 和执行边界说清楚
+- **持续迭代**：猫真的踩了新坑再补，不是先写一排想象中的坑
 
 ### T0-3：不惊吓原则（知识工程指南）
 
@@ -102,23 +102,23 @@ Skill 的行为不得超出 description 承诺的范围。副作用动作（发�
 ### T0-4：反例至少出现两次（知识工程指南）
 
 只写 "Use when" 不写 "Not for" = 边界模糊 → 误触发。反例要在 **description** 和 **正文** 都出现。
-每个 skill 至少：2 条正例 + 2 条反例 + 1 条灰例。
+反例按**真实混淆密度**写——有误触发历史的边界才值得反例；"2 正 2 反 1 灰"是常见形态**不是硬配额**（2026-07-15：配额化诱导编造反例凑数）。
 
 ### T0-5：Skill 是文件夹，不只是 markdown（Anthropic）
 
 用文件系统做 progressive disclosure：模板放 `assets/`、脚本放 `scripts/`、参考放 `refs/`。
-Claude 会按需读取这些文件。重材料移到子文件，SKILL.md 正文控制在 150 行内。
+Claude 会按需读取这些文件。**150 行是拆分 smell 不是硬限**——超了先问"哪段是按需材料该下沉 refs/"；核心执行文本完整性优先于行数达标（2026-07-15：本 skill 与多个核心 skill 自身超行，硬限只制造违规感不制造质量）。
 
-### T0-6：MCP Description 五要素（MCP 规范）
+### T0-6：MCP Description 四要素 + 条件 Gotcha（MCP 规范）
 
 ```
 1. 做什么（一句话能力）
 2. 什么时候用（触发关键词 / 用户常见表述）
 3. 不做什么（排除错误路由 + 和相似 tool 的区别）
 4. 产物（调用后会发生什么，含副作用）
-5. GOTCHA（陷阱 + 易混工具区分）
+5. GOTCHA（仅当存在真实陷阱 / 易混工具时）
 ```
-> 缺一个就是不合格。详见 `refs/mcp-tool-description-standard.md`
+> 1-4 是完整路由契约；5 由真实混淆证据触发。缺路由契约不合格，缺一个并不存在的 GOTCHA 不算缺陷。详见 `refs/mcp-tool-description-standard.md`
 
 ## Skill 类型（Anthropic 9 分类 + 我们的 3 分类）
 
@@ -145,7 +145,7 @@ description: >
 ## 核心知识 / Overview（1-2 句）
 ## 流程 / When to Use（触发 + 排除）
 ## Quick Reference（表格/bullet，供扫视）
-## Common Mistakes（错误 → 后果 → 修复，持续迭代！）
+## Common Mistakes（可选：有真实错误史时写“错误 → 后果 → 修复”）
 ## 验证 / Pressure Test（如何证明 skill 防住了真实失败）
 ## 和其他 skill 的区别（防误触发）
 ## 下一步（进入哪个 skill）
@@ -159,7 +159,7 @@ description: >
 | post_message vs cross_post_message | post=当前 thread；cross=跨 thread | NOT for: posting to other threads (use cross_post_message) |
 | generate_document vs create_rich_block | generate=自动投递 IM；create=消息内嵌展示 | GOTCHA: Do NOT manually pandoc + create_rich_block |
 
-> **写新 skill/MCP 时，问自己："有没有和现有工具/概念容易混的？"有就必须在 GOTCHA 里写清楚。**
+> **写新 skill/MCP 时，问自己："有没有和现有工具/概念容易混的？"有证据就必须在 GOTCHA 里写清楚；没有就不要凑段落。**
 
 ## 发布检查清单
 
@@ -175,26 +175,26 @@ description: >
 |------|------|------|
 | 凭空写，不看范本 | 风格不一致、质量参差 | **先看范本表里的好例子** |
 | Description 含流程摘要 | 猫走捷径不读 SKILL.md | 只写触发条件（T0-1） |
-| 没有 GOTCHA/Common Mistakes 段 | 猫反复踩同一个坑 | **必须有**，持续补（T0-2） |
+| 已有真实陷阱却没写 GOTCHA/Common Mistakes | 猫反复踩同一个坑 | 把已发生 failure mode 写成可执行边界（T0-2） |
 | 写通用教程 | 浪费 token、锚定到平庸模板 | 只保留领域 know-how / 历史坑 / 证据标准 / 行为刹车 |
 | 把 high-risk 行为只写进 prompt | 模型压力下仍会绕过 | 能机械检测就做 hook/runtime guard |
 | 没有 RED 场景 | 不知道 skill 防住了什么 | 先看 agent 在无 skill 时怎么失败 |
 | 设计 rigid debate 流程 | 限制模型思辨，讨论像演戏 | 只保护独立思考、证据、分歧保留和收敛 |
 | 只写 Use when 不写 Not for | 误触发 | 反例写两次：description + 正文（T0-4） |
-| 忘了问"和谁容易混" | 猫选错工具 | 看概念边界指南，写 GOTCHA（T0-6） |
-| 文件 >150 行 | 超 token 预算 | 重材料移到 refs/（T0-5） |
+| 忘了问"和谁容易混" | 猫选错工具 | 看概念边界指南；存在真实混淆时写 GOTCHA（T0-6） |
+| 文件 >150 行就机械拆分 | 核心执行语义被切碎，或为了达标制造 refs | 把 150 行当 smell；只下沉真正按需的重材料（T0-5） |
 | 功能实现时产出了 skill 但没加载 writing-skills | 漏 sync、漏 manifest | **动了 cat-cafe-skills/ 就必须加载本 skill** |
-| MCP description 缺要素 | 猫路由失败 | 用五要素检查清单审查（T0-6） |
+| MCP description 缺路由契约 | 猫路由失败 | 用四项必需契约 + 条件 Gotcha 清单审查（T0-6） |
 | 小改 skill 直接 push 不跑检查 | 可能把 raw first-party `curl localhost` 主路径带进 main，下一只合 PR 的猫才踩雷 | 只要 skill/MCP description 涉及 API / localhost / script / CLI / 第一方执行面，即使 ≤5 行也跑 `pnpm check` |
 
 ## 深入学习（按需阅读）
 
 | 主题 | 文件 | 看什么 |
 |------|------|--------|
-| Cat Café skill 质量哲学 | `writing-skills/cat-cafe-skill-quality-principles.md` | 废话 skill 判定、载体选择、激发/刹车边界 |
+| Clowder AI skill 质量哲学 | `writing-skills/cat-cafe-skill-quality-principles.md` | 废话 skill 判定、载体选择、激发/刹车边界 |
 | Anthropic 官方 skill 写法 | `writing-skills/anthropic-best-practices.md` | 9 类 skill、progressive disclosure、hooks |
 | 知识工程完整方法论 | *(internal reference removed)* | 触发设计、正反灰例、8 个可复用模式 |
-| MCP description 五要素+审查清单 | `refs/mcp-tool-description-standard.md` | 好/差对比、inputSchema 规范、错误返回 |
+| MCP description 四要素 + 条件 Gotcha 审查清单 | `refs/mcp-tool-description-standard.md` | 好/差对比、inputSchema 规范、错误返回 |
 | Skill TDD 测试方法 | `writing-skills/testing-skills-with-subagents.md` | 红绿重构、压力测试、弹孔表 |
 
 ## 和其他 Skill 的区别

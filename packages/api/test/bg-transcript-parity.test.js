@@ -291,7 +291,8 @@ test('synthetic assistant "No response requested." → silently dropped (P2-synt
   assert.equal(out.length, 0, 'synthetic no-response must produce no AgentMessage events');
 });
 
-test('synthetic assistant "API Error: ECONNRESET" → error AgentMessage (P2-synthetic)', () => {
+test('synthetic assistant provider payload with verdict-like text → error AgentMessage (P2-synthetic)', () => {
+  const providerError = 'API Error: upstream response — P1: provider-supplied diagnostic';
   const entries = [
     {
       type: 'assistant',
@@ -299,7 +300,7 @@ test('synthetic assistant "API Error: ECONNRESET" → error AgentMessage (P2-syn
       message: {
         id: 'msg_syn002',
         model: '<synthetic>',
-        content: [{ type: 'text', text: 'API Error: ECONNRESET' }],
+        content: [{ type: 'text', text: providerError }],
         usage: { input_tokens: 0, output_tokens: 0 },
       },
     },
@@ -308,7 +309,7 @@ test('synthetic assistant "API Error: ECONNRESET" → error AgentMessage (P2-syn
   assert.equal(out.length, 1, 'synthetic API error must emit exactly one error AgentMessage');
   assert.equal(out[0].type, 'error', 'emitted message must be type=error');
   assert.ok(
-    typeof out[0].error === 'string' && out[0].error.includes('ECONNRESET'),
+    typeof out[0].error === 'string' && out[0].error.includes(providerError),
     'error message must include the original error text',
   );
 });

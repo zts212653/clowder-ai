@@ -1,6 +1,7 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { AgentMessage } from '../../types.js';
 import { normalizeTaskStatus } from '../invocation/invoke-helpers.js';
+import { type CodexApprovalSurface, classifyCodexGithubAppApprovalFailure } from './codex-app-approval-routing.js';
 
 // F060: Allowed image MIME types and max base64 payload size (5 MB encoded ≈ 3.75 MB decoded)
 const IMAGE_MIME_WHITELIST = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml']);
@@ -17,6 +18,10 @@ export interface CodexStreamState {
   hadPriorTextTurn: boolean;
 }
 
+export interface CodexEventTransformOptions {
+  approvalSurface?: CodexApprovalSurface;
+}
+
 /**
  * Transform a raw Codex CLI NDJSON event into an AgentMessage.
  * Returns null to skip events we don't care about.
@@ -28,6 +33,7 @@ export function transformCodexEvent(
   event: unknown,
   catId: CatId,
   state?: CodexStreamState,
+  options?: CodexEventTransformOptions,
 ): AgentMessage | AgentMessage[] | null {
   if (typeof event !== 'object' || event === null) return null;
   const e = event as Record<string, unknown>;
@@ -179,9 +185,35 @@ export function transformCodexEvent(
     const tool = typeof item.tool === 'string' ? item.tool : 'unknown';
     const status = typeof item.status === 'string' ? item.status : 'completed';
     const result = item.result as Record<string, unknown> | undefined;
+    const itemError = item.error as Record<string, unknown> | undefined;
     const contentArr = Array.isArray(result?.content) ? result.content : [];
     const typed = contentArr as Array<Record<string, unknown>>;
     const textParts = typed.filter((c) => c.type === 'text' && typeof c.text === 'string').map((c) => c.text as string);
+    const resultError =
+      typeof result?.Err === 'string'
+        ? result.Err
+        : (status === 'failed' || status === 'error') && typeof itemError?.message === 'string'
+          ? itemError.message
+          : status === 'failed' || status === 'error'
+            ? textParts.length === 1
+              ? textParts[0]
+              : undefined
+            : undefined;
+    const approvalFailure = resultError
+      ? classifyCodexGithubAppApprovalFailure({
+          server,
+          tool,
+          error: resultError,
+          approvalSurface: options?.approvalSurface,
+        })
+      : null;
+    const visibleTextParts = approvalFailure
+      ? [`[${approvalFailure.reasonCode}] ${approvalFailure.message}`]
+      : textParts.length > 0
+        ? textParts
+        : resultError
+          ? [resultError]
+          : [];
 
     const toolLabel = `mcp:${server}/${tool}`;
     // F153 Phase J AC-J2: map Codex item.status → structured ToolResultStatus + carry item.id.
@@ -190,9 +222,10 @@ export function transformCodexEvent(
     const toolResult: AgentMessage = {
       type: 'tool_result',
       catId,
-      content: `${toolLabel} (${status})\n${textParts.join('\n')}`.trim(),
+      content: `${toolLabel} (${status})\n${visibleTextParts.join('\n')}`.trim(),
       toolName: toolLabel,
       toolResultStatus,
+      ...(approvalFailure ? { toolResultErrorCode: approvalFailure.reasonCode } : {}),
       timestamp: Date.now(),
     };
     if (typeof item.id === 'string') toolResult.toolUseId = item.id;

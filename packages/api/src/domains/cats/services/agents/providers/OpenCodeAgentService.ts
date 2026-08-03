@@ -23,7 +23,13 @@ import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import { CliRawArchive } from '../../session/CliRawArchive.js';
-import type { AgentMessage, AgentServiceOptions, L0InjectableAgentService, MessageMetadata } from '../../types.js';
+import type {
+  AgentMessage,
+  AgentServiceOptions,
+  L0InjectableAgentService,
+  MessageMetadata,
+  ToolExecutionPolicy,
+} from '../../types.js';
 import type { RawArchiveSink } from '../providers/codex-audit-hooks.js';
 import { sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
 import {
@@ -53,7 +59,7 @@ interface OpenCodeAgentServiceOptions {
   /** #780: Raw NDJSON archive sink (default: CliRawArchive to disk) */
   rawArchive?: RawArchiveSink;
   /** F203 Phase I: test seam — replaces the real L0 compiler subprocess (like Claude/Codex services). */
-  l0CompilerFn?: (options: { catId: string; outPath?: string }) => Promise<string>;
+  l0CompilerFn?: (options: { catId: string; userId?: string; dataDir?: string; outPath?: string }) => Promise<string>;
   /** Test seam for the `opencode run --help` auto-approval capability probe. */
   autoApproveProbeFn?: OpenCodeAutoApproveProbeFn;
 }
@@ -61,6 +67,21 @@ interface OpenCodeAgentServiceOptions {
 const OPENCODE_API_KEY_ENV = 'OPENCODE_API_KEY';
 const ANTHROPIC_API_KEY_ENV = 'ANTHROPIC_API_KEY';
 const ANTHROPIC_BASE_URL_ENV = 'ANTHROPIC_BASE_URL';
+const OPENCODE_READ_ONLY_AGENT = 'cat-cafe-read-only';
+const OPENCODE_READ_ONLY_PERMISSION = {
+  '*': 'deny',
+  read: 'allow',
+  glob: 'allow',
+  grep: 'allow',
+  lsp: 'allow',
+  skill: 'allow',
+  webfetch: 'allow',
+  websearch: 'allow',
+  edit: 'deny',
+  bash: 'deny',
+  task: 'deny',
+  question: 'deny',
+} as const;
 // Process-wide cache: --auto support is a property of the installed opencode binary.
 // Restart the API process after upgrading opencode so this capability is re-probed.
 let sharedOpenCodeAutoApproveProbe: Promise<OpenCodeAutoApproveProbeResult> | undefined;
@@ -152,7 +173,12 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     return true;
   }
 
+  supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
+    return policy.mode === 'read_only';
+  }
+
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
+    const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
     // P1-2: runtime model override takes precedence over constructor model
     const effectiveModel = options?.callbackEnv?.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE ?? this.model;
     const cwd = options?.workingDirectory;
@@ -160,6 +186,18 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     // F171: Account env vars applied LAST — user overrides provider-injected values
     if (options?.accountEnv) {
       for (const [k, v] of Object.entries(options.accountEnv)) childEnv[k] = v;
+    }
+    if (readOnly) {
+      childEnv.CAT_CAFE_READONLY = 'true';
+      childEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify({
+        permission: OPENCODE_READ_ONLY_PERMISSION,
+        agent: {
+          [OPENCODE_READ_ONLY_AGENT]: {
+            mode: 'primary',
+            permission: OPENCODE_READ_ONLY_PERMISSION,
+          },
+        },
+      });
     }
     // The Clowder AI MCP workspace is authoritative in OPENCODE_CONFIG
     // mcp.cat-cafe.environment. Do not leak stale account-level workspace env into
@@ -183,18 +221,16 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         return;
       }
 
-      const defaultAutoApproveFlag = await this.resolveDefaultAutoApproveFlag(
-        opencodeCommand,
-        cwd,
-        childEnv,
-        options?.cliConfigArgs,
-      );
+      const defaultAutoApproveFlag = readOnly
+        ? undefined
+        : await this.resolveDefaultAutoApproveFlag(opencodeCommand, cwd, childEnv, options?.cliConfigArgs);
       const args = this.buildArgs(
         prompt,
         options?.sessionId,
         effectiveModel,
-        options?.cliConfigArgs,
+        readOnly ? undefined : options?.cliConfigArgs,
         defaultAutoApproveFlag,
+        readOnly,
       );
 
       log.debug(
@@ -279,6 +315,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
               cliSessionId: event.cliSessionId,
               invocationId: event.invocationId,
               rawArchivePath: event.rawArchivePath,
+              terminalContext: event.terminalContext,
             }),
             timestamp: Date.now(),
           };
@@ -436,8 +473,11 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     model?: string,
     cliConfigArgs?: readonly string[],
     defaultAutoApproveFlag?: string,
+    readOnly = false,
   ): string[] {
     const args = ['run'];
+
+    if (readOnly) args.push('--pure', '--agent', OPENCODE_READ_ONLY_AGENT);
 
     // Session resume
     if (sessionId) {

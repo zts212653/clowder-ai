@@ -174,15 +174,60 @@ describe('GenericRepoScanner', () => {
 
   // ── Frontmatter-aware ───────────────────────────────────────────
 
-  it('extracts anchor from docs with YAML frontmatter', () => {
+  it('extracts anchor from frontmatter — feature_ids only works in features/ path', () => {
     mkdirSync(join(tmpDir, 'docs'), { recursive: true });
+    mkdirSync(join(tmpDir, 'docs', 'features'), { recursive: true });
+
+    // Non-feature doc with feature_ids → path-based anchor (no anchor theft)
     writeFileSync(
       join(tmpDir, 'docs', 'design.md'),
       '---\nfeature_ids: [FEAT-42]\ntopics: [design]\n---\n\n# Design Doc\n\nSome design.\n',
     );
+    const results1 = scanner.discover(tmpDir);
+    const design = results1.find((r) => r.item.sourcePath?.includes('design.md'));
+    assert.ok(design, 'should find the design doc');
+    assert.equal(design.item.anchor, 'doc:docs/design', 'Non-feature doc should get path-based anchor');
+
+    // Feature doc with feature_ids → uses feature_ids as anchor
+    writeFileSync(
+      join(tmpDir, 'docs', 'features', 'FEAT-42.md'),
+      '---\nfeature_ids: [FEAT-42]\ntopics: [testing]\n---\n\n# FEAT-42 Spec\n\nSpec content.\n',
+    );
+    const results2 = scanner.discover(tmpDir);
+    const feat = results2.find((r) => r.item.anchor === 'FEAT-42');
+    assert.ok(feat, 'Feature doc should use feature_ids as anchor');
+  });
+
+  it('non-feature doc feature_ids become keywords in GenericRepoScanner', () => {
+    mkdirSync(join(tmpDir, 'docs'), { recursive: true });
+    writeFileSync(
+      join(tmpDir, 'docs', 'overview.md'),
+      '---\nfeature_ids: [F100, F200]\ntopics: [architecture]\n---\n\n# Overview\n\nArch overview.\n',
+    );
     const results = scanner.discover(tmpDir);
-    const design = results.find((r) => r.item.anchor === 'FEAT-42');
-    assert.ok(design, 'should extract anchor from frontmatter');
+    const doc = results.find((r) => r.item.sourcePath?.includes('overview.md'));
+    assert.ok(doc, 'should find overview doc');
+    assert.equal(doc.item.anchor, 'doc:docs/overview', 'Should get path-based anchor');
+    assert.ok(doc.item.keywords?.includes('F100'), 'F100 should be in keywords');
+    assert.ok(doc.item.keywords?.includes('F200'), 'F200 should be in keywords');
+    assert.ok(doc.item.keywords?.includes('architecture'), 'topics should also be in keywords');
+  });
+
+  it('architecture-features/ is NOT a feature path (P2 fix)', () => {
+    mkdirSync(join(tmpDir, 'docs', 'architecture-features'), { recursive: true });
+    writeFileSync(
+      join(tmpDir, 'docs', 'architecture-features', 'overview.md'),
+      '---\nfeature_ids: [F300]\n---\n\n# Arch Features Overview\n\nSome content.\n',
+    );
+    const results = scanner.discover(tmpDir);
+    const doc = results.find((r) => r.item.sourcePath?.includes('architecture-features'));
+    assert.ok(doc, 'should find the doc');
+    assert.equal(
+      doc.item.anchor,
+      'doc:docs/architecture-features/overview',
+      'architecture-features/ should NOT be treated as features/',
+    );
+    assert.ok(doc.item.keywords?.includes('F300'), 'F300 should be promoted to keyword');
   });
 
   // ── parseSingle tier consistency ───────────────────────────────

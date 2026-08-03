@@ -1,9 +1,10 @@
 ---
 feature_ids: [F063]
-related_features: [F060, F058]
+related_features: [F060, F058, F279]
 topics: [hub, ux, workspace, file-browser, code-preview, collaboration]
 doc_kind: spec
 created: 2026-03-05
+tips_exempt: chat document links are a direct click affordance with no separate capability or workflow to teach
 ---
 
 # F063: Hub Workspace Explorer — operator不用打开 IDE 也可以和猫猫们优雅协作
@@ -11,6 +12,9 @@ created: 2026-03-05
 > **Status**: done | **Owner**: Ragdoll (Opus 4.6, Leader)
 > **Created**: 2026-03-05
 > **Completed**: 2026-03-09
+
+Architecture cell: hub-action-surface
+Map delta: none — chat document links reuse the existing Workspace open-file action without changing ownership.
 
 ## Why
 
@@ -254,7 +258,7 @@ PUT  /api/workspace/file    { worktreeId, path, content, baseSha256, editSession
 | 演示锁定追踪方式 | 单开新 feature / 作为 F063 增量 | **作为 F063 post-completion enhancement 追踪** — 不单开新 feature，避免 Workspace 能力分散 | operator (2026-05-06) |
 | Mermaid 图表渲染 | 新 feature / 作为 F063 Markdown 渲染增量 | **作为 F063 post-completion enhancement 追踪** — workspace 已负责 Markdown rendered mode，`mermaid` fenced block 是同一渲染面的格式支持 | operator (2026-05-19) |
 | 参考实现 | 自研 / 参考现有 | **参考 Claude.ai Project + Codex 布局**，取其精华 | operator (2026-03-05) |
-| UI 设计语言 | 通用 / 猫猫化 | **对齐 F056 Cat Café 设计语言（猫猫化不是猫化）** | operator (2026-03-05) |
+| UI 设计语言 | 通用 / 猫猫化 | **对齐 F056 Clowder AI 设计语言（猫猫化不是猫化）** | operator (2026-03-05) |
 | 设计稿工具 | Figma / Pencil | **Pencil MCP**（用 `pencil-design` skill） | operator (2026-03-05) |
 | 设计稿协作 | 单猫 / 多猫 | **Siamese出灵感（不画），GPT-5.2 可协助画设计稿，Ragdoll用 Pencil 落地** | operator (2026-03-05) |
 
@@ -272,7 +276,7 @@ PUT  /api/workspace/file    { worktreeId, path, content, baseSha256, editSession
 
 1. **灵感**：Siamese/Siamese提供 UX 灵感和方向建议（**不让他画**，幻觉多）
 2. **设计稿**：Ragdoll用 **Pencil MCP**（`pencil-design` skill）画设计稿；如需协助可 @gpt52 一起画
-3. **设计语言**：所有 UI 元素对齐 **F056 Cat Café 设计语言**（猫猫化不是猫化）
+3. **设计语言**：所有 UI 元素对齐 **F056 Clowder AI 设计语言**（猫猫化不是猫化）
 4. **前端实现**：设计稿确认后用 `pencil-to-code` skill 导出 React/Tailwind 代码
 
 ## Risk
@@ -301,7 +305,7 @@ operator评价 Phase 1 UI："有点丑不够猫猫，感觉没有设计感"。�
 | U1 | 文件树缺乏视觉层次 | 纯文本 emoji（📂📄），无颜色区分，hover 只有灰色背景 | Claude.ai Artifacts: 文件类型图标有颜色区分，hover 有微妙渐变 |
 | U2 | 搜索栏太工具化 | 蓝色按钮 + 小 icon，像 admin 后台 | Cursor/Claude: 搜索栏内嵌，圆角大，placeholder 有引导性 |
 | U3 | 文件头区域太暗太突兀 | `bg-gray-800` 深色头 vs `bg-white` 面板体，割裂感 | Codex: 文件头用浅色高对比 + 文件类型 badge |
-| U4 | 没有 Cat Café 设计语言 | 通用灰/蓝配色，和 Hub 其他面板风格不统一 | F056 要求：猫猫化不是猫化，温暖而专业 |
+| U4 | 没有 Clowder AI 设计语言 | 通用灰/蓝配色，和 Hub 其他面板风格不统一 | F056 要求：猫猫化不是猫化，温暖而专业 |
 | U5 | worktree 指示器太小 | `text-[10px]` 绿色 badge，几乎看不到 | 应该醒目：分支名 + 短 SHA + 状态色 |
 | U6 | 空状态不友好 | "加载中..." 纯文字 | 应有骨架屏 / 猫猫插图 / 引导提示 |
 | U7 | 没有动画过渡 | 面板切换、文件展开/折叠无动画 | Claude.ai: 面板 slide-in，树节点 fade-in |
@@ -323,7 +327,7 @@ operator评价 Phase 1 UI："有点丑不够猫猫，感觉没有设计感"。�
 - 代码查看器顶部有 tab 风格的文件选择器
 - diff 视图是 inline，不是 side-by-side
 
-**我们应该做的（对齐 F056 Cat Café 设计语言）:**
+**我们应该做的（对齐 F056 Clowder AI 设计语言）:**
 - 用项目色板（暖色系，不是纯灰蓝）
 - 文件类型用小型彩色 SVG 图标（不是 emoji）
 - 面板过渡用 Framer Motion（和 Hub 其他面板一致）
@@ -344,7 +348,7 @@ operator评价 Phase 1 UI："有点丑不够猫猫，感觉没有设计感"。�
 | P2A-5 | 面板过渡动画（Framer Motion slide-in） | S |
 | P2A-6 | worktree 指示器重新设计：醒目标签 + 状态色 | S |
 | P2A-7 | 空状态 + 加载骨架屏 | S |
-| P2A-8 | CodeMirror 主题自定义：对齐 Cat Café 配色 | M |
+| P2A-8 | CodeMirror 主题自定义：对齐 Clowder AI 配色 | M |
 
 ### Phase 2B: 功能增强
 
@@ -362,6 +366,7 @@ operator评价 Phase 1 UI："有点丑不够猫猫，感觉没有设计感"。�
 | P2B-10 | **BUG**: "Add to chat" 按钮固定在文件查看器顶部，滚动到下方代码时按钮不可见 — 改为跟随选区浮动或 sticky 在可视区域 | AC-15 | **done** |
 | P2B-11 | **BUG**: Markdown 渲染模式下相对链接不可跳转 — `[F046](features/F046-xxx.md)` 这样的相对路径链接在 Rendered 模式下点击无效（`target="_blank"` 打开的是无意义的浏览器 URL）。应拦截相对 `.md` 链接，解析为相对于当前文件的路径，用 `setWorkspaceOpenFile` 在 workspace 内打开目标文件 | — | **done** |
 | P2B-12 | **Enhancement**: Markdown rendered mode 支持 `mermaid` fenced code block，避免长文/设计文档里的流程图退化成普通代码块 | — | **done** |
+| P2B-13 | **BUG**: 聊天气泡中的命名 Markdown 链接把家内绝对路径藏在 href 后，绕过裸路径识别并由浏览器打开 404。Chat 默认 anchor 需识别 active project 内的绝对/仓库相对 `.md`/`.mdx`（含 `:line`），复用 `setWorkspaceOpenFile`；外部 URL 与项目外路径保持浏览器链接 | AC-4, AC-13 | **done** |
 
 ### Phase 2C: 预览能力
 
@@ -538,7 +543,7 @@ operator看到实际 UI 后指出两个层级问题：
 | # | 级别 | 问题 | 修复 |
 |---|------|------|------|
 | 6 | P1 | 专注按钮放在 tab bar 与 view mode 同级，层级错误（它是 pane action 不是 view mode） | 移到 per-pane toolbar 行：文件 toolbar 同行（Copy/Path/Finder/编辑 旁）、浏览器右上角浮层 |
-| 7 | P1 | 退出专注用暗色 sticky header，与 Cat Cafe 暖色设计语言冲突 | 改为暖色调半透明浮标：`bg-cocreator-light/70 rounded-full backdrop-blur-sm shadow-sm` |
+| 7 | P1 | 退出专注用暗色 sticky header，与 Clowder AI 暖色设计语言冲突 | 改为暖色调半透明浮标：`bg-cocreator-light/70 rounded-full backdrop-blur-sm shadow-sm` |
 
 ### Review 记录
 
@@ -604,6 +609,31 @@ operator看到实际 UI 后指出两个层级问题：
 | B1 | 切换 Hub project 后 Workspace 仍显示 cat-cafe 文件 | 后端 `listWorktrees()` 用 `process.cwd()` 固定指向 cat-cafe，前端无 project context | **PR #266 已修（后端+hook）** |
 | B1.1 | 切换已有 thread 或刷新页面后 workspace 不跟随项目切换 | `handleSelect` 只做路由跳转不恢复 `projectPath`；`ChatContainer` 首次挂载不从 thread 元数据恢复 `currentProjectPath` | **PR #269 已修** |
 | B2 | Link External Folder "Network error" | `LinkedRootsManager.tsx` 用 raw `fetch` + `API_BASE` 而非 `apiFetch`，port 不匹配 | **PR #264 已修** |
+| B3 | 聊天气泡中的家内命名文档链接打开浏览器 404 | `MarkdownContent` 默认 anchor 一律 `target="_blank"`，路径位于 href 时绕过 `FilePathLink` | **PR #2855 已修；Alpha 愿景守护 PASS** |
+| B3.1 | 另一个已注册 worktree 的绝对 Markdown 链接仍新开 404 | B3 resolver 只接受当前 projectRoot；外部 fallback 未区分 local document 与 HTTP URL | **2026-07-28 repair：absolute input → typed target；local fail-closed；待 review/merge** |
+
+### B3.1 contract
+
+- 用户/猫/Codex 的输入格式与原生本地文件链接一致：绝对路径可直接点击或传给 Navigator。
+- Workspace 内部继续使用 `(worktreeId, repoRelativePath)`；绝对路径只在 API/UI adapter
+  边界存在，并须命中已注册 worktree/linked root 与 `resolveWorkspacePath` 安全检查。
+- 只有真实外部 URL 渲染为新标签链接；无法解析的本地 Markdown 不再访问浏览器。
+- 同 chat 的 recall/memory mode 会切回 Files 并打开；non-chat route、其他 thread、窄屏
+  latest-wins 排队；Presentation Lock 阻塞文件自动导航但不阻塞 `knowledge-feed` 模式切换；
+  无客户端回执返回 unconfirmed，apply 边界拒绝时不得回报 applied。
+- AppShell 与 chat layout 共用可订阅的 browser-route snapshot；custom thread
+  `pushState` 后不能继续把 Workspace 投递绑定在旧 thread。
+- absolute document resolver 与 Workspace navigate 必须先取得可信 caller identity，再触碰
+  本地 filesystem 或广播动作：browser 走 session，显式 user header 仅限 direct loopback，
+  MCP 走已验证 callback-token / agent-key；audit `catId` 只取 verified MCP principal，
+  不信任 request body。
+- 同一 tab 只有最新且仍属于当前 thread 的 document-resolution claim 能写 Workspace；
+  新点击、thread 切换或组件卸载使旧响应失效；取消 claim 时，仍挂载的旧链接必须立即
+  退出 resolving/disabled，不能等待已经失去 custody 的网络请求返回。
+- Markdown href 先切真实 fragment 再 decode pathname；API 只接 fragment-free 原生路径，
+  因而文件名中的 literal `%` 与 encoded `#` 都不会被二次解释。
+- document-resolution claim 同时绑定 store thread 与 live browser pathname；custom route
+  或 popstate 先于 store 同步发生时，旧响应同样失效。
 
 ## B1 Fix Plan — Project-Aware Workspace
 

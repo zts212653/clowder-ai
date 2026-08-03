@@ -7,7 +7,7 @@ import type { TaskRunnerV2 } from '../infrastructure/scheduler/TaskRunnerV2.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { cancelWakeWhenRunner } from './callback-hold-ball-routes.js';
-import { executeHoldCancel, findHoldBallTask } from './hold-ball-cancel.js';
+import { executeHoldCancel, findHoldBallTask, findPendingHoldBallTask, readHoldLifecycle } from './hold-ball-cancel.js';
 import { HOLD_BALL_SOURCE } from './hold-ball-source.js';
 
 const log = createModuleLogger('routes/callback-hold-ball-cancel');
@@ -49,6 +49,37 @@ async function authorizeThreadAccess(
 export function registerHoldBallCancelRoutes(app: FastifyInstance, deps: HoldBallCancelRouteDeps): void {
   const { dynamicTaskStore, taskRunner, messageStore, socketManager } = deps;
 
+  app.get<{ Params: { taskId: string } }>('/api/callbacks/hold-ball/:taskId/status', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Unauthorized' };
+    }
+
+    const { taskId } = request.params;
+    const task = findHoldBallTask(taskId, dynamicTaskStore);
+    if (!task) {
+      reply.status(404);
+      return { error: 'Hold task not found or not a hold-ball task' };
+    }
+
+    const threadId = task.deliveryThreadId;
+    if (threadId && !(await authorizeThreadAccess(deps, userId, threadId, reply))) {
+      return { error: 'Not authorized to read holds in this thread' };
+    }
+
+    const lifecycle = readHoldLifecycle(task);
+    const status = lifecycle?.status ?? (task.enabled ? 'active' : 'inactive');
+    const catId = task.createdBy?.replace('hold-ball:', '') ?? 'unknown';
+    return {
+      taskId,
+      status,
+      cancelable: task.enabled && status === 'active',
+      catId,
+      lifecycle,
+    };
+  });
+
   app.delete<{ Params: { taskId: string }; Querystring: { withFeedback?: string } }>(
     '/api/callbacks/hold-ball/:taskId',
     async (request, reply) => {
@@ -60,7 +91,7 @@ export function registerHoldBallCancelRoutes(app: FastifyInstance, deps: HoldBal
 
       const { taskId } = request.params;
       const withFeedback = request.query.withFeedback === '1' || request.query.withFeedback === 'true';
-      const task = findHoldBallTask(taskId, dynamicTaskStore);
+      const task = findPendingHoldBallTask(taskId, dynamicTaskStore);
       if (!task) {
         reply.status(404);
         return { error: 'Hold task not found or not a hold-ball task' };

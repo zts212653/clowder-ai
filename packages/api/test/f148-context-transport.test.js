@@ -10,9 +10,11 @@ import {
   formatAnchors,
   formatTombstone,
   recallEvidence,
+  recallEvidenceWithProvenance,
   scoreImportance,
   scrubToolPayloads,
   selectAnchors,
+  stripStructuralEnvelope,
 } from '../dist/domains/cats/services/agents/routing/context-transport.js';
 
 // --- Test Helpers ---
@@ -346,6 +348,97 @@ describe('F148: scrubToolPayloads', () => {
   });
 });
 
+// --- F263: stripStructuralEnvelope Tests ---
+
+describe('F263: stripStructuralEnvelope', () => {
+  it('strips navigation blocks', () => {
+    const input = 'before\n[导航]\nsome nav content\n[/导航]\nafter';
+    assert.equal(stripStructuralEnvelope(input), 'before\n\nafter');
+  });
+
+  it('strips conversation history blocks', () => {
+    const input = 'before\n[对话历史增量 - 智能窗口: 100 条]\nhistory content\n[/对话历史]\nafter';
+    assert.equal(stripStructuralEnvelope(input), 'before\n\nafter');
+  });
+
+  it('strips blockquote staging lines', () => {
+    const input = '> L0 Staging Layer\n> more staging\nactual content';
+    assert.equal(stripStructuralEnvelope(input), 'actual content');
+  });
+
+  it('strips System skip lines', () => {
+    const input = 'before\n[System: skipped 100 messages]\nafter';
+    assert.equal(stripStructuralEnvelope(input), 'before\n\nafter');
+  });
+
+  it('strips Identity lines', () => {
+    const input = 'Identity: 布偶猫/宪宪 (@opus)\nactual content';
+    assert.equal(stripStructuralEnvelope(input), 'actual content');
+  });
+
+  it('strips cross-post envelope header', () => {
+    const input = '📨 来自跨线程消息（source thread: thread_xxx）\nactual content';
+    assert.equal(stripStructuralEnvelope(input), 'actual content');
+  });
+
+  it('strips separator lines', () => {
+    const input = 'before\n---\nafter';
+    assert.equal(stripStructuralEnvelope(input), 'before\n\nafter');
+  });
+
+  it('passes through plain user text unchanged', () => {
+    const input = 'How do we handle billing-only taste decisions?';
+    assert.equal(stripStructuralEnvelope(input), input);
+  });
+
+  it('preserves quoted user semantics outside a typed L0 staging envelope', () => {
+    const input = '> The billing-only decision is the source evidence.\nUse that quoted precedent for this review.';
+    assert.equal(stripStructuralEnvelope(input), input);
+  });
+
+  it('preserves a non-L0 long message byte-for-byte', () => {
+    const input = `${'ordinary owner-authored context '.repeat(30)}\n> quoted tail remains semantic`;
+    assert.ok(input.length > 300);
+    assert.equal(stripStructuralEnvelope(input), input);
+  });
+
+  it('fails closed on a malformed L0 separator instead of deleting later quoted semantics', () => {
+    const input = [
+      '> L0 Staging Layer (ADR-038)',
+      'metadata without typed termination',
+      '--- not a separator',
+      '> billing-only remains quoted user evidence',
+    ].join('\n');
+    const result = stripStructuralEnvelope(input);
+    assert.ok(result.includes('metadata without typed termination'));
+    assert.ok(result.includes('--- not a separator'));
+    assert.ok(result.includes('billing-only remains quoted user evidence'));
+  });
+
+  it('handles a realistic composite message', () => {
+    const input = [
+      '> L0 Staging Layer (ADR-038)',
+      '> **摩擦上报**: ...',
+      '---',
+      'Identity: 布偶猫 (@opus)',
+      '📨 来自跨线程消息（thread_xxx）',
+      '[导航]',
+      '传球: Sol → 你',
+      '活跃毛线球: F263',
+      '[/导航]',
+      '[对话历史增量 - 100 条]',
+      '[System: skipped 100]',
+      '[/对话历史]',
+      '',
+      'The billing-only taste was approved.',
+    ].join('\n');
+    const result = stripStructuralEnvelope(input);
+    assert.ok(result.includes('billing-only'), `should preserve semantic content, got: "${result}"`);
+    assert.ok(!result.includes('[导航]'), 'should strip navigation');
+    assert.ok(!result.includes('L0 Staging'), 'should strip staging');
+  });
+});
+
 // --- recallEvidence Tests ---
 
 describe('F148: recallEvidence', () => {
@@ -382,6 +475,43 @@ describe('F148: recallEvidence', () => {
     const results = await recallEvidence(store, 'Redis Thread', 'How do we handle Redis?', recentMsgs, config);
     assert.ok(results.length > 0);
     assert.ok(results.length <= config.maxEvidenceHits);
+  });
+
+  it('does not opt automatic cold-mention recall into pull-only candidates', async () => {
+    let receivedOptions;
+    const store = {
+      search: async (_query, options) => {
+        receivedOptions = options;
+        return [];
+      },
+    };
+
+    await recallEvidence(store, 'Memory', 'reflection candidate', [], config);
+    assert.notEqual(receivedOptions.includePullOnly, true);
+  });
+
+  it('F263 returns a drill pointer and structured push candidate for every evidence line', async () => {
+    const store = {
+      search: async () => [
+        {
+          anchor: 'F263',
+          sourcePath: 'docs/features/F263-memory-lifecycle-repair-and-metrics.md',
+          kind: 'feature',
+          title: 'Memory lifecycle repair',
+          summary: 'Phase B telemetry',
+        },
+      ],
+    };
+
+    const result = await recallEvidenceWithProvenance(store, 'Memory', 'telemetry', [], config);
+    assert.equal(result.evidence.length, 1);
+    assert.match(result.evidence[0].line, /provenance: anchor=F263; sourcePath=docs\/features\/F263/);
+    assert.deepEqual(result.evidence[0].candidate, {
+      anchor: 'F263',
+      rank: 0,
+      sourcePath: 'docs/features/F263-memory-lifecycle-repair-and-metrics.md',
+      docKind: 'feature',
+    });
   });
 
   it('returns empty array when no evidenceStore', async () => {
@@ -424,6 +554,85 @@ describe('F148: recallEvidence', () => {
     resetSeq();
     const results = await recallEvidence(errorStore, 'Thread', 'test', makeMsgSequence(1), config);
     assert.deepEqual(results, []);
+  });
+  it('F263 RED: query captures semantic content past structural envelope prefix', async () => {
+    // Simulate a trigger message where the semantic term "billing-only" appears
+    // after a long L0 staging / navigation / conversation-history prefix.
+    // The structural prefix alone exceeds 300 chars, so raw .slice(0, 300)
+    // would miss the semantic content entirely.
+    const structuralPrefix = [
+      '> L0 Staging Layer (ADR-038, 5 shared items, ~565 tokens)',
+      '> **摩擦上报**: ...',
+      '> **摩擦检测反射**: ...',
+      '---',
+      'Identity: 布偶猫/宪宪 (@opus, model=claude-opus-4-6)',
+      '',
+      '📨 来自跨线程消息（source thread: thread_xxx, 发件猫: @codex-sol）',
+      '',
+      '[导航]',
+      '传球: 缅因猫 Sol(GPT-5.6 Sol) → 你',
+      '活跃毛线球:',
+      '  - [doing] F263 Memory Lifecycle',
+      '真相源: context-transport.ts',
+      '[/导航]',
+      '[对话历史增量 - 智能窗口: 100 条已摘要]',
+      '[System: skipped 100 messages]',
+      '[Thread opener @co-creator: msg-001] 你好',
+      '[/对话历史]',
+    ].join('\n');
+
+    // Verify our prefix is actually longer than 300 chars (the current slice limit)
+    assert.ok(structuralPrefix.length > 300, `prefix should exceed 300 chars, got ${structuralPrefix.length}`);
+
+    const semanticContent = 'The billing-only taste decision was approved for cost routing.';
+    const fullMessage = structuralPrefix + '\n\n' + semanticContent;
+
+    // The search query MUST contain "billing-only" for evidence recall to work
+    let capturedQuery = '';
+    const store = {
+      search: async (query) => {
+        capturedQuery = query;
+        return [];
+      },
+    };
+
+    await recallEvidenceWithProvenance(store, 'Thread', fullMessage, [], config);
+    assert.ok(
+      capturedQuery.includes('billing-only'),
+      `query should contain semantic term "billing-only" but got: "${capturedQuery.slice(0, 200)}..."`,
+    );
+  });
+
+  it('F287: query handles the real L0 layout where shared staging items are not blockquotes', async () => {
+    const fullMessage = [
+      '> L0 Staging Layer (ADR-038, shared items outside L0 cap)',
+      '',
+      `**摩擦上报**: ${'typed staging metadata '.repeat(20)}`,
+      `**机制选择反射**: ${'more typed staging metadata '.repeat(20)}`,
+      '---',
+      'Identity: 缅因猫 Sol (@codex-sol)',
+      '📨 来自跨线程消息（source thread: thread_xxx）',
+      '[导航]',
+      '真相源: context-transport.ts',
+      '[/导航]',
+      '',
+      'The billing-only taste decision was approved for cost routing.',
+    ].join('\n');
+    assert.ok(fullMessage.indexOf('billing-only') > 300);
+
+    let capturedQuery = '';
+    const store = {
+      search: async (query) => {
+        capturedQuery = query;
+        return [];
+      },
+    };
+    await recallEvidenceWithProvenance(store, 'Thread', fullMessage, [], config);
+
+    assert.ok(
+      capturedQuery.includes('billing-only'),
+      `query should contain real-layout semantic tail but got: "${capturedQuery.slice(0, 200)}..."`,
+    );
   });
 });
 
@@ -728,6 +937,7 @@ describe('Phase D: buildCoverageMap (AC-D2)', () => {
       anchorIds: ['msg-5', 'msg-10'],
       threadMemory: { available: true, sessionsIncorporated: 3 },
       retrievalHints: ['Ask about Redis config decisions'],
+      semanticSearchTerms: ['redis config'],
     });
     assert.equal(map.omitted.count, 22);
     assert.equal(map.omitted.timeRange.from, 1000);
@@ -739,6 +949,7 @@ describe('Phase D: buildCoverageMap (AC-D2)', () => {
     assert.deepStrictEqual(map.anchorIds, ['msg-5', 'msg-10']);
     assert.deepStrictEqual(map.threadMemory, { available: true, sessionsIncorporated: 3 });
     assert.deepStrictEqual(map.retrievalHints, ['Ask about Redis config decisions']);
+    assert.deepStrictEqual(map.semanticSearchTerms, ['redis config']);
   });
 
   it('handles zero omitted messages', () => {

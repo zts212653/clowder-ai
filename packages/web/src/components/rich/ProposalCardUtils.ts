@@ -1,7 +1,7 @@
 import type { RichCardBlock } from '@/stores/chat-types';
 import type { ReportingModeEditValue } from './ProposalCardFields';
 
-export type ProposalCardStatus = 'pending' | 'approving' | 'approved' | 'rejected';
+export type ProposalCardStatus = 'pending' | 'approving' | 'approved' | 'rejected' | 'withdrawn';
 
 export interface ProposalSnapshot {
   proposalId: string;

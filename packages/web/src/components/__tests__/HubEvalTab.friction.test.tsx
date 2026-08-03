@@ -2,11 +2,34 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
 
+const mockChatStoreState = vi.hoisted(() => ({
+  currentThreadId: 'thread-eval-friction',
+  threads: [{ id: 'thread-eval-friction', projectPath: '/tmp/current-project' }],
+}));
 const setWorkspaceOpenFileMock = vi.hoisted(() => vi.fn());
 
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/settings',
+  useRouter: () => ({ push: vi.fn() }),
+}));
+
 vi.mock('@/stores/chatStore', () => ({
-  useChatStore: (selector: (state: { setWorkspaceOpenFile: typeof setWorkspaceOpenFileMock }) => unknown) =>
-    selector({ setWorkspaceOpenFile: setWorkspaceOpenFileMock }),
+  useChatStore: (
+    selector: (state: {
+      currentThreadId: string;
+      setCurrentThread: () => void;
+      threads: Array<{ id: string; projectPath?: string }>;
+      setCurrentProject: () => void;
+      setWorkspaceOpenFile: typeof setWorkspaceOpenFileMock;
+    }) => unknown,
+  ) =>
+    selector({
+      currentThreadId: mockChatStoreState.currentThreadId,
+      setCurrentThread: vi.fn(),
+      threads: mockChatStoreState.threads,
+      setCurrentProject: vi.fn(),
+      setWorkspaceOpenFile: setWorkspaceOpenFileMock,
+    }),
 }));
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
@@ -48,6 +71,13 @@ const frictionSummary = {
       feedbackType: 'live-verdict',
       verdict: 'keep_observe',
       phenomenon: 'Friction rollup surfaced repeated workspace confusion',
+      operatorNarrative: {
+        headline: '发现 1 个线索，但证据还不够定案',
+        summary: '这次检查的是「工具和流程哪里容易卡住」。发现 1 个线索，但当前证据只够继续观察。',
+        action: '现在不用立刻改代码；先确认这些线索是否持续出现。',
+        nextCheck: '按现有频率继续观察；下一轮确认同类信号是否再次出现。',
+        evidenceQuality: 'usable',
+      },
       ownerAsk: 'keep observing the next eval after reviewing the draft suggestions',
       harnessUnderEval: { featureId: 'F245', componentId: 'friction-rollup', name: 'friction rollup' },
       reeval: {
@@ -55,7 +85,13 @@ const frictionSummary = {
         status: 'observing',
         summary: 'next eval at 2026-06-29T00:00:00.000Z',
       },
-      lifecycle: { ownerResponseStatus: 'not_required', closureStatus: 'observing', stale: false },
+      lifecycle: {
+        availability: 'not_required',
+        ownerResponseStatus: 'not_required',
+        closureStatus: 'observing',
+        reevalStatus: 'not_required',
+        stale: false,
+      },
       evidence: {
         snapshotRefs: ['snapshot:bundle/2026-06-22-eval-friction-test/snapshot'],
         attributionRefs: ['attribution:bundle/2026-06-22-eval-friction-test/eval-F245-2026-06-22:no-finding'],

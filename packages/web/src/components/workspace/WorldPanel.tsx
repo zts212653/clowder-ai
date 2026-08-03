@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { ExpandableProse } from '@/components/content-overflow';
 
 type WorldMode = 'build' | 'perform' | 'replay';
 
@@ -175,7 +176,12 @@ function EventList({ events }: { events: WorldEvent[] }) {
             <span className="text-cafe-secondary/50 ml-auto text-micro">{ev.createdAt.slice(11, 19)}</span>
           </div>
           {'content' in ev.payload && ev.payload.content != null && (
-            <p className="text-cafe-primary mt-0.5 leading-relaxed">{String(ev.payload.content).slice(0, 200)}</p>
+            <ExpandableProse
+              text={String(ev.payload.content)}
+              lines={3}
+              className="mt-0.5"
+              contentClassName="text-xs leading-relaxed text-cafe-primary"
+            />
           )}
         </li>
       ))}

@@ -155,6 +155,8 @@ export async function* spawnCliInTmux(
   let timedOut = false;
   let killed = false;
   let gotFirstEvent = false;
+  /** F212 Phase H cloud R5 P2: last terminal signal seen in this stream. */
+  let localFinalTerminal: 'completed' | 'failed' | null = null;
   let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
   let firstEventTimer: ReturnType<typeof setTimeout> | null = null;
   let stderrPollTimer: ReturnType<typeof setInterval> | null = null;
@@ -359,6 +361,21 @@ export async function* spawnCliInTmux(
           // F212 Phase D: collect result error events (type==='result' && subtype!=='success')
           // for cliDiagnostics — they are valid JSON so they never reach nonJsonOutput above.
           maybeCollectStreamError(event, streamErrorTexts, structuredErrorTexts);
+          // F212 Phase H cloud R5 P2 (2026-07-10): track the LAST terminal event locally.
+          // AbortSignal (semanticCompletionSignal) is sticky — once turn.completed fires
+          // in a multi-turn tmux stream, a subsequent turn.failed cannot clear it. Reading
+          // `.aborted === true` at exit-time therefore incorrectly reports "semantically
+          // complete" even when the final terminal was a real failure. Track finalTerminal
+          // locally on the events we see and use it (below at line ~412) instead of the
+          // sticky signal. Codex normal path: turn.completed → localFinalTerminal=completed
+          // → suppress exit=1 quirk. Multi-turn failure path: turn.completed → turn.failed
+          // → localFinalTerminal=failed → surface __cliError. Symmetric fix lands in
+          // spawnCli.ts too — same sticky-signal class.
+          if (event && typeof event === 'object') {
+            const payloadType = (event as { type?: string }).type;
+            if (payloadType === 'turn.completed') localFinalTerminal = 'completed';
+            else if (payloadType === 'turn.failed') localFinalTerminal = 'failed';
+          }
           // Mark first event and switch from first-event timeout to idle timeout.
           if (!gotFirstEvent) {
             gotFirstEvent = true;
@@ -399,7 +416,17 @@ export async function* spawnCliInTmux(
         command: options.command,
       };
     }
-    if (!killed && exitCode !== null && exitCode !== 0) {
+    // F212 Phase H (Sol Final确权 P1-A 2026-07-10) — unified `finalSemanticDone`
+    // predicate mirroring cli-spawn.ts. Handles all four cells:
+    //   1. sticky signal + turn.completed → localFinalTerminal='completed' → SUPPRESS
+    //   2. sticky + completed then failed → localFinalTerminal='failed' → SURFACE (cloud R5 P2)
+    //   3. sticky + no terminal event → localFinalTerminal=null, sig aborted → SUPPRESS
+    //      (caller-side signal-only contract)
+    //   4. no signal + no terminal → both falsy → SURFACE (unchanged)
+    // Local terminal WINS over sticky abort — chronological failure outranks prior success.
+    const semanticDone = options.semanticCompletionSignal?.aborted === true;
+    const finalSemanticDone = localFinalTerminal === 'completed' || (localFinalTerminal === null && semanticDone);
+    if (!finalSemanticDone && !killed && exitCode !== null && exitCode !== 0) {
       // F212 AC-A1: structured diagnostics on tmux abnormal exit.
       // 云端 codex P2 + 砚砚 round-4: NDJSON mode merges stderr→stdout fifo so stderrFile is empty;
       // non-JSON lines collected from parse-error branch (= stderr noise) carry the actual error text.

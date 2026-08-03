@@ -353,7 +353,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     }
   });
 
-  it('POST and PATCH /api/cats persist native structured cli.effort for Codex members', async () => {
+  it('POST/PATCH /api/cats preserves provider-native effort across model switches', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
@@ -380,37 +380,267 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         roleDescription: '审查',
         clientId: 'openai',
         accountRef: 'codex',
-        defaultModel: 'gpt-5.4',
-        cli: { command: 'codex', outputFormat: 'json', effort: 'max' },
+        defaultModel: 'gpt-5.6-sol',
+        cli: {
+          command: 'codex',
+          outputFormat: 'json',
+          effort: 'turbo-native',
+          contextWindow: 372000,
+          autoCompactTokenLimit: 353400,
+        },
       }),
     });
-    assert.equal(createRes.statusCode, 201);
+    assert.equal(createRes.statusCode, 201, createRes.body);
     const createdBody = JSON.parse(createRes.body);
-    assert.equal(createdBody.cat.cli?.effort, 'max');
-
-    const patchRes = await app.inject({
-      method: 'PATCH',
-      url: '/api/cats/runtime-codex-effort',
-      headers: {
-        'content-type': 'application/json',
-        'x-cat-cafe-user': 'codex',
-      },
-      body: JSON.stringify({ cli: { effort: 'ultra' } }),
-    });
-    assert.equal(patchRes.statusCode, 200);
-    assert.equal(JSON.parse(patchRes.body).cat.cli?.effort, 'ultra');
+    assert.equal(createdBody.cat.cli?.effort, 'turbo-native');
+    assert.equal(createdBody.cat.cli?.contextWindow, 372000);
+    assert.equal(createdBody.cat.cli?.autoCompactTokenLimit, 353400);
 
     const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
     assert.equal(listRes.statusCode, 200);
     const listBody = JSON.parse(listRes.body);
     const runtimeCat = listBody.cats.find((cat) => cat.id === 'runtime-codex-effort');
     assert.ok(runtimeCat, 'runtime-codex-effort should appear in /api/cats');
-    assert.equal(runtimeCat.cli?.effort, 'ultra');
+    assert.equal(runtimeCat.cli?.effort, 'turbo-native');
+    assert.equal(runtimeCat.cli?.contextWindow, 372000);
+    assert.equal(runtimeCat.cli?.autoCompactTokenLimit, 353400);
 
     const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
     const persisted = JSON.parse(readFileSync(catalogPath, 'utf-8'));
     const variant = persisted.breeds.find((breed) => breed.catId === 'runtime-codex-effort')?.variants?.[0];
-    assert.equal(variant?.cli?.effort, 'ultra');
+    assert.equal(variant?.cli?.effort, 'turbo-native');
+    assert.equal(variant?.cli?.contextWindow, 372000);
+    assert.equal(variant?.cli?.autoCompactTokenLimit, 353400);
+
+    const effortPatchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-codex-effort',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ cli: { effort: 'max' } }),
+    });
+    assert.equal(effortPatchRes.statusCode, 200, effortPatchRes.body);
+    const effortPatchedCat = JSON.parse(effortPatchRes.body).cat;
+    assert.equal(effortPatchedCat.cli?.effort, 'max');
+    assert.equal(effortPatchedCat.cli?.contextWindow, 372000, 'partial effort patch preserves the CLI window');
+    assert.equal(effortPatchedCat.cli?.autoCompactTokenLimit, 353400);
+
+    const contextOnlyPatchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-codex-effort',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ cli: { contextWindow: 100000 } }),
+    });
+    assert.equal(contextOnlyPatchRes.statusCode, 200, contextOnlyPatchRes.body);
+    const contextOnlyPatchedCat = JSON.parse(contextOnlyPatchRes.body).cat;
+    assert.equal(contextOnlyPatchedCat.cli?.contextWindow, 100000);
+    assert.equal(
+      contextOnlyPatchedCat.cli?.autoCompactTokenLimit,
+      88000,
+      'changing the window recomputes its derived compaction threshold',
+    );
+
+    const compactOnlyPatchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-codex-effort',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ cli: { autoCompactTokenLimit: 85000 } }),
+    });
+    assert.equal(compactOnlyPatchRes.statusCode, 200, compactOnlyPatchRes.body);
+    const compactOnlyPatchedCat = JSON.parse(compactOnlyPatchRes.body).cat;
+    assert.equal(compactOnlyPatchedCat.cli?.contextWindow, 100000);
+    assert.equal(compactOnlyPatchedCat.cli?.autoCompactTokenLimit, 85000);
+
+    const oversizedCompactPatchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-codex-effort',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ cli: { autoCompactTokenLimit: 100001 } }),
+    });
+    assert.equal(oversizedCompactPatchRes.statusCode, 400, oversizedCompactPatchRes.body);
+    assert.match(JSON.parse(oversizedCompactPatchRes.body).error, /cannot exceed cli\.contextWindow/i);
+
+    const modelPatchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-codex-effort',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ defaultModel: 'gpt-5.4' }),
+    });
+    assert.equal(modelPatchRes.statusCode, 200, modelPatchRes.body);
+    const modelPatchedCat = JSON.parse(modelPatchRes.body).cat;
+    assert.equal(modelPatchedCat.cli?.effort, 'max', 'model switch preserves the provider-native member value');
+    assert.equal(modelPatchedCat.cli?.contextWindow, undefined, 'model switch drops the prior model-specific window');
+    assert.equal(modelPatchedCat.cli?.autoCompactTokenLimit, undefined);
+
+    const restoreGpt56Res = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-codex-effort',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        defaultModel: 'gpt-5.6-sol',
+        cli: { effort: 'max', contextWindow: 372000 },
+      }),
+    });
+    assert.equal(restoreGpt56Res.statusCode, 200, restoreGpt56Res.body);
+    const restoredGpt56Cat = JSON.parse(restoreGpt56Res.body).cat;
+    assert.equal(restoredGpt56Cat.cli?.contextWindow, 372000);
+    assert.equal(restoredGpt56Cat.cli?.autoCompactTokenLimit, 327360);
+    const restoredCatalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const restoredVariant = restoredCatalog.breeds.find((breed) => breed.catId === 'runtime-codex-effort')
+      ?.variants?.[0];
+    assert.equal(restoredVariant?.cli?.autoCompactTokenLimit, 327360, 'derived threshold is persisted');
+
+    const modelAndContextPatchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-codex-effort',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        defaultModel: 'gpt-5.4',
+        cli: { contextWindow: 100000, autoCompactTokenLimit: 90000 },
+      }),
+    });
+    assert.equal(modelAndContextPatchRes.statusCode, 200, modelAndContextPatchRes.body);
+    const modelAndContextPatchedCat = JSON.parse(modelAndContextPatchRes.body).cat;
+    assert.equal(modelAndContextPatchedCat.cli?.effort, 'max');
+    assert.equal(modelAndContextPatchedCat.cli?.contextWindow, 100000, 'new model-specific window is accepted');
+    assert.equal(modelAndContextPatchedCat.cli?.autoCompactTokenLimit, 90000);
+
+    const clearEffortRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-codex-effort',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ cli: { effort: null } }),
+    });
+    assert.equal(clearEffortRes.statusCode, 200, clearEffortRes.body);
+    assert.equal(JSON.parse(clearEffortRes.body).cat.cli?.effort, undefined);
+
+    const noEffortModelSwitchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-codex-effort',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ defaultModel: 'gpt-5.6-sol' }),
+    });
+    assert.equal(noEffortModelSwitchRes.statusCode, 200, noEffortModelSwitchRes.body);
+    const noEffortModelSwitchedCat = JSON.parse(noEffortModelSwitchRes.body).cat;
+    assert.equal(noEffortModelSwitchedCat.cli?.effort, undefined, 'model switch preserves an implicit effort');
+    assert.equal(noEffortModelSwitchedCat.cli?.contextWindow, undefined);
+    assert.equal(noEffortModelSwitchedCat.cli?.autoCompactTokenLimit, undefined);
+
+    const orphanCompactPatchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-codex-effort',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ cli: { autoCompactTokenLimit: 50000 } }),
+    });
+    assert.equal(orphanCompactPatchRes.statusCode, 400, orphanCompactPatchRes.body);
+    assert.match(JSON.parse(orphanCompactPatchRes.body).error, /requires cli\.contextWindow/i);
+  });
+
+  it('POST /api/cats derives and validates the CLI context tuple', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const baseBody = {
+      name: '上下文缅因猫',
+      displayName: '上下文缅因猫',
+      avatar: '/avatars/codex.png',
+      color: { primary: '#16a34a', secondary: '#bbf7d0' },
+      roleDescription: '审查',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.6-sol',
+    };
+    const headers = {
+      'content-type': 'application/json',
+      'x-cat-cafe-user': 'codex',
+    };
+
+    const createContextOnlyRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers,
+      body: JSON.stringify({
+        ...baseBody,
+        catId: 'runtime-context-derived',
+        mentionPatterns: ['@runtime-context-derived'],
+        cli: { command: 'codex', outputFormat: 'json', contextWindow: 100000 },
+      }),
+    });
+    assert.equal(createContextOnlyRes.statusCode, 201, createContextOnlyRes.body);
+    const createdContextCat = JSON.parse(createContextOnlyRes.body).cat;
+    assert.equal(createdContextCat.cli?.contextWindow, 100000);
+    assert.equal(createdContextCat.cli?.autoCompactTokenLimit, 88000);
+    const persisted = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
+    const derivedVariant = persisted.breeds.find((breed) => breed.catId === 'runtime-context-derived')?.variants?.[0];
+    assert.equal(derivedVariant?.cli?.autoCompactTokenLimit, 88000, 'derived threshold is persisted on create');
+
+    const createOrphanCompactRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers,
+      body: JSON.stringify({
+        ...baseBody,
+        catId: 'runtime-context-orphan',
+        mentionPatterns: ['@runtime-context-orphan'],
+        cli: { command: 'codex', outputFormat: 'json', autoCompactTokenLimit: 90000 },
+      }),
+    });
+    assert.equal(createOrphanCompactRes.statusCode, 400, createOrphanCompactRes.body);
+    assert.match(JSON.parse(createOrphanCompactRes.body).error, /requires cli\.contextWindow/i);
+
+    const createOversizedCompactRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers,
+      body: JSON.stringify({
+        ...baseBody,
+        catId: 'runtime-context-oversized',
+        mentionPatterns: ['@runtime-context-oversized'],
+        cli: {
+          command: 'codex',
+          outputFormat: 'json',
+          contextWindow: 100000,
+          autoCompactTokenLimit: 100001,
+        },
+      }),
+    });
+    assert.equal(createOversizedCompactRes.statusCode, 400, createOversizedCompactRes.body);
+    assert.match(JSON.parse(createOversizedCompactRes.body).error, /cannot exceed cli\.contextWindow/i);
   });
 
   it('POST /api/cats rejects blank cli.effort values', async () => {
@@ -431,12 +661,12 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
-        catId: 'runtime-blank-effort',
+        catId: 'runtime-invalid-effort',
         name: '非法缅因猫',
         displayName: '非法缅因猫',
         avatar: '/avatars/codex.png',
         color: { primary: '#16a34a', secondary: '#bbf7d0' },
-        mentionPatterns: ['@runtime-blank-effort'],
+        mentionPatterns: ['@runtime-invalid-effort'],
         roleDescription: '审查',
         clientId: 'openai',
         accountRef: 'codex',
@@ -448,7 +678,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(createRes.statusCode, 400);
   });
 
-  it('POST and PATCH /api/cats reject cli.effort for clients without an effort adapter', async () => {
+  it('POST and PATCH /api/cats reject effort for clients without an effort adapter', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
@@ -459,65 +689,341 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     await app.register(catsRoutes);
 
     try {
-      // kimi has no effort adapter — getCatEffort() is not consumed by its adapter
-      const createRes = await app.inject({
+      const headers = {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      };
+      const baseBody = {
+        name: 'Kimi 猫',
+        displayName: 'Kimi 猫',
+        avatar: '/avatars/kimi.png',
+        color: { primary: '#7c3aed', secondary: '#ede9fe' },
+        roleDescription: '中文代码助手',
+        clientId: 'kimi',
+        accountRef: 'kimi',
+        defaultModel: 'kimi-k2.5',
+      };
+
+      const createWithEffortRes = await app.inject({
         method: 'POST',
         url: '/api/cats',
-        headers: {
-          'content-type': 'application/json',
-          'x-cat-cafe-user': 'codex',
-        },
+        headers,
         body: JSON.stringify({
+          ...baseBody,
           catId: 'runtime-kimi-effort',
-          name: 'Kimi 猫',
-          displayName: 'Kimi 猫',
-          avatar: '/avatars/kimi.png',
-          color: { primary: '#7c3aed', secondary: '#ede9fe' },
           mentionPatterns: ['@runtime-kimi-effort'],
-          roleDescription: '中文代码助手',
-          clientId: 'kimi',
-          accountRef: 'kimi',
-          defaultModel: 'kimi-k2.5',
           cli: { command: 'kimi', outputFormat: 'stream-json', effort: 'high' },
         }),
       });
-
-      assert.equal(createRes.statusCode, 400);
-      assert.match(JSON.parse(createRes.body).error, /effort/i);
+      assert.equal(createWithEffortRes.statusCode, 400);
+      assert.match(JSON.parse(createWithEffortRes.body).error, /effort/i);
 
       const validCreateRes = await app.inject({
         method: 'POST',
         url: '/api/cats',
-        headers: {
-          'content-type': 'application/json',
-          'x-cat-cafe-user': 'codex',
-        },
+        headers,
         body: JSON.stringify({
+          ...baseBody,
           catId: 'runtime-kimi-no-effort',
-          name: 'Kimi 猫',
-          displayName: 'Kimi 猫',
-          avatar: '/avatars/kimi.png',
-          color: { primary: '#7c3aed', secondary: '#ede9fe' },
           mentionPatterns: ['@runtime-kimi-no-effort'],
-          roleDescription: '中文代码助手',
-          clientId: 'kimi',
-          accountRef: 'kimi',
-          defaultModel: 'kimi-k2.5',
         }),
       });
-      assert.equal(validCreateRes.statusCode, 201);
+      assert.equal(validCreateRes.statusCode, 201, validCreateRes.body);
 
       const patchRes = await app.inject({
         method: 'PATCH',
         url: '/api/cats/runtime-kimi-no-effort',
-        headers: {
-          'content-type': 'application/json',
-          'x-cat-cafe-user': 'codex',
-        },
+        headers,
         body: JSON.stringify({ cli: { effort: 'high' } }),
       });
       assert.equal(patchRes.statusCode, 400);
       assert.match(JSON.parse(patchRes.body).error, /effort/i);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('POST and PATCH /api/cats handle cli.carrier as an openai-only override', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    try {
+      const headers = {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      };
+      const baseBody = {
+        name: '缅因猫',
+        displayName: '缅因猫',
+        avatar: '/avatars/codex.png',
+        color: { primary: '#16a34a', secondary: '#bbf7d0' },
+        roleDescription: '审查',
+        clientId: 'openai',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
+      };
+
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          catId: 'runtime-codex-carrier',
+          mentionPatterns: ['@runtime-codex-carrier'],
+          cli: { command: 'codex', outputFormat: 'json', carrier: 'app_server' },
+        }),
+      });
+      assert.equal(createRes.statusCode, 201, createRes.body);
+      assert.equal(JSON.parse(createRes.body).cat.cli?.carrier, 'app_server');
+
+      const invalidEnumRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          catId: 'runtime-codex-carrier-invalid',
+          mentionPatterns: ['@runtime-codex-carrier-invalid'],
+          cli: { command: 'codex', outputFormat: 'json', carrier: 'carrier_pigeon' },
+        }),
+      });
+      assert.equal(invalidEnumRes.statusCode, 400);
+
+      const kimiCreateRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          clientId: 'kimi',
+          accountRef: 'kimi',
+          defaultModel: 'kimi-k2.5',
+          catId: 'runtime-kimi-carrier',
+          mentionPatterns: ['@runtime-kimi-carrier'],
+          cli: { command: 'kimi', outputFormat: 'stream-json', carrier: 'app_server' },
+        }),
+      });
+      assert.equal(kimiCreateRes.statusCode, 400);
+      assert.match(JSON.parse(kimiCreateRes.body).error, /carrier/i);
+
+      const patchRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-codex-carrier',
+        headers,
+        body: JSON.stringify({ cli: { carrier: 'exec_json' } }),
+      });
+      assert.equal(patchRes.statusCode, 200, patchRes.body);
+      assert.equal(JSON.parse(patchRes.body).cat.cli?.carrier, 'exec_json');
+
+      const clearRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-codex-carrier',
+        headers,
+        body: JSON.stringify({ cli: { carrier: null } }),
+      });
+      assert.equal(clearRes.statusCode, 200, clearRes.body);
+      assert.equal(JSON.parse(clearRes.body).cat.cli?.carrier, undefined);
+
+      // Carrier is model-independent: a model switch must preserve the override.
+      const modelSwitchRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-codex-carrier',
+        headers,
+        body: JSON.stringify({ cli: { carrier: 'app_server' } }),
+      });
+      assert.equal(modelSwitchRes.statusCode, 200, modelSwitchRes.body);
+      const modelChangeRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-codex-carrier',
+        headers,
+        body: JSON.stringify({ defaultModel: 'gpt-5.5' }),
+      });
+      assert.equal(modelChangeRes.statusCode, 200, modelChangeRes.body);
+      assert.equal(JSON.parse(modelChangeRes.body).cat.cli?.carrier, 'app_server');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('GET /api/cats exposes effective codexCarrier truth (per-cat > env > default)', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    const savedCarrier = process.env.CAT_CAFE_CODEX_CARRIER;
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    try {
+      delete process.env.CAT_CAFE_CODEX_CARRIER;
+      const headers = {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      };
+
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          catId: 'runtime-carrier-truth',
+          name: '缅因猫',
+          displayName: '缅因猫',
+          avatar: '/avatars/codex.png',
+          color: { primary: '#16a34a', secondary: '#bbf7d0' },
+          mentionPatterns: ['@runtime-carrier-truth'],
+          roleDescription: '审查',
+          clientId: 'openai',
+          accountRef: 'codex',
+          defaultModel: 'gpt-5.4',
+        }),
+      });
+      assert.equal(createRes.statusCode, 201, createRes.body);
+      assert.deepEqual(JSON.parse(createRes.body).cat.codexCarrier, { effective: 'exec_json', source: 'default' });
+
+      // Env applies when no per-cat override exists.
+      process.env.CAT_CAFE_CODEX_CARRIER = 'app_server';
+      const envRes = await app.inject({ method: 'GET', url: '/api/cats', headers });
+      assert.equal(envRes.statusCode, 200, envRes.body);
+      const envCat = JSON.parse(envRes.body).cats.find((cat) => cat.id === 'runtime-carrier-truth');
+      assert.deepEqual(envCat.codexCarrier, { effective: 'app_server', source: 'env' });
+
+      // Per-cat override beats env — including an explicit exec_json override.
+      const patchRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-carrier-truth',
+        headers,
+        body: JSON.stringify({ cli: { carrier: 'exec_json' } }),
+      });
+      assert.equal(patchRes.statusCode, 200, patchRes.body);
+      assert.deepEqual(JSON.parse(patchRes.body).cat.codexCarrier, { effective: 'exec_json', source: 'per-cat' });
+
+      // Non-openai cats never carry the field (opus is the anthropic template cat).
+      const claudeCat = JSON.parse(envRes.body).cats.find((cat) => cat.id === 'opus');
+      assert.equal(claudeCat.clientId, 'anthropic');
+      assert.equal(claudeCat.codexCarrier, undefined);
+
+      // openai + generic ACP (env=app_server): the assembly checks getAcpConfig
+      // first, so AcpAgentService runs and the Codex carrier never applies.
+      const acpRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          catId: 'runtime-carrier-acp',
+          name: 'ACP 缅因猫',
+          displayName: 'ACP 缅因猫',
+          avatar: '/avatars/codex.png',
+          color: { primary: '#16a34a', secondary: '#bbf7d0' },
+          mentionPatterns: ['@runtime-carrier-acp'],
+          roleDescription: '审查',
+          clientId: 'openai',
+          accountRef: 'codex',
+          defaultModel: 'gpt-5.4',
+          acp: { command: 'codex', startupArgs: ['acp'] },
+        }),
+      });
+      assert.equal(acpRes.statusCode, 201, acpRes.body);
+      const acpCat = JSON.parse(acpRes.body).cat;
+      assert.equal(acpCat.adapterMode, 'acp');
+      assert.equal(acpCat.codexCarrier, undefined, 'ACP cats bypass the Codex carrier entirely');
+
+      // Cloud-only (F247 KD-17): cli removed → no local dispatch → no carrier truth.
+      const cloudRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          catId: 'runtime-carrier-cloud',
+          name: '云端缅因猫',
+          displayName: '云端缅因猫',
+          avatar: '/avatars/codex.png',
+          color: { primary: '#16a34a', secondary: '#bbf7d0' },
+          mentionPatterns: ['@runtime-carrier-cloud'],
+          roleDescription: '云端 Remote MCP 猫',
+          clientId: 'openai',
+          accountRef: 'codex',
+          defaultModel: 'gpt-pro',
+          provider: 'openai-chatgpt-pro',
+          mcpSupport: true,
+        }),
+      });
+      assert.equal(cloudRes.statusCode, 201, cloudRes.body);
+      const cloudCat = JSON.parse(cloudRes.body).cat;
+      assert.equal(cloudCat.cli, undefined);
+      assert.equal(cloudCat.codexCarrier, undefined, 'cloud-only cats never reach the Codex carrier');
+    } finally {
+      if (savedCarrier === undefined) {
+        delete process.env.CAT_CAFE_CODEX_CARRIER;
+      } else {
+        process.env.CAT_CAFE_CODEX_CARRIER = savedCarrier;
+      }
+      await app.close();
+    }
+  });
+
+  it('POST and PATCH /api/cats accept effort for tier-capable kimi k3 models', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    try {
+      const headers = {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      };
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          catId: 'runtime-kimi-k3-effort',
+          name: 'Kimi K3 猫',
+          displayName: 'Kimi K3 猫',
+          avatar: '/avatars/kimi.png',
+          color: { primary: '#7c3aed', secondary: '#ede9fe' },
+          mentionPatterns: ['@runtime-kimi-k3-effort'],
+          roleDescription: '中文代码助手',
+          clientId: 'kimi',
+          accountRef: 'kimi',
+          defaultModel: 'kimi-code/k3',
+          cli: { command: 'kimi', outputFormat: 'stream-json', effort: 'max' },
+        }),
+      });
+      assert.equal(createRes.statusCode, 201, createRes.body);
+      assert.equal(JSON.parse(createRes.body).cat.cli?.effort, 'max');
+
+      const patchRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-kimi-k3-effort',
+        headers,
+        body: JSON.stringify({ cli: { effort: 'low' } }),
+      });
+      assert.equal(patchRes.statusCode, 200, patchRes.body);
+      assert.equal(JSON.parse(patchRes.body).cat.cli?.effort, 'low');
+
+      const unsupportedPatchRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-kimi-k3-effort',
+        headers,
+        body: JSON.stringify({ defaultModel: 'kimi-code/kimi-for-coding', cli: { effort: 'low' } }),
+      });
+      assert.equal(unsupportedPatchRes.statusCode, 400, unsupportedPatchRes.body);
+      assert.match(JSON.parse(unsupportedPatchRes.body).error, /effort/i);
     } finally {
       await app.close();
     }

@@ -14,6 +14,16 @@
 type InvocationStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled';
 
 /**
+ * Recovery meaning of a persisted invocation status.
+ *
+ * A record proves durable identity, not durable execution. Only `succeeded`
+ * proves the requested work completed. `queued` and `failed` retain an exact
+ * replay transition, while `running` is owned by the current executor and
+ * `canceled` is terminal without success.
+ */
+export type InvocationRecoveryStatus = 'replayable' | 'in_flight' | 'completed' | 'terminal';
+
+/**
  * Legal state transitions, derived from production call sites:
  *
  * queued  → running   (normal execution start)
@@ -44,6 +54,20 @@ export const ALL_STATUSES: readonly InvocationStatus[] = [
   'failed',
   'canceled',
 ] as const;
+
+export function classifyInvocationRecoveryStatus(status: InvocationStatus): InvocationRecoveryStatus {
+  switch (status) {
+    case 'queued':
+    case 'failed':
+      return 'replayable';
+    case 'running':
+      return 'in_flight';
+    case 'succeeded':
+      return 'completed';
+    case 'canceled':
+      return 'terminal';
+  }
+}
 
 /**
  * Check whether a status transition is legal.

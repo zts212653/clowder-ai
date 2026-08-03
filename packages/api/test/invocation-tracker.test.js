@@ -24,9 +24,10 @@ describe('InvocationTracker userId auth (slot-aware)', () => {
 
   it('cancel with matching userId succeeds', () => {
     const tracker = new InvocationTracker();
-    tracker.start('thread-1', 'opus', 'alice', ['opus']);
+    tracker.start('thread-1', 'opus', 'alice', ['opus'], 'inv-opus');
     const result = tracker.cancel('thread-1', 'opus', 'alice');
     assert.equal(result.cancelled, true);
+    assert.deepEqual(result.executionIds, ['inv-opus']);
     assert.equal(tracker.has('thread-1', 'opus'), false);
   });
 
@@ -378,6 +379,60 @@ describe('InvocationTracker: tryStartThreadAll', () => {
     assert.equal(result, null);
     guard.release();
   });
+
+  it('binds a post-reservation executionId for exact terminal ownership', () => {
+    const tracker = new InvocationTracker();
+    const batch = tracker.tryStartThreadAll('t1', ['opus', 'codex'], 'user1');
+    assert.ok(batch);
+
+    tracker.bindExecutionId('t1', ['opus', 'codex'], batch, 'inv-batch');
+    const result = tracker.cancel('t1', 'opus', 'user1');
+
+    assert.deepEqual(result.executionIds, ['inv-batch']);
+  });
+
+  it('does not bind a late executionId onto a replacement slot', () => {
+    const tracker = new InvocationTracker();
+    const stale = tracker.tryStartThreadAll('t1', ['opus'], 'user1');
+    assert.ok(stale);
+    const replacement = tracker.startAll('t1', ['opus'], 'user1', 'inv-replacement');
+
+    tracker.bindExecutionId('t1', ['opus'], stale, 'inv-stale');
+    const result = tracker.cancel('t1', 'opus', 'user1');
+
+    assert.equal(replacement.signal.aborted, false, 'batch gate stays independent from per-cat cancel');
+    assert.deepEqual(result.executionIds, ['inv-replacement']);
+  });
+});
+
+describe('InvocationTracker: exact execution ownership recovery', () => {
+  it('releases a slot only when its executionId matches the terminal record', () => {
+    const tracker = new InvocationTracker();
+    const controller = tracker.start('thread-zombie', 'codex-sol', 'alice', ['codex-sol'], 'inv-zombie');
+
+    assert.equal(tracker.classifyExecutionId('thread-zombie', 'codex-sol', 'inv-zombie'), 'matching');
+    assert.equal(tracker.completeByExecutionId('thread-zombie', 'codex-sol', 'inv-zombie'), 'released');
+    assert.equal(tracker.classifyExecutionId('thread-zombie', 'codex-sol', 'inv-zombie'), 'absent');
+    assert.equal(tracker.has('thread-zombie', 'codex-sol'), false);
+    assert.equal(controller.signal.aborted, false, 'terminal cleanup must not abort an already-dead runner');
+  });
+
+  it('preserves a replacement slot whose executionId differs from the zombie record', () => {
+    const tracker = new InvocationTracker();
+    const replacement = tracker.start('thread-zombie', 'codex-sol', 'alice', ['codex-sol'], 'inv-replacement');
+
+    assert.equal(tracker.classifyExecutionId('thread-zombie', 'codex-sol', 'inv-zombie'), 'replacement');
+    assert.equal(tracker.completeByExecutionId('thread-zombie', 'codex-sol', 'inv-zombie'), 'replacement');
+    assert.equal(tracker.has('thread-zombie', 'codex-sol'), true);
+    assert.equal(replacement.signal.aborted, false);
+  });
+
+  it('distinguishes an empty slot from a replacement owner', () => {
+    const tracker = new InvocationTracker();
+
+    assert.equal(tracker.classifyExecutionId('thread-zombie', 'codex-sol', 'inv-zombie'), 'absent');
+    assert.equal(tracker.completeByExecutionId('thread-zombie', 'codex-sol', 'inv-zombie'), 'absent');
+  });
 });
 
 describe('InvocationTracker: per-cat cancel isolation (AC-B9 regression)', () => {
@@ -492,26 +547,46 @@ describe('InvocationTracker: cancelAll userId guard (F156 B-2)', () => {
     assert.equal(tracker.has('t1'), false);
   });
 
-  it('cancelAll returns cancelled catIds for orchestrator scoping', () => {
+  it('cancelAll returns cancelled catIds and executionIds for terminal scoping', () => {
     const tracker = new InvocationTracker();
-    tracker.start('t1', 'opus', 'alice', ['opus']);
-    tracker.start('t1', 'codex', 'bob', ['codex']);
-    tracker.start('t1', 'gemini', 'alice', ['gemini']);
+    tracker.start('t1', 'opus', 'alice', ['opus'], 'inv-opus');
+    tracker.start('t1', 'codex', 'bob', ['codex'], 'inv-codex');
+    tracker.start('t1', 'gemini', 'alice', ['gemini'], 'inv-gemini');
 
     const cancelled = tracker.cancelAll('t1', 'alice');
-    assert.ok(Array.isArray(cancelled), 'cancelAll must return an array');
-    assert.deepStrictEqual(cancelled.sort(), ['gemini', 'opus'], 'should return only alice catIds');
+    assert.deepStrictEqual(cancelled.catIds.sort(), ['gemini', 'opus'], 'should return only alice catIds');
+    assert.deepStrictEqual(cancelled.executionIds.sort(), ['inv-gemini', 'inv-opus']);
+    assert.deepStrictEqual(cancelled.executionIdByCatId, {
+      opus: 'inv-opus',
+      gemini: 'inv-gemini',
+    });
     assert.equal(tracker.has('t1', 'codex'), true, 'bob codex untouched');
   });
 
-  it('cancelAll without userId returns all cancelled catIds', () => {
+  it('cancelAll without userId returns all cancelled catIds and executionIds', () => {
     const tracker = new InvocationTracker();
-    tracker.start('t1', 'opus', 'alice', ['opus']);
-    tracker.start('t1', 'codex', 'bob', ['codex']);
+    tracker.start('t1', 'opus', 'alice', ['opus'], 'inv-opus');
+    tracker.start('t1', 'codex', 'bob', ['codex'], 'inv-codex');
 
     const cancelled = tracker.cancelAll('t1');
-    assert.ok(Array.isArray(cancelled), 'cancelAll must return an array');
-    assert.deepStrictEqual(cancelled.sort(), ['codex', 'opus']);
+    assert.deepStrictEqual(cancelled.catIds.sort(), ['codex', 'opus']);
+    assert.deepStrictEqual(cancelled.executionIds.sort(), ['inv-codex', 'inv-opus']);
+    assert.deepStrictEqual(cancelled.executionIdByCatId, {
+      opus: 'inv-opus',
+      codex: 'inv-codex',
+    });
+  });
+
+  it('cancelAll maps a shared batch execution to every canceled slot while keeping the aggregate deduplicated', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['opus', 'codex'], 'alice', 'inv-shared');
+
+    const cancelled = tracker.cancelAll('t1', 'alice');
+    assert.deepStrictEqual(cancelled.executionIds, ['inv-shared']);
+    assert.deepStrictEqual(cancelled.executionIdByCatId, {
+      opus: 'inv-shared',
+      codex: 'inv-shared',
+    });
   });
 });
 

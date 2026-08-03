@@ -83,6 +83,8 @@ describe('F118 ThinkingIndicator liveness states', () => {
     expect(el).toBeTruthy();
     expect(el?.textContent).toContain('静默等待');
     expect(el?.textContent).toContain('2m 30s');
+    expect(el?.textContent).toContain('进程存活且 CPU 活跃');
+    expect(el?.textContent).not.toContain('客户端初始化');
     // No cancel button for alive_but_silent
     expect(container.querySelector('[data-testid="cancel-btn"]')).toBeNull();
   });
@@ -96,6 +98,9 @@ describe('F118 ThinkingIndicator liveness states', () => {
           state: 'idle-silent',
           silenceDurationMs: 312000,
           processAlive: true,
+          firstEventAt: Date.now() - 312000,
+          lastEventAt: Date.now() - 312000,
+          lastEventType: 'turn.started',
           receivedAt: Date.now(),
         },
       },
@@ -114,9 +119,37 @@ describe('F118 ThinkingIndicator liveness states', () => {
     expect(el).toBeTruthy();
     expect(el?.textContent).toContain('可能卡住');
     expect(el?.textContent).toContain('5m 12s');
+    expect(el?.textContent).toContain('CLI 已开始回合');
+    expect(el?.textContent).toContain('客户端初始化或上游连接');
 
     const cancelBtn = container.querySelector('[data-testid="cancel-btn"]');
     expect(cancelBtn).toBeTruthy();
+  });
+
+  it('explains client initialization when the API explicitly reports no CLI events', async () => {
+    storeState.catStatuses = { codex: 'alive_but_silent' };
+    storeState.catInvocations = {
+      codex: {
+        livenessWarning: {
+          level: 'alive_but_silent',
+          state: 'idle-silent',
+          silenceDurationMs: 150000,
+          processAlive: true,
+          firstEventAt: null,
+          lastEventAt: null,
+          lastEventType: null,
+          receivedAt: Date.now(),
+        },
+      },
+    };
+
+    const { ThinkingIndicator } = await import('../ThinkingIndicator');
+    act(() => {
+      root.render(React.createElement(ThinkingIndicator));
+    });
+
+    expect(container.textContent).toContain('尚未返回任何事件');
+    expect(container.textContent).toContain('客户端初始化');
   });
 
   it('cancel button calls onCancel with threadId', async () => {

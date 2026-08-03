@@ -95,13 +95,13 @@ async function readVoiceService(feature: VoiceFeature): Promise<ServiceState | n
   return servicesPayload.services?.find((item) => item.id === serviceId) ?? null;
 }
 
-async function readServiceLogTail(serviceId: string): Promise<string | null> {
+async function readServiceLogDetails(serviceId: string): Promise<string | null> {
   const res = await apiFetch(`/api/services/${serviceId}/logs`).catch(() => null);
   if (!res?.ok) return null;
   const payload = (await res.json().catch(() => ({}))) as { lines?: string[] };
-  const lines = payload.lines?.filter((line) => line.trim().length > 0).slice(-20);
+  const lines = payload.lines?.filter((line) => line.trim().length > 0);
   if (!lines?.length) return null;
-  return lines.join('\n').slice(-1600);
+  return lines.join('\n');
 }
 
 function isServiceReady(service: ServiceState): boolean {
@@ -114,11 +114,11 @@ function isServiceStarting(service: ServiceState): boolean {
 
 async function toastServiceStartupFailure(feature: VoiceFeature, service: ServiceState | null, fallback?: string) {
   const { serviceId, serviceLabel } = FEATURE_SERVICES[feature];
-  const logTail = await readServiceLogTail(serviceId);
+  const logDetails = await readServiceLogDetails(serviceId);
   const rawError = service?.error?.trim();
   const headline =
     rawError && rawError !== 'fetch failed' ? rawError : (fallback ?? `${serviceLabel}启动失败，请查看服务日志。`);
-  toastServiceError(feature, logTail ? `${headline}\n${logTail}` : headline);
+  toastServiceError(feature, logDetails ? `${headline}\n${logDetails}` : headline);
 }
 
 async function waitForVoiceServiceReady(feature: VoiceFeature): Promise<VoiceServiceReadyResult> {

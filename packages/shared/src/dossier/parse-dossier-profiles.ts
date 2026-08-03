@@ -2,7 +2,7 @@
  * F208 KD-10: Parse structured profile YAML blocks from cat-dossier.md.
  *
  * Extracts per-cat machine-readable data for:
- * - compile-l0 `buildRosterRow` (l0RosterSummary replaces teamStrengths)
+ * - compile-l0 `buildRosterRow` (l0RoutingNote carries only route-critical context)
  * - SystemPromptBuilder `buildTeammateRoster` (same)
  * - Frontend 画像页 (Phase C)
  * - Open-source baseline (Phase E)
@@ -15,8 +15,14 @@
 
 export interface DossierProfile {
   entityId: string;
+  identity?: {
+    pronouns?: string;
+    l0PronounReminder?: boolean;
+  };
   oneLiner?: string;
   l0RosterSummary?: string;
+  l0RoutingNote?: string;
+  l0SelfDescription?: string;
   routingSignals?: {
     peakCapabilities?: string[];
     antiSignals?: string[];
@@ -66,11 +72,25 @@ function parseYamlBlock(content: string): DossierProfile | null {
 
   const profile: DossierProfile = { entityId };
 
+  const pronouns = extractStringField(content, 'pronouns');
+  const l0PronounReminder = extractBooleanField(content, 'l0PronounReminder');
+  if (pronouns || l0PronounReminder !== undefined) {
+    profile.identity = {};
+    if (pronouns) profile.identity.pronouns = pronouns;
+    if (l0PronounReminder !== undefined) profile.identity.l0PronounReminder = l0PronounReminder;
+  }
+
   const oneLiner = extractStringField(content, 'oneLiner');
   if (oneLiner) profile.oneLiner = oneLiner;
 
   const l0RosterSummary = extractStringField(content, 'l0RosterSummary');
   if (l0RosterSummary) profile.l0RosterSummary = l0RosterSummary;
+
+  const l0RoutingNote = extractStringField(content, 'l0RoutingNote');
+  if (l0RoutingNote) profile.l0RoutingNote = l0RoutingNote;
+
+  const l0SelfDescription = extractStringField(content, 'l0SelfDescription');
+  if (l0SelfDescription) profile.l0SelfDescription = l0SelfDescription;
 
   // Parse routingSignals (nested object with list fields)
   const peakCapabilities = extractListField(content, 'peakCapabilities');
@@ -96,11 +116,23 @@ function parseYamlBlock(content: string): DossierProfile | null {
   return profile;
 }
 
-/** Extract a quoted string field: `fieldName: "value"` (allows optional leading whitespace for nested fields) */
+/**
+ * Extract a quoted string field: `fieldName: "value"`.
+ * Allows leading whitespace for nested fields and a trailing YAML comment;
+ * identity facts in the canonical dossier carry inline operator provenance.
+ */
 function extractStringField(content: string, field: string): string | undefined {
-  const pattern = new RegExp(`^\\s*${field}:\\s*"(.+)"\\s*$`, 'm');
+  const pattern = new RegExp(`^\\s*${field}:\\s*"([^"]*)"\\s*(?:#.*)?$`, 'm');
   const match = content.match(pattern);
   return match?.[1];
+}
+
+/** Extract an unquoted boolean field with an optional trailing YAML comment. */
+function extractBooleanField(content: string, field: string): boolean | undefined {
+  const pattern = new RegExp(`^\\s*${field}:\\s*(true|false)\\s*(?:#.*)?$`, 'm');
+  const match = content.match(pattern);
+  if (!match) return undefined;
+  return match[1] === 'true';
 }
 
 /** Extract a list field: supports both inline `["a", "b"]` and multi-line `- "value"` */

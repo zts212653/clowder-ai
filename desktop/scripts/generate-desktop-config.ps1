@@ -2,13 +2,12 @@
 .SYNOPSIS
   Generates desktop-config.json based on installer component selection.
 .PARAMETER AppDir
-  Root directory of the installed/portable application.
+  Root directory of the installed or portable application.
 .PARAMETER Version
-  Application version string. When omitted, the script reads it from
-  $AppDir\package.json (the monorepo root package.json shipped by the installer).
+  Application version. When omitted, resolve it from desktop/package.json,
+  then the repository-root package.json.
 .PARAMETER InstallType
-  How the app was installed: 'installer' (Inno Setup) or 'portable' (zip extract).
-  Defaults to 'unknown' if not provided.
+  Installation channel: installer, portable, or unknown.
 #>
 
 param(
@@ -17,9 +16,6 @@ param(
     [string]$InstallType = "unknown"
 )
 
-# Resolve version from package.json when caller does not pass -Version.
-# Prefer desktop/package.json (the real desktop app version) over the monorepo
-# root package.json, which carries a different (workspace-root) version number.
 if (-not $Version) {
     $desktopPkgPath = Join-Path $AppDir "desktop\package.json"
     $rootPkgPath = Join-Path $AppDir "package.json"
@@ -36,7 +32,7 @@ if (-not $Version) {
 }
 
 $config = @{
-    version     = $Version
+    version = $Version
     installType = $InstallType
     installedAt = (Get-Date -Format "o")
 }
@@ -52,8 +48,6 @@ if (-not (Test-Path $configDir)) {
     New-Item -ItemType Directory -Path $configDir -Force | Out-Null
 }
 
-# Write UTF-8 without BOM. Windows PowerShell 5.1's -Encoding utf8
-# emits a BOM (ef bb bf) that breaks JSON.parse in Node.js consumers.
 $json = $config | ConvertTo-Json -Depth 3
 [System.IO.File]::WriteAllText($configPath, $json, (New-Object System.Text.UTF8Encoding $false))
 Write-Host "Desktop config written to $configPath"

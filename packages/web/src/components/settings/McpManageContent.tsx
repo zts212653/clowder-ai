@@ -28,6 +28,7 @@ interface ModalState {
   editId?: string;
   editData?: McpConfigModalProps['editData'];
   readOnly?: boolean;
+  hasProjectOverride?: boolean;
   tools?: { name: string; description?: string }[];
 }
 
@@ -121,6 +122,7 @@ export function McpManageContent() {
     setModal({
       editId: item.id,
       readOnly,
+      hasProjectOverride: item.source === 'external' && !item.pluginId && item.hasOverride === true,
       // Modal auto-probes on mount (McpConfigModal.handleProbeTools); no parent fetch needed.
       tools: undefined,
       editData: buildEditData(item),
@@ -376,6 +378,7 @@ export function McpManageContent() {
           editId={modal.editId}
           editData={modal.editData}
           readOnly={modal.readOnly}
+          hasProjectOverride={modal.hasProjectOverride}
           tools={modal.tools}
           onSaved={handleSaved}
           onClose={() => setModal(null)}

@@ -1,9 +1,11 @@
+import { isRecallResultStatus } from '@cat-cafe/shared';
 import type Database from 'better-sqlite3';
 import type { FastifyPluginAsync } from 'fastify';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { canAccessThread } from '../domains/guides/guide-state-access.js';
 import { CrossCatMetricsComputer } from '../domains/memory/CrossCatMetricsComputer.js';
 import { freezeF200Flags } from '../domains/memory/f200-types.js';
+import { LifecycleTraceStore } from '../domains/memory/LifecycleTraceStore.js';
 import { OutputVerifiedDetector } from '../domains/memory/output-verified-detector.js';
 import { RecallMetricsComputer } from '../domains/memory/RecallMetricsComputer.js';
 import { SqliteSignalSources } from '../domains/memory/SqliteSignalSources.js';
@@ -223,7 +225,8 @@ export const recallMetricsRoutes: FastifyPluginAsync<RecallMetricsRoutesOptions>
     const rows = opts.evidenceDb
       .prepare(
         `SELECT recall_id, cat_id, tool_name, query, mode, scope,
-              candidates_json, result_count, timestamp
+              candidates_json, consumed_json, result_count, result_status, timestamp,
+              source, push_surface, presented, inspected, outcome
        FROM recall_events
        WHERE thread_id = ?
        ORDER BY timestamp DESC
@@ -237,14 +240,30 @@ export const recallMetricsRoutes: FastifyPluginAsync<RecallMetricsRoutesOptions>
       mode: string | null;
       scope: string | null;
       candidates_json: string;
+      consumed_json: string;
       result_count: number | null;
+      result_status: string | null;
       timestamp: number;
+      source: string;
+      push_surface: string | null;
+      presented: number;
+      inspected: number;
+      outcome: string | null;
     }>;
 
     return {
       events: rows.map((r) => {
         const candidates = JSON.parse(r.candidates_json || '[]') as Array<{ anchor: string; docKind?: string }>;
-        const resultCount = r.result_count ?? (candidates.length > 0 ? candidates.length : undefined);
+        const consumed = JSON.parse(r.consumed_json || '[]') as Array<{ anchor: string }>;
+        const consumedAnchors = new Set(consumed.map((c) => c.anchor));
+        const resultStatus = isRecallResultStatus(r.result_status)
+          ? r.result_status
+          : r.result_count != null
+            ? r.result_count === 0
+              ? 'no_results'
+              : 'counted'
+            : 'legacy_unknown';
+        const resultCount = resultStatus === 'legacy_unknown' ? undefined : (r.result_count ?? undefined);
         return {
           id: r.recall_id,
           toolName: r.tool_name,
@@ -252,14 +271,215 @@ export const recallMetricsRoutes: FastifyPluginAsync<RecallMetricsRoutesOptions>
           mode: r.mode ?? undefined,
           scope: r.scope ?? undefined,
           timestamp: r.timestamp,
+          source: r.source,
+          ...(r.push_surface ? { pushSurface: r.push_surface } : {}),
+          presented: r.presented === 1,
+          inspected: r.inspected === 1,
+          outcome: r.outcome ?? (r.inspected === 1 ? 'used' : 'ignored'),
           ...(resultCount != null ? { resultCount } : {}),
+          resultStatus,
           results: candidates.map((c) => ({
             title: c.anchor,
             anchor: c.anchor,
             sourceType: c.docKind,
+            consumed: consumedAnchors.has(c.anchor),
           })),
         };
       }),
+    };
+  });
+
+  // ── F263 Phase C lifecycle endpoints ─────────────────────────────
+  // All three endpoints enforce the same thread-scoped access model as
+  // /api/recall/ledger: fail-closed without threadStore, scoped to
+  // the caller's accessible threads only.
+
+  /** Resolve the calling user's accessible thread IDs. Fail-closed. */
+  async function resolveUserThreadIds(
+    userId: string,
+    reply: { status: (code: number) => { send: (body: unknown) => unknown } },
+  ): Promise<string[] | null> {
+    if (!opts.threadStore) {
+      reply.status(503).send({ error: 'Thread store unavailable' });
+      return null;
+    }
+    const userThreads = await opts.threadStore.list(userId);
+    return userThreads.map((t) => t.id);
+  }
+
+  // F263 Phase C: three-axis lifecycle snapshot
+  app.get<{
+    Querystring: { days?: string };
+  }>('/api/recall/lifecycle/three-axis', async (request, reply) => {
+    const userId = resolveHeaderUserId(request);
+    if (!userId) return reply.status(401).send({ error: 'Missing X-Cat-Cafe-User header' });
+
+    const threadIds = await resolveUserThreadIds(userId, reply);
+    if (threadIds === null) return; // 503 already sent
+
+    const days = Math.min(Math.max(1, parseInt(request.query.days ?? '7', 10) || 7), 90);
+
+    if (threadIds.length === 0) {
+      const now = Date.now();
+      return {
+        harmfulConsumption: { value: 0, maturity: 'no-data', reason: '无可访问的 thread。' },
+        unmetDemandLowerBound: { value: 0, maturity: 'no-data', reason: '无可访问的 thread。' },
+        attentionCost: { value: 0, maturity: 'no-data', reason: '无可访问的 thread。' },
+        days,
+        from: now - days * 86400000,
+        to: now,
+      };
+    }
+
+    try {
+      const traceStore = new LifecycleTraceStore(opts.evidenceDb);
+      return traceStore.computeThreeAxis(days, threadIds);
+    } catch {
+      // V33 migration may not be applied yet — return no-data
+      return {
+        harmfulConsumption: { value: 0, maturity: 'no-data', reason: 'lifecycle_traces 表尚未初始化。' },
+        unmetDemandLowerBound: { value: 0, maturity: 'no-data', reason: 'lifecycle_traces 表尚未初始化。' },
+        attentionCost: { value: 0, maturity: 'no-data', reason: 'lifecycle_traces 表尚未初始化。' },
+        days,
+        from: Date.now() - days * 86400000,
+        to: Date.now(),
+      };
+    }
+  });
+
+  // F263 Phase C: verification events query
+  app.get<{
+    Querystring: { target?: string; days?: string; limit?: string };
+  }>('/api/recall/lifecycle/verification-events', async (request, reply) => {
+    const userId = resolveHeaderUserId(request);
+    if (!userId) return reply.status(401).send({ error: 'Missing X-Cat-Cafe-User header' });
+
+    const threadIds = await resolveUserThreadIds(userId, reply);
+    if (threadIds === null) return;
+
+    const days = Math.min(Math.max(1, parseInt(request.query.days ?? '30', 10) || 30), 90);
+    const now = Date.now();
+    const from = now - days * 86400000;
+    const limit = Math.min(Math.max(1, parseInt(request.query.limit ?? '50', 10) || 50), 500);
+    const target = request.query.target || undefined;
+
+    if (threadIds.length === 0) return { events: [], days, from, to: now };
+
+    try {
+      const traceStore = new LifecycleTraceStore(opts.evidenceDb);
+      const events = traceStore.getVerificationEvents({
+        targetAnchor: target,
+        threadIds,
+        from,
+        to: now,
+        limit,
+      });
+      return { events, days, from, to: now };
+    } catch {
+      return { events: [], days, from, to: now };
+    }
+  });
+
+  // F263 Phase C: lifecycle traces query (for drill-down)
+  app.get<{
+    Querystring: { kind?: string; category?: string; sourceFamily?: string; days?: string; limit?: string };
+  }>('/api/recall/lifecycle/traces', async (request, reply) => {
+    const userId = resolveHeaderUserId(request);
+    if (!userId) return reply.status(401).send({ error: 'Missing X-Cat-Cafe-User header' });
+
+    const threadIds = await resolveUserThreadIds(userId, reply);
+    if (threadIds === null) return;
+
+    const days = Math.min(Math.max(1, parseInt(request.query.days ?? '30', 10) || 30), 90);
+    const now = Date.now();
+    const from = now - days * 86400000;
+    const limit = Math.min(Math.max(1, parseInt(request.query.limit ?? '50', 10) || 50), 500);
+
+    if (threadIds.length === 0) return { traces: [], days, from, to: now };
+
+    try {
+      const traceStore = new LifecycleTraceStore(opts.evidenceDb);
+      const traces = traceStore.query({
+        kind: request.query.kind as
+          | 'harmful_consumption'
+          | 'unmet_demand'
+          | 'verification'
+          | 'attention_cost'
+          | undefined,
+        category: request.query.category || undefined,
+        sourceFamily: request.query.sourceFamily as
+          | 'search_evidence'
+          | 'graph_resolve'
+          | 'list_recent'
+          | 'session_bootstrap'
+          | 'cold_context'
+          | undefined,
+        threadIds,
+        from,
+        to: now,
+        limit,
+      });
+      return { traces, days, from, to: now };
+    } catch {
+      return { traces: [], days, from, to: now };
+    }
+  });
+
+  // F263 B.5 Task 4: consumption ledger — stateless aggregate over recall_events
+  // Thread-scoped: only aggregates events from threads the caller can access.
+  app.get<{
+    Querystring: { days?: string };
+  }>('/api/recall/ledger', async (request, reply) => {
+    const userId = resolveHeaderUserId(request);
+    if (!userId) return reply.status(401).send({ error: 'Missing X-Cat-Cafe-User header' });
+
+    const days = Math.min(Math.max(1, parseInt(request.query.days ?? '7', 10) || 7), 90);
+    const now = Date.now();
+    const from = now - days * 24 * 60 * 60 * 1000;
+
+    // Fail closed: require threadStore to scope by user's accessible threads
+    if (!opts.threadStore) {
+      return reply.status(503).send({ error: 'Thread store unavailable' });
+    }
+    const userThreads = await opts.threadStore.list(userId);
+    const threadIds = userThreads.map((t) => t.id);
+    if (threadIds.length === 0) {
+      return { days, from, to: now, rows: [] };
+    }
+
+    const placeholders = threadIds.map(() => '?').join(', ');
+    const rows = opts.evidenceDb
+      .prepare(
+        `SELECT
+           source,
+           COALESCE(push_surface, tool_name) AS surface,
+           COUNT(*) AS presented,
+           SUM(inspected) AS inspected,
+           SUM(CASE WHEN outcome = 'used' THEN 1 ELSE 0 END) AS used
+         FROM recall_events
+         WHERE timestamp >= ? AND thread_id IN (${placeholders})
+         GROUP BY source, COALESCE(push_surface, tool_name)
+         ORDER BY source DESC, presented DESC`,
+      )
+      .all(from, ...threadIds) as Array<{
+      source: string;
+      surface: string;
+      presented: number;
+      inspected: number;
+      used: number;
+    }>;
+
+    return {
+      days,
+      from,
+      to: now,
+      rows: rows.map((r) => ({
+        source: r.source as 'push' | 'pull',
+        surface: r.surface,
+        presented: r.presented,
+        inspected: r.inspected,
+        used: r.used,
+      })),
     };
   });
 };

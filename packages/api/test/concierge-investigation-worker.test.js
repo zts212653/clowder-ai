@@ -1,11 +1,15 @@
 /**
- * ConciergeInvestigationWorker tests (F229 Phase B2)
+ * ConciergeInvestigationWorker tests (F229 Phase B2, KD-23)
  *
  * Covers the async investigation execution:
  *   queued → running → search → report → done
  *   queued → running → error → failed
  *   running → deadline → cancelled (INV I3)
  *   queued → cancelled (race: cancelled before worker starts)
+ *
+ * KD-23: No HandleMapStore sync — investigation reports produce anchors
+ * that are rendered directly by InvestigationReportCard in frontend.
+ * No handle table side-effects needed.
  */
 
 import assert from 'node:assert/strict';
@@ -374,6 +378,11 @@ describe('ConciergeInvestigationWorker', () => {
     const result = await jobStore.get('job-1');
     assert.strictEqual(result.status, 'cancelled', 'Job past deadline after search should be cancelled, not done');
   });
+
+  // ── KD-23: No HandleMapStore sync tests needed ──
+  // Investigation reports are rendered directly by InvestigationReportCard
+  // in the frontend using report.anchors. No handle table side-effects.
+  // The old HandleMapStore sync tests tested behavior that no longer exists.
 
   it('report anchors parse drillDown params correctly', async () => {
     const job = makeJob();

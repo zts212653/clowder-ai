@@ -1,7 +1,7 @@
 'use client';
 
 import { type ConnectorIconSpec, getConnectorDefinition } from '@cat-cafe/shared';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { tintedLight } from '@/lib/color-utils';
 import type { ChatMessage as ChatMessageType, MessageContent } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
@@ -83,6 +83,33 @@ function ConnectorIcon({ iconSpec, fallbackIcon }: { iconSpec?: ConnectorIconSpe
 
 function HoldBallCancelButton({ taskId, threadId, catId }: { taskId: string; threadId?: string; catId?: string }) {
   const [state, setState] = useState<'idle' | 'loading' | 'done'>('idle');
+  const [terminalStatus, setTerminalStatus] = useState<'retired_by_event' | 'fired' | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void apiFetch(`/api/callbacks/hold-ball/${encodeURIComponent(taskId)}/status`)
+      .then(async (res) => {
+        if (cancelled || !res.ok) return;
+        const body = (await res.json().catch(() => null)) as { status?: unknown; cancelable?: unknown } | null;
+        if (body?.cancelable !== false) {
+          setTerminalStatus(null);
+          return;
+        }
+        if (body.status === 'retired_by_event') {
+          setTerminalStatus('retired_by_event');
+        } else if (body.status === 'fired') {
+          setTerminalStatus('fired');
+        } else {
+          setTerminalStatus(null);
+        }
+      })
+      .catch(() => {
+        // Status is a read-side affordance. Keep the existing cancel controls if it fails.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [taskId]);
 
   const handleCancel = useCallback(
     async (withFeedback = false) => {
@@ -117,6 +144,10 @@ function HoldBallCancelButton({ taskId, threadId, catId }: { taskId: string; thr
     [catId, taskId, threadId],
   );
 
+  if (terminalStatus === 'retired_by_event') {
+    return <span className="text-xs text-cafe-muted">已被事件唤醒</span>;
+  }
+  if (terminalStatus === 'fired') return <span className="text-xs text-cafe-muted">已完成</span>;
   if (state === 'done') return <span className="text-xs text-cafe-muted">已取消</span>;
   return (
     <div className="flex items-center gap-2">
@@ -141,6 +172,12 @@ function HoldBallCancelButton({ taskId, threadId, catId }: { taskId: string; thr
   );
 }
 
+function getHoldStatusRefreshKey(message: ChatMessageType): string {
+  const source = message.source;
+  if (source?.connector !== 'hold-ball') return '';
+  return `${message.id}:${message.timestamp}:${message.content}:${JSON.stringify(source.meta ?? {})}`;
+}
+
 interface ConnectorBubbleProps {
   message: ChatMessageType;
   threadId?: string;
@@ -163,6 +200,7 @@ export function ConnectorBubble({ message, threadId }: ConnectorBubbleProps) {
   const rawUrl = source.url;
   const srcUrl = rawUrl && /^https?:\/\//.test(rawUrl) ? rawUrl : undefined;
   const sourceCatId = typeof source.meta?.catId === 'string' ? source.meta.catId : undefined;
+  const holdStatusRefreshKey = getHoldStatusRefreshKey(message);
 
   const avatar = (
     <div
@@ -214,7 +252,12 @@ export function ConnectorBubble({ message, threadId }: ConnectorBubbleProps) {
       {richBlocks && richBlocks.length > 0 && <RichBlocks blocks={richBlocks} messageSource={message.source} />}
       {source.connector === 'hold-ball' && typeof source.meta?.taskId === 'string' && (
         <div className="mt-2 pt-2 border-t border-cafe-border">
-          <HoldBallCancelButton taskId={source.meta.taskId} threadId={threadId} catId={sourceCatId} />
+          <HoldBallCancelButton
+            key={holdStatusRefreshKey}
+            taskId={source.meta.taskId}
+            threadId={threadId}
+            catId={sourceCatId}
+          />
         </div>
       )}
     </MessageBubble>

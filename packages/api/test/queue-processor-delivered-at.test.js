@@ -42,7 +42,18 @@ function stubDeps(overrides = {}) {
     messageStore: {
       append: mock.fn(async () => ({ id: 'msg-stub' })),
       getById: mock.fn(async () => null),
-      markDelivered: mock.fn(async () => ({ id: 'msg-1', deliveredAt: Date.now() })),
+      markDelivered: mock.fn(async () => ({
+        id: 'msg-1',
+        threadId: 't1',
+        content: 'delivered',
+        catId: null,
+        timestamp: Date.now(),
+        mentions: [],
+        userId: 'u1',
+        deliveryStatus: 'delivered',
+        deliveredAt: Date.now(),
+        deliveryTransitioned: true,
+      })),
     },
     log: {
       info: mock.fn(),
@@ -65,6 +76,7 @@ describe('QueueProcessor deliveredAt backfill', () => {
   it('calls markDelivered for primary messageId when executing queue entry', async () => {
     // Enqueue + backfill messageId
     const result = deps.queue.enqueue({
+      ownerAuthProvenance: 'unknown',
       threadId: 't1',
       userId: 'u1',
       content: 'hello',
@@ -90,6 +102,7 @@ describe('QueueProcessor deliveredAt backfill', () => {
 
   it('calls markDelivered for entry messageId (F175: merge removed)', async () => {
     const result = deps.queue.enqueue({
+      ownerAuthProvenance: 'unknown',
       threadId: 't1',
       userId: 'u1',
       content: 'first',
@@ -110,6 +123,7 @@ describe('QueueProcessor deliveredAt backfill', () => {
 
   it('passes a reasonable timestamp (close to now)', async () => {
     const result = deps.queue.enqueue({
+      ownerAuthProvenance: 'unknown',
       threadId: 't1',
       userId: 'u1',
       content: 'hello',
@@ -139,6 +153,7 @@ describe('QueueProcessor deliveredAt backfill', () => {
     });
 
     const result = deps.queue.enqueue({
+      ownerAuthProvenance: 'unknown',
       threadId: 't1',
       userId: 'u1',
       content: 'hello',
@@ -166,6 +181,7 @@ describe('QueueProcessor deliveredAt backfill', () => {
     deps.messageStore.markDelivered = mock.fn(async () => null);
 
     const result = deps.queue.enqueue({
+      ownerAuthProvenance: 'unknown',
       threadId: 't1',
       userId: 'u1',
       content: 'hello',
@@ -184,6 +200,41 @@ describe('QueueProcessor deliveredAt backfill', () => {
       deliveredEvents.length,
       0,
       `should not emit messages_delivered for null results, got ${deliveredEvents.length}`,
+    );
+  });
+
+  it('does not emit messages_delivered when markDelivered returns a non-transitioned visible message (cloud P2-R5)', async () => {
+    deps.messageStore.markDelivered = mock.fn(async (id) => ({
+      id,
+      threadId: 't1',
+      content: 'already visible trigger',
+      catId: 'codex',
+      timestamp: Date.now(),
+      mentions: ['opus'],
+      userId: 'u1',
+      deliveryTransitioned: false,
+    }));
+
+    const result = deps.queue.enqueue({
+      ownerAuthProvenance: 'unknown',
+      threadId: 't1',
+      userId: 'u1',
+      content: 'already visible trigger',
+      source: 'connector',
+      targetCats: ['opus'],
+      intent: 'execute',
+    });
+    deps.queue.backfillMessageId('t1', 'u1', result.entry.id, 'msg-visible');
+
+    await processor.onInvocationComplete('t1', 'opus', 'succeeded');
+    await new Promise((r) => setTimeout(r, 100));
+
+    const emitCalls = deps.socketManager.emitToUser.mock.calls;
+    const deliveredEvents = emitCalls.filter((c) => c.arguments[1] === 'messages_delivered');
+    assert.equal(
+      deliveredEvents.length,
+      0,
+      `should not emit messages_delivered for non-transitioned messages, got ${deliveredEvents.length}`,
     );
   });
 });

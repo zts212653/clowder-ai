@@ -111,6 +111,28 @@ describe('POST /api/threads/:id/read/latest', () => {
     assert.equal(body.messageId, msg2.id);
   });
 
+  it('acks a queued cat-authored message already published to the timeline', async () => {
+    const thread = threadStore.create('alice', 'Thread with source-cat seed');
+    const seed = messageStore.append({
+      userId: 'alice',
+      catId: 'codex-sol',
+      content: 'published source-cat seed',
+      mentions: ['opus'],
+      timestamp: 1000,
+      threadId: thread.id,
+      deliveryStatus: 'queued',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${thread.id}/read/latest`,
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(JSON.parse(res.body), { advanced: true, messageId: seed.id });
+  });
+
   it('is idempotent — second call returns advanced=false', async () => {
     const thread = threadStore.create('alice', 'Thread');
     messageStore.append({

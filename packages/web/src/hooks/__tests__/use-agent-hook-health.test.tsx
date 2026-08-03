@@ -21,6 +21,19 @@ const configuredResponse = {
   ],
 };
 
+const staleResponse = {
+  status: 'stale',
+  targets: [
+    {
+      name: 'skills',
+      status: 'stale',
+      drifted: true,
+      reason: '1 stale, 196 conflicts',
+      targetPath: '',
+    },
+  ],
+};
+
 function flushPromises() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -30,6 +43,13 @@ function Probe({ onStatus }: { onStatus: (status: string | null) => void }) {
   useEffect(() => {
     onStatus(health?.status ?? null);
   }, [health?.status, onStatus]);
+  return null;
+}
+
+let latestResult: ReturnType<typeof useAgentHookHealth> | null = null;
+
+function SyncProbe() {
+  latestResult = useAgentHookHealth({ enabled: true });
   return null;
 }
 
@@ -85,5 +105,31 @@ describe('useAgentHookHealth', () => {
     expect(apiFetch).toHaveBeenCalledTimes(1);
     expect(apiFetch).toHaveBeenCalledWith('/api/agent-hooks/status');
     expect(statuses).toContain('configured');
+  });
+
+  it('records a partial sync attempt when sync succeeds but drift remains', async () => {
+    vi.mocked(apiFetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => staleResponse,
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => staleResponse,
+      } as Response);
+
+    await act(async () => {
+      root.render(<SyncProbe />);
+      await flushPromises();
+    });
+
+    await act(async () => {
+      await latestResult?.sync();
+      await flushPromises();
+    });
+
+    expect(latestResult?.health).toEqual(staleResponse);
+    expect(latestResult?.synced).toBe(false);
+    expect(latestResult?.syncAttempted).toBe(true);
   });
 });

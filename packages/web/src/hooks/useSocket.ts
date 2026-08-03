@@ -14,9 +14,11 @@ import { useGuideStore } from '@/stores/guideStore';
 import { useToastStore } from '@/stores/toastStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
 import { getUserId } from '@/utils/userId';
+import { hydrateQueueActiveInvocationSlots, type QueueActiveInvocationSlot } from './queue-active-invocation-hydration';
 // F173 Phase E: isInvocationReplaced 检查已下沉到 useAgentMessages.handleAgentMessage
 // dispatch entry，useSocket 不再做 active path drop guard。
 import { reconnectGame } from './useGameReconnect';
+import { emitExplicitCancel, newCancelIdentity } from './useSocket-cancel-provenance';
 // F173 Phase E (KD-1): bg refs + background message processing moved into
 // useAgentMessages — useSocket no longer dispatches active vs background.
 import { type AgentMessageCoalescer, createAgentMessageCoalescer } from './useSocket-message-coalescer';
@@ -166,6 +168,40 @@ function getLiveQueueHydrateEpoch(threadId: string): number {
   return liveQueueHydrateEpoch.get(threadId) ?? 0;
 }
 
+async function hydrateFreshnessClosureProjections(
+  threadId: string,
+  onMessage: (message: AgentMessage) => void,
+): Promise<void> {
+  try {
+    const response = await apiFetch(`/api/threads/${threadId}/freshness-closures`);
+    if (!response.ok) return;
+    const payload = (await response.json()) as {
+      closures?: Array<{ catId: string; updatedAt: number; [key: string]: unknown }>;
+      supplements?: Array<{ catId: string; updatedAt: number; [key: string]: unknown }>;
+    };
+    for (const projection of payload.closures ?? []) {
+      onMessage({
+        type: 'system_info',
+        catId: projection.catId,
+        threadId,
+        content: JSON.stringify(projection),
+        timestamp: projection.updatedAt,
+      });
+    }
+    for (const projection of payload.supplements ?? []) {
+      onMessage({
+        type: 'system_info',
+        catId: projection.catId,
+        threadId,
+        content: JSON.stringify(projection),
+        timestamp: projection.updatedAt,
+      });
+    }
+  } catch {
+    // Rebuildable projection only; live socket events and the next reconnect retry.
+  }
+}
+
 function hasStaleActiveThreadPresentation(state: ReturnType<typeof useChatStore.getState>, threadId: string): boolean {
   if (state.currentThreadId !== threadId) return false;
   if (state.messages.some((msg) => msg.type === 'assistant' && msg.isStreaming)) return true;
@@ -211,7 +247,7 @@ export async function reconcileThreadWithServer(
     if (shouldAbort()) return;
     if (!res.ok) return;
     const data = (await res.json()) as {
-      activeInvocations?: Array<{ catId: string; startedAt: number }>;
+      activeInvocations?: QueueActiveInvocationSlot[];
     };
     if (shouldAbort()) return;
     const store = useChatStore.getState();
@@ -225,13 +261,7 @@ export async function reconcileThreadWithServer(
       // F173 PR-C Task 10: thread-scoped writers throughout — flat is mirror, no
       // active vs background branch needed.
       const serverActiveCats = serverSlots.map((s) => s.catId);
-      store.clearThreadActiveInvocation(threadId);
-      store.replaceThreadTargetCats(threadId, serverActiveCats);
-      for (const slot of serverSlots) {
-        store.updateThreadCatStatus(threadId, slot.catId, 'streaming');
-        const syntheticId = `hydrated-${threadId}-${slot.catId}`;
-        store.addThreadActiveInvocation(threadId, syntheticId, slot.catId, 'execute', slot.startedAt);
-      }
+      hydrateQueueActiveInvocationSlots({ threadId, slots: serverSlots });
       finalizeStreamingBubblesAbsentFromServerSlots(threadId, new Set(serverActiveCats));
       console.log(`[ws] ${source} reconciliation: re-hydrated active slots from server`, {
         threadId,
@@ -375,7 +405,7 @@ function checkForStaleActiveInvocations(): void {
   }
 }
 
-export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
+export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregroundThreadIds?: string[]) {
   const socketRef = useRef<Socket | null>(null);
   const [socketConnected, setSocketConnected] = useState<boolean | null>(null);
   const joinedRoomsRef = useRef<Set<string>>(new Set());
@@ -385,6 +415,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
   // F173 Phase E (KD-1): bg refs (bgStreamRefs / bgFinalizedRefs / bgSeq) moved to
   // useAgentMessages — single dispatch handler owns them now。
   const userIdRef = useRef(getUserId());
+  const cancelClientInstanceIdRef = useRef<string | null>(null);
+  if (cancelClientInstanceIdRef.current === null) {
+    cancelClientInstanceIdRef.current = newCancelIdentity('client');
+  }
   const threadIdRef = useRef(threadId);
   threadIdRef.current = threadId;
 
@@ -516,6 +550,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       // F101: Recover game state on reconnect
       if (tid) {
         reconnectGame(tid).catch(() => {});
+        void hydrateFreshnessClosureProjections(tid, (message) => callbacksRef.current.onMessage(message));
       }
 
       // Reconnect reconciliation: verify invocation state against server truth.
@@ -751,6 +786,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     });
 
     const normalizeQueueForDebug = (queue: unknown): unknown[] => (Array.isArray(queue) ? queue : []);
+    const isQueueEntryObject = (entry: unknown): entry is import('../stores/chat-types').QueueEntry =>
+      entry !== null && typeof entry === 'object' && !Array.isArray(entry);
+    const normalizeQueueEntries = (queue: unknown): import('../stores/chat-types').QueueEntry[] =>
+      Array.isArray(queue) ? queue.filter(isQueueEntryObject) : [];
     const getQueueStatusesForDebug = (queue: unknown) =>
       normalizeQueueForDebug(queue).map((entry) => {
         if (!entry || typeof entry !== 'object') return 'unknown';
@@ -761,7 +800,15 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     // F39: Queue events — always write via store (no dual-pointer guard needed, queue is thread-scoped)
     socket.on('queue_updated', (data: { threadId: string; queue: unknown[]; action: string }) => {
       const store = useChatStore.getState();
-      store.setQueue(data.threadId, data.queue as import('../stores/chat-types').QueueEntry[]);
+      const queue = normalizeQueueEntries(data.queue);
+      store.setQueue(data.threadId, queue);
+      // F264: every durable user queue entry is owner-visible from admission.
+      // Hydrate the authoritative message so its receipt stays live and the
+      // same projection is recovered after F5. Connector/agent work remains
+      // queue-only and must not trigger a browser history read.
+      if (queue.some((entry) => entry.source === 'user' && typeof entry.messageId === 'string')) {
+        store.requestStreamCatchUp(data.threadId);
+      }
       // Queue processor started executing an entry: restore the coarse "active"
       // marker immediately, then hydrate current-thread slot truth from /queue.
       // This covers the gap where processing resumes before intent_mode lands:
@@ -815,6 +862,50 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
         });
       }
     });
+    // F264: a cross-thread Queue carrier is visible as soon as durable custody
+    // accepts it. This does not mark the backend message delivered; it only
+    // installs the original source message so live queueReceipt updates have a
+    // stable timeline anchor before terminal completion.
+    socket.on(
+      'messages_queued',
+      (data: {
+        threadId: string;
+        messageIds: string[];
+        messages: Array<{
+          id: string;
+          content: string;
+          catId: string | null;
+          timestamp: number;
+          contentBlocks?: readonly unknown[];
+          extra?: Record<string, unknown>;
+          origin?: 'stream' | 'callback' | 'briefing';
+          replyTo?: string;
+          replyPreview?: { senderCatId: string | null; content: string; deleted?: boolean; kind?: string };
+          mentionsUser?: boolean;
+        }>;
+      }) => {
+        const store = useChatStore.getState();
+        for (const message of data.messages) {
+          store.addMessageToThread(data.threadId, {
+            id: message.id,
+            type: message.catId ? 'assistant' : 'user',
+            content: message.content,
+            timestamp: message.timestamp,
+            ...(message.catId ? { catId: message.catId } : {}),
+            ...(message.contentBlocks
+              ? { contentBlocks: message.contentBlocks as import('../stores/chat-types').ChatMessage['contentBlocks'] }
+              : {}),
+            ...(message.extra ? { extra: message.extra as import('../stores/chat-types').ChatMessage['extra'] } : {}),
+            ...(message.origin ? { origin: message.origin } : {}),
+            ...(message.replyTo ? { replyTo: message.replyTo } : {}),
+            ...(message.replyPreview
+              ? { replyPreview: message.replyPreview as import('../stores/chat-types').ChatMessage['replyPreview'] }
+              : {}),
+            ...(message.mentionsUser ? { mentionsUser: true } : {}),
+          });
+        }
+      },
+    );
     // F098-D + F117: Messages delivered — update deliveredAt + insert user bubbles for queue sends
     socket.on(
       'messages_delivered',
@@ -827,6 +918,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
           content: string;
           catId: string | null;
           timestamp: number;
+          timelineOrderAt?: number;
           mentions: readonly string[];
           userId: string;
           contentBlocks?: readonly unknown[];
@@ -898,7 +990,13 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     // F085 Phase 4: Hyperfocus brake trigger from backend activity tracking
     socket.on(
       'brake:trigger',
-      (data: { level: 1 | 2 | 3; activeMinutes: number; nightMode: boolean; timestamp: number }) => {
+      (data: {
+        level: 1 | 2 | 3;
+        activeMinutes: number;
+        nightMode: boolean;
+        mode?: 'gentle' | 'hardcore';
+        timestamp: number;
+      }) => {
         useBrakeStore.getState().show(data);
       },
     );
@@ -1095,7 +1193,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     [persistJoinedRooms],
   );
 
-  /** Sync joined rooms to exactly the given set of thread IDs */
+  /** Sync joined rooms to foreground threads plus background work that is still live. */
   const syncRooms = useCallback(
     (threadIds: string[]) => {
       const socket = socketRef.current;
@@ -1105,7 +1203,13 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
 
       // Leave rooms no longer needed
       for (const room of joinedRoomsRef.current) {
-        if (!targetRooms.has(room)) {
+        const roomThreadId = room.slice('thread:'.length);
+        const store = useChatStore.getState();
+        const threadState = store.getThreadState(roomThreadId);
+        const hasKnownState = roomThreadId === store.currentThreadId || Object.hasOwn(store.threadStates, roomThreadId);
+        const mustRetainForBackgroundWork =
+          !hasKnownState || threadState.hasActiveInvocation || threadState.queue.length > 0;
+        if (!targetRooms.has(room) && !mustRetainForBackgroundWork) {
           socket.emit('leave_room', room);
           joinedRoomsRef.current.delete(room);
         }
@@ -1123,12 +1227,26 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     [persistJoinedRooms],
   );
 
-  // Automatically ensure active thread room is joined when threadId changes
+  const foregroundThreadIdsRef = useRef(foregroundThreadIds);
+  foregroundThreadIdsRef.current = foregroundThreadIds;
+  const foregroundRoomsKey = (foregroundThreadIds ?? (threadId ? [threadId] : [])).join('\u0000');
+  const previousForegroundRoomsKeyRef = useRef<string | null>(null);
+
+  // Initial mount restores a bounded legacy set for background catch-up. Once
+  // foreground ownership changes, synchronize and prune inactive rooms.
   useEffect(() => {
-    if (threadId) {
-      joinRoom(threadId);
+    const requestedThreadIds = foregroundThreadIdsRef.current ?? (threadId ? [threadId] : []);
+    if (previousForegroundRoomsKeyRef.current === null) {
+      previousForegroundRoomsKeyRef.current = foregroundRoomsKey;
+      for (const requestedThreadId of requestedThreadIds) joinRoom(requestedThreadId);
+    } else if (previousForegroundRoomsKeyRef.current !== foregroundRoomsKey) {
+      previousForegroundRoomsKeyRef.current = foregroundRoomsKey;
+      syncRooms(requestedThreadIds);
     }
-  }, [threadId, joinRoom]);
+    if (threadId) {
+      void hydrateFreshnessClosureProjections(threadId, (message) => callbacksRef.current.onMessage(message));
+    }
+  }, [foregroundRoomsKey, threadId, joinRoom, syncRooms]);
 
   const storeThreadId = useChatStore((s) => s.currentThreadId);
   useEffect(() => {
@@ -1145,7 +1263,14 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
   }, [threadId, storeThreadId]);
 
   const cancelInvocation = useCallback((tid: string, catId?: string) => {
-    socketRef.current?.emit('cancel_invocation', catId ? { threadId: tid, catId } : { threadId: tid });
+    const clientInstanceId = cancelClientInstanceIdRef.current;
+    if (!clientInstanceId) return;
+    emitExplicitCancel(socketRef.current, {
+      threadId: tid,
+      ...(catId ? { catId } : {}),
+      clientInstanceId,
+      actionId: newCancelIdentity('action'),
+    });
   }, []);
 
   return { socketRef, joinRoom, leaveRoom, syncRooms, cancelInvocation, socketConnected };

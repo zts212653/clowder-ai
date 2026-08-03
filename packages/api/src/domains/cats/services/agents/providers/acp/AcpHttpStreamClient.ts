@@ -25,6 +25,7 @@ import { createInterface } from 'node:readline';
 
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import { resolveCliCommandOrBare } from '../../../../../../utils/cli-resolve.js';
+import { buildChildEnv } from '../../../../../../utils/cli-spawn.js';
 import { resolveWindowsSpawnPlan } from '../../../../../../utils/cli-spawn-win.js';
 import {
   type AcpCapacitySignal,
@@ -102,7 +103,7 @@ export class AcpHttpStreamClient {
     const doSpawn = this.config.spawnFn ?? nodeSpawn;
     let command = resolveCliCommandOrBare(this.config.command);
     let args = [...this.config.args];
-    const childEnv = { ...process.env, ...this.config.env };
+    const childEnv = buildChildEnv(this.config.env);
     if (!IS_WINDOWS && isAbsolute(command)) {
       const binDir = dirname(command);
       childEnv.PATH = childEnv.PATH ? `${binDir}:${childEnv.PATH}` : binDir;

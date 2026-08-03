@@ -77,7 +77,10 @@ export interface ConnectorRouterOptions {
       threadId: string,
       state: { v: 1; connectorId: string; externalChatId: string; createdAt: number; lastCommandAt?: number } | null,
     ): void | Promise<void>;
-    updateSystemKind?(threadId: string, kind: 'connector_hub' | 'eval_domain' | null): void | Promise<void>;
+    updateSystemKind?(
+      threadId: string,
+      kind: 'connector_hub' | 'eval_domain' | 'cat_bedroom' | null,
+    ): void | Promise<void>;
     get?(threadId: string):
       | {
           projectPath?: string;

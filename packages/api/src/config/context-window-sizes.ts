@@ -26,6 +26,9 @@ export const CONTEXT_WINDOW_SIZES: Record<string, number> = {
   'o4-mini': 200_000,
   // MiniMax
   'MiniMax-M3': 1_000_000,
+  // Zhipu / BigModel
+  'glm-5.2': 1_000_000,
+  'glm-5.2[1m]': 1_000_000,
   'minimax-m3': 1_000_000,
   // Gemini
   'gemini-2.5-pro': 1_000_000,

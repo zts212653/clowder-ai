@@ -22,6 +22,12 @@ describe('computeRecencyDecay', () => {
     assert.equal(r.halfLife, 90);
   });
 
+  it('architecture doc (T=180): 180d old → factor 0.5', () => {
+    const r = computeRecencyDecay(180, 'architecture');
+    assert.equal(r.factor, 0.5);
+    assert.equal(r.halfLife, 180);
+  });
+
   it('thread doc (T=14): 14d old → factor 0.5', () => {
     const r = computeRecencyDecay(14, 'thread');
     assert.equal(r.factor, 0.5);

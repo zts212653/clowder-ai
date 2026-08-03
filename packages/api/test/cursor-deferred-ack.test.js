@@ -30,6 +30,7 @@ function createTrackingRouter(options = {}) {
     routeExecution: async function* (_userId, _msg, _threadId, _userMsgId, _cats, _intent, _opts) {
       if (shouldThrow) throw new Error('Boom');
       yield { type: 'text', catId: 'opus', content: 'ok', timestamp: Date.now() };
+      yield { type: 'done', catId: 'opus', timestamp: Date.now() };
     },
     resolveTargetsAndIntent: async () => ({
       targetCats: ['opus'],
@@ -65,6 +66,7 @@ async function setupScenario(router, status = 'failed') {
     targetCats: ['opus'],
     intent: 'execute',
     idempotencyKey: `key-cursor-${Date.now()}`,
+    actionLeaseCarrier: { kind: 'none' },
   });
   // Transition through proper lifecycle: queued → running → target status
   invocationRecordStore.update(createResult.invocationId, {
@@ -138,6 +140,7 @@ describe('ADR-008 S3: cursor deferred ack', () => {
       routeExecution: async function* (_u, _m, _t, _mid, _cats, _intent, opts) {
         capturedOpts = opts;
         yield { type: 'text', catId: 'opus', content: 'cap', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
       },
       resolveTargetsAndIntent: async () => ({
         targetCats: ['opus'],

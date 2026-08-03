@@ -161,4 +161,59 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
     expect(text).toContain('缅因猫');
     expect(text).not.toContain('0:00');
   });
+
+  it('shows canonical app-server stage and last provider activity in-context', async () => {
+    const now = Date.now();
+    useChatStore.setState({
+      activeInvocations: {
+        'inv-1': { catId: 'codex', mode: 'execute', startedAt: now - 10_000 },
+      },
+      hasActiveInvocation: true,
+      catInvocations: {
+        codex: {
+          invocationId: 'inv-1',
+          appServerLifecycle: {
+            stage: 'active',
+            lastActivityAt: now - 5_000,
+            recoveryAttempt: 0,
+            turnStartSent: true,
+            turnAccepted: true,
+            itemObserved: true,
+          },
+        },
+      },
+    });
+    await act(async () => root.render(React.createElement(ThreadExecutionBar)));
+
+    expect(container.textContent).toContain('运行回合');
+    expect(container.textContent).toMatch(/活动 [45] 秒前/);
+  });
+
+  it('marks a silent active app-server turn as visible warning without auto-canceling it', async () => {
+    const now = Date.now();
+    useChatStore.setState({
+      activeInvocations: {
+        'inv-1': { catId: 'codex', mode: 'execute', startedAt: now - 300_000 },
+      },
+      hasActiveInvocation: true,
+      catInvocations: {
+        codex: {
+          invocationId: 'inv-1',
+          appServerLifecycle: {
+            stage: 'active',
+            lastActivityAt: now - 130_000,
+            recoveryAttempt: 0,
+            turnStartSent: true,
+            turnAccepted: true,
+            itemObserved: false,
+          },
+        },
+      },
+    });
+    await act(async () => root.render(React.createElement(ThreadExecutionBar)));
+
+    expect(container.querySelector('[data-app-server-stalled="true"]')).not.toBeNull();
+    expect(container.textContent).toContain('可能在等待模型');
+    expect(container.querySelector('[aria-label="Stop 缅因猫"]')).not.toBeNull();
+  });
 });

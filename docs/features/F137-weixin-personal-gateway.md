@@ -112,7 +112,7 @@ operator确认已被灰度到 ClawBot（iLink Bot）功能。
 
 #### iLink 协议消息类型（`ILinkMessageItem.type`）
 
-| type 值 | 名称 | 入站（微信→Cat Cafe） | 出站（Cat Cafe→微信） |
+| type 值 | 名称 | 入站（微信→Clowder AI） | 出站（Clowder AI→微信） |
 |---------|------|:-----:|:-----:|
 | 1 | TEXT | 已实现 | 已实现 |
 | 2 | IMAGE | 已实现（CDN 下载 + AES 解密） | 已实现（CDN 上传 + `image_item`） |
@@ -140,7 +140,7 @@ operator确认已被灰度到 ClawBot（iLink Bot）功能。
 
 #### iLink 富媒体能力矩阵
 
-| 能力 | iLink 协议 | Cat Cafe 实现 | 状态 |
+| 能力 | iLink 协议 | Clowder AI 实现 | 状态 |
 |------|:-:|:-:|:-:|
 | 文字收/发 | ✅ | ✅ | Phase A 已完成 |
 | 图片收 | ✅ CDN URL | ✅ CDN 下载 + AES 解密 | Phase B 完成 |
@@ -418,7 +418,7 @@ cat-cafe:connector-binding:weixin:o9cq8008zWwzHxRSAQqEgo5Sz34g@im.wechat
 
 ## 2026-05-14 Hermes 最新对比审计
 
-**范围边界**：本节只记录 Cat Cafe 自身个人微信 iLink Bot 适配需要补齐的协议/可靠性问题。HermesClaw 的"同一个个人微信账号被 Hermes/OpenClaw/OpenCode 多 runtime 共享"本地代理模式不纳入 F137；我们只需要让猫猫自己的微信通道可靠工作。
+**范围边界**：本节只记录 Clowder AI 自身个人微信 iLink Bot 适配需要补齐的协议/可靠性问题。HermesClaw 的"同一个个人微信账号被 Hermes/OpenClaw/OpenCode 多 runtime 共享"本地代理模式不纳入 F137；我们只需要让猫猫自己的微信通道可靠工作。
 
 **核对来源**：
 - Hermes Agent latest main（本轮拉到 `ddb8d8fa`，2026-05-14）`gateway/platforms/weixin.py`

@@ -14,7 +14,7 @@ created: 2026-03-14
 
 operator截图展示了 Claude Code 的 embedded browser panel：猫猫跑 `pnpm dev` 后，旁边直接嵌一个浏览器看 `localhost:3847` 的完整应用，改代码 → HMR 热更新 → 浏览器实时刷新。
 
-Cat Café 目前的差距：
+Clowder AI 目前的差距：
 
 1. **F063 AC-5 只做了静态渲染**：单文件 HTML/JSX 通过 esbuild-wasm + iframe sandbox 渲染，不是运行中的应用
 2. **看前端效果要切浏览器**：猫猫在 worktree 写前端代码，operator想看效果必须切到 Chrome 打开 localhost——这和 F063 愿景（"不用打开 IDE 也能协作"）同源，但 scope 是全新的
@@ -127,7 +127,7 @@ operator experience（2026-03-14，Phase C 讨论）：
 ### Phase B（安全与隔离） ✅
 - [x] AC-B1: browser panel 只能访问 localhost，尝试访问外部 URL 被拦截
 - [x] AC-B2: iframe 内页面无法访问 Hub 的 Cookie/Storage/DOM
-- [x] AC-B3: 禁止访问 Cat Café 自身 API 端口（可配置排除列表）
+- [x] AC-B3: 禁止访问 Clowder AI 自身 API 端口（可配置排除列表）
 
 ### Phase C（增强体验） ✅
 - [x] AC-C1: 猫可通过 API 触发 `preview:auto-open`，前端自动打开 browser panel（无需用户点击 toast）

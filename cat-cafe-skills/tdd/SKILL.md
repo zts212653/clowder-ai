@@ -1,10 +1,10 @@
 ---
 name: tdd
 description: >
-  Red-Green-Refactor 测试驱动开发纪律。
-  Use when: 写新功能代码、修 bug、任何实现工作。
-  Not for: 纯文档、纯调研、已有充分测试的 trivial 改动。
-  Output: 失败测试 → 最小实现 → 重构，全程有测试保护。
+  Red-Green-Refactor for changes with behavior or regression risk.
+  Use when: adding observable behavior, fixing a bug, or changing logic not already covered by a precise executable check.
+  Not for: pure docs/research, deterministic generated-artifact refreshes, or mechanical changes already covered by an existing checker.
+  Output: observed RED (new test or existing failing check) → minimal GREEN → refactor under protection.
 triggers:
   - "写代码"
   - "test first"
@@ -14,111 +14,77 @@ triggers:
 
 # TDD（测试驱动开发）
 
-先写测试。看它失败。写最少代码通过。
+行为变化先看到一个可信的失败信号，再写最少实现把它变绿。**RED 是证据状态，不是必须新建测试文件。**
 
-**铁律：没有失败的测试，就没有实现代码。**
+## 风险入口
 
-## 核心知识
+| 改动 | 怎么走 |
+|---|---|
+| 新增用户可见 / runtime 行为 | 先写能失败的行为测试，再实现 |
+| 修 bug，现有测试没有复现 | 先补回归测试，确认按正确原因失败 |
+| 现有精确检查已经红 | 这就是现成 RED；直接修到该检查绿，不重复造测试 |
+| 确定性生成物过期 | generator / sync check 的失败就是 RED；重生成后复跑，不另写“测试生成物存在”的测试 |
+| 纯文档、调研、无行为的机械改动 | 不触发本 skill；跑与改动面匹配的校验 |
 
-### 为什么顺序绝对不能反？（4 个常见异议的反驳）
+判断标准不是“有没有写代码”，而是“是否引入或修复了可观察行为，且现有检查能否准确保护它”。拿不准是否有行为风险时，按有风险处理。
 
-| 异议 | 真相 |
-|------|------|
-| "写完再补测试，也能验证" | 测试写在实现后会立即通过——你永远不知道它是否真的在测你要的东西 |
-| "我手工测了所有 case" | 手工测试没有记录、不能重跑、下次改动时你会忘了测什么 |
-| "删掉 X 小时的工作太浪费" | 沉没成本谬误。留着无法信任的代码才是浪费 |
-| "TDD 是教条，务实应该灵活" | TDD 本身就是务实的——它比事后调试快，能防止回归，是真正的捷径 |
+## RED 来源
 
-**Tests-after 回答"这段代码做了什么"；tests-first 回答"这段代码应该做什么"。两者不等价。**
+RED 可以来自两处：
 
-### Red-Green-Refactor 循环
+1. **新测试**：现有检查没有表达目标行为。先写测试，亲眼确认它以预期原因失败。
+2. **现有检查**：CI、typecheck、schema/index freshness、generator drift 等已经准确指出目标差异。保存命令与失败输出；它已经完成了 RED 的工作。
 
-```
-RED  → 写一个会失败的测试
-       ↓ 必须亲眼看到它失败（失败原因要对，不是 typo）
-GREEN → 写最少代码让测试通过
-       ↓ 必须亲眼看到它通过（其他测试也要绿）
-REFACTOR → 消除重复、改善命名
-       ↓ 保持绿灯，不添加行为
-重复 →
-```
+禁止为了仪式感叠加第二个等价 RED。尤其是 checked-in index、代码生成结果、格式化快照等确定性派生物：精准 checker 红 → 重生成 → 同一 checker 绿，就是完整闭环。
 
-**关键决策点**：
-- RED 阶段测试立即通过？→ 你在测已有行为，修测试
-- RED 阶段报错而非失败？→ 修错误直到"正确地失败"
-- GREEN 阶段其他测试挂了？→ 立即修，不要继续
-- REFACTOR 后测试变红？→ 撤销 refactor，重来
+## Red-Green-Refactor
 
-### Bug Fix 模式
-
-Bug 修复和新功能一样，必须先写失败测试。**入口动作：先填诊断胶囊。**
-
-> 诊断胶囊模板 → [refs/bug-diagnosis-capsule.md](../refs/bug-diagnosis-capsule.md)
-
-```bash
-# 0. 填诊断胶囊（现象/证据/假设/诊断策略/超时策略/预警策略）
-# 1. 写一个复现 bug 的测试（此时必须红）
-# 2. 确认测试以"预期的理由"失败
-# 3. 修复代码
-# 4. 确认测试通过 → 填胶囊第 8 栏（验收）
-# 5. 确认无回归
+```text
+RED      观察可信失败信号
+  ↓
+GREEN    写最少实现，让同一信号通过；相关检查也保持绿
+  ↓
+REFACTOR 消除重复、改善命名，不新增行为；复跑同一保护集
 ```
 
-**永远不要在没有测试的情况下修 bug。**
+- RED 立即通过：目标行为已经存在，或检查没覆盖目标；先纠正测试/判断。
+- RED 是语法错误、环境错误：修到它能准确表达行为失败再继续。
+- GREEN 让别的检查变红：停下修复回归，不扩 scope。
+- REFACTOR 后变红：回退这次重构，重新收敛。
 
-## 流程
+## Bug Fix 模式
 
-```
-任务开始
-  ↓
-写一个描述期望行为的测试
-  ↓
-跑测试 → 失败？→ 继续
-              → 通过？→ 你在测已有行为，修测试
-  ↓
-写最少实现代码
-  ↓
-跑测试 → 通过？→ 继续
-              → 失败？→ 修代码（不改测试）
-  ↓
-全量测试通过？→ Refactor → 重复
-```
+未知根因、跨层或非确定性 bug 先加载 `debugging`，用[诊断胶囊](../refs/bug-diagnosis-capsule.md)定位；确定根因后再选择 RED：
 
-## Quick Reference
+- 没有现成复现 → 新增失败回归测试；
+- 已有精确失败检查 → 直接把它当 RED；
+- 确定性 `main` 红且修复可逆、无行为变化 → 走 Harness Diet fix-forward，不为找 owner 或新建测试排队。
 
-### 好测试的标准
+安全、鉴权、生产数据、外部契约与不可逆面即使已有 RED，也不因此降级其他门禁；RED 只回答测试入口，不回答授权与合入风险。
 
-- **一个行为**：名字里有"and"？拆分
-- **名字描述行为**：`rejects empty email` 好于 `test1`
-- **测真实代码**：避免只测 mock
+## 正反灰例
 
-### 口令：立即停止的 Red Flags
-
-听到自己说以下任何一句 → 删掉代码，从测试重新开始：
-
-- "应该能过"、"大概没问题"、"先快速实现一下"
-- "测试我写完功能再补"、"这个太简单了不用测"
-- "我已经手工验证过了"、"精神一致就够了，不用走形式"
-- "这个情况不一样，因为……"、"留着参考，写测试时再删"
-
-**所有这些都是理由化（Rationalization）。没有例外。**
+- 正例：API 对空 token 返回 200，现有测试没覆盖 → 先补失败回归测试。
+- 正例：`pnpm check:sop-definitions` 报 checked-in 生成文件 stale → 该失败就是 RED，运行 generator 后复验。
+- 反例：给纯 discussion 改措辞 → 不写单测，跑 docs/format 校验。
+- 反例：index generator 已精准报 drift，却另造一个同义单测 → 删除重复测试。
+- 灰例：机械 rename 有完整 typecheck 覆盖 → typecheck 红可作 RED；若还改变对外名字/契约，则升级为行为测试 + 契约风险车道。
 
 ## Common Mistakes
 
-| 错误 | 正确做法 |
-|------|----------|
-| 先写实现，再补测试 | 删掉实现，从失败测试开始 |
-| 跳过"看它失败"步骤 | 必须跑测试亲眼看失败 |
-| 测试立即通过就继续 | 停下来——测试没有测到真正的行为 |
-| 修 bug 时直接改代码 | 先写复现 bug 的失败测试 |
-| GREEN 阶段过度实现 | 只写能通过当前测试的最少代码 |
-| mock 了所有东西 | 代码耦合度太高，用依赖注入简化 |
+| 错误 | 后果 | 修正 |
+|---|---|---|
+| 先实现，再补从未失败过的测试 | 无法证明测试能抓回归 | 回到可观察 RED |
+| 把“测试文件”当 TDD 目标 | 给确定性生成物制造冗余测试 | 复用现有精确检查 |
+| 因为已有 RED 就跳过安全/授权边界 | 测试证据被误当风险许可证 | 风险路由独立判断 |
+| 小修也强造新 RED | 仪式成本高于信息增益 | 无行为或现有 checker 已覆盖就不新增 |
+| RED 只是环境/拼写错误仍继续 | 失败信号不可信 | 修到按预期原因失败 |
 
 ## 和其他 skill 的区别
 
-- **vs `debugging`**：TDD 是**预防性**的（写代码前）；debugging 是**修复性**的（bug 出现后）。两者的交叉点：debugging 发现 bug 后，Phase 4 必须先写失败测试再修（此时切换回 TDD 模式）
-- **vs `quality-gate`**：TDD 是开发过程中的纪律；quality-gate 是提交前的验收检查
+- `debugging`：先定位未知根因；TDD 在方向确定后保护行为变化。
+- `quality-gate`：按风险汇总交付证据；TDD 只负责实现循环中的行为保护。
 
 ## 下一步
 
-完成功能实现后 → **直接加载 `quality-gate`** 做提交前验收。不要停下来问operator（§17）。
+实现完成后，按风险选择 targeted 自检或 `quality-gate`；不要因使用了 TDD 自动触发其余所有车道。

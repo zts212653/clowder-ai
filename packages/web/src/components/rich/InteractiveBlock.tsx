@@ -25,7 +25,8 @@ export function buildSelectionMessage(
   customText?: string,
 ): string {
   if (interactiveType === 'confirm') {
-    const action = selectedIds[0] === '__confirm__' ? '确认' : '取消';
+    const confirmId = options.find((option) => option.id === '__confirm__')?.id ?? options[0]?.id ?? '__confirm__';
+    const action = selectedIds[0] === confirmId ? '确认' : '取消';
     return title ? `${action} — ${title}` : action;
   }
 
@@ -423,8 +424,15 @@ function ConfirmInteraction({
   onSelect: (ids: string[]) => void;
   pendingMode?: boolean;
 }) {
-  const confirmOpt = options.find((o) => o.id === '__confirm__') ?? { id: '__confirm__', label: '确认' };
-  const cancelOpt = options.find((o) => o.id === '__cancel__') ?? { id: '__cancel__', label: '取消' };
+  // Producers own option ids. The legacy sentinels remain preferred when
+  // present; otherwise confirm blocks use their declared first/second options.
+  const confirmOpt = options.find((option) => option.id === '__confirm__') ??
+    options[0] ?? {
+      id: '__confirm__',
+      label: '确认',
+    };
+  const cancelOpt = options.find((option) => option.id === '__cancel__') ??
+    options.find((option) => option.id !== confirmOpt.id) ?? { id: '__cancel__', label: '取消' };
   const [pendingId, setPendingId] = useState<string | null>(null);
   const selectedId = disabled ? selectedIds[0] : pendingMode ? pendingId : selectedIds[0];
 
@@ -443,10 +451,10 @@ function ConfirmInteraction({
       <button
         type="button"
         disabled={disabled}
-        onClick={() => handleClick('__cancel__')}
+        onClick={() => handleClick(cancelOpt.id)}
         className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all border-[1.5px] flex items-center justify-center gap-1.5
           ${
-            selectedId === '__cancel__'
+            selectedId === cancelOpt.id
               ? 'bg-conn-red-bg border-conn-red-ring text-conn-red-text -text'
               : disabled && selectedId
                 ? 'bg-cafe-surface-elevated border-cafe text-cafe-muted opacity-50 cursor-not-allowed'
@@ -455,7 +463,7 @@ function ConfirmInteraction({
                   : 'bg-conn-red-bg/50 border-conn-red-ring text-conn-red-text hover:bg-conn-red-bg hover:border-conn-red-ring cursor-pointer'
           }`}
       >
-        {selectedId !== '__cancel__' && (
+        {selectedId !== cancelOpt.id && (
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
@@ -465,10 +473,10 @@ function ConfirmInteraction({
       <button
         type="button"
         disabled={disabled}
-        onClick={() => handleClick('__confirm__')}
+        onClick={() => handleClick(confirmOpt.id)}
         className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all border-[1.5px] flex items-center justify-center gap-1.5
           ${
-            selectedId === '__confirm__'
+            selectedId === confirmOpt.id
               ? 'bg-conn-green-bg border-conn-green-ring text-conn-green-text '
               : disabled && selectedId
                 ? 'bg-cafe-surface-elevated border-cafe text-cafe-muted opacity-50 cursor-not-allowed'
@@ -477,7 +485,7 @@ function ConfirmInteraction({
                   : 'bg-conn-green-bg/50 border-conn-green-ring text-conn-green-text hover:bg-conn-green-bg hover:border-conn-green-ring cursor-pointer'
           }`}
       >
-        {selectedId !== '__confirm__' && (
+        {selectedId !== confirmOpt.id && (
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
           </svg>

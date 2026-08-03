@@ -1,3 +1,4 @@
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
@@ -67,7 +68,7 @@ describe('routeSerial A2A tracker bridge', () => {
       signal: controller.signal,
       invocationController: controller,
       trackA2ASlot: (tid, catId, uid, ctrl) => {
-        tracker.trackExternalSlot(tid, catId, ctrl, uid, [catId]);
+        return tracker.trackExternalSlot(tid, catId, ctrl, uid, [catId]);
       },
       completeA2ASlots: (tid, catIds, ctrl) => {
         for (const catId of catIds) tracker.completeSlot(tid, catId, ctrl);
@@ -123,7 +124,7 @@ describe('routeSerial A2A tracker bridge', () => {
       maxA2ADepth: 3,
       trackA2ASlot: (tid, catId, uid, ctrl) => {
         if (catId === 'codex') codexTrackCount++;
-        tracker.trackExternalSlot(tid, catId, ctrl, uid, [catId]);
+        return tracker.trackExternalSlot(tid, catId, ctrl, uid, [catId]);
       },
       completeA2ASlots: (tid, catIds, ctrl) => {
         for (const catId of catIds) tracker.completeSlot(tid, catId, ctrl);
@@ -183,7 +184,7 @@ describe('routeSerial A2A tracker bridge', () => {
       signal: controller.signal,
       invocationController: controller,
       trackA2ASlot: (tid, catId, uid, ctrl) => {
-        tracker.trackExternalSlot(tid, catId, ctrl, uid, [catId]);
+        return tracker.trackExternalSlot(tid, catId, ctrl, uid, [catId]);
       },
       completeA2ASlots: (tid, catIds, ctrl) => {
         for (const catId of catIds) tracker.completeSlot(tid, catId, ctrl);
@@ -205,6 +206,204 @@ describe('routeSerial A2A tracker bridge', () => {
 
     assert.equal(sawOpusDone, true, 'test must exercise the callback-only handoff point');
     assert.equal(tracker.has(threadId), false, 'callback A2A slot must be cleaned up after the chain finishes');
+  });
+
+  it('defers an A2A return instead of invoking a cat owned by another active route', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+
+    const threadId = 'thread-a2a-active-external-owner';
+    const userId = 'user-a';
+    const tracker = new InvocationTracker();
+    const directOwnerBatch = tracker.startAll(threadId, ['codex'], userId, 'direct-sol');
+    const routeBatch = tracker.startAll(threadId, ['opus'], userId, 'queued-opus');
+    const directOwnerController = tracker.getController(threadId, 'codex');
+    const queue = new InvocationQueue();
+    let codexInvocations = 0;
+
+    const deps = createMockDeps({
+      opus: {
+        async *invoke() {
+          yield { type: 'text', catId: 'opus', content: '@codex\n复核完成，回球给你', timestamp: Date.now() };
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        },
+      },
+      codex: {
+        async *invoke() {
+          codexInvocations++;
+          yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+        },
+      },
+    });
+
+    for await (const msg of routeSerial(deps, ['opus'], 'review', userId, threadId, {
+      signal: routeBatch.signal,
+      invocationController: routeBatch,
+      deferA2AEnqueue: (entry) => queue.enqueue(entry),
+      trackA2ASlot: (tid, catId, uid, ctrl) => tracker.trackExternalSlot(tid, catId, ctrl, uid, [catId], 'queued-opus'),
+      completeA2ASlots: (tid, catIds, ctrl) => {
+        for (const catId of catIds) tracker.completeSlot(tid, catId, ctrl);
+      },
+    })) {
+      if (msg.type === 'done' && msg.catId === 'opus') {
+        tracker.completeSlot(threadId, 'opus', routeBatch);
+      }
+    }
+
+    assert.equal(codexInvocations, 0, 'the A2A return must not start a second Codex invocation');
+    const deferred = queue.list(threadId, userId);
+    assert.equal(deferred.length, 1, 'the A2A return must be durably deferred instead of dropped');
+    assert.deepEqual(deferred[0].targetCats, ['codex']);
+    assert.equal(deferred[0].sourceCategory, 'a2a');
+    assert.equal(deferred[0].autoExecute, true);
+    assert.equal(deferred[0].messageId, 'msg-2', 'the persisted review reply must remain the queue trigger');
+    assert.equal(deferred[0].a2aTriggerMessageId, 'msg-2');
+    assert.equal(
+      tracker.getController(threadId, 'codex'),
+      directOwnerController,
+      'the original direct invocation must keep ownership of its slot',
+    );
+    assert.equal(directOwnerBatch.signal.aborted, false, 'deferring the return must not abort the original invocation');
+  });
+
+  it('fails closed when a route ingress omits the A2A slot-admission bridge', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+
+    let codexInvocations = 0;
+    const deps = createMockDeps({
+      opus: {
+        async *invoke() {
+          yield { type: 'text', catId: 'opus', content: '@codex\n复核完成，回球给你', timestamp: Date.now() };
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        },
+      },
+      codex: {
+        async *invoke() {
+          codexInvocations++;
+          yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+        },
+      },
+    });
+
+    await assert.rejects(async () => {
+      for await (const _ of routeSerial(deps, ['opus'], 'review', 'user-a', 'thread-a2a-bridge-missing', {})) {
+        // drain
+      }
+    }, /A2A slot admission unavailable: route bridge missing/);
+    assert.equal(codexInvocations, 0, 'a missing bridge must never degrade to an untracked second invocation');
+  });
+
+  it('fails the route when an occupied-slot handoff has no durable queue', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+
+    const controller = new AbortController();
+    let codexInvocations = 0;
+    const deps = createMockDeps({
+      opus: {
+        async *invoke() {
+          yield { type: 'text', catId: 'opus', content: '@codex\n复核完成，回球给你', timestamp: Date.now() };
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        },
+      },
+      codex: {
+        async *invoke() {
+          codexInvocations++;
+          yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+        },
+      },
+    });
+
+    await assert.rejects(async () => {
+      for await (const _ of routeSerial(deps, ['opus'], 'review', 'user-a', 'thread-a2a-custody-rejected', {
+        signal: controller.signal,
+        invocationController: controller,
+        trackA2ASlot: () => false,
+      })) {
+        // drain
+      }
+    }, /durable A2A custody unavailable/);
+    assert.equal(codexInvocations, 0, 'custody failure must fail closed before a second Codex invocation');
+  });
+
+  it('fails the route when durable enqueue explicitly rejects an occupied-slot handoff', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+
+    const controller = new AbortController();
+    let codexInvocations = 0;
+    const deps = createMockDeps({
+      opus: {
+        async *invoke() {
+          yield { type: 'text', catId: 'opus', content: '@codex\n复核完成，回球给你', timestamp: Date.now() };
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        },
+      },
+      codex: {
+        async *invoke() {
+          codexInvocations++;
+          yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+        },
+      },
+    });
+
+    await assert.rejects(async () => {
+      for await (const _ of routeSerial(deps, ['opus'], 'review', 'user-a', 'thread-a2a-custody-full', {
+        signal: controller.signal,
+        invocationController: controller,
+        deferA2AEnqueue: () => ({ outcome: 'full' }),
+        trackA2ASlot: () => false,
+      })) {
+        // drain
+      }
+    }, /durable A2A custody unavailable.*enqueue outcome full/);
+    assert.equal(codexInvocations, 0, 'rejected custody must not invoke the occupied target');
+  });
+
+  it('fails the route when a callback-pushed occupied target has no recoverable trigger content', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { pushToWorklist } = await import('../dist/domains/cats/services/agents/routing/WorklistRegistry.js');
+
+    const controller = new AbortController();
+    let enqueueCalls = 0;
+    let codexInvocations = 0;
+    const deps = createMockDeps({
+      opus: {
+        async *invoke() {
+          const result = pushToWorklist('thread-a2a-custody-no-content', ['codex'], 'opus');
+          assert.deepEqual(result.added, ['codex']);
+          yield {
+            type: 'tool_use',
+            catId: 'opus',
+            toolName: 'cat_cafe_post_message',
+            toolInput: { targetCats: ['codex'] },
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        },
+      },
+      codex: {
+        async *invoke() {
+          codexInvocations++;
+          yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+        },
+      },
+    });
+
+    await assert.rejects(async () => {
+      for await (const _ of routeSerial(deps, ['opus'], 'review', 'user-a', 'thread-a2a-custody-no-content', {
+        signal: controller.signal,
+        invocationController: controller,
+        deferA2AEnqueue: () => {
+          enqueueCalls++;
+          return { outcome: 'enqueued' };
+        },
+        trackA2ASlot: () => false,
+      })) {
+        // drain
+      }
+    }, /durable A2A custody unavailable/);
+    assert.equal(enqueueCalls, 0, 'missing trigger content must not enqueue an unusable placeholder');
+    assert.equal(codexInvocations, 0, 'missing trigger content must fail closed before invoking the occupied target');
   });
 
   it('trackExternalSlot purges a canceled tombstone instead of preserving its aborted controller', async () => {
@@ -264,8 +463,12 @@ describe('routeSerial A2A tracker bridge', () => {
     };
 
     // currentUserMessageId 提供 original target 的 messageId 来源（用户消息 id）。
+    const controller = new AbortController();
     for await (const _ of routeSerial(deps, ['opus'], 'start', 'user-a', 'thread-handed-p1', {
       currentUserMessageId: 'user-msg-1',
+      invocationController: controller,
+      trackA2ASlot: () => true,
+      completeA2ASlots: () => {},
     })) {
       // drain
     }

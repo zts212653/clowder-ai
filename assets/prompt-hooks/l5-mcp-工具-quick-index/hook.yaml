@@ -20,5 +20,5 @@ safetyTier: readonly
 transparencyTier: opt-in-view
 governanceTier: immutable
 
-# CVO-facing
+# operator-facing
 userExplanation: "MCP 工具家族快速索引"

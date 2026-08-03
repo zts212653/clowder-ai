@@ -28,7 +28,7 @@
   <path d="M0,70 C420,10 760,95 1120,42 C1440,-4 1660,42 2100,16 L2100,0 L0,0 Z" fill="#f8efe0" opacity="0.8"/>
   
   
-  <text x="900" y="70" text-anchor="middle" opacity="1" class="title"><tspan x="900" dy="0" fill="#263238" font-weight="850" font-size="48">Cat Cafe 运行时技术栈：代码在哪，改什么影响什么</tspan></text>
+  <text x="900" y="70" text-anchor="middle" opacity="1" class="title"><tspan x="900" dy="0" fill="#263238" font-weight="850" font-size="48">Clowder AI 运行时技术栈：代码在哪，改什么影响什么</tspan></text>
   <text x="900" y="112" text-anchor="middle" opacity="1" class=""><tspan x="900" dy="0" fill="#667085" font-weight="600" font-size="24">Hub → Fastify API → Provider / MCP / Storage；6399 是 runtime 用户数据圣域</tspan></text>
 
   
@@ -119,6 +119,6 @@
   
   <rect x="1015" y="968" width="560" height="44" rx="18" fill="#fee2e2" opacity="0.45"/>
   <text x="1025" y="988" text-anchor="start" opacity="1" class=""><tspan x="1025" dy="0" fill="#263238" font-weight="820" font-size="27">Redis 6399：runtime / 用户数据圣域</tspan><tspan x="1025" dy="31.86" fill="#263238" font-weight="820" font-size="27">Redis 6398：worktree / alpha / test 隔离</tspan><tspan x="1025" dy="31.86" fill="#263238" font-weight="820" font-size="27">SQLite：evidence.sqlite</tspan><tspan x="1025" dy="31.86" fill="#263238" font-weight="820" font-size="27">docs/：真相源</tspan><tspan x="1025" dy="31.86" fill="#263238" font-weight="820" font-size="27">git：版本控制 / 审计</tspan></text>
-  <text x="1570" y="1000" text-anchor="start" opacity="1" class=""><tspan x="1570" dy="0" fill="#dc2626" font-weight="900" font-size="22">6399 圣域</tspan></text>
+  <text x="1570" y="1000" text-anchor="start" opacity="1" class=""><tspan x="1570" dy="0" fill="#dc2626" font-weight="900" font-size="22">production Redis (sacred)</tspan></text>
   
 </svg>

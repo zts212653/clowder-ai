@@ -36,6 +36,24 @@ function setActive(catId: string, status: CatStatusType) {
   });
 }
 
+function setSilentActive(catId: string) {
+  setActive(catId, 'streaming');
+  useChatStore.setState({
+    catInvocations: {
+      [catId]: {
+        appServerLifecycle: {
+          stage: 'active',
+          lastActivityAt: Date.now() - 120_001,
+          recoveryAttempt: 0,
+          turnStartSent: true,
+          turnAccepted: true,
+          itemObserved: false,
+        },
+      },
+    },
+  });
+}
+
 describe('ThreadExecutionBar force-reset (F220 Phase 3)', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -114,19 +132,30 @@ describe('ThreadExecutionBar force-reset (F220 Phase 3)', () => {
     expect(entry?.getAttribute('data-escalated')).toBe('false');
   });
 
-  it('does not render capability tips in the execution bar', async () => {
+  it('escalates when app-server is active but silent past the recovery threshold', () => {
+    setSilentActive('opus');
+    act(() => {
+      root.render(React.createElement(ThreadExecutionBar, { threadId: 'thread-a' }));
+    });
+    const entry = container.querySelector('[data-testid="force-reset-entry"]');
+    expect(entry?.getAttribute('data-escalated')).toBe('true');
+  });
+
+  it('does not duplicate pre-output capability tips in the execution chrome', () => {
+    setActive('opus', 'streaming');
+    act(() => {
+      root.render(React.createElement(ThreadExecutionBar, { threadId: 'thread-a' }));
+    });
+    expect(container.querySelector('[data-testid="capability-tip-strip"]')).toBeNull();
+  });
+
+  it('suppresses capability tips while the execution is stalled', () => {
     vi.useFakeTimers();
     try {
-      setActive('opus', 'streaming');
+      setActive('opus', 'suspected_stall');
       act(() => {
         root.render(React.createElement(ThreadExecutionBar, { threadId: 'thread-a' }));
       });
-      expect(container.querySelector('[data-testid="capability-tip-strip"]')).toBeNull();
-
-      await act(async () => {
-        vi.advanceTimersByTime(6000);
-      });
-
       expect(container.querySelector('[data-testid="capability-tip-strip"]')).toBeNull();
     } finally {
       vi.useRealTimers();

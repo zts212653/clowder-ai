@@ -278,8 +278,8 @@
     },
     {
       "id": "F047",
-      "name": "Queue Steer（队列消息一键“立即执行 / 提到队首”）",
-      "status": "done | **Owner**: Maine Coon/Maine Coon（Codex）",
+      "name": "Queue Steer（取消当前轮并以同一消息立即重启）",
+      "status": "done（2026-07-12 语义修订） | **Owner**: Maine Coon/Maine Coon（Codex）",
       "file": "F047-queue-steer.md"
     },
     {
@@ -849,7 +849,7 @@
     {
       "id": "F140",
       "name": "GitHub PR Signals — 冲突检测 + Review Feedback 全来源感知",
-      "status": "done | **Owner**: Ragdoll | **Priority**: P1 | **Phase A-D Completed**: 2026-03-27 | **Reopened**: 2026-04-24（Phase E — 通知合流：severity 抽取 + 下线 email 路径） | **Completed**: 2026-04-25",
+      "status": "done（wake 契约 superseded by F280） | **Owner**: Ragdoll | **Priority**: P1 | **Phase A-D Completed**: 2026-03-27 | **Reopened**: 2026-04-24（Phase E — 通知合流：severity 抽取 + 下线 email 路径） | **Completed**: 2026-04-25",
       "file": "F140-github-pr-automation.md"
     },
     {
@@ -921,7 +921,7 @@
     {
       "id": "F152",
       "name": "Expedition Memory — 外部项目记忆冷启动 + 经验回流",
-      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1 | **Close Gate**: 2026-06-18 rerun complete — 代码链与 close 证物已补齐，仍等待 AC-C5 operator全链路终验",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1 | **Close Gate**: 2026-07-26 Phase C durable supply 已补牢（PR #3243）：`generalizable`、candidate queue、approved truth 均跨 rebuild；仅 AC-C5 operator全链路终验待完成。durable truth 归属为个人本地全局层，只有显式 export/share 才进入 repo/shared collection。",
       "file": "F152-expedition-memory.md"
     },
     {
@@ -1029,7 +1029,7 @@
     {
       "id": "F168",
       "name": "Community Operations Board — 社区事务编排引擎",
-      "status": "infra-complete / ops-gap 🚧 — 管道精密但没流水（2026-06-20 operator review 后重新定位）| **基础设施 A→E 全部 merged ✅** | **Phase F backend + backfill + board UX merged, opus-47 vision guards PASS ✅** | **运营闭环仍在推进 🚧**（端到端生产流未完成）| **Owner**: Ragdoll (opus-4.8) | **Priority**: P1",
+      "status": "infra-complete / ops-gap 🚧 — 管道精密但没流水（2026-06-20 operator review 后重新定位）| **基础设施 A→E 全部 merged ✅** | **Phase F backend + backfill + board UX merged, opus-47 vision guards PASS ✅** | **F-Step3 External Case Closure 已收敛、实现待续 🚧**（端到端生产流未完成）| **Owner**: Ragdoll (opus-4.8) | **Priority**: P1",
       "file": "F168-community-ops-board.md"
     },
     {
@@ -1083,7 +1083,7 @@
     {
       "id": "F177",
       "name": "Harness Update — Close Gate 结构化判据 + 四心智专属护栏",
-      "status": "reopened (Phase H merged; vision guard pending) | **Completed (Phase A–G)**: 2026-04-29 | **Reopened**: 2026-06-11 (Phase H) | **Owner**: Ragdoll(46 总负责) + Maine Coon(Maine Coon) + Bengal(46代言)，按 Phase 分主笔；Phase H Ragdoll(48) 主笔 + Maine Coon实现 | **Priority**: P0",
+      "status": "reopened (Phase L child-execution truth merged via PR #3036; Phase I/K/J complete; Phase G/H routing guard superseded by F167 Phase T cutover) | **Completed (Phase A–G)**: 2026-04-29 | **Reopened**: 2026-06-11 (Phase H), 2026-07-10 (Phase I/J), 2026-07-15 (Phase K), 2026-07-16 (Phase L) | **Owner**: Ragdoll(46 总负责) + Maine Coon(Maine Coon) + Bengal(46代言)，按 Phase 分主笔；Phase H Ragdoll(48) 主笔 + Maine Coon实现；Phase I/J/K/L Maine Coon Sol 主笔（独立 threads/worktrees） | **Priority**: P0",
       "file": "F177-harness-update.md"
     },
     {
@@ -1149,7 +1149,7 @@
     {
       "id": "F188",
       "name": "Library Stewardship — 图书馆管护与成长",
-      "status": "done | **Completed (A-J)**: 2026-05-26 | **Reopened**: 2026-06-09 (Phase K) | **Phase K Closed**: 2026-06-19 (PR #2414, merge `1ec99732`) | **Infra Fix**: 2026-06-19 (PR #2419 — alpha:start build-freshness gate, ADR-039 parity) | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "done | **Completed (A-J)**: 2026-05-26 | **Reopened**: 2026-06-09 (Phase K) | **Phase K Closed**: 2026-06-19 (PR #2414, merge `1ec99732`) | **Infra Fix**: 2026-06-19 (PR #2419 — alpha:start build-freshness gate, ADR-039 parity) | **Temporal Debt Fix**: 2026-07-05 (PR #2755, merge `17edde5e`) | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F188-library-stewardship.md"
     },
     {
@@ -1173,7 +1173,7 @@
     {
       "id": "F192",
       "name": "Socio-Technical Harness Eval — harness 共创评估体系",
-      "status": "in-progress (Phase F re-eval closure + Phase G `eval:task-outcome` closure) | **Owner**: Ragdoll | **Truth sync**: 2026-06-10",
+      "status": "in-progress (Phase F re-eval closure + Phase G `eval:task-outcome` closure) | **Owner**: Ragdoll | **Truth sync**: 2026-07-03",
       "file": "F192-socio-technical-harness-eval.md"
     },
     {
@@ -1239,7 +1239,7 @@
     {
       "id": "F205",
       "name": "MediaHub Video Provider Plugins — 视频生成/分析插件",
-      "status": "spec | **Owner**: community @mindfn + Clowder AI maintainers | **Priority**: P1",
+      "status": "in-progress | **Owner**: community @mindfn + Clowder AI maintainers | **Priority**: P1",
       "file": "F205-video-provider-plugins.md"
     },
     {
@@ -1323,13 +1323,13 @@
     {
       "id": "F220",
       "name": "A2A 协作的可观测 · 可靠 · 可恢复",
-      "status": "spec | **Owner**: Ragdoll (Opus-4.8，已接 own + 驱动) | **Priority**: P1 | **Source**: internal",
+      "status": "in-progress | **Owner**: Ragdoll (Opus-4.8，已接 own + 驱动) | **Priority**: P1 | **Source**: internal",
       "file": "F220-a2a-collab-reliability.md"
     },
     {
       "id": "F221",
       "name": "Taste Lane — per-user 品味导航",
-      "status": "done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-06-03",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F221-taste-lane.md"
     },
     {
@@ -1389,7 +1389,7 @@
     {
       "id": "F231",
       "name": "启动胶囊 — per-user 画像注入与 L0 分层",
-      "status": "in-progress (Phase C 功能性完成，观察期 — 所有 AC ✅，零有机使用待解) | **Owner**: Ragdoll（Ragdoll Fable-5） | **Priority**: P1",
+      "status": "in-progress (Phase C 功能性完成；Phase D topology 代码已合入；live migration apply 暂停——relationship granularity 于 2026-07-12 重新打开，不能再把 individual primer 冲突预设为待合并内容) | **Owner**: Ragdoll（Ragdoll Fable-5）；topology repair owner: Maine Coon Sol | **Priority**: P1",
       "file": "F231-user-profile-capsule.md"
     },
     {
@@ -1419,7 +1419,7 @@
     {
       "id": "F237",
       "name": "Prompt Injection Visibility",
-      "status": "done — clowder-ai#859 absorbed via cat-cafe#2505 squash `b859eb38` (2026-06-22) | **Owner**: community @mindfn + cat-cafe maintainers",
+      "status": "Phase 1 done (clowder-ai#859 via cat-cafe#2505 `b859eb38`) · Phase 2 design in progress | **Owner**: Ragdoll Opus 4.6",
       "file": "F237-prompt-injection-visibility.md"
     },
     {
@@ -1449,7 +1449,7 @@
     {
       "id": "F243",
       "name": "Docs Discovery Profile — OKF-inspired metadata + generated index",
-      "status": "spec (v2 redesigned 2026-06-29) | **Owner**: Ragdoll (Ragdoll Opus-4.7) | **Priority**: P1",
+      "status": "in-progress (Phase B/C + AC-C4 merged; Phase D baseline recorded; Phase E managed-index ownership moved to the post-merge finalizer on 2026-07-16; observation pending) | **Owner**: Ragdoll (Ragdoll Opus-4.7) | **Priority**: P1",
       "file": "F243-docs-discovery-profile.md"
     },
     {
@@ -1467,7 +1467,7 @@
     {
       "id": "F246",
       "name": "Approval Hub — 统一审批中心底座",
-      "status": "done（2026-06-22, Phase A–E; Phase F 2026-06-26; Phase G 2026-06-26）| **Owner**: Ragdoll/Ragdoll (opus-46) | **Priority**: P2",
+      "status": "in-progress（Phase A–H done；Phase I spec 已由 PR #3122 落地；Wave 0 由 PR #3135 交付 AC-I1/I4 与底座迁移；Wave 1 由 PR #3178 交付 F139 strict principal + create/delete approval gate（AC-I5~I7）；Wave 2 由 PR #3228 交付 F193/F260/F221 producer ingress hardening（AC-I8~I10），后续 AC-I11~I15 仍待实现）| **Phase I Owner**: Maine Coon Sol/小太阳·Maine Coon (@codex-sol)；历史 owner：Ragdoll/Ragdoll (opus-46, Phase A–H) | **Priority**: P1（Phase I）",
       "file": "F246-approval-hub.md"
     },
     {
@@ -1479,7 +1479,7 @@
     {
       "id": "F249",
       "name": "Multi-Project MCP Sync Management — 多项目 MCP 配置同步管理",
-      "status": "in-progress | **Owner**: community @mindfn + cat-cafe maintainers | **Priority**: P1 | **Created**: 2026-06-25",
+      "status": "in-progress (implementation-backed ACs synced 2026-07-08; close-audit pending) | **Owner**: community @mindfn + cat-cafe maintainers | **Priority**: P1 | **Created**: 2026-06-25",
       "file": "F249-multi-project-mcp-sync-management.md"
     },
     {
@@ -1509,13 +1509,13 @@
     {
       "id": "F254",
       "name": "Side-Effect Freshness Gate — 副作用出口 freshness 拦截",
-      "status": "in-progress (Phase A+B+C done, Phase D planning) | **Owner**: Ragdoll (Opus-4.6) | **Priority**: P1",
+      "status": "in-progress, **D2 live app-server canary lifecycle/parity hardening + E-C complete** (**ADR-042 glass-box publish-then-supplement merged via PR #2906 (`ace5412c0`); durable Queue custody / migration / replayable `eval:freshness` merged via PR #2912 (`07f46f5aa`); D2 default-off provider-native carrier merged via PR #3004 (`680ab702f`); typed causal provenance + durable child lifecycle merged via PR #3036 (`9ae942beb`). The operator has explicitly enabled `CAT_CAFE_CODEX_CARRIER=app_server` in the live runtime canary. PR #3079 (`3b83fb43c`) fixed LF-only JSONL framing plus pump rejection isolation; PR #3082 (`7dd7a4d51`) restored provider-neutral Codex diagnostics; PR #3097 (`54aef5e74`) merged AC-D14 lifecycle parity/no-replay after Terra exact-HEAD review; PR #3285 (`65ef23d17`) merged exact capacity checkpoint continuation after gpt52 exact-HEAD review. Code default remains `exec_json`; broad rollout is still gated by the unfinished AC-D16 exact-read/late-boundary live parity matrix and explicit rollout authorization. These merges did not restart runtime, so canonical main truth does not prove the live canary loaded them. F264 owns the separate per-target receipt/UI close gate.**) | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
       "file": "F254-side-effect-freshness-gate.md"
     },
     {
       "id": "F255",
-      "name": "Auto Dream — 会做梦的猫 / 猫猫日记",
-      "status": "spec | **Owner**: Ragdoll (opus-48) | **Priority**: P1 | **Eval contract**: Maine Coon (codex) 认领 alignment 段",
+      "name": "Auto Dream — 猫的私人时间与梦",
+      "status": "in-progress（Phase A + Phase A.1 complete；Phase B 未开工） | **Owner**: Ragdoll (fable-5)——**设计 own**；Phase A / A.1 code own：小太阳·Maine Coon (codex-sol)，alpha 验收 @sonnet | **Priority**: P1 | **Eval contract**: Maine Coon (codex) 认领 alignment 段（v2 承诺，v3 续期待确认）",
       "file": "F255-auto-dream.md"
     },
     {
@@ -1525,10 +1525,166 @@
       "file": "F256-memory-search-strategy-evolution.md"
     },
     {
+      "id": "F258",
+      "name": "看得见的猫咖 Visible Café — 小王子星球宇宙",
+      "status": "in-progress | **Owner**: Ragdoll (fable-5，spec/设计) | **Priority**: P1",
+      "file": "F258-visible-cafe.md"
+    },
+    {
+      "id": "F259",
+      "name": "operator 训练营（正式名待 operator 定）— 家史第一个猫给人建的 harness",
+      "status": "spec | **Owner**: Ragdoll (fable-5，设计 own；同 F255/F258 模式) | **Priority**: P1",
+      "file": "F259-cvo-training-camp.md"
+    },
+    {
+      "id": "F260",
+      "name": "记忆写侧尸检与实体解引用 — Write-Side Autopsy & Entity Deref",
+      "status": "done | **Completed**: 2026-07-12 | **Owner**: Ragdoll (fable-5)——设计 own；实现按分工 directive 传 opus 家族；alpha 验收 @sonnet | **Priority**: P1 | **Reviewer**: Maine Coon (codex)——operator 点名",
+      "file": "F260-write-side-autopsy-entity-deref.md"
+    },
+    {
+      "id": "F261",
+      "name": "AGY Durable Execution & Recovery — 长任务不随回合或重启消失",
+      "status": "spec | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "file": "F261-agy-durable-execution-recovery.md"
+    },
+    {
+      "id": "F262",
+      "name": "Per-Thread Cat Effort Overrides — 对话级猫猫思考档位",
+      "status": "done | **Completed**: 2026-07-11 | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "file": "F262-per-thread-cat-effort-overrides.md"
+    },
+    {
+      "id": "F263",
+      "name": "Memory Lifecycle Repair & Metrics — 记忆 lifecycle 修复与度量",
+      "status": "in-progress（Phase A/B/C complete；Phase D pending） | **Owner**: Ragdoll (fable-5，spec/plan own；Phase A/B 实现由 codex-sol 承接) | **Priority**: P1",
+      "file": "F263-memory-lifecycle-repair-and-metrics.md"
+    },
+    {
+      "id": "F265",
+      "name": "WeChat Local Reader — 指定会话读取与一次性来信 Watch",
+      "status": "in-progress | **Owner**: 小太阳·Maine Coon (@codex-sol) | **Priority**: P1",
+      "file": "F265-wechat-visible-reader.md"
+    },
+    {
+      "id": "F266",
+      "name": "Eval Verdict Closure Control Plane — 评估结论闭环控制面",
+      "status": "done | **Completed**: 2026-07-19 | **Owner**: Maine Coon Sol (@codex-sol，implementation) | **Reviewer**: Maine Coon GPT-5.4 (@gpt52) | **Vision guardian**: Maine Coon Terra (@codex-terra) | **Priority**: P1",
+      "file": "F266-eval-verdict-closure-control-plane.md"
+    },
+    {
+      "id": "F267",
+      "name": "Eval Measurement Validity — 评估度量有效性迁移",
+      "status": "implementation | **Owner**: Maine Coon Sol/小太阳·Maine Coon (@codex-sol) | **Reviewer**: 狸花猫 GLM-5.2 (@glm52) | **Priority**: P1",
+      "file": "F267-eval-measurement-validity.md"
+    },
+    {
+      "id": "F268",
+      "name": "Capability Tips Telemetry & Effectiveness Pipeline — 提示效果管道",
+      "status": "Phase B implemented; Phase C gated | **Owner history**: @opus (Phase A/B author) → @codex-sol (operator-authorized Phase B closeout) | **Priority**: P1",
+      "file": "F268-capability-tips-effectiveness-pipeline.md"
+    },
+    {
+      "id": "F269",
+      "name": "Recoverable Content Overflow — 前端截断审计与全文可达契约",
+      "status": "in-progress | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "file": "F269-recoverable-content-overflow.md"
+    },
+    {
+      "id": "F270",
+      "name": "BLE 设备作为类型化 Limb — 第一个物理设备族（macOS 只读垂直切片）",
+      "status": "spec（方向已确认，AC 待 Design Gate 与提案人对齐后冻结） | **Owner**: Community (彭潇/bouillipx) + Ragdoll家族 maintainer | **Priority**: P2",
+      "file": "F270-ble-typed-limb-device-family.md"
+    },
+    {
+      "id": "F271",
+      "name": "Pragmatic Memory Reflection — 功利记忆写侧反射",
+      "status": "in-progress（Phase A + B implemented；Phase B 首次 live run 超时；Phase C 未开工） | **Owner**: Ragdoll（设计）+ 小太阳·Maine Coon（记忆边界） | **Priority**: P1",
+      "file": "F271-pragmatic-memory-reflection.md"
+    },
+    {
+      "id": "F272",
+      "name": "Cat Jumps on the Table — 猫会自己跳上桌",
+      "status": "in-progress（Phase A complete；Phase B 未开工） | **Owner**: 小太阳·Maine Coon（纵切片与运行时）+ Ragdoll（效用函数与 eval） | **Priority**: P0 vision / P1 execution",
+      "file": "F272-cat-jumps-on-the-table.md"
+    },
+    {
       "id": "F273",
       "name": "Desktop In-App Update — 应用内检查更新 + 原地升级（无签名约束版）",
-      "status": "in-progress (Phase A–D implemented; Phase E isolated RC E2E + first stable release field validation pending) | **Owner**: Ragdoll (Opus) | **Priority**: P1",
+      "status": "in-progress（Phase A–D 已通过 clowder-ai #1105 合入；Clowder AI intake #3222 已合入 `8424af315`；exact-head RC package verification 与 macOS arm64 isolated old-install 验收通过；**Phase E 首次 upstream stable release field validation 待完成**） | **Source author**: mindfn | **Intake owner**: @codex-sol | **Priority**: P1",
       "file": "F273-desktop-in-app-update.md"
+    },
+    {
+      "id": "F274",
+      "name": "Kimi Native L0 + Harness 能力差距盘点",
+      "status": "done | **Completed**: 2026-07-26（实现段 PR #3201 squash `12e085a80`；愿景守护 follow-up PR #3204 squash `3a029b9f6`） | **Owner**: 墨墨 (@kimi, kimi-code/k3) | **Priority**: P1",
+      "file": "F274-kimi-native-l0-harness.md"
+    },
+    {
+      "id": "F275",
+      "name": "Managed Work Admission Identity — 受理工作身份契约",
+      "status": "in-progress / Phase B landed on main; runtime dormant; Phase C deferred | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol，kickoff / architecture contract) | **Priority**: P1",
+      "file": "F275-managed-work-admission-identity.md"
+    },
+    {
+      "id": "F276",
+      "name": "People & Relationship Memory — 人物与关系记忆",
+      "status": "Phase A/B + live proposal-status resolver + pending-card atomic",
+      "file": "F276-people-relationship-memory.md"
+    },
+    {
+      "id": "F277",
+      "name": "Thread Attention Navigation — 关系感知的注意力导航",
+      "status": "spec | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "file": "F277-thread-attention-navigation.md"
+    },
+    {
+      "id": "F278",
+      "name": "Paw-Feel Disposition Inbox — 爪感差责任收件箱",
+      "status": "in progress — Phase E code landed; awaiting operator activation",
+      "file": "F278-paw-feel-disposition-inbox.md"
+    },
+    {
+      "id": "F279",
+      "name": "Workspace Listen Mode — 正文听读与可复用音频缓存",
+      "status": "in-progress / Phase A UX Design Gate passed; Phase B pending",
+      "file": "F279-workspace-listen-mode.md"
+    },
+    {
+      "id": "F281",
+      "name": "Feedback Channel First-Class（反馈通道一等公民）",
+      "status": "done | **Owner**: Ragdoll (@fable-5, claude-fable-5) | **Priority**: P1",
+      "file": "F281-feedback-channel-first-class.md"
+    },
+    {
+      "id": "F282",
+      "name": "Proactive Memory Pipeline（记忆 proactive 生产端）",
+      "status": "done | **Completed**: 2026-07-30 | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "file": "F282-proactive-memory-pipeline.md"
+    },
+    {
+      "id": "F283",
+      "name": "Object-Driven Experience Runtime — 对象驱动的动态体验运行时",
+      "status": "frozen / research hypothesis (Experience Design Gate not authorized) | **Owner**: 小太阳·Maine Coon",
+      "file": "F283-object-driven-experience-runtime.md"
+    },
+    {
+      "id": "F285",
+      "name": "StackChan Physical Limb Plugin — 猫猫的第一个物理身体",
+      "status": "in-progress / Phase A-C vertical slice | **Owner**: 小太阳·Maine Coon",
+      "file": "F285-stackchan-physical-limb-plugin.md"
+    },
+    {
+      "id": "F286",
+      "name": "MCP Surface Lifecycle Governance",
+      "status": "spec | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "file": "F286-mcp-surface-lifecycle-governance.md"
+    },
+    {
+      "id": "F287",
+      "name": "Memory Cue Plane（记忆线索与召回闭环）",
+      "status": "done | **Completed**: 2026-08-02 | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "file": "F287-memory-cue-plane.md"
     }
   ]
 }

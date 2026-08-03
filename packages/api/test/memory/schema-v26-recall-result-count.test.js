@@ -17,7 +17,7 @@ describe('V26 migration — recall_events result_count', () => {
       const resultCount = cols.find((col) => col.name === 'result_count');
       assert.ok(resultCount, 'result_count column exists');
       assert.equal(resultCount.notnull, 0, 'result_count is nullable so old rows can stay unknown');
-      assert.equal(schema.CURRENT_SCHEMA_VERSION, 26);
+      assert.ok(schema.CURRENT_SCHEMA_VERSION >= 26);
     } finally {
       db.close();
     }

@@ -26,7 +26,7 @@ operator的愿景：**猫咖不只是一个项目，是共创工作站。猫是o
 
 ### 定位
 
-- Cat Cafe = **方法论中枢**（methodology hub）：SOP/Skills/协作规范/愿景守护的真相源
+- Clowder AI = **方法论中枢**（methodology hub）：SOP/Skills/协作规范/愿景守护的真相源
 - 外部项目 = **独立执行面**（independent execution plane）：用猫咖方法论模板，但拥有自己的 BACKLOG/Feature/ADR
 - **分区控制模型**：猫咖治理的是"怎么做"（方法论），外部项目治理的是"做什么"（自己的 backlog/feature）
 - 猫咖不是外部项目的 BACKLOG 真相源——猫咖只输出方法论模板和工作流规范

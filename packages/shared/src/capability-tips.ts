@@ -14,7 +14,13 @@ export const CAPABILITY_TIP_CONTEXTS = [
   'pet_waiting_for_user',
 ] as const;
 export const CAPABILITY_TIP_AUDIENCES = ['cvo', 'developer', 'maintainer', 'all'] as const;
-export const CAPABILITY_TIP_SURFACES = ['assistant_stream_bubble', 'pending_bubble', 'concierge'] as const;
+export const CAPABILITY_TIP_SURFACES = [
+  'assistant_stream_bubble',
+  'pending_bubble',
+  // Read compatibility for telemetry emitted by the reverted #3261 placement.
+  'thread_execution_bar',
+  'concierge',
+] as const;
 
 const ACTION_REQUIRED_KINDS = new Set(['capability', 'workflow', 'feature']);
 const FAKE_PROGRESS_RE = /就快好了|快好了|马上完成|马上好|马上就好|即将完成/u;
@@ -155,6 +161,7 @@ export const CapabilityTipSchema = z
     id: z
       .string()
       .min(1)
+      .max(64)
       .regex(/^[a-z0-9][a-z0-9-]*$/),
     kind: z.enum(CAPABILITY_TIP_KINDS),
     sourceRef: CapabilityTipSourceRefSchema,
@@ -171,7 +178,10 @@ export const CapabilityTipSchema = z
 export const CapabilityTipUsageEventSchema = z
   .object({
     event: z.enum(['capability_tip_exposed', 'capability_tip_action', 'capability_tip_dismissed']),
-    tipId: z.string().min(1),
+    tipId: z
+      .string()
+      .max(64)
+      .regex(/^[a-z0-9][a-z0-9-]*$/),
     context: z.enum(CAPABILITY_TIP_CONTEXTS),
     surface: z.enum(CAPABILITY_TIP_SURFACES),
     actionType: z.enum(['open_concierge_draft', 'open_source', 'open_guide', 'open_capability_surface']).optional(),

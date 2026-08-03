@@ -6,7 +6,7 @@
  * formatMessage() 也被 export route 复用 (聊天记录导出)。
  */
 
-import { catRegistry } from '@cat-cafe/shared';
+import { catRegistry, isCrossThreadProvenance } from '@cat-cafe/shared';
 import { estimateTokens } from '../../../../utils/token-counter.js';
 import { formatPromptTime } from '../format-time.js';
 import { isDelivered, type StoredMessage } from '../stores/ports/MessageStore.js';
@@ -69,7 +69,7 @@ export function getSenderName(catId: string | null): string {
 
 /**
  * Sanitize an external display name for safe embedding in prompt history
- * headers. Strips characters that could break the `[HH:MM sender] content`
+ * headers. Strips characters that could break the `[timestamp sender] content`
  * format or spoof other speakers:
  *  - Line breaks (`\n`, `\r`, U+2028, U+2029) → space
  *  - Brackets (`[`, `]`) → removed
@@ -91,7 +91,7 @@ function sanitizeDisplaySegment(raw: string): string {
  *
  * Format: `SenderName via Label` (group) | `Label` (p2p/system)
  */
-function getSourceDisplayName(source: { label: string; sender?: { id: string; name?: string } }): string {
+export function getSourceDisplayName(source: { label: string; sender?: { id: string; name?: string } }): string {
   const safeLabel = sanitizeDisplaySegment(source.label);
   if (source.sender) {
     const name = sanitizeDisplaySegment(source.sender.name || source.sender.id);
@@ -119,7 +119,7 @@ function truncateHeadTail(content: string, limit: number): string {
  * Format a single message for display.
  * Shared by context assembly (with truncation) and export (without truncation).
  *
- * @returns `[HH:MM 角色名] 内容`
+ * @returns `[timestamp 角色名] 内容`
  */
 export function formatMessage(
   msg: StoredMessage,
@@ -139,8 +139,9 @@ export function formatMessage(
   const time = (options?.formatTime ?? formatPromptTime)(msg.timestamp);
   const sender = msg.source ? getSourceDisplayName(msg.source) : getSenderName(msg.catId);
   // F52: Annotate cross-thread messages with source thread
-  const crossPostTag = msg.extra?.crossPost?.sourceThreadId
-    ? ` ← from thread:${msg.extra.crossPost.sourceThreadId.slice(0, 8)}`
+  const sourceThreadId = msg.extra?.crossPost?.sourceThreadId;
+  const crossPostTag = isCrossThreadProvenance(sourceThreadId, msg.threadId)
+    ? ` ← from thread:${sourceThreadId.slice(0, 8)}`
     : '';
 
   // #699: Inline reply-to preview — saves agents a get_message tool call.

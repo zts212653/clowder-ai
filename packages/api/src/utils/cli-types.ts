@@ -20,7 +20,7 @@ export interface CliSpawnOptions {
   outputMode?: 'ndjson' | 'plainText';
   /** Working directory for the process */
   cwd?: string;
-  /** Timeout in milliseconds before auto-kill (default: 300_000 = 5 min) */
+  /** Opt-in timeout in milliseconds before automatic termination (default: 0 = manual cancel only) */
   timeoutMs?: number;
   /** AbortSignal to cancel the process externally */
   signal?: AbortSignal;
@@ -39,6 +39,8 @@ export interface CliSpawnOptions {
     minCpuGrowthMs?: number;
     /** #774: Auto-kill on idle-silent suspected_stall instead of waiting for full timeout */
     stallAutoKill?: boolean;
+    /** F118/F212: Codex opts into a bounded SIGINT-first stall shutdown; default stays SIGTERM-first. */
+    stallTerminationMode?: 'interrupt-first' | 'terminate-first';
   };
   /** F118 Phase B: Provider-scoped raw archive path for diagnostic enrichment */
   rawArchivePath?: string;

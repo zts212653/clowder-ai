@@ -14,7 +14,7 @@ drift_note: >
   See clowder-ai#386 for community report.
 ---
 
-# ADR-009: Cat Café Skills 分发策略
+# ADR-009: Clowder AI Skills 分发策略
 
 > **⚠️ DRIFTED** — 本决策的"仅用户级分发"假设已被 [F070](../features/F070-portable-governance.md) 的项目级 governance bootstrap 事实性推翻。当前系统同时存在用户级和项目级两层挂载，且无一致性校验。新的 canonical mount policy 待定（successor ADR 待立）。
 >
@@ -26,7 +26,7 @@ drift_note: >
 
 ## 背景
 
-Cat Café Skills 是从 Superpowers 改进而来的协作规则 skills，需要让三只猫都能加载。
+Clowder AI Skills 是从 Superpowers 改进而来的协作规则 skills，需要让三只猫都能加载。
 
 ### 问题
 
@@ -103,7 +103,7 @@ done
 
 ### 3. 为什么选择用户级而非项目级
 
-1. **任何项目都能用**：Cat Café 的协作规则应该对三只猫在任何项目都生效
+1. **任何项目都能用**：Clowder AI 的协作规则应该对三只猫在任何项目都生效
 2. **单一来源**：源文件在 `cat-cafe-skills/`，symlink 到三个用户级目录
 3. **易于更新**：更新源文件，三只猫自动同步
 4. **可开源分享**：`cat-cafe-skills/` 在 git 里，别人可以 clone 后自己 symlink

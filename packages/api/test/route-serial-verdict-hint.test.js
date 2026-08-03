@@ -134,6 +134,9 @@ async function runRoute(text, threadId) {
       const codexService = createCapturingService('codex', 'ack, no further action.');
       const deps = createMockDeps({ opus: opusService, codex: codexService }, appended);
       for await (const _ of routeSerial(deps, ['opus'], 'verdict test', 'user1', threadId, {
+        invocationController: new AbortController(),
+        trackA2ASlot: () => true,
+        completeA2ASlots: () => {},
         thinkingMode: 'play',
       })) {
       }
@@ -158,6 +161,9 @@ async function runRouteWithTool(text, threadId, toolName, toolInput) {
       const codexService = createCapturingService('codex', 'ack, no further action.');
       const deps = createMockDeps({ opus: opusService, codex: codexService }, appended);
       for await (const _ of routeSerial(deps, ['opus'], 'verdict test', 'user1', threadId, {
+        invocationController: new AbortController(),
+        trackA2ASlot: () => true,
+        completeA2ASlots: () => {},
         thinkingMode: 'play',
       })) {
       }

@@ -7,8 +7,11 @@
  * AC-E2: "同一 thread 下所有 session 按时间串联"
  */
 
+import type { ChatMessage } from '@/stores/chat-types';
+import { getMessageTimelineOrderTime } from '@/stores/message-timeline';
 import { apiFetch } from '@/utils/api-client';
 import { mergeSessionEvents } from './merge-session-events';
+import { mergeHubMessagesWithTranscriptSupplements } from './thread-message-events';
 import type { RawTranscriptEvent } from './types';
 
 // Re-export for convenience
@@ -63,6 +66,43 @@ async function fetchSessionEvents(sessionId: string): Promise<RawTranscriptEvent
   return all;
 }
 
+/**
+ * Fetch Hub message history for a thread.
+ *
+ * This is the canonical conversation timeline: it includes user turns and all
+ * cat bubbles. Session transcripts are per-cat runtime logs and are used only
+ * as supplemental event detail.
+ */
+async function fetchThreadMessages(threadId: string): Promise<ChatMessage[]> {
+  const pages: ChatMessage[][] = [];
+  const seenCursors = new Set<string>();
+  let before: string | undefined;
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const params = new URLSearchParams({ threadId, limit: '10000' });
+    if (before) params.set('before', before);
+
+    const res = await apiFetch(`/api/messages?${params.toString()}`);
+    if (!res.ok) {
+      throw new Error(`Failed to fetch thread messages: ${res.status}`);
+    }
+    const data = (await res.json()) as { messages?: ChatMessage[]; hasMore?: boolean };
+    const messages = data.messages ?? [];
+
+    if (messages.length > 0) pages.unshift(messages);
+    if (!data.hasMore || messages.length === 0) break;
+
+    const oldest = messages[0];
+    const nextBefore = `${getMessageTimelineOrderTime(oldest)}:${oldest.id}`;
+    if (seenCursors.has(nextBefore)) break;
+    seenCursors.add(nextBefore);
+    before = nextBefore;
+  }
+
+  return pages.flat();
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -77,10 +117,11 @@ async function fetchSessionEvents(sessionId: string): Promise<RawTranscriptEvent
  */
 export async function fetchThreadReplayEvents(threadId: string): Promise<RawTranscriptEvent[]> {
   const sessionIds = await fetchThreadSessionIds(threadId);
-  if (sessionIds.length === 0) return [];
 
-  // Fetch all sessions in parallel
-  const sessionEventSets = await Promise.all(sessionIds.map(fetchSessionEvents));
+  const [messages, sessionEventSets] = await Promise.all([
+    fetchThreadMessages(threadId),
+    sessionIds.length > 0 ? Promise.all(sessionIds.map(fetchSessionEvents)) : Promise.resolve([]),
+  ]);
 
-  return mergeSessionEvents(sessionEventSets);
+  return mergeHubMessagesWithTranscriptSupplements(messages, mergeSessionEvents(sessionEventSets), threadId);
 }

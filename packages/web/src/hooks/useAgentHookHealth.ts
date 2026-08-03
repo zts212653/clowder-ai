@@ -35,6 +35,7 @@ interface UseAgentHookHealthResult {
   loading: boolean;
   syncing: boolean;
   synced: boolean;
+  syncAttempted: boolean;
   error: string | null;
   refresh: () => Promise<void>;
   sync: () => Promise<void>;
@@ -119,6 +120,7 @@ export function useAgentHookHealth({
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [synced, setSynced] = useState(false);
+  const [syncAttempted, setSyncAttempted] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const applyStatus = useCallback(async (readStatus: () => Promise<AgentHookStatusResponse>) => {
@@ -135,6 +137,7 @@ export function useAgentHookHealth({
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setSyncAttempted(false);
     cachedHealth = null;
     hasCachedHealth = false;
     await applyStatus(() => readAgentHookStatus(projectPath));
@@ -144,8 +147,10 @@ export function useAgentHookHealth({
   const sync = useCallback(async () => {
     setSyncing(true);
     setSynced(false);
+    setSyncAttempted(false);
     setError(null);
     const status = await applyStatus(() => postAgentHookSync(projectPath));
+    setSyncAttempted(status !== null);
     setSynced(status?.status === 'configured');
     setSyncing(false);
   }, [applyStatus, projectPath]);
@@ -162,6 +167,7 @@ export function useAgentHookHealth({
     setLoading(true);
     setError(null);
     setHealth(null);
+    setSyncAttempted(false);
     readAgentHookStatus(projectPath)
       .then(
         (status) => {
@@ -180,5 +186,5 @@ export function useAgentHookHealth({
     };
   }, [enabled, projectPath]);
 
-  return { health, loading, syncing, synced, error, refresh, sync };
+  return { health, loading, syncing, synced, syncAttempted, error, refresh, sync };
 }

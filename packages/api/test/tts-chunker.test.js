@@ -6,7 +6,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { chunkText } from '../dist/domains/cats/services/tts/TtsChunker.js';
+import { chunkStaticTtsText, chunkText } from '../dist/domains/cats/services/tts/TtsChunker.js';
 
 describe('TtsChunker', () => {
   describe('hard breakpoints', () => {
@@ -189,6 +189,30 @@ describe('TtsChunker', () => {
       const result = chunkText(longInput);
       const reconstructed = result.map((c) => c.text).join(' ');
       assert.equal(reconstructed, longInput);
+    });
+  });
+
+  describe('static long-form synthesis', () => {
+    it('keeps short input in one provider request', () => {
+      assert.deepEqual(chunkStaticTtsText('一小段语音。'), ['一小段语音。']);
+    });
+
+    it('bounds requests while preserving every code point in order', () => {
+      const input = `${'这是一句带有 emoji 🐾 的长文本，用来验证静态语音分块。'.repeat(20)}尾句`;
+      const chunks = chunkStaticTtsText(input);
+
+      assert.ok(chunks.length > 1);
+      assert.ok(chunks.every((chunk) => Array.from(chunk).length <= 180));
+      assert.equal(chunks.join(''), input);
+      assert.ok(chunks.at(-1).endsWith('尾句'));
+    });
+
+    it('prefers a nearby sentence boundary over a mid-sentence cut', () => {
+      const input = `${'甲'.repeat(120)}。${'乙'.repeat(120)}。`;
+      const chunks = chunkStaticTtsText(input);
+
+      assert.equal(chunks[0], `${'甲'.repeat(120)}。`);
+      assert.equal(chunks.join(''), input);
     });
   });
 });

@@ -4,6 +4,7 @@
  */
 
 import type { CatId, MessageContent, RichBlock, RichBlockBase } from '@cat-cafe/shared';
+import { isCrossThreadProvenance } from '@cat-cafe/shared';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { DEFAULT_HIERARCHICAL_CONTEXT } from '../../../../../config/hierarchical-context-config.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
@@ -11,15 +12,21 @@ import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 const log = createModuleLogger('context-transport');
 
 import { estimateTokens } from '../../../../../utils/token-counter.js';
+import type { MemoryCueOpportunitySeed } from '../../../../memory/cue/MemoryCueInvocationPromptService.js';
+import type { NudgeProcessResult } from '../../../../memory/EntityNudgeService.js';
 import { buildMessageMap, formatMessage } from '../../context/ContextAssembler.js';
+import { BRIEFING_TIMEZONE } from '../../duty-briefing/constants.js';
+import { formatPromptTime } from '../../format-time.js';
 import { checkContextBudget, type DegradationResult } from '../../orchestration/DegradationPolicy.js';
 import { DeliveryCursorStore } from '../../stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../../stores/ports/DraftStore.js';
 import type { IMessageStore, StoredMessage, StoredToolEvent } from '../../stores/ports/MessageStore.js';
 import type { Thread } from '../../stores/ports/ThreadStore.js';
 import { canViewMessage, resolveVisibleReplyParent } from '../../stores/visibility.js';
-import type { AgentMessage, AgentService } from '../../types.js';
+import type { AgentMessage, AgentService, ToolExecutionPolicy } from '../../types.js';
+import type { InvocationTracker } from '../invocation/InvocationTracker.js';
 import type { InvocationDeps } from '../invocation/invoke-single-cat.js';
+import type { OwnerAuthProvenance } from '../invocation/owner-auth-provenance.js';
 import { extractRecentArtifacts, mergeLedger } from './artifact-tracking.js';
 import type { CoverageMap } from './context-transport.js';
 import {
@@ -28,12 +35,41 @@ import {
   detectRecentBurst,
   formatAnchors,
   formatTombstone,
-  recallEvidence,
+  recallEvidenceWithProvenance,
   scrubToolPayloads,
   selectAnchors,
+  stripStructuralEnvelope,
 } from './context-transport.js';
+import type { HumanDispositionInvocationOrigin } from './human-disposition-invocation-origin.js';
 import { extractBatonContext, formatNavigationHeader, summarizeActiveTasks } from './navigation-context.js';
 import { rankArtifactSources } from './source-ranking.js';
+
+/**
+ * P1 R7 fix: Shared pure helper for context budget calculation.
+ * Used by both route-serial and route-parallel in incremental + legacy paths.
+ * Formula: min(max(0, maxPromptTokens - systemTokens - promptTokens - nudgeTokens - RESERVED), maxContextTokens)
+ *
+ * The 200-token RESERVED accounts for formatting overhead (separators, tags, padding).
+ */
+export const BUDGET_RESERVED_TOKENS = 200;
+
+export function computeContextBudget(params: {
+  maxPromptTokens: number;
+  maxContextTokens: number;
+  systemPartsTokens: number;
+  promptTokens: number;
+  nudgeTokens: number;
+}): number {
+  const remaining = Math.max(
+    0,
+    params.maxPromptTokens -
+      params.systemPartsTokens -
+      params.promptTokens -
+      params.nudgeTokens -
+      BUDGET_RESERVED_TOKENS,
+  );
+  return Math.min(remaining, params.maxContextTokens);
+}
 
 /** Minimal broadcast interface — avoids coupling routing layer to SocketManager concrete class */
 export interface RouteBroadcaster {
@@ -54,6 +90,10 @@ export interface RouteStrategyDeps {
   packStore?: import('../../../../packs/PackStore.js').PackStore;
   /** F148: Evidence store for context recall (optional, fail-open) */
   evidenceStore?: import('../../../../memory/interfaces.js').IEvidenceStore;
+  /** F282 Phase A: lane-neutral proactive memory prompt carrier. */
+  proactiveMemoryNudgeService?: import('../../../../memory/ProactiveMemoryNudgeService.js').ProactiveMemoryNudgeService;
+  /** F281 Phase C: exact-subject correction carrier, gated by independent invocation origin. */
+  humanDispositionFeedbackContextService?: import('../../../../human-disposition/HumanDispositionFeedbackContextService.js').HumanDispositionFeedbackContextService;
   /** F150: Tool usage counter (fire-and-forget INCR on tool_use events) */
   toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
   /** F188 Phase F AC-F10: Tool event log (append-only sequence, fire-and-forget) */
@@ -72,8 +112,16 @@ export interface RouteStrategyDeps {
   worldStore?: import('../../../../world/interfaces.js').IWorldStore;
   /** F233 Phase B (B2): Ball-custody ingest — fire-and-forget 旁路写球权事件（append + appended-guard apply）。optional, fail-open */
   ballCustody?: import('../../../../ball-custody/BallCustodyIngest.js').IBallCustodyIngest;
+  /** F167 Phase T: read-only turn-scoped stop-gate projection. */
+  turnCustodyProjectionService?: import('../../../../ball-custody/TurnCustodyProjectionService.js').TurnCustodyProjectionService;
   /** F237 Phase 2 (AC-P2-8): Injection trace store for pipeline observability. optional, fail-open */
   injectionTraceStore?: import('../../../../prompt-hooks/InjectionTraceStore.js').InjectionTraceStore;
+  /** F254 Phase D (AC-D4): Freshness event log for stream_stale_detected / stream_fresh audit trail */
+  freshnessEventLog?: import('../../freshness/FreshnessAttentionEventLog.js').FreshnessAttentionEventLog;
+  /** F254 Phase E: single output-commit boundary backed by a persistent catch closure. */
+  freshnessOutputCommitCoordinator?: import('../../freshness/glass-box/FreshnessOutputCommitCoordinator.js').FreshnessOutputCommitCoordinator;
+  /** F276: owner-scoped live proposal state injected before every model invocation. */
+  personMemoryProposalStatusContextResolver?: import('../../../../memory/people/PersonMemoryProposalStatusContextResolver.js').PersonMemoryProposalStatusContextResolver;
 }
 
 /** Mutable context for tracking persistence failures across the generator boundary.
@@ -85,10 +133,29 @@ export interface PersistenceContext {
   errors: Array<{ catId: string; error: string }>;
   /** F088-P3: Rich blocks consumed during this invocation, for outbound delivery */
   richBlocks?: import('@cat-cafe/shared').RichBlock[];
+  /**
+   * F254 Phase E: per-cat output-commit verdict. Connector delivery must only
+   * expose answer content after this verdict is committed.
+   */
+  outputCommitDecisions?: Record<string, import('@cat-cafe/shared').OutputCommitDecision>;
+  /** F167 Phase S: a durable successor fence rejected this route's output commit. */
+  actionOutputCommitRejected?: boolean;
+  /** Message ids persisted by this route, so a later fence can cancel the projection fail-closed. */
+  persistedOutputMessageIds?: string[];
 }
 
 /** Common options for both strategies */
 export interface RouteOptions {
+  /** Authentication-grade owner provenance propagated unchanged to every child invocation. */
+  ownerAuthProvenance?: OwnerAuthProvenance;
+  /** F281 Phase C: explicit first-party ingress provenance; omitted legacy callers fail closed. */
+  humanDispositionInvocationOrigin?: HumanDispositionInvocationOrigin;
+  /** F167 Phase T: exact protocol wake carrier for this route, never inferred from response prose. */
+  turnCustodyWake?: import('../../../../ball-custody/TurnCustodyProjectionService.js').TurnCustodyWakeProvenance;
+  /** Per-cat carrier resolver for multi-holder routes. Takes precedence over turnCustodyWake. */
+  turnCustodyWakeForCat?: (
+    catId: CatId,
+  ) => import('../../../../ball-custody/TurnCustodyProjectionService.js').TurnCustodyWakeProvenance;
   contentBlocks?: readonly MessageContent[] | undefined;
   uploadDir?: string | undefined;
   signal?: AbortSignal | undefined;
@@ -98,12 +165,16 @@ export interface RouteOptions {
    *  Absent → fall back to the shared `signal` (route-serial / legacy callers). */
   signalForCat?: ((catId: CatId) => AbortSignal | undefined) | undefined;
   promptTags?: readonly string[] | undefined;
+  /** Trusted server-owned Cue seeds supplied by connector/workflow ingress. */
+  memoryCueOpportunitySeeds?: readonly MemoryCueOpportunitySeed[] | undefined;
   /** Pre-assembled context (deprecated: use history for per-cat budget) */
   contextHistory?: string | undefined;
   /** Raw thread history for per-cat context assembly */
   history?: StoredMessage[] | undefined;
   /** Current user message ID (enables exact incremental context delivery path) */
   currentUserMessageId?: string | undefined;
+  /** Persisted bodies already folded into the caller-provided raw message (Queue merge/batch). */
+  persistedPromptMessageIds?: readonly string[] | undefined;
   /** Explicit A2A trigger message ID for queue-dispatched initial targets. */
   a2aTriggerMessageId?: string | undefined;
   /** Max A2A chain depth for routeSerial (default: MAX_A2A_DEPTH env or 2) */
@@ -111,14 +182,34 @@ export interface RouteOptions {
   /** Queue fairness hook: when true for current thread, routeSerial must stop extending A2A chain.
    *  F185 Phase B: should use hasQueuedNonAgentForThread (user + connector), not user-only. */
   queueHasQueuedMessages?: ((threadId: string) => boolean) | undefined;
+  /** F254 D1.1: Target-aware queued freshness input. Unlike queueHasQueuedMessages,
+   *  this must return only queued messages that the current cat would actually process. */
+  getQueuedFreshnessMessagesForCat?:
+    | ((
+        threadId: string,
+        userId: string,
+        catId: string,
+      ) => Array<{
+        entryId?: string;
+        source: string;
+        content: string;
+        callerCatId?: string;
+        messageId?: string | null;
+        mergedMessageIds?: string[];
+        sourceCategory?: string;
+      }>)
+    | undefined;
   /** A2A dedup hook: skip text-scan @mention if cat already dispatched via callback path. */
   hasQueuedOrActiveAgentForCat?: ((threadId: string, catId: string) => boolean) | undefined;
+  /** F254 D1.1: Any-source same-cat coverage check for stream freshness fallback. */
+  hasPendingForCat?: ((threadId: string, userId: string, catId: string) => boolean) | undefined;
   /** F185 Phase B: deferred A2A enqueue — called when fairness gate blocks text-scan expansion
    *  but A2A targets were detected. Entry is queued behind non-agent entries instead of being silently dropped. */
   deferA2AEnqueue?:
     | ((entry: {
         threadId: string;
         userId: string;
+        ownerAuthProvenance: OwnerAuthProvenance;
         content: string;
         source: 'agent';
         sourceCategory: 'a2a';
@@ -133,7 +224,7 @@ export interface RouteOptions {
          *  route picked up by QueueProcessor reuses it as the parent — preserving cross-route
          *  causality through the fairness-gate deferred path. */
         callerTraceContext?: import('../../../../../infrastructure/telemetry/genai-semconv.js').CallerTraceContext;
-      }) => void)
+      }) => { outcome: 'enqueued' | 'full' | string } | undefined)
     | undefined;
   /** ADR-008 S3: When provided, cursor boundaries are collected here instead of acking immediately.
    *  Caller acks after invocation succeeds. If absent, legacy immediate ack behavior. */
@@ -141,6 +232,8 @@ export interface RouteOptions {
   /** P1-2: When provided, persistence failures are recorded here instead of silently swallowed.
    *  Caller checks after generator exhausts to determine invocation status. */
   persistenceContext?: PersistenceContext;
+  /** F167 Phase S: durable outcome CAS run after model completion and before every route-side side effect. */
+  beforeOutputCommit?: ((catId: CatId) => Promise<boolean>) | undefined;
   /** F11: Mode-specific system prompt section (appended after identity prompt) */
   modeSystemPrompt?: string | undefined;
   /** F11: Per-cat mode prompt override (takes precedence over modeSystemPrompt) */
@@ -150,10 +243,33 @@ export interface RouteOptions {
   /** F108: Unique invocation ID for WorklistRegistry isolation in concurrent execution.
    *  When provided, worklist is keyed by this ID instead of threadId. */
   parentInvocationId?: string | undefined;
+  /** Exact, non-trigger message bodies exposed by incremental context to this invocation. */
+  onPromptMessagesExposed?:
+    | ((input: {
+        threadId: string;
+        userId: string;
+        catId: string;
+        invocationId: string;
+        messageIds: readonly string[];
+        seenAt: number;
+      }) => Promise<void>)
+    | undefined;
+  /** F254 Phase E stable sibling-exclusion identity for one parallel fan-out. */
+  parallelBatchId?: string | undefined;
+  /** F254 Phase E typed queue adoption proof for this route execution. */
+  freshnessClosureId?: string | undefined;
+  freshnessClosureRequiredMessageIds?: readonly string[] | undefined;
+  freshnessSupplementId?: string | undefined;
+  freshnessSupplementRequiredMessageIds?: readonly string[] | undefined;
+  /** ADR-042 provider/callback hard boundary for an automatic supplement. */
+  toolExecutionPolicy?: ToolExecutionPolicy | undefined;
   /** Parent invocation controller used to keep A2A worklist slots tied to the same cancel signal. */
   invocationController?: AbortController | undefined;
-  /** Register an A2A worklist target with the outer invocation tracker before it executes. */
-  trackA2ASlot?: ((threadId: string, catId: CatId, userId: string, controller: AbortController) => void) | undefined;
+  /**
+   * Atomically claim an A2A worklist target in the outer invocation tracker.
+   * False means another live route owns the slot, so the caller must defer instead of invoking inline.
+   */
+  trackA2ASlot?: ((threadId: string, catId: CatId, userId: string, controller: AbortController) => boolean) | undefined;
   /** Cleanup registered A2A worklist slots if the route exits before every target emits done. */
   completeA2ASlots?: ((threadId: string, catIds: readonly CatId[], controller: AbortController) => void) | undefined;
   /** F153 Phase E: Root route span — invocation spans become children of this. */
@@ -175,6 +291,7 @@ export interface RouteOptions {
     | ((entry: {
         threadId: string;
         userId: string;
+        ownerAuthProvenance: OwnerAuthProvenance;
         content: string;
         source: 'agent';
         sourceCategory: 'freshness';
@@ -183,19 +300,134 @@ export interface RouteOptions {
         autoExecute: true;
         priority: 'normal';
         intent: 'execute';
+        idempotencyKey?: string;
+        /** Closure successors must ignore the attempt that is currently processing while still coalescing queued duplicates. */
+        dedupeProcessing?: boolean;
+        freshnessClosureId?: string;
+        freshnessRequiredFrontierMessageId?: string;
+        freshnessSupplementId?: string;
+        freshnessSupplementLineageId?: string;
+        freshnessSupplementSeq?: 1 | 2;
+        readOnlyToolPolicy?: ToolExecutionPolicy;
         /** Notice IDs that triggered this re-invoke (for event log correlation) */
         freshnessContext: {
           sourceNoticeIds: string[];
           senders: string[];
           reason: string;
         };
-      }) => void)
+      }) => undefined | { outcome?: 'enqueued' | 'full' | string } | undefined)
     | undefined;
+}
+
+const TASTE_JUDGMENT_STAGES = new Set(['quality_gate', 'review']);
+const TASTE_JUDGMENT_SKILLS = new Set(['writing-plans', 'co-creation-docs', 'fresh-context-review', 'request-review']);
+
+export function subjectSeenCueSeeds(input: {
+  result: NudgeProcessResult;
+  sourceMessageId: string | undefined;
+  occurredAt: number;
+}): Array<Extract<MemoryCueOpportunitySeed, { kind: 'subject_seen' }>> {
+  const sourceMessageId = input.sourceMessageId;
+  if (!sourceMessageId) return [];
+  return input.result.nudges.flatMap((nudge) =>
+    nudge.entityId?.startsWith('person:')
+      ? [
+          {
+            kind: 'subject_seen' as const,
+            producer: 'entity_nudge' as const,
+            occurredAt: input.occurredAt,
+            payload: {
+              entityId: nudge.entityId,
+              matchedAlias: nudge.matchedAlias,
+              sourceMessageId,
+            },
+          },
+        ]
+      : [],
+  );
+}
+
+export function judgmentSurfaceCueSeeds(input: {
+  sopStageHint?: { stage: string; suggestedSkill: string; suggestedSkillSource: string; featureId: string };
+  promptTags?: readonly string[];
+  occurredAt: number;
+}): MemoryCueOpportunitySeed[] {
+  const hint = input.sopStageHint;
+  if (!hint || !TASTE_JUDGMENT_STAGES.has(hint.stage) || !/^F\d{3,}$/.test(hint.featureId)) {
+    return [];
+  }
+  const explicitSkill = input.promptTags
+    ?.map((tag) => tag.match(/^skill:(.+)$/)?.[1])
+    .find((skill): skill is string => typeof skill === 'string' && TASTE_JUDGMENT_SKILLS.has(skill));
+  const selectedSkill = explicitSkill ?? hint.suggestedSkill;
+  const selectionSource = explicitSkill
+    ? ('explicit_prompt_tag' as const)
+    : hint.suggestedSkillSource === 'override'
+      ? ('override' as const)
+      : null;
+  if (!selectionSource || !TASTE_JUDGMENT_SKILLS.has(selectedSkill)) return [];
+  return [
+    {
+      kind: 'judgment_surface_entered',
+      producer: 'workflow_sop',
+      occurredAt: input.occurredAt,
+      payload: {
+        stage: hint.stage as 'quality_gate' | 'review',
+        selectedSkill: selectedSkill as
+          | 'writing-plans'
+          | 'co-creation-docs'
+          | 'fresh-context-review'
+          | 'request-review',
+        selectionSource,
+        featureId: hint.featureId,
+      },
+    },
+  ];
+}
+
+/**
+ * Bind every routeExecution ingress to the same atomic A2A slot-admission contract.
+ * The returned controller is the parent batch gate; trackExternalSlot creates an
+ * independent per-target controller while preserving exact cleanup ownership.
+ */
+export type A2ASlotTrackingOptions = {
+  invocationController: NonNullable<RouteOptions['invocationController']>;
+  trackA2ASlot: NonNullable<RouteOptions['trackA2ASlot']>;
+  completeA2ASlots: NonNullable<RouteOptions['completeA2ASlots']>;
+};
+
+export function createA2ASlotTrackingBridge(
+  invocationTracker:
+    | {
+        trackExternalSlot?: InvocationTracker['trackExternalSlot'];
+        completeSlot?: InvocationTracker['completeSlot'];
+      }
+    | undefined,
+  invocationController: AbortController,
+  executionId?: string,
+): A2ASlotTrackingOptions {
+  return {
+    invocationController,
+    trackA2ASlot: (threadId, catId, userId, controller) => {
+      if (!invocationTracker?.trackExternalSlot || !invocationTracker.completeSlot) {
+        throw new Error('A2A slot admission unavailable: InvocationTracker bridge missing');
+      }
+      return invocationTracker.trackExternalSlot(threadId, catId, controller, userId, [catId], executionId);
+    },
+    completeA2ASlots: (threadId, catIds, controller) => {
+      if (!invocationTracker?.completeSlot) {
+        throw new Error('A2A slot cleanup unavailable: InvocationTracker bridge missing');
+      }
+      for (const catId of catIds) invocationTracker.completeSlot(threadId, catId, controller);
+    },
+  };
 }
 
 export interface IncrementalContextResult {
   contextText: string;
   boundaryId?: string;
+  /** Message bodies present in full after all visibility, count, token, and per-message trims. */
+  exposedMessageIds: string[];
   includesCurrentUserMessage: boolean;
   /** True when the current user message exists in unseen but was filtered out
    *  (e.g. whisper not intended for this cat). Callers must NOT inject the raw
@@ -216,6 +448,8 @@ export interface IncrementalContextResult {
   };
   /** F148 Phase F: Navigation context header (injected on ALL paths — KD-7) */
   navigationHeader?: string;
+  /** F263: only cold-context evidence lines that survived final token trimming. */
+  pushRecallPresentations?: import('../../../../memory/f200-types.js').PushRecallPresentation[];
 }
 
 /**
@@ -238,6 +472,22 @@ export function shouldAppendExplicitCurrentMessage(
   if (inc.includesCurrentUserMessage || inc.currentMessageFilteredOut) return false;
   if (currentUserMessageId && inc.contextText.includes(currentUserMessageId)) return false;
   return true;
+}
+
+/**
+ * One stable, exact set of persisted message bodies present in a child prompt.
+ * Both ledger creation and freshness relevance must consume this same set;
+ * otherwise a caller-folded Queue body can be read by the model yet look like
+ * unrelated late work when a sibling reply arrives.
+ */
+export function collectExactPromptMessageIds(...groups: ReadonlyArray<ReadonlyArray<string | undefined>>): string[] {
+  const collected = new Set<string>();
+  for (const group of groups) {
+    for (const messageId of group) {
+      if (messageId) collected.add(messageId);
+    }
+  }
+  return [...collected];
 }
 
 /**
@@ -664,6 +914,28 @@ export function digestRichBlocks(msg: StoredMessage): string {
   return `${msg.content}\n${digests.join(' ')}`;
 }
 
+function exactBodyMessageIds(messages: readonly StoredMessage[], truncateLimit: number): string[] {
+  return messages
+    .filter((message) => {
+      const persistedBody = digestRichBlocks(message);
+      const injectedBody = sanitizeInjectedContent(persistedBody);
+      return injectedBody === persistedBody && injectedBody.length <= truncateLimit;
+    })
+    .map((message) => message.id);
+}
+
+function exactBodyMessageIdsAfterToolScrub(
+  originalMessages: readonly StoredMessage[],
+  scrubbedMessages: readonly StoredMessage[],
+  truncateLimit: number,
+): string[] {
+  const originalContentById = new Map(originalMessages.map((message) => [message.id, message.content]));
+  return exactBodyMessageIds(
+    scrubbedMessages.filter((message) => originalContentById.get(message.id) === message.content),
+    truncateLimit,
+  );
+}
+
 export async function fetchAfterCursor(
   messageStore: IMessageStore,
   threadId: string,
@@ -685,6 +957,8 @@ export interface IncrementalContextOptions {
   recentFilesTouched?: Array<{ path: string; ops: string[] }>;
   canonicalFeatureId?: string;
   threadTitle?: string;
+  /** Invocation wall-clock for stale-age rendering in prompt timestamps. */
+  nowMs?: number;
 }
 
 async function resolveRecentFilesTouched(
@@ -728,7 +1002,12 @@ export async function assembleIncrementalContext(
   options?: IncrementalContextOptions,
 ): Promise<IncrementalContextResult> {
   if (!deps.deliveryCursorStore) {
-    return { contextText: '', includesCurrentUserMessage: false, currentMessageFilteredOut: false };
+    return {
+      contextText: '',
+      exposedMessageIds: [],
+      includesCurrentUserMessage: false,
+      currentMessageFilteredOut: false,
+    };
   }
 
   const cursor = await deps.deliveryCursorStore.getCursor(userId, catId, threadId);
@@ -743,9 +1022,10 @@ export async function assembleIncrementalContext(
     if (m.origin === 'briefing') return false;
     // F35: Exclude whispers not intended for this cat (play mode only)
     if (!canViewMessage(m, viewer)) return false;
-    // Exclude own messages (only include user messages and other cats' messages)
-    // F052 fix: exempt cross-posted messages — same catId from another thread must be visible
-    if (!m.extra?.crossPost && m.catId !== null && m.catId === catId) return false;
+    // Exclude own messages (only include user messages and other cats' messages).
+    // F052: only distinct source/target provenance earns the same-cat cross-post exemption.
+    const isActualCrossPost = isCrossThreadProvenance(m.extra?.crossPost?.sourceThreadId, m.threadId);
+    if (!isActualCrossPost && m.catId !== null && m.catId === catId) return false;
     // In play mode, hide other cats' stream (thinking) messages.
     // Legacy messages (no origin) are visible for backward compatibility —
     // all new writes are tagged, so untagged = legacy callback data.
@@ -811,6 +1091,7 @@ export async function assembleIncrementalContext(
   const topSource = rankedSources[0] ?? null;
   const bestNextSource = topSource ? `先看 ${topSource.label}: ${topSource.ref}` : undefined;
   const navigationHeader = formatNavigationHeader({
+    threadId,
     baton,
     tasks: activeTasks,
     artifacts: recentArtifacts,
@@ -889,11 +1170,18 @@ export async function assembleIncrementalContext(
       ? {
           contextText: navigationHeader,
           boundaryId: cursor,
+          exposedMessageIds: [],
           includesCurrentUserMessage,
           currentMessageFilteredOut,
           navigationHeader,
         }
-      : { contextText: navigationHeader, includesCurrentUserMessage, currentMessageFilteredOut, navigationHeader };
+      : {
+          contextText: navigationHeader,
+          exposedMessageIds: [],
+          includesCurrentUserMessage,
+          currentMessageFilteredOut,
+          navigationHeader,
+        };
   }
 
   const truncateLimit = budget.maxContentLengthPerMsg;
@@ -919,6 +1207,16 @@ export async function assembleIncrementalContext(
     }
   }
   const messageMap: ReadonlyMap<string, StoredMessage> = baseMap;
+  // Stale-age formatTime callback: appends "Xh Ym ago" for cross-date or ≥6h-stale messages.
+  // Compare dates in co-creator timezone to avoid false cross-date triggers around midnight UTC.
+  const staleFormatTime = options?.nowMs
+    ? (epochMs: number) =>
+        formatPromptTime(epochMs, {
+          nowMs: options.nowMs,
+          includeAge: 'stale',
+          staleComparisonTimeZone: BRIEFING_TIMEZONE,
+        })
+    : undefined;
   const lines = capped.map((m) => {
     // F22: Digest rich blocks into compact summaries for context
     const contentWithDigest = digestRichBlocks(m);
@@ -928,6 +1226,7 @@ export async function assembleIncrementalContext(
       truncate: truncateLimit,
       messageMap,
       sanitizeContent: sanitizeInjectedContent,
+      ...(staleFormatTime ? { formatTime: staleFormatTime } : {}),
     });
     return `[${m.id}] ${rendered}`;
   });
@@ -945,6 +1244,7 @@ export async function assembleIncrementalContext(
     return {
       contextText: navigationHeader,
       boundaryId: zeroBoundaryId,
+      exposedMessageIds: [],
       includesCurrentUserMessage: false,
       currentMessageFilteredOut,
       degradation: zeroBudgetDegradation,
@@ -987,12 +1287,14 @@ export async function assembleIncrementalContext(
       ? {
           contextText: navigationHeader,
           boundaryId: cursor,
+          exposedMessageIds: [],
           includesCurrentUserMessage: false,
           currentMessageFilteredOut,
           navigationHeader,
         }
       : {
           contextText: navigationHeader,
+          exposedMessageIds: [],
           includesCurrentUserMessage: false,
           currentMessageFilteredOut,
           navigationHeader,
@@ -1012,6 +1314,7 @@ export async function assembleIncrementalContext(
   return {
     contextText: `${navigationHeader}\n[对话历史增量 - 未发送过 ${finalCapped.length} 条]\n${finalLines.join('\n')}\n[/对话历史]`,
     boundaryId,
+    exposedMessageIds: exactBodyMessageIds(finalCapped, truncateLimit),
     includesCurrentUserMessage: finalIncludesCurrentUserMessage,
     currentMessageFilteredOut,
     degradation,
@@ -1083,15 +1386,16 @@ async function assembleSmartWindowContext(
   const tombstoneText = tombstone ? formatTombstone(tombstone) : '';
 
   // 3.5 Phase C: Anchor extraction from omitted messages
+  // F263: strip structural envelope before slicing to ensure semantic content is captured
   const currentMsgText = currentUserMessageId
-    ? (burst.find((m) => m.id === currentUserMessageId)?.content.slice(0, 200) ?? '')
+    ? stripStructuralEnvelope(burst.find((m) => m.id === currentUserMessageId)?.content ?? '').slice(0, 200)
     : '';
   const compositeQueryTerms = [threadTitle, currentMsgText]
     .concat(
       burst
         .filter((m) => m.catId === null && m.userId !== 'system')
         .slice(-2)
-        .map((m) => m.content.slice(0, 200)),
+        .map((m) => stripStructuralEnvelope(m.content).slice(0, 200)),
     )
     .join(' ')
     .toLowerCase()
@@ -1107,7 +1411,9 @@ async function assembleSmartWindowContext(
     available: boolean;
     sessionsIncorporated: number;
     decisions?: string[];
+    decisionRefs?: import('../../stores/ports/ThreadStore.js').ThreadMemorySourceRef[];
     openQuestions?: string[];
+    openQuestionRefs?: import('../../stores/ports/ThreadStore.js').ThreadMemorySourceRef[];
   } | null = null;
   if (threadStore) {
     try {
@@ -1129,7 +1435,7 @@ async function assembleSmartWindowContext(
             if (estimateTokens(summary.slice(0, mid)) <= hcConfig.maxThreadMemoryTokens) lo = mid;
             else hi = mid - 1;
           }
-          summary = summary.slice(0, lo) + '…';
+          summary = `${summary.slice(0, lo)}…`;
         }
         threadMemorySummary = summary;
         // storedFileArtifacts already pre-read via preReadStoredArtifacts (G1→G2 bridge)
@@ -1137,7 +1443,11 @@ async function assembleSmartWindowContext(
           available: true,
           sessionsIncorporated: mem.sessionsIncorporated,
           ...(Array.isArray(mem.decisions) && mem.decisions.length ? { decisions: mem.decisions } : {}),
+          ...(Array.isArray(mem.decisionRefs) && mem.decisionRefs.length ? { decisionRefs: mem.decisionRefs } : {}),
           ...(Array.isArray(mem.openQuestions) && mem.openQuestions.length ? { openQuestions: mem.openQuestions } : {}),
+          ...(Array.isArray(mem.openQuestionRefs) && mem.openQuestionRefs.length
+            ? { openQuestionRefs: mem.openQuestionRefs }
+            : {}),
         };
       }
     } catch {
@@ -1148,13 +1458,14 @@ async function assembleSmartWindowContext(
   // 3.8 Evidence recall (fail-open) — must run before coverage map so hints are populated
   const currentMsg = currentUserMessageId ? burst.find((m) => m.id === currentUserMessageId) : undefined;
   const nonSystemRecent = burst.filter((m) => m.catId === null && m.userId !== 'system').slice(-2);
-  const evidenceLines = await recallEvidence(
+  const recalledEvidence = await recallEvidenceWithProvenance(
     deps.evidenceStore,
     threadTitle,
     currentMsg?.content ?? '',
     nonSystemRecent,
     hcConfig,
   );
+  const evidenceLines = recalledEvidence.evidence.map((item) => item.line);
 
   // 3.9 Phase D: Build coverage map (AC-D2) — VG-1: only evidence recall titles (not tombstone search hints)
   const participants = [...new Set(omitted.map((m) => m.catId ?? m.userId).filter(Boolean))] as string[];
@@ -1178,6 +1489,7 @@ async function assembleSmartWindowContext(
     threadMemory: threadMemoryMeta,
     retrievalHints,
     searchSuggestions: tombstone?.retrievalHints ?? [],
+    semanticSearchTerms: tombstone?.keywords.length ? [tombstone.keywords.slice(0, 2).join(' ')] : [],
   });
   const coverageMapText = `[Context Coverage Map]\n${JSON.stringify(coverageMap)}`;
   const threadMemoryText = threadMemorySummary
@@ -1205,6 +1517,15 @@ async function assembleSmartWindowContext(
     }
   }
   const messageMap: ReadonlyMap<string, StoredMessage> = baseMap;
+  // Stale-age formatTime callback (same logic as warm path).
+  const coldStaleFormatTime = options?.nowMs
+    ? (epochMs: number) =>
+        formatPromptTime(epochMs, {
+          nowMs: options.nowMs,
+          includeAge: 'stale',
+          staleComparisonTimeZone: BRIEFING_TIMEZONE,
+        })
+    : undefined;
   const burstLines = scrubbedBurst.map((m) => {
     const contentWithDigest = digestRichBlocks(m);
     const cleanContent = sanitizeInjectedContent(contentWithDigest);
@@ -1213,6 +1534,7 @@ async function assembleSmartWindowContext(
       truncate: truncateLimit,
       messageMap,
       sanitizeContent: sanitizeInjectedContent,
+      ...(coldStaleFormatTime ? { formatTime: coldStaleFormatTime } : {}),
     });
     return `[${m.id}] ${rendered}`;
   });
@@ -1225,6 +1547,7 @@ async function assembleSmartWindowContext(
     return {
       contextText: '',
       boundaryId,
+      exposedMessageIds: [],
       includesCurrentUserMessage: false,
       currentMessageFilteredOut,
       degradation: `⚠️ 增量上下文预算耗尽: 系统提示已占满 prompt 预算`,
@@ -1236,6 +1559,7 @@ async function assembleSmartWindowContext(
   let finalBurstLines = burstLines;
   let finalBurstMsgs = scrubbedBurst;
   const finalEvidenceLines = [...evidenceLines];
+  const finalEvidenceCandidates = recalledEvidence.evidence.map((item) => item.candidate);
   const finalAnchorLines = [...anchorLines];
   const anchorScores = anchors.map((a) => a.score);
   let finalTombstoneText = tombstoneText;
@@ -1261,6 +1585,7 @@ async function assembleSmartWindowContext(
     // Stage 1: Drop evidence lines from oldest
     while (finalEvidenceLines.length > 0 && totalTokens() > effectiveTokenBudget) {
       finalEvidenceLines.shift();
+      finalEvidenceCandidates.shift();
     }
 
     // Stage 1.3: Drop coverage map + thread memory together
@@ -1297,6 +1622,7 @@ async function assembleSmartWindowContext(
       return {
         contextText: '',
         boundaryId,
+        exposedMessageIds: [],
         includesCurrentUserMessage: false,
         currentMessageFilteredOut,
         degradation: `⚠️ 增量上下文 token 预算截断: 预算不足以容纳最小上下文 (${effectiveTokenBudget} tokens)`,
@@ -1331,6 +1657,7 @@ async function assembleSmartWindowContext(
     return {
       contextText: '',
       boundaryId,
+      exposedMessageIds: [],
       includesCurrentUserMessage: false,
       currentMessageFilteredOut,
       degradation: `⚠️ 增量上下文 token 预算截断: 预算不足以容纳最小上下文 (${effectiveTokenBudget} tokens)`,
@@ -1340,6 +1667,7 @@ async function assembleSmartWindowContext(
   return {
     contextText,
     boundaryId,
+    exposedMessageIds: exactBodyMessageIdsAfterToolScrub(burst, finalBurstMsgs, truncateLimit),
     includesCurrentUserMessage,
     currentMessageFilteredOut,
     degradation: tokenDegradation,
@@ -1356,5 +1684,18 @@ async function assembleSmartWindowContext(
       ...(rankedSources.length > 0 ? { rankedSources } : {}),
     },
     navigationHeader,
+    ...(finalEvidenceCandidates.length > 0
+      ? {
+          pushRecallPresentations: [
+            {
+              surface: 'cold_context' as const,
+              query: recalledEvidence.query,
+              scope: 'docs',
+              timestamp: Date.now(),
+              candidates: finalEvidenceCandidates,
+            },
+          ],
+        }
+      : {}),
   };
 }

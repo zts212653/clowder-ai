@@ -1,18 +1,19 @@
 ---
 feature_ids: [F246]
-related_features: [F128, F225, F193, F168, F231]
-topics: [approval, hub, cvo-gate, cross-thread, cqrs, proposal]
+related_features: [F128, F139, F168, F193, F208, F221, F225, F231, F260]
+topics: [approval, hub, cvo-gate, cross-thread, cqrs, proposal, provenance, schedule]
 doc_kind: spec
 created: 2026-06-20
+updated: 2026-07-21
 ---
 
 # F246: Approval Hub — 统一审批中心底座
 
-> **Status**: done（2026-06-22, Phase A–E; Phase F 2026-06-26; Phase G 2026-06-26）| **Owner**: Ragdoll/Ragdoll (opus-46) | **Priority**: P2
+> **Status**: in-progress（Phase A–H done；Phase I spec 已由 PR #3122 落地；Wave 0 由 PR #3135 交付 AC-I1/I4 与底座迁移；Wave 1 由 PR #3178 交付 F139 strict principal + create/delete approval gate（AC-I5~I7）；Wave 2 由 PR #3228 交付 F193/F260/F221 producer ingress hardening（AC-I8~I10），后续 AC-I11~I15 仍待实现）| **Phase I Owner**: Maine Coon Sol/小太阳·Maine Coon (@codex-sol)；历史 owner：Ragdoll/Ragdoll (opus-46, Phase A–H) | **Priority**: P1（Phase I）
 
-Architecture cell: platform-infra（subcell: `approval-index`）
-Map delta: 新 cell — Hub 通过 feature adapter 实时聚合（query aggregation）各 feature 的 operator 审批项 + Hub UI panel。不维护独立 index，at-read-time 直查 canonical stores。
-Why: operator 审批散落在各 thread（F128/F225/F193），operator不在对应 thread 就看不到。需要跨 thread 统一入口。
+Architecture cell: `approval-index`
+Map delta: update required（Phase I）— 保留 feature adapter + query aggregation；`approval-index` 新增统一 producer ingress、单一注册表与来源双锚契约，不新增第二套 canonical proposal store。
+Why: operator 审批不仅会散落，还可能进入 Hub 后失去原文锚点，或由新 producer 完全绕过 Hub。底座必须同时守住“所有猫发起的 operator gate 可见”和“每条审批可精确追溯”。
 
 ## Why
 
@@ -20,10 +21,22 @@ Why: operator 审批散落在各 thread（F128/F225/F193），operator不在对�
 > "现在f128 和 f225 都有富文本需要我审批的东西笑死但是很多猫可能反馈operator忘记点了！"
 > "我感觉这种thread内的点击审批似乎需要有个event中心。。能让我看到 点击跳转到对应thread等等等"
 > "这个应该是底座 底座上是f168 193 128 225 这些可能涉及到需要我审批的"
+>
+> operator experience（2026-07-20，Phase I reopen）："审批跳转过去之后 都不知道原本在哪边的，是发出了原文是什么的？"
+> "那我们的这个 approve hub的feat md 更新一下？ 你看看斑斑说的？ 哪些你认可觉得ok的"
 
 ## Current State / 现状基线
 
-N/A — 全新能力。F246 之前不存在统一审批中心。各 feature（F128/F225/F193）的审批卡片分散在各自的 thread 消息流中，operator必须逐个 thread 翻找，无统一入口，无计数，无过期提醒。
+**历史基线（Phase A 前）**：F246 之前不存在统一审批中心。各 feature（F128/F225/F193）的审批卡片分散在各自的 thread 消息流中，operator必须逐个 thread 翻找，无统一入口，无计数，无过期提醒。
+
+**Phase I reopen 基线（2026-07-20 只读审计，thread `[thread-id]`）**：
+
+- Hub 已注册 6 个 adapter：F128 / F225 / F193 / F231 / F260 / F221。
+- 最近 200 条 settled 样本中，F128 154/154、F225 6/6、F231 10/10 有 message anchor；F193 0/13、F260 0/10；F221 7/7 由 caller 传入，但字段仍可选。
+- F193 已进 Hub 但 producer 不追加 chat card；F260 明确选择“不生成 confirmation card”；前端在 message anchor 缺失时仍以“查看上下文”打开 thread 根部。
+- F139 调度是临时 preview + 提示词要求口头确认；agent 可直接调用持久化 endpoint。现场 25 条可见任务中 13 builtin、12 dynamic（7 active / 5 paused），dynamic store 没有原始审批 message anchor。
+- F208 spec 明写 `proposal → Hub pending → operator approve/reject`，实现没有 adapter；Authorization 仍是 thread-local 临时卡。两者审计时 pending 均为 0，属于潜伏缺口而非当下积压。
+- 当前 adapter 数已从 AC-D7 记录的 4 增至 6，越过“达到 5 时测 p95”的测量触发点；尚无新的代表性 inbox p95 证据。
 
 ### 痛点
 
@@ -31,12 +44,29 @@ N/A — 全新能力。F246 之前不存在统一审批中心。各 feature（F1
 2. **审批散落多 feature** — F128/F225 各自做了审批卡片，operator不知道总共多少待批
 3. **忘记审批** — 卡片埋没在 thread 消息流里，无人提醒
 4. **没有审批中心** — 需要逐个 thread 翻
+5. **Hub 中的跳转不等于原文** — `sourceMessageId` 可空且同时兼任“触发原文”和“审批卡片”两种语义
+6. **producer 接入靠自觉** — allowlist / API adapter / Web metadata 分散维护，新 operator gate 可以漏登记
+7. **agent 侧副作用仍可绕过 gate** — F139 preview/confirm 只由 tool description 约束，服务端不验证批准事实
 
 ### 不是什么
 
 - **不是把所有跨线程通讯变成审批** — F193 绝大多数场景（FYI/协调）继续自动投递，只有极少数任务分配类走审批
 - **不是泛化 F168 Decision Queue** — F168 是 action queue（多 actor + 多态 action），底座是 approval queue（actor=operator + binary approve/reject），是 sibling concept 不是 parent-child
 - **不是 push notification** — Hub 是 pull surface，push channel（iOS/邮件/webhook）独立问题
+- **不是把 operator 亲手点击的每个操作再审批一次** — 已认证 operator 的同步直接操作可执行；猫代理发起或异步等待 operator 决议的动作才进入 Hub
+- **不是把所有 proposal 搬进一个新总表** — canonical state 继续归各 feature store；Phase I 统一的是发布、注册、来源与副作用门禁
+
+## User Journey（Phase I）
+
+**Scope unit**：一条由猫/后台 producer 发起、需要 operator 决议后才能产生副作用的 proposal。
+
+1. operator在 thread 里提出需求，或猫因异步事件产生需要 operator 决议的动作。
+2. 原 thread 出现持久化富文本审批卡；卡片明确引用触发原文，或展示不可变的事件来源摘要。
+3. 同一 canonical proposal 同时出现在 Approval Hub，不产生第二份审批状态。
+4. 从 Hub 点“查看审批卡”精确定位该卡；从卡片点“查看触发原文”精确定位原消息。没有消息型来源时，UI 明示“事件来源”，不伪装成消息跳转。
+5. operator 批准后才执行副作用；拒绝则不执行。历史记录保留相同双锚与决定人/时间。
+6. operator 在调度面板亲手进行已认证的直接操作时无需二次审批；猫通过 MCP/callback 发起创建或永久删除时必须走 proposal。
+7. 历史动态任务若找不到原始授权，只显示 `legacy_unanchored`；只有 operator 当前重新确认后，才新增一条真实的 re-attestation，不倒填历史批准。
 
 ## Design Discussion
 
@@ -55,6 +85,15 @@ N/A — 全新能力。F246 之前不存在统一审批中心。各 feature（F1
 | KD-7 | Hub user-scoped + adapter internal-only | 各 feature adapter 是 internal service（不暴露为 MCP/callback tool），Hub 读写都走 user auth（`resolveUserId`）（Maine Coon R1 P1-1） |
 | KD-8 | v1 无独立 index → 无 backfill/phantom 问题 | query aggregation 直接读 canonical stores，数据天然一致——不存在 index drift/phantom/stale 问题。v2+ 引入 materialized index 时再补 backfill 契约（opus-48 R1 blocking 修正，Maine Coon R1 P1-2 根因消除） |
 | KD-9 | F193 E3 effect-class 机械化边界 | FYI/协调/只读调查 = 自动投递（不产生 ApprovalItem）；任务分配/要求接收方改代码 = Approval Hub。有 fixture 证明非任务分配类不触发审批（Maine Coon R1 P1-3） |
+| KD-10 | sender intent ≠ receiver standing ≠ action custody | effect-class 只描述发送方此次想产生的 effect。它不能偷授新活，也不能剥夺接收方独立核验后已有的责任；standing 由 F167 Phase O 核验，custody 由 ActionSuccessorLease 单账本记录。Approval Hub 只审“新增责任”。 |
+| KD-11 | Phase I 两条底座不变量 | 所有猫/后台 producer 发起的 operator gate 必须进入统一审批索引；所有 Hub item 必须能精确回到审批卡与触发来源，不能以 thread 根部跳转冒充原文。 |
+| KD-12 | 保留 adapter + canonical stores；Envelope 是发布契约，不是新总 store | F128/F225/F231 已健康，替换成统一 store 会重造状态机与一致性债。Phase I 让各 adapter 继续读 canonical store，但所有新 proposal 经统一 ingress 发布。 |
+| KD-13 | 来源拆成 `originRef` + `approvalCardRef` | `originRef` 回答“什么触发了它”（message 或 stable event）；`approvalCardRef` 回答“在哪里审批”。废止一个 optional `sourceMessageId` 兼任两职。 |
+| KD-14 | card 是 Hub 可见性的 commit point | proposal 可以先在 canonical store 预留，但只有 card 持久化并回写 messageId 后才可被 adapter 投影为 pending；失败必须删除/tombstone 并可重试，不留下 Hub-visible orphan。 |
+| KD-15 | direct operator 与 cat proxy 按可信 principal 分流 | 当前 schedule route 已能识别 verified callback/agent-key，但“没有 callback”不足以证明是 operator。直接执行必须有严格 user/session identity；callback/agent-key 一律先 proposal；禁止信任 body `createdBy` 或 `default-user` fallback 授权 mutation。 |
+| KD-16 | 机器门禁 runtime-first，静态 parity check 辅助 | `ApprovalIngress.publish()` 是 producer 唯一发布口；副作用 endpoint 校验 strict operator principal 或 approved proposal。CI checker 只守 registry/adapter/Web metadata/decision-route/source-policy 同源，不能替代 runtime authorization。 |
+| KD-17 | 历史迁移不伪造审批 | 旧任务/旧 item 无可靠 message anchor 时标 `legacy_unanchored`，不写成 approved/rejected。operator 当前确认可生成新的 re-attestation，时间与来源均按当下记录。 |
+| KD-18 | Phase I 不挂 Eval Hub | producer coverage、身份分流、卡片 commit point、精确跳转都是确定契约，用 schema/test/lint/runtime guard 验证；adapter fan-out 延迟是运行健康问题，用 p95 measurement，不造效用 eval。 |
 
 ### Admission Criteria（接入资格三条件，AND）
 
@@ -62,19 +101,23 @@ N/A — 全新能力。F246 之前不存在统一审批中心。各 feature（F1
 
 | # | 条件 | 说明 | 反例 |
 |---|------|------|------|
-| 1 | actor = operator | 必须operator本人审批 | 猫间协调（FYI/ACTION）→ 自动投递 |
+| 1 | decision actor = operator | 最终决定必须由operator本人做；requester 通常是猫或后台 producer | 猫间协调（FYI/ACTION）→ 自动投递 |
 | 2 | binary outcome | approve / reject（可选 modify） | F168 acknowledge/resolve/waive → 多态 action |
-| 3 | 跨 thread 需求 | 审批可能在operator不在的 thread 产生 | operator主动发起的操作 |
+| 3 | 异步 / 跨 surface 需求 | proposal 可能在operator不在的 thread/surface 产生，或存活超过当前 invocation | 已认证 operator 当场亲手执行的同步操作 |
 
 ### Census（全量审批点）
 
 | Feature | 审批项 | 接入 |
 |---------|--------|------|
-| F128 | propose_thread | **v1** |
-| F225 | session_handoff | **v1** |
-| F193 E3 | cross_thread_dispatch (任务分配) | **v1** |
+| F128 | propose_thread | ✅ 已接；chat card + 双向可追溯的健康范本 |
+| F225 | session_handoff | ✅ 已接；chat card + message anchor |
+| F193 E3 | cross_thread_dispatch (任务分配) | ⚠️ 已接 Hub；Phase I 补 chat card + origin/card 双锚 |
 | F168 | community direction | Sibling（不迁 v1） |
-| F231 | propose_profile_update | **v2** |
+| F231 | propose_profile_update | ✅ 已接；chat card + message anchor |
+| F221 | propose_taste | ⚠️ 已接 Hub；caller sourceMessageId 可选，Phase I 改为 ingress 自产 card |
+| F260 | propose_entity | ⚠️ 已接 Hub；明确无 confirmation card，Phase I 修复 |
+| F139 | agent schedule create / permanent delete | ✅ Wave 1：verified cat 先 proposal，approve 后 materialize/delete；authenticated operator 直执并审计 |
+| F208 | dossier distillation | ❌ spec 承诺 Hub 但无 adapter；Phase I 接入 event origin |
 | Knowledge Feed | 知识条目审核 | ❌ Parked（operator） |
 | Limb | pair_approve | ❌ Dropped（operator） |
 
@@ -87,7 +130,7 @@ N/A — 全新能力。F246 之前不存在统一审批中心。各 feature（F1
 - **ApprovalItem 接口**（统一 DTO，adapter 输出格式）：
   - `ownerUserId` — 审批项归属用户（Hub 按 userId 过滤，防跨用户泄露）
   - `sourceFeatureId` — 来源 feature（限 allowlist：`F128` / `F225` / `F193`，v1 硬编码）
-  - `sourceThreadId`, `sourceMessageId` — 原始位置（跳转用）
+  - `sourceThreadId`, `sourceMessageId` — v1 历史字段；Phase I 由 `originRef` + `approvalCardRef` 替代，迁移期只读兼容
   - `requesterCatId` — 发起审批的猫
   - `status` — `pending` / `approved` / `rejected` / `stale`
   - `summary`, `actions`, `inlineApprovable`, `expiresAt`
@@ -122,15 +165,15 @@ N/A — 全新能力。F246 之前不存在统一审批中心。各 feature（F1
 
 | effect-class | 接收方动作 | 示例 | 走底座？ |
 |-------------|-----------|------|---------|
-| `fyi` | 看一眼 + 知道了 | "shared 改了请 rebuild" | ❌ 自动投递 |
-| `coordinate` | 协调自己的节奏 | "你卡我了请 ack" / "请 rebase" | ❌ 自动投递 |
-| `investigate` | 只读调查 | "main 上有你 feature 的 stray 文件" | ❌ 自动投递 |
-| `assign_work` | 开 worktree 写代码 | "这个 bug 归你修" | ✅ Approval Hub |
+| `fyi` | 只传递信息；系统记录 receipt，不要求 LLM 礼貌 ACK | "shared 接口已变" | ❌ 自动投递 |
+| `coordinate` | 对齐依赖/进度/已有责任；**不转移 implementation custody** | "你刚合入的 commit 把main弄红了，这是复现证据" | ❌ 自动投递 |
+| `investigate` | 授予此次只读调查边界，不授新的实现球权 | "main 上有你 feature 的 stray 文件" | ❌ 自动投递 |
+| `assign_work` | 请求给接收方**新增**实现责任；审批后再进入 action custody | "这个 bug 原本不归你，现在请你接手" | ✅ Approval Hub |
 
 - [x] **AC-B1**: F193 E3 `assign_work` 类卡片审批走底座 → Hub 可见
 - [x] **AC-B2**: F193 E3 `fyi`/`coordinate`/`investigate` 类不产生 ApprovalItem（有 fixture 测试证明）
 - [x] **AC-B3**: effect-class 由发送猫在 cross-post 时声明，不由底座推断
-- [x] **AC-B4**: **接收侧不变量**（Maine Coon R2 P2）：`fyi`/`coordinate`/`investigate` 自动投递**永远不是开工授权**。接收猫只能知会/协调/只读调查；写代码必须有 `assign_work` 的 approved DispatchProposal 或 operator 直接指令。接收侧 prompt 注入 effect-class 标签 + 行为约束。Fixture：imperative wording（"请修这个 bug"）+ non-assign effect-class（`fyi`）= 不触发 ApprovalItem + 接收侧不授权 coding
+- [x] **AC-B4**: **接收侧双向不变量**（Maine Coon R2 P2；2026-07-15 校正）：`fyi`/`coordinate`/`investigate` 自动投递本身**不授予新的 coding 责任**，也**不撤销接收方独立于本消息的已有 standing/custody**。命令式正文不能绕过 `assign_work` 偷派活；但确定性 main-red fix-forward、当前 action lease、feature owner 或 operator 既有指令也不会被 `coordinate` 反向禁止。接收侧按 F167 Phase O 三值核验：`verified` → 从自己已有责任路径 claim/continue；`mismatch` → 携证据退回；`insufficient` → 只读调查或升级。D4 fixture 锁住这个对偶边界，并禁止 courtesy-only ACK。
 
 ### Phase C: Workspace 集成 + 响应式 Tab Bar ✅
 
@@ -327,23 +370,138 @@ Goal: 把 Phase C 后真实遗留的成熟化工作收束成可执行交付，�
 - [x] **AC-G4**: `handoff-proposals:settled:{userId}` sorted set 原子维护：`CAS_AND_SETTLE_LUA` 在一次 Lua 调用中完成状态 CAS + ZREM pending + ZADD settled，消除 crash window（P1 fix）
 - [x] **AC-G5**: 一次性 backfill 脚本 `backfill-f225-settled-index.mjs`，DRY RUN 默认，`--apply` 写入，默认 Redis 6398（生产需显式 `REDIS_URL=redis://localhost:6399`）
 
+### Phase H: F231 Settled Adapter + History Filter Bar + Jump Button ✅
+
+**Goal**: 解决历史 tab 的三个用户痛点（operator 2026-07-03 反馈）：
+1. F231 画像更新审批记录不出现在历史 tab（F231ApprovalAdapter 缺 `listSettled()`）
+2. 历史 tab 没有 filter 能区分审批通过 vs 拒绝
+3. 历史 tab 无法跳转回原始 thread/消息
+
+**核心设计**：
+
+| 问题 | 解法 |
+|------|------|
+| F231 历史缺失 | F231ApprovalAdapter 添加 `listSettled()`；IProfileUpdateProposalStore 接口扩展 `listSettledByUser()`；Redis 端 `profile-update:settled:{userId}` ZSet 原子维护（Lua CAS）；InMemory 端 collect() 支持自定义排序 |
+| 无 outcome filter | ApprovalPanel 历史 tab 新增 outcome toggle（✅通过 / ❌拒绝）；与 feature chip filter 组合，互为 AND |
+| 无跳转 | SettledHistoryCard 新增"查看"按钮，使用 `planTeleport` 模式（同 ApprovalItemCard.jumpToApproval）；有 `sourceMessageId` 则定位消息，否则跳 thread 入口 |
+
+#### AC 清单（Phase H）
+
+- [x] **AC-H1**: `F231ApprovalAdapter.listSettled(userId, opts?)` 实现：委托 `store.listSettledByUser(userId, limit)`，mapping 到 `SettledApprovalItem` DTOs（status approved/rejected，decidedAt = approvedAt ?? rejectedAt，decidedBy = approvedBy ?? rejectedBy）
+- [x] **AC-H2**: `IProfileUpdateProposalStore.listSettledByUser(userId, limit?)` 接口扩展，InMemoryProfileUpdateProposalStore 实现（按 approvedAt ?? rejectedAt DESC 排序，collect() 接受可选 sort 比较器）
+- [x] **AC-H3**: `profile-update:settled:{userId}` ZSet 原子写入：`CAS_FINALIZE_AND_SETTLE_LUA`（approving→approved + ZADD settled）+ `CAS_REJECT_AND_SETTLE_LUA`（pending→rejected + ZREM pending + ZADD settled）提取到 `redis-profile-update-lua-scripts.ts`
+- [x] **AC-H4**: `RedisProfileUpdateProposalStore.listSettledByUser()` — ZREVRANGE + 逐条 get，一致性与 F225/F128 Phase G 模式相同
+- [x] **AC-H5**: ApprovalPanel 历史 tab 新增 outcome filter（✅通过 / ❌拒绝 toggle），与已有 feature chip 组合过滤；active filter 时显示 Clear 按钮；无匹配时显示空态
+- [x] **AC-H6**: SettledHistoryCard 新增"查看"跳转按钮（外链 icon + 文字），调用 `planTeleport({ threadId, messageId, currentThreadId })`；有 messageId 滚动定位，无 messageId 跳 thread
+- [x] **AC-H7**: 测试覆盖：14/14 F231 adapter 测试通过（含 7 个新 listSettled 测试：空集、approved mapping、rejected mapping、pending 排除、decidedAt 排序、sourceMessageId、limit 截断）
+- [x] **AC-H8**: 一次性 backfill 脚本 `backfill-f231-settled-index.mjs`，补全 Phase H deploy 前已决议的 F231 提案（code-review P1 修复）；DRY RUN 默认（需 `--execute` 才写）；sanctuary guard（默认 6398，6399 需 `--allow-sanctuary`）；4/4 sanctuary guard 测试通过
+
+**已知限制（P3，范围外）**：历史 tab 在operator已打开的状态下发生新审批决议时，新记录不会实时出现（需切 tab 或手动刷新）。原因：`useApprovalHub` live-sync hook 目前只订阅 pending 事件，不推送 settled 事件。此限制超出本 PR 范围（不在原始三个用户投诉中），作为后续优化记录。
+
+### Phase I: Producer Admission + Exact Provenance + Schedule Gate 🚧
+
+> **Reopen provenance（2026-07-20）**：现状审计与方案基线来自 thread `[thread-id]` message `0001784589151623-000190-e286ebe3`；斑斑独立评议来自 message `0001784602530779-000004-7056ce19`；operator 授权更新本 spec 来自 message `0001784604430659-000047-c9c19f4d`。
+
+**Goal**：把 Approval Hub 从“若干 feature 自愿接入的聚合 UI”升级为“猫/后台 producer 发起 operator gate 时绕不过的发布边界”，并让 Hub、审批卡、触发来源三者可精确互跳。
+
+#### 架构收束（回应 2026-07-20 独立评议）
+
+| 追问 | Phase I 决策 |
+|------|--------------|
+| Envelope 与现有 adapter 是替换还是叠加？ | **不替换 canonical store，不新增中央 proposal store。** 各 adapter 继续读取自己的 canonical state；Envelope 只统一 ingress 输出与 provenance，adapter 投影同一 proposal。 |
+| F139 怎么区分 operator 亲手操作与猫代理？ | 看服务端验证过的 principal，不看 endpoint、请求 body 或“没有 callback”。authenticated user/session 可直执；callback/agent-key 一律是 cat proxy；身份缺失或不可信则 fail closed。 |
+| 机器门禁是 compile-time 还是 runtime？ | **runtime 是主门禁**：proposal 发布统一走 ingress，副作用执行校验 strict operator principal 或 approved proposal；compile/CI parity checker 只防注册表、adapter、Web metadata 与 route 漂移。 |
+| 历史迁移记录放哪里？ | Hub/调度 UI 展示 `provenanceState=legacy_unanchored`，它不是 approved/rejected 状态。若 operator 现在重新确认，新增一条带当前时间与双锚的 re-attestation，不篡改旧记录。 |
+
+#### 发布契约
+
+```ts
+type ApprovalOriginRef =
+  | { kind: 'message'; threadId: string; messageId: string }
+  | { kind: 'event'; anchor: string; summary: string; threadId?: string };
+
+interface ApprovalEnvelope {
+  canonicalProposalId: string;
+  sourceFeatureId: ApprovalFeatureId;
+  ownerUserId: string;
+  requesterCatId: string;
+  originRef: ApprovalOriginRef;
+  approvalCardRef: { threadId: string; messageId: string };
+  createdAt: number;
+}
+```
+
+- Producer 向 `ApprovalIngress.publish(draft)` 提交 canonical proposal ref、`originRef` 与 card payload；ingress 持久化 card 后返回完整 Envelope。
+- Envelope 的 provenance metadata 由 feature canonical store 持久化，Hub 不另建 proposal 状态表。
+- `approvalCardRef` 非空才允许 adapter 把 item 投影成 Hub-visible pending。card 写入失败时 proposal 必须保持不可审批并 tombstone/回滚，重试需幂等。
+- `originRef.kind='message'` 必须精确定位消息；没有消息原文的系统事件使用稳定 `anchor` + 不可歧义摘要，UI 明示“事件来源”。
+- v1 `sourceThreadId/sourceMessageId` 仅作迁移期读取兼容；新 producer 禁止继续写单锚字段。
+
+#### F139 actor / effect matrix
+
+| Verified principal | 创建调度 | 暂停/恢复 | 永久删除 |
+|--------------------|----------|-----------|----------|
+| authenticated operator user/session | 直接执行并留 audit | 直接执行并留 audit | 直接执行并留 audit |
+| verified cat callback / agent-key | 创建 proposal；approve 后 materialize | 可按既有授权边界执行并留 audit | 创建 proposal；approve 后 delete |
+| missing / unverified / body-claimed identity | 401/403，不写入 | 401/403，不写入 | 401/403，不写入 |
+
+> 本 Phase 不把暂停/恢复扩大为新的 operator gate；它只封住会新增长期副作用或永久移除状态的 create/delete。若后续证据显示暂停/恢复也需要 gate，另以行为风险更新矩阵。
+
+#### 交付波次
+
+1. **Wave 0 — 底座先行（PR #3135）**：`ApprovalProducerRegistry` 单源、`ApprovalIngress`、双锚 DTO、truthful jump UI、adapter fan-out 分项日志；本 wave 完成 AC-I1/I4，并先迁移 F128/F225/F231，AC-I2/I3 随其余 producer 在后续 wave 收口。
+2. **Wave 1 — 活风险止血（已实现）**：F139 cat-proxy create/permanent-delete proposal 化，批准后才 materialize/delete；strict principal guard 覆盖同一 mutation endpoint，暂停/恢复保留直执但统一鉴权与审计。
+3. **Wave 2 — 已接但缺锚**：F193 / F260 / F221 统一生成 card，并迁移为 `originRef + approvalCardRef`。
+
+#### 机制选择
+
+| Claim | 机制 | 通过证据 |
+|-------|------|----------|
+| producer 注册完整、card commit point、双锚、principal 分流、副作用不得提前发生 | schema + unit/integration test + runtime guard + parity checker | 精确 RED→GREEN fixtures；绕过路径返回 401/403/409 且无持久化副作用 |
+| query aggregation 在 6+ adapters 下是否仍健康 | logs/measurement | alpha 代表性 inbox 的 pending fetch p95 + adapter 分项耗时 |
+| Approval Hub 是否“有用” | 本 Phase 不新增 eval | 本轮要守的是确定契约，不存在 keep/tune/sunset 的不确定效用决策 |
+
+#### AC 清单（Phase I）
+
+- [x] **AC-I1**: `ApprovalProducerRegistry` 成为 producer/feature allowlist、API adapter、Web badge/filter metadata、decision route 与 source policy 的单一真相源；CI parity checker 对缺项或多项 fail closed。（PR #3135）
+- [ ] **AC-I2**: `ApprovalIngress.publish()` 是猫/后台 producer 发布 operator proposal 的唯一入口；card 持久化成功是 Hub-visible commit point，失败不会产生 orphan pending，重试幂等。（Wave 0 已完成 ingress 事务边界与 F128/F225/F231 迁移；Wave 1 已迁移 F139；F193/F221/F260 及后续 producer 待所属 wave）
+- [ ] **AC-I3**: shared DTO 与 canonical stores 支持非空 `originRef` + `approvalCardRef`；旧 `sourceThreadId/sourceMessageId` 仅保留读取兼容，新 producer 写入被 type/lint/guard 拒绝。（Wave 0 已完成 shared 契约与 F128/F225/F231 store；Wave 1 已完成 F139 persistent store；其余 canonical store 待所属 wave）
+- [x] **AC-I4**: pending 与 settled UI 分别提供“查看审批卡”和“查看触发原文/事件来源”；message ref 精确定位消息，event ref 展示稳定来源；缺锚时不再显示会跳到 thread 根部的误导性“查看上下文”。（PR #3135）
+- [x] **AC-I5**: schedule mutation 只接受 authenticated operator user/session 或 verified cat principal；body `createdBy`、无 callback、`default-user` 均不能提升权限。身份缺失/伪造 fixtures 返回 401/403 且 store 不变。（Wave 1，PR #3178）
+- [x] **AC-I6**: verified cat 创建 schedule 时只生成 proposal；operator approve 后恰好一次 materialize，reject 不创建；authenticated operator 在调度面板亲手创建可直执并有 audit。（Wave 1，PR #3178）
+- [x] **AC-I7**: verified cat 永久删除 schedule 时只生成 proposal；approve 后恰好一次 delete，reject 保留；authenticated operator 亲手永久删除可直执并有 audit。（Wave 1，PR #3178）
+- [x] **AC-I8**: F193 `assign_work` producer 自动持久化审批 card，并同时写入 origin/card 双锚；FYI/coordinate/investigate 仍不产生 ApprovalItem。Ingress failure 四阶段模型（pre-card / card-persisted / envelope-anchored / fanout）。`assign_work` callback 必须携带稳定 `clientMessageId`（canonical MCP producer 自动生成），commitEnvelope 不确定结果可由同 key 恢复；anchored dedup retry 重放 thread + Hub fanout 而不重复建卡。R2 commit-point recovery + successor fence CAS；fanout best-effort；backfill 旧候选 `supersededBy` 指向 keeper 而非 newId。（Wave 2，PR #3228）
+- [x] **AC-I9**: F260 entity proposal 自动持久化审批 card，并同时写入 origin/card 双锚；不再以“无 confirmation card”为设计例外。Callback 必须携带稳定 `clientRequestId`（canonical MCP producer 自动生成）；staged retry 恢复同一 proposal，anchored dedup retry 经 ingress 重放 fanout，均不按 `entityId + catId` 猜测重试身份。（Wave 2，PR #3228）
+- [x] **AC-I10**: F221 taste proposal 由 ingress 生成审批 card；caller 传入的消息只可成为 `originRef`，不能让 optional `sourceMessageId` 决定 Hub 是否可追溯。Callback 必须携带稳定 `clientRequestId`（canonical MCP producer 自动生成）；staged retry 恢复同一 proposal，anchored dedup retry 经 ingress 重放 fanout。（Wave 2，PR #3228）
+- [ ] **AC-I11**: F208 dossier distillation proposal 接入 Hub adapter；无 chat 原文的自动涌现使用稳定 event origin，approve/reject 后 canonical store 与 Hub 历史一致。
+- [ ] **AC-I13**: 历史无可靠来源的 dynamic schedule / ApprovalItem 标为 `legacy_unanchored`，不伪造 approved/rejected；re-attestation 是带当前 actor/time/双锚的新记录，有视觉区分与审计测试。
+- [ ] **AC-I14**: adapter count 已达 6 后，在 alpha 以 ≥10 pending、≥3 adapters 的代表性 inbox 测 pending fetch p95，并记录分项耗时；p95 ≥250ms 才开 materialized index plan，否则记录结果并继续 query aggregation。
+- [ ] **AC-I15**: 回归/UAT 覆盖 Hub ↔ card ↔ origin 双向跳转、F139 两类 principal、orphan 防护、历史缺锚视觉；F139/F208/F221/F260 的 feature truth、Authorization phase truth 与 F246 census 同步。
+
 ## Dependencies
 
 - **Evolved from**: N/A（全新底座能力，起源于 F193 E3 讨论中operator发现审批散落问题）
-- **Related**: F128（propose_thread adapter）/ F225（session_handoff adapter）/ F193（dispatch adapter）/ F231（profile_update v2 adapter）/ F168（community ops — sibling concept, operator parked）
+- **Related**: F128（propose_thread）/ F225（session_handoff）/ F193（dispatch）/ F231（profile update）/ F221（taste）/ F260（entity）/ F139（schedule）/ F208（dossier）/ F168（community ops — sibling concept, operator parked）
 - **Blocked by**: none
-- **Evolves to**: materialized CQRS index（条件触发：adapter 数 >5 AND p95 >250ms，见 AC-D7）
+- **Evolves to**: runtime-enforced producer ingress；materialized CQRS index 仍是条件演进（adapter 数 >5 AND measured p95 ≥250ms，见 AC-I14），不是 Phase I 默认目标
 
 ## Risk
 
 | 风险 | 缓解 | 结果 |
 |------|------|------|
-| adapter fan-out 延迟随 feature 数增长 | AC-D7 双阈值 gate（>5 adapters AND p95 >250ms） | 4 adapters，阈值未触发，continue query aggregation |
+| adapter fan-out 延迟随 feature 数增长 | AC-D7/AC-I14 双阈值 gate（>5 adapters AND p95 ≥250ms） | 已达 6 adapters，count 阈值触发；p95 待实测，未满足双阈值前继续 query aggregation |
 | filter 引入"可见集 ≠ 全集"状态分裂 | LL-087 plan-time invariant table + batch scoped to filteredItems | Phase D alpha 8/8 PASS 覆盖边界场景 |
 | F128 就地审批降级审批能力 | AC-A4 强制全量 overrides 或跳转 | Maine Coon R2 P2 守住 |
 | 跨用户数据泄露 | ownerUserId 过滤 + adapter 按 userId 查询 | AC-A7 + AC-A8 |
+| 新 producer 漏接 Hub | 单一 producer registry + runtime ingress + CI parity checker | AC-I1 已由 PR #3135 建立并 fail closed；AC-I2 已迁移 F128/F225/F231，其余 producer 随所属 wave 接入 ingress |
+| 把“无 callback”误判成 operator | strict authenticated user/session principal；cat callback/agent-key 显式分类 | Wave 1 已完成 AC-I5~I7；mutation fail closed |
+| canonical proposal 已写但 card 失败，形成无来源 pending | card 持久化作为 Hub-visible commit point + 幂等回滚/tombstone | PR #3135 已为 ingress 与 F128/F225/F231 实现；其余 producer 迁移后才完成 AC-I2 |
+| 历史补录伪造审批事实 | `legacy_unanchored` provenance state + 当下 re-attestation | Phase I AC-I13 待实现 |
+| 为统一而大迁移 canonical stores | Envelope 限定为发布/溯源契约，adapter 继续读 feature store | KD-12；Phase I 禁止 big-bang store replacement |
 
-## Close Gate Report
+## Historical Close Gate Report（Phase A–H）
+
+> 下列报告仅证明 Phase A–H 的历史交付；2026-07-20 reopen 的 Phase I 不在该 close verdict 内，须在 AC-I1~I15 完成后另走 close gate。
 
 ```yaml
 feature_id: F246
@@ -373,7 +531,7 @@ harness_feedback: none | reason: non-harness feature, pure product capability
 - AC-B1 ✅ met — F193 dispatch adapter, assign_work → Hub visible, alpha 5/5 PASS
 - AC-B2 ✅ met — fyi/coordinate/investigate = no ApprovalItem, fixture test
 - AC-B3 ✅ met — effect-class declared by sender, not inferred
-- AC-B4 ✅ met — receiver invariant enforced (prompt injection + fixture), alpha verified
+- AC-B4 ✅ met / 2026-07-15 corrected — Phase B 的“non-assign 不授新活”保留；D4 + focused fixture 补上“不剥夺已有 standing/custody”对偶边界。ActionSuccessor 硬/eval 闭环归 F167 Phase S.1，不误报为 F246 已实现
 
 **Phase C (PR #2463)**:
 - AC-C1 ✅ met — workspaceMode='approval' renders ApprovalPanel
@@ -410,6 +568,16 @@ harness_feedback: none | reason: non-harness feature, pure product capability
 - AC-G3 ✅ met — Redis listSettledByUser ZREVRANGE + pipeline + double-check (8/8 Redis tests)
 - AC-G4 ✅ met — atomic CAS_AND_SETTLE_LUA (status CAS + ZREM + ZADD in one Lua call)
 - AC-G5 ✅ met — backfill script, DRY RUN default, 6398 default (prod explicit override)
+
+**Phase H (AC-H1~H8):**
+- AC-H1 ✅ met — F231ApprovalAdapter.listSettled() delegating to listSettledByUser, SettledApprovalItem mapping
+- AC-H2 ✅ met — IProfileUpdateProposalStore interface + InMemory implementation (collect() with optional sort comparator)
+- AC-H3 ✅ met — CAS_FINALIZE_AND_SETTLE_LUA + CAS_REJECT_AND_SETTLE_LUA in redis-profile-update-lua-scripts.ts, atomic ZADD settled
+- AC-H4 ✅ met — RedisProfileUpdateProposalStore.listSettledByUser() via ZREVRANGE loadFromIndex
+- AC-H5 ✅ met — ApprovalPanel outcome filter (✅通过/❌拒绝 toggle) + Clear button + empty state
+- AC-H6 ✅ met — SettledHistoryCard "查看" button using planTeleport (scrollNow → scrollToMessage; navigateTo → pushThreadRouteWithHistory)
+- AC-H7 ✅ met — 14/14 F231 adapter tests pass (7 new listSettled tests)
+- AC-H8 ✅ met — backfill-f231-settled-index.mjs: dry-run default, --execute writes, sanctuary guard (4/4 tests pass)
 
 ## Reflection Capsule
 

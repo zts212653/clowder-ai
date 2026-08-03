@@ -6,7 +6,7 @@ doc_kind: spec
 created: 2026-03-15
 ---
 
-# F124: Apple Ecosystem × Cat Café 语音交互系统
+# F124: Apple Ecosystem × Clowder AI 语音交互系统
 
 > **Status**: spec | **Owner**: Ragdoll | **Priority**: P1
 
@@ -61,7 +61,7 @@ operator的苹果手表到了。核心场景：operator戴着 AirPods，双手�
 ### Phase C: watchOS App — MVP（Watch 优先）
 
 SwiftUI 实现 watchOS App MVP：
-- Watch 直连 Cat Café 后端（URLSession / WebSocket over eSIM/WiFi）
+- Watch 直连 Clowder AI 后端（URLSession / WebSocket over eSIM/WiFi）
 - Thread 列表 + 切换（表冠/手势/语音）
 - 语音输入：Watch 麦克风 → SFSpeechRecognizer 本地离线识别 → 文字发到 thread（不传音频到后端）
 - 语音输出：猫猫消息 → TTS → Watch 扬声器/蓝牙耳机自动播报
@@ -95,7 +95,7 @@ iPhone companion App：
 - [ ] AC-B3: iPhone ↔ Watch 交互流程图确认
 
 ### Phase C（watchOS App MVP）
-- [ ] AC-C1: Watch 独立联网（eSIM/WiFi）直连 Cat Café 后端
+- [ ] AC-C1: Watch 独立联网（eSIM/WiFi）直连 Clowder AI 后端
 - [ ] AC-C2: Thread 列表显示 + 表冠滚动切换
 - [ ] AC-C3: Watch 麦克风语音输入 → SFSpeechRecognizer 本地识别 → 文字发到 thread
 - [ ] AC-C4: 猫猫消息 → TTS → Watch 扬声器/蓝牙自动播报
@@ -129,7 +129,7 @@ iPhone companion App：
 | Apple Developer 账号 operational cost/年 | 先 free provisioning sideload，成熟后交钱 |
 | iOS/watchOS 开发需要 Xcode + 真机调试 | operator有 M4 Max + 手表实机 |
 | AirPods 硬件事件（单击/双击/长按）浏览器/App 能否捕获 | Phase B 调研，降级方案用语音指令 |
-| Cat Café 后端 API 需要适配移动端 | 现有 REST API 基本可用，需补鉴权 |
+| Clowder AI 后端 API 需要适配移动端 | 现有 REST API 基本可用，需补鉴权 |
 | **Cloudflare Tunnel 延迟** | 之前体验很卡，Watch 语音交互需要 <300ms 延迟。**Blocker 级**——需要operator和之前的Ragdoll讨论优化方案 |
 | 域名未注册 | 公网入口的域名还没注册，需要operator处理 |
 

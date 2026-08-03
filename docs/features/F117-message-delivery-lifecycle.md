@@ -1,9 +1,10 @@
 ---
 feature_ids: [F117]
-related_features: [F039]
+related_features: [F039, F264]
 topics: [message, queue, delivery, lifecycle, context]
 doc_kind: spec
 created: 2026-03-14
+tips_exempt: automatic owner-timeline and cat-delivery consistency hardening; no new user action or standalone capability to teach
 ---
 
 # F117: Message Delivery Lifecycle — 消息投递生命周期真相源
@@ -17,7 +18,15 @@ operator 2026-03-14 实测发现：queue 模式发送消息后立即取消，该
 
 根因：当前架构下 queue send 在 enqueue 阶段就持久化 user message 并做乐观插入，但没有 delivery status 概念。History API 和 ContextAssembler 不区分 queued/delivered/canceled，导致未送达甚至已取消的消息污染聊天历史和猫猫上下文。
 
-**核心 invariant**：`undelivered user messages MUST NOT appear in timeline, history API, or prompt context.`
+**2026-03-14 原始 invariant**：`undelivered user messages MUST NOT appear in timeline, history API, or prompt context.`
+
+**2026-07-21 契约演进（F264）**：原句把“operator查看自己已持久化的消息”和“猫获得正文”混成一个
+visibility 开关，已被 F264 的 per-target receipt 契约细分：
+
+- durable queued user message 从 admission 起留在**operator的浏览器时间线**原位，并显示真实 Queue receipt；
+- 同一消息在 exact delivery 前仍不得进入猫的 callback/thread-context/prompt/pending-mentions；
+- canceled 消息同时从 live 时间线与 F5 history 消失；
+- `deliveryStatus` 继续表示 cat delivery，不再兼任 owner timeline publication。
 
 operator experience：
 > "前端不应该显示你们真正没有收到的消息，对吧？"
@@ -59,7 +68,8 @@ operator experience：
 
 1. Message 模型新增 `deliveryStatus?: 'queued' | 'delivered' | 'canceled'`（老数据缺省 `delivered` 兼容）
 2. enqueue 时 message 持久化带 `deliveryStatus: 'queued'`
-3. History API（`GET /api/messages`）默认只返回 `delivered`（或无 deliveryStatus 的历史消息）
+3. MessageStore 默认读只返回 `delivered`（或无 deliveryStatus 的历史消息）；F264 后 owner-facing
+   `GET /api/messages` 显式 opt-in durable queued user publication，cat cognition readers 不 opt-in
 4. ContextAssembler 只组装 `delivered` 消息
 5. Mention surfaces（`pending-mentions` 等）只返回 `delivered` 消息的 @mention
 6. QueueProcessor dequeue 执行时：将 message 标为 `delivered`，扩展 `messages_delivered` 事件携带完整 user message payload
@@ -67,6 +77,10 @@ operator experience：
 7. clear 队列：批量标 `canceled`，发批量 `message_deleted`
 
 ### Phase B: 前端适配
+
+> 以下是 2026-03-14 的历史交付。F264 于 2026-07-21 仅 supersede “queued user bubble 何时对operator
+> 可见”：显式 queue send 在 202 成功并拿到 durable message id 后插入；smart-default queued 保留并
+> reconcile optimistic bubble。取消与 cat-context 隔离仍完全沿用 F117。
 
 1. queue send 时**不做乐观插入**到主时间线（QueuePanel 仍通过 `queue_updated` 展示）
 2. 收到扩展版 `messages_delivered` 事件时，将 user message 插入主时间线
@@ -94,15 +108,26 @@ operator experience：
 - [x] AC-B5: QueuePanel 功能不受影响（仍通过 `queue_updated` 正常展示）
 - [x] AC-B6: queue send 多行消息（Shift+Enter）时不出现 optimistic bubble；delivered 后只出现一次
 
+### F264 owner-timeline 演进（2026-07-21）
+
+- [x] AC-B7: durable queued user message 从 Queue admission 起可由 owner-facing history/F5 水合，仍不被 cat callback/context 读取
+- [x] AC-B8: explicit queue send 等 202 durable id 后插入；smart-default queued 不删除 optimistic bubble
+- [x] AC-B9: terminal delivery 更新同一 bubble 的 receipt/deliveredAt 并保留 authoring-time 顺序，不复制正文
+- [x] AC-B10: canceled 消息继续由 `message_deleted` 移除，owner history/F5 也不返回
+
 ## Scope Boundary
 
-- **In scope**: undelivered user message 对 `timeline / history API / prompt context / pending-mentions` 的一切泄漏
+- **In scope**: undelivered user message 对 cat cognition (`callback / thread context / prompt / pending-mentions`) 的泄漏，以及 canceled message 对 owner timeline/history 的 resurfacing
 - **Out of scope but related**: `cat_cafe_post_message` callback 路由的 @mention 解析/路由异常（走 `callbacks.ts`，不经过 queue/delivery lifecycle）
 
 ## Dependencies
 
 - **Evolved from**: F039（消息排队投递 — 三模式已完成，但缺 delivery lifecycle 概念）
 - **Related**: F047（Queue Steer）、community issue [#20](https://github.com/zts212653/clowder-ai/issues/20)、PR [#25](https://github.com/zts212653/clowder-ai/pull/25)
+
+Architecture cell: `dispatch` + `bubble-pipeline`
+Map delta: none — F264 只把既有 message visibility 拆成 owner timeline 与 cat delivery 两个 typed read option，未改变 cell ownership。
+Why: Queue custody 仍归 dispatch，时间线投影与 receipt 合并仍归 bubble-pipeline。
 
 ## Risk
 
@@ -120,6 +145,7 @@ operator experience：
 | KD-2 | 不 merge 社区 PR #25 作为 quick fix | 只修渲染层是脚手架不是终态，withdraw resurfacing 未闭合（P1铁律）| 2026-03-14 |
 | KD-3 | 修完后走全量 sync 而非 hotfix | 有多个已完成 F 待同步，hotfix 增加后续同步难度（operator决定）| 2026-03-14 |
 | KD-4 | Bug 3 拆分：queued @mention 泄漏 in scope / post_message callback 路由 out of scope | post_message 走 callback 路由不经 queue，硬塞进 F117 会混 scope（Maine Coon Design Gate 提出）| 2026-03-14 |
+| KD-5 | owner timeline publication 与 cat delivery 分成两个 typed read option | F264 receipt 必须让operator持续看见原消息；复用全局 `isTimelinePublished` 会把未投递正文泄给猫 | 2026-07-21 |
 
 ## Review Gate
 

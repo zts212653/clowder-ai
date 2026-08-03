@@ -280,7 +280,11 @@ test('AC-G10: capture bridge stamps nativeSystemPrompt when nativeL0Provider=tru
       effectivePrompt: 'pack-system\n\n---\n\nhi',
       injectionDecision: { isResume: false, canSkipOnResume: true, forceReinjection: false, injected: true },
       nativeL0Provider: true,
-      nativeL0Fetcher: async () => 'TEST-COMPILED-L0',
+      nativeL0Fetcher: async (catId, userId) => {
+        assert.equal(catId, 'opus');
+        assert.equal(userId, 'g10-user', 'native L0 capture must not fall back to another user profile');
+        return 'TEST-COMPILED-L0';
+      },
     });
     // Capture is fire-and-forget async; poll the listByInvocation index.
     let captures = [];

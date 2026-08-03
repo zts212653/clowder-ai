@@ -164,12 +164,23 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
   // #712: always send the form's mcpSupport value so the user can toggle it explicitly
   const mcpSupportPatch = { mcpSupport: form.mcpSupport };
   const trimmedCliEffort = trimText(form.cliEffort);
-  const cliPatch =
-    trimmedCliEffort.length > 0
-      ? { cli: { effort: trimmedCliEffort } }
-      : cat?.cli?.effort
-        ? { cli: { effort: null as null } }
-        : {};
+  const cliFields: Record<string, unknown> = {};
+  if (trimmedCliEffort.length > 0) {
+    cliFields.effort = trimmedCliEffort;
+  } else if (cat?.cli?.effort) {
+    cliFields.effort = null as null;
+  }
+  // F254 D2: per-cat Codex carrier override. Only meaningful when the cat
+  // actually dispatches through the local Codex CLI — generic ACP wins over
+  // the carrier in the production assembly, so don't persist one under ACP.
+  if (form.clientId === 'openai' && !form.acpEnabled) {
+    if (form.codexCarrier) {
+      cliFields.carrier = form.codexCarrier;
+    } else if (cat?.cli?.carrier) {
+      cliFields.carrier = null as null;
+    }
+  }
+  const cliPatch = Object.keys(cliFields).length > 0 ? { cli: cliFields } : {};
   const voiceConfig = buildVoiceConfig(form);
   const voiceConfigPatch: Record<string, unknown> =
     voiceConfig !== undefined ? { voiceConfig } : cat?.voiceConfig ? { voiceConfig: null } : {};

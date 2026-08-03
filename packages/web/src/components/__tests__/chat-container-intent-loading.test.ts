@@ -2,6 +2,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainer } from '@/components/ChatContainer';
+import type { ChatMessage, ThreadState } from '@/stores/chat-types';
 
 const mockSetLoading = vi.fn();
 const mockSetHasActiveInvocation = vi.fn();
@@ -22,10 +23,10 @@ let capturedSocketCallbacks: {
 
 function createMockStoreState() {
   return {
-    messages: [],
+    messages: [] as ChatMessage[],
     isLoading: false,
     hasActiveInvocation: false,
-    intentMode: null,
+    intentMode: null as ThreadState['intentMode'],
     targetCats: [] as string[],
     catStatuses: {} as Record<string, string>,
     catInvocations: {},
@@ -129,6 +130,23 @@ vi.mock('../MessageActions', () => ({
 vi.mock('../MessageNavigator', () => ({ MessageNavigator: () => null }));
 vi.mock('../MobileStatusSheet', () => ({ MobileStatusSheet: () => null }));
 vi.mock('../ParallelStatusBar', () => ({ ParallelStatusBar: () => null }));
+vi.mock('../PendingMemberBubble', () => ({
+  PendingMemberBubble: ({
+    invocationId,
+    showCapabilityTip,
+    appServerLifecycle,
+  }: {
+    invocationId: string;
+    showCapabilityTip?: boolean;
+    appServerLifecycle?: { stage?: string };
+  }) =>
+    React.createElement('div', {
+      'data-testid': 'pending-member-bubble',
+      'data-invocation-id': invocationId,
+      'data-show-capability-tip': showCapabilityTip ? 'true' : 'false',
+      'data-app-server-stage': appServerLifecycle?.stage,
+    }),
+}));
 vi.mock('../ProjectSetupCard', () => ({ ProjectSetupCard: () => null }));
 vi.mock('../QueuePanel', () => ({ QueuePanel: () => null }));
 vi.mock('../RightStatusPanel', () => ({ RightStatusPanel: () => null }));
@@ -139,7 +157,9 @@ vi.mock('../SplitPaneView', () => ({
 vi.mock('../ThinkingIndicator', () => ({
   ThinkingIndicator: (props: unknown) => mockThinkingIndicator(props),
 }));
-vi.mock('../ThreadExecutionBar', () => ({ ThreadExecutionBar: () => null }));
+vi.mock('../ThreadExecutionBar', () => ({
+  ThreadExecutionBar: () => React.createElement('div', { 'data-testid': 'thread-execution-bar' }),
+}));
 vi.mock('../ThreadSidebar', () => ({ ThreadSidebar: () => null }));
 vi.mock('../VoteActiveBar', () => ({ VoteActiveBar: () => null }));
 vi.mock('../VoteConfigModal', () => ({ VoteConfigModal: () => null }));
@@ -246,6 +266,296 @@ describe('ChatContainer intent_mode loading lock', () => {
     });
 
     expect(mockThinkingIndicator).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders one pending member bubble before an active invocation has produced assistant output', () => {
+    storeState.messages = [
+      {
+        id: 'user-start-invocation',
+        type: 'user',
+        content: '@codex 开始',
+        timestamp: Date.now() - 2_000,
+        extra: { targetCats: ['codex'] },
+      },
+    ];
+    storeState.hasActiveInvocation = true;
+    storeState.activeInvocations = {
+      'inv-codex-55': { catId: 'codex', mode: 'execute', startedAt: Date.now() - 1_000 },
+    };
+    storeState.intentMode = 'execute';
+    storeState.targetCats = ['codex'];
+    storeState.catStatuses = { codex: 'spawning' };
+
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
+    });
+
+    const pending = container.querySelector('[data-testid="pending-member-bubble"]');
+    expect(pending?.getAttribute('data-invocation-id')).toBe('inv-codex-55');
+  });
+
+  it('removes the pre-start placeholder once the cat is executing while keeping execution chrome', () => {
+    storeState.messages = [
+      {
+        id: 'user-start-invocation',
+        type: 'user',
+        content: '@codex 开始',
+        timestamp: Date.now() - 2_000,
+        extra: { targetCats: ['codex'] },
+      },
+    ];
+    storeState.hasActiveInvocation = true;
+    storeState.activeInvocations = {
+      'inv-codex-55': { catId: 'codex', mode: 'execute', startedAt: Date.now() - 1_000 },
+    };
+    storeState.intentMode = 'execute';
+    storeState.targetCats = ['codex'];
+    storeState.catStatuses = { codex: 'streaming' };
+    storeState.catInvocations = {
+      codex: {
+        invocationId: 'inv-codex-55',
+        appServerLifecycle: {
+          stage: 'active',
+          lastActivityAt: Date.now(),
+          recoveryAttempt: 0,
+          turnStartSent: true,
+          turnAccepted: true,
+          itemObserved: true,
+        },
+      },
+    };
+
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
+    });
+
+    expect(container.querySelector('[data-testid="pending-member-bubble"]')).toBeNull();
+    expect(container.querySelector('[data-testid="thread-execution-bar"]')).not.toBeNull();
+  });
+
+  it('does not render a second Kimi avatar when an ACP draft carries the real parent + child identity', () => {
+    const parentInvocationId = 'eefcfc03-e188-4f8c-ac6d-435e76fc8b6f';
+    const turnInvocationId = 'd2abf34d-47fb-42a6-80e2-fae40e1d18cf';
+    storeState.messages = [
+      {
+        id: `draft-${turnInvocationId}`,
+        type: 'assistant',
+        catId: 'kimi',
+        content: '',
+        timestamp: Date.now(),
+        isStreaming: true,
+        thinking: 'Check the current git state.',
+        toolEvents: [{ id: 'tool-1', type: 'tool_use', label: 'kimi → Bash', timestamp: Date.now() }],
+        extra: {
+          stream: { invocationId: parentInvocationId, turnInvocationId },
+          turnExecution: {
+            invocationId: turnInvocationId,
+            parentInvocationId,
+            executionKind: 'ordinary',
+          },
+        },
+      },
+    ];
+    storeState.hasActiveInvocation = true;
+    storeState.activeInvocations = {
+      [parentInvocationId]: { catId: 'kimi', mode: 'execute', startedAt: Date.now() - 1_000 },
+    };
+    storeState.intentMode = 'execute';
+    storeState.targetCats = ['kimi'];
+    storeState.catStatuses = { kimi: 'streaming' };
+    storeState.catInvocations = {
+      kimi: { invocationId: parentInvocationId, turnInvocationId },
+    };
+
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
+    });
+
+    expect(container.querySelector('[data-testid="pending-member-bubble"]')).toBeNull();
+    expect(container.querySelector('[data-testid="thread-execution-bar"]')).not.toBeNull();
+  });
+
+  it('keeps the placeholder for a new invocation when the cat status is stale from a previous turn', () => {
+    storeState.messages = [
+      {
+        id: 'user-start-invocation',
+        type: 'user',
+        content: '@codex 再来一轮',
+        timestamp: Date.now() - 2_000,
+        extra: { targetCats: ['codex'] },
+      },
+    ];
+    storeState.hasActiveInvocation = true;
+    storeState.activeInvocations = {
+      'inv-codex-99': { catId: 'codex', mode: 'execute', startedAt: Date.now() - 1_000 },
+    };
+    storeState.intentMode = 'execute';
+    storeState.targetCats = ['codex'];
+    // Stale per-cat state from the previous turn: status stuck at streaming and
+    // the lifecycle snapshot still describes the old invocation.
+    storeState.catStatuses = { codex: 'streaming' };
+    storeState.catInvocations = {
+      codex: {
+        invocationId: 'inv-codex-55',
+        appServerLifecycle: {
+          stage: 'active',
+          lastActivityAt: Date.now() - 60_000,
+          recoveryAttempt: 0,
+          turnStartSent: true,
+          turnAccepted: true,
+          itemObserved: true,
+        },
+      },
+    };
+
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
+    });
+
+    const pending = container.querySelector('[data-testid="pending-member-bubble"]');
+    expect(pending?.getAttribute('data-invocation-id')).toBe('inv-codex-99');
+  });
+
+  it('does not add a second avatar when a later msg-box message arrives during the same visible invocation', () => {
+    storeState.messages = [
+      {
+        id: 'msg-inv-codex-55-codex',
+        type: 'assistant',
+        catId: 'codex',
+        content: '正在输出已有回合',
+        timestamp: Date.now() - 2_000,
+        isStreaming: true,
+        extra: { stream: { invocationId: 'inv-codex-55' } },
+      },
+      {
+        id: 'user-to-sol',
+        type: 'user',
+        content: '@codex-sol 请只让 5.6 看',
+        timestamp: Date.now(),
+        extra: { targetCats: ['codex-sol'] },
+      },
+    ];
+    storeState.hasActiveInvocation = true;
+    storeState.activeInvocations = {
+      'inv-codex-55': { catId: 'codex', mode: 'execute', startedAt: Date.now() - 360_000 },
+    };
+    storeState.intentMode = 'execute';
+    storeState.targetCats = ['codex'];
+
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
+    });
+
+    expect(container.querySelector('[data-testid="pending-member-bubble"]')).toBeNull();
+  });
+
+  it('does not add a placeholder avatar for an auxiliary execution attached to visible output', () => {
+    storeState.messages = [
+      {
+        id: 'msg-parent-1-gpt52',
+        type: 'assistant',
+        catId: 'gpt52',
+        content: '普通回合已经有可见输出',
+        timestamp: Date.now() - 1_000,
+        isStreaming: true,
+        extra: {
+          stream: { invocationId: 'parent-1', turnInvocationId: 'ordinary-turn-1' },
+          auxiliaryTurnExecutions: [
+            {
+              invocationId: 'routing-guard-turn-1',
+              parentInvocationId: 'parent-1',
+              executionKind: 'routing_guard',
+            },
+          ],
+        },
+      },
+    ];
+    storeState.hasActiveInvocation = true;
+    storeState.activeInvocations = {
+      'routing-guard-turn-1': { catId: 'gpt52', mode: 'execute', startedAt: Date.now() - 500 },
+    };
+
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
+    });
+
+    expect(container.querySelector('[data-testid="pending-member-bubble"]')).toBeNull();
+  });
+
+  it('still renders a pending avatar for a newer invocation when the same cat only has older output', () => {
+    storeState.messages = [
+      {
+        id: 'msg-inv-old-codex',
+        type: 'assistant',
+        catId: 'codex',
+        content: '上一轮输出',
+        timestamp: Date.now() - 10_000,
+        extra: { stream: { invocationId: 'inv-old' } },
+      },
+    ];
+    storeState.hasActiveInvocation = true;
+    storeState.activeInvocations = {
+      'inv-new': { catId: 'codex', mode: 'execute', startedAt: Date.now() - 1_000 },
+    };
+    storeState.intentMode = 'execute';
+    storeState.targetCats = ['codex'];
+
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
+    });
+
+    const pending = container.querySelector('[data-testid="pending-member-bubble"]');
+    expect(pending?.getAttribute('data-invocation-id')).toBe('inv-new');
+  });
+
+  it('does not keep pending placeholders once cats are executing', () => {
+    storeState.messages = [
+      {
+        id: 'user-start-parallel',
+        type: 'user',
+        content: '@codex @opus 开始',
+        timestamp: Date.now() - 180_000,
+        extra: { targetCats: ['codex', 'opus'] },
+      },
+    ];
+    storeState.hasActiveInvocation = true;
+    storeState.activeInvocations = {
+      'inv-stalled': { catId: 'codex', mode: 'execute', startedAt: Date.now() - 180_000 },
+      'inv-healthy': { catId: 'opus', mode: 'execute', startedAt: Date.now() - 1_000 },
+    };
+    storeState.catStatuses = { codex: 'streaming', opus: 'streaming' };
+    storeState.catInvocations = {
+      codex: {
+        invocationId: 'inv-stalled',
+        appServerLifecycle: {
+          stage: 'active',
+          lastActivityAt: Date.now() - 120_001,
+          recoveryAttempt: 0,
+          turnStartSent: true,
+          turnAccepted: true,
+          itemObserved: false,
+        },
+      },
+      opus: {
+        invocationId: 'inv-healthy',
+        appServerLifecycle: {
+          stage: 'active',
+          lastActivityAt: Date.now(),
+          recoveryAttempt: 0,
+          turnStartSent: true,
+          turnAccepted: true,
+          itemObserved: true,
+        },
+      },
+    };
+    storeState.intentMode = 'execute';
+    storeState.targetCats = ['codex', 'opus'];
+
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
+    });
+
+    expect(container.querySelector('[data-testid="pending-member-bubble"]')).toBeNull();
   });
 
   // Cross-thread guard has moved to useSocket (dual-pointer guard).

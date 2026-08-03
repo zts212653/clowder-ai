@@ -40,12 +40,13 @@ export function ChatContainerHeader({
     <header className="safe-area-top">
       <div className="px-5 py-3 flex items-center gap-2">
         <button
+          type="button"
           onClick={onToggleSidebar}
           className="p-1 rounded-lg hover:bg-[var(--console-hover-bg)] transition-colors mr-1"
           title={sidebarOpen ? '收起侧栏' : '展开侧栏'}
           aria-label={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
         >
-          <svg className="w-5 h-5 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
+          <svg aria-hidden="true" className="w-5 h-5 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
             <path
               fillRule="evenodd"
               d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"
@@ -78,12 +79,13 @@ export function ChatContainerHeader({
         )}
         {/* Mobile/tablet: status sheet trigger */}
         <button
+          type="button"
           onClick={onOpenMobileStatus}
           className="p-1 rounded-lg hover:bg-[var(--console-hover-bg)] transition-colors ml-1 lg:hidden"
           title="打开状态面板"
           aria-label="打开状态面板"
         >
-          <svg className="w-5 h-5 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
+          <svg aria-hidden="true" className="w-5 h-5 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
             <path
               fillRule="evenodd"
               d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
@@ -144,9 +146,8 @@ function DaemonActiveIndicator({ threadId }: { threadId: string }) {
   );
 }
 
-// ThreadIndicator extracted to ./ThreadIndicator.tsx (inline title editing).
-// Brand: INTERNAL_BASENAMES ('cat-cafe', 'cat-cafe-runtime') now live in ThreadIndicator.tsx.
-// Re-export for backward compat (tests, other consumers)
+// Brand Guard: INTERNAL_BASENAMES ('cat-cafe', 'cat-cafe-runtime') now live in ThreadIndicator.tsx.
+// Re-export for existing tests and consumers that import from the header module.
 export { ThreadIndicator, tailTruncate } from './ThreadIndicator';
 
 /**
@@ -170,7 +171,7 @@ function PanelToggle({
       aria-label={statusPanelOpen ? '收起面板' : '打开面板'}
       title={statusPanelOpen ? '收起面板' : '打开面板'}
     >
-      <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
+      <svg aria-hidden="true" className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
         <path
           fillRule="evenodd"
           d="M3 4a1 1 0 011-1h12a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm2 0v12h10V4H5z"

@@ -1611,7 +1611,7 @@ describe('GET /api/capabilities (Fastify)', () => {
     await app.close();
   });
 
-  it('keeps global capability writes persistent and rejects governance under Cat Cafe descendants', async () => {
+  it('keeps global capability writes persistent and rejects governance under Clowder AI descendants', async () => {
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
     const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
@@ -2545,10 +2545,10 @@ describe('GET /api/capabilities (Fastify)', () => {
       assert.equal(item.hasOverride, true);
       assert.equal(item.mcpServer.command, 'node');
       assert.deepEqual(item.mcpServer.args, ['project.js']);
-      assert.deepEqual(item.mcpServer.env, { PROJECT_TOKEN: 'project-secret' });
+      assert.deepEqual(item.mcpServer.env, { PROJECT_TOKEN: REDACTED_SECRET });
       assert.deepEqual(item.mcpServer.envKeys, ['PROJECT_TOKEN']);
-      // Global config should not leak into project override response
-      assert.doesNotMatch(res.payload, /global-secret|global.js|GLOBAL_TOKEN/);
+      // The project override is active, but list responses never echo secret values.
+      assert.doesNotMatch(res.payload, /project-secret|global-secret|global.js|GLOBAL_TOKEN/);
     } finally {
       if (prevOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
       else process.env.DEFAULT_OWNER_USER_ID = prevOwner;
@@ -2820,9 +2820,10 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       assert.equal(res.statusCode, 200, res.payload);
       await assert.rejects(() => lstat(linkPath), /ENOENT/);
       const config = await readCapabilitiesConfig(projectDir);
-      assert.equal(config?.capabilities[0]?.enabled, true, 'project disable must NOT change enabled');
-      assert.equal(config?.capabilities[0]?.globalEnabled, true, 'project disable must NOT change globalEnabled');
-      assert.deepEqual(config?.capabilities[0]?.mountPaths, [], 'project disable is represented by empty mountPaths');
+      const skill = config?.capabilities.find((cap) => cap.id === skillId && cap.type === 'skill');
+      assert.equal(skill?.enabled, true, 'project disable must NOT change enabled');
+      assert.equal(skill?.globalEnabled, true, 'project disable must NOT change globalEnabled');
+      assert.deepEqual(skill?.mountPaths, [], 'project disable is represented by empty mountPaths');
     } finally {
       await app.close();
       await rm(projectDir, { recursive: true, force: true });
@@ -2893,9 +2894,10 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
         assert.equal(await realpath(linkPath), await realpath(join(sourceSkillsDir, skillId)));
       }
       const config = await readCapabilitiesConfig(projectDir);
-      assert.equal(config?.capabilities[0]?.enabled, false, 'project enable must NOT change enabled');
-      assert.equal(config?.capabilities[0]?.globalEnabled, false, 'project enable must NOT change globalEnabled');
-      assert.deepEqual(config?.capabilities[0]?.mountPaths, ['claude', 'codex', 'gemini', 'kimi']);
+      const skill = config?.capabilities.find((cap) => cap.id === skillId && cap.type === 'skill');
+      assert.equal(skill?.enabled, false, 'project enable must NOT change enabled');
+      assert.equal(skill?.globalEnabled, false, 'project enable must NOT change globalEnabled');
+      assert.deepEqual(skill?.mountPaths, ['claude', 'codex', 'gemini', 'kimi']);
     } finally {
       await app.close();
       await rm(projectDir, { recursive: true, force: true });
@@ -3033,9 +3035,10 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       assert.equal((await lstat(localSkillDir)).isDirectory(), true);
       // Config IS updated (config write precedes sync)
       const config = await readCapabilitiesConfig(projectDir);
-      assert.equal(config?.capabilities[0]?.enabled, false, 'project enable must NOT change enabled');
-      assert.equal(config?.capabilities[0]?.globalEnabled, false, 'project enable must NOT change globalEnabled');
-      assert.deepEqual(config?.capabilities[0]?.mountPaths, ['claude', 'codex', 'gemini', 'kimi']);
+      const skill = config?.capabilities.find((cap) => cap.id === skillId && cap.type === 'skill');
+      assert.equal(skill?.enabled, false, 'project enable must NOT change enabled');
+      assert.equal(skill?.globalEnabled, false, 'project enable must NOT change globalEnabled');
+      assert.deepEqual(skill?.mountPaths, ['claude', 'codex', 'gemini', 'kimi']);
       // Non-conflicting providers ARE mounted
       for (const provider of ['.claude', '.gemini', '.kimi']) {
         const linkPath = join(projectDir, provider, 'skills', skillId);
@@ -3077,7 +3080,8 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       assert.equal(res.statusCode, 200, res.payload);
       assert.equal(await realpath(linkPath), await realpath(externalSource));
       const config = await readCapabilitiesConfig(projectDir);
-      assert.equal(config?.capabilities[0]?.globalEnabled, false);
+      const skill = config?.capabilities.find((cap) => cap.id === skillId && cap.type === 'skill');
+      assert.equal(skill?.globalEnabled, false);
     } finally {
       await app.close();
       await rm(projectDir, { recursive: true, force: true });
@@ -3270,7 +3274,8 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       assert.equal(missingOwner.statusCode, 200, missingOwner.payload);
       let config = await readCapabilitiesConfig(projectDir);
       // scope=cat writes the F249 blockedCats list, not legacy overrides.
-      assert.equal(config?.capabilities[0]?.blockedCats?.includes('ragdoll'), true);
+      let secretCap = config?.capabilities.find((cap) => cap.id === 'secret-mcp' && cap.type === 'mcp');
+      assert.equal(secretCap?.blockedCats?.includes('ragdoll'), true);
 
       const nonLocalMissingOwner = await patchCapability(app, projectDir, {
         ...OWNER_SESSION_HEADERS,
@@ -3340,7 +3345,8 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       // scope=cat writes blockedCats; cap.enabled/globalEnabled stay unchanged.
       // Verify the blockedCats entry from the first successful call persists and
       // the failed auth attempts didn't mutate it further.
-      assert.equal(config?.capabilities[0]?.blockedCats?.includes('ragdoll'), true);
+      secretCap = config?.capabilities.find((cap) => cap.id === 'secret-mcp' && cap.type === 'mcp');
+      assert.equal(secretCap?.blockedCats?.includes('ragdoll'), true);
     } finally {
       await app.close();
       await rm(projectDir, { recursive: true, force: true });
@@ -3368,9 +3374,10 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
 
       const config = await readCapabilitiesConfig(projectDir);
       // scope=cat writes blockedCats, cap.enabled/globalEnabled stay unchanged.
-      assert.equal(config?.capabilities[0]?.blockedCats?.includes('ragdoll'), true);
-      assert.equal(config?.capabilities[0]?.mcpServer?.env?.API_KEY, 'raw-secret');
-      assert.equal(config?.capabilities[0]?.mcpServer?.headers?.Authorization, 'Bearer raw-secret');
+      const secretCap = config?.capabilities.find((cap) => cap.id === 'secret-mcp' && cap.type === 'mcp');
+      assert.equal(secretCap?.blockedCats?.includes('ragdoll'), true);
+      assert.equal(secretCap?.mcpServer?.env?.API_KEY, 'raw-secret');
+      assert.equal(secretCap?.mcpServer?.headers?.Authorization, 'Bearer raw-secret');
 
       // Audit log still redacts secrets (persisted / potentially shared)
       const audit = await readAuditLog(projectDir);

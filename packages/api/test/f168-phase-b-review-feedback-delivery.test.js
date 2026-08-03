@@ -81,7 +81,14 @@ function makePrTask(overrides = {}) {
     threadId: 'thread-1',
     ownerCatId: 'cat1',
     userId: 'user1',
-    automationState: {},
+    automationState: {
+      review: {
+        lastCommentCursor: 0,
+        lastInlineCommentCursor: 0,
+        lastConversationCommentCursor: 0,
+        lastDecisionCursor: 0,
+      },
+    },
     ...overrides,
   };
 }

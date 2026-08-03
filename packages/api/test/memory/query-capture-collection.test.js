@@ -17,7 +17,8 @@ describe('Query Capture — collection routing metadata (AC-E1)', () => {
         variant_id TEXT NOT NULL,
         effective_flags TEXT NOT NULL,
         payload TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        origin TEXT DEFAULT 'user'
       );
       CREATE TABLE IF NOT EXISTS f163_cohorts (
         thread_id TEXT PRIMARY KEY,
@@ -134,5 +135,96 @@ describe('Query Capture — collection routing metadata (AC-E1)', () => {
       count: 1,
       anchors: ['project:cat-cafe:doc/f186'],
     });
+  });
+
+  it('tags origin=eval for eval domain threads (F192 server-side detection)', async () => {
+    const { evidenceRoutes } = await import('../../dist/routes/evidence.js');
+    app = Fastify();
+    await app.register(evidenceRoutes, {
+      hindsightClient: {
+        recall: async () => [],
+        retain: async () => {},
+        reflect: async () => '',
+        ensureBank: async () => {},
+        isHealthy: async () => true,
+      },
+      sharedBank: 'test',
+      evidenceStore: mockStore(),
+      knowledgeResolver: mockResolver(),
+    });
+    await app.ready();
+
+    // Search with x-cat-cafe-thread-id header matching eval domain convention.
+    // The header is the trusted source (set by MCP server from session env),
+    // NOT the public query param currentThreadId.
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=test',
+      headers: { 'x-cat-cafe-thread-id': 'thread_eval_memory' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    const evalRow = db.prepare("SELECT origin FROM f163_logs WHERE log_type = 'search'").get();
+    assert.ok(evalRow, 'f163_logs must have a search entry');
+    assert.equal(evalRow.origin, 'eval', 'eval domain thread searches must be tagged origin=eval');
+  });
+
+  it('tags origin=user for non-eval threads (F192 server-side detection)', async () => {
+    const { evidenceRoutes } = await import('../../dist/routes/evidence.js');
+    app = Fastify();
+    await app.register(evidenceRoutes, {
+      hindsightClient: {
+        recall: async () => [],
+        retain: async () => {},
+        reflect: async () => '',
+        ensureBank: async () => {},
+        isHealthy: async () => true,
+      },
+      sharedBank: 'test',
+      evidenceStore: mockStore(),
+      knowledgeResolver: mockResolver(),
+    });
+    await app.ready();
+
+    // Non-eval thread header — should remain origin=user
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=test',
+      headers: { 'x-cat-cafe-thread-id': 'thread_abc12345' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    const userRow = db.prepare("SELECT origin FROM f163_logs WHERE log_type = 'search'").get();
+    assert.ok(userRow, 'f163_logs must have a search entry');
+    assert.equal(userRow.origin, 'user', 'non-eval thread searches must be tagged origin=user');
+  });
+
+  it('ignores spoofed currentThreadId query param for origin detection (F192 trust boundary)', async () => {
+    const { evidenceRoutes } = await import('../../dist/routes/evidence.js');
+    app = Fastify();
+    await app.register(evidenceRoutes, {
+      hindsightClient: {
+        recall: async () => [],
+        retain: async () => {},
+        reflect: async () => '',
+        ensureBank: async () => {},
+        isHealthy: async () => true,
+      },
+      sharedBank: 'test',
+      evidenceStore: mockStore(),
+      knowledgeResolver: mockResolver(),
+    });
+    await app.ready();
+
+    // Spoof attempt: eval thread in query param but NO trusted header
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=test&currentThreadId=thread_eval_spoof',
+    });
+    assert.equal(res.statusCode, 200);
+
+    const row = db.prepare("SELECT origin FROM f163_logs WHERE log_type = 'search'").get();
+    assert.ok(row, 'f163_logs must have a search entry');
+    assert.equal(row.origin, 'user', 'spoofed query param must NOT grant eval exemption');
   });
 });

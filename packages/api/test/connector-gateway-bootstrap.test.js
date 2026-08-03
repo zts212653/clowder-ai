@@ -282,8 +282,8 @@ describe('ConnectorGateway Bootstrap', () => {
         NODE_ENV: 'production',
         CAT_CAFE_RUNTIME_ROOT: '/tmp/cat-cafe-runtime',
       }),
-      true,
-      'runtime worktree production launches carry the runtime-root marker',
+      false,
+      'ambient production/runtime markers are not authorization to connect external IM platforms',
     );
     assert.equal(
       isPreconfiguredConnectorAutostartEnabled({
@@ -389,6 +389,7 @@ describe('ConnectorGateway Bootstrap', () => {
     const runtimeProductionConfig = applyConnectorGatewayAutostartPolicy(rawConfig, {
       NODE_ENV: 'production',
       CAT_CAFE_RUNTIME_ROOT: '/tmp/cat-cafe-runtime',
+      CONNECTOR_GATEWAY_AUTOSTART: '1',
     });
     assert.equal(runtimeProductionConfig.weixinBotToken, 'weixin-token');
     assert.equal(runtimeProductionConfig.telegramBotToken, '123456:ABC-DEF-tokenfull');

@@ -20,5 +20,5 @@ safetyTier: readonly
 transparencyTier: visible-by-default
 governanceTier: immutable
 
-# CVO-facing
+# operator-facing
 userExplanation: "伙伴猫不是工具猫"

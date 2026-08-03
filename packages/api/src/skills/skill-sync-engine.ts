@@ -143,7 +143,7 @@ export interface SyncProjectOptions {
    *  the main project root — not the target project root). */
   globalCustomSourceSkills?: ReadonlyMap<string, { skillsSource: string; pluginId?: string }>;
   /** Main project root for resolving relative skillsSource paths in project
-   *  config entries. Plugin skillsSource paths are relative to the Cat Café
+   *  config entries. Plugin skillsSource paths are relative to the Clowder AI
    *  instance root, not the target project being synced. When syncing external
    *  projects, this MUST be set so custom-source skills resolve correctly.
    *  Defaults to projectRoot (correct only when syncing the main project). */
@@ -175,14 +175,16 @@ async function syncProjectUnlocked(
   const allCatCafeCaps = config.capabilities.filter(
     (cap) => cap.type === 'skill' && cap.source === 'cat-cafe' && isValidSkillName(cap.id),
   );
-  // pluginId is an identity label, not a filter criterion. All cat-cafe
-  // skills are managed uniformly — source resolution uses skillsSource
-  // (custom) or the default source dir (built-in).
-  const managedCaps = allCatCafeCaps;
+  const firstPartySkillIds = new Set(
+    allCatCafeCaps.filter((cap) => !cap.pluginId && !cap.skillsSource).map((cap) => cap.id),
+  );
+  const managedCaps = allCatCafeCaps.filter(
+    (cap) => (!cap.pluginId && !cap.skillsSource) || (!!cap.skillsSource && !firstPartySkillIds.has(cap.id)),
+  );
   const previousNames = managedCaps.map((cap) => cap.id);
 
   // Per-skill effective source: resolve(instanceRoot, cap.skillsSource ?? defaultSkillsDir).
-  // skillsSource paths in capability entries are relative to the Cat Café
+  // skillsSource paths in capability entries are relative to the Clowder AI
   // INSTANCE root, not the target project being synced.
   const instanceRoot = opts.mainProjectRoot ?? projectRoot;
   const effectiveSourceMap = new Map<string, string>();

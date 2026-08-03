@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getStreamingTipContexts, isStreamingTipSuppressedByStatus } from '../capability-tip-placement';
+import { getStreamingTipContexts, isStreamingTipSuppressed } from '../capability-tip-placement';
 
 describe('F244 capability tip placement', () => {
   it('uses review contexts for ideate mode', () => {
@@ -13,9 +13,23 @@ describe('F244 capability tip placement', () => {
   });
 
   it('suppresses tips for suspected_stall and alive_but_silent', () => {
-    expect(isStreamingTipSuppressedByStatus('suspected_stall')).toBe(true);
-    expect(isStreamingTipSuppressedByStatus('alive_but_silent')).toBe(true);
-    expect(isStreamingTipSuppressedByStatus('streaming')).toBe(false);
-    expect(isStreamingTipSuppressedByStatus(undefined)).toBe(false);
+    expect(isStreamingTipSuppressed('suspected_stall')).toBe(true);
+    expect(isStreamingTipSuppressed('alive_but_silent')).toBe(true);
+    expect(isStreamingTipSuppressed('streaming')).toBe(false);
+    expect(isStreamingTipSuppressed(undefined)).toBe(false);
+  });
+
+  it('suppresses tips for an app-server turn that stays active past the silence threshold', () => {
+    const now = 1_000_000;
+    const lifecycle = {
+      stage: 'active' as const,
+      lastActivityAt: now - 120_001,
+      recoveryAttempt: 0,
+      turnStartSent: true,
+      turnAccepted: true,
+      itemObserved: false,
+    };
+
+    expect(isStreamingTipSuppressed('streaming', lifecycle, now)).toBe(true);
   });
 });

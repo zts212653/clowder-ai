@@ -15,27 +15,31 @@ import { getMaxSeverity } from './severity-parser.js';
 
 export interface PrFeedbackComment {
   readonly id: number;
+  /** REST pull-request review id for inline comments; absent for conversation comments. */
+  readonly reviewId?: number;
   readonly author: string;
+  /** GitHub REST `user.type`; absent when the upstream actor cannot be classified reliably. */
+  readonly actorType?: string;
   readonly body: string;
   readonly createdAt: string;
   readonly commitId?: string;
   readonly commentType: 'inline' | 'conversation';
   readonly filePath?: string;
   readonly line?: number;
-  /** GitHub author_association field. Used by delivery policy to silence OWNER/MEMBER activity.
-   * Undefined when fetched via legacy paths or when association is unavailable. */
+  /** GitHub author_association field. Context only; never used as actor identity. */
   readonly authorAssociation?: string;
 }
 
 export interface PrReviewDecision {
   readonly id: number;
   readonly author: string;
+  /** GitHub REST `user.type`; absent when the upstream actor cannot be classified reliably. */
+  readonly actorType?: string;
   readonly state: 'APPROVED' | 'CHANGES_REQUESTED' | 'DISMISSED' | 'COMMENTED';
   readonly body: string;
   readonly submittedAt: string;
   readonly commitId?: string;
-  /** GitHub author_association field. Used by delivery policy to silence OWNER/MEMBER activity.
-   * Undefined when fetched via legacy paths or when association is unavailable. */
+  /** GitHub author_association field. Context only; never used as actor identity. */
   readonly authorAssociation?: string;
 }
 

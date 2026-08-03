@@ -1,0 +1,72 @@
+official.rollup_signal_count:
+  label: 摩擦信号总数
+  means: 观察窗口里工具、运行时或流程摩擦被记录的总次数；应和相同长度、相近活动量的窗口比较。
+  goodDirection: lower
+  category: friction
+  component: official-rollup
+official.rollup_cluster_count:
+  label: 去重后的摩擦类型数
+  means: 把重复报告聚合后还剩多少类独立问题；越少通常越好。
+  goodDirection: lower
+  category: friction
+  component: official-rollup
+official.actionable_candidates:
+  label: 可行动问题候选数
+  means: 聚类后证据足够、值得安排修复的问题数量；越少表示仍需处理的明确摩擦越少。
+  goodDirection: lower
+  category: friction
+  component: official-rollup
+baseline.official.rollup_signal_count:
+  label: 基线摩擦信号总数
+  means: 对照窗口里官方 rollup 收到的摩擦信号数；用于和当前窗口按相同口径比较。
+  goodDirection: neutral
+  category: context
+  component: baseline-official-rollup
+baseline.official.rollup_cluster_count:
+  label: 基线摩擦聚类数
+  means: 对照窗口里官方 rollup 去重后的独立摩擦类型数；用于判断当前聚类量是否改善。
+  goodDirection: neutral
+  category: context
+  component: baseline-official-rollup
+baseline.official.actionable_candidates:
+  label: 基线可行动候选数
+  means: 对照窗口里证据足够、可安排修复的摩擦候选数；用于判断当前可行动积压是否变化。
+  goodDirection: neutral
+  category: context
+  component: baseline-official-rollup
+baseline.official.reference_only_clusters:
+  label: 基线仅作参考的摩擦聚类数
+  means: 对照窗口里官方 rollup 中证据不足以直接安排修复、只能作为背景观察的聚类数量；用于判断当前 reference-only 噪声是否增减。
+  goodDirection: neutral
+  category: context
+  component: baseline-official-rollup
+official.reference_only_clusters:
+  label: 仅作参考的摩擦聚类数
+  means: 官方 rollup 中证据不足以直接安排修复、只能作为背景观察的聚类数量；用于避免把噪声误当成可行动问题。
+  goodDirection: neutral
+  category: context
+  component: official-rollup
+watch.f254_f140_post_landing_recurrence:
+  label: 已修问题复发次数
+  means: F254/F140 已落地后，同类问题再次出现的次数；应保持为 0。
+  goodDirection: lower
+  category: friction
+  component: watchlist
+watch.direct_channel_signals:
+  label: 直接通道摩擦信号数
+  means: 观察窗口里来自直接对话通道、未通过专门表单或自动分类入口记录的摩擦信号数量；用于判断是否还有旁路反馈需要归口。
+  goodDirection: lower
+  category: friction
+  component: watchlist
+watch.reference_only_top_clusters:
+  label: 仅作参考的头部聚类数
+  means: 排名前列但只有参考证据、暂时不能直接行动的问题数量；用于区分噪声与真正可修的问题。
+  goodDirection: neutral
+  category: context
+  component: watchlist
+watch.local_6398_sideprobe_drift:
+  label: 本地复测结果漂移
+  means: 6398 隔离环境的侧探结果与已发布证据不一致的次数；应保持为 0，否则结论可能不可复现。
+  goodDirection: lower
+  category: friction
+  component: watchlist

@@ -186,6 +186,7 @@ export EMBED_MODE=off
 export AUDIO_SERVICE_ENABLED=0
 export AUDIO_SERVICE_PORT=$ALPHA_AUDIO_PORT
 export CONNECTOR_GATEWAY_AUTOSTART=0
+export CAT_CAFE_F247_CLOUD_AUTOSTART=0
 EOF
 }
 
@@ -237,6 +238,12 @@ source_env_if_present() {
 }
 
 apply_alpha_env() {
+  # Alpha is a complete runtime checkout. Do not inherit binary/workspace paths
+  # from whichever Clowder AI runtime happened to launch this command, otherwise
+  # the API can boot from alpha while routing MCP tools through stale dist files.
+  export CAT_CAFE_RUNTIME_ROOT="$ALPHA_DIR"
+  export CAT_CAFE_WORKSPACE_ROOT="$PROJECT_DIR"
+  export CAT_CAFE_MCP_SERVER_PATH="$ALPHA_DIR/packages/mcp-server/dist/index.js"
   export REDIS_PORT="$ALPHA_REDIS_PORT"
   export REDIS_URL="redis://localhost:$ALPHA_REDIS_PORT"
   export REDIS_PROFILE="$ALPHA_REDIS_PROFILE"
@@ -253,6 +260,7 @@ apply_alpha_env() {
   export AUDIO_SERVICE_ENABLED=0
   export AUDIO_SERVICE_PORT="$ALPHA_AUDIO_PORT"
   export CONNECTOR_GATEWAY_AUTOSTART=0
+  export CAT_CAFE_F247_CLOUD_AUTOSTART=0
   # Alpha shares ~/.cat-cafe/services.json with runtime — persistent config
   # overrides env-level EMBED_ENABLED=0 etc. Tell the API guard to block
   # sidecar lifecycle mutations and auto-start reconciliation.

@@ -3,9 +3,8 @@
  *
  * Locks 3 boundary cases that future refactors might erode:
  *  1. Trigger message NOT FOUND → null (don't crash, no hint)
- *  2. Trigger has NO crossPost metadata (same-thread post) → null
- *     (KD-1 boundary: agent-key target-thread writes also have no crossPost,
- *      so this case covers both)
+ *  2. Trigger has neither crossPost nor coordination metadata → null
+ *     (KD-1 boundary: agent-key target-thread writes also have neither field)
  *  3. Trigger has NO catId (user-authored message) → null
  *
  * Positive case: trigger has both crossPost.sourceThreadId + catId →
@@ -39,6 +38,32 @@ describe('F193 AC-B4: hydrateCrossThreadReplyHint boundary', () => {
     };
     const result = await hydrateCrossThreadReplyHint(store, 'msg-1');
     assert.equal(result, null, 'same-thread / agent-key target-thread → no hint');
+  });
+
+  test('same-thread coordination hydrates lifecycle without inventing cross-thread provenance', async () => {
+    const { hydrateCrossThreadReplyHint } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = {
+      getById: async () => ({
+        id: 'same-thread-terminal',
+        threadId: 'thread-same',
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'APPROVE; no open items',
+        mentions: ['codex'],
+        timestamp: Date.now(),
+        extra: {
+          coordination: { id: 'coord-same', phase: 'terminal', hop: 1 },
+        },
+      }),
+    };
+
+    const result = await hydrateCrossThreadReplyHint(store, 'same-thread-terminal');
+
+    assert.deepEqual(result, {
+      sourceThreadId: 'thread-same',
+      senderCatId: 'opus',
+      coordination: { id: 'coord-same', phase: 'terminal', hop: 1 },
+    });
   });
 
   test('user-authored message (catId null) → null', async () => {
@@ -133,6 +158,64 @@ describe('F193 AC-B4: hydrateCrossThreadReplyHint boundary', () => {
     assert.deepEqual(result, {
       sourceThreadId: 'thread_source_full_id_abc123def456',
       senderCatId: 'opus',
+    });
+  });
+
+  test('F167 Phase R: coordination projection hydrates independently from cross-thread provenance', async () => {
+    const { hydrateCrossThreadReplyHint } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = {
+      getById: async () => ({
+        id: 'terminal-relay',
+        threadId: 'thread-target',
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'Release',
+        mentions: ['codex'],
+        timestamp: Date.now(),
+        extra: {
+          crossPost: {
+            sourceThreadId: 'thread-source',
+          },
+          coordination: { id: 'coord-1', phase: 'terminal', hop: 2 },
+        },
+      }),
+    };
+
+    const result = await hydrateCrossThreadReplyHint(store, 'terminal-relay');
+
+    assert.deepEqual(result, {
+      sourceThreadId: 'thread-source',
+      senderCatId: 'opus',
+      coordination: { id: 'coord-1', phase: 'terminal', hop: 2 },
+    });
+  });
+
+  test('legacy nested coordination remains readable during migration', async () => {
+    const { hydrateCrossThreadReplyHint } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = {
+      getById: async () => ({
+        id: 'legacy-terminal-relay',
+        threadId: 'thread-target',
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'Legacy release',
+        mentions: ['codex'],
+        timestamp: Date.now(),
+        extra: {
+          crossPost: {
+            sourceThreadId: 'thread-source',
+            coordination: { id: 'coord-legacy', phase: 'terminal', hop: 2 },
+          },
+        },
+      }),
+    };
+
+    const result = await hydrateCrossThreadReplyHint(store, 'legacy-terminal-relay');
+
+    assert.deepEqual(result, {
+      sourceThreadId: 'thread-source',
+      senderCatId: 'opus',
+      coordination: { id: 'coord-legacy', phase: 'terminal', hop: 2 },
     });
   });
 });

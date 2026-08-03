@@ -9,18 +9,35 @@
  * BACKLOG #97 Phase 3b
  */
 
-import { type CatId, type MessageContent } from '@cat-cafe/shared';
+import { type CatId, type MessageContent, type OutputCommitDecision } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import { getDefaultCatId } from '../../config/cat-config-loader.js';
+import type { TurnCustodyWakeProvenance } from '../../domains/ball-custody/TurnCustodyProjectionService.js';
+import {
+  resolveQueueTurnCustodyWake,
+  retargetTurnCustodyWake,
+} from '../../domains/ball-custody/turn-custody-wake-provenance.js';
 import type { InvocationQueue } from '../../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationTracker } from '../../domains/cats/services/agents/invocation/InvocationTracker.js';
+import { PerCatTerminalDispositionCollector } from '../../domains/cats/services/agents/invocation/PerCatTerminalDispositionCollector.js';
 import type { QueueProcessor } from '../../domains/cats/services/agents/invocation/QueueProcessor.js';
+import { requireInvocationRecordUpdate } from '../../domains/cats/services/agents/invocation/require-invocation-record-update.js';
 import { stampVisibleTurn } from '../../domains/cats/services/agents/invocation/visible-turn.js';
 import type { AgentRouter } from '../../domains/cats/services/agents/routing/AgentRouter.js';
-import type { PersistenceContext } from '../../domains/cats/services/agents/routing/route-helpers.js';
-import type { IInvocationRecordStore } from '../../domains/cats/services/stores/ports/InvocationRecordStore.js';
+import {
+  createA2ASlotTrackingBridge,
+  type PersistenceContext,
+} from '../../domains/cats/services/agents/routing/route-helpers.js';
+import type {
+  IInvocationRecordStore,
+  InvocationRecord,
+  InvocationStatus,
+} from '../../domains/cats/services/stores/ports/InvocationRecordStore.js';
+import { classifyInvocationRecoveryStatus } from '../../domains/cats/services/stores/ports/invocation-state-machine.js';
 import type { IMessageStore } from '../../domains/cats/services/stores/ports/MessageStore.js';
-import { mergeTokenUsage, type TokenUsage } from '../../domains/cats/services/types.js';
+import { type AgentMessage, mergeTokenUsage, type TokenUsage } from '../../domains/cats/services/types.js';
+import type { MemoryCueOpportunitySeed } from '../../domains/memory/cue/MemoryCueInvocationPromptService.js';
+import { readTrustedConnectorMemoryCueSeeds } from '../../domains/memory/cue/MemoryCueTrustedConnector.js';
 import type { SocketManager } from '../../infrastructure/websocket/index.js';
 import { emitQueueUpdated, enrichQueueEntries } from '../../utils/queue-enrichment.js';
 
@@ -28,6 +45,84 @@ import type { OutboundDeliveryHook, ThreadMeta } from '../connectors/OutboundDel
 import type { StreamingOutboundHook } from '../connectors/StreamingOutboundHook.js';
 
 export type TriggerOutcome = 'dispatched' | 'enqueued' | 'full';
+
+type DirectInvocationAdmission =
+  | {
+      readonly kind: 'execute';
+      readonly invocationId: string;
+      readonly expectedInitialStatus: Extract<InvocationStatus, 'queued' | 'failed'>;
+    }
+  | { readonly kind: 'acknowledged'; readonly invocationId: string; readonly status: 'running' | 'succeeded' };
+
+interface ExecutionStartReceipt {
+  readonly promise: Promise<void>;
+  readonly accept: () => void;
+  readonly reject: (reason: unknown) => void;
+}
+
+function createExecutionStartReceipt(): ExecutionStartReceipt {
+  let settled = false;
+  let resolvePromise!: () => void;
+  let rejectPromise!: (reason: unknown) => void;
+  const promise = new Promise<void>((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+  return {
+    promise,
+    accept: () => {
+      if (settled) return;
+      settled = true;
+      resolvePromise();
+    },
+    reject: (reason) => {
+      if (settled) return;
+      settled = true;
+      rejectPromise(reason);
+    },
+  };
+}
+
+function hasExecutionStartReceipt(record: InvocationRecord): boolean {
+  return (
+    typeof record.executionStartedAt === 'number' &&
+    Number.isFinite(record.executionStartedAt) &&
+    record.executionStartedAt > 0
+  );
+}
+
+interface DurableChildExecutionStart {
+  readonly childInvocationId: string;
+  readonly startedAt: number;
+}
+
+function parseDurableChildExecutionStart(
+  message: AgentMessage,
+  expectedParentInvocationId: string,
+): DurableChildExecutionStart | undefined {
+  if (message.type !== 'system_info' || typeof message.content !== 'string') return undefined;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(message.content);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== 'object') return undefined;
+
+  const candidate = parsed as Record<string, unknown>;
+  if (candidate.type !== 'invocation_created') return undefined;
+  if (typeof candidate.invocationId !== 'string' || candidate.invocationId.trim().length === 0) return undefined;
+  if (candidate.parentInvocationId !== expectedParentInvocationId) return undefined;
+  if (typeof candidate.startedAt !== 'number' || !Number.isFinite(candidate.startedAt) || candidate.startedAt <= 0) {
+    return undefined;
+  }
+
+  return {
+    childInvocationId: candidate.invocationId,
+    startedAt: candidate.startedAt,
+  };
+}
 
 export interface ConnectorInvokeTriggerOptions {
   readonly router: AgentRouter;
@@ -64,15 +159,27 @@ export interface ConnectorTriggerPolicy {
   readonly coalesceKey?: string;
 }
 
+function isConnectorDeliverable(decision: OutputCommitDecision | undefined): boolean {
+  return (
+    decision === undefined ||
+    decision.kind === 'committed_fresh' ||
+    decision.kind === 'committed_degraded_unknown' ||
+    decision.kind === 'published_with_unseen'
+  );
+}
+
 /**
- * Fire-and-forget invocation trigger for connector messages.
+ * Invocation trigger for connector messages. The executor continues in the
+ * background, but admission does not resolve until router startup has durable
+ * evidence in the parent InvocationRecord.
  *
  * Flow:
  *   1. Create InvocationRecord (atomic)
  *   2. Start InvocationTracker
- *   3. Run routeExecution in background (fire-and-forget)
- *   4. Broadcast agent messages to WebSocket room
- *   5. Ack cursor boundaries + update status
+ *   3. Start routeExecution and persist its durable first-event receipt
+ *   4. Continue routeExecution in background
+ *   5. Broadcast agent messages to WebSocket room
+ *   6. Ack cursor boundaries + update status
  */
 export class ConnectorInvokeTrigger {
   private readonly opts: ConnectorInvokeTriggerOptions;
@@ -93,7 +200,8 @@ export class ConnectorInvokeTrigger {
 
   /**
    * Trigger a cat invocation for a connector message.
-   * Returns immediately — execution happens in background.
+   * Returns after durable execution-start acknowledgement; the remainder of
+   * execution continues in the background.
    *
    * @param threadId  Thread where the connector message was posted
    * @param catId     Target cat to invoke
@@ -113,6 +221,24 @@ export class ConnectorInvokeTrigger {
   ): Promise<TriggerOutcome> {
     const { invocationTracker } = this.opts;
     const priority = policy?.priority ?? 'normal';
+
+    // A cancel-all/force-reset owns the next terminal transition. Late managed
+    // command or connector wakes remain durable in Queue instead of reviving
+    // the just-reset slot through direct admission.
+    if (this.opts.queueProcessor?.isAutoResumeSuppressed?.(threadId, catId)) {
+      return this.enqueueWhileActive(
+        threadId,
+        catId,
+        userId,
+        message,
+        messageId,
+        sender,
+        priority,
+        policy?.sourceCategory,
+        policy?.suggestedSkill,
+        policy?.coalesceKey,
+      );
+    }
 
     // F185 AC-1: thread-level queue/processingSlots gate
     if (this.opts.queueProcessor?.isThreadBusy(threadId)) {
@@ -147,29 +273,21 @@ export class ConnectorInvokeTrigger {
       );
     }
 
-    // Admission is not accepted until the idempotent InvocationRecord exists.
-    // Creating it inside the detached background promise used to let callers observe
-    // `dispatched` even when durable admission subsequently failed.
-    let invocationId: string;
-    try {
-      const createResult = await this.opts.invocationRecordStore.create({
-        threadId,
-        userId,
-        targetCats: [catId],
-        intent: 'execute',
-        idempotencyKey: `connector-${messageId}`,
-      });
-      if (createResult.outcome === 'duplicate') {
-        invocationTracker.complete(threadId, catId, controller);
-        this.opts.log.info(`[ConnectorInvokeTrigger] Duplicate invocation for message ${messageId}, skipping`);
-        return 'dispatched';
-      }
-      invocationId = createResult.invocationId;
-    } catch (err) {
+    const releaseDirectAdmission = (): void => {
       invocationTracker.complete(threadId, catId, controller);
-      this.opts.queueProcessor?.onInvocationComplete(threadId, catId, 'failed').catch(() => {
-        /* best-effort: release any queued work after failed direct admission */
+    };
+    const rejectDirectAdmission = (): void => {
+      releaseDirectAdmission();
+      this.opts.queueProcessor?.onInvocationComplete(threadId, catId, 'failed', undefined, []).catch(() => {
+        /* best-effort: release any queued work after rejected direct admission */
       });
+    };
+
+    let admission: DirectInvocationAdmission;
+    try {
+      admission = await this.admitDirectInvocation(threadId, catId, userId, messageId);
+    } catch (err) {
+      rejectDirectAdmission();
       this.opts.log.error(
         { err, threadId, catId, messageId },
         '[ConnectorInvokeTrigger] Durable invocation admission failed',
@@ -177,22 +295,169 @@ export class ConnectorInvokeTrigger {
       throw err;
     }
 
-    // AC-2+3: dispatch with acquired controller and already-durable invocation record.
+    if (admission.kind === 'acknowledged') {
+      releaseDirectAdmission();
+      return 'dispatched';
+    }
+
+    // AC-2+3: dispatch with acquired controller and atomically claimed durable record.
+    // A running status is only the exclusive claim. Do not report `dispatched`
+    // until the executor persists proof that router execution actually started.
+    const executionStartReceipt = createExecutionStartReceipt();
     this.executeInBackground(
       threadId,
       catId,
       userId,
       message,
       messageId,
-      invocationId,
+      admission.invocationId,
       contentBlocks,
+      policy?.sourceCategory,
       policy?.suggestedSkill,
       sender,
       controller,
+      executionStartReceipt,
     ).catch((err) => {
+      executionStartReceipt.reject(err);
       this.opts.log.error(`[ConnectorInvokeTrigger] Unhandled: ${err instanceof Error ? err.message : String(err)}`);
     });
+    await executionStartReceipt.promise;
     return 'dispatched';
+  }
+
+  private isExactConnectorRecord(
+    record: InvocationRecord | null,
+    expected: { threadId: string; userId: string; catId: CatId; messageId: string },
+  ): record is InvocationRecord {
+    return (
+      record !== null &&
+      record.threadId === expected.threadId &&
+      record.userId === expected.userId &&
+      record.intent === 'execute' &&
+      record.idempotencyKey === `connector-${expected.messageId}` &&
+      record.targetCats.length === 1 &&
+      record.targetCats[0] === expected.catId &&
+      record.actionLeaseCarrier.kind === 'none'
+    );
+  }
+
+  private async admitDirectInvocation(
+    threadId: string,
+    catId: CatId,
+    userId: string,
+    messageId: string,
+  ): Promise<DirectInvocationAdmission> {
+    // Admission is not accepted until the idempotent record exists and exactly
+    // one worker has claimed queued -> running in the shared store.
+    const createResult = await this.opts.invocationRecordStore.create({
+      threadId,
+      userId,
+      targetCats: [catId],
+      intent: 'execute',
+      idempotencyKey: `connector-${messageId}`,
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    const invocationId = createResult.invocationId;
+    let expectedInitialStatus: Extract<InvocationStatus, 'queued' | 'failed'> = 'queued';
+
+    if (createResult.outcome === 'duplicate') {
+      const existingRecord = await this.opts.invocationRecordStore.get(invocationId);
+      if (!this.isExactConnectorRecord(existingRecord, { threadId, userId, catId, messageId })) {
+        this.opts.log.warn(
+          { threadId, catId, messageId, invocationId, status: 'missing' },
+          '[ConnectorInvokeTrigger] Duplicate invocation identity was not accepted',
+        );
+        throw new Error(
+          `Duplicate connector admission rejected: existing invocation ${invocationId} is missing or mismatched`,
+        );
+      }
+
+      const recoveryStatus = classifyInvocationRecoveryStatus(existingRecord.status);
+      switch (recoveryStatus) {
+        case 'replayable':
+          expectedInitialStatus = existingRecord.status as Extract<InvocationStatus, 'queued' | 'failed'>;
+          this.opts.log.warn(
+            { threadId, catId, messageId, invocationId, status: existingRecord.status },
+            '[ConnectorInvokeTrigger] Recovering replayable duplicate before acknowledging dispatch',
+          );
+          break;
+        case 'in_flight':
+          if (!hasExecutionStartReceipt(existingRecord)) {
+            this.opts.log.warn(
+              { threadId, catId, messageId, invocationId, status: existingRecord.status },
+              '[ConnectorInvokeTrigger] Running duplicate has no execution-start receipt',
+            );
+            throw new Error(
+              `Duplicate connector admission rejected: existing invocation ${invocationId} is running without execution-start receipt`,
+            );
+          }
+          this.opts.log.info(
+            { threadId, catId, messageId, invocationId, status: existingRecord.status },
+            '[ConnectorInvokeTrigger] Duplicate invocation already accepted',
+          );
+          return { kind: 'acknowledged', invocationId, status: 'running' };
+        case 'completed':
+          this.opts.log.info(
+            { threadId, catId, messageId, invocationId, status: existingRecord.status },
+            '[ConnectorInvokeTrigger] Duplicate invocation already accepted',
+          );
+          return {
+            kind: 'acknowledged',
+            invocationId,
+            status: existingRecord.status as Extract<InvocationStatus, 'running' | 'succeeded'>,
+          };
+        case 'terminal':
+          this.opts.log.warn(
+            { threadId, catId, messageId, invocationId, status: existingRecord.status },
+            '[ConnectorInvokeTrigger] Duplicate invocation was not accepted',
+          );
+          throw new Error(
+            `Duplicate connector admission rejected: existing invocation ${invocationId} is ${existingRecord.status}`,
+          );
+      }
+    }
+
+    const claimedRecord = await this.opts.invocationRecordStore.update(invocationId, {
+      userMessageId: messageId,
+      status: 'running',
+      expectedStatus: expectedInitialStatus,
+      ...(expectedInitialStatus === 'failed' ? { error: '' } : {}),
+    });
+    if (claimedRecord) return { kind: 'execute', invocationId, expectedInitialStatus };
+
+    const currentRecord = await this.opts.invocationRecordStore.get(invocationId);
+    switch (currentRecord?.status) {
+      case 'running':
+        if (!hasExecutionStartReceipt(currentRecord)) {
+          this.opts.log.warn(
+            { threadId, catId, messageId, invocationId, status: currentRecord.status },
+            '[ConnectorInvokeTrigger] Invocation claim winner has not started execution',
+          );
+          throw new Error(
+            `Duplicate connector admission rejected: existing invocation ${invocationId} is running without execution-start receipt`,
+          );
+        }
+        this.opts.log.info(
+          { threadId, catId, messageId, invocationId, status: currentRecord.status },
+          '[ConnectorInvokeTrigger] Another worker accepted the invocation',
+        );
+        return { kind: 'acknowledged', invocationId, status: currentRecord.status };
+      case 'succeeded':
+        this.opts.log.info(
+          { threadId, catId, messageId, invocationId, status: currentRecord.status },
+          '[ConnectorInvokeTrigger] Another worker accepted the invocation',
+        );
+        return { kind: 'acknowledged', invocationId, status: currentRecord.status };
+    }
+
+    const status = currentRecord ? currentRecord.status : 'missing';
+    this.opts.log.warn(
+      { threadId, catId, messageId, invocationId, status },
+      '[ConnectorInvokeTrigger] Invocation claim was not accepted',
+    );
+    throw new Error(
+      `Connector invocation ${invocationId} could not be claimed from ${expectedInitialStatus} (status: ${status})`,
+    );
   }
 
   private async enqueueWhileActive(
@@ -220,6 +485,7 @@ export class ConnectorInvokeTrigger {
     const result = invocationQueue.enqueue({
       threadId,
       userId,
+      ownerAuthProvenance: 'unknown',
       content: message,
       ...(coalesceKey
         ? {
@@ -289,13 +555,19 @@ export class ConnectorInvokeTrigger {
     messageId: string,
     existingInvocationId?: string,
     contentBlocks?: readonly MessageContent[],
+    sourceCategory?: ConnectorTriggerPolicy['sourceCategory'],
     suggestedSkill?: string,
     sender?: { id: string; name?: string },
     preAcquiredController?: AbortController,
+    executionStartReceipt?: ExecutionStartReceipt,
   ): Promise<void> {
     const { router, socketManager, invocationRecordStore, invocationTracker, invocationQueue, log } = this.opts;
     const targetCats: CatId[] = [catId];
     let finalStatus: 'succeeded' | 'failed' | 'canceled' = 'failed';
+    const terminalDispositions = new PerCatTerminalDispositionCollector({
+      targetCatIds: targetCats,
+      isCanceled: (completedCatId) => invocationTracker.getSlotState?.(threadId, completedCatId) === 'canceled',
+    });
 
     // R1-P1 fix: move controller before try so finally always releases it (even if create() throws)
     const controller = preAcquiredController ?? invocationTracker.start(threadId, catId, userId, targetCats);
@@ -303,43 +575,44 @@ export class ConnectorInvokeTrigger {
     const HEARTBEAT_INTERVAL_MS = 30_000;
     let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
     let invocationId: string | undefined;
+    let executionStartRecorded = false;
     // R4 fix: hoist above try so catch can await it for correct failure cleanup
     // (onStreamEnd → cleanupPlaceholders, per messages.ts cleanupStreamingOnFailure).
     let streamStartPromise: Promise<void> | undefined;
 
     try {
-      // ① InvocationRecord was created synchronously by trigger() before it reported
-      // `dispatched`. QueueProcessor owns the separate queued-admission path.
+      // ① InvocationRecord was created and atomically claimed by trigger() before
+      // it reported `dispatched`. QueueProcessor owns the separate queued-admission path.
       if (!existingInvocationId) {
         throw new Error('Connector invocation reached execution without a durable invocation record');
       }
       const createResult = { outcome: 'created' as const, invocationId: existingInvocationId };
 
       invocationId = createResult.invocationId;
+      invocationTracker.bindExecutionId?.(threadId, targetCats, controller, invocationId);
 
       if (controller?.signal.aborted) {
+        if (controller.signal.reason === 'cancel_all') {
+          // cancelAll may win after tracker reservation but before durable admission,
+          // when it can only arm an ID-less slot fence. Bind the exact record identity
+          // now so this terminal can consume that fence without making it wildcard.
+          this.opts.queueProcessor?.bindAutoResumeSuppressionExecution(threadId, catId, invocationId);
+        }
         finalStatus = 'canceled';
-        await invocationRecordStore.update(invocationId, { status: 'canceled' });
+        await invocationRecordStore.update(invocationId, { status: 'canceled', expectedStatus: 'running' });
+        executionStartReceipt?.reject(new Error('Connector invocation canceled before execution started'));
         log.warn(`[ConnectorInvokeTrigger] Thread ${threadId} is being deleted, skipping`);
         return;
       }
-
-      // ② Backfill userMessageId (the connector message that triggered this)
-      await invocationRecordStore.update(createResult.invocationId, {
-        userMessageId: messageId,
-      });
 
       heartbeatInterval = setInterval(() => {
         socketManager.broadcastToRoom(`thread:${threadId}`, 'heartbeat', { threadId, timestamp: Date.now() });
       }, HEARTBEAT_INTERVAL_MS);
 
-      // ③ Set status running + broadcast intent
-      await invocationRecordStore.update(createResult.invocationId, { status: 'running' });
-
       // #768: Defer intent_mode broadcast until CLI produces first event.
       let intentModeBroadcast = false;
 
-      // ④ Run routeExecution and broadcast each agent message
+      // ② Run routeExecution and broadcast each agent message
       const cursorBoundaries = new Map<string, string>();
       const persistenceContext: PersistenceContext = { failed: false, errors: [] };
       const collectedUsage = new Map<string, TokenUsage>();
@@ -390,22 +663,95 @@ export class ConnectorInvokeTrigger {
       // F140 Phase C: suggestedSkill flows via promptTags → SystemPromptBuilder (hint, not directive)
       const promptTags: string[] = suggestedSkill ? [`skill:${suggestedSkill}`] : [];
       const intent = { intent: 'execute' as const, explicit: false, promptTags };
+      let turnCustodyWake: TurnCustodyWakeProvenance = {
+        kind: 'legacy',
+        reason: 'carrier_missing',
+        ...(sourceCategory ? { sourceCategory } : {}),
+      };
+      if (this.opts.messageStore) {
+        turnCustodyWake = await resolveQueueTurnCustodyWake(
+          {
+            threadId,
+            messageId,
+            source: 'connector',
+            sourceCategory,
+            targetCats,
+          },
+          this.opts.messageStore,
+        );
+      }
+
+      let memoryCueOpportunitySeeds: MemoryCueOpportunitySeed[] = [];
+      if (this.opts.messageStore) {
+        try {
+          memoryCueOpportunitySeeds = await readTrustedConnectorMemoryCueSeeds({
+            entrySource: 'connector',
+            messageId,
+            expectedThreadId: threadId,
+            expectedUserId: userId,
+            messageStore: this.opts.messageStore,
+          });
+        } catch (err) {
+          log.warn({ err, threadId, messageId }, '[F287] direct connector Cue carrier read failed closed');
+        }
+      }
 
       for await (const msg of router.routeExecution(userId, message, threadId, messageId, targetCats, intent, {
+        ownerAuthProvenance: 'unknown',
+        humanDispositionInvocationOrigin: 'connector',
+        turnCustodyWake,
+        turnCustodyWakeForCat: (catId) => retargetTurnCustodyWake(turnCustodyWake, catId),
+        ...(memoryCueOpportunitySeeds.length > 0 ? { memoryCueOpportunitySeeds } : {}),
         ...(contentBlocks ? { contentBlocks } : {}),
         ...(controller?.signal ? { signal: controller.signal } : {}),
         queueHasQueuedMessages: (tid: string) => invocationQueue.hasQueuedNonAgentForThread(tid),
-        deferA2AEnqueue: (e) => invocationQueue.enqueue(e as any),
+        getQueuedFreshnessMessagesForCat: (tid: string, uid: string, catId: string) =>
+          invocationQueue.getQueuedFreshnessMessagesForCat(tid, uid, catId),
+        deferA2AEnqueue: (e) => invocationQueue.enqueue({ ...e, ownerAuthProvenance: 'unknown' }),
+        freshnessReinvokeEnqueue: (entry) => {
+          const { freshnessContext: _freshnessContext, ...queueFields } = entry;
+          return invocationQueue.enqueue({ ...queueFields, ownerAuthProvenance: 'unknown' });
+        },
         hasQueuedOrActiveAgentForCat: (tid: string, catId: string) =>
           invocationQueue.hasActiveOrQueuedAgentForCat(tid, catId),
+        hasPendingForCat: (tid: string, uid: string, catId: string) =>
+          invocationQueue.hasPendingForCat(tid, catId, { userId: uid }),
+        ...createA2ASlotTrackingBridge(invocationTracker, controller, createResult.invocationId),
         cursorBoundaries,
         persistenceContext,
         parentInvocationId: createResult.invocationId,
+        onPromptMessagesExposed: (input) =>
+          this.opts.queueProcessor?.markPromptMessagesSeen(input) ?? Promise.resolve(),
         // F222 P1: Connector-triggered execution is not user-origin — suppress frustration detection
         frustrationAutoIssueEligible: false,
         // #949 P2: Connector-sourced flows have no ball-pass expectation — suppress verdict warning
         verdictPassWarningEnabled: false,
       })) {
+        const durableChildStart = parseDurableChildExecutionStart(msg, createResult.invocationId);
+        if (!executionStartRecorded && durableChildStart) {
+          // invokeSingleCat yields this exact child identity only after its
+          // TurnExecutionStore.createRunning() succeeds. Pre-invocation router
+          // events (degradation/context briefing) are deliberately ignored.
+          await requireInvocationRecordUpdate({
+            store: invocationRecordStore,
+            invocationId: createResult.invocationId,
+            update: {
+              executionStartedAt: durableChildStart.startedAt,
+              expectedStatus: 'running',
+            },
+            writer: 'connector execution-start receipt',
+          });
+          log.debug(
+            {
+              threadId,
+              invocationId: createResult.invocationId,
+              childInvocationId: durableChildStart.childInvocationId,
+            },
+            '[ConnectorInvokeTrigger] Durable child execution started',
+          );
+          executionStartRecorded = true;
+          executionStartReceipt?.accept();
+        }
         // #768: Broadcast intent_mode on first CLI event — proves CLI is alive.
         if (!intentModeBroadcast) {
           socketManager.broadcastToRoom(`thread:${threadId}`, 'intent_mode', {
@@ -418,6 +764,10 @@ export class ConnectorInvokeTrigger {
         }
         // F39 bugfix: stop broadcasting after cancel (drain pipe buffer silently)
         if (controller?.signal.aborted) break;
+        terminalDispositions.observe(msg);
+        if ((msg.type === 'done' || msg.type === 'error') && msg.catId) {
+          invocationTracker.completeSlot?.(threadId, msg.catId, controller);
+        }
         if (msg.type === 'done' && msg.catId) {
           if (msg.metadata?.usage) {
             collectedUsage.set(msg.catId, mergeTokenUsage(collectedUsage.get(msg.catId), msg.metadata.usage));
@@ -447,6 +797,7 @@ export class ConnectorInvokeTrigger {
               if (deliveredTurnIndices.has(i)) continue;
               const turn = outboundTurns[i];
               if (turn.catId !== msg.catId) continue;
+              if (!isConnectorDeliverable(persistenceContext.outputCommitDecisions?.[turn.catId])) continue;
               const turnContent = turn.textParts.join('');
               if (!turnContent && !turn.richBlocks?.length) continue;
               try {
@@ -500,7 +851,11 @@ export class ConnectorInvokeTrigger {
         );
       }
 
-      // ⑤ Finalize: abort guard → persistence check → ack + succeeded
+      if (!executionStartRecorded) {
+        throw new Error('Connector router ended before producing durable execution-start evidence');
+      }
+
+      // ③ Finalize: abort guard → persistence check → ack + succeeded
       // F39 P1 fix (砚砚 R1): abort guard after loop — same pattern as messages.ts.
       // When signal aborted and generator ends normally, break exits loop but
       // post-loop code would still run ack+succeeded without this guard.
@@ -518,18 +873,33 @@ export class ConnectorInvokeTrigger {
         });
       } else {
         await router.ackCollectedCursors(userId, threadId, cursorBoundaries);
-        await invocationRecordStore.update(createResult.invocationId, {
-          status: 'succeeded',
-          ...(collectedUsage.size > 0
-            ? {
-                usageByCat: Object.fromEntries(collectedUsage),
-              }
-            : {}),
+        await requireInvocationRecordUpdate({
+          store: invocationRecordStore,
+          invocationId: createResult.invocationId,
+          update: {
+            status: 'succeeded',
+            successfulCatIds: terminalDispositions.getSuccessfulCatIds() as CatId[],
+            ...(collectedUsage.size > 0
+              ? {
+                  usageByCat: Object.fromEntries(collectedUsage),
+                }
+              : {}),
+          },
+          writer: 'connector invoke trigger',
         });
         finalStatus = 'succeeded';
 
-        // ⑥ Outbound delivery: send final text + rich blocks to bound external chats
-        const finalContent = collectedTextParts.join('');
+        // ④ Outbound delivery: send final text + rich blocks to bound external chats
+        const deliverableTurns = outboundTurns.filter((turn) =>
+          isConnectorDeliverable(persistenceContext.outputCommitDecisions?.[turn.catId]),
+        );
+        const hasKnownUndeliverableOutput = Object.values(persistenceContext.outputCommitDecisions ?? {}).some(
+          (decision) => !isConnectorDeliverable(decision),
+        );
+        const finalContent =
+          outboundTurns.length > 0
+            ? deliverableTurns.flatMap((turn) => turn.textParts).join('')
+            : collectedTextParts.join('');
 
         // Phase 4: Finalize streaming — ensure start completed before ending
         if (this.opts.streamingHook) {
@@ -540,13 +910,33 @@ export class ConnectorInvokeTrigger {
               new Promise<void>((resolve) => setTimeout(resolve, STREAM_START_TIMEOUT_MS)),
             ]);
           }
-          await this.opts.streamingHook.onStreamEnd(threadId, finalContent, createResult.invocationId).catch((err) => {
-            log.warn({ err, threadId }, '[ConnectorInvokeTrigger] StreamingHook.onStreamEnd failed');
-          });
+          const outputDecisionEntries = Object.entries(persistenceContext.outputCommitDecisions ?? {});
+          const supersededOutput = outputDecisionEntries.find(
+            ([, decision]) => decision.kind === 'superseded_positive_stale',
+          );
+          const blockedOutput = outputDecisionEntries.find(([, decision]) => decision.kind === 'blocked_known_closure');
+          if (blockedOutput?.[1].kind === 'blocked_known_closure' && this.opts.streamingHook.onClosureBlocked) {
+            await this.opts.streamingHook
+              .onClosureBlocked(threadId, blockedOutput[0] as CatId, blockedOutput[1].reason, createResult.invocationId)
+              .catch((err) => log.warn({ err, threadId }, '[ConnectorInvokeTrigger] blocked projection failed'));
+          } else if (
+            supersededOutput?.[1].kind === 'superseded_positive_stale' &&
+            this.opts.streamingHook.onClosureCatchingUp
+          ) {
+            await this.opts.streamingHook
+              .onClosureCatchingUp(threadId, supersededOutput[0] as CatId, createResult.invocationId)
+              .catch((err) => log.warn({ err, threadId }, '[ConnectorInvokeTrigger] catch projection failed'));
+          } else {
+            await this.opts.streamingHook
+              .onStreamEnd(threadId, finalContent, createResult.invocationId)
+              .catch((err) => {
+                log.warn({ err, threadId }, '[ConnectorInvokeTrigger] StreamingHook.onStreamEnd failed');
+              });
+          }
         }
 
         // R1-P1 fix: restore OR condition — richBlocks-only replies must also trigger delivery
-        const hasContent = collectedTextParts.length > 0 || outboundTurns.length > 0;
+        const hasContent = finalContent.length > 0 || deliverableTurns.some((turn) => turn.richBlocks?.length);
         log.info(
           {
             threadId,
@@ -567,9 +957,10 @@ export class ConnectorInvokeTrigger {
 
           // ISSUE-9 + Cloud-P1-4: deliver per-turn (ordered, supports A→B→A ping-pong)
           // F151: skip turns already delivered mid-loop
-          const nonEmptyTurns = outboundTurns.filter(
-            (t, i) =>
-              !deliveredTurnIndices.has(i) && (t.textParts.length > 0 || (t.richBlocks && t.richBlocks.length > 0)),
+          const nonEmptyTurns = deliverableTurns.filter(
+            (turn) =>
+              !deliveredTurnIndices.has(outboundTurns.indexOf(turn)) &&
+              (turn.textParts.length > 0 || (turn.richBlocks && turn.richBlocks.length > 0)),
           );
 
           let deliveryFailed = false;
@@ -673,7 +1064,7 @@ export class ConnectorInvokeTrigger {
               }
             });
           }
-        } else {
+        } else if (!hasKnownUndeliverableOutput) {
           // R6+R7 fix: deliver fallback FIRST (with timeout), then cleanup placeholder
           // only on success — preserves "thinking" card if delivery fails (Cloud P2).
           // Timeout prevents adapter hang from blocking finally (Cloud P1).
@@ -730,6 +1121,7 @@ export class ConnectorInvokeTrigger {
         `[ConnectorInvokeTrigger] Invocation ${createResult.invocationId} completed for ${catId} in thread ${threadId}`,
       );
     } catch (err) {
+      executionStartReceipt?.reject(err);
       const errorMsg = err instanceof Error ? err.message : 'Unknown error';
       log.error(`[ConnectorInvokeTrigger] Invocation failed: ${errorMsg}`);
 
@@ -802,9 +1194,17 @@ export class ConnectorInvokeTrigger {
       if (heartbeatInterval) clearInterval(heartbeatInterval);
       invocationTracker.complete(threadId, catId, controller);
       // F39 P1 fix: Notify queue processor for auto-dequeue chain
-      this.opts.queueProcessor?.onInvocationComplete(threadId, catId, finalStatus).catch(() => {
-        /* best-effort, don't crash background task */
-      });
+      this.opts.queueProcessor
+        ?.onInvocationComplete(
+          threadId,
+          catId,
+          finalStatus,
+          invocationId,
+          finalStatus === 'succeeded' ? terminalDispositions.getSuccessfulCatIds() : [],
+        )
+        .catch(() => {
+          /* best-effort, don't crash background task */
+        });
       // F151: Signal adapters that this invocation's delivery batch is complete.
       // Fires on both success AND failure — failed invocations must close the task
       // immediately instead of waiting for TASK_TIMEOUT_MS (P2-1 review fix).

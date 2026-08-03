@@ -72,6 +72,150 @@ describe('F173 Phase A — ThreadRuntimeWriter mirror invariant', () => {
       expect(s.threadStates[BG_TID]?.catInvocations?.opus?.invocationId).toBe('inv-bg');
       expect(s.catInvocations.opus).toBeUndefined();
     });
+
+    it('active thread: a new parent without a child clears the previous child identity', () => {
+      const store = useChatStore.getState();
+      store.setThreadCatInvocation(ACTIVE_TID, 'opus', {
+        invocationId: 'parent-old',
+        turnInvocationId: 'child-old',
+      });
+      store.setThreadCatInvocation(ACTIVE_TID, 'opus', { invocationId: 'parent-new' });
+
+      const s = useChatStore.getState();
+      expect(s.catInvocations.opus?.invocationId).toBe('parent-new');
+      expect(s.catInvocations.opus?.turnInvocationId).toBeUndefined();
+      expect(s.threadStates[ACTIVE_TID]?.catInvocations?.opus?.turnInvocationId).toBeUndefined();
+    });
+
+    it('background thread: a new parent without a child clears the previous child identity', () => {
+      const store = useChatStore.getState();
+      store.setThreadCatInvocation(BG_TID, 'opus', {
+        invocationId: 'parent-bg-old',
+        turnInvocationId: 'child-bg-old',
+      });
+      store.setThreadCatInvocation(BG_TID, 'opus', { invocationId: 'parent-bg-new' });
+
+      const invocation = useChatStore.getState().threadStates[BG_TID]?.catInvocations?.opus;
+      expect(invocation?.invocationId).toBe('parent-bg-new');
+      expect(invocation?.turnInvocationId).toBeUndefined();
+    });
+
+    it('same-parent authoritative replacement clears an explicitly absent child identity', () => {
+      const store = useChatStore.getState();
+      store.setThreadCatInvocation(ACTIVE_TID, 'opus', {
+        invocationId: 'parent-same',
+        turnInvocationId: 'child-old',
+      });
+      store.setThreadCatInvocation(ACTIVE_TID, 'opus', {
+        invocationId: 'parent-same',
+        turnInvocationId: undefined,
+      });
+
+      const state = useChatStore.getState();
+      expect(state.catInvocations.opus).toMatchObject({
+        invocationId: 'parent-same',
+        turnInvocationId: undefined,
+      });
+      expect(state.threadStates[ACTIVE_TID]?.catInvocations?.opus?.turnInvocationId).toBeUndefined();
+    });
+  });
+
+  describe('setCatInvocation identity boundary', () => {
+    it('clears the previous child when the active parent changes without a child', () => {
+      const store = useChatStore.getState();
+      store.setCatInvocation('opus', {
+        invocationId: 'parent-direct-old',
+        turnInvocationId: 'child-direct-old',
+      });
+      store.setCatInvocation('opus', { invocationId: 'parent-direct-new' });
+
+      expect(useChatStore.getState().catInvocations.opus).toMatchObject({
+        invocationId: 'parent-direct-new',
+        turnInvocationId: undefined,
+      });
+    });
+
+    it('preserves the child for a telemetry-only patch on the same parent', () => {
+      const store = useChatStore.getState();
+      store.setCatInvocation('opus', {
+        invocationId: 'parent-direct',
+        turnInvocationId: 'child-direct',
+      });
+      store.setCatInvocation('opus', { durationMs: 42 });
+
+      expect(useChatStore.getState().catInvocations.opus).toMatchObject({
+        invocationId: 'parent-direct',
+        turnInvocationId: 'child-direct',
+        durationMs: 42,
+      });
+    });
+
+    it('clears the previous app-server lifecycle when the parent rebinds without new lifecycle evidence', () => {
+      const store = useChatStore.getState();
+      store.setCatInvocation('opus', {
+        invocationId: 'parent-old',
+        turnInvocationId: 'child-old',
+        appServerLifecycle: {
+          stage: 'active',
+          lastActivityAt: Date.now() - 60_000,
+          recoveryAttempt: 0,
+          turnStartSent: true,
+          turnAccepted: true,
+          itemObserved: true,
+        },
+      });
+      // Mirrors the invocation_created patch shape (useAgentMessages active + background):
+      // new parent identity, no lifecycle payload.
+      store.setCatInvocation('opus', { invocationId: 'parent-new', turnInvocationId: undefined });
+
+      const info = useChatStore.getState().catInvocations.opus;
+      expect(info?.invocationId).toBe('parent-new');
+      expect(info?.appServerLifecycle).toBeUndefined();
+    });
+
+    it('preserves the lifecycle for a telemetry-only patch on the same parent', () => {
+      const store = useChatStore.getState();
+      const lifecycle = {
+        stage: 'active' as const,
+        lastActivityAt: Date.now(),
+        recoveryAttempt: 0,
+        turnStartSent: true,
+        turnAccepted: true,
+        itemObserved: true,
+      };
+      store.setCatInvocation('opus', { invocationId: 'parent-same', appServerLifecycle: lifecycle });
+      store.setCatInvocation('opus', { durationMs: 42 });
+
+      expect(useChatStore.getState().catInvocations.opus?.appServerLifecycle).toMatchObject(lifecycle);
+    });
+
+    it('keeps lifecycle supplied in the same patch as the parent rebind', () => {
+      const store = useChatStore.getState();
+      store.setCatInvocation('opus', {
+        invocationId: 'parent-old',
+        appServerLifecycle: {
+          stage: 'active',
+          lastActivityAt: Date.now() - 60_000,
+          recoveryAttempt: 0,
+          turnStartSent: true,
+          turnAccepted: true,
+          itemObserved: true,
+        },
+      });
+      store.setCatInvocation('opus', {
+        invocationId: 'parent-new',
+        appServerLifecycle: {
+          stage: 'child_spawned',
+          lastActivityAt: Date.now(),
+          recoveryAttempt: 0,
+          turnStartSent: false,
+          turnAccepted: false,
+          itemObserved: false,
+        },
+      });
+
+      expect(useChatStore.getState().catInvocations.opus?.appServerLifecycle?.stage).toBe('child_spawned');
+    });
   });
 
   describe('addThreadActiveInvocation', () => {

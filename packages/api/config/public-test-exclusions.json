@@ -333,6 +333,42 @@
       "owner": "@zts212653",
       "introducedBy": "bd8823b99",
       "expiresOn": "2026-08-31"
+    },
+    {
+      "id": "f254-private-evidence-contracts",
+      "match": "f254-(?:freshness-replay-provider|manual-reminder-scope)\\.test",
+      "category": "private_fixture",
+      "reason": "F254 replay and scope checks require home-only incident fixtures and operator discussion evidence; public runtime behavior is covered independently.",
+      "owner": "@zts212653",
+      "introducedBy": "bfa9e2c8f",
+      "expiresOn": "2026-08-31"
+    },
+    {
+      "id": "harness-eval-private-registry",
+      "match": "harness-eval/eval-hub-(?:lifecycle-summary-route|metric-glossary-coverage|read-model-f248-phase-b2|route)\\.test",
+      "category": "private_fixture",
+      "reason": "These Eval Hub governance checks require the home-only measurement registry and historical evidence archive, not public product state.",
+      "owner": "@zts212653",
+      "introducedBy": "bfa9e2c8f",
+      "expiresOn": "2026-08-31"
+    },
+    {
+      "id": "harness-eval-private-measurement-evidence",
+      "match": "harness-eval/(?:friction-measurement-bundle|measurement-bundle-census|measurement-independent-rejudge(?:-adjudication|-judgment)?)\\.test",
+      "category": "private_fixture",
+      "reason": "Measurement census and rejudge checks consume private certificates, verdicts, and replay artifacts that are deliberately absent from the public export.",
+      "owner": "@zts212653",
+      "introducedBy": "bfa9e2c8f",
+      "expiresOn": "2026-08-31"
+    },
+    {
+      "id": "harness-eval-private-verdict-publication",
+      "match": "harness-eval/publish-verdict-(?:capability-wakeup(?:-owner-scope)?|freshness|friction|measurement-validity-gate|memory|pipeline|task-outcome(?:-writeback-guard)?)\\.test",
+      "category": "private_fixture",
+      "reason": "Verdict publication checks require home-owned task, memory, and measurement evidence stores; they are governance coverage rather than a public runtime contract.",
+      "owner": "@zts212653",
+      "introducedBy": "bfa9e2c8f",
+      "expiresOn": "2026-08-31"
     }
   ]
 }

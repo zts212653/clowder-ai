@@ -21,5 +21,5 @@ safetyTier: readonly
 transparencyTier: visible-by-default
 governanceTier: human-gated
 
-# CVO-facing
+# operator-facing
 userExplanation: "语音模式开关状态和行为指导"

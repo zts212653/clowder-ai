@@ -25,12 +25,102 @@ function createMockEvidenceStore(overrides = {}) {
 describe('GET /api/evidence/search', () => {
   let app;
 
-  async function setup(storeOverrides = {}) {
+  async function setup(storeOverrides = {}, routeOverrides = {}) {
     app = Fastify();
     const evidenceStore = createMockEvidenceStore(storeOverrides);
-    await app.register(evidenceRoutes, { evidenceStore });
+    await app.register(evidenceRoutes, { evidenceStore, ...routeOverrides });
     await app.ready();
   }
+
+  it('fails closed when a resolver returns evidence outside the exact thread filter', async () => {
+    let resolverOptions;
+    const knowledgeResolver = {
+      resolve: async (_query, options) => {
+        resolverOptions = options;
+        return {
+          query: 'needle',
+          sources: ['project'],
+          results: [
+            {
+              anchor: 'thread-thread_other',
+              kind: 'thread',
+              status: 'active',
+              title: 'Unrelated historical thread',
+              summary: 'This result must not escape an exact thread filter.',
+              updatedAt: '2026-07-15T00:00:00Z',
+            },
+          ],
+        };
+      },
+    };
+    await setup({}, { knowledgeResolver });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=needle&scope=threads&threadId=thread_target&include_expansion=false',
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(resolverOptions.threadId, 'thread_target', 'route must propagate the structured filter');
+    const body = res.json();
+    assert.deepEqual(body.results, [], 'response boundary must reject evidence from every other thread');
+    assert.deepEqual(body.filterExecution, {
+      requestedThreadId: 'thread_target',
+      executedThreadId: 'thread_target',
+      outcome: 'authoritative_empty',
+    });
+  });
+
+  it('does not emit unscoped expansion hints for an exact thread search', async () => {
+    let expansionSearches = 0;
+    const target = {
+      anchor: 'thread-thread_target',
+      kind: 'thread',
+      status: 'active',
+      title: 'Target thread',
+      summary: 'Needle lives in the requested thread.',
+      keywords: ['global-noise'],
+      updatedAt: '2026-07-15T00:00:00Z',
+    };
+    const knowledgeResolver = {
+      resolve: async () => ({ query: 'needle', sources: ['project'], results: [target] }),
+    };
+    await setup(
+      {
+        searchWithMeta: async () => {
+          expansionSearches += 1;
+          return {
+            items: [
+              {
+                anchor: 'F167',
+                kind: 'feature',
+                status: 'active',
+                title: 'Unscoped related direction',
+                updatedAt: '2026-07-15T00:00:00Z',
+              },
+            ],
+            meta: { degraded: false },
+          };
+        },
+      },
+      { knowledgeResolver },
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=needle&scope=threads&threadId=thread_target',
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.deepEqual(
+      body.results.map((item) => item.anchor),
+      ['thread-thread_target'],
+    );
+    assert.equal(body.expansionHints, undefined, 'exact thread responses must not contain global related directions');
+    assert.equal(expansionSearches, 0, 'thread filter must stop unscoped expansion searches');
+    assert.equal(body.filterExecution.outcome, 'matched');
+  });
 
   it('returns results from evidence store', async () => {
     await setup({
@@ -43,6 +133,7 @@ describe('GET /api/evidence/search', () => {
           summary: 'ADR-005 decided single bank strategy for Hindsight integration',
           updatedAt: '2026-01-01T00:00:00Z',
           authority: 'validated',
+          retrievalScore: 0.92,
         },
         {
           anchor: 'docs/phases/phase-4.0-direction.md',
@@ -66,13 +157,33 @@ describe('GET /api/evidence/search', () => {
     assert.equal(body.degraded, false);
     assert.equal(body.results.length, 2);
     assert.equal(body.results[0].sourceType, 'decision');
-    // Phase E: confidence = f(rank), rank 0 of 2 → high
-    assert.equal(body.results[0].confidence, 'high');
+    // F263: matchRank = f(rank), independent from retrieval score and authority.
+    assert.equal(body.results[0].matchRank, 'high');
+    assert.equal(body.results[0].confidence, undefined);
+    assert.equal(body.results[0].retrievalScore, 0.92);
+    assert.equal(body.results[0].updatedAt, '2026-01-01T00:00:00Z');
+    assert.equal(body.results[0].status, 'active');
     assert.equal(body.results[0].authority, 'validated');
     assert.equal(body.results[1].sourceType, 'phase');
     // Phase E: rank 1 of 2 → high
-    assert.equal(body.results[1].confidence, 'high');
+    assert.equal(body.results[1].matchRank, 'high');
+    assert.equal(body.results[1].updatedAt, '2026-01-01T00:00:00Z');
     assert.equal(body.results[1].authority, 'candidate');
+  });
+
+  it('explicitly opts the manual search surface into pull-only candidates', async () => {
+    let receivedOptions;
+    await setup({
+      search: async (_query, options) => {
+        receivedOptions = options;
+        return [];
+      },
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/evidence/search?q=reflection' });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(receivedOptions.includePullOnly, true);
   });
 
   it('attaches suggested cross-post action for non-current thread hits', async () => {
@@ -209,7 +320,7 @@ describe('GET /api/evidence/search', () => {
     assert.equal(body.results[0].suggestedAction, undefined);
   });
 
-  it('Phase E: confidence reflects rank position, not authority', async () => {
+  it('F263: matchRank reflects rank position, not authority', async () => {
     await setup({
       search: async () =>
         Array.from({ length: 6 }, (_, i) => ({
@@ -229,12 +340,12 @@ describe('GET /api/evidence/search', () => {
     });
 
     const body = res.json();
-    assert.equal(body.results[0].confidence, 'high');
-    assert.equal(body.results[1].confidence, 'high');
-    assert.equal(body.results[2].confidence, 'mid');
-    assert.equal(body.results[4].confidence, 'mid');
-    assert.equal(body.results[5].confidence, 'low');
-    // all have same authority despite different confidence
+    assert.equal(body.results[0].matchRank, 'high');
+    assert.equal(body.results[1].matchRank, 'high');
+    assert.equal(body.results[2].matchRank, 'mid');
+    assert.equal(body.results[4].matchRank, 'mid');
+    assert.equal(body.results[5].matchRank, 'low');
+    // all have same authority despite different match rank
     for (const r of body.results) {
       assert.equal(r.authority, 'constitutional');
     }
@@ -275,7 +386,7 @@ describe('GET /api/evidence/search', () => {
     assert.equal(capturedOpts.limit, 5);
   });
 
-  it('degrades when evidence store throws', async () => {
+  it('degrades with an explicit filter outcome when exact-thread retrieval throws', async () => {
     await setup({
       search: async () => {
         throw new Error('SQLite error');
@@ -284,7 +395,7 @@ describe('GET /api/evidence/search', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/evidence/search?q=test',
+      url: '/api/evidence/search?q=test&scope=threads&threadId=thread_target',
     });
 
     assert.equal(res.statusCode, 200);
@@ -292,6 +403,11 @@ describe('GET /api/evidence/search', () => {
     assert.equal(body.degraded, true);
     assert.equal(body.degradeReason, 'evidence_store_error');
     assert.deepEqual(body.results, []);
+    assert.deepEqual(body.filterExecution, {
+      requestedThreadId: 'thread_target',
+      executedThreadId: 'thread_target',
+      outcome: 'degraded_empty',
+    });
   });
 
   // ── F209 Phase A: raw non-lexical modes degrade only when passage vectors are unavailable ──
@@ -435,6 +551,28 @@ describe('GET /api/evidence/search', () => {
     assert.equal(res.statusCode, 400);
   });
 
+  it('F263: accepts a query at the 2,000-character contract boundary', async () => {
+    await setup({ search: async () => [] });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/evidence/search?q=${'q'.repeat(2_000)}`,
+    });
+
+    assert.equal(res.statusCode, 200);
+  });
+
+  it('F263: rejects a query above the 2,000-character contract boundary', async () => {
+    await setup({ search: async () => [] });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/evidence/search?q=${'q'.repeat(2_001)}`,
+    });
+
+    assert.equal(res.statusCode, 400);
+  });
+
   it('returns 400 for limit out of range', async () => {
     await setup();
 
@@ -455,6 +593,47 @@ describe('GET /api/evidence/search', () => {
     });
 
     assert.equal(res.statusCode, 400);
+  });
+
+  it('F263: coverage honors scope and mode while using a fixed bounded candidate envelope', async () => {
+    const calls = [];
+    await setup({
+      searchWithMeta: async (_query, options) => {
+        calls.push(options);
+        return { items: [], meta: { degraded: false } };
+      },
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=wide&intent=coverage&scope=threads&mode=hybrid&limit=15',
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(
+      calls.map((options) => options.scope),
+      ['threads'],
+    );
+    assert.equal(calls[0].limit, 50, 'coverage discovery must use one fixed bounded candidate envelope');
+    assert.equal(calls[0].mode, 'hybrid');
+    assert.ok(calls[0].signal instanceof AbortSignal, 'route coverage must propagate a cancellation signal');
+    assert.ok(Number.isFinite(calls[0].deadlineAt), 'route coverage must propagate an absolute deadline');
+    assert.deepEqual(res.json().contract.executed.scopes, ['threads']);
+    assert.equal(res.json().contract.latency.budgetMs, 15_000);
+    assert.equal(typeof res.json().contract.latency.eventLoopLagMaxMs, 'number');
+    assert.equal(typeof res.json().contract.latency.abortPropagated, 'boolean');
+  });
+
+  it('F263: coverage rejects scopes it cannot execute instead of silently broadening them', async () => {
+    await setup({ searchWithMeta: async () => ({ items: [], meta: { degraded: false } }) });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=test&intent=coverage&scope=memory',
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.match(res.json().error, /coverage scope/i);
   });
 
   it('returns empty results for no matches', async () => {

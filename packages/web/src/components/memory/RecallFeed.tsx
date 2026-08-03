@@ -5,22 +5,39 @@ import { useState } from 'react';
 import {
   anchorToHref,
   type RecallEvent,
+  type RecallResultItem,
   recallEventDisplayTitle,
   recallEventResultLabel,
   useRecallEvents,
 } from '@/hooks/useRecallEvents';
 import { ExpandableText } from '../ExpandableText';
 
-function RecallCard({ event }: { event: RecallEvent }) {
+export function recallResultSemanticsLabel(result: RecallResultItem): string | null {
+  if (result.matchRank) {
+    return `[match:${result.matchRank} · authority:${result.authority ?? 'unknown'} · updated:${result.updatedAt ?? 'unknown'}]`;
+  }
+  return result.matchType ? `[matchType:${result.matchType}]` : null;
+}
+
+export function RecallCard({ event }: { event: RecallEvent }) {
   const [expanded, setExpanded] = useState(false);
   const displayTitle = recallEventDisplayTitle(event);
   const resultLabel = recallEventResultLabel(event);
   const resultLabelTone = event.resultCount == null ? 'text-cafe-secondary' : 'text-cafe-interactive';
 
+  const sourceLabel = event.source === 'push' ? 'push' : event.source === 'pull' ? 'pull' : null;
+  const sourceBadgeClass =
+    event.source === 'push' ? 'bg-conn-amber-bg text-conn-amber-text' : 'bg-conn-blue-bg text-[var(--semantic-info)]';
+
   return (
     <div className="rounded-lg bg-[var(--console-card-bg)] p-2.5">
       <button type="button" onClick={() => setExpanded(!expanded)} className="flex w-full items-center gap-2 text-left">
         <span className="text-xs text-cafe-secondary">{expanded ? '\u25BE' : '\u25B8'}</span>
+        {sourceLabel && (
+          <span className={`shrink-0 rounded px-1 py-0.5 text-micro font-semibold ${sourceBadgeClass}`}>
+            {sourceLabel}
+          </span>
+        )}
         <span className="flex-1 text-sm font-medium text-cafe-black truncate" title={displayTitle}>
           {displayTitle}
         </span>
@@ -29,6 +46,16 @@ function RecallCard({ event }: { event: RecallEvent }) {
             className={`rounded bg-[var(--console-panel-bg)] px-1.5 py-0.5 text-micro font-semibold ${resultLabelTone}`}
           >
             {resultLabel}
+          </span>
+        )}
+        {event.outcome === 'used' && (
+          <span className="shrink-0 rounded bg-conn-green-bg px-1 py-0.5 text-micro font-semibold text-conn-green-text">
+            used
+          </span>
+        )}
+        {event.outcome === 'ignored' && (
+          <span className="shrink-0 rounded bg-[var(--console-panel-bg)] px-1 py-0.5 text-micro font-semibold text-cafe-secondary">
+            ign.
           </span>
         )}
       </button>
@@ -41,6 +68,7 @@ function RecallCard({ event }: { event: RecallEvent }) {
             <div className="mt-1.5 space-y-1.5">
               {event.results.map((r, i) => {
                 const href = anchorToHref(r.anchor);
+                const semanticsLabel = recallResultSemanticsLabel(r);
                 return (
                   <div
                     key={`${event.id}-r${i}`}
@@ -53,8 +81,18 @@ function RecallCard({ event }: { event: RecallEvent }) {
                         </span>
                       )}
                       <ExpandableText text={r.title} clampClass="truncate" className="font-medium text-cafe-black" />
-                      {r.confidence && (
-                        <span className="ml-auto text-micro text-cafe-secondary/70">[{r.confidence}]</span>
+                      {semanticsLabel && (
+                        <span className="ml-auto text-micro text-cafe-secondary/70">{semanticsLabel}</span>
+                      )}
+                      {r.consumed === true && (
+                        <span className="shrink-0 rounded bg-conn-green-bg px-1 py-0.5 text-micro font-semibold text-conn-green-text">
+                          used
+                        </span>
+                      )}
+                      {r.consumed === false && (
+                        <span className="shrink-0 rounded bg-[var(--console-panel-bg)] px-1 py-0.5 text-micro font-semibold text-cafe-secondary">
+                          ign.
+                        </span>
                       )}
                     </div>
                     {r.snippet && (

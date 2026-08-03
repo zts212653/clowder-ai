@@ -1,10 +1,10 @@
 # IM Connector 开发文档
 
-> Build a custom IM connector for Cat Café without modifying the main repository.
+> Build a custom IM connector for Clowder AI without modifying the main repository.
 
 ## Overview
 
-Cat Café's IM connector plugin system (F240) lets you integrate any messaging platform by packaging a self-contained plugin archive. Upload via Hub UI, configure credentials — done.
+Clowder AI's IM connector plugin system (F240) lets you integrate any messaging platform by packaging a self-contained plugin archive. Upload via Hub UI, configure credentials — done.
 
 ```
 # Package your connector as a tar.gz:
@@ -16,7 +16,7 @@ tar czf my-connector.tar.gz my-connector/
 ## Architecture
 
 ```
-Your IM Platform                     Cat Café
+Your IM Platform                     Clowder AI
 ┌──────────┐    webhook/ws     ┌─────────────────────────┐
 │  Server   │ ───────────────► │ Your Plugin              │
 │           │                  │  handleWebhook()         │
@@ -26,7 +26,7 @@ Your IM Platform                     Cat Café
 └──────────┘                   └─────────────────────────┘
 ```
 
-Your plugin sits between the IM platform and Cat Café's message router. It translates platform-specific protocols into the unified `IMConnectorPlugin` interface.
+Your plugin sits between the IM platform and Clowder AI's message router. It translates platform-specific protocols into the unified `IMConnectorPlugin` interface.
 
 ## Quick Start
 
@@ -274,7 +274,7 @@ const plugin = {
         }
         // 2. Parse payload
         const msg = parseEvent(body);
-        // 3. Route to Cat Café
+        // 3. Route to Clowder AI
         await onMessage({ chatId: msg.chatId, text: msg.text, messageId: msg.id });
         return { kind: 'processed', messageId: msg.id };
       },
@@ -469,7 +469,7 @@ Every connector has a `source` attribute:
 
 | Source | Origin | Managed by |
 |--------|--------|------------|
-| `builtin` | Ships with Cat Café (feishu, telegram, wecom-bot, etc.) | Core repo |
+| `builtin` | Ships with Clowder AI (feishu, telegram, wecom-bot, etc.) | Core repo |
 | `external` | Installed as plugin archives via Hub UI or API | Plugin system |
 
 Both render identically in the Hub UI connector card list. External connectors display a "外部" badge and a trash icon for uninstalling. The `source` field is force-written into `connector.yaml` at install time — plugin authors don't need to set it.

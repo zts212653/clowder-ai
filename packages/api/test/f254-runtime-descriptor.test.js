@@ -120,16 +120,51 @@ describe('RuntimeCapabilityDescriptor (AC-C1)', () => {
   });
 
   describe('descriptorFromProviderFallback (gpt52 terminal review P1)', () => {
-    it('returns restricted descriptor for openai (ASYNC_CLOUD_PROVIDERS)', async () => {
+    it('prefers explicit provider over clientId for cloud-only runtime descriptor lookup', async () => {
+      const { descriptorFromProviderFallback, resolveFreshnessDescriptorProvider } = await import(
+        '../dist/domains/cats/services/freshness/RuntimeCapabilityDescriptor.js'
+      );
+
+      const provider = resolveFreshnessDescriptorProvider({
+        clientId: 'openai',
+        provider: 'openai-chatgpt-pro',
+      });
+      assert.equal(provider, 'openai-chatgpt-pro');
+
+      const d = descriptorFromProviderFallback(provider);
+      assert.notEqual(d, undefined, 'cloud-only runtime must remain restricted when clientId is openai');
+      assert.equal(d.carrier, 'cloud');
+      assert.equal(d.driver, 'openai-chatgpt-pro');
+      assert.equal(d.canReceiveHeldResponse, false);
+      assert.equal(d.canReceiveContentFreeNotice, false);
+    });
+
+    it('falls back to clientId when no explicit provider exists', async () => {
+      const { resolveFreshnessDescriptorProvider } = await import(
+        '../dist/domains/cats/services/freshness/RuntimeCapabilityDescriptor.js'
+      );
+
+      assert.equal(resolveFreshnessDescriptorProvider({ clientId: 'openai' }), 'openai');
+      assert.equal(resolveFreshnessDescriptorProvider(undefined), 'unknown');
+    });
+
+    it('returns undefined for regular openai so local Codex stays fail-open without carrierTier', async () => {
       const { descriptorFromProviderFallback } = await import(
         '../dist/domains/cats/services/freshness/RuntimeCapabilityDescriptor.js'
       );
-      const d = descriptorFromProviderFallback('openai');
-      assert.notEqual(d, undefined, 'openai should get a descriptor, not undefined');
+      assert.equal(descriptorFromProviderFallback('openai'), undefined);
+    });
+
+    it('returns restricted descriptor for openai-chatgpt-pro cloud-only provider', async () => {
+      const { descriptorFromProviderFallback } = await import(
+        '../dist/domains/cats/services/freshness/RuntimeCapabilityDescriptor.js'
+      );
+      const d = descriptorFromProviderFallback('openai-chatgpt-pro');
+      assert.notEqual(d, undefined, 'openai-chatgpt-pro should get a descriptor, not undefined');
       assert.equal(d.carrier, 'cloud');
-      assert.equal(d.driver, 'openai');
-      assert.equal(d.canReceiveHeldResponse, false, 'openai should NOT receive held responses');
-      assert.equal(d.canReceiveContentFreeNotice, false, 'openai should NOT receive notices');
+      assert.equal(d.driver, 'openai-chatgpt-pro');
+      assert.equal(d.canReceiveHeldResponse, false, 'cloud-only provider should NOT receive held responses');
+      assert.equal(d.canReceiveContentFreeNotice, false, 'cloud-only provider should NOT receive notices');
     });
 
     it('returns undefined for non-async providers (google, kimi, antigravity)', async () => {
@@ -246,6 +281,41 @@ describe('checkFreshnessForPostMessage with descriptor (AC-C3)', () => {
     });
 
     assert.equal(result.decision, 'held');
+  });
+
+  it('holds queued user messages for regular openai provider fallback (Codex MCP live regression)', async () => {
+    const { checkFreshnessForPostMessage } = await import(
+      '../dist/domains/cats/services/freshness/checkFreshnessForPostMessage.js'
+    );
+    const { descriptorFromProviderFallback } = await import(
+      '../dist/domains/cats/services/freshness/RuntimeCapabilityDescriptor.js'
+    );
+
+    const cursorStore = {
+      getSeenCursor: async () => 'msg-001',
+      pushSeenCursor: async () => {},
+    };
+    const messageStore = {
+      getByThreadAfter: async () => [],
+    };
+    const queueChecker = {
+      getQueuedForThread: () => [{ source: 'user', content: 'new user message', callerCatId: undefined }],
+    };
+
+    const result = await checkFreshnessForPostMessage({
+      userId: 'u1',
+      catId: 'codex',
+      threadId: 't1',
+      invocationId: 'inv-1',
+      toolName: 'post_message',
+      cursorStore,
+      messageStore,
+      queueChecker,
+      descriptor: descriptorFromProviderFallback('openai'),
+    });
+
+    assert.equal(result.decision, 'held');
+    assert.equal(result.reason, 'queued_messages_pending');
   });
 
   it('applies descriptor override to pagination_limit_uncertain held path (cloud P2 fix)', async () => {

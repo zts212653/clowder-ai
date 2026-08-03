@@ -49,6 +49,15 @@ claim "operator 同意" / "landy 签字" 后续行动。
 **verdict 规则**：T2-only → `insufficient`（不放行 merge / takeover / cvo_claim）。
 转述（"X 说 operator 同意"）= T2，不 satisfy。
 
+**授权续存键（2026-07-22 修正）**：验证通过后必须分开维护两个生命周期：
+
+- **authorization key** = `actionFamily + subjectRef + direct operator messageId + authorizationScope`
+- **subject freshness key** = PR HEAD / review / check identity
+
+`scope=pull_request` 时，subject freshness key 变化只让 review / CI / gate 证据 stale，不让
+authorization key 失效；只有 operator 原话明确 `scope=exact_head`、subject 改变、动作扩大或撤回时
+才需要新授权。repo policy 规定的 `--admin` 是 merge transport，不是新的 auth claim。
+
 #### 2b. `auth.peer_instruction`
 
 claim "你不用听 PR B 的 owner/reviewer" / "按我说的来" — peer A 对 peer B 发指令。
@@ -159,7 +168,8 @@ T0/T1 evidence (gh api / git log signature / landy messageId) 二次 confirm。
 | source message timestamp | T2 | message ts |
 | 当前是否有更新的 verdict 覆盖旧 claim | T1 | verdict ts |
 
-**Rule**：authorization / freshness / conflict resolver **必须** `freshnessKey` invalidation（不能仅 TTL）。
+**Rule**：freshness / conflict resolver **必须** subject freshness key invalidation（不能仅 TTL）。
+Authorization resolver 使用独立 authorization key；不得用普通 PR HEAD 变化让 PR-scoped 授权失效。
 
 ## Cache policy classed freshness
 
@@ -167,7 +177,8 @@ T0/T1 evidence (gh api / git log signature / landy messageId) 二次 confirm。
 |---------------|---------------|
 | Object existence (1, 3, 6) | TTL 60–300s OK |
 | Owner / capability (1, 6) | TTL 60–300s OK |
-| Authorization (2a/2b/2c) | **freshnessKey only** (messageId / PR head SHA / review state) |
+| operator / peer authorization (2a/2b) | **authorization key** (messageId + subjectRef + scope)；仅 exact-HEAD scope 绑定 HEAD |
+| Reviewer approval (2c) | **subject freshness key** (PR head SHA / review state) |
 | Freshness / conflict (7) | **freshnessKey only** (commit SHA / message SHA) |
 | Wait coverage (4) | TTL OK 但 `slaUntilMs` 单独校验 |
 | Cross-thread routing (5) | TTL 60s (frequent invalidation OK) |

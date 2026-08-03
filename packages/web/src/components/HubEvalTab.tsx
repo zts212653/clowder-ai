@@ -1,44 +1,21 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useState } from 'react';
 import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 import { apiFetch } from '@/utils/api-client';
-import { type EvalHubItem, VERDICT_LABELS } from './HubEvalTypes';
+import { PawFeelSettingsSection } from './eval-settings/PawFeelSettingsSection';
+import { HubEvalMetricGlossary } from './HubEvalMetricGlossary';
+import {
+  deriveDomainScheduleLine,
+  deriveDomainStateBadge,
+  deriveDomainVerdictLabel,
+  type EvalDomainSummary,
+  type EvalHubSummary,
+  VERDICT_LABELS,
+} from './HubEvalTypes';
 import { HubEvalVerdictCard } from './HubEvalVerdictCard';
 
 export { VERDICT_LABELS };
-
-interface EvalDomainSummary {
-  domainId: string;
-  displayName: string;
-  systemThreadId: string;
-  frequency: string;
-  evalCatId: string;
-  evalCatHandle: string;
-  /**
-   * Sunset state. When false, domain.yaml has `enabled: false` — scheduled cron
-   * skips it and `nextCronFireAt` is omitted. UI shows a "Sunset" indicator
-   * instead of "下次评估" so operators don't see a misleading future fire time.
-   */
-  enabled: boolean;
-  hasVerdict: boolean;
-  latestVerdictId?: string;
-  latestVerdict?: EvalHubItem['verdict'];
-  /** Next cron fire time. Omitted when `enabled === false` (sunset). */
-  nextCronFireAt?: string;
-}
-
-interface EvalHubSummary {
-  counts: {
-    total: number;
-    actionable: number;
-    keepObserve: number;
-    stale: number;
-    registeredDomains?: number;
-  };
-  domains?: EvalDomainSummary[];
-  items: EvalHubItem[];
-}
 
 export function HubEvalTab() {
   const [summary, setSummary] = useState<EvalHubSummary | null>(null);
@@ -64,24 +41,36 @@ export function HubEvalTab() {
     void fetchSummary();
   }, [fetchSummary]);
 
-  if (loading) return <p className="text-sm text-cafe-muted">...</p>;
-  if (error) {
-    return (
+  let periodicSurface: ReactNode;
+  if (loading) {
+    periodicSurface = <p className="text-sm text-cafe-muted">加载周期评估…</p>;
+  } else if (error) {
+    periodicSurface = (
       <div className="rounded-lg bg-cafe-surface-elevated p-4 text-sm text-conn-red-text" role="alert">
-        Eval Hub 暂时不可用：{error}
+        周期 Eval Hub 暂时不可用：{error}
       </div>
     );
-  }
-  if (!summary || (summary.items.length === 0 && (!summary.domains || summary.domains.length === 0))) {
-    return (
+  } else if (!summary || (summary.items.length === 0 && summary.domains.length === 0)) {
+    periodicSurface = (
       <div className="rounded-lg bg-cafe-surface-elevated p-4 text-sm text-cafe-secondary">
         还没有 live verdict。Eval Hub 只展示已经提交证据包的真实 eval 结论。
       </div>
     );
+  } else {
+    periodicSurface = <PeriodicEvalSurface summary={summary} onCatUpdated={fetchSummary} />;
   }
 
   return (
     <div className="space-y-4" data-guide-id="observability.eval-panel">
+      <PawFeelSettingsSection />
+      {periodicSurface}
+    </div>
+  );
+}
+
+function PeriodicEvalSurface({ summary, onCatUpdated }: { summary: EvalHubSummary; onCatUpdated: () => void }) {
+  return (
+    <>
       <p className="text-xs text-cafe-muted">
         Harness Eval 控制面板：猫猫定期评估自身协作机制的健康度，下方是最新评估结论。
       </p>
@@ -92,11 +81,11 @@ export function HubEvalTab() {
         <StatCell label="过期" sublabel="需重新评估" value={summary.counts.stale} />
       </div>
 
-      {summary.domains && summary.domains.length > 0 && (
+      {summary.domains.length > 0 && (
         <div className="space-y-3">
           <h2 className="text-sm font-semibold text-cafe">评估域总览</h2>
           {summary.domains.map((domain) => (
-            <DomainCard key={domain.domainId} domain={domain} onCatUpdated={fetchSummary} />
+            <DomainCard key={domain.domainId} domain={domain} onCatUpdated={onCatUpdated} />
           ))}
         </div>
       )}
@@ -110,11 +99,17 @@ export function HubEvalTab() {
       {summary.items.length > 0 && (
         <div className="space-y-3">
           {summary.items.map((item) => (
-            <HubEvalVerdictCard key={item.id} item={item} />
+            <HubEvalVerdictCard
+              key={item.id}
+              item={item}
+              metricGlossary={summary.domains.find((domain) => domain.domainId === item.domainId)?.metricGlossary}
+              projectPath={summary.repoProjectPath}
+              worktreeId={summary.repoWorktreeId}
+            />
           ))}
         </div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -179,6 +174,9 @@ function DomainCard({ domain, onCatUpdated }: { domain: EvalDomainSummary; onCat
         <div className="min-w-0">
           <div className="text-xs font-medium uppercase tracking-wide text-cafe-muted">{domain.domainId}</div>
           <h3 className="mt-1 text-base font-semibold text-cafe">{domain.displayName}</h3>
+          {domain.descriptionForHuman ? (
+            <p className="mt-1 text-xs leading-relaxed text-cafe-secondary">{domain.descriptionForHuman}</p>
+          ) : null}
           <p className="mt-1 text-xs text-cafe-muted">
             评估频率: {domain.frequency} · 评估猫:{' '}
             {editing ? (
@@ -208,7 +206,7 @@ function DomainCard({ domain, onCatUpdated }: { domain: EvalDomainSummary; onCat
                   type="button"
                   onClick={handleSave}
                   disabled={saving}
-                  className="rounded bg-[var(--console-button-emphasis)] px-2 py-0.5 text-xs text-white hover:opacity-90 disabled:opacity-50"
+                  className="rounded bg-[var(--console-button-emphasis)] px-2 py-0.5 text-xs text-[var(--cafe-surface)] hover:opacity-90 disabled:opacity-50"
                 >
                   {saving ? '...' : '保存'}
                 </button>
@@ -253,10 +251,22 @@ function DomainCard({ domain, onCatUpdated }: { domain: EvalDomainSummary; onCat
             }
             return null;
           })()}
+          <HubEvalMetricGlossary glossary={domain.metricGlossary} />
         </div>
-        <span className="inline-flex shrink-0 rounded-md bg-cafe-surface px-2.5 py-1 text-xs font-semibold text-[var(--console-button-emphasis)]">
-          {deriveDomainStatusBadge(domain)}
-        </span>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <span className="inline-flex rounded-md bg-cafe-surface px-2.5 py-1 text-xs font-semibold text-[var(--console-button-emphasis)]">
+            {deriveDomainStateBadge(domain)}
+          </span>
+          {(() => {
+            const label = deriveDomainVerdictLabel(domain);
+            if (!label) return null;
+            return (
+              <span className="inline-flex rounded-md border border-cafe bg-cafe-surface px-2.5 py-0.5 text-xs font-medium text-cafe-secondary">
+                结论：{label}
+              </span>
+            );
+          })()}
+        </div>
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <a
@@ -276,61 +286,4 @@ function DomainCard({ domain, onCatUpdated }: { domain: EvalDomainSummary; onCat
       </div>
     </section>
   );
-}
-
-// ---- Sunset-rendering helpers (extracted for vitest unit coverage) ----
-// Pattern follows evidence-search.test.ts: pull pure logic out of JSX so we
-// can vitest it without bringing in @testing-library/react / jsdom. Closes
-// gpt52 R2 residual test gap on sunset rendering branches.
-
-export type DomainScheduleLine =
-  | { kind: 'sunset'; text: string }
-  | { kind: 'next-eval'; text: string }
-  | { kind: 'none' };
-
-/**
- * Decide the secondary line under the cat row in a domain card.
- * - Sunset (enabled=false): "🌙 Sunset · 自动调度已停" — never lie about a
- *   future cron fire (would mirror silent-fire on the operator surface).
- * - Active + has nextCronFireAt: "下次评估: <locale string>".
- * - Active + no nextCronFireAt: nothing (kind=none).
- */
-export function deriveDomainScheduleLine(domain: {
-  enabled: boolean;
-  nextCronFireAt?: string;
-  /** Used to distinguish N-day probe cadence from actual eval cadence (gpt52 R1 P2). */
-  frequency?: string;
-}): DomainScheduleLine {
-  if (domain.enabled === false) {
-    return { kind: 'sunset', text: '🌙 Sunset · 自动调度已停 (yaml: enabled: false)' };
-  }
-  if (domain.nextCronFireAt) {
-    // N-day domains (every-Nd): cron fires daily but last-run gate controls actual eval.
-    // Show "下次探测 (every-Nd)" instead of "下次评估" to avoid implying eval WILL run
-    // at the next daily fire — the gate may skip it (gpt52 R1 P2 fix).
-    const isNDay = domain.frequency ? /^every-\d+d$/.test(domain.frequency) : false;
-    const label = isNDay ? `下次探测 (${domain.frequency})` : '下次评估';
-    return {
-      kind: 'next-eval',
-      text: `${label}: ${new Date(domain.nextCronFireAt).toLocaleString()}`,
-    };
-  }
-  return { kind: 'none' };
-}
-
-/**
- * Decide the verdict-status badge text in a domain card.
- * Sunset wins over verdict label / "待首次评估" — operators must see the
- * domain is paused, not a stale verdict status.
- */
-export function deriveDomainStatusBadge(domain: {
-  enabled: boolean;
-  hasVerdict: boolean;
-  latestVerdict?: EvalHubItem['verdict'];
-}): string {
-  if (domain.enabled === false) return 'Sunset';
-  if (domain.hasVerdict && domain.latestVerdict) {
-    return VERDICT_LABELS[domain.latestVerdict];
-  }
-  return '待首次评估';
 }

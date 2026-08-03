@@ -9,11 +9,53 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { CatId } from '@cat-cafe/shared';
+import type { CatId, FreshnessClosureStatus } from '@cat-cafe/shared';
 import { isValidTransition } from './invocation-state-machine.js';
 
 /** InvocationRecord lifecycle statuses */
 export type InvocationStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled';
+
+/**
+ * F167 S.1-b: immutable carrier projection for an action-successor lease.
+ * The action-successor store remains canonical; InvocationRecord only carries
+ * the exact ref from queue admission to an invocation-authenticated callback.
+ */
+export interface InvocationActionLeaseRef {
+  readonly leaseId: string;
+  readonly generation: number;
+}
+
+/**
+ * Every newly-created invocation classifies whether it carries action custody.
+ * Keeping the discriminator and exact ref in one value prevents a half-state
+ * where a record says a lease is required but has no generation to complete.
+ */
+export type InvocationActionLeaseCarrier =
+  | { readonly kind: 'none' }
+  | ({ readonly kind: 'action_successor' } & InvocationActionLeaseRef);
+
+export function requireInvocationActionLeaseCarrier(value: unknown): InvocationActionLeaseCarrier {
+  if (typeof value !== 'object' || value === null || !('kind' in value)) {
+    throw new Error('InvocationRecord create requires an explicit action lease carrier classification');
+  }
+  if (value.kind === 'none') return Object.freeze({ kind: 'none' });
+  if (
+    value.kind !== 'action_successor' ||
+    !('leaseId' in value) ||
+    typeof value.leaseId !== 'string' ||
+    value.leaseId.length === 0 ||
+    !('generation' in value) ||
+    !Number.isInteger(value.generation) ||
+    (value.generation as number) <= 0
+  ) {
+    throw new Error('InvocationRecord create received an invalid action successor carrier');
+  }
+  return Object.freeze({
+    kind: 'action_successor',
+    leaseId: value.leaseId,
+    generation: value.generation as number,
+  });
+}
 
 /**
  * A single invocation record tracking the lifecycle of a cat invocation.
@@ -27,15 +69,33 @@ export interface InvocationRecord {
   targetCats: CatId[];
   intent: 'execute' | 'ideate';
   status: InvocationStatus;
+  /** F254: cats with an exact successful terminal event for this invocation.
+   *  Persisted atomically with the running -> succeeded transition so restart
+   *  recovery never infers per-target success from the aggregate parent status. */
+  successfulCatIds?: readonly CatId[];
   /** Idempotency key (client-provided or server-generated, always present) */
   idempotencyKey: string;
   /** Error message when status is 'failed' */
   error?: string;
+  /**
+   * Epoch ms when the executor produced its first durable routing event.
+   *
+   * `status: running` is only an exclusive claim. Connector callers may not
+   * acknowledge a wake until this receipt exists, otherwise a process exit
+   * between the claim and router startup can silently consume pending work.
+   */
+  executionStartedAt?: number;
   /** F8: Per-cat token usage collected on invocation completion */
   usageByCat?: Record<string, import('../../types.js').TokenUsage>;
   /** F128: Epoch ms when usageByCat was first recorded. Stable for daily bucketing
    *  (unlike updatedAt which any subsequent update can shift). */
   usageRecordedAt?: number;
+  /** F254 Phase E: typed custody proof for a catch-closure successor. */
+  freshnessClosureId?: string;
+  freshnessInputFrontierMessageId?: string;
+  freshnessClosureStatus?: FreshnessClosureStatus;
+  /** F167 S.1-b: server-written carrier classification recovered by holder callbacks. */
+  actionLeaseCarrier: InvocationActionLeaseCarrier;
   createdAt: number;
   updatedAt: number;
 }
@@ -47,6 +107,8 @@ export interface CreateInvocationInput {
   targetCats: CatId[];
   intent: 'execute' | 'ideate';
   idempotencyKey: string;
+  /** F167 S.1-b: exact carrier classification; every producer must choose one union arm. */
+  actionLeaseCarrier: InvocationActionLeaseCarrier;
 }
 
 /** Result of atomic create-or-deduplicate */
@@ -58,8 +120,12 @@ export interface CreateResult {
 /** Fields that can be updated on an InvocationRecord */
 export interface UpdateInvocationInput {
   status?: InvocationStatus;
+  /** Exact successful targets. Valid only on the transition to `succeeded`. */
+  successfulCatIds?: readonly CatId[];
   userMessageId?: string | null;
   error?: string;
+  /** Durable proof that the claimed executor reached router execution. */
+  executionStartedAt?: number;
   /** CAS guard: update only if current status matches. Returns null on mismatch. */
   expectedStatus?: InvocationStatus;
   /** CAS guard: update only if usageByCat is missing or an empty object. Returns null on mismatch. */
@@ -73,6 +139,9 @@ export interface UpdateInvocationInput {
    *  updatedAt fallback. Never `invocation.createdAt` (would mis-bucket
    *  cross-midnight runs onto the start day instead of the finish day). */
   usageRecordedAt?: number;
+  freshnessClosureId?: string;
+  freshnessInputFrontierMessageId?: string;
+  freshnessClosureStatus?: FreshnessClosureStatus;
 }
 
 /**
@@ -152,6 +221,7 @@ export class InvocationRecordStore implements IInvocationRecordStore {
       intent: input.intent,
       status: 'queued',
       idempotencyKey: input.idempotencyKey,
+      actionLeaseCarrier: requireInvocationActionLeaseCarrier(input.actionLeaseCarrier),
       createdAt: now,
       updatedAt: now,
     };
@@ -192,10 +262,25 @@ export class InvocationRecordStore implements IInvocationRecordStore {
     ) {
       return null;
     }
+    const successfulCatIds = normalizeSuccessfulCatIds(record.targetCats, input);
+    const startsNewExecutionAttempt = input.status === 'running' && record.status !== 'running';
 
     if (input.status !== undefined) record.status = input.status;
+    if (successfulCatIds !== undefined) record.successfulCatIds = Object.freeze(successfulCatIds);
     if (input.userMessageId !== undefined) record.userMessageId = input.userMessageId;
     if (input.error !== undefined) record.error = input.error;
+    if (startsNewExecutionAttempt) {
+      // The receipt proves one specific execution attempt. A queued/failed
+      // record reclaimed for a new attempt must not inherit the old proof.
+      delete record.executionStartedAt;
+    } else if (input.executionStartedAt !== undefined) {
+      record.executionStartedAt = input.executionStartedAt;
+    }
+    if (input.freshnessClosureId !== undefined) record.freshnessClosureId = input.freshnessClosureId;
+    if (input.freshnessInputFrontierMessageId !== undefined) {
+      record.freshnessInputFrontierMessageId = input.freshnessInputFrontierMessageId;
+    }
+    if (input.freshnessClosureStatus !== undefined) record.freshnessClosureStatus = input.freshnessClosureStatus;
     if (input.usageByCat !== undefined) {
       record.usageByCat = input.usageByCat;
       // F128: stamp usageRecordedAt only on first write (stable for daily bucketing).
@@ -231,4 +316,27 @@ export class InvocationRecordStore implements IInvocationRecordStore {
   get size(): number {
     return this.records.size;
   }
+}
+
+export class InvalidInvocationSuccessWitnessError extends Error {
+  readonly code = 'INVALID_INVOCATION_SUCCESS_WITNESS';
+}
+
+export function normalizeSuccessfulCatIds(
+  targetCats: readonly CatId[],
+  input: UpdateInvocationInput,
+): CatId[] | undefined {
+  if (input.successfulCatIds === undefined) return undefined;
+  if (input.status !== 'succeeded') {
+    throw new InvalidInvocationSuccessWitnessError('successfulCatIds may only be supplied with status succeeded');
+  }
+  if (targetCats.length > 0 && input.successfulCatIds.length === 0) {
+    throw new InvalidInvocationSuccessWitnessError('successfulCatIds must be non-empty for a targeted invocation');
+  }
+  const targetSet = new Set(targetCats);
+  if (input.successfulCatIds.some((catId) => !targetSet.has(catId))) {
+    throw new InvalidInvocationSuccessWitnessError('successfulCatIds must be a subset of immutable targetCats');
+  }
+  const successfulSet = new Set(input.successfulCatIds);
+  return targetCats.filter((catId) => successfulSet.has(catId));
 }

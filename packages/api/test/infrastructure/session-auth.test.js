@@ -191,4 +191,78 @@ describe('F156 D-1: GET /api/session — session establishment', () => {
     const body = JSON.parse(res.body);
     assert.equal(body.userId, 'default-user');
   });
+
+  it('issues the configured private owner identity into the browser session', async () => {
+    const configuredApp = Fastify();
+    await configuredApp.register(cookie);
+    await configuredApp.register(sessionAuthPlugin);
+    await configuredApp.register(sessionRoute, { ownerUserId: 'private-owner' });
+    configuredApp.get('/api/test-owner', async (request) => ({
+      sessionUserId: request.sessionUserId ?? null,
+    }));
+    await configuredApp.ready();
+
+    try {
+      const pair = await configuredApp.inject({ method: 'GET', url: '/api/session' });
+      assert.equal(pair.statusCode, 200);
+      assert.equal(pair.json().userId, 'private-owner');
+      const token = pair.headers['set-cookie'].match(/cat_cafe_session=([^;]+)/)?.[1];
+      assert.ok(token);
+
+      const authenticated = await configuredApp.inject({
+        method: 'GET',
+        url: '/api/test-owner',
+        headers: { cookie: `cat_cafe_session=${token}` },
+      });
+      assert.equal(authenticated.json().sessionUserId, 'private-owner');
+    } finally {
+      await configuredApp.close();
+    }
+  });
+
+  it('does not mint the configured owner identity for remote or proxied bootstrap callers', async () => {
+    const configuredApp = Fastify();
+    await configuredApp.register(cookie);
+    await configuredApp.register(sessionAuthPlugin);
+    await configuredApp.register(sessionRoute, { ownerUserId: 'private-owner' });
+    configuredApp.get('/api/test-owner', async (request) => ({
+      sessionUserId: request.sessionUserId ?? null,
+    }));
+    await configuredApp.ready();
+
+    try {
+      for (const request of [{ remoteAddress: '192.168.1.50' }, { headers: { 'x-forwarded-for': '192.168.1.50' } }]) {
+        const pair = await configuredApp.inject({ method: 'GET', url: '/api/session', ...request });
+        assert.equal(pair.statusCode, 200);
+        assert.equal(pair.json().userId, 'default-user');
+        const token = pair.headers['set-cookie'].match(/cat_cafe_session=([^;]+)/)?.[1];
+        assert.ok(token);
+
+        const authenticated = await configuredApp.inject({
+          method: 'GET',
+          url: '/api/test-owner',
+          ...request,
+          headers: {
+            ...(request.headers ?? {}),
+            cookie: `cat_cafe_session=${token}`,
+          },
+        });
+        assert.equal(authenticated.json().sessionUserId, 'default-user');
+      }
+    } finally {
+      await configuredApp.close();
+    }
+  });
+
+  it('keeps remote bootstrap non-privileged when the owner uses the default identity', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/session',
+      remoteAddress: '192.168.1.50',
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().userId, 'unpaired-user');
+    assert.notEqual(res.json().userId, 'default-user');
+  });
 });

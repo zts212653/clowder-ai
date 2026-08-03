@@ -1,7 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { rankToMatchRank } from '../domains/memory/f163-types.js';
 import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { mapKindToSourceType } from './evidence-helpers.js';
 
 interface CallbackMemoryRoutesDeps {
   /** F102: DI — SQLite-backed services (required) */
@@ -40,16 +42,16 @@ export async function registerCallbackMemoryRoutes(
     const { q, limit } = parsed.data;
 
     try {
-      const items = await deps.evidenceStore.search(q, { limit: limit ?? 5 });
-      const results = items.map((item) => ({
+      const items = await deps.evidenceStore.search(q, { limit: limit ?? 5, includePullOnly: true });
+      const results = items.map((item, index) => ({
         title: item.title,
         anchor: item.anchor,
         snippet: item.summary ?? '',
-        confidence: 'mid' as const,
-        sourceType: (item.kind === 'decision' ? 'decision' : item.kind === 'plan' ? 'phase' : 'discussion') as
-          | 'decision'
-          | 'phase'
-          | 'discussion',
+        matchRank: rankToMatchRank(index),
+        ...(item.retrievalScore != null ? { retrievalScore: item.retrievalScore } : {}),
+        sourceType: mapKindToSourceType(item.kind),
+        ...(item.authority ? { authority: item.authority } : {}),
+        ...(item.updatedAt ? { updatedAt: item.updatedAt } : {}),
       }));
       return { results, degraded: false };
     } catch {

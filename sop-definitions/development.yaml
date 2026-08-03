@@ -1,10 +1,13 @@
 id: development
 domain: engineering
 label: Development SOP
-description: Clowder AI coding feature lifecycle. This is the runtime SOP definition used by WorkflowSop.
+description: >
+  Risk-routed development lane catalog used by WorkflowSop. Stage ids are bulletin-board lanes,
+  not a mandatory serial pipeline; cats select only the lanes justified by behavior, data,
+  security, contract, or irreversibility risk.
 stages:
   - id: kickoff
-    label: 立项
+    label: 立项（按需）
     suggested_skill: feat-lifecycle
     hard_rules:
       - id: kickoff-ac-checklist
@@ -22,8 +25,8 @@ stages:
           reason: operator confirmation is conversational intent, not yet represented as a structured event.
 
   - id: impl
-    label: 实现
-    suggested_skill: writing-plans
+    label: 实现隔离（按需）
+    suggested_skill: worktree
     hard_rules:
       - id: impl-main-sync-before-worktree
         text: worktree 开之前必须 main 双向同步 (ahead=0 behind=0)
@@ -42,13 +45,13 @@ stages:
           key: REDIS_URL
           must_include: ":6398"
           must_not_include: ":6399"
-      - id: impl-design-gate-before-code
-        text: 跳过 Design Gate（含 User Journey 落盘）直接写代码
+      - id: impl-risk-route-before-action
+        text: 实现前未按行为面 / 数据 / 安全 / 契约 / 不可逆五轴判断风险，就机械套用或机械跳过流程
         severity: blocker
         predicate:
           type: manual_only
-          reason: Design Gate evidence and User Journey section are feature-doc fields; upgrade to feature_doc_readiness_check when checker script is available.
-          future_candidate: feature_doc_readiness_check
+          reason: Risk classification is semantic; machine guards enforce concrete safety and contract boundaries after the lane is selected.
+          future_candidate: risk_route_attestation
       - id: impl-user-journey-missing
         text: 用户可感知 Feature 缺 User Journey 段（或 user_journey_exempt）
         severity: blocker
@@ -56,6 +59,29 @@ stages:
           type: command_pattern
           must_match: pnpm check:features|node scripts/check-feature-truth
           reason: "check-feature-truth.mjs now checks changed feature docs for ## User Journey presence. F252 root cause — session vs thread scope mismatch went undetected because journey was never written down."
+      - id: impl-co-creation-docs-lane
+        text: 共创型 docs-only 可自决直推；进入 worktree / PR / cloud / full gate 前才必须用 classifier 证明风险，且不得越过结果支付代码级流程税
+        severity: blocker
+        owner:
+          type: skill
+          skill: co-creation-docs
+        predicate:
+          type: co_creation_docs_lane
+          include_globs:
+            - docs/*.md
+            - docs/**/*.md
+          classifier_required_globs:
+            - docs/SOP.md
+            - docs/VISION.md
+            - docs/lessons-learned.md
+            - docs/architecture/ownership/**
+            - docs/canon/**
+            - docs/decisions/**
+          classifier_match: pnpm classify:co-creation-docs|node scripts/co-creation-docs-lane.mjs
+          worktree_match: git worktree add
+          pull_request_match: gh pr create
+          cloud_review_match: gh pr comment .*@codex review
+          full_gate_match: pnpm gate
     pitfalls:
       - id: impl-post-compact-recall-loss
         text: 压缩后忘了当前在做什么
@@ -65,15 +91,22 @@ stages:
           reason: Current runtime has no stable post-compact recall-failure telemetry.
           future_candidate: trace_pattern_post_compact_recall
       - id: impl-convention-graph-before-convention-edit
-        text: 改 MCP tool / skill manifest / route / callback 等约定面前，先用 convention graph 查影响面；stale=true 先 reindex
-        severity: warn
+        text: 改 MCP tool / skill manifest 等当前已索引约定面前，先用 convention graph 查影响面；stale=true 先 reindex
+        severity: blocker
         predicate:
-          type: manual_only
-          reason: Convention graph CLI usage is not yet emitted as structured telemetry.
-          future_candidate: convention_graph_usage_event
+          type: changed_files_require_command
+          include_globs:
+            - packages/mcp-server/src/tools/*.ts
+            - packages/mcp-server/src/server-toolsets.ts
+            - cat-cafe-skills/*/SKILL.md
+          exclude_globs:
+            - "**/*.test.ts"
+            - "**/*.test.js"
+          must_match: "pnpm convention-graph:code-consumers|cat-cafe-convention-graph code-consumers"
+          reason: F242 adoption guard; convention-surface edits need a successful impact query before editing/merge.
 
   - id: quality_gate
-    label: 自检
+    label: 自检（按风险）
     suggested_skill: quality-gate
     hard_rules:
       - id: quality-gate-vision-coverage
@@ -84,12 +117,12 @@ stages:
           reason: Vision coverage has no machine-checkable report artifact yet; upgrade when quality-gate emits structured evidence.
           future_candidate: quality_gate_report_artifact
     pitfalls:
-      - id: quality-gate-full-test-evidence
-        text: 声称完成但没跑全量测试
+      - id: quality-gate-risk-matched-evidence
+        text: 声称完成但没有与风险面匹配的验证证据（至少 targeted；高风险才要求 full gate）
         severity: blocker
         predicate:
           type: command_pattern
-          must_match: pnpm gate|pnpm test|pnpm --filter .* test|node --test
+          must_match: pnpm gate|pnpm (check|lint|test)|pnpm --filter .* test|node --test|git diff --check
 
   - id: fresh_context
     label: Fresh-Context Pre-Review
@@ -105,7 +138,7 @@ stages:
           reason: Fresh-context output is free-form finding list, not a structured verdict event.
 
   - id: review
-    label: Review
+    label: 独立验证（按风险择源）
     suggested_skill: request-review
     hard_rules:
       - id: review-no-self-review
@@ -115,7 +148,7 @@ stages:
           type: handle_check
           constraint: reviewer_not_author
       - id: review-original-requirements
-        text: Review 请求必须附原始需求摘录
+        text: 涉及用户意图或愿景的 Review 请求必须附原始需求摘录
         severity: blocker
         predicate:
           type: manual_only
@@ -123,18 +156,15 @@ stages:
           future_candidate: review_packet_schema
     pitfalls:
       - id: review-retrigger-after-p1
-        text: 收到 P1 修完后没 re-trigger review
+        text: P1/P2 修复后的实质内容未被对应 review source 覆盖；SHA-only / 可证明机械变化用 continuityProof，不重开 reviewer
         severity: blocker
         predicate:
-          type: command_sequence
-          must_include:
-            - git push
-            - gh pr comment
-          absent:
-            - "@codex review"
+          type: manual_only
+          reason: Final-SHA review coverage is the boundary; the trigger channel is lane-dependent (cloud re-trigger vs local stateful re-review). The old command_sequence predicate hardcoded the cloud incantation ("@codex review") and false-flags local-lane PRs. Truth source is merge-gate Review Provenance Matrix.
+          future_candidate: review_coverage_final_sha_check
 
   - id: merge
-    label: 合入
+    label: 合入（载体触发）
     suggested_skill: merge-gate
     hard_rules:
       - id: merge-github-squash-only
@@ -157,6 +187,13 @@ stages:
           type: manual_only
           reason: Claimed-done vs code-real reconciliation is semantic; check-feature-truth mechanically guards only obvious status/timeline drift. Detailed pre/post steps live in merge-gate SKILL Step 7.5.
           future_candidate: feature_doc_truth_check
+      - id: merge-runtime-activation-truth
+        text: 触及 runtime 加载面的 PR 合入后必须分开声明 main 与 live runtime 状态；未获co-creator授权时记录 live=dormant，不得冒充已生效
+        severity: blocker
+        predicate:
+          type: manual_only
+          reason: Runtime impact, current live-load state, and operator authorization are semantic and external truths; changed filenames alone cannot prove activation.
+          future_candidate: runtime_activation_receipt
     pitfalls:
       - id: merge-local-squash-close
         text: 本地 squash + push + gh pr close（PR 显示 closed 不是 merged）
@@ -179,11 +216,11 @@ stages:
             - pnpm start|runtime:start|restart
 
   - id: completion
-    label: 完成
+    label: 愿景守护（终态触发）
     suggested_skill: feat-lifecycle
     hard_rules:
       - id: completion-vision-guardian
-        text: feat close 前必须跨猫愿景守护
+        text: 用户可见或愿景变化的 feat close 前必须有独立愿景守护
         severity: blocker
         predicate:
           type: manual_only
@@ -199,7 +236,7 @@ stages:
             - pnpm check:features
     pitfalls:
       - id: completion-missing-guardian-handoff
-        text: 没有 @ 其他猫做愿景守护就直接 close
+        text: 用户可见或愿景变化的 feat 没有 @ 独立守护猫就直接 close
         severity: blocker
         predicate:
           type: handle_check

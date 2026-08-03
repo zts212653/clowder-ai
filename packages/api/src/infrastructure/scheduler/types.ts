@@ -110,7 +110,7 @@ export interface ScheduleLifecycleNotice {
 
 export type ScheduleLifecycleNotifier = (notice: ScheduleLifecycleNotice) => void;
 
-/** Fire-and-forget cat invocation trigger — subset of ConnectorInvokeTrigger */
+/** Async cat invocation trigger — callers may detach it, but resolution means durable wake acceptance. */
 export interface ScheduleInvokeTrigger {
   trigger(
     threadId: string,
@@ -129,6 +129,8 @@ export interface ExecuteContext {
   assignedCatId: string | null;
   /** Phase 2: session × materialization context, if task declares one */
   context?: ContextSpec;
+  /** Sleep/wake and wall-clock timing metadata for this scheduled fire. */
+  schedule?: ScheduleRunTiming;
   /** Phase 4: deliver message to a thread */
   deliver?: (opts: DeliverOpts) => Promise<string>;
   /** Phase 4: fetch web content with browser-automation routing */
@@ -202,6 +204,20 @@ export interface RunStats {
 /** Phase 3A: task source — builtin (code-registered) vs dynamic (user-registered) */
 export type TaskSource = 'builtin' | 'dynamic';
 
+export type TriggerKind = 'interval' | 'cron' | 'once' | 'manual';
+
+export type CronMisfirePolicy = 'merge_late_one';
+
+export interface ScheduleRunTiming {
+  triggerKind: TriggerKind;
+  scheduledAt: string | null;
+  firedAt: string;
+  latenessMs: number;
+  missedSlots: number;
+  late: boolean;
+  misfirePolicy?: CronMisfirePolicy;
+}
+
 /** Schedule panel task summary (API response shape) */
 export interface ScheduleTaskSummary {
   id: string;
@@ -222,6 +238,10 @@ export interface ScheduleTaskSummary {
   source: TaskSource;
   /** Phase 3A: dynamic_task_defs.id for CRUD (only for dynamic tasks) */
   dynamicTaskId?: string;
+  /** Delivery thread for thread-scoped dynamic tasks. */
+  deliveryThreadId?: string | null;
+  /** Whether the task is currently registered in TaskRunnerV2 runtime memory. */
+  registered: boolean;
 }
 
 /** Run ledger row */
@@ -236,4 +256,10 @@ export interface RunLedgerRow {
   assigned_cat_id: string | null;
   /** Phase 3A: human-readable failure reason (AC-F3) */
   error_summary: string | null;
+  scheduled_at?: string | null;
+  fired_at?: string | null;
+  lateness_ms?: number | null;
+  missed_slots?: number | null;
+  trigger_kind?: TriggerKind | null;
+  misfire_policy?: CronMisfirePolicy | null;
 }

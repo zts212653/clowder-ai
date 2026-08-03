@@ -27,11 +27,21 @@ export type CliErrorReasonCode =
   | 'context_window_exceeded'
   | 'tool_call_parse_failed'
   | 'server_overloaded'
+  /** F212 post-close hotfix: the response timer fired while the CLI was still alive. */
+  | 'cli_response_timeout'
+  /** F212 post-close hotfix: liveness probe confirmed idle-silent stall before termination. */
+  | 'cli_stall_timeout'
   /** Phase G (clowder-ai#875): CLI exited cleanly with event stream that has events but
    *  no text events (e.g. OpenCode + DeepSeek producing only `step_start`). NOT an error
    *  per se but surfaced via cliDiagnostics so users get evidence instead of generic
    *  "completed without textual output" message. */
-  | 'silent_completion';
+  | 'silent_completion'
+  /** Phase H (Sol runtime forensics 2026-07-09): upstream provider (Codex 0.98+) sent
+   *  `{type:"error", message:"This content was flagged for possible cybersecurity risk..."}`
+   *  followed by `turn.failed` + exit 1. NOT a Clowder AI bug — upstream policy engine decision.
+   *  Users get humanized rephrase guidance instead of generic "unknown CLI error". Excluded
+   *  from F222 FrustrationDetector auto-issue triggering (not user-actionable within our scope). */
+  | 'upstream_policy_reject';
 
 /**
  * Structured CLI error payload (Phase A KD-1 white-list admission).
@@ -65,7 +75,8 @@ export interface CliDiagnostics {
   /** Debug correlation metadata — safe to expose */
   debugRef: {
     command: string;
-    exitCode: number | null;
+    /** Absent for timeout causes: any observed exit happened after our termination request. */
+    exitCode?: number | null;
     signal: NodeJS.Signals | string | null;
     invocationId?: string;
     /**

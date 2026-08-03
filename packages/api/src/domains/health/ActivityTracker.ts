@@ -1,11 +1,27 @@
 /**
- * F085 Phase 4 — ActivityTracker
+ * F085 Phase 4+6 — ActivityTracker
  * 平台级活跃时长追踪：per-user in-memory state, 5min gap detection.
+ *
+ * Phase 6 changes:
+ * - Settings persist to Redis (TD110) — write-through cache, sync reads
+ * - Default enabled: false (社区默认 OFF, opt-in)
+ * - BrakeMode: 'gentle' | 'hardcore' (双档)
  */
-import type { BrakeCheckinResponse, BrakeSettings, BrakeState } from '@cat-cafe/shared';
+import type { BrakeCheckinResponse, BrakeMode, BrakeSettings, BrakeState } from '@cat-cafe/shared';
+
+/** Minimal Redis subset needed by ActivityTracker (avoids hard dep on ioredis) */
+export interface BrakeRedisClient {
+  hgetall(key: string): Promise<Record<string, string>>;
+  hset(key: string, field: string, value: string): Promise<number>;
+}
 
 const GAP_THRESHOLD_MS = 5 * 60_000; // 5 minutes = break
 const BYPASS_WINDOW_MS = 4 * 60 * 60_000; // 4h window for bypass escalation (AC13)
+
+/** Redis hash key for persisted brake settings (TD110) */
+const SETTINGS_HASH_KEY = 'brake:settings';
+
+const VALID_MODES: BrakeMode[] = ['gentle', 'hardcore'];
 
 /** Internal state extends BrakeState with fields not exposed to frontend */
 interface InternalState extends BrakeState {
@@ -30,16 +46,47 @@ function defaultState(): InternalState {
 export class ActivityTracker {
   private states = new Map<string, InternalState>();
   private settings = new Map<string, BrakeSettings>();
+  private redis?: BrakeRedisClient;
 
-  private static defaultSettings(): BrakeSettings {
-    return { enabled: true, thresholdMinutes: 90 };
+  static defaultSettings(): BrakeSettings {
+    return { enabled: false, thresholdMinutes: 90, mode: 'gentle' };
+  }
+
+  constructor(opts?: { redis?: BrakeRedisClient }) {
+    this.redis = opts?.redis;
+  }
+
+  /**
+   * Load persisted settings from Redis into in-memory cache (TD110).
+   * Call once on startup before handling requests.
+   * Gracefully no-ops if Redis is unavailable.
+   */
+  async init(): Promise<void> {
+    if (!this.redis) return;
+    try {
+      const all = await this.redis.hgetall(SETTINGS_HASH_KEY);
+      for (const [userId, raw] of Object.entries(all)) {
+        try {
+          const parsed = JSON.parse(raw);
+          // Merge with defaults to handle schema evolution (new fields like 'mode')
+          this.settings.set(userId, { ...ActivityTracker.defaultSettings(), ...parsed });
+        } catch {
+          /* ignore corrupt entries */
+        }
+      }
+    } catch {
+      /* Redis unavailable — fall back to in-memory defaults */
+    }
   }
 
   getSettings(userId: string): BrakeSettings {
     return this.settings.get(userId) ?? ActivityTracker.defaultSettings();
   }
 
-  updateSettings(userId: string, patch: Partial<BrakeSettings>): BrakeSettings | { error: string } {
+  async updateSettings(
+    userId: string,
+    patch: Partial<BrakeSettings>,
+  ): Promise<BrakeSettings | { error: string; code?: 'PERSIST_FAILED' }> {
     const current = { ...this.getSettings(userId) };
     if (patch.thresholdMinutes !== undefined) {
       if (typeof patch.thresholdMinutes !== 'number' || patch.thresholdMinutes < 30 || patch.thresholdMinutes > 240) {
@@ -53,7 +100,24 @@ export class ActivityTracker {
       }
       current.enabled = patch.enabled;
     }
+    if (patch.mode !== undefined) {
+      if (!VALID_MODES.includes(patch.mode)) {
+        return { error: 'mode must be gentle or hardcore' };
+      }
+      current.mode = patch.mode;
+    }
+    // TD110: persist FIRST — a settings change that cannot be durably stored must
+    // fail the request instead of reporting false success (a restart would reload
+    // the old value and silently revert the user's choice).
+    if (this.redis) {
+      try {
+        await this.redis.hset(SETTINGS_HASH_KEY, userId, JSON.stringify(current));
+      } catch {
+        return { error: 'Failed to persist brake settings', code: 'PERSIST_FAILED' };
+      }
+    }
     this.settings.set(userId, current);
+
     return current;
   }
 

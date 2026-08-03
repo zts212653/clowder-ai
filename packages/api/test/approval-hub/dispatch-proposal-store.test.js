@@ -22,9 +22,31 @@ describe('DispatchProposalStore (in-memory)', () => {
     ...overrides,
   });
 
+  async function anchor(store, proposalId) {
+    const proposal = await store.get(proposalId);
+    await store.commitEnvelope(proposalId, {
+      canonicalProposalId: proposalId,
+      sourceFeatureId: 'F193',
+      ownerUserId: proposal.ownerUserId,
+      requesterCatId: proposal.senderCatId,
+      originRef: {
+        kind: 'event',
+        anchor: `test:${proposalId}`,
+        summary: 'test',
+        threadId: proposal.sourceThreadId,
+      },
+      approvalCardRef: {
+        threadId: proposal.sourceThreadId,
+        messageId: `card-${proposalId}`,
+      },
+      createdAt: proposal.createdAt,
+    });
+  }
+
   it('create stores proposal with status=pending', async () => {
     const store = new InMemoryDispatchProposalStore();
-    const proposal = await store.create(createInput());
+    const result = await store.create(createInput());
+    const proposal = result.proposal;
 
     assert.equal(proposal.proposalId, 'dp-001');
     assert.equal(proposal.status, 'pending');
@@ -50,9 +72,10 @@ describe('DispatchProposalStore (in-memory)', () => {
 
   it('listPendingByUser returns only pending for the user', async () => {
     const store = new InMemoryDispatchProposalStore();
-    await store.create(createInput({ proposalId: 'dp-1', ownerUserId: 'user-1' }));
-    await store.create(createInput({ proposalId: 'dp-2', ownerUserId: 'user-1' }));
-    await store.create(createInput({ proposalId: 'dp-3', ownerUserId: 'user-2' }));
+    // Different targetThreadIds to avoid same-K superseding
+    await store.create(createInput({ proposalId: 'dp-1', ownerUserId: 'user-1', targetThreadId: 'thread-A' }));
+    await store.create(createInput({ proposalId: 'dp-2', ownerUserId: 'user-1', targetThreadId: 'thread-B' }));
+    await store.create(createInput({ proposalId: 'dp-3', ownerUserId: 'user-2', targetThreadId: 'thread-C' }));
 
     const items = await store.listPendingByUser('user-1');
     assert.equal(items.length, 2);
@@ -61,8 +84,9 @@ describe('DispatchProposalStore (in-memory)', () => {
 
   it('listPendingByUser excludes approved/rejected', async () => {
     const store = new InMemoryDispatchProposalStore();
-    await store.create(createInput({ proposalId: 'dp-1' }));
-    await store.create(createInput({ proposalId: 'dp-2' }));
+    // Different targetThreadIds to avoid same-K superseding
+    await store.create(createInput({ proposalId: 'dp-1', targetThreadId: 'thread-A' }));
+    await store.create(createInput({ proposalId: 'dp-2', targetThreadId: 'thread-B' }));
     await store.approve('dp-1', 'user-1');
 
     const items = await store.listPendingByUser('user-1');
@@ -191,5 +215,168 @@ describe('DispatchProposalStore (in-memory)', () => {
 
     const rejected = await store.reject('dp-001', 'user-1');
     assert.equal(rejected, null); // Already approved
+  });
+
+  // === F246 Phase J: Superseded (AC-J4, INV-J5, INV-J6) ===
+
+  it('create returns { proposal, supersededProposals } result shape', async () => {
+    const store = new InMemoryDispatchProposalStore();
+    const result = await store.create(createInput());
+
+    assert.ok(result.proposal, 'result must have proposal');
+    assert.ok(Array.isArray(result.supersededProposals), 'result must have supersededProposals array');
+    assert.equal(result.proposal.proposalId, 'dp-001');
+    assert.equal(result.proposal.status, 'pending');
+    assert.equal(result.supersededProposals.length, 0, 'first create has nothing to supersede');
+  });
+
+  it('same-K create atomically supersedes old pending proposal (AC-J4)', async () => {
+    const store = new InMemoryDispatchProposalStore();
+    // First proposal: same source→target→sender
+    await store.create(createInput({ proposalId: 'dp-old' }));
+    await anchor(store, 'dp-old');
+
+    // Second proposal: same K (same source, target, sender)
+    const result = await store.create(createInput({ proposalId: 'dp-new', content: 'Updated work' }));
+
+    // New proposal is pending
+    assert.equal(result.proposal.proposalId, 'dp-new');
+    assert.equal(result.proposal.status, 'pending');
+
+    // Old proposal is superseded
+    assert.equal(result.supersededProposals.length, 1);
+    assert.equal(result.supersededProposals[0].proposalId, 'dp-old');
+    assert.equal(result.supersededProposals[0].status, 'superseded');
+    assert.equal(result.supersededProposals[0].supersededBy, 'dp-new');
+
+    // Verify old proposal in store is also superseded
+    const old = await store.get('dp-old');
+    assert.equal(old?.status, 'superseded');
+    assert.equal(old?.supersededBy, 'dp-new');
+  });
+
+  it('same-K dual pending cannot coexist (INV-J5)', async () => {
+    const store = new InMemoryDispatchProposalStore();
+    await store.create(createInput({ proposalId: 'dp-1' }));
+    await anchor(store, 'dp-1');
+    await store.create(createInput({ proposalId: 'dp-2' }));
+    await anchor(store, 'dp-2');
+    await store.create(createInput({ proposalId: 'dp-3' }));
+
+    // Only the latest should be pending
+    const pending = await store.listPendingByUser('user-1');
+    const sameKPending = pending.filter(
+      (p) => p.sourceThreadId === 'thread-sender' && p.targetThreadId === 'thread-target' && p.senderCatId === 'opus',
+    );
+    assert.equal(sameKPending.length, 1, 'only one pending proposal per lineage K');
+    assert.equal(sameKPending[0].proposalId, 'dp-3');
+  });
+
+  it('different-K proposals do not supersede each other', async () => {
+    const store = new InMemoryDispatchProposalStore();
+    // Different target threads = different K
+    await store.create(createInput({ proposalId: 'dp-1', targetThreadId: 'thread-A' }));
+    const result = await store.create(createInput({ proposalId: 'dp-2', targetThreadId: 'thread-B' }));
+
+    assert.equal(result.supersededProposals.length, 0, 'different K should not supersede');
+
+    // Both should be pending
+    const dp1 = await store.get('dp-1');
+    const dp2 = await store.get('dp-2');
+    assert.equal(dp1?.status, 'pending');
+    assert.equal(dp2?.status, 'pending');
+  });
+
+  it('superseded proposal cannot be approved (INV-J6)', async () => {
+    const store = new InMemoryDispatchProposalStore();
+    await store.create(createInput({ proposalId: 'dp-old' }));
+    await anchor(store, 'dp-old');
+    await store.create(createInput({ proposalId: 'dp-new' }));
+
+    // Old is now superseded — approve should fail
+    const result = await store.approve('dp-old', 'user-1');
+    assert.equal(result, null, 'superseded proposal must not be approvable');
+  });
+
+  it('superseded proposal cannot be rejected (INV-J6)', async () => {
+    const store = new InMemoryDispatchProposalStore();
+    await store.create(createInput({ proposalId: 'dp-old' }));
+    await anchor(store, 'dp-old');
+    await store.create(createInput({ proposalId: 'dp-new' }));
+
+    const result = await store.reject('dp-old', 'user-1');
+    assert.equal(result, null, 'superseded proposal must not be rejectable');
+  });
+
+  it('listPendingByUser excludes superseded proposals', async () => {
+    const store = new InMemoryDispatchProposalStore();
+    await store.create(createInput({ proposalId: 'dp-old' }));
+    await anchor(store, 'dp-old');
+    await store.create(createInput({ proposalId: 'dp-new' }));
+
+    const pending = await store.listPendingByUser('user-1');
+    assert.equal(pending.length, 1);
+    assert.equal(pending[0].proposalId, 'dp-new');
+  });
+
+  it('superseded proposal does not appear in settled list', async () => {
+    const store = new InMemoryDispatchProposalStore();
+    await store.create(createInput({ proposalId: 'dp-old' }));
+    await anchor(store, 'dp-old');
+    await store.create(createInput({ proposalId: 'dp-new' }));
+
+    // Superseded is terminal but not a operator decision — should not be in settled
+    const settled = await store.listSettledByUser('user-1', 10);
+    assert.equal(settled.length, 0, 'superseded proposals should not appear in settled');
+  });
+
+  it('already-approved proposal is not superseded by new same-K create', async () => {
+    const store = new InMemoryDispatchProposalStore();
+    await store.create(createInput({ proposalId: 'dp-decided' }));
+    await store.approve('dp-decided', 'user-1');
+
+    // New same-K create — should NOT supersede the already-decided proposal
+    const r2 = await store.create(createInput({ proposalId: 'dp-new' }));
+    assert.equal(r2.supersededProposals.length, 0, 'decided proposals should not be superseded');
+
+    const decided = await store.get('dp-decided');
+    assert.equal(decided?.status, 'approved', 'decided proposal status must not change');
+  });
+
+  // === F246 Phase J: revertToPending lineage guard (INV-J5) ===
+
+  it('revertToPending with no successor → reverts to pending normally', async () => {
+    const store = new InMemoryDispatchProposalStore();
+    await store.create(createInput({ proposalId: 'dp-sole' }));
+    await store.approve('dp-sole', 'user-1');
+
+    const reverted = await store.revertToPending('dp-sole');
+    assert.ok(reverted, 'should revert when no successor exists');
+    assert.equal(reverted.status, 'pending');
+    assert.equal(reverted.decidedAt, undefined);
+    assert.equal(reverted.decidedBy, undefined);
+  });
+
+  it('revertToPending with successor → superseded, returns null (INV-J5)', async () => {
+    const store = new InMemoryDispatchProposalStore();
+    // Create dp-old, approve it, then create dp-new (same K → lineage moves to dp-new)
+    await store.create(createInput({ proposalId: 'dp-old', createdAt: 1000 }));
+    await store.approve('dp-old', 'user-1');
+    // dp-old is approved (not pending), so create doesn't supersede it, but lineage moves
+    await store.create(createInput({ proposalId: 'dp-new', createdAt: 2000 }));
+
+    // Now simulate delivery failure: dp-old tries to revert
+    const reverted = await store.revertToPending('dp-old');
+    assert.equal(reverted, null, 'must fail — successor holds lineage');
+
+    // dp-old should now be superseded (not pending)
+    const old = await store.get('dp-old');
+    assert.equal(old?.status, 'superseded');
+    assert.equal(old?.supersededBy, 'dp-new');
+
+    // dp-new is still the only pending (INV-J5: no dual pending)
+    const pending = await store.listPendingByUser('user-1');
+    assert.equal(pending.length, 1);
+    assert.equal(pending[0].proposalId, 'dp-new');
   });
 });

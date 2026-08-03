@@ -86,6 +86,7 @@ describe('auto-replyTo: worklist path (a2aTriggerMessageId)', () => {
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: `top:${userMsg.id}`,
+      actionLeaseCarrier: { kind: 'none' },
     });
     invocationRecordStore.update(createResult.invocationId, {
       userMessageId: userMsg.id,

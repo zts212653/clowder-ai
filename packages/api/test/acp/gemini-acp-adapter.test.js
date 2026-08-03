@@ -17,7 +17,9 @@ const { AcpAgentService: GeminiAcpAdapter } = await import(
 const { AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS } = await import(
   '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
 );
-const { AcpClient } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpClient.js');
+const { AcpClient, AcpProtocolError } = await import(
+  '../../dist/domains/cats/services/agents/providers/acp/AcpClient.js'
+);
 
 const TEST_POOL_KEY = { projectPath: '/tmp', providerProfile: 'test' };
 
@@ -3924,5 +3926,212 @@ describe('#1186: multiplexed cancel seals only the affected logical session', ()
     assert.ok(secondMessages.some((msg) => msg.type === 'session_init' && msg.sessionId === 'mux-sess-2'));
     assert.equal(child.killed, false, 'unrelated sessions keep the multiplexed carrier alive');
     assert.deepEqual(pool.getActivePids(), [22_222]);
+  });
+});
+
+describe('AcpAgentService turn.agent_busy retry', () => {
+  let pool = null;
+
+  afterEach(async () => {
+    if (pool) {
+      await pool.closeAll();
+      pool = null;
+    }
+  });
+
+  /**
+   * Pool whose session/prompt is rejected with -32600 turn.agent_busy for the
+   * first `busyFailures` attempts, then completes normally. Mirrors the kimi
+   * CLI behavior when an agent-internal turn (background-task completion steer)
+   * occupies the session's single-turn slot.
+   */
+  function createPoolWithBusyThenOk(busyFailures) {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const captured = [];
+    let promptAttempts = 0;
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        captured.push(msg);
+        if (msg.method === 'initialize') {
+          setImmediate(() =>
+            agentStdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: INIT_RESULT }) + '\n'),
+          );
+        } else if (msg.method === 'session/new') {
+          setImmediate(() =>
+            agentStdout.write(
+              JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { sessionId: 'sess-busy', configOptions: [] } }) +
+                '\n',
+            ),
+          );
+        } else if (msg.method === 'session/prompt') {
+          promptAttempts++;
+          setImmediate(() => {
+            if (promptAttempts <= busyFailures) {
+              agentStdout.write(
+                JSON.stringify({
+                  jsonrpc: '2.0',
+                  id: msg.id,
+                  error: {
+                    code: -32600,
+                    message: 'Invalid request: Cannot launch a new turn while another turn (ID 8) is active',
+                    data: { code: 'turn.agent_busy', details: { turnId: 8 } },
+                  },
+                }) + '\n',
+              );
+              return;
+            }
+            agentStdout.write(
+              JSON.stringify({
+                jsonrpc: '2.0',
+                method: 'session/update',
+                params: {
+                  sessionId: msg.params.sessionId,
+                  update: {
+                    sessionUpdate: 'agent_message_chunk',
+                    content: { type: 'text', text: 'Hello after busy!' },
+                  },
+                },
+              }) + '\n',
+            );
+            setTimeout(() => {
+              agentStdout.write(
+                JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } }) + '\n',
+              );
+            }, 10);
+          });
+        }
+      }
+    });
+
+    const p = new AcpProcessPool(
+      { maxLiveProcesses: 5, idleTtlMs: 999_999, healthCheckIntervalMs: 999_999 },
+      {},
+      () => new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child }),
+    );
+    return { pool: p, captured, getPromptAttempts: () => promptAttempts };
+  }
+
+  it('retries a busy-rejected prompt with backoff, then succeeds without surfacing an error', async () => {
+    const { pool: p, getPromptAttempts } = createPoolWithBusyThenOk(2);
+    pool = p;
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      agentBusyRetryDelaysMs: [1, 1, 1],
+    });
+
+    const messages = [];
+    for await (const msg of adapter.invoke('continue merge-gate')) {
+      messages.push(msg);
+    }
+
+    assert.equal(getPromptAttempts(), 3, 'initial prompt + 2 busy retries');
+    assert.ok(messages.some((m) => m.type === 'text' && m.content === 'Hello after busy!'));
+    assert.ok(messages.some((m) => m.type === 'done'));
+    assert.ok(!messages.some((m) => m.type === 'error'), `no error expected, got ${JSON.stringify(messages)}`);
+  });
+
+  it('surfaces agent_busy errorCode after the retry schedule is exhausted', async () => {
+    const { pool: p, getPromptAttempts } = createPoolWithBusyThenOk(Number.MAX_SAFE_INTEGER);
+    pool = p;
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      agentBusyRetryDelaysMs: [1, 1],
+    });
+
+    const messages = [];
+    for await (const msg of adapter.invoke('continue merge-gate')) {
+      messages.push(msg);
+    }
+
+    assert.equal(getPromptAttempts(), 3, 'initial prompt + 2 retries, then give up');
+    const errorMsg = messages.find((m) => m.type === 'error');
+    assert.ok(errorMsg, `expected an error message, got ${JSON.stringify(messages.map((m) => m.type))}`);
+    assert.equal(errorMsg.errorCode, 'agent_busy');
+    assert.match(errorMsg.error, /turn\.agent_busy|another turn \(ID 8\) is active/);
+    assert.ok(
+      messages.some((m) => m.type === 'done'),
+      'error path must still yield done',
+    );
+  });
+
+  it('abort during busy-retry backoff must not send session/cancel or seal the session', async () => {
+    // Regression for review P1: while the wrapper sleeps between busy retries,
+    // no harness prompt is in flight. Abort in that window previously saw
+    // promptPhase === 'active_unacknowledged' and cancelled the agent's own
+    // internal turn via session/cancel + pool seal.
+    const controller = new AbortController();
+    const sealedSessions = [];
+    const cancelCalls = [];
+    let promptCalls = 0;
+    const client = {
+      recentCapacitySignal: null,
+      async newSession() {
+        return { sessionId: 'sess-busy-abort', configOptions: [] };
+      },
+      async loadSession(sessionId) {
+        return { sessionId, configOptions: [] };
+      },
+      async setSessionConfigOption() {},
+      cancelSession(sessionId) {
+        cancelCalls.push(sessionId);
+      },
+      async *promptStream() {
+        promptCalls++;
+        throw new AcpProtocolError(
+          -32600,
+          'Invalid request: Cannot launch a new turn while another turn (ID 8) is active',
+          { code: 'turn.agent_busy', details: { turnId: 8 } },
+        );
+      },
+      onCapacity() {},
+      offCapacity() {},
+      clearRecentCapacitySignal() {},
+    };
+    pool = {
+      async acquire(poolKey) {
+        return { client, poolKey, release() {} };
+      },
+      rememberSession() {},
+      sealSession(_poolKey, sessionId) {
+        sealedSessions.push(sessionId);
+      },
+      async closeAll() {},
+    };
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      agentBusyRetryDelaysMs: [2_000, 2_000],
+    });
+
+    const messages = [];
+    const run = (async () => {
+      for await (const msg of adapter.invoke('continue merge-gate', { signal: controller.signal })) {
+        messages.push(msg);
+      }
+    })();
+
+    // Wait for the first busy rejection to land and the backoff sleep to begin.
+    while (promptCalls < 1) await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setTimeout(r, 30));
+    controller.abort(new Error('user cancel'));
+    await run;
+
+    assert.equal(promptCalls, 1, 'abort during backoff must stop further retries');
+    assert.deepEqual(cancelCalls, [], 'no session/cancel may be sent while no harness prompt is in flight');
+    assert.deepEqual(sealedSessions, [], 'session must not be sealed for a backoff abort');
+    assert.ok(
+      messages.some((m) => m.type === 'done'),
+      `abort path must still yield done, got ${JSON.stringify(messages.map((m) => m.type))}`,
+    );
   });
 });

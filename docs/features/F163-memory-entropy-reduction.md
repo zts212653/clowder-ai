@@ -4,6 +4,7 @@ related_features: [F102, F152, F070]
 topics: [memory, entropy, knowledge-lifecycle, harness-engineering, pruning, compression]
 doc_kind: spec
 created: 2026-04-15
+tips_exempt: internal memory governance backlog registration - no user-visible capability surface change
 ---
 
 # F163: Memory Entropy Reduction — 记忆熵减与知识生命周期治理
@@ -14,7 +15,7 @@ created: 2026-04-15
 
 ### 核心问题
 
-Cat Café 的记忆系统只有"增"的机制，没有"减"的机制。
+Clowder AI 的记忆系统只有"增"的机制，没有"减"的机制。
 
 F102 建好了记忆基础设施（怎么存和搜），F152 在做记忆可移植性（怎么跨项目携带），但没有人做过"怎么保持知识精准"。
 
@@ -317,6 +318,13 @@ salience 在 authority boost 之后、confidence 派生之前。不塞进 `apply
 | **低频高代价知识被忽视** | `criticality: high` 标签 + 禁止自动降级（ADR-009 教训） |
 | **salience gating 误降关键文档** | criticality=high 免疫 gating + gold set 验证 NDCG 不降 + shadow 先行 |
 | **task context 提取不准** | 依赖 F148 已验证的 extractBatonContext()，不自建 |
+
+## Governance Backlog
+
+| 项 | 状态 | 触发条件 | 说明 |
+|----|------|----------|------|
+| M1 历史层退役/封存机制 | deferred | 首个真实遗忘请求触及 thread / message passage / provenance 历史层时升 P1 | 结论/画像层遗忘仍是物理清除；历史层按 `memory-philosophy` v5 语义走退役封存：移出活跃召回、支持敏感行 redaction、保留 provenance 仲裁链。不在本 thread 施工。 |
+| GlobalIndexBuilder 时态 frontmatter 解析 | deferred | 全局 memory 文件开始使用 `status` / `supersedes` frontmatter，或 global recall dogfood 出现 stale 全局证据压过 active 证据时升 P2 | F188 memory temporal debt PR 只覆盖 project / collection evidence indexing；`GlobalIndexBuilder` 仍将 global memory evidence 写成 `status: active` 且不解析 `supersedes` graph edge。当前全局 memory 文件未使用时态 frontmatter，属于 latent debt；后续实现需复用 F163/F188 temporal demotion + supersedes edge lifecycle 不变量。 |
 
 ## Key Decisions
 

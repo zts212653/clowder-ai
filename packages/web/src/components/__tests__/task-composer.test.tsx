@@ -19,6 +19,16 @@ describe('TaskComposer', () => {
     expect(html).toContain('textarea');
   });
 
+  it('publishes the server limits instead of silently slicing task text', async () => {
+    const { TaskComposer } = await import('../TaskComposer');
+    const html = renderToStaticMarkup(<TaskComposer threadId="t1" onClose={vi.fn()} />);
+
+    expect(html).toContain('maxLength="200"');
+    expect(html).toContain('maxLength="1000"');
+    expect(html).toContain('0 / 200');
+    expect(html).toContain('0 / 1000');
+  });
+
   it('renders cancel button', async () => {
     const { TaskComposer } = await import('../TaskComposer');
     const html = renderToStaticMarkup(<TaskComposer threadId="t1" onClose={vi.fn()} />);

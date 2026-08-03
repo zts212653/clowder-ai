@@ -249,6 +249,21 @@ describe('MaterializationService', () => {
     assert.ok(!result.outputPath.includes('/researchs/'), `Must not contain /researchs/ in ${result.outputPath}`);
   });
 
+  it('never materializes private product diaries into Git-backed docs', async () => {
+    const marker = await queue.submit({
+      content: 'Private diary content must stay in the owner product store',
+      source: 'codex-sol:present-loop',
+      status: 'captured',
+      targetKind: 'diary',
+    });
+    await queue.transition(marker.id, 'approved');
+
+    await assert.rejects(() => service.materialize(marker.id), {
+      message: /diary.*product store/i,
+    });
+    assert.equal(existsSync(join(tmpDir, 'docs', 'diaries')), false);
+  });
+
   it('materialize throws for non-approved marker', async () => {
     const marker = await queue.submit({
       content: 'Test',

@@ -7,6 +7,7 @@ import { EventMemoryStore } from '../../dist/domains/memory/EventMemoryStore.js'
 import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
 import { createTaskOutcomeGeneratorAdapter } from '../../dist/infrastructure/harness-eval/publish-verdict/task-outcome-generator-adapter.js';
 import { TaskOutcomeEpisodeStore } from '../../dist/infrastructure/harness-eval/task-outcome/task-outcome-store.js';
+import { seedCanonicalMeasurementCensusState } from './publish-verdict-fixtures.js';
 
 const root = mkdtempSync(join(tmpdir(), 'publish-verdict-taskoutcome-'));
 const harnessFeedbackRoot = join(root, 'docs/harness-feedback');
@@ -118,6 +119,7 @@ function buildMockGitPublisher(isoName, commitSha, prNumber) {
         join(iso, 'docs', 'harness-feedback', 'eval-domains', 'eval-task-outcome.yaml'),
         readFileSync(join(harnessFeedbackRoot, 'eval-domains', 'eval-task-outcome.yaml'), 'utf8'),
       );
+      seedCanonicalMeasurementCensusState(iso);
       await (await opts.stage(iso)).afterPublish?.();
       rmSync(iso, { recursive: true, force: true });
       return { commitSha, prUrl: `https://github.com/zts212653/clowder-ai/pull/${prNumber}` };
@@ -242,6 +244,7 @@ describe('handlePublishVerdict end-to-end with task-outcome generator', () => {
           join(iso, 'docs', 'harness-feedback', 'eval-domains', 'eval-task-outcome.yaml'),
           readFileSync(join(harnessFeedbackRoot, 'eval-domains', 'eval-task-outcome.yaml'), 'utf8'),
         );
+        seedCanonicalMeasurementCensusState(iso);
         await opts.stage(iso);
         rmSync(iso, { recursive: true, force: true });
         throw new Error('simulated gh pr create failure');

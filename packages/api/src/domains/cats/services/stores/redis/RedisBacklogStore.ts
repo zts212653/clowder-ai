@@ -17,13 +17,32 @@ import type {
   UpdateBacklogDispatchProgressInput,
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
-import type { IBacklogStore } from '../ports/BacklogStore.js';
-import { BacklogTransitionError } from '../ports/BacklogStore.js';
+import type { EnsureTaskBackedBacklogItemInput, IBacklogStore } from '../ports/BacklogStore.js';
+import { BacklogTransitionError, buildTaskBackedBacklogItem, isMatchingTaskBackedItem } from '../ports/BacklogStore.js';
 import { generateSortableId } from '../ports/MessageStore.js';
 import { BacklogKeys } from '../redis-keys/backlog-keys.js';
 import { makeCatActor, makeCreatorActor, makeUserActor } from '../shared/backlog-audit-actors.js';
 
 const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry
+
+const ENSURE_TASK_BACKED_ITEM_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 1 then
+  return 0
+end
+
+local fields = cjson.decode(ARGV[1])
+for field, value in pairs(fields) do
+  redis.call('HSET', KEYS[1], field, value)
+end
+redis.call('ZADD', KEYS[2], ARGV[2], ARGV[3])
+
+local ttl = tonumber(ARGV[4])
+if ttl and ttl > 0 then
+  redis.call('EXPIRE', KEYS[1], ttl)
+  redis.call('EXPIRE', KEYS[2], ttl)
+end
+return 1
+`;
 
 /**
  * KEYS[1] = backlog:item:{id}
@@ -416,6 +435,27 @@ export class RedisBacklogStore implements IBacklogStore {
     }
     await pipeline.exec();
     return item;
+  }
+
+  async ensureTaskBackedItem(input: EnsureTaskBackedBacklogItemInput): Promise<BacklogItem> {
+    const item = buildTaskBackedBacklogItem(input);
+    const created = (await this.redis.eval(
+      ENSURE_TASK_BACKED_ITEM_LUA,
+      2,
+      BacklogKeys.detail(item.id),
+      BacklogKeys.userList(item.userId),
+      JSON.stringify(this.serializeItem(item)),
+      String(item.createdAt),
+      item.id,
+      String(this.ttlSeconds ?? 0),
+    )) as number;
+    if (created === 1) return item;
+
+    const existing = await this.get(item.id);
+    if (!existing || !isMatchingTaskBackedItem(existing, input)) {
+      throw new BacklogTransitionError(`Task-backed backlog identity collision for "${input.taskId}"`);
+    }
+    return existing;
   }
 
   async refreshMetadata(itemId: string, input: RefreshBacklogItemInput): Promise<BacklogItem | null> {

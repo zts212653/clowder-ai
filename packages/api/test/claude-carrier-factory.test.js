@@ -122,6 +122,14 @@ describe('FallbackCarrierWrapper — capability probe proxying', () => {
     const print = createClaudeAgentServiceForCanary('opus', {});
     assert.equal(print.usesChainKeyResume(), false, 'print_sdk does not use chain key resume');
   });
+
+  test('F254 read-only policy support is proxied from every Claude carrier tier', () => {
+    const policy = { mode: 'read_only', replayDeniedToolNames: ['cat_cafe_post_message'] };
+    for (const carrier of ['bg_daemon', 'interactive_pty', 'print_sdk']) {
+      const service = createClaudeAgentServiceForCanary('opus', { CAT_CAFE_CLAUDE_CARRIER: carrier });
+      assert.equal(service.supportsToolExecutionPolicy(policy), true, `${carrier} must enforce read-only policy`);
+    }
+  });
 });
 
 describe('createCarrierByTier — direct construction', () => {

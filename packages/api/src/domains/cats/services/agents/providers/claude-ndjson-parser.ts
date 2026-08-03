@@ -199,6 +199,34 @@ export function transformClaudeEvent(
     const content = message?.content;
     if (!Array.isArray(content)) return null;
 
+    // F230: Claude CLI can synthesize local assistant entries without an LLM
+    // response. Keep that provider provenance structured here, before ordinary
+    // assistant text is emitted:
+    //   - API/Error payloads become error events;
+    //   - "No response requested." and future synthetic variants produce no cat
+    //     output.
+    // Consumers must not infer this boundary from punctuation inside raw text.
+    if (message?.model === '<synthetic>') {
+      const syntheticText = content.find(
+        (block) =>
+          typeof block === 'object' &&
+          block !== null &&
+          (block as Record<string, unknown>).type === 'text' &&
+          typeof (block as Record<string, unknown>).text === 'string',
+      ) as { text?: string } | undefined;
+      const text = syntheticText?.text ?? '';
+      if (text.startsWith('API Error:') || text.startsWith('Error:')) {
+        return {
+          type: 'error',
+          catId,
+          error: text,
+          errorDisposition: 'transient',
+          timestamp: Date.now(),
+        };
+      }
+      return null;
+    }
+
     const messages: AgentMessage[] = [];
     for (const block of content) {
       if (typeof block !== 'object' || block === null) continue;

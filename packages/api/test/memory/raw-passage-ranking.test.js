@@ -98,4 +98,70 @@ describe('depth=raw passage ranking', () => {
     assert.ok(passages[0].rank != null, 'passage should carry BM25 rank');
     assert.ok(typeof passages[0].rank === 'number', 'rank must be a number');
   });
+
+  it('applies parent document filters to docs-scope raw passage-only hits', async () => {
+    await store.upsert([
+      {
+        anchor: 'doc:architecture/raw-valid',
+        kind: 'architecture',
+        status: 'active',
+        title: 'Filtered raw valid',
+        summary: 'Summary omits the rare passage token.',
+        keywords: ['wanted'],
+        updatedAt: '2026-04-04T00:00:00Z',
+      },
+      {
+        anchor: 'doc:architecture/raw-archived',
+        kind: 'architecture',
+        status: 'archived',
+        title: 'Filtered raw archived',
+        summary: 'Summary omits the rare passage token.',
+        keywords: ['wanted'],
+        updatedAt: '2026-04-04T00:00:00Z',
+      },
+      {
+        anchor: 'doc:architecture/raw-wrong-keyword',
+        kind: 'architecture',
+        status: 'active',
+        title: 'Filtered raw wrong keyword',
+        summary: 'Summary omits the rare passage token.',
+        keywords: ['other'],
+        updatedAt: '2026-04-04T00:00:00Z',
+      },
+    ]);
+
+    const stmt = store
+      .getDb()
+      .prepare(
+        'INSERT INTO evidence_passages (doc_anchor, passage_id, content, speaker, position, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      );
+    for (const anchor of [
+      'doc:architecture/raw-valid',
+      'doc:architecture/raw-archived',
+      'doc:architecture/raw-wrong-keyword',
+    ]) {
+      stmt.run(
+        anchor,
+        'md-0',
+        'The filterrawneedlexyz token appears only in this body passage.',
+        null,
+        0,
+        '2026-04-04T10:00:00Z',
+      );
+    }
+
+    const results = await store.search('filterrawneedlexyz', {
+      scope: 'docs',
+      depth: 'raw',
+      status: 'active',
+      keywords: ['wanted'],
+      limit: 10,
+    });
+    assert.deepEqual(
+      results.map((r) => r.anchor),
+      ['doc:architecture/raw-valid'],
+      'raw passage hydration must preserve parent status and keyword filters',
+    );
+    assert.ok(results[0].passages?.some((p) => p.content.includes('filterrawneedlexyz')));
+  });
 });

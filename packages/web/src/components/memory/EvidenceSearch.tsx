@@ -31,9 +31,12 @@ interface SearchResultItem {
   title: string;
   anchor: string;
   snippet: string;
-  confidence: string;
+  matchRank: 'high' | 'mid' | 'low';
+  retrievalScore?: number;
   sourceType: string;
   source?: 'project' | 'global';
+  authority?: string;
+  updatedAt?: string;
   passages?: PassageItem[];
 }
 
@@ -54,6 +57,7 @@ export const SOURCE_TYPE_COLORS: Record<string, string> = {
   decision: 'bg-conn-amber-bg text-conn-amber-text',
   phase: 'bg-conn-blue-bg text-conn-blue-text',
   feature: 'bg-conn-purple-bg text-conn-purple-text',
+  architecture: 'bg-conn-indigo-bg text-conn-indigo-text',
   lesson: 'bg-conn-green-bg text-conn-green-text',
   research: 'bg-conn-cyan-bg text-conn-cyan-text',
   knowledge: 'bg-conn-violet-bg text-conn-violet-text',
@@ -65,6 +69,7 @@ export const SOURCE_TYPE_LABELS: Record<string, string> = {
   decision: '决策',
   phase: '阶段',
   feature: '功能',
+  architecture: '架构',
   lesson: '教训',
   research: '调研',
   knowledge: '知识',
@@ -257,6 +262,9 @@ export function EvidenceSearch({ initialQuery }: EvidenceSearchProps = {}) {
                   {item.source === 'project' ? '项目' : '全局'}
                 </span>
               )}
+              <span className="text-micro text-cafe-secondary/70">
+                match:{item.matchRank} · authority:{item.authority ?? 'unknown'} · updated:{item.updatedAt ?? 'unknown'}
+              </span>
               <ExpandableText
                 text={item.title}
                 as="h3"

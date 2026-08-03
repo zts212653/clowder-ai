@@ -5,9 +5,19 @@
  * into a single sorted timeline for thread-level replay.
  */
 
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { apiFetch } from '@/utils/api-client';
+import { adaptTranscriptEvents } from '../adapter';
 import { mergeSessionEvents } from '../merge-session-events';
+import { buildReplayChatMessages } from '../replay-chat-bridge';
+import { fetchThreadReplayEvents } from '../thread-replay-fetcher';
 import type { RawTranscriptEvent } from '../types';
+
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: vi.fn(),
+}));
+
+const apiFetchMock = vi.mocked(apiFetch);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -30,6 +40,10 @@ function makeRawEvent(overrides: Partial<RawTranscriptEvent> = {}): RawTranscrip
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+beforeEach(() => {
+  apiFetchMock.mockReset();
+});
 
 describe('mergeSessionEvents', () => {
   it('merges events from multiple sessions sorted by timestamp (INV-5)', () => {
@@ -127,5 +141,133 @@ describe('mergeSessionEvents', () => {
 
     // Same-timestamp events keep original order
     expect(merged.map((e) => e.sessionId)).toEqual(['first', 'second', 'third']);
+  });
+});
+
+describe('fetchThreadReplayEvents', () => {
+  it('prefers Hub message history over single-cat transcript speech', async () => {
+    apiFetchMock.mockImplementation(async (url) => {
+      const path = String(url);
+
+      if (path === '/api/threads/thread_1/sessions') {
+        return new Response(JSON.stringify({ sessions: [{ id: 'session_opus', status: 'sealed' }] }), { status: 200 });
+      }
+
+      if (path === '/api/messages?threadId=thread_1&limit=10000') {
+        return new Response(
+          JSON.stringify({
+            messages: [
+              { id: 'msg_user', type: 'user', content: '我呢？', timestamp: 1000 },
+              { id: 'msg_opus', type: 'assistant', catId: 'opus', content: 'Opus says', timestamp: 1100 },
+              { id: 'msg_codex', type: 'assistant', catId: 'codex', content: 'Codex says', timestamp: 1200 },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+
+      if (path === '/api/sessions/session_opus/events?view=raw&limit=200') {
+        return new Response(
+          JSON.stringify({
+            events: [
+              makeRawEvent({
+                t: 1100,
+                eventNo: 0,
+                sessionId: 'session_opus',
+                catId: 'opus',
+                event: { type: 'text', content: 'duplicate transcript speech' },
+              }),
+              makeRawEvent({
+                t: 1150,
+                eventNo: 1,
+                sessionId: 'session_opus',
+                catId: 'opus',
+                event: { type: 'system_info', content: JSON.stringify({ type: 'silent_completion' }) },
+              }),
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+
+      throw new Error(`Unexpected request: ${path}`);
+    });
+
+    const events = await fetchThreadReplayEvents('thread_1');
+    const replayMessages = buildReplayChatMessages(adaptTranscriptEvents(events));
+
+    const narrativeMessages = replayMessages.filter((message) => message.type !== 'system');
+    expect(narrativeMessages.map((message) => [message.type, message.catId, message.content])).toEqual([
+      ['user', undefined, '我呢？'],
+      ['assistant', 'opus', 'Opus says'],
+      ['assistant', 'codex', 'Codex says'],
+    ]);
+    expect(events.some((event) => event.event.content === 'duplicate transcript speech')).toBe(false);
+  });
+
+  it('paginates Hub message history before suppressing transcript speech', async () => {
+    apiFetchMock.mockImplementation(async (url) => {
+      const path = String(url);
+
+      if (path === '/api/threads/thread_1/sessions') {
+        return new Response(JSON.stringify({ sessions: [{ id: 'session_opus', status: 'sealed' }] }), { status: 200 });
+      }
+
+      if (path === '/api/messages?threadId=thread_1&limit=10000') {
+        return new Response(
+          JSON.stringify({
+            messages: [
+              { id: 'new_user', type: 'user', content: 'newer user', timestamp: 2000, deliveredAt: 9000 },
+              { id: 'new_opus', type: 'assistant', catId: 'opus', content: 'newer opus', timestamp: 2100 },
+            ],
+            hasMore: true,
+          }),
+          { status: 200 },
+        );
+      }
+
+      if (path === '/api/messages?threadId=thread_1&limit=10000&before=9000%3Anew_user') {
+        return new Response(
+          JSON.stringify({
+            messages: [
+              { id: 'old_user', type: 'user', content: 'older user', timestamp: 1000 },
+              { id: 'old_codex', type: 'assistant', catId: 'codex', content: 'older codex', timestamp: 1100 },
+            ],
+            hasMore: false,
+          }),
+          { status: 200 },
+        );
+      }
+
+      if (path === '/api/sessions/session_opus/events?view=raw&limit=200') {
+        return new Response(
+          JSON.stringify({
+            events: [
+              makeRawEvent({
+                t: 1000,
+                eventNo: 0,
+                sessionId: 'session_opus',
+                catId: 'opus',
+                event: { type: 'text', content: 'older transcript duplicate' },
+              }),
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+
+      throw new Error(`Unexpected request: ${path}`);
+    });
+
+    const events = await fetchThreadReplayEvents('thread_1');
+    const replayMessages = buildReplayChatMessages(adaptTranscriptEvents(events));
+
+    expect(replayMessages.map((message) => [message.type, message.catId, message.content])).toEqual([
+      ['user', undefined, 'older user'],
+      ['assistant', 'codex', 'older codex'],
+      ['assistant', 'opus', 'newer opus'],
+      ['user', undefined, 'newer user'],
+    ]);
+    expect(events.some((event) => event.event.content === 'older transcript duplicate')).toBe(false);
   });
 });

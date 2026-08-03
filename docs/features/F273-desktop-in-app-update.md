@@ -4,11 +4,25 @@ related_features: [F179, F180]
 topics: [desktop, electron, auto-update, inno-setup, dmg, github-releases, installer, opensource-ops]
 doc_kind: spec
 created: 2026-07-07
+updated: 2026-07-26
+description: "Desktop in-app update system: fresh GitHub release discovery, resumable verified download, Windows installer upgrade, and guided macOS DMG replacement."
+description_source: model
+description_author: codex-sol
+description_generated_by: codex-sol@gpt-5.6-sol
+description_generated_at: 2026-07-26T03:59:46Z
+description_confirmed_by: codex-sol
+description_updated_at: 2026-07-26T03:59:46Z
 ---
 
 # F273: Desktop In-App Update — 应用内检查更新 + 原地升级（无签名约束版）
 
-> **Status**: in-progress（Phase A–D 已通过 PR #1105 合入；exact-head RC package verification 与 macOS arm64 isolated old-install 验收通过；Phase E 首次 upstream stable release field validation 待完成） | **方案设计**: 宪宪（Fable/Ragdoll） | **开发 Owner**: 布偶猫（Opus） | **Reviewer**: 缅因猫（Codex） | **Priority**: P1
+> **Status**: in-progress（Phase A–D 已通过 clowder-ai #1105 合入；Clowder AI intake #3222 已合入 `8424af315`；exact-head RC package verification 与 macOS arm64 isolated old-install 验收通过；**Phase E 首次 upstream stable release field validation 待完成**） | **Source author**: mindfn | **Intake owner**: @codex-sol | **Priority**: P1
+>
+> **Source**: clowder-ai#1105（Phase A–D 实现 PR，已合入 `d908aa265`）→ clowder-ai#1102（issue）→ clowder-ai#1219（docs sync，已合入 `7207936a38`）
+>
+> **operator signoff**: 2026-07-24，operator授权分配 F273 + intake 回家
+>
+> **operator sequencing decision (2026-07-26)**: 既有 Windows 安装验证作为合入前证据；真实旧版 → 首个 upstream stable release 升级验证移至合入后。若现场验证发现缺陷，以新的 follow-up issue / PR 修复，不改写已审 exact HEAD。
 
 ## Why
 
@@ -51,7 +65,7 @@ created: 2026-07-07
 
 ## 已拍板约束（operator 2026-07-07）
 
-1. **不买 Apple Developer（$99/年）** → electron-updater 的 mac 路线不可用（其底层 Squirrel.Mac 强制校验 Apple code signing，未签名 app 无法自动替换；electron-builder 官方文档确认，Codex review 复核）。mac 上限 = 半自动引导升级。
+1. **不买 Apple Developer（operational cost/年）** → electron-updater 的 mac 路线不可用（其底层 Squirrel.Mac 强制校验 Apple code signing，未签名 app 无法自动替换；electron-builder 官方文档确认，Codex review 复核）。mac 上限 = 半自动引导升级。
 2. Win 保留 Inno Setup：electron-updater 官方只支持 NSIS/Squirrel/MSI/AppX；迁移 NSIS 需重写全部 install 逻辑（tar 解压、junction、post-install、hook sync）且老用户卸载表项割裂。Inno Setup 本身天然支持原地覆盖升级（同 AppId）+ `/SILENT` 静默 + post-install 逻辑升级时自动重跑（F180 hook sync 复用）。
 3. Update feed = **GitHub Releases API**（现有发布渠道，零新增基础设施）。
 
@@ -197,13 +211,13 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
 5. **feed 选择器** → MVP 直接 `/releases` + max semver（放弃 latest，成本差异极小，消除对发布顺序的隐含假设）。
 6. **频率/UI** → 启动/重新登录立即检查、持续运行每 24h、tray 手动检查；自动检查仅发现更新时提示；UI 只用 Electron 原生（tray/dialog/taskbar progress），不动 preload/web UI。
 
-## Phase 拆分（开发：布偶猫 Opus）
+## Phase 拆分（source implementation：mindfn）
 
-- **Phase A — update-core（✅ PR #1105）**：checker + `/releases` max-semver 选择器 + semver compare + asset 四元组解析 + settings 持久化，`node --test` 单测（沿用 `desktop/*.test.js` 既有模式），mock API fixture
-- **Phase B — Win 全链路（✅ PR #1105）**：downloader（进度/四元组校验/断点续传一致性）+ pendingUpdate journal 状态机 + iss 四处改造 + spawn→quit 时序 + portable/installType 开发项（含 config 脚本参数化修硬编码）。**实现注意（Codex）**：app 外恢复路径是硬要求——最坏情形下用户必须能在不打开 app 的前提下从 `updates/` 目录重跑 installer 修复（§3.2）
-- **Phase C — mac 半自动链路（✅ PR #1105）**：arch 选择 + 下载校验 + open dmg + 指引 dialog + quit + journal 成功/失败态
-- **Phase D — UX 与文档（✅ PR #1105）**：tray「检查更新」菜单 + skip version + 进度展示 + README 双语 Upgrading + release notes 模板 + 撤版运维说明
-- **Phase E — 验收（🚧 post-merge）**：maintainer/CVO 已接受既有 Windows 安装验证作为 pre-merge evidence；真实 old-install → 首次 upstream stable release 升级、失败恢复与 incident ownership 验证移至合入后 field validation（沿 F179 Phase B 模式）。该 sequencing override 不改变安全、完整性、恢复、portable fail-safe、数据持久化或平台契约。
+- **Phase A — update-core**：checker + `/releases` max-semver 选择器 + semver compare + asset 四元组解析 + settings 持久化，`node --test` 单测（沿用 `desktop/*.test.js` 既有模式），mock API fixture
+- **Phase B — Win 全链路**：downloader（进度/四元组校验/断点续传一致性）+ pendingUpdate journal 状态机 + iss 四处改造 + spawn→quit 时序 + portable/installType 开发项（含 config 脚本参数化修硬编码）。**实现注意（Codex）**：app 外恢复路径是硬要求——最坏情形下用户必须能在不打开 app 的前提下从 `updates/` 目录重跑 installer 修复（§3.2）
+- **Phase C — mac 半自动链路**：arch 选择 + 下载校验 + open dmg + 指引 dialog + quit + journal 成功/失败态
+- **Phase D — UX 与文档**：tray「检查更新」菜单 + skip version + 进度展示 + README 双语 Upgrading + release notes 模板 + 撤版运维说明
+- **Phase E — 验收（进行中）**：exact-head installer / portable / DMG 已完成构建与包体校验，macOS arm64 isolated old-install 路径已通过；Windows 既有安装验证由 operator 接受为合入前证据。首个 upstream stable release 发布后完成真实旧版升级、数据保留与 incident ownership field validation（沿 F179 Phase B 模式）。
 
 ## Acceptance Criteria
 
@@ -214,10 +228,10 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
 - [ ] AC-5 (mac): 下载→校验→打开 dmg→指引 dialog→退出；拖拽替换后新版启动、数据完好、journal 判定成功并清理
 - [ ] AC-6: 断网/API 5xx/rate limit → 静默降级，desktop.log 可查，无用户打扰
 - [ ] AC-7 (portable/fail-safe): `installType=portable` 或字段缺失 → 仅提示 + 引导 release 页，绝不自动安装
-- [x] AC-8: `generate-desktop-config.ps1` 参数化（-Version/-InstallType），iss 与 portable bat 正确传参，硬编码 0.10.1 修复
+- [ ] AC-8: `generate-desktop-config.ps1` 参数化（-Version/-InstallType），iss 与 portable bat 正确传参，硬编码 0.10.1 修复
 - [ ] AC-9: 升级路径复用 post-install hook sync（F180）并生效
-- [x] AC-10: README 双语 Upgrading 章节 + release notes 模板含升级指引与中断恢复说明
-- [x] AC-11: 全程无签名新增告警面（不引入任何清 quarantine / 绕 Gatekeeper 行为）
+- [ ] AC-10: README 双语 Upgrading 章节 + release notes 模板含升级指引与中断恢复说明
+- [ ] AC-11: 全程无签名新增告警面（不引入任何清 quarantine / 绕 Gatekeeper 行为）
 
 ## Dependencies
 
@@ -229,14 +243,14 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
 - **r1 (2026-07-07, Maine Coon/Codex)**: REQUEST CHANGES——P1×2（checksum 应以 API digest 为主源；Win 安装失败恢复缺 journal）+ P2×2（latest 非 semver 选择器；portable installType 不是现状）。外部一手验证：electron-builder mac 签名要求、GitHub latest 语义、asset digest 字段、Range 206 实测。
 - **r2 (2026-07-07, Fable)**: 全部采纳修订。digest 字段与 config 脚本现状均独立复核确认；P2-1 升格为 MVP 直接做 `/releases` max-semver；顺手纳入 config version 硬编码存量 bug 修复。
 - **r2 确认 (2026-07-07, Maine Coon/Codex)**: **放行**。复核确认四项 findings 均进入验收口径。附非阻塞实现提醒：`[InstallDelete]` 后中断时恢复 dialog 不一定可达，须保证 app 外恢复路径（保留 installer/日志于固定位置 + 文档写明"不打开 app 也能重跑安装包"）→ 已固化进 §3.2 / §6 / Phase B。
-- **r3 (2026-07-20, 布偶猫 Opus 实现 + 缅因猫 Codex review PR #1105)**:
+- **r3 (2026-07-20, GitHub author mindfn 实现 + Maine Coon Codex review PR #1105)**:
   - 实现 Phase A–D 全部模块，提 PR #1105
-  - 修复 P1：asset 名从 `CatCafe-*` 对齐到 `ClowderAI-*`（品牌契约，含 regression tests 从 build config 反推）
+  - 修复 P1：公开仓 asset 名对齐开源品牌契约；intake 回家后恢复为 `ClowderAI-*`，由 outbound sanitizer 保证双仓契约（含 regression tests 从 build config 反推）
   - 修复 P1：F204 plugin 迁移后 desktop 三处打包配置仍指向旧 root `plugins/`，改为 `packages/api/src/plugins`（含 4 条 regression tests）
   - 修复：CI Redis 下载限流 → `GITHUB_TOKEN` header + Inno Setup `skipifsourcedoesntexist` 容错
   - 增强：semver 比较支持 pre-release 后缀（`-rc.N`、`-beta.N`），支持 RC 版本发布与升级测试
   - 双平台构建验证通过：Windows installer + portable、macOS DMG arm64 + x64
-- **r4 (2026-07-21, 缅因猫 Sol review → 布偶猫 Opus fix)**:
+- **r4 (2026-07-21, Maine Coon Sol review → Ragdoll Opus fix)**:
   - Sol cross-family review: REQUEST CHANGES — 6×P1 blocking + P2s
   - P1-1 fix: Windows UAC 提权 — `spawn()` 改 PowerShell `Start-Process -Verb RunAs` + error listener
   - P1-2 fix: PrepareToInstall PowerShell 注入 — `{app}` 路径单引号转义 (`StringChange`)
@@ -247,7 +261,7 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
   - P2 fix: portable 用户在下载前检查 installType，避免浪费 600+ MB 带宽
   - 新增 4 条 release cache 单测（round-trip / missing / corrupt / mkdir）
   - 全量 70 tests 通过（58 update-checker + 12 generate-desktop-config）
-- **r4b (2026-07-21, 缅因猫 Sol re-review → 布偶猫 Opus fix)**:
+- **r4b (2026-07-21, Maine Coon Sol re-review → Ragdoll Opus fix)**:
   - Sol focused re-review of r4 fix: REQUEST CHANGES — 4×P1 + 2×P2
   - P1-A fix: settle 作用域 — settle/settled 从 response 回调提升到 Promise 作用域，防止 request-error ReferenceError 崩溃主进程
   - P1-B fix: Windows 安装器路径 — `/LOG=` 含空格路径加双引号；`_spawnInstaller` 改 async 等待 PowerShell exit code 再退出应用
@@ -257,7 +271,7 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
   - P2-B fix: verifyFileIntegrity 改 streaming SHA-256（createReadStream），避免 600-800MB readFileSync
   - 新增 request-error regression test；downloader tests 改 async
   - 全量 94 tests 通过（58 checker + 16 downloader + 8 installer + 12 config）
-- **r4c (2026-07-21, 缅因猫 Sol re-review → 布偶猫 Opus fix)**:
+- **r4c (2026-07-21, Maine Coon Sol re-review → Ragdoll Opus fix)**:
   - Sol focused re-review of r4b fix: REQUEST CHANGES — 1×P1 + 2×P2
   - P1 fix: launcher 失败时保留 journal — _executeInstall 和 _retryInstall 的 catch 块不再 clearJournal，保障 AC-3 下次启动恢复 dialog
   - P2 fix: macOS launcher 等待 close — `_spawnInstaller` macOS 路径改为等待 `open` 命令 close 事件，不再 resolve 后异步 error
@@ -266,12 +280,12 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
   - 新增 update-manager.test.js（176 行）: launcher failure-mode sweep（Win/Mac spawn-error/nonzero/success）+ journal 保留 P1 回归
   - 新增 stalled request timeout 测试（update-installer.test.js）
   - 全量 111 tests 通过（58 checker + 16 downloader + 10 installer + 15 manager + 12 config）
-- **r4d (2026-07-21, 缅因猫 Sol re-review → 布偶猫 Opus fix)**:
+- **r4d (2026-07-21, Maine Coon Sol re-review → Ragdoll Opus fix)**:
   - Sol focused re-review of r4c fix: REQUEST CHANGES — 1×P2 transport 竞态
   - P2 fix: 超时后迟到 response 竞态 — response 回调入口增加 `settled` 守卫（迟到 response 直接 destroy，不建 write stream）；timeout handler 增加 `request.abort()` 主动取消底层连接
   - 新增 2 条竞态回归测试：timeout→late response 不写文件；mid-body timeout 验证 response.destroy + request.abort 调用
   - 全量 113 tests 通过（58 checker + 16 downloader + 12 installer + 15 manager + 12 config）
-- **r4e (2026-07-21, 缅因猫 Sol re-review → 布偶猫 Opus fix)**:
+- **r4e (2026-07-21, Maine Coon Sol re-review → Ragdoll Opus fix)**:
   - Sol focused re-review of r4d fix: REQUEST CHANGES — 1×P2 writer 清理缺口
   - P2 fix: 统一 settle+cleanup 路径 — `activeWs` 提升到 Promise 作用域；settle() 内嵌统一 cleanup（destroy response → end writer → abort request）；所有错误/超时/aborted handler 只需调 settle()
   - 新增 response `aborted` 事件监听（Electron abort 官方契约）
@@ -280,9 +294,9 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
   - 代码净减 3 行（settle+cleanup 整合消除了分散的手动 cleanup）
   - 全量 113 tests 通过（58 checker + 16 downloader + 12 installer + 15 manager + 12 config）
 
-## Timeline
+## History
 
-| Date | Event |
-|------|-------|
-| 2026-07-26 | Phase A–D merged via PR #1105 at `d908aa265`; exact-head installer/portable/DMG artifacts package-verified and the macOS arm64 isolated `.0 → .1` old-install path passed. |
-| 2026-07-26 | Maintainer/CVO acceptance override accepted the existing Windows installation validation for pre-merge sequencing; the real old-install → first upstream stable release upgrade moved to post-merge Phase E field validation. |
+- 原编号 F257 → F258（clowder-ai 内部 collision），后因 cat-cafe F258 (visible-cafe) 冲突重分配为 F273
+- 2026-07-26: clowder-ai PR #1105 合入（Phase A–D），merge commit `d908aa265`；Phase E 首次 stable release field validation 移至合入后（operator sequencing override，不改变安全/完整性/恢复/portable/持久化/平台契约）
+- 2026-07-26: clowder-ai PR #1219 docs sync 合入（`7207936a38`），status/AC-8/10/11/Timeline 同步更新；家里 intake 同步更新状态
+- 2026-07-26: Clowder AI intake PR #3222 合入（`8424af315`）；代码与家里品牌/路径/feature truth 已吸收，Phase E upstream stable release field validation 仍待完成

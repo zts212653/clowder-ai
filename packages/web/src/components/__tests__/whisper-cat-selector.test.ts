@@ -123,6 +123,20 @@ describe('WhisperCatSelector', () => {
     const codexBtn = buttons.find((b) => b.textContent?.includes('砚砚'));
     act(() => codexBtn?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
     expect(onToggle).toHaveBeenCalledWith('codex');
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls onToggle when pressing the non-interactive role description area', () => {
+    const { onToggle } = renderSelector();
+    const description = Array.from(container.querySelectorAll<HTMLElement>('[data-overflow-measure="block"]')).find(
+      (element) => element.textContent === 'review、安全、测试',
+    );
+    expect(description).toBeTruthy();
+
+    act(() => description?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+
+    expect(onToggle).toHaveBeenCalledWith('codex');
+    expect(onToggle).toHaveBeenCalledTimes(1);
   });
 
   it('shows checkmark on selected cats', () => {

@@ -583,6 +583,8 @@ After text`;
     assert.ok(typeof parsed.omitted === 'object', 'Should have omitted field');
     assert.ok(typeof parsed.burst === 'object', 'Should have burst field');
     assert.ok(Array.isArray(parsed.anchorIds), 'Should have anchorIds array');
+    assert.deepStrictEqual(parsed.semanticSearchTerms, ['msg config']);
+    assert.ok(!parsed.semanticSearchTerms.includes('thread-1'), 'thread coordinate must not become a semantic query');
   });
 
   test('AC-D2: smart window includes thread memory when available', async () => {

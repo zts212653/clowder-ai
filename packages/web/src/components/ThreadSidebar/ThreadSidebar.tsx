@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { type Thread, useChatStore } from '@/stores/chatStore';
 import { useLabelStore } from '@/stores/label-store';
@@ -17,6 +17,12 @@ import { DirectoryPickerModal, type NewThreadOptions } from './DirectoryPickerMo
 import { LabelFilterBar } from './LabelFilterBar';
 import { SectionGroup } from './SectionGroup';
 import { SidebarTabIcon } from './SidebarTabIcon';
+import {
+  createSidebarTabState,
+  readBrowserSidebarTabPreference,
+  sidebarTabReducer,
+  writeBrowserSidebarTabPreference,
+} from './sidebar-tab-state';
 import { ThreadItem } from './ThreadItem';
 import { ThreadOrganizerModal } from './ThreadOrganizerModal';
 import { pushThreadRouteWithHistory } from './thread-navigation';
@@ -25,17 +31,23 @@ import {
   buildSidebarTabs,
   getProjectPaths,
   mergeLiveActivityIntoThreads,
+  naturalTabForThread,
   projectDisplayName,
+  reconcileActiveThreadOrder,
   type SidebarTabId,
+  type ThreadGroup,
 } from './thread-utils';
 import { createToggleWithReconcile } from './toggle-with-reconcile';
 import { useCollapseState } from './use-collapse-state';
 import { useProjectPins } from './use-project-pins';
 import { useScrollAnchor } from './use-scroll-anchor';
+import { VIRTUAL_THREAD_LIST_THRESHOLD, VirtualThreadList, type VirtualThreadListHandle } from './VirtualThreadList';
 
 interface ThreadSidebarProps {
   onClose?: () => void;
   className?: string;
+  /** URL/layout truth used to gate the one-time initial tab bootstrap. */
+  routeThreadId: string;
 }
 
 function notifyThreadCreateFailure(message: string) {
@@ -47,7 +59,28 @@ function notifyThreadCreateFailure(message: string) {
   });
 }
 
-export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
+function groupKeyForSection(group: ThreadGroup): string {
+  return group.projectPath ?? group.type;
+}
+
+function projectSectionLabel(group: ThreadGroup, projectNames: Map<string, string>): string {
+  const projectPath = group.projectPath;
+  if (!projectPath) return group.label;
+  return projectNames.get(projectPath) ?? group.label;
+}
+
+function forProjectPath<T>(projectPath: string | undefined, build: (projectPath: string) => T): T | undefined {
+  if (!projectPath) return undefined;
+  return build(projectPath);
+}
+
+function forOpenableProject<T>(projectPath: string | undefined, build: (projectPath: string) => T): T | undefined {
+  if (!projectPath) return undefined;
+  if (projectPath === 'default') return undefined;
+  return build(projectPath);
+}
+
+export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSidebarProps) {
   const [showBootcampList, setShowBootcampList] = useState(false);
   const {
     threads,
@@ -57,7 +90,6 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     isLoadingThreads,
     setLoadingThreads,
     updateThreadTitle,
-    getThreadState,
     threadStates,
   } = useChatStore(
     useShallow((s) => ({
@@ -68,7 +100,6 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
       isLoadingThreads: s.isLoadingThreads,
       setLoadingThreads: s.setLoadingThreads,
       updateThreadTitle: s.updateThreadTitle,
-      getThreadState: s.getThreadState,
       threadStates: s.threadStates,
     })),
   );
@@ -87,10 +118,15 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   const [govHealth, setGovHealth] = useState<Record<string, string>>({});
   // F252 Phase E: Meow Theater replay state
   const [replayThreadId, setReplayThreadId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<SidebarTabId>('recent');
+  const [tabState, dispatchTabEvent] = useReducer(sidebarTabReducer, null, () => {
+    const preference = readBrowserSidebarTabPreference();
+    return createSidebarTabState(preference.tab, preference.persisted);
+  });
+  const activeTab = tabState.activeTab;
 
   // F095 Phase E: scroll anchor for reorder stability
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const virtualThreadListRef = useRef<VirtualThreadListHandle>(null);
   const tabRefs = useRef<Record<SidebarTabId, HTMLButtonElement | null>>({
     pinned: null,
     recent: null,
@@ -151,7 +187,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
 
     // Then fetch fresh data from API (replace snapshot if successful)
     try {
-      const res = await apiFetch('/api/threads');
+      const res = await apiFetch('/api/threads?view=sidebar');
       if (!res.ok) return;
       const data = await res.json();
       const threads = data.threads ?? [];
@@ -359,15 +395,13 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     [updateThreadTitle],
   );
 
-  const handleTogglePin = useCallback(
-    (threadId: string, pinned: boolean) => void pinToggle.current?.toggle(threadId, pinned),
-    [],
-  );
+  const handleTogglePin = useCallback((threadId: string, pinned: boolean) => {
+    void pinToggle.current?.toggle(threadId, pinned);
+  }, []);
 
-  const handleToggleFavorite = useCallback(
-    (threadId: string, favorited: boolean) => void favToggle.current?.toggle(threadId, favorited),
-    [],
-  );
+  const handleToggleFavorite = useCallback((threadId: string, favorited: boolean) => {
+    void favToggle.current?.toggle(threadId, favorited);
+  }, []);
 
   const handleUpdatePreferredCats = useCallback(async (threadId: string, cats: string[]) => {
     const res = await apiFetch(`/api/threads/${threadId}`, {
@@ -451,8 +485,20 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     [createInProject],
   );
 
+  const activeThreadOrderRef = useRef<ReadonlyMap<string, number>>(new Map());
+  const activeThreadOrder = useMemo(
+    () => reconcileActiveThreadOrder(threads, threadStates, activeThreadOrderRef.current),
+    [threads, threadStates],
+  );
+  useEffect(() => {
+    activeThreadOrderRef.current = activeThreadOrder;
+  }, [activeThreadOrder]);
+
   const normalizedQuery = searchQuery.trim().toLowerCase();
-  const liveThreads = useMemo(() => mergeLiveActivityIntoThreads(threads, threadStates), [threads, threadStates]);
+  const liveThreads = useMemo(
+    () => mergeLiveActivityIntoThreads(threads, threadStates, activeThreadOrder),
+    [activeThreadOrder, threads, threadStates],
+  );
   const filteredThreads = useMemo(() => {
     if (!normalizedQuery) return liveThreads;
     return liveThreads.filter((thread) => {
@@ -752,11 +798,82 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     () => buildSidebarTabContent(activeTab, labelFilteredThreads, pinnedProjects, unreadIds),
     [activeTab, labelFilteredThreads, pinnedProjects, unreadIds],
   );
+  const recentThreadIds = useMemo(
+    () =>
+      new Set(
+        buildSidebarTabContent('recent', labelFilteredThreads, pinnedProjects, unreadIds).threads.map(
+          (thread) => thread.id,
+        ),
+      ),
+    [labelFilteredThreads, pinnedProjects, unreadIds],
+  );
+  const currentThread = useMemo(
+    () => labelFilteredThreads.find((thread) => thread.id === currentThreadId),
+    [labelFilteredThreads, currentThreadId],
+  );
   const projectThreadGroups = useMemo(
     () => buildSidebarTabContent('project', labelFilteredThreads, pinnedProjects, unreadIds).projectGroups ?? [],
     [labelFilteredThreads, pinnedProjects, unreadIds],
   );
+  const unfilteredProjectThreadGroups = useMemo(
+    () => buildSidebarTabContent('project', liveThreads, pinnedProjects, unreadIds).projectGroups ?? [],
+    [liveThreads, pinnedProjects, unreadIds],
+  );
+  const unfilteredRecentThreadIds = useMemo(
+    () =>
+      new Set(
+        buildSidebarTabContent('recent', liveThreads, pinnedProjects, unreadIds).threads.map((thread) => thread.id),
+      ),
+    [liveThreads, pinnedProjects, unreadIds],
+  );
   const threadGroups = activeTab === 'project' ? projectThreadGroups : [];
+
+  const filterKey =
+    normalizedQuery.length === 0 && labelFilter === null ? '' : JSON.stringify([normalizedQuery, labelFilter]);
+
+  useEffect(() => {
+    const firstNonEmptyTab = tabs.find((tab) => tab.count > 0);
+    dispatchTabEvent({
+      type: 'filter-reconciled',
+      filterKey,
+      activeTabHasThreads: activeTabContent.threads.length > 0,
+      firstNonEmptyTab: firstNonEmptyTab ? firstNonEmptyTab.id : null,
+    });
+  }, [activeTabContent.threads.length, filterKey, tabs]);
+
+  useEffect(() => {
+    if (tabState.initialThreadResolved) return;
+    if (currentThreadId !== routeThreadId) return;
+    if (routeThreadId === 'default') {
+      dispatchTabEvent({
+        type: 'initial-thread-reconciled',
+        visibleInActiveTab: true,
+        destinationTab: null,
+      });
+      return;
+    }
+    if (!currentThread) return;
+    dispatchTabEvent({
+      type: 'initial-thread-reconciled',
+      visibleInActiveTab: activeTabContent.threads.some((thread) => thread.id === currentThread.id),
+      destinationTab: naturalTabForThread(currentThread, recentThreadIds),
+    });
+  }, [
+    activeTabContent.threads,
+    currentThread,
+    currentThreadId,
+    recentThreadIds,
+    routeThreadId,
+    tabState.initialThreadResolved,
+  ]);
+
+  const handleSelectTab = useCallback(
+    (tab: SidebarTabId) => {
+      writeBrowserSidebarTabPreference(tab);
+      dispatchTabEvent({ type: 'user-selected-tab', tab, filterKey });
+    },
+    [filterKey],
+  );
 
   // Tab overflow scroll: show arrow buttons when tabs overflow the row
   const updateTabScrollState = useCallback(() => {
@@ -805,75 +922,73 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   });
   const sidebarWidthClass = className === undefined ? 'w-60' : className;
 
-  // Select Open Session: scroll to & highlight the active thread in the sidebar.
-  // In project tab, auto-expand the collapsed group containing the thread first.
   const scrollToActiveThread = useCallback(() => {
     if (!currentThreadId || !scrollContainerRef.current) return;
+    const activeThread = liveThreads.find((thread) => thread.id === currentThreadId);
+    if (!activeThread) return;
 
     const needsFilterClear = searchQuery.trim() !== '' || labelFilter !== null;
-
-    // Clear any active filters so the thread is guaranteed visible
     if (searchQuery.trim()) setSearchQuery('');
     if (labelFilter) setLabelFilter(null);
 
-    // If the thread is in a collapsed project group, expand it first
-    const ownerGroup = projectThreadGroups.find((g) => g.threads.some((t) => t.id === currentThreadId));
-    const ownerKey = ownerGroup ? (ownerGroup.projectPath ?? ownerGroup.type) : undefined;
-    if (ownerKey && isCollapsed(ownerKey)) {
-      toggleGroup(ownerKey);
+    const ownerKeys: string[] = [];
+    for (const group of unfilteredProjectThreadGroups) {
+      if (!group.threads.some((thread) => thread.id === currentThreadId)) continue;
+      ownerKeys.push(groupKeyForSection(group));
+      const archivedOwner = group.archivedGroups?.find((archivedGroup) =>
+        archivedGroup.threads.some((thread) => thread.id === currentThreadId),
+      );
+      if (archivedOwner) ownerKeys.push(groupKeyForSection(archivedOwner));
+      break;
     }
+    const collapsedOwnerKeys = ownerKeys.filter(isCollapsed);
+    const needsGroupExpand = collapsedOwnerKeys.length > 0;
+    for (const ownerKey of collapsedOwnerKeys) toggleGroup(ownerKey);
 
-    // Derive the tab that actually contains the active thread by checking
-    // unfiltered membership across all tabs (avoids hardcoding 'recent').
-    const findTabForThread = (): SidebarTabId => {
-      const tabOrder: SidebarTabId[] = ['recent', 'system', 'project', 'pinned', 'favorites'];
-      for (const tabId of tabOrder) {
-        const bucket = buildSidebarTabContent(tabId, threads, pinnedProjects, unreadIds);
-        if (bucket.threads.some((t) => t.id === currentThreadId)) return tabId;
-      }
-      return 'recent';
-    };
+    const targetTab = naturalTabForThread(activeThread, unfilteredRecentThreadIds);
+    const targetFlatThreads =
+      targetTab === 'project'
+        ? null
+        : buildSidebarTabContent(targetTab, liveThreads, pinnedProjects, unreadIds).threads;
+    const needsTabSwitch = activeTab !== targetTab;
+    if (needsTabSwitch) handleSelectTab(targetTab);
 
-    // Helper: scroll to the active thread and apply a brief highlight ring.
-    // If the thread isn't in the current tab's DOM, switch to the tab that
-    // actually contains it before retrying.
-    const scrollAndHighlight = (retried = false) => {
-      const el = scrollContainerRef.current?.querySelector<HTMLElement>(`[data-thread-id="${currentThreadId}"]`);
-      if (!el) {
-        if (!retried) {
-          const targetTab = findTabForThread();
-          if (activeTab !== targetTab) {
-            setActiveTab(targetTab);
+    const scrollAndHighlight = (allowVirtualScroll = true) => {
+      const element = Array.from(
+        scrollContainerRef.current?.querySelectorAll<HTMLElement>('[data-thread-id]') ?? [],
+      ).find((candidate) => candidate.dataset.threadId === currentThreadId);
+      if (!element) {
+        if (allowVirtualScroll && targetFlatThreads) {
+          const index = targetFlatThreads.findIndex((thread) => thread.id === currentThreadId);
+          if (index >= 0 && virtualThreadListRef.current) {
+            virtualThreadListRef.current.scrollToIndex(index);
+            requestAnimationFrame(() => scrollAndHighlight(false));
           }
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => scrollAndHighlight(true));
-          });
         }
         return;
       }
-      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      el.classList.add('ring-2', 'ring-cafe-accent', 'ring-opacity-60');
-      setTimeout(() => el.classList.remove('ring-2', 'ring-cafe-accent', 'ring-opacity-60'), 1200);
+      element.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      element.classList.add('ring-2', 'ring-cafe-accent', 'ring-opacity-60');
+      setTimeout(() => element.classList.remove('ring-2', 'ring-cafe-accent', 'ring-opacity-60'), 1200);
     };
 
-    // Defer DOM lookup when state updates (filter clear / group expand) need a re-render first
-    if (needsFilterClear || (ownerKey && isCollapsed(ownerKey))) {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => scrollAndHighlight());
-      });
+    if (needsFilterClear || needsGroupExpand || needsTabSwitch) {
+      requestAnimationFrame(() => requestAnimationFrame(() => scrollAndHighlight()));
     } else {
       scrollAndHighlight();
     }
   }, [
-    currentThreadId,
-    threads,
-    projectThreadGroups,
-    isCollapsed,
-    toggleGroup,
-    searchQuery,
-    labelFilter,
     activeTab,
+    currentThreadId,
+    handleSelectTab,
+    isCollapsed,
+    labelFilter,
+    liveThreads,
     pinnedProjects,
+    searchQuery,
+    toggleGroup,
+    unfilteredProjectThreadGroups,
+    unfilteredRecentThreadIds,
     unreadIds,
   ]);
 
@@ -896,17 +1011,16 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         onReplay={handleReplay}
         isPinned={thread.pinned}
         isFavorited={thread.favorited}
-        threadState={getThreadState(thread.id)}
         projectPath={thread.projectPath}
         indented={indented}
         preferredCats={thread.preferredCats}
         threadLabels={thread.labels}
         isHubThread={!!thread.connectorHubState}
+        systemKind={thread.systemKind}
       />
     ),
     [
       currentThreadId,
-      getThreadState,
       handleDeleteRequest,
       handleRename,
       handleReplay,
@@ -916,6 +1030,67 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
       handleUpdateLabels,
       handleUpdatePreferredCats,
     ],
+  );
+
+  const renderProjectSection = useCallback(
+    (group: ThreadGroup) => {
+      const groupKey = groupKeyForSection(group);
+      const projectPath = group.projectPath;
+
+      return (
+        <SectionGroup
+          key={groupKey}
+          label={projectSectionLabel(group, projectNames)}
+          count={group.threads.length}
+          isCollapsed={isCollapsed(groupKey)}
+          onToggle={() => toggleGroup(groupKey)}
+          projectPath={projectPath}
+          governanceStatus={forProjectPath(projectPath, (path) => govHealth[path])}
+          onToggleProjectPin={forProjectPath(projectPath, (path) => () => toggleProjectPin(path))}
+          isProjectPinned={forProjectPath(projectPath, (path) => pinnedProjects.has(path))}
+          onQuickCreate={forProjectPath(projectPath, (path) => () => handleQuickCreate(path))}
+          onOpenInFinder={forOpenableProject(projectPath, (path) => () => handleOpenInFinder(path))}
+          onRenameProject={forProjectPath(projectPath, (path) => (name: string) => handleRenameProject(path, name))}
+          onArchiveThreads={forProjectPath(projectPath, (path) => () => handleArchiveThreads(path))}
+        >
+          {group.threads.map((thread) => renderThreadItem(thread, true))}
+        </SectionGroup>
+      );
+    },
+    [
+      govHealth,
+      handleArchiveThreads,
+      handleOpenInFinder,
+      handleQuickCreate,
+      handleRenameProject,
+      isCollapsed,
+      pinnedProjects,
+      projectNames,
+      renderThreadItem,
+      toggleGroup,
+      toggleProjectPin,
+    ],
+  );
+
+  const renderProjectTabGroup = useCallback(
+    (group: ThreadGroup) => {
+      const groupKey = groupKeyForSection(group);
+      if (group.type !== 'archived-container') return renderProjectSection(group);
+
+      return (
+        <SectionGroup
+          key={groupKey}
+          label={group.label}
+          icon="archive"
+          count={group.threads.length}
+          isCollapsed={isCollapsed(groupKey)}
+          onToggle={() => toggleGroup(groupKey)}
+        >
+          {group.archivedGroups?.map((archivedGroup) => renderProjectSection(archivedGroup))}
+        </SectionGroup>
+      );
+    },
+    [isCollapsed, renderProjectSection, toggleGroup],
   );
 
   return (
@@ -1046,7 +1221,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                       type="button"
                       role="tab"
                       aria-selected={activeTab === tab.id}
-                      onClick={() => setActiveTab(tab.id)}
+                      onClick={() => handleSelectTab(tab.id)}
                       className={`flex flex-shrink-0 items-center gap-1 rounded-t-md border-b-2 px-1.5 py-1.5 text-micro font-medium transition-colors ${
                         activeTab === tab.id
                           ? 'border-cafe-accent text-cafe-accent'
@@ -1107,24 +1282,19 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                     aria-label="定位当前对话"
                     title="定位当前对话"
                   >
-                    <svg
-                      aria-hidden="true"
-                      className="h-3.5 w-3.5"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={1.4}
-                    >
-                      {/* PyCharm "Select Opened File" — circle with inward crosshair, center gap */}
-                      <circle cx="8" cy="8" r="5.5" />
-                      <line x1="8" y1="2.5" x2="8" y2="6" />
-                      <line x1="8" y1="10" x2="8" y2="13.5" />
-                      <line x1="2.5" y1="8" x2="6" y2="8" />
-                      <line x1="10" y1="8" x2="13.5" y2="8" />
-                    </svg>
+                    <LocateThreadIcon />
                   </button>
                 </div>
-                {activeTabContent.threads.map((t) => renderThreadItem(t))}
+                {activeTabContent.threads.length >= VIRTUAL_THREAD_LIST_THRESHOLD ? (
+                  <VirtualThreadList
+                    ref={virtualThreadListRef}
+                    threads={activeTabContent.threads}
+                    scrollContainerRef={scrollContainerRef}
+                    renderItem={renderThreadItem}
+                  />
+                ) : (
+                  activeTabContent.threads.map((thread) => renderThreadItem(thread))
+                )}
               </>
             )}
 
@@ -1143,21 +1313,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                     aria-label="定位当前对话"
                     title="定位当前对话"
                   >
-                    <svg
-                      aria-hidden="true"
-                      className="h-3.5 w-3.5"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={1.4}
-                    >
-                      {/* PyCharm "Select Opened File" — circle with inward crosshair, center gap */}
-                      <circle cx="8" cy="8" r="5.5" />
-                      <line x1="8" y1="2.5" x2="8" y2="6" />
-                      <line x1="8" y1="10" x2="8" y2="13.5" />
-                      <line x1="2.5" y1="8" x2="6" y2="8" />
-                      <line x1="10" y1="8" x2="13.5" y2="8" />
-                    </svg>
+                    <LocateThreadIcon />
                   </button>
                   <button
                     type="button"
@@ -1175,7 +1331,6 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                       stroke="currentColor"
                       strokeWidth={1.4}
                     >
-                      {/* PyCharm-style expand all — diverging chevrons ∧∨ */}
                       <path d="M5 7l3-3 3 3" />
                       <path d="M5 9l3 3 3-3" />
                     </svg>
@@ -1196,7 +1351,6 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                       stroke="currentColor"
                       strokeWidth={1.4}
                     >
-                      {/* PyCharm-style collapse all — converging chevrons ∨∧ */}
                       <path d="M5 4l3 3 3-3" />
                       <path d="M5 12l3-3 3 3" />
                     </svg>
@@ -1205,33 +1359,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
               </div>
             )}
 
-            {activeTabContent.kind === 'project' &&
-              threadGroups.map((group) => {
-                const groupKey = group.projectPath ?? group.type;
-                const projectPath = group.projectPath;
-
-                return (
-                  <SectionGroup
-                    key={groupKey}
-                    label={projectPath ? (projectNames.get(projectPath) ?? group.label) : group.label}
-                    count={group.threads.length}
-                    isCollapsed={isCollapsed(groupKey)}
-                    onToggle={() => toggleGroup(groupKey)}
-                    projectPath={projectPath}
-                    governanceStatus={projectPath ? govHealth[projectPath] : undefined}
-                    onToggleProjectPin={projectPath ? () => toggleProjectPin(projectPath) : undefined}
-                    isProjectPinned={projectPath ? pinnedProjects.has(projectPath) : undefined}
-                    onQuickCreate={projectPath ? () => handleQuickCreate(projectPath) : undefined}
-                    onOpenInFinder={
-                      projectPath && projectPath !== 'default' ? () => handleOpenInFinder(projectPath) : undefined
-                    }
-                    onRenameProject={projectPath ? (name: string) => handleRenameProject(projectPath, name) : undefined}
-                    onArchiveThreads={projectPath ? () => handleArchiveThreads(projectPath) : undefined}
-                  >
-                    {group.threads.map((t) => renderThreadItem(t, true))}
-                  </SectionGroup>
-                );
-              })}
+            {activeTabContent.kind === 'project' && threadGroups.map((group) => renderProjectTabGroup(group))}
 
             {(normalizedQuery.length > 0 || labelFilter) && activeTabIsEmpty && (
               <div className="px-3 py-4 text-xs text-cafe-muted">没有匹配的对话</div>
@@ -1363,6 +1491,25 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   );
 }
 
+function LocateThreadIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-3.5 w-3.5"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.4}
+    >
+      <circle cx="8" cy="8" r="5.5" />
+      <line x1="8" y1="2.5" x2="8" y2="6" />
+      <line x1="8" y1="10" x2="8" y2="13.5" />
+      <line x1="2.5" y1="8" x2="6" y2="8" />
+      <line x1="10" y1="8" x2="13.5" y2="8" />
+    </svg>
+  );
+}
+
 function SparkleIcon() {
   return (
     <svg
@@ -1438,7 +1585,7 @@ function DeleteConfirmDialog({
         {isSystem ? (
           <>
             <p className="text-xs text-conn-red-text mb-2">
-              这是系统级对话。删除可能影响平台功能（连接器路由或定时评估）。
+              这是系统级对话。删除可能影响平台功能（连接器路由、定时评估或猫的私人空间）。
             </p>
             <p className="text-xs text-cafe-secondary mb-2">请输入对话名称以确认删除：</p>
             <input

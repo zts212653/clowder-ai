@@ -1,16 +1,14 @@
 ---
 name: context-self-management
-description: >
-  F225 软层：当系统发来 context_management_hint(warn)，判断该 handoff、继续/压缩、还是冲刺。
-  Use when: 收到 context_management_hint(warn) 系统信号；或自己感觉这一程话题漂移很大想换张干净桌子。
-  Not for: 没收到 warn 信号时主动焦虑 context%（你内省不准，等系统信号）；把活交给别的猫（那是 cross-cat-handoff）。
-  Output: handoff（封印自己 spawn 干净的自己）/ 继续 / 冲刺到断点 的判断 + 必要时调 propose_session_handoff。
+description: "Use when: context_management_hint 或长 session repo/projectPath 混淆。Not for: 普通 context 焦虑/跨猫交接。Output: handoff/续/冲刺判断。"
+tips_exempt: harness-internal session boundary guidance; no end-user capability surface
 triggers:
   - "context_management_hint"
   - "context 自管理"
   - "要不要 handoff"
   - "我脏了"
   - "话题漂移"
+  - "repo/projectPath 混淆"
 ---
 
 # Context 自管理：handoff vs 压缩是个判断 🐾
@@ -24,6 +22,7 @@ triggers:
 
 1. **线还是树？**（脏=话题漂移）这一程是一条主线，还是 a→g 一堆不相关的事？
    - 客观锚：`compressionCount > 0` ⇒ 你已经跑很久了，**警惕自己低估漂移**（Ragdoll尤其爱把树硬串成线）。
+   - 摩擦锚：同一肉身 session 连续处理多条 GitHub issue/PR、跨 repo review/tracking，且开始混淆 `tracker repo` / `source truth repo` / `thread projectPath` ⇒ 当作树状漂移信号，进入本矩阵。
 2. **有干净断点吗？** 手头这件事到没到一个能利落收尾的点？干一半 = 没有。
 3. **fill 可信度？** hint 里 `fillConfidence`：`exact_token` 信那个 %；`approx_token`/`bytes_health` 当弱信号；`unavailable` 别看 %、纯靠①②自检。
 

@@ -70,7 +70,7 @@ operator说了一句"做个像素格斗游戏"，然后四只猫分工协作、�
 
 ### 战场
 
-**赛博猫咖 (Cyber Cat Cafe)**：像素化的 Mission Hub，背景咖啡机冒热气，窗外流动代码云，Siamese在 DJ 台打碟。
+**赛博猫咖 (Cyber Clowder AI)**：像素化的 Mission Hub，背景咖啡机冒热气，窗外流动代码云，Siamese在 DJ 台打碟。
 
 ### 游戏模式
 

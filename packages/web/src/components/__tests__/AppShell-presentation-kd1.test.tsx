@@ -18,6 +18,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: () => {} }),
 }));
 vi.mock('@/hooks/useIsDesktop', () => ({ useIsDesktop: () => false }));
+vi.mock('@/hooks/useWorkspaceNavigate', () => ({ useWorkspaceNavigate: vi.fn() }));
 vi.mock('@/stores/sidebarStore', () => ({
   useSidebarStore: () => ({
     isOpen: false,

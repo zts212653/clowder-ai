@@ -356,6 +356,57 @@ describe('SessionBootstrap', () => {
       assert.deepEqual(readDigestCalls, ['sess-1']);
     });
 
+    it('F263 exposes SessionBootstrap recall presentation only when rendered', async () => {
+      const store = createMockSessionChainStore([
+        { id: 'sess-0', catId: 'opus', threadId: 'thread-1', status: 'sealed', seq: 0 },
+        { id: 'sess-1', catId: 'opus', threadId: 'thread-1', status: 'active', seq: 1 },
+      ]);
+      const reader = createMockTranscriptReader();
+      const threadStore = {
+        get: async () => ({ id: 'thread-1', title: 'Memory lifecycle telemetry' }),
+        getThreadMemory: async () => null,
+      };
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async () => ({
+        ok: true,
+        json: async () => ({
+          results: [
+            {
+              title: 'F263',
+              anchor: 'F263',
+              sourcePath: 'docs/features/F263-memory-lifecycle-repair-and-metrics.md',
+              snippet: 'Phase B',
+              sourceType: 'feature',
+            },
+          ],
+        }),
+      });
+      try {
+        const result = await buildSessionBootstrap(
+          { sessionChainStore: store, transcriptReader: reader, threadStore },
+          'opus',
+          'thread-1',
+        );
+        assert.match(result.text, /Project Knowledge Recall/);
+        assert.deepEqual(result.pushRecallPresentations?.[0], {
+          surface: 'session_bootstrap',
+          query: 'Memory lifecycle telemetry',
+          scope: 'docs',
+          timestamp: result.pushRecallPresentations[0].timestamp,
+          candidates: [
+            {
+              anchor: 'F263',
+              rank: 0,
+              sourcePath: 'docs/features/F263-memory-lifecycle-repair-and-metrics.md',
+              docKind: 'feature',
+            },
+          ],
+        });
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
     // --- F065 Task Snapshot Tests ---
 
     it('includes task snapshot when taskStore is provided and tasks exist', async () => {

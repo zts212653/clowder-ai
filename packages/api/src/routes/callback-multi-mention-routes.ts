@@ -5,17 +5,36 @@
  * GET  /api/callbacks/multi-mention-status — Poll request status
  */
 
-import { type CatId, catRegistry, createCatId, DEFAULT_TIMEOUT_MINUTES } from '@cat-cafe/shared';
+import {
+  actionSuccessorMetadataSchema,
+  type CatId,
+  catRegistry,
+  createCatId,
+  DEFAULT_TIMEOUT_MINUTES,
+} from '@cat-cafe/shared';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import {
+  type ActionSuccessorAdmissionService,
+  type ActionSuccessorFence,
+  buildActionSuccessorFence,
+} from '../domains/ball-custody/ActionSuccessorAdmissionService.js';
+import {
+  type ActionSuccessorCarrierAdmissionOutcome,
+  type ActionSuccessorCarrierDisposition,
+  actionSuccessorFencesMatch,
+  reconcileActionSuccessorEnqueue,
+} from '../domains/ball-custody/reconcile-action-successor-enqueue.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
+import type { OwnerAuthProvenance } from '../domains/cats/services/agents/invocation/owner-auth-provenance.js';
 import { stampVisibleTurn } from '../domains/cats/services/agents/invocation/visible-turn.js';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import {
   type MultiMentionCreateParams,
   MultiMentionOrchestrator,
 } from '../domains/cats/services/agents/routing/MultiMentionOrchestrator.js';
+import { createA2ASlotTrackingBridge } from '../domains/cats/services/agents/routing/route-helpers.js';
 import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
 import {
   checkFreshnessForPostMessage,
@@ -26,13 +45,25 @@ import { FreshnessInvocationStateStore } from '../domains/cats/services/freshnes
 import {
   descriptorFromDriver,
   descriptorFromProviderFallback,
+  resolveFreshnessDescriptorProvider,
 } from '../domains/cats/services/freshness/RuntimeCapabilityDescriptor.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import { type IMessageStore, isDelivered } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import type {
+  ITurnExecutionStore,
+  TurnExecutionRecord,
+} from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
 import { canViewMessage } from '../domains/cats/services/stores/visibility.js';
+import {
+  protocolActionWithoutCustodyTotal,
+  successorActionFenceUnavailable,
+  successorMultiMentionTotal,
+  successorSingleTargetMultiMention,
+  successorUnfencedSingleTargetMultiMention,
+} from '../infrastructure/telemetry/instruments.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 
@@ -49,18 +80,62 @@ export function resetMultiMentionOrchestrator(): void {
   globalOrchestrator = undefined;
 }
 
+export function classifyMultiMentionCarrierUsage(input: { targetCount: number; hasAction: boolean }): {
+  singleTarget: boolean;
+  unfencedSingleTarget: boolean;
+} {
+  const singleTarget = input.targetCount === 1;
+  return { singleTarget, unfencedSingleTarget: singleTarget && !input.hasAction };
+}
+
 // ── Schema ───────────────────────────────────────────────────────────
-const multiMentionSchema = z.object({
-  targets: z.array(z.string().min(1)).min(1).max(3),
-  question: z.string().min(1).max(5000),
-  callbackTo: z.string().min(1),
-  context: z.string().max(5000).optional(),
-  idempotencyKey: z.string().min(1).max(200).optional(),
-  timeoutMinutes: z.number().int().min(3).max(20).optional(),
-  searchEvidenceRefs: z.array(z.string()).optional(),
-  overrideReason: z.string().min(1).max(500).optional(),
-  triggerType: z.string().optional(),
-});
+const multiMentionSchema = z
+  .object({
+    targets: z.array(z.string().min(1)).min(1).max(3),
+    question: z.string().min(1).max(5000),
+    callbackTo: z.string().min(1),
+    context: z.string().max(5000).optional(),
+    idempotencyKey: z.string().min(1).max(200).optional(),
+    timeoutMinutes: z.number().int().min(3).max(20).optional(),
+    searchEvidenceRefs: z.array(z.string()).optional(),
+    overrideReason: z.string().min(1).max(500).optional(),
+    triggerType: z.string().optional(),
+    action: actionSuccessorMetadataSchema.optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (!value.action) return;
+    if (!value.idempotencyKey) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['idempotencyKey'], message: 'required with action metadata' });
+    }
+    if (value.action.mode === 'single' && value.targets.length !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['targets'],
+        message: 'single action requires exactly one target',
+      });
+    }
+    if (value.action.mode === 'parallel' && !value.action.returnToPredecessor && value.targets.length < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['targets'],
+        message: 'parallel action requires at least two targets',
+      });
+    }
+    if (value.action.mode === 'parallel' && value.action.returnToPredecessor && value.targets.length !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['targets'],
+        message: 'parallel rejected-ownership disposition requires one predecessor target',
+      });
+    }
+    if (value.action.mode === 'parallel' && !value.action.parallelIntent) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['action', 'parallelIntent'],
+        message: 'parallel action requires explicit parallel intent',
+      });
+    }
+  });
 
 const multiMentionStatusSchema = z.object({
   requestId: z.string().min(1),
@@ -73,6 +148,8 @@ export interface MultiMentionRouteDeps {
   router: AgentRouter;
   invocationRecordStore: IInvocationRecordStore;
   invocationTracker?: InvocationTracker | undefined;
+  /** Durable prompt-causality truth for the callback child. */
+  turnExecutionStore?: Pick<ITurnExecutionStore, 'get'>;
   /** F254 AC-A6: DeliveryCursorStore for freshness gate (seenCursor) */
   deliveryCursorStore?: DeliveryCursorStore;
   /** F254 AC-A7: Event log for recording held/forward decisions */
@@ -81,8 +158,16 @@ export interface MultiMentionRouteDeps {
   threadStore?: IThreadStore;
   /** F254 AC-C2: Redis client for FreshnessInvocationStateStore carrierTier lookup */
   redis?: import('@cat-cafe/shared/utils').RedisClient;
+  /** F167 Phase S: durable subject/action/slot single-flight admission. */
+  actionSuccessorAdmissionService?: Pick<
+    ActionSuccessorAdmissionService,
+    'admit' | 'markUnavailable' | 'markReturnedDelivered'
+  >;
   /** F122B B6: InvocationQueue for unified dispatch */
-  invocationQueue?: Pick<InvocationQueue, 'enqueue' | 'countAgentEntriesForThread' | 'hasQueuedAgentForCat' | 'list'>;
+  invocationQueue?: Pick<
+    InvocationQueue,
+    'enqueue' | 'countAgentEntriesForThread' | 'hasQueuedAgentForCat' | 'list' | 'getQueuedFreshnessMessagesForCat'
+  >;
   /** F122B B6: QueueProcessor for execution + response hook */
   queueProcessor?: {
     tryAutoExecute?(threadId: string): Promise<void>;
@@ -95,19 +180,36 @@ export interface MultiMentionRouteDeps {
       ) => void,
     ): void;
     unregisterEntryCompleteHook?(entryId: string): void;
+    markPromptMessagesSeen?(input: {
+      threadId: string;
+      userId: string;
+      catId: string;
+      invocationId: string;
+      messageIds: readonly string[];
+    }): Promise<void>;
   };
 }
 
 // ── Timeout tracking ────────────────────────────────────────────────
 const activeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-function scheduleTimeout(requestId: string, timeoutMinutes: number, log: FastifyBaseLogger): void {
+function scheduleTimeout(
+  requestId: string,
+  timeoutMinutes: number,
+  log: FastifyBaseLogger,
+  onTimeout?: () => Promise<void>,
+): void {
   const ms = timeoutMinutes * 60_000;
   const timer = setTimeout(() => {
     const orch = getMultiMentionOrchestrator();
     log.info({ requestId, timeoutMinutes }, '[F086] Multi-mention timeout fired');
     orch.handleTimeout(requestId);
     activeTimers.delete(requestId);
+    if (onTimeout) {
+      void onTimeout().catch((err) => {
+        log.error({ err, requestId }, '[F167-S] failed to mark timed-out action successors unavailable');
+      });
+    }
   }, ms);
   // Unref so it doesn't keep the process alive
   timer.unref();
@@ -122,8 +224,104 @@ function cancelTimeout(requestId: string): void {
   }
 }
 
+function registerMultiMentionCompletionHook(input: {
+  deps: MultiMentionRouteDeps;
+  queueProcessor: NonNullable<MultiMentionRouteDeps['queueProcessor']>;
+  entryId: string;
+  requestId: string;
+  catId: CatId;
+  threadId: string;
+  userId: string;
+  log: FastifyBaseLogger;
+}): void {
+  const orch = getMultiMentionOrchestrator();
+  input.queueProcessor.registerEntryCompleteHook?.(input.entryId, (_entryId, status, responseText) => {
+    if (status === 'canceled' || status === 'canceled_by_user') {
+      input.log.info(
+        { requestId: input.requestId, catId: input.catId },
+        '[F122B B6] multi-mention queue entry canceled, skipping recordResponse',
+      );
+      return;
+    }
+    const finalResponse = responseText || (status === 'failed' ? '[dispatch error]' : '');
+    const newStatus = orch.recordResponse(input.requestId, input.catId, finalResponse);
+    input.log.info(
+      { requestId: input.requestId, catId: input.catId, newStatus, responseLength: finalResponse.length },
+      '[F122B B6] multi-mention queue response recorded',
+    );
+    if (newStatus === 'done') {
+      cancelTimeout(input.requestId);
+      void flushResult(input.deps, input.requestId, input.threadId, input.userId, input.log);
+    }
+  });
+}
+
+function enqueueMultiMentionTarget(input: {
+  deps: MultiMentionRouteDeps;
+  invocationQueue: NonNullable<MultiMentionRouteDeps['invocationQueue']>;
+  queueProcessor: NonNullable<MultiMentionRouteDeps['queueProcessor']>;
+  requestId: string;
+  catId: CatId;
+  messageContent: string;
+  threadId: string;
+  userId: string;
+  ownerAuthProvenance: OwnerAuthProvenance;
+  initiator: CatId;
+  log: FastifyBaseLogger;
+  actionFence: ActionSuccessorFence | undefined;
+}): 'enqueued' | 'skipped' | 'depth_limited' | 'unavailable' {
+  const MAX_MM_DEPTH = 10;
+  if (input.invocationQueue.countAgentEntriesForThread(input.threadId) >= MAX_MM_DEPTH) {
+    input.log.warn(
+      { threadId: input.threadId, requestId: input.requestId, catId: input.catId },
+      '[F122B B6] multi-mention: depth limit reached',
+    );
+    return 'depth_limited';
+  }
+  if (!input.actionFence && input.invocationQueue.hasQueuedAgentForCat(input.threadId, input.catId)) {
+    input.log.info(
+      { threadId: input.threadId, requestId: input.requestId, catId: input.catId },
+      '[F122B B6] multi-mention: skipping duplicate agent entry',
+    );
+    return 'skipped';
+  }
+
+  const result = input.invocationQueue.enqueue({
+    threadId: input.threadId,
+    userId: input.userId,
+    ownerAuthProvenance: input.ownerAuthProvenance,
+    content: input.messageContent,
+    source: 'agent',
+    targetCats: [input.catId],
+    intent: 'execute',
+    autoExecute: true,
+    callerCatId: input.initiator,
+    ...(input.actionFence
+      ? {
+          actionSuccessorFence: input.actionFence,
+          idempotencyKey: `action:${input.actionFence.leaseId}:${input.actionFence.generation}:${input.catId}`,
+        }
+      : {}),
+  });
+
+  if (result.outcome === 'enqueued' && result.entry) {
+    registerMultiMentionCompletionHook({
+      deps: input.deps,
+      queueProcessor: input.queueProcessor,
+      entryId: result.entry.id,
+      requestId: input.requestId,
+      catId: input.catId,
+      threadId: input.threadId,
+      userId: input.userId,
+      log: input.log,
+    });
+    return 'enqueued';
+  }
+  return input.actionFence ? 'unavailable' : 'skipped';
+}
+
 // ── Dispatch via InvocationQueue (F122B B6) ─────────────────────────
-function dispatchViaQueue(
+async function dispatchViaQueue(
   deps: MultiMentionRouteDeps,
   requestId: string,
   targetCatIds: CatId[],
@@ -131,61 +329,51 @@ function dispatchViaQueue(
   context: string | undefined,
   threadId: string,
   userId: string,
+  ownerAuthProvenance: OwnerAuthProvenance,
   initiator: CatId,
   log: FastifyBaseLogger,
-): void {
+  actionFence?: ActionSuccessorFence,
+  actionCarrierDisposition?: ActionSuccessorCarrierDisposition,
+): Promise<void> {
   const { invocationQueue, queueProcessor } = deps;
   if (!invocationQueue || !queueProcessor) return;
-
-  const orch = getMultiMentionOrchestrator();
 
   const messageContent = [`[Multi-Mention from ${initiator}]`, question, ...(context ? ['---', context] : [])].join(
     '\n\n',
   );
 
+  const unavailable: CatId[] = [];
   for (const catId of targetCatIds) {
-    const MAX_MM_DEPTH = 10;
-    if (invocationQueue.countAgentEntriesForThread(threadId) >= MAX_MM_DEPTH) {
-      log.warn({ threadId, requestId, catId }, '[F122B B6] multi-mention: depth limit reached');
-      break;
-    }
-    if (invocationQueue.hasQueuedAgentForCat(threadId, catId)) {
-      log.info({ threadId, requestId, catId }, '[F122B B6] multi-mention: skipping duplicate agent entry');
-      continue;
-    }
-
-    const result = invocationQueue.enqueue({
+    const enqueueOutcome = enqueueMultiMentionTarget({
+      deps,
+      invocationQueue,
+      queueProcessor,
+      requestId,
+      catId,
+      messageContent,
       threadId,
       userId,
-      content: messageContent,
-      source: 'agent',
-      targetCats: [catId],
-      intent: 'execute',
-      autoExecute: true,
-      callerCatId: initiator,
+      ownerAuthProvenance,
+      initiator,
+      log,
+      actionFence,
     });
-
-    if (result.outcome === 'enqueued' && result.entry) {
-      queueProcessor.registerEntryCompleteHook?.(result.entry.id, (_entryId, status, responseText) => {
-        if (status === 'canceled' || status === 'canceled_by_user') {
-          log.info({ requestId, catId }, '[F122B B6] multi-mention queue entry canceled, skipping recordResponse');
-          return;
-        }
-        const finalResponse = responseText || (status === 'failed' ? '[dispatch error]' : '');
-        const newStatus = orch.recordResponse(requestId, catId, finalResponse);
-        log.info(
-          { requestId, catId, newStatus, responseLength: finalResponse.length },
-          '[F122B B6] multi-mention queue response recorded',
-        );
-        if (newStatus === 'done') {
-          cancelTimeout(requestId);
-          void flushResult(deps, requestId, threadId, userId, log);
-        }
-      });
+    if (enqueueOutcome === 'depth_limited') {
+      unavailable.push(...targetCatIds.slice(targetCatIds.indexOf(catId)));
+      break;
     }
+    if (enqueueOutcome === 'unavailable') unavailable.push(catId);
   }
 
-  void queueProcessor.tryAutoExecute?.(threadId);
+  await reconcileActionSuccessorEnqueue({
+    service: deps.actionSuccessorAdmissionService,
+    fence: actionFence,
+    disposition: actionCarrierDisposition,
+    unavailableCatIds: unavailable,
+    now: Date.now(),
+  });
+
+  await queueProcessor.tryAutoExecute?.(threadId);
 }
 
 // ── Legacy dispatch (direct routeExecution, fallback) ────────────────
@@ -197,6 +385,7 @@ async function dispatchToTarget(
   context: string | undefined,
   threadId: string,
   userId: string,
+  ownerAuthProvenance: OwnerAuthProvenance,
   initiator: CatId,
   log: FastifyBaseLogger,
 ): Promise<void> {
@@ -234,6 +423,7 @@ async function dispatchToTarget(
       targetCats: [targetCatId],
       intent: intent.intent,
       idempotencyKey: `mm-${requestId}-${targetCatId}`,
+      actionLeaseCarrier: { kind: 'none' },
     });
 
     if (createResult.outcome === 'duplicate') {
@@ -242,6 +432,7 @@ async function dispatchToTarget(
     }
 
     invocationId = createResult.invocationId;
+    invocationTracker?.bindExecutionId?.(threadId, [targetCatId], controller, invocationId);
 
     await invocationRecordStore.update(invocationId, {
       status: 'running',
@@ -263,8 +454,18 @@ async function dispatchToTarget(
         [targetCatId],
         intent,
         {
+          ownerAuthProvenance,
+          humanDispositionInvocationOrigin: 'callback',
           signal: controller.signal,
+          ...createA2ASlotTrackingBridge(invocationTracker, controller, createResult.invocationId),
+          ...(deps.invocationQueue
+            ? {
+                deferA2AEnqueue: (entry: Parameters<InvocationQueue['enqueue']>[0]) =>
+                  deps.invocationQueue?.enqueue({ ...entry, ownerAuthProvenance }),
+              }
+            : {}),
           parentInvocationId: invocationId,
+          onPromptMessagesExposed: (input) => deps.queueProcessor?.markPromptMessagesSeen?.(input) ?? Promise.resolve(),
           // F222 P1: Multi-mention fallback dispatch is callback-authenticated cat-to-cat
           // work (callerCatId = record.catId), consistent with queue path source:'agent'.
           frustrationAutoIssueEligible: false,
@@ -281,6 +482,9 @@ async function dispatchToTarget(
           intentModeBroadcast = true;
         }
         if (controller.signal.aborted) break;
+        if ((msg.type === 'done' || msg.type === 'error') && msg.catId) {
+          invocationTracker?.completeSlot?.(threadId, msg.catId, controller);
+        }
 
         // Capture text + tool usage for response aggregation
         if (msg.catId === targetCatId) {
@@ -457,7 +661,18 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
     const record = requireCallbackAuth(request, reply);
     if (!record) return;
 
-    const body = multiMentionSchema.parse(request.body);
+    const parsedBody = multiMentionSchema.safeParse(request.body);
+    if (!parsedBody.success) {
+      return reply.status(400).send({ status: 'invalid_request', issues: parsedBody.error.issues });
+    }
+    const body = parsedBody.data;
+    const carrierUsage = classifyMultiMentionCarrierUsage({
+      targetCount: body.targets.length,
+      hasAction: body.action !== undefined,
+    });
+    successorMultiMentionTotal.add(1);
+    if (carrierUsage.singleTarget) successorSingleTargetMultiMention.add(1);
+    if (carrierUsage.unfencedSingleTarget) successorUnfencedSingleTargetMultiMention.add(1);
 
     // F182 AC-C2: A' class — validate targets + callbackTo are available (contract 400 on disabled)
     const targetCatIds: CatId[] = [];
@@ -481,6 +696,36 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
 
     const orch = getMultiMentionOrchestrator();
     const callerCatId = record.catId;
+
+    let turnExecution: TurnExecutionRecord | null = null;
+    if (deps.turnExecutionStore) {
+      try {
+        turnExecution = await deps.turnExecutionStore.get(record.invocationId);
+      } catch (err) {
+        request.log.error(
+          { err, invocationId: record.invocationId },
+          '[turn-execution] multi-mention ledger read failed',
+        );
+        return reply.status(503).send({ status: 'turn_execution_ledger_unavailable' });
+      }
+      const expectedParentInvocationId = record.parentInvocationId ?? record.invocationId;
+      if (!turnExecution) {
+        return reply.status(409).send({ status: 'turn_execution_not_found' });
+      }
+      if (
+        turnExecution.status !== 'running' ||
+        turnExecution.threadId !== record.threadId ||
+        turnExecution.userId !== record.userId ||
+        turnExecution.catId !== callerCatId ||
+        turnExecution.parentInvocationId !== expectedParentInvocationId
+      ) {
+        request.log.error(
+          { invocationId: record.invocationId, expectedParentInvocationId, turnExecution },
+          '[turn-execution] multi-mention auth/ledger scope mismatch',
+        );
+        return reply.status(409).send({ status: 'turn_execution_scope_mismatch' });
+      }
+    }
 
     // Anti-cascade guard: reject if caller is a target in an active multi-mention
     if (orch.isActiveTarget(record.threadId, callerCatId)) {
@@ -520,11 +765,10 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
         };
 
         // F254 AC-C2/C3: Derive RuntimeCapabilityDescriptor from stored carrierTier.
-        // Provider-only fallback (gpt52 terminal review P1): non-Claude services
-        // don't write carrierTier to Redis, so derive from provider alone for
-        // ASYNC_CLOUD_PROVIDERS (openai).
+        // Provider-only fallback (gpt52 terminal review P1/R2): preserve the
+        // most specific provider marker when present (e.g. openai-chatgpt-pro).
         const callerCatConfig = catRegistry.tryGet(callerCatId as string);
-        const callerProvider = callerCatConfig?.config?.clientId ?? 'unknown';
+        const callerProvider = resolveFreshnessDescriptorProvider(callerCatConfig?.config);
         let freshnessDescriptor;
         if (deps.redis && record.invocationId) {
           const stateStore = new FreshnessInvocationStateStore(deps.redis);
@@ -553,6 +797,9 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
           queueChecker: deps.invocationQueue ? createQueueChecker(deps.invocationQueue) : undefined,
           // F254 AC-C3: descriptor parameterizes held/notice behavior per carrier tier
           descriptor: freshnessDescriptor,
+          ...(turnExecution?.causal?.coveredMessageIds
+            ? { coveredMessageIds: turnExecution.causal.coveredMessageIds }
+            : {}),
         });
         if (freshnessDecision.decision === 'held') {
           return {
@@ -574,6 +821,52 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
       }
     }
 
+    let actionFence: ActionSuccessorFence | undefined;
+    let actionAdmissionOutcome: ActionSuccessorCarrierAdmissionOutcome | undefined;
+    const actionCarrierDisposition: ActionSuccessorCarrierDisposition | undefined = body.action
+      ? body.action.returnToPredecessor
+        ? 'return'
+        : 'successor_dispatch'
+      : undefined;
+    if (body.action) {
+      if (!deps.actionSuccessorAdmissionService || !deps.invocationQueue || !deps.queueProcessor) {
+        successorActionFenceUnavailable.add(1);
+        protocolActionWithoutCustodyTotal.add(1);
+        return reply.status(503).send({ status: 'action_fence_unavailable' });
+      }
+      try {
+        const admission = await deps.actionSuccessorAdmissionService.admit({
+          tenantScope: record.userId,
+          actorCatId: callerCatId,
+          sourceThreadId: record.threadId,
+          targetThreadId: record.threadId,
+          holderCatIds: targetCatIds,
+          dispatchId: `multi-mention:${body.idempotencyKey}`,
+          evidenceRef: `callback:${record.invocationId}:${body.idempotencyKey}`,
+          now: Date.now(),
+          action: body.action,
+        });
+        if (!admission.admit) {
+          if (admission.outcome === 'subject_terminal') {
+            return reply.send({ status: admission.outcome, terminal: admission.terminal });
+          }
+          if (admission.outcome !== 'replayed') {
+            return reply.send({ status: admission.outcome, actionLease: admission.lease });
+          }
+          actionAdmissionOutcome = 'replayed';
+          actionFence = buildActionSuccessorFence(admission.lease, `multi-mention:${body.idempotencyKey}`);
+        } else {
+          actionAdmissionOutcome = admission.outcome;
+          actionFence = admission.fence;
+        }
+      } catch (err) {
+        request.log.warn({ err, action: body.action }, '[F167-S] invalid action successor admission');
+        return reply
+          .status(400)
+          .send({ status: 'invalid_action', error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
     const createParams = {
       threadId: record.threadId,
       initiator: callerCatId,
@@ -592,17 +885,44 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
 
     // If already created (idempotency), return existing
     if (mmRequest.status !== 'pending') {
+      if (actionFence && actionCarrierDisposition === 'return') {
+        const accepted =
+          deps.invocationQueue
+            ?.list(record.threadId, record.userId)
+            .some((entry) => actionSuccessorFencesMatch(entry.actionSuccessorFence, actionFence)) ?? false;
+        await reconcileActionSuccessorEnqueue({
+          service: deps.actionSuccessorAdmissionService,
+          fence: actionFence,
+          disposition: actionCarrierDisposition,
+          unavailableCatIds: accepted ? [] : targetCatIds,
+          now: Date.now(),
+        });
+      }
       return reply.send({ requestId: mmRequest.id, status: mmRequest.status });
     }
 
     // Start + schedule timeout
     orch.start(mmRequest.id);
-    scheduleTimeout(mmRequest.id, mmRequest.timeoutMinutes, request.log);
+    const actionAdmissionService = deps.actionSuccessorAdmissionService;
+    scheduleTimeout(
+      mmRequest.id,
+      mmRequest.timeoutMinutes,
+      request.log,
+      actionFence && actionCarrierDisposition !== 'return' && actionAdmissionService
+        ? () =>
+            actionAdmissionService.markUnavailable({
+              fence: actionFence,
+              holderCatIds: targetCatIds,
+              evidenceRef: `timeout:${actionFence.dispatchId}`,
+              now: Date.now(),
+            })
+        : undefined,
+    );
 
     // Dispatch to all targets in parallel (fire and forget)
     // F122B B6: Use InvocationQueue when available, legacy direct dispatch as fallback
     if (deps.invocationQueue && deps.queueProcessor) {
-      dispatchViaQueue(
+      await dispatchViaQueue(
         deps,
         mmRequest.id,
         targetCatIds,
@@ -610,8 +930,11 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
         body.context,
         record.threadId,
         record.userId,
+        record.ownerAuthProvenance,
         callerCatId,
         request.log,
+        actionFence,
+        actionCarrierDisposition,
       );
     } else {
       for (const targetCatId of targetCatIds) {
@@ -623,6 +946,7 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
           body.context,
           record.threadId,
           record.userId,
+          record.ownerAuthProvenance,
           callerCatId,
           request.log,
         );
@@ -642,7 +966,19 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
       '[F086] Multi-mention request created + dispatched',
     );
 
-    return reply.send({ requestId: mmRequest.id, status: mmRequest.status });
+    return reply.send({
+      requestId: mmRequest.id,
+      status: mmRequest.status,
+      ...(actionFence && actionAdmissionOutcome
+        ? {
+            actionLease: {
+              leaseId: actionFence.leaseId,
+              generation: actionFence.generation,
+              outcome: actionAdmissionOutcome,
+            },
+          }
+        : {}),
+    });
   });
 
   // GET /api/callbacks/multi-mention-status

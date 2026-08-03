@@ -172,7 +172,7 @@ Daemon 模式将日志输出到项目根目录（或运行时 worktree 根目录
 ```ini
 # /etc/systemd/system/clowder-ai.service
 [Unit]
-Description=Clowder AI (Cat Café)
+Description=Clowder AI
 After=network.target
 
 [Service]
@@ -402,7 +402,8 @@ GITHUB_REVIEW_IMAP_PORT=993
 # GITHUB_REVIEW_IMAP_HOST=outlook.office365.com
 # GITHUB_REVIEW_IMAP_PORT=993
 
-# GitHub MCP 工具（用于 PR 操作 + 获取 review 内容）
+# 可选的后台 GitHub API token，仅用于获取 review 内容。
+# 仓库操作统一使用已认证的 gh CLI；GitHub MCP 已退休。
 GITHUB_MCP_PAT=ghp_...
 ```
 
@@ -591,7 +592,7 @@ API 自动接受以下来源的请求：
 - `localhost` / `127.0.0.1`（任意端口）
 - 你设置的 `FRONTEND_URL`
 
-如果你是直接通过局域网 / Tailscale IP 打开 Cat Cafe（例如 `http://192.168.x.x:3003` 或 `http://100.x.x.x:3003`），还需要在 `.env` 里加上：
+如果你是直接通过局域网 / Tailscale IP 打开 Clowder AI（例如 `http://192.168.x.x:3003` 或 `http://100.x.x.x:3003`），还需要在 `.env` 里加上：
 
 ```bash
 API_SERVER_HOST=0.0.0.0

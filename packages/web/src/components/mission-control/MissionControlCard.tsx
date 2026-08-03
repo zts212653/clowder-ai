@@ -1,7 +1,9 @@
 'use client';
 
 import type { BacklogItem } from '@cat-cafe/shared';
+import { ExpandableProse } from '@/components/content-overflow';
 import { useCatNameResolver } from '@/hooks/useCatNameResolver';
+import { isRowPrimaryActionTarget } from '@/utils/row-primary-action';
 
 interface MissionControlCardProps {
   item: BacklogItem;
@@ -18,24 +20,28 @@ const PRIORITY_CLASS: Record<BacklogItem['priority'], string> = {
 
 export function MissionControlCard({ item, selected, onSelect }: MissionControlCardProps) {
   const resolveCatName = useCatNameResolver();
+  const selectItem = () => onSelect(item.id);
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(item.id)}
+    // biome-ignore lint/a11y: the nested native button owns keyboard/screen-reader semantics; the article restores the surrounding pointer hit area
+    <article
+      onClick={(event) => {
+        if (isRowPrimaryActionTarget(event.target, event.currentTarget)) selectItem();
+      }}
       className={[
-        'w-full rounded-xl p-3 text-left transition-all',
+        'w-full cursor-pointer rounded-xl p-3 text-left transition-all',
         selected
           ? 'bg-[var(--console-card-bg)] shadow-[0_8px_22px_rgba(43,33,26,0.04)] ring-1 ring-[var(--console-button-emphasis)]'
           : 'bg-[var(--console-card-bg)] shadow-[0_8px_22px_rgba(43,33,26,0.04)] hover:bg-[var(--console-hover-bg)]',
       ].join(' ')}
     >
-      <div className="mb-2 flex items-center gap-2">
+      <button type="button" onClick={selectItem} className="mb-2 flex w-full items-center gap-2 text-left">
         <span className="text-xs font-semibold text-cafe">{item.title}</span>
         <span className={`rounded-full px-2 py-0.5 text-micro font-semibold ${PRIORITY_CLASS[item.priority]}`}>
           {item.priority.toUpperCase()}
         </span>
-      </div>
-      <p className="line-clamp-2 text-xs leading-relaxed text-cafe-secondary">{item.summary}</p>
+        <span className="ml-auto text-micro font-semibold text-cafe-accent">查看</span>
+      </button>
+      <ExpandableProse text={item.summary} lines={2} contentClassName="text-xs leading-relaxed text-cafe-secondary" />
       {item.tags.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">
           {item.tags.map((tag) => (
@@ -81,6 +87,6 @@ export function MissionControlCard({ item, selected, onSelect }: MissionControlC
           ))}
         </div>
       )}
-    </button>
+    </article>
   );
 }

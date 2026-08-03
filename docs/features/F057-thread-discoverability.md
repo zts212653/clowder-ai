@@ -28,7 +28,7 @@ created: 2026-03-04
 
 ### 期望体验
 
-operator打开 Cat Café Hub 侧边栏：
+operator打开 Clowder AI Hub 侧边栏：
 1. **置顶区**里最近有猫回复的 thread 自动浮到最前面，不用翻
 2. **非置顶区**也按活跃度排序，刚有动静的在上面
 3. 想找特定 thread 时，**搜索框**输入名字或 ID 就能找到

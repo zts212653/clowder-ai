@@ -196,6 +196,19 @@ describe('L0 Staging Protocol PR-B-impl (ADR-038)', () => {
       assert.ok(out.includes('[爪感差:'));
     });
 
+    sourceOnlyTest('wipers routes actionable friction without copying or guessing', () => {
+      const out = buildStagingPrepend('codex');
+      assert.match(out, /cat_cafe_capture_paw_feel/, 'current invocation must declare typed capture intent');
+      assert.match(out, /原\s*turn.*单独一行/, 'typed report marker must be a standalone source line');
+      assert.match(out, /无此能力.*ambiguous.*兼容采集/, 'agent-key mode must retain a truthful fallback');
+      assert.match(out, /落盘.*sourceMessageId/, 'server must bind only the future source message');
+      assert.match(out, /(?:查证|验证).*(?:owner|归属).*thread/i, 'action routing must verify the owning thread');
+      assert.match(out, /sourceMessageId/, 'cross-thread follow-up must reference the canonical source message');
+      assert.match(out, /不复制\s*marker/, 'the literal marker must stay in the source turn');
+      assert.match(out, /(?:F128|propose_thread)/, 'unresolved ownership must fail closed to an approval proposal');
+      assert.match(out, /禁止猜投/, 'the contract must forbid choosing a nearby thread by guess');
+    });
+
     sourceOnlyTest('header indicates ADR-038 + outside L0 cap', () => {
       const out = buildStagingPrepend('opus-47');
       assert.ok(out.includes('ADR-038'));
@@ -231,17 +244,33 @@ describe('L0 Staging Protocol PR-B-impl (ADR-038)', () => {
       },
     );
 
-    sourceOnlyTest('Cloud R5 P2 #2239: ADR-031 harness 三层反射 rendered (disentangled from F218 trim)', () => {
-      // Cloud R5 P2: trimming F218 dropped the "harness 改动按软+硬+eval 三层
-      // 落地" reflex along with source-audit's 对象适用性 dimension. Cloud asked
-      // to retain the triggers OR move them to an always-injected replacement.
-      // 对象适用性 restored in L0; harness 三层 disentangled into its own
-      // staging reflex (always-injected per turn, non-security-class so no
-      // user-override concern per cloud R2 L33 boundary).
+    sourceOnlyTest('LL-095 v2: 机制选择反射 rendered (discriminator, not slogan)', () => {
+      // History: born unconditional in PR #2005 (c3f6812ad, "harness 改动按
+      // 软+硬+eval三层落地"), retained verbatim by PR #2239 R5 disentangle.
+      // 2026-07-19 thread_mrs0y3pjcoc0170x: the unconditional slogan pushed a
+      // pure engineering fix (codex CLI stall) into "attach an eval" — LL-095.
+      // v1 fix (c76dd9ce0) added an actor-based split; codex-sol audit replaced
+      // it with problem-type discrimination. This test now guards the
+      // DISCRIMINATOR (which question → which mechanism), not slogan presence —
+      // the old `includes('软+硬+eval 三层落地')` assertion guarded exactly the
+      // overbroad phrasing that caused the misfire.
       const out = buildStagingPrepend('opus-47');
-      assert.ok(out.includes('harness 三层反射'), 'harness 三层反射 title must be rendered (R5 disentangle from F218)');
-      assert.ok(out.includes('软+硬+eval'), 'harness 三层 methodology "软+硬+eval" must be rendered');
-      assert.ok(out.includes('ADR-031'), 'harness 三层 reflex must reference ADR-031');
+      assert.ok(out.includes('机制选择反射'), '机制选择反射 title must be rendered (LL-095 v2)');
+      assert.ok(out.includes('先判要回答的问题'), 'entry discriminator "先判要回答的问题" must be rendered');
+      assert.ok(out.includes('同一改动可含多类问题'), 'compound changes must be split by claim');
+      assert.ok(out.includes('按 claim 逐项选机制'), 'gray-zone rule must select per claim, not per file');
+      assert.ok(out.includes('不是待补齐清单'), 'toolbox-not-checklist stance must be rendered (anti-ritual guard)');
+      assert.ok(out.includes('不盘点未选项'), 'unused mechanisms must not become N/A checklist slots');
+      assert.ok(out.includes('默认不挂 Eval Hub'), 'runtime signal default boundary must preserve eval promotion path');
+      assert.ok(out.includes('ADR-031'), 'reflex must reference ADR-031 (§机制选择)');
+      assert.ok(
+        !out.includes('三层落地'),
+        'the unconditional "按三层落地" slogan must NOT come back (LL-095: 触发词定义域 > 规则适用域)',
+      );
+      assert.ok(
+        !out.includes('软/硬/eval 是可选工具箱'),
+        'anti-checklist guidance must not keep the old three-slot frame as its lead-in',
+      );
     });
 
     sourceOnlyTest('EXECUTION_CONTEXT 运行模式能力 matrix rendered (operator direct investment 2026-06-13)', () => {
@@ -323,16 +352,17 @@ describe('L0 Staging Protocol PR-B-impl (ADR-038)', () => {
       );
     });
 
-    sourceOnlyTest('staging tokens (measured) match manifest declared (within ±20% slack)', () => {
+    sourceOnlyTest('staging item estimates track rendered body; only compact header overhead remains', () => {
       const m = loadStagingManifest();
       const declared = m.items.reduce((sum, it) => sum + it.estimated_tokens, 0);
       const out = buildStagingPrepend('opus-47');
       const measured = tok(out);
-      // Manifest is the source-of-truth for budget tracking; allow slack for headers/markdown.
-      // If drift exceeds 50%, the manifest should be updated.
+      const headerOverhead = measured - declared;
+      // The item estimates describe the five body clauses. The rendered prepend
+      // additionally carries one compact header, which is intentionally bounded.
       assert.ok(
-        measured >= declared * 0.5 && measured <= declared * 3,
-        `staging measured ${measured} tokens vs declared ${declared} (manifest may need update)`,
+        headerOverhead >= 0 && headerOverhead <= 40,
+        `staging measured ${measured} tokens vs declared body ${declared}; header overhead ${headerOverhead} must stay within 0..40`,
       );
     });
   });

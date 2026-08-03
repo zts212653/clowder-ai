@@ -46,6 +46,14 @@ function createMockMessageStore() {
   };
 }
 
+function claimedA2ASlotOptions() {
+  return {
+    invocationController: new AbortController(),
+    trackA2ASlot: () => true,
+    completeA2ASlots: () => {},
+  };
+}
+
 describe('A2A Chain Integration (AgentRouter end-to-end)', () => {
   test('complete A2A chain: opus → @缅因猫 → codex invoked with previous context', async () => {
     const { AgentRouter } = await import('../../dist/domains/cats/services/agents/routing/AgentRouter.js');
@@ -67,7 +75,15 @@ describe('A2A Chain Integration (AgentRouter end-to-end)', () => {
     );
 
     const messages = [];
-    for await (const msg of router.route('user-1', '@opus 写个 hello world')) {
+    for await (const msg of router.route(
+      'user-1',
+      '@opus 写个 hello world',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      claimedA2ASlotOptions(),
+    )) {
       messages.push(msg);
     }
 
@@ -141,7 +157,15 @@ describe('A2A Chain Integration (AgentRouter end-to-end)', () => {
       );
 
       const messages = [];
-      for await (const msg of router.route('user-1', '@opus implement feature')) {
+      for await (const msg of router.route(
+        'user-1',
+        '@opus implement feature',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        claimedA2ASlotOptions(),
+      )) {
         messages.push(msg);
       }
 

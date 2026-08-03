@@ -36,8 +36,11 @@ export function assertRedisIsolationOrThrow(redisUrl, suiteName) {
   }
 
   const db = parsed.pathname.replace('/', '') || '0';
-  if (db !== '15') {
-    throw new Error(`[${suiteName}] REDIS_URL must use /15 test DB for isolation, got /${db}`);
+  const assignedDatabase = process.env.CAT_CAFE_REDIS_TEST_DB_ASSIGNED;
+  const hasValidAssignedDatabase = assignedDatabase === db && /^\d+$/.test(db) && Number(db) >= 15;
+  const manifestBackedRunner = Boolean(process.env.CAT_CAFE_REDIS_TEST_DB_MANIFEST);
+  if ((manifestBackedRunner || db !== '15') && !hasValidAssignedDatabase) {
+    throw new Error(`[${suiteName}] REDIS_URL must use /15 or a manifest-assigned test DB for isolation, got /${db}`);
   }
 }
 

@@ -35,6 +35,7 @@ export function createWakeCatFn(deps: WakeCatDeps): WakeCatFn {
     const result = invocationQueue.enqueue({
       threadId,
       userId,
+      ownerAuthProvenance: 'unknown',
       content: briefing,
       source: 'agent',
       targetCats: [catId],

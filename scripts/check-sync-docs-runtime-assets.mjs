@@ -134,6 +134,16 @@ export const IGNORE_PATHS = [
   // already form the env-aware bridge. IGNORE here just tells the guard
   // "the sanitizer handles this literal at sync time, no outbound sync
   // asset needs to be added".
+  // F221 Phase B: writeVignette.ts references docs/taste/vignettes/ and
+  // docs/taste/index.md at runtime for approved taste proposals. These paths
+  // are local-install-only — the open-source target has no taste data.
+  // Spec: "Outbound sync 安全：docs/taste/ 不在 allowlist（白名单模式，已確認）"
+  {
+    pathOrPrefix: 'docs/taste',
+    reason:
+      'F221 taste vignette writer (writeVignette.ts) reads/writes docs/taste/ at runtime on the private install. ' +
+      'Open-source target has no taste data; spec explicitly excludes docs/taste/ from outbound sync allowlist.',
+  },
   {
     exact: 'docs/BACKLOG.md',
     reason:

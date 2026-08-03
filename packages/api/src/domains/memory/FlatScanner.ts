@@ -110,6 +110,7 @@ export class FlatScanner implements RepoScanner {
       },
       provenance: { tier: 'derived', source: rel },
       rawContent: content,
+      passages: [],
     };
   }
 

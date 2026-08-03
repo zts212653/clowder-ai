@@ -220,6 +220,10 @@ export interface CommunityRepoConfig {
   readonly repo: string;
   readonly guardThreadId: string;
   readonly guardCatId: string;
+  /** Missing legacy values hydrate fail-closed as observe_only. */
+  readonly reviewMode: 'observe_only' | 'maintainer_review';
+  /** Optional allows readiness only when no cloud review was requested. */
+  readonly cloudReviewPolicy: 'optional' | 'required';
   readonly createdAt: number;
   readonly updatedAt: number;
 }

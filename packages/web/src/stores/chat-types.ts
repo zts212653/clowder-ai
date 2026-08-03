@@ -1,8 +1,19 @@
-import type { CliDiagnostics, ReplyPreview, SchedulerMessageExtra } from '@cat-cafe/shared';
+import type {
+  CliDiagnostics,
+  FreshnessSupplementProjection,
+  PublishedFreshnessAnnotation,
+  QueueMessageReceipt,
+  ReplyPreview,
+  SchedulerMessageExtra,
+  TurnExecutionMessageProjection,
+} from '@cat-cafe/shared';
+import type { EvidenceSourceType } from '@/types/evidence';
 
 // F212 Phase B: re-export so existing web imports (panel + tests) can pull the contract via the
 // canonical chat-types entry point without each consumer reaching into @cat-cafe/shared.
 export type { CliDiagnostics } from '@cat-cafe/shared';
+
+export type ThreadSystemKind = 'connector_hub' | 'eval_domain' | 'cat_bedroom';
 
 /** Content block types matching backend MessageContent */
 export interface TextContent {
@@ -51,9 +62,11 @@ export interface EvidenceResultData {
   title: string;
   anchor: string;
   snippet: string;
-  confidence: 'high' | 'mid' | 'low';
-  sourceType: 'decision' | 'phase' | 'discussion' | 'commit';
+  matchRank: 'high' | 'mid' | 'low';
+  retrievalScore?: number;
+  sourceType: EvidenceSourceType;
   authority?: string;
+  updatedAt?: string;
 }
 
 export interface EvidenceData {
@@ -67,6 +80,11 @@ export interface ToolEvent {
   type: 'tool_use' | 'tool_result';
   label: string;
   detail?: string;
+  resultMeta?: string;
+  /** Native provider pair key; Hub UI event ids may differ between use/result rows. */
+  toolUseId?: string;
+  /** Persisted tool result status; replay adapter maps error status to failed tool UI. */
+  status?: 'completed' | 'error';
   timestamp: number;
 }
 
@@ -230,6 +248,12 @@ export interface ConnectorSourceData {
   sender?: { id: string; name?: string };
 }
 
+export interface MessageRecoveryExtra {
+  kind: 'f254_withheld_message';
+  cvoDecisionRef: string;
+  recoveredAt: number;
+}
+
 /** Structured identity-bearing notice retained for reactive render-time projection. */
 export interface SystemInfoProjection {
   readonly v: 1;
@@ -252,6 +276,8 @@ export interface ChatMessage {
   timestamp: number;
   /** F098-D: When a queued message was actually dequeued and delivered to a cat */
   deliveredAt?: number;
+  /** Stable server timeline score when publication and delivery differ. */
+  timelineOrderAt?: number;
   isStreaming?: boolean;
   summary?: {
     id: string;
@@ -287,6 +313,10 @@ export interface ChatMessage {
       cliStdout?: string;
       speechContent?: string;
     };
+    /** Immutable child execution identity; terminal lifecycle is read from the ledger API. */
+    turnExecution?: TurnExecutionMessageProjection;
+    /** Non-body child executions attached to the visible turn they assisted. */
+    auxiliaryTurnExecutions?: TurnExecutionMessageProjection[];
     /** F098-C1: Explicit target cats from post_message API */
     targetCats?: string[];
     /** #814: True when message originated from an explicit post_message callback (not stream duplicate) */
@@ -305,6 +335,33 @@ export interface ChatMessage {
       reasonKind: 'needs_bootstrap' | 'needs_confirmation' | 'files_missing';
       invocationId?: string;
     };
+    /** F254 Phase E: identity-bound catch projection, rebuilt from closure truth. */
+    freshnessClosure?: {
+      closureId: string;
+      status: 'catching_up' | 'blocked';
+      sourceInvocationId?: string;
+      sourceMessageId?: string;
+      turnInvocationId?: string;
+      originTriggerMessageId?: string | null;
+      blockedReason?: string;
+      replayUnsafeToolNames?: string[];
+      updatedAt?: number;
+      /** Shared schema guarantees null origin only for pre-lineage legacy data. */
+      legacy?: boolean;
+    };
+    /** ADR-042 exact-boundary fact attached to every glass-box-published answer. */
+    freshness?: PublishedFreshnessAnnotation;
+    /** ADR-042 additive reply provenance; separate from recovery provenance. */
+    supplement?: {
+      lineageId: string;
+      supplementId: string;
+      seq: 1 | 2;
+      originalMessageId: string;
+    };
+    /** Durable supplement lifecycle projected onto the published original. */
+    freshnessSupplement?: FreshnessSupplementProjection;
+    /** F264: server-derived durable per-target message receipt. */
+    queueReceipt?: QueueMessageReceipt;
     /**
      * F173 a2a-handoff bug fix: marker for system messages that must be
      * timestamp-ordered into the message list (not appended at end).
@@ -314,9 +371,11 @@ export interface ChatMessage {
      * pipeline race; without marker it ends up visually after the bubble it
      * should precede.
      */
-    systemKind?: 'a2a_routing' | 'context_briefing';
+    systemKind?: 'a2a_routing' | 'context_briefing' | 'freshness_closure';
     /** Machine-readable A2A route metadata. The visible pill text is human-readable; this survives F5. */
     a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string };
+    /** F254 incident salvage: durable provenance for a message restored at its original time. */
+    recovery?: MessageRecoveryExtra;
     /** Original visible system_info payload; content remains the persisted fallback copy. */
     systemInfo?: SystemInfoProjection;
   };
@@ -382,8 +441,8 @@ export interface Thread {
   deletedAt?: number | null;
   /** F087: operator Bootcamp onboarding state. */
   bootcampState?: BootcampStateV1;
-  /** F192 livefix: System thread kind for sidebar grouping (connector_hub | eval_domain). */
-  systemKind?: 'connector_hub' | 'eval_domain';
+  /** System thread kind for sidebar grouping, including F255 private cat bedrooms. */
+  systemKind?: ThreadSystemKind;
   /** F088 Phase G: Connector Hub thread state — marks this thread as an IM Hub. */
   connectorHubState?: ConnectorHubStateV1;
   /** F187: User-defined label IDs for thread categorization. */
@@ -500,6 +559,8 @@ export interface CatInvocationInfo {
   taskProgress?: TaskProgressState;
   /** F118 Phase C: Latest liveness warning snapshot */
   livenessWarning?: LivenessWarningSnapshot;
+  /** F254 D2: canonical Codex app-server protocol stage, consumed by ThreadExecutionBar. */
+  appServerLifecycle?: AppServerLifecycleSnapshot;
   /** #939 part A (kimi auth dual-path): Latest provider capability reports keyed by capability
    *  name (e.g. 'thinking', 'image_input'). Backend emits these as `system_info` events with
    *  inner type `provider_capability`. Stored silently — MUST NOT render as a user-facing
@@ -508,6 +569,32 @@ export interface CatInvocationInfo {
    *  (tooltip / status badge) is a future follow-up; for now the data is preserved here so
    *  such UI can read it. */
   providerCapabilities?: Record<string, ProviderCapabilityReport>;
+}
+
+export type AppServerLifecycleStage =
+  | 'child_spawned'
+  | 'initialized'
+  | 'thread_ready'
+  | 'turn_accepted'
+  | 'active'
+  | 'completed'
+  | 'interrupted'
+  | 'failed'
+  | 'closing'
+  | 'closed';
+
+export interface AppServerLifecycleSnapshot {
+  stage: AppServerLifecycleStage;
+  lastActivityAt: number;
+  recoveryAttempt: number;
+  threadId?: string;
+  turnId?: string;
+  turnStartSent: boolean;
+  turnAccepted: boolean;
+  itemObserved: boolean;
+  interruptReason?: 'user_cancel' | 'timeout';
+  failureReason?: string;
+  cleanupError?: string;
 }
 
 /** #939 part A (kimi auth dual-path): per-capability report from a provider backend.
@@ -527,6 +614,9 @@ export interface LivenessWarningSnapshot {
   silenceDurationMs: number;
   cpuTimeMs?: number;
   processAlive: boolean;
+  firstEventAt?: number | null;
+  lastEventAt?: number | null;
+  lastEventType?: string | null;
   receivedAt: number;
 }
 
@@ -563,6 +653,8 @@ export interface QueueEntry {
   targetCats: string[];
   intent: string;
   status: 'queued' | 'processing';
+  /** F254 canonical per-target read projection, hydrated from GET /queue after F5. */
+  targetStates?: Record<string, 'queued' | 'notified' | 'awakened' | 'seen' | 'failed' | 'steering' | 'handled'>;
   createdAt: number;
   /** F122B: auto-execute without waiting for steer */
   autoExecute?: boolean;
@@ -571,7 +663,7 @@ export interface QueueEntry {
   /** F175: dequeue priority */
   priority?: 'urgent' | 'normal';
   /** F175: source category for visual grouping */
-  sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' | 'continuation' | 'issue';
+  sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' | 'continuation' | 'issue' | 'freshness';
   /** Queue-internal dedup key for continuation work. */
   continuationKey?: string;
   /** F175: explicit dequeue position from drag-reorder */
@@ -582,6 +674,8 @@ export interface QueueEntry {
     contentBlocks?: ReadonlyArray<{ type: string; url?: string; text?: string; alt?: string }>;
     replyTo?: string;
   };
+  /** F264: same durable receipt projection used by the terminal timeline bubble. */
+  queueReceipt?: QueueMessageReceipt;
 }
 
 /** #706: Typed composer draft for recall-edit and cross-feature insert.

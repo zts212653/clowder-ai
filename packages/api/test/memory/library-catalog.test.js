@@ -161,7 +161,7 @@ describe('LibraryCatalog', () => {
     assert.equal(routable[0].id, 'project:pub');
   });
 
-  it('getRoutable returns explicit collections regardless of sensitivity', () => {
+  it('getRoutable returns an explicit private collection only with a server authorization grant', () => {
     catalog.register({
       id: 'world:secret',
       kind: 'world',
@@ -169,13 +169,14 @@ describe('LibraryCatalog', () => {
       displayName: 'Secret',
       root: '/tmp',
       sensitivity: 'private',
+      ownerUserId: 'owner-1',
       scannerLevel: 0,
       indexPolicy: { autoRebuild: true },
       reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: false },
       createdAt: '2026-05-03',
       updatedAt: '2026-05-03',
     });
-    const routable = catalog.getRoutable('collection', ['world:secret']);
+    const routable = catalog.getRoutable('collection', ['world:secret'], ['world:secret']);
     assert.equal(routable.length, 1);
   });
 

@@ -11,11 +11,11 @@ function truncateArg(val: string, max = 60): string {
   return val.length > max ? `${val.slice(0, max - 3)}...` : val;
 }
 
-/** Regex patterns for extracting args from truncated JSON (safeJsonPreview truncates at 200 chars) */
+/** Regex patterns for extracting args from legacy persisted details that may contain truncated JSON. */
 const ARG_KEYS = ['file_path', 'command', 'pattern', 'url', 'query', 'prompt'] as const;
 
 /** Extract primary argument from JSON tool input detail for inline display.
- *  Handles both valid and truncated JSON (common when safeJsonPreview cuts at 200 chars). */
+ *  Handles both current valid JSON and legacy truncated JSON. */
 function extractPrimaryArg(detail?: string): string | undefined {
   if (!detail) return undefined;
   try {

@@ -143,6 +143,7 @@ describe('Federated search integration (real SQLite stores)', () => {
     const result = await resolver.resolve('strategy', {
       dimension: 'collection',
       collections: ['world:restricted'],
+      authorizedCollections: ['world:restricted'],
     });
 
     assert.ok(result.collectionGroups);

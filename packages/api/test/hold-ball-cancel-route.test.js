@@ -182,6 +182,47 @@ describe('F167 Phase J AC-J1: DELETE /api/callbacks/hold-ball/:taskId', () => {
     });
   });
 
+  test('GET status returns retired-by-event tombstone as non-cancelable', async () => {
+    const task = makeHoldTask('hold-ball-retired', 'thread-retired', 'codex');
+    task.enabled = false;
+    task.params = {
+      ...task.params,
+      holdLifecycle: {
+        mode: 'timer',
+        status: 'retired_by_event',
+        subjectKey: 'pr:owner/repo#42',
+        expectedSignalKey: 'review_posted',
+        wakeAt: task.trigger.fireAt,
+        createdBy: 'hold-ball:codex',
+        resolvedBy: {
+          sourceKind: 'review_feedback',
+          sourceMessageId: 'msg-review-1',
+          subjectKey: 'pr:owner/repo#42',
+          expectedSignalKey: 'review_posted',
+          at: Date.now(),
+        },
+      },
+    };
+    const deps = makeStubDeps([task], { 'thread-retired': 'test-user' });
+    const app = await createApp(deps);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/hold-ball/hold-ball-retired/status',
+      headers: { 'x-cat-cafe-user': 'test-user' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.taskId, 'hold-ball-retired');
+    assert.equal(body.status, 'retired_by_event');
+    assert.equal(body.cancelable, false);
+    assert.equal(body.catId, 'codex');
+    assert.equal(body.lifecycle.resolvedBy.sourceMessageId, 'msg-review-1');
+    assert.deepEqual(deps._unregistered, []);
+    assert.deepEqual(deps._removed, []);
+  });
+
   test('200 feedback report for stale hold task — emits feedback without live task', async () => {
     const deps = makeStubDeps([], { 'thread-feedback': 'test-user' });
     const feedbackCalls = [];

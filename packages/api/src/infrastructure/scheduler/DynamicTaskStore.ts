@@ -37,6 +37,37 @@ export class DynamicTaskStore {
       );
   }
 
+  /**
+   * Replace the executable projection for a stable dynamic definition id.
+   * Creation provenance stays attached to the identity while mutable execution
+   * fields are updated atomically.
+   */
+  upsert(def: DynamicTaskDef): void {
+    this.db
+      .prepare(
+        `INSERT INTO dynamic_task_defs (id, template_id, trigger_json, params_json, display_json, delivery_thread_id, enabled, created_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           template_id = excluded.template_id,
+           trigger_json = excluded.trigger_json,
+           params_json = excluded.params_json,
+           display_json = excluded.display_json,
+           delivery_thread_id = excluded.delivery_thread_id,
+           enabled = excluded.enabled`,
+      )
+      .run(
+        def.id,
+        def.templateId,
+        JSON.stringify(def.trigger),
+        JSON.stringify(def.params),
+        JSON.stringify(def.display),
+        def.deliveryThreadId,
+        def.enabled ? 1 : 0,
+        def.createdBy,
+        def.createdAt,
+      );
+  }
+
   getAll(): DynamicTaskDef[] {
     const rows = this.db.prepare('SELECT * FROM dynamic_task_defs ORDER BY created_at DESC').all() as RawRow[];
     return rows.map(todef);
@@ -67,6 +98,14 @@ export class DynamicTaskStore {
     const result = this.db
       .prepare('UPDATE dynamic_task_defs SET trigger_json = ? WHERE id = ?')
       .run(JSON.stringify(trigger), id);
+    return result.changes > 0;
+  }
+
+  /** F167 Phase Q: preserve hold lifecycle tombstones after timer retirement. */
+  updateParams(id: string, params: Record<string, unknown>): boolean {
+    const result = this.db
+      .prepare('UPDATE dynamic_task_defs SET params_json = ? WHERE id = ?')
+      .run(JSON.stringify(params), id);
     return result.changes > 0;
   }
 }

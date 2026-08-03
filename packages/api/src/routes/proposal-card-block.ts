@@ -38,6 +38,12 @@ export function buildProposalCardBlock(proposal: ThreadProposal): RichCardBlock 
           : '未指定（default · 子 thread 无项目归属，cat 会回落运行时默认目录）',
     },
   ];
+  if (proposal.communityPrContext) {
+    fields.push({
+      label: '正式外部 PR Review',
+      value: `${proposal.communityPrContext.repoFullName}#${proposal.communityPrContext.prNumber} · 仅唯一 child owner 自动挂 human-participant tracking`,
+    });
+  }
   if (proposal.initialMessage) fields.push({ label: '首条消息', value: proposal.initialMessage });
   return {
     id: `proposal-${proposal.proposalId}`,

@@ -261,7 +261,7 @@ describe('passage permanence (Phase I regression)', () => {
     );
     // Also sync evidence_fts for the doc
     db.exec(
-      "INSERT INTO evidence_fts(rowid, title, summary) SELECT rowid, title, summary FROM evidence_docs WHERE anchor = 'thread-raw'",
+      "INSERT INTO evidence_fts(rowid, title, summary, keywords) SELECT rowid, title, summary, keywords FROM evidence_docs WHERE anchor = 'thread-raw'",
     );
 
     const results = await store.search('Redis pipeline', { depth: 'raw', scope: 'threads', limit: 5 });
@@ -290,7 +290,7 @@ describe('passage permanence (Phase I regression)', () => {
       "INSERT INTO passage_fts(rowid, content) SELECT rowid, content FROM evidence_passages WHERE doc_anchor = 'thread-e2e'",
     );
     db.exec(
-      "INSERT INTO evidence_fts(rowid, title, summary) SELECT rowid, title, summary FROM evidence_docs WHERE anchor = 'thread-e2e'",
+      "INSERT INTO evidence_fts(rowid, title, summary, keywords) SELECT rowid, title, summary, keywords FROM evidence_docs WHERE anchor = 'thread-e2e'",
     );
 
     // search() with contextWindow should return passages with context array

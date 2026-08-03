@@ -11,8 +11,14 @@
  * IMPORTANT: ioredis keyPrefix auto-prefixes ALL commands.
  */
 
-import type { ProposalApproveOverrides, ProposalStatus, ThreadProposal } from '@cat-cafe/shared';
-import { generateProposalId } from '@cat-cafe/shared';
+import type {
+  ApprovalEnvelope,
+  ApprovalPublication,
+  ProposalApproveOverrides,
+  ProposalStatus,
+  ThreadProposal,
+} from '@cat-cafe/shared';
+import { assertApprovalEnvelopeIdentity, generateProposalId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type {
   ClaimForApprovalInput,
@@ -20,8 +26,10 @@ import type {
   FinalizeApprovalInput,
   IProposalStore,
   RejectProposalInput,
+  WithdrawProposalInput,
 } from '../ports/ProposalStore.js';
 import { ProposalKeys } from '../redis-keys/proposals/proposal-keys.js';
+import { abortRedisStaged, commitRedisApprovalEnvelope } from './RedisApprovalPublication.js';
 import {
   applyFinalize,
   CAS_TRANSITION_LUA,
@@ -30,6 +38,7 @@ import {
   RELEASE_DEDUP_LUA,
   serializeProposal,
 } from './RedisProposalStoreHelpers.js';
+import { withdrawPendingProposal } from './RedisProposalWithdrawal.js';
 
 const DEFAULT_DEDUP_TTL_SECONDS = 10 * 60; // 10 minutes — idempotency key only, not user-visible state
 const DEFAULT_LIST_LIMIT = 100;
@@ -63,6 +72,7 @@ export class RedisProposalStore implements IProposalStore {
       sourceThreadId: input.sourceThreadId,
       sourceInvocationId: input.sourceInvocationId,
       sourceCatId: input.sourceCatId,
+      sourceMessageId: input.sourceMessageId,
       title: input.title,
       reason: input.reason,
       parentThreadId: input.parentThreadId,
@@ -70,13 +80,15 @@ export class RedisProposalStore implements IProposalStore {
       projectPath: input.projectPath,
       createdBy: input.createdBy,
       createdAt: now,
+      publication: { state: 'staged', stagedAt: now },
       ...(input.initialMessage ? { initialMessage: input.initialMessage } : {}),
       ...(input.reportingMode ? { reportingMode: input.reportingMode } : {}),
+      ...(input.communityPrContext ? { communityPrContext: { ...input.communityPrContext } } : {}),
     };
 
     const key = ProposalKeys.detail(proposal.proposalId);
     const pipeline = this.redis.multi();
-    pipeline.hset(key, ...this.serialize(proposal));
+    pipeline.hset(key, ...serializeProposal(proposal));
     if (this.ttlSeconds) pipeline.expire(key, this.ttlSeconds);
     pipeline.zadd(ProposalKeys.userList(proposal.createdBy), String(now), proposal.proposalId);
     pipeline.zadd(ProposalKeys.userPending(proposal.createdBy), String(now), proposal.proposalId);
@@ -88,7 +100,7 @@ export class RedisProposalStore implements IProposalStore {
   async get(proposalId: string): Promise<ThreadProposal | null> {
     const data = await this.redis.hgetall(ProposalKeys.detail(proposalId));
     if (!data || !data.proposalId) return null;
-    return this.hydrate(data);
+    return hydrateProposal(data);
   }
 
   async listByUser(userId: string, limit: number = DEFAULT_LIST_LIMIT): Promise<ThreadProposal[]> {
@@ -168,6 +180,10 @@ export class RedisProposalStore implements IProposalStore {
     return ok ? updated : null;
   }
 
+  async withdrawPending(input: WithdrawProposalInput): Promise<ThreadProposal | null> {
+    return withdrawPendingProposal(this.redis, input);
+  }
+
   async getDedupProposalId(userId: string, clientRequestId: string): Promise<string | null> {
     return this.redis.get(ProposalKeys.dedup(userId, clientRequestId));
   }
@@ -187,6 +203,38 @@ export class RedisProposalStore implements IProposalStore {
    */
   async setCardMessageId(proposalId: string, cardMessageId: string): Promise<void> {
     await this.redis.hset(ProposalKeys.detail(proposalId), 'cardMessageId', cardMessageId);
+  }
+
+  async getPublication(proposalId: string): Promise<ApprovalPublication | null> {
+    return (await this.get(proposalId))?.publication ?? null;
+  }
+
+  async commitEnvelope(proposalId: string, envelope: ApprovalEnvelope): Promise<void> {
+    const proposal = await this.get(proposalId);
+    if (!proposal) throw new Error(`proposal not found: ${proposalId}`);
+    assertApprovalEnvelopeIdentity(envelope, {
+      canonicalProposalId: proposal.proposalId,
+      sourceFeatureId: 'F128',
+      ownerUserId: proposal.createdBy,
+      requesterCatId: proposal.sourceCatId,
+      createdAt: proposal.createdAt,
+    });
+    await commitRedisApprovalEnvelope(this.redis, ProposalKeys.detail(proposalId), envelope);
+  }
+
+  async abortStaged(proposalId: string, _reason: string): Promise<void> {
+    const proposal = await this.get(proposalId);
+    if (!proposal) return;
+    await abortRedisStaged(
+      this.redis,
+      ProposalKeys.detail(proposalId),
+      [
+        ProposalKeys.userList(proposal.createdBy),
+        ProposalKeys.userPending(proposal.createdBy),
+        ProposalKeys.threadList(proposal.sourceThreadId),
+      ],
+      proposalId,
+    );
   }
 
   /**
@@ -296,13 +344,5 @@ export class RedisProposalStore implements IProposalStore {
       records.push(hydrateProposal(d));
     }
     return records;
-  }
-
-  private serialize(proposal: ThreadProposal): string[] {
-    return serializeProposal(proposal);
-  }
-
-  private hydrate(data: Record<string, string>): ThreadProposal {
-    return hydrateProposal(data);
   }
 }

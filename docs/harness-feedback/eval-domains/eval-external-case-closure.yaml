@@ -1,0 +1,94 @@
+---
+domainId: eval:external-case-closure
+displayName: External Case Closure Eval
+descriptionForHuman: 外部 issue/PR 接单后是否能在无人提醒下等到当前 HEAD、只唤醒一次、把结论送达 GitHub，并持续拥有异常送达责任
+metricGlossary:
+  external_case.head_observed_total:
+    label: 已观察外部 HEAD
+    means: 被 F168 接纳并写入事件日志的外部 PR HEAD 数量；为 0 时不能把零违规解释成已验证健康。
+    goodDirection: neutral
+    category: activation
+    component: external-case-closure
+  external_case.verdict_recorded_total:
+    label: 已原子记录 verdict
+    means: verdict 与 delivered 或 pending_delivery 责任在同一事件中成功落盘的数量。
+    goodDirection: neutral
+    category: activation
+    component: external-case-closure
+  external_case.reviewer_wake_delivered_total:
+    label: 复审唤醒已送达
+    means: 当前 HEAD readiness 满足后向原 reviewer 送达的去重唤醒数量。
+    goodDirection: neutral
+    category: activation
+    component: external-case-closure
+  external_case.verdict_ready_without_delivery_total:
+    label: 裸 verdict
+    means: 外部 review 已给结论却没有 delivery proof 或 pending_delivery 责任的次数；必须为 0。
+    goodDirection: lower
+    category: friction
+    component: external-case-closure
+    badWhen: 大于 0 说明 verdict schema 或交接 convention 被绕过。
+  external_case.noisy_wake_during_cloud_review_total:
+    label: remote review 中误唤醒
+    means: 当前 HEAD 的remote review 仍 running、blocking 或失败时却唤醒本地 reviewer 的次数；必须为 0。
+    goodDirection: lower
+    category: friction
+    component: external-case-closure
+  external_case.duplicate_reviewer_wake_per_head_total:
+    label: 同 HEAD 重复唤醒
+    means: 同一 external subject 和 HEAD 出现第二个 reviewer wake identity 的次数；必须为 0。
+    goodDirection: lower
+    category: friction
+    component: external-case-closure
+  external_case.user_nudge_required_total:
+    label: 仍需operator提醒
+    means: 已接受的外部事务仍需要 operator 提醒作者更新、复审或送达才能继续的次数。
+    goodDirection: lower
+    category: friction
+    component: external-case-closure
+  external_case.pending_delivery_age_seconds:
+    label: 待送达责任年龄
+    means: 持久 pending_delivery 从创建到最近一次自动观察时的平均秒数；用于发现责任悬空。
+    goodDirection: lower
+    category: derived
+    component: external-case-closure
+  external_case.author_update_to_ready_wake_seconds:
+    label: 作者更新到复审唤醒延迟
+    means: 当前 HEAD 首次观察到 reviewer readiness 唤醒送达的平均秒数。
+    goodDirection: lower
+    category: derived
+    component: external-case-closure
+systemThreadId: thread_eval_external_case_closure
+evalCat:
+  catId: codex-sol
+  handle: "@codex-sol"
+  model: gpt-5.6-sol
+frequency: weekly
+sourceAdapter: f168-external-case-eval
+sourceRefsKind: a2a-snapshot-attribution
+threadPolicy:
+  role: working-home
+  stateSot: registry
+  allowedContent:
+    - longitudinal-analysis
+    - verdict-discussion
+    - handoff-drafts
+legacyScheduledTaskIds: []
+handoffTargetResolver:
+  featureId: F168
+  ownerCatId: opus48
+  threadLookup: feature-thread
+sla:
+  acknowledgeHours: 24
+  reevalWithinHours: 72
+fixtures:
+  - id: f168-external-case-replay
+    featureId: F168
+    path: packages/api/test/harness-eval/fixtures/f168-external-case-replay.json
+    skill: cross-cat-handoff
+    signal: verdict-delivery-and-wake-invariants
+  - id: f168-review-completion-routing
+    featureId: F168
+    path: packages/api/test/harness-eval/fixtures/review-completion-routing.json
+    skill: cross-cat-handoff
+    signal: external-vs-local-cat-review-completion-routing

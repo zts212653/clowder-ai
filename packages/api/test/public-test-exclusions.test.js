@@ -48,6 +48,10 @@ const RECONCILED_EXCLUSIONS = [
   'github-schedule-factories\\.test',
   'harness-eval/eval-hub-read-model\\.test',
   'harness-eval/merge-gate-provenance-contract\\.test',
+  'f254-(?:freshness-replay-provider|manual-reminder-scope)\\.test',
+  'harness-eval/eval-hub-(?:lifecycle-summary-route|metric-glossary-coverage|read-model-f248-phase-b2|route)\\.test',
+  'harness-eval/(?:friction-measurement-bundle|measurement-bundle-census|measurement-independent-rejudge(?:-adjudication|-judgment)?)\\.test',
+  'harness-eval/publish-verdict-(?:capability-wakeup(?:-owner-scope)?|freshness|friction|measurement-validity-gate|memory|pipeline|task-outcome(?:-writeback-guard)?)\\.test',
 ];
 
 async function listTestFiles(rootDir, relDir = '') {
@@ -121,6 +125,87 @@ test('resolver excludes source-only cc anchor hook coverage from the public gate
 
   assert.ok(resolved.excludedFiles.includes('test/f236-cc-anchor-hook.test.js'));
   assert.ok(!resolved.selectedFiles.includes('test/f236-cc-anchor-hook.test.js'));
+});
+
+test('resolver excludes private evidence consumers but keeps self-contained public contracts', async () => {
+  const { resolvePublicTestFiles } = await import(resolverModuleUrl);
+  const resolved = await resolvePublicTestFiles({
+    packageRoot,
+    configPath: registryPath,
+  });
+
+  for (const file of [
+    'test/f254-freshness-replay-provider.test.js',
+    'test/harness-eval/measurement-bundle-census.test.js',
+    'test/harness-eval/publish-verdict-memory.test.js',
+  ]) {
+    assert.ok(resolved.excludedFiles.includes(file), `${file} should be private-fixture-only`);
+  }
+  for (const file of [
+    'test/cicd-router.test.js',
+    'test/embed-runtime-policy.test.js',
+    'test/harness-eval/eval-capability-tips-enable-gate.test.js',
+    'test/system-prompt-builder.test.js',
+    'test/weixin-mp-path-security.test.js',
+  ]) {
+    assert.ok(resolved.selectedFiles.includes(file), `${file} should remain a public behavior contract`);
+  }
+});
+
+test('focused public selection accepts only explicit files from the live selected suite', async () => {
+  const { resolvePublicTestFiles, selectFocusedPublicTestFiles } = await import(resolverModuleUrl);
+  const resolved = await resolvePublicTestFiles({
+    packageRoot,
+    configPath: registryPath,
+  });
+
+  assert.deepEqual(
+    selectFocusedPublicTestFiles(
+      resolved,
+      'test/cicd-router.test.js,test/harness-eval/eval-capability-tips-enable-gate.test.js',
+    ),
+    ['test/cicd-router.test.js', 'test/harness-eval/eval-capability-tips-enable-gate.test.js'],
+  );
+  assert.throws(
+    () => selectFocusedPublicTestFiles(resolved, 'test/harness-eval/publish-verdict-memory.test.js'),
+    /excluded by registry/,
+  );
+  assert.throws(() => selectFocusedPublicTestFiles(resolved, 'test/not-real.test.js'), /does not exist/);
+  assert.throws(
+    () => selectFocusedPublicTestFiles(resolved, 'test/cicd-router.test.js,test/cicd-router.test.js'),
+    /duplicate/,
+  );
+});
+
+test('default expiry date helper uses the configured policy timezone rather than UTC', async () => {
+  const { formatLocalIsoDate } = await import(resolverModuleUrl);
+  const utcAfterPacificMidnight = new Date('2026-07-01T01:30:00.000Z');
+
+  assert.equal(formatLocalIsoDate(utcAfterPacificMidnight, 'America/Los_Angeles'), '2026-06-30');
+  assert.equal(formatLocalIsoDate(utcAfterPacificMidnight, 'UTC'), '2026-07-01');
+});
+
+test('default expiry date helper falls back to the repo policy timezone when env is unset', async () => {
+  const { formatLocalIsoDate } = await import(resolverModuleUrl);
+  const utcAfterPacificMidnight = new Date('2026-07-01T01:30:00.000Z');
+  const previousPolicyTimezone = process.env.CAT_CAFE_POLICY_TIMEZONE;
+  const previousHostTimezone = process.env.TZ;
+  delete process.env.CAT_CAFE_POLICY_TIMEZONE;
+  process.env.TZ = 'UTC';
+  try {
+    assert.equal(formatLocalIsoDate(utcAfterPacificMidnight), '2026-06-30');
+  } finally {
+    if (previousPolicyTimezone === undefined) {
+      delete process.env.CAT_CAFE_POLICY_TIMEZONE;
+    } else {
+      process.env.CAT_CAFE_POLICY_TIMEZONE = previousPolicyTimezone;
+    }
+    if (previousHostTimezone === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = previousHostTimezone;
+    }
+  }
 });
 
 test('validator rejects malformed, expired, or zero-match exclusion entries', async () => {

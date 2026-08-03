@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Cat Cafe - Windows Repo-Local Install Helper
+  Clowder AI - Windows Repo-Local Install Helper
 
 .DESCRIPTION
   Installs prerequisites and sets up the current checked-out cat-cafe repo.
@@ -729,7 +729,7 @@ if (-not $allGood -and -not $SkipBuild) {
 
 Write-Host ""
 Write-Host "  ========================================" -ForegroundColor Green
-Write-Host "  Cat Cafe installed!" -ForegroundColor Green
+Write-Host "  Clowder AI installed!" -ForegroundColor Green
 Write-Host "  ========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Project: $ProjectRoot"

@@ -83,7 +83,9 @@ describe('ThreadSidebar ✨ organize flow', () => {
   });
 
   function findOrganizeButton(container: HTMLElement) {
-    return Array.from(container.querySelectorAll('button')).find((b) => b.getAttribute('title') === '猫猫帮你分类');
+    return Array.from(container.querySelectorAll('button')).find((b) =>
+      b.getAttribute('title')?.startsWith('猫猫帮你分类'),
+    );
   }
 
   it('✨ button opens organizer modal, pre-fills from SUGGESTIONS_JSON, and apply sends filtered payload', async () => {
@@ -120,7 +122,7 @@ describe('ThreadSidebar ✨ organize flow', () => {
         }
         return jsonOk({ messages: [] });
       }
-      if (path === '/api/threads') {
+      if (path === '/api/threads?view=sidebar') {
         return jsonOk({ threads: [...uncatThreads, catThread, ORGANIZER_THREAD] });
       }
       return defaultSidebarApiMock(path);
@@ -214,7 +216,7 @@ describe('ThreadSidebar ✨ organize flow', () => {
         if (pollCount <= 2) return jsonOk({ messages: [noJsonMessage] });
         return jsonOk({ messages: [noJsonMessage, jsonMessage] });
       }
-      if (path === '/api/threads') return jsonOk({ threads: [...uncatThreads, ORGANIZER_THREAD] });
+      if (path === '/api/threads?view=sidebar') return jsonOk({ threads: [...uncatThreads, ORGANIZER_THREAD] });
       return defaultSidebarApiMock(path);
     });
 
@@ -300,7 +302,7 @@ describe('ThreadSidebar ✨ organize flow', () => {
         if (pollCount >= 2) return jsonOk({ messages: [catMessage] });
         return jsonOk({ messages: [] });
       }
-      if (path === '/api/threads') return jsonOk({ threads: [...uncatThreads, ORGANIZER_THREAD] });
+      if (path === '/api/threads?view=sidebar') return jsonOk({ threads: [...uncatThreads, ORGANIZER_THREAD] });
       return defaultSidebarApiMock(path);
     });
 
@@ -410,7 +412,7 @@ describe('ThreadSidebar ✨ organize flow', () => {
         if (pollCount >= 2) return jsonOk({ messages: [catMessage] });
         return jsonOk({ messages: [] });
       }
-      if (path === '/api/threads') return jsonOk({ threads: [...uncatThreads, ORGANIZER_THREAD] });
+      if (path === '/api/threads?view=sidebar') return jsonOk({ threads: [...uncatThreads, ORGANIZER_THREAD] });
       return defaultSidebarApiMock(path);
     });
 
@@ -532,7 +534,7 @@ describe('ThreadSidebar ✨ organize flow', () => {
         if (pollCount >= 2) return jsonOk({ messages: [catMessage] });
         return jsonOk({ messages: [] });
       }
-      if (path === '/api/threads') return jsonOk({ threads: [...uncatThreads, ORGANIZER_THREAD] });
+      if (path === '/api/threads?view=sidebar') return jsonOk({ threads: [...uncatThreads, ORGANIZER_THREAD] });
       return defaultSidebarApiMock(path);
     });
 
@@ -611,7 +613,7 @@ describe('ThreadSidebar ✨ organize flow', () => {
       if (path === '/api/messages' && init?.method === 'POST') {
         return textFail(500, 'send failed');
       }
-      if (path === '/api/threads') {
+      if (path === '/api/threads?view=sidebar') {
         return jsonOk({ threads: [makeThread('t1'), ORGANIZER_THREAD] });
       }
       return defaultSidebarApiMock(path);

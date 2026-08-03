@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "revision": "f282-phase-d-prerequisites-v1",
+  "featureId": "F282",
+  "phase": "D",
+  "auditBaseSha": "95010af05609959cca9afd839a04ef56db8c89da",
+  "prerequisites": [
+    {
+      "featureId": "F281",
+      "acceptanceCriterion": "AC-C2",
+      "pullRequest": 3308,
+      "implementationMergeSha": "95010af05609959cca9afd839a04ef56db8c89da",
+      "reviewedHeadSha": "ee2af5c4fac2bc40272a089bc9ce5320f1d134f8",
+      "verdict": "satisfied"
+    },
+    {
+      "featureId": "F282",
+      "acceptanceCriteria": ["AC-B1", "AC-B2"],
+      "pullRequest": 3304,
+      "implementationMergeSha": "05fe652c8ba96f668667b6370ba185acac44a172",
+      "reviewedHeadSha": "62eccbfb035937029677ac2e4453a37274671f94",
+      "verdict": "satisfied"
+    },
+    {
+      "featureId": "F282",
+      "acceptanceCriteria": ["AC-C1", "AC-C2"],
+      "pullRequest": 3306,
+      "implementationMergeSha": "fcc00a7df477a610258c184b363b8f2b64da94aa",
+      "reviewedHeadSha": "86ee7227a99315e9418db95fb947181a592bef54",
+      "verdict": "satisfied"
+    }
+  ],
+  "f281Fixture": {
+    "command": "CAT_CAFE_REDIS_TEST_ISOLATED=1 REDIS_URL=redis://127.0.0.1:6398/15 pnpm --filter @cat-cafe/api fixture:f281-bounded-reflow",
+    "exitCode": 0,
+    "positive": "exact subjectRef plus verified current lineage injects the same enum-only block in serial and parallel",
+    "negative": [
+      "same-lane Alden subject receives no block",
+      "different owner receives no receipt",
+      "forced lineage collision leaves zero writes",
+      "prompt contains no acceptance, score, or global-policy token"
+    ]
+  },
+  "openNonPrerequisite": {
+    "featureId": "F281",
+    "acceptanceCriterion": "AC-C1",
+    "status": "open"
+  },
+  "liveRuntimeRestarted": false,
+  "containsOwnerPayload": false,
+  "containsPromptBody": false
+}

@@ -17,10 +17,13 @@ vi.mock('@/utils/transcription-corrector', () => ({ refreshSpeechAliases: vi.fn(
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 vi.mock('@/stores/chatStore', () => ({
+  resolveBubbleExpanded: () => false,
   useChatStore: (selector: (s: Record<string, unknown>) => unknown) =>
     selector({
       uiThinkingExpandedByDefault: false,
+      globalBubbleDefaults: { thinking: 'collapsed', cliOutput: 'collapsed' },
       threads: [],
+      messages: [],
     }),
 }));
 
@@ -214,5 +217,216 @@ describe('ChatMessage notice rendering', () => {
 
     expect(container.querySelector('[data-testid="connector-bubble"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="notice-bar"]')).toBeFalsy();
+  });
+
+  it('renders the durable supplement lifecycle on the published original bubble', () => {
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          getCatById: (() => undefined) as never,
+          message: {
+            id: 'msg-original',
+            type: 'assistant',
+            catId: 'opus',
+            content: 'published answer',
+            timestamp: Date.now(),
+            extra: {
+              freshness: {
+                kind: 'published_with_unseen',
+                priorFrontierMessageId: 'msg-late',
+                generatedWithUnseen: ['msg-late'],
+                lineageId: 'msg-original',
+              },
+              freshnessSupplement: {
+                type: 'freshness_supplement',
+                supplementId: 'f254-supplement:msg-original:1',
+                lineageId: 'msg-original',
+                originalMessageId: 'msg-original',
+                threadId: 'thread-1',
+                catId: 'opus',
+                seq: 1,
+                status: 'declined',
+                requiredCount: 1,
+                terminalReason: 'checked_no_supplement_needed',
+                updatedAt: Date.now(),
+              },
+            },
+          },
+        }),
+      );
+    });
+
+    expect(container.querySelector('[data-testid="freshness-supplement-status"]')?.textContent).toContain(
+      '已核对，无需补充',
+    );
+    expect(container.textContent).toContain('published answer');
+  });
+
+  it('renders a typed stream-origin supplement as a readable late-message reply', () => {
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          getCatById: (() => undefined) as never,
+          message: {
+            id: 'msg-supplement',
+            type: 'assistant',
+            catId: 'opus',
+            content: 'additive supplement',
+            origin: 'stream',
+            timestamp: Date.now(),
+            replyTo: 'msg-original',
+            extra: {
+              turnExecution: {
+                invocationId: 'child-supplement-1',
+                parentInvocationId: 'parent-1',
+                executionKind: 'freshness_supplement',
+              },
+              supplement: {
+                lineageId: 'msg-original',
+                supplementId: 'f254-supplement:msg-original:1',
+                seq: 1,
+                originalMessageId: 'msg-original',
+              },
+            },
+          },
+        }),
+      );
+    });
+
+    expect(container.textContent).toContain('后到消息补充 1');
+    expect(container.querySelector('[data-turn-execution-kind="freshness_supplement"]')).toBeTruthy();
+    expect(container.textContent).toContain('additive supplement');
+    expect(container.querySelector('[data-testid="cli-output-body"]')).toBeFalsy();
+    expect(container.querySelector('[data-testid="freshness-supplement-status"]')).toBeFalsy();
+  });
+
+  it('keeps an otherwise empty routing-guard execution visible without copying reply prose', () => {
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          getCatById: (() => undefined) as never,
+          message: {
+            id: 'msg-routing-guard',
+            type: 'assistant',
+            catId: 'codex',
+            content: '',
+            timestamp: Date.now(),
+            extra: {
+              turnExecution: {
+                invocationId: 'child-routing-guard-1',
+                parentInvocationId: 'parent-1',
+                executionKind: 'routing_guard',
+              },
+            },
+          },
+        }),
+      );
+    });
+
+    expect(container.querySelector('[data-turn-execution-kind="routing_guard"]')?.textContent).toContain('系统补路由');
+    expect(container.textContent).not.toContain('重新生成');
+  });
+
+  it('shows a routing guard as an auxiliary execution without assigning its child id to the ordinary body', () => {
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          getCatById: (() => undefined) as never,
+          message: {
+            id: 'msg-ordinary-with-guard',
+            type: 'assistant',
+            catId: 'codex',
+            content: 'original ordinary answer',
+            timestamp: Date.now(),
+            extra: {
+              turnExecution: {
+                invocationId: 'child-ordinary-1',
+                parentInvocationId: 'parent-1',
+                executionKind: 'ordinary',
+              },
+              auxiliaryTurnExecutions: [
+                {
+                  invocationId: 'child-routing-guard-1',
+                  parentInvocationId: 'parent-1',
+                  executionKind: 'routing_guard',
+                },
+              ],
+            },
+          },
+        }),
+      );
+    });
+
+    expect(container.textContent).toContain('original ordinary answer');
+    expect(container.querySelector('[data-turn-execution-owner="child-ordinary-1"]')).toBeTruthy();
+    expect(container.querySelector('[data-auxiliary-turn-execution="child-routing-guard-1"]')).toBeTruthy();
+    expect(container.querySelectorAll('[data-turn-execution-kind="routing_guard"]')).toHaveLength(1);
+  });
+
+  it('shows a bodyless ordinary child beside a guard-owned replacement turn', () => {
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          getCatById: (() => undefined) as never,
+          message: {
+            id: 'msg-guard-with-bodyless-ordinary',
+            type: 'assistant',
+            catId: 'codex',
+            content: '@co-creator',
+            timestamp: Date.now(),
+            extra: {
+              turnExecution: {
+                invocationId: 'child-routing-guard-2',
+                parentInvocationId: 'parent-2',
+                executionKind: 'routing_guard',
+              },
+              auxiliaryTurnExecutions: [
+                {
+                  invocationId: 'child-ordinary-bodyless',
+                  parentInvocationId: 'parent-2',
+                  executionKind: 'ordinary',
+                },
+              ],
+            },
+          },
+        }),
+      );
+    });
+
+    expect(container.querySelector('[data-turn-execution-owner="child-routing-guard-2"]')).toBeTruthy();
+    expect(container.querySelector('[data-auxiliary-turn-execution="child-ordinary-bodyless"]')?.textContent).toContain(
+      '普通执行（无正文）',
+    );
+  });
+
+  it('shows a terminal explanation when supplement responsibility could not be stored', () => {
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          getCatById: (() => undefined) as never,
+          message: {
+            id: 'msg-offer-failed',
+            type: 'assistant',
+            catId: 'opus',
+            content: 'published despite infrastructure failure',
+            timestamp: Date.now(),
+            extra: {
+              freshness: {
+                kind: 'published_with_unseen',
+                priorFrontierMessageId: 'msg-late',
+                generatedWithUnseen: ['msg-late'],
+                lineageId: 'msg-offer-failed',
+                supplementFailureReason: 'infrastructure',
+              },
+            },
+          },
+        }),
+      );
+    });
+
+    expect(container.querySelector('[data-testid="freshness-supplement-status"]')?.textContent).toContain(
+      '补充检查未能安排',
+    );
+    expect(container.textContent).toContain('published despite infrastructure failure');
   });
 });

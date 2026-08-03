@@ -4,6 +4,8 @@ related_features: [F043, F052, F178, F213]
 topics: [mcp, cross-thread, agent-first, harness]
 doc_kind: spec
 created: 2026-05-07
+user_journey_exempt: infrastructure feature — dispatch routing is invisible to end user
+tips_exempt: infrastructure — no user-facing capability to tip
 ---
 
 # F193: Cross-Thread Communication Unification
@@ -248,7 +250,7 @@ sibling PR / thread per F209 D.0 delegation matrix):
 - [x] **AC-PCFU-2**: When AC-PCFU-1's condition holds, legacy `cat-cafe` is removed from `capabilities.json`; foreign external `cat-cafe-limb` ID collision still preserves legacy (regression of Phase C R4 P1). — `willHaveManagedLimb` extended with `hasSameRepoExternalLimb`; R4 P1 test (line 1304) untouched and green.
 - [x] **AC-PCFU-3**: New `capability-orchestrator.test.js` cases cover the three scenarios in Required Fix Scope above; existing 8 tests on `ensureCatCafeMainServer` still pass. — 3 new `ensureCatCafeMainServer` tests + 1 `healCatCafeMcpTopology` integration test for F209 D.0 shape; full suite 84/84 green via `env -u CAT_CAFE_RUNTIME_ROOT node --test packages/api/test/capability-orchestrator.test.js`.
 - [ ] **AC-PCFU-4**: After fix lands, run `GET /api/capabilities?probe=true` from a local install that reproduces the symptom; `tool_search` no longer shows duplicate `cat_cafe_*` across `mcp__cat_cafe__*` and `mcp__cat_cafe_{collab,memory,signals,limb}__*` namespaces. — runtime validation pending (alpha smoke after PR merges).
-- [x] **AC-PCFU-5**: `.mcp.json` + `.codex/config.toml` regeneration sequence preserves any user-added external (non-`source=cat-cafe`) MCP entries untouched. — AC-PCFU-5 unit test confirms unrelated externals (`filesystem`, `github-mcp`) pass through `ensureCatCafeMainServer` verbatim (args/enabled preserved); `generateCliConfigs` already respects external entries from Phase C R7 work.
+- [x] **AC-PCFU-5**: `.mcp.json` + `.codex/config.toml` regeneration sequence preserves user-added external (non-`source=cat-cafe`) MCP entries unless the surface is explicitly retired. — AC-PCFU-5 unit test confirms unrelated externals (`filesystem`, `example-mcp`) pass through `ensureCatCafeMainServer` verbatim (args/enabled preserved); the retired GitHub MCP is filtered by the later operator retirement guard.
 
 **Owner**: F193 / MCP topology thread — suggested handoff to Opus-47 or
 后端协议猫（per F209 spec line 184 delegation matrix）. F193 itself stays

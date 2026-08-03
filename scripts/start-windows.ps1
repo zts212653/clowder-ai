@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Clowder AI (Cat Cafe) - Windows Startup Script
+  Clowder AI (Clowder AI) - Windows Startup Script
 
 .DESCRIPTION
   Starts API server and Frontend (Next.js) with .env loading.
@@ -60,7 +60,8 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 Set-Location $ProjectRoot
 
 $Profile_ = $env:CAT_CAFE_PROFILE  # set by start-entry.mjs when --profile=* is given
-Write-Host "Cat Cafe - Windows Startup" -ForegroundColor Cyan
+$connectorGatewayAutostartOverride = [System.Environment]::GetEnvironmentVariable("CONNECTOR_GATEWAY_AUTOSTART", "Process")
+Write-Host "Clowder AI - Windows Startup" -ForegroundColor Cyan
 Write-Host "=========================="
 if ($Profile_) { Write-Host "  Profile: $Profile_" -ForegroundColor Cyan }
 
@@ -97,6 +98,14 @@ if (Test-Path $envFile) {
     Write-Ok ".env loaded"
 } else {
     Write-Warn ".env not found - using defaults"
+}
+
+# -- Restore connector launcher authority after dotenv -------
+# Project dotenv is configuration, not permission to attach real IM connectors.
+if ([string]::IsNullOrEmpty($connectorGatewayAutostartOverride)) {
+    [System.Environment]::SetEnvironmentVariable("CONNECTOR_GATEWAY_AUTOSTART", $null, "Process")
+} else {
+    [System.Environment]::SetEnvironmentVariable("CONNECTOR_GATEWAY_AUTOSTART", $connectorGatewayAutostartOverride, "Process")
 }
 
 function Preserve-ServiceFlagForApiLifecycle {
@@ -299,7 +308,7 @@ $embedEnabled = if ($null -ne $embedEnabledRaw -and $embedEnabledRaw -ne "") {
 $env:EMBED_ENABLED = if ($embedEnabled) { "1" } else { "0" }
 
 # Embedding sidecar lifecycle is owned by the API startup reconciler: it reads
-# .cat-cafe/services.json and starts or cleans Cat Cafe-owned listeners based
+# .cat-cafe/services.json and starts or cleans Clowder AI-owned listeners based
 # on Console state. This script only computes EMBED_URL/EMBED_PORT so the API
 # can locate the sidecar.
 $embedPortDefault = if ($env:EMBED_PORT) { [int]$env:EMBED_PORT } else { 9880 }
@@ -507,6 +516,13 @@ try {
     # -Dev controls whether the API runs in development or production mode.
     $apiNodeEnv = if ($Dev) { 'development' } else { 'production' }
     $globalSidecarOwner = if ($useRedis -and -not $Dev) { "1" } else { $null }
+    $connectorGatewayAutostart = if ($env:CONNECTOR_GATEWAY_AUTOSTART) {
+        $env:CONNECTOR_GATEWAY_AUTOSTART
+    } elseif (-not $Dev) {
+        "1"
+    } else {
+        "0"
+    }
     $runtimeRootMarker = if (-not $Dev) { $ProjectRoot } else { $null }
     $workspaceRootMarker = if (-not $Dev) {
         if ($env:CAT_CAFE_WORKSPACE_ROOT) { $env:CAT_CAFE_WORKSPACE_ROOT } else { $ProjectRoot }
@@ -530,11 +546,12 @@ try {
         CAT_CAFE_SERVICE_EMBED_ENABLED = $env:CAT_CAFE_SERVICE_EMBED_ENABLED
         CAT_CAFE_SERVICE_AUDIO_ENABLED = $env:CAT_CAFE_SERVICE_AUDIO_ENABLED
         CAT_CAFE_PROVISION_GLOBAL_SIDECAR = $globalSidecarOwner
+        CONNECTOR_GATEWAY_AUTOSTART = $connectorGatewayAutostart
         CAT_CAFE_RUNTIME_ROOT = $runtimeRootMarker
         CAT_CAFE_WORKSPACE_ROOT = $workspaceRootMarker
     }
 
-    # Embedding sidecar (and other Cat Cafe ML services) are reconciled by the
+    # Embedding sidecar (and other Clowder AI ML services) are reconciled by the
     # API startup lifecycle after it starts, per .cat-cafe/services.json. No
     # manual Start-Job here.
 
@@ -636,7 +653,7 @@ try {
 
     Write-Host ""
     Write-Host "  ========================================" -ForegroundColor Green
-    Write-Host "  Cat Cafe started!" -ForegroundColor Green
+    Write-Host "  Clowder AI started!" -ForegroundColor Green
     Write-Host "  ========================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "  Frontend: http://localhost:$WebPort"

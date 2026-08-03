@@ -16,7 +16,12 @@ import type { CatId, CommunityEvent, IssuePendingWake, TaskItem } from '@cat-caf
 import { parseIssueSubjectKey } from '@cat-cafe/shared';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
 import type { ICommunityEventLog } from '../../domains/community/CommunityEventLog.js';
+import { decideDelivery, decideTrackingWake } from '../../domains/community/community-delivery-policy.js';
 import { issueCommentEventId } from '../../domains/community/community-keys.js';
+import {
+  classifyIssueComment,
+  type IssueCommentClassification,
+} from '../../domains/community/issue-analysis/issue-comment-classifier.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../../infrastructure/scheduler/types.js';
 import type { ConnectorInvokeTrigger, ConnectorTriggerPolicy } from './ConnectorInvokeTrigger.js';
 import type { IssueComment, IssueCommentRouter } from './IssueCommentRouter.js';
@@ -32,11 +37,19 @@ export interface IssueCommentSignal {
   readonly commitWakeAccepted: () => Promise<void>;
 }
 
+export interface IssueTrackingMetadata {
+  readonly state: 'open' | 'closed';
+  readonly authorLogin?: string;
+  readonly authorType?: string;
+}
+
 export interface IssueCommentTaskSpecOptions {
   readonly taskStore: ITaskStore;
   readonly issueCommentRouter: IssueCommentRouter;
   readonly fetchComments: (repoFullName: string, issueNumber: number, sinceId?: number) => Promise<IssueComment[]>;
   readonly fetchIssueState: (repoFullName: string, issueNumber: number) => Promise<'open' | 'closed'>;
+  /** Preferred actor-aware metadata path; fetchIssueState remains for backward-compatible adapters. */
+  readonly fetchIssueMetadata?: (repoFullName: string, issueNumber: number) => Promise<IssueTrackingMetadata>;
   readonly invokeTrigger?: ConnectorInvokeTrigger;
   readonly log: {
     info: (...args: unknown[]) => void;
@@ -45,6 +58,19 @@ export interface IssueCommentTaskSpecOptions {
   };
   readonly pollIntervalMs?: number;
   readonly isEchoComment?: (comment: IssueComment) => boolean;
+  /**
+   * F220 (clowder-ai#972): suppress low-value bot boilerplate. Mirrors
+   * ReviewFeedbackTaskSpec.isNoiseComment — wired to the shared F140 setup-noise filter
+   * (`createSetupNoiseFilter`), which is EXACT-identity + content-aware: it only silences
+   * allowlisted bot logins (`GITHUB_SETUP_NOISE_BOT_LOGINS`) posting the Codex
+   * "To use Codex here…" setup boilerplate with no real content. Deliberately NOT a broad
+   * `[bot]` blanket — security/dependency bots and any bot posting real content still wake
+   * the owner (F168 AC-F12: silence by exact identity + trigger correlation, never broadly).
+   * Exact classification is persisted with collected events and also drives delivery.
+   */
+  readonly isNoiseComment?: (comment: IssueComment) => boolean;
+  /** Canonical runtime classifier shared with webhook and repo-level collection paths. */
+  readonly classifyComment?: (comment: IssueComment) => IssueCommentClassification;
   readonly id?: string;
   /**
    * F168 Phase B: Community event log for dual-cursor collection/delivery separation.
@@ -65,10 +91,52 @@ export interface IssueCommentTaskSpecOptions {
    * after case.awaiting_external would incorrectly restore in_progress.
    */
   readonly projector?: { apply(event: CommunityEvent): Promise<void> };
+  /** F167 Phase Q: retire matching hold_ball timers once structured issue comments are delivered. */
+  readonly holdLifecycle?: {
+    retireSatisfiedWait(event: {
+      threadId: string;
+      subjectKey: string;
+      expectedSignalKey: 'comment_posted';
+      sourceKind: 'issue_comment';
+      sourceMessageId?: string;
+    }): void | Promise<unknown>;
+  };
 }
 
 function resolveCommentCursor(memoryCursor: number | undefined, persistedCursor: number | undefined): number {
   return Math.max(memoryCursor ?? 0, persistedCursor ?? 0);
+}
+
+function classifyForTask(comment: IssueComment, opts: IssueCommentTaskSpecOptions): IssueCommentClassification {
+  return opts.classifyComment?.(comment) ?? classifyIssueComment(comment, opts);
+}
+
+function shouldDeliverComment(
+  comment: IssueComment,
+  classification: IssueCommentClassification,
+  task: TaskItem,
+  subjectAuthorLogin?: string,
+): boolean {
+  const baseDecision = decideDelivery({
+    state: 'in_progress',
+    eventKind: 'issue.commented',
+    authorAssociation: comment.authorAssociation as import('@cat-cafe/shared').GitHubAuthorAssociation | undefined,
+    critical: classification.critical,
+    suppressionReason: classification.suppressionReason,
+  });
+  if (baseDecision === 'silent-log') return false;
+  // Preserve existing immediate-delivery protocols (security/data-loss criticality)
+  // before applying the opt-in actor policy.
+  if (classification.critical) return true;
+  return (
+    decideTrackingWake({
+      wakePolicy: task.automationState?.wakePolicy,
+      actorLogin: comment.author,
+      actorType: comment.actorType,
+      subjectAuthorLogin,
+      authorAssociation: comment.authorAssociation as import('@cat-cafe/shared').GitHubAuthorAssociation | undefined,
+    }).decision === 'deliver'
+  );
 }
 
 export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): TaskSpec_P1<IssueCommentSignal> {
@@ -181,7 +249,10 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
 
             // AC-D4: Check issue state (fetch before comment processing so
             // pending comments are delivered before auto-close — P2-cloud fix)
-            const issueState = await opts.fetchIssueState(repoFullName, issueNumber);
+            const issueMetadata = opts.fetchIssueMetadata
+              ? await opts.fetchIssueMetadata(repoFullName, issueNumber)
+              : { state: await opts.fetchIssueState(repoFullName, issueNumber) };
+            const issueState = issueMetadata.state;
 
             if (opts.eventLog) {
               // ── F168 Phase B: Dual-cursor mode ──────────────────────────────────────
@@ -221,9 +292,11 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
               //   This ensures delivery never includes comments whose events failed to land
               //   in the event log, preserving collection-before-delivery semantics.
               const processedComments: (typeof allPending)[number][] = [];
+              const classifications = new Map<number, IssueCommentClassification>();
               let newCollectionMax = collectionCursor;
               for (const c of allPending) {
                 try {
+                  const commentClassification = classifyForTask(c, opts);
                   const communityEvent: CommunityEvent = {
                     sourceEventId: issueCommentEventId(repoFullName, issueNumber, c.id),
                     subjectKey: task.subjectKey!,
@@ -235,8 +308,13 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
                     payload: {
                       commentId: c.id,
                       authorLogin: c.author,
+                      actorType: c.actorType,
                       authorAssociation: c.authorAssociation,
                       body: c.body,
+                      critical: commentClassification.critical,
+                      ...(commentClassification.suppressionReason
+                        ? { suppressionReason: commentClassification.suppressionReason }
+                        : {}),
                     },
                     at: Date.now(),
                   };
@@ -249,6 +327,7 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
                   if (appended && opts.projector) {
                     await opts.projector.apply(communityEvent);
                   }
+                  classifications.set(c.id, commentClassification);
                   // Cloud R3 P2: advance cursor for BOTH new (appended:true) AND duplicate
                   // (appended:false) results. A duplicate means the comment is already
                   // safely in the event log (e.g. via the webhook path); withholding cursor
@@ -294,11 +373,10 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
               // Cloud R4 P1-2: use processedComments (successfully collected+projected),
               // not allPending. This prevents delivering notifications for comments whose
               // events were not appended to the event log (failed collection).
-              const echoFilter = opts.isEchoComment;
               const pendingDelivery = processedComments.filter((c) => {
                 if (c.id <= deliveryCursor) return false;
-                if (echoFilter && echoFilter(c)) return false;
-                return true;
+                const commentClassification = classifications.get(c.id) ?? classifyForTask(c, opts);
+                return shouldDeliverComment(c, commentClassification, task, issueMetadata.authorLogin);
               });
               const processedDeliveryBoundary =
                 processedComments.length > 0
@@ -380,9 +458,12 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
               const comments = await opts.fetchComments(repoFullName, issueNumber, commentCursor);
               const allNewComments = comments.filter((c) => c.id > commentCursor);
 
-              // Filter self-authored (echo) comments
-              const echoFilter = opts.isEchoComment;
-              const newComments = echoFilter ? allNewComments.filter((c) => !echoFilter(c)) : allNewComments;
+              // Use the same canonical classifier as dual-cursor collection/delivery so
+              // legacy deployments preserve critical overrides and exact-only suppression.
+              const newComments = allNewComments.filter((c) => {
+                const commentClassification = classifyForTask(c, opts);
+                return shouldDeliverComment(c, commentClassification, task, issueMetadata.authorLogin);
+              });
 
               const maxCommentId =
                 allNewComments.length > 0 ? Math.max(...allNewComments.map((c) => c.id)) : commentCursor;
@@ -494,6 +575,19 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
         }
 
         let wakeAccepted = false;
+        if (opts.holdLifecycle) {
+          try {
+            await opts.holdLifecycle.retireSatisfiedWait({
+              threadId: wake.threadId,
+              subjectKey,
+              expectedSignalKey: 'comment_posted',
+              sourceKind: 'issue_comment',
+              sourceMessageId: wake.messageId,
+            });
+          } catch (err) {
+            opts.log.warn({ err, subjectKey }, '[issue-comment] hold lifecycle retirement failed (best-effort)');
+          }
+        }
         if (opts.invokeTrigger) {
           try {
             const coalesceTargetCatId = wake.catId || task.ownerCatId || 'unassigned';

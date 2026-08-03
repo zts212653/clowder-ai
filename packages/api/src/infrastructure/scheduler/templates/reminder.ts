@@ -1,7 +1,23 @@
 import { SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
 import { buildHoldExpiredEvent } from '../../../domains/ball-custody/ball-custody-events.js';
-import type { TaskSpec_P1 } from '../types.js';
+import type { ScheduleRunTiming, TaskSpec_P1 } from '../types.js';
 import type { DynamicTaskParams, TaskTemplate } from './types.js';
+
+function formatLateness(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes >= 1 && minutes < 60) return `${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  if (hours >= 1 && remainder > 0) return `${hours} 小时 ${remainder} 分钟`;
+  if (hours >= 1) return `${hours} 小时`;
+  return `${Math.max(0, ms)} 毫秒`;
+}
+
+function formatScheduleTiming(schedule: ScheduleRunTiming | undefined): string {
+  if (!schedule?.late || !schedule.scheduledAt) return '';
+  const merged = schedule.missedSlots > 0 ? `，已合并 ${schedule.missedSlots} 个后续错过 slot` : '';
+  return `本次是 ${schedule.scheduledAt} 预定任务的补拍，实际 ${schedule.firedAt} 触发，迟到 ${formatLateness(schedule.latenessMs)}${merged}。\n`;
+}
 
 /** Reminder template — fires on schedule, wakes a cat to handle the reminder in-thread */
 export const reminderTemplate: TaskTemplate = {
@@ -46,7 +62,7 @@ export const reminderTemplate: TaskTemplate = {
           if (!ctx.deliver) throw new Error('deliver not available');
           const tid = subjectKey.startsWith('thread-') ? subjectKey.slice(7) : subjectKey;
           const catId = targetCatId ?? ctx.assignedCatId ?? 'opus';
-          const content = `${SCHEDULER_TRIGGER_PREFIX} ${message}`;
+          const content = `${SCHEDULER_TRIGGER_PREFIX} ${formatScheduleTiming(ctx.schedule)}${message}`;
 
           if (instanceId.startsWith('hold-ball-') && p.trigger.type === 'once' && threadId) {
             ctx.ballCustody

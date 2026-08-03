@@ -9,6 +9,16 @@
  * See: F193 E3 Effect-Class Matrix in docs/features/F246-approval-hub.md
  */
 
+import type { ActionSuccessorRequestMetadata } from './action-successor.js';
+import type { ApprovalOriginRef, ApprovalPublication } from './approval-hub.js';
+
+export interface DispatchActionLeaseRef {
+  leaseId: string;
+  generation: number;
+  dispatchId: string;
+  terminalPredicateDigest: string;
+}
+
 /**
  * Cross-thread dispatch effect-class (F193 E3 matrix).
  *
@@ -19,8 +29,16 @@
  */
 export type EffectClass = 'fyi' | 'coordinate' | 'investigate' | 'assign_work';
 
-/** DispatchProposal lifecycle status. */
-export type DispatchProposalStatus = 'pending' | 'approved' | 'rejected';
+/**
+ * DispatchProposal lifecycle status.
+ *
+ * - pending: awaiting operator decision
+ * - approved: operator approved, message delivered (terminal)
+ * - rejected: operator rejected (terminal)
+ * - superseded: atomically replaced by a newer proposal with the same lineage key K
+ *   (terminal — cannot approve/reject; AC-J4, INV-J5)
+ */
+export type DispatchProposalStatus = 'pending' | 'approved' | 'rejected' | 'superseded';
 
 /**
  * A cross-thread assign_work dispatch held for operator approval.
@@ -50,6 +68,14 @@ export interface DispatchProposal {
   replyTo?: string;
   /** Idempotency key from the sender. */
   clientMessageId?: string;
+  /**
+   * Server-validated action identity that may be promoted only by operator
+   * approval. This is intentionally distinct from sender-facing `action`,
+   * whose direct admission remains mutually exclusive with `assign_work`.
+   */
+  proposedAction?: ActionSuccessorRequestMetadata;
+  /** Original canonical approval origin used for staged recovery retries. */
+  approvalOriginRef?: ApprovalOriginRef;
   /** Current lifecycle status. */
   status: DispatchProposalStatus;
   /** Message ID in target thread after approval + delivery. */
@@ -62,4 +88,20 @@ export interface DispatchProposal {
   decidedAt?: number;
   /** operator userId who decided. */
   decidedBy?: string;
+  /**
+   * F246 Phase J (AC-J4): When superseded by a newer same-K proposal,
+   * records the replacing proposal's ID. Only set when status='superseded'.
+   */
+  supersededBy?: string;
+  /**
+   * F246 Phase J (AC-J8): Digest of the ActionEnvelope that backs this proposal.
+   * Absent on legacy (pre-Phase-J) proposals. When rollout state is 'required',
+   * proposals without envelopeDigest cannot be approved — only rejected or
+   * resubmitted through the new ingress. Task 1-2 will populate this field.
+   */
+  envelopeDigest?: string;
+  /** Exact F167 lease generation atomically acquired with approval. */
+  actionLeaseRef?: DispatchActionLeaseRef;
+  /** Phase-I publication state; absent only on pre-Phase-I records. */
+  publication?: ApprovalPublication;
 }

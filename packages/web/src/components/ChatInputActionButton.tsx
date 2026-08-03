@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
+import { ExpandableProse } from './content-overflow';
 import { LoadingIcon } from './icons/LoadingIcon';
 import { MicIcon } from './icons/MicIcon';
 import { SendIcon } from './icons/SendIcon';
@@ -86,9 +87,12 @@ export function ChatInputActionButton({
       {voice.state === 'recording' && (
         <div className="absolute top-0 right-4 -mt-6 flex items-center gap-2">
           {voice.partialTranscript && (
-            <div className="px-2 py-0.5 bg-cafe-surface-sunken text-cafe text-xs rounded-lg max-w-[240px] truncate opacity-80">
-              {voice.partialTranscript}
-            </div>
+            <ExpandableProse
+              text={voice.partialTranscript}
+              lines={2}
+              className="max-w-[240px] rounded-lg bg-cafe-surface-sunken px-2 py-0.5 opacity-80"
+              contentClassName="text-xs leading-4 text-cafe"
+            />
           )}
           <div className="px-2 py-0.5 bg-conn-red-text text-[var(--cafe-accent-foreground)] text-xs rounded-full animate-pulse whitespace-nowrap">
             REC {Math.floor(voice.duration / 60)}:{String(voice.duration % 60).padStart(2, '0')}

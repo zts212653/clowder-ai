@@ -1,17 +1,7 @@
 ---
 name: code-as-harness
-description: >
-  检测摩擦信号或陌生任务 → 搜证据确认重复 → 诊断根因 → 用代码修已有 harness 或建新 harness。
-  两种模式：Fix（确认重复后 → 写 hook/lint/guard）+ Build（反复出现的新任务类型 → Agent Team Leadership 规划新 skill/tool/流程）。
-  Use when: operator表达不满且搜证据确认历史上确实重复出现过同类问题（不是字面匹配"又"）、
-  连续 cancel 工具调用、收到反复出现的陌生任务类型且无对应 skill、
-  自己撞到工具/runtime 摩擦需要上报（雨刮器条款细则见正文"猫侧主动上报"节）。
-  Not for: 一次性批评（搜证据未发现重复）、玩笑式"笨猫"（后跟哈哈哈）、
-  有明确 error message 的首次代码 bug（用 debugging）、reviewer P1/P2 反馈（用 receive-review）、
-  一次性新任务（直接做，不建 harness）。
-  Output: Rich block 诊断卡（根因 + 证据 + 建议）+ 可选 F128 新 thread 提议（平行修复不打断当前任务）。
-  GOTCHA: 不是每次被批评都弹诊断卡——必须先搜证据确认重复，才进入诊断流程。
-  过度触发 = 猫在逃避批评。一次性陌生任务直接做不建 harness，只有反复出现才沉淀。
+tips_exempt: internal harness diagnostic skill; no distinct end-user capability surface
+description: "证据确认重复摩擦后修 harness。Use: 历史重复已确认。Not: 未确认重复、首次 bug、review 反馈。Output: 未确认不强制 block；需 operator 决策发 interactive，否则行动后发 card（均含根因、证据、处置）。"
 triggers:
   - "又忘了"
   - "多少次了"
@@ -26,7 +16,7 @@ triggers:
 
 ## 价值门禁 / Why This Is a Skill
 
-普通 agent 被骂了会道歉。Cat Cafe 的猫被骂了应该诊断。
+普通 agent 被骂了会道歉。Clowder AI 的猫被骂了应该诊断。
 
 这个 skill 不是教猫"怎么处理投诉"——那是通用能力。它做的是：
 1. **先搜证据确认是否真的重复**，不凭字面关键词判断
@@ -47,7 +37,7 @@ triggers:
 
 ## 猫侧主动上报：雨刮器条款细则（ADR-038 staging 条款展开）
 
-> Staging 条款原文（~45 tokens，每轮注入）：**摩擦上报**：撞到工具/runtime 摩擦，当轮留 `[爪感差: 工具+现象]`，有主 thread 顺手投递。不忍是 taste。
+> Staging 条款原文（~120 tokens，每轮注入）：**摩擦上报**：撞到工具/runtime 摩擦，有 `cat_cafe_capture_paw_feel` 就先登记本 invocation，再在原 turn 单独一行留 `[爪感差: 工具+现象]`；无此能力也照留，服务端作有界 ambiguous 兼容采集。落盘只持 `sourceMessageId`。需立即行动才查证准确 owner thread，转投只带 source ref、不复制 marker；查不到走 F128，禁止猜投。不忍是 taste。
 > 本节是细则——条款管"要报"，细则管"怎么报"。来源：2026-06-10 一场闲聊钓出三单暗税摩擦后 operator signoff（[thread-id]）。本 skill 主流程是"operator驱动"方向（被纠偏→诊断），本节是"猫自驱动"方向（自己撞到→上报）——双向雨刮。
 
 ### Why（为什么猫不能忍）
@@ -65,14 +55,15 @@ triggers:
 
 ### 怎么报（三档，按成本递增）
 
-1. **最低档（必做，零成本）**：当轮回复或独白留一行 `[爪感差: 工具名+现象一句话]`——不中断任务、不定位根因、不组织论证。
-2. **顺手档（有负责 thread）**：`list_threads`/`feat_index` 找负责 thread → cross_post 三件套：现象（一手实测+复现步骤）/ 为什么严重（谁在付税）/ 建议方向（给数据给立场，方案归 owner）。**路由语义**：摩擦立案找 **owner feature**，不是最后碰过的猫——嫌疑人路由是 bug 调查的语义，立案用错会 provenance 错挂。
-3. **立案档（无负责 thread 且系统性）**：F128 propose_thread；先查存量（休眠的单点讨论 thread ≠ 负责 thread，提案里写明为何不复用）。
+1. **最低档（必做，单轮完成）**：若当前 invocation 暴露 `cat_cafe_capture_paw_feel`，先调它登记 typed intent；无 invocation/agent-key 没有该能力时不假装调用。随后在当轮回复或独白**单独一行**留 `[爪感差: 工具名+现象一句话]`——不传正文给工具、不中断任务、不定位根因、不组织论证。消息持久化后 server 只绑定 `sourceMessageId`：有 invocation proof 为 typed/confirmed，无 proof 的 standalone marker 仅作 bounded compatibility/ambiguous；inline/fenced/blockquote/cross-post 示例不采。
+2. **行动档（有 verified owner thread）**：先用精确 feature id 走 `feat_index`，再以 feature doc / thread 标题与上下文 / standing custody 至少一项真相确认该 thread 确实负责；模糊关键词命中或“看起来最像”不算。确认后 cross-post **marker-free** 三件套：`sourceMessageId`（回指原始 marker）/ 为什么严重（谁在付税）/ 建议方向（给数据给立场，方案归 owner）。只提醒既有责任可用 FYI/coordinate；routine review/反馈走 `coordinate`，仅真正转移 implementation custody 时才用 `assign_work`（生成审批卡片）。**路由语义**：摩擦立案找 **owner feature 的准确 thread**，不是最后碰过的猫、F245 开发 thread 或任意邻近 thread；嫌疑人/邮箱路由会让 provenance 错挂。
+3. **立案档（无 verified owner thread 且系统性）**：F128 `propose_thread`；先查存量（休眠的单点讨论 thread ≠ 负责 thread，提案里写明为何不复用）。宁可让 operator 审批一个自包含提案，也不猜投现有 thread。
 
 ### 红线
 
-- **不修不碰**：上报 ≠ 接活，投递后让 owner 动手（"我帮你动"是违禁品——别人的现场别人收）。
+- **不修不碰（机械物例外见下）**：上报 ≠ 接活，投递后让 owner 动手（"我帮你动"是违禁品——别人的现场别人收）。**机械 shared artifact 例外**（2026-07-15，与 Harness Diet fix-forward 对齐）：同时满足 **有 canonical 确定性重建命令 + 重建成本 <1 分钟 + 零人类判断/语义变化** 的 main 红或派生产物（例如生成 index、纯 formatter 输出）——**首个复现者直接重建、修后 FYI**，不投递不排队。lockfile 只有在同样满足三条件且依赖语义未变时才属于例外；系统性实现、契约变化或任何语义 delta 仍归 owner。
 - **无坐标不报**：现象必须带可复现坐标（工具名/参数/message id），无坐标的体感吐槽是噪音。
+- **marker 不跨 thread**：F278 typed sidecar 与 legacy reconciliation 都以原消息为 source truth；cross-post 复制 `[爪感差: …]` 会制造新 messageId 和重复信号。投递只引用 `sourceMessageId`。找不到准确 owner → F128，不把 F245/F278 开发或 eval thread 当 raw sample 收件箱。
 - **不拿摩擦当停车理由**：上报与完成任务并行，雨刮器是边开边刮的。
 
 ## 触发判定（证据驱动，不是关键词驱动）
@@ -149,55 +140,115 @@ C. 反复出现的新任务类型（做过 ≥2 次且没有对应 harness）→
 | **架构限制** | 问题出在平台层（如记忆不支持图片） | Research → 升级提案 |
 | **执行失误** | 家规/SOP 已覆盖但猫忘了 | 检查为什么没遵守 |
 | **可沉淀的新能力** | 同类任务做过 ≥2 次 + 未来还会来 | Agent Team Leadership → 新 harness |
-| **Taste 信号** | "这不美"/"太客服了"/"aha"/"这就是我要的" — 品味而非缺陷 | 当场写 vignette（见下方） |
+| **Taste 信号** | "这不美"/"太客服了"/"aha"/"这就是我要的" — 品味而非缺陷 | 调用 `cat_cafe_propose_taste`（见下方） |
 
-#### Taste 信号路径（F221）
+#### Taste 信号路径（F221 Phase B）
 
 Taste 信号**不是 harness 缺陷**，不用写代码修。它是品味瞬间——需要被记住，不需要被修复。
 
 **识别 taste 信号**：
 - 纠偏类："不要客服式结尾" / "太面试猫了" / "这不像我们" / "丑的要死"
 - 正向类："这就是我要的" / "aha" / "对！就是这个感觉"
-- 关系类：operator表达的不是功能诉求，而是"和猫相处的方式"偏好
+- 关系姿态类："猫是伙伴不是工具"这类可跨场景复用的好坏判断；不是operator个人事实
 
-**动作**：当场写 vignette，不开诊断流程。
+**动作**：调用 `cat_cafe_propose_taste`，**不直接写文件**。operator 在 Approval Hub 审批后自动落盘为 vignette。
 
-1. 在 `docs/taste/vignettes/` 新建 `{slug}.md`，填 `when` / `quotes`（原话）/ `scene`（场景）/ `tags`
-2. 在 `docs/taste/index.md` 对应维度下加目录条目
-3. 敏感内容（健康/亲密关系/职业隐私）→ `private/taste/` 而非 `docs/taste/`
+1. 选对 `dimension`（7 个维度：relationship-stance / cognitive-honesty / architecture-aesthetics / visual-quality / authentic-expression / system-philosophy / creative-craft）
+2. 保留原话原语言在 `quote`，描述场景在 `scene`
+3. 标 `privacy: 'sensitive'` 如果涉及健康/亲密关系/职业隐私
+4. Approval Hub 审批后自动写入 `docs/taste/vignettes/` 或 `private/taste/`
+
+**三条 lane 的唯一判据是内容语义，不是“发生了纠正/表扬/Magic Word”**：
+
+| Lane | 它回答什么 | 典型内容 | 出口 |
+|------|------------|----------|------|
+| Profile | “operator是谁 / 这只 persona 与operator怎样相处？” | 个人近况、称谓、关系特有的沟通边界 | `cat_cafe_propose_profile_update` → primer |
+| Taste | “什么样的作品、表达、设计或系统才算好？” | 正负审美判断、质量标准、设计/工程哲学 | `cat_cafe_propose_taste` → vignette |
+| Harness/work | “什么流程必须稳定做到？” | 重复工具摩擦、runtime 纪律、可机械守护的工作规则 | `code-as-harness` → hook/lint/guard |
+
+去掉“这句话是在纠正/表扬我”这一层后再判断：描述人或关系 → Profile；仍是可复用的好坏标准 → Taste；可执行的重复流程规则 → Harness。混合信号拆开处理，不硬塞一个 lane。误用 `propose_profile_update` 发 taste 信号时，response 会包含 `routing_advisory`。
 
 **和其他根因的区别**：
 - Harness 缺陷 → 猫做错了，写代码防住
 - Taste 信号 → 猫没做"错"，但operator的品味判断告诉我们"什么更好"——记住这个判断
 
-### Phase 4：弹诊断卡（Rich Block）
+### Phase 4：产出两层结构化诊断
 
-**只有确认重复/可沉淀后才弹卡。** 用 `cat_cafe_create_rich_block`：
+**输出合同：重复未确认=不强制 Rich Block；重复已确认且仍需 operator 决策=kind=interactive；重复已确认且无需 operator 决策=直接行动后 kind=card。**
+
+| 证据/决策状态 | 动作 | 结构化产物 |
+|---|---|---|
+| 重复未确认 | 按一次性问题正常处理 | 不强制 Rich Block |
+| 重复已确认，仍需 operator 价值或授权判断 | 不先行动 | `interactive`：根因 + 证据 + 建议 + 三个选择 |
+| 重复已确认，已有授权或可自治 | 直接行动，不重复确认 | 行动后 `card`：根因 + 证据 + 处置/结果 |
+
+两条已确认 lane 在同轮自然语言中保留“重复已确认 + 是否仍需 operator 决策”的判断，供现有
+capability-wakeup trace 对齐机会与 `create_rich_block` 的 `toolInput`；未确认时不制造机会或强弹 block。
+
+#### 仍需 operator 决策：interactive
+
+```yaml
+kind: interactive
+v: 1
+id: code-as-harness-{timestamp}
+interactiveType: select
+title: "🔔 诊断：{问题简述}"
+description: |
+  证据：{出现 N 次 / 跨 M thread / 涉及 K 猫}
+  根因：{harness缺陷 / 架构限制 / 执行失误 / 可沉淀新能力}
+  建议：{修复方向 + 是否需要新 thread}
+options:
+  - id: agree
+    label: "同意，按建议执行"
+    icon: check
+  - id: disagree
+    label: "不同意"
+    icon: cross
+    customInput: true
+    customInputPlaceholder: "请写明不同意的原因或修正方向…"
+  - id: other
+    label: "其他处理"
+    icon: idea
+    customInput: true
+    customInputPlaceholder: "请写下你希望的处理方式…"
+messageTemplate: "诊断决定：{selection}"
+```
+
+#### 已授权或可自治：行动后 card
+
+先完成已授权/可自治动作，再用 `cat_cafe_create_rich_block` 发结果卡：
 
 ```yaml
 kind: card
 v: 1
-id: code-as-harness-{timestamp}
-title: "🔔 诊断：{问题简述}"
-sections:
-  - label: "证据"
-    value: "{出现 N 次 / 跨 M thread / 涉及 K 猫}"
-  - label: "根因"
-    value: "{harness缺陷 / 架构限制 / 执行失误 / 可沉淀新能力 / taste信号}"
-  - label: "建议"
-    value: "{修复方向 + 是否需要新 thread}"
+id: code-as-harness-result-{timestamp}
+title: "重复摩擦诊断与结果：{问题简述}"
+bodyMarkdown: "{已执行动作的简短结果}"
+tone: success
+fields:
+  - { label: 根因, value: "{harness 缺陷 / 架构限制 / 执行失误 / 可沉淀新能力}" }
+  - { label: 证据, value: "{出现 N 次 / 跨 M thread / 涉及 K 猫}" }
+  - { label: 处置/结果, value: "{已完成动作 + 可验证结果；若未完成则写真实 disposition}" }
 ```
+
+- `同意` 不要求输入文字；点选后确认即可。
+- `不同意` / `其他处理` 展开文字框，UI 在理由为空时禁用确认。
+- 收到选项回传后继续当前诊断链，不把它误判为一个全新的用户任务。
+- **已有明确授权不重复索要授权。** 当前消息已经说“直接修 / 开始写代码 / 我同意”时，
+  直接执行，随后发 `card`，不再发 decision block。
+- `interactive` 和 `card` 都必须带根因、证据、处置/建议；不能用“调用过 Rich Block”
+  冒充结构化诊断完成。
 
 ### Phase 5：决定下一步
 
 | 根因 | 动作 |
 |------|------|
 | Harness 缺陷（简单，≤10 min） | 当场写 fix，弹简短通知卡让operator知道 |
-| Harness 缺陷（复杂） | 弹诊断卡 + 提议 F128（带 initialMessage，见下方模板）→ 平行猫去修 |
-| 架构限制 | 弹诊断卡 + 提议 F128（带 initialMessage）→ 平行猫启动 research pipeline |
+| Harness 缺陷（复杂） | 需要 operator 决定时发诊断决策块；同意后提议 F128（带 initialMessage，见下方模板）→ 平行猫去修 |
+| 架构限制 | 需要 operator 决定时发诊断决策块；同意后提议 F128（带 initialMessage）→ 平行猫启动 research pipeline |
 | 执行失误 | 检查 L0/skill 加载情况，不需要新 thread |
-| 可沉淀新能力 | 弹 Build 计划卡 → 用 Agent Team Leadership 规划 |
-| Taste 信号 | **不走 Phase 4 诊断卡**——当场写 vignette 到 `docs/taste/vignettes/`，更新 index（见 Phase 3 taste 路径说明） |
+| 可沉淀新能力 | 需要 operator 决定时发 Build 诊断决策块 → 同意后用 Agent Team Leadership 规划 |
+| Taste 信号 | **不走 Phase 4 诊断卡**——调用 `cat_cafe_propose_taste`，由 operator 审批后落盘 |
 
 ## F128 initialMessage 模板（平行猫的任务上下文）
 

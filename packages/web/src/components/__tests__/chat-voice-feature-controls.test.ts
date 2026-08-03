@@ -234,6 +234,36 @@ describe('ChatVoiceFeatureControls', () => {
     expect(useToastStore.getState().toasts[0]?.message).toContain('语音管理');
   });
 
+  it('preserves every returned service log line in startup failure details', async () => {
+    const lines = Array.from({ length: 30 }, (_, index) => `log-${index}-${'diagnostic'.repeat(12)}`);
+    apiFetchMock.mockImplementation(async (path: string) => {
+      if (path === '/api/services') {
+        return jsonResponse({
+          services: [
+            {
+              id: 'mlx-tts',
+              installed: true,
+              enabled: true,
+              installable: true,
+              status: 'unhealthy',
+              error: 'fetch failed',
+              features: ['voice-output', 'voice-companion'],
+            },
+          ],
+        });
+      }
+      if (path === '/api/services/mlx-tts/logs') return jsonResponse({ lines });
+      return jsonResponse({ error: `unexpected ${path}` }, false);
+    });
+    render();
+
+    await act(async () => button('语音陪伴').click());
+
+    const message = useToastStore.getState().toasts[0]?.message ?? '';
+    expect(message).toContain('log-0-');
+    expect(message).toContain('log-29-');
+  });
+
   it('opens install preview from the audio capture header action before installing', async () => {
     const profile = {
       os: 'win32',

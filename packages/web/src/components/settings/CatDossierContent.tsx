@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useState } from 'react';
+import { ExpandableProse } from '@/components/content-overflow';
 import { type EvidenceSnippet, useDossierEvidence } from '@/hooks/useDossierEvidence';
 import { type DossierObservation, useDossierObservations } from '@/hooks/useDossierObservations';
 import {
@@ -278,15 +279,21 @@ function EvidenceSection({
                   {ev.title}
                 </SettingsText>
                 <SettingsBadge
-                  tone={ev.confidence === 'high' ? 'emerald' : ev.confidence === 'mid' ? 'amber' : 'slate'}
+                  tone={ev.matchRank === 'high' ? 'emerald' : ev.matchRank === 'mid' ? 'amber' : 'slate'}
                   size="xxs"
                 >
-                  {ev.confidence}
+                  {ev.matchRank}
                 </SettingsBadge>
               </div>
-              <SettingsText as="p" variant="xs" tone="muted" className="mt-0.5 line-clamp-2">
-                {ev.snippet}
+              <SettingsText as="p" variant="xs" tone="muted">
+                match:{ev.matchRank} · authority:{ev.authority ?? 'unknown'} · updated:{ev.updatedAt ?? 'unknown'}
               </SettingsText>
+              <ExpandableProse
+                text={ev.snippet}
+                lines={2}
+                className="mt-0.5"
+                contentClassName="text-xs leading-4 text-cafe-muted"
+              />
             </div>
           ))}
         </div>

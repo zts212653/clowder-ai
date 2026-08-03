@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { ExpandableProse } from '@/components/content-overflow';
 import type { RuntimeDrift, StaleBranch, WorktreeHealth } from '../../hooks/useGitHealth';
 import { useGitHealth } from '../../hooks/useGitHealth';
 
@@ -67,7 +68,12 @@ function DriftSection({ drift }: { drift: RuntimeDrift }) {
                   {drift.behindCommits.map((c) => (
                     <div key={c.short} className="flex items-center gap-1.5 text-micro font-mono text-cafe-black/60">
                       <span className="text-cafe-accent/50">{c.short}</span>
-                      <span className="truncate">{c.subject}</span>
+                      <ExpandableProse
+                        text={c.subject}
+                        lines={2}
+                        className="min-w-0 flex-1"
+                        contentClassName="text-micro font-mono leading-4 text-cafe-black/60"
+                      />
                     </div>
                   ))}
                 </div>

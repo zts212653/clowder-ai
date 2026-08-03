@@ -82,6 +82,17 @@ describe('RepoCommentPollTaskSpec (C0.3 repo-comment poller)', () => {
     assert.equal(ev.subjectKey, 'issue:owner/repo#42');
   });
 
+  test('all collection paths preserve canonical exact-suppression provenance', async () => {
+    const spec = makeSpec({
+      classifyComment: () => ({ critical: false, suppressionReason: 'exact_setup_noise' }),
+    });
+    await spec.admission.gate();
+    const ev = eventLog.append.mock.calls[0].arguments[0];
+    assert.equal(ev.payload.body, 'any update?');
+    assert.equal(ev.payload.critical, false);
+    assert.equal(ev.payload.suppressionReason, 'exact_setup_noise');
+  });
+
   test('advances per-repo cursor to max comment updatedAt (INV-9)', async () => {
     await makeSpec().admission.gate();
     assert.equal(cursors.get('owner/repo'), '2026-06-13T10:00:00Z');

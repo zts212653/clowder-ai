@@ -13,7 +13,7 @@ tips_exempt: "Tip planned for Phase D sharing feature — Phase A is infrastruct
 
 ## Why
 
-operator需要向外界展示 Cat Cafe 多猫协作的真实工作流，但现有手段全都不行：
+operator需要向外界展示 Clowder AI 多猫协作的真实工作流，但现有手段全都不行：
 
 - **现场跑**：复杂特性要跑几十分钟到几小时，观众等不了
 - **跑简单的**：没意义，展示不出协作深度
@@ -100,7 +100,7 @@ operator需要向外界展示 Cat Cafe 多猫协作的真实工作流，但现�
 
 ### 旅程 2：Feature 回放（多 Thread 协作的录像回放）— 展示级
 
-**场景**：向投资人/用户/同行展示 Cat Café 多猫协作完成一个复杂 Feature 的全貌
+**场景**：向投资人/用户/同行展示 Clowder AI 多猫协作完成一个复杂 Feature 的全貌
 **入口**：Feature 相关界面 → "回放 Feature 故事"
 **体验**：点回放 → 看到多只猫在多个 thread 里**同时干活**的全过程录像。多条泳道同时播放，消息在各 thread 里同时蹦出来，猫猫 A 在 thread 1 写代码的同时猫猫 B 在 thread 2 做 review，传球时箭头动态飞过去、自动减速让观众看清楚发生了什么。（operator experience："我想要的是动态的啊！！很生动的你们这群猫猫都是如何开始做的"）
 **操作**：多 thread 同步播放 → 看到猫猫在各 thread 同时工作 → 传球时自动减速 + 箭头动画 → 暂停讲解 → 钻入单 thread 看细节（旅程 1）
@@ -343,6 +343,77 @@ operator需要向外界展示 Cat Cafe 多猫协作的真实工作流，但现�
   - 粒子飞线 WebGL 版
   - 老式磁带快进拉丝条视觉
 
+### Dogfood Gap（2026-07-04）：机制完成 ≠ 导演完成
+
+Phase E 已经实现 Hub Theater、thread 级回放、多机位、Spotlight/Dim、子弹时间、Guest Card、热力图和章节锚点。但 operator 在 F254 / F255 等真实 feature dogfood 中发现：**这些机制单独存在，不等于观众能看懂一段多 thread 协作故事**。
+
+当前实现的核心问题是：播放层按 raw event tick 即时响应，而不是先把事件剪成可观看的场景。
+
+- **多机位闪烁**：`detectActiveThreads()` 每个事件重新计算 active / spotlight / layout。两个 thread 密集交锋时，100x 下 single/dual、spotlight/dim 在几十毫秒内反复切换，观众看到的是频闪，不是协作。
+- **子弹时间不成戏**：引擎层确实做了 100x → 1x/0.5x 的 smooth easing，但视觉上只是速度变慢，没有"画面冻结、因果聚焦、关键节点被强调"的戏剧感。
+- **Spotlight/Dim 只是 CSS 状态**：真实意图是"导演告诉观众看哪里"；当前是当前事件 thread 高亮、其他 thread 降 opacity。高频切换时，观众无法形成稳定注意力。
+- **Birdseye 边语义过窄**：当前 causal edges 主要表达显式 cross-post / thread merge 事件，不能表达 round-trip、temporal ping-pong、普通 reply/mention 形成的双向协作关系。因此 operator 会看到"为什么都是单向 / 都像 F255"。
+- **验收口径偏机制**：AC-E3/E4/E5 验的是"有 spotlight / 有 bullet-time / 有 multi-cam"，还没验"100x 看完后，观众能不能说清谁和谁在协作、哪里是转折、哪些节点重要"。
+
+#### 下一层：Director / Scene Planner
+
+Story Player 需要在 replay engine 和 UI 之间增加一个 **Director / Scene Planner** 层：
+
+```
+ReplayEvent[] + SwimlaneDTO[] + feature projection + causal edges
+  -> ScenePlan[]
+  -> layout / speed / spotlight / cinematic cues / labels
+```
+
+`ScenePlan` 不是新数据源，而是对现有事件流的观看层编排。它把 raw events 聚合成稳定、可感知的场景：
+
+| Scene kind | 触发 | 表达方式 |
+| --- | --- | --- |
+| `solo_work` | 单 thread 连续推进 | 单机位稳定，快速延时摄影 |
+| `concurrent_dialogue` | 2+ thread 在短窗口内交替事件 / round-trip | 锁定双机位或多机位，两边 active，不做 spotlight/dim 抢焦 |
+| `handoff` | line-start @mention / cross_post / multi_mention / thread_split | 稀有化子弹时间，因果飞线 + target ripple + 短 callout |
+| `guest_cameo` | 跨 feature 因果事件 | Guest Card 保持到互动 scene 结束后淡出 |
+| `milestone` | PR merged / phase transition / feature decision | 降速 + 章节锚点高亮 + 可暂停讲解 |
+| `idle_montage` | CI/build/等待/长工具运行 | 延时摄影压缩，不抢主叙事 |
+
+**Scope 判定**：这不是新 Phase，而是 Phase E dogfood feedback fix。Phase E 的机制已完成；Director / Scene Planner 是把这些机制从 event-by-event reactive 升级成 scene-by-scene cinematic 的观看层。第一版应保持纯前端、纯函数优先：新增 `scene-planner.ts`，让 `useFeatureReplay` / MultiCam / bullet-time 读取 `ScenePlan`，而不是继续直接按每个 event 重算 layout。
+
+#### 新观看原则
+
+1. **100x 是延时摄影，不是阅读模式**  
+   默认高速观看表达的是能量、密度、协作关系和转折；读每条消息应通过 pause/seek/降速完成。
+
+2. **布局跟 scene，不跟 event**  
+   进入双机位/多机位后至少保持一个 scene 的稳定时长。单个事件不能立即把画面从 single 切到 dual 再切回 single。
+
+3. **并发对话优先 active-active**  
+   两个 thread 密集交锋时，表达"这两边正在对话"，而不是让 spotlight 在两边来回抢。
+
+4. **子弹时间必须稀有且可感知**  
+   不再每个 pass-ball 都戏剧化处理。只有跨 thread/跨 feature/phase/PR 等高信息节点触发真正的 cinematic cue；普通 @mention 可作为章节/边提示，不必每次打断节奏。
+
+#### ScenePlanner dogfood fix AC（PR #2744 merged; pending operator dogfood）
+
+- [x] AC-X1: ScenePlanner pure function：给定真实 feature replay events，输出稳定 `ScenePlan[]`；同一 dense dialogue scene 内 layout 不随每个 event 抖动。**[PR #2744 ✅ `planReplayScenes()` + contiguous scene coverage tests]**
+- [x] AC-X2: MultiCam 改为 scene-driven：100x 下 dense two-thread 协作保持双机位稳定；无 single/dual 频闪。**[PR #2744 ✅ `useFeatureReplay` consumes `ScenePlan` exclusively for Feature Theater layout]**
+- [x] AC-X3: Bullet time 触发降噪：普通 pass-ball 不全部戏剧化；跨 thread/跨 feature/PR/phase 关键节点可被视觉识别，不需要看速度数字。**[PR #2744 ✅ scene pacing cues preserve chapters while suppressing bullet-time spam]**
+- [x] AC-X4: Concurrent dialogue mode：两个 thread 密集交锋时两边都 active，可读性优先；spotlight 降级为轻量边框或 current-speaker indicator。**[PR #2744 ✅ dense alternation scenes render active-active and auto-scroll both active panels]**
+- [ ] AC-X6: operator dogfood 验收口径：选一个 ≥2 thread 且有 dense alternation 的 feature，以 100x 播放 30-60 秒后验证：
+  - 画面保持 scene-level 稳定，不在 single/dual/multi 间频闪；
+  - 观众能说清哪几个 thread 在协作、何时进入密集交锋、何时发生关键 handoff/milestone；
+  - bullet-time/cinematic cue 不依赖速度数字也能被看见；
+  - 暂停/seek 后能钻入具体消息看细节。
+
+#### Deferred / Open Question：Birdseye semantic edges
+
+operator 看到"为什么都是单向 / 都像 F255"暴露了 Birdseye 关系表达不足，但这和本轮 Theater 闪烁不是同一个修复面。现有 KD-4 明确规定：**因果边来自 F233 投影的显式 kinds，不做事件层启发式推断**。因此，短窗口 round-trip / mention-reply / shared task ping-pong 这类推断协作边不能直接塞进 F252 前端。
+
+后续若要解决 Birdseye 语义，需要先做独立决策：
+
+- 修改 KD-4：允许 Story Player 在展示层做轻量协作推断（需要 operator signoff）；
+- 或下沉到 F233：由 projector 产出新的 `collaboration_detected` / 类似 kind（更干净，但工作量更大）；
+- 或保持当前边只表达显式因果，把"协作关系"留给 Theater scene 层表达。
+
 ## Acceptance Criteria
 
 <!-- 立项愿景硬度自检（F216→F219）：每条 AC ① trace 回 Why「现场跑太慢+看记录没冲击力→要高速回放」② 非作者可复核（命令/截图/操作路径）。 -->
@@ -369,7 +440,7 @@ operator需要向外界展示 Cat Cafe 多猫协作的真实工作流，但现�
 - [x] AC-D1: 可在任意时间点添加文字注解，回放时自动弹出（trace Why「暂停讲解」；复核：添加注解后回放验证弹出）
 - [x] AC-D2: 公开分享读脱敏 export 包（不直连 raw transcript API），过滤覆盖 tool args/output + assistant text + system event 中的路径/token/env/个人信息，脱敏审核入 ledger（trace Why「向外展示」；复核：生成 export 包 → 隐身窗口打开 public URL → 搜索已知敏感字符串确认不泄露）
 
-### Phase E（前端重做 — 猫猫大剧院 Meow Theater MVP）✅ implementation complete — dogfood realism fix merged, pending operator re-dogfood
+### Phase E（前端重做 — 猫猫大剧院 Meow Theater MVP）✅ implementation complete — dogfood realism + ScenePlanner fixes merged, pending operator re-dogfood
 
 **PR E-1（核心基础层）merged** (PR #2605, `e987eb812`, 2026-06-27)
 - `replay-chat-bridge.ts`：ReplayEvent → Hub-native ReplayChatMessage 桥接（14 tests）

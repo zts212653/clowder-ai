@@ -34,6 +34,7 @@ function makeEvent(kind, overrides = {}) {
 describe('CommunityObjectStore + projector (Redis)', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let CommunityEventLog;
   let CommunityObjectStore;
+  let CommunityKeys;
   let CommunityProjector;
   let createRedisClient;
   let redis;
@@ -52,6 +53,7 @@ describe('CommunityObjectStore + projector (Redis)', { skip: redisIsolationSkipR
 
     const osMod = await import('../dist/domains/community/CommunityObjectStore.js');
     CommunityObjectStore = osMod.RedisCommunityObjectStore;
+    CommunityKeys = (await import('../dist/domains/community/community-keys.js')).CommunityKeys;
 
     const pMod = await import('../dist/domains/community/community-projector.js');
     CommunityProjector = pMod.CommunityProjector;
@@ -81,6 +83,38 @@ describe('CommunityObjectStore + projector (Redis)', { skip: redisIsolationSkipR
   // -----------------------------------------------------------------------
 
   describe('apply — basic state transitions', () => {
+    it('resolves mixed-case GitHub subject keys through the canonical PR identity', async () => {
+      const mixedCase = {
+        subjectKey: 'pr:Owner/Repo#2868',
+        repo: 'Owner/Repo',
+        type: 'pr',
+        number: 2868,
+        state: 'fixed',
+        ownerThreadId: null,
+        ownerRole: null,
+        nextOwner: 'none',
+        lastExternalActivityAt: null,
+        lastPublicCommentAt: null,
+        linkedIssues: [],
+        linkedPrs: [],
+        closureWaiver: null,
+        appliedEventCount: 1,
+        lastRejectedEvent: null,
+        deliveryCursor: null,
+        createdAt: 100,
+        updatedAt: 200,
+      };
+
+      await redis.set(CommunityKeys.objectProjection(mixedCase.subjectKey), JSON.stringify(mixedCase));
+      await redis.sadd(CommunityKeys.objectsIndex, mixedCase.subjectKey);
+
+      const stored = await objectStore.get('pr:owner/repo#2868');
+      assert.ok(stored, 'canonical action subject must resolve the community projection');
+      assert.equal(stored.subjectKey, 'pr:owner/repo#2868');
+      assert.equal(await redis.exists(CommunityKeys.objectProjection(mixedCase.subjectKey)), 0);
+      assert.equal(await redis.exists(CommunityKeys.objectProjection('pr:owner/repo#2868')), 1);
+    });
+
     it('issue.opened → projection state=new', async () => {
       const event = makeEvent('issue.opened', {
         subjectKey: 'issue:owner/repo#1',

@@ -11,6 +11,7 @@
  * self-grant private collection visibility.
  */
 
+import { formatRecallMeta } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
@@ -124,7 +125,10 @@ export async function handleGraphResolve(input: {
     const response = await fetch(url);
     if (!response.ok) {
       const text = await response.text();
-      return errorResult(`graph_resolve failed (${response.status}): ${text}`);
+      return recallErrorResult(
+        `graph_resolve failed (${response.status}): ${text}`,
+        'graph_resolve failed before graph data was returned. Check the API error and retry.',
+      );
     }
     const data = (await response.json()) as GraphResolveResponse;
 
@@ -139,8 +143,24 @@ export async function handleGraphResolve(input: {
     }
     return successResult(formatNoMatch(data));
   } catch (err) {
-    return errorResult(`graph_resolve error: ${err instanceof Error ? err.message : String(err)}`);
+    return recallErrorResult(
+      `graph_resolve error: ${err instanceof Error ? err.message : String(err)}`,
+      'graph_resolve request failed before graph data was returned. Check API connectivity and retry.',
+    );
   }
+}
+
+function recallErrorResult(message: string, readNextHint: string): ToolResult {
+  return errorResult(
+    [
+      message,
+      formatRecallMeta({
+        resultStatus: 'error',
+        resultCount: null,
+        readNextHint,
+      }),
+    ].join('\n'),
+  );
 }
 
 function formatGraph(g: GraphSubgraphInner, relationsFilter?: readonly string[]): string {
@@ -176,6 +196,22 @@ function formatGraph(g: GraphSubgraphInner, relationsFilter?: readonly string[])
   }
   lines.push('');
   lines.push(crossReferenceFooter());
+  lines.push(
+    formatRecallMeta({
+      resultStatus: 'counted',
+      resultCount: visibleNodes.length,
+      truncated: g.truncated === true,
+      previewItems: visibleNodes.slice(0, 3).map((node) => ({
+        title: node.title,
+        anchor: node.anchor,
+        confidence: node.kind,
+        snippet: node.anchor === g.center ? 'center node' : `depth=${g.depth}`,
+      })),
+      readNextHint: g.truncated
+        ? 'Graph output was truncated by hub-node cap. Re-run graph_resolve with depth=1 or relation filters.'
+        : 'Use exact anchors from this graph for follow-up graph_resolve/read operations.',
+    }),
+  );
   return lines.join('\n');
 }
 
@@ -195,6 +231,19 @@ function formatCandidates(c: GraphCandidates): string {
   });
   lines.push('');
   lines.push(crossReferenceFooter());
+  lines.push(
+    formatRecallMeta({
+      resultStatus: c.candidates.length === 0 ? 'no_results' : 'counted',
+      resultCount: c.candidates.length,
+      previewItems: c.candidates.slice(0, 3).map((cand) => ({
+        title: cand.title,
+        anchor: cand.anchor,
+        confidence: cand.kind,
+        snippet: cand.snippet,
+      })),
+      readNextHint: 'Pick one candidate anchor and call graph_resolve again with that exact anchor.',
+    }),
+  );
   return lines.join('\n');
 }
 
@@ -204,6 +253,11 @@ function formatNoMatch(n: GraphNoMatch): string {
     n.examples.length > 0 ? `Examples: ${n.examples.join(', ')}` : '',
     '',
     crossReferenceFooter(),
+    formatRecallMeta({
+      resultStatus: 'no_results',
+      resultCount: 0,
+      readNextHint: 'No graph node matched. Try search_evidence/list_recent or use one of the example anchors.',
+    }),
   ]
     .filter(Boolean)
     .join('\n');

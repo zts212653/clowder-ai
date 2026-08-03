@@ -43,7 +43,7 @@ function Get-PythonBinaryArch {
     # ARM64 Windows, platform.machine() reports the host arch (ARM64),
     # not the process arch (AMD64). PE header is the unambiguous source.
     #
-    # CVO-verified on Windows ARM64 hardware (2026-05-14):
+    # operator-verified on Windows ARM64 hardware (2026-05-14):
     #   $bytes[$peOffset+4..+5] = 0x8664  ->  AMD64 PBS-extracted python.exe
     #   but: .\python.exe -c 'platform.machine()' ->  ARM64
     param([string]$ExePath)
@@ -74,7 +74,7 @@ function Test-Python312Candidate {
         # IMPORTANT: Python string literal uses single quotes (`sep=':'`),
         # not double quotes. PowerShell 5.1 re-quotes args when handing them
         # to native exe -- embedded `"` gets eaten, Python receives broken
-        # syntax and produces empty stdout. CVO-verified on Win-ARM64:
+        # syntax and produces empty stdout. operator-verified on Win-ARM64:
         # `print('a:b:c')` -> "a:b:c" but `print(x, y, sep=":")` -> "".
         $out = & $Path @($PrefixArgs + @('-c', "import sys; print(sys.version_info[0], sys.version_info[1], sep=':')")) 2>$null
         if (-not $out) { return $null }
@@ -427,7 +427,7 @@ function Install-PythonToProjectDirInner {
     # On Windows curl uses SChannel which intermittently bails on GitHub's
     # objects.githubusercontent.com CDN with "server closed abruptly
     # (missing close_notify)" -- observed: curl spent 30+ min at 80% and
-    # died, IWR on the same URL finished in seconds (CVO-verified).
+    # died, IWR on the same URL finished in seconds (operator-verified).
     # ProgressPreference='SilentlyContinue' avoids the IWR perf cliff where
     # the progress bar throttles large transfers.
     $prevProgress = $ProgressPreference

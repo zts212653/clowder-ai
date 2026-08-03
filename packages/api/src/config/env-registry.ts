@@ -190,6 +190,14 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
+    name: 'CAT_CAFE_F255_AWAKENED_LEASE_MS',
+    defaultValue: '5400000',
+    description: 'F255 Present loop 醒来租约时长（毫秒，默认 90 分钟；启动时读取）',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_CAFE_HOME',
     defaultValue: '<repoRoot>/.cat-cafe',
     description:
@@ -348,6 +356,16 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
     hubVisible: false,
     runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_REDIS_TEST_ISOLATED',
+    defaultValue: '(未设置)',
+    description: 'F254 隔离 Redis 迁移测试授权开关（仅随机 loopback 端口与独立 DB 的测试 harness 使用）',
+    category: 'server',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+    allowedValues: ['1'],
   },
   {
     name: 'CAT_CAFE_SERVICES_CONFIG',
@@ -510,7 +528,7 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'CAT_CAFE_RUNTIME_ROOT',
     defaultValue: '(未设置 → process.cwd())',
     description:
-      'F061: Cat Café runtime 二进制根目录（runtime startup 自动 export 为 $RUNTIME_DIR），优先级高于 capability orchestrator 的 auto-detection，用于 Antigravity MCP config args 路径',
+      'F061: Clowder AI runtime 二进制根目录（runtime startup 自动 export 为 $RUNTIME_DIR），优先级高于 capability orchestrator 的 auto-detection，用于 Antigravity MCP config args 路径',
     category: 'server',
     sensitive: false,
     runtimeEditable: false,
@@ -684,7 +702,7 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'CLI_TIMEOUT_MS',
     defaultValue: DEFAULT_CLI_TIMEOUT_LABEL,
-    description: 'CLI 调用超时',
+    description: 'CLI 自动终止超时（0 = 关闭，仅人工取消）',
     category: 'cli',
     sensitive: false,
   },
@@ -884,7 +902,7 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'CAT_CAFE_CREDENTIAL_FILE',
     defaultValue: '(运行时注入)',
     description:
-      "#1092/#1099-P1: MCP credential refresh file path, SESSION-scoped (<threadId>_<catId>_<nonce>.json). The ACP layer injects it into a session's MCP server env at session creation and rewrites the same file with fresh invocationId+callbackToken on each resume; MCP server re-reads it per callback. Superseded processes keep their own file so registry.isLatest() still rejects their late writes.",
+      '#1092/#1099-P1: MCP credential refresh file path, provider/session-scoped (<threadId>_<catId>_<nonce>.json). Persistent ACP and pooled Codex carriers inject it at session creation and rewrite the same file with fresh invocationId+callbackToken on each resume; MCP server re-reads it per callback. Superseded processes keep their own file so registry.isLatest() still rejects their late writes.',
     category: 'cli',
     sensitive: false,
     hubVisible: false,
@@ -999,9 +1017,9 @@ export const ENV_VARS: EnvDefinition[] = [
   // Only infrastructure-level and diagnostic vars remain here.
   {
     name: 'CONNECTOR_GATEWAY_AUTOSTART',
-    defaultValue: 'runtime-production-only',
+    defaultValue: 'explicit-runtime-opt-in',
     description:
-      '预配置 IM connector 自动接入开关：默认仅 runtime production（NODE_ENV=production + CAT_CAFE_RUNTIME_ROOT）启用；start:direct/alpha/dev 默认禁用。需在启动前通过 env/.env 设置，设 1 强制启用，0 强制禁用',
+      '预配置 IM connector 自动接入开关：仅显式 true 启用。官方 runtime 入口默认注入 1；start:direct/alpha/dev/review 与绕过入口的 API 命令默认禁用。授权只能由官方 wrapper 或启动进程环境显式注入；项目 dotenv 配置不会授予该能力',
     category: 'connector',
     sensitive: false,
     runtimeEditable: false,
@@ -1107,6 +1125,41 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '缅因猫审批策略',
     category: 'codex',
     sensitive: false,
+  },
+  {
+    name: 'CAT_CAFE_CODEX_CARRIER',
+    defaultValue: 'exec_json',
+    description:
+      'F254 Codex 双向 carrier（exec_json 默认；app_server 仅用于显式 canary）。支持 per-cat 覆盖：Hub 成员编辑器「接入方式（Carrier）」写入 cli.carrier，优先级高于本 env',
+    category: 'codex',
+    sensitive: false,
+    runtimeEditable: false,
+    allowedValues: ['exec_json', 'app_server'],
+  },
+  {
+    name: 'CAT_CAFE_CODEX_OAUTH_TRANSPORT',
+    defaultValue: 'builtin',
+    description: 'Codex OAuth provider 传输策略（builtin 默认；HTTPS-only 故障回滚用 https）',
+    category: 'codex',
+    sensitive: false,
+    runtimeEditable: true,
+    allowedValues: ['builtin', 'https'],
+  },
+  {
+    name: 'CAT_CAFE_CODEX_APP_SERVER_IDLE_TTL_MS',
+    defaultValue: '300000',
+    description: 'Codex app-server 空闲 host 保温时长（毫秒；0 表示每轮结束立即回收）',
+    category: 'codex',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_CODEX_APP_SERVER_MAX_WARM_HOSTS',
+    defaultValue: '16',
+    description: '每个 Codex profile 最多保留的空闲 app-server host 数；不限制正在执行的并发 host',
+    category: 'codex',
+    sensitive: false,
+    runtimeEditable: false,
   },
   {
     name: 'CODEX_AUTH_MODE',

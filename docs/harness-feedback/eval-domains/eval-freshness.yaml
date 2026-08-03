@@ -1,0 +1,105 @@
+---
+domainId: eval:freshness
+displayName: Freshness Gate Eval
+descriptionForHuman: 猫工作时是否及时看见新消息，以及 queued read/handled 是否真的减少重复唤醒
+metricGlossary:
+  freshness.queued_seen:
+    label: queued 正文已读
+    means: full contiguous get_thread_context 读取 same-target queued 正文并首次记录 queued_seen 的次数
+    goodDirection: neutral
+    category: activation
+    component: F254-D1.2a
+    source: cat_cafe.freshness.queued_seen
+  freshness.queued_handled:
+    label: queued 已处理闭环
+    means: queued_seen entry 由同 invocation 的 cat-level succeeded evidence 关闭并记录 queued_handled 的次数
+    goodDirection: neutral
+    category: activation
+    component: F254-D1.2b
+    source: cat_cafe.freshness.queued_handled
+  freshness.queued_handled_gap:
+    label: queued read/handled 缺口
+    means: queued_seen 与 queued_handled 的差距；持续升高说明读到但未闭环、失败保留、或 succeeded=handled 推断需要校准
+    goodDirection: lower
+    category: derived
+    component: F254-D1.2
+    source: derived:cat_cafe.freshness.queued_seen-cat_cafe.freshness.queued_handled
+  freshness.closure_stage:
+    label: closure 正式阶段
+    means: v1.2 记录 formal_committed 与 preflight_blocked，区分“页面曾显示”与“正式可水合”
+    goodDirection: neutral
+    category: activation
+    component: F254-v1.2
+    source: cat_cafe.freshness.closure_stage
+  freshness.replay.eligible_samples:
+    label: replay 合格样本
+    means: selector 从 TTL-0 closure 与显式 first-party fixture 中解析出的样本数；零样本是 no-data
+    goodDirection: neutral
+    category: context
+    component: F254-AC-E9
+    source: derived:freshness-closure-replay
+  freshness.replay.failed_samples:
+    label: replay 不变量失败
+    means: 可见旧答、责任无 custody、重复 final、target 缺口、same-batch 误触发、预算越界或终态无证据的样本数
+    goodDirection: lower
+    category: friction
+    component: F254-AC-E9
+    source: derived:freshness-closure-replay
+  freshness.replay.attention_samples:
+    label: replay 待处理责任
+    means: 虽未违反结构不变量，但仍处于 blocked 或 unresolved durable responsibility 的 live 样本数
+    goodDirection: lower
+    category: friction
+    component: F254-AC-E9
+    source: derived:freshness-closure-replay
+systemThreadId: thread_eval_freshness
+evalCat:
+  catId: gpt52
+  handle: "@gpt52"
+  model: gpt-5.4
+frequency: weekly
+sourceAdapter: f254-freshness-replay
+sourceRefsKind: freshness-closure-replay
+threadPolicy:
+  role: working-home
+  stateSot: registry
+  allowedContent:
+    - longitudinal-analysis
+    - verdict-discussion
+    - handoff-drafts
+legacyScheduledTaskIds: []
+handoffTargetResolver:
+  featureId: F254
+  ownerCatId: codex
+  threadLookup: feature-thread
+sla:
+  acknowledgeHours: 48
+  reevalWithinHours: 168
+fixtures:
+  - id: original-double-message-dogfood
+    featureId: F254
+    path: docs/harness-feedback/fixtures/f254/original-double-message-dogfood.json
+  - id: existing-coverage-without-closure
+    featureId: F254
+    path: docs/harness-feedback/fixtures/f254/existing-coverage-without-closure.json
+  - id: crash-cancel
+    featureId: F254
+    path: docs/harness-feedback/fixtures/f254/crash-cancel.json
+  - id: continuous-new-messages
+    featureId: F254
+    path: docs/harness-feedback/fixtures/f254/continuous-new-messages.json
+  - id: multi-target
+    featureId: F254
+    path: docs/harness-feedback/fixtures/f254/multi-target.json
+  - id: parallel-same-batch
+    featureId: F254
+    path: docs/harness-feedback/fixtures/f254/parallel-same-batch.json
+  - id: attempt-recheck-budget
+    featureId: F254
+    path: docs/harness-feedback/fixtures/f254/attempt-recheck-budget.json
+  - id: connector-blocked
+    featureId: F254
+    path: docs/harness-feedback/fixtures/f254/connector-blocked.json
+# Generator/provider wiring is conditional on the durable closure store. The scheduler
+# receives the same wired-domain set, so a no-Redis runtime will not advertise publish.
+enabled: true

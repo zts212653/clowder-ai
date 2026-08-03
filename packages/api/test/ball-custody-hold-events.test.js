@@ -99,8 +99,8 @@ describe('F233 PR3: hold_ball ball-custody events', () => {
         wakeAfterMs: 60_000,
         waitSourceRef: {
           kind: 'github_issue',
-          value: 'test/ball-custody',
-          expectedSignal: 'CI pass',
+          value: 'test/ball-custody#12',
+          expectedSignal: 'ci_complete',
           slaUntilMs: 3_600_000,
         },
       },
@@ -112,6 +112,20 @@ describe('F233 PR3: hold_ball ball-custody events', () => {
     assert.equal(events[0].sourceEventId, `hold:${thread.id}:codex:${insertedTasks[0].trigger.fireAt}`);
     assert.equal(events[0].subjectKey, `ball:thread:${thread.id}`);
     assert.deepEqual(events[0].payload, { catId: 'codex', fireAt: insertedTasks[0].trigger.fireAt });
+    assert.deepEqual(insertedTasks[0].params.holdLifecycle, {
+      mode: 'timer',
+      status: 'active',
+      waitSourceRef: {
+        kind: 'github_issue',
+        value: 'test/ball-custody#12',
+        expectedSignal: 'ci_complete',
+        slaUntilMs: 3_600_000,
+      },
+      subjectKey: 'test/ball-custody#12',
+      expectedSignalKey: 'ci_complete',
+      wakeAt: insertedTasks[0].trigger.fireAt,
+      createdBy: 'hold-ball:codex',
+    });
   });
 
   test('hold-ball reminder fire records ball.hold_expired at execution point', async () => {

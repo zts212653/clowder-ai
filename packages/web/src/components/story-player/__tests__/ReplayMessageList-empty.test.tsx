@@ -36,6 +36,43 @@ describe('ReplayMessageList empty state', () => {
   });
 });
 
+describe('ReplayMessageList visual parity', () => {
+  it('uses the same cat bubble color contract as live Hub messages', () => {
+    const message: ReplayChatMessage = {
+      id: 'replay_assistant_1',
+      type: 'assistant',
+      catId: 'opus',
+      content: '这个想法太好了。',
+      timestamp: 1000,
+      isStreaming: false,
+    };
+
+    const html = renderToStaticMarkup(<ReplayMessageList messages={[message]} />);
+
+    expect(html).toContain('background-color:var(--cat-msg-surface)');
+    expect(html).toContain('color:var(--cat-msg-text)');
+    expect(html).not.toContain('--cat-msg-bg');
+    expect(html).not.toContain('--cat-msg-bubble');
+  });
+
+  it('uses the same co-creator bubble color contract as live Hub messages', () => {
+    const message: ReplayChatMessage = {
+      id: 'replay_user_1',
+      type: 'user',
+      content: '这里还是有点问题？',
+      timestamp: 1000,
+      isStreaming: false,
+    };
+
+    const html = renderToStaticMarkup(<ReplayMessageList messages={[message]} />);
+
+    expect(html).toContain('background-color:var(--color-cocreator-surface)');
+    expect(html).toContain('color:var(--cat-msg-text)');
+    expect(html).not.toContain('--co-creator-bubble-bg');
+    expect(html).not.toContain('--co-creator-text');
+  });
+});
+
 describe('ReplayMessageList auto-scroll', () => {
   let container: HTMLDivElement;
   let root: Root;

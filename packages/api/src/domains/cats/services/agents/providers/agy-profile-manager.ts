@@ -46,6 +46,16 @@ export type AgyProfilePreflightResult =
       readonly message: string;
     };
 
+export type AgyRuntimePermissionPreflightResult =
+  | { readonly ok: true }
+  | {
+      readonly ok: false;
+      readonly reason: 'empty_file_permission_path' | 'mcp_permission_server_mismatch';
+      readonly invalidGrants: readonly string[];
+      readonly suggestedGrants?: readonly string[];
+      readonly message: string;
+    };
+
 export interface AgyProfilePreflightInput {
   readonly agyCommand: string | null | undefined;
   readonly workingDirectory: string;
@@ -81,6 +91,108 @@ function readSettings(path: string): Record<string, unknown> {
   if (!existsSync(path)) return {};
   const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
   return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+}
+
+function tryReadSettings(path: string): Record<string, unknown> | null {
+  if (!existsSync(path)) return null;
+  try {
+    return readSettings(path);
+  } catch {
+    return null;
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function preflightEmptyFilePermissions(configPath: string): AgyRuntimePermissionPreflightResult {
+  const config = tryReadSettings(configPath);
+  const allow = asRecord(asRecord(config?.userSettings)?.globalPermissionGrants)?.allow;
+  const invalidGrants = Array.isArray(allow)
+    ? allow.filter((grant): grant is string => typeof grant === 'string' && /^(?:read|write)_file\(\s*\)$/.test(grant))
+    : [];
+  if (invalidGrants.length === 0) return { ok: true };
+
+  return {
+    ok: false,
+    reason: 'empty_file_permission_path',
+    invalidGrants,
+    message: [
+      `AGY permission config contains an empty file path grant: ${invalidGrants.join(', ')}.`,
+      'Remove the empty grant or replace it with an explicit absolute path before retrying.',
+      'Otherwise AGY run_command fails with "sandbox configuration error: readonly : non-absolute file path" or its readwrite variant.',
+    ].join(' '),
+  };
+}
+
+function resolveMcpGrantReplacement(
+  grant: unknown,
+  configuredServers: readonly string[],
+  schemaRoot: string,
+): string | null {
+  if (typeof grant !== 'string') return null;
+  const match = grant.match(/^mcp\(([^/()\s]+)\/([^()\s]+)\)$/);
+  if (!match) return null;
+
+  const [, grantedServer, toolName] = match;
+  const safeSegment = /^[A-Za-z0-9._-]+$/;
+  if (!safeSegment.test(grantedServer) || !safeSegment.test(toolName)) return null;
+  if (existsSync(join(schemaRoot, grantedServer, `${toolName}.json`))) return null;
+
+  const candidateServers = configuredServers.filter(
+    (server) =>
+      safeSegment.test(server) && server !== grantedServer && existsSync(join(schemaRoot, server, `${toolName}.json`)),
+  );
+  return candidateServers.length === 1 ? `mcp(${candidateServers[0]}/${toolName})` : null;
+}
+
+function preflightMcpPermissionNamespaces(
+  settingsDir: string,
+  mcpConfigPath: string,
+): AgyRuntimePermissionPreflightResult {
+  const settings = tryReadSettings(join(settingsDir, 'settings.json'));
+  const mcpConfig = tryReadSettings(mcpConfigPath);
+  const allow = asRecord(settings?.permissions)?.allow;
+  const mcpServers = asRecord(mcpConfig?.mcpServers);
+  if (!Array.isArray(allow) || !mcpServers) return { ok: true };
+
+  const configuredServers = Object.keys(mcpServers);
+  const schemaRoot = join(settingsDir, 'mcp');
+  const mismatches = allow.flatMap((grant) => {
+    const replacement = resolveMcpGrantReplacement(grant, configuredServers, schemaRoot);
+    return typeof grant === 'string' && replacement ? [{ grant, replacement }] : [];
+  });
+  if (mismatches.length === 0) return { ok: true };
+
+  const invalidGrants = mismatches.map(({ grant }) => grant);
+  const suggestedGrants = mismatches.map(({ replacement }) => replacement);
+  return {
+    ok: false,
+    reason: 'mcp_permission_server_mismatch',
+    invalidGrants,
+    suggestedGrants,
+    message: [
+      `AGY MCP permission grants use a server namespace that does not expose the granted tool: ${invalidGrants.join(', ')}.`,
+      `Use the uniquely resolved configured grant instead: ${suggestedGrants.join(', ')}.`,
+      'The runtime did not modify user configuration.',
+    ].join(' '),
+  };
+}
+
+/**
+ * AGY turns file permission grants into sandbox mount paths. Legacy empty grants such as
+ * `read_file()` and `write_file()` therefore become readonly/readwrite mounts with an
+ * empty path and make every run_command fail with a non-absolute sandbox path error.
+ * Detect that deterministic local-config failure before spending a model turn.
+ */
+export function preflightAgyRuntimePermissions(homePath: string): AgyRuntimePermissionPreflightResult {
+  const resolvedHome = resolve(homePath);
+  const configDir = join(resolvedHome, '.gemini', 'config');
+  const filePermissionResult = preflightEmptyFilePermissions(join(configDir, 'config.json'));
+  if (!filePermissionResult.ok) return filePermissionResult;
+  const settingsDir = join(resolvedHome, '.gemini', 'antigravity-cli');
+  return preflightMcpPermissionNamespaces(settingsDir, join(configDir, 'mcp_config.json'));
 }
 
 function uniqueResolvedPaths(paths: readonly string[]): readonly string[] {

@@ -4,6 +4,17 @@ import { promisify } from 'node:util';
 import type { CreatePaneOpts, PaneInfo } from './types.js';
 
 const exec = promisify(execFile);
+const RUNTIME_ONLY_ENV_KEYS = ['CONNECTOR_GATEWAY_AUTOSTART', 'CAT_CAFE_PROVISION_GLOBAL_SIDECAR'] as const;
+
+function isolatedTmuxServerEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of RUNTIME_ONLY_ENV_KEYS) delete env[key];
+  return env;
+}
+
+function isolatedPaneEnvArgs(): string[] {
+  return RUNTIME_ONLY_ENV_KEYS.flatMap((key) => ['-e', `${key}=0`]);
+}
 
 /** Check that a path is a regular file AND is executable */
 function isExecutable(p: string): boolean {
@@ -73,10 +84,25 @@ export class TmuxGateway {
     cols: number,
     rows: number,
   ): Promise<void> {
-    const newSessionArgs = ['-L', sock, 'new-session', '-d', '-x', String(cols), '-y', String(rows), '-c', cwd, shell];
+    const newSessionArgs = [
+      '-L',
+      sock,
+      'new-session',
+      '-d',
+      '-x',
+      String(cols),
+      '-y',
+      String(rows),
+      '-c',
+      cwd,
+      ...isolatedPaneEnvArgs(),
+      shell,
+    ];
 
     try {
-      await exec(this.tmuxBin, newSessionArgs);
+      // The first tmux client becomes the server process. Strip API-only lifecycle
+      // authority at that process boundary so every pane inherits a safe baseline.
+      await exec(this.tmuxBin, newSessionArgs, { env: isolatedTmuxServerEnv() });
     } catch (error) {
       if (!isNoServerRunningError(error)) throw error;
       try {
@@ -84,7 +110,7 @@ export class TmuxGateway {
       } catch {
         // Stale socket / dead server is already gone — keep going.
       }
-      await exec(this.tmuxBin, newSessionArgs);
+      await exec(this.tmuxBin, newSessionArgs, { env: isolatedTmuxServerEnv() });
     }
   }
 
@@ -118,7 +144,7 @@ export class TmuxGateway {
     } else {
       try {
         // Add window to existing session
-        await exec(this.tmuxBin, ['-L', sock, 'new-window', '-c', cwd, shell]);
+        await exec(this.tmuxBin, ['-L', sock, 'new-window', '-c', cwd, ...isolatedPaneEnvArgs(), shell]);
       } catch (error) {
         if (!isNoServerRunningError(error)) throw error;
         // The server can die outside this process while the in-memory cache still

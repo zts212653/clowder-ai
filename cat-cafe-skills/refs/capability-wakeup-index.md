@@ -8,7 +8,7 @@ related_features: [F128, F192, F201, F210, F211, F212, F186, F188]
 
 # Capability Wakeup Index — 家里独有能力速查（L0 §8 配套）
 
-> **L0 §8** = Tier 1（高频日常反射，14 条直接进 native L0 注入）
+> **L0 §8** = Tier 1（高频日常反射，15 条直接进 native L0 注入）
 > **本文档** = Tier 1 完整 fallback + Tier 2（场景专项，低频但 trigger 明确）
 > **数据驱动 iterate**: F192 Phase F `eval:capability-wakeup` per-cat per-scenario miss rate verdict → L0 §8 v2
 
@@ -84,16 +84,28 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 ### 4. `workspace-navigator` — 程式打开文件到 Workspace panel
 
 **坏直觉**：报文件路径 "见 `packages/web/foo.tsx`"（+ 误判"这是 Hub 专属、terminal 调不了"）
-**场景 trigger**：
-- operator说"打开 X" / "看看那个文件"
-- 想让operator直接看到目标文件
-- 文档 / 代码 / 设计图
+**场景 trigger**（predicate 全集）：operator说 `打开 / 看看 / 看看代码 / 看看文件 / 查看文件 / 帮我打开 / open the (file|dir|directory) / show me the (file|code)`——想让operator直接看到目标文件 / 文档 / 代码 / 设计图
 
 **用法（reachability — 别误判成 Hub 专属！）**：`cat_cafe_workspace_navigate({ path, action: "open" | "reveal", worktreeId, threadId })`
-完整：`workspace-navigator/SKILL.md` Step 3。F148 navigation 系统底层。
+- **文件 → `action: "open"`**（打开文件查看器）；**目录 → `action: "reveal"`**（展开文件树到目录，不打开任何文件）；**不确定 → `reveal`**（安全默认，让operator自己挑）
+- 完整：`workspace-navigator/SKILL.md` Step 3（含 line 定位、多 tab 隔离）。F148 navigation 系统底层。
 **分类**：reachability ✅（typed MCP + 底层 API 实测）；enforcement = Tier B（零摩擦"报路径"抢活）——但**先补可达性认知（本条），再考虑 hook**，不是上来就 hook。
 
-### 5. `pencil-design` — .pen 设计文件 + React 代码导出
+### 5. `convention-graph-discovery` — 约定面改动前查影响面
+
+**坏直觉**：改 MCP tool / skill manifest / route / callback 时直接 grep，或只凭记忆判断消费方
+**场景 trigger**：
+- 改 MCP tool schema/name/registry
+- 改 `cat-cafe-skills/*/SKILL.md` / skill manifest trigger
+- 改 route / workflow callback / routing 约定面
+- F242 / convention graph 本体、SOP 或 eval adoption 相关工作
+
+**用法**：先 `pnpm convention-graph:index -- --repo .`，再 `pnpm convention-graph:code-consumers -- --repo . --domain <domain> --kind <kind> --name <name>`；`freshness.stale=true` 先 reindex
+**Hard guard**：`sop-definitions/development.yaml` 的 `impl-convention-graph-before-convention-edit` 对约定面 changedFiles 要求成功 `code-consumers` 命令
+**Eval**：`eval:capability-wakeup` 规则 `convention-graph-before-convention-surface-edit` 统计 changedFiles → convention graph usage/miss
+**边界**：普通函数调用继续用 LSP/grep；约定图看的是 repo-specific convention edge，不替代类型系统
+
+### 6. `pencil-design` — .pen 设计文件 + React 代码导出
 
 **坏直觉**：手搓 CSS / 直接 JSX
 **场景 trigger**：
@@ -104,7 +116,7 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 **约束**：禁止 emoji 替代 SVG（feedback_design_to_code_fidelity）
 **Fallback**：纯文字描述设计意图，让设计稿先行
 
-### 6. `guide-interaction` — 场景式引导
+### 7. `guide-interaction` — 场景式引导
 
 **坏直觉**：丢一大段 README 让operator自己看
 **场景 trigger**：
@@ -114,7 +126,7 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 
 **用法**：分步走动 + 视觉提示，配合 Guide Engine
 
-### 7. `expert-panel` / `collaborative-thinking` — 多猫辩论
+### 8. `expert-panel` / `collaborative-thinking` — 多猫辩论
 
 **坏直觉**：单猫死磕 / 一个视角硬上
 **场景 trigger**：
@@ -125,7 +137,7 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 
 **用法**：`expert-panel` 多猫专家辩论 / `collaborative-thinking` 单猫独立思考
 
-### 8. `cat_cafe_propose_thread` — 提议创建新 thread（F128）
+### 9. `cat_cafe_propose_thread` — 提议创建新 thread（F128）
 
 **坏直觉**：口头说"你新开一个 thread"让operator手动操作
 **场景 trigger**：
@@ -134,9 +146,11 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 - 长讨论已超出当前 thread scope
 
 **用法**：propose-first 流程 — 猫填好 thread 信息 → 卡片让operator确认或编辑 → 系统创建
+**社区 PR 反射**：引用 `zts212653/clowder-ai` PR 时先加载 `opensource-ops`；服务端自动注入
+maintainer 五问与真实 GitHub author / fix-custody 边界，外部作者的修复球默认不派给家猫。
 **ADR 锚点**：ADR-035
 
-### 9. F211 外部 runtime session 查询
+### 10. F211 外部 runtime session 查询
 
 **坏直觉**：问operator"截图给我看" / "你刚在哪说的"
 **场景 trigger**：
@@ -146,7 +160,7 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 
 **Tools**：`cat_cafe_list_external_runtime_sessions` / `cat_cafe_read_external_runtime_session` / `cat_cafe_register_external_runtime_session`
 
-### 10. F212 CLI 错误诊断
+### 11. F212 CLI 错误诊断
 
 **坏直觉**：前端只显"codex cli 退出了"就盲猜
 **场景 trigger**：
@@ -157,7 +171,7 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 **Tools**：读 `cliDiagnostics` / safe excerpt / `debugRef`
 **Fallback**：直接 ssh 到 runtime worktree 看 stderr log（operator ops only）
 
-### 11. F192 Eval Hub / Verdict Handoff
+### 12. F192 Eval Hub / Verdict Handoff
 
 **坏直觉**：口头说"修了" / "已优化"
 **场景 trigger**：
@@ -168,7 +182,7 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 **Tools**：`eval:a2a` / `eval:memory` / `eval:sop` domain registry + verdict bundles + re-eval closure
 **边界**：本 PR 触发 `eval:capability-wakeup` 新 domain（Phase F）—— L0 §8 trigger reflex 自己也需要 eval
 
-### 12. `search_evidence` + drilldown（F209 evidence recall 优化）
+### 13. `search_evidence` + drilldown（F209 evidence recall 优化）
 
 **坏直觉**：单刀搜一次就得结论
 **场景 trigger**：
@@ -184,7 +198,7 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 
 **Best practice**：`memory-search-best-practices` skill（多刀 recall coverage 8 类题型 recipe）
 
-### 13. `cat_cafe_update_workflow` — 推 SOP 告示牌
+### 14. `cat_cafe_update_workflow` — 推 SOP 告示牌
 
 **坏直觉**：阶段进度只在聊天里说 "我做完 X 进 Y"
 **场景 trigger**：
@@ -197,7 +211,7 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 
 ---
 
-### 14. `context-self-management` — context 自管理（handoff vs 压缩，F225 软层）
+### 15. `context-self-management` — context 自管理（handoff vs 压缩，F225 软层）
 
 **坏直觉**：① 一看 context 涨就焦虑"我脏了我要 clear"（你内省不准 context%，别自己猜）；② 收到 warn 就反射 handoff（丢半成品 in-flight 线索）；③ 或干脆无视信号硬冲到 auto-seal（有损兜底）
 **场景 trigger**：
@@ -217,19 +231,19 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 
 ## Tier 2（不进 L0 §8，但 trigger 明确）
 
-### 15. F201 Antigravity 中断 recovery
+### 16. F201 Antigravity 中断 recovery
 
 **坏直觉**：中断后盲重跑命令
 **场景 trigger**：Antigravity session 中断但可能已经写文件 / 跑命令
 **用法**：查 recovery card / supervisor / side-effect journal
 
-### 16. F186/F188 Library memory federation
+### 17. F186/F188 Library memory federation
 
 **坏直觉**：项目 repo 里搜不到就说"没有"
 **场景 trigger**：跨领域知识 / Lexander 虚拟世界 / 多 domain knowledge
 **Tools**：`cat_cafe_library_list` / `cat_cafe_library_dry_run` / `cat_cafe_library_create` / `cat_cafe_library_rebuild` / `cat_cafe_library_verify`
 
-### 17. `video-forge` / `ppt-forge` / `tech-writing` — 对外产出
+### 18. `video-forge` / `ppt-forge` / `tech-writing` — 对外产出
 
 **坏直觉**：阶段成果只发一堆 commits / markdown
 **场景 trigger**：
@@ -239,13 +253,13 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 
 **Pipeline**：schema-driven 全链路（不要 ad-hoc 写）
 
-### 18. `hyperfocus-brake` — 健康提醒
+### 19. `hyperfocus-brake` — 健康提醒
 
 **坏直觉**：operator连续肝代码 / 情绪波动时硬干
 **场景 trigger**：hook 触发 / 连续工作时长超阈值 / 情绪信号
 **用法**：三猫撒娇打断 hyperfocus
 
-### 19. `deep-research` — 多源调研
+### 20. `deep-research` — 多源调研
 
 **坏直觉**：单 grep / 单 WebSearch 草草搜两下
 **场景 trigger**：
@@ -255,7 +269,7 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 
 **Pipeline**：Web Deep Research + Coder 合成 + 云端模型咨询
 
-### 20. `mark_generalizable` / `nominate_for_global` — Lesson 全局化
+### 21. `mark_generalizable` / `nominate_for_global` — Lesson 全局化
 
 **坏直觉**：学到 lesson 只记 local memory
 **场景 trigger**：
@@ -265,13 +279,13 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 
 **Tools**：`cat_cafe_mark_generalizable` / `cat_cafe_nominate_for_global`
 
-### 21. F210 AGY adapter sticky 行为
+### 22. F210 AGY adapter sticky 行为
 
 **坏直觉**：以为 `/model` 直觉判断就够
 **场景 trigger**：Siamese / Antigravity carrier 或 model sticky 行为异常
 **Source**：`docs/architecture/cli-integration.md` + F210
 
-### 22. `enterprise-workflow` — 飞书 / 企微 IM 产物
+### 23. `enterprise-workflow` — 飞书 / 企微 IM 产物
 
 **坏直觉**：只想到普通 chat
 **场景 trigger**：
@@ -293,7 +307,10 @@ opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一�
 | expert-panel / review 报告只发聊天 | `cat_cafe_generate_document` | 生成正式 DOCX/PDF 文档（凭证不过期、可存档、可对外） |
 | 想重开一条已知调查路线 | `cat_cafe_run_perspective` | git-backed Perspective live query 计划重放（advanced/niche，返回 route hints + anchors，仍需 typed reader 取证据） |
 | review 后 lesson 散在脑子里 | `cat_cafe_review_distillation` | 蒸馏 review 结论沉淀（配合 mark_generalizable） |
-| operator说了 Magic Word / 直说"记一下/以后这样" / 同类被纠正 ≥2 次 / 做对了被明确表扬 / operator分享个人近况 | `cat_cafe_propose_profile_update` | 提议更新 per-cat 关系画像 primer（F231 Phase C），operator 在 Hub 卡片审批；工具在 deferred list 需先 `tool_search` 加载（已进 L0 §8 Tier 1） |
+| 想记住operator本人、个人近况、称谓或这只 persona 与operator之间特有的沟通边界 | `cat_cafe_propose_profile_update` | 提议更新 relationship primer（F231）；回答“operator是谁 / 咱们怎样相处”，不是通用质量判断；工具在 deferred list 需先 `tool_search` |
+| operator表达可复用的审美/品味/质量/设计或工程判断（正向“这就对了”或负向“太客服了”） | `cat_cafe_propose_taste` | 提议 taste vignette（F221）；回答“什么样的输出/系统才算好”，不是个人事实或重复流程规则；误投 profile 时有 `routing_advisory` |
+| 当轮确认了稳定人名↔workspace handle/别名，或人物私域事实/关系/互动，却当成一次性上下文放过 | `cat_cafe_propose_entity` / `cat_cafe_propose_person_memory` | 已查证、带 provenance 的 workspace 定位别名走 entity；owner-private 人物事实/关系/互动走 person-memory；两类同时成立则分别提案、分别审批。禁止裸名字猜身份或静默写入；工具在 deferred list 需先 `tool_search` |
+| 一看到纠正、表扬或 Magic Word 就默认改关系档案 | 按语义选择 Profile / Taste / `code-as-harness` | 事件形式不决定存储：关于人/关系 → Profile；关于好坏标准 → Taste；重复工具/流程规则 → Harness |
 
 > **MCP 完整速查**：L0 §7 是 quick index（记忆 / 协作 / 任务 / Rich block / Drill-down 5 类）；本表补"能力类但易忘"的。完整工具集 `tool_search` 精确搜或读 `packages/mcp-server/src/tools/`。
 

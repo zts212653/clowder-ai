@@ -134,6 +134,53 @@ describe('CiCdCheckTaskSpec', () => {
     assert.equal(policy.suggestedSkill, 'merge-gate');
   });
 
+  it('execute WAKES a review-intent owner only for an F168 current-head-ready notification', async () => {
+    const { createCiCdCheckTaskSpec } = await import('../../dist/infrastructure/email/CiCdCheckTaskSpec.js');
+    const triggered = [];
+    const tasks = [
+      mockTask({ repoFullName: 'a/b', prNumber: 1, userId: 'u1' }, { automationState: { intent: 'review' } }),
+    ];
+    const spec = createCiCdCheckTaskSpec({
+      taskStore: mockTaskStore(tasks),
+      cicdRouter: {
+        route: async () => ({
+          kind: 'notified',
+          bucket: 'pass',
+          wakeKind: 'external_review_ready',
+          headSha: 'sha1',
+          threadId: 't1',
+          catId: 'opus',
+          messageId: 'ready-1',
+          content: 'current head ready',
+        }),
+      },
+      fetchPrStatus: async () => ({
+        checks: [],
+        headSha: 'sha1',
+        prNumber: 1,
+        repoFullName: 'a/b',
+        prState: 'open',
+        aggregateBucket: 'pass',
+      }),
+      invokeTrigger: {
+        trigger: (...args) => {
+          triggered.push(args);
+          return Promise.resolve();
+        },
+      },
+      log: { info: () => {}, error: () => {}, warn: () => {} },
+    });
+
+    const gateResult = await spec.admission.gate({ taskId: 'cicd-check', lastRunAt: null, tickCount: 1 });
+    await spec.run.execute(gateResult.workItems[0].signal, 'pr:a/b#1', {});
+
+    assert.equal(triggered.length, 1);
+    const policy = triggered[0][6];
+    assert.equal(policy.reason, 'github_external_review_ready');
+    assert.equal(policy.sourceCategory, 'review');
+    assert.equal(policy.coalesceKey, 'external-review:a/b#1:sha1');
+  });
+
   it('execute triggers invokeTrigger for CI fail with urgent priority (unchanged)', async () => {
     const { createCiCdCheckTaskSpec } = await import('../../dist/infrastructure/email/CiCdCheckTaskSpec.js');
     const triggered = [];
@@ -245,6 +292,106 @@ describe('CiCdCheckTaskSpec', () => {
     assert.equal(retired.length, 1, 'closed -> matching CI hold must retire');
     assert.equal(triggered.length, 1, 'closed -> owner must know the PR is gone');
     assert.equal(triggered[0][6].reason, 'github_pr_closed');
+  });
+
+  // ── Self-merge wake suppression ──
+  // When the GitHub login that merged the PR matches our own authenticated identity,
+  // skip the lifecycle wake (the merger already knows). Message delivery + hold
+  // retirement still happen — only the token-spending invocation trigger is skipped.
+
+  it('execute SKIPS wake for self-merge (mergedByLogin matches isSelfMerge)', async () => {
+    const { createCiCdCheckTaskSpec } = await import('../../dist/infrastructure/email/CiCdCheckTaskSpec.js');
+    const triggered = [];
+    const retired = [];
+    const tasks = [mockTask({ repoFullName: 'a/b', prNumber: 1, userId: 'u1' })];
+    const spec = createCiCdCheckTaskSpec({
+      taskStore: mockTaskStore(tasks),
+      cicdRouter: {
+        route: async () => ({
+          kind: 'lifecycle',
+          prState: 'merged',
+          threadId: 't1',
+          catId: 'opus',
+          messageId: 'm1',
+          content: 'PR merged',
+        }),
+      },
+      fetchPrStatus: async () => ({
+        checks: [],
+        headSha: 'sha1',
+        prNumber: 1,
+        repoFullName: 'a/b',
+        prState: 'merged',
+        aggregateBucket: 'pass',
+        mergedByLogin: 'zts212653',
+      }),
+      invokeTrigger: {
+        trigger: (...args) => {
+          triggered.push(args);
+          return Promise.resolve();
+        },
+      },
+      holdLifecycle: {
+        retireSatisfiedWait: (event) => {
+          retired.push(event);
+        },
+      },
+      isSelfMerge: (login) => login === 'zts212653',
+      log: { info: () => {}, error: () => {}, warn: () => {} },
+    });
+    const gateResult = await spec.admission.gate({ taskId: 'cicd-check', lastRunAt: null, tickCount: 1 });
+    await spec.run.execute(gateResult.workItems[0].signal, 'pr:a/b#1', {});
+
+    assert.equal(retired.length, 1, 'hold retirement must still happen for self-merge');
+    assert.equal(triggered.length, 0, 'self-merge must NOT wake owner (they already know)');
+  });
+
+  it('execute WAKES owner for external merge (mergedByLogin does not match isSelfMerge)', async () => {
+    const { createCiCdCheckTaskSpec } = await import('../../dist/infrastructure/email/CiCdCheckTaskSpec.js');
+    const triggered = [];
+    const retired = [];
+    const tasks = [mockTask({ repoFullName: 'a/b', prNumber: 1, userId: 'u1' })];
+    const spec = createCiCdCheckTaskSpec({
+      taskStore: mockTaskStore(tasks),
+      cicdRouter: {
+        route: async () => ({
+          kind: 'lifecycle',
+          prState: 'merged',
+          threadId: 't1',
+          catId: 'opus',
+          messageId: 'm1',
+          content: 'PR merged',
+        }),
+      },
+      fetchPrStatus: async () => ({
+        checks: [],
+        headSha: 'sha1',
+        prNumber: 1,
+        repoFullName: 'a/b',
+        prState: 'merged',
+        aggregateBucket: 'pass',
+        mergedByLogin: 'external-contributor',
+      }),
+      invokeTrigger: {
+        trigger: (...args) => {
+          triggered.push(args);
+          return Promise.resolve();
+        },
+      },
+      holdLifecycle: {
+        retireSatisfiedWait: (event) => {
+          retired.push(event);
+        },
+      },
+      isSelfMerge: (login) => login === 'zts212653',
+      log: { info: () => {}, error: () => {}, warn: () => {} },
+    });
+    const gateResult = await spec.admission.gate({ taskId: 'cicd-check', lastRunAt: null, tickCount: 1 });
+    await spec.run.execute(gateResult.workItems[0].signal, 'pr:a/b#1', {});
+
+    assert.equal(retired.length, 1, 'hold retirement must happen regardless of who merged');
+    assert.equal(triggered.length, 1, 'external merge must wake owner');
+    assert.equal(triggered[0][6].reason, 'github_pr_merged');
   });
 
   it('gate admits review-terminal done tasks until CI lifecycle records prState', async () => {

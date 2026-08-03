@@ -114,7 +114,7 @@ describe('toCliEvents', () => {
   });
 
   it('extracts file_path from truncated JSON via regex fallback', () => {
-    // safeJsonPreview truncates at 200 chars — Edit tool has long old_string/new_string
+    // Legacy persisted tool input could be truncated before complete JSON was retained.
     const truncatedDetail =
       '{"file_path":"src/components/ChatMessage.tsx","old_string":"some long code that gets trunca';
     const toolEvents: ToolEvent[] = [

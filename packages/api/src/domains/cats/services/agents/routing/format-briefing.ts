@@ -2,12 +2,14 @@
 
 import type { RichCardBlock, RichMessageExtra } from '@cat-cafe/shared';
 import { getCoCreatorConfig } from '../../../../../config/cat-config-loader.js';
+import { formatInjectionProvenance } from '../../../../memory/injection-provenance.js';
 import { formatPromptTime, formatPromptTimeRange } from '../../format-time.js';
 import type { AppendMessageInput } from '../../stores/ports/MessageStore.js';
 import type { RecentArtifact } from './artifact-tracking.js';
 import type { CoverageMap } from './context-transport.js';
 import type { BatonContext, TaskSummary } from './navigation-context.js';
 import type { RankedSource } from './source-ranking.js';
+import { formatThreadDrill } from './thread-drill-pointer.js';
 
 /** Rich block payload for frontend rendering */
 export interface ContextBriefingBlock {
@@ -71,22 +73,22 @@ function formatBatonField(baton?: BatonContext): string {
   return value;
 }
 
-function formatSourceField(sources?: RankedSource[]): string {
-  if (!sources?.length) return '未定位';
+function formatSourceField(sources: RankedSource[] | undefined, threadId: string): string {
+  if (!sources?.length) return `未定位（threadId=${threadId}）`;
   const top = sources[0];
-  return top.provenance === 'regex' ? `${top.label} (推断)` : top.label;
+  const label = top.provenance === 'regex' ? `${top.label} (推断)` : top.label;
+  return `${label} — ${top.ref}`;
 }
 
-function formatNextStepField(sources?: RankedSource[], searchSuggestions?: string[]): string {
+function formatNextStepField(threadId: string, sources?: RankedSource[], semanticSearchTerms?: string[]): string {
   if (sources?.length) return `先看 ${sources[0].label}: ${sources[0].ref}`;
-  if (searchSuggestions?.length) return `搜索 ${searchSuggestions[0].replace(/[`\n\r\\]/g, ' ').trim()}`;
-  return '搜索 search_evidence() 定位真相源';
+  return formatThreadDrill(threadId, semanticSearchTerms);
 }
 
-function buildNavigationTitle(baton?: BatonContext, sources?: RankedSource[]): string {
+function buildNavigationTitle(threadId: string, baton?: BatonContext, sources?: RankedSource[]): string {
   const parts: string[] = [];
   if (baton) parts.push(`${baton.fromSpeakerDisplay} → 你`);
-  parts.push(`真相源: ${formatSourceField(sources)}`);
+  parts.push(`真相源: ${formatSourceField(sources, threadId)}`);
   return parts.join(' · ');
 }
 
@@ -135,11 +137,25 @@ export function buildBriefingMessage(
   // VG-3: Key decisions from threadMemory
   if (coverageMap.threadMemory?.decisions?.length) {
     const top3 = coverageMap.threadMemory.decisions.slice(0, 3);
-    bodyParts.push(`**关键决策**:\n${top3.map((d) => `- ${d}`).join('\n')}`);
+    bodyParts.push(
+      `**关键决策**:\n${top3
+        .map((decision, index) => {
+          const ref = coverageMap.threadMemory?.decisionRefs?.[index] ?? { threadId };
+          return `- ${decision} ${formatInjectionProvenance(ref)}`;
+        })
+        .join('\n')}`,
+    );
   }
   if (coverageMap.threadMemory?.openQuestions?.length) {
     const top2 = coverageMap.threadMemory.openQuestions.slice(0, 2);
-    bodyParts.push(`**待决问题**:\n${top2.map((q) => `- ${q}`).join('\n')}`);
+    bodyParts.push(
+      `**待决问题**:\n${top2
+        .map((question, index) => {
+          const ref = coverageMap.threadMemory?.openQuestionRefs?.[index] ?? { threadId };
+          return `- ${question} ${formatInjectionProvenance(ref)}`;
+        })
+        .join('\n')}`,
+    );
   }
   if (options?.baton) {
     const b = options.baton;
@@ -163,7 +179,7 @@ export function buildBriefingMessage(
   if (options?.rankedSources?.length) {
     const sourceLines = options.rankedSources.map((s) => {
       const tag = s.provenance === 'regex' ? ' (推断)' : '';
-      return `- [${s.type}] ${s.label}${tag}`;
+      return `- [${s.type}] ${s.label}${tag} — ${s.ref}`;
     });
     bodyParts.push(`**真相源**:\n${sourceLines.join('\n')}`);
   }
@@ -176,7 +192,7 @@ export function buildBriefingMessage(
     );
   }
 
-  const navTitle = buildNavigationTitle(options?.baton, options?.rankedSources);
+  const navTitle = buildNavigationTitle(threadId, options?.baton, options?.rankedSources);
 
   const card: RichCardBlock = {
     id: 'briefing-1',
@@ -187,8 +203,11 @@ export function buildBriefingMessage(
     bodyMarkdown: bodyParts.length > 0 ? bodyParts.join('\n\n') : undefined,
     fields: [
       { label: '传球', value: formatBatonField(options?.baton) },
-      { label: '真相源', value: formatSourceField(options?.rankedSources) },
-      { label: '下一步', value: formatNextStepField(options?.rankedSources, coverageMap.searchSuggestions) },
+      { label: '真相源', value: formatSourceField(options?.rankedSources, threadId) },
+      {
+        label: '下一步',
+        value: formatNextStepField(threadId, options?.rankedSources, coverageMap.semanticSearchTerms),
+      },
     ],
   };
 

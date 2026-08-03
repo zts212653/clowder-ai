@@ -4,7 +4,8 @@ import { z } from 'zod';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { IWorkflowSopStore } from '../domains/cats/services/stores/ports/WorkflowSopStore.js';
 import { VersionConflictError } from '../domains/cats/services/stores/ports/WorkflowSopStore.js';
-import { resolveUserId } from '../utils/request-identity.js';
+import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
+import { validateFeatureBinding } from './callback-workflow-sop-routes.js';
 
 export interface WorkflowSopRoutesOptions {
   workflowSopStore: IWorkflowSopStore;
@@ -61,7 +62,7 @@ export const workflowSopRoutes: FastifyPluginAsync<WorkflowSopRoutesOptions> = a
   });
 
   app.put<{ Params: { itemId: string } }>('/api/backlog/:itemId/workflow-sop', async (request, reply) => {
-    const userId = resolveUserId(request, {});
+    const userId = resolveStrictUserId(request);
     if (!userId) {
       reply.status(401);
       return { error: 'Identity required' };
@@ -77,11 +78,21 @@ export const workflowSopRoutes: FastifyPluginAsync<WorkflowSopRoutesOptions> = a
     const item = await backlogStore.get(request.params.itemId, userId);
     if (!item) {
       reply.status(404);
-      return { error: 'Backlog item not found' };
+      return { error: 'Backlog item not found', code: 'backlog_item_not_found' };
     }
 
     try {
       const { featureId, ...rest } = parsed.data;
+
+      // F073 follow-up: validate feature tag consistency (covers PUT write path)
+      if (!validateFeatureBinding(item, featureId)) {
+        reply.status(422);
+        return {
+          error: `Backlog item "${request.params.itemId}" feature tag does not match featureId "${featureId}"`,
+          code: 'feature_mismatch',
+        };
+      }
+
       // Cast needed: Zod output uses `T | undefined` for optionals,
       // but UpdateWorkflowSopInput uses exactOptionalPropertyTypes
       const input = {
@@ -93,7 +104,7 @@ export const workflowSopRoutes: FastifyPluginAsync<WorkflowSopRoutesOptions> = a
         ...(rest.checks !== undefined ? { checks: rest.checks } : {}),
         ...(rest.expectedVersion !== undefined ? { expectedVersion: rest.expectedVersion } : {}),
       } as import('@cat-cafe/shared').UpdateWorkflowSopInput;
-      const sop = await workflowSopStore.upsert(request.params.itemId, featureId, input, userId);
+      const sop = await workflowSopStore.upsert(request.params.itemId, featureId, input, userId, userId);
       return sop;
     } catch (err) {
       if (err instanceof VersionConflictError) {

@@ -17,7 +17,7 @@ created: 2026-02-28
 
 ## Why
 
-当前 Cat Café 的执行模型依赖外部子进程（例如 `codex` CLI）进行流式输出。API/runtime 一旦重启：
+当前 Clowder AI 的执行模型依赖外部子进程（例如 `codex` CLI）进行流式输出。API/runtime 一旦重启：
 - **in-flight invocation 基本等于挂掉**（子进程/管道断开）
 - 队列（InvocationQueue）目前是内存态，重启会丢失排队条目
 

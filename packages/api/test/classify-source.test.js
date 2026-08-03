@@ -29,6 +29,10 @@ describe('classifySource (F102 Issue 5)', () => {
     assert.equal(classifySource('docs/research/ai-survey.md'), 'research');
   });
 
+  it('maps architecture path', () => {
+    assert.equal(classifySource('docs/architecture/memory-system-overview.md'), 'architecture');
+  });
+
   it('falls back to commit for unknown paths', () => {
     assert.equal(classifySource('some/random/path.md'), 'commit');
   });
@@ -53,6 +57,10 @@ describe('mapKindToSourceType (F102 Issue 5)', () => {
 
   it('maps research kind', () => {
     assert.equal(mapKindToSourceType('research'), 'research');
+  });
+
+  it('maps architecture kind', () => {
+    assert.equal(mapKindToSourceType('architecture'), 'architecture');
   });
 
   it('maps session kind to discussion', () => {

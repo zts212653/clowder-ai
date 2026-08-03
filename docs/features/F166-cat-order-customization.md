@@ -51,7 +51,7 @@ operator experience："总揽这里你这只 47 在太下面了！我希望把�
 
 | 风险 | 缓解 |
 |------|------|
-| HTML5 DnD 在移动端体验差 | Cat Cafe 主要在桌面使用；移动端后续可加 touch 事件 |
+| HTML5 DnD 在移动端体验差 | Clowder AI 主要在桌面使用；移动端后续可加 touch 事件 |
 | catOrder 与 roster 不同步（删猫后残留 ID） | 排序时 filter 掉 roster 中不存在的 catId |
 
 ## Key Decisions

@@ -3,11 +3,19 @@
  * Agent 服务的共享类型定义
  */
 
-import type { CatId, MessageContent, ReplyPreview } from '@cat-cafe/shared';
+import type {
+  CatId,
+  CliEffortPreset,
+  CrossThreadCoordination,
+  MessageContent,
+  QueueTerminalConsumptionWitness,
+  ReplyPreview,
+} from '@cat-cafe/shared';
 import type { Span } from '@opentelemetry/api';
 import type { CliDiagnostics } from '../../../utils/cli-diagnostics.js';
 import type { CliSpawnOptions } from '../../../utils/cli-types.js';
 import type { AntigravitySessionLifecycle } from './agents/providers/antigravity/antigravity-runtime-lifecycle.js';
+import type { TurnExecutionMessageProjection } from './stores/ports/TurnExecutionStore.js';
 
 /** F8: Unified token usage type across all three cats.
  *  inputTokens = TOTAL input tokens (new + cached). Normalised at extraction
@@ -113,9 +121,21 @@ export interface MessageMetadata {
  */
 export interface AuditContext {
   invocationId: string;
+  /** Stable active-execution owner used by read-model projections; may be the parent invocation. */
+  executionId?: string;
   threadId: string;
   userId: string;
   catId: CatId;
+}
+
+/**
+ * Exact Clowder AI task identity available to provider-local bounded recovery.
+ * This is correlation truth, not a natural-language task classifier.
+ */
+export interface InvocationRecoveryAnchor {
+  threadId: string;
+  invocationId: string;
+  promptMessageIds: readonly string[];
 }
 
 /**
@@ -173,6 +193,9 @@ export interface AgentMessage {
    *  Provider transformers MUST map from raw payload (is_error / success / exitCode / status) instead of
    *  letting downstream guess from content string. Use 'unknown' when raw signal is genuinely absent. */
   toolResultStatus?: 'ok' | 'error' | 'unknown';
+  /** Host-grounded failure provenance for approval-gated tool results. Never infer
+   *  user_rejected when the carrier has no interactive confirmation surface. */
+  toolResultErrorCode?: 'user_rejected' | 'confirmation_unavailable';
   /** F153 Phase J Slice J-B AC-J7: tool span trace context for hydrate-side real-duration
    *  span synthesis. Stamped by invoke-single-cat when ToolSpanTracker opens / has-open
    *  a span for this event (so route-helpers can carry it into StoredToolEvent.tracing).
@@ -182,6 +205,10 @@ export interface AgentMessage {
   toolTracing?: { traceId: string; spanId: string; parentSpanId?: string };
   /** Error message (for 'error' type) */
   error?: string;
+  /** Whether an error event is a recoverable diagnostic or a terminal disposition.
+   *  Omitted means terminal for backward compatibility; terminal `done.errorCode`
+   *  remains the authoritative aggregate failure signal. */
+  errorDisposition?: 'transient' | 'terminal';
   /** Whether this is the final 'done' in a multi-cat invocation (for 'done' type) */
   isFinal?: boolean;
   /** Provider/model metadata (set by agent services) */
@@ -198,9 +225,17 @@ export interface AgentMessage {
       /** F246 Phase B: effect-class label for receiving-side behavior constraints */
       effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work';
     };
+    coordination?: CrossThreadCoordination;
     targetCats?: string[];
+    causal?: { kind: 'invocation_reply'; triggerMessageId: string };
+    /** Immutable child identity for live/F5 execution-kind parity. */
+    turnExecution?: TurnExecutionMessageProjection;
+    /** Bodyless child executions attached to the visible child they assisted. */
+    auxiliaryTurnExecutions?: TurnExecutionMessageProjection[];
     /** #814: True when message originated from an explicit post_message callback (not stream duplicate) */
     isExplicitPost?: boolean;
+    /** F272: durable proactive visit that owns this canonical home message. */
+    proactive?: { visitId: string; intentId: string; source: 'private_time' };
   };
   /** F121: ID of the message this message is replying to */
   replyTo?: string;
@@ -216,6 +251,12 @@ export interface AgentMessage {
    *  stable key (prevents same-parent multi-turn-same-cat bubble merge). Stamped into
    *  `extra.stream.turnInvocationId` by useAgentMessages. */
   turnInvocationId?: string;
+  /** Exact durable child start time carried only by the typed invocation-created
+   *  lifecycle event. Consumers must not recover it by parsing `content`. */
+  turnExecutionStartedAt?: number;
+  /** Typed F167 Phase T proof that this exact child consumed a terminal
+   *  coordination wake and correctly produced no reply. */
+  turnCustodyTerminalWitness?: QueueTerminalConsumptionWitness;
   /** F153-F: OTel span context for trace persistence (written to message extra.tracing) */
   tracing?: { traceId: string; spanId: string; parentSpanId?: string };
   /** F070: Structured error code for recoverable failures (e.g. GOVERNANCE_BOOTSTRAP_REQUIRED) */
@@ -248,12 +289,57 @@ export interface AgentMessage {
  */
 export type SpawnCliOverride = (options: CliSpawnOptions) => AsyncGenerator<unknown, void, undefined>;
 
+/** F254 D2 duplex JSON carrier used by provider app-server protocols. */
+export interface AgentCarrierSession {
+  read(): AsyncIterable<unknown>;
+  write(message: Record<string, unknown>): Promise<void>;
+  /** True only when a resume lease was acquired from its still-healthy affinity host. */
+  reusedSessionHost?: boolean;
+  /** Bind a provider session id to this reusable carrier host after start/resume. */
+  rememberSession?(sessionId: string): void;
+  /**
+   * Force the transport process/pane to stop after a provider-native interrupt
+   * grace window expires.  Cooperative cancellation belongs to the protocol
+   * client; this method is only the bounded OS-level fallback.
+   */
+  terminate?(): Promise<void>;
+  close(): Promise<void>;
+}
+
+export interface AgentCarrierSessionOptions {
+  command: string;
+  args: readonly string[];
+  cwd?: string;
+  env?: Record<string, string | null>;
+  signal?: AbortSignal;
+  invocationId: string;
+  /** Existing provider session id used for warm-host affinity. */
+  sessionId?: string;
+}
+
+export type AgentCarrierSessionFactory = (options: AgentCarrierSessionOptions) => Promise<AgentCarrierSession>;
+
+/** F254 D2 carrier truth used to bind provider-native freshness telemetry. */
+export interface AgentFreshnessCarrierCapability {
+  provider: import('./freshness/FreshnessAttentionEventLog.js').ProviderNativeFreshnessProvider;
+  carrier: import('./freshness/FreshnessAttentionEventLog.js').ProviderNativeFreshnessCarrier;
+  deliverySemantics: import('./freshness/FreshnessAttentionEventLog.js').ProviderNativeFreshnessDeliverySemantics;
+}
+
+/** ADR-042 automatic supplement execution: provider + callback layers must enforce this, not prompt prose. */
+export interface ToolExecutionPolicy {
+  readonly mode: 'read_only';
+  readonly replayDeniedToolNames: readonly string[];
+}
+
 /**
  * Options for invoking an agent
  */
 export interface AgentServiceOptions {
   /** Session ID to resume (optional) */
   sessionId?: string;
+  /** F262: Raw per-thread member effort. Providers validate against the effective model before applying it. */
+  reasoningEffortOverride?: CliEffortPreset;
   /** Working directory for the agent */
   workingDirectory?: string;
   /** Env vars to pass to CLI process for MCP callback auth */
@@ -269,12 +355,18 @@ export interface AgentServiceOptions {
   signal?: AbortSignal;
   /** Correlation context for audit logging and raw trace linking */
   auditContext?: AuditContext;
+  /** Exact task identity used when a provider can safely resume an interrupted turn. */
+  recoveryAnchor?: InvocationRecoveryAnchor;
   /** Static identity prompt (Claude: --append-system-prompt, others: prepend to prompt) */
   systemPrompt?: string;
   /** Static identity prompt used only if a resumed carrier creates a fresh fallback session. */
   resumeFallbackSystemPrompt?: string;
   /** F089: Override spawnCli with tmux-based spawner (set per-invocation) */
   spawnCliOverride?: SpawnCliOverride;
+  /** F254 D2: optional tmux/direct duplex carrier factory for app-server mode. */
+  agentCarrierSessionFactory?: AgentCarrierSessionFactory;
+  /** F254 D2: per-invocation two-phase provider-native freshness controller. */
+  activeInvocationFreshness?: import('./freshness/FreshnessNoticeBroker.js').ActiveInvocationFreshnessController;
   /** F210-H1b: Override AGY --log-file path (test seam for the trajectory progress observer). */
   agyLogPathOverride?: string;
   /** F118: Invocation ID for diagnostic enrichment of __cliTimeout */
@@ -295,6 +387,8 @@ export interface AgentServiceOptions {
   cliConfigArgs?: readonly string[];
   /** F153 Phase B: Parent OTel span for creating CLI session child span */
   parentSpan?: Span;
+  /** ADR-042 hard execution boundary for automatic supplement checks. */
+  toolExecutionPolicy?: ToolExecutionPolicy;
 }
 
 /**
@@ -308,6 +402,12 @@ export interface AgentService {
    * @returns An async iterable of agent messages
    */
   invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage>;
+
+  /** True only when this concrete carrier applies the requested policy before model launch. */
+  supportsToolExecutionPolicy?(policy: ToolExecutionPolicy): boolean;
+
+  /** F254 D2: effective carrier capability for this concrete service instance. */
+  freshnessCarrierCapability?(): AgentFreshnessCarrierCapability;
 
   /**
    * F203 Phase C — whether this provider injects the L0 static identity into
@@ -336,24 +436,18 @@ export interface AgentService {
    * cliSessionId path unchanged.
    */
   usesChainKeyResume?(): boolean;
-
-  /**
-   * F177 Phase H (KD-13) — true iff this service runs in a harness that does
-   * NOT honor the Claude Code F177-G Stop hook (e.g. CodexAgentService via
-   * `codex exec --json`, which does not dispatch ~/.codex/hooks.json — H0 spike
-   * 2026-06-11). When true, the serial route layer applies a server-side
-   * routing guard: one inline remedial invoke when the turn ends with no valid
-   * routing exit. Optional — defaults to false (Claude-family is already
-   * covered by the Stop hook).
-   */
-  needsServerRoutingGuard?(): boolean;
 }
 
 /**
  * F203 Phase I — L0 compiler function signature.
  * Same as `compileL0ViaSubprocess` but injectable for testing.
  */
-export type L0CompilerFn = (options: { catId: string; outPath?: string }) => Promise<string>;
+export type L0CompilerFn = (options: {
+  catId: string;
+  userId?: string;
+  dataDir?: string;
+  outPath?: string;
+}) => Promise<string>;
 
 /**
  * F203 Phase I — AgentService that carries an injectable L0 compiler seam.

@@ -8,7 +8,7 @@ user_journey_exempt: "Pure internal quality tooling (pre-push hooks, CI classifi
 tips_exempt: internal QC tooling — no user-visible capability change
 ---
 
-# F253: Cat Café QC Loop — 自动化质量门禁全链路
+# F253: Clowder AI QC Loop — 自动化质量门禁全链路
 
 > **Status**: done | **Owner**: Ragdoll (Opus-4.6) | **Priority**: P1 | **Completed**: 2026-06-28
 
@@ -19,13 +19,13 @@ operator experience（2026-06-25 Kun Chen 调研讨论）：
 > "靠 QC 把废品拦住。就算你们质量比他们好也会有问题的！！"
 > "偷方法，不偷口号。"
 
-当前 Cat Café 质量门禁散落在多个 skill（`quality-gate`、`merge-gate`、`request-review`）和家规中，缺少一条从代码提交到 merge 的**自动化、可测量、有证据的 QC 闭环**。Kun Chen 的 `no-mistakes`（git proxy validation pipeline: review→test→docs→lint→push→PR→CI）证明了 git-triggered validation 的工程可行性。Cat Café 需要在**不破坏伙伴价值观**（猫有身份、cross-model review 有价值、授权不能自动化）的前提下引入这套方法论。
+当前 Clowder AI 质量门禁散落在多个 skill（`quality-gate`、`merge-gate`、`request-review`）和家规中，缺少一条从代码提交到 merge 的**自动化、可测量、有证据的 QC 闭环**。Kun Chen 的 `no-mistakes`（git proxy validation pipeline: review→test→docs→lint→push→PR→CI）证明了 git-triggered validation 的工程可行性。Clowder AI 需要在**不破坏伙伴价值观**（猫有身份、cross-model review 有价值、授权不能自动化）的前提下引入这套方法论。
 
 核心原则：**"QC 触发可以自动，授权不能自动。"**
 
 ## Non-Goals
 
-以下是 F253 **明确不做**的事——每条都是 Cat Café 价值观护栏：
+以下是 F253 **明确不做**的事——每条都是 Clowder AI 价值观护栏：
 
 1. **不引入大副制**：不设置单一指挥猫统筹 QC 流程。每只猫对自己的代码和 review 负责，QC 是工具链支撑而非权力结构。
 2. **不把猫匿名化为工具池**：每个 review finding 都带 named cat 签名。猫的专长、直觉和历史校准是信号，不是噪声。
@@ -68,7 +68,7 @@ Why: QC Loop 是两个已有 cell 的功能延伸：hygiene/evidence/gate 扩展
 
 ### 核心设计：7-Step QC Loop
 
-受 Kun Chen `no-mistakes` 启发，适配 Cat Café 伙伴价值观的 7 步质量闭环：
+受 Kun Chen `no-mistakes` 启发，适配 Clowder AI 伙伴价值观的 7 步质量闭环：
 
 ```
 ① Hygiene auto-fix
@@ -309,7 +309,7 @@ F253 **消费** F167 的 hold_ball / review-feedback / merge-gate 事件，**产
 | ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "靠 QC 把废品拦住" — 自动化质量门禁 | AC-A1, AC-A2, AC-A4 | `pnpm gate --auto-fix` 运行 + merge-gate evidence 验证 | [ ] |
-| R2 | "偷方法，不偷口号" — 学 no-mistakes 的 pipeline，保 Cat Café 价值观 | AC-A1~A4, AC-B1 | review spec 确认无匿名化/无授权自动化 | [ ] |
+| R2 | "偷方法，不偷口号" — 学 no-mistakes 的 pipeline，保 Clowder AI 价值观 | AC-A1~A4, AC-B1 | review spec 确认无匿名化/无授权自动化 | [ ] |
 | R3 | "就算质量好也会有问题" — 需要可度量的质量追踪 | AC-C3 | telemetry 查询 | [ ] |
 
 ### 覆盖检查
@@ -356,7 +356,7 @@ tips_exempt: internal tooling — QC Loop 是开发工具链改进，无用户�
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | "QC 触发可以自动，授权不能自动" | Kun Chen 调研后operator + Ragdoll + Maine Coon三方共识：Cat Café 伙伴价值观不允许匿名化审批 | 2026-06-25 |
+| KD-1 | "QC 触发可以自动，授权不能自动" | Kun Chen 调研后operator + Ragdoll + Maine Coon三方共识：Clowder AI 伙伴价值观不允许匿名化审批 | 2026-06-25 |
 | KD-2 | allowlist not blocklist for hygiene auto-fix | 保守起步，防止 auto-fix 意外修改非确定性代码 | 2026-06-25 |
 | KD-3 | 3-layer reviewer split（Maine Coon设计） | 消除 reviewer 顺手改代码导致 review provenance 断裂 | 2026-06-25 |
 | KD-4 | same-class CI detection + max 2 rounds | 防止 CI repair loop 无限循环，同类错误连续 3 次必须人工介入 | 2026-06-25 |
@@ -386,4 +386,4 @@ tips_exempt: internal tooling — QC Loop 是开发工具链改进，无用户�
 
 ## 来源致谢
 
-本 feature 的方法论灵感来自 **Kun Chen (@kunchenguid)** 的开源工具 [`no-mistakes`](https://github.com/kunchenguid/no-mistakes)（git proxy validation pipeline）和 [`axi`](https://github.com/kunchenguid/axi)（Agent eXperience Interface），经Ragdoll和Maine Coon批判性调研后，取其 QC pipeline 方法论，适配 Cat Café 伙伴价值观。
+本 feature 的方法论灵感来自 **Kun Chen (@kunchenguid)** 的开源工具 [`no-mistakes`](https://github.com/kunchenguid/no-mistakes)（git proxy validation pipeline）和 [`axi`](https://github.com/kunchenguid/axi)（Agent eXperience Interface），经Ragdoll和Maine Coon批判性调研后，取其 QC pipeline 方法论，适配 Clowder AI 伙伴价值观。

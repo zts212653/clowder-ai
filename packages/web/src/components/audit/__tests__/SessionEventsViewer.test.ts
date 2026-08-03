@@ -40,7 +40,7 @@ const handoffInvocations = [
     toolCalls: ['Read', 'Edit'],
     errors: 0,
     durationMs: 1200,
-    keyMessages: ['read file'],
+    keyMessages: [`read file · ${'完整交接诊断'.repeat(30)} · handoff-tail`],
   },
   { invocationId: 'inv-2', eventCount: 3, toolCalls: ['Bash'], errors: 1, durationMs: 800, keyMessages: ['ran test'] },
 ];
@@ -243,6 +243,10 @@ describe('SessionEventsViewer', () => {
     expect(container.textContent).toContain('inv-1');
     expect(container.textContent).toContain('Read');
     expect(container.textContent).toContain('Edit');
+    const keyMessage = container.querySelector<HTMLElement>('[data-testid="handoff-key-message"]');
+    await act(async () => keyMessage?.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
+    expect(keyMessage?.querySelector('pre')?.className).toContain('overflow-auto');
+    expect(keyMessage?.textContent).toContain('handoff-tail');
   });
 
   it('paginates with next/prev buttons', async () => {

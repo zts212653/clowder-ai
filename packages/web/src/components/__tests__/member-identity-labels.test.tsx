@@ -1,6 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
+import { anchoredApprovalNavigation } from '@/test-support/approval-navigation';
 import { AuthorizationCard } from '../AuthorizationCard';
 import { SettledHistoryCard } from '../SettledHistoryCard';
 
@@ -39,7 +40,7 @@ describe('Console member identity labels', () => {
         item={{
           proposalId: 'proposal-1',
           sourceFeatureId: 'F225',
-          sourceThreadId: 'thread-1',
+          navigation: anchoredApprovalNavigation('thread-1'),
           requesterCatId: 'cat-sol',
           ownerUserId: 'user-1',
           status: 'approved',
@@ -52,7 +53,8 @@ describe('Console member identity labels', () => {
       />,
     );
 
-    expect(html).toContain('来自 <span class="font-medium">缅因猫（sol）</span>');
+    expect(html).toContain('来自 缅因猫（sol）');
+    expect(html).not.toContain('来自 cat-sol');
   });
 
   it('falls back to catId when the member is absent from the runtime roster', () => {

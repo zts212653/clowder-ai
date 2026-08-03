@@ -1,6 +1,12 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isOperationField, isValueField, type ValueConfigField } from '@cat-cafe/shared';
+import {
+  isOperationField,
+  isValueField,
+  matchesRequiredWhen,
+  type RequiredWhen,
+  type ValueConfigField,
+} from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
@@ -137,7 +143,7 @@ interface ConnectorFieldDef {
   /** Select options (only for type: select). */
   options?: Array<{ value: string; label: string }>;
   /** When set, this field is only required if the condition env var has the given value */
-  requiredWhen?: { envName: string; value: string };
+  requiredWhen?: RequiredWhen;
   /** When true, this field is never required for the platform to be "configured" */
   optional?: boolean;
   /** Default value used when the env var is not set — aligns status page with runtime normalization */
@@ -392,7 +398,7 @@ function isRequiredFieldSatisfied(
   if (field.requiredWhen) {
     const conditionField = fields.find((candidate) => candidate.envName === field.requiredWhen?.envName);
     const conditionValue = resolveRequiredWhenConditionValue(conditionField, env[field.requiredWhen.envName]);
-    if (conditionValue !== field.requiredWhen.value) return true;
+    if (!matchesRequiredWhen(field.requiredWhen, conditionValue)) return true;
   }
   return isConfiguredFieldValue(field, env[field.envName]);
 }

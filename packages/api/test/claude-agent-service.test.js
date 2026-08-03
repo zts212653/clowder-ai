@@ -762,6 +762,35 @@ test('yields error on result/error event', async () => {
   assert.equal(errMsg.error, 'rate limited; try again');
 });
 
+test('synthetic assistant provider payload yields structured error and no cat text', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({ spawnFn });
+  const providerError = 'API Error: upstream response — P1: provider-supplied diagnostic';
+
+  const promise = collect(service.invoke('provider error'));
+
+  emitClaudeEvents(proc, [
+    {
+      type: 'assistant',
+      message: {
+        id: 'msg-synthetic-provider-error',
+        model: '<synthetic>',
+        content: [{ type: 'text', text: providerError }],
+      },
+    },
+  ]);
+
+  const msgs = await promise;
+  const errors = msgs.filter((message) => message.type === 'error');
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].error, providerError);
+  assert.equal(
+    msgs.some((message) => message.type === 'text'),
+    false,
+  );
+});
+
 test('yields error on CLI non-zero exit', async () => {
   const proc = createMockProcess();
   // Override kill to not auto-exit (we control exit manually)
@@ -1129,6 +1158,7 @@ test('#712: merges user .mcp.json servers as base layer — managed entries take
     JSON.stringify({
       mcpServers: {
         filesystem: { command: 'npx', args: ['-y', '@mcp/fs'] },
+        github: { type: 'http', url: 'https://api.githubcopilot.com/mcp/' },
         'cat-cafe-collab': { command: 'echo', args: ['stale-should-be-ignored'] },
       },
     }),
@@ -1167,6 +1197,7 @@ test('#712: merges user .mcp.json servers as base layer — managed entries take
     // User-owned server should be merged in
     assert.ok(parsed.mcpServers.filesystem, 'user-owned filesystem should be merged');
     assert.deepEqual(parsed.mcpServers.filesystem.args, ['-y', '@mcp/fs']);
+    assert.equal(parsed.mcpServers.github, undefined, 'retired GitHub MCP must not be merged');
     // Managed split servers should be present
     assert.ok(parsed.mcpServers['cat-cafe-collab'], 'managed cat-cafe-collab should be present');
     // Stale user copy should NOT override managed entry
@@ -1740,6 +1771,21 @@ test('native Anthropic model keeps --effort value adjacent when --model is inser
   assert.ok(modelIdx >= 0, '--model flag must be present for native Anthropic model');
   assert.notEqual(modelIdx, effortIdx + 1, '--model must not split the --effort flag/value pair');
   assert.equal(args[modelIdx + 1], 'claude-opus-4-6');
+});
+
+test('F262 applies a compatible thread reasoning effort override to Claude argv', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({ catId: 'opus', spawnFn, model: 'claude-opus-4-6' });
+
+  const promise = collect(service.invoke('hello', { reasoningEffortOverride: 'low' }));
+  emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  const effortIdx = args.indexOf('--effort');
+  assert.ok(effortIdx >= 0);
+  assert.equal(args[effortIdx + 1], 'low');
 });
 
 // F212 Phase G (AC-G4, clowder-ai#875 sibling sweep): ClaudeAgentService no-text branch

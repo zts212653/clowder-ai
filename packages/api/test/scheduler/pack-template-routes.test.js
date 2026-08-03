@@ -93,6 +93,21 @@ describe('Pack Template Routes (AC-D3)', () => {
     assert.ok(body.error.includes('unknown'));
   });
 
+  test('POST rejects pack delegates to the F255-owned Present Loop before persistence', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/schedule/pack-templates',
+      payload: {
+        ...validPayload,
+        templateId: 'pack:unsafe:present-loop',
+        builtinTemplateRef: 'present-loop',
+      },
+    });
+    assert.equal(res.statusCode, 409);
+    assert.equal(res.json().code, 'F255_CONFIG_REQUIRED');
+    assert.equal(packTemplateStore.get('pack:unsafe:present-loop'), null);
+  });
+
   test('POST rejects invalid namespace', async () => {
     const res = await app.inject({
       method: 'POST',

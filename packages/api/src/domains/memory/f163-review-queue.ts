@@ -18,6 +18,7 @@ export interface ReviewQueueItem {
 const DEFAULT_CYCLE_DAYS: Record<string, number> = {
   lesson: 90,
   decision: 180,
+  architecture: 180,
   feature: 120,
   session: 60,
   thread: 60,

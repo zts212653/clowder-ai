@@ -13,6 +13,7 @@
 import type { ApprovalItem, SessionHandoffProposal, SettledApprovalItem } from '@cat-cafe/shared';
 import type { ISessionHandoffProposalStore } from '../../cats/services/stores/ports/SessionHandoffProposalStore.js';
 import type { IApprovalAdapter, ListSettledOpts } from '../ports/IApprovalAdapter.js';
+import { compactApprovalProjections, projectApprovalNavigation } from '../projectApprovalNavigation.js';
 
 const F225_STALE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -23,24 +24,27 @@ export class F225ApprovalAdapter implements IApprovalAdapter {
 
   listPending(userId: string): ApprovalItem[] | Promise<ApprovalItem[]> {
     const result = this.store.listPendingByUser(userId);
-    if (Array.isArray(result)) return result.map((p) => toItem(p));
-    return result.then((proposals) => proposals.map((p) => toItem(p)));
+    if (Array.isArray(result)) return compactApprovalProjections(result.map((p) => toItem(p)));
+    return result.then((proposals) => compactApprovalProjections(proposals.map((p) => toItem(p))));
   }
 
   async listSettled(userId: string, opts?: ListSettledOpts): Promise<SettledApprovalItem[]> {
     const limit = opts?.limit ?? 50;
     const resultRaw = this.store.listSettledByUser(userId, limit);
     const proposals = Array.isArray(resultRaw) ? resultRaw : await resultRaw;
-    return proposals.map((p) => toSettledItem(p));
+    return compactApprovalProjections(proposals.map((p) => toSettledItem(p)));
   }
 }
 
-function toItem(p: SessionHandoffProposal): ApprovalItem {
+function toItem(p: SessionHandoffProposal): ApprovalItem | null {
+  const navigation = projectApprovalNavigation(p, {
+    legacyThreadId: p.sourceThreadId,
+    legacyMessageId: p.cardMessageId,
+  });
+  if (!navigation) return null;
   return {
     proposalId: p.proposalId,
     sourceFeatureId: 'F225' as const,
-    sourceThreadId: p.sourceThreadId,
-    sourceMessageId: p.cardMessageId,
     requesterCatId: p.sourceCatId,
     ownerUserId: p.userId,
     status: 'pending' as const,
@@ -53,20 +57,24 @@ function toItem(p: SessionHandoffProposal): ApprovalItem {
       gotchas: p.note.gotchas,
       sourceSessionId: p.sourceSessionId,
     },
+    navigation,
     inlineApprovable: false,
     expiresAt: p.createdAt + F225_STALE_MS,
     createdAt: p.createdAt,
   };
 }
 
-function toSettledItem(p: SessionHandoffProposal): SettledApprovalItem {
+function toSettledItem(p: SessionHandoffProposal): SettledApprovalItem | null {
+  const navigation = projectApprovalNavigation(p, {
+    legacyThreadId: p.sourceThreadId,
+    legacyMessageId: p.cardMessageId,
+  });
+  if (!navigation) return null;
   // F225 has no dedicated decidedBy field — the decision-maker is always the operator (userId).
   // updatedAt is set to Date.now() at approve/reject time, so it serves as decidedAt.
   return {
     proposalId: p.proposalId,
     sourceFeatureId: 'F225' as const,
-    sourceThreadId: p.sourceThreadId,
-    sourceMessageId: p.cardMessageId,
     requesterCatId: p.sourceCatId,
     ownerUserId: p.userId,
     status: p.status as 'approved' | 'rejected',
@@ -79,6 +87,7 @@ function toSettledItem(p: SessionHandoffProposal): SettledApprovalItem {
       gotchas: p.note.gotchas,
       sourceSessionId: p.sourceSessionId,
     },
+    navigation,
     decidedAt: p.updatedAt,
     decidedBy: p.userId,
     createdAt: p.createdAt,

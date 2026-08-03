@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { ExpandableProse } from '@/components/content-overflow';
+import { isRowPrimaryActionTarget } from '@/utils/row-primary-action';
 import type { GitCommit } from '../../hooks/useGitPanel';
 import { useGitPanel } from '../../hooks/useGitPanel';
 import { HealthDashboard } from './HealthDashboard';
@@ -51,18 +53,26 @@ function StatusSection({
 function CommitRow({ commit, isExpanded, onToggle }: { commit: GitCommit; isExpanded: boolean; onToggle: () => void }) {
   const relDate = formatRelativeDate(commit.date);
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      className={`w-full text-left px-2 py-1.5 text-xs hover:bg-cafe-surface-sunken/30 transition-colors border-b border-cafe-subtle/20 ${isExpanded ? 'bg-cafe-surface-sunken/20' : ''}`}
+    // biome-ignore lint/a11y: the nested native button owns keyboard/screen-reader semantics; the wrapper restores the surrounding pointer hit area
+    <div
+      onClick={(event) => {
+        if (isRowPrimaryActionTarget(event.target, event.currentTarget)) onToggle();
+      }}
+      className={`w-full cursor-pointer text-left px-2 py-1.5 text-xs hover:bg-cafe-surface-sunken/30 transition-colors border-b border-cafe-subtle/20 ${isExpanded ? 'bg-cafe-surface-sunken/20' : ''}`}
     >
-      <div className="flex items-center gap-2">
+      <button type="button" onClick={onToggle} className="flex w-full items-center gap-2 text-left">
         <span className="font-mono text-cafe-accent/70 text-micro shrink-0">{commit.short}</span>
-        <span className="truncate text-cafe-black/80 flex-1">{commit.subject}</span>
+        <span className="text-micro font-semibold text-cafe-accent">{isExpanded ? '收起详情' : '查看详情'}</span>
         <span className="text-micro text-cafe-interactive/40 shrink-0">{relDate}</span>
-      </div>
+      </button>
+      <ExpandableProse
+        text={commit.subject}
+        lines={2}
+        className="mt-1"
+        contentClassName="text-xs leading-4 text-cafe-black/80"
+      />
       <div className="text-micro text-cafe-interactive/40 mt-0.5">{commit.author}</div>
-    </button>
+    </div>
   );
 }
 

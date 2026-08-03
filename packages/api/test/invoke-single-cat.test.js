@@ -201,6 +201,133 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     };
   }
 
+  it('F275 binds an admitted work from strict invocation truth and carries it in callback auth context', async () => {
+    const createCalls = [];
+    const binding = { workId: 'wrk_managed', attemptId: 'wat_managed' };
+    const deps = {
+      ...makeDeps(),
+      registry: {
+        create: async (...args) => {
+          createCalls.push(args);
+          return { invocationId: 'inv-managed', callbackToken: 'tok-managed' };
+        },
+        verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
+      },
+      threadStore: {
+        get: async () => ({ backlogItemId: 'item-managed', createdBy: 'owner-1' }),
+        updateParticipantActivity: async () => {},
+      },
+      workflowSopStore: {
+        bindManagedWorkAttempt: async (ownerUserId, backlogItemId, executorCatId) => {
+          assert.equal(ownerUserId, 'owner-1');
+          assert.equal(backlogItemId, 'item-managed');
+          assert.equal(executorCatId, 'codex');
+          return {
+            admission: {
+              workId: binding.workId,
+              ownerUserId,
+              producerKind: 'workflow_sop_v1',
+              producerRef: backlogItemId,
+              initialAttemptId: binding.attemptId,
+              admittedAt: 1,
+            },
+            attempt: {
+              attemptId: binding.attemptId,
+              workId: binding.workId,
+              attemptNumber: 1,
+              executorCatId,
+              createdAt: 1,
+              executorBoundAt: 2,
+            },
+          };
+        },
+      },
+    };
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'codex',
+        service,
+        prompt: 'managed delivery',
+        userId: 'owner-1',
+        ownerAuthProvenance: 'strict',
+        threadId: 'thread-managed',
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal(createCalls.length, 1);
+    assert.deepEqual(createCalls[0][8], binding);
+  });
+
+  it('F275 leaves ordinary and non-strict invocations unbound', async () => {
+    const createCalls = [];
+    let bindCalls = 0;
+    const deps = {
+      ...makeDeps(),
+      registry: {
+        create: async (...args) => {
+          createCalls.push(args);
+          return { invocationId: `inv-${createCalls.length}`, callbackToken: `tok-${createCalls.length}` };
+        },
+        verify: async () => ({ ok: false, reason: 'unknown_invocation' }),
+      },
+      threadStore: {
+        get: async (threadId) =>
+          threadId === 'thread-ordinary'
+            ? { createdBy: 'owner-1' }
+            : { backlogItemId: 'item-managed', createdBy: 'owner-1' },
+        updateParticipantActivity: async () => {},
+      },
+      workflowSopStore: {
+        bindManagedWorkAttempt: async () => {
+          bindCalls += 1;
+          throw new Error('non-strict invocation must not reach the bind port');
+        },
+      },
+    };
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'codex',
+        service,
+        prompt: 'ordinary chat',
+        userId: 'owner-1',
+        ownerAuthProvenance: 'strict',
+        threadId: 'thread-ordinary',
+        isLastCat: true,
+      }),
+    );
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'codex',
+        service,
+        prompt: 'compatibility chat',
+        userId: 'owner-1',
+        ownerAuthProvenance: 'compatibility_fallback',
+        threadId: 'thread-managed',
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal(bindCalls, 0);
+    assert.equal(createCalls.length, 2);
+    assert.equal(createCalls[0][8], undefined);
+    assert.equal(createCalls[1][8], undefined);
+  });
+
   it('emits CAT_ERROR audit when service yields error before done', async () => {
     const errorService = {
       async *invoke() {
@@ -227,6 +354,11 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.ok(
       msgs.some((m) => m.type === 'done'),
       'done should be yielded',
+    );
+    assert.equal(
+      msgs.find((m) => m.type === 'done')?.errorCode,
+      'PROVIDER_EXECUTION_FAILED',
+      'a forwarded provider error must stamp the terminal done so aggregate callers cannot report success',
     );
 
     // Wait for fire-and-forget audit writes
@@ -277,6 +409,97 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     // Email is intentionally NOT set — it inherits git config (contribution graph stays on one account).
     assert.equal('GIT_AUTHOR_EMAIL' in callbackEnv, false);
     assert.equal('GIT_COMMITTER_EMAIL' in callbackEnv, false);
+  });
+
+  it('F262 reads and passes the thread member effort override on every invocation', async () => {
+    const optionsSeen = [];
+    const reads = [];
+    let nextEffort = 'max';
+    const deps = {
+      ...makeDeps(),
+      threadStore: {
+        get: () => null,
+        getMemberEffort(threadId, catId, userId) {
+          reads.push({ threadId, catId, userId });
+          return nextEffort;
+        },
+      },
+    };
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'codex',
+        service,
+        prompt: 'test',
+        userId: 'user-thread-effort',
+        threadId: 'thread-effort-runtime',
+        isLastCat: true,
+      }),
+    );
+
+    nextEffort = 'low';
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'codex',
+        service,
+        prompt: 'resumed turn',
+        userId: 'user-thread-effort',
+        threadId: 'thread-effort-runtime',
+        isLastCat: true,
+      }),
+    );
+
+    assert.deepEqual(reads, [
+      { threadId: 'thread-effort-runtime', catId: 'codex', userId: 'user-thread-effort' },
+      { threadId: 'thread-effort-runtime', catId: 'codex', userId: 'user-thread-effort' },
+    ]);
+    assert.equal(optionsSeen[0]?.reasoningEffortOverride, 'max');
+    assert.equal(optionsSeen[1]?.reasoningEffortOverride, 'low');
+  });
+
+  it('F262 fails open to inherited effort and emits visible diagnostics when the override read fails', async () => {
+    const optionsSeen = [];
+    const deps = {
+      ...makeDeps(),
+      threadStore: {
+        get: () => null,
+        getMemberEffort() {
+          throw new Error('redis unavailable');
+        },
+      },
+    };
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+
+    const messages = await collect(
+      invokeSingleCat(deps, {
+        catId: 'codex',
+        service,
+        prompt: 'test',
+        userId: 'user-thread-effort',
+        threadId: 'thread-effort-runtime',
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal(optionsSeen[0]?.reasoningEffortOverride, undefined);
+    const warning = messages.find((message) => {
+      if (message.type !== 'system_info' || !message.content) return false;
+      return JSON.parse(message.content).type === 'thread_effort_override_read_failed';
+    });
+    assert.ok(warning, 'read failure should be visible as system_info');
   });
 
   it('persists task progress snapshot with completed status on done', async () => {
@@ -2056,6 +2279,83 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.ok(healthInfos[0].health.fillRatio < 0.8, 'fillRatio must reflect true 200k window');
   });
 
+  it('opencode GLM-5.2 resolves to 1M context window and does not false-seal at 140k', async () => {
+    // Production regression: GLM-5.2 opencode invocations do not report
+    // contextWindowSize. Without an explicit table entry, invoke-single-cat
+    // falls through to OPENCODE_DEFAULT_CONTEXT_WINDOW=128k and seals a healthy
+    // 140k/1M turn as budget_exhausted.
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    const sealCalls = [];
+    const sessionSealer = {
+      requestSeal: async (args) => {
+        sealCalls.push(args);
+        return { accepted: true, status: 'sealing' };
+      },
+      finalize: async () => {},
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
+    };
+
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yield { type: 'session_init', catId: 'glm', sessionId: 'cli-glm-52', timestamp: Date.now() };
+        yield {
+          type: 'agent_loop',
+          catId: 'glm',
+          timestamp: Date.now(),
+          metadata: {
+            provider: 'opencode',
+            model: 'zhipu/glm-5.2',
+            usage: {
+              inputTokens: 140_000,
+              lastTurnInputTokens: 140_000,
+              outputTokens: 128,
+              totalTokens: 140_128,
+              // NO contextWindowSize from opencode transformer.
+            },
+          },
+        };
+        yield { type: 'done', catId: 'glm', timestamp: Date.now() };
+      },
+    };
+
+    const deps = { ...makeDeps(), sessionChainStore, sessionSealer };
+    const msgs = await collect(
+      invokeSingleCat(deps, {
+        catId: 'glm',
+        service,
+        prompt: 'test',
+        userId: 'user1',
+        threadId: 'thread-glm-52-window',
+        isLastCat: true,
+      }),
+    );
+
+    const parsedSystemInfos = msgs
+      .filter((m) => m.type === 'system_info')
+      .map((m) => {
+        try {
+          return JSON.parse(m.content);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+    const healthInfos = parsedSystemInfos.filter((p) => p.type === 'context_health');
+    assert.equal(healthInfos.length, 1, 'GLM-5.2 opencode usage must emit context_health');
+    assert.equal(healthInfos[0].health.windowTokens, 1_000_000, 'zhipu/glm-5.2 must resolve to 1M');
+    assert.equal(healthInfos[0].health.usedTokens, 140_000);
+    assert.ok(healthInfos[0].health.fillRatio < 0.2, '140k of 1M must stay far below seal threshold');
+    assert.equal(
+      parsedSystemInfos.filter((p) => p.type === 'session_seal_requested').length,
+      0,
+      'healthy 140k GLM-5.2 turn must not request budget_exhausted seal',
+    );
+    assert.equal(sealCalls.length, 0, 'sessionSealer must not be called for healthy GLM-5.2 context usage');
+  });
+
   it('clowder#915 R5 cloud P2: 3-tier window resolution — unknown opencode model falls back to default', async () => {
     // Counterpart to the known-model test: when the model is NOT in the
     // fallback table (GLM-5.1, openrouter customs — the actual breed
@@ -2579,19 +2879,14 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       'missing_session',
     );
     assert.equal(classifyResumeFailure('ACP error -32603: os.getcwd() failed'), 'missing_session');
-    // Session interrupt: our stall auto-kill (SIGTERM) causes the daemon to mark the session
-    // as "interrupted". Without this classifier, resume fails cascade (no self-heal, no retry).
     assert.equal(classifyResumeFailure('session was interrupted'), 'missing_session');
     assert.equal(classifyResumeFailure('already interrupted'), 'missing_session');
-    assert.equal(classifyResumeFailure('session interrupted'), 'missing_session');
     assert.equal(classifyResumeFailure('session-interrupted'), 'missing_session');
     assert.equal(classifyResumeFailure('session terminated'), 'missing_session');
-    // Must NOT match generic messages that happen to contain "interrupt" as a substring
-    // in non-session context (e.g. developer instructions mentioning keyboard interrupts)
-    assert.equal(classifyResumeFailure('upstream timeout'), null);
     assert.equal(classifyResumeFailure('keyboard interrupt'), null);
     assert.equal(classifyResumeFailure('process was interrupted by user'), null);
     assert.equal(classifyResumeFailure('interrupted system call'), null);
+    assert.equal(classifyResumeFailure('upstream timeout'), null);
   });
 
   it('isTransientCliExitCode1: context-overflow messages must NOT be treated as transient (bug: Codex duplicate user turn in rollout)', async () => {
@@ -6995,7 +7290,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     }
   });
 
-  it('configures cat invocation stall auto-kill to leave room for slow upstream responses', async () => {
+  it('configures cat invocation liveness as warning-only so only manual cancel terminates', async () => {
     const optionsSeen = [];
     const service = {
       l0CompilerFn: dummyL0CompilerFn,
@@ -7022,36 +7317,55 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     );
     assert.equal(
       optionsSeen[0]?.livenessProbe?.stallAutoKill,
-      true,
-      'cat invocations still opt into stall cleanup (default CLI_TIMEOUT_MS)',
+      false,
+      'suspected stalls must remain visible without automatically terminating the CLI',
     );
-    // #1145: stallWarningMs tracks resolved CLI_TIMEOUT_MS (default 30 min).
-    // buildStallAutoKillConfig(cliTimeoutMs) uses resolved value, not a hardcoded constant.
     assert.equal(
       optionsSeen[0]?.livenessProbe?.stallWarningMs,
       30 * 60_000,
-      'default: stall threshold must equal DEFAULT_CLI_TIMEOUT_MS (30 min)',
+      'the 30-minute warning threshold remains diagnostic-only until manual cancel',
     );
   });
 
-  it('#1145: buildStallAutoKillConfig tracks custom CLI_TIMEOUT_MS and disables on 0', async () => {
-    const { buildStallAutoKillConfig } = await import(
-      '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js'
-    );
-    // Custom CLI_TIMEOUT_MS (e.g. 60 min)
-    const custom = buildStallAutoKillConfig(60 * 60_000);
-    assert.equal(custom.stallAutoKill, true, 'custom: stallAutoKill enabled');
-    assert.equal(custom.stallWarningMs, 60 * 60_000, 'custom: threshold tracks custom value');
+  it('CLI_TIMEOUT_MS=0 does not arm the invocation hard-timeout timer', async () => {
+    const savedTimeout = process.env.CLI_TIMEOUT_MS;
+    const originalSetTimeout = global.setTimeout;
+    const armedDelays = [];
+    global.setTimeout = (handler, delay, ...args) => {
+      armedDelays.push(delay);
+      return originalSetTimeout(handler, delay, ...args);
+    };
+    process.env.CLI_TIMEOUT_MS = '0';
 
-    // CLI_TIMEOUT_MS=0 (disabled) → stallAutoKill off
-    const disabled = buildStallAutoKillConfig(0);
-    assert.equal(disabled.stallAutoKill, false, 'disabled: stallAutoKill off when CLI_TIMEOUT_MS=0');
-    assert.equal(disabled.stallWarningMs, undefined, 'disabled: no stallWarningMs when off');
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
 
-    // Default fallback (negative → uses DEFAULT_CLI_TIMEOUT_MS internally)
-    const fallback = buildStallAutoKillConfig(-1);
-    assert.equal(fallback.stallAutoKill, true, 'fallback: stallAutoKill enabled');
-    assert.equal(fallback.stallWarningMs, 30 * 60_000, 'fallback: uses DEFAULT_CLI_TIMEOUT_MS');
+    try {
+      await collect(
+        invokeSingleCat(makeDeps(), {
+          catId: 'codex',
+          service,
+          prompt: 'manual cancel only',
+          userId: 'user-no-invocation-timeout',
+          threadId: 'thread-no-invocation-timeout',
+          isLastCat: true,
+        }),
+      );
+
+      assert.equal(
+        armedDelays.includes(60 * 60_000),
+        false,
+        'disabled CLI timeout must not silently fall back to a 60 minute invocation kill',
+      );
+    } finally {
+      global.setTimeout = originalSetTimeout;
+      if (savedTimeout === undefined) delete process.env.CLI_TIMEOUT_MS;
+      else process.env.CLI_TIMEOUT_MS = savedTimeout;
+    }
   });
 
   it('F101: game thread projectPath (games/*) does not trigger governance gate', async () => {

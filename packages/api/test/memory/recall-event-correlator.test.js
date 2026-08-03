@@ -581,6 +581,7 @@ describe('RecallEventCorrelator', () => {
         summary: {
           query: 'thread search without anchors',
           resultCount: 8,
+          resultStatus: 'counted',
         },
       }),
     ];
@@ -588,16 +589,101 @@ describe('RecallEventCorrelator', () => {
     const correlator = new RecallEventCorrelator(db);
     const results = correlator.correlateWindow(events);
     assert.equal(results[0].resultCount, 8);
+    assert.equal(results[0].resultStatus, 'counted');
     assert.deepEqual(results[0].candidates, []);
 
     correlator.persistBatch(results);
 
     const row = db
-      .prepare('SELECT result_count, candidates_json FROM recall_events WHERE query = ?')
+      .prepare('SELECT result_count, result_status, candidates_json FROM recall_events WHERE query = ?')
       .get('thread search without anchors');
     assert.ok(row, 'row exists');
     assert.equal(row.result_count, 8);
+    assert.equal(row.result_status, 'counted');
     assert.deepEqual(JSON.parse(row.candidates_json), []);
+  });
+
+  it('distinguishes unmerged tool results from parser misses', () => {
+    const events = [
+      makeEvent({
+        toolName: 'search_evidence',
+        timestamp: 1000,
+        turnIndex: 1,
+        summary: {
+          query: 'tool result never arrived',
+        },
+      }),
+      makeEvent({
+        toolName: 'search_evidence',
+        timestamp: 2000,
+        turnIndex: 2,
+        summary: {
+          query: 'tool result parser missed',
+          _resultMerged: true,
+        },
+      }),
+    ];
+
+    const correlator = new RecallEventCorrelator(db);
+    const results = correlator.correlateWindow(events);
+
+    assert.equal(results[0].resultStatus, 'result_unmerged');
+    assert.equal(results[1].resultStatus, 'parser_miss');
+
+    correlator.persistBatch(results);
+
+    const rows = db
+      .prepare('SELECT query, result_status FROM recall_events ORDER BY timestamp ASC')
+      .all()
+      .map((row) => [row.query, row.result_status]);
+    assert.deepEqual(rows, [
+      ['tool result never arrived', 'result_unmerged'],
+      ['tool result parser missed', 'parser_miss'],
+    ]);
+  });
+
+  it('infers status from legacy merged resultCount before parser_miss fallback', () => {
+    const events = [
+      makeEvent({
+        toolName: 'search_evidence',
+        timestamp: 1000,
+        turnIndex: 1,
+        summary: {
+          query: 'legacy counted result',
+          resultCount: 3,
+          _resultMerged: true,
+        },
+      }),
+      makeEvent({
+        toolName: 'search_evidence',
+        timestamp: 2000,
+        turnIndex: 2,
+        summary: {
+          query: 'legacy empty result',
+          resultCount: 0,
+          _resultMerged: true,
+        },
+      }),
+    ];
+
+    const correlator = new RecallEventCorrelator(db);
+    const results = correlator.correlateWindow(events);
+
+    assert.equal(results[0].resultStatus, 'counted');
+    assert.equal(results[0].resultCount, 3);
+    assert.equal(results[1].resultStatus, 'no_results');
+    assert.equal(results[1].resultCount, 0);
+
+    correlator.persistBatch(results);
+
+    const rows = db
+      .prepare('SELECT query, result_count, result_status FROM recall_events ORDER BY timestamp ASC')
+      .all()
+      .map((row) => [row.query, row.result_count, row.result_status]);
+    assert.deepEqual(rows, [
+      ['legacy counted result', 3, 'counted'],
+      ['legacy empty result', 0, 'no_results'],
+    ]);
   });
 
   it('multiple consumed entries from different candidates', () => {

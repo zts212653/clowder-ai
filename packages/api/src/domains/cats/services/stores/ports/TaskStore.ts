@@ -10,6 +10,7 @@ import type {
   AutomationState,
   CreateTaskInput,
   IssueAutomationState,
+  ManagedWorkBinding,
   ReviewAutomationState,
   TaskItem,
   TaskKind,
@@ -17,93 +18,19 @@ import type {
 } from '@cat-cafe/shared';
 import { isTrackingKind } from '@cat-cafe/shared';
 import { generateSortableId } from './MessageStore.js';
+import { TaskManagedWorkRegistrationStore } from './TaskManagedWorkRegistrationStore.js';
+import type { ITaskStore } from './TaskStoreContract.js';
+import { assertSubjectUpdateOwnership } from './TaskSubjectOwnership.js';
+
+export type { ITaskStore } from './TaskStoreContract.js';
+export {
+  assertSubjectUpdateOwnership,
+  createSubjectOwnershipConflict,
+  isSubjectOwnershipConflictError,
+  SUBJECT_OWNERSHIP_CONFLICT_CODE,
+} from './TaskSubjectOwnership.js';
 
 const MAX_TASKS = 500;
-export const SUBJECT_OWNERSHIP_CONFLICT_CODE = 'TASK_SUBJECT_OWNERSHIP_CONFLICT';
-
-export function createSubjectOwnershipConflict(
-  subjectKey: string,
-  ownerUserId: string,
-  requestedUserId: string,
-): Error & {
-  code: typeof SUBJECT_OWNERSHIP_CONFLICT_CODE;
-  subjectKey: string;
-  ownerUserId: string;
-  requestedUserId: string;
-} {
-  const error = new Error(`Subject ${subjectKey} is already owned by another user`) as Error & {
-    code: typeof SUBJECT_OWNERSHIP_CONFLICT_CODE;
-    subjectKey: string;
-    ownerUserId: string;
-    requestedUserId: string;
-  };
-  error.code = SUBJECT_OWNERSHIP_CONFLICT_CODE;
-  error.subjectKey = subjectKey;
-  error.ownerUserId = ownerUserId;
-  error.requestedUserId = requestedUserId;
-  return error;
-}
-
-export function isSubjectOwnershipConflictError(
-  error: unknown,
-): error is Error & { code: typeof SUBJECT_OWNERSHIP_CONFLICT_CODE } {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: string }).code === SUBJECT_OWNERSHIP_CONFLICT_CODE
-  );
-}
-
-export function assertSubjectUpdateOwnership(
-  subjectKey: string,
-  existing: Pick<TaskItem, 'threadId' | 'userId'>,
-  input: Pick<CreateTaskInput, 'threadId' | 'userId'>,
-): void {
-  if (existing.userId && input.userId && existing.userId === input.userId) return;
-  if (!existing.userId && input.userId && existing.threadId === input.threadId) return;
-  if (!existing.userId && !input.userId) return;
-
-  throw createSubjectOwnershipConflict(
-    subjectKey,
-    existing.userId ?? `thread:${existing.threadId}`,
-    input.userId ?? `thread:${input.threadId}`,
-  );
-}
-
-/**
- * Common interface for task stores (in-memory and Redis).
- * #320: Extended with kind/subject-based queries for unified PR tracking.
- */
-export interface ITaskStore {
-  create(input: CreateTaskInput): TaskItem | Promise<TaskItem>;
-  get(taskId: string): TaskItem | null | Promise<TaskItem | null>;
-  update(taskId: string, input: UpdateTaskInput): TaskItem | null | Promise<TaskItem | null>;
-  /** Conditionally update only when the task still belongs to the expected thread. */
-  updateIfThreadId(
-    taskId: string,
-    expectedThreadId: string,
-    input: UpdateTaskInput,
-  ): TaskItem | null | Promise<TaskItem | null>;
-  listByThread(threadId: string): TaskItem[] | Promise<TaskItem[]>;
-  delete(taskId: string): boolean | Promise<boolean>;
-  /** Delete all tasks in a thread (cascade delete support) */
-  deleteByThread(threadId: string): number | Promise<number>;
-
-  // --- #320 unified model extensions ---
-
-  /** Get task by unique subject key. Returns null if not found. */
-  getBySubject(subjectKey: string): TaskItem | null | Promise<TaskItem | null>;
-
-  /** Create or update task by subject key (idempotent). */
-  upsertBySubject(input: CreateTaskInput): TaskItem | Promise<TaskItem>;
-
-  /** List tasks filtered by kind (e.g. 'pr_tracking'). */
-  listByKind(kind: TaskKind): TaskItem[] | Promise<TaskItem[]>;
-
-  /** Patch automationState without touching other fields. */
-  patchAutomationState(taskId: string, patch: Partial<AutomationState>): TaskItem | null | Promise<TaskItem | null>;
-}
 
 /**
  * In-memory task store with bounded capacity.
@@ -113,10 +40,16 @@ export class TaskStore implements ITaskStore {
   private tasks: Map<string, TaskItem> = new Map();
   /** subject_key → taskId reverse index */
   private subjectIndex: Map<string, string> = new Map();
+  private readonly managedWorkRegistration: TaskManagedWorkRegistrationStore;
   private readonly maxTasks: number;
 
   constructor(options?: { maxTasks?: number }) {
     this.maxTasks = options?.maxTasks ?? MAX_TASKS;
+    this.managedWorkRegistration = new TaskManagedWorkRegistrationStore({
+      getBySubject: (subjectKey) => this.getBySubject(subjectKey),
+      getById: (taskId) => this.tasks.get(taskId),
+      upsertBySubject: (input) => this.upsertBySubject(input),
+    });
   }
 
   create(input: CreateTaskInput): TaskItem {
@@ -194,6 +127,10 @@ export class TaskStore implements ITaskStore {
     return this.create(input);
   }
 
+  upsertBySubjectWithManagedWorkBinding(input: CreateTaskInput, binding: ManagedWorkBinding): TaskItem {
+    return this.managedWorkRegistration.upsert(input, binding);
+  }
+
   listByKind(kind: TaskKind): TaskItem[] {
     const result: TaskItem[] = [];
     for (const task of this.tasks.values()) {
@@ -216,6 +153,14 @@ export class TaskStore implements ITaskStore {
     };
     this.tasks.set(taskId, updated);
     return updated;
+  }
+
+  bindManagedWorkBinding(taskId: string, binding: ManagedWorkBinding): ManagedWorkBinding | null {
+    return this.managedWorkRegistration.bind(taskId, binding);
+  }
+
+  getManagedWorkBinding(taskId: string): ManagedWorkBinding | null {
+    return this.managedWorkRegistration.get(taskId);
   }
 
   /** Shallow-merge automation state preserving sub-object cursors (ci/review/conflict/issue). */
@@ -318,20 +263,15 @@ export class TaskStore implements ITaskStore {
   delete(taskId: string): boolean {
     const task = this.tasks.get(taskId);
     if (!task) return false;
-    if (task.subjectKey) {
-      this.subjectIndex.delete(task.subjectKey);
-    }
-    return this.tasks.delete(taskId);
+    this.deleteTask(taskId, task);
+    return true;
   }
 
   deleteByThread(threadId: string): number {
     let count = 0;
     for (const [id, task] of this.tasks) {
       if (task.threadId === threadId) {
-        if (task.subjectKey) {
-          this.subjectIndex.delete(task.subjectKey);
-        }
-        this.tasks.delete(id);
+        this.deleteTask(id, task);
         count++;
       }
     }
@@ -352,6 +292,7 @@ export class TaskStore implements ITaskStore {
 
   private deleteTask(taskId: string, task?: TaskItem): void {
     if (task?.subjectKey) this.subjectIndex.delete(task.subjectKey);
+    this.managedWorkRegistration.delete(taskId);
     this.tasks.delete(taskId);
   }
 

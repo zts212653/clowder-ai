@@ -18,7 +18,7 @@ function createMockService(catId, text) {
   };
 }
 
-function createMockDeps(services, appendCalls) {
+function createMockDeps(services, appendCalls, turnExecutionStore) {
   let invocationSeq = 0;
   let messageSeq = 0;
   const storedById = new Map();
@@ -41,6 +41,7 @@ function createMockDeps(services, appendCalls) {
         updateParticipantActivity: async () => {},
       },
       apiUrl: 'http://127.0.0.1:3004',
+      ...(turnExecutionStore ? { turnExecutionStore } : {}),
     },
     messageStore: {
       append: async (msg) => {
@@ -96,8 +97,26 @@ describe('F194 Phase Z2: route-parallel must propagate parentInvocationId to inv
       services,
       invocationDeps: {
         registry: {
-          create: (userId, catId, threadId, parentInvocationId, a2aTriggerMessageId) => {
-            registryCreateCalls.push({ userId, catId, threadId, parentInvocationId, a2aTriggerMessageId });
+          create: (
+            userId,
+            catId,
+            threadId,
+            parentInvocationId,
+            a2aTriggerMessageId,
+            toolExecutionPolicy,
+            originTriggerMessageId,
+            ownerAuthProvenance,
+          ) => {
+            registryCreateCalls.push({
+              userId,
+              catId,
+              threadId,
+              parentInvocationId,
+              a2aTriggerMessageId,
+              toolExecutionPolicy,
+              originTriggerMessageId,
+              ownerAuthProvenance,
+            });
             return { invocationId: `inner-inv-${++invocationSeq}`, callbackToken: `tok-${invocationSeq}` };
           },
           verify: () => ({ ok: false, reason: 'unknown_invocation' }),
@@ -141,6 +160,7 @@ describe('F194 Phase Z2: route-parallel must propagate parentInvocationId to inv
 
     for await (const _msg of routeParallel(deps, ['qwen', 'kimi'], 'parallel hello', 'user1', 'thread1', {
       parentInvocationId: outerParentInvocationId,
+      ownerAuthProvenance: 'strict',
     })) {
       // drain
     }
@@ -153,25 +173,32 @@ describe('F194 Phase Z2: route-parallel must propagate parentInvocationId to inv
         outerParentInvocationId,
         `${call.catId} registry.create must receive parentInvocationId='${outerParentInvocationId}' (4th arg) — was undefined when route-parallel.ts:399 漏传 options.parentInvocationId`,
       );
+      assert.equal(call.ownerAuthProvenance, 'strict');
     }
   });
 
   it('persists each cat message with parentInvocationId when parent is provided', async () => {
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const { InMemoryTurnExecutionStore } = await import(
+      '../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js'
+    );
     const appendCalls = [];
     const outerParentInvocationId = 'cat-cafe-outer-parallel-123';
+    const turnExecutionStore = new InMemoryTurnExecutionStore();
     const deps = createMockDeps(
       {
         qwen: createMockService('qwen', 'qwen reply'),
         kimi: createMockService('kimi', 'kimi reply'),
       },
       appendCalls,
+      turnExecutionStore,
     );
 
-    for await (const _msg of routeParallel(deps, ['qwen', 'kimi'], 'parallel hello', 'user1', 'thread1', {
+    const yielded = [];
+    for await (const message of routeParallel(deps, ['qwen', 'kimi'], 'parallel hello', 'user1', 'thread1', {
       parentInvocationId: outerParentInvocationId,
     })) {
-      // drain
+      yielded.push(message);
     }
 
     const agentAppends = appendCalls.filter((call) => call.catId && call.origin === 'stream');
@@ -187,6 +214,27 @@ describe('F194 Phase Z2: route-parallel must propagate parentInvocationId to inv
         /^inner-inv-/,
         `${call.catId} must not persist the per-cat invocation_created id`,
       );
+      assert.deepEqual(call.extra?.turnExecution, {
+        invocationId: call.extra?.stream?.turnInvocationId,
+        parentInvocationId: outerParentInvocationId,
+        executionKind: 'ordinary',
+      });
+    }
+    const children = await turnExecutionStore.listByParent(outerParentInvocationId);
+    assert.equal(children.length, 2);
+    assert.deepEqual(
+      children.map((child) => child.status),
+      ['succeeded', 'succeeded'],
+    );
+    const liveTextByCat = new Map(
+      yielded.filter((message) => message.type === 'text').map((message) => [message.catId, message]),
+    );
+    for (const child of children) {
+      assert.deepEqual(liveTextByCat.get(child.catId)?.extra?.turnExecution, {
+        invocationId: child.invocationId,
+        parentInvocationId: outerParentInvocationId,
+        executionKind: 'ordinary',
+      });
     }
   });
 });

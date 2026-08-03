@@ -29,7 +29,7 @@ function createMockServiceWithInvocationCreated(catId, text, innerInvocationId) 
   };
 }
 
-function createMockDeps(services, appendCalls) {
+function createMockDeps(services, appendCalls, registryCreateCalls = []) {
   let invocationSeq = 0;
   let messageSeq = 0;
   const storedById = new Map();
@@ -38,7 +38,10 @@ function createMockDeps(services, appendCalls) {
     services,
     invocationDeps: {
       registry: {
-        create: () => ({ invocationId: `inv-${++invocationSeq}`, callbackToken: `tok-${invocationSeq}` }),
+        create: (...args) => {
+          registryCreateCalls.push(args);
+          return { invocationId: `inv-${++invocationSeq}`, callbackToken: `tok-${invocationSeq}` };
+        },
         verify: () => ({ ok: false, reason: 'unknown_invocation' }),
       },
       sessionManager: {
@@ -134,5 +137,23 @@ describe('#573: route-serial parentInvocationId vs ownInvocationId', () => {
     assert.ok(persistedInv, 'extra.stream.invocationId is set via fallback to ownInvocationId');
     // Registry mock creates ids like `inv-N` — verify shape (not specific value).
     assert.match(persistedInv, /^inv-\d+$/, 'fallback id matches registry-created shape');
+  });
+
+  it('propagates owner authentication provenance into every serial child registry record', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const registryCreateCalls = [];
+    const deps = createMockDeps(
+      { opus: createMockServiceWithInvocationCreated('opus', '回答', 'inner-id') },
+      [],
+      registryCreateCalls,
+    );
+
+    for await (const _msg of routeSerial(deps, ['opus'], 'hi', 'user1', 'thread1', {
+      ownerAuthProvenance: 'strict',
+    })) {
+      // drain
+    }
+
+    assert.equal(registryCreateCalls[0][7], 'strict');
   });
 });

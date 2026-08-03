@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { AgentRouter } from '../domains/cats/services/agents/routing/AgentRouter.js';
 import type { InvocationTracker } from '../domains/cats/services/index.js';
 import type { AnyMessageStore } from '../domains/cats/services/stores/factories/MessageStoreFactory.js';
@@ -26,6 +27,7 @@ export interface PodcastRouteOptions {
   router: AgentRouter;
   invocationRecordStore: IInvocationRecordStore;
   invocationTracker: InvocationTracker;
+  queueProcessor: Pick<QueueProcessor, 'markPromptMessagesSeen'>;
 }
 
 /**
@@ -67,6 +69,7 @@ export const signalPodcastRoutes: FastifyPluginAsync<PodcastRouteOptions> = asyn
     router: opts.router,
     invocationRecordStore: opts.invocationRecordStore,
     invocationTracker: opts.invocationTracker,
+    queueProcessor: opts.queueProcessor,
   };
 
   app.post('/api/signals/articles/:id/podcast', async (request, reply) => {

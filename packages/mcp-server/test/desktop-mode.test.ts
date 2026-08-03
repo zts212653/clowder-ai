@@ -26,7 +26,9 @@ const ALL_FAKE_NAMES = [
   'cat_cafe_cross_post_message',
   'cat_cafe_create_rich_block',
   'cat_cafe_get_thread_context',
+  'cat_cafe_get_thread_cats',
   'cat_cafe_list_threads',
+  'cat_cafe_list_tasks',
   'cat_cafe_get_message',
   'cat_cafe_publish_verdict',
   'cat_cafe_backfill_events',
@@ -35,6 +37,17 @@ const ALL_FAKE_NAMES = [
   'cat_cafe_teleport',
   'cat_cafe_list_events',
   'cat_cafe_register_external_runtime_session',
+  'cat_cafe_multi_mention',
+  'cat_cafe_hold_ball',
+  'cat_cafe_propose_thread',
+  'cat_cafe_propose_profile_update',
+  'cat_cafe_propose_taste',
+  'cat_cafe_read_profile',
+  'cat_cafe_list_schedule_templates',
+  'cat_cafe_preview_scheduled_task',
+  'cat_cafe_register_scheduled_task',
+  'cat_cafe_remove_scheduled_task',
+  'cat_cafe_unregister_tracking',
   'cat_cafe_shell_exec',
   // memory
   'cat_cafe_search_evidence',
@@ -82,6 +95,42 @@ describe('applyReadonlyFilter — env modes', () => {
     }
   });
 
+  it('readonly=true + hasAgentKey=true exposes AGY-safe coordination and scheduler tools', () => {
+    const out = buildCollabTools({ readonly: true, hasAgentKey: true });
+    const outNames = new Set(out.map((t) => t.name));
+
+    const expectedPresent = [
+      'cat_cafe_post_message',
+      'cat_cafe_cross_post_message',
+      'cat_cafe_get_thread_context',
+      'cat_cafe_get_message',
+      'cat_cafe_list_threads',
+      'cat_cafe_list_schedule_templates',
+      'cat_cafe_preview_scheduled_task',
+      'cat_cafe_register_scheduled_task',
+      'cat_cafe_remove_scheduled_task',
+      'cat_cafe_read_profile',
+    ];
+    for (const name of expectedPresent) {
+      assert.equal(outNames.has(name), true, `${name} must be exposed to readonly+agent-key AGY cats`);
+    }
+
+    const expectedAbsent = [
+      'cat_cafe_get_thread_cats',
+      'cat_cafe_list_tasks',
+      'cat_cafe_multi_mention',
+      'cat_cafe_hold_ball',
+      'cat_cafe_set_read_mode',
+      'cat_cafe_submit_game_action',
+      'cat_cafe_propose_thread',
+      'cat_cafe_propose_profile_update',
+      'cat_cafe_unregister_tracking',
+    ];
+    for (const name of expectedAbsent) {
+      assert.equal(outNames.has(name), false, `${name} must remain blocked in readonly+agent-key mode`);
+    }
+  });
+
   it('desktopMode=fable-phase0 → only DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS (mode precedence)', () => {
     const env: ToolsetEnv = { desktopMode: 'fable-phase0' };
     const out = applyReadonlyFilter(ALL_FAKE_TOOLS, env);
@@ -108,9 +157,10 @@ describe('applyReadonlyFilter — env modes', () => {
     assert.equal(outNames.has('cat_cafe_workspace_navigate'), false, 'workspace_navigate must not leak via AGENT_KEY');
     assert.equal(outNames.has('cat_cafe_teleport'), false, 'teleport must not leak via AGENT_KEY');
     assert.equal(outNames.has('cat_cafe_create_rich_block'), false, 'create_rich_block must not leak via AGENT_KEY');
-    // 10 项白名单全在
+    // 11 项白名单全在
     assert.equal(outNames.has('cat_cafe_post_message'), true);
     assert.equal(outNames.has('cat_cafe_search_evidence'), true);
+    assert.equal(outNames.has('cat_cafe_read_profile'), true);
     // V2→V3 adjustment §1: raw transcript/invocation detail 不在白名单
     assert.equal(outNames.has('cat_cafe_read_session_events'), false, 'read_session_events excluded (V3 §1)');
     assert.equal(outNames.has('cat_cafe_read_invocation_detail'), false, 'read_invocation_detail excluded (V3 §1)');
@@ -127,12 +177,12 @@ describe('applyReadonlyFilter — env modes', () => {
   });
 });
 
-describe('DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS — V3 spec', () => {
-  it('contains exactly 10 tools', () => {
-    assert.equal(DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS.size, 10, 'V3 spec locked at 10 tools');
+describe('DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS — V3 + F231 profile continuity', () => {
+  it('contains exactly 11 tools', () => {
+    assert.equal(DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS.size, 11, 'F231 profile continuity adds one read-only tool');
   });
 
-  it('contains 5 collab message tools + 5 memory cold-start tools', () => {
+  it('contains 5 collab message tools + 5 memory cold-start tools + 1 profile tool', () => {
     const expected = [
       // collab
       'cat_cafe_post_message',
@@ -146,6 +196,8 @@ describe('DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS — V3 spec', () => {
       'cat_cafe_list_recent',
       'cat_cafe_list_session_chain',
       'cat_cafe_read_session_digest',
+      // profile
+      'cat_cafe_read_profile',
     ];
     for (const name of expected) {
       assert.equal(DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS.has(name), true, `expected ${name} in whitelist`);
@@ -251,7 +303,7 @@ describe('buildLimbTools — F178 Phase D cloud-review P1 (limb defense-in-depth
 });
 
 describe('buildCollabTools / buildMemoryTools — real toolset assertions (codex §4)', () => {
-  it('Desktop mode collab: only 5 collab tools registered', () => {
+  it('Desktop mode collab: 5 message tools + authenticated profile reader registered', () => {
     const env: ToolsetEnv = { desktopMode: 'fable-phase0' };
     const out = buildCollabTools(env);
     const outNames = new Set(out.map((t) => t.name));
@@ -329,16 +381,16 @@ describe('buildCollabTools / buildMemoryTools — real toolset assertions (codex
 // =====================================================================
 
 describe('F238 cloud-pro-phase0 mode — Phase B1a security boundary', () => {
-  it('DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS contains exactly 10 tools', () => {
+  it('DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS contains exactly 11 tools', () => {
     assert.equal(
       DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS.size,
-      10,
-      'cloud-pro-phase0 locked at 10 tools (fable-phase0 同套)',
+      11,
+      'cloud-pro-phase0 locked at 11 tools (fable-phase0 同套)',
     );
   });
 
-  it('contains same 10 tools as fable-phase0 (shared-set reference is intentional)', () => {
-    // F238 KD-8: cloud-pro-phase0 复用 fable-phase0 同 10 项白名单 via
+  it('contains same 11 tools as fable-phase0 (shared-set reference is intentional)', () => {
+    // F238 KD-8: cloud-pro-phase0 复用 fable-phase0 同 11 项白名单 via
     // direct const reference. 这个断言保证未来 reviewer 能立刻看出两个
     // mode 共享 set 是有意为之 (not accidental coupling).
     assert.equal(
@@ -348,7 +400,7 @@ describe('F238 cloud-pro-phase0 mode — Phase B1a security boundary', () => {
     );
   });
 
-  it('applyReadonlyFilter(cloud-pro-phase0) → only 10 whitelist tools', () => {
+  it('applyReadonlyFilter(cloud-pro-phase0) → only 11 whitelist tools', () => {
     const env: ToolsetEnv = { desktopMode: 'cloud-pro-phase0' };
     const out = applyReadonlyFilter(ALL_FAKE_TOOLS, env);
     const outNames = new Set(out.map((t) => t.name));
@@ -378,9 +430,10 @@ describe('F238 cloud-pro-phase0 mode — Phase B1a security boundary', () => {
     assert.equal(outNames.has('cat_cafe_create_rich_block'), false, 'create_rich_block must not leak via AGENT_KEY');
     assert.equal(outNames.has('cat_cafe_read_session_events'), false, 'raw transcript excluded');
     assert.equal(outNames.has('cat_cafe_read_invocation_detail'), false, 'raw invocation detail excluded');
-    // 10 项白名单仍在
+    // 11 项白名单仍在
     assert.equal(outNames.has('cat_cafe_post_message'), true);
     assert.equal(outNames.has('cat_cafe_search_evidence'), true);
+    assert.equal(outNames.has('cat_cafe_read_profile'), true);
   });
 
   it('cloud-pro-phase0 limb tools fully denied (defense-in-depth)', () => {
@@ -403,7 +456,7 @@ describe('F238 cloud-pro-phase0 mode — Phase B1a security boundary', () => {
     assert.throws(() => applyReadonlyFilter(ALL_FAKE_TOOLS, env), /Unknown CAT_CAFE_DESKTOP_MODE/);
   });
 
-  it('cloud-pro-phase0 collab build: only 5 collab tools registered', () => {
+  it('cloud-pro-phase0 collab build: 5 message tools + authenticated profile reader registered', () => {
     const env: ToolsetEnv = { desktopMode: 'cloud-pro-phase0' };
     const out = buildCollabTools(env);
     const outNames = new Set(out.map((t) => t.name));

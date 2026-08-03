@@ -217,6 +217,10 @@ BRAND_EXPECTATIONS=(
   # Outbound sync transforms 3002→3004; intake must catch un-reversed port references.
   "packages/api/src/infrastructure/connectors/im-connectors/weixin/WeixinAdapter.ts|must_not_contain|localhost:3004|Weixin media fallback should use runtime API_SERVER_PORT not hardcoded opensource port"
   "packages/api/src/infrastructure/connectors/im-connectors/weixin/WeixinAdapter.ts|must_not_contain|localhost:3003|Weixin media fallback should not reference opensource frontend port"
+  # API port drift guard — outbound sync transforms 3002→3004; intake must catch un-reversed drift.
+  # These are high-risk files checked out from clowder-ai during intake.
+  "packages/api/src/index.ts|must_not_contain|?? '3004'|API server port fallback should be 3002 (home), not 3004 (opensource)"
+  "packages/api/src/domains/cats/services/agents/routing/AgentRouter.ts|must_not_contain|?? '3004'|AgentRouter API port fallback should be 3002 (home), not 3004 (opensource)"
   # favicon.svg file
   "packages/web/public/icons/favicon.svg|file_exists||favicon SVG must exist"
 )
@@ -481,13 +485,84 @@ review_proof_contains_head() {
   return 1
 }
 
+review_proof_has_blocking_verdict() {
+  REVIEW_PROOF_TEXT="$1" node - <<'NODE'
+const text = String(process.env.REVIEW_PROOF_TEXT || '').replace(/[`*_]/g, ' ');
+const blockingPatterns = [
+  /\bCHANGES[_ -]?REQUESTED\b/i,
+  /\bREQUEST(?:ED)?[_ -]?CHANGES\b/i,
+  /\bBLOCKED\b/i,
+  /\bBLOCKING\s*[:#-]/i,
+  /(?:^|\n)\s*(?:VERDICT\s*[:#-]\s*)?BLOCK\s*(?:$|\n|[:#-])/i,
+  /\b(?:do\s+not|don't|cannot|can't|can\s+not|unable\s+to)\s+approve\b/i,
+  /\b(?:not|never)\s+(?:yet\s+)?(?:approved?|approval|LGTM|pass(?:ed)?)\b/i,
+  /\bno\s+LGTM\b/i,
+  /\b(?:approv(?:e|ed|al)|LGTM|pass(?:ed)?)\s+(?:pending|withheld)\b/i,
+  /\b(?:pending|withheld|awaiting)\s+(?:approv(?:e|ed|al)|LGTM|pass(?:ed)?)\b/i,
+  /\bwaiting\s+for\s+(?:approval|approve|approved|LGTM|pass(?:ed)?)\b/i,
+];
+process.exit(blockingPatterns.some((pattern) => pattern.test(text)) ? 0 : 1);
+NODE
+}
+
+review_proof_has_non_blocking_verdict() {
+  REVIEW_PROOF_TEXT="$1" node - <<'NODE'
+const text = String(process.env.REVIEW_PROOF_TEXT || '').replace(/[`*_]/g, ' ');
+const passPatterns = [
+  /\bAPPROV(?:E|ED)\b/i,
+  /\bLGTM\b/i,
+  /\bPASS(?:ED)?\b/i,
+  /\bNO\s+(?:BLOCKING|P[12]|MAJOR)\s+(?:FINDINGS?|ISSUES?)\b/i,
+  /\bNO\s+FINDINGS?\b/i,
+  /\bDID(?:\s+NOT|N'T)\s+FIND\s+(?:ANY\s+)?(?:(?:BLOCKING|P[12]|MAJOR)\s+)?(?:FINDINGS?|ISSUES?)\b/i,
+];
+process.exit(passPatterns.some((pattern) => pattern.test(text)) ? 0 : 1);
+NODE
+}
+
+validate_review_proof_verdict() {
+  local proof_kind="$1"
+  local proof_id="$2"
+  local proof_body="$3"
+  local proof_state="${4:-}"
+  local proof_label="$proof_kind"
+  if [ -n "$proof_id" ]; then
+    proof_label="$proof_kind:$proof_id"
+  fi
+
+  local proof_state_upper
+  proof_state_upper="$(printf '%s' "$proof_state" | tr '[:lower:]' '[:upper:]')"
+  case "$proof_state_upper" in
+    CHANGES_REQUESTED|DISMISSED|PENDING)
+      echo -e "${RED}✗ review-proof ($proof_label) has blocking GitHub review state $proof_state_upper${NC}"
+      return 1
+      ;;
+    APPROVED)
+      return 0
+      ;;
+  esac
+
+  if review_proof_has_blocking_verdict "$proof_body"; then
+    echo -e "${RED}✗ review-proof ($proof_label) contains a blocking verdict${NC}"
+    return 1
+  fi
+
+  if ! review_proof_has_non_blocking_verdict "$proof_body"; then
+    echo -e "${RED}✗ review-proof ($proof_label) must include explicit non-blocking verdict (APPROVE/LGTM/PASS or the standard Codex clean verdict)${NC}"
+    return 1
+  fi
+}
+
 validate_review_proof_continuity() {
   local absorb_pr_head="$1"
   local review_proof_mode="$2"
   local absorb_pr_head_short="${absorb_pr_head:0:8}"
 
   if [ "$review_proof_mode" = "file" ]; then
-    if review_proof_contains_head "$(cat "$REVIEW_PROOF" 2>/dev/null || true)" "$absorb_pr_head" "$absorb_pr_head_short"; then
+    local proof_body
+    proof_body="$(cat "$REVIEW_PROOF" 2>/dev/null || true)"
+    if review_proof_contains_head "$proof_body" "$absorb_pr_head" "$absorb_pr_head_short"; then
+      validate_review_proof_verdict "file" "" "$proof_body" || return 1
       return 0
     fi
     echo -e "${RED}✗ --review-proof file must mention absorb PR current HEAD ($absorb_pr_head_short)${NC}"
@@ -505,6 +580,7 @@ validate_review_proof_continuity() {
   local proof_commit=""
   local proof_kind=""
   local proof_id=""
+  local proof_state=""
 
   if [[ "$REVIEW_PROOF" =~ \#issuecomment-([0-9]+)$ ]]; then
     proof_kind="issuecomment"
@@ -525,6 +601,7 @@ validate_review_proof_continuity() {
     fi
     proof_body=$(echo "$proof_json" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.body||''))")
     proof_commit=$(echo "$proof_json" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.commit_id||''))")
+    proof_state=$(echo "$proof_json" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.state||''))")
   elif [[ "$REVIEW_PROOF" =~ \#discussion_r([0-9]+)$ ]]; then
     proof_kind="discussion"
     proof_id="${BASH_REMATCH[1]}"
@@ -540,6 +617,8 @@ validate_review_proof_continuity() {
     echo "  This guard must verify review evidence against absorb PR current HEAD."
     return 1
   fi
+
+  validate_review_proof_verdict "$proof_kind" "$proof_id" "$proof_body" "$proof_state" || return 1
 
   if [ -n "$proof_commit" ] && [ "$proof_commit" = "$absorb_pr_head" ]; then
     return 0
@@ -651,6 +730,47 @@ process.stdout.write(extras.join("\n"));
     echo "  Extra files:"
     printf '%s\n' "$out_of_scope_files" | sed 's/^/    - /'
     echo "  Fix: split the extra file into another PR, or declare it explicitly under ## Exceptions."
+    return 1
+  fi
+
+  return 0
+}
+
+validate_absorb_pr_validation_evidence() {
+  local absorb_pr_files="${1:-}"
+  local absorb_pr_body="${2:-}"
+
+  if [ -z "$absorb_pr_files" ]; then
+    absorb_pr_files=$(resolve_absorb_pr_brand_scope || true)
+  fi
+
+  local evidence_ok
+  evidence_ok=$(ABSORB_PR_FILES="$absorb_pr_files" ABSORB_PR_BODY="$absorb_pr_body" node -e '
+const files = String(process.env.ABSORB_PR_FILES || "")
+  .split("\n")
+  .map((line) => line.trim())
+  .filter(Boolean);
+const body = String(process.env.ABSORB_PR_BODY || "").replace(/\r/g, "");
+const touchesA2A = files.includes("packages/api/src/domains/cats/services/agents/routing/a2a-mentions.ts");
+if (!touchesA2A) {
+  console.log("yes");
+  process.exit(0);
+}
+
+const hasFullA2ATest = body.split("\n").some((rawLine) => {
+  const line = rawLine.replace(/[`*_]/g, "").trim();
+  if (!/(^|[\s/])(?:packages\/api\/)?test\/a2a-mentions\.test\.js\b/.test(line)) return false;
+  if (/--test-name-pattern(?:\b|=)/.test(line)) return false;
+  return /\b(node\s+--test|--test|pnpm|with-test-home\.sh)\b/.test(line);
+});
+
+console.log(hasFullA2ATest ? "yes" : "no");
+')
+
+  if [ "$evidence_ok" != "yes" ]; then
+    echo -e "${RED}✗ Absorb PR #$ABSORB_PR changes a2a-mentions routing but Validation lacks a full a2a-mentions.test.js run${NC}"
+    echo "  Required evidence: node --test packages/api/test/a2a-mentions.test.js"
+    echo "  Named subtest runs with --test-name-pattern are not enough for routing-surface intake."
     return 1
   fi
 
@@ -866,6 +986,7 @@ run_absorbed_record_guard() {
   done <<< "$scope_issue_ids"
 
   validate_absorb_pr_scope_alignment "$scope_issue_bodies_b64" "${BRAND_SCOPE_FILES:-}" || return 1
+  validate_absorb_pr_validation_evidence "${BRAND_SCOPE_FILES:-}" "$(echo "$absorb_pr_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.body||''))")" || return 1
   validate_review_proof_continuity "$absorb_pr_head" "$review_proof_mode" || return 1
 
   echo -e "${GREEN}✓ Absorbed intake strict guard passed.${NC}"
@@ -1140,6 +1261,45 @@ if [ "$ADVANCE_LEDGER" = true ]; then
   exit 0
 fi
 
+post_review_continuity_comment() {
+  local absorb_pr="$1"
+  local proof_url="$2"
+  local proof_commit="$3"
+  local current_head="$4"
+  local delta_files="$5"
+  local marker="<!-- cat-cafe:intake-review-continuity:$absorb_pr:$current_head -->"
+
+  if gh api --paginate "repos/$SOURCE_REPO/issues/$absorb_pr/comments" --jq '.[].body' 2>/dev/null | grep -Fq "$marker"; then
+    echo -e "${GREEN}✓ Review continuity evidence comment already exists.${NC}"
+    return 0
+  fi
+
+  {
+    echo "$marker"
+    echo "## Intake Review Continuity"
+    echo ""
+    echo '`--verify-merge-ready` passed after the intake ledger commit advanced this PR beyond the formal review commit.'
+    echo ""
+    echo "- Review proof: $proof_url"
+    echo "- Reviewed commit: \`$proof_commit\`"
+    echo "- Current PR HEAD: \`$current_head\`"
+    echo "- Continuity verdict: post-review delta is non-behavioral."
+    echo ""
+    echo "Delta files:"
+    if [ -z "$delta_files" ]; then
+      echo "- none"
+    else
+      while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        echo "- \`$f\`"
+      done <<< "$delta_files"
+    fi
+    echo ""
+    echo "[intake-from-opensource.sh]"
+  } | gh pr comment "$absorb_pr" --repo "$SOURCE_REPO" --body-file - >/dev/null
+  echo -e "${GREEN}✓ Posted review continuity evidence comment.${NC}"
+}
+
 # ── Verify merge readiness (post-record continuity check) ──
 if [ "$VERIFY_MERGE_READY" = true ]; then
   if [ -z "$ABSORB_PR" ]; then
@@ -1230,6 +1390,7 @@ if [ "$VERIFY_MERGE_READY" = true ]; then
   vmr_delta_files=$(git diff --name-only "$vmr_proof_commit".."$vmr_current_head" 2>/dev/null || true)
   if [ -z "$vmr_delta_files" ]; then
     echo -e "${GREEN}✓ Merge ready: no file changes between review proof and current HEAD.${NC}"
+    post_review_continuity_comment "$ABSORB_PR" "$vmr_proof_url" "$vmr_proof_commit" "$vmr_current_head" "$vmr_delta_files"
     exit 0
   fi
 
@@ -1247,6 +1408,7 @@ if [ "$VERIFY_MERGE_READY" = true ]; then
     echo -e "${GREEN}✓ Merge ready: post-review delta is non-behavioral (ledger/mailbox only).${NC}"
     echo "  Delta files:"
     echo "$vmr_delta_files" | sed 's/^/    /'
+    post_review_continuity_comment "$ABSORB_PR" "$vmr_proof_url" "$vmr_proof_commit" "$vmr_current_head" "$vmr_delta_files"
     exit 0
   else
     echo -e "${RED}✗ Post-review delta contains behavioral changes:${NC}"

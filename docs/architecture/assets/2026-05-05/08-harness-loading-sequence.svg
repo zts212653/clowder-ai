@@ -41,7 +41,7 @@
     <rect x="70" y="170" width="1860" height="68" rx="24" fill="#dbeafe" stroke="#2563eb" stroke-width="3" stroke-dasharray="" opacity="1" filter=""/>
 
 
-  <text x="1000" y="214" text-anchor="middle" opacity="1" class=""><tspan x="1000" dy="0" fill="#2563eb" font-weight="900" font-size="27">Cat Cafe Orchestrator / route-serial.ts：先构建 prompt，再交给 provider CLI</tspan></text>
+  <text x="1000" y="214" text-anchor="middle" opacity="1" class=""><tspan x="1000" dy="0" fill="#2563eb" font-weight="900" font-size="27">Clowder AI Orchestrator / route-serial.ts：先构建 prompt，再交给 provider CLI</tspan></text>
 
   <line x1="130" y1="275" x2="130" y2="2915" stroke="#344054" stroke-width="6" stroke-linecap="round" opacity="0.46"/>
 
@@ -102,7 +102,7 @@
     <text x="347" y="633" text-anchor="start" opacity="1" class=""><tspan x="347" dy="0" fill="#263238" font-weight="780" font-size="22">buildStaticIdentity() 只产出 Session-level candidate，实际注入在 Phase F 决策</tspan></text>
     <rect x="1680" y="569" width="220" height="44" rx="22" fill="#2563eb22" stroke="#2563eb" stroke-width="2"/>
   <text x="1790" y="598.14" text-anchor="middle" font-size="21" font-weight="700" fill="#2563eb">10 项静态</text>
-    <text x="287" y="685" text-anchor="start" opacity="1" class=""><tspan x="287" dy="0" fill="#263238" font-weight="730" font-size="22">10 项：猫身份 / 限制声明 / Pack Masks / A2A 格式 / 队友名册</tspan><tspan x="287" dy="26.84" fill="#263238" font-weight="730" font-size="22">工作流触发 / CVO 信息 / L0 治理摘要 / Pack 护栏 / MCP 工具说明</tspan><tspan x="287" dy="26.84" fill="#263238" font-weight="730" font-size="22">关键：不是 --append-system-prompt；后面按条件 string prepend</tspan></text>
+    <text x="287" y="685" text-anchor="start" opacity="1" class=""><tspan x="287" dy="0" fill="#263238" font-weight="730" font-size="22">10 项：猫身份 / 限制声明 / Pack Masks / A2A 格式 / 队友名册</tspan><tspan x="287" dy="26.84" fill="#263238" font-weight="730" font-size="22">工作流触发 / operator 信息 / L0 治理摘要 / Pack 护栏 / MCP 工具说明</tspan><tspan x="287" dy="26.84" fill="#263238" font-weight="730" font-size="22">关键：不是 --append-system-prompt；后面按条件 string prepend</tspan></text>
 
 
 
@@ -183,7 +183,7 @@
     <text x="347" y="2298" text-anchor="start" opacity="1" class=""><tspan x="347" dy="0" fill="#263238" font-weight="780" font-size="22">CLI spawn + provider-scoped hooks + tool loop</tspan></text>
     <rect x="1680" y="2234" width="220" height="44" rx="22" fill="#16a34a22" stroke="#16a34a" stroke-width="2"/>
   <text x="1790" y="2263.14" text-anchor="middle" font-size="21" font-weight="700" fill="#16a34a">Runtime hooks</text>
-    <text x="287" y="2350" text-anchor="start" opacity="1" class=""><tspan x="287" dy="0" fill="#263238" font-weight="730" font-size="19">启动 claude / opencode / acp / gemini；流式输出 text / tool_use / done</tspan><tspan x="287" dy="22.229999999999997" fill="#263238" font-weight="730" font-size="19">SessionStart：f24-post-compact-bootstrap、preflight-shared-state</tspan><tspan x="287" dy="22.229999999999997" fill="#263238" font-weight="730" font-size="19">Claude PreToolUse：runtime-sanctuary-guard、pretool-brake-check、pretool-evidence-guard</tspan><tspan x="287" dy="22.229999999999997" fill="#263238" font-weight="730" font-size="19">Claude PostToolUse：evidence-marker、post-edit-check、shared-doc-push-guard、sop-bookmark、brake-timer</tspan><tspan x="287" dy="22.229999999999997" fill="#263238" font-weight="730" font-size="19">其他：PreCompact / UserPromptSubmit / Stop(f177-routing-guard)</tspan><tspan x="287" dy="22.229999999999997" fill="#263238" font-weight="730" font-size="19">注意：Codex F180 当前只有 SessionStart/Stop user hooks；Gemini/OpenCode 走 provider-native audit</tspan></text>
+    <text x="287" y="2350" text-anchor="start" opacity="1" class=""><tspan x="287" dy="0" fill="#263238" font-weight="730" font-size="19">启动 claude / opencode / acp / gemini；流式输出 text / tool_use / done</tspan><tspan x="287" dy="22.229999999999997" fill="#263238" font-weight="730" font-size="19">SessionStart：f24-post-compact-bootstrap、preflight-shared-state</tspan><tspan x="287" dy="22.229999999999997" fill="#263238" font-weight="730" font-size="19">Claude PreToolUse：runtime-sanctuary-guard、pretool-brake-check、pretool-evidence-guard</tspan><tspan x="287" dy="22.229999999999997" fill="#263238" font-weight="730" font-size="19">Claude PostToolUse：evidence-marker、post-edit-check、shared-doc-push-guard、sop-bookmark、brake-timer</tspan><tspan x="287" dy="22.229999999999997" fill="#263238" font-weight="730" font-size="19">其他：PreCompact / UserPromptSubmit；route settle：F167 structured custody stop gate</tspan><tspan x="287" dy="22.229999999999997" fill="#263238" font-weight="730" font-size="19">注意：Codex F180 当前只有 SessionStart/Stop user hooks；Gemini/OpenCode 走 provider-native audit</tspan></text>
 
 
 

@@ -1,6 +1,8 @@
 ---
 domainId: eval:friction
 displayName: Friction Signal Eval
+descriptionForHuman: 工具/流程让猫难受没——哪个工具老报错、哪个流程老卡壳
+metricGlossaryRef: eval-friction.metrics.yaml
 systemThreadId: thread_eval_friction
 # evalCat: F245 owner default — gpt52 (Maine Coon GPT-5.4) for cost (codex is ~2x) +
 # cross-family separation (Ragdoll authors/owns F245 → Maine Coon evaluates the friction

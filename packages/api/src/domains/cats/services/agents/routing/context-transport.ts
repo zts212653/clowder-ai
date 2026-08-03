@@ -1,9 +1,11 @@
 // F148: Hierarchical Context Transport — pure functions for smart window assembly.
 
 import type { HierarchicalContextConfig } from '../../../../../config/hierarchical-context-config.js';
+import type { PushRecallPresentation } from '../../../../memory/f200-types.js';
 import { getSenderName } from '../../context/ContextAssembler.js';
 import { formatPromptTimeRange } from '../../format-time.js';
 import type { StoredMessage } from '../../stores/ports/MessageStore.js';
+import type { ThreadMemorySourceRef } from '../../stores/ports/ThreadStore.js';
 
 // --- Phase D: Coverage Map (AC-D2) ---
 
@@ -15,10 +17,13 @@ export interface CoverageMap {
     available: boolean;
     sessionsIncorporated: number;
     decisions?: string[];
+    decisionRefs?: ThreadMemorySourceRef[];
     openQuestions?: string[];
+    openQuestionRefs?: ThreadMemorySourceRef[];
   } | null;
   retrievalHints: string[];
   searchSuggestions?: string[];
+  semanticSearchTerms?: string[];
 }
 
 export interface CoverageMapInput {
@@ -29,10 +34,13 @@ export interface CoverageMapInput {
     available: boolean;
     sessionsIncorporated: number;
     decisions?: string[];
+    decisionRefs?: ThreadMemorySourceRef[];
     openQuestions?: string[];
+    openQuestionRefs?: ThreadMemorySourceRef[];
   } | null;
   retrievalHints: string[];
   searchSuggestions?: string[];
+  semanticSearchTerms?: string[];
 }
 
 export function buildCoverageMap(input: CoverageMapInput): CoverageMap {
@@ -50,6 +58,7 @@ export function buildCoverageMap(input: CoverageMapInput): CoverageMap {
     threadMemory: input.threadMemory,
     retrievalHints: input.retrievalHints,
     ...(input.searchSuggestions?.length ? { searchSuggestions: input.searchSuggestions } : {}),
+    ...(input.semanticSearchTerms?.length ? { semanticSearchTerms: input.semanticSearchTerms } : {}),
   };
 }
 
@@ -428,7 +437,70 @@ export function formatAnchors(anchors: ScoredMessage[], truncateLimit: number): 
 
 /** Minimal interface for evidence store search — matches IEvidenceStore.search signature */
 interface EvidenceSearchable {
-  search(query: string, options?: Record<string, unknown>): Promise<Array<{ title: string; summary?: string }>>;
+  search(
+    query: string,
+    options?: Record<string, unknown>,
+  ): Promise<
+    Array<{
+      title: string;
+      summary?: string;
+      anchor: string;
+      sourcePath?: string;
+      kind?: string;
+    }>
+  >;
+}
+
+export interface RecalledEvidence {
+  line: string;
+  candidate: PushRecallPresentation['candidates'][number];
+}
+
+export interface RecallEvidenceResult {
+  query: string;
+  evidence: RecalledEvidence[];
+}
+
+/**
+ * F263: Strip structural envelope blocks that carry no semantic signal for
+ * evidence search queries. Without this, raw `.slice(0, 300)` on messages
+ * with long L0/navigation/history prefixes captures only metadata,
+ * causing push-recall to miss decision-bearing content in the tail.
+ *
+ * Stripping targets (well-delimited, stable across format revisions):
+ *   - `[导航]...[/导航]` navigation blocks
+ *   - `[对话历史...[/对话历史]` conversation history blocks
+ *   - A leading `> L0 Staging Layer` block through its typed separator
+ *   - Single-line metadata (`Identity:`, `📨`, `---`, `[System: ...]`)
+ */
+export function stripStructuralEnvelope(raw: string): string {
+  const withoutL0Staging = stripTypedL0Staging(raw);
+  const stripped = withoutL0Staging
+    // Block-delimited sections (navigation, conversation history)
+    .replace(/\[导航\][\s\S]*?\[\/导航\]/g, '')
+    .replace(/\[对话历史[^\]]*\][\s\S]*?\[\/对话历史\]/g, '')
+    // Single-line typed metadata patterns. Generic blockquotes are user semantics.
+    .replace(/^\[System:.*\]$/gm, '')
+    .replace(/^Identity:.*$/gm, '')
+    .replace(/^📨.*$/gm, '')
+    .replace(/^---+$/gm, '');
+  if (stripped === raw) return raw;
+  return stripped.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function stripTypedL0Staging(raw: string): string {
+  const lines = raw.split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim().length > 0);
+  if (start < 0 || !/^>\s*L0 Staging Layer\b/.test(lines[start] ?? '')) return raw;
+
+  const typedSeparator = lines.findIndex((line, index) => index > start && /^---+$/.test(line.trim()));
+  if (typedSeparator >= 0) {
+    return [...lines.slice(0, start), ...lines.slice(typedSeparator + 1)].join('\n');
+  }
+
+  let end = start;
+  while (end + 1 < lines.length && /^>/.test(lines[end + 1] ?? '')) end += 1;
+  return [...lines.slice(0, start), ...lines.slice(end + 1)].join('\n');
 }
 
 /**
@@ -443,21 +515,35 @@ export async function recallEvidence(
   recentMessages: readonly StoredMessage[],
   config: HierarchicalContextConfig,
 ): Promise<string[]> {
-  if (!evidenceStore) return [];
+  return (
+    await recallEvidenceWithProvenance(evidenceStore, threadTitle, currentUserMessage, recentMessages, config)
+  ).evidence.map((item) => item.line);
+}
+
+export async function recallEvidenceWithProvenance(
+  evidenceStore: EvidenceSearchable | undefined,
+  threadTitle: string,
+  currentUserMessage: string,
+  recentMessages: readonly StoredMessage[],
+  config: HierarchicalContextConfig,
+): Promise<RecallEvidenceResult> {
+  if (!evidenceStore) return { query: '', evidence: [] };
 
   try {
-    // Build composite query from thread title + current message + recent non-system msgs
+    // Build composite query from thread title + current message + recent non-system msgs.
+    // F263: strip structural envelope (navigation/history/staging blocks) before slicing
+    // to ensure semantic content is captured even when the message starts with long metadata.
     const recentContent = recentMessages
       .filter((m) => m.content.length > 0)
       .slice(-2)
-      .map((m) => m.content.slice(0, 200))
+      .map((m) => stripStructuralEnvelope(m.content).slice(0, 200))
       .join(' ');
-    const compositeQuery = [threadTitle, currentUserMessage.slice(0, 300), recentContent]
+    const compositeQuery = [threadTitle, stripStructuralEnvelope(currentUserMessage).slice(0, 300), recentContent]
       .filter(Boolean)
       .join(' ')
       .trim();
 
-    if (!compositeQuery) return [];
+    if (!compositeQuery) return { query: '', evidence: [] };
 
     // Race with timeout
     const searchPromise = evidenceStore.search(compositeQuery, { mode: 'hybrid' });
@@ -466,9 +552,26 @@ export async function recallEvidence(
     );
 
     const hits = await Promise.race([searchPromise, timeoutPromise]);
-    return hits.slice(0, config.maxEvidenceHits).map((hit) => `[Evidence: ${hit.title}] ${hit.summary ?? ''}`.trim());
+    return {
+      query: compositeQuery,
+      evidence: hits.slice(0, config.maxEvidenceHits).map((hit, rank) => {
+        const anchor = hit.anchor;
+        const coordinates = [`anchor=${anchor}`, ...(hit.sourcePath ? [`sourcePath=${hit.sourcePath}`] : [])].join(
+          '; ',
+        );
+        return {
+          line: `[Evidence: ${hit.title}] ${hit.summary ?? ''} [provenance: ${coordinates}]`.trim(),
+          candidate: {
+            anchor,
+            rank,
+            ...(hit.sourcePath ? { sourcePath: hit.sourcePath } : {}),
+            ...(hit.kind ? { docKind: hit.kind } : {}),
+          },
+        };
+      }),
+    };
   } catch {
     // Fail-open: timeout or any error → return empty
-    return [];
+    return { query: '', evidence: [] };
   }
 }

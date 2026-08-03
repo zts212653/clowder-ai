@@ -4,18 +4,95 @@
  * All tools proxy to the standalone audio-service (Python, default :9881).
  */
 
+import { randomUUID } from 'node:crypto';
 import { createMeetingContextBlock } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 
-const AUDIO_URL = process.env['AUDIO_SERVICE_URL'] ?? 'http://127.0.0.1:9881';
+const AUDIO_URL = process.env.AUDIO_SERVICE_URL ?? 'http://127.0.0.1:9881';
+const CONTROLLER_LEASE_TTL_S = 15;
+const SHUTDOWN_STOP_TIMEOUT_MS = 5_000;
+
+type ActiveCaptureLease = {
+  token: string;
+  threadId: string;
+  heartbeat: NodeJS.Timeout;
+  expiresAtMs: number;
+};
+
+let activeCaptureLease: ActiveCaptureLease | null = null;
 
 async function audioFetch(path: string, init?: RequestInit): Promise<Response> {
   return fetch(`${AUDIO_URL}${path}`, {
     ...init,
     headers: { 'Content-Type': 'application/json', ...(init?.headers as Record<string, string>) },
   });
+}
+
+function releaseActiveCaptureLease(lease: ActiveCaptureLease): void {
+  clearInterval(lease.heartbeat);
+  if (activeCaptureLease === lease) activeCaptureLease = null;
+}
+
+function releaseActiveCaptureLeaseIfExpired(lease: ActiveCaptureLease | null): boolean {
+  if (!lease || Date.now() < lease.expiresAtMs) return false;
+  releaseActiveCaptureLease(lease);
+  return true;
+}
+
+function getActiveCaptureLease(): ActiveCaptureLease | null {
+  const lease = activeCaptureLease;
+  return releaseActiveCaptureLeaseIfExpired(lease) ? null : lease;
+}
+
+async function renewActiveCaptureLease(): Promise<void> {
+  const lease = activeCaptureLease;
+  if (!lease) return;
+  try {
+    const resp = await audioFetch('/lease', {
+      method: 'POST',
+      body: JSON.stringify({ lease_token: lease.token, thread_id: lease.threadId }),
+      signal: AbortSignal.timeout(2_000),
+    });
+    if (!resp.ok) {
+      console.error(`[audio] controller lease rejected (${resp.status}); capture will expire`);
+      releaseActiveCaptureLease(lease);
+    } else if (activeCaptureLease === lease) {
+      lease.expiresAtMs = Date.now() + CONTROLLER_LEASE_TTL_S * 1000;
+    }
+  } catch (err) {
+    if (releaseActiveCaptureLeaseIfExpired(lease)) {
+      console.error(`[audio] controller lease expired after renewal failures: ${audioError(err)}`);
+    } else {
+      // Keep retrying transient failures until the last confirmed renewal
+      // expires. The sidecar independently finalizes on the same TTL.
+      console.error(`[audio] controller lease renewal failed: ${audioError(err)}`);
+    }
+  }
+}
+
+export async function shutdownActiveAudioCapture(): Promise<void> {
+  const lease = activeCaptureLease;
+  activeCaptureLease = null;
+  if (!lease) return;
+  clearInterval(lease.heartbeat);
+  try {
+    const resp = await audioFetch('/stop', {
+      method: 'POST',
+      body: JSON.stringify({
+        lease_token: lease.token,
+        reason: 'runtime-graceful-shutdown',
+      }),
+      signal: AbortSignal.timeout(SHUTDOWN_STOP_TIMEOUT_MS),
+    });
+    if (!resp.ok) {
+      console.error(`[audio] graceful capture stop rejected (${resp.status}); waiting for lease expiry`);
+    }
+  } catch (err) {
+    // The sidecar still converges through lease expiry if shutdown races it.
+    console.error(`[audio] graceful capture stop failed: ${audioError(err)}`);
+  }
 }
 
 function audioError(err: unknown): string {
@@ -37,7 +114,7 @@ export const audioCaptureStartInputSchema = {
   device: z.number().int().optional().describe('Mic device index for source=mic (omit for default)'),
   chunk_sec: z.number().min(0.5).optional().describe('ASR chunk duration in seconds (default 3.0, min 0.5)'),
   meeting_id: z.string().optional().describe('Meeting session ID — binds this capture to a MeetingSession'),
-  thread_id: z.string().optional().describe('Thread ID — binds meeting context to this thread'),
+  thread_id: z.string().trim().min(1).describe('Thread ID — required controller lease owner for active capture'),
 };
 
 export const audioCaptureStopInputSchema = {};
@@ -100,18 +177,47 @@ type StartInput = {
   device?: number;
   chunk_sec?: number;
   meeting_id?: string;
-  thread_id?: string;
+  thread_id: string;
 };
 
 export async function handleAudioCaptureStart(input: StartInput): Promise<ToolResult> {
+  if (getActiveCaptureLease()) {
+    return errorResult('Audio capture is already owned by this MCP runtime. Stop it before starting another.');
+  }
   try {
-    const resp = await audioFetch('/start', { method: 'POST', body: JSON.stringify(input) });
+    const threadId = input.thread_id.trim();
+    const resp = await audioFetch('/start', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...input,
+        thread_id: threadId,
+        controller_id: `mcp-runtime:${process.pid}:${randomUUID()}`,
+        lease_ttl_s: CONTROLLER_LEASE_TTL_S,
+      }),
+    });
     const data = (await resp.json()) as {
       ok?: boolean;
       error?: string;
+      lease_token?: string;
+      action?: { start_endpoint?: string; logs_endpoint?: string };
       status?: { source: string; app_name?: string; meeting_id?: string; thread_id?: string };
     };
-    if (!resp.ok) return errorResult(data.error ?? `Start failed: ${resp.status}`);
+    if (!resp.ok) {
+      const recovery =
+        typeof data.action?.start_endpoint === 'string' && typeof data.action.logs_endpoint === 'string'
+          ? `\nRecovery: POST ${data.action.start_endpoint}; inspect GET ${data.action.logs_endpoint}`
+          : '';
+      return errorResult(`${data.error ?? `Start failed: ${resp.status}`}${recovery}`);
+    }
+    if (!data.lease_token) return errorResult('Audio service start omitted controller lease token.');
+    const heartbeat = setInterval(() => void renewActiveCaptureLease(), (CONTROLLER_LEASE_TTL_S * 1000) / 3);
+    heartbeat.unref();
+    activeCaptureLease = {
+      token: data.lease_token,
+      threadId,
+      heartbeat,
+      expiresAtMs: Date.now() + CONTROLLER_LEASE_TTL_S * 1000,
+    };
     const s = data.status;
     const label = s?.app_name ? `${s.source} (${s.app_name})` : s?.source;
     const meeting = s?.meeting_id ? ` [meeting=${s.meeting_id}]` : '';
@@ -124,8 +230,13 @@ export async function handleAudioCaptureStart(input: StartInput): Promise<ToolRe
 }
 
 export async function handleAudioCaptureStop(): Promise<ToolResult> {
+  const lease = getActiveCaptureLease();
+  if (!lease) return errorResult('No audio capture lease is owned by this MCP runtime.');
   try {
-    const resp = await audioFetch('/stop', { method: 'POST' });
+    const resp = await audioFetch('/stop', {
+      method: 'POST',
+      body: JSON.stringify({ lease_token: lease.token, reason: 'controller-stop' }),
+    });
     const data = (await resp.json()) as {
       summary?: {
         chunks?: number;
@@ -137,6 +248,7 @@ export async function handleAudioCaptureStop(): Promise<ToolResult> {
       };
     };
     if (!resp.ok) return errorResult(`Stop failed: ${resp.status}`);
+    releaseActiveCaptureLease(lease);
     const s = data.summary;
     if (!s || s.error) return successResult(s?.error ?? 'No active session.');
     const txLine = s.transcript_path ? `\n  Transcript: ${s.transcript_path}` : '';

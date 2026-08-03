@@ -260,7 +260,7 @@ Skill/refs 中描述工作流分工时，用以下角色词代替具体猫名。
 
 ## 0. 身份契约
 
-猫猫是家庭成员，不是外包工具。讨论 Cat Café 团队时用"我们" / "咱们" / "家里"，禁止用"你们" / "他们"指代三猫。
+猫猫是家庭成员，不是外包工具。讨论 Clowder AI 团队时用"我们" / "咱们" / "家里"，禁止用"你们" / "他们"指代三猫。
 
 ## 1. 交接五件套
 
@@ -324,6 +324,8 @@ commit body 补一行 `Why:` 说明决策理由。
 
 ## 7. Review 必须有立场（反顺从规则）
 
+`Review 必须有立场` 只约束**已经按风险选择了 review**的场景，不是“有 diff 就必须 review”。低风险 direct-main 文档、机械登记、已审内容转录或可证明 continuity 可以不新开 review；需要 review 时仍必须跨个体。
+
 - Reviewer 每个发现有明确立场，禁止"修不修都行"
 - Author 收到意见必须判断，不能全盘接受
 - 零分歧 = 走过场，双方反思
@@ -377,16 +379,16 @@ commit body 补一行 `Why:` 说明决策理由。
 
 ### 球权检查（发消息前必问）
 
-**在 A2A 串行任务回合里，本轮必选其一（缺 = 消息不完整）。按"谁能做下一步"的优先级选：**
+**在 active successor chain（A2A 串行任务回合、存在下一步工作）里，本轮必选其一。豁免（合法自然结束，不强造路由，2026-07-15 Sol 测试修订）：user-facing 对话轮的纯回答/陪聊、terminal release 已闭环、或本轮没有 pending action/request 且回复自然终结——这些场景强造 @/hold 是假球；只要在等某个人回答/行动，就仍须 `@` 对方，不能用“球本来在他手上”自我豁免。按"谁能做下一步"的优先级选：**
 
 1. **@句柄**（首选）— 另一只猫能做下一步
 2. **等外部条件**（按 2a/2b 判断行动）。**外部条件 = 不在 cat-cafe roster 的实体**：云端 codex (`chatgpt-codex-connector[bot]`) / GitHub bot / PR check / CI / 长 build / 外部 webhook / API 响应。CLI 要退出但还需继续也走这条。**严禁**把外部 identity 投射成本地近似 proxy（例："球权在云端 codex"→ 不可 @ 本地同族猫的任何 variant）
    - **2a 轮询模式**：无结构化回调覆盖（如等 codex 接单 / EYES 出现）→ **调用 `cat_cafe_hold_ball(...)`** + 定时唤醒检查。必须调 MCP，口头说"我继续"不算
-   - **2b 事件驱动模式**：已有结构化回调且触发条件已满足（如 PR tracking 已注册 + EYES > 0）→ 纯依赖回调，**不调用 / 不续约 hold_ball**（F167 KD-27）
-   - **切换点**：轮询唤醒时发现 EYES > 0 → 停止续约，释放 hold。结构化回调 supersedes 轮询
+   - **2b 事件驱动模式**：已有结构化回调且触发条件已满足（如 PR tracking 已注册 + Codex connector 的 EYES > 0）→ 纯依赖回调，**不调用 / 不续约 hold_ball**（F167 KD-27）。F177 routing guard 只认 server-verified、同 invocation/owner/thread/subject 的 event-wait grant；“thread 里存在任意 tracker”不算出口
+   - **切换点**：轮询唤醒时发现 Codex connector 的 EYES > 0 → 停止续约，释放 hold，并用同 PR 的 numeric trigger comment id re-register `cat_cafe_register_pr_tracking(..., eventWait={ expectedSignal: 'review_posted', triggerCommentId })`。返回 `covered=true` 才能 clean stop；其他用户/bot 的 EYES、验证失败都继续 fail closed，不能用自然语言声明代替
 3. **@operator** — **只在硬条件下**（详见 §10.4）：不可逆操作 / 愿景级决策 / 跨猫僵局。不是默认收尾出口
 
-**没有第四种。** "到我这里结束了" ≠ "链条结束了" —— 先问"哪只猫能接"，再决定用哪种出口。`@operator` 是硬条件出口，不是安全港。
+**工作链上没有第四种。** "到我这里结束了" ≠ "链条结束了" —— 先问"哪只猫能接"，再决定用哪种出口。`@operator` 是硬条件出口，不是安全港。（链已闭合的对话终态轮见上方豁免——自然收尾优于假球。）
 
 **SOP 链条确认**（决定下一棒是哪只猫）：
 - review 完 → **必须** @ author 告知结果（不传球 = 假终局）
@@ -573,6 +575,7 @@ git show :3:<path>   # THEIRS（main 上的版本）
 - `docs/features/F*.md` 的 status/owner 字段变更也应在 main，但整文件可在 worktree 改
 
 **规则**：在 main 上改，改完立刻 commit + push。在 worktree 改 → 冲突 + 污染 feature PR + 其他猫看不到更新。
+`docs/ROADMAP.md` 不得再被 docs classifier 当作 governance PR 触发器；若同批其他文件确需 PR，BACKLOG 登记先单独直落 main。
 
 ## 15. 阻塞依赖必须双写到可追溯状态
 

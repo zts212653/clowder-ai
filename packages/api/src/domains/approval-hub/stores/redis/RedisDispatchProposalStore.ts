@@ -1,18 +1,34 @@
 /**
- * F246 Phase B: Redis-backed DispatchProposal store.
+ * F246 Phase B/J: Redis-backed DispatchProposal store.
  *
  * Persists assign_work cross-thread dispatch proposals pending operator approval.
- * Lifecycle: create(pending) → approve/reject(terminal).
+ * Lifecycle: create(pending) → approve/reject/superseded(terminal).
+ *
+ * Phase J additions (AC-J4, INV-J5):
+ * - Lineage key K = (sourceThreadId, targetThreadId, senderCatId).
+ * - create() atomically supersedes any existing pending proposal with the same K.
  *
  * Iron Law #5 (LL-048): User-visible state defaults to TTL=0 (persistent).
  * Pending dispatch proposals are user-visible in the Approval Hub and hold
  * intercepted message content — expiry would silently drop messages.
  */
 
-import type { DispatchProposal } from '@cat-cafe/shared';
+import type { ApprovalEnvelope, ApprovalPublication, DispatchProposal } from '@cat-cafe/shared';
+import { assertApprovalEnvelopeIdentity } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { type OwnerAuthProvenance, requireOwnerAuthProvenance } from '../../../cats/services/owner-auth-provenance.js';
+import { commitRedisApprovalEnvelope } from '../../../cats/services/stores/redis/RedisApprovalPublication.js';
 import { DispatchProposalKeys } from '../../../cats/services/stores/redis-keys/proposals/dispatch-proposal-keys.js';
-import type { CreateDispatchProposalInput, IDispatchProposalStore } from '../ports/IDispatchProposalStore.js';
+import type { ApprovalPublicationStore } from '../../ports/ApprovalPublicationStore.js';
+import {
+  type CreateDispatchProposalInput,
+  type CreateDispatchProposalResult,
+  computeLineageKey,
+  type IDispatchProposalStore,
+} from '../ports/IDispatchProposalStore.js';
+import { createRedisDispatchProposal } from './RedisDispatchProposalCreate.js';
+import { abortRedisDispatchStaged } from './RedisDispatchProposalRollback.js';
+import { hydrateDispatchProposal } from './RedisDispatchProposalSerde.js';
 
 /** CAS transition: pending → approved. Atomic status check + field update + index ops.
  *  deliveredMessageId is recorded separately via recordDelivery() AFTER successful delivery,
@@ -26,27 +42,44 @@ const CAS_APPROVE_LUA = `
   if status ~= 'pending' then return 0 end
   redis.call('HSET', key, 'status', 'approved',
     'decidedAt', ARGV[1],
-    'decidedBy', ARGV[2])
+    'decidedBy', ARGV[2],
+    'approvalOwnerAuthProvenance', ARGV[4])
   redis.call('ZREM', pendingKey, ARGV[3])
   redis.call('ZADD', settledKey, ARGV[1], ARGV[3])
   return 1
 `;
 
 /**
- * CAS rollback: approved → pending. Restores retryability when delivery fails (Cloud P1-2 fix).
- * KEYS[3] = userSettled sorted set: must be removed atomically to prevent stale entries from
- * crowding out real history at small limits in listSettledByUser (Phase F P2 fix).
+ * CAS rollback: approved → pending, with Phase J lineage guard (INV-J5).
+ * If a successor holds the lineage, marks as superseded instead of reverting
+ * (prevents dual pending on delivery-failure rollback).
+ *
+ * KEYS[1] = proposal hash, KEYS[2] = pending set, KEYS[3] = settled set, KEYS[4] = lineage key.
+ * ARGV[1] = createdAt, ARGV[2] = proposalId.
+ *
+ * Returns: 1 = reverted to pending, 2 = superseded (successor exists), 0 = not approved.
  */
 const CAS_REVERT_PENDING_LUA = `
   local key = KEYS[1]
   local pendingKey = KEYS[2]
   local settledKey = KEYS[3]
+  local lineageKey = KEYS[4]
   local status = redis.call('HGET', key, 'status')
   if status ~= 'approved' then return 0 end
+
+  local currentHolder = redis.call('GET', lineageKey)
+  if currentHolder and currentHolder ~= ARGV[2] then
+    redis.call('HSET', key, 'status', 'superseded', 'supersededBy', currentHolder)
+    redis.call('HDEL', key, 'decidedAt', 'decidedBy', 'approvalOwnerAuthProvenance')
+    redis.call('ZREM', settledKey, ARGV[2])
+    return 2
+  end
+
   redis.call('HSET', key, 'status', 'pending')
-  redis.call('HDEL', key, 'decidedAt', 'decidedBy')
+  redis.call('HDEL', key, 'decidedAt', 'decidedBy', 'approvalOwnerAuthProvenance')
   redis.call('ZADD', pendingKey, ARGV[1], ARGV[2])
   redis.call('ZREM', settledKey, ARGV[2])
+  redis.call('SET', lineageKey, ARGV[2])
   return 1
 `;
 
@@ -66,48 +99,18 @@ const CAS_REJECT_LUA = `
   return 1
 `;
 
-export class RedisDispatchProposalStore implements IDispatchProposalStore {
+export class RedisDispatchProposalStore implements IDispatchProposalStore, ApprovalPublicationStore {
   constructor(private readonly redis: RedisClient) {}
 
-  async create(input: CreateDispatchProposalInput): Promise<DispatchProposal> {
-    const proposal: DispatchProposal = {
-      ...input,
-      effectClass: 'assign_work',
-      status: 'pending',
-    };
-
-    const key = DispatchProposalKeys.detail(input.proposalId);
-    const pendingKey = DispatchProposalKeys.userPending(input.ownerUserId);
-
-    // Cloud P2-1 fix: atomic idempotency claim — SET NX first, fail if already claimed.
-    if (input.clientMessageId) {
-      const dedupKey = DispatchProposalKeys.clientMsg(input.sourceThreadId, input.clientMessageId);
-      const claimed = await this.redis.set(dedupKey, input.proposalId, 'NX');
-      if (!claimed) {
-        // Another concurrent create already claimed this clientMessageId.
-        // Return the existing proposal instead of creating a duplicate.
-        const existingId = await this.redis.get(dedupKey);
-        if (existingId) {
-          const existing = await this.get(existingId);
-          if (existing) return existing;
-        }
-        // Fallback: dedup key exists but proposal vanished — proceed with create
-      }
-    }
-
-    const pipeline = this.redis.multi();
-    pipeline.hset(key, ...serializeProposal(proposal));
-    pipeline.zadd(pendingKey, input.createdAt, input.proposalId);
-
-    await pipeline.exec();
-    return proposal;
+  async create(input: CreateDispatchProposalInput): Promise<CreateDispatchProposalResult> {
+    return createRedisDispatchProposal(this.redis, input);
   }
 
   async get(proposalId: string): Promise<DispatchProposal | null> {
     const key = DispatchProposalKeys.detail(proposalId);
     const raw = await this.redis.hgetall(key);
     if (!raw || Object.keys(raw).length === 0) return null;
-    return hydrateProposal(raw);
+    return hydrateDispatchProposal(raw);
   }
 
   async listPendingByUser(userId: string): Promise<DispatchProposal[]> {
@@ -126,16 +129,21 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore {
     const proposals: DispatchProposal[] = [];
     for (const [err, raw] of results) {
       if (err || !raw || typeof raw !== 'object' || Object.keys(raw as Record<string, string>).length === 0) continue;
-      const p = hydrateProposal(raw as Record<string, string>);
+      const p = hydrateDispatchProposal(raw as Record<string, string>);
       // Double-check status in case of race between ZREM and this read
       if (p.status === 'pending') proposals.push(p);
     }
     return proposals;
   }
 
-  async approve(proposalId: string, userId: string): Promise<DispatchProposal | null> {
+  async approve(
+    proposalId: string,
+    userId: string,
+    ownerAuthProvenance: OwnerAuthProvenance = 'unknown',
+  ): Promise<DispatchProposal | null> {
     const proposal = await this.get(proposalId);
     if (!proposal) return null;
+    const provenance = requireOwnerAuthProvenance(ownerAuthProvenance);
 
     const key = DispatchProposalKeys.detail(proposalId);
     const pendingKey = DispatchProposalKeys.userPending(proposal.ownerUserId);
@@ -151,6 +159,7 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore {
       String(now),
       userId,
       proposalId,
+      provenance,
     );
 
     if (result === 0) return null;
@@ -161,6 +170,11 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore {
       decidedAt: now,
       decidedBy: userId,
     };
+  }
+
+  async getApprovalOwnerAuthProvenance(proposalId: string): Promise<OwnerAuthProvenance | undefined> {
+    const value = await this.redis.hget(DispatchProposalKeys.detail(proposalId), 'approvalOwnerAuthProvenance');
+    return value === null ? undefined : requireOwnerAuthProvenance(value);
   }
 
   async recordDelivery(proposalId: string, deliveredMessageId: string): Promise<void> {
@@ -176,17 +190,24 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore {
     const pendingKey = DispatchProposalKeys.userPending(proposal.ownerUserId);
     const settledKey = DispatchProposalKeys.userSettled(proposal.ownerUserId);
 
+    // Phase J (INV-J5): pass lineage key so Lua can check for successor.
+    // If a newer proposal holds the lineage, revert → superseded (not pending).
+    const K = computeLineageKey(proposal.sourceThreadId, proposal.targetThreadId, proposal.senderCatId);
+    const lineageKeyRedis = DispatchProposalKeys.lineage(K);
+
     const result = await this.redis.eval(
       CAS_REVERT_PENDING_LUA,
-      3,
+      4,
       key,
       pendingKey,
       settledKey,
+      lineageKeyRedis,
       String(proposal.createdAt),
       proposalId,
     );
 
-    if (result === 0) return null;
+    // 0 = not approved, 2 = superseded (successor holds lineage) — both return null
+    if (result === 0 || result === 2) return null;
 
     return {
       ...proposal,
@@ -242,7 +263,7 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore {
     const proposals: DispatchProposal[] = [];
     for (const [err, raw] of results) {
       if (err || !raw || typeof raw !== 'object' || Object.keys(raw as Record<string, string>).length === 0) continue;
-      const p = hydrateProposal(raw as Record<string, string>);
+      const p = hydrateDispatchProposal(raw as Record<string, string>);
       if (p.status === 'approved' || p.status === 'rejected') proposals.push(p);
     }
     return proposals;
@@ -254,61 +275,42 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore {
     if (!proposalId) return null;
     return this.get(proposalId);
   }
-}
 
-// ---------------------------------------------------------------------------
-// Serialization helpers (hash field ↔ DispatchProposal)
-// ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // ApprovalPublicationStore (Phase-I publication envelope)
+  // ---------------------------------------------------------------------------
 
-function serializeProposal(p: DispatchProposal): string[] {
-  const fields: string[] = [
-    'proposalId',
-    p.proposalId,
-    'sourceThreadId',
-    p.sourceThreadId,
-    'targetThreadId',
-    p.targetThreadId,
-    'senderCatId',
-    p.senderCatId,
-    'ownerUserId',
-    p.ownerUserId,
-    'effectClass',
-    p.effectClass,
-    'content',
-    p.content,
-    'targetCats',
-    JSON.stringify(p.targetCats),
-    'status',
-    p.status,
-    'createdAt',
-    String(p.createdAt),
-  ];
-  if (p.replyTo) fields.push('replyTo', p.replyTo);
-  if (p.clientMessageId) fields.push('clientMessageId', p.clientMessageId);
-  if (p.cardMessageId) fields.push('cardMessageId', p.cardMessageId);
-  if (p.deliveredMessageId) fields.push('deliveredMessageId', p.deliveredMessageId);
-  if (p.decidedAt != null) fields.push('decidedAt', String(p.decidedAt));
-  if (p.decidedBy) fields.push('decidedBy', p.decidedBy);
-  return fields;
-}
+  async getPublication(proposalId: string): Promise<ApprovalPublication | null> {
+    return (await this.get(proposalId))?.publication ?? null;
+  }
 
-function hydrateProposal(raw: Record<string, string>): DispatchProposal {
-  return {
-    proposalId: raw.proposalId,
-    sourceThreadId: raw.sourceThreadId,
-    targetThreadId: raw.targetThreadId,
-    senderCatId: raw.senderCatId,
-    ownerUserId: raw.ownerUserId,
-    effectClass: 'assign_work',
-    content: raw.content,
-    targetCats: JSON.parse(raw.targetCats || '[]'),
-    status: raw.status as DispatchProposal['status'],
-    createdAt: Number(raw.createdAt),
-    ...(raw.replyTo ? { replyTo: raw.replyTo } : {}),
-    ...(raw.clientMessageId ? { clientMessageId: raw.clientMessageId } : {}),
-    ...(raw.cardMessageId ? { cardMessageId: raw.cardMessageId } : {}),
-    ...(raw.deliveredMessageId ? { deliveredMessageId: raw.deliveredMessageId } : {}),
-    ...(raw.decidedAt ? { decidedAt: Number(raw.decidedAt) } : {}),
-    ...(raw.decidedBy ? { decidedBy: raw.decidedBy } : {}),
-  };
+  async commitEnvelope(proposalId: string, envelope: ApprovalEnvelope): Promise<void> {
+    const proposal = await this.get(proposalId);
+    if (!proposal) throw new Error(`proposal not found: ${proposalId}`);
+    assertApprovalEnvelopeIdentity(envelope, {
+      canonicalProposalId: proposal.proposalId,
+      sourceFeatureId: 'F193',
+      ownerUserId: proposal.ownerUserId,
+      requesterCatId: proposal.senderCatId,
+      createdAt: proposal.createdAt,
+    });
+    await commitRedisApprovalEnvelope(this.redis, DispatchProposalKeys.detail(proposalId), envelope);
+  }
+
+  async abortStaged(proposalId: string, _reason: string): Promise<void> {
+    const proposal = await this.get(proposalId);
+    if (!proposal) return;
+    const K = computeLineageKey(proposal.sourceThreadId, proposal.targetThreadId, proposal.senderCatId);
+    const lineageKeyRedis = DispatchProposalKeys.lineage(K);
+    const conditionalDeleteKey = proposal.clientMessageId
+      ? DispatchProposalKeys.clientMsg(proposal.sourceThreadId, proposal.clientMessageId)
+      : undefined;
+    await abortRedisDispatchStaged(this.redis, {
+      detailKey: DispatchProposalKeys.detail(proposalId),
+      pendingKey: DispatchProposalKeys.userPending(proposal.ownerUserId),
+      lineageKey: lineageKeyRedis,
+      proposalId,
+      conditionalDeleteKey,
+    });
+  }
 }

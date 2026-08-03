@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
+import { makeQueuedMessageCustody } from './helpers/queued-message-custody.js';
 import './helpers/setup-cat-registry.js';
 
 function createMockSocketManager() {
@@ -257,6 +258,59 @@ describe('GET /api/callbacks/get-message visibility', () => {
     const body = JSON.parse(res.body);
     assert.equal(body.message.id, msg.id);
     assert.equal(body.message.content, 'hello opus');
+  });
+
+  test('returns queued cat speech already published to the timeline', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const published = messageStore.append({
+      userId: 'user-1',
+      catId: 'codex',
+      content: 'published source-cat seed',
+      mentions: ['opus'],
+      timestamp: 1000,
+      threadId: 'thread-published',
+      deliveryStatus: 'queued',
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${published.id}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(JSON.parse(res.body).message.content, 'published source-cat seed');
+  });
+
+  test('does not expose browser-published queued user work through cat get-message cognition', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const queued = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'visible to the owner timeline, not generally delivered to cats',
+      mentions: ['opus'],
+      timestamp: 1100,
+      threadId: 'thread-browser-only-queued-user',
+      deliveryStatus: 'queued',
+      queueCustody: makeQueuedMessageCustody({
+        entryId: 'entry-browser-only-queued-user',
+        allTargetCats: ['opus'],
+        pendingTargetCats: ['opus'],
+        steerRequestedByCatIds: ['opus'],
+        createdAt: 1100,
+        updatedAt: 1150,
+      }),
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${queued.id}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(res.statusCode, 404);
   });
 
   test('get-message defaults to preview (bounded); mode=full returns complete content (F236 AC-B1/B2)', async () => {

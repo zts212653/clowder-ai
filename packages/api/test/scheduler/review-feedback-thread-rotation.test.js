@@ -13,6 +13,16 @@ import { describe, it } from 'node:test';
 
 const noopLog = { info: () => {}, error: () => {}, warn: () => {} };
 
+function mockReviewState(completedReviewCount) {
+  return {
+    lastCommentCursor: 0,
+    lastInlineCommentCursor: 0,
+    lastConversationCommentCursor: 0,
+    lastDecisionCursor: 0,
+    completedReviewCount,
+  };
+}
+
 /** Convert mock to TaskItem shape */
 function mockTask(pr, overrides = {}) {
   return {
@@ -147,7 +157,7 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
       { repoFullName: 'owner/repo', prNumber: 42, catId: 'opus', threadId: 'th-original', userId: 'u-1' },
       {
         automationState: {
-          review: { lastCommentCursor: 0, lastDecisionCursor: 0, completedReviewCount: 99 },
+          review: mockReviewState(99),
         },
       },
     );
@@ -191,7 +201,7 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
       { repoFullName: 'owner/repo', prNumber: 44, catId: 'opus', threadId: 'thread_rotated_1', userId: 'u-1' },
       {
         automationState: {
-          review: { lastCommentCursor: 0, lastDecisionCursor: 0, completedReviewCount: 1 },
+          review: mockReviewState(1),
         },
       },
     );
@@ -251,7 +261,7 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
       { repoFullName: 'owner/repo', prNumber: 48, catId: 'opus', threadId: 'thread_rotated_1', userId: 'u-1' },
       {
         automationState: {
-          review: { lastCommentCursor: 0, lastDecisionCursor: 0, completedReviewCount: 1 },
+          review: mockReviewState(1),
         },
       },
     );
@@ -318,7 +328,7 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
       { repoFullName: 'owner/repo', prNumber: 49, catId: 'opus', threadId: 'thread_rotated_1', userId: 'u-1' },
       {
         automationState: {
-          review: { lastCommentCursor: 0, lastDecisionCursor: 0, completedReviewCount: 1 },
+          review: mockReviewState(1),
         },
       },
     );
@@ -388,7 +398,7 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
       { repoFullName: 'owner/repo', prNumber: 50, catId: 'opus', threadId: 'thread_rotated_1', userId: 'u-1' },
       {
         automationState: {
-          review: { lastCommentCursor: 0, lastDecisionCursor: 0, completedReviewCount: 1 },
+          review: mockReviewState(1),
         },
       },
     );
@@ -447,7 +457,7 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
       { repoFullName: 'owner/repo', prNumber: 51, catId: 'opus', threadId: 'thread_rotated_1', userId: 'u-1' },
       {
         automationState: {
-          review: { lastCommentCursor: 0, lastDecisionCursor: 0, completedReviewCount: 1 },
+          review: mockReviewState(1),
         },
       },
     );
@@ -507,7 +517,7 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
       { repoFullName: 'owner/repo', prNumber: 52, catId: 'opus', threadId: 'thread_rotated_1', userId: 'u-1' },
       {
         automationState: {
-          review: { lastCommentCursor: 0, lastDecisionCursor: 0, completedReviewCount: 1 },
+          review: mockReviewState(1),
         },
       },
     );
@@ -577,7 +587,7 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
       { repoFullName: 'owner/repo', prNumber: 46, catId: 'opus', threadId: 'thread_rotated_2', userId: 'u-1' },
       {
         automationState: {
-          review: { lastCommentCursor: 0, lastDecisionCursor: 0, completedReviewCount: 2 },
+          review: mockReviewState(2),
         },
       },
     );
@@ -645,7 +655,7 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
       { repoFullName: 'owner/repo', prNumber: 47, catId: 'opus', threadId: 'thread_rotated_default', userId: 'u-1' },
       {
         automationState: {
-          review: { lastCommentCursor: 0, lastDecisionCursor: 0, completedReviewCount: 2 },
+          review: mockReviewState(2),
         },
       },
     );
@@ -704,7 +714,7 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
       { repoFullName: 'owner/repo', prNumber: 45, catId: 'opus', threadId: 'thread_spoofed', userId: 'u-1' },
       {
         automationState: {
-          review: { lastCommentCursor: 0, lastDecisionCursor: 0, completedReviewCount: 1 },
+          review: mockReviewState(1),
         },
       },
     );
@@ -759,7 +769,7 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
       { repoFullName: 'owner/repo', prNumber: 43, catId: 'codex', threadId: 'th-source', userId: 'u-1' },
       {
         automationState: {
-          review: { lastCommentCursor: 0, lastDecisionCursor: 0, completedReviewCount: 3 },
+          review: mockReviewState(3),
         },
       },
     );

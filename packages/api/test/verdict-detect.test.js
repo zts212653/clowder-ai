@@ -47,6 +47,36 @@ describe('F167 C2 AC-C7: hasReviewVerdict', () => {
     assert.equal(hasReviewVerdict('rejected with P1 finding'), true);
   });
 
+  test('detects a genuine cat P1 verdict even when its text begins with API Error:', () => {
+    const text = 'API Error: Request rejected (429) — P1: authorization bypass';
+    assert.equal(hasReviewVerdict(text), true);
+    assert.equal(detectMatchedVerdictKeyword(text), 'reject');
+    assert.equal(
+      shouldWarnVerdictWithoutPass({
+        text,
+        lineStartMentions: [],
+        toolNames: [],
+        structuredTargetCats: [],
+      }),
+      true,
+    );
+  });
+
+  test('treats provider-like bytes as cat verdict text after typed provenance admits them', () => {
+    const text = 'API Error: upstream response — P1: provider-supplied diagnostic';
+    assert.equal(hasReviewVerdict(text), true);
+    assert.equal(detectMatchedVerdictKeyword(text), 'p1p2');
+    assert.equal(
+      shouldWarnVerdictWithoutPass({
+        text,
+        lineStartMentions: [],
+        toolNames: [],
+        structuredTargetCats: [],
+      }),
+      true,
+    );
+  });
+
   test('detects P1: / P2: with colon (classic verdict format, 2026-06-05 tuning)', () => {
     assert.equal(hasReviewVerdict('P1: logic bug in handler'), true);
     assert.equal(hasReviewVerdict('P2: nit on naming'), true);

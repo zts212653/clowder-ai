@@ -148,6 +148,7 @@ function createMockDeps(services, appendCalls, augmentCalls = []) {
       getByThread: () => [],
       getByThreadAfter: () => [],
       getByThreadBefore: () => [],
+      getById: () => null,
       augmentStreamMetadata: async (id, patch) => {
         augmentCalls.push({ id, patch });
         return { id, ...patch };
@@ -187,6 +188,7 @@ describe('#573: stream store dedup when cat_cafe_post_message used', () => {
 
     for await (const msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1', {
       parentInvocationId: 'parent-inv-1',
+      currentUserMessageId: 'trigger-msg-1',
     })) {
       // drain
     }
@@ -202,6 +204,10 @@ describe('#573: stream store dedup when cat_cafe_post_message used', () => {
     assert.deepEqual(patch.metadata, { provider: 'mock-provider', model: 'mock-model' });
     assert.equal(patch.toolEvents.length, 2, 'tool_use/tool_result should be retained for reload');
     assert.deepEqual(patch.extra.stream, { invocationId: 'parent-inv-1', turnInvocationId: 'inv-1' });
+    assert.deepEqual(patch.extra.causal, {
+      kind: 'invocation_reply',
+      triggerMessageId: 'trigger-msg-1',
+    });
     assert.deepEqual(patch.extra.tracing, { traceId: 'trace-1', spanId: 'span-1' });
     assert.deepEqual(patch.extra.rich.blocks, [service.richBlock]);
   });

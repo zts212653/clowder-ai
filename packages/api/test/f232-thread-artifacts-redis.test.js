@@ -102,6 +102,36 @@ describe('F232 thread artifacts — Redis-backed (AC-A6)', { skip: redisIsolatio
     assert.deepEqual(artifacts.map((a) => a.type).sort(), ['audio', 'code', 'file', 'image', 'image']);
   });
 
+  it('collects rich-block artifacts from published queued cat speech', async () => {
+    const threadId = 'thread-f232-published-seed';
+    const seed = await store.append({
+      userId: 'u',
+      catId: 'codex-sol',
+      content: 'source-cat seed with an artifact',
+      mentions: ['opus'],
+      timestamp: Date.now(),
+      threadId,
+      deliveryStatus: 'queued',
+      extra: {
+        rich: {
+          v: 1,
+          blocks: [{ id: 'seed-file', kind: 'file', v: 1, url: '/uploads/seed.pdf', fileName: 'seed.pdf' }],
+        },
+      },
+    });
+
+    const messages = await collectAllThreadMessages(store, threadId);
+    assert.deepEqual(
+      messages.map((message) => message.id),
+      [seed.id],
+    );
+    const artifacts = aggregateThreadArtifacts({ messages, prTasks: [], fileLedger: [] });
+    assert.deepEqual(
+      artifacts.map((artifact) => artifact.name),
+      ['seed.pdf'],
+    );
+  });
+
   it('collectAllThreadMessages pages by effective order time: queued→delivered msg must not hide cross-page artifacts (P2 cloud review)', async () => {
     const T = 'thread-f232-queued-paging';
     const base = Date.now();
@@ -114,7 +144,7 @@ describe('F232 thread artifacts — Redis-backed (AC-A6)', { skip: redisIsolatio
     const append = (ts, fileName, deliveryStatus) =>
       store.append({
         userId: 'u',
-        catId: 'opus-48',
+        catId: null,
         content: '',
         mentions: [],
         timestamp: ts,

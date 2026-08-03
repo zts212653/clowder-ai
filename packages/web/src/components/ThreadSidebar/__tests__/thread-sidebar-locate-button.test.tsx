@@ -2,6 +2,7 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Thread } from '@/stores/chat-types';
 import { useLabelStore } from '@/stores/label-store';
+import { SIDEBAR_TAB_STORAGE_KEY } from '../sidebar-tab-state';
 import {
   createThreadSidebarHarness,
   defaultSidebarApiMock,
@@ -107,6 +108,52 @@ describe('ThreadSidebar locate button (Select Open Session)', () => {
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center', behavior: 'smooth' });
   });
 
+  it('locates an active pinned thread outside the virtualized window', async () => {
+    const pinnedThreads = Array.from({ length: 250 }, (_, index) =>
+      makeThread({
+        id: `pinned-${index}`,
+        title: `Pinned ${index}`,
+        pinned: true,
+        pinnedAt: NOW - index,
+        lastActiveAt: NOW - index,
+      }),
+    );
+    Object.assign(mockStore, {
+      threads: [makeThread({ id: 'default', title: '大厅' }), ...pinnedThreads],
+      currentThreadId: 'pinned-200',
+    });
+    window.localStorage.setItem(SIDEBAR_TAB_STORAGE_KEY, 'pinned');
+    await harness.render();
+
+    expect(harness.container.querySelector('[data-thread-id="pinned-200"]')).toBeNull();
+    const rafQueue: FrameRequestCallback[] = [];
+    const origRAF = window.requestAnimationFrame;
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      rafQueue.push(callback);
+      return rafQueue.length;
+    }) as typeof window.requestAnimationFrame;
+
+    try {
+      const locateBtn = harness.container.querySelector('[data-testid="select-open-session-btn"]') as HTMLButtonElement;
+      await act(async () => {
+        locateBtn.click();
+      });
+      await harness.flush();
+
+      while (rafQueue.length > 0) {
+        const callback = rafQueue.shift();
+        if (!callback) break;
+        await act(async () => callback(0));
+        await harness.flush();
+      }
+
+      expect(harness.container.querySelector('[data-thread-id="pinned-200"]')).not.toBeNull();
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center', behavior: 'smooth' });
+    } finally {
+      window.requestAnimationFrame = origRAF;
+    }
+  });
+
   it('project toolbar shows locate button alongside expand/collapse', async () => {
     await harness.render();
     await clickTab(harness.container, 'project', harness.flush);
@@ -127,6 +174,9 @@ describe('ThreadSidebar locate button (Select Open Session)', () => {
     // and switch to the tab that actually contains the active thread before scrolling.
     // System threads are excluded from Recent, so Locate must select the System tab.
     Object.assign(mockStore, { currentThreadId: 'system' });
+    // Home preserves an explicit tab preference across thread navigation. Seed
+    // Recent so this test exercises Locate instead of the first-load auto-route.
+    window.localStorage.setItem(SIDEBAR_TAB_STORAGE_KEY, 'recent');
     await harness.render();
     scrollIntoView.mockClear();
 

@@ -45,6 +45,7 @@ describe('F174 Phase B — restart resilience (AC-B3, AC-B5)', () => {
         invocationId: 'survive-restart-1',
         callbackToken: 'tok-survive',
         userId: 'u-1',
+        ownerAuthProvenance: 'strict',
         catId: 'opus',
         threadId: 't-1',
         clientMessageIds: new Set(),
@@ -62,6 +63,7 @@ describe('F174 Phase B — restart resilience (AC-B3, AC-B5)', () => {
     assert.equal(result.ok, true, 'token must verify after simulated process restart');
     if (result.ok) {
       assert.equal(result.record.userId, 'u-1');
+      assert.equal(result.record.ownerAuthProvenance, 'strict');
       assert.equal(result.record.catId, 'opus');
       assert.equal(result.record.threadId, 't-1');
     }

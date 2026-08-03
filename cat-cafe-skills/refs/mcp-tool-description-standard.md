@@ -3,15 +3,17 @@
 > 提炼自Maine Coon的《知识工程实践指南》（*(internal reference removed)*）+ MCP 官方规范。
 > 写新 MCP tool 或优化现有 tool 时**必读**。
 
-## Description 五要素（缺一个就是不合格）
+## Description 四要素 + 条件 Gotcha
 
 ```
 1. 做什么（一句话能力）
 2. 什么时候用（触发关键词 / 用户常见表述）
 3. 不做什么 / 不适用场景（排除错误路由）
 4. 产物（调用后用户会看到什么）
-5. GOTCHA（常见陷阱 / 和相似 tool 的区别）
+5. GOTCHA（仅当存在真实常见陷阱 / 易混 tool 时）
 ```
+
+1-4 是路由契约，缺一项就不完整；第 5 项由真实 failure mode 触发，不为凑模板编造。
 
 ### 模板
 
@@ -20,7 +22,7 @@
 Use when: {用户说"生成报告""导出 PDF""帮我写份文档"等}.
 NOT for: {不适用场景，和相似 tool 的区别}.
 Output: {产物描述：文件类型 / 附着方式 / 副作用}.
-GOTCHA: {陷阱提醒，例如"不要用 create_rich_block 手动拼"}.
+GOTCHA: {可选；有真实陷阱时提醒，例如"不要用 create_rich_block 手动拼"}.
 ```
 
 ### 好的 vs 差的 description
@@ -82,7 +84,7 @@ return errorResult('Invalid format "xlsx". Expected one of: pdf, docx, md. Examp
 - [ ] description 有"什么时候用"（含用户常见表述 / 中英文关键词）
 - [ ] description 有"不做什么 / 不适用"
 - [ ] description 有"产物 / 副作用"
-- [ ] description 有 GOTCHA（和相似 tool 的区别）
+- [ ] 若存在真实陷阱 / 易混 tool，description 有对应 GOTCHA；否则未编造占位内容
 - [ ] inputSchema 参数都有 `.describe()`
 - [ ] 枚举值用 `enum` 不用自由文本
 - [ ] tool-registration.test.js 已更新（EXPECTED_TOOLS / EXPECTED_COLLAB_TOOLS）

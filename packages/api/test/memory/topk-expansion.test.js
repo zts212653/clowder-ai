@@ -108,7 +108,7 @@ describe('TopkExpansionService', () => {
       assert.ok(hint.provenance, 'hint must have provenance');
       assert.equal(hint.provenance.source, 'frontmatter-alias');
       assert.ok(hint.provenance.via.includes('routing'), 'via should include the keyword');
-      assert.equal(hint.provenance.confidence, 'heuristic');
+      assert.equal(hint.provenance.edgeStrength, 'heuristic');
     });
 
     it('deduplicates hints that are already in main results', async () => {
@@ -158,7 +158,7 @@ describe('TopkExpansionService', () => {
       assert.ok(threadHints.length > 0, 'should have thread expansion hints');
       assert.equal(threadHints[0].provenance.source, 'source-thread');
       assert.ok(threadHints[0].provenance.via.includes('thread-'), 'via should contain thread ref');
-      assert.equal(threadHints[0].provenance.confidence, 'heuristic');
+      assert.equal(threadHints[0].provenance.edgeStrength, 'heuristic');
     });
 
     it('expands via sourceIds containing thread references', async () => {
@@ -314,23 +314,221 @@ describe('TopkExpansionService', () => {
     });
   });
 
-  describe('convention-edge exclusion (§7.5 graphTraversal=0%)', () => {
-    it('does NOT produce convention-edge hints (Phase B constraint)', async () => {
+  describe('convention-edge expansion (Phase C)', () => {
+    /**
+     * Creates a mock ConventionGraphAdapter for testing.
+     * @param {Record<string, Array<{anchor: string, title: string, kind: string, filePath?: string, edgeStrength: string, stale: boolean}>>} consumersByName
+     */
+    function createMockGraphAdapter(consumersByName = {}) {
+      return {
+        queryConsumers(name) {
+          return Promise.resolve(consumersByName[name] || []);
+        },
+        isAvailable() {
+          return true;
+        },
+      };
+    }
+
+    async function createServiceWithGraph(store, graphAdapter) {
+      const { TopkExpansionService } = await import('../../dist/domains/memory/TopkExpansionService.js');
+      return new TopkExpansionService(store, graphAdapter);
+    }
+
+    it('produces convention-edge hints when adapter is available', async () => {
       const store = createMockStore({ docs: [] });
-      const service = await createService(store);
+      const adapter = createMockGraphAdapter({
+        'F102-routing': [
+          {
+            anchor: 'F208-cat-dossier',
+            title: 'Cat Dossier (F208)',
+            kind: 'l0_data_source',
+            filePath: 'docs/team/cat-dossier.md',
+            edgeStrength: 'static',
+            stale: false,
+          },
+        ],
+      });
+      const service = await createServiceWithGraph(store, adapter);
+
+      const topResults = [
+        makeItem({
+          anchor: 'F102-routing',
+          title: 'Routing System',
+        }),
+      ];
+      const hints = await service.expand(topResults, 'routing');
+
+      const conventionHints = hints.filter((h) => h.provenance.source === 'convention-edge');
+      assert.ok(conventionHints.length > 0, 'should have convention-edge hints');
+      assert.equal(conventionHints[0].anchor, 'F208-cat-dossier');
+      assert.equal(conventionHints[0].provenance.source, 'convention-edge');
+      assert.equal(conventionHints[0].provenance.edgeStrength, 'static');
+    });
+
+    it('does NOT produce convention-edge hints when no adapter', async () => {
+      const store = createMockStore({ docs: [] });
+      const service = await createService(store); // no adapter
 
       const topResults = [
         makeItem({
           anchor: 'F102-routing',
           title: 'Routing System',
           keywords: ['routing'],
-          summary: 'Thread reference: thread-abc123',
         }),
       ];
       const hints = await service.expand(topResults, 'routing');
 
       const conventionHints = hints.filter((h) => h.provenance.source === 'convention-edge');
-      assert.equal(conventionHints.length, 0, 'Phase B should not produce convention-edge hints (graphTraversal=0%)');
+      assert.equal(conventionHints.length, 0, 'no adapter → no convention-edge hints');
+    });
+
+    it('skips stale convention graph results', async () => {
+      const store = createMockStore({ docs: [] });
+      const adapter = createMockGraphAdapter({
+        'stale-anchor': [
+          {
+            anchor: 'stale-consumer',
+            title: 'Stale Result',
+            kind: 'l0_section',
+            edgeStrength: 'static',
+            stale: true, // marked stale
+          },
+        ],
+      });
+      const service = await createServiceWithGraph(store, adapter);
+
+      const topResults = [makeItem({ anchor: 'stale-anchor', title: 'Source' })];
+      const hints = await service.expand(topResults, 'test');
+
+      const conventionHints = hints.filter((h) => h.provenance.source === 'convention-edge');
+      assert.equal(conventionHints.length, 0, 'stale convention results should be skipped');
+    });
+
+    it('deduplicates convention-edge hints against main results and other hints', async () => {
+      const store = createMockStore({
+        docs: [makeItem({ anchor: 'keyword-hit', title: 'Via Keyword' })],
+      });
+      const adapter = createMockGraphAdapter({
+        'F102-routing': [
+          {
+            anchor: 'keyword-hit',
+            title: 'Same via convention',
+            kind: 'feature',
+            edgeStrength: 'static',
+            stale: false,
+          },
+          { anchor: 'F102-routing', title: 'Self reference', kind: 'feature', edgeStrength: 'static', stale: false },
+        ],
+      });
+      const service = await createServiceWithGraph(store, adapter);
+
+      const topResults = [makeItem({ anchor: 'F102-routing', title: 'Routing', keywords: ['keyword-hit'] })];
+      const hints = await service.expand(topResults, 'routing');
+
+      // keyword-hit already found via frontmatter-alias, should not appear again as convention-edge
+      const conventionForKeywordHit = hints.filter(
+        (h) => h.anchor === 'keyword-hit' && h.provenance.source === 'convention-edge',
+      );
+      assert.equal(conventionForKeywordHit.length, 0, 'should not duplicate keyword-hit as convention-edge');
+
+      // F102-routing is in main results, should not appear as hint
+      const selfHints = hints.filter((h) => h.anchor === 'F102-routing');
+      assert.equal(selfHints.length, 0, 'should not hint back to a main result');
+    });
+
+    it('limits convention-edge hints to maxHintsPerType', async () => {
+      const store = createMockStore({ docs: [] });
+      const manyConsumers = Array.from({ length: 10 }, (_, i) => ({
+        anchor: `convention-${i}`,
+        title: `Convention ${i}`,
+        kind: 'l0_section',
+        edgeStrength: 'static',
+        stale: false,
+      }));
+      const adapter = createMockGraphAdapter({ F102: manyConsumers });
+      const service = await createServiceWithGraph(store, adapter);
+
+      const topResults = [makeItem({ anchor: 'F102', title: 'Source' })];
+      const hints = await service.expand(topResults, 'test');
+
+      const conventionHints = hints.filter((h) => h.provenance.source === 'convention-edge');
+      assert.ok(conventionHints.length <= 3, `convention hints should be ≤3, got ${conventionHints.length}`);
+    });
+
+    it('AC-C2 flagship: convention edge connects routing to dossier', async () => {
+      // This is the signature test for Phase C:
+      // search "routing" → top result mentions routing → convention edge → F208 dossier
+      //
+      // The mock simulates real adapter output: cross-kind results sort first,
+      // so dossier (l0_data_source) appears before same-kind sections (l0_section).
+      // With maxPerType=3, dossier survives the budget cut despite 7 total siblings.
+      const store = createMockStore({ docs: [] });
+      const adapter = createMockGraphAdapter({
+        'l3-routing-rules': [
+          // Cross-kind result first (adapter sorts these ahead)
+          {
+            anchor: 'doc:docs/team/cat-dossier',
+            title: 'Cat Dossier — L0 data source (feeds {{TEAMMATE_ROSTER}})',
+            kind: 'l0_data_source',
+            filePath: 'docs/team/cat-dossier.md',
+            edgeStrength: 'static',
+            stale: false,
+          },
+          // Same-kind siblings (these would be capped out by budget)
+          {
+            anchor: 'l1-parallel-world.md',
+            title: 'L1 Section',
+            kind: 'l0_section',
+            edgeStrength: 'static',
+            stale: false,
+          },
+          { anchor: 'l2-carry-over.md', title: 'L2 Section', kind: 'l0_section', edgeStrength: 'static', stale: false },
+          { anchor: 'l4-iron-laws.md', title: 'L4 Section', kind: 'l0_section', edgeStrength: 'static', stale: false },
+          {
+            anchor: 'l5-mcp-tools-index.md',
+            title: 'L5 Section',
+            kind: 'l0_section',
+            edgeStrength: 'static',
+            stale: false,
+          },
+          {
+            anchor: 'l6-capability-wakeup.md',
+            title: 'L6 Section',
+            kind: 'l0_section',
+            edgeStrength: 'static',
+            stale: false,
+          },
+          {
+            anchor: 'l7-collaboration-philosophy.md',
+            title: 'L7 Section',
+            kind: 'l0_section',
+            edgeStrength: 'static',
+            stale: false,
+          },
+        ],
+      });
+      const service = await createServiceWithGraph(store, adapter);
+
+      const topResults = [
+        makeItem({
+          anchor: 'l3-routing-rules',
+          title: 'Routing Rules (L3)',
+          sourcePath: 'assets/prompt-templates/l3-routing-rules.md',
+        }),
+      ];
+      const hints = await service.expand(topResults, '路由');
+
+      // Dossier should be surfaced despite 7 siblings (it's first because cross-kind)
+      const dossierHint = hints.find((h) => h.anchor === 'doc:docs/team/cat-dossier');
+      assert.ok(dossierHint, 'searching routing should find dossier via convention edge');
+      assert.equal(dossierHint.provenance.source, 'convention-edge');
+      assert.ok(
+        dossierHint.provenance.via.includes('l3-routing-rules'),
+        'provenance should trace back to the routing result',
+      );
+      // Evidence anchor format should be followable through the memory stack
+      assert.ok(dossierHint.anchor.startsWith('doc:'), 'hint anchor should use evidence-compatible doc: format');
     });
   });
 

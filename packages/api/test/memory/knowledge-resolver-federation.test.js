@@ -76,7 +76,7 @@ describe('KnowledgeResolver N-collection federation', () => {
     assert.equal(result.collectionGroups.length, 2);
   });
 
-  it('dimension=collection routes to explicit IDs regardless of sensitivity', async () => {
+  it('dimension=collection routes to an explicitly authorized private ID', async () => {
     const catalog = new LibraryCatalog();
     catalog.register(manifest('world:secret', 'world', 'private'));
 
@@ -92,6 +92,7 @@ describe('KnowledgeResolver N-collection federation', () => {
     const result = await resolver.resolve('test', {
       dimension: 'collection',
       collections: ['world:secret'],
+      authorizedCollections: ['world:secret'],
     });
     assert.equal(result.results.length, 1);
     assert.equal(result.results[0].anchor, 'w1');

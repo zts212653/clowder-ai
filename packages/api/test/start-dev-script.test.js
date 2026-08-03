@@ -103,6 +103,49 @@ test('start-dev auto-install clears inherited production install env', () => {
   );
 });
 
+test('start-dev cloud cleanup uses an owner manifest instead of global cloud stop', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const scriptText = readFileSync(scriptPath, 'utf8');
+
+  assert.match(scriptText, /start --optional --owner-file=/);
+  assert.match(scriptText, /stop-owned --owner-file=/);
+  assert.doesNotMatch(
+    scriptText,
+    /node "\$cloud_helper" stop(?:\s|$)/,
+    'cleanup must never stop healthy cloud processes owned by another launcher session',
+  );
+});
+
+test('start-dev cleanup consumes a published owner manifest while helper startup is still in flight', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const scriptText = readFileSync(scriptPath, 'utf8');
+  const cleanupSource = scriptText.match(/cleanup\(\) \{[\s\S]*?\n\}\n\ntrap cleanup EXIT/)?.[0];
+
+  assert.ok(cleanupSource, 'cleanup function must remain discoverable');
+  assert.match(cleanupSource, /\[ -n "\$F247_CLOUD_OWNER_FILE" \]/);
+  assert.doesNotMatch(
+    cleanupSource,
+    /STARTED_F247_CLOUD/,
+    'an interrupt can arrive before the helper returns, so cleanup must trust the manifest rather than a post-return flag',
+  );
+});
+
+test('API Server startup wait defaults to 120s (cold-start regression guard, PR #2748)', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const scriptText = readFileSync(scriptPath, 'utf8');
+
+  // Cold-start guard (gpt52 review on #2748): API boot rebuilds the evidence/embedding
+  // index; with a large corpus this has measured ~73s. If the wait window regresses to
+  // 60s the launcher misfires a timeout and tears down the whole runtime. Lock the 120s
+  // default here while keeping API_WAIT_TIMEOUT overridable, so a future edit that lowers
+  // it has to consciously update this guard.
+  assert.match(
+    scriptText,
+    /wait_for_port_or_exit "\$API_PORT" "API Server" "\$API_PID" "\$\{API_WAIT_TIMEOUT:-120\}"/,
+    'API Server startup wait must default to 120s (overridable via API_WAIT_TIMEOUT); lowering it makes large-corpus cold starts misfire a timeout and tear down the runtime',
+  );
+});
+
 test('probe_port_with_dev_tcp falls back when timeout is unavailable', async () => {
   const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
   const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-no-timeout-'));
@@ -429,6 +472,60 @@ printf '%s' "$CAT_CAFE_MCP_SERVER_PATH"
   assert.equal(output, explicitPath);
 });
 
+test('start-dev keeps explicit runtime ownership paths over dotenv', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const nodeGuardPath = resolve(process.cwd(), '../../scripts/lib/node-runtime-guard.sh');
+  const redisHelperPath = resolve(process.cwd(), '../../scripts/lib/redis-rdb-first.sh');
+  const downloadOverridesPath = resolve(process.cwd(), '../../scripts/download-source-overrides.sh');
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-runtime-paths-'));
+
+  try {
+    mkdirSync(join(tempRoot, 'scripts', 'lib'), { recursive: true });
+    cpSync(scriptPath, join(tempRoot, 'scripts', 'start-dev.sh'));
+    cpSync(nodeGuardPath, join(tempRoot, 'scripts', 'lib', 'node-runtime-guard.sh'));
+    cpSync(redisHelperPath, join(tempRoot, 'scripts', 'lib', 'redis-rdb-first.sh'));
+    cpSync(downloadOverridesPath, join(tempRoot, 'scripts', 'download-source-overrides.sh'));
+    writeFileSync(
+      join(tempRoot, '.env'),
+      [
+        'CAT_CAFE_RUNTIME_ROOT=/tmp/dotenv-runtime',
+        'CAT_CAFE_WORKSPACE_ROOT=/tmp/dotenv-workspace',
+        'CAT_CAFE_MCP_SERVER_PATH=/tmp/dotenv-mcp.js',
+        '',
+      ].join('\n'),
+    );
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e
+source "${join(tempRoot, 'scripts', 'start-dev.sh')}" --source-only >/dev/null 2>&1
+trap - EXIT INT TERM
+printf '%s\n%s\n%s\n' "$CAT_CAFE_RUNTIME_ROOT" "$CAT_CAFE_WORKSPACE_ROOT" "$CAT_CAFE_MCP_SERVER_PATH"`,
+      ],
+      {
+        cwd: tempRoot,
+        encoding: 'utf8',
+        env: baseShellEnv({
+          CAT_CAFE_RUNTIME_ROOT: '/tmp/explicit-runtime',
+          CAT_CAFE_WORKSPACE_ROOT: '/tmp/explicit-workspace',
+          CAT_CAFE_MCP_SERVER_PATH: '/tmp/explicit-mcp.js',
+        }),
+      },
+    );
+
+    assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.deepEqual(result.stdout.trim().split('\n'), [
+      '/tmp/explicit-runtime',
+      '/tmp/explicit-workspace',
+      '/tmp/explicit-mcp.js',
+    ]);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('ensure_api_native_addons rebuilds better-sqlite3 after Node ABI drift', () => {
   const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
   const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-native-rebuild-'));
@@ -566,6 +663,31 @@ test('CLI env vars beat .env.local for port keys in default mode (#603)', () => 
   }
 });
 
+test('explicit zero worktree offset beats .env.local before review port derivation', () => {
+  const tmp = createTempProject();
+  try {
+    writeFileSync(join(tmp, '.env.local'), 'CAT_CAFE_RESPECT_DOTENV_PORTS=1\nWORKTREE_PORT_OFFSET=-10\n');
+    const scriptPath = join(tmp, 'scripts', 'start-dev.sh');
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s' "$WORKTREE_PORT_OFFSET"`,
+      ],
+      {
+        encoding: 'utf8',
+        env: baseShellEnv({ CAT_CAFE_RESPECT_DOTENV_PORTS: '0', WORKTREE_PORT_OFFSET: '0' }),
+      },
+    );
+
+    assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), '0');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('.env.local beats CLI env in respect-dotenv-ports mode (#603)', () => {
   const tmp = createTempProject();
   try {
@@ -654,6 +776,81 @@ test('dotenv cannot grant global sidecar ownership without wrapper env', () => {
       [
         '-lc',
         `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s' "\${CAT_CAFE_PROVISION_GLOBAL_SIDECAR-unset}"`,
+      ],
+      {
+        encoding: 'utf8',
+        env: baseShellEnv(),
+      },
+    );
+
+    assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), 'unset');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('non-runtime connector opt-out from wrapper env beats dotenv values', () => {
+  const tmp = createTempProject();
+  try {
+    writeFileSync(join(tmp, '.env.local'), 'CONNECTOR_GATEWAY_AUTOSTART=1\n');
+    const scriptPath = join(tmp, 'scripts', 'start-dev.sh');
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s' "$CONNECTOR_GATEWAY_AUTOSTART"`,
+      ],
+      {
+        encoding: 'utf8',
+        env: baseShellEnv({ CONNECTOR_GATEWAY_AUTOSTART: '0' }),
+      },
+    );
+
+    assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), '0');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('runtime connector opt-in from wrapper env beats dotenv values', () => {
+  const tmp = createTempProject();
+  try {
+    writeFileSync(join(tmp, '.env.local'), 'CONNECTOR_GATEWAY_AUTOSTART=0\n');
+    const scriptPath = join(tmp, 'scripts', 'start-dev.sh');
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s' "$CONNECTOR_GATEWAY_AUTOSTART"`,
+      ],
+      {
+        encoding: 'utf8',
+        env: baseShellEnv({ CONNECTOR_GATEWAY_AUTOSTART: '1' }),
+      },
+    );
+
+    assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), '1');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('dotenv cannot grant connector autostart without wrapper env', () => {
+  const tmp = createTempProject();
+  try {
+    writeFileSync(join(tmp, '.env.local'), 'CONNECTOR_GATEWAY_AUTOSTART=1\n');
+    const scriptPath = join(tmp, 'scripts', 'start-dev.sh');
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s' "\${CONNECTOR_GATEWAY_AUTOSTART-unset}"`,
       ],
       {
         encoding: 'utf8',
@@ -1152,6 +1349,7 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
 done
 [ -n "$child_pid" ] || { printf 'missing-child'; exit 1; }
 MANAGED_PIDS=("$parent_pid")
+MANAGED_SHUTDOWN_GRACE_SECONDS=0.1
 terminate_managed_pids
 sleep 0.2
 if kill -0 "$child_pid" 2>/dev/null; then
@@ -1163,6 +1361,16 @@ fi
   );
 
   assert.equal(output, 'child-killed');
+});
+
+test('managed shutdown leaves enough time for API audio-finalization hooks', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const source = readFileSync(scriptPath, 'utf8');
+  const defaultGrace = source.match(/MANAGED_SHUTDOWN_GRACE_SECONDS="\$\{MANAGED_SHUTDOWN_GRACE_SECONDS:-([0-9.]+)\}"/);
+
+  assert.ok(defaultGrace, 'start-dev must define a managed shutdown grace');
+  assert.ok(Number(defaultGrace[1]) >= 5, 'default shutdown grace must cover Fastify app.close hooks');
+  assert.match(source, /MANAGED_PIDS\[@\][\s\S]*sleep "\$MANAGED_SHUTDOWN_GRACE_SECONDS"/);
 });
 
 test('port_listen_pids accepts fuser pid output from stderr', () => {

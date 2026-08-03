@@ -104,6 +104,18 @@ describe('F223 Phase C capability normalization contract', () => {
     assertPhaseCMappingGuard(typesSource);
   });
 
+  it('keeps convention graph discovery out of the F192 hardcoded how-to classifier', () => {
+    const typesSource = readRepoFile(
+      'packages/api/src/infrastructure/harness-eval/capability-wakeup/eval-capability-wakeup-types.ts',
+    );
+    const mappingBlocks = [
+      requireMappingBlock(typesSource, 'HOW_TO_PATH_HINTS'),
+      requireMappingBlock(typesSource, 'CAPABILITY_SKILL_IDS'),
+    ].join('\n');
+
+    assert.doesNotMatch(mappingBlocks, /convention-graph-discovery/);
+  });
+
   it('allows all 13 F192 Tier 1 mappings before the classifier split threshold', () => {
     assertPhaseCMappingGuard(`
       export const HOW_TO_PATH_HINTS = {

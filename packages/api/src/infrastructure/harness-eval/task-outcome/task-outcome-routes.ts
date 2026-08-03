@@ -8,6 +8,10 @@
  * If no active episode exists, one is auto-created (trigger: cat_initiated).
  */
 import type { CancelReason } from './task-outcome-episode.js';
+import { type PublicStoredEpisode, projectPublicStoredEpisode } from './task-outcome-public-projection.js';
+
+export type { PublicStoredEpisode } from './task-outcome-public-projection.js';
+
 import {
   buildA1WorldTruthSignal,
   buildMagicWordSignal,
@@ -50,7 +54,7 @@ export interface A1WorldTruthInput {
 
 // ---- Assembled episode (with signals grouped) ----
 
-export interface AssembledEpisode extends StoredEpisode {
+export interface AssembledEpisode extends PublicStoredEpisode {
   signals: {
     a1WorldTruth: Array<Record<string, unknown>>;
     a2InteractionDecisions: Array<Record<string, unknown>>;
@@ -61,12 +65,13 @@ export interface AssembledEpisode extends StoredEpisode {
 // ---- Helpers ----
 
 function ensureActiveEpisode(store: TaskOutcomeEpisodeStore, threadId: string, catId?: string): StoredEpisode {
-  const active = store.getActiveEpisode(threadId);
+  const active = store.getActiveEpisodeByAttribution({ attribution: 'unmanaged_not_applicable', threadId });
   if (active) return active;
   return store.createEpisode({
     trigger: 'cat_initiated',
     threadId,
     participants: catId ? [catId] : [],
+    attribution: 'unmanaged_not_applicable',
   });
 }
 
@@ -110,14 +115,6 @@ export function handleA1WorldTruth(store: TaskOutcomeEpisodeStore, input: A1Worl
     category: 'a1',
     record: signal as unknown as Record<string, unknown>,
   });
-
-  // Auto-complete on merge+success only.
-  // revert is a strong NEGATIVE signal (plan: "revert → 任务失败") but does NOT
-  // auto-close the episode — cat may redo work after revert. Terminal state
-  // determination for non-merge events is left to eval cat or manual POST.
-  if (episode.terminalState === 'in_progress' && input.type === 'merge' && input.outcome === 'success') {
-    store.updateTerminalState(episode.episodeId, 'completed');
-  }
 
   return { episodeId: episode.episodeId, signalAppended: true };
 }
@@ -168,7 +165,7 @@ export function handleGetEpisode(store: TaskOutcomeEpisodeStore, episodeId: stri
   }
 
   return {
-    ...episode,
+    ...projectPublicStoredEpisode(episode),
     signals: { a1WorldTruth, a2InteractionDecisions, proxy },
   };
 }
@@ -181,13 +178,14 @@ export interface UpdateTerminalStateInput {
 export function handleUpdateTerminalState(
   store: TaskOutcomeEpisodeStore,
   input: UpdateTerminalStateInput,
-): StoredEpisode | null {
+): PublicStoredEpisode | null {
   const episode = store.getEpisode(input.episodeId);
   if (!episode) return null;
   store.updateTerminalState(input.episodeId, input.terminalState);
-  return store.getEpisode(input.episodeId);
+  const updated = store.getEpisode(input.episodeId);
+  return updated ? projectPublicStoredEpisode(updated) : null;
 }
 
-export function handleListEpisodes(store: TaskOutcomeEpisodeStore, threadId: string): StoredEpisode[] {
-  return store.listByThread(threadId);
+export function handleListEpisodes(store: TaskOutcomeEpisodeStore, threadId: string): PublicStoredEpisode[] {
+  return store.listByThread(threadId).map(projectPublicStoredEpisode);
 }

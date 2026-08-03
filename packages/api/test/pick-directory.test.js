@@ -203,17 +203,17 @@ describe('GET /api/projects/browse (F113 cross-platform)', () => {
 });
 
 describe('listAvailableDrives()', () => {
-  it('returns [] on non-Windows platforms', () => {
-    assert.deepEqual(mod.listAvailableDrives('darwin'), []);
-    assert.deepEqual(mod.listAvailableDrives('linux'), []);
+  it('returns [] on non-Windows platforms', async () => {
+    assert.deepEqual(await mod.listAvailableDrives('darwin'), []);
+    assert.deepEqual(await mod.listAvailableDrives('linux'), []);
   });
 
-  it('returns an array of DriveInfo with letter/path/label shape on win32', () => {
-    // On a non-Windows test host, realpathSync('C:\\') throws, so every probe
+  it('returns an array of DriveInfo with letter/path/label shape on win32', async () => {
+    // On a non-Windows test host, realpath('C:\\') rejects, so every probe
     // fails and the result is []. That still validates the function does not
     // throw and returns the correct type. On a real Windows host this would
     // return populated entries for mounted drives.
-    const result = mod.listAvailableDrives('win32');
+    const result = await mod.listAvailableDrives('win32');
     assert.ok(Array.isArray(result));
     for (const d of result) {
       assert.ok(typeof d.letter === 'string' && d.letter.length === 1);
@@ -222,24 +222,24 @@ describe('listAvailableDrives()', () => {
     }
   });
 
-  it('skips A: and B: (floppy legacy) — only probes C through Z', () => {
+  it('skips A: and B: (floppy legacy) — only probes C through Z', async () => {
     // Indirect assertion: listAvailableDrives never returns A or B regardless
     // of platform, since the probe loop starts at 'C'.
     for (const plat of ['win32', 'darwin', 'linux']) {
-      for (const d of mod.listAvailableDrives(plat)) {
+      for (const d of await mod.listAvailableDrives(plat)) {
         assert.notEqual(d.letter, 'A');
         assert.notEqual(d.letter, 'B');
       }
     }
   });
 
-  it('returns mounted drives and skips inaccessible ones (deterministic probe)', () => {
+  it('returns mounted drives and skips inaccessible ones (deterministic probe)', async () => {
     const probe = (root) => {
       if (root === 'C:\\') return 'C:\\';
       if (root === 'D:\\') return 'D:\\';
       throw new Error('ENOENT');
     };
-    const result = mod.listAvailableDrives('win32', probe);
+    const result = await mod.listAvailableDrives('win32', probe);
     assert.equal(result.length, 2);
     assert.equal(result[0].letter, 'C');
     assert.equal(result[0].path, 'C:\\');
@@ -248,21 +248,42 @@ describe('listAvailableDrives()', () => {
     assert.equal(result[1].path, 'D:\\');
   });
 
-  it('returns [] when no drives are accessible (deterministic probe)', () => {
+  it('awaits asynchronous drive probes and skips rejected roots', async () => {
+    const started = [];
+    const probe = async (root) => {
+      started.push(root);
+      await Promise.resolve();
+      if (root === 'C:\\' || root === 'D:\\') return root;
+      throw new Error('ENOENT');
+    };
+
+    const result = await mod.listAvailableDrives('win32', probe);
+
+    assert.equal(started.length, 24);
+    assert.deepEqual(
+      result.map(({ letter, path }) => ({ letter, path })),
+      [
+        { letter: 'C', path: 'C:\\' },
+        { letter: 'D', path: 'D:\\' },
+      ],
+    );
+  });
+
+  it('returns [] when no drives are accessible (deterministic probe)', async () => {
     const probe = () => {
       throw new Error('ENOENT');
     };
-    const result = mod.listAvailableDrives('win32', probe);
+    const result = await mod.listAvailableDrives('win32', probe);
     assert.deepEqual(result, []);
   });
 
-  it('returns the real path resolved by the probe, not the probed root', () => {
+  it('returns the real path resolved by the probe, not the probed root', async () => {
     // realpath may resolve junctions; returned path must be the resolved one.
     const probe = (root) => {
       if (root === 'C:\\') return 'C:\\';
       throw new Error('ENOENT');
     };
-    const result = mod.listAvailableDrives('win32', probe);
+    const result = await mod.listAvailableDrives('win32', probe);
     assert.equal(result.length, 1);
     assert.equal(result[0].path, 'C:\\');
   });

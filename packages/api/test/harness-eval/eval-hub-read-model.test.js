@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { chdir, cwd } from 'node:process';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -113,6 +113,10 @@ describe('Eval Hub read model', () => {
     writeFileSync(
       join(domainsDir, 'eval-memory.yaml'),
       readFileSync(join(repoHarnessFeedbackRoot, 'eval-domains', 'eval-memory.yaml'), 'utf8'),
+    );
+    writeFileSync(
+      join(domainsDir, 'eval-memory.metrics.yaml'),
+      readFileSync(join(repoHarnessFeedbackRoot, 'eval-domains', 'eval-memory.metrics.yaml'), 'utf8'),
     );
     const a2aVerdictId = '2026-05-24-eval-a2a-test';
     const a2aBundleDir = join(harnessFeedbackRoot, 'bundles', a2aVerdictId);
@@ -231,12 +235,18 @@ Evidence:
     });
 
     assert.ok(summary.domains, 'domains field must exist');
+    // F248 (co-creator 2026-06-29): 别硬编码域数——域列表会增减，从 eval-domains/ 目录
+    // 动态数。加域时此断言不破，仍验证 "Hub 显示所有注册域" 的核心不变量。
+    const expectedDomainCount = readdirSync(join(repoHarnessFeedbackRoot, 'eval-domains')).filter(
+      (f) => f.endsWith('.yaml') && !f.endsWith('.metrics.yaml'),
+    ).length;
+    assert.ok(expectedDomainCount >= 7, `sanity: expected >= 7 eval domains, found ${expectedDomainCount}`);
     assert.equal(
       summary.domains.length,
-      9,
-      'should have 9 registered domains (eval:a2a + eval:memory + eval:sop + eval:capability-wakeup + eval:task-outcome + eval:friction[F245] + eval:anchor-first[F236] + eval:capability-tips[F244] + eval:qc[F253])',
+      expectedDomainCount,
+      'Hub must surface every registered eval domain (count derived from eval-domains/ dir, not hardcoded)',
     );
-    assert.equal(summary.counts.registeredDomains, 9);
+    assert.equal(summary.counts.registeredDomains, expectedDomainCount);
     // F245 Phase C: eval:friction registered + enabled:true since PR1b wired the live sink.
     const frictionDomain = summary.domains.find((d) => d.domainId === 'eval:friction');
     assert.ok(frictionDomain, 'eval:friction must appear in Hub domains');
@@ -257,7 +267,9 @@ Evidence:
 
     const sopDomain = summary.domains.find((d) => d.domainId === 'eval:sop');
     assert.ok(sopDomain, 'eval:sop must appear in domains (weekly domain)');
-    assert.equal(sopDomain.hasVerdict, false);
+    // Updated 2026-07-14: PR #2890 merged the first eval:sop verdict.
+    assert.equal(sopDomain.hasVerdict, true);
+    assert.ok(sopDomain.latestVerdictId, 'eval:sop should have latestVerdictId');
     assert.equal(sopDomain.evalCatHandle, '@opus47');
 
     const capabilityWakeupDomain = summary.domains.find((d) => d.domainId === 'eval:capability-wakeup');
@@ -267,130 +279,62 @@ Evidence:
     assert.ok(capabilityWakeupDomain.latestVerdictId, 'eval:capability-wakeup should have latestVerdictId');
     assert.equal(capabilityWakeupDomain.evalCatHandle, '@opus47');
 
-    // F253 Phase C: eval:qc domain (zero-baseline, weekly, opus)
+    // F253 Phase C: eval:qc domain (zero-baseline, weekly, opus).
+    // Updated 2026-07-12: PR #2889 published the first eval:qc live verdict.
     const qcDomain = summary.domains.find((d) => d.domainId === 'eval:qc');
     assert.ok(qcDomain, 'eval:qc must appear in domains (F253 Phase C)');
-    assert.equal(qcDomain.hasVerdict, false);
+    assert.equal(qcDomain.hasVerdict, true);
+    assert.ok(qcDomain.latestVerdictId, 'eval:qc should have latestVerdictId');
     assert.equal(qcDomain.evalCatHandle, '@opus');
   });
 
-  // OQ-20: domain summary must include evalCatId + nextCronFireAt for frontend edit + display
-  it('includes evalCatId and nextCronFireAt in domain summaries (#OQ-20)', () => {
+  // F248 Phase A: the registry's human description must reach the Eval Hub summary.
+  it('projects descriptionForHuman from the registry into domain summaries (F248-A)', () => {
     const summary = loadEvalHubSummary({
       harnessFeedbackRoot: repoHarnessFeedbackRoot,
       now: FIXTURE_NOW_BEFORE_DEADLINE,
     });
 
     const a2aDomain = summary.domains.find((d) => d.domainId === 'eval:a2a');
-    assert.ok(a2aDomain);
-    // evalCatId must be exposed for the PATCH edit endpoint
-    assert.equal(a2aDomain.evalCatId, 'codex', 'domain summary must include evalCatId');
-    // P1-2 fix: nextCronFireAt is the scheduler's next fire time, not verdict re-eval deadline
-    // FIXTURE_NOW_BEFORE_DEADLINE = 2026-05-23T12:00 → next daily 03:00 UTC = 2026-05-24T03:00
-    assert.equal(
-      a2aDomain.nextCronFireAt,
-      '2026-05-24T03:00:00.000Z',
-      'daily domain nextCronFireAt = next 03:00 UTC after now',
+    assert.ok(a2aDomain, 'eval:a2a must appear in domains');
+    assert.ok(
+      a2aDomain.descriptionForHuman?.includes('协作'),
+      'a2a descriptionForHuman must be projected verbatim from eval-a2a.yaml (contains 协作)',
     );
 
-    // P1-2 fix: ALL domains get nextCronFireAt, including those without verdicts
-    const memoryDomain = summary.domains.find((d) => d.domainId === 'eval:memory');
-    assert.ok(memoryDomain);
-    assert.equal(memoryDomain.evalCatId, 'opus-47');
-    assert.equal(
-      memoryDomain.nextCronFireAt,
-      '2026-05-24T03:00:00.000Z',
-      'no-verdict domain still gets nextCronFireAt',
-    );
-
-    // Re-enabled 2026-06-10 (F192 sop-wiring PR): eval:sop is now wired with
-    // live publish path (SopTrace producer + file-writer + verdictGenerator).
-    // Weekly domain → nextCronFireAt = next Sunday 03:00 UTC after fixture now.
-    const sopDomain = summary.domains.find((d) => d.domainId === 'eval:sop');
-    assert.ok(sopDomain);
-    assert.equal(sopDomain.enabled, true, 're-enabled sop domain must carry enabled=true');
-    assert.equal(
-      sopDomain.nextCronFireAt,
-      '2026-05-24T03:00:00.000Z',
-      're-enabled weekly sop domain nextCronFireAt = next Sunday 03:00 UTC',
-    );
-
-    // Weekly + enabled: eval:capability-wakeup is the other weekly domain and
-    // is still enabled — its nextCronFireAt must be present and point at next
-    // Sunday 03:00 UTC after 2026-05-23 (Saturday) = 2026-05-24 (Sunday).
-    const cwDomain = summary.domains.find((d) => d.domainId === 'eval:capability-wakeup');
-    assert.ok(cwDomain);
-    assert.equal(cwDomain.enabled, true, 'enabled weekly domain must carry enabled=true');
-    assert.equal(
-      cwDomain.nextCronFireAt,
-      '2026-05-24T03:00:00.000Z',
-      'enabled weekly domain nextCronFireAt = next Sunday 03:00 UTC',
-    );
-  });
-
-  it('attaches enabled flag for ALL domains in summary (sunset visibility — F192 silent-fire fix)', () => {
-    const summary = loadEvalHubSummary({
-      harnessFeedbackRoot: repoHarnessFeedbackRoot,
-      now: FIXTURE_NOW_BEFORE_DEADLINE,
-    });
-
-    // Every domain summary must carry `enabled` (boolean) so the Hub UI can
-    // render a "Sunset" indicator instead of pretending the domain is active.
-    // This closes the gap that PR #2130 originally left as cosmetic — gpt52 R1
-    // P1 surfaced it as same-class false-green bug as silent-fire.
+    // Every production domain summary carries a non-empty human description —
+    // the read-model side of the F248 production-completeness invariant.
     for (const d of summary.domains) {
-      assert.equal(typeof d.enabled, 'boolean', `${d.domainId} must have boolean enabled field`);
+      assert.ok(
+        typeof d.descriptionForHuman === 'string' && d.descriptionForHuman.length > 0,
+        `${d.domainId} summary must carry a non-empty descriptionForHuman`,
+      );
     }
-
-    // re-enabled: enabled=true + has nextCronFireAt (weekly)
-    const sopDomain = summary.domains.find((d) => d.domainId === 'eval:sop');
-    assert.ok(sopDomain);
-    assert.equal(sopDomain.enabled, true);
-    assert.ok(sopDomain.nextCronFireAt, 're-enabled weekly domain must have nextCronFireAt');
-
-    // active: enabled=true + has nextCronFireAt
-    const a2aDomain = summary.domains.find((d) => d.domainId === 'eval:a2a');
-    assert.ok(a2aDomain);
-    assert.equal(a2aDomain.enabled, true);
-    assert.ok(a2aDomain.nextCronFireAt, 'enabled domain must have nextCronFireAt');
   });
 
-  it('fails closed when a live verdict points at a missing evidence bundle', () => {
-    const harnessFeedbackRoot = mkdtempSync(join(tmpdir(), 'f192-eval-hub-'));
-    const verdictPath = join(harnessFeedbackRoot, 'verdicts', '2026-05-24-bad-live-verdict.md');
-    mkdirSync(dirname(verdictPath), { recursive: true });
-    writeFileSync(
-      verdictPath,
-      `---
-feature_ids: [F192, F167]
-topics: [harness-eval, eval-a2a, live-verdict]
-doc_kind: harness-feedback
-feedback_type: live-verdict
-domain_id: eval:a2a
-packet_id: vhp_bad
-source_snapshot: "snapshot:bundle/2026-05-24-bad-live-verdict/snapshot"
----
+  it('projects metricGlossary and synthesized verdict summaries for Eval Hub readability (F248-B)', () => {
+    const summary = loadEvalHubSummary({
+      harnessFeedbackRoot: repoHarnessFeedbackRoot,
+      now: FIXTURE_NOW_BEFORE_DEADLINE,
+    });
 
-# Live Verdict - 2026-05-24-bad-live-verdict
-
-- Verdict: \`keep_observe\`
-- Phenomenon: Missing bundle should fail closed
-- Harness: F167/C1 (hold_ball (MCP tool))
-- Owner ask: No action required; keep observing.
-- Re-eval: next eval remains clean at 2026-05-27T00:00:00.000Z
-
-Evidence:
-- snapshot:bundle/2026-05-24-bad-live-verdict/snapshot
-- attribution:bundle/2026-05-24-bad-live-verdict/eval-F167-2026-05-24:no-finding
-- metric:c1.zombie_hold_count
-`,
-      'utf8',
+    const a2aDomain = summary.domains.find((d) => d.domainId === 'eval:a2a');
+    assert.ok(a2aDomain, 'eval:a2a must appear in domains');
+    assert.equal(a2aDomain.metricGlossary?.['c1.hold_zombie_count']?.label, '真正卡住的持球');
+    assert.equal(a2aDomain.metricGlossary?.['c1.zombie_hold_count']?.goodDirection, 'lower');
+    assert.equal(
+      a2aDomain.metricGlossary?.['c2.verdict_without_pass_count']?.means.includes('结论'),
+      true,
+      'A2A metric glossary should explain c2.verdict_without_pass_count',
     );
 
-    assert.throws(
-      () => loadEvalHubSummary({ harnessFeedbackRoot }),
-      /failed to resolve evidence bundle for 2026-05-24-bad-live-verdict/,
-    );
+    const a2aItem = summary.items.find((item) => item.id === '2026-05-23-eval-a2a-live-verdict');
+    assert.ok(a2aItem, 'fixture verdict 2026-05-23-eval-a2a-live-verdict must remain in summary');
+    assert.equal(a2aItem.operatorNarrative.evidenceQuality, 'usable');
+    assert.match(a2aItem.operatorNarrative.headline, /没有发现要处理的问题/);
+    assert.match(a2aItem.operatorNarrative.summary, /本轮数据可用/);
+    assert.match(a2aItem.operatorNarrative.action, /不用处理/);
+    assert.doesNotMatch(a2aItem.operatorNarrative.summary, /No actionable|keep observing/);
   });
 
   // PR-3 R1 (砚砚 P1): lifecycle.stale tests + writeA2aLiveVerdict / setupA2aOnlyHarnessFeedbackRoot

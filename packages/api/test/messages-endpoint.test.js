@@ -5,10 +5,12 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { makeQueuedMessageCustody } from './helpers/queued-message-custody.js';
 
 describe('GET /api/messages', () => {
   let app;
   let messageStore;
+  let freshnessClosureStore;
 
   beforeEach(async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
@@ -16,13 +18,18 @@ describe('GET /api/messages', () => {
       '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
     );
     const { messagesRoutes } = await import('../dist/routes/messages.js');
+    const { InMemoryFreshnessClosureStore } = await import(
+      '../dist/domains/cats/services/freshness/FreshnessClosureStore.js'
+    );
 
     messageStore = new MessageStore();
+    freshnessClosureStore = new InMemoryFreshnessClosureStore();
     app = Fastify();
     await app.register(messagesRoutes, {
       registry: new InvocationRegistry(),
       messageStore,
       socketManager: { broadcastAgentMessage: () => {} },
+      freshnessClosureStore,
     });
     await app.ready();
   });
@@ -69,6 +76,156 @@ describe('GET /api/messages', () => {
     assert.equal(body.messages[1].content, 'hi there');
   });
 
+  it('renders an authored queued cat seed without exposing queued user or system work', async () => {
+    messageStore.append({
+      userId: 'default-user',
+      catId: null,
+      content: 'ordinary queued user work',
+      mentions: ['opus'],
+      timestamp: 1000,
+      threadId: 'thread-f128-seed',
+      deliveryStatus: 'queued',
+    });
+    messageStore.append({
+      userId: 'system',
+      catId: 'system',
+      content: 'queued internal system work',
+      mentions: [],
+      timestamp: 1050,
+      threadId: 'thread-f128-seed',
+      deliveryStatus: 'queued',
+    });
+    messageStore.append({
+      userId: 'default-user',
+      catId: 'codex-sol',
+      content: 'source-cat thread seed',
+      mentions: ['opus'],
+      timestamp: 1100,
+      threadId: 'thread-f128-seed',
+      deliveryStatus: 'queued',
+      queueCustody: makeQueuedMessageCustody({
+        entryId: 'entry-f128-seed',
+        intent: 'execute',
+        allTargetCats: ['opus'],
+        pendingTargetCats: ['opus'],
+        createdAt: 1100,
+        updatedAt: 1100,
+      }),
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-f128-seed' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].type, 'assistant');
+    assert.equal(body.messages[0].catId, 'codex-sol');
+    assert.equal(body.messages[0].content, 'source-cat thread seed');
+  });
+
+  it('F264 publishes a steered user message in place without making it prompt-delivered', async () => {
+    const steered = messageStore.append({
+      userId: 'default-user',
+      catId: null,
+      content: 'steered follow-up stays visible while the replacement runs',
+      mentions: ['opus'],
+      timestamp: 1200,
+      threadId: 'thread-steer-publication',
+      deliveryStatus: 'queued',
+      queueCustody: makeQueuedMessageCustody({
+        entryId: 'entry-steer-publication',
+        status: 'queued',
+        allTargetCats: ['opus'],
+        pendingTargetCats: ['opus'],
+        steerRequestedByCatIds: ['opus'],
+        createdAt: 1200,
+        updatedAt: 1250,
+      }),
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-steer-publication' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].id, steered.id);
+    assert.equal(body.messages[0].type, 'user');
+    assert.equal(body.messages[0].timestamp, 1200);
+    assert.equal(body.messages[0].deliveredAt, undefined);
+    assert.deepEqual(body.messages[0].extra.queueReceipt.targets, [{ catId: 'opus', state: 'steering' }]);
+    assert.equal(messageStore.getById(steered.id).deliveryStatus, 'queued');
+  });
+
+  it('F264 publishes untouched durable queued user work with its unread receipt', async () => {
+    const queued = messageStore.append({
+      userId: 'default-user',
+      catId: null,
+      content: 'queued follow-up remains at its authored timeline position',
+      mentions: ['opus'],
+      timestamp: 1300,
+      threadId: 'thread-queued-publication',
+      deliveryStatus: 'queued',
+      queueCustody: makeQueuedMessageCustody({
+        entryId: 'entry-queued-publication',
+        status: 'queued',
+        allTargetCats: ['opus'],
+        pendingTargetCats: ['opus'],
+        createdAt: 1300,
+        updatedAt: 1300,
+      }),
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-queued-publication' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].id, queued.id);
+    assert.equal(body.messages[0].deliveredAt, undefined);
+    assert.deepEqual(body.messages[0].extra.queueReceipt.targets, [{ catId: 'opus', state: 'queued' }]);
+  });
+
+  it('F264 keeps canceled queued user work out of browser history after F5', async () => {
+    const canceled = messageStore.append({
+      userId: 'default-user',
+      catId: null,
+      content: 'withdrawn follow-up must not reappear',
+      mentions: ['opus'],
+      timestamp: 1350,
+      threadId: 'thread-canceled-publication',
+      deliveryStatus: 'queued',
+      queueCustody: makeQueuedMessageCustody({
+        entryId: 'entry-canceled-publication',
+        allTargetCats: ['opus'],
+        pendingTargetCats: ['opus'],
+        createdAt: 1350,
+        updatedAt: 1350,
+      }),
+    });
+    messageStore.markCanceled(canceled.id);
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-canceled-publication' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 0);
+  });
+
+  it('returns separate delivery and timeline-order timestamps for terminal published cat speech', async () => {
+    const speech = messageStore.append({
+      userId: 'default-user',
+      catId: 'codex-sol',
+      content: 'published before recipient execution finishes',
+      mentions: ['opus'],
+      timestamp: 1100,
+      threadId: 'thread-published-order',
+      deliveryStatus: 'queued',
+    });
+    messageStore.markDelivered(speech.id, 1500);
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-published-order' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages[0].deliveredAt, 1500);
+    assert.equal(body.messages[0].timelineOrderAt, 1100);
+  });
+
   it('preserves explicit post flag with stream identity in history response', async () => {
     messageStore.append({
       userId: 'default-user',
@@ -92,6 +249,319 @@ describe('GET /api/messages', () => {
       invocationId: 'inv-parent',
       turnInvocationId: 'turn-explicit',
     });
+  });
+
+  it('F264 hydrates a terminal receipt at the original user-message position', async () => {
+    const queued = messageStore.append({
+      userId: 'default-user',
+      catId: null,
+      content: 'message sent during the turn',
+      mentions: ['opus'],
+      timestamp: 1500,
+      threadId: 'thread-receipt',
+      deliveryStatus: 'queued',
+      queueCustody: makeQueuedMessageCustody({
+        entryId: 'entry-receipt',
+        intent: 'execute',
+        status: 'processing',
+        allTargetCats: ['opus'],
+        pendingTargetCats: ['opus'],
+        seenByCatIds: ['opus'],
+        seenInvocationIdByCatId: { opus: 'inv-receipt' },
+        bodyExposures: [{ targetCatId: 'opus', invocationId: 'inv-receipt', seenAt: 1600 }],
+        processingStartedAt: 1550,
+        createdAt: 1500,
+        updatedAt: 1550,
+      }),
+    });
+    await messageStore.transitionQueueCustody(queued.id, {
+      expectedRevision: 1,
+      deliveredAt: 1700,
+      next: {
+        ...queued.queueCustody,
+        revision: 2,
+        status: 'terminal',
+        pendingTargetCats: [],
+        seenInvocationIdByCatId: {},
+        handledByCatIds: ['opus'],
+        targetOutcomeByCatId: {
+          opus: {
+            invocationId: 'inv-receipt',
+            disposition: 'completed_with_turn',
+            evidenceRef: { kind: 'invocation_lineage', invocationId: 'inv-receipt' },
+            handledAt: 1700,
+          },
+        },
+        updatedAt: 1700,
+      },
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-receipt' });
+    const body = JSON.parse(res.body);
+
+    assert.deepEqual(body.messages[0].extra.queueReceipt, {
+      version: 1,
+      entryId: 'entry-receipt',
+      targets: [
+        {
+          catId: 'opus',
+          state: 'handled',
+          invocationId: 'inv-receipt',
+          seenAt: 1600,
+          outcome: {
+            invocationId: 'inv-receipt',
+            disposition: 'completed_with_turn',
+            evidenceRef: { kind: 'invocation_lineage', invocationId: 'inv-receipt' },
+            handledAt: 1700,
+          },
+        },
+      ],
+      reminderAttempts: [],
+    });
+    assert.equal(body.messages[0].deliveredAt, 1700);
+    assert.equal(body.messages[0].timelineOrderAt, 1500);
+  });
+
+  it('ADR-042 hydrates original freshness and supplement reply provenance', async () => {
+    const original = messageStore.append({
+      userId: 'default-user',
+      catId: 'opus',
+      content: 'published original',
+      mentions: [],
+      timestamp: 2000,
+      threadId: 'thread-supplement',
+      extra: {
+        turnExecution: {
+          invocationId: 'child-ordinary-1',
+          parentInvocationId: 'parent-supplement-1',
+          executionKind: 'ordinary',
+        },
+        auxiliaryTurnExecutions: [
+          {
+            invocationId: 'child-routing-guard-1',
+            parentInvocationId: 'parent-supplement-1',
+            executionKind: 'routing_guard',
+          },
+        ],
+        freshness: {
+          kind: 'published_with_unseen',
+          priorFrontierMessageId: 'msg-late',
+          generatedWithUnseen: ['msg-late'],
+          lineageId: 'temporary',
+        },
+      },
+    });
+    messageStore.updateExtra(original.id, {
+      freshness: {
+        kind: 'published_with_unseen',
+        priorFrontierMessageId: 'msg-late',
+        generatedWithUnseen: ['msg-late'],
+        lineageId: original.id,
+      },
+    });
+    messageStore.append({
+      userId: 'default-user',
+      catId: 'opus',
+      content: 'additive supplement',
+      mentions: [],
+      timestamp: 3000,
+      threadId: 'thread-supplement',
+      replyTo: original.id,
+      extra: {
+        freshness: { kind: 'fresh', priorFrontierMessageId: original.id },
+        turnExecution: {
+          invocationId: 'child-supplement-1',
+          parentInvocationId: 'parent-supplement-1',
+          executionKind: 'freshness_supplement',
+        },
+        supplement: {
+          lineageId: original.id,
+          supplementId: `f254-supplement:${original.id}:1`,
+          seq: 1,
+          originalMessageId: original.id,
+        },
+      },
+    });
+    const offered = await freshnessClosureStore.offerSupplement({
+      lineageId: original.id,
+      originalMessageId: original.id,
+      userId: 'default-user',
+      threadId: 'thread-supplement',
+      catId: 'opus',
+      requiredMessageIds: ['msg-late'],
+      requiredFrontierMessageId: 'msg-late',
+      replayUnsafeToolNames: [],
+      now: 2100,
+    });
+    await freshnessClosureStore.claimSupplement(offered.supplement.id, {
+      invocationId: 'inv-supplement-check',
+      now: 2200,
+    });
+    await freshnessClosureStore.declineSupplement(offered.supplement.id, {
+      invocationId: 'inv-supplement-check',
+      now: 2300,
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-supplement' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 2);
+    assert.equal(body.messages[0].extra.freshness.kind, 'published_with_unseen');
+    assert.deepEqual(body.messages[0].extra.turnExecution, {
+      invocationId: 'child-ordinary-1',
+      parentInvocationId: 'parent-supplement-1',
+      executionKind: 'ordinary',
+    });
+    assert.deepEqual(body.messages[0].extra.auxiliaryTurnExecutions, [
+      {
+        invocationId: 'child-routing-guard-1',
+        parentInvocationId: 'parent-supplement-1',
+        executionKind: 'routing_guard',
+      },
+    ]);
+    assert.deepEqual(body.messages[0].extra.freshnessSupplement, {
+      type: 'freshness_supplement',
+      supplementId: offered.supplement.id,
+      lineageId: original.id,
+      originalMessageId: original.id,
+      threadId: 'thread-supplement',
+      catId: 'opus',
+      seq: 1,
+      status: 'declined',
+      requiredCount: 1,
+      terminalReason: 'checked_no_supplement_needed',
+      updatedAt: 2300,
+    });
+    assert.deepEqual(body.messages[1].extra.supplement, {
+      lineageId: original.id,
+      supplementId: `f254-supplement:${original.id}:1`,
+      seq: 1,
+      originalMessageId: original.id,
+    });
+    assert.deepEqual(body.messages[1].extra.turnExecution, {
+      invocationId: 'child-supplement-1',
+      parentInvocationId: 'parent-supplement-1',
+      executionKind: 'freshness_supplement',
+    });
+    assert.equal(body.messages[1].replyTo, original.id);
+    assert.equal(body.messages[1].replyPreview.content, 'published original');
+  });
+
+  it('ADR-042 repairs a historically committed decline control output during hydration', async () => {
+    const original = messageStore.append({
+      userId: 'default-user',
+      catId: 'opus',
+      content: 'published original before protocol repair',
+      mentions: [],
+      timestamp: 2000,
+      threadId: 'thread-supplement-control-recovery',
+    });
+    const offered = await freshnessClosureStore.offerSupplement({
+      lineageId: original.id,
+      originalMessageId: original.id,
+      userId: 'default-user',
+      threadId: 'thread-supplement-control-recovery',
+      catId: 'opus',
+      requiredMessageIds: ['msg-late'],
+      requiredFrontierMessageId: 'msg-late',
+      replayUnsafeToolNames: [],
+      now: 2100,
+    });
+    const claimed = await freshnessClosureStore.claimSupplement(offered.supplement.id, {
+      invocationId: 'inv-supplement-control-recovery',
+      now: 2200,
+    });
+    const leaked = messageStore.append({
+      userId: 'default-user',
+      catId: 'opus',
+      content: '<!-- cat-cafe:supplement-decline -->\n\nStop hook feedback must stay internal.',
+      mentions: [],
+      timestamp: 2300,
+      threadId: 'thread-supplement-control-recovery',
+      replyTo: original.id,
+      extra: {
+        supplement: {
+          lineageId: original.id,
+          supplementId: claimed.id,
+          seq: 1,
+          originalMessageId: original.id,
+        },
+      },
+    });
+    await freshnessClosureStore.commitSupplement(claimed.id, {
+      invocationId: 'inv-supplement-control-recovery',
+      messageId: leaked.id,
+      now: 2400,
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-supplement-control-recovery',
+    });
+    const body = JSON.parse(res.body);
+
+    assert.deepEqual(
+      body.messages.map((message) => message.id),
+      [original.id],
+    );
+    assert.deepEqual(body.messages[0].extra.freshnessSupplement, {
+      type: 'freshness_supplement',
+      supplementId: claimed.id,
+      lineageId: original.id,
+      originalMessageId: original.id,
+      threadId: 'thread-supplement-control-recovery',
+      catId: 'opus',
+      seq: 1,
+      status: 'declined',
+      requiredCount: 1,
+      terminalReason: 'checked_no_supplement_needed',
+      updatedAt: 2400,
+    });
+  });
+
+  it('projects only browser-safe F254 recovery metadata in history response', async () => {
+    const recovery = {
+      kind: 'f254_withheld_message',
+      invocationId: 'inv-recovery-1',
+      manifestSha256: 'a'.repeat(64),
+      contentSha256: 'b'.repeat(64),
+      cvoDecisionRef: '0001783820437069-000027-a6cebcce',
+      recoveredAt: 3000,
+      sourceProof: {
+        transcriptPath: 'data/transcripts/thread_recovery/fable-5/events.jsonl',
+        sessionId: 'session-1',
+        firstEventNo: 1,
+        lastEventNo: 4,
+        terminalEventNo: 4,
+        terminalKind: 'transcript_done',
+      },
+    };
+    messageStore.append({
+      userId: 'default-user',
+      catId: 'fable-5',
+      content: '买到了，正在回家。',
+      mentions: [],
+      timestamp: 2000,
+      threadId: 'thread-recovery',
+      extra: {
+        stream: { invocationId: 'inv-recovery-1', turnInvocationId: 'inv-recovery-1' },
+        recovery,
+      },
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-recovery' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 1);
+    assert.deepEqual(body.messages[0].extra?.recovery, {
+      kind: 'f254_withheld_message',
+      cvoDecisionRef: '0001783820437069-000027-a6cebcce',
+      recoveredAt: 3000,
+    });
+    assert.equal(body.messages[0].extra?.recovery?.invocationId, undefined);
+    assert.equal(body.messages[0].extra?.recovery?.manifestSha256, undefined);
+    assert.equal(body.messages[0].extra?.recovery?.contentSha256, undefined);
+    assert.equal(body.messages[0].extra?.recovery?.sourceProof, undefined);
   });
 
   it('maps canonical system messages to type=system', async () => {
@@ -816,9 +1286,9 @@ describe('POST /api/messages delete-guard protection', () => {
   });
 });
 
-// --- Internal message filtering (context_briefing + routing-guard-failure) ---
+// --- User timeline visibility policy ---
 
-describe('GET /api/messages internal message filtering', () => {
+describe('GET /api/messages timeline visibility policy', () => {
   let app;
   let messageStore;
 
@@ -843,7 +1313,7 @@ describe('GET /api/messages internal message filtering', () => {
     if (app) await app.close();
   });
 
-  it('filters context_briefing messages from API response', async () => {
+  it('preserves typed context_briefing messages in API response', async () => {
     messageStore.append({
       userId: 'default-user',
       catId: null,
@@ -870,9 +1340,11 @@ describe('GET /api/messages internal message filtering', () => {
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
-    assert.equal(body.messages.length, 2);
+    assert.equal(body.messages.length, 3);
     assert.equal(body.messages[0].content, 'user msg');
-    assert.equal(body.messages[1].content, 'cat reply');
+    assert.equal(body.messages[1].content, 'briefing nav');
+    assert.equal(body.messages[1].extra.systemKind, 'context_briefing');
+    assert.equal(body.messages[2].content, 'cat reply');
   });
 
   it('filters routing-guard-failure connector messages from API response', async () => {
@@ -930,17 +1402,16 @@ describe('GET /api/messages internal message filtering', () => {
       timestamp: 100,
     });
 
-    // 25 consecutive internal context_briefing messages
+    // 25 consecutive internal route-guard diagnostics
     for (let i = 0; i < 25; i++) {
       messageStore.append({
         threadId,
         userId: 'system',
         catId: null,
-        content: `briefing-${i}`,
+        content: `route-guard-${i}`,
         mentions: [],
         timestamp: 200 + i,
-        origin: 'briefing',
-        extra: { systemKind: 'context_briefing' },
+        source: { connector: 'routing-guard-failure', detail: 'test' },
       });
     }
 
@@ -988,17 +1459,16 @@ describe('GET /api/messages internal message filtering', () => {
       timestamp: 100,
     });
 
-    // 300 consecutive internal context_briefing messages on top
+    // 300 consecutive internal route-guard diagnostics on top
     for (let i = 0; i < CLUSTER_SIZE; i++) {
       messageStore.append({
         threadId,
         userId: 'system',
         catId: null,
-        content: `briefing-${i}`,
+        content: `route-guard-${i}`,
         mentions: [],
         timestamp: 200 + i,
-        origin: 'briefing',
-        extra: { systemKind: 'context_briefing' },
+        source: { connector: 'routing-guard-failure', detail: 'test' },
       });
     }
 
@@ -1028,17 +1498,16 @@ describe('GET /api/messages internal message filtering', () => {
       timestamp: 100,
     });
 
-    // A few internal messages after
+    // A few internal route-guard diagnostics after
     for (let i = 0; i < 3; i++) {
       messageStore.append({
         threadId,
         userId: 'system',
         catId: null,
-        content: `briefing-${i}`,
+        content: `route-guard-${i}`,
         mentions: [],
         timestamp: 200 + i,
-        origin: 'briefing',
-        extra: { systemKind: 'context_briefing' },
+        source: { connector: 'routing-guard-failure', detail: 'test' },
       });
     }
 

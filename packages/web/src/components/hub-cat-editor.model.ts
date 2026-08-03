@@ -1,6 +1,6 @@
 import {
   builtinAccountFamilyForClient,
-  type CliEffortValue,
+  type CliEffortPreset,
   getCliEffortOptionsForProvider,
   builtinAccountIdForClient as sharedBuiltinAccountIdForClient,
 } from '@cat-cafe/shared';
@@ -39,7 +39,9 @@ export interface HubCatEditorFormState {
   defaultModel: string;
   commandArgs: string;
   cliConfigArgs: string[];
-  cliEffort: CliEffortValue | '';
+  cliEffort: string;
+  /** F254 D2: Codex carrier override. '' = 跟随服务端 CAT_CAFE_CODEX_CARRIER 环境变量。 */
+  codexCarrier: '' | 'exec_json' | 'app_server';
   provider: string;
   acpEnabled: boolean;
   acpTransport: 'stdio' | 'httpstream';
@@ -134,6 +136,12 @@ export const CODEX_AUTH_MODE_OPTIONS: Array<{ value: CodexAuthMode; label: strin
   { value: 'auto', label: 'auto' },
 ];
 
+export const CODEX_CARRIER_OPTIONS: Array<{ value: HubCatEditorFormState['codexCarrier']; label: string }> = [
+  { value: '', label: '默认（跟随服务端环境）' },
+  { value: 'exec_json', label: 'CLI（codex exec）' },
+  { value: 'app_server', label: 'App Server（池化常驻宿主）' },
+];
+
 export { defaultAcpCommandForClient, defaultAcpStartupArgsForClient };
 export {
   ACP_TRANSPORT_OPTIONS,
@@ -155,7 +163,7 @@ function voiceStr(value: string | number | undefined): string {
 export function getCliEffortOptionsForClient(
   client: ClientValue,
   defaultModel?: string | null,
-): readonly CliEffortValue[] | null {
+): readonly CliEffortPreset[] | null {
   return getCliEffortOptionsForProvider(client, defaultModel);
 }
 
@@ -379,6 +387,7 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     commandArgs: cat?.commandArgs?.join(' ') ?? createDraft?.commandArgs ?? '',
     cliConfigArgs: [...(cat?.cliConfigArgs ?? [])],
     cliEffort: persistedCliEffort ?? '',
+    codexCarrier: cat?.cli?.carrier ?? '',
     provider: cat?.provider ?? '',
     acpEnabled:
       Boolean(acpConfig) || (cat?.clientId as ClientId | undefined) === 'acp' || createDraft?.clientId === 'acp',

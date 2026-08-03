@@ -119,6 +119,9 @@ test('routeSerial keeps newest cursor boundary when same cat re-enters in one ch
     currentUserMessageId: newUserMsgId,
     thinkingMode: 'play',
     cursorBoundaries,
+    invocationController: new AbortController(),
+    trackA2ASlot: () => true,
+    completeA2ASlots: () => {},
   })) {
   }
 

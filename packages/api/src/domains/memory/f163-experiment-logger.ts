@@ -9,12 +9,24 @@ import type { F163FlagSnapshot } from './f163-types.js';
 export class F163ExperimentLogger {
   constructor(private db: Database.Database) {}
 
-  logSearch(variantId: string, flags: F163FlagSnapshot, payload: Record<string, unknown>): void {
+  logSearch(
+    variantId: string,
+    flags: F163FlagSnapshot,
+    payload: Record<string, unknown>,
+    opts?: { origin?: string },
+  ): void {
     this.db
       .prepare(
-        'INSERT INTO f163_logs (log_type, variant_id, effective_flags, payload, created_at) VALUES (?, ?, ?, ?, ?)',
+        'INSERT INTO f163_logs (log_type, variant_id, effective_flags, payload, created_at, origin) VALUES (?, ?, ?, ?, ?, ?)',
       )
-      .run('search', variantId, JSON.stringify(flags), JSON.stringify(payload), new Date().toISOString());
+      .run(
+        'search',
+        variantId,
+        JSON.stringify(flags),
+        JSON.stringify(payload),
+        new Date().toISOString(),
+        opts?.origin ?? 'user',
+      );
   }
 
   logWrite(variantId: string, flags: F163FlagSnapshot, payload: Record<string, unknown>): void {

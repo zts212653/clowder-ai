@@ -7,10 +7,124 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 import {
+  classifyGitHubExecutionFailure,
   computeAggregateBucket,
+  fetchPrCiStatus,
   normalizeBucket,
   normalizePrState,
 } from '../dist/infrastructure/email/ci-status-fetcher.js';
+
+function rawGitHubFixture(annotationTexts, jobCheckRunId = 91) {
+  const commands = [];
+  return {
+    commands,
+    async execFileAsync(file, args) {
+      assert.equal(file, 'gh');
+      commands.push([...args]);
+      const command = args.join(' ');
+      if (command.startsWith('pr view ')) {
+        return {
+          stdout: JSON.stringify({
+            headRefOid: 'a'.repeat(40),
+            state: 'OPEN',
+            mergedAt: null,
+            mergedBy: null,
+            statusCheckRollup: [{ name: 'gate', status: 'COMPLETED', conclusion: 'failure', __typename: 'CheckRun' }],
+          }),
+        };
+      }
+      if (command.startsWith('pr checks ')) {
+        return {
+          stdout: JSON.stringify([
+            {
+              name: 'gate',
+              bucket: 'fail',
+              link: 'https://github.example/check/91',
+              workflow: 'CI',
+              description: 'billing-shaped display prose is not classified',
+            },
+          ]),
+        };
+      }
+      if (command.includes('/commits/') && command.includes('/check-runs?')) {
+        return {
+          stdout: JSON.stringify({
+            check_runs: [{ id: 91, name: 'gate', conclusion: 'failure', output: { summary: 'ordinary failure' } }],
+          }),
+        };
+      }
+      if (command.includes('/actions/runs?head_sha=')) {
+        return { stdout: JSON.stringify({ workflow_runs: [{ id: 92, conclusion: 'failure' }] }) };
+      }
+      if (command.includes('/actions/runs/92/jobs?')) {
+        return {
+          stdout: JSON.stringify({
+            jobs: [
+              {
+                name: 'gate',
+                conclusion: 'failure',
+                runner_id: 0,
+                steps: [],
+                check_run_url: `https://api.github.com/repos/zts212653/cat-cafe/check-runs/${jobCheckRunId}`,
+              },
+            ],
+          }),
+        };
+      }
+      if (command.includes('/check-runs/91/annotations?')) {
+        return { stdout: JSON.stringify(annotationTexts.map((message) => ({ message }))) };
+      }
+      throw new Error(`unexpected gh command: ${command}`);
+    },
+  };
+}
+
+describe('classifyGitHubExecutionFailure', () => {
+  const exact = {
+    checkConclusion: 'failure',
+    jobConclusion: 'failure',
+    runnerId: 0,
+    steps: [],
+    annotationTexts: ['The job was not started because the account spending limit was reached.'],
+  };
+
+  it('recognizes only the complete typed zero-step billing tuple', () => {
+    assert.strictEqual(classifyGitHubExecutionFailure(exact), 'billing_spending_limit_zero_step');
+  });
+
+  it('returns zero for every partial tuple and for billing-shaped check prose', () => {
+    const partials = [
+      { ...exact, checkConclusion: 'success' },
+      { ...exact, jobConclusion: 'cancelled' },
+      { ...exact, runnerId: null },
+      { ...exact, steps: [{ name: 'tests', conclusion: 'failure' }] },
+      { ...exact, annotationTexts: [] },
+      { ...exact, annotationTexts: ['ordinary source test failure'] },
+    ];
+    for (const partial of partials) assert.strictEqual(classifyGitHubExecutionFailure(partial), undefined);
+  });
+
+  it('assembles the exact enum from raw check, job, and annotation JSON', async () => {
+    const fixture = rawGitHubFixture(['Account spending limit reached before the job started.']);
+    const result = await fetchPrCiStatus('zts212653/cat-cafe', 3276, { warn() {} }, fixture);
+    assert.equal(result.checks[0].executionFailure, 'billing_spending_limit_zero_step');
+    assert.ok(fixture.commands.some((args) => args[0] === 'api' && args[1].includes('/check-runs?')));
+    assert.ok(fixture.commands.some((args) => args[0] === 'api' && args[1].includes('/jobs?')));
+    assert.ok(fixture.commands.some((args) => args[0] === 'api' && args[1].includes('/annotations?')));
+  });
+
+  it('keeps a raw billing-shaped check unclassified when annotations are absent', async () => {
+    const fixture = rawGitHubFixture([]);
+    const result = await fetchPrCiStatus('zts212653/cat-cafe', 3276, { warn() {} }, fixture);
+    assert.equal(Object.hasOwn(result.checks[0], 'executionFailure'), false);
+  });
+
+  it('does not splice a same-name job and check-run from different executions', async () => {
+    const fixture = rawGitHubFixture(['Account spending limit reached before the job started.'], 999);
+    const result = await fetchPrCiStatus('zts212653/cat-cafe', 3276, { warn() {} }, fixture);
+    assert.equal(Object.hasOwn(result.checks[0], 'executionFailure'), false);
+  });
+});
 
 describe('normalizePrState', () => {
   it('returns merged when mergedAt is set', () => {

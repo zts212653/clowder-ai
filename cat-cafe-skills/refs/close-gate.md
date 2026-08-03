@@ -72,8 +72,7 @@ close_gate_report:
 | `delete` | 删除 AC | reason 必填，说明为什么不需要 |
 | `cvo_signoff` | operator 明确表态同意降级 | 四件套：`proposal_message_id` + `cvo_message_id` + `cvo_quote` + `accepted_scope` |
 
-**没有第四选项。** 以下字样出现在 resolution 中 = 自动阻塞：
-`follow-up` / `deferred` / `next phase` / `P2` / `stub` / `TD` / `后续` / `留个尾巴` / `先这样` / `下次一定` / `回头` / `以后再` / `next PR` / `will address later` / `out of scope`（作为 close 借口时）/ `MVP 先上`（作为 close 借口时）
+**没有第四选项。** `follow-up` / `deferred` / `next phase` / `P2` / `stub` / `TD` / `后续` / `留个尾巴` / `先这样` / `下次一定` / `回头` / `以后再` / `next PR` / `will address later` / `out of scope` / `MVP 先上` 等字样只是**语义检查线索，不是自动 BLOCK**。硬门只看结构化状态：`unmet` 仍存在、`met` 缺 evidence/仍带 resolution、`deleted` 缺 delete+reason、`cvo_signed_off` 缺四件套时阻塞；完整的 delete / cvo_signoff 不因 reason 里出现这些词被误杀。
 
 ## operator Signoff 机制
 
@@ -89,7 +88,7 @@ operator的实际交互模式：猫提出 tradeoff + 判断 → operator自然�
 守护猫 close 验收时必须检查：
 1. CloseGateReport 是否存在（缺矩阵 = BLOCKED）
 2. 每个 unmet AC 是否已三选一处置
-3. 有无 follow-up tail 关键词命中
+3. follow-up tail 线索是否暴露了未处置 AC（关键词本身不作 verdict）
 4. cvo_signoff 的四件套是否完整且可追溯
 5. 不允许凭自由文本"我都做了" close
 6. **Contract 漂检查（KD-26 from F194 Phase Z5）**：本 PR 改了一个 contract（id 公式 / kind 语义 / fallback 策略 / etc.）后，是否同时审了**所有引用该 contract 的周边代码**没有出现"helper 用 X 公式但 reducer 用 X+kind 公式"这种漂？守护对照表不能只对照"上一次 catch 的症状"，要主动列出"contract A 改动 → contract B/C/D 是否仍兼容"的矩阵。F194 Phase Z3/Z4 守护表两次都全绿但 Bug A+B 没 catch，根因就是没做 contract 漂检查

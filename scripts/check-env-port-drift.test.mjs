@@ -186,27 +186,11 @@ function buildExportedRootScripts(sourceScripts) {
   scripts['dev:direct'] = 'node ./scripts/start-entry.mjs dev:direct --profile=opensource';
   scripts['check:start-profile-isolation'] = 'node --test scripts/start-dev-profile-isolation.test.mjs';
   scripts['check:pre-merge-gate'] =
-    'node --test scripts/pre-merge-check.test.mjs scripts/pre-merge-gate-guard.test.mjs scripts/test-bash-runtime.test.mjs';
-  if (scripts.check === 'node scripts/run-checks.mjs') {
-    scripts.check = [
-      'pnpm biome check . --diagnostic-level=error',
-      'pnpm check:features',
-      'pnpm check:sop-definitions',
-      'pnpm check:skills:manifest',
-      'pnpm check:skills:surfaces',
-      'pnpm check:env-ports',
-      'pnpm check:env-registry',
-      'pnpm check:env-example',
-      'pnpm check:start-profile-isolation',
-      'pnpm check:pre-merge-gate',
-      'pnpm check:guides',
-      'pnpm check:followup-tails',
-      'pnpm check:scripts-ascii-only',
-    ].join(' && ');
-  }
+    'node --test scripts/pre-merge-check.test.mjs scripts/pre-merge-gate-guard.test.mjs scripts/lib/fseventsd-pressure.test.mjs scripts/test-bash-runtime.test.mjs scripts/check-worktree-dirty-ledger.test.mjs scripts/classify-merge-outcome.test.mjs scripts/clowder-merge-execution.test.mjs';
   if (!scripts.check.includes('pnpm check:start-profile-isolation')) {
     scripts.check += ' && pnpm check:start-profile-isolation';
   }
+  scripts.check = scripts.check.replace(' && pnpm test:architecture-ownership', '');
   delete scripts['check:architecture-ownership'];
   delete scripts['test:architecture-ownership'];
 
@@ -221,6 +205,13 @@ function buildExportedRootScripts(sourceScripts) {
     'check:root-debris',
     'check:source-hygiene',
     'check:f223-action-tracking',
+    'check:docs-discovery',
+    // F267 measurement validity audits the complete home evidence archive, which
+    // the curated public export intentionally does not contain.
+    'check:measurement-bundles',
+    // F267 component hashes resolve private home certificate revisions and must
+    // be removed from both the exported script table and check:features chain.
+    'check:measurement-component-hashes',
     // F238 Phase D: reverse-sanitizer detect-only CLI — internal boundary tooling
     // (PR #2333). Must mirror sync-to-opensource.sh internalScripts list.
     'check:reverse-sanitizer',
@@ -234,11 +225,28 @@ function buildExportedRootScripts(sourceScripts) {
     'check:public-behavior-impact',
     // F251 AC-A6 — 30-day retroactive eval helper. Home-only, single-shot.
     'check:f251-v1-eval',
+    // F247 B1d — home-only cloud-cat supporting service lifecycle helper.
+    // References mcp.clowder-ai.com, local Cloudflare tunnel config, and
+    // gpt-pro agent-key paths; strip from public package scripts.
+    'start:cloud',
+    'cloud:status',
+    'cloud:doctor',
+    'cloud:copy-url',
+    'cloud:stop',
+    'check:f247-cloud-services',
+    // F068 primary-worktree post-checkout guard + local event log are home-only.
+    'eval:post-checkout-guard',
     'clean:root-debris',
     'guards:check',
   ];
   for (const scriptName of internalScripts) {
     delete scripts[scriptName];
+    for (const [name, command] of Object.entries(scripts)) {
+      scripts[name] = command
+        .split(' && ')
+        .filter((segment) => segment !== `pnpm ${scriptName}` && segment !== `pnpm run ${scriptName}`)
+        .join(' && ');
+    }
   }
   for (const key of Object.keys(scripts)) {
     if (key.startsWith('desktop:')) delete scripts[key];
@@ -705,6 +713,16 @@ describe(
       );
     });
 
+    it('sync-to-opensource.sh runs sanitizer over desktop installer and launcher text files', () => {
+      const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+      for (const ext of ['ps1', 'py', 'bat', 'iss', 'html']) {
+        assert.ok(
+          content.includes(`-name "*.${ext}"`),
+          `sync sanitizer should include .${ext} files so public desktop release surfaces are sanitized`,
+        );
+      }
+    });
+
     it('sync-to-opensource.sh transforms start-dev.sh API fallback to 3004', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
       const expected = "'s/API_PORT=$" + '{API_SERVER_PORT:-3004}/API_PORT=$' + "{API_SERVER_PORT:-3004}/g'";
@@ -840,6 +858,38 @@ excluded:
       }
     });
 
+    it('sync-manifest exports every script an exported skill runs (node scripts/*.mjs)', () => {
+      // Dynamic closure: exported skills (cat-cafe-skills/, a managed_root) invoke helper
+      // scripts via `node scripts/<name>.mjs` inside SKILL.md. Any such script missing from
+      // managed_scripts makes the open-source skill mirror point at a nonexistent file.
+      // The hard-coded requiredScripts lists above cannot catch newly-referenced scripts.
+      // cloud P2-1 (cat-cafe#2846) surfaced classify-merge-outcome.mjs; this guard also
+      // closed the pre-existing check-hotfix-pattern.mjs / check-fallback-layers.mjs gaps.
+      const managedScripts = new Set(readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts'));
+      const skillFiles = execFileSync('find', ['cat-cafe-skills', '-name', 'SKILL.md'], {
+        cwd: ROOT,
+        encoding: 'utf-8',
+      })
+        .trim()
+        .split('\n')
+        .filter(Boolean);
+      const re = /node\s+(scripts\/[\w/-]+\.mjs)\b/g;
+      const missing = [];
+      for (const rel of skillFiles) {
+        const txt = readFileSync(resolve(ROOT, rel), 'utf-8');
+        for (const m of txt.matchAll(re)) {
+          if (!managedScripts.has(m[1])) {
+            missing.push(`${m[1]} (referenced by ${rel})`);
+          }
+        }
+      }
+      assert.deepEqual(
+        missing,
+        [],
+        `Exported skills reference scripts missing from sync-manifest managed_scripts:\n  ${missing.join('\n  ')}`,
+      );
+    });
+
     it('sync-manifest exports workspace dependency closure for managed package roots', () => {
       const managedRoots = new Set(readYamlTopLevelList('sync-manifest.yaml', 'managed_roots'));
       const workspaceRootsByName = loadWorkspacePackageRootsByName();
@@ -938,6 +988,10 @@ excluded:
       const requiredScripts = [
         'scripts/pre-merge-check.sh',
         'scripts/pre-merge-check.test.mjs',
+        'scripts/pre-merge-gate-guard.mjs',
+        'scripts/pre-merge-gate-guard.test.mjs',
+        'scripts/lib/fseventsd-pressure.mjs',
+        'scripts/lib/fseventsd-pressure.test.mjs',
         'scripts/write-gate-last-run.sh',
       ];
 
@@ -945,6 +999,39 @@ excluded:
         assert.ok(
           managedScripts.includes(scriptPath),
           `sync-manifest should export ${scriptPath} because public check:pre-merge-gate executes it`,
+        );
+      }
+    });
+
+    it('source pre-merge gate executes the fseventsd threshold policy suite', () => {
+      const sourcePkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8'));
+      assert.match(sourcePkg.scripts['check:pre-merge-gate'], /scripts\/lib\/fseventsd-pressure\.test\.mjs/);
+    });
+
+    it('source/public check:pre-merge-gate do not drift — every exported source test runs publicly', () => {
+      // cloud P2-3 (cat-cafe#2846): source check:pre-merge-gate gained tests (classify-merge-outcome,
+      // check-worktree-dirty-ledger) but the public transform (sync-to-opensource.sh + the
+      // buildExportedRootScripts mirror) still hard-coded an older 3-test list — so the open-source
+      // gate exported the regression tests as files but never executed them. Guard BOTH the test
+      // mirror and the real shell transform against source drift.
+      const sourcePkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf-8'));
+      const managedScripts = new Set(readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts'));
+      const extractTests = (cmd) => cmd.match(/scripts\/[\w/-]+\.test\.mjs/g) ?? [];
+      const exportedSourceTests = extractTests(sourcePkg.scripts['check:pre-merge-gate']).filter((t) =>
+        managedScripts.has(t),
+      );
+      assert.ok(exportedSourceTests.length > 0, 'source check:pre-merge-gate should reference exported tests');
+
+      const publicMirror = buildExportedRootScripts(sourcePkg.scripts)['check:pre-merge-gate'];
+      const shTransform = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+      for (const testPath of exportedSourceTests) {
+        assert.ok(
+          publicMirror.includes(testPath),
+          `buildExportedRootScripts public check:pre-merge-gate must run exported source test ${testPath}`,
+        );
+        assert.ok(
+          shTransform.includes(testPath),
+          `sync-to-opensource.sh public check:pre-merge-gate must run exported source test ${testPath}`,
         );
       }
     });
@@ -968,17 +1055,18 @@ excluded:
 
     it('sync-to-opensource.sh keeps exported root package script surfaces closed', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
+      const exportedScripts = buildExportedRootScripts(readJsonFile('package.json').scripts);
 
       assert.ok(
-        content.includes('pkg.scripts.check === "node scripts/run-checks.mjs"'),
-        'public package.json should rewrite source-only run-checks wrapper into an explicit public check chain',
+        !content.includes('pkg.scripts.check === "node scripts/run-checks.mjs"'),
+        'public package transform must consume the canonical inline check chain without a dead runner compatibility branch',
       );
       assert.ok(
         content.includes('pkg.scripts["check:pre-merge-gate"] ='),
-        'public package.json should strip source-only run-checks.test.mjs from check:pre-merge-gate',
+        'public package.json should keep only exported source tests in check:pre-merge-gate',
       );
       assert.ok(
-        content.includes('"pnpm check:skills:surfaces"'),
+        exportedScripts.check.includes('pnpm check:skills:surfaces') && !content.includes('"check:skills:surfaces",'),
         'public package.json should run the exported skill surface guard in pnpm check',
       );
       assert.ok(
@@ -990,8 +1078,30 @@ excluded:
         'public package.json should not expose test:architecture-ownership without exporting its script target',
       );
       assert.ok(
+        content.includes('pkg.scripts.check = pkg.scripts.check.replace(" && pnpm test:architecture-ownership", "")'),
+        'public package.json should remove the source-only architecture ownership test from its check chain',
+      );
+      assert.ok(
         content.includes('"check:f223-action-tracking"'),
         'public package.json should drop source-only F223 action tracking because its inventory truth source is not exported',
+      );
+      assert.ok(
+        content.includes('"check:docs-discovery"'),
+        'public package.json should drop source-only docs discovery checks because public docs export is partial',
+      );
+      assert.ok(
+        content.includes('"check:measurement-bundles"'),
+        'public package.json should drop the home-only measurement bundle audit because public evidence is partial',
+      );
+      assert.ok(
+        content.includes('"check:measurement-component-hashes"') &&
+          !exportedScripts['check:measurement-component-hashes'] &&
+          !exportedScripts['check:features'].includes('check:measurement-component-hashes'),
+        'public package.json should remove the home-only component hash audit from both its definition and nested feature chain',
+      );
+      assert.ok(
+        content.includes('"eval:post-checkout-guard"') && !exportedScripts['eval:post-checkout-guard'],
+        'public package.json should drop the home-only primary-worktree guard evaluator',
       );
       assert.ok(
         !content.includes('"check:biome-version",'),
@@ -1809,6 +1919,15 @@ describe(
       assert.ok(
         validateBlock.includes('run_target_public_gate "$VALIDATION_TARGET_DIR"'),
         'validate mode should reuse the same target/public gate as a real full sync',
+      );
+    });
+
+    it('allows focused public diagnostics only in non-mutating validate mode', () => {
+      const content = readSyncScript();
+      assert.match(
+        content,
+        /CAT_CAFE_PUBLIC_TEST_FOCUS:-.*VALIDATE.*!= true[\s\S]*Real sync always requires the complete public test suite/,
+        'focused public tests must fail closed outside --validate so a real sync cannot inherit a partial gate',
       );
     });
 

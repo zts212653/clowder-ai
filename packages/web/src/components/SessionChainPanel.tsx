@@ -7,6 +7,7 @@ import type { CatInvocationInfo, ContextHealthData } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
 import { BindNewSessionSection } from './BindNewSessionSection';
 import { ContextHealthBar } from './ContextHealthBar';
+import { CriticalText } from './content-overflow';
 import { BindSessionInput, SessionIdTag } from './SessionChainInputs';
 import { settingsResourceCardClass } from './SettingsResourceCard';
 import { deriveSessionColors, type SessionColors } from './session-chain-colors';
@@ -102,6 +103,19 @@ function sealReasonLabel(reason?: string): string {
 function cachePercent(cacheRead?: number, input?: number): number {
   if (!cacheRead || !input) return 0;
   return Math.round((cacheRead / input) * 100);
+}
+
+function sealedSessionSummary(session: SessionSummary): string {
+  return `${session.sealedAt ? timeAgo(session.sealedAt) : 'sealing'} · ${session.messageCount} msgs`;
+}
+
+function sealedSessionDetails(session: SessionSummary): string | undefined {
+  const details = [
+    session.contextHealth ? `${Math.round(session.contextHealth.fillRatio * 100)}%` : null,
+    (session.compressionCount ?? 0) > 0 ? `${session.compressionCount} compress` : null,
+    session.sealReason ? sealReasonLabel(session.sealReason) : null,
+  ].filter(Boolean);
+  return details.length > 0 ? details.join(' · ') : undefined;
 }
 
 function fmtTokens(n: number): string {
@@ -454,13 +468,12 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                         </span>
                         <SessionIdTag id={session.cliSessionId ?? session.id} />
                       </div>
-                      <div className="text-micro text-cafe-muted truncate">
-                        {session.sealedAt ? timeAgo(session.sealedAt) : 'sealing'}
-                        {session.contextHealth ? ` · ${Math.round(session.contextHealth.fillRatio * 100)}%` : ''}
-                        {' · '}
-                        {session.messageCount} msgs
-                        {(session.compressionCount ?? 0) > 0 && ` · ${session.compressionCount} compress`}
-                        {session.sealReason ? ` · ${sealReasonLabel(session.sealReason)}` : ''}
+                      <div data-testid="sealed-session-summary" className="min-w-0">
+                        <CriticalText
+                          summary={sealedSessionSummary(session)}
+                          details={sealedSessionDetails(session)}
+                          tone="info"
+                        />
                       </div>
                     </div>
                     {(session.status === 'sealed' || session.status === 'sealing') && (

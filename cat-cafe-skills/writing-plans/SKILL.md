@@ -1,5 +1,6 @@
 ---
 name: writing-plans
+tips_exempt: internal plan-authoring command-provenance guard; no new end-user capability or discovery surface
 description: >
   将 spec/需求拆分为可执行的分步实施计划。
   Use when: 有 spec 或需求，准备动手前需要拆分步骤。
@@ -138,6 +139,16 @@ git commit -m "feat: add specific feature"
 
 先判断可逆性：回滚成本低的不升级 operator，猫猫自决。
 
+## Formatting Command Contract
+
+计划写到格式化步骤时，先从当前仓库的 `package.json`、CI 或现有脚本确认可执行命令及适用范围；不要凭跨仓库习惯猜 formatter。计划中必须写出已确认的完整命令和预期结果，禁止只写“run formatting”或“格式化”。
+
+- 全仓自动修复：`pnpm check:fix`
+- 仅格式化本次文件：`pnpm biome format --write <files>`
+- 终态验证：`pnpm check`
+
+若仓库真相源提供不同命令，以真相源为准，并在计划中标明来源。
+
 ## Remember
 - Exact file paths always
 - Complete code in plan (not "add validation")
@@ -146,4 +157,4 @@ git commit -m "feat: add specific feature"
 
 ## 下一步
 
-计划写完并提交 → **直接加载 `worktree`**（创建隔离开发环境）→ `tdd`（开始实现）。SOP 链条自动推进（§17）。
+计划写完并提交 → `worktree`（隔离开发环境）→ `tdd`（实现）。

@@ -18,7 +18,7 @@ import type { ReplayEvent } from '../types';
 // ---------------------------------------------------------------------------
 
 /** Create a minimal event array with configurable pass-ball flags */
-function makeEvents(specs: Array<{ t: number; isPassBall?: boolean }>): ReplayEvent[] {
+function makeEvents(specs: Array<{ t: number; isPassBall?: boolean; triggersBulletTime?: boolean }>): ReplayEvent[] {
   return specs.map((s, i) => ({
     index: i,
     type: 'message' as const,
@@ -27,6 +27,7 @@ function makeEvents(specs: Array<{ t: number; isPassBall?: boolean }>): ReplayEv
     content: `msg-${i}`,
     eventNo: i,
     isPassBall: s.isPassBall,
+    triggersBulletTime: s.triggersBulletTime,
   }));
 }
 
@@ -68,7 +69,19 @@ describe('F252 bullet time — trigger & entry conditions', () => {
     expect(engine.currentIndex).toBeGreaterThanOrEqual(2);
     // Bullet time should be active
     expect(engine.bulletTime).not.toBeNull();
-    expect(engine.bulletTime!.triggerIndex).toBe(2);
+    expect(engine.bulletTime?.triggerIndex).toBe(2);
+  });
+
+  it('preserves pass-ball markers without entering bullet time when pacing cue is disabled', () => {
+    const events = makeEvents([{ t: 0 }, { t: 200, isPassBall: true, triggersBulletTime: false }, { t: 5000 }]);
+    let engine = createReplayEngine(events);
+    engine = play(engine);
+
+    engine = tickBy(engine, 16);
+
+    expect(engine.currentIndex).toBe(1);
+    expect(events[1].isPassBall).toBe(true);
+    expect(engine.bulletTime).toBeNull();
   });
 
   // ── INV-4: no effect when adaptive off ──
@@ -115,7 +128,7 @@ describe('F252 bullet time — trigger & entry conditions', () => {
       if (engine.bulletTime) break;
     }
     expect(engine.bulletTime).not.toBeNull();
-    expect(engine.bulletTime!.triggerIndex).toBe(1);
+    expect(engine.bulletTime?.triggerIndex).toBe(1);
 
     // Toggle OFF → tick forward past the pass-ball → toggle ON
     engine = toggleAdaptivePacing(engine);

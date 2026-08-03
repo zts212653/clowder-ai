@@ -43,6 +43,7 @@ export function DirectoryBrowser({
   const [newDirName, setNewDirName] = useState('');
   const [mkdirError, setMkdirError] = useState<string | null>(null);
   const newDirInputRef = useRef<HTMLInputElement>(null);
+  const navigationVersionRef = useRef(0);
   // Server-owned capability (R4 P2#3): isWindows comes from the browse endpoint
   // (process.platform === win32 on the server), not path-shape heuristic.
   const isWindowsServer = browseResult?.isWindows ?? false;
@@ -51,11 +52,13 @@ export function DirectoryBrowser({
 
   const fetchDirectory = useCallback(
     async (path?: string, fallbackOnForbidden = false) => {
+      const navigationVersion = ++navigationVersionRef.current;
       setIsLoading(true);
       setError(null);
       showDirectoryView();
       try {
         const res = await apiFetch(buildBrowseUrl(path));
+        if (navigationVersion !== navigationVersionRef.current) return;
         if (!res.ok) {
           // 403 fallback (initial load only) — otherwise surface the error.
           if (shouldFallbackToHome(fallbackOnForbidden, path, res.status)) {
@@ -65,18 +68,21 @@ export function DirectoryBrowser({
             return;
           }
           const errData = await res.json();
+          if (navigationVersion !== navigationVersionRef.current) return;
           setError(errData.error || 'Failed to browse directory');
           // Keep previous browseResult — don't destroy current listing on error.
           return;
         }
         const data: BrowseResult = await res.json();
+        if (navigationVersion !== navigationVersionRef.current) return;
         setBrowseResult(data);
         setPathInput(data.current);
         onCurrentPathChange?.(data.current);
       } catch {
+        if (navigationVersion !== navigationVersionRef.current) return;
         setError('Unable to connect to server');
       } finally {
-        setIsLoading(false);
+        if (navigationVersion === navigationVersionRef.current) setIsLoading(false);
       }
     },
     [onCurrentPathChange, showDirectoryView],
@@ -98,6 +104,7 @@ export function DirectoryBrowser({
   // handleCreateDir would post parentPath from the stale previous directory
   // (R2 review: wrong-location filesystem mutation).
   const enterDrivesView = useCallback(() => {
+    navigationVersionRef.current += 1;
     setError(null);
     setInfo(null);
     setCreatingDir(false);
@@ -117,6 +124,7 @@ export function DirectoryBrowser({
 
   const handleCreateDir = useCallback(async () => {
     if (!newDirName.trim() || !browseResult) return;
+    const navigationVersion = navigationVersionRef.current;
     setMkdirError(null);
     try {
       const res = await apiFetch('/api/projects/mkdir', {
@@ -124,16 +132,20 @@ export function DirectoryBrowser({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ parentPath: browseResult.current, name: newDirName.trim() }),
       });
+      if (navigationVersion !== navigationVersionRef.current) return;
       if (!res.ok) {
         const data = await res.json();
+        if (navigationVersion !== navigationVersionRef.current) return;
         setMkdirError(data.error || '创建失败');
         return;
       }
       const data = await res.json();
+      if (navigationVersion !== navigationVersionRef.current) return;
       setCreatingDir(false);
       setNewDirName('');
       fetchDirectory(data.createdPath);
     } catch {
+      if (navigationVersion !== navigationVersionRef.current) return;
       setMkdirError('无法连接到服务器');
     }
   }, [newDirName, browseResult, fetchDirectory]);

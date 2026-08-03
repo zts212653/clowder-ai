@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LLM post-processing server for Cat Cafe voice input.
+LLM post-processing server for Clowder AI voice input.
 Backends: mlx-lm/mlx-vlm (macOS GPU) -> transformers+torch (CPU/CUDA).
 Pipeline: Whisper ASR -> **LLM post-edit** -> term dictionary -> filler removal
 """
@@ -25,7 +25,7 @@ MAX_INPUT_CHARS = 2000
 
 log = logging.getLogger("llm-postprocess")
 
-app = FastAPI(title="Cat Cafe LLM Post-Process Server")
+app = FastAPI(title="Clowder AI LLM Post-Process Server")
 
 # NOTE: deliberately no __CATCAFE_SIDECAR_READY__ marker emit here.
 # Unlike embed/whisper/tts which finish model load synchronously in main()
@@ -259,7 +259,7 @@ async def _startup_load():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Cat Cafe LLM Post-Process Server")
+    parser = argparse.ArgumentParser(description="Clowder AI LLM Post-Process Server")
     parser.add_argument(
         "--model",
         required=True,
@@ -276,7 +276,7 @@ def main():
     signal.signal(signal.SIGTERM, handle_sigterm)
 
     model_ref["path"] = args.model
-    log.info("=== Cat Cafe LLM Post-Process Server ===")
+    log.info("=== Clowder AI LLM Post-Process Server ===")
     log.info("Model: %s | Port: %d", args.model, args.port)
 
     uvicorn.run(app, host="127.0.0.1", port=args.port)

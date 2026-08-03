@@ -1,7 +1,7 @@
 ---
 feature_ids: [F086]
-related_features: [F079, F055, F037, F038, F040, F042, F043, F046, F070]
-related_decisions: [012]
+related_features: [F079, F055, F037, F038, F040, F042, F043, F046, F070, F254, F108, F117, F039]
+related_decisions: [012, 040]
 topics: [collaboration, routing, mcp, multi-mention, orchestration, meta-cognition, knowledge-engineering, reflection]
 doc_kind: done
 created: 2026-03-08
@@ -402,3 +402,21 @@ F086 multi_mention（MCP 工具）:
 1. 全文注入 shared-rules.md — token 浪费，规则噪音
 2. governance-pack 手写摘要 — 破坏 P4 单一真相源
 3. 向量库检索 — 过度工程，规则不适合 embedding
+
+---
+
+## Follow-up: Per-Target Queued Message State (ADR-040)
+
+> Added 2026-07-01 | Source: F254 D1.2 dogfood + 斑斑/Maine Coon consensus
+
+F254 实测发现 queued 消息的 read/handled/target consumed 语义混在一起，导致重复唤醒或多目标吞并。ADR-040 统一定义了四层状态分离模型。
+
+**F086 新增职责**（follow-up phase，未排期）：
+
+- [ ] per-target 队列状态机：`TargetStatus` 类型（pending → running → seen → handled → deferred → superseded → cancelled）
+- [ ] 多目标 entry target preservation：一只猫 ack 不吞掉其他 target 的 pending
+- [ ] `targetStatus[catId]` map 替代单一 consume bit
+- [ ] 前端 per-recipient 状态显示（"read by codex" / "pending for opus"）
+
+**参考**：
+- ADR-040: `040-per-target-queued-message-state-model.md`

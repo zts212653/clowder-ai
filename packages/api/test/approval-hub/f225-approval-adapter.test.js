@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
+import { anchorApproval } from './helpers.js';
 
 describe('F225ApprovalAdapter', () => {
   let InMemorySessionHandoffProposalStore;
@@ -12,7 +13,7 @@ describe('F225ApprovalAdapter', () => {
     ({ F225ApprovalAdapter } = await import('../../dist/domains/approval-hub/adapters/F225ApprovalAdapter.js'));
   });
 
-  const createHandoff = (store, overrides = {}) =>
+  const createStagedHandoff = (store, overrides = {}) =>
     store.create({
       userId: 'user-1',
       sourceCatId: 'opus',
@@ -21,6 +22,21 @@ describe('F225ApprovalAdapter', () => {
       note: { done: 'Finished task A', nextSteps: 'Continue task B' },
       ...overrides,
     });
+
+  const createHandoff = (store, overrides = {}) => {
+    const proposal = createStagedHandoff(store, overrides);
+    anchorApproval(store, {
+      proposalId: proposal.proposalId,
+      sourceFeatureId: 'F225',
+      ownerUserId: proposal.userId,
+      requesterCatId: proposal.sourceCatId,
+      threadId: proposal.sourceThreadId,
+      createdAt: proposal.createdAt,
+    });
+    return proposal;
+  };
+
+  const withoutPublication = ({ publication: _publication, ...proposal }) => proposal;
 
   it('maps pending SessionHandoffProposals to ApprovalItems', () => {
     const store = new InMemorySessionHandoffProposalStore();
@@ -37,6 +53,7 @@ describe('F225ApprovalAdapter', () => {
     assert.ok(items[0].summary.includes('Session handoff'));
     assert.equal(items[0].detail.done, 'Finished task A');
     assert.equal(items[0].detail.nextSteps, 'Continue task B');
+    assert.equal(items[0].navigation.state, 'anchored');
   });
 
   it('computes expiresAt as createdAt + 24 hours', () => {
@@ -72,15 +89,21 @@ describe('F225ApprovalAdapter', () => {
     assert.equal(item.detail.sourceSessionId, 'sess-abc');
   });
 
-  it('maps cardMessageId to sourceMessageId for teleport navigation', () => {
+  it('classifies a pre-I card marker as legacy instead of guessing dual anchors', () => {
     const store = new InMemorySessionHandoffProposalStore();
-    const p = createHandoff(store);
+    const p = createStagedHandoff(store);
     // Simulate recordCheckpoint setting cardMessageId (done by persistAndBroadcastCard)
     store.recordCheckpoint(p.proposalId, { cardMessageId: 'msg-card-123' });
 
-    const adapter = new F225ApprovalAdapter(store);
+    const adapter = new F225ApprovalAdapter({
+      listPendingByUser: (...args) => store.listPendingByUser(...args).map(withoutPublication),
+    });
     const [item] = adapter.listPending('user-1');
-    assert.equal(item.sourceMessageId, 'msg-card-123');
+    assert.deepEqual(item.navigation, {
+      state: 'legacy_unanchored',
+      legacyThreadId: 't-1',
+      legacyMessageId: 'msg-card-123',
+    });
   });
 
   // F246 Phase G: listSettled — approval history for F225 session handoff proposals
@@ -106,7 +129,7 @@ describe('F225ApprovalAdapter', () => {
     it('returns rejected SessionHandoffProposals as SettledApprovalItems', async () => {
       const store = new InMemorySessionHandoffProposalStore();
       const p = createHandoff(store);
-      store.markRejected(p.proposalId);
+      store.markRejected(p.proposalId, { decidedAt: p.createdAt + 1 });
 
       const adapter = new F225ApprovalAdapter(store);
       const items = await adapter.listSettled('user-1');

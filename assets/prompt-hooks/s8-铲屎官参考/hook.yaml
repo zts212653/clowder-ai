@@ -1,5 +1,5 @@
 id: S8
-name: 铲屎官参考
+name: co-creator参考
 stage: session-init
 order: 1500
 version: 1
@@ -21,5 +21,5 @@ safetyTier: readonly
 transparencyTier: visible-by-default
 governanceTier: immutable
 
-# CVO-facing
-userExplanation: "铲屎官的偏好和沟通风格"
+# operator-facing
+userExplanation: "co-creator的偏好和沟通风格"

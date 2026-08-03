@@ -79,7 +79,7 @@ const CATS: CatData[] = [
     id: 'antigravity',
     displayName: '孟加拉猫 Antigravity',
     breedDisplayName: '孟加拉猫',
-    nickname: '阿吉',
+    nickname: '斑斑',
     clientId: 'antigravity',
     defaultModel: 'gemini-bridge',
     commandArgs: ['npx', 'antigravity', '--bridge'],
@@ -121,7 +121,7 @@ describe('CatOverviewTab', () => {
     expect(html.indexOf('+ 添加成员')).toBeLessThan(html.indexOf('布偶猫 · 宪宪'));
     expect(html).toContain('布偶猫 · 宪宪');
     expect(html).toContain('缅因猫 · 砚砚');
-    expect(html).toContain('孟加拉猫 · 阿吉');
+    expect(html).toContain('孟加拉猫 · 斑斑');
     expect(html).toContain('CLI（OAuth）账号');
     expect(html).toContain('CLI（配置） · sponsor1');
     expect(html).toContain('已启用');

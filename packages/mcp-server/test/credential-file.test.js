@@ -7,7 +7,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
@@ -135,5 +135,27 @@ describe('#1092 credential file refresh', () => {
 
     // Restore fetch
     globalThis.fetch = async () => ({ ok: true, json: async () => ({}) });
+  });
+
+  test('set_read_mode derives its session file from credential-file invocation identity', async () => {
+    const invocationId = `pooled-read-mode-${Date.now()}-${Math.random()}`;
+    const credFile = join(credDir, 'read-mode.json');
+    const modeFile = `/tmp/cat-cafe-anchor-mode-${invocationId}`;
+    writeFileSync(credFile, JSON.stringify({ invocationId, callbackToken: 'fresh-token' }));
+    process.env.CAT_CAFE_CREDENTIAL_FILE = credFile;
+    delete process.env.CAT_CAFE_INVOCATION_ID;
+    delete process.env.CAT_CAFE_CALLBACK_TOKEN;
+    rmSync(modeFile, { force: true });
+
+    try {
+      const { handleSetReadMode } = await import('../dist/tools/callback-tools.js');
+      const result = await handleSetReadMode({ mode: 'anchor' });
+
+      assert.equal(result.isError, undefined, 'pooled managed sessions must retain read-mode control');
+      assert.equal(existsSync(modeFile), true);
+      assert.equal(readFileSync(modeFile, 'utf8'), 'anchor');
+    } finally {
+      rmSync(modeFile, { force: true });
+    }
   });
 });

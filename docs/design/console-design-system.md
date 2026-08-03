@@ -9,7 +9,7 @@ source: clowder-ai#645 docs/design/console-design-system.md
 
 # Console Design System
 
-> Cat Cafe Console 的视觉语言规范。所有前端组件必须遵循本文档。
+> Clowder AI Console 的视觉语言规范。所有前端组件必须遵循本文档。
 > 参考系：macOS System Settings + Linear + Vercel Dashboard
 
 ## 1. 设计原则

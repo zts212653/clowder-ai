@@ -2,10 +2,10 @@
 
 import type { CapabilityTipContext } from '@cat-cafe/shared';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
-import type { CatStatusType } from '@/stores/chatStore';
+import type { AppServerLifecycleSnapshot, CatStatusType } from '@/stores/chat-types';
 import { CapabilityTipStrip } from './CapabilityTipStrip';
 import { CatAvatar } from './CatAvatar';
-import { DEFAULT_STREAMING_TIP_CONTEXTS, isStreamingTipSuppressedByStatus } from './capability-tip-placement';
+import { DEFAULT_STREAMING_TIP_CONTEXTS, isStreamingTipSuppressed } from './capability-tip-placement';
 import { MessageBubble } from './MessageBubble';
 
 interface PendingMemberBubbleProps {
@@ -13,6 +13,8 @@ interface PendingMemberBubbleProps {
   invocationId: string;
   /** Liveness status for stall suppression — hide tips when cat is stalled (AC-B2 red line). */
   catStatus?: CatStatusType;
+  /** App-server lifecycle can become stalled while catStatus remains streaming. */
+  appServerLifecycle?: AppServerLifecycleSnapshot;
   /** Tip contexts from intentMode — review mode gets review tips instead of generic thinking tips. */
   tipContexts?: readonly CapabilityTipContext[];
   /** Only one pending bubble per thread should show tips (dedup — cloud review P2). */
@@ -55,14 +57,14 @@ export function PendingMemberBubble({
   catId,
   invocationId,
   catStatus,
+  appServerLifecycle,
   tipContexts,
   showCapabilityTip = false,
 }: PendingMemberBubbleProps) {
   const { getCatById } = useCatData();
   const catData = getCatById(catId);
   const catName = catData ? formatCatName(catData) : catId;
-
-  const tipEnabled = showCapabilityTip && !isStreamingTipSuppressedByStatus(catStatus);
+  const tipEnabled = showCapabilityTip && !isStreamingTipSuppressed(catStatus, appServerLifecycle);
 
   return (
     <MessageBubble

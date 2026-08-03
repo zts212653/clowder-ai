@@ -1,11 +1,15 @@
+import { getMessageTimelineOrderTime } from './message-timeline';
+
 type TurnBoundaryPoint = {
   type?: string;
   timestamp?: number;
   deliveredAt?: number;
+  timelineOrderAt?: number;
 };
 
 function getTurnBoundaryTimestamp(point: TurnBoundaryPoint): number | undefined {
-  const timestamp = point.deliveredAt ?? point.timestamp;
+  if (typeof point.timestamp !== 'number') return undefined;
+  const timestamp = getMessageTimelineOrderTime({ ...point, timestamp: point.timestamp });
   return typeof timestamp === 'number' && Number.isFinite(timestamp) ? timestamp : undefined;
 }
 

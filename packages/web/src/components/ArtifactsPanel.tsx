@@ -8,6 +8,7 @@ import { useCatData } from '@/hooks/useCatData';
 import { formatCatDisplayName } from '@/lib/cat-display-name';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
+import { isRowPrimaryActionTarget } from '@/utils/row-primary-action';
 import { scrollToMessage } from '@/utils/scrollToMessage';
 import { kickTeleportResolve, planTeleport } from '@/utils/teleport';
 import { useGlobalArtifacts } from '../hooks/useGlobalArtifacts';
@@ -17,6 +18,7 @@ import { extractCatChips, filterByCat } from './artifacts/artifact-filters';
 import type { ArtifactGroup, GroupingMode } from './artifacts/artifact-grouping';
 import { groupArtifacts } from './artifacts/artifact-grouping';
 import { artifactActionLabel, artifactRowMeta, resolveAssetUrl } from './artifacts/artifact-view';
+import { CompactLabel } from './content-overflow/CompactLabel';
 
 const resolveUrl = (url?: string): string | undefined => resolveAssetUrl(url, API_URL);
 
@@ -171,16 +173,16 @@ function ArtifactRow({
         <Icon />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium text-cafe-secondary">{a.name}</div>
+        <CompactLabel label="产物名称" value={a.name} className="text-sm font-medium text-cafe-secondary" />
         <div className="mt-0.5 flex items-center gap-1.5 text-micro text-cafe-muted">
-          <span className="truncate">
-            {meta.catLabel} · {meta.relativeTime}
-          </span>
+          <CompactLabel label="产物来源" value={`${meta.catLabel} · ${meta.relativeTime}`} className="min-w-0 flex-1" />
           {/* Phase B: thread badge in global scope (skip when already grouped by thread) */}
           {global && grouping !== 'thread' && (
-            <span className="shrink-0 truncate rounded bg-cafe-surface-elevated px-1.5 py-0.5 text-micro text-cafe-muted">
-              {a.threadTitle}
-            </span>
+            <CompactLabel
+              label="所属对话"
+              value={a.threadTitle}
+              className="max-w-[45%] rounded bg-cafe-surface-elevated px-1.5 py-0.5 text-micro text-cafe-muted"
+            />
           )}
           {a.sourceMessageId && (
             <button
@@ -522,15 +524,30 @@ export function ArtifactsPanel({
                 return (
                   <div key={group.id}>
                     {showHeader && (
-                      <button
-                        type="button"
-                        onClick={() => toggleCollapse(group.id)}
-                        className="flex w-full items-center gap-1.5 border-b border-cafe-subtle bg-cafe-surface-sunken px-3 py-2 text-left"
+                      // biome-ignore lint/a11y: the nested native button owns keyboard/screen-reader semantics; the wrapper restores the surrounding pointer hit area
+                      <div
+                        data-artifact-group-header
+                        onClick={(event) => {
+                          if (isRowPrimaryActionTarget(event.target, event.currentTarget)) toggleCollapse(group.id);
+                        }}
+                        className="flex w-full cursor-pointer items-center gap-1.5 border-b border-cafe-subtle bg-cafe-surface-sunken px-3 py-2 text-left"
                       >
-                        <IconChevron open={isOpen} />
-                        <span className="flex-1 truncate text-xs font-semibold text-cafe-secondary">{group.label}</span>
+                        <button
+                          type="button"
+                          aria-expanded={isOpen}
+                          aria-label={`${isOpen ? '收起' : '展开'}分组：${group.label}`}
+                          onClick={() => toggleCollapse(group.id)}
+                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cafe-accent"
+                        >
+                          <IconChevron open={isOpen} />
+                        </button>
+                        <CompactLabel
+                          label="分组名称"
+                          value={group.label}
+                          className="min-w-0 flex-1 text-xs font-semibold text-cafe-secondary"
+                        />
                         <span className="text-micro text-cafe-muted">{group.count}</span>
-                      </button>
+                      </div>
                     )}
                     {isOpen &&
                       group.items.map((a, i) => (

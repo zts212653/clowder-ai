@@ -11,14 +11,17 @@
  * re-propose for now.
  */
 
-import type { FastifyInstance } from 'fastify';
+import type { ProfileUpdateProposal } from '@cat-cafe/shared';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { requireAnchoredPublication } from '../domains/approval-hub/requireAnchoredPublication.js';
 import type { SessionMutex } from '../domains/cats/services/agents/invocation/SessionMutex.js';
 import { clearL0Cache as defaultClearL0Cache } from '../domains/cats/services/agents/providers/l0-compiler.js';
 import {
   type ApproveProfileUpdateResult,
   approveProfileUpdate as defaultApproveProfileUpdate,
 } from '../domains/cats/services/profile/approveProfileUpdate.js';
+import type { FileProfileRepository } from '../domains/cats/services/profile/ProfileRepository.js';
 import type { IProfileUpdateProposalStore } from '../domains/cats/services/stores/ports/ProfileUpdateProposalStore.js';
 import { profileUpdateApproved, profileUpdateRejected } from '../infrastructure/telemetry/instruments.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
@@ -30,17 +33,52 @@ const rejectBodySchema = z.object({ rejectionReason: z.string().trim().min(1).ma
 export interface ProfileUpdateDecisionDeps {
   store: IProfileUpdateProposalStore;
   lock: SessionMutex;
-  profileDir: string;
+  repository: FileProfileRepository;
   socketManager: Pick<SocketManager, 'emitToUser'>;
-  clearL0Cache?: (catId?: string) => void;
+  clearL0Cache?: (catId?: string, userId?: string) => void;
   approveProfileUpdate?: typeof defaultApproveProfileUpdate;
+}
+
+interface OwnedProfileUpdate {
+  proposal: ProfileUpdateProposal;
+  userId: string;
+}
+
+function resolveProfileUpdateId(request: FastifyRequest, reply: FastifyReply): string | null {
+  const params = paramsSchema.safeParse(request.params);
+  if (params.success) return params.data.proposalId;
+  reply.status(400).send({ error: 'Invalid proposalId' });
+  return null;
+}
+
+async function resolveOwnedProfileUpdate(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  store: IProfileUpdateProposalStore,
+  proposalId: string,
+): Promise<OwnedProfileUpdate | null> {
+  const userId = resolveStrictUserId(request);
+  if (!userId) {
+    reply.status(401).send({ error: 'Identity required (X-Cat-Cafe-User header or userId query)' });
+    return null;
+  }
+  const proposal = await store.get(proposalId);
+  if (!proposal) {
+    reply.status(404).send({ error: 'Proposal not found' });
+    return null;
+  }
+  if (proposal.createdBy !== userId) {
+    reply.status(403).send({ error: 'Proposal does not belong to the current user' });
+    return null;
+  }
+  return { proposal, userId };
 }
 
 export function registerProfileUpdateDecisionRoutes(app: FastifyInstance, deps: ProfileUpdateDecisionDeps): void {
   const {
     store,
     lock,
-    profileDir,
+    repository,
     socketManager,
     clearL0Cache = defaultClearL0Cache,
     approveProfileUpdate = defaultApproveProfileUpdate,
@@ -48,57 +86,28 @@ export function registerProfileUpdateDecisionRoutes(app: FastifyInstance, deps: 
 
   const clearCommittedPrimerCache = (result: ApproveProfileUpdateResult): void => {
     if (result.proposal?.writtenPath) {
-      clearL0Cache(result.proposal.sourceCatId);
+      clearL0Cache(result.proposal.sourceCatId, result.proposal.createdBy);
     }
   };
 
   app.get('/api/profile-updates/:proposalId', async (request, reply) => {
-    const params = paramsSchema.safeParse(request.params);
-    if (!params.success) {
-      reply.status(400);
-      return { error: 'Invalid proposalId' };
-    }
-    const userId = resolveStrictUserId(request);
-    if (!userId) {
-      reply.status(401);
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
-    }
-
-    const proposal = await store.get(params.data.proposalId);
-    if (!proposal) {
-      reply.status(404);
-      return { error: 'Proposal not found' };
-    }
-    if (proposal.createdBy !== userId) {
-      reply.status(403);
-      return { error: 'Proposal does not belong to the current user' };
-    }
+    const proposalId = resolveProfileUpdateId(request, reply);
+    if (!proposalId) return;
+    const owned = await resolveOwnedProfileUpdate(request, reply, store, proposalId);
+    if (!owned) return;
+    const { proposal } = owned;
     return { proposalId: proposal.proposalId, status: proposal.status };
   });
 
   app.post('/api/profile-updates/:proposalId/approve', async (request, reply) => {
-    const params = paramsSchema.safeParse(request.params);
-    if (!params.success) {
-      reply.status(400);
-      return { error: 'Invalid proposalId' };
-    }
-    const userId = resolveStrictUserId(request);
-    if (!userId) {
-      reply.status(401);
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
-    }
+    const proposalId = resolveProfileUpdateId(request, reply);
+    if (!proposalId) return;
+    const owned = await resolveOwnedProfileUpdate(request, reply, store, proposalId);
+    if (!owned) return;
+    const { proposal, userId } = owned;
+    await requireAnchoredPublication(store, proposal.proposalId);
 
-    const proposal = await store.get(params.data.proposalId);
-    if (!proposal) {
-      reply.status(404);
-      return { error: 'Proposal not found' };
-    }
-    if (proposal.createdBy !== userId) {
-      reply.status(403);
-      return { error: 'Proposal does not belong to the current user' };
-    }
-
-    const result = await approveProfileUpdate(proposal.proposalId, userId, { store, lock, profileDir });
+    const result = await approveProfileUpdate(proposal.proposalId, userId, { store, lock, repository });
     clearCommittedPrimerCache(result);
     if (result.ok) {
       // F231 AC-C3 eval counter (KD-10)
@@ -131,31 +140,16 @@ export function registerProfileUpdateDecisionRoutes(app: FastifyInstance, deps: 
   });
 
   app.post('/api/profile-updates/:proposalId/reject', async (request, reply) => {
-    const params = paramsSchema.safeParse(request.params);
-    if (!params.success) {
-      reply.status(400);
-      return { error: 'Invalid proposalId' };
-    }
+    const proposalId = resolveProfileUpdateId(request, reply);
+    if (!proposalId) return;
     const body = rejectBodySchema.safeParse(request.body ?? {});
     if (!body.success) {
       reply.status(400);
       return { error: 'Invalid request body', details: body.error.issues };
     }
-    const userId = resolveStrictUserId(request);
-    if (!userId) {
-      reply.status(401);
-      return { error: 'Identity required (X-Cat-Cafe-User header or userId query)' };
-    }
-
-    const proposal = await store.get(params.data.proposalId);
-    if (!proposal) {
-      reply.status(404);
-      return { error: 'Proposal not found' };
-    }
-    if (proposal.createdBy !== userId) {
-      reply.status(403);
-      return { error: 'Proposal does not belong to the current user' };
-    }
+    const owned = await resolveOwnedProfileUpdate(request, reply, store, proposalId);
+    if (!owned) return;
+    const { proposal, userId } = owned;
     if (proposal.status === 'approved') {
       reply.status(409);
       return { error: 'Proposal already approved', status: 'approved' };
@@ -163,6 +157,7 @@ export function registerProfileUpdateDecisionRoutes(app: FastifyInstance, deps: 
     if (proposal.status === 'rejected') {
       return { proposalId: proposal.proposalId, status: proposal.status, deduped: true };
     }
+    await requireAnchoredPublication(store, proposal.proposalId);
 
     // markRejected is CAS pending→rejected; an `approving` (crash-recovery in-flight) proposal
     // returns null → 409 (cannot reject a commit-in-progress).

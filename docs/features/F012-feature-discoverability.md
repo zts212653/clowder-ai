@@ -14,7 +14,7 @@ created: 2026-02-26
 ## Why
 
 ## What
-- **F12**: 43f88ca + 7b03236 — Cat Café Hub modal（功能注册表 + 环境摘要 + /hub 命令）。已合入 main。
+- **F12**: 43f88ca + 7b03236 — Clowder AI Hub modal（功能注册表 + 环境摘要 + /hub 命令）。已合入 main。
 
 ## Acceptance Criteria
 - [x] AC-A1: 本文档已补齐模板核心结构（Status/Why/What/Dependencies/Risk/Timeline）。

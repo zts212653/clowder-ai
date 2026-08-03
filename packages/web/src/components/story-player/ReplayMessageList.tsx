@@ -43,36 +43,41 @@ interface ReplayMessageListProps {
 // Helpers — bridge ReplayChatMessage fields to Hub component props
 // ---------------------------------------------------------------------------
 
-/** Map tool events to CliEvent[] for CliOutputBlock */
-function toCliEvents(toolEvents: NonNullable<ReplayChatMessage['toolEvents']>): CliEvent[] {
+/** Map replay tool/stdout fields to CliEvent[] for CliOutputBlock */
+function toCliEvents(toolEvents: ReplayChatMessage['toolEvents'], cliStdout?: string): CliEvent[] {
   const result: CliEvent[] = [];
-  for (const te of toolEvents) {
-    // Tool use event
+  for (const te of toolEvents ?? []) {
+    const baseTimestamp = Date.now(); // display-only, not used for replay ordering
     result.push({
       id: `${te.id}_use`,
       kind: 'tool_use',
-      timestamp: Date.now(), // display-only, not used for ordering
+      timestamp: baseTimestamp,
       label: te.name,
       detail: te.input,
     });
-    // Tool result event (if present)
-    // CliOutputBlock reads `detail` from tool_result events (not `content`)
-    // and pairs by kind='tool_result' positional index — 'error' kind breaks pairing
     if (te.output != null) {
       result.push({
         id: `${te.id}_result`,
         kind: 'tool_result',
-        timestamp: Date.now(),
+        timestamp: baseTimestamp + 1,
         detail: te.output,
       });
     }
+  }
+  if (cliStdout?.trim()) {
+    result.push({
+      id: 'stdout-text',
+      kind: 'text',
+      timestamp: result.length > 0 ? result[result.length - 1].timestamp + 1 : Date.now(),
+      content: cliStdout,
+    });
   }
   return result;
 }
 
 /** Derive CliStatus from tool events */
-function toCliStatus(toolEvents: NonNullable<ReplayChatMessage['toolEvents']>): CliStatus {
-  if (toolEvents.some((te) => te.status === 'error')) return 'failed';
+function toCliStatus(toolEvents: ReplayChatMessage['toolEvents']): CliStatus {
+  if (toolEvents?.some((te) => te.status === 'error')) return 'failed';
   return 'done';
 }
 
@@ -103,7 +108,10 @@ function SystemAvatar() {
 /** User avatar — simple person icon */
 function UserAvatar() {
   return (
-    <div className="w-8 h-8 rounded-full bg-[var(--co-creator-bubble-bg,#2a2d35)] flex items-center justify-center flex-shrink-0">
+    <div
+      className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+      style={{ backgroundColor: 'var(--color-cocreator-primary)', color: 'var(--cafe-surface)' }}
+    >
       <svg
         width="16"
         height="16"
@@ -113,7 +121,6 @@ function UserAvatar() {
         strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
-        className="text-[var(--co-creator-text,#e0e0e0)]"
         aria-hidden="true"
       >
         <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
@@ -145,6 +152,21 @@ function catPersonaStyle(primary: string | undefined): CSSProperties {
   return { '--msg-hue': msgHue, '--msg-chroma': msgChroma } as CSSProperties;
 }
 
+const ASSISTANT_BUBBLE_STYLE = {
+  backgroundColor: 'var(--cat-msg-surface)',
+  color: 'var(--cat-msg-text)',
+} as const satisfies CSSProperties;
+
+const USER_BUBBLE_STYLE = {
+  backgroundColor: 'var(--color-cocreator-surface)',
+  color: 'var(--cat-msg-text)',
+} as const satisfies CSSProperties;
+
+const USER_PERSONA_STYLE = {
+  '--msg-hue': 40,
+  '--msg-chroma': 0.13,
+} as CSSProperties;
+
 function messageScrollSignature(msg: ReplayChatMessage): string {
   let toolPayloadLength = 0;
   if (msg.toolEvents) {
@@ -152,9 +174,14 @@ function messageScrollSignature(msg: ReplayChatMessage): string {
       toolPayloadLength += (tool.input?.length ?? 0) + (tool.output?.length ?? 0);
     }
   }
-  return [msg.id, msg.content.length, msg.thinking?.length ?? 0, msg.toolEvents?.length ?? 0, toolPayloadLength].join(
-    ':',
-  );
+  return [
+    msg.id,
+    msg.content.length,
+    msg.thinking?.length ?? 0,
+    msg.cliStdout?.length ?? 0,
+    msg.toolEvents?.length ?? 0,
+    toolPayloadLength,
+  ].join(':');
 }
 
 function buildScrollSignature(messages: ReplayChatMessage[]): string {
@@ -195,9 +222,11 @@ const ReplayMessage = memo(function ReplayMessage({
         messageId={msg.id}
         avatar={<UserAvatar />}
         align="right"
-        bubbleClassName="bg-[var(--co-creator-bubble-bg,#2a2d35)]"
+        wrapperClassName="cat-persona-derived"
+        wrapperStyle={USER_PERSONA_STYLE}
+        bubbleStyle={USER_BUBBLE_STYLE}
       >
-        <CollapsibleMarkdown content={msg.content} className="text-[var(--co-creator-text,#e0e0e0)]" />
+        <CollapsibleMarkdown content={msg.content} />
       </MessageBubble>
     );
   }
@@ -210,12 +239,12 @@ const ReplayMessage = memo(function ReplayMessage({
   const catData = msg.catId ? getCatById(msg.catId) : undefined;
   const personaStyle = catPersonaStyle(catData?.color?.primary);
 
-  // cat-persona-derived + personaStyle provides --cat-msg-{bubble,surface,inset,...} CSS vars
+  // cat-persona-derived + personaStyle provides --cat-msg-{surface,inset,...} CSS vars
   // for ThinkingContent/CliOutputBlock, and per-cat bubble color for the message wrapper.
   const personaWrapper = 'cat-persona-derived';
 
   // Thinking-only message — hidden in cinematic mode (same as ReplayEventBubble)
-  if (msg.thinking && !msg.content && !msg.toolEvents?.length) {
+  if (msg.thinking && !msg.content && !msg.cliStdout && !msg.toolEvents?.length) {
     if (!showThinking) return null;
     return (
       <MessageBubble
@@ -223,7 +252,7 @@ const ReplayMessage = memo(function ReplayMessage({
         avatar={avatar}
         wrapperClassName={personaWrapper}
         wrapperStyle={personaStyle}
-        bubbleClassName="bg-[var(--cat-msg-bg,#1e1e2e)]"
+        bubbleStyle={ASSISTANT_BUBBLE_STYLE}
       >
         <ThinkingContent content={msg.thinking} defaultExpanded={false} />
       </MessageBubble>
@@ -237,13 +266,13 @@ const ReplayMessage = memo(function ReplayMessage({
       avatar={avatar}
       wrapperClassName={personaWrapper}
       wrapperStyle={personaStyle}
-      bubbleClassName="bg-[var(--cat-msg-bg,#1e1e2e)]"
+      bubbleStyle={ASSISTANT_BUBBLE_STYLE}
     >
       {showThinking && msg.thinking && <ThinkingContent content={msg.thinking} defaultExpanded={false} />}
-      {msg.content && <CollapsibleMarkdown content={msg.content} className="text-[var(--cat-msg-text,#e0e0e0)]" />}
-      {msg.toolEvents?.length ? (
+      {msg.content && <CollapsibleMarkdown content={msg.content} />}
+      {msg.toolEvents?.length || msg.cliStdout ? (
         <CliOutputBlock
-          events={toCliEvents(msg.toolEvents)}
+          events={toCliEvents(msg.toolEvents, msg.cliStdout)}
           status={toCliStatus(msg.toolEvents)}
           defaultExpanded={false}
         />
@@ -283,7 +312,7 @@ export function ReplayMessageList({
   }
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1" data-auto-scroll={autoScroll ? 'true' : 'false'}>
       {messages.map((msg) => (
         <ReplayMessage key={msg.id} msg={msg} displayMode={displayMode} />
       ))}

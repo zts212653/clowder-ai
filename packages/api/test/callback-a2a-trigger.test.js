@@ -9,6 +9,82 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 describe('triggerA2AInvocation (fallback path)', () => {
+  test('releases a terminal dynamic A2A child with the callback route controller', async () => {
+    const { triggerA2AInvocation } = await import('../dist/routes/callback-a2a-trigger.js');
+    const slotCompletions = [];
+    let routeController;
+    const controller = new AbortController();
+    const mockInvocationTracker = {
+      has() {
+        return false;
+      },
+      start() {
+        return controller;
+      },
+      startAll() {
+        return controller;
+      },
+      tryStartThreadAll() {
+        return controller;
+      },
+      trackExternalSlot() {
+        return true;
+      },
+      completeSlot(threadId, catId, completedController) {
+        slotCompletions.push({ threadId, catId, controller: completedController });
+      },
+      complete() {},
+      completeAll() {},
+    };
+    const mockRouter = {
+      async *routeExecution(_userId, _content, threadId, _messageId, _targetCats, _intent, options) {
+        routeController = options.invocationController;
+        assert.equal(options.trackA2ASlot(threadId, 'opus', 'user-1', routeController), true);
+        yield { type: 'done', catId: 'opus', isFinal: true, timestamp: Date.now() };
+      },
+    };
+
+    await triggerA2AInvocation(
+      {
+        router: mockRouter,
+        invocationRecordStore: {
+          create() {
+            return { outcome: 'created', invocationId: 'inv-dynamic-child' };
+          },
+          update(id, data) {
+            return { id, ...data };
+          },
+        },
+        socketManager: {
+          broadcastAgentMessage() {},
+          broadcastToRoom() {},
+        },
+        invocationTracker: mockInvocationTracker,
+        log: { error() {}, warn() {}, info() {} },
+      },
+      {
+        targetCats: ['codex'],
+        content: '@codex route to opus',
+        userId: 'user-1',
+        threadId: 'thread-callback-child',
+        triggerMessage: {
+          id: 'msg-callback-child',
+          threadId: 'thread-callback-child',
+          userId: 'user-1',
+          catId: 'codex',
+          content: 'test',
+          mentions: [],
+          timestamp: Date.now(),
+        },
+      },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.deepEqual(slotCompletions, [
+      { threadId: 'thread-callback-child', catId: 'opus', controller: routeController },
+    ]);
+  });
+
   test('marks InvocationRecord as canceled when thread is deleting (P2-1)', async () => {
     const { triggerA2AInvocation } = await import('../dist/routes/callback-a2a-trigger.js');
 
@@ -406,6 +482,7 @@ describe('triggerA2AInvocation (fallback path)', () => {
     const { triggerA2AInvocation } = await import('../dist/routes/callback-a2a-trigger.js');
 
     const completions = [];
+    const invocationUpdates = [];
     const mockQueueProcessor = {
       async onInvocationComplete(threadId, catId, status) {
         completions.push({ threadId, catId, status });
@@ -416,7 +493,9 @@ describe('triggerA2AInvocation (fallback path)', () => {
       create() {
         return { outcome: 'created', invocationId: 'inv-q1' };
       },
-      update() {},
+      update(_id, input) {
+        invocationUpdates.push(input);
+      },
     };
 
     const mockInvocationTracker = {
@@ -480,6 +559,8 @@ describe('triggerA2AInvocation (fallback path)', () => {
     assert.equal(completions.length, 1, 'onInvocationComplete must be called once');
     assert.equal(completions[0].threadId, 't-queue-ok');
     assert.equal(completions[0].status, 'succeeded');
+    const succeededUpdate = invocationUpdates.find((input) => input.status === 'succeeded');
+    assert.deepEqual(succeededUpdate.successfulCatIds, ['codex']);
   });
 
   test('calls queueProcessor.onInvocationComplete with failed on error', async () => {
@@ -718,6 +799,7 @@ describe('triggerA2AInvocation (fallback path)', () => {
       false,
       'A2A direct execution must suppress frustration detection',
     );
+    assert.equal(capturedOpts?.humanDispositionInvocationOrigin, 'a2a');
   });
 });
 
@@ -1078,9 +1160,11 @@ describe('enqueueA2ATargets (F27 primary path)', () => {
       completeAll() {},
     };
 
+    let routeOptions;
     const mockRouter = {
-      async *routeExecution() {
+      async *routeExecution(_userId, _content, _threadId, _messageId, _targetCats, _intent, opts) {
         routeCalled++;
+        routeOptions = opts;
         yield { type: 'done', catId: 'codex', isFinal: true, timestamp: Date.now() };
       },
     };
@@ -1124,6 +1208,17 @@ describe('enqueueA2ATargets (F27 primary path)', () => {
 
       assert.equal(result.fallback, true, 'not_found must trigger fallback path');
       assert.equal(routeCalled, 1, 'standalone invocation must be triggered on not_found');
+      assert.deepEqual(routeOptions.turnCustodyWakeForCat('codex'), {
+        kind: 'structured',
+        protocol: 'dispatch',
+        subjectKey: `ball:thread:${threadId}`,
+        holderCatId: 'codex',
+        handoff: {
+          sourceEventId: 'route:msg-nf:codex',
+          messageId: 'msg-nf',
+          fromCatId: 'opus',
+        },
+      });
     } finally {
       unregisterWorklist(threadId, entry, 'inv-existing');
     }
@@ -1160,9 +1255,11 @@ describe('enqueueA2ATargets (F27 primary path)', () => {
     };
 
     let routeCalled = 0;
+    let routeOptions;
     const mockRouter = {
-      async *routeExecution() {
+      async *routeExecution(_userId, _content, _threadId, _messageId, _targetCats, _intent, opts) {
         routeCalled++;
+        routeOptions = opts;
         yield { type: 'done', catId: 'codex', isFinal: true, timestamp: Date.now() };
       },
     };
@@ -1183,7 +1280,7 @@ describe('enqueueA2ATargets (F27 primary path)', () => {
         log: mockLog,
       },
       {
-        targetCats: ['codex'],
+        targetCats: ['codex', 'codex-terra'],
         content: '@缅因猫\nreview',
         userId: 'user-1',
         threadId: 'no-worklist-thread',
@@ -1204,11 +1301,203 @@ describe('enqueueA2ATargets (F27 primary path)', () => {
 
     assert.equal(result.fallback, true, 'should use fallback when no worklist');
     assert.equal(routeCalled, 1, 'routeExecution called in fallback path');
+    assert.deepEqual(
+      ['codex', 'codex-terra'].map((catId) => routeOptions.turnCustodyWakeForCat(catId)),
+      ['codex', 'codex-terra'].map((catId) => ({
+        kind: 'structured',
+        protocol: 'dispatch',
+        subjectKey: 'ball:thread:no-worklist-thread',
+        holderCatId: catId,
+        handoff: {
+          sourceEventId: `route:msg-fb:${catId}`,
+          messageId: 'msg-fb',
+          fromCatId: 'opus',
+        },
+      })),
+    );
   });
 });
 
 // ── F122B: A2A enqueue to InvocationQueue ──
 describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
+  test('persists exact ball.handed before accepted single-recipient A2A work can auto-execute', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+
+    const order = [];
+    const custodyEvents = [];
+    const mockInvocationQueue = {
+      enqueue(input) {
+        return {
+          outcome: 'enqueued',
+          entry: { id: `q-${input.targetCats[0]}`, ...input, status: 'queued', createdAt: Date.now() },
+        };
+      },
+      countAgentEntriesForThread() {
+        return 0;
+      },
+      findInFlightAgentEntry() {
+        return null;
+      },
+      backfillMessageId() {},
+      list() {
+        return [];
+      },
+    };
+
+    const result = await enqueueA2ATargets(
+      {
+        router: { async *routeExecution() {} },
+        invocationRecordStore: { create() {}, update() {} },
+        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
+        queueProcessor: {
+          onInvocationComplete() {},
+          async tryAutoExecute() {
+            order.push('auto-execute');
+            assert.equal(custodyEvents.length, 1, 'the accepted handoff must be durable before execution starts');
+          },
+        },
+        invocationQueue: mockInvocationQueue,
+        ballCustody: {
+          async record(event) {
+            order.push(`handoff:${event.payload.toCatId}`);
+            custodyEvents.push(event);
+          },
+        },
+        log: { info() {}, warn() {}, error() {} },
+      },
+      {
+        targetCats: ['opus'],
+        content: 'A2A handoff message',
+        userId: 'system',
+        threadId: 'thread-a2a',
+        triggerMessage: {
+          id: 'msg-trigger',
+          mentions: ['opus'],
+          content: 'test',
+          catId: 'gemini',
+        },
+        callerCatId: 'gemini',
+      },
+    );
+
+    assert.deepEqual(result.enqueued, ['opus']);
+    assert.deepEqual(order, ['handoff:opus', 'auto-execute']);
+    assert.deepEqual(
+      custodyEvents.map((event) => ({
+        sourceEventId: event.sourceEventId,
+        subjectKey: event.subjectKey,
+        kind: event.kind,
+        payload: event.payload,
+      })),
+      [
+        {
+          sourceEventId: 'route:msg-trigger:opus',
+          subjectKey: 'ball:thread:thread-a2a',
+          kind: 'ball.handed',
+          payload: { toCatId: 'opus', fromCatId: 'gemini' },
+        },
+      ],
+    );
+  });
+
+  test('keeps an accepted single-recipient queue path off fail-open broadcast when custody shadow write rejects', async () => {
+    const [{ enqueueA2ATargets }, { MessageDeliveryService }] = await Promise.all([
+      import('../dist/routes/callback-a2a-trigger.js'),
+      import('../dist/domains/cats/services/agents/invocation/MessageDeliveryService.js'),
+    ]);
+
+    const queueEntries = [];
+    const autoExecuteCalls = [];
+    const markDeliveredCalls = [];
+    const warnCalls = [];
+    const errorCalls = [];
+    const log = {
+      info() {},
+      warn(context, message) {
+        warnCalls.push({ context, message });
+      },
+      error(context, message) {
+        errorCalls.push({ context, message });
+      },
+    };
+    const deps = {
+      router: { async *routeExecution() {} },
+      invocationRecordStore: { create() {}, update() {} },
+      socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
+      queueProcessor: {
+        onInvocationComplete() {},
+        async tryAutoExecute(threadId) {
+          autoExecuteCalls.push(threadId);
+        },
+      },
+      invocationQueue: {
+        enqueue(input) {
+          const entry = {
+            id: `q-${input.targetCats[0]}`,
+            ...input,
+            status: 'queued',
+            createdAt: Date.now(),
+          };
+          queueEntries.push(entry);
+          return { outcome: 'enqueued', entry };
+        },
+        countAgentEntriesForThread() {
+          return 0;
+        },
+        findInFlightAgentEntry() {
+          return null;
+        },
+        backfillMessageId() {},
+        list() {
+          return queueEntries;
+        },
+      },
+      ballCustody: {
+        async record() {
+          throw new Error('shadow Redis append unavailable');
+        },
+      },
+      log,
+    };
+
+    const result = await MessageDeliveryService.resolveCallbackDeliveryDecision({
+      canEnqueueA2A: true,
+      willEnqueueToQueue: true,
+      messageId: 'stored-message',
+      threadId: 'thread-shadow-failure',
+      log,
+      enqueueA2A: () =>
+        enqueueA2ATargets(deps, {
+          targetCats: ['opus'],
+          content: 'A2A handoff message',
+          userId: 'system',
+          threadId: 'thread-shadow-failure',
+          triggerMessage: {
+            id: 'msg-shadow-failure',
+            mentions: ['opus'],
+            content: 'test',
+            catId: 'gemini',
+          },
+          callerCatId: 'gemini',
+        }),
+      markDelivered: async (messageId) => {
+        markDeliveredCalls.push(messageId);
+        return null;
+      },
+      zeroEnqueuedWarnMessage: 'zero targets',
+      enqueueFailureMessage: 'enqueue failed',
+    });
+
+    assert.equal(result.shouldBroadcastNow, false, 'accepted queue work must not fail open to parent broadcast');
+    assert.equal(result.enqueueFailed, false);
+    assert.deepEqual(result.enqueued, ['opus']);
+    assert.equal(queueEntries.length, 1, 'the child must be accepted exactly once');
+    assert.deepEqual(autoExecuteCalls, ['thread-shadow-failure']);
+    assert.equal(markDeliveredCalls.length, 0, 'queued parent message must remain queued');
+    assert.equal(warnCalls.length, 1, 'the shadow write gap must remain observable');
+    assert.equal(errorCalls.length, 0, 'the accepted queue path must not be reported as enqueue failure');
+  });
+
   test('enqueues to InvocationQueue with agent source when invocationQueue dep is provided', async () => {
     const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
 
@@ -1275,6 +1564,7 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
         targetCats: ['opus'],
         content: 'A2A handoff message',
         userId: 'system',
+        ownerAuthProvenance: 'strict',
         threadId: 't1',
         triggerMessage: { id: 'msg-trigger', mentions: ['opus'], content: 'test' },
         callerCatId: 'codex',
@@ -1286,6 +1576,7 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
     assert.equal(enqueueCalls[0].source, 'agent');
     assert.equal(enqueueCalls[0].autoExecute, true);
     assert.equal(enqueueCalls[0].callerCatId, 'codex');
+    assert.equal(enqueueCalls[0].ownerAuthProvenance, 'strict');
     assert.equal(enqueueCalls[0].a2aTriggerMessageId, 'msg-trigger');
     assert.equal(enqueueCalls[0].targetCats[0], 'opus');
     assert.equal(tryAutoExecuteCalls.length, 1, 'should trigger tryAutoExecute');
@@ -1366,7 +1657,9 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
     const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
 
     const enqueueCalls = [];
+    const findCalls = [];
     const coalesceCalls = [];
+    const custodyEvents = [];
     const mockInvocationQueue = {
       enqueue(input) {
         enqueueCalls.push(input);
@@ -1376,13 +1669,30 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
         return 0;
       },
       // opus already has a queued agent entry → returned as in-flight for coalescing
-      findInFlightAgentEntry(_threadId, catId) {
+      findInFlightAgentEntry(_threadId, catId, callerCatId, parentInvocationId, ownerAuthProvenance) {
+        findCalls.push({ callerCatId, parentInvocationId, ownerAuthProvenance });
         return catId === 'opus'
           ? { id: 'q-existing', userId: 'system', status: 'queued', source: 'agent', targetCats: ['opus'] }
           : null;
       },
-      coalesceContentIntoQueuedAgent(_threadId, _userId, entryId, content, messageId) {
-        coalesceCalls.push({ entryId, content, messageId });
+      coalesceContentIntoQueuedAgent(
+        _threadId,
+        _userId,
+        entryId,
+        content,
+        messageId,
+        callerCatId,
+        parentInvocationId,
+        ownerAuthProvenance,
+      ) {
+        coalesceCalls.push({
+          entryId,
+          content,
+          messageId,
+          callerCatId,
+          parentInvocationId,
+          ownerAuthProvenance,
+        });
         return true;
       },
       backfillMessageId() {},
@@ -1418,26 +1728,39 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
           },
         },
         invocationQueue: mockInvocationQueue,
+        ballCustody: {
+          async record(event) {
+            custodyEvents.push(event);
+          },
+        },
         log: { info() {}, warn() {}, error() {} },
       },
       {
-        targetCats: ['opus', 'codex'],
+        targetCats: ['opus'],
         content: 'A2A handoff',
         userId: 'system',
+        ownerAuthProvenance: 'strict',
         threadId: 't1',
-        triggerMessage: { id: 'msg-dup', mentions: ['opus', 'codex'], content: 'test' },
+        triggerMessage: { id: 'msg-dup', mentions: ['opus'], content: 'test' },
         callerCatId: 'gemini',
+        parentInvocationId: 'parent-strict',
       },
     );
 
-    // opus → coalesced into its queued entry (no new enqueue); codex → enqueued fresh
+    // opus → coalesced into its queued entry (no new enqueue), but the accepted route still
+    // advances the thread ball before that queued entry can execute.
     assert.equal(coalesceCalls.length, 1, 'opus handoff should be coalesced into the queued entry');
     assert.equal(coalesceCalls[0].entryId, 'q-existing');
-    assert.equal(enqueueCalls.length, 1, 'only the non-duplicate cat creates a new entry');
-    assert.equal(enqueueCalls[0].targetCats[0], 'codex');
-    // Split semantics: codex is a NEW route (enqueued → body.routed); opus is a MERGE (coalesced,
-    // NOT a new route). Conflating them would falsely report opus as "已路由" (gate regression).
-    assert.deepEqual(result.enqueued, ['codex'], 'only the fresh dispatch is a new route');
+    assert.deepEqual(findCalls, [
+      { callerCatId: 'gemini', parentInvocationId: 'parent-strict', ownerAuthProvenance: 'strict' },
+    ]);
+    assert.equal(coalesceCalls[0].ownerAuthProvenance, 'strict');
+    assert.equal(enqueueCalls.length, 0, 'coalescing must not create a duplicate entry');
+    assert.deepEqual(
+      custodyEvents.map((event) => event.payload.toCatId),
+      ['opus'],
+    );
+    assert.deepEqual(result.enqueued, [], 'coalescing is not a new route');
     assert.deepEqual(result.coalesced, ['opus'], 'the merged cat is reported as coalesced, not routed');
   });
 
@@ -1574,5 +1897,630 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
     assert.equal(backfillCalls.length, 1, 'should backfill messageId onto queue entry');
     assert.equal(backfillCalls[0].entryId, 'q-1');
     assert.equal(backfillCalls[0].messageId, 'msg-trigger-123');
+  });
+
+  test('F264 initializes per-target cross-thread custody before A2A auto-execution', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const invocationQueue = new InvocationQueue();
+    const messageStore = new MessageStore();
+    const userEvents = [];
+    const triggerMessage = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'terminal release',
+      mentions: ['codex', 'codex-terra'],
+      timestamp: 100,
+      threadId: 'thread-target',
+      deliveryStatus: 'queued',
+      extra: {
+        crossPost: {
+          sourceThreadId: 'thread-source',
+          sourceInvocationId: 'parent-source',
+          effectClass: 'coordinate',
+        },
+        coordination: {
+          id: 'coord-1',
+          phase: 'terminal',
+          hop: 1,
+        },
+      },
+    });
+
+    let custodyAtAutoExecute;
+    const result = await enqueueA2ATargets(
+      {
+        router: { async *routeExecution() {} },
+        invocationRecordStore: { create() {}, update() {} },
+        socketManager: {
+          broadcastAgentMessage() {},
+          broadcastToRoom() {},
+          emitToUser(userId, event, data) {
+            userEvents.push({ userId, event, data });
+          },
+        },
+        messageStore,
+        queueProcessor: {
+          onInvocationComplete() {},
+          tryAutoExecute() {
+            custodyAtAutoExecute = messageStore.getById(triggerMessage.id)?.queueCustody;
+            return Promise.resolve();
+          },
+        },
+        invocationQueue,
+        log: { info() {}, warn() {}, error() {} },
+      },
+      {
+        targetCats: ['codex', 'codex-terra'],
+        content: 'terminal release',
+        userId: 'user-1',
+        threadId: 'thread-target',
+        triggerMessage,
+        callerCatId: 'opus',
+        parentInvocationId: 'parent-source',
+      },
+    );
+
+    assert.deepEqual(result.enqueued, ['codex', 'codex-terra']);
+    assert.ok(custodyAtAutoExecute, 'durable receipt custody must exist before the child can start');
+    assert.equal(custodyAtAutoExecute.receiptScope, 'cross_thread_delivery');
+    assert.deepEqual(custodyAtAutoExecute.allTargetCats, ['codex', 'codex-terra']);
+    assert.deepEqual(custodyAtAutoExecute.pendingTargetCats, ['codex', 'codex-terra']);
+
+    const entries = invocationQueue.list('thread-target', 'user-1');
+    assert.equal(entries.length, 2, 'A2A keeps independent per-target Queue carriers');
+    assert.deepEqual(
+      custodyAtAutoExecute.carrierByTargetCatId,
+      Object.fromEntries(
+        entries.map((entry) => [
+          entry.targetCats[0],
+          {
+            entryId: entry.id,
+            source: 'agent',
+            sourceCategory: 'a2a',
+            callerCatId: 'opus',
+            a2aParentInvocationId: 'parent-source',
+            a2aTriggerMessageId: triggerMessage.id,
+            autoExecute: true,
+            createdAt: entry.createdAt,
+          },
+        ]),
+      ),
+    );
+    const queuedTimelineEvent = userEvents.find((event) => event.event === 'messages_queued');
+    assert.equal(queuedTimelineEvent.userId, 'user-1');
+    assert.equal(queuedTimelineEvent.data.threadId, 'thread-target');
+    assert.equal(queuedTimelineEvent.data.messages[0].id, triggerMessage.id);
+    assert.equal(queuedTimelineEvent.data.messages[0].extra.queueReceipt.scope, 'cross_thread_delivery');
+    assert.deepEqual(
+      queuedTimelineEvent.data.messages[0].extra.queueReceipt.targets.map((target) => target.state),
+      ['queued', 'queued'],
+    );
+  });
+
+  test('F264 rejects a mismatched existing cross-thread custody before auto-execution', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const invocationQueue = new InvocationQueue();
+    const messageStore = new MessageStore();
+    const triggerMessage = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'terminal release',
+      mentions: ['codex'],
+      timestamp: 100,
+      threadId: 'thread-target',
+      deliveryStatus: 'queued',
+      extra: {
+        crossPost: {
+          sourceThreadId: 'thread-source',
+          sourceInvocationId: 'parent-source',
+          effectClass: 'coordinate',
+        },
+      },
+    });
+    messageStore.initializeQueueCustody(triggerMessage.id, {
+      version: 1,
+      entryId: 'unrelated-entry',
+      revision: 1,
+      intent: 'execute',
+      status: 'queued',
+      allTargetCats: ['codex'],
+      pendingTargetCats: ['codex'],
+      notifiedByCatIds: [],
+      seenByCatIds: [],
+      seenInvocationIdByCatId: {},
+      failedByCatIds: [],
+      handledByCatIds: [],
+      priority: 'normal',
+      createdAt: 100,
+      updatedAt: 100,
+    });
+    let autoExecuteCalls = 0;
+
+    await assert.rejects(
+      enqueueA2ATargets(
+        {
+          router: { async *routeExecution() {} },
+          invocationRecordStore: { create() {}, update() {} },
+          socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
+          messageStore,
+          queueProcessor: {
+            onInvocationComplete() {},
+            tryAutoExecute() {
+              autoExecuteCalls += 1;
+              return Promise.resolve();
+            },
+          },
+          invocationQueue,
+          log: { info() {}, warn() {}, error() {} },
+        },
+        {
+          targetCats: ['codex'],
+          content: 'terminal release',
+          userId: 'user-1',
+          threadId: 'thread-target',
+          triggerMessage,
+          callerCatId: 'opus',
+          parentInvocationId: 'parent-source',
+        },
+      ),
+      /custody identity mismatch/,
+    );
+
+    assert.equal(autoExecuteCalls, 0);
+    assert.deepEqual(invocationQueue.list('thread-target', 'user-1'), []);
+  });
+
+  test('F264 binds a coalesced cross-thread message to the existing exact Queue carrier', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const invocationQueue = new InvocationQueue();
+    const messageStore = new MessageStore();
+    const existing = invocationQueue.enqueue({
+      ownerAuthProvenance: 'unknown',
+      threadId: 'thread-target',
+      userId: 'user-1',
+      content: 'first handoff',
+      source: 'agent',
+      sourceCategory: 'a2a',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+      a2aParentInvocationId: 'parent-source',
+      a2aTriggerMessageId: 'message-first',
+    }).entry;
+    invocationQueue.backfillMessageId('thread-target', 'user-1', existing.id, 'message-first');
+    const triggerMessage = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'second handoff',
+      mentions: ['codex'],
+      timestamp: 200,
+      threadId: 'thread-target',
+      deliveryStatus: 'queued',
+      extra: {
+        crossPost: {
+          sourceThreadId: 'thread-source',
+          sourceInvocationId: 'parent-source',
+          effectClass: 'coordinate',
+        },
+      },
+    });
+    let custodyAtAutoExecute;
+
+    const result = await enqueueA2ATargets(
+      {
+        router: { async *routeExecution() {} },
+        invocationRecordStore: { create() {}, update() {} },
+        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
+        messageStore,
+        queueProcessor: {
+          onInvocationComplete() {},
+          tryAutoExecute() {
+            custodyAtAutoExecute = messageStore.getById(triggerMessage.id)?.queueCustody;
+            return Promise.resolve();
+          },
+        },
+        invocationQueue,
+        log: { info() {}, warn() {}, error() {} },
+      },
+      {
+        targetCats: ['codex'],
+        content: 'second handoff',
+        userId: 'user-1',
+        threadId: 'thread-target',
+        triggerMessage,
+        callerCatId: 'opus',
+        parentInvocationId: 'parent-source',
+      },
+    );
+
+    assert.deepEqual(result.enqueued, []);
+    assert.deepEqual(result.coalesced, ['codex']);
+    assert.equal(custodyAtAutoExecute.carrierByTargetCatId.codex.entryId, existing.id);
+    assert.equal(custodyAtAutoExecute.carrierByTargetCatId.codex.a2aTriggerMessageId, 'message-first');
+    const merged = invocationQueue.getEntrySnapshot('thread-target', 'user-1', existing.id);
+    assert.equal(merged.content, 'first handoff\n\nsecond handoff');
+    assert.deepEqual(merged.mergedMessageIds, [triggerMessage.id]);
+  });
+
+  test('F264 action replay restores durable carrier identity without upgrading legacy owner provenance', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { createInitialCrossThreadQueuedMessageCustody } = await import(
+      '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js'
+    );
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const admissionQueue = new InvocationQueue();
+    const enqueueCarrier = (catId, triggerMessageId) =>
+      admissionQueue.enqueue({
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-target',
+        userId: 'user-1',
+        content: 'first handoff',
+        source: 'agent',
+        sourceCategory: 'a2a',
+        targetCats: [catId],
+        intent: 'execute',
+        autoExecute: true,
+        callerCatId: 'sonnet',
+        a2aParentInvocationId: 'parent-source',
+        a2aTriggerMessageId: triggerMessageId,
+      }).entry;
+    const opusCarrier = enqueueCarrier('opus', 'message-first');
+    const codexCarrier = enqueueCarrier('codex', 'message-first');
+    const messageStore = new MessageStore();
+    const crossPost = {
+      sourceThreadId: 'thread-source',
+      sourceInvocationId: 'parent-source',
+      effectClass: 'coordinate',
+    };
+    const first = messageStore.append({
+      userId: 'user-1',
+      catId: 'sonnet',
+      content: 'first handoff',
+      mentions: ['opus', 'codex'],
+      timestamp: 100,
+      threadId: 'thread-target',
+      deliveryStatus: 'queued',
+      extra: { crossPost },
+    });
+    admissionQueue.backfillMessageId('thread-target', 'user-1', opusCarrier.id, first.id);
+    admissionQueue.backfillMessageId('thread-target', 'user-1', codexCarrier.id, first.id);
+    assert.equal(
+      messageStore.initializeQueueCustody(
+        first.id,
+        createInitialCrossThreadQueuedMessageCustody(first.id, [opusCarrier, codexCarrier], {
+          requestedTargetCats: ['opus', 'codex'],
+          createdAt: first.timestamp,
+        }),
+      ).kind,
+      'initialized',
+    );
+    const second = messageStore.append({
+      userId: 'user-1',
+      catId: 'sonnet',
+      content: 'second handoff',
+      mentions: ['opus'],
+      timestamp: 101,
+      threadId: 'thread-target',
+      deliveryStatus: 'queued',
+      extra: { crossPost },
+    });
+    assert.equal(
+      admissionQueue.coalesceContentIntoQueuedAgent(
+        'thread-target',
+        'user-1',
+        opusCarrier.id,
+        second.content,
+        second.id,
+        'sonnet',
+        'parent-source',
+      ),
+      true,
+    );
+    const mergedOpusCarrier = admissionQueue.getEntrySnapshot('thread-target', 'user-1', opusCarrier.id);
+    assert.equal(
+      messageStore.initializeQueueCustody(
+        second.id,
+        createInitialCrossThreadQueuedMessageCustody(second.id, [mergedOpusCarrier], {
+          requestedTargetCats: ['opus'],
+          createdAt: second.timestamp,
+        }),
+      ).kind,
+      'initialized',
+    );
+
+    const replayQueue = new InvocationQueue();
+    const result = await enqueueA2ATargets(
+      {
+        router: { async *routeExecution() {} },
+        invocationRecordStore: { create() {}, update() {} },
+        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
+        messageStore,
+        queueProcessor: {
+          onInvocationComplete() {},
+          tryAutoExecute() {
+            return Promise.resolve();
+          },
+        },
+        invocationQueue: replayQueue,
+        log: { info() {}, warn() {}, error() {} },
+      },
+      {
+        targetCats: ['opus'],
+        content: second.content,
+        userId: 'user-1',
+        threadId: 'thread-target',
+        triggerMessage: second,
+        callerCatId: 'sonnet',
+        parentInvocationId: 'parent-source',
+        ownerAuthProvenance: 'strict',
+        actionSuccessorFence: {
+          leaseId: 'lease-review-1',
+          generation: 2,
+          dispatchId: 'cross-post:message-second',
+        },
+      },
+    );
+
+    assert.deepEqual(result.enqueued, ['opus']);
+    const restored = replayQueue.getEntrySnapshot('thread-target', 'user-1', opusCarrier.id);
+    assert.equal(restored.messageId, first.id);
+    assert.equal(restored.ownerAuthProvenance, 'unknown');
+    assert.deepEqual(restored.mergedMessageIds, [second.id]);
+    assert.deepEqual(restored.targetCats, ['opus']);
+    assert.deepEqual(restored.actionSuccessorFence, {
+      leaseId: 'lease-review-1',
+      generation: 2,
+      dispatchId: 'cross-post:message-second',
+    });
+    assert.equal(replayQueue.getEntrySnapshot('thread-target', 'user-1', codexCarrier.id), null);
+  });
+
+  test('F264 restores a coalesced Queue carrier when durable receipt initialization fails', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const invocationQueue = new InvocationQueue();
+    const existing = invocationQueue.enqueue({
+      ownerAuthProvenance: 'unknown',
+      threadId: 'thread-target',
+      userId: 'user-1',
+      content: 'first handoff',
+      source: 'agent',
+      sourceCategory: 'a2a',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+      a2aParentInvocationId: 'parent-source',
+      a2aTriggerMessageId: 'message-first',
+    }).entry;
+    invocationQueue.backfillMessageId('thread-target', 'user-1', existing.id, 'message-first');
+    const before = invocationQueue.getEntrySnapshot('thread-target', 'user-1', existing.id);
+    const messageStore = new MessageStore();
+    const triggerMessage = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'second handoff',
+      mentions: ['codex'],
+      timestamp: 210,
+      threadId: 'thread-target',
+      deliveryStatus: 'queued',
+      extra: {
+        crossPost: {
+          sourceThreadId: 'thread-source',
+          sourceInvocationId: 'parent-source',
+          effectClass: 'coordinate',
+        },
+      },
+    });
+    messageStore.initializeQueueCustody(triggerMessage.id, {
+      version: 1,
+      entryId: 'conflicting-custody',
+      revision: 1,
+      intent: 'execute',
+      status: 'queued',
+      allTargetCats: ['codex'],
+      pendingTargetCats: ['codex'],
+      notifiedByCatIds: [],
+      seenByCatIds: [],
+      seenInvocationIdByCatId: {},
+      failedByCatIds: [],
+      handledByCatIds: [],
+      priority: 'normal',
+      createdAt: 210,
+      updatedAt: 210,
+    });
+
+    await assert.rejects(
+      enqueueA2ATargets(
+        {
+          router: { async *routeExecution() {} },
+          invocationRecordStore: { create() {}, update() {} },
+          socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
+          messageStore,
+          queueProcessor: { onInvocationComplete() {}, tryAutoExecute() {} },
+          invocationQueue,
+          log: { info() {}, warn() {}, error() {} },
+        },
+        {
+          targetCats: ['codex'],
+          content: 'second handoff',
+          userId: 'user-1',
+          threadId: 'thread-target',
+          triggerMessage,
+          callerCatId: 'opus',
+          parentInvocationId: 'parent-source',
+        },
+      ),
+      /custody identity mismatch/,
+    );
+
+    assert.deepEqual(invocationQueue.getEntrySnapshot('thread-target', 'user-1', existing.id), before);
+  });
+
+  test('F264 persists a distinct failed receipt when no cross-thread target is admitted', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const invocationQueue = new InvocationQueue();
+    for (let index = 0; index < 10; index += 1) {
+      invocationQueue.enqueue({
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-target',
+        userId: 'user-1',
+        content: `existing-${index}`,
+        source: 'agent',
+        sourceCategory: 'a2a',
+        targetCats: [`cat-${index}`],
+        intent: 'execute',
+      });
+    }
+    const messageStore = new MessageStore();
+    const triggerMessage = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'terminal release',
+      mentions: ['codex'],
+      timestamp: 300,
+      threadId: 'thread-target',
+      deliveryStatus: 'queued',
+      extra: {
+        crossPost: {
+          sourceThreadId: 'thread-source',
+          sourceInvocationId: 'parent-source',
+          effectClass: 'coordinate',
+        },
+      },
+    });
+    const userEvents = [];
+
+    const result = await enqueueA2ATargets(
+      {
+        router: { async *routeExecution() {} },
+        invocationRecordStore: { create() {}, update() {} },
+        socketManager: {
+          broadcastAgentMessage() {},
+          broadcastToRoom() {},
+          emitToUser(userId, event, data) {
+            userEvents.push({ userId, event, data });
+          },
+        },
+        messageStore,
+        queueProcessor: { onInvocationComplete() {}, tryAutoExecute() {} },
+        invocationQueue,
+        log: { info() {}, warn() {}, error() {} },
+      },
+      {
+        targetCats: ['codex'],
+        content: 'terminal release',
+        userId: 'user-1',
+        threadId: 'thread-target',
+        triggerMessage,
+        callerCatId: 'opus',
+        parentInvocationId: 'parent-source',
+      },
+    );
+
+    assert.deepEqual(result.enqueued, []);
+    const stored = messageStore.getById(triggerMessage.id);
+    assert.equal(stored.queueCustody.status, 'terminal');
+    assert.deepEqual(stored.queueCustody.pendingTargetCats, []);
+    assert.deepEqual(stored.queueCustody.failedByCatIds, ['codex']);
+    const receipt = userEvents.find((event) => event.event === 'messages_queued').data.messages[0].extra.queueReceipt;
+    assert.deepEqual(receipt.targets, [{ catId: 'codex', state: 'failed' }]);
+  });
+
+  test('F264 rejects an idempotent-looking empty carrier receipt for a different requested target', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const invocationQueue = new InvocationQueue();
+    for (let index = 0; index < 10; index += 1) {
+      invocationQueue.enqueue({
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-target',
+        userId: 'user-1',
+        content: `existing-${index}`,
+        source: 'agent',
+        sourceCategory: 'a2a',
+        targetCats: [`cat-${index}`],
+        intent: 'execute',
+      });
+    }
+    const messageStore = new MessageStore();
+    const triggerMessage = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'terminal release',
+      mentions: ['codex'],
+      timestamp: 320,
+      threadId: 'thread-target',
+      deliveryStatus: 'queued',
+      extra: {
+        crossPost: {
+          sourceThreadId: 'thread-source',
+          sourceInvocationId: 'parent-source',
+          effectClass: 'coordinate',
+        },
+      },
+    });
+    messageStore.initializeQueueCustody(triggerMessage.id, {
+      version: 1,
+      entryId: `cross-thread:${triggerMessage.id}`,
+      revision: 1,
+      receiptScope: 'cross_thread_delivery',
+      carrierByTargetCatId: {},
+      intent: 'execute',
+      status: 'terminal',
+      allTargetCats: ['opus'],
+      pendingTargetCats: [],
+      notifiedByCatIds: [],
+      seenByCatIds: [],
+      seenInvocationIdByCatId: {},
+      failedByCatIds: ['opus'],
+      handledByCatIds: [],
+      priority: 'normal',
+      createdAt: 320,
+      updatedAt: 320,
+    });
+
+    await assert.rejects(
+      enqueueA2ATargets(
+        {
+          router: { async *routeExecution() {} },
+          invocationRecordStore: { create() {}, update() {} },
+          socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
+          messageStore,
+          queueProcessor: { onInvocationComplete() {}, tryAutoExecute() {} },
+          invocationQueue,
+          log: { info() {}, warn() {}, error() {} },
+        },
+        {
+          targetCats: ['codex'],
+          content: 'terminal release',
+          userId: 'user-1',
+          threadId: 'thread-target',
+          triggerMessage,
+          callerCatId: 'opus',
+          parentInvocationId: 'parent-source',
+        },
+      ),
+      /custody identity mismatch/,
+    );
   });
 });

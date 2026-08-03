@@ -79,7 +79,7 @@ export function textFail(status = 500, body = 'fail') {
 }
 
 export function defaultSidebarApiMock(path: string) {
-  if (path === '/api/threads') return jsonOk({ threads: [] });
+  if (path === '/api/threads?view=sidebar') return jsonOk({ threads: [] });
   if (path === '/api/governance/health') return jsonOk({ projects: [] });
   if (path === '/api/projects/cwd') return jsonOk({ path: '/test' });
   if (path === '/api/backlog/items') return jsonOk({ items: [] });
@@ -121,7 +121,7 @@ export interface ThreadSidebarHarness {
   root: Root;
   cleanup: () => void;
   flush: () => Promise<void>;
-  render: (props?: React.ComponentProps<typeof ThreadSidebar>) => Promise<void>;
+  render: (props?: Partial<React.ComponentProps<typeof ThreadSidebar>>) => Promise<void>;
 }
 
 export function createThreadSidebarHarness(): ThreadSidebarHarness {
@@ -145,7 +145,12 @@ export function createThreadSidebarHarness(): ThreadSidebarHarness {
     flush,
     render: async (props) => {
       act(() => {
-        root.render(React.createElement(ThreadSidebar, props));
+        root.render(
+          React.createElement(
+            ThreadSidebar,
+            Object.assign({ routeThreadId: mockStore.currentThreadId as string }, props),
+          ),
+        );
       });
       await flush();
     },

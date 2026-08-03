@@ -1,18 +1,34 @@
 ---
 feature_ids: [F140]
-related_features: [F133, F139, F141]
+related_features: [F133, F139, F141, F168, F280]
 topics: [github, conflict-detection, review-feedback, pr-signals, automation]
 doc_kind: spec
 created: 2026-03-26
+tips_exempt: agent-facing tracking policy is surfaced in MCP parameter descriptions and pr-signals/mcp-callbacks refs; no separate web capability tip
 ---
 
 # F140: GitHub PR Signals — 冲突检测 + Review Feedback 全来源感知
 
-> **Status**: done | **Owner**: Ragdoll | **Priority**: P1 | **Phase A-D Completed**: 2026-03-27 | **Reopened**: 2026-04-24（Phase E — 通知合流：severity 抽取 + 下线 email 路径） | **Completed**: 2026-04-25
+> ## ⛔ 契约冻结（2026-07-29，operator signoff msg `0001785311364054-000054-656d056c`）
+>
+> **本 Feature 的 wake 契约已移交 F280 Unified Wait Contract。**
+> F140 从此不再接受新的 post-completion 补丁——下面那串从 2026-05-07 到 2026-07-20 的
+> 修正记录（backlog guard → `intent` 轴 → routing 修正 ×2 → CI state-only → `wakePolicy` 轴）
+> 本身就是病历：一个 done 的 Feature 被当活体补锅了三个月，因为"哪些事件该唤醒猫"
+> 从一开始就被建模成了事件订阅，而不是等待契约。
+>
+> `intent` 与 `wakePolicy` 将在 F280 Phase B 随 PR adapter 切换**同 PR 删除**，不留 deprecation 期。
+> 新的噪音问题请开在 F280，不要在这里加第三个开关。采集/冲突检测部分仍以本文件为真相源。
+
+> **Status**: done（wake 契约 superseded by F280） | **Owner**: Ragdoll | **Priority**: P1 | **Phase A-D Completed**: 2026-03-27 | **Reopened**: 2026-04-24（Phase E — 通知合流：severity 抽取 + 下线 email 路径） | **Completed**: 2026-04-25
 > **Post-completion hardening**: 2026-05-07 — Review Feedback backlog guard（merged/closed 自收敛 + stale commit 过滤 + 同 PR/target-cat queue coalesce）
 > **Post-completion correction**: 2026-06-18 — PR #2394 (squash 1d42b8f36) fixed PR review feedback routing to preserve the PR-tracking registration thread. #949 auto-rotation / PR #2372 backlink was the wrong layer: context overflow belongs to invocation hydration, not thread ownership. Review feedback no longer creates `MR review (auto-rotated...)` threads, and legacy already-rotated tracking tasks are repaired back to their source thread before delivery. If such a repair happens, the original thread receives an explicit routing-anomaly audit warning; this is fault exposure, not a redirect design.
 > **Post-completion correction audit**: 2026-06-18 — PR #2404 (squash bcabe177) keeps legacy routing repair visible even when feedback is filtered, persists the repair only after audit delivery succeeds, and makes the repair thread update conditional to avoid overwriting a fresh re-registration.
 > **Post-completion**: 2026-06-03 — PR-tracking wake intent（PR #2070）：`register_pr_tracking` 加 `intent: review|merge`，CI-pass 仅 intent=merge 唤醒；删 approval 推断 + dead poller
+> **Post-completion correction**: 2026-07-05 — PR #2756 (squash 089d089d1) changed review-intent CI-pass from "thread message but no wake" to true state-only recording: update `automationState.ci` without connector message/freshness unread; `intent=merge` pass and all CI failures still notify.
+> **Post-completion hardening**: 2026-07-20 — PR #3095 adds an actor-aware tracking `wakePolicy`, independent from `intent`: the backward-compatible default remains `all_feedback`; `human_participant_activity` wakes for GitHub `User` activity while retaining GitHub `Bot` activity as durable state-only truth.
+> **Post-completion correction**: 2026-07-20 — PR #3113 makes legacy combined PR comment cursors migrate to independent inline/conversation cursors as durable state-only backfill. Historical human comments still enter the event log and advance both cursors, but cannot create connector delivery, freshness, F168 cloud wake, or invocation.
+> **Post-completion hardening**: 2026-07-27 — F128 approved formal external-PR children now carry canonical PR metadata and reconcile an owner-valid `review + human_participant_activity` tracker, closing the repeated maintainer-transition gap seen in clowder-ai#1210 and F88.
 
 ## 三层架构定位
 
@@ -173,12 +189,41 @@ operator补充：
 
 **修复**：
 - `register_pr_tracking`（schema + callbacks handler + MCP tool）加 optional `intent: 'review' | 'merge'`（默认 `review`），结构化持久到 `task.automationState.intent`；re-register 不指定时保留已有 intent（deep-merge 不丢 ci/review cursors）。**intent 是任务意图、不是 repo 类型**（私人仓可 merge、开源仓可只 review）。
-- `CiCdCheckTaskSpec` CI-pass：`intent==='merge'` 才唤醒（normal → merge-gate），否则静默；CI fail 两种 intent 都 urgent 唤醒。一次查表，删除 approval 推断（`isHeadApproved` / retry-marker / `fetchPrReviews`）。
+- `CiCdCheckTaskSpec` / `CiCdRouter` CI-pass：`intent==='merge'` 才投递并唤醒（normal → merge-gate），否则只更新 CI state/fingerprint，不投递 connector 消息；CI fail 两种 intent 都 urgent 唤醒。一次查表，删除 approval 推断（`isHeadApproved` / retry-marker / `fetchPrReviews`）。
 - 删遗留 dead poller（`CiCdCheckPoller` + `github-ci-bootstrap`），util 迁 `ci-status-fetcher`。
 - 文档收敛：`cicd-tracking.md` / `pr-signals.md` / `merge-gate` / opensource-ops（outbound / hotfix）/ repo-inbox / mcp-callbacks 对齐 intent 语义；开源/owner-merge 路径显式 `intent='merge'`；merge-gate 写清 fingerprint 时机契约（翻 merge 要在 CI 没绿前，已绿则 `gh pr checks` 自查）。
 - **后续噪音收口（2026-06-04，operator）**：
   - `cancelled` run 不再误判 failure（PR #2087）——push 新 commit 时 GitHub 自动取消旧 run，`computeAggregateBucket` 原把 `cancelled` 当 fail → superseded-run 假 CI-fail 唤醒。改：按 GitHub success 态口径（success/skipped/neutral），`cancelled` 既非 fail 也非 success；`pass` 需至少一个真 positive，`cancelled`-only → `pending`（不当假绿灯）。
   - cat-cafe 私人仓两个 PR guard workflow（`pr-followup-guard` / `shared-state-guard`）已 `gh workflow disable`——与本地 `pnpm gate`（`check:followup-tails` + `preflight-shared-state`）重复、且制造 CI 噪音；F217 已定私人仓不靠 server-side gate。桌面构建/发布 workflow 保留。可逆（`gh workflow enable`）。
+  - 2026-07-05 follow-up（PR #2756，squash 089d089d1）：`intent=review` / absent intent 的 CI-pass 不再投递 `github-ci` connector message，只更新 `automationState.ci` 的 `headSha/lastFingerprint/lastBucket`。根因是“静默但投递线程消息”仍会产生 freshness 未读，后续把 CI 成功重新变成唤醒噪音。`intent=merge` 的 CI-pass 与 CI fail 保持投递 + 唤醒。
+
+### Post-completion: actor-aware tracking wake policy ✅ implemented 2026-07-20（PR #3095）
+
+> **根因**：PR #1185 型开源 review 流程中，不同 HEAD generation 的 cloud reviewer 过程性 feedback 都是新的 GitHub 事件，因此既不属于同 HEAD duplicate，也不应被 F167 的 custody 去重吞掉。旧 F140 契约只有 `intent=review|merge`，无法表达“保留 automation truth，但只为人类参与者叫醒 reviewer”。
+
+**契约**：
+- `register_pr_tracking` / `register_issue_tracking` 增加独立 `wakePolicy`，结构化持久到 `task.automationState.wakePolicy`；re-register 不指定时保留已有值。缺省为 `all_feedback`，守住 #1002 的全 feedback 投递行为。
+- `human_participant_activity` 只用 GitHub REST `user.type` 分类：`User`（PR/issue author 或任意第三方人类）投递；`Bot` state-only；缺失或未知 actor type fail-safe 投递。`authorAssociation=OWNER|MEMBER` 只是 repo 权限关系，不参与人类/author 身份判定；subject author 用 GitHub subject metadata 的 author login。
+- 精确 self echo / setup-noise 仍走既有 suppression；issue critical/security 协议继续优先唤醒。`intent` 决定等待哪类信号，`wakePolicy` 决定哪些 actor 能把已采集信号升级为 delivery，两者不互相推断。
+
+**耐久性与 seam**：
+- `ReviewFeedbackTaskSpec` 与 `IssueCommentTaskSpec` 都先 append event log / apply projector，再执行 actor policy。Bot-only batch 仍推进 collection/delivery cursor，但不创建 work item，因此没有 connector delivery、freshness unread、trigger invocation 或 hold retirement。
+- GitHub pollers把 REST `user.type` 与 subject author metadata带进统一策略；actor metadata不可得时不会误抑制。
+- F168 `ExternalReviewCoordinator` 仍记录 cloud observation、current-HEAD readiness 与 pending wake provenance；在 `human_participant_activity` 下只截断 `deliverReady`，返回 `wake_policy_state_only`。这是 delivery policy，不是丢弃 feedback，也不扩张 F177 routing guard / F167 custody scope。
+- PR tracking 的 legacy combined comment cursor 不能直接 seed 两个 GitHub endpoint（ID 空间不可比较），因此会从两个 source 的 0 cursor 回填。首轮为每个 source 固化 snapshot frontier；`id <= target` 的 backfill（包括旧 HEAD inline comment）照常 append/project event log 并推进 source cursor，但不进入 actor delivery 或 F168 comment candidate。任一 source 未到 target 时持久化 `commentCursorMigrationPending=true` 与两个 target；其他 source 在 snapshot target 之后的新活动仍正常 live，不被全局 pending 误抑制。Review decision cursor 独立，不受 comment migration 抑制；issue tracking 没有这条 split-cursor migration 路径。
+
+**验证边界**：actor matrix 覆盖 subject author / third-party human / self / Bot / unknown；PR 与 issue 都有 durable state-only regression；显式及缺省 `all_feedback` 守住 #1002。发布后只做一个 #1185 型 replay/smoke，不新建无 ground truth 的长期 F192 指标。
+
+### Post-completion: inbound maintainer ownership transition
+
+> **根因**：F128 能创建正式 external-PR review child，F140 也能追踪人类活动，但两者之间只有文字约定。Maintainer 把 findings 交给外部作者后，如果 reviewer 忘记手工注册 tracker，child 不会收到作者新 HEAD；clowder-ai#1210 与 F88 都需要 operator 再次提醒。Gate-keeping thread 又被正确禁止直接注册，因此缺口必须在已批准 child 的 owner transition 上闭合。
+
+**契约**：
+- `propose_thread` 只对“单一 canonical clowder-ai PR + 明确 formal review intent”持久化 `{repoFullName, prNumber, mode=formal_review}`；advisory、triage、任意 URL 引用、多 PR 歧义都不产生 tracking context。
+- Approval 先以最终 `preferredCats` 解析实际 child owner。恰好一个 owner 时，server 把 canonical PR 原子合入 child `threadMetadata.prs`，并对全局 `pr:<repo>#<number>` subject 创建或 upsert `pr_tracking`：owner/thread 精确绑定 child，`intent=review`，`wakePolicy=human_participant_activity`。
+- 没有 owner 或多个 owner 时 fail closed：metadata 仍保留，但不猜 tracker owner；source gate-keeping thread 始终没有 tracker。既有 subject 属于其他 user 时也不抢占。
+- Findings 交付给 external author 后 tracker 保持 active。重复 approve、边界获取失败后的重试、以及 thread 已创建但 proposal finalize 中断的 stale recovery 都重跑同一幂等 reconcile；既有 cursor/status 不回退。
+- 后续 activity 继续复用 actor-aware 契约：GitHub `User` 与 unknown metadata fail-safe 唤醒，`Bot` durable state-only；无需叠加 timed hold，也不新增 eval。
 
 ## Acceptance Criteria
 

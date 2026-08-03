@@ -279,18 +279,18 @@ test('file block with mov extension → type=video', () => {
   assert.equal(r[0].type, 'video');
 });
 
-test('getByThreadBefore (in-memory) uses effective order time — queued→delivered cursor does not re-include itself (P1 cloud review round 3)', async () => {
-  // P1 回归：collectAllThreadMessages 的游标用 effective order time（deliveredAt ?? timestamp），
-  // 与 Redis zset score 一致。但 in-memory getByThreadBefore 原本只比较 raw msg.timestamp——
+test('getByThreadBefore (in-memory) uses queued-work delivery time without re-including its cursor', async () => {
+  // Ordinary queued work moves to deliveredAt in the Redis index. The in-memory
+  // cursor must use the same order time rather than raw msg.timestamp——
   // 当游标传 deliveredAt（> 原始 timestamp），cursor 消息自身 timestamp < deliveredAt 仍满足边界，
   // 被再次包含 → collectAllThreadMessages 在同一页无限循环（dev/test 非 Redis 部署 hang）。
   const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
   const store = new MessageStore();
   const base = Date.now();
-  store.append({ userId: 'u', catId: 'c', content: 'older', mentions: [], timestamp: base + 50, threadId: 'T' });
+  store.append({ userId: 'u', catId: null, content: 'older', mentions: [], timestamp: base + 50, threadId: 'T' });
   const queued = store.append({
     userId: 'u',
-    catId: 'c',
+    catId: null,
     content: 'queued',
     mentions: [],
     timestamp: base + 100,

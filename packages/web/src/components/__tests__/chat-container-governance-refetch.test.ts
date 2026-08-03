@@ -241,7 +241,7 @@ vi.mock('@/hooks/useGovernanceStatus', () => ({
   }),
 }));
 vi.mock('@/hooks/useAgentHookHealth', () => ({
-  useAgentHookHealth: (options: { enabled?: boolean } = {}) => mockUseAgentHookHealth(options),
+  useAgentHookHealth: (options: { enabled?: boolean; projectPath?: string } = {}) => mockUseAgentHookHealth(options),
 }));
 vi.mock('@/hooks/useIndexState', () => ({
   useIndexState: () => ({
@@ -352,7 +352,7 @@ describe('ChatContainer governance refetch', () => {
       root.render(React.createElement(ChatContainer, { threadId: 'thread-a' }));
     });
 
-    expect(mockUseAgentHookHealth).toHaveBeenCalledWith({ enabled: false });
+    expect(mockUseAgentHookHealth).toHaveBeenCalledWith({ enabled: false, projectPath: 'default' });
     expect(container.textContent).not.toContain('Agent 运行 Hook 需要同步');
   });
 });

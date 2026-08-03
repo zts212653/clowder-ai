@@ -76,6 +76,15 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     assert.equal(fetched.createdBy, 'user1');
   });
 
+  it('persists and hydrates the cat_bedroom system kind', async () => {
+    const created = await store.create('user1', 'codex-sol 的卧室');
+
+    await store.updateSystemKind(created.id, 'cat_bedroom');
+
+    const fetched = await store.get(created.id);
+    assert.equal(fetched.systemKind, 'cat_bedroom');
+  });
+
   it('ensureExternalRuntimeAnchorThread stores a persistent hidden anchor', async () => {
     const anchor = await store.ensureExternalRuntimeAnchorThread('antigravity-desktop', 'user1');
     const again = await store.ensureExternalRuntimeAnchorThread('antigravity-desktop', 'user1');
@@ -527,6 +536,45 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     assert.equal(await redis.ttl(userListKey('user1')), -1);
     assert.equal(await redis.ttl(threadParticipantsKey(thread.id)), -1);
     assert.equal(await redis.ttl(threadActivityKey(thread.id)), -1);
+  });
+
+  it('F262: stores member effort as isolated sidecar fields and bulk reads once', async () => {
+    const thread = await store.create('user1', 'Effort Overrides');
+
+    await store.updateMemberEffort(thread.id, 'codex-sol', 'max');
+    await store.updateMemberEffort(thread.id, 'opus', 'low');
+
+    assert.equal(await redis.hget(threadDetailKey(thread.id), 'memberEffort:codex-sol'), 'max');
+    assert.equal(await store.getMemberEffort(thread.id, 'codex-sol', 'user1'), 'max');
+    assert.deepEqual(await store.getMemberEfforts(thread.id, 'user1'), {
+      'codex-sol': 'max',
+      opus: 'low',
+    });
+    assert.equal((await store.get(thread.id)).memberEffortOverrides, undefined);
+  });
+
+  it('F262: clear, corrupt raw value, and deleted-thread writes fail closed', async () => {
+    const thread = await store.create('user1', 'Effort Safety');
+    await store.updateMemberEffort(thread.id, 'codex-sol', 'ultra');
+    await store.updateMemberEffort(thread.id, 'codex-sol', null);
+    assert.equal(await store.getMemberEffort(thread.id, 'codex-sol', 'user1'), undefined);
+
+    await redis.hset(threadDetailKey(thread.id), 'memberEffort:codex-sol', 'bogus');
+    assert.deepEqual(await store.getMemberEfforts(thread.id, 'user1'), {});
+
+    await store.delete(thread.id);
+    await store.updateMemberEffort(thread.id, 'codex-sol', 'max');
+    assert.deepEqual(await redis.hkeys(threadDetailKey(thread.id)), []);
+  });
+
+  it('F262: persistent effort mutation clears a legacy detail TTL', async () => {
+    const expiringStore = new RedisThreadStore(redis, { ttlSeconds: 60 });
+    const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    const thread = await expiringStore.create('user1', 'Effort TTL');
+    assert.ok((await redis.ttl(threadDetailKey(thread.id))) > 0);
+
+    await persistentStore.updateMemberEffort(thread.id, 'codex-sol', 'max');
+    assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1);
   });
 
   it('persistent mode also clears legacy TTL on detail-only mutations', async () => {

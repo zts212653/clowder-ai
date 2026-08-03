@@ -6,6 +6,7 @@
 
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import type { MessageAppendListener } from '../ports/MessageStore.js';
 import { MessageStore } from '../ports/MessageStore.js';
 import { RedisMessageStore } from '../redis/RedisMessageStore.js';
 
@@ -26,7 +27,7 @@ function resolveMessageTtlSeconds(): number | undefined {
 
 export function createMessageStore(
   redis?: RedisClient,
-  options?: { onAppend?: (msg: { id: string; threadId: string; timestamp: number; content: string }) => void },
+  options?: { onAppend?: MessageAppendListener },
 ): AnyMessageStore {
   if (redis) {
     const ttlSeconds = resolveMessageTtlSeconds();

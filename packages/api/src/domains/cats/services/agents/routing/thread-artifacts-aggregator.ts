@@ -15,6 +15,7 @@
 
 import { isSourceCodeExtension, type RichBlock, type ThreadArtifactDTO } from '@cat-cafe/shared';
 import type { IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
+import { getTimelineOrderTime } from '../../stores/visibility.js';
 
 const THREAD_SCAN_PAGE = 200;
 
@@ -35,20 +36,19 @@ export async function collectAllThreadMessages(
   let cursor: { ts: number; id: string } | undefined;
   for (;;) {
     const page = cursor
-      ? await store.getByThreadBefore(threadId, cursor.ts, pageSize, cursor.id, userId)
-      : await store.getByThread(threadId, pageSize, userId);
+      ? await store.getByThreadBefore(threadId, cursor.ts, pageSize, cursor.id, userId, {
+          includeQueuedCatMessages: true,
+        })
+      : await store.getByThread(threadId, pageSize, userId, { includeQueuedCatMessages: true });
     if (page.length === 0) break;
     all.push(...page);
     if (page.length < pageSize) break;
     // getByThread/getByThreadBefore 返回 oldest→newest（最老在 page[0]）。
     // cursor 必须取当前页最老的一条，才能继续往「更老」分页；用最新一条会重叠重扫整页。
     const oldest = page[0];
-    // F232 P2 fix（cloud review）：thread zset 的 score = effective order time——
-    // queued 消息投递后 markDelivered 会把 score re-score 到 deliveredAt（见 RedisMessageStore）。
-    // 游标必须用同一时间（deliveredAt ?? timestamp），否则下一页 getByThreadBefore 以原始
-    // timestamp 为上界（score < timestamp），会跳过 score 落在 (timestamp, deliveredAt) 的消息，
-    // 其 artifacts 从 GET /api/threads/:threadId/artifacts 中漏聚合。
-    cursor = { ts: oldest.deliveredAt ?? oldest.timestamp, id: oldest.id };
+    // Cursor must use the same publication-order score as Redis: real-cat
+    // speech keeps authoring time; ordinary queued work uses delivery time.
+    cursor = { ts: getTimelineOrderTime(oldest), id: oldest.id };
   }
   return all;
 }

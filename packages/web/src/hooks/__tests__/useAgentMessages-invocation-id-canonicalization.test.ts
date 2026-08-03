@@ -200,6 +200,26 @@ describe('useAgentMessages — outer/inner invocationId canonicalization (砚砚
     expect(calls[0]?.[1]?.invocationId).not.toBe(INNER);
   });
 
+  it('active invocation_created: same-parent boundary explicitly invalidates a missing child', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'opus',
+        threadId: 'thread-A',
+        invocationId: OUTER,
+        content: JSON.stringify({ type: 'invocation_created', catId: 'opus', invocationId: OUTER }),
+        timestamp: 1050,
+      });
+    });
+    const call = mockSetCatInvocation.mock.calls.find((c) => c[0] === 'opus' && c[1]?.invocationId === OUTER);
+    expect(call).toBeDefined();
+    expect(Object.hasOwn(call?.[1] ?? {}, 'turnInvocationId')).toBe(true);
+    expect(call?.[1]?.turnInvocationId).toBeUndefined();
+  });
+
   it('active invocation_metrics.session_started: outer wins over inner', () => {
     act(() => {
       root.render(React.createElement(Harness));
@@ -272,6 +292,29 @@ describe('useAgentMessages — outer/inner invocationId canonicalization (砚砚
     expect(calls.length).toBeGreaterThan(0);
     expect(calls[0]?.[2]?.invocationId).toBe(OUTER);
     expect(calls[0]?.[2]?.invocationId).not.toBe(INNER);
+  });
+
+  it('bg invocation_created: same-parent boundary explicitly invalidates a missing child', () => {
+    storeState.currentThreadId = 'thread-A';
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'opus',
+        threadId: 'thread-B',
+        invocationId: OUTER,
+        content: JSON.stringify({ type: 'invocation_created', catId: 'opus', invocationId: OUTER }),
+        timestamp: 2050,
+      });
+    });
+    const call = mockSetThreadCatInvocation.mock.calls.find(
+      (c) => c[0] === 'thread-B' && c[1] === 'opus' && c[2]?.invocationId === OUTER,
+    );
+    expect(call).toBeDefined();
+    expect(Object.hasOwn(call?.[2] ?? {}, 'turnInvocationId')).toBe(true);
+    expect(call?.[2]?.turnInvocationId).toBeUndefined();
   });
 
   it('bg invocation_metrics.session_started: outer wins over inner', () => {

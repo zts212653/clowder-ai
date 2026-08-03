@@ -2,6 +2,7 @@
 
 import type { IntentCard, RiskSignal } from '@cat-cafe/shared';
 import { useCallback, useState } from 'react';
+import { ExpandableProse } from '@/components/content-overflow';
 import { apiFetch } from '@/utils/api-client';
 
 const RISK_LABELS: Record<RiskSignal, string> = {
@@ -145,7 +146,12 @@ export function RiskPanel({ projectId, cards }: RiskPanelProps) {
                   className="flex items-center gap-2 rounded bg-[var(--console-hover-bg)] px-2 py-1 text-xs"
                 >
                   <span className="shrink-0 font-mono text-micro text-cafe-secondary">{card.id.slice(0, 8)}</span>
-                  <span className="truncate text-cafe">{card.goal || '—'}</span>
+                  <ExpandableProse
+                    text={card.goal || '—'}
+                    lines={2}
+                    className="min-w-0 flex-1"
+                    contentClassName="text-xs leading-4 text-cafe"
+                  />
                 </div>
               ))}
             </div>

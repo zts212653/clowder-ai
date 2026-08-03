@@ -19,6 +19,14 @@ function mockTask(pr, overrides = {}) {
     createdAt: Date.now(),
     updatedAt: Date.now(),
     userId: pr.userId ?? 'u-default',
+    automationState: {
+      review: {
+        lastCommentCursor: 0,
+        lastInlineCommentCursor: 0,
+        lastConversationCommentCursor: 0,
+        lastDecisionCursor: 0,
+      },
+    },
     ...overrides,
   };
 }
@@ -812,7 +820,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     assert.equal(result.workItems[0].signal.newDecisions.length, 0);
   });
 
-  it('PR #1181 P1: a later inline comment is not hidden by a higher conversation-comment cursor', async () => {
+  it('PR #1181 P1: legacy split-cursor replay preserves a later inline comment without waking', async () => {
     const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
     const { router } = stubRouter();
     const taskWithLegacyCursor = mockTask(
@@ -824,8 +832,9 @@ describe('ReviewFeedbackTaskSpec', () => {
       },
     );
     const seenCursors = [];
+    const store = mockTaskStore([taskWithLegacyCursor]);
     const spec = createReviewFeedbackTaskSpec({
-      taskStore: mockTaskStore([taskWithLegacyCursor]),
+      taskStore: store,
       fetchComments: async (_repo, _pr, cursors) => {
         seenCursors.push(cursors);
         return [
@@ -844,13 +853,16 @@ describe('ReviewFeedbackTaskSpec', () => {
     });
 
     const result = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
-    assert.equal(result.run, true, 'independent inline cursor must admit the later inline comment');
-    assert.equal(result.workItems[0].signal.newComments[0].id, 3_611_000_000);
+    assert.equal(result.run, false, 'legacy history is collected as migration state, not live feedback');
     assert.deepEqual(
       seenCursors[0],
       { inline: 0, conversation: 0 },
       'legacy combined cursors must migrate by replaying each independent source safely',
     );
+    assert.equal(store._patchCalls.length, 1);
+    assert.equal(store._patchCalls[0].patch.review.lastInlineCommentCursor, 3_611_000_000);
+    assert.equal(store._patchCalls[0].patch.review.lastConversationCommentCursor, 0);
+    assert.equal(store._patchCalls[0].patch.review.commentCursorMigrationPending, false);
   });
 
   it('gate prefers advanced persisted cursors over stale in-memory cursors (#406 sibling)', async () => {

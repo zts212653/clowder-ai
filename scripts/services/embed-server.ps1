@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Start local embedding server for Cat Cafe on Windows.
+  Start local embedding server for Clowder AI on Windows.
 
 .DESCRIPTION
   Launches embed-api.py from ~/.cat-cafe/embed-venv.

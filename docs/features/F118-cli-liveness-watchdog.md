@@ -4,11 +4,14 @@ related_features: [F089]
 topics: [observability, cli, reliability, codex, claude-cli]
 doc_kind: spec
 created: 2026-03-14
+tips_exempt: post-close Codex stall termination hardening; no new user action or standalone capability surface
 ---
 
 # F118: CLI Liveness Watchdog & Session Recovery — CLI 进程活性守卫 + 会话恢复
 
 > **Status**: done (Phase D closed) | **Owner**: Ragdoll + Maine Coon | **Priority**: P0 | **Completed**: 2026-03-14 | **Follow-up Hardening**: closed (PR #492, 2026-03-16) | **GAP-2**: Phase D closed — D1 merged (PR #1105), D2 merged (PR #1108), D3+D4 merged (PR #1109), all 2026-04-12
+
+> **2026-07-13 operator override:** 多个真实 Codex 回合在等待 provider continuation 时被 420s stall guard 误判终止。默认策略改为 warning-only + manual Cancel；诊断告警延后到 30 分钟，`CLI_TIMEOUT_MS` 默认 0，只有显式正数配置才 opt in 自动 timeout。此前 hard-cap/auto-kill AC 保留为历史实现记录，不再描述默认运行策略。
 
 ## Why
 
@@ -20,7 +23,7 @@ created: 2026-03-14
 
 ### 观察到的现象
 
-**现象 1 — Maine Coon 1800s 静默超时（Cat Café 内部）**
+**现象 1 — Maine Coon 1800s 静默超时（Clowder AI 内部）**
 
 - Thread: `[thread-id]` / session `019cec11-32cf-74b2-af27-469c43644c37`
 - 表现：Codex CLI 吐出 `thread.started` 后 30 分钟完全静默，被 watchdog 杀掉
@@ -28,7 +31,7 @@ created: 2026-03-14
 - **硬证据**：同一 `cliSessionId` 在挂住期间被另一颗 invocation 成功 resume 使用（审计日志 04:46:16–04:48:02 PDT）
 - Invocation: `6c521978-b5ea-439d-b03b-52444ac4f1e5`（04:41:55 → 05:11:57 PDT / 11:41:55 → 12:11:57 UTC）
 
-**现象 2 — Maine Coon半初始化失败（Cat Café 内部）** ⚠️ 高度一致，非独立证明并发 resume
+**现象 2 — Maine Coon半初始化失败（Clowder AI 内部）** ⚠️ 高度一致，非独立证明并发 resume
 
 - Thread: `[thread-id]` / session `019cec37-8def-75e3-951e-bbc04c1febf9`
 - 表现：session chain 登记了 `cliSessionId`，raw archive 收到 `thread.started`，但 Codex 本地 `~/.codex/sessions/` 无 rollout 文件
@@ -246,7 +249,7 @@ CLI 挂了 (liveness, Phase A+B ✅)
 
 **D2 已合入**（PR #1108, 2026-04-12）：`spawn_started` socket event + per-cat spawning UI + D1 P3 多轮替换回归测试。填补 intent_mode 盲区（0-2min），ThinkingIndicator 显示"启动中..."。
 
-**D3+D4 已合入**（PR #1109, 2026-04-12）：纵深防御层。D3: InvocationTracker TTL guard — `has()` 对超过 75min（2.5× CLI timeout）的 slot 自动清理返回 false。D4: QueueProcessor zombie defense — `processingSlots` 从 `Set` 改为 `Map<string, number>`（记录 startedAt），三入口加 `sweepZombieSlots()`，双重确认（TTL 超时 + tracker.has() 为 false）防误杀。Phase D 全部完成。
+**D3+D4 已合入**（PR #1109, 2026-04-12）：纵深防御层。D3: InvocationTracker TTL guard — `has()` 对超过独立 75min owner-liveness backstop 的 slot 自动清理返回 false；该 backstop 不再派生自 CLI process timeout。D4: QueueProcessor zombie defense — `processingSlots` 从 `Set` 改为 `Map<string, number>`（记录 startedAt），三入口加 `sweepZombieSlots()`，双重确认（TTL 超时 + tracker.has() 为 false）防误杀。Phase D 全部完成。
 
 ## Key Decisions
 
@@ -258,6 +261,7 @@ CLI 挂了 (liveness, Phase A+B ✅)
 | KD-4 | SessionMutex 默认 queue/fail-fast，不默认抢占旧请求 | 防止后来的 thread 杀掉健康请求（Maine Coon review P1） | 2026-03-14 |
 | KD-5 | CPU 增长只影响状态判定，不无限重置 timer；需 bounded extension + hard cap | 防 busy-loop/livelock 永不超时（Maine Coon review P1） | 2026-03-14 |
 | KD-6 | 社区 #86/#98/#99 归入 F118，扩展 scope 为 liveness + recovery + audit closure，不开 F121 | 一条因果链不拆两个 feature，管理成本 > 边界清晰收益（三猫 + operator共识） | 2026-03-14 |
+| KD-7 | 默认静默永不自动终止；`CLI_TIMEOUT_MS=0` 且 stall warning-only，用户 Cancel 是默认唯一终止入口 | CPU/NDJSON 无法区分慢 provider continuation 与死锁；两次 Sol 现场证明自动保险丝会终止尚未交付的合法回合 | 2026-07-13 |
 
 ## Review Gate
 

@@ -1,21 +1,11 @@
 'use client';
 
-/**
- * F246 Phase F: Settled approval history card.
- *
- * Displays a single approved/rejected proposal in the history tab.
- * Shows: feature badge, status chip (✅/❌), summary, requester, decidedAt timestamp.
- */
+/** F246 compact settled-history row. */
 
 import type { SettledApprovalItem } from '@cat-cafe/shared';
 import { useCatNameResolver } from '@/hooks/useCatNameResolver';
-
-const FEATURE_LABELS: Record<string, string> = {
-  F128: '线程',
-  F225: '会话',
-  F193: '派发',
-  F231: '画像',
-};
+import { approvalFeatureMeta } from '@/lib/approval-features';
+import { ApprovalProvenanceLinks } from './ApprovalProvenanceLinks';
 
 function relativeTime(epochMs: number): string {
   const delta = Date.now() - epochMs;
@@ -35,46 +25,44 @@ interface SettledHistoryCardProps {
 
 export function SettledHistoryCard({ item }: SettledHistoryCardProps) {
   const resolveCatName = useCatNameResolver();
-  const featureLabel = FEATURE_LABELS[item.sourceFeatureId] ?? item.sourceFeatureId;
+  const featureMeta = approvalFeatureMeta(item.sourceFeatureId);
   const isApproved = item.status === 'approved';
 
   return (
     <div
-      className="rounded-lg border border-cafe-subtle/30 bg-cafe-surface/40 p-3 space-y-1.5"
+      className="group px-3 py-2.5 transition-colors hover:bg-cafe-surface/55"
       data-testid={`settled-card-${item.proposalId}`}
     >
-      {/* Header row: feature badge + status chip + time */}
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 items-center gap-1.5">
         <span
-          className="px-1.5 py-0.5 rounded text-micro font-medium bg-cafe-subtle/20 text-cafe-interactive/70"
+          className="flex items-center gap-1 text-micro font-medium text-cafe-interactive/60"
           data-testid="settled-card-feature-badge"
         >
-          {featureLabel}
+          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: featureMeta.color }} />
+          {featureMeta.label}
         </span>
         <span
-          className={`px-1.5 py-0.5 rounded text-micro font-semibold ${
-            isApproved
-              ? 'bg-[var(--semantic-success)]/10 text-[var(--semantic-success)]'
-              : 'bg-[var(--semantic-critical)]/10 text-[var(--semantic-critical)]'
+          className={`text-micro font-medium ${
+            isApproved ? 'text-[var(--semantic-success)]' : 'text-[var(--semantic-critical)]'
           }`}
           data-testid="settled-card-status"
         >
           {isApproved ? '✅ 已通过' : '❌ 已拒绝'}
         </span>
+        <span className="truncate text-micro text-cafe-interactive/35">来自 {resolveCatName(item.requesterCatId)}</span>
         <span className="ml-auto text-micro text-cafe-interactive/40" data-testid="settled-card-time">
           {relativeTime(item.decidedAt)}
         </span>
       </div>
 
-      {/* Summary */}
-      <p className="text-sm text-cafe-interactive/80 line-clamp-2" data-testid="settled-card-summary">
-        {item.summary}
-      </p>
-
-      {/* Requester */}
-      <p className="text-micro text-cafe-interactive/40">
-        来自 <span className="font-medium">{resolveCatName(item.requesterCatId)}</span>
-      </p>
+      <div className="mt-1 flex items-start gap-2">
+        <p className="line-clamp-2 min-w-0 flex-1 text-sm text-cafe-interactive/80" data-testid="settled-card-summary">
+          {item.summary}
+        </p>
+      </div>
+      <div className="mt-1">
+        <ApprovalProvenanceLinks navigation={item.navigation} compact />
+      </div>
     </div>
   );
 }

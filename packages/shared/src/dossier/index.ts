@@ -1,5 +1,8 @@
 export {
   _resetDossierCache,
+  getDossierL0Pronouns,
+  getDossierL0RoutingNote,
+  getDossierL0SelfDescription,
   getDossierRosterSummary,
   hasDossierEntry,
   isDossierAvailable,

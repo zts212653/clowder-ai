@@ -30,6 +30,7 @@ import {
   splitCommandArgs,
   validateModelFormatForClient,
 } from '@/components/hub-cat-editor.model';
+import { AccountSection } from '@/components/hub-cat-editor.sections';
 import { AdvancedRuntimeSection } from '@/components/hub-cat-editor-advanced';
 
 const mockApiFetch = vi.mocked(apiFetch);
@@ -148,6 +149,7 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
+      codexCarrier: '',
       provider: '',
       sessionChain: 'true',
       maxPromptTokens: '',
@@ -215,6 +217,7 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
+      codexCarrier: '',
       provider: '',
       sessionChain: 'true',
       maxPromptTokens: '',
@@ -263,6 +266,7 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
+      codexCarrier: '',
       provider: '',
       sessionChain: 'true',
       maxPromptTokens: '',
@@ -324,6 +328,7 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
+      codexCarrier: '',
       provider: '',
       sessionChain: 'true',
       maxPromptTokens: '',
@@ -339,9 +344,9 @@ describe('HubCatEditor', () => {
   });
 
   it('exposes model-aware effort options for Claude and Codex only', () => {
-    expect(getCliEffortOptionsForClient('anthropic')).toEqual(['low', 'medium', 'high', 'max']);
-    expect(getCliEffortOptionsForClient('openai', 'gpt-5.5')).toEqual(['low', 'medium', 'high', 'xhigh']);
-    expect(getCliEffortOptionsForClient('openai', 'gpt-5.6-terra')).toEqual([
+    expect(getCliEffortOptionsForClient('anthropic', 'claude-opus-4-6')).toEqual(['low', 'medium', 'high', 'max']);
+    expect(getCliEffortOptionsForClient('openai', 'gpt-5.4')).toEqual(['low', 'medium', 'high', 'xhigh']);
+    expect(getCliEffortOptionsForClient('openai', 'gpt-5.6-sol')).toEqual([
       'low',
       'medium',
       'high',
@@ -349,38 +354,43 @@ describe('HubCatEditor', () => {
       'max',
       'ultra',
     ]);
-    expect(getCliEffortOptionsForClient('opencode')).toBeNull();
+    expect(getCliEffortOptionsForClient('opencode', 'gpt-5.6-sol')).toBeNull();
   });
 
-  it('hydrates a native effort value that is outside the maintained presets', () => {
+  it('hydrates a provider-native effort outside the maintained presets', () => {
     const form = initialState({
-      id: 'runtime-codex-ultra',
+      id: 'runtime-codex-native',
       displayName: 'Runtime Codex',
       color: { primary: '#16a34a', secondary: '#bbf7d0' },
-      mentionPatterns: ['@runtime-codex-ultra'],
+      mentionPatterns: ['@runtime-codex-native'],
       clientId: 'openai',
       defaultModel: 'gpt-5.4',
       avatar: '/avatars/codex.png',
       roleDescription: '审查',
       personality: '严谨',
-      cli: { effort: 'ultra' },
-    });
+      cli: { effort: 'turbo-native' },
+    } as CatData);
 
-    expect(form.cliEffort).toBe('ultra');
+    expect(form.cliEffort).toBe('turbo-native');
   });
 
-  it('provides editable native effort input with client presets as suggestions', async () => {
-    const onChange = await renderAdvancedRuntimeSection('openai', 'gpt-5.6-terra');
-    const input = queryField<HTMLInputElement>(container, 'input[aria-label="CLI Effort"]');
+  it('renders editable native effort with model-aware presets and provider validation disclosure', async () => {
+    const onChange = await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol');
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="CLI Effort"]');
 
-    expect(input.list).toBeTruthy();
-    const options = Array.from(document.getElementById(input.list?.id ?? '')?.querySelectorAll('option') ?? []).map(
-      (option) => (option as HTMLOptionElement).value,
-    );
-    expect(options).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+    expect(input).not.toBeNull();
+    expect(input?.list?.options ? Array.from(input.list.options).map((option) => option.value) : []).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+      'ultra',
+    ]);
+    expect(container.textContent).toContain('CLI 会返回其自身的校验错误');
 
-    await changeField(input, 'ultra');
-    expect(onChange).toHaveBeenCalledWith({ cliEffort: 'ultra' });
+    await changeField(input!, 'turbo-native');
+    expect(onChange).toHaveBeenCalledWith({ cliEffort: 'turbo-native' });
   });
 
   it('buildCatPayload keeps structured cli.effort separate from raw cliConfigArgs', () => {
@@ -388,6 +398,7 @@ describe('HubCatEditor', () => {
       catId: 'runtime-codex',
       name: '运行时缅因猫',
       displayName: '运行时缅因猫',
+      variantLabel: '',
       nickname: '',
       avatar: '/avatars/codex.png',
       colorPrimary: '#16a34a',
@@ -417,6 +428,332 @@ describe('HubCatEditor', () => {
     const payload = buildCatPayload(form, null) as Record<string, unknown>;
     expect(payload.cli).toEqual({ effort: 'xhigh' });
     expect(payload.cliConfigArgs).toEqual(['--config model_provider="custom"']);
+  });
+
+  it('includes codexCarrier in the cli payload for openai cats', () => {
+    const form = {
+      catId: 'runtime-sol',
+      name: 'Sol',
+      displayName: 'Sol',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/sol.png',
+      colorPrimary: '#64843A',
+      colorSecondary: '#64843A',
+      mentionPatterns: '@runtime-sol',
+      roleDescription: '旗舰推理与编码',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.6-sol',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      codexCarrier: 'app_server',
+      provider: '',
+      sessionChain: 'true',
+      maxPromptTokens: '',
+      maxContextTokens: '',
+      maxMessages: '',
+      maxContentLengthPerMsg: '',
+      ...emptyAcpFields,
+      ...emptyVoiceFields,
+    } as HubCatEditorFormState;
+
+    const payload = buildCatPayload(form, null) as Record<string, unknown>;
+    expect(payload.cli).toEqual({ carrier: 'app_server' });
+  });
+
+  it('clears a stored carrier override when the form selects the env default', () => {
+    const form = {
+      catId: 'runtime-sol',
+      name: 'Sol',
+      displayName: 'Sol',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/sol.png',
+      colorPrimary: '#64843A',
+      colorSecondary: '#64843A',
+      mentionPatterns: '@runtime-sol',
+      roleDescription: '旗舰推理与编码',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.6-sol',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      codexCarrier: '',
+      provider: '',
+      sessionChain: 'true',
+      maxPromptTokens: '',
+      maxContextTokens: '',
+      maxMessages: '',
+      maxContentLengthPerMsg: '',
+      ...emptyAcpFields,
+      ...emptyVoiceFields,
+    } as HubCatEditorFormState;
+    const cat = {
+      id: 'runtime-sol',
+      displayName: 'Sol',
+      color: { primary: '#64843A', secondary: '#64843A' },
+      mentionPatterns: ['@runtime-sol'],
+      clientId: 'openai',
+      defaultModel: 'gpt-5.6-sol',
+      avatar: '/avatars/sol.png',
+      roleDescription: '旗舰推理与编码',
+      personality: '',
+      cli: { command: 'codex', outputFormat: 'json', carrier: 'app_server' },
+    } as CatData;
+
+    const payload = buildCatPayload(form, cat) as Record<string, unknown>;
+    expect(payload.cli).toEqual({ carrier: null });
+  });
+
+  it('ignores codexCarrier for non-openai clients', () => {
+    const form = {
+      catId: 'runtime-kimi',
+      name: 'Kimi',
+      displayName: 'Kimi',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/kimi.png',
+      colorPrimary: '#7c3aed',
+      colorSecondary: '#7c3aed',
+      mentionPatterns: '@runtime-kimi',
+      roleDescription: '中文代码助手',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'kimi',
+      accountRef: 'kimi',
+      defaultModel: 'kimi-k2.5',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      codexCarrier: 'app_server',
+      provider: '',
+      sessionChain: 'true',
+      maxPromptTokens: '',
+      maxContextTokens: '',
+      maxMessages: '',
+      maxContentLengthPerMsg: '',
+      ...emptyAcpFields,
+      ...emptyVoiceFields,
+    } as HubCatEditorFormState;
+
+    const payload = buildCatPayload(form, null) as Record<string, unknown>;
+    expect(payload.cli).toBeUndefined();
+  });
+
+  it('shows the server-resolved effective carrier for openai cats', async () => {
+    const form: HubCatEditorFormState = {
+      catId: 'runtime-codex',
+      name: '运行时缅因猫',
+      displayName: '运行时缅因猫',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/codex.png',
+      colorPrimary: '#16a34a',
+      colorSecondary: '#bbf7d0',
+      mentionPatterns: '@runtime-codex',
+      roleDescription: '审查',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.4',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      codexCarrier: '',
+      provider: '',
+      sessionChain: 'true',
+      maxPromptTokens: '',
+      maxContextTokens: '',
+      maxMessages: '',
+      maxContentLengthPerMsg: '',
+      ...emptyAcpFields,
+      ...emptyVoiceFields,
+    };
+
+    await act(async () => {
+      root.render(
+        React.createElement(AccountSection, {
+          form,
+          modelOptions: [],
+          availableProfiles: [],
+          loadingProfiles: false,
+          effectiveCodexCarrier: { effective: 'app_server', source: 'env' },
+          onChange: vi.fn(),
+        }),
+      );
+    });
+
+    const effective = document.body.querySelector('[data-testid="codex-carrier-effective"]');
+    expect(effective?.textContent).toContain('App Server');
+    expect(effective?.textContent).toContain('全局环境变量');
+  });
+
+  it('does not persist codexCarrier when the ACP transport is enabled', () => {
+    const form = {
+      catId: 'runtime-codex-acp',
+      name: 'ACP 缅因猫',
+      displayName: 'ACP 缅因猫',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/codex.png',
+      colorPrimary: '#16a34a',
+      colorSecondary: '#bbf7d0',
+      mentionPatterns: '@runtime-codex-acp',
+      roleDescription: '审查',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.4',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      codexCarrier: 'app_server',
+      provider: '',
+      sessionChain: 'true',
+      maxPromptTokens: '',
+      maxContextTokens: '',
+      maxMessages: '',
+      maxContentLengthPerMsg: '',
+      ...emptyAcpFields,
+      ...emptyVoiceFields,
+      acpEnabled: true,
+      acpCommand: 'codex',
+      acpStartupArgs: 'acp',
+    } as HubCatEditorFormState;
+
+    const payload = buildCatPayload(form, null) as Record<string, unknown>;
+    expect(payload.acp).toBeDefined();
+    expect(payload.cli).toBeUndefined();
+  });
+
+  it('hides the carrier selector under ACP or cloud-only dispatch', async () => {
+    const form: HubCatEditorFormState = {
+      catId: 'runtime-codex',
+      name: '运行时缅因猫',
+      displayName: '运行时缅因猫',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/codex.png',
+      colorPrimary: '#16a34a',
+      colorSecondary: '#bbf7d0',
+      mentionPatterns: '@runtime-codex',
+      roleDescription: '审查',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.4',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      codexCarrier: '',
+      provider: '',
+      sessionChain: 'true',
+      maxPromptTokens: '',
+      maxContextTokens: '',
+      maxMessages: '',
+      maxContentLengthPerMsg: '',
+      ...emptyAcpFields,
+      ...emptyVoiceFields,
+    };
+
+    // ACP enabled → AcpAgentService wins in the assembly; carrier is a lie.
+    await act(async () => {
+      root.render(
+        React.createElement(AccountSection, {
+          form: { ...form, acpEnabled: true },
+          modelOptions: [],
+          availableProfiles: [],
+          loadingProfiles: false,
+          onChange: vi.fn(),
+        }),
+      );
+    });
+    expect(document.body.textContent).not.toContain('接入方式（Carrier）');
+
+    // Cloud-only (cli removed) → no local Codex dispatch at all.
+    await act(async () => {
+      root.render(
+        React.createElement(AccountSection, {
+          form,
+          modelOptions: [],
+          availableProfiles: [],
+          loadingProfiles: false,
+          codexLocalCapable: false,
+          onChange: vi.fn(),
+        }),
+      );
+    });
+    expect(document.body.textContent).not.toContain('接入方式（Carrier）');
+  });
+
+  it('preserves a provider-native effort when patching an older OpenAI model', () => {
+    const form = {
+      catId: 'runtime-sol',
+      name: 'Sol',
+      displayName: 'Sol',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/sol.png',
+      colorPrimary: '#64843A',
+      colorSecondary: '#64843A',
+      mentionPatterns: '@runtime-sol',
+      roleDescription: '旗舰推理与编码',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.4',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: 'ultra',
+      codexCarrier: '',
+      provider: '',
+      sessionChain: 'true',
+      maxPromptTokens: '',
+      maxContextTokens: '',
+      maxMessages: '',
+      maxContentLengthPerMsg: '',
+      ...emptyAcpFields,
+      ...emptyVoiceFields,
+    } as HubCatEditorFormState;
+    const cat = {
+      id: 'runtime-sol',
+      name: 'Sol',
+      displayName: 'Sol',
+      clientId: 'openai',
+      defaultModel: 'gpt-5.6-sol',
+      accountRef: 'codex',
+      mcpSupport: true,
+      cli: { command: 'codex', outputFormat: 'json', effort: 'ultra' },
+    } as CatData;
+
+    const payload = buildCatPatchPayload(form, cat) as Record<string, unknown>;
+    expect(payload.defaultModel).toBe('gpt-5.4');
+    expect(payload.cli).toEqual({ effort: 'ultra' });
   });
 
   it('splitCommandArgs preserves quoted segments', () => {
@@ -457,6 +794,7 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
+      codexCarrier: '',
       provider: 'anthropic',
       sessionChain: 'true',
       maxPromptTokens: '',
@@ -503,6 +841,7 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
+      codexCarrier: '',
       provider: 'anthropic',
       sessionChain: 'true',
       maxPromptTokens: '',
@@ -595,6 +934,7 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
+      codexCarrier: '',
       provider: '',
       sessionChain: 'true',
       maxPromptTokens: '',
@@ -649,6 +989,7 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
+      codexCarrier: '',
       provider: '',
       sessionChain: 'true',
       maxPromptTokens: '',
@@ -710,6 +1051,7 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
+      codexCarrier: '',
       provider: '',
       sessionChain: 'true',
       maxPromptTokens: '',
@@ -769,6 +1111,7 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
+      codexCarrier: '',
       provider: '',
       sessionChain: 'true',
       maxPromptTokens: '',

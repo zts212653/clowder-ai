@@ -9,7 +9,7 @@ architecture-cell: plugin
 
 # F202: Plugin Framework — local discovery, config, resource activation, and schedule resources
 
-> **Status**: in-progress (Phase 1 merged 2026-05-31 via cat-cafe#1999; Phase 2 scoped 2026-06-08) | **Owner**: community @mindfn + Cat Cafe maintainers | **Priority**: P1
+> **Status**: in-progress (Phase 1 merged 2026-05-31 via cat-cafe#1999; Phase 2 scoped 2026-06-08) | **Owner**: community @mindfn + Clowder AI maintainers | **Priority**: P1
 
 ## Architecture Ownership
 
@@ -25,7 +25,7 @@ Why: F202 introduces the first repository-local plugin lifecycle boundary: manif
 
 ## Why
 
-Cat Cafe already has pieces of a capability ecosystem:
+Clowder AI already has pieces of a capability ecosystem:
 
 - F041 made `.cat-cafe/capabilities.json` the static capability truth source.
 - F126 introduced the limb control-plane boundary.

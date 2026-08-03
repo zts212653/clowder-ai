@@ -25,6 +25,12 @@ type ToolDef = {
   handler: (args: never, extra?: ToolExtra) => Promise<ToolResult>;
 };
 
+type TaskVars = Map<string, Record<string, string>>;
+
+function taskVarsKey(capability: string, taskId: string): string {
+  return `${capability}\0${taskId}`;
+}
+
 function buildParams(config: ProtocolToolConfig, capability: string, vars: Record<string, string>): ExecutionParams {
   return {
     provider: config.provider,
@@ -34,7 +40,7 @@ function buildParams(config: ProtocolToolConfig, capability: string, vars: Recor
   };
 }
 
-function createSubmitTool(config: ProtocolToolConfig, capabilities: string[]): ToolDef {
+function createSubmitTool(config: ProtocolToolConfig, capabilities: string[], taskVars: TaskVars): ToolDef {
   return {
     name: `${config.prefix}_submit`,
     description:
@@ -51,6 +57,7 @@ function createSubmitTool(config: ProtocolToolConfig, capabilities: string[]): T
     handler: (async (input: { capability: string; vars: Record<string, string> }, extra?: ToolExtra) => {
       try {
         const result = await submit(config.template, buildParams(config, input.capability, input.vars), extra?.signal);
+        taskVars.set(taskVarsKey(input.capability, result.taskId), { ...input.vars });
         return successResult(JSON.stringify({ taskId: result.taskId, status: result.status }));
       } catch (err) {
         const raw = err instanceof Error ? err.message : String(err);
@@ -153,7 +160,7 @@ function resolvePollConfig(config: ProtocolToolConfig, capability: string): { in
   return { interval: pollDef?.interval ?? 5000, maxAttempts: pollDef?.maxAttempts ?? 120 };
 }
 
-function createPollTool(config: ProtocolToolConfig, capabilities: string[]): ToolDef {
+function createPollTool(config: ProtocolToolConfig, capabilities: string[], taskVars: TaskVars): ToolDef {
   return {
     name: `${config.prefix}_poll`,
     description:
@@ -172,7 +179,8 @@ function createPollTool(config: ProtocolToolConfig, capabilities: string[]): Too
     handler: (async (input: { capability: string; task_id: string }, extra?: ToolExtra) => {
       try {
         const { interval, maxAttempts } = resolvePollConfig(config, input.capability);
-        const params = buildParams(config, input.capability, {});
+        const contextKey = taskVarsKey(input.capability, input.task_id);
+        const params = buildParams(config, input.capability, taskVars.get(contextKey) ?? {});
         const signal = extra?.signal;
 
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -180,6 +188,7 @@ function createPollTool(config: ProtocolToolConfig, capabilities: string[]): Too
           const result = await poll(config.template, params, input.task_id, signal);
 
           if (result.status === 'succeeded') {
+            taskVars.delete(contextKey);
             if (!result.resultUrl) {
               return errorResult('Poll succeeded but provider returned no resultUrl (malformed result).');
             }
@@ -210,6 +219,7 @@ function createPollTool(config: ProtocolToolConfig, capabilities: string[]): Too
           }
 
           if (result.status === 'failed') {
+            taskVars.delete(contextKey);
             return successResult(JSON.stringify({ status: result.status, error: result.error, attempt }, null, 2));
           }
 
@@ -258,7 +268,8 @@ export function createProtocolTools(config: ProtocolToolConfig): ToolDef[] {
   if (capabilities.length === 0) return [];
 
   if (config.template.mode === 'async') {
-    return [createSubmitTool(config, capabilities), createPollTool(config, capabilities)];
+    const taskVars: TaskVars = new Map();
+    return [createSubmitTool(config, capabilities, taskVars), createPollTool(config, capabilities, taskVars)];
   }
   return [createExecuteTool(config, capabilities)];
 }

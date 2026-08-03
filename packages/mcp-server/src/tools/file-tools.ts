@@ -119,6 +119,32 @@ function loadCollectionManifestRefs(): CollectionManifestRef[] {
 
 function resolveFileSlicePath(inputPath: string): { filePath: string; displayPath: string } | { error: string } {
   if (!inputPath.startsWith(COLLECTION_URI_PREFIX)) {
+    if (path.isAbsolute(inputPath)) {
+      const filePath = path.resolve(inputPath);
+      return { filePath, displayPath: filePath };
+    }
+    const allowedDirs = (process.env['ALLOWED_WORKSPACE_DIRS'] ?? '')
+      .split(/[:,]/)
+      .map((dir) => dir.trim())
+      .filter(Boolean)
+      .map((dir) => path.resolve(dir));
+    if (allowedDirs.length > 0) {
+      const hits: string[] = [];
+      for (const dir of allowedDirs) {
+        const candidate = path.resolve(dir, inputPath);
+        if (fs.existsSync(candidate)) {
+          hits.push(candidate);
+        }
+      }
+      if (hits.length === 1) {
+        return { filePath: hits[0], displayPath: hits[0] };
+      }
+      if (hits.length > 1) {
+        return {
+          error: `Ambiguous relative path "${inputPath}" matched multiple workspace roots: ${hits.join(', ')}. Use an absolute path.`,
+        };
+      }
+    }
     const filePath = path.resolve(inputPath);
     return { filePath, displayPath: filePath };
   }

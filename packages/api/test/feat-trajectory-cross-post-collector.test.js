@@ -87,6 +87,22 @@ describe('F233 CrossPostCollector', () => {
     assert.equal(snapshots.length, 0);
   });
 
+  it('skips legacy self-referential crossPost metadata instead of emitting a thread_merge self-edge', async () => {
+    const messages = [
+      makeCrossPostMessage({
+        threadId: 'thread_same',
+        extra: { crossPost: { sourceThreadId: 'thread_same' } },
+      }),
+    ];
+    const messageStore = makeMessageStoreStub(messages);
+    const featIndex = makeFeatIndexStub({ thread_same: 'F246' });
+
+    const collector = new CrossPostCollector({ messageStore, featIndex });
+    const snapshots = await collector.collectAll();
+
+    assert.equal(snapshots.length, 0);
+  });
+
   it('skips messages where source thread has no feat association', async () => {
     const messages = [makeCrossPostMessage()];
     const messageStore = makeMessageStoreStub(messages);

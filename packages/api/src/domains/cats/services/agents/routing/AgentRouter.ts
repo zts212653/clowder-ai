@@ -39,21 +39,27 @@ import type { TranscriptReader } from '../../session/TranscriptReader.js';
 import type { TranscriptWriter } from '../../session/TranscriptWriter.js';
 import { DeliveryCursorStore } from '../../stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../../stores/ports/DraftStore.js';
-import type { IMessageStore } from '../../stores/ports/MessageStore.js';
+import type { IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
 import type { ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
 import type { ITaskStore } from '../../stores/ports/TaskStore.js';
 import type { IThreadStore, ThreadRoutingPolicyV1, ThreadRoutingScope } from '../../stores/ports/ThreadStore.js';
 import { DEFAULT_THREAD_ID } from '../../stores/ports/ThreadStore.js';
 import type { IWorkflowSopStore } from '../../stores/ports/WorkflowSopStore.js';
-import { SYSTEM_USER_IDS } from '../../stores/visibility.js';
+import { getTimelineOrderTime, SYSTEM_USER_IDS } from '../../stores/visibility.js';
 import type { AgentMessage, AgentService } from '../../types.js';
 import type { InvocationRegistry } from '../invocation/InvocationRegistry.js';
 import type { TaskProgressStore } from '../invocation/TaskProgressStore.js';
 import type { AgentRegistry } from '../registry/AgentRegistry.js';
-import type { PersistenceContext, RouteOptions, RouteStrategyDeps } from '../routing/route-helpers.js';
+import type {
+  A2ASlotTrackingOptions,
+  PersistenceContext,
+  RouteOptions,
+  RouteStrategyDeps,
+} from '../routing/route-helpers.js';
 import { routeParallel } from '../routing/route-parallel.js';
 import { routeSerial } from '../routing/route-serial.js';
 import { resolveCatTarget } from './cat-target-resolver.js';
+import type { HumanDispositionInvocationOrigin } from './human-disposition-invocation-origin.js';
 
 const log = createModuleLogger('agent-router');
 const routeTracer = trace.getTracer('cat-cafe-api', '0.1.0');
@@ -563,6 +569,10 @@ export interface AgentRouterOptions {
   packStore?: import('../../../../packs/PackStore.js').PackStore;
   /** F148: Evidence store for hierarchical context recall */
   evidenceStore?: import('../../../../memory/interfaces.js').IEvidenceStore;
+  /** F282 Phase A: lane-neutral proactive memory prompt carrier. */
+  proactiveMemoryNudgeService?: import('../../../../memory/ProactiveMemoryNudgeService.js').ProactiveMemoryNudgeService;
+  /** F281 Phase C: direct-owner exact-subject feedback projection. */
+  humanDispositionFeedbackContextService?: import('../../../../human-disposition/HumanDispositionFeedbackContextService.js').HumanDispositionFeedbackContextService;
   /** F150: Tool usage counter */
   toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
   /** F188 Phase F AC-F10: Tool event log (append-only sequence) */
@@ -579,24 +589,36 @@ export interface AgentRouterOptions {
   worldStore?: import('../../../../world/interfaces.js').IWorldStore;
   /** F233 Phase B (B2): ball-custody ingest（注入 route deps 供旁路写球权事件，fail-open） */
   ballCustody?: import('../../../../ball-custody/BallCustodyIngest.js').IBallCustodyIngest;
+  /** F167 Phase T: read-only turn-custody projection consumed by the structured stop gate. */
+  turnCustodyProjectionService?: import('../../../../ball-custody/TurnCustodyProjectionService.js').TurnCustodyProjectionService;
   /** F222: Frustration auto-issue store */
   frustrationIssueStore?: import('../../stores/ports/FrustrationIssueStore.js').IFrustrationIssueStore;
   /** F222: Pending request store — cancel burst detection */
   pendingRequestStore?: import('../../stores/ports/PendingRequestStore.js').IPendingRequestStore;
   /** F229: Concierge config store for duty-cat岗位 prompt injection */
   conciergeConfigStore?: import('../../../../concierge/ConciergeConfigStore.js').IConciergeConfigStore;
-  /** F229 KD-17: HandleMap store for concierge R1/R2→anchor mapping */
-  conciergeHandleMapStore?: import('../../../../concierge/ConciergeHandleMapStore.js').IConciergeHandleMapStore;
   /** F229 Phase B: TriagePlan store for triage-plan marker → confirm/cancel card actions */
   conciergeTriagePlanStore?: import('../../../../concierge/ConciergeTriagePlanStore.js').IConciergeTriagePlanStore;
   /** F247 AC-B1c-3 PR-C: Cloud invoke bridge for @gpt-pro → ChatGPT dispatch */
   cloudInvokeBridge?: import('../../cloud-bridge/types.js').ICloudInvokeBridge;
   /** F254 B3: freshnessReinvokeCheck for invoke-single-cat terminal hook */
   freshnessReinvokeCheck?: import('../invocation/invoke-single-cat.js').InvocationDeps['freshnessReinvokeCheck'];
+  /** Durable per-child execution lifecycle; independent from callback-auth registry TTL. */
+  turnExecutionStore?: import('../../stores/ports/TurnExecutionStore.js').ITurnExecutionStore;
   /** F254 Phase C: Freshness state store for carrier tier persistence */
   freshnessStateStore?: import('../../freshness/FreshnessInvocationStateStore.js').FreshnessInvocationStateStore;
+  /** F254 D2: invocation-scoped provider-native freshness broker factory. */
+  providerNativeFreshnessFactory?: import('../invocation/invoke-single-cat.js').InvocationDeps['providerNativeFreshnessFactory'];
+  /** F254 Phase D (AC-D4): Freshness event log for stream output audit trail */
+  freshnessEventLog?: import('../../freshness/FreshnessAttentionEventLog.js').FreshnessAttentionEventLog;
+  /** F254 Phase E: persistent closure + atomic MessageStore output commit. */
+  freshnessOutputCommitCoordinator?: import('../../freshness/glass-box/FreshnessOutputCommitCoordinator.js').FreshnessOutputCommitCoordinator;
   /** F237 Phase 2 (AC-P2-8): Injection trace store for pipeline observability */
   injectionTraceStore?: import('../../../../prompt-hooks/InjectionTraceStore.js').InjectionTraceStore;
+  /** F276: typed rich-card discovery + owner-scoped live proposal status projection. */
+  personMemoryProposalStatusContextResolver?: import('../../../../memory/people/PersonMemoryProposalStatusContextResolver.js').PersonMemoryProposalStatusContextResolver;
+  /** F287: invocation-bound Cue Plane adapter. */
+  memoryCuePromptService?: import('../../../../memory/cue/MemoryCueInvocationPromptService.js').MemoryCueInvocationPromptResolver;
 }
 
 /**
@@ -638,6 +660,8 @@ export class AgentRouter {
     | undefined;
   private packStore?: import('../../../../packs/PackStore.js').PackStore;
   private evidenceStore?: import('../../../../memory/interfaces.js').IEvidenceStore;
+  private proactiveMemoryNudgeService?: import('../../../../memory/ProactiveMemoryNudgeService.js').ProactiveMemoryNudgeService;
+  private humanDispositionFeedbackContextService?: import('../../../../human-disposition/HumanDispositionFeedbackContextService.js').HumanDispositionFeedbackContextService;
   /** F150 */
   private toolUsageCounter?: import('../../tool-usage/ToolUsageCounter.js').ToolUsageCounter;
   /** F188 Phase F AC-F10 */
@@ -652,23 +676,33 @@ export class AgentRouter {
   private worldContextProvider?: import('../../../../world/WorldContextProvider.js').WorldContextProvider;
   private worldStore?: import('../../../../world/interfaces.js').IWorldStore;
   private ballCustody?: import('../../../../ball-custody/BallCustodyIngest.js').IBallCustodyIngest;
+  private turnCustodyProjectionService?: import('../../../../ball-custody/TurnCustodyProjectionService.js').TurnCustodyProjectionService;
   /** F222 */
   private frustrationIssueStore?: import('../../stores/ports/FrustrationIssueStore.js').IFrustrationIssueStore;
   private pendingRequestStore?: import('../../stores/ports/PendingRequestStore.js').IPendingRequestStore;
   /** F229 */
   private conciergeConfigStore?: import('../../../../concierge/ConciergeConfigStore.js').IConciergeConfigStore;
-  /** F229 KD-17 */
-  private conciergeHandleMapStore?: import('../../../../concierge/ConciergeHandleMapStore.js').IConciergeHandleMapStore;
   /** F229 Phase B */
   private conciergeTriagePlanStore?: import('../../../../concierge/ConciergeTriagePlanStore.js').IConciergeTriagePlanStore;
   /** F247 AC-B1c-3 PR-C */
   private cloudInvokeBridge?: import('../../cloud-bridge/types.js').ICloudInvokeBridge;
   /** F254 B3 */
   private freshnessReinvokeCheck?: import('../invocation/invoke-single-cat.js').InvocationDeps['freshnessReinvokeCheck'];
+  private turnExecutionStore?: import('../../stores/ports/TurnExecutionStore.js').ITurnExecutionStore;
   /** F254 Phase C */
   private freshnessStateStore?: import('../../freshness/FreshnessInvocationStateStore.js').FreshnessInvocationStateStore;
+  /** F254 D2 */
+  private providerNativeFreshnessFactory?: import('../invocation/invoke-single-cat.js').InvocationDeps['providerNativeFreshnessFactory'];
+  /** F254 Phase D (AC-D4) */
+  private freshnessEventLog?: import('../../freshness/FreshnessAttentionEventLog.js').FreshnessAttentionEventLog;
+  /** F254 Phase E */
+  private freshnessOutputCommitCoordinator?: import('../../freshness/glass-box/FreshnessOutputCommitCoordinator.js').FreshnessOutputCommitCoordinator;
   /** F237 Phase 2 (AC-P2-8) */
   private injectionTraceStore?: import('../../../../prompt-hooks/InjectionTraceStore.js').InjectionTraceStore;
+  /** F276 */
+  private personMemoryProposalStatusContextResolver?: import('../../../../memory/people/PersonMemoryProposalStatusContextResolver.js').PersonMemoryProposalStatusContextResolver;
+  /** F287 */
+  private memoryCuePromptService?: import('../../../../memory/cue/MemoryCueInvocationPromptService.js').MemoryCueInvocationPromptResolver;
   private speechMentionRe: RegExp;
 
   /**
@@ -762,6 +796,8 @@ export class AgentRouter {
     this.signalArticleLookup = options.signalArticleLookup;
     this.packStore = options.packStore;
     this.evidenceStore = options.evidenceStore;
+    this.proactiveMemoryNudgeService = options.proactiveMemoryNudgeService;
+    this.humanDispositionFeedbackContextService = options.humanDispositionFeedbackContextService;
     this.toolUsageCounter = options.toolUsageCounter;
     this.toolEventLog = options.toolEventLog;
     this.skillLoadEventLog = options.skillLoadEventLog;
@@ -770,15 +806,21 @@ export class AgentRouter {
     this.worldContextProvider = options.worldContextProvider;
     this.worldStore = options.worldStore;
     this.ballCustody = options.ballCustody;
+    this.turnCustodyProjectionService = options.turnCustodyProjectionService;
     this.frustrationIssueStore = options.frustrationIssueStore;
     this.pendingRequestStore = options.pendingRequestStore;
     this.conciergeConfigStore = options.conciergeConfigStore;
-    this.conciergeHandleMapStore = options.conciergeHandleMapStore;
     this.conciergeTriagePlanStore = options.conciergeTriagePlanStore;
     this.cloudInvokeBridge = options.cloudInvokeBridge;
     this.freshnessReinvokeCheck = options.freshnessReinvokeCheck;
+    this.turnExecutionStore = options.turnExecutionStore;
     this.freshnessStateStore = options.freshnessStateStore;
+    this.providerNativeFreshnessFactory = options.providerNativeFreshnessFactory;
+    this.freshnessEventLog = options.freshnessEventLog;
+    this.freshnessOutputCommitCoordinator = options.freshnessOutputCommitCoordinator;
     this.injectionTraceStore = options.injectionTraceStore;
+    this.personMemoryProposalStatusContextResolver = options.personMemoryProposalStatusContextResolver;
+    this.memoryCuePromptService = options.memoryCuePromptService;
   }
 
   refreshFromRegistry(agentRegistry: AgentRegistry): void {
@@ -831,15 +873,9 @@ export class AgentRouter {
     //   (vision-guard / handoff > 250) 仍可能漏掉真正的 user @ → 退化回 participantsWithActivity。
     //   1h cutoff 通过 effective score 时间维度天然 bound 扫描深度（cat msg score 最终 < cutoff
     //   时整页都比 cutoff 老，user msg cutoff 触发 return null），不会无限循环。
-    // F194 Phase Z5 R9 (砚砚 R8 P1): cursor + cutoff 都用 effectiveOrderTime = deliveredAt ?? timestamp
-    //   (与 Redis thread zset score 同口径)。markDelivered 把 score 改成 deliveredAt 但
-    //   msg.timestamp 仍是 send-time，如果 cursor 用 timestamp 跳到老 send-time → 跨页跳过中间
-    //   deliveredAt 排序的页面 → 真正的 user mention 在那段被漏。
-    const effectiveOrderTime = (m: { timestamp?: unknown; deliveredAt?: unknown }): number => {
-      const delivered = typeof m?.deliveredAt === 'number' ? m.deliveredAt : 0;
-      const ts = typeof m?.timestamp === 'number' ? m.timestamp : 0;
-      return delivered > 0 ? delivered : ts;
-    };
+    // Cursor + cutoff use the same publication-order score as Redis. Real-cat
+    // speech stays at authoring time; ordinary queued user work uses delivery.
+    const effectiveOrderTime = (message: StoredMessage): number => getTimelineOrderTime(message);
     const cutoffTimestamp = Date.now() - Z5_TIME_WINDOW_MS;
     let userMessagesSeen = 0;
     let cursorScore: number | undefined;
@@ -854,13 +890,7 @@ export class AgentRouter {
       if (!page || !Array.isArray(page) || page.length === 0) break;
 
       for (let i = page.length - 1; i >= 0; i -= 1) {
-        const m = page[i] as {
-          userId?: unknown;
-          catId?: unknown;
-          mentions?: unknown;
-          timestamp?: unknown;
-          deliveredAt?: unknown;
-        };
+        const m = page[i] as StoredMessage;
         // F194 Phase Z5 R5 + R6 (cloud Codex round-1+2 P1): system-authored notices 不算 user message。
         // R5 只排除了 'system'；R6 改用 visibility.ts 的 SYSTEM_USER_IDS（含 scheduler + system + 未来扩展）
         // — 与 message store 的 isSystemUserMessage 同口径，scheduler 触发的通知一并排除。
@@ -884,7 +914,7 @@ export class AgentRouter {
 
       // 页内没找到，准备下一页 cursor = 当前页最旧消息（ascending → page[0]）。
       // R9: cursor.score = effectiveOrderTime(page[0]) 与 Redis zset score 一致。
-      const oldest = page[0] as { id?: unknown; timestamp?: unknown; deliveredAt?: unknown };
+      const oldest = page[0] as StoredMessage;
       if (typeof oldest?.id !== 'string') break;
       const oldestScore = effectiveOrderTime(oldest);
       if (oldestScore <= 0) break;
@@ -1356,6 +1386,7 @@ export class AgentRouter {
         sessionManager: this.sessionManager,
         threadStore: this.threadStore,
         apiUrl: `http://127.0.0.1:${apiPort}`,
+        ...(this.turnExecutionStore ? { turnExecutionStore: this.turnExecutionStore } : {}),
         ...(this.taskProgressStore ? { taskProgressStore: this.taskProgressStore } : {}),
         ...(this.sessionChainStore ? { sessionChainStore: this.sessionChainStore } : {}),
         ...(this.runtimeSessionStore ? { runtimeSessionStore: this.runtimeSessionStore } : {}),
@@ -1371,18 +1402,26 @@ export class AgentRouter {
         ...(this.guideSessionStore ? { guideSessionStore: this.guideSessionStore } : {}),
         ...(this.dismissTracker ? { dismissTracker: this.dismissTracker } : {}),
         ...(this.conciergeConfigStore ? { conciergeConfigStore: this.conciergeConfigStore } : {}),
-        ...(this.conciergeHandleMapStore ? { conciergeHandleMapStore: this.conciergeHandleMapStore } : {}),
         ...(this.conciergeTriagePlanStore ? { conciergeTriagePlanStore: this.conciergeTriagePlanStore } : {}),
         ...(this.cloudInvokeBridge ? { cloudInvokeBridge: this.cloudInvokeBridge } : {}),
         ...(this.freshnessReinvokeCheck ? { freshnessReinvokeCheck: this.freshnessReinvokeCheck } : {}),
         ...(this.freshnessStateStore ? { freshnessStateStore: this.freshnessStateStore } : {}),
+        ...(this.providerNativeFreshnessFactory
+          ? { providerNativeFreshnessFactory: this.providerNativeFreshnessFactory }
+          : {}),
+        ...(this.memoryCuePromptService ? { memoryCuePromptService: this.memoryCuePromptService } : {}),
       },
       messageStore: this.messageStore,
       deliveryCursorStore: this.deliveryCursorStore,
+      ...(this.taskStore ? { taskStore: this.taskStore } : {}),
       ...(this.draftStore ? { draftStore: this.draftStore } : {}),
       ...(this.socketManager ? { socketManager: this.socketManager } : {}),
       ...(this.packStore ? { packStore: this.packStore } : {}),
       ...(this.evidenceStore ? { evidenceStore: this.evidenceStore } : {}),
+      ...(this.proactiveMemoryNudgeService ? { proactiveMemoryNudgeService: this.proactiveMemoryNudgeService } : {}),
+      ...(this.humanDispositionFeedbackContextService
+        ? { humanDispositionFeedbackContextService: this.humanDispositionFeedbackContextService }
+        : {}),
       ...(this.toolUsageCounter ? { toolUsageCounter: this.toolUsageCounter } : {}),
       ...(this.toolEventLog ? { toolEventLog: this.toolEventLog } : {}),
       ...(this.skillLoadEventLog ? { skillLoadEventLog: this.skillLoadEventLog } : {}),
@@ -1391,7 +1430,15 @@ export class AgentRouter {
       ...(this.frustrationIssueStore ? { frustrationIssueStore: this.frustrationIssueStore } : {}),
       ...(this.pendingRequestStore ? { pendingRequestStore: this.pendingRequestStore } : {}),
       ...(this.ballCustody ? { ballCustody: this.ballCustody } : {}),
+      ...(this.turnCustodyProjectionService ? { turnCustodyProjectionService: this.turnCustodyProjectionService } : {}),
+      ...(this.freshnessEventLog ? { freshnessEventLog: this.freshnessEventLog } : {}),
+      ...(this.freshnessOutputCommitCoordinator
+        ? { freshnessOutputCommitCoordinator: this.freshnessOutputCommitCoordinator }
+        : {}),
       ...(this.injectionTraceStore ? { injectionTraceStore: this.injectionTraceStore } : {}),
+      ...(this.personMemoryProposalStatusContextResolver
+        ? { personMemoryProposalStatusContextResolver: this.personMemoryProposalStatusContextResolver }
+        : {}),
     };
   }
 
@@ -1431,6 +1478,7 @@ export class AgentRouter {
     contentBlocks?: readonly MessageContent[],
     uploadDir?: string,
     signal?: AbortSignal,
+    a2aOptions?: A2ASlotTrackingOptions & Pick<RouteOptions, 'deferA2AEnqueue' | 'ownerAuthProvenance'>,
   ): AsyncIterable<AgentMessage> {
     const resolvedThreadId = threadId ?? DEFAULT_THREAD_ID;
     const targetCats = await this.resolveTargets(message, resolvedThreadId);
@@ -1528,6 +1576,7 @@ export class AgentRouter {
       currentUserMessageId: storedUserMessage.id,
       thinkingMode: legacyThinkingMode,
       routeSpan,
+      ...a2aOptions,
     };
 
     try {
@@ -1560,7 +1609,12 @@ export class AgentRouter {
     userMessageId: string,
     targetCats: CatId[],
     intent: IntentResult,
-    options?: {
+    options: A2ASlotTrackingOptions & {
+      /** Authentication-grade owner provenance; legacy/system producers pass unknown. */
+      ownerAuthProvenance: NonNullable<RouteOptions['ownerAuthProvenance']>;
+      /** F167 Phase T: turn-scoped protocol carrier for the structured stop gate. */
+      turnCustodyWake?: RouteOptions['turnCustodyWake'];
+      turnCustodyWakeForCat?: RouteOptions['turnCustodyWakeForCat'];
       contentBlocks?: readonly MessageContent[];
       uploadDir?: string;
       signal?: AbortSignal;
@@ -1568,18 +1622,25 @@ export class AgentRouter {
        *  cat its own slot signal so canceling one cat does not abort its siblings. */
       signalForCat?: (catId: CatId) => AbortSignal | undefined;
       queueHasQueuedMessages?: (threadId: string) => boolean;
+      getQueuedFreshnessMessagesForCat?: RouteOptions['getQueuedFreshnessMessagesForCat'];
       hasQueuedOrActiveAgentForCat?: (threadId: string, catId: string) => boolean;
+      hasPendingForCat?: (threadId: string, userId: string, catId: string) => boolean;
       /** F185 Phase B: deferred A2A enqueue when fairness gate blocks text-scan expansion */
       deferA2AEnqueue?: RouteOptions['deferA2AEnqueue'];
-      invocationController?: AbortController;
-      trackA2ASlot?: (threadId: string, catId: CatId, userId: string, controller: AbortController) => void;
-      completeA2ASlots?: (threadId: string, catIds: readonly CatId[], controller: AbortController) => void;
       /** ADR-008 S3: pass a Map to collect cursor boundaries; caller acks after succeeded */
       cursorBoundaries?: Map<string, string>;
       /** P1-2: pass to track persistence failures across generator boundary */
       persistenceContext?: PersistenceContext;
+      /** F167 Phase S: generation/terminal fence immediately before route output commit. */
+      beforeOutputCommit?: RouteOptions['beforeOutputCommit'];
       /** F108: parentInvocationId for WorklistRegistry concurrent isolation */
       parentInvocationId?: string;
+      /** Required for every direct invocation path so prompt exposure cannot silently bypass Queue custody. */
+      onPromptMessagesExposed: NonNullable<RouteOptions['onPromptMessagesExposed']>;
+      /** Exact persisted bodies already folded into `message` by the queue caller. */
+      persistedPromptMessageIds?: RouteOptions['persistedPromptMessageIds'];
+      /** F281: required on typed first-party ingress; only direct_owner is injectable. */
+      humanDispositionInvocationOrigin: HumanDispositionInvocationOrigin;
       /** F153: caller trace context for cross-route A2A propagation */
       callerTraceContext?: CallerTraceContext;
       /** Explicit A2A trigger message ID for queue-dispatched stream reply threading */
@@ -1593,6 +1654,9 @@ export class AgentRouter {
       verdictPassWarningEnabled?: boolean;
       /** F254 B3: Freshness re-invoke enqueue for routing layer consumption */
       freshnessReinvokeEnqueue?: RouteOptions['freshnessReinvokeEnqueue'];
+      freshnessSupplementId?: RouteOptions['freshnessSupplementId'];
+      freshnessSupplementRequiredMessageIds?: RouteOptions['freshnessSupplementRequiredMessageIds'];
+      toolExecutionPolicy?: RouteOptions['toolExecutionPolicy'];
     },
   ): AsyncIterable<AgentMessage> {
     const cleanMessage = stripIntentTags(message);
@@ -1686,24 +1750,36 @@ export class AgentRouter {
 
     const strategyDeps = this.getStrategyDeps();
     const routeOptions = {
+      ownerAuthProvenance: options.ownerAuthProvenance,
+      ...(options?.turnCustodyWake ? { turnCustodyWake: options.turnCustodyWake } : {}),
+      ...(options?.turnCustodyWakeForCat ? { turnCustodyWakeForCat: options.turnCustodyWakeForCat } : {}),
       contentBlocks: options?.contentBlocks,
       uploadDir: options?.uploadDir,
       signal: options?.signal,
       signalForCat: options?.signalForCat,
       queueHasQueuedMessages: options?.queueHasQueuedMessages,
+      getQueuedFreshnessMessagesForCat: options?.getQueuedFreshnessMessagesForCat,
       hasQueuedOrActiveAgentForCat: options?.hasQueuedOrActiveAgentForCat,
+      hasPendingForCat: options?.hasPendingForCat,
       deferA2AEnqueue: options?.deferA2AEnqueue,
       freshnessReinvokeEnqueue: options?.freshnessReinvokeEnqueue,
+      freshnessSupplementId: options?.freshnessSupplementId,
+      freshnessSupplementRequiredMessageIds: options?.freshnessSupplementRequiredMessageIds,
+      toolExecutionPolicy: options?.toolExecutionPolicy,
       invocationController: options?.invocationController,
       trackA2ASlot: options?.trackA2ASlot,
       completeA2ASlots: options?.completeA2ASlots,
       promptTags: intent.promptTags,
       currentUserMessageId: userMessageId,
+      persistedPromptMessageIds: options?.persistedPromptMessageIds,
       a2aTriggerMessageId: options?.a2aTriggerMessageId,
+      humanDispositionInvocationOrigin: options.humanDispositionInvocationOrigin,
       thinkingMode,
       ...(options?.cursorBoundaries ? { cursorBoundaries: options.cursorBoundaries } : {}),
       ...(options?.persistenceContext ? { persistenceContext: options.persistenceContext } : {}),
+      ...(options?.beforeOutputCommit ? { beforeOutputCommit: options.beforeOutputCommit } : {}),
       ...(options?.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
+      ...(options?.onPromptMessagesExposed ? { onPromptMessagesExposed: options.onPromptMessagesExposed } : {}),
       routeSpan,
       // F222 P1: thread provenance flag so route-serial/route-parallel can gate detection
       ...(options?.frustrationAutoIssueEligible !== undefined

@@ -135,21 +135,50 @@ export const TERMINAL_STATES = [
 
 export const TERMINAL_DONE_STATES = ['completed', 'abandoned', 'escalated_cvo', 'corrected_then_completed'] as const;
 
-const taskOutcomeEpisodeSchema = z.object({
-  episodeId: z.string().min(1),
-  trigger: z.enum(['user_ask', 'task_created', 'cat_initiated']),
-  threadId: z.string().min(1),
-  participants: z.array(z.string().min(1)).default([]),
-  artifacts: z.array(z.string().min(1)).default([]),
-  signals: z.object({
-    a1WorldTruth: z.array(a1WorldTruthRecordSchema).default([]),
-    a2InteractionDecisions: z.array(a2InteractionDecisionSchema).default([]),
-    proxy: z.array(proxySignalSchema).default([]),
-  }),
-  terminalState: z.enum(TERMINAL_STATES),
-  verdict: z.enum(VERDICT_CLASSES).nullable(),
-  createdAt: z.string().min(1),
-});
+export const TASK_OUTCOME_ATTRIBUTIONS = [
+  'managed_attributed',
+  'managed_unattributed',
+  'unmanaged_not_applicable',
+] as const;
+
+export type TaskOutcomeAttribution = (typeof TASK_OUTCOME_ATTRIBUTIONS)[number];
+
+const taskOutcomeEpisodeSchema = z
+  .object({
+    episodeId: z.string().min(1),
+    trigger: z.enum(['user_ask', 'task_created', 'cat_initiated']),
+    threadId: z.string().min(1),
+    participants: z.array(z.string().min(1)).default([]),
+    artifacts: z.array(z.string().min(1)).default([]),
+    attribution: z.enum(TASK_OUTCOME_ATTRIBUTIONS).default('unmanaged_not_applicable'),
+    workId: z.string().min(1).nullable().default(null),
+    attemptId: z.string().min(1).nullable().default(null),
+    signals: z.object({
+      a1WorldTruth: z.array(a1WorldTruthRecordSchema).default([]),
+      a2InteractionDecisions: z.array(a2InteractionDecisionSchema).default([]),
+      proxy: z.array(proxySignalSchema).default([]),
+    }),
+    terminalState: z.enum(TERMINAL_STATES),
+    verdict: z.enum(VERDICT_CLASSES).nullable(),
+    createdAt: z.string().min(1),
+  })
+  .superRefine((episode, ctx) => {
+    const hasCompleteBinding = episode.workId !== null && episode.attemptId !== null;
+    if (episode.attribution === 'managed_attributed' && !hasCompleteBinding) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['attribution'],
+        message: 'managed_attributed episodes require workId and attemptId',
+      });
+    }
+    if (episode.attribution !== 'managed_attributed' && (episode.workId !== null || episode.attemptId !== null)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['attribution'],
+        message: 'unattributed and not-applicable episodes cannot carry managed-work identifiers',
+      });
+    }
+  });
 
 export type TaskOutcomeEpisode = z.infer<typeof taskOutcomeEpisodeSchema>;
 

@@ -220,91 +220,6 @@ describe('cat_cafe_publish_verdict MCP schema (砚砚 R1 Q3: discriminated union
     assert.ok(!result.success);
   });
 
-  // F192 sop-wiring — sop-trace-eval kind (MCP layer wire-up)
-  it('accepts sop-trace-eval sourceRefs (eval:sop wire-up)', () => {
-    const result = schema.safeParse({
-      domainId: 'eval:sop',
-      packet: { ...validPacket, domainId: 'eval:sop' },
-      sourceRefs: {
-        kind: 'sop-trace-eval',
-        sopDefinitionId: 'development',
-        trace: {
-          sessionId: 'sess-test-123',
-          sopDefinitionId: 'development',
-          observedStage: 'worktree',
-          commands: [{ command: 'git worktree add ../cat-cafe-test -b feat/test', exitCode: 0 }],
-          envSnapshot: { REDIS_URL: 'redis://localhost:6398' },
-          gitState: { branch: 'feat/test', ahead: 0, behind: 0, clean: true },
-          handles: { author: 'opus', reviewer: 'codex' },
-          shaContext: {},
-        },
-      },
-    });
-    assert.ok(result.success, `expected accept, got: ${JSON.stringify(result)}`);
-  });
-
-  it('accepts sop-trace-eval with optional trace fields (worktreeRoot, guardian)', () => {
-    const result = schema.safeParse({
-      domainId: 'eval:sop',
-      packet: { ...validPacket, domainId: 'eval:sop' },
-      sourceRefs: {
-        kind: 'sop-trace-eval',
-        sopDefinitionId: 'development',
-        trace: {
-          sessionId: 'sess-456',
-          sopDefinitionId: 'development',
-          observedStage: 'review',
-          commands: [],
-          envSnapshot: {},
-          gitState: {
-            branch: 'feat/review',
-            ahead: 1,
-            behind: 0,
-            clean: false,
-            worktreeRoot: '/tmp/worktree',
-          },
-          handles: { author: 'opus', reviewer: 'gpt52', guardian: 'sonnet' },
-          shaContext: { prSha: 'abc123' },
-        },
-      },
-    });
-    assert.ok(result.success, `expected accept, got: ${JSON.stringify(result)}`);
-  });
-
-  it('rejects sop-trace-eval with empty sopDefinitionId', () => {
-    const result = schema.safeParse({
-      domainId: 'eval:sop',
-      packet: { ...validPacket, domainId: 'eval:sop' },
-      sourceRefs: {
-        kind: 'sop-trace-eval',
-        sopDefinitionId: '',
-        trace: {
-          sessionId: 'sess-test',
-          sopDefinitionId: 'development',
-          observedStage: 'worktree',
-          commands: [],
-          envSnapshot: {},
-          gitState: { branch: 'main', ahead: 0, behind: 0, clean: true },
-          handles: {},
-          shaContext: {},
-        },
-      },
-    });
-    assert.ok(!result.success, 'empty sopDefinitionId should fail min(1)');
-  });
-
-  it('rejects sop-trace-eval with missing trace', () => {
-    const result = schema.safeParse({
-      domainId: 'eval:sop',
-      packet: { ...validPacket, domainId: 'eval:sop' },
-      sourceRefs: {
-        kind: 'sop-trace-eval',
-        sopDefinitionId: 'development',
-      },
-    });
-    assert.ok(!result.success, 'missing trace should fail');
-  });
-
   // F245 Phase C PR1b — friction-rollup-snapshot kind (this PR)
   it('accepts friction-rollup-snapshot sourceRefs (eval:friction wire-up)', () => {
     const result = schema.safeParse({
@@ -361,25 +276,85 @@ describe('cat_cafe_publish_verdict MCP schema (砚砚 R1 Q3: discriminated union
     assert.ok(!result.success, 'non-integer topN should fail Zod int()');
   });
 
-  it('rejects sop-trace-eval with missing gitState.branch', () => {
+  // F253 Phase C — qc-metrics-rollup kind (砚砚 R1 review blocker: same-class
+  // regression without test coverage)
+  it('accepts qc-metrics-rollup sourceRefs (eval:qc wire-up)', () => {
     const result = schema.safeParse({
-      domainId: 'eval:sop',
-      packet: { ...validPacket, domainId: 'eval:sop' },
+      domainId: 'eval:qc',
+      packet: { ...validPacket, domainId: 'eval:qc' },
       sourceRefs: {
-        kind: 'sop-trace-eval',
-        sopDefinitionId: 'development',
-        trace: {
-          sessionId: 'sess-test',
-          sopDefinitionId: 'development',
-          observedStage: 'worktree',
-          commands: [],
-          envSnapshot: {},
-          gitState: { ahead: 0, behind: 0, clean: true },
-          handles: {},
-          shaContext: {},
-        },
+        kind: 'qc-metrics-rollup',
+        windowStartMs: 1759276800000,
+        windowEndMs: 1759363200000,
       },
     });
-    assert.ok(!result.success, 'missing gitState.branch should fail min(1)');
+    assert.ok(result.success, `expected accept, got: ${JSON.stringify(result)}`);
+  });
+
+  it('rejects qc-metrics-rollup with non-finite windowStartMs', () => {
+    const result = schema.safeParse({
+      domainId: 'eval:qc',
+      packet: { ...validPacket, domainId: 'eval:qc' },
+      sourceRefs: {
+        kind: 'qc-metrics-rollup',
+        windowStartMs: Number.POSITIVE_INFINITY,
+        windowEndMs: 1759363200000,
+      },
+    });
+    assert.ok(!result.success, 'non-finite windowStartMs should fail Zod finite()');
+  });
+
+  it('rejects qc-metrics-rollup with non-number windowEndMs', () => {
+    const result = schema.safeParse({
+      domainId: 'eval:qc',
+      packet: { ...validPacket, domainId: 'eval:qc' },
+      sourceRefs: {
+        kind: 'qc-metrics-rollup',
+        windowStartMs: 1759276800000,
+        windowEndMs: 'not-a-number',
+      },
+    });
+    assert.ok(!result.success, 'non-number windowEndMs should fail Zod number()');
+  });
+
+  it('rejects qc-metrics-rollup with missing windowStartMs', () => {
+    const result = schema.safeParse({
+      domainId: 'eval:qc',
+      packet: { ...validPacket, domainId: 'eval:qc' },
+      sourceRefs: {
+        kind: 'qc-metrics-rollup',
+        windowEndMs: 1759363200000,
+      },
+    });
+    assert.ok(!result.success, 'missing windowStartMs should fail Zod required');
+  });
+
+  it('rejects caller-selected freshness fixture ids because coverage is server-owned', () => {
+    const result = schema.safeParse({
+      domainId: 'eval:freshness',
+      packet: { ...validPacket, domainId: 'eval:freshness' },
+      sourceRefs: {
+        kind: 'freshness-closure-replay',
+        windowStartMs: 1700000000000,
+        windowEndMs: 1700086400000,
+        threadIds: ['thread-f254'],
+        fixtureIds: ['original-double-message-dogfood', 'connector-blocked'],
+      },
+    });
+    assert.ok(!result.success, 'fixtureIds must not be part of the caller-facing selector contract');
+  });
+
+  it('rejects caller-invented freshness fixture ids', () => {
+    const result = schema.safeParse({
+      domainId: 'eval:freshness',
+      packet: { ...validPacket, domainId: 'eval:freshness' },
+      sourceRefs: {
+        kind: 'freshness-closure-replay',
+        windowStartMs: 1700000000000,
+        windowEndMs: 1700086400000,
+        fixtureIds: ['caller-authored-metrics'],
+      },
+    });
+    assert.ok(!result.success);
   });
 });

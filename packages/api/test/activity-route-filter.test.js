@@ -15,6 +15,11 @@ describe('shouldTrackApiActivity', () => {
     assert.equal(shouldTrackApiActivity('/api/ready?cacheBust=1'), false);
   });
 
+  it('skips passive capability-tip telemetry uploads', () => {
+    assert.equal(shouldTrackApiActivity('/api/tip-telemetry/batch'), false);
+    assert.equal(shouldTrackApiActivity('/api/tip-telemetry/batch?retry=1'), false);
+  });
+
   it('keeps existing brake and non-API exclusions', () => {
     assert.equal(shouldTrackApiActivity('/api/brake/status'), false);
     assert.equal(shouldTrackApiActivity('/health'), false);

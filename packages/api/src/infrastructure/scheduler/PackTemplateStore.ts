@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { isF255PresentLoopBuiltinRef } from './f255-template-boundary.js';
 import type { DisplayCategory, SubjectKind, TriggerSpec } from './types.js';
 
 export interface PackTemplateDef {
@@ -18,6 +19,9 @@ export class PackTemplateStore {
   constructor(private db: Database.Database) {}
 
   install(def: PackTemplateDef): void {
+    if (isF255PresentLoopBuiltinRef(def.builtinTemplateRef)) {
+      throw new Error('Present Loop is owned by F255 cat-life settings and cannot be installed as a pack delegate');
+    }
     // Namespace validation: must start with "pack:"
     if (!def.templateId.startsWith('pack:')) {
       throw new Error(`Pack template ID must start with pack: — got "${def.templateId}"`);

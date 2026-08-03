@@ -10,6 +10,7 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
+import { z } from 'zod';
 import type { ICommunityRepoConfigStore } from '../domains/community/CommunityRepoConfigStore.js';
 import { requirePrivilegedRouteOwner } from '../utils/privileged-route-guard.js';
 
@@ -21,6 +22,14 @@ const COMMUNITY_REPO_CONFIG_GATE = {
   surface: 'Community repo config routes',
   ownerErrorMessage: 'Community repo config routes can only be accessed by the configured owner',
 };
+
+const repoConfigInputSchema = z.object({
+  repo: z.string().min(1),
+  guardThreadId: z.string().min(1),
+  guardCatId: z.string().min(1),
+  reviewMode: z.enum(['observe_only', 'maintainer_review']).optional(),
+  cloudReviewPolicy: z.enum(['optional', 'required']).optional(),
+});
 
 export const communityRepoConfigRoutes: FastifyPluginAsync<CommunityRepoConfigRoutesOptions> = async (
   fastify,
@@ -42,28 +51,10 @@ export const communityRepoConfigRoutes: FastifyPluginAsync<CommunityRepoConfigRo
     const gate = requirePrivilegedRouteOwner(req, reply, COMMUNITY_REPO_CONFIG_GATE);
     if (!gate.ok) return gate.response;
 
-    const body = req.body as Record<string, unknown> | null;
-    if (!body || typeof body !== 'object') {
-      return reply.code(400).send({ error: 'Request body required' });
-    }
+    const parsed = repoConfigInputSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'Invalid repo config', details: parsed.error.issues });
 
-    const { repo, guardThreadId, guardCatId } = body as {
-      repo?: string;
-      guardThreadId?: string;
-      guardCatId?: string;
-    };
-
-    if (!repo || typeof repo !== 'string') {
-      return reply.code(400).send({ error: 'repo is required (string)' });
-    }
-    if (!guardThreadId || typeof guardThreadId !== 'string') {
-      return reply.code(400).send({ error: 'guardThreadId is required (string)' });
-    }
-    if (!guardCatId || typeof guardCatId !== 'string') {
-      return reply.code(400).send({ error: 'guardCatId is required (string)' });
-    }
-
-    const config = await repoConfigStore.upsert({ repo, guardThreadId, guardCatId });
+    const config = await repoConfigStore.upsert(parsed.data);
     return reply.send(config);
   });
 

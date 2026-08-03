@@ -37,6 +37,35 @@ describe('F128 propose / approve / reject lifecycle', () => {
     assert.equal(stored.parentThreadId, source.id);
   });
 
+  test('direct user invocation publishes against its exact prompt origin without an A2A trigger', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const origin = await ctx.messageStore.append({
+      userId: 'alice',
+      catId: null,
+      content: 'Please propose a child thread directly',
+      mentions: ['opus'],
+      timestamp: Date.now(),
+      threadId: source.id,
+    });
+    const auth = await ctx.registry.create('alice', 'opus', source.id, undefined, undefined, undefined, origin.id);
+
+    const res = await ctx.app.inject({
+      method: 'POST',
+      url: '/api/callbacks/propose-thread',
+      headers: { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken },
+      payload: { title: 'Direct proposal', reason: 'Exact user-message origin' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const stored = await ctx.proposalStore.get(res.json().proposalId);
+    assert.deepEqual(stored.publication.envelope.originRef, {
+      kind: 'message',
+      threadId: source.id,
+      messageId: origin.id,
+    });
+  });
+
   test('propose returns stale_ignored when a newer invocation supersedes', async () => {
     const ctx = await createProposalTestContext();
     const source = await ctx.threadStore.create('alice', 'Source');
@@ -69,6 +98,46 @@ describe('F128 propose / approve / reject lifecycle', () => {
     const secondBody = JSON.parse(second.body);
     assert.equal(secondBody.proposalId, firstId);
     assert.equal(secondBody.deduped, true);
+  });
+
+  test('dedup retry from a later callback preserves the original proposal origin', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const payload = {
+      title: 'Origin-stable proposal',
+      reason: 'Retry must not re-anchor',
+      clientRequestId: 'origin-key',
+    };
+    const invoke = async (content) => {
+      const origin = await ctx.messageStore.append({
+        userId: 'alice',
+        catId: null,
+        content,
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: source.id,
+      });
+      const auth = await ctx.registry.create('alice', 'opus', source.id, undefined, undefined, undefined, origin.id);
+      const response = await ctx.app.inject({
+        method: 'POST',
+        url: '/api/callbacks/propose-thread',
+        headers: { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken },
+        payload,
+      });
+      return { origin, response };
+    };
+
+    const first = await invoke('Original approval trigger');
+    assert.equal(first.response.statusCode, 200);
+    const retry = await invoke('Later callback reusing the transport key');
+    assert.equal(retry.response.statusCode, 200);
+    assert.equal(retry.response.json().deduped, true);
+    const stored = await ctx.proposalStore.get(first.response.json().proposalId);
+    assert.deepEqual(stored.publication.envelope.originRef, {
+      kind: 'message',
+      threadId: source.id,
+      messageId: first.origin.id,
+    });
   });
 
   test('approve creates a new thread and marks proposal approved', async () => {
@@ -132,6 +201,40 @@ describe('F128 propose / approve / reject lifecycle', () => {
     const proposal = await ctx.proposalStore.get(proposalId);
     assert.equal(proposal.status, 'rejected');
     assert.equal(proposal.rejectionReason, 'not now');
+  });
+
+  test('staged publication blocks approve and reject before thread or proposal mutation', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const approveProposal = ctx.proposalStore.create({
+      sourceThreadId: source.id,
+      sourceInvocationId: 'inv-staged-approve',
+      sourceCatId: 'opus',
+      title: 'staged approve',
+      reason: 'race',
+      parentThreadId: source.id,
+      preferredCats: [],
+      projectPath: 'default',
+      createdBy: 'alice',
+    });
+    const rejectProposal = ctx.proposalStore.create({
+      sourceThreadId: source.id,
+      sourceInvocationId: 'inv-staged-reject',
+      sourceCatId: 'opus',
+      title: 'staged reject',
+      reason: 'race',
+      parentThreadId: source.id,
+      preferredCats: [],
+      projectPath: 'default',
+      createdBy: 'alice',
+    });
+    const sizeBefore = ctx.threadStore.size;
+
+    assert.equal((await ctx.approve('alice', approveProposal.proposalId)).statusCode, 409);
+    assert.equal((await ctx.reject('alice', rejectProposal.proposalId)).statusCode, 409);
+    assert.equal(ctx.threadStore.size, sizeBefore);
+    assert.equal((await ctx.proposalStore.get(approveProposal.proposalId)).status, 'pending');
+    assert.equal((await ctx.proposalStore.get(rejectProposal.proposalId)).status, 'pending');
   });
 
   test('reject after approve returns 409', async () => {

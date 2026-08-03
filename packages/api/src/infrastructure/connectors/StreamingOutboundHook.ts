@@ -28,10 +28,16 @@ export interface StreamingOutboundHookOptions {
   readonly log: FastifyBaseLogger;
   readonly updateIntervalMs?: number;
   readonly minDeltaChars?: number;
+  /**
+   * F254 Phase E: keep connector placeholders receipt-only until the output
+   * commit boundary decides the final answer. Production enables this.
+   */
+  readonly receiptOnlyUntilCommit?: boolean;
 }
 
 export class StreamingOutboundHook {
   private readonly sessions = new Map<string, StreamingSession[]>();
+  private readonly catchingUpSessions = new Map<string, StreamingSession[]>();
   private readonly pendingCleanup = new Map<string, StreamingSession[]>();
   /** K2: Tracks inline-final sessions separately so cleanupPlaceholders can clear stale entries. */
   private readonly pendingInlineCleanup = new Map<string, StreamingSession[]>();
@@ -40,15 +46,21 @@ export class StreamingOutboundHook {
   private readonly lateStartedCleanup = new Map<string, StreamingSession[]>();
   private readonly updateIntervalMs: number;
   private readonly minDeltaChars: number;
+  private readonly receiptOnlyUntilCommit: boolean;
 
   constructor(private readonly opts: StreamingOutboundHookOptions) {
     this.updateIntervalMs = opts.updateIntervalMs ?? DEFAULT_UPDATE_INTERVAL_MS;
     this.minDeltaChars = opts.minDeltaChars ?? DEFAULT_MIN_DELTA_CHARS;
+    this.receiptOnlyUntilCommit = opts.receiptOnlyUntilCommit ?? false;
   }
 
   /** Scope key for isolation: `threadId:invocationId` when available, else `threadId`. */
   private scopeKey(threadId: string, invocationId?: string): string {
     return invocationId ? `${threadId}:${invocationId}` : threadId;
+  }
+
+  private catchKey(threadId: string, catId?: CatId): string {
+    return `${threadId}:${catId ?? ''}`;
   }
 
   private rememberEndedBeforeStart(key: string, finalText: string): void {
@@ -120,6 +132,13 @@ export class StreamingOutboundHook {
     senderHint?: { id: string; name?: string },
   ): Promise<void> {
     const key = this.scopeKey(threadId, invocationId);
+    const catchKey = this.catchKey(threadId, catId);
+    const catchingUp = this.catchingUpSessions.get(catchKey);
+    if (catchingUp) {
+      this.catchingUpSessions.delete(catchKey);
+      this.sessions.set(key, catchingUp);
+      return;
+    }
     const bindings = await this.opts.bindingStore.getByThread(threadId);
     const sessions: StreamingSession[] = [];
 
@@ -176,6 +195,7 @@ export class StreamingOutboundHook {
   }
 
   async onStreamChunk(threadId: string, accumulatedText: string, invocationId?: string): Promise<void> {
+    if (this.receiptOnlyUntilCommit) return;
     const key = this.scopeKey(threadId, invocationId);
     const sessions = this.sessions.get(key);
     if (!sessions) {
@@ -223,6 +243,74 @@ export class StreamingOutboundHook {
     }
     if (inlineDeferred.length > 0) {
       this.pendingInlineCleanup.set(key, inlineDeferred);
+    }
+  }
+
+  async onClosureCatchingUp(threadId: string, catId: CatId, invocationId?: string): Promise<void> {
+    const key = this.scopeKey(threadId, invocationId);
+    const sessions = this.sessions.get(key);
+    if (!sessions) return;
+    this.sessions.delete(key);
+    this.pendingChunks.delete(key);
+    this.clearEndedBeforeStart(key);
+    this.catchingUpSessions.set(this.catchKey(threadId, catId), sessions);
+
+    for (const session of sessions) {
+      const adapter = this.opts.adapters.get(session.connectorId);
+      if (!adapter?.editMessage || !session.platformMessageId) continue;
+      try {
+        await adapter.editMessage(
+          session.externalChatId,
+          session.platformMessageId,
+          '🔄 收到新消息，正在重新整理回复…',
+        );
+      } catch (err) {
+        this.opts.log.warn({ err, connectorId: session.connectorId }, '[StreamingOutbound] catch state update failed');
+      }
+    }
+  }
+
+  async onClosureBlocked(
+    threadId: string,
+    catId: CatId,
+    reason: string,
+    invocationId?: string,
+    recoveryUrl?: string,
+  ): Promise<void> {
+    const key = this.scopeKey(threadId, invocationId);
+    const catchKey = this.catchKey(threadId, catId);
+    const sessions = this.sessions.get(key) ?? this.catchingUpSessions.get(catchKey);
+    this.sessions.delete(key);
+    this.catchingUpSessions.delete(catchKey);
+    this.pendingChunks.delete(key);
+    this.clearEndedBeforeStart(key);
+    const recoveryText = `⚠️ 未能完成最新消息重读（${reason}）。请打开 Clowder AI 重试${recoveryUrl ? `：${recoveryUrl}` : '。'}`;
+
+    if (!sessions || sessions.length === 0) {
+      const bindings = await this.opts.bindingStore.getByThread(threadId);
+      for (const binding of bindings) {
+        const adapter = this.opts.adapters.get(binding.connectorId);
+        if (!adapter) continue;
+        try {
+          await adapter.sendReply(binding.externalChatId, recoveryText);
+        } catch (err) {
+          this.opts.log.warn({ err, connectorId: binding.connectorId }, '[StreamingOutbound] blocked reply failed');
+        }
+      }
+      return;
+    }
+
+    for (const session of sessions) {
+      const adapter = this.opts.adapters.get(session.connectorId);
+      if (!adapter?.editMessage || !session.platformMessageId) continue;
+      try {
+        await adapter.editMessage(session.externalChatId, session.platformMessageId, recoveryText);
+      } catch (err) {
+        this.opts.log.warn(
+          { err, connectorId: session.connectorId },
+          '[StreamingOutbound] blocked state update failed',
+        );
+      }
     }
   }
 

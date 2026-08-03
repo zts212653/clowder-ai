@@ -16,7 +16,7 @@
  * version — no pinned binary required (2.1.170 pin removed).
  */
 import type { CatId } from '@cat-cafe/shared';
-import type { AgentMessage, AgentService, AgentServiceOptions } from '../../types.js';
+import type { AgentMessage, AgentService, AgentServiceOptions, ToolExecutionPolicy } from '../../types.js';
 import { ClaudeAgentService } from './ClaudeAgentService.js';
 import { ClaudeBgCarrierService } from './ClaudeBgCarrierService.js';
 import { ClaudeInteractivePtyCarrierService } from './ClaudeInteractivePtyCarrierService.js';
@@ -177,12 +177,22 @@ export class FallbackCarrierWrapper implements AgentService {
     return this.carrier.injectsL0Natively?.() ?? false;
   }
 
-  usesChainKeyResume(): boolean {
-    return this.carrier.usesChainKeyResume?.() ?? false;
+  supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
+    return this.carrier.supportsToolExecutionPolicy?.(policy) ?? false;
   }
 
-  needsServerRoutingGuard(): boolean {
-    return this.carrier.needsServerRoutingGuard?.() ?? false;
+  freshnessCarrierCapability(): import('../../types.js').AgentFreshnessCarrierCapability {
+    return (
+      this.carrier.freshnessCarrierCapability?.() ?? {
+        provider: 'anthropic',
+        carrier: 'other',
+        deliverySemantics: 'unsupported',
+      }
+    );
+  }
+
+  usesChainKeyResume(): boolean {
+    return this.carrier.usesChainKeyResume?.() ?? false;
   }
 
   // ─── Invoke with fallback ───

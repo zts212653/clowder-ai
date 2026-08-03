@@ -72,6 +72,33 @@ describe('callback-scope-helpers', () => {
     });
   });
 
+  test('resolveScopedThreadId allows scoped soft-deleted thread for read/write route policy to decide', async () => {
+    const result = await resolveScopedThreadId(record, 'thread-b', {
+      threadStore: {
+        async get() {
+          return { id: 'thread-b', createdBy: 'user-1', deletedAt: Date.now() };
+        },
+      },
+    });
+    assert.deepEqual(result, { ok: true, threadId: 'thread-b' });
+  });
+
+  test('resolveScopedThreadId does not reveal soft-deleted thread overrides owned by another user', async () => {
+    const result = await resolveScopedThreadId(record, 'thread-b', {
+      threadStore: {
+        async get() {
+          return { id: 'thread-b', createdBy: 'user-2', deletedAt: Date.now() };
+        },
+      },
+      accessDeniedError: 'Thread access denied',
+    });
+    assert.deepEqual(result, {
+      ok: false,
+      statusCode: 403,
+      error: 'Thread access denied',
+    });
+  });
+
   test('resolveScopedThreadId allows thread override owned by the same user', async () => {
     const result = await resolveScopedThreadId(record, 'thread-b', {
       threadStore: {

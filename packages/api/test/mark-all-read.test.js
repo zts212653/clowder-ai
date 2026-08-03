@@ -93,6 +93,29 @@ describe('POST /api/threads/read/mark-all', () => {
     assert.ok(body.advancedCount >= 2, `advancedCount=${body.advancedCount} should be >= 2`);
   });
 
+  it('acks threads whose latest visible item is queued cat-authored speech', async () => {
+    const thread = threadStore.create('alice', 'Source-cat seed only');
+    const seed = messageStore.append({
+      userId: 'alice',
+      catId: 'codex-sol',
+      content: 'published source-cat seed',
+      mentions: ['opus'],
+      timestamp: 1000,
+      threadId: thread.id,
+      deliveryStatus: 'queued',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/read/mark-all',
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).advancedCount, 1);
+    assert.equal((await readStateStore.get('alice', thread.id)).lastReadMessageId, seed.id);
+  });
+
   it('is idempotent — second call advances 0', async () => {
     const t = threadStore.create('alice', 'Thread X');
     messageStore.append({

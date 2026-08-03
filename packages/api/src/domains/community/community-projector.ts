@@ -15,11 +15,38 @@
  *  - case.reported side-effect: sets lastPublicCommentAt to event.at.
  */
 
-import type { CommunityEvent, CommunityObjectProjection, CommunityObjectState } from '@cat-cafe/shared';
+import type {
+  CommunityEvent,
+  CommunityObjectProjection,
+  CommunityObjectState,
+  IssueFixEvidence,
+} from '@cat-cafe/shared';
 import type { ICommunityEventLog } from './CommunityEventLog.js';
 import type { ICommunityObjectStore } from './CommunityObjectStore.js';
 import { parseLinkedIssues } from './community-link-parser.js';
-import { transition } from './community-state-machine.js';
+import { isExactSuppressedCommunityEvent, transition } from './community-state-machine.js';
+import {
+  applyExternalReviewProjectionEvent,
+  isExternalReviewEventKind,
+  isExternalReviewTerminalEventKind,
+} from './external-review/external-review-projector.js';
+import { selectIssueFixReadiness } from './issue-analysis/issue-fix-evidence.js';
+
+function issueFixEvidenceFromEvent(event: CommunityEvent): IssueFixEvidence | null {
+  if (event.kind === 'issue.commented' || event.kind === 'case.fix_evidence_recorded') {
+    const decision = selectIssueFixReadiness({ events: [event] });
+    return decision.kind === 'ready' ? decision.evidence : null;
+  }
+  if (event.kind !== 'pr.merged' || typeof event.payload.linkedPr !== 'string') return null;
+  const linked = /^pr:(.+)#(\d+)$/.exec(event.payload.linkedPr);
+  if (!linked) return null;
+  const number = Number(linked[2]);
+  return {
+    kind: 'pull_request',
+    url: `https://github.com/${linked[1]}/pull/${number}`,
+    number,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Parse subjectKey → repo/type/number
@@ -64,6 +91,8 @@ function createProjection(
     linkedIssues: [],
     linkedPrs: [],
     closureWaiver: null,
+    issueFixEvidence: null,
+    externalReview: null,
     appliedEventCount: 0,
     lastRejectedEvent: null,
     deliveryCursor: null,
@@ -91,18 +120,35 @@ export class CommunityProjector {
     const existing = await this.objectStore.get(event.subjectKey);
     const proj: CommunityObjectProjection = existing ?? createProjection(event.subjectKey, 'new', now);
 
+    // F168 Phase F-Step3: external review lifecycle is an orthogonal aggregate
+    // on the same rebuildable projection. It does not mutate the generic case
+    // state and never executes wake/GitHub side effects during replay.
+    if (isExternalReviewEventKind(event.kind)) {
+      const result = applyExternalReviewProjectionEvent(proj.externalReview, event);
+      if (!result.ok) return;
+      await this.objectStore.save({
+        ...proj,
+        externalReview: result.value,
+        appliedEventCount: proj.appliedEventCount + 1,
+        lastRejectedEvent: null,
+        updatedAt: now,
+      });
+      return;
+    }
+
     const snapshot = {
       lastPublicCommentAt: proj.lastPublicCommentAt,
       closureWaiver: proj.closureWaiver,
     };
 
     const result = transition(proj.state, event, snapshot);
+    const exactSuppressed = event.classification === 'informational' && isExactSuppressedCommunityEvent(event);
 
     if (!result.ok) {
       if (event.classification === 'informational') {
         // Internal calibration events (eval records) are not external activity —
         // skip projection entirely so rebuild() doesn't corrupt lastExternalActivityAt.
-        if (event.kind === 'case.route_decision_eval') {
+        if (event.kind === 'case.route_decision_eval' || exactSuppressed) {
           return;
         }
         // Cloud R2 P2b: informational activity events (issue.commented, issue.labeled,
@@ -112,6 +158,7 @@ export class CommunityProjector {
         const updated: CommunityObjectProjection = {
           ...proj,
           lastExternalActivityAt: event.at,
+          issueFixEvidence: issueFixEvidenceFromEvent(event) ?? proj.issueFixEvidence,
           updatedAt: now,
         };
         await this.objectStore.save(updated);
@@ -135,11 +182,18 @@ export class CommunityProjector {
       lastRejectedEvent: null,
       updatedAt: now,
     };
+    if (proj.externalReview && isExternalReviewTerminalEventKind(event.kind)) {
+      const externalReviewResult = applyExternalReviewProjectionEvent(proj.externalReview, event);
+      if (externalReviewResult.ok) updated.externalReview = externalReviewResult.value;
+    }
+    if (!exactSuppressed) {
+      updated.issueFixEvidence = issueFixEvidenceFromEvent(event) ?? updated.issueFixEvidence;
+    }
 
     // Side-effect: informational events (issue.commented, pr.review_submitted, etc.)
     // always update lastExternalActivityAt, even when they cause a state transition
     // (e.g. awaiting_external → in_progress restore on external actor comment).
-    if (event.classification === 'informational') {
+    if (event.classification === 'informational' && !exactSuppressed) {
       updated.lastExternalActivityAt = event.at;
     }
 

@@ -183,6 +183,34 @@ describe('POST /api/threads/:id/branch (ADR-008 D4 / S7)', () => {
     await app.close();
   });
 
+  it('can branch from queued cat-authored speech already published to the timeline', async () => {
+    const messageStore = new MessageStore();
+    const threadStore = createMockThreadStore();
+    seedThread(messageStore, threadStore);
+    const seed = messageStore.append({
+      userId: 'user-1',
+      catId: 'codex',
+      content: 'published source-cat seed',
+      mentions: ['opus'],
+      timestamp: 1004,
+      threadId: 'thread-orig',
+      deliveryStatus: 'queued',
+    });
+    const { app } = await setupApp(messageStore, threadStore);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-orig/branch',
+      payload: { fromMessageId: seed.id, userId: 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 201, res.body);
+    const body = res.json();
+    assert.equal(body.messageCount, 5);
+    assert.equal(messageStore.getByThread(body.threadId, 100).at(-1).content, 'published source-cat seed');
+    await app.close();
+  });
+
   it('replaces last message content when editedContent is provided', async () => {
     const messageStore = new MessageStore();
     const threadStore = createMockThreadStore();
