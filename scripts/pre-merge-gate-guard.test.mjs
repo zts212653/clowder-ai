@@ -142,6 +142,7 @@ describe('pre-merge gate guard', () => {
     try {
       const result = runGuard(tempDir, ['acquire', '--lock-dir', lockDir, '--holder-pid', String(process.pid)], {
         CAT_CAFE_FSEVENTSD_RSS_MAX_KB: '1000',
+        CAT_CAFE_GATE_GUARD_TOTAL_MEMORY_KB_FIXTURE: '50000000',
       });
       assert.equal(result.status, 0, result.stderr);
       assert.match(result.stderr, /fseventsd RSS/);
