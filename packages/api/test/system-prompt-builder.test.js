@@ -2159,6 +2159,7 @@ describe('SystemPromptBuilder', () => {
     const headings = rulesText
       .split('\n')
       .filter((l) => /^###?\s+(P\d|W\d)/.test(l))
+      .map((line) => line.replace(/\r$/, ''))
       .sort()
       .join('\n');
     const hash = createHash('sha256').update(headings).digest('hex').slice(0, 16);

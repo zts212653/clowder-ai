@@ -243,7 +243,7 @@ describe('Multi-Mention Routes', () => {
       payload: {
         targets: ['codex'],
         question: 'Route to a dynamic child',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
     assert.equal(res.statusCode, 200);
@@ -263,7 +263,7 @@ describe('Multi-Mention Routes', () => {
       userId: 'user-1',
       catId: null,
       content: 'M1 shared wave',
-      mentions: ['opus', 'fable5'],
+      mentions: ['opus-5', 'fable5'],
       threadId: 'thread-1',
       timestamp: 1,
     });
@@ -300,7 +300,7 @@ describe('Multi-Mention Routes', () => {
             parentInvocationId: invocationId,
             threadId: 'thread-1',
             userId: 'user-1',
-            catId: 'opus',
+            catId: 'opus-5',
             executionKind: 'ordinary',
             status: 'running',
             startedAt: 1,
@@ -318,7 +318,7 @@ describe('Multi-Mention Routes', () => {
       payload: {
         targets: ['codex'],
         question: 'Continue the actual work',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -352,7 +352,7 @@ describe('Multi-Mention Routes', () => {
       payload: {
         targets: ['codex'],
         question: 'must not run without child truth',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 

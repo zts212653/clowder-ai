@@ -6,6 +6,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { isAbsolute } from 'node:path';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
@@ -1716,7 +1717,7 @@ describe('Callback Routes', () => {
       `imagePath should end with filename, got ${body.messages[0].imagePaths[0]}`,
     );
     assert.ok(
-      body.messages[0].imagePaths[0].startsWith('/'),
+      isAbsolute(body.messages[0].imagePaths[0]),
       `imagePath should be absolute, got ${body.messages[0].imagePaths[0]}`,
     );
     // Message without contentBlocks should not have the field

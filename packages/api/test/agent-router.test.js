@@ -1647,8 +1647,9 @@ describe('AgentRouter', () => {
       opusReceivedPrompt.includes('由 Anthropic 提供'),
       'static provider/identity line MUST be in user-message prompt for non-native-L0 provider',
     );
-    assert.ok(
-      opusReceivedPrompt.includes('## 协作\n'),
+    assert.match(
+      opusReceivedPrompt,
+      /## 协作\r?\n/,
       'static A2A collaboration section MUST be present for non-native-L0 provider',
     );
     assert.ok(

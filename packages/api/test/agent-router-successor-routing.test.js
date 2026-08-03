@@ -142,6 +142,14 @@ describe('AgentRouter successor routing', () => {
       'msg-pre-resolved',
       ['opus'],
       { intent: 'execute', explicit: false, promptTags: [] },
+      {
+        ownerAuthProvenance: 'unknown',
+        humanDispositionInvocationOrigin: 'system',
+        invocationController: new AbortController(),
+        trackA2ASlot: () => true,
+        completeA2ASlots: () => {},
+        onPromptMessagesExposed: async () => {},
+      },
     )) {
       streamed.push(message);
     }
