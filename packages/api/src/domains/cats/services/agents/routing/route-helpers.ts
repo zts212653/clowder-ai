@@ -20,7 +20,7 @@ import type { Thread } from '../../stores/ports/ThreadStore.js';
 import { canViewMessage, resolveVisibleReplyParent } from '../../stores/visibility.js';
 import type { AgentMessage, AgentService } from '../../types.js';
 import type { InvocationDeps } from '../invocation/invoke-single-cat.js';
-import { extractRecentArtifacts, mergeLedger } from './artifact-tracking.js';
+import { extractRecentArtifacts, filterStaleArtifacts, mergeLedger } from './artifact-tracking.js';
 import type { CoverageMap } from './context-transport.js';
 import {
   buildCoverageMap,
@@ -803,8 +803,12 @@ export async function assembleIncrementalContext(
   }
   const mergedLedger = mergeLedger(storedLedgerArtifacts, recentArtifacts);
 
+  // Issue #1067: filter out artifacts whose files no longer exist on disk
+  // Prevents stale artifacts (e.g. deleted /tmp files) from polluting navigation [真相源]
+  const liveArtifacts = await filterStaleArtifacts(mergedLedger);
+
   const rankedSources = rankArtifactSources(
-    mergedLedger,
+    liveArtifacts,
     allThreadTasks.map((t) => ({ kind: t.kind, subjectKey: t.subjectKey ?? null, title: t.title, status: t.status })),
     { canonicalFeatureId: options?.canonicalFeatureId, threadTitle: options?.threadTitle },
   );
@@ -1349,10 +1353,12 @@ async function assembleSmartWindowContext(
       ...(finalAnchorLines.length > 0 ? { anchorSummaries: finalAnchorLines } : {}),
       ...(baton ? { baton } : {}),
       ...(activeTasks.length > 0 ? { activeTasks } : {}),
-      ...(() => {
+      ...(await (async () => {
         const merged = mergeLedger(storedFileArtifacts, recentArtifacts);
-        return merged.length > 0 ? { recentArtifacts: merged } : {};
-      })(),
+        // Issue #1067: also filter stale artifacts in briefing context
+        const live = await filterStaleArtifacts(merged);
+        return live.length > 0 ? { recentArtifacts: live } : {};
+      })()),
       ...(rankedSources.length > 0 ? { rankedSources } : {}),
     },
     navigationHeader,

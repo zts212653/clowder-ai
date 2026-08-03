@@ -84,3 +84,28 @@ export function mergeLedger(
   }
   return [...byRef.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_LEDGER_ENTRIES);
 }
+
+/**
+ * Filter out artifacts whose file refs no longer exist on disk.
+ * PR-type artifacts (type === 'pr') are always kept — they don't map to filesystem paths.
+ * Fail-open: if existence check throws, the artifact is kept (avoid false removals).
+ *
+ * Issue: #1067 — stale artifacts in threadMemory.recentArtifacts pollute navigation [真相源]
+ */
+export async function filterStaleArtifacts(artifacts: RecentArtifact[]): Promise<RecentArtifact[]> {
+  const fs = await import('node:fs/promises');
+  const results = await Promise.all(
+    artifacts.map(async (a) => {
+      // PR artifacts don't have filesystem refs — always keep
+      if (a.type === 'pr') return a;
+      try {
+        await fs.access(a.ref);
+        return a;
+      } catch {
+        // File doesn't exist — drop this artifact
+        return null;
+      }
+    }),
+  );
+  return results.filter((a): a is RecentArtifact => a !== null);
+}
