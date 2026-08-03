@@ -9,8 +9,6 @@ tips_exempt: K-1 establishes the kernel contract; the user-facing broker and con
 
 # F288: Plugin Messaging Domain（K-1 messaging 域收敛）
 
-> F 号 tentative——若与并行分配冲突，maintainer review 时可重命名。
-
 **Status:** DRAFT（shape review 阶段）
 **Lineage:** F240（IM connector plugins）→ plugins v0 proposal
 **真相源:** `zts212653/clowder-ai-plugins` main `189f25d` — `docs/proposals/plugin-system-principles-and-v0-design.md` §3.1；issue #1 roadmap comment `#issuecomment-4969779486` 的 PR-2（K-1）。C-1 candidate mirror 对齐 `zts212653/clowder-ai-plugins#3@f5faba5`，发布后仍以精确版本+digest 为准。
@@ -165,6 +163,6 @@ Scope verdict: ✅ 必做（plugin developer 可感知的 kernel contract）
 - 350 行硬限：append output coordinator 与 strict parser helpers 按单一职责拆分；K-1 本轮 source/test 单文件最大 349 行 ✅。
 - upstream delta：`01bf27f..591a9dc` 的 3 个提交仅触及 desktop、provider effort、cat config/web/governance，未触及 messaging/Redis event log slice；本轮无需带脏树 rebase。
 - Architecture cell：建议新增 `plugin-messaging`；ownership map 尚未更新，留给 reviewer/maintainer 判定（warning-only）。
-- 编号冲突：本 upstream 镜像的 F288 是 K-1；fork `develop_base` 已有同号 Desktop In-App Update。未擅自改号，需 maintainer 在上游 review 时裁定。
+- 编号：F288 由 maintainer 在 #1271 direction verdict §3 正式分配（`fdf351a54` 注册）。
 
 [砚砚/GPT-5.6 Sol🐾]
