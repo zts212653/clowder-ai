@@ -128,13 +128,30 @@ export class HandleService {
       parentHandleId: parent.handleId,
       issuedAt: Date.now(),
     };
-    const { record, created } = await this.handles.getOrCreateMessageHandle(candidate);
-    if (!created) {
-      if (record.pluginInstanceId !== parent.pluginInstanceId || record.parentHandleId !== parent.handleId) {
+    let result: { record: MessageHandleRecord; created: boolean };
+    try {
+      result = await this.handles.getOrCreateMessageHandle(candidate);
+    } catch (err) {
+      // INV-21: store-level binding/corruption errors → application CONFLICT
+      if (err instanceof Error && !(err instanceof MessagingError)) {
+        const msg = err.message;
+        if (msg.startsWith('handle index corruption') || msg.startsWith('handle binding violation')) {
+          throw new MessagingError('CONFLICT', msg);
+        }
+      }
+      throw err;
+    }
+    // Defense-in-depth: redundant after INV-21 store-level validation,
+    // but kept as a safety net in case a store impl is swapped.
+    if (!result.created) {
+      if (
+        result.record.pluginInstanceId !== parent.pluginInstanceId ||
+        result.record.parentHandleId !== parent.handleId
+      ) {
         throw new MessagingError('CONFLICT', 'message handle is already bound to different authority');
       }
     }
-    return record;
+    return result.record;
   }
 
   /** Message capability + its parent address capability must both be live. */

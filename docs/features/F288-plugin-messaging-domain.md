@@ -50,7 +50,7 @@ tips_exempt: K-1 establishes the kernel contract; the user-facing broker and con
 
 ```
 packages/api/src/domains/messaging/
-├── contract/types.ts      # v0.1 契约 mirror（merge 前 pin 发布包替换）
+├── contract/host-types.ts  # host-side type definitions + MessagingError
 ├── contract/validate.ts   # fail-closed 校验 + bounds
 ├── envelope.ts            # StoredMessage ↔ MessageEnvelope 纯投影（零第二真相源）
 ├── handles.ts / ledger.ts / event-stream.ts / send-service.ts / append-service.ts
@@ -73,7 +73,50 @@ packages/api/src/domains/messaging/
 
 ## 不变量（全部有对应测试）
 
-INV-1 幂等 receipt 恒等；INV-2 system audience 双层不可达；INV-3 per-thread sequence 严格单调；INV-4 未 ack 重投/已 ack 不重投；INV-5 cursor token subscription-local；INV-6 append 不改写原文；INV-7 epistemic 不洗白（非 inference 增补必须 derivedFrom 同状态源）；INV-8 handle 跨实例/revoked 拒绝（含 MessageHandle→parent address handle 撤销链）；INV-9 落后窗口 → stale 不静默丢；INV-10 baseRevision 冲突零变更；INV-11 存量消息路径零回归；INV-12 append 幂等不重复追加；INV-13 append 的 live parent grant 必须可订阅；INV-14 lease 校验与 append event insertion 原子；INV-15 output watermark 逐 revision 连续前进；INV-16 successor 先补齐所有 predecessor output；INV-17 snapshot revN 后不出现更晚的旧 revision；INV-18 fenced holder 未被 canonical output 覆盖时不得 settle；INV-19 canonical hydration closed + bounded，append history 按序精确重建 stamped suffix；INV-20 media/rich payload 保持契约要求的 open object。
+INV-1 幂等 receipt 恒等；INV-2 system audience 双层不可达；INV-3 per-thread sequence 严格单调；INV-4 未 ack 重投/已 ack 不重投；INV-5 cursor token subscription-local；INV-6 append 不改写原文；INV-7 epistemic 不洗白（非 inference 增补必须 derivedFrom 同状态源）；INV-8 handle 跨实例/revoked 拒绝（含 MessageHandle→parent address handle 撤销链）；INV-9 落后窗口 → stale 不静默丢；INV-10 baseRevision 冲突零变更；INV-11 存量消息路径零回归；INV-12 append 幂等不重复追加；INV-13 append 的 live parent grant 必须可订阅；INV-14 lease 校验与 append event insertion 原子；INV-15 output watermark 逐 revision 连续前进；INV-16 successor 先补齐所有 predecessor output；INV-17 snapshot revN 后不出现更晚的旧 revision；INV-18 fenced holder 未被 canonical output 覆盖时不得 settle；INV-19 canonical hydration closed + bounded，append history 按序精确重建 stamped suffix；INV-20 media/rich payload 保持契约要求的 open object；INV-21 `getOrCreateMessageHandle` validates the full immutable binding tuple (kind, messageId, pluginInstanceId, parentHandleId, threadId, userId) before returning any indexed record — any field mismatch fails closed；INV-22 Memory and Redis `getOrCreateMessageHandle` are behaviorally identical: same inputs → same outcome (create/return/reject)；INV-23 wrong-kind indexed record (kind ≠ message_handle) fails closed (throws), never silently falls through to create.
+
+## MessageHandle Authority Binding (INV-21 — INV-23)
+
+A `MessageHandle` is an opaque host-issued capability (`mh_`-prefixed) that binds a plugin's send receipt to its message. The handle's **immutable binding tuple** is fixed at mint time and never changes:
+
+```
+(kind, messageId, pluginInstanceId, parentHandleId, threadId, userId)
+```
+
+`scope` is derived from the parent address handle at issuance and implied by `parentHandleId` — same parent record → same scope.
+
+### Lifecycle
+
+```
+candidate record (HandleService.ensureMessageHandle)
+  → getOrCreateMessageHandle (atomic: Memory sync critical section / Redis Lua)
+    → [index miss]         CREATE:  persist record + reverse index → return (created=true)
+    → [index hit, found]   VALIDATE full binding → return (created=false)
+    → [index hit, missing] RECOVER: persist new record, overwrite index → return (created=true)
+    → [index hit, mismatch] REJECT: throw (fail-closed)
+```
+
+HandleService.ensureMessageHandle wraps store-level rejections as `MessagingError('CONFLICT')`.
+
+### Fail-Closed Validation Matrix
+
+`getOrCreateMessageHandle` validates the full immutable binding before returning any existing record. Memory and Redis produce identical results for the same inputs (INV-22).
+
+| # | Resolution path | Behavior | Error |
+|---|---|---|---|
+| M1 | Index hit, all fields match | Return existing record (idempotent) | — |
+| M2 | Index hit, `kind ≠ message_handle` | Throw | index corruption (INV-23) |
+| M3 | Index hit, `messageId` mismatch | Throw | index corruption |
+| M4 | Index hit, `pluginInstanceId` mismatch | Throw | binding violation |
+| M5 | Index hit, `parentHandleId` mismatch | Throw | binding violation |
+| M6 | Index hit, `threadId` mismatch | Throw | binding violation |
+| M7 | Index hit, `userId` mismatch | Throw | binding violation |
+| M8 | Index miss (no entry) | Create new record | — |
+| M9 | Index hit, record missing | Create new record (recovery) | — |
+
+Atomicity boundary: Memory uses a synchronous critical section (no awaits between check and write). Redis uses a Lua script for index check + record create; TypeScript validates remaining binding fields (M4–M7) before returning the record to the caller.
+
+Test anchor: `plugin-messaging-handle-binding.test.js` — one test per matrix row, both Memory and Redis.
 
 ## C-1 契约对齐点
 
@@ -140,8 +183,8 @@ Scope verdict: ✅ 必做（plugin developer 可感知的 kernel contract）
 
 | 命令 / 检查 | 结果 |
 |---|---|
-| K-1 非 Redis 定向套件 | 161/161 pass ✅ |
-| 官方 isolated Redis 定向套件 | 18/18 pass ✅（runner 分配非保留随机端口，DB 15） |
+| K-1 非 Redis 定向套件 | 186/186 pass ✅（R5: +11 binding matrix tests） |
+| 官方 isolated Redis 定向套件 | 18/18 pass ✅ + 8 binding matrix tests（runner 分配非保留随机端口，DB 15） |
 | R2 三项 Red → Green | send-only append、snapshot rev3 后新增 rev2、strict hydration 均精确 RED；聚焦 GREEN 25/25 ✅ |
 | R3 append-history Red → Green | Terra 最小反例在 envelope suite 精确 10/11 RED → 11/11 GREEN；append replay + memory/Redis parser consumer 21/21 ✅ |
 | `pnpm check` | exit 0 ✅（最终提交前重跑） |
@@ -156,7 +199,7 @@ Scope verdict: ✅ 必做（plugin developer 可感知的 kernel contract）
 - `.pen` 匹配：无；UI diff：无；设计稿对照不适用。
 - 根目录媒体/设计工件（工作树 + 已提交差异）：无。
 - PR：尚未创建；`gh pr list --head feat/k1-messaging-domain` 返回空数组。
-- ≥3 轮 state-object gate：append output 同一状态对象连续复发，已先提交 `feature-specs/2026-07-16-k1-r2-emission-fencing.md` 的状态转移表与不变量，再实现本轮修复。
+- ≥3 轮 state-object gate：(1) append output 连续复发→已提交 `feature-specs/2026-07-16-k1-r2-emission-fencing.md`。(2) MessageHandle authority binding R2/R3/R4 连续 P1→R5 spec-first: INV-21/22/23 + validation matrix (本文件§MessageHandle Authority Binding)→矩阵驱动 adversarial tests + Memory/Redis 行为对齐。
 - R2+ failure-mode sweep：从 append history 的 writer/parser 漂移抽象出 ordered-suffix invariant，并扫描 `baseRevision`、element stamping、operation-local derivation、memory/Redis 两个 consumer；均已纳入单一 parser 与回归表。
 - `check-hotfix-pattern.mjs`、`check-fallback-layers.mjs` 与 `check:architecture-ownership` 在 upstream 公开 checkout 不存在；已手工等效检查：无 hotfix 语义、无同文件新增三层 fallback。
 - 350 行硬限：append output coordinator 与 strict parser helpers 按单一职责拆分；K-1 本轮 source/test 单文件最大 349 行 ✅。

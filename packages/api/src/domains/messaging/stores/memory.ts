@@ -82,11 +82,10 @@ export class MemoryHandleStore implements HandleStore {
    * `Promise.all` of two `getOrCreateMessageHandle` calls for the same
    * messageId converges on one canonical record.
    *
-   * Validates the index invariant (kind + messageId) before returning any
-   * indexed record. Mismatched durable state fails closed (throws) rather
-   * than silently returning a wrong capability. Authority-level checks
-   * (pluginInstanceId, parentHandleId) are the caller's responsibility
-   * (HandleService) — the store only guards the index → record binding.
+   * Validates the full immutable binding tuple (INV-21: kind, messageId,
+   * pluginInstanceId, parentHandleId, threadId, userId) before returning
+   * any indexed record. Any field mismatch fails closed (throws). Wrong
+   * kind (INV-23) also throws rather than falling through to create.
    */
   async getOrCreateMessageHandle(
     record: MessageHandleRecord,
@@ -94,16 +93,47 @@ export class MemoryHandleStore implements HandleStore {
     const existingId = this.messageIndex.get(record.messageId);
     if (existingId) {
       const existing = this.records.get(existingId);
-      if (existing?.kind === 'message_handle') {
+      if (existing) {
+        // INV-23: wrong kind → fail closed, not fall-through to create
+        if (existing.kind !== 'message_handle') {
+          throw new Error(
+            `handle index corruption: indexed record ${existing.handleId} ` +
+              `has kind=${existing.kind}, expected message_handle`,
+          );
+        }
+        // INV-21: full immutable binding validation before return
         if (existing.messageId !== record.messageId) {
           throw new Error(
             `handle index corruption: indexed record ${existing.handleId} has ` +
-              `messageId=${existing.messageId} but index key is for messageId=${record.messageId}`,
+              `messageId=${existing.messageId}, requested=${record.messageId}`,
+          );
+        }
+        if (existing.pluginInstanceId !== record.pluginInstanceId) {
+          throw new Error(
+            `handle binding violation: pluginInstanceId ` +
+              `existing=${existing.pluginInstanceId}, requested=${record.pluginInstanceId}`,
+          );
+        }
+        if (existing.parentHandleId !== record.parentHandleId) {
+          throw new Error(
+            `handle binding violation: parentHandleId ` +
+              `existing=${existing.parentHandleId}, requested=${record.parentHandleId}`,
+          );
+        }
+        if (existing.threadId !== record.threadId) {
+          throw new Error(
+            `handle binding violation: threadId ` + `existing=${existing.threadId}, requested=${record.threadId}`,
+          );
+        }
+        if (existing.userId !== record.userId) {
+          throw new Error(
+            `handle binding violation: userId ` + `existing=${existing.userId}, requested=${record.userId}`,
           );
         }
         return { record: existing, created: false };
       }
     }
+    // M8/M9: index miss or record missing → create new record
     this.records.set(record.handleId, record);
     this.messageIndex.set(record.messageId, record.handleId);
     return { record, created: true };

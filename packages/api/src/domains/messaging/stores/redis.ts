@@ -115,7 +115,9 @@ export class RedisLedgerStore implements LedgerStore {
  * ARGV[2] = serialized HandleRecord JSON for the new handle
  * ARGV[3] = requested messageId (for index-hit validation)
  * Returns: {record_json, '0'|'1'|'-1'}
- *   '0' = existing validated, '1' = created, '-1' = index mismatch (fail-closed)
+ *   '0' = existing (kind+messageId OK; TS validates remaining binding fields)
+ *   '1' = created
+ *   '-1' = kind or messageId mismatch (fail-closed)
  */
 const HANDLE_GET_OR_CREATE_LUA = `
 local handlePrefix = string.sub(KEYS[2], 1, #KEYS[2] - #ARGV[1])
@@ -164,14 +166,53 @@ export class RedisHandleStore implements HandleStore {
       record.messageId,
     )) as [string, string];
     if (result[1] === '-1') {
+      // Lua rejected: inspect the raw record to distinguish wrong-kind from wrong-messageId.
+      const decoded = JSON.parse(result[0]) as HandleRecord;
+      if (decoded.kind !== 'message_handle') {
+        throw new Error(
+          `handle index corruption: indexed record ` + `has kind=${decoded.kind}, expected message_handle`,
+        );
+      }
       throw new Error(
-        `handle index corruption: indexed record does not match ` + `requested messageId=${record.messageId}`,
+        `handle index corruption: indexed record has ` +
+          `messageId=${(decoded as MessageHandleRecord).messageId}, ` +
+          `requested=${record.messageId}`,
       );
     }
-    return {
-      record: JSON.parse(result[0]) as MessageHandleRecord,
-      created: result[1] === '1',
-    };
+    const existing = JSON.parse(result[0]) as MessageHandleRecord;
+    // INV-21: Lua validated kind + messageId; validate remaining binding fields.
+    if (result[1] === '0') {
+      RedisHandleStore.validateBinding(existing, record);
+    }
+    return { record: existing, created: result[1] === '1' };
+  }
+
+  /** INV-21: validate full immutable binding. Throws on any mismatch. */
+  private static validateBinding(existing: MessageHandleRecord, candidate: MessageHandleRecord): void {
+    if (existing.pluginInstanceId !== candidate.pluginInstanceId) {
+      throw new Error(
+        `handle binding violation: pluginInstanceId ` +
+          `existing=${existing.pluginInstanceId}, ` +
+          `requested=${candidate.pluginInstanceId}`,
+      );
+    }
+    if (existing.parentHandleId !== candidate.parentHandleId) {
+      throw new Error(
+        `handle binding violation: parentHandleId ` +
+          `existing=${existing.parentHandleId}, ` +
+          `requested=${candidate.parentHandleId}`,
+      );
+    }
+    if (existing.threadId !== candidate.threadId) {
+      throw new Error(
+        `handle binding violation: threadId ` + `existing=${existing.threadId}, ` + `requested=${candidate.threadId}`,
+      );
+    }
+    if (existing.userId !== candidate.userId) {
+      throw new Error(
+        `handle binding violation: userId ` + `existing=${existing.userId}, ` + `requested=${candidate.userId}`,
+      );
+    }
   }
 
   async revoke(handleId: string, revokedAt: number): Promise<boolean> {

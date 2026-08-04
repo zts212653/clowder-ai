@@ -238,14 +238,7 @@ describe('HandleService — concurrent mint convergence', () => {
 
 describe('HandleService — index corruption fail-closed (record/index validation)', () => {
   test('missing record at indexed key falls through to create (record loss recovery)', async () => {
-    // Direct store test: put an index entry pointing to a missing handleId,
-    // then getOrCreateMessageHandle must fall through and create a fresh record.
     const store = new memory.MemoryHandleStore();
-
-    // Manually corrupt: set the messageIndex to point to a handleId that does not
-    // exist in the records Map. MemoryHandleStore uses private fields, so we call
-    // getOrCreateMessageHandle with a candidate whose messageId has no valid index entry.
-    // The clean path: first mint creates index+record; deleting the record simulates loss.
     const candidate1 = {
       handleId: 'mh_first',
       kind: 'message_handle',
@@ -257,18 +250,19 @@ describe('HandleService — index corruption fail-closed (record/index validatio
       parentHandleId: 'th_parent',
       issuedAt: 1,
     };
-    // Create the record and its index.
     const first = await store.getOrCreateMessageHandle(candidate1);
     assert.equal(first.created, true);
-    assert.equal(first.record.handleId, 'mh_first');
-
-    // Delete the record (simulate crash/corruption) by revoking and observing
-    // that the index still points to mh_first. Since MemoryHandleStore has no
-    // delete API, we test the "record exists but wrong kind" fallthrough path.
-    // A missing record means get() returns null, which the store already handles
-    // by falling through to create. That path is well-tested by the existing
-    // "unknown handle → NOT_FOUND" test at the service level.
-    // The CRITICAL path is wrong-messageId index corruption — tested below.
+    // Simulate record loss: index still maps msg-orphan → mh_first,
+    // but the record at mh_first no longer exists.
+    store.records.delete('mh_first');
+    const recovery = await store.getOrCreateMessageHandle({
+      ...candidate1,
+      handleId: 'mh_recovery',
+      issuedAt: 2,
+    });
+    assert.equal(recovery.created, true);
+    assert.equal(recovery.record.handleId, 'mh_recovery');
+    assert.equal(recovery.record.messageId, 'msg-orphan');
   });
 
   test('index points to record with wrong messageId → fail-closed error', async () => {
