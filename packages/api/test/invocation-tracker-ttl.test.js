@@ -50,7 +50,6 @@ describe('InvocationTracker TTL Guard (F118 D3)', () => {
     );
   });
 
-
   // ── AC-D6: expired slot auto-cleanup ──
 
   it('has(threadId, catId) returns false for slot exceeding TTL', (t) => {
