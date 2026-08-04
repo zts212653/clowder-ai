@@ -909,7 +909,9 @@ export class MessageStore {
     const visible: Array<{ msg: StoredMessage; seq: number }> = [];
     for (const msg of this.messages) {
       if (msg.deletedAt) continue;
-      if (!isDelivered(msg)) continue;
+      // #1269 R8 P1-1: use isTimelinePublished (not isDelivered) so timeline-published
+      // queued cat speech is included in mention scans. Hidden queued work excluded.
+      if (!isTimelinePublishedFn(msg)) continue;
       if (threadId && msg.threadId !== threadId) continue;
       if (!msg.mentions.includes(catId)) continue;
       if (userId && msg.userId !== userId) continue;
@@ -948,7 +950,8 @@ export class MessageStore {
     for (let i = this.messages.length - 1; i >= 0 && matches.length < n; i--) {
       const msg = this.messages[i]!;
       if (msg.deletedAt) continue;
-      if (!isDelivered(msg)) continue; // F117: exclude queued/canceled
+      // #1269 R8 P1-1: use isTimelinePublished (not isDelivered) — parity with getMentionsFor
+      if (!isTimelinePublishedFn(msg)) continue;
       if (threadId && msg.threadId !== threadId) continue;
       if (msg.mentions.includes(catId) && (!userId || msg.userId === userId)) {
         // #1200 §8.7: inject visibilitySeq so callers can use cursorFor()

@@ -129,15 +129,17 @@ if redis.call('HGET', KEYS[1], 'deliveryStatus') ~= 'queued' then
   return {-2, currentRevision}
 end
 local nextRevision = tonumber(ARGV[3])
-redis.call('HSET', KEYS[1], 'queueCustody', ARGV[2], 'queueCustodyRevision', ARGV[3])
+
+-- #1269 R8 P1-3: pre-mutation guard — compute visibilitySeq BEFORE any HSET/ZADD.
+-- redis.error_reply() does NOT rollback prior writes, so all validation must
+-- precede all mutations. Previously custody HSET was before HWM validation,
+-- meaning a corrupt HWM would leave custody already mutated.
+local seq = nil
+local kp = ARGV[6]
+local threadId = nil
 if ARGV[4] ~= '' then
-  -- #1269 P1-2: pre-compute visibilitySeq allocation before delivery writes.
-  -- Same invariant as DELIVER_WITH_VISIBILITY_LUA: allocate exactly once when
-  -- no position exists, preserving append-time positions for timeline-published speech.
-  local kp = ARGV[6]
-  local threadId = redis.call('HGET', KEYS[1], 'threadId')
+  threadId = redis.call('HGET', KEYS[1], 'threadId')
   local existingVis = redis.call('HGET', KEYS[1], 'visibilitySeq')
-  local seq = nil
   if existingVis == false and threadId then
     local metaKey = kp .. 'msg:visibility-meta:' .. threadId
     local hwmRaw = redis.call('HGET', metaKey, 'hwm')
@@ -161,8 +163,12 @@ if ARGV[4] ~= '' then
       return redis.error_reply('VISIBILITY_SEQ_EXHAUSTED: seq=' .. tostring(seq))
     end
   end
+end
 
-  -- All guards passed — write delivery + timeline + visibility atomically
+-- All validation passed — write mutations atomically
+redis.call('HSET', KEYS[1], 'queueCustody', ARGV[2], 'queueCustodyRevision', ARGV[3])
+
+if ARGV[4] ~= '' then
   redis.call('HSET', KEYS[1], 'deliveredAt', ARGV[4], 'timelineOrderAt', ARGV[5], 'deliveryStatus', 'delivered')
   redis.call('ZADD', KEYS[2], ARGV[5], messageId)
   redis.call('ZADD', KEYS[3], ARGV[5], messageId)
@@ -1017,8 +1023,8 @@ export class RedisMessageStore {
 
   /**
    * #1200: Chunked scan of the visibility ZSET. Reads CHUNK members at a time,
-   * hydrates, filters (isDelivered + userId), and collects into `result`.
-   * Stops when `maxCollect` delivered messages are collected or ZSET exhausted.
+   * hydrates, filters (isTimelinePublished + userId), and collects into `result`.
+   * Stops when `maxCollect` published messages are collected or ZSET exhausted.
    */
   private async scanVisibilityChunked(
     visKey: string,
@@ -1098,10 +1104,13 @@ export class RedisMessageStore {
         continue;
       }
       // #1200 Sol R2 P2-5: tombstones (deletedAt) are KEPT per binding doc
-      // (tombstone-keep / null-skip / canceled-skip / isDelivered). Parity with
+      // (tombstone-keep / null-skip / canceled-skip / isTimelinePublished). Parity with
       // Memory store: both stores return tombstones in getByThreadAfter.
+      // #1269 R8 P1-1: use isTimelinePublished (not isDelivered) so timeline-published
+      // queued cat speech is included in forward scans via getByThreadAfter and getMentionsFor.
+      // Hidden queued work (non-cat-speech) is still excluded.
       // Mention-scan callers that need to exclude deleted use extraFilter.
-      if (!isDelivered(msg)) continue;
+      if (!isTimelinePublished(msg)) continue;
       if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
       if (extraFilter && !extraFilter(msg)) continue;
       // §8.7: Inject visibilitySeq from WITHSCORES (authoritative over hash field

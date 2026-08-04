@@ -323,6 +323,9 @@ local threadId = redis.call('HGET', hash, 'threadId')
 local msgId = redis.call('HGET', hash, 'id')
 
 redis.call('HSET', hash, 'deliveryStatus', 'canceled')
+-- #1269 R8 P1-2: clear custody fields so restart/reconciliation cannot treat
+-- canceled work as still owned. Parity with CANCEL_LUA in delivery scripts.
+redis.call('HDEL', hash, 'queueCustody', 'queueCustodyRevision')
 
 -- #1200: Remove from visibility index if present (backfilled legacy queued)
 if threadId and msgId then
