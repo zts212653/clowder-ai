@@ -128,13 +128,13 @@ Published: `@clowder-ai/plugin-contract@0.1.0-beta.5`。epistemic 值集 `observ
 
 ## Quality Gate Report（review-ready）
 
-**检查时间:** 2026-07-16（Asia/Shanghai）
+**检查时间:** 2026-08-04（Asia/Shanghai）
 
 **工作树:** feature checkout（branch `feat/k1-messaging-domain`）
 
-**基线:** `upstream/main@01bf27faf`
+**基线:** `upstream/main@ffa73bb8f`
 
-**状态边界:** K-1 实现与本地验收已到 review-ready；正式 reviewer 放行前不宣称 shape-approved。C-1 发布 v0.1、精确 version+digest pin 与 conformance 绿是尚待满足的外部门禁，不计作本轮实现 AC。
+**状态边界:** K-1 实现处于 PR review 迭代中（PR #1270 OPEN，7 commits on base `ffa73bb8f`）。C-1 已发布 `@clowder-ai/plugin-contract@0.1.0-beta.5`。
 
 ### 愿景与五件套验收
 
@@ -183,13 +183,13 @@ Scope verdict: ✅ 必做（plugin developer 可感知的 kernel contract）
 
 | 命令 / 检查 | 结果 |
 |---|---|
-| K-1 非 Redis 定向套件 | 186/186 pass ✅（R5: +11 binding matrix tests） |
+| K-1 非 Redis 定向套件 | 194/194 pass ✅（R5: +11 binding matrix; R6: +6 service-level stale-claimant + 2 scope defensive copy） |
 | 官方 isolated Redis 定向套件 | 18/18 pass ✅ + 8 binding matrix tests（runner 分配非保留随机端口，DB 15） |
 | R2 三项 Red → Green | send-only append、snapshot rev3 后新增 rev2、strict hydration 均精确 RED；聚焦 GREEN 25/25 ✅ |
 | R3 append-history Red → Green | Terra 最小反例在 envelope suite 精确 10/11 RED → 11/11 GREEN；append replay + memory/Redis parser consumer 21/21 ✅ |
-| `pnpm check` | exit 0 ✅（最终提交前重跑） |
-| `pnpm lint` | exit 0 ✅；仅存量 web warnings（最终提交前重跑） |
-| `pnpm -r --if-present run build` | exit 0 ✅（最终提交前重跑） |
+| `pnpm check` | K-1 files clean；pre-existing upstream feature-truth warnings (F237/F247/F251) cause non-zero exit — no F288-specific issues |
+| `pnpm lint` | exit 0 ✅；仅存量 web warnings |
+| `pnpm -r --if-present run build` | exit 0 ✅ |
 | `git diff --check` | exit 0 ✅ |
 | `pnpm test` | exit 1：upstream 镜像的 fork-only 脚本/文档/capability 等已知基线失败；接管前 branch/base failing-set 对照全等，最终运行未出现 K-1 failure |
 | `pnpm --filter @cat-cafe/api test:redis` | exit 1：该命令在 isolated Redis 下运行完整 API 套件，仍命中同组 upstream/fork 基线失败；K-1 Redis 定向 18/18 独立全绿 |
@@ -198,13 +198,13 @@ Scope verdict: ✅ 必做（plugin developer 可感知的 kernel contract）
 
 - `.pen` 匹配：无；UI diff：无；设计稿对照不适用。
 - 根目录媒体/设计工件（工作树 + 已提交差异）：无。
-- PR：尚未创建；`gh pr list --head feat/k1-messaging-domain` 返回空数组。
-- ≥3 轮 state-object gate：(1) append output 连续复发→已提交 `feature-specs/2026-07-16-k1-r2-emission-fencing.md`。(2) MessageHandle authority binding R2/R3/R4 连续 P1→R5 spec-first: INV-21/22/23 + validation matrix (本文件§MessageHandle Authority Binding)→矩阵驱动 adversarial tests + Memory/Redis 行为对齐。
+- PR：#1270 OPEN on `zts212653/clowder-ai`（7 commits on base `ffa73bb8f`）。Review rounds: R1-R5 complete, currently in R6.
+- ≥3 轮 state-object gate：(1) append output 连续复发→已提交 `feature-specs/2026-07-16-k1-r2-emission-fencing.md`。(2) MessageHandle authority binding R2/R3/R4 连续 P1→R5 spec-first: INV-21/22/23 + validation matrix (本文件§MessageHandle Authority Binding)→矩阵驱动 adversarial tests + Memory/Redis 行为对齐。(3) Service-level stale-claimant settlement coverage R4/R5→R6: service-level tests with InterceptingLedgerStore exercising real SendService/AppendService settlement branches。
 - R2+ failure-mode sweep：从 append history 的 writer/parser 漂移抽象出 ordered-suffix invariant，并扫描 `baseRevision`、element stamping、operation-local derivation、memory/Redis 两个 consumer；均已纳入单一 parser 与回归表。
 - `check-hotfix-pattern.mjs`、`check-fallback-layers.mjs` 与 `check:architecture-ownership` 在 upstream 公开 checkout 不存在；已手工等效检查：无 hotfix 语义、无同文件新增三层 fallback。
 - 350 行硬限：append output coordinator 与 strict parser helpers 按单一职责拆分；K-1 本轮 source/test 单文件最大 349 行 ✅。
-- upstream delta：`01bf27f..591a9dc` 的 3 个提交仅触及 desktop、provider effort、cat config/web/governance，未触及 messaging/Redis event log slice；本轮无需带脏树 rebase。
+- upstream delta：PR base `ffa73bb8f` vs current `upstream/main` — 1 Web-only commit (HubCatEditor), no messaging overlap。
 - Architecture cell：建议新增 `plugin-messaging`；ownership map 尚未更新，留给 reviewer/maintainer 判定（warning-only）。
 - 编号：F288 由 maintainer 在 #1271 direction verdict §3 正式分配（`fdf351a54` 注册）。
 
-[砚砚/GPT-5.6 Sol🐾]
+[宪宪/Claude Opus 4.6🐾, initial quality gate by 砚砚/GPT-5.6 Sol🐾]

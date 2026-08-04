@@ -69,7 +69,9 @@ export class MemoryHandleStore implements HandleStore {
   private readonly messageIndex = new Map<string, string>();
 
   async put(record: HandleRecord): Promise<void> {
-    this.records.set(record.handleId, record);
+    // Defensive copy: prevent caller mutations from corrupting the store
+    // (INV-22 parity — Redis serializes on write; Memory must snapshot too).
+    this.records.set(record.handleId, { ...record, scope: { ...record.scope } });
   }
 
   async get(handleId: string): Promise<HandleRecord | null> {
@@ -134,9 +136,11 @@ export class MemoryHandleStore implements HandleStore {
       }
     }
     // M8/M9: index miss or record missing → create new record
-    this.records.set(record.handleId, record);
-    this.messageIndex.set(record.messageId, record.handleId);
-    return { record, created: true };
+    // Defensive copy (INV-22 parity — Redis serializes; Memory must snapshot).
+    const snapshot = { ...record, scope: { ...record.scope } };
+    this.records.set(snapshot.handleId, snapshot);
+    this.messageIndex.set(snapshot.messageId, snapshot.handleId);
+    return { record: snapshot, created: true };
   }
 
   async revoke(handleId: string, revokedAt: number): Promise<boolean> {
