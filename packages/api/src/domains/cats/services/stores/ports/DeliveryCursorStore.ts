@@ -17,6 +17,7 @@ import { catRegistry, createCatId } from '@cat-cafe/shared';
 import type { SessionStore } from '@cat-cafe/shared/utils';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { compareCursors } from '../cursor.js';
+import { gateForDurableSlot } from '../cursor-activation.js';
 
 const log = createModuleLogger('delivery-cursor-store');
 
@@ -134,16 +135,21 @@ export class DeliveryCursorStore {
 
     if (this.sessionStore) {
       try {
-        // #1200 Sol R5: Pre-reconcile stored v1→v2 format before CAS.
-        // Lua CAS is fail-closed on cross-format (can't compare v1 vs v2).
-        // Reconcile atomically upgrades stored v1 to v2 (same position,
-        // different format), so the subsequent CAS sees same-format.
-        await this.preReconcile(userId, catId, threadId, 'delivery');
+        // #1269: Read stored cursor for durable-slot gate decision.
+        const stored = await this.getStoredCursor(userId, catId, threadId, 'delivery');
+        const gated = gateForDurableSlot(effective, stored);
+
+        // #1200 Sol R5: Pre-reconcile stored v1→v2 only when writing v2.
+        // When gate produces v1, stored is v1/null → same-format CAS works.
+        // When gate produces v2, preReconcile ensures stored is v2 for CAS.
+        if (gated.startsWith('v2:')) {
+          await this.preReconcile(userId, catId, threadId, 'delivery');
+        }
 
         // Atomic CAS in Redis — monotonic check + write in one round-trip
-        const advanced = await this.sessionStore.setDeliveryCursor(userId, catId, threadId, effective);
+        const advanced = await this.sessionStore.setDeliveryCursor(userId, catId, threadId, gated);
         if (advanced) {
-          // CAS accepted — sync in-memory to match Redis
+          // CAS accepted — sync in-memory with canonical v2 (for comparison)
           this.upsertMap(this.cursors, key, effective);
         } else {
           // CAS noop (Redis already has a higher value) — sync in-memory
@@ -161,7 +167,7 @@ export class DeliveryCursorStore {
       }
     }
 
-    // In-memory fallback: canonicalized comparison
+    // In-memory fallback: canonicalized comparison (no durable slot, no gate)
     const current = this.cursors.get(key);
     if (current) {
       const cmp = await this.compareCanonical(effective, current, threadId);
@@ -221,16 +227,21 @@ export class DeliveryCursorStore {
 
     if (this.sessionStore) {
       try {
-        // #1200 Sol R5: Pre-reconcile stored v1→v2 before CAS (same pattern as ackCursor)
-        await this.preReconcile(userId, catId, threadId, 'mention');
+        // #1269: Read stored cursor for durable-slot gate decision.
+        const stored = await this.getStoredCursor(userId, catId, threadId, 'mention');
+        const gated = gateForDurableSlot(effective, stored);
+
+        // #1200 Sol R5: Pre-reconcile only when writing v2 (same rationale as ackCursor)
+        if (gated.startsWith('v2:')) {
+          await this.preReconcile(userId, catId, threadId, 'mention');
+        }
         // Atomic CAS in Redis — monotonic check + write in one round-trip
-        const advanced = await this.sessionStore.setMentionAckCursor(userId, catId, threadId, effective);
+        const advanced = await this.sessionStore.setMentionAckCursor(userId, catId, threadId, gated);
         if (advanced) {
-          // CAS accepted — sync in-memory to match Redis
+          // CAS accepted — sync in-memory with canonical v2 (for comparison)
           this.upsertMap(this.mentionAckCursors, key, effective);
         } else {
           // CAS noop — sync in-memory to Redis's actual value.
-          // Inner try-catch: same rationale as ackCursor above.
           try {
             const actual = await this.sessionStore.getMentionAckCursor(userId, catId, threadId);
             if (actual) this.upsertMap(this.mentionAckCursors, key, actual);
@@ -244,7 +255,7 @@ export class DeliveryCursorStore {
       }
     }
 
-    // In-memory fallback: canonicalized comparison
+    // In-memory fallback: canonicalized comparison (no durable slot, no gate)
     const current = this.mentionAckCursors.get(key);
     if (current) {
       const cmp = await this.compareCanonical(effective, current, threadId);
@@ -305,9 +316,15 @@ export class DeliveryCursorStore {
 
     if (this.sessionStore) {
       try {
-        // #1200 Sol R5: Pre-reconcile stored v1→v2 before CAS (same pattern as ackCursor)
-        await this.preReconcile(userId, catId, threadId, 'seen');
-        const advanced = await this.sessionStore.setSeenCursor(userId, catId, threadId, effective);
+        // #1269: Read stored cursor for durable-slot gate decision.
+        const stored = await this.getStoredCursor(userId, catId, threadId, 'seen');
+        const gated = gateForDurableSlot(effective, stored);
+
+        // #1200 Sol R5: Pre-reconcile only when writing v2 (same rationale as ackCursor)
+        if (gated.startsWith('v2:')) {
+          await this.preReconcile(userId, catId, threadId, 'seen');
+        }
+        const advanced = await this.sessionStore.setSeenCursor(userId, catId, threadId, gated);
         if (advanced) {
           this.upsertMap(this.seenCursors, key, effective);
         } else {
@@ -324,13 +341,32 @@ export class DeliveryCursorStore {
       }
     }
 
-    // In-memory fallback: canonicalized comparison
+    // In-memory fallback: canonicalized comparison (no durable slot, no gate)
     const current = this.seenCursors.get(key);
     if (current) {
       const cmp = await this.compareCanonical(effective, current, threadId);
       if (cmp <= 0) return;
     }
     this.upsertMap(this.seenCursors, key, effective);
+  }
+
+  // ---- Durable-slot helpers (#1269) ----
+
+  /** Read existing stored cursor value for a namespace (no side effects). */
+  private async getStoredCursor(
+    userId: string,
+    catId: CatId,
+    threadId: string,
+    namespace: 'delivery' | 'mention' | 'seen',
+  ): Promise<string | null> {
+    if (!this.sessionStore) return null;
+    if (namespace === 'delivery') {
+      return this.sessionStore.getDeliveryCursor(userId, catId, threadId);
+    }
+    if (namespace === 'mention') {
+      return this.sessionStore.getMentionAckCursor(userId, catId, threadId);
+    }
+    return this.sessionStore.getSeenCursor(userId, catId, threadId);
   }
 
   // ---- Pre-reconciliation (#1200 Sol R5) ----

@@ -25,6 +25,7 @@ import { projectFreshnessClosure } from '../domains/cats/services/freshness/glas
 import { projectFreshnessSupplementForHistory } from '../domains/cats/services/freshness/glass-box/freshness-supplement-history-projection.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { TranscriptWriter } from '../domains/cats/services/session/TranscriptWriter.js';
+import { gateForDurableSlot } from '../domains/cats/services/stores/cursor-activation.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
@@ -83,6 +84,30 @@ async function preReconcileReadCursor(
   } catch {
     // Silent: ACK_CAS_LUA will fail-closed on cross-format, preventing regression.
   }
+}
+
+/**
+ * #1269: Gated read-state ack — applies durable-slot gate before CAS.
+ * Reads existing read-state to decide format, then conditionally
+ * pre-reconciles and acks with the gated cursor value.
+ */
+async function gatedReadStateAck(
+  readStateStore: IThreadReadStateStore,
+  messageStore: IMessageStore | null | undefined,
+  userId: string,
+  threadId: string,
+  incomingCursor: string,
+): Promise<boolean> {
+  const existing = await readStateStore.get(userId, threadId);
+  const existingCursor = existing?.lastReadMessageId ?? null;
+  const gated = gateForDurableSlot(incomingCursor, existingCursor);
+
+  // Pre-reconcile only when writing v2 — stored may be v1, need same-format for ACK_CAS_LUA
+  if (gated.startsWith('v2:')) {
+    await preReconcileReadCursor(readStateStore, messageStore, userId, threadId, gated);
+  }
+
+  return readStateStore.ack(userId, threadId, gated);
 }
 
 interface ThreadIndexBuilder {
@@ -1195,9 +1220,8 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       // must ack to Q's v2 cursor, not C's raw ID.
       const latest = await messageStore.getLatestVisibleCursor(thread.id);
       if (!latest) continue;
-      // #1200: Unified pre-reconcile before CAS (all 3 ingress points).
-      await preReconcileReadCursor(opts.readStateStore!, messageStore, userId, thread.id, latest.cursor);
-      const advanced = await opts.readStateStore!.ack(userId, thread.id, latest.cursor);
+      // #1269: Gated ack — applies durable-slot gate + conditional pre-reconcile
+      const advanced = await gatedReadStateAck(opts.readStateStore!, messageStore, userId, thread.id, latest.cursor);
       if (advanced) advancedCount++;
     }
 
@@ -1250,10 +1274,8 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       }
     }
 
-    // #1200: Unified pre-reconcile before CAS (all 3 ingress points).
-    await preReconcileReadCursor(opts.readStateStore, messageStore, userId, id, cursorToken);
-
-    const advanced = await opts.readStateStore.ack(userId, id, cursorToken);
+    // #1269: Gated ack — applies durable-slot gate + conditional pre-reconcile
+    const advanced = await gatedReadStateAck(opts.readStateStore, messageStore, userId, id, cursorToken);
     return { advanced };
   });
 
@@ -1292,9 +1314,8 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { advanced: false, reason: 'no messages' };
     }
 
-    // #1200: Unified pre-reconcile before CAS (all 3 ingress points).
-    await preReconcileReadCursor(opts.readStateStore, messageStore, userId, id, latest.cursor);
-    const advanced = await opts.readStateStore.ack(userId, id, latest.cursor);
+    // #1269: Gated ack — applies durable-slot gate + conditional pre-reconcile
+    const advanced = await gatedReadStateAck(opts.readStateStore, messageStore, userId, id, latest.cursor);
     // #1200 RED #23b: return both raw messageId and canonical v2 cursor
     return { advanced, messageId: latest.messageId, cursor: latest.cursor };
   });

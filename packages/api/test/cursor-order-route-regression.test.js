@@ -95,6 +95,9 @@ describe('#1200 R14 route: POST /read/latest cross-format', () => {
   });
 
   it('pre-reconcile upgrades v1 → v2, then advances to later v2 cursor', async () => {
+    // #1269: pre-reconcile only runs when gate is ON (v2 initiation enabled)
+    const savedGate = process.env.VISIBILITY_CURSOR_V2;
+    process.env.VISIBILITY_CURSOR_V2 = 'on';
     const thread = threadStore.create('alice', 'Thread A');
 
     const msgA = messageStore.append({
@@ -134,6 +137,10 @@ describe('#1200 R14 route: POST /read/latest cross-format', () => {
     // Stored cursor must now be v2
     const after = readStateStore._raw('alice', thread.id);
     assert.ok(after.startsWith('v2:'), 'Stored must be v2 after reconcile+ack');
+
+    // #1269: restore gate state
+    if (savedGate === undefined) delete process.env.VISIBILITY_CURSOR_V2;
+    else process.env.VISIBILITY_CURSOR_V2 = savedGate;
   });
 
   it('stored v1 B, B tombstoned, latest=A (earlier) → no regression', async () => {
@@ -207,6 +214,9 @@ describe('#1200 R14 route: POST /read/mark-all cross-format', () => {
   });
 
   it('pre-reconcile upgrades v1 → v2 across all threads, then advances', async () => {
+    // #1269: pre-reconcile only runs when gate is ON (v2 initiation enabled)
+    const savedGate = process.env.VISIBILITY_CURSOR_V2;
+    process.env.VISIBILITY_CURSOR_V2 = 'on';
     const thread = threadStore.create('alice', 'Thread X');
 
     const msgA = messageStore.append({
@@ -241,6 +251,10 @@ describe('#1200 R14 route: POST /read/mark-all cross-format', () => {
     // Stored must now be v2
     const stored = readStateStore._raw('alice', thread.id);
     assert.ok(stored.startsWith('v2:'), 'Stored must be v2 after mark-all reconcile+ack');
+
+    // #1269: restore gate state
+    if (savedGate === undefined) delete process.env.VISIBILITY_CURSOR_V2;
+    else process.env.VISIBILITY_CURSOR_V2 = savedGate;
   });
 
   it('stored v1 B, B tombstoned, latest=A (earlier) → no regression', async () => {

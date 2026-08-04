@@ -34,17 +34,22 @@ export function isV2CursorActive(): boolean {
  * Returns the cursor format appropriate for writing to the slot:
  *   - Existing v2 slot → always v2 (rollback-safe, advance in same format)
  *   - Untouched/v1 slot + gate ON → v2 (initiate v2 encoding)
- *   - Untouched/v1 slot + gate OFF → v1 (don't initiate, use raw ID)
+ *   - Untouched/v1 slot + gate OFF → v1 (extract raw ID from canonical v2)
  *
  * @param canonical - The canonical v2 cursor from cursorFor()
- * @param msg - The message (for fallback to raw ID)
  * @param existingSlotCursor - Current value of the durable slot (null if untouched)
  */
-export function gateForDurableSlot(canonical: string, msg: { id: string }, existingSlotCursor: string | null): string {
+export function gateForDurableSlot(canonical: string, existingSlotCursor: string | null): string {
   // Existing v2 → always advance in v2 (rollback-safe)
   if (existingSlotCursor?.startsWith('v2:')) return canonical;
   // Gate ON → initiate v2
   if (isV2CursorActive()) return canonical;
-  // Gate OFF + untouched/v1 → don't initiate, use raw ID
-  return msg.id;
+  // Gate OFF + untouched/v1 → extract raw message ID from v2 canonical
+  if (canonical.startsWith('v2:')) {
+    // v2 format: v2:<seq16>:<messageId> — extract messageId after second colon
+    const secondColon = canonical.indexOf(':', 3);
+    if (secondColon > 0) return canonical.slice(secondColon + 1);
+  }
+  // Already v1 or non-v2 — pass through
+  return canonical;
 }

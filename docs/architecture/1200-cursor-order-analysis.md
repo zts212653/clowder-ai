@@ -7,13 +7,16 @@ Implementation proceeds per §8.10. Canonical contract: **#1269** (maintainer
 decision, binding). Architecture doc is reference material, not the contract
 source.
 
-**Activation gate** (#1269 revised, maintainer review 2026-08-04):
+**Activation gate** (#1269, wired per maintainer review rounds 1-3):
 `VISIBILITY_CURSOR_V2=on` env var controls **durable-slot initiation** only.
 `cursorFor()` always produces canonical v2 when visibilitySeq is known
 (not gated — CAS comparison/advancement must be v2-coherent in both modes).
 `gateForDurableSlot()` in `cursor-activation.ts` controls whether untouched
-durable slots (delivery/read/seen positions) initiate v2 encoding.
+durable slots initiate v2 encoding. Wired at all durable write boundaries:
+- `DeliveryCursorStore.ackCursor/ackMentionCursor/ackSeenCursor` (delivery, mention, seen)
+- `gatedReadStateAck()` in `threads.ts` (read-state via all 3 ingress points)
 Existing v2 slots advance in v2 regardless of gate state (rollback-safe).
+PreReconcile (v1→v2 stored upgrade) is gated: only runs when writing v2.
 
 **Sunset criteria**: The `VISIBILITY_CURSOR_V2` flag is a temporary deployment
 control. It can be removed (always-on) once v2 cursors have been validated
