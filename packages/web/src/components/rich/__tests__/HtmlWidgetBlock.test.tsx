@@ -148,4 +148,21 @@ describe('HtmlWidgetBlock', () => {
     // Scripts should be preserved for widget functionality
     expect(html).toContain('script');
   });
+
+  it('strips inline event handlers while preserving <script>-based listeners', () => {
+    const block = {
+      id: 'w-handlers',
+      kind: 'html_widget' as const,
+      v: 1 as const,
+      html: '<button id="b" onclick="boom()">Go</button><script>document.getElementById("b").addEventListener("click", () => {})</script>',
+    };
+    const html = renderToStaticMarkup(<HtmlWidgetBlock block={block} />);
+    // DOMPurify's default ALLOWED_ATTR carries no on* handlers and sanitizeWidgetHtml
+    // deliberately does not add them back, so inline handlers never reach the iframe.
+    expect(html).not.toContain('onclick');
+    expect(html).not.toContain('boom');
+    // The <script>-based equivalent survives — interactivity is still achievable,
+    // only the authoring syntax differs. See cat-cafe-skills/rich-messaging/SKILL.md.
+    expect(html).toContain('addEventListener');
+  });
 });
