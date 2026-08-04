@@ -2,13 +2,23 @@
 
 **Author**: 布偶猫/宪宪 (@opus)
 **Branch**: `fix/1200-cursor-order` (rebased onto `upstream/main` @ `f30e20c28`)
-**Status**: ✅ **ARCHITECTURE GATE OPEN** — rev 7 APPROVED by Sol (17:13 UTC,
-0 P1 / 0 P2, exact blob `dc2b2a456cfa36c89c10efe82ae5591da87e280d`). §8 rev 7 is
-the binding architecture truth; implementation proceeds per §8.10.
+**Status**: ✅ **ARCHITECTURE GATE OPEN** — rev 7 APPROVED by Sol.
+Implementation proceeds per §8.10. Canonical contract: **#1269** (maintainer
+decision, binding). Architecture doc is reference material, not the contract
+source.
 
-**Activation**: Gated by `VISIBILITY_CURSOR_V2=on` env var (#1269 contract).
-v2 cursors are OFF by default. `cursorFor()` checks `isV2CursorActive()` —
-the single gate point for the entire deployment. See `cursor-activation.ts`.
+**Activation gate** (#1269 revised, maintainer review 2026-08-04):
+`VISIBILITY_CURSOR_V2=on` env var controls **durable-slot initiation** only.
+`cursorFor()` always produces canonical v2 when visibilitySeq is known
+(not gated — CAS comparison/advancement must be v2-coherent in both modes).
+`gateForDurableSlot()` in `cursor-activation.ts` controls whether untouched
+durable slots (delivery/read/seen positions) initiate v2 encoding.
+Existing v2 slots advance in v2 regardless of gate state (rollback-safe).
+
+**Sunset criteria**: The `VISIBILITY_CURSOR_V2` flag is a temporary deployment
+control. It can be removed (always-on) once v2 cursors have been validated
+in production across all durable cursor consumers and the rollback window
+has closed.
 
 ---
 

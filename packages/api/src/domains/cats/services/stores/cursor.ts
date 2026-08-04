@@ -1,5 +1,5 @@
 /**
- * #1200 Cursor utilities — v2 token format (§8.3) + graded issuance (§8.7).
+ * #1200 Cursor utilities — v2 token format (§8.3) + canonical coordinate (§8.7).
  *
  * Wire format: `v2:<seq16>:<messageId>`
  *   seq16 = 16-digit zero-padded decimal (MAX_SAFE_INTEGER = 9007199254740991 is 16 digits)
@@ -8,10 +8,14 @@
  *
  * v1 = raw message ID (backward compat — resolve via lazy path §8.4)
  *
+ * cursorFor() always produces the canonical v2 coordinate when visibilitySeq
+ * is known. The #1269 activation gate does NOT live here — it controls only
+ * whether previously untouched durable slots initiate v2 encoding (see
+ * cursor-activation.ts gateForDurableSlot). This separation ensures CAS
+ * comparison/advancement is always v2-coherent regardless of activation mode.
+ *
  * Architecture ref: docs/architecture/1200-cursor-order-analysis.md §8.3, §8.4, §8.7
  */
-
-import { isV2CursorActive } from './cursor-activation.js';
 
 // --------------------------------------------------------------------------
 // Types
@@ -140,24 +144,29 @@ export function compareCursors(a: string, b: string): number {
 }
 
 // --------------------------------------------------------------------------
-// cursorFor — graded issuance (§8.7)
+// cursorFor — canonical visibility coordinate (§8.7)
 // --------------------------------------------------------------------------
 
 /**
- * Generate a cursor token for a message.
+ * Produce the canonical cursor token for a message.
+ *
+ * Always emits v2 when the visibility position (visibilitySeq) is known,
+ * regardless of the #1269 activation gate. This is the **internal canonical
+ * coordinate** used by every CAS comparison, position recovery, and
+ * advancement path. Gating this function caused rollback-mode CAS to
+ * freeze durable v2 positions (maintainer review 2026-08-04).
+ *
+ * The activation gate controls only **durable slot initiation** — see
+ * `gateForDurableSlot()` in cursor-activation.ts.
  *
  * Graded issuance:
  *   - Messages with visibilitySeq → v2 token (canonical position)
  *   - Messages without visibilitySeq → v1 raw ID (degraded)
- *
- * Every comparison point goes through parseCursor + lazy resolve (§8.4),
- * so mixed v1/v2 issuance is safe by construction.
  */
 export function cursorFor(msg: { id: string; visibilitySeq?: number }): string {
-  // #1269 activation gate: v2 cursors only when explicitly enabled.
-  if (isV2CursorActive() && msg.visibilitySeq != null) {
+  if (msg.visibilitySeq != null) {
     return `v2:${String(msg.visibilitySeq).padStart(SEQ16_PAD, '0')}:${msg.id}`;
   }
-  // v2 inactive or no visibility position → raw ID (resolve on consumption)
+  // No visibility position → raw ID (resolve on consumption via §8.4)
   return msg.id;
 }

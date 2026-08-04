@@ -1,22 +1,50 @@
 /**
- * Cursor v2 Activation Gate (#1269 contract)
+ * Cursor v2 Activation Gate (#1269 contract, revised per maintainer review)
  *
- * Single env var controls whether v2 cursors are emitted.
- * One gate point: `isV2CursorActive()`.
+ * Separates two concerns:
+ *   1. **Canonical visibility coordinate** (`cursorFor()` in cursor.ts):
+ *      Always v2 when visibilitySeq is known. Used for CAS comparison,
+ *      position recovery, and advancement. NOT gated — must be v2-coherent
+ *      in both activation modes for rollback safety.
  *
- * When OFF (default): `cursorFor()` always returns v1 (raw message ID).
- * When ON: `cursorFor()` returns v2 for messages with visibilitySeq.
+ *   2. **Durable slot initiation** (`gateForDurableSlot()` below):
+ *      Controls whether a previously untouched durable slot (delivery,
+ *      read, seen, mention-ack positions in Redis) initiates v2 encoding.
  *
- * The gate is deployment-scoped (env var), not per-request.
- * OFF → ON is safe: existing v1 cursors are consumed by lazy resolve.
- * ON → OFF rollback: v2 cursors in Redis remain parseable; new cursors
- * degrade to v1; comparison handles mixed formats via indeterminate (0).
+ * Deployment modes (same build, same artifact):
+ *   OFF (default): canonical coordinates are v2 (CAS works correctly).
+ *     Untouched durable slots receive v1 via gateForDurableSlot().
+ *     Existing v2 slots remain advanceable in v2 form (rollback-safe).
+ *   ON: all durable slots initiate and advance in v2 format.
+ *   ON → OFF rollback: existing v2 slots keep advancing in v2.
+ *     New durable slots revert to v1. No state frozen or downgraded.
  */
 
 /**
- * Check whether visibility-based v2 cursors are active.
+ * Check whether visibility-based v2 cursor initiation is active.
  * Reads `VISIBILITY_CURSOR_V2` env var. Only `'on'` activates.
  */
 export function isV2CursorActive(): boolean {
   return process.env.VISIBILITY_CURSOR_V2 === 'on';
+}
+
+/**
+ * Gate v2 initiation for a specific durable slot.
+ *
+ * Returns the cursor format appropriate for writing to the slot:
+ *   - Existing v2 slot → always v2 (rollback-safe, advance in same format)
+ *   - Untouched/v1 slot + gate ON → v2 (initiate v2 encoding)
+ *   - Untouched/v1 slot + gate OFF → v1 (don't initiate, use raw ID)
+ *
+ * @param canonical - The canonical v2 cursor from cursorFor()
+ * @param msg - The message (for fallback to raw ID)
+ * @param existingSlotCursor - Current value of the durable slot (null if untouched)
+ */
+export function gateForDurableSlot(canonical: string, msg: { id: string }, existingSlotCursor: string | null): string {
+  // Existing v2 → always advance in v2 (rollback-safe)
+  if (existingSlotCursor?.startsWith('v2:')) return canonical;
+  // Gate ON → initiate v2
+  if (isV2CursorActive()) return canonical;
+  // Gate OFF + untouched/v1 → don't initiate, use raw ID
+  return msg.id;
 }

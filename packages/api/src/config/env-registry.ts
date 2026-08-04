@@ -637,7 +637,7 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'VISIBILITY_CURSOR_V2',
     defaultValue: '(未设置 → off)',
     description:
-      '#1269: Activation gate for visibility-based v2 cursor format. Set to "on" to enable v2 cursor issuance in cursorFor(). Deployment-scoped: OFF by default, rollback-safe (existing v2 cursors remain parseable).',
+      '#1269: Activation gate for v2 cursor durable-slot initiation. Set to "on" to enable v2 encoding in previously untouched durable slots (delivery/read/seen positions). Canonical comparison always uses v2 regardless of this flag. Deployment-scoped: OFF by default, rollback-safe (existing v2 slots remain advanceable).',
     category: 'storage',
     sensitive: false,
     runtimeEditable: false,
