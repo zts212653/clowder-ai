@@ -15,7 +15,7 @@
  *   IDLE → RUNNING → {COMPLETED | TIMED_OUT | CANCELLED} → (log cleaned up)
  */
 
-import { type ChildProcess, spawn } from 'node:child_process';
+import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
 import { createWriteStream, existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -294,14 +294,32 @@ export class ManagedRunner {
   /**
    * P1-2 fix: kill the entire process group (shell + child processes).
    * With detached=true, child.pid IS the process group leader.
-   * process.kill(-pid, signal) sends the signal to all processes in the group.
+   *
+   * Platform-specific implementation:
+   * - Unix: process.kill(-pid, signal) sends signal to all processes in the group
+   * - Windows: taskkill /T kills the entire process tree
    */
   private _killProcessGroup(signal: NodeJS.Signals): void {
     if (!this._pid) return;
+
     try {
-      process.kill(-this._pid, signal);
-    } catch {
+      if (process.platform === 'win32') {
+        // Windows: use taskkill /T to kill the entire process tree
+        // /T = terminate all child processes
+        // /F = force termination (only for SIGKILL equivalent)
+        const args = signal === 'SIGKILL'
+          ? ['/PID', String(this._pid), '/T', '/F']
+          : ['/PID', String(this._pid), '/T'];
+        execFileSync('taskkill', args, { stdio: 'ignore' });
+        log.debug({ pid: this._pid, signal, args }, 'ManagedRunner: taskkill sent (Windows)');
+      } else {
+        // Unix: use negative PID to kill the process group
+        process.kill(-this._pid, signal);
+        log.debug({ pid: this._pid, signal }, 'ManagedRunner: signal sent to process group (Unix)');
+      }
+    } catch (err) {
       // Process group may already be gone — that's fine
+      log.debug({ pid: this._pid, signal, err }, 'ManagedRunner: kill process group failed (may already be dead)');
     }
   }
 
