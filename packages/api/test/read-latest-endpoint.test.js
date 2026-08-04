@@ -130,7 +130,9 @@ describe('POST /api/threads/:id/read/latest', () => {
     });
 
     assert.equal(res.statusCode, 200);
-    assert.deepEqual(JSON.parse(res.body), { advanced: true, messageId: seed.id });
+    // #1200: read/latest now includes cursor; queued cat speech has no visibilitySeq,
+    // so cursor falls back to the raw message ID.
+    assert.deepEqual(JSON.parse(res.body), { advanced: true, messageId: seed.id, cursor: seed.id });
   });
 
   it('is idempotent — second call returns advanced=false', async () => {

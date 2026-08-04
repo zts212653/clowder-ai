@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { buildDeps, seedMessages } from './helpers/incremental-context-helpers.js';
+import { buildDeps, mockMsg, seedMessages } from './helpers/incremental-context-helpers.js';
 
 const { assembleIncrementalContext } = await import('../dist/domains/cats/services/agents/routing/route-helpers.js');
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');

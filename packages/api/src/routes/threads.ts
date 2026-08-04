@@ -1218,7 +1218,18 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       // #1200: Use visibility-domain latest, not time-domain latest.
       // Late-delivered Q after C has higher visibilitySeq than C — mark-all
       // must ack to Q's v2 cursor, not C's raw ID.
-      const latest = await messageStore.getLatestVisibleCursor(thread.id);
+      let latest = await messageStore.getLatestVisibleCursor(thread.id);
+
+      // Fallback: queued cat-authored speech is timeline-published but has no
+      // visibilitySeq. Use time-domain lookup so mark-all still covers these threads.
+      if (!latest) {
+        const msgs = await messageStore.getByThread(thread.id, undefined, undefined, PUBLISHED_TIMELINE_READ);
+        if (msgs.length > 0) {
+          const last = msgs[msgs.length - 1]!;
+          latest = { cursor: last.id, messageId: last.id };
+        }
+      }
+
       if (!latest) continue;
       // #1269: Gated ack — applies durable-slot gate + conditional pre-reconcile
       const advanced = await gatedReadStateAck(opts.readStateStore!, messageStore, userId, thread.id, latest.cursor);
@@ -1309,7 +1320,19 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     // #1200: Use visibility-domain latest, not time-domain latest.
     // getByThread returns time-order; getLatestVisibleCursor returns the
     // visibility-domain tail — correct when late-delivered Q follows C.
-    const latest = await messageStore.getLatestVisibleCursor(id);
+    let latest = await messageStore.getLatestVisibleCursor(id);
+
+    // Fallback: queued cat-authored speech is timeline-published but has no
+    // visibilitySeq (not yet in visibility index). Use time-domain lookup with
+    // includeQueuedCatMessages so mark-as-read still covers these messages.
+    if (!latest) {
+      const msgs = await messageStore.getByThread(id, undefined, undefined, PUBLISHED_TIMELINE_READ);
+      if (msgs.length > 0) {
+        const last = msgs[msgs.length - 1]!;
+        latest = { cursor: last.id, messageId: last.id };
+      }
+    }
+
     if (!latest) {
       return { advanced: false, reason: 'no messages' };
     }
