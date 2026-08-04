@@ -32,10 +32,13 @@ describe('Cursor Order — RED #22: Late mention exactly-once', () => {
       threadId,
     });
 
-    // Q: queued mention (Q.id < C.id due to earlier timestamp)
+    // Q: genuinely hidden queued work (catId: null, scheduler-originated) — NOT
+    // timeline-published, so invisible before delivery.  Q.id < C.id because
+    // of the earlier timestamp.  After markDelivered, Q becomes visible and
+    // must appear exactly once in the next mention page.
     const q = store.append({
-      userId: 'u1',
-      catId: 'opus',
+      userId: 'scheduler',
+      catId: null,
       content: '@opus queued mention',
       mentions: ['opus'],
       timestamp: baseTs + 50,

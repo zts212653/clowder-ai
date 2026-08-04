@@ -684,17 +684,35 @@ export class RedisMessageStore {
     const result: StoredMessage[] = [];
     const staleIds: string[] = [];
 
-    // #1269 R10: mention scans use isDelivered — queued cat speech has a cursor
-    // position in the visibility ZSET but is not shown in mention feeds until
-    // delivered. (R8/R9 used isTimelinePublished; CI RED #22a proves isDelivered correct.)
+    // #1269: mention scans use isTimelinePublished — timeline-published cat speech
+    // is visible at append time (accepted contract: timeline-published = visible everywhere).
     if (!cursor || afterSeq === null) {
-      await this.scanVisibilityChunked(visKey, '-inf', '+inf', n, userId, result, staleIds, isDelivered, mentionFilter);
+      await this.scanVisibilityChunked(
+        visKey,
+        '-inf',
+        '+inf',
+        n,
+        userId,
+        result,
+        staleIds,
+        isTimelinePublished,
+        mentionFilter,
+      );
     } else {
       const sameRaw = await this.redis.zrangebyscore(visKey, String(afterSeq), String(afterSeq));
       const sameFiltered = sameRaw.filter((id) => id > cursorId!);
       if (sameFiltered.length > 0) {
         const sameScores = new Map(sameFiltered.map((id) => [id, afterSeq!]));
-        await this.hydrateAndFilter(sameFiltered, userId, n, result, staleIds, isDelivered, sameScores, mentionFilter);
+        await this.hydrateAndFilter(
+          sameFiltered,
+          userId,
+          n,
+          result,
+          staleIds,
+          isTimelinePublished,
+          sameScores,
+          mentionFilter,
+        );
       }
       if (result.length < n) {
         await this.scanVisibilityChunked(
@@ -705,7 +723,7 @@ export class RedisMessageStore {
           userId,
           result,
           staleIds,
-          isDelivered,
+          isTimelinePublished,
           mentionFilter,
         );
       }
@@ -744,8 +762,8 @@ export class RedisMessageStore {
     if (eligible.length === 0) return [];
     const messages = await this.hydrateMessages(eligible);
     // #1200 Sol R2: explicit deletedAt filter for mentions (hydrateAndFilter no longer filters)
-    // #1269 R10: isDelivered — mention feeds show delivered messages only.
-    return messages.filter((m) => isDelivered(m) && !m.deletedAt).slice(0, n);
+    // #1269: isTimelinePublished — timeline-published = visible everywhere.
+    return messages.filter((m) => isTimelinePublished(m) && !m.deletedAt).slice(0, n);
   }
 
   /**
@@ -785,8 +803,8 @@ export class RedisMessageStore {
 
     if (ids.length === 0) return [];
     const messages = await this.hydrateMessages(ids.reverse());
-    // #1269 R10: isDelivered — mention feeds show delivered messages only.
-    return messages.filter(isDelivered);
+    // #1269: isTimelinePublished — timeline-published = visible everywhere.
+    return messages.filter(isTimelinePublished);
   }
 
   async getBefore(timestamp: number, limit?: number, userId?: string, beforeId?: string): Promise<StoredMessage[]> {
@@ -1114,7 +1132,7 @@ export class RedisMessageStore {
    *
    * #1269 R9 P1-1: visibilityPredicate is caller-supplied so each reader
    * applies its own publication filter (e.g. resolveThreadMessageVisibility
-   * for getByThreadAfter, isDelivered for mention scans).
+   * for getByThreadAfter, isTimelinePublished for mention scans).
    */
   private async hydrateAndFilter(
     ids: string[],

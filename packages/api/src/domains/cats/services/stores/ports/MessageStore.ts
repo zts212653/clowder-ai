@@ -909,10 +909,9 @@ export class MessageStore {
     const visible: Array<{ msg: StoredMessage; seq: number }> = [];
     for (const msg of this.messages) {
       if (msg.deletedAt) continue;
-      // #1269 R10: mention scans use isDelivered — queued cat speech is positioned in
-      // the visibility ZSET for cursor ordering but not shown in mention feeds until
-      // delivered. (R8 used isTimelinePublished here; RED #22a proves isDelivered correct.)
-      if (!isDelivered(msg)) continue;
+      // #1269: timeline-published cat speech is visible in mention feeds at append time
+      // (accepted contract: timeline-published = visible everywhere).
+      if (!isTimelinePublishedFn(msg)) continue;
       if (threadId && msg.threadId !== threadId) continue;
       if (!msg.mentions.includes(catId)) continue;
       if (userId && msg.userId !== userId) continue;
@@ -951,8 +950,8 @@ export class MessageStore {
     for (let i = this.messages.length - 1; i >= 0 && matches.length < n; i--) {
       const msg = this.messages[i]!;
       if (msg.deletedAt) continue;
-      // #1269 R10: mention scans use isDelivered — parity with getMentionsFor.
-      if (!isDelivered(msg)) continue;
+      // #1269: isTimelinePublished — parity with getMentionsFor.
+      if (!isTimelinePublishedFn(msg)) continue;
       if (threadId && msg.threadId !== threadId) continue;
       if (msg.mentions.includes(catId) && (!userId || msg.userId === userId)) {
         // #1200 §8.7: inject visibilitySeq so callers can use cursorFor()
