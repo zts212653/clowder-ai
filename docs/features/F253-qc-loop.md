@@ -10,7 +10,7 @@ tips_exempt: internal QC tooling — no user-visible capability change
 
 # F253: Clowder AI QC Loop — 自动化质量门禁全链路
 
-> **Status**: done (Phase D governance amendment awaiting peer review) | **Owner**: Ragdoll (Opus-4.6) | **Priority**: P1 | **Phase A-C completed**: 2026-06-28
+> **Status**: done (Phase D governance amendment 2026-08-04) | **Owner**: Ragdoll (Opus-4.6) | **Priority**: P1 | **Phase A-C completed**: 2026-06-28
 
 ## Why
 
@@ -318,12 +318,12 @@ F253 **消费** F167 的 hold_ball / review-feedback / merge-gate 事件，**产
 - [x] AC-C2: CI repair loop 实现 same-class detection + max 2 rounds escalate — `scripts/classify-ci-error.mjs` (`classifyCiError` + `shouldAutoFix`) + merge-gate SKILL.md protocol docs（12 tests）
 - [x] AC-C3: `eval:qc` domain 注册在 F192 eval domain registry — `docs/harness-feedback/eval-domains/eval-qc.yaml` + `qc-metrics-provider.ts` + `qc-generator-adapter.ts` + `eval-cat-invocation.ts` DOMAIN_INSTRUCTIONS + `index.ts` wiring（4 tests → 12 tests after cloud P1+P2 fixes）
 
-### Phase D（ChatGPT author 多猫共识 Review rounds）🚧
+### Phase D（ChatGPT author 多猫共识 Review rounds）✅
 
-- [ ] AC-D1: ChatGPT author lane 有独立 skill + round ledger 模板，并明确至少两只非作者猫、独立阶段禁止互看、review 期间 Git 只读（验证：`pnpm check:skills` + review routing guard）
-- [ ] AC-D2: SOP 人类文本与机器定义都覆盖 independent barrier → cross-review → operator-designated recorder → ChatGPT fix/new HEAD → repeat 状态机（验证：`pnpm check:sop-definitions`）
-- [ ] AC-D3: merge-gate 只接受绑定 reviewed code HEAD 的 `approved_for_merge` / `openFindings: 0` ledger；recorder ledger-only commit 之外的 HEAD 改动使 verdict stale（验证：review routing guard + peer review）
-- [ ] AC-D4: ChatGPT 负责合入 main，合入后状态进入 operator acceptance 而非自动宣告验收完成（验证：skill、SOP 与 merge-gate 文本一致）
+- [x] AC-D1: ChatGPT author lane 有独立 skill + round ledger 模板，并明确至少两只非作者猫、独立阶段禁止互看、review 期间 Git 只读（验证：`pnpm check:skills` + review routing guard）
+- [x] AC-D2: SOP 人类文本与机器定义都覆盖 independent barrier → cross-review → operator-designated recorder → ChatGPT fix/new HEAD → repeat 状态机（验证：`pnpm check:sop-definitions`）
+- [x] AC-D3: merge-gate 只接受绑定 reviewed code HEAD 的 `approved_for_merge` / `openFindings: 0` ledger；recorder ledger-only commit 之外的 HEAD 改动使 verdict stale（验证：review routing guard + peer review）
+- [x] AC-D4: ChatGPT 负责合入 main，合入后状态进入 operator acceptance 而非自动宣告验收完成（验证：skill、SOP 与 merge-gate 文本一致）
 
 ## 需求点 Checklist
 

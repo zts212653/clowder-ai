@@ -119,6 +119,7 @@ review(<change-id>): record ChatGPT round <NN> consensus
 - barrier 前找不到其他 reviewer finding 内容。
 - recorder 之外没有该轮 Git 写入。
 - ledger 的 `reviewedCodeHead`、PR head 和 reviewer 实际读取目标一致。
+- `ledgerOnlyContinuity` 证明 `reviewedCodeHead..ledger commit` 只新增本轮 ledger 文件，没有代码、测试、配置或其他文档变化。
 - `approved_for_merge` 必须机械对应 `openFindings=0`。
 
 ## 下一步

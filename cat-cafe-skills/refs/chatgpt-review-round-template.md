@@ -44,4 +44,5 @@ verdict: fix_required | approved_for_merge
 - Independent notes stayed private until every reviewer completed: `yes`
 - Cross-review consensus completed: `yes`
 - Git writer for this round was the operator-designated recorder: `yes`
+- `ledgerOnlyContinuity`: `yes` — `reviewedCodeHead..ledger commit` changes only this round ledger file
 - Recorder signature: `[nickname/model🐾]`
