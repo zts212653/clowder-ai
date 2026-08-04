@@ -11,6 +11,8 @@
  * Architecture ref: docs/architecture/1200-cursor-order-analysis.md §8.3, §8.4, §8.7
  */
 
+import { isV2CursorActive } from './cursor-activation.js';
+
 // --------------------------------------------------------------------------
 // Types
 // --------------------------------------------------------------------------
@@ -152,9 +154,10 @@ export function compareCursors(a: string, b: string): number {
  * so mixed v1/v2 issuance is safe by construction.
  */
 export function cursorFor(msg: { id: string; visibilitySeq?: number }): string {
-  if (msg.visibilitySeq != null) {
+  // #1269 activation gate: v2 cursors only when explicitly enabled.
+  if (isV2CursorActive() && msg.visibilitySeq != null) {
     return `v2:${String(msg.visibilitySeq).padStart(SEQ16_PAD, '0')}:${msg.id}`;
   }
-  // Degraded: no visibility position → raw ID (resolve on consumption)
+  // v2 inactive or no visibility position → raw ID (resolve on consumption)
   return msg.id;
 }

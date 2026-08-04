@@ -1,10 +1,14 @@
 # Issue #1200 — Cursor Order Architecture Analysis
 
 **Author**: 布偶猫/宪宪 (@opus)
-**Branch**: `fix/1200-cursor-order` (from `upstream/main` @ `7207936a3`)
+**Branch**: `fix/1200-cursor-order` (rebased onto `upstream/main` @ `f30e20c28`)
 **Status**: ✅ **ARCHITECTURE GATE OPEN** — rev 7 APPROVED by Sol (17:13 UTC,
 0 P1 / 0 P2, exact blob `dc2b2a456cfa36c89c10efe82ae5591da87e280d`). §8 rev 7 is
 the binding architecture truth; implementation proceeds per §8.10.
+
+**Activation**: Gated by `VISIBILITY_CURSOR_V2=on` env var (#1269 contract).
+v2 cursors are OFF by default. `cursorFor()` checks `isV2CursorActive()` —
+the single gate point for the entire deployment. See `cursor-activation.ts`.
 
 ---
 
