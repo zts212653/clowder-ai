@@ -92,8 +92,9 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
 
   // ---- RED #15: Append atomicity ----
   // Every immediately-visible message carries visibilitySeq at append time.
-  // Queued messages do NOT carry it.
-  it('RED #15 — Append atomicity: immediate message has seq, queued does not', async () => {
+  // Timeline-published queued cat speech also carries it (isTimelinePublished).
+  // Hidden queued work (system/scheduler) does NOT carry it.
+  it('RED #15 — Append atomicity: immediate message has seq, hidden queued does not', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const store = new MessageStore();
     const threadId = `red15-${Date.now()}`;
@@ -107,10 +108,11 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
       threadId,
     });
 
+    // Hidden queued work (system/scheduler) — NOT timeline-published
     const queued = store.append({
-      userId: 'u1',
-      catId: 'opus',
-      content: 'queued',
+      userId: 'scheduler',
+      catId: 'system',
+      content: 'hidden-queued',
       mentions: [],
       timestamp: Date.now(),
       threadId,
@@ -122,9 +124,10 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     assert.equal(page.length, 1, 'Only the direct message should be visible');
     assert.ok(page[0].visibilitySeq !== undefined, 'Direct message must have visibilitySeq');
 
-    // Queued message should NOT be in visibility
+    // Hidden queued message should NOT be in visibility (no visibilitySeq)
+    assert.equal(queued.visibilitySeq, undefined, 'Hidden queued must not get visibilitySeq');
     const token = cursorFor({ id: queued.id }); // no visibilitySeq → v1
-    assert.equal(token, queued.id, 'Queued message should produce v1 cursor (no seq)');
+    assert.equal(token, queued.id, 'Hidden queued message should produce v1 cursor (no seq)');
   });
 
   // ---- RED #17: Padded-token CAS order ----
@@ -277,8 +280,9 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
   });
 
   // ---- RED #19: Queued lifecycle ----
-  // Queued → no seq, no visibility; deliver → allocated exactly once.
-  it('RED #19 — Queued lifecycle: deliver allocates exactly once', async () => {
+  // Timeline-published cat speech: seq assigned at append, preserved at delivery.
+  // Not visible in getByThreadAfter while queued (display filter), visible after delivery.
+  it('RED #19 — Queued lifecycle: timeline-published → seq preserved at delivery', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const store = new MessageStore();
     const threadId = `red19-${Date.now()}`;
@@ -309,6 +313,89 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     const result = store.markDelivered(q.id, Date.now() + 1000);
     assert.ok(result !== null, 'markDelivered returns result for existing msg');
     assert.equal(result.deliveryTransitioned, false, 'Second delivery is CAS no-op');
+  });
+
+  // ---- Delivery preserves immutable visibility position ----
+  // Q (timeline-published queued cat speech) gets visibilitySeq at append.
+  // Later ordinary B gets a higher seq. markDelivered(Q) must NOT reallocate —
+  // Q's cursor and position must remain unchanged.
+  it('Delivery preserves append-time visibility position for timeline-published speech', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = new MessageStore();
+    const threadId = `deliver-preserve-${Date.now()}`;
+
+    const q = store.append({
+      userId: 'u1',
+      catId: 'codex-sol',
+      content: 'timeline-published cat speech',
+      mentions: ['opus'],
+      timestamp: Date.now() - 1000,
+      threadId,
+      deliveryStatus: 'queued',
+    });
+
+    // Q gets visibilitySeq at append (timeline-published)
+    const qCursorBefore = cursorFor(q);
+    assert.ok(qCursorBefore.startsWith('v2:'), 'Q must have v2 cursor at append');
+    const qSeqBefore = parseCursor(qCursorBefore).seq;
+
+    // Append later ordinary B — gets a higher seq
+    const b = store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'ordinary B',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
+    });
+    const bSeq = parseCursor(cursorFor(b)).seq;
+    assert.ok(bSeq > qSeqBefore, 'B seq must be > Q seq (B appended later)');
+
+    // Deliver Q — must NOT reallocate
+    store.markDelivered(q.id, Date.now());
+
+    // Q's cursor must be unchanged
+    const latest = store.getLatestVisibleCursor(threadId);
+    assert.ok(latest, 'Should return a cursor');
+    assert.equal(latest.messageId, b.id, 'Latest visible should be B (higher seq)');
+
+    // Q's seq must be preserved (not moved after B)
+    const page = store.getByThreadAfter(threadId);
+    const qInPage = page.find((m) => m.id === q.id);
+    assert.ok(qInPage, 'Q must be visible after delivery');
+    assert.equal(qInPage.visibilitySeq, qSeqBefore, 'Q visibilitySeq must be preserved');
+    assert.equal(cursorFor(qInPage), qCursorBefore, 'Q cursor must be identical to pre-delivery');
+  });
+
+  // ---- Hidden queued work: delivery allocates first position ----
+  // Non-timeline-published queued work (system/scheduler) has NO visibilitySeq
+  // at append. markDelivered must allocate its first canonical position.
+  it('Hidden queued work gets visibilitySeq at delivery, not append', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = new MessageStore();
+    const threadId = `hidden-queued-${Date.now()}`;
+
+    const hidden = store.append({
+      userId: 'scheduler',
+      catId: 'system',
+      content: 'hidden system queued work',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
+      deliveryStatus: 'queued',
+    });
+
+    // Hidden queued: NO visibilitySeq at append
+    assert.equal(hidden.visibilitySeq, undefined, 'Hidden queued must not get visibilitySeq');
+    assert.equal(cursorFor(hidden), hidden.id, 'Hidden queued produces v1 cursor');
+
+    // Deliver → allocates first position
+    store.markDelivered(hidden.id, Date.now());
+
+    const latest = store.getLatestVisibleCursor(threadId);
+    assert.ok(latest, 'Should return a cursor after delivery');
+    assert.ok(latest.cursor.startsWith('v2:'), 'Delivered hidden msg gets v2 cursor');
+    assert.equal(latest.messageId, hidden.id);
   });
 
   // ---- Pruned v1 cursor fallback: FM-4 parity ----

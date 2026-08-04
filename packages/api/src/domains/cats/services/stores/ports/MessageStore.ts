@@ -1343,11 +1343,15 @@ export class MessageStore {
     msg.timelineOrderAt = resolveDeliveryTimelineScore(msg, deliveredAt);
     msg.deliveredAt = deliveredAt;
     msg.deliveryStatus = 'delivered';
-    // #1200: Message becomes visible — assign visibilitySeq.
-    // seq = max(counter+1, Date.now()) mirrors Redis Lua: max(hwm+1, serverTimeMs).
-    // Uses server wall-clock, NOT the deliveredAt argument. (#1200 P1-A fix)
-    this.visibilitySeqCounter = Math.max(this.visibilitySeqCounter + 1, Date.now());
-    this.visibilitySeq.set(id, this.visibilitySeqCounter);
+    // #1269: Preserve existing visibility position for already-published speech.
+    // Timeline-published queued cat speech gets visibilitySeq at append — delivery
+    // must NOT reallocate or it would move the message after later arrivals and
+    // invalidate already-issued durable cursors. Allocate only when no canonical
+    // position exists (legacy or truly hidden queued work).
+    if (!this.visibilitySeq.has(id)) {
+      this.visibilitySeqCounter = Math.max(this.visibilitySeqCounter + 1, Date.now());
+      this.visibilitySeq.set(id, this.visibilitySeqCounter);
+    }
     return { ...msg, deliveryTransitioned: true };
   }
 

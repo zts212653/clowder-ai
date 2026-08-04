@@ -189,9 +189,13 @@ return seq
 /**
  * DELIVER_LUA extension: allocates visibilitySeq on delivery of a queued message.
  *
- * This is the FULL replacement DELIVER_LUA — not a fragment.
- * Uses Redis TIME() (not deliveredAt) as the time source to prevent far-future
- * timestamps from corrupting the hwm. (#1200 P1-A fix)
+ * This is the FULL replacement DELIVER_LUA — not a fragment. Integrates:
+ *   - CAS guard (queued → delivered only)
+ *   - F254 custody guard (non-terminal custody → no-op)
+ *   - Publication-order preservation (real-cat speech / user receipts keep authored timestamp)
+ *   - Visibility position guard: already-positioned messages (timeline-published at append)
+ *     preserve their immutable canonical position — only allocate when no position exists
+ *   - Uses Redis TIME() (not deliveredAt) for visibility hwm (#1200 P1-A fix)
  *
  * KEYS[1] = detail hash key (auto-prefixed by ioredis)
  * ARGV[1] = message id
@@ -212,15 +216,50 @@ if status ~= 'queued' then
   return 0
 end
 
+-- F254: custody guard — non-terminal custody blocks legacy markDelivered
+local custody = redis.call('HGET', hash, 'queueCustody')
+if custody and custody ~= '' then
+  local custodyProjection = cjson.decode(custody)
+  if custodyProjection.status ~= 'terminal' then
+    return 0
+  end
+end
+
 local userId = redis.call('HGET', hash, 'userId')
 local threadId = redis.call('HGET', hash, 'threadId')
+local timestamp = redis.call('HGET', hash, 'timestamp')
+local catId = redis.call('HGET', hash, 'catId')
+local origin = redis.call('HGET', hash, 'origin')
+local source = redis.call('HGET', hash, 'source')
+
+-- Publication order: already-published real-cat speech and owner-visible
+-- queued user receipts keep their authored timestamp; private queued work
+-- enters the timeline at delivery. (Ported from original DELIVER_LUA.)
+local isRealCatSpeech = catId and catId ~= '' and catId ~= 'system'
+  and userId ~= 'system' and userId ~= 'scheduler' and origin ~= 'briefing'
+local isQueuedUserReceipt = (not catId or catId == '') and (not source or source == '')
+  and userId ~= 'system' and userId ~= 'scheduler' and origin ~= 'briefing'
+  and custody and custody ~= ''
+local timelineScore = deliveredAt
+if isRealCatSpeech or isQueuedUserReceipt then
+  timelineScore = timestamp
+end
+
+-- #1269: Check if already positioned (timeline-published at append has visibilitySeq).
+-- If so, preserve the immutable canonical position — only update delivery fields.
+local existingVis = redis.call('HGET', hash, 'visibilitySeq')
+if existingVis ~= false then
+  redis.call('HSET', hash, 'deliveredAt', deliveredAt, 'timelineOrderAt', timelineScore, 'deliveryStatus', 'delivered')
+  return redis.call('HGETALL', hash)
+end
+
+-- Not yet positioned: full visibility allocation (legacy/hidden queued work)
+local metaKey = kp .. 'msg:visibility-meta:' .. threadId
+local visKey = kp .. 'msg:visibility:' .. threadId
 
 -- Pre-mutation guard: compute visibilitySeq and check exhaustion BEFORE
 -- any writes. Redis Lua error_reply does NOT rollback prior mutations.
 -- (#1200 P1-2 fix)
-local metaKey = kp .. 'msg:visibility-meta:' .. threadId
-local visKey = kp .. 'msg:visibility:' .. threadId
-
 local hwmRaw = redis.call('HGET', metaKey, 'hwm')
 local hwm
 if hwmRaw == false then
@@ -246,11 +285,11 @@ if seq > 9007199254730991 then
   return redis.error_reply('VISIBILITY_SEQ_EXHAUSTED: seq=' .. tostring(seq))
 end
 
--- All guards passed — write delivery status + ZSETs + visibility atomically
-redis.call('HSET', hash, 'deliveredAt', deliveredAt, 'deliveryStatus', 'delivered')
-redis.call('ZADD', kp .. 'msg:thread:' .. threadId, tonumber(deliveredAt), msgId)
-redis.call('ZADD', kp .. 'msg:timeline', tonumber(deliveredAt), msgId)
-redis.call('ZADD', kp .. 'msg:user:' .. userId, tonumber(deliveredAt), msgId)
+-- All guards passed — write delivery + timeline + visibility atomically
+redis.call('HSET', hash, 'deliveredAt', deliveredAt, 'timelineOrderAt', timelineScore, 'deliveryStatus', 'delivered')
+redis.call('ZADD', kp .. 'msg:thread:' .. threadId, tonumber(timelineScore), msgId)
+redis.call('ZADD', kp .. 'msg:timeline', tonumber(timelineScore), msgId)
+redis.call('ZADD', kp .. 'msg:user:' .. userId, tonumber(timelineScore), msgId)
 
 -- Visibility: write pre-validated seq
 redis.call('ZADD', visKey, seq, msgId)
