@@ -16,7 +16,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import {
   assertRedisIsolationOrThrow,
-  cleanupPrefixedRedisKeys,
+  cleanupClientKeyspace,
   redisIsolationSkipReason,
 } from './helpers/redis-test-helpers.js';
 
@@ -195,7 +195,7 @@ describe('§2 Integration: durable-slot gate through real stores (#1269)', () =>
 
   after(async () => {
     if (redis) {
-      await cleanupPrefixedRedisKeys(redis, prefix);
+      await cleanupClientKeyspace(redis);
       await redis.quit();
     }
   });

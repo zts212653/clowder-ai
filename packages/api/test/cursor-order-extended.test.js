@@ -305,9 +305,10 @@ describe('Cursor Order — Extended RED tests (§8.8)', () => {
     assert.equal(after.length, 1, 'Delivered message is now visible');
     assert.ok(after[0].visibilitySeq !== undefined, 'Must have visibilitySeq');
 
-    // Second delivery: no-op (already delivered)
+    // Second delivery: no-op (already delivered — deliveryTransitioned=false)
     const result = store.markDelivered(q.id, Date.now() + 1000);
-    assert.equal(result, null, 'Second delivery should be no-op (CAS guard)');
+    assert.ok(result !== null, 'markDelivered returns result for existing msg');
+    assert.equal(result.deliveryTransitioned, false, 'Second delivery is CAS no-op');
   });
 
   // ---- Pruned v1 cursor fallback: FM-4 parity ----

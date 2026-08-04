@@ -389,6 +389,109 @@ describe('#1200 R14 route: PATCH /read cross-format', () => {
 });
 
 // ============================================================================
+// #1269: Route-level OFF→ON→OFF activation lifecycle via PATCH /read
+// Exercises gatedReadStateAck() through the real HTTP endpoint.
+// ============================================================================
+
+describe('#1269 route: PATCH /read OFF→ON→OFF activation lifecycle', () => {
+  let app;
+  let threadStore;
+  let messageStore;
+  let readStateStore;
+  let savedGate;
+
+  beforeEach(async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const { threadsRoutes } = await import('../dist/routes/threads.js');
+
+    threadStore = new ThreadStore();
+    messageStore = new MessageStore();
+    readStateStore = createCrossFormatAwareStore();
+
+    app = Fastify();
+    await app.register(threadsRoutes, { threadStore, messageStore, readStateStore });
+    await app.ready();
+
+    savedGate = process.env.VISIBILITY_CURSOR_V2;
+  });
+
+  afterEach(async () => {
+    if (savedGate === undefined) delete process.env.VISIBILITY_CURSOR_V2;
+    else process.env.VISIBILITY_CURSOR_V2 = savedGate;
+    if (app) await app.close();
+  });
+
+  it('OFF→ON→OFF: untouched v1, advance to v2, rollback preserves v2', async () => {
+    const thread = threadStore.create('alice', 'Gate lifecycle thread');
+
+    const msgA = messageStore.append({
+      userId: 'alice',
+      catId: 'opus',
+      content: 'msg A',
+      mentions: [],
+      timestamp: Date.now() - 3000,
+      threadId: thread.id,
+    });
+    const msgB = messageStore.append({
+      userId: 'alice',
+      catId: 'opus',
+      content: 'msg B',
+      mentions: [],
+      timestamp: Date.now() - 2000,
+      threadId: thread.id,
+    });
+    const msgC = messageStore.append({
+      userId: 'alice',
+      catId: 'opus',
+      content: 'msg C',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: thread.id,
+    });
+
+    // Phase 1: OFF — untouched slot, ack with msgA → stored as v1
+    delete process.env.VISIBILITY_CURSOR_V2;
+    const r1 = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}/read`,
+      headers: { 'x-cat-cafe-user': 'alice', 'content-type': 'application/json' },
+      payload: { upToMessageId: msgA.id },
+    });
+    assert.equal(r1.statusCode, 200);
+    assert.equal(JSON.parse(r1.body).advanced, true, 'Phase 1: must advance');
+    const s1 = readStateStore._raw('alice', thread.id);
+    assert.ok(!s1.startsWith('v2:'), 'OFF: untouched slot stores v1');
+
+    // Phase 2: ON — advance to msgB → stored as v2 (pre-reconcile upgrades v1→v2)
+    process.env.VISIBILITY_CURSOR_V2 = 'on';
+    const r2 = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}/read`,
+      headers: { 'x-cat-cafe-user': 'alice', 'content-type': 'application/json' },
+      payload: { upToMessageId: msgB.id },
+    });
+    assert.equal(r2.statusCode, 200);
+    assert.equal(JSON.parse(r2.body).advanced, true, 'Phase 2: must advance');
+    const s2 = readStateStore._raw('alice', thread.id);
+    assert.ok(s2.startsWith('v2:'), 'ON: stored must be v2');
+
+    // Phase 3: OFF (rollback) — advance to msgC → v2 preserved (existing v2 keeps gate open)
+    delete process.env.VISIBILITY_CURSOR_V2;
+    const r3 = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}/read`,
+      headers: { 'x-cat-cafe-user': 'alice', 'content-type': 'application/json' },
+      payload: { upToMessageId: msgC.id },
+    });
+    assert.equal(r3.statusCode, 200);
+    assert.equal(JSON.parse(r3.body).advanced, true, 'Phase 3: must advance');
+    const s3 = readStateStore._raw('alice', thread.id);
+    assert.ok(s3.startsWith('v2:'), 'Rollback: v2 preserved in existing v2 slot');
+  });
+});
+
+// ============================================================================
 // Sentinel notice lifecycle: real ThreadUnseenChecker → FreshnessNoticeService
 // ============================================================================
 
