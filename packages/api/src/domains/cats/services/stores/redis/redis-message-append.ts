@@ -68,6 +68,9 @@ return {'committed', messageId}
 `;
 
 function serializeMessage(message: AppendMessageInput, id: string, threadId: string): Record<string, string> {
+  // F288: split pluginMessage from host extra — stored as independent hash field
+  const { pluginMessage, ...hostExtra } = message.extra ?? {};
+  const hasHostExtra = Object.keys(hostExtra).length > 0;
   return {
     id,
     threadId,
@@ -79,7 +82,8 @@ function serializeMessage(message: AppendMessageInput, id: string, threadId: str
     ...(message.contentBlocks !== undefined ? { contentBlocks: JSON.stringify(message.contentBlocks) } : {}),
     ...(message.toolEvents !== undefined ? { toolEvents: JSON.stringify(message.toolEvents) } : {}),
     ...(message.metadata ? { metadata: JSON.stringify(message.metadata) } : {}),
-    ...(message.extra ? { extra: serializeExtra(message.extra) } : {}),
+    ...(hasHostExtra ? { extra: serializeExtra(hostExtra) } : {}),
+    ...(pluginMessage ? { pluginMessage: JSON.stringify(pluginMessage) } : {}),
     ...(message.thinking ? { thinking: message.thinking } : {}),
     ...(message.origin ? { origin: message.origin } : {}),
     ...(message.visibility ? { visibility: message.visibility } : {}),

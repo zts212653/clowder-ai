@@ -18,6 +18,7 @@ import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type {
   AppendMessageInput,
   BoundedThreadMessagePage,
+  HostMessageExtra,
   MarkCanceledResult,
   MarkDeliveredResult,
   MessageAppendListener,
@@ -26,6 +27,7 @@ import type {
   QueueCustodyTransitionResult,
   QueuedMessageCustody,
   StoredMessage,
+  StoredPluginMessage,
   StreamMetadataAugmentInput,
   ThreadFrontierAppendResult,
   ThreadMessageReadOptions,
@@ -54,6 +56,7 @@ import {
   safeParseExtra,
   safeParseMentions,
   safeParseMetadata,
+  safeParsePluginMessage,
   safeParseQueueCustody,
   safeParseToolEvents,
   serializeExtra,
@@ -121,6 +124,58 @@ if ARGV[4] ~= '' then
 end
 return {1, nextRevision}
 `;
+
+const UPDATE_PLUGIN_MESSAGE_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+local current = nil
+local raw = redis.call('HGET', KEYS[1], 'pluginMessage')
+if raw and raw ~= '' then
+  local ok, decoded = pcall(cjson.decode, raw)
+  if ok then current = decoded end
+else
+  local legacyRaw = redis.call('HGET', KEYS[1], 'extra')
+  if legacyRaw and legacyRaw ~= '' then
+    local ok, decoded = pcall(cjson.decode, legacyRaw)
+    if ok then current = decoded.pluginMessage end
+  end
+end
+if not current or tonumber(current.revision) ~= tonumber(ARGV[2]) then return -1 end
+redis.call('HSET', KEYS[1], 'pluginMessage', ARGV[1])
+return 1
+`;
+
+function splitMessageExtra(extra: StoredMessage['extra'] | undefined): {
+  hostExtra: HostMessageExtra;
+  pluginMessage: StoredPluginMessage | undefined;
+} {
+  const { pluginMessage, ...hostExtra } = extra ?? {};
+  return { hostExtra, pluginMessage };
+}
+
+function serializeHostExtra(extra: StoredMessage['extra'] | undefined): string {
+  const { hostExtra } = splitMessageExtra(extra);
+  return Object.keys(hostExtra).length > 0 ? serializeExtra(hostExtra) : '';
+}
+
+function hydrateExtra(rawExtra: string | undefined, rawPluginMessage: string | undefined): StoredMessage['extra'] {
+  const parsedExtra = safeParseExtra(rawExtra);
+  const { hostExtra, pluginMessage: legacyPluginMessage } = splitMessageExtra(parsedExtra);
+  // Once the independent field exists it is authoritative, including when
+  // malformed (fail-closed); fall back only for pre-F288 embedded records.
+  if (rawPluginMessage === undefined) {
+    // Pre-F288 path: no independent field, fall back to legacy embedded record.
+    if (Object.keys(hostExtra).length === 0 && legacyPluginMessage === undefined) return undefined;
+    return { ...hostExtra, ...(legacyPluginMessage ? { pluginMessage: legacyPluginMessage } : {}) };
+  }
+  // F288 path: independent field exists. Preserve it even when invalid so
+  // projectEnvelope enters the plugin branch and fail-closes (codex P1 fix).
+  const pluginMessage = safeParsePluginMessage(rawPluginMessage);
+  // When pluginMessage parsed to undefined (malformed), keep an invalid marker
+  // object so `extra.pluginMessage !== undefined` remains true — projectEnvelope
+  // will detect the malformed payload via readPluginMessageExtra and return null.
+  const pluginValue = pluginMessage ?? ({} as StoredPluginMessage);
+  return { ...hostExtra, pluginMessage: pluginValue };
+}
 
 export class RedisMessageStore {
   private readonly redis: RedisClient;
@@ -216,7 +271,7 @@ export class RedisMessageStore {
     const contentBlocks = safeParseContentBlocks(data.contentBlocks);
     const toolEvents = safeParseToolEvents(data.toolEvents);
     const parsedMetadata = safeParseMetadata(data.metadata);
-    const parsedExtra = safeParseExtra(data.extra);
+    const parsedExtra = hydrateExtra(data.extra, data.pluginMessage);
     const parsedSource = safeParseConnectorSource(data.source);
     const parsedQueueCustody = safeParseQueueCustody(data.queueCustody);
     const deletedAt = data.deletedAt ? parseInt(data.deletedAt, 10) : undefined;
@@ -948,6 +1003,7 @@ export class RedisMessageStore {
       toolEvents: '',
       metadata: '',
       extra: '',
+      pluginMessage: '',
       thinking: '',
       mentions: '[]',
       deletedAt: String(now),
@@ -1002,13 +1058,36 @@ export class RedisMessageStore {
   }
 
   /** F096: Update message extra data (merge semantics — preserves existing fields). */
-  async updateExtra(id: string, extra: NonNullable<StoredMessage['extra']>): Promise<StoredMessage | null> {
+  async updateExtra(id: string, extra: HostMessageExtra): Promise<StoredMessage | null> {
     const msg = await this.getById(id);
     if (!msg) return null;
-    const merged = { ...msg.extra, ...extra };
-    await this.redis.hset(MessageKeys.detail(id), { extra: serializeExtra(merged) });
-    msg.extra = merged;
-    return msg;
+    const { hostExtra: current, pluginMessage } = splitMessageExtra(msg.extra);
+    const merged = { ...current, ...extra };
+    const pipeline = this.redis.multi();
+    pipeline.hset(MessageKeys.detail(id), { extra: serializeExtra(merged) });
+    // Lazy migration for a pre-F288 record whose plugin payload still lives in
+    // the legacy extra JSON. HSETNX cannot overwrite a concurrent newer write.
+    if (pluginMessage) {
+      pipeline.hsetnx(MessageKeys.detail(id), 'pluginMessage', JSON.stringify(pluginMessage));
+    }
+    await pipeline.exec();
+    return this.getById(id);
+  }
+
+  async updatePluginMessage(
+    id: string,
+    pluginMessage: StoredPluginMessage,
+    expectedRevision: number,
+  ): Promise<StoredMessage | null> {
+    const updated = await this.redis.eval(
+      UPDATE_PLUGIN_MESSAGE_LUA,
+      1,
+      MessageKeys.detail(id),
+      JSON.stringify(pluginMessage),
+      String(expectedRevision),
+    );
+    if (Number(updated) !== 1) return null;
+    return this.getById(id);
   }
 
   async augmentStreamMetadata(id: string, patch: StreamMetadataAugmentInput): Promise<StoredMessage | null> {
@@ -1021,11 +1100,17 @@ export class RedisMessageStore {
     if (patch.toolEvents?.length && augmented.toolEvents) fields.toolEvents = JSON.stringify(augmented.toolEvents);
     if (patch.replyTo && augmented.replyTo) fields.replyTo = augmented.replyTo;
     if (patch.mentionsUser && augmented.mentionsUser) fields.mentionsUser = '1';
-    if (patch.extra && augmented.extra) fields.extra = serializeExtra(augmented.extra);
+    const { pluginMessage } = splitMessageExtra(augmented.extra);
+    if (patch.extra && augmented.extra) fields.extra = serializeHostExtra(augmented.extra);
     if (Object.keys(fields).length > 0) {
-      await this.redis.hset(MessageKeys.detail(id), fields);
+      const pipeline = this.redis.multi();
+      pipeline.hset(MessageKeys.detail(id), fields);
+      if (pluginMessage) {
+        pipeline.hsetnx(MessageKeys.detail(id), 'pluginMessage', JSON.stringify(pluginMessage));
+      }
+      await pipeline.exec();
     }
-    return augmented;
+    return (await this.getById(id)) ?? augmented;
   }
 
   /**
@@ -1179,7 +1264,7 @@ export class RedisMessageStore {
       const contentBlocks = safeParseContentBlocks(d.contentBlocks);
       const toolEvents = safeParseToolEvents(d.toolEvents);
       const parsedMetadata = safeParseMetadata(d.metadata);
-      const parsedExtra = safeParseExtra(d.extra);
+      const parsedExtra = hydrateExtra(d.extra, d.pluginMessage);
       const parsedSource = safeParseConnectorSource(d.source);
       const parsedQueueCustody = safeParseQueueCustody(d.queueCustody);
       messages.push({

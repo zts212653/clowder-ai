@@ -29,6 +29,9 @@ importers:
       '@cat-cafe/shared':
         specifier: workspace:*
         version: link:../shared
+      '@clowder-ai/plugin-contract':
+        specifier: 0.1.0-beta.5
+        version: 0.1.0-beta.5
       '@fastify/cookie':
         specifier: '9'
         version: 9.4.0
@@ -1017,6 +1020,10 @@ packages:
 
   '@chevrotain/types@11.1.2':
     resolution: {integrity: sha512-U+HFai5+zmJCkK86QsaJtoITlboZHBqrVketcO2ROv865xfCMSFpELQoz1GkX5GzME8pTa+3kbKrZHQtI0gdbw==}
+
+  '@clowder-ai/plugin-contract@0.1.0-beta.5':
+    resolution: {integrity: sha512-BQQTVygH1bw8C4brV7Bq5cM0ylLMxZOvZf/FSNCbv5tmM8sZ89QNl34aOrzsRDbRDzZkocbh8mlS1sffhf55ag==}
+    engines: {node: '>=20.0.0'}
 
   '@codemirror/autocomplete@6.20.1':
     resolution: {integrity: sha512-1cvg3Vz1dSSToCNlJfRA2WSI4ht3K+WplO0UMOgmUYPivCyy2oueZY6Lx7M9wThm7SDUBViRmuT+OG/i8+ON9A==}
@@ -7381,6 +7388,8 @@ snapshots:
   '@braintree/sanitize-url@7.1.2': {}
 
   '@chevrotain/types@11.1.2': {}
+
+  '@clowder-ai/plugin-contract@0.1.0-beta.5': {}
 
   '@codemirror/autocomplete@6.20.1':
     dependencies:

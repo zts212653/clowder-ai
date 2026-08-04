@@ -216,6 +216,24 @@ export interface StoredMessage {
     a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string };
     /** F264: derived browser projection; canonical truth remains queueCustody. */
     queueReceipt?: QueueMessageReceipt;
+    /** F288 (K-1 plugin messaging): canonical plugin payload — the envelope is a pure
+     *  projection of this (single truth source). Strict shape owned by
+     *  domains/messaging/envelope.ts (PluginMessageExtra); kept structural here so the
+     *  cats domain does not depend on the messaging domain. */
+    pluginMessage?: {
+      instanceId: string;
+      revision: number;
+      provenance: Record<string, unknown>;
+      elements: ReadonlyArray<Record<string, unknown>>;
+      sourceEventId?: string;
+      correlationId?: string;
+      causationId?: string;
+      /** Latest revision whose public output event is durably present. */
+      outputRevision?: number;
+      /** Event-log sequence covering outputRevision; paired with outputRevision. */
+      outputSequence?: number;
+      appendOps: ReadonlyArray<{ operationId: string; elementIds: readonly string[]; baseRevision?: number }>;
+    };
   };
   /** CatIds mentioned in this message */
   mentions: readonly CatId[];
@@ -291,6 +309,12 @@ export interface BoundedThreadMessagePage {
   nextCursor?: { timestamp: number; id: string };
 }
 
+/** Canonical F288 payload stored independently from host-owned extra metadata. */
+export type StoredPluginMessage = NonNullable<NonNullable<StoredMessage['extra']>['pluginMessage']>;
+
+/** Host-owned metadata patch. Plugin payload revisions use updatePluginMessage(). */
+export type HostMessageExtra = Omit<NonNullable<StoredMessage['extra']>, 'pluginMessage'>;
+
 /**
  * Input for appending a message. threadId is optional (defaults to 'default').
  */
@@ -354,7 +378,7 @@ export interface StreamMetadataAugmentInput {
   thinking?: string;
   replyTo?: string;
   mentionsUser?: boolean;
-  extra?: NonNullable<StoredMessage['extra']>;
+  extra?: HostMessageExtra;
 }
 
 function richBlockDedupeKey(block: unknown, index: number): string {
@@ -539,9 +563,12 @@ export interface IMessageStore {
   /** F35: Reveal whispers in a thread sent by userId (set revealedAt). Returns count revealed. */
   revealWhispers(threadId: string, userId: string): number | Promise<number>;
   /** F096: Update message extra data (for interactive block state persistence). Returns null if not found. */
-  updateExtra(
+  updateExtra(id: string, extra: HostMessageExtra): StoredMessage | null | Promise<StoredMessage | null>;
+  /** F288: replace only the canonical plugin payload, independently of host extra metadata. */
+  updatePluginMessage(
     id: string,
-    extra: NonNullable<StoredMessage['extra']>,
+    pluginMessage: StoredPluginMessage,
+    expectedRevision: number,
   ): StoredMessage | null | Promise<StoredMessage | null>;
   /** #1462: augment callback-persisted messages with metadata collected only on the stream path. */
   augmentStreamMetadata(
@@ -1109,10 +1136,21 @@ export class MessageStore {
    * Keep memory and Redis semantics identical: callers submit a partial top-level
    * projection, so unrelated durable provenance must survive the update.
    */
-  updateExtra(id: string, extra: NonNullable<StoredMessage['extra']>): StoredMessage | null {
+  updateExtra(id: string, extra: HostMessageExtra): StoredMessage | null {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
-    msg.extra = { ...msg.extra, ...extra };
+    // Strip pluginMessage to prevent bypassing updatePluginMessage()'s
+    // revision check — matches Redis store behaviour (codex P2 fix).
+    const { pluginMessage: _strip, ...hostOnly } = extra as Record<string, unknown>;
+    msg.extra = { ...msg.extra, ...hostOnly };
+    return msg;
+  }
+
+  updatePluginMessage(id: string, pluginMessage: StoredPluginMessage, expectedRevision: number): StoredMessage | null {
+    const msg = this.messages.find((m) => m.id === id);
+    if (!msg) return null;
+    if (msg.extra?.pluginMessage?.revision !== expectedRevision) return null;
+    msg.extra = { ...msg.extra, pluginMessage };
     return msg;
   }
 
