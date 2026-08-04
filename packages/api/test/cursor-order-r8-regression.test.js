@@ -118,14 +118,19 @@ describe('#1269 R8 P1-1: isTimelinePublished in forward scans', () => {
   });
 });
 
-// ---- P1-1: timeline-published queued cat speech in mention queries ----
+// ---- R10: mention queries use isDelivered (not isTimelinePublished) ----
+// The visibility ZSET allocates cursor positions for timeline-published messages,
+// but mention feeds only show delivered messages. Queued cat speech has a position
+// in the ordering index but is not shown in mention results until delivered.
+// (CI RED #22a proves this: queued mention Q is invisible until markDelivered.)
 
-describe('#1269 R8 P1-1: isTimelinePublished in mention queries', () => {
-  it('getMentionsFor includes timeline-published queued cat speech', async () => {
+describe('#1269 R10: mention queries use isDelivered', () => {
+  it('getMentionsFor excludes queued cat speech (not yet delivered)', async () => {
     const store = new MessageStore();
-    const threadId = `r8-p1-1-mention-${Date.now()}`;
+    const threadId = `r10-mention-queued-${Date.now()}`;
 
-    // Cat speech mentioning 'terra' — queued but timeline-published
+    // Cat speech mentioning 'terra' — queued, timeline-published for ordering
+    // but NOT yet delivered → invisible in mention feeds
     store.append({
       userId: 'u1',
       catId: 'opus',
@@ -137,15 +142,14 @@ describe('#1269 R8 P1-1: isTimelinePublished in mention queries', () => {
     });
 
     const mentions = store.getMentionsFor('terra', 10, undefined, threadId);
-    assert.equal(mentions.length, 1, 'Timeline-published cat speech mention should be found');
-    assert.equal(mentions[0].content, 'Hey @terra check this');
+    assert.equal(mentions.length, 0, 'Queued cat speech should NOT appear in mention feed');
   });
 
   it('getMentionsFor excludes hidden queued mentions', async () => {
     const store = new MessageStore();
-    const threadId = `r8-p1-1-mention-hidden-${Date.now()}`;
+    const threadId = `r10-mention-hidden-${Date.now()}`;
 
-    // Hidden queued work mentioning 'terra' — not timeline-published
+    // Hidden queued work mentioning 'terra' — not timeline-published either
     store.append({
       userId: 'scheduler',
       catId: null,
@@ -160,9 +164,9 @@ describe('#1269 R8 P1-1: isTimelinePublished in mention queries', () => {
     assert.equal(mentions.length, 0, 'Hidden queued mention should NOT be found');
   });
 
-  it('getRecentMentionsFor includes timeline-published queued cat speech', async () => {
+  it('getRecentMentionsFor excludes queued cat speech (not yet delivered)', async () => {
     const store = new MessageStore();
-    const threadId = `r8-p1-1-recent-${Date.now()}`;
+    const threadId = `r10-recent-queued-${Date.now()}`;
 
     store.append({
       userId: 'u1',
@@ -175,12 +179,12 @@ describe('#1269 R8 P1-1: isTimelinePublished in mention queries', () => {
     });
 
     const recent = store.getRecentMentionsFor('terra', 10, undefined, threadId);
-    assert.equal(recent.length, 1, 'Timeline-published recent mention should be found');
+    assert.equal(recent.length, 0, 'Queued cat speech should NOT appear in recent mention feed');
   });
 
   it('getRecentMentionsFor excludes hidden queued mentions', async () => {
     const store = new MessageStore();
-    const threadId = `r8-p1-1-recent-hidden-${Date.now()}`;
+    const threadId = `r10-recent-hidden-${Date.now()}`;
 
     store.append({
       userId: 'scheduler',
