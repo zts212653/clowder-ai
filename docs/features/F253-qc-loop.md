@@ -10,7 +10,7 @@ tips_exempt: internal QC tooling — no user-visible capability change
 
 # F253: Clowder AI QC Loop — 自动化质量门禁全链路
 
-> **Status**: done | **Owner**: Ragdoll (Opus-4.6) | **Priority**: P1 | **Completed**: 2026-06-28
+> **Status**: done (Phase D governance amendment awaiting peer review) | **Owner**: Ragdoll (Opus-4.6) | **Priority**: P1 | **Phase A-C completed**: 2026-06-28
 
 ## Why
 
@@ -139,6 +139,20 @@ qc.idle
 | **Layer 3: Final Approver** | named 猫猫（可 = Layer 2 reviewer） | 确认 final HEAD 覆盖全部 review findings | 在 stale HEAD 上签字 | 金规"merge-gate"行的前提 |
 
 **关键约束**：如果 reviewer 给了 semantic fix 建议（不只是 hygiene），author 改完后 **review provenance 必须重新闭合**（Layer 3 re-confirm on final HEAD）。Layer 3 的 APPROVE 是 merge-gate evidence 的 `reviewer` + `review_head` 来源。
+
+### Phase D: ChatGPT author 多猫共识 Review rounds（2026-08-04 operator directive）
+
+当实现作者是 **ChatGPT 桌面 Codex**，且 operator 明确启用本 lane 时，采用多猫独立判断后再共识收敛的窄例外；普通 Cat Café 代码 review 仍走上方按风险路由的 QC Loop。
+
+1. ChatGPT 提交精确 code HEAD、PR 与测试证据后，至少两只非作者猫读取同一个 HEAD，分别独立检视并把意见保留在自己的本地上下文；独立阶段禁止互看意见。
+2. 独立检视与后续交叉检视期间，所有 reviewer 对 Git 只读：不修改共享分支，不 commit/push/rebase/checkout。
+3. 只有所有 reviewer 都明确完成独立检视后，才开启交叉检视；猫猫相互核验证据、去重 finding，并形成统一共识。
+4. 只有 operator 指定的 recorder 能把共识写入 `review-notes/chatgpt/<change-id>/round-<NN>.md` 并 push。push 成功代表该轮检视完成；历史 ledger 不由 ChatGPT 改写。
+5. ChatGPT 按该轮 ledger 修复、测试、提交新 code HEAD，然后重新从独立检视开始下一轮。所有已接受 finding（含 P3）关闭且没有新 finding 前禁止合入。
+6. 最后一轮 ledger 必须记录 `approved_for_merge`、`openFindings: 0` 并绑定 reviewed code HEAD。recorder 的 ledger-only commit 是唯一允许的 review 期 Git 写入；若 HEAD 还有任何代码、测试、配置或其他文档变化，approval 立即 stale，必须开启新一轮。
+7. 风险门禁全绿后由 ChatGPT squash merge main；merge 后不代表用户验收完成，必须等待 operator 亲自验收。
+
+执行真相源：`chatgpt-review-rounds` skill；每轮结构真相源：`cat-cafe-skills/refs/chatgpt-review-round-template.md`。
 
 ### QC 触发策略
 
@@ -304,6 +318,13 @@ F253 **消费** F167 的 hold_ball / review-feedback / merge-gate 事件，**产
 - [x] AC-C2: CI repair loop 实现 same-class detection + max 2 rounds escalate — `scripts/classify-ci-error.mjs` (`classifyCiError` + `shouldAutoFix`) + merge-gate SKILL.md protocol docs（12 tests）
 - [x] AC-C3: `eval:qc` domain 注册在 F192 eval domain registry — `docs/harness-feedback/eval-domains/eval-qc.yaml` + `qc-metrics-provider.ts` + `qc-generator-adapter.ts` + `eval-cat-invocation.ts` DOMAIN_INSTRUCTIONS + `index.ts` wiring（4 tests → 12 tests after cloud P1+P2 fixes）
 
+### Phase D（ChatGPT author 多猫共识 Review rounds）🚧
+
+- [ ] AC-D1: ChatGPT author lane 有独立 skill + round ledger 模板，并明确至少两只非作者猫、独立阶段禁止互看、review 期间 Git 只读（验证：`pnpm check:skills` + review routing guard）
+- [ ] AC-D2: SOP 人类文本与机器定义都覆盖 independent barrier → cross-review → operator-designated recorder → ChatGPT fix/new HEAD → repeat 状态机（验证：`pnpm check:sop-definitions`）
+- [ ] AC-D3: merge-gate 只接受绑定 reviewed code HEAD 的 `approved_for_merge` / `openFindings: 0` ledger；recorder ledger-only commit 之外的 HEAD 改动使 verdict stale（验证：review routing guard + peer review）
+- [ ] AC-D4: ChatGPT 负责合入 main，合入后状态进入 operator acceptance 而非自动宣告验收完成（验证：skill、SOP 与 merge-gate 文本一致）
+
 ## 需求点 Checklist
 
 | ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
@@ -311,6 +332,8 @@ F253 **消费** F167 的 hold_ball / review-feedback / merge-gate 事件，**产
 | R1 | "靠 QC 把废品拦住" — 自动化质量门禁 | AC-A1, AC-A2, AC-A4 | `pnpm gate --auto-fix` 运行 + merge-gate evidence 验证 | [ ] |
 | R2 | "偷方法，不偷口号" — 学 no-mistakes 的 pipeline，保 Clowder AI 价值观 | AC-A1~A4, AC-B1 | review spec 确认无匿名化/无授权自动化 | [ ] |
 | R3 | "就算质量好也会有问题" — 需要可度量的质量追踪 | AC-C3 | telemetry 查询 | [ ] |
+| R4 | ChatGPT 提交后，多猫先独立检视、再交叉检视并统一共识 | AC-D1, AC-D2 | skill + SOP + routing guard | [ ] |
+| R5 | 只有 operator 指定猫写入本轮共识；ChatGPT 逐轮修复，清零后合入并等亲自验收 | AC-D3, AC-D4 | ledger template + merge-gate provenance | [ ] |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC
@@ -341,6 +364,9 @@ tips_exempt: internal tooling — QC Loop 是开发工具链改进，无用户�
 | **Leader Creep**：一只猫事实上变成 QC 大副 / qc-bot 演化为 verdict signer | 社会学 | Non-Goals #1 #5 硬约束 + 定期审计 qc-bot commit 范围（不得超出 hygiene） |
 | **Alarm Fatigue**：低风险变更也触发完整 QC → 猫麻木 | 社会学 | 触发策略分层（低风险 doc polish 只 Tier 1 或跳过） |
 | **Identity Flattening**：为追求"流程统一"抹掉猫的专长和直觉差异 | 社会学 | reviewer 选择由 author 基于关系画像决定（不 round-robin）+ finding 带 named cat 签名 |
+| 独立检视提前互看造成意见锚定 | 社会学 | 至少两只猫在同一 reviewedCodeHead 上独立完成；全员完成前不开放交叉意见 |
+| 多猫意见散落或多人同时写 Git | 技术/协作 | operator 指定唯一 recorder；以已 push 的 round ledger 为该轮共识真相源 |
+| recorder ledger commit 使 final HEAD 与 review HEAD 不同 | 技术 | merge-gate 只允许 ledger-only continuity proof；其他文件变化一律使 approval stale |
 
 ## Eval / Tracking Contract
 
@@ -366,6 +392,10 @@ tips_exempt: internal tooling — QC Loop 是开发工具链改进，无用户�
 | KD-8 | per-PR pipeline stateless + aggregate telemetry 复用 F192 stateful storage | per-PR evidence = merge-gate 扩展（stateless 重建）；aggregate verdict = F192 eval domain（stateful 累积）。不建 daemon/Redis。 | 2026-06-26 |
 | KD-9 | 扩展 `pnpm gate --auto-fix` 不造 `pnpm qc:hygiene`；evidence manifest 扩展 merge-gate Provenance Matrix 不造 `pnpm qc:evidence` | 已有基础设施足够——`scripts/pre-merge-check.sh` 已有 hygiene 全链路，merge-gate 已有 Review Provenance Matrix 5 字段。造新命令 = 平行轮子。（operator push back + 47 Architecture Inventory） | 2026-06-26 |
 | KD-10 | eval:qc evalCat = opus (4.6) = F253 author 暂时 OK | domain analysis ≠ PR review，author-as-eval-cat 适用于 single-feature 阶段（eval:qc 看的是 aggregate QC metrics，不是 review 个别 PR）。未来 F253 重大改造前应轮换 evalCat 避免 self-eval bias。（愿景守护 47 caveat #2 透明化） | 2026-06-28 |
+| KD-11 | ChatGPT author lane 先多猫独立检视，再开放交叉检视 | 防止 reviewer 被先出现的意见锚定，同时保留多模型盲点正交性 | 2026-08-04（operator directive） |
+| KD-12 | operator 指定唯一 recorder 把共识 ledger 写入 Git；其他 reviewer 全程 Git 只读 | 单一真相源 + 清晰 provenance，避免各猫意见分支互相覆盖 | 2026-08-04（operator directive） |
+| KD-13 | 每次 ChatGPT 修复产生新 code HEAD 后完整开启下一轮；所有 accepted findings 清零才可合入 | review 只对精确 HEAD 有效，不能用上一轮 verdict 覆盖新代码 | 2026-08-04（operator directive） |
+| KD-14 | ChatGPT 合入 main 后仍等待 operator 亲自验收 | 技术门禁通过不等于 operator 的最终体验验收 | 2026-08-04（operator directive） |
 
 ## Future Phase Candidates
 

@@ -11,6 +11,9 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
     → quality-gate → [fresh-context-review] → request-review → receive-review
     → merge-gate → feat-lifecycle(完成)
 
+ChatGPT author → chatgpt-review-rounds（独立检视→交叉检视→指定猫写 Git ledger）
+    → ChatGPT fix → repeat → merge-gate → operator acceptance
+
 co-creation docs → co-creation-docs → direct push | merge-gate(docs PR)
 ```
 
@@ -30,6 +33,7 @@ co-creation docs → co-creation-docs → direct push | merge-gate(docs PR)
 | `quality-gate` | 开发完了自检（愿景+spec+验证） | ② |
 | `fresh-context-review` | *（可选）* Author-triggered pre-review scan（finding generator, not approval） | ②½ |
 | `request-review` | 发 review 请求给 reviewer | ③ |
+| `chatgpt-review-rounds` | ChatGPT 作者代码的多猫独立检视、交叉共识与逐轮 Git ledger | ③ |
 | `receive-review` | 处理 review 反馈（Red→Green） | ③ |
 | `merge-gate` | 门禁→PR→remote review→merge→清理 | ④⑤⑥ |
 | `open-source-teardown` | 热门开源项目/竞品 agent/runtime 的源码拆解、算法剥皮、营销水分和 tradeoff 判断 | — |
@@ -75,6 +79,7 @@ co-creation docs → co-creation-docs → direct push | merge-gate(docs PR)
 | `refs/commit-signatures.md` | 猫猫签名表 + @ 句柄 |
 | `refs/pr-template.md` | PR 模板 + remote review 触发模板 |
 | `refs/review-request-template.md` | Review 请求信模板 |
+| `refs/chatgpt-review-round-template.md` | ChatGPT 多猫 Review round 共识 ledger 模板 |
 | `refs/vision-evidence-workflow.md` | 前端截图/录屏证据流程（B1） |
 | `refs/requirements-checklist-template.md` | 需求点 checklist 模板（B3） |
 | `refs/f190-frontend-lessons.md` | F190 Console intake 的前端案例与红区教训 |

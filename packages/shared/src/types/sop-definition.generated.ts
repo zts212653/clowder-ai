@@ -244,6 +244,71 @@ export const DEVELOPMENT_SOP_DEFINITION = {
             futureCandidate: 'review_packet_schema',
           },
         },
+        {
+          id: 'review-chatgpt-independent-first',
+          kind: 'hard_rule',
+          text: 'ChatGPT 提交代码进入专属多猫 Review round；至少两只非作者猫先独立检视，全部完成前不得互看意见',
+          severity: 'blocker',
+          owner: { type: 'stage_suggested_skill', skill: 'request-review' },
+          predicate: {
+            type: 'manual_only',
+            reason:
+              'Reviewer-private notes and the independent-review barrier are conversational state until a typed review-round carrier exists.',
+            futureCandidate: 'chatgpt_review_round_barrier',
+          },
+        },
+        {
+          id: 'review-chatgpt-readonly-until-consensus',
+          kind: 'hard_rule',
+          text: 'ChatGPT Review 的独立检视与交叉检视阶段只读；任何猫不得 commit、push、rebase 或修改共享分支',
+          severity: 'blocker',
+          owner: { type: 'stage_suggested_skill', skill: 'request-review' },
+          predicate: {
+            type: 'manual_only',
+            reason:
+              'Git write ownership is bound to the operator-designated recorder, but review-round identity is not yet emitted as a structured Git policy event.',
+            futureCandidate: 'chatgpt_review_round_git_write_guard',
+          },
+        },
+        {
+          id: 'review-chatgpt-cross-review-after-barrier',
+          kind: 'hard_rule',
+          text: '全部独立检视完成后才进入交叉检视；争议必须基于证据收敛，价值分歧交给co-creator',
+          severity: 'blocker',
+          owner: { type: 'stage_suggested_skill', skill: 'request-review' },
+          predicate: {
+            type: 'manual_only',
+            reason:
+              'Independent completion, note release, evidence convergence, and value escalation are semantic review-round transitions.',
+            futureCandidate: 'chatgpt_review_round_state',
+          },
+        },
+        {
+          id: 'review-chatgpt-designated-recorder',
+          kind: 'hard_rule',
+          text: '每轮只有co-creator指定的记录猫可以将共识 ledger 提交并推送到 Git；写回成功才算本轮结束',
+          severity: 'blocker',
+          owner: { type: 'stage_suggested_skill', skill: 'request-review' },
+          predicate: {
+            type: 'manual_only',
+            reason:
+              'The Git ledger is durable truth, but recorder appointment and the successful round-close write are not yet represented by one typed receipt.',
+            futureCandidate: 'chatgpt_review_round_receipt',
+          },
+        },
+        {
+          id: 'review-chatgpt-repeat-until-zero',
+          kind: 'hard_rule',
+          text: 'ChatGPT 按 ledger 修复后提交新 code HEAD 并开始下一轮；最新轮 open findings 非零不得合入',
+          severity: 'blocker',
+          owner: { type: 'stage_suggested_skill', skill: 'request-review' },
+          predicate: {
+            type: 'manual_only',
+            reason:
+              'Each new code HEAD requires a fresh independent and cross-review round; ledger closure is currently markdown evidence.',
+            futureCandidate: 'chatgpt_review_round_open_findings_gate',
+          },
+        },
       ],
       pitfalls: [
         {
@@ -276,6 +341,19 @@ export const DEVELOPMENT_SOP_DEFINITION = {
             type: 'command_pattern',
             mustMatch: 'gh pr merge .*--squash',
             mustNotMatch: 'git merge --squash|git reset --soft',
+          },
+        },
+        {
+          id: 'merge-chatgpt-review-round-closed',
+          kind: 'hard_rule',
+          text: 'ChatGPT 仅在最新共识 ledger 为 approved_for_merge、openFindings=0 且风险门禁全绿时合入 main；合入后等待co-creator亲自验收',
+          severity: 'blocker',
+          owner: { type: 'stage_suggested_skill', skill: 'merge-gate' },
+          predicate: {
+            type: 'manual_only',
+            reason:
+              'The final ledger, reviewedCodeHead continuity proof, gate evidence, merge receipt, and post-merge operator acceptance are not yet one typed state object.',
+            futureCandidate: 'chatgpt_review_round_merge_gate',
           },
         },
         {

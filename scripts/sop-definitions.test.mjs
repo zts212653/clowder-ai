@@ -30,8 +30,14 @@ const EXPECTED_PORTED_RULE_TEXTS = [
   'Fresh-context 是 finding generator，不是 approval authority——不产出 verdict，不记入 Review Provenance Matrix',
   '同一个体不能 review 自己的代码',
   '涉及用户意图或愿景的 Review 请求必须附原始需求摘录',
+  'ChatGPT 提交代码进入专属多猫 Review round；至少两只非作者猫先独立检视，全部完成前不得互看意见',
+  'ChatGPT Review 的独立检视与交叉检视阶段只读；任何猫不得 commit、push、rebase 或修改共享分支',
+  '全部独立检视完成后才进入交叉检视；争议必须基于证据收敛，价值分歧交给co-creator',
+  '每轮只有co-creator指定的记录猫可以将共识 ledger 提交并推送到 Git；写回成功才算本轮结束',
+  'ChatGPT 按 ledger 修复后提交新 code HEAD 并开始下一轮；最新轮 open findings 非零不得合入',
   'P1/P2 修复后的实质内容未被对应 review source 覆盖；SHA-only / 可证明机械变化用 continuityProof，不重开 reviewer',
   '必须用 gh pr merge --squash（禁止本地 squash）',
+  'ChatGPT 仅在最新共识 ledger 为 approved_for_merge、openFindings=0 且风险门禁全绿时合入 main；合入后等待co-creator亲自验收',
   '云端 review 同一 SHA 不重复触发',
   'merge 前核对 feature doc 是否说真话（Status/AC/Phase vs 代码现实），merge 后记录已合入状态',
   '触及 runtime 加载面的 PR 合入后必须分开声明 main 与 live runtime 状态；未获co-creator授权时记录 live=dormant，不得冒充已生效',
@@ -68,7 +74,7 @@ describe('SOP definition catalog', () => {
     );
   });
 
-  it('ports all 24 development SOP rules into development.yaml with predicates', () => {
+  it('ports all 30 development SOP rules into development.yaml with predicates', () => {
     const { runtimeDefinitions } = loadSopDefinitionCatalog();
     const development = runtimeDefinitions[0];
 
@@ -82,7 +88,7 @@ describe('SOP definition catalog', () => {
     assert.equal(development.stages.find((stage) => stage.id === 'impl')?.suggestedSkill, 'worktree');
 
     const rules = development.stages.flatMap((stage) => [...stage.hardRules, ...stage.pitfalls]);
-    assert.equal(rules.length, 24);
+    assert.equal(rules.length, 30);
     assert.deepEqual(
       rules.map((rule) => rule.text),
       EXPECTED_PORTED_RULE_TEXTS,

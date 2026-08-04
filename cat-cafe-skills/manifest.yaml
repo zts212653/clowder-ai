@@ -320,7 +320,8 @@ skills:
     description: >
       Route a change to a non-author local peer when local review is the selected independent validation source.
       Use when: risk routing chooses a stateful local reviewer for implementation, governance, or semantic context.
-      Not for: cloud as the selected source, vision-guardian acceptance, self-check, or review feedback handling.
+      Not for: operator-approved ChatGPT multi-cat rounds (use chatgpt-review-rounds), cloud as the selected source,
+      vision-guardian acceptance, self-check, or review feedback handling.
       Output: risk-matched review packet + provenance-matched verdict route; mailbox archive only when the change needs the full packet.
     triggers:
       - "请 review"
@@ -330,9 +331,33 @@ skills:
       - "收到 review"
       - "自检"
     output: "Risk-matched local review packet in thread/PR; optional mailbox archive"
-    next: ["receive-review"]
+    next: ["receive-review", "chatgpt-review-rounds"]
     sop_step: 3
     merged_from: ["cat-cafe-requesting-review"]
+
+  # ── ChatGPT 多猫 Review Round ──
+  chatgpt-review-rounds:
+    category: "开发流程"
+    description: >
+      Operator-approved multi-cat review rounds for code authored by ChatGPT desktop Codex.
+      Use when: ChatGPT has pushed a code HEAD and co-creator requires independent cat reviews,
+      cross-review consensus, and a Git ledger written by one designated recorder.
+      Not for: ordinary cat-authored changes, single-source risk-routed review, self-check, or cloud-only review.
+      Output: one immutable consensus ledger commit per round; repeat until approved_for_merge and openFindings=0.
+    triggers:
+      - "ChatGPT 提交代码"
+      - "多猫独立检视"
+      - "交叉检视"
+      - "review round"
+      - "共识 ledger"
+    not_for:
+      - "普通猫作者的单一 reviewer 流程"
+      - "自检"
+      - "cloud-only review"
+    output: "Operator-designated Git consensus ledger per round; repeat to approved_for_merge"
+    next: ["merge-gate"]
+    sop_step: 3
+    merged_from: null
 
   # ── 接收 Review ──
   receive-review:
@@ -340,7 +365,8 @@ skills:
     description: >
       处理 reviewer 反馈：Red→Green 修复 + 技术论证（禁止表演性同意）。
       Use when: 收到 review 结果、reviewer 提了 P1/P2、需要处理反馈。
-      Not for: 发 review 请求（用 request-review）、自检（用 quality-gate）。
+      Not for: ChatGPT multi-cat round ledger（用 chatgpt-review-rounds）、发 review 请求（用 request-review）、
+      自检（用 quality-gate）。
       Output: 逐项修复确认 + reviewer 放行。
     triggers:
       - "review 结果"

@@ -4,7 +4,8 @@ tips_exempt: harness-internal review routing convention; no distinct end-user ca
 description: >
   Route a change to a non-author local peer when local review is the selected independent validation source.
   Use when: risk routing chooses a stateful local reviewer for implementation, governance, or semantic context.
-  Not for: cloud as the selected source, vision-guardian acceptance, self-check, or review feedback handling.
+  Not for: operator-approved ChatGPT multi-cat rounds (use chatgpt-review-rounds), cloud as the selected source,
+  vision-guardian acceptance, self-check, or review feedback handling.
   Output: risk-matched review packet in the current thread/PR; mailbox archive only when the change needs the full packet.
 triggers:
   - "请 review"
@@ -17,6 +18,12 @@ triggers:
 # Request Review
 
 把当前 diff、最高风险面和真实验证证据送到一只非作者猫眼前。默认只选一个合适的独立验证源；local peer、cloud、愿景守护各按自己的风险触发，不能因为“进入 review”就自动叠加。
+
+## ChatGPT author 专属分流
+
+当 author 是 ChatGPT 桌面 Codex，且 co-creator 已明确启用“多猫独立检视 → 交叉检视 → 指定猫写 Git
+共识 ledger”的 round 协议时，停止本 skill 的单 reviewer 路径，改用 `chatgpt-review-rounds`。这是一条
+operator 授权的窄例外；普通猫作者和其他 PR 继续使用下方风险择源规则。
 
 ## 先选验证源
 

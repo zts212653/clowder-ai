@@ -47,11 +47,23 @@ triggers:
 
 默认只选一个合适的独立 source：家里语境与治理语义优先 local；context-blind 安全 / 契约代码扫描优先 cloud。**动作类型（“开了 PR”“改了代码”）不是叠加理由。**
 
+**ChatGPT author lane 例外**：co-creator 明确启用 `chatgpt-review-rounds` 时，独立源是“至少两只猫先
+独立检视、再交叉检视”的共识 round，不套用默认单 reviewer。此 lane 的合入证据必须包含最新
+`reviewedCodeHead`、operator 指定 recorder 推送的 round ledger、`verdict=approved_for_merge`、
+`openFindings=0`，以及所有严重级别共识 findings 已关闭的证据。
+
 ### Review Continuity Guard（review 是否真的覆盖当前 HEAD）
 
 `pnpm gate`、rebase、fixup、biome 格式化刷新等都可能让 HEAD 变化。**HEAD 变化只触发 provenance 判定，不自动等于 re-review**：先分清 review 后是否真的改了本 PR 的内容、base 前进是否与本 PR 有逻辑关联；两者都没有，或只有可机械证明的派生物重建 / 规范化，旧 review 用 continuityProof 桥接。只有真实的作者 delta 或相关 base delta 回 active source，而且只看那一小块。
 
 **Report 载体铁则（斩断 SHA 自噬环，operator 2026-07-15 投诉②修复）**：**review verdict 之后、merge 之前，不得再向被审分支 commit 任何 review report / handoff 信 / evidence 说明类文档**——这类内容的合法载体只有 PR comment、thread 消息、tracking 系统。被审分支的 HEAD 只应因代码内容（含 rebase）变化。病灶机制：report 进分支 → SHA 变 → 旧 APPROVE 失效 → re-review → 新 report → SHA 又变（round-10 自噬环）。review **请求**信（mailbox，reviewer 开审前已在 HEAD 内）不受此限。
+
+窄例外：`chatgpt-review-rounds` 中由 co-creator 指定 recorder 写入的 immutable round ledger 是该 lane
+的显式 Git 真相源，不是任意 review report。它只能新增
+`review-notes/chatgpt/<change-id>/round-<NN>.md`，必须绑定 ledger 前的 `reviewedCodeHead`。最终
+`approved_for_merge` ledger 写入后，用 continuityProof 证明 `reviewedCodeHead..currentHead` 只有该
+ledger；一旦混入实现、测试、配置或其他文档变化，approval stale，必须开新 round。其他 lane 仍严格禁止
+review 后向被审分支写 report。
 
 但 continuity 不是一个布尔 `reviewer`。进入 merge-gate 后必须维护 **Review Provenance Matrix**，先判当前 HEAD 变化由谁产生，再决定下一步 gate owner，避免把 cloud / CI / PR check 的外部 gate 投射成本地旧 reviewer。
 
@@ -64,6 +76,9 @@ triggers:
 | `currentHead` | PR 当前 `headRefOid` |
 | `headChangeCause` | `local-gate` / `cloud-finding` / `ci-fix` / `rebase` / `pr-meta` |
 | `nextGateOwner` | `local-peer` / `cloud` / `ci` / `author` / `guardian` |
+
+ChatGPT round 追加记录：`reviewRound`、`reviewedCodeHead`、`roundLedgerPath`、`roundVerdict`、
+`openFindings`、`recorderCatId` 与 `ledgerOnlyContinuity`。缺任一项不得消费 `approved_for_merge`。
 
 **判定规则**：
 - `headChangeCause = cloud-finding`（cloud P1/P2/COMMENTED 修复后 push 新 SHA）→ `nextGateOwner = cloud`：只重新触发 cloud review + 等 PR tracking；**禁止为了 cloud P1/P2 修复 @ 本地旧 reviewer**。

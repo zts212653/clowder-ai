@@ -13,6 +13,32 @@ const routingFixture = JSON.parse(
 );
 
 describe('review completion dual-route hard guard', () => {
+  it('locks the operator-approved ChatGPT multi-cat review round contract', () => {
+    assert.equal(typeof reviewGuard.checkChatgptReviewRoundLanguage, 'function');
+    if (typeof reviewGuard.checkChatgptReviewRoundLanguage !== 'function') return;
+
+    const valid = reviewGuard.checkChatgptReviewRoundLanguage(`
+      只服务于 operator 拍板的“ChatGPT 执行、Cat Café 设计与 Review”工作流
+      independent_review: 每只猫只读同一个 \`reviewedCodeHead\`，私下保留自己的 findings，
+      不得阅读、索取或预测其他猫的意见
+      cross_review: begins only after every independent review is complete
+      recorder: co-creator 指定的 recorder，只有 recorder 可以提交并推送
+      ledger: review-notes/chatgpt/<change-id>/round-<NN>.md binds reviewedCodeHead and consensus findings
+      closure: push 成功才代表本轮检视完毕；ChatGPT 不修改历史 ledger
+      lifecycle: ChatGPT fixes accepted findings, then a new round repeats until openFindings=0
+      terminal: approved_for_merge allows ChatGPT to merge main，等待 co-creator 亲自验收
+    `);
+    assert.deepEqual(valid, []);
+
+    const invalid = reviewGuard.checkChatgptReviewRoundLanguage(
+      'Several cats review together and ChatGPT merges when it looks good.',
+    );
+    assert.match(invalid.join('\n'), /independent_review/);
+    assert.match(invalid.join('\n'), /co-creator 指定的 recorder/);
+    assert.match(invalid.join('\n'), /reviewedCodeHead/);
+    assert.match(invalid.join('\n'), /openFindings=0/);
+  });
+
   it('rejects active guidance that turns every SHA change or every diff into mandatory re-review', () => {
     const errors = reviewGuard.checkReviewContinuityLanguage({
       ironLaw: 'Review 必须跨个体：自己的代码由别人 review。',

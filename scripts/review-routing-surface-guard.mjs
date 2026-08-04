@@ -19,10 +19,31 @@ export function checkReviewContinuityLanguage({ ironLaw, requestReview, mergeGat
   return errors;
 }
 
+export function checkChatgptReviewRoundLanguage(source) {
+  return requireTokens(source, 'chatgpt-review-rounds convention', [
+    '只服务于 operator 拍板的“ChatGPT 执行、Cat Café 设计与 Review”工作流',
+    'independent_review',
+    '只读同一个 `reviewedCodeHead`',
+    '私下保留自己的 findings',
+    '不得阅读、索取或预测其他猫的意见',
+    'cross_review',
+    'co-creator 指定的 recorder',
+    '只有 recorder 可以提交并推送',
+    'review-notes/chatgpt/<change-id>/round-<NN>.md',
+    'reviewedCodeHead',
+    'push 成功才代表本轮检视完毕',
+    'ChatGPT 不修改历史 ledger',
+    'openFindings=0',
+    'approved_for_merge',
+    '等待 co-creator 亲自验收',
+  ]);
+}
+
 export function checkReviewRoutingSurfaces({
   handoffSkill,
   requestReviewSkill,
   receiveReviewSkill,
+  chatgptReviewRoundsSkill,
   mergeGateSkill,
   ironLaw,
   inboundPrReference,
@@ -67,6 +88,7 @@ export function checkReviewRoutingSurfaces({
       'coordination.phase=active',
       'reviewReentry',
     ]),
+    ...checkChatgptReviewRoundLanguage(chatgptReviewRoundsSkill),
     ...requireTokens(mergeGateSkill, 'merge-gate review provenance convention', [
       'reviewReentry',
       'already-consumed exact-HEAD review',

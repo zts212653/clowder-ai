@@ -3,7 +3,7 @@ feature_ids: [F042]
 topics: [sop]
 doc_kind: note
 created: 2026-02-26
-updated: 2026-07-27
+updated: 2026-08-04
 ---
 
 # Clowder AI 开发 SOP
@@ -114,6 +114,24 @@ Phase N merge → 碰头（不是"要不要继续"，是"方向对不对"）→ 
 - 愿景守护看最终产品结果，只在 feature close 触发。
 
 只有不同风险面确实需要不同视角时才叠加，并分别写明触发理由。P1/P2 修复后只回提出 finding 的 active source 覆盖真实修复 delta；不把另一个旧 reviewer 拉来续签，也不因 SHA-only / 可证明机械变化重开 reviewer。
+
+#### ChatGPT author 多猫 Review round（operator 指定 lane）
+
+当实现作者是 ChatGPT 桌面 Codex，且 co-creator 明确启用本 lane 时，它是上方“默认单一独立源”的窄例外：
+
+1. ChatGPT 提交精确 code HEAD、PR 与测试证据。
+2. 至少两只非作者猫读取同一个 HEAD，各自独立检视并私下保留意见；全部完成前禁止互看。
+3. 独立检视与后续交叉检视期间 Git 只读：reviewer 不改共享分支，不 commit/push/rebase。
+4. 全员通过 barrier 后公开意见，交叉核验证据、合并重复项并形成共识；技术分歧继续查证，价值分歧交给 co-creator。
+5. 每轮只有 co-creator 指定的记录猫可以把共识写入
+   `review-notes/chatgpt/<change-id>/round-<NN>.md` 并推送；push 成功才算本轮结束。
+6. ChatGPT 按 ledger 修复、测试并提交新 code HEAD，再从独立检视开始下一轮；ChatGPT 不得改写历史 ledger。
+7. 最新一轮只有在所有历史共识 findings 已关闭、无新 finding、`openFindings=0` 时才能记录
+   `approved_for_merge`。风险门禁全绿后由 ChatGPT squash merge main，随后等待 co-creator 亲自验收。
+
+最终 recorder ledger commit 只允许新增该 round 文件。它通过 `reviewedCodeHead` 绑定已审代码，并以
+continuityProof 证明 ledger-only HEAD 变化；如果 ledger 后出现代码、测试、配置或其他文档变化，终态立即
+stale，必须用新 code HEAD 开下一轮。执行细节与模板见 `chatgpt-review-rounds` skill。
 
 ### Sol 测试
 
