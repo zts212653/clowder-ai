@@ -9,7 +9,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { MessageOutputEvent } from '@clowder-ai/plugin-contract';
-import type { MessageOutputEventInput } from '../contract/host-types.js';
+import type { HandleScope, MessageOutputEventInput } from '../contract/host-types.js';
 import type {
   AppendLease,
   AppendLock,
@@ -24,6 +24,15 @@ import type {
   SettleResult,
   SubscriptionRecord,
 } from './ports.js';
+
+/** Deep-clone scope so callers cannot mutate stored authority (INV-22 parity). */
+function cloneScope(scope: HandleScope): HandleScope {
+  return {
+    canSend: scope.canSend,
+    canSubscribe: scope.canSubscribe,
+    ...(scope.allowedWhisperTargets ? { allowedWhisperTargets: [...scope.allowedWhisperTargets] } : {}),
+  };
+}
 
 type LedgerEntry =
   | { readonly status: 'inflight'; readonly claimToken: string; readonly expiresAt: number }
@@ -71,7 +80,7 @@ export class MemoryHandleStore implements HandleStore {
   async put(record: HandleRecord): Promise<void> {
     // Defensive copy: prevent caller mutations from corrupting the store
     // (INV-22 parity — Redis serializes on write; Memory must snapshot too).
-    this.records.set(record.handleId, { ...record, scope: { ...record.scope } });
+    this.records.set(record.handleId, { ...record, scope: cloneScope(record.scope) });
   }
 
   async get(handleId: string): Promise<HandleRecord | null> {
@@ -137,7 +146,7 @@ export class MemoryHandleStore implements HandleStore {
     }
     // M8/M9: index miss or record missing → create new record
     // Defensive copy (INV-22 parity — Redis serializes; Memory must snapshot).
-    const snapshot = { ...record, scope: { ...record.scope } };
+    const snapshot = { ...record, scope: cloneScope(record.scope) };
     this.records.set(snapshot.handleId, snapshot);
     this.messageIndex.set(snapshot.messageId, snapshot.handleId);
     return { record: snapshot, created: true };

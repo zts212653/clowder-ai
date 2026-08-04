@@ -134,7 +134,7 @@ Published: `@clowder-ai/plugin-contract@0.1.0-beta.5`。epistemic 值集 `observ
 
 **基线:** `upstream/main@ffa73bb8f`
 
-**状态边界:** K-1 实现处于 PR review 迭代中（PR #1270 OPEN，7 commits on base `ffa73bb8f`）。C-1 已发布 `@clowder-ai/plugin-contract@0.1.0-beta.5`。
+**状态边界:** K-1 实现处于 PR review 迭代中（PR #1270 OPEN on base `ffa73bb8f`）。C-1 已发布 `@clowder-ai/plugin-contract@0.1.0-beta.5`。
 
 ### 愿景与五件套验收
 
@@ -183,7 +183,7 @@ Scope verdict: ✅ 必做（plugin developer 可感知的 kernel contract）
 
 | 命令 / 检查 | 结果 |
 |---|---|
-| K-1 非 Redis 定向套件 | 194/194 pass ✅（R5: +11 binding matrix; R6: +6 service-level stale-claimant + 2 scope defensive copy） |
+| K-1 非 Redis 定向套件 | 195/195 pass ✅（R5: +11 binding matrix; R6: +6 stale-claimant + 2 scope; R7: +1 whisper mutation defense） |
 | 官方 isolated Redis 定向套件 | 18/18 pass ✅ + 8 binding matrix tests（runner 分配非保留随机端口，DB 15） |
 | R2 三项 Red → Green | send-only append、snapshot rev3 后新增 rev2、strict hydration 均精确 RED；聚焦 GREEN 25/25 ✅ |
 | R3 append-history Red → Green | Terra 最小反例在 envelope suite 精确 10/11 RED → 11/11 GREEN；append replay + memory/Redis parser consumer 21/21 ✅ |
@@ -198,7 +198,7 @@ Scope verdict: ✅ 必做（plugin developer 可感知的 kernel contract）
 
 - `.pen` 匹配：无；UI diff：无；设计稿对照不适用。
 - 根目录媒体/设计工件（工作树 + 已提交差异）：无。
-- PR：#1270 OPEN on `zts212653/clowder-ai`（7 commits on base `ffa73bb8f`）。Review rounds: R1-R5 complete, currently in R6.
+- PR：#1270 OPEN on `zts212653/clowder-ai`（base `ffa73bb8f`）。Review rounds: R1-R6 complete, currently in R7.
 - ≥3 轮 state-object gate：(1) append output 连续复发→已提交 `feature-specs/2026-07-16-k1-r2-emission-fencing.md`。(2) MessageHandle authority binding R2/R3/R4 连续 P1→R5 spec-first: INV-21/22/23 + validation matrix (本文件§MessageHandle Authority Binding)→矩阵驱动 adversarial tests + Memory/Redis 行为对齐。(3) Service-level stale-claimant settlement coverage R4/R5→R6: service-level tests with InterceptingLedgerStore exercising real SendService/AppendService settlement branches。
 - R2+ failure-mode sweep：从 append history 的 writer/parser 漂移抽象出 ordered-suffix invariant，并扫描 `baseRevision`、element stamping、operation-local derivation、memory/Redis 两个 consumer；均已纳入单一 parser 与回归表。
 - `check-hotfix-pattern.mjs`、`check-fallback-layers.mjs` 与 `check:architecture-ownership` 在 upstream 公开 checkout 不存在；已手工等效检查：无 hotfix 语义、无同文件新增三层 fallback。

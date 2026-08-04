@@ -127,8 +127,9 @@ const CANONICAL_SEND = {
 };
 
 const CANONICAL_APPEND = {
-  newRevision: 99,
-  appliedElements: [{ elementId: 'B-el' }],
+  messageId: 'B-append-msg',
+  revision: 99,
+  appliedElementIds: ['B-el-1'],
 };
 
 /**
@@ -281,8 +282,9 @@ describe('AppendService — stale-claimant settlement (lines 82-95)', () => {
       elements: [{ elementId: 'el-a', kind: 'text', payload: { text: 'appended' } }],
     });
 
-    assert.equal(result.newRevision, CANONICAL_APPEND.newRevision);
-    assert.deepEqual(result.appliedElements, CANONICAL_APPEND.appliedElements);
+    assert.equal(result.messageId, CANONICAL_APPEND.messageId);
+    assert.equal(result.revision, CANONICAL_APPEND.revision);
+    assert.deepEqual(result.appliedElementIds, CANONICAL_APPEND.appliedElementIds);
   });
 
   test('rejected → re-claim settled → returns canonical receipt', async () => {
@@ -299,7 +301,7 @@ describe('AppendService — stale-claimant settlement (lines 82-95)', () => {
       elements: [{ elementId: 'el-b', kind: 'text', payload: { text: 'appended' } }],
     });
 
-    assert.equal(result.newRevision, CANONICAL_APPEND.newRevision);
+    assert.equal(result.messageId, CANONICAL_APPEND.messageId);
   });
 
   test('rejected → re-claim inflight → throws RETRYABLE_INFLIGHT', async () => {
