@@ -24,6 +24,7 @@ import { cursorFor, parseCursor } from '../cursor.js';
 import {
   getTimelineOrderTime,
   isSystemUserMessage,
+  isTimelinePublished as isTimelinePublishedFn,
   resolveDeliveryTimelineScore,
   resolveThreadMessageVisibility,
 } from '../visibility.js';
@@ -753,11 +754,13 @@ export class MessageStore {
       this.idempotencyIndex.set(idempotencyIndexKey, stored.id);
     }
 
-    // #1200: Non-queued messages are immediately visible — assign visibilitySeq.
+    // #1200/#1269: Timeline-published messages get immediate visibility position.
+    // This includes non-queued messages AND queued cat-authored speech (which is
+    // published at append, even though execution custody may end later).
     // seq = max(counter+1, Date.now()) mirrors the Redis Lua allocator: max(hwm+1, serverTimeMs).
     // Uses server wall-clock (Date.now()), NOT the message payload timestamp — a far-future
     // payload timestamp must NEVER enter the allocator. (#1200 P1-A fix)
-    if (stored.deliveryStatus !== 'queued') {
+    if (isTimelinePublishedFn(stored)) {
       this.visibilitySeqCounter = Math.max(this.visibilitySeqCounter + 1, Date.now());
       this.visibilitySeq.set(stored.id, this.visibilitySeqCounter);
       // #1200 P2-6: Inject visibilitySeq into returned message so callers
@@ -1108,7 +1111,8 @@ export class MessageStore {
       if (msg.threadId !== threadId) continue;
       const seq = this.visibilitySeq.get(msg.id);
       if (seq === undefined) continue;
-      if (!isDelivered(msg)) continue;
+      // #1269: include timeline-published queued cat speech (has visibilitySeq since append)
+      if (!isTimelinePublishedFn(msg)) continue;
       // #1200 codex P1: skip tombstones — same contract as Redis impl.
       // getLatestVisibleCursor returns the latest LIVE message, not a tombstone.
       if (msg.deletedAt) continue;

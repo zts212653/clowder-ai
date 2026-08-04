@@ -130,9 +130,12 @@ describe('POST /api/threads/:id/read/latest', () => {
     });
 
     assert.equal(res.statusCode, 200);
-    // #1200: read/latest now includes cursor; queued cat speech has no visibilitySeq,
-    // so cursor falls back to the raw message ID.
-    assert.deepEqual(JSON.parse(res.body), { advanced: true, messageId: seed.id, cursor: seed.id });
+    // #1200/#1269: timeline-published queued cat speech now gets visibilitySeq
+    // at append time, so getLatestVisibleCursor returns a v2 cursor.
+    const body = JSON.parse(res.body);
+    assert.equal(body.advanced, true);
+    assert.equal(body.messageId, seed.id);
+    assert.ok(body.cursor.startsWith('v2:'), 'cursor must be v2 (visibilitySeq assigned at append)');
   });
 
   it('is idempotent — second call returns advanced=false', async () => {

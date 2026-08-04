@@ -51,7 +51,6 @@ import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js'
 
 const log = createModuleLogger('routes/threads');
 const WRITE_OPS = new Set(['edit', 'create', 'delete']);
-const PUBLISHED_TIMELINE_READ = { includeQueuedCatMessages: true } as const;
 
 /**
  * #1200: Pre-reconcile stored read cursor before CAS ack.
@@ -1215,21 +1214,10 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     let advancedCount = 0;
 
     for (const thread of threads) {
-      // #1200: Use visibility-domain latest, not time-domain latest.
-      // Late-delivered Q after C has higher visibilitySeq than C — mark-all
-      // must ack to Q's v2 cursor, not C's raw ID.
-      let latest = await messageStore.getLatestVisibleCursor(thread.id);
-
-      // Fallback: queued cat-authored speech is timeline-published but has no
-      // visibilitySeq. Use time-domain lookup so mark-all still covers these threads.
-      if (!latest) {
-        const msgs = await messageStore.getByThread(thread.id, undefined, undefined, PUBLISHED_TIMELINE_READ);
-        if (msgs.length > 0) {
-          const last = msgs[msgs.length - 1]!;
-          latest = { cursor: last.id, messageId: last.id };
-        }
-      }
-
+      // #1200/#1269: Use visibility-domain latest — single authority.
+      // Timeline-published queued cat speech now has visibilitySeq at append,
+      // so getLatestVisibleCursor covers all visible items without fallback.
+      const latest = await messageStore.getLatestVisibleCursor(thread.id);
       if (!latest) continue;
       // #1269: Gated ack — applies durable-slot gate + conditional pre-reconcile
       const advanced = await gatedReadStateAck(opts.readStateStore!, messageStore, userId, thread.id, latest.cursor);
@@ -1317,22 +1305,10 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Thread not found' };
     }
 
-    // #1200: Use visibility-domain latest, not time-domain latest.
-    // getByThread returns time-order; getLatestVisibleCursor returns the
-    // visibility-domain tail — correct when late-delivered Q follows C.
-    let latest = await messageStore.getLatestVisibleCursor(id);
-
-    // Fallback: queued cat-authored speech is timeline-published but has no
-    // visibilitySeq (not yet in visibility index). Use time-domain lookup with
-    // includeQueuedCatMessages so mark-as-read still covers these messages.
-    if (!latest) {
-      const msgs = await messageStore.getByThread(id, undefined, undefined, PUBLISHED_TIMELINE_READ);
-      if (msgs.length > 0) {
-        const last = msgs[msgs.length - 1]!;
-        latest = { cursor: last.id, messageId: last.id };
-      }
-    }
-
+    // #1200/#1269: Use visibility-domain latest — single authority.
+    // Timeline-published queued cat speech now has visibilitySeq at append,
+    // so getLatestVisibleCursor covers all visible items without fallback.
+    const latest = await messageStore.getLatestVisibleCursor(id);
     if (!latest) {
       return { advanced: false, reason: 'no messages' };
     }

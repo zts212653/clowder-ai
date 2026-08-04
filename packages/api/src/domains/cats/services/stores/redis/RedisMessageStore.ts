@@ -46,7 +46,12 @@ import {
 } from '../ports/MessageStore.js';
 import { assertQueueCustodyMessageBinding, assertQueueCustodyTransition } from '../ports/queued-message-custody.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
-import { isSystemUserMessage, resolveDeliveryTimelineScore, resolveThreadMessageVisibility } from '../visibility.js';
+import {
+  isSystemUserMessage,
+  isTimelinePublished,
+  resolveDeliveryTimelineScore,
+  resolveThreadMessageVisibility,
+} from '../visibility.js';
 import { appendMessage } from './redis-message-append.js';
 import { CANCEL_LUA, DELIVER_LUA, REASSIGN_LUA } from './redis-message-delivery-lua-scripts.js';
 import {
@@ -301,7 +306,8 @@ export class RedisMessageStore {
       threadId, // [3] threadId
       String(score), // [4] score
       msg.userId, // [5] userId
-      msg.deliveryStatus === 'queued' ? '1' : '', // [6] isQueued
+      // #1269: timeline-published queued cat speech gets visibilitySeq at append
+      msg.deliveryStatus === 'queued' && !isTimelinePublished(stored) ? '1' : '', // [6] isQueued
       String(ttlSec), // [7] ttlSeconds
       idempotencyIndexKey ?? '', // [8] idemKeyRaw ('' if none)
       String(mentionCatIds.length), // [9] mentionCount
@@ -310,10 +316,11 @@ export class RedisMessageStore {
       ...hashFields, // [11+N..] hash field pairs
     ];
 
-    // #1200 codex P1: ensure visibility migration is complete BEFORE the append
+    // #1200/#1269: ensure visibility migration is complete BEFORE the append.
+    // Timeline-published messages (delivered + queued cat speech) need the index.
     // Lua marks the thread as migrated via HSETNX. Without this, the first
     // post-deploy append to a legacy thread would skip backfilling legacy members.
-    if (msg.deliveryStatus !== 'queued') {
+    if (isTimelinePublished(stored)) {
       await this.ensureVisibilityMigrated(threadId);
     }
 
@@ -910,11 +917,9 @@ export class RedisMessageStore {
           staleIds.push(id);
           continue;
         }
-        // Skip non-delivered and soft-deleted messages.
-        // #1200 codex R7 P2: read/latest and mark-all need the latest REAL message,
-        // not a tombstone. getByThreadAfter keeps tombstones for cursor pagination,
-        // but this method is for "latest live content" — different contract.
-        if (!isDelivered(msg)) continue;
+        // #1269: include timeline-published queued cat speech (has visibilitySeq
+        // since append). Skip non-published and soft-deleted messages.
+        if (!isTimelinePublished(msg)) continue;
         if (msg.deletedAt) continue;
 
         // Found the latest visible message — build v2 cursor
