@@ -34,12 +34,39 @@ const MARKDOWN_CONTAINER_ONLY_PREFIX_RE =
   /^[ \t]{0,3}(?:(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)|(?:>[ \t]*))+(?:\[[ xX]\][ \t]+)?$/u;
 const FENCE_RUN_RE = /(`{3,}|~{3,})/u;
 
-const TRAILING_PAW_SIGNATURE_RE = /`?(\[([^[\]/\n]+)\/[^[\]\n]+🐾\])`?[ \t]*$/u;
+const PAW_SIGNATURE_RE = /^\[([^[\]/\n]+)\/([^[\]\n]+)🐾\]$/u;
+const TRAILING_PAW_SIGNATURE_RE = /`?(\[([^[\]/\n]+)\/([^[\]\n]+)🐾\])`?[ \t]*$/u;
 
 function isOwnSignatureIdentity(candidate: string, expected: string): boolean {
   const normalizedCandidate = candidate.trim();
   const normalizedExpected = expected.trim();
   return normalizedCandidate === normalizedExpected || normalizedCandidate.endsWith(`·${normalizedExpected}`);
+}
+
+function normalizeSignatureModel(model: string): string {
+  return model
+    .normalize('NFKC')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/gu, '');
+}
+
+function isCanonicalOwnSignature(
+  candidateIdentity: string,
+  candidateModel: string,
+  expectedIdentity: string,
+  canonicalSignature: string | undefined,
+): boolean {
+  if (!isOwnSignatureIdentity(candidateIdentity, expectedIdentity)) return false;
+  if (!canonicalSignature) return false;
+
+  const canonical = PAW_SIGNATURE_RE.exec(canonicalSignature.trim());
+  const canonicalIdentity = canonical?.[1];
+  const canonicalModel = canonical?.[2];
+  if (!canonicalIdentity || !canonicalModel || !isOwnSignatureIdentity(canonicalIdentity, expectedIdentity)) {
+    return false;
+  }
+  return normalizeSignatureModel(candidateModel) === normalizeSignatureModel(canonicalModel);
 }
 
 interface MarkdownFence {
@@ -111,16 +138,28 @@ function isMarkdownSignatureSampleContext(text: string, candidateIndex: number):
 }
 
 /**
- * Remove only this cat's signature when it is the terminal token of one complete
- * Codex `agent_message` turn. Quoted/fenced examples and teammate signatures are
- * content, not transport decoration, and must survive finalization.
+ * Remove only this cat's runtime-canonical signature when it is the terminal token
+ * of one complete Codex `agent_message` turn. Same-cat signatures for other models,
+ * quoted/fenced examples, and teammate signatures are content, not transport
+ * decoration, and must survive finalization.
  */
-function stripOwnTrailingTurnSignature(text: string, signatureIdentity: string | undefined): StrippedTurnSignature {
+function stripOwnTrailingTurnSignature(
+  text: string,
+  signatureIdentity: string | undefined,
+  canonicalSignature: string | undefined,
+): StrippedTurnSignature {
   if (!signatureIdentity) return { content: text };
   const match = TRAILING_PAW_SIGNATURE_RE.exec(text);
   if (!match || match.index === undefined) return { content: text };
   const candidateIdentity = match[2];
-  if (!candidateIdentity || !isOwnSignatureIdentity(candidateIdentity, signatureIdentity)) return { content: text };
+  const candidateModel = match[3];
+  if (
+    !candidateIdentity ||
+    !candidateModel ||
+    !isCanonicalOwnSignature(candidateIdentity, candidateModel, signatureIdentity, canonicalSignature)
+  ) {
+    return { content: text };
+  }
 
   if (isMarkdownSignatureSampleContext(text, match.index) || isInsideFencedCode(text, match.index)) {
     return { content: text };
@@ -263,7 +302,7 @@ export function transformCodexEvent(
   const item = e.item as Record<string, unknown> | undefined;
 
   if (item?.type === 'agent_message' && typeof item.text === 'string' && item.text.trim().length > 0) {
-    const stripped = stripOwnTrailingTurnSignature(item.text, state?.signatureIdentity);
+    const stripped = stripOwnTrailingTurnSignature(item.text, state?.signatureIdentity, state?.canonicalSignature);
     if (state && stripped.signature) state.observedSignature = stripped.signature;
     if (stripped.content.trim().length === 0) return null;
     const prefix = state?.hadPriorTextTurn ? '\n\n' : '';

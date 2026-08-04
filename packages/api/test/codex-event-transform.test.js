@@ -608,15 +608,15 @@ test('#1272: Codex finalization preserves quoted, fenced, and other-cat signatur
   };
   const textWithExamples = [
     '引用保持：',
-    '> [砚砚/example-model🐾]',
+    '> [砚砚/GPT-5.6 Sol🐾]',
     '',
     '```text',
-    '[砚砚/example-model🐾]',
+    '[砚砚/GPT-5.6 Sol🐾]',
     '```',
     '',
     '另一只猫：[宪宪/claude-opus-4-8🐾]',
     '',
-    '[砚砚/raw-model-name🐾]',
+    '[砚砚/GPT-5.6 Sol🐾]',
   ].join('\n');
 
   const first = transformCodexEvent(
@@ -635,10 +635,10 @@ test('#1272: Codex finalization preserves quoted, fenced, and other-cat signatur
     text,
     [
       '引用保持：',
-      '> [砚砚/example-model🐾]',
+      '> [砚砚/GPT-5.6 Sol🐾]',
       '',
       '```text',
-      '[砚砚/example-model🐾]',
+      '[砚砚/GPT-5.6 Sol🐾]',
       '```',
       '',
       '另一只猫：[宪宪/claude-opus-4-8🐾]',
@@ -673,7 +673,7 @@ test('#1272: a signature-only provider turn still finalizes to one canonical sig
     canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
   };
   const body = transformCodexEvent(
-    { type: 'item.completed', item: { type: 'agent_message', text: '[砚砚/raw-model🐾]' } },
+    { type: 'item.completed', item: { type: 'agent_message', text: '[砚砚/GPT-5.6 Sol🐾]' } },
     CAT,
     state,
   );
@@ -727,17 +727,41 @@ test('#1272: terminal teammate and legacy signatures remain content beside one c
   );
 });
 
+test('#1272 cloud P1: non-canonical same-cat signature samples remain user content', () => {
+  const samples = [
+    '> 引用签名：[砚砚/example-model🐾]',
+    '- 示例签名：[砚砚/example-model🐾]',
+    '正文签名样例：[砚砚/example-model🐾]',
+  ];
+
+  for (const sample of samples) {
+    const state = {
+      hadPriorTextTurn: false,
+      signatureIdentity: '砚砚',
+      canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+    };
+    const body = transformCodexEvent(
+      { type: 'item.completed', item: { type: 'agent_message', text: sample } },
+      CAT,
+      state,
+    );
+    const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+
+    assert.equal(`${body?.content}${done?.content}`, `${sample}\n\n[砚砚/gpt-5.6-sol🐾]`);
+  }
+});
+
 test('#1272 review P2: indented code and bare list signature samples remain content', () => {
   const samples = [
-    '缩进代码：\n\n    [砚砚/example-model🐾]',
-    '制表符代码：\n\n\t[砚砚/example-model🐾]',
-    '一空格加制表符代码：\n\n \t[砚砚/example-model🐾]',
-    '三空格加制表符代码：\n\n   \t[砚砚/example-model🐾]',
-    '无序列表：\n\n- `[砚砚/example-model🐾]`',
-    '有序列表：\n\n1. [砚砚/example-model🐾]',
-    '任务列表：\n\n- [ ] [砚砚/example-model🐾]',
-    '列表内引用：\n\n- > [砚砚/example-model🐾]',
-    '有序列表内引用：\n\n1. > `[砚砚/example-model🐾]`',
+    '缩进代码：\n\n    [砚砚/GPT-5.6 Sol🐾]',
+    '制表符代码：\n\n\t[砚砚/GPT-5.6 Sol🐾]',
+    '一空格加制表符代码：\n\n \t[砚砚/GPT-5.6 Sol🐾]',
+    '三空格加制表符代码：\n\n   \t[砚砚/GPT-5.6 Sol🐾]',
+    '无序列表：\n\n- `[砚砚/GPT-5.6 Sol🐾]`',
+    '有序列表：\n\n1. [砚砚/GPT-5.6 Sol🐾]',
+    '任务列表：\n\n- [ ] [砚砚/GPT-5.6 Sol🐾]',
+    '列表内引用：\n\n- > [砚砚/GPT-5.6 Sol🐾]',
+    '有序列表内引用：\n\n1. > `[砚砚/GPT-5.6 Sol🐾]`',
   ];
 
   for (const sample of samples) {
@@ -766,7 +790,7 @@ test('#1272 review P2 negative control: list progress still strips its own termi
   const body = transformCodexEvent(
     {
       type: 'item.completed',
-      item: { type: 'agent_message', text: '- 正在检查。 `[砚砚/raw-model🐾]`' },
+      item: { type: 'agent_message', text: '- 正在检查。 `[砚砚/GPT-5.6 Sol🐾]`' },
     },
     CAT,
     state,
@@ -778,13 +802,13 @@ test('#1272 review P2 negative control: list progress still strips its own termi
 
 test('#1272 cloud P1: open fences and nested bare lists preserve terminal signature samples', () => {
   const samples = [
-    '反引号伪关闭：\n\n```text\n```not-a-close\n[砚砚/example-model🐾]',
-    '较短反引号：\n\n````text\n```\n[砚砚/example-model🐾]',
-    '较短波浪线：\n\n~~~~text\n~~~\n[砚砚/example-model🐾]',
-    '不同 closing marker：\n\n```text\n~~~\n[砚砚/example-model🐾]',
-    '嵌套无序列表：\n\n- - [砚砚/example-model🐾]',
-    '嵌套有序任务列表：\n\n1. - [ ] `[砚砚/example-model🐾]`',
-    '列表内开放 fence：\n\n- ````text\n  ```not-a-close\n  [砚砚/example-model🐾]',
+    '反引号伪关闭：\n\n```text\n```not-a-close\n[砚砚/GPT-5.6 Sol🐾]',
+    '较短反引号：\n\n````text\n```\n[砚砚/GPT-5.6 Sol🐾]',
+    '较短波浪线：\n\n~~~~text\n~~~\n[砚砚/GPT-5.6 Sol🐾]',
+    '不同 closing marker：\n\n```text\n~~~\n[砚砚/GPT-5.6 Sol🐾]',
+    '嵌套无序列表：\n\n- - [砚砚/GPT-5.6 Sol🐾]',
+    '嵌套有序任务列表：\n\n1. - [ ] `[砚砚/GPT-5.6 Sol🐾]`',
+    '列表内开放 fence：\n\n- ````text\n  ```not-a-close\n  [砚砚/GPT-5.6 Sol🐾]',
   ];
 
   for (const sample of samples) {
@@ -821,7 +845,7 @@ test('#1272 cloud P1 negative control: legal fence closes before a decorative si
     const body = transformCodexEvent(
       {
         type: 'item.completed',
-        item: { type: 'agent_message', text: `${sample}\n[砚砚/raw-model🐾]` },
+        item: { type: 'agent_message', text: `${sample}\n[砚砚/GPT-5.6 Sol🐾]` },
       },
       CAT,
       state,

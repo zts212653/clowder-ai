@@ -72,6 +72,41 @@ Please review the exact branch HEAD supplied in the current-thread handoff. Give
 - Coordinate correction: the prior `startsWith` toggling and separate one-marker list regexes were replaced by one explicit fence-state scanner plus one container-only prefix invariant. No Markdown dependency or fallback stack was added. The public checkout does not export `check-fallback-layers`; manual analysis found one fence state and zero fallback layers.
 - P3 disposition is unchanged from Round 1; no abnormal-termination semantics were added.
 
+## Review Round 4 Repair
+
+- Reviewed-state grounding: the outstanding P1 was verified against reviewed SHA
+  `6b536631ccecae51c7b49f32782dbdb90680b810`. The branch was then fast-forwarded to
+  GitHub's signed merge SHA `050b52d0d989567b1b61584e012946c0bdf8591c` (base
+  `f30e20c289313649b657ae80b7847b34d73edaa3`); none of the six #1272 implementation
+  or regression paths changed in that merge.
+- P1 fixed: terminal same-cat signatures are transport decoration only when both the
+  identity and normalized model match the runtime canonical signature. A sample for
+  another model is user content even when it shares the current cat's nickname.
+- State invariant:
+
+  | Terminal shape | Finalizer result |
+  | --- | --- |
+  | Another cat's signature | Preserve |
+  | Current identity, non-canonical model | Preserve |
+  | Runtime-canonical signature in quote/list/fence/indented code | Preserve |
+  | Runtime-canonical signature after ordinary prose/list progress | Strip |
+  | `turn.completed` after retained body content | Append one runtime canonical signature |
+
+- Red→Green: the exact quoted and list samples from the P1 plus a plain-body companion
+  failed before the fix (`49 / 50` pass). The provider transform file now passes
+  `50 / 50`, and the provider/service/L0/route-persistence chain passes `133 / 133`.
+- Failure-mode audit: this is a coordinate correction from nickname-only matching to
+  runtime canonical identity+model matching. It adds no prose keyword detector and no
+  additional Markdown/context fallback. `check-fallback-layers` still reports the
+  historical whole-PR `+9` count in this file; Round 4 adds no fallback branch beyond
+  fail-closed canonical availability/parsing.
+- Gate evidence on this rebased checkout: API build, `pnpm check`, Biome (zero errors;
+  two pre-existing complexity warnings), and `git diff --check` pass. The public suite
+  ran 19,410 tests with 19,368 pass, 0 fail, 9 cancelled, and 33 skipped; cancellation
+  came from the test sandbox lacking Git author identity before its setup commit. The
+  sole affected file was rerun with process-local author/committer variables and passes
+  `9 / 9` with 0 cancelled.
+
 ## Review Sandbox
 
 - Path: `/tmp/cat-cafe-review/fix-1272-codex-signature-finalization/codex`
