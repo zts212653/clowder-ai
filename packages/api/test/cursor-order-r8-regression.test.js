@@ -56,6 +56,37 @@ describe('#1269 R8 P1-1: isTimelinePublished in forward scans', () => {
     assert.ok(contents.includes('Q-cat-speech'), 'Timeline-published cat speech should be in page');
   });
 
+  it('getByThreadAfter DEFAULT excludes queued cat speech (option not set)', async () => {
+    const store = new MessageStore();
+    const threadId = `r8-p1-1-default-${Date.now()}`;
+
+    store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'C-direct',
+      mentions: [],
+      timestamp: Date.now() - 2000,
+      threadId,
+    });
+
+    // Timeline-published cat speech — queued, real cat
+    store.append({
+      userId: 'u1',
+      catId: 'opus',
+      content: 'Q-cat-speech',
+      mentions: [],
+      timestamp: Date.now() - 1000,
+      threadId,
+      deliveryStatus: 'queued',
+    });
+
+    // Default read (no options) — should NOT include queued cat speech
+    const page = store.getByThreadAfter(threadId);
+    const contents = page.map((m) => m.content);
+    assert.ok(contents.includes('C-direct'), 'Direct message should be in page');
+    assert.ok(!contents.includes('Q-cat-speech'), 'Queued cat speech should NOT be in default read');
+  });
+
   it('getByThreadAfter still excludes hidden queued work', async () => {
     const store = new MessageStore();
     const threadId = `r8-p1-1-hidden-${Date.now()}`;

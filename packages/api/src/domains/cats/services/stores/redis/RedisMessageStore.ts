@@ -684,17 +684,48 @@ export class RedisMessageStore {
     const result: StoredMessage[] = [];
     const staleIds: string[] = [];
 
+    // #1269 R9: mention scans always use isTimelinePublished — timeline-published
+    // cat speech mentions should be findable regardless of read options.
     if (!cursor || afterSeq === null) {
-      await this.scanVisibilityChunked(visKey, '-inf', '+inf', n, userId, result, staleIds, mentionFilter);
+      await this.scanVisibilityChunked(
+        visKey,
+        '-inf',
+        '+inf',
+        n,
+        userId,
+        result,
+        staleIds,
+        isTimelinePublished,
+        mentionFilter,
+      );
     } else {
       const sameRaw = await this.redis.zrangebyscore(visKey, String(afterSeq), String(afterSeq));
       const sameFiltered = sameRaw.filter((id) => id > cursorId!);
       if (sameFiltered.length > 0) {
         const sameScores = new Map(sameFiltered.map((id) => [id, afterSeq!]));
-        await this.hydrateAndFilter(sameFiltered, userId, n, result, staleIds, sameScores, mentionFilter);
+        await this.hydrateAndFilter(
+          sameFiltered,
+          userId,
+          n,
+          result,
+          staleIds,
+          isTimelinePublished,
+          sameScores,
+          mentionFilter,
+        );
       }
       if (result.length < n) {
-        await this.scanVisibilityChunked(visKey, `(${afterSeq}`, '+inf', n, userId, result, staleIds, mentionFilter);
+        await this.scanVisibilityChunked(
+          visKey,
+          `(${afterSeq}`,
+          '+inf',
+          n,
+          userId,
+          result,
+          staleIds,
+          isTimelinePublished,
+          mentionFilter,
+        );
       }
     }
 
@@ -731,7 +762,8 @@ export class RedisMessageStore {
     if (eligible.length === 0) return [];
     const messages = await this.hydrateMessages(eligible);
     // #1200 Sol R2: explicit deletedAt filter for mentions (hydrateAndFilter no longer filters)
-    return messages.filter((m) => isDelivered(m) && !m.deletedAt).slice(0, n);
+    // #1269 R9: isTimelinePublished — parity with getMentionsFor + Memory store.
+    return messages.filter((m) => isTimelinePublished(m) && !m.deletedAt).slice(0, n);
   }
 
   /**
@@ -771,7 +803,9 @@ export class RedisMessageStore {
 
     if (ids.length === 0) return [];
     const messages = await this.hydrateMessages(ids.reverse());
-    return messages.filter(isDelivered);
+    // #1269 R9 P1-2: use isTimelinePublished — parity with Memory store's
+    // getRecentMentionsFor which also admits timeline-published cat speech.
+    return messages.filter(isTimelinePublished);
   }
 
   async getBefore(timestamp: number, limit?: number, userId?: string, beforeId?: string): Promise<StoredMessage[]> {
@@ -893,13 +927,16 @@ export class RedisMessageStore {
     }
 
     // 3. Chunked WITHSCORES read from visibility ZSET: filter-then-limit
+    // #1269 R9 P1-1: caller-appropriate visibility predicate — respects
+    // includeQueuedCatMessages option (default: isDelivered only).
+    const isVisible = resolveThreadMessageVisibility(options);
     const maxResults = limit && limit > 0 ? limit : Number.MAX_SAFE_INTEGER;
     const result: StoredMessage[] = [];
     const staleIds: string[] = [];
 
     if (!cursor || afterSeq === null) {
       // No cursor or fully pruned: scan from start
-      await this.scanVisibilityChunked(visKey, '-inf', '+inf', maxResults, userId, result, staleIds);
+      await this.scanVisibilityChunked(visKey, '-inf', '+inf', maxResults, userId, result, staleIds, isVisible);
     } else {
       // Same-score segment: IDs with same visibilitySeq, id > cursorId
       const sameRaw = await this.redis.zrangebyscore(visKey, String(afterSeq), String(afterSeq));
@@ -907,7 +944,7 @@ export class RedisMessageStore {
       if (sameFiltered.length > 0) {
         // All members share afterSeq — build score map for injection
         const sameScores = new Map(sameFiltered.map((id) => [id, afterSeq!]));
-        await this.hydrateAndFilter(sameFiltered, userId, maxResults, result, staleIds, sameScores);
+        await this.hydrateAndFilter(sameFiltered, userId, maxResults, result, staleIds, isVisible, sameScores);
       }
       // Strict segment: visibilitySeq > afterSeq (chunked)
       // #1200 codex P2: pass maxResults (absolute total), not maxResults - result.length.
@@ -915,7 +952,16 @@ export class RedisMessageStore {
       // already contains items from the same-score segment, so passing the absolute
       // target lets the shared accumulator stop at the right total.
       if (result.length < maxResults) {
-        await this.scanVisibilityChunked(visKey, `(${afterSeq}`, '+inf', maxResults, userId, result, staleIds);
+        await this.scanVisibilityChunked(
+          visKey,
+          `(${afterSeq}`,
+          '+inf',
+          maxResults,
+          userId,
+          result,
+          staleIds,
+          isVisible,
+        );
       }
     }
 
@@ -1023,8 +1069,13 @@ export class RedisMessageStore {
 
   /**
    * #1200: Chunked scan of the visibility ZSET. Reads CHUNK members at a time,
-   * hydrates, filters (isTimelinePublished + userId), and collects into `result`.
+   * hydrates, filters (visibilityPredicate + userId), and collects into `result`.
    * Stops when `maxCollect` published messages are collected or ZSET exhausted.
+   *
+   * #1269 R9 P1-1: visibilityPredicate is caller-supplied — getByThreadAfter
+   * passes resolveThreadMessageVisibility(options), mention scans pass
+   * isTimelinePublished. This keeps canonical position allocation independent
+   * from reader eligibility.
    */
   private async scanVisibilityChunked(
     visKey: string,
@@ -1034,6 +1085,7 @@ export class RedisMessageStore {
     userId: string | undefined,
     result: StoredMessage[],
     staleIds: string[],
+    visibilityPredicate: (msg: StoredMessage) => boolean,
     extraFilter?: (msg: StoredMessage) => boolean,
   ): Promise<void> {
     const CHUNK = Math.max(maxCollect, 50);
@@ -1057,7 +1109,16 @@ export class RedisMessageStore {
       // #1200 codex P2: pass maxCollect directly — hydrateAndFilter checks
       // result.length < maxCollect with the shared accumulator.
       if (ids.length > 0) {
-        await this.hydrateAndFilter(ids, userId, maxCollect, result, staleIds, scores, extraFilter);
+        await this.hydrateAndFilter(
+          ids,
+          userId,
+          maxCollect,
+          result,
+          staleIds,
+          visibilityPredicate,
+          scores,
+          extraFilter,
+        );
       }
 
       if (ids.length < CHUNK) break;
@@ -1067,8 +1128,12 @@ export class RedisMessageStore {
 
   /**
    * #1200: Hydrate a batch of IDs + apply visibility filters.
-   * Collects up to `maxCollect` delivered messages into `result`.
+   * Collects up to `maxCollect` published messages into `result`.
    * Null-hydrated IDs are added to `staleIds` for lazy ZREM.
+   *
+   * #1269 R9 P1-1: visibilityPredicate is caller-supplied so each reader
+   * applies its own publication filter (e.g. resolveThreadMessageVisibility
+   * for getByThreadAfter, isTimelinePublished for mention scans).
    */
   private async hydrateAndFilter(
     ids: string[],
@@ -1076,6 +1141,7 @@ export class RedisMessageStore {
     maxCollect: number,
     result: StoredMessage[],
     staleIds: string[],
+    visibilityPredicate: (msg: StoredMessage) => boolean,
     scores?: Map<string, number>,
     extraFilter?: (msg: StoredMessage) => boolean,
   ): Promise<void> {
@@ -1104,13 +1170,13 @@ export class RedisMessageStore {
         continue;
       }
       // #1200 Sol R2 P2-5: tombstones (deletedAt) are KEPT per binding doc
-      // (tombstone-keep / null-skip / canceled-skip / isTimelinePublished). Parity with
+      // (tombstone-keep / null-skip / canceled-skip / visibilityPredicate). Parity with
       // Memory store: both stores return tombstones in getByThreadAfter.
-      // #1269 R8 P1-1: use isTimelinePublished (not isDelivered) so timeline-published
-      // queued cat speech is included in forward scans via getByThreadAfter and getMentionsFor.
-      // Hidden queued work (non-cat-speech) is still excluded.
-      // Mention-scan callers that need to exclude deleted use extraFilter.
-      if (!isTimelinePublished(msg)) continue;
+      // #1269 R9 P1-1: caller-supplied visibilityPredicate replaces hardcoded filter.
+      // getByThreadAfter passes resolveThreadMessageVisibility(options) (option-aware);
+      // mention scans pass isTimelinePublished (always include published cat speech).
+      // Hidden queued work is excluded by all predicates.
+      if (!visibilityPredicate(msg)) continue;
       if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
       if (extraFilter && !extraFilter(msg)) continue;
       // §8.7: Inject visibilitySeq from WITHSCORES (authoritative over hash field

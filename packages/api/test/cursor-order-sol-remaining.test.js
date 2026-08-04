@@ -619,10 +619,12 @@ describe('Lua hwm guard: NaN and fractional rejection', () => {
         threadId,
       });
 
-      // Step 2: Queued append (the message to be delivered)
+      // Step 2: Hidden queued work (non-cat-speech) — no visibilitySeq at append,
+      // so markDelivered enters the HWM allocation path. Timeline-published cat
+      // speech (catId: 'opus') already has visibilitySeq and would skip HWM.
       const msg = await store.append({
-        userId: 'u1',
-        catId: 'opus',
+        userId: 'scheduler',
+        catId: null,
         content: 'queued-msg',
         mentions: [],
         timestamp: Date.now(),
@@ -1099,10 +1101,11 @@ describe('Sol R5: HWM reject zero-mutation (comprehensive)', () => {
         threadId,
       });
 
-      // Queued message
+      // Hidden queued work (non-cat-speech) — no visibilitySeq at append,
+      // so markDelivered enters the HWM allocation path.
       const msg = await store.append({
-        userId: 'u1',
-        catId: 'opus',
+        userId: 'scheduler',
+        catId: null,
         content: 'queued-msg',
         mentions: [],
         timestamp: Date.now(),
