@@ -751,6 +751,33 @@ test('#1272 cloud P1: non-canonical same-cat signature samples remain user conte
   }
 });
 
+test('#1272 cloud P1: canonical signature samples remain content inside prose blockquotes', () => {
+  const samples = [
+    '> 引用签名：[砚砚/GPT-5.6 Sol🐾]',
+    '- > 引用签名：[砚砚/GPT-5.6 Sol🐾]',
+    '1. > 有序列表引用：[砚砚/GPT-5.6 Sol🐾]',
+    '> > 嵌套引用：[砚砚/GPT-5.6 Sol🐾]',
+    '> - 引用内列表：[砚砚/GPT-5.6 Sol🐾]',
+    '- - > 嵌套列表引用：[砚砚/GPT-5.6 Sol🐾]',
+  ];
+
+  for (const sample of samples) {
+    const state = {
+      hadPriorTextTurn: false,
+      signatureIdentity: '砚砚',
+      canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+    };
+    const body = transformCodexEvent(
+      { type: 'item.completed', item: { type: 'agent_message', text: sample } },
+      CAT,
+      state,
+    );
+    const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+
+    assert.equal(`${body?.content}${done?.content}`, `${sample}\n\n[砚砚/gpt-5.6-sol🐾]`);
+  }
+});
+
 test('#1272 review P2: indented code and bare list signature samples remain content', () => {
   const samples = [
     '缩进代码：\n\n    [砚砚/GPT-5.6 Sol🐾]',
@@ -781,23 +808,28 @@ test('#1272 review P2: indented code and bare list signature samples remain cont
   }
 });
 
-test('#1272 review P2 negative control: list progress still strips its own terminal signature', () => {
-  const state = {
-    hadPriorTextTurn: false,
-    signatureIdentity: '砚砚',
-    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
-  };
-  const body = transformCodexEvent(
-    {
-      type: 'item.completed',
-      item: { type: 'agent_message', text: '- 正在检查。 `[砚砚/GPT-5.6 Sol🐾]`' },
-    },
-    CAT,
-    state,
-  );
-  const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+test('#1272 review P2 negative control: ordinary prose/list progress still strips its own terminal signature', () => {
+  const samples = [
+    ['- 正在检查。 `[砚砚/GPT-5.6 Sol🐾]`', '- 正在检查。'],
+    ['正文比较 A > B。 `[砚砚/GPT-5.6 Sol🐾]`', '正文比较 A > B。'],
+    ['- 正文比较 A > B。 `[砚砚/GPT-5.6 Sol🐾]`', '- 正文比较 A > B。'],
+  ];
 
-  assert.equal(`${body?.content}${done?.content}`, '- 正在检查。\n\n[砚砚/gpt-5.6-sol🐾]');
+  for (const [sample, expectedBody] of samples) {
+    const state = {
+      hadPriorTextTurn: false,
+      signatureIdentity: '砚砚',
+      canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+    };
+    const body = transformCodexEvent(
+      { type: 'item.completed', item: { type: 'agent_message', text: sample } },
+      CAT,
+      state,
+    );
+    const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+
+    assert.equal(`${body?.content}${done?.content}`, `${expectedBody}\n\n[砚砚/gpt-5.6-sol🐾]`);
+  }
 });
 
 test('#1272 cloud P1: open fences and nested bare lists preserve terminal signature samples', () => {

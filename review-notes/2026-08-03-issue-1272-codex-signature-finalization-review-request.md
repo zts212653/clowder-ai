@@ -107,6 +107,41 @@ Please review the exact branch HEAD supplied in the current-thread handoff. Give
   sole affected file was rerun with process-local author/committer variables and passes
   `9 / 9` with 0 cancelled.
 
+## Review Round 5 Repair
+
+- Reviewed-state grounding: P1 review `4857388252` is bound to exact SHA
+  `110d3bfa39639274946e551bab33ec8e7c7b107e`. Both reported inputs reproduced locally:
+  the canonical sample was removed from `> 引用签名：…` and `- > 引用签名：…`.
+- Three gates: the accepted #1272 contract explicitly preserves quoted signature-like
+  content; the failure is isolated to the container-only prefix test; and ordinary
+  prose/list progress remains the feature-path negative control.
+- P1 fixed: signature context now parses the structural container sequence at the start
+  of the candidate line. A canonical terminal sample is preserved when that sequence
+  enters a blockquote, even when prose follows the `>` marker. An arbitrary `>` later in
+  ordinary prose or list progress does not establish blockquote context.
+- R2+ failure-mode audit: repeated findings in this classifier made a same-family sweep
+  mandatory. The contract edge is now explicit:
+
+  | Candidate line | Result |
+  | --- | --- |
+  | Plain, list-contained, nested, or list-inside blockquote with prose | Preserve |
+  | Ordinary prose/list progress containing an inline `>` | Strip runtime-canonical tail |
+  | Same-cat non-canonical model or another cat | Preserve |
+  | Runtime-canonical tail outside protected Markdown context | Strip, then append one canonical at completion |
+
+  The regression sweep covers plain, unordered/ordered/nested list-contained, nested
+  blockquotes, and blockquote-contained lists, plus two inline-`>` negative controls.
+  This repairs the structural coordinate; it adds no prose keyword detector, Markdown
+  runtime dependency, or fallback stack.
+- Red→Green: exact reproductions failed before the fix (`50 / 51` transform tests) and
+  pass after rebuilding (`51 / 51`). The provider/service/L0/route-persistence chain
+  passes `134 / 134`.
+- Gates: API build, root `pnpm check`, Biome (zero errors; two pre-existing complexity
+  warnings), and `git diff --check` pass. Canonical `test:public` passes 19,411 tests:
+  19,378 pass, 0 fail, 0 cancelled, 33 skipped. `check-fallback-layers` still reports
+  the historical whole-PR `+9` count in the transform file; Round 5 adds one structural
+  context branch and no layered fallback.
+
 ## Review Sandbox
 
 - Path: `/tmp/cat-cafe-review/fix-1272-codex-signature-finalization/codex`

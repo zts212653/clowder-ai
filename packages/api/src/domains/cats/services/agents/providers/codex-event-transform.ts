@@ -32,6 +32,7 @@ interface StrippedTurnSignature {
 
 const MARKDOWN_CONTAINER_ONLY_PREFIX_RE =
   /^[ \t]{0,3}(?:(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)|(?:>[ \t]*))+(?:\[[ xX]\][ \t]+)?$/u;
+const MARKDOWN_LEADING_CONTAINER_RE = /^[ \t]{0,3}(?:(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)|(?:>[ \t]*))+/u;
 const FENCE_RUN_RE = /(`{3,}|~{3,})/u;
 
 const PAW_SIGNATURE_RE = /^\[([^[\]/\n]+)\/([^[\]\n]+)🐾\]$/u;
@@ -133,6 +134,8 @@ function isMarkdownSignatureSampleContext(text: string, candidateIndex: number):
   const lineStart = text.lastIndexOf('\n', Math.max(0, candidateIndex - 1)) + 1;
   const linePrefix = text.slice(lineStart, candidateIndex);
   if (MARKDOWN_CONTAINER_ONLY_PREFIX_RE.test(linePrefix)) return true;
+  const leadingContainers = MARKDOWN_LEADING_CONTAINER_RE.exec(linePrefix);
+  if (leadingContainers?.[0].includes('>')) return true;
   if (/^(?: {4,}| {0,3}\t)/u.test(linePrefix)) return true;
   return false;
 }
