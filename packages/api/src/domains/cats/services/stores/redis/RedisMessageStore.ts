@@ -131,10 +131,52 @@ end
 local nextRevision = tonumber(ARGV[3])
 redis.call('HSET', KEYS[1], 'queueCustody', ARGV[2], 'queueCustodyRevision', ARGV[3])
 if ARGV[4] ~= '' then
+  -- #1269 P1-2: pre-compute visibilitySeq allocation before delivery writes.
+  -- Same invariant as DELIVER_WITH_VISIBILITY_LUA: allocate exactly once when
+  -- no position exists, preserving append-time positions for timeline-published speech.
+  local kp = ARGV[6]
+  local threadId = redis.call('HGET', KEYS[1], 'threadId')
+  local existingVis = redis.call('HGET', KEYS[1], 'visibilitySeq')
+  local seq = nil
+  if existingVis == false and threadId then
+    local metaKey = kp .. 'msg:visibility-meta:' .. threadId
+    local hwmRaw = redis.call('HGET', metaKey, 'hwm')
+    local hwm = 0
+    if hwmRaw ~= false then
+      hwm = tonumber(hwmRaw)
+      if hwm == nil then
+        return redis.error_reply('VISIBILITY_HWM_UNPARSEABLE: raw=' .. tostring(hwmRaw) .. ' metaKey=' .. metaKey)
+      end
+      if hwm ~= hwm then
+        return redis.error_reply('VISIBILITY_HWM_NAN: metaKey=' .. metaKey)
+      end
+      if hwm ~= math.floor(hwm) or hwm < 0 then
+        return redis.error_reply('VISIBILITY_HWM_INVALID: hwm=' .. tostring(hwm) .. ' metaKey=' .. metaKey)
+      end
+    end
+    local t = redis.call('TIME')
+    local now_ms = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+    seq = math.max(hwm + 1, now_ms)
+    if seq > 9007199254730991 then
+      return redis.error_reply('VISIBILITY_SEQ_EXHAUSTED: seq=' .. tostring(seq))
+    end
+  end
+
+  -- All guards passed — write delivery + timeline + visibility atomically
   redis.call('HSET', KEYS[1], 'deliveredAt', ARGV[4], 'timelineOrderAt', ARGV[5], 'deliveryStatus', 'delivered')
   redis.call('ZADD', KEYS[2], ARGV[5], messageId)
   redis.call('ZADD', KEYS[3], ARGV[5], messageId)
   redis.call('ZADD', KEYS[4], ARGV[5], messageId)
+
+  if seq then
+    local visKey = kp .. 'msg:visibility:' .. threadId
+    local metaKey = kp .. 'msg:visibility-meta:' .. threadId
+    redis.call('ZADD', visKey, seq, messageId)
+    redis.call('HSET', metaKey, 'hwm', tostring(seq))
+    redis.call('HSETNX', metaKey, 'migrated', '1')
+    redis.call('HSET', KEYS[1], 'visibilitySeq', tostring(seq))
+  end
+
   return {2, nextRevision}
 end
 return {1, nextRevision}
@@ -288,6 +330,12 @@ export class RedisMessageStore {
     if (msg.source) hashFields.push('source', JSON.stringify(msg.source));
     if (msg.mentionsUser) hashFields.push('mentionsUser', '1');
     if (msg.deliveryStatus) hashFields.push('deliveryStatus', msg.deliveryStatus);
+    // #1269 P1-1: restore queueCustody serialization that createStoredMessageData() provided.
+    // Without these, F254 custody CAS operations fail on messages appended with initial custody.
+    if (msg.queueCustody) {
+      hashFields.push('queueCustody', JSON.stringify(msg.queueCustody));
+      hashFields.push('queueCustodyRevision', String(msg.queueCustody.revision));
+    }
     if (msg.replyTo) hashFields.push('replyTo', msg.replyTo);
 
     // Mention catIds for ZADD into per-cat mention sets
@@ -1552,6 +1600,12 @@ export class RedisMessageStore {
     const timelineScore =
       input.deliveredAt === undefined ? undefined : resolveDeliveryTimelineScore(current, input.deliveredAt);
 
+    // #1269 P1-2: ensure visibility migration before delivery (same as markDelivered).
+    // Custody transitions without delivery skip this (no visibility allocation needed).
+    if (input.deliveredAt !== undefined) {
+      await this.ensureVisibilityMigrated(current.threadId);
+    }
+
     const rawResult = (await this.redis.eval(
       TRANSITION_QUEUE_CUSTODY_LUA,
       4,
@@ -1564,6 +1618,7 @@ export class RedisMessageStore {
       String(input.next.revision),
       input.deliveredAt === undefined ? '' : String(input.deliveredAt),
       timelineScore === undefined ? '' : String(timelineScore),
+      this.keyPrefix, // [6] keyPrefix for visibility key construction inside Lua
     )) as [number | string, number | string];
     const outcome = Number(rawResult[0]);
     const actualRevision = Number(rawResult[1]);

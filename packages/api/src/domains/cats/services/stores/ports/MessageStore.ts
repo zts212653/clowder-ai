@@ -1379,6 +1379,12 @@ export class MessageStore {
       msg.timelineOrderAt = resolveDeliveryTimelineScore(msg, input.deliveredAt);
       msg.deliveryStatus = 'delivered';
       msg.deliveredAt = input.deliveredAt;
+      // #1269 P1-2: allocate visibilitySeq when hidden queued work becomes visible.
+      // Same guard as markDelivered: preserve existing position, allocate only when missing.
+      if (!this.visibilitySeq.has(id)) {
+        this.visibilitySeqCounter = Math.max(this.visibilitySeqCounter + 1, Date.now());
+        this.visibilitySeq.set(id, this.visibilitySeqCounter);
+      }
     }
     return { kind: 'updated', message: { ...msg }, deliveryTransitioned: input.deliveredAt !== undefined };
   }
