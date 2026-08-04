@@ -113,13 +113,16 @@ function createTestContext(store, storeType, redis) {
   }
 
   /**
-   * Append a queued message (not immediately visible in the visibility index).
+   * Append a hidden queued message (not immediately visible in the visibility index).
    * Sets status: 'queued' via the store's delivery metadata path.
+   * Default catId is null (non-cat-speech) so the message is NOT timeline-published
+   * and receives NO visibilitySeq at append — visibility is deferred to delivery.
+   * Pass catId: 'opus' explicitly when testing timeline-published cat speech.
    */
   async function appendQueued(opts) {
     const msg = await store.append({
       userId: opts.userId ?? userId,
-      catId: opts.catId ?? 'opus',
+      catId: opts.catId ?? null,
       content: opts.content,
       mentions: opts.mentions ?? [],
       timestamp: opts.timestamp,

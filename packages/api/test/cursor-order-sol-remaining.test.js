@@ -326,14 +326,17 @@ describe('P2-6: append return value must include visibilitySeq', () => {
     assert.ok(msg.visibilitySeq > 0, 'visibilitySeq must be positive');
   });
 
-  it('Memory: queued append returns message WITHOUT visibilitySeq', async () => {
+  it('Memory: hidden queued append returns message WITHOUT visibilitySeq', async () => {
     await ensureModules();
     const store = new MessageStore();
     const threadId = `append-ret-q-${Date.now()}`;
 
+    // #1269: use non-cat-speech (catId: null) to test hidden queued work.
+    // Timeline-published cat speech (catId: 'opus') gets visibilitySeq at append;
+    // hidden queued scheduler/system work does not.
     const msg = store.append({
       userId: 'u1',
-      catId: 'opus',
+      catId: null,
       content: 'queued',
       mentions: [],
       timestamp: Date.now(),
@@ -341,7 +344,7 @@ describe('P2-6: append return value must include visibilitySeq', () => {
       deliveryStatus: 'queued',
     });
 
-    assert.equal(msg.visibilitySeq, undefined, 'Queued append must NOT have visibilitySeq');
+    assert.equal(msg.visibilitySeq, undefined, 'Hidden queued append must NOT have visibilitySeq');
   });
 
   it('Redis: direct append returns message with visibilitySeq', async (t) => {

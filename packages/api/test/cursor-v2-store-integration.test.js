@@ -127,7 +127,7 @@ describe('#1200 getLatestVisibleCursor (§8.7 read-state)', () => {
     assert.equal(msg?.content, 'third');
   });
 
-  it('skips queued messages (not yet visible)', async () => {
+  it('skips hidden queued messages (not yet visible)', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const store = new MessageStore();
     const threadId = `latest-skip-queued-${Date.now()}`;
@@ -140,11 +140,13 @@ describe('#1200 getLatestVisibleCursor (§8.7 read-state)', () => {
       timestamp: Date.now() - 1000,
       threadId,
     });
-    // Queued message appended after but NOT delivered — should not be latest
+    // #1269: hidden queued work (non-cat-speech) is not timeline-published,
+    // so it has no visibilitySeq and is not returned by getLatestVisibleCursor.
+    // Timeline-published cat speech (catId: 'opus') WOULD be visible at append.
     store.append({
-      userId: 'u1',
-      catId: 'opus',
-      content: 'queued',
+      userId: 'scheduler',
+      catId: 'system',
+      content: 'queued-hidden',
       mentions: [],
       timestamp: Date.now(),
       threadId,
@@ -154,7 +156,7 @@ describe('#1200 getLatestVisibleCursor (§8.7 read-state)', () => {
     const result = store.getLatestVisibleCursor(threadId);
     assert.ok(result, 'Should return a cursor');
     const msg = await store.getById(result.messageId);
-    assert.equal(msg?.content, 'direct', 'Latest visible should be "direct", not queued');
+    assert.equal(msg?.content, 'direct', 'Latest visible should be "direct", not hidden queued');
   });
 
   it('returns null for empty thread', async () => {
@@ -223,24 +225,26 @@ describe('#1200 canonicalizeCursor (§8.7 CAS ingress)', () => {
     assert.equal(parsed.id, m.id);
   });
 
-  it('returns raw ID for queued (not-yet-visible) message', async () => {
+  it('returns raw ID for hidden queued (not-yet-visible) message', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const store = new MessageStore();
     const threadId = `canon-queued-${Date.now()}`;
 
+    // #1269: hidden queued work (non-cat-speech) has no visibilitySeq → raw ID fallback.
+    // Timeline-published cat speech (catId: 'opus') would get v2 at append.
     const q = store.append({
-      userId: 'u1',
-      catId: 'opus',
-      content: 'queued',
+      userId: 'scheduler',
+      catId: 'system',
+      content: 'queued-hidden',
       mentions: [],
       timestamp: Date.now(),
       threadId,
       deliveryStatus: 'queued',
     });
 
-    // Queued message has no visibility position → falls back to raw ID
+    // Hidden queued message has no visibility position → falls back to raw ID
     const cursor = store.canonicalizeCursor(q.id, threadId);
-    assert.equal(cursor, q.id, 'Queued message should return raw ID (v1 fallback)');
+    assert.equal(cursor, q.id, 'Hidden queued message should return raw ID (v1 fallback)');
   });
 
   it('returns v2 for late-delivered message', async () => {
