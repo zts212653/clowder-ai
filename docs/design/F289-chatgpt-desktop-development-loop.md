@@ -10,7 +10,7 @@ The design converged from the following operator requirements in the Cat Café t
 
 - `0001785893909985-000192-8d0eb68c`: cats retain dialogue, requirements, design and code Review; all development and Bug fixes go to ChatGPT Desktop.
 - `0001785916078772-000242-6553d1dc`: cats may commit design/review artifacts and validate code logic, but do not develop tasks or tests.
-- `0001785917643838-000256-d05deb9b`: a default Review publisher/recorder is desirable; one endless chat is not required.
+- `0001785917643838-000256-d05deb9b`: a default Review recorder was discussed; the later scope correction makes Cat Café ReviewRound the default truth and keeps repository publication project-local. One endless chat is not required.
 - `0001785917973085-000260-3f3c3ba2`: unfinished Feature work must survive either side closing or replacing a conversation.
 - `0001785918577244-000262-62c238f2`: use the already mounted Traqen repository on the local Mac mini as the implementation pilot.
 
@@ -34,8 +34,8 @@ CodeX private review + Kimi private review
         v
 cross-review consensus
         |
-        +-- open findings --> bilingual Traqen GitHub Issues
-        |                       --> Desktop new attempt/new HEAD
+        +-- open findings --> Cat Café ReviewRound consensus
+        |                       --> Desktop new attempt/new HEAD via MCP
         |
         +-- zero findings --> Desktop merge --> operator acceptance
 ```
@@ -48,9 +48,9 @@ This is one logical work viewed from two products, not UI automation between two
 
 Reviewers may run existing commands that create caches or build output, while Desktop may edit/index/commit concurrently. A single writable checkout risks index locks, accidental staging and evidence drift. Both systems use the same repository but different worktrees pinned to the same SHA during Review.
 
-### Why not use the previous Git Review ledger?
+### Where do findings live?
 
-Traqen's repository policy explicitly forbids committing Review ledgers and allows confirmed findings only as bilingual GitHub Issues. The generic term is therefore `reviewPublisher`, not recorder. The ProjectBinding selects `github_issues_bilingual`; policy mismatch fails closed.
+F289 needs one generic handoff truth, so barrier-safe consensus findings live in Cat Café ReviewRound and Desktop reads them through MCP. Git ledgers, GitHub Issues, PR comments and language requirements are project-local presentation choices outside the MVP. Traqen's current policy may change without changing F289.
 
 ### Why polling rather than controlling the Desktop UI?
 
@@ -64,13 +64,7 @@ F275 already owns admitted whole-work identity and attempt continuity. F289 adds
 
 F275 Phase C is deferred, so F289 cannot infer that `fix_required -> next attempt` or `merge -> accepted/rejected` already exists. Before runtime implementation, the F275 owner must approve one named-consumer port covering existing work/attempt reads, idempotent next-attempt creation, typed evidence attachment and F275-owned terminal transitions. F289 has no bounded private fallback: if the port cannot be supplied, runtime claims stay off and the feature remains at contract/design scope.
 
-This keeps the boundary honest: F289 owns Desktop leases, session binding, ReviewRound and publication policy; F275 owns ordered attempts and whole-work terminal truth.
-
-### Who holds the Traqen Issue credential?
-
-Cat Café server does. The server reuses `GitHubIssuePublisher` and its lazy `getGitHubToken` resolver backed by the existing sensitive GitHub plugin configuration. The authenticated local operator configures and rotates `GITHUB_TOKEN`; plugin config is mode `0600`. The token is absent from ProjectBinding, Desktop MCP, Resume Packet, review drafts and publication receipts.
-
-The preferred credential is a fine-grained token restricted to `qianfengXY/Traqen` with repository Issues read/write. ProjectBinding repository identity must also pass the publisher's server-side allowlist. Desktop cannot lend its own `gh` credential as a fallback; publication failures remain explicit and redacted.
+This keeps the boundary honest: F289 owns Desktop leases, session binding and ReviewRound; F275 owns ordered attempts and whole-work terminal truth.
 
 ## State authority matrix
 
@@ -81,7 +75,7 @@ The preferred credential is a fine-grained token restricted to `qianfengXY/Traqe
 | Which Desktop chat may write? | session binding epoch + active lease | a remembered conversation ID alone |
 | What code was reviewed? | immutable full Git SHA in ReviewRound | branch tip or PR URL alone |
 | Did reviewers finish independently? | private reviewer completion records + atomic barrier | public chat messages |
-| What findings are actionable? | consensus records + repository publication receipts | one reviewer's draft |
+| What findings are actionable? | barrier-safe ReviewRound consensus | one reviewer's draft or an optional external artifact |
 | May it merge? | latest approved exact HEAD + zero open history + project policy | tests green alone |
 | Is the work complete? | F275 terminal transition backed by operator acceptance | merge event alone |
 
@@ -125,8 +119,7 @@ It excludes secrets, raw agent keys and private reviewer drafts. The server retu
 | Reviewer finishes twice | idempotent private completion; barrier count unchanged |
 | One reviewer tries to read another draft early | authorization denial; no draft data in error/projection |
 | Branch moves after Review starts | full SHA mismatch marks round stale; complete new round required |
-| GitHub Issue publish retries | idempotency/fingerprint reuses the same issue |
-| Publisher attempts Git ledger in Traqen | repository policy adapter rejects it |
+| Desktop polls the same consensus twice | stable round/version returns the same findings without duplicating work |
 | Repository mapping is missing/wrong | no external write; work enters explicit blocked state |
 | Mac sleeps | no execution while asleep; durable attempt resumes after wake |
 | Operator rejects merged result | F275 records typed rejection and opens a new attempt; not silently accepted |
@@ -138,9 +131,8 @@ It excludes secrets, raw agent keys and private reviewer drafts. The server retu
 - MCP is local to the Mac where possible; cpolar is for Cat Café UI access, not a reason to expose development MCP publicly.
 - Strict MCP toolset has no arbitrary shell, file write, config mutation, merge or deploy primitive.
 - Per-project policy gates push/PR/merge; initial Traqen values are false.
-- GitHub Issue credential stays in Cat Café's sensitive GitHub plugin configuration; server is the sole API caller and Desktop receives only a receipt URL.
 - Review private drafts, raw work IDs and authentication provenance are excluded from user/public projections.
-- Wrong repo, unknown policy, stale SHA, stale epoch and missing publisher authority all fail closed.
+- Wrong repo, stale SHA and stale epoch all fail closed.
 
 ## Design Gate checklist
 
@@ -148,6 +140,6 @@ It excludes secrets, raw agent keys and private reviewer drafts. The server retu
 - [ ] F211 owner confirms generic runtime-session extension rather than ChatGPT-specific forked storage.
 - [ ] F286 governance review confirms lifecycle surface and annotations.
 - [ ] Non-author reviewer validates role segregation, session-race and Review barrier tests.
-- [ ] Traqen policy adapter test proves bilingual Issue-only publication, exact repo allowlist, Cat Café server-only credential use and no Git ledger/Desktop-token fallback.
+- [ ] ReviewRound/MCP contract proves Desktop sees only barrier-safe consensus and does not require any repository Issue/ledger/comment artifact.
 - [ ] ProjectBinding bootstrap/rebind test proves process restart recovery and authenticated manual recovery after data-root/path migration.
 - [ ] co-creator performs runtime principal/key/config activation after implementation; no agent edits runtime config.

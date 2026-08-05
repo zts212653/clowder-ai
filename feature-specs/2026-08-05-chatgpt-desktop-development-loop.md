@@ -4,7 +4,7 @@
 
 **Goal:** connect Cat Café's design/multi-cat Review plane to ChatGPT Desktop's development plane with durable, resumable managed work, then dogfood the loop on Traqen.
 
-**Architecture:** reuse F275 `workId/attemptId` as the only work root. Add a desktop execution adapter, F211 runtime-session binding, exact-HEAD ReviewRound coordinator and repository-policy publication adapter. Expose a strict, lifecycle-oriented MCP profile; Desktop performs all repository mutation with its native local tools.
+**Architecture:** reuse F275 `workId/attemptId` as the only work root. Add a desktop execution adapter, F211 runtime-session binding and exact-HEAD ReviewRound coordinator. Expose a strict, lifecycle-oriented MCP profile; Desktop performs all repository mutation with its native local tools and reads consensus findings directly from Cat Café.
 
 **Primary spec:** `docs/features/F289-chatgpt-desktop-development-loop.md`<br>
 **Design Gate:** `docs/design/F289-chatgpt-desktop-development-loop.md`<br>
@@ -13,22 +13,21 @@
 ## Prerequisites and gates
 
 1. **Blocking:** F275 owner freezes and approves a named-consumer port for existing work/attempt reads, idempotent next-attempt creation, typed evidence and F275-owned terminal transitions. No runtime implementation or automated claim begins without it; F289 has no fallback work/attempt/terminal ledger.
-2. Non-author architecture review signs off F275 ownership, F211 session reuse, F286 MCP lifecycle and Traqen publication policy.
+2. Non-author architecture review signs off F275 ownership, F211 session reuse, F286 MCP lifecycle and internal ReviewRound finding delivery.
 3. Refresh branch from current `origin/main`; re-audit any related feature delta before coding.
 4. All Redis integration tests use isolated Redis on port 6398 via repository test harness. Never use production data stores.
-5. Human-only activation (external principal, GitHub plugin token, agent key and ChatGPT Desktop config) occurs after code/skill gates pass.
-6. No push, PR, merge or Traqen publication is part of Tasks 1–10 unless the operator explicitly activates the corresponding ProjectBinding flag.
+5. Human-only activation (external principal, agent key and ChatGPT Desktop config) occurs after code/skill gates pass.
+6. No push, PR or merge is part of Tasks 1–10 unless the operator explicitly activates the corresponding ProjectBinding flag.
 
 ## Stateful object census
 
 | Object | Write owner | Mutation API | Persisted events / transitions | Consumer |
 |---|---|---|---|---|
-| `ProjectBinding` | authenticated operator/admin | register/update policy; no secret input | `project.registered`, `project.policy_updated` | adapter, review coordinator, publisher |
+| `ProjectBinding` | authenticated operator/admin | register/update policy; no secret input | `project.registered`, `project.policy_updated` | adapter, review coordinator |
 | F275 `WorkAdmission` / `WorkAttempt` | managed-work domain | existing admission + new named-consumer attempt port | F275 canonical admission/attempt events | all F289 services |
 | `DesktopExecutionAttempt` | desktop adapter | claim/heartbeat/report/release | claimed, lease renewed/expired, evidence reported, implementation ready | Desktop MCP, Cat Café projection |
 | `RuntimeSessionBinding` | identity-session domain | register/rebind/read | bound, superseded, orphaned/recovered | lease guard, Resume Packet |
 | `ReviewRound` | review coordinator | start/private finish/cross-review/verdict | started, reviewer finished, barrier opened, consensus, stale | cats, Desktop MCP, merge gate |
-| `PublicationRecord` | repository adapter | publish receipt only | requested, published, retry-reused, failed | ReviewRound, Desktop findings |
 
 ## Event invariants
 
@@ -36,8 +35,8 @@
 - Lease holder and binding epoch are checked in the same write boundary as attempt mutation.
 - ReviewRound full SHA cannot mutate after creation.
 - Barrier opening is atomic with the final required private completion.
-- Consensus/publication never exposes a draft before barrier closure.
-- Publication fingerprint is stable across retry and binds project + round + finding.
+- Consensus delivery never exposes a draft before barrier closure.
+- Repeated reads of one round/version return the same typed findings without duplicating execution work.
 - F275 remains the only owner of whole-work terminal transitions.
 
 ## Task 1 — Freeze shared contracts and ownership map
@@ -55,7 +54,7 @@
 
 **Red:** add contract tests covering discriminated states/events, full-SHA validation, non-reviewable Desktop principal, ProjectBinding policy and Resume Packet secret/private-draft denylist.
 
-**Green:** define branded/opaque IDs and schemas for ProjectBinding references, Desktop attempt projection, ReviewRound, publication receipts and legal-action responses. Reference F275 IDs; do not define another `jobId`.
+**Green:** define branded/opaque IDs and schemas for ProjectBinding references, Desktop attempt projection, ReviewRound, barrier-safe finding views and legal-action responses. Reference F275 IDs; do not define another `jobId`.
 
 Before Green implementation, record the F275 owner-approved named-consumer interface in `managed-work.md` and F275 feature truth. Required operations are: read existing work/attempt, create-next-attempt idempotently, attach typed evidence, and apply/reject F275-owned terminal transitions. If the owner does not approve this interface, stop after docs/contracts; do not add a Redis fallback in F289.
 
@@ -79,7 +78,7 @@ If the shared package lacks a test script on refreshed main, place the contract 
 - Create: `packages/api/src/domains/desktop-development-loop/project-binding-policy.ts`
 - Create: `packages/api/test/desktop-development-project-binding.test.js`
 
-**Red fixtures:** register/idempotent replay; repository identity conflict; missing/unknown publication policy; review roster containing Desktop author; local path absent from public projection; automation flags default false; persistence after service reconstruction; authenticated rebind after local path/data-root migration; unauthenticated or inferred-folder recovery denied.
+**Red fixtures:** register/idempotent replay; repository identity conflict; review roster containing Desktop author; local path absent from public projection; automation flags default false; persistence after service reconstruction; authenticated rebind after local path/data-root migration; unauthenticated or inferred-folder recovery denied.
 
 **Green:** persist TTL=0 binding keyed by owner/project ID. Store local path only in private runtime projection. Normal process restart reloads it; clean install, replacement Mac, changed checkout path or data-store loss requires authenticated operator re-registration/rebind. Provide a typed adapter lookup that fails closed and never infers a binding from folder/remote/chat history.
 
@@ -145,21 +144,19 @@ If the shared package lacks a test script on refreshed main, place the contract 
 
 **Green:** store reviewer drafts in private records; expose only self-draft before the atomic barrier. Preserve immutable rounds and link every replacement round to the same work root plus new exact HEAD.
 
-## Task 7 — Add repository policy publication adapters
+## Task 7 — Deliver barrier-safe consensus findings to Desktop
 
 **Files:**
 
-- Create: `packages/api/src/domains/desktop-development-loop/publication/ReviewPublicationAdapter.ts`
-- Create: `packages/api/src/domains/desktop-development-loop/publication/TraqenGitHubIssuePublisher.ts`
-- Reuse/modify as needed: `packages/api/src/domains/community/github/GitHubIssuePublisher.ts`
-- Reuse: `packages/api/src/domains/plugin/plugin-config-store.ts` and the existing GitHub plugin `GITHUB_TOKEN` resolver
-- Create: `packages/api/test/traqen-review-publication.test.js`
+- Create: `packages/api/src/domains/desktop-development-loop/ReviewFindingView.ts`
+- Modify: `packages/api/src/domains/desktop-development-loop/ReviewCoordinator.ts`
+- Create: `packages/api/test/desktop-development-review-finding-delivery.test.js`
 
-**Red fixtures:** bilingual EN/ZH equivalence fields required; consensus support <2 denied; wrong repository/allowlist denied; missing/insufficient/rotated token behavior; Desktop-supplied token rejected; token absent from logs/errors/MCP/Resume Packet; Git ledger sink denied; identical retry reuses issue; changed finding fingerprint conflicts; partial GitHub failure resumes safely; external URL receipt belongs to expected repo/issue.
+**Red fixtures:** draft read before barrier denied; one-reviewer finding absent from consensus; Desktop author cannot mutate verdict; duplicate read returns the same round/version/findings; stale-round findings cannot drive the new attempt; cross-work finding lookup denied; no external Issue/ledger/comment receipt is required.
 
-**Green:** Cat Café server translates consensus objects into an issue body with exact SHA, severity, evidence, English and Chinese sections, then calls the existing typed `GitHubIssuePublisher`. Resolve `GITHUB_TOKEN` lazily from the authenticated local GitHub plugin configuration; prefer a fine-grained token restricted to `qianfengXY/Traqen` with repository Issues read/write. Bind the ProjectBinding repository to an exact server-side allowlist. Persist a publication fingerprint/receipt before the ReviewRound becomes actionable to Desktop; return only sanitized status and Issue URL.
+**Green:** project immutable consensus records into a Desktop-safe typed view containing round ID/version, exact SHA, finding IDs, severity, evidence refs, status and required next action. Keep reviewer drafts and identities required only for the private barrier out of this projection. MCP read is the completion handoff; no external artifact blocks the round.
 
-Do not use shell-string concatenation for `gh`; use the existing typed publisher/client boundary and explicit repository identity. Never fall back to Desktop's `gh` credential or place the publisher token in ProjectBinding.
+External Issue, ledger or PR-comment synchronization is not part of F289 MVP. If a project later needs one, it is a separate optional adapter consuming ReviewRound consensus without changing the core state machine.
 
 ## Task 8 — Expose API and strict MCP lifecycle surface
 
@@ -234,7 +231,7 @@ The skill must explicitly forbid Cat Café source/test mutation, secret disclosu
 2. app/service restart at every persisted transition;
 3. new chat supersedes old chat during active lease;
 4. stale SHA, stale epoch, wrong role, wrong project, policy mismatch and deploy attempt all fail closed;
-5. publication timeout after external side effect reuses receipt/issue on retry;
+5. repeated consensus reads return the same round/version and do not duplicate the fix attempt;
 6. two works in one Cat Café thread never exchange attempt/review evidence.
 
 Run the focused suite repeatedly against isolated Redis before the full repository gate.
@@ -243,19 +240,18 @@ Run the focused suite repeatedly against isolated Redis before the full reposito
 
 This task is intentionally not performed by an agent modifying config.
 
-1. co-creator configures/rotates the existing GitHub plugin `GITHUB_TOKEN` through Cat Café's authenticated local plugin UI/API. Prefer a fine-grained token limited to `qianfengXY/Traqen` with Issues read/write; verify the stored secret is excluded from Git and never paste it into chat.
-2. co-creator registers/rebinds the Traqen ProjectBinding, including the private local path, and verifies the exact repository allowlist. Repeat this step after a clean install, data-root loss, replacement Mac or checkout-path change; normal process restart should not require it.
-3. co-creator creates/provisions the dedicated `chatgpt-desktop-dev` external principal and stores its agent key outside Git.
-4. In ChatGPT Desktop MCP settings/config, add the locally reachable Cat Café MCP endpoint with toolset `desktop-dev-loop` and the principal credential. Do not expose it through cpolar unless a later security design explicitly requires remote MCP.
-5. Restart ChatGPT Desktop and confirm the four lifecycle tools plus scoped context/session tools are visible; confirm arbitrary Cat Café source mutation tools and GitHub publisher credentials are absent.
-6. Open the existing Traqen ChatGPT Project, create/choose the feature chat, invoke `$catcafe-desktop-executor`, and create a one-minute Scheduled Task in that same chat.
-7. Keep the Mac awake while automated work is expected. Use ChatGPT Remote on mobile to observe/steer the actual Desktop chat.
+1. co-creator registers/rebinds the Traqen ProjectBinding, including the private local path, and verifies the repository identity. Repeat this step after a clean install, data-root loss, replacement Mac or checkout-path change; normal process restart should not require it.
+2. co-creator creates/provisions the dedicated `chatgpt-desktop-dev` external principal and stores its agent key outside Git.
+3. In ChatGPT Desktop MCP settings/config, add the locally reachable Cat Café MCP endpoint with toolset `desktop-dev-loop` and the principal credential. Do not expose it through cpolar unless a later security design explicitly requires remote MCP.
+4. Restart ChatGPT Desktop and confirm the four lifecycle tools plus scoped context/session tools are visible; confirm arbitrary Cat Café source mutation tools are absent.
+5. Open the existing Traqen ChatGPT Project, create/choose the feature chat, invoke `$catcafe-desktop-executor`, and create a one-minute Scheduled Task in that same chat.
+6. Keep the Mac awake while automated work is expected. Use ChatGPT Remote on mobile to observe/steer the actual Desktop chat.
 
 Record screenshots/tool inventory with credentials redacted. Config values and secrets are not committed.
 
 ## Task 13 — Traqen dogfood
 
-1. Register Traqen ProjectBinding with all automation flags false and `github_issues_bilingual` policy.
+1. Register Traqen ProjectBinding with all automation flags false and internal `catcafe_mcp` finding delivery.
 2. Admit a pilot work for existing `codex/frontend-restoration` HEAD `773a6de28c6942f2743831150644594e9c0335a9` without touching the Traqen root worktree/untracked files.
 3. Let Desktop claim and run Traqen's repository commands:
 
@@ -266,7 +262,7 @@ npm run web:build
 npm run quality-gate
 ```
 
-4. Run CodeX + Kimi independent Review on the same SHA, then cross-review. Publish only consensus findings as bilingual Issues.
+4. Run CodeX + Kimi independent Review on the same SHA, then cross-review. Desktop reads only the barrier-safe ReviewRound consensus through MCP.
 5. Exercise a real or injected fix-required round, close all findings, approve exact HEAD and—with operator authorization—let Desktop perform push/PR/merge.
 6. Replace the Desktop chat mid-work and prove Resume Packet/epoch recovery. Verify mobile Remote and Cat Café both show coherent progress.
 7. Stop at `acceptance_pending`; co-creator performs the final product acceptance.
@@ -299,5 +295,5 @@ Then run a non-author security/architecture review over the exact HEAD. Only aft
 - Ownership cells show F275 as work root and F289 as consumer/adapter.
 - Strict MCP profile inventory is captured and contains no repository mutation primitive.
 - Recovery/bypass suite is green on isolated Redis.
-- Traqen dogfood links design commit, Desktop attempt, exact SHAs, checks, review rounds, bilingual issues, merge and operator acceptance.
+- Traqen dogfood links design commit, Desktop attempt, exact SHAs, checks, ReviewRound consensus, merge and operator acceptance.
 - No user files in Traqen root worktree changed; no runtime config or secret entered Git.
