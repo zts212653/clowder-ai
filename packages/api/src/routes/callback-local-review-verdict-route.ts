@@ -24,9 +24,18 @@ const localReviewVerdictSchema = z
   })
   .strict();
 
+const localReviewRecoverySchema = z
+  .object({
+    messageId: z.string().regex(LOCAL_REVIEW_MESSAGE_ID_PATTERN),
+    reviewedHeadSha: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/),
+    verdict: z.enum(['approved', 'changes_requested', 'commented']),
+    actionLeaseRef: z.object({ leaseId: z.string().min(1), generation: z.number().int().positive() }).strict(),
+  })
+  .strict();
+
 export interface CallbackLocalReviewVerdictRouteDeps {
   invocationRecordStore?: Pick<IInvocationRecordStore, 'get'>;
-  localReviewVerdictService?: Pick<LocalReviewVerdictService, 'record'>;
+  localReviewVerdictService?: Pick<LocalReviewVerdictService, 'record' | 'recover'>;
   threadStore?: Pick<IThreadStore, 'get'>;
 }
 
@@ -127,6 +136,40 @@ export function registerCallbackLocalReviewVerdictRoute(
     const result = await deps.localReviewVerdictService.record({
       leaseId: carrier.leaseId,
       generation: carrier.generation,
+      messageId: parsed.data.messageId,
+      headSha: parsed.data.reviewedHeadSha,
+      verdict: parsed.data.verdict,
+      now: Date.now(),
+      principal: { catId: record.catId, threadId: record.threadId, tenantScope: record.userId },
+    });
+    if (result.outcome !== 'committed') {
+      reply.status(result.outcome === 'insufficient' ? 422 : 409);
+    }
+    return result;
+  });
+
+  app.post('/api/callbacks/recover-local-review-verdict', async (request, reply) => {
+    if (!deps.localReviewVerdictService) {
+      reply.status(503);
+      return { error: 'Local review verdict service not configured' };
+    }
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+    const parsed = localReviewRecoverySchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+
+    const deletedThreadGuard = await getDeletedCallbackThreadGuard(deps.threadStore, record.threadId);
+    if (deletedThreadGuard) {
+      reply.status(deletedThreadGuard.statusCode);
+      return deletedThreadGuard.body;
+    }
+
+    const result = await deps.localReviewVerdictService.recover({
+      leaseId: parsed.data.actionLeaseRef.leaseId,
+      generation: parsed.data.actionLeaseRef.generation,
       messageId: parsed.data.messageId,
       headSha: parsed.data.reviewedHeadSha,
       verdict: parsed.data.verdict,

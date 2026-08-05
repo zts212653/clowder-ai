@@ -51,7 +51,7 @@ function isQueueTargetActionable(
   state: QueueTargetState,
   activeInvocationIds: ReadonlySet<string>,
 ): boolean {
-  if (state === 'handled') return false;
+  if (state === 'handled' || state === 'withdrawn') return false;
   if (state !== 'seen' && state !== 'awakened') return true;
   return !isExactSeenTargetLive(entry, catId, activeInvocationIds);
 }
@@ -90,6 +90,7 @@ export function queueEntryNeedsRecovery(
   const targetStates = queueTargetStateEntries(entry);
   if (targetStates.length > 0) {
     return targetStates.some(([catId, state]) => {
+      if (state === 'handled' || state === 'withdrawn') return false;
       if (state === 'seen' || state === 'awakened') {
         return !isExactSeenTargetLive(entry, catId, activeInvocationIds);
       }
@@ -127,6 +128,7 @@ export function receiptTargetStateLabel(
     return target.invocationId ? '已唤醒 · 未收口，已回队列' : '未能唤醒 · 已回队列';
   }
   if (target.state === 'steering') return 'Steer 中';
+  if (target.state === 'withdrawn') return '已撤出待处理 · 历史保留';
   if (target.outcome?.disposition === 'responded') return '已由回复明确处理';
   if (target.outcome?.disposition === 'completed_with_turn') return '已随本轮完成';
   return '已处理 · 无可回溯证据';

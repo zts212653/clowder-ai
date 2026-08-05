@@ -51,6 +51,10 @@ describe('RedisDispatchProposalStore', { skip: redisIsolationSkipReason(REDIS_UR
         'dispatch-proposal-user-settled:*',
         'dispatch-proposal-clientmsg:*',
         'dispatch-proposal-lineage:*',
+        'dispatch-proposal-negative-authorization:*',
+        'dispatch-proposal-legacy-negative-authorization:*',
+        'dispatch-proposal-negative-authorization-legacy-cutover',
+        'dispatch-proposal-negative-authorization-legacy-rebuild-completed-at',
       ]);
     }
   });
@@ -63,6 +67,10 @@ describe('RedisDispatchProposalStore', { skip: redisIsolationSkipReason(REDIS_UR
         'dispatch-proposal-user-settled:*',
         'dispatch-proposal-clientmsg:*',
         'dispatch-proposal-lineage:*',
+        'dispatch-proposal-negative-authorization:*',
+        'dispatch-proposal-legacy-negative-authorization:*',
+        'dispatch-proposal-negative-authorization-legacy-cutover',
+        'dispatch-proposal-negative-authorization-legacy-rebuild-completed-at',
       ]);
       await redis.quit();
     }
@@ -70,6 +78,7 @@ describe('RedisDispatchProposalStore', { skip: redisIsolationSkipReason(REDIS_UR
 
   const baseInput = {
     proposalId: 'dp-redis-001',
+    sourceInvocationId: 'invocation-redis-001',
     sourceThreadId: 'thread-sender',
     targetThreadId: 'thread-target',
     senderCatId: 'opus',
@@ -91,6 +100,15 @@ describe('RedisDispatchProposalStore', { skip: redisIsolationSkipReason(REDIS_UR
       createdAt: proposal.createdAt,
     });
   }
+
+  const negativeLookup = {
+    ownerUserId: 'user-1',
+    sourceInvocationId: 'invocation-redis-001',
+    sourceThreadId: 'thread-sender',
+    senderCatId: 'opus',
+    targetThreadId: 'thread-target',
+    targetCats: ['sonnet'],
+  };
 
   // --- create (Phase J: CreateDispatchProposalResult) ---
 
@@ -768,5 +786,112 @@ describe('RedisDispatchProposalStore', { skip: redisIsolationSkipReason(REDIS_UR
     const withThisId = pending.filter((p) => p.proposalId === 'dp-dedup-ok' || p.proposalId === 'dp-dedup-dup');
     assert.equal(withThisId.length, 1);
     assert.equal(withThisId[0].proposalId, 'dp-dedup-ok');
+  });
+
+  it('#1291: Redis lookup keeps reject/supersede blockers and removes an approved proposal atomically', async () => {
+    await store.create(baseInput);
+    assert.deepEqual(await store.findNegativeAuthorizationBlocks(negativeLookup), [
+      { proposalId: 'dp-redis-001', status: 'pending', targetCats: ['sonnet'] },
+    ]);
+
+    await store.approve('dp-redis-001', 'user-1');
+    assert.deepEqual(await store.findNegativeAuthorizationBlocks(negativeLookup), []);
+
+    await store.revertToPending('dp-redis-001');
+    await store.reject('dp-redis-001', 'user-1');
+    assert.deepEqual(await store.findNegativeAuthorizationBlocks(negativeLookup), [
+      { proposalId: 'dp-redis-001', status: 'rejected', targetCats: ['sonnet'] },
+    ]);
+  });
+
+  it('#1291: Redis abort removes only the staged successor blocker', async () => {
+    await store.create({ ...baseInput, proposalId: 'dp-negative-old' });
+    await anchor('dp-negative-old');
+    await store.create({ ...baseInput, proposalId: 'dp-negative-new', content: 'replacement' });
+
+    assert.deepEqual(await store.findNegativeAuthorizationBlocks(negativeLookup), [
+      { proposalId: 'dp-negative-new', status: 'pending', targetCats: ['sonnet'] },
+      { proposalId: 'dp-negative-old', status: 'superseded', targetCats: ['sonnet'] },
+    ]);
+
+    await store.abortStaged('dp-negative-new', 'test rollback');
+    assert.deepEqual(await store.findNegativeAuthorizationBlocks(negativeLookup), [
+      { proposalId: 'dp-negative-old', status: 'pending', targetCats: ['sonnet'] },
+    ]);
+  });
+
+  it('#1291: rebuild backfills event invocation anchors and bounds unresolved legacy candidates at the durable cutover', async () => {
+    const writeLegacy = async (proposalId, extra = {}) => {
+      await redis.hset(
+        `dispatch-proposal:${proposalId}`,
+        'proposalId',
+        proposalId,
+        'sourceThreadId',
+        baseInput.sourceThreadId,
+        'targetThreadId',
+        baseInput.targetThreadId,
+        'senderCatId',
+        baseInput.senderCatId,
+        'ownerUserId',
+        baseInput.ownerUserId,
+        'effectClass',
+        'assign_work',
+        'content',
+        'legacy held content',
+        'targetCats',
+        JSON.stringify(baseInput.targetCats),
+        'status',
+        'rejected',
+        'createdAt',
+        '100',
+        ...Object.entries(extra).flat(),
+      );
+    };
+
+    await writeLegacy('dp-legacy-event', {
+      approvalOriginRef: JSON.stringify({
+        kind: 'event',
+        anchor: 'invocation:legacy-event-invocation',
+        summary: 'legacy event origin',
+        threadId: baseInput.sourceThreadId,
+      }),
+    });
+    await writeLegacy('dp-legacy-unresolved');
+
+    const rebuilt = await store.rebuildNegativeAuthorizationIndexes();
+    assert.deepEqual(rebuilt, { exactIndexed: 1, legacyIndexed: 1 });
+    assert.equal(
+      await redis.hget('dispatch-proposal:dp-legacy-event', 'sourceInvocationId'),
+      'legacy-event-invocation',
+      'precise event anchor is persisted during backfill',
+    );
+    assert.deepEqual(
+      await store.findNegativeAuthorizationBlocks({
+        ...negativeLookup,
+        sourceInvocationId: 'legacy-event-invocation',
+      }),
+      [{ proposalId: 'dp-legacy-event', status: 'rejected', targetCats: ['sonnet'] }],
+    );
+
+    assert.equal(await store.getNegativeAuthorizationLegacyCutoverAt(), undefined);
+    assert.equal(await store.establishNegativeAuthorizationLegacyCutoverAt(1_000), 1_000);
+    assert.equal(await store.establishNegativeAuthorizationLegacyCutoverAt(2_000), 1_000, 'cutover is a ratchet');
+    const legacyLookup = {
+      ownerUserId: baseInput.ownerUserId,
+      sourceThreadId: baseInput.sourceThreadId,
+      senderCatId: baseInput.senderCatId,
+      targetThreadId: baseInput.targetThreadId,
+      targetCats: ['sonnet'],
+      cutoverAt: 1_000,
+    };
+    assert.deepEqual(
+      await store.findLegacyNegativeAuthorizationBlocks({ ...legacyLookup, invocationCreatedAt: 1_000 }),
+      [{ proposalId: 'dp-legacy-unresolved', status: 'rejected', targetCats: ['sonnet'] }],
+    );
+    assert.deepEqual(
+      await store.findLegacyNegativeAuthorizationBlocks({ ...legacyLookup, invocationCreatedAt: 1_001 }),
+      [],
+      'a post-cutover invocation cannot be trapped by broad legacy identity',
+    );
   });
 });

@@ -28,6 +28,15 @@ const { clearCodexAppServerLifecycle, recordCodexAppServerLifecycle } = await im
 
 const THREAD_ID = 't1';
 const USER_ID = 'user-a';
+const UNDECLARED_FRESHNESS_CARRIER_CAPABILITY = {
+  provider: 'other',
+  carrier: 'other',
+  deliverySemantics: 'undeclared',
+};
+
+function withUndeclaredCapability(slot) {
+  return { ...slot, freshnessCarrierCapability: UNDECLARED_FRESHNESS_CARRIER_CAPABILITY };
+}
 
 function makeRecord(overrides = {}) {
   const now = overrides.updatedAt ?? Date.now();
@@ -255,7 +264,11 @@ describe('F194 Phase B — /queue canonical liveness regression', () => {
     const { statusCode, body } = await getQueue(app);
     assert.equal(statusCode, 200, 'helper throw must not break the endpoint');
     // Fallback returns tracker.getActiveSlots()
-    assert.deepEqual(body.activeInvocations, [slot], 'fall-back tracker-only on helper exception');
+    assert.deepEqual(
+      body.activeInvocations,
+      [withUndeclaredCapability(slot)],
+      'fall-back tracker-only on helper exception',
+    );
   });
 
   it('F254 AC-D14a: helper-exception fallback omits lifecycle owned by another user', async () => {
@@ -278,7 +291,7 @@ describe('F194 Phase B — /queue canonical liveness regression', () => {
       assert.equal(statusCode, 200, 'system thread remains readable by the requesting user');
       assert.deepEqual(
         body.activeInvocations,
-        [slot],
+        [withUndeclaredCapability(slot)],
         'fail-open may preserve the bare slot but must not expose another user lifecycle',
       );
     } finally {
@@ -295,7 +308,7 @@ describe('F194 Phase B — /queue canonical liveness regression', () => {
 
     app = await makeApp(deps);
     const { body } = await getQueue(app);
-    assert.deepEqual(body.activeInvocations, [slot]);
+    assert.deepEqual(body.activeInvocations, [withUndeclaredCapability(slot)]);
   });
 
   it('F254 AC-D14a: legacy fallback omits lifecycle owned by another user', async () => {
@@ -310,7 +323,7 @@ describe('F194 Phase B — /queue canonical liveness regression', () => {
       assert.equal(statusCode, 200, 'system thread remains readable by the requesting user');
       assert.deepEqual(
         body.activeInvocations,
-        [slot],
+        [withUndeclaredCapability(slot)],
         'legacy fallback may preserve the bare slot but must not expose another user lifecycle',
       );
     } finally {
@@ -345,7 +358,7 @@ describe('F194 Phase B — /queue canonical liveness regression', () => {
       app = await makeApp(deps);
       const { body } = await getQueue(app);
       assert.deepEqual(body.activeInvocations, [
-        { ...slot, executionId: 'inv-f254-lifecycle', appServerLifecycle: lifecycle },
+        withUndeclaredCapability({ ...slot, executionId: 'inv-f254-lifecycle', appServerLifecycle: lifecycle }),
       ]);
     } finally {
       clearCodexAppServerLifecycle(THREAD_ID, 'codex', 'inv-f254-lifecycle');
@@ -383,7 +396,7 @@ describe('F194 Phase B — /queue canonical liveness regression', () => {
       const duringCleanup = await getQueue(app);
       assert.deepEqual(
         duringCleanup.body.activeInvocations,
-        [{ ...slot, executionId: ownerInvocationId, appServerLifecycle: closing }],
+        [withUndeclaredCapability({ ...slot, executionId: ownerInvocationId, appServerLifecycle: closing })],
         'F5 during bounded cleanup must hydrate the canonical closing snapshot',
       );
 
@@ -397,7 +410,7 @@ describe('F194 Phase B — /queue canonical liveness regression', () => {
       const afterCleanupFailure = await getQueue(app);
       assert.deepEqual(
         afterCleanupFailure.body.activeInvocations,
-        [{ ...slot, executionId: ownerInvocationId, appServerLifecycle: cleanupFailed }],
+        [withUndeclaredCapability({ ...slot, executionId: ownerInvocationId, appServerLifecycle: cleanupFailed })],
         'cleanup failure remains attributable while the owning execution is still active',
       );
 
@@ -405,7 +418,7 @@ describe('F194 Phase B — /queue canonical liveness regression', () => {
       const afterReplacement = await getQueue(app);
       assert.deepEqual(
         afterReplacement.body.activeInvocations,
-        [{ ...slot, executionId: activeExecutionId }],
+        [withUndeclaredCapability({ ...slot, executionId: activeExecutionId })],
         'a replacement execution must never inherit the previous execution lifecycle',
       );
     } finally {
@@ -480,20 +493,26 @@ describe('F194 Phase B — /queue canonical liveness regression', () => {
       app = await makeApp(deps);
       const duringCleanup = await getQueue(app);
       assert.deepEqual(duringCleanup.body.activeInvocations, [
-        {
+        withUndeclaredCapability({
           catId: 'codex',
           startedAt: canonicalStartedAt,
           executionId: parentExecutionId,
           turnInvocationId: childTurnId,
           appServerLifecycle: closing,
-        },
+        }),
       ]);
 
       activeExecutionId = replacementExecutionId;
       const afterReplacement = await getQueue(app);
       assert.deepEqual(
         afterReplacement.body.activeInvocations,
-        [{ catId: 'codex', startedAt: canonicalStartedAt, executionId: replacementExecutionId }],
+        [
+          withUndeclaredCapability({
+            catId: 'codex',
+            startedAt: canonicalStartedAt,
+            executionId: replacementExecutionId,
+          }),
+        ],
         'a replacement tracker owner must inherit neither the previous child nor its lifecycle snapshot',
       );
 
@@ -503,13 +522,13 @@ describe('F194 Phase B — /queue canonical liveness regression', () => {
       assert.deepEqual(
         withForeignTrackerOwner.body.activeInvocations,
         [
-          {
+          withUndeclaredCapability({
             catId: 'codex',
             startedAt: canonicalStartedAt,
             executionId: parentExecutionId,
             turnInvocationId: childTurnId,
             appServerLifecycle: closing,
-          },
+          }),
         ],
         'a tracker slot owned by another user must not replace the canonical lifecycle owner',
       );

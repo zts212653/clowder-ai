@@ -2,6 +2,7 @@
 
 import type { QueueMessageReceipt, QueueReceiptTarget, QueueReminderAttempt } from '@cat-cafe/shared';
 import type { ChatMessage } from '@/stores/chat-types';
+import { authorIntentLabel, carrierCapabilityLabel } from './message-disposition-presentation';
 import { receiptTargetStateLabel } from './queue-receipt-projection';
 
 const REMINDER_STATE_LABEL: Record<QueueReminderAttempt['state'], string> = {
@@ -107,16 +108,18 @@ function formatReceiptTime(timestamp: number): string {
 function targetTimingLabel(target: QueueReceiptTarget): string | undefined {
   const awakened = target.awakenedAt === undefined ? undefined : `回合唤醒 ${formatReceiptTime(target.awakenedAt)}`;
   const seen = target.seenAt === undefined ? undefined : `正文读取 ${formatReceiptTime(target.seenAt)}`;
+  const withdrawn =
+    target.withdrawnAt === undefined ? undefined : `撤出待处理 ${formatReceiptTime(target.withdrawnAt)}`;
   const handledAt = target.state === 'handled' ? target.outcome?.handledAt : undefined;
   const handled = handledAt === undefined ? undefined : `处理完成 ${formatReceiptTime(handledAt)}`;
-  return [awakened, seen, handled].filter(Boolean).join(' · ') || undefined;
+  return [awakened, seen, withdrawn, handled].filter(Boolean).join(' · ') || undefined;
 }
 
 function reminderTitle(attempt: QueueReminderAttempt): string | undefined {
   if (attempt.state !== 'missed') return undefined;
-  return attempt.missedReason === 'delivered_not_read'
-    ? '提醒曾送达，但本轮结束前没有读取消息正文'
-    : '本轮结束前，提醒没有完成送达';
+  if (attempt.missedReason === 'source_withdrawn') return '消息已由你撤出待处理，提醒随之结束';
+  if (attempt.missedReason === 'delivered_not_read') return '提醒曾送达，但本轮结束前没有读取消息正文';
+  return '本轮结束前，提醒没有完成送达';
 }
 
 interface MessageReceiptDockProps {
@@ -145,6 +148,7 @@ export function MessageReceiptDock({
       <div className="ml-1 border-l-2 border-cafe pl-3">
         {receipt.targets.map((target) => {
           const reminder = latestReminderForTarget(receipt, target.catId);
+          const intentLabel = authorIntentLabel(target.authorIntent);
           const timing = targetTimingLabel(target);
           const evidence = target.state === 'handled' ? target.outcome?.evidenceRef : undefined;
           const executionKind = findExecutionKind(
@@ -171,6 +175,12 @@ export function MessageReceiptDock({
                   activeInvocationIds,
                   receipt.scope,
                 )}`}</span>
+                {intentLabel && <span data-receipt-author-intent>{intentLabel}</span>}
+                {target.authorIntent?.carrierCapability && (
+                  <span className="text-cafe-muted" data-receipt-carrier-capability>
+                    {carrierCapabilityLabel(target.authorIntent.carrierCapability)}
+                  </span>
+                )}
                 {executionKind && (
                   <span
                     className="font-medium text-cafe-muted"
@@ -199,6 +209,7 @@ export function MessageReceiptDock({
                   className="mt-0.5 text-micro tabular-nums text-cafe-muted"
                   data-awakened-at={target.awakenedAt}
                   data-seen-at={target.seenAt}
+                  data-withdrawn-at={target.withdrawnAt}
                   data-handled-at={target.state === 'handled' ? target.outcome?.handledAt : undefined}
                   title={timing}
                 >

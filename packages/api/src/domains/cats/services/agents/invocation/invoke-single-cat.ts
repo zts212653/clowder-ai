@@ -746,6 +746,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   const { catId, service, userId, threadId, isLastCat, signal: callerSignal } = params;
   let prompt = params.prompt;
   assertToolExecutionPolicySupported(service, params.toolExecutionPolicy);
+  const freshnessCarrierCapability = service.freshnessCarrierCapability?.() ?? {
+    provider: 'other' as const,
+    carrier: 'other' as const,
+    deliverySemantics: 'undeclared' as const,
+  };
 
   // F247 KD-17: cloud-only cats (Remote MCP) skip local CLI dispatch.
   // The mention is already persisted in the thread; the cloud cat reads it via
@@ -1198,6 +1203,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         parentInvocationId: executionParentInvocationId,
         executionKind,
         startedAt: executionStartedAt,
+        freshnessCarrierCapability,
       }),
       timestamp: Date.now(),
     };
@@ -2229,18 +2235,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
     }
 
-    const freshnessCarrierCapability = service.freshnessCarrierCapability?.();
-    const activeInvocationFreshness =
-      deps.providerNativeFreshnessFactory && freshnessCarrierCapability
-        ? await deps.providerNativeFreshnessFactory({
-            invocationId: params.parentInvocationId ?? invocationId,
-            threadId,
-            userId,
-            catId,
-            provider: provider ?? 'unknown',
-            capability: freshnessCarrierCapability,
-          })
-        : null;
+    const activeInvocationFreshness = deps.providerNativeFreshnessFactory
+      ? await deps.providerNativeFreshnessFactory({
+          invocationId: params.parentInvocationId ?? invocationId,
+          threadId,
+          userId,
+          catId,
+          provider: provider ?? 'unknown',
+          capability: freshnessCarrierCapability,
+        })
+      : null;
 
     const baseOptions: AgentServiceOptions = {
       callbackEnv,

@@ -501,6 +501,7 @@ describe('MCP Evidence Tools', () => {
     );
     assert.ok(text.includes('<recall-meta>'), 'error output should include recall result metadata');
     assert.ok(text.includes('"resultStatus":"error"'), 'error output should declare resultStatus:error');
+    assert.ok(text.includes('"gateReason":"transport_error"'), 'top-k transport drop must remain observable');
   });
 
   test('coverage fetch carries an abort signal so an outer client timeout cancels the API request', async () => {
@@ -919,6 +920,38 @@ describe('MCP Evidence Tools', () => {
     const text = result.content[0].text;
 
     assert.ok(!text.includes('📎 Related directions'), 'should NOT render expansion block when hints absent');
+  });
+
+  test('F256 Wave 1b: preserves a no-results gate in the recall sidecar', async () => {
+    const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        degraded: false,
+        results: [],
+        expansionMeta: {
+          schemaVersion: 1,
+          cohort: 'natural_topk',
+          sourceRevision: 'f256-health-v2',
+          eligible: false,
+          gateReason: 'no_results',
+          followupWindow: { maxToolDistance: 20, maxWallClockMs: 300_000 },
+          attempted: false,
+          keyword: { probed: 0, added: 0, deduped: 0 },
+          sourceThread: { probed: 0, added: 0, deduped: 0 },
+          conventionEdge: { attempted: false, added: 0, deduped: 0, staleSkipped: 0 },
+          presented: 0,
+          hints: [],
+        },
+      }),
+    });
+
+    const result = await handleSearchEvidence({ query: 'missing' });
+    const text = result.content[0].text;
+    const sidecar = JSON.parse(text.match(/<recall-meta>(.+)<\/recall-meta>/)?.[1] ?? '{}');
+
+    assert.equal(sidecar.expansionFunnel?.gateReason, 'no_results');
+    assert.equal(sidecar.expansionFunnel?.eligible, false);
   });
 
   test('F256 Phase B: include_expansion=false sends param to API', async () => {

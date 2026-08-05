@@ -13,7 +13,7 @@
  *   item.completed (command_execution) → tool_result
  *   item.completed (file_change) → tool_use
  *   turn.started / 其余 item 事件 → 跳过
- *   turn.completed → exactly one runtime-canonical final signature
+ *   successful stream end after turn.completed → exactly one runtime-canonical final signature
  */
 
 import { createHash } from 'node:crypto';
@@ -74,7 +74,7 @@ import type {
 } from '../../types.js';
 import type { AuditLogSink, RawArchiveSink } from '../providers/codex-audit-hooks.js';
 import { extractCommandExecutionLifecycle, sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
-import { type CodexStreamState, transformCodexEvent } from '../providers/codex-event-transform.js';
+import { type CodexStreamState, finalizeCodexStream, transformCodexEvent } from '../providers/codex-event-transform.js';
 import { scanAndPublishCodexImages } from '../providers/codex-image-scanner.js';
 import {
   type CodexSessionContextSnapshotResolver,
@@ -1707,6 +1707,11 @@ export class CodexAgentService implements AgentService {
             yield { ...result, metadata };
           }
         }
+      }
+
+      const finalSignature = finalizeCodexStream(codexStreamState, this.catId);
+      if (finalSignature) {
+        yield { ...finalSignature, metadata };
       }
 
       // Estimate cost from pricing table when CLI doesn't provide costUsd.

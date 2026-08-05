@@ -5,7 +5,7 @@ feature_ids: [F102, F152, F163, F186, F188, F200, F209, F221, F227, F231, F255, 
 related_features: [F139, F148, F153, F169, F192, F229, F236, F242, F243, F246, F258, F267]
 topics: [memory, recall, write-side, cue-plane, relationship-memory, lifecycle, evidence, profile, taste, event-memory, proactive, architecture]
 created: 2026-06-28
-revised: 2026-08-02
+revised: 2026-08-04
 status: active
 author: "Maine Coon/GPT-5.5"
 revised_by: "小太阳·Maine Coon/GPT-5.6 Sol"
@@ -22,7 +22,7 @@ description_updated_at: 2026-08-02T11:00:04Z
 
 > 面向 You、新猫与工程实现者。本文回答五件事：家里有哪些记忆器官；一段经历如何
 > 变成 canonical truth；检索与执行时 cue 如何分工；F271“主动写入”主动在哪里；截至
-> 2026-08-02 哪些闭环已经工作、哪些仍欠真实运行或裁决。
+> 2026-08-04 哪些闭环已经工作、哪些仍欠真实运行或裁决。
 >
 > **文档分工**：[memory-philosophy.md](./memory-philosophy.md) 管长期原则；本文管当前系统地图；
 > [retrieval-pipeline-deep-dive.md](./retrieval-pipeline-deep-dive.md) 管 pull recall 执行细节；
@@ -30,8 +30,8 @@ description_updated_at: 2026-08-02T11:00:04Z
 > 2026-08-02 closure plan (internal) 管剩余工作的顺序。
 > 各 feature doc / task 才是 phase 与 AC 的 canonical truth。
 >
-> **Freshness**：实现面以 `origin/main@0c06853cd9ec` 为 2026-08-02 核验基线；本文的
-> docs-only 提交位于其后。运行态、UAT 与 verdict 必须单列，不能由 main commit 推断。
+> **Freshness**：本轮增量核验锚点为 F271 `1ba70d6a3`、F256 `f976a4266` 与 F227
+> exact Alpha `origin/main@4f9eba7cd`。运行态、UAT 与 verdict 必须单列，不能由 main commit 推断。
 
 ---
 
@@ -47,13 +47,14 @@ Clowder AI 的记忆系统不是一个数据库，也不是“自动把旧聊天
 5. **反馈、观测与慢裁决** 记录展示、消费、纠正和效用：F281、F200、F263、F192/F267。
 6. **猫的私人主动性** 把线索变成猫自己采纳的念头和行动：F255、F272。
 
-截至 2026-08-02：
+截至 2026-08-04：
 
 - 存储、索引、下钻、实体 revision、typed proposal、lifecycle trace 与 Cue Plane A–E 实现已进入 main。
 - F281/F282 已闭工程；F287 已完成 lifecycle/delivery/budget 加固，canonical Alpha 完成 Person、operational precedent 与 Taste integrated UAT；production 仍是 `dormant/unverified`。
-- F271 session-close 已有 durable output；daily producer 的 canonical live truth 仍停在首次 120 秒超时，不能宣称运行闭环。
-- F256 A–C 虽然组件级绿，但 30 天生产数据只有 5/4816 次 hint appearance，且建议 telemetry 空表；这是“没上场”，还不是效用 verdict。
-- 核心未闭项是 F271 daily 证活、F152 AC-C5、F263 Phase D、F271 Phase C、F256 健康/效用裁决，以及证据成熟后的 soft-forget Decision Packet。
+- F271 session-close 已有 durable output；daily 的 120 秒 timeout 已修并在 `11.874s` 内 delivered，但该 run 的五条候选全部被 household-day budget 拒绝且 `quiet=false`，尚无合法 daily outcome。
+- F256 `f256-health-v2` 已在自然 `natural_topk` 路径通水；21 条 durable row、16 个 eligible/presented event 与 56 个 presented hint 关闭了 health/observability 缺口，`followed=0 / used=0` 仍不支持效用结论。
+- F152 external bootstrap 与 distillation route 实测读取不同 store，generalizable mark 返回 404；AC-C1/AC-C5 必须先修产品链再做 You UAT。F227 已完成 cat-side Alpha 预演，只欠视觉与 teleport 签字。
+- 核心未闭项是 F271 合法 daily outcome、F152 同 store 修复与 AC-C5、F263 Phase D1、F271 Phase C、F256 效用裁决，以及证据成熟后的 soft-forget Decision Packet。
 
 ---
 
@@ -103,8 +104,10 @@ Clowder AI 的记忆系统不是一个数据库，也不是“自动把旧聊天
 
 - **Phase A 已有真实产物**：`reflection_outputs` 中有 5 条 `f271-session-close-v1` durable outputs。
 - **Phase B 工程已落**：`f271-daily-context-reflection` 按 04:15 household timezone 注册。
-- **Phase B 运行未闭**：canonical snapshot 仍是 2026-07-27 首跑 `120000ms` 后
-  `RUN_FAILED`；没有 daily producer output。修复必须定位 scan/store/cancel 路径，不能只放大 deadline。
+- **Phase B timeout 已修、outcome 未闭**：`1ba70d6a3` 已被 live runtime 加载；production
+  scheduler 同 job 手工触发后在 `11.874s` 内 `RUN_DELIVERED`。但结果为
+  `extracted=5 / accepted=0 / rejected=5 / cues=0 / quiet=false`，全被 household-day budget
+  拒绝；它既没有 durable delta，也不是合法 quiet day。自然预算 reset 后仍需再跑一次。
 - **Phase C 未闭**：要把 producer output 与 destination-lane 的 approve/reject/retire 结果
   串成 trace，并让 F263/F192 产生首个 live verdict；不能私建第二套 truth engine。
 
@@ -160,7 +163,7 @@ Clowder AI 的记忆系统不是一个数据库，也不是“自动把旧聊天
 
 ---
 
-## 六条硬边界
+## 八条硬边界
 
 1. **Producer 不等于 truth owner**：F271/F282 可以发现，不替 destination lane 批准。
 2. **Cue 不等于欲望或结论**：F287 投影线索；只有猫能把 cue 采纳为 owned seed。
@@ -168,6 +171,11 @@ Clowder AI 的记忆系统不是一个数据库，也不是“自动把旧聊天
 4. **Cue Plane 不等于万能 RAG**：只认 closed typed opportunity；未知输入、未授权、过期、被纠正或 forgotten source 一律零 cue。
 5. **观测不等于干预**：F263 看见生命周期，不顺手成为 soft-forget 执行器。
 6. **`main ≠ live ≠ UAT ≠ verdict`**：代码合入、runtime 加载、owner 验收和效用裁决分别取证。
+7. **Owner memory 不以模型权重作 truth store**：owner-specific / 用户可见的记忆 payload 不得靠 parametric internalization 变成“模型自己知道”；provenance、纠正、授权遗忘在参数里不可执行（kangrui 对读 (internal) D 档）。公开、可复用的方法论可以进入 skill / training 演化，但那是方法演化，不是 memory truth，也不得夹带私有 payload。
+8. **真相仲裁归 canonical source，不归多数**：投票/共识式冲突裁决违反 M16；机制只把冲突证据摆上桌，裁决归猫与真相源（同上 D 档，拒 Byzantine consensus over memory）。
+
+> 远期注记：everywhere/多端愿景落地那天，privacy-preserving sync 须前置到 schema 设计层，
+> 不是事后补丁（W5"只回流方法论"是它的家规先例；位阶判断来自 kangrui 对读 C 档）。
 
 ---
 
@@ -213,7 +221,7 @@ lane-neutral candidate detection/readiness，也不会因为频率高就直接�
 | [F186](../features/F186-library-memory-architecture.md) | collection federation 与安全边界 | done |
 | [F188](../features/F188-library-stewardship.md) | rebuild/health/graph/recent/collection lifecycle | done |
 | [F209](../features/F209-evidence-recall-optimization.md) | passage recall、entity anchor、typed drill、Perspective | done |
-| [F256](../features/F256-memory-search-strategy-evolution.md) | 三入口策略、coverage 补刀、related directions、doc-code bridge | A–C landed；D 待健康漏斗与 utility verdict。30d appearance=5/4816，不能据组件绿宣称有效 |
+| [F256](../features/F256-memory-search-strategy-evolution.md) | 三入口策略、coverage 补刀、related directions、doc-code bridge | A–C landed；D 待健康漏斗与 utility verdict。appearance 目前 not_observable，5/4816 已撤回，不能据组件绿宣称有效 |
 
 ### B. Typed truth 与写侧 lanes
 
@@ -261,7 +269,7 @@ lane-neutral candidate detection/readiness，也不会因为频率高就直接�
 
 ---
 
-## 当前闭环账本（2026-08-02）
+## 当前闭环账本（2026-08-04）
 
 | 环节 | 当前判定 | 人话 |
 |---|---|---|
@@ -270,13 +278,23 @@ lane-neutral candidate detection/readiness，也不会因为频率高就直接�
 | F281/F282 生产与反馈基础 | ✅ 工程闭 | lane-neutral detection、source bundle/preflight、human disposition/reflow 已落 |
 | F287 Cue Plane | ✅ main + Alpha UAT 闭 | A–E + hardening landed；三条 family journey 与 lifecycle negatives 通过；production dormant/unverified |
 | F271 session-close | ✅ 有真实产物 | 已有 5 条 durable typed outputs |
-| F271 daily | ❌ 运行未闭 | canonical truth 仍是首次 04:15 run 120 秒超时，daily output=0 |
-| F152 durable supply | 🟡 工程闭 / UAT 未闭 | candidate、批准 truth 与 compiler 跨 rebuild；AC-C5 待 You |
-| F256 search guidance | ❌ health/utility 未闭 | 组件存在但自然 appearance≈0.1%，telemetry 空；先装表通水，再做 verdict |
-| F263 lifecycle | 🟡 A–C 闭 / D 未闭 | trace、verification、true-zero、三轴齐；首轮周频 verdict/living bench 未跑 |
-| F227 Event Memory | 🟡 Phase A 工程闭 | alpha backfill、视觉与 teleport acceptance 待跑；B/C 非核心水管 |
+| F271 daily | 🟡 timeout 闭 / outcome 未闭 | live run 已由 120 秒失败降至 11.874 秒 delivered；预算拒绝且 `quiet=false`，不算 durable delta 或合法 quiet day |
+| F152 durable supply | ❌ 产品链未闭 | external bootstrap 写 project collection，distillation route 读 root store；generalizable mark 404，AC-C1/AC-C5 重开 |
+| F256 search guidance | 🟡 health 闭 / utility 未闭 | `f256-health-v2` 自然通水；21 rows / 16 events / 56 hints，但 follow/use 仍为零 |
+| F263 lifecycle | 🟡 A–C + D0 闭 / D1 未闭 | D0 已校准 abandoned/appearance 并孵化两个 measurement fixtures；1b 已通水，首个周频窗口仍待自然 follow/use 与 sample floor |
+| F227 Event Memory | 🟡 Phase A cat-side READY | exact Alpha backfill、38 tests 与真实 teleport 通过；只欠 You 视觉/跳转 acceptance，B/C 非核心水管 |
 | 私人主动性 | 🟡 第一纵切片闭 | F255/F272 已有 seed→first-action 骨架；完整 home/world/echo 是后续产品线 |
 | 通用 soft-forget | ❌ 未立项 | 等 Phase D 退休证据后出 Decision Packet；不塞进 F263，不提前造号 |
+
+---
+
+## 检索面已知薄弱（2026-08-03 对读，2026-08-04 可观测性校准）
+
+1. **未裁决矛盾对在读侧结果中不可见**（conflict surfacing 缺位）：写侧已有 contradiction detector / supersedes / revision，但"还没人发现它们打架"的两条记忆在检索结果里仍是互不相干的条目，靠猫自己扫。LL-081 只是同构 failure mode 的 review 通道类比，不是已发生的 memory 事故。未来机制只能检测与标注，不自动裁决。
+2. **temporal 只是过滤器，非推理维度**：三个检索入口都不把时间范围推断进 query plan。
+3. **现有 trace 看不见两枚观察候选的语义**：`RecallEvent.candidates` 记录 anchor / rank / consumption / result set，`LifecycleTrace.kind` 只覆盖 `harmful_consumption` / `unmet_demand` / `verification` / `attention_cost`；它们不能确定两个 candidate 语义互斥，也没有“猫又做了一次现场综合”的 episode。因此 F263 D0 对 conflict / repeated synthesis 只能返回 `observed | no_data | not_observable`；静默不得作为“问题不存在”的证据。
+
+候选解法与升级触发器见 kangrui 对读 §5 (internal)。D0 已对 conflict / repeated synthesis 均返回 `not_observable`，因此不立项、不加塞；conflict surfacing 继续等真实错选事故或可观测 trace，物化 Perspective 继续等重复综合浪费证据，temporal query plan / EvidenceNeed 继续等自己的时间推理或证据槽位失败。最后一组可在 F256 keep/tune 时共用 Decision Packet，但不继承 hint 路线的生死结论。
 
 ---
 
@@ -290,7 +308,7 @@ F263 A/B/C 已完成：
 
 Phase D 分成两个不同证据时点：
 
-1. **D0 基线裁决**：验证 trace 样本与测量效度；判断 abandoned 60% 是廉价探测还是坏结果，并判定 F256 当前 appearance 数据能否支持结论。
+1. **D0 基线裁决（2026-08-04 closed）**：69 条 verification trace 与 127 个零活动小时通过 gate。全盘 abandoned 因类别混淆降级为 `keep_observe`；F256 appearance 判为 `not_observable`，旧 5/4816 LIKE 代测正式撤回；conflict / repeated synthesis 均为 `not_observable`。详见 versioned verdict。
 2. **D1 修复后效用**：F256 健康漏斗稳定且达到预先冻结的 sample floor 后，再判 keep/tune/sunset；新失败孵化进 living bench，连续稳定且已有低成本 guard 的 fixture 才退役。
 
 F263 不接走两个外部责任：F260 maintenance 需单独归属；soft-forget 是带副作用的干预 feature，必须另过 operator Decision Gate。
@@ -302,9 +320,9 @@ F263 不接走两个外部责任：F260 maintenance 需单独归属；soft-forge
 详细 Ready/Done/evidence 合同见
 2026-08-02 Memory System Closure Plan (internal)。这里只保留架构顺序：
 
-1. F271 daily 证活；并行给 F256 装健康漏斗、跑 F263 D0 基线取证。
-2. F152 AC-C5 与 F227 Phase A 在 READY 后做一次 operator UAT 打包日。
-3. F263 D1、F271 C、F256 三岔 verdict 按真实样本启动。
+1. F271 在自然 budget reset 后补一条合法 daily outcome；F256 health 已通水，继续积累自然 follow/use。F263 D0 不再重复取证。
+2. F152 先修 project collection 与 distillation 的同 store 产品链并重签 READY；F227 已 cat-side READY，随后再安排 operator UAT。
+3. F263 D1、F271 C、F256 三岔 verdict 只按真实 follow/use 与 destination lifecycle 样本启动。
 4. Phase D 产生退休证据后，再写 soft-forget Decision Packet。
 5. F231/F260/F255/F272 作为独立尾巴或产品路线图跟踪，不污染核心水管。
 

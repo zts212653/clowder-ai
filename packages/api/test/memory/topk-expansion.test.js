@@ -54,6 +54,23 @@ describe('TopkExpansionService', () => {
     return new TopkExpansionService(store);
   }
 
+  // ── Shared graph adapter helpers (hoisted for health funnel tests) ──
+  function createMockGraphAdapterTop(consumersByName = {}) {
+    return {
+      queryConsumers(name) {
+        return Promise.resolve(consumersByName[name] || []);
+      },
+      isAvailable() {
+        return true;
+      },
+    };
+  }
+
+  async function createServiceWithGraphTop(store, graphAdapter) {
+    const { TopkExpansionService } = await import('../../dist/domains/memory/TopkExpansionService.js');
+    return new TopkExpansionService(store, graphAdapter);
+  }
+
   describe('baseline behavior', () => {
     it('returns empty hints when results have no keywords or sourceIds', async () => {
       const store = createMockStore({ docs: [] });
@@ -135,7 +152,7 @@ describe('TopkExpansionService', () => {
   describe('source-thread expansion (AC-B2)', () => {
     it('expands via thread references in summary and returns hints with provenance', async () => {
       const threadHit = makeItem({
-        anchor: 'thread-abc123-digest',
+        anchor: 'thread-thread_abc',
         title: 'Discussion about routing design',
         kind: 'thread',
         sourcePath: '',
@@ -159,6 +176,7 @@ describe('TopkExpansionService', () => {
       assert.equal(threadHints[0].provenance.source, 'source-thread');
       assert.ok(threadHints[0].provenance.via.includes('thread-'), 'via should contain thread ref');
       assert.equal(threadHints[0].provenance.edgeStrength, 'heuristic');
+      assert.deepEqual(threadHints[0].targetRef, { kind: 'thread', threadId: 'thread_abc' });
     });
 
     it('expands via sourceIds containing thread references', async () => {
@@ -561,6 +579,93 @@ describe('TopkExpansionService', () => {
         matchingHints.length <= 1,
         `anchor "shared-finding" should appear at most once, got ${matchingHints.length}`,
       );
+    });
+  });
+
+  // ── F256 health funnel: expandWithMeta returns per-stage counts ──────
+  describe('expandWithMeta — health funnel telemetry', () => {
+    it('returns funnel metadata alongside hints', async () => {
+      const store = createMockStore({
+        docs: [makeItem({ anchor: 'extra-doc', title: 'Extra', kind: 'doc' })],
+      });
+      const service = await createService(store);
+      const topResults = [makeItem({ anchor: 'main-result', keywords: ['testing'], title: 'Main' })];
+
+      const result = await service.expandWithMeta(topResults, 'test');
+
+      // Must return both hints and funnel metadata
+      assert.ok(Array.isArray(result.hints), 'result.hints should be an array');
+      assert.ok(result.funnel, 'result.funnel should exist');
+      assert.equal(result.funnel.attempted, true);
+      assert.equal(typeof result.funnel.keyword.probed, 'number');
+      assert.equal(typeof result.funnel.keyword.added, 'number');
+      assert.equal(typeof result.funnel.sourceThread.probed, 'number');
+      assert.equal(typeof result.funnel.conventionEdge.attempted, 'boolean');
+      assert.equal(result.funnel.presented, result.hints.length);
+    });
+
+    it('records zero counts when no expansion sources exist', async () => {
+      const store = createMockStore({ docs: [] });
+      const service = await createService(store);
+      const topResults = [makeItem({ anchor: 'bare-result', title: 'Bare' })];
+
+      const result = await service.expandWithMeta(topResults, 'test');
+
+      assert.equal(result.funnel.attempted, true);
+      assert.equal(result.funnel.keyword.probed, 0);
+      assert.equal(result.funnel.keyword.added, 0);
+      assert.equal(result.funnel.sourceThread.probed, 0);
+      assert.equal(result.funnel.sourceThread.added, 0);
+      assert.equal(result.funnel.conventionEdge.attempted, false, 'no convention graph configured');
+      assert.equal(result.funnel.presented, 0);
+    });
+
+    it('tracks dedup count separately from added', async () => {
+      // If keyword expansion finds items already in top-k, deduped should increment
+      const store = createMockStore({
+        docs: [makeItem({ anchor: 'main-result', title: 'Same' })],
+      });
+      const service = await createService(store);
+      const topResults = [makeItem({ anchor: 'main-result', keywords: ['overlap'], title: 'Main' })];
+
+      const result = await service.expandWithMeta(topResults, 'test');
+
+      assert.equal(result.funnel.keyword.probed, 1, 'should probe the keyword');
+      assert.equal(result.funnel.keyword.added, 0, 'should not add (deduped)');
+      assert.ok(result.funnel.keyword.deduped >= 1, 'should count deduped items');
+    });
+
+    it('records convention-edge funnel when graph is available', async () => {
+      const store = createMockStore({ docs: [] });
+      const adapter = createMockGraphAdapterTop({
+        'test-anchor': [
+          {
+            anchor: 'sibling-1',
+            title: 'Sibling',
+            kind: 'l0_section',
+            edgeStrength: 'static',
+            stale: false,
+          },
+        ],
+      });
+      const service = await createServiceWithGraphTop(store, adapter);
+      const topResults = [makeItem({ anchor: 'test-anchor', title: 'Source' })];
+
+      const result = await service.expandWithMeta(topResults, 'test');
+
+      assert.equal(result.funnel.conventionEdge.attempted, true);
+      assert.equal(result.funnel.conventionEdge.added, 1);
+    });
+
+    it('empty results returns short-circuit funnel', async () => {
+      const store = createMockStore({});
+      const service = await createService(store);
+
+      const result = await service.expandWithMeta([], 'test');
+
+      assert.deepEqual(result.hints, []);
+      assert.equal(result.funnel.attempted, false);
+      assert.equal(result.funnel.presented, 0);
     });
   });
 });

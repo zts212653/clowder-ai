@@ -24,6 +24,7 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
   const SESSION_PATTERNS = [
     'session:*',
     'session-chain:*',
+    'session-chain-by-thread:*',
     'session-active:*',
     'session-cli:*',
     'session-by-chainkey:*',
@@ -312,6 +313,66 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     const catIds = all.map((r) => r.catId);
     assert.ok(catIds.includes('opus'));
     assert.ok(catIds.includes('codex'));
+  });
+
+  it('create() maintains the per-thread chain-key index', async () => {
+    await store.create(BASE_INPUT);
+    await store.create({ ...BASE_INPUT, catId: 'codex', cliSessionId: 'cli-codex-1' });
+
+    assert.deepEqual((await redis.smembers('session-chain-by-thread:thread-1')).sort(), [
+      'session-chain:codex:thread-1',
+      'session-chain:opus:thread-1',
+    ]);
+  });
+
+  it('backfills legacy chain keys once, then reads every thread without another global SCAN', async () => {
+    const legacyId = 'legacy-session-1';
+    await redis.zadd('session-chain:opus:legacy-thread', 0, legacyId);
+    await redis.hset(
+      `session:${legacyId}`,
+      'id',
+      legacyId,
+      'cliSessionId',
+      'legacy-cli-1',
+      'threadId',
+      'legacy-thread',
+      'catId',
+      'opus',
+      'userId',
+      'user-1',
+      'seq',
+      '0',
+      'status',
+      'sealed',
+      'messageCount',
+      '1',
+      'createdAt',
+      '1',
+      'updatedAt',
+      '2',
+    );
+
+    const originalScanStream = redis.scanStream.bind(redis);
+    let globalScans = 0;
+    redis.scanStream = (...args) => {
+      globalScans += 1;
+      return originalScanStream(...args);
+    };
+    try {
+      const freshStore = new RedisSessionChainStore(redis);
+      const legacy = await freshStore.getChainByThread('legacy-thread');
+      const missing = await freshStore.getChainByThread('missing-thread');
+
+      assert.equal(legacy.length, 1);
+      assert.equal(legacy[0].id, legacyId);
+      assert.deepEqual(missing, []);
+      assert.equal(globalScans, 1, 'all later thread reads must use the index instead of scanning Redis again');
+      assert.deepEqual(await redis.smembers('session-chain-by-thread:legacy-thread'), [
+        'session-chain:opus:legacy-thread',
+      ]);
+    } finally {
+      redis.scanStream = originalScanStream;
+    }
   });
 
   it('sealed session sets sealReason and sealedAt', async () => {

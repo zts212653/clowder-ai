@@ -1,4 +1,5 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { normalizeJsonUnicode } from '../../../../../utils/json-unicode.js';
 import type {
   AppendMessageInput,
   StoredMessage,
@@ -86,7 +87,8 @@ export async function appendMessageIfThreadFrontier(input: {
   loadById: (messageId: string) => Promise<StoredMessage | null>;
   onAppend?: (message: StoredMessage) => void | Promise<void>;
 }): Promise<ThreadFrontierAppendResult> {
-  const { redis, message, expectedLatestMessageId, ttlSeconds, loadById, onAppend } = input;
+  const { redis, expectedLatestMessageId, ttlSeconds, loadById, onAppend } = input;
+  const message = normalizeJsonUnicode(input.message);
   assertValidAppendMessageInput(message);
   assertQueueCustodyMessageBinding(message);
   const threadId = message.threadId ?? DEFAULT_THREAD_ID;
@@ -175,7 +177,8 @@ export async function appendMessageAndObservePriorFrontier(input: {
   loadById: (messageId: string) => Promise<StoredMessage | null>;
   onAppend?: (message: StoredMessage) => void | Promise<void>;
 }): Promise<ThreadObservedAppendResult> {
-  const { redis, message, ttlSeconds, loadById, onAppend } = input;
+  const { redis, ttlSeconds, loadById, onAppend } = input;
+  const message = normalizeJsonUnicode(input.message);
   assertValidAppendMessageInput(message);
   assertQueueCustodyMessageBinding(message);
   const threadId = message.threadId ?? DEFAULT_THREAD_ID;

@@ -33,7 +33,7 @@ test('F271 aborts a production Redis thread-list read and releases the daily run
     options: { keyPrefix: '' },
     zrevrange: () =>
       new Promise((resolve) => {
-        setTimeout(() => resolve(['thread-a', 'thread-b']), 100);
+        setTimeout(() => resolve(['thread-a', 'thread-b']), 1_000);
       }),
     hgetall: async (key) => ({
       id: String(key).replace(/^thread:/, ''),
@@ -64,7 +64,7 @@ test('F271 aborts a production Redis thread-list read and releases the daily run
   setTimeout(() => controller.abort(new Error('daily thread scan deadline exceeded')), 20);
 
   await assert.rejects(pending, /daily thread scan deadline exceeded/);
-  assert.ok(Date.now() - startedAt < 80);
+  assert.ok(Date.now() - startedAt < 500, 'abort must beat the 1s backing read even under full-suite load');
   assert.equal(threadStore.activeReads, 0);
 });
 
@@ -84,15 +84,20 @@ test('F271 aborts a production Redis session-chain scan stream before starting a
 
   let streamActive = 0;
   let streamDestroyed = false;
+  let scanStarts = 0;
   const redis = {
     options: { keyPrefix: '' },
     scanStream: () => {
+      scanStarts += 1;
       const stream = new EventEmitter();
       streamActive += 1;
-      const timer = setTimeout(() => {
-        streamActive -= 1;
-        stream.emit('end');
-      }, 100);
+      const timer = setTimeout(
+        () => {
+          streamActive -= 1;
+          stream.emit('end');
+        },
+        scanStarts === 1 ? 1_000 : 20,
+      );
       stream.destroy = () => {
         if (streamDestroyed) return;
         streamDestroyed = true;
@@ -101,6 +106,7 @@ test('F271 aborts a production Redis session-chain scan stream before starting a
       };
       return stream;
     },
+    smembers: async () => [],
   };
   const sessionChainStore = new TrackedRedisSessionChainStore(redis);
   const startedThreads = [];
@@ -125,9 +131,13 @@ test('F271 aborts a production Redis session-chain scan stream before starting a
   setTimeout(() => controller.abort(new Error('daily session scan deadline exceeded')), 20);
 
   await assert.rejects(pending, /daily session scan deadline exceeded/);
-  assert.ok(Date.now() - startedAt < 80);
+  assert.ok(Date.now() - startedAt < 500, 'abort must beat the 1s Redis stream even under full-suite load');
   assert.equal(sessionChainStore.activeReads, 0);
   assert.equal(streamActive, 0);
   assert.equal(streamDestroyed, true);
   assert.deepEqual(startedThreads, ['thread-a']);
+
+  const retry = await sessionChainStore.getChainByThread('thread-retry');
+  assert.deepEqual(retry, []);
+  assert.equal(scanStarts, 2, 'an aborted legacy backfill must retry instead of trusting a partial index');
 });

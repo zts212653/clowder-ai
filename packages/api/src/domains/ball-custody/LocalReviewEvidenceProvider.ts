@@ -1,5 +1,6 @@
-import type { IInvocationRecordStore, InvocationRecord } from '../cats/services/stores/ports/InvocationRecordStore.js';
+import type { IInvocationRecordStore } from '../cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
+import { LocalReviewCarrierEvidenceResolver } from './LocalReviewCarrierEvidenceResolver.js';
 
 export const LOCAL_REVIEW_VERDICTS = ['approved', 'changes_requested', 'commented'] as const;
 export type LocalReviewVerdict = (typeof LOCAL_REVIEW_VERDICTS)[number];
@@ -23,6 +24,7 @@ export interface LocalReviewEvidenceInput {
 
 export interface LocalReviewEvidenceProvider {
   resolve(input: LocalReviewEvidenceInput): Promise<LocalReviewEvidenceResolution>;
+  resolveRecovery(input: LocalReviewEvidenceInput): Promise<LocalReviewEvidenceResolution>;
 }
 
 interface ParsedLocalReviewEvidenceRef {
@@ -86,6 +88,14 @@ function containsSubject(content: string, subjectRef: string): boolean {
   );
 }
 
+function containsLegacyRecoverySubject(content: string, subjectRef: string): boolean {
+  const match = /^pr:([^/]+)\/([^#]+)#([1-9]\d*)$/.exec(subjectRef);
+  if (!match) return false;
+  const number = match[3];
+  if (!number) return false;
+  return new RegExp(`(?:^|[^\\p{L}\\p{N}_.-])PR #${escapeRegex(number)}(?=\\s|$)`, 'iu').test(content);
+}
+
 function containsVerdict(content: string, verdict: LocalReviewVerdict): boolean {
   const token =
     verdict === 'approved'
@@ -96,60 +106,67 @@ function containsVerdict(content: string, verdict: LocalReviewVerdict): boolean 
   return new RegExp(`(?:^|\\n)${token}(?:\\s|$|[-—:])`, 'i').test(content);
 }
 
+function containsLegacyRecoveryVerdict(content: string, verdict: LocalReviewVerdict): boolean {
+  if (verdict !== 'changes_requested') return false;
+  return new RegExp('(?:^|\\n)\\*{0,2}Verdict:\\s*\\*{0,2}BLOCK(?=\\s|$)', 'i').test(content);
+}
+
+function verifyPersistedReviewMessage(
+  message: StoredMessage,
+  input: LocalReviewEvidenceInput,
+  predecessorCatId: string,
+  verdict: LocalReviewVerdict,
+  grammar: 'canonical' | 'historical_recovery',
+): LocalReviewEvidenceResolution {
+  if (message.threadId !== input.predecessorThreadId) {
+    return { status: 'mismatch', reason: 'local review verdict was not returned to the predecessor thread' };
+  }
+  if (!routesToPredecessor(message, predecessorCatId)) {
+    return { status: 'mismatch', reason: 'local review verdict does not target the predecessor cat' };
+  }
+  if (
+    input.holderThreadId !== input.predecessorThreadId &&
+    message.extra?.crossPost?.sourceThreadId !== input.holderThreadId
+  ) {
+    return { status: 'mismatch', reason: 'local review cross-post does not originate from the holder thread' };
+  }
+  if (!containsExactHead(message.content, input.headSha)) {
+    return { status: 'mismatch', reason: 'local review verdict does not bind the exact HEAD' };
+  }
+  const subjectMatches =
+    containsSubject(message.content, input.subjectRef) ||
+    (grammar === 'historical_recovery' && containsLegacyRecoverySubject(message.content, input.subjectRef));
+  if (!subjectMatches) {
+    return { status: 'mismatch', reason: 'local review verdict does not bind the action subject' };
+  }
+  const verdictMatches =
+    containsVerdict(message.content, verdict) ||
+    (grammar === 'historical_recovery' && containsLegacyRecoveryVerdict(message.content, verdict));
+  if (!verdictMatches) {
+    return { status: 'mismatch', reason: 'local review message does not contain the declared verdict' };
+  }
+  return { status: 'verified', evidenceRef: input.evidenceRef };
+}
+
 /**
  * Re-resolves a local review verdict from the canonical message store. The
  * evidence ref is only a locator; every lease-route and verdict claim is
  * checked again against persisted message truth.
  */
 export class MessageStoreLocalReviewEvidenceProvider implements LocalReviewEvidenceProvider {
+  private readonly carrierResolver: LocalReviewCarrierEvidenceResolver;
+
   constructor(
     private readonly messageStore: Pick<IMessageStore, 'getById'>,
-    private readonly invocationRecordStore: Pick<IInvocationRecordStore, 'get'>,
-  ) {}
-
-  private async resolveMessageCarrier(
-    message: StoredMessage,
-    input: LocalReviewEvidenceInput,
-  ): Promise<LocalReviewEvidenceResolution | null> {
-    const carrierInvocationId = message.extra?.stream?.invocationId;
-    if (!carrierInvocationId) {
-      return { status: 'insufficient', reason: 'local review verdict message has no invocation carrier provenance' };
-    }
-    const carrier = await this.invocationRecordStore.get(carrierInvocationId);
-    if (!carrier) {
-      return { status: 'insufficient', reason: 'local review verdict invocation carrier is unavailable' };
-    }
-    if (!this.carrierMatchesMessagePrincipal(carrier, input)) {
-      return {
-        status: 'mismatch',
-        reason: 'local review verdict invocation carrier is outside the message principal scope',
-      };
-    }
-    if (
-      carrier.actionLeaseCarrier.kind !== 'action_successor' ||
-      carrier.actionLeaseCarrier.leaseId !== input.leaseId ||
-      carrier.actionLeaseCarrier.generation !== input.generation
-    ) {
-      return {
-        status: 'mismatch',
-        reason: 'local review verdict message does not carry the current action lease generation',
-      };
-    }
-    return null;
+    invocationRecordStore: Pick<IInvocationRecordStore, 'get'>,
+  ) {
+    this.carrierResolver = new LocalReviewCarrierEvidenceResolver(invocationRecordStore);
   }
 
-  private carrierMatchesMessagePrincipal(
-    carrier: Pick<InvocationRecord, 'threadId' | 'userId' | 'targetCats'>,
+  private async resolvePersistedVerdict(
     input: LocalReviewEvidenceInput,
-  ): boolean {
-    return (
-      carrier.threadId === input.holderThreadId &&
-      carrier.userId === input.tenantScope &&
-      carrier.targetCats.some((catId) => catId === input.reviewerCatId)
-    );
-  }
-
-  async resolve(input: LocalReviewEvidenceInput): Promise<LocalReviewEvidenceResolution> {
+    carrierMode: 'required' | 'carrierless_recovery',
+  ): Promise<LocalReviewEvidenceResolution> {
     const parsed = parseLocalReviewEvidenceRef(input.evidenceRef);
     if (!parsed) return { status: 'mismatch', reason: 'local review evidence ref is malformed' };
     if (parsed.generation !== input.generation) {
@@ -167,28 +184,25 @@ export class MessageStoreLocalReviewEvidenceProvider implements LocalReviewEvide
     if (message.catId !== input.reviewerCatId) {
       return { status: 'mismatch', reason: 'local review verdict author is not the lease holder' };
     }
-    const carrierFailure = await this.resolveMessageCarrier(message, input);
+    const carrierFailure =
+      carrierMode === 'required'
+        ? await this.carrierResolver.resolveRequired(message, input)
+        : await this.carrierResolver.resolveRecovery(message, input);
     if (carrierFailure) return carrierFailure;
-    if (message.threadId !== input.predecessorThreadId) {
-      return { status: 'mismatch', reason: 'local review verdict was not returned to the predecessor thread' };
-    }
-    if (!routesToPredecessor(message, input.predecessorCatId)) {
-      return { status: 'mismatch', reason: 'local review verdict does not target the predecessor cat' };
-    }
-    if (input.holderThreadId !== input.predecessorThreadId) {
-      if (message.extra?.crossPost?.sourceThreadId !== input.holderThreadId) {
-        return { status: 'mismatch', reason: 'local review cross-post does not originate from the holder thread' };
-      }
-    }
-    if (!containsExactHead(message.content, input.headSha)) {
-      return { status: 'mismatch', reason: 'local review verdict does not bind the exact HEAD' };
-    }
-    if (!containsSubject(message.content, input.subjectRef)) {
-      return { status: 'mismatch', reason: 'local review verdict does not bind the action subject' };
-    }
-    if (!containsVerdict(message.content, parsed.verdict)) {
-      return { status: 'mismatch', reason: 'local review message does not contain the declared verdict' };
-    }
-    return { status: 'verified', evidenceRef: input.evidenceRef };
+    return verifyPersistedReviewMessage(
+      message,
+      input,
+      input.predecessorCatId,
+      parsed.verdict,
+      carrierMode === 'carrierless_recovery' ? 'historical_recovery' : 'canonical',
+    );
+  }
+
+  async resolve(input: LocalReviewEvidenceInput): Promise<LocalReviewEvidenceResolution> {
+    return this.resolvePersistedVerdict(input, 'required');
+  }
+
+  async resolveRecovery(input: LocalReviewEvidenceInput): Promise<LocalReviewEvidenceResolution> {
+    return this.resolvePersistedVerdict(input, 'carrierless_recovery');
   }
 }

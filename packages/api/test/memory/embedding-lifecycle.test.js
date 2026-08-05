@@ -53,6 +53,39 @@ function makeEmbeddingService(load) {
 }
 
 describe('MemoryEmbeddingLifecycle', () => {
+  it('uses the version-driven rebuild contract for embedding-ready catch-up', async () => {
+    const { MemoryEmbeddingLifecycle } = await import('../../dist/domains/memory/MemoryEmbeddingLifecycle.js');
+    const rebuildCalls = [];
+    let warmupCalls = 0;
+    const indexBuilder = {
+      rebuild: async (...args) => {
+        rebuildCalls.push(args);
+        return { docsIndexed: 0, docsSkipped: 7, durationMs: 1 };
+      },
+      startPassageEmbeddingWarmup: () => {
+        warmupCalls += 1;
+      },
+    };
+    const lifecycle = new MemoryEmbeddingLifecycle(
+      {},
+      indexBuilder,
+      {
+        embedMode: 'off',
+        embedModel: 'test-model',
+        embedDim: 4,
+        embedTimeoutMs: 100,
+        maxModelMemMb: 32,
+      },
+      {},
+    );
+
+    const result = await lifecycle.catchUpAfterReady();
+
+    assert.deepEqual(rebuildCalls, [[]], 'ready catch-up must not unconditionally force a full rebuild');
+    assert.equal(warmupCalls, 1, 'missing passage vectors should still be backfilled');
+    assert.deepEqual(result, { docsIndexed: 0, docsSkipped: 7, durationMs: 1 });
+  });
+
   it('activates vector indexing after the API starts with embedding off', async () => {
     const { createMemoryServices } = await import('../../dist/domains/memory/factory.js');
     const root = mkdtempSync(join(tmpdir(), 'embedding-lifecycle-'));

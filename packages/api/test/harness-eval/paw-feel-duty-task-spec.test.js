@@ -74,9 +74,9 @@ function makeTask(overrides = {}) {
 }
 
 describe('F278 paw-feel duty notice', () => {
-  it('uses primary below 24h, backup at 24h, and marks the 72h operator-visible breach', () => {
+  it('keeps the configured primary responsible at every SLA tier', () => {
     const normal = buildPawFeelDutyNotice([item()], duty(), NOW_MS, '/inbox');
-    const backup = buildPawFeelDutyNotice(
+    const overdue = buildPawFeelDutyNotice(
       [item({ discoveredAt: new Date(NOW_MS - 25 * HOUR).toISOString() })],
       duty(),
       NOW_MS,
@@ -91,16 +91,32 @@ describe('F278 paw-feel duty notice', () => {
 
     assert.equal(normal.targetCatId, 'codex-sol');
     assert.equal(normal.slaTier, 'normal');
-    assert.equal(backup.targetCatId, 'opus');
-    assert.equal(backup.slaTier, 'backup_due');
-    assert.equal(breach.targetCatId, 'opus');
+    assert.equal(overdue.targetCatId, 'codex-sol');
+    assert.equal(overdue.slaTier, 'overdue');
+    assert.match(overdue.content, /Primary 继续负责/);
+    assert.doesNotMatch(overdue.content, /backup duty 接管/);
+    assert.equal(breach.targetCatId, 'codex-sol');
     assert.equal(breach.slaTier, 'cvo_breach');
     assert.match(breach.content, /72h/);
+    assert.match(breach.content, /Primary 继续负责/);
     assert.match(breach.content, /message-1/);
     assert.match(breach.content, /1 个 bundle \/ 1 条 raw signal/);
     assert.equal(breach.reviewBundleCount, 1);
     assert.equal(breach.rawSignalCount, 1);
     assert.doesNotMatch(breach.content, /爪感差:|marker body|phenomenon/i);
+  });
+
+  it('routes to the new primary after an explicit duty handoff', () => {
+    const handedOff = buildPawFeelDutyNotice(
+      [item({ discoveredAt: new Date(NOW_MS - 73 * HOUR).toISOString() })],
+      duty('opus', 'codex-sol'),
+      NOW_MS,
+      '/inbox',
+    );
+
+    assert.equal(handedOff.targetCatId, 'opus');
+    assert.equal(handedOff.slaTier, 'cvo_breach');
+    assert.match(handedOff.content, /本批责任猫：@opus/);
   });
 
   it('keeps missing duty explicit instead of guessing an owner', () => {
@@ -120,7 +136,7 @@ describe('F278 paw-feel duty notice', () => {
       '/inbox',
     );
 
-    assert.equal(notice.slaTier, 'backup_due');
+    assert.equal(notice.slaTier, 'overdue');
     assert.equal(notice.targetCatId, undefined);
     assert.match(notice.content, /值班配置不完整/);
     assert.doesNotMatch(notice.content, /backup duty 接管|本批责任猫：@codex-sol/);
@@ -169,7 +185,7 @@ describe('F278 paw-feel duty task', () => {
     assert.equal((delivered[0].content.match(/- message-1/g) ?? []).length, 1);
     assert.equal(invoked.length, 1);
     assert.equal(invoked[0][0], 'thread_eval_friction');
-    assert.equal(invoked[0][1], 'opus');
+    assert.equal(invoked[0][1], 'codex-sol');
     assert.match(invoked[0][3], /1 review bundle\(s\) \/ 2 raw signal\(s\)/i);
     assert.match(invoked[0][3], /10\/20\/50-item slices are execution limits, not a terminal condition/i);
     assert.match(invoked[0][3], /real task \+ named owner \+ active F167 lease/i);

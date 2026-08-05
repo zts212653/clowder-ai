@@ -65,6 +65,8 @@ describe('F167 successor runtime wiring', () => {
     assert.match(callbacksSource, /registerCallbackLocalReviewVerdictRoute/);
     assert.doesNotMatch(callbacksSource, /app\.post\('\/api\/callbacks\/record-local-review-verdict'/);
     assert.match(localReviewRouteSource, /app\.post\('\/api\/callbacks\/record-local-review-verdict'/);
+    assert.match(localReviewRouteSource, /app\.post\('\/api\/callbacks\/recover-local-review-verdict'/);
+    assert.match(localReviewRouteSource, /resolveActionSuccessorCarrier/);
     assert.ok(localReviewRouteSource.split('\n').length <= 350, 'focused callback module must remain below hard limit');
   });
 

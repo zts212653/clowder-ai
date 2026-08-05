@@ -5,7 +5,12 @@ import { ClaudeAgentService } from '../dist/domains/cats/services/agents/provide
 import { CodexAgentService } from '../dist/domains/cats/services/agents/providers/CodexAgentService.js';
 import { CodexAppServerClient } from '../dist/domains/cats/services/agents/providers/CodexAppServerClient.js';
 import { ClaudeNativeToolBoundaryClassifier } from '../dist/domains/cats/services/agents/providers/claude-native-tool-boundary.js';
-import { classifyCodexSafeBoundary } from '../dist/domains/cats/services/agents/providers/codex-app-server-boundary.js';
+import {
+  assertCodexThreadItemCensus,
+  classifyCodexProtocolItem,
+  classifyCodexSafeBoundary,
+} from '../dist/domains/cats/services/agents/providers/codex-app-server-boundary.js';
+import { KimiAgentService } from '../dist/domains/cats/services/agents/providers/KimiAgentService.js';
 import { FreshnessAttentionEventLog } from '../dist/domains/cats/services/freshness/FreshnessAttentionEventLog.js';
 import {
   createContentFreeFreshnessNotice,
@@ -126,8 +131,58 @@ describe('F254 D2 provider-native freshness truth', () => {
     assert.equal(classifyCodexSafeBoundary(completed('fileChange')).toolSurface, 'file_change');
     assert.equal(classifyCodexSafeBoundary(completed('mcpToolCall')).toolSurface, 'mcp_tool_call');
     assert.equal(classifyCodexSafeBoundary(completed('dynamicToolCall')).toolSurface, 'dynamic_tool_call');
+    assert.equal(classifyCodexSafeBoundary(completed('collabAgentToolCall')).toolSurface, 'collab_agent_tool_call');
+    assert.equal(
+      classifyCodexSafeBoundary({
+        ...completed('collabAgentToolCall'),
+        params: {
+          ...completed('collabAgentToolCall').params,
+          item: { id: 'collab-failed', type: 'collabAgentToolCall', status: 'failed' },
+        },
+      }).toolSurface,
+      'collab_agent_tool_call',
+    );
+    assert.equal(
+      classifyCodexSafeBoundary({
+        ...completed('collabAgentToolCall'),
+        params: {
+          ...completed('collabAgentToolCall').params,
+          item: { id: 'collab-running', type: 'collabAgentToolCall', status: 'inProgress' },
+        },
+      }),
+      null,
+    );
     assert.equal(classifyCodexSafeBoundary({ ...completed('commandExecution'), method: 'item/started' }), null);
     assert.equal(classifyCodexSafeBoundary(completed('agentMessage')), null);
+    for (const itemType of ['webSearch', 'imageView', 'imageGeneration', 'sleep', 'subAgentActivity']) {
+      assert.equal(classifyCodexSafeBoundary(completed(itemType)), null, `${itemType} must not become a safe boundary`);
+      assert.notEqual(classifyCodexProtocolItem(completed(itemType)).classification, 'unknown');
+    }
+  });
+
+  it('guards the installed app-server ThreadItem census instead of silently accepting protocol drift', () => {
+    const installedTypes = [
+      'userMessage',
+      'hookPrompt',
+      'agentMessage',
+      'plan',
+      'reasoning',
+      'commandExecution',
+      'fileChange',
+      'mcpToolCall',
+      'dynamicToolCall',
+      'collabAgentToolCall',
+      'subAgentActivity',
+      'webSearch',
+      'imageView',
+      'sleep',
+      'imageGeneration',
+      'enteredReviewMode',
+      'exitedReviewMode',
+      'contextCompaction',
+    ];
+    assert.doesNotThrow(() => assertCodexThreadItemCensus(installedTypes));
+    assert.throws(() => assertCodexThreadItemCensus([...installedTypes, 'futureTool']), /futureTool/);
   });
 
   it('keeps opportunity, delivered, and seen separate while coalescing a frontier', async () => {
@@ -454,6 +509,41 @@ describe('F254 D2 provider-native freshness truth', () => {
     ]);
   });
 
+  it('puts explicit unsupported and unknown completed items in the coverage denominator', () => {
+    const capability = {
+      threadId: 'thread-1',
+      catId: 'kimi',
+      invocationId: 'inv-kimi',
+      timestamp: 100,
+      kind: 'provider_carrier_capability_declared',
+      provider: 'kimi',
+      carrier: 'kimi_stream_json',
+      deliverySemantics: 'unsupported',
+    };
+    const unknown = {
+      threadId: 'thread-1',
+      catId: 'codex-sol',
+      invocationId: 'inv-codex',
+      timestamp: 101,
+      kind: 'provider_protocol_item_observed',
+      provider: 'openai_codex',
+      carrier: 'codex_app_server',
+      deliverySemantics: 'exact_active_turn',
+      toolSurface: 'unknown',
+      itemType: 'unknown',
+      boundedUnknownSample: 'futureTool',
+      status: 'completed',
+      classification: 'unknown',
+    };
+    const report = buildProviderNativeFreshnessCoverage([capability, unknown]);
+
+    assert.equal(report.verdict, 'partial');
+    assert.equal(report.carriers.find((row) => row.provider === 'kimi').dataStatus, 'no_data');
+    assert.equal(report.carriers.find((row) => row.provider === 'kimi').allToolCoverage, false);
+    assert.equal(report.carriers.find((row) => row.provider === 'openai_codex').unknownItemCount, 1);
+    assert.equal(report.cells.find((cell) => cell.toolSurface === 'unknown').observedCount, 1);
+  });
+
   it('builds a content-free notice with no Queue body or sender preview', () => {
     const text = createContentFreeFreshnessNotice({ threadId: 'thread-1', unseenCount: 3 });
     assert.match(text, /list_recent/);
@@ -517,6 +607,83 @@ describe('F254 D2 provider-native freshness truth', () => {
     );
   });
 
+  it('records an unknown completed app-server item as bounded protocol telemetry', async () => {
+    const wire = new FakeAppServerWire();
+    const observed = [];
+    const client = new CodexAppServerClient({
+      wire,
+      freshnessController: {
+        prepare: async () => null,
+        commitDelivered: async () => {},
+        markMissed: async () => {},
+        markTurnCompleted: async () => {},
+        observeProtocolItem: async (observation) => observed.push(observation),
+      },
+    });
+    const run = (async () => {
+      for await (const _event of client.run({ prompt: 'work', thread: { kind: 'start' } })) {
+        /* drain */
+      }
+    })();
+    while (!wire.writes.some((write) => write.method === 'turn/start')) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    wire.inbox.push({
+      method: 'item/completed',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: { id: 'future-1', type: 'futureTool', status: 'completed' },
+      },
+    });
+    wire.inbox.push({
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+    });
+    await run;
+
+    assert.deepEqual(observed, [
+      {
+        itemType: 'unknown',
+        status: 'completed',
+        classification: 'unknown',
+        toolSurface: 'unknown',
+        boundedUnknownSample: 'futureTool',
+      },
+    ]);
+  });
+
+  it('bounds unknown item samples while retaining every normalized observation', async () => {
+    const events = [];
+    const broker = new FreshnessNoticeBroker({
+      context: { invocationId: 'inv-unknown', threadId: 'thread-1', catId: 'codex-sol' },
+      checkUnseen: async () => null,
+      appendEvent: async (event) => events.push(event),
+      now: () => 123,
+    });
+    const capability = {
+      provider: 'openai_codex',
+      carrier: 'codex_app_server',
+      deliverySemantics: 'exact_active_turn',
+    };
+    for (let index = 0; index < 10; index++) {
+      await broker.observeProtocolItem(capability, {
+        itemType: 'unknown',
+        status: 'completed',
+        classification: 'unknown',
+        toolSurface: 'unknown',
+        boundedUnknownSample: `futureTool${index}`,
+      });
+    }
+
+    assert.equal(events.length, 10);
+    assert.equal(events.filter((event) => event.boundedUnknownSample !== undefined).length, 8);
+    assert.equal(
+      events.every((event) => event.itemType === 'unknown'),
+      true,
+    );
+  });
+
   it('records a turn mismatch as missed and never retargets another turn', async () => {
     const wire = new FakeAppServerWire();
     wire.write = async function write(message) {
@@ -567,6 +734,7 @@ describe('F254 D2 provider-native freshness truth', () => {
   it('ignores tool completions that do not belong to the exact active thread and turn', async () => {
     const wire = new FakeAppServerWire();
     let prepareCalls = 0;
+    let observedCalls = 0;
     const client = new CodexAppServerClient({
       wire,
       freshnessController: {
@@ -577,6 +745,9 @@ describe('F254 D2 provider-native freshness truth', () => {
         commitDelivered: async () => {},
         markMissed: async () => {},
         markTurnCompleted: async () => {},
+        observeProtocolItem: async () => {
+          observedCalls++;
+        },
       },
     });
     const run = (async () => {
@@ -600,6 +771,7 @@ describe('F254 D2 provider-native freshness truth', () => {
     });
     await run;
     assert.equal(prepareCalls, 0);
+    assert.equal(observedCalls, 0);
     assert.equal(
       wire.writes.some((write) => write.method === 'turn/steer'),
       false,
@@ -751,6 +923,11 @@ describe('F254 D2 provider-native freshness truth', () => {
     assert.deepEqual(new ClaudeAgentService({ model: 'claude-test' }).freshnessCarrierCapability(), {
       provider: 'anthropic',
       carrier: 'claude_print_sdk',
+      deliverySemantics: 'unsupported',
+    });
+    assert.deepEqual(new KimiAgentService({ model: 'kimi-test' }).freshnessCarrierCapability(), {
+      provider: 'kimi',
+      carrier: 'kimi_stream_json',
       deliverySemantics: 'unsupported',
     });
     const policy = { mode: 'read_only', allowedToolNames: [], deniedToolNames: [], replayDeniedToolNames: [] };

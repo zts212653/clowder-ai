@@ -3,100 +3,100 @@
     {
       "path": "packages/api/src/domains/cats/services/agents/routing",
       "owner": "opus-48",
-      "reason": "2026-08-02 public-target recount: 26 files. Agent routing and artifact tracking remain one unsplit agents subdomain; F23 Phase 2 owns the boundary split.",
+      "reason": "2026-08-01 baseline recount: 28 files. Agent routing + artifact tracking remain one unsplit agents subdomain; F23 Phase 2 owns the boundary split.",
       "expiresAt": "2026-08-31",
       "ticket": "F23-followup"
     },
     {
       "path": "packages/api/src/routes",
       "owner": "opus",
-      "reason": "2026-08-02 public-target recount: 200 files. Routes need a domain/HTTP-boundary split rather than file shuffling; F23 Phase 2 owns the split plan.",
+      "reason": "2026-08-01 baseline recount: 243 files. Routes need a domain/HTTP-boundary split rather than file shuffling; F23 Phase 2 owns the split plan.",
       "expiresAt": "2026-08-31",
       "ticket": "F23-followup"
     },
     {
       "path": "packages/api/src/config",
       "owner": "opus",
-      "reason": "2026-08-02 public-target recount: 42 files. Config needs a domain audit before choosing stable subdirectories; F23 Phase 2 owns that split.",
+      "reason": "2026-08-01 baseline recount: 42 files. Config needs a domain audit before choosing stable subdirectories; F23 Phase 2 owns that split.",
       "expiresAt": "2026-08-31",
       "ticket": "F23-followup"
     },
     {
       "path": "packages/api/src/domains/cats/services/agents/invocation",
       "owner": "opus",
-      "reason": "2026-08-02 public-target recount: 27 files. Invocation should split by queue/registry/tracker/progress/reconciliation/delivery/auth; F23 Phase 2 owns the split.",
+      "reason": "2026-08-01 baseline recount: 36 files. Invocation should split by queue/registry/tracker/progress/reconciliation/delivery/auth; F23 Phase 2 owns the split.",
       "expiresAt": "2026-08-31",
       "ticket": "F23-followup"
     },
     {
       "path": "packages/api/src/domains/cats/services/agents/providers",
       "owner": "opus",
-      "reason": "2026-08-02 public-target recount: 42 files. Providers should split by agents/event transforms/carriers/image/config; F23 Phase 2 owns the split.",
+      "reason": "2026-08-01 baseline recount: 66 files. Providers should split by agents/event transforms/carriers/image/config; F23 Phase 2 owns the split.",
       "expiresAt": "2026-08-31",
       "ticket": "F23-followup"
     },
     {
       "path": "packages/api/src/domains/cats/services/stores/ports",
       "owner": "codex",
-      "reason": "2026-08-02 public-target recount: 28 files. Store ports remain centralized and need proposal/profile/session subdomains; F231/F23 follow-up owns the split.",
+      "reason": "2026-08-01 baseline recount: 34 files. Store ports remain centralized and need proposal/profile/session subdomains; F231/F23 follow-up owns the split.",
       "expiresAt": "2026-08-31",
       "ticket": "F231/F23-followup"
     },
     {
       "path": "packages/api/src/domains/memory",
       "owner": "gpt52",
-      "reason": "2026-08-02 public-target recount: 95 files. Memory spans indexing/query/governance/library and needs boundary-led subdirectories; F102 owns the split.",
+      "reason": "2026-08-01 baseline recount: 135 files. Memory spans indexing/query/governance/library and needs boundary-led subdirectories; F102 owns the split.",
       "expiresAt": "2026-08-31",
       "ticket": "F102"
     },
     {
       "path": "packages/api/src/utils",
       "owner": "codex",
-      "reason": "2026-08-02 public-target recount: 40 files. Utils should split by cli/process/media/paths/network/parsing/skills; F23 Phase 2 owns the split.",
+      "reason": "2026-08-01 baseline recount: 41 files. Utils should split by cli/process/media/paths/network/parsing/skills; F23 Phase 2 owns the split.",
       "expiresAt": "2026-08-31",
       "ticket": "F23-followup"
     },
     {
+      "path": "packages/api/src/infrastructure/harness-eval",
+      "owner": "opus",
+      "reason": "2026-08-01 baseline recount: 30 files. Harness eval should split by capability-wakeup/a2a/domain/hub; F192 owns the known debt.",
+      "expiresAt": "2026-08-31",
+      "ticket": "F192"
+    },
+    {
       "path": "packages/api/src/domains/cats/services/stores/redis",
       "owner": "opus",
-      "reason": "2026-08-02 public-target recount: 29 files. Redis implementations should split with their proposal/community/session domains; F23 Phase 2 owns the split.",
+      "reason": "2026-08-01 baseline recount: 42 files. Redis implementations should split with their proposal/community/session domains; F23 Phase 2 owns the split.",
       "expiresAt": "2026-08-31",
       "ticket": "F23-followup"
     },
     {
       "path": "packages/api/src/domains/cats/services/freshness",
       "owner": "opus",
-      "reason": "2026-08-03 post-sync public-target recount: 30 files. Freshness needs glass-box promotion or closure/store/telemetry subdomains; F23 Phase 2 owns the split.",
+      "reason": "2026-08-01 baseline recount: 30 files. Freshness needs glass-box promotion or closure/store/telemetry subdomains; F23 Phase 2 owns the split.",
       "expiresAt": "2026-08-31",
       "ticket": "F23-followup"
     },
     {
       "path": "packages/api/src/domains/auto-dream",
       "owner": "codex-sol",
-      "reason": "2026-08-03 post-sync public-target recount: 35 files. Auto Dream mixes cat-life settings, private seed/store operations, run lifecycle, and proactive relationship orchestration; F255/F272 own a boundary-led split.",
+      "reason": "2026-08-01 baseline census: 35 files. Auto Dream mixes cat-life settings, private seed/store operations, run lifecycle, and proactive relationship orchestration; F255/F272 own a boundary-led split.",
       "expiresAt": "2026-08-31",
       "ticket": "F255/F272"
     },
     {
       "path": "packages/api/src/domains/ball-custody",
       "owner": "codex-sol",
-      "reason": "2026-08-03 post-sync public-target recount: 42 files. Ball custody mixes action-successor, observability, and typed wait termination; F167/F233/F280 own a boundary-led split.",
+      "reason": "2026-08-01 baseline census: 42 files. Ball custody mixes action-successor, observability, and typed wait termination; F167/F233/F280 own a boundary-led split.",
       "expiresAt": "2026-08-31",
       "ticket": "F167/F233/F280"
     },
     {
       "path": "packages/api/src/domains/memory/people",
       "owner": "codex-sol",
-      "reason": "2026-08-03 post-sync public-target recount: 37 files. People memory mixes identity, proposal lifecycle, disposition proofs, and Redis persistence; F276/F281/F282 own a boundary-led split.",
+      "reason": "2026-08-01 baseline census: 37 files. People memory mixes identity, proposal lifecycle, disposition proofs, and Redis persistence; F276/F281/F282 own a boundary-led split.",
       "expiresAt": "2026-08-31",
       "ticket": "F276/F281/F282"
-    },
-    {
-      "path": "packages/api/src/infrastructure/harness-eval",
-      "owner": "opus",
-      "reason": "2026-08-03 post-sync public-target recount: 35 files. Harness eval should split by capability-wakeup/a2a/domain/hub; F192 owns the known debt.",
-      "expiresAt": "2026-08-31",
-      "ticket": "F192"
     }
   ]
 }

@@ -827,6 +827,17 @@ export class AgentRouter {
     this.rebuildRuntimeCaches(agentRegistry);
   }
 
+  /** Exact concrete carrier truth; absence remains explicit and fail-closed. */
+  freshnessCarrierCapability(catId: CatId): import('../../types.js').AgentFreshnessCarrierCapability {
+    return (
+      this.services[catId]?.freshnessCarrierCapability?.() ?? {
+        provider: 'other',
+        carrier: 'other',
+        deliverySemantics: 'undeclared',
+      }
+    );
+  }
+
   private isRoutableCat(catId: string | null | undefined): catId is CatId {
     return typeof catId === 'string' && Object.hasOwn(this.services, catId) && isCatAvailable(catId);
   }

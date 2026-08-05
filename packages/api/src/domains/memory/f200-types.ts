@@ -1,6 +1,6 @@
 // F200: Memory Recall Eval — types + experiment flags
 
-import type { RecallResultStatus } from '@cat-cafe/shared';
+import type { ExpansionFunnelMeta, RecallResultStatus } from '@cat-cafe/shared';
 
 export type RecallToolName = 'search_evidence' | 'graph_resolve' | 'list_recent' | 'session_bootstrap' | 'cold_context';
 
@@ -96,6 +96,8 @@ export interface RecallEvent {
   sourceEventId?: string;
   /** F102 bugfix: thread association for RecallFeed history persistence. */
   threadId?: string;
+  /** F256 Wave 1b: query-time health stages plus correlated downstream outcomes. */
+  expansionFunnel?: ExpansionFunnelMeta & { followed: number; used: number };
 }
 
 export interface TaskTrajectory {

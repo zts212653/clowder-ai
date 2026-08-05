@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, afterEach, describe, it } from 'node:test';
+import { Worker } from 'node:worker_threads';
 import { assignRedisDatabaseForTestFile, readRedisTestManifest } from '../scripts/redis-test-db-namespace.mjs';
 import { assertRedisIsolationOrThrow } from './helpers/redis-test-helpers.js';
 
@@ -99,6 +100,46 @@ describe('Redis test-file DB namespace', () => {
       fixtureFiles.a,
       fixtureFiles.b,
     ]);
+  });
+
+  it('preserves the parent test-file namespace inside eval workers', async () => {
+    const worker = new Worker(
+      `
+        import { parentPort, workerData } from 'node:worker_threads';
+        await import(workerData.namespaceModuleUrl);
+        parentPort.postMessage({
+          assignedDatabase: process.env.CAT_CAFE_REDIS_TEST_DB_ASSIGNED,
+          redisUrl: process.env.REDIS_URL,
+        });
+      `,
+      {
+        eval: true,
+        type: 'module',
+        env: {
+          ...process.env,
+          CAT_CAFE_REDIS_TEST_ISOLATED: '1',
+          CAT_CAFE_REDIS_TEST_DB_MANIFEST: process.env.CAT_CAFE_REDIS_TEST_DB_MANIFEST,
+          CAT_CAFE_REDIS_TEST_DB_ASSIGNED: '23',
+          REDIS_URL: 'redis://127.0.0.1:6300/23',
+        },
+        workerData: {
+          namespaceModuleUrl: new URL('../scripts/redis-test-db-namespace.mjs', import.meta.url).href,
+        },
+      },
+    );
+
+    const result = await new Promise((resolve, reject) => {
+      worker.once('message', resolve);
+      worker.once('error', reject);
+      worker.once('exit', (code) => {
+        if (code !== 0) reject(new Error(`worker exited ${code}`));
+      });
+    });
+
+    assert.deepEqual(result, {
+      assignedDatabase: '23',
+      redisUrl: 'redis://127.0.0.1:6300/23',
+    });
   });
 });
 

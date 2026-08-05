@@ -3940,6 +3940,7 @@ describe('Callback Routes', () => {
     const queuedTelemetry = await import('../dist/domains/cats/services/freshness/freshness-queue-telemetry.js');
     queuedTelemetry.resetFreshnessQueueTelemetryForTest();
     invocationQueue = new InvocationQueue();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-queued-d12a');
     const queued = invocationQueue.enqueue({
       ownerAuthProvenance: 'unknown',
       threadId: 'thread-queued-d12a',
@@ -3947,6 +3948,9 @@ describe('Callback Routes', () => {
       content: 'queued body visible only in full read',
       source: 'user',
       targetCats: ['opus'],
+      authorIntentByCatId: {
+        opus: { requested: 'continue_current', boundParentInvocationId: invocationId },
+      },
       intent: 'execute',
     });
     const storedQueuedMessage = messageStore.append({
@@ -3963,7 +3967,6 @@ describe('Callback Routes', () => {
     queueCustodyCoordinator = new QueuedMessageCustodyCoordinator({ messageStore });
     const turnExecutionStore = new InMemoryTurnExecutionStore();
     const app = await createApp({ turnExecutionStore });
-    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-queued-d12a');
     const activeEntry = invocationQueue.getEntrySnapshot('thread-queued-d12a', 'user-1', queued.entry.id);
     await queueCustodyCoordinator.requestReminder(activeEntry, 'opus', invocationId, 'reminder-read-boundary');
 
@@ -4009,7 +4012,9 @@ describe('Callback Routes', () => {
       'read must not consume the queued work item',
     );
     assert.equal(
-      invocationQueue.getQueuedFreshnessMessagesForCat('thread-queued-d12a', 'user-1', 'opus').length,
+      invocationQueue.getQueuedFreshnessMessagesForCat('thread-queued-d12a', 'user-1', 'opus', {
+        parentInvocationId: invocationId,
+      }).length,
       0,
       'returned queued body must be marked seen for freshness suppression',
     );
@@ -4093,6 +4098,9 @@ describe('Callback Routes', () => {
       content: 'queued body whose seen token must match completion evidence',
       source: 'user',
       targetCats: ['opus'],
+      authorIntentByCatId: {
+        opus: { requested: 'continue_current', boundParentInvocationId: outerParentInv },
+      },
       intent: 'execute',
       messageId: storedQueuedMessage.id,
     });
@@ -4141,6 +4149,9 @@ describe('Callback Routes', () => {
       content: 'queued searchable body',
       source: 'user',
       targetCats: ['opus'],
+      authorIntentByCatId: {
+        opus: { requested: 'continue_current', boundParentInvocationId: invocationId },
+      },
       intent: 'execute',
       messageId: '0000000000000101-000001-queued',
     });
@@ -4158,7 +4169,9 @@ describe('Callback Routes', () => {
       false,
     );
     assert.equal(
-      invocationQueue.getQueuedFreshnessMessagesForCat('thread-queued-sparse', 'user-1', 'opus').length,
+      invocationQueue.getQueuedFreshnessMessagesForCat('thread-queued-sparse', 'user-1', 'opus', {
+        parentInvocationId: invocationId,
+      }).length,
       1,
       'sparse reads must not mark queued body seen',
     );
@@ -5173,6 +5186,64 @@ describe('Callback Routes', () => {
     });
     assert.equal(nonActionCarrier.statusCode, 409);
     assert.equal(JSON.parse(nonActionCarrier.body).code, 'action_lease_required');
+    assert.equal(calls.length, 1);
+  });
+
+  test('POST recover-local-review-verdict uses predecessor callback identity without accepting a caller-supplied carrier', async () => {
+    const calls = [];
+    const app = await createApp({
+      localReviewVerdictService: {
+        async record() {
+          throw new Error('ordinary carrier path must remain separate');
+        },
+        async recover(input) {
+          calls.push(input);
+          return {
+            outcome: 'committed',
+            leaseId: input.leaseId,
+            generation: input.generation,
+            evidenceRef: `local-review:${input.messageId}:g${input.generation}:${input.verdict}`,
+          };
+        },
+      },
+    });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex-sol', 'thread-author');
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    const payload = {
+      messageId: 'message-verdict-recovery-1',
+      reviewedHeadSha: 'c'.repeat(40),
+      verdict: 'changes_requested',
+      actionLeaseRef: { leaseId: 'lease-stale-review-1', generation: 1 },
+    };
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/recover-local-review-verdict',
+      headers,
+      payload,
+    });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(calls[0], {
+      leaseId: 'lease-stale-review-1',
+      generation: 1,
+      messageId: 'message-verdict-recovery-1',
+      headSha: 'c'.repeat(40),
+      verdict: 'changes_requested',
+      now: calls[0].now,
+      principal: { catId: 'codex-sol', threadId: 'thread-author', tenantScope: 'user-1' },
+    });
+
+    const missingFence = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/recover-local-review-verdict',
+      headers,
+      payload: {
+        messageId: payload.messageId,
+        reviewedHeadSha: payload.reviewedHeadSha,
+        verdict: payload.verdict,
+      },
+    });
+    assert.equal(missingFence.statusCode, 400);
     assert.equal(calls.length, 1);
   });
 

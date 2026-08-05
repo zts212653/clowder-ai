@@ -12,6 +12,7 @@ describe('DispatchProposalStore (in-memory)', () => {
 
   const createInput = (overrides = {}) => ({
     proposalId: 'dp-001',
+    sourceInvocationId: 'invocation-001',
     sourceThreadId: 'thread-sender',
     targetThreadId: 'thread-target',
     senderCatId: 'opus',
@@ -42,6 +43,15 @@ describe('DispatchProposalStore (in-memory)', () => {
       createdAt: proposal.createdAt,
     });
   }
+
+  const negativeLookup = {
+    ownerUserId: 'user-1',
+    sourceInvocationId: 'invocation-001',
+    sourceThreadId: 'thread-sender',
+    senderCatId: 'opus',
+    targetThreadId: 'thread-target',
+    targetCats: ['sonnet'],
+  };
 
   it('create stores proposal with status=pending', async () => {
     const store = new InMemoryDispatchProposalStore();
@@ -378,5 +388,54 @@ describe('DispatchProposalStore (in-memory)', () => {
     const pending = await store.listPendingByUser('user-1');
     assert.equal(pending.length, 1);
     assert.equal(pending[0].proposalId, 'dp-new');
+  });
+
+  it('#1291: deny-only lookup follows pending → approved → pending → rejected lifecycle', async () => {
+    const store = new InMemoryDispatchProposalStore();
+    await store.create(createInput());
+
+    assert.deepEqual(await store.findNegativeAuthorizationBlocks(negativeLookup), [
+      { proposalId: 'dp-001', status: 'pending', targetCats: ['sonnet'] },
+    ]);
+
+    await store.approve('dp-001', 'user-1');
+    assert.deepEqual(await store.findNegativeAuthorizationBlocks(negativeLookup), []);
+
+    await store.revertToPending('dp-001');
+    assert.deepEqual(await store.findNegativeAuthorizationBlocks(negativeLookup), [
+      { proposalId: 'dp-001', status: 'pending', targetCats: ['sonnet'] },
+    ]);
+
+    await store.reject('dp-001', 'user-1');
+    assert.deepEqual(await store.findNegativeAuthorizationBlocks(negativeLookup), [
+      { proposalId: 'dp-001', status: 'rejected', targetCats: ['sonnet'] },
+    ]);
+  });
+
+  it('#1291: legacy cutover cannot activate until canonical index rebuild has completed', async () => {
+    const store = new InMemoryDispatchProposalStore();
+    await assert.rejects(
+      () => store.establishNegativeAuthorizationLegacyCutoverAt(1_000),
+      /requires a completed canonical index rebuild/,
+    );
+    await store.rebuildNegativeAuthorizationIndexes();
+    assert.equal(await store.establishNegativeAuthorizationLegacyCutoverAt(1_000), 1_000);
+  });
+
+  it('#1291: supersede retains both denials and abort removes only the staged successor', async () => {
+    const store = new InMemoryDispatchProposalStore();
+    await store.create(createInput({ proposalId: 'dp-old' }));
+    await anchor(store, 'dp-old');
+    await store.create(createInput({ proposalId: 'dp-new', content: 'replacement' }));
+
+    assert.deepEqual(await store.findNegativeAuthorizationBlocks(negativeLookup), [
+      { proposalId: 'dp-new', status: 'pending', targetCats: ['sonnet'] },
+      { proposalId: 'dp-old', status: 'superseded', targetCats: ['sonnet'] },
+    ]);
+
+    await store.abortStaged('dp-new', 'test rollback');
+    assert.deepEqual(await store.findNegativeAuthorizationBlocks(negativeLookup), [
+      { proposalId: 'dp-old', status: 'pending', targetCats: ['sonnet'] },
+    ]);
   });
 });

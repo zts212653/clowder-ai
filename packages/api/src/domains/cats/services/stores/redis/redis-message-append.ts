@@ -1,4 +1,5 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { normalizeJsonUnicode } from '../../../../../utils/json-unicode.js';
 import type { AppendMessageInput, MessageAppendListener, StoredMessage } from '../ports/MessageStore.js';
 import { assertValidAppendMessageInput, DEFAULT_THREAD_ID, generateSortableId } from '../ports/MessageStore.js';
 import { assertQueueCustodyMessageBinding } from '../ports/queued-message-custody.js';
@@ -108,7 +109,8 @@ export async function appendMessage(input: {
   loadById: (messageId: string) => Promise<StoredMessage | null>;
   onAppend?: MessageAppendListener;
 }): Promise<StoredMessage> {
-  const { redis, message, ttlSeconds, loadById, onAppend } = input;
+  const { redis, ttlSeconds, loadById, onAppend } = input;
+  const message = normalizeJsonUnicode(input.message);
   assertValidAppendMessageInput(message);
   assertQueueCustodyMessageBinding(message);
 

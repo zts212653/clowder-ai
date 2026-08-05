@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { derivePendingMemberInvocations, hasInvocationStartedExecuting } from '@/components/pending-member-projection';
+import { doesAssistantMessageRenderBubble } from '@/components/assistant-message-renderability';
+import { derivePendingMemberInvocations } from '@/components/pending-member-projection';
 import type { ChatMessage } from '@/stores/chat-types';
 
 function assistantMessage(catId: string, invocationId: string, turnInvocationId?: string): ChatMessage {
@@ -29,6 +30,32 @@ describe('derivePendingMemberInvocations', () => {
     expect(
       derivePendingMemberInvocations({ 'parent-1': { catId: 'codex', mode: 'execute', startedAt: 0 } }, messages),
     ).toEqual([]);
+    expect(doesAssistantMessageRenderBubble(messages[0])).toBe(true);
+  });
+
+  it('preserves trusted catId author precedence for legacy type=user records', () => {
+    const legacyCatMessage = assistantMessage('codex', 'parent-1', 'turn-1');
+    legacyCatMessage.type = 'user';
+    legacyCatMessage.isStreaming = false;
+
+    expect(doesAssistantMessageRenderBubble(legacyCatMessage)).toBe(true);
+    expect(
+      derivePendingMemberInvocations({ 'parent-1': { catId: 'codex', mode: 'execute', startedAt: 0 } }, [
+        legacyCatMessage,
+      ]),
+    ).toEqual([]);
+  });
+
+  it('keeps the pending avatar when a system error owns no assistant avatar slot', () => {
+    const systemError = assistantMessage('codex', 'parent-1', 'turn-1');
+    systemError.type = 'system';
+    systemError.content = 'Provider failed before the cat bubble appeared';
+    systemError.isStreaming = false;
+
+    expect(doesAssistantMessageRenderBubble(systemError)).toBe(false);
+    expect(
+      derivePendingMemberInvocations({ 'parent-1': { catId: 'codex', mode: 'execute', startedAt: 0 } }, [systemError]),
+    ).toEqual([{ invocationId: 'parent-1', catId: 'codex' }]);
   });
 
   it('matches the per-turn identity when the active slot uses turnInvocationId', () => {
@@ -100,67 +127,15 @@ describe('derivePendingMemberInvocations', () => {
       ]),
     ).toEqual([{ invocationId: 'shared', catId: 'codex-sol' }]);
   });
-});
 
-describe('hasInvocationStartedExecuting', () => {
-  const pending = { invocationId: 'inv-1', catId: 'codex' };
-  const lifecycle = (stage: 'child_spawned' | 'initialized' | 'thread_ready' | 'turn_accepted' | 'active') => ({
-    stage,
-    lastActivityAt: 0,
-    recoveryAttempt: 0,
-    turnStartSent: true,
-    turnAccepted: stage === 'turn_accepted' || stage === 'active',
-    itemObserved: stage === 'active',
-  });
+  it('keeps the placeholder when an identity-only assistant record would render no bubble', () => {
+    const identityOnly = assistantMessage('codex', 'parent-1', 'turn-1');
+    identityOnly.content = '';
+    identityOnly.isStreaming = false;
 
-  it('stays pending without lifecycle evidence for this invocation', () => {
-    expect(hasInvocationStartedExecuting(pending, undefined)).toBe(false);
-    expect(hasInvocationStartedExecuting(pending, { invocationId: 'inv-1' })).toBe(false);
-  });
-
-  it('stays pending while the backend is still starting up', () => {
     expect(
-      hasInvocationStartedExecuting(pending, { invocationId: 'inv-1', appServerLifecycle: lifecycle('child_spawned') }),
-    ).toBe(false);
-    expect(
-      hasInvocationStartedExecuting(pending, { invocationId: 'inv-1', appServerLifecycle: lifecycle('initialized') }),
-    ).toBe(false);
-    expect(
-      hasInvocationStartedExecuting(pending, { invocationId: 'inv-1', appServerLifecycle: lifecycle('thread_ready') }),
-    ).toBe(false);
-  });
-
-  it('exits once this invocation’s turn is accepted or active', () => {
-    expect(
-      hasInvocationStartedExecuting(pending, { invocationId: 'inv-1', appServerLifecycle: lifecycle('turn_accepted') }),
-    ).toBe(true);
-    expect(
-      hasInvocationStartedExecuting(pending, { invocationId: 'inv-1', appServerLifecycle: lifecycle('active') }),
-    ).toBe(true);
-  });
-
-  it('binds via turnInvocationId and strips the fan-out suffix', () => {
-    expect(
-      hasInvocationStartedExecuting(pending, { turnInvocationId: 'inv-1', appServerLifecycle: lifecycle('active') }),
-    ).toBe(true);
-    expect(
-      hasInvocationStartedExecuting(
-        { invocationId: 'inv-1-codex', catId: 'codex' },
-        { invocationId: 'inv-1', appServerLifecycle: lifecycle('active') },
-      ),
-    ).toBe(true);
-  });
-
-  it('ignores a stale lifecycle snapshot from a previous invocation', () => {
-    expect(
-      hasInvocationStartedExecuting(pending, { invocationId: 'inv-old', appServerLifecycle: lifecycle('active') }),
-    ).toBe(false);
-    expect(
-      hasInvocationStartedExecuting(pending, {
-        invocationId: 'inv-old',
-        turnInvocationId: 'inv-old-t',
-        appServerLifecycle: lifecycle('active'),
-      }),
-    ).toBe(false);
+      derivePendingMemberInvocations({ 'parent-1': { catId: 'codex', mode: 'execute', startedAt: 0 } }, [identityOnly]),
+    ).toEqual([{ invocationId: 'parent-1', catId: 'codex' }]);
+    expect(doesAssistantMessageRenderBubble(identityOnly)).toBe(false);
   });
 });

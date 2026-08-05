@@ -156,10 +156,10 @@ describe('F122B AC-B10: whisper mode + executing cats', () => {
       activeInvocations: { 'inv-1': { catId: 'opus', mode: 'execute', startedAt: Date.now() } },
       hasActiveInvocation: true,
     });
-    // Before whisper mode: should show queue placeholder (cat is active)
+    // Before whisper mode: product-default next-work placeholder (cat is active)
     act(() => root.render(React.createElement(ChatInput, { onSend: vi.fn(), hasActiveInvocation: true })));
     const textarea = container.querySelector('textarea')!;
-    expect(textarea.placeholder).toContain('排队');
+    expect(textarea.placeholder).toContain('下一件工作');
 
     // Enter whisper mode — default is no selection (F108B P1-1 fix)
     enterWhisperMode();
@@ -169,7 +169,7 @@ describe('F122B AC-B10: whisper mode + executing cats', () => {
     const codexChip = chips.find((b) => b.textContent?.includes('缅因猫'));
     act(() => codexChip?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
 
-    // After selecting idle cat: should show whisper placeholder, not queue
+    // After selecting idle cat: should show whisper placeholder, not next-work custody
     expect(textarea.placeholder).toBe('悄悄话...');
   });
 

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 
 const CAT = 'codex';
 
-function createCodexEventService(transformCodexEvent) {
+function createCodexEventService(transformCodexEvent, finalizeCodexStream) {
   return {
     async *invoke() {
       const state = {
@@ -26,6 +26,8 @@ function createCodexEventService(transformCodexEvent) {
         if (result === null) continue;
         for (const msg of Array.isArray(result) ? result : [result]) yield msg;
       }
+      const finalSignature = finalizeCodexStream(state, CAT);
+      if (finalSignature) yield finalSignature;
       yield { type: 'done', catId: CAT, timestamp: Date.now() };
     },
   };
@@ -65,12 +67,12 @@ function createMockDeps(service, appendCalls) {
 }
 
 test('#1272: Codex live final text and refreshed persisted message contain one signature', async () => {
-  const { transformCodexEvent } = await import(
+  const { finalizeCodexStream, transformCodexEvent } = await import(
     '../dist/domains/cats/services/agents/providers/codex-event-transform.js'
   );
   const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
   const appendCalls = [];
-  const deps = createMockDeps(createCodexEventService(transformCodexEvent), appendCalls);
+  const deps = createMockDeps(createCodexEventService(transformCodexEvent, finalizeCodexStream), appendCalls);
 
   const yielded = [];
   for await (const msg of routeSerial(deps, [CAT], '排查重复回复', 'user-1272', 'thread-1272')) {

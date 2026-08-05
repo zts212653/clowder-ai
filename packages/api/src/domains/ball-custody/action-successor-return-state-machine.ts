@@ -1,3 +1,4 @@
+import type { CanonicalActionTerminalPredicate } from './ActionTerminalPredicateCatalog.js';
 import { recordActionSuccessorOutcome } from './action-successor-outcome-state-machine.js';
 import type { ActionSuccessorLease } from './action-successor-state-machine.js';
 
@@ -10,6 +11,8 @@ export interface ActionSuccessorReturnTransition {
   fromGeneration: number;
   toGeneration: number;
   rejectingCatId: string;
+  /** Optional for rolling compatibility with transitions written before F167 returned reentry. */
+  rejectingThreadId?: string;
   predecessorCatId: string;
   predecessorThreadId: string;
   groundingEvidenceRef: string;
@@ -36,6 +39,36 @@ export interface ReturnActionSuccessorInput {
   groundingEvidenceRef: string;
   now: number;
 }
+
+export type ReturnedActionSuccessorProof =
+  | { kind: 'returned_fence'; leaseId: string; generation: number }
+  | { kind: 'return_delivery'; evidenceRef: string };
+
+export interface ReattachReturnedActionSuccessorInput {
+  expectedGeneration: number;
+  holderCatIds: string[];
+  holderThreadId: string;
+  dispatchId: string;
+  terminalPredicate: CanonicalActionTerminalPredicate;
+  evidenceRef: string;
+  freshnessEvidenceRef: string;
+  returnedHolderCatId: string;
+  returnedHolderThreadId: string;
+  returnProof: ReturnedActionSuccessorProof;
+  now: number;
+}
+
+export type ReattachReturnedActionSuccessorResult = {
+  outcome:
+    | 'reattached'
+    | 'stale_generation'
+    | 'holder_mismatch'
+    | 'return_proof_required'
+    | 'candidate_present'
+    | 'completion_present'
+    | 'terminal_predicate_mismatch';
+  lease: ActionSuccessorLease;
+};
 
 function requireNonEmpty(value: string | undefined, field: string): string {
   const normalized = value?.trim();
@@ -81,6 +114,7 @@ export function returnActionSuccessorToPredecessor(
     fromGeneration: current.generation,
     toGeneration,
     rejectingCatId,
+    rejectingThreadId,
     predecessorCatId: current.predecessorCatId,
     predecessorThreadId: current.predecessorThreadId,
     groundingEvidenceRef,
@@ -109,6 +143,107 @@ export function returnActionSuccessorToPredecessor(
       returnDeliveryLastAttemptAt: undefined,
       returnDeliveryOverdueObservedAt: undefined,
       returnTransitions: [...current.returnTransitions, transition],
+      revision: current.revision + 1,
+      updatedAt: input.now,
+    },
+  };
+}
+
+export function isReturnedActionSuccessorHolderGeneration(current: ActionSuccessorLease): boolean {
+  const transition = (current.returnTransitions ?? []).at(-1);
+  if (!transition || current.mode !== 'single') return false;
+  return (
+    transition.toGeneration === current.generation &&
+    current.holderCatIds.length === 1 &&
+    current.holderCatIds[0] === transition.predecessorCatId &&
+    current.holderThreadId === transition.predecessorThreadId &&
+    current.predecessorCatId === transition.rejectingCatId &&
+    Boolean(current.predecessorThreadId) &&
+    (transition.rejectingThreadId === undefined || transition.rejectingThreadId === current.predecessorThreadId)
+  );
+}
+
+function hasExactReturnProof(current: ActionSuccessorLease, proof: ReturnedActionSuccessorProof): boolean {
+  if (proof.kind === 'returned_fence') {
+    return proof.leaseId === current.leaseId && proof.generation === current.generation;
+  }
+  return (
+    current.returnDeliveryState === 'delivered' &&
+    current.returnDeliveryEvidenceRef === proof.evidenceRef &&
+    current.evidenceRefs.includes(proof.evidenceRef)
+  );
+}
+
+export function reattachReturnedActionSuccessor(
+  current: ActionSuccessorLease,
+  input: ReattachReturnedActionSuccessorInput,
+): ReattachReturnedActionSuccessorResult {
+  if (input.expectedGeneration !== current.generation) return { outcome: 'stale_generation', lease: current };
+  const transition = (current.returnTransitions ?? []).at(-1);
+  if (
+    !transition ||
+    !isReturnedActionSuccessorHolderGeneration(current) ||
+    input.returnedHolderCatId.trim() !== transition.predecessorCatId ||
+    input.returnedHolderThreadId.trim() !== transition.predecessorThreadId ||
+    current.holderCatIds[0] !== input.returnedHolderCatId.trim() ||
+    current.holderThreadId !== input.returnedHolderThreadId.trim()
+  ) {
+    return { outcome: 'holder_mismatch', lease: current };
+  }
+  if (Object.keys(current.completionCandidates).length > 0) {
+    return { outcome: 'candidate_present', lease: current };
+  }
+  if (current.status !== 'active' || Object.keys(current.holderOutcomes).length > 0) {
+    return { outcome: 'completion_present', lease: current };
+  }
+  if (!hasExactReturnProof(current, input.returnProof)) {
+    return { outcome: 'return_proof_required', lease: current };
+  }
+  if (!current.terminalPredicate || current.terminalPredicate.identityKey !== input.terminalPredicate.identityKey) {
+    return { outcome: 'terminal_predicate_mismatch', lease: current };
+  }
+  const holderCatIds = [...new Set(input.holderCatIds.map((catId) => catId.trim()).filter(Boolean))];
+  if (holderCatIds.length !== 1 || holderCatIds.length !== input.holderCatIds.length) {
+    throw new Error('single mode requires exactly one unique non-empty holder');
+  }
+  const holderThreadId = requireNonEmpty(input.holderThreadId, 'holderThreadId');
+  const dispatchId = requireNonEmpty(input.dispatchId, 'dispatchId');
+  const evidenceRef = requireNonEmpty(input.evidenceRef, 'evidenceRef');
+  const freshnessEvidenceRef = requireNonEmpty(input.freshnessEvidenceRef, 'freshnessEvidenceRef');
+  const returnProofEvidenceRef =
+    input.returnProof.kind === 'return_delivery' ? input.returnProof.evidenceRef : undefined;
+  return {
+    outcome: 'reattached',
+    lease: {
+      ...current,
+      holderCatIds,
+      holderThreadId,
+      predecessorCatId: input.returnedHolderCatId.trim(),
+      predecessorThreadId: input.returnedHolderThreadId.trim(),
+      issuerStandingEvidenceRef: evidenceRef,
+      dispatchId,
+      terminalPredicateState: { kind: 'predicate_backed' },
+      terminalPredicate: input.terminalPredicate,
+      generation: current.generation + 1,
+      status: 'active',
+      holderOutcomes: {},
+      completionCandidates: {},
+      evidenceRefs: [
+        ...new Set([
+          ...current.evidenceRefs,
+          current.issuerStandingEvidenceRef,
+          transition.groundingEvidenceRef,
+          evidenceRef,
+          freshnessEvidenceRef,
+          ...(returnProofEvidenceRef ? [returnProofEvidenceRef] : []),
+        ]),
+      ],
+      returnDeliveryState: undefined,
+      returnDeliveryEvidenceRef: undefined,
+      returnDeliveryAttemptCount: undefined,
+      returnDeliverySlaUntil: undefined,
+      returnDeliveryLastAttemptAt: undefined,
+      returnDeliveryOverdueObservedAt: undefined,
       revision: current.revision + 1,
       updatedAt: input.now,
     },

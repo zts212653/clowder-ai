@@ -1,10 +1,16 @@
 'use client';
 
-import type { QueueReminderAttempt } from '@cat-cafe/shared';
+import type { FreshnessCarrierCapability, QueueReminderAttempt } from '@cat-cafe/shared';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { LongFormReader } from '@/components/content-overflow';
 import type { QueueEntry } from '@/stores/chatStore';
+import {
+  authorIntentLabel,
+  carrierCapabilityLabel,
+  classifyFreshnessCarrierSupport,
+  unsupportedCarrierCopy,
+} from './message-disposition-presentation';
 import { UNSETTLED_SEEN_LABEL } from './queue-receipt-projection';
 
 const SOURCE_CATEGORY_LABEL: Record<string, string> = {
@@ -25,6 +31,7 @@ const TARGET_STATE_LABEL = {
   seen: UNSETTLED_SEEN_LABEL,
   failed: '处理失败 · 已回队列',
   steering: 'Steer 中',
+  withdrawn: '已撤出待处理 · 历史保留',
   handled: '已处理',
 } as const;
 
@@ -56,6 +63,7 @@ function QueueTargetReceiptStatus({
   catId,
   state,
   activeInvocationId,
+  activeCarrierCapability,
   onRemind,
   isReminding,
 }: {
@@ -63,6 +71,7 @@ function QueueTargetReceiptStatus({
   catId: string;
   state: keyof typeof TARGET_STATE_LABEL;
   activeInvocationId?: string;
+  activeCarrierCapability?: FreshnessCarrierCapability;
   onRemind: (id: string, targetCatId: string) => void;
   isReminding: boolean;
 }) {
@@ -72,7 +81,15 @@ function QueueTargetReceiptStatus({
     ? reminderAttempts.some((attempt) => attempt.targetCatId === catId && attempt.invocationId === activeInvocationId)
     : false;
   const canRemind =
-    !!activeInvocationId && (state === 'queued' || state === 'notified') && !alreadyAttemptedInActiveTurn;
+    !!activeInvocationId &&
+    classifyFreshnessCarrierSupport([activeCarrierCapability]) === 'exact' &&
+    (state === 'queued' || state === 'notified') &&
+    !alreadyAttemptedInActiveTurn;
+  const targetReceipt = entry.queueReceipt?.targets.find((target) => target.catId === catId);
+  const intentLabel = authorIntentLabel(targetReceipt?.authorIntent);
+  const reminderCapabilityCopy = activeInvocationId
+    ? unsupportedCarrierCopy(classifyFreshnessCarrierSupport([activeCarrierCapability]), '提醒')
+    : undefined;
 
   return (
     <span
@@ -81,7 +98,16 @@ function QueueTargetReceiptStatus({
       }`}
     >
       <span>{`${catId} · ${queueTargetStateLabel(entry, catId, state)}`}</span>
+      {intentLabel && <span data-queue-author-intent>· {intentLabel}</span>}
+      {targetReceipt?.authorIntent?.carrierCapability && (
+        <span data-queue-carrier-capability>
+          · {carrierCapabilityLabel(targetReceipt.authorIntent.carrierCapability)}
+        </span>
+      )}
       {latestReminder && <span>· {REMINDER_STATE_LABEL[latestReminder.state]}</span>}
+      {reminderCapabilityCopy && (state === 'queued' || state === 'notified') && (
+        <span className="text-conn-amber-text">· {reminderCapabilityCopy}</span>
+      )}
       {canRemind && (
         <button
           type="button"
@@ -110,6 +136,7 @@ export interface QueueEntryRowProps {
   onSteer: (id: string) => void;
   onRemind: (id: string, targetCatId: string) => void;
   activeInvocationIdByCatId: Readonly<Record<string, string>>;
+  activeCarrierCapabilityByCatId: Readonly<Record<string, FreshnessCarrierCapability | undefined>>;
   remindingTargetKeys: ReadonlySet<string>;
 }
 
@@ -137,6 +164,7 @@ function QueueEntryRow({
   onSteer,
   onRemind,
   activeInvocationIdByCatId,
+  activeCarrierCapabilityByCatId,
   remindingTargetKeys,
   dragHandleProps,
 }: QueueEntryRowProps & { dragHandleProps?: Record<string, unknown> }) {
@@ -164,7 +192,7 @@ function QueueEntryRow({
         aria-label="Drag to reorder"
         {...dragHandleProps}
       >
-        <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+        <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
           <path d="M7 2a2 2 0 10.001 4.001A2 2 0 007 2zm0 6a2 2 0 10.001 4.001A2 2 0 007 8zm0 6a2 2 0 10.001 4.001A2 2 0 007 14zm6-8a2 2 0 10-.001-4.001A2 2 0 0013 6zm0 2a2 2 0 10.001 4.001A2 2 0 0013 8zm0 6a2 2 0 10.001 4.001A2 2 0 0013 14z" />
         </svg>
       </button>
@@ -246,6 +274,7 @@ function QueueEntryRow({
                   catId={catId}
                   state={state}
                   activeInvocationId={activeInvocationIdByCatId[catId]}
+                  activeCarrierCapability={activeCarrierCapabilityByCatId[catId]}
                   onRemind={onRemind}
                   isReminding={remindingTargetKeys.has(remindKey)}
                 />
@@ -286,8 +315,8 @@ function QueueEntryRow({
         type="button"
         onClick={() => onRemove(entry.id)}
         className="p-1 text-cafe-muted hover:text-conn-red-text transition-colors shrink-0"
-        title="删除"
-        aria-label="删除"
+        title="撤出待处理（保留原消息）"
+        aria-label="撤出待处理"
       >
         <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
           <path

@@ -208,7 +208,8 @@ export async function* routeParallel(
       },
       queueChecker: getQueuedFreshnessMessagesForCat
         ? {
-            getQueuedForThread: (tid, uid, targetCatId) => getQueuedFreshnessMessagesForCat(tid, uid, targetCatId),
+            getQueuedForThread: (tid, uid, targetCatId) =>
+              getQueuedFreshnessMessagesForCat(tid, uid, targetCatId, options.parentInvocationId),
           }
         : undefined,
       onEvent: deps.freshnessEventLog

@@ -1,3 +1,4 @@
+import { performance } from 'node:perf_hooks';
 import type { ISessionChainStore } from '../cats/services/stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../cats/services/stores/ports/ThreadStore.js';
 import type {
@@ -13,7 +14,17 @@ export interface DailyContextReflectionProducerDeps {
   sessionChainStore: Pick<ISessionChainStore, 'getChainByThread'>;
   reflectionProducer: Pick<SessionReflectionProducer, 'reflectSessions'>;
   now?: () => number;
+  monotonicNow?: () => number;
   getHouseholdTimeZone?: () => string | undefined;
+}
+
+export interface DailyContextReflectionTelemetry {
+  threadCount: number;
+  threadListMs: number;
+  sessionScanMs: number;
+  reflectionMs: number;
+  totalMs: number;
+  activeWorkAtEnd: number;
 }
 
 export interface DailyContextReflectionRunResult {
@@ -26,6 +37,7 @@ export interface DailyContextReflectionRunResult {
   rejected: number;
   cuesDelivered: number;
   quiet: boolean;
+  telemetry: DailyContextReflectionTelemetry;
 }
 
 export interface DailyContextReflectionRunOptions {
@@ -34,24 +46,39 @@ export interface DailyContextReflectionRunOptions {
 
 export class DailyContextReflectionProducer {
   private readonly now: () => number;
+  private readonly monotonicNow: () => number;
 
   constructor(private readonly deps: DailyContextReflectionProducerDeps) {
     if (!deps.ownerUserId.trim()) throw new Error('daily reflection ownerUserId is required');
     this.now = deps.now ?? Date.now;
+    this.monotonicNow = deps.monotonicNow ?? performance.now.bind(performance);
   }
 
   async run(options: DailyContextReflectionRunOptions = {}): Promise<DailyContextReflectionRunResult> {
     throwIfAborted(options.signal);
+    const startedAt = this.monotonicNow();
+    let activeWork = 0;
+    const trackWork = async <T>(work: () => T | Promise<T>): Promise<T> => {
+      activeWork += 1;
+      try {
+        return await work();
+      } finally {
+        activeWork -= 1;
+      }
+    };
     const timeZone = this.deps.getHouseholdTimeZone?.();
     const sourceLocalDate = previousHouseholdDateKey(this.now(), timeZone);
-    const threads = await this.deps.threadStore.list(this.deps.ownerUserId, options);
+    const threads = await trackWork(() => this.deps.threadStore.list(this.deps.ownerUserId, options));
+    const threadListMs = elapsedMs(startedAt, this.monotonicNow());
     throwIfAborted(options.signal);
+    const sessionScanStartedAt = this.monotonicNow();
     const sessionChains = [];
     for (const thread of threads) {
       throwIfAborted(options.signal);
-      sessionChains.push(await this.deps.sessionChainStore.getChainByThread(thread.id, options));
+      sessionChains.push(await trackWork(() => this.deps.sessionChainStore.getChainByThread(thread.id, options)));
       throwIfAborted(options.signal);
     }
+    const sessionScanMs = elapsedMs(sessionScanStartedAt, this.monotonicNow());
     const sessions = sessionChains
       .flat()
       .filter(
@@ -80,16 +107,20 @@ export class DailyContextReflectionProducer {
       batches.set(session.catId, batch);
     }
 
+    const reflectionStartedAt = this.monotonicNow();
     const results: SessionReflectionRunResult[] = [];
     for (const batch of batches.values()) {
       throwIfAborted(options.signal);
       results.push(
-        await this.deps.reflectionProducer.reflectSessions(batch, {
-          sourceLocalDate,
-          signal: options.signal,
-        }),
+        await trackWork(() =>
+          this.deps.reflectionProducer.reflectSessions(batch, {
+            sourceLocalDate,
+            signal: options.signal,
+          }),
+        ),
       );
     }
+    const reflectionMs = elapsedMs(reflectionStartedAt, this.monotonicNow());
     const totals = results.reduce(
       (sum, result) => ({
         extracted: sum.extracted + result.extracted,
@@ -107,8 +138,20 @@ export class DailyContextReflectionProducer {
       catBatches: batches.size,
       ...totals,
       quiet: totals.accepted === 0 && totals.rejected === 0 && totals.cuesDelivered === 0,
+      telemetry: {
+        threadCount: threads.length,
+        threadListMs,
+        sessionScanMs,
+        reflectionMs,
+        totalMs: elapsedMs(startedAt, this.monotonicNow()),
+        activeWorkAtEnd: activeWork,
+      },
     };
   }
+}
+
+function elapsedMs(startedAt: number, completedAt: number): number {
+  return Math.max(0, Math.round(completedAt - startedAt));
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {

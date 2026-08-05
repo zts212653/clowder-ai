@@ -18,7 +18,11 @@ import {
   type CodexAppServerLifecycleStage,
 } from './CodexAppServerLifecycle.js';
 import { CodexAppServerNotificationQueue } from './CodexAppServerNotificationQueue.js';
-import { classifyCodexAppServerToolSurface, classifyCodexSafeBoundary } from './codex-app-server-boundary.js';
+import {
+  classifyCodexAppServerToolSurface,
+  classifyCodexProtocolItem,
+  classifyCodexSafeBoundary,
+} from './codex-app-server-boundary.js';
 import { buildCodexAppServerThreadParams, closeCodexAppServerTransport } from './codex-app-server-client-helpers.js';
 
 export type {
@@ -180,6 +184,18 @@ export class CodexAppServerClient {
         const record = asCodexAppServerRecord(envelope);
         const params = asCodexAppServerRecord(record?.params);
         const itemObserved = record?.method === 'item/started' || record?.method === 'item/completed';
+        const exactCompletedItem =
+          record?.method === 'item/completed' && params?.threadId === threadId && params?.turnId === activeTurnId;
+        if (exactCompletedItem && this.deps.freshnessController?.observeProtocolItem) {
+          const observation = classifyCodexProtocolItem(envelope);
+          if (observation) {
+            try {
+              await this.deps.freshnessController.observeProtocolItem(observation);
+            } catch {
+              // Protocol telemetry must not abort provider work.
+            }
+          }
+        }
         if (record?.method === 'turn/started' || itemObserved) {
           yield this.lifecycle.event(
             this.lifecycle.transition('active', {

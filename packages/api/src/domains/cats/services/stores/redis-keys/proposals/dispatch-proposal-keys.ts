@@ -29,4 +29,23 @@ export const DispatchProposalKeys = {
    * Same-K create atomically supersedes the previous pending proposal (INV-J5).
    */
   lineage: (lineageKey: string) => `dispatch-proposal-lineage:${lineageKey}`,
+
+  /**
+   * #1291 deny-only candidate index. The encoded suffix is
+   * owner×sourceInvocation×targetThread×canonicalTargetCat; members are proposal IDs.
+   * Canonical proposal fields are always revalidated before a callback is blocked.
+   */
+  negativeAuthorization: (negativeAuthorizationKey: string) =>
+    `dispatch-proposal-negative-authorization:${negativeAuthorizationKey}`,
+
+  /** Legacy candidate projection; bounded at lookup by a durable cutover epoch. */
+  legacyNegativeAuthorization: (legacyNegativeAuthorizationKey: string) =>
+    `dispatch-proposal-legacy-negative-authorization:${legacyNegativeAuthorizationKey}`,
+
+  /** Durable shadow → required activation point for unresolved legacy proposals. */
+  negativeAuthorizationLegacyCutover: 'dispatch-proposal-negative-authorization-legacy-cutover' as const,
+
+  /** Rebuild completion barrier: cutover is invalid until canonical indices have been rebuilt. */
+  negativeAuthorizationLegacyRebuildCompletedAt:
+    'dispatch-proposal-negative-authorization-legacy-rebuild-completed-at' as const,
 } as const;

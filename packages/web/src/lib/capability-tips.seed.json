@@ -735,6 +735,31 @@
     "owner": "codex-sol"
   },
   {
+    "id": "feature-author-message-disposition",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F264-per-target-message-receipt.md",
+      "anchor": "Author-Declared Message Disposition（2026-08-04）"
+    },
+    "structureSource": {
+      "path": "docs/discussions/2026-08-04-f264-author-declared-message-disposition.md",
+      "anchor": "产品判词"
+    },
+    "bodySource": {
+      "path": "docs/features/F264-per-target-message-receipt.md",
+      "anchor": "Author-Declared Message Disposition（2026-08-04）"
+    },
+    "contexts": ["thinking", "long_running"],
+    "audience": ["cvo"],
+    "body": "猫正在工作时，新消息可以选择「接着当前工作」或「作为下一件工作」；单次选择优先于本对话与全局偏好，猫空闲时则直接开始普通新回合。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "消息去向怎么选",
+      "draftPrompt": "请告诉我猫工作期间的「接着当前工作」和「作为下一件工作」分别适合什么情况，以及单次、对话和全局偏好如何继承。"
+    },
+    "owner": "codex-sol"
+  },
+  {
     "id": "feature-voting",
     "kind": "feature",
     "sourceRef": { "path": "docs/features/F079-voting-system.md", "anchor": "Voting System" },

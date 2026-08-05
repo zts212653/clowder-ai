@@ -354,6 +354,21 @@ describe('QueuePanel hides processing entries', () => {
     expect(container.textContent).not.toContain('gpt52 · 已处理');
   });
 
+  it('keeps author-withdrawn entries in history rather than the queue panel', () => {
+    useChatStore.setState({
+      queue: [withTargetStates({ opus: 'withdrawn' })],
+      queuePaused: false,
+      activeInvocations: {},
+    });
+    act(() => {
+      root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
+    });
+
+    expect(container.textContent).not.toContain('待处理');
+    expect(container.querySelector('[data-testid="steer-q1"]')).toBeNull();
+    expect(container.querySelector('[data-testid="queue-recover"]')).toBeNull();
+  });
+
   it('reports when recovery cannot start instead of failing silently', async () => {
     const { apiFetch } = await import('@/utils/api-client');
     vi.mocked(apiFetch).mockResolvedValueOnce({ ok: true, json: async () => ({ started: false }) } as Response);

@@ -206,7 +206,10 @@ test('terminates an OpenCode process tree after request capture', async () => {
 
 test(
   'OpenCode v1.18.9 sends the configured upstream model id',
-  { skip: openCodeVersion === null, timeout: 40_000 },
+  {
+    skip: !requireOpenCode && openCodeVersion !== requiredOpenCodeVersion,
+    timeout: 40_000,
+  },
   async () => {
     assert.equal(
       openCodeVersion,

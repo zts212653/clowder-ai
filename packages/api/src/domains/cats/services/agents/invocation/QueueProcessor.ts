@@ -152,6 +152,7 @@ interface ProcessingSlotReservation {
   readonly entryId: string;
   readonly userId: string;
   invocationId?: string;
+  trackerStarted?: true;
 }
 
 interface MarkDeliveredAndEmitResult {
@@ -694,6 +695,45 @@ export class QueueProcessor {
     return true;
   }
 
+  private publishRequeuedPrestartEntry(entry: QueueEntry): void {
+    void (async () => {
+      try {
+        await this.persistQueueEntry(entry);
+      } catch (err) {
+        this.deps.log.error(
+          { err, threadId: entry.threadId, userId: entry.userId, entryId: entry.id },
+          '[QueueProcessor] zombie pre-start Queue custody persistence failed',
+        );
+      }
+      try {
+        await emitQueueUpdated(
+          this.deps.socketManager,
+          entry.userId,
+          entry.threadId,
+          this.deps.queue.list(entry.threadId, entry.userId),
+          this.deps.messageStore,
+          'zombie_prestart_requeued',
+        );
+      } catch (err) {
+        this.deps.log.warn(
+          { err, threadId: entry.threadId, userId: entry.userId, entryId: entry.id },
+          '[QueueProcessor] zombie pre-start queue update failed',
+        );
+      }
+    })();
+  }
+
+  private recoverExpiredPrestartReservation(threadId: string, reservation: ProcessingSlotReservation): boolean {
+    if (reservation.trackerStarted) return false;
+    const current = this.deps.queue.getEntrySnapshot(threadId, reservation.userId, reservation.entryId);
+    if (current?.status !== 'processing') return false;
+    if (!this.deps.queue.rollbackProcessing(threadId, reservation.entryId)) return false;
+    const requeued = this.deps.queue.getEntrySnapshot(threadId, reservation.userId, reservation.entryId);
+    if (requeued?.status !== 'queued') return false;
+    this.publishRequeuedPrestartEntry(requeued);
+    return true;
+  }
+
   private bindProcessingSlotInvocation(
     key: string,
     reservation: ProcessingSlotReservation,
@@ -887,9 +927,20 @@ export class QueueProcessor {
       const catId = QueueProcessor.parseSlotKey(key)?.catId;
       if (!catId) continue;
       if (!this.deps.invocationTracker.has(threadId, catId)) {
-        this.releaseProcessingSlot(key, reservation);
+        if (!this.releaseProcessingSlot(key, reservation)) continue;
+        // Before tracker installation no provider body can have started, even if record creation
+        // already bound an invocationId. Recover only that exact user-scoped row to `queued`;
+        // once tracker ownership existed, #2917/#2928 lifecycle evidence owns terminal
+        // convergence and the TTL backstop must not guess that replay is safe.
+        const queueEntryRequeued = this.recoverExpiredPrestartReservation(threadId, reservation);
         this.deps.log.warn(
-          { threadId, catId, entryId: reservation.entryId, ageMs: now - reservation.startedAt },
+          {
+            threadId,
+            catId,
+            entryId: reservation.entryId,
+            ageMs: now - reservation.startedAt,
+            queueEntryRequeued,
+          },
           '[F118 D4] zombie processingSlot released',
         );
       }
@@ -932,8 +983,9 @@ export class QueueProcessor {
     threadId: string,
     userId: string,
     catId: string,
+    parentInvocationId?: string,
   ): Array<{ entryId: string; source: string; content: string; callerCatId?: string; messageId?: string | null }> {
-    return this.deps.queue.getQueuedFreshnessMessagesForCat(threadId, userId, catId);
+    return this.deps.queue.getQueuedFreshnessMessagesForCat(threadId, userId, catId, { parentInvocationId });
   }
 
   /**
@@ -1826,6 +1878,34 @@ export class QueueProcessor {
     }
   }
 
+  private async fallbackAuthorIntentsForTerminalParent(
+    threadId: string,
+    catId: string,
+    parentInvocationId: string | undefined,
+  ): Promise<void> {
+    if (!parentInvocationId) return;
+    const changed = this.deps.queue.fallbackAuthorIntentsForParentAcrossUsers(
+      threadId,
+      catId,
+      parentInvocationId,
+      Date.now(),
+    );
+    if (changed.length === 0) return;
+    for (const entry of changed) {
+      await this.persistQueueEntry(this.deps.queue.getEntrySnapshot(threadId, entry.userId, entry.entryId));
+    }
+    for (const userId of new Set(changed.map((entry) => entry.userId))) {
+      await emitQueueUpdated(
+        this.deps.socketManager,
+        userId,
+        threadId,
+        this.deps.queue.list(threadId, userId),
+        this.deps.messageStore,
+        'author_intent_fallback',
+      );
+    }
+  }
+
   private async markDeliveredAndEmit(
     userId: string,
     threadId: string,
@@ -2099,6 +2179,7 @@ export class QueueProcessor {
           parentInvocationId: invocationId,
           preferredInvocationId,
         });
+        await this.fallbackAuthorIntentsForTerminalParent(threadId, failedCatId, invocationId);
         await this.markQueuedFailedOnFailure(threadId, failedCatId, preferredInvocationId, attemptedQueueEntryIds);
       }
     }
@@ -2137,6 +2218,9 @@ export class QueueProcessor {
               parentInvocationId: invocationId,
               preferredInvocationId: terminalInvocationIdByCatId[failedCatId] ?? invocationId,
             })) || exactReceiptSettlementBlocked;
+        }
+        for (const completedCatId of successfulCatIds) {
+          await this.fallbackAuthorIntentsForTerminalParent(threadId, completedCatId, invocationId);
         }
         if (exactReceiptSettlementBlocked) {
           this.deps.log.error(
@@ -3336,6 +3420,7 @@ export class QueueProcessor {
 
       // 2. Start tracking ALL target cats (shared controller for F5/reconnect recovery)
       controller = invocationTracker.startAll(threadId, targetCats, userId, invocationId);
+      if (processingReservation) processingReservation.trackerStarted = true;
 
       // F216 c3: supersede tombstone guard. If a same-turn follow-up arrived during the
       // pre-start window (between markProcessingById and startAll), callback-a2a-trigger
@@ -3656,8 +3741,8 @@ export class QueueProcessor {
           // keeps streaming. (See InvocationTracker.startAll returning a fresh batchController.)
           signalForCat: (catId: string) => invocationTracker.getController?.(threadId, catId)?.signal,
           queueHasQueuedMessages: (tid: string) => queue.hasQueuedNonAgentForThread(tid),
-          getQueuedFreshnessMessagesForCat: (tid: string, uid: string, catId: string) =>
-            queue.getQueuedFreshnessMessagesForCat(tid, uid, catId, { excludeEntryId: entry.id }),
+          getQueuedFreshnessMessagesForCat: (tid: string, uid: string, catId: string, parentInvocationId?: string) =>
+            queue.getQueuedFreshnessMessagesForCat(tid, uid, catId, { excludeEntryId: entry.id, parentInvocationId }),
           deferA2AEnqueue: (e: Parameters<NonNullable<RouteOptions['deferA2AEnqueue']>>[0]) =>
             queue.enqueue({ ...e, ownerAuthProvenance: entry.ownerAuthProvenance }),
           // F254 B3: freshness re-invoke enqueue — strips freshnessContext before queueing

@@ -18,6 +18,7 @@ import type {
   SchedulerMessageExtra,
 } from '@cat-cafe/shared';
 import { isCrossThreadProvenance } from '@cat-cafe/shared';
+import { normalizeJsonUnicode } from '../../../../../utils/json-unicode.js';
 import type { MessageMetadata } from '../../types.js';
 import {
   getTimelineOrderTime,
@@ -681,10 +682,15 @@ export class MessageStore {
    * Append a message to the store. Returns the stored message with generated id.
    */
   append(msg: AppendMessageInput): StoredMessage {
-    assertValidAppendMessageInput(msg);
-    assertQueueCustodyMessageBinding(msg);
-    const threadId = msg.threadId ?? DEFAULT_THREAD_ID;
-    const idempotencyIndexKey = this.buildIdempotencyIndexKey(msg.userId, threadId, msg.idempotencyKey);
+    const normalizedMessage = normalizeJsonUnicode(msg);
+    assertValidAppendMessageInput(normalizedMessage);
+    assertQueueCustodyMessageBinding(normalizedMessage);
+    const threadId = normalizedMessage.threadId ?? DEFAULT_THREAD_ID;
+    const idempotencyIndexKey = this.buildIdempotencyIndexKey(
+      normalizedMessage.userId,
+      threadId,
+      normalizedMessage.idempotencyKey,
+    );
     if (idempotencyIndexKey) {
       const existingId = this.idempotencyIndex.get(idempotencyIndexKey);
       if (existingId) {
@@ -696,12 +702,12 @@ export class MessageStore {
       }
     }
 
-    const { idempotencyKey, ...payload } = msg;
+    const { idempotencyKey, ...payload } = normalizedMessage;
     void idempotencyKey;
     const stored: StoredMessage = {
       ...payload,
       ...(payload.queueCustody ? { queueCustody: cloneQueuedMessageCustody(payload.queueCustody) } : {}),
-      id: generateSortableId(msg.timestamp),
+      id: generateSortableId(normalizedMessage.timestamp),
       threadId,
     };
     this.messages.push(stored);
@@ -745,24 +751,26 @@ export class MessageStore {
   }
 
   appendIfThreadFrontier(msg: AppendMessageInput, expectedLatestMessageId: string | null): ThreadFrontierAppendResult {
-    assertValidAppendMessageInput(msg);
-    const threadId = msg.threadId ?? DEFAULT_THREAD_ID;
-    if (msg.idempotencyKey) {
-      const existing = this.getByIdempotencyKey(msg.userId, threadId, msg.idempotencyKey);
+    const normalizedMessage = normalizeJsonUnicode(msg);
+    assertValidAppendMessageInput(normalizedMessage);
+    const threadId = normalizedMessage.threadId ?? DEFAULT_THREAD_ID;
+    if (normalizedMessage.idempotencyKey) {
+      const existing = this.getByIdempotencyKey(normalizedMessage.userId, threadId, normalizedMessage.idempotencyKey);
       if (existing) return { kind: 'committed', message: existing };
     }
     const actualLatestMessageId = this.getLatestThreadMessageIdIncludingQueued(threadId);
     if (actualLatestMessageId !== expectedLatestMessageId) {
       return { kind: 'frontier_advanced', actualLatestMessageId };
     }
-    return { kind: 'committed', message: this.append(msg) };
+    return { kind: 'committed', message: this.append(normalizedMessage) };
   }
 
   appendAndObservePriorFrontier(msg: AppendMessageInput): ThreadObservedAppendResult {
-    assertValidAppendMessageInput(msg);
-    const threadId = msg.threadId ?? DEFAULT_THREAD_ID;
-    if (msg.idempotencyKey) {
-      const existing = this.getByIdempotencyKey(msg.userId, threadId, msg.idempotencyKey);
+    const normalizedMessage = normalizeJsonUnicode(msg);
+    assertValidAppendMessageInput(normalizedMessage);
+    const threadId = normalizedMessage.threadId ?? DEFAULT_THREAD_ID;
+    if (normalizedMessage.idempotencyKey) {
+      const existing = this.getByIdempotencyKey(normalizedMessage.userId, threadId, normalizedMessage.idempotencyKey);
       if (existing) {
         const freshness = existing.extra?.freshness;
         return {
@@ -776,9 +784,9 @@ export class MessageStore {
     }
     const priorFrontierMessageId = this.getLatestThreadMessageIdIncludingQueued(threadId);
     const message = this.append({
-      ...msg,
+      ...normalizedMessage,
       extra: {
-        ...msg.extra,
+        ...normalizedMessage.extra,
         freshness: { kind: 'scan_pending', priorFrontierMessageId },
       },
     });

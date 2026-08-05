@@ -197,39 +197,67 @@ describe('InvocationQueue', () => {
   });
 
   it('markQueuedSeen hides queued freshness only for that cat target', () => {
-    const r = queue.enqueue(entry({ content: 'queued for two cats', targetCats: ['opus', 'codex'] }));
+    const r = queue.enqueue(
+      entry({
+        content: 'queued for two cats',
+        targetCats: ['opus', 'codex'],
+        authorIntentByCatId: {
+          opus: { requested: 'continue_current', boundParentInvocationId: 'parent-opus' },
+          codex: { requested: 'continue_current', boundParentInvocationId: 'parent-codex' },
+        },
+      }),
+    );
 
     assert.equal(queue.markQueuedSeen('t1', 'u1', r.entry.id, 'opus'), true);
 
     assert.deepEqual(
-      queue.getQueuedFreshnessMessagesForCat('t1', 'u1', 'opus'),
+      queue.getQueuedFreshnessMessagesForCat('t1', 'u1', 'opus', { parentInvocationId: 'parent-opus' }),
       [],
       'seen target should not be nagged again',
     );
     assert.equal(
-      queue.getQueuedFreshnessMessagesForCat('t1', 'u1', 'codex').length,
+      queue.getQueuedFreshnessMessagesForCat('t1', 'u1', 'codex', { parentInvocationId: 'parent-codex' }).length,
       1,
       'other targets must not be consumed by opus reading',
     );
   });
 
   it('markQueuedSeen does not hide queued bodies from full read view', () => {
-    const r = queue.enqueue(entry({ content: 'body stays readable after seen', targetCats: ['opus'] }));
+    const r = queue.enqueue(
+      entry({
+        content: 'body stays readable after seen',
+        targetCats: ['opus'],
+        authorIntentByCatId: {
+          opus: { requested: 'continue_current', boundParentInvocationId: 'parent-opus' },
+        },
+      }),
+    );
 
     assert.equal(queue.markQueuedSeen('t1', 'u1', r.entry.id, 'opus'), true);
-    assert.equal(queue.getQueuedFreshnessMessagesForCat('t1', 'u1', 'opus').length, 0);
+    assert.equal(
+      queue.getQueuedFreshnessMessagesForCat('t1', 'u1', 'opus', { parentInvocationId: 'parent-opus' }).length,
+      0,
+    );
 
-    const readable = queue.getQueuedBodyMessagesForCat('t1', 'u1', 'opus');
+    const readable = queue.getQueuedBodyMessagesForCat('t1', 'u1', 'opus', 'parent-opus');
     assert.equal(readable.length, 1);
     assert.equal(readable[0].entryId, r.entry.id);
     assert.equal(readable[0].content, 'body stays readable after seen');
   });
 
   it('queued body visibility is target-cat scoped, not thread-wide', () => {
-    queue.enqueue(entry({ content: 'sol-only queued body', targetCats: ['codex-sol'] }));
+    queue.enqueue(
+      entry({
+        content: 'sol-only queued body',
+        targetCats: ['codex-sol'],
+        authorIntentByCatId: {
+          'codex-sol': { requested: 'continue_current', boundParentInvocationId: 'parent-sol' },
+        },
+      }),
+    );
 
-    assert.equal(queue.getQueuedBodyMessagesForCat('t1', 'u1', 'codex-sol').length, 1);
-    assert.deepEqual(queue.getQueuedBodyMessagesForCat('t1', 'u1', 'gpt52'), []);
+    assert.equal(queue.getQueuedBodyMessagesForCat('t1', 'u1', 'codex-sol', 'parent-sol').length, 1);
+    assert.deepEqual(queue.getQueuedBodyMessagesForCat('t1', 'u1', 'gpt52', 'parent-sol'), []);
   });
 
   it('coalescing queued agent content clears queued_seen so new content can nag again', () => {

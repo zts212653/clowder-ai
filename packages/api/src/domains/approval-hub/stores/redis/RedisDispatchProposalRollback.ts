@@ -4,8 +4,10 @@ const ABORT_STAGED_DISPATCH_LUA = `
   local failedKey = KEYS[1]
   local pendingKey = KEYS[2]
   local lineageKey = KEYS[3]
-  local conditionalDeleteKey = KEYS[4]
   local failedId = ARGV[1]
+  local hasConditionalDeleteKey = ARGV[2] == '1'
+  local conditionalDeleteKey = hasConditionalDeleteKey and KEYS[4] or nil
+  local negativeAuthorizationKeyStart = hasConditionalDeleteKey and 5 or 4
 
   local raw = redis.call('HGET', failedKey, 'publication')
   if not raw then return 0 end
@@ -30,6 +32,9 @@ const ABORT_STAGED_DISPATCH_LUA = `
 
   redis.call('DEL', failedKey)
   redis.call('ZREM', pendingKey, failedId)
+  for i = negativeAuthorizationKeyStart, #KEYS do
+    redis.call('ZREM', KEYS[i], failedId)
+  end
   if conditionalDeleteKey and redis.call('GET', conditionalDeleteKey) == failedId then
     redis.call('DEL', conditionalDeleteKey)
   end
@@ -63,10 +68,23 @@ export async function abortRedisDispatchStaged(
     lineageKey: string;
     proposalId: string;
     conditionalDeleteKey?: string;
+    negativeAuthorizationKeys: string[];
   },
 ): Promise<void> {
   const keys = params.conditionalDeleteKey
-    ? [params.detailKey, params.pendingKey, params.lineageKey, params.conditionalDeleteKey]
-    : [params.detailKey, params.pendingKey, params.lineageKey];
-  await redis.eval(ABORT_STAGED_DISPATCH_LUA, keys.length, ...keys, params.proposalId);
+    ? [
+        params.detailKey,
+        params.pendingKey,
+        params.lineageKey,
+        params.conditionalDeleteKey,
+        ...params.negativeAuthorizationKeys,
+      ]
+    : [params.detailKey, params.pendingKey, params.lineageKey, ...params.negativeAuthorizationKeys];
+  await redis.eval(
+    ABORT_STAGED_DISPATCH_LUA,
+    keys.length,
+    ...keys,
+    params.proposalId,
+    params.conditionalDeleteKey ? '1' : '0',
+  );
 }

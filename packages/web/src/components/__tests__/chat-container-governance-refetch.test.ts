@@ -56,6 +56,15 @@ type StoreState = {
 
 const mockGovRefetch = vi.fn();
 const mockUseAgentHookHealth = vi.fn();
+const mockAgentHookRefresh = vi.fn();
+let mockGovernanceStatus = {
+  ready: true,
+  needsBootstrap: false,
+  needsConfirmation: false,
+  isEmptyDir: false,
+  isGitRepo: true,
+  gitAvailable: true,
+};
 
 const staleAgentHookHealth = {
   status: 'missing',
@@ -229,14 +238,7 @@ vi.mock('@/hooks/usePreviewAutoOpen', () => ({ usePreviewAutoOpen: vi.fn() }));
 vi.mock('@/hooks/useWorkspaceNavigate', () => ({ useWorkspaceNavigate: vi.fn() }));
 vi.mock('@/hooks/useGovernanceStatus', () => ({
   useGovernanceStatus: () => ({
-    status: {
-      ready: true,
-      needsBootstrap: false,
-      needsConfirmation: false,
-      isEmptyDir: false,
-      isGitRepo: true,
-      gitAvailable: true,
-    },
+    status: mockGovernanceStatus,
     refetch: mockGovRefetch,
   }),
 }));
@@ -281,7 +283,10 @@ vi.mock('../WorkspacePanel', () => ({ WorkspacePanel: () => null }));
 vi.mock('../BootstrapOrchestrator', () => ({ BootstrapOrchestrator: () => null }));
 vi.mock('../BootcampListModal', () => ({ BootcampListModal: () => null }));
 vi.mock('@/components/HubListModal', () => ({ HubListModal: () => null }));
-vi.mock('@/components/ProjectSetupCard', () => ({ ProjectSetupCard: () => null }));
+vi.mock('@/components/ProjectSetupCard', () => ({
+  ProjectSetupCard: ({ onComplete }: { onComplete: () => void }) =>
+    React.createElement('button', { 'data-testid': 'project-setup-complete', onClick: onComplete }, 'complete setup'),
+}));
 vi.mock('@/components/game/GameOverlayConnector', () => ({ GameOverlayConnector: () => null }));
 vi.mock('@/components/icons/PawIcon', () => ({ PawIcon: () => null }));
 vi.mock('@/components/icons/BootcampIcon', () => ({ BootcampIcon: () => null }));
@@ -307,13 +312,24 @@ describe('ChatContainer governance refetch', () => {
     root = createRoot(container);
     storeState = makeStoreState();
     mockGovRefetch.mockReset();
+    mockAgentHookRefresh.mockReset();
+    mockGovernanceStatus = {
+      ready: true,
+      needsBootstrap: false,
+      needsConfirmation: false,
+      isEmptyDir: false,
+      isGitRepo: true,
+      gitAvailable: true,
+    };
     mockUseAgentHookHealth.mockReset();
     mockUseAgentHookHealth.mockReturnValue({
       health: null,
       error: null,
       syncing: false,
       synced: false,
+      syncAttempted: false,
       sync: vi.fn(),
+      refresh: mockAgentHookRefresh,
     });
   });
 
@@ -345,7 +361,9 @@ describe('ChatContainer governance refetch', () => {
       error: null,
       syncing: false,
       synced: false,
+      syncAttempted: false,
       sync: vi.fn(),
+      refresh: mockAgentHookRefresh,
     });
 
     await act(async () => {
@@ -354,5 +372,30 @@ describe('ChatContainer governance refetch', () => {
 
     expect(mockUseAgentHookHealth).toHaveBeenCalledWith({ enabled: false, projectPath: 'default' });
     expect(container.textContent).not.toContain('Agent 运行 Hook 需要同步');
+  });
+
+  it('refreshes governance and agent-hook health after project setup completes', async () => {
+    mockGovernanceStatus = {
+      ready: false,
+      needsBootstrap: true,
+      needsConfirmation: false,
+      isEmptyDir: true,
+      isGitRepo: false,
+      gitAvailable: true,
+    };
+
+    await act(async () => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-a' }));
+    });
+
+    const complete = container.querySelector<HTMLButtonElement>('[data-testid="project-setup-complete"]');
+    expect(complete).not.toBeNull();
+
+    await act(async () => {
+      complete?.click();
+    });
+
+    expect(mockGovRefetch).toHaveBeenCalledTimes(1);
+    expect(mockAgentHookRefresh).toHaveBeenCalledTimes(1);
   });
 });

@@ -285,8 +285,12 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
               ? {
                   queueHasQueuedMessages: (tid: string) =>
                     opts.queueProcessor?.hasQueuedNonAgentForThread(tid) ?? false,
-                  getQueuedFreshnessMessagesForCat: (tid: string, uid: string, catId: string) =>
-                    opts.queueProcessor?.getQueuedFreshnessMessagesForCat(tid, uid, catId) ?? [],
+                  getQueuedFreshnessMessagesForCat: (
+                    tid: string,
+                    uid: string,
+                    catId: string,
+                    parentInvocationId?: string,
+                  ) => opts.queueProcessor?.getQueuedFreshnessMessagesForCat(tid, uid, catId, parentInvocationId) ?? [],
                   hasQueuedOrActiveAgentForCat: (tid: string, catId: string) =>
                     opts.queueProcessor?.hasActiveOrQueuedAgentForCat(tid, catId) ?? false,
                   hasPendingForCat: (tid: string, uid: string, catId: string) =>

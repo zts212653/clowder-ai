@@ -1,5 +1,6 @@
 import type { IInvocationRecordStore } from '../cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
+import type { ActionSubjectTruthResolver } from './ActionSubjectTruthResolver.js';
 import type { ActionSuccessorCompletionService } from './ActionSuccessorCompletionService.js';
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
 import { MessageStoreLocalReviewEvidenceProvider } from './LocalReviewEvidenceProvider.js';
@@ -11,8 +12,9 @@ export interface LocalReviewCompletionBootstrapInput {
 }
 
 export interface LocalReviewVerdictBindingInput {
-  leaseStore: Pick<ActionSuccessorLeaseStore, 'get'>;
+  leaseStore: Pick<ActionSuccessorLeaseStore, 'get' | 'recoverLocalReviewVerdict'>;
   completionService: Pick<ActionSuccessorCompletionService, 'complete'>;
+  truthResolver: Pick<ActionSubjectTruthResolver, 'resolveFreshness'>;
 }
 
 /**
@@ -29,6 +31,7 @@ export function createLocalReviewCompletionBootstrap(input: LocalReviewCompletio
       return new LocalReviewVerdictService({
         leaseStore: binding.leaseStore,
         evidenceProvider,
+        truthResolver: binding.truthResolver,
         completeActionLease: (completionInput) => binding.completionService.complete(completionInput),
       });
     },

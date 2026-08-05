@@ -148,6 +148,7 @@ import { registerCallbackLocalReviewVerdictRoute } from './callback-local-review
 import { type CallbackMemoryCueDeps, registerCallbackMemoryCueRoutes } from './callback-memory-cue-routes.js';
 import { registerCallbackMemoryRoutes } from './callback-memory-routes.js';
 import { getMultiMentionOrchestrator, registerMultiMentionRoutes } from './callback-multi-mention-routes.js';
+import { preflightNegativeAuthorizationFence } from './callback-negative-authorization-fence.js';
 import { registerCallbackPersonMemoryRoutes } from './callback-person-memory-routes.js';
 import { registerCallbackProposePersonMemoryRoutes } from './callback-propose-person-memory-routes.js';
 import { registerCallbackProposeProfileUpdateRoutes } from './callback-propose-profile-update-routes.js';
@@ -160,6 +161,7 @@ import {
   deriveCallbackActor,
   effectiveInvocationId,
   getDeletedCallbackThreadGuard,
+  resolveCallbackActionLeaseRef,
   resolvePrincipalThread,
   resolveScopedThreadId,
 } from './callback-scope-helpers.js';
@@ -696,7 +698,7 @@ export interface CallbackRoutesOptions {
   /** F168 F-Step3: invocation-bound atomic verdict + delivery-custody recorder. */
   externalReviewVerdictService?: Pick<ExternalReviewVerdictService, 'record'>;
   /** F167: invocation-bound local verdict message completion producer. */
-  localReviewVerdictService?: Pick<LocalReviewVerdictService, 'record'>;
+  localReviewVerdictService?: Pick<LocalReviewVerdictService, 'record' | 'recover'>;
   /** F202-2D: seeds issue tracking from the current highest issue comment ID. */
   fetchIssueCommentCursor?: (repoFullName: string, issueNumber: number) => Promise<number>;
   /** F043 P1: feat_index provider override for tests */
@@ -1733,7 +1735,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
 
       const proposalId = `dp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const ownerUserId = record.userId ?? 'default-user';
+      const ownerUserId = actor.userId;
       const originRef = deriveCallbackOriginRef(record, actor.threadId);
 
       // R3 fix: The intercept exits before the normal flow's analyzeA2AMentions (line 1294),
@@ -1807,6 +1809,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
       const createResult = await opts.dispatchProposalStore.create({
         proposalId,
+        sourceInvocationId: invocationId,
         sourceThreadId: actor.threadId,
         targetThreadId: effectiveThreadId,
         senderCatId: actor.catId as string,
@@ -1905,6 +1908,50 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           : {}),
       ...(replyTo ? { replyToMessageId: replyTo } : {}),
     });
+
+    // Resolve the ordinary carrier's canonical targets before any policy that
+    // can claim, buffer, queue, or emit it. The proposal store's index is
+    // deny-only; canonical fields are revalidated inside the store lookup.
+    const senderCatId = createCatId(actor.catId);
+    const coordinationResult =
+      effectiveCoordination || incomingCrossThreadHint?.coordination
+        ? resolveCrossThreadCoordination({
+            ...(effectiveCoordination ? { explicit: effectiveCoordination } : {}),
+            ...(incomingCrossThreadHint?.coordination
+              ? {
+                  incoming: {
+                    sourceThreadId: incomingCrossThreadHint.sourceThreadId,
+                    coordination: incomingCrossThreadHint.coordination,
+                  },
+                }
+              : {}),
+            targetThreadId: effectiveThreadId,
+          })
+        : { suppressRouting: false, coordination: undefined };
+    const coordinationDedupKey: CallbackCoordinationDedupKey | undefined =
+      action && !explicitCoordination ? 'action-active-root' : coordinationResult.contentDedupCoordinationKey;
+    const negativeAuthorizationFence = await preflightNegativeAuthorizationFence({
+      content,
+      isCrossThread,
+      senderCatId,
+      sourceThreadId: actor.threadId,
+      sourceInvocationId: invocationId,
+      sourceInvocationCreatedAt: record.createdAt,
+      targetThreadId: effectiveThreadId,
+      ownerUserId: actor.userId,
+      explicitTargetCats,
+      action,
+      suppressRouting: coordinationResult.suppressRouting,
+      effectClass,
+      clientMessageId,
+      dispatchProposalStore: opts.dispatchProposalStore,
+      eventAuditLog: opts.eventAuditLog,
+      log: app.log,
+    });
+    if (negativeAuthorizationFence) {
+      reply.status(negativeAuthorizationFence.statusCode);
+      return negativeAuthorizationFence.body;
+    }
 
     // F254 Phase A: Freshness gate — hold post_message if cat has unseen messages
     // in the target thread. Uses independent seenCursor (NOT deliveryCursor — AC-A9).
@@ -2053,6 +2100,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
       const dispatchId = `${isCrossThread ? 'cross-post' : 'post'}:${clientMessageId}`;
       try {
+        const incomingActionLeaseRef = action.replace
+          ? await resolveCallbackActionLeaseRef(record, invocationRecordStore)
+          : undefined;
         const admission = await opts.actionSuccessorAdmissionService.admit({
           tenantScope: actor.userId,
           actorCatId: actor.catId,
@@ -2062,6 +2112,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           dispatchId,
           evidenceRef: `callback:${invocationId}:${clientMessageId}`,
           now: Date.now(),
+          ...(incomingActionLeaseRef ? { incomingActionLeaseRef } : {}),
           action,
         });
         if (!admission.admit) {
@@ -2138,24 +2189,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // Parse line-start @mentions (A2A rule: only line-start, strip code blocks, single target)
     // Uses analyzeA2AMentions to capture routing_warnings for disabled cats (F182 KD-10).
     // F52: Cross-thread posts skip self-reference filter so @codex can trigger target thread's codex
-    const senderCatId = createCatId(actor.catId);
-    const coordinationResult =
-      effectiveCoordination || incomingCrossThreadHint?.coordination
-        ? resolveCrossThreadCoordination({
-            ...(effectiveCoordination ? { explicit: effectiveCoordination } : {}),
-            ...(incomingCrossThreadHint?.coordination
-              ? {
-                  incoming: {
-                    sourceThreadId: incomingCrossThreadHint.sourceThreadId,
-                    coordination: incomingCrossThreadHint.coordination,
-                  },
-                }
-              : {}),
-            targetThreadId: effectiveThreadId,
-          })
-        : { suppressRouting: false, coordination: undefined };
-    const coordinationDedupKey: CallbackCoordinationDedupKey | undefined =
-      action && !explicitCoordination ? 'action-active-root' : coordinationResult.contentDedupCoordinationKey;
     const contentAnalysis = analyzeA2AMentions(storedContent, isCrossThread ? undefined : senderCatId);
     // Action-scoped dispatch uses explicit targetCats as the authoritative holder set.
     // Text mentions remain presentation only and cannot silently mutate lease cardinality.
@@ -3170,9 +3203,16 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // F254 Phase A (AC-A2): only contiguous reads can safely advance seen state.
     // Sparse reads (keyword/window/cat filter) may skip messages, so they must not ack queued bodies either.
     const isContiguousRead = !keyword && !messageId && !filterCatId;
+    const expectedParentInvocationId =
+      principal.kind === 'invocation' ? (principal.parentInvocationId ?? principal.invocationId) : undefined;
     const queuedFullEntries =
       isFullMode && isContiguousRead && principal.kind === 'invocation' && opts.invocationQueue
-        ? opts.invocationQueue.getQueuedBodyMessagesForCat(effectiveThreadId, principalUserId, principalCatId)
+        ? opts.invocationQueue.getQueuedBodyMessagesForCat(
+            effectiveThreadId,
+            principalUserId,
+            principalCatId,
+            expectedParentInvocationId,
+          )
         : [];
     if (queuedFullEntries.length > 0 && principal.kind === 'invocation' && opts.turnExecutionStore) {
       let exposureExecution: TurnExecutionRecord | null;
@@ -3186,7 +3226,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         reply.status(503);
         return { error: 'Turn execution ledger unavailable', code: 'TURN_EXECUTION_LEDGER_UNAVAILABLE' };
       }
-      const expectedParentInvocationId = principal.parentInvocationId ?? principal.invocationId;
       if (!exposureExecution) {
         reply.status(409);
         return { error: 'Turn execution not found', code: 'TURN_EXECUTION_NOT_FOUND' };
@@ -5009,6 +5048,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           principal.threadId,
           principal.userId,
           principal.catId,
+          { parentInvocationId: principal.parentInvocationId ?? principal.invocationId },
         );
         let changed = false;
         const reminderInvocationId = principal.parentInvocationId ?? principal.invocationId;

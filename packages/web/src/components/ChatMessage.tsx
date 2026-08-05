@@ -15,6 +15,7 @@ import { parseDirection } from '@/lib/parse-direction';
 import { type ChatMessage as ChatMessageType, resolveBubbleExpanded, useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { setPendingCrossPostScroll } from '@/utils/crosspost-scroll-target';
+import { doesAssistantMessageRenderBubble } from './assistant-message-renderability';
 import { CatAvatar } from './CatAvatar';
 import { CliDiagnosticsPanel, isKnownReason } from './CliDiagnosticsPanel';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
@@ -151,7 +152,8 @@ export function ChatMessage({
   const coCreator = useCoCreatorConfig();
   const { state: ttsState, synthesize: ttsSynthesize, activeMessageId } = useTts();
   const currentThreadId = useChatStore((s) => s.currentThreadId);
-  const disclosureThreadId = threadId ?? currentThreadId ?? 'default';
+  const renderThreadId = threadId ?? currentThreadId;
+  const disclosureThreadId = renderThreadId ?? 'default';
   const bodyDisclosureKey = buildMessageDisclosureKey(disclosureThreadId, message, 'body');
   const thinkingDisclosureKey = buildMessageDisclosureKey(disclosureThreadId, message, 'thinking');
   const cliDisclosureKey = buildMessageDisclosureKey(disclosureThreadId, message, 'cli');
@@ -160,7 +162,7 @@ export function ChatMessage({
   const threadMessages = useChatStore((s) => s.messages);
   const globalBubbleDefaults = useChatStore((s) => s.globalBubbleDefaults);
   const candidateSourceThreadId = message.extra?.crossPost?.sourceThreadId;
-  const crossThreadSourceThreadId = isCrossThreadProvenance(candidateSourceThreadId, currentThreadId)
+  const crossThreadSourceThreadId = isCrossThreadProvenance(candidateSourceThreadId, renderThreadId)
     ? candidateSourceThreadId
     : undefined;
   const [retryingClosureId, setRetryingClosureId] = useState<string | null>(null);
@@ -566,21 +568,15 @@ export function ChatMessage({
     );
   }
 
-  // Don't render completely empty non-streaming assistant messages.
-  // This can happen when a cat responds with only internal tool use and no text output.
-  // Keep messages that have thinking content — they should still show as collapsible bubbles.
+  // Keep the real bubble and pending placeholder on the same visual predicate.
+  // Identity/lifecycle metadata alone must not tear down the placeholder before
+  // an assistant avatar and frame can actually take over.
   if (
-    !message.isStreaming &&
-    !hasTextContent &&
-    !hasCliBlock &&
-    !hasBlocks &&
-    !message.extra?.rich?.blocks?.length &&
-    !crossThreadSourceThreadId &&
-    !message.extra?.freshness &&
-    !message.extra?.freshnessSupplement &&
-    !message.extra?.turnExecution &&
-    !message.extra?.auxiliaryTurnExecutions?.length &&
-    !message.thinking
+    !doesAssistantMessageRenderBubble(message, {
+      currentThreadId: renderThreadId,
+      hasCliBlock,
+      hasCrossThreadSource: Boolean(crossThreadSourceThreadId),
+    })
   ) {
     return null;
   }

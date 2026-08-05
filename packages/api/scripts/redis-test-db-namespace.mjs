@@ -1,5 +1,6 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { isMainThread } from 'node:worker_threads';
 
 const BASE_DATABASE = 15;
 const MANIFEST_ENV = 'CAT_CAFE_REDIS_TEST_DB_MANIFEST';
@@ -41,8 +42,30 @@ function isNodeTestRunnerChild() {
   );
 }
 
+function preserveInheritedWorkerNamespace() {
+  if (isMainThread) return false;
+
+  const assignedDatabase = process.env[ASSIGNED_DATABASE_ENV];
+  const redisUrl = process.env.REDIS_URL;
+  if (!assignedDatabase || !redisUrl) {
+    throw new Error('[redis-test] Worker inherited isolated Redis mode without a parent DB assignment');
+  }
+
+  const redisDatabase = new URL(redisUrl).pathname.replace(/^\/+/, '') || '0';
+  const isValidAssignment =
+    /^\d+$/u.test(assignedDatabase) && Number(assignedDatabase) >= BASE_DATABASE && assignedDatabase === redisDatabase;
+  if (!isValidAssignment) {
+    throw new Error(
+      `[redis-test] Worker Redis DB /${redisDatabase} does not match parent assignment ${assignedDatabase}`,
+    );
+  }
+
+  return true;
+}
+
 function applyRedisTestDatabaseNamespace() {
   if (process.env.CAT_CAFE_REDIS_TEST_ISOLATED !== '1' || !process.env[MANIFEST_ENV]) return;
+  if (preserveInheritedWorkerNamespace()) return;
   if (!isNodeTestRunnerChild()) return;
 
   const testFilePath = process.argv[1];

@@ -20,6 +20,7 @@ import {
   catRegistry,
   isCrossThreadProvenance,
   type MessageContent,
+  type MessageWorkDisposition,
   type OutputCommitDecision,
 } from '@cat-cafe/shared';
 import type { SessionStore } from '@cat-cafe/shared/utils';
@@ -99,6 +100,7 @@ import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types
 import { buildThreadDeepLink } from '../infrastructure/connectors/connector-command-helpers.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
+import { normalizeJsonUnicode } from '../utils/json-unicode.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 
 /** F088 ISSUE-15: Minimal outbound delivery interface — avoids importing full OutboundDeliveryHook. */
@@ -159,6 +161,11 @@ import { cancelWakeWhenRunner } from './callback-hold-ball-routes.js';
 import { buildGameSeats, parseGameCommand, sanitizeCatIds } from './game-command-interceptor.js';
 import type { HoldBallCancelDeps } from './hold-ball-cancel.js';
 import { cancelPendingHoldsForThread } from './hold-ball-cancel.js';
+import {
+  resolveFreshnessCarrierCapabilityOrUndeclared,
+  resolveMessageDispositionForAdmission,
+  resolveQueueAuthorIntentByCatId,
+} from './message-disposition-admission.js';
 import { sendMessageSchema } from './messages.schema.js';
 import { parseMultipart } from './parse-multipart.js';
 
@@ -175,6 +182,8 @@ const INVOCATION_STARTUP_WATCHDOG_MS = 180_000;
 const routeChainTracker = new RouteChainCompletionTracker();
 
 export interface MessagesRoutesOptions {
+  /** Shared owner-preference root. Optional test harnesses retain product-default behavior. */
+  projectRoot?: string;
   registry: InvocationRegistry;
   messageStore: IMessageStore;
   socketManager: SocketManager;
@@ -477,6 +486,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     // F39: Delivery mode
     let deliveryMode: 'immediate' | 'queue' | 'force' | undefined;
+    let messageDisposition: MessageWorkDisposition | undefined;
 
     // #699: Reply-to (quote) reference
     let replyTo: string | undefined;
@@ -501,6 +511,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       if (parsed.deliveryMode) {
         deliveryMode = parsed.deliveryMode;
       }
+      messageDisposition = parsed.messageDisposition;
       // #699: Extract replyTo from multipart
       if (parsed.replyTo) {
         replyTo = parsed.replyTo;
@@ -514,6 +525,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       }
       ({ content, userId: legacyUserId, threadId, idempotencyKey } = parseResult.data);
       deliveryMode = parseResult.data.deliveryMode;
+      messageDisposition = parseResult.data.messageDisposition;
       // F35: Extract whisper fields from parsed body
       if (parseResult.data.visibility === 'whisper') {
         whisperVisibility = 'whisper';
@@ -791,6 +803,18 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         content,
         source: 'user',
         targetCats,
+        authorIntentByCatId: resolveQueueAuthorIntentByCatId({
+          targetCats,
+          requested: resolveMessageDispositionForAdmission({
+            explicit: messageDisposition,
+            projectRoot: opts.projectRoot,
+            threadId: resolvedThreadId,
+          }),
+          threadId: resolvedThreadId,
+          userId,
+          invocationTracker: opts.invocationTracker,
+          resolveCarrierCapability: (catId) => resolveFreshnessCarrierCapabilityOrUndeclared(opts.router, catId),
+        }),
         intent: intent.intent,
       });
 
@@ -930,6 +954,18 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               content,
               source: 'user',
               targetCats,
+              authorIntentByCatId: resolveQueueAuthorIntentByCatId({
+                targetCats,
+                requested: resolveMessageDispositionForAdmission({
+                  explicit: messageDisposition,
+                  projectRoot: opts.projectRoot,
+                  threadId: resolvedThreadId,
+                }),
+                threadId: resolvedThreadId,
+                userId,
+                invocationTracker: opts.invocationTracker,
+                resolveCarrierCapability: (catId) => resolveFreshnessCarrierCapabilityOrUndeclared(opts.router, catId),
+              }),
               intent: intent.intent,
             });
             if (enqueueResult.outcome === 'full') {
@@ -1347,8 +1383,15 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 ? {
                     queueHasQueuedMessages: (tid: string) =>
                       opts.invocationQueue?.hasQueuedNonAgentForThread(tid) ?? false,
-                    getQueuedFreshnessMessagesForCat: (tid: string, uid: string, catId: string) =>
-                      opts.invocationQueue?.getQueuedFreshnessMessagesForCat(tid, uid, catId) ?? [],
+                    getQueuedFreshnessMessagesForCat: (
+                      tid: string,
+                      uid: string,
+                      catId: string,
+                      parentInvocationId?: string,
+                    ) =>
+                      opts.invocationQueue?.getQueuedFreshnessMessagesForCat(tid, uid, catId, {
+                        parentInvocationId,
+                      }) ?? [],
                     deferA2AEnqueue: (e) => opts.invocationQueue?.enqueue({ ...e, ownerAuthProvenance }),
                     // F254 B3: freshness re-invoke enqueue for immediate (foreground) invocations.
                     // Without this, freshnessReinvoke metadata from invoke-single-cat is silently
@@ -2362,10 +2405,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // Auto-summary disabled (clowder-ai#343): regex-based summaries removed from chat flow.
     // Scheduled compaction (SummaryCompactionTask) continues for memory infrastructure.
 
-    return {
+    return normalizeJsonUnicode({
       messages: chatItems,
       hasMore,
-    };
+    });
   });
 };
 

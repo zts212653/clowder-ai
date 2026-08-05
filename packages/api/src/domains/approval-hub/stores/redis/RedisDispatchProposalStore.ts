@@ -1,18 +1,3 @@
-/**
- * F246 Phase B/J: Redis-backed DispatchProposal store.
- *
- * Persists assign_work cross-thread dispatch proposals pending operator approval.
- * Lifecycle: create(pending) → approve/reject/superseded(terminal).
- *
- * Phase J additions (AC-J4, INV-J5):
- * - Lineage key K = (sourceThreadId, targetThreadId, senderCatId).
- * - create() atomically supersedes any existing pending proposal with the same K.
- *
- * Iron Law #5 (LL-048): User-visible state defaults to TTL=0 (persistent).
- * Pending dispatch proposals are user-visible in the Approval Hub and hold
- * intercepted message content — expiry would silently drop messages.
- */
-
 import type { ApprovalEnvelope, ApprovalPublication, DispatchProposal } from '@cat-cafe/shared';
 import { assertApprovalEnvelopeIdentity } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
@@ -24,9 +9,13 @@ import {
   type CreateDispatchProposalInput,
   type CreateDispatchProposalResult,
   computeLineageKey,
+  type DispatchLegacyNegativeAuthorizationLookup,
+  type DispatchNegativeAuthorizationBlock,
+  type DispatchNegativeAuthorizationLookup,
   type IDispatchProposalStore,
 } from '../ports/IDispatchProposalStore.js';
 import { createRedisDispatchProposal } from './RedisDispatchProposalCreate.js';
+import { RedisDispatchProposalNegativeAuthorization } from './RedisDispatchProposalNegativeAuthorization.js';
 import { abortRedisDispatchStaged } from './RedisDispatchProposalRollback.js';
 import { hydrateDispatchProposal } from './RedisDispatchProposalSerde.js';
 
@@ -46,6 +35,9 @@ const CAS_APPROVE_LUA = `
     'approvalOwnerAuthProvenance', ARGV[4])
   redis.call('ZREM', pendingKey, ARGV[3])
   redis.call('ZADD', settledKey, ARGV[1], ARGV[3])
+  for i = 4, #KEYS do
+    redis.call('ZREM', KEYS[i], ARGV[3])
+  end
   return 1
 `;
 
@@ -72,6 +64,9 @@ const CAS_REVERT_PENDING_LUA = `
     redis.call('HSET', key, 'status', 'superseded', 'supersededBy', currentHolder)
     redis.call('HDEL', key, 'decidedAt', 'decidedBy', 'approvalOwnerAuthProvenance')
     redis.call('ZREM', settledKey, ARGV[2])
+    for i = 5, #KEYS do
+      redis.call('ZADD', KEYS[i], tonumber(ARGV[1]), ARGV[2])
+    end
     return 2
   end
 
@@ -80,6 +75,9 @@ const CAS_REVERT_PENDING_LUA = `
   redis.call('ZADD', pendingKey, ARGV[1], ARGV[2])
   redis.call('ZREM', settledKey, ARGV[2])
   redis.call('SET', lineageKey, ARGV[2])
+  for i = 5, #KEYS do
+    redis.call('ZADD', KEYS[i], tonumber(ARGV[1]), ARGV[2])
+  end
   return 1
 `;
 
@@ -99,8 +97,13 @@ const CAS_REJECT_LUA = `
   return 1
 `;
 
+/** Canonical persistent proposal store; denial indexes remain derived projections. */
 export class RedisDispatchProposalStore implements IDispatchProposalStore, ApprovalPublicationStore {
-  constructor(private readonly redis: RedisClient) {}
+  private readonly negativeAuthorization: RedisDispatchProposalNegativeAuthorization;
+
+  constructor(private readonly redis: RedisClient) {
+    this.negativeAuthorization = new RedisDispatchProposalNegativeAuthorization(redis);
+  }
 
   async create(input: CreateDispatchProposalInput): Promise<CreateDispatchProposalResult> {
     return createRedisDispatchProposal(this.redis, input);
@@ -148,14 +151,16 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore, Appro
     const key = DispatchProposalKeys.detail(proposalId);
     const pendingKey = DispatchProposalKeys.userPending(proposal.ownerUserId);
     const settledKey = DispatchProposalKeys.userSettled(proposal.ownerUserId);
+    const negativeAuthorizationKeys = this.negativeAuthorization.keysForProposal(proposal);
     const now = Date.now();
 
     const result = await this.redis.eval(
       CAS_APPROVE_LUA,
-      3,
+      3 + negativeAuthorizationKeys.length,
       key,
       pendingKey,
       settledKey,
+      ...negativeAuthorizationKeys,
       String(now),
       userId,
       proposalId,
@@ -194,14 +199,16 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore, Appro
     // If a newer proposal holds the lineage, revert → superseded (not pending).
     const K = computeLineageKey(proposal.sourceThreadId, proposal.targetThreadId, proposal.senderCatId);
     const lineageKeyRedis = DispatchProposalKeys.lineage(K);
+    const negativeAuthorizationKeys = this.negativeAuthorization.keysForProposal(proposal);
 
     const result = await this.redis.eval(
       CAS_REVERT_PENDING_LUA,
-      4,
+      4 + negativeAuthorizationKeys.length,
       key,
       pendingKey,
       settledKey,
       lineageKeyRedis,
+      ...negativeAuthorizationKeys,
       String(proposal.createdAt),
       proposalId,
     );
@@ -276,6 +283,30 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore, Appro
     return this.get(proposalId);
   }
 
+  async findNegativeAuthorizationBlocks(
+    input: DispatchNegativeAuthorizationLookup,
+  ): Promise<DispatchNegativeAuthorizationBlock[]> {
+    return this.negativeAuthorization.findBlocks(input);
+  }
+
+  async findLegacyNegativeAuthorizationBlocks(
+    input: DispatchLegacyNegativeAuthorizationLookup,
+  ): Promise<DispatchNegativeAuthorizationBlock[]> {
+    return this.negativeAuthorization.findLegacyBlocks(input);
+  }
+
+  async getNegativeAuthorizationLegacyCutoverAt(): Promise<number | undefined> {
+    return this.negativeAuthorization.getLegacyCutoverAt();
+  }
+
+  async establishNegativeAuthorizationLegacyCutoverAt(cutoverAt: number): Promise<number> {
+    return this.negativeAuthorization.establishLegacyCutoverAt(cutoverAt);
+  }
+
+  async rebuildNegativeAuthorizationIndexes(): Promise<{ exactIndexed: number; legacyIndexed: number }> {
+    return this.negativeAuthorization.rebuildIndexes();
+  }
+
   // ---------------------------------------------------------------------------
   // ApprovalPublicationStore (Phase-I publication envelope)
   // ---------------------------------------------------------------------------
@@ -311,6 +342,7 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore, Appro
       lineageKey: lineageKeyRedis,
       proposalId,
       conditionalDeleteKey,
+      negativeAuthorizationKeys: this.negativeAuthorization.keysForProposal(proposal),
     });
   }
 }

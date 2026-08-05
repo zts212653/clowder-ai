@@ -214,7 +214,7 @@ describe('ChatInput draft persistence', () => {
     act(() => {
       textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
-    expect(onSend).toHaveBeenCalledWith('will be sent', undefined, undefined, undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith('will be sent', undefined, undefined, undefined, undefined, undefined);
 
     // Unmount and remount — draft should be gone
     act(() => root.unmount());
@@ -313,7 +313,7 @@ describe('ChatInput draft persistence', () => {
     act(() => {
       getTextarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
-    expect(onSend).toHaveBeenCalledWith('msg with image', [fakeImage], undefined, undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith('msg with image', [fakeImage], undefined, undefined, undefined, undefined);
     expect(getPreviewImage('pic.png')).toBeNull();
 
     act(() => root.unmount());

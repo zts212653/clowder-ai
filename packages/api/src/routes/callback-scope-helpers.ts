@@ -1,5 +1,9 @@
 import { type AgentKeyRecord, type CallbackPrincipal, type CatId, createCatId } from '@cat-cafe/shared';
 import type { InvocationRecord } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
+import type {
+  IInvocationRecordStore,
+  InvocationActionLeaseRef,
+} from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import { DEFAULT_THREAD_ID, type IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 
 type DeletedThreadLookup = {
@@ -34,6 +38,24 @@ export function deriveCallbackActor(record: InvocationRecord): CallbackActor {
  */
 export function effectiveInvocationId(actor: Pick<CallbackActor, 'invocationId' | 'parentInvocationId'>): string {
   return actor.parentInvocationId ?? actor.invocationId;
+}
+
+export async function resolveCallbackActionLeaseRef(
+  record: InvocationRecord,
+  invocationRecordStore: Pick<IInvocationRecordStore, 'get'> | undefined,
+): Promise<InvocationActionLeaseRef | undefined> {
+  if (!invocationRecordStore) return undefined;
+  const stored = await invocationRecordStore.get(record.parentInvocationId ?? record.invocationId);
+  if (
+    !stored ||
+    stored.threadId !== record.threadId ||
+    stored.userId !== record.userId ||
+    !stored.targetCats.includes(record.catId) ||
+    stored.actionLeaseCarrier.kind !== 'action_successor'
+  ) {
+    return undefined;
+  }
+  return { leaseId: stored.actionLeaseCarrier.leaseId, generation: stored.actionLeaseCarrier.generation };
 }
 
 export async function getDeletedCallbackThreadGuard(

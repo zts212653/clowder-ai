@@ -66,6 +66,7 @@ import {
 } from '../infrastructure/telemetry/instruments.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { resolveCallbackActionLeaseRef } from './callback-scope-helpers.js';
 
 // ── Singleton orchestrator ───────────────────────────────────────────
 let globalOrchestrator: MultiMentionOrchestrator | undefined;
@@ -835,6 +836,9 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
         return reply.status(503).send({ status: 'action_fence_unavailable' });
       }
       try {
+        const incomingActionLeaseRef = body.action.replace
+          ? await resolveCallbackActionLeaseRef(record, deps.invocationRecordStore)
+          : undefined;
         const admission = await deps.actionSuccessorAdmissionService.admit({
           tenantScope: record.userId,
           actorCatId: callerCatId,
@@ -844,6 +848,7 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
           dispatchId: `multi-mention:${body.idempotencyKey}`,
           evidenceRef: `callback:${record.invocationId}:${body.idempotencyKey}`,
           now: Date.now(),
+          ...(incomingActionLeaseRef ? { incomingActionLeaseRef } : {}),
           action: body.action,
         });
         if (!admission.admit) {

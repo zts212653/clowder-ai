@@ -22,11 +22,7 @@ export interface AgentHookTargetHealth {
 export interface AgentHookStatusResponse {
   status: AgentHookHealthStatus;
   targets: AgentHookTargetHealth[];
-  /**
-   * Set when the API answered with its PROJECT_NOT_INITIALIZED fail-loud guard
-   * (#1049): the project was never probed (missing .cat-cafe/), as opposed to
-   * probed-and-found-missing. Syncing cannot fix this from the UI.
-   */
+  /** The project has not been initialized, so no capability targets were probed. */
   uninitialised?: true;
 }
 
@@ -69,13 +65,6 @@ function isAgentHookStatusResponse(value: unknown): value is AgentHookStatusResp
   );
 }
 
-/**
- * A 400 carrying code PROJECT_NOT_INITIALIZED is the API's deliberate
- * fail-loud guard (#1049): an uninitialised project must never fall back to
- * syncing the host's capabilities. That is expected state, not a failure, so
- * surface it as a neutral `unsupported` card instead of collapsing it into a
- * red `error` one. Other non-OK responses still throw.
- */
 async function readUninitialisedProject(res: Response): Promise<AgentHookStatusResponse | null> {
   if (res.status !== 400) return null;
   const { code } = (await res.json().catch(() => ({}))) as { code?: unknown };

@@ -111,6 +111,29 @@ describe('F264 queue receipt projection', () => {
     });
   });
 
+  test('projects author withdrawal as terminal non-actionable truth without erasing prior exposure', () => {
+    const withdrawn = custody({
+      status: 'terminal',
+      pendingTargetCats: [],
+      notifiedByCatIds: [],
+      failedByCatIds: [],
+      withdrawnByCatIds: ['opus', 'codex'],
+      withdrawnAtByCatId: { opus: 1_600, codex: 1_650 },
+    });
+
+    assert.doesNotThrow(() => assertQueuedMessageCustody(withdrawn));
+    const receipt = projectQueueReceipt(withdrawn);
+    assert.deepEqual(receipt.targets[0], {
+      catId: 'opus',
+      state: 'withdrawn',
+      withdrawnAt: 1_600,
+      invocationId: 'inv-current',
+      seenAt: 1_200,
+    });
+    assert.deepEqual(receipt.targets[1], { catId: 'codex', state: 'withdrawn', withdrawnAt: 1_650 });
+    assert.equal(receipt.targets[2].state, 'handled');
+  });
+
   test('validates typed terminal-silent and exact source-response consumption witnesses', () => {
     const terminalSilent = custody({
       targetOutcomeByCatId: {

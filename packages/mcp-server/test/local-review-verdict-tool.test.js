@@ -4,6 +4,8 @@ import { z } from 'zod';
 
 import {
   handleLocalReviewVerdict,
+  handleRecoverLocalReviewVerdict,
+  localReviewRecoveryInputSchema,
   localReviewVerdictInputSchema,
   localReviewVerdictTools,
 } from '../dist/tools/local-review-verdict-tool.js';
@@ -95,6 +97,41 @@ describe('cat_cafe_record_local_review_verdict', () => {
     assert.match(description, /Output:/);
     assert.match(description, /GOTCHA:/);
     assert.match(description, /post_message|cross_post_message/);
+  });
+
+  it('posts a bounded predecessor recovery packet with an explicit exact fence', async () => {
+    const schema = z.object(localReviewRecoveryInputSchema);
+    const packet = {
+      messageId: 'message-stale-verdict-1',
+      reviewedHeadSha: 'b'.repeat(40),
+      verdict: 'changes_requested',
+      actionLeaseRef: { leaseId: 'lease-stale-review-1', generation: 1 },
+    };
+    assert.equal(schema.safeParse(packet).success, true);
+    assert.equal(schema.safeParse({ ...packet, actionLeaseRef: undefined }).success, false);
+
+    const requests = [];
+    globalThis.fetch = async (url, options) => {
+      requests.push({ url: String(url), options });
+      const body = { outcome: 'committed', evidenceRef: 'local-review:message-stale-verdict-1:g1:changes_requested' };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => body,
+        text: async () => JSON.stringify(body),
+      };
+    };
+
+    const result = await handleRecoverLocalReviewVerdict(packet);
+    assert.match(result.content[0].text, /"outcome":"committed"/);
+    assert.equal(requests[0].url, 'http://127.0.0.1:3003/api/callbacks/recover-local-review-verdict');
+    assert.deepEqual(JSON.parse(requests[0].options.body), packet);
+
+    const recoveryTool = localReviewVerdictTools.find((tool) => tool.name === 'cat_cafe_recover_local_review_verdict');
+    assert.ok(recoveryTool);
+    assert.match(recoveryTool.description, /persisted predecessor/);
+    assert.match(recoveryTool.description, /NOT for:/);
+    assert.match(recoveryTool.description, /ordinary active replacement/);
   });
 });
 

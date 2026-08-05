@@ -4,7 +4,9 @@ import { DispatchProposalKeys } from '../../../cats/services/stores/redis-keys/p
 import {
   type CreateDispatchProposalInput,
   type CreateDispatchProposalResult,
+  computeLegacyNegativeAuthorizationKey,
   computeLineageKey,
+  computeNegativeAuthorizationKey,
 } from '../ports/IDispatchProposalStore.js';
 import { hydrateDispatchProposal, serializeDispatchProposal } from './RedisDispatchProposalSerde.js';
 
@@ -21,7 +23,8 @@ const CAS_CREATE_LINEAGE_LUA = `
   local oldCount = tonumber(ARGV[3])
   local keyBase = string.sub(newHashKey, 1, #newHashKey - #newId)
 
-  if #KEYS >= 4 then
+  local hasDedup = ARGV[4] == '1'
+  if hasDedup then
     local existingId = redis.call('GET', KEYS[4])
     if existingId then
       local existingStatus = redis.call('HGET', keyBase .. existingId, 'status')
@@ -31,7 +34,7 @@ const CAS_CREATE_LINEAGE_LUA = `
 
   local publicationHolder = redis.call('GET', lineageKey)
   if not publicationHolder and oldCount > 0 then
-    publicationHolder = ARGV[4]
+    publicationHolder = ARGV[5]
   end
   if publicationHolder and publicationHolder ~= newId then
     local holderKey = keyBase .. publicationHolder
@@ -45,7 +48,7 @@ const CAS_CREATE_LINEAGE_LUA = `
     end
   end
 
-  local fieldStart = 4 + oldCount
+  local fieldStart = 5 + oldCount
   local fieldArgs = {}
   for i = fieldStart, #ARGV do
     fieldArgs[#fieldArgs + 1] = ARGV[i]
@@ -55,11 +58,11 @@ const CAS_CREATE_LINEAGE_LUA = `
   local superseded = {}
   local existingLineage = redis.call('GET', lineageKey)
   if not existingLineage and oldCount > 0 then
-    local keeperId = ARGV[4]
+    local keeperId = ARGV[5]
     redis.call('SET', lineageKey, keeperId)
     existingLineage = keeperId
     for i = 1, oldCount - 1 do
-      local staleId = ARGV[4 + i]
+      local staleId = ARGV[5 + i]
       local staleKey = keyBase .. staleId
       if redis.call('HGET', staleKey, 'status') == 'pending' then
         redis.call('HSET', staleKey, 'status', 'superseded', 'supersededBy', keeperId)
@@ -81,7 +84,11 @@ const CAS_CREATE_LINEAGE_LUA = `
 
   redis.call('ZADD', pendingKey, tonumber(createdAt), newId)
   redis.call('SET', lineageKey, newId)
-  if #KEYS >= 4 then redis.call('SET', KEYS[4], newId) end
+  if hasDedup then redis.call('SET', KEYS[4], newId) end
+  local negativeAuthorizationKeyStart = hasDedup and 5 or 4
+  for i = negativeAuthorizationKeyStart, #KEYS do
+    redis.call('ZADD', KEYS[i], tonumber(createdAt), newId)
+  end
   if #superseded > 0 then
     redis.call('HSET', newHashKey, 'supersededProposalIds', cjson.encode(superseded))
   end
@@ -92,6 +99,37 @@ async function loadProposal(redis: RedisClient, proposalId: string): Promise<Dis
   const raw = await redis.hgetall(DispatchProposalKeys.detail(proposalId));
   if (!raw || Object.keys(raw).length === 0) return null;
   return hydrateDispatchProposal(raw);
+}
+
+/** Derived projection only: ids in these sets are revalidated against the hash on read. */
+export function negativeAuthorizationRedisKeysForProposal(proposal: DispatchProposal): string[] {
+  if (!proposal.sourceInvocationId) return [];
+  return [...new Set(proposal.targetCats)].map((targetCat) =>
+    DispatchProposalKeys.negativeAuthorization(
+      computeNegativeAuthorizationKey(
+        proposal.ownerUserId,
+        proposal.sourceInvocationId as string,
+        proposal.targetThreadId,
+        targetCat,
+      ),
+    ),
+  );
+}
+
+/** Unresolved legacy records never enter the exact index; their lookup is cutover-bounded. */
+export function legacyNegativeAuthorizationRedisKeysForProposal(proposal: DispatchProposal): string[] {
+  if (proposal.sourceInvocationId) return [];
+  return [...new Set(proposal.targetCats)].map((targetCat) =>
+    DispatchProposalKeys.legacyNegativeAuthorization(
+      computeLegacyNegativeAuthorizationKey(
+        proposal.ownerUserId,
+        proposal.sourceThreadId,
+        proposal.senderCatId,
+        proposal.targetThreadId,
+        targetCat,
+      ),
+    ),
+  );
 }
 
 async function resolveDedup(
@@ -170,10 +208,11 @@ export async function createRedisDispatchProposal(
   const lineageRedisKey = DispatchProposalKeys.lineage(lineage);
   const pendingRedisKey = DispatchProposalKeys.userPending(input.ownerUserId);
   const detailRedisKey = DispatchProposalKeys.detail(input.proposalId);
+  const negativeAuthorizationRedisKeys = negativeAuthorizationRedisKeysForProposal(proposal);
   const oldCandidateIds = await findBackfillCandidateIds(redis, input, lineage, lineageRedisKey);
   const redisKeys = dedup.redisKey
-    ? [lineageRedisKey, pendingRedisKey, detailRedisKey, dedup.redisKey]
-    : [lineageRedisKey, pendingRedisKey, detailRedisKey];
+    ? [lineageRedisKey, pendingRedisKey, detailRedisKey, dedup.redisKey, ...negativeAuthorizationRedisKeys]
+    : [lineageRedisKey, pendingRedisKey, detailRedisKey, ...negativeAuthorizationRedisKeys];
   const result = await redis.eval(
     CAS_CREATE_LINEAGE_LUA,
     redisKeys.length,
@@ -181,6 +220,7 @@ export async function createRedisDispatchProposal(
     input.proposalId,
     String(input.createdAt),
     String(oldCandidateIds.length),
+    dedup.redisKey ? '1' : '0',
     ...oldCandidateIds,
     ...serializeDispatchProposal(proposal),
   );

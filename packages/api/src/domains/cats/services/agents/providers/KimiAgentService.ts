@@ -17,7 +17,13 @@ import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import { CliRawArchive } from '../../session/CliRawArchive.js';
-import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../types.js';
+import type {
+  AgentFreshnessCarrierCapability,
+  AgentMessage,
+  AgentService,
+  AgentServiceOptions,
+  MessageMetadata,
+} from '../../types.js';
 import type { RawArchiveSink } from '../providers/codex-audit-hooks.js';
 import { sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
 import { resolveDefaultClaudeMcpServerPath } from './ClaudeAgentService.js';
@@ -116,6 +122,10 @@ export class KimiAgentService implements AgentService {
    */
   injectsL0Natively(): boolean {
     return isKimiNativeL0ChannelAvailable();
+  }
+
+  freshnessCarrierCapability(): AgentFreshnessCarrierCapability {
+    return { provider: 'kimi', carrier: 'kimi_stream_json', deliverySemantics: 'unsupported' };
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {

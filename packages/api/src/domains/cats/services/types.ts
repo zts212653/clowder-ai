@@ -7,6 +7,7 @@ import type {
   CatId,
   CliEffortPreset,
   CrossThreadCoordination,
+  FreshnessCarrierCapability,
   MessageContent,
   QueueTerminalConsumptionWitness,
   ReplyPreview,
@@ -320,11 +321,7 @@ export interface AgentCarrierSessionOptions {
 export type AgentCarrierSessionFactory = (options: AgentCarrierSessionOptions) => Promise<AgentCarrierSession>;
 
 /** F254 D2 carrier truth used to bind provider-native freshness telemetry. */
-export interface AgentFreshnessCarrierCapability {
-  provider: import('./freshness/FreshnessAttentionEventLog.js').ProviderNativeFreshnessProvider;
-  carrier: import('./freshness/FreshnessAttentionEventLog.js').ProviderNativeFreshnessCarrier;
-  deliverySemantics: import('./freshness/FreshnessAttentionEventLog.js').ProviderNativeFreshnessDeliverySemantics;
-}
+export type AgentFreshnessCarrierCapability = FreshnessCarrierCapability;
 
 /** ADR-042 automatic supplement execution: provider + callback layers must enforce this, not prompt prose. */
 export interface ToolExecutionPolicy {

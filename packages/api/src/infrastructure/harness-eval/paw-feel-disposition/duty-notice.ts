@@ -4,7 +4,7 @@ import type { RedisClient } from '@cat-cafe/shared/utils';
 
 const DUTY_NOTICE_KEY = 'paw-feel:disposition:duty-notice';
 const SYSTEM_THREAD_ID = 'thread_eval_friction' as const;
-const BACKUP_AFTER_MS = 24 * 3_600_000;
+const OVERDUE_AFTER_MS = 24 * 3_600_000;
 const CVO_BREACH_AFTER_MS = 72 * 3_600_000;
 
 export interface PawFeelDutySignalSummary {
@@ -17,7 +17,7 @@ export interface PawFeelDutySignalSummary {
   lastTransitionAt: string;
 }
 
-export type PawFeelDutySlaTier = 'normal' | 'backup_due' | 'cvo_breach';
+export type PawFeelDutySlaTier = 'normal' | 'overdue' | 'cvo_breach';
 
 export interface PawFeelDutyNotice {
   systemThreadId: typeof SYSTEM_THREAD_ID;
@@ -78,7 +78,7 @@ function ageMs(discoveredAt: string, nowMs: number): number {
 
 function selectSlaTier(oldestAgeMs: number): PawFeelDutySlaTier {
   if (oldestAgeMs >= CVO_BREACH_AFTER_MS) return 'cvo_breach';
-  if (oldestAgeMs >= BACKUP_AFTER_MS) return 'backup_due';
+  if (oldestAgeMs >= OVERDUE_AFTER_MS) return 'overdue';
   return 'normal';
 }
 
@@ -107,7 +107,7 @@ export function buildPawFeelDutyNotice(
   const oldestAgeMs = Math.max(...items.map((item) => ageMs(item.discoveredAt, nowMs)));
   const slaTier = selectSlaTier(oldestAgeMs);
   const completeDuty = isCompletePawFeelDutyConfig(duty);
-  const targetCatId = completeDuty ? (slaTier === 'normal' ? duty.primaryCatId : duty.backupCatId) : undefined;
+  const targetCatId = completeDuty ? duty.primaryCatId : undefined;
   const hours = Math.floor(oldestAgeMs / 3_600_000);
   const reviewBundleCount = new Set(items.map((item) => item.bundleKey)).size;
   const representativeSources = [
@@ -120,9 +120,9 @@ export function buildPawFeelDutyNotice(
   const status = !completeDuty
     ? '值班配置不完整，不能进入运营闭环'
     : slaTier === 'cvo_breach'
-      ? '已超过 72h，Workspace 向 operator 标红'
-      : slaTier === 'backup_due'
-        ? '已超过 24h，backup duty 接管'
+      ? '已超过 72h，Primary 继续负责；Workspace 向 operator 标红'
+      : slaTier === 'overdue'
+        ? '已超过 24h，Primary 继续负责'
         : '等待值班猫审阅';
   const dutyLine = targetCatId
     ? `本批责任猫：@${targetCatId}`

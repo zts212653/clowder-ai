@@ -7,6 +7,7 @@ import type {
   ProviderNativeFreshnessMissReason,
   ProviderNativeFreshnessProvider,
   ProviderNativeFreshnessToolSurface,
+  ProviderProtocolItemObservedEvent,
 } from './FreshnessAttentionEventLog.js';
 import type { UnseenResult } from './FreshnessNoticeService.js';
 
@@ -42,6 +43,12 @@ export interface ActiveInvocationFreshnessController {
   commitDelivered(notice: PreparedFreshnessNotice, result: { acceptedTurnId: string }): Promise<void>;
   markMissed(notice: PreparedFreshnessNotice, reason: ProviderNativeFreshnessMissReason): Promise<void>;
   markTurnCompleted(turnId: string): Promise<void>;
+  observeProtocolItem?(
+    observation: Pick<
+      ProviderProtocolItemObservedEvent,
+      'toolSurface' | 'itemType' | 'status' | 'classification' | 'boundedUnknownSample'
+    >,
+  ): Promise<void>;
 }
 
 interface FreshnessNoticeBrokerDeps {
@@ -63,6 +70,7 @@ export class FreshnessNoticeBroker {
   private lastAttemptedFrontier: string | null = null;
   private readonly attemptedNoticeDedupKeys = new Set<string>();
   private sequence = 0;
+  private readonly persistedUnknownSamples = new Set<string>();
   private readonly now: () => number;
 
   constructor(private readonly deps: FreshnessNoticeBrokerDeps) {
@@ -145,6 +153,32 @@ export class FreshnessNoticeBroker {
     this.inFlight = null;
   }
 
+  async observeProtocolItem(
+    capability: Pick<ProviderProtocolItemObservedEvent, 'provider' | 'carrier' | 'deliverySemantics'>,
+    observation: Pick<
+      ProviderProtocolItemObservedEvent,
+      'toolSurface' | 'itemType' | 'status' | 'classification' | 'boundedUnknownSample'
+    >,
+  ): Promise<void> {
+    const sample = observation.boundedUnknownSample;
+    const shouldPersistSample =
+      sample !== undefined && (this.persistedUnknownSamples.has(sample) || this.persistedUnknownSamples.size < 8);
+    if (sample !== undefined && shouldPersistSample) this.persistedUnknownSamples.add(sample);
+    await this.deps.appendEvent({
+      kind: 'provider_protocol_item_observed',
+      threadId: this.deps.context.threadId,
+      catId: this.deps.context.catId,
+      invocationId: this.deps.context.invocationId,
+      timestamp: this.now(),
+      ...capability,
+      toolSurface: observation.toolSurface,
+      itemType: observation.itemType,
+      status: observation.status,
+      classification: observation.classification,
+      ...(shouldPersistSample && sample !== undefined ? { boundedUnknownSample: sample.slice(0, 64) } : {}),
+    });
+  }
+
   private recordAttempt(notice: PreparedFreshnessNotice): void {
     this.lastAttemptedFrontier = notice.frontier;
     if (notice.noticeDedupKey !== undefined) {
@@ -219,5 +253,6 @@ export function bindFreshnessNoticeBroker(
       });
       if (notice) await broker.markMissed(notice, 'no_safe_boundary');
     },
+    observeProtocolItem: (observation) => broker.observeProtocolItem(capability, observation),
   };
 }

@@ -6,9 +6,19 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const { transformCodexEvent } = await import('../dist/domains/cats/services/agents/providers/codex-event-transform.js');
+const { finalizeCodexStream, transformCodexEvent } = await import(
+  '../dist/domains/cats/services/agents/providers/codex-event-transform.js'
+);
+const { mapCodexAppServerNotification } = await import(
+  '../dist/domains/cats/services/agents/providers/CodexAppServerEventMapper.js'
+);
 
 const CAT = 'codex';
+
+function completeAndFinalize(state) {
+  transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+  return finalizeCodexStream(state, CAT);
+}
 
 // ── Existing behaviour (regression guard) ──
 
@@ -587,17 +597,101 @@ test('#1272: completed Codex turns keep all prose but emit one canonical final s
     { type: 'turn.completed', usage: {} },
   ];
 
-  const text = events
-    .flatMap((event) => {
-      const result = transformCodexEvent(event, CAT, state);
-      if (result === null) return [];
-      return Array.isArray(result) ? result : [result];
-    })
+  const messages = events.flatMap((event) => {
+    const result = transformCodexEvent(event, CAT, state);
+    if (result === null) return [];
+    return Array.isArray(result) ? result : [result];
+  });
+  const text = [...messages, finalizeCodexStream(state, CAT)]
+    .filter((msg) => msg !== null)
     .filter((msg) => msg.type === 'text')
     .map((msg) => msg.content)
     .join('');
 
   assert.equal(text, '第一段进度。\n\n第二段进度。\n\n[砚砚/gpt-5.6-sol🐾]');
+});
+
+test('#1272 review P1: multiple completed turns keep the canonical signature at the real stream end', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  const events = [
+    { type: 'item.completed', item: { type: 'agent_message', text: 'turn 1' } },
+    { type: 'turn.completed', usage: {} },
+    { type: 'item.completed', item: { type: 'agent_message', text: 'turn 2' } },
+    { type: 'turn.completed', usage: {} },
+  ];
+
+  const messages = events.flatMap((event) => {
+    const result = transformCodexEvent(event, CAT, state);
+    if (result === null) return [];
+    return Array.isArray(result) ? result : [result];
+  });
+  const text = [...messages, finalizeCodexStream(state, CAT)]
+    .filter((msg) => msg !== null)
+    .filter((msg) => msg.type === 'text')
+    .map((msg) => msg.content)
+    .join('');
+
+  assert.equal(text, 'turn 1\n\nturn 2\n\n[砚砚/gpt-5.6-sol🐾]');
+});
+
+test('#1272 review P1 negative control: failed final turn does not append a success signature', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  transformCodexEvent({ type: 'item.completed', item: { type: 'agent_message', text: 'partial' } }, CAT, state);
+  transformCodexEvent({ type: 'turn.failed', error: { message: 'boom' } }, CAT, state);
+
+  assert.equal(finalizeCodexStream(state, CAT), null);
+});
+
+test('#1272 review R2 P1: interrupted app-server terminal does not append a success signature', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  transformCodexEvent({ type: 'item.completed', item: { type: 'agent_message', text: 'partial' } }, CAT, state);
+  const interrupted = mapCodexAppServerNotification({
+    method: 'turn/completed',
+    params: { turn: { status: 'interrupted' } },
+  });
+  assert.deepEqual(interrupted, { type: 'turn.completed', status: 'interrupted' });
+  transformCodexEvent(interrupted, CAT, state);
+
+  assert.equal(finalizeCodexStream(state, CAT), null);
+});
+
+test('#1272 review R2 audit: unknown non-success terminal statuses fail closed', () => {
+  for (const status of ['cancelled', 'future_non_success']) {
+    const state = {
+      hadPriorTextTurn: false,
+      signatureIdentity: '砚砚',
+      canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+    };
+    transformCodexEvent({ type: 'item.completed', item: { type: 'agent_message', text: 'partial' } }, CAT, state);
+    transformCodexEvent({ type: 'turn.completed', status }, CAT, state);
+
+    assert.equal(finalizeCodexStream(state, CAT), null, status);
+  }
+});
+
+test('#1272 review P1 negative control: content after completion needs a newer terminal', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.6-sol🐾]',
+  };
+  transformCodexEvent({ type: 'item.completed', item: { type: 'agent_message', text: 'turn 1' } }, CAT, state);
+  transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+  transformCodexEvent({ type: 'item.completed', item: { type: 'agent_message', text: 'turn 2' } }, CAT, state);
+
+  assert.equal(finalizeCodexStream(state, CAT), null);
 });
 
 test('#1272: Codex finalization preserves quoted, fenced, and other-cat signature-like text', () => {
@@ -624,7 +718,7 @@ test('#1272: Codex finalization preserves quoted, fenced, and other-cat signatur
     CAT,
     state,
   );
-  const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+  const done = completeAndFinalize(state);
   const text = [first, done]
     .flatMap((result) => (result === null ? [] : Array.isArray(result) ? result : [result]))
     .filter((msg) => msg.type === 'text')
@@ -648,7 +742,7 @@ test('#1272: Codex finalization preserves quoted, fenced, and other-cat signatur
   );
 });
 
-test('#1272: unsigned Codex content receives one canonical signature at turn completion', () => {
+test('#1272: unsigned Codex content receives one canonical signature at stream completion', () => {
   const state = {
     hadPriorTextTurn: false,
     signatureIdentity: '砚砚',
@@ -659,7 +753,7 @@ test('#1272: unsigned Codex content receives one canonical signature at turn com
     CAT,
     state,
   );
-  const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+  const done = completeAndFinalize(state);
 
   assert.equal(body?.content, '只有正文。');
   assert.equal(done?.type, 'text');
@@ -677,7 +771,7 @@ test('#1272: a signature-only provider turn still finalizes to one canonical sig
     CAT,
     state,
   );
-  const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+  const done = completeAndFinalize(state);
 
   assert.equal(body, null);
   assert.equal(done?.content, '\n\n[砚砚/gpt-5.6-sol🐾]');
@@ -695,7 +789,7 @@ test('#1272: one already-canonical Codex turn is byte-stable after finalization'
     CAT,
     state,
   );
-  const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+  const done = completeAndFinalize(state);
 
   assert.equal(`${body?.content}${done?.content}`, original);
 });
@@ -719,7 +813,7 @@ test('#1272: terminal teammate and legacy signatures remain content beside one c
     CAT,
     state,
   );
-  const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+  const done = completeAndFinalize(state);
 
   assert.equal(
     `${teammate?.content}${legacy?.content}${done?.content}`,
@@ -745,7 +839,7 @@ test('#1272 cloud P1: non-canonical same-cat signature samples remain user conte
       CAT,
       state,
     );
-    const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+    const done = completeAndFinalize(state);
 
     assert.equal(`${body?.content}${done?.content}`, `${sample}\n\n[砚砚/gpt-5.6-sol🐾]`);
   }
@@ -772,7 +866,7 @@ test('#1272 cloud P1: canonical signature samples remain content inside prose bl
       CAT,
       state,
     );
-    const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+    const done = completeAndFinalize(state);
 
     assert.equal(`${body?.content}${done?.content}`, `${sample}\n\n[砚砚/gpt-5.6-sol🐾]`);
   }
@@ -802,7 +896,7 @@ test('#1272 review P2: indented code and bare list signature samples remain cont
       CAT,
       state,
     );
-    const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+    const done = completeAndFinalize(state);
 
     assert.equal(`${body?.content}${done?.content}`, `${sample}\n\n[砚砚/gpt-5.6-sol🐾]`);
   }
@@ -826,7 +920,7 @@ test('#1272 review P2 negative control: ordinary prose/list progress still strip
       CAT,
       state,
     );
-    const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+    const done = completeAndFinalize(state);
 
     assert.equal(`${body?.content}${done?.content}`, `${expectedBody}\n\n[砚砚/gpt-5.6-sol🐾]`);
   }
@@ -854,7 +948,7 @@ test('#1272 cloud P1: open fences and nested bare lists preserve terminal signat
       CAT,
       state,
     );
-    const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+    const done = completeAndFinalize(state);
 
     assert.equal(`${body?.content}${done?.content}`, `${sample}\n\n[砚砚/gpt-5.6-sol🐾]`);
   }
@@ -882,7 +976,7 @@ test('#1272 cloud P1 negative control: legal fence closes before a decorative si
       CAT,
       state,
     );
-    const done = transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+    const done = completeAndFinalize(state);
 
     assert.equal(`${body?.content}${done?.content}`, `${sample}\n\n[砚砚/gpt-5.6-sol🐾]`);
   }

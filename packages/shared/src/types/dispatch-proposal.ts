@@ -50,6 +50,14 @@ export type DispatchProposalStatus = 'pending' | 'approved' | 'rejected' | 'supe
 export interface DispatchProposal {
   /** Unique proposal identifier. */
   proposalId: string;
+  /**
+   * Authenticated invocation that created this proposal.
+   *
+   * Optional only while hydrating pre-#1291 records. Every new proposal must
+   * carry this identity so a rejected assignment can remain a narrow,
+   * invocation-scoped negative authorization fence.
+   */
+  sourceInvocationId?: string;
   /** Thread where the sender cat lives. */
   sourceThreadId: string;
   /** Target thread for message delivery (after approval). */
@@ -104,4 +112,23 @@ export interface DispatchProposal {
   actionLeaseRef?: DispatchActionLeaseRef;
   /** Phase-I publication state; absent only on pre-Phase-I records. */
   publication?: ApprovalPublication;
+}
+
+/**
+ * Recover a precise invocation identity from the historical event anchor when
+ * it exists. Message-origin records deliberately stay unresolved: guessing
+ * from actor/thread would create a permanent, overly broad denial.
+ */
+export function deriveDispatchProposalSourceInvocationId(input: {
+  sourceInvocationId?: string;
+  approvalOriginRef?: ApprovalOriginRef;
+  publication?: ApprovalPublication;
+}): string | undefined {
+  if (input.sourceInvocationId) return input.sourceInvocationId;
+  const originRef =
+    input.approvalOriginRef ??
+    (input.publication?.state === 'anchored' ? input.publication.envelope.originRef : undefined);
+  if (originRef?.kind !== 'event') return undefined;
+  const match = /^invocation:([^\s:]+)$/.exec(originRef.anchor);
+  return match?.[1];
 }

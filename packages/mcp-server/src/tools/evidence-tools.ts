@@ -7,6 +7,9 @@
  */
 
 import {
+  EXPANSION_HEALTH_SOURCE_REVISION,
+  type ExpansionFunnelMeta,
+  type ExpansionHintTargetRef,
   formatRecallMeta,
   type RecallMatchRank,
   type RecallPreviewItem,
@@ -189,6 +192,7 @@ export async function handleSearchEvidence(
       return recallErrorResult(
         `Evidence search failed for ${queryLabel} (${response.status}): ${text}`,
         'Evidence search failed before results were returned. Check the API error and retry after fixing the service.',
+        input.intent === 'coverage' ? undefined : transportErrorExpansionHealth(),
       );
     }
 
@@ -249,8 +253,11 @@ export async function handleSearchEvidence(
         title: string;
         kind: string;
         sourcePath?: string;
+        targetRef: ExpansionHintTargetRef;
         provenance?: { source: string; via: string; edgeStrength: string };
       }>;
+      /** F256 Wave 1b: expansion health funnel metadata */
+      expansionMeta?: ExpansionFunnelMeta;
     };
 
     const degradedBanner = formatDegradedBanner(data.degraded, data.degradeReason, data.effectiveMode);
@@ -289,6 +296,7 @@ export async function handleSearchEvidence(
           resultCount: 0,
           degraded: data.degraded,
           ...(data.degradeReason ? { degradeReason: data.degradeReason } : {}),
+          ...(data.expansionMeta ? { expansionFunnel: data.expansionMeta } : {}),
           readNextHint: 'No search results were returned. Try graph_resolve/list_recent or broaden the query.',
         }),
       ].filter(Boolean);
@@ -434,6 +442,8 @@ export async function handleSearchEvidence(
           docHits.length > 0
             ? `Read high/mid match-rank doc anchors directly: ${docHits.map((d) => d.anchor).join(', ')}`
             : 'Low match-rank search result; consider graph_resolve/list_recent or a narrower query.',
+        // F256 Wave 1b: expansion health funnel for telemetry correlation
+        ...(data.expansionMeta ? { expansionFunnel: data.expansionMeta } : {}),
       }),
     );
 
@@ -454,11 +464,12 @@ export async function handleSearchEvidence(
     return recallErrorResult(
       `Evidence search request failed for ${queryLabel}: ${message}`,
       'Evidence search request failed before results were returned. Check API connectivity and retry.',
+      input.intent === 'coverage' ? undefined : transportErrorExpansionHealth(),
     );
   }
 }
 
-function recallErrorResult(message: string, readNextHint: string): ToolResult {
+function recallErrorResult(message: string, readNextHint: string, expansionFunnel?: ExpansionFunnelMeta): ToolResult {
   return errorResult(
     [
       message,
@@ -466,9 +477,27 @@ function recallErrorResult(message: string, readNextHint: string): ToolResult {
         resultStatus: 'error',
         resultCount: null,
         readNextHint,
+        ...(expansionFunnel ? { expansionFunnel } : {}),
       }),
     ].join('\n'),
   );
+}
+
+function transportErrorExpansionHealth(): ExpansionFunnelMeta {
+  return {
+    schemaVersion: 1,
+    cohort: 'natural_topk',
+    sourceRevision: EXPANSION_HEALTH_SOURCE_REVISION,
+    eligible: false,
+    gateReason: 'transport_error',
+    followupWindow: { maxToolDistance: 20, maxWallClockMs: 300_000 },
+    attempted: false,
+    keyword: { probed: 0, added: 0, deduped: 0 },
+    sourceThread: { probed: 0, added: 0, deduped: 0 },
+    conventionEdge: { attempted: false, added: 0, deduped: 0, staleSkipped: 0 },
+    presented: 0,
+    hints: [],
+  };
 }
 
 function toRecallPreviewItem(result: {

@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-const { deriveCallbackActor, resolveBoundThreadScope, resolveScopedThreadId } = await import(
-  '../dist/routes/callback-scope-helpers.js'
-);
+const { deriveCallbackActor, resolveBoundThreadScope, resolveCallbackActionLeaseRef, resolveScopedThreadId } =
+  await import('../dist/routes/callback-scope-helpers.js');
 const { DEFAULT_THREAD_ID } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
 
 describe('callback-scope-helpers', () => {
@@ -21,6 +20,38 @@ describe('callback-scope-helpers', () => {
       userId: 'user-1',
       catId: 'opus',
     });
+  });
+
+  test('resolves an exact lease fence only from the invocation-authenticated parent carrier', async () => {
+    const carrier = await resolveCallbackActionLeaseRef(
+      { ...record, parentInvocationId: 'parent-1' },
+      {
+        async get(id) {
+          assert.equal(id, 'parent-1');
+          return {
+            threadId: 'thread-a',
+            userId: 'user-1',
+            targetCats: ['opus'],
+            actionLeaseCarrier: { kind: 'action_successor', leaseId: 'lease-returned', generation: 2 },
+          };
+        },
+      },
+    );
+    assert.deepEqual(carrier, { leaseId: 'lease-returned', generation: 2 });
+  });
+
+  test('fails closed when the persisted carrier principal does not match the callback', async () => {
+    const carrier = await resolveCallbackActionLeaseRef(record, {
+      async get() {
+        return {
+          threadId: 'thread-other',
+          userId: 'user-1',
+          targetCats: ['opus'],
+          actionLeaseCarrier: { kind: 'action_successor', leaseId: 'lease-returned', generation: 2 },
+        };
+      },
+    });
+    assert.equal(carrier, undefined);
   });
 
   test('resolveBoundThreadScope allows same-thread writes', () => {

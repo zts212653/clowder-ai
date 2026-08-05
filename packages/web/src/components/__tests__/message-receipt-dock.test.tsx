@@ -12,6 +12,16 @@ const receipt: QueueMessageReceipt = {
     {
       catId: 'opus',
       state: 'handled',
+      authorIntent: {
+        requested: 'continue_current',
+        effective: 'continue_current',
+        boundParentInvocationId: 'parent-1',
+        carrierCapability: {
+          provider: 'openai_codex',
+          carrier: 'codex_app_server',
+          deliverySemantics: 'exact_active_turn',
+        },
+      },
       invocationId: 'inv-response',
       seenAt: 400,
       outcome: {
@@ -24,6 +34,15 @@ const receipt: QueueMessageReceipt = {
     {
       catId: 'codex',
       state: 'handled',
+      authorIntent: {
+        requested: 'next_work',
+        effective: 'next_work',
+        carrierCapability: {
+          provider: 'anthropic',
+          carrier: 'claude_print_sdk',
+          deliverySemantics: 'unsupported',
+        },
+      },
       invocationId: 'inv-complete',
       seenAt: 550,
       outcome: {
@@ -144,6 +163,10 @@ describe('MessageReceiptDock', () => {
 
     expect(container.textContent).toContain('布偶 · 已由回复明确处理');
     expect(container.textContent).toContain('砚砚 · 已随本轮完成');
+    expect(container.textContent).toContain('接着当前工作 · 等待本轮读取');
+    expect(container.textContent).toContain('下一件工作 · 本轮不可见');
+    expect(container.querySelector('[data-receipt-target="opus"]')?.textContent).toContain('codex_app_server');
+    expect(container.querySelector('[data-receipt-target="codex"]')?.textContent).toContain('unsupported');
     expect(container.textContent).toContain('gpt52 · 已读 · 当前轮处理中');
     expect(container.textContent).toContain('sonnet · 已读取 · 未收口，已回队列');
     expect(container.textContent).toContain('正文读取');
@@ -335,6 +358,34 @@ describe('MessageReceiptDock', () => {
       );
     });
     expect(container.textContent).toContain('砚砚 · 已读取 · 未收口，已回队列');
+  });
+
+  it('keeps author withdrawal visible as history instead of actionable Queue work', () => {
+    const withdrawnReceipt: QueueMessageReceipt = {
+      version: 1,
+      entryId: 'entry-withdrawn',
+      targets: [{ catId: 'codex', state: 'withdrawn', withdrawnAt: 900 }],
+      reminderAttempts: [
+        {
+          id: 'reminder-withdrawn',
+          targetCatId: 'codex',
+          invocationId: 'parent-old',
+          state: 'missed',
+          requestedAt: 800,
+          missedAt: 900,
+          missedReason: 'source_withdrawn',
+        },
+      ],
+    };
+
+    act(() => {
+      root.render(<MessageReceiptDock receipt={withdrawnReceipt} messages={[]} getCatLabel={() => '砚砚'} />);
+    });
+
+    expect(container.textContent).toContain('砚砚 · 已撤出待处理 · 历史保留');
+    expect(container.textContent).toContain('撤出待处理');
+    expect(container.querySelector('[data-withdrawn-at="900"]')).not.toBeNull();
+    expect(container.querySelector('[title="消息已由你撤出待处理，提醒随之结束"]')).not.toBeNull();
   });
 
   it('does not render a work-period dock for the message that started the invocation', () => {

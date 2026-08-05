@@ -101,9 +101,8 @@ async function validateExplicitProjectPath(
   }
 
   if (!existsSync(join(validated, '.cat-cafe'))) {
-    // Fail-loud guard (#1049): an uninitialised project must never fall back to
-    // host capabilities. The code lets clients tell this expected state apart
-    // from genuine failures without parsing the message.
+    // An uninitialised project must never inherit host capabilities. The stable
+    // code lets clients present this expected setup state without parsing text.
     return {
       ok: false,
       code: 'PROJECT_NOT_INITIALIZED',

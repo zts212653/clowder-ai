@@ -15,6 +15,7 @@ export interface RequestReminderAttemptInput {
 
 interface QueueReceiptProjectionSets {
   handled: ReadonlySet<string>;
+  withdrawn: ReadonlySet<string>;
   steering: Readonly<Record<string, string>>;
   steeringRequested: ReadonlySet<string>;
   failed: ReadonlySet<string>;
@@ -45,13 +46,33 @@ function projectQueueReceiptTarget(
   state: QueueReceiptProjectionSets,
 ): QueueMessageReceipt['targets'][number] {
   const outcome: QueueTargetOutcome | undefined = custody.targetOutcomeByCatId?.[catId];
+  const authorIntent = custody.authorIntentByCatId?.[catId];
+  const authorIntentProjection = authorIntent
+    ? {
+        authorIntent: {
+          ...authorIntent,
+          effective: authorIntent.fallbackAt === undefined ? authorIntent.requested : ('next_work' as const),
+        },
+      }
+    : {};
   if (state.handled.has(catId)) {
     const exposure = outcome ? latestExposure(custody, catId, outcome.invocationId) : undefined;
     return {
       catId,
       state: 'handled',
+      ...authorIntentProjection,
       ...(exposure ? { invocationId: exposure.invocationId, seenAt: exposure.seenAt } : {}),
       ...(outcome ? { outcome } : {}),
+    };
+  }
+  if (state.withdrawn.has(catId)) {
+    const exposure = latestExposure(custody, catId);
+    return {
+      catId,
+      state: 'withdrawn',
+      ...authorIntentProjection,
+      withdrawnAt: custody.withdrawnAtByCatId?.[catId],
+      ...(exposure ? { invocationId: exposure.invocationId, seenAt: exposure.seenAt } : {}),
     };
   }
   if (state.steering[catId]) {
@@ -59,11 +80,12 @@ function projectQueueReceiptTarget(
     return {
       catId,
       state: 'steering',
+      ...authorIntentProjection,
       invocationId: state.steering[catId],
       ...(exposure ? { seenAt: exposure.seenAt } : {}),
     };
   }
-  if (state.steeringRequested.has(catId)) return { catId, state: 'steering' };
+  if (state.steeringRequested.has(catId)) return { catId, state: 'steering', ...authorIntentProjection };
   if (state.failed.has(catId)) {
     const exposure = latestExposure(custody, catId);
     const awakenedInvocationId = custody.awakenedInvocationIdByCatId?.[catId];
@@ -71,6 +93,7 @@ function projectQueueReceiptTarget(
     return {
       catId,
       state: 'failed',
+      ...authorIntentProjection,
       ...(exposure
         ? { invocationId: exposure.invocationId, seenAt: exposure.seenAt }
         : awakenedInvocationId
@@ -84,6 +107,7 @@ function projectQueueReceiptTarget(
     return {
       catId,
       state: 'seen',
+      ...authorIntentProjection,
       ...(invocationId ? { invocationId } : exposure ? { invocationId: exposure.invocationId } : {}),
       ...(exposure ? { seenAt: exposure.seenAt } : {}),
     };
@@ -93,17 +117,19 @@ function projectQueueReceiptTarget(
     return {
       catId,
       state: 'awakened',
+      ...authorIntentProjection,
       invocationId: state.awakened[catId],
       ...(awakenedAt !== undefined ? { awakenedAt } : {}),
     };
   }
-  if (state.notified.has(catId)) return { catId, state: 'notified' };
-  return { catId, state: 'queued' };
+  if (state.notified.has(catId)) return { catId, state: 'notified', ...authorIntentProjection };
+  return { catId, state: 'queued', ...authorIntentProjection };
 }
 
 export function projectQueueReceipt(custody: QueuedMessageCustody): QueueMessageReceipt {
   const state: QueueReceiptProjectionSets = {
     handled: new Set<string>(custody.handledByCatIds),
+    withdrawn: new Set<string>(custody.withdrawnByCatIds ?? []),
     steering: custody.steeredInvocationIdByCatId ?? {},
     steeringRequested: new Set<string>(custody.steerRequestedByCatIds ?? []),
     failed: new Set<string>(custody.failedByCatIds),

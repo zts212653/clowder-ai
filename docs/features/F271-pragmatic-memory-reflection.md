@@ -4,7 +4,7 @@ related_features: [F152, F221, F227, F231, F255, F263]
 topics: [memory, write-side, reflection, daily-context, candidates, proactive]
 doc_kind: spec
 created: 2026-07-20
-updated: 2026-07-27
+updated: 2026-08-04
 description: "把 session 收尾与每日 context 反射成有来源、有类型、有预算的记忆候选，并路由到既有记忆 lane；不制造每日摘要垃圾，也不替猫把 cue 写成欲望。"
 description_source: human
 description_author: codex-sol
@@ -115,6 +115,11 @@ tips_exempt: "F271 is an internal write-side producer; user-visible review and r
 - 单个 120 秒 deadline 贯穿 thread/session/transcript 扫描；生产 `IThreadStore` /
   `ISessionChainStore` 读取接受同一 `AbortSignal`，Redis session SCAN 在 abort 时销毁流。
   超时会停止启动后续 thread/session，并在释放 overlap slot 前等待活跃工作清零。
+- Redis 跨猫 session lookup 使用耐久 `thread → chain keys` 二级索引；新 session 在原子
+  create Lua 中维护索引，Phase A 历史 chain 由每个 store instance 首次读取时全局回填
+  一次。禁止退回“每个 thread 各做一次全库 SCAN”的 O(thread × keyspace) 路径。
+- completion log 携带 thread list、session scan、reflection、total 分段耗时与
+  `activeWorkAtEnd`，用于区分运行健康与 typed-delta 效用。
 - 每日任务可以产出零条；quiet day 是成功状态，但 budget-rejected extraction 不是
   quiet，不以摘要或占位记录冒充产出。
 - 公共 `decision` 只写成 `candidate + pull_only`，且 `generalizable` 保持 fail-closed；
@@ -126,7 +131,9 @@ tips_exempt: "F271 is an internal write-side producer; user-visible review and r
 `RUN_FAILED`，错误为 `daily context reflection timed out after 120000ms`。
 `reflection_outputs` 中已有 5 条 Phase A `f271-session-close-v1` 产物，但没有 daily
 producer 产物。故 Phase B 的工程 AC 已实现，运行闭环仍 blocked；修复应定位扫描 /
-存储阶段的真实耗时与取消路径，不能只扩大 deadline。
+存储阶段的真实耗时与取消路径，不能只扩大 deadline。2026-08-04 Wave 1a 已定位为
+`getChainByThread()` 对 1633 个 thread 各自全库 SCAN；二级索引与 legacy 一次性回填修复
+进入合入流程，live snapshot 在授权激活并取得成功 runId 前仍保持 blocked。
 
 ### Phase C: Promotion / retirement loop
 
@@ -183,10 +190,13 @@ producer 产物。故 Phase B 的工程 AC 已实现，运行闭环仍 blocked�
 
 Architecture cell: memory
 
-Map delta: update required — F271 Phase A Design Gate 在现有 `memory` cell 中增加
-reflection producer / adapter 扩展；producer 只路由到既有 lane，不拥有下游 truth，
-F255 private cue store 仍归 F255。Phase B 只新增 F139 daily trigger 与跨 session
-batching；storage ownership 不变，公共耐久 materialization/compiler 仍归 F152。
+Cross-cell dependency: identity-session（`RedisSessionChainStore` 的 session-chain 二级索引）；
+索引只是既有 durable session chain 的查询投影，不成为 F271 的第二个 Store 或 truth owner。
+
+Map delta: `memory` cell 已登记 F271 reflection producer / adapter；producer 只路由到
+既有 lane，不拥有下游 truth，F255 private cue store 仍归 F255。Wave 1a 只给
+identity-session 的既有 session chain 补查询索引与 legacy backfill；storage ownership
+不变，公共耐久 materialization/compiler 仍归 F152。
 
 ## Tips Contribution
 

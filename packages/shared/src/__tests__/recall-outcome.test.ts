@@ -135,4 +135,126 @@ describe('recall outcome sidecar', () => {
 
     expect(parsed).toBeNull();
   });
+
+  it('round-trips expansion funnel metadata through sidecar', () => {
+    const sidecar = formatRecallMeta({
+      resultStatus: 'counted',
+      resultCount: 5,
+      expansionFunnel: {
+        schemaVersion: 1,
+        cohort: 'natural_topk',
+        sourceRevision: 'f256-health-v2',
+        eligible: true,
+        gateReason: 'eligible',
+        followupWindow: { maxToolDistance: 20, maxWallClockMs: 300_000 },
+        attempted: true,
+        keyword: { probed: 3, added: 1, deduped: 1 },
+        sourceThread: { probed: 1, added: 1, deduped: 0 },
+        conventionEdge: { attempted: true, added: 1, deduped: 0, staleSkipped: 2 },
+        presented: 3,
+        hints: [
+          {
+            anchor: 'F208',
+            targetRef: { kind: 'doc', sourcePath: 'docs/features/F208.md', anchor: 'F208' },
+          },
+          {
+            anchor: 'doc:architecture/collaboration-landscape',
+            targetRef: { kind: 'doc', sourcePath: '', anchor: 'doc:architecture/collaboration-landscape' },
+          },
+          {
+            anchor: 'thread-thread_mqruexzf5ajaq0vo',
+            targetRef: { kind: 'thread', threadId: 'thread_mqruexzf5ajaq0vo' },
+          },
+        ],
+      },
+    });
+
+    const parsed = parseRecallMetaFromText(`search results\n${sidecar}`);
+
+    expect(parsed?.resultStatus).toBe('counted');
+    expect(parsed?.expansionFunnel).toEqual({
+      schemaVersion: 1,
+      cohort: 'natural_topk',
+      sourceRevision: 'f256-health-v2',
+      eligible: true,
+      gateReason: 'eligible',
+      followupWindow: { maxToolDistance: 20, maxWallClockMs: 300_000 },
+      attempted: true,
+      keyword: { probed: 3, added: 1, deduped: 1 },
+      sourceThread: { probed: 1, added: 1, deduped: 0 },
+      conventionEdge: { attempted: true, added: 1, deduped: 0, staleSkipped: 2 },
+      presented: 3,
+      hints: [
+        {
+          anchor: 'F208',
+          targetRef: { kind: 'doc', sourcePath: 'docs/features/F208.md', anchor: 'F208' },
+        },
+        {
+          anchor: 'doc:architecture/collaboration-landscape',
+          targetRef: { kind: 'doc', sourcePath: '', anchor: 'doc:architecture/collaboration-landscape' },
+        },
+        {
+          anchor: 'thread-thread_mqruexzf5ajaq0vo',
+          targetRef: { kind: 'thread', threadId: 'thread_mqruexzf5ajaq0vo' },
+        },
+      ],
+    });
+  });
+
+  it('rejects malformed expansion counters instead of turning telemetry corruption into zeroes', () => {
+    const sidecar = `<recall-meta>${JSON.stringify({
+      resultStatus: 'counted',
+      resultCount: 1,
+      expansionFunnel: {
+        schemaVersion: 1,
+        cohort: 'natural_topk',
+        sourceRevision: 'f256-health-v2',
+        eligible: true,
+        gateReason: 'eligible',
+        followupWindow: { maxToolDistance: 20, maxWallClockMs: 300_000 },
+        attempted: true,
+        keyword: { probed: -1, added: 0, deduped: 0 },
+        sourceThread: { probed: 0, added: 0, deduped: 0 },
+        conventionEdge: { attempted: false, added: 0, deduped: 0, staleSkipped: 0 },
+        presented: 0,
+        hints: [],
+      },
+    })}</recall-meta>`;
+
+    expect(parseRecallMetaFromText(`search results\n${sidecar}`)).toBeNull();
+  });
+
+  it('rejects expansion hints that omit the lossless typed target reference', () => {
+    const sidecar = `<recall-meta>${JSON.stringify({
+      resultStatus: 'counted',
+      resultCount: 1,
+      expansionFunnel: {
+        schemaVersion: 1,
+        cohort: 'natural_topk',
+        sourceRevision: 'f256-health-v2',
+        eligible: true,
+        gateReason: 'eligible',
+        followupWindow: { maxToolDistance: 20, maxWallClockMs: 300_000 },
+        attempted: true,
+        keyword: { probed: 1, added: 1, deduped: 0 },
+        sourceThread: { probed: 0, added: 0, deduped: 0 },
+        conventionEdge: { attempted: false, added: 0, deduped: 0, staleSkipped: 0 },
+        presented: 1,
+        hints: [{ anchor: 'F208', sourcePath: 'docs/features/F208.md' }],
+      },
+    })}</recall-meta>`;
+
+    expect(parseRecallMetaFromText(`search results\n${sidecar}`)).toBeNull();
+  });
+
+  it('omits expansion funnel when not present in sidecar', () => {
+    const sidecar = formatRecallMeta({
+      resultStatus: 'counted',
+      resultCount: 2,
+    });
+
+    const parsed = parseRecallMetaFromText(`search results\n${sidecar}`);
+
+    expect(parsed?.expansionFunnel).toBeUndefined();
+  });
 });

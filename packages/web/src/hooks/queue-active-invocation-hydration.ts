@@ -1,3 +1,4 @@
+import type { FreshnessCarrierCapability } from '@cat-cafe/shared';
 import type { AppServerLifecycleSnapshot } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 
@@ -8,6 +9,7 @@ export interface QueueActiveInvocationSlot {
   executionId?: string;
   turnInvocationId?: string;
   appServerLifecycle?: AppServerLifecycleSnapshot;
+  freshnessCarrierCapability?: FreshnessCarrierCapability;
 }
 
 function statusForHydratedAppServerLifecycle(lifecycle: AppServerLifecycleSnapshot | undefined) {
@@ -56,6 +58,11 @@ export function hydrateQueueActiveInvocationSlots({
       // Explicit undefined prevents a same-parent snapshot from certifying an old child.
       invocationId: slot.executionId,
       turnInvocationId: slot.turnInvocationId,
+      freshnessCarrierCapability: slot.freshnessCarrierCapability ?? {
+        provider: 'other',
+        carrier: 'other',
+        deliverySemantics: 'undeclared',
+      },
       ...(slot.appServerLifecycle ? { appServerLifecycle: slot.appServerLifecycle } : {}),
     });
 

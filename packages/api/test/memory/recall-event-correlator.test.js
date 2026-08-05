@@ -16,6 +16,24 @@ function makeEvent(overrides) {
   };
 }
 
+function makeExpansionFunnel(hints, overrides = {}) {
+  return {
+    schemaVersion: 1,
+    cohort: 'natural_topk',
+    sourceRevision: 'f256-health-v2',
+    eligible: true,
+    gateReason: 'eligible',
+    followupWindow: { maxToolDistance: 20, maxWallClockMs: 300_000 },
+    attempted: true,
+    keyword: { probed: hints.length, added: hints.length, deduped: 0 },
+    sourceThread: { probed: 0, added: 0, deduped: 0 },
+    conventionEdge: { attempted: false, added: 0, deduped: 0, staleSkipped: 0 },
+    presented: hints.length,
+    hints,
+    ...overrides,
+  };
+}
+
 describe('RecallEventCorrelator', () => {
   let RecallEventCorrelator;
   let Database;
@@ -78,6 +96,323 @@ describe('RecallEventCorrelator', () => {
     assert.equal(re.consumed[0].method, 'Read');
     assert.equal(re.consumed[0].rank, 1);
     assert.equal(re.abandoned, false);
+  });
+
+  it('F256 Wave 1b: persists eligible → presented → followed → used expansion stages', () => {
+    const events = [
+      makeEvent({
+        toolName: 'search_evidence',
+        timestamp: 1000,
+        turnIndex: 1,
+        summary: {
+          query: 'routing memory',
+          expansionFunnel: {
+            schemaVersion: 1,
+            cohort: 'natural_topk',
+            sourceRevision: 'f256-health-v2',
+            eligible: true,
+            gateReason: 'eligible',
+            followupWindow: { maxToolDistance: 20, maxWallClockMs: 300_000 },
+            attempted: true,
+            keyword: { probed: 1, added: 1, deduped: 0 },
+            sourceThread: { probed: 0, added: 0, deduped: 0 },
+            conventionEdge: { attempted: true, added: 1, deduped: 0, staleSkipped: 0 },
+            presented: 2,
+            hints: [
+              {
+                anchor: 'F208',
+                targetRef: {
+                  kind: 'doc',
+                  sourcePath: 'docs/features/F208-cat-capability-profile.md',
+                  anchor: 'F208',
+                },
+              },
+              {
+                anchor: 'F256',
+                targetRef: {
+                  kind: 'doc',
+                  sourcePath: 'docs/features/F256-memory-search-strategy-evolution.md',
+                  anchor: 'F256',
+                },
+              },
+            ],
+          },
+        },
+      }),
+      makeEvent({
+        toolName: 'graph_resolve',
+        timestamp: 1500,
+        turnIndex: 2,
+        summary: { query: 'F208', selectedAnchor: 'F208', rankedCandidateAnchors: ['F208'] },
+      }),
+      makeEvent({
+        toolName: 'command_execution',
+        timestamp: 2000,
+        turnIndex: 3,
+        summary: { command: 'sed -n 1,20p docs/features/F256-memory-search-strategy-evolution.md' },
+      }),
+    ];
+
+    const correlator = new RecallEventCorrelator(db);
+    const search = correlator.correlateWindow(events)[0];
+
+    assert.equal(search.expansionFunnel.eligible, true);
+    assert.equal(search.expansionFunnel.presented, 2);
+    assert.equal(search.expansionFunnel.followed, 2, 'direct reads count as following before they count as used');
+    assert.equal(search.expansionFunnel.used, 2);
+
+    correlator.persistBatch([search]);
+    const row = db.prepare('SELECT expansion_funnel_json FROM recall_events WHERE recall_id = ?').get(search.recallId);
+    assert.deepEqual(JSON.parse(row.expansion_funnel_json), search.expansionFunnel);
+  });
+
+  it('F256 P1: candidate exposure in an unrelated graph result does not count as followed', () => {
+    const events = [
+      makeEvent({
+        toolName: 'search_evidence',
+        timestamp: 1000,
+        turnIndex: 1,
+        summary: {
+          query: 'routing memory',
+          expansionFunnel: makeExpansionFunnel([
+            {
+              anchor: 'F208',
+              targetRef: {
+                kind: 'doc',
+                sourcePath: 'docs/features/F208-cat-capability-profile.md',
+                anchor: 'F208',
+              },
+            },
+          ]),
+        },
+      }),
+      makeEvent({
+        toolName: 'graph_resolve',
+        timestamp: 1500,
+        turnIndex: 2,
+        summary: {
+          query: 'unrelated-anchor',
+          selectedAnchor: 'unrelated-anchor',
+          rankedCandidateAnchors: ['unrelated-anchor', 'F208'],
+        },
+      }),
+    ];
+
+    const search = new RecallEventCorrelator(db).correlateWindow(events)[0];
+
+    assert.equal(search.expansionFunnel.followed, 0);
+    assert.equal(search.expansionFunnel.used, 0);
+  });
+
+  it('F256 P1: resolved graph anchor overrides a fuzzy query prefix for attribution', () => {
+    const events = [
+      makeEvent({
+        toolName: 'search_evidence',
+        timestamp: 1000,
+        turnIndex: 1,
+        summary: {
+          query: 'routing memory',
+          expansionFunnel: makeExpansionFunnel([
+            {
+              anchor: 'F208',
+              targetRef: {
+                kind: 'doc',
+                sourcePath: 'docs/features/F208-cat-capability-profile.md',
+                anchor: 'F208',
+              },
+            },
+          ]),
+        },
+      }),
+      makeEvent({
+        toolName: 'graph_resolve',
+        timestamp: 1500,
+        turnIndex: 2,
+        summary: {
+          query: 'F2',
+          selectedAnchor: 'F2',
+          rankedCandidateAnchors: ['F2', 'F208'],
+        },
+      }),
+    ];
+
+    const search = new RecallEventCorrelator(db).correlateWindow(events)[0];
+
+    assert.equal(search.expansionFunnel.followed, 0);
+    assert.equal(search.expansionFunnel.used, 0);
+  });
+
+  it('F256 INV-3: unresolved fuzzy graph query fails closed until an exact anchor resolves', () => {
+    const searchEvent = makeEvent({
+      toolName: 'search_evidence',
+      timestamp: 1000,
+      turnIndex: 1,
+      summary: {
+        query: 'routing memory',
+        expansionFunnel: makeExpansionFunnel([
+          {
+            anchor: 'F208',
+            targetRef: {
+              kind: 'doc',
+              sourcePath: 'docs/features/F208-cat-capability-profile.md',
+              anchor: 'F208',
+            },
+          },
+        ]),
+      },
+    });
+    const unresolved = makeEvent({
+      toolName: 'graph_resolve',
+      timestamp: 1500,
+      turnIndex: 2,
+      summary: { query: 'F2', rankedCandidateAnchors: ['F2', 'F208'] },
+    });
+    const resolved = makeEvent({
+      toolName: 'graph_resolve',
+      timestamp: 2000,
+      turnIndex: 3,
+      summary: { query: 'F208', centerAnchor: 'F208', rankedCandidateAnchors: ['F208'] },
+    });
+    const correlator = new RecallEventCorrelator(db);
+
+    const unresolvedSearch = correlator.correlateWindow([searchEvent, unresolved])[0];
+    assert.equal(unresolvedSearch.expansionFunnel.followed, 0);
+    assert.equal(unresolvedSearch.expansionFunnel.used, 0);
+
+    const resolvedSearch = correlator.correlateWindow([searchEvent, unresolved, resolved])[0];
+    assert.equal(resolvedSearch.expansionFunnel.followed, 1);
+    assert.equal(resolvedSearch.expansionFunnel.used, 1);
+  });
+
+  it('F256 P1: typed source-thread hint attributes get_thread_context consumption', () => {
+    const hints = [
+      {
+        anchor: 'thread-thread_abc',
+        targetRef: { kind: 'thread', threadId: 'thread_abc' },
+      },
+    ];
+    const events = [
+      makeEvent({
+        toolName: 'search_evidence',
+        timestamp: 1000,
+        turnIndex: 1,
+        summary: {
+          query: 'related discussion',
+          expansionFunnel: makeExpansionFunnel(hints, {
+            keyword: { probed: 0, added: 0, deduped: 0 },
+            sourceThread: { probed: 1, added: 1, deduped: 0 },
+          }),
+        },
+      }),
+      makeEvent({
+        toolName: 'get_thread_context',
+        timestamp: 1500,
+        turnIndex: 2,
+        summary: { threadId: 'thread_abc' },
+      }),
+    ];
+
+    const search = new RecallEventCorrelator(db).correlateWindow(events)[0];
+
+    assert.equal(search.expansionFunnel.followed, 1);
+    assert.equal(search.expansionFunnel.used, 1);
+  });
+
+  it('F256 INV-3: expansion file reads require an exact normalized sourcePath', () => {
+    const searchEvent = makeEvent({
+      toolName: 'search_evidence',
+      timestamp: 1000,
+      turnIndex: 1,
+      summary: {
+        query: 'contract',
+        expansionFunnel: makeExpansionFunnel([
+          {
+            anchor: 'F2',
+            targetRef: {
+              kind: 'doc',
+              sourcePath: 'docs/features/F2-contract.md',
+              anchor: 'F2',
+            },
+          },
+        ]),
+      },
+    });
+    const cases = [
+      {
+        method: 'Read',
+        falsePositiveInput: { file_path: '/repo/docs/features/F208-capability.md' },
+        exactInput: { file_path: '/repo/docs/features/F2-contract.md' },
+      },
+      {
+        method: 'Grep',
+        falsePositiveInput: { pattern: 'contract', path: '/repo/docs/features/F208-capability.md' },
+        exactInput: { pattern: 'contract', path: '/repo/docs/features/F2-contract.md' },
+      },
+      {
+        method: 'command_execution',
+        falsePositiveInput: { command: "sed -n '1,20p' /repo/docs/features/F208-capability.md" },
+        exactInput: { command: "sed -n '1,20p' /repo/docs/features/F2-contract.md" },
+      },
+    ];
+
+    for (const [index, testCase] of cases.entries()) {
+      const falsePositive = makeEvent({
+        toolName: testCase.method,
+        timestamp: 1500,
+        turnIndex: 2,
+        summary: testCase.falsePositiveInput,
+      });
+      const wrongTarget = new RecallEventCorrelator(db).correlateWindow([searchEvent, falsePositive])[0];
+      assert.equal(wrongTarget.expansionFunnel.followed, 0, `${testCase.method} F2 must not match F208`);
+      assert.equal(wrongTarget.expansionFunnel.used, 0, `${testCase.method} F2 must not use F208`);
+
+      const exact = makeEvent({
+        toolName: testCase.method,
+        timestamp: 2000 + index,
+        turnIndex: 3,
+        summary: testCase.exactInput,
+      });
+      const exactTarget = new RecallEventCorrelator(db).correlateWindow([searchEvent, exact])[0];
+      assert.equal(exactTarget.expansionFunnel.followed, 1, `${testCase.method} exact path follows`);
+      assert.equal(exactTarget.expansionFunnel.used, 1, `${testCase.method} exact path uses`);
+    }
+  });
+
+  it('F256 INV-3: expansion file reads fail closed when sourcePath is absent', () => {
+    const searchEvent = makeEvent({
+      toolName: 'search_evidence',
+      timestamp: 1000,
+      turnIndex: 1,
+      summary: {
+        query: 'contract',
+        expansionFunnel: makeExpansionFunnel([
+          {
+            anchor: 'F2',
+            targetRef: { kind: 'doc', sourcePath: '', anchor: 'F2' },
+          },
+        ]),
+      },
+    });
+    const cases = [
+      { method: 'Read', summary: { file_path: '/repo/docs/features/F2-contract.md' } },
+      { method: 'Grep', summary: { pattern: 'contract', path: '/repo/docs/features/F2-contract.md' } },
+      {
+        method: 'command_execution',
+        summary: { command: "sed -n '1,20p' /repo/docs/features/F2-contract.md" },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const readEvent = makeEvent({
+        toolName: testCase.method,
+        timestamp: 1500,
+        turnIndex: 2,
+        summary: testCase.summary,
+      });
+      const search = new RecallEventCorrelator(db).correlateWindow([searchEvent, readEvent])[0];
+      assert.equal(search.expansionFunnel.followed, 0, `${testCase.method} must fail closed`);
+      assert.equal(search.expansionFunnel.used, 0, `${testCase.method} must fail closed`);
+    }
   });
 
   it('HW-4 根因③: same-invocation searches before first downstream read share resultSetId', () => {

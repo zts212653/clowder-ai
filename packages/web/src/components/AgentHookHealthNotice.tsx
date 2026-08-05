@@ -9,6 +9,7 @@ interface AgentHookHealthNoticeProps {
   syncing?: boolean;
   synced?: boolean;
   syncAttempted?: boolean;
+  placement?: 'standalone' | 'project-setup';
   onSync: () => void | Promise<void>;
   className?: string;
 }
@@ -132,7 +133,7 @@ function toneFor(status: AgentHookNoticeStatus) {
     return {
       icon: 'info',
       title: '该项目尚未初始化',
-      body: '项目缺少 .cat-cafe/ 目录，因此不会套用本机的 Hook、Skills 和 MCP 配置。先初始化该项目，再回来同步。',
+      body: uninitialisedBody('standalone'),
       classes: 'border-conn-slate-ring bg-conn-slate-bg text-conn-slate-text',
     };
   }
@@ -169,6 +170,12 @@ function resolveNoticeStatus({ health, error, syncing, synced, syncAttempted }: 
   if (health?.uninitialised) return 'uninitialised';
   if (syncAttempted && health?.status !== 'configured') return 'partial-sync';
   return health ? health.status : 'error';
+}
+
+function uninitialisedBody(placement: 'standalone' | 'project-setup'): string {
+  return placement === 'project-setup'
+    ? '先选择下方方式完成项目初始化；完成后再检查 Hook、Skills 和 MCP 配置。'
+    : '这个项目还没完成 Clowder AI 初始化，因此暂不检查或同步运行环境配置。';
 }
 
 function AgentHookStatusPills({ health }: { health: AgentHookStatusResponse | null }) {
@@ -218,6 +225,7 @@ export function AgentHookHealthNotice({
   syncing = false,
   synced = false,
   syncAttempted = false,
+  placement = 'standalone',
   onSync,
   className = '',
 }: AgentHookHealthNoticeProps) {
@@ -226,8 +234,13 @@ export function AgentHookHealthNotice({
   const currentStatus = resolveNoticeStatus({ health, error, syncing, synced, syncAttempted });
   const tone = toneFor(currentStatus);
   const problematicTargets = previewTargets(health);
-  const canSync = !syncing && currentStatus !== 'synced' && currentStatus !== 'uninitialised';
-  const body = currentStatus === 'partial-sync' ? partialSyncBody(problematicTargets) : (error ?? tone.body);
+  const isUninitialised = currentStatus === 'uninitialised';
+  const canSync = !syncing && currentStatus !== 'synced' && !isUninitialised;
+  const body = isUninitialised
+    ? uninitialisedBody(placement)
+    : currentStatus === 'partial-sync'
+      ? partialSyncBody(problematicTargets)
+      : (error ?? tone.body);
 
   return (
     <div data-testid="agent-hook-health-notice" className={`rounded-lg border p-3 ${tone.classes} ${className}`}>
@@ -251,8 +264,8 @@ export function AgentHookHealthNotice({
             {syncing && <span className="text-xs font-medium">同步中...</span>}
           </div>
 
-          <AgentHookStatusPills health={health} />
-          <ProblematicTargetsPreview targets={problematicTargets} />
+          {!isUninitialised && <AgentHookStatusPills health={health} />}
+          {!isUninitialised && <ProblematicTargetsPreview targets={problematicTargets} />}
         </div>
       </div>
     </div>

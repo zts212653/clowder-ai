@@ -189,6 +189,7 @@ export interface RouteOptions {
         threadId: string,
         userId: string,
         catId: string,
+        parentInvocationId?: string,
       ) => Array<{
         entryId?: string;
         source: string;

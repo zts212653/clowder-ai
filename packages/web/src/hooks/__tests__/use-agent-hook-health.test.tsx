@@ -171,6 +171,30 @@ describe('useAgentHookHealth', () => {
     expect(result.error).toBeNull();
   });
 
+  it('keeps a sync race with PROJECT_NOT_INITIALIZED in the neutral state', async () => {
+    vi.mocked(apiFetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => configuredResponse } as Response)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        json: async () => ({ code: 'PROJECT_NOT_INITIALIZED', error: 'Project not initialized' }),
+      } as Response);
+
+    await act(async () => {
+      root.render(<SyncProbe />);
+      await flushPromises();
+    });
+
+    await act(async () => {
+      await latestResult?.sync();
+      await flushPromises();
+    });
+
+    expect(latestResult?.health).toEqual({ status: 'unsupported', targets: [], uninitialised: true });
+    expect(latestResult?.error).toBeNull();
+    expect(latestResult?.syncAttempted).toBe(true);
+  });
+
   it('still reports other 400 responses as errors', async () => {
     mock400({
       code: 'INVALID_PROJECT_PATH',

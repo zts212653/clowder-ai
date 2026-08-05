@@ -1,9 +1,11 @@
 'use client';
 
+import type { FreshnessCarrierCapability, MessageWorkDisposition } from '@cat-cafe/shared';
 import { KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { reconnectGame } from '@/hooks/useGameReconnect';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
+import { useMessageDispositionPreference } from '@/hooks/useMessageDispositionPreference';
 import { usePathCompletion } from '@/hooks/usePathCompletion';
 import type { UploadStatus, WhisperOptions } from '@/hooks/useSendMessage';
 import type { DeliveryMode } from '@/stores/chat-types';
@@ -19,7 +21,9 @@ import { GameLobby, type GameStartPayload } from './game/GameLobby';
 import { HistorySearchModal } from './HistorySearchModal';
 import { ImagePreview } from './ImagePreview';
 import { AttachIcon } from './icons/AttachIcon';
+import { MessageDispositionSelector } from './MessageDispositionSelector';
 import { MobileInputToolbar } from './MobileInputToolbar';
+import { classifyFreshnessCarrierSupport } from './message-disposition-presentation';
 import { PathCompletionMenu } from './PathCompletionMenu';
 import { ReplyPreviewBar } from './ReplyPreviewBar';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
@@ -53,7 +57,8 @@ interface ChatInputProps {
     whisper?: WhisperOptions,
     deliveryMode?: DeliveryMode,
     replyToId?: string,
-  ) => void;
+    messageDisposition?: MessageWorkDisposition,
+  ) => void | boolean | Promise<void | boolean>;
   onStop?: () => void;
   disabled?: boolean;
   hasActiveInvocation?: boolean;
@@ -100,6 +105,7 @@ export function ChatInput({
 
   // F122B AC-B10: track which cats are actively executing (for whisper disable)
   const activeInvocations = useChatStore((s) => s.activeInvocations);
+  const catInvocations = useChatStore((s) => s.catInvocations);
   const storeTargetCats = useChatStore((s) => s.targetCats);
   const activeCatIds = useMemo(() => {
     const ids = new Set<string>();
@@ -132,6 +138,22 @@ export function ChatInput({
     if (!whisperMode || whisperTargets.size === 0) return false;
     return ![...whisperTargets].some((catId) => activeCatIds.has(catId));
   }, [whisperMode, whisperTargets, activeCatIds]);
+  const dispositionIsMeaningful = Boolean(hasActiveInvocation && !whisperTargetsAllIdle);
+  const messageDisposition = useMessageDispositionPreference(threadId, dispositionIsMeaningful);
+  const dispositionCarrierCapabilities = useMemo(() => {
+    const targetCatIds = whisperMode
+      ? [...whisperTargets].filter((catId) => activeCatIds.has(catId))
+      : [...activeCatIds];
+    return targetCatIds.map((catId) => catInvocations[catId]?.freshnessCarrierCapability) as (
+      | FreshnessCarrierCapability
+      | undefined
+    )[];
+  }, [activeCatIds, catInvocations, whisperMode, whisperTargets]);
+  const dispositionCarrierSupport = classifyFreshnessCarrierSupport(dispositionCarrierCapabilities);
+  const displayedDisposition =
+    messageDisposition.effective === 'continue_current' && dispositionCarrierSupport !== 'exact'
+      ? 'next_work'
+      : messageDisposition.effective;
 
   const [mobileToolbar, setMobileToolbar] = useState(false);
   const [ghostSuggestion, setGhostSuggestion] = useState<string | null>(null);
@@ -254,7 +276,27 @@ export function ChatInput({
           whisperMode && whisperTargets.size > 0
             ? { visibility: 'whisper' as const, whisperTo: [...whisperTargets] }
             : undefined;
-        onSend(trimmed, images.length > 0 ? images : undefined, whisper, deliveryMode, replyToMessage?.id);
+        // Only a one-shot override belongs on this message. Thread/global/product
+        // inheritance resolves again at server admission, closing hydration races.
+        const declaredDisposition =
+          dispositionIsMeaningful && deliveryMode !== 'force'
+            ? dispositionCarrierSupport === 'exact'
+              ? (messageDisposition.oneShot ?? undefined)
+              : 'next_work'
+            : undefined;
+        const admission = onSend(
+          trimmed,
+          images.length > 0 ? images : undefined,
+          whisper,
+          deliveryMode,
+          replyToMessage?.id,
+          declaredDisposition,
+        );
+        if (declaredDisposition && messageDisposition.oneShot !== null) {
+          void Promise.resolve(admission).then((accepted) => {
+            if (accepted !== false) messageDisposition.clearOneShot();
+          });
+        }
         setInput('');
         ghostRef.current = null;
         setGhostSuggestion(null);
@@ -276,6 +318,9 @@ export function ChatInput({
       addHistoryEntry,
       replyToMessage,
       clearReplyTo,
+      dispositionIsMeaningful,
+      messageDisposition,
+      dispositionCarrierSupport,
     ],
   );
 
@@ -680,7 +725,9 @@ export function ChatInput({
         <div data-testid="active-invocation-banner" className="px-4 pt-2 flex items-center gap-2">
           <span className="inline-block w-2 h-2 rounded-full bg-[var(--color-cocreator-primary)] animate-pulse" />
           <span className="text-xs text-[var(--color-cocreator-primary)] font-medium">猫猫正在回复中...</span>
-          <span className="text-xs text-cafe-muted flex-1">继续输入，消息会排队</span>
+          <span className="text-xs text-cafe-muted flex-1">
+            {displayedDisposition === 'continue_current' ? '当前轮可在安全断点读取' : '继续输入，消息会成为下一件工作'}
+          </span>
           {onStop && (
             <button
               type="button"
@@ -692,6 +739,14 @@ export function ChatInput({
             </button>
           )}
         </div>
+      )}
+
+      {dispositionIsMeaningful && (
+        <MessageDispositionSelector
+          controller={messageDisposition}
+          carrierSupport={dispositionCarrierSupport}
+          carrierCapabilities={dispositionCarrierCapabilities}
+        />
       )}
 
       {pathCompletion.isOpen && !activeMenu && (
@@ -862,7 +917,9 @@ export function ChatInput({
               whisperMode
                 ? '悄悄话...'
                 : hasActiveInvocation && !whisperTargetsAllIdle
-                  ? '继续输入，消息会排队...'
+                  ? displayedDisposition === 'continue_current'
+                    ? '接着当前工作补充...'
+                    : '继续输入，成为下一件工作...'
                   : '输入消息... (@ 召唤猫猫)'
             }
             className={`w-full resize-none rounded-xl border p-3 text-sm focus:outline-none focus:ring-2 placeholder:text-cafe-muted ${

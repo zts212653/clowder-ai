@@ -18,10 +18,12 @@ export interface CodexStreamState {
   hadPriorTextTurn: boolean;
   /** Cat nickname/display name used to distinguish this cat's signature from quoted teammate signatures. */
   signatureIdentity?: string;
-  /** Runtime-derived signature appended once when Codex reports `turn.completed`. */
+  /** Runtime-derived signature appended once after the provider stream ends normally. */
   canonicalSignature?: string;
   /** Latest provider-authored own signature, used only when runtime config cannot provide one. */
   observedSignature?: string;
+  /** Chronological terminal truth; only a final successful stream may receive a signature. */
+  lastTurnTerminal?: 'successful' | 'non_success';
   finalSignatureEmitted?: boolean;
 }
 
@@ -179,6 +181,30 @@ export interface CodexEventTransformOptions {
 }
 
 /**
+ * Append the canonical signature only after the provider event stream has
+ * ended normally. A `turn.completed` event is not itself a stream boundary:
+ * Codex may emit another turn before the NDJSON iterator is exhausted.
+ */
+export function finalizeCodexStream(state: CodexStreamState, catId: CatId): AgentMessage | null {
+  if (
+    state.lastTurnTerminal !== 'successful' ||
+    (!state.hadPriorTextTurn && !state.observedSignature) ||
+    state.finalSignatureEmitted
+  ) {
+    return null;
+  }
+  const signature = state.canonicalSignature ?? state.observedSignature;
+  if (!signature) return null;
+  state.finalSignatureEmitted = true;
+  return {
+    type: 'text',
+    catId,
+    content: `\n\n${signature}`,
+    timestamp: Date.now(),
+  };
+}
+
+/**
  * Transform a raw Codex CLI NDJSON event into an AgentMessage.
  * Returns null to skip events we don't care about.
  *
@@ -193,6 +219,21 @@ export function transformCodexEvent(
 ): AgentMessage | AgentMessage[] | null {
   if (typeof event !== 'object' || event === null) return null;
   const e = event as Record<string, unknown>;
+
+  if (state) {
+    if (e.type === 'turn.completed') {
+      state.lastTurnTerminal = e.status === undefined || e.status === 'completed' ? 'successful' : 'non_success';
+    } else if (e.type === 'turn.failed') {
+      state.lastTurnTerminal = 'non_success';
+    } else if (
+      e.type === 'turn.started' ||
+      e.type === 'item.started' ||
+      e.type === 'item.updated' ||
+      e.type === 'item.completed'
+    ) {
+      delete state.lastTurnTerminal;
+    }
+  }
 
   if (e.type === 'thread.started') {
     const threadId = e.thread_id;
@@ -288,16 +329,7 @@ export function transformCodexEvent(
   }
 
   if (e.type === 'turn.completed') {
-    if ((!state?.hadPriorTextTurn && !state?.observedSignature) || state.finalSignatureEmitted) return null;
-    const signature = state.canonicalSignature ?? state.observedSignature;
-    if (!signature) return null;
-    state.finalSignatureEmitted = true;
-    return {
-      type: 'text',
-      catId,
-      content: `\n\n${signature}`,
-      timestamp: Date.now(),
-    };
+    return null;
   }
 
   if (e.type !== 'item.completed') return null;

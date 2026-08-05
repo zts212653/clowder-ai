@@ -2431,7 +2431,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   test('#1272: service strips per-message signatures and emits one runtime-canonical signature', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
-    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.6-sol' });
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.6-sol',
+      carrierMode: 'exec_json',
+    });
 
     const promise = collect(service.invoke('Signed multi-turn'));
     emitCodexEvents(proc, [
@@ -2453,6 +2458,39 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       textMsgs.map((msg) => msg.content),
       ['第一段。', '\n\n第二段。', '\n\n[砚砚/gpt-5.6-sol🐾]'],
     );
+  });
+
+  test('#1272: multiple completed turns keep the canonical signature at the real stream end', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.6-sol',
+      carrierMode: 'exec_json',
+    });
+
+    const promise = collect(service.invoke('Multi-terminal stream'));
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'thread-1272-multi-terminal' },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-1', type: 'agent_message', text: 'turn 1' },
+      },
+      { type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 5 } },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-2', type: 'agent_message', text: 'turn 2' },
+      },
+      { type: 'turn.completed', usage: { input_tokens: 20, output_tokens: 10 } },
+    ]);
+
+    const msgs = await promise;
+    const text = msgs
+      .filter((msg) => msg.type === 'text')
+      .map((msg) => msg.content)
+      .join('');
+    assert.equal(text, 'turn 1\n\nturn 2\n\n[砚砚/gpt-5.6-sol🐾]');
   });
 
   test('separates multi-turn text with paragraph breaks (turn newline fix)', async () => {
@@ -3022,7 +3060,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     }
   });
 
-  test('ignores turn.started/unknown controls and uses turn.completed only to finalize the signature', async () => {
+  test('ignores turn.started/unknown controls and finalizes the signature after a completed stream', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
@@ -3042,7 +3080,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     ]);
 
     const msgs = await promise;
-    // turn.completed remains non-UI control except for the one deterministic final signature chunk.
+    // turn.completed remains non-UI control; successful stream exhaustion emits the deterministic signature chunk.
     assert.equal(msgs.length, 4);
     assert.equal(msgs[0].type, 'session_init');
     assert.equal(msgs[1].type, 'text');

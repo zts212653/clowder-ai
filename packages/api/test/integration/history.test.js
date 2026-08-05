@@ -62,6 +62,49 @@ describe('POST → GET /api/messages roundtrip', () => {
     assert.equal(body.hasMore, false);
   });
 
+  it('normalizes lone surrogates before persisting message JSON', () => {
+    const loneHighSurrogate = String.fromCharCode(0xd800);
+    const loneLowSurrogate = String.fromCharCode(0xdc00);
+    const input = {
+      userId: 'default-user',
+      catId: 'codex',
+      content: `before${loneHighSurrogate}after 😀`,
+      mentions: [],
+      timestamp: 2500,
+      extra: { targetCats: [`codex${loneLowSurrogate}`] },
+    };
+
+    const stored = messageStore.append(input);
+
+    assert.equal(stored.content, 'before�after 😀');
+    assert.deepEqual(stored.extra.targetCats, ['codex�']);
+    assert.equal(input.content, `before${loneHighSurrogate}after 😀`, 'normalization must not mutate caller input');
+  });
+
+  it('returns well-formed Unicode JSON when legacy rows contain lone surrogates', async () => {
+    const loneHighSurrogate = String.fromCharCode(0xd800);
+    const loneLowSurrogate = String.fromCharCode(0xdc00);
+    const legacy = messageStore.append({
+      userId: 'default-user',
+      catId: 'codex',
+      content: 'placeholder',
+      mentions: [],
+      timestamp: 2600,
+    });
+    // Simulate a row persisted before the Unicode boundary existed.
+    legacy.content = `legacy${loneHighSurrogate}message 😀`;
+    legacy.extra = { targetCats: [`codex${loneLowSurrogate}`] };
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(body.messages[0].content, 'legacy�message 😀');
+    assert.deepEqual(body.messages[0].extra.targetCats, ['codex�']);
+    assert.ok(!res.body.includes('\\ud800'), 'response must not expose an escaped lone high surrogate');
+    assert.ok(!res.body.includes('\\udc00'), 'response must not expose an escaped lone low surrogate');
+  });
+
   it('cursor pagination returns correct pages', async () => {
     // Insert 5 messages
     for (let i = 0; i < 5; i++) {

@@ -26,6 +26,8 @@ export const sendMessageSchema = z
     whisperTo: z.array(catIdSchema()).optional(),
     /** F39: Delivery mode. undefined = smart default (queue when active, immediate otherwise). */
     deliveryMode: z.enum(['immediate', 'queue', 'force']).optional(),
+    /** F264: author-declared work disposition. Missing is server-default next_work. */
+    messageDisposition: z.enum(['continue_current', 'next_work']).optional(),
     /** #699: ID of message being replied to (quote). */
     replyTo: z.string().min(1).max(100).optional(),
   })

@@ -5,13 +5,13 @@ related_decisions: [040, 041, 042]
 topics: [freshness, glass-box, supplement, inbox-notice, runtime-descriptor, side-effect-gate, codex-app-server, lifecycle, liveness, ax]
 doc_kind: spec
 created: 2026-06-27
-updated: 2026-07-30
+updated: 2026-08-04
 tips_exempt: true
 ---
 
 # F254: Side-Effect Freshness Gate — 副作用出口 freshness 拦截
 
-> **Status**: in-progress, **D2 live app-server canary lifecycle/parity hardening + E-C complete** (**ADR-042 glass-box publish-then-supplement merged via PR #2906 (`ace5412c0`); durable Queue custody / migration / replayable `eval:freshness` merged via PR #2912 (`07f46f5aa`); D2 default-off provider-native carrier merged via PR #3004 (`680ab702f`); typed causal provenance + durable child lifecycle merged via PR #3036 (`9ae942beb`). The operator has explicitly enabled `CAT_CAFE_CODEX_CARRIER=app_server` in the live runtime canary. PR #3079 (`3b83fb43c`) fixed LF-only JSONL framing plus pump rejection isolation; PR #3082 (`7dd7a4d51`) restored provider-neutral Codex diagnostics; PR #3097 (`54aef5e74`) merged AC-D14 lifecycle parity/no-replay after Terra exact-HEAD review; PR #3285 (`65ef23d17`) merged exact capacity checkpoint continuation after gpt52 exact-HEAD review. Code default remains `exec_json`; broad rollout is still gated by the unfinished AC-D16 exact-read/late-boundary live parity matrix and explicit rollout authorization. These merges did not restart runtime, so canonical main truth does not prove the live canary loaded them. F264 owns the separate per-target receipt/UI close gate.**) | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
+> **Status**: in-progress, **D2 live app-server canary lifecycle/parity hardening + E-C complete** (**ADR-042 glass-box publish-then-supplement merged via PR #2906 (`ace5412c0`); durable Queue custody / migration / replayable `eval:freshness` merged via PR #2912 (`07f46f5aa`); D2 default-off provider-native carrier merged via PR #3004 (`680ab702f`); typed causal provenance + durable child lifecycle merged via PR #3036 (`9ae942beb`). The operator has explicitly enabled `CAT_CAFE_CODEX_CARRIER=app_server` in the live runtime canary. PR #3079 (`3b83fb43c`) fixed LF-only JSONL framing plus pump rejection isolation; PR #3082 (`7dd7a4d51`) restored provider-neutral Codex diagnostics; PR #3097 (`54aef5e74`) merged AC-D14 lifecycle parity/no-replay after Terra exact-HEAD review; PR #3285 (`65ef23d17`) merged exact capacity checkpoint continuation after gpt52 exact-HEAD review. Code default remains `exec_json`; broad rollout is still gated by AC-D15~D17 and explicit rollout authorization. 2026-08-04 normal-runtime UAT proves the live app-server path is loaded, but also proves Codex 0.146.0 protocol drift: a completed `collabAgentToolCall/wait` crossed four real boundaries without a notice because the classifier/eval census knows only command/file/MCP/dynamic. F264 owns the separate author-intent visibility and capability-aware UI close gate.**) | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
 
 Architecture cell: ball-custody, dispatch, bubble-pipeline, transport, harness-eval
 
@@ -828,6 +828,22 @@ Phase E 不再增加另一层“提醒猫去读”的 fallback。它改变输出
   provider-native adapter 不得无审计继承。任何 rate-limit/cap 抑制都记录 missed，eval 必须暴露长 invocation
   静默尾区，不能让 Claude 高频 MCP 行为把 Codex/Claude native-tool coverage 平均成健康。
 
+#### 2026-08-04 protocol census / carrier truth live blocker
+
+正常 runtime UAT 在 exact Codex app-server child 中观察到四次完成的 `collabAgentToolCall/wait`，第一条
+`continue_current` Queue message 在首个 completion 前约 64 秒已经 durable admission，但整轮没有
+`turn/steer`。这不是 timeout，也不是消息丢失：当前 classifier 对未知 completed item 返回无 boundary，
+focused test 又硬编码同一组 command/file/MCP/dynamic，因此 provider protocol 漂移同时逃过实现与 eval 分母。
+
+Codex 0.146.0 schema 还声明 `webSearch`、`imageView`、`sleep`、`imageGeneration` 与
+`subAgentActivity`。不能把它们一律当 safe：每个 variant 必须被协议 census 明确归为 safe tool boundary、
+intentional non-boundary 或 deferred/no-data；新 variant 未分类时 gate 失败，并将 item type/status 记入有界
+unknown telemetry。Claude 的 native tool-name classifier 已有 dynamic fallback，但默认 `print_sdk` carrier
+明确 unsupported；Kimi 的 `kimi_stream_json` 也必须显式声明 `unsupported/no_data`，不得从 Clowder AI MCP
+piggyback 推断 native coverage。
+
+完整 UAT、provider/carrier matrix 与 repair contract 见
+
 > **Implementation gate**：AC-D12~D18 的架构、race 与 RED 规格已冻结于
 > operator 已于 2026-07-16 授权 Phase 1。AC-D12/D13/D18 由 default-off implementation + direct/tmux
 > live fixture 证明；AC-D14 已由 PR #3079/#3082/#3097 闭合。AC-D15~D17 仍是默认启用前的 rollout gate，
@@ -1055,7 +1071,7 @@ Map delta why: 本轮只修正现有 Web closure projection / hydration 的时�
 | R37 | all-active legacy closure accounting | E-B | AC-E23 | 51-root inventory + per-invocation outcomes + exact 399-char target + idempotent Redis replay | ✅ migration machinery merged PR #2912 (`07f46f5aa`); production apply not run |
 | R38 | Codex provider-native same-turn notice | D2 | AC-D12/D13 | stable `turn/steer` exact-turn delivery + notified/seen truth split | ✅ default-off adapter + exact-turn live cognition fixture |
 | R39 | carrier parity + no replay | D2 | AC-D14 | session/auth/approval/tmux/timeout/internal-archive/F212 matrix | ✅ AC-D14a-g merged via PR #3079/#3082/#3097；AC-D16 live matrix 仍独立 gated |
-| R40 | provider × tool-surface eval | D2 | AC-D15/D16 | command/file/MCP matrix + Redis 6398 live regression | 🟡 durable matrix + anti-overclaim green；full exact-read/handled + late/no-boundary live 对照未完成 |
+| R40 | provider × tool-surface eval | D2 | AC-D15/D16 | installed-schema census + command/file/MCP/collab/search/image/sleep decisions + Redis 6398 live regression | 🟡 code repair merged PR #3431（squash `b1c9c8e26`，exact-HEAD review APPROVE）：installed schema census、`collabAgentToolCall` safe boundary、逐类 no-boundary/deferred 分类、bounded unknown telemetry/denominator 与 Claude/Kimi unsupported/no-data truth 已落地；full exact-read/handled + late/no-boundary 正常 runtime 回归仍待执行 |
 | R41 | Claude provider-native capability truth | D2 | AC-D17/D18 | print_sdk output-only baseline + stream-json exact-vs-queued fixture + B1 cap anti-silence | 🟡 live cognition proven as queued_internal_turn；default print_sdk/B1 保持不变，未迁移生产 adapter |
 | R42 | app-server JSONL framing + pump isolation | D2 | AC-D14f | U+2028/U+2029 / CRLF / UTF-8 chunk / EOF / null + direct/tmux rejection fixture | ✅ PR #3079 (`3b83fb43c`)；live crash family fixed |
 | R43 | provider-neutral Codex diagnostics | D2 | AC-D14g | Codex disconnect 不进入 Claude-only report；network classification regression | ✅ PR #3082 (`7dd7a4d51`) |

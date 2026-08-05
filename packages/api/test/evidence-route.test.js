@@ -120,6 +120,58 @@ describe('GET /api/evidence/search', () => {
     assert.equal(body.expansionHints, undefined, 'exact thread responses must not contain global related directions');
     assert.equal(expansionSearches, 0, 'thread filter must stop unscoped expansion searches');
     assert.equal(body.filterExecution.outcome, 'matched');
+    assert.equal(body.expansionMeta?.eligible, false);
+    assert.equal(body.expansionMeta?.gateReason, 'exact_thread_filter');
+    assert.equal(body.expansionMeta?.attempted, false);
+  });
+
+  it('records an explicit no-results gate in the expansion health funnel', async () => {
+    await setup({ searchWithMeta: async () => ({ items: [], meta: { degraded: false } }) });
+
+    const res = await app.inject({ method: 'GET', url: '/api/evidence/search?q=missing' });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.deepEqual(body.results, []);
+    assert.equal(body.expansionMeta?.eligible, false);
+    assert.equal(body.expansionMeta?.gateReason, 'no_results');
+    assert.equal(body.expansionMeta?.attempted, false);
+    assert.equal(body.expansionMeta?.sourceRevision, 'f256-health-v2');
+  });
+
+  it('records expansion failures instead of swallowing the health-funnel dropout', async () => {
+    let calls = 0;
+    await setup({
+      searchWithMeta: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            items: [
+              {
+                anchor: 'F256',
+                kind: 'feature',
+                status: 'active',
+                title: 'Memory Search Strategy',
+                keywords: ['related'],
+                updatedAt: '2026-08-04T00:00:00Z',
+              },
+            ],
+            meta: { degraded: false },
+          };
+        }
+        throw new Error('expansion sub-search failed');
+      },
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/evidence/search?q=F256' });
+
+    assert.equal(res.statusCode, 200, 'expansion remains fail-open for the search result');
+    const body = res.json();
+    assert.equal(body.results.length, 1);
+    assert.equal(body.expansionMeta?.eligible, true);
+    assert.equal(body.expansionMeta?.gateReason, 'expansion_error');
+    assert.equal(body.expansionMeta?.attempted, true);
+    assert.equal(body.expansionMeta?.presented, 0);
   });
 
   it('returns results from evidence store', async () => {
