@@ -124,22 +124,20 @@ operator拍板："简单的用富文本，复杂的用猫主动打开浏览器�
 - 适合：Chart.js 图表、CSS 动画、计算器等纯前端组件
 - 不适合：需要网络请求、需要访问外部资源的复杂应用（那些用 `browser-preview` skill）
 
-#### ⚠️ 要交互就用 `addEventListener`，内联 `onclick` 无效
+#### 内联 `on*` 会被剥掉
 
-HTML 会先过一遍 DOMPurify，**所有内联事件属性（`onclick` / `onmouseover` / `onerror` …）都会被剥掉**，
-而且完全静默 —— widget 照常渲染、点了没反应、控制台无报错，很难自己发现。
+DOMPurify 静默剥掉所有 `on*` 属性——widget 照常渲染，点击不生效，不报错。`<script>` 保留，从里面绑事件：
 
 ```html
-<!-- ❌ 无效：onclick 被剥掉，点了没反应 -->
+<!-- 不行：onclick 被剥掉 -->
 <button onclick="show()">点我</button>
 
-<!-- ✅ 有效：从 <script> 里绑 -->
+<!-- 可以：从 <script> 绑 -->
 <button id="btn">点我</button>
-<script>document.getElementById('btn').addEventListener('click', () => { /* ... */ })</script>
+<script>document.getElementById('btn').addEventListener('click', show)</script>
 ```
 
-`<script>` 标签本身是保留的，所以**交互能力没有损失，只是必须换个写法**。
-纯展开/折叠这类轻交互，也可以用 `<details><summary>` 或 CSS `:hover` / `:target`，零 JS 更稳。
+轻交互用 `<details><summary>` 或 CSS `:hover`，不用 JS。
 
 ## 发送方式
 
