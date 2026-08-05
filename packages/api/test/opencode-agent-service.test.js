@@ -111,6 +111,15 @@ const STEP_FINISH = {
   part: { type: 'step-finish', reason: 'stop', cost: 0.036, tokens: { total: 36937 } },
 };
 
+// CodeAgent 3.0 → OpenCode facade: translate script may drop usage, yielding
+// step_finish without tokens. This fixture pins the missing-usage alert path.
+const STEP_FINISH_NO_TOKENS = {
+  type: 'step_finish',
+  timestamp: 1773304958508,
+  sessionID: 'ses_test123',
+  part: { type: 'step-finish', reason: 'stop' },
+};
+
 const _ERROR_EVENT = {
   type: 'error',
   timestamp: 1773298718314,
@@ -879,5 +888,59 @@ describe('OpenCodeAgentService', () => {
       messages.some((m) => m.type === 'tool_use'),
       'tool_use yield confirms event reached transformer',
     );
+  });
+
+  // Issue #1208: CodeAgent 3.0 → OpenCode translate may drop token usage.
+  // When the CLI produces events but no step_finish carries tokens, auto-handoff
+  // based on context fill cannot fire. The service must surface a persistent
+  // visible alert so users know automatic handoff is unavailable.
+  test('issue #1208: opencode events without usage telemetry yield warning alert', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-opus-4-6' });
+    const promise = collect(service.invoke('Long session'));
+    // Simulate a CodeAgent translate that emits the opencode facade shape
+    // but omits token counts on step_finish.
+    emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH_NO_TOKENS]);
+    const messages = await promise;
+
+    const alert = messages.find((m) => {
+      if (m.type !== 'system_info') return false;
+      try {
+        return JSON.parse(m.content).type === 'warning';
+      } catch {
+        return false;
+      }
+    });
+    assert.ok(
+      alert,
+      `expected warning system_info when no usage telemetry; got types: ${messages.map((m) => m.type).join(',')}`,
+    );
+    const payload = JSON.parse(alert.content);
+    assert.ok(payload.message, 'alert must include human-readable message');
+    assert.ok(payload.message.includes('token 用量'), 'message should mention missing token usage');
+
+    // Sanity: no usage-bearing agent_loop was produced.
+    const usageLoops = messages.filter((m) => m.type === 'agent_loop' && m.metadata?.usage);
+    assert.strictEqual(usageLoops.length, 0, 'no usage should reach invoke-single-cat');
+  });
+
+  test('issue #1208: usage-bearing step_finish does NOT yield warning alert', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-opus-4-6' });
+    const promise = collect(service.invoke('Normal session'));
+    emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+    const messages = await promise;
+
+    const alert = messages.find((m) => {
+      if (m.type !== 'system_info') return false;
+      try {
+        return JSON.parse(m.content).type === 'warning';
+      } catch {
+        return false;
+      }
+    });
+    assert.ok(!alert, 'usage warning MUST NOT fire when usage telemetry is present');
   });
 });

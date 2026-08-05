@@ -2419,23 +2419,26 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           // Use lastTurnInputTokens (per-API-call) for accurate context fill,
           // then fallback to aggregated inputTokens, and finally totalTokens
           // for providers (Gemini CLI) that only expose a total count.
-          // clowder#915 R5 cloud P2: 3-tier window resolution.
-          // 1) Explicit `usage.contextWindowSize` (CLI-reported — Claude's exact value)
-          // 2) Fallback table by bare model name (handles prefix-strip for
-          //    account-routing path's `provider/model` form per R2 P1 #2)
-          // 3) opencode-only last-resort default for unknown/custom-provider
-          //    models (GLM-5.1, openrouter customs — the breed clowder#915
-          //    actually targets). Crucially this is LAST so known opencode
-          //    models like the default claude-opus-4-6 get their precise 200k
-          //    from the table, NOT the 128k conservative default.
-          // F24 known-min floor: tiers 1-2 are additionally raised to
-          // max(value, known floor) inside resolveContextWindow — a stale
-          // CLI (≤2.1.177) reports 200K for claude-fable-5 (native 1M),
-          // and tier 1 outranking tier 2 meant the wrong value always won:
-          // sessions sealed budget_exhausted with 80% of the window unused.
+          // clowder#915 R5 cloud P2 / issue #1208 P1: context-window resolution.
+          // 1) Explicit `usage.contextWindowSize` (CLI-reported) wins. It is
+          //    passed through resolveContextWindow only for the KNOWN_MIN floor
+          //    (e.g. stale CLI reporting 200K for claude-fable-5 which is 1M).
+          // 2) Non-opencode providers (direct Claude CLI, etc.) use the fallback
+          //    table by bare model name, also raised to the known-min floor.
+          // 3) opencode WITHOUT an explicit contextWindowSize ALWAYS uses the
+          //    conservative 128K default. The OpenCode facade gateway may only
+          //    expose a 128K window even when the underlying model (claude-opus-4-6)
+          //    nominally supports 1M. Using the fallback table's 1M value delayed
+          //    auto-handoff until ~850K and caused hits against the gateway hard
+          //    limit. The 128K default keeps opencode handoffs safe; direct
+          //    provider paths retain their precise fallback values.
+          const reportedWindowSize = msg.metadata.usage.contextWindowSize;
           const windowSize =
-            resolveContextWindow(msg.metadata.usage.contextWindowSize, msg.metadata.model ?? '') ??
-            (msg.metadata.provider === 'opencode' ? OPENCODE_DEFAULT_CONTEXT_WINDOW : undefined);
+            reportedWindowSize != null
+              ? resolveContextWindow(reportedWindowSize, msg.metadata.model ?? '')
+              : msg.metadata.provider === 'opencode'
+                ? OPENCODE_DEFAULT_CONTEXT_WINDOW
+                : resolveContextWindow(undefined, msg.metadata.model ?? '');
           const usedFrom =
             msg.metadata.usage.lastTurnInputTokens != null
               ? 'last_turn'

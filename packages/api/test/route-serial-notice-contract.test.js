@@ -10,6 +10,23 @@ function createInlineMentionService(catId) {
   };
 }
 
+function createWarningSystemInfoService(catId) {
+  return {
+    async *invoke() {
+      yield {
+        type: 'system_info',
+        catId,
+        content: JSON.stringify({
+          type: 'warning',
+          message: '当前 opencode/CodeAgent 适配器未返回 token 用量，自动 handoff 无法按上下文比例触发。',
+        }),
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId, timestamp: Date.now() };
+    },
+  };
+}
+
 function createMockDeps(services, appendCalls, feedbackWrites, broadcasts) {
   let invocationSeq = 0;
   let messageSeq = 0;
@@ -119,5 +136,45 @@ describe('route-serial notice contract', () => {
     assert.ok(hintBroadcast, 'should broadcast the routing-syntax-hint in real-time');
     assert.equal(hintBroadcast.payload.message.source.meta.presentation, 'system_notice');
     assert.equal(hintBroadcast.payload.message.source.meta.noticeTone, 'warning');
+  });
+
+  it('issue #1208 P2: persists user-facing warning system_info to messageStore', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+    const feedbackWrites = [];
+    const broadcasts = [];
+    const deps = createMockDeps(
+      { opus: createWarningSystemInfoService('opus') },
+      appendCalls,
+      feedbackWrites,
+      broadcasts,
+    );
+
+    const yieldedTypes = [];
+    for await (const msg of routeSerial(deps, ['opus'], 'do something', 'user1', 'thread-warning-persist')) {
+      yieldedTypes.push(msg.type);
+    }
+
+    // The warning must reach the live stream.
+    assert.ok(yieldedTypes.includes('system_info'), 'warning system_info must be yielded to live stream');
+
+    // It must also be persisted as a system_notice connector message so it survives refresh.
+    const warningAppend = appendCalls.find((msg) => msg.source?.connector === 'system-warning');
+    assert.ok(warningAppend, 'warning system_info must be persisted to messageStore');
+    assert.equal(warningAppend.userId, 'system');
+    assert.equal(warningAppend.catId, null);
+    assert.ok(
+      warningAppend.content.includes('未返回 token 用量'),
+      'persisted warning content should include the original warning message',
+    );
+    assert.equal(warningAppend.source.meta.presentation, 'system_notice');
+    assert.equal(warningAppend.source.meta.noticeTone, 'warning');
+
+    // It must NOT be broadcast again — the live stream already delivered the system_info event;
+    // broadcasting a duplicate connector_message would cause double rendering.
+    const warningBroadcast = broadcasts.find(
+      (entry) => entry.event === 'connector_message' && entry.payload.message.source?.connector === 'system-warning',
+    );
+    assert.equal(warningBroadcast, undefined, 'warning persistence must not re-broadcast to live clients');
   });
 });

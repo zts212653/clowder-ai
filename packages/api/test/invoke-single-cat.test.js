@@ -2210,14 +2210,12 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(postThresholdText.length, 1, 'post-threshold text must reach outputs (transcript continuity)');
   });
 
-  it('clowder#915 R5 cloud P2: 3-tier window resolution — known opencode model uses fallback table (NOT clobbered by default)', async () => {
-    // Cloud's R5 regression catch: R4's unconditional 128k attach in the
-    // transformer would prevent claude-opus-4-6 (default opencode breed
-    // model per cat-template.json) from resolving to its true 200k via the
-    // fallback table. This test pins the 3-tier chain:
-    //   1) usage.contextWindowSize (none here)
-    //   2) getContextWindowFallback('claude-opus-4-6') = 200_000 ← THIS WINS
-    //   3) opencode last-resort default (128_000) — should NOT be used here
+  it('clowder#915 R5 cloud P2 / issue #1208 P1: opencode without explicit contextWindowSize uses conservative 128K default', async () => {
+    // The OpenCode facade gateway is authoritative: even when the underlying
+    // model (claude-opus-4-6) supports 1M, the gateway may only expose 128K.
+    // Without an explicit CLI-reported contextWindowSize, opencode must NOT
+    // use the model fallback table; it must resolve to OPENCODE_DEFAULT_CONTEXT_WINDOW.
+    // Direct provider paths (anthropic, etc.) still use the fallback table.
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sessionChainStore = new SessionChainStore();
 
@@ -2231,13 +2229,13 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
           timestamp: Date.now(),
           metadata: {
             provider: 'opencode',
-            model: 'claude-opus-4-6', // KNOWN to fallback table (200k)
+            model: 'claude-opus-4-6', // KNOWN to direct-provider fallback table (1M)
             usage: {
-              inputTokens: 150_000,
-              lastTurnInputTokens: 150_000,
+              inputTokens: 90_000,
+              lastTurnInputTokens: 90_000,
               outputTokens: 50,
-              totalTokens: 150_050,
-              // NO contextWindowSize from transformer — forces tier 2+3
+              totalTokens: 90_050,
+              // NO contextWindowSize from transformer — opencode default must win
             },
           },
         };
@@ -2268,15 +2266,18 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       })
       .filter((p) => p && p.type === 'context_health');
     assert.equal(healthInfos.length, 1, 'must emit context_health');
-    // CRITICAL: windowTokens MUST be 200_000 (from fallback table) NOT 128_000
-    // (the opencode last-resort default — which would wrongly cap claude-opus-4-6).
+    // CRITICAL: windowTokens MUST be 128_000 (opencode conservative default)
+    // NOT 1_000_000 (direct-provider fallback table value for claude-opus-4-6).
     assert.equal(
       healthInfos[0].health.windowTokens,
-      200_000,
-      'claude-opus-4-6 must resolve to its precise 200k via fallback table — NOT clobbered by opencode last-resort default',
+      128_000,
+      'opencode without explicit contextWindowSize must resolve to conservative 128K — NOT direct-provider 1M fallback',
     );
-    // Sanity: 150k of 200k = 0.75 fillRatio (would be 1.17 if window were clobbered to 128k)
-    assert.ok(healthInfos[0].health.fillRatio < 0.8, 'fillRatio must reflect true 200k window');
+    // Sanity: 90k of 128k = 0.70 fillRatio, still below the 0.85 seal threshold.
+    assert.ok(
+      healthInfos[0].health.fillRatio > 0.6 && healthInfos[0].health.fillRatio < 0.85,
+      'fillRatio must reflect 128K window',
+    );
   });
 
   it('opencode GLM-5.2 resolves to 1M context window and does not false-seal at 140k', async () => {
@@ -2413,14 +2414,15 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(healthInfos[0].health.windowTokens, 128_000, 'unknown opencode model resolves to last-resort 128k');
   });
 
-  it('clowder#915 R2 cloud P1: agent_loop with provider-prefixed model (account-routing path) triggers context_health', async () => {
+  it('clowder#915 R2 cloud P1 / issue #1208 P1: opencode provider-prefixed model without explicit contextWindowSize uses 128K default', async () => {
     // Production opencode invocation path: invoke-single-cat.ts:1459 sets
     // callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE to `safeProvider/safeModel`
     // form. OpenCodeAgentService.ts:139 then propagates that as effectiveModel.
-    // Transformer doesn't set contextWindowSize, so we fall back to
-    // getContextWindowFallback. Before the R2 cloud P1 fix, the prefixed
-    // string missed the lookup table → no windowSize → context_health silently
-    // skipped → handoff bypassed. This test pins the production scenario.
+    // Even though the model string is `anthropic/claude-opus-4-6`, the provider
+    // is still 'opencode'. Without an explicit contextWindowSize from the CLI,
+    // we must use the conservative 128K opencode default rather than the direct
+    // provider fallback table's 1M value, because the OpenCode gateway window
+    // is authoritative and may be only 128K.
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sessionChainStore = new SessionChainStore();
 
@@ -2443,7 +2445,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
               lastTurnInputTokens: 36928,
               outputTokens: 9,
               totalTokens: 36937,
-              // NO contextWindowSize — forces fallback through model lookup
+              // NO contextWindowSize — opencode conservative default must win
             },
           },
         };
@@ -2477,9 +2479,13 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       'prefixed-model agent_loop with usage MUST emit context_health (clowder#915 R2 P1)',
     );
     const payload = JSON.parse(healthInfos[0].content);
-    assert.equal(payload.health.windowTokens, 200_000, 'fallback must resolve anthropic/claude-opus-4-6 → 200k');
+    assert.equal(
+      payload.health.windowTokens,
+      128_000,
+      'opencode anthropic/claude-opus-4-6 without explicit contextWindowSize → 128K default',
+    );
     assert.equal(payload.health.usedTokens, 36928);
-    assert.equal(payload.health.source, 'approx', 'fallback (no contextWindowSize on usage) → approx');
+    assert.equal(payload.health.source, 'approx', 'opencode default (no contextWindowSize on usage) → approx');
   });
 
   it('F24: uses fallback window size for models without contextWindowSize', async () => {
@@ -2530,7 +2536,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     assert.equal(healthInfos.length, 1, 'should yield context_health with fallback window');
     const payload = JSON.parse(healthInfos[0].content);
-    assert.equal(payload.health.windowTokens, 200000, 'should use fallback 200k for claude-opus-4-6');
+    assert.equal(payload.health.windowTokens, 1_000_000, 'should use fallback 1M for claude-opus-4-6');
     assert.equal(payload.health.source, 'approx', 'should mark as approx when using fallback');
   });
 

@@ -56,3 +56,27 @@ describe('SocketManager cancel behavior', () => {
     assert.ok(socketMod.SocketManager, 'SocketManager should be exported');
   });
 });
+
+describe('isUserFacingSystemInfoContent', () => {
+  it('recognizes warning as user-facing', async () => {
+    const { isUserFacingSystemInfoContent } = await import(
+      '../dist/domains/cats/services/agents/routing/route-helpers.js'
+    );
+    assert.ok(
+      isUserFacingSystemInfoContent(
+        JSON.stringify({ type: 'warning', message: 'current opencode/CodeAgent adapter did not return token usage' }),
+      ),
+      'warning system_info must be treated as user-facing so it persists and prevents silent_completion duplicates',
+    );
+  });
+
+  it('does not treat missing_usage_alert as user-facing (deprecated type)', async () => {
+    const { isUserFacingSystemInfoContent } = await import(
+      '../dist/domains/cats/services/agents/routing/route-helpers.js'
+    );
+    assert.ok(
+      !isUserFacingSystemInfoContent(JSON.stringify({ type: 'missing_usage_alert', detail: 'some detail' })),
+      'missing_usage_alert is not in the user-facing whitelist; alerts must use type=warning',
+    );
+  });
+});

@@ -10,7 +10,10 @@
 
 export const CONTEXT_WINDOW_SIZES: Record<string, number> = {
   // Claude (exact values from CLI, these are fallback)
-  'claude-opus-4-6': 200_000,
+  // Issue #1208: Anthropic confirmed Opus 4.6 / Sonnet 4.6 default to 1M
+  // context windows without a beta header. Update stale 200K fallbacks.
+  'claude-opus-4-6': 1_000_000,
+  'claude-sonnet-4-6': 1_000_000,
   'claude-sonnet-4-5': 200_000,
   'claude-haiku-4-5': 200_000,
   // Fable 5: native 1M context — the maximum is also the default (no [1m]
@@ -49,11 +52,12 @@ export const CONTEXT_WINDOW_SIZES: Record<string, number> = {
  * 0.85 seal threshold trips around 108k — safely before any real
  * provider's hard limit.
  *
- * Critical: this is a LAST-RESORT — known models (claude-opus-4-6,
- * gpt-5.x, etc.) MUST resolve through the fallback table first so we
- * use their precise window. Putting this unconditionally on the
- * transformer would defeat the table for opencode's default
- * claude-opus-4-6 (200k → wrongly capped at 128k).
+ * Critical: this is the default for opencode ONLY when the CLI does not
+ * report `usage.contextWindowSize`. Known models running through the
+ * direct provider path (Claude CLI, etc.) still resolve through the
+ * fallback table. For opencode, the gateway window is authoritative and
+ * may be as small as 128K even for models whose native window is larger,
+ * so we intentionally do NOT fall back to the model table here.
  */
 export const OPENCODE_DEFAULT_CONTEXT_WINDOW = 128_000;
 

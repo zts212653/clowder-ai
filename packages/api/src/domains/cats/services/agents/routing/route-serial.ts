@@ -1484,6 +1484,10 @@ export async function* routeSerial(
       let catProducedOutput = false;
       let turnStoredMessageId: string | undefined;
       let sawUserFacingSystemInfo = false;
+      // Issue #1208 P2: collect user-facing system_info payloads so they can be
+      // persisted to messageStore even when the cat produces no text/tools/rich.
+      // Without this, warnings yielded in the live stream disappear on refresh.
+      const userFacingSystemInfoContents: string[] = [];
       // #267: track errors that happened BEFORE abort — only these are real provider failures
       let hadProviderError = false;
       // Collect error text separately for system-message persistence (F5 reload)
@@ -1912,6 +1916,7 @@ export async function* routeSerial(
           if (effectiveMsg.type === 'system_info' && effectiveMsg.content) {
             if (isUserFacingSystemInfoContent(effectiveMsg.content)) {
               sawUserFacingSystemInfo = true;
+              userFacingSystemInfoContents.push(effectiveMsg.content);
             }
             try {
               const parsed = JSON.parse(effectiveMsg.content);
@@ -2580,6 +2585,7 @@ export async function* routeSerial(
             if (effectiveMsg.type === 'system_info' && effectiveMsg.content) {
               if (isUserFacingSystemInfoContent(effectiveMsg.content)) {
                 sawUserFacingSystemInfo = true;
+                userFacingSystemInfoContents.push(effectiveMsg.content);
               }
               try {
                 const parsed = JSON.parse(effectiveMsg.content);
@@ -4279,26 +4285,64 @@ export async function* routeSerial(
               });
             }
           }
-        } else if (!sawUserFacingSystemInfo && !isFreshnessClosureSuccessor) {
-          yield {
-            type: 'system_info' as AgentMessageType,
-            catId,
-            content: JSON.stringify({
-              type: 'silent_completion',
-              detail: `${catConfig?.displayName ?? (catId as string)} completed without textual output.`,
-              toolCount: collectedToolEvents.length,
-              provider: firstMetadata?.provider,
-              model: firstMetadata?.model,
-              invocationId: ownInvocationId,
-            }),
-            timestamp: Date.now(),
-          } as AgentMessage;
-          // No persisted message for fully silent turns.
+        }
+
+        // Issue #1208 P2: persist user-facing system_info warnings so they survive refresh.
+        // These warnings are yielded to the live stream (frontend renders them via
+        // formatVisibleSystemInfo), but without this append they disappear on page reload.
+        // We intentionally do NOT broadcast again — the live stream already delivered the
+        // event; this write is purely for hydration from messageStore.
+        if (userFacingSystemInfoContents.length > 0) {
+          for (const systemInfoContent of userFacingSystemInfoContents) {
+            try {
+              const parsed = JSON.parse(systemInfoContent) as { type?: unknown; message?: unknown };
+              if (parsed.type !== 'warning' || typeof parsed.message !== 'string') {
+                continue;
+              }
+              await deps.messageStore.append({
+                userId: 'system',
+                catId: null,
+                threadId,
+                content: parsed.message ? `⚠️ ${parsed.message}` : '⚠️ Warning',
+                mentions: [],
+                timestamp: Date.now(),
+                source: {
+                  connector: 'system-warning',
+                  label: '系统警告',
+                  icon: '⚠️',
+                  meta: { presentation: 'system_notice', noticeTone: 'warning' },
+                },
+              });
+            } catch (noticeErr) {
+              log.error(
+                { catId: catId as string, err: noticeErr },
+                'Failed to persist user-facing system_info warning',
+              );
+            }
+          }
+        }
+
+        if (!shouldPersistNoTextMessage) {
+          if (!sawUserFacingSystemInfo && !isFreshnessClosureSuccessor) {
+            yield {
+              type: 'system_info' as AgentMessageType,
+              catId,
+              content: JSON.stringify({
+                type: 'silent_completion',
+                detail: `${catConfig?.displayName ?? (catId as string)} completed without textual output.`,
+                toolCount: collectedToolEvents.length,
+                provider: firstMetadata?.provider,
+                model: firstMetadata?.model,
+                invocationId: ownInvocationId,
+              }),
+              timestamp: Date.now(),
+            } as AgentMessage;
+          }
+          // No persisted message for fully silent turns; clean up draft for turns whose
+          // only user-visible content was a system_info warning (persisted above).
           if (deps.draftStore && ownInvocationId) {
             deps.draftStore.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
           }
-        } else if (deps.draftStore && ownInvocationId) {
-          deps.draftStore.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
         }
       } else if (collectedToolEvents.length > 0) {
         // hadError && textContent === '' but toolEvents exist — persist tool record so
