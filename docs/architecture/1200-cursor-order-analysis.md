@@ -29,7 +29,20 @@ has closed.
 
 Thread message pagination uses two incompatible ordering relations that create a cursor cycle.
 
-### The C→Q→C Cycle
+**Provenance**: This is a **code-audit / defensive correctness finding** discovered
+during K-1/K-2 messaging infrastructure hardening (PR #1185 timestamp validation
+and plugin-contract message boundary design). No production incident has been
+traced to this cursor-domain mismatch. The project owner has observed related
+message display anomalies (F117 cancelled-message visibility, F123 bubble
+duplication/disappearance, pr #1146 message timing questions), but causal
+attribution to the cursor ordering domain is inferential, not traced.
+
+### The C→Q→C Cycle (Synthetic Counterexample)
+
+The following is a **synthetic state-space counterexample** derived from the
+store/CAS code paths. It demonstrates a reachable ordering inconsistency in the
+`getByThreadAfter` OR-union logic and lexicographic cursor CAS, not a traced
+production failure through a specific F254 carrier lifecycle.
 
 Given:
 - Message **C** (direct): created at t=200, delivered immediately. `C.id ≈ "0000…0200-…"`, ZSET score = 200.
@@ -47,6 +60,11 @@ Current `getByThreadAfter` uses OR-union: `id > afterId OR score > afterScore`.
 - **Cycle**: C → Q → C → Q → …
 
 Callers (`route-helpers.ts`, `DeliveryCursorStore`, `checkFreshnessForPostMessage`) store the last returned message ID and advance via lexicographic comparison (`boundary > current`). A cycle means the cursor alternates between C and Q indefinitely.
+
+No single production consumer has been identified that both observes C and later
+consumes Q through the same cursor in a normal same-target FIFO journey. The
+counterexample establishes the structural invariant violation at the store/CAS
+layer independent of any specific carrier.
 
 ### Memory/Redis Parity Gap (Baseline)
 
