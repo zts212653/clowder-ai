@@ -84,6 +84,17 @@ design_ready
 
 `accepted/rejected` are F275 whole-work transitions backed by typed evidence; the Desktop adapter may propose evidence but may not create a competing terminal ledger.
 
+### F275 dependency gate
+
+F289 cannot currently assume that the full lifecycle above is executable: F275 Phase C multi-attempt and whole-work terminal semantics are deferred. Before any F289 runtime implementation starts, the F275 owner must freeze and approve a named-consumer port that provides, at minimum:
+
+1. read/validate an existing `{workId, attemptId}` without exposing raw identity publicly;
+2. idempotently create the next ordered attempt for the same work after `fix_required`;
+3. attach typed implementation/review/merge/acceptance evidence to that work/attempt;
+4. apply or reject `accepted/rejected` whole-work transitions under F275-owned rules.
+
+There is no F289-local fallback work root, attempt sequence or terminal ledger. If the F275 port is unavailable or insufficient, automated claims remain disabled and only contract/design work may proceed. This is a blocking Design Gate, not an implementation detail to improvise inside the adapter.
+
 ### Core invariants
 
 1. One `DesktopExecutionAttempt` has at most one active lease and one current session binding epoch.
@@ -152,13 +163,29 @@ allowDeploy: false
 
 The local path `/Volumes/WorkSSD/projects/Traqen` is runtime-local ProjectBinding data, not committed configuration. After the first two successful dogfood works, co-creator may explicitly enable auto-push/PR and later auto-merge for this personal repository; upstream/fork policy remains unrelated and unchanged.
 
+### ProjectBinding bootstrap and recovery
+
+- Normal Cat Café process restart reconstructs the TTL=0 ProjectBinding from the persistent store.
+- A clean installation, replacement Mac, changed local checkout path or loss of the Cat Café data store requires an authenticated operator to re-register/rebind ProjectBinding before claims resume. F289 does not infer a binding from a matching folder, Git remote or chat history.
+- Re-registration uses repository identity plus an expected binding version, never imports credentials, and fails closed until the local path and repository policy are revalidated.
+- The Traqen dogfood runbook must exercise this manual bootstrap/rebind path once; it is a recovery prerequisite, not an automatic-discovery dependency.
+
+### Traqen publication credential boundary
+
+- Cat Café server is the only GitHub Issue credential consumer and the only caller of the existing typed `GitHubIssuePublisher`. The Desktop principal and reviewer cats receive only sanitized publication status and the resulting Issue URL.
+- The operator configures/rotates `GITHUB_TOKEN` through the existing authenticated, local GitHub plugin configuration path. The sensitive plugin store writes mode `0600`; the token is never stored in ProjectBinding, Git, MCP payloads, Resume Packets or chat.
+- Prefer a fine-grained token restricted to `qianfengXY/Traqen` with repository **Issues: read and write** (and GitHub's implicit metadata read); `POST /repos/{owner}/{repo}/issues` requires Issues write permission according to [GitHub's fine-grained token permission table](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens?apiVersion=2022-11-28#repository-permissions-for-issues).
+- The ProjectBinding repository must exactly match the publisher's server-side allowlist. Missing token, wrong repository, insufficient permission or rotation failure blocks publication and returns a redacted error; it never falls back to a Desktop/CLI credential.
+
 ## Phases
 
 ### Phase A — Contract and safe registration
 
+- Obtain F275 owner approval of the named-consumer multi-attempt/evidence/terminal port; until then runtime claims stay disabled.
 - Freeze ProjectBinding, principal, state/events, Resume Packet and strict MCP contract.
 - Extend runtime-session type with `chatgpt-desktop` without weakening `antigravity-desktop` invariants.
-- Add local ProjectBinding registration and fail-closed review-policy adapter selection.
+- Add local ProjectBinding registration/rebind and fail-closed review-policy adapter selection.
+- Reuse the Cat Café server's GitHub plugin secret path and `GitHubIssuePublisher`; do not grant the token to Desktop.
 
 ### Phase B — Managed execution and recovery
 
@@ -204,6 +231,8 @@ The local path `/Volumes/WorkSSD/projects/Traqen` is runtime-local ProjectBindin
 - [ ] AC-A2: ProjectBinding validates repository identity, local-only path, reviewer/publisher roster and repository publication adapter; unknown policy fails closed.
 - [ ] AC-A3: MCP `desktop-dev-loop` exposes only the documented lifecycle/context/session tools with accurate read/write annotations and agent-key auth.
 - [ ] AC-A4: F211 can register/read/list `chatgpt-desktop` sessions without regressing existing `antigravity-desktop` fixtures.
+- [ ] AC-A5: the F275 owner approves a named-consumer port for next-attempt creation, typed evidence and whole-work terminal transitions; absence disables runtime claims, and no F289 fallback identity/state machine exists.
+- [ ] AC-A6: GitHub Issue publication runs only inside Cat Café server through its sensitive GitHub plugin token resolver, exact repository allowlist and least-privilege permission check; Desktop never receives the token.
 
 ### Phase B
 
@@ -267,7 +296,7 @@ The local path `/Volumes/WorkSSD/projects/Traqen` is runtime-local ProjectBindin
 ## Dependencies and Review Gate
 
 - **Depends on / extends**: F275 (`managed-work`), F211/F065 (`identity-session`/continuity), F286 (MCP lifecycle governance), F247 (Desktop connector baseline), F261 (durable execution recovery), F253 (QC semantics).
-- **Design Gate**: F275 owner must verify ownership/terminal boundary; non-author reviewer must verify security, session recovery, repository-policy and state-machine contracts before Phase A implementation.
+- **Design Gate**: F275 owner must approve the named-consumer attempt/evidence/terminal port and verify ownership; non-author reviewer must verify security, session recovery, repository-policy and state-machine contracts. Until both are recorded, Phase A runtime implementation and automated claims are blocked.
 - **Runtime activation gate**: co-creator manually provisions the external principal/agent key and edits ChatGPT Desktop MCP config. Secrets never enter Git or chat.
 - **Automation rollout gate**: first pilot manual push/PR/merge; two clean works before enabling broader per-project automation.
 
@@ -285,3 +314,5 @@ The local path `/Volumes/WorkSSD/projects/Traqen` is runtime-local ProjectBindin
 | KD-8 | Session replacement uses epoch + lease + Resume Packet | closing a chat must revoke stale writers without losing work | 2026-08-05 |
 | KD-9 | No Cat Café source/test development authority | cats may validate findings but all implementation and test edits return to Desktop | 2026-08-05 |
 | KD-10 | Initial Traqen automation is fail-closed and staged | personal repo removes upstream ambiguity, but duplicate/wrong publication remains material | 2026-08-05 |
+| KD-11 | No F289 fallback for missing F275 attempt/terminal semantics | a temporary parallel ledger would become a second work truth and break recovery | 2026-08-05 |
+| KD-12 | Cat Café server alone holds the Issue publisher credential | reviewers and Desktop need publication receipts, not repository write secrets | 2026-08-05 |

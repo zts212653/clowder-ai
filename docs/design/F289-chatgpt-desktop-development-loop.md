@@ -60,6 +60,18 @@ ChatGPT Desktop Scheduled Tasks provide a supported way for the intended Project
 
 F275 already owns admitted whole-work identity and attempt continuity. F289 adds an adapter/projection and ReviewRound references. A second job root would create irreconcilable terminal and recovery states.
 
+### F275 owner contract is a blocking dependency
+
+F275 Phase C is deferred, so F289 cannot infer that `fix_required -> next attempt` or `merge -> accepted/rejected` already exists. Before runtime implementation, the F275 owner must approve one named-consumer port covering existing work/attempt reads, idempotent next-attempt creation, typed evidence attachment and F275-owned terminal transitions. F289 has no bounded private fallback: if the port cannot be supplied, runtime claims stay off and the feature remains at contract/design scope.
+
+This keeps the boundary honest: F289 owns Desktop leases, session binding, ReviewRound and publication policy; F275 owns ordered attempts and whole-work terminal truth.
+
+### Who holds the Traqen Issue credential?
+
+Cat Café server does. The server reuses `GitHubIssuePublisher` and its lazy `getGitHubToken` resolver backed by the existing sensitive GitHub plugin configuration. The authenticated local operator configures and rotates `GITHUB_TOKEN`; plugin config is mode `0600`. The token is absent from ProjectBinding, Desktop MCP, Resume Packet, review drafts and publication receipts.
+
+The preferred credential is a fine-grained token restricted to `qianfengXY/Traqen` with repository Issues read/write. ProjectBinding repository identity must also pass the publisher's server-side allowlist. Desktop cannot lend its own `gh` credential as a fallback; publication failures remain explicit and redacted.
+
 ## State authority matrix
 
 | Question | Truth source | Forbidden substitute |
@@ -109,6 +121,7 @@ It excludes secrets, raw agent keys and private reviewer drafts. The server retu
 | Old and replacement chats race | higher binding epoch owns write; stale chat gets a typed conflict |
 | Desktop exits mid-command | lease expires; attempt remains resumable; no fake failure/finish |
 | Cat Café restarts | TTL=0 objects reconstruct work, lease and ReviewRound |
+| Cat Café data store or Mac is replaced | claims stay disabled until authenticated operator re-registers ProjectBinding and revalidates local path/repository policy |
 | Reviewer finishes twice | idempotent private completion; barrier count unchanged |
 | One reviewer tries to read another draft early | authorization denial; no draft data in error/projection |
 | Branch moves after Review starts | full SHA mismatch marks round stale; complete new round required |
@@ -125,14 +138,16 @@ It excludes secrets, raw agent keys and private reviewer drafts. The server retu
 - MCP is local to the Mac where possible; cpolar is for Cat Café UI access, not a reason to expose development MCP publicly.
 - Strict MCP toolset has no arbitrary shell, file write, config mutation, merge or deploy primitive.
 - Per-project policy gates push/PR/merge; initial Traqen values are false.
+- GitHub Issue credential stays in Cat Café's sensitive GitHub plugin configuration; server is the sole API caller and Desktop receives only a receipt URL.
 - Review private drafts, raw work IDs and authentication provenance are excluded from user/public projections.
 - Wrong repo, unknown policy, stale SHA, stale epoch and missing publisher authority all fail closed.
 
 ## Design Gate checklist
 
-- [ ] F275 owner confirms no canonical identity or terminal ownership duplication.
+- [ ] **Blocking:** F275 owner approves the named-consumer port for existing attempt reads, idempotent next-attempt creation, typed evidence and whole-work terminal transitions; missing support leaves F289 claims disabled and creates no fallback ledger.
 - [ ] F211 owner confirms generic runtime-session extension rather than ChatGPT-specific forked storage.
 - [ ] F286 governance review confirms lifecycle surface and annotations.
 - [ ] Non-author reviewer validates role segregation, session-race and Review barrier tests.
-- [ ] Traqen policy adapter test proves bilingual Issue-only publication and no Git ledger.
+- [ ] Traqen policy adapter test proves bilingual Issue-only publication, exact repo allowlist, Cat Café server-only credential use and no Git ledger/Desktop-token fallback.
+- [ ] ProjectBinding bootstrap/rebind test proves process restart recovery and authenticated manual recovery after data-root/path migration.
 - [ ] co-creator performs runtime principal/key/config activation after implementation; no agent edits runtime config.
