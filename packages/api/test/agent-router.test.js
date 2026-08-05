@@ -1647,8 +1647,9 @@ describe('AgentRouter', () => {
       opusReceivedPrompt.includes('由 Anthropic 提供'),
       'static provider/identity line MUST be in user-message prompt for non-native-L0 provider',
     );
-    assert.ok(
-      opusReceivedPrompt.includes('## 协作\n'),
+    assert.match(
+      opusReceivedPrompt,
+      /## 协作\r?\n/,
       'static A2A collaboration section MUST be present for non-native-L0 provider',
     );
     assert.ok(
@@ -2257,7 +2258,7 @@ describe('F078: Default to last replier', () => {
     });
   });
 
-  test('no participants falls back away from an unavailable default cat', async () => {
+  test('no participants fail closed when the unavailable default cat has no successor', async () => {
     await withAvailabilityConfig({ opus: false }, async () => {
       const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
 
@@ -2276,8 +2277,8 @@ describe('F078: Default to last replier', () => {
       const { targetCats } = await router.resolveTargetsAndIntent('hello', 't1');
       assert.deepStrictEqual(
         targetCats,
-        ['codex'],
-        'should skip unavailable default cat and pick an available fallback',
+        [],
+        'should not route to an unrelated cat when the unavailable default has no successor',
       );
     });
   });

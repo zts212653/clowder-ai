@@ -45,8 +45,8 @@ function createMockAgentKeyRegistry() {
       return {
         ok: true,
         record: {
-          agentKeyId: 'ak-opus',
-          catId: 'opus',
+          agentKeyId: 'ak-opus-5',
+          catId: 'opus-5',
           userId: 'user-1',
           secretHash: 'hash',
           salt: 'salt',
@@ -109,7 +109,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
     threadStore = new ThreadStore();
     source = await threadStore.create('user-1', 'Source');
     target = await threadStore.create('user-1', 'Target');
-    auth = await registry.create('user-1', 'opus', source.id);
+    auth = await registry.create('user-1', 'opus-5', source.id);
 
     const calls = [];
     const unavailable = [];
@@ -233,15 +233,15 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       return {
         admit: false,
         outcome: 'parallel_return_unsupported',
-        lease: activeLease(['opus', 'codex'], {
+        lease: activeLease(['opus-5', 'codex'], {
           holderOutcomes: {
-            opus: { outcome: 'rejected_ownership', evidenceRef: 'grounding:mismatch', at: 100 },
+            'opus-5': { outcome: 'rejected_ownership', evidenceRef: 'grounding:mismatch', at: 100 },
           },
         }),
       };
     };
     const response = await postSameThread({
-      targetCats: ['opus'],
+      targetCats: ['opus-5'],
       clientMessageId: 'parallel-reject-2915',
       action: {
         subjectRef: 'github:pr:2915',
@@ -518,7 +518,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
-      callerCatId: 'opus',
+      callerCatId: 'opus-5',
     });
 
     const response = await post({
@@ -596,7 +596,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
         lease: activeLease(['codex'], { generation: 2, dispatchId: input.dispatchId }),
       };
     };
-    auth = await registry.create('user-1', 'opus', source.id);
+    auth = await registry.create('user-1', 'opus-5', source.id);
     const replay = await post({
       targetCats: ['codex'],
       clientMessageId: 'recover-review-2868',

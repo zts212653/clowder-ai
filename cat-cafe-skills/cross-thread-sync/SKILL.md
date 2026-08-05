@@ -26,7 +26,7 @@ triggers:
 
 > **⚠️ 路由铁律**：cross-post 消息如果**没有 @mention 也没有 targetCats**，消息会到达目标 thread 但**不会触发任何猫 session**——消息静默躺在那里，直到operator手动 @ 某只猫。**必须**用以下任一方式触发目标猫：
 > 1. 在 content 末尾另起一行写 `@句柄`（如 `@目标猫句柄`）
-> 2. 传 `targetCats` 参数（如 `targetCats: ["opus"]`）
+> 2. 传 `targetCats` 参数（如 `targetCats: ["opus-5"]`）
 
 ## Step 1: 发现（谁在平行工作？）
 
@@ -119,8 +119,8 @@ Action Needed 必须标注级别。**这些标签只描述期望/紧急度，不
 ```
 → cat_cafe_cross_post_message(
     threadId: "<target_thread_id>",
-    targetCats: ["opus"],
-    content: "## 🔄 Cross-Thread Sync\n\n### What Changed\n...\n\n### Impact on You\n...\n\n### Action Needed\n[ACTION] ...\n\n@opus"
+    targetCats: ["opus-5"],
+    content: "## 🔄 Cross-Thread Sync\n\n### What Changed\n...\n\n### Impact on You\n...\n\n### Action Needed\n[ACTION] ...\n\n@opus-5"
   )
 ```
 

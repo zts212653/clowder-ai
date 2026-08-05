@@ -28,7 +28,9 @@ import { catRegistry } from '@cat-cafe/shared';
 export function primaryMentionHandleForCatId(catId: string): string | null {
   const entry = catRegistry.tryGet(catId);
   if (!entry) return null;
-  const pattern = entry.config.mentionPatterns?.[0];
+  const expected = `@${catId}`.toLowerCase();
+  const patterns = entry.config.mentionPatterns ?? [];
+  const pattern = patterns.find((candidate) => candidate.toLowerCase() === expected) ?? patterns[0];
   if (!pattern) return null;
   return pattern.startsWith('@') ? pattern : `@${pattern}`;
 }

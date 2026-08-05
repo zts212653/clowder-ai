@@ -449,7 +449,7 @@ describe("F182 C2 - A' class: multi_mention disabled target → 400", () => {
       payload: {
         targets: ['antigravity'],
         question: 'What do you think?',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
         overrideReason: 'test',
       },
     });
@@ -487,7 +487,7 @@ describe("F182 C2 - A' class: multi_mention disabled target → 400", () => {
       payload: {
         targets: ['codex'],
         question: 'What do you think?',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
         overrideReason: 'test',
       },
     });

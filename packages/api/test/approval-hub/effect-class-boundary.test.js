@@ -400,9 +400,9 @@ describe('Effect-Class Boundary Tests', () => {
     });
 
     it('mixed: line-start + inline → only line-start captured', () => {
-      const content = '@opus\n这个问题 @sonnet 怎么看';
+      const content = '@opus-5\n这个问题 @sonnet 怎么看';
       const result = analyzeA2AMentions(content);
-      assert.ok(result.mentions.includes('opus'), 'line-start @opus must be captured');
+      assert.ok(result.mentions.includes('opus-5'), 'line-start @opus-5 must be captured');
       assert.ok(!result.mentions.includes('sonnet'), 'inline @sonnet must NOT be captured');
     });
 
@@ -431,11 +431,11 @@ describe('Effect-Class Boundary Tests', () => {
     });
 
     it('intercept merge: line-start mention + different explicit → both merged', () => {
-      const content = '@opus\n请帮忙看看';
+      const content = '@opus-5\n请帮忙看看';
       const interceptAnalysis = analyzeA2AMentions(content);
       const explicitTargetCats = ['sonnet'];
       const mergedTargetCats = [...new Set([...interceptAnalysis.mentions, ...explicitTargetCats])];
-      assert.ok(mergedTargetCats.includes('opus'), 'content @opus must be in merged');
+      assert.ok(mergedTargetCats.includes('opus-5'), 'content @opus-5 must be in merged');
       assert.ok(mergedTargetCats.includes('sonnet'), 'explicit sonnet must be in merged');
       assert.equal(mergedTargetCats.length, 2, 'both should be present, no duplicates');
     });

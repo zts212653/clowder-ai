@@ -32,10 +32,10 @@ describe('reviewer-matcher', () => {
     });
 
     it('selects different-family reviewer for codex', async () => {
-      // codex is maine-coon, should get opus (ragdoll, peer-reviewer)
+      // codex is maine-coon, should get opus-5 (ragdoll, peer-reviewer)
       const result = await resolveReviewer({ author: 'codex' });
 
-      assert.equal(result.reviewer, 'opus');
+      assert.equal(result.reviewer, 'opus-5');
       assert.equal(result.isDegraded, false);
     });
 
@@ -69,8 +69,8 @@ describe('reviewer-matcher', () => {
       assert.equal(result.reason, 'OK');
     });
 
-    it('allows opus reviewing codex', () => {
-      const result = canReview('opus', 'codex');
+    it('allows opus-5 reviewing codex', () => {
+      const result = canReview('opus-5', 'codex');
       assert.equal(result.canReview, true);
       assert.equal(result.reason, 'OK');
     });

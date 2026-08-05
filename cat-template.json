@@ -85,6 +85,7 @@
       "defaultModel": "claude-sonnet-4-6",
       "models": [
         "claude-sonnet-4-6",
+        "claude-opus-5",
         "claude-opus-4-6",
         "claude-opus-4-6[1m]",
         "claude-sonnet-4-5-20250929",
@@ -119,8 +120,16 @@
       "family": "ragdoll",
       "roles": ["architect", "peer-reviewer"],
       "lead": true,
-      "available": true,
+      "available": false,
+      "successor": "opus-5",
       "evaluation": "主架构师，全栈开发，深度思考强，bug定位弱"
+    },
+    "opus-5": {
+      "family": "ragdoll",
+      "roles": ["architect", "peer-reviewer"],
+      "lead": false,
+      "available": true,
+      "evaluation": "Opus 5 最新进化形态，最强推理+最强代码"
     },
     "codex": {
       "family": "maine-coon",
@@ -222,8 +231,39 @@
       "roleDescription": "主架构师和核心开发者，擅长深度思考和系统设计",
       "teamStrengths": "架构设计、写代码一把好手",
       "caution": null,
-      "defaultVariantId": "opus-default",
+      "defaultVariantId": "opus-5",
       "variants": [
+        {
+          "id": "opus-5",
+          "catId": "opus-5",
+          "variantLabel": "Opus 5",
+          "displayName": "布偶猫 Opus 5",
+          "mentionPatterns": ["@opus5", "@opus-5", "@布偶猫opus5"],
+          "clientId": "anthropic",
+          "defaultModel": "claude-opus-5",
+          "mcpSupport": true,
+          "avatar": "/avatars/opus.png",
+          "color": {
+            "primary": "#6B21A8",
+            "secondary": "#E9D5FF"
+          },
+          "cli": {
+            "command": "claude",
+            "outputFormat": "stream-json",
+            "defaultArgs": ["--output-format", "stream-json", "--model", "claude-opus-5"],
+            "effort": "max"
+          },
+          "personality": "宪宪最新进化形态，推理深度和代码能力全面升级",
+          "strengths": ["deep-reasoning", "architecture", "coding", "synthesis"],
+          "teamStrengths": "最强推理、最强代码、全面升级",
+          "caution": null,
+          "contextBudget": {
+            "maxPromptTokens": 180000,
+            "maxContextTokens": 160000,
+            "maxMessages": 200,
+            "maxContentLengthPerMsg": 100000
+          }
+        },
         {
           "id": "opus-default",
           "clientId": "anthropic",

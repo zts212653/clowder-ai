@@ -129,12 +129,15 @@ after(() => {
 
 describe('F32-b: parseMentions (longest-match-first)', () => {
   /** Create a router with variant services registered */
-  async function createVariantRouter() {
+  async function createVariantRouter(extraServices = {}) {
     const agentRegistry = new AgentRegistry();
-    agentRegistry.register('opus', createMockService('opus'));
+    agentRegistry.register('opus-5', createMockService('opus-5'));
     agentRegistry.register('codex', createMockService('codex'));
     agentRegistry.register('gemini', createMockService('gemini'));
     agentRegistry.register('opus-45', createMockService('opus-45'));
+    for (const [catId, service] of Object.entries(extraServices)) {
+      agentRegistry.register(catId, service);
+    }
 
     return new AgentRouter({
       agentRegistry,
@@ -151,18 +154,18 @@ describe('F32-b: parseMentions (longest-match-first)', () => {
     assert.deepEqual(targetCats.map(String), ['opus-45']);
   });
 
-  it('line-start @opus routes to opus only, not opus-45', async () => {
+  it('line-start @opus-5 routes to opus-5 only, not opus-45', async () => {
     const router = await createVariantRouter();
-    const { targetCats, hasMentions } = await router.resolveTargetsAndIntent('@opus 帮我看看', 'test-thread');
+    const { targetCats, hasMentions } = await router.resolveTargetsAndIntent('@opus-5 帮我看看', 'test-thread');
     assert.equal(hasMentions, true);
-    assert.deepEqual(targetCats.map(String), ['opus']);
+    assert.deepEqual(targetCats.map(String), ['opus-5']);
   });
 
   it('multiple line-start mentions → two distinct targets', async () => {
     const router = await createVariantRouter();
-    const { targetCats } = await router.resolveTargetsAndIntent('@opus\n@opus-45 一起来讨论', 'test-thread');
+    const { targetCats } = await router.resolveTargetsAndIntent('@opus-5\n@opus-45 一起来讨论', 'test-thread');
     assert.equal(targetCats.length, 2);
-    assert.ok(targetCats.map(String).includes('opus'));
+    assert.ok(targetCats.map(String).includes('opus-5'));
     assert.ok(targetCats.map(String).includes('opus-45'));
   });
 
@@ -176,8 +179,8 @@ describe('F32-b: parseMentions (longest-match-first)', () => {
     const router = await createVariantRouter();
     const { targetCats, hasMentions } = await router.resolveTargetsAndIntent('@opus-45x 不是猫猫', 'test-thread');
     assert.equal(hasMentions, false);
-    // Should fall through to default (opus) since no valid mention found
-    assert.deepEqual(targetCats.map(String), ['opus']);
+    // Should fall through to default (opus-5) since no valid mention found
+    assert.deepEqual(targetCats.map(String), ['opus-5']);
   });
 
   it('token boundary: line-start @opus-45, (with comma) matches', async () => {
@@ -188,18 +191,18 @@ describe('F32-b: parseMentions (longest-match-first)', () => {
 
   it('preserves first-occurrence ordering', async () => {
     const router = await createVariantRouter();
-    const { targetCats } = await router.resolveTargetsAndIntent('@codex\n@opus 来看看', 'test-thread');
-    assert.deepEqual(targetCats.map(String), ['codex', 'opus']);
+    const { targetCats } = await router.resolveTargetsAndIntent('@codex\n@opus-5 来看看', 'test-thread');
+    assert.deepEqual(targetCats.map(String), ['codex', 'opus-5']);
   });
 
   it('earliest position wins when same cat has short+long alias (cloud P1 regression)', async () => {
-    const router = await createVariantRouter();
-    // @布偶 (short alias, early) → opus, @codex (mid), @布偶猫 (long alias, late) → opus
-    // Longest-first processing sees @布偶猫 first (later position), but opus should
-    // resolve to the earliest occurrence (@布偶 at position 0), not the longest match.
-    const { targetCats } = await router.resolveTargetsAndIntent('@布偶\n@codex\n@布偶猫 的方案', 'test-thread');
-    // opus should come first (earliest mention), codex second
-    assert.deepEqual(targetCats.map(String), ['opus', 'codex']);
+    const router = await createVariantRouter({ gpt52: createMockService('gpt52') });
+    // @gpt (short alias, early) → gpt52, @codex (mid), @gpt52 (long alias, late) → gpt52
+    // Longest-first processing sees @gpt52 first (later position), but gpt52 should
+    // resolve to the earliest occurrence (@gpt at position 0), not the longest match.
+    const { targetCats } = await router.resolveTargetsAndIntent('@gpt\n@codex\n@gpt52 plan', 'test-thread');
+    // gpt52 should come first (earliest mention), codex second
+    assert.deepEqual(targetCats.map(String), ['gpt52', 'codex']);
   });
 
   it('bracket delimiters after a line-start mention count as token boundary (cloud P2 regression)', async () => {
@@ -210,11 +213,11 @@ describe('F32-b: parseMentions (longest-match-first)', () => {
 
     // @布偶猫] — square bracket
     const r2 = await router.resolveTargetsAndIntent('@布偶猫]', 'test-thread');
-    assert.deepEqual(r2.targetCats.map(String), ['opus']);
+    assert.deepEqual(r2.targetCats.map(String), ['opus-5']);
 
-    // @opus> — angle bracket
-    const r3 = await router.resolveTargetsAndIntent('@opus>', 'test-thread');
-    assert.deepEqual(r3.targetCats.map(String), ['opus']);
+    // @opus-5> — angle bracket
+    const r3 = await router.resolveTargetsAndIntent('@opus-5>', 'test-thread');
+    assert.deepEqual(r3.targetCats.map(String), ['opus-5']);
   });
 
   it('CJK fullwidth brackets after a line-start mention count as token boundary (R3 P1 regression)', async () => {
@@ -227,13 +230,13 @@ describe('F32-b: parseMentions (longest-match-first)', () => {
     const r2 = await router.resolveTargetsAndIntent('@缅因猫】', 'test-thread');
     assert.deepEqual(r2.targetCats.map(String), ['codex']);
 
-    // @opus》 — fullwidth angle bracket
-    const r3 = await router.resolveTargetsAndIntent('@opus》', 'test-thread');
-    assert.deepEqual(r3.targetCats.map(String), ['opus']);
+    // @opus-5》 — fullwidth angle bracket
+    const r3 = await router.resolveTargetsAndIntent('@opus-5》', 'test-thread');
+    assert.deepEqual(r3.targetCats.map(String), ['opus-5']);
 
     // @布偶猫」 — corner bracket (common in Japanese/traditional Chinese)
     const r4 = await router.resolveTargetsAndIntent('@布偶猫」', 'test-thread');
-    assert.deepEqual(r4.targetCats.map(String), ['opus']);
+    assert.deepEqual(r4.targetCats.map(String), ['opus-5']);
   });
 
   it('quoted @mentions are inert user text, not routing targets', async () => {
@@ -244,7 +247,7 @@ describe('F32-b: parseMentions (longest-match-first)', () => {
     const { targetCats, hasMentions, routing_warnings } = await router.resolveTargetsAndIntent(content, 'test-thread');
 
     assert.equal(hasMentions, false);
-    assert.deepEqual(targetCats.map(String), ['opus']);
+    assert.deepEqual(targetCats.map(String), ['opus-5']);
     assert.deepEqual(routing_warnings, []);
   });
 
@@ -260,7 +263,7 @@ describe('F32-b: parseMentions (longest-match-first)', () => {
       );
 
       assert.equal(hasMentions, false, content);
-      assert.deepEqual(targetCats.map(String), ['opus'], content);
+      assert.deepEqual(targetCats.map(String), ['opus-5'], content);
       assert.deepEqual(routing_warnings, [], content);
     }
   });
@@ -298,12 +301,12 @@ describe('F32-b: parseMentions (longest-match-first)', () => {
   it('earlier inline mention keeps priority over later route-line duplicate (cloud P1 regression)', async () => {
     const router = await createVariantRouter();
     const { targetCats, hasMentions } = await router.resolveTargetsAndIntent(
-      'please @codex and @opus\n@codex',
+      'please @codex and @opus-5\n@codex',
       'test-thread',
     );
 
     assert.equal(hasMentions, true);
-    assert.deepEqual(targetCats.map(String), ['codex', 'opus']);
+    assert.deepEqual(targetCats.map(String), ['codex', 'opus-5']);
   });
 
   it('email-like inline @handles are inert user text, not routing targets', async () => {
@@ -314,7 +317,7 @@ describe('F32-b: parseMentions (longest-match-first)', () => {
     );
 
     assert.equal(hasMentions, false);
-    assert.deepEqual(targetCats.map(String), ['opus']);
+    assert.deepEqual(targetCats.map(String), ['opus-5']);
   });
 
   it('domain-suffixed inline @handles are inert user text, not routing targets', async () => {
@@ -332,7 +335,7 @@ describe('F32-b: parseMentions (longest-match-first)', () => {
       );
 
       assert.equal(hasMentions, false, content);
-      assert.deepEqual(targetCats.map(String), ['opus'], content);
+      assert.deepEqual(targetCats.map(String), ['opus-5'], content);
       assert.deepEqual(routing_warnings, [], content);
     }
   });
@@ -352,7 +355,7 @@ describe('F32-b: parseMentions (longest-match-first)', () => {
       );
 
       assert.equal(hasMentions, false, content);
-      assert.deepEqual(targetCats.map(String), ['opus'], content);
+      assert.deepEqual(targetCats.map(String), ['opus-5'], content);
       assert.deepEqual(routing_warnings, [], content);
     }
   });
@@ -365,7 +368,7 @@ describe('F32-b: parseMentions (longest-match-first)', () => {
     );
 
     assert.equal(hasMentions, false);
-    assert.deepEqual(targetCats.map(String), ['opus']);
+    assert.deepEqual(targetCats.map(String), ['opus-5']);
   });
 
   it('CRLF blockquote @mentions are inert user text, not routing targets', async () => {
@@ -386,7 +389,7 @@ describe('F32-b: parseMentions (longest-match-first)', () => {
     const { targetCats, hasMentions } = await router.resolveTargetsAndIntent(content, 'test-thread');
 
     assert.equal(hasMentions, false);
-    assert.deepEqual(targetCats.map(String), ['opus']);
+    assert.deepEqual(targetCats.map(String), ['opus-5']);
   });
 
   it('quoted group @mentions are inert user text, not routing targets', async () => {
@@ -411,7 +414,7 @@ describe('F32-b: parseMentions (longest-match-first)', () => {
       );
 
       assert.equal(hasMentions, false, content);
-      assert.deepEqual(targetCats.map(String), ['opus'], content);
+      assert.deepEqual(targetCats.map(String), ['opus-5'], content);
       assert.deepEqual(routing_warnings, [], content);
     }
   });
@@ -421,7 +424,7 @@ describe('F32-b: parseMentions (longest-match-first)', () => {
     const { targetCats, hasMentions } = await router.resolveTargetsAndIntent('- @all 大家看一下', 'test-thread');
 
     assert.equal(hasMentions, true);
-    assert.deepEqual(targetCats.map(String).sort(), ['codex', 'gemini', 'opus', 'opus-45']);
+    assert.deepEqual(targetCats.map(String).sort(), ['codex', 'gemini', 'opus-45', 'opus-5']);
   });
 
   it('markdown-prefixed line-start mention still routes', async () => {
@@ -468,7 +471,7 @@ describe('F32-b: parseMentions (longest-match-first)', () => {
       );
 
       assert.equal(hasMentions, false, content);
-      assert.deepEqual(targetCats.map(String), ['opus'], content);
+      assert.deepEqual(targetCats.map(String), ['opus-5'], content);
       assert.deepEqual(routing_warnings, [], content);
     }
   });

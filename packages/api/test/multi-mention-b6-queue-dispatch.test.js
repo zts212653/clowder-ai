@@ -183,7 +183,7 @@ describe('B6: multi_mention queue dispatch', () => {
         actionReturnedDeliveredCalls.push(input);
       },
     };
-    creds = mockRegistry.register('opus', 'thread-1', 'user-1');
+    creds = mockRegistry.register('opus-5', 'thread-1', 'user-1');
 
     app = Fastify({ logger: false });
     registerCallbackAuthHook(app, mockRegistry);
@@ -214,7 +214,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'What do you think?',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -241,7 +241,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Can you own merge review?',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
         idempotencyKey: 'action-req-1',
         action: {
           subjectRef: 'pr:owner/repo#2868',
@@ -281,7 +281,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Custody returns to you',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
         idempotencyKey: 'return-req-1',
         action: {
           subjectRef: 'pr:owner/repo#2868',
@@ -322,7 +322,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Retry custody return',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
         idempotencyKey: 'return-replay-req-1',
         action: {
           subjectRef: 'pr:owner/repo#2868',
@@ -368,7 +368,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Retry the same custody return',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
         idempotencyKey: 'return-idempotent-1',
         action: {
           subjectRef: 'pr:owner/repo#2868',
@@ -422,7 +422,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Fallback now?',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
         idempotencyKey: 'action-req-2',
         action: {
           subjectRef: 'pr:owner/repo#2868',
@@ -456,7 +456,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Review the current head',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
         idempotencyKey: 'action-stale-head',
         action: {
           subjectRef: 'pr:owner/repo#2868',
@@ -486,9 +486,9 @@ describe('B6: multi_mention queue dispatch', () => {
       lease: {
         leaseId: 'lease-action-1',
         generation: 1,
-        holderCatIds: ['codex', 'opus'],
+        holderCatIds: ['codex', 'opus-5'],
         holderOutcomes: {
-          opus: { outcome: 'rejected_ownership', evidenceRef: 'grounding:mismatch', at: 100 },
+          'opus-5': { outcome: 'rejected_ownership', evidenceRef: 'grounding:mismatch', at: 100 },
         },
       },
     };
@@ -499,7 +499,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Record my rejection without returning the parallel lease.',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
         idempotencyKey: 'parallel-reject-1',
         action: {
           subjectRef: 'pr:owner/repo#2868',
@@ -532,7 +532,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'No replay identity',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
         action: {
           subjectRef: 'pr:owner/repo#2868',
           actionFamily: 'merge',
@@ -555,7 +555,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Review this?',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -591,7 +591,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex', 'gemini'],
         question: 'Thoughts?',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -629,7 +629,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Something?',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -654,7 +654,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Test queue entry fields',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -666,7 +666,7 @@ describe('B6: multi_mention queue dispatch', () => {
     assert.equal(entry.autoExecute, true);
     assert.equal(entry.ownerAuthProvenance, 'strict');
     assert.deepEqual(entry.targetCats, ['codex']);
-    assert.ok(entry.content.includes('[Multi-Mention from opus]'));
+    assert.ok(entry.content.includes('[Multi-Mention from opus-5]'));
     assert.ok(entry.content.includes('Test queue entry fields'));
   });
 
@@ -691,7 +691,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Should be blocked by depth',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -720,7 +720,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Dispatch must fail closed',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
         idempotencyKey: 'action-req-1',
         action: {
           subjectRef: 'pr:owner/repo#2868',
@@ -768,7 +768,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Custody return must retry',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
         idempotencyKey: 'return-req-1',
         action: {
           subjectRef: 'pr:owner/repo#2868',
@@ -815,7 +815,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Retry blocked custody return',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
         idempotencyKey: 'return-replay-blocked-1',
         action: {
           subjectRef: 'pr:owner/repo#2868',
@@ -855,7 +855,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Queue this action after existing work',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
         idempotencyKey: 'action-req-1',
         action: {
           subjectRef: 'pr:owner/repo#2868',
@@ -891,7 +891,7 @@ describe('B6: multi_mention queue dispatch', () => {
         payload: {
           targets: ['codex'],
           question: 'Timeout this action',
-          callbackTo: 'opus',
+          callbackTo: 'opus-5',
           idempotencyKey: 'action-req-1',
           action: {
             subjectRef: 'pr:owner/repo#2868',
@@ -945,7 +945,7 @@ describe('B6: multi_mention queue dispatch', () => {
         payload: {
           targets: ['codex'],
           question: 'Retry return must not lose custody on timeout',
-          callbackTo: 'opus',
+          callbackTo: 'opus-5',
           idempotencyKey: 'return-replay-timeout-1',
           action: {
             subjectRef: 'pr:owner/repo#2868',
@@ -994,7 +994,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Should be skipped',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -1010,7 +1010,7 @@ describe('B6: multi_mention queue dispatch', () => {
     resetMultiMentionOrchestrator();
     const fallbackRouter = createMockRouter();
     const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
-    const fallbackCreds = mockRegistry.register('opus', 'thread-2', 'user-2');
+    const fallbackCreds = mockRegistry.register('opus-5', 'thread-2', 'user-2');
 
     registerMultiMentionRoutes(fallbackApp, {
       registry: mockRegistry,
@@ -1030,7 +1030,7 @@ describe('B6: multi_mention queue dispatch', () => {
       payload: {
         targets: ['codex'],
         question: 'Fallback test',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -1324,7 +1324,7 @@ describe('B6: canceled hook skips recordResponse in dispatchViaQueue', () => {
     mockRouter = createMockRouter();
     invocationQueue = new InvocationQueue();
     mockQueueProcessor = createMockQueueProcessor();
-    creds = mockRegistry.register('opus', 'thread-1', 'user-1');
+    creds = mockRegistry.register('opus-5', 'thread-1', 'user-1');
 
     app = Fastify({ logger: false });
     registerCallbackAuthHook(app, mockRegistry);
@@ -1354,7 +1354,7 @@ describe('B6: canceled hook skips recordResponse in dispatchViaQueue', () => {
       payload: {
         targets: ['codex'],
         question: 'Abort scenario?',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -1380,7 +1380,7 @@ describe('B6: canceled hook skips recordResponse in dispatchViaQueue', () => {
       payload: {
         targets: ['codex'],
         question: 'User canceled scenario?',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 
@@ -1405,7 +1405,7 @@ describe('B6: canceled hook skips recordResponse in dispatchViaQueue', () => {
       payload: {
         targets: ['codex'],
         question: 'Will be removed',
-        callbackTo: 'opus',
+        callbackTo: 'opus-5',
       },
     });
 

@@ -232,6 +232,7 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
       provider: 'anthropic',
       defaultModel: 'claude-opus-4-6',
     });
+    templateConfig.roster['template-cat'].successor = 'runtime-cat';
     const runtimeCatalog = {
       ...templateConfig,
       breeds: [...templateConfig.breeds, ...makeCatalog('runtime-cat', '运行时猫').breeds],
@@ -257,6 +258,7 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
       roles: ['architect', 'peer-reviewer'],
       lead: true,
       available: true,
+      successor: 'runtime-cat',
       evaluation: 'seed lead',
     });
 

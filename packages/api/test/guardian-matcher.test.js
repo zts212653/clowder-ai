@@ -66,6 +66,18 @@ describe('GuardianMatcher', () => {
     assert.ok(!result.candidates.includes('codex'));
   });
 
+  test('returns no guardian when every available cat is the author or reviewer', async () => {
+    const isolatedRoster = {
+      opus: { ...FULL_ROSTER.opus, available: true },
+      codex: { ...FULL_ROSTER.codex, available: true },
+    };
+    const result = await resolveGuardian({ author: 'opus', reviewer: 'codex', roster: isolatedRoster });
+
+    assert.equal(result.guardian, null);
+    assert.deepEqual(result.candidates, []);
+    assert.equal(result.isDegraded, true);
+  });
+
   // F211 flake regression: under the concurrent api test suite, another file can leave a
   // bootstrap/empty (breeds:[]) cat-catalog.json at the active CAT_TEMPLATE_PATH dir. The
   // #772 merge then prunes every breed's roster entry, collapsing the roster to {owner} →

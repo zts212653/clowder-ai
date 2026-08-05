@@ -6,6 +6,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { isAbsolute } from 'node:path';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
@@ -1716,7 +1717,7 @@ describe('Callback Routes', () => {
       `imagePath should end with filename, got ${body.messages[0].imagePaths[0]}`,
     );
     assert.ok(
-      body.messages[0].imagePaths[0].startsWith('/'),
+      isAbsolute(body.messages[0].imagePaths[0]),
       `imagePath should be absolute, got ${body.messages[0].imagePaths[0]}`,
     );
     // Message without contentBlocks should not have the field
@@ -2327,15 +2328,15 @@ describe('Callback Routes', () => {
       name: 'Cross Thread Comm',
       status: 'in-progress',
       owner: '布偶猫',
-      ownerCatId: 'opus',
+      ownerCatId: 'opus-5',
       threadIds: [owningThread.id],
       suggestedAction: {
         type: 'cross_post',
         threadId: owningThread.id,
         featureId: 'F193',
-        ownerCatId: 'opus',
-        targetCats: ['opus'],
-        reason: 'F193 is owned by opus; dispatch findings to the owning thread.',
+        ownerCatId: 'opus-5',
+        targetCats: ['opus-5'],
+        reason: 'F193 is owned by opus-5; dispatch findings to the owning thread.',
         source: 'feat_index',
       },
     });
@@ -2373,7 +2374,7 @@ describe('Callback Routes', () => {
       name: 'Cross Thread Comm',
       status: 'in-progress',
       owner: '布偶猫',
-      ownerCatId: 'opus',
+      ownerCatId: 'opus-5',
       threadIds: [currentThread.id],
     });
   });
@@ -2397,14 +2398,14 @@ describe('Callback Routes', () => {
       name: 'Owner Only Feature',
       status: 'spec',
       owner: '布偶猫',
-      ownerCatId: 'opus',
+      ownerCatId: 'opus-5',
       threadIds: [],
       suggestedAction: {
         type: 'cross_post',
         featureId: 'F194',
-        ownerCatId: 'opus',
-        targetCats: ['opus'],
-        reason: 'F194 is owned by opus; find the feature thread before dispatching findings.',
+        ownerCatId: 'opus-5',
+        targetCats: ['opus-5'],
+        reason: 'F194 is owned by opus-5; find the feature thread before dispatching findings.',
         source: 'feat_index',
       },
     });
@@ -2431,14 +2432,14 @@ describe('Callback Routes', () => {
       name: 'Annotated Owner Feature',
       status: 'spec',
       owner: '布偶猫 (Opus 4.6, leader)',
-      ownerCatId: 'opus',
+      ownerCatId: 'opus-5',
       threadIds: [],
       suggestedAction: {
         type: 'cross_post',
         featureId: 'F195',
-        ownerCatId: 'opus',
-        targetCats: ['opus'],
-        reason: 'F195 is owned by opus; find the feature thread before dispatching findings.',
+        ownerCatId: 'opus-5',
+        targetCats: ['opus-5'],
+        reason: 'F195 is owned by opus-5; find the feature thread before dispatching findings.',
         source: 'feat_index',
       },
     });
@@ -2672,11 +2673,11 @@ describe('Callback Routes', () => {
     const byOwnerBody = JSON.parse(byOwner.body);
     assert.equal(byOwnerBody.items.length, 1);
     assert.equal(byOwnerBody.items[0].featId, 'F193');
-    assert.equal(byOwnerBody.items[0].ownerCatId, 'opus');
+    assert.equal(byOwnerBody.items[0].ownerCatId, 'opus-5');
 
     const byOwnerCatId = await app.inject({
       method: 'GET',
-      url: `/api/callbacks/feat-index?query=opus`,
+      url: `/api/callbacks/feat-index?query=opus-5`,
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
 

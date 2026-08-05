@@ -541,6 +541,7 @@ async function toCatResponse(
           roles: [...metadata.roster.roles],
           lead: metadata.roster.lead,
           available: metadata.roster.available,
+          ...(metadata.roster.successor ? { successor: metadata.roster.successor } : {}),
           evaluation: metadata.roster.evaluation,
         }
       : null,

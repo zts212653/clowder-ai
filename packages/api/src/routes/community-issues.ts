@@ -732,6 +732,10 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
       author: createCatId(authorId),
       reviewer: createCatId(reviewerId),
     });
+    if (!match.guardian) {
+      reply.status(409);
+      return { error: 'No eligible guardian available', candidates: match.candidates };
+    }
 
     const checklist = DEFAULT_INTAKE_CHECKLIST.map((item) => ({
       ...item,

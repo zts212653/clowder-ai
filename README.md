@@ -208,7 +208,7 @@ https://github.com/user-attachments/assets/8e470aba-8fe6-4aa5-a476-c2cd81d1630f
 
 The main interface is a multi-threaded chat where your AI team lives. Each thread is an isolated workspace — one per feature, bug, or topic.
 
-- **@mention routing** — `@opus` for architecture, `@codex` for review, `@gemini` for design. Messages go to the right agent automatically.
+- **@mention routing** — `@opus-5` for architecture, `@codex` for review, `@gemini` for design. Messages go to the right agent automatically.
 - **Thread isolation** — context stays clean. Your auth refactor doesn't leak into the landing page thread.
 - **Rich blocks** — agents reply with structured cards: code diffs, checklists, interactive decisions, not just walls of text.
 

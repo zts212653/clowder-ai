@@ -1668,8 +1668,30 @@ describe('SystemPromptBuilder', () => {
         },
       },
     });
-    assert.match(ctx, /Routing:.*review.*avoid.*@opus(?!-)/, 'Should include review avoid @opus');
-    assert.match(ctx, /Routing:.*architecture.*prefer.*@opus(?!-)/, 'Should include architecture prefer @opus');
+    assert.match(ctx, /Routing:.*review.*avoid.*@opus-5/, 'Should resolve disabled review target to @opus-5');
+    assert.match(
+      ctx,
+      /Routing:.*architecture.*prefer.*@opus-5/,
+      'Should resolve disabled architecture target to @opus-5',
+    );
+  });
+
+  test('buildInvocationContext omits disabled policy targets without a valid successor', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'codex',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+      routingPolicy: {
+        v: 1,
+        scopes: {
+          architecture: { preferCats: ['antigravity'] },
+        },
+      },
+    });
+    assert.doesNotMatch(ctx, /Routing:/, 'Should not teach an unroutable policy target');
+    assert.doesNotMatch(ctx, /@antigravity/, 'Should not emit the disabled handle');
   });
 
   test('buildInvocationContext sanitizes routing reason and tolerates malformed lists', async () => {
@@ -2137,6 +2159,7 @@ describe('SystemPromptBuilder', () => {
     const headings = rulesText
       .split('\n')
       .filter((l) => /^###?\s+(P\d|W\d)/.test(l))
+      .map((line) => line.replace(/\r$/, ''))
       .sort()
       .join('\n');
     const hash = createHash('sha256').update(headings).digest('hex').slice(0, 16);
@@ -2160,7 +2183,7 @@ describe('SystemPromptBuilder', () => {
   // ── F182 Phase B: Roster invisibility guard ─────────────────────────────────────────────────
   // AC-B1: disabled cat must NOT appear in buildTeammateRoster output (OQ-3 方案C)
   // AC-B2: disabled cat catId/mention must NOT appear in buildStaticIdentity any section
-  // AC-B3: NOT changing buildTeammateRoster logic — only adding guard tests
+  // AC-B3: available cats still appear unless they are the current cat's explicit successor
 
   test('F182 B1: disabled cat (antigravity) does not appear in teammate roster section', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
@@ -2197,6 +2220,15 @@ describe('SystemPromptBuilder', () => {
     // codex is available — should appear in opus's roster
     const prompt = buildStaticIdentity('opus');
     assert.ok(prompt.includes('codex'), 'available cat @codex must appear in roster');
+  });
+
+  test('disabled legacy self does not list its explicit successor as a teammate', async () => {
+    const { buildTeammateRoster } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const legacyRoster = buildTeammateRoster('opus');
+    const teammateRoster = buildTeammateRoster('codex');
+
+    assert.doesNotMatch(legacyRoster ?? '', /@opus-5\b/, 'successor represents the same identity as legacy self');
+    assert.match(teammateRoster ?? '', /@opus-5\b/, 'successor remains visible to other teammates');
   });
 
   // F229: ConciergePromptSection guard tests

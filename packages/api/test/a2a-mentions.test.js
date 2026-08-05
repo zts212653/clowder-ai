@@ -27,15 +27,15 @@ describe('parseA2AMentions', () => {
 
   it('detects line-start @mention with leading whitespace when action words exist', async () => {
     const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
-    const result = parseA2AMentions('  @布偶猫 请确认这个修复', 'codex');
-    assert.deepEqual(result, ['opus']);
+    const result = parseA2AMentions('  @opus-5 请确认这个修复', 'codex');
+    assert.deepEqual(result, ['opus-5']);
   });
 
   it('routes when action words are in next line of same paragraph', async () => {
     const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
-    const text = '@布偶猫\n请 review 这个 PR';
+    const text = '@opus-5\n请 review 这个 PR';
     const result = parseA2AMentions(text, 'codex');
-    assert.deepEqual(result, ['opus']);
+    assert.deepEqual(result, ['opus-5']);
   });
 
   // === Standalone mention: line-start @mention always routes ===
@@ -56,28 +56,28 @@ describe('parseA2AMentions', () => {
 
   it('routes @mention across paragraph boundary (blank line between mention and content)', async () => {
     const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
-    const text = '@布偶猫\n\n这是交接文档 blah blah';
+    const text = '@opus-5\n\n这是交接文档 blah blah';
     const result = parseA2AMentions(text, 'codex');
-    assert.deepEqual(result, ['opus']);
+    assert.deepEqual(result, ['opus-5']);
   });
 
   it('routes bare @mention (no other content in message)', async () => {
     const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
-    const result = parseA2AMentions('@布偶猫', 'codex');
-    assert.deepEqual(result, ['opus']);
+    const result = parseA2AMentions('@opus-5', 'codex');
+    assert.deepEqual(result, ['opus-5']);
   });
 
   it('routes @mention with arbitrary text on same line (no keyword match)', async () => {
     const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
-    const result = parseA2AMentions('@布偶猫 prefix typo', 'codex');
-    assert.deepEqual(result, ['opus']);
+    const result = parseA2AMentions('@opus-5 prefix typo', 'codex');
+    assert.deepEqual(result, ['opus-5']);
   });
 
   it('routes multiple @mentions across paragraphs', async () => {
     const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
-    const text = '@布偶猫\n@缅因猫\n\n这是交接给你们的';
+    const text = '@opus-5\n@缅因猫\n\n这是交接给你们的';
     const result = parseA2AMentions(text, 'gpt52');
-    assert.deepEqual(result, ['opus', 'codex']);
+    assert.deepEqual(result, ['opus-5', 'codex']);
   });
 
   it('routes multiple @mentions on the same line when the line is a pure handoff target list', async () => {
@@ -93,11 +93,11 @@ describe('parseA2AMentions', () => {
         catRegistry.register(id, config);
       }
 
-      // @opus and @codex are both roster members; test that multiple @mentions on
+      // @opus-5 and @codex are both available roster members; test that multiple @mentions on
       // a pure handoff line are all routed (no keyword gate required).
-      const text = '到我这里结束了吗？是的 — 我的编译修复已完成，等待 commit + push 和 CI 结果。\n@opus @codex';
+      const text = '到我这里结束了吗？是的 — 我的编译修复已完成，等待 commit + push 和 CI 结果。\n@opus-5 @codex';
       const result = parseA2AMentions(text, 'kimi');
-      assert.deepEqual(result, ['opus', 'codex']);
+      assert.deepEqual(result, ['opus-5', 'codex']);
     } finally {
       catRegistry.reset();
       for (const [id, config] of Object.entries(originalConfigs)) {
@@ -120,9 +120,9 @@ describe('parseA2AMentions', () => {
       }
 
       // Inline @codex mention after prose — should NOT be routed (keyword-gated inline rule).
-      const text = '@opus 请继续推进，如果需要再找 @codex';
+      const text = '@opus-5 请继续推进，如果需要再找 @codex';
       const result = parseA2AMentions(text, 'kimi');
-      assert.deepEqual(result, ['opus']);
+      assert.deepEqual(result, ['opus-5']);
     } finally {
       catRegistry.reset();
       for (const [id, config] of Object.entries(originalConfigs)) {
@@ -135,9 +135,9 @@ describe('parseA2AMentions', () => {
 
   it('routes when content comes before @mention (content-before-mention pattern)', async () => {
     const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
-    const text = '这是交接文档，源码目录执行 + 业务项目 workspace\n是否接受完全禁用 --api-key argv\n@opus';
+    const text = '这是交接文档，源码目录执行 + 业务项目 workspace\n是否接受完全禁用 --api-key argv\n@opus-5';
     const result = parseA2AMentions(text, 'codex');
-    assert.deepEqual(result, ['opus']);
+    assert.deepEqual(result, ['opus-5']);
   });
 
   it('routes line-start @mention after markdown numbered-list prefix', async () => {
@@ -174,6 +174,15 @@ describe('parseA2AMentions', () => {
     assert.deepEqual(result.mentions, []);
     assert.equal(result.suppressed, undefined);
     assert.ok(Array.isArray(result.routing_warnings));
+  });
+
+  it('reports disabled legacy Opus with its configured successor instead of routing it', async () => {
+    const { analyzeA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const result = analyzeA2AMentions('@opus', 'codex');
+    assert.deepEqual(result.mentions, []);
+    assert.equal(result.routing_warnings[0]?.kind, 'cat_disabled');
+    assert.equal(result.routing_warnings[0]?.alternatives[0]?.catId, 'opus-5');
+    assert.equal(result.routing_warnings[0]?.alternatives[0]?.mention, '@opus-5');
   });
 
   it('does NOT trigger for non-line-start @mention', async () => {
@@ -214,6 +223,12 @@ describe('parseA2AMentions', () => {
     const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
     const result = parseA2AMentions('@codex please review', 'opus');
     assert.deepEqual(result, ['codex']);
+  });
+
+  it('routes the canonical Opus 5 handle from the public template', async () => {
+    const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const result = parseA2AMentions('@opus-5 请确认架构方案', 'codex');
+    assert.deepEqual(result, ['opus-5']);
   });
 
   it('accepts line-start @mention without a separating space (English handle + CJK)', async () => {

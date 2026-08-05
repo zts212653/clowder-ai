@@ -34,7 +34,7 @@ Please implement this quickly.
 Inline mentions (mid-sentence) don't trigger routing. To mention multiple cats, put each on its own line.
 
 Common mentions:
-- `@opus` — deep architecture, system design, complex reasoning
+- `@opus-5` — deep architecture, system design, complex reasoning
 - `@opencode` — reliable multi-provider coding, tool orchestration, open-source ops
 - `@sonnet` — fast and flexible, great for everyday tasks
 - `@codex` — code review, bug hunting, implementation
@@ -117,7 +117,7 @@ Your cats remember past decisions, discussion conclusions, and lessons learned a
 行中间的 @ 不会触发路由。多只猫各占一行。
 
 常用提及：
-- `@opus` — 深度架构、系统设计、复杂推理
+- `@opus-5` — 深度架构、系统设计、复杂推理
 - `@opencode` — 可靠的多模型编码、工具编排、开源运营
 - `@sonnet` — 快速灵活，适合日常任务
 - `@codex` — 代码审查、找 bug、实现落地

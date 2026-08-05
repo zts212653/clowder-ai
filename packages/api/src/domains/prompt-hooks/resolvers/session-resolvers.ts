@@ -78,7 +78,7 @@ export class S4Resolver implements HookResolver {
     const exampleTarget = mentions[0]!;
     let dupHint = '';
     if (hasDuplicateDisplayNames) {
-      const example = uniqueHandleExample ?? '@opus';
+      const example = uniqueHandleExample ?? exampleTarget;
       dupHint = [
         `同族多分身时：默认 \`@显示名\`，其它用**唯一句柄**（例如 \`${example}\`）。`,
         `同名队友并存时，请优先使用唯一句柄（例如 \`${example}\`）避免歧义。`,

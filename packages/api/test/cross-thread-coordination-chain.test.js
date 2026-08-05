@@ -109,10 +109,10 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
   test('Claim -> Release -> ACK closes without ACK-of-ACK spawn, while explicit new active work remains routable', async () => {
     const source = await threadStore.create('user-1', 'Source');
     const target = await threadStore.create('user-1', 'Target');
-    await threadStore.addParticipants(source.id, ['opus']);
+    await threadStore.addParticipants(source.id, ['opus-5']);
     await threadStore.addParticipants(target.id, ['codex']);
 
-    const sourceClaimAuth = await registry.create('user-1', 'opus', source.id);
+    const sourceClaimAuth = await registry.create('user-1', 'opus-5', source.id);
     const claimResponse = await post({
       auth: sourceClaimAuth,
       threadId: target.id,
@@ -136,7 +136,7 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
       auth: targetActiveAuth,
       threadId: source.id,
       content: 'Working reply',
-      targetCat: 'opus',
+      targetCat: 'opus-5',
       clientMessageId: 'active-reply',
     });
     assert.equal(activeResponse.statusCode, 200);
@@ -145,7 +145,7 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
     assert.equal(activeReply.extra.coordination.phase, 'active');
     assert.equal(activeReply.extra.coordination.hop, 1);
 
-    const sourceReleaseAuth = await registry.create('user-1', 'opus', source.id, undefined, activeReply.id);
+    const sourceReleaseAuth = await registry.create('user-1', 'opus-5', source.id, undefined, activeReply.id);
     const releaseResponse = await post({
       auth: sourceReleaseAuth,
       threadId: target.id,
@@ -165,8 +165,8 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
     const ackResponse = await post({
       auth: targetAckAuth,
       threadId: source.id,
-      content: '@opus\nRelease received',
-      targetCat: 'opus',
+      content: '@opus-5\nRelease received',
+      targetCat: 'opus-5',
       clientMessageId: 'ack',
     });
     assert.equal(ackResponse.statusCode, 200);
@@ -174,10 +174,10 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
     assert.equal(ackBody.status, 'terminal_ack_recorded');
     assert.deepEqual(
       ackBody.routing_warnings.find((warning) => warning.kind === 'suppressed_by_terminal_ack'),
-      { kind: 'suppressed_by_terminal_ack', droppedMentions: ['opus'] },
+      { kind: 'suppressed_by_terminal_ack', droppedMentions: ['opus-5'] },
     );
     assert.equal(invocationRecordStore.getRecords().length, recordsBeforeAck, 'ACK must not enqueue ACK-of-ACK');
-    const ack = findMessage(source.id, '@opus\nRelease received');
+    const ack = findMessage(source.id, '@opus-5\nRelease received');
     assert.deepEqual(ack.mentions, []);
     assert.equal(ack.extra.coordination.id, coordinationId);
     assert.equal(ack.extra.coordination.phase, 'ack');
@@ -186,15 +186,15 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
     const ackRetry = await post({
       auth: targetAckAuth,
       threadId: source.id,
-      content: '@opus\nRelease received',
-      targetCat: 'opus',
+      content: '@opus-5\nRelease received',
+      targetCat: 'opus-5',
     });
     assert.equal(ackRetry.statusCode, 200);
     assert.equal(ackRetry.json().status, 'duplicate');
     assert.equal(
       messageStore
         .getByThread(source.id, 20, 'user-1')
-        .filter((message) => message.content === '@opus\nRelease received').length,
+        .filter((message) => message.content === '@opus-5\nRelease received').length,
       1,
       'terminal ACK retry must not append a second record when only an informational suppression warning exists',
     );
@@ -204,7 +204,7 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
       auth: targetAckAuth,
       threadId: source.id,
       content: 'Release received with stale caller id',
-      targetCat: 'opus',
+      targetCat: 'opus-5',
       coordination: { phase: 'terminal', id: 'caller-supplied-other-chain' },
       clientMessageId: 'ack-mismatched-terminal-id',
     });
@@ -220,7 +220,7 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
       auth: targetAckAuth,
       threadId: source.id,
       content: 'New substantive coordination',
-      targetCat: 'opus',
+      targetCat: 'opus-5',
       coordination: { phase: 'active', id: coordinationId },
       clientMessageId: 'restart',
     });
@@ -235,9 +235,9 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
 
   test('same-thread terminal review delivery closes cleanly and suppresses a courtesy ACK', async () => {
     const thread = await threadStore.create('user-1', 'Same-thread review');
-    await threadStore.addParticipants(thread.id, ['opus', 'codex']);
+    await threadStore.addParticipants(thread.id, ['opus-5', 'codex']);
 
-    const requestAuth = await registry.create('user-1', 'opus', thread.id);
+    const requestAuth = await registry.create('user-1', 'opus-5', thread.id);
     const requestResponse = await post({
       auth: requestAuth,
       threadId: thread.id,
@@ -257,7 +257,7 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
       auth: verdictAuth,
       threadId: thread.id,
       content: 'APPROVE exact HEAD aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; no open items.',
-      targetCat: 'opus',
+      targetCat: 'opus-5',
       coordination: { phase: 'terminal' },
       clientMessageId: 'same-thread-review-verdict',
     });
@@ -270,7 +270,7 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
     assert.equal(verdict.extra.coordination.id, coordinationId);
     assert.equal(verdict.extra.coordination.phase, 'terminal');
 
-    const ackAuth = await registry.create('user-1', 'opus', thread.id, undefined, verdict.id);
+    const ackAuth = await registry.create('user-1', 'opus-5', thread.id, undefined, verdict.id);
     const recordsBeforeAck = invocationRecordStore.getRecords().length;
     const ackResponse = await post({
       auth: ackAuth,
@@ -296,7 +296,7 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
     const source = await threadStore.create('user-1', 'Source');
     const target = await threadStore.create('user-1', 'Target');
     await threadStore.addParticipants(target.id, ['codex']);
-    const auth = await registry.create('user-1', 'opus', source.id);
+    const auth = await registry.create('user-1', 'opus-5', source.id);
 
     for (const phase of ['active', 'terminal']) {
       const content = `Minted ${phase} root`;
@@ -333,7 +333,7 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
     const source = await threadStore.create('user-1', 'Source');
     const target = await threadStore.create('user-1', 'Target');
     await threadStore.addParticipants(target.id, ['codex']);
-    const auth = await registry.create('user-1', 'opus', source.id);
+    const auth = await registry.create('user-1', 'opus-5', source.id);
 
     for (const id of ['caller-chain-a', 'caller-chain-b']) {
       const response = await post({
@@ -360,7 +360,7 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
   test('coordination with assign_work fails closed before creating a dispatch proposal', async () => {
     const source = await threadStore.create('user-1', 'Source');
     const target = await threadStore.create('user-1', 'Target');
-    const auth = await registry.create('user-1', 'opus', source.id);
+    const auth = await registry.create('user-1', 'opus-5', source.id);
 
     const response = await post({
       auth,
@@ -387,7 +387,7 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
     const source = await threadStore.create('user-1', 'Source');
     const target = await threadStore.create('user-1', 'Target');
     await threadStore.addParticipants(target.id, ['codex']);
-    const auth = await registry.create('user-1', 'opus', source.id);
+    const auth = await registry.create('user-1', 'opus-5', source.id);
 
     const response = await post({
       auth,

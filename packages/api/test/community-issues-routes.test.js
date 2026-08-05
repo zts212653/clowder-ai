@@ -1,5 +1,8 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 
@@ -1033,6 +1036,44 @@ describe('Community Issues Routes', () => {
     assert.equal(res.statusCode, 403);
     assert.match(res.json().error, /author.*authenticated principal/i);
     assert.equal((await communityIssueStore.get(issue.id)).guardianAssignment, null);
+  });
+
+  test('POST request-guardian fails closed when no eligible guardian exists', async () => {
+    const { _resetCachedConfig } = await import('../dist/config/cat-config-loader.js');
+    const savedTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    const isolatedRoot = mkdtempSync(join(tmpdir(), 'guardian-no-target-'));
+    const template = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../../cat-template.json'), 'utf-8'));
+    for (const [catId, entry] of Object.entries(template.roster)) {
+      entry.available = catId === 'codex' || catId === 'gemini';
+    }
+    template.roster.opus.successor = 'missing-successor';
+    const isolatedTemplatePath = join(isolatedRoot, 'cat-template.json');
+    writeFileSync(isolatedTemplatePath, JSON.stringify(template));
+
+    process.env.CAT_TEMPLATE_PATH = isolatedTemplatePath;
+    _resetCachedConfig();
+    let app;
+    try {
+      app = await createApp();
+      const issue = await createAcceptedIssue(app, 56);
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/community-issues/${issue.id}/request-guardian`,
+        headers: authHeaders('codex'),
+        payload: { author: 'codex', reviewer: 'gemini' },
+      });
+
+      assert.equal(res.statusCode, 409);
+      assert.match(res.json().error, /No eligible guardian/);
+      const stored = await communityIssueStore.get(issue.id);
+      assert.equal(stored.guardianAssignment, null);
+    } finally {
+      await app?.close();
+      if (savedTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = savedTemplatePath;
+      _resetCachedConfig();
+      rmSync(isolatedRoot, { recursive: true, force: true });
+    }
   });
 
   test('POST request-guardian rejects if already assigned', async () => {

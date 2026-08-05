@@ -1750,26 +1750,26 @@ describe('routeSerial A2A worklist', () => {
 
   it('supports 2-hop A2A chain: user→A→B→A', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    let opusCallCount = 0;
+    let opus5CallCount = 0;
     const deps = createMockDeps({
-      opus: {
+      'opus-5': {
         async *invoke() {
-          opusCallCount++;
-          if (opusCallCount === 1) {
-            yield { type: 'text', catId: 'opus', content: '写好了\n@缅因猫 review', timestamp: Date.now() };
+          opus5CallCount++;
+          if (opus5CallCount === 1) {
+            yield { type: 'text', catId: 'opus-5', content: '写好了\n@缅因猫 review', timestamp: Date.now() };
           } else {
-            yield { type: 'text', catId: 'opus', content: '已修复', timestamp: Date.now() };
+            yield { type: 'text', catId: 'opus-5', content: '已修复', timestamp: Date.now() };
           }
-          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          yield { type: 'done', catId: 'opus-5', timestamp: Date.now() };
         },
       },
-      codex: createMockService('codex', '有bug\n@布偶猫 请修复'),
+      codex: createMockService('codex', '有bug\n@opus-5 请修复'),
     });
 
     const messages = [];
     for await (const msg of routeSerial(
       deps,
-      ['opus'],
+      ['opus-5'],
       'implement feature',
       'user1',
       'thread1',
@@ -1778,10 +1778,10 @@ describe('routeSerial A2A worklist', () => {
       messages.push(msg);
     }
 
-    // Chain: opus → codex → opus (2 hops)
+    // Chain: opus-5 → codex → opus-5 (2 hops)
     const handoffs = messages.filter((m) => m.type === 'a2a_handoff');
     assert.equal(handoffs.length, 2, 'should have 2 A2A handoffs');
-    assert.equal(opusCallCount, 2, 'opus should be called twice');
+    assert.equal(opus5CallCount, 2, 'opus-5 should be called twice');
   });
 
   it('incremental mode: falls back to explicit user message when current message is missing from incremental context', async () => {
@@ -1863,9 +1863,9 @@ describe('routeSerial A2A worklist', () => {
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     const threadStore = new ThreadStore();
     const thread = threadStore.create('user1', 'no suppression');
-    const opusService = createCapturingService('opus', '收到');
-    const codexService = createSequentialCapturingService('codex', ['@布偶猫', '第二次调用']);
-    const deps = createMockDeps({ codex: codexService, opus: opusService }, undefined, threadStore);
+    const opusService = createCapturingService('opus-5', '收到');
+    const codexService = createSequentialCapturingService('codex', ['@opus-5', '第二次调用']);
+    const deps = createMockDeps({ codex: codexService, 'opus-5': opusService }, undefined, threadStore);
 
     const messages = [];
     for await (const msg of routeSerial(
@@ -1879,9 +1879,9 @@ describe('routeSerial A2A worklist', () => {
       messages.push(msg);
     }
 
-    // @布偶猫 alone should now trigger A2A handoff (no keyword required)
+    // @opus-5 alone should now trigger A2A handoff (no keyword required)
     const handoffs = messages.filter((m) => m.type === 'a2a_handoff');
-    assert.equal(handoffs.length, 1, 'bare @布偶猫 should trigger A2A handoff without action keywords');
+    assert.equal(handoffs.length, 1, 'bare @opus-5 should trigger A2A handoff without action keywords');
 
     // Second invocation should NOT have any routing feedback (suppression system removed)
     for await (const _ of routeSerial(

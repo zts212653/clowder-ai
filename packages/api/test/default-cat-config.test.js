@@ -56,7 +56,19 @@ describe('getDefaultCatId runtime override (F154 AC-A4)', () => {
   it('returns breeds[0] by default', () => {
     const id = getDefaultCatId();
     assert.ok(id, 'should return a catId');
+    assert.equal(id, 'opus-5');
     assert.equal(id, originalDefault);
+  });
+
+  it('resolves a disabled runtime override through its explicit successor', () => {
+    process.env.DEFAULT_CAT_ID = 'codex';
+    try {
+      setRuntimeDefaultCatId('opus');
+      assert.equal(getDefaultCatId(), 'opus-5');
+    } finally {
+      clearRuntimeDefaultCatId();
+      delete process.env.DEFAULT_CAT_ID;
+    }
   });
 
   it('returns runtime override when set', () => {
@@ -83,7 +95,7 @@ describe('getDefaultCatId runtime override (F154 AC-A4)', () => {
     catRegistry.register('antigravity', _allConfigs.antigravity);
     setRuntimeDefaultCatId('antigravity');
 
-    assert.notEqual(getDefaultCatId(), 'antigravity', 'should not use unavailable runtime override');
+    assert.equal(getDefaultCatId(), '__none__', 'unavailable runtime override must fail closed');
     assert.equal(hasRuntimeDefaultCatOverride(), false, 'unavailable runtime override should not be reported active');
 
     clearRuntimeDefaultCatId();
@@ -238,8 +250,7 @@ describe('getDefaultCatId reads DEFAULT_CAT_ID env (clowder-ai#543)', () => {
     catRegistry.register('opus', _allConfigs.opus);
     catRegistry.register('codex', _allConfigs.codex);
     process.env.DEFAULT_CAT_ID = 'not-a-cat';
-    const result = getDefaultCatId();
-    assert.notEqual(result, 'not-a-cat', 'should not return unknown catId from env');
+    assert.equal(getDefaultCatId(), '__none__', 'unknown env default must fail closed');
     delete process.env.DEFAULT_CAT_ID;
     catRegistry.reset();
   });
@@ -251,7 +262,7 @@ describe('getDefaultCatId reads DEFAULT_CAT_ID env (clowder-ai#543)', () => {
     catRegistry.register('antigravity', _allConfigs.antigravity);
     process.env.DEFAULT_CAT_ID = 'antigravity';
 
-    assert.notEqual(getDefaultCatId(), 'antigravity', 'should not use unavailable env default');
+    assert.equal(getDefaultCatId(), '__none__', 'unavailable env default must fail closed');
 
     delete process.env.DEFAULT_CAT_ID;
     catRegistry.reset();

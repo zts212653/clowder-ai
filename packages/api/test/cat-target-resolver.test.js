@@ -8,11 +8,12 @@ import { describe, it } from 'node:test';
 import './helpers/setup-cat-registry.js';
 
 describe('resolveCatTarget', () => {
-  it('returns ok for known available cat by catId', async () => {
+  it('returns the configured Opus 5 successor first when legacy Opus is disabled', async () => {
     const { resolveCatTarget } = await import('../dist/domains/cats/services/agents/routing/cat-target-resolver.js');
     const result = resolveCatTarget('opus');
-    assert.ok('ok' in result, 'should return ok for available cat');
-    assert.equal(result.ok, 'opus');
+    assert.ok('error' in result && result.error.kind === 'cat_disabled');
+    assert.equal(result.error.alternatives[0]?.catId, 'opus-5');
+    assert.equal(result.error.alternatives[0]?.mention, '@opus-5');
   });
 
   it('returns ok for known cat by @mention pattern', async () => {

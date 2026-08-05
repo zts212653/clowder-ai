@@ -258,6 +258,7 @@ const rosterEntrySchema = z.object({
   roles: z.array(z.string().min(1)).min(1),
   lead: z.boolean(),
   available: z.boolean(),
+  successor: z.string().min(1).optional(),
   evaluation: z.string().min(1),
 });
 
@@ -907,14 +908,20 @@ function isKnownAvailableDefaultCat(catId: string): boolean {
 export function getDefaultCatId(): CatId {
   if (_runtimeDefaultCatId) {
     if (isKnownAvailableDefaultCat(_runtimeDefaultCatId)) return _runtimeDefaultCatId;
-    log.warn({ catId: _runtimeDefaultCatId }, 'Runtime default cat is unavailable or unknown, falling back');
+    const successor = resolveCatSuccessor(_runtimeDefaultCatId);
+    if (successor) return successor;
+    log.warn({ catId: _runtimeDefaultCatId }, 'Runtime default cat is unavailable with no valid successor');
+    return createCatId('__none__');
   }
 
   const envCatId = process.env.DEFAULT_CAT_ID?.trim();
   if (envCatId) {
     const id = createCatId(envCatId);
     if (isKnownAvailableDefaultCat(id)) return id;
-    log.warn({ envCatId }, 'DEFAULT_CAT_ID references unavailable or unknown cat, falling back');
+    const successor = resolveCatSuccessor(id);
+    if (successor) return successor;
+    log.warn({ envCatId }, 'DEFAULT_CAT_ID references unavailable or unknown cat with no valid successor');
+    return createCatId('__none__');
   }
 
   if (_defaultCatId) return _defaultCatId;
@@ -924,8 +931,23 @@ export function getDefaultCatId(): CatId {
   if (firstBreed) {
     const defaultVariant = firstBreed.variants.find((v) => v.id === firstBreed.defaultVariantId);
     // variant has independent catId → use it; otherwise inherit breed's
-    _defaultCatId = createCatId(defaultVariant?.catId ?? firstBreed.catId);
-    return _defaultCatId;
+    const configuredDefault = createCatId(defaultVariant?.catId ?? firstBreed.catId);
+    if (isKnownAvailableDefaultCat(configuredDefault)) {
+      _defaultCatId = configuredDefault;
+      return _defaultCatId;
+    }
+
+    const successor = resolveCatSuccessor(configuredDefault, config);
+    if (successor) {
+      _defaultCatId = successor;
+      return _defaultCatId;
+    }
+
+    log.warn(
+      { catId: configuredDefault, successor: getRoster(config)[configuredDefault]?.successor },
+      'Configured default cat is unavailable with no valid successor',
+    );
+    return createCatId('__none__');
   }
 
   // Ultimate fallback: prefer DEFAULT_CAT_ID env even if not yet "known available"
@@ -953,7 +975,10 @@ export function clearRuntimeDefaultCatId(): void {
 
 /** F154 AC-A4: Check whether a runtime override is active. */
 export function hasRuntimeDefaultCatOverride(): boolean {
-  return _runtimeDefaultCatId !== null && isKnownAvailableDefaultCat(_runtimeDefaultCatId);
+  return (
+    _runtimeDefaultCatId !== null &&
+    (isKnownAvailableDefaultCat(_runtimeDefaultCatId) || resolveCatSuccessor(_runtimeDefaultCatId) !== null)
+  );
 }
 
 /** Unified owner userId: configured env or single-user fallback. */
@@ -1175,6 +1200,19 @@ export function isCatAvailable(catId: string, config?: CatCafeConfig): boolean {
   const entry = roster[catId];
   // If not in roster, assume available (backward compat)
   return entry?.available !== false;
+}
+
+/** Resolve an explicitly configured successor only when it exists and is available. */
+export function resolveCatSuccessor(catId: string, config?: CatCafeConfig): CatId | null {
+  const roster = getRoster(config);
+  const entry = roster[catId];
+  if (entry?.available !== false) return null;
+
+  const successor = entry.successor?.trim();
+  if (!successor || successor === catId || !isCatAvailable(successor, config)) return null;
+
+  const isRegistered = config ? buildCatIdToBreedIndex(config).has(successor) : catRegistry.has(createCatId(successor));
+  return isRegistered ? createCatId(successor) : null;
 }
 
 /**

@@ -99,26 +99,26 @@ describe('routeSerial A2A tracker bridge', () => {
     const threadId = 'thread-a2a-repeated-target';
     const userId = 'user-a';
     const tracker = new InvocationTracker();
-    const controller = tracker.startAll(threadId, ['opus'], userId);
-    let opusDoneCount = 0;
+    const controller = tracker.startAll(threadId, ['opus-5'], userId);
+    let opus5DoneCount = 0;
     let codexTrackCount = 0;
 
     const deps = createMockDeps({
-      opus: {
+      'opus-5': {
         async *invoke() {
-          yield { type: 'text', catId: 'opus', content: '@codex\n请继续', timestamp: Date.now() };
-          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          yield { type: 'text', catId: 'opus-5', content: '@codex\n请继续', timestamp: Date.now() };
+          yield { type: 'done', catId: 'opus-5', timestamp: Date.now() };
         },
       },
       codex: {
         async *invoke() {
-          yield { type: 'text', catId: 'codex', content: '@opus\n请复核', timestamp: Date.now() };
+          yield { type: 'text', catId: 'codex', content: '@opus-5\n请复核', timestamp: Date.now() };
           yield { type: 'done', catId: 'codex', timestamp: Date.now() };
         },
       },
     });
 
-    for await (const msg of routeSerial(deps, ['opus'], 'start', userId, threadId, {
+    for await (const msg of routeSerial(deps, ['opus-5'], 'start', userId, threadId, {
       signal: controller.signal,
       invocationController: controller,
       maxA2ADepth: 3,
@@ -132,15 +132,15 @@ describe('routeSerial A2A tracker bridge', () => {
     })) {
       if (msg.type === 'done' && msg.catId) {
         tracker.completeSlot(threadId, msg.catId, controller);
-        if (msg.catId === 'opus') {
-          opusDoneCount++;
-          assert.equal(tracker.has(threadId), true, `thread must stay busy after opus completion #${opusDoneCount}`);
+        if (msg.catId === 'opus-5') {
+          opus5DoneCount++;
+          assert.equal(tracker.has(threadId), true, `thread must stay busy after opus-5 completion #${opus5DoneCount}`);
           assert.equal(tracker.has(threadId, 'codex'), true, 'next codex slot must be tracked before it runs');
         }
       }
     }
 
-    assert.equal(opusDoneCount, 2, 'test must exercise a repeated opus→codex handoff');
+    assert.equal(opus5DoneCount, 2, 'test must exercise a repeated opus-5→codex handoff');
     assert.equal(codexTrackCount, 2, 'codex must be re-tracked for its second worklist entry');
     assert.equal(tracker.has(threadId), false, 'all repeated A2A slots must be cleaned up after the chain finishes');
   });

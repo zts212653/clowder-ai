@@ -19,6 +19,7 @@ const {
   getCatEffort,
   getAcpConfig,
   getCatFamily,
+  resolveCatSuccessor,
   bootstrapDefaultCatCatalog,
   _resetCachedConfig,
 } = await import('../dist/config/cat-config-loader.js');
@@ -825,6 +826,34 @@ describe('F32-b: buildCatIdToBreedIndex', () => {
   });
 });
 
+describe('explicit cat successor resolution', () => {
+  it('does not replace a source cat that is still available', () => {
+    const config = loadCatConfig(resolve(dirname(fileURLToPath(import.meta.url)), '../../../cat-template.json'));
+    const activeSourceConfig = {
+      ...config,
+      roster: {
+        ...config.roster,
+        opus: { ...config.roster.opus, available: true },
+      },
+    };
+
+    assert.equal(resolveCatSuccessor('opus', activeSourceConfig), null);
+  });
+
+  it('fails closed when the configured successor is unknown', () => {
+    const config = loadCatConfig(resolve(dirname(fileURLToPath(import.meta.url)), '../../../cat-template.json'));
+    const invalidConfig = {
+      ...config,
+      roster: {
+        ...config.roster,
+        opus: { ...config.roster.opus, successor: 'opus-99' },
+      },
+    };
+
+    assert.equal(resolveCatSuccessor('opus', invalidConfig), null);
+  });
+});
+
 describe('F32-b: isSessionChainEnabled (variant resolution)', () => {
   it('variant catId resolves to parent breed features', () => {
     const config = loadCatConfig(writeTempConfig(multiVariantConfig()));
@@ -865,6 +894,30 @@ describe('F32-b: getDefaultCatId', () => {
     try {
       const id = getDefaultCatId();
       assert.equal(id, 'opus-45');
+    } finally {
+      if (saved === undefined) {
+        delete process.env.CAT_TEMPLATE_PATH;
+      } else {
+        process.env.CAT_TEMPLATE_PATH = saved;
+      }
+      _resetCachedConfig();
+    }
+  });
+
+  it('fails closed when a disabled default has no valid explicit successor', () => {
+    const cfg = JSON.parse(
+      readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../cat-template.json')),
+    );
+    const ragdoll = cfg.breeds.find((breed) => breed.id === 'ragdoll');
+    ragdoll.defaultVariantId = 'opus-default';
+    cfg.roster.opus.available = false;
+    cfg.roster.opus.successor = 'opus-99';
+
+    const saved = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = writeTempConfig(cfg);
+    _resetCachedConfig();
+    try {
+      assert.equal(getDefaultCatId(), '__none__');
     } finally {
       if (saved === undefined) {
         delete process.env.CAT_TEMPLATE_PATH;
@@ -1125,6 +1178,27 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
     return { projectDir, templatePath };
   }
 
+  function writeOpus5ProjectWithStaleCatalog() {
+    const projectDir = mkdtempSync(join(tmpdir(), 'cat-opus5-overlay-'));
+    const templatePath = join(projectDir, 'cat-template.json');
+    const repoTemplatePath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../cat-template.json');
+    const template = JSON.parse(readFileSync(repoTemplatePath, 'utf-8'));
+    writeFileSync(templatePath, JSON.stringify(template));
+
+    const runtimeDir = join(projectDir, '.cat-cafe');
+    mkdirSync(runtimeDir, { recursive: true });
+    const existingCatalog = JSON.parse(JSON.stringify(template));
+    delete existingCatalog.roster['opus-5'];
+    delete existingCatalog.roster.opus.successor;
+    existingCatalog.roster.opus.available = false;
+    const ragdoll = existingCatalog.breeds.find((breed) => breed.id === 'ragdoll');
+    ragdoll.defaultVariantId = 'opus-default';
+    ragdoll.variants = ragdoll.variants.filter((variant) => variant.id !== 'opus-5');
+    writeFileSync(join(runtimeDir, 'cat-catalog.json'), JSON.stringify(existingCatalog));
+
+    return { projectDir, templatePath };
+  }
+
   it('project cat-template.json loads with Sonnet variant', () => {
     const config = loadCatConfig();
     const ragdoll = config.breeds.find((b) => b.id === 'ragdoll');
@@ -1168,15 +1242,30 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
     assert.deepEqual(fable.mentionPatterns, ['@fable5', '@fable-5', '@claude-fable-5', '@宪宪5', '@布偶猫5']);
   });
 
-  it('total cat count is 19 (opus + sonnet + opus-45 + opus-47 + fable-5 + codex + gpt52 + spark + codex-sol + gpt-pro + gemini + gemini25 + gemini35 + glm52 + kimi + antigravity + antig-opus + agy-opus + opencode)', () => {
+  it('Opus 5 is the public default Ragdoll while legacy Opus is disabled', () => {
+    const templatePath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../cat-template.json');
+    const config = loadCatConfig(templatePath);
+    const all = toAllCatConfigs(config);
+    const ragdoll = config.breeds.find((breed) => breed.id === 'ragdoll');
+
+    assert.equal(ragdoll?.defaultVariantId, 'opus-5');
+    assert.equal(config.roster.opus.available, false);
+    assert.equal(config.roster.opus.successor, 'opus-5');
+    assert.equal(config.roster['opus-5'].available, true);
+    assert.equal(all['opus-5'].defaultModel, 'claude-opus-5');
+    assert.ok(all['opus-5'].mentionPatterns.includes('@opus-5'));
+  });
+
+  it('total cat count is 20 (opus + opus-5 + sonnet + opus-45 + opus-47 + fable-5 + codex + gpt52 + spark + codex-sol + gpt-pro + gemini + gemini25 + gemini35 + glm52 + kimi + antigravity + antig-opus + agy-opus + opencode)', () => {
     // Use template directly to avoid catalog overlay pollution from earlier tests
     const templatePath =
       process.env.CAT_TEMPLATE_PATH ??
       resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
     const config = loadCatConfig(templatePath);
     const all = toAllCatConfigs(config);
-    assert.equal(Object.keys(all).length, 19);
+    assert.equal(Object.keys(all).length, 20);
     assert.ok(all.opus);
+    assert.ok(all['opus-5']);
     assert.ok(all.sonnet);
     assert.ok(all['opus-45']);
     assert.ok(all['opus-47']);
@@ -1278,6 +1367,28 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
       } else {
         process.env.CAT_TEMPLATE_PATH = saved;
       }
+    }
+  });
+
+  it('backfills Opus 5 and resolves it as default for a stale catalog with legacy Opus disabled', () => {
+    const { templatePath } = writeOpus5ProjectWithStaleCatalog();
+    const saved = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = templatePath;
+    _resetCachedConfig();
+    try {
+      const config = loadCatConfig();
+      const all = toAllCatConfigs(config);
+      assert.equal(all['opus-5'].defaultModel, 'claude-opus-5');
+      assert.equal(config.roster.opus.successor, 'opus-5');
+      assert.equal(config.roster['opus-5'].available, true);
+      assert.equal(getDefaultCatId(), 'opus-5');
+    } finally {
+      if (saved === undefined) {
+        delete process.env.CAT_TEMPLATE_PATH;
+      } else {
+        process.env.CAT_TEMPLATE_PATH = saved;
+      }
+      _resetCachedConfig();
     }
   });
 
