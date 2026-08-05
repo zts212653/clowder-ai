@@ -122,34 +122,25 @@ function buildAcpPatch(form: HubCatEditorFormState, cat?: CatData | null): Recor
   return cat?.acp ? { acp: null } : {};
 }
 
-export function buildContextBudget(form: HubCatEditorFormState) {
-  const values = [form.maxPromptTokens, form.maxContextTokens, form.maxMessages, form.maxContentLengthPerMsg].map(
-    (value) => value.trim(),
-  );
-  const filledCount = values.filter((value) => value.length > 0).length;
-  if (filledCount === 0) return undefined;
-  if (filledCount !== values.length) {
-    throw new Error('上下文预算要么全部留空，要么 4 项都填写');
+/**
+ * Parse the contextWindow form field.
+ * clowder-ai#1208: empty = Auto (undefined), positive integer = Manual cap.
+ */
+export function buildContextWindow(form: HubCatEditorFormState): number | undefined {
+  const raw = form.contextWindow.trim();
+  if (raw.length === 0) return undefined;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error('Context Window 必须是正整数（留空 = Auto）');
   }
-
-  const parsed = values.map((value) => Number.parseInt(value, 10));
-  if (parsed.some((value) => !Number.isFinite(value) || value <= 0)) {
-    throw new Error('上下文预算必须是正整数');
-  }
-
-  return {
-    maxPromptTokens: parsed[0]!,
-    maxContextTokens: parsed[1]!,
-    maxMessages: parsed[2]!,
-    maxContentLengthPerMsg: parsed[3]!,
-  };
+  return parsed;
 }
 
 export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | null) {
-  const contextBudget = buildContextBudget(form);
-  const hasExistingBudget = Boolean(cat?.contextBudget);
-  const contextBudgetPatch =
-    contextBudget !== undefined ? { contextBudget } : cat && hasExistingBudget ? { contextBudget: null as null } : {};
+  const contextWindow = buildContextWindow(form);
+  const hasExistingWindow = cat?.contextWindow != null;
+  const contextWindowPatch =
+    contextWindow !== undefined ? { contextWindow } : cat && hasExistingWindow ? { contextWindow: null as null } : {};
   const name = trimText(form.name);
   const displayName = trimText(form.displayName) || name;
   const createName = name || displayName;
@@ -202,7 +193,7 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
     caution: trimText(form.caution) || null,
     strengths: splitStrengthTags(form.strengths),
     sessionChain: form.sessionChain === 'true',
-    ...contextBudgetPatch,
+    ...contextWindowPatch,
     ...voiceConfigPatch,
     ...buildAcpPatch(form, cat),
   };

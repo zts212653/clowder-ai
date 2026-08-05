@@ -57,46 +57,21 @@ export function AdvancedRuntimeSection({
   return (
     <SectionCard
       title="高级运行时参数"
-      description="contextBudget + Session 策略 + Client 特有参数。标有 (Codex) 的参数仅在选择对应 Client 时显示。"
+      description="Context Window + Session 策略 + Client 特有参数。标有 (Codex) 的参数仅在选择对应 Client 时显示。"
       tone="success"
     >
-      <p className="text-xs leading-5 text-[var(--console-runtime-hint)]">
-        上下文预算会随成员配置一起持久化到运行时 catalog。4 项要么全部留空，要么全部填写。
-      </p>
       <div className="space-y-2">
         <TextField
-          label="Max Prompt Tokens"
-          value={form.maxPromptTokens}
-          onChange={(value) => onChange({ maxPromptTokens: value })}
+          label="Context Window"
+          value={form.contextWindow}
+          onChange={(value) => onChange({ contextWindow: value })}
           inputMode="numeric"
           tone="success"
-          placeholder="留空默认 48000"
+          placeholder="留空 = Auto（由 CLI / 模型目录自动探测）"
         />
-        <TextField
-          label="Max Context Tokens"
-          value={form.maxContextTokens}
-          onChange={(value) => onChange({ maxContextTokens: value })}
-          inputMode="numeric"
-          tone="success"
-          placeholder="留空默认 128000"
-        />
-        <TextField
-          label="Max Messages"
-          value={form.maxMessages}
-          onChange={(value) => onChange({ maxMessages: value })}
-          inputMode="numeric"
-          tone="success"
-          placeholder="留空默认 50"
-        />
-        <TextField
-          label="Max Content Length Per Msg"
-          ariaLabel="Max Content Length Per Msg"
-          value={form.maxContentLengthPerMsg}
-          onChange={(value) => onChange({ maxContentLengthPerMsg: value })}
-          inputMode="numeric"
-          tone="success"
-          placeholder="留空默认 16000"
-        />
+        <p className="text-xs leading-5 text-[var(--console-runtime-hint)]">
+          填写正整数 = Manual 模式，限制该成员的上下文窗口 token 上限。留空 = Auto，由运行时自动探测。
+        </p>
         <SelectField
           label="Session Chain"
           value={form.sessionChain}

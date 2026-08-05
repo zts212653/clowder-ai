@@ -12,8 +12,13 @@ import type { CatId } from './ids.js';
 import type { VoiceConfig } from './tts.js';
 
 /**
- * Per-cat context budget configuration.
+ * Per-cat context budget configuration (legacy).
  * Controls how much history/context is sent to each cat.
+ *
+ * Retained for parser tolerance — old catalogs still load, but the runtime
+ * derives prompt-assembly limits from the resolved effective context window
+ * rather than these static numbers. New catalogs should use `contextWindow`
+ * on the variant instead.
  */
 export interface ContextBudget {
   /** Total prompt token limit (including system prompt + context + user message) */
@@ -94,8 +99,14 @@ export interface CatVariant {
   readonly avatar?: string;
   /** F32-b P4c: Override breed-level color for this variant */
   readonly color?: CatColor;
-  /** Per-cat context budget (optional, falls back to defaults) */
-  readonly contextBudget?: ContextBudget;
+  /**
+   * clowder-ai#1208: explicit member-level context window cap (tokens).
+   * Absence / undefined = Auto (trust runtime discovery from CLI / model table).
+   * Positive integer = Manual cap (effective window never exceeds this).
+   * Session lifecycle (handoff/compress/hybrid) is configured separately via
+   * sessionChain + sessionStrategy on the breed features.
+   */
+  readonly contextWindow?: number;
   /** Optional per-variant override for sessionChain; falls back to breed.features.sessionChain. */
   readonly sessionChain?: boolean;
   /** F34: Per-cat TTS voice (optional, falls back to defaults in cat-voices.ts) */
@@ -274,7 +285,7 @@ export interface CoCreatorConfig {
   readonly timeZone?: string;
   /** Optional co-creator avatar shown in Hub and chat surfaces. */
   readonly avatar?: string;
-  /** Optional co-creator palette for Hub/chat surfaces. */
+  /** Optional co-creator palette for Hub and chat surfaces. */
   readonly color?: CatColor;
 }
 
@@ -289,8 +300,8 @@ export interface CatCafeConfigV2 {
   readonly coCreator?: CoCreatorConfig;
   /**
    * @deprecated clowder-ai#340: Accounts moved to global ~/.cat-cafe/accounts.json.
-   * This field is only read during one-time migration (catalog → global).
-   * New code must use catalog-accounts.ts which reads the global file.
+   *  This field is only read during one-time migration (catalog → global).
+   *  New code must use catalog-accounts.ts which reads the global file.
    */
   readonly accounts?: Readonly<Record<string, AccountConfig>>;
 }

@@ -205,12 +205,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         clientId: 'openai',
         accountRef: 'codex',
         defaultModel: 'gpt-5.4',
-        contextBudget: {
-          maxPromptTokens: 24000,
-          maxContextTokens: 16000,
-          maxMessages: 24,
-          maxContentLengthPerMsg: 6000,
-        },
+        contextWindow: 48_000,
         mcpSupport: false,
         cli: { command: 'codex', outputFormat: 'json' },
       }),
@@ -235,12 +230,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         caution: '',
         strengths: ['precision', 'speed', 'surgical-edits'],
         sessionChain: false,
-        contextBudget: {
-          maxPromptTokens: 36000,
-          maxContextTokens: 22000,
-          maxMessages: 36,
-          maxContentLengthPerMsg: 9000,
-        },
+        contextWindow: 72_000,
       }),
     });
     assert.equal(patchRes.statusCode, 200);
@@ -257,12 +247,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(runtimeCat.caution, null);
     assert.deepEqual(runtimeCat.strengths, ['precision', 'speed', 'surgical-edits']);
     assert.equal(runtimeCat.sessionChain, false);
-    assert.deepEqual(runtimeCat.contextBudget, {
-      maxPromptTokens: 36000,
-      maxContextTokens: 22000,
-      maxMessages: 36,
-      maxContentLengthPerMsg: 9000,
-    });
+    assert.equal(runtimeCat.contextWindow, 72_000);
 
     const bindProviderRes = await app.inject({
       method: 'PATCH',
@@ -299,7 +284,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
-        contextBudget: null,
+        contextWindow: null,
       }),
     });
     assert.equal(clearBudgetRes.statusCode, 200);
@@ -309,7 +294,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const listAfterClearBody = JSON.parse(listAfterClearRes.body);
     const runtimeCatAfterClear = listAfterClearBody.cats.find((cat) => cat.id === 'runtime-spark');
     assert.ok(runtimeCatAfterClear, 'runtime-spark should still exist');
-    assert.equal(runtimeCatAfterClear.contextBudget, undefined);
+    assert.equal(runtimeCatAfterClear.contextWindow, undefined);
     assert.equal(runtimeCatAfterClear.accountRef, 'codex');
 
     const mentions = parseA2AMentions('@运行时火花 请跟进这个分支', createCatId('opus'));

@@ -141,7 +141,11 @@ export function getSessionStrategyWithSource(catName: string): {
 
 /**
  * Resolve the non-runtime fallback chain:
- *   config-file → breed code → provider default → global default
+ *   config-file (breed sessionStrategy) → breed code → provider default → global default
+ *
+ * clowder-ai#1208: the former contextPolicy.lifecycle path was removed — session
+ * lifecycle is configured through breed features.sessionStrategy, not through
+ * the context window scalar.
  */
 function resolveFallbackStrategy(catName: string): {
   effective: SessionStrategyConfig;

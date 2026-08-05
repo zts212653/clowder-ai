@@ -9,7 +9,6 @@ import {
   type CatConfig,
   type CliConfig,
   type ClientId,
-  type ContextBudget,
   catRegistry,
   getCliEffortOptionsForProvider,
   getDefaultCliEffortForProvider,
@@ -52,13 +51,6 @@ import { resolveHeaderUserId } from '../utils/request-identity.js';
 const colorSchema = z.object({
   primary: z.string().min(1),
   secondary: z.string().min(1),
-});
-
-const contextBudgetSchema = z.object({
-  maxPromptTokens: z.number().int().positive(),
-  maxContextTokens: z.number().int().positive(),
-  maxMessages: z.number().int().positive(),
-  maxContentLengthPerMsg: z.number().int().positive(),
 });
 
 const cliEffortSchema = z.string().trim().min(1);
@@ -155,7 +147,9 @@ const baseCatSchema = z.object({
   color: colorSchema,
   mentionPatterns: z.array(z.string().min(1)).min(1),
   accountRef: z.string().min(1).optional(),
-  contextBudget: contextBudgetSchema.optional(),
+  /** clowder-ai#1208: explicit context window cap. undefined=Auto, positive int=Manual.
+   *  Old contextBudget (4-field) is no longer accepted — parse tolerance in catalog only. */
+  contextWindow: z.number().int().positive().optional(),
   roleDescription: z.string().min(1),
   personality: z.string().optional(),
   teamStrengths: z.string().optional(),
@@ -214,7 +208,7 @@ const updateCatSchema = z.object({
   color: colorSchema.optional(),
   mentionPatterns: z.array(z.string().min(1)).min(1).optional(),
   accountRef: z.string().min(1).nullable().optional(),
-  contextBudget: contextBudgetSchema.nullable().optional(),
+  contextWindow: z.number().int().positive().nullable().optional(),
   roleDescription: z.string().min(1).optional(),
   personality: z.string().optional(),
   teamStrengths: z.string().optional(),
@@ -451,8 +445,7 @@ function inferProviderFromModelName(model: string): string | undefined {
 }
 
 function buildEffectiveAccountRefResolver() {
-  return async (cat: CatConfig & { contextBudget?: ContextBudget }): Promise<string | undefined> =>
-    resolveBoundAccountRefForCat('', cat.id, cat);
+  return async (cat: CatConfig): Promise<string | undefined> => resolveBoundAccountRefForCat('', cat.id, cat);
 }
 
 async function validateAccountBindingOrThrow(
@@ -493,10 +486,10 @@ async function validateAccountBindingOrThrow(
 }
 
 async function toCatResponse(
-  cat: CatConfig & { contextBudget?: ContextBudget },
+  cat: CatConfig,
   projectRoot: string,
   metadata: CatResponseMetadata,
-  resolveEffectiveAccountRef: (cat: CatConfig & { contextBudget?: ContextBudget }) => Promise<string | undefined>,
+  resolveEffectiveAccountRef: (cat: CatConfig) => Promise<string | undefined>,
 ) {
   const acpConfig = getAcpConfig(cat.id as string, projectRoot);
   return {
@@ -518,7 +511,7 @@ async function toCatResponse(
     ...(cat.clientId === 'openai' && !acpConfig && cat.cli != null
       ? { codexCarrier: resolveCodexCarrierTruth(cat.cli.carrier) }
       : {}),
-    contextBudget: cat.contextBudget,
+    contextWindow: cat.contextWindow,
     avatar: cat.avatar,
     roleDescription: cat.roleDescription,
     personality: cat.personality,
@@ -751,7 +744,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           color: body.color,
           mentionPatterns: body.mentionPatterns,
           ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
-          contextBudget: body.contextBudget,
+          contextWindow: body.contextWindow,
           roleDescription: body.roleDescription,
           personality: body.personality,
           teamStrengths: body.teamStrengths,
@@ -780,7 +773,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           color: body.color,
           mentionPatterns: body.mentionPatterns,
           ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
-          contextBudget: body.contextBudget,
+          contextWindow: body.contextWindow,
           roleDescription: body.roleDescription,
           personality: body.personality,
           teamStrengths: body.teamStrengths,
@@ -813,7 +806,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           color: body.color,
           mentionPatterns: body.mentionPatterns,
           ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
-          contextBudget: body.contextBudget,
+          contextWindow: body.contextWindow,
           roleDescription: body.roleDescription,
           personality: body.personality,
           teamStrengths: body.teamStrengths,
@@ -1007,7 +1000,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         ...(body.color !== undefined ? { color: body.color } : {}),
         ...(body.mentionPatterns !== undefined ? { mentionPatterns: body.mentionPatterns } : {}),
         ...(targetAccountRef !== undefined ? { accountRef: targetAccountRef } : {}),
-        ...(body.contextBudget !== undefined ? { contextBudget: body.contextBudget } : {}),
+        ...(body.contextWindow !== undefined ? { contextWindow: body.contextWindow } : {}),
         ...(body.roleDescription !== undefined ? { roleDescription: body.roleDescription } : {}),
         ...(body.personality !== undefined ? { personality: body.personality } : {}),
         ...(body.teamStrengths !== undefined ? { teamStrengths: body.teamStrengths } : {}),

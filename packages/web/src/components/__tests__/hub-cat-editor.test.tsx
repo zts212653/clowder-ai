@@ -152,10 +152,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
     };
@@ -220,10 +217,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
     };
@@ -269,10 +263,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
     };
@@ -331,10 +322,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
     };
@@ -417,10 +405,7 @@ describe('HubCatEditor', () => {
       cliEffort: 'xhigh',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
     } as HubCatEditorFormState & { cliEffort: string };
@@ -455,10 +440,7 @@ describe('HubCatEditor', () => {
       codexCarrier: 'app_server',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
     } as HubCatEditorFormState;
@@ -492,10 +474,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
     } as HubCatEditorFormState;
@@ -541,10 +520,7 @@ describe('HubCatEditor', () => {
       codexCarrier: 'app_server',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
     } as HubCatEditorFormState;
@@ -578,10 +554,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
     };
@@ -629,10 +602,7 @@ describe('HubCatEditor', () => {
       codexCarrier: 'app_server',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
       acpEnabled: true,
@@ -670,10 +640,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
     };
@@ -733,10 +700,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
     } as HubCatEditorFormState;
@@ -797,10 +761,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: 'anthropic',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyVoiceFields,
       acpEnabled: true,
       mcpSupport: true,
@@ -844,10 +805,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: 'anthropic',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyVoiceFields,
       acpEnabled: true,
       mcpSupport: true,
@@ -937,10 +895,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyVoiceFields,
       acpEnabled: true,
       mcpSupport: true,
@@ -992,10 +947,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyVoiceFields,
       acpEnabled: true,
       mcpSupport: true,
@@ -1054,10 +1006,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyVoiceFields,
       acpEnabled: true,
       mcpSupport: true,
@@ -1114,10 +1063,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyVoiceFields,
       acpEnabled: true,
       mcpSupport: true,
@@ -3002,7 +2948,7 @@ describe('HubCatEditor', () => {
     expect(payload.mcpSupport).toBeUndefined();
   });
 
-  it('sends contextBudget=null when clearing existing runtime budget', async () => {
+  it('sends contextWindow=null when clearing existing runtime budget', async () => {
     const existingCat = {
       id: 'runtime-codex',
       name: 'runtime-codex',
@@ -3014,12 +2960,7 @@ describe('HubCatEditor', () => {
       mentionPatterns: ['@runtime-codex'],
       avatar: '/avatars/codex.png',
       roleDescription: 'review',
-      contextBudget: {
-        maxPromptTokens: 32000,
-        maxContextTokens: 24000,
-        maxMessages: 40,
-        maxContentLengthPerMsg: 8000,
-      },
+      contextWindow: 96000,
     } as CatData;
 
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
@@ -3068,10 +3009,7 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    await changeField(queryField(container, 'input[aria-label="Max Prompt Tokens"]'), '');
-    await changeField(queryField(container, 'input[aria-label="Max Context Tokens"]'), '');
-    await changeField(queryField(container, 'input[aria-label="Max Messages"]'), '');
-    await changeField(queryField(container, 'input[aria-label="Max Content Length Per Msg"]'), '');
+    await changeField(queryField(container, 'input[aria-label="Context Window"]'), '');
 
     const saveButton = Array.from(document.body.querySelectorAll('button')).find(
       (button) => button.textContent === '保存',
@@ -3086,10 +3024,10 @@ describe('HubCatEditor', () => {
     );
     expect(patchCall).toBeTruthy();
     const payload = JSON.parse(String(patchCall?.[1]?.body));
-    expect(payload.contextBudget).toBeNull();
+    expect(payload.contextWindow).toBeNull();
   });
 
-  it('requires all runtime budget fields when any budget value is provided', async () => {
+  it('rejects non-positive contextWindow and allows empty', async () => {
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/accounts') {
         return Promise.resolve(
@@ -3128,8 +3066,6 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(document.body.textContent).toContain('4 项要么全部留空，要么全部填写');
-
     await changeField(queryField(container, 'input[aria-label="Name"]'), '火花猫');
     await changeField(queryField(container, 'input[aria-label="Avatar"]'), '/avatars/spark.png');
     await changeField(queryField(container, 'input[aria-label="Description"]'), '快速执行');
@@ -3138,7 +3074,7 @@ describe('HubCatEditor', () => {
     await flushEffects();
     await changeField(queryField(container, 'select[aria-label="认证信息"]'), 'codex-sponsor', 'change');
     await changeField(queryField(container, 'input[aria-label="Model"]'), 'gpt-5.4-mini');
-    await changeField(queryField(container, 'input[aria-label="Max Prompt Tokens"]'), '48000');
+    await changeField(queryField(container, 'input[aria-label="Context Window"]'), '-1');
 
     const saveButton = Array.from(document.body.querySelectorAll('button')).find(
       (button) => button.textContent === '保存',
@@ -3148,7 +3084,6 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(document.body.textContent).toContain('上下文预算要么全部留空，要么 4 项都填写');
     expect(mockApiFetch).not.toHaveBeenCalledWith('/api/cats', expect.objectContaining({ method: 'POST' }));
   });
 
@@ -3285,20 +3220,8 @@ describe('HubCatEditor', () => {
       caution: null,
       strengths: ['security', 'testing'],
       sessionChain: true,
-      contextBudget: {
-        maxPromptTokens: 32000,
-        maxContextTokens: 24000,
-        maxMessages: 40,
-        maxContentLengthPerMsg: 8000,
-      },
-    } as CatData & {
-      contextBudget: {
-        maxPromptTokens: number;
-        maxContextTokens: number;
-        maxMessages: number;
-        maxContentLengthPerMsg: number;
-      };
-    };
+      contextWindow: 96000,
+    } as CatData;
 
     const onSaved = vi.fn(() => Promise.resolve());
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
@@ -3437,7 +3360,7 @@ describe('HubCatEditor', () => {
     expect(document.body.textContent).not.toContain('Secondary');
     expect(document.body.textContent).not.toContain('Display Name');
 
-    await changeField(queryField(container, 'input[aria-label="Max Prompt Tokens"]'), '48000');
+    await changeField(queryField(container, 'input[aria-label="Context Window"]'), '128000');
     await changeField(queryField(container, 'input[aria-label="Variant Label"]'), 'GPT-5.5');
     await changeField(queryField(container, 'input[aria-label="Nickname"]'), '砚砚升级版');
     await changeField(queryField(container, 'input[aria-label="Team Strengths"]'), '代码审查、找 bug、深度思考');
@@ -3461,7 +3384,7 @@ describe('HubCatEditor', () => {
     );
     expect(catPatch).toBeTruthy();
     const catPayload = JSON.parse(String(catPatch?.[1]?.body));
-    expect(catPayload.contextBudget.maxPromptTokens).toBe(48000);
+    expect(catPayload.contextWindow).toBe(128000);
     expect(catPayload.variantLabel).toBe('GPT-5.5');
     expect(catPayload.nickname).toBe('砚砚升级版');
     expect(catPayload.teamStrengths).toBe('代码审查、找 bug、深度思考');
@@ -3501,12 +3424,7 @@ describe('HubCatEditor', () => {
       avatar: '/avatars/codex.png',
       roleDescription: 'review',
       sessionChain: true,
-      contextBudget: {
-        maxPromptTokens: 32000,
-        maxContextTokens: 24000,
-        maxMessages: 40,
-        maxContentLengthPerMsg: 8000,
-      },
+      contextWindow: 96000,
     } as CatData;
 
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {

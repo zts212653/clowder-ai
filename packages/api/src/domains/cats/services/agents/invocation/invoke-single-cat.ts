@@ -33,7 +33,7 @@ import { resolveBoundAccountRefForCat } from '../../../../../config/cat-account-
 import { isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { buildCatGitIdentityEnv } from '../../../../../config/cat-git-identity.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
-import { OPENCODE_DEFAULT_CONTEXT_WINDOW, resolveContextWindow } from '../../../../../config/context-window-sizes.js';
+import { resolveContextCapacity } from '../../../../../config/context-capacity.js';
 import { getSessionStrategy, shouldTakeAction } from '../../../../../config/session-strategy.js';
 import { assertSafeTestConfigRoot } from '../../../../../config/test-config-write-guard.js';
 import { capturePromptIfEnabled } from '../../../../../infrastructure/debug/prompt-capture-bridge.js';
@@ -2420,25 +2420,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           // then fallback to aggregated inputTokens, and finally totalTokens
           // for providers (Gemini CLI) that only expose a total count.
           // clowder#915 R5 cloud P2 / issue #1208 P1: context-window resolution.
-          // 1) Explicit `usage.contextWindowSize` (CLI-reported) wins. It is
-          //    passed through resolveContextWindow only for the KNOWN_MIN floor
-          //    (e.g. stale CLI reporting 200K for claude-fable-5 which is 1M).
-          // 2) Non-opencode providers (direct Claude CLI, etc.) use the fallback
-          //    table by bare model name, also raised to the known-min floor.
-          // 3) opencode WITHOUT an explicit contextWindowSize ALWAYS uses the
-          //    conservative 128K default. The OpenCode facade gateway may only
-          //    expose a 128K window even when the underlying model (claude-opus-4-6)
-          //    nominally supports 1M. Using the fallback table's 1M value delayed
-          //    auto-handoff until ~850K and caused hits against the gateway hard
-          //    limit. The 128K default keeps opencode handoffs safe; direct
-          //    provider paths retain their precise fallback values.
-          const reportedWindowSize = msg.metadata.usage.contextWindowSize;
-          const windowSize =
-            reportedWindowSize != null
-              ? resolveContextWindow(reportedWindowSize, msg.metadata.model ?? '')
-              : msg.metadata.provider === 'opencode'
-                ? OPENCODE_DEFAULT_CONTEXT_WINDOW
-                : resolveContextWindow(undefined, msg.metadata.model ?? '');
+          // Unified via resolveContextCapacity(): member manual cap → CLI reported →
+          // model catalog → provider default → unresolved. All consumers share one
+          // resolved capacity instead of scattered 3-way fallback chains.
+          const capacity = resolveContextCapacity({
+            catId: catId as string,
+            reportedWindowSize: msg.metadata.usage.contextWindowSize,
+            model: msg.metadata.model,
+            provider: msg.metadata.provider,
+          });
+          const windowSize = capacity.actionable ? capacity.windowTokens : undefined;
           const usedFrom =
             msg.metadata.usage.lastTurnInputTokens != null
               ? 'last_turn'
@@ -2471,7 +2462,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           }
           if (windowSize && usedTokens > 0 && !isCumulativeOnly) {
             const source: ContextHealth['source'] =
-              msg.metadata.usage.contextWindowSize != null && usedFrom !== 'total' ? 'exact' : 'approx';
+              capacity.source === 'exact' && usedFrom !== 'total' ? 'exact' : 'approx';
             const health: ContextHealth = {
               usedTokens,
               windowTokens: windowSize,

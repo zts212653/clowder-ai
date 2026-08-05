@@ -51,10 +51,8 @@ export interface HubCatEditorFormState {
   acpIdleTtlMinutes: string;
   mcpSupport: boolean;
   sessionChain: SessionChainValue;
-  maxPromptTokens: string;
-  maxContextTokens: string;
-  maxMessages: string;
-  maxContentLengthPerMsg: string;
+  /** clowder-ai#1208: single context window cap; empty = Auto. */
+  contextWindow: string;
   voiceVoice: string;
   voiceLangCode: string;
   voiceSpeed: string;
@@ -408,10 +406,7 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
       cat?.mcpSupport ??
       defaultMcpSupportForClient((cat?.clientId as ClientId | undefined) ?? createDraft?.clientId ?? 'anthropic'),
     sessionChain: String(cat?.sessionChain ?? true) as SessionChainValue,
-    maxPromptTokens: cat?.contextBudget ? String(cat.contextBudget.maxPromptTokens) : '',
-    maxContextTokens: cat?.contextBudget ? String(cat.contextBudget.maxContextTokens) : '',
-    maxMessages: cat?.contextBudget ? String(cat.contextBudget.maxMessages) : '',
-    maxContentLengthPerMsg: cat?.contextBudget ? String(cat.contextBudget.maxContentLengthPerMsg) : '',
+    contextWindow: cat?.contextWindow ? String(cat.contextWindow) : '',
     voiceVoice: voiceStr(voiceConfig?.voice),
     voiceLangCode: voiceStr(voiceConfig?.langCode),
     voiceSpeed: voiceStr(voiceConfig?.speed),
@@ -493,7 +488,6 @@ export function buildCodexConfigPatches(
 export {
   buildCatPatchPayload,
   buildCatPayload,
-  buildContextBudget,
   hintModelFormatForClient,
   validateModelFormatForClient,
 } from './hub-cat-editor.payload';

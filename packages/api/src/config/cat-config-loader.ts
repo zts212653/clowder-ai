@@ -15,7 +15,6 @@ import type {
   CatId,
   CatVariant,
   CoCreatorConfig,
-  ContextBudget,
   MissionHubSelfClaimScope,
   ReviewPolicy,
   Roster,
@@ -154,6 +153,8 @@ const catVariantSchema = z
     avatar: z.string().min(1).optional(), // F32-b P4c: override breed avatar
     color: colorSchema.optional(), // F32-b P4c: override breed color
     contextBudget: contextBudgetSchema.optional(),
+    /** clowder-ai#1208: explicit context window cap. undefined=Auto, positive int=Manual. */
+    contextWindow: z.number().int().positive().optional(),
     voiceConfig: z // F103: per-cat TTS voice configuration
       .object({
         voice: z.string().min(1),
@@ -612,12 +613,7 @@ export function getDefaultVariant(breed: CatBreed): CatVariant {
  * @throws Error on duplicate catId (fail-fast at startup)
  */
 export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig> {
-  const result: Record<
-    string,
-    CatConfig & {
-      contextBudget?: ContextBudget;
-    }
-  > = {};
+  const result: Record<string, CatConfig> = {};
   for (const breed of config.breeds) {
     // F32-b P4c: resolve default variant personality for non-default fallback
     const defaultVariant = breed.variants.find((v) => v.id === breed.defaultVariantId);
@@ -682,7 +678,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
           : {}),
         ...(variant.cli != null ? { cli: variant.cli } : {}),
         ...(variant.provider != null ? { provider: variant.provider } : {}),
-        ...(variant.contextBudget != null ? { contextBudget: variant.contextBudget } : {}),
+        ...(variant.contextWindow != null ? { contextWindow: variant.contextWindow } : {}),
         ...(variant.voiceConfig != null ? { voiceConfig: variant.voiceConfig } : {}),
         roleDescription: variant.roleDescription ?? breed.roleDescription,
         personality: variant.personality ?? defaultVariant?.personality ?? '',
@@ -808,7 +804,7 @@ let _catIdToBreedSource: CatCafeConfig | null = null;
  * Gracefully returns true if config file is unreadable (availability over strictness).
  *
  * F32-b: Now resolves variant catIds to their parent breed via index.
- * Design constraint: Clowder AI config is loaded once at startup, no hot-reload.
+ * Design constraint: Cat Cafe config is loaded once at startup, no hot-reload.
  *
  * @param catId - The cat to check (e.g. 'opus', 'codex', 'opus-45')
  * @param config - Optional config override (for testing)
@@ -1031,13 +1027,14 @@ export interface CatContextWindowConfig {
 }
 
 /**
- * Return persisted context overrides only when they belong to the model that
- * will actually run. A per-invocation model override must fall back to the
- * Codex model catalog instead of inheriting another model's window limits.
+ * clowder-ai#1208: Return the member's explicit manual context cap, if any.
+ * This is a compatibility shim for callers that have not yet switched to
+ * `resolveContextCapacity`; the effective window should always be resolved
+ * through the capacity resolver.
  */
 export function getCatContextWindowConfig(
   catId: string,
-  effectiveModel?: string | null,
+  _effectiveModel?: string | null,
 ): CatContextWindowConfig | undefined {
   const cfg = getCachedConfig();
   if (!cfg) return undefined;
@@ -1048,13 +1045,12 @@ export function getCatContextWindowConfig(
   }
 
   const variant = _catIdToVariant.get(catId);
-  if (!variant?.cli?.contextWindow) return undefined;
-  if (effectiveModel && normalizeModelSlug(effectiveModel) !== normalizeModelSlug(variant.defaultModel)) {
-    return undefined;
-  }
+  // Top-level contextWindow is canonical; compat-read legacy cli.contextWindow.
+  const capTokens = variant?.contextWindow ?? (variant?.cli?.contextWindow || undefined);
+  if (!capTokens) return undefined;
   return {
-    contextWindow: variant.cli.contextWindow,
-    autoCompactTokenLimit: variant.cli.autoCompactTokenLimit ?? deriveAutoCompactTokenLimit(variant.cli.contextWindow),
+    contextWindow: capTokens,
+    autoCompactTokenLimit: deriveAutoCompactTokenLimit(capTokens),
   };
 }
 

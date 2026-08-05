@@ -57,12 +57,8 @@ export interface CatData {
       idleTtlMs?: number;
     };
   };
-  contextBudget?: {
-    maxPromptTokens: number;
-    maxContextTokens: number;
-    maxMessages: number;
-    maxContentLengthPerMsg: number;
-  };
+  /** clowder-ai#1208: explicit context window cap. undefined=Auto, positive int=Manual. */
+  contextWindow?: number;
   avatar: string;
   roleDescription: string;
   personality: string;

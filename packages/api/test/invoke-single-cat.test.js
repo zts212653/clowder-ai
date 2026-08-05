@@ -2210,12 +2210,10 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(postThresholdText.length, 1, 'post-threshold text must reach outputs (transcript continuity)');
   });
 
-  it('clowder#915 R5 cloud P2 / issue #1208 P1: opencode without explicit contextWindowSize uses conservative 128K default', async () => {
-    // The OpenCode facade gateway is authoritative: even when the underlying
-    // model (claude-opus-4-6) supports 1M, the gateway may only expose 128K.
-    // Without an explicit CLI-reported contextWindowSize, opencode must NOT
-    // use the model fallback table; it must resolve to OPENCODE_DEFAULT_CONTEXT_WINDOW.
-    // Direct provider paths (anthropic, etc.) still use the fallback table.
+  it('clowder#915 R5 cloud P2 / issue #1208 P1: opencode with known model uses catalog, manual cap overrides for gateway-capped bindings', async () => {
+    // clowder-ai#1208 resolver: model catalog wins for known models even through
+    // OpenCode. Users whose gateway caps at 128K should set contextWindow (Manual
+    // mode). The 128K default is only for UNKNOWN models without a catalog entry.
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sessionChainStore = new SessionChainStore();
 
@@ -2266,18 +2264,15 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       })
       .filter((p) => p && p.type === 'context_health');
     assert.equal(healthInfos.length, 1, 'must emit context_health');
-    // CRITICAL: windowTokens MUST be 128_000 (opencode conservative default)
-    // NOT 1_000_000 (direct-provider fallback table value for claude-opus-4-6).
+    // Known model (opus) resolves via catalog to 1M, even through OpenCode.
+    // Users whose OpenCode binding caps at 128K should set contextWindow: 128000.
     assert.equal(
       healthInfos[0].health.windowTokens,
-      128_000,
-      'opencode without explicit contextWindowSize must resolve to conservative 128K — NOT direct-provider 1M fallback',
+      1_000_000,
+      'opencode with known model must use catalog value (1M for opus)',
     );
-    // Sanity: 90k of 128k = 0.70 fillRatio, still below the 0.85 seal threshold.
-    assert.ok(
-      healthInfos[0].health.fillRatio > 0.6 && healthInfos[0].health.fillRatio < 0.85,
-      'fillRatio must reflect 128K window',
-    );
+    // 90k of 1M = 0.09 fillRatio, well below seal threshold.
+    assert.ok(healthInfos[0].health.fillRatio < 0.15, 'fillRatio must reflect 1M catalog window');
   });
 
   it('opencode GLM-5.2 resolves to 1M context window and does not false-seal at 140k', async () => {
@@ -2414,15 +2409,12 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(healthInfos[0].health.windowTokens, 128_000, 'unknown opencode model resolves to last-resort 128k');
   });
 
-  it('clowder#915 R2 cloud P1 / issue #1208 P1: opencode provider-prefixed model without explicit contextWindowSize uses 128K default', async () => {
+  it('clowder#915 R2 cloud P1 / issue #1208 P1: opencode provider-prefixed model resolves via catalog', async () => {
     // Production opencode invocation path: invoke-single-cat.ts:1459 sets
     // callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE to `safeProvider/safeModel`
     // form. OpenCodeAgentService.ts:139 then propagates that as effectiveModel.
-    // Even though the model string is `anthropic/claude-opus-4-6`, the provider
-    // is still 'opencode'. Without an explicit contextWindowSize from the CLI,
-    // we must use the conservative 128K opencode default rather than the direct
-    // provider fallback table's 1M value, because the OpenCode gateway window
-    // is authoritative and may be only 128K.
+    // clowder-ai#1208: model catalog wins for known models — even through OpenCode.
+    // Users whose gateway caps at 128K should set contextWindow (Manual mode).
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sessionChainStore = new SessionChainStore();
 
@@ -2481,11 +2473,11 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const payload = JSON.parse(healthInfos[0].content);
     assert.equal(
       payload.health.windowTokens,
-      128_000,
-      'opencode anthropic/claude-opus-4-6 without explicit contextWindowSize → 128K default',
+      1_000_000,
+      'opencode anthropic/claude-opus-4-6 resolves via catalog to 1M',
     );
     assert.equal(payload.health.usedTokens, 36928);
-    assert.equal(payload.health.source, 'approx', 'opencode default (no contextWindowSize on usage) → approx');
+    assert.equal(payload.health.source, 'approx', 'catalog resolution (no contextWindowSize on usage) → approx');
   });
 
   it('F24: uses fallback window size for models without contextWindowSize', async () => {
