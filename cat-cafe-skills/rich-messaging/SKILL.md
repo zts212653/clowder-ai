@@ -134,7 +134,7 @@ DOMPurify 静默剥掉所有 `on*` 属性——widget 照常渲染，点击不�
 
 <!-- 可以：从 <script> 绑 -->
 <button id="btn">点我</button>
-<script>document.getElementById('btn').addEventListener('click', show)</script>
+<script>document.getElementById('btn').addEventListener('click', () => alert('喵'))</script>
 ```
 
 轻交互用 `<details><summary>` 或 CSS `:hover`，不用 JS。
