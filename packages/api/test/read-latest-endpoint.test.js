@@ -130,7 +130,48 @@ describe('POST /api/threads/:id/read/latest', () => {
     });
 
     assert.equal(res.statusCode, 200);
-    assert.deepEqual(JSON.parse(res.body), { advanced: true, messageId: seed.id });
+    // #1200/#1269: timeline-published queued cat speech now gets visibilitySeq
+    // at append time, so getLatestVisibleCursor returns a v2 cursor.
+    const body = JSON.parse(res.body);
+    assert.equal(body.advanced, true);
+    assert.equal(body.messageId, seed.id);
+    assert.ok(body.cursor.startsWith('v2:'), 'cursor must be v2 (visibilitySeq assigned at append)');
+  });
+
+  // #1200 P1 mixed-thread regression: ordinary A + queued cat Q in same thread.
+  // getLatestVisibleCursor must return Q (later visibilitySeq), not A.
+  it('mixed thread: queued cat speech Q after ordinary A — acks Q as latest', async () => {
+    const thread = threadStore.create('alice', 'Mixed: ordinary + queued');
+    const a = messageStore.append({
+      userId: 'alice',
+      catId: null,
+      content: 'ordinary message A',
+      mentions: [],
+      timestamp: 1000,
+      threadId: thread.id,
+    });
+    const q = messageStore.append({
+      userId: 'alice',
+      catId: 'codex-sol',
+      content: 'queued cat speech Q',
+      mentions: ['opus'],
+      timestamp: 2000,
+      threadId: thread.id,
+      deliveryStatus: 'queued',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${thread.id}/read/latest`,
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.advanced, true);
+    // Q must be latest (higher visibilitySeq), not A
+    assert.equal(body.messageId, q.id, 'latest must be Q, not A');
+    assert.ok(body.cursor.startsWith('v2:'), 'cursor must be v2');
   });
 
   it('is idempotent — second call returns advanced=false', async () => {

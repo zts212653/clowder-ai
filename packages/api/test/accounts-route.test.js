@@ -124,12 +124,16 @@ describe('accounts routes', () => {
           baseUrl: 'https://api.route.dev',
           apiKey: 'sk-route',
           models: ['claude-opus-4-6'],
+          modelAliases: { 'claude-opus-4-6': 'claude-opus-4-6-20260101' },
         }),
       });
       assert.equal(createRes.statusCode, 200);
       const created = createRes.json();
       assert.equal(created.profile.authType, 'api_key');
       assert.equal(created.profile.hasApiKey, true);
+      assert.deepEqual(created.profile.modelAliases, {
+        'claude-opus-4-6': 'claude-opus-4-6-20260101',
+      });
 
       const listRes = await app.inject({
         method: 'GET',
@@ -144,6 +148,91 @@ describe('accounts routes', () => {
       const listed = list.providers.find((p) => p.id === created.profile.id);
       assert.ok(listed, 'created profile should appear in list');
       assert.equal(listed.hasApiKey, true);
+      assert.deepEqual(listed.modelAliases, {
+        'claude-opus-4-6': 'claude-opus-4-6-20260101',
+      });
+    } finally {
+      restoreGlobalRoot();
+      await rm(projectDir, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
+  it('PATCH /api/accounts/:id updates and clears model aliases', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { accountsRoutes } = await import('../dist/routes/accounts.js');
+    const app = Fastify();
+    await app.register(accountsRoutes);
+    await app.ready();
+
+    const projectDir = await makeTmpDir('model-aliases');
+    setGlobalRoot(projectDir);
+    try {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/accounts',
+        headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          projectPath: projectDir,
+          displayName: 'Aliased Models',
+          authType: 'api_key',
+          modelAliases: { 'kimi-code/k3': 'kimi-k3' },
+        }),
+      });
+      assert.equal(createRes.statusCode, 200);
+      const profileId = createRes.json().profile.id;
+
+      const updateRes = await app.inject({
+        method: 'PATCH',
+        url: `/api/accounts/${profileId}`,
+        headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          projectPath: projectDir,
+          modelAliases: { 'kimi-code/kimi-for-coding': 'kimi-k2.7-code' },
+        }),
+      });
+      assert.equal(updateRes.statusCode, 200);
+      assert.deepEqual(updateRes.json().profile.modelAliases, {
+        'kimi-code/kimi-for-coding': 'kimi-k2.7-code',
+      });
+
+      const clearRes = await app.inject({
+        method: 'PATCH',
+        url: `/api/accounts/${profileId}`,
+        headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+        payload: JSON.stringify({ projectPath: projectDir, modelAliases: {} }),
+      });
+      assert.equal(clearRes.statusCode, 200);
+      assert.equal(clearRes.json().profile.modelAliases, undefined);
+    } finally {
+      restoreGlobalRoot();
+      await rm(projectDir, { recursive: true, force: true });
+      await app.close();
+    }
+  });
+
+  it('rejects blank model alias ids', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { accountsRoutes } = await import('../dist/routes/accounts.js');
+    const app = Fastify();
+    await app.register(accountsRoutes);
+    await app.ready();
+
+    const projectDir = await makeTmpDir('invalid-model-alias');
+    setGlobalRoot(projectDir);
+    try {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/accounts',
+        headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          projectPath: projectDir,
+          displayName: 'Invalid Alias',
+          authType: 'api_key',
+          modelAliases: { 'kimi-code/k3': '   ' },
+        }),
+      });
+      assert.equal(createRes.statusCode, 400);
     } finally {
       restoreGlobalRoot();
       await rm(projectDir, { recursive: true, force: true });
@@ -153,6 +242,35 @@ describe('accounts routes', () => {
 
   // clowder-ai#340: POST /api/accounts/:id/test route removed — incomplete feature with no frontend entry.
   // Probe/heuristic protocol inference deleted alongside.
+
+  it('rejects model alias keys that collide after trimming', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { accountsRoutes } = await import('../dist/routes/accounts.js');
+    const app = Fastify();
+    await app.register(accountsRoutes);
+    await app.ready();
+
+    const projectDir = await makeTmpDir('duplicate-model-alias');
+    setGlobalRoot(projectDir);
+    try {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/accounts',
+        headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          projectPath: projectDir,
+          displayName: 'Duplicate Alias',
+          authType: 'api_key',
+          modelAliases: { 'kimi-code/k3': 'kimi-k3', ' kimi-code/k3 ': 'different-id' },
+        }),
+      });
+      assert.equal(createRes.statusCode, 400);
+    } finally {
+      restoreGlobalRoot();
+      await rm(projectDir, { recursive: true, force: true });
+      await app.close();
+    }
+  });
 
   it('rejects blank profile name in create request', async () => {
     const Fastify = (await import('fastify')).default;

@@ -43,6 +43,7 @@ import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { configCatOrderRoutes } from './config-cat-order.js';
+import { configMessageDispositionRoutes } from './config-message-disposition.js';
 
 const patchSchema = z.object({
   key: z.string().min(1),
@@ -154,6 +155,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
   const envFilePath = opts.envFilePath ?? resolve(projectRoot, '.env');
 
   await app.register(configCatOrderRoutes, { projectRoot });
+  await app.register(configMessageDispositionRoutes, { projectRoot });
 
   app.get('/api/config', async () => ({
     config: collectConfigSnapshot(),

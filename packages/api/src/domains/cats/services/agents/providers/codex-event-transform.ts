@@ -16,10 +16,192 @@ const MAX_BASE64_LENGTH = 5 * 1024 * 1024;
  */
 export interface CodexStreamState {
   hadPriorTextTurn: boolean;
+  /** Cat nickname/display name used to distinguish this cat's signature from quoted teammate signatures. */
+  signatureIdentity?: string;
+  /** Runtime-derived signature appended once after the provider stream ends normally. */
+  canonicalSignature?: string;
+  /** Latest provider-authored own signature, used only when runtime config cannot provide one. */
+  observedSignature?: string;
+  /** Chronological terminal truth; only a final successful stream may receive a signature. */
+  lastTurnTerminal?: 'successful' | 'non_success';
+  finalSignatureEmitted?: boolean;
+}
+
+interface StrippedTurnSignature {
+  content: string;
+  signature?: string;
+}
+
+const MARKDOWN_CONTAINER_ONLY_PREFIX_RE =
+  /^[ \t]{0,3}(?:(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)|(?:>[ \t]*))+(?:\[[ xX]\][ \t]+)?$/u;
+const MARKDOWN_LEADING_CONTAINER_RE = /^[ \t]{0,3}(?:(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)|(?:>[ \t]*))+/u;
+const FENCE_RUN_RE = /(`{3,}|~{3,})/u;
+
+const PAW_SIGNATURE_RE = /^\[([^[\]/\n]+)\/([^[\]\n]+)🐾\]$/u;
+const TRAILING_PAW_SIGNATURE_RE = /`?(\[([^[\]/\n]+)\/([^[\]\n]+)🐾\])`?[ \t]*$/u;
+
+function isOwnSignatureIdentity(candidate: string, expected: string): boolean {
+  const normalizedCandidate = candidate.trim();
+  const normalizedExpected = expected.trim();
+  return normalizedCandidate === normalizedExpected || normalizedCandidate.endsWith(`·${normalizedExpected}`);
+}
+
+function normalizeSignatureModel(model: string): string {
+  return model
+    .normalize('NFKC')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/gu, '');
+}
+
+function isCanonicalOwnSignature(
+  candidateIdentity: string,
+  candidateModel: string,
+  expectedIdentity: string,
+  canonicalSignature: string | undefined,
+): boolean {
+  if (!isOwnSignatureIdentity(candidateIdentity, expectedIdentity)) return false;
+  if (!canonicalSignature) return false;
+
+  const canonical = PAW_SIGNATURE_RE.exec(canonicalSignature.trim());
+  const canonicalIdentity = canonical?.[1];
+  const canonicalModel = canonical?.[2];
+  if (!canonicalIdentity || !canonicalModel || !isOwnSignatureIdentity(canonicalIdentity, expectedIdentity)) {
+    return false;
+  }
+  return normalizeSignatureModel(candidateModel) === normalizeSignatureModel(canonicalModel);
+}
+
+interface MarkdownFence {
+  marker: '`' | '~';
+  length: number;
+  continuationIndent: number;
+}
+
+interface MarkdownFenceLine extends MarkdownFence {
+  suffix: string;
+}
+
+function isAllowedFencePrefix(prefix: string, openFence: MarkdownFence | undefined, isContainer: boolean): boolean {
+  if (!openFence) return (/^ *$/u.test(prefix) && prefix.length <= 3) || isContainer;
+  if (prefix.includes('>') && isContainer) return true;
+  if (!/^ *$/u.test(prefix)) return false;
+  if (openFence.continuationIndent === 0) return prefix.length <= 3;
+  return prefix.length >= openFence.continuationIndent && prefix.length <= openFence.continuationIndent + 3;
+}
+
+function parseMarkdownFenceLine(line: string, openFence?: MarkdownFence): MarkdownFenceLine | undefined {
+  const match = FENCE_RUN_RE.exec(line);
+  if (!match || match.index === undefined) return undefined;
+
+  const prefix = line.slice(0, match.index);
+  const isContainerPrefix = MARKDOWN_CONTAINER_ONLY_PREFIX_RE.test(prefix);
+  if (!isAllowedFencePrefix(prefix, openFence, isContainerPrefix)) return undefined;
+
+  const run = match[0];
+  const marker = run[0];
+  if (marker !== '`' && marker !== '~') return undefined;
+  return {
+    marker,
+    length: run.length,
+    continuationIndent: isContainerPrefix ? prefix.length : 0,
+    suffix: line.slice(match.index + run.length),
+  };
+}
+
+function isInsideFencedCode(text: string, candidateIndex: number): boolean {
+  let openFence: MarkdownFence | undefined;
+  const prefixLines = text.slice(0, candidateIndex).split(/\r?\n/);
+  for (const line of prefixLines) {
+    if (!openFence) {
+      const opening = parseMarkdownFenceLine(line);
+      if (!opening || (opening.marker === '`' && opening.suffix.includes('`'))) continue;
+      openFence = opening;
+      continue;
+    }
+
+    const closing = parseMarkdownFenceLine(line, openFence);
+    if (
+      closing?.marker === openFence.marker &&
+      closing.length >= openFence.length &&
+      /^[ \t]*$/u.test(closing.suffix)
+    ) {
+      openFence = undefined;
+    }
+  }
+  return openFence !== undefined;
+}
+
+function isMarkdownSignatureSampleContext(text: string, candidateIndex: number): boolean {
+  const lineStart = text.lastIndexOf('\n', Math.max(0, candidateIndex - 1)) + 1;
+  const linePrefix = text.slice(lineStart, candidateIndex);
+  if (MARKDOWN_CONTAINER_ONLY_PREFIX_RE.test(linePrefix)) return true;
+  const leadingContainers = MARKDOWN_LEADING_CONTAINER_RE.exec(linePrefix);
+  if (leadingContainers?.[0].includes('>')) return true;
+  if (/^(?: {4,}| {0,3}\t)/u.test(linePrefix)) return true;
+  return false;
+}
+
+/**
+ * Remove only this cat's runtime-canonical signature when it is the terminal token
+ * of one complete Codex `agent_message` turn. Same-cat signatures for other models,
+ * quoted/fenced examples, and teammate signatures are content, not transport
+ * decoration, and must survive finalization.
+ */
+function stripOwnTrailingTurnSignature(
+  text: string,
+  signatureIdentity: string | undefined,
+  canonicalSignature: string | undefined,
+): StrippedTurnSignature {
+  if (!signatureIdentity) return { content: text };
+  const match = TRAILING_PAW_SIGNATURE_RE.exec(text);
+  if (!match || match.index === undefined) return { content: text };
+  const candidateIdentity = match[2];
+  const candidateModel = match[3];
+  if (
+    !candidateIdentity ||
+    !candidateModel ||
+    !isCanonicalOwnSignature(candidateIdentity, candidateModel, signatureIdentity, canonicalSignature)
+  ) {
+    return { content: text };
+  }
+
+  if (isMarkdownSignatureSampleContext(text, match.index) || isInsideFencedCode(text, match.index)) {
+    return { content: text };
+  }
+
+  return {
+    content: text.slice(0, match.index).trimEnd(),
+    signature: match[1],
+  };
 }
 
 export interface CodexEventTransformOptions {
   approvalSurface?: CodexApprovalSurface;
+}
+
+/**
+ * Append the canonical signature only after the provider event stream has
+ * ended normally. A `turn.completed` event is not itself a stream boundary:
+ * Codex may emit another turn before the NDJSON iterator is exhausted.
+ */
+export function finalizeCodexStream(state: CodexStreamState, catId: CatId): AgentMessage | null {
+  if (
+    state.lastTurnTerminal !== 'successful' ||
+    (!state.hadPriorTextTurn && !state.observedSignature) ||
+    state.finalSignatureEmitted
+  ) {
+    return null;
+  }
+  const signature = state.canonicalSignature ?? state.observedSignature;
+  if (!signature) return null;
+  state.finalSignatureEmitted = true;
+  return {
+    type: 'text',
+    catId,
+    content: `\n\n${signature}`,
+    timestamp: Date.now(),
+  };
 }
 
 /**
@@ -37,6 +219,21 @@ export function transformCodexEvent(
 ): AgentMessage | AgentMessage[] | null {
   if (typeof event !== 'object' || event === null) return null;
   const e = event as Record<string, unknown>;
+
+  if (state) {
+    if (e.type === 'turn.completed') {
+      state.lastTurnTerminal = e.status === undefined || e.status === 'completed' ? 'successful' : 'non_success';
+    } else if (e.type === 'turn.failed') {
+      state.lastTurnTerminal = 'non_success';
+    } else if (
+      e.type === 'turn.started' ||
+      e.type === 'item.started' ||
+      e.type === 'item.updated' ||
+      e.type === 'item.completed'
+    ) {
+      delete state.lastTurnTerminal;
+    }
+  }
 
   if (e.type === 'thread.started') {
     const threadId = e.thread_id;
@@ -131,17 +328,24 @@ export function transformCodexEvent(
     return null;
   }
 
+  if (e.type === 'turn.completed') {
+    return null;
+  }
+
   if (e.type !== 'item.completed') return null;
 
   const item = e.item as Record<string, unknown> | undefined;
 
   if (item?.type === 'agent_message' && typeof item.text === 'string' && item.text.trim().length > 0) {
+    const stripped = stripOwnTrailingTurnSignature(item.text, state?.signatureIdentity, state?.canonicalSignature);
+    if (state && stripped.signature) state.observedSignature = stripped.signature;
+    if (stripped.content.trim().length === 0) return null;
     const prefix = state?.hadPriorTextTurn ? '\n\n' : '';
     if (state) state.hadPriorTextTurn = true;
     return {
       type: 'text',
       catId,
-      content: prefix + item.text,
+      content: prefix + stripped.content,
       timestamp: Date.now(),
     };
   }

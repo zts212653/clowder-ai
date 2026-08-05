@@ -294,7 +294,7 @@ describe('ChatContainer intent_mode loading lock', () => {
     expect(pending?.getAttribute('data-invocation-id')).toBe('inv-codex-55');
   });
 
-  it('removes the pre-start placeholder once the cat is executing while keeping execution chrome', () => {
+  it('does not let lifecycle activity create a gap before a formal bubble exists', () => {
     storeState.messages = [
       {
         id: 'user-start-invocation',
@@ -329,8 +329,66 @@ describe('ChatContainer intent_mode loading lock', () => {
       root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
     });
 
-    expect(container.querySelector('[data-testid="pending-member-bubble"]')).toBeNull();
+    expect(container.querySelector('[data-testid="pending-member-bubble"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="thread-execution-bar"]')).not.toBeNull();
+  });
+
+  it('keeps the placeholder after app-server accepts the turn until a formal bubble can take over', () => {
+    storeState.messages = [
+      {
+        id: 'user-start-accepted-turn',
+        type: 'user',
+        content: '@codex 开始',
+        timestamp: Date.now() - 2_000,
+        extra: { targetCats: ['codex'] },
+      },
+    ];
+    storeState.hasActiveInvocation = true;
+    storeState.activeInvocations = {
+      'inv-codex-accepted': { catId: 'codex', mode: 'execute', startedAt: Date.now() - 1_000 },
+    };
+    storeState.intentMode = 'execute';
+    storeState.targetCats = ['codex'];
+    storeState.catStatuses = { codex: 'streaming' };
+    storeState.catInvocations = {
+      codex: {
+        invocationId: 'inv-codex-accepted',
+        appServerLifecycle: {
+          stage: 'turn_accepted',
+          lastActivityAt: Date.now(),
+          recoveryAttempt: 0,
+          turnStartSent: true,
+          turnAccepted: true,
+          itemObserved: false,
+        },
+      },
+    };
+
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
+    });
+
+    expect(container.querySelector('[data-testid="pending-member-bubble"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="thread-execution-bar"]')).not.toBeNull();
+
+    storeState.messages = [
+      ...storeState.messages,
+      {
+        id: 'msg-inv-codex-accepted-codex',
+        type: 'assistant',
+        catId: 'codex',
+        content: '',
+        timestamp: Date.now(),
+        isStreaming: true,
+        extra: { stream: { invocationId: 'inv-codex-accepted' } },
+      },
+    ];
+
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
+    });
+
+    expect(container.querySelector('[data-testid="pending-member-bubble"]')).toBeNull();
   });
 
   it('does not render a second Kimi avatar when an ACP draft carries the real parent + child identity', () => {
@@ -508,7 +566,7 @@ describe('ChatContainer intent_mode loading lock', () => {
     expect(pending?.getAttribute('data-invocation-id')).toBe('inv-new');
   });
 
-  it('does not keep pending placeholders once cats are executing', () => {
+  it('keeps one placeholder per executing cat until each has a formal bubble', () => {
     storeState.messages = [
       {
         id: 'user-start-parallel',
@@ -555,7 +613,7 @@ describe('ChatContainer intent_mode loading lock', () => {
       root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
     });
 
-    expect(container.querySelector('[data-testid="pending-member-bubble"]')).toBeNull();
+    expect(container.querySelectorAll('[data-testid="pending-member-bubble"]')).toHaveLength(2);
   });
 
   // Cross-thread guard has moved to useSocket (dual-pointer guard).

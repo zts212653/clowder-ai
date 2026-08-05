@@ -78,7 +78,7 @@ describe('F271 daily context reflection F139 task', () => {
                 cuesDelivered: 0,
                 quiet: true,
               });
-            }, 100);
+            }, 1_000);
             options.signal?.addEventListener(
               'abort',
               () => {
@@ -100,7 +100,10 @@ describe('F271 daily context reflection F139 task', () => {
     );
 
     assert.equal(spec.run.timeoutMs, 20);
-    assert.ok(Date.now() - startedAt < 80);
+    assert.ok(
+      Date.now() - startedAt < 500,
+      'task timeout must beat the 1s backing producer even under full-suite load',
+    );
     assert.equal(active, 0);
   });
 });

@@ -15,6 +15,7 @@ export interface ProfileItem {
   clientId?: BuiltinAccountClient;
   baseUrl?: string;
   models?: string[];
+  modelAliases?: Record<string, string>;
   modelOverride?: string | null;
   oauthLikeClient?: string;
   /** F171: User-defined env vars injected into agent subprocess. */

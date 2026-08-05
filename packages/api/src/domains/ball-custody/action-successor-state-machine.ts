@@ -43,16 +43,25 @@ export {
   recordActionCompletionCandidate,
 } from './action-successor-completion-state-machine.js';
 export type {
+  ReplaceActionSuccessorInput,
+  ReplaceActionSuccessorResult,
+} from './action-successor-replacement-state-machine.js';
+export { replaceActionSuccessor } from './action-successor-replacement-state-machine.js';
+export type {
   ActionSuccessorReturnDeliveryState,
   ActionSuccessorReturnTransition,
   MarkActionSuccessorReturnDeliveredResult,
+  ReattachReturnedActionSuccessorResult,
   RecordActionSuccessorReturnDeliveryAttemptResult,
   ReturnActionSuccessorResult,
+  ReturnedActionSuccessorProof,
 } from './action-successor-return-state-machine.js';
 export {
   ACTION_SUCCESSOR_RETURN_DELIVERY_SLA_MS,
   isActionSuccessorReturnReplay,
+  isReturnedActionSuccessorHolderGeneration,
   markActionSuccessorReturnDelivered,
+  reattachReturnedActionSuccessor,
   recordActionSuccessorReturnDeliveryAttempt,
   returnActionSuccessorToPredecessor,
 } from './action-successor-return-state-machine.js';
@@ -241,105 +250,6 @@ export function claimActionSuccessor(
     updatedAt: input.now,
   };
   return { outcome: 'claimed', lease };
-}
-
-export type ReplaceActionSuccessorResult = {
-  outcome: 'replaced' | 'stale_generation' | 'proof_required';
-  lease: ActionSuccessorLease;
-};
-
-type ReplaceActionSuccessorInputBase = {
-  expectedGeneration: number;
-  holderCatIds: string[];
-  holderThreadId: string;
-  dispatchId: string;
-  terminalPredicate: CanonicalActionTerminalPredicate;
-  evidenceRef: string;
-  now: number;
-};
-
-export type ReplaceActionSuccessorInput = ReplaceActionSuccessorInputBase &
-  (
-    | {
-        claimOrigin?: 'structured_transfer';
-        predecessorCatId: string;
-        predecessorThreadId: string;
-        issuerStandingEvidenceRef?: string;
-      }
-    | {
-        claimOrigin: 'existing_standing';
-        predecessorCatId?: never;
-        predecessorThreadId?: never;
-        issuerStandingEvidenceRef: string;
-      }
-  );
-
-export function replaceActionSuccessor(
-  current: ActionSuccessorLease,
-  input: ReplaceActionSuccessorInput,
-): ReplaceActionSuccessorResult {
-  if (input.expectedGeneration !== current.generation) return { outcome: 'stale_generation', lease: current };
-  if (current.status !== 'replaceable') return { outcome: 'proof_required', lease: current };
-  if (!input.terminalPredicate) {
-    throw new Error('terminal predicate is required for a replacement action successor generation');
-  }
-  const holderCatIds = normalizeHolders(current.mode, input.holderCatIds, current.parallelIntent);
-  const holderThreadId = requireNonEmpty(input.holderThreadId, 'holderThreadId');
-  const evidenceRef = requireNonEmpty(input.evidenceRef, 'evidenceRef');
-  const claimOrigin = input.claimOrigin ?? 'structured_transfer';
-  if (claimOrigin !== current.claimOrigin) {
-    throw new Error('replacement claim origin must match the persisted lease');
-  }
-  const provenance =
-    claimOrigin === 'existing_standing'
-      ? (() => {
-          if (current.mode !== 'single') throw new Error('existing standing requires single mode');
-          if (input.predecessorCatId || input.predecessorThreadId) {
-            throw new Error('existing standing cannot declare a predecessor route');
-          }
-          return {
-            issuerStandingEvidenceRef: requireNonEmpty(input.issuerStandingEvidenceRef, 'issuerStandingEvidenceRef'),
-          };
-        })()
-      : {
-          predecessorCatId: requireNonEmpty(input.predecessorCatId, 'predecessorCatId'),
-          predecessorThreadId: requireNonEmpty(input.predecessorThreadId, 'predecessorThreadId'),
-          issuerStandingEvidenceRef: requireNonEmpty(
-            input.issuerStandingEvidenceRef ?? evidenceRef,
-            'issuerStandingEvidenceRef',
-          ),
-        };
-  return {
-    outcome: 'replaced',
-    lease: {
-      ...current,
-      holderCatIds,
-      holderThreadId,
-      predecessorCatId: undefined,
-      predecessorThreadId: undefined,
-      ...provenance,
-      claimOrigin,
-      dispatchId: input.dispatchId,
-      terminalPredicateState: { kind: 'predicate_backed' },
-      terminalPredicate: input.terminalPredicate,
-      generation: current.generation + 1,
-      status: 'active',
-      holderOutcomes: {},
-      completionCandidates: {},
-      evidenceRefs: [
-        ...new Set([
-          ...current.evidenceRefs,
-          current.issuerStandingEvidenceRef,
-          evidenceRef,
-          provenance.issuerStandingEvidenceRef,
-        ]),
-      ],
-      returnDeliveryState: undefined,
-      returnDeliveryEvidenceRef: undefined,
-      revision: current.revision + 1,
-      updatedAt: input.now,
-    },
-  };
 }
 
 export type ActionSuccessorPreflightResult =

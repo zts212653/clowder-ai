@@ -189,7 +189,7 @@ describe('deriveResultSummary — graph_resolve anchor parsing (砚砚 cloud P2)
     assert.equal(result.resultStatus, 'counted');
   });
 
-  test('F256 Phase B: extracts expansion hint anchors from "📎 Related directions" block', async () => {
+  test('F256 Wave 1b: uses typed recall-meta targets instead of lossy rendered anchors', async () => {
     const { deriveResultSummary } = await import('../dist/domains/cats/services/tool-usage/derive-result-summary.js');
     const text = [
       'Found 2 result(s) for "routing"',
@@ -205,14 +205,19 @@ describe('deriveResultSummary — graph_resolve anchor parsing (砚砚 cloud P2)
       '   - thread-def456-digest: Discussion about routing [source-thread: thread-def456]',
       '',
       '📊 本轮第 1 次搜索',
+      '<recall-meta>{"resultStatus":"counted","resultCount":2,"expansionFunnel":{"schemaVersion":1,"cohort":"natural_topk","sourceRevision":"f256-health-v2","eligible":true,"gateReason":"eligible","followupWindow":{"maxToolDistance":20,"maxWallClockMs":300000},"attempted":true,"keyword":{"probed":1,"added":1,"deduped":0},"sourceThread":{"probed":1,"added":1,"deduped":0},"conventionEdge":{"attempted":false,"added":0,"deduped":0,"staleSkipped":0},"presented":2,"hints":[{"anchor":"F208-capability-profile","targetRef":{"kind":"doc","sourcePath":"docs/features/F208-cat-capability-profile.md","anchor":"F208-capability-profile"}},{"anchor":"thread-def456-digest","targetRef":{"kind":"thread","threadId":"thread-def456"}}]}}</recall-meta>',
     ].join('\n');
 
     const result = deriveResultSummary('search_evidence', text);
     assert.equal(result.resultCount, 2);
-    assert.deepEqual(result.expansionHintAnchors, ['F208-capability-profile', 'thread-def456-digest']);
+    assert.equal(result.expansionHintAnchors, undefined);
+    assert.deepEqual(result.expansionFunnel.hints[1].targetRef, {
+      kind: 'thread',
+      threadId: 'thread-def456',
+    });
   });
 
-  test('F256 Phase B: no expansionHintAnchors when "📎 Related directions" absent', async () => {
+  test('F256 Wave 1b: rendered related directions without a sidecar do not create a lossy signal', async () => {
     const { deriveResultSummary } = await import('../dist/domains/cats/services/tool-usage/derive-result-summary.js');
     const text = [
       'Found 1 result(s) for "test"',
@@ -220,11 +225,15 @@ describe('deriveResultSummary — graph_resolve anchor parsing (砚砚 cloud P2)
       '1. [high] Test Feature',
       '   anchor: F100',
       '',
+      '📎 Related directions:',
+      '   - F208: Capability Profile [frontmatter-alias: keyword:routing]',
+      '',
       '📊 本轮第 1 次搜索',
     ].join('\n');
 
     const result = deriveResultSummary('search_evidence', text);
     assert.equal(result.expansionHintAnchors, undefined);
+    assert.equal(result.expansionFunnel, undefined);
   });
 
   test('generic MCP errors: parses non-memory tool failure text', async () => {

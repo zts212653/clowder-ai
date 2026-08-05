@@ -116,6 +116,43 @@ describe('POST /api/threads/read/mark-all', () => {
     assert.equal((await readStateStore.get('alice', thread.id)).lastReadMessageId, seed.id);
   });
 
+  // #1200 P1 mixed-thread regression: ordinary A + queued cat Q in same thread.
+  // mark-all must ack to Q (latest visibilitySeq), not A.
+  it('mixed thread: queued cat speech Q after ordinary A — acks to Q', async () => {
+    const thread = threadStore.create('alice', 'Mixed: ordinary + queued');
+    messageStore.append({
+      userId: 'alice',
+      catId: null,
+      content: 'ordinary message A',
+      mentions: [],
+      timestamp: 1000,
+      threadId: thread.id,
+    });
+    const q = messageStore.append({
+      userId: 'alice',
+      catId: 'codex-sol',
+      content: 'queued cat speech Q',
+      mentions: ['opus'],
+      timestamp: 2000,
+      threadId: thread.id,
+      deliveryStatus: 'queued',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/read/mark-all',
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).advancedCount, 1);
+    // Acked cursor must correspond to Q (the latest visible), not A.
+    // gatedReadStateAck demotes v2→raw when gate OFF, so stored ID is Q's raw ID.
+    const state = await readStateStore.get('alice', thread.id);
+    assert.ok(state, 'read state must exist');
+    assert.equal(state.lastReadMessageId, q.id, 'acked message must be Q, not A');
+  });
+
   it('is idempotent — second call advances 0', async () => {
     const t = threadStore.create('alice', 'Thread X');
     messageStore.append({

@@ -184,6 +184,7 @@ export function ProjectSetupCard({
                 syncing={agentHookSyncing}
                 synced={agentHookSynced}
                 syncAttempted={agentHookSyncAttempted}
+                placement="project-setup"
                 onSync={onSyncAgentHooks}
               />
             )}

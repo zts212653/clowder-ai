@@ -17,6 +17,40 @@ function luaHash(fields) {
   return Object.entries(fields).flat();
 }
 
+describe('RedisMessageStore message JSON Unicode boundary', () => {
+  it('normalizes lone surrogates before serializing the Redis hash', async () => {
+    const { RedisMessageStore } = await import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js');
+    const loneHighSurrogate = String.fromCharCode(0xd800);
+    const loneLowSurrogate = String.fromCharCode(0xdc00);
+    let persistedFields;
+    const redis = {
+      options: {},
+      eval: async (...args) => {
+        const keyCount = Number(args[1]);
+        persistedFields = JSON.parse(args[keyCount + 3]);
+        return ['committed', persistedFields.id];
+      },
+      hgetall: async () => persistedFields,
+    };
+    const store = new RedisMessageStore(redis);
+    const input = {
+      userId: 'unicode-user',
+      catId: 'codex',
+      content: `redis${loneHighSurrogate}message 😀`,
+      mentions: [],
+      timestamp: 900,
+      extra: { targetCats: [`codex${loneLowSurrogate}`] },
+    };
+
+    const stored = await store.append(input);
+
+    assert.equal(persistedFields.content, 'redis�message 😀');
+    assert.deepEqual(JSON.parse(persistedFields.extra).targetCats, ['codex�']);
+    assert.equal(stored.content, 'redis�message 😀');
+    assert.equal(input.content, `redis${loneHighSurrogate}message 😀`, 'normalization must not mutate caller input');
+  });
+});
+
 describe('RedisMessageStore.markDelivered atomic transition', () => {
   it('uses Redis-side compare-and-set instead of read-check-write pipeline', async () => {
     const { RedisMessageStore } = await import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js');

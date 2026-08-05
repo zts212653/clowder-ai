@@ -1029,7 +1029,7 @@
     {
       "id": "F168",
       "name": "Community Operations Board — 社区事务编排引擎",
-      "status": "infra-complete / ops-gap 🚧 — 管道精密但没流水（2026-06-20 operator review 后重新定位）| **基础设施 A→E 全部 merged ✅** | **Phase F backend + backfill + board UX merged, opus-47 vision guards PASS ✅** | **F-Step3 External Case Closure 已收敛、实现待续 🚧**（端到端生产流未完成）| **Owner**: Ragdoll (opus-4.8) | **Priority**: P1",
+      "status": "operational closure dogfood complete ✅（2026-08-04）| **基础设施 A→E 全部 merged ✅** | **Phase F backend + backfill + board UX merged, opus-47 vision guards PASS ✅** | **F-Step3 External Case Closure 真实 external case 已闭环 ✅** | **Owner**: Ragdoll (opus-4.8) | **Priority**: P1",
       "file": "F168-community-ops-board.md"
     },
     {
@@ -1323,7 +1323,7 @@
     {
       "id": "F220",
       "name": "A2A 协作的可观测 · 可靠 · 可恢复",
-      "status": "in-progress | **Owner**: Ragdoll (Opus-4.8，已接 own + 驱动) | **Priority**: P1 | **Source**: internal",
+      "status": "in-progress | **Owner**: 小太阳·Maine Coon (Sol/GPT-5.6-sol；2026-08-04 operator 重分配) | **Priority**: P1 | **Source**: internal",
       "file": "F220-a2a-collab-reliability.md"
     },
     {
@@ -1509,7 +1509,7 @@
     {
       "id": "F254",
       "name": "Side-Effect Freshness Gate — 副作用出口 freshness 拦截",
-      "status": "in-progress, **D2 live app-server canary lifecycle/parity hardening + E-C complete** (**ADR-042 glass-box publish-then-supplement merged via PR #2906 (`ace5412c0`); durable Queue custody / migration / replayable `eval:freshness` merged via PR #2912 (`07f46f5aa`); D2 default-off provider-native carrier merged via PR #3004 (`680ab702f`); typed causal provenance + durable child lifecycle merged via PR #3036 (`9ae942beb`). The operator has explicitly enabled `CAT_CAFE_CODEX_CARRIER=app_server` in the live runtime canary. PR #3079 (`3b83fb43c`) fixed LF-only JSONL framing plus pump rejection isolation; PR #3082 (`7dd7a4d51`) restored provider-neutral Codex diagnostics; PR #3097 (`54aef5e74`) merged AC-D14 lifecycle parity/no-replay after Terra exact-HEAD review; PR #3285 (`65ef23d17`) merged exact capacity checkpoint continuation after gpt52 exact-HEAD review. Code default remains `exec_json`; broad rollout is still gated by the unfinished AC-D16 exact-read/late-boundary live parity matrix and explicit rollout authorization. These merges did not restart runtime, so canonical main truth does not prove the live canary loaded them. F264 owns the separate per-target receipt/UI close gate.**) | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "status": "in-progress, **D2 live app-server canary lifecycle/parity hardening + E-C complete** (**ADR-042 glass-box publish-then-supplement merged via PR #2906 (`ace5412c0`); durable Queue custody / migration / replayable `eval:freshness` merged via PR #2912 (`07f46f5aa`); D2 default-off provider-native carrier merged via PR #3004 (`680ab702f`); typed causal provenance + durable child lifecycle merged via PR #3036 (`9ae942beb`). The operator has explicitly enabled `CAT_CAFE_CODEX_CARRIER=app_server` in the live runtime canary. PR #3079 (`3b83fb43c`) fixed LF-only JSONL framing plus pump rejection isolation; PR #3082 (`7dd7a4d51`) restored provider-neutral Codex diagnostics; PR #3097 (`54aef5e74`) merged AC-D14 lifecycle parity/no-replay after Terra exact-HEAD review; PR #3285 (`65ef23d17`) merged exact capacity checkpoint continuation after gpt52 exact-HEAD review. Code default remains `exec_json`; broad rollout is still gated by AC-D15~D17 and explicit rollout authorization. 2026-08-04 normal-runtime UAT proves the live app-server path is loaded, but also proves Codex 0.146.0 protocol drift: a completed `collabAgentToolCall/wait` crossed four real boundaries without a notice because the classifier/eval census knows only command/file/MCP/dynamic. F264 owns the separate author-intent visibility and capability-aware UI close gate.**) | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
       "file": "F254-side-effect-freshness-gate.md"
     },
     {
@@ -1685,6 +1685,12 @@
       "name": "Memory Cue Plane（记忆线索与召回闭环）",
       "status": "done | **Completed**: 2026-08-02 | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
       "file": "F287-memory-cue-plane.md"
+    },
+    {
+      "id": "F288",
+      "name": "Plugin Messaging Domain（K-1 messaging 域收敛）",
+      "status": "K-1 absorbed; dormant until K-2 activation | **Owner**: Clowder AI maintainers (home intake from clowder-ai#1270)",
+      "file": "F288-plugin-messaging-domain.md"
     }
   ]
 }

@@ -3,6 +3,7 @@
 import type { CliDiagnostics, FreshnessSupplementProjection, ReplyPreview } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef } from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import { parseFreshnessCarrierCapability } from '@/components/message-disposition-presentation';
 import { deriveBubbleId, getBubbleInvocationId } from '@/debug/bubbleIdentity';
 import { recordBubbleInvariantViolation } from '@/debug/bubbleInvariantDiagnostics';
 import { recordDebugEvent } from '@/debug/invocationEventDebug';
@@ -1316,6 +1317,7 @@ export function consumeBackgroundSystemInfo(
           // invocation_created is an identity boundary, not a telemetry patch.
           // Explicit absence invalidates any cached child under the same parent.
           turnInvocationId,
+          freshnessCarrierCapability: parseFreshnessCarrierCapability(parsed.freshnessCarrierCapability),
           startedAt: Date.now(),
           taskProgress: {
             tasks: [],
@@ -5579,6 +5581,7 @@ export function useAgentMessages() {
                 // invocation_created is an identity boundary, not a telemetry patch.
                 // Explicit absence invalidates any cached child under the same parent.
                 turnInvocationId,
+                freshnessCarrierCapability: parseFreshnessCarrierCapability(parsed.freshnessCarrierCapability),
                 startedAt: Date.now(),
                 taskProgress: {
                   tasks: [],

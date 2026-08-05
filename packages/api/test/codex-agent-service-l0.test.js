@@ -123,7 +123,8 @@ test('Task 4: codex argv carries -c developer_instructions=<compiled L0>', async
 
   const args = spawnFn.mock.calls[0].arguments[1];
   assert.ok(args.includes('--config'), 'argv must include --config');
-  assertCompiledL0Preserved(args, 'DEV-L0-BODY');
+  const developerInstructions = assertCompiledL0Preserved(args, 'DEV-L0-BODY');
+  assert.match(developerInstructions, /do not append the cat signature to commentary\/progress messages/);
 });
 
 test('P0 security: prompt 正文走 stdin 不进 argv（ps -o command= 跨进程泄露防护）', async () => {

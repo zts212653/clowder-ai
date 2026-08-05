@@ -27,6 +27,7 @@ doc_anchors:
   - docs/features/F278-paw-feel-disposition-inbox.md
   - feature-specs/2026-07-16-f177-f254-f264-child-execution-truth.md
   - feature-specs/2026-07-31-f264-terminal-consumption-receipt.md
+  - feature-specs/2026-08-04-f264-author-declared-message-disposition.md
 static_scan_hints: [BubbleEvent, bubbleKind, bubbleIdentity, BubbleReducer, useAgentMessages, useChatHistory, TurnExecutionMessageProjection, executionKind, routing_guard, freshness_supplement, auxiliaryTurnExecutions, system-routing-guard, freshness_closure, QueueMessageReceipt, MessageReceiptDock, seenAt, handledAt, evidenceRef, lineage, closureId, supplementId, originalMessageId, sourceInvocationId, chatStore, hydration, IndexedDB]
 cited_by:
   - {feature: F177-F254-F264-child-execution-truth, date: 2026-07-16, delta: live and F5 consume one typed child identity projection; routing guards render as system-assisted execution without copied prose, supplements remain distinct replies, and receipt timing separates body-read from terminal handling}
@@ -37,6 +38,7 @@ cited_by:
   - {feature: F264, date: 2026-07-15, delta: the original user bubble renders persistent per-target receipt truth; evidence navigation highlights the whole loaded invocation lineage including supplements without moving messages or copying replies}
   - {feature: F278, date: 2026-07-26, delta: the exact original cat message may render a source-ref disposition projection while the marker body remains canonical and is never copied into the control-plane ledger}
   - {feature: F264-terminal-consumption, date: 2026-07-31, delta: the original cross-thread message renders delivered, exact-child awakened, body-read, unsettled, and typed terminal-silent per-target states; an empty final stays system receipt only and never creates a cat bubble}
+  - {feature: F264-author-disposition, date: 2026-08-04, delta: composer exposes inherited current-work/next-work intent only while a live target makes the choice meaningful; the original message receipt distinguishes requested current work, durable fallback, exact exposure, and outcome without moving or copying bodies}
 ---
 
 # Bubble Pipeline
@@ -52,6 +54,7 @@ F183 / ADR-033 own bubble identity and the single-writer reducer contract for fr
 - Touching `useAgentMessages`, `bubble-reducer`, `chatStore` message mutation paths, IDB message cache, or bubble diagnostics.
 - Adding or changing legacy closure projections or ADR-042 freshness annotation, supplement status, budget, decline/failure, or reply-chain rendering.
 - Adding or changing F264 receipt rendering, handled-disposition copy, reminder state copy, or lineage focus navigation.
+- Adding or changing message-disposition selector/onboarding, preference-source labels, one-shot override, or author-intent/fallback receipt copy.
 - Adding or changing ordinary/routing-guard/freshness-supplement execution identity, auxiliary execution badges, or ledger hydration links.
 
 ## Extend By
@@ -62,6 +65,7 @@ F183 / ADR-033 own bubble identity and the single-writer reducer contract for fr
 - Keep runtime diagnostics structured enough to identify duplicate stable identities and phase regression.
 - Attach supplement projections only to exact `originalMessageId`; keep the original in the normal timeline and render committed supplement content as a separate reply. UI grouping must never merge original and supplement truth.
 - Attach queue receipts only to the exact original message. Navigate evidence by canonical invocation identities and supplement provenance, highlighting the loaded lineage as a set rather than relocating or duplicating bubbles.
+- Render disposition as an author request, not execution fact. Hide the selector when no relevant invocation is live; show exact exposure/fallback/outcome from custody after send, and clear one-shot state without mutating inherited preferences.
 - Persist and hydrate execution identity through the shared typed projection. A child that owns a visible body uses `turnExecution`; a bodyless assisting child uses `auxiliaryTurnExecutions`. Read terminal status from the ledger API rather than copying mutable status into message text.
 
 ## Do NOT Unify With
@@ -72,6 +76,7 @@ F183 / ADR-033 own bubble identity and the single-writer reducer contract for fr
 - Do not use IndexedDB as online merge authority. It is a provisional/offline cache.
 - Do not remove or replace a completed original because freshness advanced. Do not discover supplement parents by text/timestamp proximity when exact identity exists.
 - Do not copy handled replies under the receipt, move the original message, or label `seen` as `handled`.
+- Do not keep a meaningless disposition chip visible while all targets are idle, or let composer preference overwrite hydrated message truth.
 - Do not parse prompt text, logs, labels or rendered prose to infer execution kind. Do not render a bodyless routing guard as a second ordinary cat answer.
 
 ## Static Scan Hints

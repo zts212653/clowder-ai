@@ -11,6 +11,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import type { QueueAuthorIntent } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import type { ActionSuccessorFence } from '../../../../ball-custody/ActionSuccessorAdmissionService.js';
@@ -33,6 +34,8 @@ export interface QueueEntry {
   targetCats: string[];
   /** Stable target identity for glass-box projection after individual targets are handled. */
   allTargetCats?: string[];
+  /** F264: per-target author intent. Missing user/connector records fail closed to next_work. */
+  authorIntentByCatId?: Record<string, QueueAuthorIntent>;
   /** Notice reached a safe boundary, but the queued body has not been read yet. */
   queuedNotifiedByCatIds?: string[];
   /** Exact child invocation created for this target before prompt-body exposure. */
@@ -292,6 +295,7 @@ export class InvocationQueue {
       source: input.source,
       targetCats: [...input.targetCats],
       allTargetCats: [...input.targetCats],
+      ...(input.authorIntentByCatId ? { authorIntentByCatId: structuredClone(input.authorIntentByCatId) } : {}),
       intent: input.intent,
       status: 'queued',
       createdAt: Date.now(),
@@ -418,8 +422,8 @@ export class InvocationQueue {
     return true;
   }
 
-  /** Restore one exact TTL-0 Queue owner after process restart. Idempotent by entryId. */
-  restoreDurableEntry(entry: QueueEntry): 'restored' | 'existing' {
+  /** Restore one exact TTL-0 Queue owner after process restart or failed persistence. Idempotent by entryId. */
+  restoreDurableEntry(entry: QueueEntry, options?: { beforeEntryId?: string }): 'restored' | 'existing' {
     for (const q of this.queues.values()) {
       const existing = q.find((candidate) => candidate.id === entry.id);
       if (!existing) continue;
@@ -429,7 +433,11 @@ export class InvocationQueue {
       return 'existing';
     }
     const restored = InvocationQueue.cloneEntry(entry);
-    this.getOrCreate(this.scopeKey(entry.threadId, entry.userId)).push(restored);
+    const queue = this.getOrCreate(this.scopeKey(entry.threadId, entry.userId));
+    const beforeIndex = options?.beforeEntryId
+      ? queue.findIndex((candidate) => candidate.id === options.beforeEntryId)
+      : -1;
+    queue.splice(beforeIndex >= 0 ? beforeIndex : queue.length, 0, restored);
     this.originalContents.set(entry.id, entry.content);
     return 'restored';
   }
@@ -439,7 +447,7 @@ export class InvocationQueue {
     threadId: string,
     userId: string,
     catId: string,
-    opts?: { excludeEntryId?: string },
+    opts?: { excludeEntryId?: string; parentInvocationId?: string },
   ): Array<{
     entryId: string;
     source: string;
@@ -452,6 +460,7 @@ export class InvocationQueue {
     return this.list(threadId, userId)
       .filter((entry) => entry.id !== opts?.excludeEntryId)
       .filter((entry) => entry.status === 'queued' && entry.targetCats.includes(catId))
+      .filter((entry) => InvocationQueue.canExposeToCurrentParent(entry, catId, opts?.parentInvocationId))
       .filter((entry) => !entry.queuedSeenByCatIds?.includes(catId))
       .map((entry) => ({
         entryId: entry.id,
@@ -469,6 +478,7 @@ export class InvocationQueue {
     threadId: string,
     userId: string,
     catId: string,
+    parentInvocationId?: string,
   ): Array<{
     entryId: string;
     source: string;
@@ -479,6 +489,7 @@ export class InvocationQueue {
   }> {
     return this.list(threadId, userId)
       .filter((entry) => entry.status === 'queued' && entry.targetCats.includes(catId))
+      .filter((entry) => InvocationQueue.canExposeToCurrentParent(entry, catId, parentInvocationId))
       .map((entry) => ({
         entryId: entry.id,
         source: entry.source,
@@ -487,6 +498,61 @@ export class InvocationQueue {
         ...(entry.messageId !== undefined ? { messageId: entry.messageId } : {}),
         ...(entry.mergedMessageIds.length > 0 ? { mergedMessageIds: [...entry.mergedMessageIds] } : {}),
       }));
+  }
+
+  private static canExposeToCurrentParent(
+    entry: Pick<QueueEntry, 'source' | 'authorIntentByCatId'>,
+    catId: string,
+    parentInvocationId: string | undefined,
+  ): boolean {
+    // Agent control-flow carriers retain their existing typed dispatch path.
+    // User/connector work requires an explicit, exact-parent author permission.
+    if (entry.source === 'agent') return true;
+    const authorIntent = entry.authorIntentByCatId?.[catId];
+    return Boolean(
+      parentInvocationId &&
+        authorIntent?.requested === 'continue_current' &&
+        authorIntent.fallbackAt === undefined &&
+        authorIntent.boundParentInvocationId === parentInvocationId,
+    );
+  }
+
+  /**
+   * Close every still-pending exposure window bound to one terminal parent.
+   * The immutable request/fence remain; only an append-only fallback fact is added.
+   */
+  fallbackAuthorIntentsForParentAcrossUsers(
+    threadId: string,
+    catId: string,
+    parentInvocationId: string,
+    fallbackAt = Date.now(),
+  ): Array<{ entryId: string; userId: string }> {
+    const changed: Array<{ entryId: string; userId: string }> = [];
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
+      for (const entry of q) {
+        if (entry.status !== 'queued' || !entry.targetCats.includes(catId)) continue;
+        const authorIntent = entry.authorIntentByCatId?.[catId];
+        if (
+          authorIntent?.requested !== 'continue_current' ||
+          authorIntent.boundParentInvocationId !== parentInvocationId ||
+          authorIntent.fallbackAt !== undefined
+        ) {
+          continue;
+        }
+        const hadExposure = (entry.queuedBodyExposures ?? []).some((exposure) => exposure.targetCatId === catId);
+        entry.authorIntentByCatId = {
+          ...(entry.authorIntentByCatId ?? {}),
+          [catId]: {
+            ...authorIntent,
+            fallbackAt,
+            fallbackReason: hadExposure ? 'parent_non_success_after_exposure' : 'parent_terminal_before_exposure',
+          },
+        };
+        changed.push({ entryId: entry.id, userId: entry.userId });
+      }
+    }
+    return changed;
   }
 
   /** Record that a best-effort freshness notice reached this target's current invocation. */
@@ -871,6 +937,7 @@ export class InvocationQueue {
       ...entry,
       targetCats: [...entry.targetCats],
       ...(entry.allTargetCats ? { allTargetCats: [...entry.allTargetCats] } : {}),
+      ...(entry.authorIntentByCatId ? { authorIntentByCatId: structuredClone(entry.authorIntentByCatId) } : {}),
       ...(entry.queuedNotifiedByCatIds ? { queuedNotifiedByCatIds: [...entry.queuedNotifiedByCatIds] } : {}),
       ...(entry.queuedAwakenedInvocationIdByCatId
         ? { queuedAwakenedInvocationIdByCatId: { ...entry.queuedAwakenedInvocationIdByCatId } }

@@ -528,7 +528,7 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'CAT_CAFE_RUNTIME_ROOT',
     defaultValue: '(未设置 → process.cwd())',
     description:
-      'F061: Clowder AI runtime 二进制根目录（runtime startup 自动 export 为 $RUNTIME_DIR），优先级高于 capability orchestrator 的 auto-detection，用于 Antigravity MCP config args 路径',
+      'F061: Cat Café runtime 二进制根目录（runtime startup 自动 export 为 $RUNTIME_DIR），优先级高于 capability orchestrator 的 auto-detection，用于 Antigravity MCP config args 路径',
     category: 'server',
     sensitive: false,
     runtimeEditable: false,
@@ -632,6 +632,15 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'Docs 根目录路径（F102 记忆系统用）',
     category: 'storage',
     sensitive: false,
+  },
+  {
+    name: 'VISIBILITY_CURSOR_V2',
+    defaultValue: '(未设置 → off)',
+    description:
+      '#1269: Activation gate for v2 cursor durable-slot initiation. Set to "on" to enable v2 encoding in previously untouched durable slots (delivery/read/seen positions). Canonical comparison always uses v2 regardless of this flag. Deployment-scoped: OFF by default, rollback-safe (existing v2 slots remain advanceable).',
+    category: 'storage',
+    sensitive: false,
+    runtimeEditable: false,
   },
 
   // --- budget ---

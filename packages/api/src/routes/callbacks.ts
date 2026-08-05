@@ -74,6 +74,7 @@ import {
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { EventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { IRuntimeSessionStore } from '../domains/cats/services/runtime-session/RuntimeSessionStore.js';
+import { compareCursors, cursorFor, parseCursor } from '../domains/cats/services/stores/cursor.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
@@ -148,6 +149,7 @@ import { registerCallbackLocalReviewVerdictRoute } from './callback-local-review
 import { type CallbackMemoryCueDeps, registerCallbackMemoryCueRoutes } from './callback-memory-cue-routes.js';
 import { registerCallbackMemoryRoutes } from './callback-memory-routes.js';
 import { getMultiMentionOrchestrator, registerMultiMentionRoutes } from './callback-multi-mention-routes.js';
+import { preflightNegativeAuthorizationFence } from './callback-negative-authorization-fence.js';
 import { registerCallbackPersonMemoryRoutes } from './callback-person-memory-routes.js';
 import { registerCallbackProposePersonMemoryRoutes } from './callback-propose-person-memory-routes.js';
 import { registerCallbackProposeProfileUpdateRoutes } from './callback-propose-profile-update-routes.js';
@@ -160,6 +162,7 @@ import {
   deriveCallbackActor,
   effectiveInvocationId,
   getDeletedCallbackThreadGuard,
+  resolveCallbackActionLeaseRef,
   resolvePrincipalThread,
   resolveScopedThreadId,
 } from './callback-scope-helpers.js';
@@ -696,7 +699,7 @@ export interface CallbackRoutesOptions {
   /** F168 F-Step3: invocation-bound atomic verdict + delivery-custody recorder. */
   externalReviewVerdictService?: Pick<ExternalReviewVerdictService, 'record'>;
   /** F167: invocation-bound local verdict message completion producer. */
-  localReviewVerdictService?: Pick<LocalReviewVerdictService, 'record'>;
+  localReviewVerdictService?: Pick<LocalReviewVerdictService, 'record' | 'recover'>;
   /** F202-2D: seeds issue tracking from the current highest issue comment ID. */
   fetchIssueCommentCursor?: (repoFullName: string, issueNumber: number) => Promise<number>;
   /** F043 P1: feat_index provider override for tests */
@@ -1733,7 +1736,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
 
       const proposalId = `dp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const ownerUserId = record.userId ?? 'default-user';
+      const ownerUserId = actor.userId;
       const originRef = deriveCallbackOriginRef(record, actor.threadId);
 
       // R3 fix: The intercept exits before the normal flow's analyzeA2AMentions (line 1294),
@@ -1807,6 +1810,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
       const createResult = await opts.dispatchProposalStore.create({
         proposalId,
+        sourceInvocationId: invocationId,
         sourceThreadId: actor.threadId,
         targetThreadId: effectiveThreadId,
         senderCatId: actor.catId as string,
@@ -1906,6 +1910,50 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       ...(replyTo ? { replyToMessageId: replyTo } : {}),
     });
 
+    // Resolve the ordinary carrier's canonical targets before any policy that
+    // can claim, buffer, queue, or emit it. The proposal store's index is
+    // deny-only; canonical fields are revalidated inside the store lookup.
+    const senderCatId = createCatId(actor.catId);
+    const coordinationResult =
+      effectiveCoordination || incomingCrossThreadHint?.coordination
+        ? resolveCrossThreadCoordination({
+            ...(effectiveCoordination ? { explicit: effectiveCoordination } : {}),
+            ...(incomingCrossThreadHint?.coordination
+              ? {
+                  incoming: {
+                    sourceThreadId: incomingCrossThreadHint.sourceThreadId,
+                    coordination: incomingCrossThreadHint.coordination,
+                  },
+                }
+              : {}),
+            targetThreadId: effectiveThreadId,
+          })
+        : { suppressRouting: false, coordination: undefined };
+    const coordinationDedupKey: CallbackCoordinationDedupKey | undefined =
+      action && !explicitCoordination ? 'action-active-root' : coordinationResult.contentDedupCoordinationKey;
+    const negativeAuthorizationFence = await preflightNegativeAuthorizationFence({
+      content,
+      isCrossThread,
+      senderCatId,
+      sourceThreadId: actor.threadId,
+      sourceInvocationId: invocationId,
+      sourceInvocationCreatedAt: record.createdAt,
+      targetThreadId: effectiveThreadId,
+      ownerUserId: actor.userId,
+      explicitTargetCats,
+      action,
+      suppressRouting: coordinationResult.suppressRouting,
+      effectClass,
+      clientMessageId,
+      dispatchProposalStore: opts.dispatchProposalStore,
+      eventAuditLog: opts.eventAuditLog,
+      log: app.log,
+    });
+    if (negativeAuthorizationFence) {
+      reply.status(negativeAuthorizationFence.statusCode);
+      return negativeAuthorizationFence.body;
+    }
+
     // F254 Phase A: Freshness gate — hold post_message if cat has unseen messages
     // in the target thread. Uses independent seenCursor (NOT deliveryCursor — AC-A9).
     // Gate is fail-open: no cursor → forward; error → forward (log + continue).
@@ -1933,6 +1981,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           // Baseline visibility (applies in ALL modes):
           if (msg.deletedAt) return false;
           if (!isDelivered(msg as unknown as Parameters<typeof isDelivered>[0])) return false;
+          // #1200 codex R11 P1: system-generated messages (persisted error badges)
+          // are display-only — route-helpers.ts:744-745 excludes them from freshness.
+          if (msg.userId === 'system') return false;
           if (msg.origin === 'briefing') return false;
           // Play-mode visibility:
           if (needsFreshnessPlayFilter) {
@@ -2053,6 +2104,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
       const dispatchId = `${isCrossThread ? 'cross-post' : 'post'}:${clientMessageId}`;
       try {
+        const incomingActionLeaseRef = action.replace
+          ? await resolveCallbackActionLeaseRef(record, invocationRecordStore)
+          : undefined;
         const admission = await opts.actionSuccessorAdmissionService.admit({
           tenantScope: actor.userId,
           actorCatId: actor.catId,
@@ -2062,6 +2116,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           dispatchId,
           evidenceRef: `callback:${invocationId}:${clientMessageId}`,
           now: Date.now(),
+          ...(incomingActionLeaseRef ? { incomingActionLeaseRef } : {}),
           action,
         });
         if (!admission.admit) {
@@ -2138,24 +2193,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // Parse line-start @mentions (A2A rule: only line-start, strip code blocks, single target)
     // Uses analyzeA2AMentions to capture routing_warnings for disabled cats (F182 KD-10).
     // F52: Cross-thread posts skip self-reference filter so @codex can trigger target thread's codex
-    const senderCatId = createCatId(actor.catId);
-    const coordinationResult =
-      effectiveCoordination || incomingCrossThreadHint?.coordination
-        ? resolveCrossThreadCoordination({
-            ...(effectiveCoordination ? { explicit: effectiveCoordination } : {}),
-            ...(incomingCrossThreadHint?.coordination
-              ? {
-                  incoming: {
-                    sourceThreadId: incomingCrossThreadHint.sourceThreadId,
-                    coordination: incomingCrossThreadHint.coordination,
-                  },
-                }
-              : {}),
-            targetThreadId: effectiveThreadId,
-          })
-        : { suppressRouting: false, coordination: undefined };
-    const coordinationDedupKey: CallbackCoordinationDedupKey | undefined =
-      action && !explicitCoordination ? 'action-active-root' : coordinationResult.contentDedupCoordinationKey;
     const contentAnalysis = analyzeA2AMentions(storedContent, isCrossThread ? undefined : senderCatId);
     // Action-scoped dispatch uses explicit targetCats as the authoritative holder set.
     // Text mentions remain presentation only and cannot silently mutate lease cardinality.
@@ -2746,26 +2783,52 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // F35: Filter out whispers not intended for this cat
     const mentionViewer = { type: 'cat' as const, catId };
     const mentions = rawMentions.filter((m) => canViewMessage(m, mentionViewer));
-    const payload = {
-      mentions: mentions.map((item) => {
-        if (isMentionFullMode) {
-          // F236 Track-1 full mode: return complete mention content, no truncation
-          return {
-            id: item.id,
-            from: getSenderName(item.catId),
-            message: item.content,
-            timestamp: item.timestamp,
-            contentLength: item.content.length,
-            requiresDrill: false,
-            ...(shouldIncludeAcked ? { acked: Boolean(lastAckId && item.id <= lastAckId) } : {}),
-          };
+    // #1200 P2-8 (Sol R2): pair-domain acked resolution via compareCursors.
+    // Uses the same (seq, id) pair comparison as the Lua CAS and in-memory
+    // cursor store, ensuring consistent ordering semantics across all
+    // cursor comparison points. Cross-format (v1/v2) uses the version
+    // boundary heuristic: v2 always > v1 (tracked era postdates untracked).
+    // #1200 Sol R6 P2-1: async canonicalization for cross-format safety.
+    // Redis getRecentMentionsFor may return items without visibilitySeq
+    // (pre-migration data), making cursorFor emit v1 while lastAckId is v2.
+    // Canonicalize via messageStore to resolve to same-format before comparing.
+    const isMentionAcked = async (item: StoredMessage): Promise<boolean> => {
+      if (!lastAckId) return false;
+      let ic = cursorFor(item);
+      // Canonicalize v1 cursors to v2 via visibility index lookup
+      if (!ic.startsWith('v2:') && messageStore.canonicalizeCursor) {
+        try {
+          ic = await messageStore.canonicalizeCursor(item.id, record.threadId);
+        } catch {
+          // Resolver failed (pruned message) — keep v1, indeterminate comparison below
         }
-        // F236 AC-A3: anchor-first — head+tail excerpt + requiresDrill, full body one hop away.
-        return anchorPendingMention(item, {
-          from: getSenderName(item.catId),
-          ...(shouldIncludeAcked ? { acked: Boolean(lastAckId && item.id <= lastAckId) } : {}),
-        });
-      }),
+      }
+      // #1200 Sol R5 P1-3: Distinguish true equality from cross-format indeterminate.
+      const cmp = compareCursors(ic, lastAckId);
+      return cmp < 0 || (cmp === 0 && ic === lastAckId);
+    };
+    const payload = {
+      mentions: await Promise.all(
+        mentions.map(async (item) => {
+          if (isMentionFullMode) {
+            // F236 Track-1 full mode: return complete mention content, no truncation
+            return {
+              id: item.id,
+              from: getSenderName(item.catId),
+              message: item.content,
+              timestamp: item.timestamp,
+              contentLength: item.content.length,
+              requiresDrill: false,
+              ...(shouldIncludeAcked ? { acked: await isMentionAcked(item) } : {}),
+            };
+          }
+          // F236 AC-A3: anchor-first — head+tail excerpt + requiresDrill, full body one hop away.
+          return anchorPendingMention(item, {
+            from: getSenderName(item.catId),
+            ...(shouldIncludeAcked ? { acked: await isMentionAcked(item) } : {}),
+          });
+        }),
+      ),
     };
     // F236 AC-A1 (R1/砚砚 P1): emit returnedChars for eval-layer payload-shrink accounting.
     const pendingMentionsReturnedChars = JSON.stringify(payload).length;
@@ -2843,9 +2906,21 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
 
     // Validation 3: monotonic (noop if backwards)
+    // #1200 §8.7 migration: canonicalize to v2 for visibility-ordered comparison.
+    // DeliveryCursorStore lex comparison is v2-safe (v2 always lex-exceeds v1).
+    const canonicalCursor = messageStore.canonicalizeCursor
+      ? await messageStore.canonicalizeCursor(upToMessageId, record.threadId)
+      : upToMessageId;
     const currentCursor = await deliveryCursorStore.getMentionAckCursor(record.userId, catId, record.threadId);
-    if (currentCursor && upToMessageId <= currentCursor) {
-      return { status: 'noop', reason: 'already acknowledged' };
+    // #1200 Sol R5 P1-3: use pair-domain comparison with indeterminate awareness.
+    // compareCursors returns 0 for both "truly equal" and "cross-format indeterminate".
+    // `<= 0` treats indeterminate as "already acked" — wrong (blocks legitimate ack).
+    // Fix: noop only on strict less-than OR true string equality.
+    if (currentCursor) {
+      const cmp = compareCursors(canonicalCursor, currentCursor);
+      if (cmp < 0 || (cmp === 0 && canonicalCursor === currentCursor)) {
+        return { status: 'noop', reason: 'already acknowledged' };
+      }
     }
 
     // Validation 4: window — upToMessageId must be within current pending window
@@ -2857,17 +2932,24 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       currentCursor,
     );
     if (pendingWindow.length > 0) {
-      const windowLastId = pendingWindow[pendingWindow.length - 1]?.id;
-      if (upToMessageId > windowLastId) {
-        reply.status(400);
-        return {
-          error: 'upToMessageId exceeds current pending window, ack only within fetched batch',
-          windowLastId,
-        };
+      const windowLastMsg = pendingWindow[pendingWindow.length - 1];
+      // Compare using canonicalized cursor (visibility position, not raw ID lex)
+      if (windowLastMsg) {
+        const windowLastCursor = messageStore.canonicalizeCursor
+          ? await messageStore.canonicalizeCursor(windowLastMsg.id, record.threadId)
+          : windowLastMsg.id;
+        // #1200 P2-3: use pair-domain comparison (both sides canonicalized)
+        if (compareCursors(canonicalCursor, windowLastCursor) > 0) {
+          reply.status(400);
+          return {
+            error: 'upToMessageId exceeds current pending window, ack only within fetched batch',
+            windowLastId: windowLastMsg.id,
+          };
+        }
       }
     }
 
-    await deliveryCursorStore.ackMentionCursor(record.userId, catId, record.threadId, upToMessageId);
+    await deliveryCursorStore.ackMentionCursor(record.userId, catId, record.threadId, canonicalCursor);
     return { status: 'ok', ackedUpTo: upToMessageId };
   });
 
@@ -3170,9 +3252,16 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // F254 Phase A (AC-A2): only contiguous reads can safely advance seen state.
     // Sparse reads (keyword/window/cat filter) may skip messages, so they must not ack queued bodies either.
     const isContiguousRead = !keyword && !messageId && !filterCatId;
+    const expectedParentInvocationId =
+      principal.kind === 'invocation' ? (principal.parentInvocationId ?? principal.invocationId) : undefined;
     const queuedFullEntries =
       isFullMode && isContiguousRead && principal.kind === 'invocation' && opts.invocationQueue
-        ? opts.invocationQueue.getQueuedBodyMessagesForCat(effectiveThreadId, principalUserId, principalCatId)
+        ? opts.invocationQueue.getQueuedBodyMessagesForCat(
+            effectiveThreadId,
+            principalUserId,
+            principalCatId,
+            expectedParentInvocationId,
+          )
         : [];
     if (queuedFullEntries.length > 0 && principal.kind === 'invocation' && opts.turnExecutionStore) {
       let exposureExecution: TurnExecutionRecord | null;
@@ -3186,7 +3275,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         reply.status(503);
         return { error: 'Turn execution ledger unavailable', code: 'TURN_EXECUTION_LEDGER_UNAVAILABLE' };
       }
-      const expectedParentInvocationId = principal.parentInvocationId ?? principal.invocationId;
       if (!exposureExecution) {
         reply.status(409);
         return { error: 'Turn execution not found', code: 'TURN_EXECUTION_NOT_FOUND' };
@@ -3327,25 +3415,144 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       modeSource,
       catId: principal.catId,
     });
-    // F254 Phase A (AC-A2): push seenCursor when cat reads thread messages.
-    // ONLY on contiguous reads (no keyword, no around-message window, no catId filter).
-    // Sparse reads (keyword filter, messageId window, catId subset) return non-contiguous
-    // subsets — advancing cursor to the last result would mark skipped messages as "seen"
-    // and suppress future freshness holds for messages the cat never read (gpt52 R1-P1-2, R2-P1-2).
-    if (deliveryCursorStore && filtered.length > 0 && principal.kind === 'invocation' && isContiguousRead) {
-      const latestSeen = filtered[filtered.length - 1];
+    // #1200 Sol R3: visibility-domain seenCursor advancement.
+    //
+    // F254 AC-A2: seenCursor must advance when cat reads via thread-context.
+    // Disabling it causes repeated freshness hold/reinvoke — it's a regression.
+    //
+    // Safety: time-domain pages from getByThreadBefore are NOT visibility-contiguous.
+    // Late-delivered Q may have older timestamp but higher visibilitySeq. With limit=N,
+    // the page can skip Q (returning [C,D], missing Q/101 between them).
+    //
+    // Sol R3 P1-1: post-hoc contiguous check on time-domain pages is fundamentally
+    // flawed — invisible messages (deleted/briefing/whisper) create permanent gaps.
+    // Fix: do a separate VISIBILITY-DOMAIN read via getByThreadAfter, then walk through
+    // results checking whether each freshness-relevant message was in the cat's page.
+    // Skip freshness-irrelevant messages (deleted, briefing, invisible whispers) —
+    // these don't trigger the freshness gate, so advancing past them is safe.
+    //
+    // #1200 Sol R2: seenCursor re-enabled with visibility-contiguous advance.
+    // computeVisibilityContiguousAdvance walks through returned messages in
+    // visibilitySeq order, advancing ONLY through a contiguous run from the
+    // current cursor. Gaps stop the advance — no false "seen" claims.
+    // Only advance on plain thread reads (no keyword filter, no messageId window).
+    if (deliveryCursorStore && !keyword && !messageId) {
       try {
-        await deliveryCursorStore.ackSeenCursor(
+        const currentSeen = await deliveryCursorStore.getSeenCursor(
           principalUserId,
-          principalCatId as CatId,
+          createCatId(principalCatId),
           effectiveThreadId,
-          latestSeen.id,
         );
+
+        // Build set of message IDs the cat actually saw in this time-domain page
+        const seenIds = new Set(filtered.map((m) => m.id));
+
+        // #1200 P1-2: Pass full cursor token to getByThreadAfter, not extracted ID.
+        // getByThreadAfter natively handles v2 tokens (extracts seq from token),
+        // so v2 cursors work even when the anchor message hash is pruned.
+        // Passing only parseCursor(currentSeen)?.id loses the seq and forces
+        // a message hash lookup that fails on pruned anchors → scan from origin.
+        const chunkSize = Math.max(filtered.length, 50);
+
+        // Freshness relevance filter — mirrors the freshness gate's messageFilter
+        // (route-helpers.ts:743-757). Must match EXACTLY to avoid false-hold.
+        // Messages that don't pass this filter are NOT counted as "unseen" by the
+        // freshness gate, so advancing the seenCursor past them is safe.
+        const isFreshnessRelevant = (msg: Awaited<ReturnType<typeof messageStore.getByThread>>[number]): boolean => {
+          if (msg.deletedAt) return false;
+          if (!isDelivered(msg)) return false;
+          // #1200 codex R10 P1: system-generated messages (persisted error badges)
+          // are display-only — route-helpers.ts:744-745 excludes them from freshness.
+          // Without this, system badges between cursor and real messages stall the scan.
+          if (msg.userId === 'system') return false;
+          if (msg.origin === 'briefing') return false;
+          // #1200 P1-2: Exclude self messages — freshness gate excludes self
+          // (route-helpers.ts:750-752). Without this, a self message not in the
+          // current page causes STOP, permanently stalling the cursor.
+          // F052: exempt cross-posted messages (same catId from another thread).
+          if (!msg.extra?.crossPost && msg.catId !== null && msg.catId === principalCatId) return false;
+          if (needsPlayFilter) {
+            if (!canViewMessage(msg, viewer)) return false;
+            const isOtherCat = msg.catId && msg.catId !== principalCatId;
+            if (isOtherCat && msg.origin === 'stream') return false;
+          }
+          return true;
+        };
+
+        // #1200 Sol R6 P1-2: Target-bounded visibility scan.
+        // Scan until we pass the cat's maximum read position (maxSeenPosition),
+        // or hit an unseen freshness-relevant message. The target position is
+        // the CORRECTNESS bound — arbitrary total-count caps truncate semantics
+        // (501 self messages + 1 external → cap at 500 = permanent false hold).
+        // Safety cap only applies when no target position (pre-migration data
+        // where all visibilitySeq are null → maxSeenPosition = 0).
+        const maxSeenPosition = filtered.reduce((max, m) => {
+          const seq = m.visibilitySeq;
+          return seq != null && seq > max ? seq : max;
+        }, 0);
+
+        let advanceTo: { id: string; visibilitySeq?: number } | null = null;
+        let scanAfter: string | undefined = currentSeen ?? undefined;
+        let foundStop = false;
+        // Safety cap: ONLY for pre-migration (no target position). With a target,
+        // the scan is bounded by maxSeenPosition (terminates in finite time).
+        const maxScanFallback = 500;
+        let scannedTotal = 0;
+
+        while (!foundStop) {
+          // Pre-migration safety cap: when no target position, limit total scan
+          if (maxSeenPosition === 0 && scannedTotal >= maxScanFallback) break;
+          const visWindow = await messageStore.getByThreadAfter(
+            effectiveThreadId,
+            scanAfter,
+            chunkSize,
+            principalUserId,
+          );
+          if (visWindow.length === 0) break;
+          scannedTotal += visWindow.length;
+
+          for (const msg of visWindow) {
+            if (!isFreshnessRelevant(msg)) {
+              // Not counted by freshness gate → safe to advance past
+              advanceTo = msg;
+              continue;
+            }
+            if (seenIds.has(msg.id)) {
+              // Freshness-relevant AND cat saw it in this read → safe to advance
+              advanceTo = msg;
+              continue;
+            }
+            // Freshness-relevant but NOT in current page → cat hasn't seen it → STOP
+            foundStop = true;
+            break;
+          }
+
+          if (!foundStop && visWindow.length > 0) {
+            const lastMsg = visWindow[visWindow.length - 1]!;
+            scanAfter = cursorFor(lastMsg);
+            // Target-bounded: stop scanning once we've passed the cat's
+            // maximum read position — no more page messages to match beyond here.
+            const lastSeq = lastMsg.visibilitySeq;
+            if (maxSeenPosition > 0 && lastSeq != null && lastSeq >= maxSeenPosition) {
+              break;
+            }
+          }
+        }
+
+        if (advanceTo?.visibilitySeq != null) {
+          await deliveryCursorStore.ackSeenCursor(
+            principalUserId,
+            createCatId(principalCatId),
+            effectiveThreadId,
+            cursorFor(advanceTo),
+          );
+        }
       } catch (err) {
-        // Fail-open: don't block thread-context on seenCursor push failure
+        // Fail-open: seenCursor advancement is best-effort. If it fails,
+        // the freshness gate may re-hold but no data is lost.
         app.log.warn(
           { err, catId: principalCatId, threadId: effectiveThreadId },
-          '[F254] seenCursor push failed in thread-context',
+          '[#1200] seenCursor visibility-domain advance failed, fail-open',
         );
       }
     }
@@ -4979,6 +5186,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       const messageFilter = (msg: Record<string, unknown>): boolean => {
         if (msg.deletedAt) return false;
         if (!isDelivered(msg as unknown as Parameters<typeof isDelivered>[0])) return false;
+        // #1200 codex R11 P1: system-generated messages (persisted error badges)
+        // are display-only — route-helpers.ts:744-745 excludes them from freshness.
+        if (msg.userId === 'system') return false;
         if (msg.origin === 'briefing') return false;
         if (needsPlayFilter) {
           if (!canViewMessage(msg as unknown as Parameters<typeof canViewMessage>[0], freshnessViewer)) return false;
@@ -5009,6 +5219,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           principal.threadId,
           principal.userId,
           principal.catId,
+          { parentInvocationId: principal.parentInvocationId ?? principal.invocationId },
         );
         let changed = false;
         const reminderInvocationId = principal.parentInvocationId ?? principal.invocationId;
@@ -5103,11 +5314,19 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         ? await deliveryCursorStore.getSeenCursor(principal.userId, principal.catId, principal.threadId)
         : undefined;
 
+      // #1200 Sol R7: pass canonicalizeCursor so legacy events (v1 maxMessageId,
+      // no maxCursor) get resolved via messageStore lookup — same resolver as
+      // createFreshnessReinvokeCheck. Both consumers now share the same path.
+      const canonicalize = messageStore.canonicalizeCursor
+        ? (msgId: string, tid: string) => Promise.resolve(messageStore.canonicalizeCursor!(msgId, tid))
+        : undefined;
+
       const reminder = await service.checkHoldBallReminder({
         invocationId: principal.invocationId,
         threadId: principal.threadId,
         catId: principal.catId,
         currentSeenCursor: currentSeenCursor ?? null,
+        canonicalizeCursor: canonicalize,
       });
 
       return { reminder };

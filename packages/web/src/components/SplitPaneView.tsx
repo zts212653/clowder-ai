@@ -1,5 +1,6 @@
 'use client';
 
+import type { MessageWorkDisposition } from '@cat-cafe/shared';
 import { useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { UploadStatus, WhisperOptions } from '@/hooks/useSendMessage';
@@ -18,7 +19,8 @@ interface SplitPaneViewProps {
     whisper?: WhisperOptions,
     deliveryMode?: DeliveryMode,
     replyToId?: string,
-  ) => void;
+    messageDisposition?: MessageWorkDisposition,
+  ) => void | boolean | Promise<void | boolean>;
   onStop: (overrideThreadId?: string) => void;
   uploadStatus?: UploadStatus;
   uploadError?: string | null;
@@ -156,8 +158,16 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
             <ChatInput
               key={splitPaneTargetId ?? 'no-target'}
               threadId={splitPaneTargetId ?? undefined}
-              onSend={(content, images, whisper, deliveryMode, replyToId) =>
-                onSend(content, images, splitPaneTargetId ?? undefined, whisper, deliveryMode, replyToId)
+              onSend={(content, images, whisper, deliveryMode, replyToId, messageDisposition) =>
+                onSend(
+                  content,
+                  images,
+                  splitPaneTargetId ?? undefined,
+                  whisper,
+                  deliveryMode,
+                  replyToId,
+                  messageDisposition,
+                )
               }
               onStop={() => onStop(splitPaneTargetId ?? undefined)}
               disabled={!splitPaneTargetId}

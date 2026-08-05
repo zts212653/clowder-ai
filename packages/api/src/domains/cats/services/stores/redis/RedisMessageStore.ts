@@ -15,9 +15,11 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import { cursorFor, parseCursor } from '../cursor.js';
 import type {
   AppendMessageInput,
   BoundedThreadMessagePage,
+  HostMessageExtra,
   MarkCanceledResult,
   MarkDeliveredResult,
   MessageAppendListener,
@@ -26,6 +28,7 @@ import type {
   QueueCustodyTransitionResult,
   QueuedMessageCustody,
   StoredMessage,
+  StoredPluginMessage,
   StreamMetadataAugmentInput,
   ThreadFrontierAppendResult,
   ThreadMessageReadOptions,
@@ -35,13 +38,20 @@ import type {
 } from '../ports/MessageStore.js';
 import {
   applyStreamMetadataAugment,
+  assertValidAppendDeliveryMetadata,
   assertValidStoredMessageTimestamp,
   DEFAULT_THREAD_ID,
+  generateSortableId,
   isDelivered,
 } from '../ports/MessageStore.js';
 import { assertQueueCustodyMessageBinding, assertQueueCustodyTransition } from '../ports/queued-message-custody.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
-import { isSystemUserMessage, resolveDeliveryTimelineScore, resolveThreadMessageVisibility } from '../visibility.js';
+import {
+  isSystemUserMessage,
+  isTimelinePublished,
+  resolveDeliveryTimelineScore,
+  resolveThreadMessageVisibility,
+} from '../visibility.js';
 import { appendMessage } from './redis-message-append.js';
 import { CANCEL_LUA, DELIVER_LUA, REASSIGN_LUA } from './redis-message-delivery-lua-scripts.js';
 import {
@@ -54,11 +64,19 @@ import {
   safeParseExtra,
   safeParseMentions,
   safeParseMetadata,
+  safeParsePluginMessage,
   safeParseQueueCustody,
   safeParseToolEvents,
   serializeExtra,
 } from './redis-message-parsers.js';
 import { projectRedisUnreadSummaries } from './redis-unread-summary-projection.js';
+import {
+  APPEND_WITH_VISIBILITY_LUA,
+  CANCEL_WITH_VISIBILITY_LUA,
+  DELIVER_WITH_VISIBILITY_LUA,
+  ENSURE_VISIBILITY_MIGRATED_LUA,
+  MAX_BACKFILL_MEMBERS,
+} from './redis-visibility-lua-scripts.js';
 
 const log = createModuleLogger('redis-message-store');
 
@@ -111,16 +129,116 @@ if redis.call('HGET', KEYS[1], 'deliveryStatus') ~= 'queued' then
   return {-2, currentRevision}
 end
 local nextRevision = tonumber(ARGV[3])
+
+-- #1269 R8 P1-3: pre-mutation guard — compute visibilitySeq BEFORE any HSET/ZADD.
+-- redis.error_reply() does NOT rollback prior writes, so all validation must
+-- precede all mutations. Previously custody HSET was before HWM validation,
+-- meaning a corrupt HWM would leave custody already mutated.
+local seq = nil
+local kp = ARGV[6]
+local threadId = nil
+if ARGV[4] ~= '' then
+  threadId = redis.call('HGET', KEYS[1], 'threadId')
+  local existingVis = redis.call('HGET', KEYS[1], 'visibilitySeq')
+  if existingVis == false and threadId then
+    local metaKey = kp .. 'msg:visibility-meta:' .. threadId
+    local hwmRaw = redis.call('HGET', metaKey, 'hwm')
+    local hwm = 0
+    if hwmRaw ~= false then
+      hwm = tonumber(hwmRaw)
+      if hwm == nil then
+        return redis.error_reply('VISIBILITY_HWM_UNPARSEABLE: raw=' .. tostring(hwmRaw) .. ' metaKey=' .. metaKey)
+      end
+      if hwm ~= hwm then
+        return redis.error_reply('VISIBILITY_HWM_NAN: metaKey=' .. metaKey)
+      end
+      if hwm ~= math.floor(hwm) or hwm < 0 then
+        return redis.error_reply('VISIBILITY_HWM_INVALID: hwm=' .. tostring(hwm) .. ' metaKey=' .. metaKey)
+      end
+    end
+    local t = redis.call('TIME')
+    local now_ms = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+    seq = math.max(hwm + 1, now_ms)
+    if seq > 9007199254730991 then
+      return redis.error_reply('VISIBILITY_SEQ_EXHAUSTED: seq=' .. tostring(seq))
+    end
+  end
+end
+
+-- All validation passed — write mutations atomically
 redis.call('HSET', KEYS[1], 'queueCustody', ARGV[2], 'queueCustodyRevision', ARGV[3])
+
 if ARGV[4] ~= '' then
   redis.call('HSET', KEYS[1], 'deliveredAt', ARGV[4], 'timelineOrderAt', ARGV[5], 'deliveryStatus', 'delivered')
   redis.call('ZADD', KEYS[2], ARGV[5], messageId)
   redis.call('ZADD', KEYS[3], ARGV[5], messageId)
   redis.call('ZADD', KEYS[4], ARGV[5], messageId)
+
+  if seq then
+    local visKey = kp .. 'msg:visibility:' .. threadId
+    local metaKey = kp .. 'msg:visibility-meta:' .. threadId
+    redis.call('ZADD', visKey, seq, messageId)
+    redis.call('HSET', metaKey, 'hwm', tostring(seq))
+    redis.call('HSETNX', metaKey, 'migrated', '1')
+    redis.call('HSET', KEYS[1], 'visibilitySeq', tostring(seq))
+  end
+
   return {2, nextRevision}
 end
 return {1, nextRevision}
 `;
+
+const UPDATE_PLUGIN_MESSAGE_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+local current = nil
+local raw = redis.call('HGET', KEYS[1], 'pluginMessage')
+if raw and raw ~= '' then
+  local ok, decoded = pcall(cjson.decode, raw)
+  if ok then current = decoded end
+else
+  local legacyRaw = redis.call('HGET', KEYS[1], 'extra')
+  if legacyRaw and legacyRaw ~= '' then
+    local ok, decoded = pcall(cjson.decode, legacyRaw)
+    if ok then current = decoded.pluginMessage end
+  end
+end
+if not current or tonumber(current.revision) ~= tonumber(ARGV[2]) then return -1 end
+redis.call('HSET', KEYS[1], 'pluginMessage', ARGV[1])
+return 1
+`;
+
+function splitMessageExtra(extra: StoredMessage['extra'] | undefined): {
+  hostExtra: HostMessageExtra;
+  pluginMessage: StoredPluginMessage | undefined;
+} {
+  const { pluginMessage, ...hostExtra } = extra ?? {};
+  return { hostExtra, pluginMessage };
+}
+
+function serializeHostExtra(extra: StoredMessage['extra'] | undefined): string {
+  const { hostExtra } = splitMessageExtra(extra);
+  return Object.keys(hostExtra).length > 0 ? serializeExtra(hostExtra) : '';
+}
+
+function hydrateExtra(rawExtra: string | undefined, rawPluginMessage: string | undefined): StoredMessage['extra'] {
+  const parsedExtra = safeParseExtra(rawExtra);
+  const { hostExtra, pluginMessage: legacyPluginMessage } = splitMessageExtra(parsedExtra);
+  // Once the independent field exists it is authoritative, including when
+  // malformed (fail-closed); fall back only for pre-F288 embedded records.
+  if (rawPluginMessage === undefined) {
+    // Pre-F288 path: no independent field, fall back to legacy embedded record.
+    if (Object.keys(hostExtra).length === 0 && legacyPluginMessage === undefined) return undefined;
+    return { ...hostExtra, ...(legacyPluginMessage ? { pluginMessage: legacyPluginMessage } : {}) };
+  }
+  // F288 path: independent field exists. Preserve it even when invalid so
+  // projectEnvelope enters the plugin branch and fail-closes (codex P1 fix).
+  const pluginMessage = safeParsePluginMessage(rawPluginMessage);
+  // When pluginMessage parsed to undefined (malformed), keep an invalid marker
+  // object so `extra.pluginMessage !== undefined` remains true — projectEnvelope
+  // will detect the malformed payload via readPluginMessageExtra and return null.
+  const pluginValue = pluginMessage ?? ({} as StoredPluginMessage);
+  return { ...hostExtra, pluginMessage: pluginValue };
+}
 
 export class RedisMessageStore {
   private readonly redis: RedisClient;
@@ -158,13 +276,142 @@ export class RedisMessageStore {
   }
 
   async append(msg: AppendMessageInput): Promise<StoredMessage> {
-    return appendMessage({
-      redis: this.redis,
-      message: msg,
-      ttlSeconds: this.ttlSeconds,
-      loadById: (messageId) => this.getById(messageId),
-      ...(this.onAppend ? { onAppend: this.onAppend } : {}),
-    });
+    assertValidAppendDeliveryMetadata(msg);
+    assertValidStoredMessageTimestamp(msg.timestamp);
+    const threadId = msg.threadId ?? DEFAULT_THREAD_ID;
+    const idempotencyIndexKey = msg.idempotencyKey
+      ? MessageKeys.idempotency(msg.userId, threadId, msg.idempotencyKey)
+      : null;
+
+    // Keep the common replay path ahead of ID generation; the Lua check below
+    // remains the authoritative claim for concurrent callers.
+    if (idempotencyIndexKey) {
+      const existingId = await this.redis.get(idempotencyIndexKey);
+      if (existingId) {
+        const existingMessage = await this.getById(existingId);
+        if (existingMessage) {
+          return existingMessage;
+        }
+      }
+      // Stale reference: do NOT delete here (avoids a check-then-act race).
+      // APPEND_WITH_VISIBILITY_LUA will reclaim it atomically (#1210).
+    }
+
+    const id = generateSortableId(msg.timestamp);
+    const { idempotencyKey, ...payload } = msg;
+    void idempotencyKey;
+    const stored: StoredMessage = { ...payload, id, threadId };
+    const score = msg.timestamp;
+    const hashKey = MessageKeys.detail(id);
+
+    // Build hash fields as flat key-value pairs for the Lua HSET
+    const hashFields: string[] = [
+      'id',
+      id,
+      'threadId',
+      threadId,
+      'userId',
+      msg.userId,
+      'catId',
+      msg.catId ?? '',
+      'content',
+      msg.content,
+      'contentBlocks',
+      msg.contentBlocks ? JSON.stringify(msg.contentBlocks) : '',
+      'toolEvents',
+      msg.toolEvents ? JSON.stringify(msg.toolEvents) : '',
+      'metadata',
+      msg.metadata ? JSON.stringify(msg.metadata) : '',
+      'extra',
+      msg.extra ? serializeExtra(msg.extra) : '',
+      'mentions',
+      JSON.stringify(msg.mentions),
+      'timestamp',
+      String(msg.timestamp),
+    ];
+    if (msg.thinking) hashFields.push('thinking', msg.thinking);
+    if (msg.origin) hashFields.push('origin', msg.origin);
+    if (msg.visibility) hashFields.push('visibility', msg.visibility);
+    if (msg.whisperTo) hashFields.push('whisperTo', JSON.stringify(msg.whisperTo));
+    if (msg.source) hashFields.push('source', JSON.stringify(msg.source));
+    if (msg.mentionsUser) hashFields.push('mentionsUser', '1');
+    if (msg.deliveryStatus) hashFields.push('deliveryStatus', msg.deliveryStatus);
+    // #1269 P1-1: restore queueCustody serialization that createStoredMessageData() provided.
+    // Without these, F254 custody CAS operations fail on messages appended with initial custody.
+    if (msg.queueCustody) {
+      hashFields.push('queueCustody', JSON.stringify(msg.queueCustody));
+      hashFields.push('queueCustodyRevision', String(msg.queueCustody.revision));
+    }
+    if (msg.replyTo) hashFields.push('replyTo', msg.replyTo);
+
+    // Mention catIds for ZADD into per-cat mention sets
+    const mentionCatIds = msg.mentions as readonly string[];
+    const ttlSec = this.ttlSeconds ?? 0;
+
+    // Shape (a) atomic append: all data writes + visibility writes + idempotency
+    // in one Lua linearization point. Combines #1200 visibility and #1210 atomic
+    // idempotency. See §8.6 of 1200-cursor-order-analysis.md.
+    //
+    // ARGV layout: kp, id, threadId, score, userId, isQueued, ttlSeconds,
+    //   idemKeyRaw, mentionCount, ...mentionCatIds, hashFieldPairCount, ...hashFieldPairs
+    const argv: (string | number)[] = [
+      this.keyPrefix, // [1] keyPrefix
+      id, // [2] msgId
+      threadId, // [3] threadId
+      String(score), // [4] score
+      msg.userId, // [5] userId
+      // #1269: timeline-published queued cat speech gets visibilitySeq at append
+      msg.deliveryStatus === 'queued' && !isTimelinePublished(stored) ? '1' : '', // [6] isQueued
+      String(ttlSec), // [7] ttlSeconds
+      idempotencyIndexKey ?? '', // [8] idemKeyRaw ('' if none)
+      String(mentionCatIds.length), // [9] mentionCount
+      ...mentionCatIds, // [10..9+N] mention catIds
+      String(hashFields.length / 2), // [10+N] hashFieldPairCount
+      ...hashFields, // [11+N..] hash field pairs
+    ];
+
+    // #1200/#1269: ensure visibility migration is complete BEFORE the append.
+    // Timeline-published messages (delivered + queued cat speech) need the index.
+    // Lua marks the thread as migrated via HSETNX. Without this, the first
+    // post-deploy append to a legacy thread would skip backfilling legacy members.
+    if (isTimelinePublished(stored)) {
+      await this.ensureVisibilityMigrated(threadId);
+    }
+
+    // Lua returns:
+    // - string (existing msgId) → idempotency replay, return existing message
+    // - number (visibilitySeq) → new message created, seq > 0 for non-queued
+    const result = await this.redis.eval(APPEND_WITH_VISIBILITY_LUA, 1, hashKey, ...argv);
+
+    // #1210 idempotency: if Lua returned a string, a concurrent caller won.
+    if (typeof result === 'string' && result !== String(0)) {
+      const existingMessage = await this.getById(result);
+      if (existingMessage) {
+        return existingMessage;
+      }
+      // The concurrent winner's hash vanished (deleteByThread / TTL) between the
+      // Lua claim and this hydration. Do not fall through to the created path,
+      // which would fire onAppend for a message that was never persisted.
+      throw new Error(`Idempotency winner ${result} for key ${idempotencyKey} vanished before hydration`);
+    }
+
+    // #1200 P2-6: Lua returns allocated visibilitySeq (number) or 0 for queued.
+    // Inject into returned message so callers get canonical position without re-read.
+    const seq = typeof result === 'number' ? result : Number(result);
+    if (seq > 0) {
+      stored.visibilitySeq = seq;
+    }
+
+    // F102 KD-34: fire-and-forget append listener for thread index updates
+    if (this.onAppend) {
+      try {
+        void Promise.resolve(this.onAppend(stored)).catch(() => {});
+      } catch {
+        /* best-effort */
+      }
+    }
+
+    return stored;
   }
 
   async getLatestThreadMessageIdIncludingQueued(threadId: string): Promise<string | null> {
@@ -216,7 +463,7 @@ export class RedisMessageStore {
     const contentBlocks = safeParseContentBlocks(data.contentBlocks);
     const toolEvents = safeParseToolEvents(data.toolEvents);
     const parsedMetadata = safeParseMetadata(data.metadata);
-    const parsedExtra = safeParseExtra(data.extra);
+    const parsedExtra = hydrateExtra(data.extra, data.pluginMessage);
     const parsedSource = safeParseConnectorSource(data.source);
     const parsedQueueCustody = safeParseQueueCustody(data.queueCustody);
     const deletedAt = data.deletedAt ? parseInt(data.deletedAt, 10) : undefined;
@@ -248,6 +495,7 @@ export class RedisMessageStore {
       ...(parsedSource ? { source: parsedSource } : {}),
       ...(data.mentionsUser === '1' ? { mentionsUser: true } : {}),
       ...(data.replyTo ? { replyTo: data.replyTo } : {}),
+      ...(data.visibilitySeq ? { visibilitySeq: parseInt(data.visibilitySeq, 10) } : {}),
     };
   }
 
@@ -389,8 +637,10 @@ export class RedisMessageStore {
 
   /**
    * Get mentions for a cat, ascending (oldest first after cursor).
-   * When afterMessageId is provided, only returns mentions after that ID.
-   * Cursor fallback: if afterMessageId not in sorted set (TTL/delete), falls back to full scan (#77 R2 P2).
+   * #1200 §8.7 migration: scans INSIDE the visibility relation with match-counted
+   * discipline — chunks visibility ZSET until `limit` MENTION matches collected or
+   * thread exhausted. Accepts v1 + v2 cursors. Per-cat mentions ZSET is NOT used
+   * for cursor advance (remains a time-domain display/backfill surface).
    */
   async getMentionsFor(
     catId: CatId,
@@ -399,57 +649,121 @@ export class RedisMessageStore {
     threadId?: string,
     afterMessageId?: string,
   ): Promise<StoredMessage[]> {
+    if (!threadId) {
+      // Global mention query without threadId: fall back to mention ZSET scan.
+      // §8.7 audit: no cursor-advance call sites use the global path.
+      return this.getMentionsForLegacy(catId, limit, userId);
+    }
+    const n = limit ?? DEFAULT_LIMIT;
+    await this.ensureVisibilityMigrated(threadId);
+    const visKey = MessageKeys.threadVisibility(threadId);
+
+    // Parse cursor + resolve to visibility position (same as getByThreadAfter)
+    const cursor = parseCursor(afterMessageId);
+    let afterSeq: number | null = null;
+    let cursorId: string | null = null;
+
+    if (cursor) {
+      cursorId = cursor.id;
+      if (cursor.version === 2) {
+        afterSeq = cursor.seq;
+      } else {
+        const seqRaw = await this.redis.hget(MessageKeys.detail(cursor.id), 'visibilitySeq');
+        if (seqRaw) afterSeq = Number(seqRaw);
+        else {
+          const score = await this.redis.zscore(visKey, cursor.id);
+          if (score !== null) afterSeq = Number(score);
+        }
+      }
+    }
+
+    // Match-counted scan with mention predicate + soft-delete exclusion.
+    // #1200 Sol R2: hydrateAndFilter no longer filters deletedAt (tombstone-keep parity).
+    // Mention scan explicitly excludes deleted messages here.
+    const mentionFilter = (msg: StoredMessage) => !msg.deletedAt && msg.mentions.includes(catId);
+    const result: StoredMessage[] = [];
+    const staleIds: string[] = [];
+
+    // #1269: mention scans use isTimelinePublished — timeline-published cat speech
+    // is visible at append time (accepted contract: timeline-published = visible everywhere).
+    if (!cursor || afterSeq === null) {
+      await this.scanVisibilityChunked(
+        visKey,
+        '-inf',
+        '+inf',
+        n,
+        userId,
+        result,
+        staleIds,
+        isTimelinePublished,
+        mentionFilter,
+      );
+    } else {
+      const sameRaw = await this.redis.zrangebyscore(visKey, String(afterSeq), String(afterSeq));
+      const sameFiltered = sameRaw.filter((id) => id > cursorId!);
+      if (sameFiltered.length > 0) {
+        const sameScores = new Map(sameFiltered.map((id) => [id, afterSeq!]));
+        await this.hydrateAndFilter(
+          sameFiltered,
+          userId,
+          n,
+          result,
+          staleIds,
+          isTimelinePublished,
+          sameScores,
+          mentionFilter,
+        );
+      }
+      if (result.length < n) {
+        await this.scanVisibilityChunked(
+          visKey,
+          `(${afterSeq}`,
+          '+inf',
+          n,
+          userId,
+          result,
+          staleIds,
+          isTimelinePublished,
+          mentionFilter,
+        );
+      }
+    }
+
+    if (staleIds.length > 0) this.redis.zrem(visKey, ...staleIds).catch(() => {});
+    return result;
+  }
+
+  /** Legacy global mention scan (no threadId). Not used by cursor-advance paths. */
+  private async getMentionsForLegacy(catId: CatId, limit?: number, userId?: string): Promise<StoredMessage[]> {
     const n = limit ?? DEFAULT_LIMIT;
     const mentionKey = MessageKeys.mentions(catId);
 
-    // Cursor fallback: verify afterMessageId exists in the sorted set
-    let effectiveAfter = afterMessageId;
-    if (effectiveAfter) {
-      const rank = await this.redis.zrank(mentionKey, effectiveAfter);
-      if (rank === null) {
-        log.warn({ cursor: effectiveAfter, catId }, 'cursor not in mention set, falling back to full pending');
-        effectiveAfter = undefined;
-      }
-    }
-
-    // Ascending scan: collect oldest N mentions after cursor
+    // #1200 codex R5 P2: apply userId filtering (match getRecentMentionsFor behavior).
+    // Scan in chunks so filtered-out entries don't consume the limit.
     const CHUNK = 50;
-    const ids: string[] = [];
-    let startIndex = 0;
+    const eligible: string[] = [];
+    let offset = 0;
 
-    if (effectiveAfter) {
-      // Find the rank of afterMessageId and start scanning after it
-      const rank = await this.redis.zrank(mentionKey, effectiveAfter);
-      if (rank !== null) {
-        startIndex = rank + 1; // Start after the cursor
-      }
-    }
-
-    // Scan forward (ascending) in chunks
-    let offset = startIndex;
-    while (ids.length < n) {
+    while (eligible.length < n) {
       const chunk = await this.redis.zrange(mentionKey, offset, offset + CHUNK - 1);
       if (chunk.length === 0) break;
       for (const id of chunk) {
-        if (ids.length >= n) break;
-        // Extra safety: skip IDs <= afterMessageId (handles edge cases)
-        if (effectiveAfter && id <= effectiveAfter) continue;
+        if (eligible.length >= n) break;
         if (userId) {
           const score = await this.redis.zscore(MessageKeys.user(userId), id);
           if (score === null) continue;
         }
-        if (threadId) {
-          const score = await this.redis.zscore(MessageKeys.thread(threadId), id);
-          if (score === null) continue;
-        }
-        ids.push(id);
+        eligible.push(id);
       }
+      if (chunk.length < CHUNK) break;
       offset += CHUNK;
     }
 
-    if (ids.length === 0) return [];
-    const messages = await this.hydrateMessages(ids); // Already ascending
-    return messages.filter(isDelivered);
+    if (eligible.length === 0) return [];
+    const messages = await this.hydrateMessages(eligible);
+    // #1200 Sol R2: explicit deletedAt filter for mentions (hydrateAndFilter no longer filters)
+    // #1269: isTimelinePublished — timeline-published = visible everywhere.
+    return messages.filter((m) => isTimelinePublished(m) && !m.deletedAt).slice(0, n);
   }
 
   /**
@@ -489,7 +803,8 @@ export class RedisMessageStore {
 
     if (ids.length === 0) return [];
     const messages = await this.hydrateMessages(ids.reverse());
-    return messages.filter(isDelivered);
+    // #1269: isTimelinePublished — timeline-published = visible everywhere.
+    return messages.filter(isTimelinePublished);
   }
 
   async getBefore(timestamp: number, limit?: number, userId?: string, beforeId?: string): Promise<StoredMessage[]> {
@@ -567,6 +882,11 @@ export class RedisMessageStore {
    * Get messages in a thread after a cursor ID (exclusive), oldest first.
    * If afterId is undefined, returns from thread start.
    * If limit is undefined, returns all matches.
+   *
+   * #1200 rewrite: reads from the visibility index (not the thread ZSET).
+   * §8.10 steps 4+5: ensureVisibilityMigrated → parseCursor → resolve/direct →
+   * WITHSCORES → hydrate → filter-then-limit → visibilitySeq injection.
+   * Lazy null-ZREM for stale members.
    */
   async getByThreadAfter(
     threadId: string,
@@ -575,72 +895,81 @@ export class RedisMessageStore {
     userId?: string,
     options?: ThreadMessageReadOptions,
   ): Promise<StoredMessage[]> {
-    const key = MessageKeys.thread(threadId);
-    const isVisible = resolveThreadMessageVisibility(options);
-    const bounded = Number.isFinite(limit) && (limit as number) > 0;
-    const maxResults = bounded ? Math.max(1, Math.floor(limit as number)) : Number.MAX_SAFE_INTEGER;
-    const chunkSize = bounded ? Math.min(Math.max(maxResults, 50), 500) : 100;
+    // 1. Ensure visibility index is migrated (lazy one-time backfill)
+    await this.ensureVisibilityMigrated(threadId);
 
-    if (!afterId && bounded) {
-      const visible: StoredMessage[] = [];
-      let offset = 0;
-      while (visible.length < maxResults) {
-        const ids = await this.redis.zrange(key, offset, offset + chunkSize - 1);
-        if (ids.length === 0) break;
-        const messages = await this.hydrateMessages(ids, { includeDeleted: true });
-        for (const message of messages) {
-          if (!isVisible(message)) continue;
-          if (userId && message.userId !== userId && !isSystemUserMessage(message)) continue;
-          visible.push(message);
-          if (visible.length >= maxResults) break;
-        }
-        if (ids.length < chunkSize) break;
-        offset += ids.length;
-      }
-      return visible;
-    }
+    const visKey = MessageKeys.threadVisibility(threadId);
 
-    let ids: string[];
-    if (!afterId) {
-      ids = await this.redis.zrange(key, 0, -1);
-    } else {
-      const afterScore = await this.redis.zscore(key, afterId);
-      if (afterScore === null) {
-        // Cursor message may have expired; fall back to lexicographic ID filtering.
-        ids = await this.redis.zrange(key, 0, -1);
-        ids = ids.filter((id) => id > afterId);
+    // 2. Parse cursor token (§8.3) + resolve to (seq, id) pair (§8.4)
+    const cursor = parseCursor(afterId);
+    let afterSeq: number | null = null;
+    let cursorId: string | null = null;
+
+    if (cursor) {
+      cursorId = cursor.id;
+      if (cursor.version === 2) {
+        // v2: seq is directly available — skip resolve round-trips
+        afterSeq = cursor.seq;
       } else {
-        // Split into two ranges to avoid filtering by ID across different
-        // scores — deliveredAt can shift a message's score forward while
-        // its ID still embeds the original send timestamp.
-        // 1) Same score as cursor: use ID as tiebreaker
-        const sameScore = await this.redis.zrangebyscore(key, afterScore, afterScore);
-        const sameFiltered = sameScore.filter((id) => id !== afterId && id > afterId);
-        // 2) Strictly higher scores: include all (no ID filter needed)
-        const higherScore = await this.redis.zrangebyscore(key, `(${afterScore}`, '+inf');
-        ids = [...sameFiltered, ...higherScore];
+        // v1: lazy resolve (§8.4 three-step)
+        // Step 1: HGET visibilitySeq from message hash (cheapest)
+        const seqRaw = await this.redis.hget(MessageKeys.detail(cursor.id), 'visibilitySeq');
+        if (seqRaw) {
+          afterSeq = Number(seqRaw);
+        } else {
+          // Step 2: ZSCORE from visibility index (hash evicted but member exists)
+          const score = await this.redis.zscore(visKey, cursor.id);
+          if (score !== null) afterSeq = Number(score);
+          // Step 3: Both null = fully pruned → scan from start
+        }
       }
     }
 
-    if (ids.length === 0) return [];
+    // 3. Chunked WITHSCORES read from visibility ZSET: filter-then-limit
+    // #1269 R9 P1-1: caller-appropriate visibility predicate — respects
+    // includeQueuedCatMessages option (default: isDelivered only).
+    const isVisible = resolveThreadMessageVisibility(options);
+    const maxResults = limit && limit > 0 ? limit : Number.MAX_SAFE_INTEGER;
+    const result: StoredMessage[] = [];
+    const staleIds: string[] = [];
 
-    const visible: StoredMessage[] = [];
-
-    // Apply the public-message predicate before the caller's result limit.
-    // Otherwise one hidden queued row can consume the whole window and mask
-    // later published speech. ADR-008 D3 still requires cursor hydration to
-    // retain deleted tombstones, so callers can advance across them safely.
-    for (let offset = 0; offset < ids.length && visible.length < maxResults; offset += chunkSize) {
-      const messages = await this.hydrateMessages(ids.slice(offset, offset + chunkSize), { includeDeleted: true });
-      for (const message of messages) {
-        if (!isVisible(message)) continue;
-        if (userId && message.userId !== userId && !isSystemUserMessage(message)) continue;
-        visible.push(message);
-        if (visible.length >= maxResults) break;
+    if (!cursor || afterSeq === null) {
+      // No cursor or fully pruned: scan from start
+      await this.scanVisibilityChunked(visKey, '-inf', '+inf', maxResults, userId, result, staleIds, isVisible);
+    } else {
+      // Same-score segment: IDs with same visibilitySeq, id > cursorId
+      const sameRaw = await this.redis.zrangebyscore(visKey, String(afterSeq), String(afterSeq));
+      const sameFiltered = sameRaw.filter((id) => id > cursorId!);
+      if (sameFiltered.length > 0) {
+        // All members share afterSeq — build score map for injection
+        const sameScores = new Map(sameFiltered.map((id) => [id, afterSeq!]));
+        await this.hydrateAndFilter(sameFiltered, userId, maxResults, result, staleIds, isVisible, sameScores);
+      }
+      // Strict segment: visibilitySeq > afterSeq (chunked)
+      // #1200 codex P2: pass maxResults (absolute total), not maxResults - result.length.
+      // scanVisibilityChunked's while loop uses `result.length < maxCollect` — result
+      // already contains items from the same-score segment, so passing the absolute
+      // target lets the shared accumulator stop at the right total.
+      if (result.length < maxResults) {
+        await this.scanVisibilityChunked(
+          visKey,
+          `(${afterSeq}`,
+          '+inf',
+          maxResults,
+          userId,
+          result,
+          staleIds,
+          isVisible,
+        );
       }
     }
 
-    return visible;
+    // 4. Lazy null-ZREM: clean stale visibility members (fire-and-forget)
+    if (staleIds.length > 0) {
+      this.redis.zrem(visKey, ...staleIds).catch(() => {});
+    }
+
+    return result;
   }
 
   async getUnreadSummaryProjection(
@@ -648,6 +977,215 @@ export class RedisMessageStore {
     userId: string,
   ): Promise<ThreadUnreadMessageProjection[]> {
     return projectRedisUnreadSummaries(this.redis, cursors, userId);
+  }
+
+  /**
+   * #1200 §8.7: Get the latest visible cursor for a thread.
+   *
+   * Reverse chunked scan of the visibility ZSET: ZREVRANGE WITHSCORES from the
+   * top, hydrate, apply the SAME filter chain as getByThreadAfter (tombstone-keep /
+   * null-skip / canceled-skip / isDelivered), return the FIRST live member.
+   *
+   * Returns {cursor: v2 token, messageId: raw ID} or null if no live messages.
+   * Used by public read-state routes (mark-all, read/latest) where time-latest ≠
+   * visibility-latest once late delivery exists.
+   */
+  async getLatestVisibleCursor(threadId: string): Promise<{ cursor: string; messageId: string } | null> {
+    await this.ensureVisibilityMigrated(threadId);
+    const visKey = MessageKeys.threadVisibility(threadId);
+    const CHUNK = 20;
+    const staleIds: string[] = [];
+    let offset = 0;
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const raw = await this.redis.zrevrange(visKey, offset, offset + CHUNK - 1, 'WITHSCORES');
+      if (raw.length === 0) break;
+
+      // Parse WITHSCORES pairs: [id, score, id, score, ...]
+      for (let i = 0; i < raw.length; i += 2) {
+        const id = raw[i]!;
+        const score = Number(raw[i + 1]);
+        const data = await this.redis.hgetall(MessageKeys.detail(id));
+        if (!data || !data.id) {
+          staleIds.push(id);
+          continue;
+        }
+        const msg = this.hydrateHash(data as Record<string, string>);
+        if (!msg) {
+          staleIds.push(id);
+          continue;
+        }
+        // #1269: include timeline-published queued cat speech (has visibilitySeq
+        // since append). Skip non-published and soft-deleted messages.
+        if (!isTimelinePublished(msg)) continue;
+        if (msg.deletedAt) continue;
+
+        // Found the latest visible message — build v2 cursor
+        // Lazy null-ZREM for stale members encountered before this one
+        if (staleIds.length > 0) {
+          this.redis.zrem(visKey, ...staleIds).catch(() => {});
+        }
+        return {
+          cursor: cursorFor({ id: msg.id, visibilitySeq: score }),
+          messageId: msg.id,
+        };
+      }
+
+      offset += CHUNK;
+    }
+
+    // No live messages found — clean stale members
+    if (staleIds.length > 0) {
+      this.redis.zrem(visKey, ...staleIds).catch(() => {});
+    }
+    return null;
+  }
+
+  /** #1200: Canonicalize a raw message ID to a v2 cursor token. */
+  async canonicalizeCursor(messageId: string, threadId: string): Promise<string> {
+    await this.ensureVisibilityMigrated(threadId);
+    const score = await this.redis.zscore(MessageKeys.threadVisibility(threadId), messageId);
+    if (score == null) return messageId;
+    return cursorFor({ id: messageId, visibilitySeq: Number(score) });
+  }
+
+  /**
+   * #1200: Ensure the visibility index exists for a thread (lazy migration guard).
+   * Cheap no-op when already migrated (single HGET inside the Lua).
+   */
+  private async ensureVisibilityMigrated(threadId: string): Promise<void> {
+    const threadKey = MessageKeys.thread(threadId);
+    await this.redis.eval(
+      ENSURE_VISIBILITY_MIGRATED_LUA,
+      1,
+      threadKey,
+      this.keyPrefix,
+      threadId,
+      String(MAX_BACKFILL_MEMBERS),
+    );
+  }
+
+  /**
+   * #1200: Chunked scan of the visibility ZSET. Reads CHUNK members at a time,
+   * hydrates, filters (visibilityPredicate + userId), and collects into `result`.
+   * Stops when `maxCollect` published messages are collected or ZSET exhausted.
+   *
+   * #1269 R9 P1-1: visibilityPredicate is caller-supplied — getByThreadAfter
+   * passes resolveThreadMessageVisibility(options), mention scans pass
+   * isTimelinePublished. This keeps canonical position allocation independent
+   * from reader eligibility.
+   */
+  private async scanVisibilityChunked(
+    visKey: string,
+    minScore: string,
+    maxScore: string,
+    maxCollect: number,
+    userId: string | undefined,
+    result: StoredMessage[],
+    staleIds: string[],
+    visibilityPredicate: (msg: StoredMessage) => boolean,
+    extraFilter?: (msg: StoredMessage) => boolean,
+  ): Promise<void> {
+    const CHUNK = Math.max(maxCollect, 50);
+    let offset = 0;
+    while (result.length < maxCollect) {
+      // WITHSCORES: response is [id, score, id, score, ...] — binding by ID (§8.7 rev 4)
+      const raw = await this.redis.zrangebyscore(visKey, minScore, maxScore, 'WITHSCORES', 'LIMIT', offset, CHUNK);
+      if (raw.length === 0) break;
+
+      // Parse WITHSCORES pairs into ids + score map
+      const ids: string[] = [];
+      const scores = new Map<string, number>();
+      for (let i = 0; i < raw.length; i += 2) {
+        const id = raw[i]!;
+        const score = Number(raw[i + 1]);
+        ids.push(id);
+        scores.set(id, score);
+      }
+
+      // #1200 P1-B: NO lex-ID filtering. Score-range params handle positioning.
+      // #1200 codex P2: pass maxCollect directly — hydrateAndFilter checks
+      // result.length < maxCollect with the shared accumulator.
+      if (ids.length > 0) {
+        await this.hydrateAndFilter(
+          ids,
+          userId,
+          maxCollect,
+          result,
+          staleIds,
+          visibilityPredicate,
+          scores,
+          extraFilter,
+        );
+      }
+
+      if (ids.length < CHUNK) break;
+      offset += CHUNK;
+    }
+  }
+
+  /**
+   * #1200: Hydrate a batch of IDs + apply visibility filters.
+   * Collects up to `maxCollect` published messages into `result`.
+   * Null-hydrated IDs are added to `staleIds` for lazy ZREM.
+   *
+   * #1269 R9 P1-1: visibilityPredicate is caller-supplied so each reader
+   * applies its own publication filter (e.g. resolveThreadMessageVisibility
+   * for getByThreadAfter, isTimelinePublished for mention scans).
+   */
+  private async hydrateAndFilter(
+    ids: string[],
+    userId: string | undefined,
+    maxCollect: number,
+    result: StoredMessage[],
+    staleIds: string[],
+    visibilityPredicate: (msg: StoredMessage) => boolean,
+    scores?: Map<string, number>,
+    extraFilter?: (msg: StoredMessage) => boolean,
+  ): Promise<void> {
+    const pipeline = this.redis.multi();
+    for (const id of ids) {
+      pipeline.hgetall(MessageKeys.detail(id));
+    }
+    const rawResults = await pipeline.exec();
+    if (!rawResults) return;
+
+    for (let i = 0; i < rawResults.length && result.length < maxCollect; i++) {
+      const [err, data] = rawResults[i] ?? [null, null];
+      if (err || !data || typeof data !== 'object') {
+        staleIds.push(ids[i]!);
+        continue;
+      }
+      const d = data as Record<string, string>;
+      if (!d.id) {
+        staleIds.push(ids[i]!);
+        continue;
+      }
+
+      const msg = this.hydrateHash(d);
+      if (!msg) {
+        staleIds.push(ids[i]!);
+        continue;
+      }
+      // #1200 Sol R2 P2-5: tombstones (deletedAt) are KEPT per binding doc
+      // (tombstone-keep / null-skip / canceled-skip / visibilityPredicate). Parity with
+      // Memory store: both stores return tombstones in getByThreadAfter.
+      // #1269 R9 P1-1: caller-supplied visibilityPredicate replaces hardcoded filter.
+      // getByThreadAfter passes resolveThreadMessageVisibility(options) (option-aware);
+      // mention scans pass isTimelinePublished (always include published cat speech).
+      // Hidden queued work is excluded by all predicates.
+      if (!visibilityPredicate(msg)) continue;
+      if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
+      if (extraFilter && !extraFilter(msg)) continue;
+      // §8.7: Inject visibilitySeq from WITHSCORES (authoritative over hash field
+      // for backfilled legacy messages that lack the hash field). Binding by ID.
+      if (scores) {
+        const seq = scores.get(ids[i]!);
+        if (seq !== undefined) msg.visibilitySeq = seq;
+      }
+      result.push(msg);
+    }
   }
 
   async getByThreadBefore(
@@ -900,7 +1438,6 @@ export class RedisMessageStore {
 
     // Get all message IDs in this thread
     const ids = await this.redis.zrange(key, 0, -1);
-    if (ids.length === 0) return 0;
 
     const pipeline = this.redis.multi();
 
@@ -909,8 +1446,14 @@ export class RedisMessageStore {
       pipeline.del(MessageKeys.detail(id));
     }
 
-    // Delete the thread sorted set
+    // Delete the thread sorted set (even if empty — may still exist as empty key)
     pipeline.del(key);
+
+    // #1200: Delete visibility ZSET + metadata hash (these are permanent — no TTL).
+    // Must run even when ids.length === 0: a thread may have migrated metadata
+    // but no messages (e.g. after all messages were individually deleted).
+    pipeline.del(MessageKeys.threadVisibility(threadId));
+    pipeline.del(MessageKeys.threadVisibilityMeta(threadId));
 
     // Note: We don't clean up global timeline, user timeline, or mention sets
     // as those will auto-expire via TTL. Cleaning them would be O(n) expensive.
@@ -948,6 +1491,7 @@ export class RedisMessageStore {
       toolEvents: '',
       metadata: '',
       extra: '',
+      pluginMessage: '',
       thinking: '',
       mentions: '[]',
       deletedAt: String(now),
@@ -1002,13 +1546,36 @@ export class RedisMessageStore {
   }
 
   /** F096: Update message extra data (merge semantics — preserves existing fields). */
-  async updateExtra(id: string, extra: NonNullable<StoredMessage['extra']>): Promise<StoredMessage | null> {
+  async updateExtra(id: string, extra: HostMessageExtra): Promise<StoredMessage | null> {
     const msg = await this.getById(id);
     if (!msg) return null;
-    const merged = { ...msg.extra, ...extra };
-    await this.redis.hset(MessageKeys.detail(id), { extra: serializeExtra(merged) });
-    msg.extra = merged;
-    return msg;
+    const { hostExtra: current, pluginMessage } = splitMessageExtra(msg.extra);
+    const merged = { ...current, ...extra };
+    const pipeline = this.redis.multi();
+    pipeline.hset(MessageKeys.detail(id), { extra: serializeExtra(merged) });
+    // Lazy migration for a pre-F288 record whose plugin payload still lives in
+    // the legacy extra JSON. HSETNX cannot overwrite a concurrent newer write.
+    if (pluginMessage) {
+      pipeline.hsetnx(MessageKeys.detail(id), 'pluginMessage', JSON.stringify(pluginMessage));
+    }
+    await pipeline.exec();
+    return this.getById(id);
+  }
+
+  async updatePluginMessage(
+    id: string,
+    pluginMessage: StoredPluginMessage,
+    expectedRevision: number,
+  ): Promise<StoredMessage | null> {
+    const updated = await this.redis.eval(
+      UPDATE_PLUGIN_MESSAGE_LUA,
+      1,
+      MessageKeys.detail(id),
+      JSON.stringify(pluginMessage),
+      String(expectedRevision),
+    );
+    if (Number(updated) !== 1) return null;
+    return this.getById(id);
   }
 
   async augmentStreamMetadata(id: string, patch: StreamMetadataAugmentInput): Promise<StoredMessage | null> {
@@ -1021,11 +1588,17 @@ export class RedisMessageStore {
     if (patch.toolEvents?.length && augmented.toolEvents) fields.toolEvents = JSON.stringify(augmented.toolEvents);
     if (patch.replyTo && augmented.replyTo) fields.replyTo = augmented.replyTo;
     if (patch.mentionsUser && augmented.mentionsUser) fields.mentionsUser = '1';
-    if (patch.extra && augmented.extra) fields.extra = serializeExtra(augmented.extra);
+    const { pluginMessage } = splitMessageExtra(augmented.extra);
+    if (patch.extra && augmented.extra) fields.extra = serializeHostExtra(augmented.extra);
     if (Object.keys(fields).length > 0) {
-      await this.redis.hset(MessageKeys.detail(id), fields);
+      const pipeline = this.redis.multi();
+      pipeline.hset(MessageKeys.detail(id), fields);
+      if (pluginMessage) {
+        pipeline.hsetnx(MessageKeys.detail(id), 'pluginMessage', JSON.stringify(pluginMessage));
+      }
+      await pipeline.exec();
     }
-    return augmented;
+    return (await this.getById(id)) ?? augmented;
   }
 
   /**
@@ -1035,11 +1608,36 @@ export class RedisMessageStore {
   async markDelivered(id: string, deliveredAt: number): Promise<MarkDeliveredResult | null> {
     assertValidStoredMessageTimestamp(deliveredAt);
     const hashKey = MessageKeys.detail(id);
-    const raw = await this.redis.eval(DELIVER_LUA, 1, hashKey, id, String(deliveredAt), this.keyPrefix);
-    const { outcome, message } = this.parseLuaTransitionResult(raw);
-    if (outcome === -1) return null;
+
+    // #1200 codex P1: ensure visibility migration before DELIVER Lua marks migrated.
+    // We need threadId for ensureVisibilityMigrated — get it from the hash.
+    // The extra HGET is acceptable: delivery is a one-time operation per message.
+    const threadId = await this.redis.hget(hashKey, 'threadId');
+    if (threadId) {
+      await this.ensureVisibilityMigrated(threadId);
+    }
+
+    // Atomic CAS: queued → delivered + visibilitySeq allocation.
+    // #1200: DELIVER_WITH_VISIBILITY_LUA extends the original to atomically allocate
+    // a visibilitySeq and ZADD into the visibility index upon delivery.
+    // Lua returns HGETALL on CAS win (no separate getById round-trip needed).
+    const result = await this.redis.eval(
+      DELIVER_WITH_VISIBILITY_LUA,
+      1,
+      hashKey,
+      id,
+      String(deliveredAt),
+      this.keyPrefix,
+    );
+    if (result === 0) {
+      // CAS no-op: message was not queued (already delivered or not found)
+      const existing = await this.getById(id);
+      if (!existing) return null;
+      return { ...existing, deliveryTransitioned: false };
+    }
+    const message = this.parseLuaHgetall(result);
     if (!message) throw new Error(`Redis delivery transition lost canonical message: ${id}`);
-    return { ...message, deliveryTransitioned: outcome === 1 };
+    return { ...message, deliveryTransitioned: true };
   }
 
   async initializeQueueCustody(id: string, custody: QueuedMessageCustody): Promise<QueueCustodyInitializeResult> {
@@ -1076,6 +1674,12 @@ export class RedisMessageStore {
     const timelineScore =
       input.deliveredAt === undefined ? undefined : resolveDeliveryTimelineScore(current, input.deliveredAt);
 
+    // #1269 P1-2: ensure visibility migration before delivery (same as markDelivered).
+    // Custody transitions without delivery skip this (no visibility allocation needed).
+    if (input.deliveredAt !== undefined) {
+      await this.ensureVisibilityMigrated(current.threadId);
+    }
+
     const rawResult = (await this.redis.eval(
       TRANSITION_QUEUE_CUSTODY_LUA,
       4,
@@ -1088,6 +1692,7 @@ export class RedisMessageStore {
       String(input.next.revision),
       input.deliveredAt === undefined ? '' : String(input.deliveredAt),
       timelineScore === undefined ? '' : String(timelineScore),
+      this.keyPrefix, // [6] keyPrefix for visibility key construction inside Lua
     )) as [number | string, number | string];
     const outcome = Number(rawResult[0]);
     const actualRevision = Number(rawResult[1]);
@@ -1101,14 +1706,23 @@ export class RedisMessageStore {
     return { kind: 'updated', message: updated, deliveryTransitioned: outcome === 2 };
   }
 
-  /** F117: Atomically mark a queued message canceled and return an applied/no-op receipt. */
+  /**
+   * F117: Mark a queued message as canceled (withdraw/clear).
+   * #1200: CANCEL_WITH_VISIBILITY_LUA extends the original to ZREM from the
+   * visibility index (handles backfilled legacy queued members).
+   */
   async markCanceled(id: string): Promise<MarkCanceledResult | null> {
     const hashKey = MessageKeys.detail(id);
-    const raw = await this.redis.eval(CANCEL_LUA, 1, hashKey);
-    const { outcome, message } = this.parseLuaTransitionResult(raw);
-    if (outcome === -1) return null;
+    // Atomic CAS: queued → canceled + visibility ZREM.
+    const result = await this.redis.eval(CANCEL_WITH_VISIBILITY_LUA, 1, hashKey, this.keyPrefix);
+    if (result === 0) {
+      const existing = await this.getById(id);
+      if (!existing) return null;
+      return { ...existing, deliveryTransitioned: false };
+    }
+    const message = this.parseLuaHgetall(result);
     if (!message) throw new Error(`Redis cancellation transition lost canonical message: ${id}`);
-    return { ...message, deliveryTransitioned: outcome === 1 };
+    return { ...message, deliveryTransitioned: true };
   }
 
   /**
@@ -1179,7 +1793,7 @@ export class RedisMessageStore {
       const contentBlocks = safeParseContentBlocks(d.contentBlocks);
       const toolEvents = safeParseToolEvents(d.toolEvents);
       const parsedMetadata = safeParseMetadata(d.metadata);
-      const parsedExtra = safeParseExtra(d.extra);
+      const parsedExtra = hydrateExtra(d.extra, d.pluginMessage);
       const parsedSource = safeParseConnectorSource(d.source);
       const parsedQueueCustody = safeParseQueueCustody(d.queueCustody);
       messages.push({
@@ -1210,6 +1824,10 @@ export class RedisMessageStore {
         ...(parsedSource ? { source: parsedSource } : {}),
         ...(d.mentionsUser === '1' ? { mentionsUser: true } : {}),
         ...(d.replyTo ? { replyTo: d.replyTo } : {}),
+        // #1200 Sol R6 P2-1: Inject visibilitySeq from hash (parity with hydrateHash).
+        // Without this, getRecentMentionsFor returns items without visibilitySeq,
+        // causing cursorFor to emit v1 while getter cursors are v2 → cross-format.
+        ...(d.visibilitySeq ? { visibilitySeq: parseInt(d.visibilitySeq, 10) } : {}),
       });
     }
     return messages;

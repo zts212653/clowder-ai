@@ -16,7 +16,7 @@ interface OpenCodeConfigOptions {
 
 type OpenCodeProviderConfig = {
   npm?: string;
-  models?: Record<string, { name: string }>;
+  models?: Record<string, { id?: string; name: string }>;
   options: {
     apiKey?: string;
     baseURL?: string;
@@ -114,6 +114,7 @@ export function deriveOpenCodeApiType(providerName: string | undefined): OpenCod
 export interface OpenCodeRuntimeConfigOptions {
   providerName: string;
   models: readonly string[];
+  modelAliases?: Readonly<Record<string, string>>;
   defaultModel?: string;
   apiType?: OpenCodeApiType;
   hasBaseUrl?: boolean;
@@ -157,6 +158,7 @@ export interface OpenCodeRuntimeConfigDebugSummary {
     {
       npm?: string;
       modelKeys: string[];
+      modelMappings: Record<string, string>;
       hasBaseUrl: boolean;
       apiKeySource: string;
       baseUrlSource?: string;
@@ -209,6 +211,7 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
   const {
     providerName,
     models,
+    modelAliases,
     defaultModel,
     apiType = 'openai',
     hasBaseUrl = false,
@@ -225,11 +228,17 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
 
   const configName = safeProviderName(providerName);
 
-  const modelsMap: Record<string, { name: string }> = {};
+  const modelsMap: Record<string, { id?: string; name: string }> = {};
   const modelsToRegister = defaultModel ? [...models, defaultModel] : [...models];
   for (const rawModel of modelsToRegister) {
     const modelName = stripOwnProviderPrefix(rawModel, providerName);
-    modelsMap[modelName] = { name: modelName };
+    const configuredAlias =
+      modelAliases && Object.hasOwn(modelAliases, modelName) ? modelAliases[modelName] : undefined;
+    const upstreamId = typeof configuredAlias === 'string' ? configuredAlias.trim() : undefined;
+    modelsMap[modelName] = {
+      ...(upstreamId ? { id: upstreamId } : {}),
+      name: modelName,
+    };
   }
 
   let configDefaultModel = defaultModel;
@@ -305,6 +314,11 @@ export function summarizeOpenCodeRuntimeConfigForDebug(
         {
           npm: providerConfig.npm,
           modelKeys: Object.keys(providerConfig.models ?? {}).sort(),
+          modelMappings: Object.fromEntries(
+            Object.entries(providerConfig.models ?? {})
+              .sort(([left], [right]) => left.localeCompare(right))
+              .map(([modelKey, modelConfig]) => [modelKey, modelConfig.id ?? modelKey]),
+          ),
           hasBaseUrl: Boolean(providerConfig.options.baseURL),
           apiKeySource: summarizeEnvPlaceholder(providerConfig.options.apiKey) ?? '(unset)',
           ...(providerConfig.options.baseURL

@@ -6,18 +6,29 @@ import type {
   ProviderNativeFreshnessToolSurface,
 } from '../../../domains/cats/services/freshness/FreshnessAttentionEventLog.js';
 
-const REQUIRED_ALL_TOOL_SURFACES = [
-  'command_execution',
-  'file_change',
-  'mcp_tool_call',
-  'dynamic_tool_call',
-] as const satisfies readonly ProviderNativeFreshnessToolSurface[];
+const REQUIRED_SURFACES_BY_PROVIDER: Readonly<
+  Partial<Record<ProviderNativeFreshnessProvider, readonly ProviderNativeFreshnessToolSurface[]>>
+> = {
+  openai_codex: [
+    'command_execution',
+    'file_change',
+    'mcp_tool_call',
+    'dynamic_tool_call',
+    'collab_agent_tool_call',
+    'web_search',
+    'image_view',
+    'image_generation',
+    'sleep',
+  ],
+  anthropic: ['command_execution', 'file_change', 'mcp_tool_call', 'dynamic_tool_call'],
+};
 
 export interface ProviderNativeFreshnessCoverageCell {
   provider: ProviderNativeFreshnessProvider;
   carrier: ProviderNativeFreshnessCarrier;
   deliverySemantics: ProviderNativeFreshnessDeliverySemantics;
   toolSurface: ProviderNativeFreshnessToolSurface;
+  observedCount: number;
   opportunityCount: number;
   deliveredCount: number;
   missedCount: number;
@@ -29,8 +40,10 @@ export interface ProviderNativeFreshnessCarrierCoverage {
   provider: ProviderNativeFreshnessProvider;
   carrier: ProviderNativeFreshnessCarrier;
   deliverySemantics: ProviderNativeFreshnessDeliverySemantics;
+  dataStatus: 'no_data' | 'observed';
   allToolCoverage: boolean;
   missingSurfaces: ProviderNativeFreshnessToolSurface[];
+  unknownItemCount: number;
 }
 
 export interface ProviderNativeFreshnessCoverageReport {
@@ -51,72 +64,119 @@ type ProviderNativeNoticeEvent = Extract<
       | 'provider_notice_handled';
   }
 >;
+type ProviderCapabilityEvent = Extract<FreshnessAttentionEvent, { kind: 'provider_carrier_capability_declared' }>;
+type ProviderObservationEvent = Extract<FreshnessAttentionEvent, { kind: 'provider_protocol_item_observed' }>;
+type ProviderEvent = ProviderNativeNoticeEvent | ProviderCapabilityEvent | ProviderObservationEvent;
 
-function isProviderNotice(event: FreshnessAttentionEvent): event is ProviderNativeNoticeEvent {
-  return event.kind.startsWith('provider_notice_') && 'provider' in event && 'toolSurface' in event;
+function isProviderEvent(event: FreshnessAttentionEvent): event is ProviderEvent {
+  return event.kind.startsWith('provider_') && 'provider' in event && 'carrier' in event;
 }
 
-export function buildProviderNativeFreshnessCoverage(
-  events: readonly FreshnessAttentionEvent[],
-): ProviderNativeFreshnessCoverageReport {
+function carrierKey(event: Pick<ProviderEvent, 'provider' | 'carrier' | 'deliverySemantics'>): string {
+  return [event.provider, event.carrier, event.deliverySemantics].join('\0');
+}
+
+function cellKey(
+  event: Pick<ProviderEvent, 'provider' | 'carrier' | 'deliverySemantics'>,
+  toolSurface: ProviderNativeFreshnessToolSurface,
+): string {
+  return `${carrierKey(event)}\0${toolSurface}`;
+}
+
+function incrementCell(
+  cell: ProviderNativeFreshnessCoverageCell,
+  event: Exclude<ProviderEvent, ProviderCapabilityEvent>,
+) {
+  if (event.kind === 'provider_protocol_item_observed') cell.observedCount++;
+  else if (event.kind === 'provider_notice_opportunity') cell.opportunityCount++;
+  else if (event.kind === 'provider_notice_delivered') cell.deliveredCount++;
+  else if (event.kind === 'provider_notice_missed') cell.missedCount++;
+  else if (event.kind === 'provider_notice_seen') cell.seenCount++;
+  else if (event.kind === 'provider_notice_handled') cell.handledCount++;
+}
+
+function collectCoverageCells(providerEvents: readonly ProviderEvent[]): ProviderNativeFreshnessCoverageCell[] {
   const cells = new Map<string, ProviderNativeFreshnessCoverageCell>();
-  for (const event of events) {
-    if (!isProviderNotice(event)) continue;
-    const key = [event.provider, event.carrier, event.deliverySemantics, event.toolSurface].join('\0');
+  for (const event of providerEvents) {
+    if (event.kind === 'provider_carrier_capability_declared') continue;
+    const key = cellKey(event, event.toolSurface);
     const cell = cells.get(key) ?? {
       provider: event.provider,
       carrier: event.carrier,
       deliverySemantics: event.deliverySemantics,
       toolSurface: event.toolSurface,
+      observedCount: 0,
       opportunityCount: 0,
       deliveredCount: 0,
       missedCount: 0,
       seenCount: 0,
       handledCount: 0,
     };
-    if (event.kind === 'provider_notice_opportunity') cell.opportunityCount++;
-    else if (event.kind === 'provider_notice_delivered') cell.deliveredCount++;
-    else if (event.kind === 'provider_notice_missed') cell.missedCount++;
-    else if (event.kind === 'provider_notice_seen') cell.seenCount++;
-    else if (event.kind === 'provider_notice_handled') cell.handledCount++;
+    incrementCell(cell, event);
     cells.set(key, cell);
   }
-
-  const sortedCells = [...cells.values()].sort((left, right) =>
+  return [...cells.values()].sort((left, right) =>
     [left.provider, left.carrier, left.deliverySemantics, left.toolSurface]
       .join(':')
       .localeCompare([right.provider, right.carrier, right.deliverySemantics, right.toolSurface].join(':')),
   );
-  const carriers = new Map<string, ProviderNativeFreshnessCarrierCoverage>();
-  for (const cell of sortedCells) {
-    const key = [cell.provider, cell.carrier, cell.deliverySemantics].join('\0');
-    if (carriers.has(key)) continue;
-    const siblings = sortedCells.filter(
-      (candidate) =>
-        candidate.provider === cell.provider &&
-        candidate.carrier === cell.carrier &&
-        candidate.deliverySemantics === cell.deliverySemantics,
+}
+
+function projectCarrierCoverage(
+  seed: Pick<ProviderEvent, 'provider' | 'carrier' | 'deliverySemantics'>,
+  cells: readonly ProviderNativeFreshnessCoverageCell[],
+): ProviderNativeFreshnessCarrierCoverage {
+  const siblings = cells.filter(
+    (candidate) =>
+      candidate.provider === seed.provider &&
+      candidate.carrier === seed.carrier &&
+      candidate.deliverySemantics === seed.deliverySemantics,
+  );
+  const required = REQUIRED_SURFACES_BY_PROVIDER[seed.provider] ?? [];
+  const missingSurfaces = required.filter(
+    (surface) => !siblings.some((candidate) => candidate.toolSurface === surface && candidate.seenCount > 0),
+  );
+  const unknownItemCount = siblings
+    .filter((candidate) => candidate.toolSurface === 'unknown')
+    .reduce((sum, candidate) => sum + candidate.observedCount, 0);
+  return {
+    provider: seed.provider,
+    carrier: seed.carrier,
+    deliverySemantics: seed.deliverySemantics,
+    dataStatus: siblings.length === 0 ? 'no_data' : 'observed',
+    allToolCoverage:
+      seed.deliverySemantics === 'exact_active_turn' &&
+      required.length > 0 &&
+      missingSurfaces.length === 0 &&
+      unknownItemCount === 0,
+    missingSurfaces: [...missingSurfaces],
+    unknownItemCount,
+  };
+}
+
+function coverageVerdict(carriers: readonly ProviderNativeFreshnessCarrierCoverage[]) {
+  if (carriers.length === 0 || carriers.every((carrier) => carrier.dataStatus === 'no_data')) return 'no_data';
+  return carriers.some((carrier) => carrier.allToolCoverage) ? 'all_tool_covered' : 'partial';
+}
+
+export function buildProviderNativeFreshnessCoverage(
+  events: readonly FreshnessAttentionEvent[],
+): ProviderNativeFreshnessCoverageReport {
+  const providerEvents = events.filter(isProviderEvent);
+  const sortedCells = collectCoverageCells(providerEvents);
+  const carrierSeeds = new Map<string, Pick<ProviderEvent, 'provider' | 'carrier' | 'deliverySemantics'>>();
+  for (const event of providerEvents) carrierSeeds.set(carrierKey(event), event);
+  const carriers: ProviderNativeFreshnessCarrierCoverage[] = [...carrierSeeds.values()]
+    .map((seed) => projectCarrierCoverage(seed, sortedCells))
+    .sort((left, right) =>
+      [left.provider, left.carrier, left.deliverySemantics]
+        .join(':')
+        .localeCompare([right.provider, right.carrier, right.deliverySemantics].join(':')),
     );
-    const missingSurfaces = REQUIRED_ALL_TOOL_SURFACES.filter(
-      (surface) => !siblings.some((candidate) => candidate.toolSurface === surface && candidate.seenCount > 0),
-    );
-    carriers.set(key, {
-      provider: cell.provider,
-      carrier: cell.carrier,
-      deliverySemantics: cell.deliverySemantics,
-      allToolCoverage: cell.deliverySemantics !== 'unsupported' && missingSurfaces.length === 0,
-      missingSurfaces: [...missingSurfaces],
-    });
-  }
-  const carrierRows = [...carriers.values()];
+
   return {
     cells: sortedCells,
-    carriers: carrierRows,
-    verdict:
-      sortedCells.length === 0
-        ? 'no_data'
-        : carrierRows.some((carrier) => carrier.allToolCoverage)
-          ? 'all_tool_covered'
-          : 'partial',
+    carriers,
+    verdict: coverageVerdict(carriers),
   };
 }

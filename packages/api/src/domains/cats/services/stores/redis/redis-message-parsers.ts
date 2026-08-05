@@ -12,11 +12,26 @@ import type {
   RichMessageExtra,
 } from '@cat-cafe/shared';
 import { deliveryDecisionCueCarrierV1Schema } from '@cat-cafe/shared';
+import { parsePluginMessageExtra } from '../../../../messaging/envelope.js';
 import type { MessageMetadata } from '../../types.js';
-import type { StoredMessage, StoredToolEvent } from '../ports/MessageStore.js';
+import type { StoredMessage, StoredPluginMessage, StoredToolEvent } from '../ports/MessageStore.js';
 import { parseQueuedMessageCustody } from '../ports/queued-message-custody.js';
 import type { TurnExecutionMessageProjection } from '../ports/TurnExecutionStore.js';
 import { parseRecoveryMarker } from './redis-message-recovery-parser.js';
+
+function parsePluginMessage(value: unknown): StoredPluginMessage | undefined {
+  return (parsePluginMessageExtra(value) as StoredPluginMessage | null) ?? undefined;
+}
+
+/** Parse the F288 payload stored in its own Redis hash field (fail-closed). */
+export function safeParsePluginMessage(raw: string | undefined): StoredPluginMessage | undefined {
+  if (!raw) return undefined;
+  try {
+    return parsePluginMessage(JSON.parse(raw));
+  } catch {
+    return undefined;
+  }
+}
 
 export function safeParseMentions(raw: string | undefined): readonly CatId[] {
   if (!raw) return [];
@@ -126,6 +141,18 @@ export function safeParseExtra(raw: string | undefined):
       recovery?: NonNullable<NonNullable<StoredMessage['extra']>['recovery']>;
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
       systemKind?: 'a2a_routing' | 'context_briefing';
+      a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string };
+      /** F288 (K-1): plugin messaging canonical payload — structural mirror of MessageStore.ts extra typing. */
+      pluginMessage?: {
+        instanceId: string;
+        revision: number;
+        provenance: Record<string, unknown>;
+        elements: ReadonlyArray<Record<string, unknown>>;
+        sourceEventId?: string;
+        correlationId?: string;
+        causationId?: string;
+        appendOps: ReadonlyArray<{ operationId: string; elementIds: readonly string[]; baseRevision?: number }>;
+      };
     }
   | undefined {
   if (!raw) return undefined;
@@ -165,6 +192,17 @@ export function safeParseExtra(raw: string | undefined):
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
       systemKind?: 'a2a_routing' | 'context_briefing';
       a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string };
+      /** F288 (K-1): plugin messaging canonical payload — structural mirror of MessageStore.ts extra typing. */
+      pluginMessage?: {
+        instanceId: string;
+        revision: number;
+        provenance: Record<string, unknown>;
+        elements: ReadonlyArray<Record<string, unknown>>;
+        sourceEventId?: string;
+        correlationId?: string;
+        causationId?: string;
+        appendOps: ReadonlyArray<{ operationId: string; elementIds: readonly string[]; baseRevision?: number }>;
+      };
     } = {};
     let hasField = false;
 
@@ -401,6 +439,16 @@ export function safeParseExtra(raw: string | undefined):
       if (typeof parsed.a2aRouting.targetCatId === 'string') routing.targetCatId = parsed.a2aRouting.targetCatId;
       if (typeof parsed.a2aRouting.invocationId === 'string') routing.invocationId = parsed.a2aRouting.invocationId;
       result.a2aRouting = routing;
+      hasField = true;
+    }
+
+    // F288 (K-1 plugin messaging): preserve pluginMessage through the Redis
+    // round-trip — twin of the Z9 turnInvocationId lesson: this parser is a
+    // whitelist, every new extra key MUST be copied explicitly or Redis reads
+    // silently drop it (append-service would then reject its own messages).
+    const pluginMessage = parsePluginMessage(parsed.pluginMessage);
+    if (pluginMessage) {
+      result.pluginMessage = pluginMessage;
       hasField = true;
     }
 

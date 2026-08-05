@@ -705,8 +705,8 @@ export class ConnectorInvokeTrigger {
         ...(contentBlocks ? { contentBlocks } : {}),
         ...(controller?.signal ? { signal: controller.signal } : {}),
         queueHasQueuedMessages: (tid: string) => invocationQueue.hasQueuedNonAgentForThread(tid),
-        getQueuedFreshnessMessagesForCat: (tid: string, uid: string, catId: string) =>
-          invocationQueue.getQueuedFreshnessMessagesForCat(tid, uid, catId),
+        getQueuedFreshnessMessagesForCat: (tid: string, uid: string, catId: string, parentInvocationId?: string) =>
+          invocationQueue.getQueuedFreshnessMessagesForCat(tid, uid, catId, { parentInvocationId }),
         deferA2AEnqueue: (e) => invocationQueue.enqueue({ ...e, ownerAuthProvenance: 'unknown' }),
         freshnessReinvokeEnqueue: (entry) => {
           const { freshnessContext: _freshnessContext, ...queueFields } = entry;

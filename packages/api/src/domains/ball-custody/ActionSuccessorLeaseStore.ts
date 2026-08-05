@@ -1,4 +1,8 @@
 import type {
+  RecoverActiveLocalReviewVerdictInput,
+  RecoverActiveLocalReviewVerdictResult,
+} from './action-successor-local-review-recovery-state-machine.js';
+import type {
   ActionCompletionVerdict,
   ActionSuccessorIdentityInput,
   ActionSuccessorLease,
@@ -63,6 +67,10 @@ export type ActionSuccessorCommitOutcomeResult =
       lease: ActionSuccessorLease | null;
     };
 
+export type ActionSuccessorLocalReviewRecoveryStoreResult =
+  | RecoverActiveLocalReviewVerdictResult
+  | { outcome: 'subject_terminal'; lease: ActionSuccessorLease };
+
 export interface ActionSuccessorLeaseStore {
   get(leaseId: string): Promise<ActionSuccessorLease | null>;
   getByIdentity(input: ActionSuccessorIdentityInput): Promise<ActionSuccessorLease | null>;
@@ -80,6 +88,10 @@ export interface ActionSuccessorLeaseStore {
       now: number;
     },
   ): Promise<ActionSuccessorCommitOutcomeResult>;
+  recoverLocalReviewVerdict(
+    leaseId: string,
+    input: RecoverActiveLocalReviewVerdictInput,
+  ): Promise<ActionSuccessorLocalReviewRecoveryStoreResult>;
   recordCompletionCandidate(
     leaseId: string,
     input: { generation: number; catId: string; evidenceRefs: string[]; now: number },

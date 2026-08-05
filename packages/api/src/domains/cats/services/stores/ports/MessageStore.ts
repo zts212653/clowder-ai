@@ -18,10 +18,13 @@ import type {
   SchedulerMessageExtra,
 } from '@cat-cafe/shared';
 import { isCrossThreadProvenance } from '@cat-cafe/shared';
+import { normalizeJsonUnicode } from '../../../../../utils/json-unicode.js';
 import type { MessageMetadata } from '../../types.js';
+import { cursorFor, parseCursor } from '../cursor.js';
 import {
   getTimelineOrderTime,
   isSystemUserMessage,
+  isTimelinePublished as isTimelinePublishedFn,
   resolveDeliveryTimelineScore,
   resolveThreadMessageVisibility,
 } from '../visibility.js';
@@ -216,6 +219,24 @@ export interface StoredMessage {
     a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string };
     /** F264: derived browser projection; canonical truth remains queueCustody. */
     queueReceipt?: QueueMessageReceipt;
+    /** F288 (K-1 plugin messaging): canonical plugin payload — the envelope is a pure
+     *  projection of this (single truth source). Strict shape owned by
+     *  domains/messaging/envelope.ts (PluginMessageExtra); kept structural here so the
+     *  cats domain does not depend on the messaging domain. */
+    pluginMessage?: {
+      instanceId: string;
+      revision: number;
+      provenance: Record<string, unknown>;
+      elements: ReadonlyArray<Record<string, unknown>>;
+      sourceEventId?: string;
+      correlationId?: string;
+      causationId?: string;
+      /** Latest revision whose public output event is durably present. */
+      outputRevision?: number;
+      /** Event-log sequence covering outputRevision; paired with outputRevision. */
+      outputSequence?: number;
+      appendOps: ReadonlyArray<{ operationId: string; elementIds: readonly string[]; baseRevision?: number }>;
+    };
   };
   /** CatIds mentioned in this message */
   mentions: readonly CatId[];
@@ -250,6 +271,13 @@ export interface StoredMessage {
   deletedBy?: string;
   /** ADR-008 D3: Hard delete marker — content wiped, skeleton only */
   _tombstone?: true;
+  /**
+   * #1200: Visibility ordering sequence number. Injected at read time by
+   * getByThreadAfter (from visibility ZSET WITHSCORES or Memory mirror).
+   * Use `cursorFor(msg)` to generate cursor tokens.
+   * Not written back to legacy hashes — runtime field only.
+   */
+  visibilitySeq?: number;
 }
 
 export type MessageAppendListener = (message: StoredMessage) => void;
@@ -290,6 +318,12 @@ export interface BoundedThreadMessagePage {
   exhausted: boolean;
   nextCursor?: { timestamp: number; id: string };
 }
+
+/** Canonical F288 payload stored independently from host-owned extra metadata. */
+export type StoredPluginMessage = NonNullable<NonNullable<StoredMessage['extra']>['pluginMessage']>;
+
+/** Host-owned metadata patch. Plugin payload revisions use updatePluginMessage(). */
+export type HostMessageExtra = Omit<NonNullable<StoredMessage['extra']>, 'pluginMessage'>;
 
 /**
  * Input for appending a message. threadId is optional (defaults to 'default').
@@ -354,7 +388,7 @@ export interface StreamMetadataAugmentInput {
   thinking?: string;
   replyTo?: string;
   mentionsUser?: boolean;
-  extra?: NonNullable<StoredMessage['extra']>;
+  extra?: HostMessageExtra;
 }
 
 function richBlockDedupeKey(block: unknown, index: number): string {
@@ -539,9 +573,12 @@ export interface IMessageStore {
   /** F35: Reveal whispers in a thread sent by userId (set revealedAt). Returns count revealed. */
   revealWhispers(threadId: string, userId: string): number | Promise<number>;
   /** F096: Update message extra data (for interactive block state persistence). Returns null if not found. */
-  updateExtra(
+  updateExtra(id: string, extra: HostMessageExtra): StoredMessage | null | Promise<StoredMessage | null>;
+  /** F288: replace only the canonical plugin payload, independently of host extra metadata. */
+  updatePluginMessage(
     id: string,
-    extra: NonNullable<StoredMessage['extra']>,
+    pluginMessage: StoredPluginMessage,
+    expectedRevision: number,
   ): StoredMessage | null | Promise<StoredMessage | null>;
   /** #1462: augment callback-persisted messages with metadata collected only on the stream path. */
   augmentStreamMetadata(
@@ -582,6 +619,27 @@ export interface IMessageStore {
   /** #697: Find message IDs with a given deliveryStatus. Used by StartupReconciler
    *  to recover orphaned queued messages after process restart. */
   scanByDeliveryStatus?(status: NonNullable<StoredMessage['deliveryStatus']>): string[] | Promise<string[]>;
+  /**
+   * #1200 §8.7: Get the latest visible cursor for a thread.
+   *
+   * Returns the visibility-domain latest (not time-domain latest) as a
+   * {cursor: v2 token, messageId: raw ID} pair. Used by read-state routes
+   * (mark-all, read/latest) where time-latest ≠ visibility-latest once
+   * late delivery exists. Returns null for empty/no-visible-messages threads.
+   */
+  getLatestVisibleCursor(
+    threadId: string,
+  ): { cursor: string; messageId: string } | null | Promise<{ cursor: string; messageId: string } | null>;
+  /**
+   * #1200 §8.7: Canonicalize a raw message ID to a v2 cursor token.
+   *
+   * Looks up the message's visibility position and returns a v2 cursor.
+   * Falls back to the raw messageId if no visibility position exists
+   * (message still queued, canceled, or pre-migration). Used for CAS ingress
+   * canonicalization — raw v1 IDs must not enter SET_IF_GREATER after v2 adoption
+   * because 'v' > any digit makes v1 permanently lose the lex comparison.
+   */
+  canonicalizeCursor?(messageId: string, threadId: string): string | Promise<string>;
 }
 
 /** Max messages to keep in memory */
@@ -627,6 +685,15 @@ export class MessageStore {
   /** F102 KD-34: Listener called after every successful append (fire-and-forget) */
   onAppend?: MessageAppendListener;
 
+  /**
+   * #1200 visibility mirror: monotonic counter mirroring Redis visibilitySeq allocator.
+   * Direct messages get seq at append. Queued messages get seq at delivery.
+   * This is the Memory-side truth for visibility ordering — parity with Redis.
+   */
+  private visibilitySeqCounter = 0;
+  /** messageId → visibilitySeq. Absent = not yet visible (queued, canceled). */
+  private readonly visibilitySeq = new Map<string, number>();
+
   constructor(options?: {
     maxMessages?: number;
     onAppend?: MessageAppendListener;
@@ -654,10 +721,15 @@ export class MessageStore {
    * Append a message to the store. Returns the stored message with generated id.
    */
   append(msg: AppendMessageInput): StoredMessage {
-    assertValidAppendMessageInput(msg);
-    assertQueueCustodyMessageBinding(msg);
-    const threadId = msg.threadId ?? DEFAULT_THREAD_ID;
-    const idempotencyIndexKey = this.buildIdempotencyIndexKey(msg.userId, threadId, msg.idempotencyKey);
+    const normalizedMessage = normalizeJsonUnicode(msg);
+    assertValidAppendMessageInput(normalizedMessage);
+    assertQueueCustodyMessageBinding(normalizedMessage);
+    const threadId = normalizedMessage.threadId ?? DEFAULT_THREAD_ID;
+    const idempotencyIndexKey = this.buildIdempotencyIndexKey(
+      normalizedMessage.userId,
+      threadId,
+      normalizedMessage.idempotencyKey,
+    );
     if (idempotencyIndexKey) {
       const existingId = this.idempotencyIndex.get(idempotencyIndexKey);
       if (existingId) {
@@ -669,12 +741,12 @@ export class MessageStore {
       }
     }
 
-    const { idempotencyKey, ...payload } = msg;
+    const { idempotencyKey, ...payload } = normalizedMessage;
     void idempotencyKey;
     const stored: StoredMessage = {
       ...payload,
       ...(payload.queueCustody ? { queueCustody: cloneQueuedMessageCustody(payload.queueCustody) } : {}),
-      id: generateSortableId(msg.timestamp),
+      id: generateSortableId(normalizedMessage.timestamp),
       threadId,
     };
     this.messages.push(stored);
@@ -682,11 +754,30 @@ export class MessageStore {
       this.idempotencyIndex.set(idempotencyIndexKey, stored.id);
     }
 
+    // #1200/#1269: Timeline-published messages get immediate visibility position.
+    // This includes non-queued messages AND queued cat-authored speech (which is
+    // published at append, even though execution custody may end later).
+    // seq = max(counter+1, Date.now()) mirrors the Redis Lua allocator: max(hwm+1, serverTimeMs).
+    // Uses server wall-clock (Date.now()), NOT the message payload timestamp — a far-future
+    // payload timestamp must NEVER enter the allocator. (#1200 P1-A fix)
+    if (isTimelinePublishedFn(stored)) {
+      this.visibilitySeqCounter = Math.max(this.visibilitySeqCounter + 1, Date.now());
+      this.visibilitySeq.set(stored.id, this.visibilitySeqCounter);
+      // #1200 P2-6: Inject visibilitySeq into returned message so callers
+      // get the canonical position without a re-read.
+      stored.visibilitySeq = this.visibilitySeqCounter;
+    }
+
     // Trim oldest if over capacity
     if (this.messages.length > this.maxMessages) {
       const removed = this.messages.slice(0, this.messages.length - this.maxMessages);
       this.messages = this.messages.slice(-this.maxMessages);
-      this.pruneIdempotencyIndexForMessageIds(removed.map((entry) => entry.id));
+      const removedIds = removed.map((entry) => entry.id);
+      this.pruneIdempotencyIndexForMessageIds(removedIds);
+      // #1200: Clean visibility entries for trimmed messages
+      for (const id of removedIds) {
+        this.visibilitySeq.delete(id);
+      }
     }
 
     // F102 KD-34: fire-and-forget append listener for thread index updates
@@ -718,24 +809,26 @@ export class MessageStore {
   }
 
   appendIfThreadFrontier(msg: AppendMessageInput, expectedLatestMessageId: string | null): ThreadFrontierAppendResult {
-    assertValidAppendMessageInput(msg);
-    const threadId = msg.threadId ?? DEFAULT_THREAD_ID;
-    if (msg.idempotencyKey) {
-      const existing = this.getByIdempotencyKey(msg.userId, threadId, msg.idempotencyKey);
+    const normalizedMessage = normalizeJsonUnicode(msg);
+    assertValidAppendMessageInput(normalizedMessage);
+    const threadId = normalizedMessage.threadId ?? DEFAULT_THREAD_ID;
+    if (normalizedMessage.idempotencyKey) {
+      const existing = this.getByIdempotencyKey(normalizedMessage.userId, threadId, normalizedMessage.idempotencyKey);
       if (existing) return { kind: 'committed', message: existing };
     }
     const actualLatestMessageId = this.getLatestThreadMessageIdIncludingQueued(threadId);
     if (actualLatestMessageId !== expectedLatestMessageId) {
       return { kind: 'frontier_advanced', actualLatestMessageId };
     }
-    return { kind: 'committed', message: this.append(msg) };
+    return { kind: 'committed', message: this.append(normalizedMessage) };
   }
 
   appendAndObservePriorFrontier(msg: AppendMessageInput): ThreadObservedAppendResult {
-    assertValidAppendMessageInput(msg);
-    const threadId = msg.threadId ?? DEFAULT_THREAD_ID;
-    if (msg.idempotencyKey) {
-      const existing = this.getByIdempotencyKey(msg.userId, threadId, msg.idempotencyKey);
+    const normalizedMessage = normalizeJsonUnicode(msg);
+    assertValidAppendMessageInput(normalizedMessage);
+    const threadId = normalizedMessage.threadId ?? DEFAULT_THREAD_ID;
+    if (normalizedMessage.idempotencyKey) {
+      const existing = this.getByIdempotencyKey(normalizedMessage.userId, threadId, normalizedMessage.idempotencyKey);
       if (existing) {
         const freshness = existing.extra?.freshness;
         return {
@@ -749,9 +842,9 @@ export class MessageStore {
     }
     const priorFrontierMessageId = this.getLatestThreadMessageIdIncludingQueued(threadId);
     const message = this.append({
-      ...msg,
+      ...normalizedMessage,
       extra: {
-        ...msg.extra,
+        ...normalizedMessage.extra,
         freshness: { kind: 'scan_pending', priorFrontierMessageId },
       },
     });
@@ -800,8 +893,8 @@ export class MessageStore {
 
   /**
    * Get mentions for a specific cat, ascending (oldest first after cursor).
-   * When afterMessageId is provided, only returns mentions with id > afterMessageId.
-   * Returns the oldest N matches (ascending) — R4 P1 contract.
+   * #1200 §8.7 migration: scans visibility ordering, match-counted (collects
+   * `limit` MENTION matches, not limit total messages). Accepts v1 + v2 cursors.
    */
   getMentionsFor(
     catId: CatId,
@@ -811,21 +904,39 @@ export class MessageStore {
     afterMessageId?: string,
   ): StoredMessage[] {
     const n = limit ?? DEFAULT_LIMIT;
-    const matches: StoredMessage[] = [];
 
-    // Walk forward (ascending) to collect oldest-first after cursor
-    for (let i = 0; i < this.messages.length && matches.length < n; i++) {
-      const msg = this.messages[i]!;
+    // Collect all visible mentions in matching threads, sorted by visibility
+    const visible: Array<{ msg: StoredMessage; seq: number }> = [];
+    for (const msg of this.messages) {
       if (msg.deletedAt) continue;
-      if (!isDelivered(msg)) continue; // F117: exclude queued/canceled
-      if (afterMessageId && msg.id <= afterMessageId) continue;
+      // #1269: timeline-published cat speech is visible in mention feeds at append time
+      // (accepted contract: timeline-published = visible everywhere).
+      if (!isTimelinePublishedFn(msg)) continue;
       if (threadId && msg.threadId !== threadId) continue;
-      if (msg.mentions.includes(catId) && (!userId || msg.userId === userId)) {
-        matches.push(msg);
-      }
+      if (!msg.mentions.includes(catId)) continue;
+      if (userId && msg.userId !== userId) continue;
+      const seq = this.visibilitySeq.get(msg.id);
+      if (seq === undefined) continue; // not yet visible
+      visible.push({ msg: { ...msg, visibilitySeq: seq }, seq });
+    }
+    visible.sort((a, b) => (a.seq !== b.seq ? a.seq - b.seq : a.msg.id < b.msg.id ? -1 : 1));
+
+    // Apply cursor filter using visibility ordering (not raw-ID lex)
+    if (!afterMessageId) return visible.slice(0, n).map((v) => v.msg);
+    const cursor = parseCursor(afterMessageId);
+    if (!cursor) return visible.slice(0, n).map((v) => v.msg);
+
+    let afterSeq: number | null = null;
+    if (cursor.version === 2) {
+      afterSeq = cursor.seq;
+    } else {
+      afterSeq = this.visibilitySeq.get(cursor.id) ?? null;
     }
 
-    return matches; // Already ascending
+    if (afterSeq === null) return visible.slice(0, n).map((v) => v.msg); // pruned → full scan
+    const startIdx = visible.findIndex((v) => v.seq > afterSeq! || (v.seq === afterSeq! && v.msg.id > cursor.id));
+    if (startIdx === -1) return [];
+    return visible.slice(startIdx, startIdx + n).map((v) => v.msg);
   }
 
   /**
@@ -839,10 +950,14 @@ export class MessageStore {
     for (let i = this.messages.length - 1; i >= 0 && matches.length < n; i--) {
       const msg = this.messages[i]!;
       if (msg.deletedAt) continue;
-      if (!isDelivered(msg)) continue; // F117: exclude queued/canceled
+      // #1269: isTimelinePublished — parity with getMentionsFor.
+      if (!isTimelinePublishedFn(msg)) continue;
       if (threadId && msg.threadId !== threadId) continue;
       if (msg.mentions.includes(catId) && (!userId || msg.userId === userId)) {
-        matches.push(msg);
+        // #1200 §8.7: inject visibilitySeq so callers can use cursorFor()
+        // for acked flag comparison (same pattern as getMentionsFor)
+        const seq = this.visibilitySeq.get(msg.id);
+        matches.push(seq !== undefined ? { ...msg, visibilitySeq: seq } : msg);
       }
     }
 
@@ -915,6 +1030,13 @@ export class MessageStore {
    * Get messages in a thread after a specific message ID (exclusive), oldest first.
    * If afterId is undefined, returns messages from thread start.
    * If limit is undefined, returns all matches.
+   *
+   * #1200 rewrite (steps 4+5): uses visibility ordering (visibilitySeq) instead of
+   * array order. Direct messages are visible at append time; queued messages become
+   * visible at delivery time. Mirrors Redis visibility index for FM-4 parity.
+   *
+   * Accepts both v1 (raw ID) and v2 (`v2:<seq16>:<id>`) cursor tokens.
+   * Returned messages carry visibilitySeq for `cursorFor()` graded issuance.
    */
   getByThreadAfter(
     threadId: string,
@@ -923,36 +1045,108 @@ export class MessageStore {
     userId?: string,
     options?: ThreadMessageReadOptions,
   ): StoredMessage[] {
-    const bounded = Number.isFinite(limit as number) && (limit as number) > 0;
-    const max = bounded ? (limit as number) : Number.MAX_SAFE_INTEGER;
-    const matches: StoredMessage[] = [];
-    let cursorSeen = !afterId;
+    const max = Number.isFinite(limit as number) && (limit as number) > 0 ? (limit as number) : Number.MAX_SAFE_INTEGER;
     const isVisible = resolveThreadMessageVisibility(options);
 
-    for (let i = 0; i < this.messages.length && matches.length < max; i++) {
-      const msg = this.messages[i]!;
+    // Collect all visible messages, inject visibilitySeq (§8.7: binding by ID)
+    const visible: Array<{ msg: StoredMessage; seq: number }> = [];
+    for (const msg of this.messages) {
       if (msg.threadId !== threadId) continue;
-      if (!cursorSeen) {
-        if (msg.id === afterId) cursorSeen = true;
-        continue;
-      }
+      // #1200 Sol R2 P2-5: tombstones (deletedAt) are KEPT in getByThreadAfter per binding
+      // doc (tombstone-keep / null-skip / canceled-skip / isDelivered). Parity direction:
+      // fix Redis to keep tombstones (like Memory), not Memory to filter them.
       if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
       if (!isVisible(msg)) continue;
-      matches.push(msg);
-    }
-
-    if (!cursorSeen && afterId) {
-      for (let i = 0; i < this.messages.length && matches.length < max; i++) {
-        const msg = this.messages[i]!;
-        if (msg.threadId !== threadId) continue;
-        if (msg.id <= afterId) continue;
-        if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
-        if (!isVisible(msg)) continue;
-        matches.push(msg);
+      const seq = this.visibilitySeq.get(msg.id);
+      if (seq === undefined) {
+        // Published but not yet in visibility index (queued cat speech, pre-visibility era).
+        // Use timeline position as fallback seq for inclusion without breaking ordering.
+        visible.push({ msg, seq: getTimelineOrderTime(msg) });
+        continue;
       }
+      visible.push({ msg: { ...msg, visibilitySeq: seq }, seq });
     }
 
-    return matches;
+    // Sort by (visibilitySeq, id) — the canonical pair
+    visible.sort((a, b) => {
+      if (a.seq !== b.seq) return a.seq - b.seq;
+      return a.msg.id < b.msg.id ? -1 : a.msg.id > b.msg.id ? 1 : 0;
+    });
+
+    // Parse cursor token (§8.3)
+    const cursor = parseCursor(afterId);
+    if (!cursor) {
+      return visible.slice(0, max).map((v) => v.msg);
+    }
+
+    if (cursor.version === 2) {
+      // v2: direct (seq, id) pair comparison — skip linear ID search
+      const startIdx = visible.findIndex((v) => v.seq > cursor.seq || (v.seq === cursor.seq && v.msg.id > cursor.id));
+      if (startIdx === -1) return [];
+      return visible.slice(startIdx, startIdx + max).map((v) => v.msg);
+    }
+
+    // v1: find cursor position by exact ID match
+    const cursorIdx = visible.findIndex((v) => v.msg.id === cursor.id);
+    if (cursorIdx >= 0) {
+      return visible.slice(cursorIdx + 1, cursorIdx + 1 + max).map((v) => v.msg);
+    }
+
+    // Pruned v1 cursor fallback (§8.4 step 3): full rescan from visibility origin.
+    // #1200 codex P1: do NOT filter by `id > cursor.id` — that reintroduces FM-3
+    // (lex-ID ordering disease). A far-future message that is later pruned would
+    // permanently hide all normally-timestamped messages. Redis rescans from start
+    // for pruned cursors; Memory must do the same for FM-4 parity.
+    return visible.slice(0, max).map((v) => v.msg);
+  }
+
+  /**
+   * #1200 §8.7: Get the latest visible cursor for a thread.
+   *
+   * Scans visible messages in reverse visibility order, returns the first
+   * live message as {cursor: v2 token, messageId: raw ID}.
+   * Mirrors RedisMessageStore.getLatestVisibleCursor for FM-4 parity.
+   */
+  getLatestVisibleCursor(threadId: string): { cursor: string; messageId: string } | null {
+    // Collect visible messages (same filter as getByThreadAfter)
+    const visible: Array<{ id: string; seq: number }> = [];
+    for (const msg of this.messages) {
+      if (msg.threadId !== threadId) continue;
+      const seq = this.visibilitySeq.get(msg.id);
+      if (seq === undefined) continue;
+      // #1269: include timeline-published queued cat speech (has visibilitySeq since append)
+      if (!isTimelinePublishedFn(msg)) continue;
+      // #1200 codex P1: skip tombstones — same contract as Redis impl.
+      // getLatestVisibleCursor returns the latest LIVE message, not a tombstone.
+      if (msg.deletedAt) continue;
+      visible.push({ id: msg.id, seq });
+    }
+    if (visible.length === 0) return null;
+
+    // Sort descending by (seq, id) — we want the latest
+    visible.sort((a, b) => {
+      if (a.seq !== b.seq) return b.seq - a.seq;
+      return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
+    });
+
+    const latest = visible[0]!;
+    return {
+      cursor: cursorFor({ id: latest.id, visibilitySeq: latest.seq }),
+      messageId: latest.id,
+    };
+  }
+
+  /** #1200: Canonicalize a raw message ID to a v2 cursor token.
+   * Validates thread membership — refuses to sign a v2 cursor for a message
+   * that doesn't belong to the specified thread (returns raw ID fallback).
+   * (#1200 P1-4 fix: prevents cross-thread cursor signing) */
+  canonicalizeCursor(messageId: string, threadId: string): string {
+    // Verify the message exists and belongs to the specified thread
+    const msg = this.messages.find((m) => m.id === messageId);
+    if (!msg || msg.threadId !== threadId) return messageId;
+    const seq = this.visibilitySeq.get(messageId);
+    if (seq == null) return messageId;
+    return cursorFor({ id: messageId, visibilitySeq: seq });
   }
 
   /**
@@ -1038,7 +1232,12 @@ export class MessageStore {
     const removed = this.messages.filter((m) => m.threadId === threadId);
     const before = this.messages.length;
     this.messages = this.messages.filter((m) => m.threadId !== threadId);
-    this.pruneIdempotencyIndexForMessageIds(removed.map((entry) => entry.id));
+    const removedIds = removed.map((entry) => entry.id);
+    this.pruneIdempotencyIndexForMessageIds(removedIds);
+    // #1200: Clean visibility entries for deleted thread
+    for (const id of removedIds) {
+      this.visibilitySeq.delete(id);
+    }
     return before - this.messages.length;
   }
 
@@ -1109,10 +1308,21 @@ export class MessageStore {
    * Keep memory and Redis semantics identical: callers submit a partial top-level
    * projection, so unrelated durable provenance must survive the update.
    */
-  updateExtra(id: string, extra: NonNullable<StoredMessage['extra']>): StoredMessage | null {
+  updateExtra(id: string, extra: HostMessageExtra): StoredMessage | null {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
-    msg.extra = { ...msg.extra, ...extra };
+    // Strip pluginMessage to prevent bypassing updatePluginMessage()'s
+    // revision check — matches Redis store behaviour (codex P2 fix).
+    const { pluginMessage: _strip, ...hostOnly } = extra as Record<string, unknown>;
+    msg.extra = { ...msg.extra, ...hostOnly };
+    return msg;
+  }
+
+  updatePluginMessage(id: string, pluginMessage: StoredPluginMessage, expectedRevision: number): StoredMessage | null {
+    const msg = this.messages.find((m) => m.id === id);
+    if (!msg) return null;
+    if (msg.extra?.pluginMessage?.revision !== expectedRevision) return null;
+    msg.extra = { ...msg.extra, pluginMessage };
     return msg;
   }
 
@@ -1136,6 +1346,15 @@ export class MessageStore {
     msg.timelineOrderAt = resolveDeliveryTimelineScore(msg, deliveredAt);
     msg.deliveredAt = deliveredAt;
     msg.deliveryStatus = 'delivered';
+    // #1269: Preserve existing visibility position for already-published speech.
+    // Timeline-published queued cat speech gets visibilitySeq at append — delivery
+    // must NOT reallocate or it would move the message after later arrivals and
+    // invalidate already-issued durable cursors. Allocate only when no canonical
+    // position exists (legacy or truly hidden queued work).
+    if (!this.visibilitySeq.has(id)) {
+      this.visibilitySeqCounter = Math.max(this.visibilitySeqCounter + 1, Date.now());
+      this.visibilitySeq.set(id, this.visibilitySeqCounter);
+    }
     return { ...msg, deliveryTransitioned: true };
   }
 
@@ -1163,6 +1382,12 @@ export class MessageStore {
       msg.timelineOrderAt = resolveDeliveryTimelineScore(msg, input.deliveredAt);
       msg.deliveryStatus = 'delivered';
       msg.deliveredAt = input.deliveredAt;
+      // #1269 P1-2: allocate visibilitySeq when hidden queued work becomes visible.
+      // Same guard as markDelivered: preserve existing position, allocate only when missing.
+      if (!this.visibilitySeq.has(id)) {
+        this.visibilitySeqCounter = Math.max(this.visibilitySeqCounter + 1, Date.now());
+        this.visibilitySeq.set(id, this.visibilitySeqCounter);
+      }
     }
     return { kind: 'updated', message: { ...msg }, deliveryTransitioned: input.deliveredAt !== undefined };
   }
@@ -1173,6 +1398,8 @@ export class MessageStore {
     if (!msg) return null;
     if (msg.deliveryStatus !== 'queued') return { ...msg, deliveryTransitioned: false };
     msg.deliveryStatus = 'canceled';
+    // #1200: Remove from visibility index if present (backfill parity with Redis CANCEL_WITH_VISIBILITY_LUA)
+    this.visibilitySeq.delete(id);
     delete msg.queueCustody;
     return { ...msg, deliveryTransitioned: true };
   }
@@ -1208,6 +1435,15 @@ export class MessageStore {
    */
   get size(): number {
     return this.messages.length;
+  }
+
+  /**
+   * #1200: Get the visibility sequence number for a message.
+   * Returns undefined if the message has no visibility entry (queued, canceled, or not found).
+   * Used by getByThreadAfter (step 4) to sort by visibility order.
+   */
+  getVisibilitySeq(messageId: string): number | undefined {
+    return this.visibilitySeq.get(messageId);
   }
 }
 

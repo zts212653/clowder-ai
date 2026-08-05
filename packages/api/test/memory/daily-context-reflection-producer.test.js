@@ -22,7 +22,7 @@ function sealedSession(id, threadId, catId, sealedAt, overrides = {}) {
   };
 }
 
-function setup(chains, reflectionOverrides = {}) {
+function setup(chains, reflectionOverrides = {}, producerOverrides = {}) {
   const calls = [];
   const producer = new DailyContextReflectionProducer({
     ownerUserId: 'owner-1',
@@ -50,6 +50,7 @@ function setup(chains, reflectionOverrides = {}) {
     },
     now: () => NOW,
     getHouseholdTimeZone: () => 'America/Los_Angeles',
+    ...producerOverrides,
   });
   return { producer, calls };
 }
@@ -119,6 +120,14 @@ describe('F271 DailyContextReflectionProducer', () => {
       rejected: 0,
       cuesDelivered: 0,
       quiet: true,
+      telemetry: {
+        threadCount: 0,
+        threadListMs: 0,
+        sessionScanMs: 0,
+        reflectionMs: 0,
+        totalMs: 0,
+        activeWorkAtEnd: 0,
+      },
     });
     assert.deepEqual(calls, []);
   });
@@ -139,6 +148,24 @@ describe('F271 DailyContextReflectionProducer', () => {
     assert.equal(result.quiet, false);
   });
 
+  test('reports bounded phase timings and zero active work at successful completion', async () => {
+    const previousMorning = Date.parse('2026-07-25T17:00:00.000Z');
+    const chains = new Map([['thread-a', [sealedSession('session-a1', 'thread-a', 'codex-sol', previousMorning)]]]);
+    const ticks = [0, 5, 5, 17, 17, 26, 26];
+    const { producer } = setup(chains, {}, { monotonicNow: () => ticks.shift() ?? 26 });
+
+    const result = await producer.run();
+
+    assert.deepEqual(result.telemetry, {
+      threadCount: 1,
+      threadListMs: 5,
+      sessionScanMs: 12,
+      reflectionMs: 9,
+      totalMs: 26,
+      activeWorkAtEnd: 0,
+    });
+  });
+
   test('stops starting session scans and leaves no active scan after its signal expires', async () => {
     const active = new Set();
     const started = [];
@@ -155,7 +182,7 @@ describe('F271 DailyContextReflectionProducer', () => {
             const timer = setTimeout(() => {
               active.delete(threadId);
               resolve([]);
-            }, 100);
+            }, 1_000);
             options.signal?.addEventListener(
               'abort',
               () => {
@@ -182,7 +209,7 @@ describe('F271 DailyContextReflectionProducer', () => {
     setTimeout(() => controller.abort(new Error('daily reflection deadline exceeded')), 20);
 
     await assert.rejects(pending, /daily reflection deadline exceeded/);
-    assert.ok(Date.now() - startedAt < 80);
+    assert.ok(Date.now() - startedAt < 500, 'abort must beat the 1s backing session scan even under full-suite load');
     assert.equal(active.size, 0);
     assert.deepEqual(started, ['thread-a']);
   });

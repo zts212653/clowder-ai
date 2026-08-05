@@ -1,18 +1,20 @@
 import { randomUUID } from 'node:crypto';
-import type { ActionSuccessorRequestMetadata } from '@cat-cafe/shared';
 import {
   completedGenerationBlockedFreshRevisionTotal,
   successorConcurrentSuccessors,
-  successorReplace,
   successorSafeWait,
   successorUniqueCatsInvokedPerAction,
 } from '../../infrastructure/telemetry/instruments.js';
 import type { ActionFreshnessResolution, ActionSubjectTruthResolver } from './ActionSubjectTruthResolver.js';
-import type {
-  ActionSubjectTerminalTruth,
-  ActionSuccessorClaimStoreResult,
-  ActionSuccessorLeaseStore,
-} from './ActionSuccessorLeaseStore.js';
+import {
+  type ActionSuccessorAdmissionInput,
+  type ActionSuccessorAdmissionOptions,
+  type ActionSuccessorAdmissionResult,
+  type ActionSuccessorFence,
+  buildActionSuccessorFence,
+} from './ActionSuccessorAdmissionContract.js';
+import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
+import { admitActionSuccessorReplacement } from './ActionSuccessorReplacementAdmission.js';
 import {
   type CanonicalActionTerminalPredicate,
   canonicalizeActionTerminalPredicate,
@@ -25,71 +27,13 @@ import {
   isActionSuccessorReturnReplay,
 } from './action-successor-state-machine.js';
 
-export interface ActionSuccessorAdmissionInput {
-  tenantScope: string;
-  actorCatId: string;
-  sourceThreadId: string;
-  targetThreadId: string;
-  holderCatIds: string[];
-  dispatchId: string;
-  evidenceRef: string;
-  now: number;
-  action: ActionSuccessorRequestMetadata;
-}
-
-export interface ActionSuccessorAdmissionOptions {
-  /**
-   * Narrow transaction override for callers that must commit another
-   * canonical state transition in the same Redis script as the F167 claim.
-   */
-  claim?: (input: ClaimActionSuccessorInput) => Promise<ActionSuccessorClaimStoreResult>;
-}
-
-export interface ActionSuccessorFence {
-  leaseId: string;
-  generation: number;
-  dispatchId: string;
-  terminalPredicateDigest?: string;
-  invocationLineageRef?: string;
-}
-
-export function buildActionSuccessorFence(lease: ActionSuccessorLease, dispatchId: string): ActionSuccessorFence {
-  return {
-    leaseId: lease.leaseId,
-    generation: lease.generation,
-    dispatchId,
-    ...(lease.terminalPredicate
-      ? {
-          terminalPredicateDigest: lease.terminalPredicate.digest,
-          invocationLineageRef: `dispatch:${dispatchId}`,
-        }
-      : {}),
-  };
-}
-
-export type ActionSuccessorAdmissionResult =
-  | {
-      admit: true;
-      outcome: 'claimed' | 'replaced' | 'returned' | 'continued';
-      lease: ActionSuccessorLease;
-      fence: ActionSuccessorFence;
-    }
-  | {
-      admit: false;
-      outcome:
-        | 'safe_wait'
-        | 'replayed'
-        | 'replay_mismatch'
-        | 'stale_generation'
-        | 'proof_required'
-        | 'lease_not_active'
-        | 'holder_mismatch'
-        | 'predecessor_missing'
-        | 'parallel_return_unsupported'
-        | 'review_reentry_ineligible';
-      lease: ActionSuccessorLease;
-    }
-  | { admit: false; outcome: 'subject_terminal'; terminal: ActionSubjectTerminalTruth };
+export type {
+  ActionSuccessorAdmissionInput,
+  ActionSuccessorAdmissionOptions,
+  ActionSuccessorAdmissionResult,
+  ActionSuccessorFence,
+} from './ActionSuccessorAdmissionContract.js';
+export { buildActionSuccessorFence } from './ActionSuccessorAdmissionContract.js';
 
 export class ActionSuccessorAdmissionService {
   constructor(
@@ -260,54 +204,18 @@ export class ActionSuccessorAdmissionService {
     identityKey: string,
     input: ActionSuccessorAdmissionInput,
   ): Promise<ActionSuccessorAdmissionResult> {
-    const replacement = input.action.replace;
-    if (!replacement) throw new Error('replacement metadata missing');
-    const current = await this.leaseStore.get(replacement.leaseId);
-    if (!current) throw new Error(`replacement lease not found: ${replacement.leaseId}`);
-    if (current.key !== identityKey) throw new Error('replacement lease identity mismatch');
-    const claimOrigin = input.action.claimOrigin ?? 'structured_transfer';
-    if (current.claimOrigin !== claimOrigin) {
-      throw new Error('replacement claim origin must match the persisted lease');
-    }
-    const issuerStandingEvidenceRef = this.resolveIssuerStanding(input, claimOrigin);
-    if (claimOrigin === 'existing_standing') {
-      if (current.holderThreadId !== input.sourceThreadId) {
-        throw new Error('existing-standing replacement must originate from the persisted holder thread');
-      }
-    } else if (current.predecessorCatId !== input.actorCatId || current.predecessorThreadId !== input.sourceThreadId) {
-      throw new Error('replacement must originate from the persisted issuer route');
-    }
-    const terminalPredicate = this.requireTerminalPredicate(input);
-    const freshness = await this.requireVerifiedGenerationFreshness(terminalPredicate);
-    this.assertFreshnessStanding(input, freshness);
-
-    const replacementInput = {
-      expectedGeneration: replacement.expectedGeneration,
-      holderCatIds: input.holderCatIds,
-      holderThreadId: input.targetThreadId,
-      dispatchId: input.dispatchId,
-      terminalPredicate,
-      evidenceRef: input.evidenceRef,
-      now: input.now,
-    };
-    const result = await this.leaseStore.replace(
-      replacement.leaseId,
-      claimOrigin === 'existing_standing'
-        ? { ...replacementInput, claimOrigin, issuerStandingEvidenceRef }
-        : {
-            ...replacementInput,
-            claimOrigin,
-            predecessorCatId: input.actorCatId,
-            predecessorThreadId: input.sourceThreadId,
-            issuerStandingEvidenceRef,
-          },
-    );
-    if (result.outcome === 'replaced') {
-      successorReplace.add(1);
-      return this.admitted('replaced', result.lease, input.dispatchId);
-    }
-    if (result.outcome === 'subject_terminal') return this.resolveTerminalCas(input, 'replacement');
-    return { admit: false, outcome: result.outcome, lease: result.lease };
+    return admitActionSuccessorReplacement(identityKey, input, {
+      leaseStore: this.leaseStore,
+      resolveIssuerStanding: (request, claimOrigin) => this.resolveIssuerStanding(request, claimOrigin),
+      resolveVerifiedPredicate: async (request) => {
+        const terminalPredicate = this.requireTerminalPredicate(request);
+        const freshness = await this.requireVerifiedGenerationFreshness(terminalPredicate);
+        this.assertFreshnessStanding(request, freshness);
+        return { terminalPredicate, freshnessEvidenceRef: freshness.evidenceRef };
+      },
+      admitted: (outcome, lease, dispatchId) => this.admitted(outcome, lease, dispatchId),
+      resolveTerminalCas: (request) => this.resolveTerminalCas(request, 'replacement'),
+    });
   }
 
   private requireTerminalPredicate(input: ActionSuccessorAdmissionInput): CanonicalActionTerminalPredicate {
@@ -403,7 +311,7 @@ export class ActionSuccessorAdmissionService {
   }
 
   private admitted(
-    outcome: 'claimed' | 'replaced' | 'returned' | 'continued',
+    outcome: 'claimed' | 'replaced' | 'reattached' | 'returned' | 'continued',
     lease: ActionSuccessorLease,
     dispatchId: string,
   ): ActionSuccessorAdmissionResult {

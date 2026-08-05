@@ -66,7 +66,7 @@ function SendWithImageRunner({
     if (called.current) return;
     called.current = true;
     const file = new File([new Uint8Array([1, 2, 3])], 'cat.png', { type: 'image/png' });
-    handleSend('@布偶 看图', [file]).then(onDone);
+    handleSend('@布偶 看图', [file], undefined, undefined, 'queue', undefined, 'continue_current').then(onDone);
   }, [handleSend, onDone]);
 
   return null;
@@ -166,5 +166,23 @@ describe('useSendMessage upload status', () => {
         content: expect.stringContaining('Failed to send message: 上传超时'),
       }),
     );
+  });
+
+  it('sends the typed author disposition in multipart admission', async () => {
+    mockApiFetch.mockResolvedValue({ ok: true, json: async () => ({ userMessageId: 'message-1' }) });
+
+    await act(async () => {
+      root.render(
+        React.createElement(SendWithImageRunner, {
+          onDone: () => {},
+          onSnapshot: () => {},
+        }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const form = mockApiFetch.mock.calls[0]?.[1]?.body as FormData;
+    expect(form.get('messageDisposition')).toBe('continue_current');
   });
 });

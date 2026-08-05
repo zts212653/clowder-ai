@@ -124,6 +124,46 @@ describe('ChatMessage Postmark v2 source pill', () => {
     expect(dispatchSpy.mock.calls.some(([event]) => event.type === CHAT_THREAD_ROUTE_EVENT)).toBe(true);
   });
 
+  it('uses the render target thread on the first frame of a thread switch', async () => {
+    const { ChatMessage } = await import('@/components/ChatMessage');
+    const sourceThreadId = 'thread_target_current';
+    const message = {
+      id: 'm-thread-switch',
+      type: 'assistant',
+      catId: 'gpt52',
+      content: '',
+      timestamp: Date.now(),
+      isStreaming: false,
+      extra: { crossPost: { sourceThreadId } },
+    };
+    const getCatById = vi.fn(() => ({
+      id: 'gpt52',
+      displayName: '缅因猫',
+      variantLabel: 'GPT-5.2',
+      breedId: 'maine-coon',
+      clientId: 'openai',
+      defaultModel: 'gpt-5.2',
+      avatar: '/avatars/gpt52.png',
+      mentionPatterns: [],
+      roleDescription: '',
+      personality: '',
+      color: { primary: '#7C3AED', secondary: '#EDE9FE' },
+    }));
+
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          message: message as never,
+          threadId: 'thread_new_target',
+          getCatById: getCatById as never,
+        }),
+      );
+    });
+
+    expect(container.textContent).toContain('avatar');
+    expect(container.querySelector(`a[href="/thread/${sourceThreadId}"]`)).not.toBeNull();
+  });
+
   it('on click, records a pending cross-post scroll target when sourceInvocationId is present', async () => {
     const { ChatMessage } = await import('@/components/ChatMessage');
     const { consumePendingCrossPostScroll, __resetPendingCrossPostScrollForTest } = await import(

@@ -10,14 +10,18 @@ import { describe, it, mock } from 'node:test';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 const { QueueProcessor } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
-const { DEFAULT_CLI_TIMEOUT_MS } = await import('../dist/utils/cli-timeout.js');
-
 const SHORT_TTL = 1000; // 1s for testing
 const DEFAULT_SLOT_TTL = 75 * 60_000;
 const T0 = 100_000;
 
-function reservation(startedAt, entryId = 'entry-test') {
-  return { startedAt, entryId };
+function reservation(startedAt, entryId = 'entry-test', invocationId, trackerStarted = false) {
+  return {
+    startedAt,
+    entryId,
+    userId: 'u1',
+    ...(invocationId ? { invocationId } : {}),
+    ...(trackerStarted ? { trackerStarted: true } : {}),
+  };
 }
 
 function stubDeps(overrides = {}) {
@@ -60,12 +64,17 @@ function stubDeps(overrides = {}) {
 
 describe('QueueProcessor zombie defense (F118 D4)', () => {
   it('keeps the default processing slot TTL independent from disabled CLI timeout', (t) => {
+    const savedTimeout = process.env.CLI_TIMEOUT_MS;
+    process.env.CLI_TIMEOUT_MS = '0';
+    t.after(() => {
+      if (savedTimeout === undefined) delete process.env.CLI_TIMEOUT_MS;
+      else process.env.CLI_TIMEOUT_MS = savedTimeout;
+    });
     t.mock.timers.enable({ apis: ['Date'], now: T0 });
     const deps = stubDeps();
     const processor = new QueueProcessor(deps);
     const slotKey = 't1:opus';
 
-    assert.equal(DEFAULT_CLI_TIMEOUT_MS, 0, 'F118 manual-cancel-only mode must be the exercised default');
     /** @type {any} */ (processor).processingSlots.set(slotKey, reservation(T0));
     deps.invocationTracker.has.mock.mockImplementation(() => false);
 
@@ -102,6 +111,110 @@ describe('QueueProcessor zombie defense (F118 D4)', () => {
 
     // Zombie should be cleaned
     assert.equal(/** @type {any} */ (processor).processingSlots.has(slotKey), false, 'zombie slot should be cleaned');
+  });
+
+  it('requeues the exact unbound pre-start row when its zombie slot is swept', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: T0 });
+    const persisted = [];
+    const deps = stubDeps({
+      queueCustodyCoordinator: {
+        persistEntry: mock.fn(async (entry) => persisted.push(structuredClone(entry))),
+      },
+    });
+    const processor = new QueueProcessor(deps, { processingSlotTtlMs: SHORT_TTL });
+    const enqueued = deps.queue.enqueue({
+      ownerAuthProvenance: 'unknown',
+      threadId: 't1',
+      userId: 'u1',
+      content: 'retry after pre-start ownership vanished',
+      source: 'user',
+      targetCats: ['opus'],
+      intent: 'execute',
+    }).entry;
+    assert.ok(enqueued);
+    assert.ok(deps.queue.markProcessingById('t1', enqueued.id));
+    /** @type {any} */ (processor).processingSlots.set('t1:opus', reservation(T0, enqueued.id));
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+
+    t.mock.timers.tick(SHORT_TTL + 1);
+    assert.equal(processor.isThreadBusy('t1'), false);
+
+    const recovered = deps.queue.getEntrySnapshot('t1', 'u1', enqueued.id);
+    assert.equal(recovered?.status, 'queued', 'pre-start work must become retryable instead of staying processing');
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(persisted.length, 1);
+    assert.equal(persisted[0].status, 'queued', 'durable custody must observe the same recovered state');
+    const queueUpdates = deps.socketManager.emitToUser.mock.calls.filter(
+      (call) => call.arguments[1] === 'queue_updated',
+    );
+    assert.equal(queueUpdates.length, 1);
+    assert.equal(queueUpdates[0].arguments[2].action, 'zombie_prestart_requeued');
+    assert.equal(queueUpdates[0].arguments[2].queue[0].status, 'queued');
+  });
+
+  it('requeues a bound row when tracker installation never completed', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: T0 });
+    const deps = stubDeps();
+    const processor = new QueueProcessor(deps, { processingSlotTtlMs: SHORT_TTL });
+    const enqueued = deps.queue.enqueue({
+      ownerAuthProvenance: 'unknown',
+      threadId: 't1',
+      userId: 'u1',
+      content: 'record exists but durable preflight never reached startAll',
+      source: 'user',
+      targetCats: ['opus'],
+      intent: 'execute',
+    }).entry;
+    assert.ok(enqueued);
+    assert.ok(deps.queue.markProcessingById('t1', enqueued.id));
+    /** @type {any} */ (processor).processingSlots.set(
+      't1:opus',
+      reservation(T0, enqueued.id, 'inv-bound-before-start'),
+    );
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+
+    t.mock.timers.tick(SHORT_TTL + 1);
+    assert.equal(processor.isThreadBusy('t1'), false);
+    assert.equal(
+      deps.queue.getEntrySnapshot('t1', 'u1', enqueued.id)?.status,
+      'queued',
+      'an invocation id alone is not proof that provider execution started',
+    );
+  });
+
+  it('does not requeue a bound row from the TTL sweep without lifecycle terminal proof', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: T0 });
+    const deps = stubDeps();
+    const processor = new QueueProcessor(deps, { processingSlotTtlMs: SHORT_TTL });
+    const enqueued = deps.queue.enqueue({
+      ownerAuthProvenance: 'unknown',
+      threadId: 't1',
+      userId: 'u1',
+      content: 'provider may already own this body',
+      source: 'user',
+      targetCats: ['opus'],
+      intent: 'execute',
+    }).entry;
+    assert.ok(enqueued);
+    assert.ok(deps.queue.markProcessingById('t1', enqueued.id));
+    /** @type {any} */ (processor).processingSlots.set(
+      't1:opus',
+      reservation(T0, enqueued.id, 'inv-bound-owner', true),
+    );
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+
+    t.mock.timers.tick(SHORT_TTL + 1);
+    assert.equal(processor.isThreadBusy('t1'), false);
+    assert.equal(
+      deps.queue.getEntrySnapshot('t1', 'u1', enqueued.id)?.status,
+      'processing',
+      'bound work requires #2917/#2928 lifecycle proof before queue convergence',
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(
+      deps.socketManager.emitToUser.mock.calls.filter((call) => call.arguments[1] === 'queue_updated').length,
+      0,
+    );
   });
 
   // ── AC-D9: tracker-alive no-cleanup regression ──

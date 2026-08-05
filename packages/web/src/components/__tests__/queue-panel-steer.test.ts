@@ -62,6 +62,9 @@ describe('QueuePanel steer (F047)', () => {
       queue: [],
       queuePaused: false,
       currentThreadId: 'thread-1',
+      activeInvocations: {},
+      catInvocations: {},
+      targetCats: [],
     });
   });
 
@@ -165,6 +168,16 @@ describe('QueuePanel steer (F047)', () => {
       activeInvocations: {
         'inv-active': { catId: 'opus', mode: 'execute', startedAt: Date.now() },
       },
+      catInvocations: {
+        opus: {
+          invocationId: 'inv-active',
+          freshnessCarrierCapability: {
+            provider: 'openai_codex',
+            carrier: 'codex_app_server',
+            deliverySemantics: 'exact_active_turn',
+          },
+        },
+      },
     });
     act(() => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
@@ -217,6 +230,57 @@ describe('QueuePanel steer (F047)', () => {
     });
 
     expect(container.textContent).toContain('提醒已送达 · 尚未读取');
+    expect(container.querySelector('[data-testid="remind-q1-opus"]')).toBeNull();
+  });
+
+  it('shows author disposition without opening the body and suppresses reminder on unsupported carriers', () => {
+    useChatStore.setState({
+      queue: [
+        {
+          ...QUEUED_ENTRY,
+          targetStates: { opus: 'queued' },
+          queueReceipt: {
+            version: 1,
+            entryId: 'q1',
+            targets: [
+              {
+                catId: 'opus',
+                state: 'queued',
+                authorIntent: {
+                  requested: 'next_work',
+                  effective: 'next_work',
+                  carrierCapability: {
+                    provider: 'anthropic',
+                    carrier: 'claude_print_sdk',
+                    deliverySemantics: 'unsupported',
+                  },
+                },
+              },
+            ],
+            reminderAttempts: [],
+          },
+        },
+      ],
+      activeInvocations: {
+        'inv-active': { catId: 'opus', mode: 'execute', startedAt: Date.now() },
+      },
+      catInvocations: {
+        opus: {
+          invocationId: 'inv-active',
+          freshnessCarrierCapability: {
+            provider: 'anthropic',
+            carrier: 'claude_print_sdk',
+            deliverySemantics: 'unsupported',
+          },
+        },
+      },
+    });
+    act(() => {
+      root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
+    });
+
+    expect(container.textContent).toContain('下一件工作 · 本轮不可见');
+    expect(container.textContent).toContain('当前接入不支持本轮提醒');
     expect(container.querySelector('[data-testid="remind-q1-opus"]')).toBeNull();
   });
 });

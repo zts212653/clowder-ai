@@ -783,6 +783,180 @@ describe('ActionSuccessorAdmissionService', () => {
     assert.equal(calls.replace.length, 1);
   });
 
+  it('reattaches only the returned predecessor route with a fresh predicate and exact return proof', async () => {
+    const oldPredicate = canonicalizeActionTerminalPredicate({
+      actionFamily: 'review',
+      subjectRef: 'pr:owner/repo#2868',
+      predicate: { kind: 'review_delivered', headSha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+    });
+    const currentLease = {
+      leaseId: 'lease-1',
+      key: 'user-1\u001fpr:owner/repo#2868\u001freview\u001freviewer',
+      tenantScope: 'user-1',
+      subjectRef: 'pr:owner/repo#2868',
+      actionFamily: 'review',
+      successorSlot: 'reviewer',
+      generation: 2,
+      revision: 3,
+      status: 'active',
+      mode: 'single',
+      holderCatIds: ['codex-sol'],
+      holderThreadId: 'thread-source',
+      claimOrigin: 'structured_transfer',
+      predecessorCatId: 'codex-terra',
+      predecessorThreadId: 'thread-target',
+      issuerStandingEvidenceRef: 'message:grounding-mismatch',
+      terminalPredicate: oldPredicate,
+      holderOutcomes: {},
+      completionCandidates: {},
+      evidenceRefs: ['message:request-1', 'message:grounding-mismatch'],
+      returnDeliveryState: 'pending',
+      returnDeliveryEvidenceRef: 'message:grounding-mismatch',
+      returnTransitions: [
+        {
+          outcome: 'rejected_ownership',
+          fromGeneration: 1,
+          toGeneration: 2,
+          rejectingCatId: 'codex-terra',
+          rejectingThreadId: 'thread-target',
+          predecessorCatId: 'codex-sol',
+          predecessorThreadId: 'thread-source',
+          groundingEvidenceRef: 'message:grounding-mismatch',
+          at: 90,
+        },
+      ],
+    };
+    const reattachedLease = { ...currentLease, generation: 3, holderCatIds: ['gpt52'] };
+    const { service, calls } = harness({
+      currentLease,
+      replaceResult: { outcome: 'reattached', lease: reattachedLease },
+    });
+
+    const result = await service.admit(
+      request({
+        actorCatId: 'codex-sol',
+        sourceThreadId: 'thread-source',
+        targetThreadId: 'thread-next-review',
+        holderCatIds: ['gpt52'],
+        dispatchId: 'post:fresh-review',
+        incomingActionLeaseRef: { leaseId: 'lease-1', generation: 2 },
+        action: {
+          ...request().action,
+          terminalPredicate: { kind: 'review_delivered', headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
+          replace: { leaseId: 'lease-1', expectedGeneration: 2 },
+        },
+      }),
+    );
+
+    assert.equal(result.admit, true);
+    assert.equal(result.outcome, 'reattached');
+    assert.equal(calls.replace.length, 1);
+    assert.equal(calls.replace[0].input.returnedHolderCatId, 'codex-sol');
+    assert.equal(calls.replace[0].input.returnedHolderThreadId, 'thread-source');
+    assert.deepEqual(calls.replace[0].input.returnProof, {
+      kind: 'returned_fence',
+      leaseId: 'lease-1',
+      generation: 2,
+    });
+    assert.match(calls.replace[0].input.freshnessEvidenceRef, /^community:/);
+
+    for (const overrides of [{ actorCatId: 'codex-terra' }, { sourceThreadId: 'thread-target' }]) {
+      await assert.rejects(
+        () =>
+          service.admit(
+            request({
+              actorCatId: 'codex-sol',
+              sourceThreadId: 'thread-source',
+              targetThreadId: 'thread-next-review',
+              holderCatIds: ['gpt52'],
+              incomingActionLeaseRef: { leaseId: 'lease-1', generation: 2 },
+              action: {
+                ...request().action,
+                terminalPredicate: {
+                  kind: 'review_delivered',
+                  headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                },
+                replace: { leaseId: 'lease-1', expectedGeneration: 2 },
+              },
+              ...overrides,
+            }),
+          ),
+        /returned holder route/,
+      );
+    }
+    assert.equal(calls.replace.length, 1);
+  });
+
+  it('requires either the exact returned fence or persisted delivered-return evidence', async () => {
+    const currentLease = {
+      leaseId: 'lease-1',
+      key: 'user-1\u001fpr:owner/repo#2868\u001freview\u001freviewer',
+      generation: 2,
+      status: 'active',
+      mode: 'single',
+      holderCatIds: ['codex-sol'],
+      holderThreadId: 'thread-source',
+      claimOrigin: 'structured_transfer',
+      predecessorCatId: 'codex-terra',
+      predecessorThreadId: 'thread-target',
+      holderOutcomes: {},
+      completionCandidates: {},
+      returnDeliveryState: 'pending',
+      returnTransitions: [
+        {
+          outcome: 'rejected_ownership',
+          fromGeneration: 1,
+          toGeneration: 2,
+          rejectingCatId: 'codex-terra',
+          predecessorCatId: 'codex-sol',
+          predecessorThreadId: 'thread-source',
+          groundingEvidenceRef: 'message:mismatch',
+          at: 90,
+        },
+      ],
+    };
+    const action = {
+      ...request().action,
+      terminalPredicate: { kind: 'review_delivered', headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
+      replace: { leaseId: 'lease-1', expectedGeneration: 2 },
+    };
+    const missing = harness({ currentLease, replaceResult: { outcome: 'reattached', lease: currentLease } });
+    const rejected = await missing.service.admit(
+      request({
+        sourceThreadId: 'thread-source',
+        targetThreadId: 'thread-next-review',
+        holderCatIds: ['gpt52'],
+        action,
+      }),
+    );
+    assert.equal(rejected.admit, false);
+    assert.equal(rejected.outcome, 'return_proof_required');
+    assert.equal(missing.calls.replace.length, 0);
+
+    const deliveredLease = {
+      ...currentLease,
+      returnDeliveryState: 'delivered',
+      returnDeliveryEvidenceRef: 'queue:return-1:return_enqueued',
+    };
+    const delivered = harness({
+      currentLease: deliveredLease,
+      replaceResult: { outcome: 'reattached', lease: { ...deliveredLease, generation: 3 } },
+    });
+    const accepted = await delivered.service.admit(
+      request({
+        sourceThreadId: 'thread-source',
+        targetThreadId: 'thread-next-review',
+        holderCatIds: ['gpt52'],
+        action,
+      }),
+    );
+    assert.equal(accepted.outcome, 'reattached');
+    assert.deepEqual(delivered.calls.replace[0].input.returnProof, {
+      kind: 'return_delivery',
+      evidenceRef: 'queue:return-1:return_enqueued',
+    });
+  });
+
   it('replaces a grounded existing-standing task lease only from its persisted owner thread', async () => {
     const taskPredicate = canonicalizeActionTerminalPredicate({
       actionFamily: 'implement',

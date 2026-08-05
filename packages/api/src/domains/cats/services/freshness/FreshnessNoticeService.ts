@@ -18,6 +18,7 @@
 
 import type { CatId } from '@cat-cafe/shared';
 import { freshnessNoticeAttached, freshnessNoticeDeferred } from '../../../../infrastructure/telemetry/instruments.js';
+import { compareCursors, parseCursor } from '../stores/cursor.js';
 import type { FreshnessAttentionEvent, NoticeAttachedEvent } from './FreshnessAttentionEventLog.js';
 import type { FreshnessInvocationState } from './FreshnessInvocationStateStore.js';
 import type { RuntimeCapabilityDescriptor } from './RuntimeCapabilityDescriptor.js';
@@ -143,6 +144,10 @@ export class FreshnessNoticeService {
     await this.stateStore.recordNoticeDelivered(invocationId, toolCallCount);
 
     // Record cold path event
+    // #1200 Sol R7 P2: store raw message ID in maxMessageId, v2 cursor in maxCursor.
+    // ThreadUnseenChecker emits v2 via cursorFor — extract raw ID via parseCursor.
+    // Legacy events have raw v1 in maxMessageId and no maxCursor.
+    const parsed = parseCursor(unseen.maxMessageId);
     await this.eventLog.append({
       kind: 'notice_attached',
       threadId,
@@ -152,7 +157,8 @@ export class FreshnessNoticeService {
       toolName,
       unseenSenders: unseen.senders,
       noticeId,
-      maxMessageId: unseen.maxMessageId,
+      maxMessageId: parsed?.id ?? unseen.maxMessageId,
+      maxCursor: unseen.maxMessageId,
     });
 
     // AC-B5: OTel counter
@@ -183,25 +189,37 @@ export class FreshnessNoticeService {
     catId: CatId;
     /** Current seenCursor — notices with maxMessageId <= cursor are resolved */
     currentSeenCursor?: string | null;
+    /** #1200 Sol R7: async canonicalize v1 raw ID → v2 cursor for legacy events.
+     *  Shared resolver with createFreshnessReinvokeCheck (same messageStore.canonicalizeCursor). */
+    canonicalizeCursor?: (messageId: string, threadId: string) => Promise<string>;
   }): Promise<{ text: string } | null> {
     const { invocationId, threadId, catId, currentSeenCursor } = params;
 
     let unresolved = await this.eventLog.getUnresolvedNotices(invocationId);
 
     // P1-2 fix: filter out notices that the cat has already read past
-    // (seenCursor advanced beyond notice.maxMessageId = implicitly resolved)
+    // (seenCursor advanced beyond notice.maxMessageId = implicitly resolved).
     //
-    // Known limitation (P2-R4-1): message IDs embed creation timestamp
-    // (generateSortableId), so lexicographic comparison matches creation
-    // order. However, queued messages (F117) can have their sorted-set
-    // score re-assigned via markDelivered() without changing the ID.
-    // If a queued message is delivered late, its ID may be lexicographically
-    // older than seenCursor even though it's unseen. This is acceptable
-    // because: (a) B1 already delivered the original notice, (b) this is
-    // an advisory reminder, (c) Phase B scope doesn't cover queued-message
-    // delivery interactions. Fix if Phase C integrates queued messages.
+    // #1200 Sol R7: prefer maxCursor (v2) for same-format comparison.
+    // Legacy events lack maxCursor — canonicalize maxMessageId via injected resolver.
+    // Canonicalization failure → keep v1 → indeterminate → conservative keep (correct).
     if (currentSeenCursor) {
-      unresolved = unresolved.filter((n) => n.maxMessageId > currentSeenCursor);
+      const resolved = await Promise.all(
+        unresolved.map(async (n) => {
+          let noticeCursor = n.maxCursor ?? n.maxMessageId;
+          if (!n.maxCursor && params.canonicalizeCursor) {
+            try {
+              noticeCursor = await params.canonicalizeCursor(n.maxMessageId, threadId);
+            } catch {
+              /* keep v1 — indeterminate is conservative-keep */
+            }
+          }
+          const cmp = compareCursors(noticeCursor, currentSeenCursor);
+          const keep = cmp > 0 || (cmp === 0 && noticeCursor !== currentSeenCursor);
+          return keep ? n : null;
+        }),
+      );
+      unresolved = resolved.filter((n): n is NonNullable<typeof n> => n !== null);
     }
 
     if (unresolved.length === 0) return null;

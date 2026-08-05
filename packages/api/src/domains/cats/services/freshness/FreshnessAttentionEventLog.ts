@@ -14,7 +14,14 @@
  *   notice_deferred | reinvoke_triggered | reinvoke_skipped | queued_handled
  */
 
-import type { CatId, QueueHandledDisposition, QueueLineageEvidenceRef } from '@cat-cafe/shared';
+import type {
+  CatId,
+  FreshnessCarrier,
+  FreshnessCarrierDeliverySemantics,
+  FreshnessCarrierProvider,
+  QueueHandledDisposition,
+  QueueLineageEvidenceRef,
+} from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { FreshnessRelevanceReason } from './FreshnessRelevancePolicy.js';
 
@@ -48,6 +55,10 @@ interface NoticeAttachedEvent extends FreshnessEventBase {
   unseenSenders: string[];
   noticeId: string;
   maxMessageId: string;
+  /** #1200 Sol R6 P2-2: v2 cursor for maxMessageId position.
+   *  New events always set this. Absent on legacy events — consumers
+   *  must fall back to canonicalizing maxMessageId or conservatively keep. */
+  maxCursor?: string;
 }
 
 interface NoticeImplicitAckedEvent extends FreshnessEventBase {
@@ -98,24 +109,21 @@ interface QueuedHandledEvent extends FreshnessEventBase {
   remainingTargetCats: string[];
 }
 
-export type ProviderNativeFreshnessProvider = 'openai_codex' | 'anthropic' | 'other';
-export type ProviderNativeFreshnessCarrier =
-  | 'codex_app_server'
-  | 'codex_exec_json'
-  | 'claude_print_sdk'
-  | 'claude_stream_json'
-  | 'mcp_result_piggyback'
-  | 'other';
-export type ProviderNativeFreshnessDeliverySemantics =
-  | 'exact_active_turn'
-  | 'queued_internal_turn'
-  | 'mcp_result_piggyback'
-  | 'unsupported';
+export type ProviderNativeFreshnessProvider = FreshnessCarrierProvider;
+export type ProviderNativeFreshnessCarrier = FreshnessCarrier;
+export type ProviderNativeFreshnessDeliverySemantics = FreshnessCarrierDeliverySemantics;
 export type ProviderNativeFreshnessToolSurface =
   | 'command_execution'
   | 'file_change'
   | 'mcp_tool_call'
   | 'dynamic_tool_call'
+  | 'collab_agent_tool_call'
+  | 'sub_agent_activity'
+  | 'web_search'
+  | 'image_view'
+  | 'image_generation'
+  | 'sleep'
+  | 'unknown'
   | 'other';
 export type ProviderNativeFreshnessMissReason =
   | 'unsupported_carrier'
@@ -168,6 +176,27 @@ export interface ProviderNoticeHandledEvent extends ProviderNoticeEventBase {
   evidenceRef: QueueLineageEvidenceRef;
 }
 
+export interface ProviderCarrierCapabilityDeclaredEvent extends FreshnessEventBase {
+  kind: 'provider_carrier_capability_declared';
+  provider: ProviderNativeFreshnessProvider;
+  carrier: ProviderNativeFreshnessCarrier;
+  deliverySemantics: ProviderNativeFreshnessDeliverySemantics;
+}
+
+export interface ProviderProtocolItemObservedEvent extends FreshnessEventBase {
+  kind: 'provider_protocol_item_observed';
+  provider: ProviderNativeFreshnessProvider;
+  carrier: ProviderNativeFreshnessCarrier;
+  deliverySemantics: ProviderNativeFreshnessDeliverySemantics;
+  toolSurface: ProviderNativeFreshnessToolSurface;
+  /** Low-cardinality census key. Unrecognized provider strings collapse to `unknown`. */
+  itemType: string;
+  status: string;
+  classification: 'safe_boundary' | 'intentional_non_boundary' | 'deferred_no_data' | 'unknown';
+  /** At most eight distinct, 64-character samples are persisted per invocation. */
+  boundedUnknownSample?: string;
+}
+
 export type FreshnessAttentionEvent =
   | HeldDecisionEvent
   | ForwardDecisionEvent
@@ -184,7 +213,9 @@ export type FreshnessAttentionEvent =
   | ProviderNoticeDeliveredEvent
   | ProviderNoticeMissedEvent
   | ProviderNoticeSeenEvent
-  | ProviderNoticeHandledEvent;
+  | ProviderNoticeHandledEvent
+  | ProviderCarrierCapabilityDeclaredEvent
+  | ProviderProtocolItemObservedEvent;
 
 // Re-export for consumers
 export type { NoticeAttachedEvent };
@@ -224,7 +255,7 @@ export class FreshnessAttentionEventLog {
     await this.redis.rpush(key, serialized);
     // Set TTL (resets on every append — last event keeps the log alive)
     await this.redis.expire(key, EVENT_LOG_TTL_SECONDS);
-    if (event.kind.startsWith('provider_notice_')) {
+    if (event.kind.startsWith('provider_')) {
       await this.redis.zadd(PROVIDER_NATIVE_INDEX_KEY, String(event.timestamp), serialized);
       await this.redis.zremrangebyscore(
         PROVIDER_NATIVE_INDEX_KEY,

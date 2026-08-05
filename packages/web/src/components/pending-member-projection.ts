@@ -1,4 +1,5 @@
-import type { AppServerLifecycleStage, CatInvocationInfo, ChatMessage } from '@/stores/chat-types';
+import type { ChatMessage } from '@/stores/chat-types';
+import { doesAssistantMessageRenderBubble } from './assistant-message-renderability';
 
 type ActiveInvocationSlots = Record<string, { catId: string; mode: string; startedAt?: number }>;
 
@@ -7,51 +8,14 @@ export interface PendingMemberInvocation {
   catId: string;
 }
 
-/**
- * Lifecycle stages at which the backend has confirmed the turn is executing.
- * Before `turn_accepted` the cat is still starting up — the pre-start
- * placeholder (avatar + frame + tips) must stay.
- */
-const EXECUTING_LIFECYCLE_STAGES: ReadonlySet<AppServerLifecycleStage> = new Set([
-  'turn_accepted',
-  'active',
-  'completed',
-  'interrupted',
-  'failed',
-  'closing',
-  'closed',
-]);
-
 function normalizeActiveInvocationId(invocationId: string, catId: string): string {
   const fanoutSuffix = `-${catId}`;
   return invocationId.endsWith(fanoutSuffix) ? invocationId.slice(0, -fanoutSuffix.length) : invocationId;
 }
 
-/**
- * A pending member bubble lives and dies with its own invocation: it renders
- * until THAT invocation's lifecycle confirms execution started. The cat-level
- * `catStatuses` map is deliberately NOT consulted — it is sticky across turns
- * and a stale `streaming`/`suspected_stall` value from a previous invocation
- * would suppress the new invocation's placeholder (and its tips) from the
- * first frame.
- */
-export function hasInvocationStartedExecuting(
-  invocation: PendingMemberInvocation,
-  info: CatInvocationInfo | undefined,
-): boolean {
-  const lifecycle = info?.appServerLifecycle;
-  if (!lifecycle) return false;
-  const normalized = normalizeActiveInvocationId(invocation.invocationId, invocation.catId);
-  const bound =
-    info.invocationId === invocation.invocationId ||
-    info.invocationId === normalized ||
-    info.turnInvocationId === invocation.invocationId ||
-    info.turnInvocationId === normalized;
-  return bound && EXECUTING_LIFECYCLE_STAGES.has(lifecycle.stage);
-}
-
-function addVisibleInvocationIds(message: ChatMessage, visible: Set<string>): void {
-  if (message.type !== 'assistant' || !message.catId || message.extra?.isExplicitPost) return;
+function addVisibleInvocationIds(message: ChatMessage, visible: Set<string>, currentThreadId?: string): void {
+  if (!message.catId || message.extra?.isExplicitPost) return;
+  if (!doesAssistantMessageRenderBubble(message, { currentThreadId })) return;
 
   const parentInvocationId = message.extra?.stream?.invocationId;
   const turnInvocationId = message.extra?.stream?.turnInvocationId;
@@ -73,9 +37,10 @@ function addVisibleInvocationIds(message: ChatMessage, visible: Set<string>): vo
 export function derivePendingMemberInvocations(
   activeInvocations: ActiveInvocationSlots,
   messages: readonly ChatMessage[],
+  currentThreadId?: string,
 ): PendingMemberInvocation[] {
   const visibleInvocations = new Set<string>();
-  for (const message of messages) addVisibleInvocationIds(message, visibleInvocations);
+  for (const message of messages) addVisibleInvocationIds(message, visibleInvocations, currentThreadId);
 
   return Object.entries(activeInvocations)
     .filter(([invocationId]) => !invocationId.startsWith('hydrated-'))

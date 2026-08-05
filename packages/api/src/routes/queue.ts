@@ -12,7 +12,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { CatId } from '@cat-cafe/shared';
+import type { CatId, FreshnessCarrierCapability } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { IBallCustodyIngest } from '../domains/ball-custody/BallCustodyIngest.js';
@@ -73,6 +73,7 @@ interface ActiveInvocationProjection {
   /** Exact child/turn identity carried by F264 body-exposure receipts. */
   turnInvocationId?: string;
   appServerLifecycle?: CodexAppServerLifecycleSnapshot;
+  freshnessCarrierCapability?: FreshnessCarrierCapability;
 }
 
 interface LifecycleProjectionCandidate {
@@ -137,10 +138,12 @@ export interface QueueRoutesOptions {
   invocationQueue: InvocationQueue;
   queueProcessor: QueueProcessor;
   invocationTracker: InvocationTrackerLike;
+  /** Exact concrete provider carrier used by active-turn composer/reminder surfaces. */
+  resolveCarrierCapability?: (catId: CatId) => FreshnessCarrierCapability | undefined;
   /** Shared owner-aware session lock released by explicit terminal actions. */
   agentSessionMutex?: AgentSessionMutexLike;
   socketManager: SocketManager;
-  /** F117: MessageStore for marking queued messages as canceled on withdraw/clear */
+  /** MessageStore supplies receipt hydration; Queue withdrawal never deletes author history. */
   messageStore?: IMessageStore;
   /** F254: persist reorder/promote mutations before acknowledging them. */
   queueCustodyCoordinator?: QueuedMessageCustodyCoordinator;
@@ -212,6 +215,7 @@ function resolveReminderRequest(input: {
   userId: string;
   invocationTracker: InvocationTrackerLike;
   coordinator: QueuedMessageCustodyCoordinator | undefined;
+  carrierCapability: FreshnessCarrierCapability | undefined;
 }): ReminderRequestResolution {
   if (!input.entry) return { ok: false, status: 404, error: '队列条目不存在', code: 'ENTRY_NOT_FOUND' };
   if (!input.entry.targetCats.includes(input.targetCatId)) {
@@ -222,6 +226,22 @@ function resolveReminderRequest(input: {
   }
   if (!input.coordinator) {
     return { ok: false, status: 503, error: '持久回执暂不可用', code: 'RECEIPT_STORE_UNAVAILABLE' };
+  }
+  if (!input.carrierCapability || input.carrierCapability.deliverySemantics === 'undeclared') {
+    return {
+      ok: false,
+      status: 409,
+      error: '当前猫的本轮提醒能力未声明，已按下一件工作处理',
+      code: 'REMINDER_CAPABILITY_UNDECLARED',
+    };
+  }
+  if (input.carrierCapability.deliverySemantics !== 'exact_active_turn') {
+    return {
+      ok: false,
+      status: 409,
+      error: '当前接入不支持本轮提醒',
+      code: 'REMINDER_UNSUPPORTED_CARRIER',
+    };
   }
   const activeUserId = input.invocationTracker.getUserId(input.threadId, input.targetCatId);
   const invocationId = input.invocationTracker.getExecutionId?.(input.threadId, input.targetCatId);
@@ -414,32 +434,41 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
     if (!guard) return;
 
-    const activeInvocations = await resolveActiveInvocations(
-      threadId,
-      guard.userId,
-      invocationTracker,
-      opts.invocationRecordStore,
-      opts.draftStore,
-      opts.turnExecutionStore,
-      request.log,
-      opts.taskProgressStore,
-      opts.ballCustody,
-      opts.invocationRegistry,
-      opts.onReconciledZombie,
-      // F220 Phase 2a (#972): wire the queue into the zombie sweep, and re-broadcast
-      // `queue_updated` when (and only when) entries were actually converged.
-      invocationQueue,
-      (info) => {
-        void emitQueueUpdated(
-          opts.socketManager,
-          info.userId,
-          info.threadId,
-          invocationQueue.list(info.threadId, info.userId),
-          messageStore,
-          'zombie_converged',
-        ).catch((err) => request.log.warn({ err, feature: 'F220' }, 'zombie_converged broadcast failed'));
+    const activeInvocations = (
+      await resolveActiveInvocations(
+        threadId,
+        guard.userId,
+        invocationTracker,
+        opts.invocationRecordStore,
+        opts.draftStore,
+        opts.turnExecutionStore,
+        request.log,
+        opts.taskProgressStore,
+        opts.ballCustody,
+        opts.invocationRegistry,
+        opts.onReconciledZombie,
+        // F220 Phase 2a (#972): wire the queue into the zombie sweep, and re-broadcast
+        // `queue_updated` when (and only when) entries were actually converged.
+        invocationQueue,
+        (info) => {
+          void emitQueueUpdated(
+            opts.socketManager,
+            info.userId,
+            info.threadId,
+            invocationQueue.list(info.threadId, info.userId),
+            messageStore,
+            'zombie_converged',
+          ).catch((err) => request.log.warn({ err, feature: 'F220' }, 'zombie_converged broadcast failed'));
+        },
+      )
+    ).map((invocation) => ({
+      ...invocation,
+      freshnessCarrierCapability: opts.resolveCarrierCapability?.(invocation.catId as CatId) ?? {
+        provider: 'other' as const,
+        carrier: 'other' as const,
+        deliverySemantics: 'undeclared' as const,
       },
-    );
+    }));
     const enrichedQueue = await enrichQueueEntries(invocationQueue.list(threadId, guard.userId), messageStore);
     return {
       queue: enrichedQueue,
@@ -469,13 +498,33 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         return { error: '条目正在处理中，无法撤回', code: 'ENTRY_PROCESSING' };
       }
 
-      // F117: Collect message IDs before removing (entry contains messageId + mergedMessageIds)
-      const messageIds = [entry.messageId, ...(entry.mergedMessageIds ?? [])].filter(Boolean) as string[];
-
       // Remove entry from queue FIRST (sync) to close the TOCTOU window —
       // prevents queue processor from promoting to 'processing' during the
       // async contentBlocks snapshot below.
+      const nextEntryId = entries[entries.findIndex((candidate) => candidate.id === entryId) + 1]?.id;
       const removed = invocationQueue.remove(threadId, guard.userId, entryId);
+      if (removed && opts.queueCustodyCoordinator) {
+        try {
+          await opts.queueCustodyCoordinator.withdrawEntry(removed);
+        } catch (err) {
+          invocationQueue.restoreDurableEntry(removed, { beforeEntryId: nextEntryId });
+          request.log.error({ err, entryId, threadId }, 'durable Queue withdrawal failed; entry restored');
+          await emitQueueUpdated(
+            socketManager,
+            guard.userId,
+            threadId,
+            invocationQueue.list(threadId, guard.userId),
+            messageStore,
+            'withdraw_failed',
+          );
+          reply.status(503);
+          return {
+            error: '撤出未完成，消息仍保留在待处理队列中',
+            code: 'QUEUE_WITHDRAWAL_FAILED',
+            queue: await enrichQueueEntries(invocationQueue.list(threadId, guard.userId), messageStore),
+          };
+        }
+      }
       // F122B B6 P2: Clean up completion hook to prevent leak when entry removed before execution
       queueProcessor.unregisterEntryCompleteHook?.(entryId);
       await queueProcessor.finalizeRemovedEntry?.(removed, 'user_cancel');
@@ -488,20 +537,6 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         messageStore,
         'removed',
       );
-
-      // F117: Mark queued messages as canceled + emit message_deleted
-      if (messageStore) {
-        for (const msgId of messageIds) {
-          const canceled = await messageStore.markCanceled(msgId);
-          if (canceled?.deliveryTransitioned === true) {
-            socketManager.emitToUser(guard.userId, 'message_deleted', {
-              messageId: msgId,
-              threadId,
-              deletedBy: guard.userId,
-            });
-          }
-        }
-      }
 
       return { removed: removed ? projectPublicQueueEntry(removed) : removed };
     },
@@ -540,6 +575,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         userId: guard.userId,
         invocationTracker,
         coordinator: opts.queueCustodyCoordinator,
+        carrierCapability: opts.resolveCarrierCapability?.(targetCatId as CatId),
       });
       if (!resolution.ok) {
         reply.status(resolution.status);
@@ -897,36 +933,49 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
     if (!guard) return;
 
-    // F117: Collect message IDs from non-processing entries for cancelation
-    // Skip 'processing' entries — their invocation is already running and will markDelivered itself
-    const entriesBeforeClear = invocationQueue.list(threadId, guard.userId);
-    const allMessageIds: string[] = [];
-    for (const e of entriesBeforeClear) {
-      if (e.status === 'processing') continue;
-      queueProcessor.unregisterEntryCompleteHook?.(e.id);
-      if (e.messageId) allMessageIds.push(e.messageId);
-      if (e.mergedMessageIds) allMessageIds.push(...e.mergedMessageIds);
-    }
+    // Withdraw one exact snapshot at a time. This preserves processing entries and lets a
+    // durable-store failure stop before any later entry is removed from actionable custody.
+    const cleared: QueueEntry[] = [];
+    const candidates = invocationQueue.list(threadId, guard.userId);
+    for (const [candidateIndex, candidate] of candidates.entries()) {
+      const current = invocationQueue.getEntrySnapshot(threadId, guard.userId, candidate.id);
+      if (!current || current.status === 'processing') continue;
+      if (!invocationQueue.removeEntrySnapshotIfUnchanged(current)) continue;
 
-    const cleared = invocationQueue.clear(threadId, guard.userId);
-    for (const entry of cleared) {
-      await queueProcessor.finalizeRemovedEntry?.(entry, 'user_cancel');
-    }
-    await emitQueueUpdated(socketManager, guard.userId, threadId, [], messageStore, 'cleared');
-
-    // F117: Mark all queued messages as canceled + emit message_deleted
-    if (messageStore) {
-      for (const msgId of allMessageIds) {
-        const canceled = await messageStore.markCanceled(msgId);
-        if (canceled?.deliveryTransitioned === true) {
-          socketManager.emitToUser(guard.userId, 'message_deleted', {
-            messageId: msgId,
-            threadId,
-            deletedBy: guard.userId,
-          });
-        }
+      try {
+        await opts.queueCustodyCoordinator?.withdrawEntry(current);
+      } catch (err) {
+        invocationQueue.restoreDurableEntry(current, { beforeEntryId: candidates[candidateIndex + 1]?.id });
+        request.log.error(
+          { err, entryId: current.id, threadId, clearedCount: cleared.length },
+          'durable Queue clear stopped; unsettled entries retained',
+        );
+        const remaining = invocationQueue.list(threadId, guard.userId);
+        await emitQueueUpdated(socketManager, guard.userId, threadId, remaining, messageStore, 'withdraw_failed');
+        reply.status(503);
+        return {
+          error:
+            cleared.length > 0
+              ? '只撤出了部分消息；其余消息仍保留在待处理队列中'
+              : '撤出未完成，消息仍保留在待处理队列中',
+          code: cleared.length > 0 ? 'QUEUE_WITHDRAWAL_PARTIAL' : 'QUEUE_WITHDRAWAL_FAILED',
+          cleared: cleared.map(projectPublicQueueEntry),
+          queue: await enrichQueueEntries(remaining, messageStore),
+        };
       }
+
+      queueProcessor.unregisterEntryCompleteHook?.(current.id);
+      await queueProcessor.finalizeRemovedEntry?.(current, 'user_cancel');
+      cleared.push(current);
     }
+    await emitQueueUpdated(
+      socketManager,
+      guard.userId,
+      threadId,
+      invocationQueue.list(threadId, guard.userId),
+      messageStore,
+      'cleared',
+    );
 
     return { cleared: cleared.map(projectPublicQueueEntry) };
   });

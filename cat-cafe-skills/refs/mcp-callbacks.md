@@ -25,6 +25,8 @@ HTTP callback route 是 MCP tool 的底层实现和维护者调试面，不是 s
 | 列任务 | `cat_cafe_list_tasks` | `GET /api/callbacks/list-tasks` |
 | 注册 PR tracking | `cat_cafe_register_pr_tracking` | `POST /api/callbacks/register-pr-tracking` |
 | 注册 issue tracking | `cat_cafe_register_issue_tracking` | `POST /api/callbacks/register-issue-tracking` |
+| assigned cat 接/退 community route | `cat_cafe_validate_community_route` | `POST /api/community-issues/:id/validate-route` |
+| 记录 external review verdict + delivery | `cat_cafe_record_external_review_verdict` | `POST /api/callbacks/record-external-review-verdict` |
 | 搜证据 | `cat_cafe_search_evidence` | `GET /api/callbacks/search-evidence` |
 | 写长期记忆 | `cat_cafe_retain_memory_callback` | `POST /api/callbacks/retain-memory` |
 | 请求权限 | `cat_cafe_request_permission` | `POST /api/callbacks/request-permission` |
@@ -55,6 +57,8 @@ MCP 工具会从 invocation credentials 或 agent-key sidecar 自动处理认证
 | invocation callback 401 | 当前 callback token 过期；用本轮可用 MCP 工具重试，或在最终回复里用行首 `@` 路由 |
 | shared Antigravity MCP 缺凭证 | 传 `agentKeyCatId`，让工具选择对应猫的 sidecar key |
 | 工具目录完全没有对应能力 | 按 F223 追踪 execution surface 缺口，不把 HTTP route 当主路径 |
+
+`routeAcceptance=pending` 只能由真实 assigned cat 调 `cat_cafe_validate_community_route` 变更；不要把 callback token 暴露给 `curl`，也不要由 case owner 冒充目标猫直写 API。
 
 ## Notes
 

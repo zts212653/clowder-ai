@@ -62,6 +62,16 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @cat-cafe/shared build
+      - run: pnpm --filter @cat-cafe/api build
+      - name: Install OpenCode behavior baseline
+        run: npm install --global opencode-ai@1.18.9
+      - name: Verify OpenCode model ID routing
+        run: >-
+          node --test
+          packages/api/test/opencode-model-id-ci-contract.test.js
+          packages/api/test/opencode-model-id-request.test.js
+        env:
+          REQUIRE_OPENCODE_MODEL_ID_TEST: '1'
       - run: pnpm --filter @cat-cafe/api run test:public
         env:
           GIT_AUTHOR_NAME: CI Runner

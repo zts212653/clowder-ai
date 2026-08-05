@@ -8,6 +8,7 @@ import { isCrossThreadProvenance } from '@cat-cafe/shared';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { DEFAULT_HIERARCHICAL_CONTEXT } from '../../../../../config/hierarchical-context-config.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import { compareCursors } from '../../stores/cursor.js';
 
 const log = createModuleLogger('context-transport');
 
@@ -18,6 +19,7 @@ import { buildMessageMap, formatMessage } from '../../context/ContextAssembler.j
 import { BRIEFING_TIMEZONE } from '../../duty-briefing/constants.js';
 import { formatPromptTime } from '../../format-time.js';
 import { checkContextBudget, type DegradationResult } from '../../orchestration/DegradationPolicy.js';
+import { cursorFor } from '../../stores/cursor.js';
 import { DeliveryCursorStore } from '../../stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../../stores/ports/DraftStore.js';
 import type { IMessageStore, StoredMessage, StoredToolEvent } from '../../stores/ports/MessageStore.js';
@@ -189,6 +191,7 @@ export interface RouteOptions {
         threadId: string,
         userId: string,
         catId: string,
+        parentInvocationId?: string,
       ) => Array<{
         entryId?: string;
         source: string;
@@ -496,11 +499,13 @@ export function collectExactPromptMessageIds(...groups: ReadonlyArray<ReadonlyAr
  * observe fewer relevant messages and produce an older boundary; this helper
  * prevents regressing the deferred ack boundary.
  *
- * Assumes message IDs are lexicographically monotonic (timestamp+seq prefix).
+ * #1200 P2-3: uses compareCursors for pair-domain comparison instead of raw lex `>`.
+ * Both v2-v2 and v1-v1 comparisons are correct; cross-format returns 0 (no-advance)
+ * which is safe — new writes should be canonicalized to v2 by the cursor store.
  */
 export function upsertMaxBoundary(cursorBoundaries: Map<string, string>, catId: string, boundaryId: string): void {
   const current = cursorBoundaries.get(catId);
-  if (!current || boundaryId > current) {
+  if (!current || compareCursors(boundaryId, current) > 0) {
     cursorBoundaries.set(catId, boundaryId);
   }
 }
@@ -1240,7 +1245,9 @@ export async function assembleIncrementalContext(
   // Return empty context with degradation rather than skipping the trim (old behavior of `> 0` guard).
   if (effectiveTokenBudget <= 0) {
     const zeroBudgetDegradation = `⚠️ 增量上下文预算耗尽: 系统提示已占满 prompt 预算，${capped.length} 条未读消息全部丢弃`;
-    const zeroBoundaryId = capped[capped.length - 1]?.id;
+    // #1200: v2 cursor for CAS ingress — graded: v2 when visibilitySeq present, v1 fallback otherwise
+    const zeroLastMsg = capped[capped.length - 1];
+    const zeroBoundaryId = zeroLastMsg ? cursorFor(zeroLastMsg) : undefined;
     return {
       contextText: navigationHeader,
       boundaryId: zeroBoundaryId,
@@ -1310,7 +1317,9 @@ export async function assembleIncrementalContext(
     degradation = `⚠️ 增量上下文 token 预算截断: ${capped.length} 条消息超出 token 预算(${effectiveTokenBudget})，已保留最近 ${finalCapped.length} 条`;
   }
 
-  const boundaryId = finalCapped[finalCapped.length - 1]?.id;
+  // #1200: v2 cursor for CAS ingress — graded issuance via cursorFor
+  const lastCappedMsg = finalCapped[finalCapped.length - 1];
+  const boundaryId = lastCappedMsg ? cursorFor(lastCappedMsg) : undefined;
   return {
     contextText: `${navigationHeader}\n[对话历史增量 - 未发送过 ${finalCapped.length} 条]\n${finalLines.join('\n')}\n[/对话历史]`,
     boundaryId,
@@ -1541,7 +1550,9 @@ async function assembleSmartWindowContext(
 
   // 7. Respect effectiveMaxContextTokens (same as warm path)
   const effectiveTokenBudget = options?.effectiveMaxContextTokens ?? budget.maxContextTokens;
-  const boundaryId = relevant[relevant.length - 1]?.id;
+  // #1200: v2 cursor for CAS ingress — graded issuance via cursorFor
+  const lastRelevantMsg = relevant[relevant.length - 1];
+  const boundaryId = lastRelevantMsg ? cursorFor(lastRelevantMsg) : undefined;
 
   if (effectiveTokenBudget <= 0) {
     return {

@@ -7,6 +7,7 @@ import {
   autoDreamTools,
   callbackMemoryTools,
   callbackTools,
+  communityRouteAcceptanceTools,
   distillationTools,
   evalLifecycleTools,
   eventMemoryTools,
@@ -222,6 +223,7 @@ export function applyReadonlyFilter(
 const COLLAB_TOOL_SOURCES: readonly ToolDef[] = [
   ...callbackTools,
   ...autoDreamTools,
+  ...communityRouteAcceptanceTools, // F168 AC-F4/F7: assigned-cat route acceptance bridge
   ...externalReviewVerdictTools, // F168 F-Step3: atomic external verdict + delivery custody
   ...localReviewVerdictTools, // F167: persisted local verdict + exact action fence
   ...externalRuntimeSessionCallbackTools,
@@ -442,8 +444,10 @@ export const EXPLICIT_TOOL_ANNOTATIONS: Record<string, Annotation> = {
   cat_cafe_capture_paw_feel: A_WRITE_SAFE,
   cat_cafe_list_paw_feel_inbox: A_READ_LOCAL,
   cat_cafe_triage_paw_feel: A_WRITE_SAFE,
+  cat_cafe_validate_community_route: A_WRITE_SAFE,
   cat_cafe_record_external_review_verdict: A_WRITE_SAFE,
   cat_cafe_record_local_review_verdict: A_WRITE_SAFE,
+  cat_cafe_recover_local_review_verdict: A_WRITE_SAFE,
   cat_cafe_register_pr_tracking: A_WRITE_SAFE,
   cat_cafe_register_issue_tracking: A_WRITE_SAFE,
   cat_cafe_get_thread_metadata: A_READ_LOCAL,

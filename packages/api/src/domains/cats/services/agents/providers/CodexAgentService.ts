@@ -12,7 +12,8 @@
  *   item.completed (agent_message) → text
  *   item.completed (command_execution) → tool_result
  *   item.completed (file_change) → tool_use
- *   turn.started / turn.completed / 其余 item 事件 → 跳过
+ *   turn.started / 其余 item 事件 → 跳过
+ *   successful stream end after turn.completed → exactly one runtime-canonical final signature
  */
 
 import { createHash } from 'node:crypto';
@@ -20,7 +21,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { type CatId, createCatId, resolveCliEffortOverride } from '@cat-cafe/shared';
+import { type CatId, catRegistry, createCatId, resolveCliEffortOverride } from '@cat-cafe/shared';
 import { parse as parseToml } from 'smol-toml';
 import {
   resolveBinaryRoot,
@@ -73,7 +74,7 @@ import type {
 } from '../../types.js';
 import type { AuditLogSink, RawArchiveSink } from '../providers/codex-audit-hooks.js';
 import { extractCommandExecutionLifecycle, sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
-import { type CodexStreamState, transformCodexEvent } from '../providers/codex-event-transform.js';
+import { type CodexStreamState, finalizeCodexStream, transformCodexEvent } from '../providers/codex-event-transform.js';
 import { scanAndPublishCodexImages } from '../providers/codex-image-scanner.js';
 import {
   type CodexSessionContextSnapshotResolver,
@@ -324,6 +325,9 @@ function toTomlString(value: string): string {
   });
   return `"${escaped}"`;
 }
+
+const CODEX_SIGNATURE_BOUNDARY_INSTRUCTION =
+  'Codex output boundary: do not append the cat signature to commentary/progress messages; append it exactly once, only at the end of the final response.';
 
 /** Build the structured Codex reasoning-effort config argument. */
 export function buildCodexReasoningArgs(effortLevel: string): string[] {
@@ -932,7 +936,9 @@ export class CodexAgentService implements AgentService {
   ): Promise<{ value: string } | { error: string; metadata: MessageMetadata }> {
     try {
       const compiledL0 = await this.l0CompilerFn({ catId: this.catId as string, userId });
-      return { value: compiledL0 };
+      const separator = compiledL0.endsWith('\n') ? '\n' : '\n\n';
+      const providerInstructions = `${compiledL0}${separator}${CODEX_SIGNATURE_BOUNDARY_INSTRUCTION}`;
+      return { value: providerInstructions };
     } catch (err) {
       return {
         error: `L0 compile failed for ${this.catId as string}: ${(err as Error).message}`,
@@ -1439,7 +1445,17 @@ export class CodexAgentService implements AgentService {
       // bookkeeping is duplicate + drift-prone. Codex 0.98+ recovery quirks
       // (compaction retry, turn.failed then new turn.started + turn.completed)
       // are handled canonically at spawn layer via localFinalTerminal tracking.
-      const codexStreamState: CodexStreamState = { hadPriorTextTurn: false };
+      const catConfig = catRegistry.tryGet(this.catId as string)?.config;
+      const signatureIdentity = catConfig?.nickname?.trim() || catConfig?.displayName?.trim();
+      const codexStreamState: CodexStreamState = {
+        hadPriorTextTurn: false,
+        ...(signatureIdentity
+          ? {
+              signatureIdentity,
+              canonicalSignature: `[${signatureIdentity}/${effectiveModel}🐾]`,
+            }
+          : {}),
+      };
 
       for await (const event of events) {
         if (pooledSessionInUse && pooledCredentialEnv && isCodexThreadStartedEvent(event)) {
@@ -1691,6 +1707,11 @@ export class CodexAgentService implements AgentService {
             yield { ...result, metadata };
           }
         }
+      }
+
+      const finalSignature = finalizeCodexStream(codexStreamState, this.catId);
+      if (finalSignature) {
+        yield { ...finalSignature, metadata };
       }
 
       // Estimate cost from pricing table when CLI doesn't provide costUsd.

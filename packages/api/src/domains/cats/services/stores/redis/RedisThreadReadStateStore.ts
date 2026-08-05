@@ -14,12 +14,38 @@ import { ReadStateKeys } from '../redis-keys/read-state-keys.js';
  * ARGV[1] = new messageId
  * ARGV[2] = updatedAt timestamp
  * Returns 1 if advanced, 0 if rejected (same or older).
+ *
+ * #1200 codex R14 + Sol R14: Fail-closed on cross-format comparison.
+ * String comparison gives wrong results for v1-vs-v2: 'v' (0x76) > any digit,
+ * so v2 always "wins" even when it represents an earlier message.
+ * Same-format is safe: v2 lex ≡ (seq, id) order; v1 lex ≈ time order.
+ * Cross-format → reject; app-layer pre-reconcile upgrades stored v1→v2
+ * before reaching this CAS so same-format comparison is the norm.
  */
 const ACK_CAS_LUA = `
 local cur = redis.call('HGET', KEYS[1], 'lastReadMessageId')
-if cur and ARGV[1] <= cur then return 0 end
+if cur then
+  local curV2 = string.sub(cur, 1, 3) == 'v2:'
+  local newV2 = string.sub(ARGV[1], 1, 3) == 'v2:'
+  if curV2 ~= newV2 then return 0 end
+  if ARGV[1] <= cur then return 0 end
+end
 redis.call('HSET', KEYS[1], 'lastReadMessageId', ARGV[1], 'updatedAt', ARGV[2])
 return 1
+`;
+
+/**
+ * #1200 codex R13: Atomic reconcile of read-state cursor format.
+ * CAS: if stored lastReadMessageId == ARGV[1] (old v1), upgrade to ARGV[2] (v2).
+ * Returns 1 if reconciled, 0 if stored changed (race) or didn't match.
+ */
+const RECONCILE_READ_CURSOR_LUA = `
+local cur = redis.call('HGET', KEYS[1], 'lastReadMessageId')
+if cur == ARGV[1] then
+  redis.call('HSET', KEYS[1], 'lastReadMessageId', ARGV[2])
+  return 1
+end
+return 0
 `;
 
 export class RedisThreadReadStateStore implements IThreadReadStateStore {
@@ -48,6 +74,17 @@ export class RedisThreadReadStateStore implements IThreadReadStateStore {
   async ack(userId: string, threadId: string, messageId: string): Promise<boolean> {
     const key = ReadStateKeys.cursor(userId, threadId);
     const result = await this.redis.eval(ACK_CAS_LUA, 1, key, messageId, String(Date.now()));
+    return result === 1;
+  }
+
+  /**
+   * #1200: Atomically reconcile stored v1 read cursor → v2.
+   * Same pattern as DeliveryCursorStore.preReconcile: CAS on old value
+   * so concurrent writes don't lose data.
+   */
+  async reconcileReadCursor(userId: string, threadId: string, oldV1: string, newV2: string): Promise<boolean> {
+    const key = ReadStateKeys.cursor(userId, threadId);
+    const result = await this.redis.eval(RECONCILE_READ_CURSOR_LUA, 1, key, oldV1, newV2);
     return result === 1;
   }
 

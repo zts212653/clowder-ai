@@ -339,6 +339,12 @@ export class QueuedMessageCustodyStartupReconciler {
       const message = await this.deps.messageStore.getById(messageId);
       const current = message?.queueCustody;
       if (!message || message.deliveryStatus !== 'queued' || !current) return null;
+      if (current.status === 'terminal' && (current.withdrawnByCatIds?.length ?? 0) > 0) {
+        // Author withdrawal intentionally leaves deliveryStatus=queued so the
+        // owner timeline keeps the authored body. It is terminal custody, not
+        // an orphan to publish or restore after restart.
+        return { message, terminalized: true, handledTargets: 0, failedTargets: 0 };
+      }
       const built = await this.buildRestartProjection(message, current);
       if (sameActiveProjection(current, built.next)) {
         return { message, terminalized: false, handledTargets: 0, failedTargets: 0 };
@@ -378,6 +384,25 @@ export class QueuedMessageCustodyStartupReconciler {
     // disappeared during restart. This prevents requested/delivered from
     // remaining active forever while never inventing a read.
     const reminderProjection = resolveRestartReminderAttempts(current, now);
+    const authorIntentByCatId = current.authorIntentByCatId ? structuredClone(current.authorIntentByCatId) : undefined;
+    if (authorIntentByCatId) {
+      for (const catId of target.pending) {
+        const authorIntent = authorIntentByCatId[catId];
+        if (
+          authorIntent?.requested !== 'continue_current' ||
+          authorIntent.fallbackAt !== undefined ||
+          !authorIntent.boundParentInvocationId
+        ) {
+          continue;
+        }
+        const hadExposure = (current.bodyExposures ?? []).some((exposure) => exposure.targetCatId === catId);
+        authorIntentByCatId[catId] = {
+          ...authorIntent,
+          fallbackAt: now,
+          fallbackReason: hadExposure ? 'parent_non_success_after_exposure' : 'parent_terminal_before_exposure',
+        };
+      }
+    }
 
     for (const catId of current.steerRequestedByCatIds ?? []) {
       if (!target.pending.has(catId)) continue;
@@ -407,6 +432,7 @@ export class QueuedMessageCustodyStartupReconciler {
         ...stableCurrent,
         revision: current.revision + 1,
         status: terminal ? 'terminal' : 'queued',
+        ...(authorIntentByCatId ? { authorIntentByCatId } : {}),
         pendingTargetCats: [...target.pending] as CatId[],
         notifiedByCatIds: [...target.notified] as CatId[],
         ...(Object.keys(target.awakenedInvocationIdByCatId).length > 0
@@ -493,6 +519,7 @@ export class QueuedMessageCustodyStartupReconciler {
       source: 'user',
       targetCats: pendingTargets,
       allTargetCats: allTargets,
+      ...(custody.authorIntentByCatId ? { authorIntentByCatId: structuredClone(custody.authorIntentByCatId) } : {}),
       queuedNotifiedByCatIds: filterTargets(custody.notifiedByCatIds),
       queuedAwakenedInvocationIdByCatId: filterInvocationMap(custody.awakenedInvocationIdByCatId ?? {}),
       queuedAwakenedAtByCatId: filterTimestampMap(custody.awakenedAtByCatId ?? {}),

@@ -10,6 +10,7 @@
 //   - Convention-edge expansion via ConventionGraphAdapter (Phase C: l0-prompt-builder domain)
 //   - Provenance visible per hint (AC-B2)
 
+import type { ExpansionHintTargetRef } from '@cat-cafe/shared';
 import type { ConventionGraphAdapter } from './CoverageSearchService.js';
 import type { ExpansionProvenance, ExpansionSourceType } from './coverage-search-types.js';
 import type { EvidenceItem, IEvidenceStore, SearchOptions } from './interfaces.js';
@@ -21,6 +22,7 @@ export interface ExpansionHint {
   title: string;
   kind: string;
   sourcePath?: string;
+  targetRef: ExpansionHintTargetRef;
   provenance: ExpansionProvenance;
 }
 
@@ -29,6 +31,34 @@ export interface TopkExpansionOptions {
   maxHitsToExpand?: number;
   /** Max hints per expansion type (default 3) */
   maxHintsPerType?: number;
+}
+
+// ── F256 health funnel: per-stage telemetry ─────────────────────────
+
+export interface ExpansionSourceFunnel {
+  probed: number;
+  added: number;
+  deduped: number;
+}
+
+export interface ExpansionConventionEdgeFunnel {
+  attempted: boolean;
+  added: number;
+  deduped: number;
+  staleSkipped: number;
+}
+
+export interface ExpansionFunnel {
+  attempted: boolean;
+  keyword: ExpansionSourceFunnel;
+  sourceThread: ExpansionSourceFunnel;
+  conventionEdge: ExpansionConventionEdgeFunnel;
+  presented: number;
+}
+
+export interface ExpandWithMetaResult {
+  hints: ExpansionHint[];
+  funnel: ExpansionFunnel;
 }
 
 // Scanner-generated keywords (section headings, wikilinks, frontmatter topics)
@@ -48,7 +78,24 @@ export class TopkExpansionService {
   }
 
   async expand(topResults: EvidenceItem[], _query: string, options?: TopkExpansionOptions): Promise<ExpansionHint[]> {
-    if (topResults.length === 0) return [];
+    const result = await this.expandWithMeta(topResults, _query, options);
+    return result.hints;
+  }
+
+  async expandWithMeta(
+    topResults: EvidenceItem[],
+    _query: string,
+    options?: TopkExpansionOptions,
+  ): Promise<ExpandWithMetaResult> {
+    const emptyFunnel: ExpansionFunnel = {
+      attempted: false,
+      keyword: { probed: 0, added: 0, deduped: 0 },
+      sourceThread: { probed: 0, added: 0, deduped: 0 },
+      conventionEdge: { attempted: false, added: 0, deduped: 0, staleSkipped: 0 },
+      presented: 0,
+    };
+
+    if (topResults.length === 0) return { hints: [], funnel: emptyFunnel };
 
     const maxHits = options?.maxHitsToExpand ?? 3;
     const maxPerType = options?.maxHintsPerType ?? 3;
@@ -59,16 +106,26 @@ export class TopkExpansionService {
 
     const hitsToExpand = topResults.slice(0, maxHits);
 
+    const funnel: ExpansionFunnel = {
+      attempted: true,
+      keyword: { probed: 0, added: 0, deduped: 0 },
+      sourceThread: { probed: 0, added: 0, deduped: 0 },
+      conventionEdge: { attempted: false, added: 0, deduped: 0, staleSkipped: 0 },
+      presented: 0,
+    };
+
     // ── Frontmatter-alias expansion ──────────────────────────────────
-    await this.expandViaKeywords(hitsToExpand, seen, hints, maxPerType);
+    await this.expandViaKeywords(hitsToExpand, seen, hints, maxPerType, funnel.keyword);
 
     // ── Source-thread expansion ──────────────────────────────────────
-    await this.expandViaSourceThreads(hitsToExpand, seen, hints, maxPerType);
+    await this.expandViaSourceThreads(hitsToExpand, seen, hints, maxPerType, funnel.sourceThread);
 
     // ── Convention-edge expansion (Phase C: F242 extractor + l0-prompt-builder) ──
-    await this.expandViaConventionEdges(hitsToExpand, seen, hints, maxPerType);
+    await this.expandViaConventionEdges(hitsToExpand, seen, hints, maxPerType, funnel.conventionEdge);
 
-    return hints;
+    funnel.presented = hints.length;
+
+    return { hints, funnel };
   }
 
   // ── Private helpers ────────────────────────────────────────────────
@@ -78,6 +135,7 @@ export class TopkExpansionService {
     seen: Set<string>,
     hints: ExpansionHint[],
     maxPerType: number,
+    meter?: ExpansionSourceFunnel,
   ): Promise<void> {
     const expandTerms = new Set<string>();
     for (const item of hits) {
@@ -101,13 +159,17 @@ export class TopkExpansionService {
       for (const item of result.items) {
         if (added >= maxPerType) break;
         const key = item.anchor.toLowerCase();
-        if (seen.has(key)) continue;
+        if (seen.has(key)) {
+          if (meter) meter.deduped++;
+          continue;
+        }
         seen.add(key);
         hints.push({
           anchor: item.anchor,
           title: item.title,
           kind: item.kind,
           sourcePath: item.sourcePath,
+          targetRef: expansionTargetRef(item),
           provenance: {
             source: 'frontmatter-alias' as ExpansionSourceType,
             via: `keyword:${term}`,
@@ -117,6 +179,10 @@ export class TopkExpansionService {
         added++;
       }
     }
+    if (meter) {
+      meter.probed = probed;
+      meter.added = added;
+    }
   }
 
   private async expandViaConventionEdges(
@@ -124,8 +190,11 @@ export class TopkExpansionService {
     seen: Set<string>,
     hints: ExpansionHint[],
     maxPerType: number,
+    meter?: ExpansionConventionEdgeFunnel,
   ): Promise<void> {
     if (!this.conventionGraph || !this.conventionGraph.isAvailable()) return;
+
+    if (meter) meter.attempted = true;
 
     let added = 0;
     for (const item of hits) {
@@ -136,9 +205,15 @@ export class TopkExpansionService {
         if (added >= maxPerType) break;
 
         const key = consumer.anchor.toLowerCase();
-        if (seen.has(key)) continue;
+        if (seen.has(key)) {
+          if (meter) meter.deduped++;
+          continue;
+        }
 
-        if (consumer.stale) continue;
+        if (consumer.stale) {
+          if (meter) meter.staleSkipped++;
+          continue;
+        }
 
         seen.add(key);
         hints.push({
@@ -146,6 +221,11 @@ export class TopkExpansionService {
           title: consumer.title,
           kind: consumer.kind,
           sourcePath: consumer.filePath,
+          targetRef: {
+            kind: 'doc',
+            sourcePath: consumer.filePath ?? '',
+            anchor: consumer.anchor,
+          },
           provenance: {
             source: 'convention-edge' as ExpansionSourceType,
             via: `${item.anchor} → ${consumer.anchor}`,
@@ -155,6 +235,7 @@ export class TopkExpansionService {
         added++;
       }
     }
+    if (meter) meter.added = added;
   }
 
   private async expandViaSourceThreads(
@@ -162,6 +243,7 @@ export class TopkExpansionService {
     seen: Set<string>,
     hints: ExpansionHint[],
     maxPerType: number,
+    meter?: ExpansionSourceFunnel,
   ): Promise<void> {
     const threadRefs = new Set<string>();
     const threadPattern = /thread-[a-z0-9_-]+/gi;
@@ -196,13 +278,17 @@ export class TopkExpansionService {
       for (const item of result.items) {
         if (added >= maxPerType) break;
         const key = item.anchor.toLowerCase();
-        if (seen.has(key)) continue;
+        if (seen.has(key)) {
+          if (meter) meter.deduped++;
+          continue;
+        }
         seen.add(key);
         hints.push({
           anchor: item.anchor,
           title: item.title,
           kind: item.kind,
           sourcePath: item.sourcePath,
+          targetRef: expansionTargetRef(item),
           provenance: {
             source: 'source-thread' as ExpansionSourceType,
             via: ref,
@@ -212,5 +298,21 @@ export class TopkExpansionService {
         added++;
       }
     }
+    if (meter) {
+      meter.probed = probed;
+      meter.added = added;
+    }
   }
+}
+
+function expansionTargetRef(item: Pick<EvidenceItem, 'anchor' | 'kind' | 'sourcePath'>): ExpansionHintTargetRef {
+  if (item.kind === 'thread' && item.anchor.startsWith('thread-')) {
+    const threadId = item.anchor.slice('thread-'.length);
+    if (threadId) return { kind: 'thread', threadId };
+  }
+  return {
+    kind: 'doc',
+    sourcePath: item.sourcePath ?? '',
+    anchor: item.anchor,
+  };
 }

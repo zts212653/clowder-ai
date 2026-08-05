@@ -1,4 +1,5 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { normalizeJsonUnicode } from '../../../../../utils/json-unicode.js';
 import type { AppendMessageInput, MessageAppendListener, StoredMessage } from '../ports/MessageStore.js';
 import { assertValidAppendMessageInput, DEFAULT_THREAD_ID, generateSortableId } from '../ports/MessageStore.js';
 import { assertQueueCustodyMessageBinding } from '../ports/queued-message-custody.js';
@@ -68,6 +69,9 @@ return {'committed', messageId}
 `;
 
 function serializeMessage(message: AppendMessageInput, id: string, threadId: string): Record<string, string> {
+  // F288: split pluginMessage from host extra — stored as independent hash field
+  const { pluginMessage, ...hostExtra } = message.extra ?? {};
+  const hasHostExtra = Object.keys(hostExtra).length > 0;
   return {
     id,
     threadId,
@@ -79,7 +83,8 @@ function serializeMessage(message: AppendMessageInput, id: string, threadId: str
     ...(message.contentBlocks !== undefined ? { contentBlocks: JSON.stringify(message.contentBlocks) } : {}),
     ...(message.toolEvents !== undefined ? { toolEvents: JSON.stringify(message.toolEvents) } : {}),
     ...(message.metadata ? { metadata: JSON.stringify(message.metadata) } : {}),
-    ...(message.extra ? { extra: serializeExtra(message.extra) } : {}),
+    ...(hasHostExtra ? { extra: serializeExtra(hostExtra) } : {}),
+    ...(pluginMessage ? { pluginMessage: JSON.stringify(pluginMessage) } : {}),
     ...(message.thinking ? { thinking: message.thinking } : {}),
     ...(message.origin ? { origin: message.origin } : {}),
     ...(message.visibility ? { visibility: message.visibility } : {}),
@@ -104,7 +109,8 @@ export async function appendMessage(input: {
   loadById: (messageId: string) => Promise<StoredMessage | null>;
   onAppend?: MessageAppendListener;
 }): Promise<StoredMessage> {
-  const { redis, message, ttlSeconds, loadById, onAppend } = input;
+  const { redis, ttlSeconds, loadById, onAppend } = input;
+  const message = normalizeJsonUnicode(input.message);
   assertValidAppendMessageInput(message);
   assertQueueCustodyMessageBinding(message);
 

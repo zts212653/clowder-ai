@@ -25,6 +25,7 @@ import { projectFreshnessClosure } from '../domains/cats/services/freshness/glas
 import { projectFreshnessSupplementForHistory } from '../domains/cats/services/freshness/glass-box/freshness-supplement-history-projection.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { TranscriptWriter } from '../domains/cats/services/session/TranscriptWriter.js';
+import { gateForDurableSlot } from '../domains/cats/services/stores/cursor-activation.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
@@ -50,7 +51,63 @@ import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js'
 
 const log = createModuleLogger('routes/threads');
 const WRITE_OPS = new Set(['edit', 'create', 'delete']);
-const PUBLISHED_TIMELINE_READ = { includeQueuedCatMessages: true } as const;
+
+/**
+ * #1200: Pre-reconcile stored read cursor before CAS ack.
+ * Converts stored v1 → v2 atomically so ACK_CAS_LUA can compare same-format.
+ * Without this, the CAS correctly fails-closed on cross-format but the ack
+ * silently no-ops. Pre-reconcile makes the ack succeed when it should.
+ *
+ * Best-effort: canonicalization or CAS failure is silent — the Lua script
+ * enforces fail-closed at the store boundary, preventing read-state regression.
+ */
+async function preReconcileReadCursor(
+  readStateStore: IThreadReadStateStore,
+  messageStore: IMessageStore | null | undefined,
+  userId: string,
+  threadId: string,
+  incomingCursor: string,
+): Promise<void> {
+  if (!incomingCursor.startsWith('v2:')) return;
+  if (!messageStore?.canonicalizeCursor) return;
+  if (!readStateStore.reconcileReadCursor) return;
+
+  const stored = await readStateStore.get(userId, threadId);
+  if (!stored || stored.lastReadMessageId.startsWith('v2:')) return;
+
+  try {
+    const storedV2 = await messageStore.canonicalizeCursor(stored.lastReadMessageId, threadId);
+    if (storedV2 !== stored.lastReadMessageId) {
+      await readStateStore.reconcileReadCursor(userId, threadId, stored.lastReadMessageId, storedV2);
+    }
+  } catch {
+    // Silent: ACK_CAS_LUA will fail-closed on cross-format, preventing regression.
+  }
+}
+
+/**
+ * #1269: Gated read-state ack — applies durable-slot gate before CAS.
+ * Reads existing read-state to decide format, then conditionally
+ * pre-reconciles and acks with the gated cursor value.
+ */
+async function gatedReadStateAck(
+  readStateStore: IThreadReadStateStore,
+  messageStore: IMessageStore | null | undefined,
+  userId: string,
+  threadId: string,
+  incomingCursor: string,
+): Promise<boolean> {
+  const existing = await readStateStore.get(userId, threadId);
+  const existingCursor = existing?.lastReadMessageId ?? null;
+  const gated = gateForDurableSlot(incomingCursor, existingCursor);
+
+  // Pre-reconcile only when writing v2 — stored may be v1, need same-format for ACK_CAS_LUA
+  if (gated.startsWith('v2:')) {
+    await preReconcileReadCursor(readStateStore, messageStore, userId, threadId, gated);
+  }
+
+  return readStateStore.ack(userId, threadId, gated);
+}
 
 interface ThreadIndexBuilder {
   markThreadDirty(threadId: string): void;
@@ -1157,10 +1214,13 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     let advancedCount = 0;
 
     for (const thread of threads) {
-      const messages = await messageStore.getByThread(thread.id, undefined, undefined, PUBLISHED_TIMELINE_READ);
-      if (messages.length === 0) continue;
-      const latestId = messages[messages.length - 1]?.id;
-      const advanced = await opts.readStateStore.ack(userId, thread.id, latestId);
+      // #1200/#1269: Use visibility-domain latest — single authority.
+      // Timeline-published queued cat speech now has visibilitySeq at append,
+      // so getLatestVisibleCursor covers all visible items without fallback.
+      const latest = await messageStore.getLatestVisibleCursor(thread.id);
+      if (!latest) continue;
+      // #1269: Gated ack — applies durable-slot gate + conditional pre-reconcile
+      const advanced = await gatedReadStateAck(opts.readStateStore!, messageStore, userId, thread.id, latest.cursor);
       if (advanced) advancedCount++;
     }
 
@@ -1198,15 +1258,23 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     }
 
     // P1-3: Validate upToMessageId belongs to this thread
+    // #1200: Also canonicalize raw v1 ID → v2 cursor for correct CAS lex comparison.
+    // Without canonicalization, a raw v1 ID permanently loses to any v2 cursor
+    // in SET_IF_GREATER because 'v' (0x76) > any digit — the ack silently no-ops.
+    let cursorToken = parseResult.data.upToMessageId;
     if (messageStore) {
       const msg = await messageStore.getById(parseResult.data.upToMessageId);
       if (!msg || msg.threadId !== id) {
         reply.status(400);
         return { error: 'upToMessageId does not belong to this thread' };
       }
+      if (messageStore.canonicalizeCursor) {
+        cursorToken = await messageStore.canonicalizeCursor(parseResult.data.upToMessageId, id);
+      }
     }
 
-    const advanced = await opts.readStateStore.ack(userId, id, parseResult.data.upToMessageId);
+    // #1269: Gated ack — applies durable-slot gate + conditional pre-reconcile
+    const advanced = await gatedReadStateAck(opts.readStateStore, messageStore, userId, id, cursorToken);
     return { advanced };
   });
 
@@ -1237,13 +1305,17 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Thread not found' };
     }
 
-    const messages = await messageStore.getByThread(id, 1, undefined, PUBLISHED_TIMELINE_READ);
-    if (messages.length === 0) {
+    // #1200/#1269: Use visibility-domain latest — single authority.
+    // Timeline-published queued cat speech now has visibilitySeq at append,
+    // so getLatestVisibleCursor covers all visible items without fallback.
+    const latest = await messageStore.getLatestVisibleCursor(id);
+    if (!latest) {
       return { advanced: false, reason: 'no messages' };
     }
 
-    const latestId = messages[messages.length - 1]?.id;
-    const advanced = await opts.readStateStore.ack(userId, id, latestId);
-    return { advanced, messageId: latestId };
+    // #1269: Gated ack — applies durable-slot gate + conditional pre-reconcile
+    const advanced = await gatedReadStateAck(opts.readStateStore, messageStore, userId, id, latest.cursor);
+    // #1200 RED #23b: return both raw messageId and canonical v2 cursor
+    return { advanced, messageId: latest.messageId, cursor: latest.cursor };
   });
 };

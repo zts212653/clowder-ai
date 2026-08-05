@@ -576,7 +576,7 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
 
   test('spawns agy print mode with repo access and maps plain stdout to text', async (t) => {
     const savedTimeout = process.env.CLI_TIMEOUT_MS;
-    delete process.env.CLI_TIMEOUT_MS;
+    process.env.CLI_TIMEOUT_MS = '0';
     t.after(() => {
       if (savedTimeout === undefined) delete process.env.CLI_TIMEOUT_MS;
       else process.env.CLI_TIMEOUT_MS = savedTimeout;

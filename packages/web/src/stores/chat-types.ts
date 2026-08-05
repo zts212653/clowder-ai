@@ -534,6 +534,8 @@ export interface CompactBoundaryTelemetry {
 }
 
 export interface CatInvocationInfo {
+  /** Exact concrete provider carrier; absent only for legacy events and fails closed in consumers. */
+  freshnessCarrierCapability?: import('@cat-cafe/shared').FreshnessCarrierCapability;
   sessionId?: string;
   /** Chain/parent invocation id (legacy SoT, liveness/queue/cancel scope). F194 Phase Z3 keeps
    *  this for backward compat with hydration code that reads `catInvocations[catId].invocationId`. */
@@ -654,7 +656,10 @@ export interface QueueEntry {
   intent: string;
   status: 'queued' | 'processing';
   /** F254 canonical per-target read projection, hydrated from GET /queue after F5. */
-  targetStates?: Record<string, 'queued' | 'notified' | 'awakened' | 'seen' | 'failed' | 'steering' | 'handled'>;
+  targetStates?: Record<
+    string,
+    'queued' | 'notified' | 'awakened' | 'seen' | 'failed' | 'steering' | 'withdrawn' | 'handled'
+  >;
   createdAt: number;
   /** F122B: auto-execute without waiting for steer */
   autoExecute?: boolean;

@@ -1,5 +1,6 @@
 'use client';
 
+import type { FreshnessCarrierCapability } from '@cat-cafe/shared';
 import { type QueueReminderAttemptState, SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
 import { closestCenter, DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -176,6 +177,16 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
       ),
     [activeInvocations],
   );
+  const activeCarrierCapabilityByCatId = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.values(activeInvocations).map((invocation) => [
+          invocation.catId,
+          catInvocations[invocation.catId]?.freshnessCarrierCapability,
+        ]),
+      ) as Readonly<Record<string, FreshnessCarrierCapability | undefined>>,
+    [activeInvocations, catInvocations],
+  );
 
   const handleRemove = useCallback(
     async (entryId: string) => {
@@ -191,17 +202,23 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           setQueue(threadId, prevQueue);
           addToast({
             type: 'error',
-            title: '删除失败',
-            message: data?.error ?? '删除失败，请重试',
+            title: '撤出失败',
+            message: data?.error ?? '撤出失败，请重试',
             threadId,
             duration: 5000,
           });
           return;
         }
-        addToast({ type: 'success', title: '已删除', message: '已从队列删除', threadId, duration: 2500 });
+        addToast({
+          type: 'success',
+          title: '已撤出待处理',
+          message: '原消息仍保留在对话历史中',
+          threadId,
+          duration: 3000,
+        });
       } catch {
         setQueue(threadId, prevQueue);
-        addToast({ type: 'error', title: '删除失败', message: '删除失败，请重试', threadId, duration: 5000 });
+        addToast({ type: 'error', title: '撤出失败', message: '撤出失败，请重试', threadId, duration: 5000 });
       }
     },
     [addToast, queue, setQueue, threadId],
@@ -292,8 +309,31 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   }, [addToast, threadId]);
 
   const handleClear = useCallback(async () => {
-    await apiFetch(`/api/threads/${threadId}/queue`, { method: 'DELETE' });
-  }, [threadId]);
+    try {
+      const res = await apiFetch(`/api/threads/${threadId}/queue`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (Array.isArray(data?.queue)) setQueue(threadId, data.queue);
+        addToast({
+          type: 'error',
+          title: data?.code === 'QUEUE_WITHDRAWAL_PARTIAL' ? '部分撤出' : '撤出失败',
+          message: data?.error ?? '撤出失败，请重试',
+          threadId,
+          duration: 5000,
+        });
+        return;
+      }
+      addToast({
+        type: 'success',
+        title: '已全部撤出待处理',
+        message: '原消息仍保留在对话历史中',
+        threadId,
+        duration: 3000,
+      });
+    } catch {
+      addToast({ type: 'error', title: '撤出失败', message: '撤出失败，请重试', threadId, duration: 5000 });
+    }
+  }, [addToast, setQueue, threadId]);
 
   const handleSteerOpen = useCallback((entryId: string) => {
     setSteerEntryId(entryId);
@@ -467,8 +507,13 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           >
             {isCollapsed ? '展开' : '收起'}
           </button>
-          <button onClick={handleClear} className="text-xs text-cafe-muted hover:text-conn-red-text transition-colors">
-            清空
+          <button
+            type="button"
+            onClick={handleClear}
+            title="全部撤出待处理（保留原消息）"
+            className="text-xs text-cafe-muted hover:text-conn-red-text transition-colors"
+          >
+            全部撤出
           </button>
         </div>
       </div>
@@ -520,6 +565,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
                     onSteer={handleSteerOpen}
                     onRemind={handleRemind}
                     activeInvocationIdByCatId={activeInvocationIdByCatId}
+                    activeCarrierCapabilityByCatId={activeCarrierCapabilityByCatId}
                     remindingTargetKeys={remindingTargetKeys}
                   />
                 );

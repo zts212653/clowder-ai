@@ -9,7 +9,7 @@ tips_exempt: internal operations tool — board/reconciler/closure UX visible on
 
 # F168: Community Operations Board — 社区事务编排引擎
 
-> **Status**: infra-complete / ops-gap 🚧 — 管道精密但没流水（2026-06-20 operator review 后重新定位）| **基础设施 A→E 全部 merged ✅** | **Phase F backend + backfill + board UX merged, opus-47 vision guards PASS ✅** | **F-Step3 External Case Closure 已收敛、实现待续 🚧**（端到端生产流未完成）| **Owner**: Ragdoll (opus-4.8) | **Priority**: P1
+> **Status**: operational closure dogfood complete ✅（2026-08-04）| **基础设施 A→E 全部 merged ✅** | **Phase F backend + backfill + board UX merged, opus-47 vision guards PASS ✅** | **F-Step3 External Case Closure 真实 external case 已闭环 ✅** | **Owner**: Ragdoll (opus-4.8) | **Priority**: P1
 
 ## Reopen（2026-06-10，operator signoff）
 
@@ -21,7 +21,7 @@ tips_exempt: internal operations tool — board/reconciler/closure UX visible on
 
 **分工（operator 拍板 2026-06-10，2026-06-14 / 2026-06-17 更新）**：Phase D/E 由Maine Coon（@codex）主导 spec/AC/failure-mode/gate；实现与 review 保持跨个体铁律（Maine Coon实现则 opus/gpt52/47 review，opus 实现则Maine Coon强 review）。Phase C 由 opus 家族接手并 closed。原分工 fable plan + sonnet 实现，实测效果不理想；fable-5 下线后 operator 确认由 opus 们全程接手 Phase C。
 
-**Phase 总览**：A 事件引擎 ✅ → B Issue Signals ✅ → C Narrator + Role Registry + 路由 ✅ → D Closure UX + Reconciler ✅ → E 看板决策队列 ✅ → **F 运营闭环上线 🚧 backend + backfill + board UX + vision guards PASS / F-Step3 External Case Closure implementation pending（2026-06-20 operator 发起，2026-07-14 扩充）**。A→E = 基础设施全部就位；F = 把管道接上水，让 triage → 分配 → 作者更新 → 复审 → GitHub 送达 → 终态真正在生产跑起来。原 v1 文档（下方）保留为历史语境。
+**Phase 总览**：A 事件引擎 ✅ → B Issue Signals ✅ → C Narrator + Role Registry + 路由 ✅ → D Closure UX + Reconciler ✅ → E 看板决策队列 ✅ → **F 运营闭环上线 ✅ backend + backfill + board UX + vision guards PASS / F-Step3 External Case Closure 真实 external case 完成（2026-06-20 operator 发起，2026-07-14 扩充，2026-08-04 闭环）**。A→E = 基础设施全部就位；F = 把管道接上水，让 triage → 分配 → 作者更新 → 复审 → GitHub 送达 → 终态真正在生产跑起来。原 v1 文档（下方）保留为历史语境。
 
 **Phase A 完成（2026-06-10）**：PR #2203，commit `10c3c9bfdb`，squash-merged。Event Log + 纯函数状态机 + CommunityProjector + bootstrap CLI + 3 入口接线 + PR lifecycle + 看板 API（向后兼容）。6 轮 cloud review 全修。Phase B 由 @fable5 规划。
 
@@ -164,7 +164,7 @@ All merged, all tests green (4383 pass), all vision guards PASS.
 - [x] AC-F4: 目标猫验证是否属于自己 thread → 接单（accept）或退回（reject）（PR #2445 `/validate-route`）
 - [x] AC-F5: 退回 → 自动进 Decision Queue → operator重新分配（PR #2445 reject clears assignment + projection returns to triaged）
 - [x] AC-F6: operator在看板上能看到 issue → thread → 猫 的分配关系并点击跳转（PR #2450：board API resolves `assignedThreadName` + CommunityPanel SVG assignment chip）
-- [ ] AC-F7: 至少 1 条真实 external issue/PR 完整跑过 narrator/accept → 作者更新 → current-HEAD readiness → 本地复审 → GitHub delivery proof → terminal closure；只完成 triage/assignment 不算
+- [x] AC-F7: 至少 1 条真实 external issue/PR 完整跑过 narrator/accept → 作者更新 → current-HEAD readiness → 本地复审 → GitHub delivery proof → terminal closure；真实 case `clowder-ai#1252/#1233` 于 exact HEAD `13a7dd02072df2fbce8d0d3d66de187aac32e287` 五项 CI 全绿并交付 APPROVE，merge `f30e20c28e5bb83b1b6dba192111dba9a85c8a18`
 - [x] AC-F8: `currentHeadSha` / `lastReviewedHeadSha` / `lastDeliveredHeadSha` 分离；HEAD 变化使旧 CI、cloud verdict、readiness 与 wake dedup 失效
 - [x] AC-F9: 当前 HEAD 只有 CI pass 且 cloud policy 满足时才 wake 原 reviewer；cloud running/blocking 期间严格 state-only，同一 HEAD 最多 wake 一次
 - [x] AC-F10: `verdict_ready` 当轮强制落 `delivered(proof)` 或 TTL=0 `pending_delivery(owner, reason)`；不得以 thread 文本“未代发”结束责任

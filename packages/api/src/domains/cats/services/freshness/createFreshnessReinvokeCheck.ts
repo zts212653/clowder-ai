@@ -20,6 +20,7 @@ import {
   freshnessReinvokeSkipped,
   freshnessReinvokeTriggered,
 } from '../../../../infrastructure/telemetry/instruments.js';
+import { compareCursors } from '../stores/cursor.js';
 import type { IMessageStore } from '../stores/ports/MessageStore.js';
 import { FreshnessAttentionEventLog } from './FreshnessAttentionEventLog.js';
 import { FreshnessInvocationStateStore } from './FreshnessInvocationStateStore.js';
@@ -107,16 +108,35 @@ export function createFreshnessReinvokeCheck(deps: FreshnessReinvokeCheckDeps): 
       }
 
       // 3b. Filter out notices the cat has already read past (GPT52 R2 P1).
-      // Matches B2 FreshnessNoticeService.ts:157-172 pattern: notices with
+      // Matches B2 FreshnessNoticeService pattern: notices with
       // maxMessageId <= seenCursor are implicitly resolved (cat advanced past them).
-      // Without this filter, a stale high-priority notice can trigger spurious
-      // re-invoke when a newer low-priority message arrives (seenCursorCaughtUp=false
-      // due to the new message, but the notice's original message was already read).
-      // ID comparison is safe here: maxMessageId and seenCursor are both creation-time
-      // IDs (generateSortableId), so lexicographic order = creation order.
+      // #1200 Sol R5 P1-3: cross-format indeterminate → conservatively KEEP notice.
+      // compareCursors returns 0 for both "truly equal" (same string) and
+      // "cross-format indeterminate" (v1 vs v2, can't compare). `> 0` alone
+      // incorrectly removes indeterminate notices. Fix: keep if cmp > 0 OR
+      // (cmp === 0 AND strings differ = indeterminate, not truly resolved).
+      // True equality (same string) = notice maxMessageId matches seenCursor exactly → resolved.
       const preFilterNoticeCount = unresolvedNotices.length;
       if (seenCursor) {
-        unresolvedNotices = unresolvedNotices.filter((n) => n.maxMessageId > seenCursor);
+        // #1200 Sol R6 P2-2: prefer maxCursor (v2) for same-format comparison.
+        // Legacy events lack maxCursor — canonicalize maxMessageId via messageStore.
+        // Canonicalization failure → keep v1 → indeterminate → conservative keep (correct).
+        const resolved = await Promise.all(
+          unresolvedNotices.map(async (n) => {
+            let noticeCursor = n.maxCursor ?? n.maxMessageId;
+            if (!n.maxCursor && deps.messageStore.canonicalizeCursor) {
+              try {
+                noticeCursor = await deps.messageStore.canonicalizeCursor(n.maxMessageId, threadId);
+              } catch {
+                /* keep v1 — indeterminate is conservative-keep */
+              }
+            }
+            const cmp = compareCursors(noticeCursor, seenCursor);
+            const keep = cmp > 0 || (cmp === 0 && noticeCursor !== seenCursor);
+            return keep ? n : null;
+          }),
+        );
+        unresolvedNotices = resolved.filter((n): n is NonNullable<typeof n> => n !== null);
       }
       // Count of notices implicitly acked by cursor advancement (removed by filter).
       // Used for unified ack counting regardless of subsequent reinvoke/skip decision

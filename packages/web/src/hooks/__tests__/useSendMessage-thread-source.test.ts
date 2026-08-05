@@ -56,11 +56,13 @@ function SendRunner({
   activeThreadId,
   overrideThreadId,
   deliveryMode,
+  messageDisposition,
   onDone,
 }: {
   activeThreadId?: string;
   overrideThreadId?: string;
   deliveryMode?: 'queue';
+  messageDisposition?: 'continue_current' | 'next_work';
   onDone: () => void;
 }) {
   const { handleSend } = useSendMessage(activeThreadId);
@@ -69,8 +71,16 @@ function SendRunner({
   useEffect(() => {
     if (called.current) return;
     called.current = true;
-    handleSend('@布偶 @缅因 看图', undefined, overrideThreadId, undefined, deliveryMode).then(onDone);
-  }, [deliveryMode, handleSend, onDone, overrideThreadId]);
+    handleSend(
+      '@布偶 @缅因 看图',
+      undefined,
+      overrideThreadId,
+      undefined,
+      deliveryMode,
+      undefined,
+      messageDisposition,
+    ).then(onDone);
+  }, [deliveryMode, handleSend, messageDisposition, onDone, overrideThreadId]);
 
   return null;
 }
@@ -134,6 +144,26 @@ describe('useSendMessage thread source', () => {
     const payload = JSON.parse(String(mockApiFetch.mock.calls[0]?.[1]?.body));
     expect(payload.threadId).toBe('thread-route');
     expect(payload.threadId).not.toBe('thread-stale');
+  });
+
+  it('sends the typed author disposition in the JSON admission payload', async () => {
+    await act(async () => {
+      root.render(
+        React.createElement(SendRunner, {
+          activeThreadId: 'thread-route',
+          deliveryMode: 'queue',
+          messageDisposition: 'continue_current',
+          onDone: () => {},
+        }),
+      );
+    });
+
+    const payload = JSON.parse(String(mockApiFetch.mock.calls[0]?.[1]?.body));
+    expect(payload).toMatchObject({
+      threadId: 'thread-route',
+      deliveryMode: 'queue',
+      messageDisposition: 'continue_current',
+    });
   });
 
   it('falls back to useChatStore.getState().currentThreadId when route threadId is absent', async () => {

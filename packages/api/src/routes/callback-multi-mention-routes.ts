@@ -66,6 +66,7 @@ import {
 } from '../infrastructure/telemetry/instruments.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { resolveCallbackActionLeaseRef } from './callback-scope-helpers.js';
 
 // ── Singleton orchestrator ───────────────────────────────────────────
 let globalOrchestrator: MultiMentionOrchestrator | undefined;
@@ -755,6 +756,10 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
           // Baseline visibility (applies in ALL modes):
           if (msg.deletedAt) return false;
           if (!isDelivered(msg as unknown as Parameters<typeof isDelivered>[0])) return false;
+          // #1200 codex R12 P1: system-generated messages (persisted error badges)
+          // are display-only — route-helpers.ts:744-745 excludes them from freshness.
+          // All 4 freshness filter sites now consistent.
+          if (msg.userId === 'system') return false;
           if (msg.origin === 'briefing') return false;
           // Play-mode visibility:
           if (needsFreshnessPlayFilter) {
@@ -835,6 +840,9 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
         return reply.status(503).send({ status: 'action_fence_unavailable' });
       }
       try {
+        const incomingActionLeaseRef = body.action.replace
+          ? await resolveCallbackActionLeaseRef(record, deps.invocationRecordStore)
+          : undefined;
         const admission = await deps.actionSuccessorAdmissionService.admit({
           tenantScope: record.userId,
           actorCatId: callerCatId,
@@ -844,6 +852,7 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
           dispatchId: `multi-mention:${body.idempotencyKey}`,
           evidenceRef: `callback:${record.invocationId}:${body.idempotencyKey}`,
           now: Date.now(),
+          ...(incomingActionLeaseRef ? { incomingActionLeaseRef } : {}),
           action: body.action,
         });
         if (!admission.admit) {

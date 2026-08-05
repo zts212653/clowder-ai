@@ -37,6 +37,11 @@ function buildDeps(overrides = {}) {
       cancel: mock.fn(() => ({ cancelled: false, catIds: [] })),
       getActiveSlots: mock.fn(() => []),
     },
+    resolveCarrierCapability: mock.fn(() => ({
+      provider: 'openai_codex',
+      carrier: 'codex_app_server',
+      deliverySemantics: 'exact_active_turn',
+    })),
     socketManager: {
       broadcastAgentMessage: mock.fn(),
       broadcastToRoom: mock.fn(),
@@ -47,6 +52,7 @@ function buildDeps(overrides = {}) {
     },
     queueCustodyCoordinator: {
       persistEntry: mock.fn(async () => {}),
+      withdrawEntry: mock.fn(async () => true),
       findReminderAttempt: mock.fn(async () => undefined),
       requestReminder: mock.fn(async () => true),
     },
@@ -180,6 +186,25 @@ describe('Queue Management API', () => {
     });
   });
 
+  it('GET /queue projects the exact provider carrier for each active target', async () => {
+    deps.invocationTracker.getActiveSlots.mock.mockImplementation(() => [{ catId: 'opus', startedAt: 100 }]);
+    deps.invocationTracker.getUserId.mock.mockImplementation(() => 'user-a');
+    deps.invocationTracker.getExecutionId.mock.mockImplementation(() => 'inv-active');
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/threads/t1/queue',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    const body = JSON.parse(res.body);
+
+    assert.deepEqual(body.activeInvocations[0].freshnessCarrierCapability, {
+      provider: 'openai_codex',
+      carrier: 'codex_app_server',
+      deliverySemantics: 'exact_active_turn',
+    });
+  });
+
   it('GET /queue hydrates notified, failed, and partially handled targets independently', async () => {
     const queued = enqueueEntry(deps.invocationQueue, {
       content: 'three targets',
@@ -299,6 +324,38 @@ describe('Queue Management API', () => {
     assert.equal(deps.queueCustodyCoordinator.requestReminder.mock.calls.length, 0);
   });
 
+  it('POST /queue/:entryId/remind fails closed for unsupported and undeclared carriers', async () => {
+    const queued = enqueueEntry(deps.invocationQueue, { targetCats: ['opus'] });
+    deps.invocationTracker.has.mock.mockImplementation(() => true);
+    deps.invocationTracker.getUserId.mock.mockImplementation(() => 'user-a');
+    deps.invocationTracker.getExecutionId.mock.mockImplementation(() => 'inv-active');
+    deps.resolveCarrierCapability.mock.mockImplementationOnce(() => ({
+      provider: 'anthropic',
+      carrier: 'claude_print_sdk',
+      deliverySemantics: 'unsupported',
+    }));
+
+    const unsupported = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/remind`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+      payload: { targetCatId: 'opus' },
+    });
+    deps.resolveCarrierCapability.mock.mockImplementation(() => undefined);
+    const undeclared = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${queued.entry.id}/remind`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+      payload: { targetCatId: 'opus' },
+    });
+
+    assert.equal(unsupported.statusCode, 409);
+    assert.equal(JSON.parse(unsupported.body).code, 'REMINDER_UNSUPPORTED_CARRIER');
+    assert.equal(undeclared.statusCode, 409);
+    assert.equal(JSON.parse(undeclared.body).code, 'REMINDER_CAPABILITY_UNDECLARED');
+    assert.equal(deps.queueCustodyCoordinator.requestReminder.mock.calls.length, 0);
+  });
+
   it('POST /queue/:entryId/remind returns the existing exact attempt idempotently', async () => {
     const queued = enqueueEntry(deps.invocationQueue, { targetCats: ['opus'] });
     deps.invocationTracker.has.mock.mockImplementation(() => true);
@@ -392,7 +449,7 @@ describe('Queue Management API', () => {
 
   // ── Functional: DELETE entry ──
 
-  it('DELETE /queue/:entryId removes entry and emits queue_updated', async () => {
+  it('DELETE /queue/:entryId withdraws actionable custody without deleting author history', async () => {
     const r = enqueueEntry(deps.invocationQueue, { ownerAuthProvenance: 'strict' });
 
     const res = await app.inject({
@@ -409,26 +466,31 @@ describe('Queue Management API', () => {
     const updateCall = emitCalls.find((c) => c.arguments[1] === 'queue_updated');
     assert.ok(updateCall);
     assert.equal(updateCall.arguments[2].action, 'removed');
+    assert.equal(deps.queueCustodyCoordinator.withdrawEntry.mock.calls.length, 1);
+    assert.equal(deps.queueCustodyCoordinator.withdrawEntry.mock.calls[0].arguments[0].id, r.entry.id);
+    assert.equal(deps.messageStore.markCanceled.mock.calls.length, 0);
+    const deleted = deps.socketManager.emitToUser.mock.calls.find((call) => call.arguments[1] === 'message_deleted');
+    assert.equal(deleted, undefined);
   });
 
-  it('DELETE /queue/:entryId suppresses message_deleted when cancel CAS is a no-op', async () => {
-    const queued = enqueueEntry(deps.invocationQueue);
-    deps.invocationQueue.backfillMessageId('t1', 'user-a', queued.entry.id, 'msg-already-delivered');
-    deps.messageStore.markCanceled = mock.fn(async () => ({
-      deliveryStatus: 'delivered',
-      deliveryTransitioned: false,
-    }));
+  it('DELETE /queue/:entryId restores the actionable entry when durable withdrawal fails', async () => {
+    const r = enqueueEntry(deps.invocationQueue, { ownerAuthProvenance: 'strict' });
+    deps.queueCustodyCoordinator.withdrawEntry.mock.mockImplementation(async () => {
+      throw new Error('custody store unavailable');
+    });
 
     const res = await app.inject({
       method: 'DELETE',
-      url: `/api/threads/t1/queue/${queued.entry.id}`,
+      url: `/api/threads/t1/queue/${r.entry.id}`,
       headers: { 'x-cat-cafe-user': 'user-a' },
     });
 
-    assert.equal(res.statusCode, 200);
-    assert.equal(deps.messageStore.markCanceled.mock.calls.length, 1);
-    const deleted = deps.socketManager.emitToUser.mock.calls.find((call) => call.arguments[1] === 'message_deleted');
-    assert.equal(deleted, undefined);
+    assert.equal(res.statusCode, 503);
+    assert.equal(JSON.parse(res.body).code, 'QUEUE_WITHDRAWAL_FAILED');
+    assert.deepEqual(
+      deps.invocationQueue.list('t1', 'user-a').map((entry) => entry.id),
+      [r.entry.id],
+    );
   });
 
   it('DELETE /queue/:entryId rejects processing entry (409)', async () => {
@@ -501,28 +563,40 @@ describe('Queue Management API', () => {
     const updateCall = emitCalls.find((c) => c.arguments[1] === 'queue_updated');
     assert.ok(updateCall);
     assert.equal(updateCall.arguments[2].action, 'cleared');
+    assert.equal(deps.queueCustodyCoordinator.withdrawEntry.mock.calls.length, 2);
+    assert.equal(deps.messageStore.markCanceled.mock.calls.length, 0);
+    const deleted = deps.socketManager.emitToUser.mock.calls.find((call) => call.arguments[1] === 'message_deleted');
+    assert.equal(deleted, undefined);
   });
 
-  it('DELETE /queue suppresses message_deleted for every cancel CAS no-op', async () => {
-    const first = enqueueEntry(deps.invocationQueue, { targetCats: ['a'] });
+  it('DELETE /queue reports partial durable withdrawal and keeps every unsettled entry actionable', async () => {
+    const first = enqueueEntry(deps.invocationQueue, { targetCats: ['a'], ownerAuthProvenance: 'strict' });
     const second = enqueueEntry(deps.invocationQueue, { targetCats: ['b'] });
-    deps.invocationQueue.backfillMessageId('t1', 'user-a', first.entry.id, 'msg-delivered');
-    deps.invocationQueue.backfillMessageId('t1', 'user-a', second.entry.id, 'msg-canceled');
-    deps.messageStore.markCanceled = mock.fn(async () => ({
-      deliveryStatus: 'delivered',
-      deliveryTransitioned: false,
-    }));
+    const third = enqueueEntry(deps.invocationQueue, { targetCats: ['c'] });
+    let calls = 0;
+    deps.queueCustodyCoordinator.withdrawEntry.mock.mockImplementation(async () => {
+      calls += 1;
+      if (calls === 2) throw new Error('custody store unavailable');
+      return true;
+    });
 
     const res = await app.inject({
       method: 'DELETE',
       url: '/api/threads/t1/queue',
       headers: { 'x-cat-cafe-user': 'user-a' },
     });
+    const body = JSON.parse(res.body);
 
-    assert.equal(res.statusCode, 200);
-    assert.equal(deps.messageStore.markCanceled.mock.calls.length, 2);
-    const deleted = deps.socketManager.emitToUser.mock.calls.find((call) => call.arguments[1] === 'message_deleted');
-    assert.equal(deleted, undefined);
+    assert.equal(res.statusCode, 503);
+    assert.equal(body.code, 'QUEUE_WITHDRAWAL_PARTIAL');
+    assert.deepEqual(
+      body.cleared.map((entry) => entry.id),
+      [first.entry.id],
+    );
+    assert.deepEqual(
+      deps.invocationQueue.list('t1', 'user-a').map((entry) => entry.id),
+      [second.entry.id, third.entry.id],
+    );
   });
 
   // ── Functional: PATCH move ──

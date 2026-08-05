@@ -11,15 +11,18 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
-const { DEFAULT_CLI_TIMEOUT_MS } = await import('../dist/utils/cli-timeout.js');
-
 const SHORT_TTL = 1000; // 1s for testing
 const DEFAULT_SLOT_TTL = 75 * 60_000;
 const T0 = 100_000; // arbitrary start time
 
 describe('InvocationTracker TTL Guard (F118 D3)', () => {
   it('keeps the default slot alive for 75 minutes when CLI auto-timeout is disabled', (t) => {
-    assert.equal(DEFAULT_CLI_TIMEOUT_MS, 0, 'F118 manual-cancel-only mode must be the exercised default');
+    const savedTimeout = process.env.CLI_TIMEOUT_MS;
+    process.env.CLI_TIMEOUT_MS = '0';
+    t.after(() => {
+      if (savedTimeout === undefined) delete process.env.CLI_TIMEOUT_MS;
+      else process.env.CLI_TIMEOUT_MS = savedTimeout;
+    });
     t.mock.timers.enable({ apis: ['Date'], now: T0 });
     const tracker = new InvocationTracker();
     tracker.start('t1', 'opus', 'user1');

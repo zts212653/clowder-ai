@@ -202,6 +202,7 @@ export function createInitialQueuedMessageCustody(entry: QueueEntry): QueuedMess
     entryId: entry.id,
     revision: 1,
     ownerAuthProvenance: entry.ownerAuthProvenance,
+    ...(entry.authorIntentByCatId ? { authorIntentByCatId: structuredClone(entry.authorIntentByCatId) } : {}),
     intent: entry.intent,
     status: 'queued',
     allTargetCats,
@@ -407,6 +408,7 @@ function activeCustodyFromEntry(entry: QueueEntry, current: QueuedMessageCustody
     ...stableCurrent,
     revision: current.revision + 1,
     status: entry.status,
+    ...(entry.authorIntentByCatId ? { authorIntentByCatId: structuredClone(entry.authorIntentByCatId) } : {}),
     pendingTargetCats: catIds(entry.targetCats),
     notifiedByCatIds: catIds(entry.queuedNotifiedByCatIds),
     ...(entry.queuedAwakenedInvocationIdByCatId && Object.keys(entry.queuedAwakenedInvocationIdByCatId).length > 0
@@ -537,6 +539,72 @@ function buildSuccessfulTargetTransition(input: {
   };
 }
 
+function buildWithdrawnTargetTransition(
+  current: QueuedMessageCustody,
+  selectedTargetCats: readonly string[],
+  withdrawnAt: number,
+): QueuedMessageCustody {
+  const selected = new Set(selectedTargetCats);
+  const withdrawnNow = current.pendingTargetCats.filter((catId) => selected.has(catId));
+  if (withdrawnNow.length === 0) return current;
+
+  const pendingTargetCats = current.pendingTargetCats.filter((catId) => !selected.has(catId));
+  const withdrawnByCatIds = [...new Set([...(current.withdrawnByCatIds ?? []), ...withdrawnNow])] as CatId[];
+  const withdrawnAtByCatId = { ...(current.withdrawnAtByCatId ?? {}) };
+  const awakenedInvocationIdByCatId = { ...(current.awakenedInvocationIdByCatId ?? {}) };
+  const awakenedAtByCatId = { ...(current.awakenedAtByCatId ?? {}) };
+  const steeredInvocationIdByCatId = { ...(current.steeredInvocationIdByCatId ?? {}) };
+  const carrierStateByTargetCatId = { ...(current.carrierStateByTargetCatId ?? {}) };
+  for (const catId of withdrawnNow) {
+    withdrawnAtByCatId[catId] = withdrawnAt;
+    delete awakenedInvocationIdByCatId[catId];
+    delete awakenedAtByCatId[catId];
+    delete steeredInvocationIdByCatId[catId];
+    delete carrierStateByTargetCatId[catId];
+  }
+  const reminderAttempts = (current.reminderAttempts ?? []).map((attempt) =>
+    selected.has(attempt.targetCatId) && (attempt.state === 'requested' || attempt.state === 'delivered')
+      ? {
+          ...attempt,
+          state: 'missed' as const,
+          missedAt: withdrawnAt,
+          missedReason: 'source_withdrawn' as const,
+        }
+      : attempt,
+  );
+  const {
+    processingStartedAt: _processingStartedAt,
+    awakenedInvocationIdByCatId: _awakenedInvocationIdByCatId,
+    awakenedAtByCatId: _awakenedAtByCatId,
+    steerRequestedByCatIds: _steerRequestedByCatIds,
+    steeredInvocationIdByCatId: _steeredInvocationIdByCatId,
+    carrierStateByTargetCatId: _carrierStateByTargetCatId,
+    withdrawnByCatIds: _withdrawnByCatIds,
+    withdrawnAtByCatId: _withdrawnAtByCatId,
+    reminderAttempts: _reminderAttempts,
+    ...stableCurrent
+  } = current;
+  return {
+    ...stableCurrent,
+    revision: current.revision + 1,
+    status: pendingTargetCats.length === 0 ? 'terminal' : 'queued',
+    pendingTargetCats,
+    notifiedByCatIds: current.notifiedByCatIds.filter((catId) => !selected.has(catId)),
+    ...(Object.keys(awakenedInvocationIdByCatId).length > 0 ? { awakenedInvocationIdByCatId } : {}),
+    ...(Object.keys(awakenedAtByCatId).length > 0 ? { awakenedAtByCatId } : {}),
+    failedByCatIds: current.failedByCatIds.filter((catId) => !selected.has(catId)),
+    withdrawnByCatIds,
+    withdrawnAtByCatId,
+    ...(Object.keys(carrierStateByTargetCatId).length > 0 ? { carrierStateByTargetCatId } : {}),
+    ...((current.steerRequestedByCatIds ?? []).some((catId) => !selected.has(catId))
+      ? { steerRequestedByCatIds: (current.steerRequestedByCatIds ?? []).filter((catId) => !selected.has(catId)) }
+      : {}),
+    ...(Object.keys(steeredInvocationIdByCatId).length > 0 ? { steeredInvocationIdByCatId } : {}),
+    ...(reminderAttempts.length > 0 ? { reminderAttempts } : {}),
+    updatedAt: withdrawnAt,
+  };
+}
+
 export class QueuedMessageCustodyCoordinator {
   private readonly messageStore: IMessageStore;
   private readonly now: () => number;
@@ -552,6 +620,23 @@ export class QueuedMessageCustodyCoordinator {
       for (const messageId of this.messageIds(entry)) {
         await this.transition(messageId, (current) => activeCustodyFromEntry(entry, current, this.now()));
       }
+    });
+  }
+
+  /**
+   * Remove this carrier's pending targets from actionable custody while
+   * retaining the original queued message and an exact owner-visible receipt.
+   */
+  async withdrawEntry(entry: QueueEntry): Promise<boolean> {
+    return this.withEntryLock(entry.id, async () => {
+      let changed = false;
+      for (const messageId of this.messageIds(entry)) {
+        changed =
+          (await this.transition(messageId, (current) =>
+            buildWithdrawnTargetTransition(current, entry.targetCats, this.now()),
+          )) || changed;
+      }
+      return changed;
     });
   }
 
@@ -748,7 +833,7 @@ export class QueuedMessageCustodyCoordinator {
       const result = await this.messageStore.transitionQueueCustody(messageId, {
         expectedRevision: current.revision,
         next,
-        ...(next.status === 'terminal' ? { deliveredAt } : {}),
+        ...(next.status === 'terminal' && deliveredAt !== undefined ? { deliveredAt } : {}),
       });
       if (result.kind === 'updated') return true;
       if (result.kind === 'not_found') return false;

@@ -1,3 +1,4 @@
+import type { ExpansionFunnelMeta, ExpansionHintTargetRef } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
@@ -7,6 +8,11 @@ import {
   evaluateConfigWarnings,
   type FunctionalStatus,
 } from '../domains/memory/evidence-status-signals.js';
+import {
+  blockedExpansionHealth,
+  failedExpansionHealth,
+  successfulExpansionHealth,
+} from '../domains/memory/expansion-health.js';
 import { F163ExperimentLogger } from '../domains/memory/f163-experiment-logger.js';
 import {
   applySalienceRerank,
@@ -103,8 +109,11 @@ export interface EvidenceSearchResponse {
     title: string;
     kind: string;
     sourcePath?: string;
+    targetRef: ExpansionHintTargetRef;
     provenance: { source: string; via: string; edgeStrength: string };
   }>;
+  /** F256 Wave 1b: versioned expansion health funnel for the natural top-k cohort. */
+  expansionMeta?: ExpansionFunnelMeta;
 }
 
 export interface EvidenceRoutesOptions {
@@ -297,17 +306,32 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       // Tag per-result source when dimension is explicit (single-source)
       const singleSource = resolvedSources && resolvedSources.length === 1 ? resolvedSources[0] : undefined;
 
-      // F256 Phase B: expansion hints for topk results (opt-out via include_expansion=false)
+      // F256 Phase B+D: expansion hints for topk results (opt-out via include_expansion=false).
+      // F263 R11 exact-thread filters remain a hard boundary: expanding them
+      // with unscoped related directions would leak evidence from other scopes.
       const wantExpansion = rawIncludeExpansion !== 'false' && rawIncludeExpansion !== '0';
       let expansionHints: import('../domains/memory/TopkExpansionService.js').ExpansionHint[] | undefined;
-      if (wantExpansion && !threadId && items.length > 0 && opts.evidenceStore.searchWithMeta) {
+      let expansionMeta: ExpansionFunnelMeta;
+      if (!wantExpansion) {
+        expansionMeta = blockedExpansionHealth('opt_out');
+      } else if (threadId) {
+        expansionMeta = blockedExpansionHealth('exact_thread_filter');
+      } else if (items.length === 0) {
+        expansionMeta = blockedExpansionHealth('no_results');
+      } else if (!opts.evidenceStore.searchWithMeta) {
+        expansionMeta = blockedExpansionHealth('store_unsupported');
+      } else {
         try {
           const { TopkExpansionService } = await import('../domains/memory/TopkExpansionService.js');
           const l0Adapter = await getL0Adapter();
           const expansionService = new TopkExpansionService(opts.evidenceStore, l0Adapter);
-          expansionHints = await expansionService.expand(items, q);
+          const expandResult = await expansionService.expandWithMeta(items, q);
+          expansionHints = expandResult.hints;
+          expansionMeta = successfulExpansionHealth(expandResult.funnel, expandResult.hints);
         } catch {
-          /* fail-open: expansion failure does not block search */
+          // Search remains fail-open, but the health funnel must not make the
+          // failed stage disappear.
+          expansionMeta = failedExpansionHealth();
         }
       }
 
@@ -455,6 +479,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         ...(responseGroups && responseGroups.length > 0 ? { collectionGroups: responseGroups } : {}),
         ...(resolveResult?.deprecationWarnings ? { deprecationWarnings: resolveResult.deprecationWarnings } : {}),
         ...(expansionHints && expansionHints.length > 0 ? { expansionHints } : {}),
+        ...(expansionMeta ? { expansionMeta } : {}),
         ...(filterExecution ? { filterExecution } : {}),
       } satisfies Partial<EvidenceSearchResponse>;
     } catch (err) {
@@ -481,6 +506,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         degraded: true,
         degradeReason: 'evidence_store_error',
         variantId,
+        expansionMeta: blockedExpansionHealth('search_error'),
         ...(threadId
           ? {
               filterExecution: {

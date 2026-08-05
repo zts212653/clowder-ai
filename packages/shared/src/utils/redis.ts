@@ -57,22 +57,124 @@ export const SessionKeys = {
 } as const;
 
 /**
+ * #1200 Sol R5: Atomic cursor format reconciliation.
+ * Upgrades stored v1 cursor to v2 WITHOUT advancing position.
+ * CAS on old value: SET newValue IF current === oldValue, preserving TTL.
+ * Used by DeliveryCursorStore before SET_IF_GREATER_LUA to ensure
+ * same-format comparison (Lua CAS is fail-closed on cross-format).
+ *
+ * Sol R6 P1-1: Uses PTTL (milliseconds) + PX to preserve sub-second TTLs.
+ * TTL (seconds) returns 0 for keys with <1s remaining, which would
+ * incorrectly permanentize opt-in expiring cursors (Iron Law 5 violation).
+ * PTTL returns -1 (persistent), -2 (missing), or positive ms remaining.
+ */
+const RECONCILE_CURSOR_FORMAT_LUA = `
+local cur = redis.call('GET', KEYS[1])
+if cur == ARGV[1] then
+  local pttl = redis.call('PTTL', KEYS[1])
+  if pttl > 0 then
+    redis.call('SET', KEYS[1], ARGV[2], 'PX', pttl)
+  else
+    redis.call('SET', KEYS[1], ARGV[2])
+  end
+  return 1
+end
+return 0
+`;
+
+/**
  * Lua script: atomic compare-and-set for monotonic cursor advancement.
- * SET key to value only if value > current (lexicographic). Sets TTL on success.
- * KEYS[1] = cursor key, ARGV[1] = new value, ARGV[2] = TTL seconds.
+ * Compares in the visibility-seq domain (NOT raw message ID or lex order).
+ *
+ * KEYS[1] = cursor key
+ * ARGV[1] = new cursor value (v1 raw ID or v2 token)
+ * ARGV[2] = TTL seconds (0 = persistent)
+ * ARGV[3] = key prefix for message hash lookup (e.g. 'cat-cafe:')
+ *
  * Returns 1 if set, 0 if noop.
+ *
+ * #1200 §8.7 cursor TTL flip (Iron Law 5 compliance):
+ * - ttl > 0 → SET with EX (expiring cursor)
+ * - ttl = 0 → SET without EX + PERSIST-before-compare (persistent cursor).
+ *
+ * #1200 Sol R2 P2-4: Pair-domain comparison.
+ * Raw ID or lex comparison conflates creation order with visibility order.
+ * Late-delivered Q (created early, high visibilitySeq) must advance past
+ * stored cursor of B (created later, lower visibilitySeq). Only (seq, id)
+ * pair comparison is correct. Lua resolves v1 cursors via message hash
+ * HGET visibilitySeq; v2 cursors carry seq in the token. Unresolvable v1
+ * (pruned message) → fail-closed (Sol R5: no ID lex fallback).
  */
 const SET_IF_GREATER_LUA = `
+local ttl = tonumber(ARGV[2])
+local kp = ARGV[3] or ''
 local cur = redis.call('GET', KEYS[1])
-if cur and ARGV[1] <= cur then
-  return 0
+
+-- Resolve a cursor to (seq, id). Returns seq (number|nil), id (string).
+local function resolveSeq(cursor)
+  if string.sub(cursor, 1, 3) == 'v2:' then
+    local sep = string.find(cursor, ':', 4)
+    if sep then
+      return tonumber(string.sub(cursor, 4, sep - 1)), string.sub(cursor, sep + 1)
+    end
+    return nil, cursor
+  end
+  -- v1: look up visibilitySeq from message hash
+  local seqRaw = redis.call('HGET', kp .. 'msg:' .. cursor, 'visibilitySeq')
+  if seqRaw then
+    local s = tonumber(seqRaw)
+    if s then return s, cursor end
+  end
+  return nil, cursor
 end
-redis.call('SET', KEYS[1], ARGV[1], 'EX', tonumber(ARGV[2]))
+
+if cur then
+  local curSeq, curId = resolveSeq(cur)
+  local newSeq, newId = resolveSeq(ARGV[1])
+
+  if curSeq and newSeq then
+    -- Both resolved to (seq, id): pair-domain compare
+    if newSeq < curSeq or (newSeq == curSeq and newId <= curId) then
+      if ttl == 0 then redis.call('PERSIST', KEYS[1]) end
+      return 0
+    end
+  elseif curSeq and not newSeq then
+    -- Stored resolvable, incoming unresolvable: reject (can't prove advancement)
+    if ttl == 0 then redis.call('PERSIST', KEYS[1]) end
+    return 0
+  elseif not curSeq and newSeq then
+    -- Stored v1 unresolvable (message hash fully pruned), incoming v2 resolvable.
+    -- FAIL-CLOSED: cannot determine stored position → cannot prove advancement.
+    -- ID lex comparison is WRONG here: late-delivered Q has old ID but high seq,
+    -- so ID order ≠ visibility order (#1200 core disease).
+    -- App layer (DeliveryCursorStore) pre-reconciles stored v1→v2 via
+    -- RECONCILE_CURSOR_FORMAT before reaching this branch. Fully-pruned is
+    -- the residual case where no resolver can help → freeze until migration.
+    if ttl == 0 then redis.call('PERSIST', KEYS[1]) end
+    return 0
+  else
+    -- Both unresolvable: lex comparison fallback (best-effort for pruned v1-vs-v1)
+    if ARGV[1] <= cur then
+      if ttl == 0 then redis.call('PERSIST', KEYS[1]) end
+      return 0
+    end
+  end
+end
+
+if ttl > 0 then
+  redis.call('SET', KEYS[1], ARGV[1], 'EX', ttl)
+else
+  redis.call('SET', KEYS[1], ARGV[1])
+end
 return 1
 `;
 
 export class SessionStore {
-  constructor(private redis: RedisClient) {}
+  private readonly keyPrefix: string;
+  constructor(private redis: RedisClient) {
+    // Read ioredis keyPrefix for Lua scripts that need to construct keys manually
+    this.keyPrefix = ((redis.options as Record<string, unknown>).keyPrefix as string) ?? '';
+  }
 
   async getSessionId(userId: string, catId: string, threadId: string): Promise<string | null> {
     return this.redis.get(SessionKeys.session(userId, catId, threadId));
@@ -100,16 +202,26 @@ export class SessionStore {
    * Atomically set delivery cursor only if messageId > current value.
    * Uses Lua script for atomic compare-and-set to prevent concurrent regression.
    * Returns true if cursor was advanced, false if noop.
+   *
+   * #1200 Iron Law 5: default persistent (ttl=0). Pass ttl>0 only for
+   * explicitly TTL-enabled threads.
    */
   async setDeliveryCursor(
     userId: string,
     catId: string,
     threadId: string,
     messageId: string,
-    ttlSeconds = 604800, // 7 days (#40)
+    ttlSeconds = 0, // #1200: persistent by default (Iron Law 5)
   ): Promise<boolean> {
     const key = SessionKeys.deliveryCursor(userId, catId, threadId);
-    const result = (await this.redis.eval(SET_IF_GREATER_LUA, 1, key, messageId, String(ttlSeconds))) as number;
+    const result = (await this.redis.eval(
+      SET_IF_GREATER_LUA,
+      1,
+      key,
+      messageId,
+      String(ttlSeconds),
+      this.keyPrefix,
+    )) as number;
     return result === 1;
   }
 
@@ -126,16 +238,25 @@ export class SessionStore {
    * Atomically set mention ack cursor only if messageId > current value.
    * Uses Lua script for atomic compare-and-set to prevent concurrent regression.
    * Returns true if cursor was advanced, false if noop (already at or past messageId).
+   *
+   * #1200 Iron Law 5: default persistent (ttl=0).
    */
   async setMentionAckCursor(
     userId: string,
     catId: string,
     threadId: string,
     messageId: string,
-    ttlSeconds = 604800, // 7 days, same as delivery cursor
+    ttlSeconds = 0, // #1200: persistent by default (Iron Law 5)
   ): Promise<boolean> {
     const key = SessionKeys.mentionAck(userId, catId, threadId);
-    const result = (await this.redis.eval(SET_IF_GREATER_LUA, 1, key, messageId, String(ttlSeconds))) as number;
+    const result = (await this.redis.eval(
+      SET_IF_GREATER_LUA,
+      1,
+      key,
+      messageId,
+      String(ttlSeconds),
+      this.keyPrefix,
+    )) as number;
     return result === 1;
   }
 
@@ -158,22 +279,74 @@ export class SessionStore {
    * Atomically set seen cursor only if messageId > current value (F254).
    * Uses same Lua CAS script as delivery/mention cursors.
    * Returns true if cursor was advanced, false if noop.
+   *
+   * #1200 Iron Law 5: default persistent (ttl=0).
    */
   async setSeenCursor(
     userId: string,
     catId: string,
     threadId: string,
     messageId: string,
-    ttlSeconds = 604800, // 7 days, same as other cursors
+    ttlSeconds = 0, // #1200: persistent by default (Iron Law 5)
   ): Promise<boolean> {
     const key = SessionKeys.seenCursor(userId, catId, threadId);
-    const result = (await this.redis.eval(SET_IF_GREATER_LUA, 1, key, messageId, String(ttlSeconds))) as number;
+    const result = (await this.redis.eval(
+      SET_IF_GREATER_LUA,
+      1,
+      key,
+      messageId,
+      String(ttlSeconds),
+      this.keyPrefix,
+    )) as number;
     return result === 1;
   }
 
   /** Delete a seen cursor (F254) */
   async deleteSeenCursor(userId: string, catId: string, threadId: string): Promise<number> {
     return this.redis.del(SessionKeys.seenCursor(userId, catId, threadId));
+  }
+
+  // ---- Cursor Format Reconciliation (#1200 Sol R5) ----
+  // Atomically upgrades stored v1 cursor to v2 format without advancing position.
+  // Used by DeliveryCursorStore before CAS to ensure same-format comparison.
+
+  async reconcileDeliveryCursorFormat(
+    userId: string,
+    catId: string,
+    threadId: string,
+    oldValue: string,
+    newValue: string,
+  ): Promise<boolean> {
+    return this.reconcileFormat(SessionKeys.deliveryCursor(userId, catId, threadId), oldValue, newValue);
+  }
+
+  async reconcileMentionAckCursorFormat(
+    userId: string,
+    catId: string,
+    threadId: string,
+    oldValue: string,
+    newValue: string,
+  ): Promise<boolean> {
+    return this.reconcileFormat(SessionKeys.mentionAck(userId, catId, threadId), oldValue, newValue);
+  }
+
+  async reconcileSeenCursorFormat(
+    userId: string,
+    catId: string,
+    threadId: string,
+    oldValue: string,
+    newValue: string,
+  ): Promise<boolean> {
+    return this.reconcileFormat(SessionKeys.seenCursor(userId, catId, threadId), oldValue, newValue);
+  }
+
+  /**
+   * Atomic format upgrade: SET newValue IF current === oldValue.
+   * Preserves TTL. No position advancement — only format change (v1→v2).
+   */
+  private async reconcileFormat(key: string, oldValue: string, newValue: string): Promise<boolean> {
+    const result = (await this.redis.eval(RECONCILE_CURSOR_FORMAT_LUA, 1, key, oldValue, newValue)) as number;
+    return result === 1;
   }
 
   async getCatState(catId: string): Promise<Record<string, unknown> | null> {

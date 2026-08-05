@@ -96,7 +96,7 @@ describe('ChatInput history completion', () => {
       pressKey(getTextarea(), 'Enter');
     });
 
-    expect(onSend).toHaveBeenCalledWith('hello world', undefined, undefined, undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith('hello world', undefined, undefined, undefined, undefined, undefined);
     expect(useInputHistoryStore.getState().entries).toContain('hello world');
   });
 

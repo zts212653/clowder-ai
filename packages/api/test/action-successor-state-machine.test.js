@@ -606,6 +606,7 @@ describe('F167 Phase S action successor state machine', () => {
       fromGeneration: 1,
       toGeneration: 2,
       rejectingCatId: 'codex-terra',
+      rejectingThreadId: 'thread-target',
       predecessorCatId: 'codex-sol',
       predecessorThreadId: 'thread-source',
       groundingEvidenceRef: 'message:grounding-mismatch',
@@ -634,6 +635,144 @@ describe('F167 Phase S action successor state machine', () => {
     });
     assert.equal(stale.outcome, 'stale_generation');
     assert.equal(stale.lease, returned.lease);
+  });
+
+  it('reattaches a returned holder to a fresh successor without opening ordinary active replacement', () => {
+    const first = claimActionSuccessor(null, baseClaim()).lease;
+    const returned = returnActionSuccessorToPredecessor(first, {
+      expectedGeneration: 1,
+      rejectingCatId: 'codex-terra',
+      rejectingThreadId: 'thread-target',
+      dispatchId: 'return-1',
+      groundingEvidenceRef: 'message:grounding-mismatch',
+      now: 120,
+    }).lease;
+    const freshPredicate = reviewPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+
+    const reattached = replaceActionSuccessor(returned, {
+      expectedGeneration: 2,
+      holderCatIds: ['gpt52'],
+      holderThreadId: 'thread-review-next',
+      predecessorCatId: 'codex-sol',
+      predecessorThreadId: 'thread-source',
+      dispatchId: 'dispatch-fresh-head',
+      terminalPredicate: freshPredicate,
+      evidenceRef: 'callback:returned-holder:dispatch-fresh-head',
+      freshnessEvidenceRef: 'community:pr:owner/repo#2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      returnedHolderCatId: 'codex-sol',
+      returnedHolderThreadId: 'thread-source',
+      returnProof: { kind: 'returned_fence', leaseId: returned.leaseId, generation: 2 },
+      now: 130,
+    });
+
+    assert.equal(reattached.outcome, 'reattached');
+    assert.equal(reattached.lease.generation, 3);
+    assert.deepEqual(reattached.lease.holderCatIds, ['gpt52']);
+    assert.equal(reattached.lease.holderThreadId, 'thread-review-next');
+    assert.equal(reattached.lease.predecessorCatId, 'codex-sol');
+    assert.equal(reattached.lease.predecessorThreadId, 'thread-source');
+    assert.equal(reattached.lease.terminalPredicate.digest, freshPredicate.digest);
+    assert.deepEqual(reattached.lease.holderOutcomes, {});
+    assert.deepEqual(reattached.lease.completionCandidates, {});
+    assert.equal(reattached.lease.returnDeliveryState, undefined);
+    assert.equal(reattached.lease.returnDeliveryEvidenceRef, undefined);
+    assert.equal(reattached.lease.returnDeliveryAttemptCount, undefined);
+    assert.equal(reattached.lease.returnDeliverySlaUntil, undefined);
+    assert.equal(reattached.lease.returnDeliveryLastAttemptAt, undefined);
+    assert.equal(reattached.lease.returnDeliveryOverdueObservedAt, undefined);
+    assert.equal(reattached.lease.returnTransitions.length, 1);
+    assert.ok(reattached.lease.evidenceRefs.includes('message:grounding-mismatch'));
+    assert.ok(reattached.lease.evidenceRefs.includes('callback:returned-holder:dispatch-fresh-head'));
+    assert.ok(
+      reattached.lease.evidenceRefs.includes(
+        'community:pr:owner/repo#2868:head:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      ),
+    );
+
+    const ordinaryActive = replaceActionSuccessor(first, {
+      expectedGeneration: 1,
+      holderCatIds: ['gpt52'],
+      holderThreadId: 'thread-review-next',
+      predecessorCatId: 'codex-sol',
+      predecessorThreadId: 'thread-source',
+      dispatchId: 'dispatch-not-returned',
+      terminalPredicate: freshPredicate,
+      evidenceRef: 'callback:not-returned',
+      freshnessEvidenceRef: 'community:fresh',
+      returnedHolderCatId: 'codex-sol',
+      returnedHolderThreadId: 'thread-source',
+      returnProof: { kind: 'returned_fence', leaseId: first.leaseId, generation: 1 },
+      now: 131,
+    });
+    assert.equal(ordinaryActive.outcome, 'proof_required');
+  });
+
+  it('fails closed when returned-holder reattach proof, route, or generation state is stale', () => {
+    const first = claimActionSuccessor(null, baseClaim()).lease;
+    const returned = returnActionSuccessorToPredecessor(first, {
+      expectedGeneration: 1,
+      rejectingCatId: 'codex-terra',
+      rejectingThreadId: 'thread-target',
+      dispatchId: 'return-1',
+      groundingEvidenceRef: 'message:grounding-mismatch',
+      now: 120,
+    }).lease;
+    const freshPredicate = reviewPredicate('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    const replacement = (overrides = {}) => ({
+      expectedGeneration: 2,
+      holderCatIds: ['gpt52'],
+      holderThreadId: 'thread-review-next',
+      predecessorCatId: 'codex-sol',
+      predecessorThreadId: 'thread-source',
+      dispatchId: 'dispatch-fresh-head',
+      terminalPredicate: freshPredicate,
+      evidenceRef: 'callback:returned-holder:dispatch-fresh-head',
+      freshnessEvidenceRef: 'community:fresh-head',
+      returnedHolderCatId: 'codex-sol',
+      returnedHolderThreadId: 'thread-source',
+      returnProof: { kind: 'returned_fence', leaseId: returned.leaseId, generation: 2 },
+      now: 130,
+      ...overrides,
+    });
+
+    assert.equal(replaceActionSuccessor(returned, replacement({ expectedGeneration: 1 })).outcome, 'stale_generation');
+    assert.equal(
+      replaceActionSuccessor(returned, replacement({ returnedHolderThreadId: 'thread-wrong' })).outcome,
+      'holder_mismatch',
+    );
+    assert.equal(
+      replaceActionSuccessor(
+        returned,
+        replacement({ returnProof: { kind: 'returned_fence', leaseId: returned.leaseId, generation: 1 } }),
+      ).outcome,
+      'return_proof_required',
+    );
+    const wrongIdentityPredicate = canonicalizeActionTerminalPredicate({
+      actionFamily: 'implement',
+      subjectRef: 'subject:task:task-1',
+      predicate: { kind: 'task_done' },
+    });
+    assert.equal(
+      replaceActionSuccessor(returned, replacement({ terminalPredicate: wrongIdentityPredicate })).outcome,
+      'terminal_predicate_mismatch',
+    );
+
+    const withCandidate = recordActionCompletionCandidate(returned, {
+      generation: 2,
+      catId: 'codex-sol',
+      evidenceRefs: ['local-review:message-1:g2:approved'],
+      now: 125,
+    });
+    assert.equal(replaceActionSuccessor(withCandidate, replacement()).outcome, 'candidate_present');
+
+    const withOutput = recordActionSuccessorOutcome(returned, {
+      generation: 2,
+      catId: 'codex-sol',
+      outcome: 'failed',
+      evidenceRef: 'runtime:returned-holder:failed',
+      now: 126,
+    });
+    assert.equal(replaceActionSuccessor(withOutput, replacement()).outcome, 'completion_present');
   });
 
   it('rejects a return from another thread of the holder cat', () => {

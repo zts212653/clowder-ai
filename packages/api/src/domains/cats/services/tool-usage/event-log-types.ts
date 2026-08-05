@@ -16,7 +16,7 @@
  * future eval needing tool call sequences.
  */
 
-import type { RecallResultStatus } from '@cat-cafe/shared';
+import type { ExpansionFunnelMeta, RecallResultStatus } from '@cat-cafe/shared';
 
 export type ToolStatus = 'success' | 'low_hit' | 'no_match' | 'error';
 
@@ -32,14 +32,14 @@ export interface BaseToolEvent {
   status: ToolStatus;
 }
 
-/** search_evidence summary — supports FM-5 (nudge effectiveness) + F256 expansion tracking. */
+/** search_evidence summary — supports FM-5 plus typed F256 expansion tracking. */
 export interface SearchEvidenceSummary {
   resultCount: number;
   resultStatus: RecallResultStatus;
   topScore: number | null;
   nudgeEmitted: boolean;
-  /** F256 Phase B: expansion hints emitted in this search result */
-  expansionHintAnchors?: string[];
+  /** F256 Wave 1b: versioned gate/stage telemetry copied from the result sidecar. */
+  expansionFunnel?: ExpansionFunnelMeta;
 }
 
 /**
@@ -94,12 +94,4 @@ export interface NudgeFollowupAnalysis {
   followed: boolean;
   followupTool: string | null;
   fallbackGrepDetected: boolean;
-}
-
-/** F256 Phase B: was an expansion hint anchor followed up by graph_resolve / search_evidence? */
-export interface ExpansionFollowupAnalysis {
-  searchEvent: ToolEvent;
-  hintAnchors: string[];
-  followedAnchors: string[];
-  followupRate: number;
 }

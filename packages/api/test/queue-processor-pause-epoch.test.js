@@ -37,6 +37,7 @@ function depsWithQueuedThread(invocationTracker = { has: mock.fn(() => false) })
       listUsersForThread: mock.fn(() => []),
       list: mock.fn(() => []),
       markQueuedFailedForCatAcrossUsers: mock.fn(() => []),
+      fallbackAuthorIntentsForParentAcrossUsers: mock.fn(() => []),
     },
     invocationTracker,
     invocationRecordStore: {

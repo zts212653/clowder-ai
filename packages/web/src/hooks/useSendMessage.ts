@@ -1,5 +1,6 @@
 'use client';
 
+import type { MessageWorkDisposition } from '@cat-cafe/shared';
 import { useCallback, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
@@ -72,6 +73,7 @@ export function useSendMessage(activeThreadId?: string) {
       whisper?: WhisperOptions,
       deliveryMode?: DeliveryMode,
       replyToId?: string,
+      messageDisposition?: MessageWorkDisposition,
     ) => {
       const activeThread = activeThreadId ?? useChatStore.getState().currentThreadId;
       const threadId = overrideThreadId ?? activeThread;
@@ -88,7 +90,7 @@ export function useSendMessage(activeThreadId?: string) {
       const capturedReplyTarget = replyToId ? useChatStore.getState().replyToMessage : undefined;
 
       const wasCommand = await processCommand(content, threadId);
-      if (wasCommand) return;
+      if (wasCommand) return false;
 
       const clientMessageId = createClientId();
       const optimisticMessageId = `user-${clientMessageId}`;
@@ -183,6 +185,7 @@ export function useSendMessage(activeThreadId?: string) {
           formData.append('threadId', threadId);
           formData.append('idempotencyKey', clientMessageId);
           if (deliveryMode) formData.append('deliveryMode', deliveryMode);
+          if (messageDisposition) formData.append('messageDisposition', messageDisposition);
           if (whisper) {
             formData.append('visibility', whisper.visibility);
             for (const catId of whisper.whisperTo) {
@@ -214,6 +217,7 @@ export function useSendMessage(activeThreadId?: string) {
               ...(whisper ? { visibility: whisper.visibility, whisperTo: whisper.whisperTo } : {}),
               ...deliveryModePayload,
               ...(replyToId ? { replyTo: replyToId } : {}),
+              ...(messageDisposition ? { messageDisposition } : {}),
             }),
           });
           if (!res.ok) {
@@ -227,6 +231,7 @@ export function useSendMessage(activeThreadId?: string) {
         setUploadError(null);
         // Guide engine: signal that message was sent (advance confirm steps on chat.input)
         window.dispatchEvent(new CustomEvent('guide:confirm', { detail: { target: 'chat.input' } }));
+        return true;
       } catch (err) {
         // F39: Only clear invocation flags for normal (non-queue, non-force) sends.
         // Queue sends never set them. Force sends target a thread where a cat is
@@ -256,6 +261,7 @@ export function useSendMessage(activeThreadId?: string) {
         } else {
           addMessage(errorMessagePayload);
         }
+        return false;
       }
     },
     [

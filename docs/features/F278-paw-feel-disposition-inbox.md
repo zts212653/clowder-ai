@@ -174,8 +174,8 @@ interface PawFeelReviewBundle {
 
 - 稳定责任归口：`thread_eval_friction`。
 - thread 只接**无 marker 正文**的 duty notice 与 source-ref inbox 入口，保持 F245 KD-8 的 single-source 约束。
-- 初始 primary / backup duty cat 由 operator 配置；猫粮或会话不可用时可换猫，ledger、SLA 与 thread 不换。
-- 每日两批审阅；24h 未看由 backup 接管；72h 未处置在 Workspace 标红并 operator-visible。
+- 初始 primary / backup duty cat 由 operator 配置；猫粮或会话不可用时由 operator 显式换班（更新 duty config，将接棒猫设为 primary），ledger、SLA 与 thread 不换。
+- 每日两批审阅；24h 未看升级为 overdue 但仍由 primary 负责；72h 未处置在 Workspace 标红并 operator-visible。年龄阈值只升级严重度，不自动把责任转给 backup。
 - unseen 从 0→1、达到批次阈值或 SLA 时才提醒，避免逐条刷 thread。
 - primary / backup 均未配置时，不运行虚假的 escalation 链；Workspace 与 Settings 顶部显示“爪感差值班未配置 · N 条待看 / M 条超时”，并给出配置入口。
 - “代码可配置”不是运营完成。operator 在新 runtime 配置 Primary/Backup 后，值班猫必须走通首批真实 bundle triage，才能重新 close 本 feature。

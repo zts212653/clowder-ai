@@ -611,19 +611,21 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
     const eventLog = new ToolEventLog(opts.redis as ConstructorParameters<typeof ToolEventLog>[0]);
     const threadIds = await eventLog.listThreadIds();
     const threads = threadIds.map((threadId) => ({ threadId }));
-    const metrics = await computeFromThreads(eventLog, threads);
 
     // F200 AC-A4: attach recall event stats from evidence.sqlite
+    let recallDb: import('better-sqlite3').Database | undefined;
     let recallEventStats: ReturnType<typeof getRecallStats24h> | undefined;
     for (const store of opts.stores.values()) {
       const db = (store as StoreWithDb).getDb?.();
       if (db) {
+        recallDb = db;
         try {
           recallEventStats = getRecallStats24h(db);
         } catch {}
         break;
       }
     }
+    const metrics = await computeFromThreads(eventLog, threads, { recallDb });
 
     return { ...metrics, recallEventStats };
   });

@@ -170,6 +170,13 @@ export async function enqueueA2ATargets(
     }
     persistedCrossThreadTrigger = persistedTrigger;
   }
+  // #1200 §8.7: mention-ack cursors must be v2 (visibility-domain). getMentionsFor
+  // now uses visibility ordering — ack cursors written as raw IDs would mismatch.
+  // Canonicalize once; reuse in both InvocationQueue and worklist ack paths.
+  const ackCursor =
+    deliveryCursorStore && deps.messageStore?.canonicalizeCursor
+      ? await deps.messageStore.canonicalizeCursor(triggerMessageId, threadId)
+      : triggerMessageId;
 
   // F167 Phase E (KD-20): L3 role-gate retired. Role-based handoff permission is
   // no longer harness-enforced — cat-config.restrictions flows into sender & target
@@ -565,7 +572,7 @@ export async function enqueueA2ATargets(
     if (deliveryCursorStore && handled.length > 0) {
       const ackTargets = handled.filter((catId) => opts.triggerMessage.mentions.includes(catId));
       await Promise.allSettled(
-        ackTargets.map((catId) => deliveryCursorStore.ackMentionCursor(opts.userId, catId, threadId, triggerMessageId)),
+        ackTargets.map((catId) => deliveryCursorStore.ackMentionCursor(opts.userId, catId, threadId, ackCursor)),
       );
     }
     // queue_updated emits on BOTH a new entry (enqueued) AND a coalesce (云端 codex R4 P2).
@@ -636,9 +643,7 @@ export async function enqueueA2ATargets(
         // already been stored/broadcast; failing would cause retries/duplicates and amplify noise.
         const ackTargets = enqueued.filter((catId) => opts.triggerMessage.mentions.includes(catId));
         const results = await Promise.allSettled(
-          ackTargets.map((catId) =>
-            deliveryCursorStore.ackMentionCursor(opts.userId, catId, opts.threadId, triggerMessageId),
-          ),
+          ackTargets.map((catId) => deliveryCursorStore.ackMentionCursor(opts.userId, catId, opts.threadId, ackCursor)),
         );
         const failed = results
           .map((r, i) => ({ r, catId: ackTargets[i] }))

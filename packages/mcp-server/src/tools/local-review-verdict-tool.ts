@@ -24,6 +24,19 @@ export const localReviewVerdictInputSchema = {
     .describe('Usually recovered from the invocation carrier; an explicit value must match that carrier exactly.'),
 };
 
+export const localReviewRecoveryInputSchema = {
+  messageId: localReviewVerdictInputSchema.messageId,
+  reviewedHeadSha: localReviewVerdictInputSchema.reviewedHeadSha,
+  verdict: localReviewVerdictInputSchema.verdict,
+  actionLeaseRef: z
+    .object({
+      leaseId: z.string().min(1).describe('Exact active stale review lease id.'),
+      generation: z.number().int().positive().describe('Exact active stale review lease generation.'),
+    })
+    .strict()
+    .describe('Required locator; authority is re-resolved from predecessor custody and persisted server truth.'),
+};
+
 export async function handleLocalReviewVerdict(input: {
   messageId: string;
   reviewedHeadSha: string;
@@ -38,6 +51,15 @@ export async function handleLocalReviewVerdict(input: {
   });
 }
 
+export async function handleRecoverLocalReviewVerdict(input: {
+  messageId: string;
+  reviewedHeadSha: string;
+  verdict: 'approved' | 'changes_requested' | 'commented';
+  actionLeaseRef: { leaseId: string; generation: number };
+}): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/recover-local-review-verdict', input);
+}
+
 export const localReviewVerdictTools = [
   {
     name: 'cat_cafe_record_local_review_verdict',
@@ -49,5 +71,16 @@ export const localReviewVerdictTools = [
       'GOTCHA: call cat_cafe_post_message or cat_cafe_cross_post_message first and pass its messageId; this tool accepts no free-form review body and never substitutes for delivery.',
     inputSchema: localReviewVerdictInputSchema,
     handler: handleLocalReviewVerdict,
+  },
+  {
+    name: 'cat_cafe_recover_local_review_verdict',
+    description:
+      'Settle one active stale local-review generation from a verdict already returned to its persisted predecessor. ' +
+      'Use when: the sole holder verdict is durable, its exact lease carrier is unavailable, and the server-observed PR HEAD has advanced. ' +
+      'NOT for: ordinary holder completion, ordinary active replacement, returned generations, admin closure, current-HEAD reviews, or caller-authored verdicts. ' +
+      'Output: re-verifies the exact structured predecessor route, sole holder message provenance, frozen HEAD, advanced server HEAD, untouched generation, and then records one existing-lease CAS outcome. ' +
+      'GOTCHA: actionLeaseRef is only a locator; it grants no authority and must name the exact active generation.',
+    inputSchema: localReviewRecoveryInputSchema,
+    handler: handleRecoverLocalReviewVerdict,
   },
 ] as const;

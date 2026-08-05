@@ -5,6 +5,7 @@ topics: [plugin-framework, capability-registry, settings, resource-activation, s
 doc_kind: spec
 created: 2026-05-15
 architecture-cell: plugin
+tips_exempt: "K-2A adds a dormant internal inventory and store boundary; it introduces no new user-invokable action or discovery surface, while the existing Settings plugin journey remains unchanged."
 ---
 
 # F202: Plugin Framework — local discovery, config, resource activation, and schedule resources
@@ -36,6 +37,18 @@ Clowder AI already has pieces of a capability ecosystem:
 What is still missing is a local plugin framework that lets a plugin declare owned resources in one folder, be configured through the Hub, and activate those resources without manual edits to multiple runtime files.
 
 PR #686 is a concrete Phase 1 implementation proposal for that missing layer. It was originally labeled `F197`, but upstream `F197` is already occupied by ACP tool result event surfacing. This feature spec is the upstream anchor for the plugin framework work.
+
+## User Journey
+
+**Scope unit:** one trusted repository-local plugin, identified by its validated manifest and owned resources.
+
+1. A maintainer places the plugin under `plugins/<plugin-id>` with a manifest that declares its configuration and resources.
+2. Clowder AI validates the manifest, directory identity, configuration keys, and ownership boundaries before exposing any activation controls.
+3. A local owner opens Settings to inspect the plugin, supply supported configuration, and explicitly enable, disable, or test it.
+4. On enable, Clowder AI activates only resources owned by that plugin and shows their resulting status through the existing plugin and capability surfaces.
+5. After restart, Clowder AI rehydrates only plugins that are still enabled and valid; disabled or invalid plugins remain inactive with a visible error state.
+
+**Failure journey:** invalid manifests, ownership collisions, unsafe configuration, or activation failures are rejected without mutating unrelated plugin resources. K-2A's contract-native inventory is a dormant internal prerequisite for the future external-package path and does not activate a new user-facing runtime by itself.
 
 ## What
 

@@ -1,6 +1,12 @@
 import type { ActionSuccessorAdmissionService, ActionSuccessorFence } from './ActionSuccessorAdmissionService.js';
 
-export type ActionSuccessorCarrierAdmissionOutcome = 'claimed' | 'replaced' | 'replayed' | 'returned' | 'continued';
+export type ActionSuccessorCarrierAdmissionOutcome =
+  | 'claimed'
+  | 'replaced'
+  | 'reattached'
+  | 'replayed'
+  | 'returned'
+  | 'continued';
 export type ActionSuccessorCarrierDisposition = 'successor_dispatch' | 'return';
 
 export function actionSuccessorFencesMatch(

@@ -13,8 +13,8 @@
  */
 
 import type { CatId } from '@cat-cafe/shared';
+import { cursorFor, parseCursor } from '../stores/cursor.js';
 import type { DeliveryCursorStore } from '../stores/ports/DeliveryCursorStore.js';
-import { generateSortableId } from '../stores/ports/MessageStore.js';
 import {
   type FreshnessMessageReader,
   getFreshnessSenderLabel,
@@ -63,7 +63,7 @@ export class ThreadUnseenChecker implements UnseenChecker {
 
     // If no delivered messages, check queue as fallback (F254 queue-aware gate)
     if (!batch || batch.length === 0) {
-      return this.checkQueueFallback(threadId, catId);
+      return this.checkQueueFallback(threadId, catId, seenCursor);
     }
 
     // Apply visibility filter (P0: must reuse Phase A's messageFilter)
@@ -72,7 +72,7 @@ export class ThreadUnseenChecker implements UnseenChecker {
       ? routable.filter((msg) => messageFilter(msg as unknown as Record<string, unknown>))
       : routable;
     if (visible.length === 0) {
-      return this.checkQueueFallback(threadId, catId);
+      return this.checkQueueFallback(threadId, catId, seenCursor);
     }
 
     // Filter out self-messages (consistent with Phase A) and expected A2A replies
@@ -84,15 +84,16 @@ export class ThreadUnseenChecker implements UnseenChecker {
       nonSelf.push(msg);
     }
     if (nonSelf.length === 0) {
-      return this.checkQueueFallback(threadId, catId);
+      return this.checkQueueFallback(threadId, catId, seenCursor);
     }
 
     // Extract unique senders (content-free — no message body)
     const senderSet = new Set(nonSelf.map((msg) => getFreshnessSenderLabel(msg)));
     const senders = [...senderSet];
 
-    // maxMessageId = last message in batch (for event log)
-    const maxMessageId = nonSelf[nonSelf.length - 1].id;
+    // #1200 §8.7: maxMessageId as v2 cursor for seen-cursor domain comparison.
+    // Messages from getByThreadAfter carry visibilitySeq → cursorFor produces v2.
+    const maxMessageId = cursorFor(nonSelf[nonSelf.length - 1]);
 
     return {
       count: nonSelf.length,
@@ -111,7 +112,7 @@ export class ThreadUnseenChecker implements UnseenChecker {
    *
    * (Bug fix: operator live test 2026-06-29)
    */
-  private async checkQueueFallback(threadId: string, catId: CatId): Promise<UnseenResult | null> {
+  private async checkQueueFallback(threadId: string, catId: CatId, seenCursor: string): Promise<UnseenResult | null> {
     const { userId, queueChecker } = this.deps;
     if (!queueChecker) return null;
 
@@ -138,15 +139,22 @@ export class ThreadUnseenChecker implements UnseenChecker {
       messageIds: [...correlationMessageIds].sort(),
     });
 
+    // #1200 codex R13: synthetic seq must exceed current seen cursor's seq.
+    // Redis allocator HWM can be ahead of process clock (sub-ms multi-allocation,
+    // clock skew). Using Date.now() alone risks producing a v2 cursor with lower
+    // seq than the seen cursor, causing the queued unseen notice to be immediately
+    // filtered as "already resolved". Fix: max(seenSeq + 1, Date.now()).
+    const parsed = parseCursor(seenCursor);
+    const seenSeq = parsed?.version === 2 && parsed.seq ? parsed.seq : 0;
+    const syntheticSeq = Math.max(seenSeq + 1, Date.now());
+
     return {
       count: nonSelf.length,
       senders,
-      // Use a sortable synthetic ID at current timestamp so the notice resolves
-      // once the cat's seenCursor advances past this point (after the queued
-      // message is delivered and read). Cloud review P2: `queued:${threadId}`
-      // sorts after all real IDs ('q' > '0'), making the notice permanently
-      // unresolved in FreshnessNoticeService.checkHoldBallReminder.
-      maxMessageId: generateSortableId(Date.now()),
+      // #1200 codex R14: sentinel ID '0' sorts below ALL real message IDs.
+      // syntheticSeq = max(seenSeq+1, Date.now()) ensures the cursor exceeds
+      // the current seen cursor (codex R13 HWM fix).
+      maxMessageId: cursorFor({ id: '0', visibilitySeq: syntheticSeq }),
       // Re-checking the same queued entry generates a fresh synthetic cursor.
       // Coalesce by durable, content-free Queue identity instead; a newly
       // merged message ID changes this key and permits exactly one new notice.

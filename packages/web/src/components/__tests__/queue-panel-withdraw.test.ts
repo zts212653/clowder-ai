@@ -73,7 +73,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
 
     expect(container.innerHTML).toContain('queued to withdraw');
 
-    const removeBtn = container.querySelector('button[aria-label="删除"]') as HTMLButtonElement | null;
+    const removeBtn = container.querySelector('button[aria-label="撤出待处理"]') as HTMLButtonElement | null;
     expect(removeBtn).not.toBeNull();
 
     await act(async () => {
@@ -84,7 +84,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
     expect(container.innerHTML).toBe('');
 
     const toasts = useToastStore.getState().toasts;
-    expect(toasts.some((t) => t.title === '已删除')).toBe(true);
+    expect(toasts.some((t) => t.title === '已撤出待处理' && t.message === '原消息仍保留在对话历史中')).toBe(true);
   });
 
   it('withdraws entry and queues its text for composer recall-edit', async () => {
@@ -325,7 +325,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
     });
 
-    const removeBtn = container.querySelector('button[aria-label="删除"]') as HTMLButtonElement | null;
+    const removeBtn = container.querySelector('button[aria-label="撤出待处理"]') as HTMLButtonElement | null;
     expect(removeBtn).not.toBeNull();
 
     await act(async () => {
@@ -337,6 +337,35 @@ describe('QueuePanel withdraw UX (F39)', () => {
     expect(container.innerHTML).toContain('queued to withdraw');
 
     const toasts = useToastStore.getState().toasts;
-    expect(toasts.some((t) => t.type === 'error' && t.title === '删除失败')).toBe(true);
+    expect(toasts.some((t) => t.type === 'error' && t.title === '撤出失败')).toBe(true);
+  });
+
+  it('hydrates the authoritative remaining queue when clearing only partially succeeds', async () => {
+    const { apiFetch } = await import('@/utils/api-client');
+    const remaining = { ...QUEUED_ENTRY, id: 'q-remaining', content: 'still actionable' };
+    (apiFetch as unknown as { mockImplementation: (fn: unknown) => void }).mockImplementation(async () => ({
+      ok: false,
+      json: async () => ({
+        error: '只撤出了部分消息；其余消息仍保留在待处理队列中',
+        code: 'QUEUE_WITHDRAWAL_PARTIAL',
+        queue: [remaining],
+      }),
+    }));
+    useChatStore.setState({ queue: [QUEUED_ENTRY, remaining] });
+
+    act(() => {
+      root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
+    });
+    const clearBtn = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('全部撤出'),
+    );
+    expect(clearBtn).toBeDefined();
+
+    await act(async () => {
+      clearBtn?.click();
+    });
+
+    expect(useChatStore.getState().queue.map((entry) => entry.id)).toEqual(['q-remaining']);
+    expect(useToastStore.getState().toasts.some((toast) => toast.title === '部分撤出')).toBe(true);
   });
 });

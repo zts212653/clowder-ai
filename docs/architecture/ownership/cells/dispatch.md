@@ -47,6 +47,7 @@ doc_anchors:
   - feature-specs/2026-07-15-f264-per-target-message-receipt.md
   - feature-specs/2026-07-16-f177-f254-f264-child-execution-truth.md
   - feature-specs/2026-07-31-f264-terminal-consumption-receipt.md
+  - feature-specs/2026-08-04-f264-author-declared-message-disposition.md
 static_scan_hints: [TurnExecutionRecord, TurnExecutionStore, RedisTurnExecutionStore, TurnExecutionStartupReconciler, executionKind, auxiliaryTurnExecutions, InvocationQueue, QueueProcessor, QueuedMessageCustody, QueueBodyExposure, QueueMessageReceipt, QueueReceiptTarget, QueueReminderAttempt, QueuedMessageCustodyCoordinator, QueuedMessageCustodyStartupReconciler, projectQueueReceipt, transitionQueueCustody, restoreDurableEntry, InvocationTracker, ConnectorInvokeTrigger, actionSuccessorFence, actionLeaseId, actionGeneration, freshnessClosureId, freshnessRequiredFrontierMessageId, freshnessSupplementId, readOnlyToolPolicy, busy, priority, autoExecute]
 cited_by:
   - {feature: F167-Phase-T-readiness, date: 2026-07-23, delta: explicit A2A source categories bind the current thread-ball dispatch after durable ball.handed evidence, while exact hold-ball sources keep their hold identity and generic or missing provenance remains legacy unknown}
@@ -62,6 +63,7 @@ cited_by:
   - {feature: F254-post-merge-durability, date: 2026-07-13, delta: ordinary queued MessageStore records carry revisioned TTL-0 custody; startup deterministically reconstructs the exact Queue owner and independent per-target lifecycle instead of degrading responsibility to delivered-only visibility}
   - {feature: F264, date: 2026-07-15, delta: durable custody projects six honest per-target UI states, distinct responded vs completed-with-turn outcomes, exact invocation-lineage evidence, idempotent reminder requested/delivered/seen/missed attempts, and persisted Steer-in-progress truth}
   - {feature: F264-terminal-consumption, date: 2026-07-31, delta: cross-thread messages bind immutable per-target Queue carriers; exact child creation records awakened separately from body exposure, and only exact-child plus aggregate success may commit a typed Phase T terminal-silent witness into the existing receipt}
+  - {feature: F264-author-disposition, date: 2026-08-04, delta: ordinary queued sources persist per-target author disposition with an exact parent exposure fence; next-work remains the default, and an unconsumed current-work request falls back to the same Queue custody instead of leaking into a successor turn}
 ---
 
 # Dispatch / Queue
@@ -79,6 +81,7 @@ F175 owns the unified message queue and priority ordering. F185 / ADR-034 own en
 - Changing ordinary queued-message persistence, custody CAS, same-invocation handled evidence, restart reconciliation, legacy custody backfill, or exact Queue owner reconstruction.
 - Changing child invocation create/terminal/restart lifecycle, execution kind, parent index, glass-box API, or callback-auth cleanup boundary.
 - Changing F264 receipt projection, handled disposition, lineage evidence, reminder attempts, or Steer-in-progress persistence.
+- Changing author-declared current-work/next-work intent, exact parent exposure eligibility, preference resolution, or terminal fallback.
 - Changing action-scoped multi-mention/cross-post admission order, queue idempotency projection, generation preflight, or stale structured response suppression.
 - Changing managed-command/return recovery dispatch, or the wake provenance passed into the turn-scoped custody stop gate.
 
@@ -92,6 +95,7 @@ F175 owns the unified message queue and priority ordering. F185 / ADR-034 own en
 - Treat `freshnessSupplementId` as a projection-only carrier. Resolve the durable aggregate, require one target + exact lineage/seq, claim before launch, rebuild input from MessageStore, and fail before provider start if `readOnlyToolPolicy` is absent or unsupported.
 - Persist ordinary queued-message responsibility on the same MessageStore record with immutable identity, revisioned CAS, stable ordering, and independent `notified / seen / failed / handled` target sets. Rebuild `InvocationQueue` from that truth on startup and reconcile only exact InvocationRecord evidence.
 - Derive `QueueMessageReceipt` from custody for both live Queue and F5 history. Keep reminder attempts additive and idempotent per exact message/target/invocation; keep `responded` and `completed_with_turn` as distinct terminal dispositions.
+- Persist author disposition on the existing per-target custody. Bind `continue_current` to the exact active parent at admission; only a matching full-body read may expose it, and parent terminal must append a fallback to `next_work` for every still-pending target.
 - Create every child in `TurnExecutionStore` before provider start, pass `executionKind` explicitly, and transition `running` through the store's one-way terminal CAS. Reconcile abandoned running children from the durable ledger, never from logs or callback auth.
 - Treat `actionSuccessorFence` as a typed projection from `ActionSuccessorLeaseStore`. Admission happens before request/message/timer/queue persistence; start and commit both preflight the exact generation.
 - Derive stop-gate wake provenance from typed Queue/action/message-source fields only. User/cron/freshness can be obligation-free; action fences, explicit A2A dispatches, and exact hold sources select one custody truth. Persist the A2A `ball.handed` transition before opening its projection; missing/failed lookups stay legacy unknown.
@@ -105,6 +109,7 @@ F175 owns the unified message queue and priority ordering. F185 / ADR-034 own en
 - Do not add child arrays or kind enums to the parent InvocationRecord, and do not retain callback-auth registry entries as historical execution truth.
 - Do not treat the in-memory `InvocationQueue` Map as restart truth, and do not call `markDelivered` merely because a queued owner was absent after process restart.
 - Do not use Steer as a synonym for promote/reorder; Steer cancels current work and restarts the exact durable entry once.
+- Do not treat preference or `continue_current` as seen/handled evidence, leave it unbound to a parent, or let a replacement/same-cat successor inherit the old exposure window.
 - Do not use `urgent` priority for agent-to-agent continuation except the explicit continuation exception. Urgent is for user/system blocking work, not agent chatter.
 - Do not model transport delivery retries here; connector delivery belongs to `transport`.
 - Do not infer catch closure from an untyped existing invocation. Scheduling coverage is not semantic closure and cannot suppress a required successor.

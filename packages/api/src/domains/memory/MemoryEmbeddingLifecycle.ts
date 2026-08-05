@@ -1,6 +1,6 @@
 import { EmbeddingService } from './EmbeddingService.js';
 import { IndexBuilder } from './IndexBuilder.js';
-import type { EmbedConfig, IEmbeddingService } from './interfaces.js';
+import type { EmbedConfig, IEmbeddingService, RebuildResult } from './interfaces.js';
 import { PassageVectorStore } from './PassageVectorStore.js';
 import { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 import { ensurePassageVectorTable, ensureVectorTable } from './schema.js';
@@ -138,6 +138,12 @@ export class MemoryEmbeddingLifecycle {
 
   getPassageVectorStore(): PassageVectorStore | undefined {
     return this.passageVectorStore;
+  }
+
+  async catchUpAfterReady(): Promise<RebuildResult> {
+    const result = await this.indexBuilder.rebuild();
+    this.indexBuilder.startPassageEmbeddingWarmup();
+    return result;
   }
 
   private async activateOnce(generation: number): Promise<EmbeddingActivationResult> {

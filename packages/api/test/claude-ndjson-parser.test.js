@@ -544,3 +544,184 @@ test('assistant event with empty text block alongside tool_use → only tool_use
   assert.equal(result.length, 1, 'only tool_use, empty text filtered out');
   assert.equal(result[0].type, 'tool_use');
 });
+
+test('#1272: streamed text survives thinking-only envelope without final snapshot duplication', () => {
+  const state = makeStreamState();
+  const events = [
+    { type: 'stream_event', event: { type: 'message_start', message: { id: 'msg-1272-thinking' } } },
+    {
+      type: 'stream_event',
+      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '只应出现一次。' } },
+    },
+    {
+      type: 'assistant',
+      message: {
+        id: 'msg-1272-thinking',
+        content: [{ type: 'thinking', thinking: '继续分析' }],
+      },
+    },
+    {
+      type: 'assistant',
+      message: {
+        id: 'msg-1272-thinking',
+        content: [{ type: 'text', text: '只应出现一次。' }],
+      },
+    },
+  ];
+
+  const output = events.flatMap((event) => {
+    const result = transformClaudeEvent(event, CAT, state);
+    if (result === null) return [];
+    return Array.isArray(result) ? result : [result];
+  });
+
+  assert.deepEqual(
+    output.filter((msg) => msg.type === 'text').map((msg) => msg.content),
+    ['只应出现一次。'],
+  );
+  assert.equal(state.partialTextMessageIds.has('msg-1272-thinking'), false, 'text-bearing snapshot closes the ID');
+});
+
+test('#1272: tool-only envelope retains partial-text ID until the text-bearing snapshot', () => {
+  const state = makeStreamState();
+  const events = [
+    { type: 'stream_event', event: { type: 'message_start', message: { id: 'msg-1272-tool' } } },
+    {
+      type: 'stream_event',
+      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '正文' } },
+    },
+    {
+      type: 'assistant',
+      message: {
+        id: 'msg-1272-tool',
+        content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: { path: 'README.md' } }],
+      },
+    },
+    {
+      type: 'assistant',
+      message: { id: 'msg-1272-tool', content: [{ type: 'text', text: '正文' }] },
+    },
+  ];
+
+  const output = events.flatMap((event) => {
+    const result = transformClaudeEvent(event, CAT, state);
+    if (result === null) return [];
+    return Array.isArray(result) ? result : [result];
+  });
+
+  assert.deepEqual(
+    output.filter((msg) => msg.type === 'text').map((msg) => msg.content),
+    ['正文'],
+  );
+  assert.equal(output.filter((msg) => msg.type === 'tool_use').length, 1, 'tool event remains visible');
+  assert.equal(state.partialTextMessageIds.has('msg-1272-tool'), false);
+});
+
+test('#1272: empty text alongside a tool does not close the partial-text ID', () => {
+  const state = makeStreamState();
+  const events = [
+    { type: 'stream_event', event: { type: 'message_start', message: { id: 'msg-1272-empty-text' } } },
+    {
+      type: 'stream_event',
+      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '正文' } },
+    },
+    {
+      type: 'assistant',
+      message: {
+        id: 'msg-1272-empty-text',
+        content: [
+          { type: 'text', text: '' },
+          { type: 'tool_use', id: 'tool-empty', name: 'Read', input: { path: 'README.md' } },
+        ],
+      },
+    },
+    {
+      type: 'assistant',
+      message: { id: 'msg-1272-empty-text', content: [{ type: 'text', text: '正文' }] },
+    },
+  ];
+
+  const output = events.flatMap((event) => {
+    const result = transformClaudeEvent(event, CAT, state);
+    if (result === null) return [];
+    return Array.isArray(result) ? result : [result];
+  });
+
+  assert.deepEqual(
+    output.filter((msg) => msg.type === 'text').map((msg) => msg.content),
+    ['正文'],
+  );
+  assert.equal(output.filter((msg) => msg.type === 'tool_use').length, 1);
+  assert.equal(state.partialTextMessageIds.has('msg-1272-empty-text'), false);
+});
+
+test('#1272: text-bearing snapshot closes the ID without hiding a later tool envelope', () => {
+  const state = makeStreamState();
+  const events = [
+    { type: 'stream_event', event: { type: 'message_start', message: { id: 'msg-1272-text-tool' } } },
+    {
+      type: 'stream_event',
+      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '正文' } },
+    },
+    {
+      type: 'assistant',
+      message: { id: 'msg-1272-text-tool', content: [{ type: 'text', text: '正文' }] },
+    },
+    {
+      type: 'assistant',
+      message: {
+        id: 'msg-1272-text-tool',
+        content: [{ type: 'tool_use', id: 'tool-after-text', name: 'Read', input: { path: 'README.md' } }],
+      },
+    },
+  ];
+
+  const output = events.flatMap((event) => {
+    const result = transformClaudeEvent(event, CAT, state);
+    if (result === null) return [];
+    return Array.isArray(result) ? result : [result];
+  });
+
+  assert.deepEqual(
+    output.filter((msg) => msg.type === 'text').map((msg) => msg.content),
+    ['正文'],
+  );
+  assert.equal(output.filter((msg) => msg.type === 'tool_use').length, 1);
+  assert.equal(state.partialTextMessageIds.has('msg-1272-text-tool'), false);
+});
+
+test('#1272: terminal result clears a partial-text ID left by a thinking-only message', () => {
+  const state = makeStreamState();
+  transformClaudeEvent(
+    { type: 'stream_event', event: { type: 'message_start', message: { id: 'msg-1272-terminal' } } },
+    CAT,
+    state,
+  );
+  transformClaudeEvent(
+    {
+      type: 'stream_event',
+      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } },
+    },
+    CAT,
+    state,
+  );
+  transformClaudeEvent(
+    {
+      type: 'assistant',
+      message: {
+        id: 'msg-1272-terminal',
+        content: [{ type: 'thinking', thinking: 'no final text follows' }],
+      },
+    },
+    CAT,
+    state,
+  );
+
+  assert.equal(
+    state.partialTextMessageIds.has('msg-1272-terminal'),
+    true,
+    'thinking-only envelope is not a proven text boundary',
+  );
+  transformClaudeEvent({ type: 'result', subtype: 'success' }, CAT, state);
+  assert.equal(state.partialTextMessageIds.size, 0, 'terminal result prevents cross-invocation state leakage');
+});

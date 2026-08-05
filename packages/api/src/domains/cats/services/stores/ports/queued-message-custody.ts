@@ -1,4 +1,4 @@
-import type { CatId, QueueReminderAttempt, QueueTargetOutcome } from '@cat-cafe/shared';
+import type { CatId, QueueAuthorIntent, QueueReminderAttempt, QueueTargetOutcome } from '@cat-cafe/shared';
 import { normalizeOwnerAuthProvenance, type OwnerAuthProvenance } from '../../owner-auth-provenance.js';
 
 export type QueuedMessageCustodyStatus = 'queued' | 'processing' | 'terminal';
@@ -33,6 +33,8 @@ export interface QueuedMessageCustody {
   ownerAuthProvenance?: OwnerAuthProvenance;
   /** The message started this invocation; keep custody but suppress the work-period timeline dock. */
   receiptScope?: 'primary_trigger' | 'cross_thread_delivery';
+  /** F264: per-target author-declared work disposition. Missing legacy records mean next_work. */
+  authorIntentByCatId?: Record<string, QueueAuthorIntent>;
   /**
    * A cross-thread callback message can dispatch one independent A2A Queue
    * carrier per target. This immutable map binds each target receipt to the
@@ -54,6 +56,9 @@ export interface QueuedMessageCustody {
   /** Append-only exact prompt-body exposure history; message id is the enclosing custody record. */
   bodyExposures?: QueueBodyExposure[];
   failedByCatIds: CatId[];
+  /** Author-cleared targets: terminal for Queue actionability, preserved in owner history. */
+  withdrawnByCatIds?: CatId[];
+  withdrawnAtByCatId?: Record<string, number>;
   handledByCatIds: CatId[];
   /** F264: exact successful invocation evidence; absent on legacy handled custody. */
   targetOutcomeByCatId?: Record<string, QueueTargetOutcome>;
@@ -173,6 +178,7 @@ function assertTargetSubsets(custody: QueuedMessageCustody, allTargets: Readonly
     ['notifiedByCatIds', custody.notifiedByCatIds],
     ['seenByCatIds', custody.seenByCatIds],
     ['failedByCatIds', custody.failedByCatIds],
+    ['withdrawnByCatIds', custody.withdrawnByCatIds ?? []],
     ['handledByCatIds', custody.handledByCatIds],
   ] as const;
   for (const [field, values] of targetSets) {
@@ -295,7 +301,9 @@ function assertReminderAttemptTimestamps(attempt: QueueReminderAttempt): void {
   }
   if (attempt.state === 'missed') {
     const validReason =
-      attempt.missedReason === 'invocation_ended_before_delivery' || attempt.missedReason === 'delivered_not_read';
+      attempt.missedReason === 'invocation_ended_before_delivery' ||
+      attempt.missedReason === 'delivered_not_read' ||
+      attempt.missedReason === 'source_withdrawn';
     if (attempt.missedAt === undefined || !validReason) {
       throw new Error('missed reminder attempt requires missedAt and a valid missedReason');
     }
@@ -323,6 +331,78 @@ function assertReminderAttempts(custody: QueuedMessageCustody, allTargets: Reado
   }
 }
 
+function assertAuthorIntentCarrierCapability(authorIntent: QueueAuthorIntent): void {
+  const capability = authorIntent.carrierCapability;
+  if (!capability) return;
+  if (!['openai_codex', 'anthropic', 'kimi', 'other'].includes(capability.provider)) {
+    throw new Error('invalid queue author intent carrier provider');
+  }
+  if (
+    ![
+      'codex_app_server',
+      'codex_exec_json',
+      'claude_print_sdk',
+      'claude_stream_json',
+      'kimi_stream_json',
+      'mcp_result_piggyback',
+      'other',
+    ].includes(capability.carrier)
+  ) {
+    throw new Error('invalid queue author intent carrier');
+  }
+  if (
+    !['exact_active_turn', 'queued_internal_turn', 'mcp_result_piggyback', 'unsupported', 'undeclared'].includes(
+      capability.deliverySemantics,
+    )
+  ) {
+    throw new Error('invalid queue author intent carrier delivery semantics');
+  }
+}
+
+function assertAuthorIntentDisposition(authorIntent: QueueAuthorIntent): void {
+  if (authorIntent.requested !== 'continue_current' && authorIntent.requested !== 'next_work') {
+    throw new Error('invalid queue author intent disposition');
+  }
+  if (authorIntent.requested === 'next_work' && authorIntent.boundParentInvocationId !== undefined) {
+    throw new Error('next-work author intent cannot bind a parent invocation');
+  }
+  const allowsMissingParent =
+    authorIntent.fallbackReason === 'no_active_parent' ||
+    authorIntent.fallbackReason === 'carrier_capability_undeclared' ||
+    authorIntent.fallbackReason === 'unsupported_carrier';
+  if (authorIntent.requested === 'continue_current' && !authorIntent.boundParentInvocationId && !allowsMissingParent) {
+    throw new Error('continue-current author intent requires an exact parent fence');
+  }
+}
+
+function assertAuthorIntentFallback(authorIntent: QueueAuthorIntent): void {
+  const validReasons = new Set([
+    'no_active_parent',
+    'carrier_capability_undeclared',
+    'unsupported_carrier',
+    'parent_terminal_before_exposure',
+    'parent_non_success_after_exposure',
+  ]);
+  if ((authorIntent.fallbackAt === undefined) !== (authorIntent.fallbackReason === undefined)) {
+    throw new Error('queue author intent fallback requires timestamp and reason together');
+  }
+  if (authorIntent.fallbackAt !== undefined) {
+    assertFiniteNonNegative(authorIntent.fallbackAt, 'authorIntent.fallbackAt');
+  }
+  if (authorIntent.fallbackReason !== undefined && !validReasons.has(authorIntent.fallbackReason)) {
+    throw new Error('invalid queue author intent fallback reason');
+  }
+}
+
+function assertAuthorIntents(custody: QueuedMessageCustody, allTargets: ReadonlySet<string>): void {
+  for (const [catId, authorIntent] of Object.entries(custody.authorIntentByCatId ?? {})) {
+    if (!allTargets.has(catId)) throw new Error('queue author intent target must belong to allTargetCats');
+    assertAuthorIntentDisposition(authorIntent);
+    assertAuthorIntentCarrierCapability(authorIntent);
+    assertAuthorIntentFallback(authorIntent);
+  }
+}
+
 function assertCustodyTargets(custody: QueuedMessageCustody, allowLegacyMissingExposure = false): void {
   assertUniqueTargets(custody.allTargetCats, 'allTargetCats');
   if (custody.allTargetCats.length === 0) throw new Error('queue custody requires at least one target');
@@ -330,9 +410,21 @@ function assertCustodyTargets(custody: QueuedMessageCustody, allowLegacyMissingE
   assertUniqueTargets(custody.notifiedByCatIds, 'notifiedByCatIds');
   assertUniqueTargets(custody.seenByCatIds, 'seenByCatIds');
   assertUniqueTargets(custody.failedByCatIds, 'failedByCatIds');
+  assertUniqueTargets(custody.withdrawnByCatIds ?? [], 'withdrawnByCatIds');
   assertUniqueTargets(custody.handledByCatIds, 'handledByCatIds');
 
   const allTargets = new Set<string>(custody.allTargetCats);
+  assertAuthorIntents(custody, allTargets);
+  for (const catId of custody.withdrawnByCatIds ?? []) {
+    const withdrawnAt = custody.withdrawnAtByCatId?.[catId];
+    if (withdrawnAt === undefined) throw new Error('withdrawn target requires withdrawnAt');
+    assertFiniteNonNegative(withdrawnAt, 'withdrawnAt');
+  }
+  for (const catId of Object.keys(custody.withdrawnAtByCatId ?? {})) {
+    if (!custody.withdrawnByCatIds?.includes(catId as CatId)) {
+      throw new Error('withdrawnAt requires a withdrawn target');
+    }
+  }
   assertTargetSubsets(custody, allTargets);
   assertBodyExposures(custody, allTargets);
   assertInvocationBindings(custody, allTargets);
@@ -347,6 +439,12 @@ function assertCustodyLifecycle(custody: QueuedMessageCustody): void {
   if (custody.pendingTargetCats.some((catId) => custody.handledByCatIds.includes(catId))) {
     throw new Error('pending and handled targets must be disjoint');
   }
+  if (custody.pendingTargetCats.some((catId) => custody.withdrawnByCatIds?.includes(catId))) {
+    throw new Error('pending and withdrawn targets must be disjoint');
+  }
+  if (custody.handledByCatIds.some((catId) => custody.withdrawnByCatIds?.includes(catId))) {
+    throw new Error('handled and withdrawn targets must be disjoint');
+  }
   if (custody.status === 'terminal' && custody.pendingTargetCats.length > 0) {
     throw new Error('terminal queue custody cannot retain pending targets');
   }
@@ -356,6 +454,9 @@ function assertCustodyLifecycle(custody: QueuedMessageCustody): void {
   const activeCarrierTargets = Object.keys(custody.carrierStateByTargetCatId ?? {});
   if (activeCarrierTargets.some((catId) => custody.handledByCatIds.includes(catId as CatId))) {
     throw new Error('handled target cannot retain an active Queue carrier state');
+  }
+  if (activeCarrierTargets.some((catId) => custody.withdrawnByCatIds?.includes(catId as CatId))) {
+    throw new Error('withdrawn target cannot retain an active Queue carrier state');
   }
   if (custody.status === 'terminal' && activeCarrierTargets.length > 0) {
     throw new Error('terminal queue custody cannot retain an active Queue carrier state');
@@ -388,6 +489,37 @@ function assertBodyExposureMonotonicity(current: QueuedMessageCustody, next: Que
     const key = `${exposure.targetCatId}\u0000${exposure.invocationId}`;
     if (JSON.stringify(nextByKey.get(key)) !== JSON.stringify(exposure)) {
       throw new Error('queue custody body exposures are append-only');
+    }
+  }
+}
+
+function assertAuthorIntentMonotonicity(current: QueuedMessageCustody, next: QueuedMessageCustody): void {
+  for (const [catId, authorIntent] of Object.entries(current.authorIntentByCatId ?? {})) {
+    const successor = next.authorIntentByCatId?.[catId];
+    if (!successor) throw new Error('queue author intent is immutable once assigned');
+    if (
+      successor.requested !== authorIntent.requested ||
+      successor.boundParentInvocationId !== authorIntent.boundParentInvocationId ||
+      JSON.stringify(successor.carrierCapability) !== JSON.stringify(authorIntent.carrierCapability)
+    ) {
+      throw new Error('queue author intent request and parent fence are immutable');
+    }
+    if (
+      authorIntent.fallbackAt !== undefined &&
+      (successor.fallbackAt !== authorIntent.fallbackAt || successor.fallbackReason !== authorIntent.fallbackReason)
+    ) {
+      throw new Error('queue author intent fallback is append-only');
+    }
+  }
+}
+
+function assertWithdrawalMonotonicity(current: QueuedMessageCustody, next: QueuedMessageCustody): void {
+  for (const catId of current.withdrawnByCatIds ?? []) {
+    if (
+      !next.withdrawnByCatIds?.includes(catId) ||
+      next.withdrawnAtByCatId?.[catId] !== current.withdrawnAtByCatId?.[catId]
+    ) {
+      throw new Error('queue custody withdrawals are append-only');
     }
   }
 }
@@ -484,12 +616,22 @@ export function assertQueueCustodyTransition(current: QueuedMessageCustody, inpu
   }
   assertTargetOutcomeMonotonicity(current, input.next);
   assertBodyExposureMonotonicity(current, input.next);
+  assertAuthorIntentMonotonicity(current, input.next);
+  assertWithdrawalMonotonicity(current, input.next);
   assertReminderAttemptMonotonicity(current, input.next);
   if (input.next.revision !== current.revision + 1) {
     throw new Error('queue custody next revision must increment by one');
   }
-  if ((input.deliveredAt !== undefined) !== (input.next.status === 'terminal')) {
-    throw new Error('delivery transition requires terminal custody and terminal custody requires deliveredAt');
+  if (input.deliveredAt !== undefined && input.next.status !== 'terminal') {
+    throw new Error('delivery transition requires terminal custody');
+  }
+  if (input.next.status === 'terminal' && input.deliveredAt === undefined) {
+    const withdrawn = new Set<string>(input.next.withdrawnByCatIds ?? []);
+    const handled = new Set<string>(input.next.handledByCatIds);
+    const allTargetsSettled = input.next.allTargetCats.every((catId) => withdrawn.has(catId) || handled.has(catId));
+    if (withdrawn.size === 0 || !allTargetsSettled) {
+      throw new Error('terminal custody without delivery requires exact author-withdrawal settlement');
+    }
   }
   if (input.deliveredAt !== undefined) assertFiniteNonNegative(input.deliveredAt, 'deliveredAt');
 }
@@ -511,7 +653,10 @@ export function cloneQueuedMessageCustody(custody: QueuedMessageCustody): Queued
     ...(custody.carrierStateByTargetCatId
       ? { carrierStateByTargetCatId: structuredClone(custody.carrierStateByTargetCatId) }
       : {}),
+    ...(custody.authorIntentByCatId ? { authorIntentByCatId: structuredClone(custody.authorIntentByCatId) } : {}),
     failedByCatIds: [...custody.failedByCatIds],
+    ...(custody.withdrawnByCatIds ? { withdrawnByCatIds: [...custody.withdrawnByCatIds] } : {}),
+    ...(custody.withdrawnAtByCatId ? { withdrawnAtByCatId: { ...custody.withdrawnAtByCatId } } : {}),
     handledByCatIds: [...custody.handledByCatIds],
     ...(custody.targetOutcomeByCatId ? { targetOutcomeByCatId: structuredClone(custody.targetOutcomeByCatId) } : {}),
     ...(custody.steeredInvocationIdByCatId

@@ -110,6 +110,11 @@ describe('invokeSingleCat durable child execution lifecycle', () => {
       parentInvocationId: 'parent-1',
       executionKind: 'freshness_supplement',
       startedAt: JSON.parse(created.content).startedAt,
+      freshnessCarrierCapability: {
+        provider: 'other',
+        carrier: 'other',
+        deliverySemantics: 'undeclared',
+      },
     });
     assert.equal(created.turnInvocationId, 'child-success');
     assert.equal(created.turnExecutionStartedAt, JSON.parse(created.content).startedAt);

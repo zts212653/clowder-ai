@@ -319,13 +319,15 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
 
     const msgs = await promise;
 
-    assert.equal(msgs.length, 3);
+    assert.equal(msgs.length, 4);
     assert.equal(msgs[0].type, 'session_init');
     assert.equal(msgs[0].sessionId, 'thread-abc');
     assert.equal(msgs[0].catId, 'codex');
     assert.equal(msgs[1].type, 'text');
     assert.equal(msgs[1].content, 'Hello from Codex!');
-    assert.equal(msgs[2].type, 'done');
+    assert.equal(msgs[2].type, 'text');
+    assert.equal(msgs[2].content, '\n\n[砚砚/gpt-5.3-codex🐾]');
+    assert.equal(msgs[3].type, 'done');
   });
 
   test('uses exec resume when sessionId is provided', async () => {
@@ -2426,6 +2428,71 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.equal(textMsgs[1].content, '\n\nSecond message');
   });
 
+  test('#1272: service strips per-message signatures and emits one runtime-canonical signature', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.6-sol',
+      carrierMode: 'exec_json',
+    });
+
+    const promise = collect(service.invoke('Signed multi-turn'));
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'thread-1272-signed' },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-1', type: 'agent_message', text: '第一段。 `[砚砚/GPT-5.6 Sol🐾]`' },
+      },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-2', type: 'agent_message', text: '第二段。\n\n[砚砚/GPT-5.6 Sol🐾]' },
+      },
+      { type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 20 } },
+    ]);
+
+    const msgs = await promise;
+    const textMsgs = msgs.filter((msg) => msg.type === 'text');
+    assert.deepEqual(
+      textMsgs.map((msg) => msg.content),
+      ['第一段。', '\n\n第二段。', '\n\n[砚砚/gpt-5.6-sol🐾]'],
+    );
+  });
+
+  test('#1272: multiple completed turns keep the canonical signature at the real stream end', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.6-sol',
+      carrierMode: 'exec_json',
+    });
+
+    const promise = collect(service.invoke('Multi-terminal stream'));
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'thread-1272-multi-terminal' },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-1', type: 'agent_message', text: 'turn 1' },
+      },
+      { type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 5 } },
+      {
+        type: 'item.completed',
+        item: { id: 'msg-2', type: 'agent_message', text: 'turn 2' },
+      },
+      { type: 'turn.completed', usage: { input_tokens: 20, output_tokens: 10 } },
+    ]);
+
+    const msgs = await promise;
+    const text = msgs
+      .filter((msg) => msg.type === 'text')
+      .map((msg) => msg.content)
+      .join('');
+    assert.equal(text, 'turn 1\n\nturn 2\n\n[砚砚/gpt-5.6-sol🐾]');
+  });
+
   test('separates multi-turn text with paragraph breaks (turn newline fix)', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
@@ -2993,7 +3060,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     }
   });
 
-  test('ignores turn.started and turn.completed control events', async () => {
+  test('ignores turn.started/unknown controls and finalizes the signature after a completed stream', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
@@ -3013,12 +3080,14 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     ]);
 
     const msgs = await promise;
-    // Only session_init, text, done — all control/unknown events skipped
-    assert.equal(msgs.length, 3);
+    // turn.completed remains non-UI control; successful stream exhaustion emits the deterministic signature chunk.
+    assert.equal(msgs.length, 4);
     assert.equal(msgs[0].type, 'session_init');
     assert.equal(msgs[1].type, 'text');
     assert.equal(msgs[1].content, 'Hello');
-    assert.equal(msgs[2].type, 'done');
+    assert.equal(msgs[2].type, 'text');
+    assert.equal(msgs[2].content, '\n\n[砚砚/gpt-5.3-codex🐾]');
+    assert.equal(msgs[3].type, 'done');
   });
 
   test('maps command execution lifecycle into tool_use and tool_result', async () => {

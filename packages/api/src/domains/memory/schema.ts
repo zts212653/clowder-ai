@@ -70,7 +70,7 @@ END`,
 END`,
 ];
 
-export const CURRENT_SCHEMA_VERSION = 37;
+export const CURRENT_SCHEMA_VERSION = 38;
 
 // F163 Phase A: experiment infrastructure tables (cohorts, suggestions, logs)
 export const SCHEMA_V13_TABLES = `
@@ -1147,6 +1147,19 @@ export function applyMigrations(db: Database.Database): void {
       END;
     `);
     db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(37, new Date().toISOString());
+  }
+
+  // V38: F256 Wave 1b — durable, versioned expansion health funnel.
+  // One JSON object per recall row preserves the natural top-k denominator,
+  // query timestamp/window, source revision, gate/drop reason, and the
+  // correlated presented/followed/used stages beyond ToolEventLog's 7-day TTL.
+  if (currentVersion < 38) {
+    try {
+      db.exec('ALTER TABLE recall_events ADD COLUMN expansion_funnel_json TEXT');
+    } catch {
+      // Column may already exist from a partial migration.
+    }
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(38, new Date().toISOString());
   }
 }
 

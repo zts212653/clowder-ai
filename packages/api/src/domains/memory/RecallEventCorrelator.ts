@@ -1,12 +1,12 @@
 // F200 Phase A: Correlates ToolEventLog entries into RecallEvents
 
 import { randomUUID } from 'node:crypto';
-import { isRecallResultStatus } from '@cat-cafe/shared';
+import { isRecallResultStatus, parseExpansionFunnelMeta } from '@cat-cafe/shared';
 import type Database from 'better-sqlite3';
 import type { ConsumedEntry, RecallCandidate, RecallEvent, TargetRef } from './f200-types.js';
 import { parseShellReadPaths } from './parse-shell-read-paths.js';
 import { asPushRecallSurface, deterministicPushRecallId } from './push-recall.js';
-import { targetMatch } from './recall-target-match.js';
+import { expansionTargetMatch, targetMatch } from './recall-target-match.js';
 
 const MEMORY_TOOLS = new Set(['search_evidence', 'graph_resolve', 'list_recent', 'session_bootstrap', 'cold_context']);
 
@@ -49,8 +49,9 @@ export class RecallEventCorrelator {
          candidates_json, result_count, result_status, consumed_json, reformulated, fell_back_to_grep,
          abandoned, next_graph_resolve_after_read, token_cost, timestamp,
          shadow_ranking_json, result_set_id, attribution_clarity, thread_id,
-         source, push_surface, presented, inspected, outcome, source_event_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         source, push_surface, presented, inspected, outcome, source_event_id,
+         expansion_funnel_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
   }
 
@@ -107,13 +108,27 @@ export class RecallEventCorrelator {
 
       const candidates = this.extractCandidates(event);
       const sameCatWindow = this.buildWindow(events, i, event);
-      const consumed = this.findConsumed(candidates, sameCatWindow);
+      const consumed = this.findConsumed(candidates, sameCatWindow, targetMatch);
       const reformulated = this.isReformulated(events, i, event);
       const fellBackToGrep = this.hasFellBackToGrep(sameCatWindow);
       const abandoned = consumed.length === 0 && !reformulated;
       const nextGraphResolveAfterRead = this.hasGraphAfterRead(sameCatWindow);
       const pushSurface = asPushRecallSurface(event.summary._f263PushSurface);
       const source = pushSurface ? 'push' : 'pull';
+      const expansionMeta = parseExpansionFunnelMeta(event.summary.expansionFunnel);
+      const expansionCandidates = expansionMeta
+        ? expansionMeta.hints.map((hint, rank) => ({
+            anchor: hint.anchor,
+            rank,
+            targetRef: hint.targetRef,
+          }))
+        : [];
+      const expansionConsumed = this.findConsumed(expansionCandidates, sameCatWindow, expansionTargetMatch);
+      // A follow is a downstream tool input that targets the presented hint,
+      // not an anchor that merely appeared in another search result. Reuse
+      // F200 targetMatch through findConsumed so followed/used attribution has
+      // one typed boundary and cannot be inflated by ranked candidates.
+      const expansionFollowed = new Set(expansionConsumed.map((entry) => entry.anchor));
 
       const resultSetId = bundleByIndex.get(i);
       let attributionClarity: 'clean' | 'ambiguous' | undefined;
@@ -168,6 +183,15 @@ export class RecallEventCorrelator {
         timestamp: event.timestamp,
         ...(resultSetId ? { resultSetId } : {}),
         ...(attributionClarity ? { attributionClarity } : {}),
+        ...(expansionMeta
+          ? {
+              expansionFunnel: {
+                ...expansionMeta,
+                followed: expansionFollowed.size,
+                used: expansionConsumed.length,
+              },
+            }
+          : {}),
       });
     }
     return results;
@@ -216,6 +240,7 @@ export class RecallEventCorrelator {
           e.inspected ? 1 : 0,
           e.outcome,
           e.sourceEventId ?? null,
+          e.expansionFunnel ? JSON.stringify(e.expansionFunnel) : null,
         ];
         this.insertStmt.run(params);
       }
@@ -272,7 +297,11 @@ export class RecallEventCorrelator {
     return window;
   }
 
-  private findConsumed(candidates: RecallCandidate[], window: Array<RawEvent & { distance: number }>): ConsumedEntry[] {
+  private findConsumed(
+    candidates: RecallCandidate[],
+    window: Array<RawEvent & { distance: number }>,
+    matcher: typeof targetMatch,
+  ): ConsumedEntry[] {
     const consumed: ConsumedEntry[] = [];
     const matched = new Set<string>();
 
@@ -282,7 +311,7 @@ export class RecallEventCorrelator {
       const toolInput = wEvent.summary as Record<string, unknown>;
       for (const cand of candidates) {
         if (matched.has(cand.anchor)) continue;
-        if (!targetMatch(wEvent.toolName, toolInput, cand.targetRef)) continue;
+        if (!matcher(wEvent.toolName, toolInput, cand.targetRef)) continue;
 
         const dwellProxy = this.computeDwell(wEvent, window);
         consumed.push({

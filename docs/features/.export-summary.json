@@ -1,8 +1,8 @@
 {
-  "exportedAt": "2026-08-03T12:52:46.253Z",
+  "exportedAt": "2026-08-05T06:43:29.522Z",
   "minTier": "yellow",
-  "exported": 281,
-  "skipped": 17,
+  "exported": 282,
+  "skipped": 16,
   "errors": 0,
   "skippedFiles": [
     "F061-verification-2026-04-21.md",
@@ -19,7 +19,6 @@
     "F257-temporal-context-hardening.md",
     "F264-per-target-message-receipt.md",
     "F280-unified-wait-contract.md",
-    "F284-contextual-workspace-shell.md",
-    "F288-plugin-messaging-domain.md"
+    "F284-contextual-workspace-shell.md"
   ]
 }

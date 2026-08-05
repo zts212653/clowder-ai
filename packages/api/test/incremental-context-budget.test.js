@@ -7,6 +7,7 @@ const { MessageStore } = await import('../dist/domains/cats/services/stores/port
 const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
 const { getCatContextBudget } = await import('../dist/config/cat-budgets.js');
 const { estimateTokens } = await import('../dist/utils/token-counter.js');
+const { parseCursor } = await import('../dist/domains/cats/services/stores/cursor.js');
 
 describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
   test('caps messages to maxMessages when cursor is undefined (first-time cat)', async () => {
@@ -220,7 +221,10 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
     const deps = buildDeps(messageStore, deliveryCursorStore);
     const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus');
 
-    assert.equal(result.boundaryId, msgs[msgs.length - 1].id, 'boundaryId should be the newest message ID');
+    // #1200: boundaryId is now a v2 cursor — extract the embedded ID for comparison
+    const parsed = parseCursor(result.boundaryId);
+    assert.ok(parsed, 'boundaryId should be a valid cursor');
+    assert.equal(parsed.id, msgs[msgs.length - 1].id, 'boundaryId should reference the newest message ID');
   });
 
   test('currentMessageFilteredOut reflects visibility filtering, not budget cap', async () => {

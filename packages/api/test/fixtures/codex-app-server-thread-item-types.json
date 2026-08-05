@@ -1,0 +1,24 @@
+{
+  "source": "codex app-server generate-json-schema --experimental",
+  "codexVersion": "0.146.0",
+  "threadItemTypes": [
+    "userMessage",
+    "hookPrompt",
+    "agentMessage",
+    "plan",
+    "reasoning",
+    "commandExecution",
+    "fileChange",
+    "mcpToolCall",
+    "dynamicToolCall",
+    "collabAgentToolCall",
+    "subAgentActivity",
+    "webSearch",
+    "imageView",
+    "sleep",
+    "imageGeneration",
+    "enteredReviewMode",
+    "exitedReviewMode",
+    "contextCompaction"
+  ]
+}

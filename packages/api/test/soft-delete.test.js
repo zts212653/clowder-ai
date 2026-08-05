@@ -150,6 +150,8 @@ describe('Read path filtering (skip soft-deleted)', () => {
     assert.ok(!result.some((m) => m.id === msgs[1].id));
   });
 
+  // #1200 Sol R2 P2-5: getByThreadAfter KEEPS deleted messages (tombstone-keep per binding doc).
+  // Parity direction: both Memory and Redis keep tombstones in cursor pagination.
   it('getByThreadAfter does NOT skip deleted (cursor path)', () => {
     const store = new MessageStore();
     const msgs = seedMessages(store);
@@ -320,6 +322,8 @@ describe('MessageStore.hardDelete()', () => {
     assert.ok(!result.some((m) => m.id === msgs[3].id));
   });
 
+  // #1200 Sol R2 P2-5: tombstones are KEPT in getByThreadAfter per binding doc.
+  // Both Memory and Redis preserve tombstones for cursor pagination parity.
   it('tombstone is visible in getByThreadAfter (cursor path)', () => {
     const store = new MessageStore();
     const msgs = seedMessages(store);

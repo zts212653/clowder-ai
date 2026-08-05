@@ -1,4 +1,4 @@
-import type { DispatchProposal } from '@cat-cafe/shared';
+import { type DispatchProposal, deriveDispatchProposalSourceInvocationId } from '@cat-cafe/shared';
 import {
   hydrateApprovalPublication,
   serializeApprovalPublication,
@@ -27,6 +27,9 @@ export function serializeDispatchProposal(proposal: DispatchProposal): string[] 
     'createdAt',
     String(proposal.createdAt),
   ];
+  if (proposal.sourceInvocationId) {
+    fields.push('sourceInvocationId', proposal.sourceInvocationId);
+  }
   if (proposal.replyTo) fields.push('replyTo', proposal.replyTo);
   if (proposal.clientMessageId) {
     fields.push('clientMessageId', proposal.clientMessageId);
@@ -59,8 +62,16 @@ export function serializeDispatchProposal(proposal: DispatchProposal): string[] 
 }
 
 export function hydrateDispatchProposal(raw: Record<string, string>): DispatchProposal {
+  const approvalOriginRef = raw.approvalOriginRef ? JSON.parse(raw.approvalOriginRef) : undefined;
+  const publication = raw.publication ? hydrateApprovalPublication(raw.publication) : undefined;
+  const sourceInvocationId = deriveDispatchProposalSourceInvocationId({
+    ...(raw.sourceInvocationId ? { sourceInvocationId: raw.sourceInvocationId } : {}),
+    ...(approvalOriginRef ? { approvalOriginRef } : {}),
+    ...(publication ? { publication } : {}),
+  });
   return {
     proposalId: raw.proposalId,
+    ...(sourceInvocationId ? { sourceInvocationId } : {}),
     sourceThreadId: raw.sourceThreadId,
     targetThreadId: raw.targetThreadId,
     senderCatId: raw.senderCatId,
@@ -73,7 +84,7 @@ export function hydrateDispatchProposal(raw: Record<string, string>): DispatchPr
     ...(raw.replyTo ? { replyTo: raw.replyTo } : {}),
     ...(raw.clientMessageId ? { clientMessageId: raw.clientMessageId } : {}),
     ...(raw.proposedAction ? { proposedAction: JSON.parse(raw.proposedAction) } : {}),
-    ...(raw.approvalOriginRef ? { approvalOriginRef: JSON.parse(raw.approvalOriginRef) } : {}),
+    ...(approvalOriginRef ? { approvalOriginRef } : {}),
     ...(raw.cardMessageId ? { cardMessageId: raw.cardMessageId } : {}),
     ...(raw.deliveredMessageId ? { deliveredMessageId: raw.deliveredMessageId } : {}),
     ...(raw.decidedAt ? { decidedAt: Number(raw.decidedAt) } : {}),
@@ -81,6 +92,6 @@ export function hydrateDispatchProposal(raw: Record<string, string>): DispatchPr
     ...(raw.supersededBy ? { supersededBy: raw.supersededBy } : {}),
     ...(raw.envelopeDigest ? { envelopeDigest: raw.envelopeDigest } : {}),
     ...(raw.actionLeaseRef ? { actionLeaseRef: JSON.parse(raw.actionLeaseRef) } : {}),
-    ...(raw.publication ? { publication: hydrateApprovalPublication(raw.publication) } : {}),
+    ...(publication ? { publication } : {}),
   };
 }

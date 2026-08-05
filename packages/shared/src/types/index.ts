@@ -417,7 +417,12 @@ export type {
   DeliberateTransition,
 } from './deliberate.js';
 // Dispatch proposal types (F246 Phase B: F193 E3 cross-thread dispatch)
-export type { DispatchProposal, DispatchProposalStatus, EffectClass } from './dispatch-proposal.js';
+export {
+  type DispatchProposal,
+  type DispatchProposalStatus,
+  deriveDispatchProposalSourceInvocationId,
+  type EffectClass,
+} from './dispatch-proposal.js';
 // Dossier distillation proposal types (F208 Phase E 画像蒸馏)
 export type {
   DistillationEvidenceRef,
@@ -1020,6 +1025,14 @@ export type {
 } from './proposal.js';
 // F264: durable per-target queued-message receipt and manual reminder truth
 export type {
+  FreshnessCarrier,
+  FreshnessCarrierCapability,
+  FreshnessCarrierDeliverySemantics,
+  FreshnessCarrierProvider,
+  MessageWorkDisposition,
+  QueueAuthorIntent,
+  QueueAuthorIntentFallbackReason,
+  QueueAuthorIntentReceipt,
   QueueHandledDisposition,
   QueueLineageEvidenceRef,
   QueueMessageReceipt,
@@ -1249,7 +1262,12 @@ export type {
   TurnExecutionTerminalStatus,
 } from './turn-execution.js';
 // User preferences types (F166 猫猫排序自定义)
-export type { UserPreferences } from './user-preferences.js';
+export type {
+  MessageDispositionPreferenceSnapshot,
+  MessageDispositionPreferenceSource,
+  MessageDispositionPreferences,
+  UserPreferences,
+} from './user-preferences.js';
 // F280: canonical wait termination event consumed by F281 feedback adapters.
 export {
   type UserCancelWaitTerminationEventV1,
