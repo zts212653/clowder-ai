@@ -31,8 +31,6 @@ import {
 import { resolveBoundAccountRefForCat } from '../config/cat-account-binding.js';
 import { bootstrapCatCatalog } from '../config/cat-catalog-store.js';
 import {
-  assertValidCliContextWindowTuple,
-  deriveAutoCompactTokenLimit,
   getAcpConfig,
   getRoster,
   loadCatConfig,
@@ -283,27 +281,23 @@ function defaultCliForClient(client: ClientId): { command: string; outputFormat:
 
 type CliPatch = z.infer<typeof cliSchema>;
 
-function resolveContextWindowFields(
-  baseCli: CliConfig,
-  patch?: CliPatch,
-): Pick<CliConfig, 'contextWindow' | 'autoCompactTokenLimit'> {
-  const contextWindowTouched = patch ? Object.hasOwn(patch, 'contextWindow') : false;
-  const autoCompactTokenLimitTouched = patch ? Object.hasOwn(patch, 'autoCompactTokenLimit') : false;
-  const contextWindow = contextWindowTouched ? patch?.contextWindow : baseCli.contextWindow;
-  const autoCompactTokenLimit = autoCompactTokenLimitTouched
-    ? patch?.autoCompactTokenLimit
-    : contextWindowTouched && contextWindow !== undefined
-      ? deriveAutoCompactTokenLimit(contextWindow)
-      : baseCli.autoCompactTokenLimit;
-
-  if (contextWindowTouched || autoCompactTokenLimitTouched) {
-    assertValidCliContextWindowTuple(contextWindow, autoCompactTokenLimit);
+/**
+ * #1208 canonical migration: on any save, promote legacy `cli.contextWindow`
+ * to top-level `contextWindow` and strip both `cli.contextWindow` and
+ * `cli.autoCompactTokenLimit` from the CLI config (they're derived at runtime).
+ */
+function canonicalizeContextWindow(
+  currentCat: CatConfig,
+  bodyContextWindow: number | null | undefined,
+): number | null | undefined {
+  // Explicit body.contextWindow takes precedence (user set/cleared it).
+  if (bodyContextWindow !== undefined) return bodyContextWindow;
+  // No body.contextWindow but legacy cli.contextWindow exists → promote.
+  const legacyCli = currentCat.cli?.contextWindow;
+  if (legacyCli != null && legacyCli > 0 && currentCat.contextWindow == null) {
+    return legacyCli;
   }
-
-  return {
-    ...(contextWindow !== undefined ? { contextWindow } : {}),
-    ...(autoCompactTokenLimit !== undefined ? { autoCompactTokenLimit } : {}),
-  };
+  return undefined; // no change
 }
 
 function buildResolvedCliConfig(
@@ -333,15 +327,14 @@ function buildResolvedCliConfig(
     throw new Error(`client "${client}" does not support cli.carrier (codex-only)`);
   }
 
-  const contextWindowFields = resolveContextWindowFields(baseCli, patch);
-
+  // #1208: contextWindow and autoCompactTokenLimit are no longer stored in cli.
+  // They are derived at runtime from the top-level contextWindow.
   return {
     command: patch?.command ?? baseCli.command,
     outputFormat: patch?.outputFormat ?? baseCli.outputFormat,
     ...(defaultArgs ? { defaultArgs } : {}),
     ...(nextEffort !== undefined && nextEffort !== null ? { effort: nextEffort } : {}),
     ...(nextCarrier !== undefined && nextCarrier !== null ? { carrier: nextCarrier } : {}),
-    ...contextWindowFields,
   };
 }
 
@@ -991,6 +984,8 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         effectiveClient === 'acp'
           ? resolveGenericAcpMcpSupportForPatch(body.mcpSupport, body.acp, isClientSwitch)
           : body.mcpSupport;
+      // #1208 P2: canonicalize legacy cli.contextWindow to top-level on every save.
+      const canonicalContextWindow = canonicalizeContextWindow(currentCat, body.contextWindow);
       updateRuntimeCat(projectRoot, request.params.id, {
         ...(body.name !== undefined ? { name: body.name } : {}),
         ...(body.displayName !== undefined ? { displayName: body.displayName } : {}),
@@ -1000,7 +995,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         ...(body.color !== undefined ? { color: body.color } : {}),
         ...(body.mentionPatterns !== undefined ? { mentionPatterns: body.mentionPatterns } : {}),
         ...(targetAccountRef !== undefined ? { accountRef: targetAccountRef } : {}),
-        ...(body.contextWindow !== undefined ? { contextWindow: body.contextWindow } : {}),
+        ...(canonicalContextWindow !== undefined ? { contextWindow: canonicalContextWindow } : {}),
         ...(body.roleDescription !== undefined ? { roleDescription: body.roleDescription } : {}),
         ...(body.personality !== undefined ? { personality: body.personality } : {}),
         ...(body.teamStrengths !== undefined ? { teamStrengths: body.teamStrengths } : {}),
