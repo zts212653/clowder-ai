@@ -178,7 +178,6 @@ const cicdCheckFactory: ScheduleFactory = {
       cicdRouter: d.cicdRouter,
       fetchPrStatus: d.fetchPrStatus,
       invokeTrigger: d.invokeTrigger,
-      holdLifecycle: d.holdLifecycle,
       isSelfMerge: d.isSelfMerge,
       log: d.log,
     }) as TaskSpec_P1;
@@ -226,7 +225,6 @@ const reviewFeedbackFactory: ScheduleFactory = {
       projector: d.projector,
       // F208 Phase E AC-E2: distillation checkpoint
       distillationCheckpoint: d.distillationCheckpoint,
-      holdLifecycle: d.holdLifecycle,
     }) as TaskSpec_P1;
   },
 };

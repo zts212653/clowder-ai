@@ -1,7 +1,14 @@
 import { PAW_FEEL_DISPOSITION_STATES, PAW_FEEL_INBOX_SORTS, PAW_FEEL_NO_ACTION_REASONS } from '@cat-cafe/shared';
 import { z } from 'zod';
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 import { callbackGet, callbackPost } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('paw-feel-disposition-tools.ts', undefined, {
+  resourceFamily: 'eval-feedback',
+  authority: 'callback-owner',
+});
 
 const nonEmpty = z.string().trim().min(1);
 const agentKeyCatIdSchema = z
@@ -107,7 +114,7 @@ export async function handleTriagePawFeel(input: TriagePawFeelInput): Promise<To
 }
 
 export const pawFeelDispositionTools = [
-  {
+  defineTool({
     name: 'cat_cafe_capture_paw_feel',
     description:
       'Declare that the current authenticated invocation will include an intentional paw-feel report in its normal final response. ' +
@@ -117,8 +124,14 @@ export const pawFeelDispositionTools = [
       'GOTCHA: call before the final response; no future message ID or marker body is accepted, and inline/fenced/blockquote examples remain legacy-ambiguous rather than typed-confirmed.',
     inputSchema: capturePawFeelInputSchema,
     handler: handleCapturePawFeel,
-  },
-  {
+    governance: {
+      implementationExport: 'handleCapturePawFeel',
+      action: 'create',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_list_paw_feel_inbox',
     description:
       'List the F278 responsibility inbox as deterministic contextual review bundles with all raw reports preserved. ' +
@@ -128,8 +141,14 @@ export const pawFeelDispositionTools = [
       'GOTCHA: problemFamilies is unavailable until an authoritative grouping contract exists.',
     inputSchema: listPawFeelInboxInputSchema,
     handler: handleListPawFeelInbox,
-  },
-  {
+    governance: {
+      implementationExport: 'handleListPawFeelInbox',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_triage_paw_feel',
     description:
       'Confirm one authoritative F278 bundle in O(1) common action plus O(exceptions) member splits. ' +
@@ -139,5 +158,11 @@ export const pawFeelDispositionTools = [
       'GOTCHA: member IDs and sequences are a snapshot, server membership is revalidated, and late members remain untouched.',
     inputSchema: triagePawFeelInputSchema,
     handler: handleTriagePawFeel,
-  },
+    governance: {
+      implementationExport: 'handleTriagePawFeel',
+      action: 'update',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+    },
+  }),
 ] as const;

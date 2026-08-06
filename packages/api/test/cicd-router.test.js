@@ -1,1136 +1,330 @@
-// @ts-check
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 
-import assert from 'node:assert';
-import { beforeEach, describe, it } from 'node:test';
-import {
-  buildCiMessageContent,
-  buildLifecycleMessageContent,
-  CiCdRouter,
-} from '../dist/infrastructure/email/CiCdRouter.js';
-import { createPrTrackingTaskStore } from './helpers/pr-tracking-test-helper.js';
+const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
+const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+const { MemoryWaitLifecycleEventLog } = await import('../dist/domains/ball-custody/WaitLifecycleEventLog.js');
+const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
+const { DistillationCheckpoint, InMemoryOpportunityStore } = await import(
+  '../dist/infrastructure/distillation/DistillationCheckpoint.js'
+);
+const { CiCdRouter, buildCiMessageContent } = await import('../dist/infrastructure/email/CiCdRouter.js');
 
-// ─── Lightweight mocks ─────────────────────────────────────────────
-
-function mockMessageStore() {
-  const messages = [];
-  let counter = 0;
-  const store = /** @type {any} */ ({
-    append(msg) {
-      counter++;
-      messages.push({
-        threadId: msg.threadId,
-        userId: msg.userId,
-        content: msg.content,
-        mentions: msg.mentions ?? [],
-        timestamp: msg.timestamp ?? Date.now(),
-        source: msg.source,
-        extra: msg.extra,
-      });
-      return { id: `msg-${counter}`, ...msg, timestamp: msg.timestamp ?? Date.now() };
-    },
-  });
-  return { store, messages };
-}
-
-function mockSocketManager() {
-  const events = [];
+function awaitState(when) {
   return {
-    manager: {
-      broadcastToRoom(room, event, payload) {
-        events.push({ room, event, payload });
+    ci: { headSha: 'aaa1111', lastFingerprint: 'aaa1111:pending', lastBucket: 'pending' },
+    await: {
+      v: 1,
+      generation: 1,
+      subjectRef: 'pr:owner/repo#7',
+      ownerFence: { kind: 'containing_task', generation: 1 },
+      baseline: {
+        capturedAt: 100,
+        headSha: 'aaa1111',
+        ci: { bucket: 'pending', fingerprint: 'aaa1111:pending' },
       },
+      continuation: {
+        when,
+        // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
+        then: 'Continue the owned step.',
+      },
+      expiresAt: 10_000,
+      createdAt: 100,
     },
-    events,
   };
 }
 
-function noopLog() {
-  const noop = () => {};
-  return /** @type {any} */ ({
-    info: noop,
-    warn: noop,
-    error: noop,
-    debug: noop,
-    trace: noop,
-    fatal: noop,
-    child: () => noopLog(),
+async function setup(when) {
+  const taskStore = new TaskStore();
+  const messageStore = new MessageStore();
+  const lifecycle = new GitHubWaitLifecycleService({
+    taskStore,
+    deliveryDeps: { messageStore },
+    eventLog: new MemoryWaitLifecycleEventLog(),
+    now: () => 500,
+    log: { info() {}, warn() {}, error() {} },
   });
+  const task = when
+    ? await taskStore.create({
+        kind: 'pr_tracking',
+        subjectKey: 'pr:owner/repo#7',
+        threadId: 'thread_1',
+        title: 'F280 PR wait',
+        ownerCatId: 'codex-sol',
+        why: 'test',
+        createdBy: 'codex-sol',
+        userId: 'user_1',
+        automationState: awaitState(when),
+      })
+    : null;
+  const events = [];
+  const router = new CiCdRouter({
+    taskStore,
+    deliveryDeps: { messageStore },
+    waitLifecycle: lifecycle,
+    log: { info() {}, warn() {}, error() {} },
+    onPrLifecycle: (event) => {
+      events.push(event);
+      return { idempotencyKey: event.idempotencyKey };
+    },
+  });
+  return { taskStore, messageStore, task, router, events };
 }
 
-/**
- * @param {Partial<import('../dist/infrastructure/email/CiCdRouter.js').CiPollResult>} [overrides]
- * @returns {import('../dist/infrastructure/email/CiCdRouter.js').CiPollResult}
- */
-function makePollResult(overrides = {}) {
+function poll(overrides = {}) {
   return {
-    repoFullName: 'zts212653/cat-cafe',
-    prNumber: 42,
-    headSha: 'abc1234567890',
+    repoFullName: 'owner/repo',
+    prNumber: 7,
+    headSha: 'aaa1111',
     prState: 'open',
-    aggregateBucket: 'fail',
-    checks: [
-      { name: 'build', bucket: 'fail', link: 'https://github.com/run/1' },
-      { name: 'lint', bucket: 'pass' },
-    ],
+    aggregateBucket: 'pass',
+    checks: [{ name: 'tests', bucket: 'pass' }],
     ...overrides,
   };
 }
 
-// ─── Tests ─────────────────────────────────────────────────────────
-
-describe('CiCdRouter', () => {
-  /** @type {ReturnType<typeof createPrTrackingTaskStore>} */
-  let prTracking;
-  /** @type {ReturnType<typeof mockMessageStore>} */
-  let messageMock;
-  /** @type {ReturnType<typeof mockSocketManager>} */
-  let socketMock;
-
-  function createRouter() {
-    return new CiCdRouter({
-      taskStore: prTracking.taskStore,
-      deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
-      log: noopLog(),
-    });
-  }
-
-  beforeEach(() => {
-    prTracking = createPrTrackingTaskStore();
-    messageMock = mockMessageStore();
-    socketMock = mockSocketManager();
+describe('CiCdRouter F280 typed waits', () => {
+  test('unregistered PR is state-only', async () => {
+    const { router } = await setup(null);
+    assert.equal((await router.route(poll())).kind, 'skipped');
   });
 
-  // ── AC-A6: Unregistered PR skipped ──────────────────────────────
-
-  describe('unregistered PR', () => {
-    it('skips when no tracking entry (AC-A6)', async () => {
-      const router = createRouter();
-      const result = await router.route(makePollResult());
-      assert.strictEqual(result.kind, 'skipped');
-      assert.ok(result.reason.includes('No tracking'));
-      assert.strictEqual(messageMock.messages.length, 0);
-    });
+  test('CI pass wakes an explicit CI waiter exactly once', async () => {
+    const { router, messageStore } = await setup([{ kind: 'pr_ci_terminal' }]);
+    const first = await router.route(poll());
+    const replay = await router.route(poll());
+    assert.equal(first.kind, 'notified');
+    assert.notEqual(replay.kind, 'notified');
+    assert.match(first.content, /CI pending → pass/);
+    assert.equal(messageStore.getByThread('thread_1').length, 1);
   });
 
-  // ── AC-A1/A2/A3: Basic delivery ────────────────────────────────
+  test('CI pass does not wake a reviewer waiting only for a new HEAD', async () => {
+    const { router, messageStore, taskStore, task } = await setup([{ kind: 'pr_head_changed' }]);
+    assert.equal((await router.route(poll())).kind, 'skipped');
+    assert.equal(messageStore.getByThread('thread_1').length, 0);
+    assert.equal((await taskStore.get(task.id)).automationState.ci.lastBucket, 'pass');
+  });
 
-  describe('delivery', () => {
-    it('delivers CI failure message to tracked thread (AC-A1)', async () => {
-      const router = createRouter();
-      prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
+  test('merged PR consumes the wait, marks done, and emits world truth once', async () => {
+    const { router, taskStore, task, events } = await setup([{ kind: 'pr_head_changed' }]);
+    const result = await router.route(poll({ prState: 'merged', aggregateBucket: 'pending' }));
+    assert.equal(result.kind, 'lifecycle');
+    assert.equal((await taskStore.get(task.id)).status, 'done');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].type, 'merge');
+    assert.equal(events[0].ref, 'pr:owner/repo#7');
+    assert.deepEqual(events[0].attribution, { kind: 'managed_unattributed' });
+  });
 
-      const result = await router.route(makePollResult({ aggregateBucket: 'fail' }));
-
-      assert.strictEqual(result.kind, 'notified');
-      if (result.kind === 'notified') {
-        assert.strictEqual(result.threadId, 'thread-abc');
-        assert.strictEqual(result.catId, 'opus');
-        assert.strictEqual(result.bucket, 'fail');
-      }
-      assert.strictEqual(messageMock.messages.length, 1);
-      assert.ok(messageMock.messages[0].content.includes('CI 失败'));
-      assert.strictEqual(messageMock.messages[0].source.connector, 'github-ci');
+  test('merge world truth carries the task-bound private managed-work identity', async () => {
+    const { router, taskStore, task, events } = await setup([{ kind: 'pr_head_changed' }]);
+    await taskStore.bindManagedWorkBinding(task.id, {
+      workId: 'wrk_work_a',
+      attemptId: 'wat_work_a_1',
     });
 
-    it('writes a delivery_decision carrier only for exact-head merge intent plus typed billing evidence', async () => {
-      const router = createRouter();
-      const task = prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-      const headSha = 'a'.repeat(40);
-      prTracking.taskStore.patchAutomationState(task.id, { intent: 'merge', ci: { headSha } });
-      const exactCheck = {
-        name: 'gate',
-        bucket: 'fail',
-        executionFailure: 'billing_spending_limit_zero_step',
-      };
+    await router.route(poll({ prState: 'merged', aggregateBucket: 'pending' }));
 
-      await router.route(makePollResult({ headSha, checks: [exactCheck] }));
-      assert.deepEqual(messageMock.messages[0].extra?.memoryCue?.deliveryDecision, {
-        v: 1,
-        producer: 'github_ci',
-        producerProvenance: 'server_github_ci',
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        headSha,
-        phase: 'merge_gate',
-        gateOutcome: 'source_evidence_complete',
-        externalCondition: 'billing_spending_limit_zero_step',
-        candidateAction: 'merge',
-        occurredAt: messageMock.messages[0].extra.memoryCue.deliveryDecision.occurredAt,
-      });
-
-      for (const taskPatch of [
-        { intent: 'review', ci: { headSha } },
-        { intent: 'merge', ci: { headSha: 'b'.repeat(40) } },
-      ]) {
-        const fresh = createPrTrackingTaskStore();
-        const freshMessage = mockMessageStore();
-        const freshTask = fresh.register({
-          repoFullName: 'zts212653/cat-cafe',
-          prNumber: 42,
-          catId: 'opus',
-          threadId: 'thread-abc',
-          userId: 'user-1',
-        });
-        fresh.taskStore.patchAutomationState(freshTask.id, taskPatch);
-        await new CiCdRouter({
-          taskStore: fresh.taskStore,
-          deliveryDeps: { messageStore: freshMessage.store },
-          log: noopLog(),
-        }).route(makePollResult({ headSha, checks: [exactCheck] }));
-        assert.equal(freshMessage.messages[0].extra?.memoryCue, undefined);
-      }
-    });
-
-    it('suppresses CI success delivery for review intent while preserving CI state', async () => {
-      const router = createRouter();
-      const task = prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-      prTracking.taskStore.patchAutomationState(task.id, { intent: 'review' });
-
-      const result = await router.route(makePollResult({ aggregateBucket: 'pass', checks: [] }));
-
-      assert.strictEqual(result.kind, 'skipped');
-      assert.ok(result.reason.includes('review intent'));
-      assert.strictEqual(messageMock.messages.length, 0);
-
-      const updated = prTracking.taskStore.getBySubject('pr:zts212653/cat-cafe#42');
-      assert.ok(updated, 'entry should still exist after silent CI pass');
-      assert.strictEqual(updated.automationState?.ci?.headSha, 'abc1234567890');
-      assert.strictEqual(updated.automationState?.ci?.lastFingerprint, 'abc1234567890:pass');
-      assert.strictEqual(updated.automationState?.ci?.lastBucket, 'pass');
-      assert.strictEqual(updated.automationState?.ci?.lastNotifiedAt, undefined);
-    });
-
-    it('suppresses CI success delivery when intent is absent (defaults to review)', async () => {
-      const router = createRouter();
-      prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-
-      const result = await router.route(makePollResult({ aggregateBucket: 'pass', checks: [] }));
-
-      assert.strictEqual(result.kind, 'skipped');
-      assert.ok(result.reason.includes('review intent'));
-      assert.strictEqual(messageMock.messages.length, 0);
-    });
-
-    it('returns an external-review-ready notification when the F168 coordinator opens the current HEAD', async () => {
-      const calls = [];
-      const router = new CiCdRouter({
-        taskStore: prTracking.taskStore,
-        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
-        log: noopLog(),
-        externalReviewCoordinator: {
-          recordCi: async (poll, target) => {
-            calls.push({ poll, target });
-            return {
-              kind: 'notified',
-              threadId: target.threadId,
-              catId: target.catId,
-              messageId: 'ready-message-1',
-              content: 'current head ready',
-              headSha: poll.headSha,
-            };
-          },
-        },
-      });
-      const task = prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-      prTracking.taskStore.patchAutomationState(task.id, { intent: 'review' });
-
-      const result = await router.route(makePollResult({ aggregateBucket: 'pass', checks: [] }));
-
-      assert.equal(result.kind, 'notified');
-      assert.equal(result.wakeKind, 'external_review_ready');
-      assert.equal(result.messageId, 'ready-message-1');
-      assert.equal(result.headSha, 'abc1234567890');
-      assert.equal(calls.length, 1);
-      assert.deepEqual(calls[0].target, { threadId: 'thread-abc', catId: 'opus', userId: 'user-1' });
-    });
-
-    it('delivers CI success message to tracked thread for merge intent (AC-A3)', async () => {
-      const router = createRouter();
-      const task = prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-      prTracking.taskStore.patchAutomationState(task.id, { intent: 'merge' });
-
-      const result = await router.route(makePollResult({ aggregateBucket: 'pass', checks: [] }));
-
-      assert.strictEqual(result.kind, 'notified');
-      if (result.kind === 'notified') {
-        assert.strictEqual(result.bucket, 'pass');
-      }
-      assert.strictEqual(messageMock.messages.length, 1);
-      assert.ok(messageMock.messages[0].content.includes('CI 通过'));
-    });
-
-    it('returns full formatted content in notified result (P2-1 regression)', async () => {
-      const router = createRouter();
-      prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-
-      const poll = makePollResult({
-        aggregateBucket: 'fail',
-        checks: [{ name: 'build', bucket: 'fail', link: 'https://example.com/1' }],
-      });
-      const result = await router.route(poll);
-
-      assert.strictEqual(result.kind, 'notified');
-      if (result.kind === 'notified') {
-        assert.ok(result.content.includes('CI 失败'), 'content should include CI failure message');
-        assert.ok(result.content.includes('build'), 'content should include failed check name');
-        assert.strictEqual(result.content, messageMock.messages[0].content, 'content matches delivered message');
-      }
-    });
-
-    it('skips pending CI without sending message', async () => {
-      const router = createRouter();
-      prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-
-      const result = await router.route(makePollResult({ aggregateBucket: 'pending' }));
-
-      assert.strictEqual(result.kind, 'skipped');
-      assert.ok(result.reason.includes('pending'));
-      assert.strictEqual(messageMock.messages.length, 0);
+    assert.deepEqual(events[0].attribution, {
+      kind: 'managed_attributed',
+      binding: { workId: 'wrk_work_a', attemptId: 'wat_work_a_1' },
     });
   });
 
-  // ── T1: Same SHA dedup (AC-A4, AC-A5) ──────────────────────────
-
-  describe('T1: same SHA dedup', () => {
-    it('same SHA + same bucket notifies only once (AC-A4)', async () => {
-      const router = createRouter();
-      prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-
-      const poll = makePollResult({ headSha: 'sha-fixed', aggregateBucket: 'fail' });
-
-      const r1 = await router.route(poll);
-      assert.strictEqual(r1.kind, 'notified');
-
-      const r2 = await router.route(poll);
-      assert.strictEqual(r2.kind, 'deduped');
-
-      assert.strictEqual(messageMock.messages.length, 1);
-    });
-
-    it('fail then success on same SHA notifies both (AC-A5)', async () => {
-      const router = createRouter();
-      const task = prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-      prTracking.taskStore.patchAutomationState(task.id, { intent: 'merge' });
-
-      const failPoll = makePollResult({ headSha: 'sha-fixed', aggregateBucket: 'fail' });
-      const passPoll = makePollResult({ headSha: 'sha-fixed', aggregateBucket: 'pass', checks: [] });
-
-      const r1 = await router.route(failPoll);
-      assert.strictEqual(r1.kind, 'notified');
-
-      const r2 = await router.route(passPoll);
-      assert.strictEqual(r2.kind, 'notified');
-
-      assert.strictEqual(messageMock.messages.length, 2);
-      assert.ok(messageMock.messages[0].content.includes('CI 失败'));
-      assert.ok(messageMock.messages[1].content.includes('CI 通过'));
-    });
-  });
-
-  // ── T2: New push resets fingerprint (AC-A9) ─────────────────────
-
-  describe('T2: new push resets fingerprint', () => {
-    it('SHA change re-notifies even for same conclusion (AC-A9)', async () => {
-      const router = createRouter();
-      prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-
-      const poll1 = makePollResult({ headSha: 'sha-v1', aggregateBucket: 'fail' });
-      const poll2 = makePollResult({ headSha: 'sha-v2', aggregateBucket: 'fail' });
-
-      const r1 = await router.route(poll1);
-      assert.strictEqual(r1.kind, 'notified');
-
-      const r2 = await router.route(poll2);
-      assert.strictEqual(r2.kind, 'notified');
-
-      assert.strictEqual(messageMock.messages.length, 2);
-    });
-  });
-
-  // ── T3: Merged/closed lifecycle close (AC-A8 + terminal notification) ──
-
-  describe('T3: merged/closed lifecycle close', () => {
-    it('merged PR marks task done AND delivers terminal lifecycle notification', async () => {
-      const router = createRouter();
-      prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-
-      const poll = makePollResult({ prState: 'merged' });
-      const result = await router.route(poll);
-
-      assert.strictEqual(result.kind, 'lifecycle');
-      if (result.kind === 'lifecycle') {
-        assert.strictEqual(result.prState, 'merged');
-        assert.strictEqual(result.threadId, 'thread-abc');
-        assert.strictEqual(result.catId, 'opus');
-        assert.ok(result.messageId, 'delivered message id must be returned');
-      }
-
-      // #320: merged/closed sets status=done (not delete)
-      const entry = prTracking.taskStore.getBySubject('pr:zts212653/cat-cafe#42');
-      assert.ok(entry, 'task should still exist');
-      assert.strictEqual(entry.status, 'done');
-
-      assert.strictEqual(messageMock.messages.length, 1);
-      const msg = messageMock.messages[0];
-      assert.strictEqual(msg.threadId, 'thread-abc');
-      assert.ok(msg.mentions.includes('opus'));
-      assert.ok(msg.content.includes('merge'), 'content should state the PR merged');
-      assert.ok(msg.content.includes('#42'));
-      assert.strictEqual(msg.source.url, `https://github.com/${poll.repoFullName}/pull/${poll.prNumber}`);
-    });
-
-    it('closed PR marks task done AND delivers closed (unmerged) notification', async () => {
-      const router = createRouter();
-      prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-
-      const result = await router.route(makePollResult({ prState: 'closed' }));
-
-      assert.strictEqual(result.kind, 'lifecycle');
-      if (result.kind === 'lifecycle') {
-        assert.strictEqual(result.prState, 'closed');
-      }
-
-      const entry = prTracking.taskStore.getBySubject('pr:zts212653/cat-cafe#42');
-      assert.ok(entry, 'task should still exist');
-      assert.strictEqual(entry.status, 'done');
-
-      assert.strictEqual(messageMock.messages.length, 1);
-      assert.ok(
-        messageMock.messages[0].content.includes('未合并'),
-        'closed wording must distinguish unmerged closure from merge',
-      );
-    });
-
-    it('skips terminal lifecycle delivery when the same terminal state was already processed', async () => {
-      const router = createRouter();
-      const task = prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-      prTracking.taskStore.update(task.id, { status: 'done' });
-      prTracking.taskStore.patchAutomationState(task.id, { ci: { prState: 'merged' } });
-
-      const result = await router.route(makePollResult({ prState: 'merged' }));
-
-      assert.strictEqual(result.kind, 'skipped');
-      if (result.kind === 'skipped') {
-        assert.ok(result.reason.includes('already processed'));
-      }
-      const entry = prTracking.taskStore.getBySubject('pr:zts212653/cat-cafe#42');
-      assert.strictEqual(entry?.status, 'done');
-      assert.strictEqual(messageMock.messages.length, 0);
-    });
-
-    it('still delivers terminal lifecycle when review feedback marked the task done first', async () => {
-      const router = createRouter();
-      const task = prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-      prTracking.taskStore.update(task.id, { status: 'done' });
-
-      const result = await router.route(makePollResult({ prState: 'merged' }));
-
-      assert.strictEqual(result.kind, 'lifecycle');
-      if (result.kind === 'lifecycle') {
-        assert.strictEqual(result.prState, 'merged');
-        assert.strictEqual(result.threadId, 'thread-abc');
-        assert.strictEqual(result.catId, 'opus');
-      }
-      const entry = prTracking.taskStore.getBySubject('pr:zts212653/cat-cafe#42');
-      assert.strictEqual(entry?.status, 'done');
-      assert.strictEqual(entry?.automationState?.ci?.prState, 'merged');
-      assert.strictEqual(messageMock.messages.length, 1);
-    });
-
-    it('appends trackingInstructions to the terminal notification (post-merge checklist)', async () => {
-      const router = createRouter();
-      const task = prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-      prTracking.taskStore.patchAutomationState(task.id, {
-        trackingInstructions: 'merge 后：验证 main 生效 + 标任务 done',
-      });
-
-      await router.route(makePollResult({ prState: 'merged' }));
-
-      assert.strictEqual(messageMock.messages.length, 1);
-      const content = messageMock.messages[0].content;
-      assert.ok(content.includes('Tracking Instructions'));
-      assert.ok(content.includes('merge 后：验证 main 生效 + 标任务 done'));
-    });
-
-    it('delivery failure degrades to skipped but still marks task done (no poller crash)', async () => {
-      const failingStore = /** @type {any} */ ({
-        append() {
-          throw new Error('message store down');
-        },
-      });
-      const router = new CiCdRouter({
-        taskStore: prTracking.taskStore,
-        deliveryDeps: { messageStore: failingStore },
-        log: noopLog(),
-      });
-      prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-
-      const result = await router.route(makePollResult({ prState: 'merged' }));
-
-      assert.strictEqual(result.kind, 'skipped');
-      if (result.kind === 'skipped') {
-        assert.ok(result.reason.includes('merged'));
-      }
-      const entry = prTracking.taskStore.getBySubject('pr:zts212653/cat-cafe#42');
-      assert.strictEqual(entry?.status, 'done', 'done-marking must survive delivery failure');
-    });
-  });
-
-  // ── F192 Phase G: onPrLifecycle callback ────────────────────────
-
-  describe('F192 Phase G: onPrLifecycle callback', () => {
-    it('emits merge event on merged PR', async () => {
-      const events = [];
-      const router = new CiCdRouter({
-        taskStore: prTracking.taskStore,
-        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
-        log: noopLog(),
-        onPrLifecycle: (e) => events.push(e),
-      });
-      prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-
-      await router.route(makePollResult({ prState: 'merged' }));
-
-      assert.strictEqual(events.length, 1);
-      assert.strictEqual(events[0].type, 'merge');
-      assert.strictEqual(events[0].outcome, 'success');
-      assert.strictEqual(events[0].threadId, 'thread-abc');
-      assert.strictEqual(events[0].ref, 'pr:zts212653/cat-cafe#42');
-      assert.deepEqual(events[0].attribution, { kind: 'managed_unattributed' });
-    });
-
-    it('reads the private task binding and carries only that identity into the merge event', async () => {
-      const events = [];
-      const router = new CiCdRouter({
-        taskStore: prTracking.taskStore,
-        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
-        log: noopLog(),
-        onPrLifecycle: (e) => events.push(e),
-      });
-      const task = prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-      prTracking.taskStore.bindManagedWorkBinding(task.id, {
-        workId: 'wrk_work_a',
-        attemptId: 'wat_work_a_1',
-      });
-
-      await router.route(makePollResult({ prState: 'merged' }));
-
-      assert.strictEqual(events.length, 1);
-      assert.deepEqual(events[0].attribution, {
-        kind: 'managed_attributed',
-        binding: { workId: 'wrk_work_a', attemptId: 'wat_work_a_1' },
-      });
-    });
-
-    it('does NOT emit on closed PR (closed ≠ revert)', async () => {
-      const events = [];
-      const router = new CiCdRouter({
-        taskStore: prTracking.taskStore,
-        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
-        log: noopLog(),
-        onPrLifecycle: (e) => events.push(e),
-      });
-      prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-
-      await router.route(makePollResult({ prState: 'closed' }));
-
-      assert.strictEqual(events.length, 0, 'closed PR must not emit A1 signal');
-    });
-
-    it('does NOT emit on open PR', async () => {
-      const events = [];
-      const router = new CiCdRouter({
-        taskStore: prTracking.taskStore,
-        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
-        log: noopLog(),
-        onPrLifecycle: (e) => events.push(e),
-      });
-      prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-
-      await router.route(makePollResult({ prState: 'open', aggregateBucket: 'pass' }));
-
-      assert.strictEqual(events.length, 0);
-    });
-  });
-
-  // ── P1-3 fix: CiCdRouter emits community events to eventLog ────────
-  // Plan: PR lifecycle canonical detection point is CiCdRouter (not ReviewFeedbackTaskSpec).
-  // CiCdRouter is the first to detect merged/closed; ReviewFeedbackTaskSpec races.
-  // dedup via sourceEventId ensures both can fire without double-projection.
-
-  describe('P1-3: community event emission on PR lifecycle (eventLog)', () => {
-    function makeMockEventLog() {
-      /** @type {{ sourceEventId: string; kind: string; subjectKey: string }[]} */
-      const appended = [];
-      return {
-        log: /** @type {any} */ ({
-          /** @param {any} event */
-          append(event) {
-            appended.push({ sourceEventId: event.sourceEventId, kind: event.kind, subjectKey: event.subjectKey });
-            return Promise.resolve({ appended: true, sequence: appended.length });
-          },
-        }),
-        appended,
-      };
-    }
-
-    it('emits pr.merged event to eventLog when PR merges (P1-3)', async () => {
-      const { log: eventLog, appended } = makeMockEventLog();
-      const router = new CiCdRouter({
-        taskStore: prTracking.taskStore,
-        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
-        log: noopLog(),
-        eventLog,
-      });
-      prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-
-      await router.route(makePollResult({ prState: 'merged' }));
-
-      assert.strictEqual(appended.length, 1, 'expected exactly one community event appended');
-      assert.strictEqual(appended[0].kind, 'pr.merged');
-      assert.ok(appended[0].subjectKey.includes('42'), 'subjectKey should contain PR number');
-    });
-
-    it('emits pr.closed event to eventLog when PR closes without merge (P1-3)', async () => {
-      const { log: eventLog, appended } = makeMockEventLog();
-      const router = new CiCdRouter({
-        taskStore: prTracking.taskStore,
-        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
-        log: noopLog(),
-        eventLog,
-      });
-      prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-
-      await router.route(makePollResult({ prState: 'closed' }));
-
-      assert.strictEqual(appended.length, 1, 'expected exactly one community event appended');
-      assert.strictEqual(appended[0].kind, 'pr.closed');
-    });
-
-    it('does not throw when eventLog is not provided (backward compat)', async () => {
-      // No eventLog → existing tests should be unaffected
-      const router = createRouter();
-      prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-      const result = await router.route(makePollResult({ prState: 'merged' }));
-      assert.strictEqual(result.kind, 'lifecycle');
-    });
-
-    it('continues routing even if eventLog.append throws (best-effort)', async () => {
-      const router = new CiCdRouter({
-        taskStore: prTracking.taskStore,
-        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
-        log: noopLog(),
-        eventLog: /** @type {any} */ ({
-          append() {
-            return Promise.reject(new Error('redis down'));
-          },
-        }),
-      });
-      prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-
-      // Must not throw
-      const result = await router.route(makePollResult({ prState: 'merged' }));
-      assert.strictEqual(result.kind, 'lifecycle');
-    });
-  });
-
-  // ── AC-A10: patchCiState does not reset registeredAt ────────────
-
-  describe('patchCiState preservation (AC-A10)', () => {
-    it('CI delivery does not change registeredAt', async () => {
-      const router = createRouter();
-      const registered = prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-      const originalCreatedAt = registered.createdAt;
-
-      await router.route(makePollResult({ aggregateBucket: 'fail' }));
-
-      const updated = prTracking.taskStore.getBySubject('pr:zts212653/cat-cafe#42');
-      assert.ok(updated, 'entry should still exist after CI delivery');
-      assert.strictEqual(updated.createdAt, originalCreatedAt);
-      assert.ok(updated.automationState?.ci?.lastFingerprint);
-      assert.strictEqual(updated.automationState?.ci?.lastBucket, 'fail');
-    });
-  });
-
-  // ── CI tracking disabled ────────────────────────────────────────
-
-  describe('ciTrackingEnabled toggle', () => {
-    it('skips PR when ci tracking is disabled', async () => {
-      const router = createRouter();
-      const task = prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-      prTracking.taskStore.patchAutomationState(task.id, { ci: { enabled: false } });
-
-      const result = await router.route(makePollResult());
-
-      assert.strictEqual(result.kind, 'skipped');
-      assert.ok(result.reason.includes('disabled'));
-      assert.strictEqual(messageMock.messages.length, 0);
-    });
-
-    it('R2-P1-A: automation off calls notifySkip with threadId and reason', async () => {
-      const skipCalls = /** @type {Array<{threadId: string, reason: string}>} */ ([]);
-      const router = new CiCdRouter({
-        taskStore: prTracking.taskStore,
-        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
-        log: noopLog(),
-        notifySkip: (threadId, reason) => {
-          skipCalls.push({ threadId, reason });
-        },
-      });
-      const task = prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-      prTracking.taskStore.patchAutomationState(task.id, { ci: { enabled: false } });
-
-      await router.route(makePollResult());
-
-      assert.strictEqual(skipCalls.length, 1, 'notifySkip must be called for automation off');
-      assert.strictEqual(skipCalls[0].threadId, 'thread-abc');
-      assert.strictEqual(skipCalls[0].reason, 'ci_automation_disabled');
-    });
-
-    it('cloud-P2: automation off notifySkip fires only once across multiple polls', async () => {
-      const skipCalls = /** @type {Array<{threadId: string, reason: string}>} */ ([]);
-      const router = new CiCdRouter({
-        taskStore: prTracking.taskStore,
-        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
-        log: noopLog(),
-        notifySkip: (threadId, reason) => {
-          skipCalls.push({ threadId, reason });
-        },
-      });
-      const task = prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-      prTracking.taskStore.patchAutomationState(task.id, { ci: { enabled: false } });
-
-      await router.route(makePollResult());
-      await router.route(makePollResult());
-      await router.route(makePollResult());
-
-      assert.strictEqual(skipCalls.length, 1, 'notifySkip must fire only once, not on every poll cycle');
-    });
-  });
-
-  // ── Socket broadcast ────────────────────────────────────────────
-
-  describe('realtime connector event', () => {
-    it('broadcasts connector_message to thread room', async () => {
-      const router = createRouter();
-      prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-
-      await router.route(makePollResult());
-
-      assert.strictEqual(socketMock.events.length, 1);
-      const evt = socketMock.events[0];
-      assert.strictEqual(evt.room, 'thread:thread-abc');
-      assert.strictEqual(evt.event, 'connector_message');
-      assert.ok(evt.payload.message.source.connector === 'github-ci');
-    });
-  });
-
-  // ── Pending updates headSha ─────────────────────────────────────
-
-  describe('pending updates headSha', () => {
-    it('pending poll updates headSha without notifying', async () => {
-      const router = createRouter();
-      prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-        threadId: 'thread-abc',
-        userId: 'user-1',
-      });
-
-      await router.route(makePollResult({ headSha: 'new-sha', aggregateBucket: 'pending' }));
-
-      const entry = prTracking.taskStore.getBySubject('pr:zts212653/cat-cafe#42');
-      assert.ok(entry, 'entry should exist with updated headSha');
-      assert.strictEqual(entry.automationState?.ci?.headSha, 'new-sha');
-      assert.strictEqual(messageMock.messages.length, 0);
-    });
-  });
-
-  // ── F208 AC-E2: distillation checkpoint on merge path ────────────
-
-  describe('F208 AC-E2: distillation checkpoint on merge path', () => {
-    it('calls onFeatPhaseClose when merged PR has feature-bearing trackingInstructions', async () => {
-      const calls = [];
-      const mockCheckpoint = {
-        onFeatPhaseClose: async (ctx) => {
-          calls.push(ctx);
-          return { fired: true, sourceId: `feat-phase-close:${ctx.featureId}:${ctx.phaseLabel}` };
-        },
-      };
-      const router = new CiCdRouter({
-        taskStore: prTracking.taskStore,
-        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
-        log: noopLog(),
-        distillationCheckpoint: /** @type {any} */ (mockCheckpoint),
-      });
-      const task = prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 2467,
-        catId: 'opus',
-        threadId: 'thread-f208',
-        userId: 'user-1',
-      });
-      prTracking.taskStore.patchAutomationState(task.id, {
-        trackingInstructions: 'F208 AC-E2 cloud re-review. Phase E checkpoint wiring.',
-      });
-
-      await router.route(makePollResult({ repoFullName: 'zts212653/cat-cafe', prNumber: 2467, prState: 'merged' }));
-
-      assert.strictEqual(calls.length, 1, 'onFeatPhaseClose must be called on merge');
-      assert.strictEqual(calls[0].featureId, 'F208');
-      assert.strictEqual(calls[0].phaseLabel, 'E');
-      assert.strictEqual(calls[0].prNumber, 2467);
-      assert.strictEqual(calls[0].repoFullName, 'zts212653/cat-cafe');
-      assert.strictEqual(calls[0].authorCatId, 'opus');
-      assert.strictEqual(calls[0].threadId, 'thread-f208');
-    });
-
-    it('does NOT call onFeatPhaseClose for closed PR (only merge)', async () => {
-      const calls = [];
-      const mockCheckpoint = {
-        onFeatPhaseClose: async (ctx) => {
-          calls.push(ctx);
-          return { fired: true, sourceId: 'test' };
-        },
-      };
-      const router = new CiCdRouter({
-        taskStore: prTracking.taskStore,
-        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
-        log: noopLog(),
-        distillationCheckpoint: /** @type {any} */ (mockCheckpoint),
-      });
-      const task = prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 99,
-        catId: 'opus',
-        threadId: 'thread-x',
-        userId: 'user-1',
-      });
-      prTracking.taskStore.patchAutomationState(task.id, {
-        trackingInstructions: 'F167 Phase O fix.',
-      });
-
-      await router.route(makePollResult({ repoFullName: 'zts212653/cat-cafe', prNumber: 99, prState: 'closed' }));
-
-      assert.strictEqual(calls.length, 0, 'closed PR must not fire distillation checkpoint');
-    });
-
-    it('does NOT call onFeatPhaseClose when no feature ID in trackingInstructions', async () => {
-      const calls = [];
-      const mockCheckpoint = {
-        onFeatPhaseClose: async (ctx) => {
-          calls.push(ctx);
-          return { fired: true, sourceId: 'test' };
-        },
-      };
-      const router = new CiCdRouter({
-        taskStore: prTracking.taskStore,
-        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
-        log: noopLog(),
-        distillationCheckpoint: /** @type {any} */ (mockCheckpoint),
-      });
-      prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 50,
-        catId: 'opus',
-        threadId: 'thread-y',
-        userId: 'user-1',
-      });
-      // No trackingInstructions with feature ID, title doesn't match either
-
-      await router.route(makePollResult({ repoFullName: 'zts212653/cat-cafe', prNumber: 50, prState: 'merged' }));
-
-      assert.strictEqual(calls.length, 0, 'no feature ID → no checkpoint');
-    });
-
-    it('continues routing when onFeatPhaseClose throws (best-effort)', async () => {
-      const mockCheckpoint = {
-        onFeatPhaseClose: async () => {
-          throw new Error('store unavailable');
-        },
-      };
-      const router = new CiCdRouter({
-        taskStore: prTracking.taskStore,
-        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
-        log: noopLog(),
-        distillationCheckpoint: /** @type {any} */ (mockCheckpoint),
-      });
-      const task = prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 77,
-        catId: 'opus',
-        threadId: 'thread-z',
-        userId: 'user-1',
-      });
-      prTracking.taskStore.patchAutomationState(task.id, {
-        trackingInstructions: 'F100 Phase A test.',
-      });
-
-      // Must not throw — checkpoint failure is best-effort
-      const result = await router.route(
-        makePollResult({ repoFullName: 'zts212653/cat-cafe', prNumber: 77, prState: 'merged' }),
-      );
-      assert.strictEqual(result.kind, 'lifecycle');
-      if (result.kind === 'lifecycle') {
-        assert.strictEqual(result.prState, 'merged');
-      }
-    });
-  });
-});
-
-// ─── buildCiMessageContent unit tests ──────────────────────────────
-
-describe('buildCiMessageContent', () => {
-  it('formats failure message with check details', () => {
-    const content = buildCiMessageContent({
-      repoFullName: 'org/repo',
-      prNumber: 10,
-      headSha: 'abc1234567890',
-      prState: 'open',
-      aggregateBucket: 'fail',
-      checks: [
-        { name: 'build', bucket: 'fail', link: 'https://example.com/1', description: 'Build failed' },
-        { name: 'lint', bucket: 'pass' },
-      ],
-    });
-
-    assert.ok(content.includes('CI 失败'));
-    assert.ok(content.includes('PR #10'));
-    assert.ok(content.includes('abc1234'));
-    assert.ok(content.includes('build'));
-    assert.ok(content.includes('Build failed'));
-    assert.ok(!content.includes('lint'));
-  });
-
-  it('formats success message without check details', () => {
-    const content = buildCiMessageContent({
-      repoFullName: 'org/repo',
-      prNumber: 10,
-      headSha: 'def7890123456',
-      prState: 'open',
-      aggregateBucket: 'pass',
-      checks: [],
-    });
-
-    assert.ok(content.includes('CI 通过'));
-    assert.ok(content.includes('def7890'));
-    assert.ok(!content.includes('失败的检查'));
-  });
-});
-
-describe('buildLifecycleMessageContent', () => {
-  it('formats merged lifecycle message with tracking instructions', () => {
-    const content = buildLifecycleMessageContent(
-      {
-        repoFullName: 'org/repo',
-        prNumber: 10,
-        prState: 'merged',
+  test('terminal delivery failure recovers every merge world-truth effect exactly once after restart', async () => {
+    const taskStore = new TaskStore();
+    const storedMessages = new MessageStore();
+    let failDelivery = true;
+    const messageStore = {
+      append: async (input) => {
+        if (failDelivery) {
+          failDelivery = false;
+          throw new Error('connector unavailable');
+        }
+        return storedMessages.append(input);
       },
-      'verify main and close task',
-    );
+    };
+    const task = await taskStore.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#7',
+      threadId: 'thread_1',
+      title: 'F280 Phase B PR wait',
+      ownerCatId: 'codex-sol',
+      why: 'test terminal recovery',
+      createdBy: 'codex-sol',
+      userId: 'user_1',
+      automationState: awaitState([{ kind: 'pr_head_changed' }]),
+    });
+    const lifecycleEvents = [];
+    const distillationEvents = [];
+    const communityEvents = [];
+    const projectedEvents = [];
+    const seenCommunityEvents = new Set();
+    const eventLog = {
+      append: async (event) => {
+        const appended = !seenCommunityEvents.has(event.sourceEventId);
+        seenCommunityEvents.add(event.sourceEventId);
+        if (appended) communityEvents.push(event);
+        return { appended, sequence: appended ? communityEvents.length - 1 : -1 };
+      },
+      read: async (subjectKey) => communityEvents.filter((event) => event.subjectKey === subjectKey),
+      listSubjects: async () => [...new Set(communityEvents.map((event) => event.subjectKey))],
+    };
+    const options = () => ({
+      taskStore,
+      deliveryDeps: { messageStore },
+      waitLifecycle: new GitHubWaitLifecycleService({
+        taskStore,
+        deliveryDeps: { messageStore },
+        eventLog: new MemoryWaitLifecycleEventLog(),
+        now: () => 500,
+        log: { info() {}, warn() {}, error() {} },
+      }),
+      log: { info() {}, warn() {}, error() {} },
+      onPrLifecycle: (event) => {
+        lifecycleEvents.push(event);
+        return { idempotencyKey: event.idempotencyKey };
+      },
+      distillationCheckpoint: {
+        onFeatPhaseClose: async (event) => {
+          distillationEvents.push(event);
+          return { fired: true, sourceId: `feat-phase-close:${event.featureId}:${event.phaseLabel}` };
+        },
+      },
+      eventLog,
+      projector: {
+        rebuild: async (subjectKey) => {
+          projectedEvents.splice(0, projectedEvents.length, ...(await eventLog.read(subjectKey)));
+        },
+      },
+    });
+    const terminalPoll = poll({ prState: 'merged', aggregateBucket: 'pending' });
 
-    assert.ok(content.includes('PR 已 merge'));
-    assert.ok(content.includes('PR #10'));
-    assert.ok(content.includes('Tracking Instructions'));
-    assert.ok(content.includes('verify main and close task'));
-    assert.match(content, /main.*live runtime|live runtime.*main/i);
-    assert.match(content, /dormant|未加载|未生效/i);
-    assert.match(content, /co-creator.*授权|显式授权/);
-    assert.match(content, /pnpm start/);
-    assert.match(content, /fresh.*(?:invocation|process)|新.*(?:invocation|进程)/i);
+    await assert.rejects(() => new CiCdRouter(options()).route(terminalPoll), /connector unavailable/);
+    assert.equal((await taskStore.get(task.id)).automationState.waitOutcome.delivery, 'pending');
+
+    await new CiCdRouter(options()).route(terminalPoll);
+    await new CiCdRouter(options()).route(terminalPoll);
+
+    assert.equal(lifecycleEvents.length, 1);
+    assert.equal(distillationEvents.length, 1);
+    assert.equal(communityEvents.length, 1);
+    assert.equal(projectedEvents.length, 1);
   });
 
-  it('formats closed lifecycle message as unmerged', () => {
-    const content = buildLifecycleMessageContent({
-      repoFullName: 'org/repo',
-      prNumber: 11,
-      prState: 'closed',
+  test('concurrent recovery and a lost receipt still commit each terminal effect exactly once', async () => {
+    const taskStore = new TaskStore();
+    const messageStore = {
+      append: async () => {
+        throw new Error('connector unavailable');
+      },
+    };
+    const task = await taskStore.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#7',
+      threadId: 'thread_1',
+      title: 'F280 Phase B PR wait',
+      ownerCatId: 'codex-sol',
+      why: 'test concurrent terminal recovery',
+      createdBy: 'codex-sol',
+      userId: 'user_1',
+      automationState: awaitState([{ kind: 'pr_head_changed' }]),
     });
+    const lifecycleCommits = new Set();
+    let lifecycleInvocations = 0;
+    let releaseLifecycle;
+    const lifecycleRelease = new Promise((resolve) => {
+      releaseLifecycle = resolve;
+    });
+    let bothLifecycleWorkersEntered;
+    const lifecycleWorkersEntered = new Promise((resolve) => {
+      bothLifecycleWorkersEntered = resolve;
+    });
+    const opportunityStore = new InMemoryOpportunityStore();
+    const distillationCheckpoint = new DistillationCheckpoint({
+      opportunityStore,
+      log: { info() {}, warn() {} },
+    });
+    const communityEvents = [];
+    const seenCommunityEvents = new Set();
+    const eventLog = {
+      append: async (event) => {
+        const appended = !seenCommunityEvents.has(event.sourceEventId);
+        seenCommunityEvents.add(event.sourceEventId);
+        if (appended) communityEvents.push(event);
+        return { appended, sequence: appended ? communityEvents.length - 1 : -1 };
+      },
+      read: async (subjectKey) => communityEvents.filter((event) => event.subjectKey === subjectKey),
+      listSubjects: async () => [...new Set(communityEvents.map((event) => event.subjectKey))],
+    };
+    const projection = { appliedEventCount: 0 };
+    const projector = {
+      apply: async () => {
+        projection.appliedEventCount += 1;
+      },
+      rebuild: async (subjectKey) => {
+        projection.appliedEventCount = (await eventLog.read(subjectKey)).length;
+      },
+    };
+    const options = () => ({
+      taskStore,
+      deliveryDeps: { messageStore },
+      waitLifecycle: new GitHubWaitLifecycleService({
+        taskStore,
+        deliveryDeps: { messageStore },
+        eventLog: new MemoryWaitLifecycleEventLog(),
+        now: () => 500,
+        log: { info() {}, warn() {}, error() {} },
+      }),
+      log: { info() {}, warn() {}, error() {} },
+      onPrLifecycle: async (event) => {
+        lifecycleInvocations += 1;
+        if (lifecycleInvocations === 2) bothLifecycleWorkersEntered();
+        if (lifecycleInvocations <= 2) await lifecycleRelease;
+        const idempotencyKey = event.idempotencyKey ?? `legacy-call:${lifecycleInvocations}`;
+        lifecycleCommits.add(idempotencyKey);
+        return { idempotencyKey };
+      },
+      distillationCheckpoint,
+      eventLog,
+      projector,
+    });
+    const terminalPoll = poll({ prState: 'merged', aggregateBucket: 'pending' });
 
-    assert.ok(content.includes('PR 已关闭'));
-    assert.ok(content.includes('未合并'));
-    assert.ok(content.includes('PR #11'));
-    assert.ok(!content.includes('pnpm start'));
+    const first = new CiCdRouter(options()).route(terminalPoll);
+    const second = new CiCdRouter(options()).route(terminalPoll);
+    await lifecycleWorkersEntered;
+    releaseLifecycle();
+    await Promise.allSettled([first, second]);
+
+    const stored = await taskStore.get(task.id);
+    const { terminalEffects: _lostReceipt, ...ciWithoutReceipt } = stored.automationState.ci;
+    await taskStore.replaceAutomationStateIfGeneration(task.id, {
+      expectedGeneration: stored.automationState.waitOutcome.generation,
+      expectedUpdatedAt: stored.updatedAt,
+      automationState: { ...stored.automationState, ci: ciWithoutReceipt },
+      status: 'done',
+    });
+    await assert.rejects(() => new CiCdRouter(options()).route(terminalPoll), /connector unavailable/);
+
+    assert.equal(lifecycleCommits.size, 1);
+    assert.equal((await opportunityStore.listPending()).length, 1);
+    assert.equal(communityEvents.length, 1);
+    assert.equal(projection.appliedEventCount, 1);
+  });
+});
+
+describe('CI preview renderer', () => {
+  test('never includes source descriptions or legacy caller prose', () => {
+    const content = buildCiMessageContent(
+      poll({
+        aggregateBucket: 'fail',
+        checks: [{ name: 'tests', bucket: 'fail', description: 'SOURCE_SECRET' }],
+      }),
+      'LEGACY_SECRET',
+    );
+    assert.equal(content.includes('SOURCE_SECRET'), false);
+    assert.equal(content.includes('LEGACY_SECRET'), false);
   });
 });

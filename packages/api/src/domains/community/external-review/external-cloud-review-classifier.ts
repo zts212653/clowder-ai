@@ -1,10 +1,10 @@
-import type { PrEventWaitState } from '@cat-cafe/shared';
+import type { AwaitStateV1 } from '@cat-cafe/shared';
 import type { PrFeedbackComment, PrReviewDecision } from '../../../infrastructure/email/ReviewFeedbackRouter.js';
 import type { ExternalCloudObservation } from './ExternalReviewCoordinator.js';
 
 export interface ExternalCloudReviewClassifierInput {
   readonly currentHeadSha: string;
-  readonly eventWait?: PrEventWaitState;
+  readonly awaitState?: AwaitStateV1;
   readonly comments: readonly PrFeedbackComment[];
   readonly reviews: readonly PrReviewDecision[];
   readonly knownCloudReviewerLogins: readonly string[];
@@ -29,12 +29,19 @@ function emptyClassification(): ExternalCloudReviewClassification {
 export function classifyExternalCloudReview(
   input: ExternalCloudReviewClassifierInput,
 ): ExternalCloudReviewClassification {
-  const { eventWait } = input;
+  const { awaitState } = input;
+  const reviewResultPredicate = awaitState?.continuation.when.find(
+    (predicate) => predicate.kind === 'pr_review_result_available',
+  );
+  const triggerCommentId =
+    reviewResultPredicate?.kind === 'pr_review_result_available'
+      ? (reviewResultPredicate.triggerCommentId ?? awaitState?.baseline.review?.resultTriggerCommentId)
+      : undefined;
   if (
-    !eventWait ||
-    eventWait.expectedSignal !== 'review_posted' ||
-    eventWait.coverage.status !== 'covered' ||
-    eventWait.triggerHeadSha !== input.currentHeadSha
+    !awaitState ||
+    !reviewResultPredicate ||
+    !triggerCommentId ||
+    awaitState.baseline.review?.resultTriggerHeadSha !== input.currentHeadSha
   ) {
     return emptyClassification();
   }
@@ -64,7 +71,7 @@ export function classifyExternalCloudReview(
       observation: {
         headSha: input.currentHeadSha,
         status,
-        triggerCommentId: eventWait.coverage.triggerCommentId,
+        triggerCommentId,
         reviewId: decision.id,
       },
       correlatedCommentIds: findings.map((comment) => comment.id),
@@ -72,12 +79,12 @@ export function classifyExternalCloudReview(
     };
   }
 
-  const timedOut = input.now - eventWait.coverage.observedAt >= input.timeoutMs;
+  const timedOut = input.now - awaitState.createdAt >= input.timeoutMs;
   return {
     observation: {
       headSha: input.currentHeadSha,
       status: timedOut ? 'failed_or_timeout' : 'running',
-      triggerCommentId: eventWait.coverage.triggerCommentId,
+      triggerCommentId,
     },
     correlatedCommentIds: [],
     correlatedReviewIds: [],

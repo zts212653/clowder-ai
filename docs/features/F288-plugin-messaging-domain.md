@@ -4,18 +4,56 @@ related_features: [F088, F202, F240]
 topics: [plugin, messaging, envelope, event-stream, idempotency]
 doc_kind: spec
 created: 2026-07-14
-tips_exempt: K-1 establishes the kernel contract; the user-facing broker and configuration surface belong to K-2
+tips_exempt: "K-1 establishes the dormant kernel contract; the user-facing broker and configuration surface belong to K-2."
+description: "Host-side plugin messaging kernel with canonical envelopes, capability-bound send/append operations, durable event cursors, snapshots, and Memory/Redis parity."
+description_source: human
+description_author: codex-sol
+description_updated_at: 2026-08-04T06:47:00Z
 ---
 
 # F288: Plugin Messaging Domain（K-1 messaging 域收敛）
 
-**Status:** IMPLEMENTING（direction accepted #1271; PR #1270 in review）
+> **Status**: K-1 absorbed; dormant until K-2 activation | **Owner**: Clowder AI maintainers (home intake from clowder-ai#1270)
+
+## Why
+
+Plugin integrations need one host-owned messaging contract instead of separate send, append, replay, and snapshot semantics in every connector. F288 keeps authority binding, idempotency, cursor recovery, and provenance rules inside one domain so K-2 can activate a reviewed kernel rather than inventing a parallel message path.
+
+## What
+
+K-1 provides the contract-native messaging domain described below: host-issued handles, canonical envelopes, idempotent send/append operations, durable event cursors, snapshot recovery, and Memory/Redis parity. It remains dormant until the K-2 Host Broker consumes the existing `createMessagingDomain(...)` seam.
+
+## Acceptance Criteria
+
+- [x] AC-A1: Plugin writes use host-issued handles and fail closed on cross-instance, revoked, or unauthorized capabilities.
+- [x] AC-A2: Send and append operations are idempotent, revision-fenced, and preserve canonical message provenance.
+- [x] AC-A3: Event delivery, acknowledgements, stale-cursor recovery, and snapshots have matching Memory/Redis behavior with executable regression coverage.
+- [ ] AC-A4: K-2 activates the absorbed domain through the Host Broker only after its separately reviewed contract re-pin and runtime gate.
+
+## Dependencies
+
+- **Evolved from**: F240 IM Connector Plugin Architecture and the C-1 plugin contract.
+- **Related**: F088 gateway adapters and F202 plugin lifecycle/discovery.
+- **Blocked by**: K-2 Host Broker activation for runtime reachability; K-1 itself is absorbed and review-complete.
+
+## Risk
+
+The sensitive boundary is capability and message authority, not UI presentation. The domain therefore keeps closed input validation, immutable handle bindings, lease-fenced append emission, bounded payloads, and explicit stale-cursor recovery; activation remains a separate K-2 gate.
+
+**Status:** K-1 absorbed（source PR #1270 merged; dormant until K-2 activation）
 **Lineage:** F240（IM connector plugins）→ plugins v0 proposal
-**真相源:** `zts212653/clowder-ai-plugins` main `189f25d` — `docs/proposals/plugin-system-principles-and-v0-design.md` §3.1；issue #1 roadmap comment `#issuecomment-4969779486` 的 PR-2（K-1）。C-1 契约包 `@clowder-ai/plugin-contract@0.1.0-beta.5` 已发布，以精确版本+digest 为准。
+**真相源:** `zts212653/clowder-ai` squash merge `3251eea9070570ad591b689eb9a0de1683741982`（reviewed source HEAD `ba72efb4958754de3a0ae01362e24665f22beb78`）；方向决策见 issue #1271。C-1 契约包 `@clowder-ai/plugin-contract@0.1.0-beta.5` 已发布，以精确版本+digest 为准。
 
 ## 一句话
 
 内核提供 plugin-facing messaging 域：一个内容模型（MessagePayload），一个发送入口（`messaging.send(draft)`），两类可靠事件（`message.publish` / `message.elements.append`），幂等结算 ledger 与 durable ack cursor。
+
+## Home allocation and intake provenance
+
+- F288 由 operator 于 2026-08-03 分配；家里先以 commit `fdf351a54` 建立占号登记，避免与既有 F258 冲突。
+- Host 侧 scope、ordering boundary、数据域恒等约束与 exact pin 政策由 [clowder-ai#1271](https://github.com/zts212653/clowder-ai/issues/1271) 接受。
+- 外部实现 [clowder-ai#1270](https://github.com/zts212653/clowder-ai/pull/1270) 在 exact source HEAD `ba72efb4958754de3a0ae01362e24665f22beb78` 通过维护者 review 后合入。
+- 家里通过 [cat-cafe#3406](https://github.com/zts212653/clowder-ai/issues/3406) 做 home-preserving intake；公共仓专属 ROADMAP 不回流，Clowder AI 的 message-store、品牌与 runtime 边界继续由本仓真相源约束。
 
 ## User Journey
 
@@ -126,15 +164,15 @@ Published: `@clowder-ai/plugin-contract@0.1.0-beta.5`。epistemic 值集 `observ
 
 新增 cell `plugin-messaging`（K-1 起草，maintainer 定夺）：plugin-facing messaging 契约面。现有 transport cell（F088）继续持有 connector 出入站与平台降级。
 
-## Quality Gate Report（review-ready）
+## Source Quality Gate Report（historical exact-source evidence）
 
 **检查时间:** 2026-08-04（Asia/Shanghai）
 
-**工作树:** feature checkout（branch `feat/k1-messaging-domain`）
+**工作树:** external source branch `feat/k1-messaging-domain`
 
 **基线:** `upstream/main@ffa73bb8f`
 
-**状态边界:** K-1 实现处于 PR review 迭代中（PR #1270 OPEN on base `ffa73bb8f`）。C-1 已发布 `@clowder-ai/plugin-contract@0.1.0-beta.5`。
+**状态边界:** K-1 source PR #1270 已以 squash commit `3251eea9070570ad591b689eb9a0de1683741982` 合入 clowder-ai；这些记录描述被吸收 source HEAD 的外部验证。Clowder AI intake 的独立验证记录在本节之后追加。C-1 已发布 `@clowder-ai/plugin-contract@0.1.0-beta.5`。
 
 ### 愿景与五件套验收
 
@@ -148,7 +186,7 @@ Published: `@clowder-ai/plugin-contract@0.1.0-beta.5`。epistemic 值集 `observ
 
 交付完整性：K-1 是可被 K-2 扩展消费的完整 domain slice；没有需要推倒重写的占位实现。Host Broker 装配面保持为 `createMessagingDomain(...)`。
 
-### Fresh-context / Terra R1-R3 findings（均已关闭，待 Terra 复验）
+### Fresh-context findings（全部在最终 exact-source review 前关闭）
 
 1. trace 字段在持久化/投影中丢失。
 2. retention trim 与 `read()` 竞态可静默跳事件。
@@ -166,8 +204,6 @@ Published: `@clowder-ai/plugin-contract@0.1.0-beta.5`。epistemic 值集 `observ
 14. outbox/watermark 仍允许 stale emitter 在 successor rev3 与 retention trim 后新增 rev2；append event insertion 现在由 current lease 原子 fencing，fenced write 不消耗 sequence，watermark 逐 revision 前进。
 15. Redis hydration parser 仍接受 unknown fields、33 elements 与 duplicate IDs；memory/Redis 现在共享同一 closed/bounded canonical parser，且无 permissive fallback。
 16. strict hydration 只校验 append-op 引用已知且不重复，未证明它按序覆盖实际 appended suffix；parser 现在逐 operation 消费 canonical suffix，同时核验 writer 的 element stamp、operation 前置 derivation 与 present `baseRevision = producedRevision - 1`。
-
-诊断记录：`docs/bug-report/redis-plugin-message-array-collapse/bug-report.md`、`docs/bug-report/append-event-order-after-lock-expiry/bug-report.md`。
 
 ### Dogfood-Your-Slice
 
@@ -198,13 +234,13 @@ Scope verdict: ✅ 必做（plugin developer 可感知的 kernel contract）
 
 - `.pen` 匹配：无；UI diff：无；设计稿对照不适用。
 - 根目录媒体/设计工件（工作树 + 已提交差异）：无。
-- PR：#1270 OPEN on `zts212653/clowder-ai`（base `ffa73bb8f`）。Review rounds: R1-R6 complete, currently in R7.
-- ≥3 轮 state-object gate：(1) append output 连续复发→已提交 `feature-specs/2026-07-16-k1-r2-emission-fencing.md`。(2) MessageHandle authority binding R2/R3/R4 连续 P1→R5 spec-first: INV-21/22/23 + validation matrix (本文件§MessageHandle Authority Binding)→矩阵驱动 adversarial tests + Memory/Redis 行为对齐。(3) Service-level stale-claimant settlement coverage R4/R5→R6: service-level tests with InterceptingLedgerStore exercising real SendService/AppendService settlement branches。
+- Source PR：#1270 MERGED；最终 reviewed HEAD `ba72efb4958754de3a0ae01362e24665f22beb78`，squash merge `3251eea9070570ad591b689eb9a0de1683741982`。
+- ≥3 轮 state-object gate：(1) append output 连续复发→已提交 *(internal reference removed)*。(2) MessageHandle authority binding R2/R3/R4 连续 P1→R5 spec-first: INV-21/22/23 + validation matrix (本文件§MessageHandle Authority Binding)→矩阵驱动 adversarial tests + Memory/Redis 行为对齐。(3) Service-level stale-claimant settlement coverage R4/R5→R6: service-level tests with InterceptingLedgerStore exercising real SendService/AppendService settlement branches。
 - R2+ failure-mode sweep：从 append history 的 writer/parser 漂移抽象出 ordered-suffix invariant，并扫描 `baseRevision`、element stamping、operation-local derivation、memory/Redis 两个 consumer；均已纳入单一 parser 与回归表。
 - `check-hotfix-pattern.mjs`、`check-fallback-layers.mjs` 与 `check:architecture-ownership` 在 upstream 公开 checkout 不存在；已手工等效检查：无 hotfix 语义、无同文件新增三层 fallback。
 - 350 行硬限：append output coordinator 与 strict parser helpers 按单一职责拆分；K-1 本轮 source/test 单文件最大 349 行 ✅。
-- upstream delta：PR base `ffa73bb8f` vs current `upstream/main` — 1 Web-only commit (HubCatEditor), no messaging overlap。
+- Historical upstream delta at source review：PR base `ffa73bb8f` vs then-current `upstream/main` — 1 Web-only commit (HubCatEditor), no messaging overlap。
 - Architecture cell：建议新增 `plugin-messaging`；ownership map 尚未更新，留给 reviewer/maintainer 判定（warning-only）。
 - 编号：F288 由 maintainer 在 #1271 direction verdict §3 正式分配（`fdf351a54` 注册）。
 
-[宪宪/Claude Opus 4.6🐾, initial quality gate by 砚砚/GPT-5.6 Sol🐾]
+[Ragdoll/Claude Opus 4.6🐾, initial quality gate by Maine Coon/GPT-5.6 Sol🐾]

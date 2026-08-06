@@ -7,8 +7,15 @@ import {
   type TTFundQueryRequest,
 } from '@cat-cafe/finance';
 import { z } from 'zod';
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('finance-tools.ts', undefined, {
+  resourceFamily: 'finance',
+  authority: 'provider-runtime',
+});
 
 const READ_ONLY_TTFUND_SKILLS = new Set([
   'FUND_BASE_INFOS',
@@ -125,11 +132,18 @@ export function createFinanceQueryHandler(options: FinanceQueryHandlerOptions = 
 export const handleFinanceQuery = createFinanceQueryHandler();
 
 export const financeTools = [
-  {
+  defineTool({
     name: 'cat_cafe_finance_query',
     description:
       'Query normalized personal-finance facts through the read-only cat-cafe-finance wrapper. Returns source/asOf/confidence/snapshot_id/presentationHint metadata. Does not expose buy, sell, transfer, or raw provider credential operations.',
     inputSchema: financeQueryInputSchema,
     handler: handleFinanceQuery,
-  },
+    governance: {
+      implementationExport: 'handleFinanceQuery',
+      action: 'read',
+      risk: { level: 'read', openWorld: true },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
 ];

@@ -528,7 +528,7 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'CAT_CAFE_RUNTIME_ROOT',
     defaultValue: '(未设置 → process.cwd())',
     description:
-      'F061: Cat Café runtime 二进制根目录（runtime startup 自动 export 为 $RUNTIME_DIR），优先级高于 capability orchestrator 的 auto-detection，用于 Antigravity MCP config args 路径',
+      'F061: Clowder AI runtime 二进制根目录（runtime startup 自动 export 为 $RUNTIME_DIR），优先级高于 capability orchestrator 的 auto-detection，用于 Antigravity MCP config args 路径',
     category: 'server',
     sensitive: false,
     runtimeEditable: false,

@@ -35,8 +35,8 @@ describe('F128 open-source PR maintainer gate', () => {
     assert.match(proposal.initialMessage, /真实 GitHub author/);
     assert.match(proposal.initialMessage, /禁止把 finding 默认派给家里的猫修/);
     assert.match(proposal.initialMessage, /Formal review tracking transition/);
-    assert.match(proposal.initialMessage, /human_participant_activity/);
-    assert.match(proposal.initialMessage, /tracker 保持 active/);
+    assert.match(proposal.initialMessage, /不猜等待条件/);
+    assert.match(proposal.initialMessage, /显式注册 typed continuation/);
     assert.match(proposal.initialMessage, /Own this PR and close the loop\./);
   });
 

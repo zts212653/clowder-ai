@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 const { scanFreshnessSupplementPreflight } = await import(
   '../dist/domains/cats/services/freshness/FreshnessSupplementPreflight.js'
 );
+const { cursorFor } = await import('../dist/domains/cats/services/stores/cursor.js');
 
 function message(id, overrides = {}) {
   return {
@@ -61,5 +62,44 @@ describe('F254 supplement preflight parallel-self relevance', () => {
 
     assert.equal(result.kind, 'ready');
     assert.deepEqual(result.requiredMessageIds, ['msg-2', 'msg-3']);
+  });
+
+  it('advances multi-page scans with the visibility cursor returned by the store', async () => {
+    const supplement = {
+      id: 'supplement-visibility-pagination',
+      lineageId: 'msg-origin',
+      seq: 1,
+      userId: 'user-1',
+      threadId: 'thread-1',
+      catId: 'codex-sol',
+      originalMessageId: 'msg-origin',
+      requiredMessageIds: ['msg-frontier'],
+      requiredFrontierMessageId: 'msg-frontier',
+      status: 'pending',
+      replayUnsafeToolNames: [],
+      revision: 1,
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    const firstPage = Array.from({ length: 20 }, (_, index) =>
+      message(`msg-page-${String(index + 1).padStart(2, '0')}`, { visibilitySeq: index + 2 }),
+    );
+    const finalMessage = message('msg-final', { visibilitySeq: 22 });
+    const expectedSecondCursor = cursorFor(firstPage.at(-1));
+    const requestedCursors = [];
+    const messageStore = {
+      getById: async () => null,
+      getByThreadAfter: async (_threadId, cursor) => {
+        requestedCursors.push(cursor);
+        if (cursor === supplement.requiredFrontierMessageId) return firstPage;
+        if (cursor === expectedSecondCursor) return [finalMessage];
+        throw new Error(`unexpected pagination cursor: ${cursor}`);
+      },
+    };
+
+    const result = await scanFreshnessSupplementPreflight({ supplement, messageStore });
+
+    assert.equal(result.kind, 'ready');
+    assert.deepEqual(requestedCursors, [supplement.requiredFrontierMessageId, expectedSecondCursor]);
   });
 });

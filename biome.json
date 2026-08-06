@@ -27,7 +27,8 @@
       "!docs/designs",
       "!docs/features/assets",
       "!docs/harness-feedback/bundles",
-      "!docs/videos"
+      "!docs/videos",
+      "!packages/mcp-server/governance/mcp-surface-baseline.json"
     ]
   },
   "formatter": {

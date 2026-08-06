@@ -16,9 +16,7 @@
 import type {
   AutomationState,
   CreateTaskInput,
-  IssueAutomationState,
   ManagedWorkBinding,
-  ReviewAutomationState,
   TaskItem,
   TaskKind,
   UpdateTaskInput,
@@ -26,7 +24,9 @@ import type {
 import { isTrackingKind } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { generateSortableId } from '../ports/MessageStore.js';
+import { automationGeneration, mergeTaskAutomationState } from '../ports/TaskAutomationState.js';
 import { assertSubjectUpdateOwnership, type ITaskStore } from '../ports/TaskStore.js';
+import type { ReplaceAutomationStateIfGenerationInput } from '../ports/TaskStoreContract.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
 import { hydrateTask, serializeTask } from './RedisTaskCodec.js';
 import { RedisTaskManagedWorkBindingStore } from './RedisTaskManagedWorkBindingStore.js';
@@ -71,7 +71,7 @@ export class RedisTaskStore implements ITaskStore {
     this.redis = redis;
     this.managedWorkBindings = new RedisTaskManagedWorkBindingStore(redis);
     this.managedWorkRegistration = new RedisTaskManagedWorkRegistrationStore(redis, {
-      mergeAutomationState: (existing, patch) => this.mergeAutomationState(existing, patch),
+      mergeAutomationState: mergeTaskAutomationState,
       applyThreadTtl: (threadId) => this.applyThreadTtl(threadId),
       compareAndDeleteSubject: (subjectKey, staleTaskId) => this.compareAndDeleteSubject(subjectKey, staleTaskId),
       waitForInFlightTaskWrite: () => this.waitForInFlightTaskWrite(),
@@ -246,7 +246,7 @@ export class RedisTaskStore implements ITaskStore {
       probe: input.probe !== undefined ? input.probe : existing.probe,
       resolveMode: input.resolveMode !== undefined ? input.resolveMode : existing.resolveMode,
       automationState: input.automationState
-        ? this.mergeAutomationState(existing.automationState, input.automationState)
+        ? mergeTaskAutomationState(existing.automationState, input.automationState)
         : existing.automationState,
       updatedAt: now,
     };
@@ -279,7 +279,7 @@ export class RedisTaskStore implements ITaskStore {
       const existing = hydrateTask(data);
       const updated: TaskItem = {
         ...existing,
-        automationState: this.mergeAutomationState(existing.automationState, patch),
+        automationState: mergeTaskAutomationState(existing.automationState, patch),
         updatedAt: Date.now(),
       };
 
@@ -301,6 +301,45 @@ export class RedisTaskStore implements ITaskStore {
 
   async getManagedWorkBinding(taskId: string): Promise<ManagedWorkBinding | null> {
     return this.managedWorkBindings.get(taskId);
+  }
+
+  async replaceAutomationStateIfGeneration(
+    taskId: string,
+    input: ReplaceAutomationStateIfGenerationInput,
+  ): Promise<TaskItem | null> {
+    const key = TaskKeys.detail(taskId);
+    for (let attempt = 0; attempt < MAX_AUTOMATION_STATE_PATCH_RETRIES; attempt += 1) {
+      await this.redis.watch(key);
+      const data = await this.redis.hgetall(key);
+      if (!data || !data.id) {
+        await this.redis.unwatch();
+        return null;
+      }
+      const existing = hydrateTask(data);
+      if (
+        (input.expectedUpdatedAt !== undefined && existing.updatedAt !== input.expectedUpdatedAt) ||
+        automationGeneration(existing.automationState) !== input.expectedGeneration
+      ) {
+        await this.redis.unwatch();
+        return null;
+      }
+      const updated: TaskItem = {
+        ...existing,
+        automationState: input.automationState,
+        ...(input.why !== undefined ? { why: input.why } : {}),
+        ...(input.status !== undefined ? { status: input.status } : {}),
+        updatedAt: Date.now(),
+      };
+      const pipeline = this.redis.multi();
+      pipeline.hset(key, serializeTask(updated));
+      const result = await pipeline.exec();
+      if (result) {
+        await this.applyTtl(updated);
+        return updated;
+      }
+      await this.waitForInFlightTaskWrite();
+    }
+    throw new Error(`RedisTaskStore replaceAutomationStateIfGeneration: CAS exhausted for ${taskId}`);
   }
 
   async update(taskId: string, input: UpdateTaskInput): Promise<TaskItem | null> {
@@ -439,10 +478,9 @@ export class RedisTaskStore implements ITaskStore {
     options?: { syncSubject?: boolean; requireSubjectOwner?: boolean },
   ): Promise<boolean> {
     const subjectKey = task.subjectKey;
-    const shouldVerifyOwnership = Boolean(options?.requireSubjectOwner && subjectKey);
     const key = TaskKeys.detail(task.id);
 
-    if (shouldVerifyOwnership) {
+    if (options?.requireSubjectOwner && subjectKey) {
       // Atomic ownership check + artifact write via Lua — no post-write window.
       const serialized = serializeTask(task);
       const flatFields: string[] = [];
@@ -452,7 +490,7 @@ export class RedisTaskStore implements ITaskStore {
       const ok = await this.redis.eval(
         ATOMIC_OWNED_WRITE_LUA,
         4,
-        TaskKeys.subject(subjectKey!),
+        TaskKeys.subject(subjectKey),
         key,
         TaskKeys.thread(task.threadId),
         TaskKeys.kind(task.kind),
@@ -528,69 +566,6 @@ export class RedisTaskStore implements ITaskStore {
       TaskKeys.subject(subjectKey),
       staleTaskId,
     );
-  }
-
-  private mergeAutomationState(
-    existing: AutomationState | undefined,
-    patch: Partial<AutomationState>,
-  ): AutomationState | undefined {
-    if (!existing && Object.keys(patch).length === 0) return undefined;
-    return {
-      ...existing,
-      ...patch,
-      ci: patch.ci ? { ...existing?.ci, ...patch.ci } : existing?.ci,
-      conflict: patch.conflict ? { ...existing?.conflict, ...patch.conflict } : existing?.conflict,
-      review: patch.review ? this.mergeReviewAutomationState(existing?.review, patch.review) : existing?.review,
-      issue: patch.issue ? this.mergeIssueAutomationState(existing?.issue, patch.issue) : existing?.issue,
-    };
-  }
-
-  /** Review cursor sources are monotonic and must not regress on task re-registration. */
-  private mergeReviewAutomationState(
-    existing: ReviewAutomationState | undefined,
-    patch: ReviewAutomationState,
-  ): ReviewAutomationState {
-    const merged: ReviewAutomationState = { ...existing, ...patch };
-    const monotonic = (current: number | undefined, next: number | undefined) =>
-      current !== undefined && next !== undefined ? Math.max(current, next) : (next ?? current);
-    const legacy = monotonic(existing?.lastCommentCursor, patch.lastCommentCursor);
-    const inline = monotonic(existing?.lastInlineCommentCursor, patch.lastInlineCommentCursor);
-    const conversation = monotonic(existing?.lastConversationCommentCursor, patch.lastConversationCommentCursor);
-    const decision = monotonic(existing?.lastDecisionCursor, patch.lastDecisionCursor);
-    return {
-      ...merged,
-      ...(legacy !== undefined ? { lastCommentCursor: legacy } : {}),
-      ...(inline !== undefined ? { lastInlineCommentCursor: inline } : {}),
-      ...(conversation !== undefined ? { lastConversationCommentCursor: conversation } : {}),
-      ...(decision !== undefined ? { lastDecisionCursor: decision } : {}),
-    };
-  }
-
-  /**
-   * Merge issue automation state with cursor anti-regression (I5).
-   *
-   * Cursors (lastCommentCursor, lastDeliveredCursor) must never decrease — a re-routing event
-   * with a stale fetchCommentCursor seed must not overwrite already-advanced cursor values.
-   * All other fields (issueState, lastNotifiedAt, etc.) use the standard last-write-wins spread.
-   */
-  private mergeIssueAutomationState(
-    existing: IssueAutomationState | undefined,
-    patch: IssueAutomationState,
-  ): IssueAutomationState {
-    const merged: IssueAutomationState = { ...existing, ...patch };
-    return {
-      ...merged,
-      // I5: cursors use Math.max — only apply when both sides are defined to avoid
-      // overwriting a genuinely new seed (undefined → value) with a null/0 floor.
-      lastCommentCursor:
-        existing?.lastCommentCursor !== undefined && patch.lastCommentCursor !== undefined
-          ? Math.max(existing.lastCommentCursor, patch.lastCommentCursor)
-          : merged.lastCommentCursor,
-      lastDeliveredCursor:
-        existing?.lastDeliveredCursor !== undefined && patch.lastDeliveredCursor !== undefined
-          ? Math.max(existing.lastDeliveredCursor, patch.lastDeliveredCursor)
-          : merged.lastDeliveredCursor,
-    };
   }
 
   private async fetchTasksByIds(ids: string[], options?: { cleanupKey?: string }): Promise<TaskItem[]> {

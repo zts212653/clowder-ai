@@ -22,20 +22,30 @@ function makeTask() {
         lastConversationCommentCursor: 0,
         lastDecisionCursor: 0,
       },
-      eventWait: {
+      await: {
         v: 1,
-        invocationId: 'invocation-1',
-        threadId: 'thread-1',
-        ownerCatId: 'codex-sol',
-        subjectKey: 'pr:owner/repo#10',
-        expectedSignal: 'review_posted',
-        triggerHeadSha: headSha,
-        coverage: {
-          status: 'covered',
-          kind: 'github_review_trigger_eyes',
-          triggerCommentId: 70,
-          observedAt: 1_000,
+        generation: 1,
+        subjectRef: 'pr:owner/repo#10',
+        ownerFence: { kind: 'containing_task', generation: 1 },
+        baseline: {
+          capturedAt: 1_000,
+          headSha,
+          review: {
+            inlineCommentCursor: 0,
+            conversationCommentCursor: 0,
+            decisionCursor: 0,
+            resultTriggerCommentId: 70,
+            resultTriggerHeadSha: headSha,
+          },
         },
+        continuation: {
+          when: [{ kind: 'pr_review_result_available', triggerCommentId: 70 }],
+          // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
+          then: 'Consume the exact cloud review.',
+        },
+        expiresAt: 120_000,
+        createdAt: 1_000,
+        provenance: 'explicit_registration',
       },
     },
   };
@@ -86,7 +96,20 @@ function cloudFinding() {
   };
 }
 
-function makeHarness(coordinatorResult, { comments = [cloudFinding()], reviews = [cloudReview()] } = {}) {
+function makeHarness(
+  coordinatorResult,
+  {
+    comments = [cloudFinding()],
+    reviews = [cloudReview()],
+    routerResult = {
+      kind: 'notified',
+      threadId: 'thread-1',
+      catId: 'codex-sol',
+      messageId: 'wait-message',
+      content: 'compact matched delta',
+    },
+  } = {},
+) {
   const task = makeTask();
   const taskStore = makeTaskStore(task);
   const coordinatorCalls = [];
@@ -101,13 +124,7 @@ function makeHarness(coordinatorResult, { comments = [cloudFinding()], reviews =
     reviewFeedbackRouter: {
       async route(signal, tracking) {
         routerCalls.push({ signal, tracking });
-        return {
-          kind: 'notified',
-          threadId: tracking.threadId,
-          catId: tracking.catId,
-          messageId: 'ordinary-message',
-          content: 'ordinary feedback',
-        };
+        return routerResult;
       },
     },
     externalReviewCoordinator: {
@@ -135,134 +152,87 @@ function makeHarness(coordinatorResult, { comments = [cloudFinding()], reviews =
   return { spec, taskStore, coordinatorCalls, routerCalls, triggerCalls, warnCalls };
 }
 
-describe('F168 ReviewFeedbackTaskSpec cloud-review integration', () => {
-  it('records blocking cloud feedback as state-only and advances its cursor without local wake', async () => {
-    const harness = makeHarness({ kind: 'state_only', reason: 'cloud_review_blocking' });
+describe('F168/F280 ReviewFeedbackTaskSpec cloud-review integration', () => {
+  it('records blocking cloud state while the typed matcher remains state-only', async () => {
+    const harness = makeHarness(
+      { kind: 'state_only', reason: 'cloud_review_blocking' },
+      { routerResult: { kind: 'state_only', reason: 'predicate_not_matched' } },
+    );
 
     const gate = await harness.spec.admission.gate();
-
-    assert.equal(gate.run, false);
+    assert.equal(gate.run, true);
     assert.equal(harness.coordinatorCalls[0].observation.status, 'blocking');
-    assert.equal(harness.routerCalls.length, 0);
+    await harness.spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
+
+    assert.equal(harness.routerCalls.length, 1);
     assert.equal(harness.triggerCalls.length, 0);
     assert.equal(harness.taskStore.patches.at(-1).review.lastCommentCursor, 72);
     assert.equal(harness.taskStore.patches.at(-1).review.lastDecisionCursor, 71);
   });
 
-  it('turns a clean current-head cloud verdict into one reviewer wake without ordinary feedback delivery', async () => {
+  it('routes a clean exact-head result only through the typed wait lifecycle', async () => {
     const harness = makeHarness(
-      {
-        kind: 'notified',
-        threadId: 'thread-1',
-        catId: 'codex-sol',
-        messageId: 'ready-message',
-        content: 'current HEAD is ready',
-        headSha,
-      },
+      { kind: 'state_only', reason: 'explicit_wait_required' },
       { comments: [], reviews: [cloudReview()] },
     );
 
     const gate = await harness.spec.admission.gate();
     assert.equal(gate.run, true);
-    assert.equal(gate.workItems[0].signal.newComments.length, 0);
-    assert.equal(gate.workItems[0].signal.newDecisions.length, 0);
-    assert.equal(gate.workItems[0].signal.externalReadyNotification.messageId, 'ready-message');
+    assert.deepEqual(
+      gate.workItems[0].signal.newDecisions.map((review) => review.id),
+      [71],
+    );
+    assert.equal('externalReadyNotification' in gate.workItems[0].signal, false);
 
     await harness.spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
-
-    assert.equal(harness.routerCalls.length, 0);
+    assert.equal(harness.routerCalls.length, 1);
     assert.equal(harness.triggerCalls.length, 1);
-    assert.equal(harness.triggerCalls[0][6].reason, 'github_external_review_ready');
-    assert.equal(harness.triggerCalls[0][6].coalesceKey, 'external-review:owner/repo#10:head-current');
-    assert.equal(harness.taskStore.patches.at(-1).review.lastDecisionCursor, 71);
+    assert.equal(harness.triggerCalls[0][6].reason, 'github_wait_satisfied');
   });
 
-  it('triggers both external-ready and ordinary feedback when they share one poll batch', async () => {
+  it('coalesces cloud and ordinary feedback into one matcher pass and one wake', async () => {
     const humanComment = {
       id: 73,
       author: 'human-reviewer',
-      body: 'Please keep this ordinary feedback visible.',
+      body: 'ordinary source body',
       createdAt: '2026-07-14T19:00:02.000Z',
       commitId: headSha,
       commentType: 'inline',
     };
     const harness = makeHarness(
-      {
-        kind: 'notified',
-        threadId: 'thread-1',
-        catId: 'codex-sol',
-        messageId: 'ready-message',
-        content: 'current HEAD is ready',
-        headSha,
-      },
+      { kind: 'state_only', reason: 'explicit_wait_required' },
       { comments: [humanComment], reviews: [cloudReview()] },
     );
 
     const gate = await harness.spec.admission.gate();
     assert.equal(gate.run, true);
     assert.equal(gate.workItems[0].signal.newComments[0].author, 'human-reviewer');
-    assert.equal(gate.workItems[0].signal.externalReadyNotification.messageId, 'ready-message');
-
-    await harness.spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
-
-    assert.equal(harness.routerCalls.length, 1);
-    assert.equal(harness.triggerCalls.length, 2);
-    assert.deepEqual(harness.triggerCalls.map((call) => call[6].reason).sort(), [
-      'github_external_review_ready',
-      'github_review_feedback',
-    ]);
-    assert.deepEqual(harness.triggerCalls.map((call) => call[4]).sort(), ['ordinary-message', 'ready-message']);
-  });
-
-  it('preserves ordinary delivery when the repository is not configured for F168', async () => {
-    const harness = makeHarness({ kind: 'not_tracked' });
-
-    const gate = await harness.spec.admission.gate();
-    assert.equal(gate.run, true);
-    assert.equal(gate.workItems[0].signal.newComments.length, 1);
-    assert.equal(gate.workItems[0].signal.newDecisions.length, 1);
-
     await harness.spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
 
     assert.equal(harness.routerCalls.length, 1);
     assert.equal(harness.triggerCalls.length, 1);
-    assert.equal(harness.triggerCalls[0][6].reason, 'github_review_feedback');
   });
 
-  it('preserves ordinary feedback when cloud-review bookkeeping fails', async () => {
-    const humanComment = {
-      id: 73,
-      reviewId: 74,
-      author: 'human-reviewer',
-      body: 'Please keep this ordinary feedback visible.',
-      createdAt: '2026-07-14T19:00:02.000Z',
-      commitId: headSha,
-      commentType: 'inline',
-    };
-    const humanReview = {
-      id: 74,
-      author: 'human-reviewer',
-      state: 'COMMENTED',
-      body: 'Ordinary review decision',
-      submittedAt: '2026-07-14T19:00:03.000Z',
-      commitId: headSha,
-    };
-    const harness = makeHarness(
-      () => {
-        throw new Error('community projection unavailable');
-      },
-      { comments: [cloudFinding(), humanComment], reviews: [cloudReview(), humanReview] },
-    );
+  it('preserves typed matching when the repository has no F168 config', async () => {
+    const harness = makeHarness({ kind: 'not_tracked' });
+    const gate = await harness.spec.admission.gate();
+    assert.equal(gate.run, true);
+    await harness.spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
+    assert.equal(harness.routerCalls.length, 1);
+    assert.equal(harness.triggerCalls.length, 1);
+  });
+
+  it('preserves typed matching when cloud bookkeeping fails', async () => {
+    const harness = makeHarness(() => {
+      throw new Error('community projection unavailable');
+    });
 
     const gate = await harness.spec.admission.gate();
-
     assert.equal(gate.run, true);
-    assert.ok(gate.workItems[0].signal.newComments.some((comment) => comment.author === 'human-reviewer'));
-    assert.ok(gate.workItems[0].signal.newDecisions.some((review) => review.author === 'human-reviewer'));
     await harness.spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
 
     assert.equal(harness.routerCalls.length, 1);
-    assert.equal(harness.triggerCalls[0][6].reason, 'github_review_feedback');
+    assert.equal(harness.triggerCalls.length, 1);
     assert.equal(harness.warnCalls.length, 1);
     assert.match(String(harness.warnCalls[0][1]), /cloud-review bookkeeping failed/i);
   });

@@ -5,6 +5,7 @@
 ## 0. 一句话契约
 
 - **Demo 名称**：
+- **demo_kind**：`concept_story` / `product_experience_gate` / `journey_validation`
 - **目标观众**：
 - **使用场景**：现场讲解 / 自助观看 / 录屏成片 / 内部对齐
 - **观众复述句**：我看到 ______ 变成了 ______，因为 ______。
@@ -12,7 +13,7 @@
 - **主 claim**：
 - **非目标**：本片明确不解释什么？
 
-## 1. 交付车道与视觉真相
+## 1. 判题类型、交付车道与视觉真相
 
 - **delivery_lane**：`internal_product_gate` / `external_showcase`
 - **交付位置**：Hub / Browser Preview / 公开页面 / 录屏 / 其他：
@@ -43,6 +44,28 @@
 - **对外入口**：
 
 禁止用一个半产品、半宣传的混合壳代替两个入口。
+
+只勾选所选 `demo_kind`：
+
+### `concept_story`
+
+- [ ] 观众复述句定义了唯一因果变化
+- [ ] 灵魂画面在没有旁白时仍能表达主张
+- [ ] 概念编排与真实证据没有混写
+
+### `product_experience_gate`
+
+- [ ] 写清 operator 要比较和裁决的变量，其他状态保持一致
+- [ ] 包含安静默认态、主动作、折叠 / 召回、错误 / 恢复
+- [ ] Must-Preserve 清单覆盖当前产品能力与生命周期语义
+- [ ] 签字结果可以明确落为 keep / tune / sunset
+
+### `journey_validation`
+
+- [ ] 起始状态、目标结果与终态判据明确
+- [ ] 每个跨人 / Agent / 工具 / surface 的 handoff 有 canonical 事件或契约
+- [ ] 至少覆盖一次中断 / 恢复和一个诚实失败路径
+- [ ] 没有用总结卡、模型转述或演示捷径代替真实导航与状态迁移
 
 ## 2. 视角与主角
 
@@ -106,6 +129,20 @@
 
 每幕只新增一个概念。切换人物、客户或时间时，在画面中加分隔与状态前提。
 
+### 产品体验 Gate 裁决表（仅 `product_experience_gate`）
+
+| 待裁决变量 | 方案 A | 方案 B | 固定不变的上下文 | operator 判题 | Must-Preserve 证据 | 结果 |
+|---|---|---|---|---|---|---|
+| | | | | | | keep / tune / sunset |
+
+### Journey ledger（仅 `journey_validation`）
+
+| # | actor | 起始状态 | 用户动作 / 系统信号 | canonical event / contract | surface | 下一状态 | 失败 / 恢复 | 验证证据 |
+|---:|---|---|---|---|---|---|---|---|
+| 1 | | | | | | | | |
+
+旅程中的每一跳都要能回答“谁拥有状态、什么事件让它变化、失败后从哪里继续”。无法回答的跳转不能靠旁白补齐。
+
 ## 7. 控场与节奏
 
 - [ ] 播放 / 暂停
@@ -133,7 +170,10 @@
 - [ ] 页面无运行时错误
 - [ ] 暂停期间没有计时器偷跑
 - [ ] 概念数据与真实证据标注清楚
+- [ ] `demo_kind` 与实际判题、证据类型一致
 - [ ] `delivery_lane`、视觉真相源与实际页面一致
+- [ ] `product_experience_gate` 的比较 fixture 只改变待裁决变量
+- [ ] `journey_validation` 的 step / handoff / recovery / terminal state 均可确定重放
 
 ### 视觉与讲述
 
@@ -149,4 +189,6 @@
 
 ## 10. 完成判据
 
-> 一位不了解内部术语的目标观众，在无人补充解释时能说出 ______；讲者可以暂停到 ______ 解释关键因果；观众能区分概念编排、原型行为与真实证据。
+- **`concept_story`**：目标观众在无人补充解释时能复述 ______ 的因果变化，并区分概念编排、原型行为与真实证据。
+- **`product_experience_gate`**：operator 能在原生产品语境中比较 ______，给出 keep / tune / sunset 裁决，且 Must-Preserve 基线无遗漏。
+- **`journey_validation`**：代表性用户能从 ______ 到达 ______；每个 handoff、失败恢复与终态都有可重放证据。

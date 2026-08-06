@@ -206,10 +206,7 @@ import {
   fetchPrCiStatus,
   ReviewFeedbackRouter,
 } from './infrastructure/email/index.js';
-import {
-  fetchInitialPrTrackingBoundary,
-  fetchLatestIssueCommentCursor,
-} from './infrastructure/github/comment-cursors.js';
+import { fetchLatestIssueCommentCursor } from './infrastructure/github/comment-cursors.js';
 import { buildGhCliEnv, resolveGhCliToken, withHiddenGhCliWindow } from './infrastructure/github/gh-cli-env.js';
 import type { EvalDomainId } from './infrastructure/harness-eval/domain/eval-domain-registry.js';
 import { ensureEvalDomainThreads } from './infrastructure/harness-eval/hub/eval-hub-thread-ensure.js';
@@ -3158,10 +3155,82 @@ async function main(): Promise<void> {
   };
   const { createRepoActivityTemplate } = await import('./infrastructure/scheduler/templates/repo-activity.js');
   templateRegistry.register(createRepoActivityTemplate({ getGitHubToken }));
-  const fetchPrTrackingBoundary = async (repoFullName: string, prNumber: number) => {
-    return fetchInitialPrTrackingBoundary(repoFullName, prNumber, {
-      fetchCiStatus: (repo, pr) => fetchPrCiStatus(repo, pr, app.log, { ghToken: getGitHubToken() }),
-    });
+  const fetchPrReviewThreads = async (
+    repo: string,
+    pr: number,
+    reviewThreadIds: readonly string[],
+  ): Promise<readonly import('@cat-cafe/shared').GitHubReviewThreadBaseline[]> => {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const execFileAsync = promisify(execFile);
+    const query =
+      'query($id:ID!){node(id:$id){... on PullRequestReviewThread{id isResolved pullRequest{number repository{nameWithOwner}} comments(last:1){nodes{id}}}}}';
+    return Promise.all(
+      reviewThreadIds.map(async (reviewThreadId) => {
+        const { stdout } = await execFileAsync(
+          'gh',
+          ['api', 'graphql', '-f', `query=${query}`, '-F', `id=${reviewThreadId}`],
+          getGitHubExecOptions(15_000),
+        );
+        const node = (
+          JSON.parse(stdout) as {
+            data?: {
+              node?: {
+                id?: string;
+                isResolved?: boolean;
+                pullRequest?: { number?: number; repository?: { nameWithOwner?: string } };
+                comments?: { nodes?: Array<{ id?: string }> };
+              };
+            };
+          }
+        ).data?.node;
+        if (
+          !node?.id ||
+          node.pullRequest?.number !== pr ||
+          node.pullRequest.repository?.nameWithOwner?.toLowerCase() !== repo.toLowerCase()
+        ) {
+          throw new Error(`Review thread ${reviewThreadId} does not belong to ${repo}#${pr}`);
+        }
+        return {
+          reviewThreadId: node.id,
+          resolved: node.isResolved === true,
+          lastCommentId: node.comments?.nodes?.at(-1)?.id ?? null,
+        };
+      }),
+    );
+  };
+  const fetchPrWaitBaseline = async (
+    repoFullName: string,
+    prNumber: number,
+    when: readonly import('@cat-cafe/shared').GitHubWaitPredicate[],
+  ) => {
+    const [{ readGitHubWaitBaseline }, { fetchPaginated }] = await Promise.all([
+      import('./domains/github-signals/GitHubWaitBaselineReader.js'),
+      import('./infrastructure/github/fetch-paginated.js'),
+    ]);
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const execFileAsync = promisify(execFile);
+    return readGitHubWaitBaseline(
+      { repoFullName, prNumber, when },
+      {
+        fetchCi: (repo, pr) => fetchPrCiStatus(repo, pr, app.log, { ghToken: getGitHubToken() }),
+        fetchInlineComments: (repo, pr) =>
+          fetchPaginated(`/repos/${repo}/pulls/${pr}/comments`, { ghToken: getGitHubToken() }),
+        fetchConversationComments: (repo, pr) =>
+          fetchPaginated(`/repos/${repo}/issues/${pr}/comments`, { ghToken: getGitHubToken() }),
+        fetchReviews: (repo, pr) => fetchPaginated(`/repos/${repo}/pulls/${pr}/reviews`, { ghToken: getGitHubToken() }),
+        fetchMergeState: async (repo, pr) => {
+          const { stdout } = await execFileAsync(
+            'gh',
+            ['pr', 'view', String(pr), '-R', repo, '--json', 'mergeable', '--jq', '.mergeable'],
+            getGitHubExecOptions(15_000),
+          );
+          return stdout.trim() || 'UNKNOWN';
+        },
+        fetchReviewThreads: fetchPrReviewThreads,
+      },
+    );
   };
   const fetchPrCurrentHead = async (repoFullName: string, prNumber: number): Promise<string> => {
     const status = await fetchPrCiStatus(repoFullName, prNumber, app.log, { ghToken: getGitHubToken() });
@@ -3477,6 +3546,9 @@ async function main(): Promise<void> {
     });
   }
 
+  const waitLifecycleHolder: {
+    current?: import('./domains/github-signals/GitHubWaitLifecycleService.js').GitHubWaitLifecycleService;
+  } = {};
   const callbackOpts = {
     registry,
     agentKeyRegistry,
@@ -3504,7 +3576,8 @@ async function main(): Promise<void> {
     validateRepo,
     validatePr,
     validateIssue,
-    fetchPrTrackingBoundary,
+    fetchPrWaitBaseline,
+    waitLifecycleHolder,
     verifyPrReviewEventWaitCoverage,
     ...(externalReviewVerdictService ? { externalReviewVerdictService } : {}),
     ...(localReviewVerdictService ? { localReviewVerdictService } : {}),
@@ -3700,13 +3773,11 @@ async function main(): Promise<void> {
   await app.register(proposalRoutes, {
     proposalStore,
     threadStore,
-    taskStore,
     messageStore,
     socketManager,
     router,
     invocationQueue,
     queueProcessor,
-    fetchPrTrackingBoundary,
     onProposalReject: (input) => onProposalReject({ ...input, proposalType: 'thread' }),
   });
   // F231 Phase C: profile-update approve/reject (user-auth; locked critical section in service)
@@ -3948,7 +4019,7 @@ async function main(): Promise<void> {
       isCatAvailable: (catId: string) => isCatAvailable(catId),
     });
   }
-  await app.register(tasksRoutes, { taskStore, socketManager });
+  await app.register(tasksRoutes, { taskStore, socketManager, waitLifecycleHolder });
 
   // F093: World Engine — routes (store + coordinator initialized above, before AgentRouter)
   await app.register(worldRoutes, { worldStore, coordinator: worldCoordinator });
@@ -5098,34 +5169,43 @@ async function main(): Promise<void> {
   // Task registration moved to plugin framework via rehydrateGitHubSchedules closure.
   {
     const deliveryDeps = { messageStore, socketManager };
+    const [{ GitHubWaitLifecycleService }, waitEventLogModule] = await Promise.all([
+      import('./domains/github-signals/GitHubWaitLifecycleService.js'),
+      import('./domains/ball-custody/WaitLifecycleEventLog.js'),
+    ]);
+    const waitEventLog = redisClient
+      ? new waitEventLogModule.RedisWaitLifecycleEventLog(redisClient)
+      : new waitEventLogModule.MemoryWaitLifecycleEventLog();
+    const waitLifecycle = new GitHubWaitLifecycleService({
+      taskStore,
+      deliveryDeps,
+      eventLog: waitEventLog,
+      log: app.log,
+    });
+    waitLifecycleHolder.current = waitLifecycle;
+    const [{ PrWaitMigrationService }, { WaitLifecycleRecoverySweep }] = await Promise.all([
+      import('./domains/ball-custody/PrWaitMigrationService.js'),
+      import('./domains/ball-custody/WaitLifecycleRecoverySweep.js'),
+    ]);
+    await new PrWaitMigrationService({
+      taskStore,
+      readBaseline: fetchPrWaitBaseline,
+      log: app.log,
+    }).migrateAll();
+    await new WaitLifecycleRecoverySweep(taskStore, waitLifecycle).run();
 
     let externalReviewCoordinator:
       | import('./domains/community/external-review/ExternalReviewCoordinator.js').ExternalReviewCoordinator
       | undefined;
     if (communityEventLog && communityProjector && communityObjectStore) {
-      const [{ ExternalReviewCoordinator }, { deliverConnectorMessage }] = await Promise.all([
-        import('./domains/community/external-review/ExternalReviewCoordinator.js'),
-        import('./infrastructure/email/deliver-connector-message.js'),
-      ]);
+      const { ExternalReviewCoordinator } = await import(
+        './domains/community/external-review/ExternalReviewCoordinator.js'
+      );
       externalReviewCoordinator = new ExternalReviewCoordinator({
         repoConfigStore: communityRepoConfigStore,
         eventLog: communityEventLog,
         projector: communityProjector,
         objectStore: communityObjectStore,
-        deliverReady: (input) =>
-          deliverConnectorMessage(deliveryDeps, {
-            threadId: input.threadId,
-            userId: input.userId,
-            catId: input.catId,
-            content: input.content,
-            idempotencyKey: input.idempotencyKey,
-            source: {
-              connector: 'github-review-readiness',
-              label: 'External Review Ready',
-              icon: 'github',
-              url: `https://github.com/${input.repoFullName}/pull/${input.prNumber}`,
-            },
-          }),
         log: app.log,
       });
     }
@@ -5133,6 +5213,7 @@ async function main(): Promise<void> {
     const cicdRouter = new CiCdRouter({
       taskStore,
       deliveryDeps,
+      waitLifecycle,
       log: app.log,
       notifySkip: (threadId, reason) => {
         socketManager?.broadcastAgentMessage(
@@ -5151,19 +5232,14 @@ async function main(): Promise<void> {
       externalReviewCoordinator,
       // F192 Phase G: wire PR merge/close events to task-outcome episodes
       onPrLifecycle: (event) => {
-        try {
-          appendPrLifecycleEvidenceToEpisode(taskOutcomeStore, {
-            type: event.type,
-            ref: event.ref,
-            outcome: event.outcome,
-            threadId: event.threadId,
-            ...(event.attribution.kind === 'managed_attributed'
-              ? { managedWorkBinding: event.attribution.binding }
-              : {}),
-          });
-        } catch {
-          // Best-effort: don't break CI/CD routing
-        }
+        appendPrLifecycleEvidenceToEpisode(taskOutcomeStore, {
+          type: event.type,
+          ref: event.ref,
+          outcome: event.outcome,
+          threadId: event.threadId,
+          ...(event.attribution.kind === 'managed_attributed' ? { managedWorkBinding: event.attribution.binding } : {}),
+        });
+        return { idempotencyKey: event.idempotencyKey };
       },
       // F208 AC-E2: distillation checkpoint — canonical first-detection point for merge
       distillationCheckpoint,
@@ -5172,11 +5248,13 @@ async function main(): Promise<void> {
     const conflictRouter = new ConflictRouter({
       taskStore,
       deliveryDeps,
+      waitLifecycle,
       log: app.log,
     });
 
     const reviewFeedbackRouter = new ReviewFeedbackRouter({
       deliveryDeps,
+      waitLifecycle,
       log: app.log,
     });
 
@@ -5472,6 +5550,7 @@ async function main(): Promise<void> {
         fetchPrMetadata,
         fetchComments,
         fetchReviews,
+        fetchReviewThreads: fetchPrReviewThreads,
         isEchoComment: (c: { author: string }) => feedbackFilter.shouldSkipComment(c),
         isEchoReview: (r: { author: string }) => feedbackFilter.shouldSkipReview(r),
         isNoiseComment: setupNoiseFilter,

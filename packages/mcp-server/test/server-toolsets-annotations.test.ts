@@ -7,6 +7,7 @@ import {
   buildLimbTools,
   buildMemoryTools,
   buildSignalTools,
+  CANONICAL_TOOL_REGISTRY,
   EXPLICIT_TOOL_ANNOTATIONS,
 } from '../src/server-toolsets.js';
 
@@ -24,6 +25,17 @@ import {
  */
 
 describe('F247 R8 P1-1: EXPLICIT_TOOL_ANNOTATIONS regression guard', () => {
+  it('derives every SDK annotation from the canonical governance contract', () => {
+    assert.equal(Object.keys(EXPLICIT_TOOL_ANNOTATIONS).length, CANONICAL_TOOL_REGISTRY.length);
+    for (const definition of CANONICAL_TOOL_REGISTRY) {
+      assert.equal(
+        EXPLICIT_TOOL_ANNOTATIONS[definition.name],
+        definition.annotations,
+        `${definition.name} annotations must be the canonical derived object`,
+      );
+    }
+  });
+
   describe('cloud-pro-phase0 11 whitelist (砚砚 ChatGPT 端实测 surface)', () => {
     const cloudProPhase0Whitelist = [
       // 5 collab

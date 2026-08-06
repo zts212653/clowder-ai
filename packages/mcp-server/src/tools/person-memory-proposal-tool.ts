@@ -10,8 +10,15 @@ import {
   personMemorySourceBundleInputSchema,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 import type { ToolResult } from './file-tools.js';
 import { errorResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('person-memory-proposal-tool.ts', './tools/callback-tools.js', {
+  resourceFamily: 'person-memory',
+  authority: 'callback-owner-private',
+});
 
 type CallbackPost = (
   path: string,
@@ -120,7 +127,7 @@ export function createPersonMemoryProposalTool(callbackPost: CallbackPost) {
 
   return {
     handleProposePersonMemory,
-    tool: {
+    tool: defineTool({
       name: 'cat_cafe_propose_person_memory',
       description:
         'Propose owner-private memory for one named person and up to three exact facts, relationship, or event items (F276). ' +
@@ -137,6 +144,12 @@ export function createPersonMemoryProposalTool(callbackPost: CallbackPost) {
         'If complete facts live in other owner-visible threads, stay in the current conversation and attach those exact messages as typed sources; the approval card remains in the current conversation while each source drills to its original thread. Never replace missing facts with a zero-information card, and never model the correction itself as a new interaction event.',
       inputSchema: proposePersonMemoryInputSchema,
       handler: handleProposePersonMemory,
-    },
+      governance: {
+        implementationExport: 'handleProposePersonMemory',
+        action: 'create',
+        risk: { level: 'write', openWorld: false },
+        runtimeProfiles: ['full'],
+      },
+    }),
   };
 }

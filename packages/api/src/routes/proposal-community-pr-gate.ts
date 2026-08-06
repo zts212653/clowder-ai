@@ -57,7 +57,8 @@ export function extractFormalCommunityPrContext(
   input: CommunityPrProposalInput,
 ): CommunityPrProposalContext | undefined {
   const prNumbers = extractCommunityPrNumbers(input);
-  if (prNumbers.length !== 1) return undefined;
+  const [prNumber] = prNumbers;
+  if (prNumbers.length !== 1 || prNumber === undefined) return undefined;
 
   const text = [input.title, input.reason, input.initialMessage ?? ''].join(' ');
   const hasStrongFormalIntent = STRONG_FORMAL_REVIEW_PATTERNS.some((pattern) => pattern.test(text));
@@ -66,7 +67,7 @@ export function extractFormalCommunityPrContext(
 
   return {
     repoFullName: 'zts212653/clowder-ai',
-    prNumber: prNumbers[0]!,
+    prNumber,
     mode: 'formal_review',
   };
 }
@@ -100,9 +101,9 @@ export function prependCommunityPrMaintainerGate(input: CommunityPrProposalInput
       ? [
           '',
           '### Formal review tracking transition',
-          '- 本 proposal 承载单一正式 external PR review；批准卡必须只选择一个 reviewer owner。批准后 server 把 canonical PR 写入 child metadata，并给该 owner 建立 `intent=review` + `wakePolicy=human_participant_activity` 的 PR tracking。',
-          '- Maintainer findings 交付后，修复球回真实 GitHub author；child tracker 保持 active，等待作者新 HEAD/人工反馈。已有事件回调时不要叠加 timed hold。',
-          '- 没有唯一 owner 时 server fail closed，只写 metadata、不猜 owner；由 child 修正 owner 后再显式注册。',
+          '- 本 proposal 承载单一正式 external PR review；批准卡必须只选择一个 reviewer owner。批准后 server 只把 canonical PR 写入 child metadata，不猜等待条件。',
+          '- Maintainer findings 交付后，修复球回真实 GitHub author；reviewer 若确实停下，必须显式注册 typed continuation（例如 new HEAD），已有事件回调时不要叠加 timed hold。',
+          '- 没有唯一 owner 时 server fail closed，只写 metadata、不猜 owner；由 child 修正 owner 后再决定是否建立等待。',
         ]
       : []),
   ].join('\n');

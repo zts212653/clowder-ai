@@ -1,3 +1,5 @@
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 /**
  * Rich Block Rules Tool
  * MCP 工具: 按需获取富消息块完整使用规范
@@ -8,6 +10,11 @@
 
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('rich-block-rules-tool.ts', undefined, {
+  resourceFamily: 'artifact-surface',
+  authority: 'local-runtime',
+});
 
 const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
 
@@ -33,7 +40,7 @@ export async function handleGetRichBlockRules(): Promise<ToolResult> {
 export const richBlockRulesInputSchema = {};
 
 export const richBlockRulesTools = [
-  {
+  defineTool({
     name: 'cat_cafe_get_rich_block_rules',
     description:
       'Get the full rich block usage rules (card/diff/checklist/media_gallery/audio/interactive). ' +
@@ -42,5 +49,11 @@ export const richBlockRulesTools = [
       'GOTCHA: Without loading these rules first, you will likely produce invalid block JSON (wrong field names, missing required fields).',
     inputSchema: richBlockRulesInputSchema,
     handler: handleGetRichBlockRules,
-  },
+    governance: {
+      implementationExport: 'handleGetRichBlockRules',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+    },
+  }),
 ] as const;

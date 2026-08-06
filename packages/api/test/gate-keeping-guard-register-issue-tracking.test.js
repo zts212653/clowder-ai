@@ -202,7 +202,13 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-issue-tracking',
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { repoFullName: 'owner/repo', prNumber: 100 },
+      payload: {
+        repoFullName: 'owner/repo',
+        prNumber: 100,
+        when: [{ kind: 'pr_head_changed' }],
+        nextStep: 'Re-lock the exact HEAD.',
+        expiresAt: Date.now() + 60_000,
+      },
     });
 
     assert.equal(response.statusCode, 400, 'PR tracking always blocked in gate-keeping');

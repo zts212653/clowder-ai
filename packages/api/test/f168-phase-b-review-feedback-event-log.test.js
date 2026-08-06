@@ -113,6 +113,30 @@ function makePrTask(id = 'pr-task-1') {
   };
 }
 
+function makeActivePrWaitTask(id = 'pr-task-1') {
+  const task = makePrTask(id);
+  return {
+    ...task,
+    automationState: {
+      ...task.automationState,
+      await: {
+        v: 1,
+        generation: 1,
+        subjectRef: task.subjectKey,
+        ownerFence: { kind: 'containing_task', generation: 1 },
+        baseline: { headSha: 'head-0' },
+        continuation: {
+          when: [{ kind: 'pr_review_decision_changed' }],
+          // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
+          then: 'Continue the review.',
+        },
+        expiresAt: Date.now() + 60_000,
+        createdAt: Date.now(),
+      },
+    },
+  };
+}
+
 const log = { info: () => {}, error: () => {}, warn: () => {} };
 
 async function runGate(spec) {
@@ -338,7 +362,7 @@ describe('ReviewFeedbackTaskSpec: event log append — polling fallback (R3-P1)'
 
     const gate = await runGate(spec);
 
-    assert.equal(gate.run, true);
+    assert.equal(gate.run, false, 'historical replay without an explicit wait remains state-only');
     assert.deepEqual(appendCalls, [], 're-registration replay must reuse the permanent legacy event identity');
     assert.deepEqual(projector.applyCalls, [], 're-registration replay must not project legacy activity again');
   });
@@ -422,9 +446,9 @@ describe('ReviewFeedbackTaskSpec: event log append — polling fallback (R3-P1)'
     );
   });
 
-  it('OWNER review is appended to event log AND delivered (#1002)', async () => {
+  it('OWNER review is appended and remains available to an explicit typed wait', async () => {
     assert.ok(createReviewFeedbackTaskSpec);
-    const taskStore = makeTaskStore(makePrTask());
+    const taskStore = makeTaskStore(makeActivePrWaitTask());
     const eventLog = makeEventLog({ appended: true });
     const projector = makeProjector();
 
@@ -452,11 +476,10 @@ describe('ReviewFeedbackTaskSpec: event log append — polling fallback (R3-P1)'
 
     const gate = await runGate(spec);
 
-    // #1002 fix: OWNER review IS now delivered (decideDelivery removed)
-    const deliveredIds = (gate.run ? (gate.workItems ?? []) : []).flatMap((wi) =>
+    const collectedIds = (gate.run ? (gate.workItems ?? []) : []).flatMap((wi) =>
       wi.signal.newDecisions.map((d) => d.id),
     );
-    assert.ok(deliveredIds.includes(501), 'OWNER review must be delivered (#1002 fix)');
+    assert.ok(collectedIds.includes(501), 'OWNER review must reach the typed matcher');
 
     // AND appended to event log (state machine must see it)
     const ownerAppend = eventLog.appendCalls.find((e) => e.payload?.reviewId === 501);
@@ -614,9 +637,7 @@ describe('ReviewFeedbackTaskSpec: safe cursor on projection failure (R4-P1-B)', 
     });
 
     const gate = await runGate(spec);
-    assert.ok(gate.run, 'gate should run — external review is deliverable');
-
-    await gate.workItems[0].signal.commitCursor();
+    assert.equal(gate.run, false, 'without an explicit wait collection advances state but does not route');
     const lastPatch = patchCalls[patchCalls.length - 1];
     assert.strictEqual(
       lastPatch?.patch?.review?.lastDecisionCursor,
@@ -671,12 +692,13 @@ describe('ReviewFeedbackTaskSpec: safe cursor on projection failure (R4-P1-B)', 
     assert.strictEqual(appendCallCount, 1, 'loop must stop after first projection failure (break on first fail)');
   });
 
-  it('duplicate review (appended=false) — projector guard skips apply, cursor advances, review delivered (Cloud R8 P1-2 revises R6-P1)', async () => {
+  it('duplicate review (appended=false) — projector guard skips apply and cursor advances state-only', async () => {
     // Cloud R8 P1-2 revises R6-P1: the old "repair path" concept is gone.
     // When appended=false the event is already in the log with its original temporal position —
     // there is nothing to repair. Calling projector.apply again out of order would corrupt state.
     // New invariant: appended=false → projector.apply NOT called (guard at call site).
-    // The event is still counted as processed → cursor advances past it → review is delivered.
+    // The event is still counted as processed → cursor advances past it. Without
+    // an explicit wait it must not enter the delivery path.
     // (If the projection is truly out of sync, use rebuildAll() for log-order replay.)
     assert.ok(createReviewFeedbackTaskSpec);
 
@@ -732,14 +754,9 @@ describe('ReviewFeedbackTaskSpec: safe cursor on projection failure (R4-P1-B)', 
     // Guard: projector.apply must NOT have been called at all
     assert.strictEqual(applyCalls.length, 0, 'projector.apply must NOT be called when appended=false (Cloud R8 P1-2)');
 
-    // Review 750 must be delivered (duplicate = already projected in prior cycle, safe to notify)
-    const deliveredIds = (gate.workItems ?? []).flatMap((wi) => wi.signal.newDecisions.map((d) => d.id));
-    assert.ok(deliveredIds.includes(750), 'duplicate review must still be delivered (projection already correct)');
+    assert.equal(gate.run, false, 'duplicate history alone does not create a wake');
 
-    // Cursor must advance past review 750 after commitCursor
-    if (gate.workItems?.length > 0) {
-      await gate.workItems[0].signal.commitCursor();
-    }
+    // Cursor must advance past review 750 during state-only collection.
     const cursorPatch = patchCalls.find((p) => p.patch?.review?.lastDecisionCursor !== undefined);
     if (cursorPatch) {
       assert.strictEqual(
@@ -795,7 +812,7 @@ describe('ReviewFeedbackTaskSpec: safe cursor on projection failure (R4-P1-B)', 
 
     const spec = createReviewFeedbackTaskSpec({
       id: 'delivery-truncation-on-break',
-      taskStore: makeTaskStore(makePrTask()),
+      taskStore: makeTaskStore(makeActivePrWaitTask()),
       reviewFeedbackRouter: router,
       fetchComments: async () => [],
       fetchReviews: async () => reviews,

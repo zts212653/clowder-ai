@@ -6,12 +6,12 @@
 import { createHash } from 'node:crypto';
 import type {
   ApprovalOriginRef,
-  AutomationState,
+  AwaitStateV1,
   CatId,
   CatRoutingError,
   CrossThreadCoordination,
-  PrEventWaitState,
-  PrEventWaitUncoveredReason,
+  LegacyIssueAutomationState,
+  PrAutomationState,
   RichBlock,
   SuggestedCrossPostAction,
 } from '@cat-cafe/shared';
@@ -44,6 +44,7 @@ import {
   actionSuccessorFencesMatch,
   reconcileActionSuccessorEnqueue,
 } from '../domains/ball-custody/reconcile-action-successor-enqueue.js';
+import { transitionWaitState } from '../domains/ball-custody/wait-state-machine.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
@@ -107,6 +108,9 @@ import {
   ExternalReviewVerdictError,
   type ExternalReviewVerdictService,
 } from '../domains/community/external-review/ExternalReviewVerdictService.js';
+import type { InitialPrWaitSnapshot } from '../domains/github-signals/GitHubWaitBaselineReader.js';
+import type { GitHubWaitLifecycleService } from '../domains/github-signals/GitHubWaitLifecycleService.js';
+import { githubWaitPredicatesSchema } from '../domains/github-signals/GitHubWaitPredicateCatalog.js';
 import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
 import { buildThreadDeepLink } from '../infrastructure/connectors/connector-command-helpers.js';
 import { extractIssueTrackingClaims, extractPrTrackingClaims } from '../infrastructure/grounding/claim-extractors.js';
@@ -680,8 +684,12 @@ export interface CallbackRoutesOptions {
   validatePr?: (repoFullName: string, prNumber: number) => Promise<boolean>;
   /** F202 Phase 2 follow-up: validates specific issue exists (number-level validation) */
   validateIssue?: (repoFullName: string, issueNumber: number) => Promise<boolean>;
-  /** F202 Phase 2 PR tracking: seeds review/CI boundaries so registration starts from current GitHub state. */
-  fetchPrTrackingBoundary?: (repoFullName: string, prNumber: number) => Promise<Pick<AutomationState, 'review' | 'ci'>>;
+  /** F280: server-owned baseline and collector frontier for a typed PR wait. */
+  fetchPrWaitBaseline?: (
+    repoFullName: string,
+    prNumber: number,
+    when: readonly import('@cat-cafe/shared').GitHubWaitPredicate[],
+  ) => Promise<InitialPrWaitSnapshot>;
   /** F177 Phase J: server-side proof that the cloud review callback owns the current wait. */
   verifyPrReviewEventWaitCoverage?: (input: {
     repoFullName: string;
@@ -691,11 +699,13 @@ export interface CallbackRoutesOptions {
     | { covered: true; triggerCommentId: number; observedAt: number }
     | {
         covered: false;
-        reason: PrEventWaitUncoveredReason;
+        reason: 'subject_mismatch' | 'not_review_trigger' | 'review_not_accepted' | 'feedback_already_posted';
         triggerCommentId: number;
         observedAt: number;
       }
   >;
+  /** Late-bound so callback registration and boot migration share the lifecycle owner. */
+  waitLifecycleHolder?: { current?: Pick<GitHubWaitLifecycleService, 'recordOutcomeEvent'> };
   /** F168 F-Step3: invocation-bound atomic verdict + delivery-custody recorder. */
   externalReviewVerdictService?: Pick<ExternalReviewVerdictService, 'record'>;
   /** F167: invocation-bound local verdict message completion producer. */
@@ -1047,7 +1057,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     validateRepo,
     validatePr,
     validateIssue,
-    fetchPrTrackingBoundary,
+    fetchPrWaitBaseline,
     fetchIssueCommentCursor,
     featIndexProvider,
     queueProcessor,
@@ -4181,32 +4191,18 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     threadStore,
   });
 
-  // TD091: PR tracking registration via MCP callback
-  // Cats call this after `gh pr create` to register the PR for Layer 1 routing.
-  // Server resolves threadId from invocation record — cat doesn't need to know it.
-  const registerPrTrackingSchema = z.object({
-    repoFullName: z
-      .string()
-      .min(1)
-      .regex(/^[^/]+\/[^/]+$/, 'Must be owner/repo format'),
-    prNumber: z.number().int().positive(),
-    // F202 Phase 2C (AC-C1): tracking instructions appended to trigger messages
-    instructions: z.string().max(2000).optional(),
-    catId: z.string().min(1).optional(), // ignored — server uses record.catId
-    // F140: wake intent. 'review' (default) = waiting on review feedback → CI-pass stays silent.
-    // 'merge' = waiting on CI-green to merge → CI-pass wakes. Re-register (upsert) to flip it.
-    intent: z.enum(['review', 'merge']).optional(),
-    // F140: explicit actor policy, independent from intent. Absent preserves #1002.
-    wakePolicy: z.enum(['all_feedback', 'human_participant_activity']).optional(),
-    // F177 Phase J: explicit current-wait subject + signal. The caller supplies only
-    // the durable trigger anchor; the server independently verifies callback coverage.
-    eventWait: z
-      .object({
-        expectedSignal: z.literal('review_posted'),
-        triggerCommentId: z.number().int().positive(),
-      })
-      .optional(),
-  });
+  const registerPrTrackingSchema = z
+    .object({
+      repoFullName: z
+        .string()
+        .min(1)
+        .regex(/^[^/]+\/[^/]+$/, 'Must be owner/repo format'),
+      prNumber: z.number().int().positive(),
+      when: githubWaitPredicatesSchema,
+      nextStep: z.string().trim().min(1).max(500),
+      expiresAt: z.number().int().positive(),
+    })
+    .strict();
 
   app.post('/api/callbacks/register-pr-tracking', async (request, reply) => {
     // #320: Unified model — write to TaskStore instead of PrTrackingStore
@@ -4230,7 +4226,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return deletedThreadGuard.body;
     }
 
-    const { repoFullName, prNumber, instructions, eventWait } = parsed.data;
+    const { repoFullName, prNumber, when, nextStep, expiresAt } = parsed.data;
+    if (expiresAt <= Date.now()) {
+      reply.status(400);
+      return { error: 'expiresAt must be in the future' };
+    }
 
     // Use authoritative catId from invocation record, not caller payload.
     const catId = record.catId;
@@ -4304,97 +4304,47 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
 
     // PR-O4 R5: normalize repo to lowercase (GitHub repos are case-insensitive)
-    const subjectKey = `pr:${repoFullName.toLowerCase()}#${prNumber}`;
+    const subjectKey = `pr:${repoFullName.toLowerCase()}#${prNumber}` as const;
     try {
-      // F140: resolve wake intent. Explicit wins; otherwise preserve an already-set intent (so an
-      // incidental re-register doesn't silently downgrade a deliberate 'merge'); default 'review'.
-      const existing = await taskStore.getBySubject(subjectKey);
-      const intent = parsed.data.intent ?? existing?.automationState?.intent ?? 'review';
-      const wakePolicy = parsed.data.wakePolicy ?? existing?.automationState?.wakePolicy ?? 'all_feedback';
-      let eventWaitState: PrEventWaitState | undefined;
-      let eventWaitVerifier: NonNullable<typeof opts.verifyPrReviewEventWaitCoverage> | undefined;
-      if (eventWait) {
-        if (intent !== 'review') {
-          reply.status(400);
-          return { error: 'eventWait expectedSignal=review_posted requires intent=review' };
-        }
-        if (!record.invocationId) {
-          reply.status(400);
-          return { error: 'eventWait requires invocation-bound callback authentication' };
-        }
-        if (!opts.verifyPrReviewEventWaitCoverage) {
-          reply.status(503);
-          return { error: 'PR review callback coverage verifier not configured' };
-        }
-        eventWaitVerifier = opts.verifyPrReviewEventWaitCoverage;
+      if (!fetchPrWaitBaseline) {
+        reply.status(503);
+        return { error: 'PR wait baseline reader not configured' };
       }
-      const shouldSeedPrBoundary = !existing || existing.status === 'done';
-      const shouldRefreshPrBoundary = shouldSeedPrBoundary || Boolean(eventWait);
-      let seededPrBoundary: Pick<AutomationState, 'review' | 'ci'> | undefined;
-      if (shouldRefreshPrBoundary) {
-        if (!fetchPrTrackingBoundary) {
-          reply.status(503);
-          return { error: 'PR tracking boundary fetcher not configured' };
-        }
-        try {
-          seededPrBoundary = await fetchPrTrackingBoundary(repoFullName, prNumber);
-        } catch {
-          reply.status(503);
-          return { error: 'PR tracking boundary unavailable — try again later' };
-        }
-        if (!seededPrBoundary.review || !seededPrBoundary.ci?.headSha) {
-          reply.status(503);
-          return { error: 'PR tracking boundary unavailable — try again later' };
-        }
-      }
-      if (eventWait && eventWaitVerifier) {
-        const triggerHeadSha = seededPrBoundary?.ci?.headSha ?? existing?.automationState?.ci?.headSha;
-        if (!triggerHeadSha) {
-          reply.status(503);
-          return { error: 'PR tracking HEAD unavailable — try again later' };
-        }
-        let coverage: Awaited<ReturnType<NonNullable<typeof opts.verifyPrReviewEventWaitCoverage>>>;
-        try {
-          coverage = await eventWaitVerifier({
-            repoFullName,
-            prNumber,
-            triggerCommentId: eventWait.triggerCommentId,
-          });
-        } catch {
-          reply.status(503);
-          return { error: 'PR review callback coverage unavailable — try again later' };
-        }
-
-        eventWaitState = {
-          v: 1,
-          invocationId: record.invocationId,
-          threadId: record.threadId,
-          ownerCatId: catId,
-          subjectKey,
-          expectedSignal: eventWait.expectedSignal,
-          triggerHeadSha,
-          coverage: coverage.covered
-            ? {
-                status: 'covered',
-                kind: 'github_review_trigger_eyes',
-                triggerCommentId: coverage.triggerCommentId,
-                observedAt: coverage.observedAt,
-              }
-            : {
-                status: 'uncovered',
-                kind: 'github_review_trigger_eyes',
-                triggerCommentId: coverage.triggerCommentId,
-                observedAt: coverage.observedAt,
-                reason: coverage.reason,
-              },
-        };
+      let snapshot: InitialPrWaitSnapshot;
+      try {
+        snapshot = await fetchPrWaitBaseline(repoFullName, prNumber, when);
+      } catch {
+        reply.status(503);
+        return { error: 'PR wait baseline unavailable — try again later' };
       }
 
-      const automationState = {
-        ...(instructions !== undefined ? { trackingInstructions: instructions } : {}),
-        ...(seededPrBoundary ?? {}),
-        ...(eventWaitState ? { eventWait: eventWaitState } : {}),
-      };
+      const triggerCommentIds = when.flatMap((predicate) =>
+        predicate.kind === 'pr_review_result_available' && predicate.triggerCommentId !== undefined
+          ? [predicate.triggerCommentId]
+          : [],
+      );
+      if (triggerCommentIds.length > 0) {
+        if (!record.invocationId || !opts.verifyPrReviewEventWaitCoverage) {
+          reply.status(503);
+          return { error: 'Exact review-result coverage verifier not configured' };
+        }
+        try {
+          for (const triggerCommentId of triggerCommentIds) {
+            const coverage = await opts.verifyPrReviewEventWaitCoverage({
+              repoFullName,
+              prNumber,
+              triggerCommentId,
+            });
+            if (!coverage.covered) {
+              reply.status(422);
+              return { error: 'Review-result trigger is not covered', reason: coverage.reason };
+            }
+          }
+        } catch {
+          reply.status(503);
+          return { error: 'Review-result coverage unavailable — try again later' };
+        }
+      }
 
       const taskInput = {
         kind: 'pr_tracking',
@@ -4402,31 +4352,66 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         threadId: record.threadId,
         title: `PR tracking: ${repoFullName}#${prNumber}`,
         ownerCatId: catId,
-        why: `Tracking PR ${repoFullName}#${prNumber} (intent=${intent}): review feedback + conflicts always wake; CI-pass wakes only when intent=merge`,
+        why: `Waiting on typed GitHub predicates for ${repoFullName}#${prNumber}.`,
         createdBy: catId,
         userId: record.userId,
-        // F202 Phase 2C (AC-C1): store user-provided tracking instructions
-        automationState: Object.keys(automationState).length > 0 ? automationState : undefined,
       } as const;
       const task = record.managedWorkBinding
         ? await taskStore.upsertBySubjectWithManagedWorkBinding(taskInput, record.managedWorkBinding)
         : await taskStore.upsertBySubject(taskInput);
-
-      // Persist independent signal intent + actor policy structurally. Deep merge preserves cursors.
-      const withIntent = await taskStore.patchAutomationState(task.id, { intent, wakePolicy });
+      const previousState = task.automationState as PrAutomationState | undefined;
+      const previousGeneration = previousState?.await?.generation ?? previousState?.waitOutcome?.generation ?? 0;
+      const generation = previousGeneration + 1;
+      const awaitState: AwaitStateV1 = {
+        v: 1,
+        generation,
+        subjectRef: subjectKey,
+        ownerFence: { kind: 'containing_task', generation },
+        baseline: snapshot.baseline,
+        continuation: {
+          when,
+          // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract names this field `then`.
+          then: nextStep,
+        },
+        expiresAt,
+        createdAt: Date.now(),
+        provenance: 'explicit_registration',
+      };
+      const superseded = previousState?.await
+        ? transitionWaitState(previousState, {
+            type: 'superseded',
+            generation: previousState.await.generation,
+            at: Date.now(),
+          })
+        : undefined;
+      const supersededOutcome =
+        superseded?.applied === true ? (superseded.state as PrAutomationState).waitOutcome : undefined;
+      const replacement: PrAutomationState = {
+        ...(previousState?.review ? { review: previousState.review } : {}),
+        ...(previousState?.ci ? { ci: previousState.ci } : {}),
+        ...(previousState?.conflict ? { conflict: previousState.conflict } : {}),
+        ...snapshot.collectorState,
+        await: awaitState,
+        ...(supersededOutcome ? { waitOutcome: supersededOutcome } : {}),
+      };
+      const installed = await taskStore.replaceAutomationStateIfGeneration(task.id, {
+        expectedGeneration: previousGeneration === 0 ? null : previousGeneration,
+        expectedUpdatedAt: task.updatedAt,
+        automationState: replacement,
+      });
+      if (!installed) {
+        reply.status(409);
+        return { error: 'PR wait changed concurrently — retry registration' };
+      }
+      if (supersededOutcome) {
+        await opts.waitLifecycleHolder?.current?.recordOutcomeEvent(installed, supersededOutcome);
+      }
 
       return {
         status: 'ok',
         threadId: record.threadId,
-        task: withIntent ?? task,
-        ...(eventWaitState
-          ? {
-              eventWait:
-                eventWaitState.coverage.status === 'covered'
-                  ? { covered: true }
-                  : { covered: false, reason: eventWaitState.coverage.reason },
-            }
-          : {}),
+        task: installed,
+        await: awaitState,
       };
     } catch (error) {
       if (isSubjectOwnershipConflictError(error)) {
@@ -4560,8 +4545,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // PR-O4 R5: normalize repo to lowercase (GitHub repos are case-insensitive)
     const subjectKey = `issue:${repoFullName.toLowerCase()}#${issueNumber}`;
     const existingTask = await taskStore.getBySubject(subjectKey);
-    const wakePolicy = parsed.data.wakePolicy ?? existingTask?.automationState?.wakePolicy ?? 'all_feedback';
-    const existingIssueCursor = existingTask?.automationState?.issue?.lastCommentCursor;
+    const existingIssueState = existingTask?.automationState as LegacyIssueAutomationState | undefined;
+    const wakePolicy = parsed.data.wakePolicy ?? existingIssueState?.wakePolicy ?? 'all_feedback';
+    const existingIssueCursor = existingIssueState?.issue?.lastCommentCursor;
     const shouldSeedIssueCursor = existingIssueCursor === undefined || existingTask?.status === 'done';
     let seededIssueCursor: number | undefined;
     if (shouldSeedIssueCursor) {
@@ -4577,7 +4563,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
     }
 
-    const automationState = {
+    const automationState: LegacyIssueAutomationState = {
       wakePolicy,
       ...(instructions !== undefined ? { trackingInstructions: instructions } : {}),
       // Cloud R17 P1: seed both cursors together. Without lastDeliveredCursor, the gate's

@@ -45,8 +45,6 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
       proposal,
       threadId,
       threadStore,
-      taskStore: opts.taskStore,
-      fetchPrTrackingBoundary: opts.fetchPrTrackingBoundary,
     });
 
   app.post('/api/proposals/:proposalId/approve', async (request, reply) => {

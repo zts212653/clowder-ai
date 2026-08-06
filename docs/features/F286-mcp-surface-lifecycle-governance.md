@@ -8,11 +8,12 @@ description: "Govern the Clowder AI MCP surface as typed resource lifecycles wit
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-01T10:03:45Z
+tips_exempt: "Phase B adds an internal MCP admission and atomic-cutover guard with zero user-visible behavior or new invokable surface; future resource-family pilots must contribute tips only when they introduce a teachable user-facing workflow."
 ---
 
 # F286: MCP Surface Lifecycle Governance
 
-> **Status**: spec | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
+> **Status**: in-progress（Phase A–B complete；Phase C pilot not started） | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
 >
 > **Gate**: Architecture Design Gate accepted by operator (`0001785600399637-001062-9b03f289`). Phase B planning and one separately tested/reviewed reversible pilot are authorized; no candidate migration is authorized without its own plan and gates.
 
@@ -34,12 +35,14 @@ At `origin/main` `0883b4001f9ebfc07adfedd680a4d1b3ce357733`:
 - The 124-row census covers Clowder AI-owned MCP server semantics. Clowder AI-managed external GitHub MCP catalog/runtime provisioning is outside that count and has a later explicit operator disposition: sunset it, use `gh` as the canonical local GitHub execution path, and do not preserve or re-seed it as an alias or lazy surface (source message `0001785582326176-000162-c2769c73`).
 - ADR-037 governs cognitive entry points, F043 owns server split, F223 owns capability discoverability/execution/verification, and F242 owns the convention-graph extractor. None defines a top-level tool admission gate or resource-lifecycle migration policy.
 
+Phase B protects `origin/main@265f7b998f7b8cae81d26d88db58351cf02b030d`, after the F168/F256 shared-file releases and F167 stale-review recovery landed. The live semantic registry at that target contains 130 tools: collab 82, memory 21, signals 12, limb 6, audio 8, finance 1; risk is 47 read, 73 write, and 10 destructive. The six additions since the historical 124-row census are `cat_cafe_drill_memory_cue`, `cat_cafe_record_eval_lifecycle`, `cat_cafe_record_memory_cue_outcome`, `cat_cafe_validate_community_route`, `cat_cafe_recover_local_review_verdict`, and `limb_bind_embodiment`; no census identity was removed. The full current descriptions total 73,506 characters / 15,519 `cl100k_base` comparison tokens. The committed generated witness reports zero schema, exact-description, annotation, runtime-profile, handler-binding, identity, resource-action, description-character, and comparison-token delta against that protected target.
+
 ## 需求点 Checklist
 
 | ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | “对全部的 MCP 盘点一下” | AC-A1 | registration parity + 124-row census | [x] |
-| R2 | 新需求默认进入已有资源生命周期，不再一动作一工具 | AC-A2, AC-B1 | ADR clauses + manifest/guard RED→GREEN | [ ] |
+| R2 | 新需求默认进入已有资源生命周期，不再一动作一工具 | AC-A2, AC-B1 | ADR clauses + manifest/guard RED→GREEN | [x] |
 | R3 | 分类真实语义、runtime alias、drill-down chain 与安全边界 | AC-A1, AC-A3 | census + reviewer spot-check | [x] |
 | R4 | 给出 keep / consolidate / lazy-discover / sunset 候选 | AC-A2 | candidate roll-up + usage provenance | [x] |
 | R5 | 一个完整 resource family 原子切换，禁止 legacy/canonical MCP 双暴露 | AC-B3, AC-C1, AC-C3 | cutover manifest + no-overlap/stale-reference guard + exact rollback | [ ] |
@@ -155,9 +158,9 @@ Why: existing cells own capability execution (`hub-action-surface`), plugin reso
 
 ### Phase B（Admission Contract）
 
-- [ ] AC-B1: A canonical derived registry requires `resourceFamily`, `operation`, `authority`, `risk`, `exposureTier`, `standaloneReason`, `cutoverState`, and owner for every semantic tool.
-- [ ] AC-B2: RED→GREEN guard proves an unjustified verb for an existing resource fails and a documented independent boundary passes.
-- [ ] AC-B3: Registration, profile filtering, description budget, per-resource action-count deltas, exact cutover sets, no-overlap, and stale-reference absence are machine-checked from one source.
+- [x] AC-B1: All 130 registered semantics carry a canonical certificate derived through `defineMcpTool()` / the protected migration factory; the registry, annotations, profiles, SDK registration, and implementation bindings are executable projections rather than parallel inventories.
+- [x] AC-B2: RED→GREEN tests reject an unjustified existing-family verb, unrelated admission evidence, mixed authority/risk lifecycle variants, unresolved handler bindings, and a same-schema handler swap; exact subject-bound accepted evidence passes.
+- [x] AC-B3: `pnpm check:mcp-surface-governance` regenerates the committed protected-base witness, verifies exact protocol/handler parity, reports identity/resource-action/profile/description deltas, and requires exact atomic manifests for semantic or profile projection removal with fixed-root stale-reference, no-overlap, rollback, and layer guards.
 
 ### Phase C（Pilot Migration）
 
@@ -209,7 +212,8 @@ Why: existing cells own capability execution (`hub-action-surface`), plugin reso
 
 ## Review Gate
 
-- Phase A: census/reviews complete and operator Architecture Design Gate accepted; the post-review atomic-cutover amendment requires exact-HEAD governance review before merge.
+- Phase A: census/reviews complete and operator Architecture Design Gate accepted.
+- Phase B: complete. The canonical 130-tool registry, protected-base parity witness, admission/cutover guards, non-author review, full merge gate, and PR #3424 merge evidence are landed on `main`.
 - Later phases: risk is MCP contract + auth/destructive boundary; implementation review depth is selected from the actual pilot diff.
 
 ## Tips Contribution（F244）

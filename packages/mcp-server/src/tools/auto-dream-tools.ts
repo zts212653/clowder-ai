@@ -12,9 +12,16 @@ import {
   sleepPostureDraftSchema,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 import { callbackGet, callbackPost } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('auto-dream-tools.ts', undefined, {
+  resourceFamily: 'cat-life',
+  authority: 'callback-owner',
+});
 
 const CAT_LIFE_SETTINGS_DECISION_ENDPOINT = '/api/auto-dream/life-settings/decision';
 
@@ -188,7 +195,7 @@ export async function handlePreviewCatLifeSettings(input: {
 }
 
 export const autoDreamTools = [
-  {
+  defineTool({
     name: 'cat_cafe_settle_present_loop',
     description:
       'Settle the current F255 private-time wake as diary, quiet, or daze, with optional sleep posture, seed decision, and proactive intent. ' +
@@ -198,8 +205,15 @@ export const autoDreamTools = [
       'GOTCHA: invocation callback auth is mandatory and supplies owner, cat, and thread identity; quiet and daze must not include a diary.',
     inputSchema: settlePresentLoopToolInputSchema,
     handler: handleSettlePresentLoop,
-  },
-  {
+    governance: {
+      implementationExport: 'handleSettlePresentLoop',
+      action: 'update',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_read_diary',
     description:
       'Read one immutable F255 diary page owned by the authenticated user, including provenance and historical-time markers. ' +
@@ -209,8 +223,15 @@ export const autoDreamTools = [
       'GOTCHA: diary text is an uncleaned historical scene; check provenance before reusing its claims.',
     inputSchema: readDiaryToolInputSchema,
     handler: handleReadDiary,
-  },
-  {
+    governance: {
+      implementationExport: 'handleReadDiary',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_list_diaries',
     description:
       'List recent F255 diary pages for the authenticated owner, optionally filtered by author cat and archive status. ' +
@@ -220,8 +241,15 @@ export const autoDreamTools = [
       'GOTCHA: archived pages are omitted unless includeArchived=true; catId filters authorship inside the current owner only.',
     inputSchema: listDiariesToolInputSchema,
     handler: handleListDiaries,
-  },
-  {
+    governance: {
+      implementationExport: 'handleListDiaries',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_preview_cat_life_settings',
     description:
       'Preview one cat’s F255 private-time rhythm and attach a user-confirmation card without changing configuration. ' +
@@ -231,5 +259,12 @@ export const autoDreamTools = [
       'GOTCHA: preview and cancel create no active task; only the user-confirmed fixed decision callback writes F255 config—never substitute schedule tools.',
     inputSchema: previewCatLifeSettingsToolInputSchema,
     handler: handlePreviewCatLifeSettings,
-  },
+    governance: {
+      implementationExport: 'handlePreviewCatLifeSettings',
+      action: 'derive',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
 ] as const;

@@ -1,13 +1,9 @@
 /**
- * F168 Phase B — ReviewFeedbackTaskSpec delivery policy tests
+ * F168/F280 — ReviewFeedbackTaskSpec collection policy tests
  *
- * #1002 fix: decideDelivery() removed from ReviewFeedbackTaskSpec. PR review
- * tracking is opt-in (cat explicitly registered), so ALL reviewer feedback
- * should be delivered regardless of authorAssociation. The existing
- * isEchoComment + isNoiseComment + isEchoReview filters are sufficient.
- *
- * Previously (R2-P1-A), OWNER/MEMBER reviews were silent-logged — this was
- * wrong because it caused maintainer reviews to be silently dropped (#1002).
+ * Source collection is actor-neutral. An explicit typed wait is required before
+ * a work item may reach the matcher, and only the predicate decides whether the
+ * owner is awakened.
  */
 
 import assert from 'node:assert/strict';
@@ -88,6 +84,20 @@ function makePrTask(overrides = {}) {
         lastConversationCommentCursor: 0,
         lastDecisionCursor: 0,
       },
+      await: {
+        v: 1,
+        generation: 1,
+        subjectRef: 'pr:owner/repo#10',
+        ownerFence: { kind: 'containing_task', generation: 1 },
+        baseline: { headSha: 'head-0' },
+        continuation: {
+          when: [{ kind: 'pr_review_decision_changed' }],
+          // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
+          then: 'Continue the review.',
+        },
+        expiresAt: Date.now() + 60_000,
+        createdAt: Date.now(),
+      },
     },
     ...overrides,
   };
@@ -103,8 +113,8 @@ async function runGate(spec) {
 // Tests: delivery policy in ReviewFeedbackTaskSpec
 // ---------------------------------------------------------------------------
 
-describe('ReviewFeedbackTaskSpec: delivery policy — #1002 fix', () => {
-  it('OWNER review decision IS delivered (#1002: decideDelivery removed)', async () => {
+describe('ReviewFeedbackTaskSpec: actor-neutral collection for explicit waits', () => {
+  it('collects OWNER and CONTRIBUTOR review decisions without actor inference', async () => {
     assert.ok(createReviewFeedbackTaskSpec, 'module must be importable');
     const taskStore = makeTaskStore();
     taskStore.addTask(makePrTask());
@@ -142,13 +152,13 @@ describe('ReviewFeedbackTaskSpec: delivery policy — #1002 fix', () => {
 
     const gate = await runGate(spec);
 
-    assert.strictEqual(gate.run, true, 'gate should run — both reviews are deliverable');
+    assert.strictEqual(gate.run, true, 'explicit wait should send collected facts to the matcher');
     const decisionIds = gate.workItems.flatMap((wi) => wi.signal.newDecisions.map((d) => d.id));
-    assert.ok(decisionIds.includes(101), 'CONTRIBUTOR review (id=101) must be in work items');
-    assert.ok(decisionIds.includes(102), 'OWNER review (id=102) must be delivered (#1002 fix)');
+    assert.ok(decisionIds.includes(101), 'CONTRIBUTOR review (id=101) must be collected');
+    assert.ok(decisionIds.includes(102), 'OWNER review (id=102) must be collected');
   });
 
-  it('MEMBER inline comment IS delivered (#1002: decideDelivery removed)', async () => {
+  it('collects MEMBER and external inline comments without actor inference', async () => {
     assert.ok(createReviewFeedbackTaskSpec);
     const taskStore = makeTaskStore();
     taskStore.addTask(makePrTask());
@@ -187,11 +197,11 @@ describe('ReviewFeedbackTaskSpec: delivery policy — #1002 fix', () => {
     const gate = await runGate(spec);
 
     const commentIds = gate.workItems.flatMap((wi) => wi.signal.newComments.map((c) => c.id));
-    assert.ok(commentIds.includes(201), 'external comment (id=201) must be delivered');
-    assert.ok(commentIds.includes(202), 'MEMBER comment (id=202) must be delivered (#1002 fix)');
+    assert.ok(commentIds.includes(201), 'external comment (id=201) must be collected');
+    assert.ok(commentIds.includes(202), 'MEMBER comment (id=202) must be collected');
   });
 
-  it('undefined authorAssociation defaults to wake-owner (conservative)', async () => {
+  it('collects facts with no authorAssociation without inventing a wake policy', async () => {
     assert.ok(createReviewFeedbackTaskSpec);
     const taskStore = makeTaskStore();
     taskStore.addTask(makePrTask());
@@ -213,10 +223,10 @@ describe('ReviewFeedbackTaskSpec: delivery policy — #1002 fix', () => {
     const gate = await runGate(spec);
 
     const decisionIds = gate.workItems.flatMap((wi) => wi.signal.newDecisions.map((d) => d.id));
-    assert.ok(decisionIds.includes(301), 'review with no authorAssociation must default to wake-owner');
+    assert.ok(decisionIds.includes(301), 'review with no authorAssociation must reach the typed matcher');
   });
 
-  it('mixed scenario: ALL reviewer activity reaches router (#1002)', async () => {
+  it('collects mixed reviewer activity for the typed matcher', async () => {
     assert.ok(createReviewFeedbackTaskSpec);
     const taskStore = makeTaskStore();
     taskStore.addTask(makePrTask());
@@ -273,9 +283,9 @@ describe('ReviewFeedbackTaskSpec: delivery policy — #1002 fix', () => {
     const commentIds = gate.workItems.flatMap((wi) => wi.signal.newComments.map((c) => c.id));
     const decisionIds = gate.workItems.flatMap((wi) => wi.signal.newDecisions.map((d) => d.id));
 
-    assert.ok(commentIds.includes(401), 'external comment must be delivered');
-    assert.ok(commentIds.includes(402), 'OWNER comment must be delivered (#1002 fix)');
-    assert.ok(decisionIds.includes(501), 'COLLABORATOR review must be delivered');
-    assert.ok(decisionIds.includes(502), 'MEMBER review must be delivered (#1002 fix)');
+    assert.ok(commentIds.includes(401), 'external comment must be collected');
+    assert.ok(commentIds.includes(402), 'OWNER comment must be collected');
+    assert.ok(decisionIds.includes(501), 'COLLABORATOR review must be collected');
+    assert.ok(decisionIds.includes(502), 'MEMBER review must be collected');
   });
 });

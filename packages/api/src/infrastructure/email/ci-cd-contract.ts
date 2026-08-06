@@ -1,6 +1,6 @@
-import type { TrackingWakePolicy } from '@cat-cafe/shared';
+import type { AwaitStateV1, WaitOutcomeV1 } from '@cat-cafe/shared';
 
-export type CiBucket = 'pass' | 'fail' | 'pending';
+export type CiBucket = 'pass' | 'fail' | 'pending' | 'external_infrastructure';
 export type CiExecutionFailure = 'billing_spending_limit_zero_step';
 
 export interface CiCheckDetail {
@@ -32,7 +32,6 @@ export type CiRouteResult =
       messageId: string;
       bucket: CiBucket;
       content: string;
-      wakeKind?: 'external_review_ready';
       headSha?: string;
     }
   | {
@@ -55,9 +54,8 @@ export interface TrackedTaskLike {
   readonly title?: string;
   readonly automationState?: {
     readonly ci?: { readonly prState?: 'merged' | 'closed'; readonly headSha?: string };
-    readonly intent?: 'review' | 'merge';
-    readonly trackingInstructions?: string;
-    readonly wakePolicy?: TrackingWakePolicy;
+    readonly await?: AwaitStateV1;
+    readonly waitOutcome?: WaitOutcomeV1;
   };
 }
 

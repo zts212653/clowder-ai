@@ -1,130 +1,102 @@
-# PR Signals 通知格式 + 处理策略
+# PR Signals：事实采集与显式等待
 
-> F140: GitHub PR Signals — 冲突检测 + Review Feedback 全来源感知
+> F280 Unified Wait Contract。F140 继续拥有 GitHub 事实采集；是否唤醒由显式 typed wait 决定。
 
-## 三类通知
+## 一条模型
 
-注册 PR tracking 后，你会收到三类自动通知：
+PR tracker 不是“订阅所有 GitHub 事件”，而是一次性等待点：
 
-| 类型 | ConnectorSource | 优先级 | 触发条件 |
-|------|----------------|--------|----------|
-| CI/CD 状态 | `github-ci` | fail=urgent（总唤醒）；pass=normal**仅 intent=merge 唤醒**，intent=review 只记 state | CI checks 完成（F133）。intent 见 cicd-tracking.md / register_pr_tracking |
-| PR 冲突 | `github-conflict` | urgent | `mergeStateStatus` 变为 CONFLICTING（F140） |
-| Review Feedback | `github-review-feedback` | changes_requested=urgent, 其余=normal | 新 comments / review decisions（F140）；是否 delivery 受 wakePolicy 控制 |
-
-## 通知消息格式
-
-### 冲突通知
-
-```
-⚠️ **PR 冲突**
-
-PR #42 (owner/repo)
-Commit: `abc1234`
-
-当前分支与 base 存在冲突，需要 rebase 或手动解决。
+```text
+live baseline + typed predicate + nextStep + expiresAt
+  → 不匹配：只推进事实台账
+  → 匹配：消费本 generation，投递一条 compact diff
+  → merged/closed：终止并投递 subject terminal
+  → expiry/owner change/user cancel：静默终止
 ```
 
-### Review Feedback 通知（三分区聚合，OQ-2）
+注册前历史永远由 live baseline 吸收。comment/review cursor 只负责采集幂等，不决定猫会看到什么。
 
+## Predicate catalog
+
+`when` 是 1–4 个 flat any-of 条件：
+
+| Predicate | 适用等待 |
+|---|---|
+| `pr_head_changed` | 等 external author push 新 HEAD |
+| `pr_review_result_available` + `triggerCommentId` | 等 exact `@codex review` 的结果 |
+| `pr_review_decision_changed` | 等 GitHub review decision 变化 |
+| `pr_review_thread_changed` + `reviewThreadIds` | 等指定 review thread 变化 |
+| `pr_ci_terminal` | 等 CI 从非终态进入 pass/fail |
+| `pr_became_conflicting` | 等 PR 首次变为 conflicting |
+
+Actor 类型、仓库归属、`authorAssociation` 都不是 predicate。Bot CI 可以满足显式 CI wait；普通人类评论也不会凭“是人”自动叫醒。
+
+## 注册示例
+
+```text
+# 等外部作者 push
+cat_cafe_register_pr_tracking(
+  repoFullName="owner/repo",
+  prNumber=42,
+  when=[{ kind: "pr_head_changed" }],
+  nextStep="Re-lock the exact HEAD and review the delta.",
+  expiresAt=<future unix ms>
+)
+
+# 等 CI 到终态
+cat_cafe_register_pr_tracking(
+  repoFullName="owner/repo",
+  prNumber=42,
+  when=[{ kind: "pr_ci_terminal" }, { kind: "pr_became_conflicting" }],
+  nextStep="Re-check mergeability and continue merge-gate.",
+  expiresAt=<future unix ms>
+)
+
+# Codex connector 已对 exact trigger 留下 EYES 后，等该结果
+cat_cafe_register_pr_tracking(
+  repoFullName="owner/repo",
+  prNumber=42,
+  when=[{ kind: "pr_review_result_available", triggerCommentId: 123456789 }],
+  nextStep="Consume the exact-HEAD cloud review verdict.",
+  expiresAt=<future unix ms>
+)
 ```
-📋 **Review Feedback** — PR #42 (owner/repo)
 
---- Review Decisions ---
-✅ **alice**: APPROVED — Ship it
-🔄 **bob**: CHANGES_REQUESTED — Needs work
+`nextStep` 只显示，不解析；它不会变成隐藏的 mode。baseline 由服务端实时读取，调用方不能提交 HEAD、cursor 或 CI bucket。
 
---- Inline Comments (1) ---
-💬 **bob** `src/a.ts:5`: typo here
+## 唤醒内容
 
---- PR Conversation (1) ---
-💬 **charlie**: great PR
+Owner 只收到满足 predicate 的 compact delta、满足原因和 `nextStep`，例如：
+
+```text
+GitHub wait satisfied — owner/repo#42
+- HEAD a1b2c3d → e4f5a6b
+Reason: pr_head_changed
+Next: Re-lock the exact HEAD and review the delta.
 ```
+
+comment/review body、CI 原始 description、legacy caller instructions 和未匹配 delta 不进入消息；原始事实留在 GitHub/台账供 drill-down。
 
 ## 处理策略
 
-### 收到冲突通知
+- `pr_head_changed`：重新锁定 exact HEAD，失效旧 verdict，再按当前 review SOP 走。
+- `pr_review_result_available` / review predicate：加载 `receive-review`，逐项验证并处理。
+- `pr_ci_terminal`：查真实 checks；pass 继续 merge-gate，fail 读日志并修复。
+- `pr_became_conflicting`：在对应 worktree rebase；复杂冲突再升级。
+- `subject_terminal`：以 GitHub merged/closed truth 收口，不再续 tracker。
 
-1. 在 worktree 中 `git fetch origin main && git rebase origin/main`
-2. 自动解决简单冲突 → push → 等下一轮 CI 通知
-3. 复杂冲突（无法自动 resolve）→ 通知operator
+同一 wait generation 最多产生一次 owner wake。需要等待另一个条件时显式 re-register；新 generation 原子替换旧 generation，不叠加第二个 tracker 或 timed hold。
 
-### 收到 Review Feedback
+### Review 来源回路
 
-1. 区分 review decision：
-   - `CHANGES_REQUESTED` → 加载 `receive-review` skill，按 Red→Green 修复
-   - `APPROVED` → 准备进入 merge-gate
-   - `COMMENTED` → 阅读 comments，判断是否需要改动
-   - `DISMISSED` → 记录，继续
-2. Inline comments → 逐个定位代码位置，理解反馈后处理
-3. Conversation comments → 理解讨论上下文后回应
+**Source-aware rule**：cloud / GitHub review 的反馈修完后，push 新 SHA 并重新触发 cloud review，
+等待同一 PR truth source；不要把它投射给本地旧 reviewer。本地猫 review 的修复则回到原 reviewer，
+明确记录“已 @ local reviewer 确认”。
 
-## Phase B: 自动响应行为（KD-13: 全自动 + 事后通知）
+## CI 外部基础设施
 
-猫被 ConnectorInvokeTrigger 唤醒后，根据通知类型自动采取行动。
+GitHub Actions job 同时满足 `runner_id=0`、`steps=[]`，且 annotation 指向 billing/payment/spending 时，归类为 `external_infrastructure`：记状态，不满足 `pr_ci_terminal`，也不把“账单红灯”当代码失败。
 
-### 冲突自动 resolve（AC-B1 + AC-B2）
+## Issue compatibility
 
-收到 `github-conflict` 通知时：
-
-1. **定位 worktree**：根据 PR 号查分支 → 找到对应 worktree
-   ```bash
-   gh pr view {N} --json headRefName --jq '.headRefName'
-   ```
-2. **执行 rebase**：
-   ```bash
-   cd <worktree-path>
-   git fetch origin main
-   git rebase origin/main
-   ```
-3. **评估结果**：
-   - **rebase clean**（无冲突）→ `git push --force-with-lease` → 通知operator"已自动 resolve"
-   - **冲突 ≤3 个文件 + 非 binary** → 尝试手动解决 → 成功则 push + 通知
-   - **复杂冲突**（>3 文件 / binary / 语义冲突）→ `git rebase --abort` → 通知operator附冲突文件列表
-
-### Review Feedback 自动处理（AC-B3）
-
-收到 `github-review-feedback` 通知时，根据 review decision 分流：
-
-| Decision | 行动 |
-|----------|------|
-| `CHANGES_REQUESTED` | 加载 `receive-review` 模式，逐项处理（Red→Green） |
-| `APPROVED` | 检查 CI + 冲突状态 → 全绿则准备 merge-gate |
-| `COMMENTED` | 阅读评论，需回复则回复，需修改则按 receive-review 处理 |
-| `DISMISSED` | 记录，不自动行动 |
-
-### 事后通知
-
-所有自动行动完成后，通知operator结果：
-- 成功: "已自动 rebase 并 push PR #42"
-- 失败: "PR #42 冲突无法自动解决，需要人工介入" + 冲突文件列表
-- cloud/GitHub review 处理完: "已按 receive-review 模式处理 PR #42 的 cloud review 意见，已重新触发 cloud review，等待 PR tracking"
-- 本地猫 review 处理完: "已按 receive-review 模式处理 PR #42 的本地 review 意见，已 @ local reviewer 确认"
-
-**Source-aware rule**：`github-review-feedback` 来自 cloud / GitHub truth source。处理 cloud P1/P2 后只 re-trigger cloud review，不把旧本地 reviewer 当 Stage ④ 常驻 gate；本地 reviewer 只在非 cloud 行为 delta、scope 扩大、cloud 不可用降级、或其自身 blocking finding 未清时介入。
-
-## 去重机制
-
-| 信号 | 去重方式 |
-|------|----------|
-| 冲突 | `lastConflictFingerprint = headSha:CONFLICTING`，MERGEABLE 时清除（KD-9） |
-| Review Feedback | cursor-based：comment ID / review ID 单调递增，cursor 仅在 delivery 成功后推进（KD-10） |
-| CI/CD | `lastCiFingerprint = headSha:bucket`（F133） |
-
-## Actor-aware wake policy
-
-`wakePolicy` 与 `intent` 是正交契约：`intent` 决定等 review 还是等 CI-green；`wakePolicy` 决定哪些 actor 的已采集 feedback 可以产生 connector delivery / freshness unread / invocation。
-
-| wakePolicy | GitHub `User` | GitHub `Bot` | actor type 缺失/未知 |
-|------------|---------------|--------------|----------------------|
-| `all_feedback`（默认） | 唤醒 | 唤醒 | 唤醒 |
-| `human_participant_activity` | 唤醒（含 PR/issue author 与第三方人类） | state-only | fail-safe 唤醒 |
-
-state-only 不是丢弃：event log、projector、cursor 与 provenance 继续推进；只是不投递 connector，也不制造 freshness unread / 新 invocation。精确 self echo 继续按既有规则抑制。`authorAssociation=OWNER` 表示 repo 权限关系，不等于 PR/issue author，也不等于“人类”。
-
-## 配置
-
-PR Signals 自动随 `register_pr_tracking` 生效。默认 `wakePolicy=all_feedback` 向后兼容；开源 reviewer 只想被人类参与者叫醒时，显式注册 `wakePolicy=human_participant_activity`。issue tracking 使用同一契约。轮询间隔：
-- 冲突检测：5 分钟
-- Review Feedback：1 分钟
-- CI/CD：由 F133 CiCdCheckTaskSpec 控制
+`register_issue_tracking` 在 F280 Phase C 前仍保留自己的 comment actor policy。不要把 issue 的 `wakePolicy` 借回 PR，也不要从 PR predicate 反推 issue 行为。

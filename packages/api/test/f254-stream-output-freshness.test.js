@@ -208,6 +208,45 @@ describe('F254 Phase D — checkStreamOutputFreshness', () => {
     assert.equal(result.highWatermark, msgId2);
   });
 
+  it('paginates from a v2 seen cursor without comparing it to a raw message id', async () => {
+    const v2SeenCursor = `v2:0000000000000001:${msgId1}`;
+    const v2NextCursor = `v2:0000000000000002:${msgId2}`;
+    const requestedCursors = [];
+    const messageStore = {
+      getById: () => null,
+      getByThreadAfter(_threadId, afterId) {
+        requestedCursors.push(afterId);
+        if (afterId === v2SeenCursor) {
+          return [
+            {
+              id: msgId2,
+              threadId,
+              userId,
+              catId: null,
+              content: 'new user message after canonical cursor',
+              visibilitySeq: 2,
+            },
+          ];
+        }
+        if (afterId === v2NextCursor) return [];
+        throw new Error(`unexpected pagination cursor: ${afterId}`);
+      },
+    };
+
+    const result = await checkStreamOutputFreshness({
+      userId,
+      catId,
+      threadId,
+      cursorStore: { getSeenCursor: async () => v2SeenCursor },
+      messageStore,
+    });
+
+    assert.equal(result.reason, 'unseen_messages');
+    assert.equal(result.scanComplete, true);
+    assert.deepEqual(result.unseenMessageIds, [msgId2]);
+    assert.deepEqual(requestedCursors, [v2SeenCursor]);
+  });
+
   it('returns stale when unseen messages from another cat exist', async () => {
     await cursorStore.ackSeenCursor(userId, catId, threadId, msgId1);
     const messageStore = createMockMessageStore([

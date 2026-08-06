@@ -384,8 +384,8 @@ commit body 补一行 `Why:` 说明决策理由。
 1. **@句柄**（首选）— 另一只猫能做下一步
 2. **等外部条件**（按 2a/2b 判断行动）。**外部条件 = 不在 cat-cafe roster 的实体**：云端 codex (`chatgpt-codex-connector[bot]`) / GitHub bot / PR check / CI / 长 build / 外部 webhook / API 响应。CLI 要退出但还需继续也走这条。**严禁**把外部 identity 投射成本地近似 proxy（例："球权在云端 codex"→ 不可 @ 本地同族猫的任何 variant）
    - **2a 轮询模式**：无结构化回调覆盖（如等 codex 接单 / EYES 出现）→ **调用 `cat_cafe_hold_ball(...)`** + 定时唤醒检查。必须调 MCP，口头说"我继续"不算
-   - **2b 事件驱动模式**：已有结构化回调且触发条件已满足（如 PR tracking 已注册 + Codex connector 的 EYES > 0）→ 纯依赖回调，**不调用 / 不续约 hold_ball**（F167 KD-27）。F177 routing guard 只认 server-verified、同 invocation/owner/thread/subject 的 event-wait grant；“thread 里存在任意 tracker”不算出口
-   - **切换点**：轮询唤醒时发现 Codex connector 的 EYES > 0 → 停止续约，释放 hold，并用同 PR 的 numeric trigger comment id re-register `cat_cafe_register_pr_tracking(..., eventWait={ expectedSignal: 'review_posted', triggerCommentId })`。返回 `covered=true` 才能 clean stop；其他用户/bot 的 EYES、验证失败都继续 fail closed，不能用自然语言声明代替
+   - **2b 事件驱动模式**：已有结构化回调且已成功注册 server-bound typed wait → 纯依赖回调，**不调用 / 不续约 hold_ball**（F167 KD-27）。routing guard 只认同 invocation/owner/thread/subject 的有效 wait generation；“thread 里存在任意 tracker”不算出口
+   - **切换点**：轮询唤醒时发现 Codex connector 的 EYES > 0 → 停止续约，释放 hold，并用同 PR 的 numeric trigger comment id 注册 `cat_cafe_register_pr_tracking(..., when=[{kind:'pr_review_result_available', triggerCommentId}], nextStep=..., expiresAt=...)`。注册成功才能 clean stop；其他用户/bot 的 EYES、验证失败都继续 fail closed，不能用自然语言声明代替
 3. **@operator** — **只在硬条件下**（详见 §10.4）：不可逆操作 / 愿景级决策 / 跨猫僵局。不是默认收尾出口
 
 **工作链上没有第四种。** "到我这里结束了" ≠ "链条结束了" —— 先问"哪只猫能接"，再决定用哪种出口。`@operator` 是硬条件出口，不是安全港。（链已闭合的对话终态轮见上方豁免——自然收尾优于假球。）

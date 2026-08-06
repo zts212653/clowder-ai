@@ -139,12 +139,6 @@ bug 链：opus parent 结束本轮 → tracker 没了/无 fresh draft → 过 gr
 - KD-5（2026-06-17 Ragdoll opus-48，接 Maine Coon routing #972）：Phase 2 答案按 **F220↔F224 轴接缝**切两层——**2a 局部修**（active-pane canonical-liveness SoT / reconcileZombies→queue 收敛 / slot↔queue 一致 / 回归）= F220 已祝福方向内、可逆 → **自决实现，不上 operator**；**2b 架构 seam**（serial-continuation-child ↔ parent/queue liveness 桥接，牵动"统一 liveness SoT"+ 轴边界重画）= 架构级 → 出 Decision Packet 交 **operator 拍板拆 feat**。遵 KD-3：2b 不在根因报告+repro 前动手大改。**#972 是"两轴不共享根因"假设的反例**（轴在此 failure mode 交互）——若 2b operator 决定重画边界，序言断言需同步修订。
 - KD-7（2026-08-04 小太阳·Maine Coon，operator 接管后 closure audit）：KD-5 的 Decision Packet 前提已被 2026-07-18 PR #3047 的后续事实消解。child lifecycle 继续由既有 `TurnExecutionStore` 持有，F194 canonical read 只消费它；没有新增 store、extension point 或 ownership cell。结论是 **不拆新 feat、不改 `/active-pane`、不再向 operator提交过期的架构 A/B 题**，直接按已合入证据同步 truth。
 
-## Timeline
-
-| Date | Event |
-|------|-------|
-| 2026-07-22 | Phase 2a merged (PR #1150, main `7563c9be0`) |
-
 ## 设计稿（Phase 3 — force-reset 逃生口 UI，operator 2026-06-02 已审概念）
 
 **它 reset 什么**：reset 这个 thread 的**执行状态**——取消你在这个 thread 里所有在跑的猫调用 + 清掉卡住的"正在回复中"/"队列繁忙"状态 → thread 重新能用。**不删消息/历史/thread，不碰别人的调用，不碰记忆数据**。只擦"谁在跑"的临时态。

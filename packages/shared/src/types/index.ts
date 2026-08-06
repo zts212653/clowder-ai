@@ -570,6 +570,19 @@ export {
   isValidActionStatus,
   isValidScope,
 } from './game.js';
+export {
+  type AwaitStateV1,
+  GITHUB_WAIT_PREDICATE_KINDS,
+  type GitHubCiBaselineBucket,
+  type GitHubReviewThreadBaseline,
+  type GitHubWaitBaseline,
+  type GitHubWaitMatchedDelta,
+  type GitHubWaitPredicate,
+  type GitHubWaitPredicateKind,
+  type WaitOutcomeDelivery,
+  type WaitOutcomeV1,
+  type WaitOwnerFence,
+} from './github-wait.js';
 // F281 Phase A: server-bound human disposition feedback and exact-subject eligibility contract
 export {
   buildHumanDispositionEnvelope,
@@ -1192,10 +1205,9 @@ export type {
   DispatchGateState,
   IssueAutomationState,
   IssuePendingWake,
-  PrEventWaitCoverage,
-  PrEventWaitSignal,
-  PrEventWaitState,
-  PrEventWaitUncoveredReason,
+  IssueTrackingWakePolicy,
+  LegacyIssueAutomationState,
+  PrAutomationState,
   ReviewAutomationState,
   SuggestedCrossPostAction,
   SuggestedCrossPostActionSource,
@@ -1203,7 +1215,6 @@ export type {
   TaskKind,
   TaskProbeSpec,
   TaskStatus,
-  TrackingWakePolicy,
   UpdateTaskInput,
 } from './task.js';
 export { extractFeatureIds, isTrackingKind } from './task.js';

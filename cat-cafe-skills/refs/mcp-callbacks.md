@@ -38,13 +38,15 @@ HTTP callback route 是 MCP tool 的底层实现和维护者调试面，不是 s
 
 ## Tracking registration policy
 
-PR tracking 的 `intent=review|merge` 表达当前等待目标；PR/issue tracking 的 `wakePolicy=all_feedback|human_participant_activity` 表达 actor delivery 策略。两者不可互相推断：
+PR tracking 是显式、一次性的 typed wait，不是事件订阅器。调用方必须给出：
 
-- `all_feedback` 是向后兼容默认，非 echo/noise feedback 正常投递。
-- `human_participant_activity` 用 GitHub `user.type`：`User` 唤醒，`Bot` 只写 event/cursor/provenance；缺失/未知类型 fail-safe 投递。
-- re-register 不带 `wakePolicy` 时保留已有值。state-only 不会产生 connector delivery、freshness unread 或 invocation。
+- `when`：1–4 个 flat any-of predicate；只允许 F280 catalog 中的 typed 条件。
+- `nextStep`：条件满足后要做什么；只显示、不解析为 policy。
+- `expiresAt`：责任失效时间。baseline 与 owner fence 均由 server 从实时真相生成，调用方不能提交。
 
-正常调用只传 MCP 参数；不要为了设置 policy 手写 callback HTTP。
+不匹配的 GitHub 事实只推进 collector 台账；匹配时每个 generation 最多投递一次 compact delta。merged/closed 会投递 terminal outcome；expiry、owner change、user cancel 静默终止。re-register 原子替换上一 generation。
+
+Issue tracking 在 F280 Phase C 前仍保留自己的 comment actor policy；不要把 issue 的 `wakePolicy` 借回 PR。正常调用只传 MCP 参数，不要为了设置 policy 手写 callback HTTP。
 
 ## Credentials
 

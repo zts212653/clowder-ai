@@ -180,24 +180,31 @@ handoff 中写明原因。
 - 非 bugfix：`multi_mention` 第二只猫独立评估
 - 两猫卡片都到了 → 汇总 → 标记是否需要operator拍板
 
-#### PR WELCOME 后：注册 F140 追踪（F141→F140 桥接）
+#### PR WELCOME 后：按真实阻塞点注册显式等待（F141→F280）
 
-WELCOME 的 PR **必须有 owner 注册 PR tracking**，否则 F140 的追踪信号不会激活：
+WELCOME 只建立 owner/case 真相，不自动订阅 PR activity。只有当前工作确实被一个外部条件阻塞时，owner 才注册 typed wait。例如，等 external author push：
 
 ```
-cat_cafe_register_pr_tracking(repoFullName, prNumber)
+cat_cafe_register_pr_tracking(
+  repoFullName,
+  prNumber,
+  when=[{ kind: "pr_head_changed" }],
+  nextStep="Re-lock exact HEAD and review the delta.",
+  expiresAt=<future unix ms>
+)
 ```
 
 | 参数 | 来源 |
 |------|------|
 | `repoFullName` | Repo Inbox 通知 `source.meta.repoFullName` |
 | `prNumber` | 通知 `source.meta.number` |
+| `when` | 当前真正改变下一步的 typed condition |
+| `nextStep` | 条件满足后 owner 要做的动作 |
+| `expiresAt` | 当前责任失效时间 |
 
-> **catId / threadId 由服务端自动解析**：API 从调用猫的 invocation record 取 `catId` 和 `threadId`，不接受 payload 覆盖。即：谁调用 `register_pr_tracking`，PR 就归谁追踪。
+> **owner / baseline 由服务端解析**：API 从当前 task/custody 和 GitHub live truth 生成，不接受 payload 覆盖。注册历史不会被回灌为 wake。
 
-> **wake intent（F140）**：WELCOME 阶段 owner 是在**审 / triage** 这个 incoming PR，用默认 `intent='review'`（CI-pass 静默，不被打扰）。等你决定"**CI 绿就用 owner 权限 merge 这个 PR**"时，再 `register_pr_tracking(..., intent='merge')` 翻一下，CI 全绿才会唤醒你去 merge（时机契约见 merge-gate skill）。
-
-注册后 F139 调度框架自动激活 `conflict-check` + `review-feedback` poller，PR 进入 F140 追踪层。
+等 CI 时改为 `when=[{kind:"pr_ci_terminal"},{kind:"pr_became_conflicting"}]`；等 cloud review 时必须锚定 exact trigger comment。等待目标变化就 re-register，新 generation 原子替换旧 generation。
 
 如果守门 thread 把 PR 或 issue 交给下游 thread，Direction Card / handoff 必须写清：
 

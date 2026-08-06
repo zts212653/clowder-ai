@@ -98,6 +98,10 @@ describe('publish-verdict refresh lifecycle', () => {
   it('maps exact-head and derived-census conflicts to actionable 409 responses', async () => {
     for (const [message, error] of [
       ['verdict_pr_head_mismatch: expected a, found b', 'verdict_pr_head_mismatch'],
+      [
+        'verdict_pr_local_branch_conflict: local branch verdict/auto/eval-a2a/x points to c, expected d',
+        'verdict_pr_local_branch_conflict',
+      ],
       ['verdict_pr_scope_invalid: docs/ROADMAP.md', 'verdict_pr_scope_invalid'],
       ['verdict_pr_refresh_conflict: packages/api/src/index.ts', 'verdict_pr_refresh_conflict'],
     ]) {

@@ -1,6 +1,13 @@
 import { z } from 'zod';
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 import { callbackPost } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('eval-lifecycle-tools.ts', undefined, {
+  resourceFamily: 'eval-feedback',
+  authority: 'eval-lifecycle-callback',
+});
 
 const nonEmpty = z.string().trim().min(1);
 const commitSha = z.string().regex(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/);
@@ -54,7 +61,7 @@ export async function handleRecordEvalLifecycle(input: RecordEvalLifecycleInput)
 }
 
 export const evalLifecycleTools = [
-  {
+  defineTool({
     name: 'cat_cafe_record_eval_lifecycle',
     description:
       'Write one authenticated fact to an actionable eval finding stable-case lifecycle. ' +
@@ -64,5 +71,11 @@ export const evalLifecycleTools = [
       'GOTCHA: main and live are separate server-verified facts; use the same commit and current case sequence.',
     inputSchema: recordEvalLifecycleInputSchema,
     handler: handleRecordEvalLifecycle,
-  },
+    governance: {
+      implementationExport: 'handleRecordEvalLifecycle',
+      action: 'update',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+    },
+  }),
 ] as const;

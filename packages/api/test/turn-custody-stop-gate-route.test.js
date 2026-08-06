@@ -2,7 +2,7 @@
  * F167 Phase T cutover — routeSerial consumes turn-scoped custody truth.
  *
  * These fixtures intentionally do not grade reply text. The authoritative
- * inputs are wake provenance, projection transitions, verified eventWait state,
+ * inputs are wake provenance, projection transitions, a verified typed PR wait,
  * and durable child-execution records.
  */
 
@@ -93,20 +93,24 @@ function createEventWaitTaskStore(threadId) {
           createdAt: 1,
           updatedAt: 2,
           automationState: {
-            intent: 'review',
-            eventWait: {
+            await: {
               v: 1,
-              invocationId: 'outer-inv-1',
-              threadId,
-              ownerCatId: 'codex',
-              subjectKey: 'pr:zts212653/cat-cafe#3282',
-              expectedSignal: 'review_posted',
-              coverage: {
-                status: 'covered',
-                kind: 'github_review_trigger_eyes',
-                triggerCommentId: 4_936_000_000,
-                observedAt: 1_783_700_000_000,
+              generation: 1,
+              subjectRef: 'pr:zts212653/cat-cafe#3282',
+              ownerFence: { kind: 'containing_task', generation: 1 },
+              baseline: {
+                capturedAt: 1_783_700_000_000,
+                headSha: 'head-1',
+                review: { resultTriggerCommentId: 4_936_000_000 },
               },
+              continuation: {
+                when: [{ kind: 'pr_review_result_available', triggerCommentId: 4_936_000_000 }],
+                // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
+                then: 'Consume the exact-HEAD review result.',
+              },
+              expiresAt: 1_883_700_000_000,
+              createdAt: 1_783_700_000_000,
+              provenance: 'explicit_registration',
             },
           },
         },
@@ -308,7 +312,7 @@ describe('F167 Phase T route custody stop gate', () => {
     );
   });
 
-  test('verified eventWait is a structured transition and suppresses the remedial child', async () => {
+  test('verified typed PR wait is a structured transition and suppresses the remedial child', async () => {
     const threadId = 'thread-event-wait';
     const projection = createProjectionService({
       state: 'covered_active',

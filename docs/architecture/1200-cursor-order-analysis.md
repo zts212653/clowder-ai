@@ -1,6 +1,22 @@
+---
+title: "Issue #1200 — Cursor Order Architecture Analysis"
+doc_kind: architecture
+feature_ids: [F254]
+related_features: [F052, F102, F117, F118, F123, F167, F194, F220, F224, F232, F236]
+topics: [cursor, visibility, ordering, pagination, migration]
+created: 2026-07-27
+updated: 2026-08-05
+status: approved
+author: "mindfn"
+description: "Issue #1200/#1269 的消息出生顺序与首次可见顺序分析，以及 visibility cursor v2 的终态契约、迁移和激活边界。"
+description_source: human
+description_author: mindfn
+description_updated_at: 2026-08-05T09:15:20Z
+---
+
 # Issue #1200 — Cursor Order Architecture Analysis
 
-**Author**: 布偶猫/宪宪 (@opus)
+**Author**: Ragdoll/Ragdoll (@opus)
 **Branch**: `fix/1200-cursor-order` (rebased onto `upstream/main` @ `f30e20c28`)
 **Status**: ✅ **ARCHITECTURE GATE OPEN** — rev 7 APPROVED by Sol.
 Implementation proceeds per §8.10. Canonical contract: **#1269** (maintainer
@@ -320,7 +336,7 @@ Sources verified first-hand (not trusted from summaries):
 - Maintainer's exact-HEAD review of #1210 `bf4fd8a9f` (fetched from GitHub, full text):
   path-1 P1 + the explicit blessing *"treat the typed/order cursor as separate
   architecture work"* — this branch IS that work.
-- Main-thread prior art (`thread_mrkmxgdfqquounc9`): Verdict v3
+- Main-thread prior art (`[thread-id]`): Verdict v3
   (msg `0001785141231078`) — allocator formula, far-future/retention couplings,
   RED matrix v3; Plans v4/v5.1 convergence; Sol's 001237 consumer-surface audit.
 
@@ -820,7 +836,7 @@ Do not reorder 3→4: the write path must exist before the read path flips, and 
 backfill guard makes the flip per-thread atomic (no global cutover moment).
 
 ---
-*Verdict rev 7 signed: [宪宪/Fable🐾] — architecture gate for issue #1200,
+*Verdict rev 7 signed: [Ragdoll/Fable🐾] — architecture gate for issue #1200,
 branch `fix/1200-cursor-order`.*
 *Rev 5 (write-triggered-only backfill, page-then-filter mentions, raw CAS ingress,
 new-writes-only TTL fix, indexMax residue) superseded by Sol's rev-5 final scan.

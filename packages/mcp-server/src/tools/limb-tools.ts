@@ -1,3 +1,5 @@
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 /**
  * Limb MCP Tools — F126 四肢控制面
  *
@@ -11,6 +13,8 @@
 import { callbackPost, getCallbackConfig, NO_CONFIG_ERROR } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('limb-tools.ts', undefined, { authority: 'callback-limb' });
 
 // ─── Input Schemas ───────────────────────────────────────────
 
@@ -202,7 +206,7 @@ export async function handleLimbBindEmbodiment(args: {
 // ─── Tool Definitions ────────────────────────────────────────
 
 export const limbTools = [
-  {
+  defineTool({
     name: 'limb_list_available',
     description:
       'Discover available limb nodes and their tool names. Returns nodeId, platform, capabilities (with command names), and status. ' +
@@ -212,8 +216,16 @@ export const limbTools = [
       'Shared Antigravity MCP GOTCHA: pass agentKeyCatId to select the correct variant sidecar key.',
     inputSchema: limbListAvailableInputSchema,
     handler: handleLimbListAvailable,
-  },
-  {
+    governance: {
+      implementationExport: 'handleLimbListAvailable',
+      resourceFamily: 'limb-capability',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'limb_list_tools',
     description:
       'Get detailed tool schemas for a specific limb node. Returns parameter descriptions, types, required flags, and defaults. ' +
@@ -224,8 +236,16 @@ export const limbTools = [
       'Shared Antigravity MCP GOTCHA: pass agentKeyCatId to select the correct variant sidecar key.',
     inputSchema: limbListToolsInputSchema,
     handler: handleLimbListTools,
-  },
-  {
+    governance: {
+      implementationExport: 'handleLimbListTools',
+      resourceFamily: 'limb-capability',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'limb_invoke_tool',
     description:
       'Invoke a tool on a specific limb node. Requires nodeId and command (tool name). ' +
@@ -235,8 +255,16 @@ export const limbTools = [
       'Shared Antigravity MCP GOTCHA: pass agentKeyCatId to select the correct variant sidecar key.',
     inputSchema: limbInvokeToolInputSchema,
     handler: handleLimbInvokeTool,
-  },
-  {
+    governance: {
+      implementationExport: 'handleLimbInvokeTool',
+      resourceFamily: 'limb-capability',
+      action: 'create',
+      risk: { level: 'destructive', openWorld: true },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'profile-gated',
+    },
+  }),
+  defineTool({
     name: 'limb_pair_list',
     description:
       'List pending limb pairing requests. Remote devices must be approved by co-creator before cats can use them. ' +
@@ -244,8 +272,16 @@ export const limbTools = [
       'Shared Antigravity MCP GOTCHA: pass agentKeyCatId to select the correct variant sidecar key.',
     inputSchema: limbPairListInputSchema,
     handler: handleLimbPairList,
-  },
-  {
+    governance: {
+      implementationExport: 'handleLimbPairList',
+      resourceFamily: 'limb-pairing',
+      action: 'command',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'limb_pair_approve',
     description:
       'Approve a limb pairing request. After approval, the remote device is automatically registered in the Registry ' +
@@ -254,8 +290,16 @@ export const limbTools = [
       'Shared Antigravity MCP GOTCHA: pass agentKeyCatId to select the correct variant sidecar key.',
     inputSchema: limbPairApproveInputSchema,
     handler: handleLimbPairApprove,
-  },
-  {
+    governance: {
+      implementationExport: 'handleLimbPairApprove',
+      resourceFamily: 'limb-pairing',
+      action: 'create',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'limb_bind_embodiment',
     description:
       'Bind one approved, online physical limb body to the current user, thread, and cat. ' +
@@ -263,5 +307,13 @@ export const limbTools = [
       'GOTCHA: Only run after the owner explicitly asks to embody the current cat on that node.',
     inputSchema: limbBindEmbodimentInputSchema,
     handler: handleLimbBindEmbodiment,
-  },
+    governance: {
+      implementationExport: 'handleLimbBindEmbodiment',
+      resourceFamily: 'limb-embodiment',
+      action: 'update',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
 ] as const;

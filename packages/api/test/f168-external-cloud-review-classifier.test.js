@@ -6,20 +6,27 @@ import { classifyExternalCloudReview } from '../dist/domains/community/external-
 const currentHeadSha = 'head-current';
 const knownCloudReviewer = 'chatgpt-codex-connector[bot]';
 
-const eventWait = (overrides = {}) => ({
+const awaitState = (overrides = {}) => ({
   v: 1,
-  invocationId: 'invocation-1',
-  threadId: 'thread-1',
-  ownerCatId: 'codex-sol',
-  subjectKey: 'pr:acme/widgets#7',
-  expectedSignal: 'review_posted',
-  triggerHeadSha: currentHeadSha,
-  coverage: {
-    status: 'covered',
-    kind: 'github_review_trigger_eyes',
-    triggerCommentId: 70,
-    observedAt: 1_000,
+  generation: 1,
+  subjectRef: 'pr:acme/widgets#7',
+  ownerFence: { kind: 'containing_task', generation: 1 },
+  baseline: {
+    capturedAt: 1_000,
+    headSha: currentHeadSha,
+    review: {
+      resultTriggerCommentId: 70,
+      resultTriggerHeadSha: currentHeadSha,
+    },
   },
+  continuation: {
+    when: [{ kind: 'pr_review_result_available', triggerCommentId: 70 }],
+    // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
+    then: 'Consume the exact review result.',
+  },
+  expiresAt: 120_000,
+  createdAt: 1_000,
+  provenance: 'explicit_registration',
   ...overrides,
 });
 
@@ -47,7 +54,7 @@ const comment = (overrides = {}) => ({
 const classify = (overrides = {}) =>
   classifyExternalCloudReview({
     currentHeadSha,
-    eventWait: eventWait(),
+    awaitState: awaitState(),
     comments: [],
     reviews: [],
     knownCloudReviewerLogins: [knownCloudReviewer],
@@ -103,7 +110,15 @@ describe('F168 external cloud-review classifier', () => {
     assert.deepEqual(stale.correlatedCommentIds, []);
     assert.deepEqual(stale.correlatedReviewIds, []);
 
-    const mismatchedWait = classify({ eventWait: eventWait({ triggerHeadSha: 'head-old' }) });
+    const mismatchedWait = classify({
+      awaitState: awaitState({
+        baseline: {
+          capturedAt: 1_000,
+          headSha: 'head-old',
+          review: { resultTriggerCommentId: 70, resultTriggerHeadSha: 'head-old' },
+        },
+      }),
+    });
     assert.equal(mismatchedWait.observation, null);
   });
 

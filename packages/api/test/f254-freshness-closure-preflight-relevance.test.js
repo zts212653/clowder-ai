@@ -7,6 +7,7 @@ const { scanFreshnessClosurePreflight } = await import(
 const { createFreshnessClosure } = await import(
   '../dist/domains/cats/services/freshness/FreshnessClosureStateMachine.js'
 );
+const { cursorFor, parseCursor } = await import('../dist/domains/cats/services/stores/cursor.js');
 
 function message(id, overrides = {}) {
   return {
@@ -119,5 +120,48 @@ describe('F254 child-ledger causal relevance in closure preflight', () => {
 
     assert.equal(result.kind, 'ready');
     assert.deepEqual(result.requiredMessageIds, ['msg-2', 'msg-3']);
+  });
+
+  it('rescans a later visibility position even when the raw frontier did not advance', async () => {
+    const origin = message('msg-100', { visibilitySeq: 1 });
+    const currentRawFrontier = message('msg-300', { visibilitySeq: 2 });
+    const lateVisible = message('msg-200', { visibilitySeq: 3, content: 'late-visible update' });
+    const messages = [origin, currentRawFrontier, lateVisible];
+    const byId = new Map(messages.map((item) => [item.id, item]));
+    const visibilityOrdered = [...messages].sort((left, right) => left.visibilitySeq - right.visibilitySeq);
+    const messageStore = {
+      getById: async (id) => byId.get(id) ?? null,
+      getLatestThreadMessageIdIncludingQueued: async () => currentRawFrontier.id,
+      getLatestVisibleCursor: async () => ({
+        cursor: cursorFor(lateVisible),
+        messageId: lateVisible.id,
+      }),
+      getByThreadAfter: async (_threadId, afterId, limit) => {
+        const parsed = parseCursor(afterId);
+        const afterSeq =
+          parsed?.version === 2 ? parsed.seq : (byId.get(parsed?.id)?.visibilitySeq ?? Number.NEGATIVE_INFINITY);
+        return visibilityOrdered.filter((item) => item.visibilitySeq > afterSeq).slice(0, limit);
+      },
+    };
+    const closure = createFreshnessClosure({
+      id: 'closure-visibility-inversion',
+      userId: 'user-1',
+      threadId: 'thread-1',
+      catId: 'codex-sol',
+      invocationId: 'child-sol-visibility',
+      turnInvocationId: 'child-sol-visibility',
+      originTriggerMessageId: origin.id,
+      draftContent: 'stale answer',
+      requiredMessageIds: [currentRawFrontier.id],
+      requiredFrontierMessageId: currentRawFrontier.id,
+      observedRawFrontierMessageId: currentRawFrontier.id,
+      now: 100,
+    });
+
+    const result = await scanFreshnessClosurePreflight({ closure, messageStore });
+
+    assert.equal(result.kind, 'ready');
+    assert.deepEqual(result.requiredMessageIds, [lateVisible.id, currentRawFrontier.id]);
+    assert.equal(result.observedRawFrontierMessageId, currentRawFrontier.id);
   });
 });

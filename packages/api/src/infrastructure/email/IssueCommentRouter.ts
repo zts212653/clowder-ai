@@ -3,7 +3,7 @@
  *
  * Mirrors ReviewFeedbackRouter pattern: route(signal, tracking) → connector message.
  * AC-D-security: External comment bodies wrapped in [UNTRUSTED EXTERNAL CONTENT].
- * AC-C2: trackingInstructions appended when present.
+ * AC-C2: the Phase-C issue continuation note is appended when present.
  */
 import type { ConnectorSource } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';

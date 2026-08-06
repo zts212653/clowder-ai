@@ -389,14 +389,10 @@ describe('F238 cloud-pro-phase0 mode — Phase B1a security boundary', () => {
     );
   });
 
-  it('contains same 11 tools as fable-phase0 (shared-set reference is intentional)', () => {
-    // F238 KD-8: cloud-pro-phase0 复用 fable-phase0 同 11 项白名单 via
-    // direct const reference. 这个断言保证未来 reviewer 能立刻看出两个
-    // mode 共享 set 是有意为之 (not accidental coupling).
-    assert.equal(
-      DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS,
-      DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS,
-      'cloud-pro-phase0 and fable-phase0 share the same Set reference (KD-8)',
+  it('contains the same 11 tools as fable-phase0 through independent profile projections', () => {
+    assert.deepEqual(
+      [...DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS].sort(),
+      [...DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS].sort(),
     );
   });
 

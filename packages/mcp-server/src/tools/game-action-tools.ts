@@ -1,7 +1,14 @@
 import { z } from 'zod';
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 import { getInvocationAuthSignal } from './invocation-auth.js';
+
+const defineTool = defineMcpMigrationFactory('game-action-tools.ts', undefined, {
+  resourceFamily: 'game',
+  authority: 'callback-owner',
+});
 
 const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
 
@@ -116,7 +123,7 @@ export async function handleSubmitGameAction(input: {
 }
 
 export const gameActionTools = [
-  {
+  defineTool({
     name: 'cat_cafe_submit_game_action',
     description:
       'Submit a game action (kill/guard/divine/vote/speak/last_words). ' +
@@ -126,5 +133,12 @@ export const gameActionTools = [
       'GOTCHA: target is required for kill/guard/divine/vote; text is required for speak/last_words.',
     inputSchema: submitGameActionInputSchema,
     handler: handleSubmitGameAction,
-  },
+    governance: {
+      implementationExport: 'handleSubmitGameAction',
+      action: 'create',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
 ] as const;

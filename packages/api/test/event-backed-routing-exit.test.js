@@ -10,20 +10,21 @@ const CAT_ID = 'codex-sol';
 const INVOCATION_ID = 'inv-event-wait';
 const SUBJECT_KEY = 'pr:zts212653/cat-cafe#2856';
 
-function coveredEventWait(overrides = {}) {
+function activeWait(overrides = {}) {
   return {
     v: 1,
-    invocationId: INVOCATION_ID,
-    threadId: THREAD_ID,
-    ownerCatId: CAT_ID,
-    subjectKey: SUBJECT_KEY,
-    expectedSignal: 'review_posted',
-    coverage: {
-      status: 'covered',
-      kind: 'github_review_trigger_eyes',
-      triggerCommentId: 4936000000,
-      observedAt: 1_783_700_000_000,
+    generation: 4,
+    subjectRef: SUBJECT_KEY,
+    ownerFence: { kind: 'containing_task', generation: 4 },
+    baseline: { capturedAt: 1, headSha: 'head-a' },
+    continuation: {
+      when: [{ kind: 'pr_review_result_available', triggerCommentId: 4_936_000_000 }],
+      // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
+      then: 'Consume the exact review result.',
     },
+    expiresAt: Date.now() + 60_000,
+    createdAt: 1,
+    provenance: 'explicit_registration',
     ...overrides,
   };
 }
@@ -41,10 +42,7 @@ function trackingTask(overrides = {}) {
     createdBy: CAT_ID,
     createdAt: 1,
     updatedAt: 2,
-    automationState: {
-      intent: 'review',
-      eventWait: coveredEventWait(),
-    },
+    automationState: { await: activeWait() },
     ...overrides,
   };
 }
@@ -67,8 +65,8 @@ function resolve(tasks, overrides = {}) {
   });
 }
 
-describe('F177 event-backed routing exit resolver', () => {
-  test('active tracker + same invocation/owner/thread/subject + covered callback grants bypass', async () => {
+describe('F177/F280 event-backed routing exit resolver', () => {
+  test('an active correlated review-result wait grants a typed bypass', async () => {
     assert.deepEqual(await resolve([trackingTask()]), {
       kind: 'bypass',
       taskId: 'task-pr-2856',
@@ -81,168 +79,70 @@ describe('F177 event-backed routing exit resolver', () => {
           ownerCatId: CAT_ID,
           threadId: THREAD_ID,
           subjectKey: SUBJECT_KEY,
-          intent: 'review',
+          generation: 4,
         },
-        eventWait: {
-          invocationId: INVOCATION_ID,
-          ownerCatId: CAT_ID,
-          threadId: THREAD_ID,
-          subjectKey: SUBJECT_KEY,
-          coverageStatus: 'covered',
+        predicate: {
+          kind: 'pr_review_result_available',
+          triggerCommentId: 4_936_000_000,
         },
       },
     });
   });
 
-  test('consumer-side proof validation rejects a forged stale bypass', () => {
-    const forged = {
-      kind: 'bypass',
-      taskId: 'task-pr-2856',
-      subjectKey: SUBJECT_KEY,
-      expectedSignal: 'review_posted',
-      proof: {
-        task: {
-          kind: 'pr_tracking',
-          status: 'done',
-          ownerCatId: CAT_ID,
-          threadId: THREAD_ID,
-          subjectKey: SUBJECT_KEY,
-          intent: 'review',
-        },
-        eventWait: {
-          invocationId: INVOCATION_ID,
-          ownerCatId: CAT_ID,
-          threadId: THREAD_ID,
-          subjectKey: SUBJECT_KEY,
-          coverageStatus: 'covered',
-        },
-      },
-    };
-
-    assert.equal(
-      isEventBackedRoutingBypassProofValid(forged, {
-        threadId: THREAD_ID,
-        catId: CAT_ID,
-        invocationId: INVOCATION_ID,
-      }),
-      false,
-    );
-  });
-
-  test('consumer-side proof validation rejects every forged identity/coverage boundary', async () => {
+  test('consumer-side proof validation rejects forged task and predicate boundaries', async () => {
     const valid = await resolve([trackingTask()]);
     assert.equal(valid.kind, 'bypass');
     if (valid.kind !== 'bypass') return;
-
-    const identity = {
-      threadId: THREAD_ID,
-      catId: CAT_ID,
-      invocationId: INVOCATION_ID,
-    };
+    const identity = { threadId: THREAD_ID, catId: CAT_ID, invocationId: INVOCATION_ID };
     const forgedProofs = [
-      { task: { ...valid.proof.task, ownerCatId: 'opus-48' } },
-      { task: { ...valid.proof.task, threadId: 'thread-other' } },
-      { task: { ...valid.proof.task, subjectKey: 'pr:zts212653/cat-cafe#9999' } },
-      { task: { ...valid.proof.task, intent: 'merge' } },
-      { eventWait: { ...valid.proof.eventWait, ownerCatId: 'opus-48' } },
-      { eventWait: { ...valid.proof.eventWait, threadId: 'thread-other' } },
-      { eventWait: { ...valid.proof.eventWait, subjectKey: 'pr:zts212653/cat-cafe#9999' } },
-      { eventWait: { ...valid.proof.eventWait, invocationId: 'inv-old' } },
-      { eventWait: { ...valid.proof.eventWait, coverageStatus: 'uncovered' } },
+      { ...valid.proof, task: { ...valid.proof.task, kind: 'work' } },
+      { ...valid.proof, task: { ...valid.proof.task, status: 'done' } },
+      { ...valid.proof, task: { ...valid.proof.task, ownerCatId: 'opus48' } },
+      { ...valid.proof, task: { ...valid.proof.task, threadId: 'thread-other' } },
+      { ...valid.proof, task: { ...valid.proof.task, subjectKey: 'pr:zts212653/cat-cafe#9999' } },
+      { ...valid.proof, task: { ...valid.proof.task, generation: 0 } },
+      { ...valid.proof, predicate: { ...valid.proof.predicate, triggerCommentId: 0 } },
     ];
-
-    for (const patch of forgedProofs) {
-      const forged = {
-        ...valid,
-        proof: {
-          task: patch.task ?? valid.proof.task,
-          eventWait: patch.eventWait ?? valid.proof.eventWait,
-        },
-      };
-      assert.equal(isEventBackedRoutingBypassProofValid(forged, identity), false);
+    for (const proof of forgedProofs) {
+      assert.equal(isEventBackedRoutingBypassProofValid({ ...valid, proof }, identity), false);
     }
   });
 
-  test('EYES=0 / uncovered callback does not grant bypass', async () => {
+  test('a wait without the correlated review-result predicate does not bypass', async () => {
     const task = trackingTask({
       automationState: {
-        intent: 'review',
-        eventWait: coveredEventWait({
-          coverage: {
-            status: 'uncovered',
-            kind: 'github_review_trigger_eyes',
-            triggerCommentId: 4936000000,
-            observedAt: 1_783_700_000_000,
-            reason: 'review_not_accepted',
+        await: activeWait({
+          continuation: {
+            when: [{ kind: 'pr_head_changed' }],
+            // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
+            then: 'Inspect the new HEAD.',
           },
         }),
       },
     });
-    assert.deepEqual(await resolve([task]), { kind: 'reject', reason: 'coverage_unconfirmed' });
+    assert.deepEqual(await resolve([task]), { kind: 'reject', reason: 'predicate_missing' });
   });
 
-  test('malformed covered callback state has no event-backed routing candidate', async () => {
+  test('a stale owner generation does not bypass', async () => {
     const task = trackingTask({
-      automationState: {
-        intent: 'review',
-        eventWait: coveredEventWait({ coverage: { status: 'covered' } }),
-      },
+      automationState: { await: activeWait({ ownerFence: { kind: 'containing_task', generation: 3 } }) },
     });
-    assert.deepEqual(await resolve([task]), { kind: 'reject', reason: 'no_candidate' });
+    assert.deepEqual(await resolve([task]), { kind: 'reject', reason: 'generation_mismatch' });
   });
 
-  test('done tracker is stale and does not grant bypass', async () => {
+  test('done, foreign-owner, and mismatched-subject waits fail closed', async () => {
     assert.deepEqual(await resolve([trackingTask({ status: 'done' })]), {
       kind: 'reject',
       reason: 'task_done',
     });
-  });
-
-  test('same thread tracker owned by another cat does not grant bypass', async () => {
-    assert.deepEqual(await resolve([trackingTask({ ownerCatId: 'opus-47' })]), {
+    assert.deepEqual(await resolve([trackingTask({ ownerCatId: 'opus47' })]), {
       kind: 'reject',
       reason: 'owner_mismatch',
     });
-  });
-
-  test('grant copied from another thread does not grant bypass', async () => {
-    const task = trackingTask({
-      automationState: {
-        intent: 'review',
-        eventWait: coveredEventWait({ threadId: 'thread-other' }),
-      },
+    const wrongSubject = trackingTask({
+      automationState: { await: activeWait({ subjectRef: 'pr:zts212653/cat-cafe#9999' }) },
     });
-    assert.deepEqual(await resolve([task]), { kind: 'reject', reason: 'thread_mismatch' });
-  });
-
-  test('active but unrelated subject does not grant bypass', async () => {
-    const task = trackingTask({
-      automationState: {
-        intent: 'review',
-        eventWait: coveredEventWait({ subjectKey: 'pr:zts212653/cat-cafe#9999' }),
-      },
-    });
-    assert.deepEqual(await resolve([task]), { kind: 'reject', reason: 'subject_mismatch' });
-  });
-
-  test('grant from an older invocation does not grant bypass', async () => {
-    const task = trackingTask({
-      automationState: {
-        intent: 'review',
-        eventWait: coveredEventWait({ invocationId: 'inv-old' }),
-      },
-    });
-    assert.deepEqual(await resolve([task]), { kind: 'reject', reason: 'invocation_mismatch' });
-  });
-
-  test('covered review wait retained after switching tracker intent to merge does not grant bypass', async () => {
-    const task = trackingTask({
-      automationState: {
-        intent: 'merge',
-        eventWait: coveredEventWait(),
-      },
-    });
-    assert.deepEqual(await resolve([task]), { kind: 'reject', reason: 'intent_mismatch' });
+    assert.deepEqual(await resolve([wrongSubject]), { kind: 'reject', reason: 'subject_mismatch' });
   });
 
   test('empty task list has no event-backed routing candidate', async () => {

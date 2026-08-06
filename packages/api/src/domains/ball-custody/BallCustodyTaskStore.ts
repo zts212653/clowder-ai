@@ -7,6 +7,7 @@ import type {
   UpdateTaskInput,
 } from '@cat-cafe/shared';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
+import type { ReplaceAutomationStateIfGenerationInput } from '../cats/services/stores/ports/TaskStoreContract.js';
 import type { IBallCustodyIngest } from './BallCustodyIngest.js';
 import { buildTaskBlockedEvent, buildTaskDoneEvent, buildTaskUnblockedEvent } from './ball-custody-events.js';
 import type { TaskActionSuccessorLifecycle } from './TaskActionSuccessorLifecycle.js';
@@ -88,17 +89,19 @@ class BallCustodyTaskStore implements ITaskStore {
   }
 
   delete(taskId: string): MaybePromise<boolean> {
-    if (!this.actionLifecycle) return this.inner.delete(taskId);
+    const actionLifecycle = this.actionLifecycle;
+    if (!actionLifecycle) return this.inner.delete(taskId);
     return Promise.resolve(this.inner.get(taskId)).then(async (task) => {
-      if (task) await this.actionLifecycle!.assertDeleteAllowed(task);
+      if (task) await actionLifecycle.assertDeleteAllowed(task);
       return this.inner.delete(taskId);
     });
   }
 
   deleteByThread(threadId: string): MaybePromise<number> {
-    if (!this.actionLifecycle) return this.inner.deleteByThread(threadId);
+    const actionLifecycle = this.actionLifecycle;
+    if (!actionLifecycle) return this.inner.deleteByThread(threadId);
     return Promise.resolve(this.inner.listByThread(threadId)).then(async (tasks) => {
-      await Promise.all(tasks.map((task) => this.actionLifecycle!.assertDeleteAllowed(task)));
+      await Promise.all(tasks.map((task) => actionLifecycle.assertDeleteAllowed(task)));
       return this.inner.deleteByThread(threadId);
     });
   }
@@ -129,6 +132,13 @@ class BallCustodyTaskStore implements ITaskStore {
 
   getManagedWorkBinding(taskId: string): MaybePromise<ManagedWorkBinding | null> {
     return this.inner.getManagedWorkBinding(taskId);
+  }
+
+  replaceAutomationStateIfGeneration(
+    taskId: string,
+    input: ReplaceAutomationStateIfGenerationInput,
+  ): MaybePromise<TaskItem | null> {
+    return this.inner.replaceAutomationStateIfGeneration(taskId, input);
   }
 
   private recordStatusTransition(before: TaskItem, updated: TaskItem): void {

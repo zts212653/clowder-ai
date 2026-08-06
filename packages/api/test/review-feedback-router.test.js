@@ -1,367 +1,136 @@
-// @ts-check
 import assert from 'node:assert/strict';
-import { beforeEach, describe, it } from 'node:test';
+import { describe, test } from 'node:test';
 
+const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
+const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
 const { ReviewFeedbackRouter, buildReviewFeedbackContent } = await import(
   '../dist/infrastructure/email/ReviewFeedbackRouter.js'
 );
 
-// ─── Mocks ─────────────────────────────────────────────────────────
-
-function mockMessageStore() {
-  const messages = [];
-  let counter = 0;
-  return {
-    store: /** @type {any} */ ({
-      append(msg) {
-        counter++;
-        messages.push({ ...msg });
-        return { id: `msg-${counter}`, ...msg, timestamp: msg.timestamp ?? Date.now() };
-      },
-    }),
-    messages,
-  };
-}
-
-function mockSocketManager() {
-  const events = [];
-  return {
-    manager: {
-      broadcastToRoom(room, event, payload) {
-        events.push({ room, event, payload });
+async function setup(when) {
+  const taskStore = new TaskStore();
+  const messageStore = new MessageStore();
+  const task = await taskStore.create({
+    kind: 'pr_tracking',
+    subjectKey: 'pr:owner/repo#7',
+    threadId: 'thread_1',
+    title: 'PR wait',
+    ownerCatId: 'codex-sol',
+    why: 'test',
+    createdBy: 'codex-sol',
+    userId: 'user_1',
+    automationState: {
+      review: { lastInlineCommentCursor: 10, lastConversationCommentCursor: 20, lastDecisionCursor: 30 },
+      await: {
+        v: 1,
+        generation: 1,
+        subjectRef: 'pr:owner/repo#7',
+        ownerFence: { kind: 'containing_task', generation: 1 },
+        baseline: {
+          capturedAt: 100,
+          headSha: 'aaa1111',
+          review: { inlineCommentCursor: 10, conversationCommentCursor: 20, decisionCursor: 30 },
+        },
+        continuation: {
+          when,
+          // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
+          then: 'Apply the exact review result.',
+        },
+        expiresAt: 10_000,
+        createdAt: 100,
       },
     },
-    events,
+  });
+  const lifecycle = new GitHubWaitLifecycleService({
+    taskStore,
+    deliveryDeps: { messageStore },
+    now: () => 500,
+    log: { info() {}, warn() {}, error() {} },
+  });
+  const router = new ReviewFeedbackRouter({
+    deliveryDeps: { messageStore },
+    waitLifecycle: lifecycle,
+    log: { info() {}, warn() {}, error() {} },
+  });
+  return { router, task, messageStore, taskStore };
+}
+
+function signal(overrides = {}) {
+  return {
+    repoFullName: 'owner/repo',
+    prNumber: 7,
+    headSha: 'aaa1111',
+    newComments: [],
+    newDecisions: [
+      {
+        id: 31,
+        author: 'reviewer',
+        state: 'CHANGES_REQUESTED',
+        body: 'SOURCE_BODY_SHOULD_NEVER_RENDER',
+        submittedAt: '2026-07-30T00:00:00Z',
+        commitId: 'aaa1111',
+      },
+    ],
+    inlineCommentCursor: 10,
+    conversationCommentCursor: 20,
+    decisionCursor: 31,
+    ...overrides,
   };
 }
 
-function noopLog() {
-  const noop = () => {};
-  return /** @type {any} */ ({
-    info: noop,
-    warn: noop,
-    error: noop,
-    debug: noop,
-    trace: noop,
-    fatal: noop,
-    child: () => noopLog(),
-  });
-}
-
-const tracking = { threadId: 'th-1', catId: 'opus', userId: 'u-1' };
-
-// ─── Tests ─────────────────────────────────────────────────────────
-
-describe('ReviewFeedbackRouter', () => {
-  let messageMock;
-  let socketMock;
-
-  function createRouter() {
-    return new ReviewFeedbackRouter({
-      deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
-      log: noopLog(),
-    });
-  }
-
-  beforeEach(() => {
-    messageMock = mockMessageStore();
-    socketMock = mockSocketManager();
-  });
-
-  it('delivers review feedback with correct connector (AC-A3/A4)', async () => {
-    const router = createRouter();
-    const result = await router.route(
-      {
-        repoFullName: 'owner/repo',
-        prNumber: 42,
-        newComments: [{ id: 1, author: 'alice', body: 'LGTM', createdAt: '2026-01-01', commentType: 'conversation' }],
-        newDecisions: [{ id: 1, author: 'alice', state: 'APPROVED', body: '', submittedAt: '2026-01-01' }],
-      },
-      tracking,
-    );
-
+describe('ReviewFeedbackRouter F280 typed waits', () => {
+  test('review decision change consumes one wait and emits compact content', async () => {
+    const { router, task, messageStore } = await setup([{ kind: 'pr_review_decision_changed' }]);
+    const result = await router.route(signal(), { taskId: task.id });
     assert.equal(result.kind, 'notified');
-    assert.equal(result.threadId, 'th-1');
-    assert.equal(messageMock.messages.length, 1);
-    assert.equal(messageMock.messages[0].source.connector, 'github-review-feedback');
+    assert.match(result.content, /review pending → CHANGES_REQUESTED/);
+    assert.equal(result.content.includes('SOURCE_BODY_SHOULD_NEVER_RENDER'), false);
+    assert.equal(messageStore.getByThread('thread_1').length, 1);
   });
 
-  it('skips when no new feedback', async () => {
-    const router = createRouter();
+  test('ordinary conversation activity advances facts but never wakes a head-only waiter', async () => {
+    const { router, task, messageStore, taskStore } = await setup([{ kind: 'pr_head_changed' }]);
     const result = await router.route(
-      {
-        repoFullName: 'owner/repo',
-        prNumber: 42,
-        newComments: [],
-        newDecisions: [],
-      },
-      tracking,
-    );
-
-    assert.equal(result.kind, 'skipped');
-    assert.equal(messageMock.messages.length, 0);
-  });
-
-  it('delivers audit-only repair notifications', async () => {
-    const router = createRouter();
-    const result = await router.route(
-      {
-        repoFullName: 'owner/repo',
-        prNumber: 42,
-        routingAudit: {
-          kind: 'legacy-auto-rotated-repaired',
-          previousThreadId: 'thread_rotated_1',
-          repairedThreadId: 'th-original',
-        },
-        newComments: [],
-        newDecisions: [],
-      },
-      tracking,
-    );
-
-    assert.equal(result.kind, 'notified');
-    assert.equal(messageMock.messages.length, 1);
-    assert.ok(messageMock.messages[0].content.includes('PR review feedback 路由异常已修复'));
-  });
-
-  it('broadcasts socket event', async () => {
-    const router = createRouter();
-    await router.route(
-      {
-        repoFullName: 'owner/repo',
-        prNumber: 42,
+      signal({
         newComments: [
           {
-            id: 1,
-            author: 'bob',
-            body: 'fix this',
-            createdAt: '2026-01-01',
-            commentType: 'inline',
-            filePath: 'src/a.ts',
-            line: 10,
+            id: 21,
+            author: 'human',
+            body: '@codex review',
+            createdAt: '2026-07-30T00:00:00Z',
+            commentType: 'conversation',
           },
         ],
         newDecisions: [],
-      },
-      tracking,
+        conversationCommentCursor: 21,
+        decisionCursor: 30,
+      }),
+      { taskId: task.id },
     );
-
-    assert.equal(socketMock.events.length, 1);
-    assert.equal(socketMock.events[0].room, 'thread:th-1');
-    assert.equal(socketMock.events[0].event, 'connector_message');
+    assert.equal(result.kind, 'skipped');
+    assert.equal(messageStore.getByThread('thread_1').length, 0);
+    assert.equal((await taskStore.get(task.id)).automationState.review.lastConversationCommentCursor, 21);
   });
 });
 
-describe('buildReviewFeedbackContent', () => {
-  it('prepends routing anomaly audit when a legacy rotated task was repaired', () => {
-    const content = buildReviewFeedbackContent({
-      repoFullName: 'owner/repo',
-      prNumber: 42,
-      routingAudit: {
-        kind: 'legacy-auto-rotated-repaired',
-        previousThreadId: 'thread_rotated_1',
-        repairedThreadId: 'th-original',
-      },
-      newDecisions: [],
-      newComments: [
-        {
-          id: 1,
-          author: 'bot',
-          body: 'Review feedback',
-          createdAt: '2026-06-18',
-          commentType: 'conversation',
-        },
-      ],
-    });
-
-    assert.match(content.split('\n')[0], /⚠️ \*\*PR review feedback 路由异常已修复\*\*/);
-    assert.ok(content.includes('task 指向 auto-rotated thread `thread_rotated_1`'));
-    assert.ok(content.includes('已修回注册 thread `th-original`'));
-    assert.ok(content.includes('📋 **Review Feedback**'), 'audit must not replace the normal feedback payload');
-  });
-
-  it('keeps severity header first when routing audit is also present', () => {
-    const content = buildReviewFeedbackContent({
-      repoFullName: 'owner/repo',
-      prNumber: 42,
-      routingAudit: {
-        kind: 'legacy-auto-rotated-repaired',
-        previousThreadId: 'thread_rotated_1',
-        repairedThreadId: 'th-original',
-      },
-      newDecisions: [],
-      newComments: [
-        {
-          id: 1,
-          author: 'chatgpt-codex-connector[bot]',
-          body: '![P1 Badge](https://img.shields.io/badge/P1-red?style=flat) Important issue',
-          createdAt: '2026-06-18',
-          commentType: 'inline',
-        },
-      ],
-    });
-
-    const lines = content.split('\n');
-    assert.match(lines[0], /\*\*Review 检测到 P1\*\*/);
-    assert.ok(
-      lines.findIndex((line) => line.includes('PR review feedback 路由异常已修复')) > 0,
-      'audit should remain visible after the severity header',
+describe('review preview renderer', () => {
+  test('does not include review/comment bodies or caller instructions', () => {
+    const content = buildReviewFeedbackContent(
+      signal({
+        newComments: [
+          {
+            id: 21,
+            author: 'human',
+            body: 'SOURCE_SENTINEL',
+            createdAt: '2026-07-30T00:00:00Z',
+            commentType: 'conversation',
+          },
+        ],
+      }),
+      'LEGACY_SENTINEL',
     );
-  });
-
-  it('renders three-section format (OQ-2)', () => {
-    const content = buildReviewFeedbackContent({
-      repoFullName: 'owner/repo',
-      prNumber: 42,
-      newDecisions: [
-        { id: 1, author: 'alice', state: 'APPROVED', body: 'Ship it', submittedAt: '2026-01-01' },
-        { id: 2, author: 'bob', state: 'CHANGES_REQUESTED', body: 'Needs work', submittedAt: '2026-01-01' },
-      ],
-      newComments: [
-        {
-          id: 10,
-          author: 'bob',
-          body: 'typo here',
-          createdAt: '2026-01-01',
-          commentType: 'inline',
-          filePath: 'src/a.ts',
-          line: 5,
-        },
-        { id: 11, author: 'charlie', body: 'great PR', createdAt: '2026-01-01', commentType: 'conversation' },
-      ],
-    });
-
-    // Section headers
-    assert.ok(content.includes('Review Decisions'));
-    assert.ok(content.includes('Inline Comments (1)'));
-    assert.ok(content.includes('PR Conversation (1)'));
-
-    // Decision content
-    assert.ok(content.includes('alice'));
-    assert.ok(content.includes('APPROVED'));
-    assert.ok(content.includes('CHANGES_REQUESTED'));
-
-    // Inline comment
-    assert.ok(content.includes('src/a.ts:5'));
-    assert.ok(content.includes('typo here'));
-
-    // Conversation comment
-    assert.ok(content.includes('charlie'));
-    assert.ok(content.includes('great PR'));
-  });
-
-  it('renders decisions-only message', () => {
-    const content = buildReviewFeedbackContent({
-      repoFullName: 'owner/repo',
-      prNumber: 42,
-      newDecisions: [{ id: 1, author: 'alice', state: 'DISMISSED', body: '', submittedAt: '2026-01-01' }],
-      newComments: [],
-    });
-
-    assert.ok(content.includes('Review Decisions'));
-    assert.ok(content.includes('DISMISSED'));
-    assert.ok(!content.includes('Inline Comments'));
-    assert.ok(!content.includes('PR Conversation'));
-  });
-
-  it('renders comments-only message', () => {
-    const content = buildReviewFeedbackContent({
-      repoFullName: 'owner/repo',
-      prNumber: 42,
-      newDecisions: [],
-      newComments: [{ id: 1, author: 'bob', body: 'check this', createdAt: '2026-01-01', commentType: 'conversation' }],
-    });
-
-    assert.ok(!content.includes('Review Decisions'));
-    assert.ok(content.includes('PR Conversation'));
-  });
-
-  it('truncates long comment bodies to 120 chars', () => {
-    const longBody = 'x'.repeat(200);
-    const content = buildReviewFeedbackContent({
-      repoFullName: 'owner/repo',
-      prNumber: 42,
-      newDecisions: [],
-      newComments: [{ id: 1, author: 'bob', body: longBody, createdAt: '2026-01-01', commentType: 'conversation' }],
-    });
-
-    assert.ok(!content.includes(longBody), 'full body should be truncated');
-    assert.ok(content.includes('x'.repeat(120)), 'first 120 chars should be present');
-  });
-
-  it('includes action hint for CHANGES_REQUESTED (AC-B3)', () => {
-    const content = buildReviewFeedbackContent({
-      repoFullName: 'owner/repo',
-      prNumber: 42,
-      newDecisions: [{ id: 1, author: 'alice', state: 'CHANGES_REQUESTED', body: 'fix it', submittedAt: '2026-03-26' }],
-      newComments: [],
-    });
-    assert.ok(content.includes('自动处理'), 'should include action hint section');
-    assert.ok(content.includes('receive-review'), 'CHANGES_REQUESTED should reference receive-review mode');
-    assert.ok(content.includes('owner/repo#42'), 'should include PR reference');
-  });
-
-  it('includes action hint for APPROVED (AC-B3)', () => {
-    const content = buildReviewFeedbackContent({
-      repoFullName: 'owner/repo',
-      prNumber: 42,
-      newDecisions: [{ id: 1, author: 'alice', state: 'APPROVED', body: 'lgtm', submittedAt: '2026-03-26' }],
-      newComments: [],
-    });
-    assert.ok(content.includes('自动处理'), 'should include action hint section');
-    assert.ok(content.includes('merge'), 'APPROVED should mention merge readiness');
-  });
-
-  // ── F140 Phase E.1: severity header prepended (AC-E1~E5) ────────
-
-  it('prepends **Review 检测到 P2** header when inline comment has P2 badge', () => {
-    const content = buildReviewFeedbackContent({
-      repoFullName: 'owner/repo',
-      prNumber: 42,
-      newDecisions: [],
-      newComments: [
-        {
-          id: 1,
-          author: 'chatgpt-codex-connector[bot]',
-          body: '![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat) Minor issue',
-          createdAt: '2026-04-24',
-          commentType: 'inline',
-          filePath: 'src/foo.ts',
-          line: 10,
-        },
-      ],
-    });
-    assert.match(content.split('\n')[0], /\*\*Review 检测到 P2\*\*/);
-  });
-
-  it('does NOT add severity header when no severity is present (backward compat)', () => {
-    const content = buildReviewFeedbackContent({
-      repoFullName: 'owner/repo',
-      prNumber: 42,
-      newDecisions: [],
-      newComments: [
-        {
-          id: 1,
-          author: 'bot',
-          body: 'LGTM',
-          createdAt: '2026-04-24',
-          commentType: 'conversation',
-        },
-      ],
-    });
-    assert.ok(!content.includes('Review 检测到'), 'no header when no severity');
-    assert.match(content.split('\n')[0], /📋 \*\*Review Feedback\*\*/);
-  });
-
-  it('picks max severity (P0 > P2) when mixed across comments and decisions', () => {
-    const content = buildReviewFeedbackContent({
-      repoFullName: 'owner/repo',
-      prNumber: 42,
-      newDecisions: [
-        { id: 1, author: 'bot', state: 'COMMENTED', body: '**P0**: critical crash', submittedAt: '2026-04-24' },
-      ],
-      newComments: [{ id: 1, author: 'bot', body: '[P2] naming nit', createdAt: '2026-04-24', commentType: 'inline' }],
-    });
-    assert.match(content.split('\n')[0], /\*\*Review 检测到 P0\*\*/);
+    assert.equal(content.includes('SOURCE_SENTINEL'), false);
+    assert.equal(content.includes('LEGACY_SENTINEL'), false);
   });
 });

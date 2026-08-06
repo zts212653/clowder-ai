@@ -26,9 +26,17 @@ describe('RedisMessageStore message JSON Unicode boundary', () => {
     const redis = {
       options: {},
       eval: async (...args) => {
+        if (args.length === 6) return 0; // ensureVisibilityMigrated
         const keyCount = Number(args[1]);
-        persistedFields = JSON.parse(args[keyCount + 3]);
-        return ['committed', persistedFields.id];
+        const argvStart = 2 + keyCount;
+        const mentionCount = Number(args[argvStart + 8]);
+        const pairCountIndex = argvStart + 9 + mentionCount;
+        const pairCount = Number(args[pairCountIndex]);
+        const fieldPairs = args.slice(pairCountIndex + 1, pairCountIndex + 1 + pairCount * 2);
+        persistedFields = Object.fromEntries(
+          Array.from({ length: pairCount }, (_, index) => [fieldPairs[index * 2], fieldPairs[index * 2 + 1]]),
+        );
+        return 1;
       },
       hgetall: async () => persistedFields,
     };
@@ -61,23 +69,22 @@ describe('RedisMessageStore.markDelivered atomic transition', () => {
       hgetall: async () => {
         throw new Error('markDelivered must hydrate from the Lua receipt, not a post-EVAL read');
       },
+      hget: async (_key, field) => (field === 'threadId' ? 't1' : null),
       eval: async (...args) => {
         evalCalls.push(args);
-        return [
-          1,
-          luaHash({
-            id: 'msg-atomic',
-            threadId: 't1',
-            userId: 'u1',
-            catId: '',
-            content: 'queued body',
-            mentions: '[]',
-            timestamp: '1000',
-            deliveryStatus: 'delivered',
-            deliveredAt: '2000',
-            timelineOrderAt: '2000',
-          }),
-        ];
+        if (evalCalls.length === 1) return 0; // ensureVisibilityMigrated
+        return luaHash({
+          id: 'msg-atomic',
+          threadId: 't1',
+          userId: 'u1',
+          catId: '',
+          content: 'queued body',
+          mentions: '[]',
+          timestamp: '1000',
+          deliveryStatus: 'delivered',
+          deliveredAt: '2000',
+          timelineOrderAt: '2000',
+        });
       },
       multi: () => {
         multiCalls += 1;
@@ -97,8 +104,8 @@ describe('RedisMessageStore.markDelivered atomic transition', () => {
     const result = await store.markDelivered('msg-atomic', 2000);
 
     assert.equal(result?.deliveryTransitioned, true);
-    assert.equal(evalCalls.length, 1, 'delivery transition must be guarded by one Redis EVAL CAS');
-    assert.equal(evalCalls[0][1], 1, 'Lua derives all sorted-set keys from the canonical message hash');
+    assert.equal(evalCalls.length, 2, 'migration guard and delivery CAS each use one Redis EVAL');
+    assert.equal(evalCalls[1][1], 1, 'Lua derives all sorted-set keys from the canonical message hash');
     assert.equal(multiCalls, 0, 'read-check-write pipeline lets concurrent callers both report transition');
   });
 
@@ -117,10 +124,9 @@ describe('RedisMessageStore.markDelivered atomic transition', () => {
     };
     const redis = {
       options: {},
-      hgetall: async () => {
-        throw new Error('lost CAS must hydrate from the Lua receipt, not a post-EVAL read');
-      },
-      eval: async () => [0, luaHash(canonical)],
+      hget: async (_key, field) => (field === 'threadId' ? 't1' : null),
+      hgetall: async () => canonical,
+      eval: async () => 0,
       multi: () => {
         throw new Error('markDelivered must not fall back to non-atomic pipeline');
       },
@@ -152,12 +158,10 @@ describe('RedisMessageStore.markCanceled atomic transition', () => {
     };
     const redis = {
       options: {},
-      hgetall: async () => {
-        throw new Error('lost cancel CAS must hydrate from the Lua receipt, not a post-EVAL read');
-      },
+      hgetall: async () => canonical,
       eval: async (...args) => {
         evalCalls.push(args);
-        return [0, luaHash(canonical)];
+        return 0;
       },
       hset: async () => {
         throw new Error('markCanceled must not use an unconditional HSET');
@@ -180,10 +184,13 @@ describe('RedisMessageStore bounded forward thread reads', () => {
     const rangeCalls = [];
     const redis = {
       options: {},
-      zrange: async (_key, start, stop) => {
-        rangeCalls.push([start, stop]);
-        const inclusiveStop = stop === -1 ? ids.length : stop + 1;
-        return ids.slice(start, inclusiveStop);
+      eval: async () => 0,
+      zrangebyscore: async (_key, _min, _max, ...args) => {
+        const limitIndex = args.indexOf('LIMIT');
+        const offset = Number(args[limitIndex + 1]);
+        const count = Number(args[limitIndex + 2]);
+        rangeCalls.push([offset, count]);
+        return ids.slice(offset, offset + count).flatMap((id, index) => [id, String(offset + index + 1)]);
       },
       multi: () => {
         const requested = [];
@@ -223,7 +230,7 @@ describe('RedisMessageStore bounded forward thread reads', () => {
     );
     assert.ok(rangeCalls.length >= 2, 'hidden rows require bounded continuation reads');
     assert.ok(
-      rangeCalls.every(([, stop]) => stop !== -1),
+      rangeCalls.every(([, count]) => count > 0 && count < ids.length),
       `bounded reads must never request the full sorted set; calls=${JSON.stringify(rangeCalls)}`,
     );
   });

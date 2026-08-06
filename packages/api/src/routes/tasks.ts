@@ -14,12 +14,15 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { MAX_BALL_CUSTODY_HTTP_PROBE_TIMEOUT_MS } from '../domains/ball-custody/BallCustodyProbeTaskSpec.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
+import type { GitHubWaitLifecycleService } from '../domains/github-signals/GitHubWaitLifecycleService.js';
 import { validateUrl } from '../infrastructure/scheduler/content-fetcher.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
+import { resolveUserId } from '../utils/request-identity.js';
 
 export interface TasksRoutesOptions {
   taskStore: ITaskStore;
   socketManager: SocketManager;
+  waitLifecycleHolder?: { current?: GitHubWaitLifecycleService };
 }
 
 const VALID_STATUSES = ['todo', 'doing', 'blocked', 'done'] as const;
@@ -153,6 +156,15 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
       return { error: 'Invalid request body', details: result.error.issues };
     }
 
+    const before = await taskStore.get(id);
+    if (
+      before?.kind === 'pr_tracking' &&
+      before.automationState?.await &&
+      result.data.ownerCatId !== undefined &&
+      result.data.ownerCatId !== before.ownerCatId
+    ) {
+      await opts.waitLifecycleHolder?.current?.ownerChanged(id);
+    }
     const updated = await taskStore.update(id, toUpdateInput(result.data));
     if (!updated) {
       reply.status(404);
@@ -162,6 +174,46 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
 
     return updated;
+  });
+
+  // POST /api/tasks/:id/cancel-wait — authenticated, server-bound terminal transition.
+  app.post('/api/tasks/:id/cancel-wait', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required' };
+    }
+    const body = z
+      .object({})
+      .strict()
+      .safeParse(request.body ?? {});
+    if (!body.success) {
+      reply.status(400);
+      return { error: 'Request body must be empty', details: body.error.issues };
+    }
+    const { id } = request.params as { id: string };
+    const task = await taskStore.get(id);
+    if (!task) {
+      reply.status(404);
+      return { error: 'Task not found' };
+    }
+    if (task.kind !== 'pr_tracking' || !task.automationState?.await) {
+      reply.status(409);
+      return { error: 'Task has no active PR wait' };
+    }
+    if (!task.userId || task.userId !== userId) {
+      reply.status(403);
+      return { error: 'Not your wait' };
+    }
+    const lifecycle = opts.waitLifecycleHolder?.current;
+    if (!lifecycle) {
+      reply.status(503);
+      return { error: 'Wait lifecycle unavailable' };
+    }
+    const result = await lifecycle.cancel(task.id, { kind: 'user', userId });
+    const updated = await taskStore.get(task.id);
+    if (updated) socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
+    return { status: 'cancelled', result };
   });
 
   // DELETE /api/tasks/:id

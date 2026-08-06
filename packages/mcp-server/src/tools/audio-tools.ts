@@ -1,3 +1,5 @@
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 /**
  * F195 Phase B — Audio capture & transcription MCP tools.
  *
@@ -9,6 +11,11 @@ import { createMeetingContextBlock } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('audio-tools.ts', undefined, {
+  resourceFamily: 'audio',
+  authority: 'local-runtime',
+});
 
 const AUDIO_URL = process.env.AUDIO_SERVICE_URL ?? 'http://127.0.0.1:9881';
 const CONTROLLER_LEASE_TTL_S = 15;
@@ -452,59 +459,115 @@ export async function handleAudioSetTalkingPoints(input: { points: string[] }): 
 // ── Tool Definitions ─────────────────────────────────────────
 
 export const audioTools = [
-  {
+  defineTool({
     name: 'cat_cafe_audio_list_sources',
     description:
       'List available audio capture sources: running applications (for per-app ScreenCaptureKit capture) and microphone devices.',
     inputSchema: audioListSourcesInputSchema,
     handler: handleAudioListSources,
-  },
-  {
+    governance: {
+      implementationExport: 'handleAudioListSources',
+      action: 'command',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_audio_capture_start',
     description:
       'Start real-time audio capture and transcription. source="app" captures a specific application\'s audio via ScreenCaptureKit (requires app_name). source="mic" captures from the system microphone. Audio is automatically chunked and transcribed via ASR.',
     inputSchema: audioCaptureStartInputSchema,
     handler: handleAudioCaptureStart,
-  },
-  {
+    governance: {
+      implementationExport: 'handleAudioCaptureStart',
+      action: 'command',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_audio_capture_stop',
     description:
       'Stop the current audio capture session. Returns a summary with chunk count, duration, and average ASR latency.',
     inputSchema: audioCaptureStopInputSchema,
     handler: handleAudioCaptureStop,
-  },
-  {
+    governance: {
+      implementationExport: 'handleAudioCaptureStop',
+      action: 'command',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_audio_capture_status',
     description: 'Check current audio capture status: whether capturing, source type, duration, and chunk count.',
     inputSchema: audioCaptureStatusInputSchema,
     handler: handleAudioCaptureStatus,
-  },
-  {
+    governance: {
+      implementationExport: 'handleAudioCaptureStatus',
+      action: 'command',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_audio_read_transcript',
     description:
       'Read transcript from the current or most recent audio capture session. mode="raw" (default): use "latest" for N most recent lines, or "from"/"to" timestamps. mode="summary": compressed event summaries of older transcript (beyond 5-min rolling window). mode="full": summaries + recent raw lines together.',
     inputSchema: audioReadTranscriptInputSchema,
     handler: handleAudioReadTranscript,
-  },
-  {
+    governance: {
+      implementationExport: 'handleAudioReadTranscript',
+      action: 'command',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_audio_enroll_speakers',
     description:
       'Enroll meeting participants for speaker attribution. Call before starting capture. The host (role="host") maps to mic source; other participants map to app/system audio. With 2 total participants, the non-host gets attributed by name. With 3+, non-host lines show "有人说" (confidence below threshold).',
     inputSchema: audioEnrollSpeakersInputSchema,
     handler: handleAudioEnrollSpeakers,
-  },
-  {
+    governance: {
+      implementationExport: 'handleAudioEnrollSpeakers',
+      action: 'command',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_audio_set_advisory_mode',
     description:
       'Set the advisory mode for the meeting copilot. "active" enables intervention hints (questions, silence, keyword matches) in the floating transcript window. "passive" (default) disables them. Advisory mode is opt-in to prevent attention overload.',
     inputSchema: audioSetAdvisoryModeInputSchema,
     handler: handleAudioSetAdvisoryMode,
-  },
-  {
+    governance: {
+      implementationExport: 'handleAudioSetAdvisoryMode',
+      action: 'command',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_audio_set_talking_points',
     description:
       'Register talking points for advisory keyword matching. When advisory mode is active and transcript mentions keywords from these points, a hint appears in the floating transcript window. Points must be user-provided — never generated from transcript.',
     inputSchema: audioSetTalkingPointsInputSchema,
     handler: handleAudioSetTalkingPoints,
-  },
+    governance: {
+      implementationExport: 'handleAudioSetTalkingPoints',
+      action: 'command',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
 ] as const;

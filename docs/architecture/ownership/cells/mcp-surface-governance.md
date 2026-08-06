@@ -8,12 +8,18 @@ description_author: codex-sol
 description_generated_by: codex-sol@gpt-5.6-sol
 description_generated_at: "2026-08-01T09:06:00-07:00"
 description_confirmed_by: landy
-description_updated_at: "2026-08-01T09:06:00-07:00"
+description_updated_at: "2026-08-04T10:59:42-07:00"
 doc_kind: architecture
 created: 2026-08-01
 canonical_features: [F286]
 code_anchors:
+  - packages/mcp-server/src/canonical-server-tools.ts
+  - packages/mcp-server/src/canonical-tool-registry.ts
   - packages/mcp-server/src/server-toolsets.ts
+  - packages/mcp-server/src/tool-governance.ts
+  - packages/mcp-server/src/tool-governance-cli.ts
+  - packages/mcp-server/src/tool-cutover.ts
+  - packages/mcp-server/governance/mcp-surface-baseline.json
   - packages/mcp-server/test/tool-registration.test.js
   - packages/mcp-server/test/server-toolsets-annotations.test.ts
   - packages/api/src/config/capabilities/mcp-constants.ts
@@ -23,6 +29,7 @@ doc_anchors:
   - docs/features/F286-mcp-surface-lifecycle-governance.md
   - project-research/2026-08-01-f286-mcp-surface-census.md
   - feature-discussions/2026-08-01-f286-mcp-surface-lifecycle/README.md
+  - feature-specs/2026-08-04-f286-phase-b-admission-contract.md
 static_scan_hints: [resourceFamily, cutoverState, exposureTier, standaloneReason, allowedNextActions, registerFullToolset, EXPECTED_TOOLS, MCP_TOOLS_SECTION, compatibility alias, atomic cutover]
 cited_by:
   - {feature: F286, date: 2026-08-01, delta: "new cell for MCP semantic admission and atomic resource-family cutover"}

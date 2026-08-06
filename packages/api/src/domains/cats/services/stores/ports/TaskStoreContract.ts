@@ -33,4 +33,17 @@ export interface ITaskStore {
     binding: ManagedWorkBinding,
   ): ManagedWorkBinding | null | Promise<ManagedWorkBinding | null>;
   getManagedWorkBinding(taskId: string): ManagedWorkBinding | null | Promise<ManagedWorkBinding | null>;
+  /** Replace complete state only while the observed wait generation/task revision is still current. */
+  replaceAutomationStateIfGeneration(
+    taskId: string,
+    input: ReplaceAutomationStateIfGenerationInput,
+  ): TaskItem | null | Promise<TaskItem | null>;
+}
+
+export interface ReplaceAutomationStateIfGenerationInput {
+  readonly expectedGeneration: number | null;
+  readonly expectedUpdatedAt?: number;
+  readonly automationState: AutomationState | undefined;
+  readonly why?: string;
+  readonly status?: TaskItem['status'];
 }

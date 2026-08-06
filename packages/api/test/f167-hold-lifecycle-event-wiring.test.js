@@ -16,7 +16,7 @@ const log = {
 };
 
 describe('F167 Phase Q: event-source hold retirement wiring', () => {
-  test('ReviewFeedbackTaskSpec retires review_posted holds after notifying and committing cursor', async () => {
+  test('ReviewFeedbackTaskSpec does not retire a parallel review_posted hold', async () => {
     const { createReviewFeedbackTaskSpec } = await import('../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
     const retired = [];
     let cursorCommitted = false;
@@ -72,18 +72,10 @@ describe('F167 Phase Q: event-source hold retirement wiring', () => {
     );
 
     assert.equal(cursorCommitted, true);
-    assert.deepEqual(retired, [
-      {
-        threadId: 'thread-Q',
-        subjectKey: 'pr:owner/repo#42',
-        expectedSignalKey: 'review_posted',
-        sourceKind: 'review_feedback',
-        sourceMessageId: 'msg-review-1',
-      },
-    ]);
+    assert.deepEqual(retired, [], 'the typed PR wait is the only PR wake lifecycle');
   });
 
-  test('CiCdCheckTaskSpec retires ci_complete holds after CI notification', async () => {
+  test('CiCdCheckTaskSpec does not retire a parallel ci_complete hold', async () => {
     const { createCiCdCheckTaskSpec } = await import('../dist/infrastructure/email/CiCdCheckTaskSpec.js');
     const retired = [];
 
@@ -143,18 +135,10 @@ describe('F167 Phase Q: event-source hold retirement wiring', () => {
       {},
     );
 
-    assert.deepEqual(retired, [
-      {
-        threadId: 'thread-Q',
-        subjectKey: 'pr:owner/repo#42',
-        expectedSignalKey: 'ci_complete',
-        sourceKind: 'ci_check',
-        sourceMessageId: 'msg-ci-1',
-      },
-    ]);
+    assert.deepEqual(retired, [], 'the typed PR wait is the only PR wake lifecycle');
   });
 
-  test('CiCdCheckTaskSpec leaves ci_complete holds active for silent review-intent CI pass', async () => {
+  test('CiCdCheckTaskSpec ignores removed legacy intent when isolating hold lifecycle', async () => {
     const { createCiCdCheckTaskSpec } = await import('../dist/infrastructure/email/CiCdCheckTaskSpec.js');
     const retired = [];
     const triggers = [];
@@ -218,7 +202,7 @@ describe('F167 Phase Q: event-source hold retirement wiring', () => {
     );
 
     assert.deepEqual(retired, []);
-    assert.deepEqual(triggers, []);
+    assert.equal(triggers.length, 1, 'a matched typed route is not suppressed by removed legacy intent');
   });
 
   test('IssueCommentTaskSpec retires comment_posted holds after routing and persisting the pending wake', async () => {

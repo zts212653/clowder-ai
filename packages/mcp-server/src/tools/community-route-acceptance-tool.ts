@@ -1,6 +1,13 @@
 import { z } from 'zod';
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 import { callbackPost } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('community-route-acceptance-tool.ts', undefined, {
+  resourceFamily: 'community-case',
+  authority: 'assigned-callback',
+});
 
 export const communityRouteAcceptanceInputSchema = {
   issueId: z
@@ -31,7 +38,7 @@ export async function handleCommunityRouteAcceptance(input: {
 }
 
 export const communityRouteAcceptanceTools = [
-  {
+  defineTool({
     name: 'cat_cafe_validate_community_route',
     description:
       'Accept or reject an F168 auto-routed community issue as the assigned cat. ' +
@@ -41,5 +48,11 @@ export const communityRouteAcceptanceTools = [
       'GOTCHA: callback identity is supplied inside the MCP bridge—the API verifies that the caller is the assigned cat. Never copy callback credentials into shell commands or tool arguments.',
     inputSchema: communityRouteAcceptanceInputSchema,
     handler: handleCommunityRouteAcceptance,
-  },
+    governance: {
+      implementationExport: 'handleCommunityRouteAcceptance',
+      action: 'validate',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
 ] as const;

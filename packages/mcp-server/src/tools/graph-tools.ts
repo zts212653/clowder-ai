@@ -1,3 +1,5 @@
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 /**
  * Graph Resolve Tool — F188 Phase F (AC-F1)
  *
@@ -15,6 +17,11 @@ import { formatRecallMeta } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('graph-tools.ts', undefined, {
+  resourceFamily: 'evidence-navigation',
+  authority: 'local-runtime',
+});
 
 const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
 
@@ -274,7 +281,7 @@ function crossReferenceFooter(): string {
 }
 
 export const graphTools = [
-  {
+  defineTool({
     name: 'cat_cafe_graph_resolve',
     description: [
       'Drill into the knowledge graph by anchor or fuzzy query.',
@@ -288,5 +295,11 @@ export const graphTools = [
     ].join('\n'),
     inputSchema: graphResolveInputSchema,
     handler: handleGraphResolve,
-  },
+    governance: {
+      implementationExport: 'handleGraphResolve',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
+    },
+  }),
 ] as const;

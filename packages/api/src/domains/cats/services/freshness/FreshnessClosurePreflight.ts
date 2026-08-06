@@ -1,4 +1,5 @@
 import type { FreshnessClosureAggregate } from '@cat-cafe/shared';
+import { compareCursors, cursorFor, parseCursor } from '../stores/cursor.js';
 import type { IMessageStore, StoredMessage } from '../stores/ports/MessageStore.js';
 import type { ITurnExecutionStore, TurnExecutionRecord } from '../stores/ports/TurnExecutionStore.js';
 import { isExpectedA2AReplyForCat, isFreshnessRoutableMessage } from './checkFreshnessForPostMessage.js';
@@ -21,6 +22,12 @@ export type FreshnessClosurePreflightResult =
   | { kind: 'blocked'; evidenceRefs: string[] };
 
 type BlockedPreflight = Extract<FreshnessClosurePreflightResult, { kind: 'blocked' }>;
+type LoadedFrontiers = {
+  kind: 'loaded';
+  latestRawFrontier: string;
+  latestVisibleCursor: string;
+  latestVisibleMessageId: string;
+};
 
 function blocked(...evidenceRefs: string[]): BlockedPreflight {
   return { kind: 'blocked', evidenceRefs };
@@ -68,34 +75,99 @@ async function isCurrentRelevantMessage(
   return !(await isExpectedA2AReplyForCat(message, closure.catId, messageStore));
 }
 
+async function inspectVisibilityBatch(input: {
+  batch: readonly StoredMessage[];
+  closure: FreshnessClosureAggregate;
+  messageStore: IMessageStore;
+  latestRawFrontier: string;
+  latestVisibleCursor: string;
+  requiredById: Map<string, StoredMessage>;
+  coveredTriggerMessageIds: ReadonlySet<string>;
+}): Promise<{ reachedVisibilitySnapshot: boolean; nextCursor?: string }> {
+  let nextCursor: string | undefined;
+  for (const message of input.batch) {
+    const messageCursor = cursorFor(message);
+    if (compareCursors(messageCursor, input.latestVisibleCursor) > 0) {
+      return { reachedVisibilitySnapshot: true, nextCursor };
+    }
+    nextCursor = messageCursor;
+    // The raw frontier is the append snapshot. A message appended after that
+    // snapshot must not leak into this preflight even if it entered the same
+    // visibility page; a late-visible older raw ID is still in scope.
+    if (message.id <= input.latestRawFrontier) {
+      const relevant = await isCurrentRelevantMessage(
+        message,
+        input.closure,
+        input.messageStore,
+        input.coveredTriggerMessageIds,
+      );
+      if (relevant) input.requiredById.set(message.id, message);
+    }
+    if (messageCursor === input.latestVisibleCursor) {
+      return { reachedVisibilitySnapshot: true, nextCursor };
+    }
+  }
+  return { reachedVisibilitySnapshot: false, nextCursor };
+}
+
 async function scanRawFrontier(input: {
   closure: FreshnessClosureAggregate;
   messageStore: IMessageStore;
   latestRawFrontier: string;
+  latestVisibleCursor: string;
+  latestVisibleMessageId: string;
   requiredById: Map<string, StoredMessage>;
   coveredTriggerMessageIds: ReadonlySet<string>;
 }): Promise<{ kind: 'scanned'; rawCursor: string } | BlockedPreflight> {
-  const { closure, messageStore, latestRawFrontier, requiredById, coveredTriggerMessageIds } = input;
-  let rawCursor = closure.observedRawFrontierMessageId ?? closure.requiredFrontierMessageId;
-  if (latestRawFrontier < rawCursor) {
-    return blocked(`raw-frontier:regressed:${latestRawFrontier}:${rawCursor}`);
+  const {
+    closure,
+    messageStore,
+    latestRawFrontier,
+    latestVisibleCursor,
+    latestVisibleMessageId,
+    requiredById,
+    coveredTriggerMessageIds,
+  } = input;
+  const previousRawFrontier = closure.observedRawFrontierMessageId ?? closure.requiredFrontierMessageId;
+  if (latestRawFrontier < previousRawFrontier) {
+    return blocked(`raw-frontier:regressed:${latestRawFrontier}:${previousRawFrontier}`);
   }
 
-  for (let page = 0; rawCursor < latestRawFrontier && page < MAX_PAGES; page += 1) {
-    const batch = await messageStore.getByThreadAfter(closure.threadId, rawCursor, PAGE_SIZE, closure.userId);
-    const nextCursor = batch.at(-1)?.id;
-    if (!nextCursor) break;
-    if (nextCursor <= rawCursor) return blocked(`raw-frontier:non-advancing:${rawCursor}`);
-    for (const message of batch) {
-      if (await isCurrentRelevantMessage(message, closure, messageStore, coveredTriggerMessageIds)) {
-        requiredById.set(message.id, message);
-      }
-    }
-    rawCursor = nextCursor;
+  // Raw frontier and visibility frontier are intentionally distinct. A queued
+  // message can become visible after previousRawFrontier without creating a new
+  // raw ID, so the visibility snapshot decides whether the scan is complete.
+  // We still return the sampled raw frontier for ADR-041's append boundary.
+  const previousRawId = parseCursor(previousRawFrontier)?.id ?? previousRawFrontier;
+  if (previousRawFrontier === latestRawFrontier && previousRawId === latestVisibleMessageId) {
+    return { kind: 'scanned', rawCursor: latestRawFrontier };
   }
-  return rawCursor >= latestRawFrontier
-    ? { kind: 'scanned', rawCursor }
-    : blocked(`raw-frontier:incomplete:${rawCursor}:${latestRawFrontier}`);
+
+  let paginationCursor = previousRawFrontier;
+  const visitedCursors = new Set([paginationCursor]);
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const batch = await messageStore.getByThreadAfter(closure.threadId, paginationCursor, PAGE_SIZE, closure.userId, {
+      includeQueuedCatMessages: true,
+    });
+    if (batch.length === 0) break;
+
+    const inspected = await inspectVisibilityBatch({
+      batch,
+      closure,
+      messageStore,
+      latestRawFrontier,
+      latestVisibleCursor,
+      requiredById,
+      coveredTriggerMessageIds,
+    });
+
+    if (inspected.reachedVisibilitySnapshot) return { kind: 'scanned', rawCursor: latestRawFrontier };
+    if (!inspected.nextCursor || visitedCursors.has(inspected.nextCursor)) {
+      return blocked(`raw-frontier:non-advancing:${previousRawFrontier}`);
+    }
+    paginationCursor = inspected.nextCursor;
+    visitedCursors.add(inspected.nextCursor);
+  }
+  return blocked(`raw-frontier:incomplete:${previousRawFrontier}:${latestRawFrontier}`);
 }
 
 function buildReadyResult(input: {
@@ -122,6 +194,57 @@ function buildReadyResult(input: {
   };
 }
 
+async function loadCoveredTriggerMessageIds(
+  closure: FreshnessClosureAggregate,
+  turnExecutionStore?: Pick<ITurnExecutionStore, 'get'>,
+): Promise<{ kind: 'loaded'; ids: Set<string> } | BlockedPreflight> {
+  const ids = new Set<string>();
+  if (!turnExecutionStore) return { kind: 'loaded', ids };
+
+  let execution: TurnExecutionRecord | null;
+  try {
+    execution = await turnExecutionStore.get(closure.turnInvocationId);
+  } catch {
+    return blocked(`turn-execution:unreadable:${closure.turnInvocationId}`);
+  }
+  if (
+    execution &&
+    (execution.threadId !== closure.threadId ||
+      execution.userId !== closure.userId ||
+      execution.catId !== closure.catId)
+  ) {
+    return blocked(`turn-execution:scope-mismatch:${closure.turnInvocationId}`);
+  }
+  for (const messageId of execution?.causal?.coveredMessageIds ?? []) ids.add(messageId);
+  return { kind: 'loaded', ids };
+}
+
+async function loadCurrentFrontiers(
+  closure: FreshnessClosureAggregate,
+  messageStore: IMessageStore,
+): Promise<LoadedFrontiers | BlockedPreflight> {
+  const latestRawFrontier = await messageStore.getLatestThreadMessageIdIncludingQueued(closure.threadId);
+  if (!latestRawFrontier) return blocked('raw-frontier:missing');
+
+  if (messageStore.canonicalizeCursor) {
+    const canonicalRawFrontier = await messageStore.canonicalizeCursor(latestRawFrontier, closure.threadId);
+    if (canonicalRawFrontier === latestRawFrontier) {
+      const previousRawFrontier = closure.observedRawFrontierMessageId ?? closure.requiredFrontierMessageId;
+      return blocked(`raw-frontier:incomplete:${previousRawFrontier}:${latestRawFrontier}`);
+    }
+  }
+  const latestVisible = messageStore.getLatestVisibleCursor
+    ? await messageStore.getLatestVisibleCursor(closure.threadId)
+    : { cursor: latestRawFrontier, messageId: latestRawFrontier };
+  if (!latestVisible) return blocked('visibility-frontier:missing');
+  return {
+    kind: 'loaded',
+    latestRawFrontier,
+    latestVisibleCursor: latestVisible.cursor,
+    latestVisibleMessageId: latestVisible.messageId,
+  };
+}
+
 /**
  * Rebuild closure input from current MessageStore truth before a retry may claim
  * the single running lease. This is deliberately fail-closed: an incomplete raw
@@ -135,34 +258,18 @@ export async function scanFreshnessClosurePreflight(input: {
   const { closure, messageStore, turnExecutionStore } = input;
   const loaded = await loadClosureBodies(input);
   if (loaded.kind === 'blocked') return loaded;
-  const coveredTriggerMessageIds = new Set<string>();
-  if (turnExecutionStore) {
-    let execution: TurnExecutionRecord | null;
-    try {
-      execution = await turnExecutionStore.get(closure.turnInvocationId);
-    } catch {
-      return blocked(`turn-execution:unreadable:${closure.turnInvocationId}`);
-    }
-    if (
-      execution &&
-      (execution.threadId !== closure.threadId ||
-        execution.userId !== closure.userId ||
-        execution.catId !== closure.catId)
-    ) {
-      return blocked(`turn-execution:scope-mismatch:${closure.turnInvocationId}`);
-    }
-    for (const messageId of execution?.causal?.coveredMessageIds ?? []) {
-      coveredTriggerMessageIds.add(messageId);
-    }
-  }
-  const latestRawFrontier = await messageStore.getLatestThreadMessageIdIncludingQueued(closure.threadId);
-  if (!latestRawFrontier) return blocked('raw-frontier:missing');
+  const covered = await loadCoveredTriggerMessageIds(closure, turnExecutionStore);
+  if (covered.kind === 'blocked') return covered;
+  const frontiers = await loadCurrentFrontiers(closure, messageStore);
+  if (frontiers.kind === 'blocked') return frontiers;
   const scanned = await scanRawFrontier({
     closure,
     messageStore,
-    latestRawFrontier,
+    latestRawFrontier: frontiers.latestRawFrontier,
+    latestVisibleCursor: frontiers.latestVisibleCursor,
+    latestVisibleMessageId: frontiers.latestVisibleMessageId,
     requiredById: loaded.requiredById,
-    coveredTriggerMessageIds,
+    coveredTriggerMessageIds: covered.ids,
   });
   if (scanned.kind === 'blocked') return scanned;
   return buildReadyResult({ ...loaded, rawCursor: scanned.rawCursor });

@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 import { callbackPost } from './callback-tools.js';
 import { errorResult, type ToolResult } from './file-tools.js';
 import { freshnessReplaySourceRefsShape } from './publish-verdict-freshness-source-refs.js';
@@ -8,6 +10,11 @@ import {
   validatePublishVerdictLifecycleInput,
 } from './publish-verdict-refresh-action.js';
 import { sopSourceRefsShape } from './publish-verdict-sop-source-refs.js';
+
+const defineTool = defineMcpMigrationFactory('publish-verdict-tool.ts', undefined, {
+  resourceFamily: 'eval-feedback',
+  authority: 'eval-callback',
+});
 
 const PUBLISH_VERDICT_FETCH_TIMEOUT_MS = 120_000;
 
@@ -306,7 +313,7 @@ export async function handlePublishVerdict(input: PublishVerdictToolInput): Prom
 }
 
 export const publishVerdictTools = [
-  {
+  defineTool({
     name: 'cat_cafe_publish_verdict',
     description:
       'Publish a converged eval-domain verdict as a structured commit and auto-PR. ' +
@@ -321,5 +328,11 @@ export const publishVerdictTools = [
       'GOTCHA: replacement publishes may repeat an exact stored episode verdict, but refresh_pr is preferred when the existing PR only needs a current-base census refresh.',
     inputSchema: publishVerdictInputSchema,
     handler: handlePublishVerdict,
-  },
+    governance: {
+      implementationExport: 'handlePublishVerdict',
+      action: 'update',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+    },
+  }),
 ] as const;

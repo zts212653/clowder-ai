@@ -1,3 +1,5 @@
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 /**
  * Library Lifecycle Tools — F188 Phase I (AC-I4)
  *
@@ -11,6 +13,11 @@
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('library-lifecycle-tools.ts', undefined, {
+  resourceFamily: 'library',
+  authority: 'local-runtime',
+});
 
 const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
 
@@ -293,7 +300,7 @@ export async function handleLibraryVerify(input: {
 // --- exports ---
 
 export const libraryLifecycleTools = [
-  {
+  defineTool({
     name: 'cat_cafe_library_list',
     description: [
       'List all registered collections with status, document count, sensitivity.',
@@ -304,8 +311,15 @@ export const libraryLifecycleTools = [
     ].join('\n'),
     inputSchema: libraryListInputSchema,
     handler: handleLibraryList,
-  },
-  {
+    governance: {
+      implementationExport: 'handleLibraryList',
+      action: 'command',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_library_dry_run',
     description: [
       'Scan a directory and report what would be indexed (file count, size, secrets, scanner level).',
@@ -314,8 +328,15 @@ export const libraryLifecycleTools = [
     ].join('\n'),
     inputSchema: libraryDryRunInputSchema,
     handler: handleLibraryDryRun,
-  },
-  {
+    governance: {
+      implementationExport: 'handleLibraryDryRun',
+      action: 'command',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_library_create',
     description: [
       'Create a new collection. Two modes:',
@@ -326,8 +347,15 @@ export const libraryLifecycleTools = [
     ].join('\n'),
     inputSchema: libraryCreateInputSchema,
     handler: handleLibraryCreate,
-  },
-  {
+    governance: {
+      implementationExport: 'handleLibraryCreate',
+      action: 'command',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_library_rebuild',
     description: [
       'Rebuild the index for a collection — scans root directory for new/changed/deleted files.',
@@ -336,8 +364,15 @@ export const libraryLifecycleTools = [
     ].join('\n'),
     inputSchema: libraryRebuildInputSchema,
     handler: handleLibraryRebuild,
-  },
-  {
+    governance: {
+      implementationExport: 'handleLibraryRebuild',
+      action: 'command',
+      risk: { level: 'destructive', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'profile-gated',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_library_archive',
     description: [
       'Archive a collection — removes it from search/routing but preserves data.',
@@ -346,8 +381,15 @@ export const libraryLifecycleTools = [
     ].join('\n'),
     inputSchema: libraryArchiveInputSchema,
     handler: handleLibraryArchive,
-  },
-  {
+    governance: {
+      implementationExport: 'handleLibraryArchive',
+      action: 'command',
+      risk: { level: 'destructive', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'profile-gated',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_library_verify',
     description: [
       'Execute a verification action on a document: confirm, mark_stale, escalate, or dismiss_review.',
@@ -356,5 +398,12 @@ export const libraryLifecycleTools = [
     ].join('\n'),
     inputSchema: libraryVerifyInputSchema,
     handler: handleLibraryVerify,
-  },
+    governance: {
+      implementationExport: 'handleLibraryVerify',
+      action: 'command',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
 ] as const;

@@ -160,10 +160,20 @@ describe('F177 PR review event-wait coverage verifier', () => {
     assert.equal(calls, 1);
   });
 
-  test('non-exact review trigger is uncovered', async () => {
+  test('accepted trigger may carry bounded author context after the command', async () => {
     assert.deepEqual(
       await verifyPrReviewEventWaitCoverage(INPUT, {
         execFileAsync: execFixture({ body: '@codex review\nplease also edit it' }),
+        now: () => 1234,
+      }),
+      { covered: true, triggerCommentId: INPUT.triggerCommentId, observedAt: 1234 },
+    );
+  });
+
+  test('narrative mention that does not begin with the command is uncovered', async () => {
+    assert.deepEqual(
+      await verifyPrReviewEventWaitCoverage(INPUT, {
+        execFileAsync: execFixture({ body: 'Ready for @codex review' }),
         now: () => 1234,
       }),
       {

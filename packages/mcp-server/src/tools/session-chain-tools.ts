@@ -1,3 +1,5 @@
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 /**
  * Session Chain MCP Tools — F24 Phase D + F98
  * Tools for cats to read sealed session transcripts.
@@ -13,6 +15,11 @@
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('session-chain-tools.ts', undefined, {
+  resourceFamily: 'runtime-session',
+  authority: 'local-runtime',
+});
 
 const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
 
@@ -312,7 +319,7 @@ export async function handleSessionSearch(input: {
 // --- Tool definitions ---
 
 export const sessionChainTools = [
-  {
+  defineTool({
     name: 'cat_cafe_list_session_chain',
     description:
       'List session chain for a thread. Shows session IDs, sequence numbers, status, and context health for each cat. ' +
@@ -321,8 +328,15 @@ export const sessionChainTools = [
       'TIP: Filter by catId to narrow results when a thread has many sessions from different cats.',
     inputSchema: listSessionChainInputSchema,
     handler: handleListSessionChain,
-  },
-  {
+    governance: {
+      implementationExport: 'handleListSessionChain',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_read_session_events',
     description:
       'Read events from a sealed session transcript. Supports view modes: raw (default, full events), chat (role/content pairs), handoff (per-invocation summaries). Pagination via cursor. ' +
@@ -334,8 +348,15 @@ export const sessionChainTools = [
       'TIP: Start with view=handoff to get the big picture, then use read_invocation_detail for specific invocations.',
     inputSchema: readSessionEventsInputSchema,
     handler: handleReadSessionEvents,
-  },
-  {
+    governance: {
+      implementationExport: 'handleReadSessionEvents',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_read_session_digest',
     description:
       'Read the extractive digest of a sealed session. Contains tool names, files touched, errors, and timing info. ' +
@@ -346,8 +367,15 @@ export const sessionChainTools = [
       'or read_invocation_detail if the digest mentions a specific invocationId of interest.',
     inputSchema: readSessionDigestInputSchema,
     handler: handleReadSessionDigest,
-  },
-  {
+    governance: {
+      implementationExport: 'handleReadSessionDigest',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_read_invocation_detail',
     description:
       'Read all events for a specific invocation within a sealed session. ' +
@@ -357,6 +385,13 @@ export const sessionChainTools = [
       'and invocationId from read_session_events (handoff view) or search_evidence results.',
     inputSchema: readInvocationDetailInputSchema,
     handler: handleReadInvocationDetail,
-  },
+    governance: {
+      implementationExport: 'handleReadInvocationDetail',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
   // D15: cat_cafe_session_search removed — superseded by search_evidence unified entry point
 ] as const;

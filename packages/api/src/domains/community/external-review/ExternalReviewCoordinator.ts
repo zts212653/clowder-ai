@@ -3,18 +3,13 @@ import type {
   CommunityObjectProjection,
   ExternalCloudReviewStatus,
   ExternalReviewAggregate,
-  TrackingWakePolicy,
 } from '@cat-cafe/shared';
 import { prSubjectKey } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import type { CiPollResult } from '../../../infrastructure/email/ci-cd-contract.js';
 import {
-  externalCaseAuthorUpdateToReadyWakeSeconds,
-  externalCaseDuplicateReviewerWakePerHead,
   externalCaseHeadObserved,
-  externalCaseNoisyWakeDuringCloudReview,
   externalCasePendingDeliveryAgeSeconds,
-  externalCaseReviewerWakeDelivered,
 } from '../../../infrastructure/telemetry/instruments.js';
 import type { ICommunityEventLog } from '../CommunityEventLog.js';
 import type { ICommunityObjectStore } from '../CommunityObjectStore.js';
@@ -30,7 +25,6 @@ export interface ExternalReviewTrackingTarget {
   readonly threadId: string;
   readonly catId: string;
   readonly userId: string;
-  readonly wakePolicy?: TrackingWakePolicy;
 }
 
 export interface ExternalCloudObservation {
@@ -40,19 +34,6 @@ export interface ExternalCloudObservation {
   readonly status: ExternalCloudReviewStatus;
   readonly triggerCommentId?: number;
   readonly reviewId?: number;
-}
-
-export interface ExternalReviewReadyDeliveryInput extends ExternalReviewTrackingTarget {
-  readonly repoFullName: string;
-  readonly prNumber: number;
-  readonly headSha: string;
-  readonly content: string;
-  readonly idempotencyKey: string;
-}
-
-export interface ExternalReviewReadyDeliveryResult {
-  readonly messageId: string;
-  readonly content: string;
 }
 
 type ExternalReviewWaitReason = Extract<ExternalReviewReadinessDecision, { kind: 'wait' }>['reason'];
@@ -65,15 +46,7 @@ export type ExternalReviewCoordinatorResult =
         | ExternalReviewWaitReason
         | 'wake_already_delivered_for_head'
         | 'projection_unavailable'
-        | 'wake_policy_state_only';
-    }
-  | {
-      readonly kind: 'notified';
-      readonly threadId: string;
-      readonly catId: string;
-      readonly messageId: string;
-      readonly content: string;
-      readonly headSha: string;
+        | 'explicit_wait_required';
     };
 
 export interface ExternalReviewCoordinatorOptions {
@@ -81,10 +54,7 @@ export interface ExternalReviewCoordinatorOptions {
   readonly eventLog: ICommunityEventLog;
   readonly projector: ExternalReviewProjectorPort;
   readonly objectStore: Pick<ICommunityObjectStore, 'get'>;
-  readonly deliverReady: (input: ExternalReviewReadyDeliveryInput) => Promise<ExternalReviewReadyDeliveryResult>;
   readonly log: Pick<FastifyBaseLogger, 'info' | 'warn' | 'error'>;
-  readonly recordNoisyWakeDuringCloudReview?: () => void;
-  readonly recordDuplicateReviewerWake?: () => void;
   readonly now?: () => number;
 }
 
@@ -96,17 +66,6 @@ function makeEvent(
   at: number,
 ): CommunityEvent {
   return { sourceEventId, subjectKey, kind, classification: 'informational', payload, at };
-}
-
-function buildReadyContent(repoFullName: string, prNumber: number, headSha: string): string {
-  return [
-    `🔎 **External PR ready for re-review** — ${repoFullName}#${prNumber}`,
-    '',
-    `Current HEAD: \`${headSha}\``,
-    'Current-head CI and configured cloud-review policy are satisfied.',
-    '',
-    'Review this exact HEAD. Record the verdict in the same turn with GitHub delivery proof or persistent pending-delivery responsibility.',
-  ].join('\n');
 }
 
 export class ExternalReviewCoordinator {
@@ -131,7 +90,7 @@ export class ExternalReviewCoordinator {
         this.now(),
       ),
     );
-    return this.maybeWake(poll.repoFullName, poll.prNumber, initialized.subjectKey, tracking);
+    return this.maybeWake(initialized.subjectKey);
   }
 
   async recordCloud(
@@ -154,7 +113,7 @@ export class ExternalReviewCoordinator {
       current.cloud.status !== 'running' &&
       current.cloud.status !== 'not_requested'
     ) {
-      return this.maybeWake(observation.repoFullName, observation.prNumber, initialized.subjectKey, tracking);
+      return this.maybeWake(initialized.subjectKey);
     }
 
     const correlation = observation.reviewId ?? observation.triggerCommentId ?? 'none';
@@ -173,7 +132,7 @@ export class ExternalReviewCoordinator {
         this.now(),
       ),
     );
-    return this.maybeWake(observation.repoFullName, observation.prNumber, initialized.subjectKey, tracking);
+    return this.maybeWake(initialized.subjectKey);
   }
 
   private async initialize(
@@ -263,12 +222,7 @@ export class ExternalReviewCoordinator {
     return (projection as CommunityObjectProjection | null)?.externalReview ?? null;
   }
 
-  private async maybeWake(
-    repoFullName: string,
-    prNumber: number,
-    subjectKey: string,
-    tracking: ExternalReviewTrackingTarget,
-  ): Promise<ExternalReviewCoordinatorResult> {
+  private async maybeWake(subjectKey: string): Promise<ExternalReviewCoordinatorResult> {
     let aggregate = await this.readAggregate(subjectKey);
     if (!aggregate) return { kind: 'state_only', reason: 'projection_unavailable' };
     if (aggregate.delivery?.kind === 'pending_delivery') {
@@ -306,77 +260,8 @@ export class ExternalReviewCoordinator {
     }
     const deliveryReadiness = decideExternalReviewReadiness({ ...aggregate, wake: null });
     if (deliveryReadiness.kind === 'wait') return { kind: 'state_only', reason: deliveryReadiness.reason };
-    if (tracking.wakePolicy === 'human_participant_activity') {
-      return { kind: 'state_only', reason: 'wake_policy_state_only' };
-    }
-    const headSha = aggregate.wake.headSha;
-    const headGeneration = aggregate.wake.headGeneration;
-    const content = buildReadyContent(repoFullName, prNumber, headSha);
-    const delivered = await this.opts.deliverReady({
-      ...tracking,
-      repoFullName,
-      prNumber,
-      headSha,
-      content,
-      idempotencyKey: `f168:review-ready:${subjectKey}:g${headGeneration}:${headSha}`,
-    });
-    const afterDelivery = await this.readAggregate(subjectKey);
-    if (
-      afterDelivery?.wake?.headSha === headSha &&
-      afterDelivery.wake.headGeneration === headGeneration &&
-      afterDelivery.wake.status === 'delivered'
-    ) {
-      if (afterDelivery.wake.messageId !== delivered.messageId) {
-        (this.opts.recordDuplicateReviewerWake ?? (() => externalCaseDuplicateReviewerWakePerHead.add(1)))();
-        this.opts.log.error(
-          {
-            subjectKey,
-            headSha,
-            headGeneration,
-            canonicalMessageId: afterDelivery.wake.messageId,
-            duplicateMessageId: delivered.messageId,
-          },
-          '[F168] duplicate reviewer wake identity detected; preserving canonical proof',
-        );
-      }
-      return { kind: 'state_only', reason: 'wake_already_delivered_for_head' };
-    }
-    if (
-      afterDelivery?.cloud?.headSha === headSha &&
-      afterDelivery.cloud.headGeneration === headGeneration &&
-      (afterDelivery.cloud.status === 'running' ||
-        afterDelivery.cloud.status === 'blocking' ||
-        afterDelivery.cloud.status === 'failed_or_timeout')
-    ) {
-      (this.opts.recordNoisyWakeDuringCloudReview ?? (() => externalCaseNoisyWakeDuringCloudReview.add(1)))();
-      this.opts.log.error(
-        { subjectKey, headSha, headGeneration, cloudStatus: afterDelivery.cloud.status },
-        '[F168] reviewer wake raced with unsatisfied cloud review',
-      );
-    }
-    const wakeProofAppended = await this.appendAndApply(
-      makeEvent(
-        `f168:reviewer-wake-delivered:${subjectKey}:g${headGeneration}:${headSha}:${delivered.messageId}`,
-        subjectKey,
-        'case.reviewer_wake_delivered',
-        { headSha, headGeneration, messageId: delivered.messageId },
-        this.now(),
-      ),
-    );
-    if (wakeProofAppended) externalCaseReviewerWakeDelivered.add(1);
-    if (wakeProofAppended && aggregate.currentHeadObservedAt != null) {
-      externalCaseAuthorUpdateToReadyWakeSeconds.record(
-        Math.max(0, this.now() - aggregate.currentHeadObservedAt) / 1000,
-      );
-    }
-    this.opts.log.info({ subjectKey, headSha, messageId: delivered.messageId }, '[F168] reviewer wake delivered');
-    return {
-      kind: 'notified',
-      threadId: tracking.threadId,
-      catId: tracking.catId,
-      messageId: delivered.messageId,
-      content: delivered.content,
-      headSha,
-    };
+    // F280: readiness remains durable case truth. Only an explicit typed wait
+    // may project it into connector delivery/invocation.
+    return { kind: 'state_only', reason: 'explicit_wait_required' };
   }
 }

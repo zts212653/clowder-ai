@@ -3,15 +3,15 @@ import { describe, test } from 'node:test';
 
 const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
 
-describe('F202 Phase 2C: trackingInstructions in AutomationState', () => {
+describe('F202 Phase 2C: issue-only trackingInstructions compatibility', () => {
   test('upsertBySubject stores trackingInstructions in automationState', () => {
     const store = new TaskStore();
     const task = store.upsertBySubject({
-      kind: 'pr_tracking',
+      kind: 'issue_tracking',
       threadId: 't1',
-      subjectKey: 'pr:owner/repo#1',
-      title: 'PR tracking: owner/repo#1',
-      why: 'Tracking PR',
+      subjectKey: 'issue:owner/repo#1',
+      title: 'Issue tracking: owner/repo#1',
+      why: 'Tracking issue',
       createdBy: 'cat1',
       automationState: { trackingInstructions: 'Fix CI then merge' },
     });
@@ -21,10 +21,10 @@ describe('F202 Phase 2C: trackingInstructions in AutomationState', () => {
   test('upsertBySubject preserves trackingInstructions on re-upsert without it', () => {
     const store = new TaskStore();
     store.upsertBySubject({
-      kind: 'pr_tracking',
+      kind: 'issue_tracking',
       threadId: 't1',
-      subjectKey: 'pr:owner/repo#2',
-      title: 'PR tracking',
+      subjectKey: 'issue:owner/repo#2',
+      title: 'Issue tracking',
       why: 'test',
       createdBy: 'cat1',
       automationState: { trackingInstructions: 'Original instructions' },
@@ -32,10 +32,10 @@ describe('F202 Phase 2C: trackingInstructions in AutomationState', () => {
 
     // Re-upsert without automationState — should preserve existing instructions
     const updated = store.upsertBySubject({
-      kind: 'pr_tracking',
+      kind: 'issue_tracking',
       threadId: 't1',
-      subjectKey: 'pr:owner/repo#2',
-      title: 'PR tracking updated',
+      subjectKey: 'issue:owner/repo#2',
+      title: 'Issue tracking updated',
       why: 'test',
       createdBy: 'cat1',
     });
@@ -45,9 +45,9 @@ describe('F202 Phase 2C: trackingInstructions in AutomationState', () => {
   test('patchAutomationState can update trackingInstructions', () => {
     const store = new TaskStore();
     const task = store.create({
-      kind: 'pr_tracking',
+      kind: 'issue_tracking',
       threadId: 't1',
-      subjectKey: 'pr:owner/repo#3',
+      subjectKey: 'issue:owner/repo#3',
       title: 'test',
       why: 'test',
       createdBy: 'cat1',

@@ -12,7 +12,7 @@
  *   Notification time (lastNotifiedAt): advances only after the owner wake is accepted.
  *   With no eventLog injected: original single-cursor behaviour is unchanged.
  */
-import type { CatId, CommunityEvent, IssuePendingWake, TaskItem } from '@cat-cafe/shared';
+import type { CatId, CommunityEvent, IssuePendingWake, LegacyIssueAutomationState, TaskItem } from '@cat-cafe/shared';
 import { parseIssueSubjectKey } from '@cat-cafe/shared';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
 import type { ICommunityEventLog } from '../../domains/community/CommunityEventLog.js';
@@ -130,7 +130,7 @@ function shouldDeliverComment(
   if (classification.critical) return true;
   return (
     decideTrackingWake({
-      wakePolicy: task.automationState?.wakePolicy,
+      wakePolicy: (task.automationState as LegacyIssueAutomationState | undefined)?.wakePolicy,
       actorLogin: comment.author,
       actorType: comment.actorType,
       subjectAuthorLogin,
@@ -557,7 +557,8 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
               threadId: task.threadId,
               catId: task.ownerCatId,
               userId: task.userId,
-              trackingInstructions: task.automationState?.trackingInstructions,
+              trackingInstructions: (task.automationState as LegacyIssueAutomationState | undefined)
+                ?.trackingInstructions,
             },
           );
 

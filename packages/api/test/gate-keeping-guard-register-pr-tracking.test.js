@@ -74,9 +74,9 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
       reflectionService,
       markerQueue,
       taskStore: overrides.taskStore ?? taskStore,
-      fetchPrTrackingBoundary: async () => ({
-        review: { lastCommentCursor: 0, lastDecisionCursor: 0 },
-        ci: { headSha: 'test-head' },
+      fetchPrWaitBaseline: async () => ({
+        baseline: { capturedAt: 100, headSha: 'test-head' },
+        collectorState: { ci: { headSha: 'test-head' } },
       }),
     };
     await app.register(callbacksRoutes, options);
@@ -97,6 +97,17 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
     );
   }
 
+  function prWaitPayload(prNumber, overrides = {}) {
+    return {
+      repoFullName: 'owner/repo',
+      prNumber,
+      when: [{ kind: 'pr_head_changed' }],
+      nextStep: `Re-lock HEAD for #${prNumber}.`,
+      expiresAt: Date.now() + 60_000,
+      ...overrides,
+    };
+  }
+
   test('INV-G4: non-gate-keeping thread → 200 (regression cover)', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', 'normal-thread');
@@ -106,7 +117,13 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { repoFullName: 'owner/repo', prNumber: 100 },
+      payload: {
+        repoFullName: 'owner/repo',
+        prNumber: 100,
+        when: [{ kind: 'pr_head_changed' }],
+        nextStep: 'Re-lock HEAD.',
+        expiresAt: Date.now() + 60_000,
+      },
     });
 
     assert.equal(response.statusCode, 200, 'normal thread tracking must still succeed');
@@ -125,7 +142,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { repoFullName: 'owner/repo', prNumber: 501 },
+      payload: prWaitPayload(501),
     });
 
     assert.equal(response.statusCode, 200);
@@ -145,7 +162,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': managed.invocationId, 'x-callback-token': managed.callbackToken },
-      payload: { repoFullName: 'owner/repo', prNumber: 502 },
+      payload: prWaitPayload(502),
     });
     assert.equal(first.statusCode, 200);
 
@@ -154,7 +171,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': unbound.invocationId, 'x-callback-token': unbound.callbackToken },
-      payload: { repoFullName: 'owner/repo', prNumber: 502 },
+      payload: prWaitPayload(502),
     });
 
     assert.equal(second.statusCode, 200);
@@ -179,7 +196,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
         'x-invocation-id': firstInvocation.invocationId,
         'x-callback-token': firstInvocation.callbackToken,
       },
-      payload: { repoFullName: 'owner/repo', prNumber: 503 },
+      payload: prWaitPayload(503),
     });
     assert.equal(first.statusCode, 200);
 
@@ -190,7 +207,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
         'x-invocation-id': secondInvocation.invocationId,
         'x-callback-token': secondInvocation.callbackToken,
       },
-      payload: { repoFullName: 'owner/repo', prNumber: 503 },
+      payload: prWaitPayload(503),
     });
 
     assert.equal(second.statusCode, 409);
@@ -215,7 +232,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
         'x-invocation-id': ownerInvocation.invocationId,
         'x-callback-token': ownerInvocation.callbackToken,
       },
-      payload: { repoFullName: 'owner/repo', prNumber: 504 },
+      payload: prWaitPayload(504),
     });
     assert.equal(first.statusCode, 200);
 
@@ -226,7 +243,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
         'x-invocation-id': attackerInvocation.invocationId,
         'x-callback-token': attackerInvocation.callbackToken,
       },
-      payload: { repoFullName: 'owner/repo', prNumber: 504 },
+      payload: prWaitPayload(504),
     });
 
     assert.equal(second.statusCode, 409);
@@ -244,12 +261,12 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
       {
         thread: threadA,
         binding: { workId: 'work-race-a', attemptId: 'attempt-race-a' },
-        instructions: 'winner-a-instructions',
+        nextStep: 'winner-a-next-step',
       },
       {
         thread: threadB,
         binding: { workId: 'work-race-b', attemptId: 'attempt-race-b' },
-        instructions: 'winner-b-instructions',
+        nextStep: 'winner-b-next-step',
       },
     ];
     const invocations = await Promise.all(
@@ -276,6 +293,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
       bindManagedWorkBinding: taskStore.bindManagedWorkBinding.bind(taskStore),
       getManagedWorkBinding: taskStore.getManagedWorkBinding.bind(taskStore),
       patchAutomationState: taskStore.patchAutomationState.bind(taskStore),
+      replaceAutomationStateIfGeneration: taskStore.replaceAutomationStateIfGeneration.bind(taskStore),
     };
     const app = await createApp({ taskStore: racingTaskStore });
 
@@ -288,11 +306,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
             'x-invocation-id': invocations[index].invocationId,
             'x-callback-token': invocations[index].callbackToken,
           },
-          payload: {
-            repoFullName: 'owner/repo',
-            prNumber: 506,
-            instructions: candidate.instructions,
-          },
+          payload: prWaitPayload(506, { nextStep: candidate.nextStep }),
         }),
       ),
     );
@@ -303,7 +317,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
     const stored = taskStore.getBySubject('pr:owner/repo#506');
     assert.ok(stored);
     assert.equal(stored.threadId, winner.thread.id);
-    assert.equal(stored.automationState.trackingInstructions, winner.instructions);
+    assert.equal(stored.automationState.await.continuation.then, winner.nextStep);
     assert.deepEqual(taskStore.getManagedWorkBinding(stored.id), winner.binding);
   });
 
@@ -345,6 +359,11 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
       },
       getManagedWorkBinding: () => null,
       patchAutomationState: () => replacement,
+      replaceAutomationStateIfGeneration: (_taskId, input) => {
+        calls.push(`replace:${replacement.id}`);
+        replacement.automationState = input.automationState;
+        return replacement;
+      },
     };
     const app = await createApp({ taskStore: racingTaskStore });
 
@@ -355,11 +374,11 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
         'x-invocation-id': invocation.invocationId,
         'x-callback-token': invocation.callbackToken,
       },
-      payload: { repoFullName: 'owner/repo', prNumber: 505 },
+      payload: prWaitPayload(505),
     });
 
     assert.equal(response.statusCode, 200);
-    assert.deepEqual(calls, [`managed-upsert:${replacement.id}:${binding.workId}`]);
+    assert.deepEqual(calls, [`managed-upsert:${replacement.id}:${binding.workId}`, `replace:${replacement.id}`]);
   });
 
   test('INV-G2: gate-keeping thread + no override → 400 gate_keeping_thread_default_blocked', async () => {
@@ -372,7 +391,13 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { repoFullName: 'owner/repo', prNumber: 200 },
+      payload: {
+        repoFullName: 'owner/repo',
+        prNumber: 200,
+        when: [{ kind: 'pr_head_changed' }],
+        nextStep: 'Re-lock HEAD.',
+        expiresAt: Date.now() + 60_000,
+      },
     });
 
     assert.equal(response.statusCode, 400, 'gate-keeping thread must default-block');
@@ -401,18 +426,16 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
       payload: {
         repoFullName: 'owner/repo',
         prNumber: 300,
+        when: [{ kind: 'pr_head_changed' }],
+        nextStep: 'Re-lock HEAD.',
+        expiresAt: Date.now() + 60_000,
         override: 'i-am-the-downstream-owner',
       },
     });
 
-    assert.equal(response.statusCode, 400, 'override claim must NOT escape — gate-keeping is hard-block');
+    assert.equal(response.statusCode, 400, 'unknown override must fail strict public schema');
     const body = JSON.parse(response.body);
-    assert.equal(body.error, 'gate_keeping_thread_default_blocked');
-    assert.equal(body.threadKind, 'gate-keeping');
-    // Remediation must point cats to traffic-redirect (cross_post / propose / 分发),
-    // and explicitly state no override channel exists.
-    assert.match(body.remediation, /cross_post|propose|分发/);
-    assert.match(body.remediation, /没有 override 通道/);
+    assert.equal(body.error, 'Invalid request body');
 
     // No task persisted.
     const stored = taskStore.getBySubject('pr:owner/repo#300');
@@ -441,7 +464,13 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { repoFullName: 'owner/repo', prNumber: 400 },
+      payload: {
+        repoFullName: 'owner/repo',
+        prNumber: 400,
+        when: [{ kind: 'pr_head_changed' }],
+        nextStep: 'Re-lock HEAD.',
+        expiresAt: Date.now() + 60_000,
+      },
     });
 
     assert.equal(response.statusCode, 200, 'guard must fail-open on threadStore error');

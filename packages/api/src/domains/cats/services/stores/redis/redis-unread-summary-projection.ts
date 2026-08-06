@@ -1,5 +1,6 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { parseCursor } from '../cursor.js';
 import type { ThreadUnreadMessageProjection, ThreadUnreadProjectionCursor } from '../ports/MessageStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import { isSystemUserMessage } from '../visibility.js';
@@ -19,10 +20,30 @@ async function projectMessageIds(
   redis: RedisClient,
   cursors: readonly ThreadUnreadProjectionCursor[],
 ): Promise<Map<string, string[]>> {
-  const scorePipeline = redis.pipeline();
-  for (const cursor of cursors) scorePipeline.zscore(MessageKeys.thread(cursor.threadId), cursor.afterId);
-  const scoreResults = (await scorePipeline.exec()) as PipelineResults;
-  const scores = cursors.map((_, index) => readPipelineValue<string | null>(scoreResults, index, 'Unread score'));
+  const cursorPlans = cursors.map((cursor) => {
+    const { afterId } = cursor;
+    const parsed = parseCursor(afterId);
+    if (!parsed) throw new Error('Unread projection cursor must not be empty');
+    return { cursor, parsed };
+  });
+
+  // Resolve legacy v1 cursors in the same visibility domain as
+  // RedisMessageStore.getByThreadAfter. HGET is authoritative when the cursor
+  // member was evicted from the visibility ZSET; ZSCORE is the fallback for a
+  // surviving index member whose message hash was pruned.
+  const positionPipeline = redis.pipeline();
+  for (const { cursor, parsed } of cursorPlans) {
+    positionPipeline.hget(MessageKeys.detail(parsed.id), 'visibilitySeq');
+    positionPipeline.zscore(MessageKeys.threadVisibility(cursor.threadId), parsed.id);
+  }
+  const positionResults = (await positionPipeline.exec()) as PipelineResults;
+  const positions = cursorPlans.map(({ parsed }, index) => {
+    if (parsed.version === 2) return parsed.seq;
+    const hashSeq = readPipelineValue<string | null>(positionResults, index * 2, 'Unread visibility hash');
+    const indexSeq = readPipelineValue<string | null>(positionResults, index * 2 + 1, 'Unread visibility score');
+    const raw = hashSeq ?? indexSeq;
+    return raw === null ? null : Number(raw);
+  });
 
   type RangePlan =
     | { kind: 'expired'; commandIndex: number }
@@ -30,38 +51,34 @@ async function projectMessageIds(
   const rangePipeline = redis.pipeline();
   const rangePlans: RangePlan[] = [];
   let commandIndex = 0;
-  for (const [index, cursor] of cursors.entries()) {
-    const score = scores[index];
-    if (score === null) {
-      rangePipeline.zrange(MessageKeys.thread(cursor.threadId), 0, -1);
+  for (const [index, { cursor }] of cursorPlans.entries()) {
+    const position = positions[index];
+    if (position === null) {
+      rangePipeline.zrange(MessageKeys.threadVisibility(cursor.threadId), 0, -1);
       rangePlans.push({ kind: 'expired', commandIndex: commandIndex++ });
       continue;
     }
-    rangePipeline.zrangebyscore(MessageKeys.thread(cursor.threadId), score, score);
+    rangePipeline.zrangebyscore(MessageKeys.threadVisibility(cursor.threadId), position, position);
     const sameScoreIndex = commandIndex++;
-    rangePipeline.zrangebyscore(MessageKeys.thread(cursor.threadId), `(${score}`, '+inf');
+    rangePipeline.zrangebyscore(MessageKeys.threadVisibility(cursor.threadId), `(${position}`, '+inf');
     rangePlans.push({ kind: 'scored', sameScoreIndex, higherScoreIndex: commandIndex++ });
   }
 
   const rangeResults = (await rangePipeline.exec()) as PipelineResults;
   const idsByThread = new Map<string, string[]>();
-  for (const [index, cursor] of cursors.entries()) {
+  for (const [index, { cursor, parsed }] of cursorPlans.entries()) {
     const plan = rangePlans[index];
     if (!plan) throw new Error(`Unread range plan missing cursor ${index}`);
     if (plan.kind === 'expired') {
       const allIds = readPipelineValue<string[]>(rangeResults, plan.commandIndex, 'Unread range');
-      idsByThread.set(
-        cursor.threadId,
-        allIds.filter((id) => id > cursor.afterId),
-      );
+      // Match getByThreadAfter's fully-pruned fallback: scan from visibility
+      // start. Raw-ID filtering would recreate the C -> Q -> C cursor cycle.
+      idsByThread.set(cursor.threadId, allIds);
       continue;
     }
     const sameScoreIds = readPipelineValue<string[]>(rangeResults, plan.sameScoreIndex, 'Unread range');
     const higherScoreIds = readPipelineValue<string[]>(rangeResults, plan.higherScoreIndex, 'Unread range');
-    idsByThread.set(cursor.threadId, [
-      ...sameScoreIds.filter((id) => id !== cursor.afterId && id > cursor.afterId),
-      ...higherScoreIds,
-    ]);
+    idsByThread.set(cursor.threadId, [...sameScoreIds.filter((id) => id > parsed.id), ...higherScoreIds]);
   }
   return idsByThread;
 }

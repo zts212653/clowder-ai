@@ -1922,7 +1922,13 @@ describe('MCP Callback Tools', () => {
       return { ok: true, json: async () => ({ status: 'ok' }) };
     };
 
-    await handleRegisterPrTracking({ repoFullName: 'zts212653/cat-cafe', prNumber: 832 });
+    await handleRegisterPrTracking({
+      repoFullName: 'zts212653/cat-cafe',
+      prNumber: 832,
+      when: [{ kind: 'pr_head_changed' }],
+      nextStep: 'Inspect the new HEAD.',
+      expiresAt: Date.now() + 60_000,
+    });
 
     const body = JSON.parse(capturedOptions.body);
     assert.equal(body.repoFullName, 'zts212653/cat-cafe');
@@ -1932,7 +1938,7 @@ describe('MCP Callback Tools', () => {
     assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
   });
 
-  test('handleRegisterPrTracking forwards catId when provided (backward compat)', async () => {
+  test('handleRegisterPrTracking never trusts caller-supplied catId in the body', async () => {
     const { handleRegisterPrTracking } = await import('../dist/tools/callback-tools.js');
 
     let capturedOptions;
@@ -1941,10 +1947,17 @@ describe('MCP Callback Tools', () => {
       return { ok: true, json: async () => ({ status: 'ok' }) };
     };
 
-    await handleRegisterPrTracking({ repoFullName: 'zts212653/cat-cafe', prNumber: 100, catId: 'opus' });
+    await handleRegisterPrTracking({
+      repoFullName: 'zts212653/cat-cafe',
+      prNumber: 100,
+      when: [{ kind: 'pr_ci_terminal' }],
+      nextStep: 'Continue merge-gate.',
+      expiresAt: Date.now() + 60_000,
+      catId: 'opus',
+    });
 
     const body = JSON.parse(capturedOptions.body);
-    assert.equal(body.catId, 'opus', 'catId must be forwarded when caller provides it');
+    assert.equal(body.catId, undefined, 'cat identity must come from callback authentication');
     assert.equal(body.repoFullName, 'zts212653/cat-cafe');
     assert.equal(body.prNumber, 100);
   });

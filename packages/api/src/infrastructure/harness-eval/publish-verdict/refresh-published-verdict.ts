@@ -44,6 +44,7 @@ function mapRefreshError(message: string): HandlerError {
   const mappings: Array<[string, number]> = [
     ['verdict_pr_not_found', 404],
     ['verdict_pr_head_mismatch', 409],
+    ['verdict_pr_local_branch_conflict', 409],
     ['verdict_pr_scope_invalid', 409],
     ['verdict_pr_refresh_conflict', 409],
     ['verdict_pr_ambiguous', 409],

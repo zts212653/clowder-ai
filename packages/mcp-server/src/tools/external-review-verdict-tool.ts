@@ -1,6 +1,13 @@
 import { z } from 'zod';
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 import { callbackPost } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('external-review-verdict-tool.ts', undefined, {
+  resourceFamily: 'tracking-review',
+  authority: 'callback-owner',
+});
 
 const deliverySchema = z
   .discriminatedUnion('kind', [
@@ -79,7 +86,7 @@ export async function handleExternalReviewVerdict(input: {
 }
 
 export const externalReviewVerdictTools = [
-  {
+  defineTool({
     name: 'cat_cafe_record_external_review_verdict',
     description:
       'Atomically record an external PR review verdict together with its delivery custody for the current HEAD. ' +
@@ -91,5 +98,11 @@ export const externalReviewVerdictTools = [
       'GOTCHA: reviewedHeadSha, assigned reviewer identity, repo policy, terminal state, and optional action lease are verified server-side using invocation credentials; stale or agent-key-only calls fail closed.',
     inputSchema: externalReviewVerdictInputSchema,
     handler: handleExternalReviewVerdict,
-  },
+    governance: {
+      implementationExport: 'handleExternalReviewVerdict',
+      action: 'update',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
 ] as const;

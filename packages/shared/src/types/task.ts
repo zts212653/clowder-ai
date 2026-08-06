@@ -9,6 +9,7 @@
 
 import type { BallResolveMode } from './ball-custody.js';
 import type { DispatchGateState } from './cross-thread-affordance.js';
+import type { AwaitStateV1, WaitOutcomeV1 } from './github-wait.js';
 import type { CatId } from './ids.js';
 
 // Re-export affordance types so existing consumers don't break
@@ -44,6 +45,17 @@ export interface CiAutomationState {
   readonly skipNotified?: boolean;
   /** Terminal PR state — persisted by CiCdRouter on lifecycle close (F200 AC-D2.3). */
   readonly prState?: 'merged' | 'closed';
+  /**
+   * Durable receipts for PR-terminal world-truth effects. The terminal collector
+   * remains schedulable until `completedAt` is present for the current `prState`.
+   */
+  readonly terminalEffects?: {
+    readonly prState: 'merged' | 'closed';
+    readonly prLifecycle?: true;
+    readonly distillation?: true;
+    readonly communityProjection?: true;
+    readonly completedAt?: number;
+  };
 }
 
 /** Conflict detection automation state for pr_tracking tasks */
@@ -75,68 +87,6 @@ export interface ReviewAutomationState {
   readonly prState?: 'merged' | 'closed';
 }
 
-/**
- * F140: what the cat is currently waiting on for this tracked PR — the wake intent, NOT the repo
- * type (a private PR can be 'merge'; an open-source PR can be 'review'). Decides whether a CI-pass
- * is noise (review-wait) or an action signal (merge-wait). Cats re-register to flip it.
- *   - review (default): waiting on review feedback → CI-pass is recorded state-only, with no connector message.
- *   - merge: waiting on CI-green to merge (own approved PR / outbound PR / owner-merge of another's
- *     PR) → CI-pass wakes (→ merge-gate).
- * CI fail / review feedback / conflict always wake under both intents.
- */
-export type PrTrackingIntent = 'review' | 'merge';
-
-/**
- * F140: which tracked GitHub activity is allowed to wake the owner.
- *
- * This is deliberately independent from {@link PrTrackingIntent}: intent decides
- * which signal the owner is waiting for, while wakePolicy decides which actors may
- * turn recorded feedback into a connector delivery.
- */
-export type TrackingWakePolicy = 'all_feedback' | 'human_participant_activity';
-
-/** F177 Phase J: signal that can currently close a turn through an event-backed PR tracker. */
-export type PrEventWaitSignal = 'review_posted';
-
-export type PrEventWaitUncoveredReason =
-  | 'subject_mismatch'
-  | 'not_review_trigger'
-  | 'review_not_accepted'
-  | 'feedback_already_posted';
-
-export type PrEventWaitCoverage =
-  | {
-      readonly status: 'covered';
-      readonly kind: 'github_review_trigger_eyes';
-      readonly triggerCommentId: number;
-      readonly observedAt: number;
-    }
-  | {
-      readonly status: 'uncovered';
-      readonly kind: 'github_review_trigger_eyes';
-      readonly triggerCommentId: number;
-      readonly observedAt: number;
-      readonly reason: PrEventWaitUncoveredReason;
-    };
-
-/**
- * Invocation-bound proof that one tracked PR wait is covered by a structured callback.
- *
- * The live TaskItem remains authoritative for owner/thread/subject/status. These copied
- * fields are matching constraints, not an ownership override.
- */
-export interface PrEventWaitState {
-  readonly v: 1;
-  readonly invocationId: string;
-  readonly threadId: string;
-  readonly ownerCatId: CatId;
-  readonly subjectKey: string;
-  readonly expectedSignal: PrEventWaitSignal;
-  /** HEAD observed when the external review trigger was registered. Missing on legacy records. */
-  readonly triggerHeadSha?: string;
-  readonly coverage: PrEventWaitCoverage;
-}
-
 /** Issue comment automation state for issue_tracking tasks (F202 Phase 2D) */
 export interface IssueAutomationState {
   readonly lastCommentCursor?: number;
@@ -163,22 +113,36 @@ export interface IssuePendingWake {
   readonly closeTaskAfterWake?: boolean;
 }
 
-/** Composite automation state embedded in pr_tracking/issue_tracking tasks (#320 KD-14, F202-2D) */
-export interface AutomationState {
+/** F280 Phase B: PR-only collector and wait state. */
+export interface PrAutomationState {
   readonly ci?: CiAutomationState;
   readonly conflict?: ConflictAutomationState;
   readonly review?: ReviewAutomationState;
+  readonly closedAt?: number;
+  readonly await?: AwaitStateV1;
+  readonly waitOutcome?: WaitOutcomeV1;
+  /** Type-level quarantine: issue compatibility cannot be installed on a PR state. */
+  readonly issue?: never;
+}
+
+/** F280 Phase B: issue-only compatibility surface until Phase C. */
+export type IssueTrackingWakePolicy = 'all_feedback' | 'human_participant_activity';
+
+export interface LegacyIssueAutomationState {
   readonly issue?: IssueAutomationState;
   readonly closedAt?: number;
-  /** F140: wake intent for this tracked PR (defaults to 'review' when absent). */
-  readonly intent?: PrTrackingIntent;
-  /** F140: actor-aware delivery policy (defaults to 'all_feedback' when absent). */
-  readonly wakePolicy?: TrackingWakePolicy;
-  /** F202 Phase 2C: user-provided instructions appended to trigger messages. Task preference, not system override. */
+  readonly wakePolicy?: IssueTrackingWakePolicy;
   readonly trackingInstructions?: string;
-  /** F177 Phase J: server-verified, invocation-bound event-wait route state. */
-  readonly eventWait?: PrEventWaitState;
+  /** Type-level quarantine: PR facts and waits cannot be installed on an issue state. */
+  readonly ci?: never;
+  readonly conflict?: never;
+  readonly review?: never;
+  readonly await?: never;
+  readonly waitOutcome?: never;
 }
+
+/** Composite automation state embedded in pr_tracking/issue_tracking tasks (#320 KD-14, F202-2D). */
+export type AutomationState = PrAutomationState | LegacyIssueAutomationState;
 
 export type TaskProbeSpec =
   | {

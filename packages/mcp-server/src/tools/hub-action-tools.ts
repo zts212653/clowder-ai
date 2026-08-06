@@ -1,7 +1,14 @@
 import { z } from 'zod';
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 import { callbackPost, getCallbackConfig } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('hub-action-tools.ts', undefined, {
+  resourceFamily: 'artifact-surface',
+  authority: 'callback-owner',
+});
 
 const optionalContextSchemas = {
   threadId: z
@@ -120,7 +127,7 @@ export async function handlePreviewOpen(input: {
 }
 
 export const hubActionTools = [
-  {
+  defineTool({
     name: 'cat_cafe_workspace_navigate',
     description:
       'Open or reveal an absolute local path or typed repo-relative path in the Hub Workspace panel. ' +
@@ -132,8 +139,14 @@ export const hubActionTools = [
       'Shared persistent MCP callers pass agentKeyCatId; do not handwrite curl to /api/workspace/navigate.',
     inputSchema: workspaceNavigateInputSchema,
     handler: handleWorkspaceNavigate,
-  },
-  {
+    governance: {
+      implementationExport: 'handleWorkspaceNavigate',
+      action: 'command',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_preview_open',
     description:
       'Open a localhost app in the Hub Browser Preview panel. ' +
@@ -142,5 +155,11 @@ export const hubActionTools = [
       'GOTCHA: validate the target dev server first; shared persistent MCP callers pass agentKeyCatId; do not handwrite curl to /api/preview/auto-open.',
     inputSchema: previewOpenInputSchema,
     handler: handlePreviewOpen,
-  },
+    governance: {
+      implementationExport: 'handlePreviewOpen',
+      action: 'derive',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+    },
+  }),
 ] as const;

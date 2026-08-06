@@ -37,6 +37,17 @@ function createMockSocketManager() {
   };
 }
 
+function prWaitPayload(overrides = {}) {
+  return {
+    repoFullName: 'zts212653/cat-cafe',
+    prNumber: 99,
+    when: [{ kind: 'pr_head_changed' }],
+    nextStep: 'Re-lock the exact HEAD and continue.',
+    expiresAt: Date.now() + 60_000,
+    ...overrides,
+  };
+}
+
 describe('Callback Routes', () => {
   let registry;
   let messageStore;
@@ -101,9 +112,27 @@ describe('Callback Routes', () => {
       evidenceStore,
       reflectionService,
       markerQueue,
-      fetchPrTrackingBoundary: async () => ({
-        review: { lastCommentCursor: 0, lastDecisionCursor: 0 },
-        ci: { headSha: 'test-head' },
+      fetchPrWaitBaseline: async (_repoFullName, _prNumber, _when) => ({
+        baseline: {
+          capturedAt: Date.now(),
+          headSha: 'test-head',
+          review: {
+            inlineCommentCursor: 0,
+            conversationCommentCursor: 0,
+            decisionCursor: 0,
+          },
+          ci: { bucket: 'pending', fingerprint: 'test-head:pending' },
+          conflict: { mergeState: 'MERGEABLE' },
+        },
+        collectorState: {
+          review: {
+            lastInlineCommentCursor: 0,
+            lastConversationCommentCursor: 0,
+            lastDecisionCursor: 0,
+          },
+          ci: { headSha: 'test-head', lastFingerprint: 'test-head:pending', lastBucket: 'pending' },
+          conflict: { mergeState: 'MERGEABLE' },
+        },
       }),
       ...overrides,
     };
@@ -4417,11 +4446,7 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: {
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 99,
-        catId: 'opus',
-      },
+      payload: prWaitPayload(),
     });
 
     assert.equal(response.statusCode, 200);
@@ -4432,6 +4457,9 @@ describe('Callback Routes', () => {
     assert.equal(body.task.ownerCatId, 'opus');
     assert.equal(body.task.threadId, 'thread-pr');
     assert.ok(body.task.createdAt > 0);
+    assert.equal(body.await.generation, 1);
+    assert.deepEqual(body.await.continuation.when, [{ kind: 'pr_head_changed' }]);
+    assert.equal(body.await.baseline.headSha, 'test-head');
 
     // Verify stored in taskStore
     const found = taskStore.getBySubject('pr:zts212653/cat-cafe#99');
@@ -4439,15 +4467,31 @@ describe('Callback Routes', () => {
     assert.equal(found.threadId, 'thread-pr');
   });
 
-  test('POST register-pr-tracking snapshots cursors before signing a server-verified event wait', async () => {
+  test('POST register-pr-tracking snapshots live baseline before verifying an exact review-result trigger', async () => {
     const verificationCalls = [];
     const callOrder = [];
     const app = await createApp({
-      fetchPrTrackingBoundary: async () => {
-        callOrder.push('fetch-boundary');
+      fetchPrWaitBaseline: async () => {
+        callOrder.push('fetch-baseline');
         return {
-          review: { lastCommentCursor: 10, lastDecisionCursor: 20 },
-          ci: { headSha: 'head-before-review' },
+          baseline: {
+            capturedAt: 100,
+            headSha: 'head-before-review',
+            review: {
+              inlineCommentCursor: 10,
+              conversationCommentCursor: 11,
+              decisionCursor: 20,
+              resultTriggerCommentId: 4936000000,
+              resultTriggerHeadSha: 'head-before-review',
+            },
+          },
+          collectorState: {
+            review: {
+              lastInlineCommentCursor: 10,
+              lastConversationCommentCursor: 11,
+              lastDecisionCursor: 20,
+            },
+          },
         };
       },
       verifyPrReviewEventWaitCoverage: async (input) => {
@@ -4466,22 +4510,18 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: {
+      payload: prWaitPayload({
         repoFullName: 'Zts212653/Cat-Cafe',
         prNumber: 2856,
-        intent: 'review',
-        eventWait: {
-          expectedSignal: 'review_posted',
-          triggerCommentId: 4936000000,
-        },
-      },
+        when: [{ kind: 'pr_review_result_available', triggerCommentId: 4936000000 }],
+      }),
     });
 
     assert.equal(response.statusCode, 200);
     assert.deepEqual(
       callOrder,
-      ['fetch-boundary', 'verify-coverage'],
-      'new tracker must snapshot review cursors before granting callback coverage so a review posted afterward remains observable',
+      ['fetch-baseline', 'verify-coverage'],
+      'baseline must be frozen before coverage verification so a result posted in between cannot be lost',
     );
     assert.deepEqual(verificationCalls, [
       {
@@ -4491,46 +4531,80 @@ describe('Callback Routes', () => {
       },
     ]);
     const body = JSON.parse(response.body);
-    assert.equal(body.eventWait.covered, true);
-    assert.deepEqual(body.task.automationState.eventWait, {
+    assert.deepEqual(body.await, {
       v: 1,
-      invocationId,
-      threadId: 'thread-pr-event',
-      ownerCatId: 'codex-sol',
-      subjectKey: 'pr:zts212653/cat-cafe#2856',
-      expectedSignal: 'review_posted',
-      triggerHeadSha: 'head-before-review',
-      coverage: {
-        status: 'covered',
-        kind: 'github_review_trigger_eyes',
-        triggerCommentId: 4936000000,
-        observedAt: 1_783_700_000_000,
+      generation: 1,
+      subjectRef: 'pr:zts212653/cat-cafe#2856',
+      ownerFence: { kind: 'containing_task', generation: 1 },
+      baseline: {
+        capturedAt: 100,
+        headSha: 'head-before-review',
+        review: {
+          inlineCommentCursor: 10,
+          conversationCommentCursor: 11,
+          decisionCursor: 20,
+          resultTriggerCommentId: 4936000000,
+          resultTriggerHeadSha: 'head-before-review',
+        },
       },
+      continuation: {
+        when: [{ kind: 'pr_review_result_available', triggerCommentId: 4936000000 }],
+        // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
+        then: 'Re-lock the exact HEAD and continue.',
+      },
+      expiresAt: body.await.expiresAt,
+      createdAt: body.await.createdAt,
+      provenance: 'explicit_registration',
     });
   });
 
-  test('POST register-pr-tracking refreshes the current HEAD before signing an event wait on an active tracker', async () => {
-    const boundaryCalls = [];
-    const boundaries = [
+  test('POST register-pr-tracking atomically supersedes the active generation with a fresh baseline', async () => {
+    const baselineCalls = [];
+    const lifecycleEvents = [];
+    const baselines = [
       {
-        review: { lastCommentCursor: 10, lastDecisionCursor: 20 },
-        ci: { headSha: 'head-before-push' },
+        baseline: { capturedAt: 100, headSha: 'head-before-push' },
+        collectorState: { ci: { headSha: 'head-before-push' } },
       },
       {
-        review: { lastCommentCursor: 30, lastDecisionCursor: 40 },
-        ci: { headSha: 'head-after-push' },
+        baseline: {
+          capturedAt: 200,
+          headSha: 'head-after-push',
+          review: {
+            inlineCommentCursor: 30,
+            conversationCommentCursor: 31,
+            decisionCursor: 40,
+            resultTriggerCommentId: 4936000010,
+            resultTriggerHeadSha: 'head-after-push',
+          },
+        },
+        collectorState: {
+          ci: { headSha: 'head-after-push' },
+          review: {
+            lastInlineCommentCursor: 30,
+            lastConversationCommentCursor: 31,
+            lastDecisionCursor: 40,
+          },
+        },
       },
     ];
     const app = await createApp({
-      fetchPrTrackingBoundary: async () => {
-        boundaryCalls.push('fetch-boundary');
-        return boundaries.shift();
+      fetchPrWaitBaseline: async () => {
+        baselineCalls.push('fetch-baseline');
+        return baselines.shift();
       },
       verifyPrReviewEventWaitCoverage: async (input) => ({
         covered: true,
         triggerCommentId: input.triggerCommentId,
         observedAt: 1_783_700_000_010,
       }),
+      waitLifecycleHolder: {
+        current: {
+          async recordOutcomeEvent(taskId, outcome) {
+            lifecycleEvents.push({ taskId, outcome });
+          },
+        },
+      },
     });
     const { invocationId, callbackToken } = await registry.create('user-1', 'codex-sol', 'thread-pr-event-refresh');
     const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
@@ -4539,7 +4613,7 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers,
-      payload: { repoFullName: 'zts212653/cat-cafe', prNumber: 2860 },
+      payload: prWaitPayload({ prNumber: 2860 }),
     });
     assert.equal(initial.statusCode, 200);
     assert.equal(JSON.parse(initial.body).task.automationState.ci.headSha, 'head-before-push');
@@ -4548,23 +4622,28 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers,
-      payload: {
-        repoFullName: 'zts212653/cat-cafe',
+      payload: prWaitPayload({
         prNumber: 2860,
-        eventWait: { expectedSignal: 'review_posted', triggerCommentId: 4936000010 },
-      },
+        when: [{ kind: 'pr_review_result_available', triggerCommentId: 4936000010 }],
+      }),
     });
 
     assert.equal(refreshed.statusCode, 200);
-    assert.deepEqual(boundaryCalls, ['fetch-boundary', 'fetch-boundary']);
+    assert.deepEqual(baselineCalls, ['fetch-baseline', 'fetch-baseline']);
     const body = JSON.parse(refreshed.body);
-    assert.equal(body.task.automationState.eventWait.triggerHeadSha, 'head-after-push');
+    assert.equal(body.await.generation, 2);
+    assert.equal(body.await.baseline.headSha, 'head-after-push');
     assert.equal(body.task.automationState.ci.headSha, 'head-after-push');
-    assert.equal(body.task.automationState.review.lastCommentCursor, 30);
+    assert.equal(body.task.automationState.review.lastInlineCommentCursor, 30);
+    assert.equal(body.task.automationState.review.lastConversationCommentCursor, 31);
     assert.equal(body.task.automationState.review.lastDecisionCursor, 40);
+    assert.equal(body.task.automationState.waitOutcome.reason, 'superseded');
+    assert.equal(body.task.automationState.waitOutcome.generation, 1);
+    assert.equal(lifecycleEvents.length, 1);
+    assert.equal(lifecycleEvents[0].outcome.reason, 'superseded');
   });
 
-  test('POST register-pr-tracking with EYES=0 keeps tracking active but stores an uncovered current-invocation state', async () => {
+  test('POST register-pr-tracking rejects an unverified exact review-result trigger without creating a wait', async () => {
     const app = await createApp({
       verifyPrReviewEventWaitCoverage: async (input) => ({
         covered: false,
@@ -4579,28 +4658,19 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: {
-        repoFullName: 'zts212653/cat-cafe',
+      payload: prWaitPayload({
         prNumber: 2857,
-        eventWait: { expectedSignal: 'review_posted', triggerCommentId: 4936000001 },
-      },
+        when: [{ kind: 'pr_review_result_available', triggerCommentId: 4936000001 }],
+      }),
     });
 
-    assert.equal(response.statusCode, 200);
+    assert.equal(response.statusCode, 422);
     const body = JSON.parse(response.body);
-    assert.deepEqual(body.eventWait, { covered: false, reason: 'review_not_accepted' });
-    assert.equal(body.task.status, 'todo', 'normal PR tracking remains registered');
-    assert.equal(body.task.automationState.eventWait.triggerHeadSha, 'test-head');
-    assert.deepEqual(body.task.automationState.eventWait.coverage, {
-      status: 'uncovered',
-      kind: 'github_review_trigger_eyes',
-      triggerCommentId: 4936000001,
-      observedAt: 1_783_700_000_001,
-      reason: 'review_not_accepted',
-    });
+    assert.equal(body.reason, 'review_not_accepted');
+    assert.equal(taskStore.getBySubject('pr:zts212653/cat-cafe#2857'), null);
   });
 
-  test('POST register-pr-tracking rejects eventWait when intent=merge', async () => {
+  test('POST register-pr-tracking rejects every deleted legacy PR mode field', async () => {
     let verificationCalled = false;
     const app = await createApp({
       verifyPrReviewEventWaitCoverage: async () => {
@@ -4614,16 +4684,17 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: {
-        repoFullName: 'zts212653/cat-cafe',
+      payload: prWaitPayload({
         prNumber: 2859,
         intent: 'merge',
         eventWait: { expectedSignal: 'review_posted', triggerCommentId: 4936000003 },
-      },
+        wakePolicy: 'human_participant_activity',
+        instructions: 'legacy prose',
+      }),
     });
 
     assert.equal(response.statusCode, 400);
-    assert.match(JSON.parse(response.body).error, /requires intent=review/i);
+    assert.equal(JSON.parse(response.body).error, 'Invalid request body');
     assert.equal(verificationCalled, false);
     assert.equal(taskStore.getBySubject('pr:zts212653/cat-cafe#2859'), null);
   });
@@ -4640,15 +4711,14 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: {
-        repoFullName: 'zts212653/cat-cafe',
+      payload: prWaitPayload({
         prNumber: 2858,
-        eventWait: { expectedSignal: 'review_posted', triggerCommentId: 4936000002 },
-      },
+        when: [{ kind: 'pr_review_result_available', triggerCommentId: 4936000002 }],
+      }),
     });
 
     assert.equal(response.statusCode, 503);
-    assert.match(JSON.parse(response.body).error, /callback coverage unavailable/i);
+    assert.match(JSON.parse(response.body).error, /coverage unavailable/i);
     assert.equal(taskStore.getBySubject('pr:zts212653/cat-cafe#2858'), null);
   });
 
@@ -4662,10 +4732,7 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: {
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 2771,
-      },
+      payload: prWaitPayload({ prNumber: 2771 }),
     });
 
     assert.equal(response.statusCode, 410);
@@ -5249,143 +5316,136 @@ describe('Callback Routes', () => {
 
   // F140: wake intent — default 'review' (quiet), explicit 'merge', and re-register preserves it.
 
-  test('POST register-pr-tracking defaults intent to review and persists it structurally', async () => {
+  test('POST register-pr-tracking persists only the explicit predicate contract', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { repoFullName: 'zts212653/cat-cafe', prNumber: 101 },
+      payload: prWaitPayload({ prNumber: 101 }),
     });
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
-    assert.equal(body.task.automationState.intent, 'review', 'absent intent persists as review');
-    assert.equal(
-      body.task.automationState.wakePolicy,
-      'all_feedback',
-      'absent wakePolicy persists the backward-compatible default',
-    );
+    assert.deepEqual(body.task.automationState.await.continuation.when, [{ kind: 'pr_head_changed' }]);
+    for (const legacyKey of ['intent', 'wakePolicy', 'trackingInstructions', 'eventWait']) {
+      assert.equal(Object.hasOwn(body.task.automationState, legacyKey), false);
+    }
   });
 
-  test('POST register-pr-tracking accepts intent=merge', async () => {
+  test('POST register-pr-tracking accepts a bounded flat any-of predicate set', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { repoFullName: 'zts212653/cat-cafe', prNumber: 102, intent: 'merge' },
+      payload: prWaitPayload({
+        prNumber: 102,
+        when: [{ kind: 'pr_ci_terminal' }, { kind: 'pr_became_conflicting' }],
+        nextStep: 'Re-check checks and mergeability.',
+      }),
     });
     assert.equal(response.statusCode, 200);
-    assert.equal(JSON.parse(response.body).task.automationState.intent, 'merge');
+    assert.deepEqual(JSON.parse(response.body).await.continuation.when, [
+      { kind: 'pr_ci_terminal' },
+      { kind: 'pr_became_conflicting' },
+    ]);
   });
 
-  test('POST register-pr-tracking re-register without intent preserves a prior merge intent', async () => {
+  test('POST register-pr-tracking re-register creates the next generation and replaces the predicate set', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
     const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
-    // 1) register with merge intent
-    await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/register-pr-tracking',
-      headers,
-      payload: { repoFullName: 'zts212653/cat-cafe', prNumber: 103, intent: 'merge' },
-    });
-    // 2) re-register WITHOUT intent — must not silently downgrade to review
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/register-pr-tracking',
-      headers,
-      payload: { repoFullName: 'zts212653/cat-cafe', prNumber: 103 },
-    });
-    assert.equal(response.statusCode, 200);
-    assert.equal(
-      JSON.parse(response.body).task.automationState.intent,
-      'merge',
-      'intent-less re-register preserves merge',
-    );
-  });
-
-  test('POST register-pr-tracking accepts and preserves human participant wake policy', async () => {
-    const app = await createApp();
-    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr-policy');
-    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
-
     const first = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers,
-      payload: {
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 1185,
-        wakePolicy: 'human_participant_activity',
-      },
+      payload: prWaitPayload({ prNumber: 103, when: [{ kind: 'pr_ci_terminal' }] }),
     });
     assert.equal(first.statusCode, 200);
-    assert.equal(JSON.parse(first.body).task.automationState.wakePolicy, 'human_participant_activity');
-
-    const second = await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/register-pr-tracking',
-      headers,
-      payload: { repoFullName: 'zts212653/cat-cafe', prNumber: 1185 },
-    });
-    assert.equal(second.statusCode, 200);
-    assert.equal(
-      JSON.parse(second.body).task.automationState.wakePolicy,
-      'human_participant_activity',
-      'policy-less re-register must not reset an explicit wake policy',
-    );
-  });
-
-  test('POST register-pr-tracking allows empty instructions to clear stored instructions', async () => {
-    const app = await createApp();
-    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
-    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
-
-    await app.inject({
-      method: 'POST',
-      url: '/api/callbacks/register-pr-tracking',
-      headers,
-      payload: {
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 104,
-        instructions: 'Old guidance',
-      },
-    });
-
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers,
-      payload: {
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 104,
-        instructions: '',
-      },
+      payload: prWaitPayload({ prNumber: 103, when: [{ kind: 'pr_head_changed' }] }),
     });
-
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
-    assert.equal(body.task.automationState.trackingInstructions, '');
-
-    const stored = taskStore.getBySubject('pr:zts212653/cat-cafe#104');
-    assert.equal(stored.automationState.trackingInstructions, '');
+    assert.equal(body.await.generation, 2);
+    assert.deepEqual(body.await.continuation.when, [{ kind: 'pr_head_changed' }]);
+    assert.equal(body.task.automationState.waitOutcome.reason, 'superseded');
   });
 
-  test('POST register-pr-tracking seeds PR feedback and CI boundaries after unregister/re-register', async () => {
+  test('POST register-pr-tracking rejects an actor policy instead of guessing signal value from identity', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr-policy');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: prWaitPayload({
+        prNumber: 1185,
+        wakePolicy: 'human_participant_activity',
+      }),
+    });
+    assert.equal(response.statusCode, 400);
+    assert.equal(taskStore.getBySubject('pr:zts212653/cat-cafe#1185'), null);
+  });
+
+  test('POST register-pr-tracking rejects source prose injection', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: prWaitPayload({
+        prNumber: 104,
+        instructions: 'Raw source text must never enter a PR wake.',
+      }),
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.equal(taskStore.getBySubject('pr:zts212653/cat-cafe#104'), null);
+  });
+
+  test('POST register-pr-tracking captures a fresh live baseline after unregister/re-register', async () => {
     const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
     const app = Fastify();
-    const boundaryCalls = [];
-    const boundaries = [
+    const baselineCalls = [];
+    const baselines = [
       {
-        review: { lastCommentCursor: 10, lastDecisionCursor: 20 },
-        ci: { headSha: 'sha-old', lastFingerprint: 'sha-old:pass', lastBucket: 'pass' },
+        baseline: {
+          capturedAt: 10,
+          headSha: 'sha-old',
+          review: { inlineCommentCursor: 10, conversationCommentCursor: 11, decisionCursor: 20 },
+          ci: { bucket: 'pass', fingerprint: 'sha-old:pass' },
+        },
+        collectorState: {
+          review: {
+            lastInlineCommentCursor: 10,
+            lastConversationCommentCursor: 11,
+            lastDecisionCursor: 20,
+          },
+          ci: { headSha: 'sha-old', lastFingerprint: 'sha-old:pass', lastBucket: 'pass' },
+        },
       },
       {
-        review: { lastCommentCursor: 110, lastDecisionCursor: 220 },
-        ci: { headSha: 'sha-current', lastFingerprint: 'sha-current:fail', lastBucket: 'fail' },
+        baseline: {
+          capturedAt: 20,
+          headSha: 'sha-current',
+          review: { inlineCommentCursor: 110, conversationCommentCursor: 111, decisionCursor: 220 },
+          ci: { bucket: 'fail', fingerprint: 'sha-current:fail' },
+        },
+        collectorState: {
+          review: {
+            lastInlineCommentCursor: 110,
+            lastConversationCommentCursor: 111,
+            lastDecisionCursor: 220,
+          },
+          ci: { headSha: 'sha-current', lastFingerprint: 'sha-current:fail', lastBucket: 'fail' },
+        },
       },
     ];
     await app.register(callbacksRoutes, {
@@ -5397,9 +5457,9 @@ describe('Callback Routes', () => {
       evidenceStore,
       reflectionService,
       markerQueue,
-      fetchPrTrackingBoundary: async (repoFullName, prNumber) => {
-        boundaryCalls.push({ repoFullName, prNumber });
-        return boundaries.shift();
+      fetchPrWaitBaseline: async (repoFullName, prNumber) => {
+        baselineCalls.push({ repoFullName, prNumber });
+        return baselines.shift();
       },
     });
 
@@ -5412,10 +5472,11 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: firstHeaders,
-      payload: { repoFullName: 'zts212653/cat-cafe', prNumber: 105 },
+      payload: prWaitPayload({ prNumber: 105 }),
     });
     assert.equal(first.statusCode, 200);
-    assert.equal(JSON.parse(first.body).task.automationState.review.lastCommentCursor, 10);
+    assert.equal(JSON.parse(first.body).task.automationState.review.lastInlineCommentCursor, 10);
+    assert.equal(JSON.parse(first.body).task.automationState.review.lastConversationCommentCursor, 11);
     assert.equal(JSON.parse(first.body).task.automationState.review.lastDecisionCursor, 20);
     assert.equal(JSON.parse(first.body).task.automationState.ci.lastFingerprint, 'sha-old:pass');
 
@@ -5435,22 +5496,24 @@ describe('Callback Routes', () => {
         'x-invocation-id': secondInvocation.invocationId,
         'x-callback-token': secondInvocation.callbackToken,
       },
-      payload: { repoFullName: 'zts212653/cat-cafe', prNumber: 105 },
+      payload: prWaitPayload({ prNumber: 105 }),
     });
     assert.equal(second.statusCode, 200);
-    assert.deepEqual(boundaryCalls, [
+    assert.deepEqual(baselineCalls, [
       { repoFullName: 'zts212653/cat-cafe', prNumber: 105 },
       { repoFullName: 'zts212653/cat-cafe', prNumber: 105 },
     ]);
 
     const updated = taskStore.getBySubject('pr:zts212653/cat-cafe#105');
     assert.equal(updated.threadId, 'thread-pr-new');
-    assert.equal(updated.automationState.review.lastCommentCursor, 110);
+    assert.equal(updated.automationState.await.baseline.headSha, 'sha-current');
+    assert.equal(updated.automationState.review.lastInlineCommentCursor, 110);
+    assert.equal(updated.automationState.review.lastConversationCommentCursor, 111);
     assert.equal(updated.automationState.review.lastDecisionCursor, 220);
     assert.equal(updated.automationState.ci.lastFingerprint, 'sha-current:fail');
   });
 
-  test('POST register-pr-tracking rejects boundary seeding when CI cursor is unavailable', async () => {
+  test('POST register-pr-tracking fails closed when the live baseline cannot be read', async () => {
     const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
     const app = Fastify();
     await app.register(callbacksRoutes, {
@@ -5462,9 +5525,9 @@ describe('Callback Routes', () => {
       evidenceStore,
       reflectionService,
       markerQueue,
-      fetchPrTrackingBoundary: async () => ({
-        review: { lastCommentCursor: 10, lastDecisionCursor: 20 },
-      }),
+      fetchPrWaitBaseline: async () => {
+        throw new Error('GitHub unavailable');
+      },
     });
 
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
@@ -5472,11 +5535,11 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { repoFullName: 'zts212653/cat-cafe', prNumber: 106 },
+      payload: prWaitPayload({ prNumber: 106 }),
     });
 
     assert.equal(response.statusCode, 503);
-    assert.match(JSON.parse(response.body).error, /PR tracking boundary unavailable/);
+    assert.match(JSON.parse(response.body).error, /PR wait baseline unavailable/);
     assert.equal(taskStore.getBySubject('pr:zts212653/cat-cafe#106'), null);
   });
 
@@ -5487,36 +5550,29 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': 'bogus', 'x-callback-token': 'bogus' },
-      payload: {
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 1,
-        catId: 'opus',
-      },
+      payload: prWaitPayload({ prNumber: 1 }),
     });
 
     assert.equal(response.statusCode, 401);
   });
 
-  test('POST register-pr-tracking ignores payload catId, uses invocation identity', async () => {
+  test('POST register-pr-tracking rejects caller-supplied owner identity', async () => {
     const app = await createApp();
 
-    // Invocation is opus, payload sends bogus catId — server must ignore payload
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: {
-        repoFullName: 'zts212653/cat-cafe',
+      payload: prWaitPayload({
         prNumber: 1,
-        catId: 'nonexistent-cat', // bogus — should be ignored
-      },
+        catId: 'nonexistent-cat',
+      }),
     });
 
-    assert.equal(response.statusCode, 200, 'payload catId is ignored, so bogus value must not cause 400');
-    const body = JSON.parse(response.body);
-    assert.equal(body.task.ownerCatId, 'opus', 'must use invocation catId, not payload');
+    assert.equal(response.statusCode, 400);
+    assert.equal(taskStore.getBySubject('pr:zts212653/cat-cafe#1'), null);
   });
 
   test('POST register-pr-tracking rejects overwrite from different user (P1-2 ownership)', async () => {
@@ -5528,11 +5584,7 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': userA.invocationId, 'x-callback-token': userA.callbackToken },
-      payload: {
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-      },
+      payload: prWaitPayload({ prNumber: 42 }),
     });
     assert.equal(regA.statusCode, 200);
 
@@ -5542,11 +5594,7 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': userB.invocationId, 'x-callback-token': userB.callbackToken },
-      payload: {
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'codex',
-      },
+      payload: prWaitPayload({ prNumber: 42 }),
     });
     assert.equal(regB.statusCode, 409, 'must reject overwrite from different user');
 
@@ -5574,11 +5622,7 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': attacker.invocationId, 'x-callback-token': attacker.callbackToken },
-      payload: {
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 406,
-        instructions: 'reroute notifications',
-      },
+      payload: prWaitPayload({ prNumber: 406 }),
     });
 
     assert.equal(response.statusCode, 409);
@@ -5588,11 +5632,7 @@ describe('Callback Routes', () => {
     assert.equal(entry.threadId, 'thread-owner', 'legacy task must stay on its original thread');
     assert.equal(entry.ownerCatId, 'opus', 'legacy task owner must not be overwritten');
     assert.equal(entry.userId, undefined, 'failed takeover must not stamp attacker userId');
-    assert.equal(
-      entry.automationState?.trackingInstructions,
-      undefined,
-      'failed takeover must not update instructions',
-    );
+    assert.equal(entry.automationState, undefined, 'failed takeover must not install a wait');
   });
 
   test('POST register-pr-tracking converts atomic store ownership conflicts into 409', async () => {
@@ -5615,15 +5655,29 @@ describe('Callback Routes', () => {
             createdAt: 1,
             updatedAt: 1,
             userId: 'user-A',
+            automationState: undefined,
           };
         }
         const error = new Error('subject ownership conflict');
         error.code = 'TASK_SUBJECT_OWNERSHIP_CONFLICT';
         throw error;
       },
-      // F140: handler persists intent via patchAutomationState after a successful upsert.
-      async patchAutomationState(_taskId, patch) {
-        return { id: 'task-user-a', automationState: patch };
+      async replaceAutomationStateIfGeneration(_taskId, input) {
+        return {
+          id: 'task-user-a',
+          kind: 'pr_tracking',
+          subjectKey: 'pr:zts212653/cat-cafe#77',
+          threadId: 'thread-A',
+          title: 'PR tracking: zts212653/cat-cafe#77',
+          ownerCatId: 'opus',
+          status: 'todo',
+          why: 'track pr',
+          createdBy: 'opus',
+          createdAt: 1,
+          updatedAt: 2,
+          userId: 'user-A',
+          automationState: input.automationState,
+        };
       },
     };
 
@@ -5634,10 +5688,7 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': userA.invocationId, 'x-callback-token': userA.callbackToken },
-      payload: {
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 77,
-      },
+      payload: prWaitPayload({ prNumber: 77 }),
     });
     assert.equal(first.statusCode, 200);
 
@@ -5646,10 +5697,7 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': userB.invocationId, 'x-callback-token': userB.callbackToken },
-      payload: {
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 77,
-      },
+      payload: prWaitPayload({ prNumber: 77 }),
     });
 
     assert.equal(second.statusCode, 409, 'atomic ownership conflict must surface as 409');
@@ -5665,11 +5713,7 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': inv1.invocationId, 'x-callback-token': inv1.callbackToken },
-      payload: {
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-      },
+      payload: prWaitPayload({ prNumber: 42 }),
     });
 
     // Same user re-registers from thread-2 (should succeed — update)
@@ -5678,11 +5722,7 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': inv2.invocationId, 'x-callback-token': inv2.callbackToken },
-      payload: {
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 42,
-        catId: 'opus',
-      },
+      payload: prWaitPayload({ prNumber: 42 }),
     });
     assert.equal(res.statusCode, 200);
 
@@ -5706,11 +5746,7 @@ describe('Callback Routes', () => {
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: {
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 1,
-        catId: 'opus',
-      },
+      payload: prWaitPayload({ prNumber: 1 }),
     });
 
     assert.equal(response.statusCode, 503);
@@ -5718,28 +5754,22 @@ describe('Callback Routes', () => {
     assert.ok(body.error.includes('not configured'));
   });
 
-  test('POST register-pr-tracking uses invocation catId, not payload catId (authority bug)', async () => {
+  test('POST register-pr-tracking derives owner identity from the invocation', async () => {
     const app = await createApp();
 
-    // Invocation is for opencode, but payload says opus
     const { invocationId, callbackToken } = await registry.create('user-1', 'opencode', 'thread-opencode');
 
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: {
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 832,
-        catId: 'opus', // ← LLM passed wrong catId
-      },
+      payload: prWaitPayload({ prNumber: 832 }),
     });
 
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
 
-    // Server must use the authoritative catId from invocation record, not the payload
-    assert.equal(body.task.ownerCatId, 'opencode', 'must use invocation catId, not payload catId');
+    assert.equal(body.task.ownerCatId, 'opencode', 'must use invocation catId');
 
     const stored = taskStore.getBySubject('pr:zts212653/cat-cafe#832');
     assert.equal(stored.ownerCatId, 'opencode', 'stored task must have authoritative catId');

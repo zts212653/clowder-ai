@@ -1,5 +1,10 @@
-import type { PrEventWaitUncoveredReason } from '@cat-cafe/shared';
 import { buildGhCliEnv, withHiddenGhCliWindow } from './gh-cli-env.js';
+
+export type PrReviewEventWaitUncoveredReason =
+  | 'subject_mismatch'
+  | 'not_review_trigger'
+  | 'review_not_accepted'
+  | 'feedback_already_posted';
 
 interface ExecFileOptions {
   timeout: number;
@@ -24,7 +29,7 @@ export type PrReviewEventWaitCoverageResult =
   | { covered: true; triggerCommentId: number; observedAt: number }
   | {
       covered: false;
-      reason: PrEventWaitUncoveredReason;
+      reason: PrReviewEventWaitUncoveredReason;
       triggerCommentId: number;
       observedAt: number;
     };
@@ -52,7 +57,7 @@ function issueUrlMatchesPr(issueUrl: string, repoFullName: string, prNumber: num
 
 function uncovered(
   input: VerifyPrReviewEventWaitCoverageInput,
-  reason: PrEventWaitUncoveredReason,
+  reason: PrReviewEventWaitUncoveredReason,
   observedAt: number,
 ): PrReviewEventWaitCoverageResult {
   return {
@@ -61,6 +66,10 @@ function uncovered(
     triggerCommentId: input.triggerCommentId,
     observedAt,
   };
+}
+
+function isCodexReviewTrigger(body: string): boolean {
+  return /^@codex\s+review(?:\s|$)/i.test(body.trimStart());
 }
 
 /**
@@ -105,7 +114,7 @@ export async function verifyPrReviewEventWaitCoverage(
   ) {
     return uncovered(input, 'subject_mismatch', observedAt);
   }
-  if (typeof comment.body !== 'string' || comment.body.trim() !== '@codex review') {
+  if (typeof comment.body !== 'string' || !isCodexReviewTrigger(comment.body)) {
     return uncovered(input, 'not_review_trigger', observedAt);
   }
   if (typeof comment.created_at !== 'string' || !Number.isFinite(Date.parse(comment.created_at))) {

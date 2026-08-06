@@ -16,6 +16,7 @@ import {
   type SuggestedCrossPostAction,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
 import { formatSuggestedCrossPostActionLines } from './cross-post-suggestion-format.js';
 import { composeCoverageIntentNudge } from './evidence-coverage-nudge.js';
 import { type CoverageToolData, renderCoverageToolResponse } from './evidence-coverage-response.js';
@@ -24,6 +25,11 @@ import { errorResult, successResult } from './file-tools.js';
 
 const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
 const COVERAGE_OUTER_HTTP_BUDGET_MS = 16_000;
+
+const defineTool = defineMcpMigrationFactory('evidence-tools.ts', undefined, {
+  resourceFamily: 'evidence-navigation',
+  authority: 'local-runtime',
+});
 
 const DOC_SOURCE_TYPES = new Set(['feature', 'decision', 'phase', 'architecture', 'lesson', 'plan', 'research']);
 const EVIDENCE_RESULT_MARKER = 'Evidence search results:';
@@ -631,7 +637,7 @@ function formatDrillDownLines(drillDown: EvidenceDrillDown): string[] {
 }
 
 export const evidenceTools = [
-  {
+  defineTool({
     name: 'cat_cafe_search_evidence',
     description:
       'Search project knowledge base — features, decisions, architecture maps, plans, lessons, session history. ' +
@@ -671,5 +677,11 @@ export const evidenceTools = [
       'When this tool returns no results or only low match-rank hits, payload appends a deterministic nudge pointing to graph_resolve/list_recent (KD-7).',
     inputSchema: searchEvidenceInputSchema,
     handler: handleSearchEvidence,
-  },
+    governance: {
+      implementationExport: 'handleSearchEvidence',
+      action: 'read',
+      risk: { level: 'read', openWorld: true },
+      runtimeProfiles: ['full', 'readonly', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
+    },
+  }),
 ] as const;

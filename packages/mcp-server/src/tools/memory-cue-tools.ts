@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 import type { ToolResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('memory-cue-tools.ts', './tools/callback-tools.js', {
+  resourceFamily: 'memory-cue',
+  authority: 'callback-owner-private',
+});
 
 type CallbackPost = (path: string, body: Record<string, unknown>) => Promise<ToolResult>;
 
@@ -51,7 +58,7 @@ export function createMemoryCueTools(callbackPost: CallbackPost) {
     handleDrillMemoryCue,
     handleRecordMemoryCueOutcome,
     tools: [
-      {
+      defineTool({
         name: 'cat_cafe_drill_memory_cue',
         description:
           'Read the exact canonical source behind one owner-authenticated CueEnvelope. ' +
@@ -62,8 +69,14 @@ export function createMemoryCueTools(callbackPost: CallbackPost) {
           'GOTCHA: handles are process-scoped; after API restart or source correction/forget they fail closed.',
         inputSchema: drillMemoryCueInputSchema,
         handler: handleDrillMemoryCue,
-      },
-      {
+        governance: {
+          implementationExport: 'handleDrillMemoryCue',
+          action: 'read',
+          risk: { level: 'read', openWorld: false },
+          runtimeProfiles: ['full'],
+        },
+      }),
+      defineTool({
         name: 'cat_cafe_record_memory_cue_outcome',
         description:
           'Record whether one authenticated, already-presented memory cue was applied or dismissed. ' +
@@ -73,7 +86,13 @@ export function createMemoryCueTools(callbackPost: CallbackPost) {
           'GOTCHA: there is intentionally no rationale field; canonical source lifecycle uses its own invalidation axis.',
         inputSchema: recordMemoryCueOutcomeInputSchema,
         handler: handleRecordMemoryCueOutcome,
-      },
+        governance: {
+          implementationExport: 'handleRecordMemoryCueOutcome',
+          action: 'update',
+          risk: { level: 'write', openWorld: false },
+          runtimeProfiles: ['full'],
+        },
+      }),
     ],
   };
 }

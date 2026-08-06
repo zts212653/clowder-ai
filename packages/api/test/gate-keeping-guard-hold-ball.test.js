@@ -341,7 +341,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/hold-ball', () => {
     assert.equal(deps._insertedTasks.length, 1, 'hold task must be scheduled');
   });
 
-  test('PR-O4: gate-keeping + short SLA + active PR tracking → 400 (event-backed hold redundant)', async () => {
+  test('F280: active PR wait no longer blocks a separately grounded short hold via cross-system detection', async () => {
     const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
     const taskStoreInstance = new TaskStore();
 
@@ -365,7 +365,8 @@ describe('F167 gate-keeping guard: POST /api/callbacks/hold-ball', () => {
       method: 'POST',
       url: '/api/callbacks/hold-ball',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      // Short SLA + waitSourceRef matching tracked PR → event callback makes hold redundant
+      // F280 removed the parallel tracker-vs-hold detector. This route is judged
+      // only by the hold contract's own grounding and SLA.
       payload: {
         reason: 'waiting CI',
         nextStep: 'check result',
@@ -379,10 +380,8 @@ describe('F167 gate-keeping guard: POST /api/callbacks/hold-ball', () => {
       },
     });
 
-    assert.equal(response.statusCode, 400, 'event-backed hold must be blocked (redundant)');
-    const body = JSON.parse(response.body);
-    assert.match(body.reason, /冗余/, 'reason must mention redundancy');
-    assert.equal(deps._insertedTasks.length, 0, 'hold task must NOT be scheduled');
+    assert.equal(response.statusCode, 200);
+    assert.equal(deps._insertedTasks.length, 1);
   });
 
   test('PR-O4: gate-keeping + short SLA + waitSourceRef + no taskStore → 200 (fail-open, no callback assumed)', async () => {

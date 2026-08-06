@@ -1,3 +1,5 @@
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 /**
  * List Recent Tool — F188 Phase F (AC-F2)
  *
@@ -13,6 +15,11 @@ import { formatRecallMeta } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('recent-tools.ts', undefined, {
+  resourceFamily: 'evidence-navigation',
+  authority: 'local-runtime',
+});
 
 const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
 
@@ -182,7 +189,7 @@ function crossReferenceFooter(): string {
 }
 
 export const recentTools = [
-  {
+  defineTool({
     name: 'cat_cafe_list_recent',
     description: [
       'Browse recent docs/threads by time window, including architecture maps. NO query needed — designed for cold-start "我记得最近讨论过什么" / "压缩后扫一眼" scenarios.',
@@ -195,5 +202,11 @@ export const recentTools = [
     ].join('\n'),
     inputSchema: listRecentInputSchema,
     handler: handleListRecent,
-  },
+    governance: {
+      implementationExport: 'handleListRecent',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
+    },
+  }),
 ] as const;

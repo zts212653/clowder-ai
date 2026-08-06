@@ -4,14 +4,8 @@
  * #320: Reads from unified TaskStore (kind=pr_tracking) instead of PrTrackingStore.
  *
  * Gate: list pr_tracking tasks → filter active → one workItem per PR.
- * Execute: fetchPrCiStatus → route → conditional trigger.
- *   - CI fail → wake (urgent) — both intents.
- *   - CI pass → gated by the tracked PR's wake intent (F140):
- *       intent='review' (default) → state-only silent (review-wait noise; no connector message).
- *       intent='merge'            → wake → merge-gate (the cat is waiting on CI-green to merge).
- *     Intent is an explicit per-task declaration (set at register_pr_tracking, updated by re-register),
- *     NOT inferred from approval state or repo type — a private PR can be 'merge', an open-source PR
- *     can be 'review'.
+ * Execute: fetch current PR/CI facts → route through F280 typed wait predicates.
+ * Collection always advances; only a matched generation creates a connector wake.
  */
 import type { CatId, TaskItem } from '@cat-cafe/shared';
 import { parsePrSubjectKey } from '@cat-cafe/shared';
@@ -41,16 +35,6 @@ export interface CiCdCheckTaskSpecOptions {
   readonly pollIntervalMs?: number;
   /** F202-2B: Override task ID for plugin-scoped schedule instances */
   readonly id?: string;
-  /** F167 Phase Q: retire matching hold_ball timers once structured CI status is delivered. */
-  readonly holdLifecycle?: {
-    retireSatisfiedWait(event: {
-      threadId: string;
-      subjectKey: string;
-      expectedSignalKey: 'ci_complete';
-      sourceKind: 'ci_check';
-      sourceMessageId?: string;
-    }): void | Promise<unknown>;
-  };
   /**
    * Filter self-merges: if the GitHub login that merged the PR matches our own
    * authenticated identity, skip the lifecycle wake (the merger already knows).
@@ -60,8 +44,7 @@ export interface CiCdCheckTaskSpecOptions {
 }
 
 /**
- * PR terminal state (merged/closed) -> wake the owner for follow-up, both intents.
- * intent=merge: the merge is the awaited outcome. intent=review: the PR is gone.
+ * PR terminal state (merged/closed) consumes any active wait exactly once.
  * Fires exactly once in production: CiCdRouter persists ci.prState and the gate filters completed lifecycle tasks.
  */
 function triggerLifecycleWake(
@@ -91,10 +74,14 @@ function triggerLifecycleWake(
 
 function needsCiLifecycleRecovery(task: TaskItem): boolean {
   const reviewTerminalState = task.automationState?.review?.prState;
+  const ciTerminalState = task.automationState?.ci?.prState;
+  const terminalEffects = task.automationState?.ci?.terminalEffects;
+  const worldTruthPending =
+    (ciTerminalState === 'merged' || ciTerminalState === 'closed') &&
+    (terminalEffects?.prState !== ciTerminalState || terminalEffects.completedAt === undefined);
   return (
     task.status === 'done' &&
-    (reviewTerminalState === 'merged' || reviewTerminalState === 'closed') &&
-    !task.automationState?.ci?.prState
+    (worldTruthPending || ((reviewTerminalState === 'merged' || reviewTerminalState === 'closed') && !ciTerminalState))
   );
 }
 
@@ -121,11 +108,13 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
 
         const workItems: { signal: CiCdCheckSignal; subjectKey: string }[] = [];
         for (const task of active) {
-          const parsed = task.subjectKey ? parsePrSubjectKey(task.subjectKey) : null;
+          const subjectKey = task.subjectKey;
+          if (!subjectKey) continue;
+          const parsed = parsePrSubjectKey(subjectKey);
           if (!parsed) continue;
           workItems.push({
             signal: { task, repoFullName: parsed.repoFullName, prNumber: parsed.prNumber },
-            subjectKey: task.subjectKey!,
+            subjectKey,
           });
         }
 
@@ -139,30 +128,14 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
     run: {
       overlap: 'skip',
       timeoutMs: 30_000,
-      async execute(signal: CiCdCheckSignal, subjectKey: string, _ctx: ExecuteContext) {
+      async execute(signal: CiCdCheckSignal, _subjectKey: string, _ctx: ExecuteContext) {
         const pollResult = await fetchPrStatus(signal.repoFullName, signal.prNumber);
         if (!pollResult) return;
 
         const routeResult = await opts.cicdRouter.route(pollResult);
         if (!opts.invokeTrigger) return;
 
-        const retireSatisfiedCiHold = async (threadId: string, sourceMessageId: string) => {
-          if (!opts.holdLifecycle) return;
-          try {
-            await opts.holdLifecycle.retireSatisfiedWait({
-              threadId,
-              subjectKey,
-              expectedSignalKey: 'ci_complete',
-              sourceKind: 'ci_check',
-              sourceMessageId,
-            });
-          } catch (err) {
-            opts.log.warn({ err, subjectKey }, '[cicd-check] hold lifecycle retirement failed (best-effort)');
-          }
-        };
-
         if (routeResult.kind === 'lifecycle') {
-          await retireSatisfiedCiHold(routeResult.threadId, routeResult.messageId);
           // Skip wake when the merge was performed by our own GitHub identity —
           // the merger already knows the PR state; waking them wastes tokens.
           // Message delivery already happened inside CiCdRouter.closeLifecycle.
@@ -176,68 +149,10 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
 
         if (routeResult.kind !== 'notified') return;
 
-        // CI fail → always wake (urgent, must fix) — independent of intent.
-        if (routeResult.bucket === 'fail') {
-          await retireSatisfiedCiHold(routeResult.threadId, routeResult.messageId);
-          const policy: ConnectorTriggerPolicy = {
-            priority: 'urgent',
-            reason: 'github_ci_failure',
-            sourceCategory: 'ci',
-          };
-          void opts.invokeTrigger
-            .trigger(
-              routeResult.threadId,
-              routeResult.catId as CatId,
-              signal.task.userId ?? '',
-              routeResult.content,
-              routeResult.messageId,
-              undefined,
-              policy,
-            )
-            .catch((err) => opts.log.warn({ err }, '[cicd-check] trigger failed (best-effort)'));
-          opts.log.info(`[cicd-check] Triggered ${routeResult.catId} for CI failure`);
-          return;
-        }
-
-        if (routeResult.wakeKind === 'external_review_ready') {
-          await retireSatisfiedCiHold(routeResult.threadId, routeResult.messageId);
-          const policy: ConnectorTriggerPolicy = {
-            priority: 'normal',
-            reason: 'github_external_review_ready',
-            sourceCategory: 'review',
-            coalesceKey: `external-review:${signal.repoFullName}#${signal.prNumber}:${routeResult.headSha ?? pollResult.headSha}`,
-          };
-          void opts.invokeTrigger
-            .trigger(
-              routeResult.threadId,
-              routeResult.catId as CatId,
-              signal.task.userId ?? '',
-              routeResult.content,
-              routeResult.messageId,
-              undefined,
-              policy,
-            )
-            .catch((err) => opts.log.warn({ err }, '[cicd-check] external review-ready trigger failed'));
-          opts.log.info(`[cicd-check] Current HEAD ready → wake ${routeResult.catId} once`);
-          return;
-        }
-
-        // CI pass → gated by the tracked PR's wake intent (F140 Phase C partial revert).
-        // 'review' (default): the cat is waiting on review feedback → CI-pass is noise.
-        //   CiCdRouter should record state without posting a connector message, so stay silent.
-        // 'merge': the cat is waiting on CI-green to merge → CI-pass is the action signal → merge-gate.
-        const intent = signal.task.automationState?.intent ?? 'review';
-        if (intent !== 'merge') {
-          opts.log.info(`[cicd-check] CI pass for ${routeResult.catId} — silent (intent=${intent}; state-only)`);
-          return;
-        }
-
-        await retireSatisfiedCiHold(routeResult.threadId, routeResult.messageId);
         const policy: ConnectorTriggerPolicy = {
-          priority: 'normal',
-          reason: 'github_ci_pass',
+          priority: routeResult.bucket === 'fail' ? 'urgent' : 'normal',
+          reason: 'github_wait_satisfied',
           sourceCategory: 'ci',
-          suggestedSkill: 'merge-gate',
         };
         void opts.invokeTrigger
           .trigger(
@@ -249,8 +164,8 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
             undefined,
             policy,
           )
-          .catch((err) => opts.log.warn({ err }, '[cicd-check] merge-gate trigger failed (best-effort)'));
-        opts.log.info(`[cicd-check] CI pass → wake ${routeResult.catId} (intent=merge → merge-gate)`);
+          .catch((err) => opts.log.warn({ err }, '[cicd-check] wait trigger failed (best-effort)'));
+        opts.log.info(`[cicd-check] Typed wait satisfied → wake ${routeResult.catId}`);
       },
     },
     state: { runLedger: 'sqlite' },

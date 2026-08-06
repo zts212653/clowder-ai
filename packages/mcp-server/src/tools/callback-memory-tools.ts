@@ -1,3 +1,5 @@
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 /**
  * MCP Callback Memory Tools — invocation-scoped evidence/reflect/retain
  */
@@ -6,6 +8,11 @@ import { z } from 'zod';
 import { callbackGet, callbackPost } from './callback-tools.js';
 import { withDegradation } from './degradation.js';
 import type { ToolResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('callback-memory-tools.ts', undefined, {
+  resourceFamily: 'memory-write',
+  authority: 'callback-owner',
+});
 
 export const callbackEvidenceSearchInputSchema = {
   query: z.string().trim().min(1).describe('Evidence query string'),
@@ -69,7 +76,7 @@ export async function handleCallbackRetainMemory(input: {
 export const callbackMemoryTools = [
   // D16: search_evidence_callback and reflect_callback removed — merged into
   // the public search_evidence / reflect tools (route supports both auth modes).
-  {
+  defineTool({
     name: 'cat_cafe_retain_memory_callback',
     description:
       'Retain a durable memory item through Clowder AI callback endpoint. ' +
@@ -79,5 +86,11 @@ export const callbackMemoryTools = [
       'TIP: Add descriptive tags (e.g. ["redis", "pitfall"]) so future search_evidence queries can find it.',
     inputSchema: callbackRetainMemoryInputSchema,
     handler: handleCallbackRetainMemory,
-  },
+    governance: {
+      implementationExport: 'handleCallbackRetainMemory',
+      action: 'create',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
 ] as const;

@@ -1,6 +1,13 @@
 import { z } from 'zod';
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 import { callbackPost } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('local-review-verdict-tool.ts', undefined, {
+  resourceFamily: 'tracking-review',
+  authority: 'callback-owner',
+});
 
 export const localReviewVerdictInputSchema = {
   messageId: z
@@ -61,7 +68,7 @@ export async function handleRecoverLocalReviewVerdict(input: {
 }
 
 export const localReviewVerdictTools = [
-  {
+  defineTool({
     name: 'cat_cafe_record_local_review_verdict',
     description:
       'Complete one local-cat review action from an already persisted exact-HEAD verdict message. ' +
@@ -71,8 +78,14 @@ export const localReviewVerdictTools = [
       'GOTCHA: call cat_cafe_post_message or cat_cafe_cross_post_message first and pass its messageId; this tool accepts no free-form review body and never substitutes for delivery.',
     inputSchema: localReviewVerdictInputSchema,
     handler: handleLocalReviewVerdict,
-  },
-  {
+    governance: {
+      implementationExport: 'handleLocalReviewVerdict',
+      action: 'update',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_recover_local_review_verdict',
     description:
       'Settle one active stale local-review generation from a verdict already returned to its persisted predecessor. ' +
@@ -82,5 +95,12 @@ export const localReviewVerdictTools = [
       'GOTCHA: actionLeaseRef is only a locator; it grants no authority and must name the exact active generation.',
     inputSchema: localReviewRecoveryInputSchema,
     handler: handleRecoverLocalReviewVerdict,
-  },
+
+    governance: {
+      implementationExport: 'handleRecoverLocalReviewVerdict',
+      action: 'recover',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
 ] as const;

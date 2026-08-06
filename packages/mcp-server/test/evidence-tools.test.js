@@ -837,6 +837,27 @@ describe('MCP Evidence Tools', () => {
     assert.ok(description.includes('architecture'), 'description should name architecture docs as first-class docs');
   });
 
+  test('search_evidence carries the canonical F286 governance certificate', async () => {
+    const { evidenceTools } = await import('../dist/tools/evidence-tools.js');
+    const [tool] = evidenceTools;
+
+    assert.equal(tool.policy.resourceFamily, 'evidence-navigation');
+    assert.deepEqual(tool.actionInventory, ['read']);
+    assert.deepEqual(tool.effectiveRisk, { level: 'read', openWorld: true });
+    assert.deepEqual(tool.annotations, {
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: true,
+    });
+    assert.deepEqual(tool.policy.runtimeProfiles, [
+      'full',
+      'readonly',
+      'desktop:fable-phase0',
+      'desktop:cloud-pro-phase0',
+    ]);
+    assert.equal(tool.implementation.ref, 'module:./tools/evidence-tools.js#handleSearchEvidence');
+  });
+
   // ── F256 Phase B: expansion hints formatting ──────────────────────────
 
   test('F256 Phase B: renders "📎 Related directions" block when expansionHints present', async () => {

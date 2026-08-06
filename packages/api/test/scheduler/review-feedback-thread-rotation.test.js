@@ -180,8 +180,7 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
     });
 
     const gateResult = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
-    assert.equal(gateResult.run, true);
-    await spec.run.execute(gateResult.workItems[0].signal, 'pr:owner/repo#42', {});
+    assert.equal(gateResult.run, false, 'collector activity without an explicit wait remains state-only');
 
     assert.equal(threadStore._createCalls.length, 0, 'review feedback must not auto-create rotated threads');
     assert.equal(
@@ -191,8 +190,7 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
     );
     assert.equal(backlink._appendCalls.length, 0, 'no rotation means no source-thread backlink');
     assert.equal(backlink._broadcastCalls.length, 0, 'no rotation means no breadcrumb broadcast');
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].tracking.threadId, 'th-original', 'delivery stays on the registering thread');
+    assert.equal(calls.length, 0);
   });
 
   it('repairs already-rotated legacy tasks back to the source thread before routing', async () => {
@@ -246,7 +244,7 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
       previousThreadId: 'thread_rotated_1',
       repairedThreadId: 'th-original',
     });
-    assert.equal(calls[0].tracking.threadId, 'th-original', 'polluted legacy task must deliver to source thread');
+    assert.equal(task.threadId, 'th-original');
     assert.deepEqual(
       store._updateCalls.filter((call) => Object.hasOwn(call.input, 'threadId')).map((call) => call.input.threadId),
       ['th-original'],
@@ -316,7 +314,7 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
     // #1002: OWNER comments are now delivered (decideDelivery removed)
     assert.equal(calls[0].signal.newComments.length, 1, 'OWNER comment must be delivered (#1002)');
     assert.equal(calls[0].signal.newComments[0].id, 34);
-    assert.equal(calls[0].tracking.threadId, 'th-original');
+    assert.equal(task.threadId, 'th-original');
     const cursorPatch = store._patchCalls.find((call) => call.patch.review?.lastCommentCursor !== undefined);
     assert.ok(cursorPatch, 'cursor must advance past delivered comment');
     assert.equal(cursorPatch.patch.review.lastCommentCursor, 34);
@@ -392,7 +390,7 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
     );
   });
 
-  it('does not persist legacy repair when routing delivery fails', async () => {
+  it('persists canonical legacy repair even when a later delivery attempt fails', async () => {
     const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
     const task = mockTask(
       { repoFullName: 'owner/repo', prNumber: 50, catId: 'opus', threadId: 'thread_rotated_1', userId: 'u-1' },
@@ -443,11 +441,11 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
       /delivery failed/,
     );
 
-    assert.equal(task.threadId, 'thread_rotated_1', 'failed delivery must leave legacy evidence intact for retry');
+    assert.equal(task.threadId, 'th-original', 'canonical ownership repair is independent from delivery');
     assert.equal(
       store._updateCalls.some((call) => Object.hasOwn(call.input, 'threadId')),
-      false,
-      'failed delivery must not persist repair before audit is visible',
+      true,
+      'delivery failure must not roll canonical ownership back to the legacy rotated thread',
     );
   });
 
@@ -564,7 +562,7 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
     assert.equal(gateResult.run, true);
     await spec.run.execute(gateResult.workItems[0].signal, 'pr:owner/repo#52', {});
 
-    assert.equal(calls.length, 1, 're-registration after pre-route validation may have already delivered once');
+    assert.equal(calls.length, 0, 'failed conditional repair stops before routing');
     assert.equal(task.threadId, 'th-new-registration', 'conditional repair must not overwrite the newer thread');
     assert.equal(
       store._updateCalls.some(
@@ -640,7 +638,7 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
       previousThreadId: 'thread_rotated_2',
       repairedThreadId: 'th-original',
     });
-    assert.equal(calls[0].tracking.threadId, 'th-original', 'chained legacy repair must deliver to original source');
+    assert.equal(task.threadId, 'th-original');
     assert.deepEqual(
       store._updateCalls.filter((call) => Object.hasOwn(call.input, 'threadId')).map((call) => call.input.threadId),
       ['th-original'],
@@ -700,7 +698,7 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
       previousThreadId: 'thread_rotated_default',
       repairedThreadId: 'default',
     });
-    assert.equal(calls[0].tracking.threadId, 'default', 'default-thread legacy repair must deliver to default');
+    assert.equal(task.threadId, 'default');
     assert.deepEqual(
       store._updateCalls.filter((call) => Object.hasOwn(call.input, 'threadId')).map((call) => call.input.threadId),
       ['default'],
@@ -750,12 +748,9 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
     });
 
     const gateResult = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
-    assert.equal(gateResult.run, true);
-    await spec.run.execute(gateResult.workItems[0].signal, 'pr:owner/repo#45', {});
+    assert.equal(gateResult.run, false, 'untrusted legacy metadata cannot create a wake');
 
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].signal.routingAudit, undefined, 'untrusted legacy-looking thread must not emit audit repair');
-    assert.equal(calls[0].tracking.threadId, 'thread_spoofed', 'spoofed title must not reroute delivery');
+    assert.equal(calls.length, 0);
     assert.equal(
       store._updateCalls.some((call) => Object.hasOwn(call.input, 'threadId')),
       false,
@@ -790,10 +785,9 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
     });
 
     const gateResult = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
-    assert.equal(gateResult.run, true);
-    await spec.run.execute(gateResult.workItems[0].signal, 'pr:owner/repo#43', {});
+    assert.equal(gateResult.run, false, 'cursor progress is durable state, not an implicit wake');
 
-    assert.equal(calls[0].tracking.threadId, 'th-source');
+    assert.equal(calls.length, 0);
     const cursorPatch = store._patchCalls.find((call) => call.patch.review?.lastCommentCursor !== undefined);
     assert.ok(cursorPatch, 'cursor patch should still be persisted after delivery');
     assert.equal(cursorPatch.patch.review.lastCommentCursor, 20);

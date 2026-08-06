@@ -1,4 +1,5 @@
 import type { CatId, FreshnessSupplementAggregate } from '@cat-cafe/shared';
+import { cursorFor } from '../stores/cursor.js';
 import type { IMessageStore, StoredMessage } from '../stores/ports/MessageStore.js';
 import { canViewMessage } from '../stores/visibility.js';
 import { isExpectedA2AReplyForCat, isFreshnessRoutableMessage } from './checkFreshnessForPostMessage.js';
@@ -60,7 +61,8 @@ export async function scanFreshnessSupplementPreflight(input: {
         requiredFrontierMessageId: ordered.at(-1) ?? supplement.requiredFrontierMessageId,
       };
     }
-    const nextCursor = batch.at(-1)?.id;
+    const lastMessage = batch.at(-1);
+    const nextCursor = lastMessage ? cursorFor(lastMessage) : undefined;
     if (!nextCursor || visitedCursors.has(nextCursor)) {
       return { kind: 'blocked', evidenceRefs: [`supplement-preflight:non-advancing:${cursor}`] };
     }

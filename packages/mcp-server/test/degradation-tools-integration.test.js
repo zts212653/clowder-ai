@@ -85,65 +85,16 @@ describe('write-class tool degradation policy declarations (F174-E AC-E2/E5)', (
 
   test('register_pr_tracking with kind:none surfaces failure', async () => {
     await withMockedCallbackPost(async ({ handleRegisterPrTracking }) => {
-      const result = await handleRegisterPrTracking({ repoFullName: 'a/b', prNumber: 1 });
+      const result = await handleRegisterPrTracking({
+        repoFullName: 'a/b',
+        prNumber: 1,
+        when: [{ kind: 'pr_head_changed' }],
+        nextStep: 'Inspect the new HEAD.',
+        expiresAt: Date.now() + 60_000,
+      });
       assert.ok(result.isError);
       const text = result.content[0].text;
       assert.ok(text.includes('[degrade]') && text.includes('reason=expired'));
-    });
-  });
-
-  test('register_pr_tracking forwards empty instructions so stored guidance can be cleared', async () => {
-    await withCapturedCallbackPosts(async ({ handleRegisterPrTracking }, requests) => {
-      const result = await handleRegisterPrTracking({ repoFullName: 'a/b', prNumber: 1, instructions: '' });
-
-      assert.equal(result.isError, undefined);
-      assert.equal(requests.length, 1);
-      assert.equal(requests[0].url, 'http://localhost:3003/api/callbacks/register-pr-tracking');
-      assert.deepEqual(requests[0].body, { repoFullName: 'a/b', prNumber: 1, instructions: '' });
-    });
-  });
-
-  test('register_pr_tracking forwards the structured event-wait proof anchor', async () => {
-    await withCapturedCallbackPosts(async ({ handleRegisterPrTracking }, requests) => {
-      const result = await handleRegisterPrTracking({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 2856,
-        intent: 'review',
-        eventWait: {
-          expectedSignal: 'review_posted',
-          triggerCommentId: 4936000000,
-        },
-      });
-
-      assert.equal(result.isError, undefined);
-      assert.equal(requests.length, 1);
-      assert.deepEqual(requests[0].body, {
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 2856,
-        intent: 'review',
-        eventWait: {
-          expectedSignal: 'review_posted',
-          triggerCommentId: 4936000000,
-        },
-      });
-    });
-  });
-
-  test('register_pr_tracking forwards actor-aware wake policy', async () => {
-    await withCapturedCallbackPosts(async ({ handleRegisterPrTracking }, requests) => {
-      const result = await handleRegisterPrTracking({
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 1185,
-        wakePolicy: 'human_participant_activity',
-      });
-
-      assert.equal(result.isError, undefined);
-      assert.equal(requests.length, 1);
-      assert.deepEqual(requests[0].body, {
-        repoFullName: 'zts212653/cat-cafe',
-        prNumber: 1185,
-        wakePolicy: 'human_participant_activity',
-      });
     });
   });
 

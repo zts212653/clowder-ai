@@ -1,4 +1,4 @@
-import type { PrEventWaitState, PrEventWaitUncoveredReason, TaskItem, TaskKind, TaskStatus } from '@cat-cafe/shared';
+import type { AwaitStateV1, TaskItem, TaskKind, TaskStatus } from '@cat-cafe/shared';
 import type { ITaskStore } from '../../../stores/ports/TaskStore.js';
 
 export type EventBackedRoutingExitRejectReason =
@@ -9,9 +9,8 @@ export type EventBackedRoutingExitRejectReason =
   | 'owner_mismatch'
   | 'thread_mismatch'
   | 'subject_mismatch'
-  | 'invocation_mismatch'
-  | 'intent_mismatch'
-  | 'coverage_unconfirmed'
+  | 'generation_mismatch'
+  | 'predicate_missing'
   | 'query_failed';
 
 export type EventBackedRoutingExitResolution =
@@ -31,14 +30,11 @@ export interface EventBackedRoutingExitProof {
     ownerCatId: string | null;
     threadId: string;
     subjectKey: string | null;
-    intent: string | undefined;
+    generation: number;
   };
-  eventWait: {
-    invocationId: string;
-    ownerCatId: string;
-    threadId: string;
-    subjectKey: string;
-    coverageStatus: PrEventWaitState['coverage']['status'];
+  predicate: {
+    kind: 'pr_review_result_available';
+    triggerCommentId: number;
   };
 }
 
@@ -51,94 +47,58 @@ interface ResolveEventBackedRoutingExitInput {
 
 type EventBackedRoutingExitIdentity = Omit<ResolveEventBackedRoutingExitInput, 'taskStore'>;
 
-/**
- * Consumer-side defense against a future resolver regression returning `bypass`
- * for stale or mismatched source state. The proof values are copied from the live
- * task and eventWait records, then independently checked at the side-effect boundary.
- */
+function reviewResultPredicate(active: AwaitStateV1) {
+  return active.continuation.when.find(
+    (
+      predicate,
+    ): predicate is Extract<AwaitStateV1['continuation']['when'][number], { kind: 'pr_review_result_available' }> & {
+      triggerCommentId: number;
+    } => predicate.kind === 'pr_review_result_available' && predicate.triggerCommentId !== undefined,
+  );
+}
+
 export function isEventBackedRoutingBypassProofValid(
   resolution: EventBackedRoutingExitResolution,
   identity: EventBackedRoutingExitIdentity,
 ): boolean {
   if (resolution.kind !== 'bypass' || !identity.invocationId) return false;
-  const { task, eventWait } = resolution.proof;
+  const { task, predicate } = resolution.proof;
   return (
     task.kind === 'pr_tracking' &&
     task.status !== 'done' &&
     task.ownerCatId === identity.catId &&
     task.threadId === identity.threadId &&
     task.subjectKey === resolution.subjectKey &&
-    task.intent === 'review' &&
-    eventWait.invocationId === identity.invocationId &&
-    eventWait.ownerCatId === identity.catId &&
-    eventWait.threadId === identity.threadId &&
-    eventWait.subjectKey === task.subjectKey &&
-    eventWait.coverageStatus === 'covered'
-  );
-}
-
-function isPrEventWaitState(value: unknown): value is PrEventWaitState {
-  if (!value || typeof value !== 'object') return false;
-  const state = value as Partial<PrEventWaitState>;
-  return (
-    state.v === 1 &&
-    typeof state.invocationId === 'string' &&
-    typeof state.threadId === 'string' &&
-    typeof state.ownerCatId === 'string' &&
-    typeof state.subjectKey === 'string' &&
-    state.expectedSignal === 'review_posted' &&
-    isPrEventWaitCoverage(state.coverage)
-  );
-}
-
-const PR_EVENT_WAIT_UNCOVERED_REASONS = new Set<PrEventWaitUncoveredReason>([
-  'subject_mismatch',
-  'not_review_trigger',
-  'review_not_accepted',
-  'feedback_already_posted',
-]);
-
-function isPrEventWaitCoverage(value: unknown): value is PrEventWaitState['coverage'] {
-  if (!value || typeof value !== 'object') return false;
-  const coverage = value as Record<string, unknown>;
-  if (
-    coverage.kind !== 'github_review_trigger_eyes' ||
-    !Number.isSafeInteger(coverage.triggerCommentId) ||
-    Number(coverage.triggerCommentId) <= 0 ||
-    typeof coverage.observedAt !== 'number' ||
-    !Number.isFinite(coverage.observedAt)
-  ) {
-    return false;
-  }
-  if (coverage.status === 'covered') return true;
-  return (
-    coverage.status === 'uncovered' &&
-    typeof coverage.reason === 'string' &&
-    PR_EVENT_WAIT_UNCOVERED_REASONS.has(coverage.reason as PrEventWaitUncoveredReason)
+    task.generation > 0 &&
+    predicate.kind === 'pr_review_result_available' &&
+    Number.isSafeInteger(predicate.triggerCommentId) &&
+    predicate.triggerCommentId > 0
   );
 }
 
 function rejectCandidate(
   task: TaskItem,
-  eventWait: PrEventWaitState,
+  active: AwaitStateV1,
   input: Omit<ResolveEventBackedRoutingExitInput, 'taskStore'> & { invocationId: string },
 ): EventBackedRoutingExitRejectReason | null {
   if (task.kind !== 'pr_tracking') return 'no_candidate';
   if (task.status === 'done') return 'task_done';
-  if (task.ownerCatId !== input.catId || eventWait.ownerCatId !== input.catId) return 'owner_mismatch';
-  if (task.threadId !== input.threadId || eventWait.threadId !== input.threadId) return 'thread_mismatch';
-  if (!task.subjectKey || eventWait.subjectKey !== task.subjectKey) return 'subject_mismatch';
-  if (eventWait.invocationId !== input.invocationId) return 'invocation_mismatch';
-  if (task.automationState?.intent !== 'review') return 'intent_mismatch';
-  if (eventWait.coverage.status !== 'covered') return 'coverage_unconfirmed';
+  if (task.ownerCatId !== input.catId) return 'owner_mismatch';
+  if (task.threadId !== input.threadId) return 'thread_mismatch';
+  if (!task.subjectKey || active.subjectRef !== task.subjectKey) return 'subject_mismatch';
+  if (active.ownerFence.kind !== 'containing_task' || active.ownerFence.generation !== active.generation) {
+    return 'generation_mismatch';
+  }
+  if (!reviewResultPredicate(active)) return 'predicate_missing';
   return null;
 }
 
 /**
- * Resolve an event-backed routing exit from live task state.
+ * Resolve an invocation exit from the live typed wait.
  *
- * Fail-closed by design: missing identity/store, malformed state, and store errors all
- * return a reject verdict so the caller keeps the original F177 remedial path.
+ * Coverage is verified by the registration route before this state exists. The
+ * wait never copies invocation/cat/thread identity; this resolver binds the
+ * authenticated invocation to the containing task at read time.
  */
 export async function resolveEventBackedRoutingExit(
   input: ResolveEventBackedRoutingExitInput,
@@ -155,19 +115,20 @@ export async function resolveEventBackedRoutingExit(
 
   let firstReject: EventBackedRoutingExitRejectReason | null = null;
   for (const task of tasks) {
-    const eventWait = task.automationState?.eventWait;
-    if (!isPrEventWaitState(eventWait)) continue;
-    const reason = rejectCandidate(task, eventWait, {
+    const active = task.automationState?.await;
+    if (!active) continue;
+    const reason = rejectCandidate(task, active, {
       threadId: input.threadId,
       catId: input.catId,
       invocationId: input.invocationId,
     });
-    if (!reason) {
+    const predicate = reviewResultPredicate(active);
+    if (!reason && predicate) {
       return {
         kind: 'bypass',
         taskId: task.id,
-        subjectKey: eventWait.subjectKey,
-        expectedSignal: eventWait.expectedSignal,
+        subjectKey: active.subjectRef,
+        expectedSignal: 'review_posted',
         proof: {
           task: {
             kind: task.kind,
@@ -175,14 +136,11 @@ export async function resolveEventBackedRoutingExit(
             ownerCatId: task.ownerCatId,
             threadId: task.threadId,
             subjectKey: task.subjectKey,
-            intent: task.automationState?.intent,
+            generation: active.generation,
           },
-          eventWait: {
-            invocationId: eventWait.invocationId,
-            ownerCatId: eventWait.ownerCatId,
-            threadId: eventWait.threadId,
-            subjectKey: eventWait.subjectKey,
-            coverageStatus: eventWait.coverage.status,
+          predicate: {
+            kind: predicate.kind,
+            triggerCommentId: predicate.triggerCommentId,
           },
         },
       };

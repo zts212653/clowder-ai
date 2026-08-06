@@ -12,7 +12,7 @@ import type {
   CommunityObjectState,
   GitHubAuthorAssociation,
   IssueCommentSuppressionReason,
-  TrackingWakePolicy,
+  IssueTrackingWakePolicy,
 } from '@cat-cafe/shared';
 
 export type DeliveryDecision = 'wake-owner' | 'silent-log';
@@ -33,7 +33,7 @@ export type TrackingWakeDecision =
   | { readonly decision: 'state_only'; readonly reason: 'automation_actor' };
 
 export interface TrackingWakePolicyInput {
-  wakePolicy?: TrackingWakePolicy;
+  wakePolicy?: IssueTrackingWakePolicy;
   actorLogin?: string;
   /** GitHub REST `user.type`. Only exact `User` and `Bot` values are classified. */
   actorType?: string;

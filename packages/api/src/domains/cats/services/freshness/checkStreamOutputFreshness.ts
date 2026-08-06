@@ -18,9 +18,8 @@
  */
 
 import type { CatId } from '@cat-cafe/shared';
-import type { DeliveryCursorStore } from '../stores/ports/DeliveryCursorStore.js';
+import { cursorFor } from '../stores/cursor.js';
 import {
-  type FreshnessMessageReader,
   getFreshnessSenderLabel,
   getQueuedFreshnessSenderLabel,
   isExpectedA2AReplyForCat,
@@ -30,89 +29,13 @@ import {
 import { decideFreshnessRelevance, type FreshnessRelevanceReason } from './FreshnessRelevancePolicy.js';
 import { isFreshnessSelfSourceMessage, isFreshnessSelfSourceQueueEntry } from './FreshnessSourcePolicy.js';
 import { recordFreshnessRelevanceSuppression } from './freshness-relevance-telemetry.js';
+import type { CheckStreamFreshnessInput, StreamFreshnessResult } from './stream-output-freshness-types.js';
 
-/** Result of the stream output freshness check */
-export interface StreamFreshnessResult {
-  /** Whether the stream output is stale (generated while unseen messages existed) */
-  stale: boolean;
-  /** Number of unseen non-self messages */
-  unseenCount: number;
-  /** Unique senders of unseen messages (deduped) */
-  unseenSenders: string[];
-  /** Ordered identities of delivered messages the replacement attempt must cover. */
-  unseenMessageIds: string[];
-  /** Raw thread frontier observed while completing the scan. */
-  observedRawFrontierMessageId?: string;
-  /** False means the checker could not prove that it scanned through its observed frontier. */
-  scanComplete: boolean;
-  /** Seen cursor used for this decision. Present when the cursor was readable. */
-  seenCursor?: string;
-  /** Highest delivered message id in the stale visible set. Used for D1 single-flight. */
-  highWatermark?: string;
-  /** Typed relevance exclusions observed while scanning; suitable for bounded telemetry. */
-  relevanceSuppressions?: Partial<Record<FreshnessRelevanceReason, number>>;
-  /** Reason for the decision */
-  reason:
-    | 'cursor_missing' // no seenCursor → fail-open (fresh)
-    | 'no_unseen' // no unseen messages after cursor
-    | 'self_only' // only self-messages after cursor
-    | 'unseen_messages' // unseen non-self messages found → stale
-    | 'queued_messages' // F117 queued messages found → stale
-    | 'queued_identity_missing' // queued body exists but durable message identity is absent
-    | 'scan_incomplete' // bounded/non-advancing scan → fail closed with evidence
-    | 'error_failopen'; // error during check → fail-open (fresh)
-}
-
-/** Event emitted by the stream freshness check (AC-D4) */
-export interface StreamFreshnessEvent {
-  kind: 'stream_stale_detected' | 'stream_fresh';
-  threadId: string;
-  catId: string;
-  unseenCount: number;
-  unseenSenders: string[];
-  reason: string;
-  relevanceSuppressions?: Partial<Record<FreshnessRelevanceReason, number>>;
-  timestamp: number;
-}
-
-export interface CheckStreamFreshnessInput {
-  userId: string;
-  catId: CatId | string;
-  threadId: string;
-  /**
-   * Message that created the current invocation. It is already in the cat's prompt
-   * and must not be counted as a "new" message that makes this same invocation stale.
-   */
-  currentTriggerMessageId?: string;
-  /** Parallel siblings share the trigger and therefore are not new work for each other. */
-  parallelBatchId?: string;
-  /** Message bodies injected by a typed Phase E closure carrier into this invocation. */
-  coveredMessageIds?: readonly string[];
-  /**
-   * ADR-042 exact scan ceiling. `undefined` preserves the legacy live-frontier scan;
-   * `null` means the atomic append observed an empty raw thread.
-   */
-  throughMessageId?: string | null;
-  cursorStore:
-    | DeliveryCursorStore
-    | {
-        getSeenCursor(
-          userId: string,
-          catId: string,
-          threadId: string,
-        ): Promise<string | undefined> | string | undefined;
-      };
-  messageStore: FreshnessMessageReader;
-  /** Optional queue checker — detects messages queued by F117 but not yet delivered */
-  queueChecker?: QueuedMessageChecker;
-  /** Optional event callback (AC-D4): called with stale/fresh event for FreshnessAttentionEventLog.
-   *  Caller provides the append function; checkStreamOutputFreshness stays pure (no Redis dep). */
-  onEvent?: (event: StreamFreshnessEvent) => void;
-  /** Optional visibility filter — matches Phase A's messageFilter (cloud R1-P1).
-   *  When provided, only messages passing this filter are counted as "unseen".
-   *  Typical use: play-mode excludes other cats' origin:'stream' messages. */
-  messageFilter?: (msg: Record<string, unknown>) => boolean;
-}
+export type {
+  CheckStreamFreshnessInput,
+  StreamFreshnessEvent,
+  StreamFreshnessResult,
+} from './stream-output-freshness-types.js';
 
 const UNSEEN_FETCH_LIMIT = 20;
 const MAX_PAGINATION_ROUNDS = 500;
@@ -227,6 +150,7 @@ export async function checkStreamOutputFreshness(input: CheckStreamFreshnessInpu
     let unseenHighWatermark: string | undefined;
     let observedRawFrontierMessageId: string | undefined;
     let scanComplete = false;
+    const visitedPaginationCursors = new Set<string>([paginationCursor]);
 
     for (let round = 0; round < MAX_PAGINATION_ROUNDS; round++) {
       const rawBatch = messageStore.getByThreadAfter(threadId, paginationCursor, UNSEEN_FETCH_LIMIT, userId);
@@ -236,8 +160,9 @@ export async function checkStreamOutputFreshness(input: CheckStreamFreshnessInpu
         scanComplete = true;
         break;
       }
-      const nextPaginationCursor = batch[batch.length - 1]?.id;
-      if (typeof nextPaginationCursor !== 'string' || nextPaginationCursor <= (paginationCursor ?? '')) {
+      const lastMessage = batch[batch.length - 1];
+      const nextPaginationCursor = lastMessage ? cursorFor(lastMessage) : undefined;
+      if (!nextPaginationCursor || visitedPaginationCursors.has(nextPaginationCursor)) {
         return emit({
           stale: true,
           unseenCount,
@@ -258,7 +183,13 @@ export async function checkStreamOutputFreshness(input: CheckStreamFreshnessInpu
             : batch.filter((message) => message.id <= throughMessageId);
       if (boundedBatch.length > 0) {
         sawAnyMessages = true;
-        observedRawFrontierMessageId = boundedBatch.at(-1)?.id;
+        const batchRawFrontier = maxMessageId(boundedBatch);
+        if (
+          batchRawFrontier !== undefined &&
+          (observedRawFrontierMessageId === undefined || batchRawFrontier > observedRawFrontierMessageId)
+        ) {
+          observedRawFrontierMessageId = batchRawFrontier;
+        }
       }
 
       // 3. Apply visibility filter (cloud R1-P1 fix — matches Phase A's messageFilter)
@@ -312,6 +243,7 @@ export async function checkStreamOutputFreshness(input: CheckStreamFreshnessInpu
 
       // Advance cursor past this batch for next round
       paginationCursor = nextPaginationCursor;
+      visitedPaginationCursors.add(nextPaginationCursor);
     }
 
     if (!scanComplete && sawAnyMessages) {

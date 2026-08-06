@@ -1,3 +1,5 @@
+import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 /**
  * MCP Callback Tools — core callbacks
  * 鉴权: CAT_CAFE_CREDENTIAL_FILE refresh file, with process.env fallback
@@ -1547,70 +1549,59 @@ export async function handleCheckPermissionStatus(input: WithAgentKey<{ requestI
   );
 }
 
-// TD091: PR tracking registration — server resolves threadId from invocation record
+const githubWaitPredicateInputSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('pr_head_changed') }).strict(),
+  z
+    .object({
+      kind: z.literal('pr_review_result_available'),
+      triggerCommentId: z.number().int().positive().optional(),
+    })
+    .strict(),
+  z.object({ kind: z.literal('pr_review_decision_changed') }).strict(),
+  z
+    .object({
+      kind: z.literal('pr_review_thread_changed'),
+      reviewThreadIds: z.array(z.string().min(1)).min(1).max(20),
+    })
+    .strict(),
+  z.object({ kind: z.literal('pr_ci_terminal') }).strict(),
+  z.object({ kind: z.literal('pr_became_conflicting') }).strict(),
+]);
+
+// F280: server-bound typed wait registration — baseline and owner are never caller input.
 export const registerPrTrackingInputSchema = {
   repoFullName: z.string().min(1).describe('Repository full name in owner/repo format (e.g. "zts212653/cat-cafe")'),
   prNumber: z.number().int().positive().describe('PR number'),
-  // F202 Phase 2C (AC-C1): tracking instructions appended to trigger messages
-  instructions: z
+  when: z
+    .array(githubWaitPredicateInputSchema)
+    .min(1)
+    .max(4)
+    .describe('One to four typed conditions, evaluated as flat any-of against a server-frozen live baseline.'),
+  nextStep: z
     .string()
-    .max(2000)
-    .optional()
-    .describe(
-      'Tracking instructions — appended to trigger messages when review/CI events fire. Task preference, not system override. For exact-HEAD external review, run the Review Entry Mode Classifier before persisting instructions.',
-    ),
-  catId: z
-    .string()
-    .optional()
-    .describe('Deprecated — server auto-resolves from invocation identity. Ignored if provided.'),
-  intent: z
-    .enum(['review', 'merge'])
-    .optional()
-    .describe(
-      "Wake intent for this PR. 'review' (default) = you're waiting on review feedback → CI-pass " +
-        "stays silent (you'll see it when you look). 'merge' = you're waiting on CI-green to merge " +
-        '(your approved PR / an outbound PR / owner-merging someone else’s PR) → CI-pass wakes you. ' +
-        'Re-call this tool to flip the intent (e.g. switch to "merge" once review is approved).',
-    ),
-  wakePolicy: z
-    .enum(['all_feedback', 'human_participant_activity'])
-    .optional()
-    .describe(
-      "Optional actor policy persisted on this PR tracker, independent from intent. Use 'human_participant_activity' " +
-        'when a community reviewer wants author/third-party human activity to wake them without cloud/bot process noise. ' +
-        "'all_feedback' is the backward-compatible default. Bot activity still advances durable event/cursor state but " +
-        'produces no connector delivery or invocation; missing/unknown actor metadata fails safe to delivery.',
-    ),
-  eventWait: z
-    .object({
-      expectedSignal: z
-        .literal('review_posted')
-        .describe('Structured callback signal covered by this wait. Currently only review_posted is supported.'),
-      triggerCommentId: z
-        .number()
-        .int()
-        .positive()
-        .describe(
-          'Numeric GitHub issue-comment ID for the exact @codex review trigger that already has an eyes reaction from the Codex connector bot.',
-        ),
-    })
-    .optional()
-    .describe(
-      'Optional invocation-bound event wait. Use only after the same PR review trigger has a Codex connector EYES reaction and this turn should stop cleanly until review feedback arrives.',
-    ),
+    .min(1)
+    .max(500)
+    .describe('What to do after a match. Display-only text; never parsed as wake policy.'),
+  expiresAt: z
+    .number()
+    .int()
+    .positive()
+    .describe('Unix timestamp in milliseconds when responsibility expires without deleting history.'),
 };
 
 export async function handleRegisterPrTracking(input: {
   repoFullName: string;
   prNumber: number;
-  instructions?: string;
-  catId?: string;
-  intent?: 'review' | 'merge';
-  wakePolicy?: 'all_feedback' | 'human_participant_activity';
-  eventWait?: {
-    expectedSignal: 'review_posted';
-    triggerCommentId: number;
-  };
+  when: Array<
+    | { kind: 'pr_head_changed' }
+    | { kind: 'pr_review_result_available'; triggerCommentId?: number }
+    | { kind: 'pr_review_decision_changed' }
+    | { kind: 'pr_review_thread_changed'; reviewThreadIds: string[] }
+    | { kind: 'pr_ci_terminal' }
+    | { kind: 'pr_became_conflicting' }
+  >;
+  nextStep: string;
+  expiresAt: number;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   // F174 Phase E (AC-E2/E5): explicit kind:'none'. PR tracking is one-shot
@@ -1623,11 +1614,9 @@ export async function handleRegisterPrTracking(input: {
         {
           repoFullName: input.repoFullName,
           prNumber: input.prNumber,
-          ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
-          ...(input.catId ? { catId: input.catId } : {}),
-          ...(input.intent ? { intent: input.intent } : {}),
-          ...(input.wakePolicy ? { wakePolicy: input.wakePolicy } : {}),
-          ...(input.eventWait ? { eventWait: input.eventWait } : {}),
+          when: input.when,
+          nextStep: input.nextStep,
+          expiresAt: input.expiresAt,
         },
         agentKeyOptions(input),
       ),
@@ -2761,6 +2750,9 @@ export async function handleHoldBall(input: {
 
 import { unlinkSync, writeFileSync } from 'node:fs';
 
+const defineTool = defineMcpMigrationFactory('callback-tools.ts');
+const defineCanonicalTool = defineMcpCanonicalFactory('callback-tools.ts');
+
 /**
  * Resolve the mode file path for the current session.
  * Uses invocation ID (Clowder AI managed) or returns null.
@@ -2882,7 +2874,7 @@ export async function handleSetThreadMetadata(input: {
 }
 
 export const callbackTools = [
-  {
+  defineTool({
     name: 'cat_cafe_post_message',
     description:
       'Post a proactive async message to YOUR CURRENT thread, optionally waking one cat as an ordinary notification or a fenced same-thread structured single successor. ' +
@@ -2898,16 +2890,32 @@ export const callbackTools = [
       'GOTCHA: Do NOT use this for routine replies — only for mid-task proactive messages when you need to share something before your response completes.',
     inputSchema: postMessageInputSchema,
     handler: handlePostMessage,
-  },
-  {
+    governance: {
+      implementationExport: 'handlePostMessage',
+      resourceFamily: 'thread-message',
+      action: 'command',
+      authority: 'callback-thread',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_get_pending_mentions',
     description:
       'Get recent messages that @-mention you. Use at session start to check if anyone is trying to get your attention. ' +
       'TIP: Call this early in your session, then call ack_mentions after processing to avoid seeing the same mentions next session.',
     inputSchema: getPendingMentionsInputSchema,
     handler: handleGetPendingMentions,
-  },
-  {
+    governance: {
+      implementationExport: 'handleGetPendingMentions',
+      resourceFamily: 'thread-message',
+      action: 'read',
+      authority: 'callback-thread',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_ack_mentions',
     description:
       'Acknowledge that you have processed mentions up to a specific message ID. ' +
@@ -2915,8 +2923,16 @@ export const callbackTools = [
       'GOTCHA: Pass the message ID of the LAST mention you processed, not the first.',
     inputSchema: ackMentionsInputSchema,
     handler: handleAckMentions,
-  },
-  {
+    governance: {
+      implementationExport: 'handleAckMentions',
+      resourceFamily: 'thread-message',
+      action: 'update',
+      authority: 'callback-thread',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_get_thread_context',
     description:
       'Read messages from one thread, with token-lean anchor previews by default and optional full bodies, ranked keywords, or a bounded window around messageId. ' +
@@ -2926,9 +2942,17 @@ export const callbackTools = [
       'GOTCHA: keyword ranking is best-effort over a bounded recent scan; scanCapped=true means older history may contain additional matches. Anchor mode does not consume queued bodies or close freshness responsibility; for a freshness catch, use responseMode="full" with no catId/keyword/messageId filters. Pass threadId only to read a different thread; omit it for the current thread.',
     inputSchema: getThreadContextInputSchema,
     handler: handleGetThreadContext,
-  },
+    governance: {
+      implementationExport: 'handleGetThreadContext',
+      resourceFamily: 'thread-message',
+      action: 'read',
+      authority: 'callback-thread',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
+    },
+  }),
   // D15: cat_cafe_search_messages removed — superseded by search_evidence + get_thread_context
-  {
+  defineTool({
     name: 'cat_cafe_get_message',
     description:
       'Look up a single message by its messageId. Use when you receive a message with replyTo — ' +
@@ -2952,8 +2976,16 @@ export const callbackTools = [
       agentKeyCatId: agentKeyCatIdSchema,
     },
     handler: handleGetMessage,
-  },
-  {
+    governance: {
+      implementationExport: 'handleGetMessage',
+      resourceFamily: 'thread-message',
+      action: 'read',
+      authority: 'callback-thread',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_get_thread_cats',
     description:
       'Discover which cats are in the current thread: participants (with activity stats), routable cats, and availability. ' +
@@ -2961,8 +2993,16 @@ export const callbackTools = [
       'Returns: participants (catId, displayName, lastMessageAt, messageCount), routableNow, routableNotJoined, notRoutable.',
     inputSchema: getThreadCatsInputSchema,
     handler: handleGetThreadCats,
-  },
-  {
+    governance: {
+      implementationExport: 'handleGetThreadCats',
+      resourceFamily: 'thread-message',
+      action: 'read',
+      authority: 'callback-thread',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_list_threads',
     description:
       'List thread summaries for discovery. Use when you need to find a thread by keyword or see recent activity. ' +
@@ -2970,16 +3010,32 @@ export const callbackTools = [
       'Use activeSince (Unix ms) to filter to recently active threads. Use keyword to search by title.',
     inputSchema: listThreadsInputSchema,
     handler: handleListThreads,
-  },
-  {
+    governance: {
+      implementationExport: 'handleListThreads',
+      resourceFamily: 'thread-message',
+      action: 'read',
+      authority: 'callback-thread',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_list_labels',
     description:
       'List user-defined thread labels (id, name, color). Use when you need to know which labels exist ' +
       'before suggesting label assignments for threads. Returns all labels sorted by sortOrder.',
     inputSchema: listLabelsInputSchema,
     handler: handleListLabels,
-  },
-  {
+    governance: {
+      implementationExport: 'handleListLabels',
+      resourceFamily: 'label-taxonomy',
+      action: 'read',
+      authority: 'callback-owner',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_feat_index',
     description:
       'Lookup feature index entries by featId or query. Returns featId, name, status, and linked threadIds. ' +
@@ -2987,8 +3043,16 @@ export const callbackTools = [
       'PARAM GUIDE: featId = exact match (e.g. "F043"), query = fuzzy substring over all fields.',
     inputSchema: featIndexInputSchema,
     handler: handleFeatIndex,
-  },
-  {
+    governance: {
+      implementationExport: 'handleFeatIndex',
+      resourceFamily: 'thread-message',
+      action: 'read',
+      authority: 'callback-thread',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_cross_post_message',
     description:
       'Post a message to a specific thread by threadId (cross-thread notification). ' +
@@ -3010,8 +3074,16 @@ export const callbackTools = [
       'TIP: The sub-thread "## 主 Thread" header includes exact routing credentials (threadId + targetCats/handle) — copy them directly.',
     inputSchema: crossPostMessageInputSchema,
     handler: handleCrossPostMessage,
-  },
-  {
+    governance: {
+      implementationExport: 'handleCrossPostMessage',
+      resourceFamily: 'thread-message',
+      action: 'command',
+      authority: 'callback-thread',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_list_tasks',
     description:
       'List tasks with optional threadId/catId/status filters for global task discovery. ' +
@@ -3019,8 +3091,16 @@ export const callbackTools = [
       'TIP: Filter by status="blocked" to find tasks that need attention.',
     inputSchema: listTasksInputSchema,
     handler: handleListTasks,
-  },
-  {
+    governance: {
+      implementationExport: 'handleListTasks',
+      resourceFamily: 'task-workflow',
+      action: 'read',
+      authority: 'callback-owner',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_update_task',
     description:
       'Update a task you own: mark as doing/blocked/done, or resolve a missing dispatch gate. ' +
@@ -3029,8 +3109,16 @@ export const callbackTools = [
       'F193-E1: Pass dispatchGate to resolve a "missing" dispatch gate (e.g. after cross_posting to the owning thread).',
     inputSchema: updateTaskInputSchema,
     handler: handleUpdateTask,
-  },
-  {
+    governance: {
+      implementationExport: 'handleUpdateTask',
+      resourceFamily: 'task-workflow',
+      action: 'update',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_create_task',
     description:
       'Create a new 🧶 毛线球 (yarn ball) task in the current thread. ' +
@@ -3046,8 +3134,16 @@ export const callbackTools = [
       'the task is created but a warning is returned reminding you to dispatch.',
     inputSchema: createTaskInputSchema,
     handler: handleCreateTask,
-  },
-  {
+    governance: {
+      implementationExport: 'handleCreateTask',
+      resourceFamily: 'task-workflow',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_create_rich_block',
     description:
       'Create a rich block (card, diff, checklist, file, media_gallery, audio, interactive, or html_widget) attached to the current message. ' +
@@ -3061,8 +3157,16 @@ export const callbackTools = [
       'If callback auth fails, falls back to cc_rich text encoding automatically.',
     inputSchema: createRichBlockInputSchema,
     handler: handleCreateRichBlock,
-  },
-  {
+    governance: {
+      implementationExport: 'handleCreateRichBlock',
+      resourceFamily: 'artifact-surface',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_generate_document',
     description:
       'Generate a document (PDF/DOCX/MD) from Markdown and deliver to IM platforms (Feishu/Telegram). ' +
@@ -3073,8 +3177,16 @@ export const callbackTools = [
       'Degradation: PDF needs LaTeX engine → falls back to DOCX → falls back to MD. No pandoc → .md only.',
     inputSchema: generateDocumentInputSchema,
     handler: handleGenerateDocument,
-  },
-  {
+    governance: {
+      implementationExport: 'handleGenerateDocument',
+      resourceFamily: 'artifact-surface',
+      action: 'derive',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_request_permission',
     description:
       'Request permission from the user before performing a sensitive action (e.g. git_commit, file_delete). ' +
@@ -3082,29 +3194,52 @@ export const callbackTools = [
       'WORKFLOW: request_permission → if pending → wait → check_permission_status with the returned requestId.',
     inputSchema: requestPermissionInputSchema,
     handler: handleRequestPermission,
-  },
-  {
+    governance: {
+      implementationExport: 'handleRequestPermission',
+      resourceFamily: 'permission',
+      action: 'command',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_check_permission_status',
     description:
       'Check the status of a previously submitted permission request. ' +
       'Use the requestId returned from request_permission. Returns granted/denied/pending.',
     inputSchema: checkPermissionStatusInputSchema,
     handler: handleCheckPermissionStatus,
-  },
-  {
+    governance: {
+      implementationExport: 'handleCheckPermissionStatus',
+      resourceFamily: 'permission',
+      action: 'read',
+      authority: 'callback-owner',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineCanonicalTool({
     name: 'cat_cafe_register_pr_tracking',
     description:
-      'Register a PR for review/CI/conflict notification routing and optionally sign an invocation-bound event-wait route grant. ' +
-      'Use when: right after `gh pr create`, when switching review/merge wake intent, or after an exact `@codex review` trigger has a Codex connector EYES reaction and this invocation should clean-stop until Review Feedback arrives. ' +
-      'NOT for: waiting for EYES to appear (use a bounded poll/hold), arbitrary webhooks, another cat’s tracker, or a different PR subject. ' +
-      'Output: upserts the current thread/cat PR tracker; eventWait additionally returns covered=true/false and only a server-verified covered result becomes a routing-guard exit. ' +
-      "Pass intent='review' (default) for review feedback; pass intent='merge' when CI-green should wake you. " +
+      'Register one explicit, bounded PR wait for the current task owner. ' +
+      'Use when: you can name the exact typed GitHub condition that changes your next action, such as a new HEAD, review result, terminal executable CI, anchored review thread change, or new conflict. ' +
+      'NOT for: generic PR activity, bare @codex review chatter, arbitrary comments, another cat’s responsibility, or a different PR subject. ' +
+      'Output: validates subject/owner, freezes a live GitHub baseline, and atomically installs the next generation. Registration history is baseline, never a wake. ' +
       'GOTCHA: For exact-HEAD external PR review, run the Review Entry Mode Classifier before registration: formal instructions containing a no-comment / do-not-comment-on-GitHub directive fail closed; only explicit advisory_read_only may stay private, and advisory must never claim review-complete. ' +
-      'GOTCHA: tracker existence alone is never a legal exit. eventWait requires intent=review, the numeric triggerCommentId from this PR, a live EYES reaction from chatgpt-codex-connector[bot], and invocation callback credentials; verification failure fails closed.',
+      'GOTCHA: `when` is 1–4 flat any-of typed predicates. `nextStep` is display-only and never parsed. `expiresAt` is required and does not delete task history.',
     inputSchema: registerPrTrackingInputSchema,
     handler: handleRegisterPrTracking,
-  },
-  {
+    governance: {
+      implementationExport: 'handleRegisterPrTracking',
+      resourceFamily: 'tracking-review',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_register_issue_tracking',
     description:
       'Register a GitHub issue for comment tracking. New comments on the issue are routed to your current thread. ' +
@@ -3113,8 +3248,16 @@ export const callbackTools = [
       'GOTCHA: Must be called while callback credentials are still valid.',
     inputSchema: registerIssueTrackingInputSchema,
     handler: handleRegisterIssueTracking,
-  },
-  {
+    governance: {
+      implementationExport: 'handleRegisterIssueTracking',
+      resourceFamily: 'tracking-review',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_unregister_tracking',
     description:
       'Unregister a PR or issue tracking task by subjectKey. Stops all automated notifications ' +
@@ -3122,8 +3265,17 @@ export const callbackTools = [
       'Format: "pr:{owner/repo}#{num}" or "issue:{owner/repo}#{num}".',
     inputSchema: unregisterTrackingInputSchema,
     handler: handleUnregisterTracking,
-  },
-  {
+    governance: {
+      implementationExport: 'handleUnregisterTracking',
+      resourceFamily: 'tracking-review',
+      action: 'close',
+      authority: 'callback-owner',
+      risk: { level: 'destructive', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'profile-gated',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_community_await_external',
     description:
       'Declare that you (the case owner) are waiting for an external response on a community case. ' +
@@ -3133,8 +3285,16 @@ export const callbackTools = [
       'Provide the subjectKey in "issue:{owner/repo}#{number}" format (e.g. "issue:my-org/my-repo#42").',
     inputSchema: communityAwaitExternalInputSchema,
     handler: handleCommunityAwaitExternal,
-  },
-  {
+    governance: {
+      implementationExport: 'handleCommunityAwaitExternal',
+      resourceFamily: 'community-case',
+      action: 'command',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_community_request_guardian',
     description:
       'Request the canonical independent Guardian assignment for an accepted community intake case. ' +
@@ -3144,8 +3304,16 @@ export const callbackTools = [
       'GOTCHA: author must match the authenticated callback or agent-key principal; reviewer is only the independently verified reviewer excluded from Guardian selection.',
     inputSchema: communityGuardianRequestInputSchema,
     handler: handleCommunityRequestGuardian,
-  },
-  {
+    governance: {
+      implementationExport: 'handleCommunityRequestGuardian',
+      resourceFamily: 'community-case',
+      action: 'command',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_community_guardian_signoff',
     description:
       "Persist the system-assigned intake Guardian's evidence-backed checklist and approve/reject verdict. " +
@@ -3156,8 +3324,16 @@ export const callbackTools = [
       'Output: the durable Guardian signoff state for the community case.',
     inputSchema: communityGuardianSignoffInputSchema,
     handler: handleCommunityGuardianSignoff,
-  },
-  {
+    governance: {
+      implementationExport: 'handleCommunityGuardianSignoff',
+      resourceFamily: 'community-case',
+      action: 'command',
+      authority: 'guardian-callback',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_update_workflow',
     description:
       'Update the SOP workflow stage for a Feature (Mission Hub bulletin board). ' +
@@ -3168,8 +3344,16 @@ export const callbackTools = [
       'TIP: Always set resumeCapsule when updating stage — it helps the next cat cold-start.',
     inputSchema: updateWorkflowInputSchema,
     handler: handleUpdateWorkflow,
-  },
-  {
+    governance: {
+      implementationExport: 'handleUpdateWorkflow',
+      resourceFamily: 'task-workflow',
+      action: 'update',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_multi_mention',
     description:
       'Fan out to and collect responses from up to 3 cats, with explicit parallel action leases when the reviews are intentionally independent. ' +
@@ -3183,8 +3367,16 @@ export const callbackTools = [
       'Only deliberate independent review, #ideate, or explicit operator fan-out may use mode=parallel with parallelIntent.',
     inputSchema: multiMentionInputSchema,
     handler: handleMultiMention,
-  },
-  {
+    governance: {
+      implementationExport: 'handleMultiMention',
+      resourceFamily: 'collaboration-orchestration',
+      action: 'command',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_start_vote',
     description:
       'Start a voting session in the current thread for collective decision-making ' +
@@ -3196,9 +3388,17 @@ export const callbackTools = [
       'GOTCHA: voters must be valid registered catIds (use get_thread_cats to discover them). Options need at least 2 choices.',
     inputSchema: startVoteInputSchema,
     handler: handleStartVote,
-  },
+    governance: {
+      implementationExport: 'handleStartVote',
+      resourceFamily: 'collaboration-orchestration',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
   // ============ Bootcamp (F087) ============
-  {
+  defineTool({
     name: 'cat_cafe_update_bootcamp_state',
     description:
       'Update the bootcamp training state for a thread. Use to advance phase, set lead cat, ' +
@@ -3207,8 +3407,17 @@ export const callbackTools = [
       'GOTCHA: Only use this during bootcamp threads. Phase values must follow the sequence.',
     inputSchema: updateBootcampStateInputSchema,
     handler: handleUpdateBootcampState,
-  },
-  {
+    governance: {
+      implementationExport: 'handleUpdateBootcampState',
+      resourceFamily: 'guide-bootcamp',
+      action: 'update',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_bootcamp_env_check',
     description:
       'Run environment check for bootcamp (Node.js, pnpm, Git, Claude CLI, MCP, TTS, ASR, Pencil). ' +
@@ -3216,9 +3425,18 @@ export const callbackTools = [
       'Returns the full check results for display to the user. Only use during bootcamp phase-2-env-check.',
     inputSchema: bootcampEnvCheckInputSchema,
     handler: handleBootcampEnvCheck,
-  },
+    governance: {
+      implementationExport: 'handleBootcampEnvCheck',
+      resourceFamily: 'guide-bootcamp',
+      action: 'command',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
   // F128: Cat-initiated thread proposal (user approves before thread is created)
-  {
+  defineTool({
     name: 'cat_cafe_propose_thread',
     description:
       'Propose a new thread to the user. Returns proposalId, NOT a threadId — the thread is only created after the user approves the proposal card. Use sparingly: ' +
@@ -3235,8 +3453,16 @@ export const callbackTools = [
       'INTENT — default vs #ideate: by default dispatch wakes only the first preferredCat (serial chain-starter). If you genuinely want PARALLEL independent ideation (everyone replies at once, no chain), tag the message with `#ideate`. With #ideate, dispatch wakes ALL preferredCats simultaneously.',
     inputSchema: proposeThreadInputSchema,
     handler: handleProposeThread,
-  },
-  {
+    governance: {
+      implementationExport: 'handleProposeThread',
+      resourceFamily: 'thread-proposal',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_withdraw_thread_proposal',
     description:
       'Withdraw one exact F128 thread proposal created by the current authenticated cat. ' +
@@ -3247,9 +3473,17 @@ export const callbackTools = [
       'GOTCHA: pass the exact proposalId returned by cat_cafe_propose_thread; requester and owner identity are derived from callback authentication.',
     inputSchema: withdrawThreadProposalInputSchema,
     handler: handleWithdrawThreadProposal,
-  },
+    governance: {
+      implementationExport: 'handleWithdrawThreadProposal',
+      resourceFamily: 'thread-proposal',
+      action: 'close',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
   // F225: Cat-initiated session handoff (user approves before the current session is sealed + continued)
-  {
+  defineTool({
     name: 'cat_cafe_propose_session_handoff',
     description:
       'Propose handing off your CURRENT session to a fresh continuation of yourself, at a clean breakpoint. ' +
@@ -3261,9 +3495,17 @@ export const callbackTools = [
       'Use sparingly — only at genuinely clean breakpoints, never to escape a hard task mid-flight. Orthogonal to compression: compress is the lossy fallback, handoff is the graceful relay.',
     inputSchema: proposeSessionHandoffInputSchema,
     handler: handleProposeSessionHandoff,
-  },
+    governance: {
+      implementationExport: 'handleProposeSessionHandoff',
+      resourceFamily: 'session-handoff',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
   // F231 Phase C: Cat-initiated profile-update proposal (operator approves before the primer is written)
-  {
+  defineTool({
     name: 'cat_cafe_read_profile',
     description:
       'Read YOUR CURRENT authenticated relationship persona primer through the stable cat-cafe-profile://relationship/current URI. ' +
@@ -3273,8 +3515,16 @@ export const callbackTools = [
       'GOTCHA: identity is derived from callback/agent-key authentication. There is intentionally no userId, catId, path, or relationshipKey input, so do not try to target another profile.',
     inputSchema: readProfileInputSchema,
     handler: handleReadProfile,
-  },
-  {
+    governance: {
+      implementationExport: 'handleReadProfile',
+      resourceFamily: 'identity-proposal',
+      action: 'read',
+      authority: 'callback-owner',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_propose_profile_update',
     description:
       'Propose an update to YOUR CURRENT authenticated relationship-persona primer — the "养熟循环" digest entry point (F231 KD-12/KD-18). ' +
@@ -3287,13 +3537,21 @@ export const callbackTools = [
       'Use cat_cafe_read_profile first when preserving existing content matters. GOTCHA: models sharing one persona also share this primer, so afterContent must preserve relevant family continuity. signalKind records provenance: cat-declared vs cvo-instructed.',
     inputSchema: proposeProfileUpdateInputSchema,
     handler: handleProposeProfileUpdate,
-  },
+    governance: {
+      implementationExport: 'handleProposeProfileUpdate',
+      resourceFamily: 'identity-proposal',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
   personMemoryProposalToolset.tool,
   proactiveMemoryOpportunityTool,
   ...personMemoryLifecycleToolset.tools,
   ...memoryCueToolset.tools,
   // F260 Phase A: Entity registration proposal (operator approves via Hub, then entity enters registry)
-  {
+  defineTool({
     name: 'cat_cafe_propose_entity',
     description:
       'Propose a workspace entity for the registry. Returns a proposalId — the entity is only registered ' +
@@ -3309,9 +3567,17 @@ export const callbackTools = [
       'visibilityScope: only "workspace" accepted (KD-7 gate — private scope deferred until resolver supports visibility filtering).',
     inputSchema: proposeEntityInputSchema,
     handler: handleProposeEntity,
-  },
+    governance: {
+      implementationExport: 'handleProposeEntity',
+      resourceFamily: 'identity-proposal',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
   // F221 Phase B: Taste Capture Loop — cat proposes a taste vignette for operator approval
-  {
+  defineTool({
     name: 'cat_cafe_propose_taste',
     description:
       'Propose a taste vignette capturing a operator preference/aesthetic signal (F221 Taste Capture Loop). ' +
@@ -3324,9 +3590,17 @@ export const callbackTools = [
       'GOTCHA: relationship-stance stores a reusable stance such as partner-not-tool, not a personal fact about the current operator. Preserve original language in quote — taste signals lose meaning when paraphrased.',
     inputSchema: proposeTasteInputSchema,
     handler: handleProposeTaste,
-  },
+    governance: {
+      implementationExport: 'handleProposeTaste',
+      resourceFamily: 'identity-proposal',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
   // ============ F155: Guide Engine ============
-  {
+  defineTool({
     name: 'cat_cafe_update_guide_state',
     description:
       'Update the guide session state for a thread after you have already decided a guided flow is appropriate. ' +
@@ -3337,8 +3611,17 @@ export const callbackTools = [
       'One active guide per thread — complete or cancel before offering a new one.',
     inputSchema: updateGuideStateInputSchema,
     handler: handleUpdateGuideState,
-  },
-  {
+    governance: {
+      implementationExport: 'handleUpdateGuideState',
+      resourceFamily: 'guide-bootcamp',
+      action: 'update',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_get_available_guides',
     description:
       'Fetch the current catalog of guides that are actually available in this thread context. ' +
@@ -3348,11 +3631,20 @@ export const callbackTools = [
       'On confirmation, call cat_cafe_start_guide with the chosen guideId.',
     inputSchema: getAvailableGuidesInputSchema,
     handler: handleGetAvailableGuides,
-  },
+    governance: {
+      implementationExport: 'handleGetAvailableGuides',
+      resourceFamily: 'guide-bootcamp',
+      action: 'read',
+      authority: 'callback-owner',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
   // F193 Phase D AC-D2: cat_cafe_guide_resolve legacy alias removed.
   // Replaced by cat_cafe_get_available_guides — let the cat inspect catalog
   // metadata directly rather than guess from a single intent string.
-  {
+  defineTool({
     name: 'cat_cafe_start_guide',
     description:
       'Start an interactive guided flow on the Console frontend. ' +
@@ -3362,8 +3654,17 @@ export const callbackTools = [
       guideId: z.string().min(1).describe('Guide flow ID (e.g. "add-member")'),
     },
     handler: handleStartGuide,
-  },
-  {
+    governance: {
+      implementationExport: 'handleStartGuide',
+      resourceFamily: 'guide-bootcamp',
+      action: 'create',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_guide_control',
     description:
       'Control an active guide session. Requires guide to be in "active" state. ' +
@@ -3373,8 +3674,17 @@ export const callbackTools = [
       action: z.enum(['next', 'skip', 'exit']).describe('Guide control action'),
     },
     handler: handleGuideControl,
-  },
-  {
+    governance: {
+      implementationExport: 'handleGuideControl',
+      resourceFamily: 'guide-bootcamp',
+      action: 'command',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_hold_ball',
     description:
       'Declare a bounded ball hold: keep the ball while waiting for a short, predictable condition, then get auto-re-invoked with your context. ' +
@@ -3457,8 +3767,16 @@ export const callbackTools = [
         ),
     },
     handler: handleHoldBall,
-  },
-  {
+    governance: {
+      implementationExport: 'handleHoldBall',
+      resourceFamily: 'task-workflow',
+      action: 'wait',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_set_read_mode',
     description:
       'Set session-level mode for cc native Read/Grep/Glob output (F236 Phase C). ' +
@@ -3474,8 +3792,17 @@ export const callbackTools = [
       'GOTCHA: Requires Clowder AI managed session (CAT_CAFE_INVOCATION_ID).',
     inputSchema: setReadModeInputSchema,
     handler: handleSetReadMode,
-  },
-  {
+    governance: {
+      implementationExport: 'handleSetReadMode',
+      resourceFamily: 'runtime-control',
+      action: 'update',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_get_thread_metadata',
     description:
       'Read low-frequency metadata anchors for the current thread: worktree paths, associated PRs/issues, ' +
@@ -3483,8 +3810,16 @@ export const callbackTools = [
       'Returns all metadata fields; missing fields are omitted (not null).',
     inputSchema: {},
     handler: handleGetThreadMetadata,
-  },
-  {
+    governance: {
+      implementationExport: 'handleGetThreadMetadata',
+      resourceFamily: 'thread-message',
+      action: 'read',
+      authority: 'callback-thread',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_set_thread_metadata',
     description:
       'Write low-frequency metadata anchors for the current thread. Merge semantics: ' +
@@ -3494,5 +3829,13 @@ export const callbackTools = [
       'SCOPE: current thread only (no threadId param); cross-thread writes are impossible.',
     inputSchema: setThreadMetadataInputSchema,
     handler: handleSetThreadMetadata,
-  },
+    governance: {
+      implementationExport: 'handleSetThreadMetadata',
+      resourceFamily: 'thread-message',
+      action: 'update',
+      authority: 'callback-thread',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+    },
+  }),
 ] as const;

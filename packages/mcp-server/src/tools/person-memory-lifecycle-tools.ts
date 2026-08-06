@@ -8,7 +8,14 @@ import {
   personIdSchema,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 import type { ToolResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('person-memory-lifecycle-tools.ts', './tools/callback-tools.js', {
+  resourceFamily: 'person-memory',
+  authority: 'callback-owner-private',
+});
 
 type CallbackPost = (
   path: string,
@@ -205,69 +212,126 @@ export function createPersonMemoryLifecycleTools(callbackPost: CallbackPost, cal
     handleForgetPerson,
     handleForgetPersonMemoryProposal,
     tools: [
-      {
+      defineTool({
         name: 'cat_cafe_get_person_memory_proposal_status',
         description:
           'Read the authoritative live status of one exact owner-private F276 proposal. Use when: before reporting that a proposal is pending, approved, materialized, withdrawn, or rejected whenever the owner may have acted since creation. NOT for: editing, approving, undoing, or reading a person dossier; this tool is read-only and candidate-specific. Output: the authenticated owner-scoped status, remaining draft IDs, publication/card reference, and latest decision or undo receipts when present; no writes. GOTCHA: never infer current status from the original proposal response or chat history.',
         inputSchema: getPersonMemoryProposalStatusInputSchema,
         handler: handleGetPersonMemoryProposalStatus,
-      },
-      {
+        governance: {
+          implementationExport: 'handleGetPersonMemoryProposalStatus',
+          action: 'read',
+          risk: { level: 'read', openWorld: false },
+          runtimeProfiles: ['full', 'agent-key'],
+        },
+      }),
+      defineTool({
         name: 'cat_cafe_recall_person_relationship',
         description:
           'Resolve one owner-private active person by alias and return a bounded relationship card (F276). Never recall pending/not-now/rejected proposals, workspace-only entities, whole dossiers, or ambiguous aliases.',
         inputSchema: recallPersonRelationshipInputSchema,
         handler: handleRecallPersonRelationship,
-      },
-      {
+        governance: {
+          implementationExport: 'handleRecallPersonRelationship',
+          action: 'read',
+          risk: { level: 'read', openWorld: false },
+          runtimeProfiles: ['full', 'agent-key'],
+        },
+      }),
+      defineTool({
         name: 'cat_cafe_drill_person_memory',
         description:
           'Drill one exact item from an authorized F276 card with a required time window. Returns a bounded projection plus at most one source ref; whole-dossier reads are unsupported.',
         inputSchema: drillPersonMemoryInputSchema,
         handler: handleDrillPersonMemory,
-      },
-      {
+        governance: {
+          implementationExport: 'handleDrillPersonMemory',
+          action: 'read',
+          risk: { level: 'read', openWorld: false },
+          runtimeProfiles: ['full', 'agent-key'],
+        },
+      }),
+      defineTool({
         name: 'cat_cafe_correct_person_claim',
         description:
           'Append an owner-authorized replacement for one exact current claim and supersede the anchored version atomically. Stale anchors and agent inference fail closed.',
         inputSchema: correctPersonClaimInputSchema,
         handler: handleCorrectPersonClaim,
-      },
-      {
+        governance: {
+          implementationExport: 'handleCorrectPersonClaim',
+          action: 'update',
+          risk: { level: 'write', openWorld: false },
+          runtimeProfiles: ['full'],
+        },
+      }),
+      defineTool({
         name: 'cat_cafe_retire_person_claim',
         description:
           'Retire one exact current F276 claim from an authenticated owner source. Appends a retirement version; stale anchors fail closed.',
         inputSchema: retirePersonClaimInputSchema,
         handler: handleRetirePersonClaim,
-      },
-      {
+        governance: {
+          implementationExport: 'handleRetirePersonClaim',
+          action: 'close',
+          risk: { level: 'write', openWorld: false },
+          runtimeProfiles: ['full'],
+        },
+      }),
+      defineTool({
         name: 'cat_cafe_amend_person_interaction',
         description:
           'Amend one exact interaction event without overwriting it. The new event links to the source and preserves approximate or conflicting time.',
         inputSchema: amendPersonInteractionInputSchema,
         handler: handleAmendPersonInteraction,
-      },
-      {
+        governance: {
+          implementationExport: 'handleAmendPersonInteraction',
+          action: 'update',
+          risk: { level: 'write', openWorld: false },
+          runtimeProfiles: ['full'],
+        },
+      }),
+      defineTool({
         name: 'cat_cafe_redact_person_memory_item',
         description:
           'Destructively purge payload and source refs from one exact claim or event while retaining a redacted lifecycle marker. Requires an explicit owner request.',
         inputSchema: redactPersonMemoryItemInputSchema,
         handler: handleRedactPersonMemoryItem,
-      },
-      {
+        governance: {
+          implementationExport: 'handleRedactPersonMemoryItem',
+          action: 'close',
+          risk: { level: 'destructive', openWorld: false },
+          runtimeProfiles: ['full'],
+          targetExposure: 'profile-gated',
+        },
+      }),
+      defineTool({
         name: 'cat_cafe_forget_person',
         description:
           'Permanently hard-forget one exact owner-private person and all canonical/private derived surfaces. Destructive; requires an explicit owner request.',
         inputSchema: forgetPersonInputSchema,
         handler: handleForgetPerson,
-      },
-      {
+        governance: {
+          implementationExport: 'handleForgetPerson',
+          action: 'close',
+          risk: { level: 'destructive', openWorld: false },
+          runtimeProfiles: ['full'],
+          targetExposure: 'profile-gated',
+        },
+      }),
+      defineTool({
         name: 'cat_cafe_forget_person_memory_proposal',
         description:
           'Permanently purge one exact owner-private terminal F276 proposal lineage, including producer feedback and matching F281 episode indexes. Use when: the owner explicitly asks to delete an unbound rejected or withdrawn proposal by its exact proposalId. NOT for: active, pending, or person-bound proposals; person-bound memory must use cat_cafe_forget_person. Output: a content-free deletion receipt or an equalized absent result. GOTCHA: destructive and owner-authenticated; aliases, names, and inferred person IDs are never accepted.',
         inputSchema: forgetPersonMemoryProposalInputSchema,
         handler: handleForgetPersonMemoryProposal,
-      },
+        governance: {
+          implementationExport: 'handleForgetPersonMemoryProposal',
+          action: 'close',
+          risk: { level: 'destructive', openWorld: false },
+          runtimeProfiles: ['full'],
+          targetExposure: 'profile-gated',
+        },
+      }),
     ],
   };
 }

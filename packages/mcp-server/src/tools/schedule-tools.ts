@@ -1,3 +1,5 @@
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 /**
  * F139 Phase 3A: Schedule MCP Tools (AC-G2)
  *
@@ -10,6 +12,11 @@ import { z } from 'zod';
 import { callbackGet, callbackPost, getCallbackConfig } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('schedule-tools.ts', undefined, {
+  resourceFamily: 'schedule',
+  authority: 'callback-owner',
+});
 
 const agentKeyCatIdSchema = z
   .string()
@@ -242,7 +249,7 @@ export async function handleRemoveScheduledTask(input: {
 // ─── Tool definitions ───────────────────────────────────────
 
 export const scheduleTools = [
-  {
+  defineTool({
     name: 'cat_cafe_list_schedule_templates',
     description:
       'List available schedule task templates. Each template defines a reusable task type (e.g. reminder, web-digest, repo-activity) ' +
@@ -251,8 +258,14 @@ export const scheduleTools = [
       'Shared persistent MCP callers pass agentKeyCatId.',
     inputSchema: listScheduleTemplatesInputSchema,
     handler: handleListScheduleTemplates,
-  },
-  {
+    governance: {
+      implementationExport: 'handleListScheduleTemplates',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_preview_scheduled_task',
     description:
       'Preview a scheduled task before submitting it for approval. ' +
@@ -262,8 +275,14 @@ export const scheduleTools = [
       'GOTCHA: shared persistent MCP callers pass agentKeyCatId.',
     inputSchema: previewScheduledTaskInputSchema,
     handler: handlePreviewScheduledTask,
-  },
-  {
+    governance: {
+      implementationExport: 'handlePreviewScheduledTask',
+      action: 'derive',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_register_scheduled_task',
     description:
       'Submit a new scheduled task from a template for operator approval. ' +
@@ -274,8 +293,14 @@ export const scheduleTools = [
       'GOTCHA: trigger and params are JSON strings; shared persistent MCP callers pass agentKeyCatId and an owned deliveryThreadId.',
     inputSchema: registerScheduledTaskInputSchema,
     handler: handleRegisterScheduledTask,
-  },
-  {
+    governance: {
+      implementationExport: 'handleRegisterScheduledTask',
+      action: 'create',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_remove_scheduled_task',
     description:
       'Request permanent removal of a user-created dynamic scheduled task by task ID. ' +
@@ -285,5 +310,11 @@ export const scheduleTools = [
       'GOTCHA: persistent agent-key callers must pass agentKeyCatId and an owned sourceThreadId.',
     inputSchema: removeScheduledTaskInputSchema,
     handler: handleRemoveScheduledTask,
-  },
+    governance: {
+      implementationExport: 'handleRemoveScheduledTask',
+      action: 'close',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+    },
+  }),
 ] as const;

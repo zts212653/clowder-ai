@@ -8,8 +8,12 @@
  * cat_cafe_workspace_navigate (design gate).
  */
 import { z } from 'zod';
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 import { callbackGet, callbackPost } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('event-memory-tools.ts');
 
 export const teleportInputSchema = {
   threadId: z.string().min(1).describe('Target Clowder AI thread id to teleport into.'),
@@ -108,7 +112,7 @@ export async function handleBackfillEvents(input: { agentKeyCatId?: string | und
 }
 
 export const eventMemoryTools = [
-  {
+  defineTool({
     name: 'cat_cafe_teleport',
     description:
       'Teleport the Hub to an exact thread message (threadId + messageId). ' +
@@ -117,8 +121,16 @@ export const eventMemoryTools = [
       'GOTCHA: pass a real messageId (Event Memory coordinate), not an invocationId; shared persistent MCP callers pass agentKeyCatId; do not handwrite curl to /api/memory/teleport.',
     inputSchema: teleportInputSchema,
     handler: handleTeleport,
-  },
-  {
+    governance: {
+      implementationExport: 'handleTeleport',
+      resourceFamily: 'thread-message',
+      action: 'update',
+      authority: 'callback-thread',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_list_events',
     description:
       'Query Event Memory — the timeline of cognitive-transition events (magic-word brakes, self-checks, aha). ' +
@@ -127,8 +139,16 @@ export const eventMemoryTools = [
       'Read-only; filters: trigger/cat/type/threadId/confidence/cognitiveTransition/since/until + limit/offset.',
     inputSchema: listEventsInputSchema,
     handler: handleListEvents,
-  },
-  {
+    governance: {
+      implementationExport: 'handleListEvents',
+      resourceFamily: 'event-memory',
+      action: 'read',
+      authority: 'callback-owner',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_backfill_events',
     description:
       'Backfill historical magic-word events into Event Memory by scanning the persisted message corpus. ' +
@@ -136,5 +156,13 @@ export const eventMemoryTools = [
       'brakes from before live capture existed. Returns {scanned, marked, skipped, failed}.',
     inputSchema: backfillEventsInputSchema,
     handler: handleBackfillEvents,
-  },
+    governance: {
+      implementationExport: 'handleBackfillEvents',
+      resourceFamily: 'event-memory',
+      action: 'update',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+    },
+  }),
 ] as const;

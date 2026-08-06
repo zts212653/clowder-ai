@@ -46,7 +46,7 @@ describe('F254 withheld-message recovery Redis safety', { skip: redisIsolationSk
     await cleanupPrefixedRedisKeys(redis, ['msg:*', 'delivery-cursor:*', 'seen-cursor:*', 'mention-ack:*']);
   });
 
-  test('historical restore is persistent, idempotent, cursor-neutral, and pagination-stable', async () => {
+  test('historical restore is persistent, idempotent, cursor-neutral, and order-domain stable', async () => {
     const threadId = 'thread_recovery';
     const userId = 'user-1';
     const catId = 'fable-5';
@@ -129,7 +129,9 @@ describe('F254 withheld-message recovery Redis safety', { skip: redisIsolationSk
     );
     assert.deepEqual(
       (await store.getByThreadAfter(threadId, question.id, 10, userId)).map((message) => message.content),
-      ['买到了，正在回家。', '谢谢宪宪'],
+      // History stays in timestamp order, while forward pagination follows the
+      // visibility-admission contract: the recovered reply became visible last.
+      ['谢谢宪宪', '买到了，正在回家。'],
     );
     assert.deepEqual(
       (await store.getByThreadBefore(threadId, later.timestamp, 10, later.id, userId)).map(

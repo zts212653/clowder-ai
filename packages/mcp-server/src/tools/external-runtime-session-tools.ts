@@ -1,7 +1,14 @@
 import { z } from 'zod';
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 import { callbackPost } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('external-runtime-session-tools.ts', undefined, {
+  resourceFamily: 'runtime-session',
+  authority: 'callback-owner',
+});
 
 const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
 
@@ -131,7 +138,7 @@ function formatExternalRuntimeSessionResponse(data: unknown): string {
 }
 
 export const externalRuntimeSessionCallbackTools = [
-  {
+  defineTool({
     name: 'cat_cafe_register_external_runtime_session',
     description:
       'Register an Antigravity IDE-direct runtime session using persistent agent-key auth. ' +
@@ -139,11 +146,18 @@ export const externalRuntimeSessionCallbackTools = [
       'Shared Antigravity MCP GOTCHA: pass agentKeyCatId so the right sidecar key is selected.',
     inputSchema: registerExternalRuntimeSessionInputSchema,
     handler: handleRegisterExternalRuntimeSession,
-  },
+    governance: {
+      implementationExport: 'handleRegisterExternalRuntimeSession',
+      action: 'create',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
 ] as const;
 
 export const externalRuntimeSessionReadTools = [
-  {
+  defineTool({
     name: 'cat_cafe_list_external_runtime_sessions',
     description:
       'List orphan, dispatched, or IDE-direct external runtime sessions by runtime, cat, and recent activity. ' +
@@ -151,8 +165,15 @@ export const externalRuntimeSessionReadTools = [
       'Use before reading digest/events when there is no normal Clowder AI thread yet.',
     inputSchema: listExternalRuntimeSessionsInputSchema,
     handler: handleListExternalRuntimeSessions,
-  },
-  {
+    governance: {
+      implementationExport: 'handleListExternalRuntimeSessions',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_read_external_runtime_session',
     description:
       'Read one external runtime session metadata record and drilldown pointers. ' +
@@ -160,7 +181,14 @@ export const externalRuntimeSessionReadTools = [
       'After this, use cat_cafe_read_session_digest or cat_cafe_read_session_events with the returned sessionId.',
     inputSchema: readExternalRuntimeSessionInputSchema,
     handler: handleReadExternalRuntimeSession,
-  },
+    governance: {
+      implementationExport: 'handleReadExternalRuntimeSession',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
 ] as const;
 
 export const externalRuntimeSessionTools = [

@@ -837,10 +837,10 @@ skills:
   concept-demo-design:
     category: "创作与媒体"
     description: >
-      把抽象产品理念、Agent 机制或未来交互变成可录屏、可讲解、可验证的交互概念演示，并先区分家内原生体验与对外叙事展示。
-      Use when: 用户说“做个 demo 让人 get 到”“先做概念片”“把理念演出来”，或产品尚未落地但需要先让受众看见因果、形成 buy-in；也用于明确 demo 是给家里体验还是对外传播。
+      把抽象理念、家内 UI/UX 可点稿或端到端用户旅程变成可讲解、可验证的交互 Demo；先区分 concept_story / product_experience_gate / journey_validation 判题类型，再区分家内原生体验与对外叙事展示。
+      Use when: 用户说“做个 demo 让人 get 到”“先做概念片”“做一个家里可点的体验设计稿”“把完整用户旅程演出来”，或产品尚未落地但需要先形成可判断证据；也用于明确 demo 是给家里体验还是对外传播。
       Not for: 已有真实产品页面的常规前端开发（用 console-dev）、已有素材的剪辑成片（用 video-forge）、PPT（用 ppt-forge）、纯视觉探索（用 pencil-design / image-generation）。
-      Output: 带 internal_product_gate / external_showcase 交付车道的 Demo Contract + 录屏友好的交互前端 + 验证记录。
+      Output: 带 demo_kind × delivery_lane 双轴契约的 Demo Contract + 确定性交互原型 + 类型专属验证记录。
     triggers:
       - "概念 demo"
       - "概念演示"
@@ -853,12 +853,16 @@ skills:
       - "concept demo"
       - "给家里看的 demo"
       - "对外 demo"
+      - "用户旅程 demo"
+      - "旅程验证"
+      - "可点稿"
+      - "体验设计 demo"
     not_for:
       - "常规前端开发"
       - "已有素材的视频剪辑"
       - "PPT"
       - "纯视觉探索"
-    output: "Lane-typed Demo Contract + recordable interactive concept demo + verification record"
+    output: "Kind × lane typed Demo Contract + deterministic interactive prototype + claim-specific verification record"
     next: ["worktree", "tdd", "browser-preview", "video-forge"]
     sop_step: null
     merged_from: null

@@ -241,6 +241,9 @@ importers:
       '@types/node':
         specifier: ^20.11.0
         version: 20.19.31
+      js-tiktoken:
+        specifier: ^1.0.21
+        version: 1.0.21
       tsx:
         specifier: ^4.7.0
         version: 4.21.0

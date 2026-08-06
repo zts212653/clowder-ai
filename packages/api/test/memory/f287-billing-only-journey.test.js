@@ -20,7 +20,7 @@ const poll = {
 
 const task = {
   automationState: {
-    intent: 'merge',
+    await: { continuation: { when: [{ kind: 'pr_ci_terminal' }] } },
     ci: { headSha },
   },
 };
@@ -34,8 +34,19 @@ describe('F287 D2 billing-only golden journey', () => {
     assert.equal(carrier.candidateAction, 'merge');
 
     const negatives = [
-      [poll, { automationState: { intent: 'review', ci: { headSha } } }],
-      [poll, { automationState: { intent: 'merge', ci: { headSha: 'b'.repeat(40) } } }],
+      [
+        poll,
+        { automationState: { await: { continuation: { when: [{ kind: 'pr_head_changed' }] } }, ci: { headSha } } },
+      ],
+      [
+        poll,
+        {
+          automationState: {
+            await: { continuation: { when: [{ kind: 'pr_ci_terminal' }] } },
+            ci: { headSha: 'b'.repeat(40) },
+          },
+        },
+      ],
       [{ ...poll, checks: [{ name: 'billing-tests', bucket: 'fail' }] }, task],
       [{ ...poll, checks: [{ ...poll.checks[0], executionFailure: undefined }] }, task],
       [{ ...poll, aggregateBucket: 'pending' }, task],
