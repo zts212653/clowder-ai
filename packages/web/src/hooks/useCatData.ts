@@ -59,13 +59,15 @@ export interface CatData {
   };
   /** clowder-ai#1208: explicit context window cap. undefined=Auto, positive int=Manual. */
   contextWindow?: number;
-  /** clowder-ai#1208 Item 4: resolved context capacity for Hub display. null = unresolved. */
+  /** clowder-ai#1208 Items 4+6: resolved context capacity for Hub display. */
   resolvedContext?: {
-    windowTokens: number;
-    source: string;
-    confidence: number;
-    provenance: string;
-    actionable: boolean;
+    windowTokens?: number;
+    source?: string;
+    confidence?: number;
+    provenance?: string;
+    actionable?: boolean;
+    /** #1208 Item 6: client context capability reason for Hub display. */
+    capabilityReason?: string;
   } | null;
   avatar: string;
   roleDescription: string;

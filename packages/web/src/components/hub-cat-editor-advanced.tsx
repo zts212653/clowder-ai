@@ -269,17 +269,18 @@ function ResolvedContextInfo({ cat, form }: { cat?: CatData | null; form: HubCat
   }
 
   const rc = cat.resolvedContext;
-  if (!rc) {
+  if (!rc || !rc.source) {
     return (
-      <p className="text-xs leading-5 text-cafe-muted">
-        ⚠ 未能解析 Context Window — 无已知的模型目录条目或 CLI 上报值。
-      </p>
+      <div className="text-xs leading-5 text-cafe-muted">
+        <p>⚠ 未能解析 Context Window — 无已知的模型目录条目或 CLI 上报值。</p>
+        {rc?.capabilityReason ? <p className="mt-0.5">原因: {rc.capabilityReason}</p> : null}
+      </div>
     );
   }
 
   const badge = CONFIDENCE_BADGES[rc.source] ?? rc.source;
   const sourceLabel = SOURCE_LABELS[rc.source] ?? rc.source;
-  const windowK = Math.round(rc.windowTokens / 1000);
+  const windowK = rc.windowTokens ? Math.round(rc.windowTokens / 1000) : 0;
 
   return (
     <div className="rounded-[8px] border border-[var(--console-runtime-group-bg)] bg-[var(--console-field-bg)] px-3 py-2 text-xs leading-5 text-cafe-secondary">
@@ -300,11 +301,12 @@ function ResolvedContextInfo({ cat, form }: { cat?: CatData | null; form: HubCat
 function StrategyCapabilityNote({ cat }: { cat?: CatData | null }) {
   if (!cat) return null;
   const rc = cat.resolvedContext;
-  if (!rc) {
+  const capReason = rc?.capabilityReason;
+  if (!rc || !rc.source) {
     return (
       <p className="mt-1 text-[var(--cafe-accent)]">
-        ⚠ Context Window 未解析：自动 Session 策略动作（handoff/seal）不会触发。 请手动设置 Context Window 或等待 CLI
-        上报。
+        ⚠ Context Window 未解析：自动 Session 策略动作（handoff/seal）不会触发。
+        {capReason ? ` ${capReason}。` : ' 请手动设置 Context Window 或等待 CLI 上报。'}
       </p>
     );
   }
@@ -312,8 +314,8 @@ function StrategyCapabilityNote({ cat }: { cat?: CatData | null }) {
     return (
       <p className="mt-1 text-[var(--cafe-accent)]">
         当前 Context Window 来自{SOURCE_LABELS[rc.source] ?? rc.source}
-        （置信度 {Math.round(rc.confidence * 100)}%）， 自动 Session 策略动作不会触发。手动设置 Context Window
-        可启用自动动作。
+        （置信度 {Math.round((rc.confidence ?? 0) * 100)}%），自动 Session 策略动作不会触发。
+        {capReason ? ` ${capReason}。` : ' 手动设置 Context Window 可启用自动动作。'}
       </p>
     );
   }
