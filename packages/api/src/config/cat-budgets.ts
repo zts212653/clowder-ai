@@ -1,64 +1,71 @@
 /**
  * Cat Context Budget — Prompt Assembly Limits
- * clowder-ai#1208: budget is now DERIVED from the member's resolved context window.
+ * clowder-ai#1208 Item 3: ALL budgets are DERIVED via derivePromptAssemblyBudget.
  *
  * Resolution order:
- *   1. Member contextWindow (Manual cap) → derive via derivePromptAssemblyBudget().
- *   2. Per-breed hardcoded defaults (graceful degradation when no window configured).
- *   3. Conservative global fallback for unknown/dynamic cats.
+ *   1. Unified context capacity resolver (manual cap → CLI → model catalog → provider default).
+ *   2. Breed-level default window estimate → derive via derivePromptAssemblyBudget().
+ *   3. Conservative global fallback window → derive via derivePromptAssemblyBudget().
  *
- * The old four-field ContextBudget type is retired from runtime consumption.
- * All consumers use PromptAssemblyBudget from context-capacity.ts.
+ * maxMessages and maxContentLengthPerMsg are always derived from the window,
+ * never independently configurable. serial/parallel/warm/cold paths all share
+ * the same derived budget via computeContextBudget().
  */
 
 import { catRegistry } from '@cat-cafe/shared';
 import { resolveBreedId } from './breed-resolver.js';
 import { getAllCatIdsFromConfig } from './cat-config-loader.js';
-import { derivePromptAssemblyBudget, type PromptAssemblyBudget, resolveContextCapacity } from './context-capacity.js';
+import {
+  derivePromptAssemblyBudget,
+  getMemberOutputReserve,
+  type PromptAssemblyBudget,
+  resolveContextCapacity,
+} from './context-capacity.js';
 
 /**
- * Hardcoded per-breed defaults — used when no contextWindow is configured.
- * These represent conservative prompt-assembly limits per breed's typical model window.
+ * Breed-level default context windows (tokens).
+ * Used when the unified resolver returns unresolved (no window configured,
+ * no model in catalog, no provider default).  Each breed gets a conservative
+ * estimate of its typical model's context window.
+ *
+ * These are NOT budgets — they are window estimates that get fed through
+ * derivePromptAssemblyBudget() to produce actual prompt-assembly limits.
+ * This ensures maxMessages and maxContentLengthPerMsg are always derived
+ * from the window, not independently configured.
  */
-const DEFAULT_BUDGETS: Record<string, PromptAssemblyBudget> = {
-  ragdoll: {
-    maxPromptTokens: 180000,
-    maxHistoryContextTokens: 160000,
-    maxMessages: 200,
-    maxContentLengthPerMsg: 100000,
-  },
-  'maine-coon': {
-    maxPromptTokens: 240000,
-    maxHistoryContextTokens: 216000,
-    maxMessages: 200,
-    maxContentLengthPerMsg: 100000,
-  },
-  siamese: {
-    maxPromptTokens: 350000,
-    maxHistoryContextTokens: 300000,
-    maxMessages: 300,
-    maxContentLengthPerMsg: 100000,
-  },
-  spark: { maxPromptTokens: 64000, maxHistoryContextTokens: 40000, maxMessages: 100, maxContentLengthPerMsg: 100000 },
+const BREED_DEFAULT_WINDOWS: Record<string, number> = {
+  ragdoll: 200_000, // Claude models: 200K is the conservative floor
+  'maine-coon': 256_000, // Codex/GPT models: 128K-400K range
+  siamese: 400_000, // Kimi/Gemini: typically 1M but conservative
+  spark: 80_000, // Small/fast models
 };
 
-/** F32-a: Conservative fallback for unknown/dynamic cats */
-const GLOBAL_FALLBACK_BUDGET: PromptAssemblyBudget = {
-  maxPromptTokens: 100000,
-  maxHistoryContextTokens: 60000,
-  maxMessages: 200,
-  maxContentLengthPerMsg: 100000,
-};
+/** F32-a: Conservative fallback window for unknown/dynamic cats. */
+const GLOBAL_FALLBACK_WINDOW = 128_000;
+
+/**
+ * Derive a prompt-assembly budget from a window estimate.
+ * Applies the standard output reserve before derivation.
+ */
+function deriveFromWindow(catId: string, windowTokens: number): PromptAssemblyBudget {
+  const outputReserve = getMemberOutputReserve(catId);
+  const inputCeiling = Math.max(0, windowTokens - outputReserve);
+  return derivePromptAssemblyBudget(inputCeiling);
+}
 
 /**
  * Get prompt-assembly budget for a cat.
- * clowder-ai#1208: always goes through the unified resolver so prompt assembly
- * and context-health share the same denominator. Falls back to per-breed defaults
- * only when the resolver returns unresolved (no window configured, no provider).
+ *
+ * clowder-ai#1208 Item 3: all paths go through derivePromptAssemblyBudget().
+ * The effective prompt cap = effective window - output reserve.
+ * serial/parallel/warm/cold then subtract their own system/prompt/nudge
+ * tokens via computeContextBudget() to get the actual context budget.
+ *
+ * There are no configurable maxMessages or maxContentLengthPerMsg —
+ * they are always derived from the window size.
  */
 export function getCatPromptBudget(catName: string): PromptAssemblyBudget {
-  // 1. Resolve capacity through the unified chain (manual cap → provider default → model catalog).
-  //    At budget time we don't have CLI-reported data, but provider/model are available.
+  // 1. Resolve capacity through the unified chain.
   const config = catRegistry.tryGet(catName)?.config;
   const capacity = resolveContextCapacity({
     catId: catName,
@@ -66,13 +73,17 @@ export function getCatPromptBudget(catName: string): PromptAssemblyBudget {
     provider: config?.clientId === 'opencode' ? 'opencode' : undefined,
   });
 
+  // Resolved (any source: exact, manual, catalog, default) → derive from resolved value.
+  if (capacity.source !== 'unresolved') {
+    return derivePromptAssemblyBudget(capacity.inputCeilingTokens);
+  }
+
+  // 2. Unresolved → use breed-level default window → derive.
   const breedId = resolveBreedId(catName);
-  // #1208 Item 2: use any resolved source for budget derivation — catalog/default
-  // are better estimates than breed-level hardcoded defaults.  Only `unresolved`
-  // (no window data at all) falls back to breed defaults.
-  return capacity.source !== 'unresolved'
-    ? derivePromptAssemblyBudget(capacity.inputCeilingTokens)
-    : (DEFAULT_BUDGETS[catName] ?? (breedId ? DEFAULT_BUDGETS[breedId] : undefined) ?? GLOBAL_FALLBACK_BUDGET);
+  const fallbackWindow =
+    BREED_DEFAULT_WINDOWS[catName] ?? (breedId ? BREED_DEFAULT_WINDOWS[breedId] : undefined) ?? GLOBAL_FALLBACK_WINDOW;
+
+  return deriveFromWindow(catName, fallbackWindow);
 }
 
 /**
@@ -90,8 +101,7 @@ export function getAllCatBudgets(): Record<string, PromptAssemblyBudget> {
 
 /**
  * Clear cached budgets (for testing).
- * clowder-ai#1208: budget is now derived on-the-fly from contextWindow,
- * so this only resets the legacy export compatibility.
+ * Budget is derived on-the-fly from contextWindow — no separate cache.
  */
 export function clearBudgetCache(): void {
   // No-op: budget is derived from catRegistry.contextWindow, no separate cache.
