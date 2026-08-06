@@ -1,0 +1,19 @@
+{
+  "verdictId": "2026-08-06-eval-friction-c8-empty-window-after-seventh-quiet-cycle",
+  "rawInputs": [
+    {
+      "path": "docs/harness-feedback/bundles/2026-08-06-eval-friction-c8-empty-window-after-seventh-quiet-cycle/raw/rollup-report.json",
+      "sha256": "364af460e53945c1c5e9bbad2e932a7766ad284eb6622342574f7edb884fac12"
+    },
+    {
+      "path": "docs/harness-feedback/bundles/2026-08-06-eval-friction-c8-empty-window-after-seventh-quiet-cycle/raw/measurement-validity.json",
+      "sha256": "7eed9b0c5573e882d9c3d73dd51af2e15488828618b6ce3fbeec267508e60c9f"
+    }
+  ],
+  "generatedAt": "2026-08-06T03:06:57.744Z",
+  "generator": {
+    "name": "eval-friction-live-verdict",
+    "version": "2"
+  },
+  "sanitizeRulesVersion": "f267-friction-measurement-v1"
+}
