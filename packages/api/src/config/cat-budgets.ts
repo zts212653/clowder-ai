@@ -67,7 +67,10 @@ export function getCatPromptBudget(catName: string): PromptAssemblyBudget {
   });
 
   const breedId = resolveBreedId(catName);
-  return capacity.actionable
+  // #1208 Item 2: use any resolved source for budget derivation — catalog/default
+  // are better estimates than breed-level hardcoded defaults.  Only `unresolved`
+  // (no window data at all) falls back to breed defaults.
+  return capacity.source !== 'unresolved'
     ? derivePromptAssemblyBudget(capacity.inputCeilingTokens)
     : (DEFAULT_BUDGETS[catName] ?? (breedId ? DEFAULT_BUDGETS[breedId] : undefined) ?? GLOBAL_FALLBACK_BUDGET);
 }

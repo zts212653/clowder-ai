@@ -89,12 +89,43 @@ describe('context-capacity resolver', () => {
     });
   });
 
+  // ─── Binding Key & Fingerprint ───────────────────────────────────
+
+  describe('computeBindingFingerprint', () => {
+    it('produces a deterministic string from binding key', () => {
+      const key = { member: 'opus', client: 'anthropic', model: 'claude-opus-4-6' };
+      const fp1 = mod.computeBindingFingerprint(key);
+      const fp2 = mod.computeBindingFingerprint(key);
+      assert.equal(fp1, fp2);
+      assert.equal(typeof fp1, 'string');
+      assert.ok(fp1.length > 0);
+    });
+
+    it('different models produce different fingerprints', () => {
+      const fp1 = mod.computeBindingFingerprint({ member: 'opus', client: 'anthropic', model: 'claude-opus-4-6' });
+      const fp2 = mod.computeBindingFingerprint({ member: 'opus', client: 'anthropic', model: 'claude-sonnet-4-6' });
+      assert.notEqual(fp1, fp2);
+    });
+
+    it('includes optional fields when present', () => {
+      const without = mod.computeBindingFingerprint({ member: 'x', client: 'y', model: 'z' });
+      const withCarrier = mod.computeBindingFingerprint({ member: 'x', client: 'y', model: 'z', carrier: 'bg' });
+      assert.notEqual(without, withCarrier);
+    });
+  });
+
+  // ─── resolveContextCapacity ──────────────────────────────────────
+
   describe('resolveContextCapacity', () => {
     it('returns unresolved when no data available', () => {
       const result = mod.resolveContextCapacity({ catId: 'unknown-cat' });
       assert.equal(result.source, 'unresolved');
       assert.equal(result.actionable, false);
       assert.equal(result.windowTokens, 0);
+      assert.equal(result.confidence, 0);
+      assert.ok(result.bindingKey, 'should have binding key');
+      assert.ok(result.fingerprint, 'should have fingerprint');
+      assert.ok(result.observedAt > 0, 'should have observedAt');
     });
 
     it('uses CLI-reported window as exact source', () => {
@@ -106,19 +137,20 @@ describe('context-capacity resolver', () => {
       });
       assert.equal(result.source, 'exact');
       assert.equal(result.actionable, true);
+      assert.equal(result.confidence, 1.0);
       assert.ok(result.windowTokens > 0);
     });
 
-    it('falls back to model catalog for non-OpenCode providers', () => {
+    it('falls back to model catalog — NOT actionable without manual cap', () => {
       catRegistry.register(TEST_CAT_ID, makeCatConfig({ defaultModel: 'claude-opus-4-6' }));
       const result = mod.resolveContextCapacity({
         catId: TEST_CAT_ID,
         model: 'claude-opus-4-6',
-        // No provider — direct Claude CLI
       });
-      // Model catalog should resolve opus-4-6 to 1M
       assert.equal(result.source, 'catalog');
-      assert.equal(result.actionable, true);
+      // catalog alone is NOT actionable — must not masquerade as exact
+      assert.equal(result.actionable, false);
+      assert.equal(result.confidence, 0.7);
       assert.equal(result.windowTokens, 1_000_000);
     });
 
@@ -129,27 +161,27 @@ describe('context-capacity resolver', () => {
         provider: 'opencode',
         model: 'claude-opus-4-6', // 1M in catalog
       });
-      // Known model catalog value wins over blanket OpenCode default
       assert.equal(result.source, 'catalog');
-      assert.equal(result.actionable, true);
+      // catalog without manual cap = NOT actionable
+      assert.equal(result.actionable, false);
       assert.equal(result.windowTokens, 1_000_000);
     });
 
-    it('OpenCode with unknown model falls back to 128K default', () => {
+    it('OpenCode with unknown model falls back to 128K default — NOT actionable', () => {
       catRegistry.register(TEST_CAT_ID, makeCatConfig({ clientId: 'opencode' }));
       const result = mod.resolveContextCapacity({
         catId: TEST_CAT_ID,
         provider: 'opencode',
         model: 'custom-vendor/mystery-model-v3', // NOT in catalog
       });
-      // Unknown model → OpenCode 128K last-resort default
       assert.equal(result.source, 'default');
-      assert.equal(result.actionable, true);
+      // default alone is NOT actionable
+      assert.equal(result.actionable, false);
+      assert.equal(result.confidence, 0.3);
       assert.equal(result.windowTokens, 128_000);
     });
 
-    it('OpenCode with known model but manual cap limits to gateway cap', () => {
-      // User sets contextWindow=128000 to reflect their OpenCode gateway cap
+    it('OpenCode with known model but manual cap → actionable (cap is binding)', () => {
       catRegistry.register(
         TEST_CAT_ID,
         makeCatConfig({
@@ -162,7 +194,7 @@ describe('context-capacity resolver', () => {
         provider: 'opencode',
         model: 'claude-opus-4-6', // 1M in catalog
       });
-      // Manual cap (128K) limits the catalog value (1M)
+      // Manual cap (128K) limits the catalog value (1M) → actionable
       assert.equal(result.actionable, true);
       assert.equal(result.windowTokens, 128_000);
       assert.ok(result.provenance.includes('capped'), 'provenance should mention capping');
@@ -176,8 +208,8 @@ describe('context-capacity resolver', () => {
         provider: 'opencode',
         model: 'claude-opus-4-20250918',
       });
-      // CLI-reported always wins over provider default
       assert.equal(result.source, 'exact');
+      assert.equal(result.actionable, true);
       assert.ok(result.windowTokens >= 200_000);
     });
 
@@ -197,11 +229,11 @@ describe('context-capacity resolver', () => {
       catRegistry.register(TEST_CAT_ID, makeCatConfig({ contextWindow: 300_000 }));
       const result = mod.resolveContextCapacity({
         catId: TEST_CAT_ID,
-        // No reportedWindowSize, no model, no provider
       });
       assert.equal(result.source, 'manual');
       assert.equal(result.windowTokens, 300_000);
       assert.equal(result.actionable, true);
+      assert.equal(result.confidence, 0.95);
     });
 
     it('legacy cli.contextWindow works as manual cap', () => {
@@ -223,7 +255,125 @@ describe('context-capacity resolver', () => {
       const reserve = mod.getMemberOutputReserve(TEST_CAT_ID);
       assert.equal(result.inputCeilingTokens, result.windowTokens - reserve);
     });
+
+    it('manual cap not binding does NOT make catalog actionable', () => {
+      // User sets cap at 2M but catalog discovers 1M → cap is NOT binding
+      catRegistry.register(TEST_CAT_ID, makeCatConfig({ contextWindow: 2_000_000 }));
+      const result = mod.resolveContextCapacity({
+        catId: TEST_CAT_ID,
+        model: 'claude-opus-4-6', // 1M in catalog
+      });
+      assert.equal(result.source, 'catalog');
+      assert.equal(result.windowTokens, 1_000_000);
+      // Cap is not binding (2M > 1M) → catalog alone → NOT actionable
+      assert.equal(result.actionable, false);
+      assert.ok(result.provenance.includes('not binding'));
+    });
+
+    // ─── Binding key in result ─────────────────────────────────────
+
+    it('includes binding key derived from options and config', () => {
+      catRegistry.register(TEST_CAT_ID, makeCatConfig({ clientId: 'opencode', accountRef: 'sponsor1' }));
+      const result = mod.resolveContextCapacity({
+        catId: TEST_CAT_ID,
+        model: 'claude-opus-4-6',
+        provider: 'opencode',
+      });
+      assert.equal(result.bindingKey.member, TEST_CAT_ID);
+      assert.equal(result.bindingKey.client, 'opencode');
+      assert.equal(result.bindingKey.account, 'sponsor1');
+      assert.equal(result.bindingKey.model, 'claude-opus-4-6');
+    });
+
+    it('explicit client/account options override config', () => {
+      catRegistry.register(TEST_CAT_ID, makeCatConfig({ clientId: 'anthropic', accountRef: 'default' }));
+      const result = mod.resolveContextCapacity({
+        catId: TEST_CAT_ID,
+        client: 'opencode',
+        account: 'sponsor2',
+        model: 'claude-opus-4-6',
+      });
+      assert.equal(result.bindingKey.client, 'opencode');
+      assert.equal(result.bindingKey.account, 'sponsor2');
+    });
   });
+
+  // ─── Session Pin ─────────────────────────────────────────────────
+
+  describe('applySessionPin', () => {
+    function makeResolved(windowTokens, fingerprint = 'test|anthropic|||claude-opus-4-6|') {
+      const outputReserve = 16_000;
+      return {
+        windowTokens,
+        inputCeilingTokens: windowTokens - outputReserve,
+        source: 'exact',
+        confidence: 1.0,
+        provenance: 'test',
+        actionable: true,
+        bindingKey: { member: 'test', client: 'anthropic', model: 'claude-opus-4-6' },
+        fingerprint,
+        observedAt: Date.now(),
+      };
+    }
+
+    it('no existing pin → pins to resolved value', () => {
+      const resolved = makeResolved(1_000_000);
+      const { effective, pin } = mod.applySessionPin(resolved, undefined);
+      assert.equal(effective.windowTokens, 1_000_000);
+      assert.equal(pin.windowTokens, 1_000_000);
+      assert.equal(pin.fingerprint, resolved.fingerprint);
+    });
+
+    it('same binding, smaller value → shrinks (safety)', () => {
+      const pin = { windowTokens: 1_000_000, fingerprint: 'test|anthropic|||claude-opus-4-6|', pinnedAt: Date.now() };
+      const resolved = makeResolved(800_000);
+      const result = mod.applySessionPin(resolved, pin);
+      assert.equal(result.effective.windowTokens, 800_000);
+      assert.equal(result.pin.windowTokens, 800_000);
+    });
+
+    it('same binding, larger value → keeps pinned (shrink-no-expand)', () => {
+      const pin = { windowTokens: 500_000, fingerprint: 'test|anthropic|||claude-opus-4-6|', pinnedAt: Date.now() };
+      const resolved = makeResolved(1_000_000);
+      const result = mod.applySessionPin(resolved, pin);
+      assert.equal(result.effective.windowTokens, 500_000);
+      assert.ok(result.effective.provenance.includes('session-pinned'));
+    });
+
+    it('different binding fingerprint → new pin', () => {
+      const pin = {
+        windowTokens: 500_000,
+        fingerprint: 'test|anthropic|||claude-opus-4-6|',
+        pinnedAt: Date.now(),
+      };
+      const resolved = makeResolved(1_000_000, 'test|anthropic|||claude-sonnet-4-6|');
+      const result = mod.applySessionPin(resolved, pin);
+      // New binding → use resolved, new pin
+      assert.equal(result.effective.windowTokens, 1_000_000);
+      assert.equal(result.pin.fingerprint, 'test|anthropic|||claude-sonnet-4-6|');
+    });
+
+    it('same binding, equal value → keeps current', () => {
+      const pin = { windowTokens: 500_000, fingerprint: 'test|anthropic|||claude-opus-4-6|', pinnedAt: Date.now() };
+      const resolved = makeResolved(500_000);
+      const result = mod.applySessionPin(resolved, pin);
+      assert.equal(result.effective.windowTokens, 500_000);
+    });
+  });
+
+  // ─── CONFIDENCE_SCORES ──────────────────────────────────────────
+
+  describe('CONFIDENCE_SCORES', () => {
+    it('has monotonically decreasing scores', () => {
+      const { CONFIDENCE_SCORES: scores } = mod;
+      assert.ok(scores.exact > scores.manual, 'exact > manual');
+      assert.ok(scores.manual > scores.catalog, 'manual > catalog');
+      assert.ok(scores.catalog > scores.default, 'catalog > default');
+      assert.ok(scores.default > scores.unresolved, 'default > unresolved');
+    });
+  });
+
+  // ─── derivePromptAssemblyBudget ──────────────────────────────────
 
   describe('derivePromptAssemblyBudget', () => {
     it('produces sensible limits from input ceiling', () => {

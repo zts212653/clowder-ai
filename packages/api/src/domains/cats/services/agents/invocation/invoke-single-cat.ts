@@ -2428,8 +2428,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             reportedWindowSize: msg.metadata.usage.contextWindowSize,
             model: msg.metadata.model,
             provider: msg.metadata.provider,
+            client: msg.metadata.provider,
           });
-          const windowSize = capacity.actionable ? capacity.windowTokens : undefined;
+          // #1208 Item 2: use any resolved source for context_health monitoring
+          // (catalog/default are useful for observability).  Lifecycle actions
+          // (auto-seal) guard on capacity.actionable separately below.
+          const windowSize = capacity.source !== 'unresolved' ? capacity.windowTokens : undefined;
           const usedFrom =
             msg.metadata.usage.lastTurnInputTokens != null
               ? 'last_turn'
@@ -2509,7 +2513,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             });
 
             // F33: Strategy-driven seal decision (replaces F24 Phase B shouldSeal)
-            if (deps.sessionSealer && deps.sessionChainStore) {
+            // #1208 Item 2: auto-seal only when capacity is actionable (exact/manual/
+            // capped-by-manual).  Catalog/default are useful for monitoring but too
+            // unreliable for aggressive lifecycle actions — we don't want to seal a
+            // session based on a catalog value that might not match the real gateway.
+            if (deps.sessionSealer && deps.sessionChainStore && capacity.actionable) {
               try {
                 // F062-fix:
                 // 1) api_key + approx health can be noisy on third-party gateways

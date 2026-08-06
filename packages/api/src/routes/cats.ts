@@ -789,6 +789,11 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         const resolvedCli = isCloudOnlyProvider
           ? undefined
           : buildResolvedCliConfig(body.clientId, body.defaultModel, defaultCliForClient(body.clientId), body.cli);
+        // #1208 Item 2: canonicalize cli.contextWindow to top-level on create.
+        // Backward-compat: callers may still send contextWindow inside cli{}.
+        const createContextWindow =
+          body.contextWindow ??
+          (body.cli?.contextWindow != null && body.cli.contextWindow > 0 ? body.cli.contextWindow : undefined);
         createRuntimeCat(projectRoot, {
           catId: body.catId,
           name: body.name,
@@ -799,7 +804,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           color: body.color,
           mentionPatterns: body.mentionPatterns,
           ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
-          contextWindow: body.contextWindow,
+          contextWindow: createContextWindow,
           roleDescription: body.roleDescription,
           personality: body.personality,
           teamStrengths: body.teamStrengths,

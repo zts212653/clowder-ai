@@ -378,8 +378,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(createRes.statusCode, 201, createRes.body);
     const createdBody = JSON.parse(createRes.body);
     assert.equal(createdBody.cat.cli?.effort, 'turbo-native');
-    assert.equal(createdBody.cat.cli?.contextWindow, 372000);
-    assert.equal(createdBody.cat.cli?.autoCompactTokenLimit, 353400);
+    // #1208 canonical migration: contextWindow is at top level, not in cli
+    assert.equal(createdBody.cat.contextWindow, 372000, 'cli.contextWindow promoted to top-level');
+    assert.equal(createdBody.cat.cli?.contextWindow, undefined, 'contextWindow no longer stored in cli');
+    assert.equal(createdBody.cat.cli?.autoCompactTokenLimit, undefined, 'autoCompactTokenLimit derived at runtime');
 
     const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
     assert.equal(listRes.statusCode, 200);
@@ -387,16 +389,16 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const runtimeCat = listBody.cats.find((cat) => cat.id === 'runtime-codex-effort');
     assert.ok(runtimeCat, 'runtime-codex-effort should appear in /api/cats');
     assert.equal(runtimeCat.cli?.effort, 'turbo-native');
-    assert.equal(runtimeCat.cli?.contextWindow, 372000);
-    assert.equal(runtimeCat.cli?.autoCompactTokenLimit, 353400);
+    assert.equal(runtimeCat.contextWindow, 372000, 'contextWindow at top level in list');
 
     const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
     const persisted = JSON.parse(readFileSync(catalogPath, 'utf-8'));
     const variant = persisted.breeds.find((breed) => breed.catId === 'runtime-codex-effort')?.variants?.[0];
     assert.equal(variant?.cli?.effort, 'turbo-native');
-    assert.equal(variant?.cli?.contextWindow, 372000);
-    assert.equal(variant?.cli?.autoCompactTokenLimit, 353400);
+    assert.equal(variant?.contextWindow, 372000, 'contextWindow persisted at variant top-level');
+    assert.equal(variant?.cli?.contextWindow, undefined, 'cli.contextWindow not persisted');
 
+    // #1208: effort patch preserves top-level contextWindow
     const effortPatchRes = await app.inject({
       method: 'PATCH',
       url: '/api/cats/runtime-codex-effort',
@@ -409,9 +411,9 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(effortPatchRes.statusCode, 200, effortPatchRes.body);
     const effortPatchedCat = JSON.parse(effortPatchRes.body).cat;
     assert.equal(effortPatchedCat.cli?.effort, 'max');
-    assert.equal(effortPatchedCat.cli?.contextWindow, 372000, 'partial effort patch preserves the CLI window');
-    assert.equal(effortPatchedCat.cli?.autoCompactTokenLimit, 353400);
+    assert.equal(effortPatchedCat.contextWindow, 372000, 'partial effort patch preserves top-level contextWindow');
 
+    // #1208: changing context window via top-level contextWindow field
     const contextOnlyPatchRes = await app.inject({
       method: 'PATCH',
       url: '/api/cats/runtime-codex-effort',
@@ -419,17 +421,14 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
       },
-      body: JSON.stringify({ cli: { contextWindow: 100000 } }),
+      body: JSON.stringify({ contextWindow: 100000 }),
     });
     assert.equal(contextOnlyPatchRes.statusCode, 200, contextOnlyPatchRes.body);
     const contextOnlyPatchedCat = JSON.parse(contextOnlyPatchRes.body).cat;
-    assert.equal(contextOnlyPatchedCat.cli?.contextWindow, 100000);
-    assert.equal(
-      contextOnlyPatchedCat.cli?.autoCompactTokenLimit,
-      88000,
-      'changing the window recomputes its derived compaction threshold',
-    );
+    assert.equal(contextOnlyPatchedCat.contextWindow, 100000, 'top-level contextWindow updated');
+    assert.equal(contextOnlyPatchedCat.cli?.contextWindow, undefined, 'cli.contextWindow stays absent');
 
+    // #1208: cli.autoCompactTokenLimit in body is silently ignored (derived at runtime)
     const compactOnlyPatchRes = await app.inject({
       method: 'PATCH',
       url: '/api/cats/runtime-codex-effort',
@@ -437,24 +436,11 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
       },
-      body: JSON.stringify({ cli: { autoCompactTokenLimit: 85000 } }),
+      body: JSON.stringify({ cli: { effort: 'max' } }),
     });
     assert.equal(compactOnlyPatchRes.statusCode, 200, compactOnlyPatchRes.body);
     const compactOnlyPatchedCat = JSON.parse(compactOnlyPatchRes.body).cat;
-    assert.equal(compactOnlyPatchedCat.cli?.contextWindow, 100000);
-    assert.equal(compactOnlyPatchedCat.cli?.autoCompactTokenLimit, 85000);
-
-    const oversizedCompactPatchRes = await app.inject({
-      method: 'PATCH',
-      url: '/api/cats/runtime-codex-effort',
-      headers: {
-        'content-type': 'application/json',
-        'x-cat-cafe-user': 'codex',
-      },
-      body: JSON.stringify({ cli: { autoCompactTokenLimit: 100001 } }),
-    });
-    assert.equal(oversizedCompactPatchRes.statusCode, 400, oversizedCompactPatchRes.body);
-    assert.match(JSON.parse(oversizedCompactPatchRes.body).error, /cannot exceed cli\.contextWindow/i);
+    assert.equal(compactOnlyPatchedCat.contextWindow, 100000, 'contextWindow unchanged after unrelated cli patch');
 
     const modelPatchRes = await app.inject({
       method: 'PATCH',
@@ -468,9 +454,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(modelPatchRes.statusCode, 200, modelPatchRes.body);
     const modelPatchedCat = JSON.parse(modelPatchRes.body).cat;
     assert.equal(modelPatchedCat.cli?.effort, 'max', 'model switch preserves the provider-native member value');
-    assert.equal(modelPatchedCat.cli?.contextWindow, undefined, 'model switch drops the prior model-specific window');
-    assert.equal(modelPatchedCat.cli?.autoCompactTokenLimit, undefined);
+    // contextWindow persists at top level across model switch (user chose this limit)
+    assert.equal(modelPatchedCat.contextWindow, 100000, 'top-level contextWindow persists across model switch');
 
+    // #1208: restore model with contextWindow via top-level field
     const restoreGpt56Res = await app.inject({
       method: 'PATCH',
       url: '/api/cats/runtime-codex-effort',
@@ -480,18 +467,20 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       },
       body: JSON.stringify({
         defaultModel: 'gpt-5.6-sol',
-        cli: { effort: 'max', contextWindow: 372000 },
+        contextWindow: 372000,
+        cli: { effort: 'max' },
       }),
     });
     assert.equal(restoreGpt56Res.statusCode, 200, restoreGpt56Res.body);
     const restoredGpt56Cat = JSON.parse(restoreGpt56Res.body).cat;
-    assert.equal(restoredGpt56Cat.cli?.contextWindow, 372000);
-    assert.equal(restoredGpt56Cat.cli?.autoCompactTokenLimit, 327360);
+    assert.equal(restoredGpt56Cat.contextWindow, 372000, 'top-level contextWindow restored');
+    assert.equal(restoredGpt56Cat.cli?.effort, 'max');
     const restoredCatalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
     const restoredVariant = restoredCatalog.breeds.find((breed) => breed.catId === 'runtime-codex-effort')
       ?.variants?.[0];
-    assert.equal(restoredVariant?.cli?.autoCompactTokenLimit, 327360, 'derived threshold is persisted');
+    assert.equal(restoredVariant?.contextWindow, 372000, 'contextWindow persisted at variant top-level');
 
+    // #1208: model switch + context window via top-level contextWindow
     const modelAndContextPatchRes = await app.inject({
       method: 'PATCH',
       url: '/api/cats/runtime-codex-effort',
@@ -501,14 +490,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       },
       body: JSON.stringify({
         defaultModel: 'gpt-5.4',
-        cli: { contextWindow: 100000, autoCompactTokenLimit: 90000 },
+        contextWindow: 100000,
       }),
     });
     assert.equal(modelAndContextPatchRes.statusCode, 200, modelAndContextPatchRes.body);
     const modelAndContextPatchedCat = JSON.parse(modelAndContextPatchRes.body).cat;
     assert.equal(modelAndContextPatchedCat.cli?.effort, 'max');
-    assert.equal(modelAndContextPatchedCat.cli?.contextWindow, 100000, 'new model-specific window is accepted');
-    assert.equal(modelAndContextPatchedCat.cli?.autoCompactTokenLimit, 90000);
+    assert.equal(modelAndContextPatchedCat.contextWindow, 100000, 'top-level contextWindow updated with model switch');
 
     const clearEffortRes = await app.inject({
       method: 'PATCH',
@@ -534,23 +522,11 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(noEffortModelSwitchRes.statusCode, 200, noEffortModelSwitchRes.body);
     const noEffortModelSwitchedCat = JSON.parse(noEffortModelSwitchRes.body).cat;
     assert.equal(noEffortModelSwitchedCat.cli?.effort, undefined, 'model switch preserves an implicit effort');
-    assert.equal(noEffortModelSwitchedCat.cli?.contextWindow, undefined);
-    assert.equal(noEffortModelSwitchedCat.cli?.autoCompactTokenLimit, undefined);
-
-    const orphanCompactPatchRes = await app.inject({
-      method: 'PATCH',
-      url: '/api/cats/runtime-codex-effort',
-      headers: {
-        'content-type': 'application/json',
-        'x-cat-cafe-user': 'codex',
-      },
-      body: JSON.stringify({ cli: { autoCompactTokenLimit: 50000 } }),
-    });
-    assert.equal(orphanCompactPatchRes.statusCode, 400, orphanCompactPatchRes.body);
-    assert.match(JSON.parse(orphanCompactPatchRes.body).error, /requires cli\.contextWindow/i);
+    // #1208: contextWindow persists at top level across model switch
+    assert.equal(noEffortModelSwitchedCat.contextWindow, 100000, 'top-level contextWindow persists');
   });
 
-  it('POST /api/cats derives and validates the CLI context tuple', async () => {
+  it('POST /api/cats canonicalizes cli.contextWindow to top-level', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
@@ -575,6 +551,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       'x-cat-cafe-user': 'codex',
     };
 
+    // #1208: cli.contextWindow is promoted to top-level contextWindow on create
     const createContextOnlyRes = await app.inject({
       method: 'POST',
       url: '/api/cats',
@@ -588,12 +565,15 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     });
     assert.equal(createContextOnlyRes.statusCode, 201, createContextOnlyRes.body);
     const createdContextCat = JSON.parse(createContextOnlyRes.body).cat;
-    assert.equal(createdContextCat.cli?.contextWindow, 100000);
-    assert.equal(createdContextCat.cli?.autoCompactTokenLimit, 88000);
+    assert.equal(createdContextCat.contextWindow, 100000, 'cli.contextWindow promoted to top-level');
+    assert.equal(createdContextCat.cli?.contextWindow, undefined, 'cli.contextWindow no longer stored');
+    assert.equal(createdContextCat.cli?.autoCompactTokenLimit, undefined, 'autoCompactTokenLimit derived at runtime');
     const persisted = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
     const derivedVariant = persisted.breeds.find((breed) => breed.catId === 'runtime-context-derived')?.variants?.[0];
-    assert.equal(derivedVariant?.cli?.autoCompactTokenLimit, 88000, 'derived threshold is persisted on create');
+    assert.equal(derivedVariant?.contextWindow, 100000, 'contextWindow persisted at variant top-level');
 
+    // #1208: autoCompactTokenLimit without contextWindow is silently accepted
+    // (autoCompactTokenLimit is ignored — derived at runtime from contextWindow)
     const createOrphanCompactRes = await app.inject({
       method: 'POST',
       url: '/api/cats',
@@ -605,27 +585,25 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         cli: { command: 'codex', outputFormat: 'json', autoCompactTokenLimit: 90000 },
       }),
     });
-    assert.equal(createOrphanCompactRes.statusCode, 400, createOrphanCompactRes.body);
-    assert.match(JSON.parse(createOrphanCompactRes.body).error, /requires cli\.contextWindow/i);
+    // Now succeeds: autoCompactTokenLimit in body is silently ignored (no validation)
+    assert.equal(createOrphanCompactRes.statusCode, 201, createOrphanCompactRes.body);
 
-    const createOversizedCompactRes = await app.inject({
+    // #1208: explicit body.contextWindow takes precedence over cli.contextWindow
+    const createBothRes = await app.inject({
       method: 'POST',
       url: '/api/cats',
       headers,
       body: JSON.stringify({
         ...baseBody,
-        catId: 'runtime-context-oversized',
-        mentionPatterns: ['@runtime-context-oversized'],
-        cli: {
-          command: 'codex',
-          outputFormat: 'json',
-          contextWindow: 100000,
-          autoCompactTokenLimit: 100001,
-        },
+        catId: 'runtime-context-both',
+        mentionPatterns: ['@runtime-context-both'],
+        contextWindow: 200000,
+        cli: { command: 'codex', outputFormat: 'json', contextWindow: 100000 },
       }),
     });
-    assert.equal(createOversizedCompactRes.statusCode, 400, createOversizedCompactRes.body);
-    assert.match(JSON.parse(createOversizedCompactRes.body).error, /cannot exceed cli\.contextWindow/i);
+    assert.equal(createBothRes.statusCode, 201, createBothRes.body);
+    const createdBothCat = JSON.parse(createBothRes.body).cat;
+    assert.equal(createdBothCat.contextWindow, 200000, 'body.contextWindow wins over cli.contextWindow');
   });
 
   it('POST /api/cats rejects blank cli.effort values', async () => {
