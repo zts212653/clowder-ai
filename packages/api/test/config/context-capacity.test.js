@@ -391,4 +391,56 @@ describe('context-capacity resolver', () => {
       assert.ok(large.maxMessages >= small.maxMessages, 'larger ceiling = more messages');
     });
   });
+
+  // ─── #1208 Denominator Fix: fillRatio uses inputCeiling ─────────
+
+  describe('#1208 denominator fix', () => {
+    it('fillRatio denominator is inputCeiling (window - output reserve), not raw window', () => {
+      // Scenario: 200K manual cap → window=200K, inputCeiling=184K (200K - 16K reserve).
+      // usedTokens=160K → fillRatio should be 160K/184K ≈ 0.8696, NOT 160K/200K = 0.8.
+      // This matters: at 0.85 action threshold, the old wrong denominator (0.8) says "safe"
+      // while the correct denominator (0.87) says "action" → the fix prevents overflow.
+      catRegistry.register(TEST_CAT_ID, makeCatConfig({ contextWindow: 200_000 }));
+      const capacity = mod.resolveContextCapacity({ catId: TEST_CAT_ID });
+      const outputReserve = mod.getMemberOutputReserve(TEST_CAT_ID);
+      assert.equal(capacity.windowTokens, 200_000);
+      assert.equal(capacity.inputCeilingTokens, 200_000 - outputReserve);
+      // Verify the correct denominator for fillRatio computation
+      const usedTokens = 160_000;
+      const correctFillRatio = usedTokens / capacity.inputCeilingTokens;
+      const wrongFillRatio = usedTokens / capacity.windowTokens;
+      // Correct: 160000/184000 = 0.8696 (above typical 0.85 action threshold)
+      assert.ok(
+        correctFillRatio > 0.85,
+        `correct fillRatio ${correctFillRatio.toFixed(4)} should exceed 0.85 action threshold`,
+      );
+      // Wrong: 160000/200000 = 0.8 (below 0.85 action threshold → overflow!)
+      assert.ok(wrongFillRatio < 0.85, `wrong fillRatio ${wrongFillRatio.toFixed(4)} would miss the threshold`);
+    });
+
+    it('inputCeilingTokens equals windowTokens minus output reserve', () => {
+      catRegistry.register(TEST_CAT_ID, makeCatConfig({ contextWindow: 202_752 }));
+      const capacity = mod.resolveContextCapacity({
+        catId: TEST_CAT_ID,
+        model: 'unknown-gateway-model',
+        client: 'acp',
+      });
+      const reserve = mod.getMemberOutputReserve(TEST_CAT_ID);
+      assert.equal(capacity.inputCeilingTokens, 202_752 - reserve);
+      // The input ceiling is the correct denominator for lifecycle decisions
+      assert.ok(
+        capacity.inputCeilingTokens < capacity.windowTokens,
+        'inputCeiling must be strictly less than window (output reserve > 0)',
+      );
+    });
+
+    it('carrier in binding key differentiates fingerprints', () => {
+      const fpNone = mod.computeBindingFingerprint({ member: 'x', client: 'openai', model: 'm' });
+      const fpExec = mod.computeBindingFingerprint({ member: 'x', client: 'openai', model: 'm', carrier: 'exec_json' });
+      const fpApp = mod.computeBindingFingerprint({ member: 'x', client: 'openai', model: 'm', carrier: 'app_server' });
+      assert.notEqual(fpNone, fpExec, 'no carrier vs exec_json should differ');
+      assert.notEqual(fpExec, fpApp, 'exec_json vs app_server should differ');
+      assert.notEqual(fpNone, fpApp, 'no carrier vs app_server should differ');
+    });
+  });
 });

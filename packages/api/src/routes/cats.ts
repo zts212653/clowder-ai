@@ -515,18 +515,28 @@ async function toCatResponse(
         provider: cat.clientId === 'opencode' ? 'opencode' : undefined,
         client: cat.clientId,
         account: cat.accountRef,
+        carrier: cat.cli?.carrier,
       });
       const clientCap = getClientCapability(cat.clientId);
+      // #1208 Hub projection: expose 3-dimension capability model + inputCeiling
+      const capabilityInfo = {
+        capabilityReason: clientCap.reason,
+        catalogAvailable: clientCap.catalogAvailable,
+        reportsRuntimeWindow: clientCap.reportsRuntimeWindow,
+        reportsUsage: clientCap.reportsUsage,
+      };
       return capacity.source !== 'unresolved'
         ? {
             windowTokens: capacity.windowTokens,
+            inputCeilingTokens: capacity.inputCeilingTokens,
             source: capacity.source,
             confidence: capacity.confidence,
             provenance: capacity.provenance,
             actionable: capacity.actionable,
-            capabilityReason: clientCap.reason,
+            ...(capacity.bindingKey.carrier ? { carrier: capacity.bindingKey.carrier } : {}),
+            ...capabilityInfo,
           }
-        : { capabilityReason: clientCap.reason };
+        : capabilityInfo;
     })(),
     avatar: cat.avatar,
     roleDescription: cat.roleDescription,

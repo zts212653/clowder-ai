@@ -231,17 +231,21 @@ function validateProviderCapability(config: SessionStrategyConfig, catName: stri
  *
  * Replaces the boolean shouldSeal() from seal-thresholds.ts with a
  * discriminated union that supports compress/hybrid strategies.
+ *
+ * #1208 denominator fix: `inputCeiling` is the effective input token ceiling
+ * (window - output reserve), NOT the raw window. Fill ratio and remaining
+ * budget are both relative to what's actually available for input tokens.
  */
 export function shouldTakeAction(
   fillRatio: number,
-  windowTokens: number,
+  inputCeiling: number,
   usedTokens: number,
   compressionCount: number,
   strategy: SessionStrategyConfig,
 ): StrategyAction {
   const turnBudget = strategy.turnBudget ?? 12_000;
   const safetyMargin = strategy.safetyMargin ?? 4_000;
-  const remaining = windowTokens - usedTokens;
+  const remaining = inputCeiling - usedTokens;
 
   // Budget exhausted — strategy-aware:
   // - compress: CLI will free space by compressing, don't pre-emptively seal

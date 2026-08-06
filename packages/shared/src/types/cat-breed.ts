@@ -7,34 +7,13 @@
  * Phase 4-F: 支持多 Variant（多版本猫召唤）
  */
 
-import type { AgyProfileConfig, CatColor, ClientId } from './cat.js';
-import type { CatId } from './ids.js';
-import type { VoiceConfig } from './tts.js';
-
-/**
- * Per-cat context budget configuration (legacy).
- * Controls how much history/context is sent to each cat.
- *
- * Retained for parser tolerance — old catalogs still load, but the runtime
- * derives prompt-assembly limits from the resolved effective context window
- * rather than these static numbers. New catalogs should use `contextWindow`
- * on the variant instead.
- */
-export interface ContextBudget {
-  /** Total prompt token limit (including system prompt + context + user message) */
-  readonly maxPromptTokens: number;
-  /** Maximum tokens for historical context */
-  readonly maxContextTokens: number;
-  /** Maximum number of historical messages to include */
-  readonly maxMessages: number;
-  /** Maximum characters per single message (truncation point) */
-  readonly maxContentLengthPerMsg: number;
-}
-
 /**
  * CLI invocation config for a variant
  */
 import type { CliEffortValue } from '../cli-effort.js';
+import type { AgyProfileConfig, CatColor, ClientId } from './cat.js';
+import type { CatId } from './ids.js';
+import type { VoiceConfig } from './tts.js';
 
 export interface CliConfig {
   readonly command: string; // 'claude' | 'codex' | 'agy' | ...

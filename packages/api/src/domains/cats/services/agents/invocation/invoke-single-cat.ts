@@ -2429,6 +2429,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             model: msg.metadata.model,
             provider: msg.metadata.provider,
             client: catConfig?.clientId,
+            carrier: catConfig?.cli?.carrier,
           });
           // #1208 Item 2: use any resolved source for context_health monitoring
           // (catalog/default are useful for observability).  Lifecycle actions
@@ -2467,10 +2468,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           if (windowSize && usedTokens > 0 && !isCumulativeOnly) {
             const source: ContextHealth['source'] =
               capacity.source === 'exact' && usedFrom !== 'total' ? 'exact' : 'approx';
+            // #1208 denominator fix: fillRatio denominator is inputCeilingTokens
+            // (effective input budget = window - output reserve), not the raw window.
+            // This is the correct denominator because usedTokens measures INPUT tokens
+            // consumed, and the actionable ceiling for lifecycle decisions is the input
+            // ceiling, not the total window that includes output reserve.
+            const inputCeiling = capacity.inputCeilingTokens;
             const health: ContextHealth = {
               usedTokens,
               windowTokens: windowSize,
-              fillRatio: Math.min(usedTokens / windowSize, 1.0),
+              fillRatio: inputCeiling > 0 ? Math.min(usedTokens / inputCeiling, 1.0) : 0,
               source,
               usedFrom,
               measuredAt: Date.now(),
@@ -2531,9 +2538,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                 const skipAutoSealForApiKeyCompress = isAnthropicApiKey && strategy.strategy === 'compress';
                 if (!skipAutoSealForApproxApiKey && !skipAutoSealForApiKeyCompress) {
                   const activeRecord = await deps.sessionChainStore.getActive(catId, threadId);
+                  // #1208 denominator fix: pass inputCeiling (not raw windowTokens)
+                  // to shouldTakeAction — remaining budget is inputCeiling - usedTokens.
                   const action = shouldTakeAction(
                     health.fillRatio,
-                    health.windowTokens,
+                    inputCeiling,
                     health.usedTokens,
                     activeRecord?.compressionCount ?? 0,
                     strategy,

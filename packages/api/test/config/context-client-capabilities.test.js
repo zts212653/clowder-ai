@@ -59,40 +59,54 @@ describe('#1208 Item 6: client capabilities + fail-closed coverage', () => {
 
   // ── 1. Registry completeness ──────────────────────────────────────
 
+  // ── 1. Registry completeness (3-dimension model) ──────────────────
+
   describe('CLIENT_CONTEXT_CAPABILITIES registry', () => {
-    it('covers all 9 ClientId values', () => {
+    it('covers all 9 ClientId values with 3 capability dimensions', () => {
       for (const clientId of ALL_CLIENT_IDS) {
         const cap = capMod.CLIENT_CONTEXT_CAPABILITIES[clientId];
         assert.ok(cap, `Missing capability entry for client "${clientId}"`);
-        assert.equal(typeof cap.reportsWindow, 'boolean', `${clientId}.reportsWindow must be boolean`);
-        assert.equal(typeof cap.catalogReliable, 'boolean', `${clientId}.catalogReliable must be boolean`);
+        assert.equal(typeof cap.catalogAvailable, 'boolean', `${clientId}.catalogAvailable must be boolean`);
+        assert.equal(typeof cap.reportsRuntimeWindow, 'boolean', `${clientId}.reportsRuntimeWindow must be boolean`);
+        assert.equal(typeof cap.reportsUsage, 'boolean', `${clientId}.reportsUsage must be boolean`);
         assert.ok(cap.reason.length > 0, `${clientId}.reason must be non-empty`);
       }
     });
 
-    it('reporting clients: anthropic, openai, google, kimi, antigravity', () => {
-      for (const clientId of ['anthropic', 'openai', 'google', 'kimi', 'antigravity']) {
-        assert.equal(capMod.CLIENT_CONTEXT_CAPABILITIES[clientId].reportsWindow, true, `${clientId} should report`);
+    it('full-reporting clients: anthropic, openai, google, kimi (all 3 dimensions true)', () => {
+      for (const clientId of ['anthropic', 'openai', 'google', 'kimi']) {
+        const cap = capMod.CLIENT_CONTEXT_CAPABILITIES[clientId];
+        assert.equal(cap.catalogAvailable, true, `${clientId} should have catalog`);
+        assert.equal(cap.reportsRuntimeWindow, true, `${clientId} should report runtime window`);
+        assert.equal(cap.reportsUsage, true, `${clientId} should report usage`);
       }
     });
 
-    it('non-reporting clients: opencode, catagent, acp, a2a', () => {
-      for (const clientId of ['opencode', 'catagent', 'acp', 'a2a']) {
-        assert.equal(
-          capMod.CLIENT_CONTEXT_CAPABILITIES[clientId].reportsWindow,
-          false,
-          `${clientId} should NOT report`,
-        );
+    it('antigravity: catalog=true, runtimeWindow=false, usage=false (catalog != runtime)', () => {
+      // Sol push-back: catalog lookup != runtime window reporting.
+      // Antigravity wraps Claude models (catalog available) but the bridge
+      // itself does NOT emit runtime window or usage data.
+      const cap = capMod.CLIENT_CONTEXT_CAPABILITIES.antigravity;
+      assert.equal(cap.catalogAvailable, true, 'Antigravity has catalog via Claude models');
+      assert.equal(cap.reportsRuntimeWindow, false, 'Antigravity bridge does NOT report runtime window');
+      assert.equal(cap.reportsUsage, false, 'Antigravity bridge does NOT report usage');
+    });
+
+    it('opencode + catagent: catalog=true, runtimeWindow=false, usage=true', () => {
+      for (const clientId of ['opencode', 'catagent']) {
+        const cap = capMod.CLIENT_CONTEXT_CAPABILITIES[clientId];
+        assert.equal(cap.catalogAvailable, true, `${clientId} has catalog`);
+        assert.equal(cap.reportsRuntimeWindow, false, `${clientId} does NOT report runtime window`);
+        assert.equal(cap.reportsUsage, true, `${clientId} reports usage`);
       }
     });
 
-    it('opaque clients (acp, a2a) have catalogReliable=false', () => {
+    it('opaque clients (acp, a2a): all 3 dimensions false', () => {
       for (const clientId of ['acp', 'a2a']) {
-        assert.equal(
-          capMod.CLIENT_CONTEXT_CAPABILITIES[clientId].catalogReliable,
-          false,
-          `${clientId} should have unreliable catalog`,
-        );
+        const cap = capMod.CLIENT_CONTEXT_CAPABILITIES[clientId];
+        assert.equal(cap.catalogAvailable, false, `${clientId} should NOT have catalog`);
+        assert.equal(cap.reportsRuntimeWindow, false, `${clientId} should NOT report runtime window`);
+        assert.equal(cap.reportsUsage, false, `${clientId} should NOT report usage`);
       }
     });
   });
@@ -100,23 +114,26 @@ describe('#1208 Item 6: client capabilities + fail-closed coverage', () => {
   // ── 2. getClientCapability fail-closed ─────────────────────────────
 
   describe('getClientCapability', () => {
-    it('unknown client fails closed', () => {
+    it('unknown client fails closed (all 3 dimensions false)', () => {
       const cap = capMod.getClientCapability('some-unknown-client');
-      assert.equal(cap.reportsWindow, false);
-      assert.equal(cap.catalogReliable, false);
+      assert.equal(cap.catalogAvailable, false);
+      assert.equal(cap.reportsRuntimeWindow, false);
+      assert.equal(cap.reportsUsage, false);
       assert.ok(cap.reason.includes('Unknown client'));
     });
 
     it('undefined client fails closed', () => {
       const cap = capMod.getClientCapability(undefined);
-      assert.equal(cap.reportsWindow, false);
-      assert.equal(cap.catalogReliable, false);
+      assert.equal(cap.catalogAvailable, false);
+      assert.equal(cap.reportsRuntimeWindow, false);
+      assert.equal(cap.reportsUsage, false);
     });
 
     it('known client returns correct entry', () => {
       const cap = capMod.getClientCapability('anthropic');
-      assert.equal(cap.reportsWindow, true);
-      assert.equal(cap.catalogReliable, true);
+      assert.equal(cap.catalogAvailable, true);
+      assert.equal(cap.reportsRuntimeWindow, true);
+      assert.equal(cap.reportsUsage, true);
     });
   });
 
