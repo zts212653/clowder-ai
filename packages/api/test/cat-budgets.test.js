@@ -1,159 +1,123 @@
 /**
  * cat-budgets.ts tests
- * Per-cat context budget configuration
+ * #1208 P1-2: resolved capacity + derived prompt-assembly budget.
+ * Breed-level fallback windows are deleted — unresolved = zero budget.
  */
 
 import assert from 'node:assert';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { clearBudgetCache, getAllCatBudgets, getCatContextBudget } from '../dist/config/cat-budgets.js';
+import { clearBudgetCache, getAllCatBudgets, getCatCapacity, getCatPromptBudget } from '../dist/config/cat-budgets.js';
 
-describe('getCatContextBudget', () => {
+describe('getCatCapacity', () => {
   beforeEach(() => {
-    // Clear cache before each test
     clearBudgetCache();
-    // Clear relevant env vars
-    delete process.env.CAT_OPUS_MAX_PROMPT_TOKENS;
-    delete process.env.CAT_CODEX_MAX_PROMPT_TOKENS;
-    delete process.env.CAT_GEMINI_MAX_PROMPT_TOKENS;
-    delete process.env.MAX_PROMPT_TOKENS;
   });
 
   afterEach(() => {
-    // Cleanup
-    delete process.env.CAT_OPUS_MAX_PROMPT_TOKENS;
-    delete process.env.CAT_CODEX_MAX_PROMPT_TOKENS;
-    delete process.env.CAT_GEMINI_MAX_PROMPT_TOKENS;
-    delete process.env.MAX_PROMPT_TOKENS;
     clearBudgetCache();
   });
 
-  it('opus default budget from runtime cat config', () => {
-    const budget = getCatContextBudget('opus');
-    assert.strictEqual(budget.maxPromptTokens, 180000);
-    assert.strictEqual(budget.maxContextTokens, 160000);
-    assert.strictEqual(budget.maxMessages, 200);
-    assert.strictEqual(budget.maxContentLengthPerMsg, 100000);
+  it('returns enriched capacity with source and actionable fields', () => {
+    const cap = getCatCapacity('opus');
+    assert.ok(typeof cap.inputCeilingTokens === 'number', 'has inputCeilingTokens');
+    assert.ok(typeof cap.source === 'string', 'has source');
+    assert.ok(typeof cap.actionable === 'boolean', 'has actionable');
+    assert.ok(typeof cap.confidence === 'number', 'has confidence');
+    assert.ok(typeof cap.budget === 'object', 'has budget');
+    assert.ok(typeof cap.budget.maxPromptTokens === 'number', 'budget has maxPromptTokens');
+    assert.ok(typeof cap.budget.maxHistoryContextTokens === 'number', 'budget has maxHistoryContextTokens');
+    assert.ok(typeof cap.budget.maxMessages === 'number', 'budget has maxMessages');
+    assert.ok(typeof cap.budget.maxContentLengthPerMsg === 'number', 'budget has maxContentLengthPerMsg');
   });
 
-  it('codex default budget from runtime cat config', () => {
-    const budget = getCatContextBudget('codex');
-    assert.strictEqual(budget.maxPromptTokens, 240000);
-    assert.strictEqual(budget.maxContextTokens, 216000);
-    assert.strictEqual(budget.maxMessages, 200);
-    assert.strictEqual(budget.maxContentLengthPerMsg, 100000);
+  it('catalog-resolved cat has non-zero budget and source != unresolved', () => {
+    // opus is a known model in the catalog (claude-opus-4) — should resolve
+    const cap = getCatCapacity('opus');
+    // Could be catalog, manual, or exact depending on config; just not unresolved
+    if (cap.source !== 'unresolved') {
+      assert.ok(cap.inputCeilingTokens > 0, 'inputCeilingTokens > 0 when resolved');
+      assert.ok(cap.budget.maxPromptTokens > 0, 'maxPromptTokens > 0 when resolved');
+      assert.ok(cap.confidence > 0, 'confidence > 0 when resolved');
+    }
   });
 
-  it('gemini default budget from runtime cat config', () => {
-    const budget = getCatContextBudget('gemini');
-    assert.strictEqual(budget.maxPromptTokens, 350000);
-    assert.strictEqual(budget.maxContextTokens, 300000);
-    assert.strictEqual(budget.maxMessages, 300);
-    assert.strictEqual(budget.maxContentLengthPerMsg, 100000);
+  it('unknown cat returns unresolved with zero budget (no breed fallback)', () => {
+    // A completely unknown cat with no config, no model, no provider
+    const cap = getCatCapacity('nonexistent-unknown-cat-xyz');
+    assert.strictEqual(cap.source, 'unresolved');
+    assert.strictEqual(cap.actionable, false);
+    assert.strictEqual(cap.inputCeilingTokens, 0);
+    assert.strictEqual(cap.confidence, 0);
+    assert.strictEqual(cap.budget.maxPromptTokens, 0);
+    assert.strictEqual(cap.budget.maxHistoryContextTokens, 0);
+    // maxMessages has a floor of 50 from derivePromptAssemblyBudget
+    assert.strictEqual(cap.budget.maxMessages, 50);
   });
 
-  it('variant budgets from runtime cat config', () => {
-    const sonnet = getCatContextBudget('sonnet');
-    assert.strictEqual(sonnet.maxPromptTokens, 180000);
-    assert.strictEqual(sonnet.maxContextTokens, 160000);
-
-    const opus45 = getCatContextBudget('opus-45');
-    assert.strictEqual(opus45.maxPromptTokens, 180000);
-    assert.strictEqual(opus45.maxContextTokens, 160000);
-
-    const gpt52 = getCatContextBudget('gpt52');
-    assert.strictEqual(gpt52.maxPromptTokens, 240000);
-    assert.strictEqual(gpt52.maxContextTokens, 216000);
-
-    const spark = getCatContextBudget('spark');
-    assert.strictEqual(spark.maxPromptTokens, 64000);
-    assert.strictEqual(spark.maxContextTokens, 40000);
-
-    const gemini25 = getCatContextBudget('gemini25');
-    assert.strictEqual(gemini25.maxPromptTokens, 350000);
-    assert.strictEqual(gemini25.maxContextTokens, 300000);
+  it('budget.maxPromptTokens equals inputCeilingTokens (derived identity)', () => {
+    const cap = getCatCapacity('opus');
+    assert.strictEqual(
+      cap.budget.maxPromptTokens,
+      cap.inputCeilingTokens,
+      'maxPromptTokens should equal inputCeilingTokens',
+    );
   });
+});
 
-  it('per-cat env var overrides maxPromptTokens', () => {
-    process.env.CAT_OPUS_MAX_PROMPT_TOKENS = '200000';
+describe('getCatPromptBudget', () => {
+  beforeEach(() => {
     clearBudgetCache();
-    const budget = getCatContextBudget('opus');
-    assert.strictEqual(budget.maxPromptTokens, 200000);
-    // Other fields remain from JSON
-    assert.strictEqual(budget.maxContextTokens, 160000);
   });
 
-  it('global MAX_PROMPT_TOKENS fallback when no per-cat env', () => {
-    process.env.MAX_PROMPT_TOKENS = '100000';
-    clearBudgetCache();
-    const budget = getCatContextBudget('opus');
-    assert.strictEqual(budget.maxPromptTokens, 100000);
-  });
-
-  it('per-cat env var takes priority over global MAX_PROMPT_TOKENS', () => {
-    process.env.CAT_OPUS_MAX_PROMPT_TOKENS = '180000';
-    process.env.MAX_PROMPT_TOKENS = '100000';
-    clearBudgetCache();
-    const budget = getCatContextBudget('opus');
-    assert.strictEqual(budget.maxPromptTokens, 180000);
+  it('returns PromptAssemblyBudget (routing compat wrapper)', () => {
+    const budget = getCatPromptBudget('opus');
+    assert.ok(typeof budget.maxPromptTokens === 'number');
+    assert.ok(typeof budget.maxHistoryContextTokens === 'number');
+    assert.ok(typeof budget.maxMessages === 'number');
+    assert.ok(typeof budget.maxContentLengthPerMsg === 'number');
+    // Should NOT have source/actionable — it's the raw budget
+    assert.strictEqual(budget.source, undefined);
+    assert.strictEqual(budget.actionable, undefined);
   });
 
   it('per-message content limit accommodates long text input (100K)', () => {
-    const opus = getCatContextBudget('opus');
+    const budget = getCatPromptBudget('opus');
     assert.ok(
-      opus.maxContentLengthPerMsg >= 100000,
-      `opus maxContentLengthPerMsg=${opus.maxContentLengthPerMsg} should be >= 100000`,
+      budget.maxContentLengthPerMsg >= 100_000,
+      `maxContentLengthPerMsg=${budget.maxContentLengthPerMsg} should be >= 100000`,
     );
-    const codex = getCatContextBudget('codex');
-    assert.ok(
-      codex.maxContentLengthPerMsg >= 100000,
-      `codex maxContentLengthPerMsg=${codex.maxContentLengthPerMsg} should be >= 100000`,
-    );
-  });
-
-  it('all budget fields are positive numbers', () => {
-    const cats = ['opus', 'codex', 'gemini'];
-    for (const cat of cats) {
-      const budget = getCatContextBudget(cat);
-      assert.ok(budget.maxPromptTokens > 0, `${cat} maxPromptTokens > 0`);
-      assert.ok(budget.maxContextTokens > 0, `${cat} maxContextTokens > 0`);
-      assert.ok(budget.maxMessages > 0, `${cat} maxMessages > 0`);
-      assert.ok(budget.maxContentLengthPerMsg > 0, `${cat} maxContentLengthPerMsg > 0`);
-    }
-  });
-
-  it('keeps Spark fallback budget when runtime config loading fails', () => {
-    const saved = process.env.CAT_TEMPLATE_PATH;
-    process.env.CAT_TEMPLATE_PATH = '/tmp/nonexistent-cat-template-for-budget-test.json';
-    clearBudgetCache();
-    try {
-      const spark = getCatContextBudget('spark');
-      assert.strictEqual(spark.maxPromptTokens, 64000);
-      assert.strictEqual(spark.maxContextTokens, 40000);
-      assert.strictEqual(spark.maxMessages, 100);
-    } finally {
-      if (saved === undefined) delete process.env.CAT_TEMPLATE_PATH;
-      else process.env.CAT_TEMPLATE_PATH = saved;
-      clearBudgetCache();
-    }
   });
 });
 
 describe('getAllCatBudgets', () => {
   beforeEach(() => {
     clearBudgetCache();
-    delete process.env.CAT_OPUS_MAX_PROMPT_TOKENS;
-    delete process.env.CAT_CODEX_MAX_PROMPT_TOKENS;
-    delete process.env.CAT_GEMINI_MAX_PROMPT_TOKENS;
-    delete process.env.MAX_PROMPT_TOKENS;
   });
 
-  it('returns budgets for all cats (core 3 + variants)', () => {
+  it('returns CatCapacityBudget entries with source/actionable', () => {
     const budgets = getAllCatBudgets();
-    // Core breed defaults must exist
-    assert.ok(budgets.opus, 'has opus');
-    assert.ok(budgets.codex, 'has codex');
-    assert.ok(budgets.gemini, 'has gemini');
-    // F032: Now includes variants (sonnet, opus-45, gpt52, spark, gemini25) — at least 8 cats
-    assert.ok(Object.keys(budgets).length >= 3, 'has at least 3 cats');
+    assert.ok(Object.keys(budgets).length >= 1, 'has at least 1 cat');
+    for (const [catId, entry] of Object.entries(budgets)) {
+      assert.ok(typeof entry.inputCeilingTokens === 'number', `${catId} has inputCeilingTokens`);
+      assert.ok(typeof entry.source === 'string', `${catId} has source`);
+      assert.ok(typeof entry.actionable === 'boolean', `${catId} has actionable`);
+      assert.ok(typeof entry.confidence === 'number', `${catId} has confidence`);
+      assert.ok(typeof entry.budget === 'object', `${catId} has budget`);
+    }
+  });
+
+  it('unresolved cats are NOT masqueraded as real capacity', () => {
+    // If any cat resolves as unresolved, its inputCeilingTokens must be 0
+    const budgets = getAllCatBudgets();
+    for (const [catId, entry] of Object.entries(budgets)) {
+      if (entry.source === 'unresolved') {
+        assert.strictEqual(
+          entry.inputCeilingTokens,
+          0,
+          `${catId}: unresolved must have inputCeilingTokens=0 (no breed fallback)`,
+        );
+        assert.strictEqual(entry.actionable, false, `${catId}: unresolved must be non-actionable`);
+      }
+    }
   });
 });

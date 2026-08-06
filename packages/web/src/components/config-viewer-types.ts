@@ -24,6 +24,19 @@ export interface PromptAssemblyBudget {
   maxContentLengthPerMsg: number;
 }
 
+/**
+ * Resolved capacity + derived prompt-assembly budget per cat (#1208 P1-2).
+ * Replaces the old 4-field-only shape: includes source/confidence/actionable
+ * so Hub can distinguish resolved from unresolved capacity.
+ */
+export interface CatCapacityBudget {
+  inputCeilingTokens: number;
+  source: 'exact' | 'catalog' | 'default' | 'manual' | 'unresolved';
+  actionable: boolean;
+  confidence: number;
+  budget: PromptAssemblyBudget;
+}
+
 export interface Capabilities {
   skills: string[];
   externalMcpServers: string[];
@@ -32,7 +45,7 @@ export interface Capabilities {
 export interface ConfigData {
   coCreator?: CoCreatorConfig;
   cats: Record<string, CatConfig>;
-  perCatBudgets: Record<string, PromptAssemblyBudget>;
+  perCatBudgets: Record<string, CatCapacityBudget>;
   cli?: {
     codexSandboxMode: 'read-only' | 'workspace-write' | 'danger-full-access';
     codexApprovalPolicy: 'untrusted' | 'on-failure' | 'on-request' | 'never';

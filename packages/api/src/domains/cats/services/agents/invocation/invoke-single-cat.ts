@@ -2424,13 +2424,17 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           // Unified via resolveContextCapacity(): member manual cap → CLI reported →
           // model catalog → provider default → unresolved. All consumers share one
           // resolved capacity instead of scattered 3-way fallback chains.
+          // #1208 P1-3: use actual runtime carrier (from service), not
+          // static config carrier.  The runtime carrierTier (extracted at
+          // invocation start, ~L957) reflects the actual transport path;
+          // catConfig.cli.carrier is static config that may not match.
           const rawCapacity = resolveContextCapacity({
             catId: catId as string,
             reportedWindowSize: msg.metadata.usage.contextWindowSize,
             model: msg.metadata.model,
             provider: msg.metadata.provider,
             client: catConfig?.clientId,
-            carrier: catConfig?.cli?.carrier,
+            carrier: carrierTier ?? catConfig?.cli?.carrier,
           });
 
           // #1208: Apply session capacity pin (shrink-no-expand within same binding).

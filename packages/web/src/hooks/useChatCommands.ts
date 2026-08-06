@@ -22,19 +22,25 @@ export function isCommandInvocation(input: string, command: string): boolean {
 function formatConfigForDisplay(config: ConfigSnapshot): string {
   const lines: string[] = ['[配置] Clowder AI 运行配置', ''];
 
-  // Per-cat prompt-assembly budgets (derived from resolved context capacity, #1208)
+  // Per-cat capacity + prompt-assembly budgets (#1208 P1-2: includes source/confidence)
   if (config.perCatBudgets) {
-    lines.push('Per-Cat Prompt Budget (derived from context window)');
-    for (const [catId, budget] of Object.entries(config.perCatBudgets)) {
-      const b = budget as {
-        maxPromptTokens: number;
-        maxHistoryContextTokens: number;
-        maxMessages: number;
-        maxContentLengthPerMsg: number;
+    lines.push('Per-Cat Context Capacity');
+    for (const [catId, entry] of Object.entries(config.perCatBudgets)) {
+      const e = entry as {
+        inputCeilingTokens: number;
+        source: string;
+        actionable: boolean;
+        confidence: number;
+        budget: {
+          maxPromptTokens: number;
+          maxHistoryContextTokens: number;
+          maxMessages: number;
+        };
       };
-      lines.push(
-        `  ${catId}: prompt ${(b.maxPromptTokens / 1000).toFixed(0)}k, history ${(b.maxHistoryContextTokens / 1000).toFixed(0)}k, ${b.maxMessages} msgs`,
-      );
+      const ceil = (e.inputCeilingTokens / 1000).toFixed(0);
+      const hist = (e.budget.maxHistoryContextTokens / 1000).toFixed(0);
+      const tag = e.source === 'unresolved' ? ' [unresolved]' : e.actionable ? '' : ` [${e.source}]`;
+      lines.push(`  ${catId}: ceiling ${ceil}k, history ${hist}k, ${e.budget.maxMessages} msgs${tag}`);
     }
     lines.push('');
   }

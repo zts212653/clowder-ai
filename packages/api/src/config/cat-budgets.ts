@@ -1,71 +1,58 @@
 /**
- * Cat Context Budget — Prompt Assembly Limits
- * clowder-ai#1208 Item 3: ALL budgets are DERIVED via derivePromptAssemblyBudget.
+ * Cat Context Budget — Capacity Resolution + Prompt Assembly Limits
+ * clowder-ai#1208 Item 3 + P1-2: ALL budgets are DERIVED via derivePromptAssemblyBudget.
  *
- * Resolution order:
- *   1. Unified context capacity resolver (manual cap → CLI → model catalog → provider default).
- *   2. Breed-level default window estimate → derive via derivePromptAssemblyBudget().
- *   3. Conservative global fallback window → derive via derivePromptAssemblyBudget().
+ * Resolution is via the unified context capacity resolver ONLY.  No breed-level
+ * defaults or hardcoded fallback windows — when unresolved, the budget is zero
+ * and `source` is 'unresolved'.  Lifecycle code already gates on actionable;
+ * routing callers must handle zero-budget gracefully (log + conservative fallback
+ * at the CALL SITE, not here).
  *
  * maxMessages and maxContentLengthPerMsg are always derived from the window,
- * never independently configurable. serial/parallel/warm/cold paths all share
- * the same derived budget via computeContextBudget().
+ * never independently configurable.
  */
 
 import { catRegistry } from '@cat-cafe/shared';
-import { resolveBreedId } from './breed-resolver.js';
 import { getAllCatIdsFromConfig } from './cat-config-loader.js';
 import {
+  type ContextCapacityConfidence,
   derivePromptAssemblyBudget,
-  getMemberOutputReserve,
   type PromptAssemblyBudget,
   resolveContextCapacity,
 } from './context-capacity.js';
 
+// ─── Enriched return type ───────────────────────────────────────────
+
 /**
- * Breed-level default context windows (tokens).
- * Used when the unified resolver returns unresolved (no window configured,
- * no model in catalog, no provider default).  Each breed gets a conservative
- * estimate of its typical model's context window.
+ * Resolved capacity + derived prompt-assembly budget for a single cat.
  *
- * These are NOT budgets — they are window estimates that get fed through
- * derivePromptAssemblyBudget() to produce actual prompt-assembly limits.
- * This ensures maxMessages and maxContentLengthPerMsg are always derived
- * from the window, not independently configured.
+ * #1208 P1-2: includes capacity metadata (source, actionable, confidence)
+ * so consumers can distinguish resolved from unresolved — no more silent
+ * breed-level fallbacks that masquerade as real capacity.
  */
-const BREED_DEFAULT_WINDOWS: Record<string, number> = {
-  ragdoll: 200_000, // Claude models: 200K is the conservative floor
-  'maine-coon': 256_000, // Codex/GPT models: 128K-400K range
-  siamese: 400_000, // Kimi/Gemini: typically 1M but conservative
-  spark: 80_000, // Small/fast models
-};
-
-/** F32-a: Conservative fallback window for unknown/dynamic cats. */
-const GLOBAL_FALLBACK_WINDOW = 128_000;
-
-/**
- * Derive a prompt-assembly budget from a window estimate.
- * Applies the standard output reserve before derivation.
- */
-function deriveFromWindow(catId: string, windowTokens: number): PromptAssemblyBudget {
-  const outputReserve = getMemberOutputReserve(catId);
-  const inputCeiling = Math.max(0, windowTokens - outputReserve);
-  return derivePromptAssemblyBudget(inputCeiling);
+export interface CatCapacityBudget {
+  /** Effective input ceiling tokens (window - output reserve). 0 when unresolved. */
+  readonly inputCeilingTokens: number;
+  /** How the capacity was determined. */
+  readonly source: ContextCapacityConfidence;
+  /** Whether the value is authoritative for lifecycle actions. */
+  readonly actionable: boolean;
+  /** Numeric confidence (0.0–1.0). */
+  readonly confidence: number;
+  /** Derived prompt-assembly limits. Zero-valued when unresolved. */
+  readonly budget: PromptAssemblyBudget;
 }
 
+// ─── Resolution ─────────────────────────────────────────────────────
+
 /**
- * Get prompt-assembly budget for a cat.
+ * Resolve a cat's full capacity + derived budget.
  *
- * clowder-ai#1208 Item 3: all paths go through derivePromptAssemblyBudget().
- * The effective prompt cap = effective window - output reserve.
- * serial/parallel/warm/cold then subtract their own system/prompt/nudge
- * tokens via computeContextBudget() to get the actual context budget.
- *
- * There are no configurable maxMessages or maxContentLengthPerMsg —
- * they are always derived from the window size.
+ * When unresolved: inputCeilingTokens=0, budget fields are zero-valued,
+ * source='unresolved', actionable=false.  Routing callers that need a
+ * non-zero budget MUST apply their own explicit fallback.
  */
-export function getCatPromptBudget(catName: string): PromptAssemblyBudget {
-  // 1. Resolve capacity through the unified chain.
+export function getCatCapacity(catName: string): CatCapacityBudget {
   const config = catRegistry.tryGet(catName)?.config;
   const capacity = resolveContextCapacity({
     catId: catName,
@@ -73,28 +60,35 @@ export function getCatPromptBudget(catName: string): PromptAssemblyBudget {
     provider: config?.clientId === 'opencode' ? 'opencode' : undefined,
   });
 
-  // Resolved (any source: exact, manual, catalog, default) → derive from resolved value.
-  if (capacity.source !== 'unresolved') {
-    return derivePromptAssemblyBudget(capacity.inputCeilingTokens);
-  }
-
-  // 2. Unresolved → use breed-level default window → derive.
-  const breedId = resolveBreedId(catName);
-  const fallbackWindow =
-    BREED_DEFAULT_WINDOWS[catName] ?? (breedId ? BREED_DEFAULT_WINDOWS[breedId] : undefined) ?? GLOBAL_FALLBACK_WINDOW;
-
-  return deriveFromWindow(catName, fallbackWindow);
+  return {
+    inputCeilingTokens: capacity.inputCeilingTokens,
+    source: capacity.source,
+    actionable: capacity.actionable,
+    confidence: capacity.confidence,
+    budget: derivePromptAssemblyBudget(capacity.inputCeilingTokens),
+  };
 }
 
 /**
- * Get all cat budgets (for config display).
+ * Get prompt-assembly budget for a cat (routing convenience wrapper).
+ *
+ * Returns the derived PromptAssemblyBudget.  When capacity is unresolved,
+ * the budget has zero-valued fields — routing callers should check for
+ * maxPromptTokens===0 and apply their own conservative fallback.
  */
-export function getAllCatBudgets(): Record<string, PromptAssemblyBudget> {
-  const result: Record<string, PromptAssemblyBudget> = {};
+export function getCatPromptBudget(catName: string): PromptAssemblyBudget {
+  return getCatCapacity(catName).budget;
+}
+
+/**
+ * Get all cat budgets with capacity metadata (for config snapshot/Hub display).
+ */
+export function getAllCatBudgets(): Record<string, CatCapacityBudget> {
+  const result: Record<string, CatCapacityBudget> = {};
   const registryIds = catRegistry.getAllIds();
   const allIds = registryIds.length > 0 ? registryIds.map(String) : getAllCatIdsFromConfig();
   for (const catName of allIds) {
-    result[catName] = getCatPromptBudget(catName);
+    result[catName] = getCatCapacity(catName);
   }
   return result;
 }

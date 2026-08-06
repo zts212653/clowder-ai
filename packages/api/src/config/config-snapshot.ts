@@ -1,4 +1,4 @@
-import type { PromptAssemblyBudget } from './context-capacity.js';
+import type { CatCapacityBudget } from './cat-budgets.js';
 
 export type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
 
@@ -14,8 +14,13 @@ export interface ConfigSnapshot {
       secondary: string;
     };
   };
-  /** Per-cat prompt-assembly budgets derived from resolved context capacity (#1208). */
-  perCatBudgets: Record<string, PromptAssemblyBudget>;
+  /**
+   * Per-cat resolved capacity + derived prompt-assembly budgets (#1208 P1-2).
+   * Includes source/confidence/actionable so Hub can distinguish resolved
+   * from unresolved — unresolved cats show inputCeilingTokens=0 with
+   * source='unresolved' instead of masquerading as real capacity.
+   */
+  perCatBudgets: Record<string, CatCapacityBudget>;
   cli: {
     timeoutMs: number;
     killGraceMs: number;

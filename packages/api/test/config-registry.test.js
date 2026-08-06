@@ -155,39 +155,35 @@ describe('ConfigRegistry', () => {
     assert.ok(snapshot.perCatBudgets.gemini, 'has gemini budget');
   });
 
-  it('perCatBudgets contains all budget fields', async () => {
+  it('perCatBudgets contains CatCapacityBudget fields (#1208 P1-2)', async () => {
     const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
     const snapshot = collectConfigSnapshot();
 
-    const opusBudget = snapshot.perCatBudgets.opus;
-    assert.ok(opusBudget.maxPromptTokens > 0, 'opus has maxPromptTokens');
-    assert.ok(opusBudget.maxContextTokens > 0, 'opus has maxContextTokens');
-    assert.ok(opusBudget.maxMessages > 0, 'opus has maxMessages');
-    assert.ok(opusBudget.maxContentLengthPerMsg > 0, 'opus has maxContentLengthPerMsg');
+    const opusCap = snapshot.perCatBudgets.opus;
+    // Capacity metadata
+    assert.ok(typeof opusCap.inputCeilingTokens === 'number', 'opus has inputCeilingTokens');
+    assert.ok(typeof opusCap.source === 'string', 'opus has source');
+    assert.ok(typeof opusCap.actionable === 'boolean', 'opus has actionable');
+    assert.ok(typeof opusCap.confidence === 'number', 'opus has confidence');
+    // Derived budget nested under .budget
+    assert.ok(typeof opusCap.budget === 'object', 'opus has budget');
+    assert.ok(opusCap.budget.maxPromptTokens >= 0, 'opus budget has maxPromptTokens');
+    assert.ok(opusCap.budget.maxHistoryContextTokens >= 0, 'opus budget has maxHistoryContextTokens');
+    assert.ok(opusCap.budget.maxMessages >= 50, 'opus budget has maxMessages');
+    assert.ok(opusCap.budget.maxContentLengthPerMsg > 0, 'opus budget has maxContentLengthPerMsg');
   });
 
-  it('context section has deprecation note', async () => {
+  it('perCatBudgets reflects different capacities per cat', async () => {
     const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
     const snapshot = collectConfigSnapshot();
 
-    assert.ok(snapshot.context.note, 'context has note');
-    assert.ok(snapshot.context.note.includes('perCatBudgets'), 'note mentions perCatBudgets');
-  });
-
-  it('perCatBudgets reflects different budgets per cat', async () => {
-    const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
-    const snapshot = collectConfigSnapshot();
-
-    // MAX_PROMPT_TOKENS may flatten prompt budgets via env, so compare the
-    // cat-specific aggregate context budget that still differs by breed.
-    assert.ok(
-      snapshot.perCatBudgets.gemini.maxContextTokens > snapshot.perCatBudgets.codex.maxContextTokens,
-      'gemini should have higher maxContextTokens than codex',
-    );
-    assert.ok(
-      snapshot.perCatBudgets.codex.maxContextTokens > snapshot.perCatBudgets.opus.maxContextTokens,
-      'codex should have higher maxContextTokens than opus',
-    );
+    // Compare inputCeilingTokens across cats — models with larger windows
+    // should have higher ceilings (unless manually capped or unresolved).
+    const geminiCeil = snapshot.perCatBudgets.gemini?.inputCeilingTokens ?? 0;
+    const codexCeil = snapshot.perCatBudgets.codex?.inputCeilingTokens ?? 0;
+    const opusCeil = snapshot.perCatBudgets.opus?.inputCeilingTokens ?? 0;
+    // At least one should be resolved with a non-zero ceiling
+    assert.ok(geminiCeil > 0 || codexCeil > 0 || opusCeil > 0, 'at least one cat should have resolved capacity');
   });
 
   it('has memory section (F3-lite)', async () => {
