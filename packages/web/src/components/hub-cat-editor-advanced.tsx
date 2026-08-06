@@ -67,11 +67,12 @@ export function AdvancedRuntimeSection({
           onChange={(value) => onChange({ contextWindow: value })}
           inputMode="numeric"
           tone="success"
-          placeholder="留空 = Auto（由 CLI / 模型目录自动探测）"
+          placeholder="留空或 0 = Auto（由 CLI / 模型目录自动探测）"
         />
         <p className="text-xs leading-5 text-[var(--console-runtime-hint)]">
-          填写正整数 = Manual 模式，限制该成员的上下文窗口 token 上限。留空 = Auto，由运行时自动探测。
+          填写正整数 = Manual 模式，限制该成员的上下文窗口 token 上限。留空或填 0 = Auto，由运行时自动探测。
         </p>
+        <ResolvedContextInfo cat={cat} form={form} />
         <SelectField
           label="Session Chain"
           value={form.sessionChain}
@@ -132,7 +133,8 @@ export function AdvancedRuntimeSection({
           {strategyForm && sessionChainEnabled ? (
             <div className="space-y-4">
               <div className="rounded-[10px] bg-[var(--console-runtime-field-bg)] px-4 py-3 text-xs leading-5 text-[var(--console-runtime-hint)]">
-                阈值基于 context 填充率 = 当前 tokens / Max Context Tokens。拖动滑条调节百分比。
+                <p>阈值基于 context 填充率 = 当前 tokens / Max Context Tokens。拖动滑条调节百分比。</p>
+                <StrategyCapabilityNote cat={cat} />
               </div>
               <div className="space-y-2">
                 <SelectField
@@ -233,4 +235,87 @@ export function AdvancedRuntimeSection({
       ) : null}
     </SectionCard>
   );
+}
+
+// ─── #1208 Item 4: Resolved Context Info ─────────────────────────────
+
+const SOURCE_LABELS: Record<string, string> = {
+  exact: 'CLI 实时上报',
+  manual: '手动设置',
+  catalog: '模型目录',
+  default: '默认值',
+};
+
+const CONFIDENCE_BADGES: Record<string, string> = {
+  exact: '✓ 精确',
+  manual: '✓ 手动',
+  catalog: '≈ 目录',
+  default: '? 默认',
+};
+
+/** Show resolved context window info below the Context Window field. */
+function ResolvedContextInfo({ cat, form }: { cat?: CatData | null; form: HubCatEditorFormState }) {
+  if (!cat) return null;
+
+  // Detect binding change: model/client changed in form → resolved context is stale.
+  const bindingChanged = form.defaultModel !== cat.defaultModel || form.clientId !== cat.clientId;
+
+  if (bindingChanged) {
+    return (
+      <p className="text-xs leading-5 text-[var(--cafe-accent)]">
+        模型或 Client 已变更，保存后将重新解析 Context Window。
+      </p>
+    );
+  }
+
+  const rc = cat.resolvedContext;
+  if (!rc) {
+    return (
+      <p className="text-xs leading-5 text-cafe-muted">
+        ⚠ 未能解析 Context Window — 无已知的模型目录条目或 CLI 上报值。
+      </p>
+    );
+  }
+
+  const badge = CONFIDENCE_BADGES[rc.source] ?? rc.source;
+  const sourceLabel = SOURCE_LABELS[rc.source] ?? rc.source;
+  const windowK = Math.round(rc.windowTokens / 1000);
+
+  return (
+    <div className="rounded-[8px] border border-[var(--console-runtime-group-bg)] bg-[var(--console-field-bg)] px-3 py-2 text-xs leading-5 text-cafe-secondary">
+      <p>
+        <span className="font-semibold">{badge}</span>
+        {' · '}
+        解析值: {windowK}K tokens
+        {' · '}
+        来源: {sourceLabel}
+        {rc.actionable ? '' : '（仅供参考，不触发自动 Session 操作）'}
+      </p>
+      <p className="mt-0.5 text-cafe-muted">{rc.provenance}</p>
+    </div>
+  );
+}
+
+/** Session Strategy capability note: explain why actionable matters. */
+function StrategyCapabilityNote({ cat }: { cat?: CatData | null }) {
+  if (!cat) return null;
+  const rc = cat.resolvedContext;
+  if (!rc) {
+    return (
+      <p className="mt-1 text-[var(--cafe-accent)]">
+        ⚠ Context Window 未解析：自动 Session 策略动作（handoff/seal）不会触发。 请手动设置 Context Window 或等待 CLI
+        上报。
+      </p>
+    );
+  }
+  if (!rc.actionable) {
+    return (
+      <p className="mt-1 text-[var(--cafe-accent)]">
+        当前 Context Window 来自{SOURCE_LABELS[rc.source] ?? rc.source}
+        （置信度 {Math.round(rc.confidence * 100)}%）， 自动 Session 策略动作不会触发。手动设置 Context Window
+        可启用自动动作。
+      </p>
+    );
+  }
+  return null;
 }

@@ -39,6 +39,7 @@ import {
 } from '../config/cat-config-loader.js';
 import { resolveCodexCarrierTruth } from '../config/codex-cli.js';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
+import { resolveContextCapacity } from '../config/context-capacity.js';
 import { resolveProjectTemplatePath } from '../config/project-template-path.js';
 import { getResolvedCats } from '../config/resolved-cats.js';
 import { createRuntimeCat, deleteRuntimeCat, updateRuntimeCat } from '../config/runtime-cat-catalog.js';
@@ -505,6 +506,25 @@ async function toCatResponse(
       ? { codexCarrier: resolveCodexCarrierTruth(cat.cli.carrier) }
       : {}),
     contextWindow: cat.contextWindow,
+    // #1208 Item 4: resolved context window info for Hub display.
+    resolvedContext: (() => {
+      const capacity = resolveContextCapacity({
+        catId: cat.id as string,
+        model: cat.defaultModel,
+        provider: cat.clientId === 'opencode' ? 'opencode' : undefined,
+        client: cat.clientId,
+        account: cat.accountRef,
+      });
+      return capacity.source !== 'unresolved'
+        ? {
+            windowTokens: capacity.windowTokens,
+            source: capacity.source,
+            confidence: capacity.confidence,
+            provenance: capacity.provenance,
+            actionable: capacity.actionable,
+          }
+        : null;
+    })(),
     avatar: cat.avatar,
     roleDescription: cat.roleDescription,
     personality: cat.personality,

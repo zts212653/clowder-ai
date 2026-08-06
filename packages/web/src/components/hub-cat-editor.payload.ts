@@ -124,14 +124,16 @@ function buildAcpPatch(form: HubCatEditorFormState, cat?: CatData | null): Recor
 
 /**
  * Parse the contextWindow form field.
- * clowder-ai#1208: empty = Auto (undefined), positive integer = Manual cap.
+ * clowder-ai#1208: empty or 0 = Auto (undefined), positive integer = Manual cap.
  */
 export function buildContextWindow(form: HubCatEditorFormState): number | undefined {
   const raw = form.contextWindow.trim();
   if (raw.length === 0) return undefined;
   const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new Error('Context Window 必须是正整数（留空 = Auto）');
+  // 0 = Auto (same as empty).
+  if (parsed === 0) return undefined;
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error('Context Window 必须是正整数（留空或 0 = Auto）');
   }
   return parsed;
 }
