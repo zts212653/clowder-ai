@@ -2428,7 +2428,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             reportedWindowSize: msg.metadata.usage.contextWindowSize,
             model: msg.metadata.model,
             provider: msg.metadata.provider,
-            client: msg.metadata.provider,
+            client: catConfig?.clientId,
           });
           // #1208 Item 2: use any resolved source for context_health monitoring
           // (catalog/default are useful for observability).  Lifecycle actions

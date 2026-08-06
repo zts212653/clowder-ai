@@ -129,10 +129,14 @@ function buildAcpPatch(form: HubCatEditorFormState, cat?: CatData | null): Recor
 export function buildContextWindow(form: HubCatEditorFormState): number | undefined {
   const raw = form.contextWindow.trim();
   if (raw.length === 0) return undefined;
+  // Strict: reject non-integer inputs like "1.5", "12abc", "0xFF"
+  if (!/^[0-9]+$/.test(raw)) {
+    throw new Error('Context Window 必须是正整数（留空或 0 = Auto）');
+  }
   const parsed = Number.parseInt(raw, 10);
   // 0 = Auto (same as empty).
   if (parsed === 0) return undefined;
-  if (!Number.isFinite(parsed) || parsed < 0) {
+  if (!Number.isFinite(parsed) || parsed <= 0) {
     throw new Error('Context Window 必须是正整数（留空或 0 = Auto）');
   }
   return parsed;
