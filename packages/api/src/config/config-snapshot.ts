@@ -1,4 +1,4 @@
-import type { ContextBudget } from '@cat-cafe/shared';
+import type { PromptAssemblyBudget } from './context-capacity.js';
 
 export type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
 
@@ -14,19 +14,8 @@ export interface ConfigSnapshot {
       secondary: string;
     };
   };
-  context: {
-    /** @deprecated Use perCatBudgets for actual limits. This is assembleContext default. */
-    maxMessages: number;
-    /** @deprecated Use perCatBudgets for actual limits. */
-    maxContentLength: number;
-    /** @deprecated Use perCatBudgets for actual limits. This is assembleContext default, overridden per-cat at route time. */
-    maxTotalChars: number;
-    /** @deprecated Use perCatBudgets for actual limits. */
-    maxPromptTokens: number;
-    note: string;
-  };
-  /** Per-cat context budgets (Phase 4.0) — the actual limits used at route time */
-  perCatBudgets: Record<string, ContextBudget>;
+  /** Per-cat prompt-assembly budgets derived from resolved context capacity (#1208). */
+  perCatBudgets: Record<string, PromptAssemblyBudget>;
   cli: {
     timeoutMs: number;
     killGraceMs: number;

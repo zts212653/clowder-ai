@@ -6,7 +6,7 @@
 import crypto from 'node:crypto';
 import type { CatConfig, CatId, OutputCommitDecision } from '@cat-cafe/shared';
 import { catRegistry, resolveWorkflowSopSkill } from '@cat-cafe/shared';
-import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
+import { getCatPromptBudget } from '../../../../../config/cat-budgets.js';
 import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
@@ -670,7 +670,7 @@ export async function* routeParallel(
       if (incrementalMode) {
         // A+ fix: calculate effective context budget by deducting ALL system parts from maxPromptTokens.
         const parCatModePromptForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
-        const parIncBudget = getCatContextBudget(catId as string);
+        const parIncBudget = getCatPromptBudget(catId as string);
         const parIncSystemTokens = estimateTokens(
           [staticIdentity, invocationContext, parCatModePromptForBudget, bootstrapCtx, mcpInstructions]
             .filter(Boolean)
@@ -681,7 +681,7 @@ export async function* routeParallel(
         const parIncNudgeTokens = routeLevelNudgePromptContext ? estimateTokens(routeLevelNudgePromptContext) : 0;
         const parEffectiveContextBudget = computeContextBudget({
           maxPromptTokens: parIncBudget.maxPromptTokens,
-          maxContextTokens: parIncBudget.maxContextTokens,
+          maxHistoryContextTokens: parIncBudget.maxHistoryContextTokens,
           systemPartsTokens: parIncSystemTokens,
           promptTokens: parIncMessageTokens,
           nudgeTokens: parIncNudgeTokens,
@@ -771,7 +771,7 @@ export async function* routeParallel(
         // Per-cat context budget (Phase 4.0)
         let catContextHistory = contextHistory;
         if (history && history.length > 0 && !contextHistory) {
-          const budget = getCatContextBudget(catId as string);
+          const budget = getCatPromptBudget(catId as string);
           // F8: token-based budget — estimate non-context tokens, remainder goes to context
           // A+ fix: include catModePrompt + bootstrapCtx in system parts estimate (P2-1)
           const parCatModePromptLegacyForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
@@ -785,7 +785,7 @@ export async function* routeParallel(
           const parLegacyNudgeTokens = routeLevelNudgePromptContext ? estimateTokens(routeLevelNudgePromptContext) : 0;
           const budgetForContext = computeContextBudget({
             maxPromptTokens: budget.maxPromptTokens,
-            maxContextTokens: budget.maxContextTokens,
+            maxHistoryContextTokens: budget.maxHistoryContextTokens,
             systemPartsTokens: parSystemTokens,
             promptTokens: parPromptTokens,
             nudgeTokens: parLegacyNudgeTokens,

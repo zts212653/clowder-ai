@@ -692,14 +692,6 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
-    name: 'MAX_PROMPT_TOKENS',
-    defaultValue: '(未设置)',
-    description: '全局 prompt token 上限',
-    category: 'budget',
-    sensitive: false,
-    hubVisible: false,
-  },
-  {
     name: 'WEB_PUSH_TIMEOUT_MS',
     defaultValue: '(未设置)',
     description: 'Web Push 超时时间',

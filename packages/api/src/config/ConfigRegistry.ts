@@ -45,11 +45,6 @@ function formatTtl(raw: string | undefined, defaultSeconds: number): string {
 export function collectConfigSnapshot(): ConfigSnapshot {
   const env = process.env;
 
-  // Context (from ContextAssembler defaults + env overrides)
-  const maxMessages = Number(env.CONTEXT_HISTORY_LIMIT) || 20;
-  const maxContentLength = Number(env.MAX_CONTEXT_MSG_CHARS) || 1500;
-  const maxTotalChars = 8000;
-  const maxPromptTokens = Number(env.MAX_PROMPT_TOKENS) || 32000;
   const coCreator = getCoCreatorConfig();
 
   // CLI (from cli-spawn.ts defaults, configurable via CLI_TIMEOUT_MS, 0 = disable)
@@ -109,13 +104,6 @@ export function collectConfigSnapshot(): ConfigSnapshot {
       ...(coCreator.timeZone ? { timeZone: coCreator.timeZone } : {}),
       ...(coCreator.avatar ? { avatar: coCreator.avatar } : {}),
       ...(coCreator.color ? { color: coCreator.color } : {}),
-    },
-    context: {
-      maxMessages,
-      maxContentLength,
-      maxTotalChars,
-      maxPromptTokens,
-      note: 'These are assembleContext defaults; see perCatBudgets for actual per-cat limits',
     },
     perCatBudgets: getAllCatBudgets(),
     cli: { timeoutMs, killGraceMs, codexSandboxMode, codexApprovalPolicy },

@@ -58,7 +58,7 @@ const RELAXATION_PATTERNS: RegExp[] = [
 /**
  * Identity fields that masks must never set (KD-3 + F093 KD-12 five-layer classification).
  * L1 (routing identity): catId, family, breedId, name→displayName, nickname, mentionPatterns
- * L2 (infrastructure): provider, model, defaultModel, contextBudget, cli, mcpSupport
+ * L2 (infrastructure): provider, model, defaultModel, contextWindow, cli, mcpSupport
  * Note: mask's own 'id' and 'name' fields are valid (mask identity, not cat identity).
  */
 const IMMUTABLE_FIELDS = new Set([
@@ -73,7 +73,7 @@ const IMMUTABLE_FIELDS = new Set([
   'provider',
   'model',
   'defaultModel',
-  'contextBudget',
+  'contextWindow',
   'cli',
   'mcpSupport',
 ]);

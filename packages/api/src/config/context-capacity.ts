@@ -182,18 +182,29 @@ export function resolveEffectiveWindowTokens(options: ResolveCapacityOptions): n
 }
 
 /**
+ * Prompt-assembly limits derived from the resolved context capacity.
+ * Replaces the legacy 4-field ContextBudget.  All consumers (serial, parallel,
+ * SessionSealer, DegradationPolicy) read from this shape.
+ */
+export interface PromptAssemblyBudget {
+  /** Total input token ceiling (window - output reserve). */
+  readonly maxPromptTokens: number;
+  /** Max tokens for historical context (input ceiling × 0.85). */
+  readonly maxHistoryContextTokens: number;
+  /** Max historical messages to include (scales sub-linearly with window). */
+  readonly maxMessages: number;
+  /** Character truncation per message. */
+  readonly maxContentLengthPerMsg: number;
+}
+
+/**
  * Derive prompt-assembly limits from the effective input ceiling.
  *
  * The legacy four context-budget knobs are retired; this function produces
  * sensible defaults based on the member's capacity policy.  Callers may still
  * apply Smart Window / unread-message selection on top of these numbers.
  */
-export function derivePromptAssemblyBudget(inputCeilingTokens: number): {
-  maxPromptTokens: number;
-  maxHistoryContextTokens: number;
-  maxMessages: number;
-  maxContentLengthPerMsg: number;
-} {
+export function derivePromptAssemblyBudget(inputCeilingTokens: number): PromptAssemblyBudget {
   // Reserve ~10% of the input ceiling for system prompt + current turn + safety.
   const maxHistoryContextTokens = Math.floor(inputCeilingTokens * 0.85);
   const maxPromptTokens = inputCeilingTokens;

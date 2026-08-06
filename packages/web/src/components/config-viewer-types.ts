@@ -16,9 +16,10 @@ export interface CatConfig {
   mcpSupport: boolean;
 }
 
-export interface ContextBudget {
+/** Prompt-assembly budget derived from resolved context capacity (#1208). */
+export interface PromptAssemblyBudget {
   maxPromptTokens: number;
-  maxContextTokens: number;
+  maxHistoryContextTokens: number;
   maxMessages: number;
   maxContentLengthPerMsg: number;
 }
@@ -31,7 +32,7 @@ export interface Capabilities {
 export interface ConfigData {
   coCreator?: CoCreatorConfig;
   cats: Record<string, CatConfig>;
-  perCatBudgets: Record<string, ContextBudget>;
+  perCatBudgets: Record<string, PromptAssemblyBudget>;
   cli?: {
     codexSandboxMode: 'read-only' | 'workspace-write' | 'danger-full-access';
     codexApprovalPolicy: 'untrusted' | 'on-failure' | 'on-request' | 'never';

@@ -5,7 +5,7 @@
 
 import type { CatId, MessageContent, RichBlock, RichBlockBase } from '@cat-cafe/shared';
 import { isCrossThreadProvenance } from '@cat-cafe/shared';
-import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
+import { getCatPromptBudget } from '../../../../../config/cat-budgets.js';
 import { DEFAULT_HIERARCHICAL_CONTEXT } from '../../../../../config/hierarchical-context-config.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { compareCursors } from '../../stores/cursor.js';
@@ -49,7 +49,7 @@ import { rankArtifactSources } from './source-ranking.js';
 /**
  * P1 R7 fix: Shared pure helper for context budget calculation.
  * Used by both route-serial and route-parallel in incremental + legacy paths.
- * Formula: min(max(0, maxPromptTokens - systemTokens - promptTokens - nudgeTokens - RESERVED), maxContextTokens)
+ * Formula: min(max(0, maxPromptTokens - systemTokens - promptTokens - nudgeTokens - RESERVED), maxHistoryContextTokens)
  *
  * The 200-token RESERVED accounts for formatting overhead (separators, tags, padding).
  */
@@ -57,7 +57,7 @@ export const BUDGET_RESERVED_TOKENS = 200;
 
 export function computeContextBudget(params: {
   maxPromptTokens: number;
-  maxContextTokens: number;
+  maxHistoryContextTokens: number;
   systemPartsTokens: number;
   promptTokens: number;
   nudgeTokens: number;
@@ -70,7 +70,7 @@ export function computeContextBudget(params: {
       params.nudgeTokens -
       BUDGET_RESERVED_TOKENS,
   );
-  return Math.min(remaining, params.maxContextTokens);
+  return Math.min(remaining, params.maxHistoryContextTokens);
 }
 
 /** Minimal broadcast interface — avoids coupling routing layer to SocketManager concrete class */
@@ -557,7 +557,7 @@ export function shouldHandleOfferedGuide(
 export function detectContextDegradation(
   historyCount: number,
   includedCount: number,
-  budget: ReturnType<typeof getCatContextBudget>,
+  budget: ReturnType<typeof getCatPromptBudget>,
 ): DegradationResult | null {
   // Existing count-based degradation logic
   const byCount = checkContextBudget(historyCount, budget);
@@ -953,7 +953,7 @@ export async function fetchAfterCursor(
 /** Options for caller-specified budget overrides */
 export interface IncrementalContextOptions {
   /**
-   * When provided, overrides budget.maxContextTokens for the token-trim pass.
+   * When provided, overrides budget.maxHistoryContextTokens for the token-trim pass.
    * The routing layer should calculate this as:
    *   maxPromptTokens - systemPartsTokens - messageTokens - guard
    * so the assembled context + system parts never exceed the model's input limit.
@@ -1163,7 +1163,7 @@ export async function assembleIncrementalContext(
 
   // GAP-1: Unconditional budget cap — protects both first-time cats (cursor=undefined)
   // and stale cursor scenarios where large unseen batches accumulate.
-  const budget = getCatContextBudget(catId as string);
+  const budget = getCatPromptBudget(catId as string);
   const wasCapped = relevant.length > budget.maxMessages;
   const capped = wasCapped ? relevant.slice(-budget.maxMessages) : relevant;
 
@@ -1239,7 +1239,7 @@ export async function assembleIncrementalContext(
   // 第二刀: Aggregate token budget — trim oldest lines until within effective token limit.
   // A+ fix: routing layer can pass effectiveMaxContextTokens (= maxPromptTokens minus system parts)
   // to prevent the assembled context + system prompt from exceeding the model's input limit.
-  const effectiveTokenBudget = options?.effectiveMaxContextTokens ?? budget.maxContextTokens;
+  const effectiveTokenBudget = options?.effectiveMaxContextTokens ?? budget.maxHistoryContextTokens;
 
   // effectiveMaxContextTokens === 0 means system parts already exhausted the entire prompt budget.
   // Return empty context with degradation rather than skipping the trim (old behavior of `> 0` guard).
@@ -1353,7 +1353,7 @@ async function assembleSmartWindowContext(
   preReadStoredArtifacts: import('./artifact-tracking.js').RecentArtifact[],
   viewer: { type: 'cat'; catId: CatId } | { type: 'user' },
 ): Promise<IncrementalContextResult> {
-  const budget = getCatContextBudget(catId as string);
+  const budget = getCatPromptBudget(catId as string);
   const truncateLimit = budget.maxContentLengthPerMsg;
 
   // 1. Burst detection
@@ -1549,7 +1549,7 @@ async function assembleSmartWindowContext(
   });
 
   // 7. Respect effectiveMaxContextTokens (same as warm path)
-  const effectiveTokenBudget = options?.effectiveMaxContextTokens ?? budget.maxContextTokens;
+  const effectiveTokenBudget = options?.effectiveMaxContextTokens ?? budget.maxHistoryContextTokens;
   // #1200: v2 cursor for CAS ingress — graded issuance via cursorFor
   const lastRelevantMsg = relevant[relevant.length - 1];
   const boundaryId = lastRelevantMsg ? cursorFor(lastRelevantMsg) : undefined;

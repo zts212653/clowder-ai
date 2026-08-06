@@ -327,7 +327,7 @@ function readTemplate(templatePath: string): string {
  * across provider switches (e.g. template cli.defaultArgs surviving into a
  * catalog variant that switched to a different client).
  */
-const ATOMIC_OBJECT_KEYS = new Set(['cli', 'agyProfile', 'color', 'contextBudget', 'voiceConfig', 'acp']);
+const ATOMIC_OBJECT_KEYS = new Set(['cli', 'agyProfile', 'color', 'voiceConfig', 'acp']);
 
 /**
  * Deep merge two plain objects. `overlay` fields override `base` fields.

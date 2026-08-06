@@ -24,7 +24,7 @@ import Fastify, { type FastifyReply } from 'fastify';
 import { resolveAnthropicRuntimeProfile, resolveForClient } from './config/account-resolver.js';
 import { regenerateStartupCliConfigs } from './config/capabilities/startup-cli-config.js';
 import { resolveBoundAccountRefForCat } from './config/cat-account-binding.js';
-import { getCatContextBudget } from './config/cat-budgets.js';
+import { getCatPromptBudget } from './config/cat-budgets.js';
 import {
   bootstrapDefaultCatCatalog,
   getAcpConfig,
@@ -953,7 +953,7 @@ async function main(): Promise<void> {
     transcriptWriter,
     threadStore,
     transcriptReader,
-    (catId) => getCatContextBudget(catId).maxPromptTokens,
+    (catId) => getCatPromptBudget(catId).maxPromptTokens,
     handoffConfig,
     summaryStore,
   );
