@@ -526,6 +526,181 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(noEffortModelSwitchedCat.contextWindow, 100000, 'top-level contextWindow persists');
   });
 
+  it('#1208 migration: legacy cli.contextWindow stripped on any PATCH save', async () => {
+    // Scenario: legacy cat with only cli.contextWindow (no top-level contextWindow).
+    // Any PATCH save should strip cli.contextWindow and promote to top-level.
+    const projectRoot = createProjectRootFromRepoTemplate();
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+
+    // Inject a legacy cat with cli.contextWindow directly into the catalog
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    catalog.breeds.push({
+      id: 'test-legacy-ctx-breed',
+      catId: 'legacy-ctx-cat',
+      name: 'Legacy Context',
+      displayName: 'Legacy Context',
+      avatar: '🐱',
+      color: { primary: '#000', secondary: '#fff' },
+      mentionPatterns: ['@legacy-ctx-cat'],
+      roleDescription: 'test',
+      personality: 'test',
+      order: 99,
+      defaultVariantId: 'legacy-ctx-cat',
+      variants: [
+        {
+          id: 'legacy-ctx-cat',
+          clientId: 'openai',
+          defaultModel: 'gpt-5.3-codex',
+          mcpSupport: false,
+          cli: { command: 'codex', outputFormat: 'stream-json', contextWindow: 128000, autoCompactTokenLimit: 96000 },
+        },
+      ],
+    });
+    writeFileSync(catalogPath, JSON.stringify(catalog, null, 2));
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // PATCH something unrelated (effort) — should still strip legacy cli fields
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/legacy-ctx-cat',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ cli: { effort: 'high' } }),
+    });
+    assert.equal(patchRes.statusCode, 200, patchRes.body);
+    const patched = JSON.parse(patchRes.body).cat;
+    // Legacy cli.contextWindow promoted to top-level
+    assert.equal(patched.contextWindow, 128000, 'legacy cli.contextWindow promoted to top-level');
+    assert.equal(patched.cli?.contextWindow, undefined, 'cli.contextWindow stripped after save');
+
+    // Verify persisted state
+    const savedCatalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const savedVariant = savedCatalog.breeds.find((b) => b.catId === 'legacy-ctx-cat')?.variants?.[0];
+    assert.equal(savedVariant?.contextWindow, 128000, 'top-level persisted');
+    assert.equal(savedVariant?.cli?.contextWindow, undefined, 'cli.contextWindow not persisted');
+    assert.equal(savedVariant?.cli?.autoCompactTokenLimit, undefined, 'cli.autoCompactTokenLimit not persisted');
+  });
+
+  it('#1208 migration: clear-to-Auto on legacy cat removes both top-level and cli cap', async () => {
+    // Scenario: legacy cat has cli.contextWindow=128000 (no top-level).
+    // User sends PATCH {contextWindow: null} to clear to Auto.
+    // Both top-level and legacy cli.contextWindow must be gone.
+    const projectRoot = createProjectRootFromRepoTemplate();
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    catalog.breeds.push({
+      id: 'test-legacy-clear-breed',
+      catId: 'legacy-clear-cat',
+      name: 'Legacy Clear',
+      displayName: 'Legacy Clear',
+      avatar: '🐱',
+      color: { primary: '#000', secondary: '#fff' },
+      mentionPatterns: ['@legacy-clear-cat'],
+      roleDescription: 'test',
+      personality: 'test',
+      order: 99,
+      defaultVariantId: 'legacy-clear-cat',
+      variants: [
+        {
+          id: 'legacy-clear-cat',
+          clientId: 'openai',
+          defaultModel: 'gpt-5.3-codex',
+          mcpSupport: false,
+          cli: { command: 'codex', outputFormat: 'stream-json', contextWindow: 128000 },
+        },
+      ],
+    });
+    writeFileSync(catalogPath, JSON.stringify(catalog, null, 2));
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // Step 1: arbitrary save → promotes cli.contextWindow to top-level
+    const promotionRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/legacy-clear-cat',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ personality: 'updated' }),
+    });
+    assert.equal(promotionRes.statusCode, 200, promotionRes.body);
+    const promoted = JSON.parse(promotionRes.body).cat;
+    assert.equal(promoted.contextWindow, 128000, 'promoted to top-level');
+    assert.equal(promoted.cli?.contextWindow, undefined, 'cli.contextWindow stripped');
+
+    // Step 2: clear to Auto via {contextWindow: null}
+    const clearRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/legacy-clear-cat',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ contextWindow: null }),
+    });
+    assert.equal(clearRes.statusCode, 200, clearRes.body);
+    const cleared = JSON.parse(clearRes.body).cat;
+    assert.equal(cleared.contextWindow, undefined, 'top-level contextWindow cleared to Auto');
+    assert.equal(cleared.cli?.contextWindow, undefined, 'cli.contextWindow stays gone');
+
+    // Verify resolver now sees this as Auto (no cap)
+    const { getMemberWindowCap } = await import('../dist/config/context-capacity.js');
+    assert.equal(getMemberWindowCap('legacy-clear-cat'), undefined, 'resolver sees Auto (no cap)');
+  });
+
+  it('#1208 migration: model switch preserves top-level contextWindow', async () => {
+    const projectRoot = createProjectRootFromRepoTemplate();
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    catalog.breeds.push({
+      id: 'test-model-switch-breed',
+      catId: 'model-switch-cat',
+      name: 'Model Switch',
+      displayName: 'Model Switch',
+      avatar: '🐱',
+      color: { primary: '#000', secondary: '#fff' },
+      mentionPatterns: ['@model-switch-cat'],
+      roleDescription: 'test',
+      personality: 'test',
+      order: 99,
+      defaultVariantId: 'model-switch-cat',
+      variants: [
+        {
+          id: 'model-switch-cat',
+          clientId: 'anthropic',
+          accountRef: 'claude',
+          defaultModel: 'claude-opus-4-6',
+          mcpSupport: false,
+          contextWindow: 200000,
+        },
+      ],
+    });
+    writeFileSync(catalogPath, JSON.stringify(catalog, null, 2));
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // Model switch should preserve contextWindow at top level
+    const switchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/model-switch-cat',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'opus' },
+      body: JSON.stringify({ defaultModel: 'claude-sonnet-4-6' }),
+    });
+    assert.equal(switchRes.statusCode, 200, switchRes.body);
+    const switched = JSON.parse(switchRes.body).cat;
+    assert.equal(switched.contextWindow, 200000, 'contextWindow preserved across model switch');
+    assert.equal(switched.defaultModel, 'claude-sonnet-4-6', 'model actually switched');
+  });
+
   it('POST /api/cats canonicalizes cli.contextWindow to top-level', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');

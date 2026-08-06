@@ -1014,6 +1014,24 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           : body.mcpSupport;
       // #1208 P2: canonicalize legacy cli.contextWindow to top-level on every save.
       const canonicalContextWindow = canonicalizeContextWindow(currentCat, body.contextWindow);
+
+      // #1208 Item 5 fix: force-strip legacy cli.contextWindow / cli.autoCompactTokenLimit
+      // on every save. When nextCli is undefined (no cli patch), the old cli object persists
+      // with its legacy fields. This breaks clear-to-Auto: user sends {contextWindow:null}
+      // but the old cli.contextWindow survives and the compat-read picks it up.
+      const effectiveCli = (() => {
+        if (nextCli !== undefined) return nextCli; // already rebuilt without legacy fields
+        const cli = currentCat.cli;
+        if (!cli) return undefined; // no cli to strip
+        const raw = cli as unknown as Record<string, unknown>;
+        if (cli.contextWindow == null && raw.autoCompactTokenLimit == null) {
+          return undefined; // nothing to strip
+        }
+        // Strip legacy fields, keep everything else
+        const { contextWindow: _cw, autoCompactTokenLimit: _acl, ...cleanCli } = raw;
+        return cleanCli as unknown as CliConfig;
+      })();
+
       updateRuntimeCat(projectRoot, request.params.id, {
         ...(body.name !== undefined ? { name: body.name } : {}),
         ...(body.displayName !== undefined ? { displayName: body.displayName } : {}),
@@ -1038,7 +1056,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
               commandArgs: body.commandArgs,
             }
           : {}),
-        ...(nextCli !== undefined ? { cli: nextCli } : {}),
+        ...(effectiveCli !== undefined ? { cli: effectiveCli } : {}),
         ...(body.available !== undefined ? { available: body.available } : {}),
         ...(body.cliConfigArgs !== undefined ? { cliConfigArgs: body.cliConfigArgs } : {}),
         // F161 AC-A5 / KD-1: generic ACP never carries provider — clear any stale value and
