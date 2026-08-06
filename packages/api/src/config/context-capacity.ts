@@ -32,7 +32,7 @@
  * alone are NOT actionable — they must not masquerade as confirmed values.
  */
 
-import { catRegistry } from '@cat-cafe/shared';
+import { catRegistry, type SessionCapacityPin } from '@cat-cafe/shared';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import {
   getContextWindowFallback,
@@ -293,16 +293,9 @@ export function resolveEffectiveWindowTokens(options: ResolveCapacityOptions): n
 
 // ─── Session Capacity Pin ────────────────────────────────────────────
 
-/**
- * A pinned capacity value for an active session.  Once set, the effective
- * window can only shrink — never expand — until the binding fingerprint
- * changes (e.g. model switch), which invalidates the pin.
- */
-export interface SessionCapacityPin {
-  readonly windowTokens: number;
-  readonly fingerprint: string;
-  readonly pinnedAt: number;
-}
+// SessionCapacityPin type is defined in @cat-cafe/shared (session.ts)
+// and re-exported here for backward compatibility.
+export type { SessionCapacityPin } from '@cat-cafe/shared';
 
 /**
  * Apply session pin semantics: shrink-no-expand within same binding.
@@ -324,6 +317,7 @@ export function applySessionPin(
   if (!existingPin || existingPin.fingerprint !== resolved.fingerprint) {
     const pin: SessionCapacityPin = {
       windowTokens: resolved.windowTokens,
+      inputCeilingTokens: resolved.inputCeilingTokens,
       fingerprint: resolved.fingerprint,
       pinnedAt: resolved.observedAt,
     };
@@ -334,6 +328,7 @@ export function applySessionPin(
   if (resolved.windowTokens <= existingPin.windowTokens) {
     const pin: SessionCapacityPin = {
       windowTokens: resolved.windowTokens,
+      inputCeilingTokens: resolved.inputCeilingTokens,
       fingerprint: resolved.fingerprint,
       pinnedAt: resolved.observedAt,
     };
@@ -341,13 +336,10 @@ export function applySessionPin(
   }
 
   // Same binding, resolved > pinned → keep pinned (shrink-no-expand).
-  const outputReserve = getMemberOutputReserve(resolved.bindingKey.member);
-  const clampedInputCeiling = Math.max(0, existingPin.windowTokens - outputReserve);
-
   const clamped: ResolvedContextCapacity = {
     ...resolved,
     windowTokens: existingPin.windowTokens,
-    inputCeilingTokens: clampedInputCeiling,
+    inputCeilingTokens: existingPin.inputCeilingTokens,
     provenance: `${resolved.provenance}; session-pinned at ${existingPin.windowTokens.toLocaleString()} (shrink-no-expand)`,
   };
 

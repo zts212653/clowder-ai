@@ -33,7 +33,8 @@ import { resolveBoundAccountRefForCat } from '../../../../../config/cat-account-
 import { isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { buildCatGitIdentityEnv } from '../../../../../config/cat-git-identity.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
-import { resolveContextCapacity } from '../../../../../config/context-capacity.js';
+import { applySessionPin, resolveContextCapacity } from '../../../../../config/context-capacity.js';
+import { getClientCapability } from '../../../../../config/context-client-capabilities.js';
 import { getSessionStrategy, shouldTakeAction } from '../../../../../config/session-strategy.js';
 import { assertSafeTestConfigRoot } from '../../../../../config/test-config-write-guard.js';
 import { capturePromptIfEnabled } from '../../../../../infrastructure/debug/prompt-capture-bridge.js';
@@ -2423,7 +2424,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           // Unified via resolveContextCapacity(): member manual cap → CLI reported →
           // model catalog → provider default → unresolved. All consumers share one
           // resolved capacity instead of scattered 3-way fallback chains.
-          const capacity = resolveContextCapacity({
+          const rawCapacity = resolveContextCapacity({
             catId: catId as string,
             reportedWindowSize: msg.metadata.usage.contextWindowSize,
             model: msg.metadata.model,
@@ -2431,6 +2432,24 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             client: catConfig?.clientId,
             carrier: catConfig?.cli?.carrier,
           });
+
+          // #1208: Apply session capacity pin (shrink-no-expand within same binding).
+          // Load existing pin from active session record, apply pin semantics,
+          // persist updated pin. This ensures capacity cannot expand mid-session.
+          let capacity = rawCapacity;
+          if (deps.sessionChainStore && rawCapacity.source !== 'unresolved') {
+            try {
+              const pinRecord = await deps.sessionChainStore.getActive(catId, threadId);
+              const { effective, pin } = applySessionPin(rawCapacity, pinRecord?.capacityPin);
+              capacity = effective;
+              if (pinRecord) {
+                await deps.sessionChainStore.update(pinRecord.id, { capacityPin: pin, updatedAt: Date.now() });
+              }
+            } catch {
+              /* best-effort — use raw capacity if pin fails */
+            }
+          }
+
           // #1208 Item 2: use any resolved source for context_health monitoring
           // (catalog/default are useful for observability).  Lifecycle actions
           // (auto-seal) guard on capacity.actionable separately below.
@@ -2520,11 +2539,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             });
 
             // F33: Strategy-driven seal decision (replaces F24 Phase B shouldSeal)
-            // #1208 Item 2: auto-seal only when capacity is actionable (exact/manual/
-            // capped-by-manual).  Catalog/default are useful for monitoring but too
-            // unreliable for aggressive lifecycle actions — we don't want to seal a
-            // session based on a catalog value that might not match the real gateway.
-            if (deps.sessionSealer && deps.sessionChainStore && capacity.actionable) {
+            // #1208: auto-seal requires BOTH:
+            //   1. capacity.actionable (exact/manual/capped-by-manual)
+            //   2. client reports usage (reportsUsage=true) — without authoritative
+            //      usage telemetry, fillRatio is unreliable for lifecycle actions
+            const clientCap = getClientCapability(catConfig?.clientId);
+            if (deps.sessionSealer && deps.sessionChainStore && capacity.actionable && clientCap.reportsUsage) {
               try {
                 // F062-fix:
                 // 1) api_key + approx health can be noisy on third-party gateways

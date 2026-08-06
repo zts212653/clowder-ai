@@ -36,6 +36,7 @@ export type SessionRecordPatch = Partial<
     | 'workspaceFingerprint'
     | 'status'
     | 'contextHealth'
+    | 'capacityPin'
     | 'lastUsage'
     | 'messageCount'
     | 'updatedAt'

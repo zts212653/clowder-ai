@@ -316,36 +316,45 @@ describe('context-capacity resolver', () => {
       };
     }
 
-    it('no existing pin → pins to resolved value', () => {
+    function makePin(windowTokens, fingerprint = 'test|anthropic|||claude-opus-4-6|') {
+      const outputReserve = 16_000;
+      return {
+        windowTokens,
+        inputCeilingTokens: windowTokens - outputReserve,
+        fingerprint,
+        pinnedAt: Date.now(),
+      };
+    }
+
+    it('no existing pin → pins to resolved value with inputCeiling', () => {
       const resolved = makeResolved(1_000_000);
       const { effective, pin } = mod.applySessionPin(resolved, undefined);
       assert.equal(effective.windowTokens, 1_000_000);
       assert.equal(pin.windowTokens, 1_000_000);
+      assert.equal(pin.inputCeilingTokens, 984_000);
       assert.equal(pin.fingerprint, resolved.fingerprint);
     });
 
     it('same binding, smaller value → shrinks (safety)', () => {
-      const pin = { windowTokens: 1_000_000, fingerprint: 'test|anthropic|||claude-opus-4-6|', pinnedAt: Date.now() };
+      const pin = makePin(1_000_000);
       const resolved = makeResolved(800_000);
       const result = mod.applySessionPin(resolved, pin);
       assert.equal(result.effective.windowTokens, 800_000);
       assert.equal(result.pin.windowTokens, 800_000);
+      assert.equal(result.pin.inputCeilingTokens, 784_000);
     });
 
     it('same binding, larger value → keeps pinned (shrink-no-expand)', () => {
-      const pin = { windowTokens: 500_000, fingerprint: 'test|anthropic|||claude-opus-4-6|', pinnedAt: Date.now() };
+      const pin = makePin(500_000);
       const resolved = makeResolved(1_000_000);
       const result = mod.applySessionPin(resolved, pin);
       assert.equal(result.effective.windowTokens, 500_000);
+      assert.equal(result.effective.inputCeilingTokens, 484_000);
       assert.ok(result.effective.provenance.includes('session-pinned'));
     });
 
     it('different binding fingerprint → new pin', () => {
-      const pin = {
-        windowTokens: 500_000,
-        fingerprint: 'test|anthropic|||claude-opus-4-6|',
-        pinnedAt: Date.now(),
-      };
+      const pin = makePin(500_000);
       const resolved = makeResolved(1_000_000, 'test|anthropic|||claude-sonnet-4-6|');
       const result = mod.applySessionPin(resolved, pin);
       // New binding → use resolved, new pin
@@ -354,7 +363,7 @@ describe('context-capacity resolver', () => {
     });
 
     it('same binding, equal value → keeps current', () => {
-      const pin = { windowTokens: 500_000, fingerprint: 'test|anthropic|||claude-opus-4-6|', pinnedAt: Date.now() };
+      const pin = makePin(500_000);
       const resolved = makeResolved(500_000);
       const result = mod.applySessionPin(resolved, pin);
       assert.equal(result.effective.windowTokens, 500_000);

@@ -108,7 +108,7 @@ function containsVerdict(content: string, verdict: LocalReviewVerdict): boolean 
 
 function containsLegacyRecoveryVerdict(content: string, verdict: LocalReviewVerdict): boolean {
   if (verdict !== 'changes_requested') return false;
-  return new RegExp('(?:^|\\n)\\*{0,2}Verdict:\\s*\\*{0,2}BLOCK(?=\\s|$)', 'i').test(content);
+  return /(?:^|\n)\*{0,2}Verdict:\s*\*{0,2}BLOCK(?=\s|$)/i.test(content);
 }
 
 function verifyPersistedReviewMessage(

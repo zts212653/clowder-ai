@@ -2619,7 +2619,14 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.ok(active.contextHealth, 'session record should have contextHealth');
     assert.equal(active.contextHealth.usedTokens, 140000);
     assert.equal(active.contextHealth.windowTokens, 200000);
-    assert.equal(active.contextHealth.fillRatio, 0.7);
+    // #1208 denominator fix: fillRatio = usedTokens / inputCeiling (not windowTokens)
+    // inputCeiling = 200000 - 16000 (output reserve) = 184000
+    // fillRatio = 140000 / 184000 ≈ 0.7609
+    const expectedRatio = 140000 / (200000 - 16000);
+    assert.ok(
+      Math.abs(active.contextHealth.fillRatio - expectedRatio) < 0.001,
+      `fillRatio should be ~${expectedRatio.toFixed(4)}, got ${active.contextHealth.fillRatio}`,
+    );
     assert.equal(active.contextHealth.source, 'exact');
   });
 
@@ -2680,11 +2687,13 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     );
     assert.equal(payload.health.usedFrom, 'last_turn');
     assert.equal(payload.health.windowTokens, 200000);
-    // fillRatio should be 44000/200000 = 0.22, not 192000/200000 = 0.96
-    const expectedRatio = 44000 / 200000;
+    // #1208 denominator fix: fillRatio = lastTurnInputTokens / inputCeiling
+    // inputCeiling = 200000 - 16000 (output reserve) = 184000
+    // fillRatio = 44000 / 184000 ≈ 0.2391, not 192000/200000 = 0.96
+    const expectedRatio = 44000 / (200000 - 16000);
     assert.ok(
       Math.abs(payload.health.fillRatio - expectedRatio) < 0.001,
-      `fillRatio should be ~${expectedRatio} (22%), got ${payload.health.fillRatio}`,
+      `fillRatio should be ~${expectedRatio.toFixed(4)} (24%), got ${payload.health.fillRatio}`,
     );
   });
 
