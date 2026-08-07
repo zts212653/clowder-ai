@@ -38,8 +38,18 @@ describe('Session Chain Routes', () => {
       });
     app = Fastify();
     const mockSealer = sealerOverride ?? {
-      requestSeal: async () => ({ accepted: true }),
-      finalize: async () => {},
+      requestSeal: async ({ sessionId, reason }) => {
+        const session = store.get(sessionId);
+        if (!session || session.status !== 'active') return { accepted: false, status: session?.status ?? 'sealed' };
+        store.update(sessionId, { status: 'sealing', sealReason: reason, updatedAt: Date.now() });
+        return { accepted: true, status: 'sealing', sessionId };
+      },
+      finalize: async ({ sessionId }) => {
+        const session = store.get(sessionId);
+        if (session?.status === 'sealing') {
+          store.update(sessionId, { status: 'sealed', sealedAt: Date.now(), updatedAt: Date.now() });
+        }
+      },
       reconcileStuck: async () => 0,
       reconcileAllStuck: async () => 0,
     };
@@ -385,6 +395,95 @@ describe('Session Chain Routes', () => {
     assert.ok(body.contextHealth);
     assert.equal(body.contextHealth.fillRatio, 0.25);
     assert.equal(body.contextHealth.source, 'exact');
+  });
+
+  it('POST /api/sessions/:sessionId/seal seals an idle owned active session and the next activation gets a new record', async () => {
+    const store = await setup();
+    const active = store.create({ cliSessionId: 'cli-active', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${active.id}/seal`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.payload);
+    assert.equal(body.mode, 'sealed');
+    assert.equal(body.session.id, active.id);
+    assert.equal(body.session.status, 'sealed');
+    assert.equal(body.session.sealReason, 'manual');
+    assert.equal(store.getActive('opus', 'thread-1'), null);
+
+    const next = store.create({ cliSessionId: 'cli-next', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
+    assert.equal(next.status, 'active');
+    assert.equal(next.seq, active.seq + 1);
+    assert.notEqual(next.id, active.id);
+  });
+
+  it('POST /api/sessions/:sessionId/seal rejects a caller without session access', async () => {
+    const store = await setup();
+    const active = store.create({ cliSessionId: 'cli-private', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${active.id}/seal`,
+      headers: { 'x-cat-cafe-user': 'other-user' },
+    });
+
+    assert.equal(res.statusCode, 403);
+    assert.equal(store.get(active.id).status, 'active');
+  });
+
+  it('POST /api/sessions/:sessionId/seal rejects an active invocation without changing the session', async () => {
+    const isSessionSwitchBusy = (threadId, catId, userId) =>
+      threadId === 'thread-1' && catId === 'opus' && userId === 'user-1';
+    const store = await setup(undefined, undefined, undefined, isSessionSwitchBusy);
+    const active = store.create({ cliSessionId: 'cli-running', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${active.id}/seal`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 409);
+    const body = JSON.parse(res.payload);
+    assert.equal(body.code, 'SESSION_ACTIVE_INVOCATION');
+    assert.equal(store.get(active.id).status, 'active');
+    assert.equal(store.getChain('opus', 'thread-1').length, 1);
+  });
+
+  it('POST /api/sessions/:sessionId/seal returns a conflict when requestSeal loses its CAS race', async () => {
+    let store;
+    const racingSealer = {
+      requestSeal: async ({ sessionId }) => {
+        store.update(sessionId, {
+          status: 'sealed',
+          sealReason: 'threshold',
+          sealedAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+        return { accepted: false, status: 'sealed' };
+      },
+      finalize: async () => {
+        throw new Error('must not finalize after a rejected seal');
+      },
+    };
+    store = await setup(undefined, racingSealer);
+    const active = store.create({ cliSessionId: 'cli-race', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${active.id}/seal`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 409);
+    const body = JSON.parse(res.payload);
+    assert.equal(body.code, 'SESSION_SEAL_RACE');
+    assert.equal(body.currentStatus, 'sealed');
+    assert.equal(store.getChain('opus', 'thread-1').length, 1);
   });
 
   it('POST /api/sessions/:sessionId/unseal returns 401 without identity for untrusted browser origin', async () => {

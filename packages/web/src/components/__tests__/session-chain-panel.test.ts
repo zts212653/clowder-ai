@@ -111,6 +111,46 @@ function expandSealed() {
 }
 
 describe('F24: SessionChainPanel', () => {
+  it('seals an idle active session and refreshes the chain', async () => {
+    mockSessionsResponse([
+      { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
+    ]);
+    renderPanel('thread-1');
+    await flushFetch();
+
+    const sealButton = container.querySelector('[data-testid="seal-session-s1"]') as HTMLButtonElement;
+    expect(sealButton).not.toBeNull();
+    expect(sealButton.disabled).toBe(false);
+    mockApiFetch.mockImplementation((url: unknown) =>
+      Promise.resolve(
+        url === '/api/sessions/s1/seal'
+          ? { ok: true, json: async () => ({ mode: 'sealed' }) }
+          : { ok: true, json: async () => ({ sessions: [] }) },
+      ),
+    );
+
+    act(() => {
+      sealButton.click();
+    });
+    await flushFetch();
+
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/sessions/s1/seal', { method: 'POST' });
+  });
+
+  it('disables manual seal for a running Agent and explains how to proceed', async () => {
+    mockSessionsResponse([
+      { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
+    ]);
+    renderPanel('thread-1', { opus: { invocationId: 'invocation-1' } });
+    await flushFetch();
+
+    const sealButton = container.querySelector('[data-testid="seal-session-s1"]') as HTMLButtonElement;
+    expect(sealButton.disabled).toBe(true);
+    expect(container.querySelector('[data-testid="seal-session-blocked-s1"]')?.textContent).toContain(
+      '请先停止该 Agent，再封存会话',
+    );
+  });
+
   it('renders panel with bind section even when API returns empty sessions (F33)', async () => {
     mockSessionsResponse([]);
     renderPanel('thread-1');
