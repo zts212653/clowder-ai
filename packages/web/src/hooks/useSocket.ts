@@ -1267,7 +1267,18 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     // endpoint. A socket cancel-all clears live slots, but cannot on its own
     // recover every persisted/orphaned running record that force-reset owns.
     if (!catId) {
-      void apiFetch(`/api/threads/${encodeURIComponent(tid)}/force-reset`, { method: 'POST' });
+      void apiFetch(`/api/threads/${encodeURIComponent(tid)}/force-reset`, { method: 'POST' })
+        .then((response) => {
+          if (!response.ok) throw new Error(`stop request failed (${response.status})`);
+        })
+        .catch(() => {
+          useToastStore.getState().addToast({
+            type: 'error',
+            title: '停止失败',
+            message: '未能停止对话中的运行，请稍后重试。',
+            duration: 5000,
+          });
+        });
       return;
     }
     const clientInstanceId = cancelClientInstanceIdRef.current;

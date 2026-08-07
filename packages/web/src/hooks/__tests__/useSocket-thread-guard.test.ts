@@ -155,8 +155,17 @@ const GUIDE_FLOW: OrchestrationFlow = {
 /**
  * Minimal wrapper component to mount the useSocket hook with controlled threadId.
  */
-function HookWrapper({ callbacks, threadId }: { callbacks: SocketCallbacks; threadId: string }) {
-  useSocket(callbacks, threadId);
+function HookWrapper({
+  callbacks,
+  threadId,
+  onReady,
+}: {
+  callbacks: SocketCallbacks;
+  threadId: string;
+  onReady?: (socket: ReturnType<typeof useSocket>) => void;
+}) {
+  const socket = useSocket(callbacks, threadId);
+  React.useEffect(() => onReady?.(socket), [onReady, socket]);
   return null;
 }
 
@@ -284,6 +293,35 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       mode: 'execute',
       targetCats: ['opus'],
     });
+  });
+
+  it('reports an all-thread Stop request failure instead of leaving an unhandled rejection', async () => {
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+    let cancelInvocation: ReturnType<typeof useSocket>['cancelInvocation'] | undefined;
+
+    await act(async () => {
+      root.render(
+        React.createElement(HookWrapper, {
+          callbacks,
+          threadId: 'thread-A',
+          onReady: (socket) => {
+            cancelInvocation = socket.cancelInvocation;
+          },
+        }),
+      );
+    });
+    expect(cancelInvocation).toBeTypeOf('function');
+    mockApiFetch.mockReset();
+    mockApiFetch.mockRejectedValueOnce(new Error('network unavailable'));
+
+    act(() => {
+      cancelInvocation?.('thread-A');
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads/thread-A/force-reset', { method: 'POST' });
+    expect(mockAddToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'error', title: '停止失败' }));
   });
 
   it('intent_mode from OTHER thread routes to background path, not callback', () => {

@@ -273,8 +273,8 @@ export function ChatInput({
           whisperMode && whisperTargets.size > 0
             ? { visibility: 'whisper' as const, whisperTo: [...whisperTargets] }
             : undefined;
-        // Only a one-shot override belongs on this message. Thread/global/product
-        // inheritance resolves again at server admission, closing hydration races.
+        // Only a one-shot override belongs on this message. The server resolves
+        // the global default again at admission, closing hydration races.
         // The server owns exact-carrier admission and writes the durable
         // fallback reason. Sending the requested global/one-shot disposition
         // lets an unavailable append fail closed to Queue without losing why.
