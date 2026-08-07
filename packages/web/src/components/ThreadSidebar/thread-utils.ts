@@ -216,11 +216,7 @@ function tabPinnedThreads(threads: Thread[], unreadIds: Set<string>): Thread[] {
     .sort((a, b) => sortPinnedUnreadActive(a, b, unreadIds));
 }
 
-function tabRecentThreads(
-  threads: Thread[],
-  unreadIds: Set<string>,
-  config: WorkspaceConfig = DEFAULT_CONFIG,
-): Thread[] {
+function tabRecentThreads(threads: Thread[], unreadIds: Set<string>): Thread[] {
   // Demo spec (sidebar-proposals.html line 200/848): 对话置顶 = 最近 Tab + 当前 Tab 双重置顶.
   // A pinned system thread must still appear in the recent tab (additive, not exclusive).
   // Unpinned system threads stay only in the system tab.
@@ -229,8 +225,7 @@ function tabRecentThreads(
     .sort((a, b) => sortPinnedUnreadActive(a, b, unreadIds));
   const recent = nonDefaultThreads(threads)
     .filter((thread) => !thread.pinned && !isSystemThread(thread))
-    .sort((a, b) => sortPinnedUnreadActive(a, b, unreadIds))
-    .slice(0, config.recentLimit);
+    .sort((a, b) => sortPinnedUnreadActive(a, b, unreadIds));
   return [...pinned, ...recent];
 }
 
@@ -299,7 +294,7 @@ export function buildSidebarTabs(
   );
   return [
     { id: 'pinned', label: '置顶', count: tabPinnedThreads(threads, unreadIds).length },
-    { id: 'recent', label: '最近', count: tabRecentThreads(threads, unreadIds, config).length },
+    { id: 'recent', label: '最近', count: tabRecentThreads(threads, unreadIds).length },
     { id: 'project', label: '项目', count: projectCount },
     { id: 'system', label: '系统', count: tabSystemThreads(threads, unreadIds).length },
     { id: 'favorites', label: '收藏', count: tabFavoriteThreads(threads, unreadIds).length },
@@ -327,7 +322,7 @@ export function buildSidebarTabContent(
   if (tabId === 'favorites') {
     return { kind: 'flat', threads: tabFavoriteThreads(threads, unreadIds) };
   }
-  return { kind: 'flat', threads: tabRecentThreads(threads, unreadIds, config) };
+  return { kind: 'flat', threads: tabRecentThreads(threads, unreadIds) };
 }
 
 /**

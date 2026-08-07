@@ -277,7 +277,7 @@ describe('ThreadItem actions', () => {
     expect(titleSpan).not.toBeNull();
     expect(titleSpan?.className).toContain('line-clamp-2');
     expect(titleSpan?.className).toContain('text-sm');
-    expect(titleSpan?.className).toContain('leading-snug');
+    expect(titleSpan?.className).toContain('leading-normal');
     expect(titleSpan?.className).not.toContain('truncate');
     expect(titleSpan?.className).not.toContain('text-xs');
   });

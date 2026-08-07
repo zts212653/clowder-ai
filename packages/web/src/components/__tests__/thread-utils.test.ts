@@ -681,7 +681,7 @@ describe('sidebar tab selectors', () => {
     expect(content.threads.map((thread) => thread.id)).toEqual(['active-first', 'active-second', 'inactive-unread']);
   });
 
-  it('recent tab preserves the F095 recent limit after filtering out unpinned system threads', () => {
+  it('recent tab shows all non-pinned non-system threads without truncation (clowder-ai#1305)', () => {
     const threads = [
       makeThread({ id: 'default', title: '大厅', lastActiveAt: NOW }),
       makeThread({ id: 'system', title: 'System', systemKind: 'eval_domain', lastActiveAt: NOW - 1 }),
@@ -707,6 +707,8 @@ describe('sidebar tab selectors', () => {
       'regular-5',
       'regular-6',
       'regular-7',
+      'regular-8',
+      'regular-9',
     ]);
   });
 

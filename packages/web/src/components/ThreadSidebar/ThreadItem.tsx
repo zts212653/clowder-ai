@@ -209,7 +209,7 @@ function ThreadItemComponent({
       title={tooltip}
     >
       {/* Title row */}
-      <div className="mb-1 flex items-start justify-between gap-1">
+      <div className="mb-1.5 flex items-start justify-between gap-1">
         {isEditing ? (
           <input
             ref={inputRef}
@@ -283,7 +283,7 @@ function ThreadItemComponent({
               </span>
             )}
             <span
-              className={`min-w-0 flex-1 line-clamp-2 text-sm leading-snug ${isActive ? 'font-semibold text-cafe-black' : 'text-cafe-secondary'}`}
+              className={`min-w-0 flex-1 line-clamp-2 text-sm leading-normal ${isActive ? 'font-semibold text-cafe-black' : 'text-cafe-secondary'}`}
             >
               {title ?? (id === 'default' ? '大厅' : '未命名对话')}
             </span>
