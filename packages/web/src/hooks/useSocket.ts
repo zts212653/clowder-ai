@@ -1262,33 +1262,34 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     });
   }, [threadId, storeThreadId]);
 
-  const cancelInvocation = useCallback((tid: string, catId?: string) => {
+  const cancelInvocation = useCallback(async (tid: string, catId?: string): Promise<boolean> => {
     // #1307: the visible conversation Stop is the durable all-thread stop
     // endpoint. A socket cancel-all clears live slots, but cannot on its own
     // recover every persisted/orphaned running record that force-reset owns.
     if (!catId) {
-      void apiFetch(`/api/threads/${encodeURIComponent(tid)}/force-reset`, { method: 'POST' })
-        .then((response) => {
-          if (!response.ok) throw new Error(`stop request failed (${response.status})`);
-        })
-        .catch(() => {
-          useToastStore.getState().addToast({
-            type: 'error',
-            title: '停止失败',
-            message: '未能停止对话中的运行，请稍后重试。',
-            duration: 5000,
-          });
+      try {
+        const response = await apiFetch(`/api/threads/${encodeURIComponent(tid)}/force-reset`, { method: 'POST' });
+        if (!response.ok) throw new Error(`stop request failed (${response.status})`);
+        return true;
+      } catch {
+        useToastStore.getState().addToast({
+          type: 'error',
+          title: '停止失败',
+          message: '未能停止对话中的运行，请稍后重试。',
+          duration: 5000,
         });
-      return;
+        return false;
+      }
     }
     const clientInstanceId = cancelClientInstanceIdRef.current;
-    if (!clientInstanceId) return;
+    if (!clientInstanceId) return false;
     emitExplicitCancel(socketRef.current, {
       threadId: tid,
       ...(catId ? { catId } : {}),
       clientInstanceId,
       actionId: newCancelIdentity('action'),
     });
+    return true;
   }, []);
 
   return { socketRef, joinRoom, leaveRoom, syncRooms, cancelInvocation, socketConnected };

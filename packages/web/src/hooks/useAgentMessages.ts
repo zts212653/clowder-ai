@@ -6389,47 +6389,56 @@ export function useAgentMessages() {
   );
 
   const handleStop = useCallback(
-    (cancelFn: (threadId: string, catId?: string) => void, threadId: string) => {
+    (cancelFn: (threadId: string, catId?: string) => boolean | void | Promise<boolean | void>, threadId: string) => {
       const store = useChatStore.getState();
       // #1307: a conversation-level Stop is always a full-thread stop. Per-cat
       // cancellation remains an internal control-plane primitive and Steer uses
       // its dedicated, explicitly destructive path.
-      cancelFn(threadId, undefined);
-      clearPendingCallbacksForThread(threadId);
-      const isActiveThreadStop = threadId === store.currentThreadId;
+      const clearStoppedThread = () => {
+        clearPendingCallbacksForThread(threadId);
+        const isActiveThreadStop = threadId === store.currentThreadId;
 
-      if (!isActiveThreadStop) {
-        clearDoneTimeout(threadId);
-        const threadState = store.getThreadState(threadId);
-        for (const message of threadState.messages) {
-          if (message.type === 'assistant' && message.isStreaming) {
-            store.setThreadMessageStreaming(threadId, message.id, false);
+        if (!isActiveThreadStop) {
+          clearDoneTimeout(threadId);
+          const threadState = store.getThreadState(threadId);
+          for (const message of threadState.messages) {
+            if (message.type === 'assistant' && message.isStreaming) {
+              store.setThreadMessageStreaming(threadId, message.id, false);
+            }
           }
+          store.resetThreadInvocationState(threadId);
+          // Codex review P2 — split-pane / background stop must also clear the stopped
+          // thread's suppression markers; otherwise switching back later sees stale
+          // replacement state and shouldSuppressLateStreamChunk drops legitimate text.
+          clearReplacedInvocationsForThread(threadId);
+          return;
         }
-        store.resetThreadInvocationState(threadId);
-        // Codex review P2 — split-pane / background stop must also clear the stopped
-        // thread's suppression markers; otherwise switching back later sees stale
-        // replacement state and shouldSuppressLateStreamChunk drops legitimate text.
-        clearReplacedInvocationsForThread(threadId);
-        return;
-      }
 
-      clearDoneTimeout(threadId);
-      setLoading(false);
-      // F108: stop clears all invocation slots (user cancel-all)
-      clearAllActiveInvocations();
-      setIntentMode(null);
-      clearCatStatuses();
-      // Stop all active streams
-      for (const ref of getAllActiveValues()) {
-        setStreaming(ref.id, false);
+        clearDoneTimeout(threadId);
+        setLoading(false);
+        // F108: stop clears all invocation slots (user cancel-all)
+        clearAllActiveInvocations();
+        setIntentMode(null);
+        clearCatStatuses();
+        // Stop all active streams
+        for (const ref of getAllActiveValues()) {
+          setStreaming(ref.id, false);
+        }
+        clearAllActive();
+        // F173 A.12 砚砚 round 5 — handleStop is an EXPLICIT cancel by the user, so it's
+        // legitimate to clear suppression for the stopped thread. (Background-stop branch
+        // above also clears for the same reason.) This is invocation-lifecycle aligned:
+        // user's stop = invocation explicitly ended = suppression no longer relevant.
+        clearReplacedInvocationsForThread(threadId);
+      };
+
+      const requested = cancelFn(threadId, undefined);
+      if (requested && typeof (requested as Promise<boolean | void>).then === 'function') {
+        return (requested as Promise<boolean | void>).then((accepted) => {
+          if (accepted !== false) clearStoppedThread();
+        });
       }
-      clearAllActive();
-      // F173 A.12 砚砚 round 5 — handleStop is an EXPLICIT cancel by the user, so it's
-      // legitimate to clear suppression for the stopped thread. (Background-stop branch
-      // above also clears for the same reason.) This is invocation-lifecycle aligned:
-      // user's stop = invocation explicitly ended = suppression no longer relevant.
-      clearReplacedInvocationsForThread(threadId);
+      if (requested !== false) clearStoppedThread();
     },
     [
       setLoading,

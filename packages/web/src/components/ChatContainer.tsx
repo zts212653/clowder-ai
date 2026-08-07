@@ -812,7 +812,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const handleStop = useCallback(
     (overrideThreadId?: unknown) => {
       const targetThreadId = typeof overrideThreadId === 'string' ? overrideThreadId : threadId;
-      stopHandler(cancelInvocation, targetThreadId);
+      void stopHandler(cancelInvocation, targetThreadId);
     },
     [stopHandler, cancelInvocation, threadId],
   );

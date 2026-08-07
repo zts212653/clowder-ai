@@ -337,6 +337,34 @@ describe('useAgentMessages loading lifecycle', () => {
     expect(mockSetStreaming).not.toHaveBeenCalled();
   });
 
+  it('keeps local running state when whole-thread Stop is rejected', async () => {
+    const cancelInvocation = vi.fn(async () => false);
+    mockGetThreadState.mockReturnValue({
+      messages: [
+        {
+          id: 'still-running',
+          type: 'assistant',
+          catId: 'opus',
+          content: 'running',
+          isStreaming: true,
+          timestamp: Date.now(),
+        },
+      ],
+    });
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+    await act(async () => {
+      await captured?.handleStop(cancelInvocation, 'thread-1');
+    });
+
+    expect(cancelInvocation).toHaveBeenCalledWith('thread-1', undefined);
+    expect(mockClearAllActiveInvocations).not.toHaveBeenCalled();
+    expect(mockSetLoading).not.toHaveBeenCalledWith(false);
+    expect(mockSetStreaming).not.toHaveBeenCalledWith('still-running', false);
+  });
+
   it('stopping a background thread stops the full target-thread run rather than deriving one cat slot', () => {
     const cancelInvocation = vi.fn();
     storeState.activeInvocations = {

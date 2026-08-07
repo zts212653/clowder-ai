@@ -314,11 +314,9 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     mockApiFetch.mockReset();
     mockApiFetch.mockRejectedValueOnce(new Error('network unavailable'));
 
-    act(() => {
-      cancelInvocation?.('thread-A');
+    await act(async () => {
+      await cancelInvocation?.('thread-A');
     });
-    await Promise.resolve();
-    await Promise.resolve();
 
     expect(mockApiFetch).toHaveBeenCalledWith('/api/threads/thread-A/force-reset', { method: 'POST' });
     expect(mockAddToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'error', title: '停止失败' }));
