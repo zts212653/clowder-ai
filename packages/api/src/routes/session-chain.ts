@@ -53,6 +53,10 @@ interface SessionChainRouteOptions extends FastifyPluginOptions {
   runtimeSessionStore?: IRuntimeSessionStore;
   /** Process-local busy probe: true while the cat has a live invocation or queued work for this user. */
   isSessionSwitchBusy?: (threadId: string, catId: string, userId: string) => boolean;
+  /** Process-local control plane. Any live provider turn for the cat must block a manual seal. */
+  invocationTracker?: {
+    has(threadId: string, catId: string): boolean;
+  };
 }
 
 interface RuntimeSessionSummary {
@@ -98,7 +102,11 @@ async function resolveManualSealCandidate(input: {
       },
     };
   }
-  if (input.isSessionSwitchBusy?.(session.threadId, session.catId, input.userId)) {
+  const tracker = input.invocationTracker;
+  // Session ownership has already been authorized above. This gate protects the
+  // session's transcript, so *any* live provider turn for this cat/thread must
+  // block sealing — A2A and scheduled turns commonly have a different userId.
+  if (tracker?.has(session.threadId, session.catId)) {
     return {
       kind: 'error',
       status: 409,

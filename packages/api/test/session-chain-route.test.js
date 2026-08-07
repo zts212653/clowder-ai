@@ -23,7 +23,7 @@ describe('Session Chain Routes', () => {
   let SessionChainStore;
   let sessionChainRoutes;
 
-  async function setup(threadStoreOverride, sealerOverride, runtimeSessionStoreOverride, isSessionSwitchBusy) {
+  async function setup(threadStoreOverride, sealerOverride, runtimeSessionStoreOverride, invocationTrackerOverride) {
     const storeMod = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const routeMod = await import('../dist/routes/session-chain.js');
     SessionChainStore = storeMod.SessionChainStore;
@@ -58,7 +58,7 @@ describe('Session Chain Routes', () => {
       threadStore,
       sessionSealer: mockSealer,
       ...(runtimeSessionStoreOverride ? { runtimeSessionStore: runtimeSessionStoreOverride } : {}),
-      ...(isSessionSwitchBusy ? { isSessionSwitchBusy } : {}),
+      ...(invocationTrackerOverride ? { invocationTracker: invocationTrackerOverride } : {}),
     });
     await app.ready();
     return store;
@@ -436,9 +436,10 @@ describe('Session Chain Routes', () => {
   });
 
   it('POST /api/sessions/:sessionId/seal rejects an active invocation without changing the session', async () => {
-    const isSessionSwitchBusy = (threadId, catId, userId) =>
-      threadId === 'thread-1' && catId === 'opus' && userId === 'user-1';
-    const store = await setup(undefined, undefined, undefined, isSessionSwitchBusy);
+    const invocationTracker = {
+      has: (threadId, catId) => threadId === 'thread-1' && catId === 'opus',
+    };
+    const store = await setup(undefined, undefined, undefined, invocationTracker);
     const active = store.create({ cliSessionId: 'cli-running', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
 
     const res = await app.inject({
@@ -452,6 +453,31 @@ describe('Session Chain Routes', () => {
     assert.equal(body.code, 'SESSION_ACTIVE_INVOCATION');
     assert.equal(store.get(active.id).status, 'active');
     assert.equal(store.getChain('opus', 'thread-1').length, 1);
+  });
+
+  it('POST /api/sessions/:sessionId/seal rejects an active invocation owned by another runtime identity', async () => {
+    const invocationTracker = {
+      has: (threadId, catId) => threadId === 'thread-1' && catId === 'opus',
+      // A2A and scheduled turns are not initiated with the browser caller's identity.
+      getUserId: () => 'unknown',
+    };
+    const store = await setup(undefined, undefined, undefined, invocationTracker);
+    const active = store.create({
+      cliSessionId: 'cli-running-a2a',
+      threadId: 'thread-1',
+      catId: 'opus',
+      userId: 'user-1',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${active.id}/seal`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(JSON.parse(res.payload).code, 'SESSION_ACTIVE_INVOCATION');
+    assert.equal(store.get(active.id).status, 'active');
   });
 
   it('POST /api/sessions/:sessionId/seal returns a conflict when requestSeal loses its CAS race', async () => {
