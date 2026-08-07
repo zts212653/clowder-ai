@@ -797,14 +797,14 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       body: '{}',
     })
       .then(async (res) => {
-        // #1304: Check caughtUp from response body, not just res.ok.
-        // HTTP 200 with caughtUp=false means cursor is stale — don't clear
-        // unread suppression or the badge will reappear on refresh.
+        // #1304 P2: Always confirm on res.ok to balance armUnreadSuppression's
+        // pending count. confirmUnreadAck only manages suppression lifecycle
+        // (decrement count → release Infinity when 0); it does NOT clear the
+        // badge. Fix 1 makes the projection return 0 for stale cursors, so
+        // releasing suppression is safe. Gating confirm on caughtUp would leak
+        // the count for persistently stale threads (the exact target of #1304).
         if (!res.ok) return;
-        const data = await res.json().catch(() => null);
-        if (data?.caughtUp) {
-          confirmUnreadAck(threadId);
-        }
+        confirmUnreadAck(threadId);
       })
       .catch((err) => {
         console.debug('[F069] read ack failed:', err);

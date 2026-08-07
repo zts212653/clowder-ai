@@ -142,4 +142,45 @@ describe('Redis unread summary visibility cursor contract', { skip: redisIsolati
     assert.deepEqual(result.requiredMessageIds, [q.id, c.id]);
     assert.equal(result.observedRawFrontierMessageId, c.id);
   });
+
+  // #1304: Stale cursor (message pruned from hash + visibility ZSET) must
+  // return 0 unread, not scan the entire visibility set as unread.
+  it('returns 0 unread when read cursor message is pruned (stale cursor)', async () => {
+    const userId = 'user-stale-cursor';
+    const threadId = 'thread-stale-cursor';
+
+    const msg = await messageStore.append({
+      userId,
+      catId: 'opus',
+      content: 'message that will be pruned',
+      mentions: [],
+      timestamp: Date.now() - 5_000,
+      threadId,
+    });
+    await messageStore.append({
+      userId,
+      catId: 'codex',
+      content: 'later message still visible',
+      mentions: [],
+      timestamp: Date.now() - 1_000,
+      threadId,
+    });
+
+    // Ack cursor to the first message
+    assert.equal(await readStateStore.ack(userId, threadId, msg.id), true);
+    // Verify 0 unread before pruning
+    assert.deepEqual(await readStateStore.getUnreadSummaries(userId, [threadId], messageStore), [
+      { threadId, unreadCount: 1, hasUserMention: false },
+    ]);
+
+    // Prune the acked message: delete hash + ZREM from visibility ZSET
+    await redis.del(`msg:${msg.id}`);
+    await redis.zrem(`msg:visibility:${threadId}`, msg.id);
+
+    // Stale cursor: position can't be resolved → must return 0 unread
+    // Old code (zrange 0 -1) would scan all visible messages → 1+ unread
+    assert.deepEqual(await readStateStore.getUnreadSummaries(userId, [threadId], messageStore), [
+      { threadId, unreadCount: 0, hasUserMention: false },
+    ]);
+  });
 });

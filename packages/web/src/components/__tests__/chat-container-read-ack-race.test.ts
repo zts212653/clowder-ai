@@ -323,7 +323,15 @@ describe('F069-R5: read ack via POST /read/latest', () => {
 
   // #1304: Frontend must check caughtUp from response body, not just res.ok.
   // When caughtUp is false (stale cursor), confirmUnreadAck must NOT be called.
-  it('does not confirm unread ack when caughtUp is false', async () => {
+  // #1304 P2: Always confirm on res.ok to balance suppression count.
+  // Even when caughtUp=false (stale cursor), confirmUnreadAck must be called
+  // to decrement _pendingAckCount — otherwise suppression leaks to Infinity.
+  it('confirms unread ack on res.ok even when caughtUp is false', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ caughtUp: false, advanced: false }),
+    });
+
     act(() => {
       root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
     });
@@ -331,7 +339,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
       await new Promise((r) => setTimeout(r, 10));
     });
 
-    expect(confirmUnreadAckSpy).not.toHaveBeenCalled();
+    expect(confirmUnreadAckSpy).toHaveBeenCalledWith('thread-A');
   });
 
   it('confirms unread ack when caughtUp is true', async () => {
