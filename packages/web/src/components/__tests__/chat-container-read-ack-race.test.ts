@@ -321,8 +321,6 @@ describe('F069-R5: read ack via POST /read/latest', () => {
     expect(newCalls[0][0]).toContain('thread-A');
   });
 
-  // #1304: Frontend must check caughtUp from response body, not just res.ok.
-  // When caughtUp is false (stale cursor), confirmUnreadAck must NOT be called.
   // #1304 P2: Always confirm on res.ok to balance suppression count.
   // Even when caughtUp=false (stale cursor), confirmUnreadAck must be called
   // to decrement _pendingAckCount — otherwise suppression leaks to Infinity.
