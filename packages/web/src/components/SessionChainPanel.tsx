@@ -303,6 +303,9 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
           /* best-effort */
         }
         setActionError(message);
+        // A non-2xx seal response can still report a completed state transition
+        // (for example SESSION_SEAL_PARTIAL), so reconcile with the authoritative chain.
+        setRefreshKey((key) => key + 1);
         return;
       }
       setRefreshKey((key) => key + 1);
