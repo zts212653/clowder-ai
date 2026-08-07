@@ -29,6 +29,12 @@ const FINALIZE_TIMEOUT_MS = 30_000;
 
 export type SealReason = 'threshold' | 'manual' | 'error' | (string & {});
 
+/** The route needs to distinguish a complete seal from a terminal partial one. */
+export interface SealFinalizeResult {
+  sealed: boolean;
+  clean: boolean;
+}
+
 /**
  * F065 Phase C: Handoff digest configuration.
  * Injectable functions for testability and per-thread resolution.
@@ -51,7 +57,7 @@ export interface ISessionSealer {
    * Phase B stub: just transitions sealing → sealed.
    * Phase C will add transcript + digest logic.
    */
-  finalize(args: { sessionId: string }): Promise<void>;
+  finalize(args: { sessionId: string }): Promise<SealFinalizeResult>;
 
   /**
    * F118 Hardening: Reconcile sessions stuck in 'sealing' state for a specific cat/thread.
@@ -153,12 +159,12 @@ export class SessionSealer implements ISessionSealer {
     };
   }
 
-  async finalize(args: { sessionId: string }): Promise<void> {
+  async finalize(args: { sessionId: string }): Promise<SealFinalizeResult> {
     const record = await this.store.get(args.sessionId);
-    if (!record) return;
+    if (!record) return { sealed: false, clean: false };
 
     // Only finalize sessions in sealing state
-    if (record.status !== 'sealing') return;
+    if (record.status !== 'sealing') return { sealed: record.status === 'sealed', clean: false };
 
     const now = Date.now();
 
@@ -257,6 +263,7 @@ export class SessionSealer implements ISessionSealer {
         }
       }
     }
+    return { sealed: sealWriteSucceeded, clean: sealWriteSucceeded && finalizeClean };
   }
 
   /**

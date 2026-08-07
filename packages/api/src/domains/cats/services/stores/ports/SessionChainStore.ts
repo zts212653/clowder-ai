@@ -113,6 +113,11 @@ export interface ISessionChainStore {
   getChainByThread(threadId: string, options?: StoreReadOptions): SessionRecord[] | Promise<SessionRecord[]>;
   /** Update partial fields */
   update(id: string, patch: SessionRecordPatch): SessionRecord | null | Promise<SessionRecord | null>;
+  /** Atomically claim one active session for sealing and clear its active pointer. */
+  claimSeal(
+    id: string,
+    patch: Pick<SessionRecordPatch, 'sealReason' | 'updatedAt'>,
+  ): SessionRecord | null | Promise<SessionRecord | null>;
   /** Look up by CLI session ID */
   getByCliSessionId(cliSessionId: string): SessionRecord | null | Promise<SessionRecord | null>;
   /**
@@ -456,6 +461,18 @@ export class SessionChainStore implements ISessionChainStore {
     if (patch.catHandoffNote !== undefined) record.catHandoffNote = patch.catHandoffNote;
     record.updatedAt = patch.updatedAt ?? Date.now();
 
+    return record;
+  }
+
+  claimSeal(id: string, patch: Pick<SessionRecordPatch, 'sealReason' | 'updatedAt'>): SessionRecord | null {
+    const record = this.records.get(id);
+    if (!record || record.status !== 'active') return null;
+
+    record.status = 'sealing';
+    if (patch.sealReason !== undefined && patch.sealReason !== null) record.sealReason = patch.sealReason;
+    record.updatedAt = patch.updatedAt ?? Date.now();
+    const key = this.catThreadKey(record.catId, record.threadId);
+    if (this.activeIndex.get(key) === id) this.activeIndex.delete(key);
     return record;
   }
 

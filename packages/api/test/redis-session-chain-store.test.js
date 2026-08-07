@@ -400,6 +400,18 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.equal(result, null);
   });
 
+  it('claimSeal atomically admits one caller and clears the active pointer', async () => {
+    const created = await store.create(BASE_INPUT);
+    const [first, second] = await Promise.all([
+      store.claimSeal(created.id, { sealReason: 'manual', updatedAt: 1_000 }),
+      store.claimSeal(created.id, { sealReason: 'manual', updatedAt: 1_001 }),
+    ]);
+
+    assert.equal([first, second].filter(Boolean).length, 1);
+    assert.equal((await store.get(created.id)).status, 'sealing');
+    assert.equal(await store.getActive('opus', 'thread-1'), null);
+  });
+
   it('getChain() returns sessions sorted by seq', async () => {
     const r0 = await store.create(BASE_INPUT);
     await store.update(r0.id, { status: 'sealed' });

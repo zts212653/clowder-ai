@@ -81,6 +81,12 @@ export interface DeleteGuard {
   release: () => void;
 }
 
+/** A short per-slot barrier used while a manual session seal clears its active pointer. */
+export interface SessionSealGuard {
+  acquired: boolean;
+  release: () => void;
+}
+
 /** Result of atomically comparing a terminal execution with the current slot owner. */
 export type ExactExecutionOwnerState = 'released' | 'absent' | 'replacement';
 /** Non-destructive projection used to fence async terminal side effects. */
@@ -90,6 +96,7 @@ export class InvocationTracker {
   /** Key: `${threadId}:${catId}` (slotKey) */
   private active = new Map<string, ActiveInvocation>();
   private deleting = new Set<string>();
+  private sessionSealing = new Set<string>();
   /** F118: max age before a slot becomes a reaper candidate; `0` disables candidacy. */
   private maxSlotTtlMs: number;
 
@@ -113,12 +120,12 @@ export class InvocationTracker {
     catIds: string[] = [],
     executionId?: string,
   ): AbortController {
-    if (this.deleting.has(threadId)) {
+    const key = this.slotKey(threadId, catId);
+    if (this.deleting.has(threadId) || this.sessionSealing.has(key)) {
       const controller = new AbortController();
       controller.abort();
       return controller;
     }
-    const key = this.slotKey(threadId, catId);
     // Abort existing invocation for this SAME slot only
     this.active.get(key)?.controller.abort('preempted');
     const controller = new AbortController();
@@ -150,7 +157,7 @@ export class InvocationTracker {
     catIds: string[] = [],
     executionId?: string,
   ): AbortController | null {
-    if (this.deleting.has(threadId)) return null;
+    if (this.deleting.has(threadId) || this.sessionSealing.has(this.slotKey(threadId, catId))) return null;
     if (this.has(threadId)) return null;
     const controller = new AbortController();
     const key = this.slotKey(threadId, catId);
@@ -184,6 +191,22 @@ export class InvocationTracker {
     return {
       acquired: true,
       release: () => this.deleting.delete(threadId),
+    };
+  }
+
+  /**
+   * Atomically check an idle slot and prevent another local invocation from
+   * claiming it until the session store has removed the old active pointer.
+   */
+  guardSessionSeal(threadId: string, catId: string): SessionSealGuard {
+    const key = this.slotKey(threadId, catId);
+    if (this.deleting.has(threadId) || this.sessionSealing.has(key) || this.has(threadId, catId)) {
+      return { acquired: false, release: () => {} };
+    }
+    this.sessionSealing.add(key);
+    return {
+      acquired: true,
+      release: () => this.sessionSealing.delete(key),
     };
   }
 
@@ -481,7 +504,7 @@ export class InvocationTracker {
    * All slots share a `batchController` ref so completeAll can match the batch.
    */
   startAll(threadId: string, catIds: string[], userId: string = 'unknown', executionId?: string): AbortController {
-    if (this.deleting.has(threadId)) {
+    if (this.deleting.has(threadId) || catIds.some((catId) => this.sessionSealing.has(this.slotKey(threadId, catId)))) {
       const controller = new AbortController();
       controller.abort();
       return controller;
@@ -526,7 +549,7 @@ export class InvocationTracker {
     catIds: string[] = [catId],
     executionId?: string,
   ): boolean {
-    if (this.deleting.has(threadId)) return false;
+    if (this.deleting.has(threadId) || this.sessionSealing.has(this.slotKey(threadId, catId))) return false;
     const key = this.slotKey(threadId, catId);
     const existing = this.active.get(key);
     // A2A re-track must REPLACE a 'canceled' tombstone, not idempotently keep it. getController()
@@ -570,7 +593,9 @@ export class InvocationTracker {
     userId: string = 'unknown',
     executionId?: string,
   ): AbortController | null {
-    if (this.deleting.has(threadId)) return null;
+    if (this.deleting.has(threadId) || catIds.some((catId) => this.sessionSealing.has(this.slotKey(threadId, catId)))) {
+      return null;
+    }
     if (this.has(threadId)) return null;
     const now = Date.now();
     // F-parallel-cancel: independent batch gate (see startAll) — single-cat cancel must not trip

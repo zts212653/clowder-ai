@@ -75,6 +75,20 @@ describe('SessionSealer', () => {
       assert.equal(second.status, 'sealing');
     });
 
+    test('atomically admits exactly one concurrent active → sealing claim', async () => {
+      const { store, sealer } = await createFixtures();
+      const record = store.create(BASE_INPUT);
+
+      const results = await Promise.all([
+        sealer.requestSeal({ sessionId: record.id, reason: 'manual' }),
+        sealer.requestSeal({ sessionId: record.id, reason: 'manual' }),
+      ]);
+
+      assert.equal(results.filter((result) => result.accepted).length, 1);
+      assert.equal(store.get(record.id)?.status, 'sealing');
+      assert.equal(store.getActive('opus', 'thread-1'), null);
+    });
+
     test('rejects sealing already sealed session', async () => {
       const { store, sealer } = await createFixtures();
       const record = store.create(BASE_INPUT);
@@ -119,6 +133,24 @@ describe('SessionSealer', () => {
       assert.equal(updated?.status, 'sealed');
       assert.ok(updated?.sealedAt, 'should have sealedAt timestamp');
       assert.ok(updated.sealedAt > 0);
+    });
+
+    test('reports a terminal partial seal when transcript finalization fails', async () => {
+      const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const store = new SessionChainStore();
+      const sealer = new SessionSealer(store, {
+        flush: async () => {
+          throw new Error('disk unavailable');
+        },
+      });
+      const record = store.create(BASE_INPUT);
+
+      await sealer.requestSeal({ sessionId: record.id, reason: 'manual' });
+      const result = await sealer.finalize({ sessionId: record.id });
+
+      assert.deepEqual(result, { sealed: true, clean: false });
+      assert.equal(store.get(record.id)?.status, 'sealed');
     });
 
     test('does nothing for non-sealing sessions', async () => {
