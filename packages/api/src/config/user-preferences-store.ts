@@ -71,10 +71,21 @@ function sanitizeDispositionPreferences(value: unknown): MessageDispositionPrefe
 
 export function resolveMessageDispositionPreference(
   projectRoot: string,
-  _threadId?: string,
+  threadId?: string,
 ): MessageDispositionPreferenceSnapshot {
   const preference = sanitizeDispositionPreferences(readUserPreferences(projectRoot).messageDisposition);
+  const thread = threadId ? (preference.threads?.[threadId] ?? null) : null;
   const global = preference.global ?? null;
+  if (thread) {
+    return {
+      productDefault: MESSAGE_DISPOSITION_PRODUCT_DEFAULT,
+      global,
+      thread,
+      effective: thread,
+      source: 'thread',
+      onboardingSeen: preference.onboardingSeen === true,
+    };
+  }
   if (global) {
     return {
       productDefault: MESSAGE_DISPOSITION_PRODUCT_DEFAULT,
@@ -97,21 +108,29 @@ export function resolveMessageDispositionPreference(
 
 export function saveMessageDispositionPreference(
   projectRoot: string,
-  input: { scope: 'global'; disposition: MessageWorkDisposition | null } | { scope: 'onboarding'; seen: true },
+  input:
+    | { scope: 'global'; disposition: MessageWorkDisposition | null }
+    | { scope: 'thread'; threadId: string; disposition: MessageWorkDisposition | null }
+    | { scope: 'onboarding'; seen: true },
 ): MessageDispositionPreferenceSnapshot {
   updateUserPreferences(projectRoot, (current) => {
     const existing = sanitizeDispositionPreferences(current.messageDisposition);
     if (input.scope === 'onboarding') {
       return { ...current, messageDisposition: { ...existing, onboardingSeen: true } };
     }
+    if (input.scope === 'global') {
+      const next = { ...existing };
+      if (input.disposition) next.global = input.disposition;
+      else delete next.global;
+      return { ...current, messageDisposition: next };
+    }
+    const threads = { ...(existing.threads ?? {}) };
+    if (input.disposition) threads[input.threadId] = input.disposition;
+    else delete threads[input.threadId];
     const next = { ...existing };
-    if (input.disposition) next.global = input.disposition;
-    else delete next.global;
-    // F264 originally supported per-thread overrides. #1307 intentionally
-    // converges the product onto one global delivery default, so a save also
-    // removes obsolete local overrides instead of allowing hidden precedence.
-    delete next.threads;
+    if (Object.keys(threads).length > 0) next.threads = threads;
+    else delete next.threads;
     return { ...current, messageDisposition: next };
   });
-  return resolveMessageDispositionPreference(projectRoot);
+  return resolveMessageDispositionPreference(projectRoot, input.scope === 'thread' ? input.threadId : undefined);
 }

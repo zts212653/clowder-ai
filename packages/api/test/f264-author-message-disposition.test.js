@@ -5,9 +5,7 @@ import { join } from 'node:path';
 import { beforeEach, describe, test } from 'node:test';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-const { saveMessageDispositionPreference, updateUserPreferences } = await import(
-  '../dist/config/user-preferences-store.js'
-);
+const { saveMessageDispositionPreference } = await import('../dist/config/user-preferences-store.js');
 const {
   resolveFreshnessCarrierCapabilityOrUndeclared,
   resolveMessageDispositionForAdmission,
@@ -228,20 +226,18 @@ describe('F264 author-declared message disposition', () => {
     });
   });
 
-  test('server admission uses the global default even when legacy thread preferences exist, while an explicit one-shot wins', async () => {
+  test('server admission resolves thread over global while an explicit one-shot wins', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'f264-disposition-admission-'));
     try {
       saveMessageDispositionPreference(projectRoot, { scope: 'global', disposition: 'continue_current' });
       assert.equal(resolveMessageDispositionForAdmission({ projectRoot, threadId: 'thread-a' }), 'continue_current');
 
-      updateUserPreferences(projectRoot, (current) => ({
-        ...current,
-        messageDisposition: {
-          global: 'continue_current',
-          threads: { 'thread-a': 'next_work' },
-        },
-      }));
-      assert.equal(resolveMessageDispositionForAdmission({ projectRoot, threadId: 'thread-a' }), 'continue_current');
+      saveMessageDispositionPreference(projectRoot, {
+        scope: 'thread',
+        threadId: 'thread-a',
+        disposition: 'next_work',
+      });
+      assert.equal(resolveMessageDispositionForAdmission({ projectRoot, threadId: 'thread-a' }), 'next_work');
       assert.equal(
         resolveMessageDispositionForAdmission({
           explicit: 'continue_current',

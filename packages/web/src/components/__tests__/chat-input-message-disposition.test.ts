@@ -79,9 +79,11 @@ describe('F264 author message disposition selector', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
       const body = init?.body ? JSON.parse(String(init.body)) : null;
       const snapshot =
-        body?.scope === 'global'
-          ? { ...productSnapshot, global: body.disposition, effective: body.disposition, source: 'global' }
-          : productSnapshot;
+        body?.scope === 'thread'
+          ? { ...productSnapshot, thread: body.disposition, effective: body.disposition, source: 'thread' }
+          : body?.scope === 'onboarding'
+            ? { ...productSnapshot, onboardingSeen: true }
+            : productSnapshot;
       return new Response(JSON.stringify(snapshot), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -95,14 +97,14 @@ describe('F264 author message disposition selector', () => {
     vi.restoreAllMocks();
   });
 
-  async function chooseOneShotAppend() {
+  async function chooseContinueCurrent() {
     const trigger = container.querySelector('[data-testid="message-disposition-trigger"]') as HTMLButtonElement;
     await act(async () => {
       trigger.click();
       await Promise.resolve();
     });
     act(() => {
-      (container.querySelector('[data-testid="append-current-reply"]') as HTMLButtonElement).click();
+      (container.querySelector('[data-disposition-option="continue_current"]') as HTMLButtonElement).click();
     });
     return trigger;
   }
@@ -117,7 +119,7 @@ describe('F264 author message disposition selector', () => {
     });
   }
 
-  it('uses a global Queue default and consumes a one-shot Append override after successful admission', async () => {
+  it('appears only for live work and consumes a one-shot override after successful admission', async () => {
     const onSend = vi.fn(async () => true);
     await act(async () => {
       root.render(React.createElement(ChatInput, { threadId: 'thread-1', onSend, hasActiveInvocation: false }));
@@ -128,8 +130,8 @@ describe('F264 author message disposition selector', () => {
       root.render(React.createElement(ChatInput, { threadId: 'thread-1', onSend, hasActiveInvocation: true }));
       await Promise.resolve();
     });
-    const trigger = await chooseOneShotAppend();
-    expect(trigger.textContent).toContain('本条：追加到当前回复');
+    const trigger = await chooseContinueCurrent();
+    expect(trigger.textContent).toContain('接着当前工作');
     await typeAndSend('顺手看一下问题 B');
 
     expect(onSend).toHaveBeenCalledWith(
@@ -140,7 +142,7 @@ describe('F264 author message disposition selector', () => {
       undefined,
       'continue_current',
     );
-    expect(trigger.textContent).toContain('默认：排队');
+    expect(trigger.textContent).toContain('下一件工作');
   });
 
   it('retains a one-shot override when admission fails', async () => {
@@ -149,7 +151,7 @@ describe('F264 author message disposition selector', () => {
       root.render(React.createElement(ChatInput, { threadId: 'thread-2', onSend, hasActiveInvocation: true }));
       await Promise.resolve();
     });
-    const trigger = await chooseOneShotAppend();
+    const trigger = await chooseContinueCurrent();
     await typeAndSend('网络失败也别吃掉我的选择');
 
     expect(onSend).toHaveBeenCalledWith(
@@ -160,7 +162,7 @@ describe('F264 author message disposition selector', () => {
       undefined,
       'continue_current',
     );
-    expect(trigger.textContent).toContain('本条：追加到当前回复');
+    expect(trigger.textContent).toContain('接着当前工作');
   });
 
   it('keeps Steer as a distinct primary-trigger action without author disposition', async () => {
@@ -169,27 +171,20 @@ describe('F264 author message disposition selector', () => {
       root.render(React.createElement(ChatInput, { threadId: 'thread-3', onSend, hasActiveInvocation: true }));
       await Promise.resolve();
     });
-    const trigger = await chooseOneShotAppend();
+    const trigger = await chooseContinueCurrent();
     const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
     act(() => setTextarea(textarea, '现在就换轨'));
     await act(async () => {
-      (container.querySelector('[aria-label="强制停止并发送此消息"]') as HTMLButtonElement).click();
+      (container.querySelector('[aria-label="强制发送"]') as HTMLButtonElement).click();
       await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(onSend).not.toHaveBeenCalled();
-    expect(container.textContent).toContain('会停止当前回复后发送此消息');
-    await act(async () => {
-      (container.querySelector('[data-testid="steer-confirm"]') as HTMLButtonElement).click();
       await Promise.resolve();
     });
 
     expect(onSend).toHaveBeenCalledWith('现在就换轨', undefined, undefined, 'force', undefined, undefined);
-    expect(trigger.textContent).toContain('本条：追加到当前回复');
+    expect(trigger.textContent).toContain('接着当前工作');
   });
 
-  it('persists only a global default instead of exposing per-thread scopes', async () => {
+  it('can persist the choice for this thread instead of changing every send', async () => {
     await act(async () => {
       root.render(React.createElement(ChatInput, { threadId: 'thread-4', onSend: vi.fn(), hasActiveInvocation: true }));
       await Promise.resolve();
@@ -199,6 +194,7 @@ describe('F264 author message disposition selector', () => {
       trigger.click();
       await Promise.resolve();
     });
+    act(() => (container.querySelector('[data-disposition-scope="thread"]') as HTMLButtonElement).click());
     await act(async () => {
       (container.querySelector('[data-disposition-option="continue_current"]') as HTMLButtonElement).click();
       await Promise.resolve();
@@ -207,16 +203,17 @@ describe('F264 author message disposition selector', () => {
 
     const put = mockApiFetch.mock.calls.find((call) => {
       if (call[0] !== '/api/config/message-disposition' || call[1]?.method !== 'PUT') return false;
-      return JSON.parse(String(call[1].body)).scope === 'global';
+      return JSON.parse(String(call[1].body)).scope === 'thread';
     });
     expect(JSON.parse(String(put?.[1]?.body))).toEqual({
-      scope: 'global',
+      scope: 'thread',
+      threadId: 'thread-4',
       disposition: 'continue_current',
     });
-    expect(trigger.textContent).toContain('默认：追加到当前回复');
+    expect(trigger.textContent).toContain('接着当前工作');
   });
 
-  it('does not expose preference scopes or provider internals in the send flow', async () => {
+  it('shows contextual onboarding only on the first meaningful open', async () => {
     await act(async () => {
       root.render(React.createElement(ChatInput, { threadId: 'thread-5', onSend: vi.fn(), hasActiveInvocation: true }));
       await Promise.resolve();
@@ -228,9 +225,11 @@ describe('F264 author message disposition selector', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(container.querySelector('[data-disposition-scope]')).toBeNull();
-    expect(container.textContent).not.toContain('本 Thread');
-    expect(container.textContent).not.toContain('provider');
+    expect(container.querySelector('[data-testid="message-disposition-onboarding"]')).not.toBeNull();
+
+    act(() => trigger.click());
+    act(() => trigger.click());
+    expect(container.querySelector('[data-testid="message-disposition-onboarding"]')).toBeNull();
   });
 
   it('fails closed and explains unsupported or undeclared provider carriers', async () => {
@@ -251,13 +250,14 @@ describe('F264 author message disposition selector', () => {
       await Promise.resolve();
     });
     const trigger = container.querySelector('[data-testid="message-disposition-trigger"]') as HTMLButtonElement;
-    expect(trigger.textContent).toContain('默认：排队');
+    expect(trigger.textContent).toContain('下一件工作');
     await act(async () => {
       trigger.click();
       await Promise.resolve();
     });
-    expect(container.querySelector('[data-testid="append-current-reply"]')).toBeNull();
-    expect(container.textContent).toContain('排队不会打断当前回复');
+    const continueOption = container.querySelector('[data-disposition-option="continue_current"]') as HTMLButtonElement;
+    expect(continueOption.disabled).toBe(true);
+    expect(container.textContent).toContain('当前接入不支持本轮读取');
 
     act(() => {
       useChatStore.setState({
@@ -268,6 +268,6 @@ describe('F264 author message disposition selector', () => {
       root.render(React.createElement(ChatInput, { threadId: 'thread-6', onSend: vi.fn(), hasActiveInvocation: true }));
       await Promise.resolve();
     });
-    expect(container.textContent).toContain('默认：排队');
+    expect(container.textContent).toContain('能力未声明');
   });
 });

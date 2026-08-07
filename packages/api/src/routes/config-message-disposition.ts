@@ -17,6 +17,7 @@ const dispositionSchema = z.enum(['continue_current', 'next_work']);
 const querySchema = z.object({ threadId: z.string().min(1).optional() });
 const putSchema = z.discriminatedUnion('scope', [
   z.object({ scope: z.literal('global'), disposition: dispositionSchema.nullable() }),
+  z.object({ scope: z.literal('thread'), threadId: z.string().min(1), disposition: dispositionSchema.nullable() }),
   z.object({ scope: z.literal('onboarding'), seen: z.literal(true) }),
 ]);
 
