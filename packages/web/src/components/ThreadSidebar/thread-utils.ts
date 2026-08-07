@@ -223,6 +223,9 @@ function tabRecentThreads(threads: Thread[], unreadIds: Set<string>): Thread[] {
   const pinned = nonDefaultThreads(threads)
     .filter((thread) => thread.pinned)
     .sort((a, b) => sortPinnedUnreadActive(a, b, unreadIds));
+  // #1304: Recent tab no longer truncates (PR #3460 removed 8-item limit),
+  // so candidate selection by lastActiveAt is moot — all threads are candidates.
+  // Unread-first display sort within the full set is acceptable per issue.
   const recent = nonDefaultThreads(threads)
     .filter((thread) => !thread.pinned && !isSystemThread(thread))
     .sort((a, b) => sortPinnedUnreadActive(a, b, unreadIds));

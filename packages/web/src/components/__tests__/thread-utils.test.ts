@@ -808,6 +808,57 @@ describe('sidebar tab selectors', () => {
     expect(withUnread.threads.map((t) => t.id)).toEqual(['unread-old', 'read-new']);
   });
 
+  // #1304 + #3460: Recent tab no longer truncates, so old unread threads
+  // are NOT excluded — but they sort by unread-first then lastActiveAt,
+  // so old unread threads appear before newer read ones (acceptable per issue:
+  // "未读可以作为视觉状态"). This test verifies all threads are included.
+  it('recent tab includes all threads without truncation (no push-out)', () => {
+    const threads = [
+      makeThread({ id: 'default', title: '大厅', lastActiveAt: NOW }),
+      ...Array.from({ length: 8 }, (_, i) =>
+        makeThread({ id: `read-${i}`, projectPath: '/proj/a', lastActiveAt: NOW - i * 1_000 }),
+      ),
+      makeThread({ id: 'unread-old-1', projectPath: '/proj/b', lastActiveAt: NOW - 10 * DAY }),
+      makeThread({ id: 'unread-old-2', projectPath: '/proj/b', lastActiveAt: NOW - 20 * DAY }),
+    ];
+    const unreadIds = new Set(['unread-old-1', 'unread-old-2']);
+
+    const content = buildSidebarTabContent('recent', threads, new Set(), unreadIds, {
+      activeCutoffMs: 7 * DAY,
+      recentLimit: 8,
+    });
+
+    // All 10 non-default threads are included (no truncation)
+    expect(content.threads).toHaveLength(10);
+    // Unread threads sort before read threads (unread-first display)
+    expect(content.threads[0].id).toBe('unread-old-1');
+    expect(content.threads[1].id).toBe('unread-old-2');
+  });
+
+  it('recent tab still sorts unread first within the selected candidate set', () => {
+    // Even after time-based selection, an unread thread that DID make the cut
+    // (because it's recent enough) should still appear before read threads in
+    // the display order.
+    const threads = [
+      makeThread({ id: 'default', title: '大厅', lastActiveAt: NOW }),
+      ...Array.from({ length: 7 }, (_, i) =>
+        makeThread({ id: `read-${i}`, projectPath: '/proj/a', lastActiveAt: NOW - i * 1_000 }),
+      ),
+      makeThread({ id: 'unread-recent', projectPath: '/proj/b', lastActiveAt: NOW - 500 }),
+    ];
+    const unreadIds = new Set(['unread-recent']);
+
+    const content = buildSidebarTabContent('recent', threads, new Set(), unreadIds, {
+      activeCutoffMs: 7 * DAY,
+      recentLimit: 8,
+    });
+
+    // unread-recent is within the top-8 by time → it's selected.
+    // Within the 8 selected, it should sort before read threads (unread-first display).
+    expect(content.threads[0].id).toBe('unread-recent');
+    expect(content.threads).toHaveLength(8);
+  });
+
   it('project tab sorts unread threads before read threads within a group', () => {
     const threads = [
       makeThread({ id: 'default', title: '大厅', lastActiveAt: NOW }),

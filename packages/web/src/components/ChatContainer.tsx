@@ -790,17 +790,19 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _messageCount = messages.length;
   useEffect(() => {
-    // Re-arm suppression before each ack. /read/latest is idempotent — any
-    // successful POST means server cursor is at latest, so any successful ack
-    // can safely clear suppression (no generation tracking needed).
     armUnreadSuppression(threadId);
     apiFetch(`/api/threads/${encodeURIComponent(threadId)}/read/latest`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: '{}',
     })
-      .then((res) => {
-        if (res.ok) {
+      .then(async (res) => {
+        // #1304: Check caughtUp from response body, not just res.ok.
+        // HTTP 200 with caughtUp=false means cursor is stale — don't clear
+        // unread suppression or the badge will reappear on refresh.
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (data?.caughtUp) {
           confirmUnreadAck(threadId);
         }
       })

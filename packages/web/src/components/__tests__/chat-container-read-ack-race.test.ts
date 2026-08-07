@@ -4,7 +4,10 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { ChatContainer } from '@/components/ChatContainer';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-const mockApiFetch = vi.fn(async (_url: string, _opts?: Record<string, unknown>) => ({ ok: true }));
+const mockApiFetch = vi.fn(async (_url: string, _opts?: Record<string, unknown>) => ({
+  ok: true,
+  json: async () => ({ caughtUp: false, advanced: false }),
+}));
 
 // Mutable store state — mutate between renders to simulate thread switching
 let storeState = {
@@ -19,6 +22,11 @@ let storeState = {
     },
   ],
 };
+
+// #1304: Stable spies that persist across baseStore() calls so tests can
+// assert on the same instance the component actually invoked.
+const confirmUnreadAckSpy = vi.fn();
+const armUnreadSuppressionSpy = vi.fn();
 
 const baseStore = () => ({
   ...storeState,
@@ -44,8 +52,8 @@ const baseStore = () => ({
   viewMode: 'single' as const,
   setViewMode: vi.fn(),
   clearUnread: vi.fn(),
-  confirmUnreadAck: vi.fn(),
-  armUnreadSuppression: vi.fn(),
+  confirmUnreadAck: confirmUnreadAckSpy,
+  armUnreadSuppression: armUnreadSuppressionSpy,
   splitPaneThreadIds: [],
   setSplitPaneThreadIds: vi.fn(),
   setSplitPaneTarget: vi.fn(),
@@ -160,7 +168,10 @@ describe('F069-R5: read ack via POST /read/latest', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
-    mockApiFetch.mockClear();
+    mockApiFetch.mockReset();
+    mockApiFetch.mockResolvedValue({ ok: true, json: async () => ({ caughtUp: false, advanced: false }) });
+    confirmUnreadAckSpy.mockClear();
+    armUnreadSuppressionSpy.mockClear();
     storeState = {
       currentThreadId: 'thread-A',
       messages: [
@@ -308,5 +319,34 @@ describe('F069-R5: read ack via POST /read/latest', () => {
     );
     expect(newCalls.length).toBe(1);
     expect(newCalls[0][0]).toContain('thread-A');
+  });
+
+  // #1304: Frontend must check caughtUp from response body, not just res.ok.
+  // When caughtUp is false (stale cursor), confirmUnreadAck must NOT be called.
+  it('does not confirm unread ack when caughtUp is false', async () => {
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(confirmUnreadAckSpy).not.toHaveBeenCalled();
+  });
+
+  it('confirms unread ack when caughtUp is true', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ caughtUp: true, advanced: true }),
+    });
+
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(confirmUnreadAckSpy).toHaveBeenCalledWith('thread-A');
   });
 });

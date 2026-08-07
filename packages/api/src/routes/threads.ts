@@ -1275,7 +1275,15 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
 
     // #1269: Gated ack — applies durable-slot gate + conditional pre-reconcile
     const advanced = await gatedReadStateAck(opts.readStateStore, messageStore, userId, id, cursorToken);
-    return { advanced };
+    // #1304: caughtUp distinguishes "cursor at/beyond target" from "stale/can't compare"
+    // Check against both cursor (v2) and raw messageId (v1 fallback when V2 OFF)
+    const afterState = await opts.readStateStore.get(userId, id);
+    const caughtUp =
+      advanced ||
+      (!!afterState &&
+        (afterState.lastReadMessageId === cursorToken ||
+          afterState.lastReadMessageId === parseResult.data.upToMessageId));
+    return { advanced, caughtUp };
   });
 
   // F069-R5: POST /api/threads/:id/read/latest — ack to latest real message server-side.
@@ -1310,12 +1318,19 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     // so getLatestVisibleCursor covers all visible items without fallback.
     const latest = await messageStore.getLatestVisibleCursor(id);
     if (!latest) {
-      return { advanced: false, reason: 'no messages' };
+      return { advanced: false, caughtUp: true, reason: 'no messages' };
     }
 
     // #1269: Gated ack — applies durable-slot gate + conditional pre-reconcile
     const advanced = await gatedReadStateAck(opts.readStateStore, messageStore, userId, id, latest.cursor);
+    // #1304: caughtUp distinguishes "cursor at latest" from "stale/can't compare"
+    // Check against both cursor (v2) and raw messageId (v1 fallback when V2 OFF)
+    const afterState = await opts.readStateStore.get(userId, id);
+    const caughtUp =
+      advanced ||
+      (!!afterState &&
+        (afterState.lastReadMessageId === latest.cursor || afterState.lastReadMessageId === latest.messageId));
     // #1200 RED #23b: return both raw messageId and canonical v2 cursor
-    return { advanced, messageId: latest.messageId, cursor: latest.cursor };
+    return { advanced, caughtUp, messageId: latest.messageId, cursor: latest.cursor };
   });
 };
