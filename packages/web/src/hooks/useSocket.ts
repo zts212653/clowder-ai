@@ -1263,6 +1263,13 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
   }, [threadId, storeThreadId]);
 
   const cancelInvocation = useCallback((tid: string, catId?: string) => {
+    // #1307: the visible conversation Stop is the durable all-thread stop
+    // endpoint. A socket cancel-all clears live slots, but cannot on its own
+    // recover every persisted/orphaned running record that force-reset owns.
+    if (!catId) {
+      void apiFetch(`/api/threads/${encodeURIComponent(tid)}/force-reset`, { method: 'POST' });
+      return;
+    }
     const clientInstanceId = cancelClientInstanceIdRef.current;
     if (!clientInstanceId) return;
     emitExplicitCancel(socketRef.current, {

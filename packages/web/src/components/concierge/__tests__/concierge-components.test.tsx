@@ -1654,9 +1654,9 @@ describe('Block 9: Cancel button during processing', () => {
     await render(<ConciergePanel />);
     await flushEffects();
 
-    const cancelBtn = container.querySelector('button[aria-label="停止回复"]');
+    const cancelBtn = container.querySelector('button[aria-label="停止对话"]');
     expect(cancelBtn).not.toBeNull();
-    expect(cancelBtn?.textContent).toBe('停止');
+    expect(cancelBtn?.textContent).toBe('停止对话');
   });
 
   it('cancel button NOT present when idle', async () => {
@@ -1682,10 +1682,10 @@ describe('Block 9: Cancel button during processing', () => {
     await render(<ConciergePanel />);
     await flushEffects();
 
-    expect(container.querySelector('button[aria-label="停止回复"]')).toBeNull();
+    expect(container.querySelector('button[aria-label="停止对话"]')).toBeNull();
   });
 
-  it('cancel button calls per-cat cancel API (not force-reset) and transitions to idle', async () => {
+  it('stop button calls the whole-conversation stop API and transitions to idle', async () => {
     useConciergeStore.setState({
       configLoaded: true,
       surfaceState: 'bubble',
@@ -1695,7 +1695,7 @@ describe('Block 9: Cancel button during processing', () => {
     });
 
     mockApiFetch.mockImplementation((url: string) => {
-      if (url.includes('/cancel/gemini25')) {
+      if (url.includes('/force-reset')) {
         return Promise.resolve({
           ok: true,
           status: 200,
@@ -1726,7 +1726,7 @@ describe('Block 9: Cancel button during processing', () => {
     await render(<ConciergePanel />);
     await flushEffects();
 
-    const cancelBtn = container.querySelector('button[aria-label="停止回复"]') as HTMLButtonElement;
+    const cancelBtn = container.querySelector('button[aria-label="停止对话"]') as HTMLButtonElement;
     expect(cancelBtn).not.toBeNull();
 
     // Click cancel
@@ -1736,18 +1736,12 @@ describe('Block 9: Cancel button during processing', () => {
     });
     await flushEffects();
 
-    // Verify per-cat cancel was called (NOT force-reset)
-    const cancelCalls = mockApiFetch.mock.calls.filter(
-      (args) => typeof args[0] === 'string' && args[0].includes('/cancel/gemini25'),
-    );
-    expect(cancelCalls.length).toBe(1);
-    expect(cancelCalls[0][0]).toBe('/api/threads/thread-cancel-3/cancel/gemini25');
-
-    // Must NOT have called force-reset
+    // Stop is identical to the durable whole-conversation reset operation.
     const resetCalls = mockApiFetch.mock.calls.filter(
       (args) => typeof args[0] === 'string' && args[0].includes('/force-reset'),
     );
-    expect(resetCalls.length).toBe(0);
+    expect(resetCalls.length).toBe(1);
+    expect(resetCalls[0][0]).toBe('/api/threads/thread-cancel-3/force-reset');
 
     // Status should transition to idle
     expect(useConciergeStore.getState().invocationStatus).toBe('idle');
@@ -1777,6 +1771,6 @@ describe('Block 9: Cancel button during processing', () => {
     await flushEffects();
 
     // Pending shows "发送中" but no cancel button (message hasn't been accepted yet)
-    expect(container.querySelector('button[aria-label="停止回复"]')).toBeNull();
+    expect(container.querySelector('button[aria-label="停止对话"]')).toBeNull();
   });
 });

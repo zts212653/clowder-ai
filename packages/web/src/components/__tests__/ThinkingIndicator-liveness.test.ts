@@ -152,7 +152,7 @@ describe('F118 ThinkingIndicator liveness states', () => {
     expect(container.textContent).toContain('客户端初始化');
   });
 
-  it('cancel button calls onCancel with threadId', async () => {
+  it('stop button calls onCancel with the whole conversation threadId', async () => {
     storeState.catStatuses = { codex: 'suspected_stall' };
     storeState.catInvocations = {
       codex: {
@@ -180,7 +180,7 @@ describe('F118 ThinkingIndicator liveness states', () => {
       cancelBtn.click();
     });
 
-    expect(mockCancelInvocation).toHaveBeenCalledWith('thread-1', 'codex');
+    expect(mockCancelInvocation).toHaveBeenCalledWith('thread-1');
   });
 
   it('renders from a single active slot even when targetCats is stale or empty', async () => {
@@ -199,7 +199,7 @@ describe('F118 ThinkingIndicator liveness states', () => {
     expect(container.textContent).toContain('回复中');
   });
 
-  it('uses single active slot as cancel target when targetCats contains multiple stale cats', async () => {
+  it('uses the requested thread when targetCats contains multiple stale cats', async () => {
     storeState.targetCats = ['codex', 'opus'];
     storeState.activeInvocations = {
       'inv-codex': { catId: 'codex', mode: 'execute' },
@@ -231,7 +231,7 @@ describe('F118 ThinkingIndicator liveness states', () => {
       cancelBtn.click();
     });
 
-    expect(mockCancelInvocation).toHaveBeenCalledWith('thread-1', 'codex');
+    expect(mockCancelInvocation).toHaveBeenCalledWith('thread-1');
   });
 
   it('normal thinking state renders paw emoji (KD-9: Apple emoji preferred over Lucide SVG)', async () => {

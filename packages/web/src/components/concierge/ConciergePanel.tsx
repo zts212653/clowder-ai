@@ -216,15 +216,15 @@ export function ConciergePanel() {
     [behaviorEnabled, setBehaviorEnabled],
   );
 
-  // F229 UX: cancel/stop in-progress invocation via scoped per-cat cancel (F122B AC-B9).
-  // Uses /cancel/:catId (scoped to the duty cat) instead of /force-reset (whole-thread nuclear).
-  // dutyCatId comes from useConciergeQueue which polls activeInvocations during in_progress.
+  // #1307: every user-facing Stop ends the whole conversation. The concierge
+  // card can name the duty cat, but it must not secretly perform a narrower
+  // operation than the chat-level Stop control.
   const [cancelLoading, setCancelLoading] = useState(false);
   const handleCancel = useCallback(async () => {
-    if (!threadId || !queueStatus.dutyCatId || cancelLoading) return;
+    if (!threadId || cancelLoading) return;
     setCancelLoading(true);
     try {
-      const res = await apiFetch(`/api/threads/${threadId}/cancel/${queueStatus.dutyCatId}`, {
+      const res = await apiFetch(`/api/threads/${threadId}/force-reset`, {
         method: 'POST',
       });
       if (res.ok) {
@@ -235,7 +235,7 @@ export function ConciergePanel() {
     } finally {
       setCancelLoading(false);
     }
-  }, [threadId, queueStatus.dutyCatId, cancelLoading, setInvocationStatus]);
+  }, [threadId, cancelLoading, setInvocationStatus]);
 
   const handleSend = useCallback(async () => {
     const text = inputValue.trim();
@@ -549,8 +549,8 @@ export function ConciergePanel() {
               </span>
               <button
                 type="button"
-                aria-label="停止回复"
-                disabled={cancelLoading || !queueStatus.dutyCatId}
+                aria-label="停止对话"
+                disabled={cancelLoading}
                 onClick={() => void handleCancel()}
                 style={{
                   color: 'var(--cafe-text-muted)',
@@ -565,7 +565,7 @@ export function ConciergePanel() {
                   'focus:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--cafe-accent)]',
                 ].join(' ')}
               >
-                {cancelLoading ? '停止中…' : '停止'}
+                {cancelLoading ? '停止对话中…' : '停止对话'}
               </button>
             </div>
           )}

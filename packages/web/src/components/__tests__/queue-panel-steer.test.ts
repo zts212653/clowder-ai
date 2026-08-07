@@ -145,9 +145,9 @@ describe('QueuePanel steer (F047)', () => {
     expect(steerBtn).not.toBeNull();
     act(() => steerBtn?.click());
 
-    expect(container.textContent).toContain('取消当前回合');
-    expect(container.textContent).toContain('以这条消息立即重新启动');
-    expect(container.textContent).toContain('取消前已经完成的回复仍会发表');
+    expect(container.textContent).toContain('Steer（强制停止并发送此消息）');
+    expect(container.textContent).toContain('会停止当前回复后发送此消息');
+    expect(container.textContent).toContain('旧回复会被停止');
     expect(container.textContent).not.toContain('提到队首');
   });
 

@@ -3,10 +3,8 @@
 import { useEffect, useRef } from 'react';
 
 /**
- * F220 Phase 3 — force-reset 确认弹窗（AC-3.2 / AC-3.3）。
- * 真相源：docs/features/F220-a2a-collab-reliability.md §设计稿 + assets/F220/force-reset-mock.html
- * 点击不立即执行——先讲清 做什么/保留什么/何时用，确认才 onConfirm。
- * LL-048：force-reset 只清运行态，绝不碰消息/历史/记忆等持久化数据（文案明示"会保留什么"）。
+ * #1307 Stop confirmation. The implementation still calls force-reset, but
+ * users see one truthful all-thread Stop action rather than two names for it.
  */
 interface ForceResetDialogProps {
   open: boolean;
@@ -76,14 +74,14 @@ export function ForceResetDialog({ open, busy = false, onCancel, onConfirm }: Fo
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="强制重置这个对话"
+      aria-label="停止这个对话"
       className="fixed inset-0 z-50 flex items-center justify-center px-4"
       style={{ backgroundColor: 'color-mix(in srgb, var(--cafe-text) 32%, transparent)' }}
     >
       <div className="w-full max-w-sm rounded-2xl overflow-hidden bg-cafe-surface-elevated shadow-xl">
         <div className="flex items-center justify-between px-5 py-4 border-b border-cafe">
           <h3 className="text-sm font-bold" style={{ color: 'var(--cafe-text)' }}>
-            强制重置这个对话？
+            停止这个对话？
           </h3>
           <button
             type="button"
@@ -117,7 +115,7 @@ export function ForceResetDialog({ open, busy = false, onCancel, onConfirm }: Fo
               <IconInfo />
             </span>
             <span>
-              <b className="font-semibold">何时用：</b>仅在猫卡死、点「停止」也没反应时的最后手段。
+              <b className="font-semibold">会发生什么：</b>当前对话里的所有运行都会停止；之后可以继续发送新消息。
             </span>
           </div>
         </div>
@@ -139,7 +137,7 @@ export function ForceResetDialog({ open, busy = false, onCancel, onConfirm }: Fo
             className="rounded-xl px-4 py-2 text-sm font-semibold text-white transition-opacity disabled:opacity-60"
             style={{ backgroundColor: 'var(--semantic-critical)' }}
           >
-            强制重置
+            停止
           </button>
         </div>
       </div>

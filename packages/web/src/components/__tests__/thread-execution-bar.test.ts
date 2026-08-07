@@ -214,6 +214,7 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
 
     expect(container.querySelector('[data-app-server-stalled="true"]')).not.toBeNull();
     expect(container.textContent).toContain('可能在等待模型');
-    expect(container.querySelector('[aria-label="Stop 缅因猫"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Stop 缅因猫"]')).toBeNull();
+    expect(container.querySelector('[data-testid="thread-stop-entry"]')).not.toBeNull();
   });
 });

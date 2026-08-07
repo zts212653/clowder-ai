@@ -38,14 +38,14 @@ describe('ForceResetDialog', () => {
     expect(container.textContent).toBe('');
   });
 
-  it('renders title + three explanation rows (做什么/保留什么/何时用) when open', () => {
+  it('renders title + three explanation rows (做什么/保留什么/会发生什么) when open', () => {
     act(() => {
       root.render(React.createElement(ForceResetDialog, { open: true, onCancel: () => {}, onConfirm: () => {} }));
     });
-    expect(container.textContent).toContain('强制重置这个对话');
+    expect(container.textContent).toContain('停止这个对话');
     expect(container.textContent).toContain('会做什么');
     expect(container.textContent).toContain('会保留什么');
-    expect(container.textContent).toContain('何时用');
+    expect(container.textContent).toContain('会发生什么');
   });
 
   it('calls onCancel and onConfirm when respective buttons are clicked', async () => {
@@ -56,7 +56,7 @@ describe('ForceResetDialog', () => {
     });
     const buttons = Array.from(container.querySelectorAll('button'));
     const cancelBtn = buttons.find((b) => b.textContent?.includes('取消')) ?? null;
-    const confirmBtn = buttons.find((b) => b.textContent?.includes('强制重置')) ?? null;
+    const confirmBtn = buttons.find((b) => b.textContent?.trim() === '停止') ?? null;
     expect(cancelBtn).not.toBeNull();
     expect(confirmBtn).not.toBeNull();
 
@@ -77,9 +77,9 @@ describe('ForceResetDialog', () => {
         React.createElement(ForceResetDialog, { open: true, busy: true, onCancel: () => {}, onConfirm: () => {} }),
       );
     });
-    const confirmBtn = Array.from(container.querySelectorAll('button')).find((b) =>
-      b.textContent?.includes('强制重置'),
-    ) as HTMLButtonElement | undefined;
+    const confirmBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.trim() === '停止') as
+      | HTMLButtonElement
+      | undefined;
     expect(confirmBtn?.disabled).toBe(true);
   });
 });

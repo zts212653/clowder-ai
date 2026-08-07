@@ -6391,11 +6391,10 @@ export function useAgentMessages() {
   const handleStop = useCallback(
     (cancelFn: (threadId: string, catId?: string) => void, threadId: string) => {
       const store = useChatStore.getState();
-      // When exactly one cat is active, cancel only that cat to avoid
-      // thread-level cancelAll accidentally killing other cats.
-      const activeSlots = Object.values(store.getThreadState(threadId).activeInvocations ?? {});
-      const singleCatId = activeSlots.length === 1 ? activeSlots[0]?.catId : undefined;
-      cancelFn(threadId, singleCatId);
+      // #1307: a conversation-level Stop is always a full-thread stop. Per-cat
+      // cancellation remains an internal control-plane primitive and Steer uses
+      // its dedicated, explicitly destructive path.
+      cancelFn(threadId, undefined);
       clearPendingCallbacksForThread(threadId);
       const isActiveThreadStop = threadId === store.currentThreadId;
 

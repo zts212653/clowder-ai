@@ -82,7 +82,7 @@ function SquareIcon({ className }: { className?: string }) {
 }
 
 interface ThinkingIndicatorProps {
-  onCancel?: (threadId: string, catId?: string) => void;
+  onCancel?: (threadId: string) => void;
   threadId?: string;
 }
 
@@ -98,8 +98,8 @@ export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps
     useThreadLiveness(effectiveThreadId);
   const { getCatById } = useCatData();
 
-  // Derive display+cancel target from the same truth source (activeInvocations)
-  // to avoid "显示 A、取消 B" when targetCats is stale.
+  // Derive the displayed cat from the active invocation rather than stale target
+  // selection. A user-facing stop always applies to the entire conversation.
   const slots = Object.values(activeInvocations ?? {});
   const catId = slots.length === 1 ? slots[0]?.catId : targetCats.length === 1 ? targetCats[0] : undefined;
   if (!catId) return null;
@@ -163,12 +163,12 @@ export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps
             <button
               type="button"
               data-testid="cancel-btn"
-              onClick={() => onCancel(effectiveThreadId, catId)}
+              onClick={() => onCancel(effectiveThreadId)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-[var(--cafe-surface)] flex-shrink-0 transition-opacity hover:opacity-90"
               style={{ backgroundColor: 'var(--semantic-warning)' }}
             >
               <SquareIcon className="w-3.5 h-3.5" />
-              取消
+              停止对话
             </button>
           )}
         </div>
@@ -209,12 +209,12 @@ export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps
             <button
               type="button"
               data-testid="cancel-btn"
-              onClick={() => onCancel(effectiveThreadId, catId)}
+              onClick={() => onCancel(effectiveThreadId)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-[var(--cafe-surface)] flex-shrink-0 transition-opacity hover:opacity-90"
               style={{ backgroundColor: 'var(--semantic-critical)' }}
             >
               <SquareIcon className="w-3.5 h-3.5" />
-              取消
+              停止对话
             </button>
           )}
         </div>

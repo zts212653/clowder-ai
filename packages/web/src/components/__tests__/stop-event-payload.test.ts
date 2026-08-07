@@ -68,7 +68,7 @@ describe('Stop event payload regression', () => {
       );
     });
 
-    const stopBtn = container.querySelector('button[aria-label="Stop generation"]');
+    const stopBtn = container.querySelector('button[aria-label="停止对话"]');
     expect(stopBtn).toBeTruthy();
 
     act(() => {

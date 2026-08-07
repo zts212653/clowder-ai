@@ -18,7 +18,6 @@ const DEFAULT_SNAPSHOT: MessageDispositionPreferenceSnapshot = {
 };
 
 export type MessageDispositionSelectionSource = MessageDispositionPreferenceSource | 'once';
-export type MessageDispositionPreferenceScope = 'once' | 'thread' | 'global';
 
 export interface MessageDispositionPreferenceController {
   snapshot: MessageDispositionPreferenceSnapshot;
@@ -29,7 +28,7 @@ export interface MessageDispositionPreferenceController {
   error: string | null;
   setOneShot(disposition: MessageWorkDisposition): void;
   clearOneShot(): void;
-  setPreference(scope: 'thread' | 'global', disposition: MessageWorkDisposition | null): Promise<boolean>;
+  setGlobalPreference(disposition: MessageWorkDisposition): Promise<boolean>;
   markOnboardingSeen(): Promise<boolean>;
 }
 
@@ -103,15 +102,9 @@ export function useMessageDispositionPreference(
     }
   }, []);
 
-  const setPreference = useCallback(
-    (scope: 'thread' | 'global', disposition: MessageWorkDisposition | null) => {
-      if (scope === 'thread') {
-        if (!threadId) return Promise.resolve(false);
-        return save({ scope, threadId, disposition });
-      }
-      return save({ scope, disposition });
-    },
-    [save, threadId],
+  const setGlobalPreference = useCallback(
+    (disposition: MessageWorkDisposition) => save({ scope: 'global', disposition }),
+    [save],
   );
 
   const markOnboardingSeen = useCallback(() => {
@@ -129,9 +122,9 @@ export function useMessageDispositionPreference(
       error,
       setOneShot,
       clearOneShot,
-      setPreference,
+      setGlobalPreference,
       markOnboardingSeen,
     }),
-    [snapshot, oneShot, loading, error, setOneShot, clearOneShot, setPreference, markOnboardingSeen],
+    [snapshot, oneShot, loading, error, setOneShot, clearOneShot, setGlobalPreference, markOnboardingSeen],
   );
 }

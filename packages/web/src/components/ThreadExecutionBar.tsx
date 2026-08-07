@@ -37,7 +37,7 @@ interface ThreadExecutionBarProps {
   threadId?: string;
 }
 
-/** F122B AC-B8+B9: Per-cat execution status bar with stop controls.
+/** F122B AC-B8: Per-cat execution status bar.
  *  B8/B9 polish: cat names use formatCatName() — "品种（variant）" format, colors from cat-config. */
 export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
   const currentThreadId = useChatStore((s) => s.currentThreadId);
@@ -90,33 +90,20 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
     return () => clearInterval(interval);
   }, [activeCats.length]);
 
-  const handleStopCat = useCallback(
-    async (catId: string) => {
-      if (!effectiveThreadId) return;
-      await apiFetch(`/api/threads/${effectiveThreadId}/cancel/${catId}`, { method: 'POST' });
-    },
-    [effectiveThreadId],
-  );
-
-  const handleStopAll = useCallback(async () => {
-    if (!effectiveThreadId) return;
-    await Promise.all(activeCats.map(({ catId }) => handleStopCat(catId)));
-  }, [effectiveThreadId, activeCats, handleStopCat]);
-
-  // F220 Phase 3: 升级态判定 — 任一活跃猫疑似卡死（liveness warning）→ 入口上浮变醒目。
+  // A stalled turn makes Stop more visually urgent, but does not change its
+  // scope: it always stops the complete thread run.
   const stalled = activeCats.some(({ catId, lifecycle }) => {
     return isStreamingTipSuppressed(catStatuses[catId], lifecycle);
   });
-  // F220 Phase 3: 确认后调 force-reset 端点（只清运行态，LL-048 不碰持久化）→ toast → 关弹窗。
-  const handleForceReset = useCallback(async () => {
+  const handleStopThread = useCallback(async () => {
     if (!effectiveThreadId) return;
     setResetting(true);
     try {
       await apiFetch(`/api/threads/${effectiveThreadId}/force-reset`, { method: 'POST' });
       useToastStore.getState().addToast({
         type: 'success',
-        title: '已重置',
-        message: '对话已解放，可以发新消息了',
+        title: '已停止',
+        message: '对话中的运行已停止，可以继续发送新消息了',
         duration: 4000,
       });
       setResetDialogOpen(false);
@@ -136,31 +123,20 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
           return (
             <CatStatusChip
               key={catId}
-              catId={catId}
               label={info.label}
               color={info.color}
               startedAt={startedAt}
               lifecycle={lifecycle}
-              onStop={handleStopCat}
             />
           );
         })}
-        {activeCats.length > 1 && (
-          <button
-            type="button"
-            onClick={handleStopAll}
-            className="ml-auto text-xs text-cafe-muted hover:text-conn-red-text transition-colors shrink-0"
-          >
-            全部停止
-          </button>
-        )}
       </div>
-      <ForceResetEntry escalated={stalled} onClick={() => setResetDialogOpen(true)} />
+      <StopConversationEntry escalated={stalled} onClick={() => setResetDialogOpen(true)} />
       <ForceResetDialog
         open={resetDialogOpen}
         busy={resetting}
         onCancel={() => setResetDialogOpen(false)}
-        onConfirm={handleForceReset}
+        onConfirm={handleStopThread}
       />
     </div>
   );
@@ -185,15 +161,13 @@ function TriangleAlertIcon({ className }: { className?: string }) {
   );
 }
 
-/** F220 Phase 3: force-reset 入口。默认低调（dashed-top + 灰 + 小，藏面板底）；
- *  escalated（疑似卡死）时上浮变醒目（critical-surface 底 + 警告色）。 */
-function ForceResetEntry({ escalated, onClick }: { escalated: boolean; onClick: () => void }) {
+function StopConversationEntry({ escalated, onClick }: { escalated: boolean; onClick: () => void }) {
   if (escalated) {
     return (
       <div className="px-4 pb-1.5">
         <button
           type="button"
-          data-testid="force-reset-entry"
+          data-testid="thread-stop-entry"
           data-escalated="true"
           onClick={onClick}
           className="w-full flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition-opacity hover:opacity-90"
@@ -204,7 +178,7 @@ function ForceResetEntry({ escalated, onClick }: { escalated: boolean; onClick: 
           }}
         >
           <TriangleAlertIcon className="w-3.5 h-3.5" />
-          卡住了？强制重置
+          停止对话
         </button>
       </div>
     );
@@ -213,13 +187,13 @@ function ForceResetEntry({ escalated, onClick }: { escalated: boolean; onClick: 
     <div className="px-4 pb-1.5">
       <button
         type="button"
-        data-testid="force-reset-entry"
+        data-testid="thread-stop-entry"
         data-escalated="false"
         onClick={onClick}
         className="flex items-center gap-1.5 w-full pt-1.5 border-t border-dashed border-cafe text-xs text-cafe-muted hover:text-cafe-secondary transition-colors"
       >
         <TriangleAlertIcon className="w-3 h-3 opacity-70" />
-        卡住了？强制重置
+        停止对话
       </button>
     </div>
   );
@@ -240,19 +214,15 @@ function getStartedAt(
 }
 
 function CatStatusChip({
-  catId,
   label,
   color,
   startedAt,
   lifecycle,
-  onStop,
 }: {
-  catId: string;
   label: string;
   color: string;
   startedAt: number;
   lifecycle?: AppServerLifecycleSnapshot;
-  onStop: (catId: string) => void;
 }) {
   const elapsed = Math.floor((Date.now() - startedAt) / 1000);
   const minutes = Math.floor(elapsed / 60);
@@ -274,20 +244,6 @@ function CatStatusChip({
         </span>
       )}
       <span className="text-cafe-muted tabular-nums">{timeStr}</span>
-      <button
-        type="button"
-        onClick={() => onStop(catId)}
-        className="ml-0.5 text-cafe-muted hover:text-conn-red-text transition-colors"
-        aria-label={`Stop ${label}`}
-      >
-        <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-          <path
-            fillRule="evenodd"
-            d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-            clipRule="evenodd"
-          />
-        </svg>
-      </button>
     </span>
   );
 }

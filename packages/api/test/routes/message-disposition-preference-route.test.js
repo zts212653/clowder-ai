@@ -46,7 +46,7 @@ describe('GET/PUT /api/config/message-disposition (F264)', () => {
     });
   });
 
-  it('resolves thread over global and removing thread restores inheritance', async () => {
+  it('uses one global preference and rejects the retired per-thread preference scope', async () => {
     const headers = { 'x-cat-cafe-user': OWNER_ID };
     await app.inject({
       method: 'PUT',
@@ -54,32 +54,23 @@ describe('GET/PUT /api/config/message-disposition (F264)', () => {
       headers,
       payload: { scope: 'global', disposition: 'continue_current' },
     });
-    await app.inject({
+    const retiredThreadScope = await app.inject({
       method: 'PUT',
       url: '/api/config/message-disposition',
       headers,
       payload: { scope: 'thread', threadId: 'thread-a', disposition: 'next_work' },
     });
+    assert.equal(retiredThreadScope.statusCode, 400, retiredThreadScope.payload);
 
-    let res = await app.inject({ method: 'GET', url: '/api/config/message-disposition?threadId=thread-a' });
+    const res = await app.inject({ method: 'GET', url: '/api/config/message-disposition?threadId=thread-a' });
     assert.deepEqual(JSON.parse(res.payload), {
       productDefault: 'next_work',
       global: 'continue_current',
-      thread: 'next_work',
-      effective: 'next_work',
-      source: 'thread',
+      thread: null,
+      effective: 'continue_current',
+      source: 'global',
       onboardingSeen: false,
     });
-
-    res = await app.inject({
-      method: 'PUT',
-      url: '/api/config/message-disposition',
-      headers,
-      payload: { scope: 'thread', threadId: 'thread-a', disposition: null },
-    });
-    assert.equal(res.statusCode, 200, res.payload);
-    assert.equal(JSON.parse(res.payload).effective, 'continue_current');
-    assert.equal(JSON.parse(res.payload).source, 'global');
   });
 
   it('persists onboarding monotonically and preserves unrelated preferences', async () => {

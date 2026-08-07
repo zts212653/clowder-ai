@@ -107,13 +107,13 @@ describe('Invocation stall cancel invariant', () => {
     // Invariant: alive_but_silent MUST have a cancel button
     const cancelBtn = container.querySelector('[data-testid="cancel-btn"]');
     expect(cancelBtn).toBeTruthy();
-    expect(cancelBtn?.textContent).toContain('取消');
+    expect(cancelBtn?.textContent).toContain('停止');
   });
 
   // ─────────────────────────────────────────────────────────────────────────
-  // RED TEST 2: alive_but_silent cancel fires onCancel with correct args
+  // RED TEST 2: alive_but_silent stop ends the whole conversation
   // ─────────────────────────────────────────────────────────────────────────
-  it('alive_but_silent cancel button calls onCancel with threadId and catId', async () => {
+  it('alive_but_silent stop button calls onCancel with the threadId only', async () => {
     storeState.catStatuses = { codex: 'alive_but_silent' };
     storeState.catInvocations = {
       codex: {
@@ -144,7 +144,7 @@ describe('Invocation stall cancel invariant', () => {
       cancelBtn.click();
     });
 
-    expect(mockCancelInvocation).toHaveBeenCalledWith('thread-1', 'codex');
+    expect(mockCancelInvocation).toHaveBeenCalledWith('thread-1');
   });
 });
 
@@ -179,7 +179,7 @@ describe('ChatInput active invocation banner cancel invariant (structural)', () 
     // INVARIANT: banner MUST contain a cancel button gated on onStop
     expect(bannerBlock).toContain('data-testid="banner-cancel-btn"');
     expect(bannerBlock).toContain('onStop');
-    expect(bannerBlock).toContain('取消');
+    expect(bannerBlock).toContain('停止');
   });
 
   it('banner cancel button is gated on onStop (not always visible)', async () => {

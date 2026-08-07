@@ -337,7 +337,7 @@ describe('useAgentMessages loading lifecycle', () => {
     expect(mockSetStreaming).not.toHaveBeenCalled();
   });
 
-  it('stopping a background thread derives catId from the TARGET thread slots', () => {
+  it('stopping a background thread stops the full target-thread run rather than deriving one cat slot', () => {
     const cancelInvocation = vi.fn();
     storeState.activeInvocations = {
       'inv-active': { catId: 'codex', mode: 'execute' },
@@ -382,7 +382,7 @@ describe('useAgentMessages loading lifecycle', () => {
       captured?.handleStop(cancelInvocation, 'thread-2');
     });
 
-    expect(cancelInvocation).toHaveBeenCalledWith('thread-2', 'opus');
+    expect(cancelInvocation).toHaveBeenCalledWith('thread-2', undefined);
     expect(mockResetThreadInvocationState).toHaveBeenCalledWith('thread-2');
   });
 

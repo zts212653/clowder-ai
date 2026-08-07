@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { ExpandableProse } from './content-overflow';
 import { LoadingIcon } from './icons/LoadingIcon';
 import { MicIcon } from './icons/MicIcon';
 import { SendIcon } from './icons/SendIcon';
 import { StopRecordingIcon } from './icons/StopRecordingIcon';
+import { SteerQueuedEntryModal } from './SteerQueuedEntryModal';
 
 interface ChatInputActionButtonProps {
   onTranscript: (text: string) => void;
@@ -34,7 +35,7 @@ function QueueSendIcon({ className }: { className?: string }) {
 }
 
 /** Renders the action button states:
- *  1. Stop generation (disabled + active invocation)
+ *  1. Stop conversation (disabled + active invocation)
  *  2. Stop recording
  *  3. Transcribing
  *  4. Queue send (F39: active invocation + has text)
@@ -55,6 +56,7 @@ export function ChatInputActionButton({
   hasText,
 }: ChatInputActionButtonProps) {
   const voice = useVoiceInput();
+  const [confirmSteer, setConfirmSteer] = useState(false);
   const isSendDisabled = Boolean(disabled || sendDisabled);
 
   useEffect(() => {
@@ -110,8 +112,8 @@ export function ChatInputActionButton({
         <button
           onClick={() => onStop()}
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-conn-red-text text-[var(--cafe-surface)] transition-colors hover:bg-conn-red-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-conn-red-text/40"
-          title="停止生成"
-          aria-label="Stop generation"
+          title="停止对话"
+          aria-label="停止对话"
         >
           <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
             <rect x="4" y="4" width="12" height="12" rx="2" />
@@ -125,8 +127,8 @@ export function ChatInputActionButton({
         <button
           onClick={() => onStop()}
           className="p-3 rounded-xl bg-conn-red-text text-[var(--cafe-surface)] hover:bg-conn-red-hover transition-colors"
-          title="停止生成"
-          aria-label="Stop generation"
+          title="停止对话"
+          aria-label="停止对话"
         >
           <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
             <rect x="4" y="4" width="12" height="12" rx="2" />
@@ -164,11 +166,11 @@ export function ChatInputActionButton({
           </button>
           {onForceSend && (
             <button
-              onClick={onForceSend}
+              onClick={() => setConfirmSteer(true)}
               disabled={isSendDisabled}
               className="p-2 rounded-lg text-xs text-conn-red-text hover:bg-conn-red-bg disabled:opacity-40 transition-colors"
-              aria-label="强制发送"
-              title="强制发送 — 中断当前猫猫"
+              aria-label="强制停止并发送此消息"
+              title="强制停止并发送此消息"
             >
               <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
                 <path
@@ -200,6 +202,16 @@ export function ChatInputActionButton({
         >
           <MicIcon className="w-5 h-5" />
         </button>
+      )}
+      {confirmSteer && onForceSend && (
+        <SteerQueuedEntryModal
+          source="draft"
+          onCancel={() => setConfirmSteer(false)}
+          onConfirm={() => {
+            setConfirmSteer(false);
+            onForceSend();
+          }}
+        />
       )}
     </>
   );
