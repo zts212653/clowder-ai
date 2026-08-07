@@ -6390,11 +6390,13 @@ export function useAgentMessages() {
 
   const handleStop = useCallback(
     (cancelFn: (threadId: string, catId?: string) => boolean | void | Promise<boolean | void>, threadId: string) => {
-      const store = useChatStore.getState();
       // #1307: a conversation-level Stop is always a full-thread stop. Per-cat
       // cancellation remains an internal control-plane primitive and Steer uses
       // its dedicated, explicitly destructive path.
       const clearStoppedThread = () => {
+        // Force-reset is async. Resolve the current snapshot only after the request
+        // succeeds so a navigation during the request cannot clean a newly active thread.
+        const store = useChatStore.getState();
         clearPendingCallbacksForThread(threadId);
         const isActiveThreadStop = threadId === store.currentThreadId;
 
