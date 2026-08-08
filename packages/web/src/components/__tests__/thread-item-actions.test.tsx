@@ -270,7 +270,7 @@ describe('ThreadItem actions', () => {
     expect(labelButton?.textContent).toContain('+1');
   });
 
-  it('renders the title with two-line clamp at text-sm, not single-line truncate', () => {
+  it('renders title with rebalanced styling fixture (clowder-ai#1305)', () => {
     renderThread({ title: 'A very long thread title that should wrap to two lines in the sidebar' });
 
     const titleSpan = container.querySelector('[data-thread-id="thread-1"] span span:last-child');
@@ -278,8 +278,26 @@ describe('ThreadItem actions', () => {
     expect(titleSpan?.className).toContain('line-clamp-2');
     expect(titleSpan?.className).toContain('text-sm');
     expect(titleSpan?.className).toContain('leading-normal');
+    expect(titleSpan?.className).not.toContain('leading-snug');
     expect(titleSpan?.className).not.toContain('truncate');
     expect(titleSpan?.className).not.toContain('text-xs');
+  });
+
+  it('uses font-medium not font-semibold for active title (clowder-ai#1305 follow-up)', () => {
+    renderThread({ title: 'Active thread', isActive: true });
+
+    const titleSpan = container.querySelector('[data-thread-id="thread-1"] span span:last-child');
+    expect(titleSpan?.className).toContain('font-medium');
+    expect(titleSpan?.className).not.toContain('font-semibold');
+  });
+
+  it('uses py-2.5 card padding for vertical breathing room (clowder-ai#1305 follow-up)', () => {
+    renderThread({ title: 'Test' });
+
+    const card = container.querySelector('[data-thread-id="thread-1"]');
+    expect(card?.className).toContain('py-2.5');
+    expect(card?.className).not.toContain('py-2 ');
+    expect(card?.className).not.toMatch(/py-2(?!\.)/);
   });
 
   it('keeps the full code-compatible tooltip format on the thread item', () => {
