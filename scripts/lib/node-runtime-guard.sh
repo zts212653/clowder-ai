@@ -17,7 +17,11 @@ node_runtime_version() {
 
 node_runtime_major() {
   local node_bin="$1"
-  "$node_bin" -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || return 1
+  # Return the major as a *string*, never Number(): `node -p` prints inspected
+  # numbers with ANSI codes whenever colors are forced (agent/CI shells export
+  # FORCE_COLOR), so Number(...) yields "\e[33m24\e[39m" and every numeric test
+  # below dies with "integer expression expected". Strings are printed raw.
+  "$node_bin" -p 'process.versions.node.split(".")[0]' 2>/dev/null || return 1
 }
 
 node_runtime_supported() {

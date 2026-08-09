@@ -48,7 +48,7 @@
     "dev": "pnpm -r --parallel run dev",
     "build": "pnpm -r run build",
     "lint": "pnpm -r run lint",
-    "check": "pnpm check:no-provider-canary-residue && pnpm check:paw-feel-disposition-boundaries && pnpm check:paw-feel-disposition-capacity && pnpm biome check . --diagnostic-level=error && pnpm check:biome-review-worktrees && pnpm check:features && pnpm check:capability-tips && pnpm check:capability-tips-enablement && pnpm check:sop-definitions && pnpm check:co-creation-docs-lane && pnpm check:review-completion-routing && pnpm check:skills:manifest && pnpm check:skills:surfaces && pnpm check:env-ports && pnpm check:env-registry && pnpm check:env-example && pnpm check:start-profile-isolation && pnpm check:pre-merge-gate && pnpm check:prompt-time-apis && pnpm check:guides && pnpm check:followup-tails && pnpm check:scripts-ascii-only && pnpm check:no-codex-provider-exit-suppression && pnpm check:f212-reconciliation-eval && pnpm check:whisper-dispatch",
+    "check": "pnpm check:no-provider-canary-residue && pnpm check:paw-feel-disposition-boundaries && pnpm check:paw-feel-disposition-capacity && pnpm biome check . --diagnostic-level=error && pnpm check:biome-review-worktrees && pnpm check:features && pnpm check:capability-tips && pnpm check:capability-tips-enablement && pnpm check:sop-definitions && pnpm check:co-creation-docs-lane && pnpm check:review-completion-routing && pnpm check:skills:manifest && pnpm check:skills:surfaces && pnpm check:env-ports && pnpm check:env-registry && pnpm check:env-example && pnpm check:start-profile-isolation && pnpm check:node-runtime-guard && pnpm check:pre-merge-gate && pnpm check:prompt-time-apis && pnpm check:guides && pnpm check:followup-tails && pnpm check:scripts-ascii-only && pnpm check:no-codex-provider-exit-suppression && pnpm check:f212-reconciliation-eval && pnpm check:whisper-dispatch",
     "check:no-codex-provider-exit-suppression": "node --test --test-concurrency=1 scripts/check-no-codex-provider-exit-suppression-literal.test.mjs scripts/check-no-codex-provider-exit-suppression-ast.test.mjs scripts/check-no-codex-provider-exit-suppression-isolation.test.mjs scripts/check-no-codex-provider-exit-suppression-structural.test.mjs scripts/check-no-provider-canary-residue.test.mjs && node scripts/check-no-codex-provider-exit-suppression.mjs && node scripts/check-no-provider-canary-residue.mjs",
     "check:no-provider-canary-residue": "node scripts/check-no-provider-canary-residue.mjs",
     "check:paw-feel-disposition-boundaries": "node --test scripts/check-paw-feel-disposition-boundaries.test.mjs && node scripts/check-paw-feel-disposition-boundaries.mjs",
@@ -107,6 +107,7 @@
     "logs:health": "bash ./scripts/logs-health.sh",
     "clean": "pnpm -r run clean && rm -rf node_modules",
     "check:start-profile-isolation": "node --test scripts/start-dev-profile-isolation.test.mjs",
+    "check:node-runtime-guard": "node --test scripts/node-runtime-guard.test.mjs",
     "check:brand-dictionary": "node --test scripts/brand-dictionary-helper.test.mjs",
     "check:brand-guard": "node --test scripts/intake-from-opensource.test.mjs scripts/lib/intake-gh-retry.test.mjs"
   },
