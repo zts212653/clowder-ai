@@ -5410,6 +5410,89 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(callbackEnv.OPENAI_API_BASE, 'https://api.bound.example');
   });
 
+  it('injects Atlas Cloud env aliases for OpenAI-compatible account bindings', async () => {
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const root = await mkdtemp(join(tmpdir(), 'atlascloud-openai-profile-'));
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+    setGlobalRoot(root);
+
+    const boundProfile = await createProviderProfile(root, {
+      provider: 'openai',
+      name: 'atlas-cloud-openai',
+      mode: 'api_key',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.atlascloud.ai/v1',
+      apiKey: 'sk-atlas-openai',
+      models: ['qwen/qwen3.5-flash'],
+      setActive: false,
+    });
+
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const originalConfig = catRegistry.tryGet('codex')?.config;
+    assert.ok(originalConfig, 'codex config should exist in registry');
+    const boundCatId = 'codex-atlascloud-profile-test';
+    catRegistry.register(boundCatId, {
+      ...originalConfig,
+      id: boundCatId,
+      mentionPatterns: [`@${boundCatId}`],
+      clientId: 'openai',
+      accountRef: boundProfile.id,
+      defaultModel: 'qwen/qwen3.5-flash',
+    });
+
+    const optionsSeen = [];
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    const previousCwd = process.cwd();
+    const previousEnvMcpPath = process.env.CAT_CAFE_MCP_SERVER_PATH;
+    try {
+      process.chdir(apiDir);
+      delete process.env.CAT_CAFE_MCP_SERVER_PATH;
+      await collect(
+        invokeSingleCat(deps, {
+          catId: boundCatId,
+          service,
+          prompt: 'test',
+          userId: 'user-atlascloud-openai-bound',
+          threadId: 'thread-atlascloud-openai-bound',
+          isLastCat: true,
+        }),
+      );
+    } finally {
+      process.chdir(previousCwd);
+      if (previousEnvMcpPath === undefined) delete process.env.CAT_CAFE_MCP_SERVER_PATH;
+      else process.env.CAT_CAFE_MCP_SERVER_PATH = previousEnvMcpPath;
+      restoreGlobalRoot();
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) {
+        catRegistry.register(id, config);
+      }
+      await rmWithRetry(root);
+    }
+
+    const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
+    assert.equal(callbackEnv.CODEX_AUTH_MODE, 'api_key');
+    assert.equal(callbackEnv.OPENAI_API_KEY, 'sk-atlas-openai');
+    assert.equal(callbackEnv.OPENAI_BASE_URL, 'https://api.atlascloud.ai/v1');
+    assert.equal(callbackEnv.OPENAI_API_BASE, 'https://api.atlascloud.ai/v1');
+    assert.equal(callbackEnv.ATLASCLOUD_API_KEY, 'sk-atlas-openai');
+    assert.equal(callbackEnv.ATLAS_CLOUD_API_KEY, 'sk-atlas-openai');
+    assert.equal(callbackEnv.ATLASCLOUD_BASE_URL, 'https://api.atlascloud.ai/v1');
+    assert.equal(callbackEnv.ATLAS_CLOUD_BASE_URL, 'https://api.atlascloud.ai/v1');
+    assert.equal(callbackEnv.OPENROUTER_API_KEY, undefined);
+  });
+
   it('F127 P1: explicit builtin codex bindings force oauth callback env', async () => {
     const root = await mkdtemp(join(tmpdir(), 'f127-openai-builtin-oauth-'));
     const apiDir = join(root, 'packages', 'api');

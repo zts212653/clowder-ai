@@ -25,6 +25,13 @@ const MODEL_SUGGESTIONS: Partial<Record<BuiltinAccountClient, string[]>> = {
   opencode: ['claude-sonnet-4-6', 'claude-opus-4-6'],
 };
 
+const ATLAS_CLOUD_BASE_URL = 'https://api.atlascloud.ai/v1';
+const ATLAS_CLOUD_MODELS = ['qwen/qwen3.5-flash', 'deepseek-ai/deepseek-v4-pro'] as const;
+
+function isAtlasCloudPresetBaseUrl(value: string): boolean {
+  return value.trim().replace(/\/+$/, '') === ATLAS_CLOUD_BASE_URL;
+}
+
 export interface UnifiedAuthEditData {
   id: string;
   displayName?: string;
@@ -87,6 +94,27 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
   if (!open) return null;
 
   const isOAuth = authMode === 'oauth';
+  const canUseAtlasCloudPreset = !initialClientId || initialClientId === 'openai';
+
+  const applyAtlasCloudPreset = () => {
+    if (!isEdit) {
+      setAuthMode('api_key');
+    }
+    if (!initialClientId) {
+      setClientId('openai');
+    }
+    if (!displayName.trim()) {
+      setDisplayName('Atlas Cloud');
+    }
+    setBaseUrl(ATLAS_CLOUD_BASE_URL);
+    setModels(Array.from(new Set([...models, ...ATLAS_CLOUD_MODELS])));
+    setError(null);
+  };
+
+  const resolveApiKeyClientId = (): BuiltinAccountClient | undefined =>
+    initialClientId ??
+    (editProfile?.clientId ? clientId : undefined) ??
+    (isAtlasCloudPresetBaseUrl(baseUrl) ? 'openai' : undefined);
 
   /** POSIX env var key: must start with uppercase or _, rest alphanumeric + _. */
   const ENV_KEY_RE = /^[A-Z_][A-Za-z0-9_]*$/;
@@ -131,13 +159,14 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
     try {
       if (isEdit) {
         const envVars = buildEnvVars();
+        const apiKeyClientId = resolveApiKeyClientId();
         const patch: Record<string, unknown> = {
           displayName: displayName.trim(),
           models,
           envVars: envVars ?? {},
         };
-        if (editProfile?.clientId) {
-          patch.clientId = clientId;
+        if (apiKeyClientId) {
+          patch.clientId = apiKeyClientId;
         }
         if (baseUrl.trim()) patch.baseUrl = baseUrl.trim();
         if (apiKey.trim()) patch.apiKey = apiKey.trim();
@@ -176,13 +205,14 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
           onClose();
         }
       } else {
+        const apiKeyClientId = resolveApiKeyClientId();
         const res = await apiFetch('/api/accounts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             displayName: displayName.trim(),
             authType: 'api_key',
-            ...(initialClientId ? { clientId: initialClientId } : {}),
+            ...(apiKeyClientId ? { clientId: apiKeyClientId } : {}),
             baseUrl: baseUrl.trim(),
             apiKey: apiKey.trim(),
             models,
@@ -297,7 +327,18 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
           {!isOAuth && (
             <>
               <div>
-                <label className="mb-1 block text-xs font-medium text-cafe-secondary">API 服务地址 (Base URL)</label>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <label className="block text-xs font-medium text-cafe-secondary">API 服务地址 (Base URL)</label>
+                  {canUseAtlasCloudPreset && (
+                    <button
+                      type="button"
+                      onClick={applyAtlasCloudPreset}
+                      className="rounded-full border border-[var(--console-border-soft)] px-2 py-0.5 text-micro font-medium text-cafe-secondary transition hover:border-cafe-accent hover:text-cafe-accent"
+                    >
+                      Atlas Cloud
+                    </button>
+                  )}
+                </div>
                 <input
                   value={baseUrl}
                   onChange={(e) => setBaseUrl(e.target.value)}
