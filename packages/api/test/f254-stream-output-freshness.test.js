@@ -106,6 +106,28 @@ describe('F254 Phase D — checkStreamOutputFreshness', () => {
     assert.equal(result.unseenCount, 0);
   });
 
+  it('reads a persisted seen cursor with the fail-closed unresolved-anchor policy', async () => {
+    await cursorStore.ackSeenCursor(userId, catId, threadId, msgId2);
+    let readOptions;
+    const messageStore = {
+      getByThreadAfter(_threadId, _afterId, _limit, _userId, options) {
+        readOptions = options;
+        return [];
+      },
+    };
+
+    const result = await checkStreamOutputFreshness({
+      userId,
+      catId,
+      threadId,
+      cursorStore,
+      messageStore,
+    });
+
+    assert.equal(result.stale, false);
+    assert.deepEqual(readOptions, { unresolvedCursorPolicy: 'empty' });
+  });
+
   it('returns fresh when only self-messages exist after seenCursor (AC-D5)', async () => {
     await cursorStore.ackSeenCursor(userId, catId, threadId, msgId1);
     const messageStore = createMockMessageStore([
@@ -591,7 +613,7 @@ describe('F254 Phase D — checkStreamOutputFreshness', () => {
       threadId,
       cursorStore,
       messageStore,
-      queueChecker: createQueueChecker(queue),
+      queueChecker: createQueueChecker(queue, { parentInvocationId: undefined }),
     });
 
     assert.equal(result.stale, false);

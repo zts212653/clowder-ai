@@ -19,58 +19,15 @@ vi.mock('@/components/ThreadCatStatus', () => ({
   ThreadCatStatus: () => null,
 }));
 
-vi.mock('@/components/ThreadSidebar/ThreadCatSettings', () => ({
-  ThreadCatSettings: ({
-    triggerIcon,
-    triggerLabel,
-    triggerRole,
-  }: {
-    triggerIcon?: React.ReactNode;
-    triggerLabel?: string;
-    triggerRole?: 'menuitem';
-  }) =>
-    React.createElement(
-      'button',
-      { role: triggerRole, title: '设置默认猫猫', type: 'button' },
-      triggerIcon,
-      React.createElement('span', null, triggerLabel ?? '设置默认猫猫'),
-    ),
-}));
-
-vi.mock('@/components/ThreadSidebar/ThreadEffortSettings', () => ({
-  ThreadEffortSettings: ({
-    triggerIcon,
-    triggerLabel,
-    triggerRole,
-  }: {
-    triggerIcon?: React.ReactNode;
-    triggerLabel?: string;
-    triggerRole?: 'menuitem';
-  }) =>
-    React.createElement(
-      'button',
-      { role: triggerRole, title: '思考档位', type: 'button' },
-      triggerIcon,
-      React.createElement('span', null, triggerLabel ?? '思考档位'),
-    ),
-}));
-
-vi.mock('@/components/ThreadSidebar/ThreadLabelPicker', () => ({
-  ThreadLabelPicker: ({
-    triggerIcon,
-    triggerLabel,
-    triggerRole,
-  }: {
-    triggerIcon?: React.ReactNode;
-    triggerLabel?: string;
-    triggerRole?: 'menuitem';
-  }) =>
-    React.createElement(
-      'button',
-      { role: triggerRole, title: '标签管理', type: 'button' },
-      triggerIcon,
-      React.createElement('span', null, triggerLabel ?? '标签管理'),
-    ),
+vi.mock('@/components/ThreadSidebar/ThreadSettingsPanel', () => ({
+  ThreadSettingsPanel: ({ open }: { open: boolean }) =>
+    open
+      ? React.createElement(
+          'aside',
+          { 'data-testid': 'thread-settings-panel', 'data-thread-settings-panel': 'true' },
+          React.createElement('button', { type: 'button' }, '面板内操作'),
+        )
+      : null,
 }));
 
 vi.mock('@/components/icons/HubIcon', () => ({
@@ -198,7 +155,9 @@ describe('ThreadItem actions', () => {
     renderThread();
 
     const item = container.querySelector('[data-thread-id="thread-1"]');
-    expect(item?.getAttribute('title')).toContain('路径: /projects/cat-cafe');
+    const title = item?.querySelector('span[title*="路径: /projects/cat-cafe"]');
+    expect(item?.getAttribute('title')).toBeNull();
+    expect(title).not.toBeNull();
   });
 
   it('shows secondary actions inside the more menu', () => {
@@ -212,13 +171,13 @@ describe('ThreadItem actions', () => {
     // Pin is NOT in the menu (it's a fixed button outside)
     expect(menu?.textContent).not.toContain('置顶');
     expect(menu?.textContent).toContain('删除对话');
-    expect(menu?.textContent).toContain('设置默认猫猫');
-    expect(menu?.textContent).toContain('思考档位');
-    expect(menu?.textContent?.indexOf('思考档位')).toBeGreaterThan(menu?.textContent?.indexOf('设置默认猫猫') ?? -1);
-    expect(menu?.textContent?.indexOf('思考档位')).toBeLessThan(menu?.textContent?.indexOf('重命名对话') ?? Infinity);
+    expect(menu?.textContent).toContain('对话设置');
+    expect(menu?.textContent).not.toContain('设置默认猫猫');
+    expect(menu?.textContent).not.toContain('思考档位');
+    expect(menu?.textContent).not.toContain('速度档位');
+    expect(menu?.textContent).not.toContain('标签管理');
     expect(menu?.textContent).toContain('重命名对话');
     expect(menu?.textContent).toContain('导出对话');
-    expect(menu?.textContent).toContain('标签管理');
     expect(menu?.textContent).toContain('收藏');
   });
 
@@ -232,7 +191,7 @@ describe('ThreadItem actions', () => {
     const menu = container.querySelector('[role="menu"]');
     expect(menu).not.toBeNull();
 
-    for (const label of ['设置默认猫猫', '思考档位', '重命名对话', '导出对话', '标签管理', '收藏', '删除对话']) {
+    for (const label of ['对话设置', '重命名对话', '导出对话', '收藏', '删除对话']) {
       const item = Array.from(menu?.querySelectorAll('[role="menuitem"]') ?? []).find((el) =>
         el.textContent?.includes(label),
       );
@@ -241,6 +200,41 @@ describe('ThreadItem actions', () => {
       expect(first?.querySelector('svg[aria-hidden="true"]') ?? first?.matches('svg[aria-hidden="true"]')).toBeTruthy();
       expect(item?.textContent).toContain(label);
     }
+  });
+
+  it('closes the short action menu before opening the unified settings surface', () => {
+    renderThread();
+
+    act(() => {
+      buttonByTitle('更多操作')?.click();
+    });
+    const settingsItem = Array.from(container.querySelectorAll('[role="menuitem"]')).find(
+      (item) => item.textContent === '对话设置',
+    ) as HTMLButtonElement | undefined;
+
+    act(() => settingsItem?.click());
+
+    expect(container.querySelector('[role="menu"]')).toBeNull();
+    expect(container.querySelector('[data-testid="thread-settings-panel"]')).not.toBeNull();
+  });
+
+  it('does not select the thread when using controls inside the portaled settings surface', () => {
+    const onSelect = vi.fn();
+    renderThread({ onSelect });
+
+    act(() => buttonByTitle('更多操作')?.click());
+    const settingsItem = Array.from(container.querySelectorAll('[role="menuitem"]')).find(
+      (item) => item.textContent === '对话设置',
+    ) as HTMLButtonElement | undefined;
+    act(() => settingsItem?.click());
+    act(() => {
+      const panelControl = Array.from(container.querySelectorAll('button')).find(
+        (button) => button.textContent === '面板内操作',
+      );
+      panelControl?.click();
+    });
+
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it('shows a filled favorite mark next to favorited thread titles', () => {
@@ -304,9 +298,11 @@ describe('ThreadItem actions', () => {
     renderThread({ participants: ['cat-a'], projectPath: '/projects/cat-cafe' });
 
     const item = container.querySelector('[data-thread-id="thread-1"]');
-    expect(item?.getAttribute('title')).toContain('Thread 1');
-    expect(item?.getAttribute('title')).toContain('参与: 猫甲');
-    expect(item?.getAttribute('title')).toContain('路径: /projects/cat-cafe');
-    expect(item?.getAttribute('title')).toContain('1分');
+    const title = item?.querySelector('span[title*="Thread 1"]');
+    expect(item?.getAttribute('title')).toBeNull();
+    expect(title?.getAttribute('title')).toContain('Thread 1');
+    expect(title?.getAttribute('title')).toContain('参与: 猫甲');
+    expect(title?.getAttribute('title')).toContain('路径: /projects/cat-cafe');
+    expect(title?.getAttribute('title')).toContain('1分');
   });
 });

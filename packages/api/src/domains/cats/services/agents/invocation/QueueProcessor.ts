@@ -10,6 +10,7 @@
 import type {
   CatId,
   FreshnessSupplementFailureReason,
+  MessageContent,
   OutputCommitDecision,
   QueueTargetOutcome,
   QueueTerminalConsumptionWitness,
@@ -55,7 +56,12 @@ import { hydrateReplyPreview, type IMessageStore, type StoredMessage } from '../
 import { projectQueueReceipt } from '../../stores/ports/queued-message-receipt.js';
 import type { ITurnExecutionStore } from '../../stores/ports/TurnExecutionStore.js';
 import { type AgentMessage, mergeTokenUsage, type TokenUsage } from '../../types.js';
-import { createA2ASlotTrackingBridge, type PersistenceContext, type RouteOptions } from '../routing/route-helpers.js';
+import {
+  createA2ASlotTrackingBridge,
+  type PersistedPromptMessage,
+  type PersistenceContext,
+  type RouteOptions,
+} from '../routing/route-helpers.js';
 import {
   accumulateTextAggregate,
   accumulateTextParts,
@@ -995,61 +1001,27 @@ export class QueueProcessor {
    */
   async markPromptMessagesSeen(input: PromptMessagesExposedInput): Promise<void> {
     const exposed = new Set(input.messageIds);
+    const expectedWitnessMessageIds = new Set<string>();
     let receiptChanged = false;
 
     for (const candidate of this.deps.queue.list(input.threadId, input.userId)) {
-      if (candidate.status !== 'queued' && candidate.status !== 'processing') continue;
-      if (!candidate.targetCats.includes(input.catId)) continue;
-      const entryMessageIds = this.queueEntryMessageIds(candidate);
-      if (entryMessageIds.length === 0) continue;
-      if (entryMessageIds.some((messageId) => !exposed.has(messageId))) continue;
-
-      const before = this.deps.queue.getEntrySnapshot(input.threadId, input.userId, candidate.id);
-      if (candidate.status === 'queued') {
-        this.deps.queue.markQueuedSeen(
-          input.threadId,
-          input.userId,
-          candidate.id,
-          input.catId,
-          input.invocationId,
-          input.seenAt,
-        );
-      } else {
-        this.deps.queue.markProcessingSeen(
-          input.threadId,
-          input.userId,
-          candidate.id,
-          [input.catId],
-          input.invocationId,
-          input.seenAt,
-        );
-      }
-      const persistedEntry = this.deps.queue.getEntrySnapshot(input.threadId, input.userId, candidate.id);
-      const newlySeen =
-        !(before?.queuedSeenByCatIds ?? []).includes(input.catId) &&
-        (persistedEntry?.queuedSeenByCatIds ?? []).includes(input.catId);
-      const exposureChanged =
-        !(before?.queuedBodyExposures ?? []).some(
-          (exposure) => exposure.targetCatId === input.catId && exposure.invocationId === input.invocationId,
-        ) &&
-        (persistedEntry?.queuedBodyExposures ?? []).some(
-          (exposure) => exposure.targetCatId === input.catId && exposure.invocationId === input.invocationId,
-        );
-      const evidenceChanged =
-        before?.queuedSeenInvocationIdByCatId?.[input.catId] !==
-        persistedEntry?.queuedSeenInvocationIdByCatId?.[input.catId];
-      let reminderSeen = false;
-      if (persistedEntry && this.deps.queueCustodyCoordinator) {
-        await this.deps.queueCustodyCoordinator.persistEntry(persistedEntry);
-        reminderSeen = await this.deps.queueCustodyCoordinator.markReminderSeen(
-          persistedEntry,
-          input.catId,
-          input.invocationId,
-        );
-      }
-      if ([newlySeen, evidenceChanged, exposureChanged, reminderSeen].some(Boolean)) receiptChanged = true;
-      if (newlySeen) recordQueuedSeenTelemetry();
+      const entryMessageIds = this.fullyExposedCandidateMessageIds(candidate, input.catId, exposed);
+      if (!entryMessageIds) continue;
+      const persisted = await this.persistPromptCandidateSeen(candidate, input);
+      for (const messageId of persisted.witnessMessageIds) expectedWitnessMessageIds.add(messageId);
+      receiptChanged = persisted.receiptChanged || receiptChanged;
     }
+
+    await this.deps.queueCustodyCoordinator?.assertPromptExposurePersisted(
+      [...expectedWitnessMessageIds],
+      input.catId,
+      input.invocationId,
+    );
+    await this.deps.queueCustodyCoordinator?.assertPromptBodiesNotRecalled(
+      input.messageIds,
+      input.catId,
+      input.invocationId,
+    );
 
     if (receiptChanged) {
       await emitQueueUpdated(
@@ -1262,6 +1234,71 @@ export class QueueProcessor {
 
   private queueEntryMessageIds(entry: Pick<QueueEntry, 'messageId' | 'mergedMessageIds'>): string[] {
     return [entry.messageId ?? '', ...entry.mergedMessageIds].filter(Boolean);
+  }
+
+  private fullyExposedCandidateMessageIds(
+    candidate: QueueEntry,
+    targetCatId: string,
+    exposed: ReadonlySet<string>,
+  ): string[] | null {
+    if (candidate.status !== 'queued' && candidate.status !== 'processing') return null;
+    if (!candidate.targetCats.includes(targetCatId)) return null;
+    const messageIds = this.queueEntryMessageIds(candidate);
+    return messageIds.length > 0 && messageIds.every((messageId) => exposed.has(messageId)) ? messageIds : null;
+  }
+
+  private async persistPromptCandidateSeen(
+    candidate: QueueEntry,
+    input: PromptMessagesExposedInput,
+  ): Promise<{ receiptChanged: boolean; witnessMessageIds: string[] }> {
+    const before = this.deps.queue.getEntrySnapshot(input.threadId, input.userId, candidate.id);
+    if (candidate.status === 'queued') {
+      this.deps.queue.markQueuedSeen(
+        input.threadId,
+        input.userId,
+        candidate.id,
+        input.catId,
+        input.invocationId,
+        input.seenAt,
+      );
+    } else {
+      this.deps.queue.markProcessingSeen(
+        input.threadId,
+        input.userId,
+        candidate.id,
+        [input.catId],
+        input.invocationId,
+        input.seenAt,
+      );
+    }
+    const persisted = this.deps.queue.getEntrySnapshot(input.threadId, input.userId, candidate.id);
+    const newlySeen =
+      !(before?.queuedSeenByCatIds ?? []).includes(input.catId) &&
+      (persisted?.queuedSeenByCatIds ?? []).includes(input.catId);
+    const exposureChanged =
+      !(before?.queuedBodyExposures ?? []).some(
+        (exposure) => exposure.targetCatId === input.catId && exposure.invocationId === input.invocationId,
+      ) &&
+      (persisted?.queuedBodyExposures ?? []).some(
+        (exposure) => exposure.targetCatId === input.catId && exposure.invocationId === input.invocationId,
+      );
+    const evidenceChanged =
+      before?.queuedSeenInvocationIdByCatId?.[input.catId] !== persisted?.queuedSeenInvocationIdByCatId?.[input.catId];
+    let reminderSeen = false;
+    let witnessMessageIds: string[] = [];
+    if (persisted && this.deps.queueCustodyCoordinator) {
+      witnessMessageIds = await this.deps.queueCustodyCoordinator.persistEntry(persisted);
+      reminderSeen = await this.deps.queueCustodyCoordinator.markReminderSeen(
+        persisted,
+        input.catId,
+        input.invocationId,
+      );
+    }
+    if (newlySeen) recordQueuedSeenTelemetry();
+    return {
+      receiptChanged: newlySeen || evidenceChanged || exposureChanged || reminderSeen,
+      witnessMessageIds,
+    };
   }
 
   private async hasDurableMessageCustody(entry: QueueEntry): Promise<boolean> {
@@ -1676,6 +1713,109 @@ export class QueueProcessor {
           this.deps.queue.list(input.threadId, userId),
           this.deps.messageStore,
           'source_response_settled',
+        );
+      }
+    }
+  }
+
+  /**
+   * True recall removes the operational Queue carrier while an already-exposed
+   * child is allowed to finish. Settle that later terminal witness directly
+   * against the content-free source, keyed only by the exact child exposure.
+   */
+  private async settleDetachedExactSourceOnTerminal(input: {
+    threadId: string;
+    catId: string;
+    invocationId: string;
+    status: 'succeeded' | 'failed' | 'canceled' | 'canceled_by_user';
+    consumption?: QueueTerminalConsumptionWitness;
+  }): Promise<void> {
+    const coordinator = this.deps.queueCustodyCoordinator;
+    if (!coordinator) return;
+    let messages: StoredMessage[];
+    try {
+      messages = await this.deps.messageStore.getByQueueExposure(input.threadId, input.catId, input.invocationId);
+    } catch (err) {
+      this.deps.log.error(
+        { err, threadId: input.threadId, catId: input.catId, invocationId: input.invocationId },
+        '[F264] detached exact-source scan failed closed',
+      );
+      return;
+    }
+
+    const targetCatId = input.catId as CatId;
+    for (const message of messages) {
+      const custody = message.queueCustody;
+      const exposure = custody?.bodyExposures?.find(
+        (candidate) => candidate.targetCatId === input.catId && candidate.invocationId === input.invocationId,
+      );
+      if (
+        !custody ||
+        !exposure ||
+        custody.handledByCatIds.includes(targetCatId) ||
+        (!custody.pendingTargetCats.includes(targetCatId) && !custody.withdrawnByCatIds?.includes(targetCatId))
+      ) {
+        continue;
+      }
+
+      try {
+        const sourceResponse = (
+          await resolveQueueSourceResponseEvidence({
+            messageStore: this.deps.messageStore,
+            threadId: input.threadId,
+            userId: message.userId,
+            catId: input.catId,
+            invocationId: input.invocationId,
+            sourceMessageIds: [message.id],
+          })
+        )[0];
+        if (input.status !== 'succeeded' && !sourceResponse) continue;
+
+        const handledAt = Math.max(
+          Date.now(),
+          exposure.seenAt + 1,
+          (custody.withdrawnAtByCatId?.[input.catId] ?? 0) + 1,
+          (message.recall?.recalledAt ?? 0) + 1,
+        );
+        const outcome: QueueTargetOutcome = {
+          invocationId: input.invocationId,
+          disposition: sourceResponse ? 'responded' : 'completed_with_turn',
+          evidenceRef: { kind: 'invocation_lineage', invocationId: input.invocationId },
+          handledAt,
+          ...(sourceResponse
+            ? { consumption: sourceResponse.witness }
+            : input.consumption
+              ? { consumption: input.consumption }
+              : {}),
+        };
+        const completion = await coordinator.commitSuccessfulTargetForMessage(
+          custody.entryId,
+          message.id,
+          input.catId,
+          input.invocationId,
+          handledAt,
+          outcome,
+          () =>
+            !this.deps.queue
+              .list(input.threadId, message.userId)
+              .some((entry) => entry.id === custody.entryId && entry.targetCats.includes(input.catId)),
+        );
+        if (completion.handledTargetCats.includes(targetCatId)) {
+          this.deps.socketManager.broadcastToRoom(`thread:${input.threadId}`, 'message_receipt_updated', {
+            threadId: input.threadId,
+            messageId: message.id,
+          });
+        }
+      } catch (err) {
+        this.deps.log.error(
+          {
+            err,
+            threadId: input.threadId,
+            catId: input.catId,
+            invocationId: input.invocationId,
+            messageId: message.id,
+          },
+          '[F264] detached exact-source settlement failed closed',
         );
       }
     }
@@ -2173,6 +2313,12 @@ export class QueueProcessor {
           catId: failedCatId,
           invocationId: preferredInvocationId,
         });
+        await this.settleDetachedExactSourceOnTerminal({
+          threadId,
+          catId: failedCatId,
+          invocationId: preferredInvocationId,
+          status,
+        });
         await this.returnBoundQueueTargetsAfterAggregateNonSuccess({
           threadId,
           catId: failedCatId,
@@ -2200,14 +2346,24 @@ export class QueueProcessor {
         const successfulCatIds = new Set(completedCatIds);
         let exactReceiptSettlementBlocked = false;
         for (const handledCatId of successfulCatIds) {
+          const exactInvocationId = terminalInvocationIdByCatId[handledCatId] ?? invocationId;
           exactReceiptSettlementBlocked =
             (await this.settleQueuedTargetsAfterAggregateSuccess({
               threadId,
               catId: handledCatId,
               parentInvocationId: invocationId,
-              preferredInvocationId: terminalInvocationIdByCatId[handledCatId] ?? invocationId,
+              preferredInvocationId: exactInvocationId,
               terminalConsumptionByInvocationId,
             })) || exactReceiptSettlementBlocked;
+          if (exactInvocationId) {
+            await this.settleDetachedExactSourceOnTerminal({
+              threadId,
+              catId: handledCatId,
+              invocationId: exactInvocationId,
+              status,
+              consumption: terminalConsumptionByInvocationId[exactInvocationId],
+            });
+          }
         }
         for (const failedCatId of this.collectBoundQueueCatIds(threadId)) {
           if (successfulCatIds.has(failedCatId)) continue;
@@ -3646,13 +3802,21 @@ export class QueueProcessor {
 
       // F039 remaining: queued image messages must be visible to cats.
       // Aggregate contentBlocks from the stored user messages (messageId + merged).
-      const messageIds: string[] = [messageId ?? '', ...(entry.mergedMessageIds ?? []), ...batchedMessageIds].filter(
-        Boolean,
-      );
-      const contentBlocks: unknown[] = [];
+      const messageIds = [
+        ...new Set([messageId ?? '', ...(entry.mergedMessageIds ?? []), ...batchedMessageIds].filter(Boolean)),
+      ];
+      const contentBlocks: MessageContent[] = [];
+      const persistedPromptMessages: PersistedPromptMessage[] = [];
       for (const id of messageIds) {
         try {
           const stored = await messageStore.getById(id);
+          if (stored) {
+            persistedPromptMessages.push({
+              messageId: id,
+              content: stored.content,
+              ...(stored.contentBlocks?.length ? { contentBlocks: stored.contentBlocks } : {}),
+            });
+          }
           if (stored?.contentBlocks && stored.contentBlocks.length > 0) {
             contentBlocks.push(...stored.contentBlocks);
           }
@@ -3760,6 +3924,10 @@ export class QueueProcessor {
           persistenceContext,
           ...(invocationId ? { parentInvocationId: invocationId } : {}),
           persistedPromptMessageIds: messageIds,
+          // F063: this is the authoritative per-message hydration subset. Passing
+          // an explicit empty/partial array prevents the aggregate raw batch text
+          // from becoming either a prompt fallback or durable exposure evidence.
+          persistedPromptMessages,
           onPromptMessagesExposed: (input: PromptMessagesExposedInput) => this.markPromptMessagesSeen(input),
           ...(freshnessSupplementOriginalMessageId
             ? { a2aTriggerMessageId: freshnessSupplementOriginalMessageId }
@@ -4001,6 +4169,12 @@ export class QueueProcessor {
         finalStatus = 'failed';
         await this.cleanupStreamingOnFailure(threadId, invocationId, streamStartPromise, log);
         return executionResult('failed');
+      }
+
+      if (!entry.actionSuccessorFence && terminalDispositions.getSuccessfulCatIds().length === 0) {
+        throw new Error(
+          terminalDispositions.getPrimaryTerminalError() ?? 'all targeted cats completed without a success witness',
+        );
       }
 
       if (entry.actionSuccessorFence) {

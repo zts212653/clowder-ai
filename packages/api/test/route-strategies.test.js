@@ -381,7 +381,7 @@ describe('incremental current-message fallback helper', () => {
     );
   });
 
-  it('does not append raw current message when context already contains current message id', async () => {
+  it('does not infer current-message delivery from an arbitrary id substring in context text', async () => {
     const { shouldAppendExplicitCurrentMessage } = await import(
       '../dist/domains/cats/services/agents/routing/route-helpers.js'
     );
@@ -390,13 +390,14 @@ describe('incremental current-message fallback helper', () => {
       {
         contextText:
           '[对话历史增量 - 未发送过 1 条]\n[Thread opener: 0000000000000002-000001-bbbbbbbb] CURRENT USER MESSAGE\n[/对话历史]',
+        projectedMessageIds: [],
         includesCurrentUserMessage: false,
         currentMessageFilteredOut: false,
       },
       '0000000000000002-000001-bbbbbbbb',
     );
 
-    assert.equal(result, false, 'context containing current message id should suppress raw fallback append');
+    assert.equal(result, true, 'unowned metadata must not suppress raw fallback append');
   });
 
   it('still appends raw current message when context truly lacks current message id', async () => {
@@ -407,6 +408,7 @@ describe('incremental current-message fallback helper', () => {
     const result = shouldAppendExplicitCurrentMessage(
       {
         contextText: '[对话历史增量 - 未发送过 1 条]\n[older-id] older user message\n[/对话历史]',
+        projectedMessageIds: [],
         includesCurrentUserMessage: false,
         currentMessageFilteredOut: false,
       },
@@ -414,6 +416,25 @@ describe('incremental current-message fallback helper', () => {
     );
 
     assert.equal(result, true, 'missing current message id should keep raw fallback append');
+  });
+
+  it('treats an explicit empty hydration subset as authoritative instead of appending aggregate raw text', async () => {
+    const { explicitPromptForIncrementalContext } = await import(
+      '../dist/domains/cats/services/agents/routing/route-helpers.js'
+    );
+
+    const result = explicitPromptForIncrementalContext(
+      {
+        projectedMessageIds: [],
+        includesCurrentUserMessage: false,
+        currentMessageFilteredOut: false,
+      },
+      'RAW AGGREGATE MUST STAY ABSENT',
+      '0000000000000002-000001-bbbbbbbb',
+      [],
+    );
+
+    assert.deepEqual(result, { projectedMessageIds: [], exposedMessageIds: [] });
   });
 });
 
@@ -491,6 +512,8 @@ describe('incremental current-message fallback integration', () => {
         for await (const _ of route(deps, ['opus'], 'current trigger', 'user1', 'thread1', {
           currentUserMessageId: scenario.currentUserMessageId,
           parentInvocationId: 'inv-parent',
+          persistedPromptMessageIds: [sanitizedMessageId],
+          persistedPromptMessages: [{ messageId: sanitizedMessageId, content: sanitizedBody }],
           onPromptMessagesExposed: async (input) => exposed.push(input),
         })) {
         }
@@ -503,9 +526,62 @@ describe('incremental current-message fallback integration', () => {
           false,
           `${label}: sanitized body must not become seen evidence`,
         );
-        assert.match(captureService.calls[0], /visible before/);
-        assert.doesNotMatch(captureService.calls[0], /hidden persisted body/);
+        assert.equal(captureService.calls[0].split('visible before').length - 1, 1, `${label}: safe prefix once`);
+        assert.equal(captureService.calls[0].split('visible after').length - 1, 1, `${label}: safe suffix once`);
+        assert.doesNotMatch(
+          captureService.calls[0],
+          /hidden persisted body/,
+          `${label}: stripped envelope stays absent`,
+        );
       }
+    }
+  });
+
+  it('projects whitespace-normalized Queue smart anchors once without granting exact receipt', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const normalizedMessageId = '0000000000000001-000001-aaaaaaaa';
+    const currentUserMessageId = '0000000000000016-000001-cccccccc';
+    const persistedBody = '  WHITESPACE NORMALIZED QUEUE BODY  ';
+    const unseen = createSmartWindowHistory({
+      1: { id: normalizedMessageId, content: persistedBody },
+      16: { id: currentUserMessageId, content: 'current trigger', mentions: ['opus'] },
+    });
+
+    for (const [routeName, route] of [
+      ['serial', routeSerial],
+      ['parallel', routeParallel],
+    ]) {
+      const captureService = createCapturingService('opus', 'ack');
+      const exposed = [];
+      const deps = createMockDeps({ opus: captureService });
+      deps.deliveryCursorStore = {
+        getCursor: async () => undefined,
+        ackSeenCursor: async () => {},
+        ackCursor: async () => {},
+      };
+      deps.messageStore.getByThreadAfter = async () => unseen;
+
+      for await (const _ of route(deps, ['opus'], 'current trigger', 'user1', 'thread1', {
+        currentUserMessageId,
+        parentInvocationId: 'inv-parent',
+        persistedPromptMessageIds: [normalizedMessageId],
+        persistedPromptMessages: [{ messageId: normalizedMessageId, content: persistedBody }],
+        onPromptMessagesExposed: async (input) => exposed.push(input),
+      })) {
+      }
+
+      assert.equal(
+        captureService.calls[0].split('WHITESPACE NORMALIZED QUEUE BODY').length - 1,
+        1,
+        `${routeName}: normalized smart anchor renders once`,
+      );
+      assert.equal(exposed.length, 1, routeName);
+      assert.equal(
+        exposed[0].messageIds.includes(normalizedMessageId),
+        false,
+        `${routeName}: normalization must not become exact receipt`,
+      );
     }
   });
 
@@ -681,11 +757,250 @@ describe('incremental current-message fallback integration', () => {
     }
   });
 
+  it('appends only the uncovered Queue message part when the incremental window contains another batched member', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const primaryMessageId = '0000000000000020-000001-primary0';
+    const batchedMessageId = '0000000000000021-000001-batched0';
+    const primaryAttachment = {
+      v: 1,
+      id: 'ctx-primary',
+      kind: 'thread',
+      threadId: 'thread-primary',
+      title: 'Primary context',
+    };
+    const batchedAttachment = {
+      v: 1,
+      id: 'ctx-batched',
+      kind: 'thread',
+      threadId: 'thread-batched',
+      title: 'Batched context',
+    };
+    const promptParts = [
+      {
+        messageId: primaryMessageId,
+        content: 'primary body',
+        contentBlocks: [{ type: 'context_attachment', attachment: primaryAttachment }],
+      },
+      {
+        messageId: batchedMessageId,
+        content: 'batched body',
+        contentBlocks: [{ type: 'context_attachment', attachment: batchedAttachment }],
+      },
+    ];
+    const foldedPrompt = `primary body\nbatched body\n<context_attachments>${JSON.stringify([
+      primaryAttachment,
+      batchedAttachment,
+    ])}</context_attachments>`;
+    const unseenBatchedMessage = {
+      id: batchedMessageId,
+      threadId: 'thread1',
+      userId: 'user1',
+      catId: null,
+      content: 'batched body',
+      contentBlocks: promptParts[1].contentBlocks,
+      mentions: [],
+      timestamp: Date.now(),
+    };
+
+    for (const [routeName, route] of [
+      ['serial', routeSerial],
+      ['parallel', routeParallel],
+    ]) {
+      const captureService = createCapturingService('opus', 'ack');
+      const deps = createMockDeps({ opus: captureService });
+      deps.deliveryCursorStore = {
+        getCursor: async () => undefined,
+        ackSeenCursor: async () => {},
+        ackCursor: async () => {},
+      };
+      deps.messageStore.getByThreadAfter = async () => [unseenBatchedMessage];
+
+      for await (const _ of route(deps, ['opus'], foldedPrompt, 'user1', 'thread1', {
+        currentUserMessageId: primaryMessageId,
+        parentInvocationId: 'inv-parent',
+        persistedPromptMessageIds: [primaryMessageId, batchedMessageId],
+        persistedPromptMessages: promptParts,
+      })) {
+      }
+
+      const prompt = captureService.calls[0];
+      assert.equal(prompt.split('"id":"ctx-primary"').length - 1, 1, `${routeName}: uncovered primary once`);
+      assert.equal(prompt.split('"id":"ctx-batched"').length - 1, 1, `${routeName}: covered batch attachment once`);
+      assert.equal(prompt.split('primary body').length - 1, 1, `${routeName}: uncovered primary body once`);
+      assert.equal(prompt.split('batched body').length - 1, 1, `${routeName}: covered batch body once`);
+    }
+  });
+
+  it('emits and receipts only the durably hydrated Queue subset in serial and parallel routes', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const hydratedMessageId = '0000000000000025-000001-hydrated';
+    const unavailableMessageId = '0000000000000026-000001-missing00';
+    const hydratedAttachment = {
+      v: 1,
+      id: 'ctx-hydrated-subset',
+      kind: 'thread',
+      threadId: 'thread-hydrated',
+      title: 'Hydrated context',
+    };
+    const unavailableAttachment = {
+      v: 1,
+      id: 'ctx-unavailable-subset',
+      kind: 'thread',
+      threadId: 'thread-unavailable',
+      title: 'Unavailable context',
+    };
+    const aggregateFallback = `HYDRATED QUEUE BODY\nUNAVAILABLE QUEUE BODY\n<context_attachments>${JSON.stringify([
+      hydratedAttachment,
+      unavailableAttachment,
+    ])}</context_attachments>`;
+
+    for (const [routeName, route] of [
+      ['serial', routeSerial],
+      ['parallel', routeParallel],
+    ]) {
+      const captureService = createCapturingService('opus', 'ack');
+      const exposed = [];
+      const deps = createMockDeps({ opus: captureService });
+      deps.deliveryCursorStore = {
+        getCursor: async () => undefined,
+        ackSeenCursor: async () => {},
+        ackCursor: async () => {},
+      };
+      deps.messageStore.getByThreadAfter = async () => [];
+
+      for await (const _ of route(deps, ['opus'], aggregateFallback, 'user1', 'thread1', {
+        currentUserMessageId: hydratedMessageId,
+        parentInvocationId: 'inv-parent',
+        persistedPromptMessageIds: [hydratedMessageId, unavailableMessageId],
+        persistedPromptMessages: [
+          {
+            messageId: hydratedMessageId,
+            content: 'HYDRATED QUEUE BODY',
+            contentBlocks: [{ type: 'context_attachment', attachment: hydratedAttachment }],
+          },
+        ],
+        onPromptMessagesExposed: async (input) => exposed.push(input),
+      })) {
+      }
+
+      const prompt = captureService.calls[0];
+      assert.equal(prompt.split('HYDRATED QUEUE BODY').length - 1, 1, `${routeName}: hydrated body once`);
+      assert.equal(prompt.split('"id":"ctx-hydrated-subset"').length - 1, 1, `${routeName}: hydrated block once`);
+      assert.doesNotMatch(prompt, /UNAVAILABLE QUEUE BODY/, `${routeName}: unavailable aggregate body absent`);
+      assert.doesNotMatch(prompt, /ctx-unavailable-subset/, `${routeName}: unavailable block absent`);
+      assert.equal(exposed.length, 1, routeName);
+      assert.equal(exposed[0].messageIds.includes(hydratedMessageId), true, `${routeName}: hydrated id receipted`);
+      assert.equal(
+        exposed[0].messageIds.includes(unavailableMessageId),
+        false,
+        `${routeName}: unavailable id keeps retry custody`,
+      );
+    }
+  });
+
+  it('does not treat Quote provenance ids as Queue body coverage in serial or parallel routes', async (t) => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const primaryMessageId = '0000000000000030-000001-primary0';
+    const batchedMessageId = '0000000000000031-000001-batched0';
+    const primaryAttachment = {
+      v: 1,
+      id: 'ctx-primary-collision',
+      kind: 'thread',
+      threadId: 'thread-primary',
+      title: 'Primary context',
+    };
+    const batchedAttachment = {
+      v: 1,
+      id: 'ctx-batched-quote',
+      kind: 'quote',
+      text: 'quote from the uncovered primary',
+      source: {
+        kind: 'message',
+        threadId: 'thread1',
+        messageId: primaryMessageId,
+      },
+    };
+    const promptParts = [
+      {
+        messageId: primaryMessageId,
+        content: 'PRIMARY FULL BODY',
+        contentBlocks: [{ type: 'context_attachment', attachment: primaryAttachment }],
+      },
+      {
+        messageId: batchedMessageId,
+        content: 'BATCHED FULL BODY',
+        contentBlocks: [{ type: 'context_attachment', attachment: batchedAttachment }],
+      },
+    ];
+    const foldedPrompt = `PRIMARY FULL BODY\nBATCHED FULL BODY\n<context_attachments>${JSON.stringify([
+      primaryAttachment,
+      batchedAttachment,
+    ])}</context_attachments>`;
+    const unseenBatchedMessage = {
+      id: batchedMessageId,
+      threadId: 'thread1',
+      userId: 'user1',
+      catId: null,
+      content: 'BATCHED FULL BODY',
+      contentBlocks: promptParts[1].contentBlocks,
+      mentions: [],
+      timestamp: Date.now(),
+    };
+
+    for (const [routeName, route] of [
+      ['serial', routeSerial],
+      ['parallel', routeParallel],
+    ]) {
+      await t.test(routeName, async () => {
+        const captureService = createCapturingService('opus', 'ack');
+        const deps = createMockDeps({ opus: captureService });
+        deps.deliveryCursorStore = {
+          getCursor: async () => undefined,
+          ackSeenCursor: async () => {},
+          ackCursor: async () => {},
+        };
+        deps.messageStore.getByThreadAfter = async () => [unseenBatchedMessage];
+
+        for await (const _ of route(deps, ['opus'], foldedPrompt, 'user1', 'thread1', {
+          currentUserMessageId: primaryMessageId,
+          parentInvocationId: 'inv-parent',
+          persistedPromptMessageIds: [primaryMessageId, batchedMessageId],
+          persistedPromptMessages: promptParts,
+        })) {
+        }
+
+        const prompt = captureService.calls[0];
+        assert.equal(prompt.split('PRIMARY FULL BODY').length - 1, 1, `${routeName}: uncovered primary body once`);
+        assert.equal(prompt.split('BATCHED FULL BODY').length - 1, 1, `${routeName}: exposed batch body once`);
+        assert.equal(
+          prompt.split('"id":"ctx-primary-collision"').length - 1,
+          1,
+          `${routeName}: uncovered primary attachment once`,
+        );
+        assert.equal(
+          prompt.split('"id":"ctx-batched-quote"').length - 1,
+          1,
+          `${routeName}: exposed batch attachment once`,
+        );
+      });
+    }
+  });
+
   it('routeSerial avoids duplicating current message when smart-window anchor already carries it', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const captureService = createCapturingService('opus', 'ack');
     const currentUserMessageId = '0000000000000001-000001-aaaaaaaa';
     const currentText = 'CURRENT USER MESSAGE';
+    const currentAttachment = {
+      v: 1,
+      id: 'ctx-smart-anchor-serial',
+      kind: 'thread',
+      threadId: 'thread-smart-anchor',
+      title: 'Smart anchor context',
+    };
     const baseTs = Date.now() - 16 * 60_000;
 
     const unseen = Array.from({ length: 16 }, (_, i) => {
@@ -696,6 +1011,7 @@ describe('incremental current-message fallback integration', () => {
         userId: 'user1',
         catId: index === 1 ? null : 'codex',
         content: index === 1 ? currentText : `history-${index}`,
+        ...(index === 1 ? { contentBlocks: [{ type: 'context_attachment', attachment: currentAttachment }] } : {}),
         mentions: [],
         timestamp: baseTs + i * 60_000,
       };
@@ -727,6 +1043,14 @@ describe('incremental current-message fallback integration', () => {
 
     for await (const _ of routeSerial(deps, ['opus'], currentText, 'user1', 'thread1', {
       currentUserMessageId,
+      persistedPromptMessageIds: [currentUserMessageId],
+      persistedPromptMessages: [
+        {
+          messageId: currentUserMessageId,
+          content: currentText,
+          contentBlocks: [{ type: 'context_attachment', attachment: currentAttachment }],
+        },
+      ],
     })) {
     }
 
@@ -735,6 +1059,11 @@ describe('incremental current-message fallback integration', () => {
       (prompt.match(/CURRENT USER MESSAGE/g) || []).length,
       1,
       'current message should appear once even when anchor already contains it',
+    );
+    assert.equal(
+      prompt.split('"id":"ctx-smart-anchor-serial"').length - 1,
+      1,
+      'current attachment should appear once in its exact smart-window anchor',
     );
     assert.ok(prompt.includes(currentUserMessageId), 'smart-window anchor should carry current message id');
   });
@@ -1062,6 +1391,13 @@ describe('incremental current-message fallback integration', () => {
     const captureService = createCapturingService('opus', 'ack');
     const currentUserMessageId = '0000000000000001-000001-aaaaaaaa';
     const currentText = 'CURRENT USER MESSAGE';
+    const currentAttachment = {
+      v: 1,
+      id: 'ctx-smart-anchor-parallel',
+      kind: 'thread',
+      threadId: 'thread-smart-anchor',
+      title: 'Smart anchor context',
+    };
     const baseTs = Date.now() - 16 * 60_000;
 
     const unseen = Array.from({ length: 16 }, (_, i) => {
@@ -1072,6 +1408,7 @@ describe('incremental current-message fallback integration', () => {
         userId: 'user1',
         catId: index === 1 ? null : 'codex',
         content: index === 1 ? currentText : `history-${index}`,
+        ...(index === 1 ? { contentBlocks: [{ type: 'context_attachment', attachment: currentAttachment }] } : {}),
         mentions: [],
         timestamp: baseTs + i * 60_000,
       };
@@ -1103,6 +1440,14 @@ describe('incremental current-message fallback integration', () => {
 
     for await (const _ of routeParallel(deps, ['opus'], currentText, 'user1', 'thread1', {
       currentUserMessageId,
+      persistedPromptMessageIds: [currentUserMessageId],
+      persistedPromptMessages: [
+        {
+          messageId: currentUserMessageId,
+          content: currentText,
+          contentBlocks: [{ type: 'context_attachment', attachment: currentAttachment }],
+        },
+      ],
     })) {
     }
 
@@ -1111,6 +1456,11 @@ describe('incremental current-message fallback integration', () => {
       (prompt.match(/CURRENT USER MESSAGE/g) || []).length,
       1,
       'current message should appear once even when anchor already contains it',
+    );
+    assert.equal(
+      prompt.split('"id":"ctx-smart-anchor-parallel"').length - 1,
+      1,
+      'current attachment should appear once in its exact smart-window anchor',
     );
     assert.ok(prompt.includes(currentUserMessageId), 'smart-window anchor should carry current message id');
   });
@@ -1991,6 +2341,7 @@ describe('routeSerial cursor ack on error', () => {
         content: 'user message',
         mentions: [],
         timestamp: Date.now(),
+        visibilitySeq: 1,
       },
     ];
 
@@ -2004,8 +2355,8 @@ describe('routeSerial cursor ack on error', () => {
     assert.ok(cursorBoundaries.has('opus'), 'cursor boundary must be set for opus even when hadError=true');
     assert.equal(
       cursorBoundaries.get('opus'),
-      '0000000000000001-000001-aaaaaaaa',
-      'boundary should match the last unseen message ID',
+      'v2:0000000000000001:0000000000000001-000001-aaaaaaaa',
+      'boundary should match the last unseen visibility cursor',
     );
   });
 });
@@ -2039,6 +2390,7 @@ describe('routeParallel cursor ack on error', () => {
         content: 'user message',
         mentions: [],
         timestamp: Date.now(),
+        visibilitySeq: 2,
       },
     ];
 

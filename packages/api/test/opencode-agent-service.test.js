@@ -118,6 +118,19 @@ const _ERROR_EVENT = {
   error: { name: 'APIError', data: { message: 'Rate limit exceeded', statusCode: 429 } },
 };
 
+const PERMANENT_PROVIDER_ERROR_EVENT = {
+  type: 'error',
+  timestamp: 1773298718315,
+  sessionID: 'ses_test123',
+  error: {
+    name: 'APIError',
+    data: {
+      message: 'No available channel for model claude-sonnet-4-6',
+      statusCode: 400,
+    },
+  },
+};
+
 describe('OpenCodeAgentService', () => {
   test('summarizeOpenCodeEnvForDebug reports runtime-config mode and masks secrets', () => {
     const summary = summarizeOpenCodeEnvForDebug({
@@ -474,6 +487,80 @@ describe('OpenCodeAgentService', () => {
     const types = messages.map((m) => m.type);
     assert.ok(types.includes('error'), `expected error in types: ${types}`);
     assert.ok(types.includes('done'), `expected done in types: ${types}`);
+  });
+
+  test('terminates a retrying CLI after a permanent provider configuration error', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-sonnet-4-6' });
+    const collection = collect(service.invoke('Test', { invocationId: 'inv-permanent-error' }));
+
+    proc.stdout.write(`${JSON.stringify(PERMANENT_PROVIDER_ERROR_EVENT)}\n`);
+
+    try {
+      const messages = await Promise.race([
+        collection,
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('permanent provider error did not terminate the retrying CLI')), 250);
+        }),
+      ]);
+
+      assert.equal(proc.kill.mock.callCount(), 1, 'the CLI process must be terminated exactly once');
+      assert.equal(messages.filter((message) => message.type === 'error').length, 1);
+      assert.equal(messages.filter((message) => message.type === 'done').length, 1);
+      assert.match(messages.find((message) => message.type === 'error').error, /No available channel/);
+    } finally {
+      if (proc.kill.mock.callCount() === 0) proc.kill();
+    }
+  });
+
+  test('terminates a retrying CLI after an auth status even when the provider omits a message', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-sonnet-4-6' });
+    const collection = collect(service.invoke('Test', { invocationId: 'inv-auth-error' }));
+
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'error',
+        timestamp: 1773298718316,
+        sessionID: 'ses_test123',
+        error: { name: 'AuthError', data: { statusCode: 401 } },
+      })}\n`,
+    );
+
+    try {
+      const messages = await Promise.race([
+        collection,
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('auth status did not terminate the retrying CLI')), 250);
+        }),
+      ]);
+      assert.equal(proc.kill.mock.callCount(), 1);
+      assert.equal(messages.filter((message) => message.type === 'error').length, 1);
+      assert.equal(messages.filter((message) => message.type === 'done').length, 1);
+      assert.equal(
+        messages.find((message) => message.type === 'error').metadata.cliDiagnostics.reasonCode,
+        'auth_failed',
+      );
+    } finally {
+      if (proc.kill.mock.callCount() === 0) proc.kill();
+    }
+  });
+
+  test('does not terminate a CLI for a transient provider error', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-sonnet-4-6' });
+    const collection = collect(service.invoke('Test'));
+
+    emitOpenCodeEvents(proc, [_ERROR_EVENT, STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+    const messages = await collection;
+
+    assert.equal(proc.kill.mock.callCount(), 0, 'natural completion after a transient error must not be killed');
+    assert.equal(messages.filter((message) => message.type === 'error').length, 1);
+    assert.ok(messages.some((message) => message.type === 'text'));
+    assert.equal(messages.filter((message) => message.type === 'done').length, 1);
   });
 
   test('metadata includes provider=opencode and model', async () => {

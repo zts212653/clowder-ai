@@ -34,6 +34,18 @@ export interface ParsedCursorV1 {
 
 export type ParsedCursor = ParsedCursorV2 | ParsedCursorV1;
 
+declare const canonicalVisibilityCursorBrand: unique symbol;
+
+/**
+ * A cursor proven to carry the canonical visibility coordinate.
+ *
+ * Durable encoding may still be gated back to v1 at the Redis boundary, but
+ * in-process aggregation slots must never accept an unproven raw message ID.
+ */
+export type CanonicalVisibilityCursor = string & {
+  readonly [canonicalVisibilityCursorBrand]: true;
+};
+
 // --------------------------------------------------------------------------
 // Constants
 // --------------------------------------------------------------------------
@@ -92,6 +104,22 @@ export function parseCursor(token: string | undefined | null): ParsedCursor | nu
 
   // v1: raw message ID (digit-prefix for sortable IDs, any string accepted)
   return { version: 1, id: token };
+}
+
+/**
+ * Runtime/type guard for in-process visibility-cursor slots.
+ *
+ * This is intentionally local to canonical boundaries. Global consumers such
+ * as freshness and mention filtering still need conservative v1/v2 handling.
+ */
+export function assertCanonicalVisibilityCursor(
+  cursor: string,
+  slot: string,
+): asserts cursor is CanonicalVisibilityCursor {
+  const parsed = parseCursor(cursor);
+  if (parsed?.version !== 2) {
+    throw new Error(`CANONICAL_VISIBILITY_CURSOR_REQUIRED: slot=${slot} cursor=${cursor}`);
+  }
 }
 
 // --------------------------------------------------------------------------

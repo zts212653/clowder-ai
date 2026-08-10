@@ -24,7 +24,7 @@ export interface ConciergeConfig {
    * - 'quiet-badge': Tier 0-1 低优先级 badge，hover 才出文字（Phase A 默认）
    */
   proactivePolicy: 'ambient' | 'quiet-badge';
-  /** 一键静音/隐藏整个球 (AC-A6) */
+  /** 隐藏整个猫猫球；字段名为历史兼容保留，不表示关闭声音 (AC-A6) */
   muted: boolean;
   /** 球位置 (PR-A3b INV-P3: per-user 持久化) — null = default bottom-right */
   ballPosition: { x: number; y: number } | null;
@@ -74,7 +74,7 @@ export const CONCIERGE_CONFIG_DEFAULTS: Omit<ConciergeConfig, 'dutyCatProfileId'
 /**
  * 球八态状态机
  * idle        — 默认待机（呼吸动画）
- * sleeping    — 静音/非活跃（可配置降级态）
+ * sleeping    — 休息/非活跃（隐藏态的可见降级）
  * listening   — STT 录音中（Phase C）
  * thinking    — 值班猫 invocation 进行中
  * found       — 记忆/功能发现返回结果（态 3）

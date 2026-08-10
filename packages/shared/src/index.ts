@@ -17,6 +17,8 @@ export * from './capability-tip-telemetry.js';
 export * from './capability-tips.js';
 // Export shared CLI effort helpers
 export * from './cli-effort.js';
+// F291: OAuth Codex Standard/Fast semantic contract
+export * from './codex-speed.js';
 // Export command parser + core commands (F142 Phase B)
 export { parseCommand } from './command-parser.js';
 export type {

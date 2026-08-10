@@ -42,6 +42,7 @@ export interface PipelineContext {
   invokeTrigger?: ScheduleInvokeTrigger;
   /** F233 PR3: optional ball-custody event sink for scheduler-originated events. */
   ballCustody?: IBallCustodyIngest;
+  managedCommandWakeRecovery?: (taskId: string) => Promise<'missing' | 'pending' | 'recovered'>;
   /** #415: per-workItem outcome callback (used for failure notifications) */
   onItemOutcome?: (taskId: string, subjectKey: string, outcome: RunOutcome, errorSummary: string | null) => void;
 }
@@ -99,6 +100,7 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
     fetchContent,
     invokeTrigger,
     ballCustody,
+    managedCommandWakeRecovery,
     onItemOutcome,
   } = ctx;
   const startMs = Date.now();
@@ -225,6 +227,7 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
         fetchContent,
         invokeTrigger,
         ballCustody,
+        managedCommandWakeRecovery,
       });
       pendingExecutes.push(rawExecute.catch(() => {}));
       let errorSummary: string | null = null;

@@ -403,6 +403,22 @@ export {
   SCHEDULER_TRIGGER_PREFIX,
   unregisterConnectorDefinition,
 } from './connector.js';
+export {
+  type CliOutputQuoteSource,
+  CONTEXT_ATTACHMENT_MAX_COUNT,
+  CONTEXT_ATTACHMENT_PROMPT_MAX_CHARS,
+  CONTEXT_ATTACHMENT_QUOTE_MAX_LENGTH,
+  CONTEXT_ATTACHMENT_VERSION,
+  type ContextAttachment,
+  type ContextAttachmentContent,
+  type MessageQuoteSource,
+  type QuoteContextAttachment,
+  type QuoteContextSource,
+  serializeContextAttachmentsPrompt,
+  type ThreadContextAttachment,
+  type WorkspaceFileContextAttachment,
+  type WorkspaceFileQuoteSource,
+} from './context-attachment.js';
 export type {
   CrossThreadCoordination,
   CrossThreadCoordinationInput,
@@ -781,6 +797,7 @@ export {
 export type {
   AgentStreamMessage,
   CodeContent,
+  FileContent,
   ImageContent,
   Message,
   MessageContent,
@@ -848,6 +865,7 @@ export {
   PAW_FEEL_DISPOSITION_STATES,
   PAW_FEEL_INBOX_SORTS,
   PAW_FEEL_NO_ACTION_REASONS,
+  PAW_FEEL_RESPONSIBILITY_STATES,
   PAW_FEEL_REVIEW_BUNDLE_BASES,
   type PawFeelCaptureAssessment,
   type PawFeelCaptureMethod,
@@ -864,10 +882,17 @@ export {
   type PawFeelInboxSort,
   type PawFeelNoActionReason,
   type PawFeelReconciliationCoverage,
+  type PawFeelResponsibilityBlocker,
+  type PawFeelResponsibilityCounts,
+  type PawFeelResponsibilityExitKind,
+  type PawFeelResponsibilityProjection,
+  type PawFeelResponsibilityState,
   type PawFeelReviewBundle,
   type PawFeelReviewBundleBasis,
   type PawFeelReviewBundleCounts,
   type PawFeelSignalId,
+  type PawFeelSignatureAction,
+  type PawFeelSignatureRequest,
   type PawFeelSourceRef,
   type PawFeelSourceResolution,
 } from './paw-feel-disposition.js';
@@ -974,6 +999,18 @@ export type {
   PluginResourceStatus,
   PluginStatus,
 } from './plugin.js';
+export {
+  DEFERRED_PERSON_MEMORY_RECEIPT_STATES,
+  type DeferredPersonMemoryInput,
+  type DeferredPersonMemoryReceipt,
+  type DeferredPersonMemoryResolvedSource,
+  type DeferredPersonMemorySourceInput,
+  deferredPersonMemoryInputSchema,
+  deferredPersonMemoryReceiptIdSchema,
+  deferredPersonMemoryReceiptSchema,
+  deferredPersonMemoryResolvedSourceSchema,
+  deferredPersonMemorySourceInputSchema,
+} from './proactive-memory-deferred-receipt.js';
 // F282 Phase D: opaque opportunity episode and calibrated-abstention contract
 export {
   PROACTIVE_MEMORY_ABSTENTION_REASON_CODES,
@@ -1243,6 +1280,12 @@ export type {
   ThreadMemberEffortPatch,
   ThreadMemberEffortRow,
 } from './thread-effort.js';
+// F291: thread-scoped Codex requested speed read/write contract
+export type {
+  ThreadMemberSpeedListResponse,
+  ThreadMemberSpeedPatch,
+  ThreadMemberSpeedRow,
+} from './thread-speed.js';
 // TTS types (F34 TTS Provider)
 export type {
   ITtsProvider,

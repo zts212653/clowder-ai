@@ -71,6 +71,12 @@ const historyPage: PawFeelInboxPage = {
         captureMethod: 'typed',
         captureAssessment: 'confirmed',
       },
+      responsibility: {
+        state: 'terminal',
+        validExit: true,
+        exitKind: 'terminal_disposition',
+        evidenceRefs: ['commit:abc'],
+      },
       source: {
         availability: 'available',
         preview: '工具卡住后没有返回清晰错误',
@@ -104,6 +110,13 @@ const historyPage: PawFeelInboxPage = {
     routePending: 0,
     disposed: 1,
     overdue: 0,
+  },
+  responsibilityCounts: {
+    unreviewed: 0,
+    bound_in_repair: 0,
+    signature_waiting: 0,
+    blocked: 0,
+    terminal: 1,
   },
   degraded: false,
 };

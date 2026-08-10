@@ -857,6 +857,156 @@ test('captures usage and session id from kimi stream events when available', asy
   assert.equal(text?.metadata?.usage?.totalTokens, 46);
 });
 
+test('estimates API-equivalent costUsd on done for priced Kimi models', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+
+  const promise = collect(service.invoke('Hello'));
+  emitKimiEvents(proc, [
+    {
+      role: 'assistant',
+      usage: {
+        input_tokens: 200_000,
+        output_tokens: 50_000,
+        total_tokens: 250_000,
+      },
+      content: 'ok',
+    },
+  ]);
+  const msgs = await promise;
+  const done = msgs.find((msg) => msg.type === 'done');
+  // Kimi K2.7 Code card (no cached input): input 200k × $0.95/M
+  // + output 50k × $4.00/M = $0.19 + $0.2 = $0.39
+  assert.equal(done?.metadata?.usage?.costUsd, 0.39);
+  assert.equal(done?.metadata?.usage?.costEstimated, true);
+});
+
+test('omits cost when raw usage reports cached_input_tokens (unproven subset contract)', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+
+  const promise = collect(service.invoke('Hello'));
+  emitKimiEvents(proc, [
+    {
+      role: 'assistant',
+      usage: {
+        input_tokens: 200_000,
+        cached_input_tokens: 100_000,
+        output_tokens: 50_000,
+        total_tokens: 250_000,
+      },
+      content: 'ok',
+    },
+  ]);
+  const msgs = await promise;
+  const done = msgs.find((msg) => msg.type === 'done');
+  // Terra P1 (cat-cafe#3479): cached_input_tokens ⊂ input_tokens is not an
+  // officially documented relationship — omit cost until a verified live
+  // sample proves the contract. Tokens stay visible.
+  assert.equal(done?.metadata?.usage?.inputTokens, 200_000);
+  assert.equal(done?.metadata?.usage?.cacheReadTokens, 100_000);
+  assert.equal(done?.metadata?.usage?.costUsd, undefined);
+  assert.equal(done?.metadata?.usage?.costEstimated, undefined);
+});
+
+test('does not bill the snapshot when raw stats carry only context tokens', async () => {
+  const shareDir = mkdtempSync(join(tmpdir(), 'kimi-context-share-'));
+  const sessionId = 'kimi-context-session';
+  const sessionDir = join(shareDir, 'sessions', 'project-hash', sessionId);
+  mkdirSync(sessionDir, { recursive: true });
+  writeFileSync(
+    join(shareDir, 'config.toml'),
+    [
+      'default_model = "kimi-code/kimi-for-coding"',
+      '',
+      '[models."kimi-code/kimi-for-coding"]',
+      'max_context_size = 262144',
+      'capabilities = ["thinking", "image_in"]',
+    ].join('\n'),
+    'utf8',
+  );
+  writeFileSync(
+    join(sessionDir, 'context.jsonl'),
+    ['{"role":"user","content":"hi"}', '{"role":"_usage","token_count":6335}'].join('\n'),
+    'utf8',
+  );
+
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+
+  try {
+    const promise = collect(
+      service.invoke('Hello', {
+        sessionId,
+        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+      }),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    // Terra residual P1 (cat-cafe#3479): raw stats with ONLY context tokens
+    // is not a billable input/output record. The snapshot enrichment will
+    // still write lastTurnInputTokens=6335 — it must never become cost.
+    emitKimiEvents(proc, [{ role: 'assistant', stats: { context_used_tokens: 1 }, content: 'ok' }]);
+    const msgs = await promise;
+    const done = msgs.find((msg) => msg.type === 'done');
+    assert.ok(done?.metadata?.usage, 'done should have usage metadata');
+    assert.equal(done.metadata.usage.contextUsedTokens, 6335);
+    assert.equal(done.metadata.usage.lastTurnInputTokens, 6335);
+    assert.equal(done.metadata.usage.costUsd, undefined);
+    assert.equal(done.metadata.usage.costEstimated, undefined);
+  } finally {
+    rmSync(shareDir, { recursive: true, force: true });
+  }
+});
+
+test('does not estimate when raw usage carries only total_tokens', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+
+  const promise = collect(service.invoke('Hello'));
+  emitKimiEvents(proc, [
+    {
+      role: 'assistant',
+      usage: { total_tokens: 46 },
+      content: 'ok',
+    },
+  ]);
+  const msgs = await promise;
+  const done = msgs.find((msg) => msg.type === 'done');
+  // total_tokens alone is not a billable input/output record.
+  assert.equal(done?.metadata?.usage?.totalTokens, 46);
+  assert.equal(done?.metadata?.usage?.costUsd, undefined);
+  assert.equal(done?.metadata?.usage?.costEstimated, undefined);
+});
+
+test('leaves costUsd unset for unverified Kimi model aliases (no guessing)', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding-v1' });
+
+  const promise = collect(service.invoke('Hello'));
+  emitKimiEvents(proc, [
+    {
+      role: 'assistant',
+      usage: {
+        input_tokens: 12,
+        output_tokens: 34,
+        total_tokens: 46,
+      },
+      content: 'ok',
+    },
+  ]);
+  const msgs = await promise;
+  const done = msgs.find((msg) => msg.type === 'done');
+  // Tokens stay visible; cost is omitted rather than guessed.
+  assert.equal(done?.metadata?.usage?.inputTokens, 12);
+  assert.equal(done?.metadata?.usage?.costUsd, undefined);
+  assert.equal(done?.metadata?.usage?.costEstimated, undefined);
+});
+
 test('enriches done metadata with local Kimi context snapshot for session-chain health', async () => {
   const shareDir = mkdtempSync(join(tmpdir(), 'kimi-context-share-'));
   const sessionId = 'kimi-context-session';
@@ -898,6 +1048,12 @@ test('enriches done metadata with local Kimi context snapshot for session-chain 
     assert.equal(done.metadata.usage.contextUsedTokens, 6335);
     assert.equal(done.metadata.usage.contextWindowSize, 262144);
     assert.equal(done.metadata.usage.lastTurnInputTokens, 6335);
+    // Terra P1 (cat-cafe#3479): the context snapshot is health/display
+    // context, not verified billable turn telemetry. With no raw usage from
+    // THIS invocation, cost must stay unset even though the model is priced
+    // and lastTurnInputTokens is populated by the enrichment above.
+    assert.equal(done.metadata.usage.costUsd, undefined);
+    assert.equal(done.metadata.usage.costEstimated, undefined);
   } finally {
     rmSync(shareDir, { recursive: true, force: true });
   }

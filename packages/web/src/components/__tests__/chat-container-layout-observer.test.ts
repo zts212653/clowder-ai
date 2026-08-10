@@ -229,7 +229,6 @@ vi.mock('../MessageNavigator', () => ({ MessageNavigator: () => null }));
 vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));
-vi.mock('../MobileStatusSheet', () => ({ MobileStatusSheet: () => null }));
 vi.mock('../QueuePanel', () => ({
   QueuePanel: () => React.createElement('div', { 'data-testid': 'queue-panel' }),
 }));

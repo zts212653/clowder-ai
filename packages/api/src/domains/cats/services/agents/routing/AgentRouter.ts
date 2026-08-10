@@ -59,6 +59,7 @@ import type {
 import { routeParallel } from '../routing/route-parallel.js';
 import { routeSerial } from '../routing/route-serial.js';
 import { resolveCatTarget } from './cat-target-resolver.js';
+import { appendContextAttachmentsToPrompt } from './context-attachment-prompt.js';
 import type { HumanDispositionInvocationOrigin } from './human-disposition-invocation-origin.js';
 
 const log = createModuleLogger('agent-router');
@@ -1500,7 +1501,7 @@ export class AgentRouter {
     const targetCats = await this.resolveTargets(message, resolvedThreadId);
     const intent = parseIntent(message, targetCats.length);
     const strategy = intent.intent === 'ideate' && targetCats.length > 1 ? 'parallel' : 'serial';
-    const cleanMessage = stripIntentTags(message);
+    const cleanMessage = appendContextAttachmentsToPrompt(stripIntentTags(message), contentBlocks);
 
     const routeSpan = routeTracer.startSpan('cat_cafe.route', {
       attributes: {
@@ -1655,6 +1656,8 @@ export class AgentRouter {
       onPromptMessagesExposed: NonNullable<RouteOptions['onPromptMessagesExposed']>;
       /** Exact persisted bodies already folded into `message` by the queue caller. */
       persistedPromptMessageIds?: RouteOptions['persistedPromptMessageIds'];
+      /** Per-message ownership for partial incremental Queue windows. */
+      persistedPromptMessages?: RouteOptions['persistedPromptMessages'];
       /** F281: required on typed first-party ingress; only direct_owner is injectable. */
       humanDispositionInvocationOrigin: HumanDispositionInvocationOrigin;
       /** F153: caller trace context for cross-route A2A propagation */
@@ -1675,7 +1678,7 @@ export class AgentRouter {
       toolExecutionPolicy?: RouteOptions['toolExecutionPolicy'];
     },
   ): AsyncIterable<AgentMessage> {
-    const cleanMessage = stripIntentTags(message);
+    const cleanMessage = appendContextAttachmentsToPrompt(stripIntentTags(message), options.contentBlocks);
     const strategy = intent.intent === 'ideate' && targetCats.length > 1 ? 'parallel' : 'serial';
 
     // F153: Reconstruct remote parent context for cross-route A2A trace propagation
@@ -1788,6 +1791,10 @@ export class AgentRouter {
       promptTags: intent.promptTags,
       currentUserMessageId: userMessageId,
       persistedPromptMessageIds: options?.persistedPromptMessageIds,
+      persistedPromptMessages: options?.persistedPromptMessages?.map((persisted) => ({
+        ...persisted,
+        content: stripIntentTags(persisted.content),
+      })),
       a2aTriggerMessageId: options?.a2aTriggerMessageId,
       humanDispositionInvocationOrigin: options.humanDispositionInvocationOrigin,
       thinkingMode,

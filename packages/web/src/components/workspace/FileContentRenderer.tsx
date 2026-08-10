@@ -6,6 +6,7 @@ import { HubIcon } from '../hub-icons';
 import { MarkdownContent } from '../MarkdownContent';
 import { CodeViewer } from './CodeViewer';
 import { JsxPreview } from './JsxPreview';
+import type { MarkdownSelectionAction } from './useMarkdownSelectionAction';
 
 export interface FileContentRendererProps {
   file: FileData;
@@ -21,7 +22,7 @@ export interface FileContentRendererProps {
   worktreeId: string | null;
   currentWorktree?: WorktreeEntry;
   mdContainerRef: React.RefObject<HTMLDivElement>;
-  mdHasSelection: boolean;
+  mdSelectionAction: MarkdownSelectionAction | null;
   onMdAddToChat: () => void;
   onSave: (c: string) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
@@ -47,7 +48,7 @@ export function FileContentRenderer({
   worktreeId,
   currentWorktree,
   mdContainerRef,
-  mdHasSelection,
+  mdSelectionAction,
   onMdAddToChat,
   onSave,
   onDirtyChange,
@@ -162,11 +163,13 @@ export function FileContentRenderer({
             worktreeId={worktreeId ?? undefined}
           />
         </div>
-        {mdHasSelection && (
+        {mdSelectionAction && (
           <button
             type="button"
             onClick={onMdAddToChat}
-            className="absolute top-2 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cafe-accent text-[var(--cafe-surface)] text-xs font-medium shadow-lg hover:bg-cafe-interactive transition-colors z-10 animate-fade-in"
+            onMouseDown={(event) => event.preventDefault()}
+            style={mdSelectionAction.position}
+            className="absolute flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cafe-accent text-[var(--cafe-surface)] text-xs font-medium shadow-lg hover:bg-cafe-interactive transition-colors z-10 animate-fade-in"
             title="引用到聊天"
           >
             <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -209,6 +212,7 @@ export function FileContentRenderer({
       onSave={onSave}
       onDirtyChange={onDirtyChange}
       branch={currentWorktree?.branch}
+      worktreeId={worktreeId}
       restoreScrollTop={restoreScrollTop}
       restoreKey={restoreKey}
       onScrollTopChange={onScrollTopChange}

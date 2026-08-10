@@ -97,6 +97,30 @@ export interface OpenCodeEnvDebugSummary {
   catCafeOcBaseUrl: string;
 }
 
+function isPermanentOpenCodeProviderFailure(event: unknown, reasonCode: string | undefined): boolean {
+  if (typeof event !== 'object' || event === null) return false;
+  const rawError = (event as Record<string, unknown>).error;
+  if (typeof rawError !== 'object' || rawError === null) return false;
+  const data = (rawError as Record<string, unknown>).data;
+  const statusCode =
+    typeof data === 'object' && data !== null && typeof (data as Record<string, unknown>).statusCode === 'number'
+      ? ((data as Record<string, unknown>).statusCode as number)
+      : undefined;
+
+  // These outcomes cannot recover by retrying the same configured invocation.
+  // Deliberately exclude 408/429/5xx: those are transient and OpenCode may
+  // legitimately recover without Clowder AI terminating the process.
+  return (
+    reasonCode === 'model_not_found' ||
+    reasonCode === 'auth_failed' ||
+    reasonCode === 'invalid_config' ||
+    statusCode === 401 ||
+    statusCode === 402 ||
+    statusCode === 403 ||
+    statusCode === 404
+  );
+}
+
 function summarizeDebugValue(value: string | null | undefined): string {
   if (value === null) return '(cleared)';
   if (!value) return '(unset)';
@@ -366,6 +390,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
 
         const result = transformOpenCodeEvent(event, this.catId);
         if (result !== null) {
+          let terminateAfterYield = false;
           if (result.type === 'text') textEventCount++;
           if (result.type === 'tool_use') toolUseEmitted = true;
           // F212 Phase A AC-A8: enrich stream `error` event yield with cliDiagnostics so
@@ -386,9 +411,15 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
               },
               'OpenCode CLI returned error event',
             );
-            if (rawError?.data?.message) {
+            const diagnosticText = [
+              rawError?.data?.message ?? rawError?.name,
+              rawError?.data?.statusCode ? `HTTP ${rawError.data.statusCode}` : undefined,
+            ]
+              .filter((value): value is string => Boolean(value))
+              .join('\n');
+            if (diagnosticText) {
               const cliDiagnostics = buildCliDiagnostics({
-                rawText: rawError.data.message,
+                rawText: diagnosticText,
                 debugRef: {
                   command: 'opencode',
                   exitCode: null,
@@ -398,6 +429,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
               });
               yieldMetadata = { ...metadata, cliDiagnostics };
             }
+            terminateAfterYield = isPermanentOpenCodeProviderFailure(event, yieldMetadata.cliDiagnostics?.reasonCode);
             errorAlreadyYielded = true;
           }
           // P2-1: Only emit the first session_init; subsequent step_start events
@@ -415,6 +447,17 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           const mergedMetadata: MessageMetadata =
             result.metadata?.usage != null ? { ...yieldMetadata, usage: result.metadata.usage } : yieldMetadata;
           yield { ...result, metadata: mergedMetadata };
+          if (terminateAfterYield) {
+            log.warn(
+              {
+                catId: this.catId,
+                invocationId: options?.invocationId,
+                reasonCode: yieldMetadata.cliDiagnostics?.reasonCode,
+              },
+              'Permanent OpenCode provider failure — terminating retrying CLI',
+            );
+            break;
+          }
         }
       }
 

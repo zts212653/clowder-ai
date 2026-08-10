@@ -13,6 +13,8 @@ describe('F278 API composition-root wiring', () => {
     assert.match(source, /eventLog: pawFeelDispositionEventLog/);
     assert.match(source, /messageStore/);
     assert.match(source, /coverageStore: pawFeelReconciliationCoverageStore/);
+    assert.match(source, /await loadOrCreatePawFeelBundleSnapshotSigner\(redis\)/);
+    assert.match(source, /bundleSnapshotSigner: pawFeelBundleSnapshotSigner/);
   });
 
   it('registers the shared read model and cat-signed writer on the HTTP surface', () => {
@@ -33,6 +35,7 @@ describe('F278 API composition-root wiring', () => {
     assert.ok(start > reconciliation && start > duty, 'F278 tasks must register before scheduler start');
     assert.match(source, /ensureEvalDomainThreads\(/);
     assert.match(source, /systemThreadId:\s*'thread_eval_friction'/);
+    assert.match(source, /receiptReconciler:\s*pawFeelDutyReceiptService/);
   });
 
   it('binds typed intent and bounded standalone compatibility to the persisted source message', () => {

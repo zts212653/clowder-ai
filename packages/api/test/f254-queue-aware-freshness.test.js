@@ -66,6 +66,37 @@ describe('F254 Queue-Aware Freshness Gate', async () => {
   // =================================================================
 
   describe('checkFreshnessForPostMessage with queueChecker', () => {
+    it('preserves the exact parent fence through the provider-native Queue adapter', async () => {
+      const queue = new queueModule.InvocationQueue();
+      queue.enqueue({
+        ownerAuthProvenance: 'strict',
+        threadId,
+        userId,
+        content: 'read this in the current parent',
+        source: 'user',
+        targetCats: [catId],
+        authorIntentByCatId: {
+          [catId]: { requested: 'continue_current', boundParentInvocationId: invocationId },
+        },
+        intent: 'execute',
+      });
+
+      const result = await wireModule.checkFreshnessForPostMessage({
+        userId,
+        catId,
+        threadId,
+        invocationId,
+        toolName: 'provider_native_safe_boundary',
+        cursorStore: makeMockCursorStore(msg1),
+        messageStore: makeMockMessageStore([]),
+        queueChecker: wireModule.createQueueChecker(queue, { parentInvocationId: invocationId }),
+      });
+
+      assert.equal(result.decision, 'held');
+      assert.equal(result.reason, 'queued_messages_pending');
+      assert.equal(result.unseenCount, 1);
+    });
+
     it('holds when no delivered unseen but queue has pending user messages', async () => {
       // Bug scenario: user sent a message while cat was running.
       // isDelivered() filtered it out, so messageStore returns empty.
@@ -531,7 +562,7 @@ describe('F254 Queue-Aware Freshness Gate', async () => {
         toolName: 'post_message',
         cursorStore,
         messageStore,
-        queueChecker: wireModule.createQueueChecker(queue),
+        queueChecker: wireModule.createQueueChecker(queue, { parentInvocationId: undefined }),
       });
 
       assert.equal(result.decision, 'forward');
@@ -914,7 +945,7 @@ describe('F254 Queue-Aware Freshness Gate', async () => {
         userId,
         cursorStore: makeMockCursorStore(msg1),
         messageStore: makeMockMessageStore([]),
-        queueChecker: wireModule.createQueueChecker(queue),
+        queueChecker: wireModule.createQueueChecker(queue, { parentInvocationId: undefined }),
       });
 
       const result = await checker.checkUnseen({ threadId, catId });

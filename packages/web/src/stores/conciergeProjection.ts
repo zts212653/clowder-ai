@@ -43,7 +43,7 @@ export interface ConciergeInputs {
  * 球态投影函数。输入 ConciergeInputs，输出球状态或 'hidden'。
  *
  * 优先级全序（高到低）：
- *   hidden(disabled/muted) > error > needs-confirmation > thinking > handoff > listening > found > idle
+ *   hidden(disabled/user-hidden) > error > needs-confirmation > thinking > handoff > listening > found > idle
  *
  * A3a: listening 条件 = surfaceState==='bubble' && inputFocused
  *   （toolbar 展开但未进入气泡时不算 listening，避免误切状态）

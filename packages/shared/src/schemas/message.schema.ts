@@ -5,6 +5,7 @@
 
 import { z } from 'zod';
 import { catIdSchema } from '../registry/cat-id-schema.js';
+import { ContextAttachmentContentSchema, ContextAttachmentsSchema } from './context-attachment.schema.js';
 
 /**
  * Message sender schema - discriminated union
@@ -36,13 +37,35 @@ export const TextContentSchema = z.object({
   text: z.string(),
 });
 
+const MessageAssetUrlSchema = z.union([
+  z.string().url(),
+  z
+    .string()
+    .max(4096)
+    .regex(
+      /^\/uploads\/(?:[A-Za-z0-9][A-Za-z0-9._-]*\/)*[A-Za-z0-9][A-Za-z0-9._-]*$/,
+      'Expected an absolute URL or canonical /uploads/ path',
+    ),
+]);
+
 /**
  * Image content schema
  */
 export const ImageContentSchema = z.object({
   type: z.literal('image'),
-  url: z.string().url(),
+  url: MessageAssetUrlSchema,
   alt: z.string().optional(),
+});
+
+/**
+ * File content schema — generic file attachments
+ */
+export const FileContentSchema = z.object({
+  type: z.literal('file'),
+  url: MessageAssetUrlSchema,
+  fileName: z.string().min(1),
+  mimeType: z.string().min(1),
+  fileSize: z.number().int().nonnegative(),
 });
 
 /**
@@ -81,10 +104,30 @@ export const ToolResultContentSchema = z.object({
 export const MessageContentSchema = z.discriminatedUnion('type', [
   TextContentSchema,
   ImageContentSchema,
+  FileContentSchema,
   CodeContentSchema,
   ToolCallContentSchema,
   ToolResultContentSchema,
+  ContextAttachmentContentSchema,
 ]);
+
+/**
+ * Collection-level message contract. Individual variants remain independently
+ * parseable, while every durable/request content array shares aggregate
+ * ContextAttachment count and prompt-budget invariants.
+ */
+export const MessageContentsSchema = z.array(MessageContentSchema).superRefine((contents, ctx) => {
+  const attachments = contents
+    .filter((content) => content.type === 'context_attachment')
+    .map((content) => content.attachment);
+  const result = ContextAttachmentsSchema.safeParse(attachments);
+  if (!result.success) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Message content attachments violate the shared aggregate contract',
+    });
+  }
+});
 
 /**
  * Message status schema
@@ -98,7 +141,7 @@ export const MessageSchema = z.object({
   id: z.string().min(1),
   threadId: z.string().min(1),
   sender: MessageSenderSchema,
-  content: z.array(MessageContentSchema),
+  content: MessageContentsSchema,
   status: MessageStatusSchema,
   createdAt: z.coerce.date(),
   updatedAt: z.coerce.date(),
@@ -110,7 +153,7 @@ export const MessageSchema = z.object({
  */
 export const SendMessageRequestSchema = z.object({
   threadId: z.string().min(1),
-  content: z.array(MessageContentSchema).min(1),
+  content: MessageContentsSchema.refine((content) => content.length > 0, 'Message content must not be empty'),
   targetCatId: catIdSchema().optional(),
 });
 

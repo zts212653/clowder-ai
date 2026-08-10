@@ -4,11 +4,12 @@ related_features: [F276, F221, F188, F255, F272, F281]
 topics: [proactive, memory, nudge, entity-detection, source-bundle, preflight, cold-start]
 doc_kind: spec
 created: 2026-07-30
+updated: 2026-08-08
 description: "记忆 proactive 生产端：机械频率检测层给在场猫供数据，typed 证据契约与 preflight 修提案质量，冷启动策略破提议沉默螺旋。"
 description_source: human
 description_author: fable-5
 description_updated_at: 2026-07-30T20:53:00-07:00
-tips_exempt: "Phase D adds cat-side proactive-memory judgment and content-free abstention, not a standalone owner UI. The owner-facing journey remains the existing F276 rejectable Approval Hub card; discovery remains covered by feature-f276-private-person-memory."
+tips_exempt: "Phase D adds cat-side proactive-memory judgment, content-free abstention, and a source-bound defer outcome, not a standalone owner UI. The owner-facing journey remains the existing F276 rejectable Approval Hub card; discovery remains covered by feature-f276-private-person-memory."
 ---
 
 # F282: Proactive Memory Pipeline（记忆 proactive 生产端）
@@ -38,6 +39,10 @@ Architecture cell: `memory`
 - pending proposal 已有 immutable complete-snapshot replacement 与 withdraw：语音转写错字（`Agent Refractor` → 正确 `AgentReflex`）可在不新增“纠错事件”、不丢未改字段的前提下原子替换旧卡（F276 PR #3286）
 - 工具描述与 `proactive-memory-judgment` 已要求先判 source eligibility、无合格来源时 abstain/降档表达；不得生成零信息卡或把纠错本身建模成新事件
 - 拒因 envelope 与有界回流归 F281 管辖；F282 只消费其契约，不维护第二份反馈账本
+- 2026-08-08 黄挺 dogfood 证明 Phase A 的 registry-miss filter 会把“已登记人物的新关系/
+  互动 delta”整类抑制，且原 `propose | abstain` 无法表达“值得记但主任务不宜中断”。
+  operator 批准 post-close 双路径 amendment：在场猫现在可 `capture/defer` exact source coordinates；
+  F276 以 content-free receipt + bounded daily clerk 转回正常可拒绝 approval proposal。
 
 ## What
 
@@ -75,6 +80,17 @@ Architecture cell: `memory`
 - L0 偏置文案："不确定 → 降档表达"替代默认沉默；低副作用可拒绝提议漏报=掉球、被拒=校准数据
 - **第一道防线制度化**（Sol review P1-2 补）：单次出现的 continuity-valued delta 走主动介入漏斗（甜甜圈资格→证据→时机→授权→降档表达），配 skill 展开与 AC-D3 fixture——频率检测只是第二道兜底，"一次就重要"必须有自己的验收
 - **时序硬约束**：本 Phase 在三项齐备后启动——F281 **有界**回流（AC-C2）+ 本 feat Phase B（证据契约）+ Phase C（preflight/pending 生命周期）。激励结构与提案通路不先修好，翻偏置 = 鼓励猫往窄门里撞（重演周玉晶）或重蹈"第五条提醒失效"（见 KD-3）
+
+### Post-close amendment: known-person delta defer
+
+- registry filtering 继续抑制非人物 Entity、pending/dormant/unknown 候选；registered person
+  Entity/private Person 仍可产生新的 relationship/interaction delta opportunity。
+- opportunity disposition 扩为 `propose | defer | abstain`。defer 只提交 subject + typed exact
+  source coordinates，由 server 绑定 invocation/origin/digest；无 private body 或第二份事实账本。
+- daily consumer 只处理显式 deferred receipts，按固定 batch 与 claim lease 运行；不扫描 owner
+  corpus、不做后台 LLM 判断。输出仍是 F276 approval proposal，不得直接 materialize。
+- capture/defer 与最终 proposal/materialized lineage 做 exact-delta dedupe；owner 可撤回、按 receipt
+  hard-forget，人物/proposal forget 也级联清理 receipt indexes。
 
 ## User Journey
 
@@ -118,7 +134,17 @@ Architecture cell: `memory`
 ### Phase D（冷启动 + 偏置 + 第一道防线）
 - [x] AC-D1: 冷启动退出判据为**多维约束向量**（coverage 不塌 + FP/污染在预算内 + 审批负担可承受），非接受率单指标；estimator / validity bounds / 样本量契约走 eval-design 出生证（Design Gate 完整化），参数写入运行配置可查（非口头约定）
 - [x] AC-D2: L0 偏置文案合入（前置**三项齐备且时序证据留档**：F281 有界回流 AC-C2 生效 + 本 feat Phase B 证据契约生效 + Phase C preflight/pending 生命周期生效——激励与提案通路先修好，再鼓励多提）
-- [x] AC-D3: **单次但重要**第一道防线验收——单次出现的 continuity-valued delta（无频率信号）场景 fixture：在场猫走"甜甜圈资格→证据→时机→授权→降档表达"漏斗，产出**最小结构化 opportunity episode**：`opportunityRef + disposition(propose|abstain) + reasonCode`。abstain 必须有 record 才算 calibrated abstention；无 proposal 且无 abstention record = `uninformed_silence` = **fixture 失败**（防"任何沉默都解释成通过"，对齐度量系统 v0.1.2 TN 三分类）。不记录私密推理正文。覆盖 operator 原话"不是反复三次才重要"（与 AC-A1 频率路径互补）
+- [x] AC-D3: **单次但重要**第一道防线验收——单次出现的 continuity-valued delta（无频率信号）场景 fixture：在场猫走"甜甜圈资格→证据→时机→授权→降档表达"漏斗，产出**最小结构化 opportunity episode**：`opportunityRef + disposition(propose|defer|abstain) + reasonCode`。defer 必须有 recognized content-free receipt，abstain 必须有 record；三者皆无 = `uninformed_silence` = **fixture 失败**（防"任何沉默都解释成通过"，对齐度量系统 v0.1.2 TN 三分类）。不记录私密推理正文。覆盖 operator 原话"不是反复三次才重要"（与 AC-A1 频率路径互补）
+
+### Post-close amendment（known-person delta）
+- [x] AC-E1: registered person Entity/private Person 的新 delta 不被 registry filter 整类
+  suppression；非人物 Entity 与 pending/dormant 仍保持抑制。
+- [x] AC-E2: evaluator 对 `propose | defer | abstain` 互斥投影；recognized defer 不是
+  uninformed silence，也不冒充 proposal。
+- [x] AC-E3: defer receipt 只保存 server-derived coordinates/digests/status，TTL=0、无正文；
+  daily 只读 bounded explicit queue，并只生成 rejectable F276 proposal。
+- [x] AC-E4: exact-delta dedupe、withdraw、receipt/proposal/person hard-forget 与未确认 ASR
+  fail-closed 都有契约测试。
 
 ## Eval / Tracking Contract（Phase D Design Gate 已锁）
 
@@ -129,7 +155,7 @@ Architecture cell: `memory`
 - **Primary Users**: 在场猫（nudge 消费 + 提案侧）+ operator（提案接收侧）
 - **Activation Signal**: nudge → proposal 转化发生（>0）；此前无法发出的证据类型成功进卡
 - **Friction Metric**: nudge 无视率持续 100%（注入形态无效）；污染型 FP（错误事实进卡）单列且权重最高（度量系统 A3 非对称损失）；审批负担（卡/周）超预算
-- **Regression Fixture**: Alden 场景（检测→lane-neutral nudge→猫分类→proposal；F276 PR #3326 另覆盖当前 thread 卡绑定跨 thread owner 来源）+ 周玉晶场景（typed bundle 过卡）+ AgentReflex 场景（pending 纠错）+ **单次但重要场景**（无频率信号，猫走漏斗提议，AC-D3）。owner 实际审批与 recall 验证是 F276 UAT，不计作本 feat 已完成的工程 fixture
+- **Regression Fixture**: Alden 场景（检测→lane-neutral nudge→猫分类→proposal；F276 PR #3326 另覆盖当前 thread 卡绑定跨 thread owner 来源）+ 周玉晶场景（typed bundle 过卡）+ AgentReflex 场景（pending 纠错）+ **单次但重要场景**（无频率信号，猫走漏斗选择 propose/defer/abstain，AC-D3）+ 黄挺 known-person deferred delta。owner 实际审批与 recall 验证是 F276 UAT，不计作本 feat 已完成的工程 fixture
 - **Sunset Signal**: operator 关闭 nudge；或约束向量持续违约（样本量契约内）且 tune 两轮无效 → 检测参数或注入形态重设计
 - **Consumer**: 冷启动退出决策（AC-D1 约束向量）+ 检测阈值 tune；账本数据服务设计者，**不回灌猫侧 KPI**（F281 KD-3 同源）
 

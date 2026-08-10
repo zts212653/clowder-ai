@@ -438,7 +438,11 @@ export function CliOutputBlock({
 
       {/* Expanded body */}
       {expanded && (
-        <div data-testid="cli-output-body" style={{ backgroundColor: 'var(--cat-msg-inset)' }}>
+        <div
+          data-testid="cli-output-body"
+          data-context-quote-source="cli_output"
+          style={{ backgroundColor: 'var(--cat-msg-inset)' }}
+        >
           <div style={{ height: 1, backgroundColor: DIVIDER }} />
           {toolUses.length > 0 && (
             <ToolsSection

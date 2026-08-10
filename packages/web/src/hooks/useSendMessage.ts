@@ -1,6 +1,6 @@
 'use client';
 
-import type { MessageWorkDisposition } from '@cat-cafe/shared';
+import type { ContextAttachment, MessageContent, MessageWorkDisposition } from '@cat-cafe/shared';
 import { useCallback, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
@@ -23,22 +23,16 @@ export interface WhisperOptions {
  */
 export function useSendMessage(activeThreadId?: string) {
   const {
-    addMessage,
     addMessageToThread,
     removeThreadMessage,
     replaceThreadMessageId,
-    setLoading,
-    setHasActiveInvocation,
     setThreadLoading,
     setThreadHasActiveInvocation,
   } = useChatStore(
     useShallow((s) => ({
-      addMessage: s.addMessage,
       addMessageToThread: s.addMessageToThread,
       removeThreadMessage: s.removeThreadMessage,
       replaceThreadMessageId: s.replaceThreadMessageId,
-      setLoading: s.setLoading,
-      setHasActiveInvocation: s.setHasActiveInvocation,
       setThreadLoading: s.setThreadLoading,
       setThreadHasActiveInvocation: s.setThreadHasActiveInvocation,
     })),
@@ -74,11 +68,12 @@ export function useSendMessage(activeThreadId?: string) {
       deliveryMode?: DeliveryMode,
       replyToId?: string,
       messageDisposition?: MessageWorkDisposition,
+      contextAttachments?: ContextAttachment[],
     ) => {
-      const activeThread = activeThreadId ?? useChatStore.getState().currentThreadId;
-      const threadId = overrideThreadId ?? activeThread;
+      const threadId = overrideThreadId ?? activeThreadId ?? useChatStore.getState().currentThreadId;
       const hasImages = Boolean(images && images.length > 0);
       const isQueueSend = deliveryMode === 'queue';
+      const hasContextAttachments = Boolean(contextAttachments?.length);
 
       // Queue sends don't reset refs — cat is still streaming
       if (!isQueueSend) resetRefs();
@@ -117,35 +112,39 @@ export function useSendMessage(activeThreadId?: string) {
         ...(whisper ? { visibility: whisper.visibility, whisperTo: whisper.whisperTo } : {}),
         ...(replyToId ? { replyTo: replyToId, ...(replyPreview ? { replyPreview } : {}) } : {}),
       };
-      if (images && images.length > 0) {
-        userMsg.contentBlocks = [
-          { type: 'text' as const, text: content },
-          ...images.map((img) => ({
-            type: 'image' as const,
-            url: URL.createObjectURL(img),
+      if (hasImages || hasContextAttachments) {
+        const contentBlocks: MessageContent[] = [
+          ...(content ? [{ type: 'text' as const, text: content }] : []),
+          ...(contextAttachments ?? []).map((attachment) => ({
+            type: 'context_attachment' as const,
+            attachment,
           })),
+          ...(images ?? []).map((file): MessageContent => {
+            if (file.type.startsWith('image/')) {
+              return { type: 'image', url: URL.createObjectURL(file) };
+            }
+            return {
+              type: 'file',
+              url: URL.createObjectURL(file),
+              fileName: file.name,
+              mimeType: file.type || 'application/octet-stream',
+              fileSize: file.size,
+            };
+          }),
         ];
+        userMsg.contentBlocks = contentBlocks;
       }
       // Explicit queue sends wait for the durable server id before publication;
       // normal sends remain optimistic even when the server smart-queues them.
       if (!isQueueSend) {
-        if (threadId !== activeThread) {
-          addMessageToThread(threadId, userMsg);
-        } else {
-          addMessage(userMsg);
-        }
+        addMessageToThread(threadId, userMsg);
       }
 
       // F39: Queue sends don't flip loading/invocation flags — cat is already running,
       // and queue_updated WS event will surface the entry in QueuePanel.
       if (!isQueueSend) {
-        if (threadId !== activeThread) {
-          setThreadLoading(threadId, true);
-          setThreadHasActiveInvocation(threadId, true);
-        } else {
-          setLoading(true);
-          setHasActiveInvocation(true);
-        }
+        setThreadLoading(threadId, true);
+        setThreadHasActiveInvocation(threadId, true);
       }
 
       const reconcileSuccessfulResponse = (
@@ -166,11 +165,7 @@ export function useSendMessage(activeThreadId?: string) {
         if (!body?.userMessageId) return;
         if (isQueueSend) {
           const durableUserMessage = { ...userMsg, id: body.userMessageId };
-          if (threadId !== activeThread) {
-            addMessageToThread(threadId, durableUserMessage);
-          } else {
-            addMessage(durableUserMessage);
-          }
+          addMessageToThread(threadId, durableUserMessage);
         } else {
           replaceThreadMessageId(threadId, optimisticMessageId, body.userMessageId);
         }
@@ -193,6 +188,9 @@ export function useSendMessage(activeThreadId?: string) {
             }
           }
           if (replyToId) formData.append('replyTo', replyToId);
+          if (contextAttachments?.length) {
+            formData.append('contextAttachments', JSON.stringify(contextAttachments));
+          }
           for (const img of images) {
             formData.append('images', img);
           }
@@ -218,6 +216,7 @@ export function useSendMessage(activeThreadId?: string) {
               ...deliveryModePayload,
               ...(replyToId ? { replyTo: replyToId } : {}),
               ...(messageDisposition ? { messageDisposition } : {}),
+              ...(contextAttachments?.length ? { contextAttachments } : {}),
             }),
           });
           if (!res.ok) {
@@ -256,23 +255,16 @@ export function useSendMessage(activeThreadId?: string) {
           content: `Failed to send message: ${errorMessage}`,
           timestamp: Date.now(),
         };
-        if (threadId !== activeThread) {
-          addMessageToThread(threadId, errorMessagePayload);
-        } else {
-          addMessage(errorMessagePayload);
-        }
+        addMessageToThread(threadId, errorMessagePayload);
         return false;
       }
     },
     [
       resetRefs,
       processCommand,
-      addMessage,
       addMessageToThread,
       removeThreadMessage,
       replaceThreadMessageId,
-      setLoading,
-      setHasActiveInvocation,
       setThreadLoading,
       setThreadHasActiveInvocation,
       activeThreadId,

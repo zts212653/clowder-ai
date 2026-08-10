@@ -124,6 +124,18 @@ function isRetiredHoldStillEnabled(def: DynamicTaskDef): boolean {
   return isHoldBallReminderDef(def) && def.enabled && readHoldLifecycleStatus(def) === 'retired_by_event';
 }
 
+function readManagedCommandWakeState(def: DynamicTaskDef): string | null {
+  if (!isHoldBallReminderDef(def)) return null;
+  const lifecycle = def.params.holdLifecycle;
+  if (typeof lifecycle !== 'object' || lifecycle === null || Array.isArray(lifecycle)) return null;
+  const record = lifecycle as Record<string, unknown>;
+  if (record.mode !== 'wake_when') return null;
+  const command = record.managedCommand;
+  if (typeof command !== 'object' || command === null || Array.isArray(command)) return null;
+  const state = (command as Record<string, unknown>).state;
+  return typeof state === 'string' ? state : null;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyTaskSpec = TaskSpec_P1<any>;
 
@@ -166,6 +178,7 @@ export class TaskRunnerV2 {
   private dynamicTaskStore: TaskRunnerV2Options['dynamicTaskStore'];
   /** F167 Phase M: busy checker for pre-fire defer (queueProcessor.isThreadBusy() || invocationTracker.has()) */
   private isThreadBusy: TaskRunnerV2Options['isThreadBusy'];
+  private managedCommandWakeRecovery?: (taskId: string) => Promise<'missing' | 'pending' | 'recovered'>;
   /** F167 Phase M: per-task consecutive defer counter (reset on fire) */
   private deferCounts = new Map<string, number>();
   /**
@@ -205,6 +218,10 @@ export class TaskRunnerV2 {
   /** #415: Late-bind dynamicTaskStore (constructed after TaskRunnerV2 in boot sequence) */
   setDynamicTaskStore(store: DynamicTaskStore): void {
     this.dynamicTaskStore = store;
+  }
+
+  setManagedCommandWakeRecovery(recovery: (taskId: string) => Promise<'missing' | 'pending' | 'recovered'>): void {
+    this.managedCommandWakeRecovery = recovery;
   }
 
   register(task: AnyTaskSpec): void {
@@ -309,8 +326,10 @@ export class TaskRunnerV2 {
     const defs = store.getAll().filter((d) => d.enabled);
     let loaded = 0;
     for (const def of defs) {
+      const managedCommandState = readManagedCommandWakeState(def);
+      if (managedCommandState && managedCommandState !== 'command_running') continue;
       // #415: once tasks with past fireAt → missed window, cancel + notify + retire
-      if (def.trigger.type === 'once' && def.trigger.fireAt < Date.now()) {
+      if (def.trigger.type === 'once' && def.trigger.fireAt < Date.now() && !managedCommandState) {
         this.handleMissedOnceTask(def, store);
         continue;
       }
@@ -571,6 +590,12 @@ export class TaskRunnerV2 {
 
   /** #415: Remove a once-task from runtime + persistent store after execution */
   private retireOnceTask(taskId: string): void {
+    const def = this.dynamicTaskStore?.getById(taskId);
+    if (def && readManagedCommandWakeState(def)) {
+      this.unregister(taskId);
+      this.logger.info(`[scheduler] ${taskId}: managed-command wake handed to durable recovery`);
+      return;
+    }
     // Use taskId directly — for dynamic tasks, taskId === dynDefId
     if (this.dynamicTaskStore) {
       this.dynamicTaskStore.remove(taskId);
@@ -732,6 +757,7 @@ export class TaskRunnerV2 {
       fetchContent: this.fetchContent,
       invokeTrigger: this.invokeTrigger,
       ballCustody: this.ballCustody,
+      managedCommandWakeRecovery: this.managedCommandWakeRecovery,
       onItemOutcome: (_taskId, _subjectKey, outcome, errorSummary) => {
         if (outcome === 'RUN_DELIVERED') hasDelivered = true;
         if (outcome === 'RUN_FAILED') lastError = errorSummary;

@@ -42,6 +42,7 @@ import { createMemoryCueTools } from './memory-cue-tools.js';
 import { createPersonMemoryLifecycleTools } from './person-memory-lifecycle-tools.js';
 import { createPersonMemoryProposalTool } from './person-memory-proposal-tool.js';
 import {
+  createDeferredPersonMemoryTool,
   handleRecordProactiveMemoryAbstention,
   proactiveMemoryOpportunityTool,
 } from './proactive-memory-opportunity-tool.js';
@@ -360,6 +361,13 @@ export const postMessageInputSchema = {
         .regex(/^[A-Za-z0-9._:-]+$/)
         .optional()
         .describe('Existing coordination id to continue explicitly. Usually omit: the server mints/inherits it.'),
+      subjectRef: z
+        .string()
+        .trim()
+        .min(1)
+        .max(240)
+        .optional()
+        .describe('Stable action subject. A different subject starts a new coordination generation.'),
     })
     .optional()
     .describe(
@@ -644,6 +652,13 @@ export const crossPostMessageInputSchema = {
         .regex(/^[A-Za-z0-9._:-]+$/)
         .optional()
         .describe('Existing coordination id to continue explicitly. Usually omit: the server mints/inherits it.'),
+      subjectRef: z
+        .string()
+        .trim()
+        .min(1)
+        .max(240)
+        .optional()
+        .describe('Stable action subject. A different subject starts a new coordination generation.'),
     })
     .optional()
     .describe(
@@ -739,7 +754,9 @@ async function _executePostMessage(
     targetCats?: string[] | undefined;
     agentKeyCatId?: string | undefined;
     effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work' | undefined;
-    coordination?: { phase: 'active' | 'terminal'; id?: string | undefined } | undefined;
+    coordination?:
+      | { phase: 'active' | 'terminal'; id?: string | undefined; subjectRef?: string | undefined }
+      | undefined;
     action?: ActionSuccessorRequestMetadata | undefined;
     proposedAction?: ActionSuccessorRequestMetadata | undefined;
     acknowledgeHeld?: boolean | undefined;
@@ -873,7 +890,9 @@ export async function handlePostMessage(
     replyTo?: string | undefined;
     clientMessageId?: string | undefined;
     targetCats?: string[] | undefined;
-    coordination?: { phase: 'active' | 'terminal'; id?: string | undefined } | undefined;
+    coordination?:
+      | { phase: 'active' | 'terminal'; id?: string | undefined; subjectRef?: string | undefined }
+      | undefined;
     agentKeyCatId?: string | undefined;
     action?: ActionSuccessorRequestMetadata | undefined;
     acknowledgeHeld?: boolean | undefined;
@@ -1200,7 +1219,7 @@ export async function handleCrossPostMessage(input: {
   clientMessageId?: string | undefined;
   agentKeyCatId?: string | undefined;
   effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work' | undefined;
-  coordination?: { phase: 'active' | 'terminal'; id?: string | undefined } | undefined;
+  coordination?: { phase: 'active' | 'terminal'; id?: string | undefined; subjectRef?: string | undefined } | undefined;
   action?: ActionSuccessorRequestMetadata | undefined;
   proposedAction?: ActionSuccessorRequestMetadata | undefined;
   acknowledgeHeld?: boolean | undefined;
@@ -2424,8 +2443,11 @@ export async function handleProposeProfileUpdate(input: {
 const personMemoryProposalToolset = createPersonMemoryProposalTool(callbackPost);
 const personMemoryLifecycleToolset = createPersonMemoryLifecycleTools(callbackPost, callbackGet);
 const memoryCueToolset = createMemoryCueTools(callbackPost);
+const deferredPersonMemoryToolset = createDeferredPersonMemoryTool(callbackPost);
 export const { handleProposePersonMemory } = personMemoryProposalToolset;
 export { handleRecordProactiveMemoryAbstention };
+export const { handleDeferPersonMemoryDelta, handleWithdrawDeferredPersonMemory, handleForgetDeferredPersonMemory } =
+  deferredPersonMemoryToolset;
 export const {
   handleGetPersonMemoryProposalStatus,
   handleRecallPersonRelationship,
@@ -2874,7 +2896,7 @@ export async function handleSetThreadMetadata(input: {
 }
 
 export const callbackTools = [
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_post_message',
     description:
       'Post a proactive async message to YOUR CURRENT thread, optionally waking one cat as an ordinary notification or a fenced same-thread structured single successor. ' +
@@ -3052,7 +3074,7 @@ export const callbackTools = [
       runtimeProfiles: ['full'],
     },
   }),
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_cross_post_message',
     description:
       'Post a message to a specific thread by threadId (cross-thread notification). ' +
@@ -3548,6 +3570,8 @@ export const callbackTools = [
   }),
   personMemoryProposalToolset.tool,
   proactiveMemoryOpportunityTool,
+  deferredPersonMemoryToolset.tool,
+  ...deferredPersonMemoryToolset.lifecycleTools,
   ...personMemoryLifecycleToolset.tools,
   ...memoryCueToolset.tools,
   // F260 Phase A: Entity registration proposal (operator approves via Hub, then entity enters registry)

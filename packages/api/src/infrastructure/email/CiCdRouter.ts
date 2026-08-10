@@ -145,10 +145,6 @@ export class CiCdRouter {
     if (!task) return { kind: 'skipped', reason: `No tracking task for ${poll.repoFullName}#${poll.prNumber}` };
 
     const terminal = terminalPrState(poll);
-    if (task.status === 'done' && !terminal && task.automationState?.waitOutcome?.delivery !== 'pending') {
-      return { kind: 'skipped', reason: 'tracking task already terminal' };
-    }
-
     const disabled = await this.skipDisabledCi(task);
     if (disabled) return disabled;
     await this.recordExternalReviewCi(poll, task, sk);

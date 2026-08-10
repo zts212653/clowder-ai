@@ -643,6 +643,87 @@ describe('triggerA2AInvocation (fallback path)', () => {
     assert.equal(completions[0].status, 'failed');
   });
 
+  test('preserves a standalone A2A terminal child error instead of writing empty success', async () => {
+    const { triggerA2AInvocation } = await import('../dist/routes/callback-a2a-trigger.js');
+
+    const updates = [];
+    const completions = [];
+    const mockInvocationRecordStore = {
+      create() {
+        return { outcome: 'created', invocationId: 'inv-terminal-error' };
+      },
+      update(_id, input) {
+        updates.push(input);
+      },
+    };
+    const mockInvocationTracker = {
+      has() {
+        return false;
+      },
+      start() {
+        return new AbortController();
+      },
+      startAll() {
+        return new AbortController();
+      },
+      tryStartThreadAll() {
+        return new AbortController();
+      },
+      complete() {},
+      completeAll() {},
+    };
+
+    await triggerA2AInvocation(
+      {
+        router: {
+          async *routeExecution() {
+            yield {
+              type: 'error',
+              catId: 'codex',
+              error: 'queued_prompt_exposure_rejected:standalone-message',
+              timestamp: Date.now(),
+            };
+            yield { type: 'done', catId: 'codex', isFinal: true, timestamp: Date.now() };
+          },
+        },
+        invocationRecordStore: mockInvocationRecordStore,
+        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {} },
+        invocationTracker: mockInvocationTracker,
+        queueProcessor: {
+          async onInvocationComplete(_threadId, _catId, status) {
+            completions.push(status);
+          },
+        },
+        log: { error() {}, warn() {}, info() {} },
+      },
+      {
+        targetCats: ['codex'],
+        content: '@codex reproduce terminal child error',
+        userId: 'user-1',
+        threadId: 'thread-terminal-error',
+        triggerMessage: {
+          id: 'message-terminal-error',
+          threadId: 'thread-terminal-error',
+          userId: 'user-1',
+          catId: 'opus',
+          content: 'handoff',
+          mentions: ['codex'],
+          timestamp: Date.now(),
+        },
+      },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(
+      updates.some((update) => update.status === 'succeeded'),
+      false,
+    );
+    const failed = updates.find((update) => update.status === 'failed');
+    assert.equal(failed.error, 'queued_prompt_exposure_rejected:standalone-message');
+    assert.deepEqual(completions, ['failed']);
+  });
+
   test('calls queueProcessor.onInvocationComplete with canceled on abort', async () => {
     const { triggerA2AInvocation } = await import('../dist/routes/callback-a2a-trigger.js');
 
@@ -1897,6 +1978,97 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
     assert.equal(backfillCalls.length, 1, 'should backfill messageId onto queue entry');
     assert.equal(backfillCalls[0].entryId, 'q-1');
     assert.equal(backfillCalls[0].messageId, 'msg-trigger-123');
+  });
+
+  test('F264 accepts prompt exposure for a published same-thread A2A trigger without recall custody', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { QueueProcessor } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
+    const { QueuedMessageCustodyCoordinator } = await import(
+      '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js'
+    );
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const invocationQueue = new InvocationQueue();
+    const messageStore = new MessageStore();
+    const queueCustodyCoordinator = new QueuedMessageCustodyCoordinator({ messageStore });
+    const socketManager = {
+      broadcastAgentMessage() {},
+      broadcastToRoom() {},
+      emitToUser() {},
+    };
+    const promptProcessor = new QueueProcessor({
+      queue: invocationQueue,
+      messageStore,
+      queueCustodyCoordinator,
+      socketManager,
+    });
+    const triggerMessage = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'same-thread handoff already published in history',
+      mentions: ['codex'],
+      timestamp: 100,
+      threadId: 'thread-target',
+    });
+    let promptBoundaryReached = false;
+
+    const result = await enqueueA2ATargets(
+      {
+        router: { async *routeExecution() {} },
+        invocationRecordStore: { create() {}, update() {} },
+        socketManager,
+        invocationTracker: {
+          has() {
+            return false;
+          },
+          start() {
+            return new AbortController();
+          },
+          startAll() {
+            return new AbortController();
+          },
+          tryStartThreadAll() {
+            return new AbortController();
+          },
+          complete() {},
+          completeAll() {},
+        },
+        messageStore,
+        queueProcessor: {
+          onInvocationComplete() {},
+          async tryAutoExecute() {
+            const [entry] = invocationQueue.list('thread-target', 'user-1');
+            assert.equal(entry.messageId, triggerMessage.id, 'callback must backfill the published trigger');
+            await promptProcessor.markPromptMessagesSeen({
+              threadId: 'thread-target',
+              userId: 'user-1',
+              catId: 'codex',
+              invocationId: 'inv-same-thread-child',
+              messageIds: [triggerMessage.id],
+              seenAt: 200,
+            });
+            promptBoundaryReached = true;
+          },
+        },
+        invocationQueue,
+        log: { info() {}, warn() {}, error() {} },
+      },
+      {
+        targetCats: ['codex'],
+        content: triggerMessage.content,
+        userId: 'user-1',
+        threadId: 'thread-target',
+        triggerMessage,
+        callerCatId: 'opus',
+        parentInvocationId: 'parent-same-thread',
+      },
+    );
+
+    assert.deepEqual(result.enqueued, ['codex']);
+    assert.equal(promptBoundaryReached, true);
+    assert.equal(messageStore.getById(triggerMessage.id).queueCustody, undefined);
+    assert.deepEqual(invocationQueue.list('thread-target', 'user-1')[0].queuedSeenByCatIds, ['codex']);
   });
 
   test('F264 initializes per-target cross-thread custody before A2A auto-execution', async () => {

@@ -127,6 +127,7 @@ describe('HubCatEditor', () => {
   async function renderAdvancedRuntimeSection(
     clientId: HubCatEditorFormState['clientId'],
     defaultModel = 'test-model',
+    speed: { visible?: boolean; fastSupported?: boolean } = {},
   ) {
     const form: HubCatEditorFormState = {
       catId: `runtime-${clientId}`,
@@ -149,6 +150,7 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
+      codexSpeed: '',
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
@@ -174,6 +176,8 @@ describe('HubCatEditor', () => {
           codexSettingsError: null,
           codexSettingsEditable: false,
           showCodexSettings: false,
+          codexSpeedVisible: speed.visible ?? false,
+          codexFastSupported: speed.fastSupported ?? false,
           onChange,
           onStrategyChange: vi.fn(),
           onCodexChange: vi.fn(),
@@ -193,6 +197,14 @@ describe('HubCatEditor', () => {
       await renderAdvancedRuntimeSection(clientId);
       expect(document.body.textContent, clientId).not.toContain('额外 CLI 参数');
     }
+  });
+
+  it('explains that structured reserved settings cannot be overridden by raw CLI args', async () => {
+    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', { visible: true, fastSupported: true });
+
+    expect(document.body.textContent).toContain('结构化保留项始终以上方字段为准');
+    expect(document.body.textContent).toContain('对应 raw 参数会被忽略');
+    expect(document.body.textContent).not.toContain('与系统参数重复时以用户参数为准');
   });
 
   it('buildCatPayload keeps name in PATCH payload when editing an existing cat', () => {
@@ -391,6 +403,61 @@ describe('HubCatEditor', () => {
 
     await changeField(input!, 'turbo-native');
     expect(onChange).toHaveBeenCalledWith({ cliEffort: 'turbo-native' });
+  });
+
+  it('shows a separate OAuth Codex speed selector and disables Fast for unsupported models', async () => {
+    const onChange = await renderAdvancedRuntimeSection('openai', 'gpt-4.1', {
+      visible: true,
+      fastSupported: false,
+    });
+    const select = container.querySelector<HTMLSelectElement>('select[aria-label="速度档位"]');
+    expect(select).not.toBeNull();
+    expect(Array.from(select?.options ?? []).map((option) => option.textContent)).toEqual([
+      '继承 Codex 设置',
+      'Standard',
+      'Fast（当前模型不可用）',
+    ]);
+    expect(Array.from(select?.options ?? []).find((option) => option.value === 'fast')?.disabled).toBe(true);
+    expect(container.textContent).toContain('这是请求档位，不代表上游最终实际服务档位');
+
+    await changeField(select!, 'standard', 'change');
+    expect(onChange).toHaveBeenCalledWith({ codexSpeed: 'standard' });
+
+    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', { visible: false, fastSupported: true });
+    expect(container.querySelector('select[aria-label="速度档位"]')).toBeNull();
+  });
+
+  it('hydrates, persists, clears, and dormantly preserves the member Codex speed intent', () => {
+    const cat = {
+      id: 'runtime-sol-speed',
+      name: 'Sol',
+      displayName: 'Sol',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.6-sol',
+      color: { primary: '#16a34a', secondary: '#bbf7d0' },
+      mentionPatterns: ['@runtime-sol-speed'],
+      avatar: '/avatars/codex.png',
+      roleDescription: '审查',
+      cli: { command: 'codex', outputFormat: 'json', serviceTier: 'fast' },
+    } as CatData;
+    const form = initialState(cat);
+    expect(form.codexSpeed).toBe('fast');
+
+    const changed = buildCatPatchPayload({ ...form, codexSpeed: 'standard' }, cat, {
+      accountAuthType: 'oauth',
+    }) as Record<string, unknown>;
+    expect(changed.cli).toEqual({ serviceTier: 'standard' });
+
+    const cleared = buildCatPatchPayload({ ...form, codexSpeed: '' }, cat, {
+      accountAuthType: 'oauth',
+    }) as Record<string, unknown>;
+    expect(cleared.cli).toEqual({ serviceTier: null });
+
+    const dormant = buildCatPatchPayload({ ...form, codexSpeed: 'standard' }, cat, {
+      accountAuthType: 'api_key',
+    }) as Record<string, unknown>;
+    expect(dormant.cli).toBeUndefined();
   });
 
   it('buildCatPayload keeps structured cli.effort separate from raw cliConfigArgs', () => {

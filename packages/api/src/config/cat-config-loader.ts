@@ -75,6 +75,8 @@ const cliConfigSchema = z
     outputFormat: z.string().min(1),
     defaultArgs: z.array(z.string()).optional(),
     effort: z.string().trim().min(1).optional(),
+    /** F291: Codex OAuth requested service tier. Absent = inherit Codex user config. */
+    serviceTier: z.enum(['standard', 'fast']).optional(),
     contextWindow: z.number().positive().int().optional(),
     autoCompactTokenLimit: z.number().positive().int().optional(),
     /** F254 D2: Codex carrier override (openai only). Absent = follow CAT_CAFE_CODEX_CARRIER env. */
@@ -957,8 +959,8 @@ export function hasRuntimeDefaultCatOverride(): boolean {
 }
 
 /** Unified owner userId: configured env or single-user fallback. */
-export function getOwnerUserId(): string {
-  return process.env.DEFAULT_OWNER_USER_ID?.trim() || 'default-user';
+export function getOwnerUserId(env: NodeJS.ProcessEnv = process.env): string {
+  return env.DEFAULT_OWNER_USER_ID?.trim() || 'default-user';
 }
 
 // ── Variant CLI effort accessor ──────────────────────────────────────

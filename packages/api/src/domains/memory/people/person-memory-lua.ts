@@ -5,22 +5,53 @@ export { BEGIN_HARD_FORGET_LUA, FINISH_HARD_FORGET_LUA } from './person-memory-f
 export const STAGE_CANDIDATE_LUA = `
 local locatedOwner = redis.call('GET', KEYS[2])
 if locatedOwner and locatedOwner ~= ARGV[3] then return 'EXISTS' end
-if #KEYS >= 3 and KEYS[3] ~= '' and redis.call('EXISTS', KEYS[3]) == 1 then
+if redis.call('EXISTS', KEYS[1]) == 1 then return 'EXISTS' end
+if ARGV[5] == '1' then
+  local actualType = redis.call('TYPE', KEYS[3])['ok']
+  if actualType ~= 'none' and actualType ~= 'string' then return 'DELTA_CONFLICT' end
+  local lineage = redis.call('GET', KEYS[3])
+  if lineage and lineage ~= ARGV[4] then return 'DELTA_CONFLICT' end
+end
+if ARGV[6] == '1' and redis.call('EXISTS', KEYS[4]) == 1 then
   return 'NOT_AVAILABLE'
 end
-if redis.call('SET', KEYS[1], ARGV[1], 'NX') == false then
-  return 'EXISTS'
-end
+if ARGV[5] == '1' then redis.call('SET', KEYS[3], ARGV[4]) end
+redis.call('SET', KEYS[1], ARGV[1])
 redis.call('SET', KEYS[2], ARGV[3])
-if #KEYS >= 4 and KEYS[4] ~= '' then
-  redis.call('SADD', KEYS[4], ARGV[2])
+if ARGV[6] == '1' then
+  redis.call('SADD', KEYS[5], ARGV[2])
 end
-if #KEYS >= 5 and KEYS[5] ~= '' then
-  redis.call('SADD', KEYS[5], KEYS[1])
-  redis.call('SADD', KEYS[5], KEYS[2])
-  if KEYS[4] ~= '' then redis.call('SADD', KEYS[5], KEYS[4]) end
+if ARGV[6] == '1' then
+  redis.call('SADD', KEYS[6], KEYS[1])
+  redis.call('SADD', KEYS[6], KEYS[2])
+  if ARGV[5] == '1' then redis.call('SADD', KEYS[6], KEYS[3]) end
+  redis.call('SADD', KEYS[6], KEYS[5])
 end
 return 'STAGED'
+`;
+
+/** Atomically moves one still-staged candidate onto the receipt's current live claim. */
+export const RENEW_DEFERRED_CANDIDATE_CLAIM_LUA = `
+if ARGV[10] == '1' and redis.call('EXISTS', KEYS[3]) == 1 then return 'NOT_AVAILABLE' end
+local candidateRaw = redis.call('GET', KEYS[1])
+local receiptRaw = redis.call('GET', KEYS[2])
+if not candidateRaw or not receiptRaw then return 'NOT_AVAILABLE' end
+local candidate = cjson.decode(candidateRaw)
+local receipt = cjson.decode(receiptRaw)
+if candidate.ownerUserId ~= ARGV[1] or candidate.candidateId ~= ARGV[2] then return 'CONFLICT' end
+if candidate.state ~= 'staged' or not candidate.publication or candidate.publication.state ~= 'staged' then
+  return 'CONFLICT'
+end
+if candidate.deferredReceiptId ~= ARGV[3] or candidate.deltaFingerprint ~= ARGV[6] then return 'CONFLICT' end
+if receipt.ownerUserId ~= ARGV[1] or receipt.receiptId ~= ARGV[3] then return 'CONFLICT' end
+if receipt.state ~= 'claimed' or receipt.claimId ~= ARGV[5] then return 'CONFLICT' end
+if tonumber(receipt.claimUntil or 0) <= tonumber(ARGV[7]) then return 'CONFLICT' end
+if receipt.dedupeHash ~= ARGV[6] then return 'CONFLICT' end
+if candidate.deferredReceiptClaimId == ARGV[5] then return 'REPLAYED' end
+if candidate.deferredReceiptClaimId ~= ARGV[4] then return 'CONFLICT' end
+if candidateRaw ~= ARGV[8] then return 'CONFLICT' end
+redis.call('SET', KEYS[1], ARGV[9])
+return 'RENEWED'
 `;
 
 export const COMMIT_CANDIDATE_ENVELOPE_LUA = `
@@ -33,6 +64,38 @@ local current = cjson.decode(raw)
 if current.state ~= 'staged' then return 'CONFLICT' end
 redis.call('SET', KEYS[1], ARGV[1])
 redis.call('ZADD', KEYS[2], tonumber(ARGV[2]), ARGV[3])
+return 'ANCHORED'
+`;
+
+/** Atomically consumes one exact deferred claim while anchoring its F276 card. */
+export const COMMIT_DEFERRED_CANDIDATE_ENVELOPE_LUA = `
+local function allowed_type(key, expected)
+  local actual = redis.call('TYPE', key)['ok']
+  return actual == 'none' or actual == expected
+end
+if ARGV[10] == '1' and redis.call('EXISTS', KEYS[3]) == 1 then return 'NOT_AVAILABLE' end
+if not allowed_type(KEYS[1], 'string') or not allowed_type(KEYS[2], 'zset')
+  or not allowed_type(KEYS[4], 'string') or not allowed_type(KEYS[5], 'zset')
+  or not allowed_type(KEYS[6], 'string') or not allowed_type(KEYS[7], 'set')
+  or not allowed_type(KEYS[8], 'string') then return 'TYPE_CONFLICT' end
+local candidateRaw = redis.call('GET', KEYS[1])
+local receiptRaw = redis.call('GET', KEYS[4])
+if not candidateRaw or not receiptRaw then return 'NOT_AVAILABLE' end
+local candidate = cjson.decode(candidateRaw)
+local receipt = cjson.decode(receiptRaw)
+if candidate.state ~= 'staged' then return 'CONFLICT' end
+if receipt.state ~= 'claimed' or receipt.claimId ~= ARGV[6] then return 'CONFLICT' end
+if tonumber(receipt.claimUntil or 0) <= tonumber(ARGV[2]) then return 'CONFLICT' end
+if receipt.receiptId ~= ARGV[5] or receipt.dedupeHash ~= ARGV[7] then return 'CONFLICT' end
+if redis.call('GET', KEYS[8]) ~= ARGV[8] then return 'CONFLICT' end
+if redis.call('SISMEMBER', KEYS[7], ARGV[5]) ~= 1 then return 'CONFLICT' end
+redis.call('SET', KEYS[1], ARGV[1])
+redis.call('ZADD', KEYS[2], tonumber(ARGV[2]), ARGV[3])
+redis.call('SET', KEYS[4], ARGV[4])
+redis.call('ZREM', KEYS[5], ARGV[5])
+redis.call('SET', KEYS[6], ARGV[5])
+redis.call('SREM', KEYS[7], ARGV[5])
+redis.call('SET', KEYS[8], ARGV[9])
 return 'ANCHORED'
 `;
 
@@ -65,7 +128,7 @@ return 'ANCHORED'
 
 /** Withdraw one unmaterialized owner proposal without creating suppression. */
 export const WITHDRAW_CANDIDATE_LUA = `
-if KEYS[3] ~= '' and redis.call('EXISTS', KEYS[3]) == 1 then return 'NOT_AVAILABLE' end
+if ARGV[5] == '1' and redis.call('EXISTS', KEYS[3]) == 1 then return 'NOT_AVAILABLE' end
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 'NOT_AVAILABLE' end
 local current = cjson.decode(raw)
@@ -77,25 +140,28 @@ if not current.publication or current.publication.state ~= 'anchored' then
 end
 redis.call('SET', KEYS[1], ARGV[1])
 redis.call('ZREM', KEYS[2], ARGV[2])
+if ARGV[4] == '1' and redis.call('GET', KEYS[4]) == ARGV[3] then redis.call('DEL', KEYS[4]) end
 return 'UPDATED'
 `;
 
 export const ABORT_STAGED_CANDIDATE_LUA = `
-if #KEYS >= 3 and KEYS[3] ~= '' and redis.call('EXISTS', KEYS[3]) == 1 then
+if ARGV[4] == '1' and redis.call('EXISTS', KEYS[4]) == 1 then
   return 'NOT_AVAILABLE'
 end
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 0 end
 local current = cjson.decode(raw)
 if current.state ~= 'staged' then return 0 end
+if ARGV[3] == '1' and redis.call('GET', KEYS[3]) == ARGV[2] then redis.call('DEL', KEYS[3]) end
 redis.call('DEL', KEYS[1], KEYS[2])
-if #KEYS >= 4 and KEYS[4] ~= '' then
-  redis.call('SREM', KEYS[4], ARGV[1])
+if ARGV[4] == '1' then
+  redis.call('SREM', KEYS[5], ARGV[1])
 end
-if #KEYS >= 5 and KEYS[5] ~= '' then
-  redis.call('SREM', KEYS[5], KEYS[1])
-  redis.call('SREM', KEYS[5], KEYS[2])
-  if KEYS[4] ~= '' then redis.call('SREM', KEYS[5], KEYS[4]) end
+if ARGV[4] == '1' then
+  redis.call('SREM', KEYS[6], KEYS[1])
+  redis.call('SREM', KEYS[6], KEYS[2])
+  if ARGV[3] == '1' then redis.call('SREM', KEYS[6], KEYS[3]) end
+  redis.call('SREM', KEYS[6], KEYS[5])
 end
 return 1
 `;

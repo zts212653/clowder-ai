@@ -11,10 +11,15 @@ import type {
   MessageContent,
   RichMessageExtra,
 } from '@cat-cafe/shared';
-import { deliveryDecisionCueCarrierV1Schema } from '@cat-cafe/shared';
+import { deliveryDecisionCueCarrierV1Schema, MessageContentsSchema } from '@cat-cafe/shared';
 import { parsePluginMessageExtra } from '../../../../messaging/envelope.js';
 import type { MessageMetadata } from '../../types.js';
-import type { StoredMessage, StoredPluginMessage, StoredToolEvent } from '../ports/MessageStore.js';
+import type {
+  MessageRecallMarker,
+  StoredMessage,
+  StoredPluginMessage,
+  StoredToolEvent,
+} from '../ports/MessageStore.js';
 import { parseQueuedMessageCustody } from '../ports/queued-message-custody.js';
 import type { TurnExecutionMessageProjection } from '../ports/TurnExecutionStore.js';
 import { parseRecoveryMarker } from './redis-message-recovery-parser.js';
@@ -56,14 +61,48 @@ export function safeParseToolEvents(raw: string | undefined): readonly StoredToo
 export function safeParseContentBlocks(raw: string | undefined): readonly MessageContent[] | undefined {
   if (!raw) return undefined;
   try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : undefined;
+    const result = MessageContentsSchema.safeParse(JSON.parse(raw));
+    return result.success ? (result.data as MessageContent[]) : undefined;
   } catch {
     return undefined;
   }
 }
 
 export const safeParseQueueCustody = parseQueuedMessageCustody;
+
+export function safeParseMessageRecall(raw: string | undefined): MessageRecallMarker | undefined {
+  if (!raw) return undefined;
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    if (
+      value.version !== 1 ||
+      (value.exposure !== 'none' && value.exposure !== 'seen') ||
+      typeof value.recalledAt !== 'number' ||
+      !Number.isFinite(value.recalledAt)
+    ) {
+      return undefined;
+    }
+    const exposures = Array.isArray(value.exposures)
+      ? value.exposures.filter(
+          (entry): entry is { targetCatId: string; invocationId: string; seenAt: number } =>
+            typeof entry === 'object' &&
+            entry !== null &&
+            typeof (entry as Record<string, unknown>).targetCatId === 'string' &&
+            typeof (entry as Record<string, unknown>).invocationId === 'string' &&
+            typeof (entry as Record<string, unknown>).seenAt === 'number' &&
+            Number.isFinite((entry as Record<string, unknown>).seenAt),
+        )
+      : [];
+    return {
+      version: 1,
+      exposure: value.exposure,
+      recalledAt: value.recalledAt,
+      ...(exposures.length > 0 ? { exposures } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
 
 function parseCrossThreadCoordination(value: unknown): CrossThreadCoordination | undefined {
   if (!value || typeof value !== 'object') return undefined;
@@ -83,6 +122,11 @@ function parseCrossThreadCoordination(value: unknown): CrossThreadCoordination |
     id: coordination.id,
     phase: coordination.phase as CrossThreadCoordination['phase'],
     hop: Number(coordination.hop),
+    ...(typeof coordination.subjectRef === 'string' &&
+    coordination.subjectRef.trim().length > 0 &&
+    coordination.subjectRef.trim().length <= 240
+      ? { subjectRef: coordination.subjectRef.trim() }
+      : {}),
   };
 }
 

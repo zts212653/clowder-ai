@@ -1,6 +1,16 @@
 import type { CatId, QueueReminderAttempt, QueueTargetOutcome } from '@cat-cafe/shared';
-import type { IMessageStore, QueuedMessageCustody, StoredMessage } from '../../stores/ports/MessageStore.js';
-import type { QueueBodyExposure, QueueTargetCarrierBinding } from '../../stores/ports/queued-message-custody.js';
+import type {
+  IMessageStore,
+  QueuedMessageCustody,
+  RecallMessageToComposerDraftInput,
+  RecallMessageToComposerDraftResult,
+  StoredMessage,
+} from '../../stores/ports/MessageStore.js';
+import {
+  type QueueBodyExposure,
+  type QueueTargetCarrierBinding,
+  settleQueueCustodyWithdrawal,
+} from '../../stores/ports/queued-message-custody.js';
 import {
   markReminderAttemptDelivered,
   markReminderAttemptMissed,
@@ -28,6 +38,10 @@ export interface QueueCustodyMessageCompletionResult extends QueueCustodyComplet
 export interface QueueCustodySettlementResult {
   perMessage: QueueCustodyMessageCompletionResult[];
 }
+
+export type RecallMessageToComposerDraftCoordinatorResult =
+  | RecallMessageToComposerDraftResult
+  | { kind: 'carrier_changed' };
 
 function catIds(values: readonly string[] | undefined): CatId[] {
   return [...(values ?? [])] as CatId[];
@@ -473,9 +487,18 @@ function buildSuccessfulTargetTransition(input: {
   outcomeByCatId?: Readonly<Record<string, QueueTargetOutcome>>;
 }): { next: QueuedMessageCustody; completion: QueueCustodyCompletionResult } {
   const successful = new Set(input.successfulTargetCats);
-  const handledTargetCats = input.current.pendingTargetCats.filter(
+  const pendingHandledTargetCats = input.current.pendingTargetCats.filter(
     (catId) => successful.has(catId) && input.current.seenInvocationIdByCatId[catId] === input.invocationId,
   );
+  const withdrawnHandledTargetCats = (input.current.withdrawnByCatIds ?? []).filter(
+    (catId) =>
+      successful.has(catId) &&
+      input.current.status === 'terminal' &&
+      input.current.bodyExposures?.some(
+        (exposure) => exposure.targetCatId === catId && exposure.invocationId === input.invocationId,
+      ),
+  );
+  const handledTargetCats = [...new Set([...pendingHandledTargetCats, ...withdrawnHandledTargetCats])] as CatId[];
   const pendingTargetCats = input.current.pendingTargetCats.filter((catId) => !handledTargetCats.includes(catId));
   const completion = {
     handledTargetCats,
@@ -491,6 +514,10 @@ function buildSuccessfulTargetTransition(input: {
   const steeredInvocationIdByCatId = { ...(input.current.steeredInvocationIdByCatId ?? {}) };
   const carrierStateByTargetCatId = { ...(input.current.carrierStateByTargetCatId ?? {}) };
   const targetOutcomeByCatId = { ...(input.current.targetOutcomeByCatId ?? {}) };
+  const withdrawnByCatIds = (input.current.withdrawnByCatIds ?? []).filter(
+    (catId) => !handledTargetCats.includes(catId),
+  );
+  const withdrawnAtByCatId = { ...(input.current.withdrawnAtByCatId ?? {}) };
   for (const catId of handledTargetCats) {
     handled.add(catId);
     delete awakenedInvocationIdByCatId[catId];
@@ -498,6 +525,7 @@ function buildSuccessfulTargetTransition(input: {
     delete seenInvocationIdByCatId[catId];
     delete steeredInvocationIdByCatId[catId];
     delete carrierStateByTargetCatId[catId];
+    delete withdrawnAtByCatId[catId];
     const exposure = input.current.bodyExposures?.find(
       (candidate) => candidate.targetCatId === catId && candidate.invocationId === input.invocationId,
     );
@@ -515,6 +543,8 @@ function buildSuccessfulTargetTransition(input: {
     steerRequestedByCatIds: _steerRequestedByCatIds,
     steeredInvocationIdByCatId: _steeredInvocationIdByCatId,
     carrierStateByTargetCatId: _carrierStateByTargetCatId,
+    withdrawnByCatIds: _withdrawnByCatIds,
+    withdrawnAtByCatId: _withdrawnAtByCatId,
     ...stableCurrent
   } = input.current;
   return {
@@ -532,76 +562,12 @@ function buildSuccessfulTargetTransition(input: {
       ...(remainingSteerRequests.length > 0 ? { steerRequestedByCatIds: remainingSteerRequests } : {}),
       ...(Object.keys(steeredInvocationIdByCatId).length > 0 ? { steeredInvocationIdByCatId } : {}),
       failedByCatIds: input.current.failedByCatIds.filter((catId) => !handledTargetCats.includes(catId)),
+      ...(withdrawnByCatIds.length > 0 ? { withdrawnByCatIds } : {}),
+      ...(Object.keys(withdrawnAtByCatId).length > 0 ? { withdrawnAtByCatId } : {}),
       handledByCatIds: [...handled],
       targetOutcomeByCatId,
       updatedAt: input.updatedAt,
     },
-  };
-}
-
-function buildWithdrawnTargetTransition(
-  current: QueuedMessageCustody,
-  selectedTargetCats: readonly string[],
-  withdrawnAt: number,
-): QueuedMessageCustody {
-  const selected = new Set(selectedTargetCats);
-  const withdrawnNow = current.pendingTargetCats.filter((catId) => selected.has(catId));
-  if (withdrawnNow.length === 0) return current;
-
-  const pendingTargetCats = current.pendingTargetCats.filter((catId) => !selected.has(catId));
-  const withdrawnByCatIds = [...new Set([...(current.withdrawnByCatIds ?? []), ...withdrawnNow])] as CatId[];
-  const withdrawnAtByCatId = { ...(current.withdrawnAtByCatId ?? {}) };
-  const awakenedInvocationIdByCatId = { ...(current.awakenedInvocationIdByCatId ?? {}) };
-  const awakenedAtByCatId = { ...(current.awakenedAtByCatId ?? {}) };
-  const steeredInvocationIdByCatId = { ...(current.steeredInvocationIdByCatId ?? {}) };
-  const carrierStateByTargetCatId = { ...(current.carrierStateByTargetCatId ?? {}) };
-  for (const catId of withdrawnNow) {
-    withdrawnAtByCatId[catId] = withdrawnAt;
-    delete awakenedInvocationIdByCatId[catId];
-    delete awakenedAtByCatId[catId];
-    delete steeredInvocationIdByCatId[catId];
-    delete carrierStateByTargetCatId[catId];
-  }
-  const reminderAttempts = (current.reminderAttempts ?? []).map((attempt) =>
-    selected.has(attempt.targetCatId) && (attempt.state === 'requested' || attempt.state === 'delivered')
-      ? {
-          ...attempt,
-          state: 'missed' as const,
-          missedAt: withdrawnAt,
-          missedReason: 'source_withdrawn' as const,
-        }
-      : attempt,
-  );
-  const {
-    processingStartedAt: _processingStartedAt,
-    awakenedInvocationIdByCatId: _awakenedInvocationIdByCatId,
-    awakenedAtByCatId: _awakenedAtByCatId,
-    steerRequestedByCatIds: _steerRequestedByCatIds,
-    steeredInvocationIdByCatId: _steeredInvocationIdByCatId,
-    carrierStateByTargetCatId: _carrierStateByTargetCatId,
-    withdrawnByCatIds: _withdrawnByCatIds,
-    withdrawnAtByCatId: _withdrawnAtByCatId,
-    reminderAttempts: _reminderAttempts,
-    ...stableCurrent
-  } = current;
-  return {
-    ...stableCurrent,
-    revision: current.revision + 1,
-    status: pendingTargetCats.length === 0 ? 'terminal' : 'queued',
-    pendingTargetCats,
-    notifiedByCatIds: current.notifiedByCatIds.filter((catId) => !selected.has(catId)),
-    ...(Object.keys(awakenedInvocationIdByCatId).length > 0 ? { awakenedInvocationIdByCatId } : {}),
-    ...(Object.keys(awakenedAtByCatId).length > 0 ? { awakenedAtByCatId } : {}),
-    failedByCatIds: current.failedByCatIds.filter((catId) => !selected.has(catId)),
-    withdrawnByCatIds,
-    withdrawnAtByCatId,
-    ...(Object.keys(carrierStateByTargetCatId).length > 0 ? { carrierStateByTargetCatId } : {}),
-    ...((current.steerRequestedByCatIds ?? []).some((catId) => !selected.has(catId))
-      ? { steerRequestedByCatIds: (current.steerRequestedByCatIds ?? []).filter((catId) => !selected.has(catId)) }
-      : {}),
-    ...(Object.keys(steeredInvocationIdByCatId).length > 0 ? { steeredInvocationIdByCatId } : {}),
-    ...(reminderAttempts.length > 0 ? { reminderAttempts } : {}),
-    updatedAt: withdrawnAt,
   };
 }
 
@@ -615,12 +581,80 @@ export class QueuedMessageCustodyCoordinator {
     this.now = deps.now ?? Date.now;
   }
 
-  async persistEntry(entry: QueueEntry): Promise<void> {
-    await this.withEntryLock(entry.id, async () => {
+  async persistEntry(entry: QueueEntry): Promise<string[]> {
+    return this.withEntryLock(entry.id, async () => {
+      const managedMessageIds: string[] = [];
       for (const messageId of this.messageIds(entry)) {
-        await this.transition(messageId, (current) => activeCustodyFromEntry(entry, current, this.now()));
+        const result = await this.transitionManaged(messageId, (current) =>
+          activeCustodyFromEntry(entry, current, this.now()),
+        );
+        if (result.managed) managedMessageIds.push(messageId);
+      }
+      return managedMessageIds;
+    });
+  }
+
+  /**
+   * Linearize a true-recall body transfer against prompt-exposure persistence
+   * for the same Queue carrier. If exposure owns the lock first, its exact
+   * witness is present when recall classifies the message; if recall wins,
+   * later exposure persistence observes terminal custody and cannot invent a
+   * read receipt for the tombstoned body.
+   */
+  async recallMessageToComposerDraft(
+    entryId: string,
+    messageId: string,
+    input: RecallMessageToComposerDraftInput,
+    carrierFence?: { freeze: () => boolean; restore: () => void },
+  ): Promise<RecallMessageToComposerDraftCoordinatorResult> {
+    return this.withEntryLock(entryId, async () => {
+      if (carrierFence && !carrierFence.freeze()) return { kind: 'carrier_changed' as const };
+      try {
+        const result = await this.messageStore.recallMessageToComposerDraft(messageId, input);
+        if (carrierFence && result.kind !== 'recalled' && result.kind !== 'already_recalled') carrierFence.restore();
+        return result;
+      } catch (error) {
+        carrierFence?.restore();
+        throw error;
       }
     });
+  }
+
+  /** Fail before provider startup unless every queued body has an exact durable exposure witness. */
+  async assertPromptExposurePersisted(
+    messageIds: readonly string[],
+    targetCatId: string,
+    invocationId: string,
+  ): Promise<void> {
+    for (const messageId of messageIds) {
+      const message = await this.messageStore.getById(messageId);
+      if (!message?.queueCustody) throw new Error(`queued_prompt_exposure_rejected:${messageId}`);
+      const witnessed = message.queueCustody.bodyExposures?.some(
+        (exposure) => exposure.targetCatId === targetCatId && exposure.invocationId === invocationId,
+      );
+      if (!witnessed) throw new Error(`queued_prompt_exposure_rejected:${messageId}`);
+    }
+  }
+
+  /**
+   * A recall that wins after prompt construction must still stop provider
+   * startup. This barrier is intentionally separate from the witness-set
+   * assertion above: active foreign-target custody is not evidence that this
+   * invocation was expected to persist a receipt.
+   */
+  async assertPromptBodiesNotRecalled(
+    messageIds: readonly string[],
+    targetCatId: string,
+    invocationId: string,
+  ): Promise<void> {
+    for (const messageId of messageIds) {
+      const message = await this.messageStore.getById(messageId);
+      if (!message?.recall || !message.queueCustody) continue;
+      const witnessed = message.queueCustody.bodyExposures?.some(
+        (exposure) => exposure.targetCatId === targetCatId && exposure.invocationId === invocationId,
+      );
+      if (!witnessed) throw new Error(`queued_prompt_exposure_rejected:${messageId}`);
+    }
   }
 
   /**
@@ -633,7 +667,7 @@ export class QueuedMessageCustodyCoordinator {
       for (const messageId of this.messageIds(entry)) {
         changed =
           (await this.transition(messageId, (current) =>
-            buildWithdrawnTargetTransition(current, entry.targetCats, this.now()),
+            settleQueueCustodyWithdrawal(current, entry.targetCats, this.now()),
           )) || changed;
       }
       return changed;
@@ -722,6 +756,38 @@ export class QueuedMessageCustodyCoordinator {
     });
   }
 
+  /**
+   * Settle one exact source after its operational Queue carrier has already
+   * disappeared (for example, exposed true recall). The durable entryId still
+   * owns the lock, so this linearizes with both recall and prompt exposure.
+   */
+  async commitSuccessfulTargetForMessage(
+    entryId: string,
+    messageId: string,
+    successfulTargetCat: string,
+    invocationId: string,
+    handledAt: number,
+    outcome: QueueTargetOutcome,
+    isCarrierDetached?: () => boolean,
+  ): Promise<QueueCustodyCompletionResult> {
+    return this.withEntryLock(entryId, async () => {
+      const message = await this.messageStore.getById(messageId);
+      if (!message?.queueCustody || message.queueCustody.entryId !== entryId) {
+        throw new Error(`exact Queue custody binding missing for ${messageId}`);
+      }
+      if (message.queueCustody.status !== 'terminal' && isCarrierDetached?.() !== true) {
+        return {
+          handledTargetCats: [],
+          pendingTargetCats: [...message.queueCustody.pendingTargetCats],
+          fullyConsumed: false,
+        };
+      }
+      return this.commitMessageSuccessfulTargets(messageId, [successfulTargetCat], invocationId, handledAt, {
+        [successfulTargetCat]: outcome,
+      });
+    });
+  }
+
   private async commitMessageSuccessfulTargets(
     messageId: string,
     successfulTargetCats: readonly string[],
@@ -749,6 +815,7 @@ export class QueuedMessageCustodyCoordinator {
         return transition.next;
       },
       deliveredAt,
+      true,
     );
     return completion;
   }
@@ -823,20 +890,34 @@ export class QueuedMessageCustodyCoordinator {
     messageId: string,
     buildNext: (current: QueuedMessageCustody) => QueuedMessageCustody,
     deliveredAt?: number,
+    allowTerminalCurrent = false,
   ): Promise<boolean> {
+    return (await this.transitionManaged(messageId, buildNext, deliveredAt, allowTerminalCurrent)).changed;
+  }
+
+  private async transitionManaged(
+    messageId: string,
+    buildNext: (current: QueuedMessageCustody) => QueuedMessageCustody,
+    deliveredAt?: number,
+    allowTerminalCurrent = false,
+  ): Promise<{ managed: boolean; changed: boolean }> {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const message = await this.messageStore.getById(messageId);
       const current = message?.queueCustody;
-      if (!current || current.status === 'terminal') return false;
+      if (!current || (current.status === 'terminal' && !allowTerminalCurrent)) {
+        return { managed: false, changed: false };
+      }
       const next = buildNext(current);
-      if (sameProjection(current, next)) return false;
+      if (sameProjection(current, next)) return { managed: true, changed: false };
       const result = await this.messageStore.transitionQueueCustody(messageId, {
         expectedRevision: current.revision,
         next,
-        ...(next.status === 'terminal' && deliveredAt !== undefined ? { deliveredAt } : {}),
+        ...(current.status !== 'terminal' && next.status === 'terminal' && deliveredAt !== undefined
+          ? { deliveredAt }
+          : {}),
       });
-      if (result.kind === 'updated') return true;
-      if (result.kind === 'not_found') return false;
+      if (result.kind === 'updated') return { managed: true, changed: true };
+      if (result.kind === 'not_found') return { managed: false, changed: false };
     }
     throw new Error(`queue custody CAS retries exhausted for message ${messageId}`);
   }

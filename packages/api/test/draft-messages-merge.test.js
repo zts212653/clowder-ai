@@ -206,6 +206,88 @@ describe('GET /api/messages — draft merge (#80)', () => {
     assert.equal(draft.catId, 'opus');
   });
 
+  it('hydrates only exposed recall tombstones and never returns their body', async () => {
+    const custody = (entryId, exposure) => ({
+      version: 1,
+      entryId,
+      revision: 1,
+      intent: 'user_message',
+      status: 'queued',
+      allTargetCats: ['opus'],
+      pendingTargetCats: ['opus'],
+      notifiedByCatIds: [],
+      seenByCatIds: exposure ? ['opus'] : [],
+      seenInvocationIdByCatId: exposure ? { opus: exposure.invocationId } : {},
+      ...(exposure ? { bodyExposures: [exposure] } : {}),
+      failedByCatIds: [],
+      handledByCatIds: [],
+      priority: 'normal',
+      createdAt: 100,
+      updatedAt: 100,
+    });
+    const hidden = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'zero exposure secret',
+      mentions: ['opus'],
+      timestamp: 1_000,
+      threadId: 'thread-1',
+      deliveryStatus: 'queued',
+      queueCustody: custody('entry-hidden'),
+    });
+    const exposure = { targetCatId: 'opus', invocationId: 'child-read', seenAt: 1_500 };
+    const exposed = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'exposed secret',
+      mentions: ['opus'],
+      timestamp: 1_100,
+      threadId: 'thread-1',
+      deliveryStatus: 'queued',
+      queueCustody: custody('entry-exposed', exposure),
+    });
+    assert.equal(
+      messageStore.recallMessageToComposerDraft(hidden.id, {
+        ownerUserId: 'user-1',
+        threadId: 'thread-1',
+        expectedDraftRevision: 0,
+        merge: 'replace',
+        recalledAt: 2_000,
+      }).kind,
+      'recalled',
+    );
+    assert.equal(
+      messageStore.recallMessageToComposerDraft(exposed.id, {
+        ownerUserId: 'user-1',
+        threadId: 'thread-1',
+        expectedDraftRevision: 1,
+        merge: 'replace',
+        recalledAt: 2_100,
+      }).kind,
+      'recalled',
+    );
+
+    const app = await buildApp();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-1',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const messages = response.json().messages;
+    assert.equal(
+      messages.some((message) => message.id === hidden.id),
+      false,
+    );
+    const tombstone = messages.find((message) => message.id === exposed.id);
+    assert.ok(tombstone);
+    assert.equal(tombstone.content, '');
+    assert.equal(tombstone.extra.recall.exposure, 'seen');
+    assert.deepEqual(tombstone.extra.recall.exposures, [exposure]);
+    assert.doesNotMatch(JSON.stringify(tombstone), /exposed secret/);
+  });
+
   it('excludes drafts on paginated request (with before cursor)', async () => {
     // Seed messages
     const ts = Date.now();

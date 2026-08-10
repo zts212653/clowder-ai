@@ -694,11 +694,11 @@ skills:
   proactive-memory-judgment:
     category: "调研与知识"
     description: >
-      判断单次 continuity-valued 人物线索或 Phase A 频率 nudge 是否应进入 F276 私人记忆提案，
-      并在不提案时留下 enum-only calibrated abstention。
+      判断单次 continuity-valued 人物线索或 Phase A 频率 nudge 应进入 F276 即时提案、
+      known-person defer，还是 enum-only calibrated abstention。
       Use when: 当轮出现未来可能有用的人物事实、关系、纠正、重要互动，或收到 proactive-memory-candidate nudge。
       Not for: 裸人名、taste、后台语料扫描、仅因重复出现就判重要、workspace alias 单独登记。
-      Output: 至多一张 F276 proposal，或一条 content-free abstention receipt；永不静默物化。
+      Output: 至多一张 F276 proposal、一条 content-free deferred receipt，或一条 enum-only abstention；永不静默物化。
     triggers:
       - "continuity-valued 人物线索"
       - "proactive-memory-candidate"
@@ -711,7 +711,7 @@ skills:
       - "后台语料扫描"
       - "重复即重要"
       - "workspace alias 单独登记"
-    output: "One F276 proposal or one enum-only calibrated abstention receipt"
+    output: "One rejectable F276 proposal, one content-free known-person deferred receipt, or one enum-only abstention"
     next: []
     sop_step: null
     feature: "F282"

@@ -165,6 +165,7 @@ import { ActivityTracker } from './domains/health/ActivityTracker.js';
 import { shouldTrackApiActivity } from './domains/health/activity-route-filter.js';
 import { HumanDispositionFeedbackContextService } from './domains/human-disposition/HumanDispositionFeedbackContextService.js';
 import { HumanDispositionLedger } from './domains/human-disposition/HumanDispositionLedger.js';
+import { createDeferredPersonMemoryDailyTaskSpec } from './domains/memory/DeferredPersonMemoryDailyTaskSpec.js';
 import { EntityRegistryStore } from './domains/memory/EntityRegistry.js';
 import { sharedProactiveCandidateNudgeReceiptStore } from './domains/memory/entity-nudge-state.js';
 import { ProactiveCandidateRegistryResolver } from './domains/memory/ProactiveCandidateRegistryResolver.js';
@@ -176,6 +177,7 @@ import { PersonMemoryProposalStatusContextResolver } from './domains/memory/peop
 import { PersonMemoryRecallService } from './domains/memory/people/PersonMemoryRecallService.js';
 import { RedisPersonMemoryStore } from './domains/memory/people/RedisPersonMemoryStore.js';
 import { EvidenceStoreWorkspacePersonResolver } from './domains/memory/people/WorkspacePersonResolver.js';
+import { RedisDeferredPersonMemoryReceiptStore } from './domains/memory/RedisDeferredPersonMemoryReceiptStore.js';
 import { PortDiscoveryService } from './domains/preview/port-discovery.js';
 import { collectRuntimePorts } from './domains/preview/port-validator.js';
 import { PreviewGateway } from './domains/preview/preview-gateway.js';
@@ -209,9 +211,11 @@ import { fetchLatestIssueCommentCursor } from './infrastructure/github/comment-c
 import { buildGhCliEnv, resolveGhCliToken, withHiddenGhCliWindow } from './infrastructure/github/gh-cli-env.js';
 import type { EvalDomainId } from './infrastructure/harness-eval/domain/eval-domain-registry.js';
 import { ensureEvalDomainThreads } from './infrastructure/harness-eval/hub/eval-hub-thread-ensure.js';
+import { loadOrCreatePawFeelBundleSnapshotSigner } from './infrastructure/harness-eval/paw-feel-disposition/bundle-snapshot.js';
 import { RedisPawFeelReconciliationCoverageStore } from './infrastructure/harness-eval/paw-feel-disposition/coverage-store.js';
 import { RedisPawFeelDutyConfigStore } from './infrastructure/harness-eval/paw-feel-disposition/duty-config-store.js';
 import { RedisPawFeelDutyNoticeWatermarkStore } from './infrastructure/harness-eval/paw-feel-disposition/duty-notice.js';
+import { PawFeelDutyReceiptService } from './infrastructure/harness-eval/paw-feel-disposition/duty-receipt.js';
 import { createPawFeelDutyTaskSpec } from './infrastructure/harness-eval/paw-feel-disposition/duty-task-spec.js';
 import { RedisPawFeelDispositionEventLog } from './infrastructure/harness-eval/paw-feel-disposition/event-log.js';
 import {
@@ -358,6 +362,7 @@ import { registerTasteProposalDecisionRoutes } from './routes/taste-proposal-dec
 import { terminalRoutes } from './routes/terminal.js';
 import { threadExportRoutes } from './routes/thread-export.js';
 import { threadMemberEffortRoutes } from './routes/thread-member-effort.js';
+import { threadMemberSpeedRoutes } from './routes/thread-member-speed.js';
 import { threadMemberStrategyRoutes } from './routes/thread-member-strategy.js';
 import { registerWaitTerminationRoutes } from './routes/wait-termination-routes.js';
 import { ApiInstanceLease, type ApiInstanceLeaseInvalidation } from './services/ApiInstanceLease.js';
@@ -609,11 +614,16 @@ async function main(): Promise<void> {
         })
       : new AgentKeyRegistry();
   app.log.info(`[api] AgentKeyRegistry initialized (${agentKeyRegistryBackendKind} backend)`);
+  let ownsGlobalAgentKeySidecars = false;
+  let agentKeySidecarRenewalLoop: { start(): void; stop(): Promise<void> } | null = null;
   try {
     const { shouldProvisionAntigravityAgentKeySidecar } = await import(
       './domains/cats/services/agents/agent-key/antigravity-agent-key-sidecar-policy.js'
     );
-    if (shouldProvisionAntigravityAgentKeySidecar({ backendKind: agentKeyRegistryBackendKind })) {
+    ownsGlobalAgentKeySidecars = shouldProvisionAntigravityAgentKeySidecar({
+      backendKind: agentKeyRegistryBackendKind,
+    });
+    if (ownsGlobalAgentKeySidecars) {
       const { ensureAntigravityAgentKeySidecar } = await import(
         './domains/cats/services/agents/agent-key/antigravity-agent-key-sidecar.js'
       );
@@ -776,8 +786,9 @@ async function main(): Promise<void> {
       communityObjectStore,
       // F167: bridge tracking task HEAD → freshness resolver when community
       // projection hasn't been seeded by ExternalReviewCoordinator yet.
-      // Carry lifecycle metadata with the server-observed GitHub HEAD so a
-      // terminal tracker cannot mint a fresh action-successor generation.
+      // Carry PR lifecycle metadata with the server-observed GitHub HEAD. A
+      // completed wait keeps its durable HEAD eligible, while merged/closed
+      // facts still prevent a fresh action-successor generation.
       {
         async getBySubject(subjectKey: string) {
           const task = await taskStore.getBySubject(subjectKey);
@@ -1189,6 +1200,20 @@ async function main(): Promise<void> {
     const { IndexBuilder } = await import('./domains/memory/IndexBuilder.js');
     const ib = memoryServices.indexBuilder;
     if (ib instanceof IndexBuilder) {
+      try {
+        const recallSuppressionRecovery = await ib.reconcileMessageRecallSuppressions(async (_threadId, messageId) =>
+          Boolean((await messageStore.getById(messageId))?.recall),
+        );
+        if (recallSuppressionRecovery.retained > 0 || recallSuppressionRecovery.released > 0) {
+          app.log.info(
+            `[api] F264: reconciled recall index suppressions — ` +
+              `${recallSuppressionRecovery.retained} retained, ${recallSuppressionRecovery.released} released`,
+          );
+        }
+      } catch (err) {
+        app.log.warn(`[api] F264: recall index suppression recovery failed (fail-closed): ${String(err)}`);
+      }
+
       // F102 KD-34: Wire append listener now that memoryServices is ready.
       // This covers ALL 36 messageStore.append() call sites via the store itself,
       // replacing the old HTTP onResponse hooks that only caught 2 routes.
@@ -1265,6 +1290,60 @@ async function main(): Promise<void> {
     throw err;
   }
 
+  // F247: gpt-pro is a separate credential boundary from the shared local-agent map.
+  // Reconcile it only on the global sidecar owner and only when the runtime catalog
+  // actually has the cloud cat installed. Never export its path into process.env.
+  if (ownsGlobalAgentKeySidecars && catRegistry.has('gpt-pro')) {
+    try {
+      const { ensureGptProAgentKeySidecar, resolveGptProAgentKeyFile } = await import(
+        './domains/cats/services/agents/agent-key/gpt-pro-agent-key-sidecar.js'
+      );
+      const disposition = await ensureGptProAgentKeySidecar(agentKeyRegistry);
+      app.log.info(
+        `[api] gpt-pro agent-key sidecar ${disposition.kind}: ${resolveGptProAgentKeyFile()} (${disposition.agentKeyId})`,
+      );
+    } catch (err) {
+      app.log.warn(`[api] gpt-pro agent-key sidecar reconciliation failed (cloud MCP disabled): ${String(err)}`);
+    }
+  }
+
+  if (ownsGlobalAgentKeySidecars) {
+    const { AgentKeySidecarRenewalLoop, reconcileSidecarsIndependently } = await import(
+      './domains/cats/services/agents/agent-key/AgentKeySidecarRenewalLoop.js'
+    );
+    agentKeySidecarRenewalLoop = new AgentKeySidecarRenewalLoop({
+      reconcile: async () => {
+        const reconciliations: Array<{ name: string; reconcile: () => Promise<void> }> = [
+          {
+            name: 'antigravity',
+            reconcile: async () => {
+              const { ensureAntigravityAgentKeySidecar } = await import(
+                './domains/cats/services/agents/agent-key/antigravity-agent-key-sidecar.js'
+              );
+              await ensureAntigravityAgentKeySidecar(agentKeyRegistry);
+            },
+          },
+        ];
+        if (catRegistry.has('gpt-pro')) {
+          reconciliations.push({
+            name: 'gpt-pro',
+            reconcile: async () => {
+              const { ensureGptProAgentKeySidecar } = await import(
+                './domains/cats/services/agents/agent-key/gpt-pro-agent-key-sidecar.js'
+              );
+              await ensureGptProAgentKeySidecar(agentKeyRegistry);
+            },
+          });
+        }
+        await reconcileSidecarsIndependently(reconciliations);
+      },
+      onError: (error) => {
+        app.log.warn(`[api] agent-key sidecar renewal failed; next daily tick will retry: ${String(error)}`);
+      },
+    });
+    agentKeySidecarRenewalLoop.start();
+  }
+
   // ── F139 Phase 3A: Dynamic task store + template registry ──
   const { DynamicTaskStore } = await import('./infrastructure/scheduler/DynamicTaskStore.js');
   const { templateRegistry } = await import('./infrastructure/scheduler/templates/registry.js');
@@ -1273,6 +1352,9 @@ async function main(): Promise<void> {
   const scheduleMutationProposalStore = new ScheduleMutationProposalStore(schedulerDb);
   const approvalIngress = new ApprovalIngress({ messageStore, socketManager });
   const personMemoryStore = redisClient ? new RedisPersonMemoryStore(redisClient) : null;
+  const deferredPersonMemoryReceiptStore = redisClient
+    ? new RedisDeferredPersonMemoryReceiptStore(redisClient)
+    : undefined;
   const personMemoryDispositionProofResolver = redisClient
     ? new PersonMemoryDispositionProofResolver(redisClient)
     : null;
@@ -1922,14 +2004,25 @@ async function main(): Promise<void> {
     await import('./domains/concierge/ConciergeInvestigationJobStore.js');
   const conciergeInvestigationJobStore = redis ? new _RIJSEarly(redis) : new _MIJSEarly();
 
-  // F247 AC-B1c-3 PR-C: Cloud invoke bridge — @gpt-pro → ChatGPT dispatch
-  const { PinchTabBridgeAdapter } = await import('./domains/cats/services/cloud-bridge/pinchtab-bridge-adapter.js');
+  // F247: Cloud invoke bridge — background Host Adapter first. The legacy
+  // PinchTab transport is foreground UI automation and therefore opt-in only.
+  const legacyPinchTabEnabled = process.env.CAT_CAFE_ENABLE_LEGACY_PINCHTAB_BRIDGE === '1';
+  const pinchTabAdapter = legacyPinchTabEnabled
+    ? new (await import('./domains/cats/services/cloud-bridge/pinchtab-bridge-adapter.js')).PinchTabBridgeAdapter()
+    : null;
+  if (legacyPinchTabEnabled) {
+    app.log.warn('[api] F247 legacy PinchTab bridge explicitly enabled; it may control foreground browser UI');
+  }
   const { CloudInvokeBridge, buildFallbackMessageContent } = await import(
     './domains/cats/services/cloud-bridge/cloud-invoke-bridge.js'
   );
   const bridgeLogger = (await import('./infrastructure/logger.js')).createModuleLogger('cloud-bridge');
   const cloudInvokeBridge = new CloudInvokeBridge({
-    pinchTabAdapter: new PinchTabBridgeAdapter(),
+    // The official host provider injects this narrow capability when the
+    // runtime exposes one. Null is honest: public OpenAI host docs currently
+    // provide no arbitrary-conversation append API for this server process.
+    hostAdapter: null,
+    pinchTabAdapter,
     emitFallback: async ({ threadId: fbThreadId, catId: fbCatId, reason, detail }) => {
       // Post a system_info message into the thread so the user sees the fallback
       const content = buildFallbackMessageContent({ reason, detail, catId: fbCatId });
@@ -2586,6 +2679,10 @@ async function main(): Promise<void> {
     messageStore,
     socketManager,
     threadStore,
+    invocationQueue,
+    queueCustodyCoordinator,
+    queueProcessor,
+    indexBuilder: memoryServices.indexBuilder,
   });
   // F155: Frontend-facing guide actions (no MCP auth, uses userId header)
   if (threadStore) {
@@ -2675,15 +2772,21 @@ async function main(): Promise<void> {
   const pawFeelReconciliationCoverageStore = redis ? new RedisPawFeelReconciliationCoverageStore(redis) : undefined;
   const pawFeelDutyConfigStore = redis ? new RedisPawFeelDutyConfigStore(redis) : undefined;
   const pawFeelDutyNoticeWatermarkStore = redis ? new RedisPawFeelDutyNoticeWatermarkStore(redis) : undefined;
+  const pawFeelBundleSnapshotSigner = redis ? await loadOrCreatePawFeelBundleSnapshotSigner(redis) : undefined;
   const pawFeelFixResolver = actionSuccessorLeaseStore
     ? new PawFeelFixEvidenceResolver({ leaseStore: actionSuccessorLeaseStore, taskStore })
     : undefined;
   const pawFeelDispositionReadModel =
-    pawFeelDispositionEventLog && pawFeelReconciliationCoverageStore
+    pawFeelDispositionEventLog && pawFeelReconciliationCoverageStore && pawFeelBundleSnapshotSigner
       ? new PawFeelDispositionReadModel({
           eventLog: pawFeelDispositionEventLog,
           messageStore,
           coverageStore: pawFeelReconciliationCoverageStore,
+          bundleSnapshotSigner: pawFeelBundleSnapshotSigner,
+          proposalStatusResolver: {
+            isPending: async (proposalId) => (await proposalStore.get(proposalId))?.status === 'pending',
+          },
+          ...(pawFeelFixResolver ? { repairBindingResolver: pawFeelFixResolver } : {}),
           semanticDegraded: () => memoryServices.embeddingService?.isReady() !== true,
         })
       : undefined;
@@ -2700,6 +2803,17 @@ async function main(): Promise<void> {
   const pawFeelCaptureIntentSidecar = pawFeelDispositionService
     ? new PawFeelCaptureIntentSidecar({ dispositionService: pawFeelDispositionService })
     : undefined;
+  const pawFeelDutyReceiptService =
+    pawFeelDutyNoticeWatermarkStore && pawFeelDispositionReadModel
+      ? new PawFeelDutyReceiptService({
+          watermarkStore: pawFeelDutyNoticeWatermarkStore,
+          readResponsibilities: (signalIds) => pawFeelDispositionReadModel.readResponsibilities(signalIds),
+          updateReceipt: async (messageId, rich) => {
+            const updated = await messageStore.updateExtra(messageId, { rich });
+            if (!updated) throw new Error(`paw-feel duty notice ${messageId} is unavailable for receipt update`);
+          },
+        })
+      : undefined;
   if (pawFeelCaptureIntentSidecar && pawFeelDispositionService) {
     const previousAppendListener = appendListener;
     appendListener = (message) => {
@@ -2893,6 +3007,7 @@ async function main(): Promise<void> {
     ...(pawFeelCaptureService ? { captureService: pawFeelCaptureService } : {}),
     ...(pawFeelCaptureIntentSidecar ? { captureIntentSidecar: pawFeelCaptureIntentSidecar } : {}),
     ...(pawFeelDutyConfigStore ? { dutyConfigStore: pawFeelDutyConfigStore } : {}),
+    ...(pawFeelDutyReceiptService ? { dutyReceiptService: pawFeelDutyReceiptService } : {}),
     callbackRegistry: registry,
     agentKeyRegistry,
   });
@@ -3566,7 +3681,14 @@ async function main(): Promise<void> {
     proposalStore,
     handoffProposalStore,
     profileUpdateProposalStore,
-    ...(personMemoryStore ? { personMemoryStore, workspacePersonResolver } : {}),
+    ...(personMemoryStore
+      ? {
+          personMemoryStore,
+          workspacePersonResolver,
+          ...(deferredPersonMemoryReceiptStore ? { deferredPersonMemoryReceiptStore } : {}),
+          ...(proactiveCandidateRegistryResolver ? { proactiveCandidateRegistryResolver } : {}),
+        }
+      : {}),
     memoryCueDeps,
     approvalIngress,
     profileRepository,
@@ -3744,6 +3866,7 @@ async function main(): Promise<void> {
   await app.register(threadExportRoutes, { threadStore });
   await app.register(threadMemberStrategyRoutes, { threadStore }); // #921
   await app.register(threadMemberEffortRoutes, { threadStore }); // F262
+  await app.register(threadMemberSpeedRoutes, { threadStore }); // F291
   // F192: Shared callback — record proposal rejection as task outcome A2 signal.
   // Covers both F128 (thread proposal) and F225 (session handoff proposal) rejections.
   const onProposalReject = (input: {
@@ -4811,6 +4934,10 @@ async function main(): Promise<void> {
     f101RecoveryPlayer?.stopAllLoops();
   });
 
+  app.addHook('onClose', async () => {
+    await agentKeySidecarRenewalLoop?.stop();
+  });
+
   let runtimeSessionSealReaperTimer: ReturnType<typeof setInterval> | null = null;
   app.addHook('onClose', async () => {
     if (runtimeSessionSealReaperTimer) {
@@ -5057,6 +5184,7 @@ async function main(): Promise<void> {
     });
     (callbackOpts.holdBallDeps as unknown as Record<string, unknown>).managedCommandWakeRecovery =
       managedCommandWakeRecovery;
+    taskRunnerV2.setManagedCommandWakeRecovery((taskId) => managedCommandWakeRecovery.recordFallbackDue(taskId));
 
     const runManagedCommandWakeRecovery = (): void => {
       void managedCommandWakeRecovery
@@ -5760,11 +5888,13 @@ async function main(): Promise<void> {
       { createReevalClosureTaskSpec, loadReevalClosureSubjects },
       { getEvalCatOverride },
       { ReevalCaseResponsibilityService },
+      { ReevalCaseReevaluationService },
       { resolveUniqueFeatureThreadId },
     ] = await Promise.all([
       import('./infrastructure/harness-eval/reeval-closure-task-spec.js'),
       import('./infrastructure/harness-eval/domain/eval-domain-override.js'),
       import('./infrastructure/harness-eval/reeval-case-responsibility.js'),
+      import('./infrastructure/harness-eval/reeval-case-reevaluation.js'),
       import('./routes/feature-thread-resolver.js'),
     ]);
     const responsibilityService = actionSuccessorAdmissionService
@@ -5774,6 +5904,14 @@ async function main(): Promise<void> {
           admissionService: actionSuccessorAdmissionService,
           resolveFeatureThreadId: (featureId, ownerUserId) =>
             resolveUniqueFeatureThreadId(threadStore, backlogStore, ownerUserId, featureId, app.log),
+          ownerUserId: privateUserId,
+        })
+      : undefined;
+    const reevaluationService = actionSuccessorAdmissionService
+      ? new ReevalCaseReevaluationService({
+          taskStore,
+          eventLog: reevalClosureEventLog,
+          admissionService: actionSuccessorAdmissionService,
           ownerUserId: privateUserId,
         })
       : undefined;
@@ -5788,10 +5926,21 @@ async function main(): Promise<void> {
               (await getEvalCatOverride(redis, domainId))?.catId ?? registryCatId,
           }),
         ...(responsibilityService ? { responsibilityService } : {}),
+        ...(reevaluationService ? { reevaluationService } : {}),
         log: { info: app.log.info.bind(app.log), warn: app.log.warn.bind(app.log) },
       }),
     );
     app.log.info('[api] F266: eval verdict closure reconciler registered');
+  }
+
+  if (deferredPersonMemoryReceiptStore) {
+    taskRunnerV2.register(
+      createDeferredPersonMemoryDailyTaskSpec({
+        receiptStore: deferredPersonMemoryReceiptStore,
+        ownerUserId: privateUserId,
+      }),
+    );
+    app.log.info('[api] F276: deferred known-person delta daily clerk registered');
   }
 
   // F278: completeness scan and duty review share the same durable event log
@@ -5801,7 +5950,8 @@ async function main(): Promise<void> {
     pawFeelDispositionReconciler &&
     pawFeelDispositionReadModel &&
     pawFeelDutyConfigStore &&
-    pawFeelDutyNoticeWatermarkStore
+    pawFeelDutyNoticeWatermarkStore &&
+    pawFeelDutyReceiptService
   ) {
     taskRunnerV2.register(
       createPawFeelReconciliationTaskSpec({
@@ -5814,6 +5964,7 @@ async function main(): Promise<void> {
         loadUndispositioned: () => pawFeelDispositionReadModel.listUndispositioned(),
         loadDutyConfig: () => pawFeelDutyConfigStore.read(),
         watermarkStore: pawFeelDutyNoticeWatermarkStore,
+        receiptReconciler: pawFeelDutyReceiptService,
         ownerUserId: privateUserId,
         inboxHref: 'Workspace → 评估',
         ensureSystemThread: async () => {

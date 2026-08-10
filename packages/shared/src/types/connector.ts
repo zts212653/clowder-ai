@@ -156,6 +156,13 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     themeColor: '#94A3B8',
     description: 'GitHub 仓库事件通知（新 PR / 新 Issue）',
   },
+  {
+    id: 'github-wait',
+    displayName: 'GitHub Wait',
+    icon: { type: 'svg', iconId: 'github' },
+    themeColor: '#778899',
+    description: 'GitHub PR 等待条件满足通知',
+  },
   // ── System connectors ──
   {
     id: 'vote-result',
@@ -198,6 +205,20 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
     icon: { type: 'svg', iconId: 'settings' },
     themeColor: '#6B7280',
     description: '系统命令响应',
+  },
+  {
+    id: 'frustration-auto-issue',
+    displayName: '问题检测',
+    icon: { type: 'svg', iconId: 'search' },
+    themeColor: '#B45309',
+    description: '自动问题检测与反馈卡',
+  },
+  {
+    id: 'physical-limb.stackchan',
+    displayName: 'StackChan',
+    icon: { type: 'svg', iconId: 'robot' },
+    themeColor: '#0F766E',
+    description: '物理 Limb 转写通知',
   },
   // ── IM connectors (PNG icons) ──
   {

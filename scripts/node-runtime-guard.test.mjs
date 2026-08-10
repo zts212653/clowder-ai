@@ -65,18 +65,7 @@ printf 'ok'
   }
 });
 
-// -- FORCE_COLOR robustness --
-//
-// Agent and CI shells commonly export FORCE_COLOR (Claude Code sets FORCE_COLOR=3),
-// which makes Node render *inspected* values with ANSI codes even when stdout is a
-// pipe. A `node -p` expression returning a number therefore prints "\e[33m24\e[39m"
-// instead of "24", and the `-ge` / `-lt` comparisons in node_runtime_supported die
-// with "integer expression expected" -- the guard then rejects a perfectly supported
-// Node 24. Expressions returning a *string* are printed raw, which is why
-// node_runtime_version never broke. These tests are version-independent: they assert
-// the shape of the parse and the stability of the verdict, not a specific major.
-
-test('node runtime guard reads a bare integer major when FORCE_COLOR is set', () => {
+test('node runtime guard reads a bare major when FORCE_COLOR is set', () => {
   const result = runBash(
     `
 set -e
@@ -87,7 +76,7 @@ node_runtime_major "${process.execPath}"
   );
 
   assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
-  assert.match(result.stdout.trim(), /^\d+$/, `expected a bare integer major, got ${JSON.stringify(result.stdout)}`);
+  assert.match(result.stdout.trim(), /^\d+$/, `expected a bare major, got ${JSON.stringify(result.stdout)}`);
 });
 
 test('node runtime guard verdict is unchanged by FORCE_COLOR', () => {

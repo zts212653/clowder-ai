@@ -3,7 +3,7 @@ feature_ids: [F247]
 related_features: [F178, F061, F174, F236, F237]
 topics: [cloud-cat, chatgpt-pro, mcp, multi-provider, custom-instructions, github-connector]
 doc_kind: spec
-tips_exempt: B1a interim — productized capability tip 待 Phase D Console 多 provider UI 上线后写
+tips_exempt: Background agent-key reconciliation and an unbound Host Adapter add no user-invokable action; the productized setup tip belongs with the future provider installation UI.
 description: Productized cloud-cat platform for connecting ChatGPT Pro and future cloud LLM providers into Clowder AI as first-class collaborators.
 description_source: model
 description_author: codex
@@ -27,6 +27,10 @@ revision_history: |
 # F247: 云端猫 Family + 多 provider 接入平台
 
 > **Status**: active | **Owner**: Ragdoll (Ragdoll opus-47) | **Reviewer**: Maine Coon (Maine Coon codex/gpt-5.5) | **Vision Guard**: Ragdoll (opus-48) | **Priority**: P1 | **Created**: 2026-06-21
+
+Architecture cell: callback-auth + plugin
+Map delta: updated 2026-08-08
+Why: F247 consumes the F178 principal lifecycle and adds a Host-governed conversation append seam without claiming provider capability.
 
 ## Why (R3 P2-2 rewrite)
 
@@ -59,6 +63,8 @@ F178 §12 升级条件给出新 F 号触发集合（self OAuth AS / multi-tenant
   - spike server pure agent-key 模式 (env -u 5 项 + AGENT_KEY_FILES override) ✅
   - cat-cafe API hot-add gpt-pro via `POST /api/cats` (0 重启) ✅
   - dry-run `cat_cafe_post_message` 真写入 thread, speaker 显示 "Maine CoonPro(Pro Cloud (ChatGPT))" ✅
+- **2026-08-08 principal lifecycle hardening + live recovery proof**：45-day Redis TTL 到期而 sidecar 残留导致 `agent_key_unknown`；共享 provisioner 已实现 verify/preserve/rotate/replace + daily renewal。授权 runtime reconcile 后，公网 Remote MCP 以 `gpt-pro` 写入 `[thread-id]` 并返回 message ID `0001786245288454-000558-7b3fc130`，full thread read 精确确认一次。
+- **Host Adapter contract**：`append_message(conversationId, text, idempotencyKey) -> {hostMessageId}` 已落窄接口与 fail-closed tests；官方 provider 尚未绑定，因此不声称任意 ChatGPT conversation background append 已可用。Legacy PinchTab 仅 `CAT_CAFE_ENABLE_LEGACY_PINCHTAB_BRIDGE=1` 显式启用，默认不接管前台 UI。
 
 ### 待验证 ⚠️
 - **ChatGPT Scheduled Tasks 能否调 Custom MCP Connector**（spike log 0 收到 + operator R1 指出 AI Blog Patrol 也可能没真跑：**待验证不写硬结论**）
@@ -248,11 +254,17 @@ operator 2026-06-21 06:54 UTC 确认：**ChatGPT 官方 GitHub Connector 已用*
 >
 > **operator R1 catch (2026-06-25 23:46 PT)**：bridge 投递到 ChatGPT 端**哪个 chat**？v1 spec 漏了这层架构——每次 mention 新建 chat = sidebar 爆炸 + Maine Coon Pro 失去 conversation continuity；投到 active chat = 打断他当前讨论。**必须做 thread↔chat binding (KD-20)**。
 
-**目标**：本地猫 @ gpt-pro → cat-cafe 自动通过 browser automation 在 user chrome 的 ChatGPT **该 thread 对应的 chat** 投递 mention 通知（带 thread context）→ Maine Coon Pro 看到后 MCP read 拉详情 + 写回复。**全程零人肉粘贴，sidebar 干净。**
+**目标**：本地猫 @ gpt-pro → cat-cafe 通过宿主提供的 background Host Adapter，向 **该 thread 已绑定的 conversation** 追加 mention 通知（带 thread context）→ Maine Coon Pro 看到后 MCP read 拉详情 + 写回复。**全程零人肉粘贴、零前台 UI 接管。** Host 未暴露能力时明确 fallback；只有 operator 显式 opt-in 才允许旧 PinchTab 路径创建/修复 binding。
 
 #### Design 要点
 
-**1. Backend = PinchTab 单一**（codex/Maine Coon R0 verdict + 跨 family）
+**1. Backend priority = Host Adapter；PinchTab 降级为显式 opt-in legacy**（2026-08-08 supersedes 原“PinchTab 单一”）
+- 首选 Host-owned 窄接口：`append_message(conversationId, text, idempotencyKey)`，成功必须返回 non-empty host message ID；conversation ID 来自 owner-only thread binding，idempotency key 来自持久化 source message ID
+- Host Adapter 缺失 / receipt 无效 / append 失败：typed fallback，**不**自动启动 PinchTab / composer / CGEvent；这保证后台服务不会抢用户鼠标和前台画面
+- 当前 OpenAI 公共 Host 能力只证明 Codex Quick Chat 可引用 ChatGPT conversation，不足以证明 server 可向任意 conversation 追加并取回 host message ID；provider 保持 `null`，直到官方能力真实出现
+- PinchTab 旧路径只在 operator 显式设置 `CAT_CAFE_ENABLE_LEGACY_PINCHTAB_BRIDGE=1` 时启用，用于兼容/诊断，不再是默认行为
+
+**历史实现：PinchTab adapter**
 - 跨族（Maine Coon/Siamese/Ragdoll都能用），不像 claude-in-chrome 仅 Anthropic 系
 - attach 现有 chrome session（不开新 browser profile，减少 zombie 面）
 - **可用工具实测**（codex R1 P1-A + 47 ref verify）：`pinchtab_eval` / `pinchtab_get_text` / `pinchtab_navigate` (localhost only) / `pinchtab_screenshot` / `pinchtab_snapshot`。**没有** `pinchtab_get_url` / `pinchtab_list_tabs` / `pinchtab_click` / `pinchtab_type` / `pinchtab_press`——v1 spec 误写
@@ -297,7 +309,7 @@ Action expected:
 2. cat_cafe_post_message(threadId="{threadId}", agentKeyCatId="gpt-pro", content="...")
 ```
 
-**5. Browser 控制流程**（all-eval pattern, Clash TUN safe, lock-first ordering）
+**5. Legacy browser 控制流程**（仅显式 opt-in；all-eval pattern, Clash TUN safe, lock-first ordering）
 
 ```
 trigger → bridge enter
@@ -478,14 +490,14 @@ gpt-pro（以及未来 claude-cloud / gemini-cloud 等其他 cloud cats），不
 
 **关键 AC（占位，立项时细化）**：
 
-- [ ] **AC-F-1**: Clowder AI Console 提供 "Add Cloud Cat" wizard — 列出可装的 cloud cats (gpt-pro / future) + 安装入口
-- [ ] **AC-F-2**: wizard step-by-step 引导：
-  1. confirm GitHub OAuth / Chrome profile 选择
-  2. PinchTab profile 自动起 + ChatGPT login 引导
+- [ ] **AC-F1**: Clowder AI Console 提供 "Add Cloud Cat" wizard — 列出可装的 cloud cats (gpt-pro / future) + 安装入口
+- [ ] **AC-F2**: wizard step-by-step 引导：
+  1. confirm connector OAuth / owner 授权
+  2. 检测并绑定官方 Host Adapter；宿主未提供时诚实阻塞，不接管前台 UI
   3. Custom Instructions 自动注入（cat-cafe 安装时 generate persona 模板）
   4. hello-world test message 自动验证 setup OK
-- [ ] **AC-F-3**: 安装失败 fallback runbook（manual config 指引 + 诊断工具）
-- [ ] **AC-F-4**: 走通后 gpt-pro plugin 上 cat-cafe marketplace（公开/受邀，operator 拍）
+- [ ] **AC-F3**: 安装失败 fallback runbook（manual config 指引 + 诊断工具）
+- [ ] **AC-F4**: 走通后 gpt-pro plugin 上 cat-cafe marketplace（公开/受邀，operator 拍）
 
 **前置依赖**：
 - Phase B/C/D 全部 ship + dogfood 走通至少 1 周（活体验证 cloud bridge 稳定性）
@@ -584,10 +596,10 @@ gpt-pro（以及未来 claude-cloud / gemini-cloud 等其他 cloud cats），不
 
 详见 Phase F 段（What 章）。AC 列表（占位，立项时细化）：
 
-- [ ] **AC-F-1**: Clowder AI Console "Add Cloud Cat" wizard 入口
-- [ ] **AC-F-2**: wizard step-by-step：OAuth → Chrome profile / PinchTab 自动起 → Custom Instructions 自动注入 → hello-world test
-- [ ] **AC-F-3**: 安装失败 fallback runbook + 诊断工具
-- [ ] **AC-F-4**: gpt-pro plugin 上 cat-cafe marketplace（公开/受邀，operator 拍）
+- [ ] AC-F1: Clowder AI Console "Add Cloud Cat" wizard 入口；当前 blocker 是 Host provider / 安装授权边界尚未产品化
+- [ ] AC-F2: wizard step-by-step：OAuth → Host Adapter 绑定 → Custom Instructions 自动注入 → hello-world test
+- [ ] AC-F3: 安装失败 fallback runbook + 诊断工具
+- [ ] AC-F4: gpt-pro plugin 上 cat-cafe marketplace（公开/受邀，operator 拍）
 
 ### Phase D / E acceptance criteria 待立项后细化
 

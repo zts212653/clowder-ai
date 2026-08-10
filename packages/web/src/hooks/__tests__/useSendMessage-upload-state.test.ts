@@ -3,10 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockApiFetch = vi.fn();
-const mockAddMessage = vi.fn();
 const mockAddMessageToThread = vi.fn();
-const mockSetLoading = vi.fn();
-const mockSetHasActiveInvocation = vi.fn();
 const mockSetThreadLoading = vi.fn();
 const mockSetThreadHasActiveInvocation = vi.fn();
 const mockResetRefs = vi.fn();
@@ -27,10 +24,7 @@ vi.mock('@/hooks/useChatCommands', () => ({
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: Object.assign(
     () => ({
-      addMessage: mockAddMessage,
       addMessageToThread: mockAddMessageToThread,
-      setLoading: mockSetLoading,
-      setHasActiveInvocation: mockSetHasActiveInvocation,
       setThreadLoading: mockSetThreadLoading,
       setThreadHasActiveInvocation: mockSetThreadHasActiveInvocation,
       currentThreadId: 'thread-stale',
@@ -100,10 +94,7 @@ describe('useSendMessage upload status', () => {
 
   beforeEach(() => {
     mockApiFetch.mockReset();
-    mockAddMessage.mockReset();
     mockAddMessageToThread.mockReset();
-    mockSetLoading.mockReset();
-    mockSetHasActiveInvocation.mockReset();
     mockSetThreadLoading.mockReset();
     mockSetThreadHasActiveInvocation.mockReset();
     mockResetRefs.mockReset();
@@ -159,7 +150,8 @@ describe('useSendMessage upload status', () => {
     const last = snapshots[snapshots.length - 1];
     expect(last.status).toBe('failed');
     expect(last.error).toContain('上传超时');
-    expect(mockAddMessage).toHaveBeenCalledWith(
+    expect(mockAddMessageToThread).toHaveBeenCalledWith(
+      'thread-route',
       expect.objectContaining({
         type: 'system',
         variant: 'error',

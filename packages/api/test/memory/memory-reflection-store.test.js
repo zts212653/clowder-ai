@@ -44,7 +44,7 @@ function batch(outputs, overrides = {}) {
 describe('F271 MemoryReflectionStore', () => {
   test('schema V34 atomically accepts a public ledger row and its pull-only evidence projection', async () => {
     const { evidence, reflection } = await createStores();
-    assert.equal(CURRENT_SCHEMA_VERSION, 38);
+    assert.equal(CURRENT_SCHEMA_VERSION, 39);
 
     const result = await reflection.acceptBatch(batch([delta()]));
     assert.equal(result.accepted.length, 1);

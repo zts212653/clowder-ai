@@ -1,6 +1,8 @@
 import { loadDomains } from './hub/eval-hub-read-model.js';
-import { type LifecycleRootArtifact, scanLifecycleRootArtifacts } from './publish-verdict/lifecycle-root-artifact.js';
+import { loadLifecycleRootsWithLegacyCases } from './legacy-reeval-case-migration.js';
+import type { LifecycleRootArtifact } from './publish-verdict/lifecycle-root-artifact.js';
 import type { ReevalCaseRoot } from './reeval-case.js';
+import { compareReevalCycles } from './reeval-case-cycle-order.js';
 
 export type LifecycleRootV2 = Extract<LifecycleRootArtifact, { schemaVersion: 2 }>;
 
@@ -15,7 +17,7 @@ export function loadReevalCaseRoot(
   verdictId: string,
   assignedEvalCatIdOverride?: string,
 ): ResolvedReevalCaseRoot | undefined {
-  const artifacts = scanLifecycleRootArtifacts(harnessFeedbackRoot);
+  const artifacts = loadLifecycleRootsWithLegacyCases(harnessFeedbackRoot);
   const requested = artifacts.find(
     (artifact): artifact is LifecycleRootV2 => artifact.schemaVersion === 2 && artifact.verdictId === verdictId,
   );
@@ -25,14 +27,12 @@ export function loadReevalCaseRoot(
     .filter(
       (artifact): artifact is LifecycleRootV2 => artifact.schemaVersion === 2 && artifact.caseId === requested.caseId,
     )
-    .sort(
-      (left, right) => left.createdAt.localeCompare(right.createdAt) || left.verdictId.localeCompare(right.verdictId),
-    );
+    .sort(compareReevalCycles);
   for (const candidate of roots) {
     if (
       candidate.domainId !== requested.domainId ||
       candidate.findingKey !== requested.findingKey ||
-      candidate.ownerAsk.targetOwnerCatId !== requested.ownerAsk.targetOwnerCatId
+      candidate.harnessUnderEval.featureId !== requested.harnessUnderEval.featureId
     ) {
       throw new Error(`case ${requested.caseId} contains incompatible immutable lifecycle roots`);
     }
@@ -47,7 +47,7 @@ export function loadReevalCaseRoot(
     projectorRoot: {
       caseId: requested.caseId,
       domainId: requested.domainId,
-      targetOwnerCatId: requested.ownerAsk.targetOwnerCatId,
+      targetOwnerCatId: domain.handoffTargetResolver.ownerCatId,
       assignedEvalCatId: assignedEvalCatIdOverride ?? domain.evalCat.catId,
       reevalWithinHours: domain.sla.reevalWithinHours,
       cycles: roots.map((root) => ({ verdictId: root.verdictId, createdAt: root.createdAt, verdict: root.verdict })),

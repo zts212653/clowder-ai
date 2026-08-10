@@ -59,7 +59,9 @@ export class ThreadUnseenChecker implements UnseenChecker {
     if (seenCursor == null) return null;
 
     // Fetch messages after seenCursor (single batch — notice doesn't need precise count)
-    const batch = await messageStore.getByThreadAfter(threadId, seenCursor, UNSEEN_FETCH_LIMIT, userId);
+    const batch = await messageStore.getByThreadAfter(threadId, seenCursor, UNSEEN_FETCH_LIMIT, userId, {
+      unresolvedCursorPolicy: 'empty',
+    });
 
     // If no delivered messages, check queue as fallback (F254 queue-aware gate)
     if (!batch || batch.length === 0) {

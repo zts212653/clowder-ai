@@ -20,14 +20,20 @@ import { cursorFor, parseCursor } from '../cursor.js';
 import type {
   AppendMessageInput,
   BoundedThreadMessagePage,
+  ClearOwnerComposerDraftResult,
   HostMessageExtra,
   MarkCanceledResult,
   MarkDeliveredResult,
   MessageAppendListener,
+  OwnerComposerDraft,
+  PutOwnerComposerDraftInput,
+  PutOwnerComposerDraftResult,
   QueueCustodyInitializeResult,
   QueueCustodyTransitionInput,
   QueueCustodyTransitionResult,
   QueuedMessageCustody,
+  RecallMessageToComposerDraftInput,
+  RecallMessageToComposerDraftResult,
   StoredMessage,
   StoredPluginMessage,
   StreamMetadataAugmentInput,
@@ -45,7 +51,11 @@ import {
   generateSortableId,
   isDelivered,
 } from '../ports/MessageStore.js';
-import { assertQueueCustodyMessageBinding, assertQueueCustodyTransition } from '../ports/queued-message-custody.js';
+import {
+  assertQueueCustodyMessageBinding,
+  assertQueueCustodyTransition,
+  terminalizeRecalledQueueCustody,
+} from '../ports/queued-message-custody.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import {
   isSystemUserMessage,
@@ -64,6 +74,7 @@ import {
   safeParseContentBlocks,
   safeParseExtra,
   safeParseMentions,
+  safeParseMessageRecall,
   safeParseMetadata,
   safeParsePluginMessage,
   safeParseQueueCustody,
@@ -126,10 +137,20 @@ local currentRevision = tonumber(redis.call('HGET', KEYS[1], 'queueCustodyRevisi
 if currentRevision ~= tonumber(ARGV[1]) then
   return {0, currentRevision}
 end
-if redis.call('HGET', KEYS[1], 'deliveryStatus') ~= 'queued' then
+local deliveryStatus = redis.call('HGET', KEYS[1], 'deliveryStatus')
+local recallRaw = redis.call('HGET', KEYS[1], 'recall')
+local recallExposed = false
+if recallRaw and recallRaw ~= '' then
+  local okRecall, recall = pcall(cjson.decode, recallRaw)
+  recallExposed = okRecall and type(recall) == 'table' and recall.exposure == 'seen'
+end
+local exposedRecallSettlement = deliveryStatus == 'canceled' and recallExposed and ARGV[4] == ''
+if deliveryStatus ~= 'queued' and not exposedRecallSettlement then
   return {-2, currentRevision}
 end
 local nextRevision = tonumber(ARGV[3])
+local okNextCustody, nextCustody = pcall(cjson.decode, ARGV[2])
+if not okNextCustody or type(nextCustody) ~= 'table' then return redis.error_reply('INVALID_NEXT_QUEUE_CUSTODY') end
 
 -- #1269 R8 P1-3: pre-mutation guard — compute visibilitySeq BEFORE any HSET/ZADD.
 -- redis.error_reply() does NOT rollback prior writes, so all validation must
@@ -168,6 +189,19 @@ end
 
 -- All validation passed — write mutations atomically
 redis.call('HSET', KEYS[1], 'queueCustody', ARGV[2], 'queueCustodyRevision', ARGV[3])
+for _, exposure in ipairs(nextCustody.bodyExposures or cjson.decode('[]')) do
+  local field = tostring(exposure.targetCatId) .. string.char(0) .. tostring(exposure.invocationId)
+  local existingRaw = redis.call('HGET', KEYS[5], field)
+  local ids = cjson.decode('[]')
+  if existingRaw and existingRaw ~= '' then
+    local okExisting, existing = pcall(cjson.decode, existingRaw)
+    if okExisting and type(existing) == 'table' then ids = existing end
+  end
+  local found = false
+  for _, existingId in ipairs(ids) do if existingId == messageId then found = true end end
+  if not found then table.insert(ids, messageId) end
+  redis.call('HSET', KEYS[5], field, cjson.encode(ids))
+end
 
 if ARGV[4] ~= '' then
   redis.call('HSET', KEYS[1], 'deliveredAt', ARGV[4], 'timelineOrderAt', ARGV[5], 'deliveryStatus', 'delivered')
@@ -205,6 +239,161 @@ else
 end
 if not current or tonumber(current.revision) ~= tonumber(ARGV[2]) then return -1 end
 redis.call('HSET', KEYS[1], 'pluginMessage', ARGV[1])
+return 1
+`;
+
+const PUT_OWNER_COMPOSER_DRAFT_LUA = `
+local currentRevision = tonumber(redis.call('HGET', KEYS[1], 'revision') or '0')
+if currentRevision ~= tonumber(ARGV[1]) then
+  return {0, currentRevision}
+end
+local nextRevision = currentRevision + 1
+redis.call('HSET', KEYS[1],
+  'version', '1',
+  'ownerUserId', ARGV[2],
+  'threadId', ARGV[3],
+  'revision', tostring(nextRevision),
+  'text', ARGV[4],
+  'updatedAt', ARGV[7])
+redis.call('HDEL', KEYS[1], 'contentBlocks', 'replyTo')
+if ARGV[5] ~= '' then redis.call('HSET', KEYS[1], 'contentBlocks', ARGV[5]) end
+if ARGV[6] ~= '' then redis.call('HSET', KEYS[1], 'replyTo', ARGV[6]) end
+return {1, nextRevision}
+`;
+
+const CLEAR_OWNER_COMPOSER_DRAFT_LUA = `
+local currentRevision = tonumber(redis.call('HGET', KEYS[1], 'revision') or '0')
+if currentRevision ~= tonumber(ARGV[1]) then
+  return {0, currentRevision}
+end
+local nextRevision = currentRevision + 1
+redis.call('HSET', KEYS[1],
+  'version', '1',
+  'ownerUserId', ARGV[2],
+  'threadId', ARGV[3],
+  'revision', tostring(nextRevision),
+  'text', '',
+  'updatedAt', ARGV[4])
+redis.call('HDEL', KEYS[1], 'contentBlocks', 'replyTo')
+return {1, nextRevision}
+`;
+
+/**
+ * F264 AC-44~46. Every validation happens before the first mutation: Redis does
+ * not roll back writes made before an error reply. The message hash remains the
+ * canonical identity/order row while its body moves exactly once into the
+ * owner+thread TTL=0 draft hash.
+ */
+const RECALL_MESSAGE_TO_COMPOSER_DRAFT_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return {-1, 0} end
+if redis.call('HGET', KEYS[1], 'recall') then return {2, 0} end
+if redis.call('HGET', KEYS[1], 'userId') ~= ARGV[1] or redis.call('HGET', KEYS[1], 'threadId') ~= ARGV[2] then
+  return {-2, 0}
+end
+if redis.call('HGET', KEYS[1], 'catId') ~= '' or redis.call('HGET', KEYS[1], '_tombstone') then
+  return {-3, 0}
+end
+local deliveryStatus = redis.call('HGET', KEYS[1], 'deliveryStatus')
+if deliveryStatus ~= 'queued' and deliveryStatus ~= 'delivered' then return {-3, 0} end
+local custodyRaw = redis.call('HGET', KEYS[1], 'queueCustody')
+if not custodyRaw or custodyRaw == '' then return {-3, 0} end
+
+local currentDraftRevision = tonumber(redis.call('HGET', KEYS[2], 'revision') or '0')
+if currentDraftRevision ~= tonumber(ARGV[3]) then return {0, currentDraftRevision} end
+
+local okCustody, custody = pcall(cjson.decode, custodyRaw)
+if not okCustody or type(custody) ~= 'table' then return redis.error_reply('INVALID_QUEUE_CUSTODY') end
+local currentCustodyRevision = tonumber(custody.revision or 0)
+if currentCustodyRevision ~= tonumber(ARGV[6]) then return {3, currentCustodyRevision} end
+local nextCustodyRaw = ARGV[7]
+local okNextCustody, nextCustody = pcall(cjson.decode, nextCustodyRaw)
+if not okNextCustody or type(nextCustody) ~= 'table' then return redis.error_reply('INVALID_NEXT_QUEUE_CUSTODY') end
+if tonumber(nextCustody.revision or 0) ~= currentCustodyRevision + 1 or
+   nextCustody.entryId ~= custody.entryId or nextCustody.status ~= 'terminal' or
+   #(nextCustody.pendingTargetCats or cjson.decode('[]')) ~= 0 then
+  return redis.error_reply('INVALID_NEXT_QUEUE_CUSTODY')
+end
+local sourceText = redis.call('HGET', KEYS[1], 'content') or ''
+local existingText = redis.call('HGET', KEYS[2], 'text') or ''
+local nextText = sourceText
+if ARGV[4] == 'append' and existingText ~= '' then nextText = existingText .. '\\n\\n' .. sourceText end
+
+local existingBlocksRaw = redis.call('HGET', KEYS[2], 'contentBlocks')
+local sourceBlocksRaw = redis.call('HGET', KEYS[1], 'contentBlocks')
+local nextBlocks = nil
+if ARGV[4] == 'append' and existingBlocksRaw and existingBlocksRaw ~= '' then
+  local ok, parsed = pcall(cjson.decode, existingBlocksRaw)
+  if ok and type(parsed) == 'table' then nextBlocks = parsed end
+end
+if sourceBlocksRaw and sourceBlocksRaw ~= '' then
+  local ok, parsed = pcall(cjson.decode, sourceBlocksRaw)
+  if ok and type(parsed) == 'table' then
+    if not nextBlocks then nextBlocks = cjson.decode('[]') end
+    for _, block in ipairs(parsed) do table.insert(nextBlocks, block) end
+  end
+end
+
+local nextReplyTo = ''
+if ARGV[4] == 'append' then nextReplyTo = redis.call('HGET', KEYS[2], 'replyTo') or '' end
+if nextReplyTo == '' then nextReplyTo = redis.call('HGET', KEYS[1], 'replyTo') or '' end
+
+local exposures = custody.bodyExposures or cjson.decode('[]')
+local exposed = #exposures > 0 or #(custody.seenByCatIds or cjson.decode('[]')) > 0
+
+local recall = { version = 1, exposure = exposed and 'seen' or 'none', recalledAt = tonumber(ARGV[5]) }
+if #exposures > 0 then recall.exposures = exposures end
+local nextDraftRevision = currentDraftRevision + 1
+
+-- All validation/derivation passed. Mutations below form the single terminal CAS.
+redis.call('HSET', KEYS[2],
+  'version', '1',
+  'ownerUserId', ARGV[1],
+  'threadId', ARGV[2],
+  'revision', tostring(nextDraftRevision),
+  'text', nextText,
+  'updatedAt', ARGV[5])
+redis.call('HDEL', KEYS[2], 'contentBlocks', 'replyTo')
+if nextBlocks and #nextBlocks > 0 then redis.call('HSET', KEYS[2], 'contentBlocks', cjson.encode(nextBlocks)) end
+if nextReplyTo ~= '' then redis.call('HSET', KEYS[2], 'replyTo', nextReplyTo) end
+
+redis.call('HSET', KEYS[1],
+  'content', '',
+  'mentions', '[]',
+  'deliveryStatus', 'canceled',
+  '_tombstone', '1',
+  'queueCustody', nextCustodyRaw,
+  'queueCustodyRevision', tostring(nextCustody.revision),
+  'recall', cjson.encode(recall))
+local messageId = redis.call('HGET', KEYS[1], 'id')
+for keyIndex = 5, #KEYS do
+  redis.call('ZREM', KEYS[keyIndex], messageId)
+end
+for _, exposure in ipairs(exposures) do
+  local field = tostring(exposure.targetCatId) .. string.char(0) .. tostring(exposure.invocationId)
+  local existingRaw = redis.call('HGET', KEYS[4], field)
+  local ids = cjson.decode('[]')
+  if existingRaw and existingRaw ~= '' then
+    local okExisting, existing = pcall(cjson.decode, existingRaw)
+    if okExisting and type(existing) == 'table' then ids = existing end
+  end
+  local found = false
+  for _, existingId in ipairs(ids) do if existingId == messageId then found = true end end
+  if not found then table.insert(ids, messageId) end
+  redis.call('HSET', KEYS[4], field, cjson.encode(ids))
+end
+redis.call('HDEL', KEYS[1], 'contentBlocks', 'toolEvents', 'metadata', 'extra', 'pluginMessage', 'thinking', 'replyTo')
+if not exposed then
+  redis.call('ZREM', KEYS[3], redis.call('HGET', KEYS[1], 'id'))
+end
+
+return {1, exposed and 1 or 0, sourceText, existingText, nextDraftRevision}
+`;
+
+const UPDATE_EXTRA_IF_NOT_RECALLED_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+if redis.call('HGET', KEYS[1], 'recall') or redis.call('HGET', KEYS[1], '_tombstone') then return 0 end
+redis.call('HSET', KEYS[1], 'extra', ARGV[1])
+if ARGV[2] ~= '' then redis.call('HSETNX', KEYS[1], 'pluginMessage', ARGV[2]) end
 return 1
 `;
 
@@ -455,6 +644,141 @@ export class RedisMessageStore {
     return this.hydrateHash(data);
   }
 
+  private hydrateOwnerComposerDraft(data: Record<string, string>): OwnerComposerDraft | null {
+    if (!data.ownerUserId || !data.threadId || data.version !== '1') return null;
+    const revision = Number(data.revision);
+    const updatedAt = Number(data.updatedAt);
+    if (!Number.isInteger(revision) || revision < 1 || !Number.isFinite(updatedAt)) return null;
+    const contentBlocks = safeParseContentBlocks(data.contentBlocks);
+    return {
+      version: 1,
+      ownerUserId: data.ownerUserId,
+      threadId: data.threadId,
+      revision,
+      text: data.text ?? '',
+      ...(contentBlocks ? { contentBlocks } : {}),
+      ...(data.replyTo ? { replyTo: data.replyTo } : {}),
+      updatedAt,
+    };
+  }
+
+  async getOwnerComposerDraft(ownerUserId: string, threadId: string): Promise<OwnerComposerDraft | null> {
+    const data = await this.redis.hgetall(MessageKeys.ownerComposerDraft(ownerUserId, threadId));
+    return this.hydrateOwnerComposerDraft(data);
+  }
+
+  async putOwnerComposerDraft(
+    ownerUserId: string,
+    threadId: string,
+    input: PutOwnerComposerDraftInput,
+  ): Promise<PutOwnerComposerDraftResult> {
+    assertValidStoredMessageTimestamp(input.updatedAt);
+    if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 0) {
+      throw new RangeError('expected draft revision must be a non-negative integer');
+    }
+    const result = (await this.redis.eval(
+      PUT_OWNER_COMPOSER_DRAFT_LUA,
+      1,
+      MessageKeys.ownerComposerDraft(ownerUserId, threadId),
+      String(input.expectedRevision),
+      ownerUserId,
+      threadId,
+      input.text,
+      input.contentBlocks ? JSON.stringify(input.contentBlocks) : '',
+      input.replyTo ?? '',
+      String(input.updatedAt),
+    )) as [number, number];
+    if (Number(result[0]) === 0) return { kind: 'revision_mismatch', actualRevision: Number(result[1]) };
+    const draft = await this.getOwnerComposerDraft(ownerUserId, threadId);
+    if (!draft) throw new Error('composer draft CAS committed but hydration failed');
+    return { kind: 'updated', draft };
+  }
+
+  async clearOwnerComposerDraft(
+    ownerUserId: string,
+    threadId: string,
+    expectedRevision: number,
+    clearedAt: number,
+  ): Promise<ClearOwnerComposerDraftResult> {
+    assertValidStoredMessageTimestamp(clearedAt);
+    if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
+      throw new RangeError('expected draft revision must be a non-negative integer');
+    }
+    const result = (await this.redis.eval(
+      CLEAR_OWNER_COMPOSER_DRAFT_LUA,
+      1,
+      MessageKeys.ownerComposerDraft(ownerUserId, threadId),
+      String(expectedRevision),
+      ownerUserId,
+      threadId,
+      String(clearedAt),
+    )) as [number, number];
+    return Number(result[0]) === 1
+      ? { kind: 'cleared', revision: Number(result[1]) }
+      : { kind: 'revision_mismatch', actualRevision: Number(result[1]) };
+  }
+
+  async recallMessageToComposerDraft(
+    id: string,
+    input: RecallMessageToComposerDraftInput,
+  ): Promise<RecallMessageToComposerDraftResult> {
+    assertValidStoredMessageTimestamp(input.recalledAt);
+    if (!Number.isInteger(input.expectedDraftRevision) || input.expectedDraftRevision < 0) {
+      throw new RangeError('expected draft revision must be a non-negative integer');
+    }
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const beforeRecall = await this.getById(id);
+      const currentCustody = beforeRecall?.queueCustody;
+      const nextCustody = currentCustody
+        ? terminalizeRecalledQueueCustody(currentCustody, input.recalledAt)
+        : undefined;
+      const mentionKeys = [...new Set(beforeRecall?.mentions ?? [])].map((catId) => MessageKeys.mentions(catId));
+      const result = (await this.redis.eval(
+        RECALL_MESSAGE_TO_COMPOSER_DRAFT_LUA,
+        4 + mentionKeys.length,
+        MessageKeys.detail(id),
+        MessageKeys.ownerComposerDraft(input.ownerUserId, input.threadId),
+        MessageKeys.threadVisibility(input.threadId),
+        MessageKeys.queueExposureIndex(input.threadId),
+        ...mentionKeys,
+        input.ownerUserId,
+        input.threadId,
+        String(input.expectedDraftRevision),
+        input.merge,
+        String(input.recalledAt),
+        String(currentCustody?.revision ?? -1),
+        nextCustody ? JSON.stringify(nextCustody) : '',
+      )) as [number, number, string?, string?, number?];
+      const outcome = Number(result[0]);
+      if (outcome === 3) continue;
+      if (outcome === -1) return { kind: 'not_found' };
+      if (outcome === -2) return { kind: 'unauthorized' };
+      if (outcome === -3) return { kind: 'not_recallable' };
+      if (outcome === 0) return { kind: 'draft_revision_mismatch', actualRevision: Number(result[1]) };
+      if (outcome === 2) {
+        const message = await this.getById(id);
+        return message ? { kind: 'already_recalled', message } : { kind: 'not_found' };
+      }
+
+      const [message, draft] = await Promise.all([
+        this.getById(id),
+        this.getOwnerComposerDraft(input.ownerUserId, input.threadId),
+      ]);
+      if (!message || !draft) throw new Error('true recall CAS committed but terminal hydration failed');
+      const sourceText = result[2] ?? '';
+      const previousText = result[3] ?? '';
+      const insertedStart = input.merge === 'append' && previousText ? previousText.length + 2 : 0;
+      return {
+        kind: 'recalled',
+        verdict: Number(result[1]) === 1 ? 'exposed' : 'zero_exposure',
+        message,
+        draft,
+        insertedRange: { start: insertedStart, end: insertedStart + sourceText.length },
+      };
+    }
+    throw new Error('true recall custody CAS retry exhausted');
+  }
+
   /**
    * Convert a Redis hash (Record<string, string> from HGETALL) into a StoredMessage.
    * Shared by getById (direct HGETALL) and parseLuaHgetall (Lua-returned HGETALL).
@@ -468,6 +792,7 @@ export class RedisMessageStore {
     const parsedExtra = hydrateExtra(data.extra, data.pluginMessage);
     const parsedSource = safeParseConnectorSource(data.source);
     const parsedQueueCustody = safeParseQueueCustody(data.queueCustody);
+    const parsedRecall = safeParseMessageRecall(data.recall);
     const deletedAt = data.deletedAt ? parseInt(data.deletedAt, 10) : undefined;
     return {
       id: data.id,
@@ -494,6 +819,7 @@ export class RedisMessageStore {
       ...(data.timelineOrderAt !== undefined ? { timelineOrderAt: parseRedisNumber(data.timelineOrderAt) } : {}),
       ...(data.deliveryStatus ? { deliveryStatus: data.deliveryStatus as StoredMessage['deliveryStatus'] } : {}),
       ...(parsedQueueCustody ? { queueCustody: parsedQueueCustody } : {}),
+      ...(parsedRecall ? { recall: parsedRecall } : {}),
       ...(parsedSource ? { source: parsedSource } : {}),
       ...(data.mentionsUser === '1' ? { mentionsUser: true } : {}),
       ...(data.replyTo ? { replyTo: data.replyTo } : {}),
@@ -903,7 +1229,13 @@ export class RedisMessageStore {
     const visKey = MessageKeys.threadVisibility(threadId);
 
     // 2. Parse cursor token (§8.3) + resolve to (seq, id) pair (§8.4)
-    const cursor = parseCursor(afterId);
+    let cursor: ReturnType<typeof parseCursor>;
+    try {
+      cursor = parseCursor(afterId);
+    } catch (error) {
+      if (options?.unresolvedCursorPolicy === 'empty') return [];
+      throw error;
+    }
     let afterSeq: number | null = null;
     let cursorId: string | null = null;
 
@@ -925,6 +1257,15 @@ export class RedisMessageStore {
           // Step 3: Both null = fully pruned → scan from start
         }
       }
+    }
+
+    // #1224/#3444 read-evidence boundary: an omitted cursor means "read from
+    // origin", but a supplied v1 cursor that lost both canonical evidence
+    // sources is indeterminate. Generic pagination keeps §8.4's at-least-once
+    // rescan default; state-bearing consumers opt into empty/fail-closed so
+    // old history cannot be reborn as unread or unseen.
+    if (cursor?.version === 1 && afterSeq === null && options?.unresolvedCursorPolicy === 'empty') {
+      return [];
     }
 
     // 3. Chunked WITHSCORES read from visibility ZSET: filter-then-limit
@@ -972,6 +1313,20 @@ export class RedisMessageStore {
     }
 
     return result;
+  }
+
+  async getByQueueExposure(threadId: string, targetCatId: string, invocationId: string): Promise<StoredMessage[]> {
+    const field = `${targetCatId}\0${invocationId}`;
+    const raw = await this.redis.hget(MessageKeys.queueExposureIndex(threadId), field);
+    if (!raw) return [];
+    let ids: string[];
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      ids = Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === 'string') : [];
+    } catch {
+      return [];
+    }
+    return this.hydrateMessages(ids);
   }
 
   async getUnreadSummaryProjection(
@@ -1480,6 +1835,7 @@ export class RedisMessageStore {
     // but no messages (e.g. after all messages were individually deleted).
     pipeline.del(MessageKeys.threadVisibility(threadId));
     pipeline.del(MessageKeys.threadVisibilityMeta(threadId));
+    pipeline.del(MessageKeys.queueExposureIndex(threadId));
 
     // Note: We don't clean up global timeline, user timeline, or mention sets
     // as those will auto-expire via TTL. Cleaning them would be O(n) expensive.
@@ -1577,14 +1933,14 @@ export class RedisMessageStore {
     if (!msg) return null;
     const { hostExtra: current, pluginMessage } = splitMessageExtra(msg.extra);
     const merged = { ...current, ...extra };
-    const pipeline = this.redis.multi();
-    pipeline.hset(MessageKeys.detail(id), { extra: serializeExtra(merged) });
-    // Lazy migration for a pre-F288 record whose plugin payload still lives in
-    // the legacy extra JSON. HSETNX cannot overwrite a concurrent newer write.
-    if (pluginMessage) {
-      pipeline.hsetnx(MessageKeys.detail(id), 'pluginMessage', JSON.stringify(pluginMessage));
-    }
-    await pipeline.exec();
+    const updated = await this.redis.eval(
+      UPDATE_EXTRA_IF_NOT_RECALLED_LUA,
+      1,
+      MessageKeys.detail(id),
+      serializeExtra(merged),
+      pluginMessage ? JSON.stringify(pluginMessage) : '',
+    );
+    if (Number(updated) !== 1) return null;
     return this.getById(id);
   }
 
@@ -1693,8 +2049,14 @@ export class RedisMessageStore {
     if (current.queueCustody.revision !== input.expectedRevision) {
       return { kind: 'revision_mismatch', actualRevision: current.queueCustody.revision };
     }
-    if (current.deliveryStatus !== 'queued') {
-      throw new Error('queue custody transition requires a queued message');
+    const isExposedRecallSettlement =
+      current.deliveryStatus === 'canceled' &&
+      current.recall?.exposure === 'seen' &&
+      current.queueCustody.status === 'terminal' &&
+      input.next.status === 'terminal' &&
+      input.deliveredAt === undefined;
+    if (current.deliveryStatus !== 'queued' && !isExposedRecallSettlement) {
+      throw new Error('queue custody transition requires a queued message or exposed recall tombstone');
     }
     assertQueueCustodyTransition(current.queueCustody, input);
     const timelineScore =
@@ -1708,11 +2070,12 @@ export class RedisMessageStore {
 
     const rawResult = (await this.redis.eval(
       TRANSITION_QUEUE_CUSTODY_LUA,
-      4,
+      5,
       MessageKeys.detail(id),
       MessageKeys.thread(current.threadId),
       MessageKeys.TIMELINE,
       MessageKeys.user(current.userId),
+      MessageKeys.queueExposureIndex(current.threadId),
       String(input.expectedRevision),
       JSON.stringify(input.next),
       String(input.next.revision),
@@ -1724,7 +2087,9 @@ export class RedisMessageStore {
     const actualRevision = Number(rawResult[1]);
     if (outcome === -1) return { kind: 'not_found' };
     if (outcome === 0) return { kind: 'revision_mismatch', actualRevision };
-    if (outcome === -2) throw new Error('queue custody transition requires a queued message');
+    if (outcome === -2) {
+      throw new Error('queue custody transition requires a queued message or exposed recall tombstone');
+    }
     if (outcome !== 1 && outcome !== 2) throw new Error(`unexpected queue custody transition result: ${outcome}`);
 
     const updated = await this.getById(id);
@@ -1822,6 +2187,7 @@ export class RedisMessageStore {
       const parsedExtra = hydrateExtra(d.extra, d.pluginMessage);
       const parsedSource = safeParseConnectorSource(d.source);
       const parsedQueueCustody = safeParseQueueCustody(d.queueCustody);
+      const parsedRecall = safeParseMessageRecall(d.recall);
       messages.push({
         id: d.id,
         threadId: d.threadId || DEFAULT_THREAD_ID,
@@ -1847,6 +2213,7 @@ export class RedisMessageStore {
         ...(d.timelineOrderAt !== undefined ? { timelineOrderAt: parseRedisNumber(d.timelineOrderAt) } : {}),
         ...(d.deliveryStatus ? { deliveryStatus: d.deliveryStatus as StoredMessage['deliveryStatus'] } : {}),
         ...(parsedQueueCustody ? { queueCustody: parsedQueueCustody } : {}),
+        ...(parsedRecall ? { recall: parsedRecall } : {}),
         ...(parsedSource ? { source: parsedSource } : {}),
         ...(d.mentionsUser === '1' ? { mentionsUser: true } : {}),
         ...(d.replyTo ? { replyTo: d.replyTo } : {}),

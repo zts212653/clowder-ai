@@ -94,21 +94,6 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
     activateView(initialPort, path);
   }, [initialPort, initialPath, activateView]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Audit: close on unmount only (use ref to avoid stale closure)
-  const targetPortRef = useRef(targetPort);
-  targetPortRef.current = targetPort;
-  useEffect(() => {
-    return () => {
-      if (targetPortRef.current) {
-        apiFetch('/api/preview/close', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ port: targetPortRef.current }),
-        }).catch(() => {});
-      }
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   const gatewayUrl = (() => {
     if (!targetPort || !gatewayPort) return '';
     const url = new URL(`http://localhost:${gatewayPort}`);
@@ -212,6 +197,20 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
 
   const handleTabClose = useCallback(
     (tabId: string) => {
+      const closingTab = tabs.find((tab) => tab.id === tabId);
+      const portStillOpen = closingTab ? tabs.some((tab) => tab.id !== tabId && tab.port === closingTab.port) : false;
+
+      // F284: collapsing or switching the Workspace shell may unmount this
+      // component, but that is not user intent to terminate a live preview.
+      // Only an explicit tab close owns the backend lifecycle transition.
+      if (closingTab?.port && !portStillOpen) {
+        void apiFetch('/api/preview/close', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ port: closingTab.port }),
+        }).catch(() => {});
+      }
+
       setTabs((prev) => {
         const next = prev.filter((t) => t.id !== tabId);
         if (activeTabId === tabId) {
@@ -227,7 +226,7 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
         return next;
       });
     },
-    [activeTabId, activateView],
+    [activeTabId, activateView, tabs],
   );
 
   const handleTabAdd = useCallback(() => {

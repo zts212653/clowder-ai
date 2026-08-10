@@ -30,6 +30,8 @@ export interface CatData {
     outputFormat?: string;
     defaultArgs?: string[];
     effort?: string;
+    /** F291: requested Codex OAuth service tier. Absent = inherit Codex user config. */
+    serviceTier?: 'standard' | 'fast';
     /** F254 D2: Codex carrier override (openai only). Absent = follow server env. */
     carrier?: 'exec_json' | 'app_server';
   };

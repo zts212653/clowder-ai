@@ -1,20 +1,15 @@
 'use client';
 
-import type { PawFeelDispositionState, PawFeelInboxPage } from '@cat-cafe/shared';
+import type { PawFeelInboxPage, PawFeelResponsibilityState } from '@cat-cafe/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
-const ACTIVE_STATES = new Set<PawFeelDispositionState>(['new', 'seen', 'route_pending']);
-
-const STATE_LABELS: Record<PawFeelDispositionState, string> = {
-  new: '等待审阅',
-  seen: '已看',
-  route_pending: '等待接单',
-  routed: '已移交',
-  closed: '已关闭',
-  duplicate: '重复',
-  no_action: '无需行动',
-  fix: '已确认要修',
+const STATE_LABELS: Record<PawFeelResponsibilityState, string> = {
+  unreviewed: 'unreviewed',
+  bound_in_repair: 'bound-in-repair',
+  signature_waiting: 'signature-waiting',
+  blocked: 'blocked',
+  terminal: 'terminal',
 };
 
 function isInboxPage(value: unknown): value is PawFeelInboxPage {
@@ -29,21 +24,28 @@ function isInboxPage(value: unknown): value is PawFeelInboxPage {
 
 function detailFor(item: PawFeelInboxPage['items'][number]): string | undefined {
   const { disposition } = item;
+  if (item.responsibility.exitKind === 'signature_request') {
+    return `等待独立签署；排除报告猫 @${item.responsibility.signerExclusionCatId ?? 'unknown'} 自签`;
+  }
+  if (item.responsibility.exitKind === 'explicit_blocker') {
+    return `阻塞 ${item.responsibility.blocker?.code ?? 'unknown'} · ${item.responsibility.blocker?.ref ?? ''}`;
+  }
   if (disposition.state === 'routed') {
     return `已移交至 ${disposition.targetThreadId ?? disposition.proposalId ?? '责任面'}，不代表已经修复`;
   }
   if (disposition.state === 'route_pending') {
     return disposition.targetThreadId
       ? `等待 ${disposition.targetThreadId} 接单`
-      : `等待 F128 proposal ${disposition.proposalId ?? ''} 获批`;
+      : `F128 proposal ${disposition.proposalId ?? 'unavailable'} 当前不是 pending，需重新路由或显式阻塞`;
   }
   if (disposition.state === 'duplicate' && disposition.duplicateOf) {
     return `重复于 ${disposition.duplicateOf}`;
   }
   if (disposition.state === 'fix') {
-    return `由 @${disposition.ownerCatId ?? 'unknown'} 负责 · 任务 ${disposition.taskId ?? 'unavailable'} · active lease ${
-      disposition.actionLeaseRef?.leaseId ?? 'unavailable'
-    }`;
+    const binding = `由 @${disposition.ownerCatId ?? 'unknown'} 负责 · 任务 ${
+      disposition.taskId ?? 'unavailable'
+    } · active lease ${disposition.actionLeaseRef?.leaseId ?? 'unavailable'}`;
+    return item.responsibility.validExit ? binding : `${binding} · 当前 active lease 复验失败`;
   }
   if (disposition.reasonCode) return `理由：${disposition.reasonCode}`;
   return undefined;
@@ -67,20 +69,20 @@ export function PawFeelDispositionDock({ messageId, pollMs = 30_000 }: { message
     }
   }, [messageId]);
 
-  const terminal =
+  const allResponsibilitiesHaveValidExit =
     page?.projectionStatus === 'available' &&
     page.items.length > 0 &&
-    page.items.every((item) => !ACTIVE_STATES.has(item.disposition.state));
+    page.items.every((item) => item.responsibility.validExit);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   useEffect(() => {
-    if (pollMs <= 0 || terminal) return;
+    if (pollMs <= 0 || allResponsibilitiesHaveValidExit) return;
     const timer = window.setInterval(() => void load(), pollMs);
     return () => window.clearInterval(timer);
-  }, [load, pollMs, terminal]);
+  }, [allResponsibilitiesHaveValidExit, load, pollMs]);
 
   if (error) {
     return (
@@ -98,9 +100,9 @@ export function PawFeelDispositionDock({ messageId, pollMs = 30_000 }: { message
     );
   }
   if (page.items.length === 0) return null;
-  const stateCounts = new Map<PawFeelDispositionState, number>();
+  const stateCounts = new Map<PawFeelResponsibilityState, number>();
   for (const item of page.items) {
-    const state = item.disposition.state;
+    const state = item.responsibility.state;
     stateCounts.set(state, (stateCounts.get(state) ?? 0) + 1);
   }
   const latestDisposition = [...page.items]
@@ -136,11 +138,13 @@ export function PawFeelDispositionDock({ messageId, pollMs = 30_000 }: { message
                 <div
                   key={item.disposition.signalId}
                   className="rounded-md border border-current/15 px-2 py-1.5"
-                  data-state={item.disposition.state}
+                  data-state={item.responsibility.state}
+                  data-valid-exit={item.responsibility.validExit ? 'true' : 'false'}
+                  data-disposition-state={item.disposition.state}
                   data-testid="paw-feel-disposition-detail"
                 >
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="font-semibold">{STATE_LABELS[item.disposition.state]}</span>
+                    <span className="font-semibold">{STATE_LABELS[item.responsibility.state]}</span>
                     {(item.disposition.ownerCatId ?? item.disposition.lastActorCatId) ? (
                       <span className="opacity-65">
                         · @{item.disposition.ownerCatId ?? item.disposition.lastActorCatId}

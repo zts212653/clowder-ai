@@ -169,7 +169,7 @@ export class FreshnessNoticeService {
       `📬 提醒：你有 ${unseen.count} 条未读消息（当前 thread）\n` +
       `来自：${unseen.senders.join(', ')}\n` +
       `位置：threadId=${threadId}; messageId=${unseen.maxMessageId}\n` +
-      `调 get_thread_context({ threadId: "${threadId}" }) 查看完整内容`;
+      `调 cat_cafe_get_thread_context({ threadId: "${threadId}", responseMode: "full" }) 无过滤查看完整内容`;
 
     return { text, noticeId };
   }
@@ -257,7 +257,7 @@ export class FreshnessNoticeService {
       `⚠️ 你这轮有 ${unresolved.length} 条未读消息未查看\n` +
       `来自：${senders.join(', ')}\n` +
       `位置：threadId=${threadId}; messageId=${latestMessageId}\n` +
-      `建议调 get_thread_context({ threadId: "${threadId}" }) 先看看再退出`;
+      `建议调 cat_cafe_get_thread_context({ threadId: "${threadId}", responseMode: "full" }) 无过滤读取后再退出`;
 
     return { text };
   }

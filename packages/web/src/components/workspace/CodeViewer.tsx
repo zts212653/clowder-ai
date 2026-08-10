@@ -7,6 +7,14 @@ import { EditorState } from '@codemirror/state';
 import { basicSetup, EditorView } from 'codemirror';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
+import { createQuoteContextAttachment } from '../chat-context-reference';
+import {
+  type FloatingSelectionPosition,
+  positionSelectionActionForAnchors,
+  type RectLike,
+  selectionAnchorPositionsForRows,
+  selectionOffsetInRange,
+} from './selection-action-position';
 
 const cafeTheme = EditorView.theme(
   {
@@ -65,6 +73,7 @@ export function CodeViewer({
   onSave,
   onDirtyChange,
   branch,
+  worktreeId,
   restoreScrollTop,
   restoreKey,
   onScrollTopChange,
@@ -77,13 +86,15 @@ export function CodeViewer({
   onSave?: (newContent: string) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
   branch?: string;
+  worktreeId?: string | null;
   restoreScrollTop?: number | null;
   restoreKey?: string;
   onScrollTopChange?: (scrollTop: number) => void;
 }) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const editorContainerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
-  const [hasSelection, setHasSelection] = useState(false);
+  const [selectionAction, setSelectionAction] = useState<FloatingSelectionPosition | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
@@ -95,14 +106,59 @@ export function CodeViewer({
   onScrollTopChangeRef.current = onScrollTopChange;
 
   useEffect(() => {
-    if (!containerRef.current) return;
-    setHasSelection(false);
+    if (!editorContainerRef.current) return;
+    setSelectionAction(null);
     setIsDirty(false);
     onDirtyChangeRef.current?.(false);
     baseContentRef.current = content;
     viewRef.current?.destroy();
 
     const lang = getLanguageExtension(mime, path);
+    const syncSelectionAction = (targetView: EditorView) => {
+      const shell = shellRef.current;
+      const selection = getSelectionInfo(targetView);
+      if (!shell || !selection) {
+        setSelectionAction(null);
+        return;
+      }
+      const shellRect = shell.getBoundingClientRect();
+      const mainSelection = targetView.state.selection.main;
+      const offsets = selectionAnchorPositionsForRows(mainSelection, targetView.viewportLineBlocks);
+      const editorRect = targetView.dom.getBoundingClientRect();
+      const anchorOffsets = new Set<number>();
+      const anchors: RectLike[] = [];
+      const addAnchor = (offset: number) => {
+        if (anchorOffsets.has(offset)) return null;
+        anchorOffsets.add(offset);
+        const coords = targetView.coordsAtPos(offset);
+        if (!coords) return null;
+        anchors.push({
+          ...coords,
+          width: coords.right - coords.left,
+          height: coords.bottom - coords.top,
+        });
+        return coords;
+      };
+
+      for (const offset of offsets) {
+        const coords = addAnchor(offset);
+        if (!coords) continue;
+        const visibleTop = Math.max(coords.top, editorRect.top);
+        const visibleBottom = Math.min(coords.bottom, editorRect.bottom);
+        if (visibleTop >= visibleBottom) continue;
+        const y = (visibleTop + visibleBottom) / 2;
+        const left = targetView.posAtCoords({ x: editorRect.left + 1, y });
+        const right = targetView.posAtCoords({ x: editorRect.right - 1, y });
+        if (left === null || right === null) continue;
+        const visibleOffset = selectionOffsetInRange(mainSelection, {
+          from: Math.min(left, right),
+          to: Math.max(left, right),
+        });
+        if (visibleOffset !== null) addAnchor(visibleOffset);
+      }
+      setSelectionAction(positionSelectionActionForAnchors(anchors, shellRect));
+    };
+
     const state = EditorState.create({
       doc: content,
       extensions: [
@@ -112,10 +168,7 @@ export function CodeViewer({
         EditorView.editable.of(editable),
         EditorState.readOnly.of(!editable),
         EditorView.updateListener.of((update) => {
-          if (update.selectionSet) {
-            const sel = getSelectionInfo(update.view);
-            setHasSelection(!!sel);
-          }
+          if (update.selectionSet || update.geometryChanged) syncSelectionAction(update.view);
           if (update.docChanged && editable) {
             const current = update.state.doc.toString();
             const dirty = current !== baseContentRef.current;
@@ -126,7 +179,7 @@ export function CodeViewer({
       ],
     });
 
-    const view = new EditorView({ state, parent: containerRef.current });
+    const view = new EditorView({ state, parent: editorContainerRef.current });
     viewRef.current = view;
 
     if (scrollToLine && scrollToLine > 0) {
@@ -142,6 +195,7 @@ export function CodeViewer({
       rafId = requestAnimationFrame(() => {
         rafId = 0;
         onScrollTopChangeRef.current?.(scroller.scrollTop);
+        syncSelectionAction(view);
       });
     };
     scroller.addEventListener('scroll', handleScroll, { passive: true });
@@ -201,15 +255,26 @@ export function CodeViewer({
     if (!view) return;
     const sel = getSelectionInfo(view);
     if (!sel) return;
-    const lineRange = sel.startLine === sel.endLine ? `${sel.startLine}` : `${sel.startLine}-${sel.endLine}`;
-    const suffix = branch ? ` (🌿 ${branch})` : '';
-    const ref = `\`${path}:${lineRange}\`${suffix}\n\`\`\`\n${sel.text}\n\`\`\``;
-    setPendingChatInsert({ threadId: currentThreadId, text: ref });
-  }, [path, branch, setPendingChatInsert, currentThreadId]);
+    setPendingChatInsert({
+      threadId: currentThreadId,
+      text: '',
+      contextAttachments: [
+        createQuoteContextAttachment(sel.text, {
+          kind: 'workspace_file',
+          path,
+          ...(worktreeId ? { worktreeId } : {}),
+          ...(branch ? { branch } : {}),
+          ...(mime ? { language: mime } : {}),
+          lineStart: sel.startLine,
+          lineEnd: sel.endLine,
+        }),
+      ],
+    });
+  }, [path, branch, worktreeId, mime, setPendingChatInsert, currentThreadId]);
 
   return (
-    <div className="relative flex-1 min-h-0 text-sm">
-      <div className="h-full overflow-auto" ref={containerRef} />
+    <div ref={shellRef} className="relative flex-1 min-h-0 text-sm">
+      <div className="h-full overflow-auto" ref={editorContainerRef} />
       {/* Floating action buttons — positioned over scroll area */}
       {editable && isDirty && (
         <button
@@ -223,11 +288,13 @@ export function CodeViewer({
         </button>
       )}
       {/* Add to chat button (selection) */}
-      {hasSelection && !editable && (
+      {selectionAction && !editable && (
         <button
           type="button"
           onClick={handleAddToChat}
-          className="absolute top-2 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cafe-accent text-[var(--cafe-surface)] text-xs font-medium shadow-lg hover:bg-cafe-interactive transition-colors z-10 animate-fade-in"
+          onMouseDown={(event) => event.preventDefault()}
+          style={selectionAction}
+          className="absolute flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cafe-accent text-[var(--cafe-surface)] text-xs font-medium shadow-lg hover:bg-cafe-interactive transition-colors z-10 animate-fade-in"
           title="引用到聊天"
         >
           <AddToChatIcon />

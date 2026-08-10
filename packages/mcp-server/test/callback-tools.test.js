@@ -113,13 +113,18 @@ describe('MCP Callback Tools', () => {
       content: 'APPROVE exact HEAD; no open items.',
       targetCats: ['opus'],
       clientMessageId: 'local-review-terminal',
-      coordination: { phase: 'terminal', id: 'coord-local-review' },
+      coordination: {
+        phase: 'terminal',
+        id: 'coord-local-review',
+        subjectRef: 'pr:owner/repo#3515',
+      },
     });
 
     assert.equal(result.isError, undefined);
     assert.deepEqual(JSON.parse(capturedOptions.body).coordination, {
       phase: 'terminal',
       id: 'coord-local-review',
+      subjectRef: 'pr:owner/repo#3515',
     });
   });
 

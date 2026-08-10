@@ -4,11 +4,16 @@ related_features: [F061, F174, F077, F086, F098, F193]
 topics: [auth, mcp, agent-key, persistent-credential, antigravity, infrastructure]
 doc_kind: spec
 created: 2026-04-26
+tips_exempt: automatic credential lifecycle hardening with no new user-invokable action; existing Remote MCP tools remain the just-in-time discovery surface
 ---
 
 # F178: Persistent MCP Agent-Key Auth — 跨 invocation 写权限
 
 > **Status**: in-progress | **Owner**: Ragdoll（Ragdoll） | **Reviewer**: Maine Coon（Maine Coon） | **Priority**: P1
+
+Architecture cell: callback-auth
+Map delta: updated 2026-08-08
+Why: F178 owns the persistent agent-key principal and canonical sidecar lifecycle above F174 invocation credentials.
 
 ## Why
 
@@ -32,6 +37,15 @@ created: 2026-04-26
 - 与Maine Coon（Maine Coon）+ operator三方确认 5 个 Open Questions（OQ-1~OQ-5，见下）
 - 产出 agent-key schema 设计：data model, lifecycle states, security boundaries, audit semantics
 - 元审美自检（feat-lifecycle Design Gate 必问）：是"坐标变换"（agent-key 是新 first-class 概念，让 persistent vs invocation 两套语义干净分离）还是"多项式堆项"（在 callback token 上叠 long-lived 标志）？
+
+## User Journey
+
+**Scope unit**：同一 owner 下的一只 persistent cat principal（`userId × catId`）及其 `0600` sidecar。
+
+1. Runtime 启动时读取 sidecar 并向权威 registry 验证；仍健康则原样保留，不让 restart 改坏身份。
+2. Key 接近 TTL 或 registry 已遗失记录时，runtime 在 owner fence 内自动 rotate/replace，原子发布新 sidecar；用户不再去 Terminal 手动重配。
+3. Remote MCP 用该 principal 读写获授权的 thread，并继续显示正确 cat 身份。
+4. 发布或验证失败时 fail closed、撤销孤儿 issuance、保留可诊断 reason code，stdout 和文档不出现 secret。
 
 ### Phase B: CallbackPrincipal 抽象 + AgentKeyRegistry + 核心 API
 
@@ -120,7 +134,7 @@ created: 2026-04-26
 - [~] ~~AC-D5: key orphaning guard~~ → 迁移到 Phase E（AC-E1）
 
 ### Phase E（Agent-Key 自治监控 — eval 闭环）📋 backlog
-- [ ] AC-E1: Key orphaning guard：sidecar reconcile 重启时按 `catId × userId × scope` upsert/replace，连续 restart/reconcile 测试覆盖（猫自治，不需人盯）
+- [x] AC-E1: Key orphaning guard：共享 sidecar provisioner 在启动 + 每日续租中 verify/preserve/rotate/replace，原子 `0600` 发布；连续 restart、并发 reconcile、stale file、发布回滚测试覆盖（2026-08-08，F247 gpt-pro expiry 修复同轮）
 - [ ] AC-E2: Audit log 走 evidence/observability 通道 + F192 eval 闭环消费（不走 Hub UI）
 - [ ] AC-E3: Agent-key 失败率走 eval telemetry 自动告警，复用 F174 ring buffer（猫发现异常自行处理）
 - [ ] AC-E4: Thread 内 agent-key 写入标识 "by agent-key"（猫可感知出处）

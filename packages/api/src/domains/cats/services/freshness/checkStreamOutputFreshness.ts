@@ -153,7 +153,9 @@ export async function checkStreamOutputFreshness(input: CheckStreamFreshnessInpu
     const visitedPaginationCursors = new Set<string>([paginationCursor]);
 
     for (let round = 0; round < MAX_PAGINATION_ROUNDS; round++) {
-      const rawBatch = messageStore.getByThreadAfter(threadId, paginationCursor, UNSEEN_FETCH_LIMIT, userId);
+      const rawBatch = messageStore.getByThreadAfter(threadId, paginationCursor, UNSEEN_FETCH_LIMIT, userId, {
+        unresolvedCursorPolicy: 'empty',
+      });
       const batch = Array.isArray(rawBatch) ? rawBatch : await rawBatch;
 
       if (!batch || batch.length === 0) {

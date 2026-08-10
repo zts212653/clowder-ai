@@ -84,7 +84,7 @@ export function PawFeelDutyBanner({
       <span className="font-semibold text-conn-green-text">值班已就绪</span>
       <span className="whitespace-nowrap">Primary @{duty.config.primaryCatId}</span>
       <span className="whitespace-nowrap">Backup @{duty.config.backupCatId}</span>
-      <span className="whitespace-nowrap text-cafe-muted">24h 接管 · 72h operator 红灯</span>
+      <span className="whitespace-nowrap text-cafe-muted">显式交接 · 72h operator 红灯</span>
     </div>
   );
 }

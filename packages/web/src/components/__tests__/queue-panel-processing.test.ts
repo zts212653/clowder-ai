@@ -211,7 +211,7 @@ describe('QueuePanel hides processing entries', () => {
     });
 
     expect(container.textContent).toContain('待处理');
-    expect(container.textContent).toContain('opus · 已唤醒，但关联回合已结束；尚未读取消息正文');
+    expect(container.textContent).toContain('已唤醒，但关联回合已结束；尚未读取消息正文');
     expect(container.querySelector('[data-testid="queue-recover"]')).not.toBeNull();
   });
 
@@ -226,7 +226,7 @@ describe('QueuePanel hides processing entries', () => {
     });
 
     expect(container.textContent).toContain('待处理');
-    expect(container.textContent).toContain('opus · 已读，但关联回合已结束；尚未确认处理完成');
+    expect(container.textContent).toContain('已读，但关联回合已结束；尚未确认处理完成');
     expect(container.textContent).not.toContain('当前轮处理中');
     expect(container.querySelector('[data-testid="queue-recover"]')).not.toBeNull();
   });
@@ -243,7 +243,7 @@ describe('QueuePanel hides processing entries', () => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
     });
 
-    expect(container.textContent).toContain('opus · 已读，但关联回合已结束；尚未确认处理完成');
+    expect(container.textContent).toContain('已读，但关联回合已结束；尚未确认处理完成');
     expect(container.querySelector('[data-testid="queue-recover"]')).not.toBeNull();
   });
 
@@ -266,7 +266,7 @@ describe('QueuePanel hides processing entries', () => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
     });
 
-    expect(container.textContent).toContain('opus · 已读，但关联回合已结束；尚未确认处理完成');
+    expect(container.textContent).toContain('已读，但关联回合已结束；尚未确认处理完成');
     expect(container.querySelector('[data-testid="queue-recover"]')).not.toBeNull();
   });
 
@@ -293,7 +293,7 @@ describe('QueuePanel hides processing entries', () => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
     });
 
-    expect(container.textContent).toContain('opus · 已读，但关联回合已结束；尚未确认处理完成');
+    expect(container.textContent).toContain('已读，但关联回合已结束；尚未确认处理完成');
     expect(container.textContent).not.toContain('当前轮处理中');
     expect(container.querySelector('[data-testid="queue-recover"]')).not.toBeNull();
   });
@@ -310,7 +310,7 @@ describe('QueuePanel hides processing entries', () => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
     });
 
-    expect(container.textContent).toContain('opus · 已读，但关联回合已结束；尚未确认处理完成');
+    expect(container.textContent).toContain('已读，但关联回合已结束；尚未确认处理完成');
     expect(container.querySelector('[data-testid="queue-recover"]')).not.toBeNull();
   });
 
@@ -334,9 +334,9 @@ describe('QueuePanel hides processing entries', () => {
     });
 
     expect(container.textContent).toContain('待处理');
-    expect(container.textContent).toContain('codex · 未读 · 排队中');
-    expect(container.textContent).not.toContain('opus · 已读');
-    expect(container.textContent).not.toContain('gpt52 · 已处理');
+    expect(container.textContent).toContain('未读 · 排队中');
+    expect(container.textContent).not.toContain('已读，但关联回合已结束');
+    expect(container.textContent).not.toContain('已处理 · 无可回溯证据');
     expect(container.textContent).not.toContain('等待 opus 当前回合');
   });
 
@@ -351,7 +351,7 @@ describe('QueuePanel hides processing entries', () => {
     });
 
     expect(container.textContent).not.toContain('待处理');
-    expect(container.textContent).not.toContain('gpt52 · 已处理');
+    expect(container.textContent).not.toContain('已处理 · 无可回溯证据');
   });
 
   it('keeps author-withdrawn entries in history rather than the queue panel', () => {

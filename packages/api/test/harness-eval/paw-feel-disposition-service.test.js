@@ -1,87 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { PawFeelDispositionService } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/service.js';
-
-const T0 = Date.parse('2026-07-26T00:00:00.000Z');
-
-class MemoryEventLog {
-  events = new Map();
-  eventOwners = new Map();
-
-  async append(event, expectedSequence) {
-    const owner = this.eventOwners.get(event.eventId);
-    if (owner) return { outcome: 'duplicate' };
-    const current = this.events.get(event.signalId) ?? [];
-    if (current.length !== expectedSequence) {
-      return { outcome: 'conflict', actualSequence: current.length };
-    }
-    this.eventOwners.set(event.eventId, event.signalId);
-    this.events.set(event.signalId, [...current, event]);
-    return { outcome: 'appended', sequence: current.length };
-  }
-
-  async read(signalId, fromSequence = 0) {
-    return (this.events.get(signalId) ?? []).slice(fromSequence);
-  }
-
-  async listSignalIds() {
-    return [...this.events.keys()].sort();
-  }
-}
-
-function candidate({
-  messageId = 'message-1',
-  digest = 'a'.repeat(64),
-  ordinal = 0,
-  markerIndex = 0,
-  sourceCatId = 'codex-sol',
-} = {}) {
-  return {
-    signalId: `${messageId}:${digest}:${ordinal}`,
-    sourceMessageId: messageId,
-    sourceThreadId: 'thread-source',
-    sourceCatId,
-    markerDigest: digest,
-    sameDigestOrdinal: ordinal,
-    markerIndex,
-    occurredAt: new Date(T0 - 60_000).toISOString(),
-    marker: { raw: '[爪感差: rg+输出太吵]', tool: 'rg', symptom: '输出太吵' },
-  };
-}
-
-function command(type, signalId, expectedSequence, overrides = {}) {
-  return {
-    type,
-    eventId: `event-${type}-${expectedSequence}`,
-    signalId,
-    expectedSequence,
-    ...overrides,
-  };
-}
-
-function createHarness({
-  resolveFix = async (leaseId) => {
-    if (leaseId !== 'lease-active') throw new Error('lease not active');
-    return {
-      ownerCatId: 'opus',
-      taskId: 'task-1',
-      leaseId,
-      leaseGeneration: 3,
-      custodyEvidenceRef: 'action-lease:lease-active:generation:3',
-    };
-  },
-  assertBundleMembers = async () => {},
-} = {}) {
-  let tick = 0;
-  const eventLog = new MemoryEventLog();
-  const service = new PawFeelDispositionService({
-    eventLog,
-    fixResolver: { resolve: resolveFix },
-    bundleMembershipResolver: { assertBundleMembers },
-    now: () => new Date(T0 + tick++ * 1000).toISOString(),
-  });
-  return { eventLog, service };
-}
+import {
+  pawFeelCandidate as candidate,
+  pawFeelCommand as command,
+  createPawFeelServiceHarness as createHarness,
+} from './helpers/paw-feel-disposition-service-fixture.js';
 
 describe('PawFeelDispositionService', () => {
   it('discovers idempotently while ignoring parser-only markerIndex drift', async () => {
@@ -343,6 +266,7 @@ describe('PawFeelDispositionService', () => {
       { kind: 'cat', id: 'opus' },
       {
         bundleKey: 'turn:turn-1',
+        membershipToken: 'signed-list-snapshot',
         members: [
           { signalId: first.signalId, expectedSequence: 1 },
           { signalId: duplicate.signalId, expectedSequence: 1 },
@@ -376,6 +300,7 @@ describe('PawFeelDispositionService', () => {
     await service.discover(source, { backfilled: false });
     const input = {
       bundleKey: 'message:message-1',
+      membershipToken: 'signed-list-snapshot',
       action: { type: 'no_action', reasonCode: 'not_actionable' },
       eventIdPrefix: 'bundle-invalid',
     };
@@ -405,30 +330,6 @@ describe('PawFeelDispositionService', () => {
         },
       ),
       /at most 50/i,
-    );
-    assert.equal((await eventLog.read(source.signalId)).length, 1);
-  });
-
-  it('rejects forged bundle membership before writing any member', async () => {
-    const { eventLog, service } = createHarness({
-      assertBundleMembers: async (bundleKey, signalIds) => {
-        throw new Error(`${signalIds[0]} does not belong to ${bundleKey}`);
-      },
-    });
-    const source = candidate();
-    await service.discover(source, { backfilled: false });
-
-    await assert.rejects(
-      service.executeBundle(
-        { kind: 'cat', id: 'opus' },
-        {
-          bundleKey: 'turn:forged',
-          members: [{ signalId: source.signalId, expectedSequence: 1 }],
-          action: { type: 'no_action', reasonCode: 'not_actionable' },
-          eventIdPrefix: 'bundle-forged',
-        },
-      ),
-      /bundle membership mismatch/i,
     );
     assert.equal((await eventLog.read(source.signalId)).length, 1);
   });

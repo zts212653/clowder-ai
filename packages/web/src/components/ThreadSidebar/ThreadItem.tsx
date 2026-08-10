@@ -6,18 +6,16 @@ import { catColorVar } from '@/lib/cat-slug';
 import { DEFAULT_THREAD_STATE, type Thread, type ThreadState } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { useLabelStore } from '@/stores/label-store';
-import { API_URL, apiFetch } from '@/utils/api-client';
 // F174 D2b-2 (rev): per-cat callback-auth dot was rejected (co-creator alpha 反馈
 // "莫名其妙的颜色" — 16px participant avatars lacked any affordance). Status now
 // surfaces system-level via <CallbackAuthHealthIndicator /> in ChatContainerHeader,
 // and per-cat (with "AFFECTED CATS" affordance) inside HubCallbackAuthPanel.
 import { CatAvatar } from '../CatAvatar';
+import { ExportButton } from '../ExportButton';
 import { HubIcon } from '../icons/HubIcon';
 import { PawIcon } from '../icons/PawIcon';
 import { ThreadCatStatus } from '../ThreadCatStatus';
-import { ThreadCatSettings } from './ThreadCatSettings';
-import { ThreadEffortSettings } from './ThreadEffortSettings';
-import { ThreadLabelPicker } from './ThreadLabelPicker';
+import { ThreadSettingsPanel } from './ThreadSettingsPanel';
 import { formatRelativeTime } from './thread-utils';
 
 export interface ThreadItemProps {
@@ -82,6 +80,7 @@ function ThreadItemComponent({
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [draftTitle, setDraftTitle] = useState(title ?? '');
   const inputRef = useRef<HTMLInputElement>(null);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
@@ -108,7 +107,6 @@ function ThreadItemComponent({
       const target = e.target as Node | null;
       if (!target) return;
       if (moreButtonRef.current?.contains(target) || moreMenuRef.current?.contains(target)) return;
-      if (target instanceof Element && target.closest('[data-thread-action-popover="true"]')) return;
       setIsMoreOpen(false);
     };
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -154,32 +152,17 @@ function ThreadItemComponent({
   tooltipLines.push(formatRelativeTime(lastActiveAt, false));
   const tooltip = tooltipLines.join('\n');
   const hasMoreActions = id !== 'default' && !isEditing;
-  const menuTriggerClassName =
-    'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-cafe-secondary hover:bg-cafe-surface-elevated transition-colors';
 
   const startRename = useCallback(() => {
     setIsMoreOpen(false);
+    setIsSettingsOpen(false);
     setIsEditing(true);
   }, []);
 
-  const exportThread = useCallback(() => {
+  const startThreadSettings = useCallback(() => {
     setIsMoreOpen(false);
-    // #580: fetch+blob instead of window.open to carry auth headers
-    void apiFetch(`/api/export/thread/${id}?format=md`)
-      .then((res) => (res.ok ? res.blob() : Promise.reject(new Error('export failed'))))
-      .then((blob) => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `thread-${id}.md`;
-        a.click();
-        URL.revokeObjectURL(url);
-      })
-      .catch(() => {
-        // Fallback: window.open if fetch fails
-        window.open(`${API_URL}/api/export/thread/${id}?format=md`);
-      });
-  }, [id]);
+    setIsSettingsOpen(true);
+  }, []);
 
   const startReplay = useCallback(() => {
     setIsMoreOpen(false);
@@ -205,8 +188,15 @@ function ThreadItemComponent({
       className={`group relative mx-2 rounded-xl ${indented ? 'pl-5 pr-3' : 'px-3'} py-2.5 transition-colors cursor-pointer ${
         isActive ? 'bg-[var(--console-active-bg)]' : 'hover:bg-[var(--console-hover-bg)]'
       }`}
-      onClick={() => onSelect(id)}
-      title={tooltip}
+      onClick={(event) => {
+        if (
+          event.target instanceof Element &&
+          event.target.closest('[data-thread-settings-panel="true"], [role="menu"]')
+        ) {
+          return;
+        }
+        onSelect(id);
+      }}
     >
       {/* Title row */}
       <div className="mb-1.5 flex items-start justify-between gap-1">
@@ -283,6 +273,7 @@ function ThreadItemComponent({
               </span>
             )}
             <span
+              title={tooltip}
               className={`min-w-0 flex-1 line-clamp-2 text-sm leading-normal ${isActive ? 'font-medium text-cafe-black' : 'text-cafe-secondary'}`}
             >
               {title ?? (id === 'default' ? '大厅' : '未命名对话')}
@@ -293,9 +284,11 @@ function ThreadItemComponent({
           {hasMoreActions && (
             <div className="relative">
               <button
+                type="button"
                 ref={moreButtonRef}
                 onClick={(e) => {
                   e.stopPropagation();
+                  setIsSettingsOpen(false);
                   setIsMoreOpen((open) => !open);
                 }}
                 className={`p-0.5 rounded transition-all ${
@@ -315,49 +308,20 @@ function ThreadItemComponent({
                   role="menu"
                   aria-label="对话操作"
                   className="absolute right-0 top-5 z-50 min-w-[144px] rounded-lg border border-cafe bg-cafe-surface py-1 shadow-lg"
-                  onClick={(e) => e.stopPropagation()}
                 >
-                  {onUpdatePreferredCats && (
-                    <ThreadCatSettings
-                      threadId={id}
-                      currentCats={preferredCats ?? []}
-                      onSave={onUpdatePreferredCats}
-                      triggerIcon={<DefaultCatIcon />}
-                      triggerLabel="设置默认猫猫"
-                      triggerClassName={menuTriggerClassName}
-                      triggerRole="menuitem"
-                    />
-                  )}
-                  <ThreadEffortSettings
-                    threadId={id}
-                    triggerIcon={<EffortIcon />}
-                    triggerLabel="思考档位"
-                    triggerClassName={menuTriggerClassName}
-                    triggerRole="menuitem"
-                  />
+                  <ThreadActionMenuItem icon={<SettingsIcon />} onClick={startThreadSettings}>
+                    对话设置
+                  </ThreadActionMenuItem>
                   {canRename && (
                     <ThreadActionMenuItem icon={<RenameIcon />} onClick={startRename}>
                       重命名对话
                     </ThreadActionMenuItem>
                   )}
-                  <ThreadActionMenuItem icon={<ExportIcon />} onClick={exportThread}>
-                    导出对话
-                  </ThreadActionMenuItem>
+                  <ExportButton threadId={id} variant="thread-menu" onSelect={() => setIsMoreOpen(false)} />
                   {onReplay && (
                     <ThreadActionMenuItem icon={<ReplayIcon />} onClick={startReplay}>
                       回放剧场
                     </ThreadActionMenuItem>
-                  )}
-                  {onUpdateLabels && (
-                    <ThreadLabelPicker
-                      threadId={id}
-                      currentLabels={threadLabels ?? []}
-                      onSave={onUpdateLabels}
-                      triggerIcon={<LabelIcon />}
-                      triggerLabel="标签管理"
-                      triggerClassName={menuTriggerClassName}
-                      triggerRole="menuitem"
-                    />
                   )}
                   {canFavorite && (
                     <ThreadActionMenuItem icon={<StarIcon filled={isFavorited} />} onClick={toggleFavorite}>
@@ -395,6 +359,7 @@ function ThreadItemComponent({
               title={`默认: ${preferredCats.map((id) => resolveCatDisplayName(id, getCatById)).join(', ')}`}
             >
               <svg
+                aria-hidden="true"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -426,6 +391,17 @@ function ThreadItemComponent({
           <span className="text-micro text-cafe-muted">{formatRelativeTime(lastActiveAt, true)}</span>
         </div>
       </div>
+      <ThreadSettingsPanel
+        open={isSettingsOpen}
+        threadId={id}
+        threadTitle={displayTitle}
+        currentCats={preferredCats ?? []}
+        currentLabels={threadLabels ?? []}
+        onSavePreferredCats={onUpdatePreferredCats}
+        onSaveLabels={onUpdateLabels}
+        onClose={() => setIsSettingsOpen(false)}
+        returnFocusRef={moreButtonRef}
+      />
     </div>
   );
 }
@@ -473,18 +449,20 @@ function MoreVerticalIcon() {
   );
 }
 
-function DefaultCatIcon() {
+function SettingsIcon() {
   return (
-    <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M8 1C4.7 1 2 3.2 2 6c0 1.4.7 2.6 1.7 3.5-.1.8-.4 1.6-.9 2.3a.5.5 0 00.4.8c1.2 0 2.3-.5 3.1-1.1.5.1 1.1.2 1.7.2 3.3 0 6-2.2 6-5S11.3 1 8 1z" />
-    </svg>
-  );
-}
-
-function EffortIcon() {
-  return (
-    <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
-      <path d="M5.2 2.6a2.7 2.7 0 00-2.1 4.4 2.7 2.7 0 001.5 4.8h.8v1.5M10.8 2.6A2.7 2.7 0 0112.9 7a2.7 2.7 0 01-1.5 4.8h-.8v1.5M8 2v12M5.1 5.1c.8.1 1.4.5 1.7 1.1M10.9 5.1c-.8.1-1.4.5-1.7 1.1M5.1 9.2c.8-.1 1.4-.5 1.7-1.1M10.9 9.2c-.8-.1-1.4-.5-1.7-1.1" />
+    <svg
+      className="w-3 h-3"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="8" cy="8" r="2.25" />
+      <path d="M6.8 1.8h2.4l.45 1.5c.35.14.68.33.98.56l1.52-.37 1.2 2.08-1.06 1.12c.03.2.05.42.05.63s-.02.42-.05.63l1.06 1.12-1.2 2.08-1.52-.37c-.3.23-.63.42-.98.56l-.45 1.5H6.8l-.45-1.5a4.7 4.7 0 0 1-.98-.56l-1.52.37-1.2-2.08 1.06-1.12a4.5 4.5 0 0 1 0-1.26L2.65 5.57l1.2-2.08 1.52.37c.3-.23.63-.42.98-.56l.45-1.5Z" />
     </svg>
   );
 }
@@ -503,15 +481,6 @@ function ReplayIcon() {
   return (
     <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
       <path d="M4 2.5a.5.5 0 01.8-.4l8 6a.5.5 0 010 .8l-8 6a.5.5 0 01-.8-.4v-12z" />
-    </svg>
-  );
-}
-
-function ExportIcon() {
-  return (
-    <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M2.75 14A1.75 1.75 0 011 12.25v-2.5a.75.75 0 011.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 00.25-.25v-2.5a.75.75 0 011.5 0v2.5A1.75 1.75 0 0113.25 14H2.75z" />
-      <path d="M7.25 7.689V2a.75.75 0 011.5 0v5.689l1.97-1.969a.749.749 0 111.06 1.06l-3.25 3.25a.749.749 0 01-1.06 0L4.22 6.78a.749.749 0 111.06-1.06l1.97 1.969z" />
     </svg>
   );
 }

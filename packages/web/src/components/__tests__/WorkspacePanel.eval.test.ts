@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   useChatStore: vi.fn(),
   apiFetch: vi.fn(),
   usePersistedState: vi.fn(),
+  enablePresentationLock: vi.fn(),
+  disablePresentationLock: vi.fn(),
 }));
 
 vi.mock('@/hooks/useWorkspace', () => ({
@@ -30,9 +32,18 @@ vi.mock('@/hooks/usePersistedState', () => ({
 vi.mock('@/components/MarkdownContent', () => ({
   MarkdownContent: () => React.createElement('div', { 'data-testid': 'markdown' }),
 }));
-vi.mock('@/components/workspace/ChangesPanel', () => ({ ChangesPanel: () => null }));
-vi.mock('@/components/workspace/GitPanel', () => ({ GitPanel: () => null }));
-vi.mock('@/components/workspace/TerminalTab', () => ({ TerminalTab: () => null }));
+vi.mock('@/components/workspace/ChangesPanel', () => ({
+  ChangesPanel: () => React.createElement('div', { 'data-testid': 'changes-panel' }),
+}));
+vi.mock('@/components/workspace/GitPanel', () => ({
+  GitPanel: () => React.createElement('div', { 'data-testid': 'git-panel' }),
+}));
+vi.mock('@/components/workspace/TerminalTab', () => ({
+  TerminalTab: () => React.createElement('div', { 'data-testid': 'terminal-tab' }),
+}));
+vi.mock('@/components/workspace/BrowserPanel', () => ({
+  BrowserPanel: () => React.createElement('div', { 'data-testid': 'browser-panel' }),
+}));
 vi.mock('@/components/workspace/JsxPreview', () => ({ JsxPreview: () => null }));
 vi.mock('@/components/workspace/LinkedRootsManager', () => ({
   LinkedRootsManager: () => null,
@@ -50,14 +61,24 @@ vi.mock('@/components/eval-workspace/EvalWorkspacePanel', () => ({
   EvalWorkspacePanel: () => React.createElement('div', { 'data-testid': 'eval-workspace-panel' }, '评估'),
 }));
 
-function setupMocks() {
+function setupMocks({
+  workspaceMode = 'eval',
+  workspaceSurface = 'home',
+  file = null,
+}: {
+  workspaceMode?: string;
+  workspaceSurface?: string;
+  file?: Record<string, unknown> | null;
+} = {}) {
   mocks.useWorkspace.mockReturnValue({
     worktrees: [{ id: 'cat-cafe-runtime', branch: 'runtime/main-sync', root: '/tmp/repo' }],
     worktreeId: 'cat-cafe-runtime',
     tree: [],
-    file: null,
+    file,
     searchResults: [],
     loading: false,
+    worktreesLoading: false,
+    worktreesError: null,
     searchLoading: false,
     error: null,
     search: vi.fn().mockResolvedValue(undefined),
@@ -78,8 +99,8 @@ function setupMocks() {
   mocks.useChatStore.mockImplementation((sel: (s: Record<string, unknown>) => unknown) => {
     const store: Record<string, unknown> = {
       workspaceWorktreeId: 'cat-cafe-runtime',
-      workspaceOpenFilePath: null,
-      workspaceOpenTabs: [],
+      workspaceOpenFilePath: file ? 'docs/guide.md' : null,
+      workspaceOpenTabs: file ? ['docs/guide.md'] : [],
       currentProjectPath: '/tmp/repo',
       currentThreadId: 'thread-1',
       setWorkspaceWorktreeId: vi.fn(),
@@ -98,8 +119,15 @@ function setupMocks() {
       clearPendingPreviewAutoOpen: vi.fn(),
       restoreWorkspaceTabs: vi.fn(),
       _workspaceFileSetAt: { ts: 0, threadId: null },
-      workspaceMode: 'eval',
+      workspaceMode,
       setWorkspaceMode: vi.fn(),
+      workspaceSurface,
+      setWorkspaceSurface: vi.fn(),
+      workspacePreview: { port: undefined, path: '/' },
+      setWorkspacePreview: vi.fn(),
+      presentationLock: false,
+      enablePresentationLock: mocks.enablePresentationLock,
+      disablePresentationLock: mocks.disablePresentationLock,
     };
     return sel(store);
   });
@@ -117,6 +145,8 @@ describe('WorkspacePanel eval mode', () => {
   });
 
   beforeEach(() => {
+    mocks.enablePresentationLock.mockReset();
+    mocks.disablePresentationLock.mockReset();
     setupMocks();
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -141,5 +171,122 @@ describe('WorkspacePanel eval mode', () => {
     });
 
     expect(container.querySelector('[data-testid="eval-workspace-panel"]')).not.toBeNull();
+  });
+
+  it('keeps the file tree visible while a file detail is open', async () => {
+    setupMocks({
+      workspaceMode: 'dev',
+      workspaceSurface: 'files',
+      file: {
+        path: 'docs/guide.md',
+        content: '# Guide',
+        sha256: 'abc123',
+        size: 7,
+        mime: 'text/markdown',
+        truncated: false,
+        binary: false,
+      },
+    });
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    expect(container.querySelector('[data-testid="workspace-tree"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="markdown"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="关闭标签页"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="关闭 guide.md"]')?.textContent?.trim()).toBe('×');
+    expect(container.querySelector('aside')?.className).not.toContain('hidden lg:flex');
+  });
+
+  it('keeps every file action reachable through a horizontally scrollable toolbar', async () => {
+    setupMocks({
+      workspaceMode: 'dev',
+      workspaceSurface: 'files',
+      file: {
+        path: 'docs/guide.md',
+        content: '# Guide',
+        sha256: 'abc123',
+        size: 7,
+        mime: 'text/markdown',
+        truncated: false,
+        binary: false,
+      },
+    });
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    const toolbar = container.querySelector<HTMLElement>('[data-testid="workspace-file-toolbar"]');
+    const content = container.querySelector<HTMLElement>('[data-testid="workspace-file-toolbar-content"]');
+    const viewer = container.querySelector<HTMLElement>('[data-testid="workspace-file-viewer"]');
+    expect(viewer).not.toBeNull();
+    expect(viewer?.className).toContain('min-w-0');
+    expect(toolbar).not.toBeNull();
+    expect(toolbar?.className).toContain('overflow-x-auto');
+    expect(toolbar?.getAttribute('role')).toBe('toolbar');
+    expect(content?.className).toContain('w-max');
+    expect(content?.className).toContain('min-w-full');
+    expect(container.querySelector('[aria-label="关闭标签页"]')).not.toBeNull();
+  });
+
+  it('keeps Presentation Lock reachable from the Workspace Launcher', async () => {
+    setupMocks({ workspaceMode: 'dev', workspaceSurface: 'home' });
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    const lock = container.querySelector<HTMLButtonElement>('[aria-label="锁定当前文件视图"]');
+    expect(lock).not.toBeNull();
+
+    await act(async () => {
+      lock?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(mocks.enablePresentationLock).toHaveBeenCalledOnce();
+  });
+
+  it('renders the large-file truncation notice as readable text', async () => {
+    setupMocks({
+      workspaceMode: 'dev',
+      workspaceSurface: 'files',
+      file: {
+        path: 'docs/guide.md',
+        content: '# Guide',
+        sha256: 'abc123',
+        size: 1_048_577,
+        mime: 'text/markdown',
+        truncated: true,
+        binary: false,
+      },
+    });
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    expect(container.textContent).toContain('文件已截断 (超过 1MB)');
+    expect(container.textContent).not.toContain('\\u6587');
+  });
+
+  it.each([
+    ['changes', 'changes-panel'],
+    ['git', 'git-panel'],
+    ['terminal', 'terminal-tab'],
+    ['browser', 'browser-panel'],
+  ])('keeps the %s Dev surface reachable', async (workspaceSurface, testId) => {
+    setupMocks({ workspaceMode: 'dev', workspaceSurface });
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    expect(container.querySelector(`[data-testid="${testId}"]`)).not.toBeNull();
   });
 });

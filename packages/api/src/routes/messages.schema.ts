@@ -4,8 +4,24 @@
  * Extracted from parse-multipart.ts for better organization.
  */
 
-import { catIdSchema } from '@cat-cafe/shared';
+import {
+  type ContextAttachment,
+  ContextAttachmentsSchema,
+  catIdSchema,
+  type FileContent,
+  type ImageContent,
+  type MessageContent,
+} from '@cat-cafe/shared';
 import { z } from 'zod';
+
+const requestContextAttachmentsSchema = z.preprocess((value) => {
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}, ContextAttachmentsSchema.optional());
 
 /**
  * Schema for POST /api/messages request body.
@@ -13,7 +29,8 @@ import { z } from 'zod';
  */
 export const sendMessageSchema = z
   .object({
-    content: z.string().min(1).max(100000),
+    content: z.string().max(100000),
+    contextAttachments: requestContextAttachmentsSchema,
     /** Legacy fallback only; preferred identity source is X-Cat-Cafe-User header. */
     userId: z.string().min(1).max(100).optional(),
     mentions: z.array(catIdSchema()).optional(),
@@ -31,9 +48,27 @@ export const sendMessageSchema = z
     /** #699: ID of message being replied to (quote). */
     replyTo: z.string().min(1).max(100).optional(),
   })
+  .refine((data) => data.content.trim().length > 0 || (data.contextAttachments?.length ?? 0) > 0, {
+    message: 'content or contextAttachments must be non-empty',
+    path: ['content'],
+  })
   .refine((data) => data.visibility !== 'whisper' || (data.whisperTo && data.whisperTo.length > 0), {
     message: 'whisperTo must be non-empty when visibility is whisper',
     path: ['whisperTo'],
   });
 
 export type SendMessageInput = z.infer<typeof sendMessageSchema>;
+
+export function buildMessageContentBlocks(
+  content: string,
+  contextAttachments: readonly ContextAttachment[] = [],
+  uploadedContent: readonly (ImageContent | FileContent)[] = [],
+): MessageContent[] {
+  const blocks: MessageContent[] = [];
+  if (content.length > 0) blocks.push({ type: 'text', text: content });
+  for (const attachment of contextAttachments) {
+    blocks.push({ type: 'context_attachment', attachment });
+  }
+  blocks.push(...uploadedContent);
+  return blocks;
+}

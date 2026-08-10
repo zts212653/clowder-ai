@@ -68,6 +68,91 @@ describe('F264 author-declared message disposition', () => {
     );
   });
 
+  test('current-parent exposure is source-domain aware and ignores author intent outside user messages', () => {
+    const cases = [
+      {
+        name: 'legacy user without intent stays next-work',
+        entry: entry({ content: 'legacy user', source: 'user' }),
+        readable: false,
+      },
+      {
+        name: 'user next-work stays isolated',
+        entry: entry({
+          content: 'user next work',
+          source: 'user',
+          authorIntentByCatId: { opus: { requested: 'next_work' } },
+        }),
+        readable: false,
+      },
+      {
+        name: 'user continue-current requires its exact parent',
+        entry: entry({
+          content: 'user current work',
+          source: 'user',
+          authorIntentByCatId: {
+            opus: { requested: 'continue_current', boundParentInvocationId: 'parent-a' },
+          },
+        }),
+        readable: true,
+      },
+      {
+        name: 'agent A2A remains readable without author intent',
+        entry: entry({ content: 'agent custody', source: 'agent', sourceCategory: 'a2a' }),
+        readable: true,
+      },
+      {
+        name: 'connector event remains readable without author intent',
+        entry: entry({ content: 'connector custody', source: 'connector', sourceCategory: 'review' }),
+        readable: true,
+      },
+      {
+        name: 'non-user custody ignores a stray next-work-shaped field',
+        entry: entry({
+          content: 'connector with polluted field',
+          source: 'connector',
+          sourceCategory: 'ci',
+          authorIntentByCatId: { opus: { requested: 'next_work' } },
+        }),
+        readable: true,
+      },
+    ];
+
+    for (const row of cases) {
+      const isolated = new InvocationQueue();
+      isolated.enqueue(row.entry);
+      const body = isolated.getQueuedBodyMessagesForCat('thread-1', 'user-1', 'opus', 'parent-a');
+      const freshness = isolated.getQueuedFreshnessMessagesForCat('thread-1', 'user-1', 'opus', {
+        parentInvocationId: 'parent-a',
+      });
+      assert.equal(body.length === 1, row.readable, `${row.name}: body exposure`);
+      assert.equal(freshness.length === 1, row.readable, `${row.name}: freshness exposure`);
+    }
+  });
+
+  test('an unread continue-current user message closes its parent window but stays eligible for successor work', () => {
+    const result = queue.enqueue(
+      entry({
+        authorIntentByCatId: {
+          opus: { requested: 'continue_current', boundParentInvocationId: 'parent-a' },
+        },
+      }),
+    );
+
+    assert.equal(
+      queue.getQueuedFreshnessMessagesForCat('thread-1', 'user-1', 'opus', {
+        parentInvocationId: 'parent-a',
+      })[0]?.entryId,
+      result.entry.id,
+      'the active parent first owns the opportunity to read',
+    );
+
+    queue.fallbackAuthorIntentsForParentAcrossUsers('thread-1', 'opus', 'parent-a', 2_000);
+
+    assert.deepEqual(queue.getQueuedBodyMessagesForCat('thread-1', 'user-1', 'opus', 'parent-a'), []);
+    assert.equal(queue.peekNextQueued('thread-1', 'user-1')?.id, result.entry.id);
+    assert.equal(queue.hasPendingForCat('thread-1', 'opus', { userId: 'user-1' }), true);
+  });
+
   test('multi-target author intent remains target-local', () => {
     queue.enqueue(
       entry({

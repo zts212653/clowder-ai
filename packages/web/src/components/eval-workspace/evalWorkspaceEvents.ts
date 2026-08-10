@@ -74,23 +74,40 @@ function toWorkspaceEvent(item: EvalHubItem, domain: EvalDomainSummary): EvalWor
 }
 
 function deriveEventKind(item: EvalHubItem): EvalWorkspaceEventKind {
-  if (item.lifecycle.closureStatus === 'escalated') return 'escalated';
-  if (item.lifecycle.closureStatus === 'resolved' || item.lifecycle.closureStatus === 'suppressed_with_reason') {
-    return 'resolved';
-  }
+  const status = item.lifecycle.closureStatus;
   if (
-    item.lifecycle.closureStatus === 'reeval_pending' ||
-    item.lifecycle.closureStatus === 'live_active' ||
-    item.lifecycle.closureStatus === 'fix_landed' ||
-    item.lifecycle.reevalStatus === 'pending'
+    status !== 'escalated' &&
+    status !== 'resolved' &&
+    status !== 'suppressed_with_reason' &&
+    (item.lifecycle.stale || item.lifecycle.reevalStatus === 'pending' || item.reeval.status === 'pending_reeval')
   ) {
     return 'awaiting_reeval';
   }
-  if (item.lifecycle.stale) return 'awaiting_reeval';
-  if (item.reeval.status === 'pending_reeval') return 'awaiting_reeval';
-  if (item.verdict === 'delete_sunset') return 'needs_decision';
-  if (item.verdict === 'fix' || item.verdict === 'build') return 'needs_action';
-  return 'watching';
+  switch (status) {
+    case 'escalated':
+      return 'escalated';
+    case 'resolved':
+    case 'suppressed_with_reason':
+      return 'resolved';
+    case 'reeval_pending':
+    case 'live_active':
+      return 'awaiting_reeval';
+    case 'monitoring':
+      return item.lifecycle.reevalDebtStatus === 'due' || item.lifecycle.reevalDebtStatus === 'in_progress'
+        ? 'awaiting_reeval'
+        : 'watching';
+    case 'open':
+    case 'acknowledged':
+    case 'action_planned':
+    case 'fix_landed':
+    case 'main_landed':
+      return item.verdict === 'delete_sunset' ? 'needs_decision' : 'needs_action';
+    case 'observing':
+    case 'unavailable':
+      if (item.verdict === 'delete_sunset') return 'needs_decision';
+      if (item.verdict === 'fix' || item.verdict === 'build') return 'needs_action';
+      return 'watching';
+  }
 }
 
 function severityFor(kind: EvalWorkspaceEventKind): EvalWorkspaceEventSeverity {

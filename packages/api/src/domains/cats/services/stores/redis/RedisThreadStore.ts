@@ -10,8 +10,8 @@
  * 默认持久化；用户可见状态禁止默认 TTL（LL-048）。
  */
 
-import type { CatId, CliEffortPreset, ThreadKind, ThreadPhase } from '@cat-cafe/shared';
-import { CLI_EFFORT_VALUES, generateThreadId } from '@cat-cafe/shared';
+import type { CatId, CliEffortPreset, CodexSpeedValue, ThreadKind, ThreadPhase } from '@cat-cafe/shared';
+import { CLI_EFFORT_VALUES, CODEX_SPEED_VALUES, generateThreadId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { StoreReadOptions } from '../ports/StoreReadOptions.js';
 import { awaitStoreRead, throwIfStoreReadAborted } from '../ports/StoreReadOptions.js';
@@ -34,6 +34,7 @@ import type {
 import {
   buildExternalRuntimeAnchorThreadId,
   DEFAULT_THREAD_ID,
+  deriveAutoThreadTitle,
   mergeThreadMetadata,
   parseThreadMetadataJson,
   validateMergedTotals,
@@ -43,9 +44,14 @@ import { ThreadKeys } from '../redis-keys/thread-keys.js';
 
 const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry
 const CLI_EFFORT_VALUE_SET = new Set<string>(CLI_EFFORT_VALUES);
+const CODEX_SPEED_VALUE_SET = new Set<string>(CODEX_SPEED_VALUES);
 
 function parseCliEffortValue(raw: string | null | undefined): CliEffortPreset | undefined {
   return raw && CLI_EFFORT_VALUE_SET.has(raw) ? (raw as CliEffortPreset) : undefined;
+}
+
+function parseCodexSpeedValue(raw: string | null | undefined): CodexSpeedValue | undefined {
+  return raw && CODEX_SPEED_VALUE_SET.has(raw) ? (raw as CodexSpeedValue) : undefined;
 }
 
 /**
@@ -455,6 +461,20 @@ export class RedisThreadStore implements IThreadStore {
   async updateTitle(threadId: string, title: string): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     await this.setDetailFields(key, 'title', title);
+  }
+
+  async compareAndSetTitle(threadId: string, expectedTitle: string, nextTitle: string): Promise<boolean> {
+    const key = ThreadKeys.detail(threadId);
+    const changed = (await this.redis.eval(
+      CAS_HSET_IF_HAS_ID_LUA,
+      1,
+      key,
+      'title',
+      expectedTitle,
+      nextTitle,
+    )) as number;
+    if (changed === 1) await this.applyKeyRetention([key]);
+    return changed === 1;
   }
 
   async updateProjectPath(threadId: string, projectPath: string): Promise<void> {
@@ -938,7 +958,7 @@ export class RedisThreadStore implements IThreadStore {
     const recovered: Thread = {
       id: threadId,
       projectPath: 'default',
-      title: this.deriveRecoveredTitle(firstMessage.content),
+      title: deriveAutoThreadTitle(firstMessage.content),
       createdBy: firstMessage.userId,
       participants,
       createdAt: firstMessage.timestamp,
@@ -1018,12 +1038,6 @@ export class RedisThreadStore implements IThreadStore {
       .filter((message): message is RecoveredMessageSnapshot => Boolean(message?.catId))
       .map((message) => message.catId as CatId);
     return [...new Set(fromMessages)];
-  }
-
-  private deriveRecoveredTitle(content: string): string | null {
-    const normalized = content.trim();
-    if (!normalized) return null;
-    return normalized.length > 30 ? `${normalized.slice(0, 30)}...` : normalized;
   }
 
   private async applyKeyRetention(keys: string[], options?: StoreReadOptions): Promise<void> {
@@ -1445,6 +1459,34 @@ export class RedisThreadStore implements IThreadStore {
       efforts[catId] = effort;
     }
     return efforts;
+  }
+
+  async updateMemberSpeed(threadId: string, catId: CatId, speed: CodexSpeedValue | null): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    const field = `memberSpeed:${catId}`;
+    if (speed === null) {
+      await this.deleteDetailFields(key, field);
+    } else {
+      await this.setDetailFields(key, field, speed);
+    }
+  }
+
+  async getMemberSpeed(threadId: string, catId: CatId, _userId: string): Promise<CodexSpeedValue | undefined> {
+    const raw = await this.redis.hget(ThreadKeys.detail(threadId), `memberSpeed:${catId}`);
+    return parseCodexSpeedValue(raw);
+  }
+
+  async getMemberSpeeds(threadId: string, _userId: string): Promise<Partial<Record<CatId, CodexSpeedValue>>> {
+    const fields = await this.redis.hgetall(ThreadKeys.detail(threadId));
+    const speeds: Partial<Record<CatId, CodexSpeedValue>> = {};
+    for (const [field, raw] of Object.entries(fields)) {
+      if (!field.startsWith('memberSpeed:')) continue;
+      const speed = parseCodexSpeedValue(raw);
+      if (!speed) continue;
+      const catId = field.slice('memberSpeed:'.length) as CatId;
+      speeds[catId] = speed;
+    }
+    return speeds;
   }
 
   /** #836: Check if cat uses reborn strategy in this thread. */

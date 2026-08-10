@@ -130,7 +130,7 @@ export const CLASSIFIER_PATTERNS: Array<{ code: CliErrorReasonCode; regex: RegEx
   {
     code: 'model_not_found',
     regex:
-      /(model.*not found|Unknown model|supported API model names|model.*not supported|deployment.*not found|neither PlanModel nor RequestedModel specified|Please use the \/model command|没有可用的账号侧默认模型)/i,
+      /(model.*not found|Unknown model|supported API model names|model.*not supported|No available channel for model|deployment.*not found|neither PlanModel nor RequestedModel specified|Please use the \/model command|没有可用的账号侧默认模型)/i,
   },
   {
     code: 'auth_failed',

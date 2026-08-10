@@ -8,16 +8,18 @@ tips_exempt: task-custody verification reuses the existing typed disposition act
 description: "让每条猫猫爪感差进入系统 thread 负责的可见收件箱，并以原消息引用、猫签处置和 Workspace 实时投影形成责任闭环。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-07-30T16:39:00Z
+description_updated_at: 2026-08-08T00:00:00Z
 ---
 
 # F278: Paw-Feel Disposition Inbox — 爪感差责任收件箱
 
-> **Status**: in progress — Phase E code landed; awaiting operator activation
+> **Status**: in progress — Phase G production acceptance correction in branch; live remains on Phase F behavior
 > **Owner**: 小太阳·Maine Coon（@codex-sol）
 > **Priority**: P1
 > **Initial delivery**: 2026-07-27
 > **Reopened**: 2026-07-30（live dogfood 暴露 review work unit 与 duty activation gap）
+> **Reopened again**: 2026-08-08（真实 duty 批次暴露 transport receipt 与业务责任真相混淆）
+> **Reopened a third time**: 2026-08-10（production duty 证明 stale repair 仍被计为修复中，incomplete batch 没有可审计收据）
 > **Evolved from**: F245
 
 ## Why
@@ -29,10 +31,14 @@ operator 要的不是“采到过”，而是每条爪感差都有人负责看�
 - `0001785414248058-000159-bd739ce3`：追问值班猫在哪里配置、多久看一次、看完怎样处理，以及人猫完整旅程是否真的规定。
 - `0001785414536911-000162-4a459989`：指出同一 thread、同一 invocation 会产生多条相关 signal，按逐条平铺会反复阅读同一上下文。
 - `0001785418998194-000191-a53bd6bd`：授权更新 F278 spec、补全 gap；代码完成后再由 operator 重启并配置值班猫。
+- `0001786235537994-000350-dcdfd3c3`：真实 inbox 诊断显示 208 bundles / 262 active / 179 overdue，全部非终态仍被 UI 当作 “new”，且 `112876b3` 连续 `bundle_invalid`。
+- `0001786236680561-000372-aff77c69`：授权把真实 friction signal 推进到可验证责任状态，并要求每班留下逐 bundle rich receipt；本轮不启动 runtime、不碰 Redis 6399、不做 production activation。
 
 当前 F245 会回扫、聚类并产生周期 verdict，但 Top-N 之外的原始 signal 没有逐条责任状态。结果是“分析系统知道存在”不等于“某只猫必须看完”。F278 补的是责任控制面，不是 embedding 阈值。
 
 2026-07-30 的 live dogfood 又证明：**逐条入账正确，不等于逐条平铺就是正确的审阅工作单元**。当时 ledger 有 520 条、全部 unseen、395 条 72h+，且 primary / backup 未配置；最近 24 小时抽样 21 条来自 20 条消息、14 个 thread，其中一个 thread 占 6 条。同消息与同 invocation 的多条 signal 需要共享一次上下文阅读，但每条 disposition 仍须独立入账。
+
+2026-08-08 的真实收件进一步证明：**信使送达不等于业务责任完成，事件名也不等于业务真相**。值班 watermark 在 notice delivery / wake 后即完成，confirm 又重新水合当前 bundle membership，导致旧列表连续失效；与此同时 source cat 是真实 repair owner 时，终态 signer guard 错把“修复归属”和“独立签署”绑成同一身份约束。
 
 ## Association Verdict
 
@@ -44,20 +50,24 @@ operator 要的不是“采到过”，而是每条爪感差都有人负责看�
 | F222 | user-authored dissatisfaction / frustration | user-authored marker 继续归 F222；F278 首期只接 canonical cat-authored paw-feel |
 | F248 | Settings / Workspace Eval Hub 可读投影 | Workspace「评估」新增 live paw-feel surface |
 | F266 | published eval verdict lifecycle | 复用 append-only event/projection 形状，不复用 verdict 对象或状态语义 |
-| F128 | 无准确 owner 时提案 | `route_pending` 指向 F128 proposal，批准后才完成 routed |
-| F167 | 路由后的工作球权与闭环 | F278 的 routed 只表示责任移交，不冒充修复完成 |
+| F128 | 无准确 owner 时提案 | pending proposal 是可审计 blocked exit；批准后仍须形成真实 repair binding 或 terminal disposition |
+| F167 | 路由后的工作球权与闭环 | named owner + task + active lease 才能投影 `bound_in_repair`；transport-only `routed` 仍是 `unreviewed` |
 | F264 | 原消息上的 durable status projection | 原消息就地显示 paw-feel disposition，不复制正文 |
 
 F277 已被开放 PR #3234 占用，因此本功能使用最新可用编号 F278。
 
 **2026-07-30 association verdict：reopen F278，不另立 feature。** 本轮不改变 canonical signal、ledger writer、duty home 或四个既有 read surfaces；它修正 F278 自己的 review work unit、运营完成判据和 routed 证据强度。
 
+**2026-08-08 association verdict：再次 reopen F278，不另立 feature。** 真实 signal、bundle、duty watermark、四个 read surfaces 和责任 writer 全部仍属于 F278；本轮只把既有对象从“消息已送达”提升到“业务 exit 可证明”。
+
+**2026-08-10 association verdict：继续在 F278 内修正，不另立 feature/thread。** production 验收失败发生在同一 responsibility read model 与 duty receipt writer：安全门正确拒绝了非法出口，但人类看到的状态与 incomplete receipt 仍不诚实。这不是新的工作流，也不改变 F167/F266/F192 的 ownership。
+
 ## Architecture Ownership
 
 ```text
 Architecture cell: harness-eval
-Map delta: update required
-Why: 新增 pre-verdict、per-signal 的责任对象和 Workspace live read model，同时保持 F245 分析边界。
+Map delta: none
+Why: Phase F/G 只校正既有 F278 responsibility / duty receipt 在 harness-eval cell 内的完成语义，不新增 ownership boundary；F278 的 pre-verdict 责任对象与四个 consumer 已在既有 architecture map 登记。
 ```
 
 正文真相、责任真相和分析真相分离：
@@ -86,9 +96,12 @@ MessageStore original message
 9. `thread_eval_friction`、Workspace live、Settings audit summary 与原消息状态都从同一 F278 event log/projection 读取；任何 surface 都不能拥有第二个 disposition writer 或可漂移副本。
 10. ledger 仍按 signal 逐条 exactly-once；上下文 bundle 只是可重建 read projection，不持久化第二本 bundle ledger，也不能隐藏任何成员。
 11. 确定性 bundle 优先级为同 `sourceMessageId` → 同 `turnInvocationId` → legacy `invocationId`；`threadId` 只作目录与导航，绝不等价于“同一问题”。
-12. bundle 处置是 O(1) 猫确认 + O(例外) 拆出；服务端按确认瞬间的 `signalId + expectedSequence` 快照逐条 fan-out。后来新到的成员保持 `new`，不得被追溯签名。
-13. `routed` 必须引用 F167 active custody 或 owner 显式结构化 ack；transport delivery / 文本文案不能冒充责任接单。
+12. bundle 处置是 O(1) 猫确认 + O(例外) 拆出；list 返回服务端签名的精确 `signalId + expectedSequence` membership snapshot，confirm 只验证并消费该快照，禁止重新水合 membership。后来新到的成员保持原状态，不得被追溯签名。
+13. transport delivery、wake、旧 `routed` 事件或文本文案都不能成为业务责任 exit；只有 terminal disposition、verified repair binding、pending proposal 或 explicit blocker 可成为当班 valid exit。`signature_waiting` 是可恢复的 active state，不完成 receipt。
 14. primary / backup 未配置时必须是 Workspace 与 Settings 的最高优先级运行红灯；在完成配置并走通一批真实 triage 之前，F278 不能宣称运营完成。
+15. 每个 actionable bundle 必须处于 `terminal`，或拥有 named owner + task + **当前仍 active 的 exact lease/generation**，或 **F128 当前仍为 pending 的 proposal**，或 explicit blocker；投影必须携带对应 evidence refs。read/receipt 时重新查权威 store，过期 lease 或非 pending proposal 立即失去 `validExit`。`signature_waiting` 必须继续完成独立签署或转成 explicit blocker。
+16. duty watermark 的终态是业务 receipt，不是 messenger receipt。每班只有在精确 snapshot 中每个 bundle 都有 valid exit，且同一 durable notice 已更新为逐 bundle rich checklist 后才能 complete；未完成 batch 不得被新 watermark 覆盖。
+17. source cat 可以是 resolver-verified repair owner，但不能 terminal-sign 自己的 signal。系统必须持久化 exact candidate、source signer exclusion 和可选 preferred signer，使 Backup / 首选 signer 中断后任一合法独立 signer 都能结构化恢复。
 
 ## Durable Identity and Data Model
 
@@ -114,7 +127,10 @@ interface PawFeelDispositionProjection {
     | 'fix'
     | 'closed'
     | 'duplicate'
-    | 'no_action';
+    | 'no_action'
+    | 'fix'
+    | 'signature_waiting'
+    | 'blocked';
   lastTransitionAt: string;
   lastActorCatId?: string;
   targetThreadId?: string;
@@ -122,7 +138,16 @@ interface PawFeelDispositionProjection {
   duplicateOf?: PawFeelSignalId;
   reasonCode?: string;
   outcomeRef?: string;
+  signatureRequest?: PawFeelSignatureRequest;
+  blocker?: PawFeelResponsibilityBlocker;
 }
+
+type PawFeelResponsibilityState =
+  | 'unreviewed'
+  | 'bound_in_repair'
+  | 'signature_waiting'
+  | 'blocked'
+  | 'terminal';
 
 // Pure read projection. Never persisted as a new authority.
 interface PawFeelReviewBundle {
@@ -130,6 +155,7 @@ interface PawFeelReviewBundle {
   basis: 'message' | 'turn_invocation' | 'legacy_invocation' | 'single_signal';
   sourceThreadId: string;
   representativeSourceMessageId: string;
+  membershipToken: string; // server-authenticated exact list snapshot
   members: Array<{
     signalId: PawFeelSignalId;
     expectedSequence: number;
@@ -137,6 +163,7 @@ interface PawFeelReviewBundle {
   }>;
   rawSignalCount: number;
   stateCounts: Partial<Record<PawFeelDispositionProjection['state'], number>>;
+  responsibility: PawFeelResponsibilityProjection;
 }
 ```
 
@@ -151,6 +178,8 @@ interface PawFeelReviewBundle {
 - `closed`
 - `duplicate`
 - `no_action`
+- `signature_requested`
+- `blocked`
 
 若原文 digest 与 ledger identity 不符，必须 fail loud，不得把旧 disposition 静默挂到另一条 marker。`duplicateOf` 必须存在且无环；`no_action` 必须有枚举 reason；`closed` 必须有 `outcomeRef`。
 
@@ -161,14 +190,17 @@ interface PawFeelReviewBundle {
 | absent | `new` | scanner / reconciliation only |
 | `new` | `seen` | authenticated duty/responsible cat |
 | `seen` | `route_pending` | cat + exact owner evidence or F128 proposal ref |
-| `route_pending` | `routed` | F167 active custody ref or owner explicit structured ack；transport receipt alone is rejected |
+| `route_pending` | `routed` | legacy audit transition only；即使 receipt 合法也不构成新业务 exit |
 | `route_pending` | `seen` | owner rejection / proposal rejection (`route_reopened`) |
 | `new` / `seen` / `route_pending` | `fix` | cat/operator + resolver-verified named owner, task and active F167 lease |
+| `new` / `seen` / `route_pending` | `signature_waiting` | source cat requests one exact `duplicate` / `no_action` / `fix` candidate; persisted request excludes source signer and may name a preferred independent signer |
+| `signature_waiting` | `fix` / `duplicate` / `no_action` | any authenticated legal signer other than excluded source signs the exact persisted candidate; preferred signer is routing preference, not a single point of failure |
+| `new` / `seen` / `route_pending` / `signature_waiting` | `blocked` | cat writes an explicit blocker code + evidence ref |
 | `seen` | `closed` | cat + reason + `outcomeRef` |
 | `seen` | `duplicate` | cat + valid `duplicateOf` |
 | `seen` | `no_action` | cat + reason enum |
 
-`route_pending` 仍属于 undispositioned，继续计入 24h/72h aging。source cat 可以看和补证据，但不能签自己 signal 的 terminal disposition。`routed` 文案必须明确“已移交，不等于已修复”。
+`route_pending` 与旧 `routed` 都继续计入 active responsibility；`routed` 最多证明历史 transport/custody 事件，不能替代当前 business exit。source cat 可以看、补证据并成为 verified repair owner，但不能签自己 signal 的 terminal disposition。Workspace 按五态责任投影展示业务真相，不再把全部非终态都标成 `new`。
 
 ## Duty Model
 
@@ -177,6 +209,7 @@ interface PawFeelReviewBundle {
 - 初始 primary / backup duty cat 由 operator 配置；猫粮或会话不可用时由 operator 显式换班（更新 duty config，将接棒猫设为 primary），ledger、SLA 与 thread 不换。
 - 每日两批审阅；24h 未看升级为 overdue 但仍由 primary 负责；72h 未处置在 Workspace 标红并 operator-visible。年龄阈值只升级严重度，不自动把责任转给 backup。
 - unseen 从 0→1、达到批次阈值或 SLA 时才提醒，避免逐条刷 thread。
+- 每次 duty claim 持久化精确 bundle/member snapshot；delivery 与 wake 后状态保持 `awaiting_receipt`。每个 bundle 获得 valid exit 后，系统把同一 durable notice 更新为逐 bundle Rich Checklist，再完成 watermark；重试只更新同一 receipt，不重复发消息，且新 backlog 不能覆盖未完成 batch。
 - primary / backup 均未配置时，不运行虚假的 escalation 链；Workspace 与 Settings 顶部显示“爪感差值班未配置 · N 条待看 / M 条超时”，并给出配置入口。
 - “代码可配置”不是运营完成。operator 在新 runtime 配置 Primary/Backup 后，值班猫必须走通首批真实 bundle triage，才能重新 close 本 feature。
 - 首批真实 triage 同时收口已入 append-only ledger 的存量 parser 假阳性：值班猫按 bundle 签 `no_action(reason=parser_false_positive)`；不得删除历史、由 automation 代签或让 reconciliation 静默抹掉。
@@ -201,8 +234,10 @@ interface PawFeelReviewBundle {
 1. 每个 bundle 只读一次原始上下文，查看其中所有 marker；
 2. 选择共同 disposition，必要时把例外成员拆出；
 3. 一次确认后，服务端为快照中的每个 signal 独立校验 sequence、独立写猫签事件并明确报告冲突；
-4. 路由到已知 owner 时先进入 `route_pending`；只有 F167 custody / owner ack 成立才变为 `routed`；
+4. 路由与信使回执只提供 transport evidence；真实 repair 必须解析到 named owner + task + active lease，未知 owner 则保持 pending proposal / explicit blocker；
 5. 查不到 owner 时走 F128 proposal，不猜 owner、不直接代替 owner 修复。
+6. source cat 同时是 verified repair owner 时，提交 exact signature request；任一非 source 的合法 signer 可从持久化 candidate 继续签署，不依赖原 Backup invocation 存活。
+7. 当 snapshot 中每个 bundle 都达到允许的 valid exit 后，值班 notice 原地生成逐 bundle rich receipt，作为本班完成凭据；`signature_waiting` 仍保持未勾选。
 
 Phase E 的值班主动作收敛为三个：`duplicate`、带理由 `no_action`、`fix`。`fix` 必须解析到 named owner + task + F167 active lease；task-backed implement 的直线路径是 persisted task standing → `implement/task_done` lease，不接受 generic durable-verdict、自报 ACK 或 transport receipt。它表示“责任已进入可执行修复球权”，不是“问题已修复”。旧 `route_pending/routed/closed` 事件继续可审计，但 transport-only receipt 不再可由新动作写绿。
 
@@ -302,6 +337,23 @@ semantic suggestion 只是在 bundle 之上的候选合并层；未命中或 deg
 - `route_pending → routed` 读取 F167 custody / owner ack；
 - operator 重启后配置 Primary/Backup，并用真实 backlog 完成首批运营验收。
 
+### Phase F — Business Responsibility & Auditable Duty Receipt
+
+- list 为每个 bundle 返回服务端签名的 exact membership snapshot；confirm 不再按实时 source context 重建成员；
+- 在 disposition event 之上派生 `unreviewed / bound_in_repair / signature_waiting / blocked / terminal` 五态责任真相，并在读取时复验 active lease 与 pending proposal 后暴露 valid-exit evidence；
+- source=owner 与 source=signer 解耦：source 可成为 verified repair owner，但 exact terminal candidate 必须由独立 signer 签署；首选 signer 中断不锁死恢复；
+- duty watermark 持久化每班 snapshot，delivery/wake 只推进到 `awaiting_receipt`；逐 bundle valid exit 后将同一 durable notice 更新为 rich checklist receipt，再 complete；
+- Workspace、原消息 bubble 与筛选器消费 responsibility projection，旧 `routed` 不再被误算为业务完成；
+- 不重启 runtime、不访问 Redis 6399、不做 production activation；live truth 继续标为 dormant，等待合入后的独立激活步骤。
+
+### Phase G — Production Acceptance Correction
+
+- 失效 task/lease 的历史 `fix` 事件保留审计引用，但 responsibility 回到 `unreviewed`；只有复验仍 active 的 exact binding 才计入 `bound_in_repair`；
+- incomplete batch 也更新同一 durable notice，写入 danger card + 逐 bundle checklist；未覆盖项保持 unchecked，watermark 继续 `awaiting_receipt`；
+- scheduler 在唤醒 duty cat 前先把 batch 推到 `awaiting_receipt` 并幂等 reconcile，使 usage-limit / restart 不能阻止收据落地；机器预写明确标为收据维护，不冒充审阅猫；
+- scheduler 可在旧 batch 已全部取得合法出口时写 success receipt 并完成 watermark；这表示机器已复验业务终态，不表示当班猫亲自签过本班；
+- 不新增状态机、SOP、thread 或用户管理面；不触碰 Redis 6399，production 生效仍需合入后的显式 runtime activation。
+
 ## Acceptance Criteria
 
 ### A — Completeness
@@ -347,6 +399,16 @@ semantic suggestion 只是在 bundle 之上的候选合并层；未命中或 deg
 - [x] AC-E7: transport receipt / 任意字符串不能完成 `routed`；只有 resolver-verified F167 active custody 可签 `fix`。task-backed implement 必须由真实 task 的 named owner 在 task thread 建立 `implement/task_done` lease；owner ACK 不替代 custody。
 - [ ] AC-E8: 520/624 规模 cohort 已证明不丢 signal、raw/bundle denominator 一致；仍须 operator 从最新 main 重启 runtime，配置不同的 Primary/Backup，并走通一批真实 triage 后才允许重新标 done。
 
+### F — Business Responsibility & Duty Receipt
+
+- [x] AC-F1: 公共 list→confirm 使用 server-authenticated exact membership snapshot；confirm 期间 source hydration 变化不会让旧列表漂移，late members 不被追溯签署。
+- [ ] AC-F2: 每个 bundle 派生五态 responsibility 与 `validExit`；transport-only `routed` 与失效 repair binding 均保持 `unreviewed`，只有 active exact binding 计入 `bound_in_repair`；UI、counts、filters 与原消息 bubble 使用同一投影。（Phase G code ready；等待 production 以同一真实 cohort 复验。）
+- [ ] AC-F3: actionable bundle 只有 terminal、权威 store 复验仍有效的 owner/task/active lease、当前仍 pending 的 proposal 或 explicit blocker 才能完成本班责任；过期绑定保留历史 evidence 但重新进入 duty，可重绑或显式阻塞；recoverable signature request 保持 active，直到独立 signer 完成 exact candidate 或记录 explicit blocker。（Phase G code ready；等待 production 以同一真实 cohort 复验。）
+- [x] AC-F4: source cat 可作为 verified repair owner，但不能 terminal-sign 自己的 signal；持久化 exact candidate 与 signer exclusion，preferred signer / Backup 中断后可由其他合法 signer 恢复。
+- [ ] AC-F5: duty delivery/wake 不完成 watermark；complete 与 incomplete 都更新同一 durable notice 的逐 bundle rich checklist，只有全部 checked 才 complete；scheduler-owned reconcile 在 duty invocation 失败时仍能留下 danger receipt，未完成 batch 不被新 watermark 覆盖。（Phase G code ready；等待 production 以同一真实 cohort 复验。）
+- [x] AC-F6: 真实 `112876b3` failure mode 有 RED→GREEN 回归；focused API/MCP、shared contract、Web 全量与 isolated Redis 6398 DB 15 均有 fresh green evidence。
+- [x] AC-F7: operator 已显式重启 production runtime 并激活真实 duty；2026-08-10 首班 production 验收发现 Phase G blocker，证明 activation gate 已执行但 feature 尚未完成。
+
 ## Key Decisions
 
 | ID | Decision | Why |
@@ -362,6 +424,10 @@ semantic suggestion 只是在 bundle 之上的候选合并层；未命中或 deg
 | KD-9 | semantic layer 后置且可 sunset | 没有真实值班 consumer 时不为不确定效用建 Eval Hub 仪式 |
 | KD-10 | routed 读取 F167 custody truth | transport 成功不等于 owner 接单，F278 不重造第三套 custody |
 | KD-11 | 新报告走 typed capture，legacy parser 有界兼容 | 相同字节可能既是教学示例也是真实报告，不能靠 Markdown 位置猜意图或删历史 |
+| KD-12 | responsibility 是 event log 的纯读业务投影 | disposition 事件保留历史语义，surface 不再用事件名猜责任是否已完成 |
+| KD-13 | list snapshot 由服务端签名并在 confirm 验证 | confirmation 消费用户实际看过的成员，source hydration 变化不能改写审阅集合 |
+| KD-14 | repair owner 与 terminal signer 分离 | owner 可以等于 source；独立签署约束只排除 source signer，且不能依赖单个 Backup invocation |
+| KD-15 | duty completion 以 durable rich receipt 为准 | messenger delivery 只证明信使成功；逐 bundle valid exit 才证明本班责任完成 |
 
 ## Review Gate
 
@@ -377,3 +443,4 @@ semantic suggestion 只是在 bundle 之上的候选合并层；未命中或 deg
 - Phase E docs content review：Fable 5 对 bundle 纯读投影、O(1)+exceptions、duty fail-loud、F167 authority 与无第三 ledger/eval 域逐项 PASS（`0001785419651028-000210-65a308b8`）。
 - Phase E implementation exact-HEAD review：Kimi 对 PR #3303 `229f339982c5646b8ccd45a436f3abec2e3f2514` APPROVE；reconciliation、strict parser、bundle fan-out、duty/F167/UI 均无阻塞 finding（`0001785429107743-000571-ce98a056`）。
 - Phase E post-merge vision guard：Opus 4.7 对 AC-E1..E7 PASS；AC-E8 明确保留为 operator activation gate（`0001785429890132-000581-1dbbd163`）。
+- Phase F 独立 review gate：唯一 reviewer 为 Opus 5；必须 exact-HEAD APPROVE 后才能进入 merge-gate，不追加第二轮 cloud AI review。合入不等于 runtime activation。

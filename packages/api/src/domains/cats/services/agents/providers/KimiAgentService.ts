@@ -11,6 +11,7 @@ import {
 } from '@cat-cafe/shared';
 import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
+import { estimateCostFromTokens } from '../../../../../config/model-pricing.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
@@ -316,6 +317,12 @@ export class KimiAgentService implements AgentService {
       let sawThinking = false;
       let emittedImageCapability = false;
       let hadCliError = false;
+      // clowder-ai#1197 review (Terra P1): cost estimation is only allowed
+      // from an immutable raw cost basis captured from usage/stats actually
+      // emitted by THIS invocation — never from post-enrichment
+      // metadata.usage (the session snapshot writes lastTurnInputTokens for
+      // health display; it is not verified billable turn telemetry).
+      let rawCostBasis: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number } | undefined;
       const cliOpts = {
         command: kimiCommand,
         args,
@@ -481,7 +488,17 @@ export class KimiAgentService implements AgentService {
         }
 
         const usage = parseUsage(msg.usage) ?? parseUsage(msg.stats);
-        if (usage) metadata.usage = { ...(metadata.usage ?? {}), ...usage };
+        if (usage) {
+          metadata.usage = { ...(metadata.usage ?? {}), ...usage };
+          // Capture the raw billable fields BEFORE any snapshot enrichment
+          // can touch metadata.usage. Latest non-null value per field wins,
+          // mirroring the merge semantics above.
+          rawCostBasis = {
+            inputTokens: usage.inputTokens ?? usage.lastTurnInputTokens ?? rawCostBasis?.inputTokens,
+            outputTokens: usage.outputTokens ?? rawCostBasis?.outputTokens,
+            cacheReadTokens: usage.cacheReadTokens ?? rawCostBasis?.cacheReadTokens,
+          };
+        }
 
         const messageSessionId = readSessionIdFromMessage(msg);
         if (messageSessionId && messageSessionId !== rejectedResumeSessionId) {
@@ -596,6 +613,40 @@ export class KimiAgentService implements AgentService {
           }
         } catch {
           // best-effort snapshot enrichment only
+        }
+      }
+
+      // clowder-ai#1197: Kimi CLI never reports costUsd. Estimate an
+      // API-equivalent cost from the pricing table (same pattern as Codex).
+      // Keyed by effectiveModel (= metadata.model, what the client actually
+      // reports); unknown aliases return null and stay unpriced — token
+      // telemetry still shows, no guessing.
+      //
+      // Review gates (Terra, cat-cafe#3479):
+      //   1. Estimate only from the immutable raw cost basis captured above,
+      //      and only when that raw record itself carries billable fields
+      //      (input or last-turn input, plus output). stats carrying only
+      //      total/context tokens do NOT qualify, and the post-enrichment
+      //      snapshot lastTurnInputTokens is never read for cost.
+      //   2. Skip estimation when the raw record reports cached input:
+      //      whether Kimi's cached_input_tokens is a subset of input_tokens
+      //      (OpenAI-shaped) is NOT documented by any official schema and we
+      //      hold no verified live sample. Until one is captured, cache-split
+      //      arithmetic would rest on an unproven input contract — omit cost.
+      const rawInput = rawCostBasis?.inputTokens;
+      const rawOutput = rawCostBasis?.outputTokens;
+      const rawCachedInput = rawCostBasis?.cacheReadTokens ?? 0;
+      if (
+        rawInput != null &&
+        rawOutput != null &&
+        rawCachedInput === 0 &&
+        metadata.usage &&
+        metadata.usage.costUsd == null
+      ) {
+        const estimatedCost = estimateCostFromTokens(effectiveModel, rawInput, rawOutput);
+        if (estimatedCost != null) {
+          metadata.usage.costUsd = estimatedCost;
+          metadata.usage.costEstimated = true;
         }
       }
 

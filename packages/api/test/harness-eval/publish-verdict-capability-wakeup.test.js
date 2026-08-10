@@ -251,10 +251,16 @@ sla:
     rmSync(join(root, '..', 'cw-e2e-nofound-iso'), { recursive: true, force: true });
   });
 
-  it('returns 404 no_trials_in_window when provider yields zero trials (PR-2 4xx mapping)', async () => {
+  // PR #3495: zero-trial keep_observe now succeeds with no-data confidence
+  // (replaces old 404 no_trials_in_window assertion — adapter-level test covers
+  // the actionable-verdict throw path; E2E validates full handler → generator flow)
+  it('zero-trial keep_observe succeeds with no-data confidence (PR #3495)', async () => {
     const emptyProvider = { resolve: async () => [] };
     const cwGenerator = createCapabilityWakeupGeneratorAdapter(emptyProvider);
-    const mockGitPublisher = createMockGitPublisher('cw-e2e-empty2-iso');
+    const mockGitPublisher = createMockGitPublisher('cw-e2e-empty2-iso', {
+      commitSha: 'cw-zero-trial-sha',
+      prUrl: 'https://github.com/zts212653/clowder-ai/pull/9001',
+    });
     mkdirSync(join(root, '..', 'cw-e2e-empty2-iso', 'docs', 'harness-feedback'), { recursive: true });
 
     const result = await handlePublishVerdict(
@@ -273,9 +279,11 @@ sla:
         ownerUserId: 'default-user',
       },
     );
-    assert.ok('error' in result);
-    assert.equal(result.status, 404);
-    assert.equal(result.error, 'no_trials_in_window');
+
+    assert.ok(!('error' in result), `expected success, got: ${JSON.stringify(result)}`);
+    assert.equal(result.commitSha, 'cw-zero-trial-sha');
+    assert.equal(result.verdictPath, 'docs/harness-feedback/verdicts/vhp-cw-empty2.md');
+    assert.equal(result.bundleDir, 'docs/harness-feedback/bundles/vhp-cw-empty2');
 
     rmSync(join(root, '..', 'cw-e2e-empty2-iso'), { recursive: true, force: true });
   });
@@ -307,7 +315,10 @@ sla:
     assert.match(result.detail, /eval:capability-wakeup/);
   });
 
-  it('returns 404 when cw provider yields zero trials (no_trials_in_window propagates)', async () => {
+  // PR #3495: actionable verdicts (fix/build/delete_sunset) are still blocked by
+  // measurement_validity_gate when domain is keep_observe_only. This validates the
+  // gate → 409 path at E2E level (adapter-level zero-trial throw tested separately).
+  it('returns 409 measurement_validity_gate when actionable verdict blocked by keep_observe_only gate', async () => {
     const emptyProvider = { resolve: async () => [] };
     const cwGenerator = createCapabilityWakeupGeneratorAdapter(emptyProvider);
     const mockGitPublisher = createMockGitPublisher('cw-e2e-empty-iso');
@@ -316,7 +327,7 @@ sla:
     const result = await handlePublishVerdict(
       { harnessFeedbackRoot: root, gitPublisher: mockGitPublisher, generator: cwGenerator },
       {
-        packet: buildCwPacket({ id: 'vhp-cw-empty' }),
+        packet: buildCwPacket({ id: 'vhp-cw-empty', verdict: 'fix' }),
         domain: 'eval:capability-wakeup',
         catId: 'opus-47',
         sourceRefs: {
@@ -330,11 +341,9 @@ sla:
       },
     );
     assert.ok('error' in result);
-    // cloud R5 P2 (PR-2): updated from 500 generator_failed → 404 no_trials_in_window
-    // (user-correctable input error, not server failure).
-    assert.equal(result.status, 404);
-    assert.equal(result.error, 'no_trials_in_window');
-    assert.match(result.detail, /no_trials_in_window/);
+    assert.equal(result.status, 409);
+    assert.equal(result.error, 'measurement_validity_gate');
+    assert.match(result.detail, /keep_observe_only/);
 
     rmSync(join(root, '..', 'cw-e2e-empty-iso'), { recursive: true, force: true });
   });

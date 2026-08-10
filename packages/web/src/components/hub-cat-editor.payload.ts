@@ -145,7 +145,13 @@ export function buildContextBudget(form: HubCatEditorFormState) {
   };
 }
 
-export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | null) {
+export interface CatPayloadContext {
+  accountAuthType?: 'oauth' | 'api_key' | null;
+  /** Rollback writes the original semantic value even when it matches the current read model. */
+  forceServiceTier?: boolean;
+}
+
+export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | null, context: CatPayloadContext = {}) {
   const contextBudget = buildContextBudget(form);
   const hasExistingBudget = Boolean(cat?.contextBudget);
   const contextBudgetPatch =
@@ -169,6 +175,12 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
     cliFields.effort = trimmedCliEffort;
   } else if (cat?.cli?.effort) {
     cliFields.effort = null as null;
+  }
+  const nextServiceTier = form.codexSpeed ?? '';
+  const currentServiceTier = cat?.cli?.serviceTier ?? '';
+  const serviceTierEligible = form.clientId === 'openai' && context.accountAuthType === 'oauth' && !form.acpEnabled;
+  if (serviceTierEligible && (context.forceServiceTier || nextServiceTier !== currentServiceTier)) {
+    cliFields.serviceTier = nextServiceTier || (null as null);
   }
   // F254 D2: per-cat Codex carrier override. Only meaningful when the cat
   // actually dispatches through the local Codex CLI — generic ACP wins over
@@ -238,8 +250,8 @@ function normalizeOptionalText(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-export function buildCatPatchPayload(form: HubCatEditorFormState, cat: CatData) {
-  const payload = buildCatPayload(form, cat) as Record<string, unknown>;
+export function buildCatPatchPayload(form: HubCatEditorFormState, cat: CatData, context: CatPayloadContext = {}) {
+  const payload = buildCatPayload(form, cat, context) as Record<string, unknown>;
 
   if (form.clientId === cat.clientId) {
     delete payload.clientId;

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -24,6 +24,26 @@ function run(cmd, args, cwd, extraEnv = {}) {
       ...extraEnv,
     },
   });
+}
+
+function runResult(cmd, args, cwd, extraEnv = {}) {
+  const result = spawnSync(cmd, args, {
+    cwd,
+    encoding: 'utf-8',
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'Clowder AI Test',
+      GIT_AUTHOR_EMAIL: 'cat-cafe@example.com',
+      GIT_COMMITTER_NAME: 'Clowder AI Test',
+      GIT_COMMITTER_EMAIL: 'cat-cafe@example.com',
+      ...extraEnv,
+    },
+  });
+  return {
+    status: result.status,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  };
 }
 
 function stripAnsi(text) {
@@ -112,14 +132,14 @@ function captureAdvanceFailure(repoRoot) {
   }
 }
 
-function makePlanFixture(files) {
+function makePlanFixture(files, pr = {}) {
   const fixture = makeFixture();
   const mockPrJson = JSON.stringify(
     {
       title: 'test high-risk intake plan',
-      state: 'MERGED',
+      state: pr.state ?? 'MERGED',
       author: { login: 'contributor' },
-      mergedAt: '2026-04-24T20:00:00Z',
+      mergedAt: Object.hasOwn(pr, 'mergedAt') ? pr.mergedAt : '2026-04-24T20:00:00Z',
       mergeCommit: { oid: '1111111111111111111111111111111111111111' },
       files: files.map((path) => ({ path })),
     },
@@ -168,6 +188,19 @@ function runPlan(repoRoot, extraEnv = {}) {
   return run('bash', ['scripts/intake-from-opensource.sh', '--pr', '777', '--mode=plan'], repoRoot, extraEnv);
 }
 
+function runRiskCheck(repoRoot, extraEnv = {}) {
+  return run('bash', ['scripts/intake-from-opensource.sh', '--pr', '777', '--mode=risk-check'], repoRoot, extraEnv);
+}
+
+function captureRiskCheckFailure(repoRoot, extraEnv = {}) {
+  try {
+    runRiskCheck(repoRoot, extraEnv);
+    assert.fail('expected stateful migration risk-check to fail closed');
+  } catch (error) {
+    return stripAnsi(String(error.stdout || ''));
+  }
+}
+
 function commitFile(repoRoot, filePath, content, message) {
   writeFileSync(join(repoRoot, filePath), content, 'utf-8');
   git(repoRoot, 'add', filePath);
@@ -182,6 +215,70 @@ describe('intake-from-opensource.sh --mode=plan high-risk guard', () => {
     while (fixtures.length > 0) {
       rmSync(fixtures.pop(), { recursive: true, force: true });
     }
+  });
+
+  it('raises a 1224-class quarantine for a cross-consumer persistent-state migration', () => {
+    const fixture = makePlanFixture([
+      'packages/api/src/domains/cats/services/stores/cursor.ts',
+      'packages/api/src/domains/cats/services/stores/cursor-activation.ts',
+      'packages/api/src/domains/cats/services/stores/ports/DeliveryCursorStore.ts',
+      'packages/api/src/domains/cats/services/stores/ports/MessageStore.ts',
+      'packages/api/src/domains/cats/services/stores/redis/RedisMessageStore.ts',
+      'packages/api/src/domains/cats/services/stores/redis/redis-visibility-lua-scripts.ts',
+      'packages/shared/src/utils/redis.ts',
+      'packages/api/src/domains/cats/services/freshness/FreshnessGateService.ts',
+      'packages/api/src/domains/cats/services/freshness/ThreadUnseenChecker.ts',
+      'packages/api/src/routes/threads.ts',
+      'packages/api/scripts/persist-dormant-cursors.mjs',
+      'packages/api/test/cursor-activation-gate.test.js',
+    ]);
+    fixtures.push(fixture.sandboxRoot);
+
+    const output = stripAnsi(runPlan(fixture.repoRoot, { PATH: `${fixture.mockBin}:${process.env.PATH}` }));
+
+    assert.match(output, /STATEFUL MIGRATION QUARANTINE/);
+    assert.match(output, /1224-class/);
+    assert.match(output, /minimum 7-day source quarantine/i);
+    assert.match(output, /historical-state replay/i);
+  });
+
+  it('allows a pre-merge risk-check for an open PR and fails closed on 1224-class risk', () => {
+    const fixture = makePlanFixture(
+      [
+        'packages/api/src/domains/cats/services/stores/cursor.ts',
+        'packages/api/src/domains/cats/services/stores/redis/RedisMessageStore.ts',
+        'packages/api/src/domains/cats/services/stores/redis/redis-visibility-lua-scripts.ts',
+        'packages/shared/src/utils/redis.ts',
+        'packages/api/src/domains/cats/services/freshness/FreshnessGateService.ts',
+        'packages/api/src/routes/threads.ts',
+        'packages/api/src/config/env-registry.ts',
+        'packages/api/scripts/persist-dormant-cursors.mjs',
+        'packages/api/test/cursor-order.test.js',
+        'packages/api/test/cursor-activation-gate.test.js',
+      ],
+      { state: 'OPEN', mergedAt: null },
+    );
+    fixtures.push(fixture.sandboxRoot);
+
+    const output = captureRiskCheckFailure(fixture.repoRoot, {
+      PATH: `${fixture.mockBin}:${process.env.PATH}`,
+    });
+
+    assert.match(output, /STATEFUL MIGRATION QUARANTINE/);
+    assert.match(output, /HOLD.*split.*contract/i);
+  });
+
+  it('does not quarantine an isolated store change without downstream consumer migration', () => {
+    const fixture = makePlanFixture(
+      ['packages/api/src/domains/example/stores/RedisExampleStore.ts', 'packages/api/test/example-store.test.js'],
+      { state: 'OPEN', mergedAt: null },
+    );
+    fixtures.push(fixture.sandboxRoot);
+
+    const output = stripAnsi(runRiskCheck(fixture.repoRoot, { PATH: `${fixture.mockBin}:${process.env.PATH}` }));
+
+    assert.doesNotMatch(output, /STATEFUL MIGRATION QUARANTINE/);
+    assert.match(output, /No 1224-class stateful migration risk detected/);
   });
 
   it('flags high-risk files separately from safe cherry-pick files', () => {
@@ -759,6 +856,8 @@ function makeHookFixture() {
   mkdirSync(join(repoRoot, 'node_modules', '.bin'), { recursive: true });
   writeFileSync(join(repoRoot, 'node_modules', '.bin', 'biome'), '#!/bin/bash\nexit 0\n');
   chmodSync(join(repoRoot, 'node_modules', '.bin', 'biome'), 0o755);
+  mkdirSync(join(repoRoot, 'node_modules', '@biomejs', 'biome'), { recursive: true });
+  writeFileSync(join(repoRoot, 'node_modules', '@biomejs', 'biome', 'package.json'), '{"name":"@biomejs/biome"}\n');
 
   // Install intake script
   mkdirSync(join(repoRoot, 'scripts'), { recursive: true });
@@ -792,6 +891,29 @@ function makeHookFixture() {
 
 describe('pre-commit hook brand guard (--from-index)', () => {
   const fixtures = [];
+  const homeStateMigrationFiles = [
+    'packages/api/src/domains/cats/services/stores/ports/DeliveryCursorStore.ts',
+    'packages/api/src/domains/cats/services/stores/ports/MessageStore.ts',
+    'packages/api/src/domains/cats/services/stores/ports/ThreadReadStateStore.ts',
+    'packages/api/src/domains/cats/services/stores/redis/RedisMessageStore.ts',
+    'packages/api/src/domains/cats/services/stores/redis/RedisThreadReadStateStore.ts',
+    'packages/shared/src/utils/redis.ts',
+    'packages/api/src/domains/cats/services/duty-briefing/collectDutyBriefingInput.ts',
+    'packages/api/src/domains/cats/services/freshness/ThreadUnseenChecker.ts',
+    'packages/api/src/domains/cats/services/freshness/checkFreshnessForPostMessage.ts',
+    'packages/api/src/domains/cats/services/freshness/checkStreamOutputFreshness.ts',
+    'packages/api/src/domains/cats/services/freshness/createFreshnessReinvokeCheck.ts',
+    'packages/api/src/routes/threads.ts',
+  ];
+
+  function stageStateMigrationFiles(repoRoot) {
+    for (const relPath of homeStateMigrationFiles) {
+      const absPath = join(repoRoot, relPath);
+      mkdirSync(join(absPath, '..'), { recursive: true });
+      writeFileSync(absPath, '// staged home state-migration repair fixture\n', 'utf-8');
+    }
+    git(repoRoot, 'add', ...homeStateMigrationFiles);
+  }
 
   afterEach(() => {
     while (fixtures.length > 0) {
@@ -821,6 +943,49 @@ describe('pre-commit hook brand guard (--from-index)', () => {
     }
   });
 
+  it('warns without blocking a home-authored 1224-shaped repair through the real pre-commit path', () => {
+    const f = makeHookFixture();
+    fixtures.push(f.sandboxRoot);
+    stageStateMigrationFiles(f.repoRoot);
+
+    const result = runResult('git', ['commit', '-m', 'repair home state migration'], f.repoRoot);
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    assert.equal(result.status, 0, output);
+    assert.match(output, /STATEFUL MIGRATION QUARANTINE/);
+    assert.match(output, /advisory.*commit is not blocked/i);
+  });
+
+  it('keeps the same staged shape blocked for explicit inbound validation', () => {
+    const f = makeHookFixture();
+    fixtures.push(f.sandboxRoot);
+    stageStateMigrationFiles(f.repoRoot);
+
+    const result = runResult(
+      'bash',
+      ['scripts/intake-from-opensource.sh', '--validate-inbound', '--from-index'],
+      f.repoRoot,
+    );
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    assert.equal(result.status, 2, output);
+    assert.match(output, /STATEFUL MIGRATION QUARANTINE/);
+    assert.match(output, /staged migration blocked before commit/i);
+  });
+
+  it('allows an isolated staged store change through the same pre-commit path', () => {
+    const f = makeHookFixture();
+    fixtures.push(f.sandboxRoot);
+    const relPath = 'packages/api/src/domains/example/ExampleStore.ts';
+    const absPath = join(f.repoRoot, relPath);
+    mkdirSync(join(absPath, '..'), { recursive: true });
+    writeFileSync(absPath, 'export const example = true;\n', 'utf-8');
+    git(f.repoRoot, 'add', relPath);
+
+    const output = git(f.repoRoot, 'commit', '-m', 'isolated store change');
+    assert.match(output, /isolated store change/);
+  });
+
   it('allows commit when index has good brand values', () => {
     const f = makeHookFixture();
     fixtures.push(f.sandboxRoot);
@@ -839,6 +1004,10 @@ describe('pre-commit hook brand guard (--from-index)', () => {
     assert.match(output, /good brand commit/);
   });
 });
+
+function fixtureFilePath(file) {
+  return typeof file === 'string' ? file : file.path;
+}
 
 function makeRecordFixture(mock = {}) {
   const fixture = makeFixture();
@@ -934,13 +1103,17 @@ function makeRecordFixture(mock = {}) {
   const mockTargetPrJson = JSON.stringify(
     {
       state: mock.targetPrState ?? 'MERGED',
+      mergedAt: mock.targetMergedAt ?? '2026-04-24T20:00:00Z',
       mergeCommit: { oid: mock.targetMergeSha ?? '1111111111111111111111111111111111111111' },
     },
     null,
     2,
   );
+  const mockTargetPrFileList = (mock.targetPrFiles ?? [{ path: 'packages/web/src/components/hub-accounts.view.ts' }])
+    .map(fixtureFilePath)
+    .join('\n');
   const mockAbsorbPrFileList = (mock.absorbPrFiles ?? [{ path: 'packages/web/src/components/hub-accounts.view.ts' }])
-    .map((file) => (typeof file === 'string' ? file : file.path))
+    .map(fixtureFilePath)
     .join('\n');
 
   const mockBin = join(fixture.sandboxRoot, 'mock-bin');
@@ -999,6 +1172,14 @@ FILES
 fi
 
 if [ "\${1:-}" = "api" ]; then
+  for arg in "$@"; do
+    if [[ "$arg" =~ ^repos/zts212653/clowder-ai/pulls/[0-9]+/files$ ]]; then
+      cat <<'FILES'
+${mockTargetPrFileList}
+FILES
+      exit 0
+    fi
+  done
   path="\${2:-}"
   if [[ "$path" =~ ^repos/zts212653/cat-cafe/issues/comments/ ]]; then
     cat <<'JSON'
@@ -1174,6 +1355,113 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
     while (fixtures.length > 0) {
       rmSync(fixtures.pop(), { recursive: true, force: true });
     }
+  });
+
+  const statefulMigrationFiles = [
+    'packages/api/src/domains/cats/services/stores/cursor.ts',
+    'packages/api/src/domains/cats/services/stores/redis/RedisMessageStore.ts',
+    'packages/api/src/domains/cats/services/stores/redis/redis-visibility-lua-scripts.ts',
+    'packages/shared/src/utils/redis.ts',
+    'packages/api/src/domains/cats/services/freshness/FreshnessGateService.ts',
+    'packages/api/src/routes/threads.ts',
+    'packages/api/scripts/persist-dormant-cursors.mjs',
+  ];
+
+  it('blocks same-day absorption of a 1224-class stateful migration', () => {
+    const f = makeRecordFixture({
+      targetMergedAt: new Date().toISOString(),
+      targetPrFiles: statefulMigrationFiles,
+    });
+    fixtures.push(f.sandboxRoot);
+
+    const error = captureRecordFailure(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#pullrequestreview-789',
+      ],
+      { PATH: `${f.mockBin}:${process.env.PATH}` },
+    );
+
+    assert.match(stripAnsi(String(error.stdout || '')), /minimum 7-day source quarantine/i);
+  });
+
+  it('does not allow the historical backfill escape hatch to bypass 1224-class quarantine', () => {
+    const f = makeRecordFixture({ targetPrFiles: statefulMigrationFiles });
+    fixtures.push(f.sandboxRoot);
+
+    const error = captureRecordFailure(f.repoRoot, ['--pr', '495', '--decision', 'absorbed', '--skip-absorbed-guard'], {
+      PATH: `${f.mockBin}:${process.env.PATH}`,
+    });
+
+    assert.match(stripAnsi(String(error.stdout || '')), /cannot use --skip-absorbed-guard/i);
+  });
+
+  it('requires historical, mixed-version, and rollback evidence after quarantine', () => {
+    const f = makeRecordFixture({ targetPrFiles: statefulMigrationFiles });
+    fixtures.push(f.sandboxRoot);
+
+    const error = captureRecordFailure(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#pullrequestreview-789',
+      ],
+      { PATH: `${f.mockBin}:${process.env.PATH}` },
+    );
+
+    assert.match(stripAnsi(String(error.stdout || '')), /missing mandatory migration evidence/i);
+  });
+
+  it('accepts a quarantined stateful migration only with the three evidence markers', () => {
+    const f = makeRecordFixture({
+      targetPrFiles: statefulMigrationFiles,
+      reviewBody: 'APPROVE',
+      absorbPrBody: [
+        'Closes #1234',
+        'Source: clowder-ai#495',
+        'Historical-state replay: PASS',
+        'Mixed-version consumer matrix: PASS',
+        'Rollback/off-mode semantics: PASS',
+      ].join('\n'),
+    });
+    fixtures.push(f.sandboxRoot);
+
+    const output = runRecord(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#pullrequestreview-789',
+      ],
+      { PATH: `${f.mockBin}:${process.env.PATH}` },
+    );
+
+    assert.match(stripAnsi(output), /1224-class quarantine detected/);
+    assert.match(stripAnsi(output), /Absorbed intake strict guard passed/);
   });
 
   it('accepts Intent Issue with English decision table header', () => {

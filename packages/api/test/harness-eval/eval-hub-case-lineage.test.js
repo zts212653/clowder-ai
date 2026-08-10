@@ -97,6 +97,44 @@ function event(type, verdictId, extra = {}) {
 }
 
 describe('F266 Eval Hub stable case lineage', () => {
+  it('keeps unresolved feature-thread responsibility visible as an actionable tracked blocker', async (t) => {
+    const harnessFeedbackRoot = setupRoot(t);
+    const events = [
+      event('verdict_cycle_observed', verdictIds[0], { cycleCreatedAt: '2026-08-01T00:00:00.000Z' }),
+      event('responsibility_blocked', verdictIds[0], {
+        reasonCode: 'feature_thread_not_found',
+        featureId: 'F266',
+        ownerCatId: 'codex-sol',
+        candidateThreadIds: [],
+        refs: [ref('other', 'feature-thread-resolution:F266:feature_thread_not_found')],
+      }),
+    ];
+    const summary = {
+      generatedAt: '2026-08-09T00:00:00.000Z',
+      counts: { total: 2, actionable: 2, keepObserve: 0, stale: 2, registeredDomains: 1 },
+      domains: [],
+      items: verdictIds.map(item),
+    };
+
+    const enriched = await enrichEvalHubLifecycle(summary, {
+      harnessFeedbackRoot,
+      eventLog: { read: async (subjectId) => (subjectId === caseId ? structuredClone(events) : []) },
+    });
+
+    assert.equal(enriched.items.length, 1);
+    assert.equal(enriched.items[0].lifecycle.closureStatus, 'open');
+    assert.deepEqual(enriched.items[0].lifecycle.responsibilityBlocker, {
+      eventId: `responsibility_blocked:${verdictIds[0]}`,
+      reasonCode: 'feature_thread_not_found',
+      featureId: 'F266',
+      ownerCatId: 'codex-sol',
+      candidateThreadIds: [],
+    });
+    assert.equal(enriched.items[0].lifecycle.taskId, undefined);
+    assert.equal(enriched.items[0].lifecycle.leaseId, undefined);
+    assert.equal(enriched.counts.actionable, 1);
+  });
+
   it('renders one responsibility card for repeated verdict cycles in the same active case', async (t) => {
     const harnessFeedbackRoot = setupRoot(t);
     const events = [
@@ -129,6 +167,8 @@ describe('F266 Eval Hub stable case lineage', () => {
     assert.equal(enriched.items[0].lifecycle.taskId, 'task-case-cycle');
     assert.equal(enriched.items[0].lifecycle.leaseId, 'lease-case-cycle');
     assert.equal(enriched.items[0].lifecycle.closureStatus, 'acknowledged');
+    assert.equal(enriched.items[0].lifecycle.repairDebtStatus, 'active');
+    assert.equal(enriched.items[0].lifecycle.reevalDebtStatus, 'not_scheduled');
     assert.deepEqual(enriched.counts, { total: 1, actionable: 1, keepObserve: 0, stale: 0, registeredDomains: 1 });
   });
 
@@ -183,6 +223,8 @@ describe('F266 Eval Hub stable case lineage', () => {
     assert.equal(enriched.items[0].id, verdictIds[0]);
     assert.equal(enriched.items[0].verdict, 'fix');
     assert.equal(enriched.items[0].lifecycle.closureStatus, 'reeval_pending');
+    assert.equal(enriched.items[0].lifecycle.repairDebtStatus, 'cleared');
+    assert.equal(enriched.items[0].lifecycle.reevalDebtStatus, 'in_progress');
     assert.equal(enriched.domains[0].latestVerdictId, verdictIds[0]);
     assert.equal(enriched.domains[0].latestVerdict, 'fix');
     assert.equal(enriched.counts.actionable, 1);

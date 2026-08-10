@@ -3,6 +3,7 @@ import type {
   McpActionBoundary,
   McpMigrationCandidateInput,
   McpRuntimeProfile,
+  McpStandaloneReason,
   NonEmptyReadonlyArray,
 } from './tool-governance-types.js';
 
@@ -26,18 +27,22 @@ export type McpMigrationSeed = {
   risk: McpActionBoundary['risk'];
   runtimeProfiles: NonEmptyReadonlyArray<McpRuntimeProfile>;
   targetExposure?: 'profile-gated' | 'lazy-discoverable';
+  standaloneReason?: McpStandaloneReason;
 };
 
 type LegacyToolFields = Pick<McpMigrationCandidateInput, 'name' | 'description' | 'inputSchema' | 'handler'>;
 
 type MigrationFactoryDefaults = { resourceFamily?: string; authority?: MigrationAuthority };
+type ResolvedMigrationGovernance = McpMigrationCandidateInput['governance'] & {
+  standaloneReason?: McpStandaloneReason;
+};
 
 function resolveMigrationGovernance(
   sourceFile: string,
   implementationModule: string | undefined,
   defaults: MigrationFactoryDefaults,
   input: LegacyToolFields & { governance: McpMigrationSeed },
-): McpMigrationCandidateInput['governance'] {
+): ResolvedMigrationGovernance {
   const sourceRef = `file:packages/mcp-server/src/tools/${sourceFile}` as const;
   const defaultModule = implementationModule ?? `./tools/${sourceFile.replace(/\.ts$/, '.js')}`;
   const resourceFamily = input.governance.resourceFamily ?? defaults.resourceFamily;
@@ -62,6 +67,7 @@ function resolveMigrationGovernance(
     },
     runtimeProfiles: input.governance.runtimeProfiles,
     ...(input.governance.targetExposure ? { targetExposure: input.governance.targetExposure } : {}),
+    ...(input.governance.standaloneReason ? { standaloneReason: input.governance.standaloneReason } : {}),
   };
 }
 
@@ -173,7 +179,7 @@ export function defineMcpCanonicalFactory(
           domainCell: 'architecture-cell:mcp-surface-governance',
           surface: 'mcp-surface-governance',
         },
-        standaloneReason: {
+        standaloneReason: governance.standaloneReason ?? {
           disposition: 'consolidation-candidate',
           kind: 'same-resource-lifecycle',
           evidenceRef: governance.sourceRef,

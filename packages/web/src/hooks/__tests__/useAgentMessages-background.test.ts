@@ -1370,6 +1370,54 @@ describe('background thread socket handling', () => {
       });
     });
 
+    it('keeps background Sol usage internal and writes the footer when cat telemetry projection throws', () => {
+      const now = Date.now();
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'codex-sol',
+        threadId: 'thread-bg',
+        content: 'done',
+        metadata: { provider: 'openai', model: 'gpt-5.6-sol' },
+        timestamp: now,
+      });
+
+      const telemetrySpy = vi.spyOn(useChatStore.getState(), 'setThreadCatInvocation').mockImplementationOnce(() => {
+        throw new Error('simulated synchronous background cat telemetry projection failure');
+      });
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      try {
+        simulateBackgroundMessage({
+          type: 'system_info',
+          catId: 'codex-sol',
+          threadId: 'thread-bg',
+          content: JSON.stringify({
+            type: 'invocation_usage',
+            catId: 'codex-sol',
+            usage: { inputTokens: 126626, outputTokens: 2017, cacheReadTokens: 125696 },
+            model: 'gpt-5.6-sol',
+            provider: 'openai',
+          }),
+          timestamp: now + 1,
+        });
+        expect(warnSpy).toHaveBeenCalledWith(
+          '[system_info] background internal projection failed; payload suppressed',
+          expect.objectContaining({ catId: 'codex-sol', threadId: 'thread-bg' }),
+        );
+      } finally {
+        telemetrySpy.mockRestore();
+        warnSpy.mockRestore();
+      }
+
+      const messages = useChatStore.getState().getThreadState('thread-bg').messages;
+      expect(messages).toHaveLength(1);
+      expect(messages[0]?.metadata).toMatchObject({
+        model: 'gpt-5.6-sol',
+        provider: 'openai',
+        usage: { inputTokens: 126626, outputTokens: 2017, cacheReadTokens: 125696 },
+      });
+    });
+
     it('binds metadata+usage when tool event arrives before first text chunk', () => {
       const now = Date.now();
 

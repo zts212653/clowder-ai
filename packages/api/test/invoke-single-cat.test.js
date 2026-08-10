@@ -502,6 +502,98 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.ok(warning, 'read failure should be visible as system_info');
   });
 
+  it('F291 resolves thread speed over member default for eligible Codex OAuth invocations', async () => {
+    const optionsSeen = [];
+    const reads = [];
+    const base = catRegistry.getOrThrow('codex-sol').config;
+    const previous = base.cli?.serviceTier;
+    base.cli.serviceTier = 'standard';
+    const deps = {
+      ...makeDeps(),
+      threadStore: {
+        get: () => null,
+        getMemberSpeed(threadId, catId, userId) {
+          reads.push({ threadId, catId, userId });
+          return 'fast';
+        },
+      },
+    };
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'codex-sol', timestamp: Date.now() };
+      },
+    };
+
+    try {
+      await collect(
+        invokeSingleCat(deps, {
+          catId: 'codex-sol',
+          service,
+          prompt: 'test',
+          userId: 'user-thread-speed',
+          threadId: 'thread-speed-runtime',
+          isLastCat: true,
+        }),
+      );
+    } finally {
+      if (previous === undefined) delete base.cli.serviceTier;
+      else base.cli.serviceTier = previous;
+    }
+
+    assert.deepEqual(reads, [{ threadId: 'thread-speed-runtime', catId: 'codex-sol', userId: 'user-thread-speed' }]);
+    assert.equal(optionsSeen[0]?.requestedServiceTier, 'fast');
+  });
+
+  it('F291 falls back to the member default and emits diagnostics when thread speed cannot be loaded', async () => {
+    const optionsSeen = [];
+    const base = catRegistry.getOrThrow('codex-sol').config;
+    const previous = base.cli?.serviceTier;
+    base.cli.serviceTier = 'standard';
+    const deps = {
+      ...makeDeps(),
+      threadStore: {
+        get: () => null,
+        getMemberSpeed() {
+          throw new Error('redis unavailable');
+        },
+      },
+    };
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'codex-sol', timestamp: Date.now() };
+      },
+    };
+
+    let messages;
+    try {
+      messages = await collect(
+        invokeSingleCat(deps, {
+          catId: 'codex-sol',
+          service,
+          prompt: 'test',
+          userId: 'user-thread-speed',
+          threadId: 'thread-speed-runtime',
+          isLastCat: true,
+        }),
+      );
+    } finally {
+      if (previous === undefined) delete base.cli.serviceTier;
+      else base.cli.serviceTier = previous;
+    }
+
+    assert.equal(optionsSeen[0]?.requestedServiceTier, 'standard');
+    assert.ok(
+      messages.some((message) => {
+        if (message.type !== 'system_info' || !message.content) return false;
+        return JSON.parse(message.content).type === 'thread_speed_override_read_failed';
+      }),
+    );
+  });
+
   it('persists task progress snapshot with completed status on done', async () => {
     const { MemoryTaskProgressStore } = await import(
       '../dist/domains/cats/services/agents/invocation/MemoryTaskProgressStore.js'

@@ -503,6 +503,39 @@ describe('QueueProcessor', () => {
     assert.deepEqual(succeededUpdate.arguments[1].successfulCatIds, ['opus']);
   });
 
+  it('preserves the primary child error when every target fails', async () => {
+    const sharedDeps = stubDeps({
+      router: {
+        routeExecution: mock.fn(async function* () {
+          yield {
+            type: 'error',
+            catId: 'codex',
+            error: 'queued_prompt_exposure_rejected:message-same-thread',
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+        }),
+        ackCollectedCursors: mock.fn(async () => {}),
+      },
+    });
+    const sharedProcessor = new QueueProcessor(sharedDeps);
+    enqueueEntry(sharedDeps.queue, { targetCats: ['codex'], source: 'agent', sourceCategory: 'a2a' });
+
+    const result = await sharedProcessor.executeEntry(sharedDeps.queue.markProcessing('t1', 'u1'));
+
+    assert.equal(result.status, 'failed');
+    assert.deepEqual(result.successfulCatIds, []);
+    const failedUpdate = sharedDeps.invocationRecordStore.update.mock.calls.find(
+      (call) => call.arguments[1]?.status === 'failed',
+    );
+    assert.ok(failedUpdate, 'expected the terminal child failure to be durable');
+    assert.equal(failedUpdate.arguments[1].error, 'queued_prompt_exposure_rejected:message-same-thread');
+    assert.equal(
+      sharedDeps.invocationRecordStore.update.mock.calls.some((call) => call.arguments[1]?.status === 'succeeded'),
+      false,
+    );
+  });
+
   it('ADR-042 persists decline while suppressing the marker from the visible stream', async () => {
     const closureStore = new InMemoryFreshnessClosureStore();
     const offered = await closureStore.offerSupplement({
@@ -704,6 +737,126 @@ describe('QueueProcessor', () => {
           { targetCatId: 'opus', invocationId: 'inv-incremental', seenAt: 1_234 },
         ]);
       }
+    });
+
+    it('ignores ordinary prompt history while still requiring exact custody exposure witnesses', async () => {
+      const durableStore = new MessageStore();
+      const durableDeps = stubDeps({ messageStore: durableStore });
+      durableDeps.queueCustodyCoordinator = new QueuedMessageCustodyCoordinator({ messageStore: durableStore });
+      const durableProcessor = new QueueProcessor(durableDeps);
+      const historical = durableStore.append({
+        threadId: 't1',
+        userId: 'u1',
+        catId: 'codex',
+        content: 'ordinary published history',
+        mentions: [],
+        timestamp: 1_000,
+      });
+      const queued = enqueueCustodiedEntry(durableDeps.queue, durableStore, { content: 'new queued body' });
+
+      await durableProcessor.markPromptMessagesSeen({
+        threadId: 't1',
+        userId: 'u1',
+        catId: 'opus',
+        invocationId: 'inv-with-history',
+        messageIds: [historical.id, queued.message.id],
+        seenAt: 1_234,
+      });
+
+      assert.equal(durableStore.getById(historical.id).queueCustody, undefined);
+      assert.deepEqual(durableStore.getById(queued.message.id).queueCustody.bodyExposures, [
+        { targetCatId: 'opus', invocationId: 'inv-with-history', seenAt: 1_234 },
+      ]);
+    });
+
+    it('does not require this invocation to witness a queued carrier owned by another target cat', async () => {
+      const durableStore = new MessageStore();
+      const durableDeps = stubDeps({ messageStore: durableStore });
+      durableDeps.queueCustodyCoordinator = new QueuedMessageCustodyCoordinator({ messageStore: durableStore });
+      const durableProcessor = new QueueProcessor(durableDeps);
+      const foreignTarget = enqueueCustodiedEntry(durableDeps.queue, durableStore, {
+        content: 'queued body for fable5 only',
+        targetCats: ['fable5'],
+      });
+
+      await durableProcessor.markPromptMessagesSeen({
+        threadId: 't1',
+        userId: 'u1',
+        catId: 'opus',
+        invocationId: 'inv-opus-cross-target',
+        messageIds: [foreignTarget.message.id],
+        seenAt: 1_234,
+      });
+
+      const stored = durableStore.getById(foreignTarget.message.id);
+      assert.equal(stored.queueCustody.bodyExposures, undefined);
+      assert.deepEqual(stored.queueCustody.pendingTargetCats, ['fable5']);
+    });
+
+    it('aborts before provider startup when true recall wins the prompt-exposure race', async () => {
+      const durableStore = new MessageStore();
+      const durableDeps = stubDeps({ messageStore: durableStore });
+      const coordinator = new QueuedMessageCustodyCoordinator({ messageStore: durableStore });
+      durableDeps.queueCustodyCoordinator = coordinator;
+      const durableProcessor = new QueueProcessor(durableDeps);
+      const queued = enqueueCustodiedEntry(durableDeps.queue, durableStore, { content: 'body recalled at boundary' });
+
+      const snapshot = durableDeps.queue.getEntrySnapshot('t1', 'u1', queued.entry.id);
+      assert.ok(snapshot);
+      assert.equal(durableDeps.queue.removeEntrySnapshotIfUnchanged(snapshot), true);
+      const recalled = await coordinator.recallMessageToComposerDraft(queued.entry.id, queued.message.id, {
+        ownerUserId: 'u1',
+        threadId: 't1',
+        expectedDraftRevision: 0,
+        merge: 'replace',
+        recalledAt: 1_200,
+      });
+      assert.equal(recalled.kind, 'recalled');
+      assert.equal(recalled.verdict, 'zero_exposure');
+
+      await assert.rejects(
+        durableProcessor.markPromptMessagesSeen({
+          threadId: 't1',
+          userId: 'u1',
+          catId: 'opus',
+          invocationId: 'inv-lost-race',
+          messageIds: [queued.message.id],
+          seenAt: 1_234,
+        }),
+        /queued_prompt_exposure_rejected/,
+      );
+      assert.deepEqual(durableStore.getById(queued.message.id).queueCustody.bodyExposures, undefined);
+    });
+
+    it('classifies recall as exposed when prompt evidence owns the carrier lock first', async () => {
+      const durableStore = new MessageStore();
+      const durableDeps = stubDeps({ messageStore: durableStore });
+      const coordinator = new QueuedMessageCustodyCoordinator({ messageStore: durableStore });
+      durableDeps.queueCustodyCoordinator = coordinator;
+      const durableProcessor = new QueueProcessor(durableDeps);
+      const queued = enqueueCustodiedEntry(durableDeps.queue, durableStore, { content: 'body read before recall' });
+
+      await durableProcessor.markPromptMessagesSeen({
+        threadId: 't1',
+        userId: 'u1',
+        catId: 'opus',
+        invocationId: 'inv-won-race',
+        messageIds: [queued.message.id],
+        seenAt: 1_234,
+      });
+      const recalled = await coordinator.recallMessageToComposerDraft(queued.entry.id, queued.message.id, {
+        ownerUserId: 'u1',
+        threadId: 't1',
+        expectedDraftRevision: 0,
+        merge: 'replace',
+        recalledAt: 1_300,
+      });
+
+      assert.equal(recalled.kind, 'recalled');
+      assert.equal(recalled.verdict, 'exposed');
+      assert.deepEqual(recalled.message.recall.exposures, [
+        { targetCatId: 'opus', invocationId: 'inv-won-race', seenAt: 1_234 },
+      ]);
     });
 
     it('restores the complete multi-target Queue snapshot when custody commit fails after tentative consume', async () => {
@@ -1467,6 +1620,15 @@ describe('QueueProcessor', () => {
         batchDeps.queue.backfillMessageId('t1', 'u1', entry.id, `msg-batch-${index}`);
         return entry;
       });
+      batchDeps.messageStore.getById = mock.fn(async (id) => ({
+        id,
+        threadId: 't1',
+        userId: 'u1',
+        catId: null,
+        content: entries[Number(id.at(-1))].content,
+        mentions: ['opus'],
+        timestamp: Date.now(),
+      }));
 
       await batchProcessor.processNext('t1', 'u1');
       await waitFor(() => routedOptions !== undefined);
@@ -1475,7 +1637,93 @@ describe('QueueProcessor', () => {
         new Set(routedOptions.persistedPromptMessageIds),
         new Set(entries.map((_entry, index) => `msg-batch-${index}`)),
       );
+      assert.deepEqual(
+        routedOptions.persistedPromptMessages.map(({ messageId, content }) => ({ messageId, content })),
+        entries.map((entry, index) => ({ messageId: `msg-batch-${index}`, content: entry.content })),
+      );
       await waitFor(() => batchDeps.queue.list('t1', 'u1').length === 0);
+    });
+
+    it('passes only successfully hydrated Queue members after missing or throwing batch reads', async () => {
+      for (const hydrationFailure of ['missing', 'throw']) {
+        let routedOptions;
+        let custodyAtExposure;
+        const batchDeps = stubDeps({
+          router: {
+            routeExecution: mock.fn(async function* (...args) {
+              routedOptions = args[6];
+              await routedOptions.onPromptMessagesExposed({
+                threadId: 't1',
+                userId: 'u1',
+                catId: 'opus',
+                invocationId: `child-partial-${hydrationFailure}`,
+                messageIds: routedOptions.persistedPromptMessages.map(({ messageId }) => messageId),
+                seenAt: Date.now(),
+              });
+              custodyAtExposure = batchDeps.queue.list('t1', 'u1').map((candidate) => ({
+                messageId: candidate.messageId,
+                seenBy: candidate.queuedSeenByCatIds ?? [],
+              }));
+              yield {
+                type: 'done',
+                catId: 'opus',
+                invocationId: `child-partial-${hydrationFailure}`,
+                timestamp: Date.now(),
+              };
+            }),
+            ackCollectedCursors: mock.fn(async () => {}),
+          },
+        });
+        const batchProcessor = new QueueProcessor(batchDeps);
+        const entries = ['hydrated primary', 'unavailable batched'].map((content, index) => {
+          const entry = enqueueEntry(batchDeps.queue, { content });
+          batchDeps.queue.backfillMessageId('t1', 'u1', entry.id, `msg-partial-${index}`);
+          return entry;
+        });
+        batchDeps.messageStore.getById = mock.fn(async (id) => {
+          if (id === 'msg-partial-1') {
+            if (hydrationFailure === 'throw') throw new Error('hydration unavailable');
+            return null;
+          }
+          return {
+            id,
+            threadId: 't1',
+            userId: 'u1',
+            catId: null,
+            content: entries[0].content,
+            contentBlocks: [
+              {
+                type: 'context_attachment',
+                attachment: { v: 1, id: 'ctx-hydrated', kind: 'thread', threadId: 'thread-hydrated' },
+              },
+            ],
+            mentions: ['opus'],
+            timestamp: Date.now(),
+          };
+        });
+
+        await batchProcessor.processNext('t1', 'u1');
+        await waitFor(() => routedOptions !== undefined);
+
+        assert.deepEqual(
+          routedOptions.persistedPromptMessageIds,
+          ['msg-partial-0', 'msg-partial-1'],
+          `${hydrationFailure}: intended batch census remains diagnostic`,
+        );
+        assert.deepEqual(
+          routedOptions.persistedPromptMessages.map(({ messageId, content }) => ({ messageId, content })),
+          [{ messageId: 'msg-partial-0', content: 'hydrated primary' }],
+          `${hydrationFailure}: only the durable per-message subset may reach routing`,
+        );
+        assert.deepEqual(
+          custodyAtExposure,
+          [
+            { messageId: 'msg-partial-0', seenBy: ['opus'] },
+            { messageId: 'msg-partial-1', seenBy: [] },
+          ],
+          `${hydrationFailure}: unavailable member receives no seen/custody transition`,
+        );
+      }
     });
 
     it('does not immediately re-run a succeeded Queue attempt that never bound exact body exposure', async () => {
@@ -1589,6 +1837,155 @@ describe('QueueProcessor', () => {
         },
       );
       assert.deepEqual(durableDeps.queue.list('t1', 'u1'), []);
+    });
+
+    it('settles the exact child after exposed true recall removed its Queue carrier', async () => {
+      const durableStore = new MessageStore();
+      const durableDeps = stubDeps({ messageStore: durableStore });
+      const { entry, message } = enqueueCustodiedEntry(durableDeps.queue, durableStore);
+      const childInvocationId = 'child-success-after-recall';
+      const seenAt = entry.createdAt + 100;
+      const coordinator = new QueuedMessageCustodyCoordinator({ messageStore: durableStore, now: () => seenAt + 300 });
+      durableDeps.queueCustodyCoordinator = coordinator;
+      const durableProcessor = new QueueProcessor(durableDeps);
+      assert.equal(durableDeps.queue.markQueuedSeen('t1', 'u1', entry.id, 'opus', childInvocationId, seenAt), true);
+      const exposedEntry = durableDeps.queue.getEntrySnapshot('t1', 'u1', entry.id);
+      await coordinator.persistEntry(exposedEntry);
+      assert.equal(durableDeps.queue.removeEntrySnapshotIfUnchanged(exposedEntry), true);
+      const recalled = durableStore.recallMessageToComposerDraft(message.id, {
+        ownerUserId: 'u1',
+        threadId: 't1',
+        expectedDraftRevision: 0,
+        merge: 'replace',
+        recalledAt: seenAt + 200,
+      });
+      assert.equal(recalled.kind, 'recalled');
+      assert.equal(recalled.verdict, 'exposed');
+
+      await durableProcessor.onInvocationComplete(
+        't1',
+        'opus',
+        'succeeded',
+        'parent-success-after-recall',
+        ['opus'],
+        false,
+        { opus: childInvocationId },
+      );
+
+      const settled = durableStore.getById(message.id);
+      assert.equal(settled.content, '');
+      assert.equal(settled.deliveryStatus, 'canceled');
+      assert.equal(settled.recall.exposure, 'seen');
+      assert.deepEqual(settled.queueCustody.handledByCatIds, ['opus']);
+      assert.deepEqual(settled.queueCustody.withdrawnByCatIds ?? [], []);
+      assert.equal(settled.queueCustody.targetOutcomeByCatId.opus.invocationId, childInvocationId);
+      assert.equal(settled.queueCustody.targetOutcomeByCatId.opus.disposition, 'completed_with_turn');
+      const receiptEvent = durableDeps.socketManager.broadcastToRoom.mock.calls.find(
+        (call) => call.arguments[1] === 'message_receipt_updated',
+      );
+      assert.deepEqual(receiptEvent?.arguments, [
+        'thread:t1',
+        'message_receipt_updated',
+        { threadId: 't1', messageId: message.id },
+      ]);
+    });
+
+    it('settles an exposed recalled source through the durable exposure index when visibility no longer lists it', async () => {
+      const durableStore = new MessageStore();
+      const durableDeps = stubDeps({ messageStore: durableStore });
+      const { entry, message } = enqueueCustodiedEntry(durableDeps.queue, durableStore);
+      const childInvocationId = 'child-hidden-after-recall';
+      const seenAt = entry.createdAt + 100;
+      const coordinator = new QueuedMessageCustodyCoordinator({ messageStore: durableStore, now: () => seenAt + 300 });
+      durableDeps.queueCustodyCoordinator = coordinator;
+      assert.equal(durableDeps.queue.markQueuedSeen('t1', 'u1', entry.id, 'opus', childInvocationId, seenAt), true);
+      const exposedEntry = durableDeps.queue.getEntrySnapshot('t1', 'u1', entry.id);
+      await coordinator.persistEntry(exposedEntry);
+      assert.equal(durableDeps.queue.removeEntrySnapshotIfUnchanged(exposedEntry), true);
+      assert.equal(
+        durableStore.recallMessageToComposerDraft(message.id, {
+          ownerUserId: 'u1',
+          threadId: 't1',
+          expectedDraftRevision: 0,
+          merge: 'replace',
+          recalledAt: seenAt + 200,
+        }).kind,
+        'recalled',
+      );
+      durableStore.getByThreadAfter = async () => [];
+      durableStore.getByQueueExposure = async (threadId, targetCatId, invocationId) => {
+        assert.equal(threadId, 't1');
+        assert.equal(targetCatId, 'opus');
+        assert.equal(invocationId, childInvocationId);
+        return [durableStore.getById(message.id)];
+      };
+
+      await new QueueProcessor(durableDeps).onInvocationComplete(
+        't1',
+        'opus',
+        'succeeded',
+        'parent-hidden-after-recall',
+        ['opus'],
+        false,
+        { opus: childInvocationId },
+      );
+
+      const settled = durableStore.getById(message.id);
+      assert.deepEqual(settled.queueCustody.handledByCatIds, ['opus']);
+      assert.equal(settled.queueCustody.targetOutcomeByCatId.opus.invocationId, childInvocationId);
+    });
+
+    it('retains an exact response witness when an exposed recalled child later cancels', async () => {
+      const durableStore = new MessageStore();
+      const durableDeps = stubDeps({ messageStore: durableStore });
+      const { entry, message } = enqueueCustodiedEntry(durableDeps.queue, durableStore);
+      const childInvocationId = 'child-response-after-recall';
+      const seenAt = entry.createdAt + 100;
+      const coordinator = new QueuedMessageCustodyCoordinator({ messageStore: durableStore, now: () => seenAt + 400 });
+      durableDeps.queueCustodyCoordinator = coordinator;
+      assert.equal(durableDeps.queue.markQueuedSeen('t1', 'u1', entry.id, 'opus', childInvocationId, seenAt), true);
+      const exposedEntry = durableDeps.queue.getEntrySnapshot('t1', 'u1', entry.id);
+      await coordinator.persistEntry(exposedEntry);
+      assert.equal(durableDeps.queue.removeEntrySnapshotIfUnchanged(exposedEntry), true);
+      assert.equal(
+        durableStore.recallMessageToComposerDraft(message.id, {
+          ownerUserId: 'u1',
+          threadId: 't1',
+          expectedDraftRevision: 0,
+          merge: 'replace',
+          recalledAt: seenAt + 200,
+        }).kind,
+        'recalled',
+      );
+      const response = durableStore.append({
+        userId: 'u1',
+        threadId: 't1',
+        catId: 'opus',
+        content: 'exact response survived recall',
+        mentions: [],
+        timestamp: seenAt + 300,
+        replyTo: message.id,
+        extra: { stream: { invocationId: 'parent-response-after-recall', turnInvocationId: childInvocationId } },
+      });
+
+      await new QueueProcessor(durableDeps).onInvocationComplete(
+        't1',
+        'opus',
+        'canceled',
+        'parent-response-after-recall',
+        ['opus'],
+        false,
+        { opus: childInvocationId },
+      );
+
+      const settled = durableStore.getById(message.id);
+      assert.equal(settled.content, '');
+      assert.equal(settled.deliveryStatus, 'canceled');
+      assert.equal(settled.queueCustody.targetOutcomeByCatId.opus.disposition, 'responded');
+      assert.deepEqual(settled.queueCustody.targetOutcomeByCatId.opus.consumption, {
+        kind: 'source_response',
+        outputMessageIds: [response.id],
+      });
     });
 
     it('does not treat unbound output or tool activity as source consumption after cancellation', async () => {
@@ -3376,7 +3773,7 @@ describe('QueueProcessor', () => {
   });
 
   it('emits queue_updated(action=completed) after entry is removed from queue', async () => {
-    const entry = enqueueEntry(deps.queue, { targetCats: ['codex'] });
+    const entry = enqueueEntry(deps.queue, { targetCats: ['opus'] });
     deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
 
     const result = await processor.processNext('t1', 'u1');
@@ -3484,6 +3881,11 @@ describe('QueueProcessor', () => {
   // ── P1 fix: chain auto-dequeue ──
 
   it('chain auto-dequeue: entry1 succeed → entry2 auto-starts', async () => {
+    deps.router.routeExecution = mock.fn(async function* (_userId, _content, _threadId, _messageId, targetCats) {
+      for (const catId of targetCats) {
+        yield { type: 'done', catId, timestamp: Date.now() };
+      }
+    });
     // Enqueue two entries from different users
     const e1 = enqueueEntry(deps.queue, { userId: 'u1', content: 'first', targetCats: ['a'] });
     deps.queue.backfillMessageId('t1', 'u1', e1.id, 'msg-1');

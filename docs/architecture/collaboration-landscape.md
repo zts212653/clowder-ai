@@ -2,7 +2,7 @@
 title: "Clowder AI 协同全景 — 人 & 猫 & 猫的协作是怎么发生的"
 doc_kind: architecture
 feature_ids: [F064, F078, F079, F086, F087, F100, F108, F110, F128, F154, F155, F165, F167, F171, F193, F208, F220, F221, F224, F225, F227, F229, F231, F233, F234, F244, F245, F246, F247, F253, F254, F255, F257, F262, F264, F274, F275, F278, F280]
-related_features: [F043, F052, F070, F073, F102, F114, F117, F148, F163, F169, F177, F178, F186, F188, F192, F200, F209, F236, F240, F241, F248, F250, F259, F261, F266, F267, F270, F277, F282, F285, F286, F287]
+related_features: [F043, F052, F070, F073, F102, F114, F117, F148, F163, F169, F177, F178, F186, F188, F192, F200, F209, F236, F240, F241, F248, F250, F259, F261, F266, F267, F270, F277, F282, F285, F286, F287, F290]
 topics: [collaboration, a2a, human-cat, culture, routing, ball-custody, nurturing, taste, profile, attention-budget, teamact, harness-metabolism, memory-collaboration-loop, contract-hardening, control-plane, multi-provider, work-identity]
 created: 2026-06-29
 updated: 2026-08-02

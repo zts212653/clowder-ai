@@ -34,6 +34,7 @@ import {
   cloneQueuedMessageCustody,
   type QueueCustodyTransitionInput,
   type QueuedMessageCustody,
+  terminalizeRecalledQueueCustody,
 } from './queued-message-custody.js';
 // Single source of truth: ThreadStore.ts owns DEFAULT_THREAD_ID
 import { DEFAULT_THREAD_ID } from './ThreadStore.js';
@@ -56,12 +57,83 @@ export function isDelivered(msg: StoredMessage): boolean {
  */
 export { isTimelinePublished } from '../visibility.js';
 
+export type UnresolvedCursorPolicy = 'rescan' | 'empty';
+
 export interface ThreadMessageReadOptions {
   /** Include queued cat-authored speech that is already published to the timeline. */
   includeQueuedCatMessages?: boolean;
   /** Include durable queued user work in the owner's browser timeline only. */
   includeQueuedUserMessages?: boolean;
+  /** Include only owner-visible, content-free tombstones whose body had a proven exposure before recall. */
+  includeRecalledUserMessages?: boolean;
+  /**
+   * Policy for an explicitly supplied v1 cursor whose message hash and
+   * visibility-index member are both gone, or for a malformed persisted token.
+   *
+   * `rescan` (default) preserves #1200 FM-3 at-least-once pagination. Stateful
+   * read/seen consumers use `empty` so indeterminate history is not reclassified
+   * as unread or unseen. An omitted cursor always scans from the beginning.
+   */
+  unresolvedCursorPolicy?: UnresolvedCursorPolicy;
 }
+
+export interface MessageRecallMarker {
+  version: 1;
+  exposure: 'none' | 'seen';
+  recalledAt: number;
+  /** Exact body-exposure witnesses only. Legacy seen flags never manufacture a timestamp. */
+  exposures?: readonly import('./queued-message-custody.js').QueueBodyExposure[];
+}
+
+/** TTL=0 owner-authored composer state. The message body has no second durable copy after recall. */
+export interface OwnerComposerDraft {
+  version: 1;
+  ownerUserId: string;
+  threadId: string;
+  revision: number;
+  text: string;
+  contentBlocks?: readonly MessageContent[];
+  replyTo?: string;
+  updatedAt: number;
+}
+
+export interface PutOwnerComposerDraftInput {
+  expectedRevision: number;
+  text: string;
+  contentBlocks?: readonly MessageContent[];
+  replyTo?: string;
+  updatedAt: number;
+}
+
+export type PutOwnerComposerDraftResult =
+  | { kind: 'updated'; draft: OwnerComposerDraft }
+  | { kind: 'revision_mismatch'; actualRevision: number };
+
+export type ClearOwnerComposerDraftResult =
+  | { kind: 'cleared'; revision: number }
+  | { kind: 'revision_mismatch'; actualRevision: number };
+
+export interface RecallMessageToComposerDraftInput {
+  ownerUserId: string;
+  threadId: string;
+  expectedDraftRevision: number;
+  merge: 'replace' | 'append';
+  recalledAt: number;
+}
+
+export type RecallMessageToComposerDraftResult =
+  | {
+      kind: 'recalled';
+      verdict: 'zero_exposure' | 'exposed';
+      message: StoredMessage;
+      draft: OwnerComposerDraft;
+      insertedRange: { start: number; end: number };
+    }
+  | { kind: 'already_recalled'; message: StoredMessage }
+  | { kind: 'draft_revision_mismatch'; actualRevision: number }
+  | { kind: 'not_found' }
+  | { kind: 'unauthorized' }
+  | { kind: 'not_recallable' };
 
 export interface ThreadUnreadProjectionCursor {
   threadId: string;
@@ -263,6 +335,8 @@ export interface StoredMessage {
   deliveryStatus?: 'queued' | 'delivered' | 'canceled';
   /** F254 ADR-042: TTL-0 execution custody for this exact ordinary queued user message. */
   queueCustody?: QueuedMessageCustody;
+  /** F264 Gap F: content-free terminal recall truth; body custody lives only in owner composer draft. */
+  recall?: MessageRecallMarker;
   /** F121: ID of the message this is replying to (same thread only) */
   replyTo?: string;
   /** ADR-008 D3: Soft delete timestamp (present = deleted) */
@@ -330,7 +404,7 @@ export type HostMessageExtra = Omit<NonNullable<StoredMessage['extra']>, 'plugin
  */
 export type AppendMessageInput = Omit<
   StoredMessage,
-  'id' | 'threadId' | 'deliveredAt' | 'timelineOrderAt' | 'deliveryStatus'
+  'id' | 'threadId' | 'deliveredAt' | 'timelineOrderAt' | 'deliveryStatus' | 'recall'
 > & {
   threadId?: string;
   /** Append may initialize only queued state; terminal delivery metadata belongs to transition methods. */
@@ -493,6 +567,29 @@ export interface IMessageStore {
   ): ThreadObservedAppendResult | Promise<ThreadObservedAppendResult>;
   /** Get a single message by its ID. Returns null if not found. */
   getById(id: string): StoredMessage | null | Promise<StoredMessage | null>;
+  /** Read the persistent owner+thread composer draft. Missing means revision 0. */
+  getOwnerComposerDraft(
+    ownerUserId: string,
+    threadId: string,
+  ): OwnerComposerDraft | null | Promise<OwnerComposerDraft | null>;
+  /** Revision-fenced standalone composer update used before send/discard/recall. */
+  putOwnerComposerDraft(
+    ownerUserId: string,
+    threadId: string,
+    input: PutOwnerComposerDraftInput,
+  ): PutOwnerComposerDraftResult | Promise<PutOwnerComposerDraftResult>;
+  /** Clear only the exact acknowledged revision; a concurrent edit wins. */
+  clearOwnerComposerDraft(
+    ownerUserId: string,
+    threadId: string,
+    expectedRevision: number,
+    clearedAt: number,
+  ): ClearOwnerComposerDraftResult | Promise<ClearOwnerComposerDraftResult>;
+  /** F264 AC-44~46: one CAS transfers body custody, tombstones the message and freezes Queue eligibility. */
+  recallMessageToComposerDraft(
+    id: string,
+    input: RecallMessageToComposerDraftInput,
+  ): RecallMessageToComposerDraftResult | Promise<RecallMessageToComposerDraftResult>;
   getRecent(limit?: number, userId?: string): StoredMessage[] | Promise<StoredMessage[]>;
   /**
    * Return every retained, delivered owner message whose effective timeline time
@@ -535,6 +632,12 @@ export interface IMessageStore {
     limit?: number,
     userId?: string,
     options?: ThreadMessageReadOptions,
+  ): StoredMessage[] | Promise<StoredMessage[]>;
+  /** Content-free durable reverse index used to settle an exact exposed child after recall hides its source. */
+  getByQueueExposure(
+    threadId: string,
+    targetCatId: string,
+    invocationId: string,
   ): StoredMessage[] | Promise<StoredMessage[]>;
   /**
    * Optional storage-native batch projection for Sidebar unread badges.
@@ -676,6 +779,60 @@ export function generateSortableId(timestamp: number): string {
   return `${ts}-${seq}-${suffix}`;
 }
 
+interface RecallDraftProjection {
+  draft: OwnerComposerDraft;
+  insertedRange: { start: number; end: number };
+}
+
+function buildRecallDraft(
+  message: StoredMessage,
+  input: RecallMessageToComposerDraftInput,
+  existingDraft: OwnerComposerDraft | undefined,
+  actualRevision: number,
+): RecallDraftProjection {
+  const appendDraft = input.merge === 'append' ? existingDraft : undefined;
+  const prefix = appendDraft?.text ? `${appendDraft.text}\n\n` : '';
+  const sourceBlocks = message.contentBlocks ? structuredClone(message.contentBlocks) : [];
+  const existingBlocks = appendDraft?.contentBlocks ? structuredClone(appendDraft.contentBlocks) : [];
+  const contentBlocks = [...existingBlocks, ...sourceBlocks];
+  const replyTo = appendDraft?.replyTo ?? message.replyTo;
+  const draft: OwnerComposerDraft = {
+    version: 1,
+    ownerUserId: input.ownerUserId,
+    threadId: input.threadId,
+    revision: actualRevision + 1,
+    text: `${prefix}${message.content}`,
+    ...(contentBlocks.length > 0 ? { contentBlocks } : {}),
+    ...(replyTo ? { replyTo } : {}),
+    updatedAt: input.recalledAt,
+  };
+  return {
+    draft,
+    insertedRange: { start: prefix.length, end: prefix.length + message.content.length },
+  };
+}
+
+function redactRecalledMessage(message: StoredMessage, recall: MessageRecallMarker): void {
+  message.content = '';
+  message.mentions = [];
+  delete message.contentBlocks;
+  delete message.toolEvents;
+  delete message.metadata;
+  delete message.extra;
+  delete message.thinking;
+  delete message.replyTo;
+  message.deliveryStatus = 'canceled';
+  message._tombstone = true;
+  message.recall = recall;
+}
+
+function isRecallableOwnerMessage(message: StoredMessage): boolean {
+  if (message.catId !== null || message._tombstone) return false;
+  return (
+    Boolean(message.queueCustody) && (message.deliveryStatus === 'queued' || message.deliveryStatus === 'delivered')
+  );
+}
+
 export class MessageStore {
   private messages: StoredMessage[] = [];
   private readonly maxMessages: number;
@@ -693,6 +850,8 @@ export class MessageStore {
   private visibilitySeqCounter = 0;
   /** messageId → visibilitySeq. Absent = not yet visible (queued, canceled). */
   private readonly visibilitySeq = new Map<string, number>();
+  /** F264 Gap F: persistent-by-contract in-memory mirror (no TTL or eviction). */
+  private readonly ownerComposerDrafts = new Map<string, OwnerComposerDraft>();
 
   constructor(options?: {
     maxMessages?: number;
@@ -856,6 +1015,107 @@ export class MessageStore {
    */
   getById(id: string): StoredMessage | null {
     return this.messages.find((m) => m.id === id) ?? null;
+  }
+
+  private ownerComposerDraftKey(ownerUserId: string, threadId: string): string {
+    return `${ownerUserId}\u0000${threadId}`;
+  }
+
+  getOwnerComposerDraft(ownerUserId: string, threadId: string): OwnerComposerDraft | null {
+    const draft = this.ownerComposerDrafts.get(this.ownerComposerDraftKey(ownerUserId, threadId));
+    return draft ? structuredClone(draft) : null;
+  }
+
+  putOwnerComposerDraft(
+    ownerUserId: string,
+    threadId: string,
+    input: PutOwnerComposerDraftInput,
+  ): PutOwnerComposerDraftResult {
+    assertValidStoredMessageTimestamp(input.updatedAt);
+    const key = this.ownerComposerDraftKey(ownerUserId, threadId);
+    const existing = this.ownerComposerDrafts.get(key);
+    const actualRevision = existing?.revision ?? 0;
+    if (actualRevision !== input.expectedRevision) {
+      return { kind: 'revision_mismatch', actualRevision };
+    }
+    const draft: OwnerComposerDraft = {
+      version: 1,
+      ownerUserId,
+      threadId,
+      revision: actualRevision + 1,
+      text: input.text,
+      ...(input.contentBlocks ? { contentBlocks: structuredClone(input.contentBlocks) } : {}),
+      ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+      updatedAt: input.updatedAt,
+    };
+    this.ownerComposerDrafts.set(key, draft);
+    return { kind: 'updated', draft: structuredClone(draft) };
+  }
+
+  clearOwnerComposerDraft(
+    ownerUserId: string,
+    threadId: string,
+    expectedRevision: number,
+    clearedAt: number,
+  ): ClearOwnerComposerDraftResult {
+    assertValidStoredMessageTimestamp(clearedAt);
+    const key = this.ownerComposerDraftKey(ownerUserId, threadId);
+    const actualRevision = this.ownerComposerDrafts.get(key)?.revision ?? 0;
+    if (actualRevision !== expectedRevision) return { kind: 'revision_mismatch', actualRevision };
+    const revision = actualRevision + 1;
+    this.ownerComposerDrafts.set(key, {
+      version: 1,
+      ownerUserId,
+      threadId,
+      revision,
+      text: '',
+      updatedAt: clearedAt,
+    });
+    return { kind: 'cleared', revision };
+  }
+
+  recallMessageToComposerDraft(
+    id: string,
+    input: RecallMessageToComposerDraftInput,
+  ): RecallMessageToComposerDraftResult {
+    assertValidStoredMessageTimestamp(input.recalledAt);
+    const msg = this.messages.find((message) => message.id === id);
+    if (!msg) return { kind: 'not_found' };
+    if (msg.userId !== input.ownerUserId || msg.threadId !== input.threadId) return { kind: 'unauthorized' };
+    if (msg.recall) return { kind: 'already_recalled', message: structuredClone(msg) };
+    if (!isRecallableOwnerMessage(msg)) return { kind: 'not_recallable' };
+
+    const draftKey = this.ownerComposerDraftKey(input.ownerUserId, input.threadId);
+    const existingDraft = this.ownerComposerDrafts.get(draftKey);
+    const actualDraftRevision = existingDraft?.revision ?? 0;
+    if (actualDraftRevision !== input.expectedDraftRevision) {
+      return { kind: 'draft_revision_mismatch', actualRevision: actualDraftRevision };
+    }
+
+    const projection = buildRecallDraft(msg, input, existingDraft, actualDraftRevision);
+
+    const custody = msg.queueCustody;
+    const exactExposures = custody?.bodyExposures ? structuredClone(custody.bodyExposures) : [];
+    const wasExposed = exactExposures.length > 0 || (custody?.seenByCatIds.length ?? 0) > 0;
+    if (custody) {
+      msg.queueCustody = terminalizeRecalledQueueCustody(custody, input.recalledAt);
+    }
+    redactRecalledMessage(msg, {
+      version: 1,
+      exposure: wasExposed ? 'seen' : 'none',
+      recalledAt: input.recalledAt,
+      ...(exactExposures.length > 0 ? { exposures: exactExposures } : {}),
+    });
+    if (!wasExposed) this.visibilitySeq.delete(id);
+    this.ownerComposerDrafts.set(draftKey, projection.draft);
+
+    return {
+      kind: 'recalled',
+      verdict: wasExposed ? 'exposed' : 'zero_exposure',
+      message: structuredClone(msg),
+      draft: structuredClone(projection.draft),
+      insertedRange: projection.insertedRange,
+    };
   }
 
   /**
@@ -1073,8 +1333,15 @@ export class MessageStore {
       return a.msg.id < b.msg.id ? -1 : a.msg.id > b.msg.id ? 1 : 0;
     });
 
-    // Parse cursor token (§8.3)
-    const cursor = parseCursor(afterId);
+    // Parse cursor token (§8.3). Generic callers retain strict parser errors;
+    // state projections treat malformed persisted tokens as unresolved evidence.
+    let cursor: ReturnType<typeof parseCursor>;
+    try {
+      cursor = parseCursor(afterId);
+    } catch (error) {
+      if (options?.unresolvedCursorPolicy === 'empty') return [];
+      throw error;
+    }
     if (!cursor) {
       return visible.slice(0, max).map((v) => v.msg);
     }
@@ -1092,12 +1359,26 @@ export class MessageStore {
       return visible.slice(cursorIdx + 1, cursorIdx + 1 + max).map((v) => v.msg);
     }
 
+    if (options?.unresolvedCursorPolicy === 'empty') return [];
+
     // Pruned v1 cursor fallback (§8.4 step 3): full rescan from visibility origin.
     // #1200 codex P1: do NOT filter by `id > cursor.id` — that reintroduces FM-3
     // (lex-ID ordering disease). A far-future message that is later pruned would
     // permanently hide all normally-timestamped messages. Redis rescans from start
     // for pruned cursors; Memory must do the same for FM-4 parity.
     return visible.slice(0, max).map((v) => v.msg);
+  }
+
+  getByQueueExposure(threadId: string, targetCatId: string, invocationId: string): StoredMessage[] {
+    return this.messages
+      .filter(
+        (message) =>
+          message.threadId === threadId &&
+          message.queueCustody?.bodyExposures?.some(
+            (exposure) => exposure.targetCatId === targetCatId && exposure.invocationId === invocationId,
+          ),
+      )
+      .map((message) => structuredClone(message));
   }
 
   /**
@@ -1310,7 +1591,7 @@ export class MessageStore {
    */
   updateExtra(id: string, extra: HostMessageExtra): StoredMessage | null {
     const msg = this.messages.find((m) => m.id === id);
-    if (!msg) return null;
+    if (!msg || msg.recall || msg._tombstone) return null;
     // Strip pluginMessage to prevent bypassing updatePluginMessage()'s
     // revision check — matches Redis store behaviour (codex P2 fix).
     const { pluginMessage: _strip, ...hostOnly } = extra as Record<string, unknown>;
@@ -1375,7 +1656,15 @@ export class MessageStore {
     if (msg.queueCustody.revision !== input.expectedRevision) {
       return { kind: 'revision_mismatch', actualRevision: msg.queueCustody.revision };
     }
-    if (msg.deliveryStatus !== 'queued') throw new Error('queue custody transition requires a queued message');
+    const isExposedRecallSettlement =
+      msg.deliveryStatus === 'canceled' &&
+      msg.recall?.exposure === 'seen' &&
+      msg.queueCustody.status === 'terminal' &&
+      input.next.status === 'terminal' &&
+      input.deliveredAt === undefined;
+    if (msg.deliveryStatus !== 'queued' && !isExposedRecallSettlement) {
+      throw new Error('queue custody transition requires a queued message or exposed recall tombstone');
+    }
     assertQueueCustodyTransition(msg.queueCustody, input);
     msg.queueCustody = cloneQueuedMessageCustody(input.next);
     if (input.deliveredAt !== undefined) {

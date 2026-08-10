@@ -190,7 +190,9 @@ VERIFY 完所有 findings 之后、动手修之前，做一次 failure-mode 判�
 
 ## 修复后确认（硬规则）
 
-**修复完成 ≠ 可以合入。必须回到原 feedback source 确认。**
+**修复完成 ≠ 可以合入。必须回到本轮可验证的 feedback source 确认。** 对本地 review，权威来源是
+**direct review carrier**（直接承载 review 请求、由 lease `predecessorThreadId` 绑定的 thread），不是任务祖先
+thread，也不是第一次误投 verdict 的落点。若二者冲突，停止沿错路级联并回 direct review carrier。
 
 ### 本地 reviewer 复入载体（terminal 之后的新工作）
 
@@ -200,7 +202,7 @@ P1/P2 修复产生的新 exact HEAD 是一轮新的、可执行的 review work�
 
 | Feedback source | 修复后动作 |
 |-----------------|------------|
-| 本地猫 reviewer | `@reviewer` 发送修复确认请求；等 reviewer 明确放行当前 SHA |
+| 本地猫 reviewer | 在 direct review carrier 向 `@reviewer` 发送结构化修复确认请求；等 reviewer 明确放行当前 SHA |
 | cloud / GitHub review | 在 GitHub 回复或标注修复证据，push 新 SHA 后**只重新触发 cloud review**，等 PR tracking / review feedback；不要 @ 本地旧 reviewer |
 | CI / PR check | 修复后 rerun/check gate；若只是外部 check gate，不需要本地 reviewer 续签 |
 | operator / 愿景级 feedback | 回读原始需求；需要价值取舍时带 Decision Packet 给operator |
@@ -229,7 +231,7 @@ Fresh-Context Delta: {N} FC:covered, {M} FC:new, {K} FC:N/A <!-- 仅 review requ
 
 修复完成后（F160 Phase C）：
 - 每个 P1/P2 修复任务 → `cat_cafe_update_task` 状态改为 `done`
-- 回到原 feedback source 确认（硬规则不变）
+- 回到上述可验证 feedback source 确认（本地 review 以 direct review carrier 为准）
 
 **remote review 修了 P1/P2 → 必须 re-trigger remote review，不能自判通过直接合入，也不能把 cloud gate 投射成本地旧 reviewer。**
 

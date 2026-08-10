@@ -61,6 +61,12 @@ function makeHarness(options = {}) {
         tasks.set(id, { ...task, params });
         return true;
       },
+      updateParamsIfCurrent(id, expected, params) {
+        const task = tasks.get(id);
+        if (!task || task.params !== expected) return false;
+        tasks.set(id, { ...task, params });
+        return true;
+      },
       setEnabled(id, enabled) {
         const task = tasks.get(id);
         if (!task) return false;
@@ -193,13 +199,19 @@ describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
     assert.equal(h.tasks.get('hold-ball-task-1').params.holdLifecycle.managedCommand.state, 'dispatch_pending');
     assert.equal(h.appended.length, 1);
 
-    const volatileAttempt = await sweep.runOnce();
-    assert.deepEqual(volatileAttempt, { scanned: 1, recovered: 0, pending: 1 });
+    const graceAttempt = await sweep.runOnce();
+    assert.deepEqual(graceAttempt, { scanned: 1, recovered: 0, pending: 1 });
     let task = h.tasks.get('hold-ball-task-1');
     assert.equal(task.enabled, true, 'an in-memory queue entry cannot retire the durable fallback');
-    assert.equal(task.params.holdLifecycle.managedCommand.state, 'enqueued');
+    assert.equal(task.params.holdLifecycle.managedCommand.state, 'dispatch_pending');
+    assert.equal(h.triggerCalls.length, 1, 'a recent attempt must wait for its durable carrier');
 
     h.setNow(12_000);
+    const volatileAttempt = await sweep.runOnce();
+    assert.deepEqual(volatileAttempt, { scanned: 1, recovered: 0, pending: 1 });
+    assert.equal(h.tasks.get('hold-ball-task-1').params.holdLifecycle.managedCommand.state, 'enqueued');
+
+    h.setNow(14_000);
     const restartedAttempt = await sweep.runOnce();
     assert.deepEqual(restartedAttempt, { scanned: 1, recovered: 0, pending: 1 });
     task = h.tasks.get('hold-ball-task-1');
@@ -219,7 +231,7 @@ describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
     assert.equal(h.tasks.get('hold-ball-task-1').enabled, true, 'bare queued metadata is not recoverable execution');
 
     invocation.status = 'failed';
-    h.setNow(14_000);
+    h.setNow(16_000);
     assert.deepEqual(await sweep.runOnce(), { scanned: 1, recovered: 0, pending: 1 });
     assert.equal(h.tasks.get('hold-ball-task-1').enabled, true, 'failed execution must retain fallback custody');
 

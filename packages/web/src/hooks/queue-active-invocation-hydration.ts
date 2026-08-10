@@ -1,6 +1,7 @@
 import type { FreshnessCarrierCapability } from '@cat-cafe/shared';
 import type { AppServerLifecycleSnapshot } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
+import { resumeInvocationReconciliationAfterHydration } from './invocation-timeout-reconciliation';
 
 /** Canonical `/queue` liveness shape shared by initial hydration and reconnect repair. */
 export interface QueueActiveInvocationSlot {
@@ -74,6 +75,11 @@ export function hydrateQueueActiveInvocationSlots({
       startedAt: slot.startedAt,
     };
   }
+
+  // A five-minute presentation timeout is a rebuildable projection, not a
+  // terminal verdict. If F5 restored an unresolved notice, authoritative
+  // `/queue` identity resumes its InvocationRecord reconciliation immediately.
+  resumeInvocationReconciliationAfterHydration(threadId);
 
   return activeStateSnapshot;
 }

@@ -225,11 +225,19 @@ describe('F193 AC-A4 P1 (codex review): cross_post_message fails closed at MCP l
       threadId: 'thread-target',
       content: 'Release',
       targetCats: ['codex'],
-      coordination: { phase: 'terminal', id: 'coord-test' },
+      coordination: {
+        phase: 'terminal',
+        id: 'coord-test',
+        subjectRef: 'pr:owner/repo#3515',
+      },
     });
 
     assert.equal(result.isError, undefined);
-    assert.deepEqual(requestBody.coordination, { phase: 'terminal', id: 'coord-test' });
+    assert.deepEqual(requestBody.coordination, {
+      phase: 'terminal',
+      id: 'coord-test',
+      subjectRef: 'pr:owner/repo#3515',
+    });
   });
 
   test('accept when content has line-start @', async () => {

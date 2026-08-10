@@ -2,7 +2,7 @@
 
 import type { QueueMessageReceipt, QueueReceiptTarget, QueueReminderAttempt } from '@cat-cafe/shared';
 import type { ChatMessage } from '@/stores/chat-types';
-import { authorIntentLabel, carrierCapabilityLabel } from './message-disposition-presentation';
+import { authorIntentLabel, carrierCapabilityLabel, humanCarrierLabel } from './message-disposition-presentation';
 import { receiptTargetStateLabel } from './queue-receipt-projection';
 
 const REMINDER_STATE_LABEL: Record<QueueReminderAttempt['state'], string> = {
@@ -86,6 +86,19 @@ export function focusInvocationLineage(messages: readonly ChatMessage[], invocat
   window.setTimeout(() => {
     for (const node of nodes) delete node.dataset.lineageFocus;
   }, 3200);
+  return true;
+}
+
+export function focusTurnAbsorptionSummary(messages: readonly ChatMessage[], invocationId: string): boolean {
+  if (typeof document === 'undefined') return false;
+  const dock = [...document.querySelectorAll<HTMLDetailsElement>('details[data-turn-absorption-invocation]')].find(
+    (candidate) => candidate.dataset.turnAbsorptionInvocation === invocationId,
+  );
+  if (!dock) return focusInvocationLineage(messages, invocationId);
+  dock.open = true;
+  dock.dataset.lineageFocus = 'true';
+  dock.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  window.setTimeout(() => delete dock.dataset.lineageFocus, 3200);
   return true;
 }
 
@@ -177,9 +190,14 @@ export function MessageReceiptDock({
                 )}`}</span>
                 {intentLabel && <span data-receipt-author-intent>{intentLabel}</span>}
                 {target.authorIntent?.carrierCapability && (
-                  <span className="text-cafe-muted" data-receipt-carrier-capability>
-                    {carrierCapabilityLabel(target.authorIntent.carrierCapability)}
-                  </span>
+                  <details className="text-cafe-muted" data-receipt-carrier-detail={target.catId}>
+                    <summary className="cursor-pointer select-none inline" data-receipt-carrier-summary={target.catId}>
+                      {humanCarrierLabel(target.authorIntent.carrierCapability)}
+                    </summary>
+                    <span className="block ml-2 mt-0.5" data-receipt-carrier-capability>
+                      {carrierCapabilityLabel(target.authorIntent.carrierCapability)}
+                    </span>
+                  </details>
                 )}
                 {executionKind && (
                   <span

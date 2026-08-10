@@ -30,6 +30,7 @@ export interface ContextBudget {
  * CLI invocation config for a variant
  */
 import type { CliEffortValue } from '../cli-effort.js';
+import type { CodexSpeedValue } from '../codex-speed.js';
 
 export interface CliConfig {
   readonly command: string; // 'claude' | 'codex' | 'agy' | ...
@@ -51,6 +52,8 @@ export interface CliConfig {
    * API rejects it for other clients.
    */
   readonly carrier?: 'exec_json' | 'app_server';
+  /** F291: Codex OAuth request tier. Absent inherits the Codex user config. */
+  readonly serviceTier?: CodexSpeedValue;
 }
 
 /**

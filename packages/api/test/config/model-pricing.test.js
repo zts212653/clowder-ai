@@ -29,6 +29,40 @@ describe('model-pricing', () => {
       }
     });
 
+    it('covers Kimi aliases reported by the client plus raw API ids', () => {
+      // clowder-ai#1197: keys must match metadata.model as reported by the
+      // client — OAuth aliases (kimi-code/*) and API-key pass-through ids.
+      for (const model of [
+        'kimi-code/k3',
+        'kimi-code/k3-256k',
+        'kimi-code/kimi-for-coding',
+        'kimi-code/kimi-for-coding-highspeed',
+        'kimi-k3',
+        'kimi-k2.7-code',
+        'kimi-k2.7-code-highspeed',
+        'kimi-k2.6',
+      ]) {
+        const pricing = getModelPricing(model);
+        assert.ok(pricing, `missing pricing for ${model}`);
+        assert.ok(pricing.source, `missing source url for ${model}`);
+        assert.ok(pricing.verifiedAt, `missing verification date for ${model}`);
+      }
+    });
+
+    it('maps kimi-for-coding alias to the Kimi K2.7 Code price card', () => {
+      const alias = getModelPricing('kimi-code/kimi-for-coding');
+      const raw = getModelPricing('kimi-k2.7-code');
+      assert.ok(alias && raw);
+      assert.equal(alias.inputPerMillion, raw.inputPerMillion);
+      assert.equal(alias.cachedInputPerMillion, raw.cachedInputPerMillion);
+      assert.equal(alias.outputPerMillion, raw.outputPerMillion);
+    });
+
+    it('returns undefined for unverified Kimi aliases (no guessing)', () => {
+      assert.equal(getModelPricing('kimi-code/kimi-for-coding-v1'), undefined);
+      assert.equal(getModelPricing('kimi-code/unknown-future-alias'), undefined);
+    });
+
     it('long-context variants have higher rates than standard', () => {
       const std54 = getModelPricing('gpt-5.4');
       const long54 = getModelPricing('gpt-5.4-long');
@@ -87,6 +121,27 @@ describe('model-pricing', () => {
       assert.ok(cost != null);
       const decimals = cost.toString().split('.')[1]?.length ?? 0;
       assert.ok(decimals <= 6, `too many decimals: ${cost}`);
+    });
+
+    it('calculates Kimi K3 cost with cache split', () => {
+      // 1M total input, 500k cached, 500k fresh; 100k output
+      // fresh: 500k × $3.00/M = $1.50
+      // cached: 500k × $0.30/M = $0.15
+      // output: 100k × $15.00/M = $1.50
+      // total = $3.15
+      const cost = estimateCostFromTokens('kimi-code/k3', 1_000_000, 100_000, 500_000);
+      assert.equal(cost, 3.15);
+    });
+
+    it('calculates Kimi K2.7 Code (kimi-for-coding) cost with no cache', () => {
+      // 200k input × $0.95/M + 50k output × $4.00/M = $0.19 + $0.2 = $0.39
+      const cost = estimateCostFromTokens('kimi-code/kimi-for-coding', 200_000, 50_000);
+      assert.equal(cost, 0.39);
+    });
+
+    it('returns null for unverified Kimi alias', () => {
+      const cost = estimateCostFromTokens('kimi-code/kimi-for-coding-v1', 100_000, 5_000);
+      assert.equal(cost, null);
     });
   });
 });

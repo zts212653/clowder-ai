@@ -44,8 +44,11 @@ function quotaKey(catId: string, threadId: string): string {
  * Build the content-free re-invoke prompt (spec §B3).
  * Contains sender info + count only, NO message content (AC-B6 privacy).
  */
-function buildReinvokePrompt(senders: string[], noticeCount: number): string {
-  return `你上一轮 turn 中有来自 ${senders.join(', ')} 的 ${noticeCount} 条未读消息，请调 list_recent 查看并回应。`;
+export function buildFreshnessReinvokePrompt(threadId: string, senders: string[], noticeCount: number): string {
+  return (
+    `你上一轮 turn 中有来自 ${senders.join(', ')} 的 ${noticeCount} 条未读消息，` +
+    `请调用 cat_cafe_get_thread_context({ threadId: "${threadId}", responseMode: "full" }) 无过滤读取并回应。`
+  );
 }
 
 // --- Dependencies ---
@@ -155,7 +158,9 @@ export function createFreshnessReinvokeCheck(deps: FreshnessReinvokeCheckDeps): 
       // score/ID split correctly (see RedisMessageStore.ts:539-546).
       let seenCursorCaughtUp = false;
       if (seenCursor != null && threadLatestMessageId != null) {
-        const afterCursor = await deps.messageStore.getByThreadAfter(threadId, seenCursor, 1);
+        const afterCursor = await deps.messageStore.getByThreadAfter(threadId, seenCursor, 1, undefined, {
+          unresolvedCursorPolicy: 'empty',
+        });
         seenCursorCaughtUp = afterCursor.length === 0;
       }
 
@@ -238,7 +243,7 @@ export function createFreshnessReinvokeCheck(deps: FreshnessReinvokeCheckDeps): 
         // P1-2 fix: build content-free re-invoke prompt (spec §B3)
         return {
           ...decision,
-          reinvokePrompt: buildReinvokePrompt(decision.senders, decision.noticeIds.length),
+          reinvokePrompt: buildFreshnessReinvokePrompt(threadId, decision.senders, decision.noticeIds.length),
         };
       }
 

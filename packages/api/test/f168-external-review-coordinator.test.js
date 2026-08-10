@@ -97,6 +97,22 @@ describe('F168 ExternalReviewCoordinator', () => {
     });
   };
 
+  it('continues collection only for configured non-terminal maintainer-review cases', async () => {
+    assert.equal(await coordinator.shouldContinueTracking('acme/widgets', 7), false);
+
+    configure({ reviewMode: 'observe_only' });
+    assert.equal(await coordinator.shouldContinueTracking('acme/widgets', 7), false);
+
+    configure();
+    assert.equal(await coordinator.shouldContinueTracking('acme/widgets', 7), true);
+
+    await objectStore.save({
+      subjectKey: 'pr:acme/widgets#7',
+      externalReview: { lifecycle: 'terminal' },
+    });
+    assert.equal(await coordinator.shouldContinueTracking('acme/widgets', 7), false);
+  });
+
   it('records required-cloud readiness but never projects it into a connector wake', async () => {
     configure();
 

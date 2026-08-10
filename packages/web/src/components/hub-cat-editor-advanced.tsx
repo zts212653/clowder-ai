@@ -28,6 +28,8 @@ export function AdvancedRuntimeSection({
   codexSettingsError,
   codexSettingsEditable,
   showCodexSettings,
+  codexSpeedVisible,
+  codexFastSupported,
   onChange,
   onStrategyChange,
   onCodexChange,
@@ -42,6 +44,8 @@ export function AdvancedRuntimeSection({
   codexSettingsError: string | null;
   codexSettingsEditable: boolean;
   showCodexSettings: boolean;
+  codexSpeedVisible?: boolean;
+  codexFastSupported?: boolean;
   onChange: (patch: FormPatch) => void;
   onStrategyChange: (patch: Partial<StrategyFormState>) => void;
   onCodexChange: (patch: Partial<CodexRuntimeSettings>) => void;
@@ -120,6 +124,28 @@ export function AdvancedRuntimeSection({
             </p>
           </>
         ) : null}
+        {codexSpeedVisible ? (
+          <div className="space-y-1">
+            <SelectField
+              label="速度档位"
+              value={form.codexSpeed ?? ''}
+              options={[
+                { value: '', label: '继承 Codex 设置' },
+                { value: 'standard', label: 'Standard' },
+                {
+                  value: 'fast',
+                  label: codexFastSupported ? 'Fast' : 'Fast（当前模型不可用）',
+                  disabled: !codexFastSupported,
+                },
+              ]}
+              onChange={(value) => onChange({ codexSpeed: value as HubCatEditorFormState['codexSpeed'] })}
+              tone="success"
+            />
+            <p className="text-label leading-4 text-cafe-muted">
+              仅 Codex OAuth 可用；这是请求档位，不代表上游最终实际服务档位。与 CLI Effort（思考深度）互不影响。
+            </p>
+          </div>
+        ) : null}
         {form.clientId !== 'antigravity' && form.clientId !== 'catagent' ? (
           <div className="space-y-1">
             <p className="text-sm font-medium text-cafe">额外 CLI 参数</p>
@@ -132,7 +158,8 @@ export function AdvancedRuntimeSection({
               tone="green"
             />
             <p className="text-label leading-4 text-cafe-muted">
-              每条直接追加到 CLI 命令，与系统参数重复时以用户参数为准。`CLI Effort` 请优先用上面的结构化字段。
+              每条直接追加到 CLI 命令。普通重复参数以用户参数为准；`CLI Effort`、`速度档位`
+              等结构化保留项始终以上方字段为准，对应 raw 参数会被忽略。
             </p>
           </div>
         ) : null}

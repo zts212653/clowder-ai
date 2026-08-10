@@ -359,12 +359,22 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
 
   it('start-dev wires F247 cloud supporting services through optional helper stage', () => {
     const source = readFileSync(resolve(ROOT, 'scripts/start-dev.sh'), 'utf8');
+    const mainSource = source.slice(source.indexOf('\nmain() {'));
+    const apiReadyIndex = mainSource.indexOf(
+      'wait_for_port_or_exit "$API_PORT" "API Server" "$API_PID" "${API_WAIT_TIMEOUT:-120}"',
+    );
+    const cloudStartIndex = mainSource.indexOf('\n    maybe_start_f247_cloud_services');
 
     assert.match(source, /f247-cloud-services\.mjs/);
     assert.match(source, /start --optional/);
     assert.match(source, /CAT_CAFE_F247_CLOUD_AUTOSTART/);
     assert.match(source, /start --optional --owner-file=/);
     assert.match(source, /stop-owned --owner-file=/);
+    assert.ok(apiReadyIndex >= 0, 'API readiness wait must remain discoverable');
+    assert.ok(
+      cloudStartIndex > apiReadyIndex,
+      'F247 cloud autostart must run only after the API-dependent principal probe can reach a ready API',
+    );
   });
 
   it('official runtime launchers opt in to connector autostart without overriding explicit false', () => {

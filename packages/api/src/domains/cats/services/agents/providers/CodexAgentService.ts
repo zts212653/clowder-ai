@@ -21,7 +21,14 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { type CatId, catRegistry, createCatId, resolveCliEffortOverride } from '@cat-cafe/shared';
+import {
+  type CatId,
+  catRegistry,
+  createCatId,
+  resolveCliEffortOverride,
+  resolveCodexSpeed,
+  resolveCodexSpeedWire,
+} from '@cat-cafe/shared';
 import { parse as parseToml } from 'smol-toml';
 import {
   resolveBinaryRoot,
@@ -74,7 +81,12 @@ import type {
 } from '../../types.js';
 import type { AuditLogSink, RawArchiveSink } from '../providers/codex-audit-hooks.js';
 import { extractCommandExecutionLifecycle, sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
-import { type CodexStreamState, finalizeCodexStream, transformCodexEvent } from '../providers/codex-event-transform.js';
+import {
+  type CodexStreamState,
+  finalizeCodexStream,
+  parseCodexReconnectNotice,
+  transformCodexEvent,
+} from '../providers/codex-event-transform.js';
 import { scanAndPublishCodexImages } from '../providers/codex-image-scanner.js';
 import {
   type CodexSessionContextSnapshotResolver,
@@ -106,6 +118,51 @@ import {
 } from './session-credential-file.js';
 
 const log = createModuleLogger('codex-agent');
+
+interface CodexProviderRecoveryTracker {
+  attempts: string[];
+  lastAttempt?: number;
+}
+
+function codexEventType(event: unknown): string | undefined {
+  if (typeof event !== 'object' || event === null) return undefined;
+  const type = (event as Record<string, unknown>).type;
+  return typeof type === 'string' ? type : undefined;
+}
+
+function isCodexProviderRecoveryEvidence(event: unknown): boolean {
+  const type = codexEventType(event);
+  return (
+    type === 'turn.started' ||
+    type === 'item.started' ||
+    type === 'item.updated' ||
+    type === 'item.completed' ||
+    type === 'turn.completed'
+  );
+}
+
+function buildCodexProviderRecoveryTransition(
+  catId: CatId,
+  invocationId: string | undefined,
+  phase: 'reconnecting' | 'recovered' | 'failed',
+  tracker: CodexProviderRecoveryTracker,
+  evidence?: string,
+): AgentMessage {
+  return {
+    type: 'system_info',
+    catId,
+    content: JSON.stringify({
+      type: 'provider_recovery',
+      provider: 'codex',
+      phase,
+      ...(invocationId ? { invocationId } : {}),
+      ...(tracker.lastAttempt !== undefined ? { attempt: tracker.lastAttempt } : {}),
+      attempts: tracker.attempts,
+      ...(evidence ? { evidence } : {}),
+    }),
+    timestamp: Date.now(),
+  };
+}
 
 function isCodexAppServerLifecycleEvent(value: unknown): value is CodexAppServerLifecycleEvent {
   if (typeof value !== 'object' || value === null) return false;
@@ -341,30 +398,61 @@ export function buildCodexReasoningArgs(effortLevel: string): string[] {
  * the F203 spec is a P1 — silent system-config drop hides L0 from the cat.
  * (砚砚 review 2026-05-16 BLOCKING finding.)
  */
-const RESERVED_SYSTEM_CONFIG_KEYS: ReadonlySet<string> = new Set(['developer_instructions']);
+const RESERVED_SYSTEM_CONFIG_KEYS: ReadonlySet<string> = new Set(['developer_instructions', 'service_tier']);
 
 /**
- * Strip `--config <key=value>` / `-c <key=value>` pairs from a pre-split
- * cliConfigArgs array when `key` is reserved. The downstream `dedup()`
+ * Parse every Codex CLI config spelling accepted by the installed CLI.
+ * Split forms consume the following token; equals/attached forms are atomic.
+ */
+function parseCodexConfigArg(
+  args: readonly string[],
+  index: number,
+): { expression: string; form: string; tokenCount: 1 | 2 } | null {
+  const arg = args[index];
+  if ((arg === '--config' || arg === '-c') && index + 1 < args.length) {
+    return { expression: args[index + 1], form: arg, tokenCount: 2 };
+  }
+  if (arg.startsWith('--config=')) {
+    return { expression: arg.slice('--config='.length), form: '--config=', tokenCount: 1 };
+  }
+  if (arg.startsWith('-c=')) {
+    return { expression: arg.slice('-c='.length), form: '-c=', tokenCount: 1 };
+  }
+  if (arg.startsWith('-c') && arg.length > 2) {
+    return { expression: arg.slice(2), form: '-c<value>', tokenCount: 1 };
+  }
+  return null;
+}
+
+function configKey(expression: string): string {
+  const equalsIndex = expression.indexOf('=');
+  return (equalsIndex === -1 ? expression : expression.slice(0, equalsIndex)).trim();
+}
+
+/**
+ * Strip reserved config keys from a pre-split cliConfigArgs array. The
+ * downstream `dedup()`
  * would otherwise skip the system push for any key already in
  * userConfigKeys — silently dropping the L0 the moment a user adds the
- * same key. `-c` is the documented short alias of `--config` per
- * `codex exec --help` so both forms must be intercepted (云端 Codex
- * P1-cloud-2, 2026-05-16).
+ * same key. F291 extends the original split-form guard to every accepted
+ * `--config` / `-c` spelling so typed service_tier and L0 stay authoritative.
  */
 function stripReservedSystemConfigs(args: string[], catId: string): string[] {
   const out: string[] = [];
   for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if ((a === '--config' || a === '-c') && i + 1 < args.length) {
-      const key = args[i + 1].split('=')[0];
+    const parsed = parseCodexConfigArg(args, i);
+    if (parsed) {
+      const key = configKey(parsed.expression);
       if (key && RESERVED_SYSTEM_CONFIG_KEYS.has(key)) {
-        log.warn({ catId, key, form: a }, 'cliConfigArgs override of reserved system config key dropped');
-        i++; // also skip the value pair
+        log.warn({ catId, key, form: parsed.form }, 'cliConfigArgs override of reserved system config key dropped');
+        i += parsed.tokenCount - 1;
         continue;
       }
+      out.push(...args.slice(i, i + parsed.tokenCount));
+      i += parsed.tokenCount - 1;
+      continue;
     }
-    out.push(a);
+    out.push(args[i]);
   }
   return out;
 }
@@ -1012,22 +1100,34 @@ export class CodexAgentService implements AgentService {
       (readOnly ? [] : (options?.cliConfigArgs ?? [])).flatMap((arg) => arg.trim().split(/\s+/)),
       this.catId as string,
     );
-    // Collect user --config / -c keys so system-injected duplicates can be
-    // skipped. `-c` is the documented short alias of `--config` per
-    // `codex exec --help`; both forms must be recognized here (云端 Codex
-    // P1-cloud-2, 2026-05-16).
+    // Collect user config keys across every accepted spelling so ordinary,
+    // non-reserved user overrides retain the established precedence contract.
     const userConfigKeys = new Set<string>();
     const userFlagSet = new Set<string>();
     for (let i = 0; i < userConfigArgs.length; i++) {
-      const a = userConfigArgs[i];
-      if ((a === '--config' || a === '-c') && i + 1 < userConfigArgs.length) {
-        const key = userConfigArgs[i + 1].split('=')[0];
+      const parsed = parseCodexConfigArg(userConfigArgs, i);
+      if (parsed) {
+        const key = configKey(parsed.expression);
         if (key) userConfigKeys.add(key);
-      } else if (a.startsWith('-')) {
-        userFlagSet.add(a);
+        i += parsed.tokenCount - 1;
+      } else if (userConfigArgs[i].startsWith('-')) {
+        userFlagSet.add(userConfigArgs[i]);
       }
     }
     const authMode = getCodexAuthMode(options?.callbackEnv);
+    const requestedServiceTier = resolveCodexSpeed({
+      clientId: 'openai',
+      authType: authMode === 'oauth' || authMode === 'api_key' ? authMode : undefined,
+      model: effectiveModel,
+      memberDefault: options?.requestedServiceTier,
+    }).requested;
+    const serviceTierWire = resolveCodexSpeedWire(requestedServiceTier);
+    const serviceTierArgs =
+      serviceTierWire.kind === 'inherit'
+        ? []
+        : ['--config', `service_tier="${serviceTierWire.kind === 'standard' ? 'default' : 'fast'}"`];
+    const appServerServiceTier =
+      serviceTierWire.kind === 'inherit' ? undefined : serviceTierWire.kind === 'standard' ? null : 'fast';
 
     // Codex CLI deprecated OPENAI_BASE_URL env var.
     // Configure a custom model provider via --config model_providers.*
@@ -1166,6 +1266,7 @@ export class CodexAgentService implements AgentService {
           ...dedup(appsWriteApprovalArgs),
           ...dedup(developerInstructionsArgs),
           ...dedup(providerArgs),
+          ...serviceTierArgs,
           ...userConfigArgs,
           ...gitRepoArgs,
           ...catCafeMcpArgs,
@@ -1186,6 +1287,7 @@ export class CodexAgentService implements AgentService {
           ...dedup(appsWriteApprovalArgs),
           ...dedup(developerInstructionsArgs),
           ...dedup(providerArgs),
+          ...serviceTierArgs,
           ...userConfigArgs,
           ...gitRepoArgs,
           ...catCafeMcpArgs,
@@ -1208,6 +1310,7 @@ export class CodexAgentService implements AgentService {
     const auditContext = options?.auditContext;
     const recentStreamErrors: string[] = [];
     let capacityRecoveryBlocked: CodexAppServerRecoveryBlockedEvent | null = null;
+    let providerRecovery: CodexProviderRecoveryTracker | null = null;
 
     try {
       // HOME isolation: only for API Key mode.
@@ -1397,6 +1500,7 @@ export class CodexAgentService implements AgentService {
               approvalPolicy,
               developerInstructions,
               ...(appServerThreadConfig ? { config: appServerThreadConfig } : {}),
+              ...(appServerServiceTier !== undefined ? { serviceTier: appServerServiceTier } : {}),
               imagePaths,
               ...(options?.signal ? { signal: options.signal } : {}),
               timeoutMs: resolveCliTimeoutMs(parseCliTimeoutMs(codexEnv.CLI_TIMEOUT_MS ?? undefined)),
@@ -1504,6 +1608,12 @@ export class CodexAgentService implements AgentService {
           continue;
         }
         collectCodexStreamError(event, recentStreamErrors);
+        const reconnectNotice = parseCodexReconnectNotice(event);
+        if (reconnectNotice) {
+          providerRecovery ??= { attempts: [] };
+          providerRecovery.attempts.push(reconnectNotice.message);
+          if (reconnectNotice.attempt !== undefined) providerRecovery.lastAttempt = reconnectNotice.attempt;
+        }
 
         if (!useAppServer && options?.activeInvocationFreshness) {
           const toolSurface = classifyCodexExecToolSurface(event);
@@ -1535,6 +1645,19 @@ export class CodexAgentService implements AgentService {
         }
 
         if (isCliTimeout(event)) {
+          if (providerRecovery) {
+            yield {
+              ...buildCodexProviderRecoveryTransition(
+                this.catId,
+                options?.invocationId,
+                'failed',
+                providerRecovery,
+                'cli_timeout',
+              ),
+              metadata,
+            };
+            providerRecovery = null;
+          }
           // F118 AC-C3: Forward timeout diagnostics as system_info before error
           yield {
             type: 'system_info' as const,
@@ -1584,6 +1707,19 @@ export class CodexAgentService implements AgentService {
           continue;
         }
         if (isCliError(event)) {
+          if (providerRecovery) {
+            yield {
+              ...buildCodexProviderRecoveryTransition(
+                this.catId,
+                options?.invocationId,
+                'failed',
+                providerRecovery,
+                'cli_error',
+              ),
+              metadata,
+            };
+            providerRecovery = null;
+          }
           // F212 Phase H (Sol runtime forensics 2026-07-09 → Final确权 2026-07-10):
           // suppress branch DELETED. Provider layer previously masked exit=1-with-
           // substantive-output as a Codex 0.98+ false-positive; empirically that
@@ -1622,6 +1758,26 @@ export class CodexAgentService implements AgentService {
             timestamp: Date.now(),
           };
           continue;
+        }
+
+        const currentEventType = codexEventType(event);
+        // A Codex spawn can report turn.failed and then resume with a new turn in
+        // the same process. The spawn layer owns chronological terminal truth;
+        // only __cliError/__cliTimeout (handled above) prove recovery exhaustion.
+        // Keep the tracker alive across intermediate turn.failed noise so the
+        // next real progress event can resolve the same warning as recovered.
+        if (providerRecovery && isCodexProviderRecoveryEvidence(event)) {
+          yield {
+            ...buildCodexProviderRecoveryTransition(
+              this.catId,
+              options?.invocationId,
+              'recovered',
+              providerRecovery,
+              currentEventType,
+            ),
+            metadata,
+          };
+          providerRecovery = null;
         }
 
         // F212 Phase H: item.completed tracking removed (was used only for the deleted
@@ -1689,6 +1845,19 @@ export class CodexAgentService implements AgentService {
           }
         }
 
+        if (reconnectNotice && providerRecovery) {
+          yield {
+            ...buildCodexProviderRecoveryTransition(
+              this.catId,
+              options?.invocationId,
+              'reconnecting',
+              providerRecovery,
+            ),
+            metadata,
+          };
+          continue;
+        }
+
         const result = transformCodexEvent(event, this.catId, codexStreamState, {
           approvalSurface: this.approvalSurface,
         });
@@ -1707,6 +1876,20 @@ export class CodexAgentService implements AgentService {
             yield { ...result, metadata };
           }
         }
+      }
+
+      if (providerRecovery) {
+        yield {
+          ...buildCodexProviderRecoveryTransition(
+            this.catId,
+            options?.invocationId,
+            'recovered',
+            providerRecovery,
+            'process_completed',
+          ),
+          metadata,
+        };
+        providerRecovery = null;
       }
 
       const finalSignature = finalizeCodexStream(codexStreamState, this.catId);
@@ -1804,6 +1987,19 @@ export class CodexAgentService implements AgentService {
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
     } catch (err) {
       const rawError = err instanceof Error ? err.message : String(err);
+      if (providerRecovery) {
+        yield {
+          ...buildCodexProviderRecoveryTransition(
+            this.catId,
+            options?.invocationId,
+            'failed',
+            providerRecovery,
+            'service_exception',
+          ),
+          metadata,
+        };
+        providerRecovery = null;
+      }
       const visibleError = capacityRecoveryBlocked
         ? `自动续跑已安全停止（${capacityRecoveryBlocked.reason}）；系统已保留并显示本轮断点，没有猜测或切换任务。`
         : rawError;

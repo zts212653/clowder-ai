@@ -25,6 +25,7 @@ const ref = (kind, value) => ({ kind, availability: 'available', value });
 function event(type, overrides = {}) {
   const actors = {
     verdict_cycle_observed: { kind: 'automation', id: 'eval-verdict-closure-reconciler' },
+    responsibility_blocked: { kind: 'automation', id: 'eval-verdict-closure-reconciler' },
     responsibility_bound: { kind: 'automation', id: 'eval-verdict-closure-reconciler' },
     action_planned: { kind: 'cat', id: 'codex-sol' },
     main_landed: { kind: 'cat', id: 'codex-sol' },
@@ -50,6 +51,14 @@ function event(type, overrides = {}) {
     ...(type === 'responsibility_bound'
       ? { taskId: 'task-cycle-1', leaseId: 'lease-cycle-1', leaseGeneration: 1 }
       : {}),
+    ...(type === 'responsibility_blocked'
+      ? {
+          reasonCode: 'feature_thread_not_found',
+          featureId: 'F203',
+          ownerCatId: 'codex-sol',
+          candidateThreadIds: [],
+        }
+      : {}),
     ...(['main_landed', 'live_active'].includes(type) ? { commitSha: 'a'.repeat(40) } : {}),
     ...(type === 'reeval_requested' ? { dueAt: '2026-08-08T00:00:00.000Z', assignedEvalCatId: 'gpt52' } : {}),
     ...(['reeval_passed', 'reeval_failed'].includes(type) ? { assignedEvalCatId: 'gpt52' } : {}),
@@ -69,6 +78,47 @@ function throughPending() {
 }
 
 describe('F266 stable case lifecycle', () => {
+  it('projects an explicit responsibility blocker until verified feature-thread truth becomes bindable', () => {
+    const opened = event('verdict_cycle_observed');
+    const blocked = event('responsibility_blocked', {
+      refs: [ref('other', 'feature-thread-resolution:F203:feature_thread_not_found')],
+    });
+
+    assert.equal(EvalLifecycleEventSchema.safeParse(blocked).success, true);
+    const blockedProjection = projectReevalCase(root, [opened, blocked]);
+    assert.equal(blockedProjection.status, 'open');
+    assert.deepEqual(blockedProjection.responsibilityBlocker, {
+      eventId: blocked.eventId,
+      reasonCode: 'feature_thread_not_found',
+      featureId: 'F203',
+      ownerCatId: 'codex-sol',
+      candidateThreadIds: [],
+    });
+
+    const recovered = projectReevalCase(root, [
+      opened,
+      blocked,
+      event('responsibility_bound', {
+        refs: [ref('task', 'task-cycle-1'), ref('other', 'lease:lease-cycle-1:1')],
+      }),
+    ]);
+    assert.equal(recovered.status, 'acknowledged');
+    assert.equal(recovered.responsibilityBlocker, undefined);
+    assert.equal(recovered.taskId, 'task-cycle-1');
+
+    assert.throws(
+      () =>
+        projectReevalCase(root, [
+          opened,
+          event('responsibility_blocked', {
+            reasonCode: 'feature_thread_ambiguous',
+            candidateThreadIds: [],
+          }),
+        ]),
+      /candidates must match/,
+    );
+  });
+
   it('requires main and live as separate ordered facts before re-evaluation', () => {
     const events = throughPending();
     const statuses = events.map((_, index) => projectReevalCase(root, events.slice(0, index + 1)).status);
@@ -139,7 +189,7 @@ describe('F266 stable case lifecycle', () => {
     assert.deepEqual(projection.reevalRefs, []);
   });
 
-  it('does not promote an absorbed keep-observe cycle after actionable closure', () => {
+  it('promotes an absorbed keep-observe cycle into cadence monitoring after trusted closure', () => {
     const keepObserveRoot = {
       ...root,
       cycles: [root.cycles[0], { ...root.cycles[1], verdict: 'keep_observe' }],
@@ -156,8 +206,8 @@ describe('F266 stable case lifecycle', () => {
       event('reeval_passed', { occurredAt: '2026-08-09T00:00:00.000Z' }),
     ]);
 
-    assert.equal(projection.status, 'resolved');
-    assert.equal(projection.activeVerdictId, firstVerdictId);
+    assert.equal(projection.status, 'monitoring');
+    assert.equal(projection.activeVerdictId, secondVerdictId);
   });
 
   it('reopens the same stable case only for a genuinely later cycle after terminal re-evaluation', () => {
@@ -193,6 +243,7 @@ describe('F266 stable case lifecycle', () => {
   });
 
   it('rejects foreign case/cycle identity and malformed binding evidence', () => {
+    const { cycleCreatedAt: _cycleCreatedAt, ...legacyEventBase } = event('verdict_cycle_observed');
     assert.equal(EvalLifecycleEventSchema.safeParse(event('verdict_cycle_observed')).success, true);
     assert.equal(EvalLifecycleEventSchema.safeParse(event('responsibility_bound')).success, true);
     assert.throws(
@@ -206,6 +257,43 @@ describe('F266 stable case lifecycle', () => {
     assert.equal(
       EvalLifecycleEventSchema.safeParse(event('responsibility_bound', { leaseGeneration: 0 })).success,
       false,
+    );
+    assert.throws(
+      () =>
+        projectReevalCase(root, [
+          event('verdict_cycle_observed', {
+            actor: { kind: 'migration', id: 'f266-legacy-v1-case-migration' },
+          }),
+        ]),
+      /requires automation/,
+    );
+    assert.throws(
+      () =>
+        projectReevalCase(root, [
+          {
+            ...legacyEventBase,
+            type: 'legacy_case_migrated',
+            actor: { kind: 'automation', id: 'eval-verdict-closure-reconciler' },
+            reviewedAt: '2026-08-01T00:00:00.000Z',
+            legacyVerdictIds: [firstVerdictId],
+            disposition: 'repair',
+          },
+        ]),
+      /requires the audited migration principal/,
+    );
+    assert.throws(
+      () =>
+        projectReevalCase(root, [
+          {
+            ...legacyEventBase,
+            type: 'legacy_case_migrated',
+            actor: { kind: 'migration', id: 'f266-legacy-v1-case-migration' },
+            reviewedAt: '2026-08-01T00:00:00.000Z',
+            legacyVerdictIds: [firstVerdictId, secondVerdictId],
+            disposition: 'repair',
+          },
+        ]),
+      /must match the immutable cycle prefix/,
     );
   });
 });

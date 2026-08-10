@@ -710,6 +710,25 @@
     "owner": "codex-sol"
   },
   {
+    "id": "feature-codex-oauth-speed",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/features/F291-codex-oauth-fast-mode.md", "anchor": "User Journey" },
+    "structureSource": {
+      "path": "docs/features/F291-codex-oauth-fast-mode.md",
+      "anchor": "Primary Journey: 为成员设置默认速度，再为单个对话覆盖"
+    },
+    "bodySource": { "path": "docs/features/F291-codex-oauth-fast-mode.md", "anchor": "Why" },
+    "contexts": ["thinking", "concierge_open"],
+    "audience": ["cvo", "developer"],
+    "body": "Codex OAuth 猫可在成员配置设置 Standard / Fast 默认档位，也可从目标对话的 ⋮ → 速度档位单独覆盖；两处都从下一次回复生效。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "怎么设置",
+      "draftPrompt": "请告诉我怎么给 Codex OAuth 成员设置默认速度，以及如何在单个对话里覆盖或恢复继承。"
+    },
+    "owner": "codex-sol"
+  },
+  {
     "id": "feature-per-target-message-receipt",
     "kind": "feature",
     "sourceRef": {
@@ -1055,7 +1074,7 @@
     },
     "contexts": ["thinking", "concierge_open"],
     "audience": ["cvo"],
-    "body": "第一次介绍或纠正重要人物时，猫就能亮出私域人物记忆卡；你在 Approval Hub 逐项同意后才会写入，不必重复三次。",
+    "body": "第一次介绍、纠正，或发现已登记人物的新互动时，猫可立即提卡，也可先留无正文的延后收据；最终仍由你在 Approval Hub 逐项决定。",
     "action": {
       "type": "open_source",
       "label": "查看人物记忆说明",

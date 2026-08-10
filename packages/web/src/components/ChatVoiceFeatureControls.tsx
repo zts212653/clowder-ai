@@ -334,38 +334,67 @@ export function ChatVoiceFeatureControls({ threadId, defaultCatId, disabled }: C
     [defaultCatId, installTarget, setRightPanelMode, startVoice, threadId],
   );
 
-  const buttonClass = (active: boolean, busy: boolean) =>
-    `flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+  const cardClass = (active: boolean, busy: boolean) =>
+    `group flex min-h-20 w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-[border-color,background-color,transform] disabled:cursor-not-allowed disabled:opacity-30 ${
       active
-        ? 'text-conn-emerald-text bg-conn-emerald-bg hover:opacity-80'
-        : 'bg-transparent text-cafe-secondary hover:text-cafe-accent'
+        ? 'border-[var(--semantic-success)]/30 bg-conn-emerald-bg text-conn-emerald-text'
+        : 'border-cafe-subtle/75 bg-[var(--console-card-bg)] text-cafe-secondary hover:-translate-y-px hover:border-cafe-accent/35 hover:bg-cafe-surface'
     } ${busy ? 'animate-pulse' : ''}`;
 
   return (
     <>
-      <div className="flex items-center gap-0.5">
-        {voiceCompanionActive && (playbackState === 'playing' || playbackState === 'paused') && (
-          <VoicePlaybackControls playbackState={playbackState} />
-        )}
-        <button
-          type="button"
-          onClick={activateVoiceCompanion}
-          disabled={actionDisabled}
-          className={buttonClass(voiceCompanionActive, busyFeature === 'voice-companion')}
-          aria-label={voiceCompanionActive ? '停止语音陪伴' : '语音陪伴'}
-          title={voiceCompanionActive ? '停止语音陪伴' : '语音陪伴'}
-        >
-          <HeadphonesIcon className={`w-4 h-4${voiceCompanionActive ? ' animate-pulse' : ''}`} />
-        </button>
+      <div
+        className="grid gap-2.5"
+        data-testid="workspace-companion-controls"
+        data-layout="panel-auto-fit"
+        style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 24rem), 1fr))' }}
+      >
+        <div className="relative">
+          <button
+            type="button"
+            onClick={activateVoiceCompanion}
+            disabled={actionDisabled}
+            className={cardClass(voiceCompanionActive, busyFeature === 'voice-companion')}
+            aria-label={voiceCompanionActive ? '停止语音陪伴' : '语音陪伴'}
+            title={voiceCompanionActive ? '停止语音陪伴' : '语音陪伴'}
+            data-testid="workspace-companion-voice"
+          >
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cafe-accent/10 text-cafe-accent">
+              <HeadphonesIcon className={`h-5 w-5${voiceCompanionActive ? ' animate-pulse' : ''}`} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold tracking-tight text-cafe-black">语音陪伴</span>
+              <span className="mt-0.5 block text-micro leading-4 text-cafe-secondary">
+                {voiceCompanionActive ? '正在陪伴，点此结束' : '让当前猫猫朗读后续回复'}
+              </span>
+            </span>
+            <FeatureArrow />
+          </button>
+          {voiceCompanionActive && (playbackState === 'playing' || playbackState === 'paused') && (
+            <div className="absolute bottom-1.5 right-8 flex items-center gap-0.5">
+              <VoicePlaybackControls playbackState={playbackState} />
+            </div>
+          )}
+        </div>
         <button
           type="button"
           onClick={activateAudioCapture}
           disabled={actionDisabled}
-          className={buttonClass(audioCaptureActive, busyFeature === 'audio-capture')}
-          aria-label={audioCaptureActive ? '关闭音频采集' : '音频采集'}
-          title={audioCaptureActive ? '关闭音频采集' : '音频采集'}
+          className={cardClass(audioCaptureActive, busyFeature === 'audio-capture')}
+          aria-label={audioCaptureActive ? '关闭会议伴随' : '会议伴随'}
+          title={audioCaptureActive ? '关闭会议伴随' : '会议伴随'}
+          data-testid="workspace-companion-meeting"
         >
-          <MicIcon className="w-4 h-4" />
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cafe-accent/10 text-cafe-accent">
+            <MicIcon className="h-5 w-5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold tracking-tight text-cafe-black">会议伴随</span>
+            <span className="mt-0.5 block text-micro leading-4 text-cafe-secondary">
+              {audioCaptureActive ? '正在采集，点此关闭' : '打开实时录音与会议转写'}
+            </span>
+          </span>
+          <FeatureArrow />
         </button>
       </div>
       {installTarget && (
@@ -379,5 +408,22 @@ export function ChatVoiceFeatureControls({ threadId, defaultCatId, disabled }: C
         />
       )}
     </>
+  );
+}
+
+function FeatureArrow() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-3.5 w-3.5 shrink-0 text-cafe-muted transition-transform group-hover:translate-x-0.5 group-hover:text-cafe-accent"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m6 3.5 4.5 4.5L6 12.5" />
+    </svg>
   );
 }

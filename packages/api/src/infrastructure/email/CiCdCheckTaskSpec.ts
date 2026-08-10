@@ -33,6 +33,12 @@ export interface CiCdCheckTaskSpecOptions {
     warn: (...args: unknown[]) => void;
   };
   readonly pollIntervalMs?: number;
+  /**
+   * F168 external-case collection outlives one F280 wait generation. A done
+   * wait remains collectable only when the canonical external-review policy
+   * says this PR still has an open maintainer-review lifecycle.
+   */
+  readonly continueDoneTracking?: (repoFullName: string, prNumber: number) => Promise<boolean>;
   /** F202-2B: Override task ID for plugin-scoped schedule instances */
   readonly id?: string;
   /**
@@ -85,6 +91,24 @@ function needsCiLifecycleRecovery(task: TaskItem): boolean {
   );
 }
 
+async function shouldCollectTask(
+  opts: CiCdCheckTaskSpecOptions,
+  task: TaskItem,
+  repoFullName: string,
+  prNumber: number,
+  subjectKey: string,
+): Promise<boolean> {
+  if (task.automationState?.ci?.enabled === false) return false;
+  if (task.status !== 'done' || needsCiLifecycleRecovery(task)) return true;
+  if (!opts.continueDoneTracking) return false;
+  try {
+    return await opts.continueDoneTracking(repoFullName, prNumber);
+  } catch (error) {
+    opts.log.warn({ error, subjectKey }, '[F168] external-review CI continuation check failed; deferring collection');
+    return false;
+  }
+}
+
 export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpec_P1<CiCdCheckSignal> {
   const fetchPrStatus = opts.fetchPrStatus ?? ((repo: string, pr: number) => fetchPrCiStatus(repo, pr, opts.log));
 
@@ -98,20 +122,13 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
         // Review feedback can observe terminal PR state first; keep those done tasks
         // reachable until CiCdRouter delivers/records the CI lifecycle marker.
         const allTasks = await opts.taskStore.listByKind('pr_tracking');
-        const active = allTasks.filter(
-          (t) => (t.status !== 'done' || needsCiLifecycleRecovery(t)) && t.automationState?.ci?.enabled !== false,
-        );
-
-        if (active.length === 0) {
-          return { run: false, reason: 'no active tracked PRs' };
-        }
-
         const workItems: { signal: CiCdCheckSignal; subjectKey: string }[] = [];
-        for (const task of active) {
+        for (const task of allTasks) {
           const subjectKey = task.subjectKey;
           if (!subjectKey) continue;
           const parsed = parsePrSubjectKey(subjectKey);
           if (!parsed) continue;
+          if (!(await shouldCollectTask(opts, task, parsed.repoFullName, parsed.prNumber, subjectKey))) continue;
           workItems.push({
             signal: { task, repoFullName: parsed.repoFullName, prNumber: parsed.prNumber },
             subjectKey,

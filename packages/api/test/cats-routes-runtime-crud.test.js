@@ -852,6 +852,144 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     }
   });
 
+  it('POST and PATCH /api/cats gate cli.serviceTier to eligible Codex OAuth bindings', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
+    writeCatalogAccount(projectRoot, 'codex-api-key', {
+      authType: 'api_key',
+      baseUrl: 'https://api.openai.example',
+      models: ['gpt-5.6-sol'],
+      displayName: 'Codex API Key',
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    try {
+      const headers = {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      };
+      const baseBody = {
+        name: '缅因猫',
+        displayName: '缅因猫',
+        avatar: '/avatars/codex.png',
+        color: { primary: '#16a34a', secondary: '#bbf7d0' },
+        roleDescription: '审查',
+        clientId: 'openai',
+        defaultModel: 'gpt-5.6-sol',
+      };
+
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          catId: 'runtime-codex-speed',
+          mentionPatterns: ['@runtime-codex-speed'],
+          accountRef: 'codex',
+          cli: { command: 'codex', outputFormat: 'json', serviceTier: 'fast' },
+        }),
+      });
+      assert.equal(createRes.statusCode, 201, createRes.body);
+      assert.equal(JSON.parse(createRes.body).cat.cli?.serviceTier, 'fast');
+
+      const unsupportedModelRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          catId: 'runtime-codex-speed-unsupported',
+          mentionPatterns: ['@runtime-codex-speed-unsupported'],
+          accountRef: 'codex',
+          defaultModel: 'gpt-4.1',
+          cli: { command: 'codex', outputFormat: 'json', serviceTier: 'fast' },
+        }),
+      });
+      assert.equal(unsupportedModelRes.statusCode, 400);
+      assert.match(JSON.parse(unsupportedModelRes.body).error, /Fast.*model/i);
+
+      const apiKeyCreateRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          catId: 'runtime-codex-speed-api-key',
+          mentionPatterns: ['@runtime-codex-speed-api-key'],
+          accountRef: 'codex-api-key',
+          cli: { command: 'codex', outputFormat: 'json', serviceTier: 'fast' },
+        }),
+      });
+      assert.equal(apiKeyCreateRes.statusCode, 400);
+      assert.match(JSON.parse(apiKeyCreateRes.body).error, /OAuth/i);
+
+      const nonCodexRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          clientId: 'kimi',
+          accountRef: 'kimi',
+          defaultModel: 'kimi-k2.5',
+          catId: 'runtime-kimi-speed',
+          mentionPatterns: ['@runtime-kimi-speed'],
+          cli: { command: 'kimi', outputFormat: 'stream-json', serviceTier: 'standard' },
+        }),
+      });
+      assert.equal(nonCodexRes.statusCode, 400);
+      assert.match(JSON.parse(nonCodexRes.body).error, /Codex OAuth/i);
+
+      const clearRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-codex-speed',
+        headers,
+        body: JSON.stringify({ cli: { serviceTier: null } }),
+      });
+      assert.equal(clearRes.statusCode, 200, clearRes.body);
+      assert.equal(JSON.parse(clearRes.body).cat.cli?.serviceTier, undefined);
+
+      const restoreRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-codex-speed',
+        headers,
+        body: JSON.stringify({ cli: { serviceTier: 'fast' } }),
+      });
+      assert.equal(restoreRes.statusCode, 200, restoreRes.body);
+
+      const switchBindingRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-codex-speed',
+        headers,
+        body: JSON.stringify({ accountRef: 'codex-api-key' }),
+      });
+      assert.equal(switchBindingRes.statusCode, 200, switchBindingRes.body);
+      assert.equal(
+        JSON.parse(switchBindingRes.body).cat.cli?.serviceTier,
+        'fast',
+        'account switches preserve dormant member intent when serviceTier was not explicitly edited',
+      );
+
+      const explicitApiKeyRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-codex-speed',
+        headers,
+        body: JSON.stringify({ cli: { serviceTier: 'standard' } }),
+      });
+      assert.equal(explicitApiKeyRes.statusCode, 400);
+      assert.match(JSON.parse(explicitApiKeyRes.body).error, /OAuth/i);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('GET /api/cats exposes effective codexCarrier truth (per-cat > env > default)', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');

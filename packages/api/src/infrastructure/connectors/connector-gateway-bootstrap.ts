@@ -364,37 +364,6 @@ export function classifyPreconfiguredConnectorAutostart(
   return hasCredentials ? 'disabled-credentials-suppressed' : 'disabled-no-credentials';
 }
 
-export function applyConnectorGatewayAutostartPolicy(
-  config: ConnectorGatewayConfig,
-  env: ConnectorAutostartEnv = process.env,
-): ConnectorGatewayConfig {
-  if (isPreconfiguredConnectorAutostartEnabled(env)) return config;
-
-  return {
-    ...config,
-    telegramBotToken: undefined,
-    feishuAppId: undefined,
-    feishuAppSecret: undefined,
-    feishuVerificationToken: undefined,
-    feishuBotOpenId: undefined,
-    feishuAdminOpenIds: undefined,
-    feishuGroupBotMentionsJson: undefined,
-    dingtalkAppKey: undefined,
-    dingtalkAppSecret: undefined,
-    weixinBotToken: undefined,
-    wecomBotId: undefined,
-    wecomBotSecret: undefined,
-    wecomCorpId: undefined,
-    wecomAgentId: undefined,
-    wecomAgentSecret: undefined,
-    wecomToken: undefined,
-    wecomEncodingAesKey: undefined,
-    xiaoyiAk: undefined,
-    xiaoyiSk: undefined,
-    xiaoyiAgentId: undefined,
-  };
-}
-
 /**
  * Map ConnectorGatewayConfig fields → env var names.
  * Built-in plugins read from ctx.env (env var names), but tests pass config objects.

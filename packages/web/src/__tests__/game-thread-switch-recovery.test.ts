@@ -172,7 +172,6 @@ vi.mock('../components/MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));
 vi.mock('../components/SplitPaneView', () => ({ SplitPaneView: () => null }));
-vi.mock('../components/MobileStatusSheet', () => ({ MobileStatusSheet: () => null }));
 vi.mock('../components/QueuePanel', () => ({ QueuePanel: () => null }));
 vi.mock('../components/ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));
 vi.mock('../components/AuthorizationCard', () => ({ AuthorizationCard: () => null }));

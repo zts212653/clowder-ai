@@ -280,6 +280,24 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
+    name: 'CAT_CAFE_GPT_PRO_AGENT_KEY_FILE',
+    defaultValue: '$CAT_CAFE_DATA_DIR/agent-keys/gpt-pro.secret',
+    description:
+      'F247 Cloud Cat — gpt-pro Remote MCP agent-key sidecar override；默认由 runtime owner 自动 provision/renew，无需手工 mint。',
+    category: 'server',
+    sensitive: true,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_ENABLE_LEGACY_PINCHTAB_BRIDGE',
+    defaultValue: '0',
+    description:
+      'F247 Cloud Cat — 显式启用会控制前台浏览器的 legacy PinchTab bridge；默认 0，Host Adapter 缺失时 fail closed。',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_CAFE_REMOTE_TOKEN',
     defaultValue: '(空)',
     description:

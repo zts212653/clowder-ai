@@ -38,4 +38,14 @@ export interface IThreadReadStateStore {
    * Optional: implementations without cross-format concern may omit.
    */
   reconcileReadCursor?(userId: string, threadId: string, oldV1: string, newV2: string): boolean | Promise<boolean>;
+  /**
+   * Exact CAS replacement used only after the caller proves the stored cursor
+   * unresolvable and supplies new explicit read evidence.
+   */
+  replaceReadCursorIfEqual?(
+    userId: string,
+    threadId: string,
+    expectedValue: string,
+    newValue: string,
+  ): boolean | Promise<boolean>;
 }

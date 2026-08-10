@@ -43,7 +43,7 @@ function subject(events = [opened]) {
     caseRoot: {
       caseId,
       domainId: root.domainId,
-      targetOwnerCatId: 'codex-sol',
+      targetOwnerCatId: 'opus-47',
       assignedEvalCatId: 'gpt52',
       cycles: [{ verdictId, createdAt: root.createdAt }],
     },
@@ -73,7 +73,7 @@ class MemoryEventLog {
   }
 }
 
-function matchingLease(taskId) {
+function matchingLease(taskId, holderCatId = 'codex-sol') {
   return {
     leaseId: 'lease-cycle-1',
     generation: 1,
@@ -81,7 +81,7 @@ function matchingLease(taskId) {
     subjectRef: `subject:task:${taskId}`,
     actionFamily: 'implement',
     successorSlot: 'implementer',
-    holderCatIds: ['codex-sol'],
+    holderCatIds: [holderCatId],
     holderThreadId: 'thread_f203',
     tenantScope: 'user-1',
     terminalPredicate: { kind: 'task_done' },
@@ -96,7 +96,7 @@ function fixture(overrides = {}) {
     async admit(input) {
       admissions.push(structuredClone(input));
       const taskId = input.action.subjectRef.slice('subject:task:'.length);
-      const lease = matchingLease(taskId);
+      const lease = matchingLease(taskId, input.holderCatIds[0]);
       return { admit: true, outcome: 'claimed', lease, fence: { leaseId: lease.leaseId, generation: 1 } };
     },
   };
@@ -117,18 +117,19 @@ describe('F266 case responsibility binding', () => {
     const result = await service.reconcile(subject(), {
       systemThreadId: 'thread_eval_capability_wakeup',
       featureId: 'F203',
+      ownerCatId: 'opus-47',
       evalCatId: 'gpt52',
     });
 
     assert.equal(result.outcome, 'bound');
     const task = await taskStore.getBySubject(`eval-case:${caseId}:cycle:${verdictId}`);
     assert.ok(task);
-    assert.equal(task.ownerCatId, 'codex-sol');
+    assert.equal(task.ownerCatId, 'opus-47');
     assert.equal(task.threadId, 'thread_f203');
     assert.equal(task.userId, 'user-1');
     assert.equal(task.status, 'doing');
     assert.equal(admissions.length, 1);
-    assert.deepEqual(admissions[0].holderCatIds, ['codex-sol']);
+    assert.deepEqual(admissions[0].holderCatIds, ['opus-47']);
     assert.equal(admissions[0].sourceThreadId, 'thread_eval_capability_wakeup');
     assert.equal(admissions[0].targetThreadId, 'thread_f203');
     assert.equal(admissions[0].action.subjectRef, `subject:task:${task.id}`);
@@ -168,21 +169,55 @@ describe('F266 case responsibility binding', () => {
     assert.equal((await eventLog.read(caseId)).at(-1).type, 'responsibility_bound');
   });
 
-  it('fails before writing a task when feature-thread truth is absent or ambiguous', async () => {
-    for (const reason of ['not_found', 'ambiguous']) {
-      const taskStore = new TaskStore();
-      const { service } = fixture({
-        taskStore,
-        resolveFeatureThreadId: async () => {
-          throw new Error(`feature_thread_${reason}`);
-        },
-      });
-      await assert.rejects(
-        () => service.reconcile(subject(), { systemThreadId: 'thread_eval', featureId: 'F203', evalCatId: 'gpt52' }),
-        new RegExp(reason),
-      );
-      assert.equal(await taskStore.getBySubject(`eval-case:${caseId}:cycle:${verdictId}`), null);
-    }
+  it('binds a new repair task after a monitoring cadence fails', async () => {
+    const monitorRoot = { ...root, verdict: 'keep_observe' };
+    const monitorOpened = { ...opened, eventId: 'monitor-opened' };
+    const reevalRequested = {
+      eventId: 'monitor-reeval-requested',
+      caseId,
+      verdictId,
+      domainId: root.domainId,
+      type: 'reeval_requested',
+      actor: { kind: 'cat', id: 'gpt52' },
+      occurredAt: '2026-08-08T00:00:00.000Z',
+      dueAt: '2026-08-10T00:00:00.000Z',
+      assignedEvalCatId: 'gpt52',
+      reason: 'cadence due',
+      refs: [{ kind: 'reeval', availability: 'available', value: 'reeval:monitor' }],
+    };
+    const reevalFailed = {
+      eventId: 'monitor-reeval-failed',
+      caseId,
+      verdictId,
+      domainId: root.domainId,
+      type: 'reeval_failed',
+      actor: { kind: 'cat', id: 'gpt52' },
+      occurredAt: '2026-08-09T00:00:00.000Z',
+      assignedEvalCatId: 'gpt52',
+      reason: 'cadence found a repair debt',
+      refs: [{ kind: 'reeval', availability: 'available', value: 'reeval:failed' }],
+    };
+    const events = [monitorOpened, reevalRequested, reevalFailed];
+    const current = {
+      ...subject(events),
+      caseRoot: {
+        ...subject(events).caseRoot,
+        cycles: [{ verdictId, createdAt: root.createdAt, verdict: 'keep_observe' }],
+      },
+      roots: [monitorRoot],
+    };
+    const eventLog = new MemoryEventLog(events);
+    const { service } = fixture({ eventLog });
+
+    const result = await service.reconcile(current, {
+      systemThreadId: 'thread_eval_capability_wakeup',
+      featureId: 'F203',
+      ownerCatId: 'opus-47',
+      evalCatId: 'gpt52',
+    });
+
+    assert.equal(result.outcome, 'bound');
+    assert.equal((await eventLog.read(caseId)).at(-1).type, 'responsibility_bound');
   });
 
   it('recovers the same task after a task-before-lease crash and the same lease after a lease-before-event crash', async () => {
@@ -194,7 +229,7 @@ describe('F266 case responsibility binding', () => {
         attempts += 1;
         if (attempts === 1) throw new Error('simulated_after_task_write');
         const taskId = input.action.subjectRef.slice('subject:task:'.length);
-        const lease = matchingLease(taskId);
+        const lease = matchingLease(taskId, input.holderCatIds[0]);
         return {
           admit: attempts === 2,
           outcome: attempts === 2 ? 'claimed' : 'replayed',
@@ -245,7 +280,7 @@ describe('F266 case responsibility binding', () => {
         admissionService: {
           async admit(input) {
             const taskId = input.action.subjectRef.slice('subject:task:'.length);
-            const lease = { ...matchingLease(taskId), ...patch };
+            const lease = { ...matchingLease(taskId, input.holderCatIds[0]), ...patch };
             return { admit: false, outcome: 'safe_wait', lease };
           },
         },

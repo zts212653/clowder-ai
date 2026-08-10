@@ -574,6 +574,89 @@ describe('ActionSuccessorAdmissionService', () => {
     }
   });
 
+  it('admits one fenced direct-carrier review successor from durable done-tracking HEAD truth', async () => {
+    const claimedLease = {
+      leaseId: 'lease-done-tracking',
+      generation: 1,
+      mode: 'single',
+      holderCatIds: ['codex-terra'],
+    };
+    const claimCalls = [];
+    const leaseStore = {
+      async getSubjectTerminal() {
+        return null;
+      },
+      async markSubjectTerminal() {
+        throw new Error('terminal marker write is not expected');
+      },
+      async clearSubjectTerminal() {
+        throw new Error('terminal marker clear is not expected');
+      },
+      async claim(input) {
+        claimCalls.push(input);
+        return { outcome: 'claimed', lease: claimedLease };
+      },
+      async get() {
+        return null;
+      },
+      async replace() {
+        throw new Error('replace is not expected');
+      },
+      async commitOutcome() {
+        throw new Error('commitOutcome is not expected');
+      },
+      async returnToPredecessor() {
+        throw new Error('returnToPredecessor is not expected');
+      },
+      async markReturnDelivered() {
+        throw new Error('markReturnDelivered is not expected');
+      },
+      async continueFreshRevision() {
+        throw new Error('continueFreshRevision is not expected');
+      },
+    };
+    const resolver = new ActionSubjectTruthResolver(
+      leaseStore,
+      {
+        async get() {
+          return null;
+        },
+      },
+      {
+        async getBySubject() {
+          return {
+            kind: 'pr_tracking',
+            status: 'done',
+            headSha: '1111111111111111111111111111111111111111',
+            ciPrState: null,
+            reviewPrState: null,
+            closedAt: null,
+          };
+        },
+      },
+    );
+    const service = new ActionSuccessorAdmissionService(leaseStore, resolver);
+    const input = request({
+      sourceThreadId: 'thread-direct-carrier',
+      targetThreadId: 'thread-direct-carrier',
+      dispatchId: 'post:done-tracking-direct-carrier',
+    });
+
+    assert.deepEqual(await service.admit(input), {
+      admit: true,
+      outcome: 'claimed',
+      lease: claimedLease,
+      fence: {
+        leaseId: claimedLease.leaseId,
+        generation: claimedLease.generation,
+        dispatchId: input.dispatchId,
+      },
+    });
+    assert.equal(claimCalls.length, 1);
+    assert.equal(claimCalls[0].terminalPredicate.kind, 'review_delivered');
+    assert.equal(claimCalls[0].holderThreadId, 'thread-direct-carrier');
+  });
+
   it('does not mint a reviewer lease from a terminal PR tracking task when community HEAD is unavailable', async () => {
     for (const prState of ['merged', 'closed']) {
       const terminalTask = {
@@ -1444,5 +1527,79 @@ describe('ActionSuccessorAdmissionService', () => {
       },
     ]);
     assert.deepEqual(calls.recordOutcome, []);
+  });
+
+  it('binds a local review terminal verdict to the direct review carrier thread', async () => {
+    const currentLease = {
+      leaseId: 'lease-review-route',
+      key: 'user-1\u001fpr:owner/repo#2868\u001freview\u001freviewer',
+      tenantScope: 'user-1',
+      subjectRef: 'pr:owner/repo#2868',
+      actionFamily: 'review',
+      successorSlot: 'reviewer',
+      generation: 3,
+      status: 'active',
+      mode: 'single',
+      holderCatIds: ['codex-terra'],
+      holderThreadId: 'thread-reviewer-session',
+      predecessorCatId: 'codex-sol',
+      predecessorThreadId: 'thread-direct-review-carrier',
+    };
+    const { service } = harness({ currentLease });
+
+    const allowed = await service.preflightLocalReviewTerminalRoute({
+      leaseId: currentLease.leaseId,
+      generation: currentLease.generation,
+      reviewerCatId: 'codex-terra',
+      holderThreadId: 'thread-reviewer-session',
+      targetThreadId: 'thread-direct-review-carrier',
+    });
+    assert.equal(allowed.applicable, true);
+    assert.equal(allowed.allow, true);
+    assert.equal(allowed.expectedThreadId, 'thread-direct-review-carrier');
+
+    const ancestorRoute = await service.preflightLocalReviewTerminalRoute({
+      leaseId: currentLease.leaseId,
+      generation: currentLease.generation,
+      reviewerCatId: 'codex-terra',
+      holderThreadId: 'thread-reviewer-session',
+      targetThreadId: 'thread-task-ancestor',
+    });
+    assert.equal(ancestorRoute.applicable, true);
+    assert.equal(ancestorRoute.allow, false);
+    assert.equal(ancestorRoute.reason, 'target_thread_mismatch');
+    assert.equal(ancestorRoute.expectedThreadId, 'thread-direct-review-carrier');
+  });
+
+  it('does not apply the review route guard when lease family is unknown or non-review', async () => {
+    const { service: missingLeaseService } = harness();
+    const missingLease = await missingLeaseService.preflightLocalReviewTerminalRoute({
+      leaseId: 'lease-missing',
+      generation: 1,
+      reviewerCatId: 'codex-terra',
+      holderThreadId: 'thread-reviewer-session',
+      targetThreadId: 'thread-owner',
+    });
+    assert.deepEqual(missingLease, { applicable: false });
+
+    const { service: implementService } = harness({
+      currentLease: {
+        leaseId: 'lease-implement',
+        generation: 1,
+        status: 'active',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
+        holderCatIds: ['codex-terra'],
+        holderThreadId: 'thread-reviewer-session',
+      },
+    });
+    const implementLease = await implementService.preflightLocalReviewTerminalRoute({
+      leaseId: 'lease-implement',
+      generation: 1,
+      reviewerCatId: 'codex-terra',
+      holderThreadId: 'thread-reviewer-session',
+      targetThreadId: 'thread-owner',
+    });
+    assert.deepEqual(implementLease, { applicable: false });
   });
 });

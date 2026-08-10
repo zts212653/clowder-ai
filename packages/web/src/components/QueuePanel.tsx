@@ -11,6 +11,7 @@ import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
+import { composerInsertFromRecall, requestTrueRecall, TrueRecallRequestError } from '@/utils/true-recall';
 import { SortableQueueEntryRow } from './QueueEntryRow';
 import {
   collectExactLiveInvocationIds,
@@ -202,8 +203,8 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           setQueue(threadId, prevQueue);
           addToast({
             type: 'error',
-            title: '撤出失败',
-            message: data?.error ?? '撤出失败，请重试',
+            title: '停止失败',
+            message: data?.error ?? '停止后续处理失败，请重试',
             threadId,
             duration: 5000,
           });
@@ -211,14 +212,20 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
         }
         addToast({
           type: 'success',
-          title: '已撤出待处理',
-          message: '原消息仍保留在对话历史中',
+          title: '已停止后续处理',
+          message: '原消息与已经发生的读取事实仍保留在历史中',
           threadId,
           duration: 3000,
         });
       } catch {
         setQueue(threadId, prevQueue);
-        addToast({ type: 'error', title: '撤出失败', message: '撤出失败，请重试', threadId, duration: 5000 });
+        addToast({
+          type: 'error',
+          title: '停止失败',
+          message: '停止后续处理失败，请重试',
+          threadId,
+          duration: 5000,
+        });
       }
     },
     [addToast, queue, setQueue, threadId],
@@ -228,57 +235,46 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
     async (entryId: string) => {
       const entry = queue.find((e) => e.id === entryId);
       if (!entry) return;
-
-      // #706: Extract image URLs from server-enriched messagePreview (already in queue data).
-      // No need to read from DELETE response — the data is available before the request.
-      const imageUrls = (entry.messagePreview?.contentBlocks ?? [])
-        .filter((b) => b.type === 'image' && b.url)
-        .map((b) => b.url!);
-
-      const prevQueue = queue;
-      setQueue(
-        threadId,
-        prevQueue.filter((e) => e.id !== entryId),
-      );
+      if (!entry.messageId) {
+        addToast({
+          type: 'error',
+          title: '无法撤回这条消息',
+          message: '缺少原消息身份；可以改用“停止后续处理”。',
+          threadId,
+          duration: 5000,
+        });
+        return;
+      }
 
       try {
-        const res = await apiFetch(`/api/threads/${threadId}/queue/${entryId}`, { method: 'DELETE' });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          setQueue(threadId, prevQueue);
-          addToast({
-            type: 'error',
-            title: '撤回编辑失败',
-            message: data?.error ?? '撤回编辑失败，请重试',
-            threadId,
-            duration: 5000,
-          });
-          return;
-        }
-
-        // #706 + #833 cross-PR: preserve replyToId so recall-edit restores quote state
-        const replyToId = entry.messagePreview?.replyTo;
-        setPendingChatInsert({
+        const result = await requestTrueRecall({
           threadId,
-          text: entry.content,
-          ...(imageUrls.length > 0 ? { imageUrls } : {}),
-          ...(replyToId ? { replyToId } : {}),
+          messageId: entry.messageId,
+          confirmAppend: () => window.confirm('输入框已有草稿。撤回正文会空一行追加到当前草稿末尾，是否继续？'),
         });
-        const hasImages = imageUrls.length > 0;
-        const hasQuote = !!replyToId;
-        const parts = ['已回填文字'];
-        if (hasImages) parts.push('图片');
-        if (hasQuote) parts.push('引用');
+        if (!result) return;
+        setQueue(threadId, result.queue);
+        const insert = composerInsertFromRecall(result);
+        if (insert) setPendingChatInsert(insert);
         addToast({
-          type: 'success',
-          title: '已撤回编辑',
-          message: `${parts.join('、')}到输入框`,
+          type: result.verdict === 'exposed' ? 'info' : 'success',
+          title: result.verdict === 'exposed' ? '正文已撤回 · 猫曾读取' : '已撤回并回填输入框',
+          message:
+            result.verdict === 'exposed'
+              ? '未读猫已停止后续处理；已读回合不会被普通撤回中断。'
+              : '正文已从消息历史转移到持久草稿，可修改后重新发送。',
           threadId,
-          duration: 2500,
+          duration: 4000,
         });
-      } catch {
-        setQueue(threadId, prevQueue);
-        addToast({ type: 'error', title: '撤回编辑失败', message: '撤回编辑失败，请重试', threadId, duration: 5000 });
+      } catch (error) {
+        const conflict = error instanceof TrueRecallRequestError && error.code === 'DRAFT_REVISION_MISMATCH';
+        addToast({
+          type: 'error',
+          title: conflict ? '草稿已在别处更新' : '撤回并重新编辑失败',
+          message: conflict ? '原消息和两份草稿都没有改变；刷新输入框后再试。' : (error as Error).message,
+          threadId,
+          duration: 5000,
+        });
       }
     },
     [addToast, queue, setPendingChatInsert, setQueue, threadId],
@@ -316,8 +312,8 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
         if (Array.isArray(data?.queue)) setQueue(threadId, data.queue);
         addToast({
           type: 'error',
-          title: data?.code === 'QUEUE_WITHDRAWAL_PARTIAL' ? '部分撤出' : '撤出失败',
-          message: data?.error ?? '撤出失败，请重试',
+          title: data?.code === 'QUEUE_WITHDRAWAL_PARTIAL' ? '已停止部分消息' : '停止失败',
+          message: data?.error ?? '停止后续处理失败，请重试',
           threadId,
           duration: 5000,
         });
@@ -325,13 +321,19 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
       }
       addToast({
         type: 'success',
-        title: '已全部撤出待处理',
-        message: '原消息仍保留在对话历史中',
+        title: '已全部停止后续处理',
+        message: '原消息与已经发生的读取事实仍保留在历史中',
         threadId,
         duration: 3000,
       });
     } catch {
-      addToast({ type: 'error', title: '撤出失败', message: '撤出失败，请重试', threadId, duration: 5000 });
+      addToast({
+        type: 'error',
+        title: '停止失败',
+        message: '停止后续处理失败，请重试',
+        threadId,
+        duration: 5000,
+      });
     }
   }, [addToast, setQueue, threadId]);
 
@@ -510,10 +512,10 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           <button
             type="button"
             onClick={handleClear}
-            title="全部撤出待处理（保留原消息）"
+            title="全部停止后续处理（保留原消息）"
             className="text-xs text-cafe-muted hover:text-conn-red-text transition-colors"
           >
-            全部撤出
+            全部停止
           </button>
         </div>
       </div>

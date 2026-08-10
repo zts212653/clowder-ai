@@ -1029,7 +1029,7 @@
     {
       "id": "F168",
       "name": "Community Operations Board — 社区事务编排引擎",
-      "status": "operational closure dogfood complete ✅（2026-08-04）| **基础设施 A→E 全部 merged ✅** | **Phase F backend + backfill + board UX merged, opus-47 vision guards PASS ✅** | **F-Step3 External Case Closure 真实 external case 已闭环 ✅** | **Owner**: Ragdoll (opus-4.8) | **Priority**: P1",
+      "status": "**done** ✅（2026-08-04 operational closure dogfood complete；2026-08-06 post-close verdict projection starvation 修复见 Timeline）| **基础设施 A→E 全部 merged ✅** | **Phase F backend + backfill + board UX merged, opus-47 vision guards PASS ✅** | **F-Step3 External Case Closure 真实 external case 已闭环 ✅** | **Owner**: Ragdoll (opus-4.8) | **Priority**: P1",
       "file": "F168-community-ops-board.md"
     },
     {
@@ -1611,7 +1611,7 @@
     {
       "id": "F273",
       "name": "Desktop In-App Update — 应用内检查更新 + 原地升级（无签名约束版）",
-      "status": "in-progress（Phase A–D 已通过 clowder-ai #1105 合入；Clowder AI intake #3222 已合入 `8424af315`；exact-head RC package verification 与 macOS arm64 isolated old-install 验收通过；**Phase E 首次 upstream stable release field validation 待完成**） | **Source author**: mindfn | **Intake owner**: @codex-sol | **Priority**: P1",
+      "status": "in-progress（Phase A–D 已通过 clowder-ai #1105 合入；Clowder AI intake #3222 已合入 `8424af315`；clowder-ai #1227 的 hardened renderer/update recovery 已合入并完成 Windows RC `.14` 主路径现场验收；**Phase E 首次 upstream stable release 的完整 field validation 仍待完成**） | **Source author**: mindfn | **Intake owner**: @codex-sol | **Priority**: P1",
       "file": "F273-desktop-in-app-update.md"
     },
     {
@@ -1641,13 +1641,13 @@
     {
       "id": "F278",
       "name": "Paw-Feel Disposition Inbox — 爪感差责任收件箱",
-      "status": "in progress — Phase E code landed; awaiting operator activation",
+      "status": "in progress — Phase G production acceptance correction in branch; live remains on Phase F behavior",
       "file": "F278-paw-feel-disposition-inbox.md"
     },
     {
       "id": "F279",
       "name": "Workspace Listen Mode — 正文听读与可复用音频缓存",
-      "status": "in-progress / Phase A UX Design Gate passed; Phase B pending",
+      "status": "in-progress / Phase A passed; Phase B/C review delta awaiting terminal re-review; F289 base dependency and real-TTS UAT pending",
       "file": "F279-workspace-listen-mode.md"
     },
     {
@@ -1691,6 +1691,36 @@
       "name": "Plugin Messaging Domain（K-1 messaging 域收敛）",
       "status": "K-1 absorbed; dormant until K-2 activation | **Owner**: Clowder AI maintainers (home intake from clowder-ai#1270)",
       "file": "F288-plugin-messaging-domain.md"
+    },
+    {
+      "id": "F289",
+      "name": "Canonical Data Root — 用户数据离开 runtime 投影",
+      "status": "in-progress | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P0",
+      "file": "F289-canonical-data-root.md"
+    },
+    {
+      "id": "F290",
+      "name": "AI-native Collective — 多人·多 Agent 共同世界",
+      "status": "spec / Experience Design Gate",
+      "file": "F290-ai-native-collective.md"
+    },
+    {
+      "id": "F291",
+      "name": "Codex OAuth Fast Mode — 成员默认与对话级速度档位",
+      "status": "done | **Completed**: 2026-08-09 | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "file": "F291-codex-oauth-fast-mode.md"
+    },
+    {
+      "id": "F292",
+      "name": "Feishu Meeting Intake Plugin — 会后产物不再靠人搬运",
+      "status": "spec / Architecture + Experience Design Gate",
+      "file": "F292-feishu-meeting-intake-plugin.md"
+    },
+    {
+      "id": "F293",
+      "name": "— Live Routing Context",
+      "status": "spec / Architecture Design Gate | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "file": "F293-live-routing-context.md"
     }
   ]
 }

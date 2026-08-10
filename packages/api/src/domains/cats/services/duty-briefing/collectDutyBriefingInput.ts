@@ -220,7 +220,9 @@ async function collectMentionCandidates(
     const tail = await messageStore.getByThread(thread.id, 1, userId);
     const last = tail[tail.length - 1];
     if (!last || !last.mentionsUser || last.catId == null) continue;
-    const after = await messageStore.getByThreadAfter(thread.id, last.id, undefined, userId);
+    const after = await messageStore.getByThreadAfter(thread.id, last.id, undefined, userId, {
+      unresolvedCursorPolicy: 'empty',
+    });
     if (after.some((m) => m.catId == null && !isSystemUserMessage(m))) continue; // 真正的 operator 已回应 → 球不在 operator 手上
     candidates.push({
       threadId: thread.id,

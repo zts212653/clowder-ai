@@ -7,6 +7,7 @@
  */
 
 import { useToastStore } from '../stores/toastStore';
+import { boundedFetch, waitForPromiseWithSignal } from './bounded-fetch';
 
 function getBrowserLocation(): Location | null {
   if (typeof globalThis !== 'object' || globalThis === null) return null;
@@ -46,6 +47,9 @@ export function resolveApiUrl(): string {
 }
 export const API_URL = resolveApiUrl();
 
+const SESSION_BOOTSTRAP_TIMEOUT_MS = 10_000;
+const API_REQUEST_TIMEOUT_MS = 30_000;
+
 let sessionGate: Promise<void> | null = null;
 let lastSessionFailureToastAt = 0;
 
@@ -63,17 +67,22 @@ function notifySessionFailure() {
 
 function ensureSession(): Promise<void> {
   if (sessionGate) return sessionGate;
-  sessionGate = fetch(`${API_URL}/api/session`, { credentials: 'include' })
+  const gate = boundedFetch(`${API_URL}/api/session`, { credentials: 'include' }, SESSION_BOOTSTRAP_TIMEOUT_MS)
     .then((res) => {
       if (!res.ok) {
         throw new Error(`session bootstrap failed (${res.status})`);
       }
     })
     .catch((err) => {
-      sessionGate = null;
+      if (sessionGate === gate) sessionGate = null;
       throw err;
     });
-  return sessionGate;
+  sessionGate = gate;
+  return gate;
+}
+
+function invalidateSession(observedGate: Promise<void>) {
+  if (sessionGate === observedGate) sessionGate = null;
 }
 
 /**
@@ -106,20 +115,30 @@ function ensureBodyForMutation(init?: RequestInit): RequestInit | undefined {
  * @param init - Standard RequestInit options
  */
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  await ensureSession();
+  const initialSessionGate = ensureSession();
+  await waitForPromiseWithSignal(initialSessionGate, init?.signal);
   const normalized = ensureBodyForMutation(init);
-  const res = await fetch(`${API_URL}${path}`, {
-    ...normalized,
-    credentials: 'include',
-  });
-  if (res.status === 401) {
-    // Session expired (API restart, cookie cleared). Re-establish and retry once.
-    sessionGate = null;
-    await ensureSession();
-    const retryRes = await fetch(`${API_URL}${path}`, {
+  const res = await boundedFetch(
+    `${API_URL}${path}`,
+    {
       ...normalized,
       credentials: 'include',
-    });
+    },
+    API_REQUEST_TIMEOUT_MS,
+  );
+  if (res.status === 401) {
+    // Session expired (API restart, cookie cleared). Re-establish and retry once.
+    invalidateSession(initialSessionGate);
+    const refreshedSessionGate = ensureSession();
+    await waitForPromiseWithSignal(refreshedSessionGate, init?.signal);
+    const retryRes = await boundedFetch(
+      `${API_URL}${path}`,
+      {
+        ...normalized,
+        credentials: 'include',
+      },
+      API_REQUEST_TIMEOUT_MS,
+    );
     if (retryRes.status === 401) {
       notifySessionFailure();
     }

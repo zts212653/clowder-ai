@@ -697,6 +697,7 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
 
     const orch = getMultiMentionOrchestrator();
     const callerCatId = record.catId;
+    const expectedParentInvocationId = record.parentInvocationId ?? record.invocationId;
 
     let turnExecution: TurnExecutionRecord | null = null;
     if (deps.turnExecutionStore) {
@@ -709,7 +710,6 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
         );
         return reply.status(503).send({ status: 'turn_execution_ledger_unavailable' });
       }
-      const expectedParentInvocationId = record.parentInvocationId ?? record.invocationId;
       if (!turnExecution) {
         return reply.status(409).send({ status: 'turn_execution_not_found' });
       }
@@ -799,7 +799,9 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
           // AC-A7: record held/forward decisions as events
           eventLog: deps.freshnessEventLog,
           // F254 queue-aware gate: detect queued messages hidden by isDelivered()
-          queueChecker: deps.invocationQueue ? createQueueChecker(deps.invocationQueue) : undefined,
+          queueChecker: deps.invocationQueue
+            ? createQueueChecker(deps.invocationQueue, { parentInvocationId: expectedParentInvocationId })
+            : undefined,
           // F254 AC-C3: descriptor parameterizes held/notice behavior per carrier tier
           descriptor: freshnessDescriptor,
           ...(turnExecution?.causal?.coveredMessageIds

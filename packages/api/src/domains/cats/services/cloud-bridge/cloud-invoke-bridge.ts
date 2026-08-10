@@ -21,11 +21,10 @@
  * Previously completed: PR-B (skeleton + fallback), PR-C (real CDP adapter).
  */
 
-import type { CatId } from '@cat-cafe/shared';
-
 import { CHATGPT_CHAT_URL_REGEX } from '../../../../utils/chatgpt-chat-url.js';
-import type { IThreadStore } from '../stores/ports/ThreadStore.js';
 import { buildDeltaPayload } from './build-delta-payload.js';
+import { type BridgeLogger, type CloudInvokeBridgeDeps, noopBridgeLogger } from './cloud-invoke-bridge-deps.js';
+import { dispatchBoundConversationThroughHost } from './conversation-host-dispatch.js';
 import type {
   BridgeDispatchOutcome,
   BridgeFallbackReason,
@@ -34,54 +33,8 @@ import type {
   IPinchTabBridgeAdapter,
 } from './types.js';
 
-/**
- * Callback invoked when the bridge needs to emit a fallback `system_info`
- * notification into the local thread (AC-B1c-4).
- *
- * The wire-up (in `packages/api/src/index.ts`) injects a real implementation
- * that posts to the message store + broadcasts to connected clients. Tests
- * use a recording mock.
- *
- * The bridge service itself does NOT depend on the message store directly;
- * it just calls this callback. Keeps the bridge unit-testable without
- * dragging in the full broadcast infrastructure.
- */
-export type EmitFallbackFn = (params: {
-  readonly threadId: string;
-  readonly catId: CatId | string;
-  readonly reason: BridgeFallbackReason;
-  readonly detail?: string;
-}) => Promise<void>;
-
-/**
- * Minimal logger interface (matches pino — the project-wide logger
- * convention) without dragging in the pino types here.
- */
-export interface BridgeLogger {
-  warn(ctx: object, msg: string): void;
-  info(ctx: object, msg: string): void;
-  error?(ctx: object, msg: string): void;
-}
-
-export interface CloudInvokeBridgeDeps {
-  /** Pluggable PinchTab CDP adapter. `null` → all dispatches fall back. */
-  readonly pinchTabAdapter: IPinchTabBridgeAdapter | null;
-  /** Emit a `system_info` block into the local thread on adapter failure. */
-  readonly emitFallback: EmitFallbackFn;
-  /** ThreadStore for reading + writing per-thread cloud cat bindings. */
-  readonly threadStore: IThreadStore;
-  /** Optional logger; tests pass a recording mock. */
-  readonly logger?: BridgeLogger;
-}
-
-const noopLogger: BridgeLogger = {
-  warn() {
-    /* no-op */
-  },
-  info() {
-    /* no-op */
-  },
-};
+export { buildFallbackMessageContent } from './cloud-bridge-fallback.js';
+export type { BridgeLogger, CloudInvokeBridgeDeps, EmitFallbackFn } from './cloud-invoke-bridge-deps.js';
 
 /**
  * Cloud invoke bridge — default implementation.
@@ -119,7 +72,7 @@ export class CloudInvokeBridge implements ICloudInvokeBridge {
   constructor(private readonly deps: CloudInvokeBridgeDeps) {}
 
   private get logger(): BridgeLogger {
-    return this.deps.logger ?? noopLogger;
+    return this.deps.logger ?? noopBridgeLogger;
   }
 
   async dispatch(params: CloudInvokeDispatchParams): Promise<void> {
@@ -204,14 +157,38 @@ export class CloudInvokeBridge implements ICloudInvokeBridge {
    * bound URL (stale chat), clear the binding and retry with boundUrl=null.
    */
   private async dispatchCoreWithSelfHeal(params: CloudInvokeDispatchParams): Promise<BridgeDispatchOutcome> {
-    const { pinchTabAdapter, threadStore } = this.deps;
+    const { hostAdapter, pinchTabAdapter, threadStore } = this.deps;
 
     // 1. Build delta payload (AC-B1c-12).
     const renderedPrompt = buildDeltaPayload(params);
 
-    // 2. Adapter availability gate (AC-B1c-4).
+    // 2. Resolve the stable host conversation before choosing a transport.
+    // The Host Adapter can append only to an existing binding; it never
+    // manufactures a conversation by driving the foreground composer.
+    const boundUrl = await this.readBoundUrl(params);
+    const hostDecision = await dispatchBoundConversationThroughHost({
+      adapter: hostAdapter,
+      boundUrl,
+      renderedPrompt,
+      params,
+    });
+    if (hostDecision) {
+      if (hostDecision.fallback) {
+        await this.fallback(params, hostDecision.fallback.reason, hostDecision.fallback.detail);
+      }
+      return hostDecision.outcome;
+    }
+
+    // 3. Legacy adapter availability gate (AC-B1c-4). Production wiring keeps
+    // this null unless the operator explicitly opts into foreground automation.
     if (!pinchTabAdapter) {
-      await this.fallback(params, 'no-adapter', 'PinchTab adapter not yet wired (B1c PR-C pending)');
+      await this.fallback(
+        params,
+        'no-adapter',
+        boundUrl
+          ? 'No conversation Host Adapter is installed; legacy foreground automation is disabled'
+          : 'No bound host conversation is available; legacy foreground automation is disabled',
+      );
       return { kind: 'fallback', reason: 'no-adapter' };
     }
     const ready = await pinchTabAdapter.isReady().catch(() => false);
@@ -220,10 +197,7 @@ export class CloudInvokeBridge implements ICloudInvokeBridge {
       return { kind: 'fallback', reason: 'adapter-not-ready' };
     }
 
-    // 3. Read existing binding INSIDE the lock (AC-B1c-9 lock-first ordering).
-    const boundUrl = await this.readBoundUrl(params);
-
-    // 4. Invoke adapter with self-heal retry on stale binding (AC-B1c-6).
+    // 4. Invoke explicitly enabled legacy adapter with self-heal retry.
     const injectResult = await this.injectWithSelfHeal(pinchTabAdapter, params, renderedPrompt, boundUrl);
     if (injectResult.kind !== 'ok') return injectResult.outcome;
     const capturedUrl = injectResult.capturedUrl;
@@ -248,7 +222,7 @@ export class CloudInvokeBridge implements ICloudInvokeBridge {
       );
     }
 
-    return { kind: 'sent', capturedUrl };
+    return { kind: 'sent', capturedUrl, transport: 'legacy-pinchtab' };
   }
 
   /**
@@ -342,30 +316,4 @@ function shortMessage(err: unknown): string {
 function serializeError(err: unknown): { name?: string; message: string } {
   if (err instanceof Error) return { name: err.name, message: err.message };
   return { message: String(err) };
-}
-
-/**
- * Compose a default fallback emitter from a minimal "post system message"
- * primitive. Lets the wire-up code (index.ts) keep the bridge agnostic of
- * how messages actually get into the thread store + broadcast pipeline.
- */
-export function buildFallbackMessageContent(args: {
-  reason: BridgeFallbackReason;
-  detail?: string;
-  catId: CatId | string;
-}): string {
-  const headlineByReason: Record<BridgeFallbackReason, string> = {
-    'no-adapter': `Cloud cat @${args.catId} bridge not yet wired (B1c PR-C pending).`,
-    'adapter-not-ready': `Cloud cat @${args.catId} bridge unavailable: PinchTab Chrome unreachable or not logged in to ChatGPT.`,
-    'inject-failed': `Cloud cat @${args.catId} bridge inject failed (DOM selector or eval error).`,
-    'invalid-captured-url': `Cloud cat @${args.catId} bridge captured a non-canonical ChatGPT URL; binding not written.`,
-  };
-  const headline = headlineByReason[args.reason];
-  return JSON.stringify({
-    type: 'b1c_bridge_fallback',
-    catId: args.catId,
-    reason: args.reason,
-    headline,
-    detail: args.detail ?? '',
-  });
 }

@@ -135,7 +135,31 @@ describe('presentation lock (AC-PL1~PL5)', () => {
       workspaceOpenFilePath: 'README.md',
       workspaceOpenFileLine: 42,
       presentationLock: null,
+      workspaceSurface: 'home',
+      workspacePreview: { port: undefined, path: '/' },
     });
+  });
+
+  it('keeps the selected surface when the panel folds or its route unmounts', () => {
+    useChatStore.getState().setWorkspaceSurface('browser');
+    useChatStore.getState().setWorkspacePreview({ port: 5172, path: '/thread/thread-a' });
+    useChatStore.getState().closeRightPanel();
+
+    expect(useChatStore.getState().workspaceSurface).toBe('browser');
+    expect(useChatStore.getState().workspacePreview).toEqual({ port: 5172, path: '/thread/thread-a' });
+
+    useChatStore.getState().setRightPanelMode('workspace');
+    expect(useChatStore.getState().workspaceSurface).toBe('browser');
+  });
+
+  it('does not let an automatic preview event replace a locked surface', () => {
+    useChatStore.getState().setWorkspaceSurface('files');
+    useChatStore.getState().enablePresentationLock();
+
+    useChatStore.getState().setPendingPreviewAutoOpen({ port: 5172, path: '/preview' });
+
+    expect(useChatStore.getState().pendingPreviewAutoOpen).toBeNull();
+    expect(useChatStore.getState().workspaceSurface).toBe('files');
   });
 
   it('AC-PL1: locked workspace persists across thread switch', () => {

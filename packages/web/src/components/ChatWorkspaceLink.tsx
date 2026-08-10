@@ -3,6 +3,7 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import {
   cancelActiveWorkspaceDocumentResolution,
   claimWorkspaceDocumentResolution,
@@ -17,6 +18,18 @@ export interface WorkspaceDocumentTarget {
 const MARKDOWN_FILE_HREF_RE = /^(.*\.mdx?)(?::(\d+))?$/i;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 const WINDOWS_ABSOLUTE_PATH_RE = /^[a-z]:\//i;
+const THREAD_HREF_RE = /^\/thread\/([^/?#]+)$/;
+
+export function resolveChatThreadHref(href: string | undefined): string | null {
+  const encodedId = href?.match(THREAD_HREF_RE)?.[1];
+  if (!encodedId) return null;
+  try {
+    const threadId = decodeURIComponent(encodedId);
+    return /^thread_[a-zA-Z0-9_-]+$/.test(threadId) ? threadId : null;
+  } catch {
+    return null;
+  }
+}
 
 function normalizeHrefPath(path: string): string {
   return path.replace(/\\/g, '/');
@@ -115,6 +128,7 @@ export function ChatWorkspaceLink({ href, children }: { href?: string; children:
   const workspaceTarget = resolveChatWorkspaceDocumentHref(href, projectRoot);
   const isLocalDocument = isLocalMarkdownDocumentHref(href);
   const requiresServerResolution = isLocalDocument && isAbsoluteLocalMarkdownDocumentHref(href);
+  const threadTarget = resolveChatThreadHref(href);
   const [resolveState, setResolveState] = useState<'idle' | 'resolving' | 'error'>('idle');
   const resolutionClaimRef = useRef<WorkspaceDocumentResolutionClaim | null>(null);
   const mountedRef = useRef(true);
@@ -158,6 +172,22 @@ export function ChatWorkspaceLink({ href, children }: { href?: string; children:
       if (resolutionClaimRef.current === claim) resolutionClaimRef.current = null;
     }
   };
+
+  if (threadTarget) {
+    return (
+      <a
+        href={href}
+        onClick={(event) => {
+          event.preventDefault();
+          pushThreadRouteWithHistory(threadTarget, typeof window !== 'undefined' ? window : undefined);
+        }}
+        className="text-conn-blue-text hover:underline break-all"
+        title={`打开 Thread ${threadTarget}`}
+      >
+        {children}
+      </a>
+    );
+  }
 
   if (workspaceTarget || isLocalDocument) {
     const targetLabel = workspaceTarget?.path ?? href ?? '';

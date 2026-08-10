@@ -14,6 +14,8 @@ const PERSON_MEMORY_STAGES = [
   'amend',
   'redact',
   'forget',
+  'capture',
+  'deferred_daily',
 ] as const;
 
 const PERSON_MEMORY_OUTCOMES = [

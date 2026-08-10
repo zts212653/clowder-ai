@@ -15,6 +15,7 @@ import {
   getDefaultCliEffortForProvider,
   normalizeCliEffortForProvider,
   type RosterEntry,
+  resolveCodexSpeed,
 } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
@@ -67,6 +68,8 @@ const cliSchema = z.object({
   outputFormat: z.string().min(1).optional(),
   defaultArgs: z.array(z.string().min(1)).optional(),
   effort: cliEffortSchema.nullable().optional(),
+  /** F291: null clears the member default and restores Codex user-config inheritance. */
+  serviceTier: z.enum(['standard', 'fast']).nullable().optional(),
   contextWindow: z.number().int().positive().optional(),
   autoCompactTokenLimit: z.number().int().positive().optional(),
   /** F254 D2: Codex carrier override (openai only). null clears the per-cat override. */
@@ -339,6 +342,9 @@ function buildResolvedCliConfig(
     throw new Error(`client "${client}" does not support cli.carrier (codex-only)`);
   }
 
+  const serviceTierTouched = patch ? Object.hasOwn(patch, 'serviceTier') : false;
+  const nextServiceTier = serviceTierTouched ? patch?.serviceTier : baseCli.serviceTier;
+
   const contextWindowFields = resolveContextWindowFields(baseCli, patch);
 
   return {
@@ -347,6 +353,7 @@ function buildResolvedCliConfig(
     ...(defaultArgs ? { defaultArgs } : {}),
     ...(nextEffort !== undefined && nextEffort !== null ? { effort: nextEffort } : {}),
     ...(nextCarrier !== undefined && nextCarrier !== null ? { carrier: nextCarrier } : {}),
+    ...(nextServiceTier !== undefined && nextServiceTier !== null ? { serviceTier: nextServiceTier } : {}),
     ...contextWindowFields,
   };
 }
@@ -362,6 +369,9 @@ function buildCliForModelSwitch(client: ClientId, defaultModel: string, currentC
     ...(normalizedEffort ? { effort: normalizedEffort } : {}),
     // Carrier is model-independent — preserve the per-cat override across model switches.
     ...(currentCli.carrier ? { carrier: currentCli.carrier } : {}),
+    // Requested service tier is also model-independent intent. Runtime compatibility
+    // decides whether it is active for the selected model/account.
+    ...(currentCli.serviceTier ? { serviceTier: currentCli.serviceTier } : {}),
   };
 }
 
@@ -489,6 +499,31 @@ async function validateAccountBindingOrThrow(
   });
   if (modelFormatError) {
     throw new Error(modelFormatError);
+  }
+}
+
+function validateServiceTierMutationOrThrow(
+  projectRoot: string,
+  client: ClientId,
+  accountRef: string | undefined,
+  defaultModel: string | undefined | null,
+  serviceTier: CliPatch['serviceTier'],
+  touched: boolean,
+): void {
+  if (!touched || serviceTier == null) return;
+
+  const runtimeProfile = accountRef ? resolveByAccountRef(projectRoot, accountRef) : null;
+  const resolution = resolveCodexSpeed({
+    clientId: client,
+    authType: runtimeProfile?.authType,
+    model: defaultModel,
+    memberDefault: serviceTier,
+  });
+  if (!resolution.configurable) {
+    throw new Error('cli.serviceTier is available only for Codex OAuth bindings');
+  }
+  if (!resolution.options.includes(serviceTier)) {
+    throw new Error(`Codex Fast is not supported by model "${defaultModel ?? ''}"`);
   }
 }
 
@@ -739,6 +774,14 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         body.defaultModel,
         providerNameForValidation,
       );
+      validateServiceTierMutationOrThrow(
+        projectRoot,
+        body.clientId,
+        accountRef ?? undefined,
+        body.defaultModel,
+        'cli' in body ? body.cli?.serviceTier : undefined,
+        'cli' in body && body.cli !== undefined && Object.hasOwn(body.cli, 'serviceTier'),
+      );
       const resolvedAvatar = body.avatar ?? '/avatars/default.png';
       if (body.clientId === 'antigravity') {
         createRuntimeCat(projectRoot, {
@@ -967,6 +1010,21 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         reply.status(400);
         return { error: message };
       }
+    }
+
+    try {
+      validateServiceTierMutationOrThrow(
+        projectRoot,
+        effectiveClient,
+        effectiveAccountRef,
+        effectiveDefaultModel,
+        body.cli?.serviceTier,
+        body.cli != null && Object.hasOwn(body.cli, 'serviceTier'),
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      reply.status(400);
+      return { error: message };
     }
 
     // F161 invariant: clientId 'acp' must have an effective acp config.

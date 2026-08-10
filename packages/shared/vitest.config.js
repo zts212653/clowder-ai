@@ -16,6 +16,7 @@ export default defineConfig({
       'src/__tests__/proactive-memory-opportunity.test.ts',
       'src/__tests__/subject-key.test.ts',
       'src/__tests__/cli-effort.test.ts',
+      'src/__tests__/codex-speed.test.ts',
       'src/__tests__/dispatch-proposal-types.test.ts',
       'src/__tests__/approval-hub-types.test.ts',
       'src/__tests__/approval-producer-catalog.test.ts',
@@ -31,6 +32,7 @@ export default defineConfig({
       'src/__tests__/capability-tip-telemetry.test.ts',
       'src/__tests__/paw-feel-disposition-contract.test.ts',
       'src/__tests__/memory-cue.test.ts',
+      'src/__tests__/context-attachment.test.ts',
     ],
   },
 });

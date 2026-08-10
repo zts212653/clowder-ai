@@ -37,7 +37,9 @@ export function createProviderNativeFreshnessFactory(
       return stored.origin !== 'stream' || !stored.catId || stored.catId === catId;
     };
     const queue = deps.getQueue?.();
-    const queueChecker: QueuedMessageChecker | undefined = queue ? createQueueChecker(queue) : undefined;
+    const queueChecker: QueuedMessageChecker | undefined = queue
+      ? createQueueChecker(queue, { parentInvocationId: invocationId })
+      : undefined;
     const unseenChecker = new ThreadUnseenChecker({
       userId,
       cursorStore: deps.cursorStore,

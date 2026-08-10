@@ -29,6 +29,8 @@ import type {
   ThreadState,
   TokenUsage,
   ToolEvent,
+  WorkspacePreviewState,
+  WorkspaceSurface,
 } from './chat-types';
 import { DEFAULT_THREAD_STATE } from './chat-types';
 import { getMessageTimelineOrderTime } from './message-timeline';
@@ -452,7 +454,7 @@ function revokeBlobUrls(messages: ChatMessage[]) {
   for (const msg of messages) {
     if (msg.contentBlocks) {
       for (const block of msg.contentBlocks) {
-        if (block.type === 'image' && block.url.startsWith('blob:')) {
+        if ((block.type === 'image' || block.type === 'file') && block.url.startsWith('blob:')) {
           URL.revokeObjectURL(block.url);
         }
       }
@@ -465,7 +467,7 @@ function collectBlobUrls(messages: ChatMessage[]): Set<string> {
   for (const msg of messages) {
     if (!msg.contentBlocks) continue;
     for (const block of msg.contentBlocks) {
-      if (block.type === 'image' && block.url.startsWith('blob:')) {
+      if ((block.type === 'image' || block.type === 'file') && block.url.startsWith('blob:')) {
         blobUrls.add(block.url);
       }
     }
@@ -501,7 +503,11 @@ function revokeRemovedBlobUrls(previousMessages: ChatMessage[], nextMessages: Ch
   for (const msg of previousMessages) {
     if (!msg.contentBlocks) continue;
     for (const block of msg.contentBlocks) {
-      if (block.type === 'image' && block.url.startsWith('blob:') && !retainedBlobUrls.has(block.url)) {
+      if (
+        (block.type === 'image' || block.type === 'file') &&
+        block.url.startsWith('blob:') &&
+        !retainedBlobUrls.has(block.url)
+      ) {
         URL.revokeObjectURL(block.url);
       }
     }
@@ -854,6 +860,7 @@ export interface ChatState {
   /** F108: Clear all active invocations (timeout/error/stop recovery) */
   clearAllActiveInvocations: () => void;
   setLoadingHistory: (loading: boolean) => void;
+  setThreadLoadingHistory: (threadId: string, loading: boolean) => void;
   setIntentMode: (mode: 'execute' | 'ideate' | null) => void;
   setTargetCats: (cats: string[]) => void;
   setCatStatus: (catId: string, status: CatStatusType) => void;
@@ -1104,6 +1111,11 @@ export interface ChatState {
   workspaceOpenTabs: string[];
   workspaceOpenFilePath: string | null;
   workspaceOpenFileLine: number | null;
+  /** F284: current Workspace object; survives panel folds and route unmounts. */
+  workspaceSurface: WorkspaceSurface;
+  setWorkspaceSurface: (surface: WorkspaceSurface) => void;
+  workspacePreview: WorkspacePreviewState;
+  setWorkspacePreview: (preview: WorkspacePreviewState) => void;
   workspaceEditToken: string | null;
   workspaceEditTokenExpiry: number | null;
   /** @internal Last workspace-file-set event context (timestamp + threadId).
@@ -1423,6 +1435,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   workspaceOpenTabs: [],
   workspaceOpenFilePath: null,
   workspaceOpenFileLine: null,
+  workspaceSurface: 'home' as const,
+  setWorkspaceSurface: (surface) => set({ workspaceSurface: surface, rightPanelMode: 'workspace' }),
+  workspacePreview: { port: undefined, path: '/' },
+  setWorkspacePreview: (preview) => set({ workspacePreview: preview }),
   workspaceEditToken: null,
   workspaceEditTokenExpiry: null,
   _workspaceFileSetAt: { ts: 0, threadId: null },
@@ -1508,6 +1524,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           workspaceOpenFileLine: line ?? null,
           workspaceEditToken: null,
           workspaceEditTokenExpiry: null,
+          workspaceSurface: 'files',
           rightPanelMode: 'workspace',
           _workspaceFileSetAt: stamp,
         });
@@ -1518,6 +1535,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           workspaceOpenTabs: newTabs,
           workspaceOpenFilePath: path,
           workspaceOpenFileLine: line ?? null,
+          workspaceSurface: 'files',
           rightPanelMode: 'workspace',
           _workspaceFileSetAt: stamp,
         });
@@ -1541,10 +1559,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
       }
     } else {
-      set({
+      set(() => ({
         workspaceOpenFilePath: null,
         workspaceOpenFileLine: null,
-      });
+      }));
     }
   },
   closeWorkspaceTab: (path) => {
@@ -1590,6 +1608,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setWorkspaceRevealPath: (path, originThreadId) =>
     set((state) => ({
       workspaceRevealPath: path,
+      ...(path ? { workspaceSurface: 'files' as const } : {}),
       rightPanelMode: 'workspace' as const,
       _workspaceFileSetAt: { ts: Date.now(), threadId: originThreadId ?? state.currentThreadId },
     })),
@@ -1767,7 +1786,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // ── F120: Preview auto-open ──
   pendingPreviewAutoOpen: null,
-  setPendingPreviewAutoOpen: (data) => set({ pendingPreviewAutoOpen: data, rightPanelMode: 'workspace' }),
+  setPendingPreviewAutoOpen: (data) =>
+    set((state) =>
+      state.presentationLock
+        ? {}
+        : {
+            pendingPreviewAutoOpen: data,
+            workspacePreview: data,
+            workspaceSurface: 'browser' as const,
+            rightPanelMode: 'workspace' as const,
+          },
+    ),
   consumePreviewAutoOpen: () => {
     const pending = get().pendingPreviewAutoOpen;
     if (pending) set({ pendingPreviewAutoOpen: null });
@@ -2771,6 +2800,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ...existing,
             isLoading: loading,
             lastActivity: Date.now(),
+          },
+        },
+      };
+    }),
+
+  /** Update presentation-only history hydration state for a specific thread. */
+  setThreadLoadingHistory: (threadId, loading) =>
+    set((state) => {
+      if (threadId === state.currentThreadId) {
+        return {
+          isLoadingHistory: loading,
+          ...mirrorActiveToThreadStates(state, threadId, { isLoadingHistory: loading }),
+        };
+      }
+      const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
+      return {
+        threadStates: {
+          ...state.threadStates,
+          [threadId]: {
+            ...existing,
+            isLoadingHistory: loading,
           },
         },
       };

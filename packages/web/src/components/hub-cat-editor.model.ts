@@ -15,9 +15,6 @@ export type ClientId = 'anthropic' | 'openai' | 'google' | 'kimi' | 'opencode' |
 /** @deprecated Use ClientId instead. */
 export type ClientValue = ClientId;
 export type SessionChainValue = 'true' | 'false';
-export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
-export type CodexApprovalPolicy = 'untrusted' | 'on-failure' | 'on-request' | 'never';
-export type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
 
 export interface HubCatEditorFormState {
   catId: string;
@@ -40,6 +37,8 @@ export interface HubCatEditorFormState {
   commandArgs: string;
   cliConfigArgs: string[];
   cliEffort: string;
+  /** F291: '' inherits Codex user config. Optional keeps legacy form fixtures source-compatible. */
+  codexSpeed?: '' | 'standard' | 'fast';
   /** F254 D2: Codex carrier override. '' = 跟随服务端 CAT_CAFE_CODEX_CARRIER 环境变量。 */
   codexCarrier: '' | 'exec_json' | 'app_server';
   provider: string;
@@ -89,12 +88,6 @@ export interface StrategyFormState {
   sessionChainEnabled: boolean;
 }
 
-export interface CodexRuntimeSettings {
-  sandboxMode: CodexSandboxMode;
-  approvalPolicy: CodexApprovalPolicy;
-  authMode: CodexAuthMode;
-}
-
 export const CLIENT_OPTIONS: Array<{ value: ClientId; label: string }> = [
   { value: 'anthropic', label: 'Claude' },
   { value: 'openai', label: 'Codex' },
@@ -115,25 +108,6 @@ export const SESSION_STRATEGY_OPTIONS: Array<{ value: StrategyType; label: strin
   { value: 'handoff', label: 'handoff' },
   { value: 'compress', label: 'compress' },
   { value: 'hybrid', label: 'hybrid' },
-];
-
-export const CODEX_SANDBOX_OPTIONS: Array<{ value: CodexSandboxMode; label: string }> = [
-  { value: 'read-only', label: 'read-only' },
-  { value: 'workspace-write', label: 'workspace-write' },
-  { value: 'danger-full-access', label: 'danger-full-access' },
-];
-
-export const CODEX_APPROVAL_OPTIONS: Array<{ value: CodexApprovalPolicy; label: string }> = [
-  { value: 'untrusted', label: 'untrusted' },
-  { value: 'on-failure', label: 'on-failure' },
-  { value: 'on-request', label: 'on-request' },
-  { value: 'never', label: 'never' },
-];
-
-export const CODEX_AUTH_MODE_OPTIONS: Array<{ value: CodexAuthMode; label: string }> = [
-  { value: 'oauth', label: 'oauth' },
-  { value: 'api_key', label: 'api_key' },
-  { value: 'auto', label: 'auto' },
 ];
 
 export const CODEX_CARRIER_OPTIONS: Array<{ value: HubCatEditorFormState['codexCarrier']; label: string }> = [
@@ -387,6 +361,7 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     commandArgs: cat?.commandArgs?.join(' ') ?? createDraft?.commandArgs ?? '',
     cliConfigArgs: [...(cat?.cliConfigArgs ?? [])],
     cliEffort: persistedCliEffort ?? '',
+    codexSpeed: cat?.cli?.serviceTier ?? '',
     codexCarrier: cat?.cli?.carrier ?? '',
     provider: cat?.provider ?? '',
     acpEnabled:
@@ -457,39 +432,17 @@ export function buildStrategyPayload(strategy: StrategyFormState) {
   return payload;
 }
 
-export function toCodexRuntimeSettings(config?: {
-  cli?: {
-    codexSandboxMode?: CodexSandboxMode;
-    codexApprovalPolicy?: CodexApprovalPolicy;
-  };
-  codexExecution?: {
-    authMode?: CodexAuthMode;
-  };
-}): CodexRuntimeSettings {
-  return {
-    sandboxMode: config?.cli?.codexSandboxMode ?? 'workspace-write',
-    approvalPolicy: config?.cli?.codexApprovalPolicy ?? 'on-request',
-    authMode: config?.codexExecution?.authMode ?? 'oauth',
-  };
-}
-
-export function buildCodexConfigPatches(
-  settings: CodexRuntimeSettings,
-  baseline: CodexRuntimeSettings,
-): Array<{ key: string; value: string }> {
-  const patches: Array<{ key: string; value: string }> = [];
-  if (settings.sandboxMode !== baseline.sandboxMode) {
-    patches.push({ key: 'cli.codexSandboxMode', value: settings.sandboxMode });
-  }
-  if (settings.approvalPolicy !== baseline.approvalPolicy) {
-    patches.push({ key: 'cli.codexApprovalPolicy', value: settings.approvalPolicy });
-  }
-  if (settings.authMode !== baseline.authMode) {
-    patches.push({ key: 'codex.execution.authMode', value: settings.authMode });
-  }
-  return patches;
-}
-
+export {
+  buildCodexConfigPatches,
+  CODEX_APPROVAL_OPTIONS,
+  CODEX_AUTH_MODE_OPTIONS,
+  CODEX_SANDBOX_OPTIONS,
+  type CodexApprovalPolicy,
+  type CodexAuthMode,
+  type CodexRuntimeSettings,
+  type CodexSandboxMode,
+  toCodexRuntimeSettings,
+} from './hub-cat-editor.codex';
 export {
   buildCatPatchPayload,
   buildCatPayload,

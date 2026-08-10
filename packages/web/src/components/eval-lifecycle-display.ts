@@ -9,6 +9,7 @@ const LIFECYCLE_STATUS_LABELS = {
   fix_landed: '修复已落地',
   main_landed: '主干已落地',
   live_active: '运行环境已生效',
+  monitoring: '持续监测',
   reeval_pending: '等待复评',
   resolved: '已验证闭环',
   suppressed_with_reason: '已说明不处理',
@@ -41,6 +42,24 @@ export function ownerResponseLabel(status: EvalHubLifecycleView['ownerResponseSt
 
 export function reevalStatusLabel(status: EvalHubLifecycleView['reevalStatus']): string {
   return status ? REEVAL_STATUS_LABELS[status] : '尚未记录复评状态';
+}
+
+export function repairDebtLabel(status: EvalHubLifecycleView['repairDebtStatus']): string {
+  if (status === 'active') return '待修复';
+  if (status === 'cleared') return '修复已落地';
+  return '无需修复';
+}
+
+export function reevalDebtLabel(status: EvalHubLifecycleView['reevalDebtStatus']): string {
+  const labels = {
+    not_scheduled: '尚未进入复评周期',
+    scheduled: '复评已排期',
+    due: '复评已到期',
+    in_progress: '复评执行中',
+    passed: '复评已通过',
+    failed: '复评未通过',
+  } as const;
+  return status ? labels[status] : '尚未记录复评责任';
 }
 
 export function formatDiagnosisTarget(target: EvalHubDiagnosisTarget): string {

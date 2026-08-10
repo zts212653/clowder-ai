@@ -1,13 +1,16 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
+import { useTextSelectionAction } from '@/hooks/useTextSelectionAction';
 import type { ChatMessage } from '@/stores/chatStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { getUserId } from '@/utils/userId';
 import { ConfirmDialog } from './ConfirmDialog';
+import { createQuoteContextAttachment } from './chat-context-reference';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
+import { TrueRecallActionButton } from './TrueRecallActionButton';
 
 function showErrorToast(title: string, body?: Record<string, unknown>) {
   useToastStore.getState().addToast({
@@ -34,13 +37,16 @@ interface MessageActionsProps {
 
 export function MessageActions({ message, threadId, children }: MessageActionsProps) {
   const [dialog, setDialog] = useState<DialogState>({ type: 'none' });
+  const messageRef = useRef<HTMLDivElement>(null);
+  const selectionAction = useTextSelectionAction(messageRef, !message.isStreaming, message.id, 'viewport');
   const removeThreadMessage = useChatStore((s) => s.removeThreadMessage);
 
   const isUser = message.type === 'user' && !message.catId;
   const isAssistant = message.type === 'assistant' || (message.type === 'user' && !!message.catId);
-  const canAct = (isUser || isAssistant) && !message.isStreaming;
+  const isRecalled = Boolean(message.extra?.recall);
+  const canAct = (isUser || isAssistant) && !message.isStreaming && !isRecalled;
   // #699: Reply is available on all message types (not just user/assistant)
-  const canReply = !message.isStreaming;
+  const canReply = !message.isStreaming && !isRecalled;
   /* Toolbar position: float ABOVE the bubble, horizontally aligned to the
    * bubble start (past the avatar). -translate-y-full pushes it above the
    * wrapper; left-10/right-10 clears the avatar (w-8 + gap-2 ≈ 40px). */
@@ -162,9 +168,46 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
 
   const close = useCallback(() => setDialog({ type: 'none' }), []);
 
+  const handleSelectionAddToChat = useCallback(() => {
+    if (!selectionAction) return;
+    const source =
+      selectionAction.sourceKind === 'cli_output'
+        ? ({ kind: 'cli_output', threadId, messageId: message.id } as const)
+        : ({
+            kind: 'message',
+            threadId,
+            messageId: message.id,
+            ...(message.catId ? { senderCatId: message.catId } : {}),
+          } as const);
+    useChatStore.getState().setPendingChatInsert({
+      threadId,
+      text: '',
+      contextAttachments: [createQuoteContextAttachment(selectionAction.text, source)],
+    });
+    window.getSelection()?.removeAllRanges();
+  }, [message.catId, message.id, selectionAction, threadId]);
+
   return (
-    <div className="group relative">
+    <div ref={messageRef} data-context-quote-source="message" className="group relative">
       {children}
+
+      {selectionAction && (
+        <button
+          type="button"
+          data-testid="message-selection-add-to-chat"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={handleSelectionAddToChat}
+          style={selectionAction.position}
+          className="fixed z-[70] flex items-center gap-1.5 rounded-lg bg-cafe-accent px-2.5 py-1.5 text-xs font-medium text-[var(--cafe-surface)] shadow-lg transition-colors hover:bg-cafe-interactive"
+          title="引用到聊天"
+        >
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M1.5 2.5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v5.5a1 1 0 0 1-1 1H5L2.5 11.5V9h-1a1 1 0 0 1-1-1V2.5Z" />
+            <path d="M13.5 5v4a1 1 0 0 1-1 1H12v2.5L9.5 10H7a1 1 0 0 1-1-1" opacity="0.5" />
+          </svg>
+          Add to chat
+        </button>
+      )}
 
       {canReply && (
         <div
@@ -223,20 +266,23 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
                 </svg>
               </button>
               {isUser && (
-                <button
-                  onClick={handleEdit}
-                  className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-blue-text transition-colors"
-                  title="编辑 (创建分支)"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                    />
-                  </svg>
-                </button>
+                <>
+                  <TrueRecallActionButton message={message} threadId={threadId} />
+                  <button
+                    onClick={handleEdit}
+                    className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-blue-text transition-colors"
+                    title="编辑 (创建分支)"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                      />
+                    </svg>
+                  </button>
+                </>
               )}
               <button
                 onClick={handleHardDelete}

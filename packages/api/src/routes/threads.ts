@@ -25,6 +25,7 @@ import { projectFreshnessClosure } from '../domains/cats/services/freshness/glas
 import { projectFreshnessSupplementForHistory } from '../domains/cats/services/freshness/glass-box/freshness-supplement-history-projection.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { TranscriptWriter } from '../domains/cats/services/session/TranscriptWriter.js';
+import { parseCursor } from '../domains/cats/services/stores/cursor.js';
 import { gateForDurableSlot } from '../domains/cats/services/stores/cursor-activation.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
@@ -43,6 +44,7 @@ import type {
 } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { SYSTEM_USER_IDS } from '../domains/cats/services/stores/visibility.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
+import { visibilityCursorUnresolvedRepair } from '../infrastructure/telemetry/instruments.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { CHATGPT_CHAT_URL_REGEX } from '../utils/chatgpt-chat-url.js';
 import { migrateStoredProjectPath, resolvePersistentProjectPathDetailed } from '../utils/persistent-project-path.js';
@@ -106,7 +108,32 @@ async function gatedReadStateAck(
     await preReconcileReadCursor(readStateStore, messageStore, userId, threadId, gated);
   }
 
-  return readStateStore.ack(userId, threadId, gated);
+  const advanced = await readStateStore.ack(userId, threadId, gated);
+  if (advanced || !existingCursor || !incomingCursor.startsWith('v2:')) return advanced;
+  const replace = readStateStore.replaceReadCursorIfEqual;
+  if (!replace || !messageStore?.canonicalizeCursor) return false;
+
+  let parsedExisting: ReturnType<typeof parseCursor> = null;
+  try {
+    parsedExisting = parseCursor(existingCursor);
+  } catch {
+    // Malformed persisted tokens have no comparable visibility position and
+    // may be replaced by the validated incoming read evidence below.
+  }
+  if (parsedExisting?.version === 2) return false;
+  if (parsedExisting?.version === 1) {
+    try {
+      const storedCanonical = await messageStore.canonicalizeCursor(existingCursor, threadId);
+      if (storedCanonical !== existingCursor) return false;
+    } catch {
+      // Resolver availability is not proof that the stored position is gone.
+      return false;
+    }
+  }
+
+  const repaired = await replace.call(readStateStore, userId, threadId, existingCursor, gated);
+  if (repaired) visibilityCursorUnresolvedRepair.add(1, { namespace: 'read' });
+  return repaired;
 }
 
 interface ThreadIndexBuilder {

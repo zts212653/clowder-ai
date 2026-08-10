@@ -34,7 +34,7 @@ export interface QueueEntry {
   targetCats: string[];
   /** Stable target identity for glass-box projection after individual targets are handled. */
   allTargetCats?: string[];
-  /** F264: per-target author intent. Missing user/connector records fail closed to next_work. */
+  /** F264: per-target human author intent. Missing user records use legacy next_work compatibility. */
   authorIntentByCatId?: Record<string, QueueAuthorIntent>;
   /** Notice reached a safe boundary, but the queued body has not been read yet. */
   queuedNotifiedByCatIds?: string[];
@@ -505,9 +505,10 @@ export class InvocationQueue {
     catId: string,
     parentInvocationId: string | undefined,
   ): boolean {
-    // Agent control-flow carriers retain their existing typed dispatch path.
-    // User/connector work requires an explicit, exact-parent author permission.
-    if (entry.source === 'agent') return true;
+    // Author disposition belongs only to human-authored work. Agent and connector
+    // carriers retain their typed custody/continuation path and may be read at a
+    // current safe boundary without manufacturing a human queue preference.
+    if (entry.source !== 'user') return true;
     const authorIntent = entry.authorIntentByCatId?.[catId];
     return Boolean(
       parentInvocationId &&

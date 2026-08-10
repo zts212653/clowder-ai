@@ -16,9 +16,11 @@ import { dirname, join, resolve } from 'node:path';
 import {
   type CatId,
   type CliEffortPreset,
+  type CodexSpeedValue,
   type ContextHealth,
   catRegistry,
   type MessageContent,
+  resolveCodexSpeed,
   type SealReason,
   type SessionRecord,
 } from '@cat-cafe/shared';
@@ -807,6 +809,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           })),
           calledBy: params.mentioningCatId,
           intent: params.mentionContent,
+          ...((params.executionCausal?.triggerMessageId ?? params.a2aTriggerMessageId)
+            ? { idempotencyKey: params.executionCausal?.triggerMessageId ?? params.a2aTriggerMessageId }
+            : {}),
         })
         .catch((err: unknown) => {
           log.warn(
@@ -2235,6 +2240,37 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
     }
 
+    let threadSpeedOverride: CodexSpeedValue | undefined;
+    if (provider === 'openai' && deps.threadStore?.getMemberSpeed) {
+      try {
+        threadSpeedOverride = await deps.threadStore.getMemberSpeed(threadId, catId, userId);
+      } catch (err) {
+        log.warn(
+          { catId, threadId, userId, err },
+          'Thread speed override read failed — continuing with the member default',
+        );
+        yield {
+          type: 'system_info' as const,
+          catId,
+          content: JSON.stringify({
+            type: 'thread_speed_override_read_failed',
+            message: 'Thread speed override could not be loaded; using the member default for this invocation.',
+          }),
+          timestamp: Date.now(),
+        };
+      }
+    }
+    const requestedServiceTier =
+      provider === 'openai' && catConfig
+        ? (resolveCodexSpeed({
+            clientId: catConfig.clientId,
+            authType: resolvedAccount?.authType,
+            model: getCatModel(catId),
+            memberDefault: catConfig.cli?.serviceTier,
+            threadOverride: threadSpeedOverride,
+          }).requested ?? undefined)
+        : undefined;
+
     const activeInvocationFreshness = deps.providerNativeFreshnessFactory
       ? await deps.providerNativeFreshnessFactory({
           invocationId: params.parentInvocationId ?? invocationId,
@@ -2249,6 +2285,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const baseOptions: AgentServiceOptions = {
       callbackEnv,
       ...(reasoningEffortOverride ? { reasoningEffortOverride } : {}),
+      ...(requestedServiceTier ? { requestedServiceTier } : {}),
       ...(accountEnv ? { accountEnv } : {}),
       auditContext: {
         invocationId,

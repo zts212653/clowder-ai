@@ -53,6 +53,12 @@ function createCrossFormatAwareStore() {
       }
       return false;
     },
+    replaceReadCursorIfEqual(userId, threadId, expectedValue, newValue) {
+      const key = `${userId}:${threadId}`;
+      if (cursors.get(key) !== expectedValue) return false;
+      cursors.set(key, newValue);
+      return true;
+    },
     getUnreadSummaries: async () => [],
     deleteByThread: async () => {},
     /** Test helper: seed a raw cursor value */
@@ -182,6 +188,48 @@ describe('#1200 R14 route: POST /read/latest cross-format', () => {
     // Stored cursor must remain at B's reconciled v2 (not A)
     const stored = readStateStore._raw('alice', thread.id);
     assert.ok(!stored.includes(msgA.id), 'Stored must NOT be A');
+  });
+
+  it('stored canonical v2 B, latest=A (earlier) → evidence repair must not regress it', async () => {
+    const savedGate = process.env.VISIBILITY_CURSOR_V2;
+    process.env.VISIBILITY_CURSOR_V2 = 'on';
+    try {
+      const thread = threadStore.create('alice', 'Thread canonical monotonicity');
+      const msgA = messageStore.append({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'message A (earlier, live)',
+        mentions: [],
+        timestamp: Date.now() - 2000,
+        threadId: thread.id,
+      });
+      const msgB = messageStore.append({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'message B (later, will be tombstoned)',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: thread.id,
+      });
+      const cursorB = messageStore.canonicalizeCursor(msgB.id, thread.id);
+      readStateStore._seed('alice', thread.id, cursorB);
+      messageStore.softDelete(msgB.id, 'admin');
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/threads/${thread.id}/read/latest`,
+        headers: { 'x-cat-cafe-user': 'alice' },
+      });
+      const body = JSON.parse(res.body);
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(body.advanced, false, 'A canonical higher cursor must not be treated as repairable');
+      assert.equal(readStateStore._raw('alice', thread.id), cursorB);
+      assert.ok(!cursorB.includes(msgA.id));
+    } finally {
+      if (savedGate === undefined) delete process.env.VISIBILITY_CURSOR_V2;
+      else process.env.VISIBILITY_CURSOR_V2 = savedGate;
+    }
   });
 });
 
@@ -354,7 +402,7 @@ describe('#1200 R14 route: PATCH /read cross-format', () => {
     assert.equal(body.advanced, true, 'Must advance (pre-reconcile enables same-format CAS)');
   });
 
-  it('stored v1 for pruned message → fail-closed, cursor unchanged', async () => {
+  it('stored v1 for pruned message → explicit read evidence repairs the slot', async () => {
     const thread = threadStore.create('alice', 'Thread Q');
 
     const msgLive = messageStore.append({
@@ -367,8 +415,8 @@ describe('#1200 R14 route: PATCH /read cross-format', () => {
     });
 
     // Seed with a v1 cursor for a message that doesn't exist in the store.
-    // canonicalizeCursor will return the raw ID unchanged → reconcile is no-op
-    // → ack hits cross-format → fail-closed.
+    // canonicalizeCursor returns the raw ID unchanged, proving that the old
+    // position is unknowable. The validated PATCH target is new read evidence.
     const prunedV1 = 'msg-pruned-no-longer-in-store';
     readStateStore._seed('alice', thread.id, prunedV1);
 
@@ -380,11 +428,12 @@ describe('#1200 R14 route: PATCH /read cross-format', () => {
     });
     const body = JSON.parse(res.body);
     assert.equal(res.statusCode, 200);
-    assert.equal(body.advanced, false, 'Must fail-closed when stored v1 cannot be reconciled');
+    assert.equal(body.advanced, true, 'Validated read evidence must repair an unresolvable stored cursor');
+    assert.equal(body.caughtUp, true);
 
-    // Stored cursor must remain the original v1
     const stored = readStateStore._raw('alice', thread.id);
-    assert.equal(stored, prunedV1, 'Stored cursor must remain unchanged on fail-closed');
+    assert.notEqual(stored, prunedV1, 'Stored cursor must leave the unresolvable value');
+    assert.ok(stored.includes(msgLive.id), 'Stored cursor must bind the validated read target');
   });
 });
 

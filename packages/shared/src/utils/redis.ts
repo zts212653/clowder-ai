@@ -57,18 +57,17 @@ export const SessionKeys = {
 } as const;
 
 /**
- * #1200 Sol R5: Atomic cursor format reconciliation.
- * Upgrades stored v1 cursor to v2 WITHOUT advancing position.
- * CAS on old value: SET newValue IF current === oldValue, preserving TTL.
- * Used by DeliveryCursorStore before SET_IF_GREATER_LUA to ensure
- * same-format comparison (Lua CAS is fail-closed on cross-format).
+ * #1200: Atomic exact cursor replacement.
+ * CAS on the expected value, preserving TTL. Callers decide whether the
+ * replacement is a same-position format reconciliation or accepted evidence
+ * repairing a fully pruned slot; this primitive performs no ordering claim.
  *
  * Sol R6 P1-1: Uses PTTL (milliseconds) + PX to preserve sub-second TTLs.
  * TTL (seconds) returns 0 for keys with <1s remaining, which would
  * incorrectly permanentize opt-in expiring cursors (Iron Law 5 violation).
  * PTTL returns -1 (persistent), -2 (missing), or positive ms remaining.
  */
-const RECONCILE_CURSOR_FORMAT_LUA = `
+const REPLACE_CURSOR_IF_EQUAL_LUA = `
 local cur = redis.call('GET', KEYS[1])
 if cur == ARGV[1] then
   local pttl = redis.call('PTTL', KEYS[1])
@@ -102,15 +101,34 @@ return 0
  * Late-delivered Q (created early, high visibilitySeq) must advance past
  * stored cursor of B (created later, lower visibilitySeq). Only (seq, id)
  * pair comparison is correct. Lua resolves v1 cursors via message hash
- * HGET visibilitySeq; v2 cursors carry seq in the token. Unresolvable v1
- * (pruned message) → fail-closed (Sol R5: no ID lex fallback).
+ * HGET visibilitySeq, then the visibility ZSET (#3444 root-1 fix: lazy
+ * backfill leaves legacy hashes without visibilitySeq, so the ZSET is the
+ * canonical fallback); v2 cursors carry seq in the token. A one-sided
+ * unresolvable v1 after both lookups stays fail-closed. When both sides are
+ * unresolvable pre-migration values, compatibility retains raw lex ordering;
+ * that residual cannot prove visibility inversions.
  */
-const SET_IF_GREATER_LUA = `
-local ttl = tonumber(ARGV[2])
-local kp = ARGV[3] or ''
-local cur = redis.call('GET', KEYS[1])
-
+/**
+ * Shared Lua fragment: resolve a cursor token to a (seq, id) pair in the
+ * visibility domain. Single source of truth for every durable-slot CAS
+ * (delivery / mention / seen via SET_IF_GREATER_LUA, read-state via
+ * RedisThreadReadStateStore's ACK_CAS_LUA).
+ *
+ * Contract: every host passes key prefix in ARGV[3] and threadId in ARGV[4].
+ * The fragment owns those locals so a future host cannot compile yet fail at
+ * runtime merely because it forgot an implicit declaration.
+ *
+ * #3444 root-1 fix: v1 resolution order is message hash first (cheap),
+ * then the visibility ZSET. Lazy backfill writes the ZSET WITHOUT
+ * backfilling legacy message hashes, so hash-miss ≠ pruned — the ZSET is
+ * the canonical visibility truth. Hidden queued messages are absent from
+ * the ZSET by design, so the fallback can never resolve a not-yet-visible
+ * message (negative invariant: hidden queued must not enter cursor slots).
+ */
+export const VISIBILITY_RESOLVE_SEQ_LUA = `
 -- Resolve a cursor to (seq, id). Returns seq (number|nil), id (string).
+local visibilityCursorKeyPrefix = ARGV[3] or ''
+local visibilityCursorThreadId = ARGV[4] or ''
 local function resolveSeq(cursor)
   if string.sub(cursor, 1, 3) == 'v2:' then
     local sep = string.find(cursor, ':', 4)
@@ -119,14 +137,33 @@ local function resolveSeq(cursor)
     end
     return nil, cursor
   end
-  -- v1: look up visibilitySeq from message hash
-  local seqRaw = redis.call('HGET', kp .. 'msg:' .. cursor, 'visibilitySeq')
+  -- v1: look up visibilitySeq from message hash (cheap, post-migration shape)
+  local seqRaw = redis.call('HGET', visibilityCursorKeyPrefix .. 'msg:' .. cursor, 'visibilitySeq')
   if seqRaw then
     local s = tonumber(seqRaw)
     if s then return s, cursor end
   end
+  -- v1 fallback: visibility ZSET position (legacy message whose hash was
+  -- never backfilled by the lazy migration — #3444 root 1)
+  if visibilityCursorThreadId ~= '' then
+    local score = redis.call(
+      'ZSCORE',
+      visibilityCursorKeyPrefix .. 'msg:visibility:' .. visibilityCursorThreadId,
+      cursor
+    )
+    if score then
+      local s = tonumber(score)
+      if s then return s, cursor end
+    end
+  end
   return nil, cursor
 end
+`;
+
+const SET_IF_GREATER_LUA = `
+local ttl = tonumber(ARGV[2])
+local cur = redis.call('GET', KEYS[1])
+${VISIBILITY_RESOLVE_SEQ_LUA}
 
 if cur then
   local curSeq, curId = resolveSeq(cur)
@@ -221,6 +258,7 @@ export class SessionStore {
       messageId,
       String(ttlSeconds),
       this.keyPrefix,
+      threadId,
     )) as number;
     return result === 1;
   }
@@ -256,6 +294,7 @@ export class SessionStore {
       messageId,
       String(ttlSeconds),
       this.keyPrefix,
+      threadId,
     )) as number;
     return result === 1;
   }
@@ -297,6 +336,7 @@ export class SessionStore {
       messageId,
       String(ttlSeconds),
       this.keyPrefix,
+      threadId,
     )) as number;
     return result === 1;
   }
@@ -317,7 +357,7 @@ export class SessionStore {
     oldValue: string,
     newValue: string,
   ): Promise<boolean> {
-    return this.reconcileFormat(SessionKeys.deliveryCursor(userId, catId, threadId), oldValue, newValue);
+    return this.replaceCursorIfEqual(SessionKeys.deliveryCursor(userId, catId, threadId), oldValue, newValue);
   }
 
   async reconcileMentionAckCursorFormat(
@@ -327,7 +367,7 @@ export class SessionStore {
     oldValue: string,
     newValue: string,
   ): Promise<boolean> {
-    return this.reconcileFormat(SessionKeys.mentionAck(userId, catId, threadId), oldValue, newValue);
+    return this.replaceCursorIfEqual(SessionKeys.mentionAck(userId, catId, threadId), oldValue, newValue);
   }
 
   async reconcileSeenCursorFormat(
@@ -337,15 +377,47 @@ export class SessionStore {
     oldValue: string,
     newValue: string,
   ): Promise<boolean> {
-    return this.reconcileFormat(SessionKeys.seenCursor(userId, catId, threadId), oldValue, newValue);
+    return this.replaceCursorIfEqual(SessionKeys.seenCursor(userId, catId, threadId), oldValue, newValue);
   }
 
   /**
-   * Atomic format upgrade: SET newValue IF current === oldValue.
-   * Preserves TTL. No position advancement — only format change (v1→v2).
+   * Replace an exact stale delivery value with newly accepted canonical evidence.
+   * Unlike the monotonic CAS, this operation makes no ordering claim about the
+   * old value: the caller has already proved that the old cursor is unresolvable.
    */
-  private async reconcileFormat(key: string, oldValue: string, newValue: string): Promise<boolean> {
-    const result = (await this.redis.eval(RECONCILE_CURSOR_FORMAT_LUA, 1, key, oldValue, newValue)) as number;
+  async replaceDeliveryCursorIfEqual(
+    userId: string,
+    catId: string,
+    threadId: string,
+    expectedValue: string,
+    newValue: string,
+  ): Promise<boolean> {
+    return this.replaceCursorIfEqual(SessionKeys.deliveryCursor(userId, catId, threadId), expectedValue, newValue);
+  }
+
+  async replaceMentionAckCursorIfEqual(
+    userId: string,
+    catId: string,
+    threadId: string,
+    expectedValue: string,
+    newValue: string,
+  ): Promise<boolean> {
+    return this.replaceCursorIfEqual(SessionKeys.mentionAck(userId, catId, threadId), expectedValue, newValue);
+  }
+
+  async replaceSeenCursorIfEqual(
+    userId: string,
+    catId: string,
+    threadId: string,
+    expectedValue: string,
+    newValue: string,
+  ): Promise<boolean> {
+    return this.replaceCursorIfEqual(SessionKeys.seenCursor(userId, catId, threadId), expectedValue, newValue);
+  }
+
+  /** Atomic exact replacement. Preserves TTL and performs no comparison. */
+  private async replaceCursorIfEqual(key: string, oldValue: string, newValue: string): Promise<boolean> {
+    const result = (await this.redis.eval(REPLACE_CURSOR_IF_EQUAL_LUA, 1, key, oldValue, newValue)) as number;
     return result === 1;
   }
 

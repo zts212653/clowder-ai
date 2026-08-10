@@ -26,6 +26,7 @@ import {
 } from '@cat-cafe/shared';
 import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { getOwnerUserId } from '../config/cat-config-loader.js';
 import { resolveFrontendBaseUrl } from '../config/frontend-origin.js';
 import type { ApprovalIngress } from '../domains/approval-hub/ApprovalIngress.js';
 import {
@@ -34,9 +35,13 @@ import {
 } from '../domains/approval-hub/DispatchProposedAction.js';
 import {
   type ActionSuccessorFence,
+  ActionSuccessorStandingError,
   buildActionSuccessorFence,
 } from '../domains/ball-custody/ActionSuccessorAdmissionService.js';
-import { ActionTerminalPredicateError } from '../domains/ball-custody/ActionTerminalPredicateCatalog.js';
+import {
+  ActionTerminalPredicateError,
+  getActionTerminalCapabilityForPredicateKind,
+} from '../domains/ball-custody/ActionTerminalPredicateCatalog.js';
 import type { LocalReviewVerdictService } from '../domains/ball-custody/LocalReviewVerdictService.js';
 import {
   type ActionSuccessorCarrierAdmissionOutcome,
@@ -143,6 +148,7 @@ import {
 import { CallbackAuthSystemMessageNotifier } from './callback-auth-system-message.js';
 import { recordCallbackAuthFailure } from './callback-auth-telemetry.js';
 import { registerCallbackBootcampRoutes } from './callback-bootcamp-routes.js';
+import { registerCallbackDeferPersonMemoryRoutes } from './callback-defer-person-memory-routes.js';
 import { registerCallbackDocumentRoutes } from './callback-document-routes.js';
 import { registerCallbackGameRoutes } from './callback-game-routes.js';
 import { registerCallbackGuideRoutes } from './callback-guide-routes.js';
@@ -658,6 +664,10 @@ export interface CallbackRoutesOptions {
   profileUpdateProposalStore?: import('../domains/cats/services/stores/ports/ProfileUpdateProposalStore.js').IProfileUpdateProposalStore;
   /** F276: owner-private people and relationship memory proposals. */
   personMemoryStore?: import('../domains/memory/people/PersonMemoryStore.js').PersonMemoryStore;
+  /** F276: content-free known-person delta receipts. */
+  deferredPersonMemoryReceiptStore?: import('../domains/memory/DeferredPersonMemoryReceiptStore.js').DeferredPersonMemoryReceiptStore;
+  /** F276/F282: exact workspace/private person registry convergence. */
+  proactiveCandidateRegistryResolver?: import('../domains/memory/ProactiveCandidateRegistryResolver.js').ProactiveCandidateRegistryResolver;
   /** F276 KD-12: read-only workspace person identity root resolver. */
   workspacePersonResolver?: import('../domains/memory/people/WorkspacePersonResolver.js').WorkspacePersonResolver;
   /** F287 Phase C: owner-scoped opaque cue drill and content-free outcome callbacks. */
@@ -795,6 +805,7 @@ const postMessageSchema = z.object({
         .max(128)
         .regex(/^[A-Za-z0-9._:-]+$/)
         .optional(),
+      subjectRef: z.string().trim().min(1).max(240).optional(),
     })
     .optional(),
   // F254 Phase A: acknowledge held — escape hatch to force-send despite unseen messages
@@ -1075,6 +1086,23 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       ...(opts.eventAuditLog ? { eventAuditLog: opts.eventAuditLog } : {}),
     });
   }
+
+  // Lightweight principal liveness probe for cloud lifecycle diagnostics.
+  // Authentication is performed by the shared pre-handler; no thread/message
+  // data is read, and the response intentionally exposes no principal fields.
+  app.get('/api/callbacks/auth-probe', async (request, reply) => {
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+    if (
+      principal.kind !== 'agent_key' ||
+      principal.catId !== createCatId('gpt-pro') ||
+      principal.userId !== getOwnerUserId()
+    ) {
+      reply.status(403);
+      return { ok: false, reason: 'gpt_pro_principal_required' };
+    }
+    return { ok: true };
+  });
 
   app.post('/api/callbacks/post-message', async (request, reply) => {
     const principal = requireCallbackPrincipal(request, reply);
@@ -1651,6 +1679,17 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         message: 'action successor dispatch starts substantive work and cannot use terminal coordination.',
       };
     }
+    if (
+      action &&
+      explicitCoordination?.subjectRef &&
+      explicitCoordination.subjectRef.trim() !== action.subjectRef.trim()
+    ) {
+      reply.status(400);
+      return {
+        kind: 'action_coordination_subject_mismatch',
+        message: 'coordination.subjectRef must match action.subjectRef for a structured successor dispatch.',
+      };
+    }
     if (proposedAction && effectClass !== 'assign_work') {
       reply.status(400);
       return {
@@ -1699,6 +1738,48 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         kind: 'coordination_with_assign_work',
         message: 'coordination cannot be combined with assign_work approval proposals.',
       };
+    }
+
+    if (explicitCoordination?.phase === 'terminal') {
+      let terminalActionLeaseRef: Awaited<ReturnType<typeof resolveCallbackActionLeaseRef>>;
+      try {
+        terminalActionLeaseRef = await resolveCallbackActionLeaseRef(record, invocationRecordStore);
+      } catch (err) {
+        app.log.error({ err, invocationId }, '[F167] local review terminal route preflight carrier read failed');
+        reply.status(503);
+        return { kind: 'local_review_terminal_route_preflight_unavailable' };
+      }
+      if (terminalActionLeaseRef) {
+        if (!opts.actionSuccessorAdmissionService) {
+          reply.status(503);
+          return { kind: 'local_review_terminal_route_preflight_unavailable' };
+        }
+        let preflight: Awaited<
+          ReturnType<typeof opts.actionSuccessorAdmissionService.preflightLocalReviewTerminalRoute>
+        >;
+        try {
+          preflight = await opts.actionSuccessorAdmissionService.preflightLocalReviewTerminalRoute({
+            leaseId: terminalActionLeaseRef.leaseId,
+            generation: terminalActionLeaseRef.generation,
+            reviewerCatId: actor.catId,
+            holderThreadId: actor.threadId,
+            targetThreadId: effectiveThreadId,
+          });
+        } catch (err) {
+          app.log.error({ err, invocationId }, '[F167] local review terminal route lease read failed');
+          reply.status(503);
+          return { kind: 'local_review_terminal_route_preflight_unavailable' };
+        }
+        if (preflight.applicable && !preflight.allow) {
+          reply.status(409);
+          return {
+            kind: 'local_review_terminal_route_mismatch',
+            reason: preflight.reason,
+            ...(preflight.expectedThreadId ? { expectedThreadId: preflight.expectedThreadId } : {}),
+            targetThreadId: effectiveThreadId,
+          };
+        }
+      }
     }
 
     // F246 Phase B: assign_work effect-class intercept — hold as DispatchProposal
@@ -1818,6 +1899,44 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         throw err;
       }
 
+      const capability = getActionTerminalCapabilityForPredicateKind(validatedAction.terminalPredicate.kind);
+      if (capability.freshnessResolver === 'task_active_owner') {
+        if (!opts.actionSuccessorAdmissionService) {
+          reply.status(503);
+          return {
+            kind: 'proposed_action_standing_unavailable',
+            message: 'Task standing preflight is unavailable; no approval proposal was created.',
+            guidance: 'retry_when_task_truth_is_available',
+          };
+        }
+        try {
+          await opts.actionSuccessorAdmissionService.preflightStructuredTransferStanding({
+            action: validatedAction.action,
+            holderCatIds: mergedTargetCats,
+            targetThreadId: effectiveThreadId,
+            tenantScope: ownerUserId,
+          });
+        } catch (err) {
+          if (err instanceof ActionSuccessorStandingError) {
+            reply.status(err.status === 'mismatch' ? 409 : 503);
+            return {
+              kind:
+                err.status === 'mismatch'
+                  ? 'proposed_action_standing_mismatch'
+                  : 'proposed_action_standing_unavailable',
+              message: `${err.reason}; no approval proposal was created.`,
+              standingStatus: err.status,
+              mismatchDimensions: err.mismatchDimensions,
+              guidance:
+                err.status === 'mismatch'
+                  ? 'align_target_cats_target_thread_and_tenant_with_task'
+                  : 'retry_when_task_truth_is_available',
+            };
+          }
+          throw err;
+        }
+      }
+
       const createResult = await opts.dispatchProposalStore.create({
         proposalId,
         sourceInvocationId: invocationId,
@@ -1908,7 +2027,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // an active coordination transition even when the caller omits the redundant
     // coordination field. Plain targetCats/@mentions remain suppressible so the
     // original ACK-of-ACK guard stays fail-closed without free-text intent parsing.
-    const effectiveCoordination = explicitCoordination ?? (action ? { phase: 'active' as const } : undefined);
+    const effectiveCoordination = action
+      ? {
+          ...(explicitCoordination ?? { phase: 'active' as const }),
+          subjectRef: action.subjectRef,
+        }
+      : explicitCoordination;
     const crossThreadFreshnessPolicy = decideCrossThreadFreshnessGate({
       isCrossThread,
       ...(effectClass ? { effectClass } : {}),
@@ -2053,7 +2177,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           messageFilter,
           eventLog: freshnessEventLog,
           // F254 queue-aware gate: detect queued messages hidden by isDelivered()
-          queueChecker: opts.invocationQueue ? createQueueChecker(opts.invocationQueue) : undefined,
+          queueChecker: opts.invocationQueue
+            ? createQueueChecker(opts.invocationQueue, { parentInvocationId: effectiveInvId })
+            : undefined,
           // F254 AC-C3: descriptor parameterizes held/notice behavior per carrier tier
           descriptor: freshnessDescriptor,
           ...(turnExecution?.causal?.coveredMessageIds
@@ -3264,8 +3390,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const isContiguousRead = !keyword && !messageId && !filterCatId;
     const expectedParentInvocationId =
       principal.kind === 'invocation' ? (principal.parentInvocationId ?? principal.invocationId) : undefined;
+    // Queued bodies are execution-owned, unlike already-published history. A cross-thread
+    // history read must not expose or acknowledge another thread's queued receipt custody.
+    const canExposeQueuedBodies = principal.kind === 'invocation' && effectiveThreadId === principal.threadId;
     const queuedFullEntries =
-      isFullMode && isContiguousRead && principal.kind === 'invocation' && opts.invocationQueue
+      isFullMode && isContiguousRead && canExposeQueuedBodies && opts.invocationQueue
         ? opts.invocationQueue.getQueuedBodyMessagesForCat(
             effectiveThreadId,
             principalUserId,
@@ -5062,11 +5191,20 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       messageStore: opts.messageStore,
       socketManager,
       ...(opts.approvalIngress ? { approvalIngress: opts.approvalIngress } : {}),
+      ...(opts.deferredPersonMemoryReceiptStore ? { deferredReceiptStore: opts.deferredPersonMemoryReceiptStore } : {}),
     });
     registerCallbackPersonMemoryRoutes(app, {
       store: opts.personMemoryStore,
       workspacePersonResolver: opts.workspacePersonResolver,
     });
+    if (opts.deferredPersonMemoryReceiptStore && opts.proactiveCandidateRegistryResolver) {
+      registerCallbackDeferPersonMemoryRoutes(app, {
+        registry,
+        messageStore: opts.messageStore,
+        receiptStore: opts.deferredPersonMemoryReceiptStore,
+        registryResolver: opts.proactiveCandidateRegistryResolver,
+      });
+    }
   }
 
   if (opts.memoryCueDeps) {
@@ -5195,7 +5333,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         redis,
         messageFilter,
         // F254 queue-aware gate: detect queued messages hidden by isDelivered()
-        queueChecker: opts.invocationQueue ? createQueueChecker(opts.invocationQueue) : undefined,
+        queueChecker: opts.invocationQueue
+          ? createQueueChecker(opts.invocationQueue, {
+              parentInvocationId: principal.parentInvocationId ?? principal.invocationId,
+            })
+          : undefined,
         // F254 AC-C2/C3: provider for descriptor derivation (reads carrierTier from state store)
         provider: resolveFreshnessDescriptorProvider(catRegistry.tryGet(principal.catId)?.config),
       });

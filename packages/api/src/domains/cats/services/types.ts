@@ -6,6 +6,7 @@
 import type {
   CatId,
   CliEffortPreset,
+  CodexSpeedValue,
   CrossThreadCoordination,
   FreshnessCarrierCapability,
   MessageContent,
@@ -337,6 +338,8 @@ export interface AgentServiceOptions {
   sessionId?: string;
   /** F262: Raw per-thread member effort. Providers validate against the effective model before applying it. */
   reasoningEffortOverride?: CliEffortPreset;
+  /** F291: Resolved Codex OAuth requested tier. Undefined means inherit Codex user config. */
+  requestedServiceTier?: CodexSpeedValue;
   /** Working directory for the agent */
   workingDirectory?: string;
   /** Env vars to pass to CLI process for MCP callback auth */

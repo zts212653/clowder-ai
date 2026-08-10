@@ -76,11 +76,13 @@ function button(label: string): HTMLButtonElement {
 }
 
 describe('ChatVoiceFeatureControls', () => {
-  it('renders both header voice entries as inactive gray icon buttons', () => {
+  it('renders both companion capabilities as labeled Workspace cards', () => {
     render();
 
     expect(button('语音陪伴').className).toContain('text-cafe-secondary');
-    expect(button('音频采集').className).toContain('text-cafe-secondary');
+    expect(button('语音陪伴').textContent).toContain('语音陪伴');
+    expect(button('会议伴随').className).toContain('text-cafe-secondary');
+    expect(button('会议伴随').textContent).toContain('会议伴随');
   });
 
   it('starts installed-but-disabled TTS service before enabling voice companion', async () => {
@@ -203,7 +205,7 @@ describe('ChatVoiceFeatureControls', () => {
     render();
 
     await act(async () => {
-      button('音频采集').click();
+      button('会议伴随').click();
     });
 
     expect(apiFetchMock).not.toHaveBeenCalledWith(expect.stringContaining('/toggle'), expect.anything());
@@ -227,7 +229,7 @@ describe('ChatVoiceFeatureControls', () => {
     render();
 
     await act(async () => {
-      button('音频采集').click();
+      button('会议伴随').click();
     });
 
     expect(useChatStore.getState().rightPanelMode).toBe('status');
@@ -264,7 +266,7 @@ describe('ChatVoiceFeatureControls', () => {
     expect(message).toContain('log-29-');
   });
 
-  it('opens install preview from the audio capture header action before installing', async () => {
+  it('opens install preview from the meeting companion card before installing', async () => {
     const profile = {
       os: 'win32',
       arch: 'x64',
@@ -325,7 +327,7 @@ describe('ChatVoiceFeatureControls', () => {
     render();
 
     await act(async () => {
-      button('音频采集').click();
+      button('会议伴随').click();
     });
     await act(async () => {
       await Promise.resolve();

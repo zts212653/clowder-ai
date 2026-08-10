@@ -518,6 +518,48 @@ function createCustodiedEntry() {
 }
 
 describe('F264 custody coordinator evidence', () => {
+  test('late exact success reclassifies an exposed recall without reviving its body or Queue custody', async () => {
+    const { queue, store, entry, message } = createCustodiedEntry();
+    const seenAt = entry.createdAt + 100;
+    const handledAt = seenAt + 200;
+    const coordinator = new QueuedMessageCustodyCoordinator({ messageStore: store, now: () => handledAt });
+    queue.markQueuedSeen(entry.threadId, entry.userId, entry.id, 'opus', 'inv-recalled', seenAt);
+    const exposedEntry = queue.getEntrySnapshot(entry.threadId, entry.userId, entry.id);
+    await coordinator.persistEntry(exposedEntry);
+
+    const recalled = store.recallMessageToComposerDraft(message.id, {
+      ownerUserId: entry.userId,
+      threadId: entry.threadId,
+      expectedDraftRevision: 0,
+      merge: 'replace',
+      recalledAt: seenAt + 100,
+    });
+    assert.equal(recalled.kind, 'recalled');
+    assert.equal(recalled.verdict, 'exposed');
+    assert.deepEqual(recalled.message.queueCustody.withdrawnByCatIds, ['opus']);
+
+    const settlement = await coordinator.commitSuccessfulTargets(exposedEntry, ['opus'], 'inv-recalled', handledAt, {
+      opus: {
+        invocationId: 'inv-recalled',
+        disposition: 'completed_with_turn',
+        evidenceRef: { kind: 'invocation_lineage', invocationId: 'inv-recalled' },
+        handledAt,
+      },
+    });
+
+    assert.deepEqual(settlement.perMessage, [
+      { messageId: message.id, handledTargetCats: ['opus'], pendingTargetCats: [], fullyConsumed: true },
+    ]);
+    const terminal = store.getById(message.id);
+    assert.equal(terminal.content, '');
+    assert.equal(terminal.deliveryStatus, 'canceled');
+    assert.equal(terminal.recall.exposure, 'seen');
+    assert.equal(terminal.queueCustody.status, 'terminal');
+    assert.deepEqual(terminal.queueCustody.handledByCatIds, ['opus']);
+    assert.deepEqual(terminal.queueCustody.withdrawnByCatIds ?? [], []);
+    assert.equal(terminal.queueCustody.targetOutcomeByCatId.opus.invocationId, 'inv-recalled');
+  });
+
   test('persists exact handled disposition and lineage without deleting it at terminal delivery', async () => {
     const { queue, store, entry, message } = createCustodiedEntry();
     let now = entry.createdAt + 100;

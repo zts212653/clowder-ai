@@ -63,7 +63,6 @@ import { PawIcon } from './icons/PawIcon';
 import { MessageActions } from './MessageActions';
 import { MessageNavigator } from './MessageNavigator';
 import { MobileApprovalSheet } from './MobileApprovalSheet';
-import { MobileStatusSheet } from './MobileStatusSheet';
 import { ParallelStatusBar } from './ParallelStatusBar';
 import { PendingMemberBubble } from './PendingMemberBubble';
 import { ProjectSetupCard } from './ProjectSetupCard';
@@ -80,6 +79,7 @@ import { assignDocumentRoute, pushThreadRouteWithHistory } from './ThreadSidebar
 import { VoteActiveBar } from './VoteActiveBar';
 import { type VoteConfig, VoteConfigModal } from './VoteConfigModal';
 import { WorkspacePanel } from './WorkspacePanel';
+import { ContextualWorkspaceChrome } from './workspace/ContextualWorkspaceChrome';
 import { FloatingTranscriptContainer } from './workspace/FloatingTranscriptContainer';
 import { ResizeHandle } from './workspace/ResizeHandle';
 import { TranscriptPanel } from './workspace/TranscriptPanel';
@@ -102,11 +102,15 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     armUnreadSuppression,
     rightPanelMode,
     workspaceMode,
+    workspaceSurface,
+    presentationLock,
+    setWorkspaceMode,
+    setWorkspaceSurface,
     setRightPanelMode,
     closeRightPanel,
     showVoteModal,
     setShowVoteModal,
-    addMessage,
+    addMessageToThread,
   } = useChatStore(
     useShallow((s) => ({
       setCurrentThread: s.setCurrentThread,
@@ -118,11 +122,15 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       armUnreadSuppression: s.armUnreadSuppression,
       rightPanelMode: s.rightPanelMode,
       workspaceMode: s.workspaceMode,
+      workspaceSurface: s.workspaceSurface,
+      presentationLock: s.presentationLock,
+      setWorkspaceMode: s.setWorkspaceMode,
+      setWorkspaceSurface: s.setWorkspaceSurface,
       setRightPanelMode: s.setRightPanelMode,
       closeRightPanel: s.closeRightPanel,
       showVoteModal: s.showVoteModal,
       setShowVoteModal: s.setShowVoteModal,
-      addMessage: s.addMessage,
+      addMessageToThread: s.addMessageToThread,
     })),
   );
   // F173 Phase C Task 3 — full read-side migration. All thread liveness +
@@ -183,8 +191,11 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   usePreviewAutoOpen(workspaceWorktreeId, threadId);
   useTeleport(); // F227: drive the Hub to a teleport target message (thread:teleport)
   const { isOpen: sidebarOpen, open: openSidebar, close: closeSidebar, toggle: toggleSidebar } = useSidebarStore();
-  const [statusPanelOpen, setStatusPanelOpen] = useState(true);
-  const [mobileStatusOpen, setMobileStatusOpen] = useState(false);
+  // F284: Chat is the calm default. Typed workspace/transcript actions still
+  // open the contextual shell through the existing rightPanelMode effect.
+  const [statusPanelOpen, setStatusPanelOpen] = useState(false);
+  const [workspacePanelMounted, setWorkspacePanelMounted] = useState(rightPanelMode === 'workspace');
+  const [activityPanelMounted, setActivityPanelMounted] = useState(false);
   const [showBootcampList, setShowBootcampList] = useState(false);
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
   const editingCat = editingCatId ? (getCatById(editingCatId) ?? null) : null;
@@ -248,6 +259,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     if ((rightPanelMode === 'workspace' || rightPanelMode === 'transcript') && !statusPanelOpen) {
       setStatusPanelOpen(true);
     }
+    if (rightPanelMode === 'workspace') setWorkspacePanelMounted(true);
+    if (rightPanelMode === 'status' && statusPanelOpen) setActivityPanelMounted(true);
   }, [rightPanelMode, statusPanelOpen]);
 
   // F232 P2（云端 round 5）：显式关闭右侧 panel——先退出 workspace/transcript mode（否则上面的 auto-open
@@ -257,7 +270,32 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     setStatusPanelOpen(false);
   }, [closeRightPanel]);
 
+  const openStatusPanel = useCallback(() => {
+    setActivityPanelMounted(true);
+    setRightPanelMode('status');
+    setStatusPanelOpen(true);
+  }, [setRightPanelMode]);
+
+  const openWorkspaceLauncher = useCallback(() => {
+    setWorkspacePanelMounted(true);
+    setWorkspaceMode('dev');
+    setWorkspaceSurface('home');
+    setRightPanelMode('workspace');
+    setStatusPanelOpen(true);
+  }, [setRightPanelMode, setWorkspaceMode, setWorkspaceSurface]);
+
   const isDesktop = useIsDesktop();
+
+  useEffect(() => {
+    if (isDesktop || !statusPanelOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      closeStatusPanel();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [closeStatusPanel, isDesktop, statusPanelOpen]);
 
   // Desktop: open sidebar before first paint (useLayoutEffect avoids false→true flicker).
   useLayoutEffect(() => {
@@ -301,7 +339,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           body: JSON.stringify(config),
         });
         if (res.status === 409) {
-          addMessage({
+          addMessageToThread(threadId, {
             id: `vote-${Date.now()}`,
             type: 'system',
             variant: 'error',
@@ -321,7 +359,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         const notifyMsg = `${mentions}\n投票请求：${data.question}\n\n选项：\n${optionList}\n\n请在回复中包含 [VOTE:你的选项]，例如 [VOTE:${config.options[0]}]`;
         handleSend(notifyMsg);
       } catch (err) {
-        addMessage({
+        addMessageToThread(threadId, {
           id: `vote-${Date.now()}`,
           type: 'system',
           variant: 'error',
@@ -330,7 +368,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         });
       }
     },
-    [threadId, handleSend, setShowVoteModal, addMessage],
+    [threadId, handleSend, setShowVoteModal, addMessageToThread],
   );
 
   const messageSummary = useMemo(() => {
@@ -913,19 +951,17 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           authPendingCount={authPending.length}
           viewMode={viewMode}
           onToggleViewMode={() => setViewMode(viewMode === 'single' ? 'split' : 'single')}
-          onOpenMobileStatus={() => setMobileStatusOpen(true)}
-          statusPanelOpen={statusPanelOpen}
+          statusPanelOpen={statusPanelOpen && rightPanelMode === 'workspace'}
+          hasWorkspaceActivity={hasActiveInvocation || workspaceSurface !== 'home' || presentationLock !== null}
           onToggleStatusPanel={() => {
-            if (statusPanelOpen) {
+            if (statusPanelOpen && rightPanelMode === 'workspace') {
               closeStatusPanel();
             } else {
-              // closeRightPanel() 退回 'status' 防 auto-open 循环；重新打开时默认进 workspace
-              // （status/transcript 各有底部工具栏图标单独入口，不需要 PanelTabs tab 栏切换）。
+              setWorkspacePanelMounted(true);
               setRightPanelMode('workspace');
               setStatusPanelOpen(true);
             }
           }}
-          defaultCatId={targetCats[0] || 'opus'}
         />
 
         {intentMode === 'ideate' && <ParallelStatusBar onStop={handleStop} threadId={threadId} />}
@@ -1131,8 +1167,17 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             <ChatInput
               key={threadId}
               threadId={threadId}
-              onSend={(content, images, whisper, deliveryMode, replyToId, messageDisposition) =>
-                handleSend(content, images, undefined, whisper, deliveryMode, replyToId, messageDisposition)
+              onSend={(content, images, whisper, deliveryMode, replyToId, messageDisposition, contextAttachments) =>
+                handleSend(
+                  content,
+                  images,
+                  undefined,
+                  whisper,
+                  deliveryMode,
+                  replyToId,
+                  messageDisposition,
+                  contextAttachments,
+                )
               }
               onStop={handleStop}
               disabled={connectionStatus.isReadonly}
@@ -1209,38 +1254,55 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         />
       </div>
 
-      {/* P2-2（云端 review）：右侧 panel 仅桌面渲染——小屏走 MobileStatusSheet。 */}
-      {statusPanelOpen && isDesktop && (
-        <>
-          {/* rightPanelMode：status 固定宽（statusPanelWidth）；workspace/transcript 百分比（chatBasis）。
-              mode 切换从底部工具栏图标触发（ChatVoiceFeatureControls / header toggle），面板内不再有 tab 栏。 */}
-          {rightPanelMode === 'status' ? (
-            <div className="hidden lg:flex">
-              <ResizeHandle
-                direction="horizontal"
-                label="右侧面板"
-                onResize={handleStatusPanelResize}
-                onCollapse={closeStatusPanel}
-                onDoubleClick={resetStatusPanelWidth}
-              />
-            </div>
-          ) : (
-            <ResizeHandle
-              direction="horizontal"
-              label="右侧面板"
-              onResize={handleHorizontalResize}
-              onCollapse={closeStatusPanel}
-              onDoubleClick={resetChatBasis}
-            />
-          )}
-          <div
-            className="flex flex-col min-h-0 overflow-hidden"
-            style={
-              rightPanelMode === 'status' ? { width: statusPanelWidth, flexShrink: 0 } : { flex: '1 1 0%', minWidth: 0 }
-            }
+      {/* F284: visited Workspace/Activity panels stay mounted across fold and sibling-host switches.
+          At 768px+ they use the split host; below 768px the same host becomes a full-screen overlay. */}
+      {statusPanelOpen &&
+        isDesktop &&
+        (rightPanelMode === 'status' ? (
+          <ResizeHandle
+            direction="horizontal"
+            label="右侧面板"
+            onResize={handleStatusPanelResize}
+            onCollapse={closeStatusPanel}
+            onDoubleClick={resetStatusPanelWidth}
+          />
+        ) : (
+          <ResizeHandle
+            direction="horizontal"
+            label="右侧面板"
+            onResize={handleHorizontalResize}
+            onCollapse={closeStatusPanel}
+            onDoubleClick={resetChatBasis}
+          />
+        ))}
+      {(statusPanelOpen || workspacePanelMounted || activityPanelMounted) && (
+        <div
+          className={
+            !statusPanelOpen || (!isDesktop && rightPanelMode === 'workspace' && workspaceMode === 'approval')
+              ? 'hidden'
+              : isDesktop
+                ? 'flex min-h-0 flex-col overflow-hidden'
+                : 'fixed inset-0 z-50 flex min-h-0 flex-col overflow-hidden bg-[var(--console-panel-bg)]'
+          }
+          style={
+            statusPanelOpen && isDesktop
+              ? rightPanelMode === 'status'
+                ? { width: statusPanelWidth, flexShrink: 0 }
+                : { flex: '1 1 0%', minWidth: 0 }
+              : undefined
+          }
+          role="region"
+          aria-label="上下文侧栏"
+          aria-hidden={!statusPanelOpen}
+          data-testid="contextual-workspace-host"
+        >
+          <ContextualWorkspaceChrome
+            mode={rightPanelMode}
+            onFold={closeStatusPanel}
+            onNavigateHome={rightPanelMode === 'workspace' ? undefined : openWorkspaceLauncher}
           >
-            <div className="flex min-h-0 flex-1 overflow-hidden">
-              {rightPanelMode === 'status' && (
+            {activityPanelMounted && (
+              <div className={rightPanelMode === 'status' ? 'flex min-h-0 flex-1' : 'hidden'}>
                 <RightStatusPanel
                   intentMode={intentMode}
                   targetCats={targetCats}
@@ -1250,31 +1312,31 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                   hasActiveInvocation={hasActiveInvocation}
                   threadId={threadId}
                   messageSummary={messageSummary}
-                  width={statusPanelWidth}
+                  width={isDesktop ? statusPanelWidth : '100%'}
                 />
-              )}
-              {rightPanelMode === 'workspace' && <WorkspacePanel />}
-              {rightPanelMode === 'transcript' && <TranscriptPanel />}
-            </div>
-          </div>
-        </>
+              </div>
+            )}
+            {workspacePanelMounted && (
+              <div
+                className={rightPanelMode === 'workspace' ? 'flex min-h-0 min-w-0 flex-1' : 'hidden'}
+                data-testid="workspace-host-pane"
+              >
+                <WorkspacePanel
+                  activeInvocations={activeInvocations}
+                  threadId={threadId}
+                  defaultCatId={targetCats[0] || 'opus'}
+                  onOpenStatus={openStatusPanel}
+                />
+              </div>
+            )}
+            {rightPanelMode === 'transcript' && statusPanelOpen && <TranscriptPanel />}
+          </ContextualWorkspaceChrome>
+        </div>
       )}
       <FloatingTranscriptContainer />
       <MobileApprovalSheet
         open={!isDesktop && rightPanelMode === 'workspace' && workspaceMode === 'approval'}
-        onClose={closeRightPanel}
-      />
-      <MobileStatusSheet
-        open={mobileStatusOpen}
-        onClose={() => setMobileStatusOpen(false)}
-        intentMode={intentMode}
-        targetCats={targetCats}
-        catStatuses={catStatuses}
-        catInvocations={catInvocations}
-        activeInvocations={activeInvocations}
-        hasActiveInvocation={hasActiveInvocation}
-        threadId={threadId}
-        messageSummary={messageSummary}
+        onClose={closeStatusPanel}
       />
       {showFirstRunQuestPrompt &&
         createPortal(

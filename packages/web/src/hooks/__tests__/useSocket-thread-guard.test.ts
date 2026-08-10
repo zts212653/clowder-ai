@@ -674,6 +674,30 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     expect(mockSetThreadHasActiveInvocation).toHaveBeenCalledWith('thread-B', true);
   });
 
+  it('forwards true recall and late receipt events with their source thread intact', () => {
+    const onMessageRecalled = vi.fn();
+    const onMessageReceiptUpdated = vi.fn();
+    const callbacks: SocketCallbacks = {
+      onMessage: vi.fn(),
+      onMessageRecalled,
+      onMessageReceiptUpdated,
+    };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    const recall = { messageId: 'm-recalled', threadId: 'thread-A', verdict: 'exposed' as const };
+    const receipt = { messageId: 'm-recalled', threadId: 'thread-A' };
+    act(() => {
+      simulateServerEvent('message_recalled', recall);
+      simulateServerEvent('message_receipt_updated', receipt);
+    });
+
+    expect(onMessageRecalled).toHaveBeenCalledWith(recall);
+    expect(onMessageReceiptUpdated).toHaveBeenCalledWith(receipt);
+  });
+
   it('queue_updated hydrates every durable queued user bubble from admission', () => {
     mockStoreCurrentThreadId = 'thread-B';
     const callbacks: SocketCallbacks = { onMessage: vi.fn() };

@@ -37,7 +37,7 @@ afterEach(() => {
 
 function renderButton(threadId = 'thread-1') {
   act(() => {
-    root.render(React.createElement(ExportButton, { threadId }));
+    root.render(React.createElement(ExportButton, { threadId, variant: 'thread-menu' }));
   });
 }
 
@@ -81,12 +81,13 @@ function mockDownload() {
 }
 
 describe('ExportButton', () => {
-  it('renders icon-only button with correct aria-label', () => {
+  it('renders as a labeled thread action instead of permanent header chrome', () => {
     renderButton();
     const btn = getToggle();
     expect(btn).toBeTruthy();
     expect(btn.getAttribute('aria-label')).toBe('导出对话');
     expect(btn.getAttribute('title')).toBe('导出对话');
+    expect(btn.textContent).toContain('导出对话');
   });
 
   it('does not show menu initially', () => {

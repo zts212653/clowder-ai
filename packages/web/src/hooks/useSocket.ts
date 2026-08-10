@@ -102,6 +102,8 @@ export interface SocketCallbacks {
   onHeartbeat?: (data: { threadId: string; timestamp: number }) => void;
   onMessageDeleted?: (data: { messageId: string; threadId: string; deletedBy: string }) => void;
   onMessageRestored?: (data: { messageId: string; threadId: string }) => void;
+  onMessageRecalled?: (data: { messageId: string; threadId: string; verdict: 'zero_exposure' | 'exposed' }) => void;
+  onMessageReceiptUpdated?: (data: { messageId: string; threadId: string }) => void;
   onThreadBranched?: (data: { sourceThreadId: string; newThreadId: string; fromMessageId: string }) => void;
   onAuthorizationRequest?: (data: {
     requestId: string;
@@ -767,6 +769,15 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     });
     socket.on('message_restored', (data: { messageId: string; threadId: string }) => {
       callbacksRef.current.onMessageRestored?.(data);
+    });
+    socket.on(
+      'message_recalled',
+      (data: { messageId: string; threadId: string; verdict: 'zero_exposure' | 'exposed' }) => {
+        callbacksRef.current.onMessageRecalled?.(data);
+      },
+    );
+    socket.on('message_receipt_updated', (data: { messageId: string; threadId: string }) => {
+      callbacksRef.current.onMessageReceiptUpdated?.(data);
     });
     socket.on('thread_branched', (data: { sourceThreadId: string; newThreadId: string; fromMessageId: string }) => {
       callbacksRef.current.onThreadBranched?.(data);

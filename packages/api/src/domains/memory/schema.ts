@@ -70,7 +70,7 @@ END`,
 END`,
 ];
 
-export const CURRENT_SCHEMA_VERSION = 38;
+export const CURRENT_SCHEMA_VERSION = 39;
 
 // F163 Phase A: experiment infrastructure tables (cohorts, suggestions, logs)
 export const SCHEMA_V13_TABLES = `
@@ -1160,6 +1160,42 @@ export function applyMigrations(db: Database.Database): void {
       // Column may already exist from a partial migration.
     }
     db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(38, new Date().toISOString());
+  }
+
+  // V39: F264 Gap F — fail-closed derived guard for true-recall indexing.
+  // The MessageStore tombstone remains canonical truth. Suppressions use
+  // independent leases so a losing concurrent recall cannot release the
+  // winner's committed guard. The snapshot makes pre-CAS rollback exact even
+  // when the recalled passage sits outside the bounded rebuild window.
+  if (currentVersion < 39) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS message_recall_index_suppressions (
+        doc_anchor TEXT NOT NULL,
+        passage_id TEXT NOT NULL,
+        lease_id TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('prepared', 'committed')),
+        prepared_at TEXT NOT NULL,
+        committed_at TEXT,
+        PRIMARY KEY (doc_anchor, passage_id, lease_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_message_recall_suppressions_passage
+        ON message_recall_index_suppressions(doc_anchor, passage_id, state);
+
+      CREATE TABLE IF NOT EXISTS message_recall_index_snapshots (
+        doc_anchor TEXT NOT NULL,
+        passage_id TEXT NOT NULL,
+        passage_content TEXT,
+        passage_speaker TEXT,
+        passage_position INTEGER,
+        passage_created_at TEXT,
+        doc_title TEXT,
+        doc_summary TEXT,
+        doc_source_hash TEXT,
+        doc_updated_at TEXT,
+        PRIMARY KEY (doc_anchor, passage_id)
+      );
+    `);
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(39, new Date().toISOString());
   }
 }
 

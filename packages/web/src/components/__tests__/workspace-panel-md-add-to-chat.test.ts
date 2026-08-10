@@ -114,6 +114,12 @@ function setupMocks(fileOverrides: Record<string, unknown> = {}) {
       clearPendingPreviewAutoOpen: vi.fn(),
       restoreWorkspaceTabs: vi.fn(),
       _workspaceFileSetAt: { ts: 0, threadId: null },
+      workspaceMode: 'dev',
+      setWorkspaceMode: vi.fn(),
+      workspaceSurface: 'files',
+      setWorkspaceSurface: vi.fn(),
+      workspacePreview: { port: 3000, path: '/' },
+      setWorkspacePreview: vi.fn(),
     };
     return sel(store);
   });
@@ -126,12 +132,36 @@ function setupMocks(fileOverrides: Record<string, unknown> = {}) {
  * Uses a mock Selection object since jsdom's Selection API is limited.
  */
 function simulateSelection(anchorNode: Node | null, focusNode: Node | null, text: string) {
+  const anchorElement = anchorNode instanceof Element ? anchorNode : anchorNode?.parentElement;
+  const selectionContainer = anchorElement?.parentElement;
+  if (selectionContainer) {
+    vi.spyOn(selectionContainer, 'getBoundingClientRect').mockReturnValue({
+      top: 0,
+      right: 600,
+      bottom: 500,
+      left: 0,
+      width: 600,
+      height: 500,
+    } as DOMRect);
+  }
+  const selectionRect = {
+    top: 100,
+    right: 240,
+    bottom: 120,
+    left: 120,
+    width: 120,
+    height: 20,
+  } as DOMRect;
   const mockSelection = {
     isCollapsed: !text,
     anchorNode,
     focusNode,
     toString: () => text,
     rangeCount: text ? 1 : 0,
+    getRangeAt: () => ({
+      getClientRects: () => [selectionRect],
+      getBoundingClientRect: () => selectionRect,
+    }),
   };
   vi.spyOn(window, 'getSelection').mockReturnValue(mockSelection as unknown as Selection);
   document.dispatchEvent(new Event('selectionchange'));
@@ -233,7 +263,21 @@ describe('WorkspacePanel Markdown Add to Chat', () => {
 
     expect(setPendingChatInsert).toHaveBeenCalledWith({
       threadId: 'thread-1',
-      text: '`docs/test.md` (🌿 main)\n```markdown\nselected text\n```',
+      text: '',
+      contextAttachments: [
+        expect.objectContaining({
+          v: 1,
+          kind: 'quote',
+          text: 'selected text',
+          source: {
+            kind: 'workspace_file',
+            path: 'docs/test.md',
+            worktreeId: 'main',
+            branch: 'main',
+            language: 'markdown',
+          },
+        }),
+      ],
     });
   });
 
@@ -275,6 +319,12 @@ describe('WorkspacePanel Markdown Add to Chat', () => {
         clearPendingPreviewAutoOpen: vi.fn(),
         restoreWorkspaceTabs: vi.fn(),
         _workspaceFileSetAt: { ts: 0, threadId: null },
+        workspaceMode: 'dev',
+        setWorkspaceMode: vi.fn(),
+        workspaceSurface: 'files',
+        setWorkspaceSurface: vi.fn(),
+        workspacePreview: { port: 3000, path: '/' },
+        setWorkspacePreview: vi.fn(),
       };
       return sel(store);
     });

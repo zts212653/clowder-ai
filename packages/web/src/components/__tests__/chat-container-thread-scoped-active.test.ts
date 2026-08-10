@@ -120,7 +120,6 @@ vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));
 vi.mock('../MessageNavigator', () => ({ MessageNavigator: () => null }));
-vi.mock('../MobileStatusSheet', () => ({ MobileStatusSheet: () => null }));
 vi.mock('../ParallelStatusBar', () => ({ ParallelStatusBar: () => null }));
 vi.mock('../ProjectSetupCard', () => ({ ProjectSetupCard: () => null }));
 vi.mock('../QueuePanel', () => ({ QueuePanel: () => null }));

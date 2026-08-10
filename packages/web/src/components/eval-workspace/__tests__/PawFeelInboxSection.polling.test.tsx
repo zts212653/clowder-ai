@@ -25,6 +25,10 @@ async function chooseViewOption(container: HTMLElement, kind: 'filter' | 'sort',
 }
 
 function buildItem(signalId: string, state: PawFeelInboxItem['disposition']['state']): PawFeelInboxItem {
+  const responsibility: PawFeelInboxItem['responsibility'] =
+    state === 'closed' || state === 'duplicate' || state === 'no_action'
+      ? { state: 'terminal', validExit: true, exitKind: 'terminal_disposition', evidenceRefs: [] }
+      : { state: 'unreviewed', validExit: false, exitKind: 'none', evidenceRefs: [] };
   return {
     disposition: {
       signalId,
@@ -42,6 +46,7 @@ function buildItem(signalId: string, state: PawFeelInboxItem['disposition']['sta
       captureMethod: 'typed',
       captureAssessment: 'confirmed',
     },
+    responsibility,
     source: {
       availability: 'available',
       preview: `原消息预览 ${signalId}`,
@@ -71,6 +76,7 @@ function buildPage(overrides: Partial<PawFeelInboxPage> = {}): PawFeelInboxPage 
         members: [item],
         rawSignalCount: 1,
         stateCounts: { [item.disposition.state]: 1 },
+        responsibility: item.responsibility,
       })),
     bundleCounts: overrides.bundleCounts ?? {
       total: overrides.counts?.total ?? items.length,
@@ -92,6 +98,13 @@ function buildPage(overrides: Partial<PawFeelInboxPage> = {}): PawFeelInboxPage 
       problemFamilies: { status: 'unavailable', reason: 'No authoritative grouping contract' },
     },
     counts: { total: 0, unseen: 0, inProgress: 0, routePending: 0, disposed: 0, overdue: 0 },
+    responsibilityCounts: overrides.responsibilityCounts ?? {
+      unreviewed: Math.max(0, (overrides.counts?.total ?? items.length) - (overrides.counts?.disposed ?? 0)),
+      bound_in_repair: 0,
+      signature_waiting: 0,
+      blocked: 0,
+      terminal: overrides.counts?.disposed ?? 0,
+    },
     degraded: false,
     coverage: {
       coverageStartAt: '2026-07-19T00:00:00.000Z',
@@ -151,7 +164,7 @@ describe('PawFeelInboxSection polling navigation', () => {
       if (url === '/api/paw-feel/duty') {
         return { ok: true, json: async () => ({ config: { primaryCatId: 'opus' } }) };
       }
-      if (url.includes('states=routed%2Cclosed%2Cduplicate%2Cno_action%2Cfix')) {
+      if (url.includes('states=closed%2Cduplicate%2Cno_action')) {
         disposedReads += 1;
         return {
           ok: true,
@@ -201,7 +214,7 @@ describe('PawFeelInboxSection polling navigation', () => {
     await act(async () => {});
 
     expect(mocks.apiFetch).toHaveBeenLastCalledWith(
-      '/api/paw-feel/inbox?limit=50&sort=newest&states=new%2Cseen%2Croute_pending',
+      '/api/paw-feel/inbox?limit=50&sort=newest&states=new%2Cseen%2Croute_pending%2Crouted%2Cfix%2Csignature_waiting%2Cblocked',
     );
     expect(container.textContent).toContain('原消息预览 fresh');
     expect(container.textContent).not.toContain('原消息预览 closed');
@@ -214,7 +227,7 @@ describe('PawFeelInboxSection polling navigation', () => {
       if (url === '/api/paw-feel/duty') {
         return { ok: true, json: async () => ({ config: { primaryCatId: 'opus' } }) };
       }
-      if (url.includes('states=routed%2Cclosed%2Cduplicate%2Cno_action%2Cfix')) {
+      if (url.includes('states=closed%2Cduplicate%2Cno_action')) {
         disposedReads += 1;
         return {
           ok: true,

@@ -86,7 +86,7 @@ import type { IMessageStore, StoredMessage } from '../domains/cats/services/stor
 import { isTimelinePublished } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { projectQueueReceipt } from '../domains/cats/services/stores/ports/queued-message-receipt.js';
 import type { ISummaryStore } from '../domains/cats/services/stores/ports/SummaryStore.js';
-import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { deriveAutoThreadTitle, type IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import {
   type ITurnExecutionStore,
   projectTurnExecutionMessage,
@@ -166,7 +166,7 @@ import {
   resolveMessageDispositionForAdmission,
   resolveQueueAuthorIntentByCatId,
 } from './message-disposition-admission.js';
-import { sendMessageSchema } from './messages.schema.js';
+import { buildMessageContentBlocks, sendMessageSchema } from './messages.schema.js';
 import { parseMultipart } from './parse-multipart.js';
 
 const STREAM_START_TIMEOUT_MS = 5_000;
@@ -524,6 +524,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         return { error: 'Invalid request body', details: parseResult.error.issues };
       }
       ({ content, userId: legacyUserId, threadId, idempotencyKey } = parseResult.data);
+      if (parseResult.data.contextAttachments?.length) {
+        contentBlocks = buildMessageContentBlocks(content, parseResult.data.contextAttachments);
+      }
       deliveryMode = parseResult.data.deliveryMode;
       messageDisposition = parseResult.data.messageDisposition;
       // F35: Extract whisper fields from parsed body
@@ -566,7 +569,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         };
       } else if (thread.title === null) {
         // Auto-title existing untitled thread
-        const autoTitle = content.length > 30 ? `${content.slice(0, 30)}...` : content;
+        const autoTitle = deriveAutoThreadTitle(content || '上下文附件') ?? '上下文附件';
         await opts.threadStore.updateTitle(resolvedThreadId, autoTitle);
         opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'thread_updated', {
           threadId: resolvedThreadId,
@@ -2008,6 +2011,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     const browserTimelineRead = {
       includeQueuedCatMessages: true,
       includeQueuedUserMessages: true,
+      includeRecalledUserMessages: true,
     } as const;
 
     type StoredMsg = Awaited<ReturnType<typeof opts.messageStore.getByThread>>[number];
@@ -2129,6 +2133,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       m.extra?.auxiliaryTurnExecutions ||
       supplementProjectionByOriginal.has(m.id) ||
       m.queueCustody ||
+      m.recall ||
       m.extra?.recovery
         ? {
             extra: {
@@ -2152,6 +2157,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 ? { freshnessSupplement: supplementProjectionByOriginal.get(m.id) }
                 : {}),
               ...(m.queueCustody ? { queueReceipt: projectQueueReceipt(m.queueCustody) } : {}),
+              ...(m.recall ? { recall: m.recall } : {}),
               ...(m.extra?.recovery ? { recovery: projectRecoveryForHistory(m.extra.recovery) } : {}),
             },
           }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -12,7 +12,7 @@ import { createCapabilityWakeupGeneratorAdapter } from '../../dist/infrastructur
  *   - Discriminator: rejects non-capability-wakeup-trial-window sourceRefs
  *   - Validation: rejects bad selector (delegates to PR-1a validator)
  *   - Provider: calls provider.resolve(selector) for trials
- *   - Empty trials: throws no_trials_in_window (caller treats as 4xx upstream)
+ *   - Empty trials: keep_observe writes no-finding evidence; actionable verdicts throw
  *   - Submit: passes packet to generator as submittedPacket (砚砚 R8 P1)
  *   - Registry: loads EvalDomainRegistryEntry from isolated harness root
  */
@@ -134,12 +134,12 @@ describe('createCapabilityWakeupGeneratorAdapter', () => {
     );
   });
 
-  it('throws no_trials_in_window when provider returns empty', async () => {
+  it('throws no_trials_in_window for actionable verdicts when provider returns empty', async () => {
     const provider = { resolve: async () => [] };
     const adapter = createCapabilityWakeupGeneratorAdapter(provider);
     await assert.rejects(
       adapter(
-        buildSubmittedPacket(),
+        buildSubmittedPacket({ verdict: 'fix' }),
         {
           kind: 'capability-wakeup-trial-window',
           capability: 'rich-messaging',
@@ -151,6 +151,46 @@ describe('createCapabilityWakeupGeneratorAdapter', () => {
       ),
       /no_trials_in_window.*rich-messaging/,
     );
+  });
+
+  it('writes a no-finding bundle for zero-trial keep_observe without fabricating trials', async () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'cw-adapter-zero-repo-'));
+    const harnessFeedbackRoot = join(repoRoot, 'docs', 'harness-feedback');
+    seedDomainRegistry(harnessFeedbackRoot);
+    const provider = { resolve: async () => [] };
+    const adapter = createCapabilityWakeupGeneratorAdapter(provider);
+
+    const result = await adapter(
+      buildSubmittedPacket({
+        id: 'vhp-cw-zero-trial-test',
+        verdict: 'keep_observe',
+        phenomenon: 'No classified capability-wakeup trials matched this replay window.',
+      }),
+      {
+        kind: 'capability-wakeup-trial-window',
+        capability: 'rich-messaging',
+        windowStartMs: 1000,
+        windowEndMs: 7300000,
+        sessionIds: ['session-1'],
+      },
+      { harnessFeedbackRoot, liveHarnessFeedbackRoot: '/tmp/live-unused-for-cw', ownerUserId: 'default-user' },
+    );
+
+    const snapshot = JSON.parse(readFileSync(join(result.bundleDir, 'snapshot.json'), 'utf8'));
+    const attribution = JSON.parse(readFileSync(join(result.bundleDir, 'attribution.json'), 'utf8'));
+    const rawTrials = JSON.parse(
+      readFileSync(join(repoRoot, 'generated', 'capability-wakeup', 'vhp-cw-zero-trial-test', 'trials.json'), 'utf8'),
+    );
+
+    assert.deepEqual(rawTrials.trials, [], 'raw replay evidence must preserve the empty trial result');
+    assert.equal(snapshot.window.startMs, 1000);
+    assert.equal(snapshot.window.endMs, 7300000);
+    assert.equal(snapshot.components[0].confidence, 'no-data');
+    assert.equal(snapshot.components[0].activationCounts.opportunity_count, 0);
+    assert.equal(snapshot.components[0].frictionCounts.miss_count, 0);
+    assert.deepEqual(attribution.findings, []);
+    assert.equal(attribution.noFindingRecord.reason, 'no classified trials matched source window');
+    assert.match(result.verdictPath, /verdicts\/vhp-cw-zero-trial-test\.md$/);
   });
 
   it('requires ownerUserId before resolving provider', async () => {

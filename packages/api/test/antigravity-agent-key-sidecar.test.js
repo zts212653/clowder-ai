@@ -72,4 +72,34 @@ describe('ensureAntigravityAgentKeySidecar', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  test('reuses valid sidecars instead of invalidating shared MCP processes on every API restart', async () => {
+    const { AgentKeyRegistry } = await import('../dist/domains/cats/services/agents/agent-key/AgentKeyRegistry.js');
+    const { ensureAntigravityAgentKeySidecar } = await import(
+      '../dist/domains/cats/services/agents/agent-key/antigravity-agent-key-sidecar.js'
+    );
+
+    const dir = join(tmpdir(), `cat-cafe-agent-key-restart-${Date.now()}`);
+    const filePath = join(dir, 'antigravity.secret');
+    const registry = new AgentKeyRegistry();
+    try {
+      const first = await ensureAntigravityAgentKeySidecar(registry, {
+        filePath,
+        catIds: ['antigravity'],
+        env: {},
+      });
+      const firstSecret = await readFile(filePath, 'utf8');
+      const second = await ensureAntigravityAgentKeySidecar(registry, {
+        filePath,
+        catIds: ['antigravity'],
+        env: {},
+      });
+
+      assert.equal(second.agentKeyIds.antigravity, first.agentKeyIds.antigravity);
+      assert.equal(await readFile(filePath, 'utf8'), firstSecret);
+      assert.equal((await registry.list({ catId: 'antigravity', userId: 'default-user' })).length, 1);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

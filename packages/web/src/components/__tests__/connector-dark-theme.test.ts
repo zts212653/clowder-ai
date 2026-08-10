@@ -1,9 +1,14 @@
 import { getAllConnectorDefinitions } from '@cat-cafe/shared';
 import { describe, expect, it } from 'vitest';
+import { connectorThemeToken } from '@/lib/connector-theme-token';
 
 import tailwindConfig from '../../../tailwind.config';
 
 describe('connector dark mode themes', () => {
+  it('normalizes connector IDs before using them as CSS custom-property fragments', () => {
+    expect(connectorThemeToken('physical-limb.stackchan')).toBe('physical-limb-stackchan');
+  });
+
   it('Tailwind darkMode selector matches ThemeProvider data-theme attribute', () => {
     // ThemeProvider uses attribute="data-theme" (next-themes)
     // Tailwind must use matching selector so dark: classes follow in-app theme, not OS preference
