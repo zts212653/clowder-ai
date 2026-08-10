@@ -12,7 +12,7 @@ description_updated_at: 2026-07-28T16:04:04Z
 
 # F279: Workspace Listen Mode — 正文听读与可复用音频缓存
 
-> **Status**: in-progress / Phase A passed; Phase B/C review delta awaiting terminal re-review; F289 base dependency and real-TTS UAT pending
+> **Status**: in-progress / Phase A passed; Phase B/C exact-HEAD review approved; F289 base dependency and real-TTS UAT pending
 > **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol)
 > **Priority**: P1
 > **Created**: 2026-07-28
@@ -34,19 +34,20 @@ Why: Workspace 是用户入口；F066/F111 继续拥有 TTS 合成能力，F112 
 
 家里已经分别拥有 Markdown 渲染、TTS 合成、流式分句和播放队列，却还没有把这些能力接成一个用户能直接使用的“听正文”旅程。F279 的目标不是再造 TTS，而是让operator在 Workspace 打开一篇 Markdown 后，**从任意句开始、按自己舒服的速度听下去；听过的内容可以立即重播，缓存何时清理一眼可见。**
 
-## Current State（updated 2026-08-09）
+## Current State（updated 2026-08-10）
 
 - F063 已支持 Workspace Markdown 渲染、文本选择和媒体预览，但没有“听读”入口。
 - F066 提供本地 TTS；F111 提供流式分句；F112 提供 pause/resume/skip/interrupt 的共享 PlaybackManager。
 - `/api/tts` 已按文本、voice、model、speed 等指纹缓存 `.wav`；相同输入实测 cache hit 约 `3.7ms`。
-- 当前本机实测：
-  - 53 字：合成 `5.38s`，音频 `10.96s`；
-  - 138 字：合成 `9.17s`，音频 `20.56s`。
-  - 结论：1×/1.5× 有充足边播边合成余量；2× 需要更积极预取，不能假装永不缓冲。
+- 2026-08-10 以指定研究文档和生产默认 Qwen clone 声线完成真实 API 探针：
+  - 跨全文 12 句冷合成：p50 `9.15s`、p95 `13.96s`；同一资产热命中：p50 `1ms`、p95 `2ms`；
+  - 连续 8 句：合成 real-time factor p50 `1.124`、p95 `1.252`。按当前“首句就播、其余串行预取”时序，1× 仍会出现 3 次、合计 `12.5s` 的 underrun；1.5×/2× 更明显；
+  - manifest 真实写入 361 个稳定 anchor、关联 12 个音频资产后，可恢复句内 `2.25s`、`1.5×` 与 `forever`；清理 12 个音频后上述用户状态仍完整保留。
+  - 结论：cache-hit 与持久状态链路达标；此前“1×/1.5× 有充足余量”的小样本结论已被长文反证。AC-C4/C5/C7 继续开放，播放器必须保留真实 loading/buffering，不能把预取当成吞吐保证。
 - 现有 cleaner 每 6 小时清理超过 7 天的文件，并在缓存超过 500MB 时按 LRU 压回 400MB。
 - 当前默认目录是 runtime cwd 下的 `./data/tts-cache`：缓存能命中，但位置随运行 checkout 漂移；没有文档 manifest、续听位置、缓存状态或用户可见清理入口。
 - F284 已把 Workspace 重构为 contextual shell；Files 和文件详情仍是持久 Workspace 内的正式层级，且访问后的 Workspace 在折叠/切换 sibling host 时保持挂载。F279 的入口继续属于 rendered Markdown 文件详情，但全局 mini player 必须位于 `ContextualWorkspaceChrome` 外的 AppShell，返回正文必须调用 F284 的 canonical Files/detail store transition。
-- 生产实现分支 `feat/f279-listen-mode` 已在 exact HEAD `fe15c18dd1464e9d758d2adff3d08aa6b05f1a02` 接入 F284 contextual Workspace：rendered Markdown 工具栏/inline sentence span、AppShell 全局播放器、逐句预取、句内位置节流持久化、语音自动播放抑制、缓存状态/清理 UI 均已落代码；首轮非作者 review 提出的播放互斥、size-pressure retention、mutation strict identity、零引用资产策略与 UI blast radius 已完成 Red→Green 修复。修复聚焦验证为 Web 22/22、API 15/15，完整 `pnpm gate --no-rebase` 通过。尚待同 reviewer terminal delta re-review 与真实 TTS UAT。
+- 生产实现分支 `feat/f279-listen-mode` 已接入 F284 contextual Workspace：rendered Markdown 工具栏/inline sentence span、AppShell 全局播放器、逐句预取、句内位置节流持久化、语音自动播放抑制、缓存状态/清理 UI 均已落代码；非作者 reviewer `@opus5` 已对功能实现 exact HEAD `fe15c18dd1464e9d758d2adff3d08aa6b05f1a02` 给出 terminal `APPROVE`。真实 UAT 后又在 `81052ff94` 补齐 WAV `durationSec`，使生产 route 能直接记录 `tts_synthesis_rtf`；该两文件 delta 经 TDD 27/27 与真实 sidecar response 验证，留待性能方案收敛后一次性复审。尚待 F289 base 落 main 后 rebase，以及 AC-C4/C5/C7 性能缺口。
 - F289 #3467 尚未落 main。F279 分支暂时叠放其通用 data-root substrate，并由 F279 自己登记独立 `listenModeState` 资产与 `LISTEN_MODE_DB` override；音频消费 `ttsCache`，续听位置、倍速、retention 与 manifest 进入 TTL=0 SQLite，不能把用户状态藏进可清理 cache 目录。
 
 ## Product Boundary
@@ -253,9 +254,9 @@ TTS、缓存或生产 Workspace 集成已经实现。
 | Risk | Consequence | Mitigation |
 |---|---|---|
 | 句段 anchor 随编辑漂移 | 从错句续听/高亮 | semantic anchor + occurrence + digest，编辑旅程测试 |
-| 2× 消耗快于合成 | 频繁断音 | 前瞻预取、buffer watermark、显式 buffering |
+| 生产默认 Qwen clone 的持续合成慢于实时 | 冷听时 1× 也可能耗尽预取缓冲；1.5×/2× 更频繁断音 | 热缓存即时复用；冷听保留真实 loading/buffering 与 underrun 指标；在 AC-C5 关闭前不得宣称连续播放达标，后续吞吐改进必须落在 provider/chunking 坐标而非只增大句数预取 |
 | 共享 chunk 被误删 | 其他文档突然 cache miss | manifest 引用/可达性回收，非按文件夹粗删 |
-| 稳定缓存无限增长 | 磁盘膨胀 | 默认 7d last-used + size cap + 可见清理 |
+| 稳定缓存无限增长 | 磁盘膨胀 | 默认 7d last-used 到期回收 + 可见的单文档清理；30d/永久属于用户保留承诺，不受 size-pressure 驱逐；全局 size cap 只治理无 manifest 引用的 legacy cache |
 | 新播放器绕过 F112 | 多音源竞争、状态割裂 | 架构契约 + integration test |
 | Markdown 提取读出噪声 | 听感不可用 | 语义树白名单、默认跳过非正文、选择覆盖 |
 | **PlaybackManager 生命周期绑在 ChatContainer + voiceMode** | 切 thread 卸载 ChatContainer、或用户开关一次 Voice Mode，都会触发 `destroy()` + 置 null，**听读会被静默销毁**，与 KD-10 全局会话直接冲突 | Phase B 前置：把单例提升到 AppShell，effect 依赖与 cleanup 不再绑 `session?.voiceMode`；加 integration test 覆盖「切 thread / 切 voiceMode 后听读仍在播」 |
@@ -275,7 +276,11 @@ TTS、缓存或生产 Workspace 集成已经实现。
 - Phase A 已以真实 Workspace 原型取得 operator Design Gate signoff；证据锁定
   `007ebe3de33eaea853cda27da77dc314e75eff42`。
 - Phase B/C 生产实现修复后 exact HEAD 为
-  `fe15c18dd1464e9d758d2adff3d08aa6b05f1a02`；Web 修复聚焦 22/22、API 修复聚焦 15/15 与完整 gate 均通过，同 reviewer terminal delta re-review 待回填。
+  `fe15c18dd1464e9d758d2adff3d08aa6b05f1a02`；Web 修复聚焦 22/22、API 修复聚焦 15/15 与完整 gate 均通过。非作者 reviewer `@opus5` 在
+  `0001786350373337-000090-38a5b65d` 对该 exact HEAD 给出 terminal
+  `APPROVE`；其浏览器实测与 focused test 复核覆盖全部六项 review delta。
+- 分支后续 observability delta `81052ff94` 只增加 WAV 时长推导与回归测试；RED 为 `durationSec === undefined`，GREEN 为 provider 27/27，真实 sidecar response 返回 `durationSec: 4.24` / `synthesisMs: 8576`。它不冒充吞吐修复，也不继承前一 exact HEAD 的 review verdict。
+- 合入前仍需：F289 data-root substrate 落 main 后 clean rebase；真实 TTS UAT 已证明热缓存/恢复/清理链路，但冷合成 p50/p95 与连续播放仍未达到 AC-C4/C5，AC-C3 的“首个可听”也还缺浏览器音频起播证据；当前无 merge 授权。
 - 行为改动需非作者独立验证，并覆盖最终 HEAD。
 - 路径安全、共享资产回收、持久状态和 PlaybackManager 互斥是阻塞项。
 - 完成只在 AC 有测试、指标或真实 Workspace UAT 证据后声明。

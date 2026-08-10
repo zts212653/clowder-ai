@@ -142,7 +142,14 @@ function extractCatHandle(email: string): string | null {
   if (lower.includes('codex')) return 'codex';
   if (lower.includes('gpt52') || lower.includes('gpt-5.2') || lower.includes('gpt-5.4')) return 'gpt52';
   if (lower.includes('sonnet')) return 'sonnet';
-  if (lower.includes('gemini35') || lower.includes('gemini-3.5')) return 'gemini35';
+  if (
+    lower.includes('gemini35') ||
+    lower.includes('gemini36') ||
+    lower.includes('gemini-3.5') ||
+    lower.includes('gemini-3.6')
+  ) {
+    return 'gemini35';
+  }
   if (lower.includes('gemini')) return 'gemini';
   // 'opus' generic last (less specific than opus-XX)
   if (lower.includes('opus')) return 'opus';

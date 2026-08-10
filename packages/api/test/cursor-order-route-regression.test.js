@@ -27,8 +27,9 @@ import Fastify from 'fastify';
  */
 function createCrossFormatAwareStore() {
   const cursors = new Map();
+  const anchors = new Map();
   return {
-    ack(userId, threadId, messageId) {
+    ack(userId, threadId, messageId, canonicalCursor) {
       const key = `${userId}:${threadId}`;
       const current = cursors.get(key);
       if (current) {
@@ -38,12 +39,21 @@ function createCrossFormatAwareStore() {
         if (messageId <= current) return false;
       }
       cursors.set(key, messageId);
+      if (canonicalCursor) anchors.set(key, canonicalCursor);
       return true;
     },
     get(userId, threadId) {
       const key = `${userId}:${threadId}`;
       const id = cursors.get(key);
-      return id ? { userId, threadId, lastReadMessageId: id, updatedAt: Date.now() } : null;
+      return id
+        ? {
+            userId,
+            threadId,
+            lastReadMessageId: id,
+            ...(anchors.get(key) ? { lastReadVisibilityCursor: anchors.get(key) } : {}),
+            updatedAt: Date.now(),
+          }
+        : null;
     },
     reconcileReadCursor(userId, threadId, oldV1, newV2) {
       const key = `${userId}:${threadId}`;
@@ -53,17 +63,20 @@ function createCrossFormatAwareStore() {
       }
       return false;
     },
-    replaceReadCursorIfEqual(userId, threadId, expectedValue, newValue) {
+    replaceReadCursorIfEqual(userId, threadId, expectedValue, newValue, canonicalCursor) {
       const key = `${userId}:${threadId}`;
       if (cursors.get(key) !== expectedValue) return false;
       cursors.set(key, newValue);
+      if (canonicalCursor) anchors.set(key, canonicalCursor);
       return true;
     },
     getUnreadSummaries: async () => [],
     deleteByThread: async () => {},
     /** Test helper: seed a raw cursor value */
-    _seed(userId, threadId, cursor) {
-      cursors.set(`${userId}:${threadId}`, cursor);
+    _seed(userId, threadId, cursor, anchor) {
+      const key = `${userId}:${threadId}`;
+      cursors.set(key, cursor);
+      if (anchor) anchors.set(key, anchor);
     },
     /** Test helper: read raw cursor value */
     _raw(userId, threadId) {
@@ -212,7 +225,7 @@ describe('#1200 R14 route: POST /read/latest cross-format', () => {
         threadId: thread.id,
       });
       const cursorB = messageStore.canonicalizeCursor(msgB.id, thread.id);
-      readStateStore._seed('alice', thread.id, cursorB);
+      readStateStore._seed('alice', thread.id, cursorB, cursorB);
       messageStore.softDelete(msgB.id, 'admin');
 
       const res = await app.inject({
@@ -224,6 +237,7 @@ describe('#1200 R14 route: POST /read/latest cross-format', () => {
 
       assert.equal(res.statusCode, 200);
       assert.equal(body.advanced, false, 'A canonical higher cursor must not be treated as repairable');
+      assert.equal(body.caughtUp, true, 'A stored canonical anchor beyond latest is already caught up');
       assert.equal(readStateStore._raw('alice', thread.id), cursorB);
       assert.ok(!cursorB.includes(msgA.id));
     } finally {
@@ -434,6 +448,49 @@ describe('#1200 R14 route: PATCH /read cross-format', () => {
     const stored = readStateStore._raw('alice', thread.id);
     assert.notEqual(stored, prunedV1, 'Stored cursor must leave the unresolvable value');
     assert.ok(stored.includes(msgLive.id), 'Stored cursor must bind the validated read target');
+  });
+
+  it('does not repair backward when a durable anchor proves the stored position is later', async () => {
+    const savedGate = process.env.VISIBILITY_CURSOR_V2;
+    process.env.VISIBILITY_CURSOR_V2 = 'on';
+    try {
+      const thread = threadStore.create('alice', 'Anchored monotonic read');
+      const msgA = messageStore.append({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'earlier visible message',
+        mentions: [],
+        timestamp: Date.now() - 2000,
+        threadId: thread.id,
+      });
+      const msgB = messageStore.append({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'later read position',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: thread.id,
+      });
+      const cursorB = messageStore.canonicalizeCursor(msgB.id, thread.id);
+      const stalePrimary = '0000000000000001-pruned-primary';
+      readStateStore._seed('alice', thread.id, stalePrimary, cursorB);
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/threads/${thread.id}/read`,
+        headers: { 'x-cat-cafe-user': 'alice' },
+        payload: { upToMessageId: msgA.id },
+      });
+      const body = JSON.parse(res.body);
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(body.advanced, false);
+      assert.equal(body.caughtUp, true);
+      assert.equal(readStateStore._raw('alice', thread.id), stalePrimary);
+    } finally {
+      if (savedGate === undefined) delete process.env.VISIBILITY_CURSOR_V2;
+      else process.env.VISIBILITY_CURSOR_V2 = savedGate;
+    }
   });
 });
 

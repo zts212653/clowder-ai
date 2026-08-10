@@ -171,6 +171,7 @@ import { parseMultipart } from './parse-multipart.js';
 
 const STREAM_START_TIMEOUT_MS = 5_000;
 const INVOCATION_STARTUP_WATCHDOG_MS = 180_000;
+const QUEUE_COMPLETION_WATCHDOG_MS = 5_000;
 
 /**
  * Dependencies injected via Fastify plugin options.
@@ -216,6 +217,8 @@ export interface MessagesRoutesOptions {
   sessionContinuationCoordinator?: SessionContinuationCoordinatorLike;
   /** Test/diagnostic override for releasing invocations that never produce a provider/session event. */
   invocationStartupWatchdogMs?: number;
+  /** Bounded fallback for queue drain notification when terminal bookkeeping stalls. */
+  queueCompletionWatchdogMs?: number;
   /** F101: Game store for /game command interception */
   gameStore?: IGameStore;
   /** F101: Injectable auto-player for lifecycle-safe teardown in tests/routes */
@@ -1789,51 +1792,76 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           clearStartupWatchdog();
           clearInterval(heartbeatInterval);
           opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
-          // F194 Phase Z3 (AC-Z3): defensive terminal write. If routeExecution silently exited
-          // without writing terminal (the runtime split symptom root cause), CAS expectedStatus=
-          // running guarded write based on chainCompletion signal. Skips if status already terminal.
-          // Reads chainTracker → succeeded/failed/missing → CAS update or fallback. (砚砚 R1 P1-3)
-          if (opts.invocationRecordStore) {
-            try {
-              await ensureTerminalStatus(
-                createResult.invocationId,
-                {
-                  invocationRecordStore: opts.invocationRecordStore,
-                  chainCompletion: routeChainTracker,
-                  log,
-                },
-                {
-                  reqId: request.id,
-                  successfulCatIds: terminalDispositions.getSuccessfulCatIds() as CatId[],
-                },
-              );
-            } catch (err) {
-              log.warn(
-                { err, invocationId: createResult.invocationId, feature: 'F194' },
-                'F194 Z3 ensureTerminalStatus failed (background)',
-              );
-            }
+          // Preserve the normal ordering (terminal truth + continuation commit before the next
+          // Queue turn), but never let an unbounded bookkeeping await erase the only drain signal.
+          // The callback is idempotent per route, so the watchdog and normal finally converge.
+          const queueCompletionWatchdogMs = opts.queueCompletionWatchdogMs ?? QUEUE_COMPLETION_WATCHDOG_MS;
+          const queueCompletionWatchdog =
+            queueCompletionWatchdogMs >= 0
+              ? setTimeout(() => {
+                  log.warn(
+                    {
+                      threadId: resolvedThreadId,
+                      invocationId: createResult.invocationId,
+                      queueCompletionWatchdogMs,
+                    },
+                    '[messages] terminal bookkeeping exceeded queue completion deadline; notifying drain',
+                  );
+                  notifyQueueCompletion(finalStatus);
+                }, queueCompletionWatchdogMs)
+              : undefined;
+          if (queueCompletionWatchdog && typeof queueCompletionWatchdog === 'object') {
+            queueCompletionWatchdog.unref();
           }
-          routeChainTracker.release(createResult.invocationId);
-          if (opts.sessionContinuationCoordinator) {
-            try {
-              await opts.sessionContinuationCoordinator.commitInvocationOutcome({
-                finalStatus,
-                threadId: resolvedThreadId,
-                catId: primaryCat,
-                userId,
-                consumedContinuation,
-                producedCapsules: [...continuationCapsules.values()],
-              });
-            } catch (err) {
-              log.warn(
-                { err, threadId: resolvedThreadId, targetCats },
-                '[messages] F224: commitInvocationOutcome failed',
-              );
+          try {
+            // F194 Phase Z3 (AC-Z3): defensive terminal write. If routeExecution silently exited
+            // without writing terminal (the runtime split symptom root cause), CAS expectedStatus=
+            // running guarded write based on chainCompletion signal. Skips if status already terminal.
+            // Reads chainTracker → succeeded/failed/missing → CAS update or fallback. (砚砚 R1 P1-3)
+            if (opts.invocationRecordStore) {
+              try {
+                await ensureTerminalStatus(
+                  createResult.invocationId,
+                  {
+                    invocationRecordStore: opts.invocationRecordStore,
+                    chainCompletion: routeChainTracker,
+                    log,
+                  },
+                  {
+                    reqId: request.id,
+                    successfulCatIds: terminalDispositions.getSuccessfulCatIds() as CatId[],
+                  },
+                );
+              } catch (err) {
+                log.warn(
+                  { err, invocationId: createResult.invocationId, feature: 'F194' },
+                  'F194 Z3 ensureTerminalStatus failed (background)',
+                );
+              }
             }
+            routeChainTracker.release(createResult.invocationId);
+            if (opts.sessionContinuationCoordinator) {
+              try {
+                await opts.sessionContinuationCoordinator.commitInvocationOutcome({
+                  finalStatus,
+                  threadId: resolvedThreadId,
+                  catId: primaryCat,
+                  userId,
+                  consumedContinuation,
+                  producedCapsules: [...continuationCapsules.values()],
+                });
+              } catch (err) {
+                log.warn(
+                  { err, threadId: resolvedThreadId, targetCats },
+                  '[messages] F224: commitInvocationOutcome failed',
+                );
+              }
+            }
+          } finally {
+            if (queueCompletionWatchdog) clearTimeout(queueCompletionWatchdog);
+            // F39: Notify queue processor for auto-dequeue chain.
+            notifyQueueCompletion(finalStatus);
           }
-          // F39: Notify queue processor for auto-dequeue chain
-          notifyQueueCompletion(finalStatus);
         }
       })();
     } else {

@@ -245,7 +245,11 @@ function assertTargetOutcomes(
     ) {
       throw new Error('target outcome must carry matching invocation lineage evidence');
     }
-    if (outcome.disposition !== 'responded' && outcome.disposition !== 'completed_with_turn') {
+    if (
+      outcome.disposition !== 'responded' &&
+      outcome.disposition !== 'completed_with_turn' &&
+      outcome.disposition !== 'managed_hold_disposition'
+    ) {
       throw new Error(`invalid target outcome disposition: ${outcome.disposition}`);
     }
     if (outcome.consumption !== undefined) {
@@ -264,6 +268,14 @@ function assertTargetOutcomes(
           new Set(outputMessageIds).size !== outputMessageIds.length
         ) {
           throw new Error('source response consumption requires unique output message ids');
+        }
+      } else if (outcome.consumption.kind === 'managed_hold_continued') {
+        if (
+          !outcome.consumption.sourceMessageId ||
+          !outcome.consumption.taskId ||
+          !['reheld', 'event_wait', 'transferred'].includes(outcome.consumption.transition)
+        ) {
+          throw new Error('invalid managed hold continuation witness');
         }
       } else {
         throw new Error('invalid target terminal consumption witness');

@@ -810,6 +810,10 @@ export interface ChatState {
   _unreadSuppressedUntil: Record<string, number>;
   /** #586: Count of in-flight ack requests per thread — suppression clears only when 0 */
   _pendingAckCount: Record<string, number>;
+  /** #1304: Badge snapshot restored when the latest ack batch fails to catch up. */
+  _unreadAckRollback: Record<string, { unreadCount: number; hasUserMention: boolean }>;
+  /** #1304: Aggregate failure bit for overlapping ack requests in the current batch. */
+  _unreadAckHadFailure: Record<string, boolean>;
   threads: Thread[];
   isLoadingThreads: boolean;
   /** F164: True when messages are from offline snapshot, not fresh API data */
@@ -1048,7 +1052,9 @@ export interface ChatState {
   clearUnread: (threadId: string) => void;
   /** F072: Clear unread badges for all threads at once */
   clearAllUnread: () => void;
-  /** #586: One ack resolved — decrement pending count; clear suppression when 0 */
+  /** #1304: Settle one ack; only a fully caught-up batch confirms the optimistic badge clear. */
+  settleUnreadAck: (threadId: string, caughtUp: boolean) => void;
+  /** @deprecated Use settleUnreadAck(threadId, true). Retained for non-HTTP callers. */
   confirmUnreadAck: (threadId: string) => void;
   /** #586: Ack about to fire — increment pending count + set Infinity suppression */
   armUnreadSuppression: (threadId: string) => void;
@@ -1213,6 +1219,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   currentProjectPath: 'default',
   _unreadSuppressedUntil: {},
   _pendingAckCount: {},
+  _unreadAckRollback: {},
+  _unreadAckHadFailure: {},
   threads: [],
   isLoadingThreads: true,
   isOfflineSnapshot: false,
@@ -3073,7 +3081,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const ts = state.threadStates[threadId];
       if (!ts || (ts.unreadCount === 0 && !ts.hasUserMention)) return state;
       // #586 Bug 3: Use Infinity instead of 10s timeout. Suppression persists
-      // until confirmUnreadAck() is called after POST /read/latest succeeds,
+      // until settleUnreadAck() records the terminal POST /read/latest result,
       // preventing stale server unread counts from overwriting cleared state.
       return {
         threadStates: {
@@ -3083,6 +3091,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         _unreadSuppressedUntil: {
           ...state._unreadSuppressedUntil,
           [threadId]: Infinity,
+        },
+        _unreadAckRollback: {
+          ...state._unreadAckRollback,
+          [threadId]: state._unreadAckRollback[threadId] ?? {
+            unreadCount: ts.unreadCount,
+            hasUserMention: ts.hasUserMention,
+          },
         },
       };
     }),
@@ -3109,38 +3124,76 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return changed ? { threadStates: updated, _unreadSuppressedUntil: suppressed } : state;
     }),
 
-  confirmUnreadAck: (threadId) =>
+  settleUnreadAck: (threadId, caughtUp) =>
     set((state) => {
-      // #586 final: Decrement pending ack count. Only clear suppression when
-      // ALL in-flight acks have resolved — this prevents an early-resolving ack
-      // from clearing suppression while a newer ack is still in flight.
+      // Every terminal response settles the request count. A non-2xx,
+      // network failure, or caughtUp:false is not a confirmed durable read;
+      // remember that failure until the overlapping batch fully drains.
       const count = Math.max(0, (state._pendingAckCount[threadId] ?? 1) - 1);
       const newCounts = { ...state._pendingAckCount, [threadId]: count };
+      const hadFailure = (state._unreadAckHadFailure[threadId] ?? false) || !caughtUp;
+      const newFailures = { ...state._unreadAckHadFailure, [threadId]: hadFailure };
       if (count > 0) {
-        // Still have pending acks — keep suppression, just update counter
-        return { _pendingAckCount: newCounts };
+        return { _pendingAckCount: newCounts, _unreadAckHadFailure: newFailures };
       }
-      // All acks resolved — safe to clear suppression
-      if (!state._unreadSuppressedUntil[threadId]) return { _pendingAckCount: newCounts };
+
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { [threadId]: _removed, ...rest } = state._unreadSuppressedUntil;
-      return { _unreadSuppressedUntil: rest, _pendingAckCount: newCounts };
+      const { [threadId]: _removedSuppression, ...remainingSuppressions } = state._unreadSuppressedUntil;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [threadId]: rollback, ...remainingRollbacks } = state._unreadAckRollback;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [threadId]: _removedFailure, ...remainingFailures } = newFailures;
+
+      if (!hadFailure || !rollback) {
+        return {
+          _unreadSuppressedUntil: remainingSuppressions,
+          _pendingAckCount: newCounts,
+          _unreadAckRollback: remainingRollbacks,
+          _unreadAckHadFailure: remainingFailures,
+        };
+      }
+
+      const current = state.threadStates[threadId];
+      return {
+        _unreadSuppressedUntil: remainingSuppressions,
+        _pendingAckCount: newCounts,
+        _unreadAckRollback: remainingRollbacks,
+        _unreadAckHadFailure: remainingFailures,
+        ...(current
+          ? {
+              threadStates: {
+                ...state.threadStates,
+                [threadId]: {
+                  ...current,
+                  unreadCount: Math.max(current.unreadCount, rollback.unreadCount),
+                  hasUserMention: current.hasUserMention || rollback.hasUserMention,
+                },
+              },
+            }
+          : {}),
+      };
     }),
 
+  confirmUnreadAck: (threadId) => get().settleUnreadAck(threadId, true),
+
   armUnreadSuppression: (threadId) =>
-    set((state) => ({
-      // #586 final: Increment pending ack count + set Infinity suppression.
-      // Each ack attempt increments; confirmUnreadAck decrements. Suppression
-      // only clears when counter reaches 0 (all in-flight acks resolved).
-      _unreadSuppressedUntil: {
-        ...state._unreadSuppressedUntil,
-        [threadId]: Infinity,
-      },
-      _pendingAckCount: {
-        ...state._pendingAckCount,
-        [threadId]: (state._pendingAckCount[threadId] ?? 0) + 1,
-      },
-    })),
+    set((state) => {
+      const pending = state._pendingAckCount[threadId] ?? 0;
+      return {
+        _unreadSuppressedUntil: {
+          ...state._unreadSuppressedUntil,
+          [threadId]: Infinity,
+        },
+        _pendingAckCount: {
+          ...state._pendingAckCount,
+          [threadId]: pending + 1,
+        },
+        _unreadAckHadFailure: {
+          ...state._unreadAckHadFailure,
+          [threadId]: pending > 0 ? (state._unreadAckHadFailure[threadId] ?? false) : false,
+        },
+      };
+    }),
 
   initThreadUnread: (threadId, unreadCount, hasUserMention) =>
     set((state) => {

@@ -98,6 +98,7 @@ async function gatedReadStateAck(
   userId: string,
   threadId: string,
   incomingCursor: string,
+  options: { repairUnresolvableLegacy?: boolean } = {},
 ): Promise<boolean> {
   const existing = await readStateStore.get(userId, threadId);
   const existingCursor = existing?.lastReadMessageId ?? null;
@@ -108,8 +109,13 @@ async function gatedReadStateAck(
     await preReconcileReadCursor(readStateStore, messageStore, userId, threadId, gated);
   }
 
-  const advanced = await readStateStore.ack(userId, threadId, gated);
+  const advanced = await readStateStore.ack(userId, threadId, gated, incomingCursor);
   if (advanced || !existingCursor || !incomingCursor.startsWith('v2:')) return advanced;
+  if (!options.repairUnresolvableLegacy) return false;
+  // A durable anchor remains ordering evidence when the rollout-gated primary
+  // is pruned. ACK already compared against it, so legacy repair must not
+  // bypass that monotonic verdict.
+  if (existing?.lastReadVisibilityCursor) return false;
   const replace = readStateStore.replaceReadCursorIfEqual;
   if (!replace || !messageStore?.canonicalizeCursor) return false;
 
@@ -131,9 +137,32 @@ async function gatedReadStateAck(
     }
   }
 
-  const repaired = await replace.call(readStateStore, userId, threadId, existingCursor, gated);
+  const repaired = await replace.call(readStateStore, userId, threadId, existingCursor, gated, incomingCursor);
   if (repaired) visibilityCursorUnresolvedRepair.add(1, { namespace: 'read' });
   return repaired;
+}
+
+function isReadStateCaughtUp(
+  state: Awaited<ReturnType<IThreadReadStateStore['get']>>,
+  targetCursor: string,
+  targetMessageId: string,
+): boolean {
+  if (!state) return false;
+  if (state.lastReadMessageId === targetCursor || state.lastReadMessageId === targetMessageId) return true;
+  const anchor = state.lastReadVisibilityCursor;
+  if (!anchor) return false;
+  try {
+    const parsedAnchor = parseCursor(anchor);
+    const parsedTarget = parseCursor(targetCursor);
+    return (
+      parsedAnchor?.version === 2 &&
+      parsedTarget?.version === 2 &&
+      (parsedAnchor.seq > parsedTarget.seq ||
+        (parsedAnchor.seq === parsedTarget.seq && parsedAnchor.id >= parsedTarget.id))
+    );
+  } catch {
+    return false;
+  }
 }
 
 interface ThreadIndexBuilder {
@@ -1247,7 +1276,9 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       const latest = await messageStore.getLatestVisibleCursor(thread.id);
       if (!latest) continue;
       // #1269: Gated ack — applies durable-slot gate + conditional pre-reconcile
-      const advanced = await gatedReadStateAck(opts.readStateStore!, messageStore, userId, thread.id, latest.cursor);
+      const advanced = await gatedReadStateAck(opts.readStateStore!, messageStore, userId, thread.id, latest.cursor, {
+        repairUnresolvableLegacy: true,
+      });
       if (advanced) advancedCount++;
     }
 
@@ -1301,15 +1332,14 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     }
 
     // #1269: Gated ack — applies durable-slot gate + conditional pre-reconcile
-    const advanced = await gatedReadStateAck(opts.readStateStore, messageStore, userId, id, cursorToken);
+    const advanced = await gatedReadStateAck(opts.readStateStore, messageStore, userId, id, cursorToken, {
+      // #3476: a validated same-thread message is explicit read evidence.
+      repairUnresolvableLegacy: true,
+    });
     // #1304: caughtUp distinguishes "cursor at/beyond target" from "stale/can't compare"
     // Check against both cursor (v2) and raw messageId (v1 fallback when V2 OFF)
     const afterState = await opts.readStateStore.get(userId, id);
-    const caughtUp =
-      advanced ||
-      (!!afterState &&
-        (afterState.lastReadMessageId === cursorToken ||
-          afterState.lastReadMessageId === parseResult.data.upToMessageId));
+    const caughtUp = advanced || isReadStateCaughtUp(afterState, cursorToken, parseResult.data.upToMessageId);
     return { advanced, caughtUp };
   });
 
@@ -1349,14 +1379,13 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     }
 
     // #1269: Gated ack — applies durable-slot gate + conditional pre-reconcile
-    const advanced = await gatedReadStateAck(opts.readStateStore, messageStore, userId, id, latest.cursor);
+    const advanced = await gatedReadStateAck(opts.readStateStore, messageStore, userId, id, latest.cursor, {
+      repairUnresolvableLegacy: true,
+    });
     // #1304: caughtUp distinguishes "cursor at latest" from "stale/can't compare"
     // Check against both cursor (v2) and raw messageId (v1 fallback when V2 OFF)
     const afterState = await opts.readStateStore.get(userId, id);
-    const caughtUp =
-      advanced ||
-      (!!afterState &&
-        (afterState.lastReadMessageId === latest.cursor || afterState.lastReadMessageId === latest.messageId));
+    const caughtUp = advanced || isReadStateCaughtUp(afterState, latest.cursor, latest.messageId);
     // #1200 RED #23b: return both raw messageId and canonical v2 cursor
     return { advanced, caughtUp, messageId: latest.messageId, cursor: latest.cursor };
   });

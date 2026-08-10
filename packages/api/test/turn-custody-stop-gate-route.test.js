@@ -66,8 +66,7 @@ function createProjectionService({ state, closeDecisions }) {
       const next = closeDecisions[Math.min(closes.length, closeDecisions.length - 1)];
       const decision = {
         state,
-        shouldBlock: next.shouldBlock,
-        transitionObserved: next.transitionObserved,
+        ...next,
         evidenceRefs: [...projection.evidenceRefs],
       };
       closes.push(decision);
@@ -279,6 +278,156 @@ describe('F167 Phase T route custody stop gate', () => {
       yielded.some((message) => message.type === 'a2a_handoff' || message.mentionsUser),
       false,
       'remedial prose and line-start mentions are not structured custody transitions',
+    );
+  });
+
+  test('managed hold mounts its disposition producer on the exact turn and fails without a second invocation', async () => {
+    const projection = createProjectionService({
+      state: 'covered_active',
+      closeDecisions: [{ shouldBlock: true, transitionObserved: false }],
+    });
+    const service = createSequenceService('codex', ['Text-only completion.']);
+
+    const { appended, yielded } = await runRoute(service, 'thread-managed-hold-remedial', {
+      projectionService: projection,
+      routeOptions: {
+        turnCustodyWake: {
+          kind: 'structured',
+          protocol: 'hold',
+          subjectKey: 'ball:thread:thread-managed-hold-remedial',
+          holderCatId: 'codex',
+          sourceMessageId: 'message-managed-hold',
+          taskId: 'task-managed-hold',
+        },
+      },
+    });
+
+    assert.equal(service.calls.length, 1);
+    assert.match(service.calls[0], /cat_cafe_complete_managed_hold/);
+    assert.doesNotMatch(service.calls[0], /完成候选/);
+    assert.doesNotMatch(service.calls[0], /returnToPredecessor/);
+    assert.match(service.calls[0], /command exit/);
+    assert.equal(projection.closes.length, 1);
+    assert.equal(appended.filter((message) => message.source?.connector === 'routing-guard-failure').length, 1);
+    assert.equal(yielded.find((message) => message.type === 'done')?.errorCode, 'managed_hold_disposition_missing');
+  });
+
+  test('ordinary A2A dispatch mounts its exact producer and never spawns a stale remedial child', async () => {
+    const projection = createProjectionService({
+      state: 'covered_active',
+      closeDecisions: [{ shouldBlock: true, transitionObserved: false }],
+    });
+    const service = createSequenceService('codex', ['Completed the requested review.']);
+
+    const { appended, yielded } = await runRoute(service, 'thread-a2a-dispatch-disposition', {
+      projectionService: projection,
+      routeOptions: {
+        turnCustodyWake: {
+          kind: 'structured',
+          protocol: 'dispatch',
+          subjectKey: 'ball:thread:thread-a2a-dispatch-disposition',
+          holderCatId: 'codex',
+          handoff: {
+            sourceEventId: 'route:message-a2a:codex',
+            messageId: 'message-a2a',
+            fromCatId: 'fable5',
+          },
+        },
+      },
+    });
+
+    assert.equal(service.calls.length, 1);
+    assert.match(service.calls[0], /cat_cafe_complete_a2a_dispatch/);
+    assert.doesNotMatch(service.calls[0], /完成候选/);
+    assert.doesNotMatch(service.calls[0], /returnToPredecessor/);
+    assert.match(service.calls[0], /merge truth/);
+    assert.equal(projection.closes.length, 1);
+    assert.equal(appended.filter((message) => message.source?.connector === 'routing-guard-failure').length, 1);
+    assert.equal(yielded.find((message) => message.type === 'done')?.errorCode, 'a2a_dispatch_disposition_missing');
+  });
+
+  test('managed re-hold emits exact continuation receipt proof without terminal completion', async () => {
+    const projection = createProjectionService({
+      state: 'covered_active',
+      closeDecisions: [{ shouldBlock: false, transitionObserved: true, structuredTransitionKind: 'held' }],
+    });
+    const service = createSequenceService('codex', ['Established a new structured hold.']);
+
+    const { yielded } = await runRoute(service, 'thread-managed-hold-continued', {
+      projectionService: projection,
+      routeOptions: {
+        turnCustodyWake: {
+          kind: 'structured',
+          protocol: 'hold',
+          subjectKey: 'ball:thread:thread-managed-hold-continued',
+          holderCatId: 'codex',
+          sourceMessageId: 'message-managed-hold',
+          taskId: 'task-managed-hold',
+        },
+      },
+    });
+
+    assert.deepEqual(yielded.find((message) => message.type === 'done')?.turnCustodyTerminalWitness, {
+      kind: 'managed_hold_continued',
+      sourceMessageId: 'message-managed-hold',
+      taskId: 'task-managed-hold',
+      transition: 'reheld',
+    });
+  });
+
+  test('managed transfer emits exact continuation receipt proof', async () => {
+    const projection = createProjectionService({
+      state: 'covered_active',
+      closeDecisions: [{ shouldBlock: false, transitionObserved: true, structuredTransitionKind: 'handed' }],
+    });
+    const service = createSequenceService('codex', ['Transferred through a structured action.']);
+
+    const { yielded } = await runRoute(service, 'thread-managed-hold-transferred', {
+      projectionService: projection,
+      routeOptions: {
+        turnCustodyWake: {
+          kind: 'structured',
+          protocol: 'hold',
+          subjectKey: 'ball:thread:thread-managed-hold-transferred',
+          holderCatId: 'codex',
+          sourceMessageId: 'message-managed-hold',
+          taskId: 'task-managed-hold',
+        },
+      },
+    });
+
+    assert.equal(
+      yielded.find((message) => message.type === 'done')?.turnCustodyTerminalWitness?.transition,
+      'transferred',
+    );
+  });
+
+  test('managed eventWait emits exact continuation receipt proof', async () => {
+    const threadId = 'thread-managed-hold-event-wait';
+    const projection = createProjectionService({
+      state: 'covered_active',
+      closeDecisions: [{ shouldBlock: true, transitionObserved: false }],
+    });
+    const service = createSequenceService('codex', ['Registered the exact event wait.']);
+
+    const { yielded } = await runRoute(service, threadId, {
+      projectionService: projection,
+      taskStore: createEventWaitTaskStore(threadId),
+      routeOptions: {
+        turnCustodyWake: {
+          kind: 'structured',
+          protocol: 'hold',
+          subjectKey: `ball:thread:${threadId}`,
+          holderCatId: 'codex',
+          sourceMessageId: 'message-managed-hold',
+          taskId: 'task-managed-hold',
+        },
+      },
+    });
+
+    assert.equal(
+      yielded.find((message) => message.type === 'done')?.turnCustodyTerminalWitness?.transition,
+      'event_wait',
     );
   });
 

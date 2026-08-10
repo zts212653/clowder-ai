@@ -3,7 +3,7 @@ feature_ids: [F247]
 related_features: [F178, F061, F174, F236, F237]
 topics: [cloud-cat, chatgpt-pro, mcp, multi-provider, custom-instructions, github-connector]
 doc_kind: spec
-tips_exempt: Background agent-key reconciliation and an unbound Host Adapter add no user-invokable action; the productized setup tip belongs with the future provider installation UI.
+tips_exempt: Cloud lifecycle hardening adds no new Hub-invokable capability; the existing CLI status/doctor commands are self-documenting, while the productized setup tip belongs with the future provider installation UI.
 description: Productized cloud-cat platform for connecting ChatGPT Pro and future cloud LLM providers into Clowder AI as first-class collaborators.
 description_source: model
 description_author: codex
@@ -422,8 +422,9 @@ Implementation 选择（择一，implementation PR 决定）：
 
 **关键约束**（LL from B1c-0）：
 - 不新写独立 launchd plist——复用 `scripts/launchd/` 模板 + INSTALL runbook 模式，operator opt-in
-- 不硬编码 token / agent-key path 到 `pnpm start`——env 或 file lookup，缺 secret fail-closed 打印诊断
-- 环境探测——operator 没配 cloudflared / 没 mint gpt-pro key 时 pnpm start **不报错**（skip supporting services + WARN），不阻塞常规 dev
+- 不硬编码 token / agent-key path 到启动器——env 或 file lookup；显式 `pnpm start:cloud` 缺配置或探针失败时 fail-closed
+- 故障域隔离——`pnpm start` 中 F247 是 optional capability：缺配置时 skip + WARN；supporting service、公网 tunnel、authenticated MCP 或 cloud principal 失败时 cleanup + degraded + WARN，**不得终止本地 frontend/API/Redis**
+- 探针重试只覆盖瞬时故障（network/timeout/408/425/429/5xx），预算有界；401/403 等确定性 auth 错误立即降级或失败，不重试
 
 **B1d lifecycle runbook (PR-C implementation)**：
 
@@ -450,8 +451,13 @@ pnpm start:cloud
 
 # - incomplete cloud setup -> WARN + skip (frontend/API still start)
 
-# - complete cloud setup -> start cloudflared + remote-spike, then health-check public endpoint
+# - complete cloud setup -> start cloudflared + remote-spike, then health-check all cloud boundaries
+
+# - any cloud-only failure -> cleanup + WARN + degraded (frontend/API/Redis still start)
 pnpm start
+
+# Daemon health remains primary; the output also reports live F247 cloud healthy/degraded/disabled.
+pnpm start:status
 
 # Escape hatch for local dev sessions that intentionally do not want cloud services.
 CAT_CAFE_F247_CLOUD_AUTOSTART=0 pnpm start
@@ -580,13 +586,14 @@ gpt-pro（以及未来 claude-cloud / gemini-cloud 等其他 cloud cats），不
 
 **触发**：2026-07-06 03:30 PT dogfood friction —— operator 重启 runtime 后 F247 supporting services 全部离线，`pnpm start` 未覆盖，双向链路同时断（reverse: cloudflared+spike / forward: PinchTab）。
 
-- [x] **AC-B1d-1**: `pnpm start` (或 `pnpm start:cloud` 独立命令) 集成 F247 supporting services 阶段——按顺序拉起：cloudflared daemon → spike server (3098) → 健康探针 verify 公网 `mcp.clowder-ai.com` HTTP 200。**Fail-closed**：任一环节起不来打印诊断（缺 secret / 端口占用 / config 缺失）并退出，不留半开状态。
+- [x] **AC-B1d-1**: `pnpm start` 与 `pnpm start:cloud` 集成 F247 supporting services 阶段——按顺序拉起：cloudflared daemon → spike server (3098) → 健康探针 verify 公网 `mcp.clowder-ai.com` HTTP 200。**故障域契约**：显式 `pnpm start:cloud` fail-closed；常规 `pnpm start` 把 F247 视为 optional capability，任一 cloud-only 失败都 cleanup + WARN + degraded，本地 frontend/API/Redis 继续运行，不留半开状态。启动器还必须隔离 helper 进程级非零退出，防止 crash/依赖损坏越过 helper 内部契约。
 - [x] **AC-B1d-2**: launchd `cloudflared` KeepAlive plist template 进 `scripts/launchd/`（复用 B1c-0 `cat-cafe.mcp-cleanup.plist.template` 模式：模板进 git，`launchctl load` 由 operator 手动执行，不自动 install）。plist 引用 `~/.cloudflared/config.yml` + credentials，重启后自愈。
 - [x] **AC-B1d-3**: `pnpm cloud:status` / `pnpm cloud:doctor` 命令——一次输出 3 层状态：(a) cloudflared daemon 进程 + tunnel connection state (`cloudflared tunnel info`) (b) spike server 3098 LISTEN + `/health` 200 (c) 公网 `mcp.clowder-ai.com` HTTP status (250ms timeout)；异常项打印**具体命令**帮 operator 手动恢复（不 auto-fix，保 operator opt-in 原则）。
 - [x] **AC-B1d-4**: 环境探测——operator 未 mint `gpt-pro` agent-key 或 `~/.cloudflared/` 未配 named tunnel 时 `pnpm start` **skip cloud stage + WARN**，不 fail，不阻塞常规 dev（cat-cafe / 前端 3003/3004 照常起）。skip 逻辑必须 test fixture 覆盖 (无 agent-key 文件 / 无 CF config / 都无) 三态。
 - [x] **AC-B1d-5**: `docs/SOP.md` 或 `docs/features/F247` 内加"F247 lifecycle runbook"——列出 3 项 supporting service 的手动起 / 停 / 状态命令 + 故障排查树（PinchTab 断链 → Chrome profile 检查 / cloudflared 断 → journalctl / spike 断 → dist 是否 build）。
 - [ ] **AC-B1d-6** (dogfood verify)：operator 或 sonnet 在 alpha 环境跑一次 "cold restart" 剧本——`pnpm stop` → 重启 mac → `pnpm start` → 验证公网 `mcp.clowder-ai.com` 200 + 云端Maine Coon `cat_cafe_get_thread_context` 一次成功 + 本地 `@gpt-pro` forward 一次触达 chat。
 - [x] **AC-B1d-7** (token contract followup — 2026-07-08 dogfood friction)：URL-token persistent contract 防回归。**触发**：ChatGPT connector URL 不可编辑 + 本地 token 被改 → 云端猫永久 401，`/health` 绿灯掩盖。**交付**：(a) `pnpm cloud:doctor` 加 authenticated MCP initialize probe（POST `/mcp?token=...`），401 时报 "connector token mismatch likely"；(b) `pnpm cloud:copy-url` 命令复制 URL（含 token）到剪贴板，stdout 不打印 raw token；(c) 测试覆盖 15 项（copy-url 行为 + authenticated probe + 不打印 token + 不覆盖已有 token 文件防回归）；(d) B1d docs 写清 URL-token 是 persistent contract。
+- [x] **AC-B1d-8** (optional failure-domain isolation — 2026-08-10 dogfood incident)：Cloudflare HTTP 530 或 API `auth-probe` startup timeout 不得触发 `start-dev.sh` EXIT cleanup 杀掉本地 runtime。helper 内部 optional failure 返回 degraded success，启动器对 helper 进程级失败再做一次 ownership-safe cleanup + isolation；authenticated MCP / gpt-pro principal 的瞬时失败有界重试，401/403 不重试；`pnpm start:status` 显示 F247 live summary，其独立网络探针并发执行且跳过仅供详细诊断的 tunnel-info，失败路径由最慢的 2 秒探针限定。严格 `pnpm start:cloud` 行为不变。
 
 **B1d 前置**：Phase B1c 13/13 done（已 ✅ 2026-06-29）；spike server 已在 `packages/mcp-server/dist/remote-spike.js` 稳定运行数周（B1a-B1c）。
 

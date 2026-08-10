@@ -94,8 +94,10 @@ import {
   explicitPromptForIncrementalContext,
   getService,
   getThreadBootcampMemberCount,
+  hydrateVisibleA2ATriggerPromptMessage,
   isUserFacingSystemInfoContent,
   judgmentSurfaceCueSeeds,
+  mergePersistedPromptMessages,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
   subjectSeenCueSeeds,
@@ -576,6 +578,13 @@ export async function* routeParallel(
 
       const targetContentBlocks = routeContentBlocksForCat(catId, contentBlocks);
       const targetUploadDir = targetContentBlocks ? uploadDir : undefined;
+      const exactA2ATriggerPromptMessage = incrementalMode
+        ? await hydrateVisibleA2ATriggerPromptMessage(deps, options.a2aTriggerMessageId, threadId, catId, thinkingMode)
+        : undefined;
+      const persistedPromptMessagesForCat = mergePersistedPromptMessages(
+        options.persistedPromptMessages,
+        exactA2ATriggerPromptMessage,
+      );
 
       // F24 Phase E: Bootstrap context for Session #2+
       // #836: Reborn cats skip bootstrap — every invocation starts with zero prior context.
@@ -693,6 +702,8 @@ export async function* routeParallel(
             effectiveMaxContextTokens: parEffectiveContextBudget,
             canonicalFeatureId: sopStageHint?.featureId,
             threadTitle: routeThread?.title ?? undefined,
+            cursorOverlay: options.cursorBoundaries?.get(catId as string),
+            exactA2ATriggerMessageId: options.a2aTriggerMessageId,
           },
         );
         boundaryByCat.set(catId, inc.boundaryId);
@@ -761,7 +772,7 @@ export async function* routeParallel(
           inc,
           message,
           currentUserMessageId,
-          options.persistedPromptMessages,
+          persistedPromptMessagesForCat,
         );
         explicitlyExposedMessageIds = explicitProjection.exposedMessageIds;
         if (explicitProjection.text) parts.push(explicitProjection.text);
@@ -835,7 +846,7 @@ export async function* routeParallel(
 
       const exactPromptMessageIds = collectExactPromptMessageIds(
         incrementalMode ? [] : (options.persistedPromptMessageIds ?? []),
-        incrementalMode ? [options.a2aTriggerMessageId] : [currentUserMessageId, options.a2aTriggerMessageId],
+        incrementalMode ? [] : [currentUserMessageId, options.a2aTriggerMessageId],
         incrementallyExposedMessageIds,
         explicitlyExposedMessageIds,
         options.freshnessSupplementRequiredMessageIds ?? [],

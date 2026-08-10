@@ -213,10 +213,22 @@ export interface InvocationRecordStoreLike {
 function isQueueTerminalConsumptionWitness(value: unknown): value is QueueTerminalConsumptionWitness {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Record<string, unknown>;
-  return (
+  if (
     candidate.kind === 'terminal_silent' &&
     candidate.projectionState === 'covered_empty' &&
     candidate.wake === 'coordination_terminal'
+  ) {
+    return true;
+  }
+  return (
+    candidate.kind === 'managed_hold_continued' &&
+    typeof candidate.sourceMessageId === 'string' &&
+    candidate.sourceMessageId.length > 0 &&
+    typeof candidate.taskId === 'string' &&
+    candidate.taskId.length > 0 &&
+    (candidate.transition === 'reheld' ||
+      candidate.transition === 'event_wait' ||
+      candidate.transition === 'transferred')
   );
 }
 
@@ -1344,7 +1356,8 @@ export class QueueProcessor {
     handledAt: number,
     consumption?: QueueTerminalConsumptionWitness,
   ): Promise<QueueTargetOutcome> {
-    let disposition: QueueTargetOutcome['disposition'] = 'completed_with_turn';
+    let disposition: QueueTargetOutcome['disposition'] =
+      consumption?.kind === 'managed_hold_continued' ? 'managed_hold_disposition' : 'completed_with_turn';
     try {
       const getByThreadAfter = this.deps.messageStore.getByThreadAfter?.bind(this.deps.messageStore);
       if (getByThreadAfter) {
@@ -1357,7 +1370,7 @@ export class QueueProcessor {
             message.catId === catId && sameInvocation && !!message.replyTo && handledMessageIds.has(message.replyTo)
           );
         });
-        if (hasExplicitReply) disposition = 'responded';
+        if (hasExplicitReply && consumption?.kind !== 'managed_hold_continued') disposition = 'responded';
       }
     } catch (err) {
       this.deps.log.warn(
@@ -1779,7 +1792,12 @@ export class QueueProcessor {
         );
         const outcome: QueueTargetOutcome = {
           invocationId: input.invocationId,
-          disposition: sourceResponse ? 'responded' : 'completed_with_turn',
+          disposition:
+            input.consumption?.kind === 'managed_hold_continued'
+              ? 'managed_hold_disposition'
+              : sourceResponse
+                ? 'responded'
+                : 'completed_with_turn',
           evidenceRef: { kind: 'invocation_lineage', invocationId: input.invocationId },
           handledAt,
           ...(sourceResponse

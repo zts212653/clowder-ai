@@ -57,7 +57,7 @@ export interface ManagedCommandWakeTrigger {
     message: string,
     messageId: string,
     contentBlocks?: undefined,
-    policy?: { sourceCategory?: string },
+    policy?: { sourceCategory?: string; forceQueue?: boolean },
   ): Promise<ManagedCommandWakeTriggerOutcome>;
 }
 
@@ -81,6 +81,15 @@ export interface ManagedCommandWakeRecoveryDeps {
     ): InvocationRecord | null | Promise<InvocationRecord | null>;
   };
   readonly getInvokeTrigger: () => ManagedCommandWakeTrigger | undefined;
+  /** F167×F254: current Queue/F264 carrier truth for force-queued event wakes. */
+  readonly getEventCarrier?: (input: {
+    threadId: string;
+    userId: string;
+    catId: string;
+    messageId: string;
+  }) =>
+    | { state: 'missing' | 'pending' | 'handled'; invocationId?: string }
+    | Promise<{ state: 'missing' | 'pending' | 'handled'; invocationId?: string }>;
   readonly now?: () => number;
   readonly dispatchedCarrierGraceMs?: number;
   readonly wakeSlaMs?: number;

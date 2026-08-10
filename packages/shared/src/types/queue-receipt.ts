@@ -8,7 +8,7 @@ export type QueueReceiptTargetState =
   | 'withdrawn'
   | 'handled';
 
-export type QueueHandledDisposition = 'responded' | 'completed_with_turn';
+export type QueueHandledDisposition = 'responded' | 'completed_with_turn' | 'managed_hold_disposition';
 
 export type MessageWorkDisposition = 'continue_current' | 'next_work';
 
@@ -79,9 +79,18 @@ export interface QueueSourceResponseConsumptionWitness {
   outputMessageIds: string[];
 }
 
+/** Existing structured tools consumed one managed wake by establishing its successor condition. */
+export interface QueueManagedHoldContinuationWitness {
+  kind: 'managed_hold_continued';
+  sourceMessageId: string;
+  taskId: string;
+  transition: 'reheld' | 'event_wait' | 'transferred';
+}
+
 export type QueueTerminalConsumptionWitness =
   | QueueTerminalSilentConsumptionWitness
-  | QueueSourceResponseConsumptionWitness;
+  | QueueSourceResponseConsumptionWitness
+  | QueueManagedHoldContinuationWitness;
 
 export interface QueueTargetOutcome {
   invocationId: string;

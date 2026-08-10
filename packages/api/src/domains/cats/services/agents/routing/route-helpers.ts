@@ -29,7 +29,7 @@ import { DeliveryCursorStore } from '../../stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../../stores/ports/DraftStore.js';
 import type { IMessageStore, StoredMessage, StoredToolEvent } from '../../stores/ports/MessageStore.js';
 import type { Thread } from '../../stores/ports/ThreadStore.js';
-import { canViewMessage, resolveVisibleReplyParent } from '../../stores/visibility.js';
+import { canViewMessage, isTimelinePublished, resolveVisibleReplyParent } from '../../stores/visibility.js';
 import type { AgentMessage, AgentService, ToolExecutionPolicy } from '../../types.js';
 import type { InvocationTracker } from '../invocation/InvocationTracker.js';
 import type { InvocationDeps } from '../invocation/invoke-single-cat.js';
@@ -157,6 +157,61 @@ export interface PersistedPromptMessage {
   messageId: string;
   content: string;
   contentBlocks?: readonly MessageContent[] | undefined;
+}
+
+/**
+ * Resolve one server-owned A2A trigger into the existing hydrated prompt path.
+ * The exact-id lookup is never authority to bypass thread, publication, or
+ * whisper visibility constraints.
+ */
+export async function hydrateVisibleA2ATriggerPromptMessage(
+  deps: RouteStrategyDeps,
+  triggerMessageId: string | undefined,
+  threadId: string,
+  catId: CatId,
+  thinkingMode: 'debug' | 'play',
+): Promise<PersistedPromptMessage | undefined> {
+  if (!triggerMessageId) return undefined;
+  let message: StoredMessage | null;
+  try {
+    message = await deps.messageStore.getById(triggerMessageId);
+  } catch (err) {
+    log.warn({ err, threadId, catId: catId as string }, 'A2A trigger hydration failed');
+    return undefined;
+  }
+  if (
+    !message ||
+    message.threadId !== threadId ||
+    message.deletedAt ||
+    message._tombstone ||
+    message.userId === 'system' ||
+    message.origin === 'briefing' ||
+    message.catId === null ||
+    message.catId === catId ||
+    !isTimelinePublished(message)
+  ) {
+    return undefined;
+  }
+  const viewer = thinkingMode === 'play' ? { type: 'cat' as const, catId } : { type: 'user' as const };
+  if (!canViewMessage(message, viewer)) return undefined;
+  return {
+    messageId: message.id,
+    content: message.content,
+    ...(message.contentBlocks ? { contentBlocks: message.contentBlocks } : {}),
+  };
+}
+
+/** Preserve the caller-hydrated queue order and append the exact trigger once. */
+export function mergePersistedPromptMessages(
+  persistedPromptMessages: readonly PersistedPromptMessage[] | undefined,
+  exactTrigger: PersistedPromptMessage | undefined,
+): readonly PersistedPromptMessage[] | undefined {
+  if (!exactTrigger) return persistedPromptMessages;
+  if (persistedPromptMessages?.some((message) => message.messageId === exactTrigger.messageId)) {
+    return persistedPromptMessages;
+  }
+  if (!persistedPromptMessages) return [exactTrigger];
+  return [...persistedPromptMessages, exactTrigger];
 }
 
 /** Common options for both strategies */
@@ -1102,6 +1157,10 @@ export interface IncrementalContextOptions {
   threadTitle?: string;
   /** Invocation wall-clock for stale-age rendering in prompt timestamps. */
   nowMs?: number;
+  /** Route-scoped deferred boundary from an earlier invocation of this same cat. */
+  cursorOverlay?: string;
+  /** The one server-owned A2A stream message allowed through play-mode isolation. */
+  exactA2ATriggerMessageId?: string;
 }
 
 async function resolveRecentFilesTouched(
@@ -1154,11 +1213,37 @@ export async function assembleIncrementalContext(
     };
   }
 
-  const cursor = await deps.deliveryCursorStore.getCursor(userId, catId, threadId);
+  const durableCursor = await deps.deliveryCursorStore.getCursor(userId, catId, threadId);
+  const overlayCursor = options?.cursorOverlay;
+  if (overlayCursor) {
+    assertCanonicalVisibilityCursor(overlayCursor, 'incremental-context:cursor-overlay');
+  }
+  let cursor = durableCursor;
+  if (overlayCursor) {
+    if (!durableCursor) {
+      cursor = overlayCursor;
+    } else {
+      try {
+        assertCanonicalVisibilityCursor(durableCursor, 'incremental-context:durable-read');
+        cursor = compareCursors(overlayCursor, durableCursor) > 0 ? overlayCursor : durableCursor;
+      } catch (err) {
+        // The overlay was produced after reading this durable slot earlier in
+        // the same route. If a legacy/raw durable value cannot be compared in
+        // the canonical domain, prefer the proven in-flight boundary; replay
+        // remains at-least-once after a crash because the overlay is ephemeral.
+        log.warn(
+          { err, catId: catId as string, threadId },
+          'Using canonical cursor overlay over unresolved durable read',
+        );
+        cursor = overlayCursor;
+      }
+    }
+  }
   const unseen = await fetchAfterCursor(deps.messageStore, threadId, cursor, userId);
 
   // Debug mode: cats see all whispers (full transparency). Play mode: cats only see their own whispers.
-  const viewer = (thinkingMode ?? 'play') === 'play' ? { type: 'cat' as const, catId } : { type: 'user' as const };
+  const playMode = thinkingMode !== 'debug';
+  const viewer = playMode ? { type: 'cat' as const, catId } : { type: 'user' as const };
   const relevant = unseen.filter((m) => {
     // System-generated messages (persisted error badges) are display-only — never enter prompt
     if (m.userId === 'system') return false;
@@ -1173,7 +1258,8 @@ export async function assembleIncrementalContext(
     // In play mode, hide other cats' stream (thinking) messages.
     // Legacy messages (no origin) are visible for backward compatibility —
     // all new writes are tagged, so untagged = legacy callback data.
-    if ((thinkingMode ?? 'play') === 'play' && m.catId !== null && m.origin === 'stream') return false;
+    if (playMode && m.catId !== null && m.origin === 'stream' && m.id !== options?.exactA2ATriggerMessageId)
+      return false;
     return true;
   });
 

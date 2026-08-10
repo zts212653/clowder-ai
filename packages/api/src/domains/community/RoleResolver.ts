@@ -143,9 +143,10 @@ export function createRoleResolver(
  *家里 default bindings (deployment-config seam). Together with cat ids in deployment config, this
  * is the ONE place cat names appear — allowlisted by the C1.3 engine-zero-catname grep guard.
  *
- * - narrator → gemini25 (资料卡 handle @gemini35, 暹罗猫). Model pinned to gemini-3.5-flash (cheap,
- *   fast — narration is high-volume triage). Capabilities exclude code/merge/worktree (INV-2): the
- *   narrator triages, recommends a route, and replies — it never owns case state or touches code.
+ * - narrator → gemini25 (Siamese Flash narrator profile). Model pinned to gemini-3.5-flash (cheap,
+ *   fast — narration is high-volume triage); this is intentionally separate from gemini35/gemini36
+ *   routing aliases. Capabilities exclude code/merge/worktree (INV-2): the narrator triages,
+ *   recommends a route, and replies — it never owns case state or touches code.
  * - case-owner / reconciler are reserved (Phase C is narrator-first); they are bound in later phases.
  */
 export const DEFAULT_COMMUNITY_ROLE_BINDINGS: CommunityRoleBindings = {

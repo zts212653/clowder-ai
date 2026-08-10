@@ -1,4 +1,4 @@
-import { validateEffectiveGrants, validateManifest } from '@clowder-ai/plugin-contract';
+import { type SignalSchemaCatalog, validateEffectiveGrants, validateManifest } from '@clowder-ai/plugin-contract';
 import { PLUGIN_CONTRACT_VERSION, requestedCapabilitiesForManifest } from './contract-policy.js';
 import type {
   ActivationState,
@@ -56,6 +56,13 @@ function equalStrings(left: readonly string[], right: readonly string[]): boolea
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+function signalSchemaCatalog(value: unknown, label: string): SignalSchemaCatalog {
+  const raw = object(value, label);
+  return Object.fromEntries(
+    Object.entries(raw).map(([key, schema]) => [key, structuredClone(object(schema, `${label}.${key}`))]),
+  );
+}
+
 export function isCanonicalPackageDigest(value: string): boolean {
   if (!/^sha512-[A-Za-z0-9+/]{86}==$/.test(value)) return false;
   const encoded = value.slice('sha512-'.length);
@@ -73,6 +80,7 @@ function parsePackage(value: unknown, index: number): PluginPackageRecord {
     version: string(raw.version, `packages[${index}].version`),
     contractVersion: string(raw.contractVersion, `packages[${index}].contractVersion`),
     manifest: structuredClone(validation.manifest),
+    signalSchemas: signalSchemaCatalog(raw.signalSchemas ?? {}, `packages[${index}].signalSchemas`),
     packageState: enumValue(raw.packageState, PACKAGE_STATES, `packages[${index}].packageState`),
     verifiedAt: timestamp(raw.verifiedAt, `packages[${index}].verifiedAt`),
     updatedAt: timestamp(raw.updatedAt, `packages[${index}].updatedAt`),
@@ -87,6 +95,11 @@ function parsePackage(value: unknown, index: number): PluginPackageRecord {
   }
   if (record.contractVersion !== PLUGIN_CONTRACT_VERSION) {
     corrupt(`packages[${index}] contract version is not supported by this Host`);
+  }
+  for (const declaration of record.manifest.signals?.provides ?? []) {
+    if (!Object.hasOwn(record.signalSchemas, declaration.schemaRef)) {
+      corrupt(`packages[${index}] is missing declared signal schema ${declaration.schemaRef}`);
+    }
   }
   return record;
 }

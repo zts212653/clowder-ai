@@ -158,6 +158,20 @@ describe('F267 real measurement bundle census', () => {
     duplicateRiskRank.entries.find((entry) => entry.domainId === 'eval:a2a').validityMigration.riskRank = 1;
     assert.throws(() => validateMeasurementBundleCensus(duplicateRiskRank, repoRoot), /risk rank/i);
 
+    const skippedBatch = loadCensus();
+    skippedBatch.entries.find((entry) => entry.domainId === 'eval:a2a').validityMigration.batch = 3;
+    assert.throws(() => validateMeasurementBundleCensus(skippedBatch, repoRoot), /batch|risk rank/i);
+
+    const batchBeforeEvidence = loadCensus();
+    const anchorMigration = batchBeforeEvidence.entries.find(
+      (entry) => entry.domainId === 'eval:anchor-first',
+    ).validityMigration;
+    anchorMigration.status = 'unmigrated';
+    anchorMigration.certificateRef = null;
+    anchorMigration.resultRef = null;
+    anchorMigration.replayRef = null;
+    assert.throws(() => validateMeasurementBundleCensus(batchBeforeEvidence, repoRoot), /unmigrated.*batch/i);
+
     const unsafeActionGate = loadCensus();
     const memoryMigration = unsafeActionGate.entries.find(
       (entry) => entry.domainId === 'eval:memory',

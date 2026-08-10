@@ -33,13 +33,21 @@ describe('F167 Phase T queue wake provenance', () => {
 
     assert.deepEqual(
       await resolveQueueTurnCustodyWake(entry({ sourceCategory: 'scheduled' }), {
-        getById: async () => ({ source: { connector: 'hold-ball' } }),
+        getById: async () => ({
+          id: 'message-1',
+          source: {
+            connector: 'hold-ball',
+            meta: { taskId: 'task-hold-1', threadId: 'thread-1', catId: 'codex-sol', wakeWhen: true },
+          },
+        }),
       }),
       {
         kind: 'structured',
         protocol: 'hold',
         subjectKey: 'ball:thread:thread-1',
         holderCatId: 'codex-sol',
+        sourceMessageId: 'message-1',
+        taskId: 'task-hold-1',
       },
     );
   });

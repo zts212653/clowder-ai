@@ -9,13 +9,13 @@ community_issue: "clowder-ai-plugins#23"
 description: "飞书生成会议文字稿后，官方 input-source 插件把它变成可恢复的 Meeting Intake；人只补说话人、背景与去向，猫带着家里记忆产出纪要、决定、Roadmap 或任务。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-08-09T04:44:53Z
-tips_exempt: spec-only — the user-visible Meeting Intake action does not exist yet
+description_updated_at: 2026-08-10T09:35:00Z
+tips_exempt: automatic setup cannot be opened truthfully until the official Feishu package is published and an external K-2 runtime is activated; the builtin Host transport remains dormant
 ---
 
 # F292: Feishu Meeting Intake Plugin — 会后产物不再靠人搬运
 
-> **Status**: spec / Architecture + Experience Design Gate
+> **Status**: implementation / Phase C Host path complete with dormant K-2B transport; Phase D remains blocked by Feishu package publication and external runtime activation
 > **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol)
 > **Priority**: P1
 > **operator kickoff**: `[thread-id]` / `0001786250693680-000748-45686450`
@@ -102,15 +102,31 @@ Anker recorder
 
 | Evidence | Already true | Not yet true |
 |---|---|---|
-| Feishu/Lark surface | Generated-note/minute events and transcript retrieval exist in the installed CLI capability surface | No Clowder AI intake route, durable state, or end-to-end user journey |
-| Plugin repository | Independent contract package, SDK/runtime, stdio transport, grants vocabulary, and first-party conformance structure exist | Released machine schema does not yet expose `input-source`, `manifest.signals.provides[]`, or an executable `events.publish` row |
-| Host Broker direction | K-2 separates transport/liveness from domain semantics and reserves K-3a for signal ingress | K-3a route, durable intake contract, and source-resolution capability are not implemented truth |
+| Feishu/Lark surface | Generated-note/minute events and transcript retrieval exist in the installed CLI capability surface; Host-side resolution uses the existing user-scoped `lark-cli` login only after a one-shot source grant | The official `@clowder-ai/feishu-meeting-intake@0.1.0-alpha.0` package is not published to npm, so automatic setup is not installable |
+| Plugin repository | PR #24 merged the C-2 source; PR #26 merged the formal SDK/package release chain, and `@clowder-ai/plugin-sdk@0.1.0-beta.5` is registry-published | The official `@clowder-ai/feishu-meeting-intake@0.1.0-alpha.0` artifact is still absent; merged source/SDK truth is not an installable Feishu runtime |
+| Host Broker direction | PR #3522/#3542 merged durable intake, Needs Me, source grants, and cat delivery; K-2A inventory is landed and K-2B now supplies a contract-native session/ledger plus typed `events.publish` adapter | The builtin loopback and Host control plane are dormant: no external process supervision, stdio/IPC, composition-root activation, or real plugin co-run is live |
 | GitHub operations | Webhook/poll/event-log/inbox/guardian behavior proves long-lived-source value | It is specialized behavior and must not be generalized by copying its private schema |
-| Needs Me / F290 | A global human-attention surface and future Channel destination have product direction | F290 is still at Experience Design Gate; F292 cannot claim a production Channel or make every event an inbox item |
+| Needs Me / F290 | F292 unresolved-choice and repair cards use the shared Needs Me surface; successful auto-resolved work stays quiet | F290 is still at Experience Design Gate; F292 honestly rejects Channel destinations |
 
 The preferred automatic trigger is “note/minute generated”, not merely “recording ended”: the latter
 can arrive before the artifact is ready. Manual import by Feishu URL/token remains a recovery path for
 missed events and pre-plugin meetings, not the primary journey.
+
+### Current activation and repair truth
+
+- **Automatic intake is not yet activatable.** The SDK release exists and the Host-side K-2B
+  state machine can carry a conforming `events.publish` call through real F292 admission, but the
+  official Feishu npm package is absent and no external runtime is activated. Clowder AI therefore
+  does not expose a misleading install switch or capability tip.
+- **An existing intake is durable and repairable.** Needs Me can collect speaker mapping, missing
+  context, a Host-owned private-thread destination, and requested outputs against an exact revision.
+  Failed source resolution offers retry, regrant, and bounded manual-transcript recovery on the same
+  TTL=0 record.
+- **Regrant is explicit.** The UI displays `lark-cli auth login --as user`; Clowder AI does not launch a
+  login flow, copy credentials into a plugin, or treat cancellation as authorization.
+- **Delivery stays inside Host authority.** A one-shot source grant resolves the transcript, the cat
+  receives it as `untrusted_external` / data-only content with provenance, and the resulting request
+  is queued idempotently in the chosen owner-scoped private thread. F290 Channels remain unavailable.
 
 ## User Journey
 
@@ -255,46 +271,46 @@ missed events and pre-plugin meetings, not the primary journey.
 
 ### Phase A（Cross-repo Architecture + Experience Design Gate）
 
-- [ ] AC-A1: One reviewed contract map names the public plugin repo, Host Broker, durable intake,
+- [x] AC-A1: One reviewed contract map names the public plugin repo, Host Broker, durable intake,
   Needs Me, Feishu source truth, GitHub compatibility fixture, and F290 dependency; it keeps C-2 in
   the `plugin` cell, compares Host-side intake ownership with `github-signals`, and either selects a
   separate existing/new Host cell (candidate `signal-intake`) or records the contrary precedent. No
   component has overlapping ownership and no `event_source` shortcut is introduced.
-- [ ] AC-A2: The Design Gate freezes a bounded C-2 signal/source-handle shape plus typed liveness and
+- [x] AC-A2: The Design Gate freezes a bounded C-2 signal/source-handle shape plus typed liveness and
   Host-owned routing; hostile examples prove that plugins cannot publish undeclared signals, upgrade
   epistemic status, embed destinations, or smuggle transcript bodies.
-- [ ] AC-A3: Deterministic Needs Me fixtures cover ready/not-ready, speaker mapping, missing context,
+- [x] AC-A3: Deterministic Needs Me fixtures cover ready/not-ready, speaker mapping, missing context,
   destination/output choice, resolved auto-route, auth failure, retry, and manual import; operator can
   complete the human-required states without downloading or locating a file.
 - [x] AC-A4: Fable's one-shot architecture verdict reviewed exact kickoff SHA `b638c4a6` with APPROVE,
   0×P1 / 3×P2; the three Phase A clarifications were incorporated without reopening an A2A loop.
-- [ ] AC-A5: The Gate records credential custody for the existing lark-cli login state: long-lived
+- [x] AC-A5: The Gate records credential custody for the existing lark-cli login state: long-lived
   credential owner, plugin-visible scoped/short-lived authority or brokered call, expiration,
   revocation, redaction, and recovery all have contract tests and one accountable boundary.
 
 ### Phase B（Public C-2 Contract + Official Feishu Plugin）
 
-- [ ] AC-B1: A released contract version has one authoritative machine schema and matching generated
+- [x] AC-B1: A released contract version has one authoritative machine schema and matching generated
   types, wire registry, SDK helpers, docs, and conformance fixtures for `input-source` declarations,
   `events.publish`, source handles, idempotency, provenance/privacy/epistemic metadata, and liveness.
-- [ ] AC-B2: Official Feishu plugin source begins in `clowder-ai-plugins`; core contains only reusable
+- [x] AC-B2: Official Feishu plugin source begins in `clowder-ai-plugins`; core contains only reusable
   Host contracts and an automated guard rejects any Feishu-specific C-2 schema or route fork.
-- [ ] AC-B3: Contract/plugin tests reject undeclared type, arbitrary target, oversized/transcript
+- [x] AC-B3: Contract/plugin tests reject undeclared type, arbitrary target, oversized/transcript
   payload, malformed handle, provenance upgrade, publish-after-lease, cursor regression, and duplicate
   delivery; auth expiry/reconnect exposes a typed degraded state rather than silent loss.
 
 ### Phase C（Host Broker + Durable Meeting Intake）
 
-- [ ] AC-C1: Host accepts a conforming generated-note/minute signal, verifies identity/grant/lease,
+- [x] AC-C1: Host accepts a conforming generated-note/minute signal, verifies identity/grant/lease,
   persists exactly one TTL=0 `MeetingIntake` per source artifact, and reconciles restart/redelivery
   without losing recovery evidence or duplicating user-visible work.
-- [ ] AC-C2: Projection tests prove that only unresolved human judgment or repair appears in Needs Me;
+- [x] AC-C2: Projection tests prove that only unresolved human judgment or repair appears in Needs Me;
   confirmed speaker/context/destination/output choices transition the same durable record and all
   visible degraded states offer a concrete retry/regrant/manual-import action.
-- [ ] AC-C3: Destination tests prove the plugin cannot address any cat/thread/invocation/Channel; Host
+- [x] AC-C3: Destination tests prove the plugin cannot address any cat/thread/invocation/Channel; Host
   routes a confirmed intake to an existing private thread, while unavailable F290 destinations are
   honestly disabled rather than guessed or silently downgraded.
-- [ ] AC-C4: Source-resolution and prompt-injection tests prove transcript retrieval occurs only under
+- [x] AC-C4: Source-resolution and prompt-injection tests prove transcript retrieval occurs only under
   explicit grant; cat context admission preserves source/provenance and does not leak household
   memory, transcript text, or summary prompts back into the plugin event/logs.
 
@@ -317,13 +333,15 @@ missed events and pre-plugin meetings, not the primary journey.
 - [ ] Add a tip when the user action exists: “让飞书会议自动交给猫猫整理” with an action opening
   plugin setup or manual meeting import.
 - [ ] Source the tip to the released plugin manifest plus this feature, not a title-only placeholder.
-- [x] Spec-only exemption recorded in frontmatter until that action exists.
+- [x] Truthful exemption recorded in frontmatter: there is no install/setup action until the package
+  is published and K-2 production transport is live.
 
 ## Dependencies
 
 - **Evolved from**: F202 + F240（plugin lifecycle and IM connector boundary）.
-- **Blocked by**: F288 / K-2 Host Broker landing enough executable transport/runtime contract for
-  K-3a signal ingress; design work can proceed without claiming runtime availability.
+- **Blocked by for Phase D**: publication of the official Feishu package plus the later K-2 external
+  process/runtime activation slice. K-2A inventory and K-2B's dormant Host transport no longer block
+  Host-side C-2/K-3a implementation.
 - **Related**: F141 + F168（GitHub long-lived-source behavior and durable operations oracle; no
   migration requirement）.
 - **Related**: F195（live meeting copilot; F292 owns post-meeting Feishu artifact intake only）.

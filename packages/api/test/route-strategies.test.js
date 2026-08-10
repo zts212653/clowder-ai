@@ -2134,6 +2134,148 @@ describe('routeSerial A2A worklist', () => {
     assert.equal(opusCallCount, 2, 'opus should be called twice');
   });
 
+  it('incremental play mode delivers the exact A2A trigger and overlays the deferred cursor on same-cat re-entry', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const initialMessages = [
+      {
+        id: '0000000000000001-000001-aaaaaaaa',
+        threadId: 'thread1',
+        userId: 'user1',
+        catId: null,
+        content: 'OLD USER MESSAGE ONE',
+        mentions: [],
+        timestamp: 1_000,
+        visibilitySeq: 1,
+      },
+      {
+        id: '0000000000000002-000001-bbbbbbbb',
+        threadId: 'thread1',
+        userId: 'user1',
+        catId: null,
+        content: 'OLD USER MESSAGE TWO',
+        mentions: ['opus'],
+        timestamp: 2_000,
+        visibilitySeq: 2,
+      },
+    ];
+    const storedMessages = [...initialMessages];
+    let nextVisibilitySeq = 3;
+    const opusService = createSequentialCapturingService('opus', [
+      'OPUS EXACT DIRECT BODY\n@\u7f05\u56e0\u732b review',
+      'fixed',
+    ]);
+    const codexService = createOptionsCapturingService('codex', 'CODEX EXACT DIRECT BODY\n@\u5e03\u5076\u732b fix');
+    const deps = createMockDeps({ opus: opusService, codex: codexService });
+    deps.deliveryCursorStore = {
+      getCursor: async () => undefined,
+      ackCursor: async () => {},
+      ackSeenCursor: async () => {},
+    };
+    deps.messageStore.append = async (input) => {
+      const visibilitySeq = nextVisibilitySeq++;
+      const stored = {
+        ...input,
+        id: `000000000000000${visibilitySeq}-000001-${String(visibilitySeq).padStart(8, '0')}`,
+        timestamp: visibilitySeq * 1_000,
+        visibilitySeq,
+      };
+      storedMessages.push(stored);
+      return stored;
+    };
+    deps.messageStore.getById = async (id) => storedMessages.find((candidate) => candidate.id === id);
+    deps.messageStore.getByThreadAfter = async (_threadId, afterCursor) => {
+      const afterSeq = afterCursor?.startsWith('v2:') ? Number(afterCursor.slice(3, 19)) : 0;
+      return storedMessages.filter((candidate) => candidate.visibilitySeq > afterSeq);
+    };
+
+    const cursorBoundaries = new Map();
+    for await (const _ of routeSerial(
+      deps,
+      ['opus'],
+      'OLD USER MESSAGE TWO',
+      'user1',
+      'thread1',
+      withClaimedA2ASlot({
+        currentUserMessageId: initialMessages[1].id,
+        cursorBoundaries,
+        maxA2ADepth: 2,
+        thinkingMode: 'play',
+      }),
+    )) {
+      /* drain */
+    }
+
+    assert.equal(codexService.calls.length, 1, 'codex should be invoked by opus exactly once');
+    assert.ok(
+      codexService.calls[0].prompt.includes('OPUS EXACT DIRECT BODY'),
+      'the exact persisted A2A trigger body must survive play-mode stream isolation',
+    );
+    assert.equal(opusService.calls.length, 2, 'opus should be re-entered after codex replies');
+    assert.ok(
+      opusService.calls[1].includes('CODEX EXACT DIRECT BODY'),
+      'same-cat re-entry must receive the new exact A2A trigger body',
+    );
+    assert.ok(
+      !opusService.calls[1].includes('OLD USER MESSAGE ONE') && !opusService.calls[1].includes('OLD USER MESSAGE TWO'),
+      'same-cat re-entry must read after the in-flight deferred cursor instead of replaying old user messages',
+    );
+  });
+
+  it('incremental play mode does not expose or receipt an invisible A2A trigger', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const codexService = createOptionsCapturingService('codex', 'ack');
+    const deps = createMockDeps({ codex: codexService });
+    const userMessageId = '0000000000000001-000001-aaaaaaaa';
+    const whisperTriggerId = '0000000000000002-000001-bbbbbbbb';
+    const messages = [
+      {
+        id: userMessageId,
+        threadId: 'thread1',
+        userId: 'user1',
+        catId: null,
+        content: 'VISIBLE USER MESSAGE',
+        mentions: ['codex'],
+        timestamp: 1_000,
+        visibilitySeq: 1,
+      },
+      {
+        id: whisperTriggerId,
+        threadId: 'thread1',
+        userId: 'user1',
+        catId: 'opus',
+        content: 'SECRET A2A BODY',
+        mentions: ['codex'],
+        timestamp: 2_000,
+        visibilitySeq: 2,
+        origin: 'stream',
+        visibility: 'whisper',
+        whisperTo: ['opus'],
+      },
+    ];
+    deps.deliveryCursorStore = {
+      getCursor: async () => undefined,
+      ackCursor: async () => {},
+      ackSeenCursor: async () => {},
+    };
+    deps.messageStore.getByThreadAfter = async () => messages;
+    deps.messageStore.getById = async (id) => messages.find((candidate) => candidate.id === id);
+
+    for await (const _ of routeSerial(deps, ['codex'], 'VISIBLE USER MESSAGE', 'user1', 'thread1', {
+      currentUserMessageId: userMessageId,
+      a2aTriggerMessageId: whisperTriggerId,
+      thinkingMode: 'play',
+    })) {
+      /* drain */
+    }
+
+    assert.equal(codexService.calls.length, 1, 'codex should be invoked once');
+    assert.ok(!codexService.calls[0].prompt.includes('SECRET A2A BODY'), 'invisible whisper content must stay hidden');
+    assert.ok(
+      !codexService.calls[0].options.recoveryAnchor?.promptMessageIds.includes(whisperTriggerId),
+      'an invisible trigger must not earn an exact body-exposure receipt',
+    );
+  });
+
   it('incremental mode: falls back to explicit user message when current message is missing from incremental context', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const captureService = createCapturingService('opus', 'ack');
@@ -2403,6 +2545,66 @@ describe('routeParallel cursor ack on error', () => {
 
     assert.ok(cursorBoundaries.has('opus'), 'cursor boundary must be set for opus even when it errored');
     assert.ok(cursorBoundaries.has('codex'), 'cursor boundary must be set for codex (no error)');
+  });
+
+  it('uses the deferred cursor overlay and exposes only the exact A2A stream trigger in play mode', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const codexService = createOptionsCapturingService('codex', 'ack');
+    const deps = createMockDeps({ codex: codexService });
+    const oldMessage = {
+      id: '0000000000000001-000001-aaaaaaaa',
+      threadId: 'thread1',
+      userId: 'user1',
+      catId: null,
+      content: 'OLD PARALLEL USER MESSAGE',
+      mentions: [],
+      timestamp: 1_000,
+      visibilitySeq: 1,
+    };
+    const triggerMessage = {
+      id: '0000000000000002-000001-bbbbbbbb',
+      threadId: 'thread1',
+      userId: 'user1',
+      catId: 'opus',
+      content: 'PARALLEL EXACT A2A BODY',
+      mentions: ['codex'],
+      timestamp: 2_000,
+      visibilitySeq: 2,
+      origin: 'stream',
+    };
+    const messages = [oldMessage, triggerMessage];
+    deps.deliveryCursorStore = {
+      // Simulate a legacy durable v1 value beside the route-scoped canonical v2 overlay.
+      getCursor: async () => oldMessage.id,
+      ackCursor: async () => {},
+      ackSeenCursor: async () => {},
+    };
+    deps.messageStore.getById = async (id) => messages.find((candidate) => candidate.id === id);
+    deps.messageStore.getByThreadAfter = async (_threadId, afterCursor) => {
+      const afterSeq = afterCursor?.startsWith('v2:') ? Number(afterCursor.slice(3, 19)) : 0;
+      return messages.filter((candidate) => candidate.visibilitySeq > afterSeq);
+    };
+
+    const cursorBoundaries = new Map([['codex', 'v2:0000000000000001:0000000000000001-000001-aaaaaaaa']]);
+    for await (const _ of routeParallel(deps, ['codex'], triggerMessage.content, 'user1', 'thread1', {
+      currentUserMessageId: triggerMessage.id,
+      a2aTriggerMessageId: triggerMessage.id,
+      cursorBoundaries,
+      thinkingMode: 'play',
+    })) {
+      /* drain */
+    }
+
+    assert.equal(codexService.calls.length, 1, 'codex should be invoked once');
+    assert.ok(codexService.calls[0].prompt.includes(triggerMessage.content), 'exact A2A body must be exposed');
+    assert.ok(
+      !codexService.calls[0].prompt.includes(oldMessage.content),
+      'overlay must suppress older delivered history',
+    );
+    assert.ok(
+      codexService.calls[0].options.recoveryAnchor?.promptMessageIds.includes(triggerMessage.id),
+      'the exact unchanged body must earn its exposure receipt',
+    );
   });
 });
 

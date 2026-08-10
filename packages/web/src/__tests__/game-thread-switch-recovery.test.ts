@@ -35,6 +35,7 @@ vi.mock('@/stores/chatStore', () => {
       setViewMode: vi.fn(),
       clearUnread: vi.fn(),
       confirmUnreadAck: vi.fn(),
+      settleUnreadAck: vi.fn(),
       armUnreadSuppression: vi.fn(),
       rightPanelMode: null,
       uiThinkingExpandedByDefault: false,

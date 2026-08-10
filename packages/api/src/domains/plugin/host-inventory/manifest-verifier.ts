@@ -44,6 +44,15 @@ export function verifyPackageAdmission(candidate: PackageAdmissionCandidate, now
     throw new PluginInventoryError('INVALID_GRANT', 'effective grants must be a subset of manifest requests');
   }
   const effectiveGrants = canonicalCapabilities(candidate.effectiveGrants as readonly Capability[]);
+  const signalSchemas = candidate.signalSchemas ?? {};
+  for (const declaration of validation.manifest.signals?.provides ?? []) {
+    if (!Object.hasOwn(signalSchemas, declaration.schemaRef)) {
+      throw new PluginInventoryError(
+        'INVALID_MANIFEST',
+        `declared signal schema is missing from admitted package: ${declaration.schemaRef}`,
+      );
+    }
+  }
   return {
     package: {
       packageDigest: candidate.computedPackageDigest,
@@ -51,6 +60,7 @@ export function verifyPackageAdmission(candidate: PackageAdmissionCandidate, now
       version: validation.manifest.version,
       contractVersion: validation.manifest.contractVersion,
       manifest: structuredClone(validation.manifest),
+      signalSchemas: structuredClone(signalSchemas),
       packageState: 'installed',
       verifiedAt: now,
       updatedAt: now,

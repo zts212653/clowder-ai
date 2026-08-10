@@ -8,20 +8,20 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 
-// gemini35 lives in the runtime catalog overlay (not cat-template.json).
-// Register it for tests so resolveDefaultDutyCatProfileId() can find it.
+// Register gemini35 for tests so resolveDefaultDutyCatProfileId() can find it
+// even when this file runs with an isolated minimal registry.
 if (!catRegistry.has('gemini35')) {
   catRegistry.register('gemini35', {
     id: 'gemini35',
-    name: '暹罗猫 Gemini 3.5 Flash',
+    name: '暹罗猫 Gemini 3.6 Flash',
     displayName: '暹罗猫',
     avatar: '/avatars/gemini25.png',
     color: { primary: '#2563EB', secondary: '#DBEAFE' },
-    mentionPatterns: ['@gemini35'],
+    mentionPatterns: ['@gemini35', '@gemini36'],
     clientId: 'google',
-    defaultModel: 'Gemini 3.5 Flash (High)',
+    defaultModel: 'Gemini 3.6 Flash (High)',
     mcpSupport: true,
-    roleDescription: '暹罗猫 Gemini 3.5 Flash',
+    roleDescription: '暹罗猫 Gemini 3.6 Flash',
     personality: '创意灵感丰富',
   });
 }
@@ -233,12 +233,10 @@ describe('ConciergeThreadService', () => {
   });
 
   it('MemoryConciergeConfigStore default dutyCatProfileId resolves to gemini35', async () => {
-    // Default duty cat: gemini35 (暹罗猫 Gemini 3.5 Flash, co-creator directive 2026-06-12).
-    // gemini35 is registered in runtime catalog (not cat-template.json), so test setup
-    // manually registers it above.
+    // Default duty cat: gemini35 (暹罗猫 Gemini Flash, current 3.6 Flash).
     const { MemoryConciergeConfigStore } = await import('../dist/domains/concierge/ConciergeConfigStore.js');
     const store = new MemoryConciergeConfigStore();
     const config = await store.get('user-default-check');
-    assert.equal(config.dutyCatProfileId, 'gemini35', 'default duty cat should be gemini35 (暹罗猫 Gemini 3.5 Flash)');
+    assert.equal(config.dutyCatProfileId, 'gemini35', 'default duty cat should be gemini35 (暹罗猫 Gemini Flash)');
   });
 });

@@ -101,6 +101,15 @@ export const APPROVAL_PRODUCER_CATALOG = {
     history: true,
     humanDispositionReasonCodes: ['not_important', 'wrong_lane', 'bad_evidence', 'wrong', 'other'],
   },
+  F292: {
+    label: '会议',
+    badgeLabel: 'Meeting',
+    colorToken: 'var(--semantic-info, #3b82f6)',
+    decisionEndpointBase: '/api/meeting-intakes',
+    sourcePolicy: 'message-or-event',
+    history: true,
+    humanDispositionReasonCodes: null,
+  },
 } as const satisfies Record<ApprovalProducerId, ApprovalProducerCatalogEntry>;
 
 /** Stable display/fan-out order; preserves the existing Hub order during registry migration. */
@@ -113,6 +122,7 @@ export const APPROVAL_PRODUCER_IDS = Object.freeze([
   'F260',
   'F221',
   'F276',
+  'F292',
 ] as const satisfies readonly ApprovalProducerId[]);
 
 export function approvalProducerMeta(producerId: ApprovalProducerId): ApprovalProducerCatalogEntry {

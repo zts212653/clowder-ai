@@ -181,9 +181,9 @@ describe('F246 AC-D3: ApprovalPanel', () => {
       root.render(React.createElement(ApprovalPanel));
     });
 
-    // The header should show "待审批" but no count badge
+    // The header should show "待我处理" but no count badge
     const panel = container.querySelector('[data-testid="approval-panel"]');
-    expect(panel?.textContent).toContain('待审批');
+    expect(panel?.textContent).toContain('待我处理');
     // Should not have any numeric count visible (no badge span rendered)
     const badges = panel?.querySelectorAll('.rounded-full');
     const countBadges = Array.from(badges ?? []).filter((b) => b.textContent && /^\d+/.test(b.textContent));

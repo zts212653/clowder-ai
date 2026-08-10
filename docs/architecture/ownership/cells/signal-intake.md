@@ -5,13 +5,21 @@ doc_kind: architecture
 created: 2026-08-08
 summary: Host-owned admission, routing, durable workflow intake, source-resolution authority, and repair projection for declared external plugin signals.
 canonical_features: [F292]
-code_anchors: []
+code_anchors:
+  - packages/shared/src/types/signal-ingress.ts
+  - packages/shared/src/types/meeting-intake.ts
+  - packages/api/src/domains/signal-intake/SignalAdmissionService.ts
+  - packages/api/src/domains/signal-intake/RedisMeetingIntakeStore.ts
+  - packages/api/src/domains/signal-intake/SourceAccessLeaseService.ts
+  - packages/api/src/domains/plugin/host-broker/events-publish-handler.ts
+  - packages/api/src/routes/meeting-intake-routes.ts
 doc_anchors:
   - docs/features/F292-feishu-meeting-intake-plugin.md
   - feature-specs/2026-08-08-f292-feishu-meeting-intake.md
-static_scan_hints: [SignalAdmissionService, SignalRouteStore, MeetingIntakeStore, MeetingIntakeService, SourceAccessLeaseService, signal-ingress, meeting-intake]
+static_scan_hints: [SignalAdmissionService, SignalRouteStore, MeetingIntakeStore, MeetingIntakeService, SourceAccessLeaseService, EventsPublishBrokerHandler, signal-ingress, meeting-intake]
 cited_by:
   - {feature: F292, date: 2026-08-08, delta: "new Host-side cell separates durable external-signal truth from plugin lifecycle and source-specific collectors"}
+  - {feature: F292, date: 2026-08-10, delta: "K-2B typed events.publish adapter consumes Host Broker identity while preserving signal-intake settlement authority"}
 ---
 
 # External Signal Intake
@@ -31,8 +39,11 @@ The external source remains source truth. This cell persists bounded metadata, s
 governance/settlement history, and workflow choices; it does not become a document store or universal
 event log.
 
-The cell is frozen before implementation, so its code-anchor list is intentionally empty. PR 2 must
-replace that empty list with the exact landed shared/API anchors before it can claim completion.
+The merged core slices establish released-contract admission, atomic TTL=0 intake truth, Host route
+generation, one-shot source access, typed repair state, Needs Me actions, and owner-scoped recovery.
+K-2B adds the typed `events.publish` transport edge: it resolves the current Host route for every
+call, invokes this cell's admission service, and uses this cell's canonical settlement receipt to
+recover ambiguous Broker dispatch without creating a second intake.
 
 ## Use This When
 
@@ -47,6 +58,10 @@ replace that empty list with the exact landed shared/API anchors before it can c
 - Require one released public contract and exact package digest; never mirror its schema in core.
 - Bind producer, provenance, grants, runtime session, liveness, and route generation from Host truth.
 - Persist accepted settlement and durable intake atomically before attempting wake or UI fan-out.
+- Keep route generation in the per-call Host binding, not in a long-lived runtime lease; route
+  changes must take effect without re-authorizing the plugin process.
+- Expose a validated canonical-settlement lookup for Broker recovery. It may return an already
+  committed receipt, but it cannot create or mutate intake truth.
 - Treat delivery as at-least-once and visible work as idempotent; exact retries return the same receipt,
   while same-key/different-input conflicts fail closed.
 - Cross the plugin boundary with bounded metadata and opaque source refs. Resolve source content only

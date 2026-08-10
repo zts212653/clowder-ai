@@ -163,7 +163,7 @@ describe('F167 Phase T TurnCustodyProjectionService', () => {
     assert.equal((await h.service.close(opened)).shouldBlock, true);
   });
 
-  test('structured hold wake ignores invocation.started but accepts hold/transfer/done transitions', async () => {
+  test('structured hold wake ignores unrelated truth but accepts hold/transfer/exact disposition transitions', async () => {
     const h = harness();
     const opened = await h.service.open({
       kind: 'structured',
@@ -186,6 +186,34 @@ describe('F167 Phase T TurnCustodyProjectionService', () => {
       payload: { fromCatId: 'opus', toCatId: 'codex-sol' },
     });
     assert.equal((await h.service.close(opened)).shouldBlock, true, 'receiving the wake is not turn progress');
+
+    const exact = harness();
+    const exactOpened = await exact.service.open({
+      kind: 'structured',
+      protocol: 'hold',
+      subjectKey: 'ball:thread:thread-1',
+      holderCatId: 'codex-sol',
+      sourceMessageId: 'message-1',
+      taskId: 'task-1',
+    });
+    exact.addEvent({
+      kind: 'ball.hold_dispositioned',
+      sourceEventId: 'hold-disposition:inv-1:message-1:task-1',
+      payload: {
+        catId: 'codex-sol',
+        invocationId: 'inv-1',
+        sourceMessageId: 'message-1',
+        taskId: 'task-1',
+        disposition: 'completed',
+      },
+    });
+    assert.deepEqual(await exact.service.close(exactOpened), {
+      state: 'covered_active',
+      shouldBlock: false,
+      transitionObserved: true,
+      structuredTransitionKind: 'hold_dispositioned',
+      evidenceRefs: ['hold:ball:thread:thread-1'],
+    });
 
     for (const kind of ['ball.held', 'ball.handed', 'ball.handed_cvo']) {
       const next = harness();

@@ -20,6 +20,7 @@ import {
 import type { InvocationQueue } from '../../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationTracker } from '../../domains/cats/services/agents/invocation/InvocationTracker.js';
 import { PerCatTerminalDispositionCollector } from '../../domains/cats/services/agents/invocation/PerCatTerminalDispositionCollector.js';
+import { createInitialQueuedMessageCustody } from '../../domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import type { QueueProcessor } from '../../domains/cats/services/agents/invocation/QueueProcessor.js';
 import { requireInvocationRecordUpdate } from '../../domains/cats/services/agents/invocation/require-invocation-record-update.js';
 import { stampVisibleTurn } from '../../domains/cats/services/agents/invocation/visible-turn.js';
@@ -150,6 +151,8 @@ export interface ConnectorTriggerPolicy {
   readonly sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' | 'issue';
   /** F140 Phase C: hint which Skill to auto-load (not a hard constraint — cat can override) */
   readonly suggestedSkill?: string;
+  /** Event carriers use the existing Queue/F254/F264 custody even when the thread is idle. */
+  readonly forceQueue?: boolean;
   /**
    * Optional queue coalescing key for connector bursts that supersede earlier queued work.
    * Later hits reuse the first queued entry: messageIds are merged, but the original content/body stays in place.
@@ -221,6 +224,23 @@ export class ConnectorInvokeTrigger {
   ): Promise<TriggerOutcome> {
     const { invocationTracker } = this.opts;
     const priority = policy?.priority ?? 'normal';
+
+    if (policy?.forceQueue) {
+      const outcome = await this.enqueueWhileActive(
+        threadId,
+        catId,
+        userId,
+        message,
+        messageId,
+        sender,
+        priority,
+        policy.sourceCategory,
+        policy.suggestedSkill,
+        policy.coalesceKey,
+      );
+      if (outcome === 'enqueued') await this.opts.queueProcessor?.tryAutoExecute(threadId);
+      return outcome;
+    }
 
     // A cancel-all/force-reset owns the next terminal transition. Late managed
     // command or connector wakes remain durable in Queue instead of reviving
@@ -530,6 +550,17 @@ export class ConnectorInvokeTrigger {
 
     if (result.entry) {
       invocationQueue.backfillMessageId(threadId, userId, result.entry.id, messageId);
+      const persistedEntry = invocationQueue.getEntrySnapshot(threadId, userId, result.entry.id);
+      const sourceMessage = await this.opts.messageStore?.getById(messageId);
+      if (persistedEntry && sourceMessage?.deliveryStatus === 'queued' && !sourceMessage.queueCustody) {
+        const initialized = await this.opts.messageStore?.initializeQueueCustody(
+          messageId,
+          createInitialQueuedMessageCustody(persistedEntry),
+        );
+        if (initialized?.kind !== 'initialized' && initialized?.kind !== 'existing') {
+          throw new Error(`connector Queue custody initialization failed for ${messageId}: ${initialized?.kind}`);
+        }
+      }
     }
 
     await emitQueueUpdated(

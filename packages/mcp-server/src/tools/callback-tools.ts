@@ -2768,6 +2768,14 @@ export async function handleHoldBall(input: {
   return result;
 }
 
+export async function handleCompleteManagedHold(input: { disposition: 'handled' | 'completed' }): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/complete-managed-hold', { disposition: input.disposition });
+}
+
+export async function handleCompleteA2ADispatch(input: { disposition: 'handled' | 'completed' }): Promise<ToolResult> {
+  return callbackPost('/api/callbacks/complete-a2a-dispatch', { disposition: input.disposition });
+}
+
 // ─── F236 Phase C: cat-controlled anchor mode ─────────────────────────────
 
 import { unlinkSync, writeFileSync } from 'node:fs';
@@ -3798,6 +3806,67 @@ export const callbackTools = [
       authority: 'callback-owner',
       risk: { level: 'write', openWorld: false },
       runtimeProfiles: ['full'],
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_complete_managed_hold',
+    description:
+      'Terminally dispose the exact managed hold wake bound to this invocation. ' +
+      'Use when: the current turn was triggered by a managed hold wake and its requested work is actually handled/completed. ' +
+      'NOT for: ordinary holds, unfinished work, re-hold, a structured event wait, transfer, or unrelated task completion. ' +
+      'Output: marks the exact F264 target receipt handled and terminalizes the original F167 hold ball; ' +
+      'the server derives and fences threadId, holderCatId, invocationId, sourceMessageId, and taskId. ' +
+      'GOTCHA: full read, command exit, tests, merge truth, or ACK never substitute for this producer, ' +
+      'and the caller cannot select or close another subject.',
+    inputSchema: {
+      disposition: z
+        .enum(['handled', 'completed'])
+        .describe(
+          'handled = wake consumed; completed = wake work completed. Both terminalize the exact original hold.',
+        ),
+    },
+    handler: handleCompleteManagedHold,
+    governance: {
+      implementationExport: 'handleCompleteManagedHold',
+      resourceFamily: 'task-workflow',
+      action: 'complete',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'authority-boundary',
+        admissionRef: 'file:docs/features/F167-a2a-chain-quality.md',
+      },
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_complete_a2a_dispatch',
+    description:
+      'Terminally dispose the exact ordinary A2A dispatch bound to this invocation. ' +
+      'Use when: the current turn was triggered by a same-thread or queued agent handoff and its requested work is actually handled/completed. ' +
+      'NOT for: user turns, managed holds, unfinished work, re-hold, event wait, transfer, or unrelated task completion. ' +
+      'Output: terminalizes the exact F167 dispatch ball; the server derives and fences threadId, holderCatId, fromCatId, invocationId, and sourceMessageId. ' +
+      'GOTCHA: command exit, tests, merge truth, another coordination terminal, or ACK never substitute for this producer, ' +
+      'and the caller cannot select or close another subject.',
+    inputSchema: {
+      disposition: z
+        .enum(['handled', 'completed'])
+        .describe('handled = exact A2A request consumed; completed = requested A2A work completed.'),
+    },
+    handler: handleCompleteA2ADispatch,
+    governance: {
+      implementationExport: 'handleCompleteA2ADispatch',
+      resourceFamily: 'task-workflow',
+      action: 'complete',
+      authority: 'callback-owner',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'authority-boundary',
+        admissionRef: 'file:docs/features/F167-a2a-chain-quality.md',
+      },
     },
   }),
   defineTool({

@@ -5,7 +5,7 @@ topics: [eval, measurement-validity, calibration, uncertainty, repeatability, fr
 tips_exempt: "Internal eval measurement governance and migration; no new user-invokable capability or action surface"
 doc_kind: spec
 created: 2026-07-18
-updated: 2026-08-01
+updated: 2026-08-10
 description: "为决策型 eval bundle 建立目标、边界、不确定性与重裁契约，并以 friction 通道召回为首个实证迁移。"
 description_source: human
 description_author: codex-sol
@@ -119,8 +119,8 @@ eval 能稳定产出数字，不等于数字真的代表我们在乎的东西。
 ### Phase C（Repeatability + Migration）
 - [x] AC-C1: 至少一批 frozen cohort 被非原 judge/人工独立重裁，产出 agreement、分歧样本与 adjudication report。
 - [x] AC-C2: 至少三段连续 keep_observe/green 窗口与同期生产事故对照，报告阴性可信度和传感盲区。
-- [ ] AC-C3: 所有活跃 decision-bearing bundle 有完整证，所有自动 judge 有显式版本；缺证 bundle 不允许驱动 fix/build/sunset。
-- [ ] AC-C4: migration 按风险分批，friction pilot 未通过前不批量迁移；每 Phase checkpoint 写明新增证据和是否改变跨 Feat contract。
+- [x] AC-C3: 除按 AC-C5..C8 / F275 保持 `blocked_f275` 的 `eval:task-outcome` 外，所有活跃 decision-bearing bundle 有完整证，所有自动 judge 有显式版本；缺证或 blocked bundle 不允许驱动 fix/build/sunset。
+- [x] AC-C4: validity evidence migration 按风险分批；friction pilot 未签发 usable 前，批量 action enablement 保持关闭；每 Phase checkpoint 写明新增证据和是否改变跨 Feat contract。
 - [ ] AC-C5: `eval:task-outcome` 的 target population 明确限定为 F275 admitted managed work；thread/message/TaskItem 存在性不得代替 eligibility。
 - [ ] AC-C6: 任务归属结果保留 `managed_attributed / managed_unattributed / unmanaged_not_applicable` 三桶；只有第一桶进入 task-level loss，第二桶作为 coverage guardrail，第三桶不适用。
 - [ ] AC-C7: unmanaged 抽样审计拥有独立出生证、冻结抽样概率与 judge 版本；首期指标命名为 `unmanaged_should_have_been_managed_rate`，不得直接发布为 `SOP miss rate`。
@@ -131,6 +131,20 @@ eval 能稳定产出数字，不等于数字真的代表我们在乎的东西。
 > cancel recall remains `null`/not estimable for these windows; AC-C4 bulk migration remains closed; F268 remains disabled; AC-C5..C8 remain dependent on F275.
 
 > 2026-08-01 AC-C2 / batch-1 验收：`eval:memory` 的三个相互重叠 30-day `keep_observe` 窗口均固定 200/200 search-quality observations，随后一段真实生产事故 verdict 又固定 official output=`0`、底层 SQLite rows=`32,258`、direct observations=`200`。checked-in incident snapshot 却记录 200 observed searches，故确定性重建得到 `green_window_coverage=1`、`incident_detection_rate=1`、`incident_evidence_consistency=0`，overall=`insufficient`、action=`keep_observe`。这证明 negative control 能抓住传感链自相矛盾，不能证明 memory search quality 健康。GLM 在消息 `0001785594420381-000795-a9794ee9` 对 exact HEAD `1ed6409a35482a6f6d2300338b090b422662b56d` 独立复核并 `APPROVE`，PR #3363 随后 squash merge 到 canonical `main@708f68213728c73676b138db75570f5c3d7bdd6e`，因此 AC-C2 的 review + landing 时序门已满足。AC-C3/C4 仍开放，其余 8 个 active bundle 均不具 action enablement（friction=`certified_insufficient`、6 个=`unmigrated`、task-outcome=`blocked_f275`）。
+
+> 2026-08-10 AC-C3/C4 batch-2 验收：`eval:a2a` 固定 2026-08-01 的 301-projection regression 窗口与 2026-08-03 的 post-repair zero-projection 窗口；后者确定性重建 `projections_total=0`，因此不能用“无告警”证明 custody/routing 健康。certificate、六组件 procedure identity、source hash、normalized `insufficient + keep_observe` result 与 same-version replay 完整存在。GLM 在消息 `0001786357655262-000210-012dd732` 对 exact HEAD `bea3f256b2e6dda091c350993214368f75380206` 独立复核并 `APPROVE`，PR #3545 随后 squash merge 到 canonical `main@3a9971a28a48871d02175dba129aac49ca7c2e9a`；batch-2 的 review + landing 时序门已满足，但结论仍是 `certified_insufficient + keep_observe_only`，AC-C3/C4 继续开放。
+
+> 2026-08-10 AC-C3/C4 batch-3 验收：`eval:sop` 固定 2026-07-12 与 2026-08-09 两次同一 `pr-2459-sop-wiring-gap-fix` trace 的 source-bound snapshot/verdict。negative control 仍复用同一 session identity 且 `rules_skipped=11`，因此既不能代表目标 population，也没有覆盖 manual rule gap。GLM 在消息 `0001786358909892-000230-7e737c85` 对 exact HEAD `da10b93d61931d90714457c0946f4ac418905d93` 独立复核并 `APPROVE`，PR #3546 随后 squash merge 到 canonical `main@ceb74b97d1475ca2895e9f26af2241c0bab042a2`。batch-3 的证据链完整但仍是 `certified_insufficient + keep_observe_only`，AC-C3/C4 继续开放。
+
+> 2026-08-10 AC-C3/C4 batch-4 验收：`eval:capability-wakeup` 固定 workspace-navigator 的 27-opportunity/0-use/27-miss 窗口与后续 3-opportunity/0-use/3-miss 窗口。后者样本极薄且没有 source-bound trial identity、接受/拒绝标签或 consumer outcome，故不能从“零使用”推断 wakeup 无效或健康。GLM 在消息 `0001786359159792-000250-dd2a93a9` 对 exact HEAD `8aff513dc8fa86396a2eebbd7af46f91b89139d3` 独立复核并 `APPROVE`，PR #3547 随后 squash merge 到 canonical `main@03e6d282feedebe89d6851ee653cc3a6f92bdf0b`。batch-4 的证据链完整但仍是 `certified_insufficient + keep_observe_only`，AC-C3/C4 继续开放。
+
+> 2026-08-10 AC-C3/C4 batch-5 验收：`eval:freshness` 固定 2026-07-19 的 42 eligible / 34 live / 145 provider-native-opportunity 窗口，与 2026-08-09 的 8 eligible / 8 fixture / 0 live / 0 provider-native-opportunity 窗口。negative control 只有 fixture 样本且没有真实 provider opportunity，故既不能证明 live carrier closure，也不能把“零失败”解释为 freshness 健康。GLM 在消息 `0001786360048001-000262-87dcc604` 对 exact HEAD `21a6d2e91f9447d8ade0fa3360aeb2a70a1b8332` 独立复核并 `APPROVE`，PR #3549 随后 squash merge 到 canonical `main@20a3fe0d0d6fba2d2391b5437204035c54167106`。batch-5 的证据链完整但仍是 `certified_insufficient + keep_observe_only`，AC-C3/C4 继续开放。
+
+> 2026-08-10 AC-C3/C4 batch-6 验收：`eval:qc` 固定 2026-08-02 与 2026-08-09 两个 source-bound provider window；两者均为 `pr_count=0`、finding/reviewer/post-merge 指标全零且 confidence=`no-data`。零分母与 provider 明示无数据不能证明 QC 健康，更不能授权 fix/build/delete_sunset。GLM 在消息 `0001786360522889-000272-f028bef6` 对 exact HEAD `ce7acfbaaa4183b1cff320e909df2d7cc2609855` 独立复核并 `APPROVE`，PR #3550 随后 squash merge 到 canonical `main@8dd08c743b0014f8df2624964cc9b6b03eebef4e`。batch-6 的证据链完整但仍是 `certified_insufficient + keep_observe_only`，AC-C3/C4 继续开放。
+
+> 2026-08-10 AC-C3/C4 batch-7 验收：`eval:anchor-first` 固定 2026-08-09 partial-uptime 窗口（7 anchor / 193 full-context / 10 orphan drills）与 post-restart 薄窗（0 anchor / 3 full-context / 0 orphan drills）。后者既没有 anchor adoption，又只有三个 process-local full-context 样本，故“零 orphan”不能支持 population health 或 utility 结论。GLM 在消息 `0001786361099907-000285-47a5a104` 对 exact HEAD `cd32b5e15d13c9623dd0d9c25b033a5993f01585` 独立复核并 `APPROVE`，PR #3551 随后 squash merge 到 canonical `main@39c8b0e4334a91c75ba43701f05c9e813919aba3`。batch-7 的证据链完整但仍是 `certified_insufficient + keep_observe_only`。
+>
+> 2026-08-10 AC-C3/C4 终态验收：risk 1→7 的 memory、a2a、sop、capability-wakeup、freshness、qc、anchor-first 已依序完成 source-bound cohort、certificate、六组件 procedure identity、normalized result、same-version replay、negative control、exact-HEAD review 与 canonical-main landing；friction 既有证书同样保持 `certified_insufficient`。全量 census 无 active `unmigrated` / `contract_ready`，所有 non-usable bundle 都是 `keep_observe_only`，没有签发 fix/build/delete_sunset 权限。唯一无证 active bundle 是 `eval:task-outcome=blocked_f275`；它由 AC-C5..C8 / F275 继续持有，不被本轮完成声明覆盖。故 AC-C3/C4 在该明确边界内闭合；F266、F268 与 live runtime 均未改变，`live=dormant`。
 
 ## Eval / Tracking Contract
 

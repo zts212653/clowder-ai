@@ -85,11 +85,26 @@ async function resolveScheduledWake(
   try {
     const sourceMessage = entry.messageId ? await messageStore.getById(entry.messageId) : null;
     if (sourceMessage?.source?.connector === 'hold-ball') {
+      const meta = sourceMessage.source.meta;
+      const taskId = typeof meta?.taskId === 'string' ? meta.taskId : undefined;
+      const sourceThreadId = typeof meta?.threadId === 'string' ? meta.threadId : undefined;
+      const sourceCatId = typeof meta?.catId === 'string' ? meta.catId : undefined;
+      if (
+        !entry.messageId ||
+        !taskId ||
+        meta?.wakeWhen !== true ||
+        sourceThreadId !== entry.threadId ||
+        sourceCatId !== entry.targetCats[0]
+      ) {
+        return { kind: 'legacy', reason: 'carrier_missing', sourceCategory: 'scheduled' };
+      }
       return {
         kind: 'structured',
         protocol: 'hold',
         subjectKey: `ball:thread:${entry.threadId}`,
         holderCatId: entry.targetCats[0] ?? 'unknown',
+        sourceMessageId: entry.messageId,
+        taskId,
       };
     }
     return { kind: 'unstructured', source: 'cron' };

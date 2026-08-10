@@ -763,6 +763,20 @@ export type {
   MeetingContextProvenance,
 } from './meeting-context-block.js';
 export { createMeetingContextBlock } from './meeting-context-block.js';
+export {
+  type MeetingIntake,
+  type MeetingIntakeChoices,
+  type MeetingIntakeExecutionState,
+  type MeetingIntakeHealthState,
+  type MeetingIntakeIngress,
+  type MeetingIntakeJudgmentState,
+  type MeetingIntakeOutput,
+  type MeetingIntakeRepair,
+  type MeetingIntakeRepairAction,
+  type MeetingIntakeSignalOrigin,
+  type MeetingIntakeSourceState,
+  meetingIntakeNeedsAttention,
+} from './meeting-intake.js';
 // Memory types (F3-lite 显式记忆)
 export type {
   MemoryEntry,
@@ -1085,6 +1099,7 @@ export type {
   QueueAuthorIntentReceipt,
   QueueHandledDisposition,
   QueueLineageEvidenceRef,
+  QueueManagedHoldContinuationWitness,
   QueueMessageReceipt,
   QueueReceiptTarget,
   QueueReceiptTargetState,
@@ -1159,6 +1174,12 @@ export type {
   HandoffProposalStatus,
   SessionHandoffProposal,
 } from './session-handoff-proposal.js';
+export type {
+  MeetingIntakeJudgmentField,
+  SignalRouteRecord,
+  SignalRouteState,
+  SignalRuntimeBinding,
+} from './signal-ingress.js';
 // Signals types (F21 Signal Hunter)
 export type {
   SignalArticle,

@@ -119,6 +119,16 @@ export class ManagedCommandWakeRecoverySweep {
     }
 
     if (isDispatchableWakeState(parsed.command.state)) {
+      const eventCarrier = parsed.command.messageId
+        ? await this.deps.getEventCarrier?.({
+            threadId: parsed.threadId,
+            userId: parsed.userId,
+            catId: parsed.catId,
+            messageId: parsed.command.messageId,
+          })
+        : undefined;
+      if (eventCarrier?.state === 'handled') return this.consume(parsed, eventCarrier.invocationId);
+      if (eventCarrier?.state === 'pending') return 'pending';
       const carrier = await this.findInvocationCarrier(parsed);
       if (carrier) {
         const recoveryStatus = classifyInvocationRecoveryStatus(carrier.status);
@@ -173,7 +183,7 @@ export class ManagedCommandWakeRecoverySweep {
         `[定时任务] ${wakeContent}`,
         messageId,
         undefined,
-        { sourceCategory: 'scheduled' },
+        { sourceCategory: 'scheduled', forceQueue: true },
       );
     } catch (err) {
       log.warn(

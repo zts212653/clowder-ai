@@ -1,4 +1,4 @@
-import type { Capability, PluginManifest } from '@clowder-ai/plugin-contract';
+import type { Capability, PluginManifest, SignalSchemaCatalog } from '@clowder-ai/plugin-contract';
 
 export const PLUGIN_INVENTORY_SCHEMA_VERSION = 1 as const;
 
@@ -14,6 +14,8 @@ export interface PluginPackageRecord {
   readonly version: string;
   readonly contractVersion: string;
   readonly manifest: PluginManifest;
+  /** Package-local schemas resolved from the exact admitted archive. */
+  readonly signalSchemas: SignalSchemaCatalog;
   readonly packageState: PackageState;
   readonly verifiedAt: number;
   readonly updatedAt: number;
@@ -55,6 +57,7 @@ export interface PackageAdmissionCandidate {
   readonly expectedPackageDigest: string;
   readonly packagePluginId: string;
   readonly effectiveGrants: readonly string[];
+  readonly signalSchemas?: SignalSchemaCatalog;
 }
 
 export interface UpgradePackageInput extends PackageAdmissionCandidate {

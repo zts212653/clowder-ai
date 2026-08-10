@@ -5,7 +5,7 @@
  * （TRANSITION_TABLE 而非 if-chain，降单函数 cognitive complexity）。
  * 调用方（projector）负责持久化 + 字段 effect（heldUntil/blockedSinceAt/lastWakeAt）。
  *
- * INV-10（完整性）：全 8 state × 17 event 的每格行为确定（转移 or 显式 reject），穷举测试钉死。
+ * INV-10（完整性）：全 8 state × 18 event 的每格行为确定（转移 or 显式 reject），穷举测试钉死。
  * 复杂守卫拆成独立 resolver：
  *   - ball.handed_cvo：payload.intent 三态（handoff→parked / done_notify→resolved / fyi→不变）
  *   - ball.hold_expired：需 payload.fireAt 匹配 snapshot.heldUntil，防旧 reminder 误杀新 hold
@@ -43,6 +43,8 @@ export const ALL_BALL_EVENT_KINDS: BallCustodyEvent['kind'][] = [
   'task.done',
   'ball.wake_sent',
   'ball.wake_condition_met',
+  'ball.hold_dispositioned',
+  'ball.dispatch_dispositioned',
   // ─── Phase C 安乐死 (KD-C1/C2) ───
   'ball.frozen',
   'ball.degraded',
@@ -109,7 +111,9 @@ type DynamicRule = {
 const STATIC_TABLE: Partial<Record<BallCustodyEvent['kind'], StaticRule>> = {
   'ball.handed': { from: '*', to: 'active' }, // 任意（含 resolved=reopen）→ active
   'ball.void_pass': { from: set('new', 'active', 'blocked', 'parked'), to: 'void' },
-  'ball.held': { from: set('new', 'active'), to: 'active' }, // heldUntil 由 projector 设
+  // A fresh structured hold is a new custody acquisition on the thread subject.
+  // It must reopen a prior terminal disposition just as a new A2A handoff does.
+  'ball.held': { from: set('new', 'active', 'resolved'), to: 'active' }, // heldUntil 由 projector 设
   'invocation.started': { from: set('active', 'blocked'), to: 'active' },
   'invocation.died': { from: set('active', 'blocked'), to: 'dead' }, // lastScanAt 由 projector 设
   'task.blocked': { from: set('new', 'active', 'void', 'zombie', 'parked'), to: 'blocked' }, // 不落 active（P1-3）
@@ -119,6 +123,10 @@ const STATIC_TABLE: Partial<Record<BallCustodyEvent['kind'], StaticRule>> = {
   'ball.wake_sent': { from: set('blocked'), to: 'blocked' }, // informational；非 blocked → reject（ignore）
   // F167 Phase P: wakeWhen command completed — ball stays active (cat is being woken with result)
   'ball.wake_condition_met': { from: set('active'), to: 'active' },
+  // F167×F254: only the exact invocation-bound producer may close a live managed hold.
+  'ball.hold_dispositioned': { from: set('active', 'blocked'), to: 'resolved' },
+  // F167: only the exact invocation-bound producer may close a live ordinary A2A dispatch.
+  'ball.dispatch_dispositioned': { from: set('active', 'blocked'), to: 'resolved' },
   // ─── Phase C 安乐死（KD-C1/C2 + 砚砚 R0：7 非-resolved → resolved；resolved → 自然 reject 无规则）───
   // KD-C2 三独立 kind 共享转移行为（语义独立 / payload.kind 区分 / simple table 一致性）
   'ball.frozen': { from: set('new', 'active', 'blocked', 'parked', 'dead', 'void', 'zombie'), to: 'resolved' },

@@ -15,6 +15,7 @@ import { ReadStateKeys } from '../redis-keys/read-state-keys.js';
  * ARGV[2] = updatedAt timestamp
  * ARGV[3] = key prefix (for manual key construction inside Lua)
  * ARGV[4] = threadId (visibility ZSET fallback; '' disables)
+ * ARGV[5] = canonical visibility cursor (optional)
  * Returns 1 if advanced, 0 if rejected (same or older).
  *
  * #3444 root-2 fix (audit thread_msk4hm5oat1ldrbh): the previous same-format
@@ -32,9 +33,20 @@ import { ReadStateKeys } from '../redis-keys/read-state-keys.js';
  */
 const ACK_CAS_LUA = `
 local cur = redis.call('HGET', KEYS[1], 'lastReadMessageId')
+local durableCur = redis.call('HGET', KEYS[1], 'lastReadVisibilityCursor')
 ${VISIBILITY_RESOLVE_SEQ_LUA}
 if cur then
-  local curSeq, curId = resolveSeq(cur)
+  if ARGV[1] == cur then
+    if ARGV[5] and ARGV[5] ~= '' then
+      redis.call('HSET', KEYS[1], 'lastReadVisibilityCursor', ARGV[5])
+    elseif string.sub(ARGV[1], 1, 3) == 'v2:' then
+      redis.call('HSET', KEYS[1], 'lastReadVisibilityCursor', ARGV[1])
+    end
+    return 0
+  end
+  -- The rollout-gated primary may have been pruned. Once present, the
+  -- canonical anchor is the authoritative monotonic comparison coordinate.
+  local curSeq, curId = resolveSeq(durableCur or cur)
   local newSeq, newId = resolveSeq(ARGV[1])
   if curSeq and newSeq then
     -- Both resolved: visibility pair-domain comparison
@@ -51,6 +63,11 @@ if cur then
   end
 end
 redis.call('HSET', KEYS[1], 'lastReadMessageId', ARGV[1], 'updatedAt', ARGV[2])
+if ARGV[5] and ARGV[5] ~= '' then
+  redis.call('HSET', KEYS[1], 'lastReadVisibilityCursor', ARGV[5])
+elseif string.sub(ARGV[1], 1, 3) == 'v2:' then
+  redis.call('HSET', KEYS[1], 'lastReadVisibilityCursor', ARGV[1])
+end
 return 1
 `;
 
@@ -63,6 +80,12 @@ const REPLACE_READ_CURSOR_IF_EQUAL_LUA = `
 local cur = redis.call('HGET', KEYS[1], 'lastReadMessageId')
 if cur == ARGV[1] then
   redis.call('HSET', KEYS[1], 'lastReadMessageId', ARGV[2])
+  if ARGV[3] and ARGV[3] ~= '' then
+    redis.call('HSET', KEYS[1], 'lastReadVisibilityCursor', ARGV[3])
+  end
+  if ARGV[4] and ARGV[4] ~= '' then
+    redis.call('HSET', KEYS[1], 'updatedAt', ARGV[4])
+  end
   return 1
 end
 return 0
@@ -88,6 +111,7 @@ export class RedisThreadReadStateStore implements IThreadReadStateStore {
       userId,
       threadId,
       lastReadMessageId: data.lastReadMessageId,
+      ...(data.lastReadVisibilityCursor ? { lastReadVisibilityCursor: data.lastReadVisibilityCursor } : {}),
       updatedAt: Number(data.updatedAt ?? 0),
     };
   }
@@ -98,9 +122,22 @@ export class RedisThreadReadStateStore implements IThreadReadStateStore {
     return this.parseReadState(userId, threadId, data);
   }
 
-  async ack(userId: string, threadId: string, messageId: string): Promise<boolean> {
+  private readPosition(state: ThreadReadState): string {
+    return state.lastReadVisibilityCursor ?? state.lastReadMessageId;
+  }
+
+  async ack(userId: string, threadId: string, messageId: string, canonicalCursor = ''): Promise<boolean> {
     const key = ReadStateKeys.cursor(userId, threadId);
-    const result = await this.redis.eval(ACK_CAS_LUA, 1, key, messageId, String(Date.now()), this.keyPrefix, threadId);
+    const result = await this.redis.eval(
+      ACK_CAS_LUA,
+      1,
+      key,
+      messageId,
+      String(Date.now()),
+      this.keyPrefix,
+      threadId,
+      canonicalCursor,
+    );
     return result === 1;
   }
 
@@ -118,9 +155,20 @@ export class RedisThreadReadStateStore implements IThreadReadStateStore {
     threadId: string,
     expectedValue: string,
     newValue: string,
+    canonicalCursor?: string,
   ): Promise<boolean> {
     const key = ReadStateKeys.cursor(userId, threadId);
-    const result = await this.redis.eval(REPLACE_READ_CURSOR_IF_EQUAL_LUA, 1, key, expectedValue, newValue);
+    const anchor = canonicalCursor ?? (newValue.startsWith('v2:') ? newValue : '');
+    const updatedAt = canonicalCursor ? String(Date.now()) : '';
+    const result = await this.redis.eval(
+      REPLACE_READ_CURSOR_IF_EQUAL_LUA,
+      1,
+      key,
+      expectedValue,
+      newValue,
+      anchor,
+      updatedAt,
+    );
     return result === 1;
   }
 
@@ -153,7 +201,7 @@ export class RedisThreadReadStateStore implements IThreadReadStateStore {
     if (messageStore.getUnreadSummaryProjection) {
       const cursors = states.flatMap((state, index) => {
         const threadId = threadIds[index];
-        return state && threadId ? [{ threadId, afterId: state.lastReadMessageId }] : [];
+        return state && threadId ? [{ threadId, afterId: this.readPosition(state) }] : [];
       });
       const projected = await messageStore.getUnreadSummaryProjection(cursors, userId);
       const projectedByThread = new Map(projected.map((summary) => [summary.threadId, summary]));
@@ -172,7 +220,7 @@ export class RedisThreadReadStateStore implements IThreadReadStateStore {
       if (!state) {
         return { threadId, unreadCount: 0, hasUserMention: false };
       }
-      const afterId = state.lastReadMessageId;
+      const afterId = this.readPosition(state);
 
       const unreadMessages = await messageStore.getByThreadAfter(threadId, afterId, undefined, userId, {
         includeQueuedCatMessages: true,

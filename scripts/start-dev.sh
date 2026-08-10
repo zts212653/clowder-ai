@@ -1224,15 +1224,37 @@ maybe_start_f247_cloud_services() {
     F247_CLOUD_OWNER_FILE="$(mktemp "${TMPDIR:-/tmp}/cat-cafe-f247-owner.XXXXXX")"
     rm -f "$F247_CLOUD_OWNER_FILE"
     if ! node "$helper" start --optional --owner-file="$F247_CLOUD_OWNER_FILE"; then
+        node "$helper" stop-owned --owner-file="$F247_CLOUD_OWNER_FILE" >/dev/null 2>&1 || true
         rm -f "$F247_CLOUD_OWNER_FILE"
         F247_CLOUD_OWNER_FILE=""
-        return 1
+        echo -e "${YELLOW}  ⚠ F247 cloud supporting services degraded; local Clowder AI startup will continue.${NC}"
+        return 0
     fi
 
     if [ ! -s "$F247_CLOUD_OWNER_FILE" ]; then
         rm -f "$F247_CLOUD_OWNER_FILE"
         F247_CLOUD_OWNER_FILE=""
     fi
+}
+
+print_f247_cloud_status_summary() {
+    if [ "${CAT_CAFE_F247_CLOUD_AUTOSTART:-1}" = "0" ]; then
+        echo "  F247 cloud: disabled (CAT_CAFE_F247_CLOUD_AUTOSTART=0)"
+        return 0
+    fi
+
+    local helper="$PROJECT_DIR/scripts/f247-cloud-services.mjs"
+    if [ ! -f "$helper" ]; then
+        echo "  F247 cloud: unavailable (lifecycle helper missing)"
+        return 0
+    fi
+
+    if node "$helper" status --summary >/dev/null 2>&1; then
+        echo "  F247 cloud: healthy"
+    else
+        echo "  F247 cloud: degraded (run pnpm cloud:doctor for details)"
+    fi
+    return 0
 }
 
 # 检查/启动 Redis
@@ -1606,6 +1628,7 @@ if [[ "${1:-}" == "--status" ]] || [[ "${1:-}" == "status" ]]; then
         REAL_LOG="$DAEMON_LOG_FILE"
         [ -f "$DAEMON_LOG_PATH_FILE" ] && REAL_LOG=$(cat "$DAEMON_LOG_PATH_FILE")
         echo -e "${GREEN}Clowder AI daemon 运行中${NC} (PID: $DAEMON_PID)"
+        print_f247_cloud_status_summary
         [ -f "$REAL_LOG" ] && echo "  日志: $REAL_LOG"
         echo "  停止: pnpm stop  或  ./scripts/start-dev.sh --stop"
         echo "  查看日志: tail -f $REAL_LOG"

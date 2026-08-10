@@ -29,6 +29,7 @@ type StoreState = {
   currentProjectPath: string;
   clearUnread: ReturnType<typeof vi.fn>;
   confirmUnreadAck: ReturnType<typeof vi.fn>;
+  settleUnreadAck: ReturnType<typeof vi.fn>;
   armUnreadSuppression: ReturnType<typeof vi.fn>;
   splitPaneThreadIds: string[];
   setSplitPaneThreadIds: ReturnType<typeof vi.fn>;
@@ -72,6 +73,7 @@ const makeStoreState = (): StoreState => ({
   currentProjectPath: 'default',
   clearUnread: vi.fn(),
   confirmUnreadAck: vi.fn(),
+  settleUnreadAck: vi.fn(),
   armUnreadSuppression: vi.fn(),
   splitPaneThreadIds: [],
   setSplitPaneThreadIds: vi.fn(),

@@ -3,8 +3,13 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainer } from '@/components/ChatContainer';
 
+type MockApiResponse = {
+  ok: boolean;
+  json: () => Promise<unknown>;
+};
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-const mockApiFetch = vi.fn(async (_url: string, _opts?: Record<string, unknown>) => ({
+const mockApiFetch = vi.fn<(_url: string, _opts?: Record<string, unknown>) => Promise<MockApiResponse>>(async () => ({
   ok: true,
   json: async () => ({ caughtUp: false, advanced: false }),
 }));
@@ -26,6 +31,7 @@ let storeState = {
 // #1304: Stable spies that persist across baseStore() calls so tests can
 // assert on the same instance the component actually invoked.
 const confirmUnreadAckSpy = vi.fn();
+const settleUnreadAckSpy = vi.fn();
 const armUnreadSuppressionSpy = vi.fn();
 
 const baseStore = () => ({
@@ -53,6 +59,7 @@ const baseStore = () => ({
   setViewMode: vi.fn(),
   clearUnread: vi.fn(),
   confirmUnreadAck: confirmUnreadAckSpy,
+  settleUnreadAck: settleUnreadAckSpy,
   armUnreadSuppression: armUnreadSuppressionSpy,
   splitPaneThreadIds: [],
   setSplitPaneThreadIds: vi.fn(),
@@ -170,6 +177,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
     mockApiFetch.mockReset();
     mockApiFetch.mockResolvedValue({ ok: true, json: async () => ({ caughtUp: false, advanced: false }) });
     confirmUnreadAckSpy.mockClear();
+    settleUnreadAckSpy.mockClear();
     armUnreadSuppressionSpy.mockClear();
     storeState = {
       currentThreadId: 'thread-A',
@@ -320,10 +328,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
     expect(newCalls[0][0]).toContain('thread-A');
   });
 
-  // #1304 P2: Always confirm on res.ok to balance suppression count.
-  // Even when caughtUp=false (stale cursor), confirmUnreadAck must be called
-  // to decrement _pendingAckCount — otherwise suppression leaks to Infinity.
-  it('confirms unread ack on res.ok even when caughtUp is false', async () => {
+  it('settles without confirming when read/latest returns caughtUp=false', async () => {
     mockApiFetch.mockResolvedValue({
       ok: true,
       json: async () => ({ caughtUp: false, advanced: false }),
@@ -336,10 +341,10 @@ describe('F069-R5: read ack via POST /read/latest', () => {
       await new Promise((r) => setTimeout(r, 10));
     });
 
-    expect(confirmUnreadAckSpy).toHaveBeenCalledWith('thread-A');
+    expect(settleUnreadAckSpy).toHaveBeenCalledWith('thread-A', false);
   });
 
-  it('confirms unread ack when caughtUp is true', async () => {
+  it('settles as confirmed when read/latest returns caughtUp=true', async () => {
     mockApiFetch.mockResolvedValue({
       ok: true,
       json: async () => ({ caughtUp: true, advanced: true }),
@@ -352,6 +357,22 @@ describe('F069-R5: read ack via POST /read/latest', () => {
       await new Promise((r) => setTimeout(r, 10));
     });
 
-    expect(confirmUnreadAckSpy).toHaveBeenCalledWith('thread-A');
+    expect(settleUnreadAckSpy).toHaveBeenCalledWith('thread-A', true);
+  });
+
+  it('settles as unconfirmed on a non-2xx response', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: false,
+      json: async () => ({ error: 'failed' }),
+    });
+
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(settleUnreadAckSpy).toHaveBeenCalledWith('thread-A', false);
   });
 });

@@ -47,6 +47,7 @@ function createMockStoreState() {
     setViewMode: vi.fn(),
     clearUnread: mockClearUnread,
     confirmUnreadAck: vi.fn(),
+    settleUnreadAck: vi.fn(),
     armUnreadSuppression: vi.fn(),
     splitPaneThreadIds: [],
     setSplitPaneThreadIds: vi.fn(),

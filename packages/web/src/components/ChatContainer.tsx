@@ -98,7 +98,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     setViewMode,
     isLoading: chatIsLoading,
     clearUnread,
-    confirmUnreadAck,
+    settleUnreadAck,
     armUnreadSuppression,
     rightPanelMode,
     workspaceMode,
@@ -118,7 +118,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       setViewMode: s.setViewMode,
       isLoading: s.isLoading,
       clearUnread: s.clearUnread,
-      confirmUnreadAck: s.confirmUnreadAck,
+      settleUnreadAck: s.settleUnreadAck,
       armUnreadSuppression: s.armUnreadSuppression,
       rightPanelMode: s.rightPanelMode,
       workspaceMode: s.workspaceMode,
@@ -835,19 +835,18 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       body: '{}',
     })
       .then(async (res) => {
-        // #1304 P2: Always confirm on res.ok to balance armUnreadSuppression's
-        // pending count. confirmUnreadAck only manages suppression lifecycle
-        // (decrement count → release Infinity when 0); it does NOT clear the
-        // badge. Fix 1 makes the projection return 0 for stale cursors, so
-        // releasing suppression is safe. Gating confirm on caughtUp would leak
-        // the count for persistently stale threads (the exact target of #1304).
-        if (!res.ok) return;
-        confirmUnreadAck(threadId);
+        if (!res.ok) {
+          settleUnreadAck(threadId, false);
+          return;
+        }
+        const payload = (await res.json()) as { caughtUp?: unknown };
+        settleUnreadAck(threadId, payload.caughtUp === true);
       })
       .catch((err) => {
+        settleUnreadAck(threadId, false);
         console.debug('[F069] read ack failed:', err);
       });
-  }, [threadId, _messageCount, confirmUnreadAck, armUnreadSuppression]);
+  }, [threadId, _messageCount, settleUnreadAck, armUnreadSuppression]);
 
   const handleStop = useCallback(
     (overrideThreadId?: unknown) => {

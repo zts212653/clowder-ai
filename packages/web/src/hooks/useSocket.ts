@@ -688,7 +688,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
                   useChatStore.getState().removeActiveInvocation(key);
                 }
               }
-              useChatStore.getState().addActiveInvocation(invId, cats[i]!, data.mode);
+              // Preserve the first-seen startedAt when re-registering an
+              // existing key (spawn_started may have registered it earlier);
+              // re-stamping would restart execution timing.
+              useChatStore.getState().addActiveInvocation(invId, cats[i]!, data.mode, cur[invId]?.startedAt);
             }
           }
           return;
@@ -710,7 +713,14 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
                   store.removeThreadActiveInvocation(data.threadId, key);
                 }
               }
-              store.addThreadActiveInvocation(data.threadId, invId, cats[i]!, data.mode);
+              // Preserve the first-seen startedAt on same-key re-registration.
+              store.addThreadActiveInvocation(
+                data.threadId,
+                invId,
+                cats[i]!,
+                data.mode,
+                threadState.activeInvocations[invId]?.startedAt,
+              );
             }
           } else {
             store.setThreadHasActiveInvocation(data.threadId, true);
@@ -735,6 +745,24 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         for (const catId of cats) {
           useChatStore.getState().setCatStatus(catId, 'spawning');
         }
+        // Register exact invocation slots at spawn time so the pending-bubble
+        // projection renders immediately. intent_mode is deferred to the first
+        // CLI event (#768), so without this the chat area stays blank while the
+        // status bar already shows the cat running (targetCats fallback).
+        // Same fan-out key convention as intent_mode. On duplicate
+        // spawn_started (or a slot already refined by intent_mode), preserve
+        // the existing mode/startedAt — re-stamping startedAt would restart
+        // execution timing and shift the stale watchdog.
+        if (data.invocationId) {
+          const cur = useChatStore.getState().activeInvocations;
+          for (let i = 0; i < cats.length; i++) {
+            const invId = i === 0 ? data.invocationId : `${data.invocationId}-${cats[i]}`;
+            const existing = cur[invId];
+            useChatStore
+              .getState()
+              .addActiveInvocation(invId, cats[i]!, existing?.mode ?? 'execute', existing?.startedAt);
+          }
+        }
         return;
       }
 
@@ -744,6 +772,23 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         store.setThreadLoading(data.threadId, true);
         store.setThreadHasActiveInvocation(data.threadId, true);
         store.setThreadTargetCats(data.threadId, data.targetCats ?? []);
+        // Same reasoning as the active path: exact slots let the background
+        // thread project pending bubbles before intent_mode arrives.
+        if (data.invocationId) {
+          const cats = data.targetCats ?? [];
+          const threadActive = store.getThreadState(data.threadId).activeInvocations;
+          for (let i = 0; i < cats.length; i++) {
+            const invId = i === 0 ? data.invocationId : `${data.invocationId}-${cats[i]}`;
+            const existing = threadActive[invId];
+            store.addThreadActiveInvocation(
+              data.threadId,
+              invId,
+              cats[i]!,
+              existing?.mode ?? 'execute',
+              existing?.startedAt,
+            );
+          }
+        }
       }
     });
 

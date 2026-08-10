@@ -49,6 +49,7 @@ import { F225ApprovalAdapter } from './domains/approval-hub/adapters/F225Approva
 import { F231ApprovalAdapter } from './domains/approval-hub/adapters/F231ApprovalAdapter.js';
 import { F260ApprovalAdapter } from './domains/approval-hub/adapters/F260ApprovalAdapter.js';
 import { F276ApprovalAdapter } from './domains/approval-hub/adapters/F276ApprovalAdapter.js';
+import { F292ApprovalAdapter } from './domains/approval-hub/adapters/F292ApprovalAdapter.js';
 import { createDispatchProposalStore } from './domains/approval-hub/stores/factories/DispatchProposalStoreFactory.js';
 import { createEntityProposalStore } from './domains/approval-hub/stores/factories/EntityProposalStoreFactory.js';
 import { RedisWaitTerminationStore } from './domains/ball-custody/RedisWaitTerminationStore.js';
@@ -744,6 +745,7 @@ async function main(): Promise<void> {
     | undefined;
   // F233 Phase B (B2): ball-custody ingest（fire-and-forget 旁路写球权事件，注入 AgentRouter）
   let ballCustodyIngest: import('./domains/ball-custody/BallCustodyIngest.js').BallCustodyIngest | undefined;
+  let ballCustodyProjector: import('./domains/ball-custody/BallCustodyProjector.js').BallCustodyProjector | undefined;
   let ballCustodyProjectionStore:
     | import('./domains/ball-custody/BallCustodyProjectionStore.js').IBallCustodyProjectionStore
     | undefined;
@@ -856,7 +858,7 @@ async function main(): Promise<void> {
     ]);
     ballCustodyEventLog = new bcMod.RedisBallCustodyEventLog(redis);
     ballCustodyProjectionStore = new bcStoreMod.RedisBallCustodyProjectionStore(redis);
-    const ballCustodyProjector = new bcProjMod.BallCustodyProjector(ballCustodyEventLog, ballCustodyProjectionStore);
+    ballCustodyProjector = new bcProjMod.BallCustodyProjector(ballCustodyEventLog, ballCustodyProjectionStore);
     ballCustodyIngest = new bcIngestMod.BallCustodyIngest(ballCustodyEventLog, ballCustodyProjector);
     app.log.info('[api] F233 Phase B: ball-custody ingest initialized');
   }
@@ -3667,6 +3669,53 @@ async function main(): Promise<void> {
   const waitLifecycleHolder: {
     current?: import('./domains/github-signals/GitHubWaitLifecycleService.js').GitHubWaitLifecycleService;
   } = {};
+  let managedHoldDispositionService:
+    | import('./domains/ball-custody/ManagedHoldDispositionService.js').ManagedHoldDispositionService
+    | undefined;
+  let a2aDispatchDispositionService:
+    | import('./domains/ball-custody/A2ADispatchDispositionService.js').A2ADispatchDispositionService
+    | undefined;
+  if (ballCustodyIngest && ballCustodyEventLog && ballCustodyProjectionStore) {
+    const [{ ManagedHoldReceiptService }, { ManagedHoldDispositionService }, { A2ADispatchDispositionService }] =
+      await Promise.all([
+        import('./domains/ball-custody/ManagedHoldReceiptService.js'),
+        import('./domains/ball-custody/ManagedHoldDispositionService.js'),
+        import('./domains/ball-custody/A2ADispatchDispositionService.js'),
+      ]);
+    const receiptService = new ManagedHoldReceiptService({
+      queue: invocationQueue,
+      messageStore,
+      coordinator: queueCustodyCoordinator,
+      onSettled: ({ threadId, sourceMessageId }) => {
+        socketManager?.broadcastToRoom(`thread:${threadId}`, 'message_receipt_updated', {
+          threadId,
+          messageId: sourceMessageId,
+        });
+      },
+    });
+    managedHoldDispositionService = new ManagedHoldDispositionService({
+      registry,
+      dynamicTaskStore,
+      messageStore,
+      ballCustodyEventLog,
+      ballCustodyProjectionStore,
+      ballCustody: ballCustodyIngest,
+      receiptService,
+      ...(ballCustodyProjector
+        ? { repairProjection: (subjectKey: string) => ballCustodyProjector!.rebuild(subjectKey) }
+        : {}),
+    });
+    a2aDispatchDispositionService = new A2ADispatchDispositionService({
+      registry,
+      messageStore,
+      ballCustodyEventLog,
+      ballCustodyProjectionStore,
+      ballCustody: ballCustodyIngest,
+      ...(ballCustodyProjector
+        ? { repairProjection: (subjectKey: string) => ballCustodyProjector!.rebuild(subjectKey) }
+        : {}),
+    });
+  }
   const callbackOpts = {
     registry,
     agentKeyRegistry,
@@ -3736,6 +3785,8 @@ async function main(): Promise<void> {
       threadStore,
       taskStore,
       invocationRecordStore,
+      ...(managedHoldDispositionService ? { managedHoldDispositionService } : {}),
+      ...(a2aDispatchDispositionService ? { a2aDispatchDispositionService } : {}),
       ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
       onHoldBallCancelFeedback: (input) => {
         void import('./domains/cats/services/frustration/FrustrationDetector.js')
@@ -3923,7 +3974,21 @@ async function main(): Promise<void> {
     socketManager,
     onProposalReject: (input) => onProposalReject({ ...input, proposalType: 'session_handoff' }),
   });
-  // F246: Approval Hub — unified operator approval center (query aggregation over F128 + F225 + F193 + F231)
+  const {
+    LarkCliFeishuSourceResolver,
+    MeetingIntakeActionService,
+    MeetingIntakeService,
+    MemoryMeetingIntakeStore,
+    RedisMeetingIntakeStore,
+    RedisSourceAccessLeaseStore,
+    SourceAccessLeaseService,
+    SourceResolverRegistry,
+    ThreadDestinationAuthority,
+    ThreadMeetingArtifactDispatcher,
+  } = await import('./domains/signal-intake/index.js');
+  const meetingIntakeStore = redis ? new RedisMeetingIntakeStore(redis) : new MemoryMeetingIntakeStore();
+
+  // F246: Approval Hub — unified operator approval center, including F292 event-origin intake.
   const approvalProducerRegistry = new ApprovalProducerRegistry({
     F128: { adapter: new F128ApprovalAdapter(proposalStore) },
     F139: { adapter: new F139ApprovalAdapter(scheduleMutationProposalStore) },
@@ -3932,6 +3997,7 @@ async function main(): Promise<void> {
     F225: { adapter: new F225ApprovalAdapter(handoffProposalStore) },
     F231: { adapter: new F231ApprovalAdapter(profileUpdateProposalStore) },
     F276: { adapter: new F276ApprovalAdapter(personMemoryStore) },
+    F292: { adapter: new F292ApprovalAdapter(meetingIntakeStore) },
     F260: {
       adapter: new F260ApprovalAdapter(entityProposalStore, (proposal) => {
         if (!memoryServices.evidenceStore.inspectEntityConflict) {
@@ -3944,6 +4010,36 @@ async function main(): Promise<void> {
       }),
     },
   });
+  // F292 PR2: durable Host-owned MeetingIntake truth and recovery surface.
+  if (redis) {
+    const { registerMeetingIntakeRoutes } = await import('./routes/meeting-intake-routes.js');
+    const destinations = new ThreadDestinationAuthority(threadStore);
+    const meetingService = new MeetingIntakeService(meetingIntakeStore, destinations);
+    const sourceResolvers = new SourceResolverRegistry();
+    sourceResolvers.register(new LarkCliFeishuSourceResolver());
+    const sourceAccess = new SourceAccessLeaseService({
+      intakes: meetingIntakeStore,
+      leases: new RedisSourceAccessLeaseStore(redis),
+      resolvers: sourceResolvers,
+    });
+    const actions = new MeetingIntakeActionService({
+      store: meetingIntakeStore,
+      meeting: meetingService,
+      sources: sourceAccess,
+      dispatcher: new ThreadMeetingArtifactDispatcher({
+        threadStore,
+        messageStore,
+        invocationQueue,
+        queueProcessor,
+      }),
+    });
+    registerMeetingIntakeRoutes(app, {
+      store: meetingIntakeStore,
+      service: meetingService,
+      actions,
+    });
+  }
+
   await app.register(approvalHubRoutes, {
     registry: approvalProducerRegistry,
   });
@@ -5181,6 +5277,17 @@ async function main(): Promise<void> {
       taskRunner: taskRunnerV2,
       invocationRecordStore,
       getInvokeTrigger: () => invokeTrigger,
+      getEventCarrier: async ({ threadId, catId, messageId }) => {
+        const message = await messageStore.getById(messageId);
+        const custody = message?.queueCustody;
+        if (!message || message.threadId !== threadId || !custody) return { state: 'missing' as const };
+        const outcome = custody.targetOutcomeByCatId?.[catId];
+        if (custody.handledByCatIds.includes(catId as CatId) && outcome) {
+          return { state: 'handled' as const, invocationId: outcome.invocationId };
+        }
+        if (custody.pendingTargetCats.includes(catId as CatId)) return { state: 'pending' as const };
+        return { state: 'missing' as const };
+      },
     });
     (callbackOpts.holdBallDeps as unknown as Record<string, unknown>).managedCommandWakeRecovery =
       managedCommandWakeRecovery;

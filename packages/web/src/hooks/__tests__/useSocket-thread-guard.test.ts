@@ -55,14 +55,30 @@ const mockSetThreadTargetCats = vi.fn();
 const mockReplaceThreadTargetCats = vi.fn();
 const mockUpdateThreadCatStatus = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
-const mockAddActiveInvocation = vi.fn();
+// Stateful slot records so spawn_started/intent_mode registration behavior
+// (startedAt preservation, slot-count stability) can be asserted through the
+// real handler code, mimicking chatStore's `startedAt ?? Date.now()` write.
+const mockActiveInvocations: Record<string, { catId: string; mode: string; startedAt?: number }> = {};
+const mockThreadActiveInvocations: Record<
+  string,
+  Record<string, { catId: string; mode: string; startedAt?: number }>
+> = {};
+const mockAddActiveInvocation = vi.fn(
+  (threadId: string, invId: string, catId: string, mode: string, startedAt?: number) => {
+    (mockThreadActiveInvocations[threadId] ??= {})[invId] = { catId, mode, startedAt: startedAt ?? Date.now() };
+  },
+);
+const mockAddFlatActiveInvocation = vi.fn((invId: string, catId: string, mode: string, startedAt?: number) => {
+  mockActiveInvocations[invId] = { catId, mode, startedAt: startedAt ?? Date.now() };
+});
 const mockSetCatStatus = vi.fn();
-const mockRemoveActiveInvocation = vi.fn();
+const mockRemoveActiveInvocation = vi.fn((invId: string) => {
+  delete mockActiveInvocations[invId];
+});
 const mockAddToast = vi.fn();
 const mockThreadQueues = new Map<string, unknown[]>();
 const mockKnownThreadIds = new Set(['thread-A', 'thread-B', 'thread-C']);
 const mockGetThreadState = vi.fn((threadId: string) => {
-  void threadId;
   return {
     messages: [],
     queue: [] as Array<{ id: string }>,
@@ -74,6 +90,7 @@ const mockGetThreadState = vi.fn((threadId: string) => {
     targetCats: [],
     catStatuses: {},
     catInvocations: {},
+    activeInvocations: mockThreadActiveInvocations[threadId] ?? {},
     currentGame: null,
 
     unreadCount: 0,
@@ -107,10 +124,10 @@ vi.mock('@/stores/chatStore', () => {
     clearThreadActiveInvocation: mockClearThreadActiveInvocation,
     clearThreadCatStatuses: vi.fn(),
     addThreadActiveInvocation: mockAddActiveInvocation,
-    addActiveInvocation: vi.fn(),
+    addActiveInvocation: mockAddFlatActiveInvocation,
     removeActiveInvocation: mockRemoveActiveInvocation,
     setCatStatus: mockSetCatStatus,
-    activeInvocations: {} as Record<string, { catId: string; mode: string }>,
+    activeInvocations: mockActiveInvocations,
     getThreadState: mockGetThreadState,
   });
   const useChatStore = ((selector?: (state: ReturnType<typeof getState>) => unknown) =>
@@ -223,9 +240,13 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     mockUpdateThreadCatStatus.mockClear();
     mockClearThreadActiveInvocation.mockClear();
     mockAddActiveInvocation.mockClear();
+    mockAddFlatActiveInvocation.mockClear();
+    mockRemoveActiveInvocation.mockClear();
+    for (const key of Object.keys(mockActiveInvocations)) delete mockActiveInvocations[key];
+    for (const key of Object.keys(mockThreadActiveInvocations)) delete mockThreadActiveInvocations[key];
     mockAddToast.mockClear();
     mockGetThreadState.mockReset();
-    mockGetThreadState.mockImplementation(() => ({
+    mockGetThreadState.mockImplementation((threadId: string) => ({
       messages: [],
       queue: [],
       isLoading: false,
@@ -236,6 +257,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
+      activeInvocations: mockThreadActiveInvocations[threadId] ?? {},
       currentGame: null,
       unreadCount: 0,
       lastActivity: 0,
@@ -616,6 +638,126 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
 
     expect(onSpawnStarted).toHaveBeenCalledTimes(1);
     expect(onSpawnStarted.mock.calls[0]?.[0]).toMatchObject({ threadId: 'thread-B' });
+  });
+
+  it('spawn_started on active thread registers exact invocation slots (pending bubble before intent_mode)', () => {
+    // Blank-chat regression: intent_mode is deferred to the first CLI event (#768),
+    // so without exact slots at spawn time the pending-bubble projection renders
+    // nothing while the status bar already shows the cat running.
+    const onSpawnStarted = vi.fn();
+    const callbacks: SocketCallbacks = {
+      onMessage: vi.fn(),
+      onSpawnStarted,
+    };
+
+    mockStoreCurrentThreadId = 'thread-A';
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    act(() => {
+      simulateServerEvent('spawn_started', {
+        threadId: 'thread-A',
+        targetCats: ['opus', 'kimi'],
+        invocationId: 'inv-1',
+      });
+    });
+
+    // Same fan-out key convention as intent_mode: first cat gets the parent id,
+    // subsequent cats get `${invocationId}-${catId}`.
+    expect(mockAddFlatActiveInvocation).toHaveBeenCalledWith('inv-1', 'opus', 'execute', undefined);
+    expect(mockAddFlatActiveInvocation).toHaveBeenCalledWith('inv-1-kimi', 'kimi', 'execute', undefined);
+    expect(Object.keys(mockActiveInvocations)).toHaveLength(2);
+  });
+
+  it('spawn_started on background thread registers thread-scoped exact invocation slots', () => {
+    const onSpawnStarted = vi.fn();
+    const callbacks: SocketCallbacks = {
+      onMessage: vi.fn(),
+      onSpawnStarted,
+    };
+
+    mockStoreCurrentThreadId = 'thread-A';
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    act(() => {
+      simulateServerEvent('spawn_started', {
+        threadId: 'thread-B',
+        targetCats: ['opus', 'kimi'],
+        invocationId: 'inv-1',
+      });
+    });
+
+    expect(mockAddActiveInvocation).toHaveBeenCalledWith('thread-B', 'inv-1', 'opus', 'execute', undefined);
+    expect(mockAddActiveInvocation).toHaveBeenCalledWith('thread-B', 'inv-1-kimi', 'kimi', 'execute', undefined);
+    expect(Object.keys(mockThreadActiveInvocations['thread-B'] ?? {})).toHaveLength(2);
+    // Background path must not fire the active-thread callback
+    expect(onSpawnStarted).not.toHaveBeenCalled();
+  });
+
+  it('duplicate spawn_started and later intent_mode preserve first startedAt and do not grow slots', () => {
+    // Lifecycle regression: addActiveInvocation re-stamps startedAt on every
+    // call (startedAt ?? Date.now()), so re-registration must explicitly carry
+    // the first-seen startedAt — otherwise execution timing resets when
+    // intent_mode arrives (~48s after spawn) and the stale watchdog shifts.
+    vi.useFakeTimers();
+    try {
+      const T0 = 1_800_000_000_000;
+      vi.setSystemTime(T0);
+
+      const callbacks: SocketCallbacks = {
+        onMessage: vi.fn(),
+        onSpawnStarted: vi.fn(),
+        onIntentMode: vi.fn(),
+      };
+
+      mockStoreCurrentThreadId = 'thread-A';
+      act(() => {
+        root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+      });
+
+      act(() => {
+        simulateServerEvent('spawn_started', {
+          threadId: 'thread-A',
+          targetCats: ['opus', 'kimi'],
+          invocationId: 'inv-1',
+        });
+      });
+      expect(mockActiveInvocations['inv-1']).toMatchObject({ catId: 'opus', startedAt: T0 });
+      expect(mockActiveInvocations['inv-1-kimi']).toMatchObject({ catId: 'kimi', startedAt: T0 });
+
+      // Duplicate spawn_started ~48s later (retry/double dispatch): no reset.
+      vi.setSystemTime(T0 + 48_000);
+      act(() => {
+        simulateServerEvent('spawn_started', {
+          threadId: 'thread-A',
+          targetCats: ['opus', 'kimi'],
+          invocationId: 'inv-1',
+        });
+      });
+      expect(mockActiveInvocations['inv-1']?.startedAt).toBe(T0);
+      expect(mockActiveInvocations['inv-1-kimi']?.startedAt).toBe(T0);
+      expect(Object.keys(mockActiveInvocations)).toHaveLength(2);
+
+      // intent_mode arriving with the first CLI event refines mode but must
+      // keep the original startedAt and the same two slots.
+      vi.setSystemTime(T0 + 49_000);
+      act(() => {
+        simulateServerEvent('intent_mode', {
+          threadId: 'thread-A',
+          mode: 'ideate',
+          targetCats: ['opus', 'kimi'],
+          invocationId: 'inv-1',
+        });
+      });
+      expect(mockActiveInvocations['inv-1']).toMatchObject({ catId: 'opus', mode: 'ideate', startedAt: T0 });
+      expect(mockActiveInvocations['inv-1-kimi']).toMatchObject({ catId: 'kimi', mode: 'ideate', startedAt: T0 });
+      expect(Object.keys(mockActiveInvocations)).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('route/store mismatch: non-text tool_use event is preserved via background path', async () => {
@@ -1375,6 +1517,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
+      activeInvocations: {},
       currentGame: null,
       unreadCount: 0,
       lastActivity: 0,
@@ -1409,6 +1552,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       targetCats: [],
       catStatuses: {},
       catInvocations: {},
+      activeInvocations: {},
       currentGame: null,
       unreadCount: 0,
       lastActivity: 0,

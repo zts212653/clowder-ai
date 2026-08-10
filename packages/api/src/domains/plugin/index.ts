@@ -1,3 +1,4 @@
+export * from './host-broker/index.js';
 export * from './host-inventory/index.js';
 export { PluginRegistry, resourceCapId } from './PluginRegistry.js';
 export type { ActivatePluginResult, ActivationResult, LimbAdapterFactory } from './PluginResourceActivator.js';

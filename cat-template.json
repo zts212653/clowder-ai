@@ -101,6 +101,7 @@
       "models": [
         "Gemini 3.1 Pro (High)",
         "Gemini 3.1 Pro (Low)",
+        "Gemini 3.6 Flash (High)",
         "Gemini 3.5 Flash (High)",
         "Claude Opus 4.6 (Thinking)"
       ]
@@ -659,7 +660,7 @@
       "id": "gemini35",
       "relationshipKey": "siamese",
       "catId": "gemini35",
-      "name": "暹罗猫 Gemini 3.5 Flash",
+      "name": "暹罗猫 Gemini 3.6 Flash",
       "displayName": "暹罗猫",
       "nickname": "烁烁",
       "avatar": "/avatars/gemini25.png",
@@ -667,8 +668,19 @@
         "primary": "#2563EB",
         "secondary": "#DBEAFE"
       },
-      "mentionPatterns": ["@gemini35", "@gemini-35", "@gemini3.5", "@flash", "@暹罗flash", "@暹罗gemini35"],
-      "roleDescription": "暹罗猫 Gemini 3.5 Flash，视觉设计和创意顾问",
+      "mentionPatterns": [
+        "@gemini35",
+        "@gemini-35",
+        "@gemini3.5",
+        "@gemini36",
+        "@gemini-36",
+        "@gemini3.6",
+        "@flash",
+        "@暹罗flash",
+        "@暹罗gemini35",
+        "@暹罗gemini36"
+      ],
+      "roleDescription": "暹罗猫 Gemini 3.6 Flash，视觉设计和创意顾问",
       "teamStrengths": "审美、前端设计风格、打破常规",
       "caution": "新猫加入还在测评；开发任务需要强 reviewer 守门",
       "defaultVariantId": "gemini35-default",
@@ -679,8 +691,8 @@
         {
           "id": "gemini35-default",
           "clientId": "google",
-          "variantLabel": "Gemini 3.5 Flash",
-          "defaultModel": "Gemini 3.5 Flash (High)",
+          "variantLabel": "Gemini 3.6 Flash",
+          "defaultModel": "Gemini 3.6 Flash (High)",
           "mcpSupport": true,
           "cli": {
             "command": "agy",

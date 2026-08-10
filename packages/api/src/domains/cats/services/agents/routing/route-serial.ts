@@ -100,6 +100,7 @@ import {
 import {
   compareTurnCustodyShadow,
   type TurnCustodyProjection,
+  type TurnCustodyWakeProvenance,
 } from '../../../../ball-custody/TurnCustodyProjectionService.js';
 import {
   buildA2ADispatchTurnCustodyWake,
@@ -203,8 +204,10 @@ import {
   explicitPromptForIncrementalContext,
   getService,
   getThreadBootcampMemberCount,
+  hydrateVisibleA2ATriggerPromptMessage,
   isUserFacingSystemInfoContent,
   judgmentSurfaceCueSeeds,
+  mergePersistedPromptMessages,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
   subjectSeenCueSeeds,
@@ -223,10 +226,27 @@ const log = createModuleLogger('route-serial');
 // (shared across serial + parallel strategies — see sharedCandidateTracker/sharedNudgeCooldown)
 
 const BALL_CUSTODY_INVOCATION_HEARTBEAT_MIN_INTERVAL_MS = 30_000;
-const TURN_CUSTODY_STOP_GATE_REMEDIAL_PROMPT =
-  '[F167 球权停止门] 本次唤醒携带的协议球尚未发生可验证状态迁移。\n' +
-  '请只完成一次与当前协议球匹配的结构化动作，不要重做或改写刚才的工作：完成候选、结构化传球、returnToPredecessor、hold_ball 或已注册的 eventWait。\n' +
-  '必须调用现有结构化工具；不要用纯文本 @、口头“持球”或礼貌 ACK 代替状态迁移。';
+export function buildTurnCustodyStopGateRemedialPrompt(wake: TurnCustodyWakeProvenance): string {
+  if (wake.kind === 'structured' && wake.protocol === 'hold') {
+    return (
+      '[F167 球权停止门] 当前 managed hold wake 尚未发生可验证状态迁移。\n' +
+      '若本次 wake 工作已经处理完成，只调用 cat_cafe_complete_managed_hold，并选择 handled 或 completed；工具会从当前 invocation 自动绑定 source message 与 task，不能手填 subject。\n' +
+      '若工作尚未结束，只使用与下一条件匹配的 hold_ball、已注册 eventWait 或结构化传球。不要用纯文本 @、礼貌 ACK、command exit、测试/merge truth 代替 disposition。'
+    );
+  }
+  if (wake.kind === 'structured' && wake.protocol === 'dispatch') {
+    return (
+      '[F167 球权停止门] 当前普通 A2A dispatch 尚未发生可验证状态迁移。\n' +
+      '若本次 A2A 工作已经处理完成，只调用 cat_cafe_complete_a2a_dispatch，并选择 handled 或 completed；工具会从当前 invocation 自动绑定 source message、前手与当前 holder，不能手填 subject。\n' +
+      '若工作尚未结束，只使用与下一条件匹配的 hold_ball、已注册 eventWait 或结构化传球。不要用纯文本 @、礼貌 ACK、command exit、测试/merge truth 代替 disposition。'
+    );
+  }
+  return (
+    '[F167 球权停止门] 本次唤醒携带的协议球尚未发生可验证状态迁移。\n' +
+    '请只完成一次与当前协议球匹配的结构化动作，不要重做或改写刚才的工作：完成候选、结构化传球、returnToPredecessor、hold_ball 或已注册的 eventWait。\n' +
+    '必须调用现有结构化工具；不要用纯文本 @、口头“持球”或礼貌 ACK 代替状态迁移。'
+  );
+}
 
 /**
  * F233 Phase B (B2): persist ball.handed at the receiver boundary.
@@ -928,6 +948,7 @@ export async function* routeSerial(
     while (index < worklist.length) {
       const catId = worklist[index]!;
       let stopGateRemedialAttempted = false;
+      let structuredDispositionMissingCode: string | undefined;
       // F-parallel-cancel: per-cat signal — canceling one cat skips ONLY that cat, not the
       // whole worklist. force-reset/cancelAll aborts every cat's controller, so all entries
       // skip = equivalent to stopping. Using the shared primaryController.signal made
@@ -985,6 +1006,13 @@ export async function* routeSerial(
         activeA2ATriggerMessage && !activeA2ATriggerMessage.deletedAt && !activeA2ATriggerMessage._tombstone
           ? activeA2ATriggerMessage.content
           : undefined;
+      const exactA2ATriggerPromptMessage = incrementalMode
+        ? await hydrateVisibleA2ATriggerPromptMessage(deps, streamReplyTo, threadId, catId, thinkingMode)
+        : undefined;
+      const persistedPromptMessagesForCat = mergePersistedPromptMessages(
+        options.persistedPromptMessages,
+        exactA2ATriggerPromptMessage,
+      );
       // F193 AC-B2: structured cross-thread reply hint hydrated from trigger message.
       // Closes Codex review P1 (砚砚 2026-05-08): worklist `a2aTriggerMessageId` map
       // only has entries for downstream A2A targets — initial target via the modern
@@ -1074,6 +1102,11 @@ export async function* routeSerial(
       if (deps.turnCustodyProjectionService) {
         turnCustodyProjection = await deps.turnCustodyProjectionService.open(turnCustodyWake);
       }
+      const structuredDispositionPrompt =
+        turnCustodyWake.kind === 'structured' &&
+        (turnCustodyWake.protocol === 'hold' || turnCustodyWake.protocol === 'dispatch')
+          ? buildTurnCustodyStopGateRemedialPrompt(turnCustodyWake)
+          : undefined;
       let turnCustodyShadowRecorded = false;
       let turnCustodyTerminalWitness: QueueTerminalConsumptionWitness | undefined;
       const hasNativeL0 = service.injectsL0Natively?.() ?? false;
@@ -1340,6 +1373,8 @@ export async function* routeSerial(
             effectiveMaxContextTokens: effectiveContextBudget,
             canonicalFeatureId: sopStageHint?.featureId,
             threadTitle: routeThread?.title ?? undefined,
+            cursorOverlay: options.cursorBoundaries?.get(catId as string),
+            exactA2ATriggerMessageId: streamReplyTo,
           },
         );
         deliveryBoundaryId = inc.boundaryId;
@@ -1408,7 +1443,7 @@ export async function* routeSerial(
           inc,
           message,
           currentUserMessageId,
-          options.persistedPromptMessages,
+          persistedPromptMessagesForCat,
         );
         explicitlyExposedMessageIds = explicitProjection.exposedMessageIds;
         if (explicitProjection.text) parts.push(explicitProjection.text);
@@ -1481,12 +1516,13 @@ export async function* routeSerial(
           deps.proactiveMemoryNudgeService?.finalize(preparedProactiveMemoryNudge);
         }
       }
+      if (structuredDispositionPrompt) {
+        prompt = `${prompt}\n\n---\n\n${structuredDispositionPrompt}`;
+      }
 
       const exactPromptMessageIds = collectExactPromptMessageIds(
         incrementalMode ? [] : (options.persistedPromptMessageIds ?? []),
-        incrementalMode
-          ? [a2aTriggerMessageId, streamReplyTo]
-          : [currentUserMessageId, a2aTriggerMessageId, streamReplyTo],
+        incrementalMode ? [] : [currentUserMessageId, a2aTriggerMessageId, streamReplyTo],
         incrementallyExposedMessageIds,
         explicitlyExposedMessageIds,
         options.freshnessSupplementRequiredMessageIds ?? [],
@@ -1522,6 +1558,7 @@ export async function* routeSerial(
       const pendingCallbackRoutingExits: CallbackContentRoutingExit[] = [];
       const confirmedCallbackRoutingGuardMentions = new Set<CatId>();
       const confirmedLocalCallbackRoutingMentions = new Set<CatId>();
+      const confirmedLocalCallbackRoutedTargets = new Set<CatId>();
       let confirmedCallbackRoutingGuardHasCoCreatorLineStartMention = false;
       let confirmedLocalCallbackRoutingHasCoCreatorLineStartMention = false;
       const emittedBallHandedCvoMessageIds = new Set<string>();
@@ -1749,6 +1786,13 @@ export async function* routeSerial(
         if (!confirmed || !exit) return undefined;
         for (const mention of exit.guardLineStartMentions) confirmedCallbackRoutingGuardMentions.add(mention);
         for (const mention of exit.localLineStartMentions) confirmedLocalCallbackRoutingMentions.add(mention);
+        if (exit.scope === 'local') {
+          // The callback already admitted this source/target through InvocationQueue or the
+          // legacy worklist. Never reinterpret the same persisted callback body as a fresh
+          // serial handoff after that carrier has already completed and disappeared from the
+          // live queue: that callback+text-scan fork caused the exact A→B duplicate dogfood.
+          for (const targetCatId of exit.targetCatIds) confirmedLocalCallbackRoutedTargets.add(targetCatId);
+        }
         if (exit.hasGuardCoCreatorLineStartMention) confirmedCallbackRoutingGuardHasCoCreatorLineStartMention = true;
         if (exit.hasLocalCoCreatorLineStartMention) confirmedLocalCallbackRoutingHasCoCreatorLineStartMention = true;
         return exit;
@@ -1756,9 +1800,10 @@ export async function* routeSerial(
       const getRoutingExitLineStartMentions = (textMentions: readonly CatId[] = []): CatId[] => [
         ...new Set<CatId>([...textMentions, ...confirmedCallbackRoutingGuardMentions]),
       ];
-      const getLocalRoutingLineStartMentions = (textMentions: readonly CatId[] = []): CatId[] => [
-        ...new Set<CatId>([...textMentions, ...confirmedLocalCallbackRoutingMentions]),
-      ];
+      const getLocalRoutingLineStartMentions = (textMentions: readonly CatId[] = []): CatId[] =>
+        [...new Set<CatId>([...textMentions, ...confirmedLocalCallbackRoutingMentions])].filter(
+          (targetCatId) => !confirmedLocalCallbackRoutedTargets.has(targetCatId),
+        );
       const hasRoutingExitCoCreatorLineStartMention = (content: string): boolean =>
         Boolean(
           (content ? detectUserMention(content) : false) || confirmedCallbackRoutingGuardHasCoCreatorLineStartMention,
@@ -2338,6 +2383,28 @@ export async function* routeSerial(
                 }
               : rawDecision;
           if (
+            turnCustodyWake.kind === 'structured' &&
+            turnCustodyWake.protocol === 'hold' &&
+            newDecision.transitionObserved &&
+            newDecision.structuredTransitionKind !== 'hold_dispositioned'
+          ) {
+            const transition = verifiedEventWait
+              ? 'event_wait'
+              : newDecision.structuredTransitionKind === 'held'
+                ? 'reheld'
+                : newDecision.structuredTransitionKind === 'handed'
+                  ? 'transferred'
+                  : undefined;
+            if (transition) {
+              turnCustodyTerminalWitness = {
+                kind: 'managed_hold_continued',
+                sourceMessageId: turnCustodyWake.sourceMessageId,
+                taskId: turnCustodyWake.taskId,
+                transition,
+              };
+            }
+          }
+          if (
             newDecision.state === 'covered_empty' &&
             turnCustodyWake.kind === 'non_obligation' &&
             turnCustodyWake.source === 'coordination_terminal'
@@ -2433,6 +2500,23 @@ export async function* routeSerial(
             return;
           }
 
+          // The exact F254 body exposure belongs to the invocation that just
+          // finished. A routing-guard child has different callback credentials,
+          // so omission must fail this attempt and restore the same Queue carrier
+          // instead of letting a second invocation impersonate its disposition.
+          if (
+            turnCustodyWake.kind === 'structured' &&
+            (turnCustodyWake.protocol === 'hold' || turnCustodyWake.protocol === 'dispatch')
+          ) {
+            stopGateRemedialAttempted = true;
+            structuredDispositionMissingCode =
+              turnCustodyWake.protocol === 'hold'
+                ? 'managed_hold_disposition_missing'
+                : 'a2a_dispatch_disposition_missing';
+            await appendStopGateFailureNotice();
+            return;
+          }
+
           const originalOwnInvocationId = ownInvocationId;
           const originalDoneMsg = doneMsg;
           const originalTextContent = textContent;
@@ -2512,7 +2596,7 @@ export async function* routeSerial(
         for await (const remedialMsg of invokeSingleCat(deps.invocationDeps, {
           catId,
           service,
-          prompt: TURN_CUSTODY_STOP_GATE_REMEDIAL_PROMPT,
+          prompt: buildTurnCustodyStopGateRemedialPrompt(turnCustodyWake),
           userId,
           ownerAuthProvenance,
           threadId,
@@ -4696,6 +4780,7 @@ export async function* routeSerial(
           ...ownStampedDone,
           ...(mentionsUser ? { mentionsUser } : {}),
           ...(turnCustodyTerminalWitness ? { turnCustodyTerminalWitness } : {}),
+          ...(structuredDispositionMissingCode ? { errorCode: structuredDispositionMissingCode } : {}),
           isFinal,
         });
         activeTrackedA2ASlots.delete(catId);

@@ -1221,7 +1221,7 @@
     {
       "id": "F202",
       "name": "Plugin Framework — local discovery, config, resource activation, and schedule resources",
-      "status": "in-progress (Phase 1 merged 2026-05-31 via cat-cafe#1999; Phase 2 scoped 2026-06-08) | **Owner**: community @mindfn + Clowder AI maintainers | **Priority**: P1",
+      "status": "in-progress (local Phase 1 merged; K-2A merged; K-2B production-transport state machine implemented dormant) | **Owner**: community @mindfn + Clowder AI maintainers | **Priority**: P1",
       "file": "F202-plugin-framework.md"
     },
     {
@@ -1647,7 +1647,7 @@
     {
       "id": "F279",
       "name": "Workspace Listen Mode — 正文听读与可复用音频缓存",
-      "status": "in-progress / Phase A passed; Phase B/C review delta awaiting terminal re-review; F289 base dependency and real-TTS UAT pending",
+      "status": "in-progress / Phase A passed; Phase B/C exact-HEAD review approved; F289 base dependency and real-TTS UAT pending",
       "file": "F279-workspace-listen-mode.md"
     },
     {
@@ -1713,7 +1713,7 @@
     {
       "id": "F292",
       "name": "Feishu Meeting Intake Plugin — 会后产物不再靠人搬运",
-      "status": "spec / Architecture + Experience Design Gate",
+      "status": "implementation / Phase C Host path complete with dormant K-2B transport; Phase D remains blocked by Feishu package publication and external runtime activation",
       "file": "F292-feishu-meeting-intake-plugin.md"
     },
     {

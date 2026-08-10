@@ -4,6 +4,7 @@ import assert from 'node:assert';
 import { beforeEach, describe, it } from 'node:test';
 import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { InvocationRecordStore } from '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js';
+import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ConnectorInvokeTrigger } from '../dist/infrastructure/email/ConnectorInvokeTrigger.js';
 
 // ─── Mocks ───────────────────────────────────────────────────────
@@ -539,7 +540,14 @@ describe('ConnectorInvokeTrigger', () => {
     const trigger = createTrigger({
       messageStore: {
         getById: async (messageId) =>
-          messageId === 'msg-hold-complete' ? { source: { connector: 'hold-ball' } } : null,
+          messageId === 'msg-hold-complete'
+            ? {
+                source: {
+                  connector: 'hold-ball',
+                  meta: { taskId: 'task-hold-complete', threadId: 'thread-1', catId: 'opus', wakeWhen: true },
+                },
+              }
+            : null,
       },
     });
 
@@ -559,6 +567,8 @@ describe('ConnectorInvokeTrigger', () => {
       protocol: 'hold',
       subjectKey: 'ball:thread:thread-1',
       holderCatId: 'opus',
+      sourceMessageId: 'msg-hold-complete',
+      taskId: 'task-hold-complete',
     });
   });
 
@@ -2550,6 +2560,57 @@ describe('ConnectorInvokeTrigger', () => {
   // ── F185: thread-level busy gate (AC-1/AC-2) ──
 
   describe('F185: thread-level busy gate', () => {
+    it('managed event forceQueue creates one F254/F264 carrier even while idle', async () => {
+      const messageStore = new MessageStore();
+      const source = messageStore.append({
+        userId: 'scheduler',
+        catId: null,
+        content: '[定时任务] managed command completed',
+        mentions: [],
+        timestamp: 2_100,
+        threadId: 'thread-managed-event',
+        deliveryStatus: 'queued',
+        source: {
+          connector: 'hold-ball',
+          label: '持球通知',
+          meta: {
+            taskId: 'task-managed-event',
+            threadId: 'thread-managed-event',
+            catId: 'opus',
+            wakeWhen: true,
+          },
+        },
+      });
+      const autoExecuteCalls = [];
+      const queueProcessor = /** @type {any} */ ({
+        async tryAutoExecute(threadId) {
+          autoExecuteCalls.push(threadId);
+        },
+      });
+      const trigger = createTrigger({ messageStore, queueProcessor });
+      const args = [
+        'thread-managed-event',
+        /** @type {any} */ ('opus'),
+        'user-1',
+        source.content,
+        source.id,
+        undefined,
+        { sourceCategory: 'scheduled', forceQueue: true },
+      ];
+
+      assert.equal(await trigger.trigger(...args), 'enqueued');
+      assert.equal(await trigger.trigger(...args), 'enqueued');
+
+      const entries = queue.list('thread-managed-event', 'user-1');
+      assert.equal(entries.length, 1, 'duplicate delivery must reuse the exact source carrier');
+      assert.equal(entries[0].messageId, source.id);
+      assert.equal(entries[0].sourceCategory, 'scheduled');
+      assert.equal(messageStore.getById(source.id).queueCustody.entryId, entries[0].id);
+      assert.equal(routerMock.calls.length, 0, 'forceQueue never forks into direct admission');
+      assert.equal(recordMock.creates.length, 0);
+      assert.deepEqual(autoExecuteCalls, ['thread-managed-event', 'thread-managed-event']);
+    });
+
     it('force-reset suppression queues a late connector wake before direct admission', async () => {
       let tryStartCalls = 0;
       trackerMock.tracker.tryStartThread = () => {

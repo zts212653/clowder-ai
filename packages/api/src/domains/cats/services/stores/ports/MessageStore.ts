@@ -247,6 +247,13 @@ export interface StoredMessage {
       coordinationKey: 'minted-active-root' | 'minted-terminal-root' | 'action-active-root';
     };
     targetCats?: string[];
+    /** F292: Host-authored provenance for a data-only meeting artifact queued to a cat. */
+    meetingArtifact?: {
+      intakeId: string;
+      sourceHandle: string;
+      trust: 'untrusted_external';
+      instructionPolicy: 'data_only';
+    };
     freshness?:
       | PublishedFreshnessAnnotation
       | {

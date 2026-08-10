@@ -82,6 +82,44 @@ describe('MCP Callback Tools', () => {
     assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
   });
 
+  test('handleCompleteManagedHold exposes only the invocation-bound disposition input', async () => {
+    const { handleCompleteManagedHold } = await import('../dist/tools/callback-tools.js');
+    let capturedUrl;
+    let capturedOptions;
+    globalThis.fetch = async (url, options) => {
+      capturedUrl = url;
+      capturedOptions = options;
+      return { ok: true, json: async () => ({ outcome: 'applied' }) };
+    };
+
+    const result = await handleCompleteManagedHold({ disposition: 'completed' });
+
+    assert.equal(result.isError, undefined);
+    assert.ok(capturedUrl.endsWith('/api/callbacks/complete-managed-hold'));
+    assert.deepEqual(JSON.parse(capturedOptions.body), { disposition: 'completed' });
+    assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
+    assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
+  });
+
+  test('handleCompleteA2ADispatch exposes only the invocation-bound disposition input', async () => {
+    const { handleCompleteA2ADispatch } = await import('../dist/tools/callback-tools.js');
+    let capturedUrl;
+    let capturedOptions;
+    globalThis.fetch = async (url, options) => {
+      capturedUrl = url;
+      capturedOptions = options;
+      return { ok: true, json: async () => ({ outcome: 'applied' }) };
+    };
+
+    const result = await handleCompleteA2ADispatch({ disposition: 'handled' });
+
+    assert.equal(result.isError, undefined);
+    assert.ok(capturedUrl.endsWith('/api/callbacks/complete-a2a-dispatch'));
+    assert.deepEqual(JSON.parse(capturedOptions.body), { disposition: 'handled' });
+    assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
+    assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
+  });
+
   test('handleUpdateWorkflow forwards taskId for deterministic task-backed Mission Hub import', async () => {
     const { handleUpdateWorkflow } = await import('../dist/tools/callback-tools.js');
     let capturedUrl;

@@ -1,13 +1,13 @@
 ---
 feature_ids: [F290]
 related_features: [F044, F077, F128, F168, F195, F202, F232, F246, F254, F276, F277, F282, F287]
-topics: [ai-native-collaboration, multi-human, multi-agent, collective, cafe, channel, topic, rich-message, task, vote, team-memory]
+topics: [ai-native-collaboration, multi-human, multi-agent, collective, cafe, channel, topic, asset, annotation, rich-message, task, vote, team-memory]
 doc_kind: spec
 created: 2026-08-08
-description: "让多个独立 Café 在同一个 Collective 中长期交流、共同判断和执行；私人空间不被吞并，承诺、来源与团队记忆也不会掉线。"
+description: "让多个独立 Café 在同一个 Collective 中围绕对话、资产、工作与关系持续协同；私人空间不被吞并，承诺、来源与团队记忆也不会掉线。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-08-09T02:32:27Z
+description_updated_at: 2026-08-10T09:24:00Z
 ---
 
 # F290: AI-native Collective — 多人·多 Agent 共同世界
@@ -44,6 +44,32 @@ F290 因而不是“给 Chat 加几个团队按钮”，也不是一份最终会
 与工作；私人 Thread 仍然属于家里，值得公开的东西通过 Living Projection 生长；人不再搬运
 消息和上下文，猫也不被降成匿名工具。**
 
+## Product Thesis — 资产代谢与社会环
+
+Collective 的工作协同围绕**资产代谢**展开：对话是资产的重要孕育现场，资产是对话形成的
+可持续结晶，猫维持对话、资产、Work、证据与团队记忆之间的活连接。完整循环不是单向的
+“聊天变文件”，而是：
+
+```text
+对话 / 会议 / 外部事件
+→ 候选资产
+→ 阅读、批注、分歧与判断
+→ 被确认的版本
+→ Roadmap / Work
+→ 产物与证据
+→ 更新资产与团队记忆
+→ 触发下一轮对话
+```
+
+资产代谢不能独占 Collective 的全部定义。人、猫、Café、Bond 与 Membership 是主体和关系，
+不是资产；Channel、灵感公地继续承担共同在场、弱连接、关系生长和方向再对齐的**社会环**。
+缺少资产代谢，组织热闹但失忆；缺少社会环，组织高效但没有温度。
+
+`Asset / Artifact` 是内部统一信封，不是要求用户学习的总称。纪要、方案、Decision、Roadmap、
+PR、代码、数据、Demo、视频和作品保留各自的人类语言与动作；它们共享 id、owner、lineage、
+版本、权限、批注面及与 Work / 证据的关系，并按来源与生长关系组织，而不是退化为按文件类型
+分文件夹的网盘。
+
 ## Current State / 立项基线
 
 截至 2026-08-08：
@@ -67,6 +93,7 @@ F290 因而不是“给 Chat 加几个团队按钮”，也不是一份最终会
 | **Thread** | Café 内私人生活/思考房间，或有边界的工作上下文 | 默认组织资产 |
 | **Topic** | Channel 某条根消息展开的局部讨论视角 | 新的主内容世界、另一条私人 Thread |
 | **Living Projection** | 从私人来源发布出的、可持续生长且保留 lineage 的公共生命 | 私人原文复制或一次性贴文 |
+| **Asset / Artifact** | 可被阅读、批注、修订、引用、体验或继续接棒的版本化共同对象 | 文件附件、静态网盘条目或无来源摘要 |
 | **Work / Task** | 从表达中形成、具备责任和状态的承诺对象 | 任意消息自动任务化 |
 | **Vote / Decision** | Collective 的轻量意见聚合或有约束力判断；二者必须显式区分 | reaction 数量、猫替人拍板 |
 
@@ -214,6 +241,17 @@ Vote 是 Collective 的一等互动，不是当前高摩擦表格的复制：
    authority、provenance 与结果去向；
 5. 有约束力的结果可以生成 Decision / Roadmap 节点，不能靠 reaction 数量暗中升级。
 
+### Two collaboration entries, one lineage
+
+Channel 回复和资产批注都是协同，但不合并成两套聊天真相：
+
+- **Channel 回复**锚定共同现场与根消息，适合发散、交换看法和召集参与者，回答“大家怎么看”；
+- **资产批注**锚定 asset id、版本和具体位置，适合质疑、补证据与请求修改，回答“这里哪里要变”；
+- Channel 回复可以引用资产；资产批注可以展开 Topic；二者通过 exact lineage 相连，不复制正文、
+  不静默互相升级；
+- 猫可以恢复外部聊天反馈与资产的关系、提出候选修改，但没有 authority 时不能直接改写 canonical
+  版本或把评论冒充组织决定。
+
 ### Reactions and identity cards
 
 - Reaction 是低成本的社会信号（看见、共鸣、好笑、担心），不等于批准、认领或投票。
@@ -256,6 +294,18 @@ operator 2026-08-09 指定（`0001786287171493-000047`，原话"权限控制的�
 接 Open Questions 6 的权限矩阵与 AC-B1 撤权契约。在 Gate 1–3（主界面 / 接入 / 灵感孵化）
 之后展开；此处登记防丢，未展开前不冒充已设计。
 
+### J7 — 真实 Markdown 分享触发资产协同
+
+You 把一篇真实 Markdown 分享给同事 → 同事在外部聊天中给出点评 → 该点评以原始来源挂回
+Markdown，而不伪造成当时就在资产页发生的批注 → 后续参与者既可以在 Channel 围绕整件事回复，
+也可以在资产页对具体段落批注 → 批注可展开 Topic → 猫关联它影响的既有判断并提出候选修改 →
+有 authority 的人选择接受、部分接受或保留分歧 → 新版本说明“什么变了、为什么”，原点评、旧版本
+与讨论仍可追溯。
+
+这条旅程按同一个 Gate 分两段验证：第一段只做到“打开资产 → 分享到 Channel → 位置批注 →
+批注长出 Topic”；第二段再验证“猫识别影响 → 提议修改 → 人确认 → 新版本”。分段是降低体验
+判题密度，不是把后半环降级为可选尾巴。
+
 ## Requirements Checklist
 
 | ID | 需求 | Acceptance Criteria | 当前状态 |
@@ -270,6 +320,7 @@ operator 2026-08-09 指定（`0001786287171493-000047`，原话"权限控制的�
 | R8 | 私人来源、身份、authority 与 public projection 边界可解释 | AC-B1, AC-C1 | [ ] |
 | R9 | 多 Café 离线、送达、唤醒、执行和回流不混为一个状态 | AC-C1 | [ ] |
 | R10 | 用 You + 吴浪 / 社区真实工作完成首条终态 dogfood | AC-D1 | [ ] |
+| R11 | 同一真实 Markdown 同时支持 Channel 回复与版本/位置锚定批注，且保持一条 lineage | AC-A5 | [ ] |
 
 ### Coverage check
 
@@ -292,6 +343,9 @@ operator 2026-08-09 指定（`0001786287171493-000047`，原话"权限控制的�
   不混淆。
 - [ ] **AC-A4**：Gate 的每个关键状态有 fixture、交互说明与截图；operator 反馈逐条回写 Design Gate，
   不靠聊天记忆维护 UI 真相。
+- [ ] **AC-A5**：用 2026-08-10 真实 Markdown 分享事件做确定性 fixture，第一段可重放“打开资产 →
+  分享 → 批注 → Topic”，并保留“点评原本发生在外部聊天”的事实来源；第二段另行验证候选修改、
+  authority、版本与回流，不用导览文本冒充已完成行为。
 
 ### Phase B — Stable object and trust contracts
 
@@ -347,6 +401,8 @@ operator 2026-08-09 指定（`0001786287171493-000047`，原话"权限控制的�
 | KD-10 | `clowder-ai` 是伞牌，Café + Bond 是世界观核心；Collective / Channel / Thread / Living Projection 是稳定对象，空间隐喻留在体验层 | `0001786161775831-000144-aa0fa126`, `0001786162432854-000155-b7e2d51e`, `0001786162631496-000157-1d48831a` |
 | KD-11 | 表达允许沉默；请求不能假装被接住；承诺不允许失踪 | vision §19.17 |
 | KD-12 | Café 与 Collective 通过双向望窗互相可见：说话自由、窗看摘要、签字类动作进入所属现场完成 | `0001786180420333-000365-bf6bdb75`, `0001786237918673-000404-85ef0313` |
+| KD-13 | Collective 的工作协同围绕资产代谢展开，同时保留不被资产化的社会环；资产是内部统一信封，不是强迫用户学习的 UI 总称 | `0001786346949390-000016-6d774788`, `0001786351158315-000093-88552f5b` |
+| KD-14 | Channel 回复与资产批注是两种协同入口、一条 lineage；外部反馈挂回资产时保留真实发生位置，不伪造历史 | `0001786351789923-000108-89bf3d37`, `0001786353602673-000148-fb73f15f` |
 
 ## Open Questions / Design Gate
 
@@ -371,6 +427,24 @@ operator 2026-08-09 指定（`0001786287171493-000047`，原话"权限控制的�
 11. 猫运行状态的可见性：猫正在启动 / 思考 / 执行时，人看到什么——防"不知道是猫在跑
     还是系统挂了"的黑盒焦虑（operator 同上消息；接联邦五层链的唤醒后半段与在场绿点；Raft
     左下角 agent 状态为参照；它是组织可观测性的微观版，也是黄挺可信度边界的 UI 面）。
+12. 批注原语：资产（纪要、文稿、产物）上的位置锚定评论——Agent 时代批注不只给人看，
+    也是**资产上的期待入口**（批注可为表达 / 提问 / 请求，猫接住后按期待契约处理）；它与
+    Topic（消息的讨论分支）的关系与皮肤差异（外部企业用户一手需求，
+    `0001786346182279-000000`）。
+13. 团队记忆的人可浏览前台：事实记忆（已确认决定）与产物的"结论性信息同步空间"——
+    团队记忆不能只是猫的检索后端，人要能直接逛、获取（如"火山/阿里聊完的文字稿"）、
+    批注、追问下一步（同上外部需求；与灵感公地 / 作品并列的对象空间候选，落位待 Gate）。
+    **答案原型已被 operator 点破（`0001786346947339-000006`）：把 Clowder AI 单 Café 版的
+    docs 真相源纪律产品化**——VISION / features / decisions / discussions + git lineage +
+    记忆索引，就是这个前台的手工版；协议同构模式的资产版（单 Café 已验证 → 联邦升维）。
+    资产类型系统：Artifact 为基类，doc / deck / PR / video / code / pipeline / dataset 为
+    子类型，共享 id / owner / lineage / 版本 / 权限 / 批注面接口，各有渲染器与动作集；
+    **Decision 本身也是资产**（家里的 ADR 即活样本）；资产库按 lineage 与 Work 挂靠组织，
+    不按文件类型分文件夹（那是网盘，不是团队记忆）。产品方向已由 KD-13/KD-14 确认；仍待
+    Gate 的是人类可见入口名称、默认落位、浏览密度以及与 Search / Needs Me 的关系。
+14. 场景严肃度谱系：对话主导（家庭 / 小团队的 Channel 中心）↔ 资产主导（企业的结论
+    空间中心）的默认视图权重可配置——"对话态不适合严肃协同场合"不是否定 Channel，而是
+    企业侧入口的默认权重不同（与成员密度谱系正交的第二根配置轴）。
 
 ## Human Disposition Feedback Contract
 
@@ -417,6 +491,7 @@ context; no stable user action exists yet for a proactive capability tip.`
 | `0001786241060409-000472-e26ba613` | Slack-like Topic / reaction / avatar / emoji 是 Channel 刚需 |
 | `0001786241554272-000488-e68a5284` | Topic 留右栏；Channel 必须继承 Thread 富内容能力 |
 | `0001786242747248-000502-77c148cd` | 人猫富消息同权、无弹窗 Task、低摩擦 Vote 与正式立项要求 |
+| `0001786346182279-000000-fc6491e5` | 首个外部企业用户一手需求（You 同事对真 demo 的反馈）："对话是过程、信息资产是结果、两个不同的空间"；对齐=核心场景；结论性信息同步空间 + 批注留言 + 资料库；"Agent 时代的 Google Docs 怎么设计"之问——验证现场/对象空间两类目的地的分离，新增 OQ12–14 |
 
 ### Documents
 

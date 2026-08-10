@@ -25,6 +25,16 @@ interface CoordinatorDeps {
   now?: () => number;
 }
 
+function isManagedHoldWakeMessage(message: StoredMessage): boolean {
+  const meta = message.source?.meta;
+  return (
+    message.source?.connector === 'hold-ball' &&
+    meta?.wakeWhen === true &&
+    typeof meta.taskId === 'string' &&
+    meta.taskId.length > 0
+  );
+}
+
 export interface QueueCustodyCompletionResult {
   handledTargetCats: string[];
   pendingTargetCats: string[];
@@ -795,6 +805,20 @@ export class QueuedMessageCustodyCoordinator {
     deliveredAt: number,
     outcomeByCatId?: Readonly<Record<string, QueueTargetOutcome>>,
   ): Promise<QueueCustodyCompletionResult> {
+    const message = await this.messageStore.getById(messageId);
+    if (message && isManagedHoldWakeMessage(message)) {
+      for (const catId of successfulTargetCats) {
+        const outcome = outcomeByCatId?.[catId];
+        const continuation = outcome?.consumption?.kind === 'managed_hold_continued' ? outcome.consumption : undefined;
+        if (
+          outcome?.disposition !== 'managed_hold_disposition' ||
+          (continuation !== undefined &&
+            (continuation.sourceMessageId !== messageId || continuation.taskId !== message.source?.meta?.taskId))
+        ) {
+          throw new Error('managed hold receipt requires its invocation-bound disposition');
+        }
+      }
+    }
     let completion: QueueCustodyCompletionResult = {
       handledTargetCats: [],
       pendingTargetCats: [],

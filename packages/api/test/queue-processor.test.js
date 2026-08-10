@@ -92,7 +92,8 @@ function enqueueEntry(queue, overrides = {}) {
 }
 
 function enqueueCustodiedEntry(queue, messageStore, overrides = {}) {
-  const entry = enqueueEntry(queue, overrides);
+  const { messageSource, ...entryOverrides } = overrides;
+  const entry = enqueueEntry(queue, entryOverrides);
   const message = messageStore.append({
     userId: entry.userId,
     catId: null,
@@ -102,6 +103,7 @@ function enqueueCustodiedEntry(queue, messageStore, overrides = {}) {
     threadId: entry.threadId,
     deliveryStatus: 'queued',
     queueCustody: createInitialQueuedMessageCustody(entry),
+    ...(messageSource ? { source: messageSource } : {}),
   });
   queue.backfillMessageId(entry.threadId, entry.userId, entry.id, message.id);
   return { entry, message };
@@ -1119,6 +1121,63 @@ describe('QueueProcessor', () => {
       });
     });
 
+    it('settles a managed hold carrier only from exact structured-continuation proof', async () => {
+      const durableStore = new MessageStore();
+      const seenAt = 1_752;
+      const durableDeps = stubDeps({
+        messageStore: durableStore,
+        router: {
+          routeExecution: mock.fn(async function* (...args) {
+            await args[6].onPromptMessagesExposed({
+              threadId: 't1',
+              userId: 'u1',
+              catId: 'opus',
+              invocationId: 'child-managed-rehold',
+              messageIds: [args[3]],
+              seenAt,
+            });
+            yield {
+              type: 'done',
+              catId: 'opus',
+              invocationId: 'child-managed-rehold',
+              turnCustodyTerminalWitness: {
+                kind: 'managed_hold_continued',
+                sourceMessageId: args[3],
+                taskId: 'task-managed-rehold',
+                transition: 'reheld',
+              },
+              timestamp: Date.now(),
+            };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+      });
+      durableDeps.queueCustodyCoordinator = new QueuedMessageCustodyCoordinator({ messageStore: durableStore });
+      const durableProcessor = new QueueProcessor(durableDeps);
+      const { message } = enqueueCustodiedEntry(durableDeps.queue, durableStore, {
+        source: 'connector',
+        sourceCategory: 'scheduled',
+        messageSource: {
+          connector: 'hold-ball',
+          label: '持球通知',
+          meta: { taskId: 'task-managed-rehold', threadId: 't1', catId: 'opus', wakeWhen: true },
+        },
+      });
+
+      const started = await durableProcessor.processNext('t1', 'u1');
+      assert.equal(started.started, true);
+      await waitFor(() => durableStore.getById(message.id)?.deliveryStatus === 'delivered');
+
+      const outcome = durableStore.getById(message.id).queueCustody.targetOutcomeByCatId.opus;
+      assert.equal(outcome.disposition, 'managed_hold_disposition');
+      assert.deepEqual(outcome.consumption, {
+        kind: 'managed_hold_continued',
+        sourceMessageId: message.id,
+        taskId: 'task-managed-rehold',
+        transition: 'reheld',
+      });
+    });
+
     it('persists exact child awakening before the cross-thread body is exposed', async () => {
       const durableStore = new MessageStore();
       let releaseExposure;
@@ -1464,7 +1523,15 @@ describe('QueueProcessor', () => {
       });
       durableDeps.queueCustodyCoordinator = new QueuedMessageCustodyCoordinator({ messageStore: durableStore });
       const durableProcessor = new QueueProcessor(durableDeps);
-      const { entry, message } = enqueueCustodiedEntry(durableDeps.queue, durableStore);
+      const { entry, message } = enqueueCustodiedEntry(durableDeps.queue, durableStore, {
+        source: 'connector',
+        sourceCategory: 'scheduled',
+        messageSource: {
+          connector: 'hold-ball',
+          label: '持球通知',
+          meta: { taskId: 'task-interrupted', threadId: 't1', catId: 'opus', wakeWhen: true },
+        },
+      });
       durableDeps.queue.markQueuedSeen('t1', 'u1', entry.id, 'opus', 'child-interrupted-read', 2_150);
       await durableDeps.queueCustodyCoordinator.persistEntry(durableDeps.queue.getEntrySnapshot('t1', 'u1', entry.id));
 
@@ -1509,7 +1576,15 @@ describe('QueueProcessor', () => {
       });
       durableDeps.queueCustodyCoordinator = new QueuedMessageCustodyCoordinator({ messageStore: durableStore });
       const durableProcessor = new QueueProcessor(durableDeps);
-      const { entry, message } = enqueueCustodiedEntry(durableDeps.queue, durableStore);
+      const { entry, message } = enqueueCustodiedEntry(durableDeps.queue, durableStore, {
+        source: 'connector',
+        sourceCategory: 'scheduled',
+        messageSource: {
+          connector: 'hold-ball',
+          label: '持球通知',
+          meta: { taskId: 'task-failed', threadId: 't1', catId: 'opus', wakeWhen: true },
+        },
+      });
       durableDeps.queue.markQueuedSeen('t1', 'u1', entry.id, 'opus', 'child-direct-failed', 2_350);
       await durableDeps.queueCustodyCoordinator.persistEntry(durableDeps.queue.getEntrySnapshot('t1', 'u1', entry.id));
 
@@ -1525,6 +1600,45 @@ describe('QueueProcessor', () => {
       assert.deepEqual(persisted.queueCustody.bodyExposures, [
         { targetCatId: 'opus', invocationId: 'child-direct-failed', seenAt: 2_350 },
       ]);
+      assert.equal(persisted.queueCustody.targetOutcomeByCatId, undefined);
+    });
+
+    it('returns a canceled managed-hold child to the same single Queue carrier', async () => {
+      const durableStore = new MessageStore();
+      const durableDeps = stubDeps({ messageStore: durableStore });
+      durableDeps.queueCustodyCoordinator = new QueuedMessageCustodyCoordinator({ messageStore: durableStore });
+      const durableProcessor = new QueueProcessor(durableDeps);
+      const { entry, message } = enqueueCustodiedEntry(durableDeps.queue, durableStore, {
+        source: 'connector',
+        sourceCategory: 'scheduled',
+        messageSource: {
+          connector: 'hold-ball',
+          label: '持球通知',
+          meta: { taskId: 'task-canceled', threadId: 't1', catId: 'opus', wakeWhen: true },
+        },
+      });
+      durableDeps.queue.markQueuedSeen('t1', 'u1', entry.id, 'opus', 'child-canceled', 2_450);
+      await durableDeps.queueCustodyCoordinator.persistEntry(durableDeps.queue.getEntrySnapshot('t1', 'u1', entry.id));
+
+      await durableProcessor.onInvocationComplete(
+        't1',
+        'opus',
+        'canceled',
+        'parent-canceled',
+        [],
+        true,
+        { opus: 'child-canceled' },
+        [entry.id],
+      );
+
+      const queued = durableDeps.queue.list('t1', 'u1');
+      assert.equal(queued.length, 1);
+      assert.equal(queued[0].id, entry.id);
+      assert.deepEqual(queued[0].queuedFailedByCatIds, ['opus']);
+      assert.equal(queued[0].queuedSeenInvocationIdByCatId, undefined);
+      const persisted = durableStore.getById(message.id);
+      assert.deepEqual(persisted.queueCustody.failedByCatIds, ['opus']);
+      assert.deepEqual(persisted.queueCustody.handledByCatIds, []);
       assert.equal(persisted.queueCustody.targetOutcomeByCatId, undefined);
     });
 

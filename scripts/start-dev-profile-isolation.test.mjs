@@ -38,11 +38,13 @@ function createSandbox(envFile = '') {
   return dir;
 }
 
-function runSourceOnly({ sandboxDir, env = {}, extraArgs = [] }) {
-  const command = [
-    `source scripts/start-dev.sh --source-only ${extraArgs.join(' ')}`,
-    'printf "PROFILE=%s\\nASR=%s\\nPROXY=%s\\nTTS=%s\\nLLM=%s\\nEMBED=%s\\nTTL=%s\\nREDIS_PROFILE=%s\\n" "$PROFILE" "$ASR_ENABLED" "$ANTHROPIC_PROXY_ENABLED" "$TTS_ENABLED" "$LLM_POSTPROCESS_ENABLED" "${EMBED_ENABLED:-}" "$MESSAGE_TTL_SECONDS" "$REDIS_PROFILE"',
-  ].join('; ');
+function runSourceOnly({ sandboxDir, env = {}, extraArgs = [], commands }) {
+  const command = (
+    commands ?? [
+      `source scripts/start-dev.sh --source-only ${extraArgs.join(' ')}`,
+      'printf "PROFILE=%s\\nASR=%s\\nPROXY=%s\\nTTS=%s\\nLLM=%s\\nEMBED=%s\\nTTL=%s\\nREDIS_PROFILE=%s\\n" "$PROFILE" "$ASR_ENABLED" "$ANTHROPIC_PROXY_ENABLED" "$TTS_ENABLED" "$LLM_POSTPROCESS_ENABLED" "${EMBED_ENABLED:-}" "$MESSAGE_TTL_SECONDS" "$REDIS_PROFILE"',
+    ]
+  ).join('; ');
 
   return spawnSync('bash', ['-lc', command], {
     cwd: sandboxDir,
@@ -375,6 +377,53 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
       cloudStartIndex > apiReadyIndex,
       'F247 cloud autostart must run only after the API-dependent principal probe can reach a ready API',
     );
+  });
+
+  it('contains an optional F247 helper process failure inside the cloud capability boundary', () => {
+    const sandboxDir = createSandbox();
+    writeFileSync(join(sandboxDir, 'scripts', 'f247-cloud-services.mjs'), '', 'utf8');
+    try {
+      const result = runSourceOnly({
+        sandboxDir,
+        commands: [
+          'source scripts/start-dev.sh --source-only',
+          'node() { return 17; }',
+          'maybe_start_f247_cloud_services',
+          'printf "CONTINUED=1\\nOWNER=%s\\n" "${F247_CLOUD_OWNER_FILE:-empty}"',
+        ],
+      });
+
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /CONTINUED=1/);
+      assert.match(result.stdout, /OWNER=empty/);
+      assert.match(result.stdout, /F247 cloud supporting services degraded/i);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports live F247 degradation without changing daemon status semantics', () => {
+    const sandboxDir = createSandbox();
+    writeFileSync(join(sandboxDir, 'scripts', 'f247-cloud-services.mjs'), '', 'utf8');
+    try {
+      const result = runSourceOnly({
+        sandboxDir,
+        commands: [
+          'source scripts/start-dev.sh --source-only',
+          'node() { printf "%s\\n" "$*" > node-args; return 1; }',
+          'print_f247_cloud_status_summary',
+          'printf "NODE_ARGS=%s\\n" "$(cat node-args)"',
+          'printf "RESULT=%s\\n" "$?"',
+        ],
+      });
+
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /F247 cloud: degraded/i);
+      assert.match(result.stdout, /NODE_ARGS=.*status --summary/);
+      assert.match(result.stdout, /RESULT=0/);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
   });
 
   it('official runtime launchers opt in to connector autostart without overriding explicit false', () => {

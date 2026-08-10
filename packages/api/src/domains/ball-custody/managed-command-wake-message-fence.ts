@@ -128,6 +128,7 @@ export async function publishManagedCommandWakeMessage(
         mentions: [],
         timestamp: now(),
         threadId: claimed.threadId,
+        deliveryStatus: 'queued',
         idempotencyKey,
         source: {
           connector: 'hold-ball',

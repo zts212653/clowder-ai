@@ -45,6 +45,8 @@ export {
   getThreadContextInputSchema,
   handleAckMentions,
   handleCheckPermissionStatus,
+  handleCompleteA2ADispatch,
+  handleCompleteManagedHold,
   handleCrossPostMessage,
   handleDrillMemoryCue,
   handleFeatIndex,
