@@ -38,6 +38,13 @@ interface ActiveInvocation {
   state: 'active' | 'canceled';
   /** Abort reason recorded at cancel time (e.g. 'user_cancel' / 'preempted'). */
   cancelReason?: string;
+  /**
+   * #1313: Whether the provider teardown after cancel has called complete()/completeSlot().
+   * A canceled tombstone with teardownComplete=false blocks guardSessionSeal() — "Stop" followed
+   * by an immediate "Seal" must wait until the route layer finishes its cleanup. Once teardown
+   * completes, the tombstone is kept for resolveFinalStatus() but no longer blocks seal.
+   */
+  teardownComplete?: boolean;
 }
 
 /** F-parallel-cancel: observable slot lifecycle state for callers that need to distinguish
@@ -197,10 +204,18 @@ export class InvocationTracker {
   /**
    * Atomically check an idle slot and prevent another local invocation from
    * claiming it until the session store has removed the old active pointer.
+   *
+   * #1313: also blocks while a canceled tombstone's teardown is still in progress —
+   * "Stop" + immediate "Seal" must wait until the route layer calls complete().
    */
   guardSessionSeal(threadId: string, catId: string): SessionSealGuard {
     const key = this.slotKey(threadId, catId);
-    if (this.deleting.has(threadId) || this.sessionSealing.has(key) || this.has(threadId, catId)) {
+    if (
+      this.deleting.has(threadId) ||
+      this.sessionSealing.has(key) ||
+      this.has(threadId, catId) ||
+      this.hasPendingTeardown(threadId, catId)
+    ) {
       return { acquired: false, release: () => {} };
     }
     this.sessionSealing.add(key);
@@ -208,6 +223,20 @@ export class InvocationTracker {
       acquired: true,
       release: () => this.sessionSealing.delete(key),
     };
+  }
+
+  /**
+   * #1313: Whether a slot has a canceled tombstone whose provider teardown hasn't
+   * completed yet. Teardown is marked done when complete()/completeSlot()/completeAll()
+   * is called for the canceled slot; expired tombstones are not pending.
+   */
+  private hasPendingTeardown(threadId: string, catId: string): boolean {
+    const key = this.slotKey(threadId, catId);
+    const inv = this.active.get(key);
+    if (!inv) return false;
+    if (inv.state !== 'canceled') return false;
+    if (this.isExpired(key, inv)) return false;
+    return !inv.teardownComplete;
   }
 
   /**
@@ -425,7 +454,11 @@ export class InvocationTracker {
     // abort-induced terminal (error/done) message BEFORE the aggregate finalStatus check; deleting
     // here would make getSlotState() return 'absent' → 'succeeded' even though the user cancelled.
     // Canceled tombstones are purged on the next start*/tryStart* for the slot (re-occupation).
-    if (inv.state === 'canceled') return;
+    // #1313: mark teardown as done so guardSessionSeal() unblocks.
+    if (inv.state === 'canceled') {
+      inv.teardownComplete = true;
+      return;
+    }
     this.active.delete(key);
   }
 
@@ -470,7 +503,11 @@ export class InvocationTracker {
     // exactly the call route consumers fire on the abort-induced terminal message BEFORE the
     // aggregate finalStatus check, so deleting a canceled slot here would lose the cancellation
     // and resolveFinalStatus() would wrongly return 'succeeded'.
-    if (inv.state === 'canceled') return;
+    // #1313: mark teardown as done so guardSessionSeal() unblocks.
+    if (inv.state === 'canceled') {
+      inv.teardownComplete = true;
+      return;
+    }
     this.active.delete(key);
   }
 
@@ -648,7 +685,11 @@ export class InvocationTracker {
       // F-parallel-cancel (cloud P1): keep CANCELED tombstones (see complete()) — consistent with
       // complete/completeSlot so aggregate resolveFinalStatus() never loses cancellation state.
       // Purged on next start*/tryStart* re-occupation (+ TTL as backstop).
-      if (inv.state === 'canceled') continue;
+      // #1313: mark teardown as done so guardSessionSeal() unblocks.
+      if (inv.state === 'canceled') {
+        inv.teardownComplete = true;
+        continue;
+      }
       this.active.delete(key);
     }
   }
