@@ -240,6 +240,17 @@ export class InvocationTracker {
   }
 
   /**
+   * Retain a canceled slot until the route layer has completed provider teardown.
+   * Tombstones are inactive for dispatch (`has() === false`) but remain visible to
+   * the manual-seal guard so every cancel path has the same lifecycle fence.
+   */
+  private tombstoneCanceledInvocation(inv: ActiveInvocation, abortReason?: string): void {
+    inv.controller.abort(abortReason);
+    inv.state = 'canceled';
+    inv.cancelReason = abortReason;
+  }
+
+  /**
    * Cancel an active invocation for a specific slot.
    * If requestUserId is provided, only cancels if it matches the invocation owner.
    * Optional abortReason is forwarded to AbortController.abort(reason).
@@ -252,7 +263,7 @@ export class InvocationTracker {
       return { cancelled: false, catIds: [], executionIds: [] };
     }
     const { catIds } = inv;
-    inv.controller.abort(abortReason);
+    this.tombstoneCanceledInvocation(inv, abortReason);
     // F211-REG6 instrument (observation-only): the cancel funnel is the complete chokepoint for the
     // hardcoded 'user_cancel' reason (SocketManager:211 + queue.ts). Logging abortReason + msSinceStart
     // here (vs only at the WS layer) disambiguates WS-sourced cancels from any non-WS path, and a very
@@ -272,8 +283,6 @@ export class InvocationTracker {
     // getController() still returns the aborted controller for a cat cancelled BEFORE the route
     // layer grabbed its own signal (pre-invoke cancel must not be lost / fall back to the batch
     // gate). Purged at the next start-family or complete-family call for this slot.
-    inv.state = 'canceled';
-    inv.cancelReason = abortReason;
     return { cancelled: true, catIds, executionIds: inv.executionId ? [inv.executionId] : [] };
   }
 
@@ -306,14 +315,12 @@ export class InvocationTracker {
           cancelledExecutionIdByCatId.set(inv.catId, inv.executionId);
         }
         cancelledSlots.push({ catId: inv.catId, msSinceStart: Date.now() - inv.startedAt });
-        inv.controller.abort(abortReason);
+        this.tombstoneCanceledInvocation(inv, abortReason);
         if (inv.batchController) batchControllers.add(inv.batchController);
         // #1313: tombstone instead of delete — guardSessionSeal() must see pending teardown
         // so "Stop (force-reset) → immediate Seal" blocks until the route completes cleanup.
         // has() stays false for tombstones (queue gates, tryStartThread unaffected).
         // Tombstones purged at next start*/tryStart* re-occupation or by TTL expiry.
-        inv.state = 'canceled';
-        inv.cancelReason = abortReason;
       }
     }
     for (const bc of batchControllers) bc.abort(abortReason);
@@ -367,8 +374,7 @@ export class InvocationTracker {
       const sharesBatch = inv.batchController !== undefined && targetBatches.has(inv.batchController);
       if (!isAnchor && !sharesBatch) continue;
       cancelledCatIds.push(inv.catId);
-      inv.controller.abort(abortReason);
-      this.active.delete(key);
+      this.tombstoneCanceledInvocation(inv, abortReason);
     }
     for (const bc of targetBatches) bc.abort(abortReason);
     return cancelledCatIds;

@@ -290,3 +290,57 @@ describe('InvocationTracker: cancelAll → Seal race (#1313 P1)', () => {
     assert.equal(tracker.getSlotState('t1', 'opus'), 'active');
   });
 });
+
+// ── scoped force/preempt → Seal race ──
+// #1313 P1 follow-up: callback-a2a-trigger uses cancelInvocation() for an
+// in-flight force delivery. It must preserve the same teardown fence as the
+// visible Stop path without canceling an unrelated side-dispatch.
+
+describe('InvocationTracker: cancelInvocation → Seal race (#1313 P1 follow-up)', () => {
+  it('blocks seal for every canceled batch sibling until scoped preempt teardown completes', () => {
+    const tracker = new InvocationTracker();
+    const batch = tracker.startAll('t1', ['opus', 'codex'], 'user1');
+
+    const cancelled = tracker.cancelInvocation('t1', ['opus'], 'user1', 'preempted');
+
+    assert.deepEqual(cancelled.sort(), ['codex', 'opus']);
+    assert.equal(tracker.has('t1', 'opus'), false);
+    assert.equal(tracker.has('t1', 'codex'), false);
+    assert.equal(tracker.guardSessionSeal('t1', 'opus').acquired, false, 'opus teardown is pending');
+    assert.equal(tracker.guardSessionSeal('t1', 'codex').acquired, false, 'codex teardown is pending');
+
+    tracker.completeAll('t1', ['opus', 'codex'], batch);
+
+    const opusSeal = tracker.guardSessionSeal('t1', 'opus');
+    assert.equal(opusSeal.acquired, true, 'opus seal is safe after terminal cleanup');
+    opusSeal.release();
+    const codexSeal = tracker.guardSessionSeal('t1', 'codex');
+    assert.equal(codexSeal.acquired, true, 'codex seal is safe after terminal cleanup');
+    codexSeal.release();
+  });
+
+  it('keeps an unrelated side-dispatch active while the preempted batch is tombstoned', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['codex'], 'user1');
+    tracker.startAll('t1', ['opus'], 'user1');
+
+    tracker.cancelInvocation('t1', ['codex'], 'user1', 'preempted');
+
+    assert.equal(tracker.has('t1', 'codex'), false, 'preempted slot must not block replacement work');
+    assert.equal(tracker.guardSessionSeal('t1', 'codex').acquired, false, 'preempted teardown still blocks seal');
+    assert.equal(tracker.has('t1', 'opus'), true, 'unrelated side-dispatch remains active');
+    assert.equal(tracker.guardSessionSeal('t1', 'opus').acquired, false, 'active side-dispatch remains protected');
+  });
+
+  it('allows an immediate replacement start while scoped-preempt teardown is pending', () => {
+    const tracker = new InvocationTracker();
+    tracker.start('t1', 'opus', 'user1', ['opus']);
+    tracker.cancelInvocation('t1', ['opus'], 'user1', 'preempted');
+
+    const replacement = tracker.start('t1', 'opus', 'user1', ['opus']);
+
+    assert.equal(replacement.signal.aborted, false);
+    assert.equal(tracker.has('t1', 'opus'), true);
+    assert.equal(tracker.getSlotState('t1', 'opus'), 'active');
+  });
+});
