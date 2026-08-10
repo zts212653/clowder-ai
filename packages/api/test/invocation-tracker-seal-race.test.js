@@ -158,3 +158,135 @@ describe('InvocationTracker: Stop→Seal race (#1313)', () => {
     guard.release();
   });
 });
+
+// ── cancelAll (force-reset / Stop-all) → Seal race ──
+// Terra P1 review: Stop button fires POST /api/threads/:id/force-reset → cancelAll.
+// cancelAll deleted slots outright, so guardSessionSeal saw them as idle while
+// the provider route was still tearing down.
+
+describe('InvocationTracker: cancelAll → Seal race (#1313 P1)', () => {
+  it('guardSessionSeal rejects immediately after cancelAll (teardown pending)', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    tracker.cancelAll('t1');
+
+    // has() must still be false (queue gates unaffected)
+    assert.equal(tracker.has('t1', 'opus'), false);
+    assert.equal(tracker.has('t1', 'codex'), false);
+    assert.equal(tracker.has('t1'), false);
+
+    // But seal must block for EACH cat
+    const g1 = tracker.guardSessionSeal('t1', 'opus');
+    assert.equal(g1.acquired, false, 'opus seal must wait for teardown');
+
+    const g2 = tracker.guardSessionSeal('t1', 'codex');
+    assert.equal(g2.acquired, false, 'codex seal must wait for teardown');
+  });
+
+  it('guardSessionSeal succeeds after completeAll marks cancelAll teardown done', () => {
+    const tracker = new InvocationTracker();
+    const batch = tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    tracker.cancelAll('t1');
+
+    // Simulate route teardown finishing
+    tracker.completeAll('t1', ['opus', 'codex'], batch);
+
+    const g1 = tracker.guardSessionSeal('t1', 'opus');
+    assert.equal(g1.acquired, true, 'opus seal allowed after teardown');
+    g1.release();
+
+    const g2 = tracker.guardSessionSeal('t1', 'codex');
+    assert.equal(g2.acquired, true, 'codex seal allowed after teardown');
+    g2.release();
+  });
+
+  it('guardSessionSeal succeeds after per-cat complete marks cancelAll teardown done', () => {
+    const tracker = new InvocationTracker();
+    tracker.start('t1', 'opus', 'user1', ['opus']);
+    tracker.cancelAll('t1');
+
+    // Route cleanup calls complete per-cat (no controller for cancelAll path)
+    tracker.complete('t1', 'opus');
+
+    const guard = tracker.guardSessionSeal('t1', 'opus');
+    assert.equal(guard.acquired, true, 'seal allowed after per-cat complete');
+    guard.release();
+  });
+
+  it('cancelAll with userId filter only tombstones matching user slots', () => {
+    const tracker = new InvocationTracker();
+    tracker.start('t1', 'opus', 'alice', ['opus']);
+    tracker.start('t1', 'codex', 'bob', ['codex']);
+    tracker.cancelAll('t1', 'alice');
+
+    // alice's opus is tombstoned — seal blocked
+    assert.equal(tracker.has('t1', 'opus'), false);
+    const g1 = tracker.guardSessionSeal('t1', 'opus');
+    assert.equal(g1.acquired, false, 'alice slot tombstoned — seal blocked');
+
+    // bob's codex is still active — seal also blocked (active, not tombstone)
+    assert.equal(tracker.has('t1', 'codex'), true);
+    const g2 = tracker.guardSessionSeal('t1', 'codex');
+    assert.equal(g2.acquired, false, 'bob slot still active — seal blocked');
+  });
+
+  it('cancelAll tombstone does not block new start (queue gates intact)', () => {
+    const tracker = new InvocationTracker();
+    tracker.start('t1', 'opus', 'user1', ['opus']);
+    tracker.cancelAll('t1');
+
+    // has() returns false → tryStartThread succeeds
+    const ctrl = tracker.tryStartThread('t1', 'codex', 'user1', ['codex']);
+    assert.ok(ctrl, 'new start must succeed — cancelAll tombstone is invisible to has()');
+    assert.equal(ctrl.signal.aborted, false);
+  });
+
+  it('cancelAll preserves batch final status via batch.aborted (not tombstone)', () => {
+    const tracker = new InvocationTracker();
+    const batch = tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    tracker.cancelAll('t1', undefined, 'cancel_all');
+
+    // cancelAll aborts the batch gate — resolveFinalStatus uses batch.aborted (first branch)
+    assert.equal(batch.signal.aborted, true, 'batch gate must be aborted');
+    const status = tracker.resolveFinalStatus('t1', ['opus', 'codex'], {
+      aborted: batch.signal.aborted,
+      reason: 'cancel_all',
+    });
+    assert.equal(status, 'canceled_by_user');
+  });
+
+  it('expired cancelAll tombstone does not block seal', () => {
+    const tracker = new InvocationTracker({ maxSlotTtlMs: 1 });
+    tracker.start('t1', 'opus', 'user1', ['opus']);
+    tracker.cancelAll('t1');
+
+    const deadline = Date.now() + 10;
+    while (Date.now() < deadline) {
+      /* wait for expiry */
+    }
+
+    const guard = tracker.guardSessionSeal('t1', 'opus');
+    assert.equal(guard.acquired, true, 'expired cancelAll tombstone must not block seal');
+    guard.release();
+  });
+
+  it('getActiveSlots returns empty after cancelAll (tombstones excluded)', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['opus', 'codex'], 'user1');
+    tracker.cancelAll('t1');
+
+    assert.deepEqual(tracker.getActiveSlots('t1'), []);
+  });
+
+  it('startAll replaces cancelAll tombstones and runs normally', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['opus'], 'user1');
+    tracker.cancelAll('t1');
+
+    // New startAll should replace the tombstone
+    const batch = tracker.startAll('t1', ['opus'], 'user1');
+    assert.equal(batch.signal.aborted, false, 'new batch gate is fresh');
+    assert.equal(tracker.has('t1', 'opus'), true);
+    assert.equal(tracker.getSlotState('t1', 'opus'), 'active');
+  });
+});

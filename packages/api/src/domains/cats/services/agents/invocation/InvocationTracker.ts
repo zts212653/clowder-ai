@@ -308,7 +308,12 @@ export class InvocationTracker {
         cancelledSlots.push({ catId: inv.catId, msSinceStart: Date.now() - inv.startedAt });
         inv.controller.abort(abortReason);
         if (inv.batchController) batchControllers.add(inv.batchController);
-        this.active.delete(key);
+        // #1313: tombstone instead of delete — guardSessionSeal() must see pending teardown
+        // so "Stop (force-reset) → immediate Seal" blocks until the route completes cleanup.
+        // has() stays false for tombstones (queue gates, tryStartThread unaffected).
+        // Tombstones purged at next start*/tryStart* re-occupation or by TTL expiry.
+        inv.state = 'canceled';
+        inv.cancelReason = abortReason;
       }
     }
     for (const bc of batchControllers) bc.abort(abortReason);
