@@ -269,6 +269,7 @@ describe('deriveOpenCodeApiType', () => {
       { ocProviderName: 'deepseek', expected: 'openai' },
       { ocProviderName: 'minimax', expected: 'openai' },
       { ocProviderName: 'openrouter', expected: 'openai' },
+      { ocProviderName: 'orcarouter', expected: 'openai' },
       { ocProviderName: undefined, expected: 'openai' },
     ];
     for (const { ocProviderName, expected } of scenarios) {

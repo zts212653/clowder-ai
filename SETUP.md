@@ -226,7 +226,7 @@ There are two types of accounts:
 | Type | How It Works | Providers |
 |------|-------------|-----------|
 | **Built-in (OAuth / CLI subscription)** | Authenticate via the provider's CLI tool (`claude`, `codex`, `gemini`). No API key needed — the CLI subscription handles auth. | Claude, GPT/Codex, Gemini |
-| **API Key** | Enter your API key + base URL for direct API access. Works with any OpenAI-compatible or Anthropic-compatible endpoint. | Claude, GPT, Gemini, **Kimi, GLM, MiniMax, Qwen, OpenRouter**, and more |
+| **API Key** | Enter your API key + base URL for direct API access. Works with any OpenAI-compatible or Anthropic-compatible endpoint. | Claude, GPT, Gemini, **Kimi, GLM, MiniMax, Qwen, OpenRouter, OrcaRouter**, and more |
 
 **Steps:**
 1. Click **"Add Account"** in the Account Configuration tab
@@ -235,7 +235,7 @@ There are two types of accounts:
 4. For API key providers: enter your API key and (optionally) a custom base URL
 5. Click **Save**
 
-**Adding Chinese / third-party providers (Kimi, GLM, MiniMax, Qwen, OpenRouter):**
+**Adding Chinese / third-party providers (Kimi, GLM, MiniMax, Qwen, OpenRouter, OrcaRouter):**
 
 These providers are configured as API key accounts with a custom base URL. In the **Account Configuration** UI, add a new account, choose the provider, enter your API key, and set the base URL to the provider's OpenAI-compatible endpoint. Select the appropriate protocol and click **Save**.
 

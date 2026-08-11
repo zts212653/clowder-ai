@@ -26,7 +26,7 @@ describe('KNOWN_OC_PROVIDERS datalist suggestions', () => {
   });
 
   it('includes core provider names', () => {
-    for (const name of ['anthropic', 'openai', 'google', 'openrouter', 'zhipu', 'glm']) {
+    for (const name of ['anthropic', 'openai', 'google', 'openrouter', 'orcarouter', 'zhipu', 'glm']) {
       expect(KNOWN_OC_PROVIDERS).toContain(name);
     }
   });

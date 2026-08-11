@@ -330,7 +330,7 @@ export function validateModelFormatForProvider(
     //     if "x/y" is in the list AND bare "y" is also in the list → canonical (dual-form).
     //     if "x/y" is in the list but bare "y" is not → ambiguous namespace → require provider name.
     //     if "x/y" is NOT in the list → user-provided canonical form → accept.
-    const KNOWN_CANONICAL_PROVIDERS = new Set(['anthropic', 'openai', 'openrouter', 'google']);
+    const KNOWN_CANONICAL_PROVIDERS = new Set(['anthropic', 'openai', 'openrouter', 'orcarouter', 'google']);
     const bareModel = looksLikeProviderModel ? modelTrimmed.slice(slashIdx + 1) : '';
     const parsedPrefix = looksLikeProviderModel ? modelTrimmed.slice(0, slashIdx) : '';
     const models = options?.accountModels;

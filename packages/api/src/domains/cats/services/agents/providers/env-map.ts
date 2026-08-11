@@ -58,6 +58,9 @@ export const BUILTIN_ENV_MAPS: Record<string, Record<string, string>> = {
   openrouter: {
     OPENROUTER_API_KEY: OPENROUTER_API_KEY_TEMPLATE,
   },
+  orcarouter: {
+    ORCAROUTER_API_KEY: '${api_key}',
+  },
   kimi: {
     MOONSHOT_API_KEY: '${api_key}',
   },

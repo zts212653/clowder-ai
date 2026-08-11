@@ -6563,6 +6563,80 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(callbackEnv.OPENROUTER_API_KEY, 'sk-openrouter-key');
   });
 
+  it('injects ORCAROUTER_API_KEY for opencode members bound to orcarouter api_key profiles', async () => {
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const root = await mkdtemp(join(tmpdir(), 'orca-key-injection-'));
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+    setGlobalRoot(root);
+
+    const orcaProfile = await createProviderProfile(root, {
+      provider: 'openai',
+      name: 'orcarouter-openai',
+      mode: 'api_key',
+      authType: 'api_key',
+      protocol: 'openai',
+      baseUrl: 'https://api.orcarouter.ai/v1',
+      apiKey: 'sk-orca-key',
+      setActive: false,
+    });
+
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const originalConfig = catRegistry.tryGet('opencode')?.config;
+    assert.ok(originalConfig, 'opencode config should exist in registry');
+    const boundCatId = 'opencode-orcarouter-bound-test';
+    catRegistry.register(boundCatId, {
+      ...originalConfig,
+      id: boundCatId,
+      mentionPatterns: [`@${boundCatId}`],
+      clientId: 'opencode',
+      accountRef: orcaProfile.id,
+      defaultModel: 'orcarouter/openai/gpt-5-mini',
+    });
+
+    const optionsSeen = [];
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(apiDir);
+      const messages = await collect(
+        invokeSingleCat(deps, {
+          catId: boundCatId,
+          service,
+          prompt: 'test',
+          userId: 'user-orca-key-injection',
+          threadId: 'thread-orca-key-injection',
+          isLastCat: true,
+        }),
+      );
+      assert.ok(messages.some((m) => m.type === 'done'));
+    } finally {
+      process.chdir(previousCwd);
+      restoreGlobalRoot();
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) {
+        catRegistry.register(id, config);
+      }
+      await rmWithRetry(root);
+    }
+
+    const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
+    assert.equal(callbackEnv.CAT_CAFE_EFFECTIVE_PROTOCOL, undefined);
+    assert.equal(callbackEnv.OPENAI_BASE_URL, 'https://api.orcarouter.ai/v1');
+    assert.equal(callbackEnv.OPENAI_API_KEY, 'sk-orca-key');
+    assert.equal(callbackEnv.OPENROUTER_API_KEY, 'sk-orca-key');
+  });
+
   it('clowder-ai#223: unknown canonical provider/model without ocProviderName writes invocation-scoped OPENCODE_CONFIG and cleans it up', async () => {
     const mod = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');
     mod._resetOpenCodeKnownModels(new Set(['anthropic/claude-opus-4-6']));

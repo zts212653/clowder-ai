@@ -426,7 +426,7 @@ AI 不一定是冰冷的 API 和无状态调用。它可以是陪伴——有持
 
 - **[教程](https://github.com/zts212653/cat-cafe-tutorials)** — Clowder AI 的分步教程
 - **[SETUP.zh-CN.md](SETUP.zh-CN.md)** — 完整安装和配置指南
-- **[第三方 AI Provider 配置指南](SETUP.zh-CN.md#模型接入ui)** — 配置 Kimi、GLM、MiniMax、Qwen、OpenRouter 等国产/第三方模型
+- **[第三方 AI Provider 配置指南](SETUP.zh-CN.md#模型接入ui)** — 配置 Kimi、GLM、MiniMax、Qwen、OpenRouter、OrcaRouter 等国产/第三方模型
 - **[使用小 Tips](docs/TIPS.md)** — Magic Words、@提及、语音陪伴等使用技巧
 - **[docs/](docs/)** — 架构决策、功能规格、经验教训
 

@@ -226,7 +226,7 @@ NEXT_PUBLIC_API_URL=http://localhost:3004
 | 类型 | 工作方式 | 适用 Provider |
 |------|---------|--------------|
 | **内置（OAuth / CLI 订阅）** | 通过 provider 的 CLI 工具认证（`claude`、`codex`、`gemini`），无需 API key — CLI 订阅自动处理认证 | Claude、GPT/Codex、Gemini |
-| **API Key** | 输入 API key + base URL 直接调用 API。兼容任何 OpenAI 或 Anthropic 协议的端点 | Claude、GPT、Gemini、**Kimi、GLM、MiniMax、Qwen、OpenRouter** 等 |
+| **API Key** | 输入 API key + base URL 直接调用 API。兼容任何 OpenAI 或 Anthropic 协议的端点 | Claude、GPT、Gemini、**Kimi、GLM、MiniMax、Qwen、OpenRouter、OrcaRouter** 等 |
 
 **步骤：**
 1. 在账号配置页点击 **"添加账号"**
@@ -235,7 +235,7 @@ NEXT_PUBLIC_API_URL=http://localhost:3004
 4. API key provider：输入 API key，可选填自定义 base URL
 5. 点击 **保存**
 
-**添加国产 / 第三方 provider（Kimi、GLM、MiniMax、Qwen、OpenRouter）：**
+**添加国产 / 第三方 provider（Kimi、GLM、MiniMax、Qwen、OpenRouter、OrcaRouter）：**
 
 这些 provider 以 API key 账号形式配置，需要填写自定义 base URL。在**账号配置** UI 中添加新账号，选择 provider，输入 API key，填入该 provider 的 OpenAI 兼容端点 URL，选择对应协议，点击**保存**。
 

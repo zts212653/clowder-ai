@@ -248,6 +248,7 @@ export const KNOWN_OC_PROVIDERS = [
   'openai',
   'openai-responses',
   'openrouter',
+  'orcarouter',
   'google',
   'azure',
   'deepseek',

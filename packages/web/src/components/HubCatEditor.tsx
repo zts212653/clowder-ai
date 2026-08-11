@@ -423,7 +423,7 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
           const looksLike = si > 0 && si < m.length - 1;
           if (!looksLike) return true; // bare model, need provider
           // Known provider prefix → canonical (synced with BUILTIN_OPENCODE_PROVIDERS)
-          const known = new Set(['anthropic', 'openai', 'openrouter', 'google']);
+          const known = new Set(['anthropic', 'openai', 'openrouter', 'orcarouter', 'google']);
           if (known.has(m.slice(0, si))) return false;
           // Non-builtin: "x/y" in account list + bare "y" absent → namespace
           const acm = selectedProfile?.models ?? [];

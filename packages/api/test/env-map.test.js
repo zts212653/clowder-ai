@@ -62,6 +62,16 @@ describe('F161: env-map — resolveEnvMap', () => {
     });
   });
 
+  it('resolves orcarouter via provider name (not clientId)', () => {
+    // opencode cat with provider=orcarouter
+    const result = resolveEnvMap('opencode', 'orcarouter', {
+      apiKey: 'sk-orca-xxx',
+    });
+    assert.deepEqual(result, {
+      ORCAROUTER_API_KEY: 'sk-orca-xxx',
+    });
+  });
+
   it('resolves opencode built-in mapping (native env vars)', () => {
     const result = resolveEnvMap('opencode', undefined, {
       apiKey: 'sk-oc-xxx',
@@ -280,7 +290,7 @@ describe('F161: env-map — extractUserEnvTemplates', () => {
 
 describe('F161: env-map — BUILTIN_ENV_MAPS coverage', () => {
   it('has mappings for all expected providers', () => {
-    const expected = ['anthropic', 'openai', 'google', 'openrouter', 'kimi', 'opencode'];
+    const expected = ['anthropic', 'openai', 'google', 'openrouter', 'orcarouter', 'kimi', 'opencode'];
     for (const provider of expected) {
       assert.ok(BUILTIN_ENV_MAPS[provider], `Missing built-in map for ${provider}`);
       assert.ok(Object.keys(BUILTIN_ENV_MAPS[provider]).length > 0, `Empty built-in map for ${provider}`);

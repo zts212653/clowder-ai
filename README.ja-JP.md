@@ -431,7 +431,7 @@ AI は冷たい API やステートレスな呼び出しである必要はあり
 
 - **[Tutorials](https://github.com/zts212653/cat-cafe-tutorials)** — Clowder AI で構築するためのステップバイステップガイド
 - **[SETUP.md](SETUP.md)** — 完全なインストールおよび設定ガイド
-- **[サードパーティ AI プロバイダーガイド](SETUP.md#model-access-ui)** — Kimi、GLM、MiniMax、Qwen、OpenRouter、その他のプロバイダーを設定
+- **[サードパーティ AI プロバイダーガイド](SETUP.md#model-access-ui)** — Kimi、GLM、MiniMax、Qwen、OpenRouter、OrcaRouter、その他のプロバイダーを設定
 - **[Tips](docs/TIPS.md)** — マジックワード、@メンション、Voice Companion、その他の使用ヒント
 - **[docs/](docs/)** — アーキテクチャの決定、機能仕様、学んだ教訓
 

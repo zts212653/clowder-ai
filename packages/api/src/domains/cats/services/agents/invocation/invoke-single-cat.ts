@@ -1987,6 +1987,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       kimi: 'kimi',
       opencode: 'anthropic',
       openrouter: 'openai',
+      orcarouter: 'openai',
     };
     let effectiveProtocol: string | null = provider ? (protocolForProvider[provider] ?? null) : null;
     if (provider === 'opencode') {
