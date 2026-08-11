@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, mock, test } from 'node:test';
+import Database from 'better-sqlite3';
 import {
   OpenCodeAgentService,
   summarizeOpenCodeEnvForDebug,
@@ -68,6 +72,34 @@ async function collect(iterable) {
   const messages = [];
   for await (const msg of iterable) messages.push(msg);
   return messages;
+}
+
+function createOpenCodeRecoveryDb({ sessionId, messageId, text }) {
+  const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-opencode-db-'));
+  const dbPath = join(dir, 'opencode.db');
+  const db = new Database(dbPath);
+  db.exec(`
+    CREATE TABLE part (
+      id text PRIMARY KEY,
+      message_id text NOT NULL,
+      session_id text NOT NULL,
+      time_created integer NOT NULL,
+      time_updated integer NOT NULL,
+      data text NOT NULL
+    );
+  `);
+  db.prepare(
+    'INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(
+    'prt_recovered_text',
+    messageId,
+    sessionId,
+    1780915410601,
+    1780915410687,
+    JSON.stringify({ type: 'text', text }),
+  );
+  db.close();
+  return dbPath;
 }
 
 // ── opencode JSON event fixtures ──
@@ -944,6 +976,33 @@ describe('OpenCodeAgentService', () => {
     );
   });
 
+  test('step_start-only NDJSON recovers assistant text from OpenCode SQLite by session/message id', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const dbPath = createOpenCodeRecoveryDb({
+      sessionId: STEP_START.sessionID,
+      messageId: STEP_START.part.messageID,
+      text: 'Recovered from OpenCode SQLite.',
+    });
+    const service = new OpenCodeAgentService({
+      catId: 'opencode',
+      spawnFn,
+      model: 'deepseek-chat',
+      opencodeDbPath: dbPath,
+    });
+    const promise = collect(service.invoke('Test silent', { invocationId: 'inv-silent-sqlite-recovery' }));
+
+    emitOpenCodeEvents(proc, [STEP_START]);
+    const messages = await promise;
+
+    const recovered = messages.find((m) => m.type === 'text');
+    assert.equal(recovered?.content, 'Recovered from OpenCode SQLite.');
+    assert.ok(
+      !messages.some((m) => m.type === 'system_info' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion'),
+      'SQLite recovery supplies text, so silent_completion must not fire',
+    );
+  });
+
   test('AC-G3: text event present → does NOT yield silent_completion (no false positive)', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
@@ -1000,6 +1059,77 @@ describe('OpenCodeAgentService', () => {
   // When the CLI produces events but no step_finish carries tokens, auto-handoff
   // based on context fill cannot fire. The service must surface a persistent
   // visible alert so users know automatic handoff is unavailable.
+  test('post-tool completion gap runs a no-tool finalizer and replaces the incomplete prelude', async () => {
+    const proc = createMockProcess();
+    const finalizerProc = createMockProcess();
+    let spawnCalls = 0;
+    const spawnFn = mock.fn(() => {
+      spawnCalls++;
+      if (spawnCalls === 2) {
+        process.nextTick(() => {
+          emitOpenCodeEvents(finalizerProc, [
+            STEP_START,
+            {
+              ...TEXT_RESPONSE,
+              part: { ...TEXT_RESPONSE.part, text: 'The active model is deepseek-v4-pro.' },
+            },
+            STEP_FINISH,
+          ]);
+        });
+        return finalizerProc;
+      }
+      return proc;
+    });
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'deepseek-v4-pro' });
+    const promise = collect(service.invoke('Check the active model and report it'));
+
+    emitOpenCodeEvents(proc, [
+      STEP_START,
+      {
+        ...TEXT_RESPONSE,
+        part: { ...TEXT_RESPONSE.part, text: 'Let me verify from the actual config rather than guessing.' },
+      },
+      {
+        ...TOOL_USE,
+        part: {
+          ...TOOL_USE.part,
+          tool: 'read',
+          state: {
+            status: 'completed',
+            input: { filePath: '.cat-cafe/cat-catalog.json', offset: 210, limit: 50 },
+            output: '"defaultModel": "deepseek-v4-pro"',
+          },
+        },
+      },
+      STEP_FINISH,
+    ]);
+
+    const messages = await promise;
+    const textMsgs = messages.filter((m) => m.type === 'text');
+
+    assert.equal(spawnCalls, 2, 'post-tool gap should start exactly one no-tool finalizer invocation');
+    const finalizerArgs = spawnFn.mock.calls[1].arguments[1];
+    assert.ok(finalizerArgs.includes('--session'), `finalizer must resume the same OpenCode session: ${finalizerArgs}`);
+    assert.equal(finalizerArgs[finalizerArgs.indexOf('--session') + 1], 'ses_test123');
+    assert.ok(finalizerArgs.includes('--agent'), `finalizer must use a dedicated no-tool agent: ${finalizerArgs}`);
+    assert.equal(finalizerArgs[finalizerArgs.indexOf('--agent') + 1], 'cat-cafe-no-tool-finalizer');
+    const finalizerConfig = JSON.parse(spawnFn.mock.calls[1].arguments[2].env.OPENCODE_CONFIG_CONTENT);
+    assert.equal(finalizerConfig.permission['*'], 'deny', 'finalizer env must deny tool execution');
+    assert.equal(
+      finalizerConfig.agent['cat-cafe-no-tool-finalizer'].permission['*'],
+      'deny',
+      'dedicated finalizer agent must deny tool execution',
+    );
+    assert.equal(textMsgs.length, 2, 'finalizer should add one replacement text after the incomplete prelude');
+    assert.equal(textMsgs[0].content, 'Let me verify from the actual config rather than guessing.');
+    assert.equal(textMsgs.at(-1)?.textMode, 'replace');
+    assert.equal(textMsgs.at(-1)?.content, 'The active model is deepseek-v4-pro.');
+    assert.ok(
+      !messages.some((m) => m.type === 'system_info' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion'),
+      'post-tool finalizer is a recovery, not silent_completion',
+    );
+  });
+
   test('issue #1208: opencode events without usage telemetry yield warning alert', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
