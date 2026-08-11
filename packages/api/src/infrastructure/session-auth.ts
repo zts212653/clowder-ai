@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type {} from '@fastify/cookie';
 import type { FastifyInstance } from 'fastify';
 import fp from 'fastify-plugin';
-import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
+import { isDirectLoopbackRequest, isDirectPrivateNetworkRequest } from '../utils/loopback-request.js';
 
 const COOKIE_NAME = 'cat_cafe_session';
 const TOKEN_BYTES = 32;
@@ -67,11 +67,14 @@ export const sessionAuthPlugin = fp(sessionAuth, {
 
 export interface SessionRouteOptions {
   ownerUserId?: string;
+  /** Opt-in for direct RFC 1918/Tailscale peers on an operator-trusted private network. */
+  trustPrivateNetwork?: boolean;
 }
 
 function sessionRoutePlugin(app: FastifyInstance, opts: SessionRouteOptions, done: () => void) {
   const ownerUserId = (opts.ownerUserId ?? DEFAULT_USER_ID).trim();
   if (!ownerUserId) throw new Error('[session-auth] ownerUserId must not be blank');
+  const trustPrivateNetwork = opts.trustPrivateNetwork === true;
 
   app.get('/api/session', async (request, reply) => {
     if (request.sessionUserId) {
@@ -80,7 +83,9 @@ function sessionRoutePlugin(app: FastifyInstance, opts: SessionRouteOptions, don
 
     const fwdProto = (request.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0]?.trim().toLowerCase();
     const isSecure = request.protocol === 'https' || fwdProto === 'https';
-    const bootstrapUserId = isDirectLoopbackRequest(request)
+    const isTrustedBootstrapCaller =
+      isDirectLoopbackRequest(request) || (trustPrivateNetwork && isDirectPrivateNetworkRequest(request));
+    const bootstrapUserId = isTrustedBootstrapCaller
       ? ownerUserId
       : ownerUserId === DEFAULT_USER_ID
         ? UNPAIRED_USER_ID

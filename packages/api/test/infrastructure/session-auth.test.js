@@ -265,4 +265,65 @@ describe('F156 D-1: GET /api/session — session establishment', () => {
     assert.equal(res.json().userId, 'unpaired-user');
     assert.notEqual(res.json().userId, 'default-user');
   });
+
+  it('mints the owner session for explicitly trusted private-network callers', async () => {
+    const trustedApp = Fastify();
+    await trustedApp.register(cookie);
+    await trustedApp.register(sessionAuthPlugin);
+    await trustedApp.register(sessionRoute, {
+      ownerUserId: 'private-owner',
+      trustPrivateNetwork: true,
+    });
+    await trustedApp.ready();
+
+    try {
+      for (const remoteAddress of [
+        '10.1.2.3',
+        '172.16.4.5',
+        '192.168.1.50',
+        '100.64.0.1',
+        '100.88.90.108',
+        '100.127.255.254',
+        '::ffff:100.88.90.108',
+      ]) {
+        const res = await trustedApp.inject({
+          method: 'GET',
+          url: '/api/session',
+          remoteAddress,
+        });
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.json().userId, 'private-owner', remoteAddress);
+      }
+    } finally {
+      await trustedApp.close();
+    }
+  });
+
+  it('keeps public, out-of-range CGNAT, and proxied callers non-owner when private-network trust is enabled', async () => {
+    const trustedApp = Fastify();
+    await trustedApp.register(cookie);
+    await trustedApp.register(sessionAuthPlugin);
+    await trustedApp.register(sessionRoute, {
+      ownerUserId: 'private-owner',
+      trustPrivateNetwork: true,
+    });
+    await trustedApp.ready();
+
+    try {
+      for (const request of [
+        { remoteAddress: '8.8.8.8' },
+        { remoteAddress: '100.63.255.255' },
+        { remoteAddress: '100.128.0.1' },
+        { remoteAddress: '192.168.1.50', headers: { 'x-forwarded-for': '8.8.8.8' } },
+        { headers: { 'x-forwarded-for': '100.88.90.108' } },
+      ]) {
+        const res = await trustedApp.inject({ method: 'GET', url: '/api/session', ...request });
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.json().userId, 'default-user');
+        assert.notEqual(res.json().userId, 'private-owner');
+      }
+    } finally {
+      await trustedApp.close();
+    }
+  });
 });

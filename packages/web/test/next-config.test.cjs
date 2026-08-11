@@ -108,6 +108,16 @@ describe('next.config rewrites', () => {
     );
   });
 
+  it('does not precache the root document across frontend builds', () => {
+    const pwaOptions = loadConfigWithPwaCapture();
+
+    assert.equal(
+      pwaOptions?.dynamicStartUrl,
+      true,
+      'The chat shell changes with every build and must use the runtime page cache instead of a precached root document',
+    );
+  });
+
   it('retains the packaged desktop version parameter in service-worker cache keys', () => {
     const pwaOptions = loadConfigWithPwaCapture();
     const ignoredParameters = pwaOptions?.workboxOptions?.ignoreURLParametersMatching;
