@@ -2,9 +2,8 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { test } from 'node:test';
 
-const { TASKKILL_TIMEOUT_MS, buildTaskkillArgs, terminateWindowsProcessTree } = await import(
-  '../dist/infrastructure/managed-runner-process-tree.js'
-);
+const { TASKKILL_TIMEOUT_MS, armProcessTreeKillEscalation, buildTaskkillArgs, terminateWindowsProcessTree } =
+  await import('../dist/infrastructure/managed-runner-process-tree.js');
 
 function createHarness() {
   const child = new EventEmitter();
@@ -46,6 +45,41 @@ function createHarness() {
     },
     observed() {
       return { spawnCalls, timeoutDelay, clearCalls, unrefCalls, killCalls };
+    },
+  };
+}
+
+function createEscalationHarness() {
+  const timerHandle = {};
+  let timeoutCallback = null;
+  let timeoutDelay = null;
+  let timerActive = false;
+  let cancelCalls = 0;
+  let forceKillCalls = 0;
+
+  return {
+    deps: {
+      scheduleTimeout(callback, delayMs) {
+        timeoutCallback = callback;
+        timeoutDelay = delayMs;
+        timerActive = true;
+        return timerHandle;
+      },
+      cancelTimeout(handle) {
+        assert.strictEqual(handle, timerHandle);
+        cancelCalls += 1;
+        timerActive = false;
+      },
+    },
+    fireTimeout() {
+      assert.ok(timeoutCallback, 'escalation callback should be registered');
+      if (timerActive) timeoutCallback();
+    },
+    forceKill() {
+      forceKillCalls += 1;
+    },
+    observed() {
+      return { timeoutDelay, cancelCalls, forceKillCalls };
     },
   };
 }
@@ -126,4 +160,39 @@ test('Windows tree termination times out deterministically and stops taskkill', 
     signal: null,
   });
   assert.strictEqual(harness.observed().killCalls, 1);
+});
+
+test('completed graceful tree termination cancels its pending force escalation', async () => {
+  const harness = createEscalationHarness();
+  armProcessTreeKillEscalation(
+    Promise.resolve({ status: 'completed', exitCode: 0, signal: null }),
+    () => harness.forceKill(),
+    5_000,
+    harness.deps,
+  );
+
+  await Promise.resolve();
+
+  assert.deepStrictEqual(harness.observed(), {
+    timeoutDelay: 5_000,
+    cancelCalls: 1,
+    forceKillCalls: 0,
+  });
+  harness.fireTimeout();
+  assert.strictEqual(harness.observed().forceKillCalls, 0);
+});
+
+test('failed or timed-out graceful tree termination preserves force escalation', async () => {
+  const outcomes = [{ status: 'failed' }, { status: 'timed_out' }];
+
+  for (const outcome of outcomes) {
+    const harness = createEscalationHarness();
+    armProcessTreeKillEscalation(Promise.resolve(outcome), () => harness.forceKill(), 5_000, harness.deps);
+
+    await Promise.resolve();
+
+    assert.strictEqual(harness.observed().cancelCalls, 0, `${outcome.status} must retain escalation`);
+    harness.fireTimeout();
+    assert.strictEqual(harness.observed().forceKillCalls, 1, `${outcome.status} must force-kill after grace`);
+  }
 });

@@ -17,7 +17,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createModuleLogger } from './logger.js';
 import { buildManagedRunnerEnvironment } from './managed-runner-environment.js';
-import { terminateWindowsProcessTree } from './managed-runner-process-tree.js';
+import {
+  armProcessTreeKillEscalation,
+  type ProcessTreeKillEscalation,
+  terminateWindowsProcessTree,
+  type WindowsProcessTreeTerminationResult,
+} from './managed-runner-process-tree.js';
 
 const log = createModuleLogger('managed-runner');
 
@@ -57,7 +62,7 @@ export class ManagedRunner {
   private _logPath: string | null = null;
   private _child: ChildProcess | null = null;
   private _timeoutTimer: ReturnType<typeof setTimeout> | null = null;
-  private _killTimer: ReturnType<typeof setTimeout> | null = null;
+  private _killEscalation: ProcessTreeKillEscalation | null = null;
   /** P2-3 fix: rolling tail buffer keeps last TAIL_LINES regardless of log file truncation */
   private _rollingTail: string[] = [];
 
@@ -172,14 +177,8 @@ export class ManagedRunner {
         if (this._state !== 'running') return;
         log.info({ pid: this._pid, command, timeoutMs }, 'ManagedRunner: timeout reached, sending SIGTERM');
         this._state = 'timed_out';
-        // P1-2 fix: kill the process GROUP (shell + children), not just the shell PID.
-        this._killProcessGroup('SIGTERM');
-
-        // Escalate even if the shell exits before descendants.
-        this._killTimer = setTimeout(() => {
-          log.warn({ pid: this._pid }, 'ManagedRunner: SIGKILL after grace period');
-          this._killProcessGroup('SIGKILL');
-        }, KILL_GRACE_MS);
+        const gracefulTermination = this._killProcessGroup('SIGTERM');
+        this._armKillEscalation(gracefulTermination, 'ManagedRunner: SIGKILL after grace period');
       }, timeoutMs);
 
       // `close` waits for stdout/stderr to drain before the tail is read.
@@ -198,10 +197,7 @@ export class ManagedRunner {
           this._timeoutTimer = null;
         }
         if (this._state !== 'timed_out' && this._state !== 'cancelled') {
-          if (this._killTimer) {
-            clearTimeout(this._killTimer);
-            this._killTimer = null;
-          }
+          this._clearKillEscalation();
         }
         const durationMs = Date.now() - startTime;
 
@@ -257,40 +253,32 @@ export class ManagedRunner {
     });
   }
 
-  /**
-   * Cancel the running process. SIGTERM → 5s grace → SIGKILL.
-   * No-op if not running.
-   */
+  /** Cancel the running process. SIGTERM → 5s grace → SIGKILL. */
   cancel(): void {
     if (this._state !== 'running' || !this._child) return;
 
     log.info({ pid: this._pid }, 'ManagedRunner: cancel requested, sending SIGTERM');
     this._state = 'cancelled';
     this._clearTimers();
-    // Terminate the whole process tree.
-    this._killProcessGroup('SIGTERM');
-
-    // Escalate even if the shell exits before descendants.
-    this._killTimer = setTimeout(() => {
-      log.warn({ pid: this._pid }, 'ManagedRunner: SIGKILL after cancel grace period');
-      this._killProcessGroup('SIGKILL');
-    }, KILL_GRACE_MS);
+    const gracefulTermination = this._killProcessGroup('SIGTERM');
+    this._armKillEscalation(gracefulTermination, 'ManagedRunner: SIGKILL after cancel grace period');
   }
 
   /** Terminate the detached process group (Unix) or process tree (Windows). */
-  private _killProcessGroup(signal: NodeJS.Signals): void {
-    if (!this._pid) return;
+  private _killProcessGroup(signal: NodeJS.Signals): Promise<WindowsProcessTreeTerminationResult> | null {
+    if (!this._pid) return null;
 
     if (process.platform === 'win32') {
       const pid = this._pid;
-      void terminateWindowsProcessTree(pid, signal).then((result) => {
+      const termination = terminateWindowsProcessTree(pid, signal);
+      void termination.then((result) => {
         if (result.status === 'completed') {
           log.debug({ pid, signal }, 'ManagedRunner: taskkill completed');
           return;
         }
         log.warn({ pid, signal, result }, `ManagedRunner: taskkill ${result.status}`);
       });
-      return;
+      return termination;
     }
 
     try {
@@ -299,6 +287,26 @@ export class ManagedRunner {
       // Process group may already be gone — that's fine
       log.debug({ pid: this._pid, signal, err }, 'ManagedRunner: kill process group failed (may already be gone)');
     }
+    return null;
+  }
+
+  private _armKillEscalation(
+    gracefulTermination: Promise<WindowsProcessTreeTerminationResult> | null,
+    warningMessage: string,
+  ): void {
+    this._killEscalation = armProcessTreeKillEscalation(
+      gracefulTermination,
+      () => {
+        log.warn({ pid: this._pid }, warningMessage);
+        this._killProcessGroup('SIGKILL');
+      },
+      KILL_GRACE_MS,
+    );
+  }
+
+  private _clearKillEscalation(): void {
+    this._killEscalation?.cancel();
+    this._killEscalation = null;
   }
 
   private _clearTimers(): void {
@@ -306,10 +314,7 @@ export class ManagedRunner {
       clearTimeout(this._timeoutTimer);
       this._timeoutTimer = null;
     }
-    if (this._killTimer) {
-      clearTimeout(this._killTimer);
-      this._killTimer = null;
-    }
+    this._clearKillEscalation();
   }
 
   private _readTailOutput(): string {

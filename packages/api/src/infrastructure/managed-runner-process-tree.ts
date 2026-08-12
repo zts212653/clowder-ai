@@ -19,6 +19,15 @@ export interface BoundedTimerHandle {
   unref?(): void;
 }
 
+export interface ProcessTreeKillEscalation {
+  cancel(): void;
+}
+
+export interface ProcessTreeKillEscalationDeps {
+  scheduleTimeout(callback: () => void, delayMs: number): BoundedTimerHandle;
+  cancelTimeout(handle: BoundedTimerHandle): void;
+}
+
 export interface WindowsProcessTreeTerminationDeps {
   spawnTaskkill(command: string, args: string[], options: TaskkillSpawnOptions): TaskkillChildProcess;
   scheduleTimeout(callback: () => void, delayMs: number): BoundedTimerHandle;
@@ -50,10 +59,53 @@ const DEFAULT_DEPS: WindowsProcessTreeTerminationDeps = {
   cancelTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
 
+const DEFAULT_ESCALATION_DEPS: ProcessTreeKillEscalationDeps = {
+  scheduleTimeout: DEFAULT_DEPS.scheduleTimeout,
+  cancelTimeout: DEFAULT_DEPS.cancelTimeout,
+};
+
 export function buildTaskkillArgs(pid: number, signal: NodeJS.Signals): string[] {
   const args = ['/PID', String(pid), '/T'];
   if (signal === 'SIGKILL') args.push('/F');
   return args;
+}
+
+/**
+ * Arm one force-kill fallback for a graceful process-tree termination attempt.
+ *
+ * A completed Windows `taskkill /T` authoritatively terminated that PID's tree,
+ * so retaining a later `/F /T` would risk targeting a reused PID. Failed or
+ * timed-out helpers retain the fallback. Unix callers pass `null` and preserve
+ * their existing SIGTERM → grace → SIGKILL behavior.
+ */
+export function armProcessTreeKillEscalation(
+  gracefulTermination: Promise<WindowsProcessTreeTerminationResult> | null,
+  forceKill: () => void,
+  graceMs: number,
+  deps: ProcessTreeKillEscalationDeps = DEFAULT_ESCALATION_DEPS,
+): ProcessTreeKillEscalation {
+  let active = true;
+  let timer: BoundedTimerHandle;
+
+  const cancel = (): void => {
+    if (!active) return;
+    active = false;
+    deps.cancelTimeout(timer);
+  };
+
+  timer = deps.scheduleTimeout(() => {
+    if (!active) return;
+    active = false;
+    forceKill();
+  }, graceMs);
+
+  if (gracefulTermination) {
+    void gracefulTermination.then((result) => {
+      if (result.status === 'completed') cancel();
+    });
+  }
+
+  return { cancel };
 }
 
 /**
