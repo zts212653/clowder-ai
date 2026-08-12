@@ -4,23 +4,20 @@
  * Spawns a shell command, captures combined stdout+stderr output to a temp log file,
  * and returns a structured result when the command exits, times out, or is cancelled.
  *
- * Design decisions (per f167-phase-p-wakewhen.md plan):
- * - Shell mode: `spawn(command, { shell: true })` — commands are shell expressions
- * - Output: combined stdout+stderr piped to temp file; last 50 lines returned
- * - Timeout: SIGTERM → 5s grace → SIGKILL
- * - Single-use: each ManagedRunner instance handles one command lifecycle
- * - Log cleanup: temp file deleted after result is captured
+ * Shell expressions run once per instance; output is captured to a temporary log.
+ * Termination follows SIGTERM → 5s grace → SIGKILL and returns the last 50 lines.
  *
  * State machine:
  *   IDLE → RUNNING → {COMPLETED | TIMED_OUT | CANCELLED} → (log cleaned up)
  */
 
-import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
 import { createWriteStream, existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createModuleLogger } from './logger.js';
 import { buildManagedRunnerEnvironment } from './managed-runner-environment.js';
+import { terminateWindowsProcessTree } from './managed-runner-process-tree.js';
 
 const log = createModuleLogger('managed-runner');
 
@@ -101,8 +98,7 @@ export class ManagedRunner {
     return new Promise<WakeWhenResult>((resolve) => {
       const logStream = createWriteStream(this._logPath!, { flags: 'w' });
 
-      // P1-2 fix: detached=true creates a new process group so we can kill
-      // the entire tree (shell + children) via process.kill(-pid, signal).
+      // A detached child leads the process group used for tree termination.
       const child = spawn(command, {
         shell: true,
         cwd,
@@ -179,19 +175,14 @@ export class ManagedRunner {
         // P1-2 fix: kill the process GROUP (shell + children), not just the shell PID.
         this._killProcessGroup('SIGTERM');
 
-        // P1-4 fix (cloud R2): always attempt SIGKILL after grace period in timed_out state.
-        // With detached=true, the shell may exit first (firing the 'exit' event) while child
-        // processes in the group survive SIGTERM. _killProcessGroup(-pid, SIGKILL) is idempotent
-        // (ESRCH caught if group is already dead).
+        // Escalate even if the shell exits before descendants.
         this._killTimer = setTimeout(() => {
           log.warn({ pid: this._pid }, 'ManagedRunner: SIGKILL after grace period');
           this._killProcessGroup('SIGKILL');
         }, KILL_GRACE_MS);
       }, timeoutMs);
 
-      // P2-9 fix (cloud R4): use 'close' instead of 'exit'. Node can emit 'exit'
-      // before child stdout/stderr streams have fully drained — using 'close' ensures
-      // all piped data has been consumed before we read the rolling tail.
+      // `close` waits for stdout/stderr to drain before the tail is read.
       child.on('close', (code, signal) => {
         // P2-3 fix: flush any remaining partial line to rolling tail
         if (_rollingPartialLine) {
@@ -201,11 +192,7 @@ export class ManagedRunner {
           }
           _rollingPartialLine = '';
         }
-        // P1-4 fix (cloud R2): selective timer clearing.
-        // Always clear timeout timer (process already exited, no need).
-        // Keep _killTimer alive in timed_out/cancelled state — with detached=true,
-        // the shell may exit while child processes in the group survive SIGTERM.
-        // The SIGKILL escalation must still fire to clean up the group.
+        // Keep escalation alive when descendants may outlive the shell.
         if (this._timeoutTimer) {
           clearTimeout(this._timeoutTimer);
           this._timeoutTimer = null;
@@ -280,46 +267,37 @@ export class ManagedRunner {
     log.info({ pid: this._pid }, 'ManagedRunner: cancel requested, sending SIGTERM');
     this._state = 'cancelled';
     this._clearTimers();
-    // P1-2 fix: kill the process GROUP, not just the shell PID
+    // Terminate the whole process tree.
     this._killProcessGroup('SIGTERM');
 
-    // P1-4 fix (cloud R2): always attempt SIGKILL after cancel grace period.
-    // With detached=true, shell may exit while children in the group survive.
+    // Escalate even if the shell exits before descendants.
     this._killTimer = setTimeout(() => {
       log.warn({ pid: this._pid }, 'ManagedRunner: SIGKILL after cancel grace period');
       this._killProcessGroup('SIGKILL');
     }, KILL_GRACE_MS);
   }
 
-  /**
-   * P1-2 fix: kill the entire process group (shell + child processes).
-   * With detached=true, child.pid IS the process group leader.
-   *
-   * Platform-specific implementation:
-   * - Unix: process.kill(-pid, signal) sends signal to all processes in the group
-   * - Windows: taskkill /T kills the entire process tree
-   */
+  /** Terminate the detached process group (Unix) or process tree (Windows). */
   private _killProcessGroup(signal: NodeJS.Signals): void {
     if (!this._pid) return;
 
+    if (process.platform === 'win32') {
+      const pid = this._pid;
+      void terminateWindowsProcessTree(pid, signal).then((result) => {
+        if (result.status === 'completed') {
+          log.debug({ pid, signal }, 'ManagedRunner: taskkill completed');
+          return;
+        }
+        log.warn({ pid, signal, result }, `ManagedRunner: taskkill ${result.status}`);
+      });
+      return;
+    }
+
     try {
-      if (process.platform === 'win32') {
-        // Windows: use taskkill /T to kill the entire process tree
-        // /T = terminate all child processes
-        // /F = force termination (only for SIGKILL equivalent)
-        const args = signal === 'SIGKILL'
-          ? ['/PID', String(this._pid), '/T', '/F']
-          : ['/PID', String(this._pid), '/T'];
-        execFileSync('taskkill', args, { stdio: 'ignore' });
-        log.debug({ pid: this._pid, signal, args }, 'ManagedRunner: taskkill sent (Windows)');
-      } else {
-        // Unix: use negative PID to kill the process group
-        process.kill(-this._pid, signal);
-        log.debug({ pid: this._pid, signal }, 'ManagedRunner: signal sent to process group (Unix)');
-      }
+      process.kill(-this._pid, signal);
     } catch (err) {
       // Process group may already be gone — that's fine
-      log.debug({ pid: this._pid, signal, err }, 'ManagedRunner: kill process group failed (may already be dead)');
+      log.debug({ pid: this._pid, signal, err }, 'ManagedRunner: kill process group failed (may already be gone)');
     }
   }
 
