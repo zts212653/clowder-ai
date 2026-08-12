@@ -139,12 +139,24 @@ describe('opencode recovery boundary', () => {
 
   test('safe tool-output projection redacts provider tokens and absolute paths', () => {
     const projected = projectSafeOpenCodeToolOutput(
-      'token=sk-review-secret-123 C:\\Users\\Alice\\secrets\\config.json /Users/alice/.ssh/id_rsa',
+      [
+        'token=sk-review-secret-123',
+        'C:\\Users\\Alice\\secrets\\config.json',
+        '/Users/alice/.ssh/id_rsa',
+        '/usr/local/bin/opencode',
+        '/root/.ssh/id_rsa',
+        '/data/app/config.env',
+        '/srv/opencode/runtime.log',
+      ].join(' '),
     );
 
     assert.doesNotMatch(projected, /sk-review-secret/);
     assert.doesNotMatch(projected, /C:\\Users\\Alice/);
     assert.doesNotMatch(projected, /\/Users\/alice/);
+    assert.doesNotMatch(projected, /\/usr\/local/);
+    assert.doesNotMatch(projected, /\/root\/\.ssh/);
+    assert.doesNotMatch(projected, /\/data\/app/);
+    assert.doesNotMatch(projected, /\/srv\/opencode/);
     assert.match(projected, /\[redacted/);
   });
 });

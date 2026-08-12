@@ -1034,17 +1034,37 @@ describe('OpenCodeAgentService', () => {
   });
 
   // F212 Phase G R1 P1 (cloud codex catch on 1d519e7f2): tool-only turns are legitimate
-  // task completions per F215 AC-B3. Tool events that complete the user's request without
-  // a text response MUST NOT be flagged as silent_completion.
-  test('AC-G3 R1 P1: tool_use event without text → does NOT yield silent_completion', async () => {
+  // task completions per F215 AC-B3. Tool events must not be mislabeled as
+  // silent_completion; if the CLI exits after a tool with no final text, recover
+  // through the no-tool finalizer in append mode so later real text is not replaced.
+  test('AC-G3 R1 P1: tool_use event without text runs append-mode finalizer, not silent_completion', async () => {
     const proc = createMockProcess();
-    const spawnFn = mock.fn(() => proc);
+    const finalizerProc = createMockProcess();
+    let spawnCalls = 0;
+    const spawnFn = mock.fn(() => {
+      spawnCalls++;
+      if (spawnCalls === 2) {
+        process.nextTick(() => {
+          emitOpenCodeEvents(finalizerProc, [
+            STEP_START,
+            {
+              ...TEXT_RESPONSE,
+              part: { ...TEXT_RESPONSE.part, text: 'The tool completed and produced file.txt.' },
+            },
+            STEP_FINISH,
+          ]);
+        });
+        return finalizerProc;
+      }
+      return proc;
+    });
     const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-haiku-4-5' });
     const promise = collect(service.invoke('Use tools'));
-    // step_start + tool_use only — no TEXT_RESPONSE. Per F215 AC-B3 this is a valid
-    // tool-only completion path. silent_completion would mislabel it as a provider error.
+    // step_start + tool_use only — no TEXT_RESPONSE from the main CLI invocation.
+    // This is not a provider error, but users still need final assistant text.
     emitOpenCodeEvents(proc, [STEP_START, TOOL_USE, STEP_FINISH]);
     const messages = await promise;
+    const textMsgs = messages.filter((m) => m.type === 'text');
 
     const silentError = messages.find(
       (m) => m.type === 'error' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion',
@@ -1065,6 +1085,10 @@ describe('OpenCodeAgentService', () => {
       messages.some((m) => m.type === 'tool_use'),
       'tool_use yield confirms event reached transformer',
     );
+    assert.equal(spawnCalls, 2, 'tool-only completion gap should start one no-tool finalizer invocation');
+    assert.equal(textMsgs.length, 1, 'tool-only recovery should append exactly one finalizer answer');
+    assert.equal(textMsgs[0].textMode, 'append', 'tool-only recovery must not replace possible later real text');
+    assert.equal(textMsgs[0].content, 'The tool completed and produced file.txt.');
   });
 
   // Issue #1208: CodeAgent 3.0 → OpenCode translate may drop token usage.

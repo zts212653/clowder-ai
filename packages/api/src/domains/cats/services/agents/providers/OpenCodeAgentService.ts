@@ -120,7 +120,18 @@ interface OpenCodePostToolFinalizerParams {
   metadata: MessageMetadata;
   sessionId?: string;
   trace: OpenCodeToolTrace | null;
+  textMode: 'append' | 'replace';
   options?: AgentServiceOptions;
+}
+
+function getOpenCodeStepFinishReason(event: unknown): string | undefined {
+  if (typeof event !== 'object' || event === null) return undefined;
+  const raw = event as Record<string, unknown>;
+  if (raw.type !== 'step_finish') return undefined;
+  const part = raw.part;
+  if (typeof part !== 'object' || part === null) return undefined;
+  const reason = (part as Record<string, unknown>).reason;
+  return typeof reason === 'string' ? reason : undefined;
 }
 
 function isPermanentOpenCodeProviderFailure(event: unknown, reasonCode: string | undefined): boolean {
@@ -352,6 +363,8 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
       let lastTextEventIndex = 0;
       let lastToolEventIndex = 0;
       let lastToolTrace: OpenCodeToolTrace | null = null;
+      let lastStepFinishReason: string | undefined;
+      let terminalStepFinishAfterLastTool = false;
       let lastAssistantMessageId: string | undefined;
       // F212 Phase G (AC-G3, clowder-ai#875): track unique event types so the
       // silent_completion diagnostic can surface them when textEventCount===0.
@@ -460,6 +473,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           if (result.type === 'tool_use') {
             toolUseEmitted = true;
             lastToolEventIndex = eventCount;
+            terminalStepFinishAfterLastTool = false;
             const toolTrace = extractOpenCodeToolTrace(event);
             if (toolTrace !== null) {
               lastToolTrace = toolTrace;
@@ -534,6 +548,13 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
             break;
           }
         }
+        const stepFinishReason = getOpenCodeStepFinishReason(event);
+        if (stepFinishReason) {
+          lastStepFinishReason = stepFinishReason;
+          if (lastToolEventIndex > lastTextEventIndex && eventCount > lastToolEventIndex) {
+            terminalStepFinishAfterLastTool = stepFinishReason !== 'tool-calls';
+          }
+        }
       }
 
       log.info(
@@ -567,7 +588,10 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           };
         }
       }
-      if (textEventCount > 0 && lastToolEventIndex > lastTextEventIndex && !errorAlreadyYielded) {
+      if (lastToolEventIndex > lastTextEventIndex && !errorAlreadyYielded) {
+        // Existing prelude text is incomplete and should be replaced. Pure tool-only
+        // gaps have no text to replace; append avoids clobbering a later real continuation.
+        const postToolFinalizerTextMode = textEventCount > 0 ? 'replace' : 'append';
         log.warn(
           {
             catId: this.catId,
@@ -577,6 +601,9 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
             lastTextEventIndex,
             lastToolEventIndex,
             latestTool: lastToolTrace?.toolName,
+            lastStepFinishReason,
+            terminalStepFinishAfterLastTool,
+            textMode: postToolFinalizerTextMode,
           },
           'OpenCode CLI stopped after tool_use without final text - running no-tool finalizer',
         );
@@ -590,6 +617,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
             ? { sessionId: metadata.sessionId ?? options?.sessionId }
             : {}),
           trace: lastToolTrace,
+          textMode: postToolFinalizerTextMode,
           options,
         })) {
           if (finalizerMsg.type === 'text') textEventCount++;
@@ -766,7 +794,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         finalizerTextBuffer.push({
           ...result,
           metadata: params.metadata,
-          textMode: finalizerTextBuffer.length === 0 ? ('replace' as const) : result.textMode,
+          textMode: finalizerTextBuffer.length === 0 ? params.textMode : result.textMode,
         });
         continue;
       }
@@ -801,7 +829,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         type: 'text',
         catId: this.catId,
         content: buildOpenCodePostToolFallbackText(params.trace, finalizerErrorReason ?? 'no_text'),
-        textMode: 'replace',
+        textMode: params.textMode,
         metadata: params.metadata,
         timestamp: Date.now(),
       };

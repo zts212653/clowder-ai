@@ -79,7 +79,7 @@ function redactGenericAbsolutePaths(value: string): string {
   return value
     .replace(/\b[A-Za-z]:\\(?:[^\s"'<>|]+\\)*[^\s"'<>|]+/g, '[redacted path]')
     .replace(
-      /(^|[\s"'(=[{,:])\/(?:Users|home|var|private|opt|etc|mnt|workspace|tmp)\/[^\s"'<>{}|]+/g,
+      /(^|[\s"'(=[{,:])\/(?:Users|home|var|private|opt|etc|mnt|workspace|tmp|usr|root|data|app|srv|projects)\/[^\s"'<>{}|]+/g,
       (_match, prefix: string) => `${prefix}[redacted path]`,
     );
 }
