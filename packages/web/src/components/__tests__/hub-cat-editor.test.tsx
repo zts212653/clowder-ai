@@ -367,6 +367,94 @@ describe('HubCatEditor', () => {
     expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
   });
 
+  it('derives Context Window compatibility from the edited client instead of the saved member', async () => {
+    const savedAntigravity = {
+      id: 'runtime-antigravity',
+      displayName: 'Runtime antigravity',
+      clientId: 'antigravity',
+      defaultModel: 'test-model',
+      color: { primary: '#16a34a', secondary: '#bbf7d0' },
+      mentionPatterns: ['@runtime-antigravity'],
+      avatar: '/avatars/default.png',
+      roleDescription: 'runtime config',
+      personality: 'test',
+      resolvedContext: {
+        reportsRuntimeWindow: false,
+        nativeWindowControl: false,
+        authoritativeUsage: false,
+        usageTelemetry: 'unavailable' as const,
+        nativeCompressionControl: false,
+        observesCompression: false,
+      },
+    } satisfies CatData;
+
+    await renderAdvancedRuntimeSection('antigravity');
+    expect(document.body.textContent).toContain('当前 Client 无法自动探测上下文窗口');
+
+    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', {}, {}, { cat: savedAntigravity });
+    expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
+
+    await renderAdvancedRuntimeSection(
+      'antigravity',
+      'test-model',
+      {},
+      {},
+      {
+        cat: {
+          ...savedAntigravity,
+          clientId: 'openai',
+          resolvedContext: {
+            ...actionableContextProjection,
+            reportsRuntimeWindow: true,
+            nativeWindowControl: true,
+          },
+        },
+      },
+    );
+    expect(document.body.textContent).toContain('当前 Client 无法自动探测上下文窗口');
+
+    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', { codexCarrier: 'app_server' });
+    expect(document.body.textContent).toContain('当前 Client 无法自动探测上下文窗口');
+
+    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', { codexCarrier: 'exec_json' });
+    expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
+  });
+
+  it('does not reuse a saved Manual source after the editor switches Context Window to Auto', async () => {
+    await renderAdvancedRuntimeSection(
+      'antigravity',
+      'test-model',
+      {},
+      {},
+      {
+        cat: {
+          id: 'runtime-antigravity',
+          displayName: 'Runtime antigravity',
+          clientId: 'antigravity',
+          defaultModel: 'test-model',
+          contextWindow: 128_000,
+          color: { primary: '#16a34a', secondary: '#bbf7d0' },
+          mentionPatterns: ['@runtime-antigravity'],
+          avatar: '/avatars/default.png',
+          roleDescription: 'runtime config',
+          personality: 'test',
+          resolvedContext: {
+            source: 'manual',
+            windowTokens: 128_000,
+            reportsRuntimeWindow: false,
+            nativeWindowControl: false,
+            authoritativeUsage: false,
+            usageTelemetry: 'unavailable',
+            nativeCompressionControl: false,
+            observesCompression: false,
+          },
+        },
+      },
+    );
+
+    expect(document.body.textContent).toContain('当前 Client 无法自动探测上下文窗口；请填写正整数使用 Manual 模式。');
+  });
+
   it.each([
     'handoff',
     'compress',

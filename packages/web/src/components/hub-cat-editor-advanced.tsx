@@ -76,7 +76,7 @@ export function AdvancedRuntimeSection({
         <p className="text-xs leading-5 text-[var(--console-runtime-hint)]">
           填写正整数 = Manual 模式，作为该成员的上下文窗口大小。留空或填 0 = Auto，由运行时自动探测。
         </p>
-        <ContextWindowCompatibilityNotice cat={cat} contextWindow={form.contextWindow} />
+        <ContextWindowCompatibilityNotice cat={cat} form={form} />
         {cliExtensionsAvailable && cliEffortOptions ? (
           <>
             <TextField
@@ -195,13 +195,42 @@ export function AdvancedRuntimeSection({
   );
 }
 
-function ContextWindowCompatibilityNotice({ cat, contextWindow }: { cat?: CatData | null; contextWindow: string }) {
-  const capability = cat?.resolvedContext;
-  if (capability?.reportsRuntimeWindow !== false || capability.nativeWindowControl !== false) return null;
+function selectionMatchesSavedContext(cat: CatData | null | undefined, form: HubCatEditorFormState): boolean {
+  if (!cat || cat.clientId !== form.clientId || Boolean(cat.acp) !== form.acpEnabled) return false;
+  if (form.clientId !== 'openai') return true;
+  return (cat.cli?.carrier ?? '') === form.codexCarrier;
+}
 
-  const manualWindow = Number(contextWindow.trim());
+function draftCannotResolveOrApplyContextWindow(form: HubCatEditorFormState): boolean | null {
+  if (form.acpEnabled) return false;
+  if (form.clientId === 'antigravity' || form.clientId === 'catagent') return true;
+  if (form.clientId !== 'openai') return false;
+  if (form.codexCarrier === 'app_server') return true;
+  if (form.codexCarrier === 'exec_json') return false;
+  return null;
+}
+
+function ContextWindowCompatibilityNotice({ cat, form }: { cat?: CatData | null; form: HubCatEditorFormState }) {
+  const usesSavedContext = selectionMatchesSavedContext(cat, form);
+  const capability = usesSavedContext ? cat?.resolvedContext : null;
+  const projectedIncompatibility =
+    capability?.reportsRuntimeWindow === false && capability.nativeWindowControl === false
+      ? true
+      : capability?.reportsRuntimeWindow === true || capability?.nativeWindowControl === true
+        ? false
+        : null;
+  const cannotResolveOrApply = projectedIncompatibility ?? draftCannotResolveOrApplyContextWindow(form);
+  if (cannotResolveOrApply !== true) return null;
+
+  const manualWindow = Number(form.contextWindow.trim());
   const isManual = Number.isInteger(manualWindow) && manualWindow > 0;
-  if (!isManual && capability.source) return null;
+  const hasCurrentAutoResolution =
+    !isManual &&
+    usesSavedContext &&
+    cat?.contextWindow == null &&
+    cat?.defaultModel === form.defaultModel &&
+    (capability?.source === 'reported' || capability?.source === 'catalog');
+  if (hasCurrentAutoResolution) return null;
 
   return (
     <p className="rounded-[10px] bg-[var(--console-field-bg)] px-3 py-2 text-xs leading-5 text-[var(--cafe-accent)]">
