@@ -297,6 +297,31 @@ describe('HubCatEditor', () => {
     await renderAdvancedRuntimeSection(
       'antigravity',
       'test-model',
+      { contextWindow: '128000' },
+      {},
+      {
+        cat: {
+          ...baseCat,
+          resolvedContext: {
+            reportsRuntimeWindow: false,
+            nativeWindowControl: false,
+            authoritativeUsage: false,
+            usageTelemetry: 'unavailable',
+            nativeCompressionControl: false,
+            observesCompression: false,
+          },
+        },
+      },
+    );
+
+    expect(document.body.textContent).toContain(
+      '当前 Client 无法校验或调整自身的上下文窗口；请确认 Manual 值不高于 Client 的实际上限。',
+    );
+    expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
+
+    await renderAdvancedRuntimeSection(
+      'antigravity',
+      'test-model',
       {},
       {},
       {
