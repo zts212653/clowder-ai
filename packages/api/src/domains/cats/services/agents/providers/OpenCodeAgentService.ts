@@ -14,10 +14,6 @@
  *   error       → error
  */
 
-import Database from 'better-sqlite3';
-import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
@@ -48,6 +44,18 @@ import {
   userControlsOpenCodeAutoApprove,
 } from './opencode-auto-approval.js';
 import { transformOpenCodeEvent } from './opencode-event-transform.js';
+import {
+  buildOpenCodePostToolFallbackText,
+  buildOpenCodePostToolFinalizerPrompt,
+  extractOpenCodeMessageRef,
+  extractOpenCodeToolTrace,
+  identifierPrefix,
+  OPENCODE_NO_TOOL_FINALIZER_AGENT,
+  OPENCODE_NO_TOOL_PERMISSION,
+  type OpenCodeToolTrace,
+  recoverOpenCodeSilentCompletion,
+  SessionSingleFlight,
+} from './opencode-recovery.js';
 
 const log = createModuleLogger('opencode-agent');
 
@@ -74,9 +82,7 @@ interface OpenCodeAgentServiceOptions {
 const OPENCODE_API_KEY_ENV = 'OPENCODE_API_KEY';
 const ANTHROPIC_API_KEY_ENV = 'ANTHROPIC_API_KEY';
 const ANTHROPIC_BASE_URL_ENV = 'ANTHROPIC_BASE_URL';
-const OPENCODE_DB_PATH_ENV = 'OPENCODE_DB_PATH';
 const OPENCODE_READ_ONLY_AGENT = 'cat-cafe-read-only';
-const OPENCODE_NO_TOOL_FINALIZER_AGENT = 'cat-cafe-no-tool-finalizer';
 const OPENCODE_READ_ONLY_PERMISSION = {
   '*': 'deny',
   read: 'allow',
@@ -91,21 +97,6 @@ const OPENCODE_READ_ONLY_PERMISSION = {
   task: 'deny',
   question: 'deny',
 } as const;
-const OPENCODE_NO_TOOL_PERMISSION = {
-  '*': 'deny',
-  read: 'deny',
-  glob: 'deny',
-  grep: 'deny',
-  lsp: 'deny',
-  skill: 'deny',
-  webfetch: 'deny',
-  websearch: 'deny',
-  edit: 'deny',
-  bash: 'deny',
-  task: 'deny',
-  question: 'deny',
-} as const;
-const MAX_OPENCODE_VISIBLE_TOOL_OUTPUT_CHARS = 4_000;
 // Process-wide cache: --auto support is a property of the installed opencode binary.
 // Restart the API process after upgrading opencode so this capability is re-probed.
 let sharedOpenCodeAutoApproveProbe: Promise<OpenCodeAutoApproveProbeResult> | undefined;
@@ -121,12 +112,6 @@ export interface OpenCodeEnvDebugSummary {
   catCafeOcBaseUrl: string;
 }
 
-interface OpenCodeToolTrace {
-  toolName: string;
-  status?: string;
-  output?: unknown;
-}
-
 interface OpenCodePostToolFinalizerParams {
   command: string;
   cwd?: string;
@@ -136,11 +121,6 @@ interface OpenCodePostToolFinalizerParams {
   sessionId?: string;
   trace: OpenCodeToolTrace | null;
   options?: AgentServiceOptions;
-}
-
-interface OpenCodeMessageRef {
-  sessionId?: string;
-  messageId?: string;
 }
 
 function isPermanentOpenCodeProviderFailure(event: unknown, reasonCode: string | undefined): boolean {
@@ -169,97 +149,6 @@ function isPermanentOpenCodeProviderFailure(event: unknown, reasonCode: string |
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
-}
-
-function truncateForVisibleText(value: string, maxChars: number): string {
-  if (value.length <= maxChars) return value;
-  return `${value.slice(0, maxChars)}\n...[truncated ${value.length - maxChars} chars]`;
-}
-
-function stringifyForVisibleText(value: unknown, maxChars: number): string {
-  if (value == null) return '';
-  if (typeof value === 'string') return truncateForVisibleText(value, maxChars);
-  const jsonText = JSON.stringify(value, null, 2);
-  return truncateForVisibleText(typeof jsonText === 'string' ? jsonText : String(value), maxChars);
-}
-
-function extractOpenCodeToolTrace(event: unknown): OpenCodeToolTrace | null {
-  if (!isRecord(event)) return null;
-  if (event.type !== 'tool_use') return null;
-  const part = isRecord(event.part) ? event.part : {};
-  const state = isRecord(part.state) ? part.state : {};
-  const toolName = typeof part.tool === 'string' && part.tool.length > 0 ? part.tool : 'unknown';
-  const trace: OpenCodeToolTrace = { toolName };
-  if (typeof state.status === 'string' && state.status.length > 0) {
-    trace.status = state.status;
-  }
-  if ('output' in state) {
-    trace.output = state.output;
-  }
-  return trace;
-}
-
-function buildOpenCodePostToolFinalizerPrompt(trace: OpenCodeToolTrace | null): string {
-  const toolName = trace ? trace.toolName : 'a tool';
-  const outputText = stringifyForVisibleText(trace ? trace.output : undefined, MAX_OPENCODE_VISIBLE_TOOL_OUTPUT_CHARS);
-  return [
-    'The previous OpenCode turn stopped immediately after a tool call and did not produce the final assistant text.',
-    'Do not call any tools. Use only the existing session state and the latest tool result below to write the final answer to the user.',
-    `Latest tool: ${toolName}${trace?.status ? ` (${trace.status})` : ''}.`,
-    outputText.length > 0 ? `Latest tool output:\n${outputText}` : 'No tool output was captured.',
-    'If the available tool result is insufficient, state the limitation briefly instead of inventing details.',
-  ].join('\n\n');
-}
-
-function extractOpenCodeMessageRef(event: unknown): OpenCodeMessageRef | null {
-  if (typeof event !== 'object' || event === null) return null;
-  const record = event as Record<string, unknown>;
-  if (record.type !== 'step_start') return null;
-  const part = typeof record.part === 'object' && record.part !== null ? (record.part as Record<string, unknown>) : {};
-  const sessionId =
-    typeof part.sessionID === 'string'
-      ? part.sessionID
-      : typeof record.sessionID === 'string'
-        ? record.sessionID
-        : undefined;
-  const messageId =
-    typeof part.messageID === 'string'
-      ? part.messageID
-      : typeof record.messageID === 'string'
-        ? record.messageID
-        : undefined;
-  if (!sessionId && !messageId) return null;
-  return { ...(sessionId ? { sessionId } : {}), ...(messageId ? { messageId } : {}) };
-}
-
-function extractOpenCodePartText(data: string): string | null {
-  try {
-    const parsed = JSON.parse(data) as unknown;
-    if (typeof parsed !== 'object' || parsed === null) return null;
-    const part = parsed as Record<string, unknown>;
-    if (part.type !== 'text' || typeof part.text !== 'string') return null;
-    const text = part.text;
-    return text.trim().length > 0 ? text : null;
-  } catch {
-    return null;
-  }
-}
-
-function defaultOpenCodeDbPath(): string {
-  return join(homedir(), '.local', 'share', 'opencode', 'opencode.db');
-}
-
-function buildOpenCodePostToolFallbackText(trace: OpenCodeToolTrace | null, reason: string): string {
-  const toolName = trace ? trace.toolName : 'a tool';
-  const outputText = stringifyForVisibleText(trace ? trace.output : undefined, MAX_OPENCODE_VISIBLE_TOOL_OUTPUT_CHARS);
-  const lines = [
-    `OpenCode stopped after running \`${toolName}\` but did not produce a final text response.`,
-    `No-tool finalizer recovery did not produce text: ${reason}.`,
-    trace?.status ? `Tool status: ${trace.status}.` : undefined,
-    outputText.length > 0 ? `Latest tool output:\n${outputText}` : 'No tool output was captured.',
-    'This is a recovery message; review the tool output before treating the task as complete.',
-  ];
-  return lines.filter((line): line is string => Boolean(line)).join('\n\n');
 }
 
 function summarizeDebugValue(value: string | null | undefined): string {
@@ -312,6 +201,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
   readonly l0CompilerFn: import('../../types.js').L0CompilerFn | undefined;
   private readonly autoApproveProbeFn: OpenCodeAutoApproveProbeFn | undefined;
   private readonly opencodeDbPath: string | undefined;
+  private readonly sessionSingleFlight = new SessionSingleFlight();
   private autoApproveProbe: Promise<OpenCodeAutoApproveProbeResult> | undefined;
 
   constructor(options?: OpenCodeAgentServiceOptions) {
@@ -359,6 +249,10 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
+    yield* this.sessionSingleFlight.run(options?.sessionId, () => this.invokeUnlocked(prompt, options));
+  }
+
+  private async *invokeUnlocked(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
     // P1-2: runtime model override takes precedence over constructor model
     const effectiveModel = options?.callbackEnv?.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE ?? this.model;
@@ -643,7 +537,12 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
       }
 
       log.info(
-        { catId: this.catId, totalEvents: eventCount, textEvents: textEventCount, sessionId: metadata.sessionId },
+        {
+          catId: this.catId,
+          totalEvents: eventCount,
+          textEvents: textEventCount,
+          sessionIdPrefix: identifierPrefix(metadata.sessionId),
+        },
         'OpenCode CLI invocation completed',
       );
       if (eventCount > 0 && textEventCount === 0 && !errorAlreadyYielded && !toolUseEmitted) {
@@ -652,8 +551,8 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           log.info(
             {
               catId: this.catId,
-              sessionId: metadata.sessionId,
-              messageId: lastAssistantMessageId,
+              sessionIdPrefix: identifierPrefix(metadata.sessionId),
+              messageIdPrefix: identifierPrefix(lastAssistantMessageId),
               textLength: recoveredText.length,
             },
             'Recovered OpenCode silent completion text from local SQLite state',
@@ -687,7 +586,9 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           childEnv,
           effectiveModel,
           metadata,
-          ...(metadata.sessionId ?? options?.sessionId ? { sessionId: metadata.sessionId ?? options?.sessionId } : {}),
+          ...((metadata.sessionId ?? options?.sessionId)
+            ? { sessionId: metadata.sessionId ?? options?.sessionId }
+            : {}),
           trace: lastToolTrace,
           options,
         })) {
@@ -790,7 +691,8 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
       ? params.options.spawnCliOverride(cliOpts)
       : spawnCli(cliOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);
 
-    let finalizerTextEmitted = false;
+    const finalizerTextBuffer: AgentMessage[] = [];
+    let finalizerPoisoned = false;
     let finalizerErrorReason: string | undefined;
     const finalizerEventTypes = new Set<string>();
 
@@ -810,6 +712,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
       finalizerEventTypes.add(evtType);
 
       if (isCliTimeout(event)) {
+        finalizerPoisoned = true;
         finalizerErrorReason = 'timeout';
         log.warn(
           { catId: this.catId, invocationId: params.options?.invocationId, timeoutMs: event.timeoutMs },
@@ -821,6 +724,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         continue;
       }
       if (isCliError(event)) {
+        finalizerPoisoned = true;
         finalizerErrorReason = event.reasonCode ?? 'cli_error';
         log.warn(
           { catId: this.catId, invocationId: params.options?.invocationId, reasonCode: event.reasonCode },
@@ -836,6 +740,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         continue;
       }
       if (result.type === 'tool_use') {
+        finalizerPoisoned = true;
         finalizerErrorReason = 'tool_use_blocked';
         log.warn(
           {
@@ -848,6 +753,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         continue;
       }
       if (result.type === 'error') {
+        finalizerPoisoned = true;
         finalizerErrorReason = 'provider_error';
         log.warn(
           { catId: this.catId, invocationId: params.options?.invocationId, error: result.error },
@@ -856,34 +762,40 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         continue;
       }
       if (result.type === 'text') {
-        yield {
+        if (finalizerPoisoned) continue;
+        finalizerTextBuffer.push({
           ...result,
           metadata: params.metadata,
-          textMode: finalizerTextEmitted ? result.textMode : ('replace' as const),
-        };
-        finalizerTextEmitted = true;
+          textMode: finalizerTextBuffer.length === 0 ? ('replace' as const) : result.textMode,
+        });
         continue;
       }
       if (result.type === 'agent_loop') {
         yield {
           ...result,
           metadata:
-            result.metadata?.usage != null
-              ? { ...params.metadata, usage: result.metadata.usage }
-              : params.metadata,
+            result.metadata?.usage != null ? { ...params.metadata, usage: result.metadata.usage } : params.metadata,
         };
       }
     }
 
-    if (!finalizerTextEmitted) {
+    if (!finalizerPoisoned && finalizerTextBuffer.length > 0) {
+      for (const finalizerText of finalizerTextBuffer) {
+        yield finalizerText;
+      }
+      return;
+    }
+
+    if (finalizerTextBuffer.length === 0 || finalizerPoisoned) {
       log.warn(
         {
           catId: this.catId,
           invocationId: params.options?.invocationId,
           eventTypes: Array.from(finalizerEventTypes),
           reason: finalizerErrorReason ?? 'no_text',
+          finalizerPoisoned,
         },
-        'OpenCode no-tool finalizer produced no text - yielding deterministic recovery text',
+        'OpenCode no-tool finalizer produced no usable text - yielding deterministic recovery text',
       );
       yield {
         type: 'text',
@@ -897,38 +809,24 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
   }
 
   private recoverSilentCompletionText(sessionId: string | undefined, messageId: string | undefined): string | null {
-    if (!sessionId || !messageId) return null;
-    const dbPath = this.opencodeDbPath ?? process.env[OPENCODE_DB_PATH_ENV] ?? defaultOpenCodeDbPath();
-    const dbPathSource = this.opencodeDbPath ? 'override' : process.env[OPENCODE_DB_PATH_ENV] ? 'env' : 'default';
-    if (!existsSync(dbPath)) return null;
-
-    let db: Database.Database | undefined;
-    try {
-      db = new Database(dbPath, { readonly: true, fileMustExist: true });
-      const rows = db
-        .prepare(
-          `
-          SELECT data
-          FROM part
-          WHERE session_id = ? AND message_id = ?
-          ORDER BY time_created ASC
-        `,
-        )
-        .all(sessionId, messageId) as Array<{ data: string }>;
-      const text = rows
-        .map((row) => (typeof row.data === 'string' ? extractOpenCodePartText(row.data) : null))
-        .filter((partText): partText is string => partText !== null)
-        .join('');
-      return text.trim().length > 0 ? text : null;
-    } catch (err) {
+    const recovered = recoverOpenCodeSilentCompletion({
+      sessionId,
+      messageId,
+      ...(this.opencodeDbPath ? { overridePath: this.opencodeDbPath } : {}),
+    });
+    if (recovered.reason && recovered.reason !== 'missing_db' && recovered.reason !== 'no_text') {
       log.warn(
-        { catId: this.catId, sessionId, messageId, dbPathSource, err },
+        {
+          catId: this.catId,
+          sessionIdPrefix: identifierPrefix(sessionId),
+          messageIdPrefix: identifierPrefix(messageId),
+          dbPathSource: recovered.source,
+          reason: recovered.reason,
+        },
         'Failed to recover OpenCode silent completion text from local SQLite state',
       );
-      return null;
-    } finally {
-      db?.close();
     }
+    return recovered.text;
   }
 
   private buildNoToolFinalizerArgs(prompt: string, sessionId: string | undefined, model: string): string[] {

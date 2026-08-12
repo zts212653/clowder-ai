@@ -74,6 +74,18 @@ async function collect(iterable) {
   return messages;
 }
 
+async function delay(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitFor(predicate, description) {
+  for (let i = 0; i < 50; i++) {
+    if (predicate()) return;
+    await delay(5);
+  }
+  assert.fail(`timed out waiting for ${description}`);
+}
+
 function createOpenCodeRecoveryDb({ sessionId, messageId, text }) {
   const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-opencode-db-'));
   const dbPath = join(dir, 'opencode.db');
@@ -1128,6 +1140,147 @@ describe('OpenCodeAgentService', () => {
       !messages.some((m) => m.type === 'system_info' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion'),
       'post-tool finalizer is a recovery, not silent_completion',
     );
+  });
+
+  test('post-tool finalizer tool attempt poisons later text and falls back safely', async () => {
+    const proc = createMockProcess();
+    const finalizerProc = createMockProcess();
+    let spawnCalls = 0;
+    const spawnFn = mock.fn(() => {
+      spawnCalls++;
+      if (spawnCalls === 2) {
+        process.nextTick(() => {
+          emitOpenCodeEvents(finalizerProc, [
+            STEP_START,
+            {
+              ...TOOL_USE,
+              part: { ...TOOL_USE.part, tool: 'read', state: { status: 'completed', input: {}, output: 'forbidden' } },
+            },
+            {
+              ...TEXT_RESPONSE,
+              part: { ...TEXT_RESPONSE.part, text: 'accepted-after-tool' },
+            },
+            STEP_FINISH,
+          ]);
+        });
+        return finalizerProc;
+      }
+      return proc;
+    });
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'deepseek-v4-pro' });
+    const promise = collect(service.invoke('Check the active model and report it'));
+
+    emitOpenCodeEvents(proc, [
+      STEP_START,
+      {
+        ...TEXT_RESPONSE,
+        part: { ...TEXT_RESPONSE.part, text: 'Let me check that.' },
+      },
+      {
+        ...TOOL_USE,
+        part: { ...TOOL_USE.part, tool: 'read', state: { status: 'completed', output: 'model=deepseek-v4-pro' } },
+      },
+      STEP_FINISH,
+    ]);
+
+    const messages = await promise;
+    const textMsgs = messages.filter((m) => m.type === 'text');
+
+    assert.equal(spawnCalls, 2);
+    assert.ok(
+      !textMsgs.some((m) => m.content === 'accepted-after-tool'),
+      'any finalizer tool_use must poison the whole finalizer result before later text is accepted',
+    );
+    assert.equal(textMsgs.at(-1)?.textMode, 'replace');
+    assert.match(String(textMsgs.at(-1)?.content), /tool_use_blocked/);
+  });
+
+  test('post-tool deterministic fallback redacts raw tool output secrets and absolute paths', async () => {
+    const proc = createMockProcess();
+    const finalizerProc = createMockProcess();
+    let spawnCalls = 0;
+    const spawnFn = mock.fn(() => {
+      spawnCalls++;
+      if (spawnCalls === 2) {
+        process.nextTick(() => {
+          emitOpenCodeEvents(finalizerProc, [STEP_START, STEP_FINISH]);
+        });
+        return finalizerProc;
+      }
+      return proc;
+    });
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'deepseek-v4-pro' });
+    const promise = collect(service.invoke('Read config'));
+
+    emitOpenCodeEvents(proc, [
+      STEP_START,
+      {
+        ...TEXT_RESPONSE,
+        part: { ...TEXT_RESPONSE.part, text: 'Reading config.' },
+      },
+      {
+        ...TOOL_USE,
+        part: {
+          ...TOOL_USE.part,
+          tool: 'read',
+          state: {
+            status: 'completed',
+            output:
+              'token=sk-review-secret-123 path=C:\\Users\\Alice\\secrets\\config.json also /Users/alice/.ssh/id_rsa',
+          },
+        },
+      },
+      STEP_FINISH,
+    ]);
+
+    const messages = await promise;
+    const fallback = messages.filter((m) => m.type === 'text').at(-1);
+    const content = String(fallback?.content);
+
+    assert.equal(spawnCalls, 2);
+    assert.equal(fallback?.textMode, 'replace');
+    assert.doesNotMatch(content, /sk-review-secret/);
+    assert.doesNotMatch(content, /C:\\Users\\Alice/);
+    assert.doesNotMatch(content, /\/Users\/alice/);
+    assert.match(content, /\[redacted/);
+  });
+
+  test('same OpenCode session invocations are serialized through finalization', async () => {
+    let active = 0;
+    let maxActive = 0;
+    let started = 0;
+    const releases = [];
+    const spawnCliOverride = async function* () {
+      active++;
+      started++;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => releases.push(resolve));
+      yield STEP_START;
+      yield TEXT_RESPONSE;
+      yield STEP_FINISH;
+      active--;
+    };
+    const service = new OpenCodeAgentService({
+      catId: 'opencode',
+      model: 'deepseek-v4-pro',
+      spawnFn: mock.fn(() => {
+        throw new Error('spawnCliOverride must own this test');
+      }),
+    });
+    const first = collect(service.invoke('first', { sessionId: 'ses_shared', spawnCliOverride }));
+    const second = collect(service.invoke('second', { sessionId: 'ses_shared', spawnCliOverride }));
+
+    await waitFor(() => started >= 1, 'first session process to start');
+    await delay(20);
+    assert.equal(maxActive, 1, 'second same-session invoke must not spawn before first completes');
+    releases[0]();
+    await first;
+
+    await waitFor(() => started === 2, 'second session process to start after first completes');
+    releases[1]();
+    await second;
+
+    assert.equal(maxActive, 1, 'same-session invokes must remain single-flight');
   });
 
   test('issue #1208: opencode events without usage telemetry yield warning alert', async () => {

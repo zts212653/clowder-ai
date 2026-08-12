@@ -836,6 +836,16 @@ export const ENV_VARS: EnvDefinition[] = [
     settingsGroup: 'runtime',
   },
   {
+    name: 'OPENCODE_DB',
+    defaultValue: '(OpenCode default data dir)',
+    description:
+      'Optional OpenCode SQLite database override used only for read-only silent-completion recovery. Leave unset to use OpenCode data-dir discovery.',
+    category: 'cli',
+    sensitive: false,
+    runtimeEditable: false,
+    hubVisible: false,
+  },
+  {
     name: 'CAT_CAFE_SUPERVISOR_PARENT_PID',
     defaultValue: '(内部注入)',
     description: 'CLI supervisor 内部父进程 PID，不需要手动设置',

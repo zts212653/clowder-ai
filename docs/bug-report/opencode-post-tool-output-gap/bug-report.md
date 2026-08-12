@@ -1,3 +1,11 @@
+---
+title: OpenCode + DeepSeek no-output recovery
+status: external-review
+issue: https://github.com/zts212653/clowder-ai/issues/1341
+pr: https://github.com/zts212653/clowder-ai/pull/1342
+created: 2026-08-12
+---
+
 # OpenCode + DeepSeek no-output recovery
 
 ## Summary
@@ -49,9 +57,9 @@ Recovery rule:
 
 - At normal CLI completion, detect `textEventCount > 0 && lastToolEventIndex > lastTextEventIndex && !errorAlreadyYielded`.
 - Run exactly one no-tool finalizer in the same OpenCode session using a dedicated `cat-cafe-no-tool-finalizer` agent.
-- Deny all tools in the finalizer config. The finalizer may use only existing session state and the latest tool output.
+- Deny all tools in the finalizer config. The finalizer may use only existing session state and a sanitized latest-tool-output summary.
 - Emit the first finalizer text with `textMode: "replace"` so it replaces the incomplete prelude.
-- If the finalizer produces no text or attempts a tool, emit a deterministic diagnostic fallback with the latest tool output summary.
+- If the finalizer produces no text or attempts a tool, emit a deterministic diagnostic fallback with the sanitized latest-tool-output summary.
 
 ## Non-goals and safety boundaries
 
@@ -78,18 +86,30 @@ The correct completion contract is:
 
 ## Implementation
 
-Code path: `packages/api/src/domains/cats/services/agents/providers/OpenCodeAgentService.ts`
+Code paths:
+
+- `packages/api/src/domains/cats/services/agents/providers/OpenCodeAgentService.ts`
+- `packages/api/src/domains/cats/services/agents/providers/opencode-recovery.ts`
 
 - Tracks `lastTextEventIndex`, `lastToolEventIndex`, latest tool trace, and latest `step_start` message reference.
 - Adds read-only SQLite recovery for phenotype A using `part.session_id + part.message_id`.
+- Resolves OpenCode SQLite through an explicit override test seam, canonical `OPENCODE_DB`, XDG/platform data roots, and channel-named `opencode*.db` files.
 - Adds a no-tool finalizer for phenotype B using `--session` and `--agent cat-cafe-no-tool-finalizer`.
-- Denies all finalizer tool permissions through `OPENCODE_CONFIG_CONTENT`.
-- Preserves deterministic fallback text only for finalizer failure.
+- Denies all finalizer tool permissions through `OPENCODE_CONFIG_CONTENT` and treats any observed finalizer `tool_use` as a poisoned finalizer result.
+- Buffers finalizer text until the finalizer completes without tool/error poison, then emits the first text with `textMode: "replace"`.
+- Uses one central safe projector for latest tool output before including it in the finalizer prompt or deterministic fallback.
+- Preserves deterministic fallback text only for finalizer failure, with secrets and absolute paths redacted.
+- Serializes invocations for the same OpenCode session so a second turn cannot race a first turn's finalization window.
 
-Regression tests: `packages/api/test/opencode-agent-service.test.js`
+Regression tests:
+
+- `packages/api/test/opencode-agent-service.test.js`
+- `packages/api/test/opencode-recovery.test.js`
 
 - Adds a red/green SQLite recovery case for `step_start`-only NDJSON.
 - Updates the post-tool gap case to require a second no-tool finalizer invocation, session resume, deny-all permissions, and `textMode: "replace"`.
+- Adds fail-closed finalizer poisoning, sanitized fallback, and same-session single-flight regression cases.
+- Adds SQLite path-resolution, schema-drift, malformed-part, multi-part, and redaction tests at the recovery boundary.
 - Keeps the older AC-G3 cases for true silent diagnostics and pure tool-only completion.
 
 ## Verification
