@@ -214,6 +214,16 @@ test('F153: invoke-single-cat calls capturePromptIfEnabled', () => {
   );
   assert.ok(src.includes('capturePromptIfEnabled'), 'Should call capture function after effectivePrompt assembly');
   assert.ok(src.includes('prompt-capture-bridge'), 'Should import from prompt-capture-bridge');
+  assert.match(
+    src,
+    /model: defaultModel \?\? 'unknown'/,
+    'prompt capture must record the member-selected runtime model',
+  );
+  assert.doesNotMatch(
+    src,
+    /model: resolvedAccount\?\.models\?\.\[0\]/,
+    'account.models[0] is an allowed-model entry, never the observed runtime model',
+  );
 });
 
 test('F153: API routes registered in index.ts', () => {
