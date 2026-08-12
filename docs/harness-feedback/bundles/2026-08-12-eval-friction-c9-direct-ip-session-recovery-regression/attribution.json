@@ -1,0 +1,36 @@
+{
+  "verdictId": "2026-08-12-eval-friction-c9-direct-ip-session-recovery-regression",
+  "featureId": "F245",
+  "evalSnapshotId": "eval-F245-2026-08-12",
+  "generatedAt": "2026-08-12T03:05:48.059Z",
+  "findings": [
+    {
+      "id": "FR-2026-08-12-cd494b7db6bf",
+      "relatedFeature": "F245",
+      "frictionSignal": {
+        "type": "friction.cluster_cd494b7db6bf",
+        "severity": "medium",
+        "confidence": 0.7,
+        "detectedAt": "2026-08-12T03:05:48.059Z"
+      },
+      "attribution": {
+        "primaryLayer": "needs_investigation",
+        "evidence": [
+          {
+            "type": "counter",
+            "anchor": "friction-rollup/cluster_cd494b7db6bf",
+            "excerpt": "cluster 'text_frustration: 还是不行' count=1 severity=medium sensorForms=[reason]"
+          }
+        ]
+      },
+      "proposedAction": [
+        {
+          "action": "triage-top-friction-cluster",
+          "target": "F245/friction-rollup",
+          "rationale": "Highest-ranked friction cluster in the window — eval cat assigns the 7-class root cause in the verdict before handoff."
+        }
+      ],
+      "status": "open"
+    }
+  ]
+}

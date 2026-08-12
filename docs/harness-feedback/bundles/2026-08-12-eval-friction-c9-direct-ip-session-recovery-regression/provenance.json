@@ -1,0 +1,27 @@
+{
+  "verdictId": "2026-08-12-eval-friction-c9-direct-ip-session-recovery-regression",
+  "rawInputs": [
+    {
+      "path": "docs/harness-feedback/bundles/2026-08-12-eval-friction-c9-direct-ip-session-recovery-regression/raw/rollup-report.json",
+      "sha256": "c392a64d872bb100e45891aab3ac4e597b71ddb35f0af2dd14af366fd5871cb9"
+    },
+    {
+      "path": "docs/harness-feedback/bundles/2026-08-12-eval-friction-c9-direct-ip-session-recovery-regression/raw/measurement-validity.json",
+      "sha256": "158e4c1dc97450123e6f1ad78fdc21b9ff0bb82fcb0b5f6c57b6620cd8d78de1"
+    }
+  ],
+  "generatedAt": "2026-08-12T03:05:48.059Z",
+  "generator": {
+    "name": "eval-friction-live-verdict",
+    "version": "2"
+  },
+  "sanitizeRulesVersion": "f267-friction-measurement-v1",
+  "sourceThreadId": "thread_eval_friction",
+  "sourceRefs": {
+    "kind": "friction-rollup-snapshot",
+    "windowStartMs": 1786244400000,
+    "windowEndMs": 1786503600000,
+    "topN": 10,
+    "tokenCap": 4000
+  }
+}

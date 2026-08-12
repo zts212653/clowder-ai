@@ -1,0 +1,26 @@
+{
+  "verdictId": "2026-08-12-eval-friction-c9-direct-ip-session-recovery-regression",
+  "evalSnapshotId": "eval-F245-2026-08-12",
+  "featureId": "F245",
+  "generatedAt": "2026-08-12T03:05:48.059Z",
+  "window": {
+    "startMs": 1786244400000,
+    "endMs": 1786503600000,
+    "durationHours": 72
+  },
+  "components": [
+    {
+      "id": "friction-rollup",
+      "name": "friction rollup (Top-N + sensorForm)",
+      "confidence": "low",
+      "activationCounts": {},
+      "frictionCounts": {
+        "cluster_count": 1,
+        "top_cluster_count": 1,
+        "tail_cluster_count": 0,
+        "tail_signal_count": 0,
+        "cluster_cd494b7db6bf": 1
+      }
+    }
+  ]
+}

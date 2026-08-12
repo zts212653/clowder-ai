@@ -1,0 +1,92 @@
+{
+  "verdictId": "2026-08-12-eval-friction-c9-direct-ip-session-recovery-regression",
+  "selector": {
+    "kind": "friction-rollup-snapshot",
+    "windowStartMs": 1786244400000,
+    "windowEndMs": 1786503600000,
+    "topN": 10,
+    "tokenCap": 4000
+  },
+  "window": {
+    "sinceMs": 1786244400000,
+    "untilMs": 1786503600000
+  },
+  "signalCount": 1,
+  "clusterCount": 1,
+  "degraded": true,
+  "droppedChannels": [],
+  "report": {
+    "window": {
+      "sinceMs": 1786244400000,
+      "untilMs": 1786503600000
+    },
+    "generatedAt": "2026-08-12T03:05:48.059Z",
+    "topClusters": [
+      {
+        "clusterId": "cd494b7db6bf",
+        "representative": "text_frustration: 还是不行",
+        "channels": [
+          "user-feedback"
+        ],
+        "count": 1,
+        "members": [
+          {
+            "signalId": "user-feedback:fi_msoh4u90frs9ruzk",
+            "rawRef": "fi_msoh4u90frs9ruzk",
+            "channel": "user-feedback"
+          }
+        ],
+        "method": "rule",
+        "sensorForms": [
+          "reason"
+        ],
+        "severity": "medium"
+      }
+    ],
+    "actionableCandidates": [
+      {
+        "clusterId": "cd494b7db6bf",
+        "representative": "text_frustration: 还是不行",
+        "channels": [
+          "user-feedback"
+        ],
+        "count": 1,
+        "members": [
+          {
+            "signalId": "user-feedback:fi_msoh4u90frs9ruzk",
+            "rawRef": "fi_msoh4u90frs9ruzk",
+            "channel": "user-feedback"
+          }
+        ],
+        "method": "rule",
+        "sensorForms": [
+          "reason"
+        ],
+        "severity": "medium",
+        "actionability": "actionable_candidate",
+        "followupDraft": {
+          "clusterId": "cd494b7db6bf",
+          "title": "Investigate friction cluster: text_frustration: 还是不行",
+          "summary": "text_frustration: 还是不行",
+          "evidenceRefs": [
+            "fi_msoh4u90frs9ruzk"
+          ],
+          "reportingMode": "final-only"
+        },
+        "referenceOnlyEvidenceRefs": []
+      }
+    ],
+    "referenceOnly": [],
+    "tailSummary": {
+      "clusterCount": 0,
+      "signalCount": 0,
+      "byChannel": {}
+    },
+    "degraded": true,
+    "droppedChannels": [],
+    "tokenBudget": {
+      "cap": 4000,
+      "estimated": 292
+    }
+  }
+}

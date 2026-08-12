@@ -1,0 +1,21 @@
+{
+  "verdictId": "2026-08-12-eval-friction-c9-direct-ip-session-recovery-regression",
+  "domainId": "eval:friction",
+  "createdAt": "2026-08-12T03:01:25.648Z",
+  "verdict": "fix",
+  "harnessUnderEval": {
+    "featureId": "F245",
+    "componentId": "friction-rollup",
+    "name": "friction rollup (Top-N + sensorForm)"
+  },
+  "ownerAsk": {
+    "targetFeatureId": "F156",
+    "targetOwnerCatId": "opus-47",
+    "requestedAction": "Treat the Aug 9 to Aug 12 user-feedback singleton as a real F156 fallout regression; complete the in-flight repair for direct Tailscale/IP session recovery so cleared or invalid `cat_cafe_session` state no longer drops phone/tablet browsers into unpaired-user or empty-cat-cafe behavior."
+  },
+  "acceptanceReevalPlan": {
+    "nextEvalAt": "2026-08-15T03:00:00.000Z",
+    "closureCondition": "A subsequent every-3d window shows no recurrence of direct-IP/mobile session-loss friction, and the active F156 repair has landed with verified recovery for phone/tablet Tailscale access."
+  },
+  "schemaVersion": 1
+}
