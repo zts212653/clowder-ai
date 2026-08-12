@@ -701,6 +701,16 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 纠正轮次 | 1（operator 问“这是我的问题吗”并指出星空会自动唤起宇宙级航行后，fable-5 完成深空化；codex-sol 再校准唤醒码与变轨并收敛）。 |
 | 元心智哪条没执行 | Q3 坐标变换——验证了每条映射，却没把所有元素放回听众会自动加载的同一个物理坐标系做整体预测。 |
 
+### Case E8: 把短 SHA 真相锚点误作 thread 路由标识（2026-08-04，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | operator 说“去主 thread `db54fb77` 同步”时，`db54fb77` 是目标 thread 的短标识；于是绕过该锚点，自行搜索并选择了旧主 thread。 |
+| 实际要求 | `db54fb77` / `f3f8fbf5` 是 `insight/main` 上的连续 Git 真相锚点；应先用 Git 解析锚点的对象类型与归属，再到产出该 commit 的主 thread 做双向同步。 |
+| 偏差根因 | **锚点类型误判 + 过早路由推断**：没先判输入是 Git SHA、thread ID 还是 message ID，就把“去哪里”的语义交给模糊检索。 |
+| 纠正轮次 | 1 次纠正后完成：解析 `f3f8fbf5`、核对两份决策文档，并向正确主 thread 发送双向同步确认。 |
+| 元心智哪条没执行 | Q2 信息验证漏了“先解析锚点类型”；Q3 坐标变换漏了“commit → owning thread / truth chain”的转换。 |
+
 ## Review Gate
 
 - Phase 0: **多猫协作审视**（所有猫参与各自 prompt 审视）+ 现有 system-prompt-builder 测试全绿
