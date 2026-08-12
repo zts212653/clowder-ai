@@ -48,7 +48,7 @@ const STATE_DOT_COLORS: Record<ConciergeBallState, string> = {
 // State → aria-label suffix
 const STATE_LABELS: Record<ConciergeBallState, string> = {
   idle: '待机中',
-  sleeping: '静音',
+  sleeping: '休息中',
   listening: '聆听中',
   thinking: '思考中',
   found: '发现结果',
@@ -127,6 +127,26 @@ function AtlasSprite({ atlas, containerSize }: { atlas: AtlasSpriteResult; conta
   );
 }
 
+type ConciergeSkin = 'yarn-ball' | 'ragdoll-v1' | 'yanyan-codex' | 'xianxian-codex';
+
+/** Shared cat renderer for the floating ball and the in-panel status avatar. */
+export function ConciergePetSprite({ state, skin, size }: { state: string; skin: ConciergeSkin; size: number }) {
+  const spriteResult = resolvePetSprite(state, skin);
+  if (typeof spriteResult !== 'string' && spriteResult.kind === 'atlas') {
+    return <AtlasSprite atlas={spriteResult as AtlasSpriteResult} containerSize={size} />;
+  }
+  return (
+    // biome-ignore lint/performance/noImgElement: sprite image, not content — Next Image optimization not applicable
+    <img
+      src={spriteResult as string}
+      alt=""
+      aria-hidden="true"
+      className="w-[88%] h-[88%] object-contain"
+      style={{ transition: 'opacity 300ms ease-in-out', imageRendering: 'pixelated' }}
+    />
+  );
+}
+
 // ---------------------------------------------------------------------------
 // ConciergeBall component
 // ---------------------------------------------------------------------------
@@ -197,21 +217,7 @@ export function ConciergeBall({ ballState, visualOverride, autonomousOverlay }: 
         onClick={handleClick}
       >
         {/* Cat sprite — fills parent (E3: dynamic size via Rnd wrapper) */}
-        {isAtlas ? (
-          <AtlasSprite atlas={spriteResult as AtlasSpriteResult} containerSize={ballSize} />
-        ) : (
-          // biome-ignore lint/performance/noImgElement: sprite image, not content — Next Image optimization not applicable
-          <img
-            src={spriteResult as string}
-            alt=""
-            aria-hidden="true"
-            className="w-[88%] h-[88%] object-contain"
-            style={{
-              transition: 'opacity 300ms ease-in-out',
-              imageRendering: 'pixelated',
-            }}
-          />
-        )}
+        <ConciergePetSprite state={spriteState} skin={skin} size={ballSize} />
 
         {/* Badge dot — shows only when unseenResultCount > 0 (quiet-badge policy §3)
             role="img" lets aria-label attach to an empty visual element */}

@@ -17,6 +17,7 @@ import { useConfirm } from '../useConfirm';
 import { VoiceSettingsPanel } from '../VoiceSettingsPanel';
 import { CatDossierContent } from './CatDossierContent';
 import { ConciergeSettingsContent } from './ConciergeSettingsContent';
+import { HubSystemSettingsTab } from './HubSystemSettingsTab';
 import { MarketplaceContent } from './MarketplaceContent';
 import { McpManageContent } from './McpManageContent';
 import { OpsContent } from './OpsContent';
@@ -208,6 +209,7 @@ export function SettingsContent({ section, initialEditCatId }: SettingsContentPr
         return (
           <div className="space-y-6">
             <DesktopUpdateSettingsPanel />
+            <HubSystemSettingsTab />
             <HubEnvFilesTab excludeCategories={['connector']} />
           </div>
         );

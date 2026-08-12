@@ -6,6 +6,7 @@
 import type {
   CatId,
   CliEffortPreset,
+  CodexSpeedValue,
   CrossThreadCoordination,
   FreshnessCarrierCapability,
   MessageContent,
@@ -40,12 +41,30 @@ export interface TokenUsage {
    *  represents the single most recent API call's input size. */
   lastTurnInputTokens?: number;
   /** #679: true when inputTokens/totalTokens are cumulative across all turns
-   *  (e.g. Gemini CLI stats) — not usable for single-turn context fill ratio. */
+   *  (e.g. Gemini CLI stats) — not usable for single-turn context fill ratio.
+   *  This does not taint a separately extracted lastTurnInputTokens value. */
   isCumulativeUsage?: boolean;
   /** Codex session token_count: exact current context usage shown by CLI status. */
   contextUsedTokens?: number;
   /** Codex session token_count: reset timestamp (epoch ms) for display-only hint. */
   contextResetsAtMs?: number;
+}
+
+/** Resolve the only token signals that represent the current context rather than aggregate spend. */
+export function resolveCurrentContextUsage(
+  usage: TokenUsage,
+): { usedTokens: number; usedFrom: 'context' | 'last_turn' } | undefined {
+  if (usage.contextUsedTokens != null && Number.isFinite(usage.contextUsedTokens) && usage.contextUsedTokens > 0) {
+    return { usedTokens: usage.contextUsedTokens, usedFrom: 'context' };
+  }
+  if (
+    usage.lastTurnInputTokens != null &&
+    Number.isFinite(usage.lastTurnInputTokens) &&
+    usage.lastTurnInputTokens > 0
+  ) {
+    return { usedTokens: usage.lastTurnInputTokens, usedFrom: 'last_turn' };
+  }
+  return undefined;
 }
 
 /** F8: Accumulate token usage — adds numeric fields from `incoming` into `existing` */
@@ -323,6 +342,42 @@ export type AgentCarrierSessionFactory = (options: AgentCarrierSessionOptions) =
 /** F254 D2 carrier truth used to bind provider-native freshness telemetry. */
 export type AgentFreshnessCarrierCapability = FreshnessCarrierCapability;
 
+/** #1208: capability truth for the concrete provider/carrier used by an invocation. */
+export interface AgentContextCapability {
+  readonly provider: string;
+  readonly carrier: string;
+  readonly reportsRuntimeWindow: boolean;
+  readonly authoritativeUsage: boolean;
+  /**
+   * Whether authoritative current-context usage has actually been proven for
+   * this concrete carrier. `conditional` is used by generic transports such as
+   * ACP until the active agent emits the standard usage signal at least once.
+   */
+  readonly usageTelemetry: 'available' | 'conditional' | 'unavailable';
+  readonly nativeWindowControl: boolean;
+  readonly nativeCompressionControl: boolean;
+  readonly observesCompression: boolean;
+  readonly reason: string;
+}
+
+/** The invocation-owned capacity snapshot passed to provider-native controls. */
+export interface AgentContextCapacity {
+  readonly windowTokens: number;
+  readonly inputCeilingTokens: number;
+  readonly actionable: boolean;
+}
+
+/**
+ * Concrete proof of the model/window attached to one carrier instance or
+ * per-invocation native configuration. This is a pure runtime projection and
+ * must never be persisted or inferred from capability flags alone.
+ */
+export interface AgentContextBinding {
+  readonly model?: string;
+  readonly windowTokens?: number;
+  readonly source: 'service_spawn' | 'invocation_config';
+}
+
 /** ADR-042 automatic supplement execution: provider + callback layers must enforce this, not prompt prose. */
 export interface ToolExecutionPolicy {
   readonly mode: 'read_only';
@@ -335,8 +390,12 @@ export interface ToolExecutionPolicy {
 export interface AgentServiceOptions {
   /** Session ID to resume (optional) */
   sessionId?: string;
+  /** #1208: same capacity snapshot used by prompt assembly and lifecycle health. */
+  contextCapacity?: AgentContextCapacity;
   /** F262: Raw per-thread member effort. Providers validate against the effective model before applying it. */
   reasoningEffortOverride?: CliEffortPreset;
+  /** F291: Resolved Codex OAuth requested tier. Undefined means inherit Codex user config. */
+  requestedServiceTier?: CodexSpeedValue;
   /** Working directory for the agent */
   workingDirectory?: string;
   /** Env vars to pass to CLI process for MCP callback auth */
@@ -405,6 +464,19 @@ export interface AgentService {
 
   /** F254 D2: effective carrier capability for this concrete service instance. */
   freshnessCarrierCapability?(): AgentFreshnessCarrierCapability;
+
+  /** #1208: effective context capability for this concrete service/carrier. */
+  contextCapability?(): AgentContextCapability;
+
+  /** #1208: model/window already applied to this concrete service instance. */
+  contextBinding?(): AgentContextBinding | undefined;
+
+  /**
+   * #1208: concrete model/window this service will deterministically apply
+   * from the invocation-owned capacity before model launch. This is a pure
+   * projection of provider-native configuration, not a capability inference.
+   */
+  contextBindingForCapacity?(capacity: AgentContextCapacity): AgentContextBinding | undefined;
 
   /**
    * F203 Phase C — whether this provider injects the L0 static identity into

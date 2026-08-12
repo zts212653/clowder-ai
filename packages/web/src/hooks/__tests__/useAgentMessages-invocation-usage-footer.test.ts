@@ -190,4 +190,57 @@ describe('F230 footer-parity: invocation_usage → setMessageMetadata (active pa
     expect(mockSetMessageMetadata).not.toHaveBeenCalled();
     expect(mockSetMessageUsage).toHaveBeenCalledWith('msg-legacy-001', expect.objectContaining({ inputTokens: 100 }));
   });
+
+  it('keeps Sol usage internal and writes the footer when cat-level telemetry projection throws', () => {
+    setActiveBubble(getThreadRuntimeLedger(), 'thread-1', 'codex-sol', {
+      messageId: 'msg-sol-usage',
+      invocationId: 'inv-sol-usage',
+    });
+    mockSetCatInvocation.mockImplementationOnce(() => {
+      throw new Error('simulated synchronous cat telemetry projection failure');
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    try {
+      act(() => {
+        captured?.handleAgentMessage({
+          type: 'system_info',
+          catId: 'codex-sol',
+          content: JSON.stringify({
+            type: 'invocation_usage',
+            catId: 'codex-sol',
+            usage: {
+              inputTokens: 126626,
+              outputTokens: 2017,
+              cacheReadTokens: 125696,
+              lastTurnInputTokens: 126626,
+              contextUsedTokens: 126626,
+            },
+            model: 'gpt-5.6-sol',
+            provider: 'openai',
+          }),
+        });
+      });
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[system_info] active internal projection failed; payload suppressed',
+        expect.objectContaining({ catId: 'codex-sol' }),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+
+    expect(mockSetMessageMetadata).toHaveBeenCalledWith('msg-sol-usage', {
+      model: 'gpt-5.6-sol',
+      provider: 'openai',
+    });
+    expect(mockSetMessageUsage).toHaveBeenCalledWith(
+      'msg-sol-usage',
+      expect.objectContaining({ inputTokens: 126626, outputTokens: 2017, cacheReadTokens: 125696 }),
+    );
+    expect(mockAddMessage).not.toHaveBeenCalled();
+  });
 });

@@ -48,7 +48,7 @@ describe('chat store subscription scope', () => {
 });
 
 describe('useChatCommands render subscription', () => {
-  const originalAddMessage = useChatStore.getState().addMessage;
+  const originalAddMessageToThread = useChatStore.getState().addMessageToThread;
   const originalShowVoteModal = useChatStore.getState().showVoteModal;
   let container: HTMLDivElement | null = null;
   let root: Root | null = null;
@@ -65,7 +65,7 @@ describe('useChatCommands render subscription', () => {
     root = null;
     container = null;
     useChatStore.setState({
-      addMessage: originalAddMessage,
+      addMessageToThread: originalAddMessageToThread,
       showVoteModal: originalShowVoteModal,
     });
   });
@@ -96,7 +96,7 @@ describe('useChatCommands render subscription', () => {
     expect(renderCount).toBe(1);
 
     act(() => {
-      useChatStore.setState({ addMessage: vi.fn() as typeof originalAddMessage });
+      useChatStore.setState({ addMessageToThread: vi.fn() as typeof originalAddMessageToThread });
     });
     expect(renderCount).toBe(2);
   });

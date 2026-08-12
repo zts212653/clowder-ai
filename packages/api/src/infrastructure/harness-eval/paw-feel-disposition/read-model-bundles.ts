@@ -3,10 +3,97 @@ import type {
   PawFeelDispositionProjection,
   PawFeelDispositionState,
   PawFeelInboxItem,
+  PawFeelResponsibilityCounts,
+  PawFeelResponsibilityProjection,
   PawFeelReviewBundle,
   PawFeelReviewBundleBasis,
   PawFeelReviewBundleCounts,
 } from '@cat-cafe/shared';
+import { aggregatePawFeelResponsibility } from './responsibility-aggregation.js';
+
+export function emptyResponsibilityCounts(): PawFeelResponsibilityCounts {
+  return { unreviewed: 0, bound_in_repair: 0, signature_waiting: 0, blocked: 0, terminal: 0 };
+}
+
+export interface PawFeelResponsibilityEvidence {
+  proposalIsPending?: boolean;
+  repairBindingIsActive?: boolean;
+}
+
+export function derivePawFeelResponsibility(
+  projection: PawFeelDispositionProjection,
+  evidence: PawFeelResponsibilityEvidence = {},
+): PawFeelResponsibilityProjection {
+  if (projection.state === 'fix') {
+    const leaseId = projection.actionLeaseRef?.leaseId;
+    const evidenceRefs = [projection.taskId, leaseId, projection.custodyEvidenceRef].filter((value): value is string =>
+      Boolean(value),
+    );
+    const validExit = Boolean(
+      projection.ownerCatId &&
+        projection.taskId &&
+        leaseId &&
+        projection.custodyEvidenceRef &&
+        evidence.repairBindingIsActive,
+    );
+    return {
+      state: validExit ? 'bound_in_repair' : 'unreviewed',
+      validExit,
+      exitKind: 'repair_binding',
+      evidenceRefs,
+      ...(projection.ownerCatId ? { ownerCatId: projection.ownerCatId } : {}),
+      ...(projection.taskId ? { taskId: projection.taskId } : {}),
+      ...(leaseId ? { leaseId } : {}),
+    };
+  }
+  if (projection.state === 'signature_waiting' && projection.signatureRequest) {
+    return {
+      state: 'signature_waiting',
+      validExit: false,
+      exitKind: 'signature_request',
+      evidenceRefs: [projection.signatureRequest.requestId],
+      signerExclusionCatId: projection.signatureRequest.excludedSignerCatId,
+      ...(projection.signatureRequest.preferredSignerCatId
+        ? { preferredSignerCatId: projection.signatureRequest.preferredSignerCatId }
+        : {}),
+    };
+  }
+  if (projection.state === 'blocked' && projection.blocker) {
+    return {
+      state: 'blocked',
+      validExit: true,
+      exitKind: 'explicit_blocker',
+      evidenceRefs: [projection.blocker.ref],
+      blocker: projection.blocker,
+    };
+  }
+  if (projection.state === 'route_pending' && projection.proposalId && evidence.proposalIsPending) {
+    return {
+      state: 'blocked',
+      validExit: true,
+      exitKind: 'pending_proposal',
+      evidenceRefs: [projection.proposalId],
+      proposalId: projection.proposalId,
+    };
+  }
+  if (projection.state === 'closed' || projection.state === 'duplicate' || projection.state === 'no_action') {
+    return {
+      state: 'terminal',
+      validExit: true,
+      exitKind: 'terminal_disposition',
+      evidenceRefs: [projection.outcomeRef, projection.duplicateOf, projection.reasonCode].filter(
+        (value): value is string => Boolean(value),
+      ),
+      ...(projection.ownerCatId ? { ownerCatId: projection.ownerCatId } : {}),
+    };
+  }
+  return { state: 'unreviewed', validExit: false, exitKind: 'none', evidenceRefs: [] };
+}
+
+function deriveBundleResponsibility(members: readonly PawFeelInboxItem[]): PawFeelResponsibilityProjection {
+  const responsibilities = members.map((member) => member.responsibility);
+  return aggregatePawFeelResponsibility(responsibilities, 'paw-feel responsibility bundle has no members');
+}
 
 export function emptyBundleCounts(): PawFeelReviewBundleCounts {
   return {
@@ -77,7 +164,15 @@ export function filterPawFeelBundles(
       const state = member.disposition.state;
       stateCounts[state] = (stateCounts[state] ?? 0) + 1;
     }
-    return [{ ...bundle, members, rawSignalCount: members.length, stateCounts }];
+    return [
+      {
+        ...bundle,
+        members,
+        rawSignalCount: members.length,
+        stateCounts,
+        responsibility: deriveBundleResponsibility(members),
+      },
+    ];
   });
 }
 
@@ -118,6 +213,7 @@ export function derivePawFeelBundles(items: readonly PawFeelInboxItem[]): {
       members: group.members,
       rawSignalCount: group.members.length,
       stateCounts,
+      responsibility: deriveBundleResponsibility(group.members),
     };
   });
   return { bundles, counts };

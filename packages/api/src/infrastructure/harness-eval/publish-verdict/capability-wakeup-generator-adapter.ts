@@ -50,7 +50,7 @@ export function createCapabilityWakeupGeneratorAdapter(provider: CapabilityWakeu
     }
 
     const trials = await provider.resolve(selector, { ownerUserId: deps.ownerUserId });
-    if (trials.length === 0) {
+    if (trials.length === 0 && packet.verdict !== 'keep_observe') {
       throw new Error(
         `no_trials_in_window: capability='${selector.capability}' window=[${selector.windowStartMs},${selector.windowEndMs}) sessionIds=[${selector.sessionIds?.join(',') ?? ''}] yielded zero classified trials`,
       );
@@ -68,6 +68,14 @@ export function createCapabilityWakeupGeneratorAdapter(provider: CapabilityWakeu
       domain,
       capability: selector.capability,
       trials,
+      emptyTrialWindow:
+        trials.length === 0
+          ? {
+              startMs: selector.windowStartMs,
+              endMs: selector.windowEndMs,
+              reason: 'no classified trials matched source window',
+            }
+          : undefined,
       submittedPacket: packet,
     });
 

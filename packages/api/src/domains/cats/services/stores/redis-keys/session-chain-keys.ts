@@ -15,6 +15,9 @@ export const SessionChainKeys = {
   byThread: (threadId: string) => `session-chain-by-thread:${threadId}`,
   /** String: cat+thread → active session ID (fast lookup) */
   active: (catId: string, threadId: string) => `session-active:${catId}:${threadId}`,
+  /** String: user+cat+thread → active session ID (#1329 managed ownership). */
+  activeOwner: (userId: string, catId: string, threadId: string) =>
+    `session-active:${catId}:${threadId}:owner:${encodeURIComponent(userId)}`,
   /** String: CLI session ID → record ID index */
   byCli: (cliSessionId: string) => `session-cli:${cliSessionId}`,
   /**

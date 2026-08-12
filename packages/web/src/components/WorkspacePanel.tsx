@@ -7,13 +7,14 @@ import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import type { TreeNode } from '@/hooks/useWorkspace';
 import { useWorkspace } from '@/hooks/useWorkspace';
-import { isWorkspaceMode } from '@/lib/workspace-modes';
+import { isWorkspaceMode, WORKSPACE_MODE_META } from '@/lib/workspace-modes';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
 import { worktreeBasename, worktreeLabel } from '@/utils/worktree-label';
 import { ApprovalPanel } from './ApprovalPanel';
 import { ArtifactsPanel } from './ArtifactsPanel';
 import { CommunityPanel } from './CommunityPanel';
+import { createFileContextAttachment } from './chat-context-reference';
 import { EvalWorkspacePanel } from './eval-workspace/EvalWorkspacePanel';
 import { EventTimeline } from './event-memory/EventTimeline';
 import { RecallFeed } from './memory/RecallFeed';
@@ -32,8 +33,10 @@ import { TerminalTab } from './workspace/TerminalTab';
 import { TrajectoryPanel } from './workspace/trajectory/TrajectoryPanel';
 import { WorkspaceFileViewer } from './workspace/WorkspaceFileViewer';
 import { WorkspaceFocusShell } from './workspace/WorkspaceFocusShell';
+import { type WorkspaceDevSurface, WorkspaceLauncher } from './workspace/WorkspaceLauncher';
+import { WorkspaceNowSurface } from './workspace/WorkspaceNowSurface';
 import { WorkspacePreviewOnly } from './workspace/WorkspacePreviewOnly';
-import { WorkspaceTabBar } from './workspace/WorkspaceTabBar';
+import { WorkspaceSurfaceHeader } from './workspace/WorkspaceSurfaceHeader';
 import { WorkspaceTree } from './workspace/WorkspaceTree';
 
 /** Find a node in a tree by path (DFS) */
@@ -98,20 +101,6 @@ function SearchResultItem({
 }
 
 /* ── SVG micro-icons ─────────────────────────── */
-const CloseIcon = () => (
-  <svg
-    width="10"
-    height="10"
-    viewBox="0 0 10 10"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.5"
-    aria-hidden="true"
-  >
-    <path d="M1 1l8 8M9 1l-8 8" />
-  </svg>
-);
-
 const SearchIcon = () => (
   <svg
     className="w-3.5 h-3.5 text-cafe-interactive/40 flex-shrink-0"
@@ -127,18 +116,48 @@ const SearchIcon = () => (
   </svg>
 );
 
-const MenuIcon = () => (
-  <svg className="w-4 h-4 text-cafe-accent flex-shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-    <path
-      fillRule="evenodd"
-      d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10zm0 5.25a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75z"
-      clipRule="evenodd"
-    />
-  </svg>
-);
+function PresentationLockButton({ locked, onToggle }: { locked: boolean; onToggle: () => void }) {
+  const label = locked ? '解锁当前文件视图' : '锁定当前文件视图';
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-micro font-semibold transition-colors ${
+        locked
+          ? 'bg-cafe-accent/10 text-cafe-accent hover:bg-cafe-accent/20'
+          : 'text-cafe-interactive/40 hover:bg-cafe-surface-sunken/60 hover:text-cafe-interactive'
+      }`}
+      title={
+        locked
+          ? '点击退出锁定 — 恢复各 thread 自己的文件视图'
+          : '锁定当前文件视图 — 切换 thread 时右侧保持不变，适合演示/讲解'
+      }
+      aria-label={label}
+      aria-pressed={locked}
+    >
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+        {locked ? (
+          <path d="M8 1a3.5 3.5 0 0 0-3.5 3.5V6H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-1.5V4.5A3.5 3.5 0 0 0 8 1Zm2 5H6V4.5a2 2 0 1 1 4 0V6Z" />
+        ) : (
+          <path d="M8 1a3.5 3.5 0 0 0-3.5 3.5V6H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1H6V4.5a2 2 0 1 1 4 0 .75.75 0 0 0 1.5 0A3.5 3.5 0 0 0 8 1Z" />
+        )}
+      </svg>
+      <span className="hidden 2xl:inline">{locked ? '已锁定' : '锁定'}</span>
+    </button>
+  );
+}
 
-/* ── Main panel ──────────────────────────────── */
-export function WorkspacePanel() {
+export function WorkspacePanel({
+  activeInvocations = {},
+  threadId,
+  defaultCatId = 'opus',
+  onOpenStatus,
+}: {
+  activeInvocations?: Record<string, { catId: string; mode: string; startedAt?: number }>;
+  threadId?: string;
+  defaultCatId?: string;
+  onOpenStatus?: () => void;
+}) {
   const confirm = useConfirm();
   const {
     worktrees,
@@ -147,6 +166,8 @@ export function WorkspacePanel() {
     file,
     searchResults,
     loading,
+    worktreesLoading,
+    worktreesError,
     searchLoading,
     error,
     search,
@@ -169,7 +190,6 @@ export function WorkspacePanel() {
   const openFilePath = useChatStore((s) => s.workspaceOpenFilePath);
   const scrollToLine = useChatStore((s) => s.workspaceOpenFileLine);
   const workspaceFileSetAt = useChatStore((s) => s._workspaceFileSetAt);
-  const setRightPanelMode = useChatStore((s) => s.setRightPanelMode);
   const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
   const currentThreadId = useChatStore((s) => s.currentThreadId);
   const { editMode, setEditMode, saveError, canEdit, handleToggleEdit, handleSave } = useFileEditing({
@@ -201,23 +221,26 @@ export function WorkspacePanel() {
     [setPresentationLockViewport],
   );
 
-  const [viewMode, setViewMode] = useState<'files' | 'changes' | 'git' | 'terminal' | 'browser'>('files');
+  const viewMode = useChatStore((s) => s.workspaceSurface);
+  const setViewMode = useChatStore((s) => s.setWorkspaceSurface);
   // F227: recall mode sub-tab — 记忆流 (RecallFeed) vs 拉闸记录 (EventTimeline) vs 账本 (RecallLedger, F263)
   const [recallTab, setRecallTab] = useState<'feed' | 'events' | 'ledger'>('feed');
   // Phase H: Workspace mode switcher (dev tools vs knowledge feed)
   const workspaceMode = useChatStore((s) => s.workspaceMode);
   const setWorkspaceMode = useChatStore((s) => s.setWorkspaceMode);
-  const [previewPort, setPreviewPort] = useState<number | undefined>();
-  const [previewPath, setPreviewPath] = useState<string>('/');
+  const workspacePreview = useChatStore((s) => s.workspacePreview);
+  const setWorkspacePreview = useChatStore((s) => s.setWorkspacePreview);
+  const previewPort = workspacePreview.port;
+  const previewPath = workspacePreview.path;
   const [focusedPane, setFocusedPane] = useState<'browser' | 'changes' | 'file' | 'git' | 'terminal' | null>(null);
   const previousOpenFilePathRef = useRef(openFilePath);
   const previousWorkspaceFileSetTsRef = useRef(workspaceFileSetAt.ts);
 
   // Keep parent state in sync with BrowserPanel navigation (focus mode state preservation)
-  const handleBrowserNavigate = useCallback((port: number, path: string) => {
-    setPreviewPort(port);
-    setPreviewPath(path);
-  }, []);
+  const handleBrowserNavigate = useCallback(
+    (port: number, path: string) => setWorkspacePreview({ port, path }),
+    [setWorkspacePreview],
+  );
 
   // Auto-exit focus mode when context changes
   useEffect(() => {
@@ -238,11 +261,10 @@ export function WorkspacePanel() {
     if (!pendingPreviewAutoOpen) return;
     const data = consumePreviewAutoOpen();
     if (data) {
-      setPreviewPort(data.port);
-      setPreviewPath(data.path);
+      setWorkspacePreview(data);
       setViewMode('browser');
     }
-  }, [pendingPreviewAutoOpen, consumePreviewAutoOpen]);
+  }, [pendingPreviewAutoOpen, consumePreviewAutoOpen, setViewMode, setWorkspacePreview]);
 
   useEffect(() => {
     const previousOpenFilePath = previousOpenFilePathRef.current;
@@ -254,7 +276,7 @@ export function WorkspacePanel() {
       workspaceFileSetAt.ts !== previousWorkspaceFileSetTs &&
       (!workspaceFileSetAt.threadId || workspaceFileSetAt.threadId === currentThreadId);
     if (openFilePath && (openFilePath !== previousOpenFilePath || freshOpenForCurrentThread)) setViewMode('files');
-  }, [currentThreadId, openFilePath, workspaceFileSetAt.threadId, workspaceFileSetAt.ts]);
+  }, [currentThreadId, openFilePath, setViewMode, workspaceFileSetAt.threadId, workspaceFileSetAt.ts]);
   const [portDiscoveryToast, setPortDiscoveryToast] = useState<{ port: number; framework?: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState<'content' | 'filename' | 'all'>('all');
@@ -269,7 +291,7 @@ export function WorkspacePanel() {
     setPendingRevealPath(storeRevealPath);
     setViewMode('files');
     setStoreRevealPath(null);
-  }, [storeRevealPath, setStoreRevealPath]);
+  }, [setStoreRevealPath, setViewMode, storeRevealPath]);
 
   // G7-2: Per-thread expandedPaths cache — tabs/openFile are now in store-level ThreadState
   // (snapshotActive/flattenThread handle save/restore automatically on setCurrentThread)
@@ -342,7 +364,7 @@ export function WorkspacePanel() {
   const [markdownRendered, setMarkdownRendered] = useState(true);
   const [htmlPreview, setHtmlPreview] = useState(false);
   const [jsxPreview, setJsxPreview] = useState(false);
-  // F063: vertical resize — treeBasis as percentage (20-80), persisted
+  // F063: vertical resize — treeBasis as percentage (20-80), persisted.
   const [treeBasis, setTreeBasis, resetTreeBasis] = usePersistedState('cat-cafe:treeBasis', 40);
   const panelRef = useRef<HTMLElement>(null);
   const handleVerticalResize = useCallback(
@@ -351,7 +373,7 @@ export function WorkspacePanel() {
       const totalHeight = panelRef.current.offsetHeight;
       if (totalHeight === 0) return;
       const pct = (delta / totalHeight) * 100;
-      setTreeBasis((prev) => Math.min(80, Math.max(20, prev + pct)));
+      setTreeBasis((previous) => Math.min(80, Math.max(20, previous + pct)));
     },
     [setTreeBasis],
   );
@@ -379,11 +401,12 @@ export function WorkspacePanel() {
   const handleFileSelect = useCallback(
     (path: string) => {
       setOpenFile(path);
+      setViewMode('files');
       setSearchResults([]);
       setDidSearch(false);
       setEditMode(false);
     },
-    [setOpenFile, setSearchResults],
+    [setEditMode, setOpenFile, setSearchResults, setViewMode],
   );
 
   const handleSearchSubmit = useCallback(
@@ -440,12 +463,13 @@ export function WorkspacePanel() {
   const handleSearchResultClick = useCallback(
     (path: string, line: number) => {
       setOpenFile(path, line);
+      setViewMode('files');
       setSearchResults([]);
       setDidSearch(false);
       setEditMode(false);
       revealInTree(path);
     },
-    [setOpenFile, setSearchResults, revealInTree],
+    [revealInTree, setEditMode, setOpenFile, setSearchResults, setViewMode],
   );
 
   // Reset markdown rendered mode when file changes (covers all entry points).
@@ -459,10 +483,15 @@ export function WorkspacePanel() {
 
   const handleCite = useCallback(
     (path: string) => {
-      const branch = currentWorktree?.branch;
-      const wtTag = worktreeId ? `[wt:${worktreeId}]` : '';
-      const suffix = branch ? ` ${wtTag}(🌿 ${branch})` : wtTag ? ` ${wtTag}` : '';
-      setPendingChatInsert({ threadId: currentThreadId, text: `\`${path}\`${suffix}` });
+      setPendingChatInsert({
+        threadId: currentThreadId,
+        text: '',
+        contextAttachments: [
+          createFileContextAttachment(path, worktreeId, {
+            ...(currentWorktree?.branch ? { branch: currentWorktree.branch } : {}),
+          }),
+        ],
+      });
     },
     [setPendingChatInsert, currentThreadId, currentWorktree, worktreeId],
   );
@@ -530,10 +559,26 @@ export function WorkspacePanel() {
   const isHtml = !!(openFilePath && /\.html?$/i.test(openFilePath));
   const isJsx = !!(openFilePath && /\.[jt]sx$/i.test(openFilePath));
 
+  const surfaceTitle =
+    workspaceMode === 'dev'
+      ? viewMode === 'home'
+        ? 'Workspace'
+        : viewMode === 'files'
+          ? '文件'
+          : viewMode === 'changes'
+            ? '变更'
+            : viewMode === 'git'
+              ? 'Git'
+              : viewMode === 'terminal'
+                ? '终端'
+                : '浏览器预览'
+      : WORKSPACE_MODE_META[workspaceMode].label;
+  const surfaceDetail = workspaceMode === 'dev' ? undefined : WORKSPACE_MODE_META[workspaceMode].description;
+
   return (
     <aside
       ref={panelRef}
-      className="hidden lg:flex flex-1 min-w-0 bg-[var(--console-panel-bg)] flex-col overflow-hidden animate-slide-in-right"
+      className="flex flex-1 min-w-0 bg-[var(--console-panel-bg)] flex-col overflow-hidden animate-slide-in-right"
     >
       {/* ── Focus mode overlay ── */}
       {focusedPane === 'browser' && workspaceMode === 'dev' && viewMode === 'browser' ? (
@@ -596,169 +641,119 @@ export function WorkspacePanel() {
             <TerminalTab worktreeId={worktreeId} />
           ) : (
             <div className="flex items-center justify-center h-full text-sm text-cafe-interactive/50">
-              请先选择一个 Worktree
+              先在上方选择或连接一个工作区
             </div>
           )}
         </WorkspaceFocusShell>
       ) : (
         <>
-          {/* Header */}
-          <div className="px-3 py-2.5 border-b border-cafe-subtle flex items-center justify-between bg-cafe-surface/50">
-            <div className="flex items-center gap-2 min-w-0">
-              <MenuIcon />
-              <span className="text-sm font-semibold text-cafe-black">Workspace</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={presentationLock ? disablePresentationLock : enablePresentationLock}
-                className={`w-6 h-6 flex items-center justify-center rounded-md transition-colors ${
-                  presentationLock
-                    ? 'text-cafe-accent bg-cafe-accent/10 hover:bg-cafe-accent/20'
-                    : 'text-cafe-interactive/40 hover:text-cafe-interactive hover:bg-cafe-surface-sunken/60'
-                }`}
-                title={
-                  presentationLock
-                    ? '点击退出锁定 — 恢复各 thread 自己的文件视图'
-                    : '锁定当前文件视图 — 切换 thread 时右侧保持不变，适合演示/讲解'
-                }
-              >
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                  {presentationLock ? (
-                    <path d="M8 1a3.5 3.5 0 0 0-3.5 3.5V6H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-1.5V4.5A3.5 3.5 0 0 0 8 1Zm2 5H6V4.5a2 2 0 1 1 4 0V6Z" />
-                  ) : (
-                    <path d="M8 1a3.5 3.5 0 0 0-3.5 3.5V6H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1H6V4.5a2 2 0 1 1 4 0 .75.75 0 0 0 1.5 0A3.5 3.5 0 0 0 8 1Z" />
+          {!(workspaceMode === 'dev' && viewMode === 'home') && (
+            <WorkspaceSurfaceHeader
+              title={surfaceTitle}
+              detail={surfaceDetail}
+              onBack={() => {
+                setWorkspaceMode('dev');
+                setViewMode('home');
+              }}
+              actions={
+                <>
+                  {/* F063/F226 actions keep their original owners; F284 only moves them into object chrome. */}
+                  {workspaceMode === 'dev' && (
+                    <>
+                      <PresentationLockButton
+                        locked={!!presentationLock}
+                        onToggle={presentationLock ? disablePresentationLock : enablePresentationLock}
+                      />
+                      <button
+                        type="button"
+                        onClick={detachToFloat}
+                        disabled={!openFilePath || !!presentationSurface}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-micro font-semibold text-cafe-interactive/40 transition-colors hover:bg-cafe-surface-sunken/60 hover:text-cafe-interactive disabled:cursor-not-allowed disabled:opacity-30"
+                        title="浮出文档窗口 — 讲稿浮起来，右侧腾出来切定时任务/记忆/毛线球"
+                      >
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 16 16"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          aria-hidden="true"
+                        >
+                          <path
+                            d="M5 3H3a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2M9 2h5v5M14 2 7 9"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                        <span className="hidden 2xl:inline">浮出</span>
+                      </button>
+                    </>
                   )}
-                </svg>
-              </button>
-              {/* F226: detach current file into a floating window (dev mode only — 烁烁 P2-2) */}
-              {workspaceMode === 'dev' && (
-                <button
-                  type="button"
-                  onClick={detachToFloat}
-                  disabled={!openFilePath || !!presentationSurface}
-                  className="w-6 h-6 flex items-center justify-center rounded-md text-cafe-interactive/40 hover:text-cafe-interactive hover:bg-cafe-surface-sunken/60 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                  title="浮出文档窗口 — 讲稿浮起来，右侧腾出来切定时任务/记忆/毛线球"
-                >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M5 3H3a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2M9 2h5v5M14 2 7 9"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
-              )}
-              {presentationLock && (
-                <span className="text-micro font-medium px-1.5 py-0.5 rounded-full bg-cafe-accent/15 text-cafe-accent">
-                  Locked
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={() => setRightPanelMode('status')}
-                className="w-6 h-6 flex items-center justify-center rounded-md text-cafe-interactive/40 hover:text-cafe-interactive hover:bg-cafe-surface-sunken/60 transition-colors"
-                title="切换到状态面板"
-              >
-                <CloseIcon />
-              </button>
-            </div>
-          </div>
+                </>
+              }
+            />
+          )}
 
-          {/* Worktree indicator */}
-          {currentWorktree && (
-            <div className="px-3 py-2 border-b border-cafe-subtle/60 bg-cafe-surface/30">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-[var(--semantic-success)] flex-shrink-0" />
-                <span className="text-xs font-medium text-cafe-black truncate" title={currentWorktree.root}>
-                  {worktreeBasename(currentWorktree.root)}
-                </span>
-                <span className="text-micro font-mono text-cafe-interactive/50">{currentWorktree.head}</span>
-              </div>
-              <div className="ml-4 text-micro text-cafe-interactive/60 truncate">🌿 {currentWorktree.branch}</div>
-              {worktrees.length > 1 && (
-                <div className="flex items-center gap-1 mt-1.5">
+          {workspaceMode === 'dev' && viewMode !== 'home' && (
+            <div
+              data-testid="workspace-source-bar"
+              className="relative flex flex-wrap items-center gap-2 border-b border-cafe-subtle/45 bg-cafe-surface/15 px-3 py-2"
+            >
+              {worktrees.length > 0 ? (
+                <>
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-conn-green-text" aria-hidden="true" />
                   <select
                     value={worktreeId ?? ''}
-                    onChange={(e) => setWorktreeId(e.target.value || null)}
-                    className="flex-1 text-micro border border-cafe-subtle rounded-md px-2 py-1 bg-cafe-surface/80 text-cafe-black focus:outline-none focus:border-cafe-accent"
+                    onChange={(event) => setWorktreeId(event.target.value || null)}
+                    className="h-8 min-w-0 flex-1 rounded-lg border border-cafe-subtle/70 bg-cafe-surface/80 px-2 text-xs font-medium text-cafe-black outline-none focus:border-cafe-accent"
+                    aria-label="当前工作区"
+                    title={worktrees.find((worktree) => worktree.id === worktreeId)?.root}
                   >
-                    {worktrees.map((w) => (
-                      <option key={w.id} value={w.id} title={w.root}>
-                        {worktreeLabel(w)}
+                    {!worktreeId && <option value="">选择一个工作区</option>}
+                    {worktrees.map((worktree) => (
+                      <option key={worktree.id} value={worktree.id} title={worktree.root}>
+                        {worktreeLabel(worktree)}
                       </option>
                     ))}
                   </select>
-                  {worktreeId && <LinkedRootRemoveButton id={worktreeId} onRemoved={fetchWorktrees} />}
-                </div>
+                  {worktreesLoading && <output className="shrink-0 text-micro text-cafe-muted">更新中…</output>}
+                </>
+              ) : worktreesLoading ? (
+                <span data-testid="workspace-discovery-status" className="min-w-0 flex-1 text-xs text-cafe-secondary">
+                  正在查找可用工作区…
+                </span>
+              ) : (
+                <>
+                  <span data-testid="workspace-discovery-status" className="min-w-0 flex-1 text-xs text-cafe-secondary">
+                    {worktreesError ? '工作区列表暂时不可用' : '没有找到可用工作区'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void fetchWorktrees()}
+                    className="h-7 shrink-0 rounded-lg px-2 text-micro font-semibold text-cafe-accent transition-colors hover:bg-cafe-accent/8"
+                  >
+                    重新查找
+                  </button>
+                </>
               )}
-              <LinkedRootsManager onRootsChanged={fetchWorktrees} />
+              {worktreeId && <LinkedRootRemoveButton id={worktreeId} onRemoved={fetchWorktrees} />}
+              {!worktreesLoading && (
+                <details className="relative shrink-0">
+                  <summary
+                    aria-label="工作区更多操作"
+                    className="flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-lg text-sm font-semibold text-cafe-muted transition-colors hover:bg-cafe-surface-sunken hover:text-cafe-accent"
+                    title="工作区更多操作"
+                  >
+                    ···
+                  </summary>
+                  <div className="absolute right-0 top-9 z-30 w-72 rounded-xl border border-cafe-subtle/70 bg-cafe-surface p-2 shadow-lg">
+                    <LinkedRootsManager compact onRootsChanged={fetchWorktrees} />
+                  </div>
+                </details>
+              )}
             </div>
           )}
-
-          {/* Search bar — dev mode only (repo file search is irrelevant for other modes) */}
-          {workspaceMode === 'dev' && (
-            <form onSubmit={handleSearchSubmit} className="px-3 py-2 border-b border-cafe-subtle/40">
-              <div className="flex items-center gap-1.5 bg-cafe-surface/80 border border-cafe-subtle rounded-lg px-2.5 py-1.5 focus-within:border-cafe-accent focus-within:ring-1 focus-within:ring-cafe-accent/20 transition-all">
-                <SearchIcon />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => {
-                    setSearchQuery(e.target.value);
-                    setDidSearch(false);
-                    if (!e.target.value.trim()) setSearchResults([]);
-                  }}
-                  onCompositionStart={searchIme.onCompositionStart}
-                  onCompositionEnd={searchIme.onCompositionEnd}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && searchIme.isComposing()) e.preventDefault();
-                  }}
-                  placeholder={
-                    searchMode === 'content'
-                      ? '搜索代码内容...'
-                      : searchMode === 'filename'
-                        ? '搜索文件名/路径...'
-                        : '搜索全部...'
-                  }
-                  className="flex-1 text-xs bg-transparent text-cafe-black placeholder:text-cafe-interactive/30 focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() =>
-                    setSearchMode((m) => (m === 'all' ? 'filename' : m === 'filename' ? 'content' : 'all'))
-                  }
-                  className={`text-micro px-1.5 py-0.5 rounded-md font-medium transition-colors ${
-                    searchMode === 'all'
-                      ? 'bg-cafe-accent/15 text-cafe-accent'
-                      : searchMode === 'filename'
-                        ? 'bg-cafe-surface-sunken text-cafe-interactive'
-                        : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
-                  }`}
-                  title={
-                    searchMode === 'all'
-                      ? '全部搜索（文件名+内容）→ 点击切换到仅文件名'
-                      : searchMode === 'filename'
-                        ? '文件名搜索 → 点击切换到仅内容'
-                        : '内容搜索 → 点击切换到全部搜索'
-                  }
-                >
-                  {searchMode === 'all' ? 'All' : searchMode === 'filename' ? 'File' : 'Aa'}
-                </button>
-              </div>
-            </form>
-          )}
-
-          {/* F246 Phase C: responsive workspace tab bar (replaces hardcoded buttons) */}
-          <WorkspaceTabBar />
 
           {/* Knowledge / Schedule / Tasks / Artifacts / Approval / Eval / Dev mode routing */}
           {workspaceMode === 'recall' ? (
@@ -806,33 +801,6 @@ export function WorkspacePanel() {
             <TrajectoryPanel />
           ) : (
             <>
-              {/* Files / Changes toggle */}
-              <div className="flex border-b border-cafe-subtle/40">
-                {(['files', 'changes', 'git', 'terminal', 'browser'] as const).map((mode) => {
-                  const labels: Record<typeof mode, string> = {
-                    files: 'Files',
-                    changes: 'Changes',
-                    git: 'Git',
-                    terminal: 'Term',
-                    browser: '🌐',
-                  };
-                  return (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => setViewMode(mode)}
-                      className={`flex-1 py-1.5 text-micro font-semibold uppercase tracking-wider transition-colors ${
-                        viewMode === mode
-                          ? 'text-cafe-accent border-b-2 border-cafe-accent'
-                          : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
-                      }`}
-                    >
-                      {labels[mode]}
-                    </button>
-                  );
-                })}
-              </div>
-
               {/* Error */}
               {error && (
                 <div className="px-3 py-2 text-xs text-conn-red-text bg-conn-red-bg/80 border-b border-conn-red-ring">
@@ -867,7 +835,7 @@ export function WorkspacePanel() {
                       type="button"
                       className="px-3 py-1.5 rounded-md bg-cafe-accent text-[var(--cafe-surface)] text-xs font-medium hover:bg-cafe-accent-hover transition-colors"
                       onClick={() => {
-                        setPreviewPort(portDiscoveryToast.port);
+                        setWorkspacePreview({ port: portDiscoveryToast.port, path: '/' });
                         setViewMode('browser');
                         setPortDiscoveryToast(null);
                       }}
@@ -885,7 +853,30 @@ export function WorkspacePanel() {
                 </div>
               )}
 
-              {viewMode === 'browser' ? (
+              {viewMode === 'home' ? (
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                  <WorkspaceNowSurface
+                    activeInvocations={activeInvocations}
+                    repository={
+                      currentWorktree
+                        ? { name: worktreeBasename(currentWorktree.root), branch: currentWorktree.branch }
+                        : undefined
+                    }
+                  />
+                  <WorkspaceLauncher
+                    onSelectDevSurface={(surface: WorkspaceDevSurface) => setViewMode(surface)}
+                    onOpenStatus={onOpenStatus}
+                    threadId={threadId}
+                    defaultCatId={defaultCatId}
+                    actions={
+                      <PresentationLockButton
+                        locked={!!presentationLock}
+                        onToggle={presentationLock ? disablePresentationLock : enablePresentationLock}
+                      />
+                    }
+                  />
+                </div>
+              ) : viewMode === 'browser' ? (
                 <div className="relative flex-1 min-h-0 flex flex-col">
                   <FocusModeButton
                     disabled={!previewPort}
@@ -909,7 +900,7 @@ export function WorkspacePanel() {
                     <TerminalTab worktreeId={worktreeId} />
                   ) : (
                     <div className="flex items-center justify-center h-full text-sm text-cafe-interactive/50">
-                      请先选择一个 Worktree
+                      先在上方选择或连接一个工作区
                     </div>
                   )}
                 </div>
@@ -929,6 +920,52 @@ export function WorkspacePanel() {
                 </div>
               ) : (
                 <>
+                  <form onSubmit={handleSearchSubmit} className="border-b border-cafe-subtle/40 px-3 py-2">
+                    <div className="flex items-center gap-1.5 rounded-lg border border-cafe-subtle bg-cafe-surface/80 px-2.5 py-1.5 transition-all focus-within:border-cafe-accent focus-within:ring-1 focus-within:ring-cafe-accent/20">
+                      <SearchIcon />
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(event) => {
+                          setSearchQuery(event.target.value);
+                          setDidSearch(false);
+                          if (!event.target.value.trim()) setSearchResults([]);
+                        }}
+                        onCompositionStart={searchIme.onCompositionStart}
+                        onCompositionEnd={searchIme.onCompositionEnd}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' && searchIme.isComposing()) event.preventDefault();
+                        }}
+                        placeholder={
+                          searchMode === 'content'
+                            ? '搜索代码内容…'
+                            : searchMode === 'filename'
+                              ? '搜索文件名或路径…'
+                              : '搜索当前工作区…'
+                        }
+                        className="min-w-0 flex-1 bg-transparent text-xs text-cafe-black outline-none placeholder:text-cafe-interactive/30"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSearchMode((mode) =>
+                            mode === 'all' ? 'filename' : mode === 'filename' ? 'content' : 'all',
+                          )
+                        }
+                        className={`rounded-md px-1.5 py-0.5 text-micro font-medium transition-colors ${
+                          searchMode === 'all'
+                            ? 'bg-cafe-accent/15 text-cafe-accent'
+                            : searchMode === 'filename'
+                              ? 'bg-cafe-surface-sunken text-cafe-interactive'
+                              : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
+                        }`}
+                        title="切换搜索范围"
+                      >
+                        {searchMode === 'all' ? 'All' : searchMode === 'filename' ? 'File' : 'Aa'}
+                      </button>
+                    </div>
+                  </form>
+
                   {/* Search loading indicator */}
                   {searchLoading && (
                     <div className="border-b border-cafe-subtle/40 px-3 py-3 text-xs text-cafe-interactive/70 flex items-center gap-2">
@@ -1028,17 +1065,35 @@ export function WorkspacePanel() {
                     hasFile={!!file}
                     basisPct={treeBasis}
                     callbacks={treeCallbacks}
+                    emptyTitle={
+                      worktreeId
+                        ? '这个工作区还没有文件'
+                        : worktreesLoading
+                          ? '正在查找工作区'
+                          : worktreesError
+                            ? '暂时没能读取工作区'
+                            : '没有找到可用工作区'
+                    }
+                    emptyDescription={
+                      worktreeId
+                        ? '可以新建文件，或切换到另一个工作区'
+                        : worktreesLoading
+                          ? '系统会自动列出这个项目的所有 worktree'
+                          : worktreesError
+                            ? '请在上方重新查找'
+                            : '系统会自动发现 Git worktree；外部文件夹可从更多操作中添加'
+                    }
                   />
 
-                  {/* Vertical resize handle + File viewer (extracted) */}
                   {(file || openTabs.length > 0) && (
                     <>
                       <ResizeHandle
                         direction="vertical"
+                        label="文件树与文件详情"
                         onResize={handleVerticalResize}
                         onDoubleClick={resetTreeBasis}
                       />
-                      {file && (
+                      {file ? (
                         <WorkspaceFileViewer
                           file={file}
                           openFilePath={openFilePath}
@@ -1062,9 +1117,9 @@ export function WorkspacePanel() {
                             setEditMode(false);
                           }}
                           onToggleEdit={handleToggleEdit}
-                          onToggleMarkdownRendered={() => setMarkdownRendered((p) => !p)}
-                          onToggleHtmlPreview={() => setHtmlPreview((p) => !p)}
-                          onToggleJsxPreview={() => setJsxPreview((p) => !p)}
+                          onToggleMarkdownRendered={() => setMarkdownRendered((previous) => !previous)}
+                          onToggleHtmlPreview={() => setHtmlPreview((previous) => !previous)}
+                          onToggleJsxPreview={() => setJsxPreview((previous) => !previous)}
                           onSave={handleSave}
                           onDirtyChange={setEditDirty}
                           pendingExternalSha={pendingExternalSha}
@@ -1076,6 +1131,10 @@ export function WorkspacePanel() {
                           restoreKey={presentationLock ? viewportRestoreKey : undefined}
                           onScrollTopChange={presentationLock ? handleScrollTopChange : undefined}
                         />
+                      ) : (
+                        <div className="flex min-h-0 flex-1 items-center justify-center text-xs text-cafe-secondary">
+                          正在打开文档…
+                        </div>
                       )}
                     </>
                   )}

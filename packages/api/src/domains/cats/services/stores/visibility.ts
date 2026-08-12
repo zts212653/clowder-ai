@@ -39,7 +39,8 @@ export function resolveThreadMessageVisibility(
   return (message) =>
     isDeliveredMessage(message) ||
     (options?.includeQueuedCatMessages === true && isQueuedCatTimelineMessage(message)) ||
-    (options?.includeQueuedUserMessages === true && isQueuedUserTimelineMessage(message));
+    (options?.includeQueuedUserMessages === true && isQueuedUserTimelineMessage(message)) ||
+    (options?.includeRecalledUserMessages === true && isOwnerVisibleRecalledUserMessage(message));
 }
 
 /**
@@ -92,6 +93,15 @@ function isQueuedUserTimelineMessage(message: StoredMessage): boolean {
     return false;
   }
   return message.queueCustody !== undefined;
+}
+
+function isOwnerVisibleRecalledUserMessage(message: StoredMessage): boolean {
+  return (
+    message.deliveryStatus === 'canceled' &&
+    message.catId === null &&
+    message._tombstone === true &&
+    message.recall?.exposure === 'seen'
+  );
 }
 
 /** Who is viewing */

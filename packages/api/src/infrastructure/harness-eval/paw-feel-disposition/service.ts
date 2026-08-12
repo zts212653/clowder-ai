@@ -5,13 +5,12 @@ import type {
   PawFeelDispositionProjection,
 } from '@cat-cafe/shared';
 import type { CanonicalPawFeelCandidate } from '../friction/paw-feel-source.js';
+import { type PawFeelFixResolver, resolvePawFeelCommandContext } from './command-context.js';
 import {
   type PawFeelBundleAction,
   PawFeelBundleCommandSchema,
   type PawFeelDispositionCommand,
   PawFeelDispositionCommandSchema,
-  type PawFeelResolvedCommandContext,
-  type PawFeelResolvedFix,
   pawFeelCommandToEvent,
 } from './commands.js';
 import type { IPawFeelDispositionEventLog, PawFeelDispositionAppendResult } from './event-log.js';
@@ -20,13 +19,13 @@ import {
   isLegacyWrite,
   PawFeelDispositionServiceError,
   type PawFeelDispositionServiceErrorCode,
-  type PawFeelTrustedPrincipal,
   parseCommand,
   parsePrincipal,
   requireMatchingEvent,
   sameDiscoveryIdentity,
 } from './service-guards.js';
 
+export type { PawFeelFixResolver } from './command-context.js';
 export { PawFeelDispositionServiceError, type PawFeelDispositionServiceErrorCode } from './service-guards.js';
 
 export type PawFeelDispositionCommandResult =
@@ -48,12 +47,12 @@ export interface PawFeelBundleCommandResult {
   counts: Record<'appended' | 'duplicate' | 'conflict' | 'rejected', number>;
 }
 
-export interface PawFeelFixResolver {
-  resolve(leaseId: string): Promise<PawFeelResolvedFix>;
-}
-
 export interface PawFeelBundleMembershipResolver {
-  assertBundleMembers(bundleKey: string, signalIds: readonly string[]): Promise<void>;
+  assertBundleSnapshot(
+    bundleKey: string,
+    members: readonly { signalId: string; expectedSequence: number }[],
+    membershipToken: string,
+  ): Promise<void>;
 }
 
 export interface PawFeelDispositionServiceOptions {
@@ -75,7 +74,16 @@ function commandForBundleMember(
   const base = { eventId, signalId: member.signalId, expectedSequence: member.expectedSequence };
   if (action.type === 'duplicate') return { ...base, type: 'mark_duplicate', duplicateOf: action.duplicateOf };
   if (action.type === 'no_action') return { ...base, type: 'mark_no_action', reasonCode: action.reasonCode };
-  return { ...base, type: 'mark_fix', leaseId: action.leaseId };
+  if (action.type === 'fix') return { ...base, type: 'mark_fix', leaseId: action.leaseId };
+  if (action.type === 'request_signature') {
+    return {
+      ...base,
+      type: 'request_signature',
+      action: action.action,
+      ...(action.preferredSignerCatId ? { preferredSignerCatId: action.preferredSignerCatId } : {}),
+    };
+  }
+  return { ...base, type: 'mark_blocked', blockerCode: action.blockerCode, blockerRef: action.blockerRef };
 }
 
 export class PawFeelDispositionService {
@@ -139,7 +147,7 @@ export class PawFeelDispositionService {
     if (currentEvents.length === 0) {
       throw new PawFeelDispositionServiceError('signal_not_found', `signal ${command.signalId} not found`);
     }
-    const context = await this.resolveCommandContext(actor, command, options);
+    const context = await resolvePawFeelCommandContext(actor, command, this.options.fixResolver, options.ownerCatId);
     const existing = currentEvents.find((event) => event.eventId === command.eventId);
     const attempted = pawFeelCommandToEvent(actor, command, existing?.occurredAt ?? this.now(), context);
     if (existing) {
@@ -151,6 +159,9 @@ export class PawFeelDispositionService {
     }
     if (command.type === 'mark_duplicate') {
       await this.assertDuplicateTarget(command.signalId, command.duplicateOf);
+    }
+    if (command.type === 'request_signature' && command.action.type === 'duplicate') {
+      await this.assertDuplicateTarget(command.signalId, command.action.duplicateOf);
     }
 
     const nextProjection = projectPawFeelDisposition([...currentEvents, attempted]);
@@ -234,7 +245,11 @@ export class PawFeelDispositionService {
       );
     }
     try {
-      await this.options.bundleMembershipResolver.assertBundleMembers(bundle.bundleKey, memberIds);
+      await this.options.bundleMembershipResolver.assertBundleSnapshot(
+        bundle.bundleKey,
+        bundle.members,
+        bundle.membershipToken,
+      );
     } catch (error) {
       throw new PawFeelDispositionServiceError(
         'bundle_invalid',
@@ -252,42 +267,6 @@ export class PawFeelDispositionService {
     const counts = { appended: 0, duplicate: 0, conflict: 0, rejected: 0 };
     for (const result of results) counts[result.outcome] += 1;
     return { bundleKey: bundle.bundleKey, results, counts };
-  }
-
-  private async resolveCommandContext(
-    actor: PawFeelTrustedPrincipal,
-    command: PawFeelDispositionCommand,
-    options: PawFeelExecutionOptions,
-  ): Promise<PawFeelResolvedCommandContext> {
-    if (command.type === 'mark_fix') {
-      if (!this.options.fixResolver) {
-        throw new PawFeelDispositionServiceError(
-          'fix_evidence_invalid',
-          'fix requires a task owner and active F167 lease resolver',
-        );
-      }
-      try {
-        const fix = await this.options.fixResolver.resolve(command.leaseId);
-        if (fix.leaseId !== command.leaseId) throw new Error('resolved lease identity mismatch');
-        return { fix };
-      } catch (error) {
-        throw new PawFeelDispositionServiceError(
-          'fix_evidence_invalid',
-          `fix requires a real task/owner/active lease: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-    if (command.type !== 'mark_duplicate' && command.type !== 'mark_no_action') return {};
-    if (actor.kind !== 'cat') {
-      throw new PawFeelDispositionServiceError(
-        'named_owner_required',
-        `${command.type} requires a cat-signed named lightweight owner`,
-      );
-    }
-    if (options.ownerCatId && options.ownerCatId !== actor.id) {
-      throw new PawFeelDispositionServiceError('named_owner_required', 'cat actor may only sign itself as owner');
-    }
-    return { ownerCatId: actor.id };
   }
 
   private resolveDiscoveryReplay(

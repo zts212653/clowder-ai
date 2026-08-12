@@ -17,6 +17,7 @@ vi.mock('@/components/icons/AttachIcon', () => ({
   AttachIcon: () => React.createElement('span', null, 'attach'),
 }));
 vi.mock('@/components/ImagePreview', () => ({ ImagePreview: () => null }));
+vi.mock('@/components/AttachmentPreview', () => ({ AttachmentPreview: () => null }));
 vi.mock('@/utils/compressImage', () => ({ compressImage: (f: File) => Promise.resolve(f) }));
 
 vi.mock('@/hooks/useCatData', () => ({
@@ -85,7 +86,9 @@ function getWhisperChips() {
 }
 
 function enterWhisperMode() {
-  const btn = container.querySelector<HTMLButtonElement>('[aria-label="Whisper mode"]');
+  const addBtn = container.querySelector<HTMLButtonElement>('[aria-label="添加"]');
+  act(() => addBtn?.click());
+  const btn = container.querySelector<HTMLButtonElement>('[data-testid="composer-whisper"]');
   act(() => btn?.click());
 }
 

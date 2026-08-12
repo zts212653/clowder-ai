@@ -18,6 +18,10 @@ export interface ModelPricing {
   cachedInputPerMillion: number;
   /** Price per 1M output tokens (USD) */
   outputPerMillion: number;
+  /** Source URL for the price card (required for new entries) */
+  source?: string;
+  /** Date the price + alias mapping was verified (YYYY-MM-DD) */
+  verifiedAt?: string;
 }
 
 /**
@@ -66,6 +70,78 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
     inputPerMillion: 10.0,
     cachedInputPerMillion: 1.0,
     outputPerMillion: 45.0,
+  },
+
+  // ── Kimi (Moonshot) ────────────────────────────────────────────────
+  // clowder-ai#1197: API-equivalent estimates only. Kimi CLI never reports
+  // costUsd; subscription/OAuth mode bills via weekly+5h quota (not per
+  // token), so these numbers are what the usage WOULD cost at official API
+  // rates — never present them as actual billing.
+  //
+  // Keys must match metadata.model as reported by the client:
+  //   - OAuth mode reports aliases like 'kimi-code/k3' / 'kimi-code/kimi-for-coding'
+  //   - API-key mode passes raw ids like 'kimi-k3' through (kimi-config.ts)
+  // Alias→model mapping per official Kimi Code docs (kimi.com/code/docs/en/):
+  //   k3 = Kimi K3 · k3-256k = K3 256k variant (same model, single K3 price
+  //   card) · kimi-for-coding = Kimi K2.7 Code · kimi-for-coding-highspeed =
+  //   Kimi K2.7 Code HighSpeed. Aliases can drift over time — re-verify
+  //   before repricing; unknown alias stays unpriced (no guessing).
+  // Price cards: kimi.com/resources/kimi-{k3,k2-7-code,k2-6}-pricing
+  'kimi-k3': {
+    inputPerMillion: 3.0,
+    cachedInputPerMillion: 0.3,
+    outputPerMillion: 15.0,
+    source: 'https://www.kimi.com/resources/kimi-k3-pricing',
+    verifiedAt: '2026-08-09',
+  },
+  'kimi-code/k3': {
+    inputPerMillion: 3.0,
+    cachedInputPerMillion: 0.3,
+    outputPerMillion: 15.0,
+    source: 'https://www.kimi.com/resources/kimi-k3-pricing',
+    verifiedAt: '2026-08-09',
+  },
+  'kimi-code/k3-256k': {
+    inputPerMillion: 3.0,
+    cachedInputPerMillion: 0.3,
+    outputPerMillion: 15.0,
+    source: 'https://www.kimi.com/resources/kimi-k3-pricing',
+    verifiedAt: '2026-08-09',
+  },
+  'kimi-k2.7-code': {
+    inputPerMillion: 0.95,
+    cachedInputPerMillion: 0.19,
+    outputPerMillion: 4.0,
+    source: 'https://www.kimi.com/resources/kimi-k2-7-code-pricing',
+    verifiedAt: '2026-08-09',
+  },
+  'kimi-code/kimi-for-coding': {
+    inputPerMillion: 0.95,
+    cachedInputPerMillion: 0.19,
+    outputPerMillion: 4.0,
+    source: 'https://www.kimi.com/resources/kimi-k2-7-code-pricing',
+    verifiedAt: '2026-08-09',
+  },
+  'kimi-k2.7-code-highspeed': {
+    inputPerMillion: 1.9,
+    cachedInputPerMillion: 0.38,
+    outputPerMillion: 8.0,
+    source: 'https://www.kimi.com/resources/kimi-k2-7-code-pricing',
+    verifiedAt: '2026-08-09',
+  },
+  'kimi-code/kimi-for-coding-highspeed': {
+    inputPerMillion: 1.9,
+    cachedInputPerMillion: 0.38,
+    outputPerMillion: 8.0,
+    source: 'https://www.kimi.com/resources/kimi-k2-7-code-pricing',
+    verifiedAt: '2026-08-09',
+  },
+  'kimi-k2.6': {
+    inputPerMillion: 0.95,
+    cachedInputPerMillion: 0.16,
+    outputPerMillion: 4.0,
+    source: 'https://www.kimi.com/resources/kimi-k2-6-pricing',
+    verifiedAt: '2026-08-09',
   },
 };
 

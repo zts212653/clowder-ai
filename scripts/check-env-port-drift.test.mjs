@@ -1659,8 +1659,8 @@ excluded:
       );
       assert.match(
         content,
-        /PUBLISH_HANDOFF_CMD="bash scripts\/publish-sync-tag\.sh --source-sha=\$\(git -C "\$SOURCE_DIR" rev-parse HEAD\) --push"/,
-        'sync-to-opensource should print the post-merge publish-sync-tag.sh handoff command',
+        /PUBLISH_HANDOFF_CMD="bash scripts\/publish-sync-tag\.sh --source-sha=\$SOURCE_SHA --push"/,
+        'sync-to-opensource should bind the post-merge publish handoff to the exported source commit',
       );
       assert.match(
         content,

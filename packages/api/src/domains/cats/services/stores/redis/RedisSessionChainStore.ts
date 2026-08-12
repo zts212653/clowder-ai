@@ -6,7 +6,8 @@
  * - Hash per session record (session:{id})
  * - Sorted Set per cat+thread chain (session-chain:{catId}:{threadId}, score=seq)
  * - Set per thread (session-chain-by-thread:{threadId} → cat+thread chain keys)
- * - String for active index (session-active:{catId}:{threadId} → id)
+ * - String for legacy/global active index (session-active:{catId}:{threadId} → id)
+ * - String for owner active index (session-active-owner:{userId}:{catId}:{threadId} → id)
  * - String for CLI index (session-cli:{cliSessionId} → id)
  *
  * IMPORTANT: ioredis keyPrefix auto-prefixes ALL commands including eval() KEYS[].
@@ -17,12 +18,20 @@ import type {
   CatHandoffNote,
   CatId,
   ContextHealth,
+  HybridProgress,
+  SessionCapacityPin,
+  SessionPolicySnapshot,
   SessionRecord,
   SessionStatus,
   SessionUsageSnapshot,
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
-import type { CreateSessionInput, ISessionChainStore, SessionRecordPatch } from '../ports/SessionChainStore.js';
+import type {
+  CompressionEventResult,
+  CreateSessionInput,
+  ISessionChainStore,
+  SessionRecordPatch,
+} from '../ports/SessionChainStore.js';
 import type { StoreReadOptions } from '../ports/StoreReadOptions.js';
 import { awaitStoreRead, throwIfStoreReadAborted } from '../ports/StoreReadOptions.js';
 import { SessionChainKeys } from '../redis-keys/session-chain-keys.js';
@@ -39,21 +48,33 @@ const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
  * ARGV[8] = chainKey value ('' = none, KEYS[5] left untouched)
  * ARGV[9] = workingDirectory ('' = none), ARGV[10] = workspaceFingerprint ('' = none)
  * ARGV[11] = bare cat+thread chain key (Lua KEYS are keyPrefix-expanded by ioredis)
+ * ARGV[12] = reuse existing active flag, ARGV[13] = initial compression count ('' = unknown)
+ * KEYS[7] = owner-scoped active pointer
  *
  * Returns: {'existing', existingId} when cliSessionId is already claimed,
  *          {'created', id, seq} when a new record is created.
  */
 const CREATE_LUA = `
-if ARGV[7] == '1' then
+if ARGV[12] == '1' then
+  local existingActive = redis.call('GET', KEYS[7])
+  if existingActive then return {'existing_active', existingActive} end
+end
+if ARGV[7] == '1' and ARGV[2] ~= '' then
   local existingId = redis.call('GET', KEYS[4])
   if existingId then return {'existing', existingId} end
 end
-local seq = redis.call('ZCARD', KEYS[2])
+local seq = 0
+local detailPrefix = string.sub(KEYS[3], 1, string.len(KEYS[3]) - string.len(ARGV[1]))
+for _, chainId in ipairs(redis.call('ZRANGE', KEYS[2], 0, -1)) do
+  if redis.call('HGET', detailPrefix .. chainId, 'userId') == ARGV[5] then seq = seq + 1 end
+end
 redis.call('HSET', KEYS[3],
-  'id', ARGV[1], 'cliSessionId', ARGV[2], 'threadId', ARGV[3],
+  'id', ARGV[1], 'threadId', ARGV[3],
   'catId', ARGV[4], 'userId', ARGV[5], 'seq', tostring(seq),
   'status', 'active', 'messageCount', '0',
   'createdAt', ARGV[6], 'updatedAt', ARGV[6])
+if ARGV[2] ~= '' then redis.call('HSET', KEYS[3], 'cliSessionId', ARGV[2]) end
+if ARGV[13] ~= '' then redis.call('HSET', KEYS[3], 'compressionCount', ARGV[13]) end
 if ARGV[8] ~= '' then
   redis.call('HSET', KEYS[3], 'chainKey', ARGV[8])
   ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[5], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})` : `redis.call('SET', KEYS[5], ARGV[1])`}
@@ -66,8 +87,80 @@ ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('EXPIRE', KEYS[2], ${DEFAULT_TTL_SECONDS
 redis.call('SADD', KEYS[6], ARGV[11])
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('EXPIRE', KEYS[6], ${DEFAULT_TTL_SECONDS})` : '-- persistent mode: no EXPIRE'}
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[1], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})` : `redis.call('SET', KEYS[1], ARGV[1])`}
-${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[4], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})` : `redis.call('SET', KEYS[4], ARGV[1])`}
+${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[7], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})` : `redis.call('SET', KEYS[7], ARGV[1])`}
+if ARGV[2] ~= '' then
+  ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[4], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})` : `redis.call('SET', KEYS[4], ARGV[1])`}
+end
 return {'created', ARGV[1], tostring(seq)}
+`;
+
+const BIND_CLI_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return {'missing'} end
+if redis.call('HGET', KEYS[1], 'status') ~= 'active' then return {'inactive'} end
+local claimedBy = redis.call('GET', KEYS[2])
+if claimedBy and claimedBy ~= ARGV[1] then return {'conflict', claimedBy} end
+local oldCli = redis.call('HGET', KEYS[1], 'cliSessionId') or ''
+redis.call('HSET', KEYS[1], 'cliSessionId', ARGV[2], 'updatedAt', ARGV[3])
+${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[2], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})` : `redis.call('SET', KEYS[2], ARGV[1])`}
+return {'bound', oldCli}
+`;
+
+const COMPARE_DELETE_LUA = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
+return 0
+`;
+
+const TRANSITION_TO_SEALING_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+if redis.call('HGET', KEYS[1], 'status') ~= 'active' then return -1 end
+if ARGV[4] ~= '' and redis.call('HGET', KEYS[1], 'appliedPolicyRevision') ~= ARGV[4] then return -2 end
+redis.call('HSET', KEYS[1],
+  'status', 'sealing',
+  'sealReason', ARGV[2],
+  'updatedAt', ARGV[3])
+if redis.call('GET', KEYS[2]) == ARGV[1] then redis.call('DEL', KEYS[2]) end
+if redis.call('GET', KEYS[3]) == ARGV[1] then redis.call('DEL', KEYS[3]) end
+return 1
+`;
+
+const APPLY_POLICY_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+if redis.call('HGET', KEYS[1], 'status') ~= 'active' then return 0 end
+local previousRevision = redis.call('HGET', KEYS[1], 'appliedPolicyRevision')
+if previousRevision ~= ARGV[2] then
+  if ARGV[3] == 'hybrid' then
+    redis.call('HSET', KEYS[1],
+      'hybridPolicyRevision', ARGV[2],
+      'hybridObservedCount', '0',
+      'hybridStartedAt', ARGV[5])
+  else
+    redis.call('HDEL', KEYS[1], 'hybridPolicyRevision', 'hybridObservedCount', 'hybridStartedAt')
+  end
+end
+redis.call('HSET', KEYS[1],
+  'appliedPolicy', ARGV[1],
+  'appliedPolicyRevision', ARGV[2],
+  'appliedPolicyStrategy', ARGV[3],
+  'updatedAt', ARGV[4])
+return 1
+`;
+
+const RECORD_COMPRESSION_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return {'missing'} end
+if redis.call('HGET', KEYS[1], 'status') ~= 'active' then return {'inactive'} end
+local lifetime = ''
+if redis.call('HEXISTS', KEYS[1], 'compressionCount') == 1 then
+  lifetime = tostring(redis.call('HINCRBY', KEYS[1], 'compressionCount', 1))
+end
+local appliedRevision = redis.call('HGET', KEYS[1], 'appliedPolicyRevision') or ''
+local matched = appliedRevision == ARGV[1]
+local hybridCount = redis.call('HGET', KEYS[1], 'hybridObservedCount') or ''
+if matched and redis.call('HGET', KEYS[1], 'appliedPolicyStrategy') == 'hybrid'
+  and redis.call('HGET', KEYS[1], 'hybridPolicyRevision') == ARGV[1] then
+  hybridCount = tostring(redis.call('HINCRBY', KEYS[1], 'hybridObservedCount', 1))
+end
+redis.call('HSET', KEYS[1], 'updatedAt', ARGV[2])
+return {'recorded', lifetime, hybridCount, matched and '1' or '0'}
 `;
 
 /**
@@ -79,6 +172,7 @@ return {'created', ARGV[1], tostring(seq)}
 const INCR_COMPRESSION_LUA = `
 if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
 if redis.call('HGET', KEYS[1], 'status') ~= 'active' then return -2 end
+if redis.call('HEXISTS', KEYS[1], 'compressionCount') == 0 then return -3 end
 local newCount = redis.call('HINCRBY', KEYS[1], 'compressionCount', 1)
 redis.call('HSET', KEYS[1], 'updatedAt', ARGV[1])
 return newCount
@@ -94,7 +188,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
 
   async create(input: CreateSessionInput): Promise<SessionRecord> {
     const { randomUUID } = await import('node:crypto');
-    const cliKey = SessionChainKeys.byCli(input.cliSessionId);
+    const cliKey = SessionChainKeys.byCli(input.cliSessionId ?? '__unbound__');
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const id = randomUUID();
@@ -110,15 +204,16 @@ export class RedisSessionChainStore implements ISessionChainStore {
 
       const result = (await this.redis.eval(
         CREATE_LUA,
-        6,
+        7,
         activeKey,
         chainSetKey,
         detailKey,
         cliKey,
         chainKeyIndexKey,
         threadIndexKey,
+        SessionChainKeys.activeOwner(input.userId, input.catId, input.threadId),
         id,
-        input.cliSessionId,
+        input.cliSessionId ?? '',
         input.threadId,
         input.catId,
         input.userId,
@@ -128,26 +223,46 @@ export class RedisSessionChainStore implements ISessionChainStore {
         input.workingDirectory ?? '',
         input.workspaceFingerprint ?? '',
         chainSetKey,
+        input.reuseExistingActive ? '1' : '0',
+        input.compressionCount == null ? '' : String(input.compressionCount),
       )) as [string, string, string?];
 
       const [status, recordId, seqRaw] = result;
-      if (status === 'existing') {
+      if (status === 'existing' || status === 'existing_active') {
         const existing = await this.get(recordId);
-        if (existing) return existing;
-        await this.redis.del(cliKey);
+        if (status === 'existing') {
+          if (existing) return existing;
+          await this.redis.eval(COMPARE_DELETE_LUA, 1, cliKey, recordId);
+        } else {
+          if (
+            existing?.status === 'active' &&
+            existing.userId === input.userId &&
+            existing.catId === input.catId &&
+            existing.threadId === input.threadId
+          ) {
+            return existing;
+          }
+          await this.redis.eval(
+            COMPARE_DELETE_LUA,
+            1,
+            SessionChainKeys.activeOwner(input.userId, input.catId, input.threadId),
+            recordId,
+          );
+        }
         continue;
       }
 
       const seq = Number.parseInt(seqRaw ?? '0', 10);
       return {
         id: recordId,
-        cliSessionId: input.cliSessionId,
+        ...(input.cliSessionId ? { cliSessionId: input.cliSessionId } : {}),
         threadId: input.threadId,
         catId: input.catId as CatId,
         userId: input.userId,
         seq,
         status: 'active',
         messageCount: 0,
+        compressionCount: input.compressionCount ?? null,
         createdAt: parseInt(now, 10),
         updatedAt: parseInt(now, 10),
         ...(input.chainKey ? { chainKey: input.chainKey } : {}),
@@ -156,7 +271,116 @@ export class RedisSessionChainStore implements ISessionChainStore {
       };
     }
 
-    throw new Error(`stale CLI session index could not be repaired: ${input.cliSessionId}`);
+    throw new Error(
+      `stale session index could not be repaired: ${input.cliSessionId ?? `${input.catId}:${input.threadId}`}`,
+    );
+  }
+
+  async getOrCreateActive(input: CreateSessionInput): Promise<SessionRecord> {
+    const active = await this.getActive(input.catId, input.threadId, input.userId);
+    if (active) return active;
+    if (!input.cliSessionId) return this.create({ ...input, reuseExistingActive: true });
+
+    // Ask CREATE_LUA to observe both owner and CLI indexes atomically. If the
+    // runtime ID is already owned by another logical session, never reuse or
+    // overwrite that record: create this owner's logical node unbound instead.
+    const claimedOrCreated = await this.create({
+      ...input,
+      reuseExistingActive: true,
+      reuseExistingCliSession: true,
+    });
+    if (
+      claimedOrCreated.status === 'active' &&
+      claimedOrCreated.userId === input.userId &&
+      claimedOrCreated.catId === input.catId &&
+      claimedOrCreated.threadId === input.threadId
+    ) {
+      return claimedOrCreated;
+    }
+    return this.create({
+      ...input,
+      cliSessionId: undefined,
+      reuseExistingActive: true,
+      reuseExistingCliSession: false,
+    });
+  }
+
+  async bindCliSessionId(id: string, cliSessionId: string): Promise<SessionRecord | null> {
+    const now = String(Date.now());
+    const result = (await this.redis.eval(
+      BIND_CLI_LUA,
+      2,
+      SessionChainKeys.detail(id),
+      SessionChainKeys.byCli(cliSessionId),
+      id,
+      cliSessionId,
+      now,
+    )) as [string, string?];
+    if (result[0] !== 'bound') return null;
+    const oldCli = result[1];
+    if (oldCli && oldCli !== cliSessionId) {
+      await this.redis.eval(COMPARE_DELETE_LUA, 1, SessionChainKeys.byCli(oldCli), id);
+    }
+    return this.get(id);
+  }
+
+  async applyPolicySnapshot(id: string, snapshot: SessionPolicySnapshot): Promise<SessionRecord | null> {
+    const result = await this.redis.eval(
+      APPLY_POLICY_LUA,
+      1,
+      SessionChainKeys.detail(id),
+      JSON.stringify(snapshot),
+      snapshot.revision,
+      snapshot.config.strategy,
+      String(Date.now()),
+      new Date().toISOString(),
+    );
+    return Number(result) === 1 ? this.get(id) : null;
+  }
+
+  async recordCompressionEvent(id: string, policyRevision: string): Promise<CompressionEventResult | null> {
+    const result = (await this.redis.eval(
+      RECORD_COMPRESSION_LUA,
+      1,
+      SessionChainKeys.detail(id),
+      policyRevision,
+      String(Date.now()),
+    )) as [string, string?, string?, string?];
+    if (result[0] !== 'recorded') return null;
+    const record = await this.get(id);
+    if (!record) return null;
+    const lifetimeCount = result[1];
+    const hybridCount = result[2];
+    const hybridProgress =
+      record.hybridProgress && hybridCount !== undefined && hybridCount !== ''
+        ? { ...record.hybridProgress, observedCount: Number.parseInt(hybridCount, 10) }
+        : (record.hybridProgress ?? null);
+    return {
+      compressionCount: lifetimeCount === undefined || lifetimeCount === '' ? null : Number.parseInt(lifetimeCount, 10),
+      hybridProgress,
+      revisionMatched: result[3] === '1',
+    };
+  }
+
+  async transitionToSealing(
+    id: string,
+    reason: string,
+    expectedPolicyRevision?: string,
+  ): Promise<SessionRecord | null> {
+    const record = await this.get(id);
+    if (!record) return null;
+    const result = await this.redis.eval(
+      TRANSITION_TO_SEALING_LUA,
+      3,
+      SessionChainKeys.detail(id),
+      SessionChainKeys.active(record.catId, record.threadId),
+      SessionChainKeys.activeOwner(record.userId, record.catId, record.threadId),
+      id,
+      reason,
+      String(Date.now()),
+      expectedPolicyRevision ?? '',
+    );
+    return Number(result) === 1 ? this.get(id) : null;
   }
 
   async get(id: string): Promise<SessionRecord | null> {
@@ -165,15 +389,30 @@ export class RedisSessionChainStore implements ISessionChainStore {
     return this.hydrate(data);
   }
 
-  async getActive(catId: CatId, threadId: string): Promise<SessionRecord | null> {
-    const activeId = await this.redis.get(SessionChainKeys.active(catId, threadId));
-    if (!activeId) return null;
-    const record = await this.get(activeId);
-    if (!record || record.status !== 'active') return null;
-    return record;
+  async getActive(catId: CatId, threadId: string, userId?: string): Promise<SessionRecord | null> {
+    const activeKey = userId
+      ? SessionChainKeys.activeOwner(userId, catId, threadId)
+      : SessionChainKeys.active(catId, threadId);
+    const activeId = await this.redis.get(activeKey);
+    if (activeId) {
+      const record = await this.get(activeId);
+      if (record?.status === 'active' && (userId === undefined || record.userId === userId)) return record;
+      await this.redis.eval(COMPARE_DELETE_LUA, 1, activeKey, activeId);
+    }
+    if (userId === undefined) return null;
+
+    // Upgrade pre-#1329 records (or recover a stale owner pointer) by scanning
+    // the existing durable chain once, then materializing the owner index.
+    const active = [...(await this.getChain(catId, threadId, userId))]
+      .reverse()
+      .find((record) => record.status === 'active');
+    if (!active) return null;
+    if (DEFAULT_TTL_SECONDS > 0) await this.redis.set(activeKey, active.id, 'EX', DEFAULT_TTL_SECONDS);
+    else await this.redis.set(activeKey, active.id);
+    return active;
   }
 
-  async getChain(catId: CatId, threadId: string): Promise<SessionRecord[]> {
+  async getChain(catId: CatId, threadId: string, userId?: string): Promise<SessionRecord[]> {
     const ids = await this.redis.zrange(SessionChainKeys.chain(catId, threadId), 0, -1);
     if (!ids.length) return [];
 
@@ -188,7 +427,10 @@ export class RedisSessionChainStore implements ISessionChainStore {
     for (const [err, data] of results) {
       if (err || !data) continue;
       const d = data as Record<string, string>;
-      if (d.id) records.push(this.hydrate(d));
+      if (d.id) {
+        const record = this.hydrate(d);
+        if (userId === undefined || record.userId === userId) records.push(record);
+      }
     }
     return records.sort((a, b) => a.seq - b.seq);
   }
@@ -282,25 +524,32 @@ export class RedisSessionChainStore implements ISessionChainStore {
       pairs.push('status', patch.status);
       const catId = await this.redis.hget(detailKey, 'catId');
       const threadId = await this.redis.hget(detailKey, 'threadId');
-      if (catId && threadId) {
+      const userId = await this.redis.hget(detailKey, 'userId');
+      if (catId && threadId && userId) {
         const activeKey = SessionChainKeys.active(catId, threadId);
+        const ownerActiveKey = SessionChainKeys.activeOwner(userId, catId, threadId);
         if (patch.status === 'active') {
           if (DEFAULT_TTL_SECONDS > 0) {
             await this.redis.set(activeKey, id, 'EX', DEFAULT_TTL_SECONDS);
+            await this.redis.set(ownerActiveKey, id, 'EX', DEFAULT_TTL_SECONDS);
           } else {
             await this.redis.set(activeKey, id);
+            await this.redis.set(ownerActiveKey, id);
           }
         } else {
-          const currentActive = await this.redis.get(activeKey);
-          if (currentActive === id) {
-            await this.redis.del(activeKey);
-          }
+          // A new active record may claim either pointer while this seal write
+          // is in flight. Delete only if the index still names this record.
+          await this.redis.eval(COMPARE_DELETE_LUA, 1, activeKey, id);
+          await this.redis.eval(COMPARE_DELETE_LUA, 1, ownerActiveKey, id);
         }
       }
     }
 
     if (patch.contextHealth !== undefined) {
       pairs.push('contextHealth', JSON.stringify(patch.contextHealth));
+    }
+    if (patch.capacityPin !== undefined) {
+      pairs.push('capacityPin', JSON.stringify(patch.capacityPin));
     }
     if (patch.lastUsage !== undefined) {
       pairs.push('lastUsage', JSON.stringify(patch.lastUsage));
@@ -317,7 +566,36 @@ export class RedisSessionChainStore implements ISessionChainStore {
       else if (patch.sealedAt !== undefined) pairs.push('sealedAt', String(patch.sealedAt));
     }
     if (patch.compressionCount !== undefined) {
-      pairs.push('compressionCount', String(patch.compressionCount));
+      if (patch.compressionCount === null) deleteFields.push('compressionCount');
+      else pairs.push('compressionCount', String(patch.compressionCount));
+    }
+    if ('appliedPolicy' in patch) {
+      if (patch.appliedPolicy === null) {
+        deleteFields.push('appliedPolicy', 'appliedPolicyRevision', 'appliedPolicyStrategy');
+      } else if (patch.appliedPolicy !== undefined) {
+        pairs.push(
+          'appliedPolicy',
+          JSON.stringify(patch.appliedPolicy),
+          'appliedPolicyRevision',
+          patch.appliedPolicy.revision,
+          'appliedPolicyStrategy',
+          patch.appliedPolicy.config.strategy,
+        );
+      }
+    }
+    if ('hybridProgress' in patch) {
+      if (patch.hybridProgress === null) {
+        deleteFields.push('hybridPolicyRevision', 'hybridObservedCount', 'hybridStartedAt');
+      } else if (patch.hybridProgress !== undefined) {
+        pairs.push(
+          'hybridPolicyRevision',
+          patch.hybridProgress.policyRevision,
+          'hybridObservedCount',
+          String(patch.hybridProgress.observedCount),
+          'hybridStartedAt',
+          patch.hybridProgress.startedAt,
+        );
+      }
     }
     if (patch.continuityCapsule !== undefined) {
       pairs.push('continuityCapsule', JSON.stringify(patch.continuityCapsule));
@@ -331,7 +609,6 @@ export class RedisSessionChainStore implements ISessionChainStore {
     if (patch.catHandoffNote !== undefined) {
       pairs.push('catHandoffNote', JSON.stringify(patch.catHandoffNote));
     }
-
     await this.redis.hset(detailKey, ...pairs);
     if (deleteFields.length > 0) {
       await this.redis.hdel(detailKey, ...deleteFields);
@@ -387,6 +664,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
 
   private hydrate(data: Record<string, string>): SessionRecord {
     const contextHealth = safeParseJson<ContextHealth>(data.contextHealth);
+    const capacityPin = safeParseJson<SessionCapacityPin>(data.capacityPin);
     const lastUsage = safeParseJson<SessionUsageSnapshot>(data.lastUsage);
     const continuityCapsule =
       data.continuityCapsule !== undefined ? safeParseJson<unknown>(data.continuityCapsule) : undefined;
@@ -394,14 +672,23 @@ export class RedisSessionChainStore implements ISessionChainStore {
       data.catHandoffNote !== undefined ? safeParseJson<CatHandoffNote>(data.catHandoffNote) : undefined;
     const sealReason = data.sealReason as SessionRecord['sealReason'] | undefined;
     const sealedAt = data.sealedAt ? parseInt(data.sealedAt, 10) : undefined;
-    const compressionCount = data.compressionCount ? parseInt(data.compressionCount, 10) : undefined;
+    const compressionCount = data.compressionCount !== undefined ? parseInt(data.compressionCount, 10) : null;
+    const appliedPolicy = safeParseJson<SessionPolicySnapshot>(data.appliedPolicy);
+    const hybridProgress: HybridProgress | undefined =
+      data.hybridPolicyRevision && data.hybridObservedCount !== undefined && data.hybridStartedAt
+        ? {
+            policyRevision: data.hybridPolicyRevision,
+            observedCount: parseInt(data.hybridObservedCount, 10),
+            startedAt: data.hybridStartedAt,
+          }
+        : undefined;
     const consecutiveRestoreFailures = data.consecutiveRestoreFailures
       ? parseInt(data.consecutiveRestoreFailures, 10)
       : undefined;
 
     return {
       id: data.id!,
-      cliSessionId: data.cliSessionId!,
+      ...(data.cliSessionId ? { cliSessionId: data.cliSessionId } : {}),
       threadId: data.threadId!,
       catId: data.catId as CatId,
       userId: data.userId!,
@@ -410,11 +697,14 @@ export class RedisSessionChainStore implements ISessionChainStore {
       seq: parseInt(data.seq!, 10),
       status: (data.status as SessionStatus) ?? 'active',
       ...(contextHealth ? { contextHealth } : {}),
+      ...(capacityPin ? { capacityPin } : {}),
       ...(lastUsage ? { lastUsage } : {}),
       messageCount: parseInt(data.messageCount ?? '0', 10),
+      compressionCount,
       ...(sealReason ? { sealReason } : {}),
       ...(sealedAt ? { sealedAt } : {}),
-      ...(compressionCount !== undefined ? { compressionCount } : {}),
+      ...(appliedPolicy ? { appliedPolicy } : {}),
+      ...(hybridProgress ? { hybridProgress } : {}),
       ...(continuityCapsule !== undefined && continuityCapsule !== null ? { continuityCapsule } : {}),
       ...(catHandoffNote !== undefined && catHandoffNote !== null ? { catHandoffNote } : {}),
       ...(consecutiveRestoreFailures !== undefined ? { consecutiveRestoreFailures } : {}),

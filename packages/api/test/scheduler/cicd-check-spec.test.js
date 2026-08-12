@@ -75,6 +75,28 @@ describe('CI scheduler F280 adapter', () => {
     assert.equal((await spec.admission.gate()).run, false);
   });
 
+  test('gate keeps a completed wait collectable while a configured external case is still open', async () => {
+    const taskStore = new TaskStore();
+    const task = await trackedTask(taskStore);
+    await taskStore.update(task.id, { status: 'done' });
+    const continuationChecks = [];
+    const spec = createCiCdCheckTaskSpec({
+      taskStore,
+      cicdRouter: { route: async () => ({ kind: 'skipped', reason: 'state-only' }) },
+      fetchPrStatus: async () => null,
+      continueDoneTracking: async (repoFullName, prNumber) => {
+        continuationChecks.push({ repoFullName, prNumber });
+        return true;
+      },
+      log: { info() {}, warn() {}, error() {} },
+    });
+
+    const gate = await spec.admission.gate();
+    assert.equal(gate.run, true);
+    assert.equal(gate.workItems.length, 1);
+    assert.deepEqual(continuationChecks, [{ repoFullName: 'owner/repo', prNumber: 7 }]);
+  });
+
   test('only a notified typed outcome invokes the owner', async () => {
     const taskStore = new TaskStore();
     const task = await trackedTask(taskStore);

@@ -40,6 +40,17 @@ describe('context-management-hint (F225 soft layer)', () => {
     assert.match(text, /context-self-management/, 'points the cat to the skill');
   });
 
+  test('formatContextManagementHint: preserves unknown compression history instead of rendering zero', async () => {
+    const { formatContextManagementHint } = await loadModule();
+    const text = formatContextManagementHint({
+      severity: 'warn',
+      fillConfidence: 'exact_token',
+      compressionCount: null,
+    });
+    assert.match(text, /compressionCount=unknown/);
+    assert.doesNotMatch(text, /compressionCount=0/);
+  });
+
   // The reviewer's P1: the hint must actually reach the cat. It rides the
   // prompt-injection channel (queue on warn turn → take as prompt prefix next turn).
   describe('pending delivery (queue → take = the prompt-injection channel)', () => {

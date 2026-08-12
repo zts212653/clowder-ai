@@ -34,6 +34,7 @@ import { ApprovalProvenanceLinks } from './ApprovalProvenanceLinks';
 import { CriticalText } from './content-overflow';
 import { EntityConflictResolutionPanel } from './EntityConflictResolutionPanel';
 import { HumanDispositionFeedbackDialog } from './HumanDispositionFeedbackDialog';
+import { MeetingIntakeCard } from './MeetingIntakeCard';
 import { PersonMemoryClaimSelector } from './PersonMemoryClaimSelector';
 
 function formatAge(createdAt: number): string {
@@ -51,6 +52,11 @@ function formatDetailLines(entries: ReadonlyArray<readonly [label: string, value
   return lines.length > 0 ? lines.join('\n') : undefined;
 }
 export function ApprovalItemCard({ item }: { item: ApprovalItem }) {
+  if (item.sourceFeatureId === 'F292') return <MeetingIntakeCard item={item} />;
+  return <GenericApprovalItemCard item={item} />;
+}
+
+function GenericApprovalItemCard({ item }: { item: ApprovalItem }) {
   const close = useApprovalHubStore((s) => s.close);
   const resolveCatName = useCatNameResolver();
 

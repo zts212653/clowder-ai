@@ -168,6 +168,13 @@ function runGate(bash, args = [], extraEnv = {}, options = {}) {
 }
 
 describe('pre-merge-check dependency refresh order', () => {
+  it('does not truncate git worktree output with a pipe that can SIGPIPE under pipefail', () => {
+    const source = readFileSync(scriptPath, 'utf8');
+
+    assert.doesNotMatch(source, /git worktree list --porcelain\s*\|\s*head\b/);
+    assert.match(source, /git worktree list --porcelain\s*\|\s*sed -n/);
+  });
+
   it('runs pnpm install after rebasing onto origin/main', (t) => {
     const bash = requireBash(t);
     const result = runGate(bash);
@@ -211,6 +218,12 @@ describe('pre-merge-check dependency refresh order', () => {
       'env NODE_ENV=<unset> npm_config_production=<unset> NPM_CONFIG_PRODUCTION=<unset>',
       `expected gate to clear inherited production install env, got:\n${result.logLines.join('\n')}`,
     );
+  });
+
+  it('does not truncate git worktree output through head under pipefail', () => {
+    const source = readFileSync(scriptPath, 'utf8');
+
+    assert.doesNotMatch(source, /git worktree list --porcelain\s*\|\s*head\b/);
   });
 
   it('uses public API tests when source-only Claude settings are absent', (t) => {

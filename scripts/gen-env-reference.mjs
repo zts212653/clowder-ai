@@ -2,8 +2,9 @@
 /**
  * gen:env-reference — Generate docs/env-reference.md from env-registry.ts.
  *
- * Reads ENV_VARS and ENV_CATEGORIES from the registry source (regex parse,
- * no import needed) and generates a Markdown reference grouped by category.
+ * Reads ENV_VARS and ENV_CATEGORIES from the registry source through the
+ * TypeScript AST (without executing application code) and generates a
+ * Markdown reference grouped by category.
  *
  * Run: `node scripts/gen-env-reference.mjs`
  * Wire: `pnpm gen:env-reference` in root package.json
@@ -11,50 +12,12 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { parseCategories, parseVars } from './lib/env-registry-parser.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const REGISTRY_PATH = join(ROOT, 'packages/api/src/config/env-registry.ts');
 const OUTPUT_PATH = join(ROOT, 'docs/env-reference.md');
 
-// ── Parse ENV_CATEGORIES ──
-function parseCategories(src) {
-  /** @type {Map<string, string>} */
-  const cats = new Map();
-  const block = src.match(/ENV_CATEGORIES[^{]*\{([^}]+)\}/s);
-  if (!block) return cats;
-  for (const m of block[1].matchAll(/(\w+):\s*'([^']+)'/g)) {
-    cats.set(m[1], m[2]);
-  }
-  return cats;
-}
-
-// ── Parse ENV_VARS ──
-function parseVars(src) {
-  /** @type {Array<{name:string, category:string, defaultValue:string, description:string, sensitive:boolean}>} */
-  const vars = [];
-  const objPattern = /\{([^}]+)\}/gs;
-  for (const block of src.matchAll(objPattern)) {
-    const body = block[1];
-    const nameMatch = body.match(/name:\s*['"]([A-Z_][A-Z0-9_]*)['"]/);
-    if (!nameMatch) continue;
-    const name = nameMatch[1];
-    const catMatch = body.match(/category:\s*['"](\w+)['"]/);
-    const defMatch = body.match(/defaultValue:\s*['"](.+?)['"]/);
-    const descMatch = body.match(/description:\s*\n?\s*['"](.+?)['"]/s);
-    const sensitive = /sensitive:\s*true/.test(body);
-
-    vars.push({
-      name,
-      category: catMatch?.[1] ?? 'unknown',
-      defaultValue: defMatch?.[1] ?? '—',
-      description: descMatch?.[1]?.replace(/\n\s*/g, ' ') ?? '',
-      sensitive,
-    });
-  }
-  return vars;
-}
-
-// ── Generate Markdown ──
 const src = readFileSync(REGISTRY_PATH, 'utf-8');
 const categories = parseCategories(src);
 const vars = parseVars(src);

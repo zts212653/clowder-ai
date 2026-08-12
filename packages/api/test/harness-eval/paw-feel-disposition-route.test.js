@@ -24,6 +24,7 @@ const PAGE = {
     problemFamilies: { status: 'unavailable', reason: 'No authoritative grouping contract' },
   },
   counts: { total: 0, unseen: 0, inProgress: 0, routePending: 0, disposed: 0, overdue: 0 },
+  responsibilityCounts: { unreviewed: 0, bound_in_repair: 0, signature_waiting: 0, blocked: 0, terminal: 0 },
   degraded: false,
 };
 
@@ -61,6 +62,7 @@ async function createApp(overrides = {}) {
   const captureCalls = [];
   const captureIntentCalls = [];
   const dutyCalls = [];
+  const receiptCalls = [];
   const readModel = Object.hasOwn(overrides, 'readModel')
     ? overrides.readModel
     : {
@@ -122,12 +124,21 @@ async function createApp(overrides = {}) {
           };
         },
       };
+  const dutyReceiptService = Object.hasOwn(overrides, 'dutyReceiptService')
+    ? overrides.dutyReceiptService
+    : {
+        async reconcile(actorCatId) {
+          receiptCalls.push(actorCatId);
+          return { outcome: 'incomplete', uncoveredBundleKeys: ['bundle:remaining'] };
+        },
+      };
   await app.register(pawFeelDispositionRoutes, {
     readModel,
     dispositionService,
     captureService,
     captureIntentSidecar,
     dutyConfigStore,
+    dutyReceiptService,
     callbackRegistry: callbackRegistry(),
   });
   await app.ready();
@@ -140,6 +151,7 @@ async function createApp(overrides = {}) {
     captureCalls,
     captureIntentCalls,
     dutyCalls,
+    receiptCalls,
   };
 }
 
@@ -296,12 +308,24 @@ describe('F278 paw-feel disposition routes', () => {
   it('accepts one callback bundle snapshot instead of requiring per-row routing calls', async () => {
     const fixture = await createApp();
     apps.push(fixture.app);
+    const missingSnapshot = await fixture.app.inject({
+      method: 'POST',
+      url: '/api/callbacks/paw-feel-bundle-triage',
+      headers: callbackHeaders(),
+      payload: {
+        bundleKey: 'turn:turn-1',
+        eventIdPrefix: 'bundle-missing-snapshot',
+        members: [{ signalId: 'signal-1', expectedSequence: 1 }],
+        action: { type: 'no_action', reasonCode: 'not_actionable' },
+      },
+    });
     const response = await fixture.app.inject({
       method: 'POST',
       url: '/api/callbacks/paw-feel-bundle-triage',
       headers: callbackHeaders(),
       payload: {
         bundleKey: 'turn:turn-1',
+        membershipToken: 'signed-list-snapshot',
         eventIdPrefix: 'bundle-1',
         members: [
           { signalId: 'signal-1', expectedSequence: 1 },
@@ -311,10 +335,42 @@ describe('F278 paw-feel disposition routes', () => {
       },
     });
 
+    assert.equal(missingSnapshot.statusCode, 400);
     assert.equal(response.statusCode, 200);
     assert.equal(fixture.bundleCalls.length, 1);
     assert.deepEqual(fixture.bundleCalls[0].principal, { kind: 'cat', id: 'opus' });
     assert.equal(fixture.bundleCalls[0].command.members.length, 2);
+    assert.deepEqual(fixture.receiptCalls, ['opus']);
+    assert.deepEqual(JSON.parse(response.body).dutyReceipt, {
+      outcome: 'incomplete',
+      uncoveredBundleKeys: ['bundle:remaining'],
+    });
+  });
+
+  it('keeps durable triage successful when auxiliary receipt reconciliation fails', async () => {
+    const fixture = await createApp({
+      dutyReceiptService: {
+        async reconcile() {
+          throw new Error('notice message unavailable');
+        },
+      },
+    });
+    apps.push(fixture.app);
+
+    const response = await fixture.app.inject({
+      method: 'POST',
+      url: '/api/callbacks/paw-feel-triage',
+      headers: callbackHeaders(),
+      payload: { commands: [seenCommand()] },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.results[0].outcome, 'appended');
+    assert.deepEqual(body.dutyReceiptWarning, {
+      code: 'receipt_reconciliation_failed',
+      detail: 'notice message unavailable',
+    });
   });
 
   it('prevents operator from attributing cat-signed terminal actions while retaining verified-fix override', async () => {

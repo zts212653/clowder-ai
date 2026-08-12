@@ -32,6 +32,14 @@ function item(overrides: Partial<ExternalRuntimeSessionListItem> = {}): External
     lastObservedAt: 1780000000000,
     lifecycle: { state: 'active', startedAt: 1779999999000, lastObservedAt: 1780000000000 },
     binding: { mode: 'orphan_anchor', anchorThreadId: 'external-runtime:antigravity-desktop:user-1' },
+    sessionState: { seq: 0, status: 'active', compressionCount: null },
+    sessionPolicy: {
+      config: { strategy: 'handoff' },
+      source: 'provider_default',
+      revision: 'provider:test',
+      changedAt: 0,
+      execution: { status: 'unavailable', missingCapabilities: ['managed_invocation_boundary'] },
+    },
     drilldown: {
       sessionRecord: '/api/sessions/session-active',
       events: '/api/sessions/session-active/events',
@@ -60,6 +68,13 @@ const sessions = [
       drainResult: 'complete',
     },
     binding: { mode: 'thread', threadId: 'thread-1', requestedBy: 'agent_key' },
+    sessionPolicy: {
+      config: { strategy: 'hybrid' },
+      source: 'runtime_override',
+      revision: 'managed:test',
+      changedAt: 1000,
+      execution: { status: 'degraded', missingCapabilities: ['compression_signal'] },
+    },
   }),
 ] satisfies ExternalRuntimeSessionListItem[];
 
@@ -110,6 +125,8 @@ describe('ExternalRuntimeSessionsPanel', () => {
     expect(container.textContent).toContain('antigravity');
     expect(container.textContent).toContain('gemini-3.1-pro');
     expect(container.textContent).toContain('IDE 直连');
+    expect(container.textContent).toContain('policy handoff · unavailable · unmanaged boundary');
+    expect(container.textContent).toContain('policy hybrid · degraded · missing compression_signal');
     expect(container.textContent).toContain('已封存');
     expect(container.textContent).toContain('Runtime 断开');
     expect(container.textContent).toContain('Thread 绑定');

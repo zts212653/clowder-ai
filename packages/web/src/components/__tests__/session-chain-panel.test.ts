@@ -140,6 +140,68 @@ describe('F24: SessionChainPanel', () => {
     expect(container.textContent).toContain('2 total');
   });
 
+  it('distinguishes unknown compression history from observed zero', async () => {
+    mockSessionsResponse([
+      {
+        id: 'unknown-count',
+        catId: 'opus',
+        seq: 0,
+        status: 'active',
+        messageCount: 0,
+        compressionCount: null,
+        createdAt: Date.now(),
+      },
+      {
+        id: 'observed-zero',
+        catId: 'codex',
+        seq: 0,
+        status: 'active',
+        messageCount: 0,
+        compressionCount: 0,
+        createdAt: Date.now(),
+      },
+    ]);
+
+    renderPanel('thread-count-state');
+    await flushFetch();
+
+    expect(container.textContent).toContain('compress count unknown');
+    expect(container.textContent).toContain('0 compress observed');
+  });
+
+  it('shows the applied policy and exact execution status on the active session node', async () => {
+    mockSessionsResponse([
+      {
+        id: 'policy-node',
+        catId: 'opus',
+        seq: 0,
+        status: 'active',
+        messageCount: 0,
+        compressionCount: null,
+        createdAt: Date.now(),
+        appliedPolicy: {
+          config: { strategy: 'hybrid', thresholds: { warn: 0.8, action: 0.9 } },
+          source: 'runtime_override',
+          revision: 'runtime:hybrid:1',
+          changedAt: 1,
+          execution: {
+            status: 'degraded',
+            missingCapabilities: ['compression_signal', 'session_rotation'],
+          },
+        },
+      },
+    ]);
+
+    renderPanel('thread-policy-state');
+    await flushFetch();
+
+    const policyState = container.querySelector('[data-testid="session-policy-state"]');
+    expect(policyState?.textContent).toContain('hybrid');
+    expect(policyState?.textContent).toContain('degraded');
+    expect(policyState?.textContent).toContain('compression_signal');
+    expect(policyState?.textContent).toContain('session_rotation');
+  });
+
   it('collapses repeated 0-msg tool_conflict retry corpses into one summary (F201-churn)', async () => {
     const corpse = (seq: number) => ({
       id: `corpse-${seq}`,

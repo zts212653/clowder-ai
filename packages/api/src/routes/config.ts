@@ -24,10 +24,12 @@ import { configEventBus, createChangeSetId } from '../config/config-event-bus.js
 import type { ConfigSnapshot } from '../config/config-snapshot.js';
 import {
   buildEnvSummary,
+  buildSystemEnvSummary,
   ENV_CATEGORIES,
   filterSensitiveEditableKeys,
   hasSensitiveEditableVars,
   isEditableEnvVarName,
+  SETTINGS_GROUPS,
 } from '../config/env-registry.js';
 import { updateRuntimeCoCreator } from '../config/runtime-cat-catalog.js';
 import { isValidTimeZone } from '../config/time-zone.js';
@@ -267,7 +269,14 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
     return handleCoCreatorPatch(request, reply);
   });
 
-  app.get('/api/config/env-summary', async () => {
+  app.get('/api/config/env-summary', async (request) => {
+    const { surface } = request.query as { surface?: string };
+
+    // #770: ?surface=system returns only curated System Settings vars
+    if (surface === 'system') {
+      return { groups: SETTINGS_GROUPS, variables: buildSystemEnvSummary() };
+    }
+
     const apiCwd = process.cwd();
     const home = os.homedir();
     return {

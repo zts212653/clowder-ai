@@ -1373,6 +1373,79 @@ describe('TaskRunnerV2 — once trigger (#415)', () => {
     runner.stop();
   });
 
+  it('hydrates a past-due running managed command into its durable fallback path', async () => {
+    const [{ TaskRunnerV2 }, { reminderTemplate }] = await Promise.all([
+      import('../../dist/infrastructure/scheduler/TaskRunnerV2.js'),
+      import('../../dist/infrastructure/scheduler/templates/reminder.js'),
+    ]);
+    const recovered = [];
+    const runner = new TaskRunnerV2({ logger: silentLogger, ledger, dynamicTaskStore });
+    runner.setManagedCommandWakeRecovery(async (taskId) => {
+      recovered.push(taskId);
+      return 'pending';
+    });
+    const pastFireAt = Date.now() - 60_000;
+    dynamicTaskStore.insert({
+      id: 'hold-ball-managed-running',
+      templateId: 'reminder',
+      trigger: { type: 'once', fireAt: pastFireAt },
+      params: {
+        message: 'managed fallback',
+        holdLifecycle: {
+          mode: 'wake_when',
+          status: 'active',
+          managedCommand: { state: 'command_running', command: 'pnpm gate', startedAt: pastFireAt - 1_000 },
+        },
+      },
+      display: { label: 'managed fallback', category: 'system' },
+      deliveryThreadId: 'thread-managed',
+      enabled: true,
+      createdBy: 'hold-ball:codex-sol',
+      createdAt: new Date(pastFireAt - 1_000).toISOString(),
+    });
+
+    assert.equal(runner.hydrateDynamic(dynamicTaskStore, { get: () => reminderTemplate }), 1);
+    runner.start();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    assert.deepEqual(recovered, ['hold-ball-managed-running']);
+    assert.ok(dynamicTaskStore.getById('hold-ball-managed-running'), 'recovery-owned receipt must stay durable');
+    assert.ok(!runner.getRegisteredTasks().includes('hold-ball-managed-running'));
+    runner.stop();
+  });
+
+  it('leaves a past-due dispatch-pending managed receipt exclusively to recovery', async () => {
+    const { TaskRunnerV2 } = await import('../../dist/infrastructure/scheduler/TaskRunnerV2.js');
+    const runner = new TaskRunnerV2({ logger: silentLogger, ledger, dynamicTaskStore });
+    const pastFireAt = Date.now() - 60_000;
+    dynamicTaskStore.insert({
+      id: 'hold-ball-managed-pending',
+      templateId: 'reminder',
+      trigger: { type: 'once', fireAt: pastFireAt },
+      params: {
+        message: 'managed fallback',
+        holdLifecycle: {
+          mode: 'wake_when',
+          status: 'active',
+          managedCommand: { state: 'dispatch_pending', command: 'pnpm gate', startedAt: pastFireAt - 1_000 },
+        },
+      },
+      display: { label: 'managed fallback', category: 'system' },
+      deliveryThreadId: 'thread-managed',
+      enabled: true,
+      createdBy: 'hold-ball:codex-sol',
+      createdAt: new Date(pastFireAt - 1_000).toISOString(),
+    });
+
+    assert.equal(runner.hydrateDynamic(dynamicTaskStore, { get: () => null }), 0);
+    assert.ok(
+      dynamicTaskStore.getById('hold-ball-managed-pending'),
+      'pending receipt must not be missed-window retired',
+    );
+    assert.ok(!runner.getRegisteredTasks().includes('hold-ball-managed-pending'));
+    runner.stop();
+  });
+
   it('hydrated once trigger with past fireAt sends missed-window notification', async () => {
     const { TaskRunnerV2 } = await import('../../dist/infrastructure/scheduler/TaskRunnerV2.js');
     const notifyCalls = [];

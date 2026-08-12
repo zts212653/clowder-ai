@@ -9,7 +9,7 @@ tips_exempt: internal operations tool — board/reconciler/closure UX visible on
 
 # F168: Community Operations Board — 社区事务编排引擎
 
-> **Status**: operational closure dogfood complete ✅（2026-08-04）| **基础设施 A→E 全部 merged ✅** | **Phase F backend + backfill + board UX merged, opus-47 vision guards PASS ✅** | **F-Step3 External Case Closure 真实 external case 已闭环 ✅** | **Owner**: Ragdoll (opus-4.8) | **Priority**: P1
+> **Status**: **done** ✅（2026-08-04 operational closure dogfood complete；2026-08-06 post-close verdict projection starvation 修复见 Timeline）| **基础设施 A→E 全部 merged ✅** | **Phase F backend + backfill + board UX merged, opus-47 vision guards PASS ✅** | **F-Step3 External Case Closure 真实 external case 已闭环 ✅** | **Owner**: Ragdoll (opus-4.8) | **Priority**: P1
 
 ## Reopen（2026-06-10，operator signoff）
 

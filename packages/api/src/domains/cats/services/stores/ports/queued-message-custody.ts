@@ -245,7 +245,11 @@ function assertTargetOutcomes(
     ) {
       throw new Error('target outcome must carry matching invocation lineage evidence');
     }
-    if (outcome.disposition !== 'responded' && outcome.disposition !== 'completed_with_turn') {
+    if (
+      outcome.disposition !== 'responded' &&
+      outcome.disposition !== 'completed_with_turn' &&
+      outcome.disposition !== 'managed_hold_disposition'
+    ) {
       throw new Error(`invalid target outcome disposition: ${outcome.disposition}`);
     }
     if (outcome.consumption !== undefined) {
@@ -264,6 +268,14 @@ function assertTargetOutcomes(
           new Set(outputMessageIds).size !== outputMessageIds.length
         ) {
           throw new Error('source response consumption requires unique output message ids');
+        }
+      } else if (outcome.consumption.kind === 'managed_hold_continued') {
+        if (
+          !outcome.consumption.sourceMessageId ||
+          !outcome.consumption.taskId ||
+          !['reheld', 'event_wait', 'transferred'].includes(outcome.consumption.transition)
+        ) {
+          throw new Error('invalid managed hold continuation witness');
         }
       } else {
         throw new Error('invalid target terminal consumption witness');
@@ -515,12 +527,28 @@ function assertAuthorIntentMonotonicity(current: QueuedMessageCustody, next: Que
 
 function assertWithdrawalMonotonicity(current: QueuedMessageCustody, next: QueuedMessageCustody): void {
   for (const catId of current.withdrawnByCatIds ?? []) {
-    if (
-      !next.withdrawnByCatIds?.includes(catId) ||
-      next.withdrawnAtByCatId?.[catId] !== current.withdrawnAtByCatId?.[catId]
-    ) {
-      throw new Error('queue custody withdrawals are append-only');
+    if (next.withdrawnByCatIds?.includes(catId)) {
+      if (next.withdrawnAtByCatId?.[catId] !== current.withdrawnAtByCatId?.[catId]) {
+        throw new Error('queue custody withdrawals are append-only');
+      }
+      continue;
     }
+    const lateOutcome = next.targetOutcomeByCatId?.[catId];
+    const exactExposure = lateOutcome
+      ? current.bodyExposures?.some(
+          (exposure) => exposure.targetCatId === catId && exposure.invocationId === lateOutcome.invocationId,
+        )
+      : false;
+    const supersededByExactTerminalHandling =
+      current.status === 'terminal' &&
+      next.status === 'terminal' &&
+      !current.handledByCatIds.includes(catId) &&
+      next.handledByCatIds.includes(catId) &&
+      current.targetOutcomeByCatId?.[catId] === undefined &&
+      lateOutcome !== undefined &&
+      exactExposure === true &&
+      lateOutcome.handledAt > (current.withdrawnAtByCatId?.[catId] ?? Number.POSITIVE_INFINITY);
+    if (!supersededByExactTerminalHandling) throw new Error('queue custody withdrawals are append-only');
   }
 }
 
@@ -629,7 +657,13 @@ export function assertQueueCustodyTransition(current: QueuedMessageCustody, inpu
     const withdrawn = new Set<string>(input.next.withdrawnByCatIds ?? []);
     const handled = new Set<string>(input.next.handledByCatIds);
     const allTargetsSettled = input.next.allTargetCats.every((catId) => withdrawn.has(catId) || handled.has(catId));
-    if (withdrawn.size === 0 || !allTargetsSettled) {
+    const exactLateHandled = input.next.handledByCatIds.filter(
+      (catId) =>
+        !current.handledByCatIds.includes(catId) &&
+        current.withdrawnByCatIds?.includes(catId) &&
+        input.next.targetOutcomeByCatId?.[catId] !== undefined,
+    );
+    if ((withdrawn.size === 0 && exactLateHandled.length === 0) || !allTargetsSettled) {
       throw new Error('terminal custody without delivery requires exact author-withdrawal settlement');
     }
   }
@@ -667,6 +701,126 @@ export function cloneQueuedMessageCustody(custody: QueuedMessageCustody): Queued
       ? { reminderAttempts: custody.reminderAttempts.map((attempt) => ({ ...attempt })) }
       : {}),
   };
+}
+
+interface QueueCustodyWithdrawalOptions {
+  /** Recall must advance the custody revision even when every target was already settled. */
+  forceRevision?: boolean;
+}
+
+function withoutSelectedEntries<T>(
+  current: Readonly<Record<string, T>> | undefined,
+  selected: ReadonlySet<string>,
+): Record<string, T> {
+  const next = { ...(current ?? {}) };
+  for (const catId of selected) delete next[catId];
+  return next;
+}
+
+function includesSelected(values: readonly string[] | undefined, selected: ReadonlySet<string>): boolean {
+  return (values ?? []).some((catId) => selected.has(catId));
+}
+
+function hasSelectedEntry<T>(current: Readonly<Record<string, T>> | undefined, selected: ReadonlySet<string>): boolean {
+  return Object.keys(current ?? {}).some((catId) => selected.has(catId));
+}
+
+function settleSelectedReminderAttempts(
+  current: readonly QueueReminderAttempt[] | undefined,
+  selected: ReadonlySet<string>,
+  withdrawnAt: number,
+): { attempts: QueueReminderAttempt[]; changed: boolean } {
+  let changed = false;
+  const attempts = (current ?? []).map((attempt) => {
+    const active = attempt.state === 'requested' || attempt.state === 'delivered';
+    if (!selected.has(attempt.targetCatId) || !active) return attempt;
+    changed = true;
+    return {
+      ...attempt,
+      state: 'missed' as const,
+      missedAt: withdrawnAt,
+      missedReason: 'source_withdrawn' as const,
+    };
+  });
+  return { attempts, changed };
+}
+
+/**
+ * Single source of truth for author-withdrawal terminalization. Queue withdraw
+ * and true recall both use this projection so newly-added active fields cannot
+ * remain live in one path while being settled in the other.
+ */
+export function settleQueueCustodyWithdrawal(
+  current: QueuedMessageCustody,
+  selectedTargetCats: readonly string[],
+  withdrawnAt: number,
+  options: QueueCustodyWithdrawalOptions = {},
+): QueuedMessageCustody {
+  assertFiniteNonNegative(withdrawnAt, 'withdrawnAt');
+  const selected = new Set(selectedTargetCats);
+  const withdrawnNow = current.pendingTargetCats.filter((catId) => selected.has(catId));
+  const pendingTargetCats = current.pendingTargetCats.filter((catId) => !selected.has(catId));
+  const withdrawnByCatIds = [...new Set([...(current.withdrawnByCatIds ?? []), ...withdrawnNow])] as CatId[];
+  const withdrawnAtByCatId = { ...(current.withdrawnAtByCatId ?? {}) };
+  for (const catId of withdrawnNow) {
+    withdrawnAtByCatId[catId] ??= withdrawnAt;
+  }
+  const awakenedInvocationIdByCatId = withoutSelectedEntries(current.awakenedInvocationIdByCatId, selected);
+  const awakenedAtByCatId = withoutSelectedEntries(current.awakenedAtByCatId, selected);
+  const steeredInvocationIdByCatId = withoutSelectedEntries(current.steeredInvocationIdByCatId, selected);
+  const carrierStateByTargetCatId = withoutSelectedEntries(current.carrierStateByTargetCatId, selected);
+  const reminderSettlement = settleSelectedReminderAttempts(current.reminderAttempts, selected, withdrawnAt);
+  const activeStateChanged =
+    withdrawnNow.length > 0 ||
+    reminderSettlement.changed ||
+    includesSelected(current.notifiedByCatIds, selected) ||
+    includesSelected(current.failedByCatIds, selected) ||
+    hasSelectedEntry(current.awakenedInvocationIdByCatId, selected) ||
+    hasSelectedEntry(current.steeredInvocationIdByCatId, selected) ||
+    hasSelectedEntry(current.carrierStateByTargetCatId, selected) ||
+    includesSelected(current.steerRequestedByCatIds, selected);
+  if (!activeStateChanged && !options.forceRevision) return current;
+
+  const {
+    processingStartedAt: _processingStartedAt,
+    awakenedInvocationIdByCatId: _awakenedInvocationIdByCatId,
+    awakenedAtByCatId: _awakenedAtByCatId,
+    steerRequestedByCatIds: _steerRequestedByCatIds,
+    steeredInvocationIdByCatId: _steeredInvocationIdByCatId,
+    carrierStateByTargetCatId: _carrierStateByTargetCatId,
+    withdrawnByCatIds: _withdrawnByCatIds,
+    withdrawnAtByCatId: _withdrawnAtByCatId,
+    reminderAttempts: _reminderAttempts,
+    ...stableCurrent
+  } = current;
+  const next: QueuedMessageCustody = {
+    ...stableCurrent,
+    revision: current.revision + 1,
+    status: pendingTargetCats.length === 0 ? 'terminal' : 'queued',
+    pendingTargetCats,
+    notifiedByCatIds: current.notifiedByCatIds.filter((catId) => !selected.has(catId)),
+    ...(Object.keys(awakenedInvocationIdByCatId).length > 0 ? { awakenedInvocationIdByCatId } : {}),
+    ...(Object.keys(awakenedAtByCatId).length > 0 ? { awakenedAtByCatId } : {}),
+    failedByCatIds: current.failedByCatIds.filter((catId) => !selected.has(catId)),
+    withdrawnByCatIds,
+    withdrawnAtByCatId,
+    ...(Object.keys(carrierStateByTargetCatId).length > 0 ? { carrierStateByTargetCatId } : {}),
+    ...((current.steerRequestedByCatIds ?? []).some((catId) => !selected.has(catId))
+      ? { steerRequestedByCatIds: (current.steerRequestedByCatIds ?? []).filter((catId) => !selected.has(catId)) }
+      : {}),
+    ...(Object.keys(steeredInvocationIdByCatId).length > 0 ? { steeredInvocationIdByCatId } : {}),
+    ...(reminderSettlement.attempts.length > 0 ? { reminderAttempts: reminderSettlement.attempts } : {}),
+    updatedAt: withdrawnAt,
+  };
+  return next;
+}
+
+/** True recall withdraws every target that was not already durably handled. */
+export function terminalizeRecalledQueueCustody(
+  current: QueuedMessageCustody,
+  recalledAt: number,
+): QueuedMessageCustody {
+  return settleQueueCustodyWithdrawal(current, current.allTargetCats, recalledAt, { forceRevision: true });
 }
 
 export class QueueCustodyParseError extends Error {

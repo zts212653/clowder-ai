@@ -19,24 +19,33 @@ export function ConciergeRailToggle() {
   const surfaceState = useConciergeStore((s) => s.surfaceState);
   const muted = useConciergeStore((s) => s.muted);
   const setSurfaceState = useConciergeStore((s) => s.setSurfaceState);
+  const setMuted = useConciergeStore((s) => s.setMuted);
 
   // P2 R6: don't render until config is known — prevents surfaceState race during startup
   if (!configLoaded && !configFailed) return null;
   if (!enabled) return null;
 
   const isOpen = surfaceState !== 'collapsed';
+  const handleClick = () => {
+    if (isOpen) {
+      setSurfaceState('collapsed');
+      return;
+    }
+    if (muted) void setMuted(false);
+    setSurfaceState('toolbar');
+  };
 
   return (
     <button
       type="button"
-      onClick={() => setSurfaceState(isOpen ? 'collapsed' : 'toolbar')}
+      onClick={handleClick}
       className={`flex h-10 w-10 items-center justify-center rounded-lg transition-all ${
         isOpen
           ? 'bg-[var(--console-rail-active)] shadow-[var(--console-rail-shadow)]'
           : 'hover:bg-[var(--console-rail-item)] hover:shadow-[var(--console-rail-shadow)]'
       }`}
-      title={isOpen ? '收起猫猫球' : muted ? '唤起猫猫球（已静音）' : '唤起猫猫球'}
-      aria-label={isOpen ? '收起猫猫球' : '唤起猫猫球'}
+      title={isOpen ? '收起猫猫球' : muted ? '显示猫猫球' : '打开猫猫球'}
+      aria-label={isOpen ? '收起猫猫球' : muted ? '显示猫猫球' : '打开猫猫球'}
       data-testid="concierge-rail-toggle"
     >
       <CafeIcon name="cat" className="w-5 h-5" />

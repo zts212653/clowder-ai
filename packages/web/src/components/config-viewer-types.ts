@@ -16,11 +16,12 @@ export interface CatConfig {
   mcpSupport: boolean;
 }
 
-export interface ContextBudget {
-  maxPromptTokens: number;
-  maxContextTokens: number;
-  maxMessages: number;
-  maxContentLengthPerMsg: number;
+export interface CatCapacityProjection {
+  windowTokens: number;
+  inputCeilingTokens: number;
+  source: 'reported' | 'catalog' | 'manual' | 'unresolved';
+  actionable: boolean;
+  provenance: string;
 }
 
 export interface Capabilities {
@@ -31,7 +32,7 @@ export interface Capabilities {
 export interface ConfigData {
   coCreator?: CoCreatorConfig;
   cats: Record<string, CatConfig>;
-  perCatBudgets: Record<string, ContextBudget>;
+  perCatCapacities: Record<string, CatCapacityProjection>;
   cli?: {
     codexSandboxMode: 'read-only' | 'workspace-write' | 'danger-full-access';
     codexApprovalPolicy: 'untrusted' | 'on-failure' | 'on-request' | 'never';

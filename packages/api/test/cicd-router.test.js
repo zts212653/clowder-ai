@@ -68,7 +68,7 @@ async function setup(when) {
       return { idempotencyKey: event.idempotencyKey };
     },
   });
-  return { taskStore, messageStore, task, router, events };
+  return { taskStore, messageStore, task, router, events, lifecycle };
 }
 
 function poll(overrides = {}) {
@@ -104,6 +104,47 @@ describe('CiCdRouter F280 typed waits', () => {
     assert.equal((await router.route(poll())).kind, 'skipped');
     assert.equal(messageStore.getByThread('thread_1').length, 0);
     assert.equal((await taskStore.get(task.id)).automationState.ci.lastBucket, 'pass');
+  });
+
+  test('completed HEAD wait still advances external-case CI projection without another wake', async () => {
+    const { taskStore, messageStore, task, lifecycle } = await setup([{ kind: 'pr_head_changed' }]);
+    const headSha = 'bbb2222';
+    const waitResult = await lifecycle.observe({
+      taskId: task.id,
+      facts: { headSha },
+      collectorPatch: {
+        review: {
+          lastInlineCommentCursor: 0,
+          lastConversationCommentCursor: 0,
+          lastDecisionCursor: 0,
+        },
+      },
+    });
+    assert.equal(waitResult.kind, 'notified');
+    assert.equal((await taskStore.get(task.id)).status, 'done');
+
+    const projected = [];
+    const router = new CiCdRouter({
+      taskStore,
+      deliveryDeps: { messageStore },
+      waitLifecycle: lifecycle,
+      externalReviewCoordinator: {
+        recordCi: async (facts) => {
+          projected.push(facts);
+          return { kind: 'state_only', reason: 'explicit_wait_required' };
+        },
+      },
+      log: { info() {}, warn() {}, error() {} },
+    });
+
+    const result = await router.route(poll({ headSha }));
+
+    assert.equal(result.kind, 'skipped');
+    assert.equal(result.reason, 'no_active_wait');
+    assert.equal(projected.length, 1);
+    assert.equal(projected[0].headSha, headSha);
+    assert.equal((await taskStore.get(task.id)).automationState.ci.headSha, headSha);
+    assert.equal(messageStore.getByThread('thread_1').length, 1, 'only the original HEAD wake is delivered');
   });
 
   test('merged PR consumes the wait, marks done, and emits world truth once', async () => {

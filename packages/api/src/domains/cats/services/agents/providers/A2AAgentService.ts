@@ -25,6 +25,19 @@ function agentMsg(type: AgentMessage['type'], catId: CatId, content?: string): A
 }
 
 export class A2AAgentService implements AgentService {
+  contextCapability(): import('../../types.js').AgentContextCapability {
+    return {
+      provider: 'a2a',
+      carrier: 'a2a',
+      reportsRuntimeWindow: false,
+      authoritativeUsage: false,
+      usageTelemetry: 'unavailable',
+      nativeWindowControl: false,
+      nativeCompressionControl: false,
+      observesCompression: false,
+      reason: 'A2A does not expose the remote agent context state',
+    };
+  }
   private readonly catId: CatId;
   private readonly config: A2AAgentConfig;
   private readonly fetchFn: typeof fetch;

@@ -115,9 +115,9 @@ export class D4Resolver implements HookResolver {
     const replyInstruction =
       coordination?.phase === 'terminal'
         ? '这是 terminal Release：协调链已终止，不要发送“收到/谢谢” ACK，也不要 cross_post 回源 thread。若 Release 给出的 Action Needed 属于你已持有且已授权的原任务，立即继续原任务，不等待新的用户回合；若它只关闭协调链，直接干净停止，无需 @co-creator、hold_ball 或另补路由出口。只有出现新的实质工作，才用 coordination.phase=active 开一条新链。'
-        : `回复请用 cross_post_message(threadId="${sourceThreadId}", targetCats=["${senderCatId}"])\n本 thread 的 @${senderCatId} 不会路由回对方（对方 session 在另一个 thread）`;
+        : `仅当你是在回复这条入站 coordination 时，才用 cross_post_message(threadId="${sourceThreadId}", targetCats=["${senderCatId}"])。\n若你要在当前 owner thread 发起 new workflow action（例如新的 PR review），它不是回复：留在 direct review carrier，用结构化 action；若结构化 action 暂不可用，显式传 coordination={phase:"active", subjectRef:"<subjectRef>"}，禁止继承更早的 task source。\n本 thread 的 @${senderCatId} 不会路由回对方（对方 session 在另一个 thread）`;
     const coordinationText = coordination
-      ? `coordination=${coordination.id} phase=${coordination.phase} hop=${coordination.hop}`
+      ? `coordination=${coordination.id} phase=${coordination.phase} hop=${coordination.hop}${coordination.subjectRef ? ` subject=${coordination.subjectRef}` : ''}`
       : '';
     return {
       status: 'fired',

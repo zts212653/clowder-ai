@@ -50,7 +50,8 @@ function putVerifiedPackage(transaction: PluginInventoryTransaction, verified: V
   if (
     existing.pluginId !== verified.package.pluginId ||
     existing.version !== verified.package.version ||
-    !isDeepStrictEqual(existing.manifest, verified.package.manifest)
+    !isDeepStrictEqual(existing.manifest, verified.package.manifest) ||
+    !isDeepStrictEqual(existing.signalSchemas, verified.package.signalSchemas)
   ) {
     throw new PluginInventoryError(
       'PACKAGE_DIGEST_MISMATCH',

@@ -170,6 +170,7 @@ describe('F254 B2: hold_ball reminder — cursor resolution', () => {
 
     assert.ok(result);
     assert.ok(result.text.includes('get_thread_context'), 'should reference get_thread_context');
+    assert.match(result.text, /responseMode.*full/, 'should require a full contiguous thread read');
     assert.ok(!result.text.includes('list_recent'), 'should NOT reference list_recent');
   });
 

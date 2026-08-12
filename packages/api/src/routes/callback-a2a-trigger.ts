@@ -933,16 +933,26 @@ export async function triggerA2AInvocation(
           error: governanceErrorCode,
         });
       } else {
-        await requireInvocationRecordUpdate({
-          store: invocationRecordStore,
-          invocationId: createResult.invocationId,
-          update: {
-            status: 'succeeded',
-            successfulCatIds: terminalDispositions.getSuccessfulCatIds() as CatId[],
-          },
-          writer: 'standalone A2A callback',
-        });
-        finalStatus = 'succeeded';
+        const successfulCatIds = terminalDispositions.getSuccessfulCatIds() as CatId[];
+        if (successfulCatIds.length === 0) {
+          finalStatus = 'failed';
+          await invocationRecordStore.update(createResult.invocationId, {
+            status: 'failed',
+            error:
+              terminalDispositions.getPrimaryTerminalError() ?? 'all targeted cats completed without a success witness',
+          });
+        } else {
+          await requireInvocationRecordUpdate({
+            store: invocationRecordStore,
+            invocationId: createResult.invocationId,
+            update: {
+              status: 'succeeded',
+              successfulCatIds,
+            },
+            writer: 'standalone A2A callback',
+          });
+          finalStatus = 'succeeded';
+        }
       }
     } catch (err) {
       if (controller?.signal.aborted) {

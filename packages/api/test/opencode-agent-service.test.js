@@ -108,7 +108,35 @@ const STEP_FINISH = {
   type: 'step_finish',
   timestamp: 1773304958508,
   sessionID: 'ses_test123',
-  part: { type: 'step-finish', reason: 'stop', cost: 0.036, tokens: { total: 36937 } },
+  part: {
+    type: 'step-finish',
+    reason: 'stop',
+    cost: 0.036,
+    tokens: { total: 36937, input: 36928, output: 9 },
+  },
+};
+
+// CodeAgent 3.0 → OpenCode facade: translate script may drop usage, yielding
+// step_finish without tokens. This fixture pins the missing-usage alert path.
+const STEP_FINISH_NO_TOKENS = {
+  type: 'step_finish',
+  timestamp: 1773304958508,
+  sessionID: 'ses_test123',
+  part: { type: 'step-finish', reason: 'stop' },
+};
+
+const STEP_FINISH_TOTAL_ONLY = {
+  type: 'step_finish',
+  timestamp: 1773304958508,
+  sessionID: 'ses_test123',
+  part: { type: 'step-finish', reason: 'stop', tokens: { total: 36937 } },
+};
+
+const STEP_FINISH_OUTPUT_ONLY = {
+  type: 'step_finish',
+  timestamp: 1773304958508,
+  sessionID: 'ses_test123',
+  part: { type: 'step-finish', reason: 'stop', tokens: { output: 9 } },
 };
 
 const _ERROR_EVENT = {
@@ -116,6 +144,19 @@ const _ERROR_EVENT = {
   timestamp: 1773298718314,
   sessionID: 'ses_test123',
   error: { name: 'APIError', data: { message: 'Rate limit exceeded', statusCode: 429 } },
+};
+
+const PERMANENT_PROVIDER_ERROR_EVENT = {
+  type: 'error',
+  timestamp: 1773298718315,
+  sessionID: 'ses_test123',
+  error: {
+    name: 'APIError',
+    data: {
+      message: 'No available channel for model claude-sonnet-4-6',
+      statusCode: 400,
+    },
+  },
 };
 
 describe('OpenCodeAgentService', () => {
@@ -474,6 +515,80 @@ describe('OpenCodeAgentService', () => {
     const types = messages.map((m) => m.type);
     assert.ok(types.includes('error'), `expected error in types: ${types}`);
     assert.ok(types.includes('done'), `expected done in types: ${types}`);
+  });
+
+  test('terminates a retrying CLI after a permanent provider configuration error', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-sonnet-4-6' });
+    const collection = collect(service.invoke('Test', { invocationId: 'inv-permanent-error' }));
+
+    proc.stdout.write(`${JSON.stringify(PERMANENT_PROVIDER_ERROR_EVENT)}\n`);
+
+    try {
+      const messages = await Promise.race([
+        collection,
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('permanent provider error did not terminate the retrying CLI')), 250);
+        }),
+      ]);
+
+      assert.equal(proc.kill.mock.callCount(), 1, 'the CLI process must be terminated exactly once');
+      assert.equal(messages.filter((message) => message.type === 'error').length, 1);
+      assert.equal(messages.filter((message) => message.type === 'done').length, 1);
+      assert.match(messages.find((message) => message.type === 'error').error, /No available channel/);
+    } finally {
+      if (proc.kill.mock.callCount() === 0) proc.kill();
+    }
+  });
+
+  test('terminates a retrying CLI after an auth status even when the provider omits a message', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-sonnet-4-6' });
+    const collection = collect(service.invoke('Test', { invocationId: 'inv-auth-error' }));
+
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'error',
+        timestamp: 1773298718316,
+        sessionID: 'ses_test123',
+        error: { name: 'AuthError', data: { statusCode: 401 } },
+      })}\n`,
+    );
+
+    try {
+      const messages = await Promise.race([
+        collection,
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('auth status did not terminate the retrying CLI')), 250);
+        }),
+      ]);
+      assert.equal(proc.kill.mock.callCount(), 1);
+      assert.equal(messages.filter((message) => message.type === 'error').length, 1);
+      assert.equal(messages.filter((message) => message.type === 'done').length, 1);
+      assert.equal(
+        messages.find((message) => message.type === 'error').metadata.cliDiagnostics.reasonCode,
+        'auth_failed',
+      );
+    } finally {
+      if (proc.kill.mock.callCount() === 0) proc.kill();
+    }
+  });
+
+  test('does not terminate a CLI for a transient provider error', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-sonnet-4-6' });
+    const collection = collect(service.invoke('Test'));
+
+    emitOpenCodeEvents(proc, [_ERROR_EVENT, STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+    const messages = await collection;
+
+    assert.equal(proc.kill.mock.callCount(), 0, 'natural completion after a transient error must not be killed');
+    assert.equal(messages.filter((message) => message.type === 'error').length, 1);
+    assert.ok(messages.some((message) => message.type === 'text'));
+    assert.equal(messages.filter((message) => message.type === 'done').length, 1);
   });
 
   test('metadata includes provider=opencode and model', async () => {
@@ -880,4 +995,102 @@ describe('OpenCodeAgentService', () => {
       'tool_use yield confirms event reached transformer',
     );
   });
+
+  // Issue #1208: CodeAgent 3.0 → OpenCode translate may drop token usage.
+  // When the CLI produces events but no step_finish carries tokens, auto-handoff
+  // based on context fill cannot fire. The service must surface a persistent
+  // visible alert so users know automatic handoff is unavailable.
+  test('issue #1208: opencode events without usage telemetry yield warning alert', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-opus-4-6' });
+    const promise = collect(service.invoke('Long session'));
+    // Simulate a CodeAgent translate that emits the opencode facade shape
+    // but omits token counts on step_finish.
+    emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH_NO_TOKENS]);
+    const messages = await promise;
+
+    const alert = messages.find((m) => {
+      if (m.type !== 'system_info') return false;
+      try {
+        return JSON.parse(m.content).type === 'warning';
+      } catch {
+        return false;
+      }
+    });
+    assert.ok(
+      alert,
+      `expected warning system_info when no usage telemetry; got types: ${messages.map((m) => m.type).join(',')}`,
+    );
+    const payload = JSON.parse(alert.content);
+    assert.ok(payload.message, 'alert must include human-readable message');
+    assert.ok(payload.message.includes('token 用量'), 'message should mention missing token usage');
+
+    // Sanity: no usage-bearing agent_loop was produced.
+    const usageLoops = messages.filter((m) => m.type === 'agent_loop' && m.metadata?.usage);
+    assert.strictEqual(usageLoops.length, 0, 'no usage should reach invoke-single-cat');
+  });
+
+  test('issue #1208: successful zero-event completion still yields the missing-usage warning', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-opus-4-6' });
+    const promise = collect(service.invoke('Empty successful run'));
+    emitOpenCodeEvents(proc, []);
+    const messages = await promise;
+
+    const warnings = messages.filter((message) => {
+      if (message.type !== 'system_info') return false;
+      try {
+        return JSON.parse(message.content).type === 'warning';
+      } catch {
+        return false;
+      }
+    });
+    assert.equal(warnings.length, 1, 'a zero-event success has no usage evidence and must warn durably');
+    assert.match(JSON.parse(warnings[0].content).message, /token 用量/);
+  });
+
+  test('issue #1208: usage-bearing step_finish does NOT yield warning alert', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-opus-4-6' });
+    const promise = collect(service.invoke('Normal session'));
+    emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+    const messages = await promise;
+
+    const alert = messages.find((m) => {
+      if (m.type !== 'system_info') return false;
+      try {
+        return JSON.parse(m.content).type === 'warning';
+      } catch {
+        return false;
+      }
+    });
+    assert.ok(!alert, 'usage warning MUST NOT fire when usage telemetry is present');
+  });
+
+  for (const [label, partialUsageEvent] of [
+    ['total-only', STEP_FINISH_TOTAL_ONLY],
+    ['output-only', STEP_FINISH_OUTPUT_ONLY],
+  ]) {
+    test(`issue #1208: ${label} usage still yields warning alert`, async () => {
+      const proc = createMockProcess();
+      const spawnFn = mock.fn(() => proc);
+      const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-opus-4-6' });
+      const promise = collect(service.invoke('Partial telemetry'));
+      emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, partialUsageEvent]);
+      const messages = await promise;
+
+      const alert = messages.find((m) => {
+        if (m.type !== 'system_info') return false;
+        try {
+          return JSON.parse(m.content).type === 'warning';
+        } catch {
+          return false;
+        }
+      });
+      assert.ok(alert, `${label} usage cannot drive context-fill handoff; warning must still fire`);
+    });
+  }
 });

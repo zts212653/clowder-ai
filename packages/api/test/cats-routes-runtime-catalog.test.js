@@ -286,18 +286,18 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     const res = await app.inject({ method: 'GET', url: '/api/cats' });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
-    // GET /api/cats merges catRegistry (seeded from the global test template) with the
-    // project-local runtime catalog — so the response may include cats beyond the
-    // local template.  Assert that the four locally-bootstrapped cats ARE present.
+    // #948 bootstrap persists exactly one usable seed member. GET /api/cats also
+    // merges catRegistry, so unrelated globally registered cats may be present.
+    // Only the project-local seed is guaranteed on the first read.
     const catIds = body.cats.map((cat) => cat.id);
-    for (const expected of ['codex', 'antigravity', 'opencode']) {
-      assert.ok(catIds.includes(expected), `first read should include bootstrapped cat "${expected}"`);
-    }
+    assert.ok(catIds.includes('codex'), 'first read should include bootstrapped seed cat "codex"');
 
-    // F171: bootstrapCatCatalog now creates an EMPTY catalog (first-run quest).
-    // The catalog file has breeds: [] — cats are served from catRegistry + lazy first-run setup.
     const runtimeCatalog = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
-    assert.ok(Array.isArray(runtimeCatalog.breeds), 'bootstrapped runtime catalog should have a breeds array');
+    assert.deepEqual(
+      runtimeCatalog.breeds.map((breed) => breed.catId),
+      ['codex'],
+      'bootstrap should persist only the selected seed member',
+    );
 
     await app.close();
   });

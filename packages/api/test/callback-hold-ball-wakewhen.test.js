@@ -91,6 +91,12 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
           task.params = params;
           return true;
         },
+        updateParamsIfCurrent(id, expected, params) {
+          const task = insertedTasks.find((t) => t.id === id && !removedIds.includes(t.id));
+          if (!task || task.params !== expected) return false;
+          task.params = params;
+          return true;
+        },
         setEnabled(id, enabled) {
           const task = insertedTasks.find((t) => t.id === id && !removedIds.includes(t.id));
           if (!task) return false;

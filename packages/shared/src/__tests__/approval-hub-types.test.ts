@@ -128,8 +128,8 @@ describe('F246 Phase I approval provenance contract', () => {
   });
 
   it('keeps the admitted producer union exhaustive through F276 and excludes F028', () => {
-    const ids: ApprovalProducerId[] = ['F128', 'F139', 'F193', 'F221', 'F225', 'F231', 'F260', 'F276'];
-    assert.equal(ids.length, 8);
+    const ids: ApprovalProducerId[] = ['F128', 'F139', 'F193', 'F221', 'F225', 'F231', 'F260', 'F276', 'F292'];
+    assert.equal(ids.length, 9);
     assert.equal(ids.includes('F028' as ApprovalProducerId), false);
   });
 
@@ -139,7 +139,7 @@ describe('F246 Phase I approval provenance contract', () => {
   });
 
   it('admits feature-owned exact-claim selection without changing generic approval modes', () => {
-    const modes: ApprovalDecisionMode[] = ['approve-reject', 'resume-only', 'claim-select'];
-    assert.deepEqual(modes, ['approve-reject', 'resume-only', 'claim-select']);
+    const modes: ApprovalDecisionMode[] = ['approve-reject', 'resume-only', 'claim-select', 'meeting-intake'];
+    assert.deepEqual(modes, ['approve-reject', 'resume-only', 'claim-select', 'meeting-intake']);
   });
 });

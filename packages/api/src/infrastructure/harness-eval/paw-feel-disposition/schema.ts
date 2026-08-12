@@ -32,6 +32,21 @@ const eventBaseSchema = z
   })
   .strict();
 
+const signatureActionSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('duplicate'), duplicateOf: nonEmptyString }).strict(),
+  z.object({ type: z.literal('no_action'), reasonCode: z.enum(PAW_FEEL_NO_ACTION_REASONS) }).strict(),
+  z
+    .object({
+      type: z.literal('fix'),
+      ownerCatId: nonEmptyString,
+      taskId: nonEmptyString,
+      leaseId: nonEmptyString,
+      leaseGeneration: z.number().int().nonnegative(),
+      custodyEvidenceRef: nonEmptyString,
+    })
+    .strict(),
+]);
+
 export const PawFeelDispositionEventSchema = z.discriminatedUnion('type', [
   eventBaseSchema
     .extend({
@@ -95,6 +110,20 @@ export const PawFeelDispositionEventSchema = z.discriminatedUnion('type', [
       leaseId: nonEmptyString,
       leaseGeneration: z.number().int().nonnegative(),
       custodyEvidenceRef: nonEmptyString,
+    })
+    .strict(),
+  eventBaseSchema
+    .extend({
+      type: z.literal('signature_requested'),
+      action: signatureActionSchema,
+      preferredSignerCatId: nonEmptyString.optional(),
+    })
+    .strict(),
+  eventBaseSchema
+    .extend({
+      type: z.literal('blocked'),
+      blockerCode: nonEmptyString,
+      blockerRef: nonEmptyString,
     })
     .strict(),
 ]);

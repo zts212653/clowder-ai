@@ -482,6 +482,20 @@ export class AntigravityAgentService implements AgentService {
     return this.bridge.drainCascade(runtimeSessionId, options);
   }
 
+  contextCapability(): import('../../../types.js').AgentContextCapability {
+    return {
+      provider: 'antigravity',
+      carrier: 'cdp_bridge',
+      reportsRuntimeWindow: false,
+      authoritativeUsage: false,
+      usageTelemetry: 'unavailable',
+      nativeWindowControl: false,
+      nativeCompressionControl: false,
+      observesCompression: false,
+      reason: 'Antigravity bridge exposes no authoritative context telemetry',
+    };
+  }
+
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     const metadata: MessageMetadata = {
       provider: 'antigravity',

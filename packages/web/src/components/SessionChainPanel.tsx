@@ -23,7 +23,7 @@ interface SessionSummary {
   sealReason?: string;
   createdAt: number;
   sealedAt?: number;
-  compressionCount?: number;
+  compressionCount?: number | null;
   contextHealth?: {
     usedTokens: number;
     windowTokens: number;
@@ -35,6 +35,15 @@ interface SessionSummary {
     outputTokens?: number;
     cacheReadTokens?: number;
     costUsd?: number;
+  };
+  appliedPolicy?: {
+    config: { strategy: 'handoff' | 'compress' | 'hybrid' };
+    source: string;
+    revision: string;
+    execution: {
+      status: 'active' | 'degraded' | 'unavailable';
+      missingCapabilities: string[];
+    };
   };
   runtimeSession?: RuntimeSessionSummary;
 }
@@ -112,8 +121,15 @@ function sealedSessionSummary(session: SessionSummary): string {
 function sealedSessionDetails(session: SessionSummary): string | undefined {
   const details = [
     session.contextHealth ? `${Math.round(session.contextHealth.fillRatio * 100)}%` : null,
-    (session.compressionCount ?? 0) > 0 ? `${session.compressionCount} compress` : null,
+    session.compressionCount == null
+      ? 'compress count unknown'
+      : session.compressionCount > 0
+        ? `${session.compressionCount} compress`
+        : '0 compress observed',
     session.sealReason ? sealReasonLabel(session.sealReason) : null,
+    session.appliedPolicy
+      ? `${session.appliedPolicy.config.strategy} · ${session.appliedPolicy.execution.status}`
+      : null,
   ].filter(Boolean);
   return details.length > 0 ? details.join(' · ') : undefined;
 }
@@ -340,10 +356,26 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                 <div className="text-micro text-cafe-muted mb-1.5">
                   Started {timeAgo(session.createdAt)}
                   {session.messageCount > 0 ? ` · ${session.messageCount} msgs` : ''}
-                  {(session.compressionCount ?? 0) > 0 && (
+                  {session.compressionCount != null && session.compressionCount > 0 && (
                     <span className="text-conn-amber-text"> · {session.compressionCount} compress</span>
                   )}
+                  {session.compressionCount == null && (
+                    <span className="text-cafe-muted"> · compress count unknown</span>
+                  )}
+                  {session.compressionCount === 0 && <span className="text-cafe-muted"> · 0 compress observed</span>}
                 </div>
+                {session.appliedPolicy && (
+                  <div
+                    data-testid="session-policy-state"
+                    className="mb-1.5 rounded bg-[var(--console-runtime-field-bg)] px-2 py-1 text-micro text-cafe-secondary"
+                  >
+                    <span className="font-semibold">policy {session.appliedPolicy.config.strategy}</span>
+                    <span> · {session.appliedPolicy.execution.status}</span>
+                    {session.appliedPolicy.execution.missingCapabilities.length > 0 && (
+                      <span> · missing {session.appliedPolicy.execution.missingCapabilities.join(', ')}</span>
+                    )}
+                  </div>
+                )}
                 {session.runtimeSession && (
                   <div
                     data-testid="runtime-session-summary"

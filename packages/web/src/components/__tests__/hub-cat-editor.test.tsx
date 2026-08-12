@@ -18,6 +18,7 @@ import type { ProfileItem } from '@/components/hub-accounts.types';
 import {
   buildCatPatchPayload,
   buildCatPayload,
+  buildStrategyPayload,
   builtinAccountIdForClient,
   DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
   filterProfiles,
@@ -54,6 +55,35 @@ const emptyAcpFields = {
   acpIdleTtlMinutes: '',
   mcpSupport: true,
 };
+
+const actionableContextProjection: NonNullable<CatData['resolvedContext']> = {
+  windowTokens: 100_000,
+  inputCeilingTokens: 84_000,
+  source: 'manual',
+  provenance: 'test member window',
+  actionable: true,
+  authoritativeUsage: true,
+  usageTelemetry: 'available',
+  nativeWindowControl: true,
+  nativeCompressionControl: true,
+  observesCompression: false,
+};
+
+it('rejects fractional hybrid compression limits instead of silently truncating them', () => {
+  expect(() =>
+    buildStrategyPayload({
+      strategy: 'hybrid',
+      statusStrategy: 'hybrid',
+      warnThreshold: '0.75',
+      actionThreshold: '0.85',
+      maxCompressions: '1.5',
+      source: 'runtime_override',
+      revision: 'test',
+      changedAt: 0,
+      executionStatus: { status: 'active', missingCapabilities: [] },
+    }),
+  ).toThrow(/正整数/);
+});
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -127,6 +157,8 @@ describe('HubCatEditor', () => {
   async function renderAdvancedRuntimeSection(
     clientId: HubCatEditorFormState['clientId'],
     defaultModel = 'test-model',
+    patch: Partial<HubCatEditorFormState> = {},
+    speed: { visible?: boolean; fastSupported?: boolean } = {},
   ) {
     const form: HubCatEditorFormState = {
       catId: `runtime-${clientId}`,
@@ -149,15 +181,14 @@ describe('HubCatEditor', () => {
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
+      codexSpeed: '',
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
+      ...patch,
     };
 
     const onChange = vi.fn();
@@ -174,6 +205,8 @@ describe('HubCatEditor', () => {
           codexSettingsError: null,
           codexSettingsEditable: false,
           showCodexSettings: false,
+          codexSpeedVisible: speed.visible ?? false,
+          codexFastSupported: speed.fastSupported ?? false,
           onChange,
           onStrategyChange: vi.fn(),
           onCodexChange: vi.fn(),
@@ -193,6 +226,14 @@ describe('HubCatEditor', () => {
       await renderAdvancedRuntimeSection(clientId);
       expect(document.body.textContent, clientId).not.toContain('额外 CLI 参数');
     }
+  });
+
+  it('explains that structured reserved settings cannot be overridden by raw CLI args', async () => {
+    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', {}, { visible: true, fastSupported: true });
+
+    expect(document.body.textContent).toContain('结构化保留项始终以上方字段为准');
+    expect(document.body.textContent).toContain('对应 raw 参数会被忽略');
+    expect(document.body.textContent).not.toContain('与系统参数重复时以用户参数为准');
   });
 
   it('buildCatPayload keeps name in PATCH payload when editing an existing cat', () => {
@@ -220,10 +261,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
     };
@@ -269,10 +307,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
     };
@@ -331,10 +366,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
     };
@@ -393,6 +425,69 @@ describe('HubCatEditor', () => {
     expect(onChange).toHaveBeenCalledWith({ cliEffort: 'turbo-native' });
   });
 
+  it('hides CLI-only extensions when the effective transport is ACP', async () => {
+    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', { acpEnabled: true });
+    expect(container.querySelector('input[aria-label="CLI Effort"]')).toBeNull();
+    expect(container.textContent).not.toContain('额外 CLI 参数');
+  });
+
+  it('shows a separate OAuth Codex speed selector and disables Fast for unsupported models', async () => {
+    const onChange = await renderAdvancedRuntimeSection(
+      'openai',
+      'gpt-4.1',
+      {},
+      { visible: true, fastSupported: false },
+    );
+    const select = container.querySelector<HTMLSelectElement>('select[aria-label="速度档位"]');
+    expect(select).not.toBeNull();
+    expect(Array.from(select?.options ?? []).map((option) => option.textContent)).toEqual([
+      '继承 Codex 设置',
+      'Standard',
+      'Fast（当前模型不可用）',
+    ]);
+    expect(Array.from(select?.options ?? []).find((option) => option.value === 'fast')?.disabled).toBe(true);
+    expect(container.textContent).toContain('这是请求档位，不代表上游最终实际服务档位');
+
+    await changeField(select!, 'standard', 'change');
+    expect(onChange).toHaveBeenCalledWith({ codexSpeed: 'standard' });
+
+    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', {}, { visible: false, fastSupported: true });
+    expect(container.querySelector('select[aria-label="速度档位"]')).toBeNull();
+  });
+
+  it('hydrates, persists, clears, and dormantly preserves the member Codex speed intent', () => {
+    const cat = {
+      id: 'runtime-sol-speed',
+      name: 'Sol',
+      displayName: 'Sol',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.6-sol',
+      color: { primary: '#16a34a', secondary: '#bbf7d0' },
+      mentionPatterns: ['@runtime-sol-speed'],
+      avatar: '/avatars/codex.png',
+      roleDescription: '审查',
+      cli: { command: 'codex', outputFormat: 'json', serviceTier: 'fast' },
+    } as CatData;
+    const form = initialState(cat);
+    expect(form.codexSpeed).toBe('fast');
+
+    const changed = buildCatPatchPayload({ ...form, codexSpeed: 'standard' }, cat, {
+      accountAuthType: 'oauth',
+    }) as Record<string, unknown>;
+    expect(changed.cli).toEqual({ serviceTier: 'standard' });
+
+    const cleared = buildCatPatchPayload({ ...form, codexSpeed: '' }, cat, {
+      accountAuthType: 'oauth',
+    }) as Record<string, unknown>;
+    expect(cleared.cli).toEqual({ serviceTier: null });
+
+    const dormant = buildCatPatchPayload({ ...form, codexSpeed: 'standard' }, cat, {
+      accountAuthType: 'api_key',
+    }) as Record<string, unknown>;
+    expect(dormant.cli).toBeUndefined();
+  });
+
   it('buildCatPayload keeps structured cli.effort separate from raw cliConfigArgs', () => {
     const form = {
       catId: 'runtime-codex',
@@ -417,10 +512,7 @@ describe('HubCatEditor', () => {
       cliEffort: 'xhigh',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
     } as HubCatEditorFormState & { cliEffort: string };
@@ -428,6 +520,35 @@ describe('HubCatEditor', () => {
     const payload = buildCatPayload(form, null) as Record<string, unknown>;
     expect(payload.cli).toEqual({ effort: 'xhigh' });
     expect(payload.cliConfigArgs).toEqual(['--config model_provider="custom"']);
+  });
+
+  it('ACP payloads clear persisted CLI-only extensions and ignore stale form values', () => {
+    const cat = {
+      id: 'runtime-codex-acp',
+      name: 'ACP Codex',
+      displayName: 'ACP Codex',
+      color: { primary: '#16a34a', secondary: '#bbf7d0' },
+      mentionPatterns: ['@runtime-codex-acp'],
+      avatar: '/avatars/codex.png',
+      roleDescription: 'review',
+      personality: 'rigorous',
+      clientId: 'openai',
+      defaultModel: 'gpt-5.6-sol',
+      cli: { command: 'codex', outputFormat: 'json', effort: 'ultra', carrier: 'exec_json' },
+      cliConfigArgs: ['--config stale=true'],
+    } as CatData;
+    const form = {
+      ...initialState(cat),
+      acpEnabled: true,
+      acpCommand: 'codex-acp',
+      acpStartupArgs: 'acp',
+      cliEffort: 'ultra',
+      cliConfigArgs: ['--config should-not-survive=true'],
+    } as HubCatEditorFormState;
+
+    const payload = buildCatPatchPayload(form, cat) as Record<string, unknown>;
+    expect(payload.cli).toEqual({ effort: null, carrier: null });
+    expect(payload.cliConfigArgs).toEqual([]);
   });
 
   it('includes codexCarrier in the cli payload for openai cats', () => {
@@ -455,10 +576,7 @@ describe('HubCatEditor', () => {
       codexCarrier: 'app_server',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
     } as HubCatEditorFormState;
@@ -492,10 +610,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
     } as HubCatEditorFormState;
@@ -541,10 +656,7 @@ describe('HubCatEditor', () => {
       codexCarrier: 'app_server',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
     } as HubCatEditorFormState;
@@ -578,10 +690,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
     };
@@ -629,10 +738,7 @@ describe('HubCatEditor', () => {
       codexCarrier: 'app_server',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
       acpEnabled: true,
@@ -670,10 +776,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
     };
@@ -733,10 +836,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyAcpFields,
       ...emptyVoiceFields,
     } as HubCatEditorFormState;
@@ -797,10 +897,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: 'anthropic',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyVoiceFields,
       acpEnabled: true,
       mcpSupport: true,
@@ -844,10 +941,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: 'anthropic',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyVoiceFields,
       acpEnabled: true,
       mcpSupport: true,
@@ -937,10 +1031,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyVoiceFields,
       acpEnabled: true,
       mcpSupport: true,
@@ -992,10 +1083,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyVoiceFields,
       acpEnabled: true,
       mcpSupport: true,
@@ -1054,10 +1142,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyVoiceFields,
       acpEnabled: true,
       mcpSupport: true,
@@ -1114,10 +1199,7 @@ describe('HubCatEditor', () => {
       codexCarrier: '',
       provider: '',
       sessionChain: 'true',
-      maxPromptTokens: '',
-      maxContextTokens: '',
-      maxMessages: '',
-      maxContentLengthPerMsg: '',
+      contextWindow: '',
       ...emptyVoiceFields,
       acpEnabled: true,
       mcpSupport: true,
@@ -3002,7 +3084,7 @@ describe('HubCatEditor', () => {
     expect(payload.mcpSupport).toBeUndefined();
   });
 
-  it('sends contextBudget=null when clearing existing runtime budget', async () => {
+  it('sends contextWindow=null when clearing existing runtime budget', async () => {
     const existingCat = {
       id: 'runtime-codex',
       name: 'runtime-codex',
@@ -3014,12 +3096,7 @@ describe('HubCatEditor', () => {
       mentionPatterns: ['@runtime-codex'],
       avatar: '/avatars/codex.png',
       roleDescription: 'review',
-      contextBudget: {
-        maxPromptTokens: 32000,
-        maxContextTokens: 24000,
-        maxMessages: 40,
-        maxContentLengthPerMsg: 8000,
-      },
+      contextWindow: 96000,
     } as CatData;
 
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
@@ -3068,10 +3145,7 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    await changeField(queryField(container, 'input[aria-label="Max Prompt Tokens"]'), '');
-    await changeField(queryField(container, 'input[aria-label="Max Context Tokens"]'), '');
-    await changeField(queryField(container, 'input[aria-label="Max Messages"]'), '');
-    await changeField(queryField(container, 'input[aria-label="Max Content Length Per Msg"]'), '');
+    await changeField(queryField(container, 'input[aria-label="Context Window"]'), '');
 
     const saveButton = Array.from(document.body.querySelectorAll('button')).find(
       (button) => button.textContent === '保存',
@@ -3086,10 +3160,10 @@ describe('HubCatEditor', () => {
     );
     expect(patchCall).toBeTruthy();
     const payload = JSON.parse(String(patchCall?.[1]?.body));
-    expect(payload.contextBudget).toBeNull();
+    expect(payload.contextWindow).toBeNull();
   });
 
-  it('requires all runtime budget fields when any budget value is provided', async () => {
+  it('rejects non-positive contextWindow and allows empty', async () => {
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/accounts') {
         return Promise.resolve(
@@ -3128,8 +3202,6 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(document.body.textContent).toContain('4 项要么全部留空，要么全部填写');
-
     await changeField(queryField(container, 'input[aria-label="Name"]'), '火花猫');
     await changeField(queryField(container, 'input[aria-label="Avatar"]'), '/avatars/spark.png');
     await changeField(queryField(container, 'input[aria-label="Description"]'), '快速执行');
@@ -3138,7 +3210,7 @@ describe('HubCatEditor', () => {
     await flushEffects();
     await changeField(queryField(container, 'select[aria-label="认证信息"]'), 'codex-sponsor', 'change');
     await changeField(queryField(container, 'input[aria-label="Model"]'), 'gpt-5.4-mini');
-    await changeField(queryField(container, 'input[aria-label="Max Prompt Tokens"]'), '48000');
+    await changeField(queryField(container, 'input[aria-label="Context Window"]'), '-1');
 
     const saveButton = Array.from(document.body.querySelectorAll('button')).find(
       (button) => button.textContent === '保存',
@@ -3148,7 +3220,6 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(document.body.textContent).toContain('上下文预算要么全部留空，要么 4 项都填写');
     expect(mockApiFetch).not.toHaveBeenCalledWith('/api/cats', expect.objectContaining({ method: 'POST' }));
   });
 
@@ -3285,20 +3356,9 @@ describe('HubCatEditor', () => {
       caution: null,
       strengths: ['security', 'testing'],
       sessionChain: true,
-      contextBudget: {
-        maxPromptTokens: 32000,
-        maxContextTokens: 24000,
-        maxMessages: 40,
-        maxContentLengthPerMsg: 8000,
-      },
-    } as CatData & {
-      contextBudget: {
-        maxPromptTokens: number;
-        maxContextTokens: number;
-        maxMessages: number;
-        maxContentLengthPerMsg: number;
-      };
-    };
+      contextWindow: 96000,
+      resolvedContext: actionableContextProjection,
+    } as CatData;
 
     const onSaved = vi.fn(() => Promise.resolve());
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
@@ -3338,13 +3398,14 @@ describe('HubCatEditor', () => {
                   thresholds: { warn: 0.6, action: 0.8 },
                 },
                 source: 'runtime_override',
+                revision: 'runtime:test',
+                changedAt: 0,
+                executionStatus: { status: 'active', missingCapabilities: [] },
                 hasOverride: true,
                 override: {
                   strategy: 'compress',
                   thresholds: { warn: 0.6, action: 0.8 },
                 },
-                hybridCapable: false,
-                sessionChainEnabled: true,
               },
             ],
           }),
@@ -3360,7 +3421,7 @@ describe('HubCatEditor', () => {
                 mentionPatterns: ['@co-worker', '@owner'],
               },
               cats: {},
-              perCatBudgets: {},
+              perCatCapacities: {},
               a2a: { enabled: true, maxDepth: 2 },
               memory: { enabled: true, maxKeysPerThread: 50 },
               hindsight: {
@@ -3420,7 +3481,7 @@ describe('HubCatEditor', () => {
     expect(document.body.textContent).toContain('展开后可配置 TTS clone 参考音频和文本。');
     expect(document.body.textContent).toContain('别名与 @ 路由');
     expect(document.body.textContent).toContain('认证与模型');
-    expect(document.body.textContent).toContain('Session Chain');
+    expect(document.body.textContent).toContain('Session State / Chain 始终记录并可见');
     expect(document.body.textContent).toContain('── Codex 专属 (仅 Client=Codex 时显示) ──');
     expect(document.body.textContent).toContain('Codex Sandbox (Codex)');
     expect(document.body.textContent).toContain('Codex Approval (Codex)');
@@ -3437,12 +3498,14 @@ describe('HubCatEditor', () => {
     expect(document.body.textContent).not.toContain('Secondary');
     expect(document.body.textContent).not.toContain('Display Name');
 
-    await changeField(queryField(container, 'input[aria-label="Max Prompt Tokens"]'), '48000');
+    await changeField(queryField(container, 'input[aria-label="Context Window"]'), '128000');
     await changeField(queryField(container, 'input[aria-label="Variant Label"]'), 'GPT-5.5');
     await changeField(queryField(container, 'input[aria-label="Nickname"]'), '砚砚升级版');
     await changeField(queryField(container, 'input[aria-label="Team Strengths"]'), '代码审查、找 bug、深度思考');
     await changeField(queryField(container, 'input[aria-label="Strengths"]'), 'security, testing, debugging');
     await changeField(queryField(container, 'select[aria-label="Session Strategy"]'), 'handoff', 'change');
+    expect(document.body.textContent).toContain('已保存 compress 策略的能力预检');
+    expect(document.body.textContent).toContain('保存后会重新预检 handoff');
     await changeField(queryField(container, 'input[aria-label="Session Warn Threshold"]'), '0.55', 'change');
     await changeField(queryField(container, 'select[aria-label^="Codex Sandbox"]'), 'danger-full-access', 'change');
     await changeField(queryField(container, 'select[aria-label^="Codex Approval"]'), 'never', 'change');
@@ -3461,12 +3524,12 @@ describe('HubCatEditor', () => {
     );
     expect(catPatch).toBeTruthy();
     const catPayload = JSON.parse(String(catPatch?.[1]?.body));
-    expect(catPayload.contextBudget.maxPromptTokens).toBe(48000);
+    expect(catPayload.contextWindow).toBe(128000);
     expect(catPayload.variantLabel).toBe('GPT-5.5');
     expect(catPayload.nickname).toBe('砚砚升级版');
     expect(catPayload.teamStrengths).toBe('代码审查、找 bug、深度思考');
     expect(catPayload.strengths).toEqual(['security', 'testing', 'debugging']);
-    expect(catPayload.sessionChain).toBe(true);
+    expect(catPayload).not.toHaveProperty('sessionChain');
 
     const strategyPatch = mockApiFetch.mock.calls.find(
       ([path, init]) => path === '/api/config/session-strategy/codex' && init?.method === 'PATCH',
@@ -3500,13 +3563,9 @@ describe('HubCatEditor', () => {
       mentionPatterns: ['@codex', '@缅因猫'],
       avatar: '/avatars/codex.png',
       roleDescription: 'review',
+      resolvedContext: actionableContextProjection,
       sessionChain: true,
-      contextBudget: {
-        maxPromptTokens: 32000,
-        maxContextTokens: 24000,
-        maxMessages: 40,
-        maxContentLengthPerMsg: 8000,
-      },
+      contextWindow: 96000,
     } as CatData;
 
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
@@ -3545,10 +3604,14 @@ describe('HubCatEditor', () => {
                   strategy: 'compress',
                   thresholds: { warn: 0.6, action: 0.8 },
                 },
-                source: 'breed',
+                source: 'provider_default',
+                revision: 'provider_default:test-codex',
+                changedAt: 0,
                 hasOverride: false,
-                hybridCapable: false,
-                sessionChainEnabled: true,
+                executionStatus: {
+                  status: 'unavailable',
+                  missingCapabilities: ['authoritative_usage'],
+                },
               },
             ],
           }),
@@ -3606,7 +3669,7 @@ describe('HubCatEditor', () => {
     expect(strategyPatch).toBeFalsy();
   });
 
-  it('hides session strategy controls and skips invalid strategy validation when Session Chain is disabled', async () => {
+  it('keeps strategy controls visible for a legacy sessionChain=false member without rewriting the legacy byte', async () => {
     const existingCat = {
       id: 'opencode',
       name: 'opencode',
@@ -3641,13 +3704,14 @@ describe('HubCatEditor', () => {
                 displayName: '金渐层',
                 provider: 'opencode',
                 effective: {
-                  strategy: 'handoff',
-                  thresholds: { warn: 0.85, action: 0.75 },
+                  strategy: 'compress',
+                  thresholds: { warn: 0.75, action: 0.85 },
                 },
-                source: 'provider',
+                source: 'legacy_session_chain_false',
+                revision: 'legacy:test',
+                changedAt: 0,
+                executionStatus: { status: 'active', missingCapabilities: [] },
                 hasOverride: false,
-                hybridCapable: false,
-                sessionChainEnabled: false,
               },
             ],
           }),
@@ -3667,11 +3731,11 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(document.body.textContent).toContain('Session Chain 未开启');
-    expect(document.body.textContent).toContain('策略不会生效');
-    expect(document.body.querySelector('select[aria-label="Session Strategy"]')).toBeNull();
-    expect(document.body.querySelector('input[aria-label="Session Warn Threshold"]')).toBeNull();
-    expect(document.body.querySelector('input[aria-label="Session Action Threshold"]')).toBeNull();
+    expect(document.body.textContent).toContain('Session State / Chain 始终记录并可见');
+    expect(document.body.textContent).not.toContain('Session Chain 未开启');
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Session Strategy"]').value).toBe('compress');
+    expect(document.body.querySelector('input[aria-label="Session Observe Threshold"]')).toBeTruthy();
+    expect(document.body.querySelector('input[aria-label="Session Observe Threshold (upper)"]')).toBeTruthy();
 
     const saveButton = Array.from(document.body.querySelectorAll('button')).find(
       (button) => button.textContent === '保存',
@@ -3685,11 +3749,11 @@ describe('HubCatEditor', () => {
       ([path, init]) => path === '/api/cats/opencode' && init?.method === 'PATCH',
     );
     expect(catPatch).toBeTruthy();
+    expect(JSON.parse(String(catPatch?.[1]?.body))).not.toHaveProperty('sessionChain');
     const strategyPatch = mockApiFetch.mock.calls.find(
       ([path, init]) => path === '/api/config/session-strategy/opencode' && init?.method === 'PATCH',
     );
     expect(strategyPatch).toBeFalsy();
-    expect(document.body.textContent).not.toContain('Warn Threshold 必须小于 Action Threshold');
     expect(onSaved).toHaveBeenCalled();
   });
 
@@ -3812,6 +3876,7 @@ describe('HubCatEditor', () => {
       mentionPatterns: ['@codex'],
       avatar: '/avatars/codex.png',
       roleDescription: 'review',
+      resolvedContext: actionableContextProjection,
     } as CatData;
 
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
@@ -4094,6 +4159,7 @@ describe('HubCatEditor', () => {
       mentionPatterns: ['@codex'],
       avatar: '/avatars/codex.png',
       roleDescription: 'review',
+      resolvedContext: actionableContextProjection,
     } as CatData;
 
     let configPatchCount = 0;
@@ -4134,13 +4200,17 @@ describe('HubCatEditor', () => {
                   thresholds: { warn: 0.6, action: 0.8 },
                 },
                 source: 'runtime_override',
+                revision: 'runtime_override:test-codex',
+                changedAt: 1,
                 hasOverride: true,
                 override: {
                   strategy: 'compress',
                   thresholds: { warn: 0.6, action: 0.8 },
                 },
-                hybridCapable: false,
-                sessionChainEnabled: true,
+                executionStatus: {
+                  status: 'unavailable',
+                  missingCapabilities: ['authoritative_usage'],
+                },
               },
             ],
           }),
@@ -4243,6 +4313,7 @@ describe('HubCatEditor', () => {
       mentionPatterns: ['@codex'],
       avatar: '/avatars/codex.png',
       roleDescription: 'review',
+      resolvedContext: actionableContextProjection,
     } as CatData;
 
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
@@ -4282,13 +4353,17 @@ describe('HubCatEditor', () => {
                   thresholds: { warn: 0.6, action: 0.8 },
                 },
                 source: 'runtime_override',
+                revision: 'runtime_override:test-codex',
+                changedAt: 1,
                 hasOverride: true,
                 override: {
                   strategy: 'compress',
                   thresholds: { warn: 0.6, action: 0.8 },
                 },
-                hybridCapable: false,
-                sessionChainEnabled: true,
+                executionStatus: {
+                  status: 'unavailable',
+                  missingCapabilities: ['authoritative_usage'],
+                },
               },
             ],
           }),

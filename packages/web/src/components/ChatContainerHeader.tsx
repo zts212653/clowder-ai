@@ -1,8 +1,6 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
-import { ChatVoiceFeatureControls } from './ChatVoiceFeatureControls';
-import { ExportButton } from './ExportButton';
 import { CatCafeLogo } from './icons/CatCafeLogo';
 import { ThreadCatPill } from './ThreadCatPill';
 import { ThreadIndicator } from './ThreadIndicator';
@@ -14,11 +12,9 @@ interface ChatContainerHeaderProps {
   authPendingCount: number;
   viewMode: 'single' | 'split';
   onToggleViewMode: () => void;
-  onOpenMobileStatus: () => void;
   statusPanelOpen: boolean;
   onToggleStatusPanel: () => void;
-  /** F092: Default cat for voice companion */
-  defaultCatId: string;
+  hasWorkspaceActivity?: boolean;
 }
 
 export function ChatContainerHeader({
@@ -31,10 +27,9 @@ export function ChatContainerHeader({
   viewMode: _viewMode,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   onToggleViewMode: _onToggleViewMode,
-  onOpenMobileStatus,
   statusPanelOpen,
   onToggleStatusPanel,
-  defaultCatId,
+  hasWorkspaceActivity = false,
 }: ChatContainerHeaderProps) {
   return (
     <header className="safe-area-top">
@@ -67,8 +62,6 @@ export function ChatContainerHeader({
             </div>
           </div>
         </div>
-        <ExportButton threadId={threadId} />
-        <ChatVoiceFeatureControls threadId={threadId} defaultCatId={defaultCatId} />
         {authPendingCount > 0 && (
           <span
             className="inline-flex items-center justify-center h-5 min-w-[20px] px-1 rounded-full bg-conn-amber-bg text-conn-amber-text text-micro font-bold animate-pulse-subtle"
@@ -77,25 +70,12 @@ export function ChatContainerHeader({
             🔐 {authPendingCount}
           </span>
         )}
-        {/* Mobile/tablet: status sheet trigger */}
-        <button
-          type="button"
-          onClick={onOpenMobileStatus}
-          className="p-1 rounded-lg hover:bg-[var(--console-hover-bg)] transition-colors ml-1 lg:hidden"
-          title="打开状态面板"
-          aria-label="打开状态面板"
-        >
-          <svg aria-hidden="true" className="w-5 h-5 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
-            <path
-              fillRule="evenodd"
-              d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-              clipRule="evenodd"
-            />
-          </svg>
-        </button>
-        {/* F232 AC-A8: 单一 panel 开关（桌面 lg:block）；mode 切换从底部工具栏图标触发。
-            P2-2：右侧 panel desktop-only，小屏走 MobileStatusSheet。 */}
-        <PanelToggle onToggleStatusPanel={onToggleStatusPanel} statusPanelOpen={statusPanelOpen} />
+        {/* F284: one stable recall entry; activity stays a badge, not a second header capability. */}
+        <PanelToggle
+          onToggleStatusPanel={onToggleStatusPanel}
+          statusPanelOpen={statusPanelOpen}
+          hasWorkspaceActivity={hasWorkspaceActivity}
+        />
       </div>
     </header>
   );
@@ -151,34 +131,51 @@ function DaemonActiveIndicator({ threadId }: { threadId: string }) {
 export { ThreadIndicator, tailTruncate } from './ThreadIndicator';
 
 /**
- * F232 AC-A8: 单一 panel 开关。原 F099 RightPanelToggle + F232 ArtifactsToggle
- * 收敛成一个 toggle——mode 切换从底部工具栏图标触发。桌面 lg:block，小屏走 MobileStatusSheet。
+ * F284 stable Workspace entry. The Launcher owns capability discovery; this
+ * borderless control only recalls the contextual work surface.
  */
-function PanelToggle({
+export function PanelToggle({
   onToggleStatusPanel,
   statusPanelOpen,
+  hasWorkspaceActivity = false,
 }: {
   onToggleStatusPanel: () => void;
   statusPanelOpen: boolean;
+  hasWorkspaceActivity?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onToggleStatusPanel}
-      className={`p-1 rounded-lg transition-colors ml-1 hidden lg:block ${
-        statusPanelOpen ? 'text-cafe-accent' : 'text-cafe-secondary hover:text-cafe-accent'
+      className={`relative ml-1 inline-flex h-8 w-8 items-center justify-center rounded-full bg-transparent transition-colors ${
+        statusPanelOpen
+          ? 'text-cafe-accent'
+          : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent'
       }`}
-      aria-label={statusPanelOpen ? '收起面板' : '打开面板'}
-      title={statusPanelOpen ? '收起面板' : '打开面板'}
+      aria-label={statusPanelOpen ? '收起 Workspace' : '打开 Workspace'}
+      title={statusPanelOpen ? '收起 Workspace' : '打开 Workspace'}
+      data-testid="workspace-panel-toggle"
     >
-      <svg aria-hidden="true" className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
-        <path
-          fillRule="evenodd"
-          d="M3 4a1 1 0 011-1h12a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm2 0v12h10V4H5z"
-          clipRule="evenodd"
-        />
-        {statusPanelOpen && <rect x="12" y="4" width="4" height="12" rx="0.5" opacity="0.3" />}
+      <svg
+        aria-hidden="true"
+        className="h-4 w-4"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M4 2.5h8a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 12V4A1.5 1.5 0 0 1 4 2.5Z" />
+        <path d="M10.5 2.5v11M7.5 6 5.5 8l2 2" />
       </svg>
+      {hasWorkspaceActivity && (
+        <span
+          className="absolute right-1 top-1 h-2 w-2 rounded-full border-2 border-[var(--console-card-bg)] bg-[var(--semantic-success)]"
+          aria-hidden="true"
+          data-testid="workspace-activity-badge"
+        />
+      )}
     </button>
   );
 }

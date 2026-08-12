@@ -117,6 +117,54 @@ class FakeRedis {
 }
 
 describe('F254 D2 provider-native freshness truth', () => {
+  it('carries the exact active parent into queued freshness at provider-native safe boundaries', async () => {
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { createProviderNativeFreshnessFactory } = await import(
+      '../dist/domains/cats/services/freshness/createProviderNativeFreshnessFactory.js'
+    );
+    const queue = new InvocationQueue();
+    queue.enqueue({
+      ownerAuthProvenance: 'strict',
+      threadId: 'thread-current-parent',
+      userId: 'user-1',
+      content: 'continue in the active provider turn',
+      source: 'user',
+      targetCats: ['opus'],
+      authorIntentByCatId: {
+        opus: { requested: 'continue_current', boundParentInvocationId: 'parent-active' },
+      },
+      intent: 'execute',
+    });
+    const factory = createProviderNativeFreshnessFactory({
+      redis: new FakeRedis(),
+      cursorStore: { getSeenCursor: async () => 'seen-cursor' },
+      messageStore: { getByThreadAfter: async () => [] },
+      threadStore: { get: async () => ({ thinkingMode: 'debug' }) },
+      getQueue: () => queue,
+    });
+
+    const controller = await factory({
+      invocationId: 'parent-active',
+      threadId: 'thread-current-parent',
+      userId: 'user-1',
+      catId: 'opus',
+      provider: 'openai_codex',
+      capability: {
+        provider: 'openai_codex',
+        carrier: 'codex_app_server',
+        deliverySemantics: 'exact_active_turn',
+      },
+    });
+    const notice = await controller.prepare({
+      threadId: 'thread-current-parent',
+      turnId: 'turn-active',
+      toolSurface: 'command_execution',
+    });
+
+    assert.ok(notice, 'the current parent must receive a content-free queued freshness notice');
+    assert.match(notice.text, /get_thread_context/);
+  });
+
   it('classifies only completed supported tool surfaces as safe boundaries', () => {
     const completed = (type) => ({
       method: 'item/completed',
@@ -546,7 +594,10 @@ describe('F254 D2 provider-native freshness truth', () => {
 
   it('builds a content-free notice with no Queue body or sender preview', () => {
     const text = createContentFreeFreshnessNotice({ threadId: 'thread-1', unseenCount: 3 });
-    assert.match(text, /list_recent/);
+    assert.match(text, /get_thread_context/);
+    assert.match(text, /thread-1/);
+    assert.match(text, /responseMode.*full/);
+    assert.doesNotMatch(text, /list_recent/);
     assert.doesNotMatch(text, /secret body|landy/);
   });
 
@@ -561,7 +612,7 @@ describe('F254 D2 provider-native freshness truth', () => {
           noticeId: 'notice-1',
           frontier: 'm-1',
           expectedTurnId: boundary.turnId,
-          text: '📬 freshness notice: call list_recent',
+          text: '📬 freshness notice: read the current thread in full',
           boundary,
         }),
         commitDelivered: async (notice, result) => delivered.push({ notice, result }),
@@ -598,7 +649,9 @@ describe('F254 D2 provider-native freshness truth', () => {
     const steer = wire.writes.find((write) => write.method === 'turn/steer');
     assert.equal(steer.params.expectedTurnId, 'turn-1');
     assert.equal(steer.params.threadId, 'thread-1');
-    assert.deepEqual(steer.params.input, [{ type: 'text', text: '📬 freshness notice: call list_recent' }]);
+    assert.deepEqual(steer.params.input, [
+      { type: 'text', text: '📬 freshness notice: read the current thread in full' },
+    ]);
     assert.equal(delivered.length, 1);
     assert.equal(missed.length, 0);
     assert.equal(
@@ -1054,6 +1107,8 @@ describe('F254 D2 provider-native freshness truth', () => {
     const messages = [];
     for await (const message of service.invoke('work', {
       invocationId: 'inv-app-server',
+      requestedServiceTier: 'standard',
+      cliConfigArgs: ['--config=service_tier="fast"', '-c=service_tier="fast"', '-cservice_tier="fast"'],
       agentCarrierSessionFactory: async (input) => {
         factoryInput = input;
         return wire;
@@ -1064,8 +1119,14 @@ describe('F254 D2 provider-native freshness truth', () => {
 
     assert.deepEqual(factoryInput.args.slice(0, 2), ['app-server', '--stdio']);
     assert.equal(factoryInput.args.includes('exec'), false);
+    assert.equal(
+      factoryInput.args.some((arg) => arg.includes('service_tier=')),
+      false,
+      'app-server process args must not retain raw service_tier overrides',
+    );
     assert.ok(factoryInput.args.includes('apps._default.default_tools_approval_mode="writes"'));
     const threadStart = wire.writes.find((message) => message.method === 'thread/start');
+    assert.equal(threadStart.params.serviceTier, null, 'typed Standard must reach the app-server request');
     assert.match(threadStart.params.developerInstructions, /GitHub routing/);
     assert.match(threadStart.params.developerInstructions, /GitHub MCP.*retired/i);
     assert.match(threadStart.params.developerInstructions, /canonical.*gh/i);

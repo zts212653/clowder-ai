@@ -41,8 +41,17 @@ const proactiveMemoryAbstentionEpisodeSchema = z
   })
   .strict();
 
+const proactiveMemoryDeferredEpisodeSchema = z
+  .object({
+    opportunityRef: proactiveMemoryOpportunityRefSchema,
+    disposition: z.literal('defer'),
+    reasonCode: z.literal('deferred_receipt_recorded'),
+  })
+  .strict();
+
 export const proactiveMemoryOpportunityEpisodeSchema = z.discriminatedUnion('disposition', [
   proactiveMemoryProposalEpisodeSchema,
+  proactiveMemoryDeferredEpisodeSchema,
   proactiveMemoryAbstentionEpisodeSchema,
 ]);
 

@@ -5,6 +5,8 @@ export type CrossThreadCoordinationInputPhase = 'active' | 'terminal';
 export interface CrossThreadCoordinationInput {
   phase: CrossThreadCoordinationInputPhase;
   id?: string;
+  /** Stable action subject. A changed subject starts a fresh coordination generation. */
+  subjectRef?: string;
 }
 
 /** Persistent lifecycle projection carried independently by StoredMessage.extra.coordination. */
@@ -13,6 +15,8 @@ export interface CrossThreadCoordination {
   phase: CrossThreadCoordinationInputPhase | 'ack';
   /** Lineage hint only; ordering truth remains the message id/timestamp. */
   hop: number;
+  /** Optional action identity binding; absent on legacy/general-purpose chains. */
+  subjectRef?: string;
 }
 
 /**

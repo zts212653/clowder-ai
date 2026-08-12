@@ -48,6 +48,10 @@ import type { IWorkflowSopStore } from '../../stores/ports/WorkflowSopStore.js';
 import { getTimelineOrderTime, SYSTEM_USER_IDS } from '../../stores/visibility.js';
 import type { AgentMessage, AgentService } from '../../types.js';
 import type { InvocationRegistry } from '../invocation/InvocationRegistry.js';
+import {
+  type InvocationCapacitySnapshot,
+  resolveInvocationCapacitySnapshot,
+} from '../invocation/invocation-capacity-snapshot.js';
 import type { TaskProgressStore } from '../invocation/TaskProgressStore.js';
 import type { AgentRegistry } from '../registry/AgentRegistry.js';
 import type {
@@ -59,6 +63,7 @@ import type {
 import { routeParallel } from '../routing/route-parallel.js';
 import { routeSerial } from '../routing/route-serial.js';
 import { resolveCatTarget } from './cat-target-resolver.js';
+import { appendContextAttachmentsToPrompt } from './context-attachment-prompt.js';
 import type { HumanDispositionInvocationOrigin } from './human-disposition-invocation-origin.js';
 
 const log = createModuleLogger('agent-router');
@@ -843,6 +848,29 @@ export class AgentRouter {
     );
   }
 
+  /** #1208: exact context capability of the concrete service/carrier. */
+  contextCapability(catId: CatId): import('../../types.js').AgentContextCapability {
+    return (
+      this.services[catId]?.contextCapability?.() ?? {
+        provider: 'unknown',
+        carrier: 'unknown',
+        reportsRuntimeWindow: false,
+        authoritativeUsage: false,
+        usageTelemetry: 'unavailable',
+        nativeWindowControl: false,
+        nativeCompressionControl: false,
+        observesCompression: false,
+        reason: 'No concrete context capability is registered for this member',
+      }
+    );
+  }
+
+  /** #1208: Hub projection from the same concrete service snapshot used by invocations. */
+  contextCapacitySnapshot(catId: CatId): InvocationCapacitySnapshot | undefined {
+    const service = this.services[catId];
+    return service ? resolveInvocationCapacitySnapshot({ catId, service }) : undefined;
+  }
+
   private isRoutableCat(catId: string | null | undefined): catId is CatId {
     return typeof catId === 'string' && Object.hasOwn(this.services, catId) && isCatAvailable(catId);
   }
@@ -1500,7 +1528,7 @@ export class AgentRouter {
     const targetCats = await this.resolveTargets(message, resolvedThreadId);
     const intent = parseIntent(message, targetCats.length);
     const strategy = intent.intent === 'ideate' && targetCats.length > 1 ? 'parallel' : 'serial';
-    const cleanMessage = stripIntentTags(message);
+    const cleanMessage = appendContextAttachmentsToPrompt(stripIntentTags(message), contentBlocks);
 
     const routeSpan = routeTracer.startSpan('cat_cafe.route', {
       attributes: {
@@ -1655,6 +1683,8 @@ export class AgentRouter {
       onPromptMessagesExposed: NonNullable<RouteOptions['onPromptMessagesExposed']>;
       /** Exact persisted bodies already folded into `message` by the queue caller. */
       persistedPromptMessageIds?: RouteOptions['persistedPromptMessageIds'];
+      /** Per-message ownership for partial incremental Queue windows. */
+      persistedPromptMessages?: RouteOptions['persistedPromptMessages'];
       /** F281: required on typed first-party ingress; only direct_owner is injectable. */
       humanDispositionInvocationOrigin: HumanDispositionInvocationOrigin;
       /** F153: caller trace context for cross-route A2A propagation */
@@ -1675,7 +1705,7 @@ export class AgentRouter {
       toolExecutionPolicy?: RouteOptions['toolExecutionPolicy'];
     },
   ): AsyncIterable<AgentMessage> {
-    const cleanMessage = stripIntentTags(message);
+    const cleanMessage = appendContextAttachmentsToPrompt(stripIntentTags(message), options.contentBlocks);
     const strategy = intent.intent === 'ideate' && targetCats.length > 1 ? 'parallel' : 'serial';
 
     // F153: Reconstruct remote parent context for cross-route A2A trace propagation
@@ -1788,6 +1818,10 @@ export class AgentRouter {
       promptTags: intent.promptTags,
       currentUserMessageId: userMessageId,
       persistedPromptMessageIds: options?.persistedPromptMessageIds,
+      persistedPromptMessages: options?.persistedPromptMessages?.map((persisted) => ({
+        ...persisted,
+        content: stripIntentTags(persisted.content),
+      })),
       a2aTriggerMessageId: options?.a2aTriggerMessageId,
       humanDispositionInvocationOrigin: options.humanDispositionInvocationOrigin,
       thinkingMode,

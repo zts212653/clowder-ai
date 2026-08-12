@@ -19,6 +19,7 @@ import {
   personMemoryInteractionEvidenceFieldSchema,
   personMemoryResolvedSourceBundleSchema,
 } from './person-memory-source-bundle.js';
+import { deferredPersonMemoryReceiptIdSchema } from './proactive-memory-deferred-receipt.js';
 
 export type {
   CandidateClaimDraftId,
@@ -528,6 +529,7 @@ const captureCandidateBaseSchema = z
     relationshipDraft: candidateRelationshipDraftSchema.optional(),
     interactionDraft: candidateInteractionDraftSchema.optional(),
     sourceBundle: personMemoryResolvedSourceBundleSchema.optional(),
+    deferredReceiptId: deferredPersonMemoryReceiptIdSchema.optional(),
     replacesProposalId: captureCandidateIdSchema.optional(),
     replacedByProposalId: captureCandidateIdSchema.optional(),
     state: z.enum(PERSON_MEMORY_CANDIDATE_STATES),

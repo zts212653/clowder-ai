@@ -16,7 +16,7 @@
 - 阶段进度给下棒可见 → `cat_cafe_update_workflow` 推告示牌（不只发聊天）
 - 关于co-creator本人/个人近况/称谓/咱们关系/沟通边界的稳定事实 → `cat_cafe_propose_profile_update`（先 read_profile；Hub 审批；先 `tool_search`）
 - 关于什么输出/设计/表达/架构/系统才算好的可复用品味判断 → `cat_cafe_propose_taste`（Hub 审批；先 `tool_search`）
-- 单次 continuity-valued 人物线索或频率 nudge → `proactive-memory-judgment`（不确定降档、不因未重复沉默）；skill 再路由 entity/person proposal。
+- 单次 continuity-valued 人物线索或频率 nudge → `proactive-memory-judgment`（不确定降档、不因未重复沉默）；skill 再路由三态。
 - 纠正/表扬/Magic Word 不决定存哪，按内容走上两路；重复工具/流程摩擦 → `code-as-harness`（搜证据→代码守护）
 
 > Skills 在 manifest ≠ 在认知路径。完整集 + Tier 2 见 `cat-cafe-skills/refs/capability-wakeup-index.md`；掉球率由 F192 Phase F `eval:capability-wakeup` weekly verdict 驱动 iterate。

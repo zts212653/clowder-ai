@@ -3,25 +3,35 @@ import {
   type CandidateInteractionDraft,
   type PersonIdentityDraft,
   type PersonMemorySourceBundleInput,
-  type RichPersonMemoryProposalCardBlock,
   validatePersonMemoryAssertionMatrix,
 } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { ApprovalIngress } from '../domains/approval-hub/ApprovalIngress.js';
+import { ApprovalCardCommittedError, ApprovalIngress } from '../domains/approval-hub/ApprovalIngress.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import type { DeferredPersonMemoryReceiptStore } from '../domains/memory/DeferredPersonMemoryReceiptStore.js';
 import {
   type OwnerPrivateArtifactResolver,
   type PersonMemoryAssertionTargetResolution,
   PersonMemorySourceBundleResolver,
   type PersonMemorySourceResolution,
 } from '../domains/memory/people/PersonMemorySourceBundleResolver.js';
-import type { PersonMemoryStore, StoredPersonMemoryCandidate } from '../domains/memory/people/PersonMemoryStore.js';
+import type {
+  PersonMemoryStore,
+  StagePersonMemoryCandidateInput,
+  StoredPersonMemoryCandidate,
+} from '../domains/memory/people/PersonMemoryStore.js';
+import {
+  DeferredPersonMemoryCommitConflictError,
+  PersonMemoryDeltaConflictError,
+} from '../domains/memory/people/person-memory-candidate-publication.js';
+import { proposalPersonMemoryDeltaCoordinates } from '../domains/memory/people/person-memory-delta-lineage.js';
 import { observePersonMemoryStage } from '../domains/memory/people/person-memory-telemetry.js';
 import type { WorkspacePersonResolver } from '../domains/memory/people/WorkspacePersonResolver.js';
 import { resolveWorkspacePersonAliasSet } from '../domains/memory/people/WorkspacePersonResolver.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { resolveDeferredProposalReceipt } from './person-memory-deferred-proposal.js';
 import {
   assertionTargets,
   candidateIdForProposal,
@@ -36,6 +46,7 @@ import {
   proposalPreflightFailure,
   proposalSchemaPreflight,
 } from './person-memory-proposal-preflight.js';
+import { publishPersonMemoryCandidate } from './person-memory-proposal-publication.js';
 import {
   legacySourceBundle,
   type ProposePersonMemoryBody,
@@ -54,28 +65,7 @@ export interface ProposePersonMemoryDeps {
   socketManager: SocketManager;
   approvalIngress?: Pick<ApprovalIngress, 'publish'>;
   ownerPrivateArtifactResolver?: OwnerPrivateArtifactResolver;
-}
-
-function publishCandidate(
-  ingress: Pick<ApprovalIngress, 'publish'>,
-  store: PersonMemoryStore,
-  candidate: StoredPersonMemoryCandidate,
-  cardBlock: RichPersonMemoryProposalCardBlock,
-): Promise<ApprovalEnvelope> {
-  return ingress.publish(
-    {
-      producerId: 'F276',
-      canonicalProposalId: candidate.candidateId,
-      ownerUserId: candidate.ownerUserId,
-      requesterCatId: candidate.requesterCatId,
-      originRef: candidate.sourceMessageRef,
-      cardThreadId: candidate.sourceMessageRef.threadId,
-      cardContent: `提议将 ${candidate.personDraft?.displayName ?? '这位人物'} 写入你的私人关系记忆`,
-      cardBlock,
-      createdAt: candidate.createdAt,
-    },
-    store,
-  );
+  deferredReceiptStore?: Pick<DeferredPersonMemoryReceiptStore, 'get'>;
 }
 
 type PreparedProposal = {
@@ -196,6 +186,12 @@ async function resolveProposalEvidence(
       }),
     };
   }
+  if (proposalPersonMemoryDeltaCoordinates(sourceResolution.bundle).status === 'duplicate') {
+    return {
+      status: 'error',
+      failure: { statusCode: 422, payload: { error: 'duplicate_source_coordinate' } },
+    };
+  }
   if (!(await resolvedBindingsAreMaterializable(sourceResolution.bundle, deps.messageStore))) {
     return {
       status: 'error',
@@ -253,6 +249,58 @@ async function resolveProposalPerson(
   return { status: 'ok', value: derived.person };
 }
 
+async function resolvePriorCandidateForProposal(
+  input: StagePersonMemoryCandidateInput,
+  person: PersonIdentityDraft,
+  sourceDigest: string,
+  store: PersonMemoryStore,
+): Promise<ProposalStep<StoredPersonMemoryCandidate | null>> {
+  const validation = await validatePriorCandidate(input, person, sourceDigest, store);
+  if (validation.status === 'error') {
+    return {
+      status: 'error',
+      failure: { statusCode: validation.statusCode, payload: { error: validation.error } },
+    };
+  }
+  if (!validation.deferredClaimRenewal) return { status: 'ok', value: validation.prior };
+  if (!validation.prior || !input.deferredReceiptId) {
+    return {
+      status: 'error',
+      failure: { statusCode: 409, payload: { error: 'deferred_receipt_transition_conflict' } },
+    };
+  }
+  const renewed = await store.renewDeferredCandidateClaim({
+    ownerUserId: input.ownerUserId,
+    candidateId: input.candidateId,
+    receiptId: input.deferredReceiptId,
+    previousClaimId: validation.deferredClaimRenewal.previousClaimId,
+    nextClaimId: validation.deferredClaimRenewal.nextClaimId,
+    deltaFingerprint: validation.deferredClaimRenewal.deltaFingerprint,
+    renewedAt: Date.now(),
+  });
+  if (renewed.outcome !== 'renewed' && renewed.outcome !== 'replayed') {
+    return {
+      status: 'error',
+      failure: { statusCode: 409, payload: { error: 'deferred_receipt_transition_conflict' } },
+    };
+  }
+  return { status: 'ok', value: renewed.candidate };
+}
+
+function emitReplacementUpdate(
+  candidate: StoredPersonMemoryCandidate,
+  ownerUserId: string,
+  socketManager: SocketManager,
+): void {
+  if (!candidate.replacesProposalId) return;
+  socketManager.emitToUser(ownerUserId, 'proposal_updated', {
+    proposalId: candidate.replacesProposalId,
+    sourceFeatureId: 'F276',
+    status: 'withdrawn',
+    replacedByProposalId: candidate.candidateId,
+  });
+}
+
 async function handleProposal(
   prepared: PreparedProposal,
   reply: FastifyReply,
@@ -265,26 +313,33 @@ async function handleProposal(
   if (evidence.status === 'error') return rejectProposal(reply, evidence.failure);
   const person = await resolveProposalPerson(prepared, deps);
   if (person.status === 'error') return rejectProposal(reply, person.failure);
+  const deferredReceipt = await resolveDeferredProposalReceipt({
+    lineage: body.deferredReceipt,
+    ownerUserId: auth.userId,
+    requesterCatId: auth.catId,
+    targetPersonId: body.targetPersonId,
+    person: person.value,
+    sourceBundle: evidence.value.sourceResolution.bundle,
+    messageStore: deps.messageStore,
+    receiptStore: deps.deferredReceiptStore,
+  });
+  if (deferredReceipt.status === 'error') return rejectProposal(reply, deferredReceipt.failure);
   const input = makeCandidateInput(
     { ...body, person: person.value },
     auth,
     prepared.originMessageId,
     evidence.value.interactionSourceEvidence,
     evidence.value.sourceResolution.bundle,
+    deferredReceipt.value?.originMessageRef,
   );
-  const priorValidation = await validatePriorCandidate(
+  const priorResolution = await resolvePriorCandidateForProposal(
     input,
     person.value,
     evidence.value.sourceResolution.bundleDigest,
     deps.store,
   );
-  if (priorValidation.status === 'error') {
-    return rejectProposal(reply, {
-      statusCode: priorValidation.statusCode,
-      payload: { error: priorValidation.error },
-    });
-  }
-  const prior = priorValidation.prior;
+  if (priorResolution.status === 'error') return rejectProposal(reply, priorResolution.failure);
+  const prior = priorResolution.value;
   const preview = prior ?? previewCandidateForProposal(input);
   const cardPreflight = preflightPersonMemoryProposalCard(preview);
   if (cardPreflight.status === 'blocked') {
@@ -293,7 +348,16 @@ async function handleProposal(
       payload: { error: 'person_memory_preflight_failed', preflight: cardPreflight.preflight },
     });
   }
-  const candidate = prior ?? (await observePersonMemoryStage('stage', () => deps.store.stageCandidate(input)));
+  let candidate: StoredPersonMemoryCandidate;
+  try {
+    candidate = prior ?? (await observePersonMemoryStage('stage', () => deps.store.stageCandidate(input)));
+  } catch (error) {
+    if (error instanceof PersonMemoryDeltaConflictError) {
+      reply.status(409);
+      return { error: 'delta_already_captured' };
+    }
+    throw error;
+  }
   const revalidated = await evidence.value.sourceResolver.revalidate(
     evidence.value.publicSourceBundle,
     { ownerUserId: auth.userId },
@@ -305,17 +369,19 @@ async function handleProposal(
     reply.status(409);
     return { error: 'source_drift' };
   }
-  const envelope = await observePersonMemoryStage('publish', () =>
-    publishCandidate(ingress, deps.store, candidate, cardPreflight.card),
-  );
-  if (candidate.replacesProposalId) {
-    deps.socketManager.emitToUser(auth.userId, 'proposal_updated', {
-      proposalId: candidate.replacesProposalId,
-      sourceFeatureId: 'F276',
-      status: 'withdrawn',
-      replacedByProposalId: candidate.candidateId,
-    });
+  let envelope: ApprovalEnvelope;
+  try {
+    envelope = await observePersonMemoryStage('publish', () =>
+      publishPersonMemoryCandidate(ingress, deps.store, candidate, cardPreflight.card),
+    );
+  } catch (error) {
+    if (error instanceof ApprovalCardCommittedError && error.cause instanceof DeferredPersonMemoryCommitConflictError) {
+      reply.status(409);
+      return { error: 'deferred_receipt_transition_conflict' };
+    }
+    throw error;
   }
+  emitReplacementUpdate(candidate, auth.userId, deps.socketManager);
   return {
     candidateId: candidate.candidateId,
     status: candidate.state === 'staged' ? 'pending_approval' : candidate.state,

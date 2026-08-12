@@ -136,7 +136,7 @@ describe('ProactiveCandidateNudgeReceiptStore', () => {
 });
 
 describe('ProactiveMemoryNudgeService', () => {
-  it('filters registry truth before claiming, leaves cap overflow untouched, and finalizes only rendered claims', async () => {
+  it('admits registered people/entities as known-person deltas while suppressing unresolved or pending subjects', async () => {
     const [{ ProactiveCandidateNudgeReceiptStore }, { ProactiveMemoryNudgeService }] = await Promise.all([
       import('../../dist/domains/memory/ProactiveCandidateNudgeReceiptStore.js'),
       import('../../dist/domains/memory/ProactiveMemoryNudgeService.js'),
@@ -144,7 +144,15 @@ describe('ProactiveMemoryNudgeService', () => {
     const db = new Database(':memory:');
     try {
       const receiptStore = new ProactiveCandidateNudgeReceiptStore(db);
-      const candidates = ['Registered', 'Unknown', 'Alden', 'Beryl', 'Cedar', 'Daria'].map(candidate);
+      const candidates = [
+        'Registered Entity',
+        'Registered Person',
+        'Registered Non-Person',
+        'Pending',
+        'Unknown',
+        'Alden',
+        'Beryl',
+      ].map(candidate);
       const registryCalls = [];
       const service = new ProactiveMemoryNudgeService({
         detector: {
@@ -161,7 +169,14 @@ describe('ProactiveMemoryNudgeService', () => {
         registryResolver: {
           resolve: async ({ phrase }) => {
             registryCalls.push(phrase);
-            if (phrase === 'Registered') return { kind: 'registered_entity', ref: 'person:registered' };
+            if (phrase === 'Registered Entity') return { kind: 'registered_entity', ref: 'entity:registered' };
+            if (phrase === 'Registered Person') return { kind: 'registered_person', ref: 'person:registered' };
+            if (phrase === 'Registered Non-Person') {
+              return { kind: 'registered_non_person_entity', ref: 'feature:registered' };
+            }
+            if (phrase === 'Pending') {
+              return { kind: 'pending_candidate', producerId: 'F276', proposalId: 'person_candidate_pending' };
+            }
             if (phrase === 'Unknown') return { kind: 'unknown' };
             return { kind: 'unregistered' };
           },
@@ -177,11 +192,14 @@ describe('ProactiveMemoryNudgeService', () => {
       });
       assert.deepEqual(
         prepared.candidates.map((item) => item.phrase),
-        ['Alden', 'Beryl', 'Cedar'],
+        ['Registered Entity', 'Registered Person', 'Alden'],
       );
-      assert.equal(registryCalls.includes('Registered'), true);
+      assert.equal(registryCalls.includes('Registered Entity'), true);
+      assert.equal(registryCalls.includes('Registered Person'), true);
+      assert.equal(registryCalls.includes('Registered Non-Person'), true);
+      assert.equal(registryCalls.includes('Pending'), true);
       assert.equal(registryCalls.includes('Unknown'), true);
-      assert.equal(registryCalls.includes('Daria'), true, 'registry filtering must complete before cap');
+      assert.equal(registryCalls.includes('Beryl'), true, 'registry filtering must complete before cap');
       assert.equal(db.prepare('SELECT COUNT(*) AS count FROM proactive_memory_nudge_receipts').get().count, 3);
       assert.equal(prepared.context.includes('[proactive-memory-candidate]'), true);
       assert.equal(prepared.context.includes('[registration-candidate]'), false);
@@ -189,11 +207,14 @@ describe('ProactiveMemoryNudgeService', () => {
       assert.equal(prepared.context.includes('应该记录'), false);
       assert.equal(prepared.context.includes('2 threads / 3 messages'), true);
       assert.equal(prepared.context.includes('background 1/10 messages; recent 2/10 messages'), true);
-      assert.equal(prepared.context.includes('thread-2-a'), true);
+      assert.equal(prepared.context.includes('known-person delta'), true);
+      assert.equal(prepared.context.includes('registered_entity'), true);
+      assert.equal(prepared.context.includes('registered_person'), true);
+      assert.equal(prepared.context.includes('thread-0-a'), true);
       assert.equal(
         receiptStore.read({
           ownerUserId: 'owner-1',
-          normalizedSubject: 'daria',
+          normalizedSubject: 'beryl',
         }),
         null,
       );
@@ -214,9 +235,9 @@ describe('ProactiveMemoryNudgeService', () => {
       });
       assert.deepEqual(
         nextMessage.candidates.map((item) => item.phrase),
-        ['Daria'],
+        ['Beryl'],
       );
-      assert.equal(nextMessage.context.includes('Daria'), true);
+      assert.equal(nextMessage.context.includes('Beryl'), true);
     } finally {
       db.close();
     }

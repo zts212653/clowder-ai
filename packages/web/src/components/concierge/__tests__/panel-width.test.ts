@@ -18,9 +18,20 @@ import {
   PANEL_MAX_W,
   PANEL_MIN_H,
   PANEL_MIN_W,
+  resolveExpandedPanelSize,
   resolveInitialPanelHeight,
   resolveInitialPanelWidth,
 } from '../usePanelWidth';
+
+describe('resolveExpandedPanelSize', () => {
+  it('fills the safe viewport area without covering the activity rail or cat', () => {
+    expect(resolveExpandedPanelSize(1200, 900)).toEqual({ width: 1112, height: 764 });
+  });
+
+  it('never returns negative dimensions on tiny viewports', () => {
+    expect(resolveExpandedPanelSize(20, 40)).toEqual({ width: 0, height: 0 });
+  });
+});
 
 // ---------------------------------------------------------------------------
 // clampPanelWidth

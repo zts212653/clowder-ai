@@ -637,6 +637,70 @@ describe('POST /api/messages deliveryMode', () => {
     assert.ok(completion, 'watchdog should notify queue processor so queued work is not stuck');
   });
 
+  it('queue completion watchdog fires when terminal bookkeeping never settles', async (t) => {
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 0 });
+    await app.close();
+    const stuckCommit = deferred();
+    deps = buildDeps({
+      queueCompletionWatchdogMs: 50,
+      sessionContinuationCoordinator: {
+        prepareInvocationContext: mock.fn(async ({ content }) => ({ content, sessionPolicy: 'resume' })),
+        commitInvocationOutcome: mock.fn(() => stuckCommit.promise),
+      },
+    });
+    const { messagesRoutes } = await import('../dist/routes/messages.js');
+    app = Fastify();
+    await app.register(messagesRoutes, deps);
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '@opus', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    for (
+      let i = 0;
+      i < 10 && deps.sessionContinuationCoordinator.commitInvocationOutcome.mock.calls.length === 0;
+      i++
+    ) {
+      await Promise.resolve();
+    }
+    assert.equal(
+      deps.sessionContinuationCoordinator.commitInvocationOutcome.mock.calls.length,
+      1,
+      'test must reach the real post-completeAll bookkeeping window',
+    );
+    assert.equal(deps.queueProcessor.onInvocationComplete.mock.calls.length, 0);
+
+    t.mock.timers.tick(51);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(
+      deps.queueProcessor.onInvocationComplete.mock.calls.length,
+      1,
+      'a stuck terminal write/continuation commit must not permanently suppress queue drain notification',
+    );
+    assert.deepEqual(deps.queueProcessor.onInvocationComplete.mock.calls[0].arguments.slice(0, 4), [
+      'thread-1',
+      'opus',
+      'succeeded',
+      'inv-stub',
+    ]);
+
+    stuckCommit.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(
+      deps.queueProcessor.onInvocationComplete.mock.calls.length,
+      1,
+      'normal finally must replay the same completion idempotently after the watchdog wins',
+    );
+  });
+
   it('default broadcast with queued leftovers but no active invocation → executes immediately', async () => {
     deps.invocationTracker.has.mock.mockImplementation(() => false);
     deps.queueProcessor = {

@@ -29,6 +29,8 @@ import type {
   ThreadState,
   TokenUsage,
   ToolEvent,
+  WorkspacePreviewState,
+  WorkspaceSurface,
 } from './chat-types';
 import { DEFAULT_THREAD_STATE } from './chat-types';
 import { getMessageTimelineOrderTime } from './message-timeline';
@@ -452,7 +454,7 @@ function revokeBlobUrls(messages: ChatMessage[]) {
   for (const msg of messages) {
     if (msg.contentBlocks) {
       for (const block of msg.contentBlocks) {
-        if (block.type === 'image' && block.url.startsWith('blob:')) {
+        if ((block.type === 'image' || block.type === 'file') && block.url.startsWith('blob:')) {
           URL.revokeObjectURL(block.url);
         }
       }
@@ -465,7 +467,7 @@ function collectBlobUrls(messages: ChatMessage[]): Set<string> {
   for (const msg of messages) {
     if (!msg.contentBlocks) continue;
     for (const block of msg.contentBlocks) {
-      if (block.type === 'image' && block.url.startsWith('blob:')) {
+      if ((block.type === 'image' || block.type === 'file') && block.url.startsWith('blob:')) {
         blobUrls.add(block.url);
       }
     }
@@ -501,7 +503,11 @@ function revokeRemovedBlobUrls(previousMessages: ChatMessage[], nextMessages: Ch
   for (const msg of previousMessages) {
     if (!msg.contentBlocks) continue;
     for (const block of msg.contentBlocks) {
-      if (block.type === 'image' && block.url.startsWith('blob:') && !retainedBlobUrls.has(block.url)) {
+      if (
+        (block.type === 'image' || block.type === 'file') &&
+        block.url.startsWith('blob:') &&
+        !retainedBlobUrls.has(block.url)
+      ) {
         URL.revokeObjectURL(block.url);
       }
     }
@@ -804,6 +810,10 @@ export interface ChatState {
   _unreadSuppressedUntil: Record<string, number>;
   /** #586: Count of in-flight ack requests per thread — suppression clears only when 0 */
   _pendingAckCount: Record<string, number>;
+  /** #1304: Badge snapshot restored when the latest ack batch fails to catch up. */
+  _unreadAckRollback: Record<string, { unreadCount: number; hasUserMention: boolean }>;
+  /** #1304: Aggregate failure bit for overlapping ack requests in the current batch. */
+  _unreadAckHadFailure: Record<string, boolean>;
   threads: Thread[];
   isLoadingThreads: boolean;
   /** F164: True when messages are from offline snapshot, not fresh API data */
@@ -854,6 +864,7 @@ export interface ChatState {
   /** F108: Clear all active invocations (timeout/error/stop recovery) */
   clearAllActiveInvocations: () => void;
   setLoadingHistory: (loading: boolean) => void;
+  setThreadLoadingHistory: (threadId: string, loading: boolean) => void;
   setIntentMode: (mode: 'execute' | 'ideate' | null) => void;
   setTargetCats: (cats: string[]) => void;
   setCatStatus: (catId: string, status: CatStatusType) => void;
@@ -1041,7 +1052,9 @@ export interface ChatState {
   clearUnread: (threadId: string) => void;
   /** F072: Clear unread badges for all threads at once */
   clearAllUnread: () => void;
-  /** #586: One ack resolved — decrement pending count; clear suppression when 0 */
+  /** #1304: Settle one ack; only a fully caught-up batch confirms the optimistic badge clear. */
+  settleUnreadAck: (threadId: string, caughtUp: boolean) => void;
+  /** @deprecated Use settleUnreadAck(threadId, true). Retained for non-HTTP callers. */
   confirmUnreadAck: (threadId: string) => void;
   /** #586: Ack about to fire — increment pending count + set Infinity suppression */
   armUnreadSuppression: (threadId: string) => void;
@@ -1104,6 +1117,11 @@ export interface ChatState {
   workspaceOpenTabs: string[];
   workspaceOpenFilePath: string | null;
   workspaceOpenFileLine: number | null;
+  /** F284: current Workspace object; survives panel folds and route unmounts. */
+  workspaceSurface: WorkspaceSurface;
+  setWorkspaceSurface: (surface: WorkspaceSurface) => void;
+  workspacePreview: WorkspacePreviewState;
+  setWorkspacePreview: (preview: WorkspacePreviewState) => void;
   workspaceEditToken: string | null;
   workspaceEditTokenExpiry: number | null;
   /** @internal Last workspace-file-set event context (timestamp + threadId).
@@ -1201,6 +1219,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   currentProjectPath: 'default',
   _unreadSuppressedUntil: {},
   _pendingAckCount: {},
+  _unreadAckRollback: {},
+  _unreadAckHadFailure: {},
   threads: [],
   isLoadingThreads: true,
   isOfflineSnapshot: false,
@@ -1423,6 +1443,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   workspaceOpenTabs: [],
   workspaceOpenFilePath: null,
   workspaceOpenFileLine: null,
+  workspaceSurface: 'home' as const,
+  setWorkspaceSurface: (surface) => set({ workspaceSurface: surface, rightPanelMode: 'workspace' }),
+  workspacePreview: { port: undefined, path: '/' },
+  setWorkspacePreview: (preview) => set({ workspacePreview: preview }),
   workspaceEditToken: null,
   workspaceEditTokenExpiry: null,
   _workspaceFileSetAt: { ts: 0, threadId: null },
@@ -1508,6 +1532,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           workspaceOpenFileLine: line ?? null,
           workspaceEditToken: null,
           workspaceEditTokenExpiry: null,
+          workspaceSurface: 'files',
           rightPanelMode: 'workspace',
           _workspaceFileSetAt: stamp,
         });
@@ -1518,6 +1543,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           workspaceOpenTabs: newTabs,
           workspaceOpenFilePath: path,
           workspaceOpenFileLine: line ?? null,
+          workspaceSurface: 'files',
           rightPanelMode: 'workspace',
           _workspaceFileSetAt: stamp,
         });
@@ -1541,10 +1567,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
       }
     } else {
-      set({
+      set(() => ({
         workspaceOpenFilePath: null,
         workspaceOpenFileLine: null,
-      });
+      }));
     }
   },
   closeWorkspaceTab: (path) => {
@@ -1590,6 +1616,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setWorkspaceRevealPath: (path, originThreadId) =>
     set((state) => ({
       workspaceRevealPath: path,
+      ...(path ? { workspaceSurface: 'files' as const } : {}),
       rightPanelMode: 'workspace' as const,
       _workspaceFileSetAt: { ts: Date.now(), threadId: originThreadId ?? state.currentThreadId },
     })),
@@ -1767,7 +1794,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // ── F120: Preview auto-open ──
   pendingPreviewAutoOpen: null,
-  setPendingPreviewAutoOpen: (data) => set({ pendingPreviewAutoOpen: data, rightPanelMode: 'workspace' }),
+  setPendingPreviewAutoOpen: (data) =>
+    set((state) =>
+      state.presentationLock
+        ? {}
+        : {
+            pendingPreviewAutoOpen: data,
+            workspacePreview: data,
+            workspaceSurface: 'browser' as const,
+            rightPanelMode: 'workspace' as const,
+          },
+    ),
   consumePreviewAutoOpen: () => {
     const pending = get().pendingPreviewAutoOpen;
     if (pending) set({ pendingPreviewAutoOpen: null });
@@ -2776,6 +2813,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
     }),
 
+  /** Update presentation-only history hydration state for a specific thread. */
+  setThreadLoadingHistory: (threadId, loading) =>
+    set((state) => {
+      if (threadId === state.currentThreadId) {
+        return {
+          isLoadingHistory: loading,
+          ...mirrorActiveToThreadStates(state, threadId, { isLoadingHistory: loading }),
+        };
+      }
+      const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
+      return {
+        threadStates: {
+          ...state.threadStates,
+          [threadId]: {
+            ...existing,
+            isLoadingHistory: loading,
+          },
+        },
+      };
+    }),
+
   /** Update hasActiveInvocation for a specific thread (active or background). */
   setThreadHasActiveInvocation: (threadId, active) =>
     set((state) => {
@@ -3023,7 +3081,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const ts = state.threadStates[threadId];
       if (!ts || (ts.unreadCount === 0 && !ts.hasUserMention)) return state;
       // #586 Bug 3: Use Infinity instead of 10s timeout. Suppression persists
-      // until confirmUnreadAck() is called after POST /read/latest succeeds,
+      // until settleUnreadAck() records the terminal POST /read/latest result,
       // preventing stale server unread counts from overwriting cleared state.
       return {
         threadStates: {
@@ -3033,6 +3091,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         _unreadSuppressedUntil: {
           ...state._unreadSuppressedUntil,
           [threadId]: Infinity,
+        },
+        _unreadAckRollback: {
+          ...state._unreadAckRollback,
+          [threadId]: state._unreadAckRollback[threadId] ?? {
+            unreadCount: ts.unreadCount,
+            hasUserMention: ts.hasUserMention,
+          },
         },
       };
     }),
@@ -3059,38 +3124,76 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return changed ? { threadStates: updated, _unreadSuppressedUntil: suppressed } : state;
     }),
 
-  confirmUnreadAck: (threadId) =>
+  settleUnreadAck: (threadId, caughtUp) =>
     set((state) => {
-      // #586 final: Decrement pending ack count. Only clear suppression when
-      // ALL in-flight acks have resolved — this prevents an early-resolving ack
-      // from clearing suppression while a newer ack is still in flight.
+      // Every terminal response settles the request count. A non-2xx,
+      // network failure, or caughtUp:false is not a confirmed durable read;
+      // remember that failure until the overlapping batch fully drains.
       const count = Math.max(0, (state._pendingAckCount[threadId] ?? 1) - 1);
       const newCounts = { ...state._pendingAckCount, [threadId]: count };
+      const hadFailure = (state._unreadAckHadFailure[threadId] ?? false) || !caughtUp;
+      const newFailures = { ...state._unreadAckHadFailure, [threadId]: hadFailure };
       if (count > 0) {
-        // Still have pending acks — keep suppression, just update counter
-        return { _pendingAckCount: newCounts };
+        return { _pendingAckCount: newCounts, _unreadAckHadFailure: newFailures };
       }
-      // All acks resolved — safe to clear suppression
-      if (!state._unreadSuppressedUntil[threadId]) return { _pendingAckCount: newCounts };
+
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { [threadId]: _removed, ...rest } = state._unreadSuppressedUntil;
-      return { _unreadSuppressedUntil: rest, _pendingAckCount: newCounts };
+      const { [threadId]: _removedSuppression, ...remainingSuppressions } = state._unreadSuppressedUntil;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [threadId]: rollback, ...remainingRollbacks } = state._unreadAckRollback;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [threadId]: _removedFailure, ...remainingFailures } = newFailures;
+
+      if (!hadFailure || !rollback) {
+        return {
+          _unreadSuppressedUntil: remainingSuppressions,
+          _pendingAckCount: newCounts,
+          _unreadAckRollback: remainingRollbacks,
+          _unreadAckHadFailure: remainingFailures,
+        };
+      }
+
+      const current = state.threadStates[threadId];
+      return {
+        _unreadSuppressedUntil: remainingSuppressions,
+        _pendingAckCount: newCounts,
+        _unreadAckRollback: remainingRollbacks,
+        _unreadAckHadFailure: remainingFailures,
+        ...(current
+          ? {
+              threadStates: {
+                ...state.threadStates,
+                [threadId]: {
+                  ...current,
+                  unreadCount: Math.max(current.unreadCount, rollback.unreadCount),
+                  hasUserMention: current.hasUserMention || rollback.hasUserMention,
+                },
+              },
+            }
+          : {}),
+      };
     }),
 
+  confirmUnreadAck: (threadId) => get().settleUnreadAck(threadId, true),
+
   armUnreadSuppression: (threadId) =>
-    set((state) => ({
-      // #586 final: Increment pending ack count + set Infinity suppression.
-      // Each ack attempt increments; confirmUnreadAck decrements. Suppression
-      // only clears when counter reaches 0 (all in-flight acks resolved).
-      _unreadSuppressedUntil: {
-        ...state._unreadSuppressedUntil,
-        [threadId]: Infinity,
-      },
-      _pendingAckCount: {
-        ...state._pendingAckCount,
-        [threadId]: (state._pendingAckCount[threadId] ?? 0) + 1,
-      },
-    })),
+    set((state) => {
+      const pending = state._pendingAckCount[threadId] ?? 0;
+      return {
+        _unreadSuppressedUntil: {
+          ...state._unreadSuppressedUntil,
+          [threadId]: Infinity,
+        },
+        _pendingAckCount: {
+          ...state._pendingAckCount,
+          [threadId]: pending + 1,
+        },
+        _unreadAckHadFailure: {
+          ...state._unreadAckHadFailure,
+          [threadId]: pending > 0 ? (state._unreadAckHadFailure[threadId] ?? false) : false,
+        },
+      };
+    }),
 
   initThreadUnread: (threadId, unreadCount, hasUserMention) =>
     set((state) => {

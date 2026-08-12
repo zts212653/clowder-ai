@@ -291,6 +291,156 @@ describe('useChatHistory scroll memory (#27)', () => {
     expect(scrollTop.get()).toBe(500);
   });
 
+  it('leaves bottom follow after repeated small user scroll-up inputs', async () => {
+    const threadId = 'thread-small-user-scrolls';
+    const messages = [makeMsg('m1', 1), makeMsg('m2', 2)];
+
+    useChatStore.setState({
+      currentThreadId: threadId,
+      messages,
+      hasMore: false,
+      isLoadingHistory: false,
+      threadStates: {
+        [threadId]: makeThreadState(messages),
+      },
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId }));
+    });
+
+    const scrollEl = capturedHook!.scrollContainerRef.current!;
+    const scrollTop = defineMutableNumberProp(scrollEl, 'scrollTop', 400);
+    defineMutableNumberProp(scrollEl, 'clientHeight', 600);
+    const scrollHeight = defineMutableNumberProp(scrollEl, 'scrollHeight', 1000);
+    const endEl = capturedHook!.messagesEndRef.current!;
+    endEl.scrollIntoView = vi.fn();
+
+    rafCallbacks.clear();
+    act(() => {
+      capturedHook?.handleScroll();
+    });
+
+    scrollHeight.set(1400);
+    for (const top of [398, 396, 394, 392, 390]) {
+      act(() => {
+        scrollEl.dispatchEvent(new WheelEvent('wheel', { deltaY: -2 }));
+        scrollTop.set(top);
+        capturedHook?.handleScroll();
+      });
+    }
+
+    act(() => {
+      useChatStore.setState({
+        messages: [...messages, makeMsg('m3', 3)],
+      });
+    });
+
+    expect(endEl.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('keeps bottom follow across a layout-driven upward scroll correction', async () => {
+    const threadId = 'thread-layout-upward-correction';
+    const messages = [makeMsg('m1', 1), makeMsg('m2', 2)];
+
+    useChatStore.setState({
+      currentThreadId: threadId,
+      messages,
+      hasMore: false,
+      isLoadingHistory: false,
+      threadStates: {
+        [threadId]: makeThreadState(messages),
+      },
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId }));
+    });
+
+    const scrollEl = capturedHook!.scrollContainerRef.current!;
+    const scrollTop = defineMutableNumberProp(scrollEl, 'scrollTop', 500);
+    defineMutableNumberProp(scrollEl, 'clientHeight', 600);
+    const scrollHeight = defineMutableNumberProp(scrollEl, 'scrollHeight', 1100);
+    const endEl = capturedHook!.messagesEndRef.current!;
+    endEl.scrollIntoView = vi.fn();
+
+    rafCallbacks.clear();
+    act(() => {
+      capturedHook?.handleScroll();
+    });
+
+    scrollHeight.set(1400);
+    scrollTop.set(450);
+    act(() => {
+      capturedHook?.handleScroll();
+    });
+
+    act(() => {
+      useChatStore.setState({
+        messages: [...messages, makeMsg('m3', 3)],
+      });
+    });
+
+    expect(endEl.scrollIntoView).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps following when smooth-scroll intermediate frames fire scroll events (#1234)', async () => {
+    const threadId = 'thread-append-smooth-frames';
+    const messages = [makeMsg('m1', 1), makeMsg('m2', 2)];
+
+    useChatStore.setState({
+      currentThreadId: threadId,
+      messages,
+      hasMore: false,
+      isLoadingHistory: false,
+      threadStates: {
+        [threadId]: makeThreadState(messages),
+      },
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId }));
+    });
+
+    const scrollEl = capturedHook!.scrollContainerRef.current!;
+    const scrollTop = defineMutableNumberProp(scrollEl, 'scrollTop', 400);
+    defineMutableNumberProp(scrollEl, 'clientHeight', 600);
+    const scrollHeight = defineMutableNumberProp(scrollEl, 'scrollHeight', 1000);
+    const endEl = capturedHook!.messagesEndRef.current!;
+    const scrollIntoView = vi.fn();
+    endEl.scrollIntoView = scrollIntoView;
+
+    rafCallbacks.clear();
+
+    // User is pinned at bottom (1000 - 600 - 400 = 0).
+    act(() => {
+      capturedHook?.handleScroll();
+    });
+
+    // A streaming append grows the content; the smooth follow has not caught up yet, so the
+    // next scroll event observes a downward-moving scrollTop that is far from the new bottom.
+    scrollHeight.set(1600);
+    act(() => {
+      useChatStore.setState({
+        messages: [...messages, makeMsg('m3', 3)],
+      });
+    });
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+
+    scrollTop.set(500); // intermediate smooth frame: moving down, still 500px above the bottom
+    act(() => {
+      capturedHook?.handleScroll();
+    });
+
+    // The transient not-at-bottom frame must not demote the anchor: the next append still follows.
+    act(() => {
+      useChatStore.setState({
+        messages: [...messages, makeMsg('m3', 3), makeMsg('m4', 4)],
+      });
+    });
+    expect(scrollIntoView).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps bottom anchor on layout-change events when the user is pinned to bottom', async () => {
     const threadId = 'thread-layout-bottom';
     const messages = [makeMsg('m1', 1), makeMsg('m2', 2)];

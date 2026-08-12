@@ -125,7 +125,7 @@ export function PawFeelDutyEditor() {
             <a href="/thread/thread_eval_friction" className="font-mono hover:underline">
               thread_eval_friction
             </a>
-            。24h 后 backup 接管，72h 未处置向 operator 亮红灯。
+            。Primary 持续负责；Backup 仅在显式交接后接班，72h 未处置向 operator 亮红灯。
           </p>
         </div>
         {config ? <span className="text-micro text-cafe-muted">版本 {config.version}</span> : null}

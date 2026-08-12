@@ -10,11 +10,25 @@ export {
   ManifestSlashCommandsSchema,
   slashCommandNameSchema,
 } from './command.schema.js';
+export {
+  CliOutputQuoteSourceSchema,
+  ContextAttachmentContentSchema,
+  ContextAttachmentSchema,
+  ContextAttachmentsSchema,
+  MessageQuoteSourceSchema,
+  QuoteContextAttachmentSchema,
+  QuoteContextSourceSchema,
+  ThreadContextAttachmentSchema,
+  WorkspaceFileContextAttachmentSchema,
+  WorkspaceFileQuoteSourceSchema,
+} from './context-attachment.schema.js';
 export type { SendMessageRequest } from './message.schema.js';
 export {
   CodeContentSchema,
+  FileContentSchema,
   ImageContentSchema,
   MessageContentSchema,
+  MessageContentsSchema,
   MessageSchema,
   MessageSenderSchema,
   MessageStatusSchema,

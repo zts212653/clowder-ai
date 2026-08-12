@@ -43,6 +43,8 @@ export interface CodexAppServerRunInput {
   approvalPolicy?: 'untrusted' | 'on-failure' | 'on-request' | 'never';
   developerInstructions?: string;
   config?: JsonObject;
+  /** F291: omitted inherits Codex config; null explicitly requests Standard. */
+  serviceTier?: string | null;
   imagePaths?: readonly string[];
   signal?: AbortSignal;
   /** Inactivity timeout. Zero keeps the F118 manual-cancel-only default. */

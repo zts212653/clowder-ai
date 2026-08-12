@@ -1,0 +1,318 @@
+close_gate_report:
+  feature_id: F033/issue-1329
+  spec_path: feature-specs/2026-08-11-issue-1329-session-strategy-contract.md
+  canonical_feature_path: docs/features/F033-session-strategy-configurability.md
+  head_sha: 3a306767405d54d0c3ccf967f4130d5049202cf4
+  implementation_sha: ed1df26be6a0
+  substantive_code_sha: 3a306767405d54d0c3ccf967f4130d5049202cf4
+  report_date: 2026-08-11
+  report_stage: pre_pr_quality_gate
+  close_author: "Maine Coon/Yanyan (@cat-eqdvbcxw, model=gpt-5.6-sol)"
+  maintainer_contract:
+    issue: "https://github.com/zts212653/clowder-ai/issues/1329"
+    welcome: "https://github.com/zts212653/clowder-ai/issues/1329#issuecomment-5248213731"
+    base_dependency: "#1209 merged as 83e7bd0cd68a841b7bb8e6d25a439763c8505481"
+    boundary: "#1329 owns the new state/policy/capability contract; no new semantics were backfilled into #1209"
+
+  ac_matrix:
+    - ac_id: INV-1
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/invoke-single-cat.test.js
+          description: "Managed invocation creates and retains session state independently of the legacy toggle and selected policy."
+        - kind: test
+          ref: packages/web/src/components/__tests__/hub-cat-editor.test.tsx
+          description: "The editor remains visible for legacy sessionChain=false members."
+      resolution: null
+
+    - ac_id: INV-2
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/invoke-single-cat.test.js
+          description: "The first managed invocation creates one logical node even when no session_init event arrives."
+      resolution: null
+
+    - ac_id: INV-3
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/session-chain-store.test.js
+          description: "Concurrent in-memory get-or-create calls converge on one active record."
+        - kind: test
+          ref: packages/api/test/redis-session-chain-store.test.js
+          description: "The Redis Lua transition provides the same atomic one-active-record contract."
+      resolution: null
+
+    - ac_id: INV-4
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/config/context-client-capabilities.test.js
+          description: "Capability evaluation returns execution status and never a replacement policy."
+        - kind: test
+          ref: packages/api/test/session-strategy-phase3.test.js
+          description: "Unsupported hybrid and handoff configurations retain the selected strategy."
+      resolution: null
+
+    - ac_id: INV-5
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/session-strategy-phase2.test.js
+          description: "Explicit policy wins over legacy sessionChain=false; the derived migration applies only without explicit policy."
+      resolution: null
+
+    - ac_id: INV-6
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/session-strategy-config-route.test.js
+          description: "PATCH accepts strategy-only writes, rejects legacy sessionChain writes, and does not capability-filter policy intent."
+        - kind: doc
+          ref: feature-specs/2026-08-11-issue-1329-session-strategy-contract.md#state--event-transition-table
+          description: "Dual-read/single-write migration preserves the legacy byte as rollback input."
+      resolution: null
+
+    - ac_id: INV-7
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/invoke-single-cat.test.js
+          description: "Invocation N keeps its immutable revision while a save is first applied to N+1 on the same active session."
+        - kind: test
+          ref: packages/api/test/session-policy-snapshot.test.js
+          description: "Snapshot construction and persistence are invocation-boundary operations."
+      resolution: null
+
+    - ac_id: INV-8
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/config/context-client-capabilities.test.js
+          description: "Dropping any handoff proof dimension returns stable unavailable reasons."
+        - kind: test
+          ref: packages/api/test/invoke-single-cat.test.js
+          description: "Incomplete proof never seals; action requires ceiling, carrier binding, authoritative usage, rotation, and continuity bootstrap on one invocation."
+      resolution: null
+
+    - ac_id: INV-9
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/session-chain-store.test.js
+          description: "Missing lifetime telemetry remains null while an observed zero remains 0."
+        - kind: test
+          ref: packages/web/src/components/__tests__/session-chain-panel.test.ts
+          description: "The Session Chain panel renders unknown and observed zero distinctly."
+      resolution: null
+
+    - ac_id: INV-10
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/session-chain-store.test.js
+          description: "Applying a new policy revision resets hybrid-local progress without consuming lifetime telemetry."
+        - kind: test
+          ref: packages/api/test/redis-session-chain-store.test.js
+          description: "Redis rejects stale revision events and preserves nullable lifetime observation."
+      resolution: null
+
+    - ac_id: INV-11
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/redis-session-chain-store.test.js
+          description: "Concurrent compact events increment atomically and yield one terminal threshold transition."
+        - kind: test
+          ref: packages/api/test/session-hooks-route.test.js
+          description: "The hook requests a seal only for the matching active hybrid epoch."
+      resolution: null
+
+    - ac_id: INV-12
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/route-strategies.test.js
+          description: "Serial and parallel routes share session bootstrap and snapshot semantics."
+        - kind: test
+          ref: packages/api/test/invoke-single-cat.test.js
+          description: "CLI, ACP, and managed external invocations traverse the common invocation snapshot/action path."
+      resolution: null
+
+    - ac_id: INV-13
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/external-runtime-sessions-route.test.js
+          description: "Unmanaged external sessions project unavailable(managed_invocation_boundary) and have no lifecycle action path."
+      resolution: null
+
+    - ac_id: INV-14
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/api/test/invoke-single-cat-turn-execution.test.js
+          description: "invocation_created carries the exact effectiveStrategy snapshot used by child and normal executions."
+        - kind: test
+          ref: packages/api/test/invoke-single-cat.test.js
+          description: "Audit payload contains config, source, revision, changedAt, and execution status."
+      resolution: null
+
+    - ac_id: INV-15
+      status: met
+      evidence:
+        - kind: test
+          ref: packages/web/src/components/__tests__/hub-cat-editor.test.tsx
+          description: "All three policies remain selectable and saving sends only strategy fields with next-invocation copy."
+        - kind: test
+          ref: packages/web/src/components/__tests__/session-chain-panel.test.ts
+          description: "Applied policy, execution status, stable missing reasons, and nullable telemetry remain visible."
+        - kind: test
+          ref: packages/web/src/components/runtime-sessions/__tests__/ExternalRuntimeSessionsPanel.test.tsx
+          description: "External runtime projection exposes policy execution truth rather than hiding unavailable state."
+      resolution: null
+
+  summary:
+    met: 15
+    unmet: 0
+    deleted: 0
+    cvo_signed_off: 0
+
+  verification:
+    - kind: test
+      ref: "API focused matrix: 567/567"
+      head_sha: ed1df26be6a0
+    - kind: test
+      ref: "API sensitive regression matrix: 289/289"
+      head_sha: ed1df26be6a0
+    - kind: test
+      ref: "Shared full suite: 294/294"
+      head_sha: ed1df26be6a0
+    - kind: test
+      ref: "Web focused matrix: 139/139"
+      head_sha: ed1df26be6a0
+    - kind: test
+      ref: "Isolated Redis matrix on port 6388: 41/41"
+      head_sha: ed1df26be6a0
+    - kind: test
+      ref: "pnpm gate code/build/public-test/Biome stages passed; final docs association check exposed and stopped on a missing canonical F033 link"
+      head_sha: 2c7aeb387
+    - kind: test
+      ref: "pnpm check: exit 0"
+      head_sha: dc1ba7df3d394dd4ccd265722b57da20a3597c6c
+    - kind: test
+      ref: "pnpm check:capability-tips: 11/11 and PASS; repository carried 20 unrelated advisory warnings"
+      head_sha: dc1ba7df3d394dd4ccd265722b57da20a3597c6c
+    - kind: test
+      ref: "API and Web production builds: exit 0"
+      head_sha: 2c7aeb387
+    - kind: test
+      ref: "git diff --check: exit 0"
+      head_sha: dc1ba7df3d394dd4ccd265722b57da20a3597c6c
+    - kind: test
+      ref: "Fresh-context impacted matrix: 71/71; Biome and git diff --check passed"
+      head_sha: 3a306767405d54d0c3ccf967f4130d5049202cf4
+
+  fresh_context_review:
+    agent: "Golden Shorthair/Gold (@opencode, deepseek-v4-pro)"
+    reviewed_head_sha: 44fc1a3cc701af68937c9ecffe1313969cdbd101
+    authority: "finding generator only; no formal review verdict"
+    disposition:
+      - finding: FC-1
+        status: fixed
+        ref: 3a306767405d54d0c3ccf967f4130d5049202cf4
+        reason: "Partial Redis result tuples now preserve absent lifetime/hybrid counters instead of manufacturing observed zero."
+      - finding: FC-2
+        status: dismissed
+        reason: "The finding confirms the extracted editor owns its own loading/error/status branches; no missing behavior was identified."
+      - finding: FC-3
+        status: dismissed
+        reason: "A successful save closes the modal; reopening performs a fresh strategy GET, so no user-visible stale statusStrategy path persists."
+      - finding: FC-4
+        status: fixed
+        ref: 3a306767405d54d0c3ccf967f4130d5049202cf4
+        reason: "An explicit managed-boundary test now proves compress remains active with every optional lifecycle capability absent."
+
+  dogfood:
+    environment: "Isolated feature worktree; API 3112, Web 5112, Redis 6388; services stopped after verification."
+    evidence:
+      - "Browser Preview successfully opened the isolated Web surface on port 5112."
+      - "PATCH hybrid returned 200 with runtime_override revision and execution status."
+      - "PATCH with legacy sessionChain returned 400."
+      - "DELETE restored provider/default resolution."
+      - "Direct in-app pointer automation was unavailable because the installed browser control surface exposed no node_repl; responsive component tests cover desktop/narrow structure and status copy."
+
+  user_visibility:
+    - surface: Hub member advanced settings
+      achieved: "Operator can always select handoff, compress, or hybrid and sees when the saved choice first applies."
+      actual: "HubSessionStrategyEditor renders all choices, next-invocation copy, execution status, and stable reason labels even for legacy-disabled members."
+      gap: none
+      disposition: met
+    - surface: Session Chain panel
+      achieved: "Session state remains visible from the first invocation, including unbound one-node chains and honest unknown telemetry."
+      actual: "The panel renders the chain independently of policy/capability and distinguishes unknown from zero."
+      gap: none
+      disposition: met
+    - surface: External runtime sessions
+      achieved: "Managed and unmanaged sessions expose the same policy vocabulary while unmanaged lifecycle action is explicitly unavailable."
+      actual: "The projection displays execution status and managed_invocation_boundary rather than filtering the record."
+      gap: none
+      disposition: met
+
+  contract_drift_check:
+    - contract: "sessionChain legacy byte is migration input, not state visibility"
+      consumers_checked:
+        - packages/api/src/config/cat-config-loader.ts
+        - packages/api/src/domains/cats/services/agents/invocation/invoke-single-cat.ts
+        - packages/api/src/domains/cats/services/agents/routing/route-serial.ts
+        - packages/api/src/domains/cats/services/agents/routing/route-parallel.ts
+        - packages/web/src/components/hub-cat-editor-advanced.tsx
+        - packages/web/src/components/HubCatEditor.tsx
+      result: "No creation, lookup, projection, or UI visibility gate remains coupled to the byte."
+    - contract: "Policy is immutable intent; capability derives execution only"
+      consumers_checked:
+        - packages/api/src/config/session-strategy.ts
+        - packages/api/src/domains/cats/services/agents/context-lifecycle-capability.ts
+        - packages/api/src/domains/cats/services/agents/invocation/session-policy-snapshot.ts
+        - packages/api/src/routes/session-hooks.ts
+        - packages/api/src/routes/session-strategy-config.ts
+      result: "No capability path returns or persists a substitute strategy; actions consume an applied snapshot."
+    - contract: "Unknown lifetime compression telemetry differs from zero and from policy-local progress"
+      consumers_checked:
+        - packages/shared/src/types/session.ts
+        - packages/api/src/domains/cats/services/stores/ports/SessionChainStore.ts
+        - packages/api/src/domains/cats/services/stores/redis/RedisSessionChainStore.ts
+        - packages/web/src/components/SessionChainPanel.tsx
+      result: "Nullable telemetry is preserved end-to-end; hybrid progress is revision-scoped and atomic."
+    - contract: "Managed invocation proof is the sole lifecycle-action authority"
+      consumers_checked:
+        - packages/api/src/domains/cats/services/agents/invocation/invocation-capacity-snapshot.ts
+        - packages/api/src/domains/cats/services/agents/invocation/invoke-single-cat.ts
+        - packages/api/src/routes/external-runtime-sessions.ts
+        - packages/api/src/routes/session-hooks.ts
+      result: "Handoff requires the complete five-part proof; unmanaged external records are read-only unavailable projections."
+
+  architecture_ownership:
+    cell: identity-session
+    map_delta: none
+    rationale: "The change stays within identity/session ownership and does not introduce a subsystem owner. The public export has no check:architecture-ownership command, so this was inspected against the plan and existing cell boundary."
+
+  fallback_audit:
+    result: pass
+    rationale:
+      - "Invocation optional branches represent independent provider/runtime boundaries, not a layered retry chain."
+      - "Store normalization covers legacy/null hydration plus state-transition guards required for data compatibility."
+      - "Hook defaults protect absent legacy snapshots without changing selected policy."
+      - "UI partial/error states fail visibly unavailable and never synthesize active capability."
+
+  harness_feedback:
+    status: none
+    reason: "This is a product/runtime contract implementation; no harness or skill surface changed, no operator dissatisfaction trace was raised, and gate drift was captured in the scoped bug report instead."
+
+  advisory_warnings:
+    - "No .pen design draft exists; the change reuses the existing Hub token/layout system and is behavior-first."
+    - "Direct browser interaction control was unavailable; preview health, API dogfood, and responsive component tests provide the available UI evidence."
+    - "The public export omits check:architecture-ownership; ownership was inspected manually and recorded above."
+    - "The exact-head full pnpm gate did not return exit 0 because its final docs feature-truth stage found the missing F033 association. All earlier code/build/public/Biome stages passed at 2c7aeb387; the canonical F033/tip-only descendants pass the complete pnpm check at dc1ba7df3."

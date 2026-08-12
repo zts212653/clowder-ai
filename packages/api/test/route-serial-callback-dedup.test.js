@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict';
+import { dirname, resolve } from 'node:path';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { catRegistry } from '@cat-cafe/shared';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const REPO_TEMPLATE_PATH = resolve(__dirname, '..', '..', '..', 'cat-template.json');
 
 /**
  * #573: When a cat calls cat_cafe_post_message during an invocation, the callback
@@ -165,6 +171,120 @@ function createMockDeps(services, appendCalls, augmentCalls = []) {
 }
 
 describe('#573: stream store dedup when cat_cafe_post_message used', () => {
+  it('does not re-dispatch a callback-routed source/target through the serial mention worklist', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+    const appendCalls = [];
+    let duplicateTargetInvocations = 0;
+    const callbackBody = '@codex\nCallback already routed this exact source and target.';
+    const callbackService = {
+      async *invoke() {
+        yield { type: 'text', catId: 'opus', content: callbackBody, timestamp: Date.now() };
+        yield {
+          type: 'tool_use',
+          catId: 'opus',
+          toolName: 'cat_cafe_post_message',
+          toolInput: { content: callbackBody, targetCats: ['codex'] },
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'tool_result',
+          catId: 'opus',
+          content: JSON.stringify({ status: 'ok', threadId: 'thread1', messageId: 'callback-source-1' }),
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const duplicateTargetService = {
+      async *invoke() {
+        duplicateTargetInvocations++;
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+    const deps = createMockDeps({ opus: callbackService, codex: duplicateTargetService }, appendCalls);
+    deps.messageStore.getById = async (id) =>
+      id === 'callback-source-1'
+        ? {
+            id,
+            userId: 'user1',
+            catId: 'opus',
+            content: callbackBody,
+            mentions: ['codex'],
+            timestamp: Date.now(),
+            threadId: 'thread1',
+            origin: 'stream',
+          }
+        : null;
+
+    const originalConfigs = catRegistry.getAllConfigs();
+    catRegistry.reset();
+    try {
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(REPO_TEMPLATE_PATH));
+      for (const [id, config] of Object.entries(runtimeConfigs)) catRegistry.register(id, config);
+
+      const yielded = [];
+      for await (const msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1', {
+        parentInvocationId: 'parent-inv-callback-dedup',
+        invocationController: new AbortController(),
+        trackA2ASlot: () => true,
+        queueHasQueuedMessages: () => false,
+        hasQueuedOrActiveAgentForCat: () => false,
+      })) {
+        yielded.push(msg);
+      }
+
+      assert.equal(
+        duplicateTargetInvocations,
+        0,
+        'callback admission is the one carrier; route-serial must not invoke the same source/target again',
+      );
+      assert.equal(
+        yielded.filter((msg) => msg.type === 'a2a_handoff' && msg.targetCatId === 'codex').length,
+        0,
+        'the stale duplicate must not acquire a serial worklist handoff or reach F167 remediation',
+      );
+
+      const failedCallbackService = {
+        async *invoke() {
+          yield { type: 'text', catId: 'opus', content: callbackBody, timestamp: Date.now() };
+          yield {
+            type: 'tool_use',
+            catId: 'opus',
+            toolName: 'cat_cafe_post_message',
+            toolInput: { content: callbackBody, targetCats: ['codex'] },
+            timestamp: Date.now(),
+          };
+          yield {
+            type: 'tool_result',
+            catId: 'opus',
+            content: 'Error: callback token expired',
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        },
+      };
+      const failedDeps = createMockDeps({ opus: failedCallbackService, codex: duplicateTargetService }, appendCalls);
+      for await (const _msg of routeSerial(failedDeps, ['opus'], 'hello', 'user1', 'thread1', {
+        parentInvocationId: 'parent-inv-callback-failed',
+        invocationController: new AbortController(),
+        trackA2ASlot: () => true,
+        queueHasQueuedMessages: () => false,
+        hasQueuedOrActiveAgentForCat: () => false,
+      })) {
+        // drain
+      }
+      assert.equal(
+        duplicateTargetInvocations,
+        1,
+        'failed callback admission must leave the line-start target eligible for the serial carrier',
+      );
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(originalConfigs)) catRegistry.register(id, config);
+    }
+  });
+
   it('skips stream messageStore.append when cat_cafe_post_message was called', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const appendCalls = [];

@@ -82,25 +82,37 @@ class MemoryCoverageStore {
 class MemoryWatermarkStore {
   current;
 
-  async claim(watermark, claimedAt) {
+  async claim(watermark, claimedAt, snapshot) {
     if (!this.current || this.current.watermark !== watermark) {
-      this.current = { watermark, status: 'claimed', updatedAt: claimedAt };
+      this.current = { watermark, status: 'claimed', updatedAt: claimedAt, snapshot };
       return { outcome: 'claimed' };
     }
     if (this.current.status === 'delivered') {
-      return { outcome: 'resume_invocation', messageId: this.current.messageId };
+      return { outcome: 'resume_invocation', watermark: this.current.watermark, messageId: this.current.messageId };
+    }
+    if (this.current.status === 'awaiting_receipt') {
+      return { outcome: 'resume_invocation', watermark: this.current.watermark, messageId: this.current.messageId };
     }
     return { outcome: this.current.status === 'complete' ? 'complete' : 'claimed_elsewhere' };
   }
 
+  async readCurrent() {
+    return this.current ? structuredClone(this.current) : null;
+  }
+
   async markDelivered(watermark, messageId, updatedAt) {
     assert.equal(this.current.watermark, watermark);
-    this.current = { watermark, status: 'delivered', messageId, updatedAt };
+    this.current = { ...this.current, status: 'delivered', messageId, updatedAt };
   }
 
   async markComplete(watermark, updatedAt) {
     assert.equal(this.current.watermark, watermark);
     this.current = { ...this.current, status: 'complete', updatedAt };
+  }
+
+  async markAwaitingReceipt(watermark, updatedAt) {
+    assert.equal(this.current.watermark, watermark);
+    this.current = { ...this.current, status: 'awaiting_receipt', updatedAt };
   }
 }
 
@@ -229,6 +241,11 @@ describe('F278 seven-day capacity contract', () => {
         updatedBy: 'you',
       }),
       watermarkStore,
+      receiptReconciler: {
+        async reconcile() {
+          return { outcome: 'incomplete' };
+        },
+      },
       ownerUserId: 'user-1',
       inboxHref: '/workspace?tab=eval&section=paw-feel',
       now: () => NOW,
@@ -258,11 +275,10 @@ describe('F278 seven-day capacity contract', () => {
       invokeTrigger: { async trigger() {} },
     });
     assert.equal(delivered.length, 1);
-    assert.equal(watermarkStore.current.status, 'complete');
+    assert.equal(watermarkStore.current.status, 'awaiting_receipt');
     const duplicateGate = await task.admission.gate({ taskId: task.id, lastRunAt: 1, tickCount: 2 });
-    assert.deepEqual(duplicateGate, {
-      run: false,
-      reason: 'duty notice watermark already complete',
-    });
+    assert.equal(duplicateGate.run, true);
+    assert.equal(duplicateGate.workItems[0].signal.deliveryRequired, false);
+    assert.equal(duplicateGate.workItems[0].signal.messageId, 'capacity-notice-1');
   });
 });

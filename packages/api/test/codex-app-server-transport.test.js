@@ -304,6 +304,44 @@ test('authoritative terminal result survives a cleanup failure', async () => {
   assert.equal(lifecycle.at(-1).cleanupError, 'cleanup exploded');
 });
 
+test('F291 app-server preserves Fast and explicit Standard on thread start/resume', async () => {
+  for (const testCase of [
+    { thread: { kind: 'start' }, serviceTier: 'fast', expected: 'fast', method: 'thread/start' },
+    {
+      thread: { kind: 'resume', threadId: 'thread-existing' },
+      serviceTier: null,
+      expected: null,
+      method: 'thread/resume',
+    },
+  ]) {
+    const wire = new ProtocolWire();
+    const client = new CodexAppServerClient({ wire });
+    const run = collect(client.run({ prompt: 'work', thread: testCase.thread, serviceTier: testCase.serviceTier }));
+    await waitFor(() => wire.writes.some((message) => message.method === 'turn/start'));
+    const request = wire.writes.find((message) => message.method === testCase.method);
+    assert.equal(Object.hasOwn(request.params, 'serviceTier'), true);
+    assert.equal(request.params.serviceTier, testCase.expected);
+    const threadId = testCase.thread.kind === 'resume' ? testCase.thread.threadId : 'thread-1';
+    wire.inbox.push({
+      method: 'turn/completed',
+      params: { threadId, turn: { id: 'turn-1', status: 'completed' } },
+    });
+    await run;
+  }
+
+  const inheritWire = new ProtocolWire();
+  const inheritClient = new CodexAppServerClient({ wire: inheritWire });
+  const inheritRun = collect(inheritClient.run({ prompt: 'work', thread: { kind: 'start' } }));
+  await waitFor(() => inheritWire.writes.some((message) => message.method === 'turn/start'));
+  const inheritStart = inheritWire.writes.find((message) => message.method === 'thread/start');
+  assert.equal(Object.hasOwn(inheritStart.params, 'serviceTier'), false);
+  inheritWire.inbox.push({
+    method: 'turn/completed',
+    params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+  });
+  await inheritRun;
+});
+
 test('early generator return releases the carrier before cleanup lifecycle can be abandoned', async () => {
   const wire = new ProtocolWire();
   const client = new CodexAppServerClient({ wire });

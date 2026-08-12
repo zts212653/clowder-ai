@@ -7,11 +7,18 @@ import {
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { HumanDispositionKeys } from '../../human-disposition/human-disposition-keys.js';
+import { DeferredPersonMemoryReceiptKeys } from '../deferred-person-memory-redis-contract.js';
 import type {
   HardForgetPersonMemoryProposalInput,
   PersonMemoryProposalForgetResult,
   StoredPersonMemoryCandidate,
 } from './PersonMemoryStore.js';
+import {
+  loadDeferredReceiptSnapshotsForCandidates,
+  planDeferredReceiptSnapshots,
+} from './person-memory-deferred-forget.js';
+import { personMemoryProposalLineageMarker } from './person-memory-delta-lineage.js';
+import type { PersonMemoryCandidateSnapshot } from './person-memory-disposition-forget.js';
 import {
   parseProposalDispositionDecisionReceiptLocator,
   parseProposalDispositionLineageBinding,
@@ -24,11 +31,6 @@ import { PersonMemoryRedisPlan } from './person-memory-redis-plan.js';
 
 const FORGET_FENCE_TTL_MS = 24 * 60 * 60 * 1_000;
 const MAX_LINEAGE_HOPS = 32;
-
-interface CandidateSnapshot {
-  candidate: StoredPersonMemoryCandidate;
-  raw: string;
-}
 
 function candidatePersonId(candidate: StoredPersonMemoryCandidate): string | undefined {
   return candidate.materializedPersonId ?? candidate.targetPersonId;
@@ -64,7 +66,7 @@ async function readCandidate(
   redis: RedisClient,
   ownerUserId: string,
   candidateId: string,
-): Promise<CandidateSnapshot | null> {
+): Promise<PersonMemoryCandidateSnapshot | null> {
   const raw = await redis.get(PersonMemoryKeys.candidate(ownerUserId, candidateId));
   const candidate = parseStoredCandidate(raw);
   return raw && candidate && candidate.ownerUserId === ownerUserId && candidate.candidateId === candidateId
@@ -75,11 +77,11 @@ async function readCandidate(
 async function loadExactLineage(
   redis: RedisClient,
   ownerUserId: string,
-  exact: CandidateSnapshot,
-): Promise<Map<string, CandidateSnapshot> | 'person_bound' | 'conflict'> {
-  const reverse: CandidateSnapshot[] = [];
+  exact: PersonMemoryCandidateSnapshot,
+): Promise<Map<string, PersonMemoryCandidateSnapshot> | 'person_bound' | 'conflict'> {
+  const reverse: PersonMemoryCandidateSnapshot[] = [];
   const seen = new Set<string>();
-  let current: CandidateSnapshot | null = exact;
+  let current: PersonMemoryCandidateSnapshot | null = exact;
   while (current) {
     if (seen.has(current.candidate.candidateId) || reverse.length >= MAX_LINEAGE_HOPS) return 'conflict';
     if (candidatePersonId(current.candidate)) return 'person_bound';
@@ -93,7 +95,7 @@ async function loadExactLineage(
   const root = reverse.at(-1);
   if (!root) return 'conflict';
 
-  const lineage = new Map<string, CandidateSnapshot>();
+  const lineage = new Map<string, PersonMemoryCandidateSnapshot>();
   current = root;
   while (current) {
     if (lineage.has(current.candidate.candidateId) || lineage.size >= MAX_LINEAGE_HOPS) return 'conflict';
@@ -127,7 +129,7 @@ async function planDispositionPurge(
   redis: RedisClient,
   plan: PersonMemoryRedisPlan,
   input: HardForgetPersonMemoryProposalInput,
-  lineage: Map<string, CandidateSnapshot>,
+  lineage: Map<string, PersonMemoryCandidateSnapshot>,
 ): Promise<number> {
   const roots = [...lineage.values()].filter((snapshot) => !snapshot.candidate.replacesProposalId);
   const current = [...lineage.values()].at(-1);
@@ -271,6 +273,8 @@ export async function hardForgetPersonMemoryProposal(
 
   const plan = new PersonMemoryRedisPlan([fenceKey, resultReceiptKey]);
   const dispositionCount = await planDispositionPurge(redis, plan, input, lineage);
+  const deferredReceiptSnapshots = await loadDeferredReceiptSnapshotsForCandidates(redis, input.ownerUserId, lineage);
+  planDeferredReceiptSnapshots(plan, input.ownerUserId, deferredReceiptSnapshots);
   for (const [candidateId, snapshot] of lineage) {
     const candidateKey = PersonMemoryKeys.candidate(input.ownerUserId, candidateId);
     const candidateOwnerKey = PersonMemoryKeys.candidateOwner(candidateId);
@@ -291,9 +295,15 @@ export async function hardForgetPersonMemoryProposal(
     }
     plan.del(PersonMemoryKeys.suppression(input.ownerUserId, candidateId), 'string');
     plan.del(PersonMemoryKeys.candidateDecisions(input.ownerUserId, candidateId), 'set');
+    if (snapshot.candidate.deltaFingerprint && !snapshot.candidate.deferredReceiptId) {
+      const deltaKey = DeferredPersonMemoryReceiptKeys.dedupe(input.ownerUserId, snapshot.candidate.deltaFingerprint);
+      plan.expect(deltaKey, personMemoryProposalLineageMarker(candidateId));
+      plan.del(deltaKey, 'string');
+    }
   }
   const receipt = deletionReceipt(input, 'purged', {
     candidates: lineage.size,
+    deferredReceipts: deferredReceiptSnapshots.size,
     dispositionEntries: dispositionCount,
   });
   return parseFinishResult(

@@ -7,29 +7,14 @@
  * Phase 4-F: 支持多 Variant（多版本猫召唤）
  */
 
-import type { AgyProfileConfig, CatColor, ClientId } from './cat.js';
-import type { CatId } from './ids.js';
-import type { VoiceConfig } from './tts.js';
-
-/**
- * Per-cat context budget configuration.
- * Controls how much history/context is sent to each cat.
- */
-export interface ContextBudget {
-  /** Total prompt token limit (including system prompt + context + user message) */
-  readonly maxPromptTokens: number;
-  /** Maximum tokens for historical context */
-  readonly maxContextTokens: number;
-  /** Maximum number of historical messages to include */
-  readonly maxMessages: number;
-  /** Maximum characters per single message (truncation point) */
-  readonly maxContentLengthPerMsg: number;
-}
-
 /**
  * CLI invocation config for a variant
  */
 import type { CliEffortValue } from '../cli-effort.js';
+import type { CodexSpeedValue } from '../codex-speed.js';
+import type { AgyProfileConfig, CatColor, ClientId } from './cat.js';
+import type { CatId } from './ids.js';
+import type { VoiceConfig } from './tts.js';
 
 export interface CliConfig {
   readonly command: string; // 'claude' | 'codex' | 'agy' | ...
@@ -42,8 +27,6 @@ export interface CliConfig {
    * Defaults: 'max' (claude) / 'xhigh' (codex).
    */
   readonly effort?: CliEffortValue;
-  readonly contextWindow?: number;
-  readonly autoCompactTokenLimit?: number;
   /**
    * Codex-only carrier override (F254 D2): 'exec_json' (one-shot `codex exec`)
    * or 'app_server' (pooled app-server host). Absent = follow the process-level
@@ -51,6 +34,8 @@ export interface CliConfig {
    * API rejects it for other clients.
    */
   readonly carrier?: 'exec_json' | 'app_server';
+  /** F291: Codex OAuth request tier. Absent inherits the Codex user config. */
+  readonly serviceTier?: CodexSpeedValue;
 }
 
 /**
@@ -94,10 +79,18 @@ export interface CatVariant {
   readonly avatar?: string;
   /** F32-b P4c: Override breed-level color for this variant */
   readonly color?: CatColor;
-  /** Per-cat context budget (optional, falls back to defaults) */
-  readonly contextBudget?: ContextBudget;
+  /**
+   * clowder-ai#1208: explicit member-level context window cap (tokens).
+   * Absence / undefined = Auto (trust runtime discovery from CLI / model table).
+   * Positive integer = Manual cap (effective window never exceeds this).
+   * Session lifecycle (handoff/compress/hybrid) is configured separately via
+   * sessionChain + sessionStrategy on the breed features.
+   */
+  readonly contextWindow?: number;
   /** Optional per-variant override for sessionChain; falls back to breed.features.sessionChain. */
   readonly sessionChain?: boolean;
+  /** Explicit member policy intent; takes precedence over the breed strategy. */
+  readonly sessionStrategy?: CatFeatures['sessionStrategy'];
   /** F34: Per-cat TTS voice (optional, falls back to defaults in cat-voices.ts) */
   readonly voiceConfig?: VoiceConfig;
   /** F-Ground-3: Human-readable strengths for teammate roster (overrides breed-level) */
@@ -274,7 +267,7 @@ export interface CoCreatorConfig {
   readonly timeZone?: string;
   /** Optional co-creator avatar shown in Hub and chat surfaces. */
   readonly avatar?: string;
-  /** Optional co-creator palette for Hub/chat surfaces. */
+  /** Optional co-creator palette for Hub and chat surfaces. */
   readonly color?: CatColor;
 }
 
@@ -289,8 +282,8 @@ export interface CatCafeConfigV2 {
   readonly coCreator?: CoCreatorConfig;
   /**
    * @deprecated clowder-ai#340: Accounts moved to global ~/.cat-cafe/accounts.json.
-   * This field is only read during one-time migration (catalog → global).
-   * New code must use catalog-accounts.ts which reads the global file.
+   *  This field is only read during one-time migration (catalog → global).
+   *  New code must use catalog-accounts.ts which reads the global file.
    */
   readonly accounts?: Readonly<Record<string, AccountConfig>>;
 }

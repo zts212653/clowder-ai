@@ -87,7 +87,7 @@ describe('F254 incident registry v1.2', () => {
     assert.equal(decision.kind, 'committed_fresh');
     assert.equal((await closureStore.get(old.id)).status, 'blocked');
     const history = await messageStore.getByThread('thread-1');
-    const nextPeerContext = assembleContext(history, { maxMessages: 20, maxTotalTokens: 4000 });
+    const nextPeerContext = assembleContext(history, { maxTotalTokens: 4000 });
     assert.match(nextPeerContext.contextText, /Fable durable answer visible to Sol/);
     assert.equal(
       history.find((message) => message.id === decision.messageId)?.extra?.stream?.turnInvocationId,

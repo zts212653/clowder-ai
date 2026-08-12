@@ -8,7 +8,14 @@ describe('RedisThreadReadStateStore batch unread projection', () => {
     );
 
     const cursorByKey = new Map([
-      ['read-state:user-1:thread-a', { lastReadMessageId: 'a-1', updatedAt: '1' }],
+      [
+        'read-state:user-1:thread-a',
+        {
+          lastReadMessageId: 'a-1',
+          lastReadVisibilityCursor: 'v2:0000000000000001:a-1',
+          updatedAt: '1',
+        },
+      ],
       ['read-state:user-1:thread-b', { lastReadMessageId: 'b-1', updatedAt: '2' }],
       ['read-state:user-1:thread-c', { lastReadMessageId: 'c-1', updatedAt: '3' }],
     ]);
@@ -51,7 +58,7 @@ describe('RedisThreadReadStateStore batch unread projection', () => {
     assert.equal(projectionCalls.length, 1);
     assert.equal(projectionCalls[0].userId, 'user-1');
     assert.deepEqual(projectionCalls[0].cursors, [
-      { threadId: 'thread-a', afterId: 'a-1' },
+      { threadId: 'thread-a', afterId: 'v2:0000000000000001:a-1' },
       { threadId: 'thread-b', afterId: 'b-1' },
       { threadId: 'thread-c', afterId: 'c-1' },
     ]);

@@ -15,6 +15,14 @@ describe('F276 person-memory telemetry', () => {
       status: 'success',
     });
     assert.doesNotMatch(JSON.stringify(attributes), /personId|candidateId|claimId|messageId|threadId|hash/i);
+    assert.deepEqual(personMemoryMetricAttributes('capture', 'replayed'), {
+      'operation.name': 'person_memory.capture',
+      status: 'replayed',
+    });
+    assert.deepEqual(personMemoryMetricAttributes('deferred_daily', 'not_available'), {
+      'operation.name': 'person_memory.deferred_daily',
+      status: 'not_available',
+    });
   });
 
   it('rejects unknown dimensions and ignores caller identifiers by construction', () => {

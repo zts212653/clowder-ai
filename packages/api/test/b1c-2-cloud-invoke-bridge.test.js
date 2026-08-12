@@ -69,6 +69,7 @@ const baseParams = {
   ],
   calledBy: 'opus-47',
   intent: 'help me',
+  idempotencyKey: 'source-message-123',
 };
 
 describe('F247 AC-B1c-2: dispatch fire-and-forget contract', () => {
@@ -276,9 +277,117 @@ describe('F247 AC-B1c-2: existing binding read + corruption-safe', () => {
   });
 });
 
+describe('F247 Host Adapter: background append without foreground UI takeover', () => {
+  it('prefers append_message for a bound conversation and returns the host message ID', async () => {
+    const existing = 'https://chatgpt.com/c/existing-uuid';
+    const threadStore = makeMockThreadStore({ initialBindings: { 'gpt-pro': existing } });
+    const fallback = makeRecordingFallback();
+    const hostCalls = [];
+    let legacyCalls = 0;
+    const bridge = new CloudInvokeBridge({
+      hostAdapter: {
+        append_message: async (...args) => {
+          hostCalls.push(args);
+          return { hostMessageId: 'host-message-77' };
+        },
+      },
+      pinchTabAdapter: {
+        isReady: async () => true,
+        injectAndCaptureUrl: async () => {
+          legacyCalls += 1;
+          return existing;
+        },
+      },
+      emitFallback: fallback.fn,
+      threadStore,
+    });
+
+    const outcome = await bridge.dispatchInternal(baseParams);
+
+    assert.equal(outcome.kind, 'sent');
+    assert.equal(outcome.hostMessageId, 'host-message-77');
+    assert.equal(outcome.transport, 'host');
+    assert.equal(hostCalls.length, 1);
+    assert.equal(hostCalls[0][0], 'existing-uuid');
+    assert.match(hostCalls[0][1], /help me/);
+    assert.equal(hostCalls[0][2], 'source-message-123');
+    assert.equal(legacyCalls, 0, 'successful host append never drives foreground UI');
+    assert.equal(fallback.calls.length, 0);
+  });
+
+  it('fails closed on host append failure instead of silently taking over PinchTab', async () => {
+    const existing = 'https://chatgpt.com/c/existing-uuid';
+    const threadStore = makeMockThreadStore({ initialBindings: { 'gpt-pro': existing } });
+    const fallback = makeRecordingFallback();
+    let legacyCalls = 0;
+    const bridge = new CloudInvokeBridge({
+      hostAdapter: {
+        append_message: async () => {
+          throw new Error('host rejected append');
+        },
+      },
+      pinchTabAdapter: {
+        isReady: async () => true,
+        injectAndCaptureUrl: async () => {
+          legacyCalls += 1;
+          return existing;
+        },
+      },
+      emitFallback: fallback.fn,
+      threadStore,
+    });
+
+    const outcome = await bridge.dispatchInternal(baseParams);
+
+    assert.equal(outcome.kind, 'error');
+    assert.equal(fallback.calls[0].reason, 'host-append-failed');
+    assert.equal(legacyCalls, 0);
+  });
+
+  it('requires the persisted source message ID and does not use legacy automation when it is absent', async () => {
+    const existing = 'https://chatgpt.com/c/existing-uuid';
+    const threadStore = makeMockThreadStore({ initialBindings: { 'gpt-pro': existing } });
+    const fallback = makeRecordingFallback();
+    let hostCalls = 0;
+    let legacyCalls = 0;
+    const bridge = new CloudInvokeBridge({
+      hostAdapter: {
+        append_message: async () => {
+          hostCalls += 1;
+          return { hostMessageId: 'should-not-exist' };
+        },
+      },
+      pinchTabAdapter: {
+        isReady: async () => true,
+        injectAndCaptureUrl: async () => {
+          legacyCalls += 1;
+          return existing;
+        },
+      },
+      emitFallback: fallback.fn,
+      threadStore,
+    });
+
+    const outcome = await bridge.dispatchInternal({ ...baseParams, idempotencyKey: undefined });
+
+    assert.equal(outcome.kind, 'fallback');
+    assert.equal(outcome.reason, 'missing-idempotency-key');
+    assert.equal(fallback.calls[0].reason, 'missing-idempotency-key');
+    assert.equal(hostCalls, 0);
+    assert.equal(legacyCalls, 0);
+  });
+});
+
 describe('F247 AC-B1c-4: fallback message content', () => {
   it('produces a JSON system_info-shaped block per reason', () => {
-    for (const reason of ['no-adapter', 'adapter-not-ready', 'inject-failed', 'invalid-captured-url']) {
+    for (const reason of [
+      'no-adapter',
+      'adapter-not-ready',
+      'inject-failed',
+      'invalid-captured-url',
+      'host-append-failed',
+      'missing-idempotency-key',
+    ]) {
       const out = buildFallbackMessageContent({ reason, catId: 'gpt-pro', detail: 'why' });
       const parsed = JSON.parse(out);
       assert.equal(parsed.type, 'b1c_bridge_fallback');

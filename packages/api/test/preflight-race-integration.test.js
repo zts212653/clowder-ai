@@ -102,6 +102,9 @@ describe('preflight timeout rescues hung invocation', () => {
   });
 
   it('Pattern A: hanging sessionChainStore.getChain does not block invocation', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    sessionChainStore.getChain = () => new Promise(() => {});
     let serviceCalled = false;
     const stubService = {
       async *invoke() {
@@ -123,10 +126,9 @@ describe('preflight timeout rescues hung invocation', () => {
         store: async () => {},
         delete: async () => {},
       },
-      sessionChainStore: {
-        // Simulates a hung chain store: never resolves
-        getChain: () => new Promise(() => {}),
-      },
+      // Only the resume-chain read hangs. The mandatory logical-node write
+      // path remains available, so the invocation can safely start fresh.
+      sessionChainStore,
       threadStore: null,
       apiUrl: 'http://127.0.0.1:3004',
     };
@@ -145,6 +147,10 @@ describe('preflight timeout rescues hung invocation', () => {
     const elapsed = Date.now() - start;
 
     assert.ok(serviceCalled, 'service.invoke must be called after chain store timeout');
+    assert.ok(
+      sessionChainStore.getActive('opus', 'thread-chain-hang', 'user1'),
+      'the timeout fallback must still establish the required logical session node',
+    );
     assert.ok(elapsed < 5000, `should complete quickly, took ${elapsed}ms`);
   });
 

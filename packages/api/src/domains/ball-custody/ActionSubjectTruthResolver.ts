@@ -40,10 +40,15 @@ export type ActionFreshnessResolution =
 
 /**
  * Narrow snapshot of the PR tracking task that observed a HEAD SHA. Freshness
- * depends on both the observed revision and the tracking lifecycle: a terminal
- * tracker retains its last HEAD for history, but cannot prove a PR is still open.
+ * depends on both the observed revision and the PR lifecycle. A tracking task
+ * reaching `done` only completes the wait/poll lifecycle; its exact observed
+ * HEAD remains durable truth until the snapshot records PR terminal state.
  *
  * The HEAD is server-observed (GitHub API via CI poll), not a cat claim.
+ * Availability tradeoff: if CommunityStore is unavailable and no producer
+ * records a later PR transition, this latest durable observation can lag
+ * GitHub until the next server observation; this fallback does not widen that
+ * pre-existing producer window.
  */
 export interface TrackingFreshnessSnapshot {
   kind: 'work' | 'pr_tracking' | 'issue_tracking';
@@ -90,9 +95,9 @@ function taskEvidenceRef(task: TaskActionSnapshot, state: 'active' | 'done'): st
   return `task:${task.id}:${state}:${task.updatedAt}`;
 }
 
-function activeTrackingHead(snapshot: TrackingFreshnessSnapshot | null): string | null {
+function durableTrackingHead(snapshot: TrackingFreshnessSnapshot | null): string | null {
   if (!snapshot) return null;
-  if (snapshot.kind !== 'pr_tracking' || snapshot.status === 'done') return null;
+  if (snapshot.kind !== 'pr_tracking') return null;
   if (snapshot.ciPrState || snapshot.reviewPrState || snapshot.closedAt !== null) return null;
   return snapshot.headSha;
 }
@@ -294,7 +299,7 @@ export class ActionSubjectTruthResolver {
     // Bridges the gap where ExternalReviewCoordinator hasn't yet seeded the community
     // projection but the CI poll has already observed the HEAD from GitHub.
     if (this.trackingFreshnessProvider) {
-      const trackingHead = activeTrackingHead(await this.trackingFreshnessProvider.getBySubject(predicate.subjectRef));
+      const trackingHead = durableTrackingHead(await this.trackingFreshnessProvider.getBySubject(predicate.subjectRef));
       if (trackingHead) {
         if (trackingHead !== predicate.headSha) {
           return { status: 'mismatch', reason: 'predicate HEAD is not the tracking-observed current HEAD' };

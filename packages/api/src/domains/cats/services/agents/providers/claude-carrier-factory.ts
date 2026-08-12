@@ -191,6 +191,22 @@ export class FallbackCarrierWrapper implements AgentService {
     );
   }
 
+  contextCapability(): import('../../types.js').AgentContextCapability {
+    return (
+      this.carrier.contextCapability?.() ?? {
+        provider: 'anthropic',
+        carrier: this.activeTier,
+        reportsRuntimeWindow: false,
+        authoritativeUsage: false,
+        usageTelemetry: 'unavailable',
+        nativeWindowControl: false,
+        nativeCompressionControl: false,
+        observesCompression: false,
+        reason: 'active Claude carrier did not declare context telemetry',
+      }
+    );
+  }
+
   usesChainKeyResume(): boolean {
     return this.carrier.usesChainKeyResume?.() ?? false;
   }

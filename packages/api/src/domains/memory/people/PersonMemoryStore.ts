@@ -34,11 +34,28 @@ export interface StagePersonMemoryCandidateInput {
   relationshipDraft?: CandidateRelationshipDraft;
   interactionDraft?: CandidateInteractionDraft;
   sourceBundle: PersonMemoryResolvedSourceBundle;
+  deferredReceiptId?: string;
+  deferredReceiptClaimId?: string;
+  deltaFingerprint?: string;
   replacesProposalId?: CaptureCandidateId;
   remainingDraftIds: CandidateClaimDraftId[];
   retention: 'owner_controlled_no_ttl';
   createdAt: number;
 }
+
+export interface RenewDeferredPersonMemoryCandidateClaimInput {
+  ownerUserId: string;
+  candidateId: CaptureCandidateId;
+  receiptId: string;
+  previousClaimId: string;
+  nextClaimId: string;
+  deltaFingerprint: string;
+  renewedAt: number;
+}
+
+export type RenewDeferredPersonMemoryCandidateClaimResult =
+  | { outcome: 'renewed' | 'replayed'; candidate: StoredPersonMemoryCandidate }
+  | { outcome: 'conflict' | 'not_available' };
 
 export interface StoredPersonMemoryCandidate
   extends Omit<StagePersonMemoryCandidateInput, 'personDraft' | 'sourceBundle'> {
@@ -209,6 +226,9 @@ export type PersonAliasResolution =
 
 export interface PersonMemoryStore {
   stageCandidate(input: StagePersonMemoryCandidateInput): Promise<StoredPersonMemoryCandidate>;
+  renewDeferredCandidateClaim(
+    input: RenewDeferredPersonMemoryCandidateClaimInput,
+  ): Promise<RenewDeferredPersonMemoryCandidateClaimResult>;
   getCandidateForOwner(ownerUserId: string, candidateId: string): Promise<StoredPersonMemoryCandidate | null>;
   listPending(ownerUserId: string, limit?: number): Promise<StoredPersonMemoryCandidate[]>;
   resolvePendingCandidateBySubject(ownerUserId: string, subject: string): Promise<StoredPersonMemoryCandidate | null>;

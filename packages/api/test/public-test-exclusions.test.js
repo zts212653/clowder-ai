@@ -42,16 +42,16 @@ const RECONCILED_EXCLUSIONS = [
   'f188-cold-start-fixtures\\.test',
   'f188-harness-consistency\\.test',
   'orphan-chrome-cleaner\\.test',
-  'capabilities-route\\.test',
   'f203-phase-i-opencode-l0\\.test',
   'f236-cc-anchor-hook\\.test',
   'github-schedule-factories\\.test',
   'harness-eval/eval-hub-read-model\\.test',
   'harness-eval/merge-gate-provenance-contract\\.test',
-  'f254-(?:freshness-replay-provider|manual-reminder-scope|provider-native-freshness)\\.test',
+  'f254-(?:freshness-instruction-private-evidence|freshness-replay-provider|manual-reminder-scope|provider-native-freshness)\\.test',
   'harness-eval/eval-hub-(?:lifecycle-summary-route|metric-glossary-coverage|read-model-f248-phase-b2|route)\\.test',
   'harness-eval/(?:friction-measurement-bundle|measurement-bundle-census|measurement-independent-rejudge(?:-adjudication|-judgment)?)\\.test',
   'harness-eval/publish-verdict-(?:capability-wakeup(?:-owner-scope)?|freshness|friction|measurement-validity-gate|memory|pipeline|task-outcome(?:-writeback-guard)?)\\.test',
+  'harness-eval/legacy-reeval-case-(?:hub|migration)\\.test',
 ];
 
 async function listTestFiles(rootDir, relDir = '') {
@@ -83,6 +83,10 @@ test('registry preserves metadata for reconciled exclusions and drops retired on
   assert.equal(registry.version, 1);
   assert.equal(
     registry.entries.some((entry) => entry.match === 'antigravity-cdp-client\\.test'),
+    false,
+  );
+  assert.equal(
+    registry.entries.some((entry) => entry.match === 'capabilities-route\\.test'),
     false,
   );
 
@@ -135,6 +139,7 @@ test('resolver excludes private evidence consumers but keeps self-contained publ
   });
 
   for (const file of [
+    'test/f254-freshness-instruction-private-evidence.test.js',
     'test/f254-freshness-replay-provider.test.js',
     'test/f254-provider-native-freshness.test.js',
     'test/harness-eval/measurement-bundle-census.test.js',
@@ -145,6 +150,7 @@ test('resolver excludes private evidence consumers but keeps self-contained publ
   for (const file of [
     'test/cicd-router.test.js',
     'test/embed-runtime-policy.test.js',
+    'test/f254-freshness-instruction-surface.test.js',
     'test/harness-eval/eval-capability-tips-enable-gate.test.js',
     'test/system-prompt-builder.test.js',
     'test/weixin-mp-path-security.test.js',
@@ -176,6 +182,17 @@ test('focused public selection accepts only explicit files from the live selecte
     () => selectFocusedPublicTestFiles(resolved, 'test/cicd-router.test.js,test/cicd-router.test.js'),
     /duplicate/,
   );
+});
+
+test('resolver re-admits capabilities-route once the product regression is fixed', async () => {
+  const { resolvePublicTestFiles } = await import(resolverModuleUrl);
+  const resolved = await resolvePublicTestFiles({
+    packageRoot,
+    configPath: registryPath,
+  });
+
+  assert.ok(!resolved.excludedFiles.includes('test/capabilities-route.test.js'));
+  assert.ok(resolved.selectedFiles.includes('test/capabilities-route.test.js'));
 });
 
 test('default expiry date helper uses the configured policy timezone rather than UTC', async () => {

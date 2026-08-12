@@ -49,6 +49,12 @@ test('wakeWhen persists primary output when daemon PATH omits bundled rg', async
         task.params = params;
         return true;
       },
+      updateParamsIfCurrent(id, expected, params) {
+        const task = tasks.find((candidate) => candidate.id === id);
+        if (!task || task.params !== expected) return false;
+        task.params = params;
+        return true;
+      },
       setEnabled(id, enabled) {
         const task = tasks.find((candidate) => candidate.id === id);
         if (!task) return false;

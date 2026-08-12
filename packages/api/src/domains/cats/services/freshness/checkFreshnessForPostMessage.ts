@@ -17,6 +17,7 @@ import { freshnessGateForward, freshnessGateHeld } from '../../../../infrastruct
 import { getSourceDisplayName } from '../context/ContextAssembler.js';
 import { cursorFor } from '../stores/cursor.js';
 import type { DeliveryCursorStore } from '../stores/ports/DeliveryCursorStore.js';
+import type { ThreadMessageReadOptions } from '../stores/ports/MessageStore.js';
 import type { FreshnessAttentionEventLog } from './FreshnessAttentionEventLog.js';
 import { type FreshnessDecision, FreshnessGateService, type UnseenMessage } from './FreshnessGateService.js';
 import { decideFreshnessRelevance, type FreshnessRelevanceReason } from './FreshnessRelevancePolicy.js';
@@ -67,6 +68,7 @@ export interface FreshnessMessageReader {
     afterId?: string,
     limit?: number,
     userId?: string,
+    options?: Pick<ThreadMessageReadOptions, 'unresolvedCursorPolicy'>,
   ): FreshnessReadableMessage[] | Promise<FreshnessReadableMessage[]>;
 }
 
@@ -102,34 +104,47 @@ export interface QueuedMessageChecker {
  * the freshness gate.
  *
  * Usage at wiring layer:
- *   queueChecker: invocationQueue ? createQueueChecker(invocationQueue) : undefined
+ *   queueChecker: invocationQueue
+ *     ? createQueueChecker(invocationQueue, { parentInvocationId })
+ *     : undefined
  */
-export function createQueueChecker(queue: {
-  getQueuedFreshnessMessagesForCat(
-    threadId: string,
-    userId: string,
-    catId: string,
-  ): Array<{
-    entryId?: string;
-    source: string;
-    content: string;
-    callerCatId?: string;
-    messageId?: string | null;
-    mergedMessageIds?: string[];
-    sourceCategory?: string;
-  }>;
-}): QueuedMessageChecker {
+export function createQueueChecker(
+  queue: {
+    getQueuedFreshnessMessagesForCat(
+      threadId: string,
+      userId: string,
+      catId: string,
+      opts?: { parentInvocationId?: string },
+    ): Array<{
+      entryId?: string;
+      source: string;
+      content: string;
+      callerCatId?: string;
+      messageId?: string | null;
+      mergedMessageIds?: string[];
+      sourceCategory?: string;
+    }>;
+  },
+  context: {
+    /** Exact active parent whose safe boundary is performing this check. */
+    parentInvocationId: string | undefined;
+  },
+): QueuedMessageChecker {
   return {
     getQueuedForThread(threadId: string, userId: string, catId: string) {
-      return queue.getQueuedFreshnessMessagesForCat(threadId, userId, catId).map((e) => ({
-        ...(e.entryId ? { entryId: e.entryId } : {}),
-        source: e.source,
-        content: e.content,
-        callerCatId: e.callerCatId,
-        ...(e.messageId !== undefined ? { messageId: e.messageId } : {}),
-        ...(e.mergedMessageIds ? { mergedMessageIds: e.mergedMessageIds } : {}),
-        sourceCategory: e.sourceCategory,
-      }));
+      return queue
+        .getQueuedFreshnessMessagesForCat(threadId, userId, catId, {
+          parentInvocationId: context.parentInvocationId,
+        })
+        .map((e) => ({
+          ...(e.entryId ? { entryId: e.entryId } : {}),
+          source: e.source,
+          content: e.content,
+          callerCatId: e.callerCatId,
+          ...(e.messageId !== undefined ? { messageId: e.messageId } : {}),
+          ...(e.mergedMessageIds ? { mergedMessageIds: e.mergedMessageIds } : {}),
+          sourceCategory: e.sourceCategory,
+        }));
     },
   };
 }
@@ -341,7 +356,9 @@ export async function checkFreshnessForPostMessage(input: CheckFreshnessInput): 
   let threadExhausted = false;
 
   while (round < MAX_PAGINATION_ROUNDS) {
-    const batch = await messageStore.getByThreadAfter(threadId, paginationCursor, UNSEEN_FETCH_LIMIT, userId);
+    const batch = await messageStore.getByThreadAfter(threadId, paginationCursor, UNSEEN_FETCH_LIMIT, userId, {
+      unresolvedCursorPolicy: 'empty',
+    });
     if (!batch || batch.length === 0) {
       threadExhausted = true;
       break;

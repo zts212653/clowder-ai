@@ -30,6 +30,7 @@ import type {
   MessageMetadata,
   ToolExecutionPolicy,
 } from '../../types.js';
+import { resolveCurrentContextUsage } from '../../types.js';
 import type { RawArchiveSink } from '../providers/codex-audit-hooks.js';
 import { sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
 import {
@@ -95,6 +96,30 @@ export interface OpenCodeEnvDebugSummary {
   anthropicBaseUrl: string;
   catCafeOcApiKey: string;
   catCafeOcBaseUrl: string;
+}
+
+function isPermanentOpenCodeProviderFailure(event: unknown, reasonCode: string | undefined): boolean {
+  if (typeof event !== 'object' || event === null) return false;
+  const rawError = (event as Record<string, unknown>).error;
+  if (typeof rawError !== 'object' || rawError === null) return false;
+  const data = (rawError as Record<string, unknown>).data;
+  const statusCode =
+    typeof data === 'object' && data !== null && typeof (data as Record<string, unknown>).statusCode === 'number'
+      ? ((data as Record<string, unknown>).statusCode as number)
+      : undefined;
+
+  // These outcomes cannot recover by retrying the same configured invocation.
+  // Deliberately exclude 408/429/5xx: those are transient and OpenCode may
+  // legitimately recover without Clowder AI terminating the process.
+  return (
+    reasonCode === 'model_not_found' ||
+    reasonCode === 'auth_failed' ||
+    reasonCode === 'invalid_config' ||
+    statusCode === 401 ||
+    statusCode === 402 ||
+    statusCode === 403 ||
+    statusCode === 404
+  );
 }
 
 function summarizeDebugValue(value: string | null | undefined): string {
@@ -175,6 +200,20 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
 
   supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
     return policy.mode === 'read_only';
+  }
+
+  contextCapability(): import('../../types.js').AgentContextCapability {
+    return {
+      provider: 'opencode',
+      carrier: 'run_json',
+      reportsRuntimeWindow: false,
+      authoritativeUsage: true,
+      usageTelemetry: 'available',
+      nativeWindowControl: true,
+      nativeCompressionControl: true,
+      observesCompression: false,
+      reason: 'OpenCode reports current turn input; runtime config controls the bound model window',
+    };
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
@@ -286,6 +325,10 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
       // completions per F215 AC-B3. When the assistant emitted a tool_use event the work
       // happened via tools — silent_completion would mislabel a legitimate path.
       let toolUseEmitted = false;
+      // Issue #1208: CodeAgent 3.0 → OpenCode facade may drop token usage in the
+      // translate script. Track whether any event carried usage so we can surface a
+      // persistent visible alert when auto-handoff cannot be guaranteed.
+      let usageTelemetryReceived = false;
 
       for await (const event of events) {
         eventCount++;
@@ -366,6 +409,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
 
         const result = transformOpenCodeEvent(event, this.catId);
         if (result !== null) {
+          let terminateAfterYield = false;
           if (result.type === 'text') textEventCount++;
           if (result.type === 'tool_use') toolUseEmitted = true;
           // F212 Phase A AC-A8: enrich stream `error` event yield with cliDiagnostics so
@@ -386,9 +430,15 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
               },
               'OpenCode CLI returned error event',
             );
-            if (rawError?.data?.message) {
+            const diagnosticText = [
+              rawError?.data?.message ?? rawError?.name,
+              rawError?.data?.statusCode ? `HTTP ${rawError.data.statusCode}` : undefined,
+            ]
+              .filter((value): value is string => Boolean(value))
+              .join('\n');
+            if (diagnosticText) {
               const cliDiagnostics = buildCliDiagnostics({
-                rawText: rawError.data.message,
+                rawText: diagnosticText,
                 debugRef: {
                   command: 'opencode',
                   exitCode: null,
@@ -398,6 +448,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
               });
               yieldMetadata = { ...metadata, cliDiagnostics };
             }
+            terminateAfterYield = isPermanentOpenCodeProviderFailure(event, yieldMetadata.cliDiagnostics?.reasonCode);
             errorAlreadyYielded = true;
           }
           // P2-1: Only emit the first session_init; subsequent step_start events
@@ -414,7 +465,21 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           // invoke-single-cat's F8 token block + F24 contextHealth path can fire.
           const mergedMetadata: MessageMetadata =
             result.metadata?.usage != null ? { ...yieldMetadata, usage: result.metadata.usage } : yieldMetadata;
+          if (result.metadata?.usage != null && resolveCurrentContextUsage(result.metadata.usage) != null) {
+            usageTelemetryReceived = true;
+          }
           yield { ...result, metadata: mergedMetadata };
+          if (terminateAfterYield) {
+            log.warn(
+              {
+                catId: this.catId,
+                invocationId: options?.invocationId,
+                reasonCode: yieldMetadata.cliDiagnostics?.reasonCode,
+              },
+              'Permanent OpenCode provider failure — terminating retrying CLI',
+            );
+            break;
+          }
         }
       }
 
@@ -450,6 +515,29 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
             detail: 'OpenCode CLI 完成但无文字输出（见 cliDiagnostics 详情）',
           }),
           metadata: { ...metadata, cliDiagnostics: silentDiag },
+          timestamp: Date.now(),
+        };
+      }
+
+      // Issue #1208: CodeAgent 3.0 → OpenCode facade translate script may drop
+      // token usage. Without usage, invoke-single-cat's F24 context_health path
+      // cannot compute fillRatio and auto-handoff silently fails. Surface a
+      // persistent visible alert so the user knows automatic handoff is unavailable.
+      // Use type='warning' because it is already in system-info-visible.ts and
+      // route-helpers.ts USER_FACING_SYSTEM_INFO_TYPES, so it formats and persists.
+      if (!usageTelemetryReceived && !errorAlreadyYielded) {
+        log.warn(
+          { catId: this.catId, totalEvents: eventCount, eventTypes: Array.from(uniqueEventTypes) },
+          'OpenCode CLI completed without token usage telemetry — auto-handoff cannot be guaranteed',
+        );
+        yield {
+          type: 'system_info' as const,
+          catId: this.catId,
+          content: JSON.stringify({
+            type: 'warning',
+            message: '当前 opencode/CodeAgent 适配器未返回 token 用量，自动 handoff 无法按上下文比例触发。',
+          }),
+          metadata,
           timestamp: Date.now(),
         };
       }

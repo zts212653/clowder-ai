@@ -5,12 +5,17 @@
 
 import type { CatId, MessageContent, RichBlock, RichBlockBase } from '@cat-cafe/shared';
 import { isCrossThreadProvenance } from '@cat-cafe/shared';
-import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
 import { DEFAULT_HIERARCHICAL_CONTEXT } from '../../../../../config/hierarchical-context-config.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
-import { compareCursors } from '../../stores/cursor.js';
+import { visibilityCursorDeferredBoundaryRejected } from '../../../../../infrastructure/telemetry/instruments.js';
+import {
+  assertCanonicalVisibilityCursor,
+  type CanonicalVisibilityCursor,
+  compareCursors,
+} from '../../stores/cursor.js';
 
 const log = createModuleLogger('context-transport');
+const PROMPT_MESSAGE_SAFETY_CHAR_LIMIT = 100_000;
 
 import { estimateTokens } from '../../../../../utils/token-counter.js';
 import type { MemoryCueOpportunitySeed } from '../../../../memory/cue/MemoryCueInvocationPromptService.js';
@@ -18,19 +23,20 @@ import type { NudgeProcessResult } from '../../../../memory/EntityNudgeService.j
 import { buildMessageMap, formatMessage } from '../../context/ContextAssembler.js';
 import { BRIEFING_TIMEZONE } from '../../duty-briefing/constants.js';
 import { formatPromptTime } from '../../format-time.js';
-import { checkContextBudget, type DegradationResult } from '../../orchestration/DegradationPolicy.js';
+import type { DegradationResult } from '../../orchestration/DegradationPolicy.js';
 import { cursorFor } from '../../stores/cursor.js';
 import { DeliveryCursorStore } from '../../stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../../stores/ports/DraftStore.js';
 import type { IMessageStore, StoredMessage, StoredToolEvent } from '../../stores/ports/MessageStore.js';
 import type { Thread } from '../../stores/ports/ThreadStore.js';
-import { canViewMessage, resolveVisibleReplyParent } from '../../stores/visibility.js';
+import { canViewMessage, isTimelinePublished, resolveVisibleReplyParent } from '../../stores/visibility.js';
 import type { AgentMessage, AgentService, ToolExecutionPolicy } from '../../types.js';
 import type { InvocationTracker } from '../invocation/InvocationTracker.js';
 import type { InvocationDeps } from '../invocation/invoke-single-cat.js';
 import type { OwnerAuthProvenance } from '../invocation/owner-auth-provenance.js';
 import { extractRecentArtifacts, mergeLedger } from './artifact-tracking.js';
-import type { CoverageMap } from './context-transport.js';
+import { appendContextAttachmentsToPrompt } from './context-attachment-prompt.js';
+import type { CoverageMap, ScoredMessage } from './context-transport.js';
 import {
   buildCoverageMap,
   buildTombstone,
@@ -49,28 +55,28 @@ import { rankArtifactSources } from './source-ranking.js';
 /**
  * P1 R7 fix: Shared pure helper for context budget calculation.
  * Used by both route-serial and route-parallel in incremental + legacy paths.
- * Formula: min(max(0, maxPromptTokens - systemTokens - promptTokens - nudgeTokens - RESERVED), maxContextTokens)
+ * Formula: min(max(0, inputCeiling - fixed tokens - reserve), history ceiling)
  *
  * The 200-token RESERVED accounts for formatting overhead (separators, tags, padding).
  */
 export const BUDGET_RESERVED_TOKENS = 200;
 
 export function computeContextBudget(params: {
-  maxPromptTokens: number;
-  maxContextTokens: number;
+  inputCeilingTokens: number;
+  historyTokenCeiling: number;
   systemPartsTokens: number;
   promptTokens: number;
   nudgeTokens: number;
 }): number {
   const remaining = Math.max(
     0,
-    params.maxPromptTokens -
+    params.inputCeilingTokens -
       params.systemPartsTokens -
       params.promptTokens -
       params.nudgeTokens -
       BUDGET_RESERVED_TOKENS,
   );
-  return Math.min(remaining, params.maxContextTokens);
+  return Math.min(remaining, params.historyTokenCeiling);
 }
 
 /** Minimal broadcast interface — avoids coupling routing layer to SocketManager concrete class */
@@ -146,6 +152,68 @@ export interface PersistenceContext {
   persistedOutputMessageIds?: string[];
 }
 
+/** One persisted Queue body and the blocks that belong to that exact message id. */
+export interface PersistedPromptMessage {
+  messageId: string;
+  content: string;
+  contentBlocks?: readonly MessageContent[] | undefined;
+}
+
+/**
+ * Resolve one server-owned A2A trigger into the existing hydrated prompt path.
+ * The exact-id lookup is never authority to bypass thread, publication, or
+ * whisper visibility constraints.
+ */
+export async function hydrateVisibleA2ATriggerPromptMessage(
+  deps: RouteStrategyDeps,
+  triggerMessageId: string | undefined,
+  threadId: string,
+  catId: CatId,
+  thinkingMode: 'debug' | 'play',
+): Promise<PersistedPromptMessage | undefined> {
+  if (!triggerMessageId) return undefined;
+  let message: StoredMessage | null;
+  try {
+    message = await deps.messageStore.getById(triggerMessageId);
+  } catch (err) {
+    log.warn({ err, threadId, catId: catId as string }, 'A2A trigger hydration failed');
+    return undefined;
+  }
+  if (
+    !message ||
+    message.threadId !== threadId ||
+    message.deletedAt ||
+    message._tombstone ||
+    message.userId === 'system' ||
+    message.origin === 'briefing' ||
+    message.catId === null ||
+    message.catId === catId ||
+    !isTimelinePublished(message)
+  ) {
+    return undefined;
+  }
+  const viewer = thinkingMode === 'play' ? { type: 'cat' as const, catId } : { type: 'user' as const };
+  if (!canViewMessage(message, viewer)) return undefined;
+  return {
+    messageId: message.id,
+    content: message.content,
+    ...(message.contentBlocks ? { contentBlocks: message.contentBlocks } : {}),
+  };
+}
+
+/** Preserve the caller-hydrated queue order and append the exact trigger once. */
+export function mergePersistedPromptMessages(
+  persistedPromptMessages: readonly PersistedPromptMessage[] | undefined,
+  exactTrigger: PersistedPromptMessage | undefined,
+): readonly PersistedPromptMessage[] | undefined {
+  if (!exactTrigger) return persistedPromptMessages;
+  if (persistedPromptMessages?.some((message) => message.messageId === exactTrigger.messageId)) {
+    return persistedPromptMessages;
+  }
+  if (!persistedPromptMessages) return [exactTrigger];
+  return [...persistedPromptMessages, exactTrigger];
+}
+
 /** Common options for both strategies */
 export interface RouteOptions {
   /** Authentication-grade owner provenance propagated unchanged to every child invocation. */
@@ -175,8 +243,10 @@ export interface RouteOptions {
   history?: StoredMessage[] | undefined;
   /** Current user message ID (enables exact incremental context delivery path) */
   currentUserMessageId?: string | undefined;
-  /** Persisted bodies already folded into the caller-provided raw message (Queue merge/batch). */
+  /** Intended persisted Queue members folded into the caller's aggregate input; never receipt evidence. */
   persistedPromptMessageIds?: readonly string[] | undefined;
+  /** Authoritative successfully hydrated Queue subset; an explicit empty array means no member hydrated. */
+  persistedPromptMessages?: readonly PersistedPromptMessage[] | undefined;
   /** Explicit A2A trigger message ID for queue-dispatched initial targets. */
   a2aTriggerMessageId?: string | undefined;
   /** Max A2A chain depth for routeSerial (default: MAX_A2A_DEPTH env or 2) */
@@ -426,9 +496,28 @@ export function createA2ASlotTrackingBridge(
   };
 }
 
+function canonicalDeferredBoundary(
+  candidate: string | undefined,
+  source: string,
+): CanonicalVisibilityCursor | undefined {
+  if (!candidate) return undefined;
+  try {
+    assertCanonicalVisibilityCursor(candidate, `incremental-context:${source}`);
+    return candidate;
+  } catch (err) {
+    // Fail at the producer boundary without aborting the route. No canonical
+    // evidence means this invocation must not mutate the deferred durable slot.
+    visibilityCursorDeferredBoundaryRejected.add(1);
+    log.error({ err, source }, 'Omitting non-canonical deferred delivery boundary');
+    return undefined;
+  }
+}
+
 export interface IncrementalContextResult {
   contextText: string;
-  boundaryId?: string;
+  boundaryId?: CanonicalVisibilityCursor;
+  /** Message ids with a retained per-message safe projection in the final prompt. */
+  projectedMessageIds: string[];
   /** Message bodies present in full after all visibility, count, token, and per-message trims. */
   exposedMessageIds: string[];
   includesCurrentUserMessage: boolean;
@@ -463,18 +552,96 @@ export interface IncrementalContextResult {
  * - append when the current message is genuinely absent from unseen history
  * - do NOT append when the message was filtered out for privacy
  *
- * Defensive guard:
- * some smart-window / metadata paths can still surface the current message ID
- * inside `contextText` even when `includesCurrentUserMessage` is false.
- * In that case, appending the raw message would duplicate it in the same prompt.
+ * Delivery is derived only from structural ownership. `contextText` also carries
+ * attachment provenance and other metadata, so an arbitrary id substring cannot
+ * prove that a message body was exposed.
  */
 export function shouldAppendExplicitCurrentMessage(
-  inc: Pick<IncrementalContextResult, 'contextText' | 'includesCurrentUserMessage' | 'currentMessageFilteredOut'>,
+  inc: Pick<
+    IncrementalContextResult,
+    'projectedMessageIds' | 'includesCurrentUserMessage' | 'currentMessageFilteredOut'
+  >,
   currentUserMessageId: string | undefined,
 ): boolean {
   if (inc.includesCurrentUserMessage || inc.currentMessageFilteredOut) return false;
-  if (currentUserMessageId && inc.contextText.includes(currentUserMessageId)) return false;
-  return true;
+  return !currentUserMessageId || !inc.projectedMessageIds.includes(currentUserMessageId);
+}
+
+export interface ExplicitIncrementalPromptProjection {
+  text?: string;
+  /** Persisted ids represented by this explicit safe projection. */
+  projectedMessageIds: string[];
+  /** Strict subset whose complete model-facing body survived unchanged. */
+  exposedMessageIds: string[];
+}
+
+function emptyExplicitPromptProjection(): ExplicitIncrementalPromptProjection {
+  return { projectedMessageIds: [], exposedMessageIds: [] };
+}
+
+function projectLegacyIncrementalFallback(
+  inc: Pick<
+    IncrementalContextResult,
+    'projectedMessageIds' | 'includesCurrentUserMessage' | 'currentMessageFilteredOut'
+  >,
+  fallbackMessage: string,
+  currentUserMessageId: string | undefined,
+): ExplicitIncrementalPromptProjection {
+  if (!shouldAppendExplicitCurrentMessage(inc, currentUserMessageId)) return emptyExplicitPromptProjection();
+  const safeBody = sanitizeInjectedContent(fallbackMessage);
+  if (!safeBody) return emptyExplicitPromptProjection();
+  const projectedMessageIds = currentUserMessageId ? [currentUserMessageId] : [];
+  return {
+    text: safeBody,
+    projectedMessageIds,
+    exposedMessageIds: safeBody === fallbackMessage ? projectedMessageIds : [],
+  };
+}
+
+function projectHydratedPromptMessages(
+  alreadyProjectedMessageIds: readonly string[],
+  persistedPromptMessages: readonly PersistedPromptMessage[],
+): ExplicitIncrementalPromptProjection {
+  const safelyProjectedIds = new Set(alreadyProjectedMessageIds);
+  const pieces: string[] = [];
+  const projectedMessageIds: string[] = [];
+  const exposedMessageIds: string[] = [];
+  for (const { messageId, content, contentBlocks } of persistedPromptMessages) {
+    if (safelyProjectedIds.has(messageId)) continue;
+    const persistedBody = appendContextAttachmentsToPrompt(content, contentBlocks);
+    const safeBody = sanitizeInjectedContent(persistedBody);
+    if (!safeBody) continue;
+    pieces.push(safeBody);
+    projectedMessageIds.push(messageId);
+    if (safeBody === persistedBody) exposedMessageIds.push(messageId);
+  }
+  return {
+    ...(pieces.length > 0 ? { text: pieces.join('\n') } : {}),
+    projectedMessageIds,
+    exposedMessageIds,
+  };
+}
+
+/**
+ * Project only persisted Queue bodies that incremental history did not already
+ * safely project. Exact exposure is deliberately separate from safe projection:
+ * altered content prevents durable receipt but must also prevent a later raw
+ * fallback from bypassing the sanitizer.
+ */
+export function explicitPromptForIncrementalContext(
+  inc: Pick<
+    IncrementalContextResult,
+    'projectedMessageIds' | 'includesCurrentUserMessage' | 'currentMessageFilteredOut'
+  >,
+  fallbackMessage: string,
+  currentUserMessageId: string | undefined,
+  persistedPromptMessages: readonly PersistedPromptMessage[] | undefined,
+): ExplicitIncrementalPromptProjection {
+  if (inc.currentMessageFilteredOut) return emptyExplicitPromptProjection();
+  if (persistedPromptMessages === undefined) {
+    return projectLegacyIncrementalFallback(inc, fallbackMessage, currentUserMessageId);
+  }
+  return projectHydratedPromptMessages(inc.projectedMessageIds, persistedPromptMessages);
 }
 
 /**
@@ -499,12 +666,16 @@ export function collectExactPromptMessageIds(...groups: ReadonlyArray<ReadonlyAr
  * observe fewer relevant messages and produce an older boundary; this helper
  * prevents regressing the deferred ack boundary.
  *
- * #1200 P2-3: uses compareCursors for pair-domain comparison instead of raw lex `>`.
- * Both v2-v2 and v1-v1 comparisons are correct; cross-format returns 0 (no-advance)
- * which is safe — new writes should be canonicalized to v2 by the cursor store.
+ * #1200/#3444 A3: this is a canonical visibility slot. Reject raw IDs before
+ * comparison so compareCursors' cross-format `0` cannot silently freeze a
+ * deferred ACK boundary.
  */
 export function upsertMaxBoundary(cursorBoundaries: Map<string, string>, catId: string, boundaryId: string): void {
+  assertCanonicalVisibilityCursor(boundaryId, 'deferred-delivery-boundary');
   const current = cursorBoundaries.get(catId);
+  if (current) {
+    assertCanonicalVisibilityCursor(current, 'deferred-delivery-boundary:existing');
+  }
   if (!current || compareCursors(boundaryId, current) > 0) {
     cursorBoundaries.set(catId, boundaryId);
   }
@@ -554,23 +725,13 @@ export function shouldHandleOfferedGuide(
   return false;
 }
 
-export function detectContextDegradation(
-  historyCount: number,
-  includedCount: number,
-  budget: ReturnType<typeof getCatContextBudget>,
-): DegradationResult | null {
-  // Existing count-based degradation logic
-  const byCount = checkContextBudget(historyCount, budget);
-  if (byCount.degraded) return byCount;
-
-  // Additional char-budget degradation: history count is within budget, but content still got truncated.
-  const maxCountCandidate = Math.min(historyCount, budget.maxMessages);
-  if (includedCount < maxCountCandidate) {
+export function detectContextDegradation(historyCount: number, includedCount: number): DegradationResult | null {
+  if (includedCount < historyCount) {
     return {
       degraded: true,
       strategy: 'truncated',
-      reason: `Token 预算限制，历史从 ${maxCountCandidate} 条截断到 ${includedCount} 条`,
-      adjustedMaxMessages: includedCount,
+      reason: `Token 预算限制，历史从 ${historyCount} 条截断到 ${includedCount} 条`,
+      includedMessages: includedCount,
     };
   }
 
@@ -914,9 +1075,10 @@ function digestRichBlock(b: RichBlock): string {
 }
 
 export function digestRichBlocks(msg: StoredMessage): string {
-  if (!msg.extra?.rich?.blocks?.length) return msg.content;
+  const contextAwareContent = appendContextAttachmentsToPrompt(msg.content, msg.contentBlocks);
+  if (!msg.extra?.rich?.blocks?.length) return contextAwareContent;
   const digests = msg.extra.rich.blocks.map(digestRichBlock);
-  return `${msg.content}\n${digests.join(' ')}`;
+  return `${contextAwareContent}\n${digests.join(' ')}`;
 }
 
 function exactBodyMessageIds(messages: readonly StoredMessage[], truncateLimit: number): string[] {
@@ -941,6 +1103,27 @@ function exactBodyMessageIdsAfterToolScrub(
   );
 }
 
+/**
+ * Count a smart-window anchor as exact body exposure only when its projected
+ * model-facing body survived sanitization and truncation unchanged.
+ */
+function exactAnchorBodyMessageIds(
+  originalMessages: readonly StoredMessage[],
+  retainedAnchors: readonly ScoredMessage[],
+  truncateLimit: number,
+): string[] {
+  const originalById = new Map(originalMessages.map((message) => [message.id, message]));
+  return retainedAnchors
+    .filter(({ message }) => {
+      const original = originalById.get(message.id);
+      if (!original) return false;
+      const persistedBody = digestRichBlocks(original);
+      const injectedBody = sanitizeInjectedContent(persistedBody);
+      return message.content === injectedBody && injectedBody === persistedBody && injectedBody.length <= truncateLimit;
+    })
+    .map(({ message }) => message.id);
+}
+
 export async function fetchAfterCursor(
   messageStore: IMessageStore,
   threadId: string,
@@ -953,9 +1136,9 @@ export async function fetchAfterCursor(
 /** Options for caller-specified budget overrides */
 export interface IncrementalContextOptions {
   /**
-   * When provided, overrides budget.maxContextTokens for the token-trim pass.
+   * Invocation-owned history ceiling for the token-trim pass.
    * The routing layer should calculate this as:
-   *   maxPromptTokens - systemPartsTokens - messageTokens - guard
+   *   invocation input ceiling - fixed prompt tokens - guard
    * so the assembled context + system parts never exceed the model's input limit.
    */
   effectiveMaxContextTokens?: number;
@@ -964,6 +1147,10 @@ export interface IncrementalContextOptions {
   threadTitle?: string;
   /** Invocation wall-clock for stale-age rendering in prompt timestamps. */
   nowMs?: number;
+  /** Route-scoped deferred boundary from an earlier invocation of this same cat. */
+  cursorOverlay?: string;
+  /** The one server-owned A2A stream message allowed through play-mode isolation. */
+  exactA2ATriggerMessageId?: string;
 }
 
 async function resolveRecentFilesTouched(
@@ -980,7 +1167,7 @@ async function resolveRecentFilesTouched(
   if (!sessionChainStore || !transcriptWriter) return [];
 
   try {
-    const activeSession = await Promise.resolve(sessionChainStore.getActive(catId, threadId));
+    const activeSession = await Promise.resolve(sessionChainStore.getActive(catId, threadId, userId));
     if (activeSession?.userId === userId) {
       return transcriptWriter.getFilesTouched(activeSession.id, { threadId, catId });
     }
@@ -1009,17 +1196,44 @@ export async function assembleIncrementalContext(
   if (!deps.deliveryCursorStore) {
     return {
       contextText: '',
+      projectedMessageIds: [],
       exposedMessageIds: [],
       includesCurrentUserMessage: false,
       currentMessageFilteredOut: false,
     };
   }
 
-  const cursor = await deps.deliveryCursorStore.getCursor(userId, catId, threadId);
+  const durableCursor = await deps.deliveryCursorStore.getCursor(userId, catId, threadId);
+  const overlayCursor = options?.cursorOverlay;
+  if (overlayCursor) {
+    assertCanonicalVisibilityCursor(overlayCursor, 'incremental-context:cursor-overlay');
+  }
+  let cursor = durableCursor;
+  if (overlayCursor) {
+    if (!durableCursor) {
+      cursor = overlayCursor;
+    } else {
+      try {
+        assertCanonicalVisibilityCursor(durableCursor, 'incremental-context:durable-read');
+        cursor = compareCursors(overlayCursor, durableCursor) > 0 ? overlayCursor : durableCursor;
+      } catch (err) {
+        // The overlay was produced after reading this durable slot earlier in
+        // the same route. If a legacy/raw durable value cannot be compared in
+        // the canonical domain, prefer the proven in-flight boundary; replay
+        // remains at-least-once after a crash because the overlay is ephemeral.
+        log.warn(
+          { err, catId: catId as string, threadId },
+          'Using canonical cursor overlay over unresolved durable read',
+        );
+        cursor = overlayCursor;
+      }
+    }
+  }
   const unseen = await fetchAfterCursor(deps.messageStore, threadId, cursor, userId);
 
   // Debug mode: cats see all whispers (full transparency). Play mode: cats only see their own whispers.
-  const viewer = (thinkingMode ?? 'play') === 'play' ? { type: 'cat' as const, catId } : { type: 'user' as const };
+  const playMode = thinkingMode !== 'debug';
+  const viewer = playMode ? { type: 'cat' as const, catId } : { type: 'user' as const };
   const relevant = unseen.filter((m) => {
     // System-generated messages (persisted error badges) are display-only — never enter prompt
     if (m.userId === 'system') return false;
@@ -1034,7 +1248,8 @@ export async function assembleIncrementalContext(
     // In play mode, hide other cats' stream (thinking) messages.
     // Legacy messages (no origin) are visible for backward compatibility —
     // all new writes are tagged, so untagged = legacy callback data.
-    if ((thinkingMode ?? 'play') === 'play' && m.catId !== null && m.origin === 'stream') return false;
+    if (playMode && m.catId !== null && m.origin === 'stream' && m.id !== options?.exactA2ATriggerMessageId)
+      return false;
     return true;
   });
 
@@ -1161,11 +1376,8 @@ export async function assembleIncrementalContext(
 
   // --- Warm path: existing behavior unchanged ---
 
-  // GAP-1: Unconditional budget cap — protects both first-time cats (cursor=undefined)
-  // and stale cursor scenarios where large unseen batches accumulate.
-  const budget = getCatContextBudget(catId as string);
-  const wasCapped = relevant.length > budget.maxMessages;
-  const capped = wasCapped ? relevant.slice(-budget.maxMessages) : relevant;
+  // Smart Window owns message selection; invocation capacity owns token trimming.
+  const capped = relevant;
 
   // Metadata must be based on the FINAL capped set, not pre-cap `relevant`
   const includesCurrentUserMessage = Boolean(currentUserMessageId && capped.some((m) => m.id === currentUserMessageId));
@@ -1174,7 +1386,8 @@ export async function assembleIncrementalContext(
     return cursor
       ? {
           contextText: navigationHeader,
-          boundaryId: cursor,
+          boundaryId: canonicalDeferredBoundary(cursor, 'warm-empty-cursor'),
+          projectedMessageIds: [],
           exposedMessageIds: [],
           includesCurrentUserMessage,
           currentMessageFilteredOut,
@@ -1182,6 +1395,7 @@ export async function assembleIncrementalContext(
         }
       : {
           contextText: navigationHeader,
+          projectedMessageIds: [],
           exposedMessageIds: [],
           includesCurrentUserMessage,
           currentMessageFilteredOut,
@@ -1189,7 +1403,7 @@ export async function assembleIncrementalContext(
         };
   }
 
-  const truncateLimit = budget.maxContentLengthPerMsg;
+  const truncateLimit = PROMPT_MESSAGE_SAFETY_CHAR_LIMIT;
   // #699: Build map from full relevant set for inline reply-to preview.
   // Cursor gap fix: messages replying to older content (before cursor) need
   // a targeted fetch so the inline preview can resolve the parent.
@@ -1237,20 +1451,24 @@ export async function assembleIncrementalContext(
   });
 
   // 第二刀: Aggregate token budget — trim oldest lines until within effective token limit.
-  // A+ fix: routing layer can pass effectiveMaxContextTokens (= maxPromptTokens minus system parts)
+  // The routing layer passes the history share of the invocation-owned input ceiling.
   // to prevent the assembled context + system prompt from exceeding the model's input limit.
-  const effectiveTokenBudget = options?.effectiveMaxContextTokens ?? budget.maxContextTokens;
+  const effectiveTokenBudget = options?.effectiveMaxContextTokens ?? 0;
 
   // effectiveMaxContextTokens === 0 means system parts already exhausted the entire prompt budget.
   // Return empty context with degradation rather than skipping the trim (old behavior of `> 0` guard).
   if (effectiveTokenBudget <= 0) {
     const zeroBudgetDegradation = `⚠️ 增量上下文预算耗尽: 系统提示已占满 prompt 预算，${capped.length} 条未读消息全部丢弃`;
-    // #1200: v2 cursor for CAS ingress — graded: v2 when visibilitySeq present, v1 fallback otherwise
+    // #1200/#3444: only canonical evidence may enter the deferred ACK slot.
     const zeroLastMsg = capped[capped.length - 1];
-    const zeroBoundaryId = zeroLastMsg ? cursorFor(zeroLastMsg) : undefined;
+    const zeroBoundaryId = canonicalDeferredBoundary(
+      zeroLastMsg ? cursorFor(zeroLastMsg) : undefined,
+      'warm-zero-budget-tail',
+    );
     return {
       contextText: navigationHeader,
       boundaryId: zeroBoundaryId,
+      projectedMessageIds: [],
       exposedMessageIds: [],
       includesCurrentUserMessage: false,
       currentMessageFilteredOut,
@@ -1293,7 +1511,8 @@ export async function assembleIncrementalContext(
     return cursor
       ? {
           contextText: navigationHeader,
-          boundaryId: cursor,
+          boundaryId: canonicalDeferredBoundary(cursor, 'warm-trimmed-empty-cursor'),
+          projectedMessageIds: [],
           exposedMessageIds: [],
           includesCurrentUserMessage: false,
           currentMessageFilteredOut,
@@ -1301,6 +1520,7 @@ export async function assembleIncrementalContext(
         }
       : {
           contextText: navigationHeader,
+          projectedMessageIds: [],
           exposedMessageIds: [],
           includesCurrentUserMessage: false,
           currentMessageFilteredOut,
@@ -1309,20 +1529,21 @@ export async function assembleIncrementalContext(
   }
 
   let degradation: string | undefined;
-  if (wasCapped && tokenTrimmed) {
-    degradation = `⚠️ 增量上下文已截断: 未读消息 ${relevant.length} 条经 maxMessages(${budget.maxMessages}) 和 token 预算(${effectiveTokenBudget}) 双重截断，已保留最近 ${finalCapped.length} 条`;
-  } else if (wasCapped) {
-    degradation = `⚠️ 增量上下文已截断: 未读消息 ${relevant.length} 条超出预算 ${budget.maxMessages}，已保留最近 ${finalCapped.length} 条`;
-  } else if (tokenTrimmed) {
+  if (tokenTrimmed) {
     degradation = `⚠️ 增量上下文 token 预算截断: ${capped.length} 条消息超出 token 预算(${effectiveTokenBudget})，已保留最近 ${finalCapped.length} 条`;
   }
 
-  // #1200: v2 cursor for CAS ingress — graded issuance via cursorFor
+  // #1200/#3444: cursorFor remains graded for general consumers; this producer
+  // admits only the canonical branch into deferred delivery state.
   const lastCappedMsg = finalCapped[finalCapped.length - 1];
-  const boundaryId = lastCappedMsg ? cursorFor(lastCappedMsg) : undefined;
+  const boundaryId = canonicalDeferredBoundary(
+    lastCappedMsg ? cursorFor(lastCappedMsg) : undefined,
+    'warm-visible-tail',
+  );
   return {
     contextText: `${navigationHeader}\n[对话历史增量 - 未发送过 ${finalCapped.length} 条]\n${finalLines.join('\n')}\n[/对话历史]`,
     boundaryId,
+    projectedMessageIds: finalCapped.map((message) => message.id),
     exposedMessageIds: exactBodyMessageIds(finalCapped, truncateLimit),
     includesCurrentUserMessage: finalIncludesCurrentUserMessage,
     currentMessageFilteredOut,
@@ -1353,8 +1574,7 @@ async function assembleSmartWindowContext(
   preReadStoredArtifacts: import('./artifact-tracking.js').RecentArtifact[],
   viewer: { type: 'cat'; catId: CatId } | { type: 'user' },
 ): Promise<IncrementalContextResult> {
-  const budget = getCatContextBudget(catId as string);
-  const truncateLimit = budget.maxContentLengthPerMsg;
+  const truncateLimit = PROMPT_MESSAGE_SAFETY_CHAR_LIMIT;
 
   // 1. Burst detection
   const { burst, omitted } = detectRecentBurst(relevant, hcConfig);
@@ -1411,7 +1631,19 @@ async function assembleSmartWindowContext(
     .split(/[^a-zA-Z0-9\u4e00-\u9fff]+/)
     .filter((w) => w.length >= 3);
   const anchors = selectAnchors(sanitizedOmitted, compositeQueryTerms, hcConfig.maxAnchors);
-  const anchorLines = formatAnchors(anchors, truncateLimit);
+  const omittedById = new Map(omitted.map((message) => [message.id, message]));
+  const promptAnchors = anchors.map((anchor) => {
+    const original = omittedById.get(anchor.message.id);
+    if (!original) return anchor;
+    return {
+      ...anchor,
+      message: {
+        ...anchor.message,
+        content: sanitizeInjectedContent(digestRichBlocks(original)),
+      },
+    };
+  });
+  const anchorLines = formatAnchors(promptAnchors, truncateLimit);
 
   // 3.7 Phase D: Fetch thread memory (fail-open)
   let threadMemorySummary = '';
@@ -1549,15 +1781,20 @@ async function assembleSmartWindowContext(
   });
 
   // 7. Respect effectiveMaxContextTokens (same as warm path)
-  const effectiveTokenBudget = options?.effectiveMaxContextTokens ?? budget.maxContextTokens;
-  // #1200: v2 cursor for CAS ingress — graded issuance via cursorFor
+  const effectiveTokenBudget = options?.effectiveMaxContextTokens ?? 0;
+  // #1200/#3444: cursorFor remains graded for general consumers; this producer
+  // admits only the canonical branch into deferred delivery state.
   const lastRelevantMsg = relevant[relevant.length - 1];
-  const boundaryId = lastRelevantMsg ? cursorFor(lastRelevantMsg) : undefined;
+  const boundaryId = canonicalDeferredBoundary(
+    lastRelevantMsg ? cursorFor(lastRelevantMsg) : undefined,
+    'cold-visible-tail',
+  );
 
   if (effectiveTokenBudget <= 0) {
     return {
       contextText: '',
       boundaryId,
+      projectedMessageIds: [],
       exposedMessageIds: [],
       includesCurrentUserMessage: false,
       currentMessageFilteredOut,
@@ -1572,6 +1809,7 @@ async function assembleSmartWindowContext(
   const finalEvidenceLines = [...evidenceLines];
   const finalEvidenceCandidates = recalledEvidence.evidence.map((item) => item.candidate);
   const finalAnchorLines = [...anchorLines];
+  const finalAnchors = [...promptAnchors];
   const anchorScores = anchors.map((a) => a.score);
   let finalTombstoneText = tombstoneText;
   let finalCoverageMapText = coverageMapText;
@@ -1612,6 +1850,7 @@ async function assembleSmartWindowContext(
         if (anchorScores[i] < anchorScores[minIdx]) minIdx = i;
       }
       finalAnchorLines.splice(minIdx, 1);
+      finalAnchors.splice(minIdx, 1);
       anchorScores.splice(minIdx, 1);
     }
 
@@ -1633,6 +1872,7 @@ async function assembleSmartWindowContext(
       return {
         contextText: '',
         boundaryId,
+        projectedMessageIds: [],
         exposedMessageIds: [],
         includesCurrentUserMessage: false,
         currentMessageFilteredOut,
@@ -1668,6 +1908,7 @@ async function assembleSmartWindowContext(
     return {
       contextText: '',
       boundaryId,
+      projectedMessageIds: [],
       exposedMessageIds: [],
       includesCurrentUserMessage: false,
       currentMessageFilteredOut,
@@ -1678,7 +1919,15 @@ async function assembleSmartWindowContext(
   return {
     contextText,
     boundaryId,
-    exposedMessageIds: exactBodyMessageIdsAfterToolScrub(burst, finalBurstMsgs, truncateLimit),
+    projectedMessageIds: [
+      ...new Set([...finalAnchors.map(({ message }) => message.id), ...finalBurstMsgs.map((message) => message.id)]),
+    ],
+    exposedMessageIds: [
+      ...new Set([
+        ...exactAnchorBodyMessageIds(omitted, finalAnchors, truncateLimit),
+        ...exactBodyMessageIdsAfterToolScrub(burst, finalBurstMsgs, truncateLimit),
+      ]),
+    ],
     includesCurrentUserMessage,
     currentMessageFilteredOut,
     degradation: tokenDegradation,

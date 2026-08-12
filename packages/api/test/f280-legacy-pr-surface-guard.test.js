@@ -78,7 +78,7 @@ const allowedRegions = [
   {
     path: 'packages/api/src/domains/cats/services/agents/routing/route-serial.ts',
     label: 'structured custody stop-gate vocabulary',
-    start: 'const TURN_CUSTODY_STOP_GATE_REMEDIAL_PROMPT',
+    start: 'export function buildTurnCustodyStopGateRemedialPrompt',
     end: '/**\n * F233 Phase B (B2): persist ball.handed',
   },
 ];

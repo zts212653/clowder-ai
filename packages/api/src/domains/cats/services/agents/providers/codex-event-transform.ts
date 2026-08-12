@@ -1,5 +1,24 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { AgentMessage } from '../../types.js';
+
+export interface CodexReconnectNotice {
+  message: string;
+  attempt?: number;
+}
+
+export function parseCodexReconnectNotice(event: unknown): CodexReconnectNotice | null {
+  if (typeof event !== 'object' || event === null) return null;
+  const raw = event as Record<string, unknown>;
+  if (raw.type !== 'error' || typeof raw.message !== 'string') return null;
+  const message = raw.message.trim();
+  if (!message.startsWith('Reconnecting...')) return null;
+  const attemptMatch = message.match(/(?:Reconnecting\.\.\.\s*|attempt\s+)(\d+)/i);
+  return {
+    message,
+    ...(attemptMatch ? { attempt: Number(attemptMatch[1]) } : {}),
+  };
+}
+
 import { normalizeTaskStatus } from '../invocation/invoke-helpers.js';
 import { type CodexApprovalSurface, classifyCodexGithubAppApprovalFailure } from './codex-app-approval-routing.js';
 
@@ -318,11 +337,24 @@ export function transformCodexEvent(
   }
 
   if (e.type === 'error') {
-    const message = e.message;
-    if (typeof message !== 'string') return null;
-    const text = message.trim();
-    // Reconnecting… lines stream to UI as progress
-    if (text.startsWith('Reconnecting...')) return { type: 'system_info', catId, content: text, timestamp: Date.now() };
+    const reconnect = parseCodexReconnectNotice(e);
+    // Reconnecting is a transient provider lifecycle transition, not a
+    // permanent warning. The service later emits recovered/failed for the
+    // same invocation-scoped projection.
+    if (reconnect) {
+      return {
+        type: 'system_info',
+        catId,
+        content: JSON.stringify({
+          type: 'provider_recovery',
+          provider: 'codex',
+          phase: 'reconnecting',
+          ...(reconnect.attempt !== undefined ? { attempt: reconnect.attempt } : {}),
+          message: reconnect.message,
+        }),
+        timestamp: Date.now(),
+      };
+    }
     // Non-Reconnecting errors: return null — CodexAgentService collects them via
     // collectCodexStreamError() and surfaces them as diagnostics in the exit error.
     return null;

@@ -577,6 +577,40 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1);
   });
 
+  it('F291: stores persistent member speed as isolated sidecar fields and rejects corrupt values', async () => {
+    const thread = await store.create('user1', 'Speed Overrides');
+
+    await store.updateMemberSpeed(thread.id, 'codex-sol', 'fast');
+    await store.updateMemberSpeed(thread.id, 'codex-terra', 'standard');
+
+    assert.equal(await redis.hget(threadDetailKey(thread.id), 'memberSpeed:codex-sol'), 'fast');
+    assert.equal(await store.getMemberSpeed(thread.id, 'codex-sol', 'user1'), 'fast');
+    assert.deepEqual(await store.getMemberSpeeds(thread.id, 'user1'), {
+      'codex-sol': 'fast',
+      'codex-terra': 'standard',
+    });
+
+    await store.updateMemberSpeed(thread.id, 'codex-sol', null);
+    assert.equal(await store.getMemberSpeed(thread.id, 'codex-sol', 'user1'), undefined);
+
+    await redis.hset(threadDetailKey(thread.id), 'memberSpeed:codex-sol', 'turbo');
+    assert.deepEqual(await store.getMemberSpeeds(thread.id, 'user1'), { 'codex-terra': 'standard' });
+
+    await store.delete(thread.id);
+    await store.updateMemberSpeed(thread.id, 'codex-sol', 'fast');
+    assert.deepEqual(await redis.hkeys(threadDetailKey(thread.id)), []);
+  });
+
+  it('F291: persistent speed mutation clears a legacy detail TTL', async () => {
+    const expiringStore = new RedisThreadStore(redis, { ttlSeconds: 60 });
+    const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    const thread = await expiringStore.create('user1', 'Speed TTL');
+    assert.ok((await redis.ttl(threadDetailKey(thread.id))) > 0);
+
+    await persistentStore.updateMemberSpeed(thread.id, 'codex-sol', 'fast');
+    assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1);
+  });
+
   it('persistent mode also clears legacy TTL on detail-only mutations', async () => {
     const expiringStore = new RedisThreadStore(redis, { ttlSeconds: 60 });
     const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });

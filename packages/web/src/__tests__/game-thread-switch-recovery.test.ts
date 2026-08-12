@@ -35,6 +35,7 @@ vi.mock('@/stores/chatStore', () => {
       setViewMode: vi.fn(),
       clearUnread: vi.fn(),
       confirmUnreadAck: vi.fn(),
+      settleUnreadAck: vi.fn(),
       armUnreadSuppression: vi.fn(),
       rightPanelMode: null,
       uiThinkingExpandedByDefault: false,
@@ -172,7 +173,6 @@ vi.mock('../components/MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));
 vi.mock('../components/SplitPaneView', () => ({ SplitPaneView: () => null }));
-vi.mock('../components/MobileStatusSheet', () => ({ MobileStatusSheet: () => null }));
 vi.mock('../components/QueuePanel', () => ({ QueuePanel: () => null }));
 vi.mock('../components/ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));
 vi.mock('../components/AuthorizationCard', () => ({ AuthorizationCard: () => null }));

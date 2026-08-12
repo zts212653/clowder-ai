@@ -3,7 +3,8 @@ import { PERSON_MEMORY_DISPOSITION_PREFLIGHT_LUA } from './person-memory-disposi
 export const BEGIN_HARD_FORGET_LUA = `
 local receipt = redis.call('GET', KEYS[2])
 if receipt then return 'RECEIPT:' .. receipt end
-if redis.call('EXISTS', KEYS[3]) == 0 and redis.call('EXISTS', KEYS[4]) == 0 then return 'ABSENT' end
+if redis.call('EXISTS', KEYS[3]) == 0 and redis.call('EXISTS', KEYS[4]) == 0
+  and (#KEYS < 5 or redis.call('EXISTS', KEYS[5]) == 0) then return 'ABSENT' end
 local fence = redis.call('GET', KEYS[1])
 if fence and fence ~= ARGV[1] then return 'CONFLICT' end
 redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])

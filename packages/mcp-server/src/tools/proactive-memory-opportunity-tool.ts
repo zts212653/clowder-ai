@@ -1,15 +1,36 @@
-import { type ProactiveMemoryAbstentionInput, proactiveMemoryAbstentionInputSchema } from '@cat-cafe/shared';
-import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import {
+  type DeferredPersonMemoryInput,
+  deferredPersonMemoryInputSchema,
+  deferredPersonMemoryReceiptIdSchema,
+  type ProactiveMemoryAbstentionInput,
+  proactiveMemoryAbstentionInputSchema,
+} from '@cat-cafe/shared';
+import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
 
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 
-const defineTool = defineMcpMigrationFactory('proactive-memory-opportunity-tool.ts', undefined, {
-  resourceFamily: 'memory-write',
-  authority: 'callback-owner',
-});
+const defineMigrationTool = defineMcpMigrationFactory(
+  'proactive-memory-opportunity-tool.ts',
+  './tools/callback-tools.js',
+  {
+    resourceFamily: 'memory-write',
+    authority: 'callback-owner',
+  },
+);
+const defineCanonicalTool = defineMcpCanonicalFactory(
+  'proactive-memory-opportunity-tool.ts',
+  './tools/callback-tools.js',
+  {
+    resourceFamily: 'memory-write',
+    authority: 'callback-owner',
+  },
+);
 
 export const proactiveMemoryAbstentionToolInputSchema = proactiveMemoryAbstentionInputSchema.shape;
+export const deferredPersonMemoryToolInputSchema = deferredPersonMemoryInputSchema.shape;
+
+type CallbackPost = (path: string, body: Record<string, unknown>) => Promise<ToolResult>;
 
 export async function handleRecordProactiveMemoryAbstention(
   input: ProactiveMemoryAbstentionInput,
@@ -21,7 +42,7 @@ export async function handleRecordProactiveMemoryAbstention(
   return successResult(JSON.stringify({ status: 'recorded' }));
 }
 
-export const proactiveMemoryOpportunityTool = defineTool({
+export const proactiveMemoryOpportunityTool = defineMigrationTool({
   name: 'cat_cafe_record_proactive_memory_abstention',
   description:
     'Record why you deliberately did not create an F276 person-memory proposal for the current proactive-memory opportunity. ' +
@@ -38,3 +59,105 @@ export const proactiveMemoryOpportunityTool = defineTool({
     runtimeProfiles: ['full'],
   },
 });
+
+export function createDeferredPersonMemoryTool(callbackPost: CallbackPost) {
+  async function handleDeferPersonMemoryDelta(input: DeferredPersonMemoryInput): Promise<ToolResult> {
+    const parsed = deferredPersonMemoryInputSchema.safeParse(input);
+    if (!parsed.success) return errorResult('Invalid deferred person-memory receipt input.');
+    const result = await callbackPost('/api/callbacks/defer-person-memory', parsed.data);
+    if (result.isError) return result;
+    try {
+      const body = JSON.parse(result.content[0]?.text ?? '{}') as Record<string, unknown>;
+      if (body.status === 'stale_ignored') {
+        return errorResult('Deferred receipt was NOT created because this invocation is stale.');
+      }
+      return successResult(JSON.stringify({ ...body, proactiveMemoryOutcome: 'deferred_receipt_recorded' }));
+    } catch {
+      return errorResult('Deferred receipt callback returned an invalid response.');
+    }
+  }
+
+  const handleWithdrawDeferredPersonMemory = (input: { receiptId: string }) =>
+    callbackPost('/api/callbacks/person-memory/deferred/withdraw', { receiptId: input.receiptId });
+
+  const handleForgetDeferredPersonMemory = (input: { receiptId: string }) =>
+    callbackPost('/api/callbacks/person-memory/deferred/forget', { receiptId: input.receiptId });
+
+  const receiptInputSchema = {
+    receiptId: deferredPersonMemoryReceiptIdSchema.describe(
+      'Exact deferred receipt ID returned by cat_cafe_defer_person_memory_delta.',
+    ),
+  };
+
+  return {
+    handleDeferPersonMemoryDelta,
+    handleWithdrawDeferredPersonMemory,
+    handleForgetDeferredPersonMemory,
+    tool: defineCanonicalTool({
+      name: 'cat_cafe_defer_person_memory_delta',
+      description:
+        'Capture a high-value interaction delta for a known person without interrupting the current task with an approval card. ' +
+        'Use when the exact owner sources are available but immediate cat_cafe_propose_person_memory would disrupt the main task. ' +
+        'Input contains only the subject plus exact message or attachment coordinates; owner, requester, invocation, source threads, digests, and visibility are server-derived. The receipt does not store message or transcript bodies. ' +
+        'A bounded daily clerk reads only explicit deferred receipts and may create a normal rejectable F276 proposal; it never scans all conversation history and never materializes memory silently. ' +
+        'Known person means an already registered private person or workspace person Entity. NOT for first-time identity capture, vague reminders, or unconfirmed ASR facts. ' +
+        'For ASR or attachments, include an exact owner confirmation message when available; without confirmation the server records a non-actionable awaiting_confirmation receipt that the daily clerk cannot consume.',
+      inputSchema: deferredPersonMemoryToolInputSchema,
+      handler: handleDeferPersonMemoryDelta,
+      governance: {
+        implementationExport: 'handleDeferPersonMemoryDelta',
+        action: 'create',
+        risk: { level: 'write', openWorld: false },
+        runtimeProfiles: ['full'],
+        standaloneReason: {
+          disposition: 'accepted-boundary',
+          kind: 'side-effect-boundary',
+          admissionRef: 'file:docs/features/F276-people-relationship-memory.md',
+        },
+      },
+    }),
+    lifecycleTools: [
+      defineCanonicalTool({
+        name: 'cat_cafe_withdraw_deferred_person_memory',
+        description:
+          'Withdraw one exact owner-private deferred person-memory receipt before it becomes a proposal. ' +
+          'This removes it from the daily queue, purges its subject/source payload, and allows a later fresh capture of the same delta. ' +
+          'NOT for an already-created F276 proposal; use the proposal card lifecycle for that.',
+        inputSchema: receiptInputSchema,
+        handler: handleWithdrawDeferredPersonMemory,
+        governance: {
+          implementationExport: 'handleWithdrawDeferredPersonMemory',
+          action: 'close',
+          risk: { level: 'write', openWorld: false },
+          runtimeProfiles: ['full'],
+          standaloneReason: {
+            disposition: 'accepted-boundary',
+            kind: 'side-effect-boundary',
+            admissionRef: 'file:docs/features/F276-people-relationship-memory.md',
+          },
+        },
+      }),
+      defineCanonicalTool({
+        name: 'cat_cafe_forget_deferred_person_memory',
+        description:
+          'Permanently purge one exact owner-private deferred person-memory receipt and every queue/dedupe locator. ' +
+          'Destructive; use only on the owner’s explicit request. Names and aliases are never accepted as purge coordinates. ' +
+          'If the receipt already created a proposal, this refuses the partial purge; use the exact F276 proposal hard-forget lifecycle instead.',
+        inputSchema: receiptInputSchema,
+        handler: handleForgetDeferredPersonMemory,
+        governance: {
+          implementationExport: 'handleForgetDeferredPersonMemory',
+          action: 'close',
+          risk: { level: 'destructive', openWorld: false },
+          runtimeProfiles: ['full'],
+          targetExposure: 'profile-gated',
+          standaloneReason: {
+            disposition: 'accepted-boundary',
+            kind: 'destructive-boundary',
+            admissionRef: 'file:docs/features/F276-people-relationship-memory.md',
+          },
+        },
+      }),
+    ],
+  };
+}

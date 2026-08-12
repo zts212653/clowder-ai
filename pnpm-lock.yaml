@@ -30,8 +30,8 @@ importers:
         specifier: workspace:*
         version: link:../shared
       '@clowder-ai/plugin-contract':
-        specifier: 0.1.0-beta.7
-        version: 0.1.0-beta.7
+        specifier: 0.1.0-beta.9
+        version: 0.1.0-beta.9
       '@fastify/cookie':
         specifier: '9'
         version: 9.4.0
@@ -1024,8 +1024,8 @@ packages:
   '@chevrotain/types@11.1.2':
     resolution: {integrity: sha512-U+HFai5+zmJCkK86QsaJtoITlboZHBqrVketcO2ROv865xfCMSFpELQoz1GkX5GzME8pTa+3kbKrZHQtI0gdbw==}
 
-  '@clowder-ai/plugin-contract@0.1.0-beta.7':
-    resolution: {integrity: sha512-dDtMthN6ssmBtJM6oQ7sOWqKPcIW2zOe3BRdughWR/gjT5mkuwPK5X16BOypslWeYpGUUWkWC3cOw8W3Z3i/ow==}
+  '@clowder-ai/plugin-contract@0.1.0-beta.9':
+    resolution: {integrity: sha512-YPpJguiVd0qdoOX8HdU26k36b+58zj0V9w02z/GpRnF8WBubfwuoZ5RBQPE2gf5qwSQwCl/+WVRhsMG/i65Epg==}
     engines: {node: '>=20.0.0'}
 
   '@codemirror/autocomplete@6.20.1':
@@ -7392,7 +7392,7 @@ snapshots:
 
   '@chevrotain/types@11.1.2': {}
 
-  '@clowder-ai/plugin-contract@0.1.0-beta.7':
+  '@clowder-ai/plugin-contract@0.1.0-beta.9':
     dependencies:
       ajv: 8.17.1
       ajv-formats: 3.0.1(ajv@8.17.1)

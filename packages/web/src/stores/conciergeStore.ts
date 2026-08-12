@@ -55,7 +55,7 @@ interface ConciergeStoreState extends ConciergeInputs {
   fetchConfig: () => Promise<void>;
   /** Lazy-load concierge threadId on first bubble open (INV-9). */
   fetchThreadId: () => Promise<void>;
-  /** Toggle muted with optimistic update + PUT /api/concierge/config (INV-8). */
+  /** Toggle cat visibility with optimistic update + PUT; `muted` is the legacy persisted field name. */
   setMuted: (muted: boolean) => Promise<void>;
   /** Toggle behaviorEnabled with optimistic update + PUT (AC-E4-7). */
   setBehaviorEnabled: (enabled: boolean) => Promise<void>;

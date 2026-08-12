@@ -2,17 +2,23 @@
 cell_id: identity-session
 title: Identity / Session
 summary: Agent identity、connector session binding、bubble identity、runtime session binding、user profile 五个 subcell 的边界。
-canonical_features: [F032, F088, F183, F211, F231, F262]
+canonical_features: [F032, F088, F183, F211, F231, F262, F291]
 code_anchors:
   - cat-config.json
   - packages/api/src/config/cat-config-loader.ts
   - packages/shared/src/cli-effort.ts
+  - packages/shared/src/codex-speed.ts
+  - packages/shared/src/types/thread-speed.ts
   - packages/shared/src/types/cat.ts
   - packages/api/src/infrastructure/connectors/ConnectorThreadBindingStore.ts
   - packages/api/src/infrastructure/connectors/connector-binding-keys.ts
   - packages/api/src/routes/thread-cats-core.ts
   - packages/api/src/routes/thread-member-effort.ts
+  - packages/api/src/routes/thread-member-speed.ts
   - packages/api/src/domains/cats/services/agents/invocation/invoke-single-cat.ts
+  - packages/api/src/domains/cats/services/agents/providers/CodexAgentService.ts
+  - packages/web/src/components/HubCatEditor.tsx
+  - packages/web/src/components/ThreadSidebar/ThreadSpeedSettings.tsx
   - packages/web/src/debug/bubbleIdentity.ts
   - packages/api/src/domains/cats/services/stores/ports/SessionChainStore.ts
   - packages/api/src/domains/cats/services/runtime-session/RuntimeSessionMetadata.ts
@@ -42,9 +48,11 @@ doc_anchors:
   - feature-discussions/2026-05-24-f211-design-memo/README.md
   - docs/features/F231-user-profile-capsule.md
   - docs/features/F262-per-thread-cat-effort-overrides.md
+  - docs/features/F291-codex-oauth-fast-mode.md
+  - feature-discussions/2026-08-08-f291-codex-oauth-fast-mode/README.md
   - feature-discussions/2026-06-13-f231-phase-c-design-gate.md
   - feature-discussions/2026-07-10-f231-profile-topology-convergence.md
-static_scan_hints: [catId, relationshipKey, AgentRegistry, cat-config, roster, ConnectorThreadBindingStore, bubbleIdentity, session, SessionChainStore, cliSessionId, cascadeId, runtimeSession, capsule, CAT_CAFE_DATA_DIR, cat-cafe-profile, "private/profile"]
+static_scan_hints: [catId, relationshipKey, AgentRegistry, cat-config, roster, ConnectorThreadBindingStore, bubbleIdentity, session, SessionChainStore, cliSessionId, cascadeId, runtimeSession, serviceTier, CodexSpeed, memberSpeed, capsule, CAT_CAFE_DATA_DIR, cat-cafe-profile, "private/profile"]
 cited_by:
   - {feature: F191, date: 2026-05-07, delta: new cell}
   - {feature: F193, date: 2026-05-08, delta: Phase B — typed crossThreadReplyHint field on InvocationContext + render block in buildInvocationContext (receiver-side reply hint hydrated from trigger message id)}
@@ -56,6 +64,7 @@ cited_by:
   - {feature: F231, date: 2026-06-13, delta: "OQ-4 closed (KD-8~11) — Phase C nurturing loop = 3-stage pipeline (collect→distill→digest), system-gives-data / cat-operator-gives-conclusion throughout (F227 KD-8 no-classifier line). KD-9 collection whitelist data contract (deterministic explainable events only; forbids classifier labeling like 'this is a relationship signal'); KD-10 runtime-neutral distill trigger on Clowder AI runtime invocation/session-seal/turn-completed events, NOT provider Stop hook (codex exec --json does not dispatch ~/.codex/hooks.json Stop hook, CodexAgentService.ts); KD-11 F231 = bounded profile consolidation pilot (dry-run proposal + provenance, no general dream lane). 46's L0 reflex demoted to a manual digest-stage entry, not main path. Decision: feature-discussions/2026-06-13-f231-phase-c-design-gate.md"}
   - {feature: F231, date: 2026-06-13, delta: "Phase C design deepening (operator co-creation) — KD-12 digest layer = cost-tiered signing + use-to-verify: only high-cost objective facts (health/safety/irreversible) need operator signature; preferences/impressions written autonomously by cats and verified in-use (profile used in a real decision, operator reacts, corrected on the spot), push-approval becomes pull-calibration (solves humans-won't-approve-daily + self-view-is-distorted). KD-13 correction signal = highest-priority collection source but recognized via the participating cat's own understanding, NEVER via system keyword/pattern matching (human phrasing too varied = classifier in disguise); distinct from magic-word (operator's bounded agreed triggers, still matchable). KD-14 profile use = subconscious surfacing (internalized intuition, not table-lookup recitation), anti-class-tone. OQ-5 (open): injection layer / 50k-5k-500 funnel third stage (dynamic vs pull vs static); injection = relevance retrieval not intake judgment, does not break KD-8."}
   - {feature: F262, date: 2026-07-10, delta: "identity-agent config extension — thread-scoped raw cat effort override, projected through current provider/model capability and consumed at every invocation after actual-cat routing"}
+  - {feature: F291, date: 2026-08-08, delta: "identity-agent config extension — OAuth Codex member and thread-scoped speed intent, projected after actual-cat routing and mapped to carrier-specific service-tier wire states"}
   - {feature: F231, date: 2026-06-13, delta: "Phase C write-rule cleanup (codex REQUEST-CHANGES P1) — removed stale 'all changes via operator review' wording that conflicted with KD-12; KD-15 added: low-cost autonomous writes target per-cat layer (primer / user-signal lane) ONLY, NOT shared capsule directly (promotion to shared capsule needs high bar: operator signature or multi-cat corroboration); low-cost writes require provenance (source coords + owner cat + status + correction path)."}
   - {feature: F231, date: 2026-07-10, delta: "Phase D topology repair (KD-18/19) — relationship continuity is per-persona relationshipKey, canonical private truth lives under CAT_CAFE_DATA_DIR/profiles/<userId>, L0 emits cat-cafe-profile://relationship/current, authenticated read/propose/approve share FileProfileRepository, legacy private/profile is migration input only."}
 ---
@@ -69,7 +78,7 @@ Architecture cell: identity-session
 This is a top-level routing cell with five subcells. It exists to prevent identity concerns from becoming a garbage bin.
 
 - `identity-agent`: F032 owns dynamic CatId, roster, AgentRegistry, roles, and reviewer matching.
-- `identity-agent config`: F127 owns per-cat default effort and provider/model capability; F262 extends that chain with a raw `(threadId, catId)` override. The thread store owns persistence, but effective effort is derived after routing at invocation time and is not navigation or session-strategy state.
+- `identity-agent config`: F127 owns per-cat runtime defaults and provider/model capability; F262 extends that chain with raw `(threadId, catId)` effort overrides, and F291 adds OAuth Codex speed intent with carrier-specific projection. The thread store owns persistence, but effective effort/speed are derived after actual-cat routing at invocation time and are not navigation or session-strategy state.
 - `identity-connector`: F088 owns connector principal link and external chat/thread binding.
 - `identity-bubble`: F183 / ADR-033 own frontend bubble identity within a thread.
 - `identity-runtime-session`: F211 owns runtime session identity and binding for long-lived or external runtimes: cascade/conversation IDs, SessionChainStore bridge records, lifecycle registration, hidden external-runtime anchor threads, seal reason, and per-session identity history.

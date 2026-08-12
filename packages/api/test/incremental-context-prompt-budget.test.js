@@ -1,9 +1,9 @@
 /**
  * Regression tests for incremental context prompt budget overflow
  *
- * Bug: assembleIncrementalContext used raw maxContextTokens (160k for opus)
- * without deducting system prompt overhead (~15-20k tokens), causing the total
- * prompt to exceed maxPromptTokens and trigger "Prompt is too long" from CLI.
+ * Bug: assembleIncrementalContext independently resolved a model-wide budget
+ * instead of consuming the invocation-owned history ceiling. That could diverge
+ * from the prompt assembler and the concrete carrier configuration.
  *
  * Fix (A+): Routing layer calculates effectiveMaxContextTokens by subtracting
  * system parts, and passes it to assembleIncrementalContext.
@@ -29,10 +29,8 @@ function seedLongMessages(messageStore, count, threadId = 'thread-1') {
   return stored;
 }
 
-describe('assembleIncrementalContext — effectiveMaxContextTokens override (A+ fix)', () => {
-  test('respects effectiveMaxContextTokens override that is smaller than default maxContextTokens', async () => {
-    // 50 messages × ~1250 tokens each ≈ 62.5K tokens — fits default opus maxContextTokens(160K)
-    // but exceeds a small override of 5000 tokens
+describe('assembleIncrementalContext — invocation history ceiling', () => {
+  test('respects an invocation ceiling smaller than the candidate history', async () => {
     const count = 50;
     const smallBudget = 5000;
 
@@ -67,8 +65,7 @@ describe('assembleIncrementalContext — effectiveMaxContextTokens override (A+ 
     assert.ok(result.degradation, 'Zero budget should report degradation');
   });
 
-  test('without override, uses default maxContextTokens (backward compat)', async () => {
-    // Same as existing token-budget tests — no override means default behavior
+  test('without an invocation ceiling, fails closed instead of resolving a hidden default', async () => {
     const count = 50;
     const messageStore = new MessageStore();
     const deliveryCursorStore = new DeliveryCursorStore();
@@ -77,13 +74,11 @@ describe('assembleIncrementalContext — effectiveMaxContextTokens override (A+ 
     const deps = buildDeps(messageStore, deliveryCursorStore);
     const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus');
 
-    // Default opus maxContextTokens is 160K — 50 messages × 1250 tokens ≈ 62.5K fits
-    assert.ok(result.contextText.length > 0, 'Default budget should include messages');
-    assert.ok(!result.degradation, 'Default budget should not trigger degradation for 50 messages');
+    assert.equal(result.contextText, '', 'Unresolved invocation capacity must not include history');
+    assert.ok(result.degradation, 'Fail-closed capacity should be visible as degradation');
   });
 
-  test('override does not affect maxMessages cap (first-knife still applies)', async () => {
-    // 300 messages with small content, override budget generous enough for all
+  test('Smart Window still owns message selection under a generous invocation ceiling', async () => {
     const count = 300;
     const messageStore = new MessageStore();
     const deliveryCursorStore = new DeliveryCursorStore();
@@ -94,12 +89,11 @@ describe('assembleIncrementalContext — effectiveMaxContextTokens override (A+ 
     }
 
     const deps = buildDeps(messageStore, deliveryCursorStore);
-    // opus maxMessages = 200, give generous token budget
     const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus', undefined, undefined, {
       effectiveMaxContextTokens: 500000,
     });
 
     const deliveredCount = (result.contextText.match(/\[(\d{16}-\d{6}-[a-f0-9]{8})\]/g) || []).length;
-    assert.ok(deliveredCount <= 200, `maxMessages cap should still apply: got ${deliveredCount}`);
+    assert.ok(deliveredCount < count, `Smart Window should select a bounded burst: got ${deliveredCount}`);
   });
 });

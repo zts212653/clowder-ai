@@ -9,9 +9,16 @@ import { projectReevalCase } from './reeval-case.js';
 import type { IReevalClosureEventLog, ReevalClosureAppendResult } from './reeval-closure-event-log.js';
 import type { ReevalCaseReconcileSubject } from './reeval-closure-reconciler.js';
 
+type FeatureThreadBlocker = {
+  code: 'feature_thread_not_found' | 'feature_thread_ambiguous';
+  featureId: string;
+  candidateThreadIds: string[];
+};
+
 export interface ReevalCaseResponsibilityContext {
   systemThreadId: string;
   featureId: string;
+  ownerCatId?: string;
   evalCatId: string;
 }
 
@@ -32,6 +39,7 @@ export type ReevalCaseResponsibilityResult =
       append: Exclude<ReevalClosureAppendResult, { outcome: 'conflict' }>;
     }
   | { outcome: 'conflict'; task: TaskItem; lease: ActionSuccessorLease; actualSequence: number }
+  | { outcome: 'blocked'; append: ReevalClosureAppendResult }
   | { outcome: 'not_open' };
 
 function requireNonEmpty(value: string, field: string): void {
@@ -59,11 +67,78 @@ function leaseFromAdmission(result: ActionSuccessorAdmissionResult): ActionSucce
   return result.lease;
 }
 
+function caseAcceptsResponsibility(projection: ReturnType<typeof projectReevalCase>): boolean {
+  return (
+    projection.status === 'open' ||
+    (projection.status === 'escalated' && projection.escalation?.stage === 'acknowledgement')
+  );
+}
+
+function featureThreadBlocker(error: unknown, expectedFeatureId: string): FeatureThreadBlocker | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const candidate = error as Record<string, unknown>;
+  const normalizedFeatureId = expectedFeatureId.trim().toUpperCase();
+  if (
+    (candidate.code !== 'feature_thread_not_found' && candidate.code !== 'feature_thread_ambiguous') ||
+    typeof candidate.featureId !== 'string' ||
+    candidate.featureId.trim().toUpperCase() !== normalizedFeatureId ||
+    !Array.isArray(candidate.candidateThreadIds) ||
+    !candidate.candidateThreadIds.every((value) => typeof value === 'string' && value.length > 0)
+  ) {
+    return undefined;
+  }
+  return {
+    code: candidate.code,
+    featureId: candidate.featureId,
+    candidateThreadIds: [...new Set(candidate.candidateThreadIds)].sort(),
+  };
+}
+
 export class ReevalCaseResponsibilityService {
   private readonly now: () => string;
 
   constructor(private readonly options: ReevalCaseResponsibilityServiceOptions) {
     this.now = options.now ?? (() => new Date().toISOString());
+  }
+
+  private async resolveTargetThread(
+    subject: ReevalCaseReconcileSubject,
+    projection: ReturnType<typeof projectReevalCase>,
+    featureId: string,
+    ownerCatId: string,
+  ): Promise<string | Extract<ReevalCaseResponsibilityResult, { outcome: 'blocked' }>> {
+    try {
+      return await this.options.resolveFeatureThreadId(featureId, this.options.ownerUserId);
+    } catch (error) {
+      const blocker = featureThreadBlocker(error, featureId);
+      if (!blocker) throw error;
+      const candidates = blocker.candidateThreadIds.join(',') || 'none';
+      const append = await this.options.eventLog.append(
+        {
+          eventId: `f266:${subject.caseRoot.caseId}:cycle:${projection.activeVerdictId}:responsibility-blocked:${blocker.code}:${candidates}`,
+          caseId: subject.caseRoot.caseId,
+          verdictId: projection.activeVerdictId,
+          domainId: subject.caseRoot.domainId,
+          type: 'responsibility_blocked',
+          actor: { kind: 'automation', id: 'eval-verdict-closure-reconciler' },
+          occurredAt: this.now(),
+          reason: 'feature-thread truth cannot yet bind durable responsibility; retry when routing truth changes',
+          refs: [
+            {
+              kind: 'other',
+              availability: 'available',
+              value: `feature-thread-resolution:${blocker.featureId}:${blocker.code}:${candidates}`,
+            },
+          ],
+          reasonCode: blocker.code,
+          featureId: blocker.featureId,
+          ownerCatId,
+          candidateThreadIds: blocker.candidateThreadIds,
+        },
+        subject.events.length,
+      );
+      return { outcome: 'blocked', append };
+    }
   }
 
   async reconcile(
@@ -73,13 +148,10 @@ export class ReevalCaseResponsibilityService {
     requireNonEmpty(context.systemThreadId, 'systemThreadId');
     requireNonEmpty(context.featureId, 'featureId');
     requireNonEmpty(context.evalCatId, 'evalCatId');
+    const ownerCatId = context.ownerCatId ?? subject.caseRoot.targetOwnerCatId;
+    requireNonEmpty(ownerCatId, 'ownerCatId');
     const projection = projectReevalCase(subject.caseRoot, subject.events);
-    if (
-      projection.status !== 'open' &&
-      !(projection.status === 'escalated' && projection.escalation?.stage === 'acknowledgement')
-    ) {
-      return { outcome: 'not_open' };
-    }
+    if (!caseAcceptsResponsibility(projection)) return { outcome: 'not_open' };
     if (subject.assignedEvalCatId !== context.evalCatId) {
       throw new Error('responsibility binding eval cat does not match the trusted domain assignment');
     }
@@ -89,7 +161,9 @@ export class ReevalCaseResponsibilityService {
       throw new Error('responsibility binding feature does not match the immutable verdict root');
     }
 
-    const targetThreadId = await this.options.resolveFeatureThreadId(context.featureId, this.options.ownerUserId);
+    const resolution = await this.resolveTargetThread(subject, projection, context.featureId, ownerCatId);
+    if (typeof resolution !== 'string') return resolution;
+    const targetThreadId = resolution;
     requireNonEmpty(targetThreadId, 'featureThreadId');
     const subjectKey = `eval-case:${subject.caseRoot.caseId}:cycle:${projection.activeVerdictId}`;
     const task = await this.options.taskStore.upsertBySubject({
@@ -99,17 +173,17 @@ export class ReevalCaseResponsibilityService {
       createdBy: createCatId(context.evalCatId),
       kind: 'work',
       subjectKey,
-      ownerCatId: createCatId(root.ownerAsk.targetOwnerCatId),
+      ownerCatId: createCatId(ownerCatId),
       userId: this.options.ownerUserId,
       relatedFeatureId: context.featureId,
     });
     if (task.status === 'done') throw new Error('active eval case cannot bind a completed cycle task');
     if (
-      task.ownerCatId !== root.ownerAsk.targetOwnerCatId ||
+      task.ownerCatId !== ownerCatId ||
       task.threadId !== targetThreadId ||
       task.userId !== this.options.ownerUserId
     ) {
-      throw new Error('persisted task does not match immutable verdict responsibility');
+      throw new Error('persisted task does not match current feature-owner responsibility');
     }
 
     const occurredAt = this.now();
@@ -118,7 +192,7 @@ export class ReevalCaseResponsibilityService {
       actorCatId: context.evalCatId,
       sourceThreadId: context.systemThreadId,
       targetThreadId,
-      holderCatIds: [root.ownerAsk.targetOwnerCatId],
+      holderCatIds: [ownerCatId],
       dispatchId: `f266:${subject.caseRoot.caseId}:${projection.activeVerdictId}:responsibility`,
       evidenceRef: `eval-verdict:${projection.activeVerdictId}`,
       now: Date.parse(occurredAt),

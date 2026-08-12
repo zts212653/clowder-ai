@@ -35,6 +35,168 @@ describe('SessionChainStore', () => {
     assert.equal(record.createdAt, record.updatedAt);
   });
 
+  test('#1329 getOrCreateActive() creates one unbound logical node and reuses it', async () => {
+    const store = await createStore();
+    const input = {
+      threadId: 'thread-logical',
+      catId: 'opus',
+      userId: 'user-1',
+      compressionCount: null,
+    };
+
+    const first = store.getOrCreateActive(input);
+    const second = store.getOrCreateActive(input);
+
+    assert.equal(first.id, second.id);
+    assert.equal(first.cliSessionId, undefined);
+    assert.equal(first.compressionCount, null);
+    assert.equal(store.getChain('opus', 'thread-logical').length, 1);
+  });
+
+  test('#1329 logical active ownership includes userId on a shared thread', async () => {
+    const store = await createStore();
+    const ownerA = { threadId: 'default', catId: 'opus', userId: 'user-a', compressionCount: null };
+    const ownerB = { threadId: 'default', catId: 'opus', userId: 'user-b', compressionCount: null };
+
+    const firstA = store.getOrCreateActive(ownerA);
+    const firstB = store.getOrCreateActive(ownerB);
+    const secondA = store.getOrCreateActive(ownerA);
+    const secondB = store.getOrCreateActive(ownerB);
+
+    assert.notEqual(firstA.id, firstB.id);
+    assert.equal(firstA.seq, 0);
+    assert.equal(firstB.seq, 0);
+    assert.equal(secondA.id, firstA.id);
+    assert.equal(secondB.id, firstB.id);
+    assert.equal(store.getActive('opus', 'default', 'user-a').id, firstA.id);
+    assert.equal(store.getActive('opus', 'default', 'user-b').id, firstB.id);
+    assert.equal(store.getChain('opus', 'default', 'user-a').length, 1);
+    assert.equal(store.getChain('opus', 'default', 'user-b').length, 1);
+
+    store.update(firstA.id, { status: 'sealed' });
+    const nextA = store.getOrCreateActive({ ...ownerA, cliSessionId: 'cli-owner-a-next' });
+    assert.equal(nextA.seq, 1);
+  });
+
+  test('#1329 bindCliSessionId() attaches runtime identity to the existing logical node', async () => {
+    const store = await createStore();
+    const logical = store.getOrCreateActive({
+      threadId: 'thread-logical',
+      catId: 'opus',
+      userId: 'user-1',
+      compressionCount: null,
+    });
+
+    const bound = store.bindCliSessionId(logical.id, 'cli-late');
+    assert.equal(bound.id, logical.id);
+    assert.equal(bound.cliSessionId, 'cli-late');
+    assert.equal(store.getByCliSessionId('cli-late').id, logical.id);
+    assert.equal(store.getChain('opus', 'thread-logical').length, 1);
+  });
+
+  test('#1329 applyPolicySnapshot resets hybrid progress only when the revision changes', async () => {
+    const store = await createStore();
+    const logical = store.getOrCreateActive({
+      threadId: 'thread-policy',
+      catId: 'opus',
+      userId: 'user-1',
+      compressionCount: 0,
+    });
+    const snapshot = {
+      config: { strategy: 'hybrid', thresholds: { warn: 0.75, action: 0.85 }, hybrid: { maxCompressions: 2 } },
+      source: 'runtime_override',
+      revision: 'revision-a',
+      changedAt: 10,
+      execution: { status: 'active', missingCapabilities: [] },
+    };
+
+    store.applyPolicySnapshot(logical.id, snapshot);
+    store.recordCompressionEvent(logical.id, 'revision-a');
+    store.applyPolicySnapshot(logical.id, snapshot);
+    assert.equal(store.get(logical.id).hybridProgress.observedCount, 1);
+
+    store.applyPolicySnapshot(logical.id, { ...snapshot, revision: 'revision-b', changedAt: 20 });
+    const updated = store.get(logical.id);
+    assert.equal(updated.appliedPolicy.revision, 'revision-b');
+    assert.deepEqual(updated.hybridProgress, {
+      policyRevision: 'revision-b',
+      observedCount: 0,
+      startedAt: updated.hybridProgress.startedAt,
+    });
+  });
+
+  test('#1329 records hybrid progress atomically without inventing an unknown lifetime total', async () => {
+    const store = await createStore();
+    const logical = store.getOrCreateActive({
+      threadId: 'thread-progress',
+      catId: 'opus',
+      userId: 'user-1',
+      compressionCount: null,
+    });
+    const snapshot = {
+      config: { strategy: 'hybrid', thresholds: { warn: 0.75, action: 0.85 }, hybrid: { maxCompressions: 2 } },
+      source: 'runtime_override',
+      revision: 'revision-a',
+      changedAt: 10,
+      execution: { status: 'active', missingCapabilities: [] },
+    };
+    store.applyPolicySnapshot(logical.id, snapshot);
+
+    const first = store.recordCompressionEvent(logical.id, 'revision-a');
+    const second = store.recordCompressionEvent(logical.id, 'revision-a');
+    const stale = store.recordCompressionEvent(logical.id, 'revision-old');
+
+    assert.equal(first.revisionMatched, true);
+    assert.equal(second.hybridProgress.observedCount, 2);
+    assert.equal(second.compressionCount, null);
+    assert.equal(stale.revisionMatched, false);
+    assert.equal(stale.hybridProgress.observedCount, 2);
+    assert.equal(store.get(logical.id).compressionCount, null);
+  });
+
+  test('#1329 increments lifetime telemetry only when zero was actually observed', async () => {
+    const store = await createStore();
+    const logical = store.getOrCreateActive({
+      threadId: 'thread-observed',
+      catId: 'opus',
+      userId: 'user-1',
+      compressionCount: 0,
+    });
+    const snapshot = {
+      config: { strategy: 'compress', thresholds: { warn: 0.75, action: 0.85 } },
+      source: 'runtime_override',
+      revision: 'revision-compress',
+      changedAt: 10,
+      execution: { status: 'active', missingCapabilities: [] },
+    };
+    store.applyPolicySnapshot(logical.id, snapshot);
+
+    const event = store.recordCompressionEvent(logical.id, 'revision-compress');
+    assert.equal(event.compressionCount, 1);
+    assert.equal(event.hybridProgress, null);
+  });
+
+  test('#1329 Redis result decoding preserves unknown counters when fields are absent', async () => {
+    const { RedisSessionChainStore } = await import(
+      '../dist/domains/cats/services/stores/redis/RedisSessionChainStore.js'
+    );
+    const store = new RedisSessionChainStore({
+      eval: async () => ['recorded'],
+    });
+    store.get = async () => ({
+      hybridProgress: {
+        policyRevision: 'revision-a',
+        observedCount: 7,
+        startedAt: 10,
+      },
+    });
+
+    const event = await store.recordCompressionEvent('session-a', 'revision-a');
+
+    assert.equal(event.compressionCount, null);
+    assert.equal(event.hybridProgress.observedCount, 7);
+  });
+
   test('create() and update() preserve workspace binding metadata', async () => {
     const store = await createStore();
     const record = store.create({
@@ -187,6 +349,24 @@ describe('SessionChainStore', () => {
     assert.equal(updated.contextHealth.fillRatio, 0.25);
   });
 
+  test('update() stores the active session capacity pin', async () => {
+    const store = await createStore();
+    const record = store.create(BASE_INPUT);
+    const capacityPin = {
+      windowTokens: 200_000,
+      inputCeilingTokens: 184_000,
+      source: 'reported',
+      provenance: 'Carrier reported 200,000 tokens',
+      actionable: true,
+    };
+
+    const updated = store.update(record.id, { capacityPin });
+
+    assert.ok(updated);
+    assert.deepEqual(updated.capacityPin, capacityPin);
+    assert.deepEqual(store.getActive('opus', 'thread-1').capacityPin, capacityPin);
+  });
+
   test('update() changes cliSessionId and updates index', async () => {
     const store = await createStore();
     const record = store.create(BASE_INPUT);
@@ -337,6 +517,37 @@ describe('SessionChainStore', () => {
       const found = store.getActive('opus', `thread-${i}`);
       assert.ok(found, `thread-${i} active should still exist`);
     }
+  });
+
+  test('#1329 capacity eviction preserves every owner-scoped active session on the shared default thread', async () => {
+    const store = await createStore();
+    const first = store.create({
+      cliSessionId: 'cli-owner-0',
+      threadId: 'default',
+      catId: 'opus',
+      userId: 'user-0',
+    });
+    for (let i = 1; i < 1000; i++) {
+      store.create({
+        cliSessionId: `cli-owner-${i}`,
+        threadId: 'default',
+        catId: 'opus',
+        userId: `user-${i}`,
+      });
+    }
+
+    assert.throws(
+      () =>
+        store.create({
+          cliSessionId: 'cli-owner-overflow',
+          threadId: 'default',
+          catId: 'opus',
+          userId: 'user-overflow',
+        }),
+      /capacity/,
+    );
+    assert.equal(store.getActive('opus', 'default', 'user-0')?.id, first.id);
+    assert.equal(store.getByCliSessionId('cli-owner-0')?.id, first.id);
   });
 
   test('update() persists consecutiveRestoreFailures (F118 AC-C6)', async () => {

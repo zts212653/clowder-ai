@@ -16,6 +16,7 @@ const REDIS_URL = process.env.REDIS_URL;
 
 describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisSessionChainStore;
+  let SessionSealer;
   let createRedisClient;
   let redis;
   let store;
@@ -35,6 +36,7 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
 
     const storeModule = await import('../dist/domains/cats/services/stores/redis/RedisSessionChainStore.js');
     RedisSessionChainStore = storeModule.RedisSessionChainStore;
+    ({ SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js'));
     const redisModule = await import('@cat-cafe/shared/utils');
     createRedisClient = redisModule.createRedisClient;
 
@@ -100,6 +102,208 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.equal(record.status, 'active');
     assert.equal(record.messageCount, 0);
     assert.ok(record.createdAt > 0);
+  });
+
+  it('#1329 atomically creates one unbound logical node and binds it later', async () => {
+    const input = {
+      threadId: 'thread-logical',
+      catId: 'opus',
+      userId: 'user-1',
+      compressionCount: null,
+    };
+    const [first, second] = await Promise.all([store.getOrCreateActive(input), store.getOrCreateActive(input)]);
+    assert.equal(first.id, second.id);
+    assert.equal(first.cliSessionId, undefined);
+    assert.equal(first.compressionCount, null);
+    assert.equal((await store.getChain('opus', 'thread-logical')).length, 1);
+
+    const bound = await store.bindCliSessionId(first.id, 'cli-late');
+    assert.equal(bound.id, first.id);
+    assert.equal((await store.getByCliSessionId('cli-late')).id, first.id);
+  });
+
+  it('#1329 accepts exactly one concurrent seal transition', async () => {
+    const record = await store.create({
+      cliSessionId: 'cli-concurrent-seal',
+      threadId: 'thread-concurrent-seal',
+      catId: 'opus',
+      userId: 'user-1',
+    });
+    const sealer = new SessionSealer(store);
+    const results = await Promise.all(
+      Array.from({ length: 12 }, () => sealer.requestSeal({ sessionId: record.id, reason: 'threshold' })),
+    );
+
+    assert.equal(
+      results.filter((result) => result.accepted).length,
+      1,
+      'active -> sealing must be a store-owned CAS transition',
+    );
+  });
+
+  it('#1329 refuses an atomic seal from a superseded policy revision', async () => {
+    const record = await store.create({
+      cliSessionId: 'cli-revision-seal',
+      threadId: 'thread-revision-seal',
+      catId: 'opus',
+      userId: 'user-1',
+    });
+    await store.applyPolicySnapshot(record.id, {
+      config: { strategy: 'compress', thresholds: { warn: 0.75, action: 0.85 } },
+      source: 'runtime_override',
+      revision: 'revision-new',
+      changedAt: 2,
+      execution: { status: 'active', missingCapabilities: [] },
+    });
+
+    assert.equal(await store.transitionToSealing(record.id, 'max_compressions', 'revision-old'), null);
+    assert.equal((await store.get(record.id)).status, 'active');
+    assert.equal((await store.getActive('opus', 'thread-revision-seal', 'user-1')).id, record.id);
+  });
+
+  it('#1329 atomically isolates logical active ownership by user on a shared thread', async () => {
+    const ownerA = { threadId: 'default', catId: 'opus', userId: 'user-a', compressionCount: null };
+    const ownerB = { threadId: 'default', catId: 'opus', userId: 'user-b', compressionCount: null };
+
+    const [firstA, firstB] = await Promise.all([store.getOrCreateActive(ownerA), store.getOrCreateActive(ownerB)]);
+    const [secondA, secondB] = await Promise.all([store.getOrCreateActive(ownerA), store.getOrCreateActive(ownerB)]);
+
+    assert.notEqual(firstA.id, firstB.id);
+    assert.equal(firstA.seq, 0);
+    assert.equal(firstB.seq, 0);
+    assert.equal(secondA.id, firstA.id);
+    assert.equal(secondB.id, firstB.id);
+    assert.equal((await store.getActive('opus', 'default', 'user-a')).id, firstA.id);
+    assert.equal((await store.getActive('opus', 'default', 'user-b')).id, firstB.id);
+    assert.equal((await store.getChain('opus', 'default', 'user-a')).length, 1);
+    assert.equal((await store.getChain('opus', 'default', 'user-b')).length, 1);
+
+    await store.update(firstA.id, { status: 'sealed' });
+    const nextA = await store.getOrCreateActive({ ...ownerA, cliSessionId: 'cli-owner-a-next' });
+    assert.equal(nextA.seq, 1);
+  });
+
+  it('#1329 repairs a stale owner-active pointer instead of reviving a sealed record', async () => {
+    const input = { threadId: 'default', catId: 'opus', userId: 'user-a', compressionCount: null };
+    const sealed = await store.getOrCreateActive(input);
+    await store.update(sealed.id, { status: 'sealed', sealedAt: Date.now() });
+    await redis.set('session-active:opus:default:owner:user-a', sealed.id);
+
+    const replacement = await store.getOrCreateActive(input);
+
+    assert.notEqual(replacement.id, sealed.id);
+    assert.equal(replacement.status, 'active');
+    assert.equal((await store.get(sealed.id)).status, 'sealed');
+  });
+
+  it('#1329 sealing compare-deletes active pointers without erasing a concurrent replacement', async () => {
+    const old = await store.create({
+      cliSessionId: 'cli-pointer-old',
+      threadId: 'thread-pointer-race',
+      catId: 'opus',
+      userId: 'user-a',
+    });
+    const replacement = await store.create({
+      cliSessionId: 'cli-pointer-new',
+      threadId: 'thread-pointer-race',
+      catId: 'opus',
+      userId: 'user-a',
+    });
+    const keys = new Set([
+      'session-active:opus:thread-pointer-race',
+      'session-active:opus:thread-pointer-race:owner:user-a',
+    ]);
+    for (const key of keys) await redis.set(key, old.id);
+
+    const originalGet = redis.get.bind(redis);
+    const originalEval = redis.eval.bind(redis);
+    redis.get = async (key, ...args) => {
+      const value = await originalGet(key, ...args);
+      if (keys.has(key) && value === old.id) await redis.set(key, replacement.id);
+      return value;
+    };
+    redis.eval = async (script, numberOfKeys, key, ...args) => {
+      if (keys.has(key) && typeof script === 'string' && script.includes("redis.call('GET', KEYS[1]) == ARGV[1]")) {
+        await redis.set(key, replacement.id);
+      }
+      return originalEval(script, numberOfKeys, key, ...args);
+    };
+    try {
+      await store.update(old.id, { status: 'sealed' });
+    } finally {
+      redis.get = originalGet;
+      redis.eval = originalEval;
+    }
+
+    for (const key of keys) assert.equal(await redis.get(key), replacement.id);
+    assert.equal((await store.getActive('opus', 'thread-pointer-race', 'user-a')).id, replacement.id);
+  });
+
+  it('#1329 adopts a pre-owner-index active record without creating a duplicate', async () => {
+    const input = {
+      cliSessionId: 'cli-legacy-owner-index',
+      threadId: 'default',
+      catId: 'opus',
+      userId: 'user-a',
+      compressionCount: null,
+    };
+    const legacy = await store.create(input);
+    await redis.del('session-active:opus:default:owner:user-a');
+
+    const adopted = await store.getOrCreateActive(input);
+
+    assert.equal(adopted.id, legacy.id);
+    assert.equal((await store.getChain('opus', 'default', 'user-a')).length, 1);
+  });
+
+  it('#1329 late binding cannot steal a runtime ID from another logical node', async () => {
+    const logical = await store.getOrCreateActive({
+      threadId: 'thread-logical-conflict',
+      catId: 'opus',
+      userId: 'user-1',
+      compressionCount: null,
+    });
+    const owner = await store.create({
+      cliSessionId: 'cli-owned',
+      threadId: 'thread-owner',
+      catId: 'codex',
+      userId: 'user-1',
+    });
+
+    assert.equal(await store.bindCliSessionId(logical.id, 'cli-owned'), null);
+    assert.equal((await store.getByCliSessionId('cli-owned')).id, owner.id);
+    assert.equal((await store.get(logical.id)).cliSessionId, undefined);
+  });
+
+  it('#1329 keeps unknown lifetime telemetry separate from revision-local hybrid progress', async () => {
+    const logical = await store.getOrCreateActive({
+      threadId: 'thread-progress',
+      catId: 'opus',
+      userId: 'user-1',
+      compressionCount: null,
+    });
+    const snapshot = {
+      config: { strategy: 'hybrid', thresholds: { warn: 0.75, action: 0.85 }, hybrid: { maxCompressions: 2 } },
+      source: 'runtime_override',
+      revision: 'revision-a',
+      changedAt: 10,
+      execution: { status: 'active', missingCapabilities: [] },
+    };
+    await store.applyPolicySnapshot(logical.id, snapshot);
+
+    const [one, two] = await Promise.all([
+      store.recordCompressionEvent(logical.id, 'revision-a'),
+      store.recordCompressionEvent(logical.id, 'revision-a'),
+    ]);
+    assert.deepEqual([one.hybridProgress.observedCount, two.hybridProgress.observedCount].sort(), [1, 2]);
+    const reread = await store.get(logical.id);
+    assert.equal(reread.compressionCount, null);
+    assert.equal(reread.hybridProgress.observedCount, 2);
+
+    await store.applyPolicySnapshot(logical.id, { ...snapshot, revision: 'revision-b', changedAt: 20 });
+    const reset = await store.get(logical.id);
+    assert.equal(reset.hybridProgress.policyRevision, 'revision-b');
+    assert.equal(reset.hybridProgress.observedCount, 0);
   });
 
   it('create() and update() preserve workspace binding metadata', async () => {
@@ -237,6 +441,26 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     const updated = await store.update(record.id, { contextHealth: health });
     assert.ok(updated);
     assert.deepEqual(updated.contextHealth, health);
+  });
+
+  it('update() persists capacityPin across hydrated lookup paths', async () => {
+    const record = await store.create(BASE_INPUT);
+    const capacityPin = {
+      windowTokens: 200_000,
+      inputCeilingTokens: 184_000,
+      source: 'reported',
+      provenance: 'Carrier reported 200,000 tokens',
+      actionable: true,
+    };
+
+    const updated = await store.update(record.id, { capacityPin });
+    assert.ok(updated);
+    assert.deepEqual(updated.capacityPin, capacityPin);
+
+    const freshStore = new RedisSessionChainStore(redis);
+    assert.deepEqual((await freshStore.get(record.id)).capacityPin, capacityPin);
+    assert.deepEqual((await freshStore.getActive('opus', 'thread-1')).capacityPin, capacityPin);
+    assert.deepEqual((await freshStore.getByCliSessionId('cli-sess-1')).capacityPin, capacityPin);
   });
 
   it('update() persists continuityCapsule across hydrated lookup paths', async () => {

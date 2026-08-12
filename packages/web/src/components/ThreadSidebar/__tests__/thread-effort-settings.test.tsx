@@ -2,7 +2,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/utils/api-client';
-import { ThreadEffortSettings } from '../ThreadEffortSettings';
+import { ThreadEffortSettingsContent } from '../ThreadEffortSettings';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 vi.mock('@/components/CatAvatar', () => ({ CatAvatar: () => <span data-testid="cat-avatar" /> }));
@@ -61,18 +61,15 @@ describe('F262 ThreadEffortSettings', () => {
 
   function render() {
     act(() => {
-      root.render(<ThreadEffortSettings threadId="thread-262" triggerLabel="思考档位" triggerRole="menuitem" />);
+      root.render(<ThreadEffortSettingsContent threadId="thread-262" />);
     });
   }
 
-  it('loads lazily and renders participants before other effort-capable cats', async () => {
+  it('loads on mount and renders participants before other effort-capable cats', async () => {
     vi.mocked(apiFetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ threadId: 'thread-262', members }), { status: 200 }),
     );
     render();
-    expect(apiFetch).not.toHaveBeenCalled();
-
-    act(() => container.querySelector<HTMLButtonElement>('button[title="思考档位"]')?.click());
     await flush();
 
     expect(apiFetch).toHaveBeenCalledWith('/api/threads/thread-262/members/effort');
@@ -93,7 +90,6 @@ describe('F262 ThreadEffortSettings', () => {
         }),
       );
     render();
-    act(() => container.querySelector<HTMLButtonElement>('button[title="思考档位"]')?.click());
     await flush();
 
     const select = container.querySelector<HTMLSelectElement>('select[data-cat-id="codex-sol"]');
@@ -117,7 +113,6 @@ describe('F262 ThreadEffortSettings', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ threadId: 'thread-262', members }), { status: 200 }))
       .mockResolvedValueOnce(new Response('{}', { status: 500 }));
     render();
-    act(() => container.querySelector<HTMLButtonElement>('button[title="思考档位"]')?.click());
     await flush();
 
     const select = container.querySelector<HTMLSelectElement>('select[data-cat-id="codex-sol"]');
@@ -146,34 +141,9 @@ describe('F262 ThreadEffortSettings', () => {
       new Response(JSON.stringify({ threadId: 'thread-262', members: staleMembers }), { status: 200 }),
     );
     render();
-    act(() => container.querySelector<HTMLButtonElement>('button[title="思考档位"]')?.click());
     await flush();
 
     expect(container.querySelector<HTMLSelectElement>('select[data-cat-id="codex-sol"]')?.value).toBe('ultra');
     expect(container.textContent).toContain('当前模型不支持 ultra，暂按 xhigh 运行');
-  });
-
-  it('keeps the popover inside a narrow viewport', async () => {
-    vi.mocked(apiFetch).mockResolvedValueOnce(
-      new Response(JSON.stringify({ threadId: 'thread-262', members }), { status: 200 }),
-    );
-    vi.stubGlobal('innerWidth', 320);
-    vi.stubGlobal('innerHeight', 480);
-    render();
-    const trigger = container.querySelector<HTMLButtonElement>('button[title="思考档位"]');
-    if (!trigger) throw new Error('missing effort trigger');
-    vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue({
-      bottom: 700,
-      right: 500,
-    } as DOMRect);
-
-    act(() => trigger.click());
-    await flush();
-
-    const dialog = container.querySelector<HTMLElement>('[role="dialog"]');
-    if (!dialog) throw new Error('missing effort dialog');
-    expect(Number.parseFloat(dialog.style.left)).toBeGreaterThanOrEqual(8);
-    expect(Number.parseFloat(dialog.style.width)).toBeLessThanOrEqual(304);
-    expect(Number.parseFloat(dialog.style.top) + Number.parseFloat(dialog.style.maxHeight)).toBeLessThanOrEqual(472);
   });
 });

@@ -13,6 +13,7 @@
  * them with normal commands (which DO auto-prefix). See RedisSessionChainStore.scanKeys().
  */
 
+import { createHash, randomUUID } from 'node:crypto';
 import type { SessionStrategyConfig } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createModuleLogger } from '../infrastructure/logger.js';
@@ -21,7 +22,37 @@ import { SessionStrategyKeys } from './session-strategy-keys.js';
 const log = createModuleLogger('session-strategy-overrides');
 
 let _redis: RedisClient | undefined;
-const _cache = new Map<string, Partial<SessionStrategyConfig>>();
+
+export interface RuntimeStrategyOverride {
+  config: Partial<SessionStrategyConfig>;
+  revision: string;
+  changedAt: number;
+}
+
+const _cache = new Map<string, RuntimeStrategyOverride>();
+
+function stableLegacyRevision(config: Partial<SessionStrategyConfig>): string {
+  const input = JSON.stringify(config);
+  return `legacy:${createHash('sha256').update(input).digest('hex')}`;
+}
+
+function isRevisionedOverride(value: unknown): value is RuntimeStrategyOverride {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<RuntimeStrategyOverride>;
+  return (
+    candidate.config != null &&
+    typeof candidate.config === 'object' &&
+    typeof candidate.revision === 'string' &&
+    typeof candidate.changedAt === 'number'
+  );
+}
+
+function normalizeStoredOverride(value: unknown): RuntimeStrategyOverride | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  if (isRevisionedOverride(value)) return value;
+  const config = value as Partial<SessionStrategyConfig>;
+  return { config, revision: stableLegacyRevision(config), changedAt: 0 };
+}
 
 /**
  * Initialize the runtime override layer with a Redis client.
@@ -34,23 +65,37 @@ export async function initRuntimeOverrides(redis: RedisClient): Promise<void> {
 
 /** Get the runtime override for a specific cat (sync, from cache). */
 export function getRuntimeOverride(catId: string): Partial<SessionStrategyConfig> | undefined {
+  return _cache.get(catId)?.config;
+}
+
+/** Get the revision metadata used to snapshot policy at invocation boundaries. */
+export function getRuntimeOverrideEntry(catId: string): RuntimeStrategyOverride | undefined {
   return _cache.get(catId);
 }
 
 /** Get all runtime overrides (sync, from cache). */
 export function getAllRuntimeOverrides(): ReadonlyMap<string, Partial<SessionStrategyConfig>> {
-  return _cache;
+  return new Map([..._cache].map(([catId, entry]) => [catId, entry.config]));
 }
 
 /**
  * Set a runtime strategy override for a variant cat.
  * Write-through: Redis first, then cache on success (P1-3: no cache split on Redis failure).
  */
-export async function setRuntimeOverride(catId: string, override: Partial<SessionStrategyConfig>): Promise<void> {
+export async function setRuntimeOverride(
+  catId: string,
+  override: Partial<SessionStrategyConfig>,
+): Promise<RuntimeStrategyOverride> {
+  const entry: RuntimeStrategyOverride = {
+    config: override,
+    revision: randomUUID(),
+    changedAt: Date.now(),
+  };
   if (_redis) {
-    await _redis.set(SessionStrategyKeys.override(catId), JSON.stringify(override));
+    await _redis.set(SessionStrategyKeys.override(catId), JSON.stringify(entry));
   }
-  _cache.set(catId, override);
+  _cache.set(catId, entry);
+  return entry;
 }
 
 /**
@@ -93,7 +138,7 @@ async function hydrateFromRedis(): Promise<void> {
   // Build into a temporary map — only swap to _cache on full success.
   // If SCAN fails mid-way, _cache stays empty (clean fallback) rather than
   // holding a partial subset that silently drops some overrides.
-  const tempCache = new Map<string, Partial<SessionStrategyConfig>>();
+  const tempCache = new Map<string, RuntimeStrategyOverride>();
   let cursor = '0';
   do {
     const [nextCursor, keys] = await _redis.scan(cursor, 'MATCH', matchPattern, 'COUNT', 100);
@@ -105,7 +150,8 @@ async function hydrateFromRedis(): Promise<void> {
       if (raw) {
         const catId = key.slice(keyPrefix.length);
         try {
-          tempCache.set(catId, JSON.parse(raw) as Partial<SessionStrategyConfig>);
+          const normalized = normalizeStoredOverride(JSON.parse(raw));
+          if (normalized) tempCache.set(catId, normalized);
         } catch {
           log.warn({ key }, 'invalid JSON in Redis key, skipping');
         }

@@ -41,7 +41,7 @@ co-creation docs → co-creation-docs → direct push | merge-gate(docs PR)
 | `convention-graph-discovery` | 进入陌生 repo / F242 约定图工作：定义 domain、extractor、gap/freshness/provenance 报告 | — |
 | `knowledge-engineering` | 外部项目文档重构/冷启动知识注入 | — |
 | `memory-navigation` | 项目记忆三入口路由（graph / recent / search） | — |
-| `proactive-memory-judgment` | 单次 continuity-valued 人物线索的 F276 提案 / calibrated-abstention 判断 | — |
+| `proactive-memory-judgment` | 单次 continuity-valued 人物线索的 F276 即时提案 / known-person defer / calibrated-abstention 判断 | — |
 | `memory-search-best-practices` | 记忆系统多刀检索 + recall coverage 策略（8 类题型 recipe） | — |
 | `writing-skills` | 写新 skill | — |
 | `pencil-design` | 设计 UI / .pen 文件 | — |

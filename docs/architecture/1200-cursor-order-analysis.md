@@ -5,7 +5,7 @@ feature_ids: [F254]
 related_features: [F052, F102, F117, F118, F123, F167, F194, F220, F224, F232, F236]
 topics: [cursor, visibility, ordering, pagination, migration]
 created: 2026-07-27
-updated: 2026-08-05
+updated: 2026-08-08
 status: approved
 author: "mindfn"
 description: "Issue #1200/#1269 的消息出生顺序与首次可见顺序分析，以及 visibility cursor v2 的终态契约、迁移和激活边界。"
@@ -574,6 +574,26 @@ On receiving a v1 cursor (raw message ID), resolve to a **pair**:
    Not ID-prefix decoding — an index lookup.
 3. Fully pruned → `(0, "")` (scan from start); callers' idempotent ack (already
    required, pinned by RED #2) absorbs re-reads.
+
+**2026-08-08 state-consumer amendment (#3444 closure):** step 3 is the default
+only for generic, at-least-once pagination. It must not be silently reused as a
+read-evidence policy. `getByThreadAfter` therefore distinguishes an omitted
+cursor from an explicitly supplied cursor whose position is unresolvable:
+
+- generic history, context transport, and closure verification retain `rescan`;
+- unread, seen/freshness, terminal re-invoke, and Duty Brief projections select
+  `empty`, so indeterminate history is not reborn as new state;
+- malformed stored tokens are strict errors for generic callers but are bounded
+  as unresolved for those state projections;
+- a later accepted ACK may repair an unresolvable durable delivery, mention,
+  seen, or human-read slot by exact compare-and-replace. This does not compare
+  the old unknown position: the new validated boundary is fresh evidence, and
+  exact CAS prevents overwriting a concurrent writer. The ordinary monotonic
+  Lua remains fail-closed.
+
+An omitted cursor still means “from origin” in every mode. This policy split is
+part of the cursor contract; neither global rescan nor global empty semantics is
+correct across all consumers.
 
 **Successor query (both stores, all regions):**
 ```

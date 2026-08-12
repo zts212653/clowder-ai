@@ -1186,6 +1186,94 @@ describe('cat-catalog-store', () => {
     assert.deepEqual(custom.acp, { command: 'gemini', startupArgs: ['--acp'] });
   });
 
+  it('migrates existing gemini35 catalogs from Gemini 3.5 identity to Gemini 3.6', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-gemini36-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    const template = makeF127BootstrapTemplate();
+    const templateBreed = template.breeds.find((breed) => breed.id === 'siamese');
+    templateBreed.catId = 'gemini35';
+    templateBreed.name = '暹罗猫 Gemini 3.6 Flash';
+    templateBreed.mentionPatterns = [
+      '@gemini35',
+      '@gemini-35',
+      '@gemini3.5',
+      '@gemini36',
+      '@gemini-36',
+      '@gemini3.6',
+      '@flash',
+      '@暹罗flash',
+      '@暹罗gemini35',
+      '@暹罗gemini36',
+    ];
+    templateBreed.roleDescription = '暹罗猫 Gemini 3.6 Flash，视觉设计和创意顾问';
+    templateBreed.variants[0].clientId = 'google';
+    templateBreed.variants[0].variantLabel = 'Gemini 3.6 Flash';
+    templateBreed.variants[0].defaultModel = 'Gemini 3.6 Flash (High)';
+    templateBreed.variants[0].cli = { command: 'agy', outputFormat: 'plainText', defaultArgs: [] };
+    delete templateBreed.variants[0].provider;
+    writeFileSync(templatePath, JSON.stringify(template, null, 2));
+
+    const catalog = makeF127BootstrapTemplate();
+    const legacyBreed = catalog.breeds.find((breed) => breed.id === 'siamese');
+    legacyBreed.catId = 'gemini35';
+    legacyBreed.name = '暹罗猫 Gemini 3.5 Flash';
+    legacyBreed.mentionPatterns = ['@gemini35', '@gemini-35', '@gemini3.5', '@暹罗gemini35'];
+    legacyBreed.roleDescription = '暹罗猫 Gemini 3.5 Flash，视觉设计和创意顾问';
+    const legacyVariant = legacyBreed.variants[0];
+    legacyVariant.clientId = 'google';
+    legacyVariant.variantLabel = 'Gemini 3.5 Flash';
+    legacyVariant.defaultModel = 'gemini-3.5-flash';
+    legacyVariant.cli = { command: 'gemini', outputFormat: 'stream-json', defaultArgs: [] };
+    legacyVariant.acp = { command: 'gemini', startupArgs: ['--acp'] };
+    delete legacyVariant.provider;
+    writeCatCatalog(projectRoot, catalog);
+
+    bootstrapCatCatalog(projectRoot, templatePath);
+
+    const rawCatalog = JSON.parse(readFileSync(resolveCatCatalogPath(projectRoot), 'utf-8'));
+    const migratedBreed = rawCatalog.breeds.find((breed) => breed.id === 'siamese');
+    const migrated = migratedBreed.variants[0];
+    assert.equal(migratedBreed.name, '暹罗猫 Gemini 3.6 Flash');
+    assert.equal(migratedBreed.roleDescription, '暹罗猫 Gemini 3.6 Flash，视觉设计和创意顾问');
+    for (const alias of ['@gemini36', '@gemini-36', '@gemini3.6', '@暹罗gemini36']) {
+      assert.ok(migratedBreed.mentionPatterns.includes(alias), `existing catalog gains ${alias}`);
+    }
+    assert.equal(migratedBreed.mentionPatterns.includes('@flash'), false);
+    assert.equal(migratedBreed.mentionPatterns.includes('@暹罗flash'), false);
+    assert.equal(migrated.variantLabel, 'Gemini 3.6 Flash');
+    assert.equal(migrated.defaultModel, 'Gemini 3.6 Flash (High)');
+    assert.deepEqual(migrated.cli, { command: 'agy', outputFormat: 'plainText', defaultArgs: [] });
+    assert.equal(migrated.acp, null);
+  });
+
+  it('migrates already-normalized gemini35 3.5 labels to the Gemini 3.6 selector', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-gemini36-label-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    const template = makeF127BootstrapTemplate();
+    const templateBreed = template.breeds.find((breed) => breed.id === 'siamese');
+    templateBreed.catId = 'gemini35';
+    templateBreed.variants[0].clientId = 'google';
+    templateBreed.variants[0].cli = { command: 'agy', outputFormat: 'plainText', defaultArgs: [] };
+    delete templateBreed.variants[0].provider;
+    writeFileSync(templatePath, JSON.stringify(template, null, 2));
+
+    const catalog = makeF127BootstrapTemplate();
+    const legacyBreed = catalog.breeds.find((breed) => breed.id === 'siamese');
+    legacyBreed.catId = 'gemini35';
+    const legacyVariant = legacyBreed.variants[0];
+    legacyVariant.clientId = 'google';
+    legacyVariant.defaultModel = 'Gemini 3.5 Flash (High)';
+    legacyVariant.cli = { command: 'agy', outputFormat: 'plainText', defaultArgs: [] };
+    delete legacyVariant.provider;
+    writeCatCatalog(projectRoot, catalog);
+
+    bootstrapCatCatalog(projectRoot, templatePath);
+
+    const rawCatalog = JSON.parse(readFileSync(resolveCatCatalogPath(projectRoot), 'utf-8'));
+    const migrated = rawCatalog.breeds.find((breed) => breed.id === 'siamese').variants[0];
+    assert.equal(migrated.defaultModel, 'Gemini 3.6 Flash (High)');
+  });
+
   it('migrates persisted Gemini 2.5 ids to AGY selector labels when carrier is already AGY', () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
     const templatePath = join(projectRoot, 'cat-template.json');

@@ -954,6 +954,58 @@ describe('consumeBackgroundSystemInfo provider_capability (#966)', () => {
 });
 
 describe('consumeBackgroundSystemInfo warning + telemetry suppression', () => {
+  it('patches a background reconnect notice to recovered with the same identity', () => {
+    const initial = {
+      id: 'provider-recovery:codex-sol:turn-bg',
+      type: 'system',
+      variant: 'info',
+      catId: 'codex-sol',
+      content: 'Reconnecting to codex (attempt 1)…',
+      timestamp: 100,
+    };
+    const options = createMockOptions({
+      getThreadState: vi.fn(() => ({ messages: [initial], catStatuses: {}, catInvocations: {} })),
+    });
+
+    const result = consumeBackgroundSystemInfo(
+      {
+        type: 'system_info',
+        catId: 'codex-sol',
+        threadId: 'thread-bg',
+        invocationId: 'parent-bg',
+        turnInvocationId: 'turn-bg',
+        content: JSON.stringify({
+          type: 'provider_recovery',
+          provider: 'codex',
+          phase: 'recovered',
+          invocationId: 'turn-bg',
+          attempts: ['Reconnecting... 1/5'],
+          evidence: 'turn.completed',
+        }),
+        timestamp: 200,
+      },
+      undefined,
+      options,
+    );
+
+    expect(result.consumed).toBe(true);
+    expect(options.store.addMessageToThread).not.toHaveBeenCalled();
+    expect(options.store.patchThreadMessage).toHaveBeenCalledWith(
+      'thread-bg',
+      'provider-recovery:codex-sol:turn-bg',
+      expect.objectContaining({
+        content: 'Connection recovered.',
+        extra: expect.objectContaining({
+          providerRecovery: expect.objectContaining({
+            phase: 'recovered',
+            invocationId: 'turn-bg',
+            parentInvocationId: 'parent-bg',
+          }),
+        }),
+      }),
+    );
+  });
+
   it('converts warning JSON to readable text (not raw JSON bubble)', () => {
     const options = createMockOptions();
 

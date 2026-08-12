@@ -31,6 +31,7 @@ import {
   shouldLoadOlderForTeleport,
   TELEPORT_RESOLVE_EVENT,
 } from '@/utils/teleport';
+import { resumeInvocationReconciliationAfterHydration } from './invocation-timeout-reconciliation';
 import { hydrateQueueActiveInvocationSlots, type QueueActiveInvocationSlot } from './queue-active-invocation-hydration';
 
 type SavedScrollState = {
@@ -65,14 +66,31 @@ export function deriveQueueHydrationTargetCats({
   return activeCatIds;
 }
 
-function isNearBottom(el: HTMLElement): boolean {
+function isNearBottom(el: { scrollTop: number; scrollHeight: number; clientHeight: number }): boolean {
   return el.scrollHeight - el.clientHeight - el.scrollTop <= SCROLL_BOTTOM_THRESHOLD_PX;
 }
 
-function rememberScrollState(threadId: string, el: HTMLElement) {
+/**
+ * Decide the bottom-follow anchor from a scroll observation. Geometry alone cannot distinguish
+ * user scrolling from smooth-follow or layout corrections, so leaving bottom follow requires an
+ * explicit upward-input signal. Intentional message jumps set the saved anchor to offset directly.
+ *
+ * Exported for unit testing — see __tests__/resolveScrollAnchor.test.ts.
+ */
+export function resolveScrollAnchor(
+  el: { scrollTop: number; scrollHeight: number; clientHeight: number },
+  prev: SavedScrollState | null,
+  userScrolledUp = false,
+): SavedScrollState['anchor'] {
+  if (isNearBottom(el)) return 'bottom';
+  if (prev?.anchor !== 'bottom') return 'offset';
+  return userScrolledUp && el.scrollTop < prev.top ? 'offset' : 'bottom';
+}
+
+function rememberScrollState(threadId: string, el: HTMLElement, userScrolledUp = false) {
   scrollPositionsByThread.set(threadId, {
     top: el.scrollTop,
-    anchor: isNearBottom(el) ? 'bottom' : 'offset',
+    anchor: resolveScrollAnchor(el, scrollPositionsByThread.get(threadId) ?? null, userScrolledUp),
   });
 }
 
@@ -99,6 +117,10 @@ type ReplaceHydrationMergeResult = {
 type MessageExtra = NonNullable<ChatMessageData['extra']>;
 type MessageRichPayload = MessageExtra['rich'];
 type MessageToolEvent = NonNullable<ChatMessageData['toolEvents']>[number];
+
+function invocationReconciliationMessages(messages: readonly ChatMessageData[]): ChatMessageData[] {
+  return messages.filter((message) => message.extra?.invocationReconciliation !== undefined);
+}
 
 function getHistoryInvocationId(msg: ChatMessageData): string | undefined {
   if (msg.extra?.isExplicitPost) return undefined;
@@ -571,9 +593,13 @@ export function mergeReplaceHydrationMessages(
   let reconciledToHistoryCount = 0;
   let replacedHistoryCount = 0;
 
-  for (const msg of currentMsgs) {
-    // F183 Phase D AC-D2 (砚砚 R1 P1 fix): IDB-origin messages NEVER participate
-    // in the merge — server history is authoritative. Skip BEFORE id/streamKey
+  for (const currentMsg of currentMsgs) {
+    let msg = currentMsg;
+    // F183 Phase D AC-D2 (砚砚 R1 P1 fix): ordinary IDB-origin messages never
+    // participate in the merge — server history is authoritative. The sole
+    // exception is an invocation-reconciliation projection: terminal receipts
+    // are immutable, while `/queue` + InvocationRecord immediately revalidate
+    // unresolved receipts after hydration. Skip BEFORE id/streamKey
     // matching so cached IDB never enters mergeSameIdHydrationMessage (which
     // could spread cachedFrom into a "richer-current preferred" outcome) nor
     // the streamKey replacement branch (which would write the cached msg
@@ -581,9 +607,11 @@ export function mergeReplaceHydrationMessages(
     // as-is; for unmatched, the cached copy is dropped. F164 AC-A3 instant
     // render still works: IDB hydrates first paint, API hydration replaces
     // cleanly without cache leakage.
-    if (msg.cachedFrom === 'idb') {
+    const isInvocationReconciliationProjection = msg.extra?.invocationReconciliation !== undefined;
+    if (msg.cachedFrom === 'idb' && !isInvocationReconciliationProjection) {
       continue;
     }
+    if (msg.cachedFrom === 'idb') msg = { ...msg, cachedFrom: undefined };
 
     // Strategy: stable-identity lookup. id 优先于 streamKey（id 命中走 same-id 合并）。
     const idHit = historyIndexByStableId.get(msg.id);
@@ -699,11 +727,9 @@ export function useChatHistory(threadId: string) {
     messages,
     isLoadingHistory,
     hasMore,
-    prependHistory,
-    replaceMessages,
+    replaceThreadMessages,
     hydrateThread,
-    setLoadingHistory,
-    clearMessages,
+    setThreadLoadingHistory,
     setCatInvocation,
     replaceThreadTargetCats,
     updateThreadCatStatus,
@@ -715,11 +741,9 @@ export function useChatHistory(threadId: string) {
       messages: s.messages,
       isLoadingHistory: s.isLoadingHistory,
       hasMore: s.hasMore,
-      prependHistory: s.prependHistory,
-      replaceMessages: s.replaceMessages,
+      replaceThreadMessages: s.replaceThreadMessages,
       hydrateThread: s.hydrateThread,
-      setLoadingHistory: s.setLoadingHistory,
-      clearMessages: s.clearMessages,
+      setThreadLoadingHistory: s.setThreadLoadingHistory,
       setCatInvocation: s.setCatInvocation,
       replaceThreadTargetCats: s.replaceThreadTargetCats,
       updateThreadCatStatus: s.updateThreadCatStatus,
@@ -738,6 +762,7 @@ export function useChatHistory(threadId: string) {
   const prevCountRef = useRef(0);
   const scrollSnapshotRef = useRef<number | null>(null);
   const restoreFrameRef = useRef<number | null>(null);
+  const userScrollUpRef = useRef(false);
 
   // Track loading guard per-thread to prevent double-fetch
   const loadingRef = useRef(false);
@@ -747,6 +772,10 @@ export function useChatHistory(threadId: string) {
   // Always-current threadId for stale response checks
   const threadIdRef = useRef(threadId);
   threadIdRef.current = threadId;
+
+  const isStaleThreadRequest = useCallback((controller: AbortController, capturedThreadId: string) => {
+    return controller.signal.aborted || abortRef.current !== controller || threadIdRef.current !== capturedThreadId;
+  }, []);
 
   const cancelPendingRestore = useCallback(() => {
     if (restoreFrameRef.current !== null) {
@@ -826,13 +855,29 @@ export function useChatHistory(threadId: string) {
       const scheduledForThread = threadIdRef.current;
       let framesRemaining = MAX_RESTORE_FRAMES;
       const tick = () => {
-        if (threadIdRef.current !== scheduledForThread) return;
-        if (scrollToMessage(messageId)) return;
+        if (threadIdRef.current !== scheduledForThread) {
+          restoreFrameRef.current = null;
+          return;
+        }
+        if (scrollToMessage(messageId)) {
+          const el = scrollContainerRef.current;
+          if (el) {
+            scrollPositionsByThread.set(scheduledForThread, {
+              top: el.scrollTop,
+              anchor: 'offset',
+            });
+          }
+          restoreFrameRef.current = null;
+          return;
+        }
         framesRemaining -= 1;
-        if (framesRemaining <= 0) return;
-        requestAnimationFrame(tick);
+        if (framesRemaining <= 0) {
+          restoreFrameRef.current = null;
+          return;
+        }
+        restoreFrameRef.current = requestAnimationFrame(tick);
       };
-      requestAnimationFrame(tick);
+      restoreFrameRef.current = requestAnimationFrame(tick);
     },
     [cancelPendingRestore],
   );
@@ -872,10 +917,10 @@ export function useChatHistory(threadId: string) {
       if (loadingRef.current) return;
       const controller = abortRef.current;
       if (!controller) return;
+      const fetchForThread = threadId; // capture at call time
 
       loadingRef.current = true;
-      setLoadingHistory(true);
-      const fetchForThread = threadId; // capture at call time
+      setThreadLoadingHistory(fetchForThread, true);
       try {
         const isExport =
           typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('export') === 'true';
@@ -887,9 +932,10 @@ export function useChatHistory(threadId: string) {
           signal: controller.signal,
         });
         if (!res.ok) return;
-        // Stale check: discard if thread changed during fetch
-        if (threadIdRef.current !== fetchForThread) return;
+        // Stale check: discard if the request was superseded while the response body was in flight.
+        if (isStaleThreadRequest(controller, fetchForThread)) return;
         const data = await res.json();
+        if (isStaleThreadRequest(controller, fetchForThread)) return false;
         const historyMsgs = (data.messages ?? []).map(
           (m: {
             id: string;
@@ -1025,17 +1071,16 @@ export function useChatHistory(threadId: string) {
             }) as ChatMessageData,
         );
         if (options?.replace) {
-          // Replace mode now does a non-destructive merge first, then resets the thread
-          // snapshot to the merged result in one step. The clear is no longer "drop
-          // everything and trust history", it is "replace the stale cache with the
-          // merged timeline we just computed". By the time this async callback runs,
-          // setCurrentThread has already executed, so clearMessages targets the
-          // correct thread.
+          // Merge only against the captured Thread's projection, then replace that
+          // projection atomically. The flat compatibility view may already point at
+          // another Thread by the time this async callback commits.
           const currentState = useChatStore.getState();
+          const targetProjection =
+            currentState.currentThreadId === fetchForThread ? currentState : currentState.threadStates[fetchForThread];
           const mergeResult = mergeReplaceHydrationMessages(
             historyMsgs,
-            currentState.messages,
-            currentState.catInvocations,
+            targetProjection?.messages ?? [],
+            targetProjection?.catInvocations ?? {},
           );
           const mergedMsgs = mergeResult.messages;
           recordDebugEvent({
@@ -1050,7 +1095,7 @@ export function useChatHistory(threadId: string) {
             queueLength: mergedMsgs.length,
             reason: [
               `history=${historyMsgs.length}`,
-              `current=${currentState.messages.length}`,
+              `targetLocal=${targetProjection?.messages.length ?? 0}`,
               `preservedLocal=${mergeResult.stats.preservedLocalCount}`,
               `reconciledToHistory=${mergeResult.stats.reconciledToHistoryCount}`,
               `replacedHistory=${mergeResult.stats.replacedHistoryCount}`,
@@ -1068,19 +1113,24 @@ export function useChatHistory(threadId: string) {
           const projectedMerged = projectCanonicalBubbles({ records: mergedMsgs }).messages;
           hydrateThread(fetchForThread, projectedMerged, data.hasMore ?? false);
           restoreActiveFromDrafts(fetchForThread, data.messages ?? []);
+          resumeInvocationReconciliationAfterHydration(fetchForThread);
           return true;
         }
         // F194 Phase Z8 AC-Z22 + R2 P2 (砚砚): page-boundary projection — project
         // (new historyMsgs ∪ existing store messages) so cross-page same-(catId, invocationId)
         // raw records collapse into one canonical bubble. Plain prependHistory only dedupes
         // by id, leaving canonical siblings split across page boundary.
-        const beforePrepend = useChatStore.getState().messages;
+        const currentState = useChatStore.getState();
+        const beforePrepend =
+          currentState.currentThreadId === fetchForThread
+            ? currentState.messages
+            : (currentState.threadStates[fetchForThread]?.messages ?? []);
         const unionProjected = projectCanonicalBubbles({
           records: [...historyMsgs, ...beforePrepend],
         }).messages;
         // Replace store with projected union (cleaner than prepend + post-merge).
         // hasMore propagates older-history pagination state.
-        replaceMessages(unionProjected, data.hasMore ?? false);
+        replaceThreadMessages(fetchForThread, unionProjected, data.hasMore ?? false);
         restoreActiveFromDrafts(fetchForThread, data.messages ?? []);
         // F164: Snapshot fetched messages to IndexedDB (fire-and-forget)
         const snapshotState = useChatStore.getState();
@@ -1096,11 +1146,18 @@ export function useChatHistory(threadId: string) {
         // Do not let stale/aborted request clear loading state for a newer thread request.
         if (abortRef.current === controller && threadIdRef.current === fetchForThread) {
           loadingRef.current = false;
-          setLoadingHistory(false);
+          setThreadLoadingHistory(fetchForThread, false);
         }
       }
     },
-    [setLoadingHistory, prependHistory, replaceMessages, hydrateThread, restoreActiveFromDrafts, threadId],
+    [
+      setThreadLoadingHistory,
+      replaceThreadMessages,
+      hydrateThread,
+      restoreActiveFromDrafts,
+      isStaleThreadRequest,
+      threadId,
+    ],
   );
 
   const fetchTasks = useCallback(async () => {
@@ -1337,8 +1394,7 @@ export function useChatHistory(threadId: string) {
     const hydrateSecondaryPanels = () => {
       if (secondaryHydrationStarted) return;
       secondaryHydrationStarted = true;
-      if (abortRef.current !== controller || threadIdRef.current !== threadId) return;
-      if (controller.signal.aborted) return;
+      if (isStaleThreadRequest(controller, threadId)) return;
       void fetchTasks();
       void fetchTaskProgress();
       void fetchQueue();
@@ -1346,7 +1402,9 @@ export function useChatHistory(threadId: string) {
 
     // F164: Reset offline badge on every thread switch so stale state from
     // a previous thread's aborted fetch never leaks to the new thread.
-    useChatStore.getState().setOfflineSnapshot(false);
+    if (useChatStore.getState().currentThreadId === threadId) {
+      useChatStore.getState().setOfflineSnapshot(false);
+    }
 
     // F194 Phase Z10 AC-Z28 (R14): restore IDB active state snapshot for F5
     // first paint so UI doesn't show fake "idle" gap while fetchQueue is
@@ -1357,7 +1415,7 @@ export function useChatHistory(threadId: string) {
     void (async () => {
       try {
         const snapshot = await loadThreadActiveState(threadId);
-        if (abortRef.current !== controller || threadIdRef.current !== threadId) return;
+        if (isStaleThreadRequest(controller, threadId)) return;
         if (!snapshot) return;
         // F194 Phase Z10 (砚砚 R1 P1): if fetchQueue already wrote server truth
         // (active OR idle), IDB restore must NOT overwrite. The previous
@@ -1383,20 +1441,38 @@ export function useChatHistory(threadId: string) {
         let restoredFromIdb = false;
         try {
           const idbSnapshot = await loadCachedMessages(threadId);
+          if (isStaleThreadRequest(controller, threadId)) return;
           if (idbSnapshot && idbSnapshot.messages.length > 0) {
-            replaceMessages(idbSnapshot.messages, idbSnapshot.hasMore);
-            useChatStore.getState().setOfflineSnapshot(true);
+            replaceThreadMessages(threadId, idbSnapshot.messages, idbSnapshot.hasMore);
+            if (useChatStore.getState().currentThreadId === threadId) {
+              useChatStore.getState().setOfflineSnapshot(true);
+            }
             restoredFromIdb = true;
           } else if (isThreadSynced) {
-            clearMessages();
+            // Timeout projections are absent from server message history by
+            // design. Preserve their receipt; `/queue` + InvocationRecord
+            // revalidate unresolved phases instead of losing identity on F5.
+            replaceThreadMessages(
+              threadId,
+              invocationReconciliationMessages(useChatStore.getState().getThreadState(threadId).messages),
+              true,
+            );
           }
         } catch {
-          if (isThreadSynced) clearMessages();
+          if (isStaleThreadRequest(controller, threadId)) return;
+          if (isThreadSynced) {
+            replaceThreadMessages(
+              threadId,
+              invocationReconciliationMessages(useChatStore.getState().getThreadState(threadId).messages),
+              true,
+            );
+          }
         }
+        if (isStaleThreadRequest(controller, threadId)) return;
         // Always fetch fresh data from API (replace snapshot)
         const fetchOk = await fetchHistory(undefined, { replace: true });
         // F164: Clear offline badge only after successful API fetch
-        if (restoredFromIdb && fetchOk) {
+        if (restoredFromIdb && fetchOk && useChatStore.getState().currentThreadId === threadId) {
           useChatStore.getState().setOfflineSnapshot(false);
         }
       } else if (
@@ -1431,7 +1507,17 @@ export function useChatHistory(threadId: string) {
       cancelPendingRestore();
       abortRef.current?.abort();
     };
-  }, [threadId, cancelPendingRestore, clearMessages, fetchHistory, fetchQueue, fetchTaskProgress, fetchTasks]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [
+    threadId,
+    cancelPendingRestore,
+    fetchHistory,
+    fetchQueue,
+    fetchTaskProgress,
+    fetchTasks,
+    isStaleThreadRequest,
+    queueFetchedControllers,
+    replaceThreadMessages,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Bug C safety net: when useAgentMessages detects done(isFinal) with no
   // streaming bubble, or processThreadSeq detects gap/epoch-change, it bumps
@@ -1662,6 +1748,77 @@ export function useChatHistory(threadId: string) {
     };
   }, [followBottomAnchor]);
 
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+
+    let touchY: number | null = null;
+    let pointerY: number | null = null;
+    const markUpwardIntent = () => {
+      userScrollUpRef.current = true;
+    };
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0) markUpwardIntent();
+    };
+    const handleTouchStart = (event: TouchEvent) => {
+      touchY = event.touches[0]?.clientY ?? null;
+    };
+    const handleTouchMove = (event: TouchEvent) => {
+      const nextY = event.touches[0]?.clientY ?? null;
+      if (touchY !== null && nextY !== null && nextY > touchY) markUpwardIntent();
+      touchY = nextY;
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      pointerY = event.clientY;
+    };
+    const handlePointerMove = (event: PointerEvent) => {
+      if (pointerY !== null && event.clientY < pointerY) markUpwardIntent();
+      pointerY = event.clientY;
+    };
+    const clearPointer = () => {
+      pointerY = null;
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        event.defaultPrevented ||
+        (target instanceof HTMLElement &&
+          (target.isContentEditable || target.matches('input, textarea, select, [role="textbox"]')))
+      ) {
+        return;
+      }
+      if (
+        event.key === 'ArrowUp' ||
+        event.key === 'PageUp' ||
+        event.key === 'Home' ||
+        (event.key === ' ' && event.shiftKey)
+      ) {
+        markUpwardIntent();
+      }
+    };
+
+    el.addEventListener('wheel', handleWheel, { passive: true });
+    el.addEventListener('touchstart', handleTouchStart, { passive: true });
+    el.addEventListener('touchmove', handleTouchMove, { passive: true });
+    el.addEventListener('touchend', clearPointer, { passive: true });
+    el.addEventListener('pointerdown', handlePointerDown, { passive: true });
+    el.addEventListener('pointermove', handlePointerMove, { passive: true });
+    el.addEventListener('pointerup', clearPointer, { passive: true });
+    el.addEventListener('pointercancel', clearPointer, { passive: true });
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      el.removeEventListener('wheel', handleWheel);
+      el.removeEventListener('touchstart', handleTouchStart);
+      el.removeEventListener('touchmove', handleTouchMove);
+      el.removeEventListener('touchend', clearPointer);
+      el.removeEventListener('pointerdown', handlePointerDown);
+      el.removeEventListener('pointermove', handlePointerMove);
+      el.removeEventListener('pointerup', clearPointer);
+      el.removeEventListener('pointercancel', clearPointer);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
   // Load more when scrolled to top + clowder-ai#27 continuous scroll save
   const handleScroll = useCallback(() => {
     const el = scrollContainerRef.current;
@@ -1671,7 +1828,8 @@ export function useChatHistory(threadId: string) {
     // Guard: don't save during store swap (DOM content may not match threadId,
     // and browser may fire scroll events with scrollTop=0 during content swap).
     if (useChatStore.getState().currentThreadId === threadIdRef.current) {
-      rememberScrollState(threadIdRef.current, el);
+      rememberScrollState(threadIdRef.current, el, userScrollUpRef.current);
+      userScrollUpRef.current = false;
     }
 
     if (!hasMore || isLoadingHistory) return;

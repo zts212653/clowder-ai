@@ -1,24 +1,32 @@
 ---
 cell_id: plugin
 title: Plugin Framework
-summary: Repository-local plugin activation plus Host-governed external official-plugin contracts, grants, runtime isolation, and owned resource adapters.
-canonical_features: [F202, F285]
+summary: Repository-local plugin activation plus Host-governed external package inventory, Broker sessions, grants, durable call settlement, owned resource adapters, and narrow receipt-bearing Host capabilities.
+canonical_features: [F202, F247, F285, F292]
 code_anchors:
   - packages/api/src/domains/plugin/PluginRegistry.ts
   - packages/api/src/domains/plugin/PluginResourceActivator.ts
   - packages/api/src/domains/plugin/ScheduleFactoryRegistry.ts
   - packages/api/src/domains/plugin/plugin-manifest.ts
   - packages/api/src/domains/plugin/plugin-config-store.ts
+  - packages/api/src/domains/plugin/host-inventory/index.ts
+  - packages/api/src/domains/plugin/host-broker/index.ts
+  - packages/api/src/domains/plugin/host-broker/events-publish-handler.ts
   - packages/api/src/routes/plugin-routes.ts
   - packages/shared/src/types/plugin.ts
+  - packages/api/src/domains/cats/services/cloud-bridge/conversation-host-adapter.ts
 doc_anchors:
   - docs/features/F202-plugin-framework.md
   - docs/features/F285-stackchan-physical-limb-plugin.md
-static_scan_hints: [PluginRegistry, PluginResourceActivator, ScheduleFactoryRegistry, plugin.yaml, pluginId, plugin-owned, factoryId, schedule, PluginConfigPanel]
+  - docs/features/F247-cloud-cat-family.md
+static_scan_hints: [PluginRegistry, PluginResourceActivator, ScheduleFactoryRegistry, PluginInventoryStore, HostBrokerControlPlane, HostBrokerStore, BrokerMethodHandler, IConversationHostAdapter, append_message, plugin.yaml, pluginId, plugin-owned, factoryId, schedule, PluginConfigPanel]
 cited_by:
   - {feature: F202, date: 2026-05-31, delta: new cell}
   - {feature: F202, date: 2026-06-08, delta: schedule resources}
   - {feature: F285, date: 2026-08-01, delta: external official-plugin and physical-limb contribution boundary}
+  - {feature: F292, date: 2026-08-08, delta: C-2 signal declaration/wire contribution boundary; durable intake stays in signal-intake}
+  - {feature: F247, date: 2026-08-08, delta: narrow conversation Host Adapter seam with no implicit UI fallback}
+  - {feature: F202, date: 2026-08-10, delta: K-2B contract-native Broker sessions, durable call ledger, and typed signal-intake edge}
 ---
 
 # Plugin Framework
@@ -37,6 +45,20 @@ resource adapters, and the existing domain control planes that those adapters
 invoke. A plugin-declared contribution is a candidate resource, never proof of
 identity, installation, permission, health, or execution authority.
 
+K-2A and K-2B make that Host authority executable without loading community
+code into the API process. The inventory owns admitted package, installation,
+grant, and activation truth. The Broker owns one-use handshake sessions,
+runtime leases, and a durable call ledger whose recovery consults the owning
+domain's canonical settlement before it can redispatch. The builtin loopback
+adapter exercises this same state machine, but production composition and an
+external process transport remain dormant.
+
+F247 owns the first narrow conversation Host capability seam:
+`append_message(conversationId, text, idempotencyKey)` returns a durable Host
+message ID. The seam is an admission point, not proof that a provider exposes
+the capability. A missing adapter fails closed; foreground browser/composer
+automation is a separate, explicitly enabled legacy transport.
+
 ## Use This When
 
 - Adding or changing `plugins/<plugin-id>/plugin.yaml` manifest semantics.
@@ -46,6 +68,8 @@ identity, installation, permission, health, or execution authority.
   explains plugin-owned resources.
 - Adding an external official contribution such as `physical-limb`, or changing
   the Host adapter that admits such a contribution into an existing control plane.
+- Adding a provider Host capability such as background conversation append, or
+  changing its receipt/idempotency contract.
 - Deciding whether a new capability belongs in the local plugin framework,
   the MCP marketplace/control plane, or a built-in integration surface.
 
@@ -67,6 +91,19 @@ identity, installation, permission, health, or execution authority.
 - Bind package digest, installation instance, runtime session, grants, and
   resource identity from Host-owned state. External runtimes cannot choose or
   widen those identities through self-report.
+- Admit only methods marked ready by the exact published wire registry. Validate
+  every frame with contract-owned validators and never mirror public wire
+  schemas or method registries in core.
+- Persist dispatch intent before invoking a domain handler. Recovery may return
+  a domain's canonical receipt, but must not blindly replay an ambiguous effect.
+- Keep domain adapters narrow: the Broker owns transport settlement, while the
+  receiving domain owns authorization, idempotency, and durable product truth.
+- Keep C-2 signal declaration, wire, generated types, SDK helpers, conformance,
+  and official input-source plugin code in the public plugin seam. Route
+  admission, idempotent settlement, durable workflow intake, source access,
+  and Needs Me eligibility belong to `signal-intake`, not this cell.
+- Keep Host capability interfaces narrow and receipt-bearing. Do not synthesize
+  provider success or silently substitute a more invasive transport.
 - Route physical actions through F126 Registry / Policy / Lease / Action Log.
   Physical observations may enter only through a typed, grant-checked Host seam;
   raw sensor media and plugin-originated user identity are not admissible.
@@ -81,13 +118,21 @@ identity, installation, permission, health, or execution authority.
 - Do not treat remote marketplace install/signing as already solved by F202
   Phase 1. That trust boundary needs a separate design slice.
 - Do not load external executable plugins into the API process or treat the
-  existence of a public SDK as proof that the production Host Broker has landed.
+  presence of the dormant Broker state machine as proof that stdio/process
+  supervision, production composition, or an external plugin runtime is live.
 - Do not let an external physical plugin register a parallel Limb registry,
   bypass F126 for actions, or turn device observations directly into cat intent.
+- Do not absorb K-3a routes, `MeetingIntake`, source-resolution authority, or
+  Needs Me state into plugin activation merely because the producer is a plugin.
+- Do not treat ChatGPT conversation visibility in a desktop host as proof of an
+  arbitrary-conversation append API, and do not use private endpoints to fill
+  a missing official adapter.
 
 ## Static Scan Hints
 
 Watch for new or renamed `PluginRegistry`, `PluginResourceActivator`,
-`ScheduleFactoryRegistry`, `PluginConfigStore`, `plugin.yaml`, `pluginId`,
+`ScheduleFactoryRegistry`, `PluginInventoryStore`, `HostBrokerControlPlane`,
+`HostBrokerStore`, `BrokerMethodHandler`, `PluginConfigStore`, `plugin.yaml`, `pluginId`,
 `plugin-owned`, `factoryId`, `schedule`, `PluginConfigPanel`, and direct writers
-to plugin-owned capability records.
+to plugin-owned capability records. Also watch `IConversationHostAdapter`,
+`append_message`, provider receipts, and implicit browser/composer fallbacks.

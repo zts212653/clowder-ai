@@ -34,6 +34,7 @@ import {
 import { homedir, tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { type AgyProfileConfig, type CatId, type CliDiagnostics, createCatId } from '@cat-cafe/shared';
+import { normalizeAgyGeminiModelSelector } from '../../../../../config/agy-gemini-models.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { buildCliDiagnostics, buildSilentCompletionDiagnostic } from '../../../../../utils/cli-diagnostics.js';
@@ -366,22 +367,6 @@ function appendAgyMcpIdentityContract(prompt: string, catId: CatId, hasCallbackE
   ].join('\n');
 }
 
-const AGY_GEMINI_MODEL_BY_LEGACY_MODEL_ID = new Map([
-  ['gemini-2.5-pro', 'Gemini 3.1 Pro (High)'],
-  ['gemini-2.5-pro-preview', 'Gemini 3.1 Pro (High)'],
-  ['gemini-2.5-pro-exp', 'Gemini 3.1 Pro (High)'],
-  ['gemini-2.5-flash', 'Gemini 3.5 Flash (High)'],
-  ['gemini-2.5-flash-preview', 'Gemini 3.5 Flash (High)'],
-  ['gemini-3.1-pro', 'Gemini 3.1 Pro (High)'],
-  ['gemini-3.1-pro-preview', 'Gemini 3.1 Pro (High)'],
-  ['gemini-3.5-flash', 'Gemini 3.5 Flash (High)'],
-]);
-
-function normalizeAgyModelSelector(model: string): string {
-  const trimmed = model.trim();
-  return AGY_GEMINI_MODEL_BY_LEGACY_MODEL_ID.get(trimmed) ?? trimmed;
-}
-
 function removeValuedCliFlags(
   args: readonly string[],
   flags: ReadonlySet<string>,
@@ -554,6 +539,32 @@ export class GeminiAgentService implements AgentService {
 
   supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
     return policy.mode === 'read_only' && this.adapter !== 'antigravity';
+  }
+
+  contextCapability(): import('../../types.js').AgentContextCapability {
+    return this.adapter === 'gemini-cli'
+      ? {
+          provider: 'google',
+          carrier: 'gemini_cli',
+          reportsRuntimeWindow: true,
+          authoritativeUsage: true,
+          usageTelemetry: 'available',
+          nativeWindowControl: false,
+          nativeCompressionControl: false,
+          observesCompression: true,
+          reason: 'Gemini CLI session files provide last-turn context usage',
+        }
+      : {
+          provider: 'google',
+          carrier: this.adapter,
+          reportsRuntimeWindow: false,
+          authoritativeUsage: false,
+          usageTelemetry: 'unavailable',
+          nativeWindowControl: false,
+          nativeCompressionControl: false,
+          observesCompression: false,
+          reason: 'Antigravity carrier does not expose authoritative context telemetry',
+        };
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
@@ -828,9 +839,9 @@ export class GeminiAgentService implements AgentService {
     const requestedModelOverrideRaw = options?.callbackEnv?.CAT_CAFE_GEMINI_MODEL_OVERRIDE?.trim();
     const requestedModelOverride =
       requestedModelOverrideRaw !== undefined && requestedModelOverrideRaw.length > 0
-        ? normalizeAgyModelSelector(requestedModelOverrideRaw)
+        ? normalizeAgyGeminiModelSelector(requestedModelOverrideRaw)
         : undefined;
-    const configuredAgyModel = normalizeAgyModelSelector(this.model);
+    const configuredAgyModel = normalizeAgyGeminiModelSelector(this.model);
     let agyModel = configuredAgyModel;
     if (requestedModelOverride !== undefined) {
       agyModel = requestedModelOverride;

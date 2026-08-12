@@ -161,3 +161,58 @@ describe('F109: onMessageRestored calls requestStreamCatchUp', () => {
     expect(requestStreamCatchUpMock).toHaveBeenCalledWith('thread-bg-3');
   });
 });
+
+describe('F264 Gap F: recalled message projection stays truthful across tabs', () => {
+  beforeAll(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  beforeEach(() => {
+    removeThreadMessageMock.mockClear();
+    requestStreamCatchUpMock.mockClear();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    captured = null;
+  });
+
+  afterAll(() => {
+    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  it('removes a zero-exposure recall and hydrates an exposed recall from the authoritative history', () => {
+    act(() => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-1' }));
+    });
+
+    captured!.onMessageRecalled!({
+      messageId: 'msg-zero',
+      threadId: 'thread-bg',
+      verdict: 'zero_exposure',
+    });
+    captured!.onMessageRecalled!({
+      messageId: 'msg-seen',
+      threadId: 'thread-bg',
+      verdict: 'exposed',
+    });
+
+    expect(removeThreadMessageMock).toHaveBeenCalledWith('thread-bg', 'msg-zero');
+    expect(requestStreamCatchUpMock).toHaveBeenCalledWith('thread-bg');
+  });
+
+  it('hydrates a late exact receipt without reviving the recalled body', () => {
+    act(() => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-1' }));
+    });
+
+    captured!.onMessageReceiptUpdated!({ messageId: 'msg-seen', threadId: 'thread-bg' });
+
+    expect(requestStreamCatchUpMock).toHaveBeenCalledWith('thread-bg');
+    expect(removeThreadMessageMock).not.toHaveBeenCalled();
+  });
+});

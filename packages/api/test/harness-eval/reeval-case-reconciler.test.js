@@ -55,7 +55,11 @@ const caseSubject = (events, roots = [root]) => ({
     domainId: root.domainId,
     targetOwnerCatId: root.ownerAsk.targetOwnerCatId,
     assignedEvalCatId: 'gpt52',
-    cycles: roots.map((item) => ({ verdictId: item.verdictId, createdAt: item.createdAt })),
+    cycles: roots.map((item) => ({
+      verdictId: item.verdictId,
+      createdAt: item.createdAt,
+      verdict: item.verdict,
+    })),
   },
   roots,
   assignedEvalCatId: 'gpt52',
@@ -85,6 +89,58 @@ class MemoryEventLog {
 }
 
 describe('F266 stable case reconciler', () => {
+  it('bootstraps audited v1 roots at the latest reviewed cycle and current owner truth', async (t) => {
+    const harnessFeedbackRoot = mkdtempSync(join(tmpdir(), 'f266-legacy-case-subjects-'));
+    t.after(() => rmSync(harnessFeedbackRoot, { recursive: true, force: true }));
+    const legacyRoots = [
+      {
+        ...root,
+        schemaVersion: 1,
+        verdictId: 'legacy-week-a',
+        ownerAsk: { ...root.ownerAsk, targetOwnerCatId: 'old-owner' },
+      },
+      {
+        ...root,
+        schemaVersion: 1,
+        verdictId: 'legacy-week-b',
+        createdAt: '2026-08-08T00:00:00.000Z',
+        ownerAsk: { ...root.ownerAsk, targetOwnerCatId: 'old-owner' },
+      },
+    ].map(({ caseId: _caseId, findingKey: _findingKey, ...item }) => item);
+    for (const item of legacyRoots) {
+      const bundle = join(harnessFeedbackRoot, 'bundles', item.verdictId);
+      mkdirSync(bundle, { recursive: true });
+      writeFileSync(join(bundle, 'lifecycle-root.json'), JSON.stringify(item));
+    }
+    mkdirSync(join(harnessFeedbackRoot, 'eval-domains'), { recursive: true });
+    writeFileSync(
+      join(harnessFeedbackRoot, 'eval-domains', 'eval-capability-wakeup.yaml'),
+      `domainId: eval:capability-wakeup\ndisplayName: Wakeup\nsystemThreadId: thread_eval\nevalCat: { catId: gpt52, handle: "@gpt52", model: gpt-5.4 }\nfrequency: weekly\nsourceAdapter: wakeup\nsourceRefsKind: window\nthreadPolicy: { role: working-home, stateSot: registry, allowedContent: [verdict-discussion] }\nlegacyScheduledTaskIds: []\nhandoffTargetResolver: { featureId: F203, ownerCatId: opus-47, threadLookup: feature-thread }\nsla: { acknowledgeHours: 48, reevalWithinHours: 168 }\nfixtures: []\n`,
+    );
+    mkdirSync(join(harnessFeedbackRoot, 'migrations'), { recursive: true });
+    writeFileSync(
+      join(harnessFeedbackRoot, 'migrations', 'f266-legacy-reeval-cases.yaml'),
+      `schemaVersion: 1\nreviewedThrough: 2026-08-08T01:00:00.000Z\ncases:\n  - domainId: eval:capability-wakeup\n    findingKey: rich-messaging\n    selectors: [{ featureId: F203, componentId: rich-messaging }]\n    freshnessReview:\n      reviewedAt: 2026-08-08T01:00:00.000Z\n      reviewedThroughVerdictId: legacy-week-b\n      disposition: repair\n      evidenceRefs: [source-message:legacy-review]\n`,
+    );
+
+    const subjects = await loadReevalClosureSubjects({ harnessFeedbackRoot, eventLog: new MemoryEventLog() });
+    assert.equal(subjects.length, 1);
+    assert.equal(subjects[0].caseRoot.targetOwnerCatId, 'opus-47');
+    assert.equal(subjects[0].responsibilityContext.ownerCatId, 'opus-47');
+    assert.deepEqual(
+      subjects[0].caseRoot.cycles.map((cycle) => cycle.verdictId),
+      ['legacy-week-a', 'legacy-week-b'],
+    );
+    assert.throws(
+      () => planReevalClosureEvents(subjects[0], '2026-08-08T00:59:59.999Z'),
+      /freshness review is in the future/,
+    );
+    const planned = planReevalClosureEvents(subjects[0], '2026-08-08T01:00:00.000Z');
+    assert.equal(planned[0].event.type, 'legacy_case_migrated');
+    assert.equal(planned[0].event.verdictId, 'legacy-week-b');
+    assert.deepEqual(planned[0].event.legacyVerdictIds, ['legacy-week-a', 'legacy-week-b']);
+  });
+
   it('groups repeated v2 roots and observes each cycle in one stream', async (t) => {
     const harnessFeedbackRoot = mkdtempSync(join(tmpdir(), 'f266-case-subjects-'));
     t.after(() => rmSync(harnessFeedbackRoot, { recursive: true, force: true }));
@@ -226,7 +282,7 @@ describe('F266 stable case reconciler', () => {
     assert.equal(bindings, 1);
   });
 
-  it('treats a first keep-observe cycle as no work instead of projecting an empty case stream', async () => {
+  it('initializes a first keep-observe cycle so its nextEvalAt can create executable work', async () => {
     const eventLog = new MemoryEventLog();
     const observing = { ...root, verdict: 'keep_observe' };
     const task = createReevalClosureTaskSpec({
@@ -242,6 +298,40 @@ describe('F266 stable case reconciler', () => {
     });
 
     const gate = await task.admission.gate({ taskId: task.id, lastRunAt: null, tickCount: 1 });
-    assert.deepEqual(gate, { run: false, reason: 'no lifecycle events due' });
+    assert.equal(gate.run, true);
+    assert.equal(gate.workItems[0].signal.planned[0].event.type, 'verdict_cycle_observed');
+    await task.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
+    assert.equal((await eventLog.read(caseId))[0].type, 'verdict_cycle_observed');
+  });
+
+  it('routes a due monitoring cycle into the durable re-evaluation service', async () => {
+    const observing = { ...root, verdict: 'keep_observe' };
+    const current = caseSubject([observed], [observing]);
+    let reconciliations = 0;
+    const task = createReevalClosureTaskSpec({
+      eventLog: new MemoryEventLog(),
+      loadSubjects: async () => [current],
+      reevaluationService: {
+        async needsReconcile(subject, now) {
+          assert.equal(subject.caseRoot.caseId, caseId);
+          assert.equal(now, '2026-08-08T01:00:00.000Z');
+          return true;
+        },
+        async reconcile(subject, context) {
+          reconciliations += 1;
+          assert.equal(subject.caseRoot.caseId, caseId);
+          assert.equal(context.systemThreadId, 'thread_eval');
+        },
+      },
+      now: () => '2026-08-08T01:00:00.000Z',
+      log: { info() {}, warn() {} },
+    });
+
+    const gate = await task.admission.gate({ taskId: task.id, lastRunAt: null, tickCount: 1 });
+    assert.equal(gate.run, true);
+    assert.equal(gate.workItems[0].signal.bindReevaluation, true);
+    assert.equal(gate.workItems[0].dedupeKey, `f266:${caseId}:reevaluation:1`);
+    await task.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
+    assert.equal(reconciliations, 1);
   });
 });

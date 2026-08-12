@@ -143,7 +143,7 @@ describe('F226 KD-1: presentation float survives route change (AppShell-root mou
     await act(async () => {
       root.render(<AppShell>{React.createElement('div', null, 'thread content')}</AppShell>);
     });
-    // MobileStatusSheet-style backdrop: permanently rendered, hidden via opacity-0 + pointer-events-none.
+    // Permanently rendered backdrop hidden via opacity-0 + pointer-events-none.
     const hiddenBackdrop = document.createElement('div');
     hiddenBackdrop.className = 'fixed inset-0 opacity-0 pointer-events-none';
     document.body.appendChild(hiddenBackdrop);

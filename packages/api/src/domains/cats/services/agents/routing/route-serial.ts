@@ -23,9 +23,11 @@ import {
 } from '@cat-cafe/shared';
 import type { Span } from '@opentelemetry/api';
 import { context, trace } from '@opentelemetry/api';
-import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
-import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { getCatVoice } from '../../../../../config/cat-voices.js';
+import {
+  deriveHistoryContextTokenCeiling,
+  resolvePromptInputCeilingTokens,
+} from '../../../../../config/context-capacity.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
   AGENT_ID,
@@ -100,6 +102,7 @@ import {
 import {
   compareTurnCustodyShadow,
   type TurnCustodyProjection,
+  type TurnCustodyWakeProvenance,
 } from '../../../../ball-custody/TurnCustodyProjectionService.js';
 import {
   buildA2ADispatchTurnCustodyWake,
@@ -142,12 +145,13 @@ import {
   type InvocationContext,
 } from '../../context/SystemPromptBuilder.js';
 import { checkStreamOutputFreshness, type StreamFreshnessResult } from '../../freshness/checkStreamOutputFreshness.js';
+import { buildFreshnessReinvokePrompt } from '../../freshness/createFreshnessReinvokeCheck.js';
 import { mayDeleteDraft } from '../../freshness/FreshnessDraftCustody.js';
 import type { FreshnessEvaluation } from '../../freshness/glass-box/FreshnessOutputCommitCoordinator.js';
 import { findReplayUnsafeToolNames } from '../../freshness/tool-replay-safety.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
-import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
+import { buildSessionBootstrap, MAX_SESSION_BOOTSTRAP_TOKENS } from '../../session/SessionBootstrap.js';
 import {
   type AppendMessageInput,
   hydrateCrossThreadReplyHint,
@@ -169,9 +173,15 @@ import { getStreamingTtsRegistry, StreamingTtsChunker } from '../../tts/Streamin
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
 import { buildCapsuleFromRouteState } from '../invocation/CollaborationContinuityCapsule.js';
+import {
+  applyActiveSessionCapacityPin,
+  resolveInvocationCapacitySnapshot,
+  sealBeforeInvocationIfNeeded,
+} from '../invocation/invocation-capacity-snapshot.js';
 import { invokeSingleCat } from '../invocation/invoke-single-cat.js';
 import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/McpPromptInjector.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
+import { resolveManagedSessionPolicySnapshot } from '../invocation/session-policy-snapshot.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { detectInlineActionMentionsWithShadow, getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
 import {
@@ -191,6 +201,7 @@ import {
   resolveEventBackedRoutingExit,
 } from './guards/event-backed-routing-exit.js';
 import { isDirectOwnerDispositionOrigin } from './human-disposition-invocation-origin.js';
+import { persistUserFacingSystemInfoWarnings } from './persist-system-info-warnings.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
@@ -199,13 +210,15 @@ import {
   computeContextBudget,
   createLeakedToolCallStreamStripper,
   detectContextDegradation,
+  explicitPromptForIncrementalContext,
   getService,
   getThreadBootcampMemberCount,
+  hydrateVisibleA2ATriggerPromptMessage,
   isUserFacingSystemInfoContent,
   judgmentSurfaceCueSeeds,
+  mergePersistedPromptMessages,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
-  shouldAppendExplicitCurrentMessage,
   subjectSeenCueSeeds,
   toStoredToolEvent,
   upsertMaxBoundary,
@@ -222,10 +235,27 @@ const log = createModuleLogger('route-serial');
 // (shared across serial + parallel strategies — see sharedCandidateTracker/sharedNudgeCooldown)
 
 const BALL_CUSTODY_INVOCATION_HEARTBEAT_MIN_INTERVAL_MS = 30_000;
-const TURN_CUSTODY_STOP_GATE_REMEDIAL_PROMPT =
-  '[F167 球权停止门] 本次唤醒携带的协议球尚未发生可验证状态迁移。\n' +
-  '请只完成一次与当前协议球匹配的结构化动作，不要重做或改写刚才的工作：完成候选、结构化传球、returnToPredecessor、hold_ball 或已注册的 eventWait。\n' +
-  '必须调用现有结构化工具；不要用纯文本 @、口头“持球”或礼貌 ACK 代替状态迁移。';
+export function buildTurnCustodyStopGateRemedialPrompt(wake: TurnCustodyWakeProvenance): string {
+  if (wake.kind === 'structured' && wake.protocol === 'hold') {
+    return (
+      '[F167 球权停止门] 当前 managed hold wake 尚未发生可验证状态迁移。\n' +
+      '若本次 wake 工作已经处理完成，只调用 cat_cafe_complete_managed_hold，并选择 handled 或 completed；工具会从当前 invocation 自动绑定 source message 与 task，不能手填 subject。\n' +
+      '若工作尚未结束，只使用与下一条件匹配的 hold_ball、已注册 eventWait 或结构化传球。不要用纯文本 @、礼貌 ACK、command exit、测试/merge truth 代替 disposition。'
+    );
+  }
+  if (wake.kind === 'structured' && wake.protocol === 'dispatch') {
+    return (
+      '[F167 球权停止门] 当前普通 A2A dispatch 尚未发生可验证状态迁移。\n' +
+      '若本次 A2A 工作已经处理完成，只调用 cat_cafe_complete_a2a_dispatch，并选择 handled 或 completed；工具会从当前 invocation 自动绑定 source message、前手与当前 holder，不能手填 subject。\n' +
+      '若工作尚未结束，只使用与下一条件匹配的 hold_ball、已注册 eventWait 或结构化传球。不要用纯文本 @、礼貌 ACK、command exit、测试/merge truth 代替 disposition。'
+    );
+  }
+  return (
+    '[F167 球权停止门] 本次唤醒携带的协议球尚未发生可验证状态迁移。\n' +
+    '请只完成一次与当前协议球匹配的结构化动作，不要重做或改写刚才的工作：完成候选、结构化传球、returnToPredecessor、hold_ball 或已注册的 eventWait。\n' +
+    '必须调用现有结构化工具；不要用纯文本 @、口头“持球”或礼貌 ACK 代替状态迁移。'
+  );
+}
 
 /**
  * F233 Phase B (B2): persist ball.handed at the receiver boundary.
@@ -927,6 +957,7 @@ export async function* routeSerial(
     while (index < worklist.length) {
       const catId = worklist[index]!;
       let stopGateRemedialAttempted = false;
+      let structuredDispositionMissingCode: string | undefined;
       // F-parallel-cancel: per-cat signal — canceling one cat skips ONLY that cat, not the
       // whole worklist. force-reset/cancelAll aborts every cat's controller, so all entries
       // skip = equivalent to stopping. Using the shared primaryController.signal made
@@ -984,6 +1015,13 @@ export async function* routeSerial(
         activeA2ATriggerMessage && !activeA2ATriggerMessage.deletedAt && !activeA2ATriggerMessage._tombstone
           ? activeA2ATriggerMessage.content
           : undefined;
+      const exactA2ATriggerPromptMessage = incrementalMode
+        ? await hydrateVisibleA2ATriggerPromptMessage(deps, streamReplyTo, threadId, catId, thinkingMode)
+        : undefined;
+      const persistedPromptMessagesForCat = mergePersistedPromptMessages(
+        options.persistedPromptMessages,
+        exactA2ATriggerPromptMessage,
+      );
       // F193 AC-B2: structured cross-thread reply hint hydrated from trigger message.
       // Closes Codex review P1 (砚砚 2026-05-08): worklist `a2aTriggerMessageId` map
       // only has entries for downstream A2A targets — initial target via the modern
@@ -1031,6 +1069,39 @@ export async function* routeSerial(
         packBlocks = await getActivePackBlocks(deps.packStore);
       }
       const service = getService(deps.services, catId);
+      const resolvedCapacitySnapshot = await resolveInvocationCapacitySnapshot({
+        catId,
+        service,
+      });
+      let capacitySnapshot = resolvedCapacitySnapshot;
+      capacitySnapshot = await applyActiveSessionCapacityPin({
+        snapshot: capacitySnapshot,
+        catId,
+        threadId,
+        userId,
+        sessionChainStore: deps.invocationDeps.sessionChainStore,
+      });
+      const sessionPolicySnapshot = resolveManagedSessionPolicySnapshot({
+        catId: catId as string,
+        evidence: {
+          capacitySnapshot,
+          // A carrier declaration is not this invocation's usage evidence.
+          authoritativeUsage: false,
+          sessionRotation: Boolean(deps.invocationDeps.sessionChainStore && deps.invocationDeps.sessionSealer),
+          continuityBootstrap: Boolean(deps.invocationDeps.sessionChainStore && deps.invocationDeps.transcriptReader),
+        },
+      });
+      const sealedForCapacity = await sealBeforeInvocationIfNeeded({
+        snapshot: capacitySnapshot,
+        catId,
+        threadId,
+        userId,
+        sessionChainStore: deps.invocationDeps.sessionChainStore,
+        sessionSealer: deps.invocationDeps.sessionSealer,
+        policySnapshot: sessionPolicySnapshot,
+        clearProviderSession: () => deps.invocationDeps.sessionManager.delete(userId, catId, threadId),
+      });
+      if (sealedForCapacity) capacitySnapshot = resolvedCapacitySnapshot;
       const declaredTurnCustodyWake =
         options.turnCustodyWakeForCat?.(catId) ??
         options.turnCustodyWake ??
@@ -1073,6 +1144,11 @@ export async function* routeSerial(
       if (deps.turnCustodyProjectionService) {
         turnCustodyProjection = await deps.turnCustodyProjectionService.open(turnCustodyWake);
       }
+      const structuredDispositionPrompt =
+        turnCustodyWake.kind === 'structured' &&
+        (turnCustodyWake.protocol === 'hold' || turnCustodyWake.protocol === 'dispatch')
+          ? buildTurnCustodyStopGateRemedialPrompt(turnCustodyWake)
+          : undefined;
       let turnCustodyShadowRecorded = false;
       let turnCustodyTerminalWitness: QueueTerminalConsumptionWitness | undefined;
       const hasNativeL0 = service.injectsL0Natively?.() ?? false;
@@ -1241,25 +1317,29 @@ export async function* routeSerial(
           '[routeSerial] #836: isRebornSession lookup failed pre-bootstrap, defaulting to non-reborn',
         );
       }
-      if (
-        !isSerialReborn &&
-        isSessionChainEnabled(catId) &&
-        deps.invocationDeps.sessionChainStore &&
-        deps.invocationDeps.transcriptReader
-      ) {
+      const bootstrapSessionChainStore = deps.invocationDeps.sessionChainStore;
+      const bootstrapTranscriptReader = deps.invocationDeps.transcriptReader;
+      const rebuildSessionBootstrap =
+        !isSerialReborn && bootstrapSessionChainStore && bootstrapTranscriptReader
+          ? async () => {
+              const bootstrapDepth = sessionPolicySnapshot.config.handoff?.bootstrapDepth;
+              return buildSessionBootstrap(
+                {
+                  sessionChainStore: bootstrapSessionChainStore,
+                  transcriptReader: bootstrapTranscriptReader,
+                  ownerUserId: userId,
+                  ...(deps.invocationDeps.taskStore ? { taskStore: deps.invocationDeps.taskStore } : {}),
+                  ...(deps.invocationDeps.threadStore ? { threadStore: deps.invocationDeps.threadStore } : {}),
+                  ...(bootstrapDepth ? { bootstrapDepth } : {}),
+                },
+                catId,
+                threadId,
+              );
+            }
+          : undefined;
+      if (rebuildSessionBootstrap) {
         try {
-          const bootstrapDepth = getConfigSessionStrategy(catId)?.handoff?.bootstrapDepth;
-          const bootstrap = await buildSessionBootstrap(
-            {
-              sessionChainStore: deps.invocationDeps.sessionChainStore,
-              transcriptReader: deps.invocationDeps.transcriptReader,
-              ...(deps.invocationDeps.taskStore ? { taskStore: deps.invocationDeps.taskStore } : {}),
-              ...(deps.invocationDeps.threadStore ? { threadStore: deps.invocationDeps.threadStore } : {}),
-              ...(bootstrapDepth ? { bootstrapDepth } : {}),
-            },
-            catId,
-            threadId,
-          );
+          const bootstrap = await rebuildSessionBootstrap();
           if (bootstrap) {
             bootstrapContext = bootstrap.text;
             if (bootstrap.pushRecallPresentations?.length) {
@@ -1303,25 +1383,26 @@ export async function* routeSerial(
 
       let deliveryBoundaryId: string | undefined;
       let incrementallyExposedMessageIds: string[] = [];
+      const invocationMessagePrompt = prompt;
+      let rebuildPromptWithBootstrap: ((bootstrap: string) => string) | undefined;
+      let explicitlyExposedMessageIds: string[] = [];
       if (incrementalMode) {
         // Serial incremental mode depends on AgentRouter having appended current user message first.
         // We still explicitly include `message` when that message is not present in unseen rows.
 
-        // A+ fix: calculate effective context budget by deducting ALL system parts from maxPromptTokens.
-        // Without this, context (up to maxContextTokens=160k) + system parts (~15-20k) can exceed maxPromptTokens.
+        // Deduct fixed prompt parts from the invocation-owned input ceiling.
         const catModePromptForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
-        const incBudget = getCatContextBudget(catId as string);
-        const incSystemTokens = estimateTokens(
-          [staticIdentity, invocationContext, catModePromptForBudget, bootstrapContext, mcpInstructions]
-            .filter(Boolean)
-            .join('\n'),
-        );
+        const inputCeilingTokens = resolvePromptInputCeilingTokens(capacitySnapshot.capacity);
+        const incSystemTokens =
+          estimateTokens(
+            [staticIdentity, invocationContext, catModePromptForBudget, mcpInstructions].filter(Boolean).join('\n'),
+          ) + (rebuildSessionBootstrap ? MAX_SESSION_BOOTSTRAP_TOKENS : estimateTokens(bootstrapContext));
         const incMessageTokens = estimateTokens([message, conciergeSearchContextForCat].filter(Boolean).join('\n'));
         // P1 R7 fix: use shared budget helper (serial/parallel × incremental/legacy unified)
         const incNudgeTokens = routeLevelNudgePromptContext ? estimateTokens(routeLevelNudgePromptContext) : 0;
         const effectiveContextBudget = computeContextBudget({
-          maxPromptTokens: incBudget.maxPromptTokens,
-          maxContextTokens: incBudget.maxContextTokens,
+          inputCeilingTokens,
+          historyTokenCeiling: deriveHistoryContextTokenCeiling(inputCeilingTokens),
           systemPartsTokens: incSystemTokens,
           promptTokens: incMessageTokens,
           nudgeTokens: incNudgeTokens,
@@ -1338,10 +1419,12 @@ export async function* routeSerial(
             effectiveMaxContextTokens: effectiveContextBudget,
             canonicalFeatureId: sopStageHint?.featureId,
             threadTitle: routeThread?.title ?? undefined,
+            cursorOverlay: options.cursorBoundaries?.get(catId as string),
+            exactA2ATriggerMessageId: streamReplyTo,
           },
         );
         deliveryBoundaryId = inc.boundaryId;
-        incrementallyExposedMessageIds = inc.exposedMessageIds.filter((id) => id !== currentUserMessageId);
+        incrementallyExposedMessageIds = inc.exposedMessageIds;
         if (inc.pushRecallPresentations?.length) {
           currentPushRecallPresentations.push(...inc.pushRecallPresentations);
         }
@@ -1399,45 +1482,52 @@ export async function* routeSerial(
         /* @segment R1 — Mode System Prompt */
         /* @segment R2 — Mode System Prompt (per-cat) */
         const catModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
-        const parts = [invocationContext, catModePrompt, bootstrapContext, mcpInstructions].filter(Boolean);
-        if (inc.contextText) parts.push(inc.contextText);
-        // F35 fix: only inject raw message when it was genuinely absent from unseen rows.
-        // Defensive guard: if the current message ID is already present anywhere in
-        // the assembled context text, do not append the raw message again.
-        if (shouldAppendExplicitCurrentMessage(inc, currentUserMessageId)) parts.push(message);
-        prompt = parts.join('\n\n---\n\n');
+        // F35/F063: append only persisted Queue bodies without structural exposure ownership.
+        const explicitProjection = explicitPromptForIncrementalContext(
+          inc,
+          message,
+          currentUserMessageId,
+          persistedPromptMessagesForCat,
+        );
+        explicitlyExposedMessageIds = explicitProjection.exposedMessageIds;
+        rebuildPromptWithBootstrap = (bootstrap) => {
+          const parts = [invocationContext, catModePrompt, bootstrap, mcpInstructions].filter(Boolean);
+          if (inc.contextText) parts.push(inc.contextText);
+          if (explicitProjection.text) parts.push(explicitProjection.text);
+          return parts.join('\n\n---\n\n');
+        };
+        prompt = rebuildPromptWithBootstrap(bootstrapContext);
       } else {
         // Per-cat context budget (Phase 4.0): assemble context with cat-specific limits
         let catContextHistory = contextHistory; // fallback to legacy pre-assembled
         if (history && history.length > 0 && !contextHistory) {
-          const budget = getCatContextBudget(catId as string);
+          const inputCeilingTokens = resolvePromptInputCeilingTokens(capacitySnapshot.capacity);
           // F8: token-based budget — estimate non-context tokens, remainder goes to context
           // A+ fix: include catModePrompt + bootstrapContext in system parts estimate (P2-1)
           const catModePromptLegacyForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
-          const systemPartsTokens = estimateTokens(
-            [staticIdentity, invocationContext, catModePromptLegacyForBudget, bootstrapContext, mcpInstructions]
-              .filter(Boolean)
-              .join('\n'),
-          );
+          const systemPartsTokens =
+            estimateTokens(
+              [staticIdentity, invocationContext, catModePromptLegacyForBudget, mcpInstructions]
+                .filter(Boolean)
+                .join('\n'),
+            ) + (rebuildSessionBootstrap ? MAX_SESSION_BOOTSTRAP_TOKENS : estimateTokens(bootstrapContext));
           const promptTokens = estimateTokens([prompt, conciergeSearchContextForCat].filter(Boolean).join('\n'));
           // P1 R7 fix: use shared budget helper (legacy path)
           const legacyNudgeTokens = routeLevelNudgePromptContext ? estimateTokens(routeLevelNudgePromptContext) : 0;
           const budgetForContext = computeContextBudget({
-            maxPromptTokens: budget.maxPromptTokens,
-            maxContextTokens: budget.maxContextTokens,
+            inputCeilingTokens,
+            historyTokenCeiling: deriveHistoryContextTokenCeiling(inputCeilingTokens),
             systemPartsTokens,
             promptTokens,
             nudgeTokens: legacyNudgeTokens,
           });
           const { contextText, messageCount } = assembleContext(history, {
-            maxMessages: budget.maxMessages,
-            maxContentLength: budget.maxContentLengthPerMsg,
             maxTotalTokens: budgetForContext,
           });
           catContextHistory = contextText || undefined;
 
           // Degradation check: notify user if context was truncated (count budget or char budget)
-          const degradation = detectContextDegradation(history.length, messageCount, budget);
+          const degradation = detectContextDegradation(history.length, messageCount);
           if (degradation?.degraded) {
             yield {
               type: 'system_info' as AgentMessageType,
@@ -1449,13 +1539,17 @@ export async function* routeSerial(
         }
 
         const catModePromptLegacy = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
-        if (invocationContext || catModePromptLegacy || mcpInstructions || bootstrapContext) {
-          const parts = [invocationContext, catModePromptLegacy, bootstrapContext, mcpInstructions].filter(Boolean);
-          if (catContextHistory) parts.push(catContextHistory);
-          prompt = `${parts.join('\n\n---\n\n')}\n\n---\n\n${prompt}`;
-        } else if (catContextHistory) {
-          prompt = `${catContextHistory}\n\n---\n\n${prompt}`;
-        }
+        rebuildPromptWithBootstrap = (bootstrap) => {
+          if (invocationContext || catModePromptLegacy || mcpInstructions || bootstrap) {
+            const parts = [invocationContext, catModePromptLegacy, bootstrap, mcpInstructions].filter(Boolean);
+            if (catContextHistory) parts.push(catContextHistory);
+            return `${parts.join('\n\n---\n\n')}\n\n---\n\n${invocationMessagePrompt}`;
+          }
+          return catContextHistory
+            ? `${catContextHistory}\n\n---\n\n${invocationMessagePrompt}`
+            : invocationMessagePrompt;
+        };
+        prompt = rebuildPromptWithBootstrap(bootstrapContext);
       }
 
       // F229 KD-24: append the table only after incremental/legacy assembly reaches
@@ -1474,6 +1568,34 @@ export async function* routeSerial(
           deps.proactiveMemoryNudgeService?.finalize(preparedProactiveMemoryNudge);
         }
       }
+      if (structuredDispositionPrompt) {
+        prompt = `${prompt}\n\n---\n\n${structuredDispositionPrompt}`;
+      }
+      const assemblePromptAfterSeal = rebuildPromptWithBootstrap;
+      const rebuildPromptAfterSessionSeal =
+        rebuildSessionBootstrap && assemblePromptAfterSeal
+          ? async () => {
+              const refreshed = await rebuildSessionBootstrap();
+              if (!refreshed) throw new Error('sealed_session_bootstrap_unavailable');
+              if (refreshed.pushRecallPresentations?.length) {
+                currentPushRecallPresentations.push(...refreshed.pushRecallPresentations);
+              }
+              let rebuilt = assemblePromptAfterSeal(refreshed.text);
+              if (conciergeSearchContextForCat) rebuilt = `${rebuilt}\n${conciergeSearchContextForCat}`;
+              if (routeLevelNudgePromptContext) rebuilt = `${rebuilt}\n${routeLevelNudgePromptContext}`;
+              if (structuredDispositionPrompt) rebuilt = `${rebuilt}\n\n---\n\n${structuredDispositionPrompt}`;
+              return rebuilt;
+            }
+          : undefined;
+
+      const exactPromptMessageIds = collectExactPromptMessageIds(
+        incrementalMode ? [] : (options.persistedPromptMessageIds ?? []),
+        incrementalMode ? [] : [currentUserMessageId, a2aTriggerMessageId, streamReplyTo],
+        incrementallyExposedMessageIds,
+        explicitlyExposedMessageIds,
+        options.freshnessSupplementRequiredMessageIds ?? [],
+        options.freshnessClosureRequiredMessageIds ?? [],
+      );
 
       let textContent = '';
       const thinkingChunks: string[] = [];
@@ -1484,6 +1606,10 @@ export async function* routeSerial(
       let catProducedOutput = false;
       let turnStoredMessageId: string | undefined;
       let sawUserFacingSystemInfo = false;
+      // Issue #1208 P2: collect user-facing system_info payloads so they can be
+      // persisted to messageStore even when the cat produces no text/tools/rich.
+      // Without this, warnings yielded in the live stream disappear on refresh.
+      const userFacingSystemInfoContents: string[] = [];
       // #267: track errors that happened BEFORE abort — only these are real provider failures
       let hadProviderError = false;
       // Collect error text separately for system-message persistence (F5 reload)
@@ -1504,6 +1630,7 @@ export async function* routeSerial(
       const pendingCallbackRoutingExits: CallbackContentRoutingExit[] = [];
       const confirmedCallbackRoutingGuardMentions = new Set<CatId>();
       const confirmedLocalCallbackRoutingMentions = new Set<CatId>();
+      const confirmedLocalCallbackRoutedTargets = new Set<CatId>();
       let confirmedCallbackRoutingGuardHasCoCreatorLineStartMention = false;
       let confirmedLocalCallbackRoutingHasCoCreatorLineStartMention = false;
       const emittedBallHandedCvoMessageIds = new Set<string>();
@@ -1731,6 +1858,13 @@ export async function* routeSerial(
         if (!confirmed || !exit) return undefined;
         for (const mention of exit.guardLineStartMentions) confirmedCallbackRoutingGuardMentions.add(mention);
         for (const mention of exit.localLineStartMentions) confirmedLocalCallbackRoutingMentions.add(mention);
+        if (exit.scope === 'local') {
+          // The callback already admitted this source/target through InvocationQueue or the
+          // legacy worklist. Never reinterpret the same persisted callback body as a fresh
+          // serial handoff after that carrier has already completed and disappeared from the
+          // live queue: that callback+text-scan fork caused the exact A→B duplicate dogfood.
+          for (const targetCatId of exit.targetCatIds) confirmedLocalCallbackRoutedTargets.add(targetCatId);
+        }
         if (exit.hasGuardCoCreatorLineStartMention) confirmedCallbackRoutingGuardHasCoCreatorLineStartMention = true;
         if (exit.hasLocalCoCreatorLineStartMention) confirmedLocalCallbackRoutingHasCoCreatorLineStartMention = true;
         return exit;
@@ -1738,9 +1872,10 @@ export async function* routeSerial(
       const getRoutingExitLineStartMentions = (textMentions: readonly CatId[] = []): CatId[] => [
         ...new Set<CatId>([...textMentions, ...confirmedCallbackRoutingGuardMentions]),
       ];
-      const getLocalRoutingLineStartMentions = (textMentions: readonly CatId[] = []): CatId[] => [
-        ...new Set<CatId>([...textMentions, ...confirmedLocalCallbackRoutingMentions]),
-      ];
+      const getLocalRoutingLineStartMentions = (textMentions: readonly CatId[] = []): CatId[] =>
+        [...new Set<CatId>([...textMentions, ...confirmedLocalCallbackRoutingMentions])].filter(
+          (targetCatId) => !confirmedLocalCallbackRoutedTargets.has(targetCatId),
+        );
       const hasRoutingExitCoCreatorLineStartMention = (content: string): boolean =>
         Boolean(
           (content ? detectUserMention(content) : false) || confirmedCallbackRoutingGuardHasCoCreatorLineStartMention,
@@ -1801,7 +1936,10 @@ export async function* routeSerial(
       for await (const msg of invokeSingleCat(deps.invocationDeps, {
         catId,
         service,
+        capacitySnapshot,
+        sessionPolicySnapshot,
         prompt,
+        ...(rebuildPromptAfterSessionSeal ? { rebuildPromptAfterSessionSeal } : {}),
         userId,
         ownerAuthProvenance,
         threadId,
@@ -1821,13 +1959,7 @@ export async function* routeSerial(
             : {}),
           ...(options.freshnessSupplementId ? { freshnessSupplementId: options.freshnessSupplementId } : {}),
         },
-        promptMessageIds: collectExactPromptMessageIds(
-          options.persistedPromptMessageIds ?? [],
-          [currentUserMessageId, a2aTriggerMessageId, streamReplyTo],
-          incrementallyExposedMessageIds,
-          options.freshnessSupplementRequiredMessageIds ?? [],
-          options.freshnessClosureRequiredMessageIds ?? [],
-        ),
+        promptMessageIds: exactPromptMessageIds,
         ...(options.onPromptMessagesExposed ? { onPromptMessagesExposed: options.onPromptMessagesExposed } : {}),
         // F247 AC-B1c-3 PR-C: Plumb raw mention text + mentioning cat for cloud bridge dispatch.
         // - mentionContent: the raw user/cat message (NOT the orchestrated prompt with system context)
@@ -1912,6 +2044,7 @@ export async function* routeSerial(
           if (effectiveMsg.type === 'system_info' && effectiveMsg.content) {
             if (isUserFacingSystemInfoContent(effectiveMsg.content)) {
               sawUserFacingSystemInfo = true;
+              userFacingSystemInfoContents.push(effectiveMsg.content);
             }
             try {
               const parsed = JSON.parse(effectiveMsg.content);
@@ -2326,6 +2459,28 @@ export async function* routeSerial(
                 }
               : rawDecision;
           if (
+            turnCustodyWake.kind === 'structured' &&
+            turnCustodyWake.protocol === 'hold' &&
+            newDecision.transitionObserved &&
+            newDecision.structuredTransitionKind !== 'hold_dispositioned'
+          ) {
+            const transition = verifiedEventWait
+              ? 'event_wait'
+              : newDecision.structuredTransitionKind === 'held'
+                ? 'reheld'
+                : newDecision.structuredTransitionKind === 'handed'
+                  ? 'transferred'
+                  : undefined;
+            if (transition) {
+              turnCustodyTerminalWitness = {
+                kind: 'managed_hold_continued',
+                sourceMessageId: turnCustodyWake.sourceMessageId,
+                taskId: turnCustodyWake.taskId,
+                transition,
+              };
+            }
+          }
+          if (
             newDecision.state === 'covered_empty' &&
             turnCustodyWake.kind === 'non_obligation' &&
             turnCustodyWake.source === 'coordination_terminal'
@@ -2421,6 +2576,23 @@ export async function* routeSerial(
             return;
           }
 
+          // The exact F254 body exposure belongs to the invocation that just
+          // finished. A routing-guard child has different callback credentials,
+          // so omission must fail this attempt and restore the same Queue carrier
+          // instead of letting a second invocation impersonate its disposition.
+          if (
+            turnCustodyWake.kind === 'structured' &&
+            (turnCustodyWake.protocol === 'hold' || turnCustodyWake.protocol === 'dispatch')
+          ) {
+            stopGateRemedialAttempted = true;
+            structuredDispositionMissingCode =
+              turnCustodyWake.protocol === 'hold'
+                ? 'managed_hold_disposition_missing'
+                : 'a2a_dispatch_disposition_missing';
+            await appendStopGateFailureNotice();
+            return;
+          }
+
           const originalOwnInvocationId = ownInvocationId;
           const originalDoneMsg = doneMsg;
           const originalTextContent = textContent;
@@ -2497,10 +2669,67 @@ export async function* routeSerial(
 
         const remedialStreamEvents: AgentMessage[] = [];
         const remedialStripper = createLeakedToolCallStreamStripper();
+        const remedialService = getService(deps.services, catId);
+        const resolvedRemedialCapacitySnapshot = await resolveInvocationCapacitySnapshot({
+          catId,
+          service: remedialService,
+        });
+        let remedialCapacitySnapshot = resolvedRemedialCapacitySnapshot;
+        const turnCustodyRemedialPrompt = buildTurnCustodyStopGateRemedialPrompt(turnCustodyWake);
+        const rebuildRemedialPromptAfterSessionSeal = rebuildSessionBootstrap
+          ? async () => {
+              const refreshed = await rebuildSessionBootstrap();
+              if (!refreshed) throw new Error('sealed_session_bootstrap_unavailable');
+              if (refreshed.pushRecallPresentations?.length) {
+                currentPushRecallPresentations.push(...refreshed.pushRecallPresentations);
+              }
+              return `${refreshed.text}\n\n---\n\n${turnCustodyRemedialPrompt}`;
+            }
+          : undefined;
+        let remedialPrompt = turnCustodyRemedialPrompt;
+        remedialCapacitySnapshot = await applyActiveSessionCapacityPin({
+          snapshot: remedialCapacitySnapshot,
+          catId,
+          threadId,
+          userId,
+          sessionChainStore: deps.invocationDeps.sessionChainStore,
+        });
+        const remedialSessionPolicySnapshot = resolveManagedSessionPolicySnapshot({
+          catId: catId as string,
+          evidence: {
+            capacitySnapshot: remedialCapacitySnapshot,
+            // Remedial invocations own a fresh evidence epoch too.
+            authoritativeUsage: false,
+            sessionRotation: Boolean(deps.invocationDeps.sessionChainStore && deps.invocationDeps.sessionSealer),
+            continuityBootstrap: Boolean(rebuildRemedialPromptAfterSessionSeal),
+          },
+        });
+        const sealed = await sealBeforeInvocationIfNeeded({
+          snapshot: remedialCapacitySnapshot,
+          catId,
+          threadId,
+          userId,
+          sessionChainStore: deps.invocationDeps.sessionChainStore,
+          sessionSealer: deps.invocationDeps.sessionSealer,
+          policySnapshot: remedialSessionPolicySnapshot,
+          clearProviderSession: () => deps.invocationDeps.sessionManager.delete(userId, catId, threadId),
+        });
+        if (sealed) {
+          remedialCapacitySnapshot = resolvedRemedialCapacitySnapshot;
+          if (!rebuildRemedialPromptAfterSessionSeal) {
+            throw new Error('pre_invocation_capacity_seal_requires_prompt_rebuild');
+          }
+          remedialPrompt = await rebuildRemedialPromptAfterSessionSeal();
+        }
         for await (const remedialMsg of invokeSingleCat(deps.invocationDeps, {
           catId,
-          service,
-          prompt: TURN_CUSTODY_STOP_GATE_REMEDIAL_PROMPT,
+          service: remedialService,
+          capacitySnapshot: remedialCapacitySnapshot,
+          sessionPolicySnapshot: remedialSessionPolicySnapshot,
+          prompt: remedialPrompt,
+          ...(rebuildRemedialPromptAfterSessionSeal
+            ? { rebuildPromptAfterSessionSeal: rebuildRemedialPromptAfterSessionSeal }
+            : {}),
           userId,
           ownerAuthProvenance,
           threadId,
@@ -2580,6 +2809,7 @@ export async function* routeSerial(
             if (effectiveMsg.type === 'system_info' && effectiveMsg.content) {
               if (isUserFacingSystemInfoContent(effectiveMsg.content)) {
                 sawUserFacingSystemInfo = true;
+                userFacingSystemInfoContents.push(effectiveMsg.content);
               }
               try {
                 const parsed = JSON.parse(effectiveMsg.content);
@@ -2846,13 +3076,7 @@ export async function* routeSerial(
           threadId,
           currentTriggerMessageId: streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId,
           parallelBatchId: options.parallelBatchId,
-          coveredMessageIds: collectExactPromptMessageIds(
-            options.persistedPromptMessageIds ?? [],
-            [currentUserMessageId, a2aTriggerMessageId, streamReplyTo],
-            incrementallyExposedMessageIds,
-            options.freshnessSupplementRequiredMessageIds ?? [],
-            options.freshnessClosureRequiredMessageIds ?? [],
-          ),
+          coveredMessageIds: exactPromptMessageIds,
           throughMessageId: priorFrontierMessageId,
           cursorStore: deps.deliveryCursorStore!,
           messageStore: deps.messageStore,
@@ -4279,26 +4503,29 @@ export async function* routeSerial(
               });
             }
           }
-        } else if (!sawUserFacingSystemInfo && !isFreshnessClosureSuccessor) {
-          yield {
-            type: 'system_info' as AgentMessageType,
-            catId,
-            content: JSON.stringify({
-              type: 'silent_completion',
-              detail: `${catConfig?.displayName ?? (catId as string)} completed without textual output.`,
-              toolCount: collectedToolEvents.length,
-              provider: firstMetadata?.provider,
-              model: firstMetadata?.model,
-              invocationId: ownInvocationId,
-            }),
-            timestamp: Date.now(),
-          } as AgentMessage;
-          // No persisted message for fully silent turns.
+        }
+
+        if (!shouldPersistNoTextMessage) {
+          if (!sawUserFacingSystemInfo && !isFreshnessClosureSuccessor) {
+            yield {
+              type: 'system_info' as AgentMessageType,
+              catId,
+              content: JSON.stringify({
+                type: 'silent_completion',
+                detail: `${catConfig?.displayName ?? (catId as string)} completed without textual output.`,
+                toolCount: collectedToolEvents.length,
+                provider: firstMetadata?.provider,
+                model: firstMetadata?.model,
+                invocationId: ownInvocationId,
+              }),
+              timestamp: Date.now(),
+            } as AgentMessage;
+          }
+          // No persisted message for fully silent turns; clean up draft for turns whose
+          // only user-visible content was a system_info warning (persisted in the common path below).
           if (deps.draftStore && ownInvocationId) {
             deps.draftStore.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
           }
-        } else if (deps.draftStore && ownInvocationId) {
-          deps.draftStore.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
         }
       } else if (collectedToolEvents.length > 0) {
         // hadError && textContent === '' but toolEvents exist — persist tool record so
@@ -4380,6 +4607,16 @@ export async function* routeSerial(
           }
         }
       }
+
+      // Persist after all text/no-text/error branches so every live warning survives refresh.
+      // Do not broadcast again: the system_info stream already delivered the live event.
+      await persistUserFacingSystemInfoWarnings({
+        messageStore: deps.messageStore,
+        threadId,
+        catId: catId as string,
+        contents: userFacingSystemInfoContents,
+        ...(options.persistenceContext ? { persistenceContext: options.persistenceContext } : {}),
+      });
 
       a2aMentions = getLocalRoutingLineStartMentions(a2aMentions);
 
@@ -4625,7 +4862,7 @@ export async function* routeSerial(
             // QueueProcessor strips freshnessContext, so content must carry the prompt.
             const reinvokeContent =
               reinvokeDecision.reinvokePrompt ||
-              `你上一轮 turn 中有来自 ${reinvokeDecision.senders.join(', ')} 的 ${reinvokeDecision.noticeIds.length} 条未读消息，请调 list_recent 查看并回应。`;
+              buildFreshnessReinvokePrompt(threadId, reinvokeDecision.senders, reinvokeDecision.noticeIds.length);
             freshnessReinvokeEnqueue({
               threadId,
               userId,
@@ -4690,6 +4927,7 @@ export async function* routeSerial(
           ...ownStampedDone,
           ...(mentionsUser ? { mentionsUser } : {}),
           ...(turnCustodyTerminalWitness ? { turnCustodyTerminalWitness } : {}),
+          ...(structuredDispositionMissingCode ? { errorCode: structuredDispositionMissingCode } : {}),
           isFinal,
         });
         activeTrackedA2ASlots.delete(catId);

@@ -1,12 +1,11 @@
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { buildCapabilityWakeupClosureImport } from '../capability-wakeup-closure-import.js';
-import { type LifecycleRootArtifact, scanLifecycleRootArtifacts } from '../publish-verdict/lifecycle-root-artifact.js';
-import { projectReevalCase, type ReevalCaseProjection } from '../reeval-case.js';
+import { loadLegacyReevalCaseMigrations, loadLifecycleRootsWithLegacyCases } from '../legacy-reeval-case-migration.js';
+import { deriveEvalCaseId, type LifecycleRootArtifact } from '../publish-verdict/lifecycle-root-artifact.js';
+import { projectReevalCase } from '../reeval-case.js';
 import { loadReevalCaseRoot } from '../reeval-case-root.js';
-import { projectReevalClosure, type ReevalClosureProjection, type ReevalClosureRoot } from '../reeval-closure.js';
+import { projectReevalClosure, type ReevalClosureRoot } from '../reeval-closure.js';
 import type { IReevalClosureEventLog } from '../reeval-closure-event-log.js';
 import type { EvalLifecycleEvent } from '../reeval-closure-schema.js';
+import { projectLifecyclePresentation } from './eval-hub-lifecycle-debt.js';
 import { loadDomains } from './eval-hub-read-model.js';
 import type { EvalHubItem, EvalHubLifecycleView, EvalHubSummary } from './eval-hub-read-model-types.js';
 
@@ -26,15 +25,7 @@ export function loadEvalVerdictLifecycleRoots(
   assignedEvalCatIds?: ReadonlyMap<string, string>,
 ): Map<string, ResolvedEvalVerdictLifecycleRoot> {
   const domains = loadDomains(harnessFeedbackRoot);
-  const artifacts = scanLifecycleRootArtifacts(harnessFeedbackRoot);
-  const historical = buildCapabilityWakeupClosureImport();
-  const historicalVerdictPath = join(harnessFeedbackRoot, 'verdicts', `${historical.root.verdictId}.md`);
-  if (
-    existsSync(historicalVerdictPath) &&
-    !artifacts.some((artifact) => artifact.verdictId === historical.root.verdictId)
-  ) {
-    artifacts.push(historical.root);
-  }
+  const artifacts = loadLifecycleRootsWithLegacyCases(harnessFeedbackRoot);
 
   const roots = new Map<string, ResolvedEvalVerdictLifecycleRoot>();
   for (const artifact of artifacts) {
@@ -64,48 +55,6 @@ export function loadEvalVerdictLifecycleRoot(
   return loadEvalVerdictLifecycleRoots(harnessFeedbackRoot, assignedEvalCatIds).get(verdictId);
 }
 
-type LifecyclePresentation = Pick<
-  EvalHubLifecycleView,
-  'ownerResponseStatus' | 'reevalStatus' | 'reevalDueAt' | 'escalation' | 'stale'
->;
-
-function latestReevalResult(
-  projection: ReevalClosureProjection | ReevalCaseProjection,
-): NonNullable<EvalHubLifecycleView['reevalStatus']> {
-  const activeVerdictId = 'activeVerdictId' in projection ? projection.activeVerdictId : undefined;
-  for (let index = projection.history.length - 1; index >= 0; index -= 1) {
-    const event = projection.history[index];
-    if (activeVerdictId && event?.verdictId !== activeVerdictId) continue;
-    const type = event?.type;
-    if (type === 'reeval_passed') return 'passed';
-    if (type === 'reeval_failed') return 'failed';
-  }
-  return 'not_requested';
-}
-
-function lifecyclePresentation(
-  projection: ReevalClosureProjection | ReevalCaseProjection,
-  generatedAt: string,
-): LifecyclePresentation {
-  const suppressed = projection.status === 'suppressed_with_reason';
-  const activeReeval =
-    projection.status === 'reeval_pending' ||
-    (projection.status === 'escalated' && projection.escalation?.stage === 'reevaluation');
-  const reevalStatus = suppressed ? 'not_required' : activeReeval ? 'pending' : latestReevalResult(projection);
-  const stale =
-    projection.status === 'escalated' ||
-    (projection.status === 'reeval_pending' &&
-      projection.reevalDueAt !== undefined &&
-      Date.parse(generatedAt) >= Date.parse(projection.reevalDueAt));
-  return {
-    ownerResponseStatus: suppressed ? 'not_required' : projection.lifecycleOwnerCatId ? 'acknowledged' : 'not_started',
-    reevalStatus,
-    stale,
-    ...(activeReeval && projection.reevalDueAt ? { reevalDueAt: projection.reevalDueAt } : {}),
-    ...(projection.status === 'escalated' && projection.escalation ? { escalation: projection.escalation } : {}),
-  };
-}
-
 function availableCaseLifecycle(
   item: EvalHubItem,
   harnessFeedbackRoot: string,
@@ -118,10 +67,8 @@ function availableCaseLifecycle(
   const resolved = loadReevalCaseRoot(harnessFeedbackRoot, item.id, assignedEvalCatIds?.get(root.artifact.domainId));
   if (!resolved) throw new Error(`stable case root unavailable for verdict ${item.id}`);
   const projection = projectReevalCase(resolved.projectorRoot, events);
-  const presentation = lifecyclePresentation(projection, generatedAt);
-  const ownerResponseRefs = projection.history
-    .filter((event) => event.type === 'responsibility_bound' && event.verdictId === projection.activeVerdictId)
-    .flatMap((event) => event.refs);
+  const activeRoot = resolved.roots.find((candidate) => candidate.verdictId === projection.activeVerdictId);
+  const presentation = projectLifecyclePresentation(projection, generatedAt, activeRoot);
   return {
     availability: 'available',
     closureStatus: projection.status,
@@ -135,9 +82,20 @@ function availableCaseLifecycle(
     ...(projection.taskId ? { taskId: projection.taskId } : {}),
     ...(projection.leaseId ? { leaseId: projection.leaseId } : {}),
     ...(projection.leaseGeneration ? { leaseGeneration: projection.leaseGeneration } : {}),
+    ...(projection.responsibilityBlocker
+      ? {
+          responsibilityBlocker: {
+            ...projection.responsibilityBlocker,
+            candidateThreadIds: [...projection.responsibilityBlocker.candidateThreadIds],
+          },
+        }
+      : {}),
     ...(projection.mainCommitSha ? { mainCommitSha: projection.mainCommitSha } : {}),
     ...(projection.liveCommitSha ? { liveCommitSha: projection.liveCommitSha } : {}),
-    ownerResponseRefs,
+    ...(projection.reevalTaskId ? { reevalTaskId: projection.reevalTaskId } : {}),
+    ...(projection.reevalLeaseId ? { reevalLeaseId: projection.reevalLeaseId } : {}),
+    ...(projection.reevalLeaseGeneration ? { reevalLeaseGeneration: projection.reevalLeaseGeneration } : {}),
+    ownerResponseRefs: [...projection.ownerResponseRefs],
     planRefs: [...projection.planRefs],
     actionRefs: [...projection.actionRefs],
     reevalRefs: [...projection.reevalRefs],
@@ -158,8 +116,11 @@ function diagnosisTarget(item: EvalHubItem, artifact: LifecycleRootArtifact) {
 }
 
 function requiresAction(item: EvalHubItem): boolean {
-  if (item.verdict === 'keep_observe') return false;
-  return item.lifecycle.closureStatus !== 'resolved' && item.lifecycle.closureStatus !== 'suppressed_with_reason';
+  return (
+    item.lifecycle.repairDebtStatus === 'active' ||
+    item.lifecycle.reevalDebtStatus === 'due' ||
+    item.lifecycle.reevalDebtStatus === 'in_progress'
+  );
 }
 
 function availableLifecycle(
@@ -169,7 +130,7 @@ function availableLifecycle(
   generatedAt: string,
 ): EvalHubLifecycleView {
   const projection = projectReevalClosure(root.projectorRoot, events);
-  const presentation = lifecyclePresentation(projection, generatedAt);
+  const presentation = projectLifecyclePresentation(projection, generatedAt);
   return {
     availability: 'available',
     closureStatus: projection.status,
@@ -193,10 +154,32 @@ export async function enrichEvalHubLifecycle(
 ): Promise<EvalHubSummary> {
   if (!options.eventLog) return summary;
   const roots = loadEvalVerdictLifecycleRoots(options.harnessFeedbackRoot, options.assignedEvalCatIds);
+  const legacyMigrations = loadLegacyReevalCaseMigrations(options.harnessFeedbackRoot);
+  const stableCaseIds = new Set(
+    [...roots.values()]
+      .filter((root) => root.artifact.schemaVersion === 2)
+      .map((root) => (root.artifact.schemaVersion === 2 ? root.artifact.caseId : '')),
+  );
   const processedCaseIds = new Set<string>();
   const items: EvalHubItem[] = [];
   for (const item of summary.items) {
     const root = roots.get(item.id);
+    const legacyCase = legacyMigrations.find(
+      (migration) =>
+        migration.domainId === item.domainId &&
+        migration.selectors.some(
+          (selector) =>
+            selector.featureId === item.harnessUnderEval.featureId &&
+            selector.componentId === item.harnessUnderEval.componentId,
+        ),
+    );
+    if (
+      legacyCase &&
+      root?.artifact.schemaVersion !== 2 &&
+      stableCaseIds.has(deriveEvalCaseId(legacyCase.domainId, legacyCase.findingKey))
+    ) {
+      continue;
+    }
     if (!root) {
       if (item.verdict === 'keep_observe') {
         items.push(item);

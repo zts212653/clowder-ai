@@ -3,6 +3,7 @@
 import { type ConnectorIconSpec, getConnectorDefinition } from '@cat-cafe/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { tintedLight } from '@/lib/color-utils';
+import { connectorThemeToken } from '@/lib/connector-theme-token';
 import type { ChatMessage as ChatMessageType, MessageContent } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
 import {
@@ -10,7 +11,9 @@ import {
   ConnectorImage,
   GitHubIcon,
   HoldBallIcon,
+  RobotIcon,
   SchedulerIcon,
+  SearchIcon,
   SettingsIcon,
   UsersIcon,
 } from './icons/ConnectorIcons';
@@ -29,6 +32,8 @@ const SVG_ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> 
   settings: SettingsIcon,
   'hold-ball': HoldBallIcon,
   'auth-key': AuthKeyIcon,
+  search: SearchIcon,
+  robot: RobotIcon,
 };
 
 function formatTime(ts: number): string {
@@ -193,6 +198,7 @@ export function ConnectorBubble({ message, threadId }: ConnectorBubbleProps) {
   if (message.extra?.scheduler?.hiddenTrigger) return null;
 
   const connId = source.connector;
+  const themeToken = connectorThemeToken(connId);
   const connDef = getConnectorDefinition(connId);
   const themeHex = connDef?.themeColor;
   const hasBlocks = message.contentBlocks && message.contentBlocks.length > 0;
@@ -222,12 +228,15 @@ export function ConnectorBubble({ message, threadId }: ConnectorBubbleProps) {
           target="_blank"
           rel="noopener noreferrer"
           className="text-xs font-semibold hover:underline"
-          style={{ color: `var(--color-${connId}-bubble, var(--cafe-text))` }}
+          style={{ color: `var(--color-${themeToken}-bubble, var(--cafe-text))` }}
         >
           {source.label}
         </a>
       ) : (
-        <span className="text-xs font-semibold" style={{ color: `var(--color-${connId}-bubble, var(--cafe-text))` }}>
+        <span
+          className="text-xs font-semibold"
+          style={{ color: `var(--color-${themeToken}-bubble, var(--cafe-text))` }}
+        >
           {source.label}
         </span>
       )}
@@ -244,7 +253,7 @@ export function ConnectorBubble({ message, threadId }: ConnectorBubbleProps) {
       avatar={avatar}
       header={header}
       bubbleStyle={{
-        backgroundColor: `var(--color-${connId}-surface, var(--cafe-surface))`,
+        backgroundColor: `var(--color-${themeToken}-surface, var(--cafe-surface))`,
         color: 'var(--cat-msg-text, var(--cafe-text))',
       }}
     >

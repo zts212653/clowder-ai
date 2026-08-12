@@ -190,6 +190,14 @@ describe('L0 Staging Protocol PR-B-impl (ADR-038)', () => {
       assert.ok(out.includes('[爪感差:'));
     });
 
+    sourceOnlyTest('freshness handling names the full current-thread read surface', () => {
+      const out = buildStagingPrepend('codex');
+      const freshnessClause = out.match(/\*\*Freshness notice 处理\*\*[^\n]*/)?.[0] ?? '';
+      assert.match(freshnessClause, /get_thread_context/);
+      assert.match(freshnessClause, /responseMode.*full/);
+      assert.doesNotMatch(freshnessClause, /list_recent/);
+    });
+
     sourceOnlyTest('wipers content rendered for siamese cat (gemini25)', () => {
       const out = buildStagingPrepend('gemini25');
       assert.ok(out.includes('摩擦上报'));

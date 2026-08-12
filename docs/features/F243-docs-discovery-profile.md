@@ -224,7 +224,7 @@ Signal 强度: 6 次 × 4 类 producer × 平均 30 min 下游 unblock 延迟 �
 
 **AC-E3 Attribution chain**: auto-commit body 记 triggering commit SHA + producer author + affected indexes list。`git log --grep="F243-finalizer"` 可 audit 全 drift 事件历史 (Eval 数据源)。
 
-**AC-E4 Failure fail-closed**: generator/commit 失败或 finalizer push 冲突（main race）→ open GitHub Issue，workflow exit 1。**不 auto-force-push**；新 main push 会重新消费聚合 drift，亦可用 `workflow_dispatch` 恢复。
+**AC-E4 Failure fail-closed + alert lifecycle**: generator/commit 失败或 finalizer push 冲突（main race）→ 以专用 `f243-finalizer-alert` label + 固定标题维护唯一 GitHub aggregate Issue；lookup 必须走 direct issues listing 后 exact-title 过滤，不依赖 GitHub search index。首次失败 create，连续失败 update，恢复后再次失败 reopen + update；workflow exit 1。后续 finalizer 健康运行（`clean`、`no-diff-after-write`，或 `committed` 且 push 成功）→ 自动 close 该 aggregate Issue。聚合 Issue 与 managed indexes 都只描述/接受 `refs/heads/main` 状态：所有 main run 共用同一 concurrency group；off-main `workflow_dispatch` 必须跳过状态写入，并使用 run-specific non-main group，不能取消或挤掉 running/pending main reconciliation。**不 auto-force-push**；新 main push 会重新消费聚合 drift，亦可在 main 上用 `workflow_dispatch` 恢复。Issue 正文由无 shell interpolation 的脚本生成，禁止 heredoc/backtick command-substitution 重现 2026-07-15 dry-run 告警正文损坏。
 
 **AC-E5 Retire producer-side rebuild responsibility**: `pnpm check:docs-discovery` 不再要求 feature branch `generate-index --check` 绿色，改跑 `guard-managed-index-ownership.mjs --base origin/main`：source-doc-only branch 必须通过；任何 managed index add/edit/delete 必须失败并提示“只改 source，merge 后 finalizer 重建”。这不是 per-producer pre-commit binding；是单一 ownership boundary 的 hard gate。
 

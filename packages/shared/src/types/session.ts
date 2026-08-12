@@ -13,10 +13,25 @@ import type { CatHandoffNote } from './session-handoff-proposal.js';
 
 export type SessionStatus = 'active' | 'sealing' | 'sealed';
 
+/**
+ * Effective capacity owned by one active session.
+ *
+ * The pin deliberately stores only the resolved capacity — no provider/model
+ * fingerprint or reusable carrier proof. A later invocation may shrink this
+ * value, but only a new session may expand it.
+ */
+export interface SessionCapacityPin {
+  windowTokens: number;
+  inputCeilingTokens: number;
+  source: 'reported' | 'manual' | 'catalog' | 'unresolved';
+  provenance: string;
+  actionable: boolean;
+}
+
 export interface SessionRecord {
   readonly id: string;
   /** CLI-reported session ID (from session_init event) */
-  cliSessionId: string;
+  cliSessionId?: string;
   /** Canonical workspace path associated with this CLI session, when provider-scoped. */
   workingDirectory?: string;
   /** Stable workspace identity used to decide whether a CLI session can be resumed. */
@@ -29,6 +44,8 @@ export interface SessionRecord {
   status: SessionStatus;
   /** Latest context health snapshot after last invocation */
   contextHealth?: ContextHealth;
+  /** #1208: active-session capacity is shrink-only until session rollover. */
+  capacityPin?: SessionCapacityPin;
   /** Latest token usage snapshot (persisted for frontend display after reload) */
   lastUsage?: SessionUsageSnapshot;
   messageCount: number;
@@ -40,8 +57,12 @@ export interface SessionRecord {
    * 带 proposalId 让 commit point 可从 session 侧反推（KD-9 crash recovery）。
    */
   catHandoffNote?: CatHandoffNote;
-  /** F33: Number of CLI compressions in this session (hybrid strategy) */
-  compressionCount?: number;
+  /** Lifetime compression telemetry. `null` means the historical total is unknown. */
+  compressionCount: number | null;
+  /** #1329 immutable strategy snapshot most recently applied at a managed invocation boundary. */
+  appliedPolicy?: SessionPolicySnapshot;
+  /** #1329 policy-local progress for the active hybrid revision. */
+  hybridProgress?: HybridProgress;
   /** Structured collaboration control-flow state used across compact/seal/resume boundaries. */
   continuityCapsule?: unknown;
   /** F118 AC-C6: Consecutive restore failures for overflow circuit breaker */
@@ -78,14 +99,20 @@ export interface SessionUsageSnapshot {
 export interface ContextHealth {
   /** Tokens used for context health. Check usedFrom before interpreting source semantics. */
   usedTokens: number;
-  /** Total context window capacity */
+  /** Total context window capacity (including output reserve). */
   windowTokens: number;
-  /** usedTokens / windowTokens (0.0 ~ 1.0) */
+  /**
+   * usedTokens / inputCeilingTokens (0.0 ~ 1.0).
+   * #1208 denominator fix: denominator is the effective input ceiling
+   * (windowTokens - outputReserve), NOT the raw windowTokens.
+   * This is correct because usedTokens measures input tokens consumed,
+   * and the actionable budget for lifecycle decisions is the input ceiling.
+   */
   fillRatio: number;
-  /** exact = CLI reported; approx = hardcoded fallback */
+  /** exact = carrier-authoritative usage; approx is retained for legacy records. */
   source: 'exact' | 'approx';
   /** Usage field that fed usedTokens. Older records may omit it. */
-  usedFrom?: 'last_turn' | 'input' | 'total';
+  usedFrom?: 'context' | 'last_turn' | 'input' | 'total';
   measuredAt: number;
 }
 
@@ -112,13 +139,10 @@ export interface ContextManagementHint {
    */
   fillConfidence: 'exact_token' | 'approx_token' | 'bytes_health' | 'unavailable';
   /**
-   * Times this (cat, thread) session was compressed. Maintained by Claude's
-   * PreCompact hook (`f24-pre-compact.sh`); stays 0 on runtimes without a
-   * compression hook (Codex/Antigravity) → the cat degrades to the breakpoint +
-   * drift self-check. Objective drift anchor: `compressionCount > 0` ⇒ "you've
-   * been running long enough to compress — suspect topic drift before deciding".
+   * Times this session was compressed when full lifetime observation exists.
+   * `null` is unknown and must not be interpreted as observed zero.
    */
-  compressionCount: number;
+  compressionCount: number | null;
 }
 
 export interface ContextHealthConfig {
@@ -139,6 +163,8 @@ export interface SealResult {
   status: SessionStatus;
   /** Session ID that was sealed (if accepted) */
   sessionId?: string;
+  /** Stable reason for a rejected transition. */
+  rejectionReason?: 'not_found' | 'not_active' | 'policy_revision_mismatch';
 }
 
 // ── F33: Session Strategy Configurability ──
@@ -180,6 +206,47 @@ export interface SessionStrategyConfig {
   turnBudget?: number;
   /** Safety margin above turnBudget */
   safetyMargin?: number;
+}
+
+/** Provenance of the policy selected for one managed invocation. */
+export type SessionPolicySource =
+  | 'runtime_override'
+  | 'config_file'
+  | 'breed_code'
+  | 'provider_default'
+  | 'global_default'
+  | 'legacy_session_chain_false';
+
+/** Stable machine-readable reasons why a policy cannot execute at full fidelity. */
+export type SessionExecutionReason =
+  | 'effective_input_ceiling'
+  | 'carrier_binding'
+  | 'authoritative_usage'
+  | 'session_rotation'
+  | 'continuity_bootstrap'
+  | 'compression_signal'
+  | 'managed_invocation_boundary';
+
+/** Capability is a status projection; it never substitutes another policy. */
+export interface SessionExecutionStatus {
+  status: 'active' | 'degraded' | 'unavailable';
+  missingCapabilities: SessionExecutionReason[];
+}
+
+/** Immutable policy and execution evidence used by one managed invocation. */
+export interface SessionPolicySnapshot {
+  config: SessionStrategyConfig;
+  source: SessionPolicySource;
+  revision: string;
+  changedAt: number;
+  execution: SessionExecutionStatus;
+}
+
+/** Policy-local progress for one hybrid revision; distinct from lifetime telemetry. */
+export interface HybridProgress {
+  policyRevision: string;
+  observedCount: number;
+  startedAt: string;
 }
 
 /** Seal reason for strategy-driven actions */

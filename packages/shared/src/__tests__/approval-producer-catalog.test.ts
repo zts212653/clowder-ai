@@ -14,7 +14,7 @@ import { HUMAN_DISPOSITION_REASON_CODES } from '../types/human-disposition-feedb
 
 describe('F246 Approval producer catalog', () => {
   it('contains the existing producers plus F276 people memory', () => {
-    assert.deepEqual(APPROVAL_PRODUCER_IDS, ['F128', 'F139', 'F225', 'F193', 'F231', 'F260', 'F221', 'F276']);
+    assert.deepEqual(APPROVAL_PRODUCER_IDS, ['F128', 'F139', 'F225', 'F193', 'F231', 'F260', 'F221', 'F276', 'F292']);
     assert.equal('F028' in APPROVAL_PRODUCER_CATALOG, false);
     assert.equal('authorization' in APPROVAL_PRODUCER_CATALOG, false);
   });

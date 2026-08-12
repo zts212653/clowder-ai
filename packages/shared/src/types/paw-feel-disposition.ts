@@ -14,6 +14,8 @@ export const PAW_FEEL_DISPOSITION_STATES = [
   'duplicate',
   'no_action',
   'fix',
+  'signature_waiting',
+  'blocked',
 ] as const;
 
 export type PawFeelDispositionState = (typeof PAW_FEEL_DISPOSITION_STATES)[number];
@@ -52,6 +54,66 @@ export type PawFeelDispositionActor =
   | { kind: 'cvo'; id: string }
   | { kind: 'automation'; id: string }
   | { kind: 'migration'; id: string };
+
+export type PawFeelSignatureAction =
+  | { type: 'duplicate'; duplicateOf: PawFeelSignalId }
+  | { type: 'no_action'; reasonCode: PawFeelNoActionReason }
+  | {
+      type: 'fix';
+      ownerCatId: string;
+      taskId: string;
+      leaseId: string;
+      leaseGeneration: number;
+      custodyEvidenceRef: string;
+    };
+
+export interface PawFeelSignatureRequest {
+  requestId: string;
+  requestedByCatId: string;
+  excludedSignerCatId: string;
+  preferredSignerCatId?: string;
+  action: PawFeelSignatureAction;
+}
+
+export interface PawFeelResponsibilityBlocker {
+  code: string;
+  ref: string;
+}
+
+export const PAW_FEEL_RESPONSIBILITY_STATES = [
+  'unreviewed',
+  'bound_in_repair',
+  'signature_waiting',
+  'blocked',
+  'terminal',
+] as const;
+
+export type PawFeelResponsibilityState = (typeof PAW_FEEL_RESPONSIBILITY_STATES)[number];
+
+export type PawFeelResponsibilityExitKind =
+  | 'none'
+  | 'repair_binding'
+  | 'signature_request'
+  | 'pending_proposal'
+  | 'explicit_blocker'
+  | 'terminal_disposition';
+
+export interface PawFeelResponsibilityProjection {
+  state: PawFeelResponsibilityState;
+  /** True only when the bundle has durable business evidence for an allowed shift exit. */
+  validExit: boolean;
+  exitKind: PawFeelResponsibilityExitKind;
+  evidenceRefs: string[];
+  ownerCatId?: string;
+  taskId?: string;
+  leaseId?: string;
+  proposalId?: string;
+  signerExclusionCatId?: string;
+  preferredSignerCatId?: string;
+  blocker?: PawFeelResponsibilityBlocker;
+}
+
+export type PawFeelResponsibilityCounts = Record<PawFeelResponsibilityState, number>;
 
 export interface PawFeelEventBase {
   eventId: string;
@@ -110,6 +172,16 @@ export type PawFeelDispositionEvent =
       leaseId: string;
       leaseGeneration: number;
       custodyEvidenceRef: string;
+    })
+  | (PawFeelEventBase & {
+      type: 'signature_requested';
+      action: PawFeelSignatureAction;
+      preferredSignerCatId?: string;
+    })
+  | (PawFeelEventBase & {
+      type: 'blocked';
+      blockerCode: string;
+      blockerRef: string;
     });
 
 export interface PawFeelDispositionProjection extends PawFeelSourceRef {
@@ -128,6 +200,8 @@ export interface PawFeelDispositionProjection extends PawFeelSourceRef {
   taskId?: string;
   actionLeaseRef?: { leaseId: string; generation: number };
   custodyEvidenceRef?: string;
+  signatureRequest?: PawFeelSignatureRequest;
+  blocker?: PawFeelResponsibilityBlocker;
   backfilled: boolean;
   captureMethod: PawFeelCaptureMethod;
   captureAssessment: PawFeelCaptureAssessment;
@@ -148,6 +222,7 @@ export type PawFeelSourceResolution =
 
 export interface PawFeelInboxItem {
   disposition: PawFeelDispositionProjection;
+  responsibility: PawFeelResponsibilityProjection;
   source: PawFeelSourceResolution;
   /** Original message timeline time, resolved live from MessageStore. */
   sourceOccurredAt?: string;
@@ -197,12 +272,15 @@ export type PawFeelReviewBundleBasis = (typeof PAW_FEEL_REVIEW_BUNDLE_BASES)[num
 
 export interface PawFeelReviewBundle {
   bundleKey: string;
+  /** Server-authenticated exact list snapshot used by confirm without re-deriving membership. */
+  membershipToken?: string;
   basis: PawFeelReviewBundleBasis;
   sourceThreadId: string;
   representativeSourceMessageId: string;
   members: PawFeelInboxItem[];
   rawSignalCount: number;
   stateCounts: Partial<Record<PawFeelDispositionState, number>>;
+  responsibility: PawFeelResponsibilityProjection;
 }
 
 export interface PawFeelReviewBundleCounts {
@@ -218,6 +296,8 @@ export interface PawFeelInboxPage {
   bundleCounts: PawFeelReviewBundleCounts;
   denominator: PawFeelDenominator;
   counts: PawFeelInboxCounts;
+  /** Bundle-level responsibility truth; raw-signal counts remain available in counts. */
+  responsibilityCounts: PawFeelResponsibilityCounts;
   nextCursor?: string;
   degraded: boolean;
   coverage?: PawFeelReconciliationCoverage;

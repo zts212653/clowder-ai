@@ -176,6 +176,10 @@ describe('external runtime sessions API routes', () => {
     assert.equal(body.lifecycle.state, 'sealed');
     assert.equal(body.lifecycle.sealReason, 'runtime_disconnected');
     assert.equal(body.lifecycle.drainResult, 'complete');
+    assert.equal(body.sessionState.status, 'active');
+    assert.equal(body.sessionState.compressionCount, null);
+    assert.equal(body.sessionPolicy.execution.status, 'unavailable');
+    assert.deepEqual(body.sessionPolicy.execution.missingCapabilities, ['managed_invocation_boundary']);
     assert.equal(body.drilldown.sessionRecord, `/api/sessions/${user1OtherCatSession.sessionId}`);
     assert.equal(body.drilldown.events, `/api/sessions/${user1OtherCatSession.sessionId}/events`);
     assert.equal(body.drilldown.digest, `/api/sessions/${user1OtherCatSession.sessionId}/digest`);
@@ -253,6 +257,18 @@ describe('external runtime sessions API routes', () => {
       catId: 'antig-opus',
       userId: 'user-1',
     });
+    await sessionChainStore.applyPolicySnapshot(rec.id, {
+      config: {
+        strategy: 'handoff',
+        thresholds: { warn: 0.75, action: 0.85 },
+        turnBudget: 12_000,
+        safetyMargin: 4_000,
+      },
+      source: 'runtime_override',
+      revision: 'managed-dispatch-policy',
+      changedAt: 1000,
+      execution: { status: 'active', missingCapabilities: [] },
+    });
     await runtimeSessionStore.upsert({
       sessionId: rec.id,
       runtime: 'antigravity-desktop',
@@ -306,6 +322,8 @@ describe('external runtime sessions API routes', () => {
     assert.equal(body.sessionId, rec.id);
     assert.equal(body.surface, 'cat-cafe-dispatch');
     assert.equal(body.runtimeSessionId, 'cascade-dispatch-2');
+    assert.equal(body.sessionPolicy.revision, 'managed-dispatch-policy');
+    assert.equal(body.sessionPolicy.execution.status, 'active');
   });
 
   test('list scans per-surface so a cat-scoped query is not diluted by other cats (F211-REG1 cloud-P1)', async () => {

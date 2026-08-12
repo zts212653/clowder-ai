@@ -23,9 +23,21 @@ const CONFIG: ConfigData & {
     codex: { displayName: '缅因猫', clientId: 'openai', model: 'codex-2025-03', mcpSupport: false },
     antigravity: { displayName: '孟加拉猫', clientId: 'antigravity', model: 'gemini-bridge', mcpSupport: true },
   },
-  perCatBudgets: {
-    opus: { maxPromptTokens: 150000, maxContextTokens: 200000, maxMessages: 50, maxContentLengthPerMsg: 64000 },
-    codex: { maxPromptTokens: 100000, maxContextTokens: 128000, maxMessages: 30, maxContentLengthPerMsg: 32000 },
+  perCatCapacities: {
+    opus: {
+      windowTokens: 200000,
+      inputCeilingTokens: 184000,
+      source: 'manual',
+      actionable: true,
+      provenance: 'manual',
+    },
+    codex: {
+      windowTokens: 128000,
+      inputCeilingTokens: 112000,
+      source: 'catalog',
+      actionable: false,
+      provenance: 'catalog',
+    },
   },
   a2a: { enabled: true, maxDepth: 2 },
   memory: { enabled: true, maxKeysPerThread: 50 },

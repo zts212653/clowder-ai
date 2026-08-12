@@ -756,4 +756,39 @@ describe('ThreadStore', () => {
     store.updateMemberEffort('ghost-thread', 'catA', 'max');
     assert.deepEqual(store.getMemberEfforts('ghost-thread', 'user-1'), {});
   });
+
+  test('F291: member speed overrides are isolated, clearable, and persistent for the thread lifetime', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    const threadA = store.create('user-1', 'speed-a');
+    const threadB = store.create('user-1', 'speed-b');
+
+    store.updateMemberSpeed(threadA.id, 'codex-sol', 'fast');
+    store.updateMemberSpeed(threadA.id, 'codex-terra', 'standard');
+    store.updateMemberSpeed(threadB.id, 'codex-sol', 'standard');
+
+    assert.equal(store.getMemberSpeed(threadA.id, 'codex-sol', 'user-1'), 'fast');
+    assert.deepEqual(store.getMemberSpeeds(threadA.id, 'user-1'), {
+      'codex-sol': 'fast',
+      'codex-terra': 'standard',
+    });
+    assert.equal(store.getMemberSpeed(threadB.id, 'codex-sol', 'user-1'), 'standard');
+
+    store.updateMemberSpeed(threadA.id, 'codex-sol', null);
+    assert.equal(store.getMemberSpeed(threadA.id, 'codex-sol', 'user-1'), undefined);
+    assert.deepEqual(store.getMemberSpeeds(threadA.id, 'user-1'), { 'codex-terra': 'standard' });
+
+    store.softDelete(threadA.id);
+    store.restore(threadA.id);
+    assert.equal(store.getMemberSpeed(threadA.id, 'codex-terra', 'user-1'), 'standard');
+    store.delete(threadA.id);
+    assert.deepEqual(store.getMemberSpeeds(threadA.id, 'user-1'), {});
+  });
+
+  test('F291: updating speed on a missing thread is a no-op', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const store = new ThreadStore();
+    store.updateMemberSpeed('ghost-thread', 'codex-sol', 'fast');
+    assert.deepEqual(store.getMemberSpeeds('ghost-thread', 'user-1'), {});
+  });
 });

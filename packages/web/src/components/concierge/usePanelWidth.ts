@@ -54,6 +54,22 @@ export const PANEL_MAX_H = 700;
 export const PANEL_DEFAULT_H = 400;
 /** Bottom offset (24+72+16=112) + 24px top margin = 136px reserved vertical space */
 export const PANEL_MARGIN_V = 136;
+/** Activity rail width (52px) + 12px gap + fixed right inset (24px). */
+export const PANEL_EXPANDED_HORIZONTAL_INSET = 88;
+
+/** Largest safe panel footprint while preserving the activity rail, cat, and viewport margins. */
+export function resolveExpandedPanelSize(
+  viewportWidth: number,
+  viewportHeight: number,
+): {
+  width: number;
+  height: number;
+} {
+  return {
+    width: Math.max(0, viewportWidth - PANEL_EXPANDED_HORIZONTAL_INSET),
+    height: Math.max(0, viewportHeight - PANEL_MARGIN_V),
+  };
+}
 
 /** Clamp a height to viewport bounds. Same logic as width: viewport constraint wins. */
 export function clampPanelHeight(h: number, viewportHeight: number): number {
@@ -86,12 +102,17 @@ const PANEL_HEIGHT_STORAGE_KEY = 'concierge-panel-height';
 export interface UsePanelWidthReturn {
   panelWidth: number;
   panelHeight: number;
+  isExpanded: boolean;
+  toggleExpanded: () => void;
   handleResizePointerDown: (e: PointerEvent) => void;
   handleResizePointerMove: (e: PointerEvent) => void;
   handleResizePointerUp: () => void;
   handleHeightResizePointerDown: (e: PointerEvent) => void;
   handleHeightResizePointerMove: (e: PointerEvent) => void;
   handleHeightResizePointerUp: () => void;
+  handleCornerResizePointerDown: (e: PointerEvent) => void;
+  handleCornerResizePointerMove: (e: PointerEvent) => void;
+  handleCornerResizePointerUp: () => void;
 }
 
 export function usePanelWidth(): UsePanelWidthReturn {
@@ -105,7 +126,7 @@ export function usePanelWidth(): UsePanelWidthReturn {
     return clampPanelHeight(h, window.innerHeight);
   }, []);
 
-  const [panelWidth, setPanelWidth] = useState<number>(() => {
+  const [manualPanelWidth, setManualPanelWidth] = useState<number>(() => {
     if (typeof window === 'undefined') return PANEL_DEFAULT_W;
     let saved: string | null = null;
     try {
@@ -116,7 +137,7 @@ export function usePanelWidth(): UsePanelWidthReturn {
     return resolveInitialPanelWidth(saved, window.innerWidth);
   });
 
-  const [panelHeight, setPanelHeight] = useState<number>(() => {
+  const [manualPanelHeight, setManualPanelHeight] = useState<number>(() => {
     if (typeof window === 'undefined') return PANEL_DEFAULT_H;
     let saved: string | null = null;
     try {
@@ -129,12 +150,19 @@ export function usePanelWidth(): UsePanelWidthReturn {
 
   const resizeDragRef = useRef<{ startX: number; startW: number } | null>(null);
   const heightDragRef = useRef<{ startY: number; startH: number } | null>(null);
+  const cornerDragRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [expandedSize, setExpandedSize] = useState(() => {
+    if (typeof window === 'undefined') return { width: PANEL_DEFAULT_W, height: PANEL_DEFAULT_H };
+    return resolveExpandedPanelSize(window.innerWidth, window.innerHeight);
+  });
 
   // Re-clamp both dimensions on viewport resize
   useEffect(() => {
     const handleResize = () => {
-      setPanelWidth((prev) => clampPanelWidth(prev, window.innerWidth));
-      setPanelHeight((prev) => clampPanelHeight(prev, window.innerHeight));
+      setManualPanelWidth((prev) => clampPanelWidth(prev, window.innerWidth));
+      setManualPanelHeight((prev) => clampPanelHeight(prev, window.innerHeight));
+      setExpandedSize(resolveExpandedPanelSize(window.innerWidth, window.innerHeight));
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
@@ -146,10 +174,10 @@ export function usePanelWidth(): UsePanelWidthReturn {
     (e: PointerEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      resizeDragRef.current = { startX: e.clientX, startW: panelWidth };
+      resizeDragRef.current = { startX: e.clientX, startW: manualPanelWidth };
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
     },
-    [panelWidth],
+    [manualPanelWidth],
   );
 
   const handleResizePointerMove = useCallback(
@@ -158,7 +186,7 @@ export function usePanelWidth(): UsePanelWidthReturn {
       // Panel grows leftward (anchored right-6), so moving left = wider
       const delta = resizeDragRef.current.startX - e.clientX;
       const newW = clampWidth(resizeDragRef.current.startW + delta);
-      setPanelWidth(newW);
+      setManualPanelWidth(newW);
     },
     [clampWidth],
   );
@@ -167,11 +195,11 @@ export function usePanelWidth(): UsePanelWidthReturn {
     if (!resizeDragRef.current) return;
     resizeDragRef.current = null;
     try {
-      localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(panelWidth));
+      localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(manualPanelWidth));
     } catch {
       // Storage unavailable — width not persisted, non-critical
     }
-  }, [panelWidth]);
+  }, [manualPanelWidth]);
 
   // --- Height resize handlers (top edge) ---
 
@@ -179,10 +207,10 @@ export function usePanelWidth(): UsePanelWidthReturn {
     (e: PointerEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      heightDragRef.current = { startY: e.clientY, startH: panelHeight };
+      heightDragRef.current = { startY: e.clientY, startH: manualPanelHeight };
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
     },
-    [panelHeight],
+    [manualPanelHeight],
   );
 
   const handleHeightResizePointerMove = useCallback(
@@ -191,7 +219,7 @@ export function usePanelWidth(): UsePanelWidthReturn {
       // Panel grows upward (anchored at bottom), so moving up = taller
       const delta = heightDragRef.current.startY - e.clientY;
       const newH = clampHeight(heightDragRef.current.startH + delta);
-      setPanelHeight(newH);
+      setManualPanelHeight(newH);
     },
     [clampHeight],
   );
@@ -200,20 +228,68 @@ export function usePanelWidth(): UsePanelWidthReturn {
     if (!heightDragRef.current) return;
     heightDragRef.current = null;
     try {
-      localStorage.setItem(PANEL_HEIGHT_STORAGE_KEY, String(panelHeight));
+      localStorage.setItem(PANEL_HEIGHT_STORAGE_KEY, String(manualPanelHeight));
     } catch {
       // Storage unavailable — height not persisted, non-critical
     }
-  }, [panelHeight]);
+  }, [manualPanelHeight]);
+
+  const handleCornerResizePointerDown = useCallback(
+    (e: PointerEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      cornerDragRef.current = {
+        startX: e.clientX,
+        startY: e.clientY,
+        startW: manualPanelWidth,
+        startH: manualPanelHeight,
+      };
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    },
+    [manualPanelHeight, manualPanelWidth],
+  );
+
+  const handleCornerResizePointerMove = useCallback(
+    (e: PointerEvent) => {
+      const drag = cornerDragRef.current;
+      if (!drag) return;
+      setManualPanelWidth(clampWidth(drag.startW + drag.startX - e.clientX));
+      setManualPanelHeight(clampHeight(drag.startH + drag.startY - e.clientY));
+    },
+    [clampHeight, clampWidth],
+  );
+
+  const handleCornerResizePointerUp = useCallback(() => {
+    if (!cornerDragRef.current) return;
+    cornerDragRef.current = null;
+    try {
+      localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(manualPanelWidth));
+      localStorage.setItem(PANEL_HEIGHT_STORAGE_KEY, String(manualPanelHeight));
+    } catch {
+      // Storage unavailable — dimensions remain valid for this session.
+    }
+  }, [manualPanelHeight, manualPanelWidth]);
+
+  const toggleExpanded = useCallback(() => {
+    if (!isExpanded && typeof window !== 'undefined') {
+      setExpandedSize(resolveExpandedPanelSize(window.innerWidth, window.innerHeight));
+    }
+    setIsExpanded((current) => !current);
+  }, [isExpanded]);
 
   return {
-    panelWidth,
-    panelHeight,
+    panelWidth: isExpanded ? expandedSize.width : manualPanelWidth,
+    panelHeight: isExpanded ? expandedSize.height : manualPanelHeight,
+    isExpanded,
+    toggleExpanded,
     handleResizePointerDown,
     handleResizePointerMove,
     handleResizePointerUp,
     handleHeightResizePointerDown,
     handleHeightResizePointerMove,
     handleHeightResizePointerUp,
+    handleCornerResizePointerDown,
+    handleCornerResizePointerMove,
+    handleCornerResizePointerUp,
   };
 }

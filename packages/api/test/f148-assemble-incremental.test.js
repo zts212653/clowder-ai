@@ -2,10 +2,21 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-const { assembleIncrementalContext } = await import('../dist/domains/cats/services/agents/routing/route-helpers.js');
+const { assembleIncrementalContext: assembleIncrementalContextWithoutCapacity } = await import(
+  '../dist/domains/cats/services/agents/routing/route-helpers.js'
+);
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
 const { estimateTokens } = await import('../dist/utils/token-counter.js');
+
+const TEST_INVOCATION_HISTORY_CEILING = 500_000;
+
+function assembleIncrementalContext(deps, userId, threadId, catId, currentUserMessageId, thinkingMode, options) {
+  return assembleIncrementalContextWithoutCapacity(deps, userId, threadId, catId, currentUserMessageId, thinkingMode, {
+    ...options,
+    effectiveMaxContextTokens: options?.effectiveMaxContextTokens ?? TEST_INVOCATION_HISTORY_CEILING,
+  });
+}
 
 function mockMsg(overrides) {
   const ts = overrides.timestamp ?? Date.now();

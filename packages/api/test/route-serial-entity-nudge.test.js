@@ -283,7 +283,7 @@ describe('F260 computeContextBudget (shared budget helper)', () => {
     assert.equal(BUDGET_RESERVED_TOKENS, 200, 'reserved tokens constant');
 
     const cases = [
-      // label, maxPromptTokens, maxContextTokens, systemPartsTokens, promptTokens, nudgeTokens, expected
+      // label, input ceiling, history ceiling, fixed prompt tokens, current prompt, nudge, expected
       ['no nudge, ample budget', 200000, 160000, 15000, 500, 0, 160000],
       ['nudge deducts from budget', 200000, 160000, 15000, 500, 1000, 160000],
       ['nudge pushes below maxContext', 200000, 160000, 30000, 5000, 10000, 154800],
@@ -296,8 +296,8 @@ describe('F260 computeContextBudget (shared budget helper)', () => {
 
     for (const [label, maxPrompt, maxContext, system, prompt, nudge, expected] of cases) {
       const result = computeContextBudget({
-        maxPromptTokens: maxPrompt,
-        maxContextTokens: maxContext,
+        inputCeilingTokens: maxPrompt,
+        historyTokenCeiling: maxContext,
         systemPartsTokens: system,
         promptTokens: prompt,
         nudgeTokens: nudge,

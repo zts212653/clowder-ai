@@ -16,7 +16,12 @@ function reorderIds(ids: string[], srcId: string, targetId: string): string[] {
   return [...withoutSrc.slice(0, targetIdx), srcId, ...withoutSrc.slice(targetIdx)];
 }
 
-export type { Capabilities, CatConfig, ConfigData, ContextBudget } from './config-viewer-types';
+export type {
+  Capabilities,
+  CatCapacityProjection,
+  CatConfig,
+  ConfigData,
+} from './config-viewer-types';
 
 function KV({ label, value }: { label: string; value: string | number | boolean }) {
   const display = typeof value === 'boolean' ? (value ? '是' : '否') : String(value);

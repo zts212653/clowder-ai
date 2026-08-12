@@ -19,10 +19,12 @@ import {
 import { deriveProactiveMemoryOpportunityRef } from './proactive-memory-opportunity-ref.js';
 
 const PROPOSAL_TOOL_NAME = 'propose_person_memory';
+const DEFER_TOOL_NAME = 'defer_person_memory_delta';
 const ABSTENTION_TOOL_NAME = 'record_proactive_memory_abstention';
 
 interface ProjectedToolEvidence {
   readonly proposalSucceeded: boolean;
+  readonly deferSucceeded: boolean;
   readonly abstentionReasons: ReadonlySet<ProactiveMemoryAbstentionReasonCode>;
 }
 
@@ -59,24 +61,31 @@ function groupEligibleEvents(
 
 function projectToolEvidence(events: readonly ToolEvent[]): ProjectedToolEvidence {
   let proposalSucceeded = false;
+  let deferSucceeded = false;
   const abstentionReasons = new Set<ProactiveMemoryAbstentionReasonCode>();
   for (const event of events) {
     if (event.toolName === PROPOSAL_TOOL_NAME && isRecognizedSuccess(event, 'proposal_submitted')) {
       proposalSucceeded = true;
       continue;
     }
+    if (event.toolName === DEFER_TOOL_NAME && isRecognizedSuccess(event, 'deferred_receipt_recorded')) {
+      deferSucceeded = true;
+      continue;
+    }
     if (event.toolName !== ABSTENTION_TOOL_NAME || !isRecognizedSuccess(event, 'abstention_recorded')) continue;
     const reason = proactiveMemoryAbstentionReasonCodeSchema.safeParse(toolSummary(event).reasonCode);
     if (reason.success) abstentionReasons.add(reason.data);
   }
-  return { proposalSucceeded, abstentionReasons };
+  return { proposalSucceeded, deferSucceeded, abstentionReasons };
 }
 
 function projectEpisode(
   exposure: ProactiveMemoryOpportunityExposure,
   evidence: ProjectedToolEvidence,
 ): { episode?: ProactiveMemoryOpportunityEpisode; failure?: ProactiveMemoryOpportunityFailure } {
-  if (evidence.proposalSucceeded && evidence.abstentionReasons.size > 0) {
+  const dispositionCount =
+    Number(evidence.proposalSucceeded) + Number(evidence.deferSucceeded) + Number(evidence.abstentionReasons.size > 0);
+  if (dispositionCount > 1) {
     return {
       failure: { opportunityRef: exposure.opportunityRef, code: 'contradictory_disposition' },
     };
@@ -92,6 +101,15 @@ function projectEpisode(
         opportunityRef: exposure.opportunityRef,
         disposition: 'propose',
         reasonCode: 'proposal_submitted',
+      },
+    };
+  }
+  if (evidence.deferSucceeded) {
+    return {
+      episode: {
+        opportunityRef: exposure.opportunityRef,
+        disposition: 'defer',
+        reasonCode: 'deferred_receipt_recorded',
       },
     };
   }

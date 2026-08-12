@@ -160,6 +160,24 @@ export function transformAcpEvent(
   }
 
   switch (sessionUpdate) {
+    case 'usage_update': {
+      const used = typeof inner.used === 'number' && Number.isFinite(inner.used) ? inner.used : undefined;
+      const size = typeof inner.size === 'number' && Number.isFinite(inner.size) ? inner.size : undefined;
+      if (used == null && size == null) return withFlush(null);
+      return withFlush({
+        type: 'agent_loop',
+        catId,
+        metadata: {
+          ...metadata,
+          usage: {
+            ...(used != null ? { contextUsedTokens: used, lastTurnInputTokens: used } : {}),
+            ...(size != null ? { contextWindowSize: size } : {}),
+          },
+        },
+        timestamp: now,
+      });
+    }
+
     case 'agent_message_chunk': {
       const text = content?.text ?? '';
       if (state) {

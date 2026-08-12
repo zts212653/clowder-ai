@@ -88,7 +88,7 @@ export interface GitHubScheduleDeps extends ScheduleFactoryDeps {
   isEchoComment: (c: PrFeedbackComment) => boolean;
   isEchoReview: (r: PrReviewDecision) => boolean;
   isNoiseComment: (c: PrFeedbackComment) => boolean;
-  externalReviewCoordinator?: Pick<ExternalReviewCoordinator, 'recordCloud'>;
+  externalReviewCoordinator?: Pick<ExternalReviewCoordinator, 'recordCloud' | 'shouldContinueTracking'>;
   /** Self-merge filter: returns true if the given GitHub login is our own authenticated identity. */
   isSelfMerge?: (mergedByLogin: string) => boolean;
   // repo-scan deps — optional, not available when redis is not configured
@@ -180,6 +180,9 @@ const cicdCheckFactory: ScheduleFactory = {
       invokeTrigger: d.invokeTrigger,
       isSelfMerge: d.isSelfMerge,
       log: d.log,
+      ...(d.externalReviewCoordinator
+        ? { continueDoneTracking: d.externalReviewCoordinator.shouldContinueTracking.bind(d.externalReviewCoordinator) }
+        : {}),
     }) as TaskSpec_P1;
   },
 };

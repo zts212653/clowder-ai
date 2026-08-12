@@ -29,8 +29,17 @@ export interface ProactiveMemoryNudgeServiceDeps {
 
 export interface PreparedProactiveMemoryNudge {
   readonly context: string;
-  readonly candidates: readonly ProactiveMemoryCandidate[];
+  readonly candidates: readonly PreparedProactiveMemoryCandidate[];
   readonly claimIds: readonly string[];
+}
+
+type EligibleRegistryMatch = Extract<
+  ProactiveCandidateRegistryMatch,
+  { kind: 'unregistered' | 'registered_entity' | 'registered_person' }
+>;
+
+export interface PreparedProactiveMemoryCandidate extends ProactiveMemoryCandidate {
+  readonly registryMatch: EligibleRegistryMatch;
 }
 
 const DEFAULT_CLAIM_LEASE_MS = 2 * 60 * 1_000;
@@ -41,7 +50,7 @@ function formatCoordinates(candidate: ProactiveMemoryCandidate): string {
     .join(' | ');
 }
 
-function formatContext(candidates: readonly ProactiveMemoryCandidate[]): string {
+function formatContext(candidates: readonly PreparedProactiveMemoryCandidate[]): string {
   if (candidates.length === 0) return '';
   const lines = candidates.map(
     (candidate) =>
@@ -53,6 +62,8 @@ function formatContext(candidates: readonly ProactiveMemoryCandidate[]): string 
       `${candidate.frequency.background.eligibleMessageCount} messages; recent ` +
       `${candidate.frequency.recentBurst.distinctMessageCount}/` +
       `${candidate.frequency.recentBurst.eligibleMessageCount} messages\n` +
+      `  ↳ registry=${candidate.registryMatch.kind}` +
+      `${candidate.registryMatch.kind === 'unregistered' ? '' : '; known-person delta'}\n` +
       `  ↳ ${formatCoordinates(candidate)}`,
   );
   return (
@@ -77,19 +88,21 @@ export class ProactiveMemoryNudgeService {
       proactiveMemoryScanTotal.add(1);
       proactiveMemoryScanDuration.record(performance.now() - scanStartedAt);
       proactiveMemoryCandidateCount.record(detected.length);
-      const registryMisses: ProactiveMemoryCandidate[] = [];
+      const eligibleCandidates: PreparedProactiveMemoryCandidate[] = [];
       for (const candidate of detected) {
         const match = await this.deps.registryResolver.resolve({
           ownerUserId: input.ownerUserId,
           phrase: candidate.phrase,
         });
-        if (match.kind === 'unregistered') registryMisses.push(candidate);
+        if (match.kind === 'unregistered' || match.kind === 'registered_entity' || match.kind === 'registered_person') {
+          eligibleCandidates.push({ ...candidate, registryMatch: match });
+        }
       }
 
       const config = this.deps.detector.getConfig();
-      const candidates: ProactiveMemoryCandidate[] = [];
+      const candidates: PreparedProactiveMemoryCandidate[] = [];
       const claimIds: string[] = [];
-      for (const candidate of registryMisses) {
+      for (const candidate of eligibleCandidates) {
         if (candidates.length >= config.maxNudgesPerTurn) break;
         const windowEndsAt = candidate.window.untilInclusive + config.windowMs;
         const claim = this.deps.receiptStore.claim({

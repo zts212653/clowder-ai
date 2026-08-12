@@ -21,6 +21,7 @@ vi.mock('@/components/icons/AttachIcon', () => ({
   AttachIcon: () => React.createElement('span', null, 'attach'),
 }));
 vi.mock('@/components/ImagePreview', () => ({ ImagePreview: () => null }));
+vi.mock('@/components/AttachmentPreview', () => ({ AttachmentPreview: () => null }));
 vi.mock('@/utils/compressImage', () => ({ compressImage: (f: File) => Promise.resolve(f) }));
 
 // Two cats: one with mentionPatterns, one without (non-default variant)
@@ -88,8 +89,9 @@ describe('ChatInput whisper targets with empty mentionPatterns', () => {
       root.render(React.createElement(ChatInput, { onSend: vi.fn() }));
     });
 
-    // Click the whisper mode toggle (aria-label="Whisper mode")
-    const whisperBtn = container.querySelector<HTMLButtonElement>('[aria-label="Whisper mode"]');
+    const addBtn = container.querySelector<HTMLButtonElement>('[aria-label="添加"]');
+    act(() => addBtn?.click());
+    const whisperBtn = container.querySelector<HTMLButtonElement>('[data-testid="composer-whisper"]');
     expect(whisperBtn).not.toBeNull();
     act(() => whisperBtn?.click());
 
@@ -111,8 +113,10 @@ describe('ChatInput whisper targets with empty mentionPatterns', () => {
       root.render(React.createElement(ChatInput, { onSend: vi.fn() }));
     });
 
-    // Enter whisper mode
-    const whisperBtn = container.querySelector<HTMLButtonElement>('[aria-label="Whisper mode"]');
+    // Enter whisper mode through the progressive add menu.
+    const addBtn = container.querySelector<HTMLButtonElement>('[aria-label="添加"]');
+    act(() => addBtn?.click());
+    const whisperBtn = container.querySelector<HTMLButtonElement>('[data-testid="composer-whisper"]');
     act(() => whisperBtn?.click());
 
     // Find the opus-fast row in the floating popup

@@ -127,6 +127,8 @@ export function buildHoldExpiredEvent(input: HeldEventInput): BallCustodyEvent {
 export interface WakeConditionMetEventInput {
   threadId: string;
   catId: string;
+  /** Exact managed hold task whose condition fired. */
+  taskId: string;
   /** Command that was run */
   command: string;
   /** Exit code (null = killed by timeout/cancel) */
@@ -145,16 +147,89 @@ export interface WakeConditionMetEventInput {
  */
 export function buildWakeConditionMetEvent(input: WakeConditionMetEventInput): BallCustodyEvent {
   return {
-    sourceEventId: `wakecond:${input.threadId}:${input.catId}:${input.at}`,
+    sourceEventId: `wakecond:${input.taskId}`,
     subjectKey: `ball:thread:${input.threadId}`,
     kind: 'ball.wake_condition_met',
     classification: 'state-changing',
     payload: {
       catId: input.catId,
+      taskId: input.taskId,
       command: input.command,
       exitCode: input.exitCode,
       timedOut: input.timedOut,
       durationMs: input.durationMs,
+    },
+    at: input.at,
+  };
+}
+
+export type ManagedHoldDisposition = 'handled' | 'completed';
+
+export interface HoldDispositionEventInput {
+  threadId: string;
+  catId: string;
+  invocationId: string;
+  sourceMessageId: string;
+  taskId: string;
+  disposition: ManagedHoldDisposition;
+  at: number;
+}
+
+export function holdDispositionEventSourceId(input: {
+  invocationId: string;
+  sourceMessageId: string;
+  taskId: string;
+}): string {
+  return `hold-disposition:${input.invocationId}:${input.sourceMessageId}:${input.taskId}`;
+}
+
+/** Exact managed wake completion; deliberately distinct from handed_cvo.done_notify. */
+export function buildHoldDispositionEvent(input: HoldDispositionEventInput): BallCustodyEvent {
+  return {
+    sourceEventId: holdDispositionEventSourceId(input),
+    subjectKey: `ball:thread:${input.threadId}`,
+    kind: 'ball.hold_dispositioned',
+    classification: 'state-changing',
+    payload: {
+      catId: input.catId,
+      invocationId: input.invocationId,
+      sourceMessageId: input.sourceMessageId,
+      taskId: input.taskId,
+      disposition: input.disposition,
+    },
+    at: input.at,
+  };
+}
+
+export type A2ADispatchDisposition = 'handled' | 'completed';
+
+export interface DispatchDispositionEventInput {
+  threadId: string;
+  catId: string;
+  fromCatId: string;
+  invocationId: string;
+  sourceMessageId: string;
+  disposition: A2ADispatchDisposition;
+  at: number;
+}
+
+export function dispatchDispositionEventSourceId(input: { invocationId: string; sourceMessageId: string }): string {
+  return `dispatch-disposition:${input.invocationId}:${input.sourceMessageId}`;
+}
+
+/** Exact ordinary A2A completion; caller identity and source are server-derived. */
+export function buildDispatchDispositionEvent(input: DispatchDispositionEventInput): BallCustodyEvent {
+  return {
+    sourceEventId: dispatchDispositionEventSourceId(input),
+    subjectKey: `ball:thread:${input.threadId}`,
+    kind: 'ball.dispatch_dispositioned',
+    classification: 'state-changing',
+    payload: {
+      catId: input.catId,
+      fromCatId: input.fromCatId,
+      invocationId: input.invocationId,
+      sourceMessageId: input.sourceMessageId,
+      disposition: input.disposition,
     },
     at: input.at,
   };

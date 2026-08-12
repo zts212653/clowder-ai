@@ -345,25 +345,41 @@ if [ -f "$REPO_ROOT/scripts/brand-dictionary-helper.mjs" ]; then
   done <<< "$DICT_PATTERNS"
 fi
 BRAND_PROTECTED_STAGED=$(git diff --cached --name-only | grep -E "$BRAND_PROTECTED_REGEX" || true)
+# Broad, cheap trigger only: the intake script remains the single authoritative
+# aggregate classifier. False positives here merely run that classifier; they
+# do not block. Keeping the trigger broad ensures a 1224-class staged change
+# cannot avoid the automatic guard just because none of its files are branded.
+STATEFUL_MIGRATION_CANDIDATE_STAGED=$(
+  printf '%s\n' "$STAGED_FILES" \
+    | grep -E '(^packages/api/src/.*/stores/|^packages/api/src/.*([Ss]tore|[Rr]edis|[Cc]ursor|freshness|read-state|unseen|briefing|closure|supplement).*\.ts$|^packages/shared/src/.*([Rr]edis|[Cc]ursor).*\.ts$|^packages/api/src/routes/.*\.ts$|^packages/api/scripts/.*([Cc]ursor|migrat|persist)|(^|/).*(lua|activation|feature-flag|migration|migrate|backfill|persist).*)' \
+    || true
+)
 
-if [ -n "$BRAND_PROTECTED_STAGED" ]; then
+if [ -n "$BRAND_PROTECTED_STAGED" ] || [ -n "$STATEFUL_MIGRATION_CANDIDATE_STAGED" ]; then
   echo "" >&2
-  echo "🛡 BRAND GUARD: brand-protected files staged, running validation..." >&2
-  echo "$BRAND_PROTECTED_STAGED" | sed 's/^/  - /' >&2
+  if [ -n "$BRAND_PROTECTED_STAGED" ]; then
+    echo "🛡 INBOUND GUARD: brand-protected files staged, running brand + 1224-class validation..." >&2
+    echo "$BRAND_PROTECTED_STAGED" | sed 's/^/  - /' >&2
+  else
+    echo "🛡 INBOUND GUARD: checking staged files for 1224-class state migration risk..." >&2
+    echo "$STATEFUL_MIGRATION_CANDIDATE_STAGED" | sed 's/^/  - /' >&2
+  fi
   echo "" >&2
   if [ -f "scripts/intake-from-opensource.sh" ]; then
-    if ! bash scripts/intake-from-opensource.sh --validate-inbound --from-index >&2; then
+    if ! bash scripts/intake-from-opensource.sh --validate-inbound --from-index --state-migration-advisory >&2; then
       echo "" >&2
-      echo "🚫 Brand Guard failed! Fix brand contamination before committing." >&2
+      echo "🚫 Inbound Guard failed! Fix brand contamination before committing." >&2
       echo "   See: bash scripts/intake-from-opensource.sh --validate-inbound" >&2
       exit 1
     fi
   else
-    echo "⚠ Brand validation script not found, skipping guard." >&2
+    echo "🚫 Inbound Guard unavailable: scripts/intake-from-opensource.sh is missing." >&2
+    echo "   Refusing to commit without the automatic brand + 1224-class migration guard." >&2
+    exit 1
   fi
 fi
 
-# main 分支：Brand Guard 已在上面对所有分支生效；仅跳过 Shared State Guard
+# main 分支：Inbound Guard 已在上面对所有分支生效；仅跳过 Shared State Guard
 # （共享状态文件 SHOULD be committed on main）
 if [ "$BRANCH" = "main" ]; then
   exit 0

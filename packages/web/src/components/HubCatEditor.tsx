@@ -1,5 +1,6 @@
 'use client';
 
+import { supportsCodexFastModel } from '@cat-cafe/shared';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { CatData } from '@/hooks/useCatData';
@@ -76,6 +77,10 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
   const selectedProfile = useMemo(
     () => availableProfiles.find((profile) => profile.id === form.accountRef) ?? null,
     [availableProfiles, form.accountRef],
+  );
+  const originalProfile = useMemo(
+    () => profiles.find((profile) => profile.id === cat?.accountRef) ?? null,
+    [cat?.accountRef, profiles],
   );
   const modelOptions = useMemo(() => {
     if (form.clientId === 'antigravity') return [];
@@ -452,11 +457,17 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
     try {
       const effectiveForm =
         !cat && selectedProfile?.authType === 'api_key' ? withDefaultModelMentionPattern(form) : form;
-      const catPayload = cat ? buildCatPatchPayload(effectiveForm, cat) : buildCatPayload(effectiveForm, cat);
-      const rollbackCatPayload = cat ? buildCatPayload(initialState(cat, null), cat) : null;
-      const strategyEditable = Boolean(
-        cat && form.sessionChain === 'true' && (strategyForm?.sessionChainEnabled ?? true),
-      );
+      const payloadContext = { accountAuthType: selectedProfile?.authType ?? null };
+      const catPayload = cat
+        ? buildCatPatchPayload(effectiveForm, cat, payloadContext)
+        : buildCatPayload(effectiveForm, cat, payloadContext);
+      const rollbackCatPayload = cat
+        ? buildCatPayload(initialState(cat, null), cat, {
+            accountAuthType: originalProfile?.authType ?? null,
+            forceServiceTier: true,
+          })
+        : null;
+      const strategyEditable = Boolean(cat && strategyForm);
       const nextStrategyPayload = strategyEditable && strategyForm ? buildStrategyPayload(strategyForm) : null;
       const baselineStrategyPayload =
         strategyEditable && strategyBaseline ? buildStrategyPayload(strategyBaseline) : null;
@@ -694,6 +705,13 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
             codexSettingsError={codexSettingsError}
             codexSettingsEditable={codexSettingsEditable}
             showCodexSettings={showCodexSettings}
+            codexSpeedVisible={
+              form.clientId === 'openai' &&
+              selectedProfile?.authType === 'oauth' &&
+              !form.acpEnabled &&
+              (cat ? cat.cli != null : true)
+            }
+            codexFastSupported={supportsCodexFastModel(form.defaultModel)}
             onChange={patchForm}
             onStrategyChange={patchStrategy}
             onCodexChange={patchCodex}

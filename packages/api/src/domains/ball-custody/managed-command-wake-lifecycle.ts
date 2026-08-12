@@ -26,7 +26,11 @@ export interface ManagedCommandWakeProjection {
   readonly startedAt: number;
   readonly conditionMetAt?: number;
   readonly wakeContent?: string;
+  readonly wakeSource?: 'command_completion' | 'fallback_timer';
   readonly result?: ManagedCommandTerminalResult;
+  readonly messageClaimGeneration?: number;
+  readonly messageClaimedAt?: number;
+  readonly pendingCompletionContent?: string;
   readonly messageId?: string;
   readonly messageWrittenAt?: number;
   readonly dispatchAttemptCount?: number;
@@ -53,14 +57,14 @@ export interface ManagedCommandWakeTrigger {
     message: string,
     messageId: string,
     contentBlocks?: undefined,
-    policy?: { sourceCategory?: string },
+    policy?: { sourceCategory?: string; forceQueue?: boolean },
   ): Promise<ManagedCommandWakeTriggerOutcome>;
 }
 
 export interface ManagedCommandWakeDynamicTaskStore {
   getAll(): DynamicTaskDef[];
   getById(id: string): DynamicTaskDef | null;
-  updateParams(id: string, params: Record<string, unknown>): boolean;
+  updateParamsIfCurrent(id: string, current: Record<string, unknown>, next: Record<string, unknown>): boolean;
   setEnabled(id: string, enabled: boolean): boolean;
 }
 
@@ -77,6 +81,15 @@ export interface ManagedCommandWakeRecoveryDeps {
     ): InvocationRecord | null | Promise<InvocationRecord | null>;
   };
   readonly getInvokeTrigger: () => ManagedCommandWakeTrigger | undefined;
+  /** F167×F254: current Queue/F264 carrier truth for force-queued event wakes. */
+  readonly getEventCarrier?: (input: {
+    threadId: string;
+    userId: string;
+    catId: string;
+    messageId: string;
+  }) =>
+    | { state: 'missing' | 'pending' | 'handled'; invocationId?: string }
+    | Promise<{ state: 'missing' | 'pending' | 'handled'; invocationId?: string }>;
   readonly now?: () => number;
   readonly dispatchedCarrierGraceMs?: number;
   readonly wakeSlaMs?: number;
@@ -89,6 +102,8 @@ export interface RecordManagedCommandCompletionInput {
 }
 
 export type ManagedCommandWakeRecoveryResult = 'missing' | 'pending' | 'recovered';
+
+export type ManagedCommandCompletionEvidenceWrite = 'missing' | 'active' | 'terminal' | 'contended';
 
 export interface ParsedManagedCommandWakeTask {
   readonly task: DynamicTaskDef;
@@ -178,4 +193,81 @@ export function buildCancelledManagedCommandCompletionParams(
       },
     },
   };
+}
+
+function normalizeTerminalResult(result: ManagedCommandTerminalResult): ManagedCommandTerminalResult {
+  return {
+    exitCode: result.exitCode,
+    timedOut: result.timedOut,
+    ...(result.cancelled !== undefined ? { cancelled: result.cancelled } : {}),
+    durationMs: result.durationMs,
+    ...(result.tailOutput ? { tailOutput: result.tailOutput } : {}),
+  };
+}
+
+/**
+ * Merge a real command completion into the existing durable wake receipt.
+ *
+ * The fallback timer may have advanced the receipt before the child process
+ * reports its terminal result. Before the durable message-content claim, the
+ * real completion owns the content. Once claimed, content stays frozen while
+ * late terminal evidence is enriched, so source-message and dispatch payload
+ * cannot diverge or create a second user-visible reinvocation.
+ */
+export function persistManagedCommandCompletionEvidence(
+  store: ManagedCommandWakeDynamicTaskStore,
+  input: RecordManagedCommandCompletionInput,
+  conditionMetAt: number,
+): ManagedCommandCompletionEvidenceWrite {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const task = store.getById(input.taskId);
+    const lifecycle = task?.params.holdLifecycle;
+    const command = task ? readManagedCommandWakeProjection(task) : null;
+    if (!task || !isPlainRecord(lifecycle) || !command || command.state === 'cancelled') return 'missing';
+
+    const terminal = lifecycle.status === 'fired' && command.state === 'consumed';
+    const active = lifecycle.status === 'active' && task.enabled;
+    if (!terminal && !active) return 'missing';
+    if (command.result) return terminal ? 'terminal' : 'active';
+
+    let nextCommand: ManagedCommandWakeProjection;
+    if (command.state === 'command_running') {
+      nextCommand = {
+        ...command,
+        state: 'condition_met',
+        conditionMetAt,
+        wakeContent: input.wakeContent,
+        wakeSource: 'command_completion',
+        result: normalizeTerminalResult(input.result),
+      };
+    } else if (command.state === 'condition_met' && !command.messageId && command.messageClaimedAt === undefined) {
+      nextCommand = {
+        ...command,
+        wakeContent: input.wakeContent,
+        wakeSource: 'command_completion',
+        result: normalizeTerminalResult(input.result),
+      };
+    } else if (command.state === 'condition_met' && !command.messageId) {
+      nextCommand = {
+        ...command,
+        result: normalizeTerminalResult(input.result),
+        pendingCompletionContent: input.wakeContent,
+      };
+    } else {
+      nextCommand = {
+        ...command,
+        result: normalizeTerminalResult(input.result),
+      };
+    }
+
+    const persisted = store.updateParamsIfCurrent(task.id, task.params, {
+      ...task.params,
+      holdLifecycle: {
+        ...lifecycle,
+        managedCommand: nextCommand,
+      },
+    });
+    if (persisted) return terminal ? 'terminal' : 'active';
+  }
+  return 'contended';
 }

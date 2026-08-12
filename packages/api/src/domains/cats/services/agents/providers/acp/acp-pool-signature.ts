@@ -4,6 +4,7 @@ export interface AcpPoolSpawnSignatureInput {
   cwd: string;
   env?: Record<string, string> | null;
   openCodeRuntimeConfig?: unknown;
+  contextPolicy?: unknown;
   maxLiveProcesses: number;
   idleTtlMs: number;
   transport?: 'stdio' | 'httpstream';
@@ -17,6 +18,7 @@ export function createAcpPoolSpawnSignature(input: AcpPoolSpawnSignatureInput): 
     cwd: input.cwd,
     env: input.env ?? null,
     openCodeRuntimeConfig: input.openCodeRuntimeConfig ?? null,
+    contextPolicy: input.contextPolicy ?? null,
     maxLiveProcesses: input.maxLiveProcesses,
     idleTtlMs: input.idleTtlMs,
     transport: input.transport ?? 'stdio',

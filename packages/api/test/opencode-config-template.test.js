@@ -5,14 +5,17 @@ import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 import { resolveWorkspaceRoot } from '../dist/config/capabilities/mcp-config-adapters.js';
+import { CONTEXT_WINDOW_SIZES } from '../dist/config/context-window-sizes.js';
 import { prepareOpenCodeAcpSpawnConfig } from '../dist/domains/cats/services/agents/providers/opencode-acp-spawn-config.js';
 import {
   deriveOpenCodeApiType,
   generateOpenCodeConfig,
   generateOpenCodeRuntimeConfig,
+  inferOpenCodeProviderFromModelName,
   OC_API_KEY_ENV,
   OC_BASE_URL_ENV,
   parseOpenCodeModel,
+  resolveEffectiveOpenCodeModel,
   summarizeOpenCodeRuntimeConfigForDebug,
 } from '../dist/domains/cats/services/agents/providers/opencode-config-template.js';
 import {
@@ -222,6 +225,40 @@ describe('parseOpenCodeModel', () => {
   });
 });
 
+describe('resolveEffectiveOpenCodeModel', () => {
+  test('canonicalizes recognized bare native models', () => {
+    const scenarios = [
+      ['claude-opus-4-6', 'anthropic'],
+      ['gpt-5.4', 'openai'],
+      ['o3', 'openai'],
+      ['gemini-3-flash', 'google'],
+      ['kimi-k2', 'kimi'],
+      ['deepseek-v4', 'deepseek'],
+      ['glm-5.2', 'zhipu'],
+      ['qwen3-coder', 'dashscope'],
+      ['MiniMax-M3', 'minimax'],
+    ];
+    for (const [model, providerName] of scenarios) {
+      assert.equal(inferOpenCodeProviderFromModelName(model), providerName);
+      assert.deepEqual(resolveEffectiveOpenCodeModel(undefined, model), {
+        providerName,
+        model: `${providerName}/${model}`,
+      });
+    }
+  });
+
+  test('keeps unknown bare models unresolved without an explicit provider', () => {
+    assert.equal(resolveEffectiveOpenCodeModel(undefined, 'vendor-model'), null);
+  });
+
+  test('resolves every bare model in the context-window catalog', () => {
+    const unresolved = Object.keys(CONTEXT_WINDOW_SIZES).filter(
+      (model) => resolveEffectiveOpenCodeModel(undefined, model) == null,
+    );
+    assert.deepEqual(unresolved, []);
+  });
+});
+
 describe('deriveOpenCodeApiType', () => {
   test('derives apiType solely from providerName', () => {
     const scenarios = [
@@ -252,7 +289,7 @@ describe('deriveOpenCodeApiType', () => {
 });
 
 describe('prepareOpenCodeAcpSpawnConfig', () => {
-  test('writes OPENCODE_CONFIG and credential env for OpenCode ACP api_key accounts', async () => {
+  test('writes OPENCODE_CONFIG and credential env for bare OpenCode ACP api_key models', async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-opencode-acp-'));
     try {
       const prepared = await prepareOpenCodeAcpSpawnConfig({
@@ -260,8 +297,9 @@ describe('prepareOpenCodeAcpSpawnConfig', () => {
         profileId: 'opencode-acp',
         clientId: 'opencode',
         command: '/opt/homebrew/bin/opencode',
-        providerName: 'anthropic',
-        defaultModel: 'anthropic/claude-opus-4-6',
+        providerName: undefined,
+        defaultModel: 'claude-opus-4-6',
+        contextWindowTokens: 128_000,
         account: {
           id: 'anthropic-proxy',
           authType: 'api_key',
@@ -283,7 +321,11 @@ describe('prepareOpenCodeAcpSpawnConfig', () => {
       assert.equal(config.provider.anthropic.options.apiKey, `{env:${OC_API_KEY_ENV}}`);
       assert.equal(config.provider.anthropic.options.baseURL, `{env:${OC_BASE_URL_ENV}}`);
       assert.deepEqual(config.provider.anthropic.models, {
-        'claude-opus-4-6': { id: 'claude-opus-4-6-20260101', name: 'claude-opus-4-6' },
+        'claude-opus-4-6': {
+          id: 'claude-opus-4-6-20260101',
+          name: 'claude-opus-4-6',
+          limit: { context: 128_000 },
+        },
       });
       assert.deepEqual(prepared.runtimeConfigSummary.providerSummary.anthropic.modelMappings, {
         'claude-opus-4-6': 'claude-opus-4-6-20260101',

@@ -197,7 +197,7 @@ describe('F246 AC-D3: ActivityBar — ApprovalHubButton', () => {
     });
 
     const bellBtn = container.querySelector('[data-testid="approval-hub-button"]') as HTMLElement;
-    expect(bellBtn.getAttribute('title')).toBe('7 项待审批');
+    expect(bellBtn.getAttribute('title')).toBe('7 项需要处理');
   });
 
   it('bell title shows generic label when no pending items', async () => {
@@ -207,6 +207,6 @@ describe('F246 AC-D3: ActivityBar — ApprovalHubButton', () => {
     });
 
     const bellBtn = container.querySelector('[data-testid="approval-hub-button"]') as HTMLElement;
-    expect(bellBtn.getAttribute('title')).toBe('审批中心');
+    expect(bellBtn.getAttribute('title')).toBe('Needs Me');
   });
 });

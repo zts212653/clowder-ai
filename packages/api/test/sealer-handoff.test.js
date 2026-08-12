@@ -41,7 +41,7 @@ describe('SessionSealer handoff digest integration', () => {
       },
     };
 
-    const sealer = new SessionSealer(store, writer, threadStore, reader, (_catId) => 180000, handoffConfig);
+    const sealer = new SessionSealer(store, writer, threadStore, reader, handoffConfig);
 
     return { store, writer, reader, sealer };
   }

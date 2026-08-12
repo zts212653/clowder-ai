@@ -12,14 +12,8 @@ import { formatPromptTime } from '../format-time.js';
 import { isDelivered, type StoredMessage } from '../stores/ports/MessageStore.js';
 
 export interface ContextAssemblerOptions {
-  /** Maximum number of recent messages to include (default: 20) */
-  maxMessages?: number;
-  /** Maximum characters per message content (default: 1500) */
-  maxContentLength?: number;
-  /** Maximum total tokens for assembled context (default: 2000) */
+  /** Invocation-owned token ceiling for the already-selected history. */
   maxTotalTokens?: number;
-  /** @deprecated Use maxTotalTokens instead. Kept for backward compat during migration. */
-  maxTotalChars?: number;
 }
 
 export interface AssembledContext {
@@ -31,9 +25,9 @@ export interface AssembledContext {
   estimatedTokens: number;
 }
 
-const DEFAULT_MAX_MESSAGES = 20;
-const DEFAULT_MAX_CONTENT_LENGTH = 1500;
 const DEFAULT_MAX_TOTAL_TOKENS = 2000;
+/** Injection-safety bound, not a per-member prompt policy. */
+const PROMPT_MESSAGE_SAFETY_CHAR_LIMIT = 100_000;
 /** #699: Max chars for inline reply-to preview (saves agents a get_message tool call) */
 const REPLY_PREVIEW_LENGTH = 60;
 
@@ -169,11 +163,7 @@ export function formatMessage(
  * Assemble recent thread history into a context string for prompt prepend.
  */
 export function assembleContext(messages: StoredMessage[], options?: ContextAssemblerOptions): AssembledContext {
-  const maxMessages = options?.maxMessages ?? DEFAULT_MAX_MESSAGES;
-  const maxContentLength =
-    options?.maxContentLength ?? (Number(process.env.MAX_CONTEXT_MSG_CHARS) || DEFAULT_MAX_CONTENT_LENGTH);
-  // F8: token-based budget (maxTotalTokens preferred, maxTotalChars fallback for compat)
-  const maxTotalTokens = options?.maxTotalTokens ?? options?.maxTotalChars ?? DEFAULT_MAX_TOTAL_TOKENS;
+  const maxTotalTokens = options?.maxTotalTokens ?? DEFAULT_MAX_TOTAL_TOKENS;
 
   // F117: exclude undelivered messages (queued/canceled) from prompt context
   // Also exclude system-generated messages (userId='system') — these are display-only
@@ -198,16 +188,17 @@ export function assembleContext(messages: StoredMessage[], options?: ContextAsse
     return { contextText: '', messageCount: 0, estimatedTokens: 0 };
   }
 
-  // Take the most recent N messages (messages are already chronological from store)
-  const recent = deliveredMessages.length > maxMessages ? deliveredMessages.slice(-maxMessages) : deliveredMessages;
-
   // #699: Build message map for inline reply-to preview resolution.
   // Use deliveredMessages (not raw input) so system/undelivered/error parents
   // can't leak into prompt via formatMessage's inline preview.
   const messageMap = buildMessageMap(deliveredMessages);
 
   // Format all messages, then apply token budget from most-recent backward
-  const formatted = recent.map((m) => formatMessage(m, { truncate: maxContentLength, messageMap }));
+  // Candidate selection belongs to Smart Window / the route. This assembler only
+  // formats those candidates and enforces the invocation-owned token ceiling.
+  const formatted = deliveredMessages.map((m) =>
+    formatMessage(m, { truncate: PROMPT_MESSAGE_SAFETY_CHAR_LIMIT, messageMap }),
+  );
 
   // Estimate overhead for header + separator
   const overheadTokens = estimateTokens('[对话历史 - 最近 99 条]\n[/对话历史]');

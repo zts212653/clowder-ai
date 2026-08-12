@@ -597,10 +597,14 @@ function createTempProject() {
   return tmp;
 }
 
-function createManagedRuntimeFixture({ launcherHasConnectorInjection = false } = {}) {
+function createManagedRuntimeFixture({
+  launcherHasConnectorInjection = false,
+  runtimeDirName = 'cat-cafe-runtime',
+  runtimeBranch = 'runtime/main-sync',
+} = {}) {
   const tempRoot = mkdtempSync(join(tmpdir(), 'managed-runtime-'));
   const workspaceRoot = join(tempRoot, 'launcher');
-  const runtimeRoot = join(tempRoot, 'runtime');
+  const runtimeRoot = join(tempRoot, runtimeDirName);
   mkdirSync(join(workspaceRoot, 'scripts'), { recursive: true });
 
   const git = (...args) => {
@@ -617,7 +621,7 @@ function createManagedRuntimeFixture({ launcherHasConnectorInjection = false } =
 
   git('init', '--initial-branch=main');
   git('config', 'user.name', 'Clowder AI Test');
-  git('config', 'user.email', 'test@clowder-ai.local');
+  git('config', 'user.email', 'test@cat-cafe.local');
   writeFileSync(join(workspaceRoot, 'launcher-version.txt'), 'pre-1282\n');
   writeFileSync(
     join(workspaceRoot, 'scripts', 'runtime-worktree.sh'),
@@ -632,7 +636,7 @@ function createManagedRuntimeFixture({ launcherHasConnectorInjection = false } =
   );
   git('add', 'launcher-version.txt', 'scripts/runtime-worktree.sh');
   git('commit', '-m', 'seed legacy launcher');
-  git('worktree', 'add', '-b', 'runtime/main-sync', runtimeRoot);
+  git('worktree', 'add', '-b', runtimeBranch, runtimeRoot);
 
   copyStartDevClosure(
     runtimeRoot,
@@ -944,6 +948,24 @@ test('new runtime preserves connector autostart when invoked by the pre-1282 man
   }
 });
 
+test('legacy managed launcher honors its explicit runtime path and branch selection', () => {
+  const fixture = createManagedRuntimeFixture({
+    runtimeDirName: 'custom-runtime',
+    runtimeBranch: 'runtime/custom',
+  });
+  try {
+    assert.equal(
+      readManagedRuntimeConnectorAutostart(fixture, {
+        CAT_CAFE_RUNTIME_DIR: fixture.runtimeRoot,
+        CAT_CAFE_RUNTIME_BRANCH: 'runtime/custom',
+      }),
+      '1',
+    );
+  } finally {
+    rmSync(fixture.tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('pre-1282 managed launcher compatibility never overrides an explicit connector opt-out', () => {
   const fixture = createManagedRuntimeFixture();
   try {
@@ -956,6 +978,18 @@ test('pre-1282 managed launcher compatibility never overrides an explicit connec
 
 test('registered worktree topology alone cannot grant connector autostart', () => {
   const fixture = createManagedRuntimeFixture({ launcherHasConnectorInjection: true });
+  try {
+    assert.equal(readManagedRuntimeConnectorAutostart(fixture), 'unset');
+  } finally {
+    rmSync(fixture.tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('arbitrary registered feature worktree cannot impersonate the managed runtime', () => {
+  const fixture = createManagedRuntimeFixture({
+    runtimeDirName: 'feature-probe',
+    runtimeBranch: 'feat/probe',
+  });
   try {
     assert.equal(readManagedRuntimeConnectorAutostart(fixture), 'unset');
   } finally {

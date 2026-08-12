@@ -39,7 +39,7 @@ interface ResolverDeps {
   ownerPrivateArtifactResolver?: OwnerPrivateArtifactResolver;
 }
 
-function normalizeText(value: string): string {
+export function normalizePersonMemorySourceText(value: string): string {
   return value.normalize('NFKC').trim();
 }
 
@@ -56,7 +56,7 @@ function stableJson(value: unknown): string {
 }
 
 export function digestPersonMemorySourceMaterial(value: unknown): string {
-  const material = typeof value === 'string' ? normalizeText(value) : stableJson(value);
+  const material = typeof value === 'string' ? normalizePersonMemorySourceText(value) : stableJson(value);
   return createHash('sha256').update(material).digest('hex');
 }
 
@@ -71,7 +71,10 @@ export function digestPersonMemoryResolvedBundle(bundle: PersonMemoryResolvedSou
   });
 }
 
-function eligibleOwnerMessage(message: StoredMessage | null, auth: PersonMemorySourceAuth): message is StoredMessage {
+export function eligibleOwnerMessage(
+  message: StoredMessage | null,
+  auth: PersonMemorySourceAuth,
+): message is StoredMessage {
   return Boolean(
     message &&
       message.userId === auth.ownerUserId &&
@@ -84,21 +87,21 @@ function eligibleOwnerMessage(message: StoredMessage | null, auth: PersonMemoryS
   );
 }
 
-function explicitlyConfirmsAccuracy(message: StoredMessage): boolean {
-  const content = normalizeText(message.content);
+export function explicitlyConfirmsAccuracy(message: StoredMessage): boolean {
+  const content = normalizePersonMemorySourceText(message.content);
   if (/(?:不对|不准确|未确认|not correct|inaccurate)/iu.test(content)) return false;
   return /(?:^|[\s，,。.!！])(?:对|是的|没错)(?:[\s，,。.!！]|$)|(?:转写|记录|内容).{0,24}(?:准确|没错|已确认)|\bconfirm(?:ed)?\b/iu.test(
     content,
   );
 }
 
-function sourceRef(message: StoredMessage) {
+export function ownerMessageSourceRef(message: StoredMessage) {
   return { kind: 'message' as const, threadId: message.threadId, messageId: message.id };
 }
 
-function attachmentBlock(
+export function ownerMessageAttachmentBlock(
   message: StoredMessage,
-  input: Extract<PersonMemorySourceInput, { kind: 'message_attachment' }>,
+  input: { attachmentLocator: { surface: 'content_block' | 'rich_block'; index: number } },
 ) {
   const index = input.attachmentLocator.index;
   if (input.attachmentLocator.surface === 'content_block') {
@@ -107,7 +110,7 @@ function attachmentBlock(
   return message.extra?.rich?.blocks[index] ?? null;
 }
 
-function attachmentTranscript(block: unknown): string {
+export function ownerMessageAttachmentTranscript(block: unknown): string {
   if (!block || typeof block !== 'object') return '';
   const value = block as Record<string, unknown>;
   if (value.type === 'text' && typeof value.text === 'string') return value.text;
@@ -197,7 +200,7 @@ export class PersonMemorySourceBundleResolver {
   ) {
     const message = await this.deps.messageStore.getById(input.messageId);
     if (!eligibleOwnerMessage(message, auth)) return { status: 'invalid' as const, error: 'invalid_message_source' };
-    if (!normalizeText(message.content).includes(normalizeText(input.excerpt))) {
+    if (!normalizePersonMemorySourceText(message.content).includes(normalizePersonMemorySourceText(input.excerpt))) {
       return { status: 'invalid' as const, error: 'source_excerpt_mismatch' };
     }
     const resolvedDigest = digestPersonMemorySourceMaterial(message.content);
@@ -209,7 +212,7 @@ export class PersonMemorySourceBundleResolver {
       source: {
         sourceId: input.sourceId,
         kind: input.kind,
-        sourceRef: sourceRef(message),
+        sourceRef: ownerMessageSourceRef(message),
         ownerUserId: auth.ownerUserId,
         resolvedDigest,
         excerpt: input.excerpt,
@@ -225,9 +228,12 @@ export class PersonMemorySourceBundleResolver {
     if (!eligibleOwnerMessage(message, auth)) {
       return { status: 'invalid' as const, error: 'invalid_attachment_source' };
     }
-    const block = attachmentBlock(message, input);
-    const transcript = attachmentTranscript(block);
-    if (!block || !normalizeText(transcript).includes(normalizeText(input.boundedTranscript))) {
+    const block = ownerMessageAttachmentBlock(message, input);
+    const transcript = ownerMessageAttachmentTranscript(block);
+    if (
+      !block ||
+      !normalizePersonMemorySourceText(transcript).includes(normalizePersonMemorySourceText(input.boundedTranscript))
+    ) {
       return { status: 'invalid' as const, error: 'attachment_transcript_mismatch' };
     }
     const resolvedDigest = digestPersonMemorySourceMaterial(block);
@@ -239,7 +245,7 @@ export class PersonMemorySourceBundleResolver {
       source: {
         sourceId: input.sourceId,
         kind: input.kind,
-        sourceRef: sourceRef(message),
+        sourceRef: ownerMessageSourceRef(message),
         ownerUserId: auth.ownerUserId,
         attachmentLocator: input.attachmentLocator,
         resolvedDigest,
@@ -260,15 +266,15 @@ export class PersonMemorySourceBundleResolver {
       return { status: 'invalid' as const, error: 'invalid_transcript_confirmation' };
     }
     const resolvedDigest = digestPersonMemorySourceMaterial({
-      transcript: normalizeText(input.transcript),
-      confirmation: normalizeText(confirmation.content),
+      transcript: normalizePersonMemorySourceText(input.transcript),
+      confirmation: normalizePersonMemorySourceText(confirmation.content),
     });
     return {
       status: 'resolved' as const,
       source: {
         sourceId: input.sourceId,
         kind: input.kind,
-        confirmationSourceRef: sourceRef(confirmation),
+        confirmationSourceRef: ownerMessageSourceRef(confirmation),
         ownerUserId: auth.ownerUserId,
         resolvedDigest,
         transcript: input.transcript,
@@ -289,13 +295,15 @@ export class PersonMemorySourceBundleResolver {
     if (
       !artifact ||
       artifact.digest !== input.expectedDigest ||
-      !normalizeText(artifact.boundedText).includes(normalizeText(input.boundedExcerpt))
+      !normalizePersonMemorySourceText(artifact.boundedText).includes(
+        normalizePersonMemorySourceText(input.boundedExcerpt),
+      )
     ) {
       return { status: 'invalid' as const, error: 'invalid_private_artifact' };
     }
     const resolvedDigest = digestPersonMemorySourceMaterial({
       artifactDigest: artifact.digest,
-      confirmation: normalizeText(confirmation.content),
+      confirmation: normalizePersonMemorySourceText(confirmation.content),
     });
     return {
       status: 'resolved' as const,
@@ -303,7 +311,7 @@ export class PersonMemorySourceBundleResolver {
         sourceId: input.sourceId,
         kind: input.kind,
         artifactLocator: input.artifactLocator,
-        confirmationSourceRef: sourceRef(confirmation),
+        confirmationSourceRef: ownerMessageSourceRef(confirmation),
         ownerUserId: auth.ownerUserId,
         resolvedDigest,
         boundedExcerpt: input.boundedExcerpt,

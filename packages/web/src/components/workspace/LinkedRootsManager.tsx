@@ -5,9 +5,10 @@ import { apiFetch } from '@/utils/api-client';
 
 interface LinkedRootsManagerProps {
   onRootsChanged: () => void;
+  compact?: boolean;
 }
 
-export function LinkedRootsManager({ onRootsChanged }: LinkedRootsManagerProps) {
+export function LinkedRootsManager({ onRootsChanged, compact = false }: LinkedRootsManagerProps) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
   const [path, setPath] = useState('');
@@ -45,26 +46,36 @@ export function LinkedRootsManager({ onRootsChanged }: LinkedRootsManagerProps) 
       <button
         type="button"
         onClick={() => setAdding(true)}
-        className="w-full text-left px-3 py-1.5 text-micro text-cafe-interactive/60 hover:text-cafe-accent hover:bg-cafe-surface/50 transition-colors"
+        className={
+          compact
+            ? 'inline-flex h-7 shrink-0 items-center rounded-lg px-2 text-micro font-semibold text-cafe-secondary transition-colors hover:bg-cafe-surface-sunken hover:text-cafe-accent'
+            : 'w-full px-3 py-1.5 text-left text-micro text-cafe-interactive/60 transition-colors hover:bg-cafe-surface/50 hover:text-cafe-accent'
+        }
       >
-        + Link external folder...
+        {compact ? '添加外部文件夹' : '+ 连接外部文件夹…'}
       </button>
     );
   }
 
   return (
-    <div className="px-3 py-2 border-t border-cafe-subtle/40 space-y-1.5">
-      <div className="text-micro font-medium text-cafe-black">Link External Folder</div>
+    <div
+      className={
+        compact
+          ? 'basis-full space-y-1.5 border-t border-cafe-subtle/40 px-1 pt-2'
+          : 'space-y-1.5 border-t border-cafe-subtle/40 px-3 py-2'
+      }
+    >
+      <div className="text-micro font-medium text-cafe-black">连接外部文件夹</div>
       <input
         type="text"
-        placeholder="Name (e.g. studio-flow)"
+        placeholder="名称（例如 studio-flow）"
         value={name}
         onChange={(e) => setName(e.target.value)}
         className="w-full text-micro border border-cafe-subtle rounded px-2 py-1 bg-cafe-surface/80 text-cafe-black focus:outline-none focus:border-cafe-accent"
       />
       <input
         type="text"
-        placeholder="Absolute path (e.g. /home/user/projects/studio-flow)"
+        placeholder="绝对路径（例如 /home/user/projects/studio-flow）"
         value={path}
         onChange={(e) => setPath(e.target.value)}
         className="w-full text-micro border border-cafe-subtle rounded px-2 py-1 bg-cafe-surface/80 text-cafe-black focus:outline-none focus:border-cafe-accent"
@@ -77,7 +88,7 @@ export function LinkedRootsManager({ onRootsChanged }: LinkedRootsManagerProps) 
           disabled={submitting || !name.trim() || !path.trim()}
           className="px-2 py-0.5 rounded text-micro font-medium bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-accent/80 disabled:opacity-50 transition-colors"
         >
-          {submitting ? 'Adding...' : 'Add'}
+          {submitting ? '连接中…' : '连接'}
         </button>
         <button
           type="button"
@@ -87,7 +98,7 @@ export function LinkedRootsManager({ onRootsChanged }: LinkedRootsManagerProps) 
           }}
           className="px-2 py-0.5 rounded text-micro font-medium text-cafe-interactive/60 hover:text-cafe-black transition-colors"
         >
-          Cancel
+          取消
         </button>
       </div>
     </div>
@@ -111,7 +122,7 @@ export function LinkedRootRemoveButton({ id, onRemoved }: { id: string; onRemove
     <button
       type="button"
       onClick={handleRemove}
-      title="Unlink this folder"
+      title="断开这个文件夹"
       className="ml-1 text-xs text-conn-red-text/60 hover:text-conn-red-text transition-colors"
     >
       x

@@ -116,26 +116,21 @@ describe('assembleContext', () => {
     assert.equal(result.messageCount, 3);
   });
 
-  test('truncates to maxMessages', async () => {
+  test('does not apply a hidden count-selection policy', async () => {
     const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
     const msgs = Array.from({ length: 25 }, (_, i) => mockMsg({ content: `msg-${i}`, timestamp: i * 1000 }));
-    const result = assembleContext(msgs, { maxMessages: 5 });
-    assert.equal(result.messageCount, 5);
-    // Should include the last 5 (msg-20 through msg-24)
+    const result = assembleContext(msgs, { maxTotalTokens: 10_000 });
+    assert.equal(result.messageCount, 25);
     assert.ok(result.contextText.includes('msg-24'));
-    assert.ok(result.contextText.includes('msg-20'));
-    assert.ok(!result.contextText.includes('msg-19'));
+    assert.ok(result.contextText.includes('msg-0'));
   });
 
-  test('truncates long message content with head+tail', async () => {
+  test('does not apply the retired per-message policy to ordinary long content', async () => {
     const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
-    const longContent = `${'X'.repeat(500)}TAIL_DATA`;
+    const longContent = `${'X'.repeat(5_000)}TAIL_DATA`;
     const msgs = [mockMsg({ content: longContent })];
-    const result = assembleContext(msgs, { maxContentLength: 100 });
-    assert.ok(
-      /\[\.\.\.truncated \d+ chars\.\.\.\]/.test(result.contextText),
-      'should have truncation marker with char count',
-    );
+    const result = assembleContext(msgs, { maxTotalTokens: 10_000 });
+    assert.ok(!/\[\.\.\.truncated \d+ chars\.\.\.\]/.test(result.contextText));
     assert.ok(result.contextText.includes('TAIL_DATA'), 'should preserve tail');
   });
 
@@ -168,74 +163,70 @@ describe('assembleContext', () => {
     assert.ok(!result.contextText.includes('co-creator] Error:'), 'system error must not appear as co-creator');
   });
 
-  test('uses default maxMessages=20 and maxContentLength=1500', async () => {
+  test('default token ceiling does not reintroduce a message-count cap', async () => {
     const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
     const msgs = Array.from({ length: 25 }, (_, i) => mockMsg({ content: `m${i}`, timestamp: i * 1000 }));
     const result = assembleContext(msgs);
-    assert.equal(result.messageCount, 20);
-    assert.ok(result.contextText.includes('最近 20 条'));
+    assert.equal(result.messageCount, 25);
+    assert.ok(result.contextText.includes('最近 25 条'));
   });
 
-  test('default maxContentLength=1500 does not truncate 600-char messages', async () => {
+  test('internal safety bound does not truncate ordinary long messages', async () => {
     const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
     const content = 'A'.repeat(600);
     const msgs = [mockMsg({ content })];
     const result = assembleContext(msgs);
-    // 600 chars < 1500 default, so should NOT be truncated
     assert.ok(result.contextText.includes(content), 'should contain full 600 chars');
     assert.ok(!result.contextText.includes('...'), 'should not have truncation marker');
   });
 
-  test('respects MAX_CONTEXT_MSG_CHARS env var override', async () => {
+  test('ignores the retired MAX_CONTEXT_MSG_CHARS policy knob', async () => {
     process.env.MAX_CONTEXT_MSG_CHARS = '200';
     try {
-      // Re-import to pick up env var (assembleContext reads env at call time)
       const { assembleContext: ac } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
       const msgs = [mockMsg({ content: 'B'.repeat(300) })];
       const result = ac(msgs);
-      // 300 chars > 200 env limit, should be truncated with marker
-      assert.ok(/\[\.\.\.truncated \d+ chars\.\.\.\]/.test(result.contextText), 'should truncate at env limit');
+      assert.ok(!/\[\.\.\.truncated \d+ chars\.\.\.\]/.test(result.contextText));
+      assert.ok(result.contextText.includes('B'.repeat(300)));
     } finally {
       delete process.env.MAX_CONTEXT_MSG_CHARS;
     }
   });
 
-  test('maxTotalChars (deprecated) still works as token budget via fallback', async () => {
+  test('maxTotalTokens trims oldest messages', async () => {
     const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
     // Create 10 messages each ~12-15 tokens formatted (timestamp + sender + content)
     const msgs = Array.from({ length: 10 }, (_, i) =>
       mockMsg({ content: `message-content-${i}-padding`, timestamp: i * 1000 }),
     );
     // Tight token budget — only a few messages should fit
-    const result = assembleContext(msgs, { maxTotalChars: 50 });
+    const result = assembleContext(msgs, { maxTotalTokens: 50 });
     assert.ok(result.messageCount < 10, `expected fewer than 10, got ${result.messageCount}`);
     assert.ok(result.messageCount > 0, 'should include at least 1 message');
     assert.ok(result.estimatedTokens <= 60, `tokens should be near budget, got ${result.estimatedTokens}`);
   });
 
-  test('maxTotalChars large enough includes all messages', async () => {
+  test('maxTotalTokens large enough includes all messages', async () => {
     const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
     const msgs = Array.from({ length: 5 }, (_, i) => mockMsg({ content: `short${i}`, timestamp: i * 1000 }));
-    const result = assembleContext(msgs, { maxTotalChars: 10000 });
+    const result = assembleContext(msgs, { maxTotalTokens: 10000 });
     assert.equal(result.messageCount, 5);
   });
 
-  test('maxTotalChars=0 returns empty context', async () => {
+  test('maxTotalTokens=0 returns empty context', async () => {
     const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
     const msgs = [mockMsg({ content: 'hello' })];
-    const result = assembleContext(msgs, { maxTotalChars: 0 });
+    const result = assembleContext(msgs, { maxTotalTokens: 0 });
     assert.equal(result.contextText, '');
     assert.equal(result.messageCount, 0);
   });
 
-  test('maxContentLength truncates before maxTotalChars budget check', async () => {
+  test('token ceiling fails closed when even the newest message cannot fit', async () => {
     const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
-    // One very long message that would be 600 chars raw
     const msgs = [mockMsg({ content: 'Z'.repeat(600) })];
-    // maxContentLength=100 truncates to ~100 chars, then maxTotalChars budget allows it
-    const result = assembleContext(msgs, { maxContentLength: 100, maxTotalChars: 300 });
-    assert.equal(result.messageCount, 1);
-    assert.ok(/\[\.\.\.truncated \d+ chars\.\.\.\]/.test(result.contextText), 'should truncate with marker');
+    const result = assembleContext(msgs, { maxTotalTokens: 10 });
+    assert.equal(result.messageCount, 0);
+    assert.equal(result.contextText, '');
   });
 });
 

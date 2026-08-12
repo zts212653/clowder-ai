@@ -108,7 +108,7 @@ describe('renderer popup link policy', () => {
 
   test('rejects non-HTTPS and malformed links', () => {
     assert.equal(isAllowedRendererLink('http://localhost:3003/uploads/screenshot.png'), false);
-    assert.equal(isAllowedRendererLink('file:///Users/example/private.txt'), false);
+    assert.equal(isAllowedRendererLink('file:///home/user/private.txt'), false);
     assert.equal(isAllowedRendererLink('not a URL'), false);
   });
 });

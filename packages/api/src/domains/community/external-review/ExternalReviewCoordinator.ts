@@ -76,6 +76,13 @@ export class ExternalReviewCoordinator {
     this.now = opts.now ?? Date.now;
   }
 
+  async shouldContinueTracking(repoFullName: string, prNumber: number): Promise<boolean> {
+    const config = await this.opts.repoConfigStore.getByRepo(repoFullName);
+    if (config?.reviewMode !== 'maintainer_review') return false;
+    const projection = await this.opts.objectStore.get(prSubjectKey(repoFullName, prNumber));
+    return projection?.externalReview?.lifecycle !== 'terminal';
+  }
+
   async recordCi(poll: CiPollResult, tracking: ExternalReviewTrackingTarget): Promise<ExternalReviewCoordinatorResult> {
     const initialized = await this.initialize(poll.repoFullName, poll.prNumber, poll.headSha, tracking);
     if (!initialized) return { kind: 'not_tracked' };

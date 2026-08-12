@@ -81,7 +81,9 @@ export const PawFeelSingleActionBodySchema = z.discriminatedUnion('type', [
     .strict(),
 ]);
 
-export const PawFeelBundleActionBodySchema = PawFeelBundleCommandSchema;
+export const PawFeelBundleActionBodySchema = PawFeelBundleCommandSchema.extend({
+  membershipToken: z.string().trim().min(1),
+});
 
 export function pawFeelSingleActionCommand(
   action: z.infer<typeof PawFeelSingleActionBodySchema>,

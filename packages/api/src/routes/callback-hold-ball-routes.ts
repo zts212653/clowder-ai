@@ -13,6 +13,10 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import {
+  A2ADispatchDispositionError,
+  type A2ADispatchDispositionService,
+} from '../domains/ball-custody/A2ADispatchDispositionService.js';
 import type { IBallCustodyIngest } from '../domains/ball-custody/BallCustodyIngest.js';
 import { buildHeldEvent, buildWakeConditionMetEvent } from '../domains/ball-custody/ball-custody-events.js';
 import {
@@ -20,6 +24,10 @@ import {
   ManagedCommandWakeRecoverySweep,
   type RecordManagedCommandCompletionInput,
 } from '../domains/ball-custody/ManagedCommandWakeRecoverySweep.js';
+import {
+  ManagedHoldDispositionError,
+  type ManagedHoldDispositionService,
+} from '../domains/ball-custody/ManagedHoldDispositionService.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
@@ -344,9 +352,13 @@ export interface HoldBallRouteDeps {
       message: string,
       messageId: string,
       contentBlocks?: undefined,
-      policy?: { sourceCategory?: string },
+      policy?: { sourceCategory?: string; forceQueue?: boolean },
     ): Promise<'dispatched' | 'enqueued' | 'full'>;
   };
+  /** F167×F254: exact current-wake terminal producer. */
+  managedHoldDispositionService?: Pick<ManagedHoldDispositionService, 'complete'>;
+  /** F167: exact ordinary A2A dispatch terminal producer. */
+  a2aDispatchDispositionService?: Pick<A2ADispatchDispositionService, 'complete'>;
 }
 
 /**
@@ -433,6 +445,7 @@ function launchWakeWhenRunner(opts: {
           buildWakeConditionMetEvent({
             threadId,
             catId,
+            taskId,
             command: wakeWhen.command,
             exitCode: result.exitCode,
             timedOut: result.timedOut,
@@ -816,6 +829,58 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       wakeAt: new Date(fireAt).toISOString(),
       ...(wakeWhen ? { wakeWhen: { command: wakeWhen.command, pid: null } } : {}),
     };
+  });
+
+  app.post('/api/callbacks/complete-managed-hold', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+    if (!deps.managedHoldDispositionService) {
+      reply.status(503);
+      return { error: 'Managed hold disposition unavailable', code: 'MANAGED_HOLD_DISPOSITION_UNAVAILABLE' };
+    }
+    const parsed = z
+      .object({ disposition: z.enum(['handled', 'completed']) })
+      .strict()
+      .safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+    try {
+      return await deps.managedHoldDispositionService.complete(record, parsed.data.disposition);
+    } catch (error) {
+      if (error instanceof ManagedHoldDispositionError) {
+        reply.status(409);
+        return { error: 'Managed hold disposition rejected', code: error.code };
+      }
+      throw error;
+    }
+  });
+
+  app.post('/api/callbacks/complete-a2a-dispatch', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+    if (!deps.a2aDispatchDispositionService) {
+      reply.status(503);
+      return { error: 'A2A dispatch disposition unavailable', code: 'A2A_DISPATCH_DISPOSITION_UNAVAILABLE' };
+    }
+    const parsed = z
+      .object({ disposition: z.enum(['handled', 'completed']) })
+      .strict()
+      .safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+    try {
+      return await deps.a2aDispatchDispositionService.complete(record, parsed.data.disposition);
+    } catch (error) {
+      if (error instanceof A2ADispatchDispositionError) {
+        reply.status(409);
+        return { error: 'A2A dispatch disposition rejected', code: error.code };
+      }
+      throw error;
+    }
   });
 
   registerHoldBallCancelRoutes(app, deps);

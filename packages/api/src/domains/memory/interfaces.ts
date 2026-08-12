@@ -404,12 +404,24 @@ export interface IEvidenceStore {
 
 export type RebuildProgressCallback = (phase: string, percent: number) => void;
 
+export interface MessageRecallSuppressionLease {
+  threadId: string;
+  messageId: string;
+  leaseId: string;
+}
+
 export interface IIndexBuilder {
   rebuild(options?: { force?: boolean; onProgress?: RebuildProgressCallback }): Promise<RebuildResult>;
   startPassageEmbeddingWarmup(): void;
   /** True while background passage-vector backfill is running. */
   isPassageWarmupActive(): boolean;
   incrementalUpdate(changedPaths: string[]): Promise<void>;
+  /** Fail-closed pre-CAS guard: hide one authored body from every index rebuild path. */
+  suppressMessagePassage(threadId: string, messageId: string): Promise<MessageRecallSuppressionLease>;
+  /** Release this lease; true only when the final prepared lease restored the snapshot. */
+  releaseMessagePassageSuppression(lease: MessageRecallSuppressionLease): Promise<boolean>;
+  /** Commit every concurrent lease for the recalled source after canonical CAS. */
+  finalizeMessagePassageSuppression(lease: MessageRecallSuppressionLease): Promise<void>;
   checkConsistency(): Promise<ConsistencyReport>;
 }
 

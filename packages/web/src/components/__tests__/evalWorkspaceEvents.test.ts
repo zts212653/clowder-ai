@@ -268,6 +268,27 @@ describe('deriveEvalWorkspaceEvents', () => {
     expect(event.summary).toContain('没有可处理问题');
   });
 
+  it('surfaces a failed keep-observe cadence that reopened into repair', () => {
+    const [event] = deriveEvalWorkspaceEvents(
+      summaryWith([
+        {
+          ...baseItem,
+          verdict: 'keep_observe',
+          lifecycle: {
+            ...baseItem.lifecycle,
+            closureStatus: 'open',
+            repairDebtStatus: 'active',
+            reevalDebtStatus: 'failed',
+            reevalStatus: 'failed',
+            stale: false,
+          },
+        },
+      ]),
+    );
+    expect(event.kind).toBe('needs_action');
+    expect(event.severity).toBe('attention');
+  });
+
   it('only projects the latest verdict for each domain into workspace events', () => {
     const historicalFix: EvalHubItem = {
       ...baseItem,

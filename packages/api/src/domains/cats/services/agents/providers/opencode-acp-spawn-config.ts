@@ -1,9 +1,9 @@
+import { resolveEffectiveOpenCodeModel } from '../../../../../config/opencode-model.js';
 import {
   deriveOpenCodeApiType,
   OC_API_KEY_ENV,
   OC_BASE_URL_ENV,
   type OpenCodeRuntimeConfigDebugSummary,
-  parseOpenCodeModel,
   summarizeOpenCodeRuntimeConfigForDebug,
 } from './opencode-config-template.js';
 import { writeOpenCodeRuntimeConfig } from './opencode-config-writer.js';
@@ -23,6 +23,8 @@ export interface OpenCodeAcpSpawnConfigOptions {
   clientId: string;
   providerName?: string | null;
   defaultModel?: string | null;
+  /** Invocation resolver output applied to the long-lived ACP process config. */
+  contextWindowTokens?: number;
   account?: OpenCodeAcpSpawnAccount | null;
 }
 
@@ -39,35 +41,6 @@ export interface PreparedOpenCodeAcpSpawnConfig {
 // env-map path, which already dropped command-based builtin inference.
 function isOpenCodeAcpTarget(clientId: string): boolean {
   return clientId === 'opencode';
-}
-
-function resolveEffectiveOpenCodeModel(
-  providerName: string | null | undefined,
-  defaultModel: string | null | undefined,
-): { providerName: string; model: string } | null {
-  const modelProviderName = providerName?.trim() || undefined;
-  const trimmedDefaultModel = defaultModel?.trim() || undefined;
-  if (!trimmedDefaultModel) return null;
-
-  const parsed = parseOpenCodeModel(trimmedDefaultModel);
-  if (parsed) {
-    if (modelProviderName && parsed.providerName !== modelProviderName) {
-      return {
-        providerName: modelProviderName,
-        model: `${modelProviderName}/${trimmedDefaultModel}`,
-      };
-    }
-    return {
-      providerName: modelProviderName ?? parsed.providerName,
-      model: trimmedDefaultModel,
-    };
-  }
-
-  if (!modelProviderName) return null;
-  return {
-    providerName: modelProviderName,
-    model: `${modelProviderName}/${trimmedDefaultModel}`,
-  };
 }
 
 /**
@@ -95,6 +68,7 @@ export async function prepareOpenCodeAcpSpawnConfig(
     models: account?.models?.length ? account.models : [effective.model],
     ...(account?.modelAliases ? { modelAliases: account.modelAliases } : {}),
     defaultModel: effective.model,
+    ...(options.contextWindowTokens ? { contextWindowTokens: options.contextWindowTokens } : {}),
     apiType: deriveOpenCodeApiType(effective.providerName),
     hasBaseUrl: Boolean(account?.baseUrl),
     omitProviderAuth: account?.authType !== 'api_key',

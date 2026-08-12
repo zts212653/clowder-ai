@@ -139,6 +139,8 @@ export interface ExecuteContext {
   invokeTrigger?: ScheduleInvokeTrigger;
   /** F233 PR3: optional ball-custody event sink for scheduler-originated events. */
   ballCustody?: IBallCustodyIngest;
+  /** F167: hand a due managed-command fallback to its durable recovery receipt. */
+  managedCommandWakeRecovery?: (taskId: string) => Promise<'missing' | 'pending' | 'recovered'>;
 }
 
 /**

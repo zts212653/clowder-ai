@@ -26,4 +26,27 @@ describe('ACP pool spawn signature', () => {
     assert.notEqual(singleFlight, multiplexed);
     assert.equal(omitted, singleFlight);
   });
+
+  test('changes when the derived member context policy changes', async () => {
+    const { createAcpPoolSpawnSignature } = await import(
+      '../../dist/domains/cats/services/agents/providers/acp/acp-pool-signature.js'
+    );
+    const base = {
+      command: 'agent',
+      args: ['--acp'],
+      cwd: '/repo',
+      maxLiveProcesses: 3,
+      idleTtlMs: 30_000,
+      transport: 'stdio',
+    };
+    const first = createAcpPoolSpawnSignature({
+      ...base,
+      contextPolicy: { windowTokens: 200_000 },
+    });
+    const second = createAcpPoolSpawnSignature({
+      ...base,
+      contextPolicy: { windowTokens: 128_000 },
+    });
+    assert.notEqual(first, second);
+  });
 });

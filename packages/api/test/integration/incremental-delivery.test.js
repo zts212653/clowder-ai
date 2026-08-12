@@ -40,8 +40,6 @@ function extractDeliveredIds(prompt) {
   return ids;
 }
 
-const { getCatContextBudget } = await import('../../dist/config/cat-budgets.js');
-
 describe('Incremental Delivery', () => {
   let messageStore;
   let registry;
@@ -112,10 +110,9 @@ describe('Incremental Delivery', () => {
     assert.ok(codexPrompt2.includes('gamma'), 'codex second prompt should include new user message gamma');
   });
 
-  test('#91 regression: message between 2000~budget chars must NOT be truncated in incremental path', async () => {
-    const budget = getCatContextBudget('codex').maxContentLengthPerMsg;
-    // Construct a user message longer than old hardcoded 2000 but within budget
-    const msgLength = Math.min(budget - 500, 5000);
+  test('#91 regression: a 5000-char message must NOT be truncated in incremental path', async () => {
+    // Message formatting has an internal injection-safety ceiling, not a per-cat prompt-policy field.
+    const msgLength = 5000;
     assert.ok(msgLength > 2000, `test requires msgLength > 2000, got ${msgLength}`);
     const longUserMsg = `@opus ${'X'.repeat(msgLength - 30)}_TAIL_MARKER_91`;
 

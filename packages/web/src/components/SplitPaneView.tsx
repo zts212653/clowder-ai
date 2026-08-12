@@ -1,6 +1,6 @@
 'use client';
 
-import type { MessageWorkDisposition } from '@cat-cafe/shared';
+import type { ContextAttachment, MessageWorkDisposition } from '@cat-cafe/shared';
 import { useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { UploadStatus, WhisperOptions } from '@/hooks/useSendMessage';
@@ -20,6 +20,7 @@ interface SplitPaneViewProps {
     deliveryMode?: DeliveryMode,
     replyToId?: string,
     messageDisposition?: MessageWorkDisposition,
+    contextAttachments?: ContextAttachment[],
   ) => void | boolean | Promise<void | boolean>;
   onStop: (overrideThreadId?: string) => void;
   uploadStatus?: UploadStatus;
@@ -158,16 +159,27 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
             <ChatInput
               key={splitPaneTargetId ?? 'no-target'}
               threadId={splitPaneTargetId ?? undefined}
-              onSend={(content, images, whisper, deliveryMode, replyToId, messageDisposition) =>
-                onSend(
-                  content,
-                  images,
-                  splitPaneTargetId ?? undefined,
-                  whisper,
-                  deliveryMode,
-                  replyToId,
-                  messageDisposition,
-                )
+              onSend={(content, images, whisper, deliveryMode, replyToId, messageDisposition, contextAttachments) =>
+                contextAttachments?.length
+                  ? onSend(
+                      content,
+                      images,
+                      splitPaneTargetId ?? undefined,
+                      whisper,
+                      deliveryMode,
+                      replyToId,
+                      messageDisposition,
+                      contextAttachments,
+                    )
+                  : onSend(
+                      content,
+                      images,
+                      splitPaneTargetId ?? undefined,
+                      whisper,
+                      deliveryMode,
+                      replyToId,
+                      messageDisposition,
+                    )
               }
               onStop={() => onStop(splitPaneTargetId ?? undefined)}
               disabled={!splitPaneTargetId}

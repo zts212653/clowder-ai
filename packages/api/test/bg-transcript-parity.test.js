@@ -235,8 +235,8 @@ test('extractTranscriptUsage: aggregates per-turn usage via shared extractClaude
 
   assert.deepEqual(
     transcriptUsage,
-    equivalent,
-    'transcript usage must match what extractClaudeUsage produces from equivalent synthetic event',
+    { ...equivalent, lastTurnInputTokens: 208 },
+    'transcript usage must retain aggregate telemetry plus the final turn context input',
   );
   // Sanity: inputTokens = 18 + 300 + 50 = 368 (raw + cache_read + cache_creation).
   assert.equal(transcriptUsage.inputTokens, 368);
@@ -246,6 +246,11 @@ test('extractTranscriptUsage: aggregates per-turn usage via shared extractClaude
   assert.equal(transcriptUsage.costUsd, 0.042);
   assert.equal(transcriptUsage.durationMs, 4000);
   assert.equal(transcriptUsage.numTurns, 2);
+  assert.equal(
+    transcriptUsage.lastTurnInputTokens,
+    208,
+    'lastTurnInputTokens must use only the final request (8 raw + 200 cache read)',
+  );
 });
 
 test('extractTranscriptUsage: terminalMeta.durationMs overrides summed turn_duration', () => {
@@ -419,4 +424,14 @@ test('accumulateUsageFromEntries: real+synthetic mix → only real turn counted 
   const usage = finalizeTranscriptUsage(acc);
   assert.equal(usage.numTurns, 1, 'numTurns must be 1 for a single real turn');
   assert.equal(usage.outputTokens, 5, 'token counts from the real turn must be preserved');
+});
+
+test('final real assistant without usage clears an older last-turn context measurement', () => {
+  const usage = extractTranscriptUsage([
+    { type: 'assistant', message: { usage: { input_tokens: 25, cache_read_input_tokens: 75 } } },
+    { type: 'assistant', message: { content: [{ type: 'text', text: 'final' }] } },
+  ]);
+
+  assert.equal(usage.inputTokens, 100, 'aggregate telemetry from observed turns remains available');
+  assert.equal(usage.lastTurnInputTokens, undefined, 'missing final-turn usage must not reuse the prior turn');
 });

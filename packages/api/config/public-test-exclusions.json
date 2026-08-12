@@ -281,15 +281,6 @@
       "expiresOn": "2026-08-31"
     },
     {
-      "id": "capabilities-route",
-      "match": "capabilities-route\\.test",
-      "category": "product_regression",
-      "reason": "Public target e0c11043d still fails managed-capability lifecycle assertions; track the fix in https://github.com/zts212653/clowder-ai/issues/1049.",
-      "owner": "@zts212653",
-      "introducedBy": "e9bb56052",
-      "expiresOn": "2026-08-08"
-    },
-    {
       "id": "f203-phase-i-opencode-l0",
       "match": "f203-phase-i-opencode-l0\\.test",
       "category": "source_only",
@@ -336,9 +327,9 @@
     },
     {
       "id": "f254-private-evidence-contracts",
-      "match": "f254-(?:freshness-replay-provider|manual-reminder-scope|provider-native-freshness)\\.test",
+      "match": "f254-(?:freshness-instruction-private-evidence|freshness-replay-provider|manual-reminder-scope|provider-native-freshness)\\.test",
       "category": "private_fixture",
-      "reason": "F254 replay, scope, and native-provider checks require home-only evidence or carrier credentials; public runtime behavior is covered independently.",
+      "reason": "F254 document evidence, replay, scope, and native-provider checks require home-only archives, owner provenance, or carrier credentials; public runtime behavior is covered independently.",
       "owner": "@zts212653",
       "introducedBy": "bfa9e2c8f",
       "expiresOn": "2026-08-31"
@@ -368,6 +359,15 @@
       "reason": "Verdict publication checks require home-owned task, memory, and measurement evidence stores; they are governance coverage rather than a public runtime contract.",
       "owner": "@zts212653",
       "introducedBy": "bfa9e2c8f",
+      "expiresOn": "2026-08-31"
+    },
+    {
+      "id": "harness-eval-private-legacy-reeval-cases",
+      "match": "harness-eval/legacy-reeval-case-(?:hub|migration)\\.test",
+      "category": "private_fixture",
+      "reason": "Legacy stable-case migration and Hub projection assertions consume the home-only historical verdict archive and migration manifest, which are deliberately absent from the public export.",
+      "owner": "@zts212653",
+      "introducedBy": "7121c7dec",
       "expiresOn": "2026-08-31"
     }
   ]

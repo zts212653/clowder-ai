@@ -56,7 +56,7 @@ export function FloatingPresentationSurfaceHost() {
       if (e.key !== 'Escape') return;
       // Defer Esc only to an INTERACTIVE fullscreen overlay (ConfirmDialog / VoteConfigModal /
       // SteerQueuedEntryModal / BrakeModal / Lightbox — all "fixed inset-0" regardless of role).
-      // Exclude non-interactive backdrops: some (e.g. MobileStatusSheet) render permanently and
+      // Exclude non-interactive backdrops: some overlays render permanently and
       // only toggle visibility via pointer-events-none / hidden / invisible — those must NOT block
       // Esc (砚砚 R4). The float is react-rnd (absolute), so it never matches .fixed.inset-0 itself.
       if (document.querySelector('.fixed.inset-0:not(.pointer-events-none):not(.hidden):not(.invisible)')) {

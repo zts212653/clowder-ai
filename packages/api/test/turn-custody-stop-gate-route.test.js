@@ -66,8 +66,7 @@ function createProjectionService({ state, closeDecisions }) {
       const next = closeDecisions[Math.min(closes.length, closeDecisions.length - 1)];
       const decision = {
         state,
-        shouldBlock: next.shouldBlock,
-        transitionObserved: next.transitionObserved,
+        ...next,
         evidenceRefs: [...projection.evidenceRefs],
       };
       closes.push(decision);
@@ -122,7 +121,17 @@ function createEventWaitTaskStore(threadId) {
 function createMockDeps(
   service,
   appended,
-  { triggerMessage, taskStore, turnCustodyProjectionService, turnExecutionStore, metadataAugments } = {},
+  {
+    triggerMessage,
+    taskStore,
+    turnCustodyProjectionService,
+    turnExecutionStore,
+    metadataAugments,
+    sessionChainStore,
+    sessionSealer,
+    transcriptReader,
+    sessionManager,
+  } = {},
 ) {
   let sequence = 0;
   return {
@@ -135,12 +144,17 @@ function createMockDeps(
       sessionManager: {
         getOrCreate: async () => ({}),
         get: async () => null,
+        delete: async () => {},
         resolveWorkingDirectory: () => '/tmp/test',
+        ...sessionManager,
       },
       threadStore: null,
       apiUrl: 'http://127.0.0.1:3004',
       ...(taskStore ? { taskStore } : {}),
       ...(turnExecutionStore ? { turnExecutionStore } : {}),
+      ...(sessionChainStore ? { sessionChainStore } : {}),
+      ...(sessionSealer ? { sessionSealer } : {}),
+      ...(transcriptReader ? { transcriptReader } : {}),
     },
     messageStore: {
       append: async (message) => {
@@ -188,7 +202,18 @@ function createMockDeps(
 async function runRoute(
   service,
   threadId,
-  { projectionService, routeOptions = {}, taskStore, triggerMessage, turnExecutionStore } = {},
+  {
+    projectionService,
+    routeOptions = {},
+    taskStore,
+    triggerMessage,
+    turnExecutionStore,
+    beforeRoute,
+    sessionChainStore,
+    sessionSealer,
+    transcriptReader,
+    sessionManager,
+  } = {},
 ) {
   return withCatRegistryLock(async () => {
     const original = catRegistry.getAllConfigs();
@@ -198,6 +223,7 @@ async function runRoute(
     for (const [id, config] of Object.entries(toAllCatConfigs(loadCatConfig()))) {
       catRegistry.register(id, config);
     }
+    beforeRoute?.();
     const appended = [];
     const metadataAugments = [];
     try {
@@ -207,6 +233,10 @@ async function runRoute(
         triggerMessage,
         turnExecutionStore,
         metadataAugments,
+        sessionChainStore,
+        sessionSealer,
+        transcriptReader,
+        sessionManager,
       });
       const yielded = [];
       for await (const message of routeSerial(deps, ['codex'], 'custody gate test', 'user1', threadId, {
@@ -282,6 +312,156 @@ describe('F167 Phase T route custody stop gate', () => {
     );
   });
 
+  test('managed hold mounts its disposition producer on the exact turn and fails without a second invocation', async () => {
+    const projection = createProjectionService({
+      state: 'covered_active',
+      closeDecisions: [{ shouldBlock: true, transitionObserved: false }],
+    });
+    const service = createSequenceService('codex', ['Text-only completion.']);
+
+    const { appended, yielded } = await runRoute(service, 'thread-managed-hold-remedial', {
+      projectionService: projection,
+      routeOptions: {
+        turnCustodyWake: {
+          kind: 'structured',
+          protocol: 'hold',
+          subjectKey: 'ball:thread:thread-managed-hold-remedial',
+          holderCatId: 'codex',
+          sourceMessageId: 'message-managed-hold',
+          taskId: 'task-managed-hold',
+        },
+      },
+    });
+
+    assert.equal(service.calls.length, 1);
+    assert.match(service.calls[0], /cat_cafe_complete_managed_hold/);
+    assert.doesNotMatch(service.calls[0], /完成候选/);
+    assert.doesNotMatch(service.calls[0], /returnToPredecessor/);
+    assert.match(service.calls[0], /command exit/);
+    assert.equal(projection.closes.length, 1);
+    assert.equal(appended.filter((message) => message.source?.connector === 'routing-guard-failure').length, 1);
+    assert.equal(yielded.find((message) => message.type === 'done')?.errorCode, 'managed_hold_disposition_missing');
+  });
+
+  test('ordinary A2A dispatch mounts its exact producer and never spawns a stale remedial child', async () => {
+    const projection = createProjectionService({
+      state: 'covered_active',
+      closeDecisions: [{ shouldBlock: true, transitionObserved: false }],
+    });
+    const service = createSequenceService('codex', ['Completed the requested review.']);
+
+    const { appended, yielded } = await runRoute(service, 'thread-a2a-dispatch-disposition', {
+      projectionService: projection,
+      routeOptions: {
+        turnCustodyWake: {
+          kind: 'structured',
+          protocol: 'dispatch',
+          subjectKey: 'ball:thread:thread-a2a-dispatch-disposition',
+          holderCatId: 'codex',
+          handoff: {
+            sourceEventId: 'route:message-a2a:codex',
+            messageId: 'message-a2a',
+            fromCatId: 'fable5',
+          },
+        },
+      },
+    });
+
+    assert.equal(service.calls.length, 1);
+    assert.match(service.calls[0], /cat_cafe_complete_a2a_dispatch/);
+    assert.doesNotMatch(service.calls[0], /完成候选/);
+    assert.doesNotMatch(service.calls[0], /returnToPredecessor/);
+    assert.match(service.calls[0], /merge truth/);
+    assert.equal(projection.closes.length, 1);
+    assert.equal(appended.filter((message) => message.source?.connector === 'routing-guard-failure').length, 1);
+    assert.equal(yielded.find((message) => message.type === 'done')?.errorCode, 'a2a_dispatch_disposition_missing');
+  });
+
+  test('managed re-hold emits exact continuation receipt proof without terminal completion', async () => {
+    const projection = createProjectionService({
+      state: 'covered_active',
+      closeDecisions: [{ shouldBlock: false, transitionObserved: true, structuredTransitionKind: 'held' }],
+    });
+    const service = createSequenceService('codex', ['Established a new structured hold.']);
+
+    const { yielded } = await runRoute(service, 'thread-managed-hold-continued', {
+      projectionService: projection,
+      routeOptions: {
+        turnCustodyWake: {
+          kind: 'structured',
+          protocol: 'hold',
+          subjectKey: 'ball:thread:thread-managed-hold-continued',
+          holderCatId: 'codex',
+          sourceMessageId: 'message-managed-hold',
+          taskId: 'task-managed-hold',
+        },
+      },
+    });
+
+    assert.deepEqual(yielded.find((message) => message.type === 'done')?.turnCustodyTerminalWitness, {
+      kind: 'managed_hold_continued',
+      sourceMessageId: 'message-managed-hold',
+      taskId: 'task-managed-hold',
+      transition: 'reheld',
+    });
+  });
+
+  test('managed transfer emits exact continuation receipt proof', async () => {
+    const projection = createProjectionService({
+      state: 'covered_active',
+      closeDecisions: [{ shouldBlock: false, transitionObserved: true, structuredTransitionKind: 'handed' }],
+    });
+    const service = createSequenceService('codex', ['Transferred through a structured action.']);
+
+    const { yielded } = await runRoute(service, 'thread-managed-hold-transferred', {
+      projectionService: projection,
+      routeOptions: {
+        turnCustodyWake: {
+          kind: 'structured',
+          protocol: 'hold',
+          subjectKey: 'ball:thread:thread-managed-hold-transferred',
+          holderCatId: 'codex',
+          sourceMessageId: 'message-managed-hold',
+          taskId: 'task-managed-hold',
+        },
+      },
+    });
+
+    assert.equal(
+      yielded.find((message) => message.type === 'done')?.turnCustodyTerminalWitness?.transition,
+      'transferred',
+    );
+  });
+
+  test('managed eventWait emits exact continuation receipt proof', async () => {
+    const threadId = 'thread-managed-hold-event-wait';
+    const projection = createProjectionService({
+      state: 'covered_active',
+      closeDecisions: [{ shouldBlock: true, transitionObserved: false }],
+    });
+    const service = createSequenceService('codex', ['Registered the exact event wait.']);
+
+    const { yielded } = await runRoute(service, threadId, {
+      projectionService: projection,
+      taskStore: createEventWaitTaskStore(threadId),
+      routeOptions: {
+        turnCustodyWake: {
+          kind: 'structured',
+          protocol: 'hold',
+          subjectKey: `ball:thread:${threadId}`,
+          holderCatId: 'codex',
+          sourceMessageId: 'message-managed-hold',
+          taskId: 'task-managed-hold',
+        },
+      },
+    });
+
+    assert.equal(
+      yielded.find((message) => message.type === 'done')?.turnCustodyTerminalWitness?.transition,
+      'event_wait',
+    );
+  });
+
   test('a structured remedial transition closes the same projection without a failure notice', async () => {
     const projection = createProjectionService({
       state: 'covered_active',
@@ -310,6 +490,180 @@ describe('F167 Phase T route custody stop gate', () => {
       appended.some((message) => message.source?.connector === 'routing-guard-failure'),
       false,
     );
+  });
+
+  test('the stop-gate remedial child reads a fresh member capacity snapshot', async () => {
+    const replaceCodexWindow = (contextWindow) => {
+      const configs = catRegistry.getAllConfigs();
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(configs)) {
+        catRegistry.register(id, id === 'codex' ? { ...config, contextWindow } : config);
+      }
+    };
+    const calls = [];
+    const service = {
+      async *invoke(prompt, options) {
+        calls.push({ prompt, capacity: options?.contextCapacity });
+        if (calls.length === 1) replaceCodexWindow(256_000);
+        yield {
+          type: 'system_info',
+          catId: 'codex',
+          content: JSON.stringify({ type: 'invocation_created', invocationId: `codex-capacity-${calls.length}` }),
+          timestamp: Date.now(),
+        };
+        yield { type: 'text', catId: 'codex', content: 'No structured transition.', timestamp: Date.now() };
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+    const projection = createProjectionService({
+      state: 'covered_active',
+      closeDecisions: [
+        { shouldBlock: true, transitionObserved: false },
+        { shouldBlock: true, transitionObserved: false },
+      ],
+    });
+
+    await runRoute(service, 'thread-remedial-capacity', {
+      projectionService: projection,
+      beforeRoute: () => replaceCodexWindow(1_000_000),
+      routeOptions: {
+        turnCustodyWake: {
+          kind: 'action_successor',
+          leaseId: 'lease-remedial-capacity',
+          generation: 1,
+          holderCatId: 'codex',
+        },
+      },
+    });
+
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].capacity?.windowTokens, 1_000_000);
+    assert.equal(calls[1].capacity?.windowTokens, 256_000);
+  });
+
+  test('the stop-gate remedial child rebuilds its fixed prompt after a fresh capacity seal', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { _setTestStrategyOverride, _clearTestStrategyOverrides, getSessionStrategyWithSource } = await import(
+      '../dist/config/session-strategy.js'
+    );
+    const sessionChainStore = new SessionChainStore();
+    const threadId = 'thread-remedial-capacity-seal';
+    const active = sessionChainStore.create({
+      cliSessionId: 'cli-remedial-capacity-old',
+      threadId,
+      catId: 'codex',
+      userId: 'user1',
+    });
+    sessionChainStore.update(active.id, {
+      contextHealth: {
+        usedTokens: 240_000,
+        windowTokens: 2_000_000,
+        fillRatio: 0.12,
+        source: 'exact',
+        usedFrom: 'last_turn',
+        measuredAt: Date.now(),
+      },
+    });
+    const replaceCodexWindow = (contextWindow) => {
+      const configs = catRegistry.getAllConfigs();
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(configs)) {
+        catRegistry.register(id, id === 'codex' ? { ...config, contextWindow } : config);
+      }
+    };
+    const prompts = [];
+    const service = {
+      contextCapability() {
+        return {
+          provider: 'openai',
+          carrier: 'test_stream',
+          reportsRuntimeWindow: false,
+          authoritativeUsage: true,
+          usageTelemetry: 'available',
+          nativeWindowControl: false,
+          nativeCompressionControl: false,
+          observesCompression: true,
+          reason: 'test carrier',
+        };
+      },
+      async *invoke(prompt) {
+        prompts.push(prompt);
+        if (prompts.length === 1) replaceCodexWindow(256_000);
+        yield {
+          type: 'system_info',
+          catId: 'codex',
+          content: JSON.stringify({ type: 'invocation_created', invocationId: `codex-seal-${prompts.length}` }),
+          timestamp: Date.now(),
+        };
+        yield { type: 'text', catId: 'codex', content: 'No structured transition.', timestamp: Date.now() };
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+    const sessionSealer = {
+      async requestSeal({ sessionId, reason }) {
+        sessionChainStore.update(sessionId, { status: 'sealing', sealReason: reason });
+        return { accepted: true, status: 'sealing', sessionId };
+      },
+      async finalize({ sessionId }) {
+        sessionChainStore.update(sessionId, { status: 'sealed' });
+      },
+    };
+    const projection = createProjectionService({
+      state: 'covered_active',
+      closeDecisions: [
+        { shouldBlock: true, transitionObserved: false },
+        { shouldBlock: true, transitionObserved: false },
+      ],
+    });
+
+    try {
+      await runRoute(service, threadId, {
+        projectionService: projection,
+        beforeRoute: () => {
+          _setTestStrategyOverride('codex', {
+            strategy: 'hybrid',
+            thresholds: { warn: 0.75, action: 0.85 },
+            turnBudget: 12_000,
+            safetyMargin: 4_000,
+            hybrid: { maxCompressions: 1 },
+          });
+          const policy = getSessionStrategyWithSource('codex');
+          sessionChainStore.update(active.id, {
+            appliedPolicy: {
+              config: policy.effective,
+              source: policy.source,
+              revision: policy.revision,
+              changedAt: policy.changedAt,
+              execution: { status: 'active', missingCapabilities: [] },
+            },
+            hybridProgress: {
+              policyRevision: policy.revision,
+              observedCount: 1,
+              startedAt: new Date().toISOString(),
+            },
+          });
+          replaceCodexWindow(2_000_000);
+        },
+        sessionChainStore,
+        sessionSealer,
+        transcriptReader: { readDigest: async () => null },
+        sessionManager: { get: async () => 'cli-remedial-capacity-old' },
+        routeOptions: {
+          turnCustodyWake: {
+            kind: 'action_successor',
+            leaseId: 'lease-remedial-capacity-seal',
+            generation: 1,
+            holderCatId: 'codex',
+          },
+        },
+      });
+    } finally {
+      _clearTestStrategyOverrides();
+    }
+
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[1], /\[Session Continuity/);
+    assert.match(prompts[1], /F167 球权停止门/);
   });
 
   test('verified typed PR wait is a structured transition and suppresses the remedial child', async () => {

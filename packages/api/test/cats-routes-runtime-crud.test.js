@@ -181,6 +181,38 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const app = Fastify();
     await app.register(catsRoutes);
 
+    const createPayload = {
+      catId: 'runtime-spark',
+      name: '火花猫',
+      displayName: '火花猫',
+      nickname: '小火花',
+      avatar: '/avatars/spark.png',
+      color: { primary: '#f97316', secondary: '#fed7aa' },
+      mentionPatterns: ['@runtime-spark', '@火花猫'],
+      roleDescription: '快速执行',
+      personality: '利落',
+      teamStrengths: '精确点改',
+      caution: '不会自动跑测试',
+      strengths: ['precision', 'speed'],
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.4',
+      contextWindow: 48_000,
+      mcpSupport: false,
+      cli: { command: 'codex', outputFormat: 'json' },
+    };
+    const rejectedLegacyCreate = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ ...createPayload, sessionChain: true }),
+    });
+    assert.equal(rejectedLegacyCreate.statusCode, 400);
+    assert.match(JSON.parse(rejectedLegacyCreate.body).error, /legacy sessionChain/i);
+
     const createRes = await app.inject({
       method: 'POST',
       url: '/api/cats',
@@ -188,37 +220,36 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
       },
-      body: JSON.stringify({
-        catId: 'runtime-spark',
-        name: '火花猫',
-        displayName: '火花猫',
-        nickname: '小火花',
-        avatar: '/avatars/spark.png',
-        color: { primary: '#f97316', secondary: '#fed7aa' },
-        mentionPatterns: ['@runtime-spark', '@火花猫'],
-        roleDescription: '快速执行',
-        personality: '利落',
-        teamStrengths: '精确点改',
-        caution: '不会自动跑测试',
-        strengths: ['precision', 'speed'],
-        sessionChain: true,
-        clientId: 'openai',
-        accountRef: 'codex',
-        defaultModel: 'gpt-5.4',
-        contextBudget: {
-          maxPromptTokens: 24000,
-          maxContextTokens: 16000,
-          maxMessages: 24,
-          maxContentLengthPerMsg: 6000,
-        },
-        mcpSupport: false,
-        cli: { command: 'codex', outputFormat: 'json' },
-      }),
+      body: JSON.stringify(createPayload),
     });
     assert.equal(createRes.statusCode, 201);
     const createdBody = JSON.parse(createRes.body);
     assert.equal(createdBody.cat.id, 'runtime-spark');
     assert.equal(createdBody.cat.clientId, 'openai');
+
+    // Simulate a member created by an older version. New routes must preserve
+    // this rollback byte during unrelated writes while refusing to edit it.
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+    const legacyCatalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const legacyBreed = legacyCatalog.breeds.find((breed) => breed.catId === 'runtime-spark');
+    const legacyVariant = legacyBreed?.variants.find(
+      (variant) => (variant.catId ?? legacyBreed.catId) === 'runtime-spark',
+    );
+    assert.ok(legacyVariant);
+    legacyVariant.sessionChain = false;
+    writeFileSync(catalogPath, `${JSON.stringify(legacyCatalog, null, 2)}\n`, 'utf-8');
+
+    const rejectedLegacyPatch = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-spark',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({ sessionChain: false }),
+    });
+    assert.equal(rejectedLegacyPatch.statusCode, 400);
+    assert.match(JSON.parse(rejectedLegacyPatch.body).error, /legacy sessionChain/i);
 
     const patchRes = await app.inject({
       method: 'PATCH',
@@ -234,13 +265,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         teamStrengths: '精确点改 + 快速修复',
         caution: '',
         strengths: ['precision', 'speed', 'surgical-edits'],
-        sessionChain: false,
-        contextBudget: {
-          maxPromptTokens: 36000,
-          maxContextTokens: 22000,
-          maxMessages: 36,
-          maxContentLengthPerMsg: 9000,
-        },
+        contextWindow: 72_000,
       }),
     });
     assert.equal(patchRes.statusCode, 200);
@@ -256,13 +281,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(runtimeCat.teamStrengths, '精确点改 + 快速修复');
     assert.equal(runtimeCat.caution, null);
     assert.deepEqual(runtimeCat.strengths, ['precision', 'speed', 'surgical-edits']);
-    assert.equal(runtimeCat.sessionChain, false);
-    assert.deepEqual(runtimeCat.contextBudget, {
-      maxPromptTokens: 36000,
-      maxContextTokens: 22000,
-      maxMessages: 36,
-      maxContentLengthPerMsg: 9000,
-    });
+    assert.equal(runtimeCat.contextWindow, 72_000);
+    const patchedCatalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const patchedBreed = patchedCatalog.breeds.find((breed) => breed.catId === 'runtime-spark');
+    const patchedVariant = patchedBreed?.variants.find(
+      (variant) => (variant.catId ?? patchedBreed.catId) === 'runtime-spark',
+    );
+    assert.equal(patchedVariant.sessionChain, false, 'unrelated writes must preserve the legacy rollback byte');
 
     const bindProviderRes = await app.inject({
       method: 'PATCH',
@@ -299,7 +324,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
-        contextBudget: null,
+        contextWindow: null,
       }),
     });
     assert.equal(clearBudgetRes.statusCode, 200);
@@ -309,7 +334,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const listAfterClearBody = JSON.parse(listAfterClearRes.body);
     const runtimeCatAfterClear = listAfterClearBody.cats.find((cat) => cat.id === 'runtime-spark');
     assert.ok(runtimeCatAfterClear, 'runtime-spark should still exist');
-    assert.equal(runtimeCatAfterClear.contextBudget, undefined);
+    assert.equal(runtimeCatAfterClear.contextWindow, undefined);
     assert.equal(runtimeCatAfterClear.accountRef, 'codex');
 
     const mentions = parseA2AMentions('@运行时火花 请跟进这个分支', createCatId('opus'));
@@ -381,20 +406,23 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         clientId: 'openai',
         accountRef: 'codex',
         defaultModel: 'gpt-5.6-sol',
+        contextWindow: 372000,
         cli: {
           command: 'codex',
           outputFormat: 'json',
           effort: 'turbo-native',
-          contextWindow: 372000,
-          autoCompactTokenLimit: 353400,
+          contextWindow: 128000,
+          autoCompactTokenLimit: 96000,
         },
       }),
     });
     assert.equal(createRes.statusCode, 201, createRes.body);
     const createdBody = JSON.parse(createRes.body);
     assert.equal(createdBody.cat.cli?.effort, 'turbo-native');
-    assert.equal(createdBody.cat.cli?.contextWindow, 372000);
-    assert.equal(createdBody.cat.cli?.autoCompactTokenLimit, 353400);
+    // #1208 public API: only the top-level field is accepted; nested legacy keys are inert.
+    assert.equal(createdBody.cat.contextWindow, 372000, 'top-level contextWindow is canonical');
+    assert.equal(createdBody.cat.cli?.contextWindow, undefined, 'contextWindow no longer stored in cli');
+    assert.equal(createdBody.cat.cli?.autoCompactTokenLimit, undefined, 'autoCompactTokenLimit derived at runtime');
 
     const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
     assert.equal(listRes.statusCode, 200);
@@ -402,16 +430,16 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const runtimeCat = listBody.cats.find((cat) => cat.id === 'runtime-codex-effort');
     assert.ok(runtimeCat, 'runtime-codex-effort should appear in /api/cats');
     assert.equal(runtimeCat.cli?.effort, 'turbo-native');
-    assert.equal(runtimeCat.cli?.contextWindow, 372000);
-    assert.equal(runtimeCat.cli?.autoCompactTokenLimit, 353400);
+    assert.equal(runtimeCat.contextWindow, 372000, 'contextWindow at top level in list');
 
     const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
     const persisted = JSON.parse(readFileSync(catalogPath, 'utf-8'));
     const variant = persisted.breeds.find((breed) => breed.catId === 'runtime-codex-effort')?.variants?.[0];
     assert.equal(variant?.cli?.effort, 'turbo-native');
-    assert.equal(variant?.cli?.contextWindow, 372000);
-    assert.equal(variant?.cli?.autoCompactTokenLimit, 353400);
+    assert.equal(variant?.contextWindow, 372000, 'contextWindow persisted at variant top-level');
+    assert.equal(variant?.cli?.contextWindow, undefined, 'cli.contextWindow not persisted');
 
+    // #1208: effort patch preserves top-level contextWindow
     const effortPatchRes = await app.inject({
       method: 'PATCH',
       url: '/api/cats/runtime-codex-effort',
@@ -424,9 +452,9 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(effortPatchRes.statusCode, 200, effortPatchRes.body);
     const effortPatchedCat = JSON.parse(effortPatchRes.body).cat;
     assert.equal(effortPatchedCat.cli?.effort, 'max');
-    assert.equal(effortPatchedCat.cli?.contextWindow, 372000, 'partial effort patch preserves the CLI window');
-    assert.equal(effortPatchedCat.cli?.autoCompactTokenLimit, 353400);
+    assert.equal(effortPatchedCat.contextWindow, 372000, 'partial effort patch preserves top-level contextWindow');
 
+    // #1208: changing context window via top-level contextWindow field
     const contextOnlyPatchRes = await app.inject({
       method: 'PATCH',
       url: '/api/cats/runtime-codex-effort',
@@ -434,17 +462,14 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
       },
-      body: JSON.stringify({ cli: { contextWindow: 100000 } }),
+      body: JSON.stringify({ contextWindow: 100000 }),
     });
     assert.equal(contextOnlyPatchRes.statusCode, 200, contextOnlyPatchRes.body);
     const contextOnlyPatchedCat = JSON.parse(contextOnlyPatchRes.body).cat;
-    assert.equal(contextOnlyPatchedCat.cli?.contextWindow, 100000);
-    assert.equal(
-      contextOnlyPatchedCat.cli?.autoCompactTokenLimit,
-      88000,
-      'changing the window recomputes its derived compaction threshold',
-    );
+    assert.equal(contextOnlyPatchedCat.contextWindow, 100000, 'top-level contextWindow updated');
+    assert.equal(contextOnlyPatchedCat.cli?.contextWindow, undefined, 'cli.contextWindow stays absent');
 
+    // #1208: cli.autoCompactTokenLimit in body is silently ignored (derived at runtime)
     const compactOnlyPatchRes = await app.inject({
       method: 'PATCH',
       url: '/api/cats/runtime-codex-effort',
@@ -452,24 +477,11 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'content-type': 'application/json',
         'x-cat-cafe-user': 'codex',
       },
-      body: JSON.stringify({ cli: { autoCompactTokenLimit: 85000 } }),
+      body: JSON.stringify({ cli: { effort: 'max' } }),
     });
     assert.equal(compactOnlyPatchRes.statusCode, 200, compactOnlyPatchRes.body);
     const compactOnlyPatchedCat = JSON.parse(compactOnlyPatchRes.body).cat;
-    assert.equal(compactOnlyPatchedCat.cli?.contextWindow, 100000);
-    assert.equal(compactOnlyPatchedCat.cli?.autoCompactTokenLimit, 85000);
-
-    const oversizedCompactPatchRes = await app.inject({
-      method: 'PATCH',
-      url: '/api/cats/runtime-codex-effort',
-      headers: {
-        'content-type': 'application/json',
-        'x-cat-cafe-user': 'codex',
-      },
-      body: JSON.stringify({ cli: { autoCompactTokenLimit: 100001 } }),
-    });
-    assert.equal(oversizedCompactPatchRes.statusCode, 400, oversizedCompactPatchRes.body);
-    assert.match(JSON.parse(oversizedCompactPatchRes.body).error, /cannot exceed cli\.contextWindow/i);
+    assert.equal(compactOnlyPatchedCat.contextWindow, 100000, 'contextWindow unchanged after unrelated cli patch');
 
     const modelPatchRes = await app.inject({
       method: 'PATCH',
@@ -483,9 +495,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(modelPatchRes.statusCode, 200, modelPatchRes.body);
     const modelPatchedCat = JSON.parse(modelPatchRes.body).cat;
     assert.equal(modelPatchedCat.cli?.effort, 'max', 'model switch preserves the provider-native member value');
-    assert.equal(modelPatchedCat.cli?.contextWindow, undefined, 'model switch drops the prior model-specific window');
-    assert.equal(modelPatchedCat.cli?.autoCompactTokenLimit, undefined);
+    // contextWindow persists at top level across model switch (user chose this limit)
+    assert.equal(modelPatchedCat.contextWindow, 100000, 'top-level contextWindow persists across model switch');
 
+    // #1208: restore model with contextWindow via top-level field
     const restoreGpt56Res = await app.inject({
       method: 'PATCH',
       url: '/api/cats/runtime-codex-effort',
@@ -495,18 +508,20 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       },
       body: JSON.stringify({
         defaultModel: 'gpt-5.6-sol',
-        cli: { effort: 'max', contextWindow: 372000 },
+        contextWindow: 372000,
+        cli: { effort: 'max' },
       }),
     });
     assert.equal(restoreGpt56Res.statusCode, 200, restoreGpt56Res.body);
     const restoredGpt56Cat = JSON.parse(restoreGpt56Res.body).cat;
-    assert.equal(restoredGpt56Cat.cli?.contextWindow, 372000);
-    assert.equal(restoredGpt56Cat.cli?.autoCompactTokenLimit, 327360);
+    assert.equal(restoredGpt56Cat.contextWindow, 372000, 'top-level contextWindow restored');
+    assert.equal(restoredGpt56Cat.cli?.effort, 'max');
     const restoredCatalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
     const restoredVariant = restoredCatalog.breeds.find((breed) => breed.catId === 'runtime-codex-effort')
       ?.variants?.[0];
-    assert.equal(restoredVariant?.cli?.autoCompactTokenLimit, 327360, 'derived threshold is persisted');
+    assert.equal(restoredVariant?.contextWindow, 372000, 'contextWindow persisted at variant top-level');
 
+    // #1208: model switch + context window via top-level contextWindow
     const modelAndContextPatchRes = await app.inject({
       method: 'PATCH',
       url: '/api/cats/runtime-codex-effort',
@@ -516,14 +531,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       },
       body: JSON.stringify({
         defaultModel: 'gpt-5.4',
-        cli: { contextWindow: 100000, autoCompactTokenLimit: 90000 },
+        contextWindow: 100000,
       }),
     });
     assert.equal(modelAndContextPatchRes.statusCode, 200, modelAndContextPatchRes.body);
     const modelAndContextPatchedCat = JSON.parse(modelAndContextPatchRes.body).cat;
     assert.equal(modelAndContextPatchedCat.cli?.effort, 'max');
-    assert.equal(modelAndContextPatchedCat.cli?.contextWindow, 100000, 'new model-specific window is accepted');
-    assert.equal(modelAndContextPatchedCat.cli?.autoCompactTokenLimit, 90000);
+    assert.equal(modelAndContextPatchedCat.contextWindow, 100000, 'top-level contextWindow updated with model switch');
 
     const clearEffortRes = await app.inject({
       method: 'PATCH',
@@ -549,23 +563,338 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(noEffortModelSwitchRes.statusCode, 200, noEffortModelSwitchRes.body);
     const noEffortModelSwitchedCat = JSON.parse(noEffortModelSwitchRes.body).cat;
     assert.equal(noEffortModelSwitchedCat.cli?.effort, undefined, 'model switch preserves an implicit effort');
-    assert.equal(noEffortModelSwitchedCat.cli?.contextWindow, undefined);
-    assert.equal(noEffortModelSwitchedCat.cli?.autoCompactTokenLimit, undefined);
-
-    const orphanCompactPatchRes = await app.inject({
-      method: 'PATCH',
-      url: '/api/cats/runtime-codex-effort',
-      headers: {
-        'content-type': 'application/json',
-        'x-cat-cafe-user': 'codex',
-      },
-      body: JSON.stringify({ cli: { autoCompactTokenLimit: 50000 } }),
-    });
-    assert.equal(orphanCompactPatchRes.statusCode, 400, orphanCompactPatchRes.body);
-    assert.match(JSON.parse(orphanCompactPatchRes.body).error, /requires cli\.contextWindow/i);
+    // #1208: contextWindow persists at top level across model switch
+    assert.equal(noEffortModelSwitchedCat.contextWindow, 100000, 'top-level contextWindow persists');
   });
 
-  it('POST /api/cats derives and validates the CLI context tuple', async () => {
+  it('#1208 migration: legacy cli.contextWindow stripped on any PATCH save', async () => {
+    // Scenario: legacy cat with only cli.contextWindow (no top-level contextWindow).
+    // Any PATCH save should strip cli.contextWindow and promote to top-level.
+    const projectRoot = createProjectRootFromRepoTemplate();
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+
+    // Inject a legacy cat with cli.contextWindow directly into the catalog
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    catalog.breeds.push({
+      id: 'test-legacy-ctx-breed',
+      catId: 'legacy-ctx-cat',
+      name: 'Legacy Context',
+      displayName: 'Legacy Context',
+      avatar: '🐱',
+      color: { primary: '#000', secondary: '#fff' },
+      mentionPatterns: ['@legacy-ctx-cat'],
+      roleDescription: 'test',
+      personality: 'test',
+      order: 99,
+      defaultVariantId: 'legacy-ctx-cat',
+      variants: [
+        {
+          id: 'legacy-ctx-cat',
+          clientId: 'openai',
+          defaultModel: 'gpt-5.3-codex',
+          mcpSupport: false,
+          cli: { command: 'codex', outputFormat: 'stream-json', contextWindow: 128000, autoCompactTokenLimit: 96000 },
+        },
+      ],
+    });
+    writeFileSync(catalogPath, JSON.stringify(catalog, null, 2));
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // PATCH something unrelated (effort) — should still strip legacy cli fields
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/legacy-ctx-cat',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ cli: { effort: 'high' } }),
+    });
+    assert.equal(patchRes.statusCode, 200, patchRes.body);
+    const patched = JSON.parse(patchRes.body).cat;
+    // Legacy cli.contextWindow promoted to top-level
+    assert.equal(patched.contextWindow, 128000, 'legacy cli.contextWindow promoted to top-level');
+    assert.equal(patched.cli?.contextWindow, undefined, 'cli.contextWindow stripped after save');
+
+    // Verify persisted state
+    const savedCatalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const savedVariant = savedCatalog.breeds.find((b) => b.catId === 'legacy-ctx-cat')?.variants?.[0];
+    assert.equal(savedVariant?.contextWindow, 128000, 'top-level persisted');
+    assert.equal(savedVariant?.cli?.contextWindow, undefined, 'cli.contextWindow not persisted');
+    assert.equal(savedVariant?.cli?.autoCompactTokenLimit, undefined, 'cli.autoCompactTokenLimit not persisted');
+  });
+
+  it('#1208 GET /api/cats resolves Hub capacity from legacy window and effective model', async () => {
+    const projectRoot = createProjectRootFromRepoTemplate();
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const makeBreed = (catId, variant) => ({
+      id: `${catId}-breed`,
+      catId,
+      name: catId,
+      displayName: catId,
+      avatar: '🐱',
+      color: { primary: '#000', secondary: '#fff' },
+      mentionPatterns: [`@${catId}`],
+      roleDescription: 'test',
+      personality: 'test',
+      order: 99,
+      defaultVariantId: catId,
+      variants: [{ id: catId, clientId: 'openai', mcpSupport: false, ...variant }],
+    });
+    catalog.breeds.push(
+      makeBreed('hub-legacy-window', {
+        defaultModel: 'gpt-5.1-codex',
+        cli: { command: 'codex', outputFormat: 'json', contextWindow: 123_000 },
+      }),
+      makeBreed('hub-auto-model', {
+        defaultModel: 'gpt-5.1-codex',
+        cli: { command: 'codex', outputFormat: 'json' },
+      }),
+    );
+    writeFileSync(catalogPath, JSON.stringify(catalog, null, 2));
+
+    const envKey = 'CAT_HUB_AUTO_MODEL_MODEL';
+    const savedModel = process.env[envKey];
+    process.env[envKey] = 'gpt-5.3';
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/cats',
+        headers: { 'x-cat-cafe-user': 'codex' },
+      });
+      assert.equal(res.statusCode, 200, res.body);
+      const cats = JSON.parse(res.body).cats;
+      const legacy = cats.find((cat) => cat.id === 'hub-legacy-window');
+      const auto = cats.find((cat) => cat.id === 'hub-auto-model');
+
+      assert.equal(legacy?.contextWindow, 123_000, 'Hub editable field exposes the effective legacy manual setting');
+      assert.equal(legacy?.resolvedContext?.source, 'manual');
+      assert.equal(legacy?.resolvedContext?.windowTokens, 123_000);
+      assert.equal(auto?.contextWindow, undefined, 'Auto remains blank in the editable field');
+      assert.equal(auto?.resolvedContext?.source, 'catalog');
+      assert.equal(auto?.resolvedContext?.windowTokens, 128_000);
+      assert.match(auto?.resolvedContext?.provenance ?? '', /gpt-5\.3/);
+    } finally {
+      await app.close();
+      if (savedModel === undefined) delete process.env[envKey];
+      else process.env[envKey] = savedModel;
+    }
+  });
+
+  it('#1208 GET /api/cats projects a binding-aware Auto ACP capacity snapshot', async () => {
+    const projectRoot = createProjectRootFromRepoTemplate();
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    catalog.breeds.push({
+      id: 'hub-auto-acp-breed',
+      catId: 'hub-auto-acp',
+      name: 'Hub Auto ACP',
+      displayName: 'Hub Auto ACP',
+      avatar: '🐱',
+      color: { primary: '#000', secondary: '#fff' },
+      mentionPatterns: ['@hub-auto-acp'],
+      roleDescription: 'test',
+      personality: 'test',
+      order: 99,
+      defaultVariantId: 'hub-auto-acp',
+      variants: [
+        {
+          id: 'hub-auto-acp',
+          clientId: 'opencode',
+          defaultModel: 'claude-opus-4-6',
+          provider: 'anthropic',
+          mcpSupport: true,
+          acp: {
+            command: 'opencode',
+            startupArgs: ['acp'],
+            supportsMultiplexing: true,
+          },
+        },
+      ],
+    });
+    writeFileSync(catalogPath, JSON.stringify(catalog, null, 2));
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes, {
+      resolveContextCapacitySnapshot: (catId) =>
+        catId === 'hub-auto-acp'
+          ? {
+              capacity: {
+                windowTokens: 1_000_000,
+                inputCeilingTokens: 900_000,
+                source: 'catalog',
+                provenance: 'model catalog: claude-opus-4-6; bound by service_spawn to opencode/acp',
+                actionable: true,
+              },
+              capability: {
+                provider: 'opencode',
+                carrier: 'acp',
+                reportsRuntimeWindow: false,
+                authoritativeUsage: true,
+                usageTelemetry: 'available',
+                nativeWindowControl: true,
+                nativeCompressionControl: false,
+                observesCompression: false,
+                reason: 'OpenCode ACP usage telemetry observed',
+              },
+              binding: {
+                model: 'claude-opus-4-6',
+                windowTokens: 1_000_000,
+                source: 'service_spawn',
+              },
+              memberWindowTokens: null,
+              model: 'claude-opus-4-6',
+            }
+          : undefined,
+    });
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/cats',
+        headers: { 'x-cat-cafe-user': 'codex' },
+      });
+      assert.equal(res.statusCode, 200, res.body);
+      const cat = JSON.parse(res.body).cats.find((candidate) => candidate.id === 'hub-auto-acp');
+
+      assert.equal(cat?.resolvedContext?.source, 'catalog');
+      assert.equal(cat?.resolvedContext?.windowTokens, 1_000_000);
+      assert.equal(cat?.resolvedContext?.actionable, true);
+      assert.equal(cat?.resolvedContext?.usageTelemetry, 'available');
+      assert.match(cat?.resolvedContext?.provenance ?? '', /bound by service_spawn to opencode\/acp/);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('#1208 migration: clear-to-Auto on legacy cat removes both top-level and cli cap', async () => {
+    // Scenario: legacy cat has cli.contextWindow=128000 (no top-level).
+    // User sends PATCH {contextWindow: null} to clear to Auto.
+    // Both top-level and legacy cli.contextWindow must be gone.
+    const projectRoot = createProjectRootFromRepoTemplate();
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    catalog.breeds.push({
+      id: 'test-legacy-clear-breed',
+      catId: 'legacy-clear-cat',
+      name: 'Legacy Clear',
+      displayName: 'Legacy Clear',
+      avatar: '🐱',
+      color: { primary: '#000', secondary: '#fff' },
+      mentionPatterns: ['@legacy-clear-cat'],
+      roleDescription: 'test',
+      personality: 'test',
+      order: 99,
+      defaultVariantId: 'legacy-clear-cat',
+      variants: [
+        {
+          id: 'legacy-clear-cat',
+          clientId: 'openai',
+          defaultModel: 'gpt-5.3-codex',
+          mcpSupport: false,
+          cli: { command: 'codex', outputFormat: 'stream-json', contextWindow: 128000 },
+        },
+      ],
+    });
+    writeFileSync(catalogPath, JSON.stringify(catalog, null, 2));
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // Step 1: arbitrary save → promotes cli.contextWindow to top-level
+    const promotionRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/legacy-clear-cat',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ personality: 'updated' }),
+    });
+    assert.equal(promotionRes.statusCode, 200, promotionRes.body);
+    const promoted = JSON.parse(promotionRes.body).cat;
+    assert.equal(promoted.contextWindow, 128000, 'promoted to top-level');
+    assert.equal(promoted.cli?.contextWindow, undefined, 'cli.contextWindow stripped');
+
+    // Step 2: clear to Auto via {contextWindow: null}
+    const clearRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/legacy-clear-cat',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ contextWindow: null }),
+    });
+    assert.equal(clearRes.statusCode, 200, clearRes.body);
+    const cleared = JSON.parse(clearRes.body).cat;
+    assert.equal(cleared.contextWindow, undefined, 'top-level contextWindow cleared to Auto');
+    assert.equal(cleared.cli?.contextWindow, undefined, 'cli.contextWindow stays gone');
+
+    // Verify resolver now sees this as Auto (no cap)
+    const { getMemberWindowSetting } = await import('../dist/config/context-capacity.js');
+    assert.equal(getMemberWindowSetting('legacy-clear-cat'), undefined, 'resolver sees Auto (no manual setting)');
+  });
+
+  it('#1208 migration: model switch preserves top-level contextWindow', async () => {
+    const projectRoot = createProjectRootFromRepoTemplate();
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    catalog.breeds.push({
+      id: 'test-model-switch-breed',
+      catId: 'model-switch-cat',
+      name: 'Model Switch',
+      displayName: 'Model Switch',
+      avatar: '🐱',
+      color: { primary: '#000', secondary: '#fff' },
+      mentionPatterns: ['@model-switch-cat'],
+      roleDescription: 'test',
+      personality: 'test',
+      order: 99,
+      defaultVariantId: 'model-switch-cat',
+      variants: [
+        {
+          id: 'model-switch-cat',
+          clientId: 'anthropic',
+          accountRef: 'claude',
+          defaultModel: 'claude-opus-4-6',
+          mcpSupport: false,
+          contextWindow: 200000,
+        },
+      ],
+    });
+    writeFileSync(catalogPath, JSON.stringify(catalog, null, 2));
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // Model switch should preserve contextWindow at top level
+    const switchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/model-switch-cat',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'opus' },
+      body: JSON.stringify({ defaultModel: 'claude-sonnet-4-6' }),
+    });
+    assert.equal(switchRes.statusCode, 200, switchRes.body);
+    const switched = JSON.parse(switchRes.body).cat;
+    assert.equal(switched.contextWindow, 200000, 'contextWindow preserved across model switch');
+    assert.equal(switched.defaultModel, 'claude-sonnet-4-6', 'model actually switched');
+  });
+
+  it('POST /api/cats keeps legacy nested CLI window fields outside the public contract', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
@@ -590,6 +919,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       'x-cat-cafe-user': 'codex',
     };
 
+    // #1208: nested cli.contextWindow is unknown public input and cannot set member capacity.
     const createContextOnlyRes = await app.inject({
       method: 'POST',
       url: '/api/cats',
@@ -603,12 +933,15 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     });
     assert.equal(createContextOnlyRes.statusCode, 201, createContextOnlyRes.body);
     const createdContextCat = JSON.parse(createContextOnlyRes.body).cat;
-    assert.equal(createdContextCat.cli?.contextWindow, 100000);
-    assert.equal(createdContextCat.cli?.autoCompactTokenLimit, 88000);
+    assert.equal(createdContextCat.contextWindow, undefined, 'nested cli.contextWindow must be inert');
+    assert.equal(createdContextCat.cli?.contextWindow, undefined, 'cli.contextWindow no longer stored');
+    assert.equal(createdContextCat.cli?.autoCompactTokenLimit, undefined, 'autoCompactTokenLimit derived at runtime');
     const persisted = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
     const derivedVariant = persisted.breeds.find((breed) => breed.catId === 'runtime-context-derived')?.variants?.[0];
-    assert.equal(derivedVariant?.cli?.autoCompactTokenLimit, 88000, 'derived threshold is persisted on create');
+    assert.equal(derivedVariant?.contextWindow, undefined, 'nested cli.contextWindow must not be migrated on create');
 
+    // #1208: autoCompactTokenLimit without contextWindow is silently accepted
+    // (autoCompactTokenLimit is ignored — derived at runtime from contextWindow)
     const createOrphanCompactRes = await app.inject({
       method: 'POST',
       url: '/api/cats',
@@ -620,27 +953,25 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         cli: { command: 'codex', outputFormat: 'json', autoCompactTokenLimit: 90000 },
       }),
     });
-    assert.equal(createOrphanCompactRes.statusCode, 400, createOrphanCompactRes.body);
-    assert.match(JSON.parse(createOrphanCompactRes.body).error, /requires cli\.contextWindow/i);
+    // Now succeeds: autoCompactTokenLimit in body is silently ignored (no validation)
+    assert.equal(createOrphanCompactRes.statusCode, 201, createOrphanCompactRes.body);
 
-    const createOversizedCompactRes = await app.inject({
+    // #1208: explicit top-level contextWindow is the only public member window field.
+    const createBothRes = await app.inject({
       method: 'POST',
       url: '/api/cats',
       headers,
       body: JSON.stringify({
         ...baseBody,
-        catId: 'runtime-context-oversized',
-        mentionPatterns: ['@runtime-context-oversized'],
-        cli: {
-          command: 'codex',
-          outputFormat: 'json',
-          contextWindow: 100000,
-          autoCompactTokenLimit: 100001,
-        },
+        catId: 'runtime-context-both',
+        mentionPatterns: ['@runtime-context-both'],
+        contextWindow: 200000,
+        cli: { command: 'codex', outputFormat: 'json', contextWindow: 100000 },
       }),
     });
-    assert.equal(createOversizedCompactRes.statusCode, 400, createOversizedCompactRes.body);
-    assert.match(JSON.parse(createOversizedCompactRes.body).error, /cannot exceed cli\.contextWindow/i);
+    assert.equal(createBothRes.statusCode, 201, createBothRes.body);
+    const createdBothCat = JSON.parse(createBothRes.body).cat;
+    assert.equal(createdBothCat.contextWindow, 200000, 'top-level contextWindow is persisted');
   });
 
   it('POST /api/cats rejects blank cli.effort values', async () => {
@@ -852,6 +1183,144 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     }
   });
 
+  it('POST and PATCH /api/cats gate cli.serviceTier to eligible Codex OAuth bindings', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const { writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
+    writeCatalogAccount(projectRoot, 'codex-api-key', {
+      authType: 'api_key',
+      baseUrl: 'https://api.openai.example',
+      models: ['gpt-5.6-sol'],
+      displayName: 'Codex API Key',
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    try {
+      const headers = {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      };
+      const baseBody = {
+        name: '缅因猫',
+        displayName: '缅因猫',
+        avatar: '/avatars/codex.png',
+        color: { primary: '#16a34a', secondary: '#bbf7d0' },
+        roleDescription: '审查',
+        clientId: 'openai',
+        defaultModel: 'gpt-5.6-sol',
+      };
+
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          catId: 'runtime-codex-speed',
+          mentionPatterns: ['@runtime-codex-speed'],
+          accountRef: 'codex',
+          cli: { command: 'codex', outputFormat: 'json', serviceTier: 'fast' },
+        }),
+      });
+      assert.equal(createRes.statusCode, 201, createRes.body);
+      assert.equal(JSON.parse(createRes.body).cat.cli?.serviceTier, 'fast');
+
+      const unsupportedModelRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          catId: 'runtime-codex-speed-unsupported',
+          mentionPatterns: ['@runtime-codex-speed-unsupported'],
+          accountRef: 'codex',
+          defaultModel: 'gpt-4.1',
+          cli: { command: 'codex', outputFormat: 'json', serviceTier: 'fast' },
+        }),
+      });
+      assert.equal(unsupportedModelRes.statusCode, 400);
+      assert.match(JSON.parse(unsupportedModelRes.body).error, /Fast.*model/i);
+
+      const apiKeyCreateRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          catId: 'runtime-codex-speed-api-key',
+          mentionPatterns: ['@runtime-codex-speed-api-key'],
+          accountRef: 'codex-api-key',
+          cli: { command: 'codex', outputFormat: 'json', serviceTier: 'fast' },
+        }),
+      });
+      assert.equal(apiKeyCreateRes.statusCode, 400);
+      assert.match(JSON.parse(apiKeyCreateRes.body).error, /OAuth/i);
+
+      const nonCodexRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          clientId: 'kimi',
+          accountRef: 'kimi',
+          defaultModel: 'kimi-k2.5',
+          catId: 'runtime-kimi-speed',
+          mentionPatterns: ['@runtime-kimi-speed'],
+          cli: { command: 'kimi', outputFormat: 'stream-json', serviceTier: 'standard' },
+        }),
+      });
+      assert.equal(nonCodexRes.statusCode, 400);
+      assert.match(JSON.parse(nonCodexRes.body).error, /Codex OAuth/i);
+
+      const clearRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-codex-speed',
+        headers,
+        body: JSON.stringify({ cli: { serviceTier: null } }),
+      });
+      assert.equal(clearRes.statusCode, 200, clearRes.body);
+      assert.equal(JSON.parse(clearRes.body).cat.cli?.serviceTier, undefined);
+
+      const restoreRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-codex-speed',
+        headers,
+        body: JSON.stringify({ cli: { serviceTier: 'fast' } }),
+      });
+      assert.equal(restoreRes.statusCode, 200, restoreRes.body);
+
+      const switchBindingRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-codex-speed',
+        headers,
+        body: JSON.stringify({ accountRef: 'codex-api-key' }),
+      });
+      assert.equal(switchBindingRes.statusCode, 200, switchBindingRes.body);
+      assert.equal(
+        JSON.parse(switchBindingRes.body).cat.cli?.serviceTier,
+        'fast',
+        'account switches preserve dormant member intent when serviceTier was not explicitly edited',
+      );
+
+      const explicitApiKeyRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-codex-speed',
+        headers,
+        body: JSON.stringify({ cli: { serviceTier: 'standard' } }),
+      });
+      assert.equal(explicitApiKeyRes.statusCode, 400);
+      assert.match(JSON.parse(explicitApiKeyRes.body).error, /OAuth/i);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('GET /api/cats exposes effective codexCarrier truth (per-cat > env > default)', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
@@ -929,6 +1398,8 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
           clientId: 'openai',
           accountRef: 'codex',
           defaultModel: 'gpt-5.4',
+          cli: { effort: 'xhigh', carrier: 'exec_json' },
+          cliConfigArgs: ['--config stale=true'],
           acp: { command: 'codex', startupArgs: ['acp'] },
         }),
       });
@@ -936,6 +1407,25 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       const acpCat = JSON.parse(acpRes.body).cat;
       assert.equal(acpCat.adapterMode, 'acp');
       assert.equal(acpCat.codexCarrier, undefined, 'ACP cats bypass the Codex carrier entirely');
+      assert.equal(acpCat.cli?.effort, undefined, 'ACP create must not persist CLI effort');
+      assert.equal(acpCat.cli?.carrier, undefined, 'ACP create must not persist a CLI carrier override');
+      assert.deepEqual(acpCat.cliConfigArgs ?? [], [], 'ACP create must not persist extra CLI arguments');
+
+      const switchToAcpRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-carrier-truth',
+        headers,
+        body: JSON.stringify({
+          acp: { command: 'codex', startupArgs: ['acp'] },
+          cli: { effort: 'xhigh', carrier: 'app_server' },
+          cliConfigArgs: ['--config stale=true'],
+        }),
+      });
+      assert.equal(switchToAcpRes.statusCode, 200, switchToAcpRes.body);
+      const switchedToAcp = JSON.parse(switchToAcpRes.body).cat;
+      assert.equal(switchedToAcp.cli?.effort, undefined, 'ACP patch must clear CLI effort');
+      assert.equal(switchedToAcp.cli?.carrier, undefined, 'ACP patch must clear CLI carrier override');
+      assert.deepEqual(switchedToAcp.cliConfigArgs ?? [], [], 'ACP patch must clear extra CLI arguments');
 
       // Cloud-only (F247 KD-17): cli removed → no local dispatch → no carrier truth.
       const cloudRes = await app.inject({

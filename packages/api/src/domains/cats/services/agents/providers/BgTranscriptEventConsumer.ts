@@ -121,6 +121,8 @@ export interface UsageAccumulator {
   outputTokens: number | undefined;
   cacheRead: number | undefined;
   cacheCreation: number | undefined;
+  /** Total input observed on the most recent real assistant/API turn. */
+  lastTurnInputTokens: number | undefined;
   assistantTurnCount: number;
   totalTurnDurationMs: number;
   sawTurnDuration: boolean;
@@ -132,10 +134,20 @@ export function createUsageAccumulator(): UsageAccumulator {
     outputTokens: undefined,
     cacheRead: undefined,
     cacheCreation: undefined,
+    lastTurnInputTokens: undefined,
     assistantTurnCount: 0,
     totalTurnDurationMs: 0,
     sawTurnDuration: false,
   };
+}
+
+function resolveLastTurnInputTokens(usage: Record<string, unknown> | undefined): number | undefined {
+  if (!usage) return undefined;
+  const raw = typeof usage.input_tokens === 'number' ? usage.input_tokens : 0;
+  const cacheRead = typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0;
+  const cacheCreation = typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0;
+  const total = raw + cacheRead + cacheCreation;
+  return total > 0 ? total : undefined;
 }
 
 /**
@@ -159,6 +171,9 @@ export function accumulateUsageFromEntries(acc: UsageAccumulator, entries: unkno
 
       acc.assistantTurnCount++;
       const usage = message?.usage as Record<string, unknown> | undefined;
+      // Match the foreground Claude stream contract: a real assistant turn
+      // replaces (and may clear) the prior current-context measurement.
+      acc.lastTurnInputTokens = resolveLastTurnInputTokens(usage);
       if (usage) {
         // Per-field: undefined = never observed, real number = observed.
         // (?? 0) only kicks in on FIRST observation; subsequent additions
@@ -212,7 +227,9 @@ export function finalizeTranscriptUsage(acc: UsageAccumulator, terminalMeta?: Te
   const turns = terminalMeta?.numTurns ?? acc.assistantTurnCount;
   if (turns > 0) syntheticResult.num_turns = turns;
 
-  return extractClaudeUsage(syntheticResult);
+  const result = extractClaudeUsage(syntheticResult);
+  if (acc.lastTurnInputTokens != null) result.lastTurnInputTokens = acc.lastTurnInputTokens;
+  return result;
 }
 
 /**

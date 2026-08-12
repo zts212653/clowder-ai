@@ -130,7 +130,11 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
         reply.status(403);
         return { error: `Cannot query sessions for cat '${catId}' — you are '${callerCatId}'` };
       }
-      const sessions = await sessionChainStore.getChain(effectiveCatId as CatId, threadId);
+      const sessions = await sessionChainStore.getChain(
+        effectiveCatId as CatId,
+        threadId,
+        isSharedDefaultThread(thread) ? userId : undefined,
+      );
       const visibleSessions = isSharedDefaultThread(thread)
         ? sessions.filter((session) => session.userId === userId)
         : sessions;
@@ -210,7 +214,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       return { error: `Session status ${session.status} cannot be reopened` };
     }
 
-    const active = await sessionChainStore.getActive(session.catId, session.threadId);
+    const active = await sessionChainStore.getActive(session.catId, session.threadId, session.userId);
     if (active && active.id !== session.id) {
       // Only displace the active session if it's empty (no messages).
       // A non-empty active session is real work — refuse to destroy it.
@@ -324,7 +328,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
     }
 
     // Check for active session
-    const active = await sessionChainStore.getActive(catId as CatId, threadId);
+    const active = await sessionChainStore.getActive(catId as CatId, threadId, userId);
     if (active && !canAccessSessionRecord(thread, active, userId)) {
       reply.status(403);
       return { error: 'Access denied' };
@@ -334,25 +338,35 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
     let mode: 'updated' | 'created';
 
     if (active) {
-      // Update existing active session's cliSessionId
-      const updated = await sessionChainStore.update(active.id, {
-        cliSessionId,
-        updatedAt: Date.now(),
-      });
+      // Late-bind through the store's atomic CLI-ID claim path. A generic
+      // update can race another logical node and steal its runtime identity.
+      const updated = await sessionChainStore.bindCliSessionId(active.id, cliSessionId);
       if (!updated) {
         reply.status(409);
-        return { error: 'Session was modified concurrently, please retry' };
+        return { error: 'CLI session ID is already bound or the active session changed; please retry' };
       }
       session = updated;
       mode = 'updated';
     } else {
-      // No active session → create new one
-      session = await sessionChainStore.create({
-        cliSessionId,
+      // Establish the logical owner node first, then claim the runtime ID
+      // through the same atomic path as a late bind. A direct create could
+      // overwrite another chain's CLI index when this owner has no active node.
+      const claimed = await sessionChainStore.getByCliSessionId(cliSessionId);
+      if (claimed) {
+        reply.status(409);
+        return { error: 'CLI session ID is already bound or the active session changed; please retry' };
+      }
+      const logical = await sessionChainStore.getOrCreateActive({
         threadId,
         catId: catId as CatId,
         userId,
       });
+      const bound = await sessionChainStore.bindCliSessionId(logical.id, cliSessionId);
+      if (!bound) {
+        reply.status(409);
+        return { error: 'CLI session ID is already bound or the active session changed; please retry' };
+      }
+      session = bound;
       mode = 'created';
     }
 

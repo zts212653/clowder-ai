@@ -10,7 +10,9 @@ import {
   lifecycleRefText,
   lifecycleStatusLabel,
   ownerResponseLabel,
+  reevalDebtLabel,
   reevalStatusLabel,
+  repairDebtLabel,
 } from '../eval-lifecycle-display';
 import { HubEvalMetricGlossary } from '../HubEvalMetricGlossary';
 import type { EvalLifecycleRef } from '../HubEvalTypes';
@@ -76,6 +78,13 @@ export function EvalWorkspaceEventCard({
           <InfoTerm label="运行状态" value={`live · ${event.lifecycle.liveCommitSha}`} />
         ) : null}
         <InfoTerm label="跟进状态" value={ownerResponseLabel(event.lifecycle.ownerResponseStatus)} />
+        {event.lifecycle.repairDebtStatus ? (
+          <InfoTerm label="修复债务" value={repairDebtLabel(event.lifecycle.repairDebtStatus)} />
+        ) : null}
+        {event.lifecycle.reevalDebtStatus ? (
+          <InfoTerm label="节奏 / 复评债务" value={reevalDebtLabel(event.lifecycle.reevalDebtStatus)} />
+        ) : null}
+        {event.lifecycle.reevalTaskId ? <InfoTerm label="复评任务" value={event.lifecycle.reevalTaskId} /> : null}
         <InfoTerm label="闭环进度" value={lifecycleStatusLabel(event.lifecycle.closureStatus)} />
         {event.lifecycle.reevalStatus ? (
           <InfoTerm label="复评状态" value={reevalStatusLabel(event.lifecycle.reevalStatus)} />

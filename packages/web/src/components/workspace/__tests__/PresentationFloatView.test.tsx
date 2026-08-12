@@ -124,7 +124,7 @@ describe('PresentationFloatView (F226 floating window)', () => {
   it('uses a non-modal z-index so open modal backdrops cover the float (云端 P2)', () => {
     const full = renderToStaticMarkup(<PresentationFloatView {...baseProps} minimized={false} fileContent={'# doc'} />);
     const min = renderToStaticMarkup(<PresentationFloatView {...baseProps} minimized={true} />);
-    // z-[35] sits above the sidebar (z-30) but below MobileStatusSheet backdrop (z-40) and dialogs
+    // z-[35] sits above the sidebar (z-30) but below status/dialog overlays
     // (z-50+), so an open backdrop actually covers the float — consistent with Esc deferring to it.
     expect(full).toContain('z-[35]');
     expect(full).not.toContain('z-40');

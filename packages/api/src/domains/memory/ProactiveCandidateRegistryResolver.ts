@@ -8,6 +8,7 @@ const ALL_RETAINED_PROPOSALS = Number.MAX_SAFE_INTEGER;
 
 export type ProactiveCandidateRegistryMatch =
   | { kind: 'registered_entity'; ref: string }
+  | { kind: 'registered_non_person_entity'; ref: string }
   | { kind: 'registered_person'; ref: string }
   | { kind: 'pending_candidate'; producerId: 'F260' | 'F276'; proposalId: string }
   | { kind: 'dormant_candidate'; producerId: 'F260' | 'F276'; proposalId: string }
@@ -73,8 +74,13 @@ export class ProactiveCandidateRegistryResolver {
       const registeredEntities = this.deps.entityRegistry
         .resolveExactAlias(input.phrase, input.ownerUserId)
         .sort((left, right) => left.entityId.localeCompare(right.entityId));
+      const registeredPersonEntities = registeredEntities.filter((entity) => entity.type === 'person');
+      if (registeredPersonEntities.length > 1) return { kind: 'unknown' };
+      if (registeredPersonEntities[0]) {
+        return { kind: 'registered_entity', ref: registeredPersonEntities[0].entityId };
+      }
       if (registeredEntities[0]) {
-        return { kind: 'registered_entity', ref: registeredEntities[0].entityId };
+        return { kind: 'registered_non_person_entity', ref: registeredEntities[0].entityId };
       }
 
       const person = await this.deps.personMemoryStore.resolveActivePersonByAlias(input.ownerUserId, input.phrase);

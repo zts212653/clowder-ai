@@ -139,11 +139,13 @@ describe('F32-a Mock Agent Integration', () => {
   // ── Config lookups ────────────────────────────────────────
 
   describe('Config lookups for mock-cat', () => {
-    test('getCatContextBudget returns fallback for mock-cat', async () => {
-      const { getCatContextBudget } = await import('../dist/config/cat-budgets.js');
-      const budget = getCatContextBudget('mock-cat');
-      assert.ok(budget.maxPromptTokens > 0, 'should have positive maxPromptTokens');
-      assert.ok(budget.maxMessages > 0, 'should have positive maxMessages');
+    test('getCatCapacity leaves an undiscoverable mock carrier unresolved', async () => {
+      const { getCatCapacity } = await import('../dist/config/cat-budgets.js');
+      const capacity = getCatCapacity('mock-cat');
+      assert.equal(capacity.windowTokens, 0);
+      assert.equal(capacity.inputCeilingTokens, 0);
+      assert.equal(capacity.actionable, false);
+      assert.equal(capacity.source, 'unresolved');
     });
 
     test('getSealConfig returns global fallback for mock-cat (unknown provider)', async () => {

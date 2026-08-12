@@ -12,6 +12,15 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(__dirname, '../UnifiedAuthModal.tsx'), 'utf-8');
+const catTemplate = JSON.parse(readFileSync(resolve(__dirname, '../../../../../cat-template.json'), 'utf-8')) as {
+  clientDefaults: Record<string, { models: string[] }>;
+};
+
+function extractGoogleModelSuggestions(): string[] {
+  const match = source.match(/google:\s*\[([\s\S]*?)\]/);
+  expect(match?.[1]).toBeTruthy();
+  return Array.from(match![1].matchAll(/'([^']+)'/g), (m) => m[1]);
+}
 
 describe('UnifiedAuthModal env-var layout (#862)', () => {
   it('KEY input is wrapped in a w-[38%] shrink-0 container', () => {
@@ -33,5 +42,11 @@ describe('UnifiedAuthModal env-var layout (#862)', () => {
   it('formInputClass contains w-full (the root cause that requires wrappers)', () => {
     const helperSource = readFileSync(resolve(__dirname, '../mcp-form-helpers.tsx'), 'utf-8');
     expect(helperSource).toMatch(/formInputClass[\s\S]*?w-full/);
+  });
+
+  it('keeps OAuth Google model suggestions synchronized with cat-template Gemini defaults', () => {
+    const templateModels = catTemplate.clientDefaults.gemini.models;
+    expect(templateModels).toContain('Gemini 3.6 Flash (High)');
+    expect(extractGoogleModelSuggestions()).toEqual(templateModels);
   });
 });

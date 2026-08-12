@@ -116,7 +116,7 @@ instructions 中的 no-comment 禁令必须在新 HEAD 复审前清除。
 正式结论前按 **author/custody/handoff source** 分类，repo 名和 GitHub login 不参与分类：
 
 - 外部作者或 external PR / Issue custody：verdict 必须写回同一 GitHub subject，并绑定精确 PR HEAD / Issue body digest；没有 review/comment URL 就还没完成。
-- 本地猫通过 `@` / handoff 交来的 review：默认走 author cat route。开始真实 review 链时，同 thread 用 `post_message(coordination.phase=active)`，跨 thread 用 `cross_post_message(coordination.phase=active)`；final verdict 用同一 carrier 的 `coordination.phase=terminal` 回原 route。包内带 final HEAD / content digest 与独立验证证据，不强制 GitHub comment。
+- 本地猫通过 `@` / handoff 交来的 review：默认走 author cat route。**direct review carrier** 是直接承载本轮 review 请求、并被 lease 记录为 `predecessorThreadId` 的 thread；它压过任务祖先 thread、旧 `sourceThreadId` 与继承 coordination。开始真实 review 链时，同 thread 用 `post_message(coordination.phase=active)`，跨 thread 用 `cross_post_message(coordination.phase=active)`；final verdict 用同一 carrier 的 `coordination.phase=terminal` 回 direct review carrier。结构化 action 失败后的普通消息降级必须留在该 carrier，并显式带 `coordination={phase:"active", subjectRef:"<same subjectRef>"}`；不得裸继承旧链。包内带 final HEAD / content digest 与独立验证证据，不强制 GitHub comment。
 
 两条完成证据不能互相代偿。本地 review 只有在 **merge-gate、repository rule 或 operator** 明确要求时才额外写 GitHub；额外 artifact 不取代回作者猫的 custody。
 

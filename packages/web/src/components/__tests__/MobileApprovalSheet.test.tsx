@@ -31,7 +31,7 @@ describe('MobileApprovalSheet', () => {
     act(() => root.render(<MobileApprovalSheet open onClose={vi.fn()} />));
     expect(container.querySelector('[data-testid="mobile-approval-sheet"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="approval-panel-stub"]')).toBeTruthy();
-    expect(document.activeElement).toBe(container.querySelector('[aria-label="关闭审批中心"]'));
+    expect(document.activeElement).toBe(container.querySelector('[aria-label="关闭 Needs Me"]'));
   });
 
   it('closes from the explicit button and Escape', () => {
@@ -39,7 +39,7 @@ describe('MobileApprovalSheet', () => {
     act(() => root.render(<MobileApprovalSheet open onClose={onClose} />));
 
     act(() => {
-      (container.querySelector('[aria-label="关闭审批中心"]') as HTMLButtonElement).click();
+      (container.querySelector('[aria-label="关闭 Needs Me"]') as HTMLButtonElement).click();
     });
     expect(onClose).toHaveBeenCalledTimes(1);
 

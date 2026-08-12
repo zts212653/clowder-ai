@@ -4,6 +4,7 @@ import {
   candidateInteractionProposalSchema,
   candidateRelationshipDraftSchema,
   captureCandidateIdSchema,
+  deferredPersonMemoryReceiptIdSchema,
   PERSON_MEMORY_LIMITS,
   type PersonMemoryResolvedSourceBundle,
   type PersonMemorySourceBundleInput,
@@ -29,6 +30,13 @@ export const proposePersonMemorySchema = z
     interaction: interactionInputSchema.optional(),
     sourceBundle: personMemorySourceBundleInputSchema.optional(),
     replacesProposalId: captureCandidateIdSchema.optional(),
+    deferredReceipt: z
+      .object({
+        receiptId: deferredPersonMemoryReceiptIdSchema,
+        claimId: z.string().trim().min(1).max(240),
+      })
+      .strict()
+      .optional(),
     sourceMessageId: z.string().trim().min(1).max(240).optional(),
     clientRequestId: z.string().trim().min(1).max(200).optional(),
   })

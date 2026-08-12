@@ -6,20 +6,20 @@ const { buildDefaultAgyProfileSmokeTargets, parseAgyProfileSmokeArgs, summarizeA
 );
 
 describe('F210 AGY profile E2E smoke runner', () => {
-  test('default target set covers Opus, Gemini 3.1 Pro, and Gemini 3.5 Flash selector labels', () => {
+  test('default target set covers Opus, Gemini 3.1 Pro, and Gemini Flash selector labels', () => {
     const targets = buildDefaultAgyProfileSmokeTargets();
 
     assert.deepEqual(
       targets.map((target) => target.modelLabel),
-      ['Claude Opus 4.6 (Thinking)', 'Gemini 3.1 Pro (High)', 'Gemini 3.5 Flash (High)'],
+      ['Claude Opus 4.6 (Thinking)', 'Gemini 3.1 Pro (High)', 'Gemini 3.5 Flash (High)', 'Gemini 3.6 Flash (High)'],
     );
-    assert.equal(new Set(targets.map((target) => target.profileId)).size, 3);
-    assert.equal(new Set(targets.map((target) => target.marker)).size, 3);
+    assert.equal(new Set(targets.map((target) => target.profileId)).size, 4);
+    assert.equal(new Set(targets.map((target) => target.marker)).size, 4);
     assert.ok(targets.every((target) => target.marker.startsWith('CAT_CAFE_AGY_PROFILE_SMOKE_OK_')));
   });
 
   test('summarizes a profile run as passed only when the marker and verified model both match', () => {
-    const target = buildDefaultAgyProfileSmokeTargets()[2];
+    const target = buildDefaultAgyProfileSmokeTargets()[3];
     const result = summarizeAgyProfileSmokeEvents(target, [
       {
         type: 'text',

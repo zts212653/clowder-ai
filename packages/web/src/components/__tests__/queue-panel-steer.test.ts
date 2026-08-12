@@ -99,9 +99,9 @@ describe('QueuePanel steer (F047)', () => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
     });
 
-    expect(container.textContent).toContain('opus · 已读，但关联回合已结束；尚未确认处理完成');
-    expect(container.textContent).toContain('codex · 处理失败 · 已回队列');
-    expect(container.textContent).not.toContain('gpt52 · 已处理');
+    expect(container.textContent).toContain('已读，但关联回合已结束；尚未确认处理完成');
+    expect(container.textContent).toContain('处理失败 · 已回队列');
+    expect(container.textContent).not.toContain('已处理 · 无可回溯证据');
   });
 
   it('submits Steer as immediate cancel-and-restart without a promote choice', async () => {
@@ -185,7 +185,7 @@ describe('QueuePanel steer (F047)', () => {
 
     const remind = container.querySelector('[data-testid="remind-q1-opus"]') as HTMLButtonElement | null;
     expect(remind).not.toBeNull();
-    expect(remind?.textContent).toContain('提醒猫');
+    expect(remind?.textContent).toContain('提醒');
 
     await act(async () => remind?.click());
 
@@ -279,8 +279,8 @@ describe('QueuePanel steer (F047)', () => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
     });
 
-    expect(container.textContent).toContain('下一件工作 · 本轮不可见');
-    expect(container.textContent).toContain('当前接入不支持本轮提醒');
+    expect(container.textContent).toContain('下一件工作');
+    expect(container.textContent).toContain('当前接入不支持本轮读取/提醒');
     expect(container.querySelector('[data-testid="remind-q1-opus"]')).toBeNull();
   });
 });

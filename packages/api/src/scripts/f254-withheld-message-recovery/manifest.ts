@@ -54,7 +54,7 @@ export interface RecoveryTranscriptEvent {
   threadId: string;
   catId: string;
   sessionId: string;
-  cliSessionId: string;
+  cliSessionId?: string;
   invocationId?: string;
   eventNo: number;
   event: Record<string, unknown>;

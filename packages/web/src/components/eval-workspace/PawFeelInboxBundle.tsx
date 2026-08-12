@@ -20,6 +20,16 @@ const STATE_LABELS: Record<string, string> = {
   duplicate: '重复',
   no_action: '不修',
   fix: '已确认要修',
+  signature_waiting: '等待独立签署',
+  blocked: '显式阻塞',
+};
+
+const RESPONSIBILITY_LABELS: Record<PawFeelReviewBundle['responsibility']['state'], string> = {
+  unreviewed: 'unreviewed',
+  bound_in_repair: 'bound-in-repair',
+  signature_waiting: 'signature-waiting',
+  blocked: 'blocked',
+  terminal: 'terminal',
 };
 
 export function PawFeelInboxBundle({ bundle }: { bundle: PawFeelReviewBundle }) {
@@ -34,11 +44,25 @@ export function PawFeelInboxBundle({ bundle }: { bundle: PawFeelReviewBundle }) 
   );
 
   return (
-    <article className="min-w-0 px-3 py-3 sm:px-4" data-testid="paw-feel-inbox-bundle" data-basis={bundle.basis}>
+    <article
+      className="min-w-0 px-3 py-3 sm:px-4"
+      data-testid="paw-feel-inbox-bundle"
+      data-basis={bundle.basis}
+      data-responsibility={bundle.responsibility.state}
+    >
       <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <div className="text-xs font-semibold text-cafe">
-            {BASIS_LABELS[bundle.basis]} · {bundle.rawSignalCount} 条报告
+          <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-cafe">
+            <span>
+              {BASIS_LABELS[bundle.basis]} · {bundle.rawSignalCount} 条报告
+            </span>
+            <span
+              className="rounded-full border border-current px-1.5 py-0.5 font-mono text-micro text-cafe-secondary"
+              data-testid="paw-feel-responsibility-state"
+            >
+              {RESPONSIBILITY_LABELS[bundle.responsibility.state]}
+              {!bundle.responsibility.validExit ? ' · 尚未形成有效出口' : ''}
+            </span>
           </div>
           <div className="mt-1 truncate text-micro text-cafe-muted" title={stateSummary}>
             {stateSummary}

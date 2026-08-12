@@ -1,6 +1,12 @@
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { buildOpenCodeMcpSync } from './opencode-mcp-injection.js';
 
+export {
+  inferOpenCodeProviderFromModelName,
+  parseOpenCodeModel,
+  resolveEffectiveOpenCodeModel,
+} from '../../../../../config/opencode-model.js';
+
 const log = createModuleLogger('opencode-config');
 
 interface OpenCodeConfigOptions {
@@ -16,7 +22,7 @@ interface OpenCodeConfigOptions {
 
 type OpenCodeProviderConfig = {
   npm?: string;
-  models?: Record<string, { id?: string; name: string }>;
+  models?: Record<string, { id?: string; name: string; limit?: { context: number } }>;
   options: {
     apiKey?: string;
     baseURL?: string;
@@ -116,6 +122,8 @@ export interface OpenCodeRuntimeConfigOptions {
   models: readonly string[];
   modelAliases?: Readonly<Record<string, string>>;
   defaultModel?: string;
+  /** #1208: invocation-owned window applied to every registered model. */
+  contextWindowTokens?: number;
   apiType?: OpenCodeApiType;
   hasBaseUrl?: boolean;
   /**
@@ -166,16 +174,6 @@ export interface OpenCodeRuntimeConfigDebugSummary {
   >;
 }
 
-export function parseOpenCodeModel(model: string): { providerName: string; modelName: string } | null {
-  const trimmed = model.trim();
-  const slashIndex = trimmed.indexOf('/');
-  if (slashIndex <= 0 || slashIndex >= trimmed.length - 1) return null;
-  return {
-    providerName: trimmed.slice(0, slashIndex),
-    modelName: trimmed.slice(slashIndex + 1),
-  };
-}
-
 function stripOwnProviderPrefix(modelName: string, providerName: string): string {
   const prefix = `${providerName}/`;
   return modelName.startsWith(prefix) ? modelName.slice(prefix.length) : modelName;
@@ -213,6 +211,7 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
     models,
     modelAliases,
     defaultModel,
+    contextWindowTokens,
     apiType = 'openai',
     hasBaseUrl = false,
     omitProviderAuth = false,
@@ -228,7 +227,7 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
 
   const configName = safeProviderName(providerName);
 
-  const modelsMap: Record<string, { id?: string; name: string }> = {};
+  const modelsMap: Record<string, { id?: string; name: string; limit?: { context: number } }> = {};
   const modelsToRegister = defaultModel ? [...models, defaultModel] : [...models];
   for (const rawModel of modelsToRegister) {
     const modelName = stripOwnProviderPrefix(rawModel, providerName);
@@ -238,6 +237,7 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
     modelsMap[modelName] = {
       ...(upstreamId ? { id: upstreamId } : {}),
       name: modelName,
+      ...(contextWindowTokens && contextWindowTokens > 0 ? { limit: { context: contextWindowTokens } } : {}),
     };
   }
 

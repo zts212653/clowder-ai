@@ -24,6 +24,11 @@ const activeTrackingSnapshot = (headSha) => ({
   closedAt: null,
 });
 
+const completedTrackingSnapshot = (headSha) => ({
+  ...activeTrackingSnapshot(headSha),
+  status: 'done',
+});
+
 function projection(state, overrides = {}) {
   return {
     repo: 'owner/repo',
@@ -493,6 +498,62 @@ describe('ActionSubjectTruthResolver', () => {
     });
   });
 
+  it('accepts durable tracking HEAD after the wait lifecycle completes without PR terminal truth', async () => {
+    const { resolver } = harness({
+      object: projection('in_progress'),
+      trackingSnapshot: completedTrackingSnapshot(HEAD_NEW),
+    });
+    const predicate = canonicalizeActionTerminalPredicate({
+      actionFamily: 'review',
+      subjectRef: 'pr:owner/repo#2868',
+      predicate: { kind: 'review_delivered', headSha: HEAD_NEW },
+    });
+
+    assert.deepEqual(await resolver.resolveFreshness(predicate), {
+      status: 'verified',
+      evidenceRef: `tracking:pr:owner/repo#2868:head:${HEAD_NEW}`,
+      freshnessKey: predicate.freshnessKey,
+    });
+  });
+
+  it('accepts durable tracking HEAD for todo and blocked nonterminal wait states', async () => {
+    const predicate = canonicalizeActionTerminalPredicate({
+      actionFamily: 'review',
+      subjectRef: 'pr:owner/repo#2868',
+      predicate: { kind: 'review_delivered', headSha: HEAD_NEW },
+    });
+
+    for (const status of ['todo', 'blocked']) {
+      const { resolver } = harness({
+        object: projection('in_progress'),
+        trackingSnapshot: { ...activeTrackingSnapshot(HEAD_NEW), status },
+      });
+
+      assert.deepEqual(await resolver.resolveFreshness(predicate), {
+        status: 'verified',
+        evidenceRef: `tracking:pr:owner/repo#2868:head:${HEAD_NEW}`,
+        freshnessKey: predicate.freshnessKey,
+      });
+    }
+  });
+
+  it('rejects a stale review HEAD against durable tracking truth after the wait lifecycle completes', async () => {
+    const { resolver } = harness({
+      object: projection('in_progress'),
+      trackingSnapshot: completedTrackingSnapshot(HEAD_OLD),
+    });
+    const predicate = canonicalizeActionTerminalPredicate({
+      actionFamily: 'review',
+      subjectRef: 'pr:owner/repo#2868',
+      predicate: { kind: 'review_delivered', headSha: HEAD_NEW },
+    });
+
+    assert.deepEqual(await resolver.resolveFreshness(predicate), {
+      status: 'mismatch',
+      reason: 'predicate HEAD is not the tracking-observed current HEAD',
+    });
+  });
+
   it('returns mismatch when tracking HEAD does not match predicate HEAD', async () => {
     const { resolver } = harness({
       object: projection('in_progress'),
@@ -541,7 +602,7 @@ describe('ActionSubjectTruthResolver', () => {
     });
   });
 
-  it('rejects non-PR and terminal tracking snapshots even when they retain the matching HEAD', async () => {
+  it('rejects non-PR and PR-terminal tracking snapshots even when they retain the matching HEAD', async () => {
     const predicate = canonicalizeActionTerminalPredicate({
       actionFamily: 'review',
       subjectRef: 'pr:owner/repo#2868',
@@ -549,7 +610,6 @@ describe('ActionSubjectTruthResolver', () => {
     });
     const inactiveSnapshots = [
       { ...activeTrackingSnapshot(HEAD_NEW), kind: 'issue_tracking' },
-      { ...activeTrackingSnapshot(HEAD_NEW), status: 'done' },
       { ...activeTrackingSnapshot(HEAD_NEW), ciPrState: 'merged' },
       { ...activeTrackingSnapshot(HEAD_NEW), reviewPrState: 'closed' },
       { ...activeTrackingSnapshot(HEAD_NEW), closedAt: 300 },

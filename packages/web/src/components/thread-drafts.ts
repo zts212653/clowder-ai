@@ -1,5 +1,8 @@
+import { type ContextAttachment, ContextAttachmentsSchema } from '@cat-cafe/shared';
+
 const STORAGE_KEY = 'cat-cafe:thread-drafts';
 const REPLY_STORAGE_KEY = 'cat-cafe:thread-reply-drafts';
+const CONTEXT_STORAGE_KEY = 'cat-cafe:thread-context-attachment-drafts';
 
 /**
  * Reply context persisted alongside the text draft so quoted messages survive
@@ -55,6 +58,32 @@ function hydrateReplyDrafts(): Map<string, DraftReplyContext> {
   return map;
 }
 
+export function parseContextAttachmentDrafts(raw: string | null): Map<string, ContextAttachment[]> {
+  const map = new Map<string, ContextAttachment[]>();
+  try {
+    if (!raw) return map;
+    const entries: unknown = JSON.parse(raw);
+    if (!Array.isArray(entries)) return map;
+    for (const entry of entries) {
+      if (!Array.isArray(entry) || typeof entry[0] !== 'string') continue;
+      const parsed = ContextAttachmentsSchema.safeParse(entry[1]);
+      if (parsed.success && parsed.data.length > 0) map.set(entry[0], parsed.data);
+    }
+  } catch {
+    // Corrupt or unavailable — start fresh.
+  }
+  return map;
+}
+
+function hydrateContextAttachmentDrafts(): Map<string, ContextAttachment[]> {
+  if (typeof window === 'undefined') return new Map();
+  try {
+    return parseContextAttachmentDrafts(window.sessionStorage.getItem(CONTEXT_STORAGE_KEY));
+  } catch {
+    return new Map();
+  }
+}
+
 function persistToStorage(map: Map<string, string>): void {
   if (typeof window === 'undefined') return;
   try {
@@ -81,9 +110,23 @@ function persistReplyDrafts(map: Map<string, DraftReplyContext>): void {
   }
 }
 
+function persistContextAttachmentDrafts(map: Map<string, ContextAttachment[]>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (map.size === 0) {
+      window.sessionStorage.removeItem(CONTEXT_STORAGE_KEY);
+    } else {
+      window.sessionStorage.setItem(CONTEXT_STORAGE_KEY, JSON.stringify([...map.entries()]));
+    }
+  } catch {
+    // QuotaExceededError or SecurityError — best effort.
+  }
+}
+
 export const threadDrafts = hydrateFromStorage();
 export const threadImageDrafts = new Map<string, File[]>();
 export const threadReplyDrafts = hydrateReplyDrafts();
+export const threadContextAttachmentDrafts = hydrateContextAttachmentDrafts();
 
 /** Sync a draft write to sessionStorage. Call after mutating threadDrafts. */
 export function syncDraftToStorage(threadId: string, text: string | undefined): void {
@@ -105,12 +148,25 @@ export function syncReplyDraftToStorage(threadId: string, reply: DraftReplyConte
   persistReplyDrafts(threadReplyDrafts);
 }
 
+export function syncContextAttachmentDraftToStorage(threadId: string, attachments: readonly ContextAttachment[]): void {
+  const parsed = ContextAttachmentsSchema.safeParse(attachments);
+  if (parsed.success && parsed.data.length > 0) {
+    threadContextAttachmentDrafts.set(threadId, parsed.data);
+  } else {
+    threadContextAttachmentDrafts.delete(threadId);
+  }
+  persistContextAttachmentDrafts(threadContextAttachmentDrafts);
+}
+
 export function hasPendingThreadDraft(threadId: string): boolean {
   const textDraft = threadDrafts.get(threadId);
   if (typeof textDraft === 'string' && textDraft.trim().length > 0) return true;
 
   const imageDrafts = threadImageDrafts.get(threadId);
   if (Array.isArray(imageDrafts) && imageDrafts.length > 0) return true;
+
+  const contextDrafts = threadContextAttachmentDrafts.get(threadId);
+  if (Array.isArray(contextDrafts) && contextDrafts.length > 0) return true;
 
   // A reply-to without text still counts as a pending draft (#934)
   return threadReplyDrafts.has(threadId);

@@ -179,6 +179,20 @@ export class ClaudeBgCarrierService implements AgentService {
     return policy.mode === 'read_only';
   }
 
+  contextCapability(): import('../../types.js').AgentContextCapability {
+    return {
+      provider: 'anthropic',
+      carrier: 'bg',
+      reportsRuntimeWindow: false,
+      authoritativeUsage: true,
+      usageTelemetry: 'available',
+      nativeWindowControl: false,
+      nativeCompressionControl: false,
+      observesCompression: true,
+      reason: 'Claude bg transcript reports last-turn input but not a runtime window',
+    };
+  }
+
   /**
    * F198 Bug #3 — the bg daemon forks a fresh sessionId UUID every
    * `--bg --resume` round, so there is no stable per-conversation id. Signal

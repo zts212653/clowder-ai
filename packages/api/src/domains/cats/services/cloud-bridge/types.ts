@@ -37,6 +37,8 @@ export interface CloudInvokeDispatchParams {
    * builder, not by the caller).
    */
   readonly intent: string;
+  /** Persisted source message ID used as the host append idempotency key. */
+  readonly idempotencyKey?: string;
 }
 
 /**
@@ -85,11 +87,22 @@ export interface IPinchTabBridgeAdapter {
  * Bridge dispatch outcome — observable for tests + logging.
  */
 export type BridgeDispatchOutcome =
-  | { readonly kind: 'sent'; readonly capturedUrl: string }
+  | {
+      readonly kind: 'sent';
+      readonly capturedUrl: string;
+      readonly transport?: 'host' | 'legacy-pinchtab';
+      readonly hostMessageId?: string;
+    }
   | { readonly kind: 'fallback'; readonly reason: BridgeFallbackReason }
   | { readonly kind: 'error'; readonly message: string };
 
-export type BridgeFallbackReason = 'adapter-not-ready' | 'no-adapter' | 'invalid-captured-url' | 'inject-failed';
+export type BridgeFallbackReason =
+  | 'adapter-not-ready'
+  | 'no-adapter'
+  | 'invalid-captured-url'
+  | 'inject-failed'
+  | 'host-append-failed'
+  | 'missing-idempotency-key';
 
 /**
  * The cloud invoke bridge — invoked fire-and-forget from `invokeSingleCat`

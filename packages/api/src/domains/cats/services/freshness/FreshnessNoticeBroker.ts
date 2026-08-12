@@ -61,7 +61,8 @@ interface FreshnessNoticeBrokerDeps {
 export function createContentFreeFreshnessNotice(input: { threadId: string; unseenCount: number }): string {
   return (
     `📬 freshness notice：当前 thread 有 ${input.unseenCount} 条新消息。` +
-    '请在自然工具断点调用无 filter 的 list_recent 精确读取；本提醒不含消息正文。'
+    `请在自然工具断点调用 cat_cafe_get_thread_context({ threadId: "${input.threadId}", responseMode: "full" }) ` +
+    '无过滤精确读取；本提醒不含消息正文。'
   );
 }
 

@@ -10,7 +10,7 @@ describe('F282 Phase A/B replay', () => {
 
     assert.deepEqual(second, first, 'frozen fixture replay must be deterministic');
     assert.equal(JSON.stringify(second), JSON.stringify(first), 'frozen output must be byte-identical');
-    assert.equal(first.fixtureRevision, 'f282-phase-a-b-v2');
+    assert.equal(first.fixtureRevision, 'f282-phase-a-b-v3');
     assert.equal(first.status, 'incubating');
     assert.equal(Object.hasOwn(first, 'totalScore'), false);
     assert.deepEqual(first.vector.relevantCoverage, {
@@ -24,12 +24,12 @@ describe('F282 Phase A/B replay', () => {
       },
     });
     assert.deepEqual(first.vector.irrelevantSlots, {
-      surfacedSlots: 4,
+      surfacedSlots: 5,
       irrelevantSlots: 0,
     });
     assert.deepEqual(first.vector.attentionBurden, {
       activeWorkspaceWeeks: 7,
-      surfacedSlotsByWeek: [1, 0, 0, 0, 0, 0, 3],
+      surfacedSlotsByWeek: [1, 0, 0, 0, 0, 1, 3],
     });
     assert.deepEqual(first.hardConstraintFailures, []);
     assert.deepEqual(first.evidenceContract, {
@@ -47,13 +47,14 @@ describe('F282 Phase A/B replay', () => {
         'observed-lexical-noise',
         'chronic-background-noise',
         'private-source-excluded',
-        'registry-and-dormant-suppressed',
+        'known-person-admitted-pending-dormant-suppressed',
         'cap-overflow-preserved',
       ],
     );
     assert.deepEqual(first.episodes[2].surfacedSubjects, []);
     assert.deepEqual(first.episodes[3].surfacedSubjects, []);
-    assert.deepEqual(first.episodes[5].surfacedSubjects, []);
+    assert.deepEqual(first.episodes[5].surfacedSubjects, ['alden']);
+    assert.deepEqual(first.episodes[5].blockedRegistrySubjectsSurfaced, []);
     assert.deepEqual(first.episodes[6].surfacedSubjects, ['alden', 'boreal', 'cora']);
   });
 });

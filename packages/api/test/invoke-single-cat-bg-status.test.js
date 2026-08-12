@@ -25,6 +25,7 @@ async function collect(iterable) {
 
 let tempDir;
 let invokeSingleCat;
+let SessionChainStore;
 
 describe('F198-C P2-1: status messages treated as non-substantive', () => {
   before(async () => {
@@ -32,6 +33,7 @@ describe('F198-C P2-1: status messages treated as non-substantive', () => {
     process.env.AUDIT_LOG_DIR = tempDir;
     const mod = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');
     invokeSingleCat = mod.invokeSingleCat;
+    ({ SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js'));
   });
 
   after(async () => {
@@ -95,30 +97,14 @@ describe('F198-C P2-1: status messages treated as non-substantive', () => {
       },
     };
 
-    const deps = makeDeps({
-      sessionChainStore: {
-        getChain: () => [
-          {
-            id: 'sess-1',
-            cliSessionId: 'stale-cli-session',
-            status: 'active',
-            consecutiveRestoreFailures: 0,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          },
-        ],
-        getActive: async () => ({
-          id: 'sess-1',
-          cliSessionId: 'stale-cli-session',
-          status: 'active',
-          consecutiveRestoreFailures: 0,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        }),
-        update: async () => {},
-        create: async () => ({ id: 'sess-2', cliSessionId: null }),
-      },
+    const sessionChainStore = new SessionChainStore();
+    sessionChainStore.create({
+      cliSessionId: 'stale-cli-session',
+      threadId: 'thread-status-retry',
+      catId: 'opus',
+      userId: 'user-1',
     });
+    const deps = makeDeps({ sessionChainStore });
 
     const msgs = await collect(
       invokeSingleCat(deps, {

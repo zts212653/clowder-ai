@@ -24,6 +24,7 @@ import {
   requireAnchoredPublication,
 } from '../domains/approval-hub/requireAnchoredPublication.js';
 import type { IDispatchProposalStore } from '../domains/approval-hub/stores/ports/IDispatchProposalStore.js';
+import { ActionSuccessorStandingError } from '../domains/ball-custody/ActionSuccessorAdmissionService.js';
 import type { DispatchRecoveryResult } from '../domains/ball-custody/ActionSuccessorRecoverySweep.js';
 import type { ActionSuccessorLease } from '../domains/ball-custody/action-successor-state-machine.js';
 import type { OwnerAuthProvenance } from '../domains/cats/services/owner-auth-provenance.js';
@@ -78,6 +79,25 @@ async function approveProposedDispatch(
   try {
     promoted = await opts.approveAction(proposal, userId, ownerAuthProvenance);
   } catch (err) {
+    if (err instanceof ActionSuccessorStandingError) {
+      log.warn(
+        { proposalId: proposal.proposalId, standingStatus: err.status, mismatchDimensions: err.mismatchDimensions },
+        'Action standing preflight rejected persisted proposal; proposal remains pending',
+      );
+      return {
+        statusCode: err.status === 'mismatch' ? 409 : 503,
+        body: {
+          error: `${err.reason}; proposal remains pending`,
+          code: err.status === 'mismatch' ? 'ACTION_STANDING_MISMATCH' : 'ACTION_STANDING_UNAVAILABLE',
+          standingStatus: err.status,
+          mismatchDimensions: err.mismatchDimensions,
+          guidance:
+            err.status === 'mismatch'
+              ? 'reject_and_resubmit_with_current_task_standing'
+              : 'retry_when_task_truth_is_available',
+        },
+      };
+    }
     log.error({ err, proposalId: proposal.proposalId }, 'Action lease claim failed; proposal remains pending');
     return {
       statusCode: 503,

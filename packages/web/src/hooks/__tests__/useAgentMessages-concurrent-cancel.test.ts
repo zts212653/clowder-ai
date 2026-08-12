@@ -374,8 +374,9 @@ describe('clearDoneTimeout safety net during concurrent execution', () => {
       vi.advanceTimersByTime(5 * 60 * 1000 + 100);
     });
 
-    // Safety timeout should have fired — cleaning up stale opus state
-    expect(mockClearAllActiveInvocations).toHaveBeenCalled();
+    // Presentation timeout must not erase the remaining invocation identity.
+    expect(mockClearAllActiveInvocations).not.toHaveBeenCalled();
+    expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-1');
   });
 
   it('error(isFinal) for first cat preserves safety timeout for remaining cats', () => {
@@ -396,8 +397,9 @@ describe('clearDoneTimeout safety net during concurrent execution', () => {
       vi.advanceTimersByTime(5 * 60 * 1000 + 100);
     });
 
-    // Safety timeout should have fired — cleaning up stale opus state
-    expect(mockClearAllActiveInvocations).toHaveBeenCalled();
+    // Presentation timeout must not erase the remaining invocation identity.
+    expect(mockClearAllActiveInvocations).not.toHaveBeenCalled();
+    expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-1');
   });
 
   it('done(isFinal) for the LAST cat clears safety timeout (no false alarm)', () => {

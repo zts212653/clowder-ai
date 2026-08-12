@@ -6,13 +6,20 @@
  * Phase 3.3 可扩展 Redis 版本。
  */
 
-import type { CatId, CliEffortPreset, ThreadKind, ThreadPhase } from '@cat-cafe/shared';
+import type { CatId, CliEffortPreset, CodexSpeedValue, ThreadKind, ThreadPhase } from '@cat-cafe/shared';
 import { generateThreadId } from '@cat-cafe/shared';
 import type { StoreReadOptions } from './StoreReadOptions.js';
 import { throwIfStoreReadAborted } from './StoreReadOptions.js';
 
 /** Default thread ID for the lobby (backwards-compatible single-thread mode) */
 export const DEFAULT_THREAD_ID = 'default';
+
+/** Canonical first-message title derivation shared by append, recovery, and true recall. */
+export function deriveAutoThreadTitle(content: string): string | null {
+  const normalized = content.trim();
+  if (!normalized) return null;
+  return normalized.length > 30 ? `${normalized.slice(0, 30)}...` : normalized;
+}
 
 /** System-owned thread surfaces that stay distinct from ordinary user conversations. */
 export type ThreadSystemKind = 'connector_hub' | 'eval_domain' | 'cat_bedroom';
@@ -217,6 +224,8 @@ export interface Thread {
   memberSessionStrategy?: Record<string, 'resume' | 'reborn'>;
   /** F262: In-memory raw thread × cat effort overrides. Redis keeps these as sidecar hash fields. */
   memberEffortOverrides?: Partial<Record<CatId, CliEffortPreset>>;
+  /** F291: In-memory raw thread × cat speed overrides. Redis keeps these as persistent sidecar hash fields. */
+  memberSpeedOverrides?: Partial<Record<CatId, CodexSpeedValue>>;
   /** F247 AC-B1c-1 (KD-20 + KD-21): Local-only operational sidecar — per-cloud-cat
    *  ChatGPT chat URL binding.
    *
@@ -586,6 +595,8 @@ export interface IThreadStore {
   /** F032 P1-2 fix: Update participant activity on every message (not just join) */
   updateParticipantActivity(threadId: string, catId: CatId, healthy?: boolean): void | Promise<void>;
   updateTitle(threadId: string, title: string): void | Promise<void>;
+  /** Exact title CAS used to scrub/restore message-derived copies without clobbering user edits. */
+  compareAndSetTitle(threadId: string, expectedTitle: string, nextTitle: string): boolean | Promise<boolean>;
   /** ISSUE-16: backfill projectPath for threads created before the fix */
   updateProjectPath(threadId: string, projectPath: string): void | Promise<void>;
   updatePin(threadId: string, pinned: boolean): void | Promise<void>;
@@ -681,6 +692,19 @@ export interface IThreadStore {
     threadId: string,
     userId: string,
   ): Partial<Record<CatId, CliEffortPreset>> | Promise<Partial<Record<CatId, CliEffortPreset>>>;
+  /** F291: Set or clear one raw thread × cat requested speed override. */
+  updateMemberSpeed(threadId: string, catId: CatId, speed: CodexSpeedValue | null): void | Promise<void>;
+  /** F291: Read one raw speed override. Authorization is enforced by the caller. */
+  getMemberSpeed(
+    threadId: string,
+    catId: CatId,
+    userId: string,
+  ): CodexSpeedValue | undefined | Promise<CodexSpeedValue | undefined>;
+  /** F291: Bulk read all raw speed overrides for one thread. */
+  getMemberSpeeds(
+    threadId: string,
+    userId: string,
+  ): Partial<Record<CatId, CodexSpeedValue>> | Promise<Partial<Record<CatId, CodexSpeedValue>>>;
   /** F247 AC-B1c-1: Set or clear a cloud cat's ChatGPT chat URL binding for this thread.
    *  `chatUrl=null` clears the specific catId binding (stale binding recovery / explicit unbind).
    *  Owner-only — authorization MUST be enforced at the route/MCP layer; this store method
@@ -964,6 +988,13 @@ export class ThreadStore implements IThreadStore {
   updateTitle(threadId: string, title: string): void {
     const thread = this.get(threadId);
     if (thread) thread.title = title;
+  }
+
+  compareAndSetTitle(threadId: string, expectedTitle: string, nextTitle: string): boolean {
+    const thread = this.get(threadId);
+    if (!thread || thread.title !== expectedTitle) return false;
+    thread.title = nextTitle;
+    return true;
   }
 
   updateProjectPath(threadId: string, projectPath: string): void {
@@ -1265,6 +1296,27 @@ export class ThreadStore implements IThreadStore {
 
   getMemberEfforts(threadId: string, _userId: string): Partial<Record<CatId, CliEffortPreset>> {
     return { ...(this.get(threadId)?.memberEffortOverrides ?? {}) };
+  }
+
+  updateMemberSpeed(threadId: string, catId: CatId, speed: CodexSpeedValue | null): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (speed === null) {
+      if (!thread.memberSpeedOverrides) return;
+      delete thread.memberSpeedOverrides[catId];
+      if (Object.keys(thread.memberSpeedOverrides).length === 0) delete thread.memberSpeedOverrides;
+      return;
+    }
+    if (!thread.memberSpeedOverrides) thread.memberSpeedOverrides = {};
+    thread.memberSpeedOverrides[catId] = speed;
+  }
+
+  getMemberSpeed(threadId: string, catId: CatId, _userId: string): CodexSpeedValue | undefined {
+    return this.get(threadId)?.memberSpeedOverrides?.[catId];
+  }
+
+  getMemberSpeeds(threadId: string, _userId: string): Partial<Record<CatId, CodexSpeedValue>> {
+    return { ...(this.get(threadId)?.memberSpeedOverrides ?? {}) };
   }
 
   updateCloudCatBinding(threadId: string, catId: CatId, chatUrl: string | null): void {

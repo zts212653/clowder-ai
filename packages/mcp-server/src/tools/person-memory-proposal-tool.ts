@@ -5,17 +5,18 @@ import {
   candidateRelationshipDraftSchema,
   captureCandidateIdSchema,
   createTemporalValueSchema,
+  deferredPersonMemoryReceiptIdSchema,
   personIdentityDraftSchema,
   personIdSchema,
   personMemorySourceBundleInputSchema,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
-import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 
 import type { ToolResult } from './file-tools.js';
 import { errorResult } from './file-tools.js';
 
-const defineTool = defineMcpMigrationFactory('person-memory-proposal-tool.ts', './tools/callback-tools.js', {
+const defineTool = defineMcpCanonicalFactory('person-memory-proposal-tool.ts', './tools/callback-tools.js', {
   resourceFamily: 'person-memory',
   authority: 'callback-owner-private',
 });
@@ -56,6 +57,16 @@ export const proposePersonMemoryInputSchema = {
     .describe(
       'Exact pending/not-now F276 proposal ID to replace with this corrected card. The server anchors the new card and withdraws the old one atomically.',
     ),
+  deferredReceipt: z
+    .object({
+      receiptId: deferredPersonMemoryReceiptIdSchema,
+      claimId: z.string().trim().min(1).max(240).describe('Exact active daily-clerk claim fence for the receipt.'),
+    })
+    .strict()
+    .optional()
+    .describe(
+      'Daily-clerk lineage only: exact claimed deferred receipt and claim lease. The server verifies owner, cat, subject, sources, and active claim before creating a card.',
+    ),
   claims: z
     .array(claimInputSchema)
     .max(3)
@@ -86,6 +97,7 @@ type ProposePersonMemoryInput = {
   person: z.infer<typeof personIdentityDraftSchema>;
   targetPersonId?: z.infer<typeof personIdSchema>;
   replacesProposalId?: z.infer<typeof captureCandidateIdSchema>;
+  deferredReceipt?: { receiptId: z.infer<typeof deferredPersonMemoryReceiptIdSchema>; claimId: string };
   claims: Array<z.infer<typeof claimInputSchema>>;
   relationship?: z.infer<typeof relationshipInputSchema>;
   interaction?: z.infer<typeof interactionInputSchema>;
@@ -109,6 +121,7 @@ export function createPersonMemoryProposalTool(callbackPost: CallbackPost) {
       person: input.person,
       targetPersonId: input.targetPersonId,
       replacesProposalId: input.replacesProposalId,
+      deferredReceipt: input.deferredReceipt,
       claims: input.claims,
       relationship: input.relationship,
       interaction: input.interaction,

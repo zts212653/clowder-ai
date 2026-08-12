@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { digestRichBlocks } from '../dist/domains/cats/services/agents/routing/route-helpers.js';
-import { safeParseExtra } from '../dist/domains/cats/services/stores/redis/redis-message-parsers.js';
+import {
+  safeParseContentBlocks,
+  safeParseExtra,
+} from '../dist/domains/cats/services/stores/redis/redis-message-parsers.js';
 
 describe('digestRichBlocks', () => {
   it('returns content unchanged when no extra.rich', () => {
@@ -128,6 +131,65 @@ describe('digestRichBlocks', () => {
       },
     };
     assert.doesNotThrow(() => digestRichBlocks(msg));
+  });
+});
+
+describe('safeParseContentBlocks', () => {
+  const attachmentBlock = {
+    type: 'context_attachment',
+    attachment: {
+      v: 1,
+      id: 'ctx-thread-1',
+      kind: 'thread',
+      threadId: 'thread_abc123',
+      title: 'F063 Context Attachments',
+    },
+  };
+
+  it('preserves a valid context attachment through the Redis parser', () => {
+    assert.deepEqual(safeParseContentBlocks(JSON.stringify([{ type: 'text', text: 'inspect' }, attachmentBlock])), [
+      { type: 'text', text: 'inspect' },
+      attachmentBlock,
+    ]);
+  });
+
+  it('preserves canonical persisted upload images alone and beside context attachments', () => {
+    const imageBlock = { type: 'image', url: '/uploads/8f4c2a0d-quote.png', alt: 'uploaded evidence' };
+
+    assert.deepEqual(safeParseContentBlocks(JSON.stringify([imageBlock])), [imageBlock]);
+    assert.deepEqual(safeParseContentBlocks(JSON.stringify([imageBlock, attachmentBlock])), [
+      imageBlock,
+      attachmentBlock,
+    ]);
+  });
+
+  it('preserves canonical persisted generic files beside context attachments', () => {
+    const fileBlock = {
+      type: 'file',
+      url: '/uploads/evidence.pdf',
+      fileName: 'evidence.pdf',
+      mimeType: 'application/pdf',
+      fileSize: 42,
+    };
+
+    assert.deepEqual(safeParseContentBlocks(JSON.stringify([fileBlock, attachmentBlock])), [
+      fileBlock,
+      attachmentBlock,
+    ]);
+  });
+
+  it('fails closed when a stored context attachment violates the shared contract', () => {
+    assert.equal(
+      safeParseContentBlocks(
+        JSON.stringify([
+          {
+            ...attachmentBlock,
+            attachment: { ...attachmentBlock.attachment, unexpected: 'identity-bypass' },
+          },
+        ]),
+      ),
+      undefined,
+    );
   });
 });
 

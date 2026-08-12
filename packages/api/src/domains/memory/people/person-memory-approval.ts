@@ -14,6 +14,7 @@ import {
   type WorkspaceEntityLink,
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { DeferredPersonMemoryReceiptKeys } from '../deferred-person-memory-redis-contract.js';
 import type {
   ApprovePersonMemoryDraftsInput,
   PersonMemoryDecisionReceipt,
@@ -122,6 +123,9 @@ async function resolvePerson(
   addArtifact(plan, artifactSet, PersonMemoryKeys.candidateOwner(candidate.candidateId));
   addArtifact(plan, artifactSet, PersonMemoryKeys.candidatePerson(owner, candidate.candidateId));
   addArtifact(plan, artifactSet, PersonMemoryKeys.personCandidates(owner, personId));
+  if (candidate.deltaFingerprint) {
+    addArtifact(plan, artifactSet, DeferredPersonMemoryReceiptKeys.dedupe(owner, candidate.deltaFingerprint));
+  }
 
   const personDraft = candidate.personDraft;
   if (!personDraft) return null;

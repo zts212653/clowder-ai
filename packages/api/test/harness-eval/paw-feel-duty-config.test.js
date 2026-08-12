@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { createRedisClient } from '@cat-cafe/shared/utils';
 import {
+  loadOrCreatePawFeelBundleSnapshotSigner,
+  PawFeelBundleSnapshotSecretKey,
+} from '../../dist/infrastructure/harness-eval/paw-feel-disposition/bundle-snapshot.js';
+import {
   PawFeelDutyConfigKey,
   PawFeelDutyConfigStoreError,
   RedisPawFeelDutyConfigStore,
@@ -14,6 +18,9 @@ import { assertRedisIsolationOrThrow, redisIsolationSkipReason } from '../helper
 
 const REDIS_URL = process.env.REDIS_URL;
 const NOW = '2026-07-26T12:00:00.000Z';
+const SNAPSHOT = {
+  bundles: [{ bundleKey: 'bundle-1', members: [{ signalId: 'signal-1', expectedSequence: 1 }] }],
+};
 
 describe('RedisPawFeelDutyConfigStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let redis;
@@ -37,13 +44,13 @@ describe('RedisPawFeelDutyConfigStore', { skip: redisIsolationSkipReason(REDIS_U
 
   after(async () => {
     if (!redis || !connected) return;
-    await redis.del(PawFeelDutyConfigKey, PawFeelDutyNoticeKey);
+    await redis.del(PawFeelDutyConfigKey, PawFeelDutyNoticeKey, PawFeelBundleSnapshotSecretKey);
     await redis.quit();
   });
 
   beforeEach(async (context) => {
     if (!connected) return context.skip('Redis not connected');
-    await redis.del(PawFeelDutyConfigKey, PawFeelDutyNoticeKey);
+    await redis.del(PawFeelDutyConfigKey, PawFeelDutyNoticeKey, PawFeelBundleSnapshotSecretKey);
   });
 
   it('allows only a operator principal to make versioned duty assignments', async () => {
@@ -106,18 +113,91 @@ describe('RedisPawFeelDutyConfigStore', { skip: redisIsolationSkipReason(REDIS_U
   });
 
   it('dedupes duty delivery and resumes invocation from its durable message receipt', async () => {
-    assert.deepEqual(await watermarkStore.claim('watermark-1', NOW), { outcome: 'claimed' });
-    assert.deepEqual(await watermarkStore.claim('watermark-1', NOW), { outcome: 'claimed_elsewhere' });
+    assert.deepEqual(await watermarkStore.claim('watermark-1', NOW, SNAPSHOT), { outcome: 'claimed' });
+    assert.deepEqual(await watermarkStore.claim('watermark-1', NOW, SNAPSHOT), { outcome: 'claimed_elsewhere' });
 
     await watermarkStore.markDelivered('watermark-1', 'message-1', NOW);
-    assert.deepEqual(await watermarkStore.claim('watermark-1', NOW), {
+    assert.deepEqual(await watermarkStore.claim('watermark-1', NOW, SNAPSHOT), {
       outcome: 'resume_invocation',
+      watermark: 'watermark-1',
       messageId: 'message-1',
     });
 
+    await watermarkStore.markAwaitingReceipt('watermark-1', NOW);
+    assert.deepEqual(await watermarkStore.claim('watermark-1', NOW, SNAPSHOT), {
+      outcome: 'resume_invocation',
+      watermark: 'watermark-1',
+      messageId: 'message-1',
+    });
+    assert.deepEqual(await watermarkStore.claim('watermark-2', NOW, SNAPSHOT), {
+      outcome: 'resume_invocation',
+      watermark: 'watermark-1',
+      messageId: 'message-1',
+    });
+    await watermarkStore.markAwaitingReceipt('watermark-1', NOW);
+    assert.deepEqual(await watermarkStore.readCurrent(), {
+      watermark: 'watermark-1',
+      status: 'awaiting_receipt',
+      updatedAt: NOW,
+      messageId: 'message-1',
+      snapshot: SNAPSHOT,
+    });
+
     await watermarkStore.markComplete('watermark-1', NOW);
-    assert.deepEqual(await watermarkStore.claim('watermark-1', NOW), { outcome: 'complete' });
-    assert.deepEqual(await watermarkStore.claim('watermark-2', NOW), { outcome: 'claimed' });
+    await watermarkStore.markComplete('watermark-1', NOW);
+    assert.deepEqual(await watermarkStore.claim('watermark-1', NOW, SNAPSHOT), { outcome: 'complete' });
+    assert.deepEqual(await watermarkStore.claim('watermark-2', NOW, SNAPSHOT), { outcome: 'claimed' });
     assert.equal(await redis.ttl(PawFeelDutyNoticeKey), -1);
+  });
+
+  it('reclaims pre-snapshot legacy records instead of wedging the scheduler', async () => {
+    for (const status of ['claimed', 'delivered', 'awaiting_receipt']) {
+      await redis.del(PawFeelDutyNoticeKey);
+      await redis.hset(
+        PawFeelDutyNoticeKey,
+        'watermark',
+        `legacy-${status}`,
+        'status',
+        status,
+        'updatedAt',
+        NOW,
+        'messageId',
+        'legacy-message',
+      );
+
+      assert.deepEqual(await watermarkStore.claim(`fresh-${status}`, NOW, SNAPSHOT), { outcome: 'claimed' });
+      assert.deepEqual(await watermarkStore.readCurrent(), {
+        watermark: `fresh-${status}`,
+        status: 'claimed',
+        updatedAt: NOW,
+        snapshot: SNAPSHOT,
+      });
+    }
+  });
+
+  it('keeps bundle snapshot tokens valid across signer reconstruction without expiring the secret', async () => {
+    const members = [{ signalId: 'signal-1', expectedSequence: 1 }];
+    const first = await loadOrCreatePawFeelBundleSnapshotSigner(redis);
+    const token = first.sign('bundle-1', members);
+
+    const reconstructed = await loadOrCreatePawFeelBundleSnapshotSigner(redis);
+    reconstructed.assert('bundle-1', members, token);
+    assert.equal(await redis.ttl(PawFeelBundleSnapshotSecretKey), -1);
+
+    await redis.set(PawFeelBundleSnapshotSecretKey, 'corrupt');
+    await assert.rejects(loadOrCreatePawFeelBundleSnapshotSigner(redis), /invalid.*snapshot secret/i);
+  });
+
+  it('fails closed when durable duty recovery state is malformed', async () => {
+    await watermarkStore.claim('watermark-1', NOW, SNAPSHOT);
+    await assert.rejects(
+      watermarkStore.markComplete('watermark-1', NOW),
+      /watermark or state changed before completion/,
+    );
+    await redis.hset(PawFeelDutyNoticeKey, 'status', 'corrupted');
+    await assert.rejects(watermarkStore.readCurrent(), /invalid paw-feel duty batch status/);
+
+    await redis.hset(PawFeelDutyNoticeKey, 'status', 'awaiting_receipt', 'snapshot', JSON.stringify({ bundles: [] }));
+    await assert.rejects(watermarkStore.readCurrent(), /invalid paw-feel duty batch snapshot/);
   });
 });
