@@ -871,8 +871,8 @@ describe('#770: isEditableEnvVar fail-closed default', () => {
 describe('#770: SYSTEM_VARS and buildSystemEnvSummary', () => {
   afterEach(() => restoreEnv());
 
-  it('SYSTEM_VARS contains exactly 24 curated variables', () => {
-    assert.equal(SYSTEM_VARS.size, 24);
+  it('SYSTEM_VARS contains exactly 25 curated variables', () => {
+    assert.equal(SYSTEM_VARS.size, 25);
   });
 
   it('every SYSTEM_VAR exists in the registry', () => {
@@ -908,7 +908,12 @@ describe('#770: SYSTEM_VARS and buildSystemEnvSummary', () => {
   });
 
   it('security SYSTEM_VARS are explicitly runtimeEditable: false', () => {
-    for (const name of ['PROJECT_ALLOWED_ROOTS', 'PROJECT_ALLOWED_ROOTS_APPEND', 'PROJECT_DENIED_ROOTS']) {
+    for (const name of [
+      'PROJECT_ALLOWED_ROOTS',
+      'PROJECT_ALLOWED_ROOTS_APPEND',
+      'PROJECT_DENIED_ROOTS',
+      'DEFAULT_OWNER_USER_ID',
+    ]) {
       const def = ENV_VARS.find((v) => v.name === name);
       assert.ok(def, `${name} should be in registry`);
       assert.equal(def.runtimeEditable, false, `${name} must not be editable`);
@@ -930,6 +935,95 @@ describe('#770: SYSTEM_VARS and buildSystemEnvSummary', () => {
       assert.ok(entry.label, `${entry.name} should have label`);
       assert.ok(entry.settingsGroup, `${entry.name} should have settingsGroup`);
     }
+  });
+});
+
+describe('#770: deprecated metadata (dead-config marking)', () => {
+  // Vars whose runtime consumers were removed — verified by repo-wide reference
+  // scan including shell scripts and skills:
+  //   - MODE_SWITCH_REQUIRES_APPROVAL: Mode-system consumer (ModeOrchestrator) was
+  //     removed in the F101 Mode v2 rework (2dfece987), before the TD117 registry
+  //     backfill (b58106d0d) re-registered the then-already-dead var
+  //   - GITHUB_REVIEW_IMAP_* + POLL_INTERVAL: IMAP mail-poll channel removed in v0.9.0 sync (#596);
+  //     PR review feedback now flows through register_pr_tracking-driven GitHub API polling
+  //     (GITHUB_WEBHOOK_SECRET belongs to the separate Repo Inbox webhook, not this channel)
+  const DEAD_VARS = [
+    'MODE_SWITCH_REQUIRES_APPROVAL',
+    'GITHUB_REVIEW_IMAP_USER',
+    'GITHUB_REVIEW_IMAP_PASS',
+    'GITHUB_REVIEW_IMAP_HOST',
+    'GITHUB_REVIEW_IMAP_PORT',
+    'GITHUB_REVIEW_POLL_INTERVAL_MS',
+    'GITHUB_REVIEW_IMAP_PROXY',
+  ];
+
+  it('every known dead-config var stays in the registry (canonical truth — no deletion)', () => {
+    const registryNames = new Set(ENV_VARS.map((v) => v.name));
+    for (const name of DEAD_VARS) {
+      assert.ok(registryNames.has(name), `${name} must remain registered (registry entries are never deleted)`);
+    }
+  });
+
+  it('every known dead-config var carries a non-empty deprecated reason', () => {
+    for (const name of DEAD_VARS) {
+      const def = ENV_VARS.find((v) => v.name === name);
+      assert.ok(def, `${name} should be in registry`);
+      assert.equal(typeof def.deprecated, 'string', `${name} must have a deprecated reason string`);
+      assert.ok(def.deprecated.length > 0, `${name} deprecated reason must be non-empty`);
+    }
+  });
+
+  it('deprecated vars are never runtimeEditable', () => {
+    for (const def of ENV_VARS) {
+      if (def.deprecated) {
+        assert.notEqual(def.runtimeEditable, true, `${def.name} is deprecated and must not be editable`);
+      }
+    }
+  });
+
+  it('deprecated vars never appear in the SYSTEM_VARS curated projection', () => {
+    for (const def of ENV_VARS) {
+      if (def.deprecated) {
+        assert.ok(!SYSTEM_VARS.has(def.name), `${def.name} is deprecated and must not be a curated System var`);
+      }
+    }
+  });
+
+  it('buildEnvSummary carries deprecated through to the API payload', () => {
+    const summary = buildEnvSummary();
+    for (const name of DEAD_VARS) {
+      const entry = summary.find((v) => v.name === name);
+      if (!entry) continue; // hubVisible:false vars are excluded from the summary by design
+      assert.equal(typeof entry.deprecated, 'string', `${name} summary entry must expose deprecated`);
+    }
+    // At least one deprecated var must actually reach the payload, otherwise the
+    // frontend "已废弃" badge (EnvSubComponents) has nothing to render.
+    assert.ok(
+      summary.some((v) => typeof v.deprecated === 'string' && v.deprecated.length > 0),
+      'at least one deprecated var must be visible in the env summary',
+    );
+  });
+});
+
+describe('#770: DEFAULT_OWNER_USER_ID trust-anchor projection', () => {
+  it('DEFAULT_OWNER_USER_ID is a curated System var (issue #770 allowlist)', () => {
+    assert.ok(SYSTEM_VARS.has('DEFAULT_OWNER_USER_ID'));
+  });
+
+  it('DEFAULT_OWNER_USER_ID projection is read-only with restart-required semantics', () => {
+    const def = ENV_VARS.find((v) => v.name === 'DEFAULT_OWNER_USER_ID');
+    assert.ok(def, 'DEFAULT_OWNER_USER_ID should be in registry');
+    // Trust anchor: the owner gate derives ALL identity checks from this value.
+    // Allowing runtime edits would let a session grant itself ownership
+    // (privilege bootstrap paradox) — must stay editable only via .env + restart.
+    assert.equal(def.runtimeEditable, false);
+    assert.equal(def.restartRequired, true);
+    assert.equal(def.settingsGroup, 'security');
+    assert.ok(def.label, 'needs a human-friendly label for the System page');
+    assert.ok(
+      def.description.includes('单用户'),
+      'description must explain the unset ⇒ single-user-mode semantics so the read-only value is interpretable',
+    );
   });
 });
 

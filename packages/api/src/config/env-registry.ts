@@ -78,6 +78,15 @@ export interface EnvDefinition {
   runtimeEditable?: boolean;
   /** If true, this var should appear in .env.example (enforced by check:env-example) */
   exampleRecommended?: boolean;
+  /**
+   * Dead-config marker (#770): set to a human-readable reason when the var has
+   * zero live consumers in this repo. The entry STAYS in the registry (registry
+   * is the canonical inventory — entries are never deleted); the frontend renders
+   * an "已废弃" badge from this field. Physical removal is a maintainer decision.
+   * Invariants (enforced by env-registry tests): deprecated vars are never
+   * runtimeEditable and never part of the SYSTEM_VARS curated projection.
+   */
+  deprecated?: string;
   /** Explicit allowed values for cycle-style toggles (e.g. ['off','shadow','on']) */
   allowedValues?: string[];
   /** Human-friendly label for System Settings page (#770) */
@@ -261,11 +270,16 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'DEFAULT_OWNER_USER_ID',
-    defaultValue: '(未设置)',
-    description: '默认所有者用户 ID（信任锚点，不可从 Hub 修改）',
+    defaultValue: '(未设置 = 单用户本地模式)',
+    description:
+      '所有者信任锚点：未设置时为单用户本地模式（依赖 loopback 保护）；设置后特权操作按此 ID 做 owner 校验。' +
+      '仅可通过编辑 .env 并重启修改——Hub 内可写会造成权限自举（会话可将自己设为 owner），故永久只读',
     category: 'server',
     sensitive: false,
     runtimeEditable: false,
+    label: '所有者用户 ID',
+    settingsGroup: 'security',
+    restartRequired: true,
   },
   {
     name: 'CAT_CAFE_USER_ID',
@@ -905,6 +919,8 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '模式切换需要确认',
     category: 'cli',
     sensitive: false,
+    deprecated:
+      '模式系统消费者已在 F101 Mode v2 重构（2dfece987）中移除，早于 TD117 registry backfill（b58106d0d）；当前无活消费者，去留待 maintainer 决定',
   },
   {
     name: 'CAT_CAFE_TMUX_AGENT',
@@ -1518,6 +1534,8 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'QQ 邮箱地址 (xxx@qq.com)',
     category: 'github_review',
     sensitive: false,
+    deprecated:
+      'IMAP 邮件监控通道已在 v0.9.0 (#596) 移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
   },
   {
     name: 'GITHUB_REVIEW_IMAP_PASS',
@@ -1525,6 +1543,8 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'QQ 邮箱授权码 (非登录密码)',
     category: 'github_review',
     sensitive: true,
+    deprecated:
+      'IMAP 邮件监控通道已在 v0.9.0 (#596) 移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
   },
   {
     name: 'GITHUB_REVIEW_IMAP_HOST',
@@ -1532,6 +1552,8 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'IMAP 服务器地址',
     category: 'github_review',
     sensitive: false,
+    deprecated:
+      'IMAP 邮件监控通道已在 v0.9.0 (#596) 移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
   },
   {
     name: 'GITHUB_REVIEW_IMAP_PORT',
@@ -1539,6 +1561,8 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'IMAP 端口 (SSL)',
     category: 'github_review',
     sensitive: false,
+    deprecated:
+      'IMAP 邮件监控通道已在 v0.9.0 (#596) 移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
   },
   {
     name: 'GITHUB_REVIEW_POLL_INTERVAL_MS',
@@ -1546,6 +1570,8 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '邮件轮询间隔 (毫秒)',
     category: 'github_review',
     sensitive: false,
+    deprecated:
+      'IMAP 邮件监控通道已在 v0.9.0 (#596) 移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
   },
   {
     name: 'GITHUB_MCP_PAT',
@@ -1561,6 +1587,8 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'IMAP 连接代理地址（如 socks5://127.0.0.1:1080）',
     category: 'github_review',
     sensitive: false,
+    deprecated:
+      'IMAP 邮件监控通道已在 v0.9.0 (#596) 移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
   },
 
   // --- evidence (F102 记忆系统) ---
@@ -2048,6 +2076,7 @@ export const SYSTEM_VARS: ReadonlySet<string> = new Set([
   'CAT_CAFE_DATA_DIR',
   'CLI_TIMEOUT_MS',
   'CORS_ALLOW_PRIVATE_NETWORK',
+  'DEFAULT_OWNER_USER_ID',
   'DRAFT_TTL_SECONDS',
   'FRONTEND_PORT',
   'FRONTEND_URL',
