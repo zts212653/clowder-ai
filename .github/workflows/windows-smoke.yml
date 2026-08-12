@@ -3,7 +3,8 @@
 # See sync-manifest.yaml target_owned_files.
 #
 # Runs Windows-specific tests that cannot be validated on Linux/macOS CI.
-# Covers: CLI .cmd shim resolution, ProcessLivenessProbe platform guard.
+# Covers: CLI .cmd shim resolution, ProcessLivenessProbe platform guard,
+# and ManagedRunner parent/descendant process-tree cleanup.
 
 name: Windows Smoke
 
@@ -48,5 +49,10 @@ jobs:
           node --test packages/api/test/cli-spawn-win.test.js
           node --test packages/api/test/process-liveness-probe.test.js
           node --test packages/api/test/pick-directory.test.js
+      - name: ManagedRunner Windows process-tree cleanup
+        run: >-
+          node --test
+          packages/api/test/managed-runner-process-tree.test.js
+          packages/api/test/managed-runner-windows.test.js
       - name: Desktop config behavioral tests (PowerShell)
         run: node --test desktop/generate-desktop-config-behavior.test.js
