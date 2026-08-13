@@ -267,8 +267,48 @@ offer ──> admission / readiness ──> prepare ──> accept ──> CAS c
 在 commit 前，B 的 provider/token/admission 故障会通过 transfer abort 留下证据，并自动按 A 的
 existing assignment 建立下一次精确唤起（A 已运行时则进入其后继 carrier，绝不静默注入 prompt）。
 在 commit 后，B 的 Run 再崩溃，Assignment 仍属于 B；它只能走 B 的 retry、suspend、recovery
-或明确的后继 transfer policy，不能因为 A 是 predecessor 就悄悄回滚。若 policy 明确要交回 A，
-那是另一笔带新 version 的 transfer，不是异常处理的隐式副作用。
+或明确的后继 transfer policy，不能因为 A 是 predecessor 就悄悄回滚。默认 RecoveryPolicy 是
+`retry_then_return_if_eligible_else_suspend_and_notify`：退回 A 是在 B 的重试耗尽后才可能发生的
+**新一笔**带版本 transfer，不是异常处理的隐式 Assignment 回滚。
+
+#### 已提交 B 的 Run 失败：默认恢复策略
+
+`retry_then_return_if_eligible_else_suspend_and_notify` 由配置定义，不把某个 provider 的固定次数或
+秒数写死进协议；最少必须有 `retryable` 分类、`maxAttempts`、`maxElapsed`、backoff/jitter 策略和
+副作用对账要求。其状态机如下：
+
+```text
+B(v) Run failure
+  ├─ retryable + budget available + effect reconciled
+  │    └─ Retry-After；否则 exponential backoff + jitter → B(v) 的新 Run
+  └─ non-retryable / budget exhausted / effect uncertain
+       └─ recovery disposition
+            ├─ A eligible + reverse-transfer CAS → A(v+1)
+            └─ otherwise → suspended + dispositionActor + user notification/decision
+```
+
+1. **先分类和对账，后重试。** retryable 的 transient failure 才能在同一 B Assignment 下创建新
+   Run；若 provider 给出 `Retry-After`，必须遵守它，否则使用 exponential backoff + jitter。每次
+   retry 前都要核对在途副作用、幂等键、外部 receipt 或未知 effect boundary；不能因为 Run 失败就
+   盲目重放已经可能提交的动作。non-retryable failure 直接进入 recovery disposition。
+2. **重试有双界。** `maxAttempts` 和 `maxElapsed` 任一耗尽即停止 retry；两者是 policy 配置，
+   允许按 failure class、风险与 provider 能力不同，但不允许无限重试或用下一次普通消息绕过预算。
+3. **默认尝试受限退回。** B 耗尽后，可按预授权 RecoveryPolicy 尝试把同一个 WorkUnit 交回
+   immediate predecessor A。原 transfer manifest 必须在 A→B commit 前声明 return policy、允许的
+   scope、recovery authority 与 effect reconciliation requirement；没有这些证据就没有 reverse
+   transfer 的权限。
+4. **资格检查与新 CAS。** 只有 A 的 identity、capability、AuthorityGrant、readiness、policy/version
+   和 in-flight effect 对账均仍有效，且不存在 Assignment version conflict 时，才能 CAS commit
+   `B(v) → A(v+1)`。B 在该 commit 前仍是 holder；成功后 A 收到包含 B failure、retry history、
+   effect evidence 与 original manifest 的 exact carrier。这个 `v+1` 是一次新的 transfer transaction，
+   不是把 B 的 commit 擦掉。
+5. **不能安全退回时挂起并通知。** A 不可接、reverse CAS 失败、权限/能力失效、effect 状态未知、
+   或 policy 禁止退回时，WorkUnit 进入 `suspended`，保留 B failure evidence，指定
+   `dispositionActor + nextCheckAt`，并创建用户 notification/decision。系统不得硬退、广播成员或
+   再开无限 retry。
+6. **只适用于同一 WorkUnit 的 transfer。** delegate、join、approval 和 gate 的 parent/child
+   拓扑不机械“退回 A”；它们分别唤起 parent holder 或 disposition actor，并按自己的 join/gate
+   recovery policy 处置。
 
 Transfer 与相邻操作必须严格区分：
 
@@ -722,7 +762,7 @@ recoveryCandidates[]
 | A24 | wait / action 触发重新唤起 | 只唤起 exact holder/target + 当前 generation；过期、跨 holder、跨 thread 或 stale event fail closed |
 | A25 | A 向 B offer transfer，但 B 无 token、无额度或 admission 失败 | Assignment 仍是 A；attempt 有未接纳/abort evidence，A 得到包含失败原因和 source snapshot 的 exact 后继 carrier |
 | A26 | transfer prepare、accept 与 commit 之间 crash、expiry 或 CAS version 冲突 | 不出现部分换 holder；无 commit record 则恢复 A 的 source state（suspended 保持 suspended）并写 abort/reconciliation evidence |
-| A27 | transfer 已 commit 给 B 后，B 的 Run 崩溃或 provider 失败 | Assignment 仍归 B，按 B 的 retry/suspend/recovery policy 继续；除非另起带版本 transfer，否则绝不隐式回到 A |
+| A27 | transfer 已 commit 给 B 后发生 transient Run failure | Assignment 仍归 B；仅在 effect 对账通过且 `maxAttempts` 与 `maxElapsed` 都未耗尽时，按 provider `Retry-After` 或 exponential backoff + jitter 创建 B 的新 Run |
 | A28 | 负责执行的猫、human approver 与 observer 同时在 thread | packet 明示 Assignment 与 AuthorityGrant 的差别；observer/approver 不因看见消息获得执行责任，执行者不因有责任越过审批 scope |
 | A29 | 多猫 `parallel + all_of`，其中一个 child 失败或迟到 | parent 只按 sealed membership、required predicate 与 failure policy 收敛；不以“都曾回复”或 arrival order 判完成 |
 | A30 | `any_of` / `first_success` / `quorum(n)` 并发返回 | 成功 winner 可证明；其余 child 的取消、挂起或继续由各自 Assignment/authority 终局，旧结果不能污染下一代 join |
@@ -733,6 +773,9 @@ recoveryCandidates[]
 | A35 | 用户/系统请求 supersede 或 interrupt | 请求必须携带 exact run/work/scope/authority；旧 Run 被审计为 preempted，未终局 WorkUnit 有 resume/suspend/reconcile 归宿，而非被新消息吞掉 |
 | A36 | `reconciliation_required` 被创建 | 记录带 source、typed reason、observed version、disposition owner、`nextCheckAt`、policy 和预期动作；reconciler 不自行换 holder 或产生普通 Queue entry |
 | A37 | reconciliation 检查超过 SLA 或需要非预授权业务选择 | 同一 disposition owner 得到升级 carrier/proposal；系统不无限停车、不广播所有成员、不凭历史猜接班人 |
+| A38 | B 的 retry 耗尽或遇 non-retryable failure，A 仍 eligible | 原 manifest 的 return policy/authority 和 effect evidence 均通过；以新 CAS 将 `B(v)` transfer 给 `A(v+1)`，A 收到 B failure、retry history 和 effect 对账；绝不抹掉 B 的原 commit |
+| A39 | retry 耗尽后 A 不 eligible、reverse CAS 冲突、effect 未知或 policy 禁止退回 | WorkUnit 进入 `suspended`，带 B failure evidence、dispositionActor、`nextCheckAt` 和用户 notification/decision；不得硬退、广播或无限 retry |
+| A40 | delegate / join / approval / gate 的 child Run 重试耗尽 | 不机械退回其 predecessor；由 parent holder 或该 child 的 disposition actor 按 typed topology policy 收到 exact recovery carrier |
 
 ## 这次审计明确不做什么
 
