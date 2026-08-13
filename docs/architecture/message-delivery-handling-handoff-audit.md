@@ -2,7 +2,7 @@
 title: "消息投递、处理与交接：终态重构 RFC"
 description: "从消息发出、入队、被目标读取、执行、交接、等待、失败恢复到用户可见回执的端到端状态地图；以 #1354 为入口，定义单一终态模型和一次性切换边界。"
 doc_kind: architecture
-feature_ids: [F039, F117, F122, F167, F175, F177, F185, F254, F264, F280]
+feature_ids: [F039, F117, F122, F167, F175, F177, F185, F194, F233, F254, F264, F275, F277, F280]
 topics: [message, delivery, queue, invocation, handoff, custody, receipt, lifecycle, observability]
 created: 2026-08-13
 status: proposed
@@ -11,10 +11,16 @@ related_issue: 1354
 related_docs:
   - docs/features/F117-message-delivery-lifecycle.md
   - docs/features/F167-a2a-chain-quality.md
+  - docs/features/F194-invocation-liveness-canonical-read-model.md
+  - docs/features/F233-ball-custody-observability.md
   - docs/features/F254-side-effect-freshness-gate.md
+  - docs/features/F275-managed-work-admission-identity.md
+  - docs/features/F277-thread-attention-navigation.md
   - docs/architecture/ownership/cells/dispatch.md
   - docs/architecture/ownership/cells/bubble-pipeline.md
   - docs/architecture/ownership/cells/ball-custody.md
+  - docs/architecture/ownership/cells/managed-work.md
+  - docs/architecture/ownership/cells/thread-navigation.md
   - docs/architecture/ownership/cells/transport.md
 ---
 
@@ -51,12 +57,209 @@ wait / action successor 仅通过 source + holder + generation 关联；
 它们不成为这条普通消息的 Queue entry。
 ```
 
-客户端消费两个不同的只读视图：
+面向**普通消息对象**的客户端消费两个不同的只读视图：
 
 - **Message receipt**：挂在原消息上，回答“哪个目标走到了哪一步、是否读到正文、这次执行结果是什么”。
 - **Actionable queue**：只列出可立即操作的精确 Queue candidate；没有 candidate 就没有恢复按钮，也不借 thread-wide 失败显示一块空面板。
 
 `threadId` 只负责把这些对象放进同一个对话，不再被允许把它们归因为同一次失败或同一个可恢复操作。
+thread 级协作现场另由下文的 continuation projection 聚合；它不替代这两个对象视图。
+
+## Thread 的完整生命周期：成员是被动唤起的，不是常驻监督者
+
+上一节描述了**一条消息**的因果线，但它不足以说明协作为什么会停住：一只猫结束
+invocation 后并不会继续在 thread 中观察；没有被明确唤起的成员也不会因为自己曾经参与过
+thread 而自动看到新消息。因此，`Thread.participants` 和“上一条是谁说的”都只能说明历史或
+组织信息，**不能说明谁正在工作、谁必须继续、或者下一次该唤起谁**。
+
+这不是模型的缺陷，而是当前产品的执行模型：一个 thread 是持久的共同上下文和事件容器，
+不是一组常驻 worker。每一次执行都必须由一个可证明的输入唤起；每一次退出都必须把尚未
+终局的责任放进一个可再次唤起的 owner，而不是留在自然语言的尾句里。
+
+### 先拆开四个容易混淆的问题
+
+| 问题 | 权威回答者 | 绝不能用来代答的东西 |
+|---|---|---|
+| 谁曾参与这个对话？ | `Thread.participants`、消息历史 | 当前是否执行、是否有责任、是否应被唤起 |
+| 谁**现在**在运行？ | F194 `getThreadLiveInvocations` / `TurnExecution` | pending message、任务 owner 或最近发言者 |
+| 谁拥有一个尚未完成的行动或等待？ | `ActionSuccessor` / `AwaitState` / `BallCustody` 的 exact holder + generation | thread 成员列表、Queue 长度或 `activeInvocations` |
+| 谁现在有一条可读、可处理的普通消息？ | `messageId × targetCatId` 的 receipt / Queue custody | “thread 有新消息”、某个猫曾经被 @、同 thread 的别的失败 |
+
+F194 已经把“有没有活着的 invocation”收口为服务端 canonical read model；它是本设计的一个
+输入，却不是 thread 协作的总答案。反过来，F233/F167/F280 已各自保存责任、转交和等待的
+精确事实；它们也不能凭自己的 holder 推断一个猫已经在运行。终态必须同时保留这些边界。
+
+### Thread 不是一个标量状态，而是并发工作单元的叠加
+
+同一 thread 可以同时有 A 正在执行、B 的普通消息尚未读、C 持有一个等待 CI 的责任。把它
+压成 `active`、`paused` 或 `idle` 任一标签，必然丢失“谁该做什么”。因此不引入
+`thread.status` 作为新的裁定账本；服务端只从既有 owner 构造可重建的
+**Thread Continuation Projection（thread 续航投影）**：
+
+```text
+ThreadContinuationProjection(threadId, observedAt)
+  liveExecutions[]       ← F194 canonical liveness + TurnExecution
+  deliverableMessages[]  ← per-target receipt + Queue custody
+  recoverableFailures[]  ← exact failed invocation + exact candidate
+  openCustodies[]        ← ActionSuccessor / BallCustody exact holder + generation
+  activeWaits[]          ← AwaitState source + holder + generation + expiry
+  managedWorkRefs[]      ← only an explicit F275 binding, otherwise absent
+  materialTransitions[]  ← typed, attributable changes since a supplied cursor
+  reconciliation[]       ← non-terminal object that has lost a safe next carrier
+```
+
+它是 read model，不是第五份持久生命周期账本：任何一行都必须能回到上表的 source object；
+重建或暂时读不到 source 时必须显示 `unknown` / `reconciliation_required`，不能把空数组解释
+为完成。`managedWorkRefs` 只是有明确绑定时的上下文关联，绝不由 thread、任务、时间邻近或
+自然语言补推；F275 也不因此变成所有对话的 workflow owner。
+
+投影的聚合结果应使用可并存的旗标，而非单一状态：
+
+| 旗标 | 可证明的含义 | UI / 被唤起成员应得出的结论 |
+|---|---|---|
+| `executing` | 至少一条 exact live invocation | 显示谁在做什么；不据此把其他人的工作标完成 |
+| `deliverable` | 至少一条普通消息仍由一个精确 target 可处理 | 只向那个 target 建立唤起条件 |
+| `awaiting_external` | 有未终局的 typed wait | 显示 holder、条件和到期；不是聊天 Queue 的“继续” |
+| `custody_open` | 有 action successor / ball custody 尚由 holder 持有 | 明确 holder 和 generation；不因为 holder 当前不运行就丢失 |
+| `reconciliation_required` | 存在非终局对象但无法安全证明下一 carrier | 显示系统正在核对；禁止泛化 replay 或把它归给最近说话的人 |
+| `quiet` | 上述集合均为空，且没有 unknown / reconciliation | thread 当前没有系统可证明的待行动作；新事件可再次打开它 |
+
+例如 `executing + awaiting_external` 是完全正常的并发现场。只有 `quiet` 可作为“当前没有可证明
+的系统责任”的结论；“长时间没新消息”永远不是 completed 的证据。
+
+### 端到端主线：从沉寂到再次沉寂
+
+下图是一个 thread 的运行时生命周期。每一阶段都描述**发生了什么、谁持有下一步、如何让
+被动成员重新知道现场**；它不是新的万能状态机，而是既有对象必须共同满足的协议。
+
+```text
+                ┌───────────────────────────────┐
+                │  0. QUIET / OBSERVED           │
+                │  仅历史与可重建投影；无活责任  │
+                └──────────────┬────────────────┘
+                               │ 外部事件 / 用户消息 / A2A / wait 命中
+                               ▼
+ [1] ACCEPT ──> [2] ROUTE & ADMIT ──> [3] DURABLE CUSTODY
+ 保存原文          决定事件类别            per-target receipt / action / await
+                               │
+                               │ exact target 或 exact holder 的 carrier
+                               ▼
+                    [4] WAKE & ORIENT
+                    创建 exact invocation，注入当前续航快照
+                               │
+                               ▼
+                    [5] EXECUTE & PUBLISH
+                    活性、输出、receipt 与责任事实分别落各自 owner
+                               │
+                               ▼
+                    [6] EXIT GATE
+          ┌────────────┬──────────────┬──────────────┬──────────────┐
+          ▼            ▼              ▼              ▼              ▼
+       terminal     hand off        await          retry/recover   reconcile
+       终局回执      新 holder+carrier  source+holder    exact candidate  安全性未知
+          │            │              │              │              │
+          └────────────┴──────────────┴──────────────┴──────────────┘
+                               │ 新 carrier / wait event / recovery outcome
+                               └──────────────► [4] WAKE & ORIENT
+
+所有并发单元都终局，且无 wait / custody / reconciliation
+                               └──────────────► [0] QUIET / OBSERVED
+```
+
+逐阶段的不可省略约束如下：
+
+1. **Accept（接纳）**：将用户、connector、A2A 或外部完成信号规范化为一个有来源的事件。
+   保存原文不等于交付；接收一个外部事件也不等于应该让所有 thread 成员醒来。
+2. **Route & admit（路由与受理）**：区分普通消息的 target、责任交接的 subject/holder、
+   以及 wait 的 source/predicate。多目标必须拆成 per-target unit；普通通知不能隐式创造
+   action custody。
+3. **Durable custody（耐久托管）**：在真正唤起前，下一步已经有 owner 和恢复依据：普通
+   消息由 Queue/receipt，行动由 ActionSuccessor/BallCustody，等待由 AwaitState。只写
+   “我接着做”或“等 CI”而没有对应的 structured carrier，不算通过本阶段。
+4. **Wake & orient（唤起与定向）**：系统只唤起 exact target/holder，不广播给全部
+   participants。创建 invocation 时读取同一时刻的续航投影，为这次执行带上可验证的“我为何
+   被叫来、其他人此刻在做什么、我是否已有责任”。
+5. **Execute & publish（执行与发布）**：该 invocation 只报告自己的 liveness、正文 exposure、
+   输出和 terminal outcome；它不能用自己的成功覆盖别人的 receipt 或 custody。其他成员在
+   这一阶段仍是休眠的，他们对变化的获知靠下一次精确 wake 时的 snapshot，而不是假定在旁观。
+6. **Exit gate（退出闸门）**：每个被本 invocation 接触的非终局 unit 必须有且只能有一条
+   明确归宿：`terminal`、`handoff`、`await`、`recoverable failure` 或
+   `reconciliation_required`。没有归宿不能静默退出；但也不能为了“有下一步”凭空创建 Queue
+   item 或转派给任意 participant。
+7. **Quiet / reopen（安静与重开）**：当所有 unit 均终局，thread 可以静默，历史和最终
+   receipt 永久保留。新消息、精确 handoff、匹配的 wait event 或 exact recovery candidate
+   重新进入第 1–4 阶段；不是依据“上次是某猫说话”重新唤起。
+
+### 被唤起时必须收到什么：Thread Situation Packet
+
+被动唤起的成员不能靠阅读一段过期的 system prompt 或猜聊天尾巴来判断是否应继续。因此
+`Wake & orient` 阶段必须向这一次 invocation 提供一个**有界、带版本和 observedAt 的
+Thread Situation Packet**。它既是执行时的上下文，也是 UI 控制条的同源输入；不是把全量
+内部日志塞给模型。
+
+| 字段组 | 最少内容 | 回答的问题 |
+|---|---|---|
+| `wake` | carrier kind、source pointer、`messageId`/lease/wait identity、exact `targetCatId`/holder、wake generation | “为什么是我被唤起，而不是某个历史参与者？” |
+| `myStanding` | `handle_delivery` / `continue_custody` / `await_external` / `observe_only` / `no_action`，以及每项的 source identity | “我此刻是否被系统证明需要继续？” |
+| `liveNow` | 当前 exact live invocations 的 cat、工作单元摘要、startedAt、degraded/unknown 标记 | “谁正在做什么，谁只是历史参与者？” |
+| `openElsewhere` | 其他 target 的未读 delivery、open custody、wait 与 `reconciliation_required` 的**类型化摘要** | “是否有并发工作；我不能覆盖什么？” |
+| `changesSince` | 自上一个 packet cursor 起的 material typed transitions，附 source reference | “我离开期间发生了什么？” |
+| `constraints` | active generation、fence、可否恢复、unknown / stale 原因 | “哪些动作安全，哪些必须 fail closed？” |
+
+`myStanding` 只能从 exact receipt、lease、wait 或已认证 wake 产生正结论。以下情况一律只给
+`observe_only` 或 `no_action`：我在 `participants` 中、我最后发过言、有人在文中提到我的
+名字、同 thread 有失败、或一个不相关 task 显示我为 owner。这样系统不会把“知道现场”误做
+成“获得球权”。
+
+Packet 要提供工作单元的短摘要和指针，而不是隐藏或改写 canonical 聊天内容；成员需要阅读
+原文时仍读 MessageStore 的 canonical messages。内部安全凭据、私有 `workId/attemptId`、
+不属于该 invocation 的 prompt 内容也不得泄露进 packet。读面失败时 packet 必须明确
+`unknown`，并拒绝依赖它的交接/恢复动作。
+
+### 责任怎么继续，而不是“看起来应该继续”
+
+成员每次被唤起，系统都要给出一个**可行动而不越权**的答案：
+
+| Packet 中的 standing | 当前成员能做什么 | 退出前必须留下什么 |
+|---|---|---|
+| `handle_delivery` | 读取该 target 的正文并处理 | receipt 的 exact outcome；若未终局，进入 handoff / await / recovery 之一 |
+| `continue_custody` | 在 own holder + generation fence 内推进该 action | terminal evidence，或新的 exact successor / wait |
+| `await_external` | 不主动重跑；等待被声明的 source | 仅在匹配事件或到期/recovery 流程再次唤起 |
+| `observe_only` | 阅读、给建议或做不改变责任的工作 | 不得吞掉别人的 Queue / lease，也不得自行宣称已接手 |
+| `no_action` | 无系统要求；可在收到新 carrier 后再运行 | 不从空闲、参与者名单或时间推导“应该继续” |
+
+如果 execution 崩溃、超时或 provider 不可用，`Exit gate` 不能把工作留给“下一位看到 thread
+的人”。其 exact `TurnExecution` 先记录失败；普通消息只有在存在 `messageId × target ×
+queueEntry × failedInvocation` 的 recovery candidate 时才会重试；责任/等待则由自身 holder、
+generation 和 source 的 reconciliation/recovery 流程继续。找不到安全 carrier 的对象进入
+`reconciliation_required`，由其 source owner 的 sweep/probe 处理，而不是触发 thread-wide
+Continue 或唤醒全体成员。
+
+### 同一投影必须服务成员与用户，但两个面不能越权
+
+用户需要看见“这里没有人静默盯着 thread”，也需要随时知道现在的协作现场。因此 thread
+顶部应展示一个可展开的 **协作控制条**，消费同一 Thread Continuation Projection：
+
+```text
+协作现场 · 观测于 10:32
+  正在执行：砚砚 · 核查队列生命周期（2 分钟）
+  待交付：布偶猫 · 1 条消息尚未读
+  正在等待：金哥 · CI 回调（到期 10:45）
+  需核对：1 项内部责任，尚不能安全恢复
+```
+
+- 每行必须指向 exact source/工作单元；用户可展开查看 human-readable reason、阶段和诊断，
+  但默认不泄露私有 credential 或 raw managed-work identity。
+- 成员获得的是自己的 `myStanding` 和必要的并发边界；用户获得的是可理解的协作状态。两者
+  共享事实投影，不共享不必要的执行上下文。
+- 控制条只显示事实和 exact action（如存在）。它不能用“有猫在运行”替代消息 receipt，不能
+  在没有 recovery candidate 时显示 Continue，也不能把 `quiet` 显示成“项目已完成”。
+- F277 的 thread navigation 可以消费这些 flags 做注意力展示，但 navigation 只组织和阅读
+  thread；它不创建 custody、不选择 next actor，也不从历史 participants 推断 liveness。
+
+这就是 #1354 的体验归属：若失败是一条原消息的 exact execution，细节在该消息的 receipt；
+若是 wait/custody，则在控制条相应工作单元；如果它使整个 thread 无法安全续航，则额外出现
+`reconciliation_required`。绝不把这些不同对象折叠成“队列已暂停 · 0 · 当前调用失败”。
 
 ## 先看一条消息实际经历了什么
 
@@ -202,7 +405,7 @@ F264 的 receipt 已给出正确的基本词汇：
 
 ## 终态重构：一个模型、一次切换
 
-### 目标状态：四个真相，两个用户视图
+### 目标状态：四个真相，三个严格分工的读视图
 
 实现完成后，运行时只保留下面四个既有真相域；它们由稳定坐标关联，绝不相互覆写：
 
@@ -213,14 +416,47 @@ F264 的 receipt 已给出正确的基本词汇：
 | TurnExecution ledger | 记录精确 child invocation 的运行、失败、输出和 terminal outcome | 用一次失败推断整条原消息未送达，或替代 receipt 的 body-read witness |
 | AwaitState / ActionSuccessor / BallCustody | 记录结构化等待、责任移交、generation 和终局消费 | 伪装成普通用户 Queue entry，或由 thread-wide Continue 处理 |
 
-在这四个真相之上只允许两个用户视图：
+在这四个真相之上允许三个只读投影；它们都可被重建，不能回写或互相裁定：
 
 1. **消息回执视图**以 `messageId × targetCatId` 为锚。它列出该目标的 child 是否创建、正文是否暴露、最后一次精确 execution 的 typed outcome，以及仍有无后续可用动作。
 2. **可操作队列视图**以 `queueEntryId × targetCatId` 为锚。它只包含当前真正可操作的普通 queued work，和由同一对象授权的恢复动作。
+3. **Thread 续航视图**以 `threadId + observedAt` 为锚，汇合 live execution、per-target
+   delivery、open custody、typed wait、recovery/reconciliation 的当前事实。它为用户提供协作
+   控制条，并在 exact wake 时裁剪成该成员的 Thread Situation Packet；它没有独立的 terminal
+   字段，也不以 `participants`、最近消息或 task 近邻补齐缺失事实。
 
-系统诊断可以按 thread 聚合，但不能携带操作按钮，更不能把一条内部 wait 的异常翻译成“当前调用失败”。
+系统诊断可以按 thread 聚合，但诊断、控制条和 Queue action 都只能携带其 exact object 的操作，
+更不能把一条内部 wait 的异常翻译成“当前调用失败”。
 
-### 目标 API 与 UI 契约
+### 目标 API、wake injection 与 UI 契约
+
+除 message receipt 与 actionable queue 外，服务端提供一个由既有 owner 即时构建的
+`ThreadContinuationProjection`。初始 history、F5 hydration、socket 增量和 Thread Situation
+Packet 必须消费**同一版本化 reader**；不能由浏览器从 `queue.length`、bubble 文本、thread
+participants 或多个互相独立的 endpoint 猜出协作现场。
+
+```text
+ThreadContinuationProjection
+  threadId, observedAt, revision/cursor
+  liveExecutions[]        // exact invocation, cat, typed work reference, liveness confidence
+  deliveries[]            // only non-terminal per-target receipt/custody
+  custodies[] / waits[]   // source, holder, generation, state, expiry where applicable
+  recoveryCandidates[]    // exact, user-actionable candidates only
+  reconciliation[]        // identity + owner domain + typed reason; never auto-replayed
+  materialTransitions[]   // typed source references since cursor; no generated prose summary
+```
+
+每一个列表项必须有 source identity 和 source domain；Reader 漏读、版本不一致或 source
+不可用时，返回 explicit `unknown`/`reconciliation_required` 项，而不是删除它。socket 增量需要
+带 `revision`，客户端只接受能接续当前 projection 的更新；发生 gap / epoch change 时重新取
+完整投影。这与 F194 的 canonical liveness 规则并行：F194 判断某个 invocation 是否 live，
+continuation reader 决定如何把它与其他责任单元并列呈现，二者都不能让前端自行再拼一套 truth。
+
+创建 invocation 的入口必须在认证 carrier 已选中 exact target/holder 后调用同一 reader，生成
+packet 并绑定其 `observedAt` / cursor 到该次 `invocationId`。它不能在 invocation 结束时倒写
+packet，也不能因 packet 中另一个猫正在执行就抢占或取消对方。若生成 packet 失败，依赖它的
+handoff/recovery/责任动作 fail closed；普通消息是否可以按既有安全语义运行，必须由该消息的
+Queue/receipt owner 显式决定，不能以“读面异常”静默丢弃。
 
 `QueueProcessor` 可以继续为调度器保存 slot 级暂停/失败信息，但对外不得再提供 thread-wide `queuePaused`、裸 `pauseReason` 或由 `/queue/next` 触发的泛化恢复。其对外 read model 必须返回两个互不混淆的集合：
 
@@ -241,6 +477,7 @@ recoveryCandidates[]
 | `POST /queue/next` 按 thread 继续 | 用户触发的恢复操作必须请求精确 `recoveryCandidate`；调度器内部 drain 与用户恢复是不同入口 |
 | “当前调用失败”悬在 QueuePanel 顶部 | execution failure 归属于原消息 receipt / invocation lineage；内部 wait failure 归属于对应 status card |
 | UI 自行从 raw queue + 宽泛 pause 拼状态 | API 提供已绑定身份的 read model；UI 不再从长度、文案或相邻时间猜状态 |
+| thread 的 members / 最近气泡被当作“正在协作” | 控制条与 wake packet 只读 continuation projection；历史成员、安静和完成分开表示 |
 
 这不是只改 endpoint 名称：服务器先在同一次原子校验中核验 candidate 仍与 source message、target、failed invocation 和当前 custody generation 相符，才允许恢复。客户端传错、对象已被替换、已终局或跨目标的请求全部 fail closed。
 
@@ -274,11 +511,17 @@ recoveryCandidates[]
 
 1. **契约冻结与 RED fixtures**：把所有入口的因果链写成黑盒 fixture。每条断言都检查 `messageId × targetCatId × queueEntryId × invocationId`，不只检查 HTTP 200。
 2. **后端一次重构**：收口 receipt、Queue custody、TurnExecution 与 wait 的边界；删除 thread-wide recovery API / projection；实现 exact candidate 校验和 server-owned reconciliation。
-3. **客户端同次切换**：删除 pause banner / generic Continue 的消费，改为 receipt/invocation status 和 action queue 两个视图；socket、F5 hydration 与初始 history 同源。
-4. **迁移 preflight 与正式切换**：在隔离副本验证上表的全部转换，备份可恢复证据，执行一次性切换，确认没有 legacy reader/writer 后才启用。
-5. **端到端验收**：跑下面的全矩阵，并对真实 thread 抽样核验。发现遗漏不以兼容 fallback 掩盖，回到同一个 target model 修正。
+3. **thread 续航 reader 与 wake injection**：实现投影、revision/cursor、F5/socket 收敛和
+   Thread Situation Packet；让每次 invocation 都能说明自己的 carrier 和 standing，同时保持
+   reader 零写副作用。
+4. **客户端同次切换**：删除 pause banner / generic Continue 的消费，改为 receipt/invocation
+   status、action queue 与协作控制条三个视图；socket、F5 hydration 与初始 history 同源。
+5. **迁移 preflight 与正式切换**：在隔离副本验证上表的全部转换，备份可恢复证据，执行一次性
+   切换，确认没有 legacy reader/writer 后才启用。
+6. **端到端验收**：跑下面的全矩阵，并对真实 thread 抽样核验。发现遗漏不以兼容 fallback
+   掩盖，回到同一个 target model 修正。
 
-提交可以按这五类组织，PR 的 review 以同一个 RFC / acceptance matrix 为准；不得把第 2、3、4 类各自当作完成的独立产品行为。
+提交可以按这六类组织，PR 的 review 以同一个 RFC / acceptance matrix 为准；不得把第 2、3、4、5 类各自当作完成的独立产品行为。
 
 ## 验收矩阵
 
@@ -300,11 +543,24 @@ recoveryCandidates[]
 | A14 | connector 对已提交回答重试投递 | 重试 delivery，不重新生成/撤回原回答 |
 | A15 | F5 与 socket 同时更新 | receipt、bubble、Queue action 结论收敛，不靠文本猜测 |
 | A16 | 无 candidate 的暂停诊断 | 无“继续”按钮；状态说明不归咎于用户消息 |
+| A17 | 历史参与者没有被新的 carrier 指向 | 不因 `participants`、最近发言或同 thread 失败而被唤起或得到 `continue_custody` |
+| A18 | exact target 被普通消息、handoff 或 wait 唤起 | invocation 收到带 carrier/source、`myStanding`、并发边界与 revision 的 Thread Situation Packet |
+| A19 | A 正在执行，B 有未读消息，C 在等 CI | continuation projection 同时列出三项；不压成一个 `active/paused` 标签，也不互相覆盖 |
+| A20 | invocation 退出但工作未终局 | exit gate 留下 exact terminal、handoff、wait、recovery 或 reconciliation 之一；纯自然语言“我之后继续”不算闭环 |
+| A21 | holder 的 invocation crash / provider 失败 | exact invocation 失败可追溯；只有拥有 exact carrier 的对象重试，失去安全 carrier 的对象进入 reconciliation，不唤醒全体成员 |
+| A22 | projection source 暂不可读、socket 有 gap 或 F5 中途进入 | UI / packet 明示 unknown 或重拉同源完整 projection；不能把漏读解释为 quiet/completed |
+| A23 | thread 控制条展示并发现场 | 每行指向 exact source；普通消息失败回到 message receipt，wait/custody 异常归对应 status，而没有泛化 Continue |
+| A24 | wait / action 触发重新唤起 | 只唤起 exact holder/target + 当前 generation；过期、跨 holder、跨 thread 或 stale event fail closed |
 
 ## 这次审计明确不做什么
 
 - 不把所有消息、所有 A2A、所有 wait 都塞进 `InvocationQueue`；
 - 不用新的全局状态机替换已存在的 MessageStore custody、TurnExecution、ActionSuccessor 或 AwaitState；
+- 不把 `ThreadContinuationProjection` 物化成新的可写 thread lifecycle ledger，或把它的
+  `quiet` / summary 当成 action terminal truth；
+- 不把 `Thread.participants`、最后说话者、thread 标题、任务 owner 或长时间无消息当作当前
+  owner、live invocation、完成或下一位被唤起者；
+- 不在成员未被 carrier 唤起时假定它看见 thread 后续，也不在 wake 时广播全部历史成员；
 - 不保留旧/新 Queue pause、read model、endpoint 或 UI 的长期双轨 compatibility fallback；
 - 不因为 UI 难解释，就放宽 invocation-bound completion 的 fail-closed 条件；
 - 不从 provider 文本、控制台日志或 timestamp proximity 推导业务终局；
@@ -319,6 +575,8 @@ recoveryCandidates[]
 2. 无 action 的内部协调异常，默认收在可展开的系统状态中，还是在 thread 顶部显示非阻塞摘要？它不应占用 Queue action panel。
 3. 原消息已读、但一次 execution 失败时，默认显示阶段 + 可读原因 + 下一步，还是暴露更多 lineage 细节？建议精确 invocation ID 仅放在“查看诊断”。
 4. `reconciliation_required` 记录的 operator 体验是什么？建议只显示“系统正在核对一项内部状态”，并在 server 证明可恢复前禁用任何聊天/Queue 操作。
+5. 协作控制条默认展示多少并发单元，哪些工作摘要可被 thread 中所有成员 / 用户看见？建议默认只放类型化、human-readable 标题和时长，私有凭据与 raw managed-work identity 一律不出读面。
+6. packet 的 `observe_only` 是否允许成员主动发普通协调消息？建议允许，但它必须明确走新的普通 message admission；绝不把观察行为升级为 custody transfer。
 
 ## 代码与文档来源地图
 
@@ -329,11 +587,19 @@ recoveryCandidates[]
 | Queue 排序、暂停、恢复 | `packages/api/src/domains/cats/services/agents/invocation/InvocationQueue.ts`、`QueueProcessor.ts`、`packages/api/src/routes/queue.ts` |
 | durable queued-message custody 与 per-target receipt | `QueuedMessageCustodyCoordinator.ts`、`QueuedMessageCustodyStartupReconciler.ts`、`queued-message-custody.ts`、`queued-message-receipt.ts`、`queue-receipt.ts` |
 | child execution ledger | `TurnExecutionStore.ts`、`TurnExecutionStartupReconciler.ts`、`invoke-single-cat.ts` |
+| canonical invocation liveness | `getThreadLiveInvocations.ts`、`InvocationRecordStore`、`InvocationTracker`、F194 |
 | Queue action rendering | `packages/web/src/components/QueuePanel.tsx`、`queue-receipt-projection.ts` |
 | message bubble / receipt hydration | `MessageReceiptDock.tsx`、`useChatHistory.ts`、`useSocket.ts`、bubble reducer |
 | typed wait、action successor、responsibility lifecycle | `docs/architecture/ownership/cells/ball-custody.md`、F167、F280 |
+| thread collaboration projection / navigation boundary | F233 projection、F194 liveness reader、F277 `thread-navigation` cell；新 continuation reader 只作组合 read model |
+| managed work (optional explicit context only) | F275 `managed-work` cell；不得按 thread / task 近邻推断 |
 | output commit and connector transport | `docs/architecture/ownership/cells/transport.md`、ADR-041、ADR-042 |
 
 ## 下一步
 
-先由 maintainer 做 RFC 内容 review，重点检查：入口是否齐全、既有 truth owner 是否被误合并、一次性切换能否保住用户数据，以及 exact recovery contract 是否足以取代 thread-wide Continue。review 通过后，#1354 保持 umbrella，按上面的五个交付单元组织**同一个终态重构 PR**；任何发现的新持久化真相源、不能安全映射的存量类别或跨 owner 矛盾，都先回到本 RFC 的 architecture decision，不在 `QueuePanel` 或 `QueueProcessor` 堆兼容分支。
+先由 maintainer 做 RFC 内容 review，重点检查：被动唤起成员的 lifecycle 是否完整、Thread
+Situation Packet 是否足以让成员知道“我为什么被叫来 / 谁在做什么 / 我是否必须继续”、既有
+truth owner 是否被误合并、一次性切换能否保住用户数据，以及 exact recovery contract 是否足以
+取代 thread-wide Continue。review 通过后，#1354 保持 umbrella，按上面的六个交付单元组织
+**同一个终态重构 PR**；任何发现的新持久化真相源、不能安全映射的存量类别或跨 owner 矛盾，都先
+回到本 RFC 的 architecture decision，不在 `QueuePanel` 或 `QueueProcessor` 堆兼容分支。
