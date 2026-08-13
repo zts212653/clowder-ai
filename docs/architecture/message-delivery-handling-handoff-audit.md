@@ -1,11 +1,11 @@
 ---
-title: "消息投递、处理与交接：全链路审计与整改输入"
-description: "从消息发出、入队、被目标读取、执行、交接、等待、失败恢复到用户可见回执的端到端状态地图；以 #1354 的队列暂停错配为审计样本。"
+title: "消息投递、处理与交接：终态重构 RFC"
+description: "从消息发出、入队、被目标读取、执行、交接、等待、失败恢复到用户可见回执的端到端状态地图；以 #1354 为入口，定义单一终态模型和一次性切换边界。"
 doc_kind: architecture
 feature_ids: [F039, F117, F122, F167, F175, F177, F185, F254, F264, F280]
 topics: [message, delivery, queue, invocation, handoff, custody, receipt, lifecycle, observability]
 created: 2026-08-13
-status: draft
+status: proposed
 author: "砚砚/codex@gpt-5.6-terra"
 related_issue: 1354
 related_docs:
@@ -18,11 +18,45 @@ related_docs:
   - docs/architecture/ownership/cells/transport.md
 ---
 
-# 消息投递、处理与交接：全链路审计与整改输入
+# 消息投递、处理与交接：终态重构 RFC
 
-> **这是什么**：一份把现有消息链路讲清楚的架构审计，不是另造一套 Queue 或状态机。
+> **这是什么**：一份先把现有消息链路讲清楚、再定义单一终态模型的重构 RFC；不是另造一套 Queue 或状态机。
 > **为什么现在做**：[#1354](https://github.com/zts212653/clowder-ai/issues/1354) 显示了“队列已暂停 · 0 · 当前调用失败”。界面给了用户一个失败结论，却无法指出失败的是谁、影响了哪条工作、现在能做什么。这不是单个提示位置不对，而是投递、执行、责任和展示四层的身份没有被一起守住。
-> **本文结论的边界**：下文的“当前事实”由 `main@4155d65a1` 的代码、ownership cells 和现有 feature 契约交叉核对；“整改方向”是待评审的设计输入，尚未授权实现。
+> **本文结论的边界**：下文的“当前事实”由 `main@69f6ef7ad` 的代码、ownership cells 和现有 feature 契约交叉核对；终态设计待 maintainer 内容 review 通过后才授权实现。
+
+## 决策请求：不是热修，而是一次终态切换
+
+本 RFC 请求确认下面四件事：
+
+1. #1354 不以 `QueuePanel` 文案、计数或 `isPaused` 的局部条件修补关闭；它是整个消息生命周期重构的入口证据。
+2. 新客户端和服务端同时切到一个**单一目标模型**。不保留 thread-wide pause、宽泛的 `/queue/next` 手工恢复、旧/新双投影或长期 compatibility fallback。
+3. 不做历史协议兼容，不等于删除历史。用户消息、已完成回复、责任记录和诊断证据必须保留；已有存量只走一次、可审计的转换或隔离，不让旧字段继续参与运行时裁定。
+4. 实现可以拆成便于 review 的提交，但不能把“新旧模型同时写、靠 fallback 猜测”的中间态交付给用户。完成定义是所有入口和用户界面都只消费目标模型。
+
+这份取舍适合客户端应用：我们控制客户端与服务端的发布节奏，因此不必背负无限期 API / UI 向后兼容；但持久的用户数据仍是产品契约，必须保住而不能借“无兼容”丢弃。
+
+## 目标模型：一条消息有一条可信的因果线
+
+目标不是将每一种协作对象压成一个万能 status，而是让每种对象只拥有一段自己的真相，并以精确 ID 串成同一条因果线：
+
+```text
+messageId
+  └─ targetCatId
+       └─ queueEntryId（一次排队/恢复候选）
+            └─ turnExecutionId / invocationId（一次实际执行）
+                 ├─ body exposure（是否真正读到正文）
+                 └─ typed terminal outcome（该次执行的结果）
+
+wait / action successor 仅通过 source + holder + generation 关联；
+它们不成为这条普通消息的 Queue entry。
+```
+
+客户端消费两个不同的只读视图：
+
+- **Message receipt**：挂在原消息上，回答“哪个目标走到了哪一步、是否读到正文、这次执行结果是什么”。
+- **Actionable queue**：只列出可立即操作的精确 Queue candidate；没有 candidate 就没有恢复按钮，也不借 thread-wide 失败显示一块空面板。
+
+`threadId` 只负责把这些对象放进同一个对话，不再被允许把它们归因为同一次失败或同一个可恢复操作。
 
 ## 先看一条消息实际经历了什么
 
@@ -166,71 +200,85 @@ F264 的 receipt 已给出正确的基本词汇：
 6. **输出提交与外部送达分开。** 已提交的回答不能因为 connector 重试或补充回答失败而被撤回、重发或伪装成“还在处理中”。
 7. **没有可靠证据，不显示确定语气。** 禁止从正文、日志文本、时间相近或 queue length 猜“已读”“已完成”“需要用户继续”。
 
-## 分阶段整改建议
+## 终态重构：一个模型、一次切换
 
-### 阶段 0：先把现有契约变成可测的端到端事实
+### 目标状态：四个真相，两个用户视图
 
-不改数据模型，不引入新 Queue。先为每种入口建立同一份 trace fixture：
+实现完成后，运行时只保留下面四个既有真相域；它们由稳定坐标关联，绝不相互覆写：
 
-- 浏览器用户消息：闲置目标、忙碌目标、撤回、重启后恢复；
-- connector 消息：规范化、已提交输出的 transport retry；
-- 同 thread / 跨 thread A2A：单目标、多目标、终局 ACK 不再重新 enqueue；
-- managed hold / command wake：成功消费、stale、跨 task、跨 holder、重启恢复；
-- provider failure：正文未暴露、已暴露未完成、terminal silent、可重试与不可重试；
-- 一个 thread 同时有多个目标、多个 queue entry 和一个暂停 slot。
+| 真相域 | 终态职责 | 运行时明确禁止 |
+|---|---|---|
+| MessageStore + per-target receipt | 保存原文、作者时间线、每个目标的 admission / child creation / body exposure / terminal receipt | 用 aggregate parent 成功、thread pause 或 provider 文案代替精确目标 receipt |
+| InvocationQueue + Queue custody | 排序并接纳仍可调度的普通消息工作；从 durable custody 重建 live queue | 作为聊天历史、等待账本，或跨目标失败的聚合器 |
+| TurnExecution ledger | 记录精确 child invocation 的运行、失败、输出和 terminal outcome | 用一次失败推断整条原消息未送达，或替代 receipt 的 body-read witness |
+| AwaitState / ActionSuccessor / BallCustody | 记录结构化等待、责任移交、generation 和终局消费 | 伪装成普通用户 Queue entry，或由 thread-wide Continue 处理 |
 
-每份 fixture 的断言不是“接口返回 200”，而是：每一个 `messageId × targetCatId × queueEntryId × invocationId` 的状态变化可解释；F5 hydration、socket live update 和 action projection 得到同一结论。
+在这四个真相之上只允许两个用户视图：
 
-### 阶段 1：补一个只读的“精确恢复资格”投影
+1. **消息回执视图**以 `messageId × targetCatId` 为锚。它列出该目标的 child 是否创建、正文是否暴露、最后一次精确 execution 的 typed outcome，以及仍有无后续可用动作。
+2. **可操作队列视图**以 `queueEntryId × targetCatId` 为锚。它只包含当前真正可操作的普通 queued work，和由同一对象授权的恢复动作。
 
-把 Queue 面板需要的事实收敛为一个 derived projection，例如 `QueueRecoveryCandidate`；它不是新的 canonical store。最少字段为：
+系统诊断可以按 thread 聚合，但不能携带操作按钮，更不能把一条内部 wait 的异常翻译成“当前调用失败”。
 
-```text
-threadId, targetCatId, queueEntryId, messageId,
-failedInvocationId, failureClass, retryEligibility,
-receiptState, pauseSlotKey, updatedAt
-```
+### 目标 API 与 UI 契约
 
-生成条件必须是交集，而非并集：
+`QueueProcessor` 可以继续为调度器保存 slot 级暂停/失败信息，但对外不得再提供 thread-wide `queuePaused`、裸 `pauseReason` 或由 `/queue/next` 触发的泛化恢复。其对外 read model 必须返回两个互不混淆的集合：
 
 ```text
-同一 thread
-AND 同一 target slot
-AND 该 entry 仍可调度
-AND receipt 未终局
-AND 失败 / 暂停确实由该 candidate 的精确 invocation 造成
-AND 当前 generation / custody 仍允许恢复
+actionableQueueEntries[]
+recoveryCandidates[]
+  = exact failed invocation + exact target + exact queue entry
+    + non-terminal receipt + current custody/generation eligibility
 ```
 
-若交集为空，thread 可以有一条诊断记录，但不得产生“队列已暂停”或“继续”动作。这样既解决 `0` 计数矛盾，也避免全局/同 thread 误重放。
+每一个 `recoveryCandidate` 至少含 `messageId`、`targetCatId`、`queueEntryId`、`failedInvocationId`、失败类别与授权 generation。缺少其中任一项，就不是 candidate。
 
-### 阶段 2：把三种不同的失败放回正确界面
+客户端与服务端在同一次切换中采取下列契约：
 
-| 失败类别 | 主展示位置 | 用户看到的最少信息 | 允许动作 |
-|---|---|---|---|
-| 普通消息的 delivery / execution failure | 原消息的 receipt / lineage | 目标、发生阶段、是否读到正文、可否自动恢复 | 仅 exact retry / cancel（若契约允许） |
-| provider 配额、暂时不可用等 invocation failure | 该 invocation 的状态卡，并由原消息 receipt 链接 | 可读的失败类别、影响范围、下次自动恢复或替代路径 | 不把无关 Queue item 当重试对象 |
-| managed hold / wait / action-custody mismatch | 对应等待或工作状态卡 | 等待的对象、为何不能消费、是否需系统 reconciliation | 不显示普通 Queue “继续” |
+| 旧的宽泛行为 | 目标行为 |
+|---|---|
+| thread 级 `queuePaused` / `pauseReason` 决定 QueuePanel 是否展示 | QueuePanel 只由 `actionableQueueEntries` 与 `recoveryCandidates` 渲染；两者为空则无 action panel |
+| `POST /queue/next` 按 thread 继续 | 用户触发的恢复操作必须请求精确 `recoveryCandidate`；调度器内部 drain 与用户恢复是不同入口 |
+| “当前调用失败”悬在 QueuePanel 顶部 | execution failure 归属于原消息 receipt / invocation lineage；内部 wait failure 归属于对应 status card |
+| UI 自行从 raw queue + 宽泛 pause 拼状态 | API 提供已绑定身份的 read model；UI 不再从长度、文案或相邻时间猜状态 |
 
-QueuePanel 保持“可采取动作的排队工作”这一职责：`visibleEntries.length === 0` 时，应整体隐藏 action panel，或显示一个没有主操作的、明确标为系统诊断的状态条；绝不能显示 `0` 与可恢复动作并列。
+这不是只改 endpoint 名称：服务器先在同一次原子校验中核验 candidate 仍与 source message、target、failed invocation 和当前 custody generation 相符，才允许恢复。客户端传错、对象已被替换、已终局或跨目标的请求全部 fail closed。
 
-### 阶段 3：为受管等待增加受控 reconciliation
+### 失败展示的唯一归属
 
-对于 invocation-bound disposition 不匹配的对象，保持 fail-closed，但增加一条 server-owned reconciliation 路径：
+| 事件 | 归属与展示 | 可用动作 |
+|---|---|---|
+| 普通消息尚未被目标读到就失败 | 原消息的该目标 receipt：未读 + 失败执行 | 仅当存在 exact recovery candidate 时恢复或撤回 |
+| 目标已读，后续 execution 失败 | 原消息 receipt 保留已读事实；invocation lineage 显示失败阶段/原因 | 由 target-bound candidate 或明确的重新发起策略决定 |
+| provider 配额、暂时不可用 | execution 状态卡链接回原消息；说明影响范围和系统的确定下一步 | 不能把 thread 内别的 Queue entry 作为“继续” |
+| managed hold / wake / action-custody 不匹配 | 等待或工作状态卡；含 source、holder、generation 与 reconciliation 结论 | 无普通 Queue 操作；只走 server-owned reconciliation |
 
-- 重新读取 source / task / thread / holder / generation，不信任调用方传入的宽泛定位；
-- 区分“旧 wake 已被新 generation 取代”“来源任务已终局”“存储不确定，等待启动恢复”“真正缺少终局 producer”；
-- 只在前两类能被权威记录证明时终局或退役；不确定时保留隔离状态并上报；
-- 不通过 `processNext(threadId)`、自由文本或任意 task 完成去清除它。
+任何空的 Queue action view 都不显示 `0`、失败横幅或继续按钮。没有 exact object 的动作不是“保守”，而是错误动作。
 
-这是对 F167 已有精确边界的可观察性补足，不是给 managed hold 增加一条旁路消息或第二个 receipt ledger。
+### 一次性数据切换，而非旧新兼容层
 
-### 阶段 4：逐步切换与回归门槛
+切换前做一次只读 preflight，按以下规则生成可复核清单；这不是在线 shadow 双跑：
 
-1. 先在只读 shadow projection 中计算 candidate，与现有 `isPaused` 对比，记录 disagreement；不改变 dispatch 行为。
-2. 为 `QueuePanel` 加 fixture：raw queue 非空、action projection 为空、存在无关 paused slot 时，面板不显示可恢复态，计数和动作一致。
-3. 在 API 层拒绝缺少 exact candidate 的 manual continue；前端同一时间只操作来自 API projection 的 candidate。
-4. 等端到端 fixture 和生产样本都证明无误后，再替换 thread 级 UI pause 聚合。旧投影保留短期 telemetry，不同时保留两套写入真相。
+| 存量对象 | 切换规则 |
+|---|---|
+| 已终局的消息、receipt 和 execution | 保留为不可变历史；新读模型直接投影，不再执行旧状态分支 |
+| 仍活跃且拥有完整 `messageId × targetCatId × queueEntryId` 坐标的普通消息 | 一次性映射到目标 Queue custody / receipt 形状，随后只由新写路径更新 |
+| 仍活跃且有精确 invocation / generation 的 wait 或 action successor | 保留在其既有责任域，并由新 reconciliation reader 投影；不生成 Queue row |
+| 缺少精确身份、无法证明可安全重放的 in-flight 旧记录 | 标为 `reconciliation_required`，不自动 replay、不伪装为用户待办；由 server-owned reconciler 读取权威来源后终局或隔离 |
+
+切换完成后删除旧 API 字段、旧 UI 分支和旧 thread-wide recovery 调用点。不存在“新模型为空就回退旧模型”的读写路径。若 preflight 发现不能安全映射的类别，应阻断上线并把该类别交回设计 review，而不是临时接回旧分支。
+
+### 重构交付顺序
+
+这是一个终态项目，不是向用户逐步暴露的 hotfix；顺序只用于降低 review 风险：
+
+1. **契约冻结与 RED fixtures**：把所有入口的因果链写成黑盒 fixture。每条断言都检查 `messageId × targetCatId × queueEntryId × invocationId`，不只检查 HTTP 200。
+2. **后端一次重构**：收口 receipt、Queue custody、TurnExecution 与 wait 的边界；删除 thread-wide recovery API / projection；实现 exact candidate 校验和 server-owned reconciliation。
+3. **客户端同次切换**：删除 pause banner / generic Continue 的消费，改为 receipt/invocation status 和 action queue 两个视图；socket、F5 hydration 与初始 history 同源。
+4. **迁移 preflight 与正式切换**：在隔离副本验证上表的全部转换，备份可恢复证据，执行一次性切换，确认没有 legacy reader/writer 后才启用。
+5. **端到端验收**：跑下面的全矩阵，并对真实 thread 抽样核验。发现遗漏不以兼容 fallback 掩盖，回到同一个 target model 修正。
+
+提交可以按这五类组织，PR 的 review 以同一个 RFC / acceptance matrix 为准；不得把第 2、3、4 类各自当作完成的独立产品行为。
 
 ## 验收矩阵
 
@@ -257,18 +305,20 @@ QueuePanel 保持“可采取动作的排队工作”这一职责：`visibleEntr
 
 - 不把所有消息、所有 A2A、所有 wait 都塞进 `InvocationQueue`；
 - 不用新的全局状态机替换已存在的 MessageStore custody、TurnExecution、ActionSuccessor 或 AwaitState；
+- 不保留旧/新 Queue pause、read model、endpoint 或 UI 的长期双轨 compatibility fallback；
 - 不因为 UI 难解释，就放宽 invocation-bound completion 的 fail-closed 条件；
 - 不从 provider 文本、控制台日志或 timestamp proximity 推导业务终局；
 - 不把 internal receipt、reconciliation failure 或系统 diagnostic 伪装成某只猫的自然语言回答；
-- 不先改一个文案就关闭 #1354。若 exact recovery scope 未得到证明，文案再友好也是误导。
+- 不先改一个文案就关闭 #1354。若 exact recovery scope 未得到证明，文案再友好也是误导；若一批存量不能安全映射，也不能用旧路径把它悄悄接回去。
 
 ## 需要在实现前做出的产品决定
 
-以下不是技术 A/B 题，需在本审计经内容评审后，用用户体验与责任边界来拍板：
+以下不是局部技术 A/B 题，需在本 RFC review 中以用户体验与责任边界拍板：
 
-1. provider 配额/不可用时，用户要看到“系统将自动在何时重试”，还是必须显式选择继续？前者降低打扰，后者给予控制；两者都不能牺牲 exact object binding。
-2. 无 action 的内部协调异常，是默认收在可展开的“系统状态”中，还是在当前 thread 顶部展示一个非阻塞摘要？前者更安静，后者更可发现；无论选择哪一种，都不应占用 Queue action panel。
-3. 当原消息已读但一次执行失败时，原气泡下的状态应显示到什么粒度？建议默认是阶段 + 可读原因 + 下一步，精确 invocation ID 留给“查看诊断”，避免把内部术语推给用户。
+1. provider 配额/不可用时，恢复的 owner 是系统自动策略还是用户显式确认？无论答案是什么，动作必须由 exact candidate 授权，而不是按 thread 继续。
+2. 无 action 的内部协调异常，默认收在可展开的系统状态中，还是在 thread 顶部显示非阻塞摘要？它不应占用 Queue action panel。
+3. 原消息已读、但一次 execution 失败时，默认显示阶段 + 可读原因 + 下一步，还是暴露更多 lineage 细节？建议精确 invocation ID 仅放在“查看诊断”。
+4. `reconciliation_required` 记录的 operator 体验是什么？建议只显示“系统正在核对一项内部状态”，并在 server 证明可恢复前禁用任何聊天/Queue 操作。
 
 ## 代码与文档来源地图
 
@@ -286,4 +336,4 @@ QueuePanel 保持“可采取动作的排队工作”这一职责：`visibleEntr
 
 ## 下一步
 
-先对这份审计做一次跨家族、零上下文内容 review：检查它是否漏掉入口、把 historic 契约当成现状，或把三种责任对象错误合并。通过后，以 #1354 为第一条 implementation issue，按“阶段 0 → shadow projection → UI / API gate → rollout”推进；任何阶段若发现需要新持久化真相源，应暂停并单独开 architecture decision，而不是在 QueuePanel 或 QueueProcessor 里堆一层兼容分支。
+先由 maintainer 做 RFC 内容 review，重点检查：入口是否齐全、既有 truth owner 是否被误合并、一次性切换能否保住用户数据，以及 exact recovery contract 是否足以取代 thread-wide Continue。review 通过后，#1354 保持 umbrella，按上面的五个交付单元组织**同一个终态重构 PR**；任何发现的新持久化真相源、不能安全映射的存量类别或跨 owner 矛盾，都先回到本 RFC 的 architecture decision，不在 `QueuePanel` 或 `QueueProcessor` 堆兼容分支。
