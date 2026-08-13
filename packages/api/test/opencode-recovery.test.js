@@ -52,6 +52,38 @@ describe('opencode recovery boundary', () => {
     assert.equal(recovered.source, 'OPENCODE_DB');
   });
 
+  test('resolves relative OPENCODE_DB under the OpenCode data root', () => {
+    const root = mkdtempSync(join(tmpdir(), 'cat-cafe-opencode-relative-db-'));
+    const xdgRoot = join(root, 'xdg');
+    const dbPath = join(xdgRoot, 'opencode', 'custom.db');
+    createPartDb(dbPath, [
+      {
+        sessionId: 'ses_relative',
+        messageId: 'msg_relative',
+        data: JSON.stringify({ type: 'text', text: 'from relative env db' }),
+      },
+    ]);
+
+    const candidates = resolveOpenCodeDbCandidates({
+      env: { OPENCODE_DB: 'custom.db', XDG_DATA_HOME: xdgRoot },
+      homeDir: join(root, 'home'),
+      platform: 'linux',
+    });
+    assert.equal(candidates[0].path, dbPath);
+    assert.equal(candidates[0].source, 'OPENCODE_DB');
+
+    const recovered = recoverOpenCodeSilentCompletion({
+      sessionId: 'ses_relative',
+      messageId: 'msg_relative',
+      env: { OPENCODE_DB: 'custom.db', XDG_DATA_HOME: xdgRoot },
+      homeDir: join(root, 'home'),
+      platform: 'linux',
+    });
+
+    assert.equal(recovered.text, 'from relative env db');
+    assert.equal(recovered.source, 'OPENCODE_DB');
+  });
+
   test('discovers channel database files under XDG data root', () => {
     const root = mkdtempSync(join(tmpdir(), 'cat-cafe-opencode-xdg-'));
     const xdgRoot = join(root, 'xdg');
@@ -147,6 +179,10 @@ describe('opencode recovery boundary', () => {
         '/root/.ssh/id_rsa',
         '/data/app/config.env',
         '/srv/opencode/runtime.log',
+        '/secrets/acme/private.pem',
+        '/custom/private/file.txt',
+        '/single-segment-secret',
+        '\\\\server\\share\\private.txt',
       ].join(' '),
     );
 
@@ -157,6 +193,10 @@ describe('opencode recovery boundary', () => {
     assert.doesNotMatch(projected, /\/root\/\.ssh/);
     assert.doesNotMatch(projected, /\/data\/app/);
     assert.doesNotMatch(projected, /\/srv\/opencode/);
+    assert.doesNotMatch(projected, /\/secrets\/acme/);
+    assert.doesNotMatch(projected, /\/custom\/private/);
+    assert.doesNotMatch(projected, /\/single-segment-secret/);
+    assert.doesNotMatch(projected, /\\\\server\\share/);
     assert.match(projected, /\[redacted/);
   });
 });

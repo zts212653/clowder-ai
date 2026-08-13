@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -158,6 +158,11 @@ const STEP_FINISH = {
     cost: 0.036,
     tokens: { total: 36937, input: 36928, output: 9 },
   },
+};
+
+const STEP_FINISH_TOOL_CALLS = {
+  ...STEP_FINISH,
+  part: { ...STEP_FINISH.part, reason: 'tool-calls' },
 };
 
 // CodeAgent 3.0 → OpenCode facade: translate script may drop usage, yielding
@@ -1035,9 +1040,8 @@ describe('OpenCodeAgentService', () => {
 
   // F212 Phase G R1 P1 (cloud codex catch on 1d519e7f2): tool-only turns are legitimate
   // task completions per F215 AC-B3. Tool events must not be mislabeled as
-  // silent_completion; if the CLI exits after a tool with no final text, recover
-  // through the no-tool finalizer in append mode so later real text is not replaced.
-  test('AC-G3 R1 P1: tool_use event without text runs append-mode finalizer, not silent_completion', async () => {
+  // silent_completion and must not be routed through the post-tool finalizer.
+  test('AC-G3 R1 P1: pure tool_use completion is preserved without silent_completion or finalizer', async () => {
     const proc = createMockProcess();
     const finalizerProc = createMockProcess();
     let spawnCalls = 0;
@@ -1047,10 +1051,7 @@ describe('OpenCodeAgentService', () => {
         process.nextTick(() => {
           emitOpenCodeEvents(finalizerProc, [
             STEP_START,
-            {
-              ...TEXT_RESPONSE,
-              part: { ...TEXT_RESPONSE.part, text: 'The tool completed and produced file.txt.' },
-            },
+            { ...TEXT_RESPONSE, part: { ...TEXT_RESPONSE.part, text: 'unexpected finalizer text' } },
             STEP_FINISH,
           ]);
         });
@@ -1085,10 +1086,8 @@ describe('OpenCodeAgentService', () => {
       messages.some((m) => m.type === 'tool_use'),
       'tool_use yield confirms event reached transformer',
     );
-    assert.equal(spawnCalls, 2, 'tool-only completion gap should start one no-tool finalizer invocation');
-    assert.equal(textMsgs.length, 1, 'tool-only recovery should append exactly one finalizer answer');
-    assert.equal(textMsgs[0].textMode, 'append', 'tool-only recovery must not replace possible later real text');
-    assert.equal(textMsgs[0].content, 'The tool completed and produced file.txt.');
+    assert.equal(spawnCalls, 1, 'pure tool-only completion must not start a no-tool finalizer invocation');
+    assert.equal(textMsgs.length, 0, 'pure tool-only completion remains non-user-visible text');
   });
 
   // Issue #1208: CodeAgent 3.0 → OpenCode translate may drop token usage.
@@ -1137,7 +1136,7 @@ describe('OpenCodeAgentService', () => {
           },
         },
       },
-      STEP_FINISH,
+      STEP_FINISH_TOOL_CALLS,
     ]);
 
     const messages = await promise;
@@ -1204,7 +1203,7 @@ describe('OpenCodeAgentService', () => {
         ...TOOL_USE,
         part: { ...TOOL_USE.part, tool: 'read', state: { status: 'completed', output: 'model=deepseek-v4-pro' } },
       },
-      STEP_FINISH,
+      STEP_FINISH_TOOL_CALLS,
     ]);
 
     const messages = await promise;
@@ -1217,6 +1216,59 @@ describe('OpenCodeAgentService', () => {
     );
     assert.equal(textMsgs.at(-1)?.textMode, 'replace');
     assert.match(String(textMsgs.at(-1)?.content), /tool_use_blocked/);
+  });
+
+  test('post-tool finalizer fails closed before spawn when managed OpenCode config can override permissions', async () => {
+    const proc = createMockProcess();
+    const finalizerProc = createMockProcess();
+    const managedConfigPath = join(mkdtempSync(join(tmpdir(), 'cat-cafe-opencode-managed-')), 'opencode.json');
+    writeFileSync(managedConfigPath, JSON.stringify({ permission: { '*': 'allow' } }), 'utf8');
+    let spawnCalls = 0;
+    const spawnFn = mock.fn(() => {
+      spawnCalls++;
+      if (spawnCalls === 2) {
+        process.nextTick(() => {
+          emitOpenCodeEvents(finalizerProc, [
+            STEP_START,
+            { ...TEXT_RESPONSE, part: { ...TEXT_RESPONSE.part, text: 'managed override would have run' } },
+            STEP_FINISH,
+          ]);
+        });
+        return finalizerProc;
+      }
+      return proc;
+    });
+    const service = new OpenCodeAgentService({
+      catId: 'opencode',
+      spawnFn,
+      model: 'deepseek-v4-pro',
+      opencodeManagedConfigPaths: [managedConfigPath],
+    });
+    const promise = collect(service.invoke('Check the active model and report it'));
+
+    emitOpenCodeEvents(proc, [
+      STEP_START,
+      {
+        ...TEXT_RESPONSE,
+        part: { ...TEXT_RESPONSE.part, text: 'Let me check that.' },
+      },
+      {
+        ...TOOL_USE,
+        part: { ...TOOL_USE.part, tool: 'read', state: { status: 'completed', output: 'model=deepseek-v4-pro' } },
+      },
+      STEP_FINISH_TOOL_CALLS,
+    ]);
+
+    const messages = await promise;
+    const textMsgs = messages.filter((m) => m.type === 'text');
+
+    assert.equal(
+      spawnCalls,
+      1,
+      'managed config precedence must block finalizer before a second OpenCode process starts',
+    );
+    assert.equal(textMsgs.at(-1)?.textMode, 'replace');
+    assert.match(String(textMsgs.at(-1)?.content), /managed_config_present/);
   });
 
   test('post-tool deterministic fallback redacts raw tool output secrets and absolute paths', async () => {
@@ -1254,7 +1306,7 @@ describe('OpenCodeAgentService', () => {
           },
         },
       },
-      STEP_FINISH,
+      STEP_FINISH_TOOL_CALLS,
     ]);
 
     const messages = await promise;

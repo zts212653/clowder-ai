@@ -1,14 +1,16 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { homedir, platform as osPlatform } from 'node:os';
-import { join } from 'node:path';
+import { join, posix, win32 } from 'node:path';
 import Database from 'better-sqlite3';
 import { sanitizeCliStderr } from '../../../../../utils/sanitize-cli-stderr.js';
 
 export const OPENCODE_DB_ENV = 'OPENCODE_DB';
+export const OPENCODE_CONFIG_CONTENT_ENV = 'OPENCODE_CONFIG_CONTENT';
 export const OPENCODE_NO_TOOL_FINALIZER_AGENT = 'cat-cafe-no-tool-finalizer';
 export const OPENCODE_NO_TOOL_PERMISSION = {
   '*': 'deny',
   read: 'deny',
+  list: 'deny',
   glob: 'deny',
   grep: 'deny',
   lsp: 'deny',
@@ -16,14 +18,43 @@ export const OPENCODE_NO_TOOL_PERMISSION = {
   webfetch: 'deny',
   websearch: 'deny',
   edit: 'deny',
+  write: 'deny',
+  apply_patch: 'deny',
   bash: 'deny',
+  shell: 'deny',
   task: 'deny',
+  subagent: 'deny',
+  todowrite: 'deny',
+  todoread: 'deny',
   question: 'deny',
+  external_directory: 'deny',
+  doom_loop: 'deny',
+} as const;
+export const OPENCODE_NO_TOOL_FLAGS = {
+  read: false,
+  list: false,
+  glob: false,
+  grep: false,
+  lsp: false,
+  skill: false,
+  webfetch: false,
+  websearch: false,
+  edit: false,
+  write: false,
+  apply_patch: false,
+  bash: false,
+  shell: false,
+  task: false,
+  subagent: false,
+  todowrite: false,
+  todoread: false,
+  question: false,
 } as const;
 
 const MAX_OPENCODE_VISIBLE_TOOL_OUTPUT_CHARS = 4_000;
 const DEFAULT_SAFE_TOOL_OUTPUT_CHARS = 1_000;
 const OPENCODE_DB_FILE_PATTERN = /^opencode(?:[-_.][\w-]+)?\.db$/;
+const OPENCODE_CONFIG_FILENAMES = ['opencode.json', 'opencode.jsonc'] as const;
 
 export interface OpenCodeToolTrace {
   toolName: string;
@@ -46,6 +77,13 @@ export interface OpenCodeDbResolutionOptions {
   env?: Record<string, string | undefined>;
   homeDir?: string;
   platform?: NodeJS.Platform;
+}
+
+export interface OpenCodeManagedConfigDetectionOptions {
+  env?: Record<string, string | undefined>;
+  homeDir?: string;
+  platform?: NodeJS.Platform;
+  managedConfigPaths?: readonly string[];
 }
 
 export interface OpenCodeSilentRecoveryOptions extends OpenCodeDbResolutionOptions {
@@ -77,9 +115,13 @@ function stringifyForVisibleText(value: unknown, maxChars: number): string {
 
 function redactGenericAbsolutePaths(value: string): string {
   return value
+    .replace(
+      /(^|[\s"'(=[{,])\\\\(?:[^\s"'<>|\\]+\\)+[^\s"'<>|\\]+/g,
+      (_match, prefix: string) => `${prefix}[redacted path]`,
+    )
     .replace(/\b[A-Za-z]:\\(?:[^\s"'<>|]+\\)*[^\s"'<>|]+/g, '[redacted path]')
     .replace(
-      /(^|[\s"'(=[{,:])\/(?:Users|home|var|private|opt|etc|mnt|workspace|tmp|usr|root|data|app|srv|projects)\/[^\s"'<>{}|]+/g,
+      /(^|[\s"'(=[{,])\/(?!\/)[^\s"'<>|:]+(?:\/[^\s"'<>|:]+)*/g,
       (_match, prefix: string) => `${prefix}[redacted path]`,
     );
 }
@@ -198,6 +240,37 @@ function addDbFilesFromDirectory(
   }
 }
 
+function openCodeDataDir(
+  env: Record<string, string | undefined>,
+  homeDir: string,
+  runtimePlatform: NodeJS.Platform,
+): string {
+  if (runtimePlatform === 'win32') {
+    return env.LOCALAPPDATA ? join(env.LOCALAPPDATA, 'opencode') : join(homeDir, 'AppData', 'Local', 'opencode');
+  }
+  if (runtimePlatform === 'darwin') {
+    return join(homeDir, 'Library', 'Application Support', 'opencode');
+  }
+  return env.XDG_DATA_HOME ? join(env.XDG_DATA_HOME, 'opencode') : join(homeDir, '.local', 'share', 'opencode');
+}
+
+function isAbsoluteForPlatform(path: string, runtimePlatform: NodeJS.Platform): boolean {
+  if (runtimePlatform === 'win32') return win32.isAbsolute(path) || path.startsWith('/');
+  return posix.isAbsolute(path) || /^[A-Za-z]:[\\/]/.test(path);
+}
+
+function resolveOpenCodeDbEnvPath(
+  value: string | undefined,
+  env: Record<string, string | undefined>,
+  homeDir: string,
+  runtimePlatform: NodeJS.Platform,
+): string | undefined {
+  if (!value) return undefined;
+  return isAbsoluteForPlatform(value, runtimePlatform)
+    ? value
+    : join(openCodeDataDir(env, homeDir, runtimePlatform), value);
+}
+
 export function resolveOpenCodeDbCandidates(options: OpenCodeDbResolutionOptions = {}): OpenCodeDbCandidate[] {
   const env = options.env ?? process.env;
   const homeDir = options.homeDir ?? homedir();
@@ -205,7 +278,11 @@ export function resolveOpenCodeDbCandidates(options: OpenCodeDbResolutionOptions
   const candidates: OpenCodeDbCandidate[] = [];
 
   addCandidate(candidates, options.overridePath, 'override');
-  addCandidate(candidates, env[OPENCODE_DB_ENV], 'OPENCODE_DB');
+  addCandidate(
+    candidates,
+    resolveOpenCodeDbEnvPath(env[OPENCODE_DB_ENV], env, homeDir, runtimePlatform),
+    'OPENCODE_DB',
+  );
 
   const xdgOpenCodeDir = env.XDG_DATA_HOME ? join(env.XDG_DATA_HOME, 'opencode') : undefined;
   addCandidate(candidates, xdgOpenCodeDir ? join(xdgOpenCodeDir, 'opencode.db') : undefined, 'xdg');
@@ -232,6 +309,49 @@ export function resolveOpenCodeDbCandidates(options: OpenCodeDbResolutionOptions
   addDbFilesFromDirectory(candidates, defaultOpenCodeDir, 'default');
 
   return candidates;
+}
+
+function defaultManagedConfigPaths(options: OpenCodeManagedConfigDetectionOptions): string[] {
+  const env = options.env ?? process.env;
+  const runtimePlatform = options.platform ?? osPlatform();
+  const paths: string[] = [];
+  const addConfigDir = (dir: string | undefined) => {
+    if (!dir) return;
+    for (const filename of OPENCODE_CONFIG_FILENAMES) paths.push(join(dir, filename));
+  };
+
+  if (runtimePlatform === 'win32') {
+    addConfigDir(env.ProgramData ? join(env.ProgramData, 'opencode') : undefined);
+  } else if (runtimePlatform === 'darwin') {
+    addConfigDir('/Library/Application Support/opencode');
+    paths.push('/Library/Managed Preferences/ai.opencode.managed.plist');
+    if (env.USER) paths.push(join('/Library/Managed Preferences', env.USER, 'ai.opencode.managed.plist'));
+  } else {
+    addConfigDir('/etc/opencode');
+  }
+
+  if (options.managedConfigPaths) paths.push(...options.managedConfigPaths);
+  return paths.filter((path) => path.length > 0);
+}
+
+export function hasOpenCodeManagedConfig(options: OpenCodeManagedConfigDetectionOptions = {}): boolean {
+  return defaultManagedConfigPaths(options).some((path) => existsSync(path));
+}
+
+export function buildOpenCodeNoToolFinalizerConfig(): Record<string, unknown> {
+  return {
+    $schema: 'https://opencode.ai/config.json',
+    default_agent: OPENCODE_NO_TOOL_FINALIZER_AGENT,
+    permission: OPENCODE_NO_TOOL_PERMISSION,
+    tools: OPENCODE_NO_TOOL_FLAGS,
+    agent: {
+      [OPENCODE_NO_TOOL_FINALIZER_AGENT]: {
+        mode: 'primary',
+        permission: OPENCODE_NO_TOOL_PERMISSION,
+        tools: OPENCODE_NO_TOOL_FLAGS,
+      },
+    },
+  };
 }
 
 export function recoverOpenCodeSilentCompletion(options: OpenCodeSilentRecoveryOptions): OpenCodeSilentRecoveryResult {

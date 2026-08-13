@@ -45,13 +45,15 @@ import {
 } from './opencode-auto-approval.js';
 import { transformOpenCodeEvent } from './opencode-event-transform.js';
 import {
+  buildOpenCodeNoToolFinalizerConfig,
   buildOpenCodePostToolFallbackText,
   buildOpenCodePostToolFinalizerPrompt,
   extractOpenCodeMessageRef,
   extractOpenCodeToolTrace,
+  hasOpenCodeManagedConfig,
   identifierPrefix,
+  OPENCODE_CONFIG_CONTENT_ENV,
   OPENCODE_NO_TOOL_FINALIZER_AGENT,
-  OPENCODE_NO_TOOL_PERMISSION,
   type OpenCodeToolTrace,
   recoverOpenCodeSilentCompletion,
   SessionSingleFlight,
@@ -77,6 +79,8 @@ interface OpenCodeAgentServiceOptions {
   autoApproveProbeFn?: OpenCodeAutoApproveProbeFn;
   /** Test seam for OpenCode's local SQLite state used to recover silent completions. */
   opencodeDbPath?: string;
+  /** Test seam for managed OpenCode config precedence detection. */
+  opencodeManagedConfigPaths?: readonly string[];
 }
 
 const OPENCODE_API_KEY_ENV = 'OPENCODE_API_KEY';
@@ -158,10 +162,6 @@ function isPermanentOpenCodeProviderFailure(event: unknown, reasonCode: string |
   );
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
 function summarizeDebugValue(value: string | null | undefined): string {
   if (value === null) return '(cleared)';
   if (!value) return '(unset)';
@@ -212,6 +212,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
   readonly l0CompilerFn: import('../../types.js').L0CompilerFn | undefined;
   private readonly autoApproveProbeFn: OpenCodeAutoApproveProbeFn | undefined;
   private readonly opencodeDbPath: string | undefined;
+  private readonly opencodeManagedConfigPaths: readonly string[] | undefined;
   private readonly sessionSingleFlight = new SessionSingleFlight();
   private autoApproveProbe: Promise<OpenCodeAutoApproveProbeResult> | undefined;
 
@@ -225,6 +226,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     this.l0CompilerFn = options?.l0CompilerFn;
     this.autoApproveProbeFn = options?.autoApproveProbeFn;
     this.opencodeDbPath = options?.opencodeDbPath;
+    this.opencodeManagedConfigPaths = options?.opencodeManagedConfigPaths;
   }
 
   /**
@@ -588,10 +590,12 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           };
         }
       }
-      if (lastToolEventIndex > lastTextEventIndex && !errorAlreadyYielded) {
-        // Existing prelude text is incomplete and should be replaced. Pure tool-only
-        // gaps have no text to replace; append avoids clobbering a later real continuation.
-        const postToolFinalizerTextMode = textEventCount > 0 ? 'replace' : 'append';
+      if (
+        textEventCount > 0 &&
+        lastToolEventIndex > lastTextEventIndex &&
+        !terminalStepFinishAfterLastTool &&
+        !errorAlreadyYielded
+      ) {
         log.warn(
           {
             catId: this.catId,
@@ -603,7 +607,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
             latestTool: lastToolTrace?.toolName,
             lastStepFinishReason,
             terminalStepFinishAfterLastTool,
-            textMode: postToolFinalizerTextMode,
+            textMode: 'replace',
           },
           'OpenCode CLI stopped after tool_use without final text - running no-tool finalizer',
         );
@@ -617,7 +621,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
             ? { sessionId: metadata.sessionId ?? options?.sessionId }
             : {}),
           trace: lastToolTrace,
-          textMode: postToolFinalizerTextMode,
+          textMode: 'replace',
           options,
         })) {
           if (finalizerMsg.type === 'text') textEventCount++;
@@ -697,6 +701,23 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
   }
 
   private async *runPostToolFinalizer(params: OpenCodePostToolFinalizerParams): AsyncIterable<AgentMessage> {
+    const boundaryFailure = this.getNoToolFinalizerBoundaryFailure();
+    if (boundaryFailure) {
+      log.warn(
+        { catId: this.catId, invocationId: params.options?.invocationId, reason: boundaryFailure },
+        'OpenCode no-tool finalizer blocked before spawn',
+      );
+      yield {
+        type: 'text',
+        catId: this.catId,
+        content: buildOpenCodePostToolFallbackText(params.trace, boundaryFailure),
+        textMode: params.textMode,
+        metadata: params.metadata,
+        timestamp: Date.now(),
+      };
+      return;
+    }
+
     const finalizerPrompt = buildOpenCodePostToolFinalizerPrompt(params.trace);
     const finalizerArgs = this.buildNoToolFinalizerArgs(finalizerPrompt, params.sessionId, params.effectiveModel);
     const finalizerEnv = this.buildNoToolFinalizerEnv(params.childEnv);
@@ -868,16 +889,15 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
   private buildNoToolFinalizerEnv(childEnv: Record<string, string | null>): Record<string, string | null> {
     return {
       ...childEnv,
-      OPENCODE_CONFIG_CONTENT: JSON.stringify({
-        permission: OPENCODE_NO_TOOL_PERMISSION,
-        agent: {
-          [OPENCODE_NO_TOOL_FINALIZER_AGENT]: {
-            mode: 'primary',
-            permission: OPENCODE_NO_TOOL_PERMISSION,
-          },
-        },
-      }),
+      [OPENCODE_CONFIG_CONTENT_ENV]: JSON.stringify(buildOpenCodeNoToolFinalizerConfig()),
     };
+  }
+
+  private getNoToolFinalizerBoundaryFailure(): string | null {
+    if (hasOpenCodeManagedConfig({ managedConfigPaths: this.opencodeManagedConfigPaths })) {
+      return 'managed_config_present';
+    }
+    return null;
   }
 
   private buildArgs(
