@@ -38,9 +38,9 @@ related_docs:
 1. #1354 不以 `QueuePanel` 文案、计数或 `isPaused` 的局部修补关闭；它是完整 thread 生命周期重构的入口证据。
 2. 一位成员 A 请求 B 或 B/C 处理，并不让 A 的闭环责任消失。B/C 是 A 创建的处理分支；A 只在所需分支给出可接受结果，或 A 自己明确处置失败后，才算结束。
 3. 所有新消息先持久化、再按目标排队。某位成员正在执行，绝不是丢弃、短路或“已经处理了”随后到消息的理由。
-4. `@co-creator` 是面向 human participant 的分支，和猫分支使用同一套可观察的生命周期；差别只是 human 不经历 provider Run，而是等待回复、确认、批准、拒绝或超时。
+4. `@co-creator` 先经过 durable intent 判定：只有可行动的 `handoff` / 请求 / gate 才建立 human branch；`fyi` 与 `done-notify` 只是可见通知，不建立 human inbox，也不阻塞父责任。human branch 与猫分支使用同一套可观察的生命周期；差别只是 human 不经历 provider Run，而是等待回复、确认、批准、拒绝或超时。
 5. 不新增一个抽象的 `WorkUnit / Assignment / AuthorityGrant / ThreadContinuationProjection` 总账本。现有消息、Queue entry、invocation/TurnExecution、`ActionSuccessor`、`AwaitState`、F233 custody 的精确事实仍各自归其 owner；需要补的只是它们之间的**父责任与分支关联**及其原子状态转换。
-6. 这是客户端应用的一次目标模型切换：旧消息、旧回复和诊断永远保留为历史；切换后的**新消息**才按本 RFC 建立新链路。无需为历史数据构造运行时兼容、迁移或猜测性补链。
+6. 这是客户端应用的一次目标模型切换，但绝不把仍在处理的已接纳工作直接降为历史：发布门必须先让旧运行时 quiescent drain；只要仍有 queued、processing、wait 或 custody record，切换就中止并保留旧 executor 继续处理。只有所有旧记录终局后，后续**新消息**才按本 RFC 建立新链路。无需为终局历史构造运行时兼容、迁移或猜测性补链。
 
 ## 先分清五件不同的事
 
@@ -75,6 +75,8 @@ Message
 
 一条消息可有多个显式 target。每个 `messageId × targetId` 都有独立 receipt：`accepted → queued → processing → responded | failed | canceled`，并连到精确 `queueEntryId` 与 `invocationId / turnExecutionId`。它只回答“这个 target 是否处理了这条消息”，不回答整个协作是否结束。
 
+`processing` 只证明 child Run 已创建，**不证明正文已被读到**。正文暴露是 receipt 上独立、append-only 的事实：`bodyExposure(messageId, targetId, invocationId, seenAt)`。因此同一个 `processing → failed` 可以是暴露前失败或暴露后失败；前者必须显示未读，后者保留已读事实。不得从 Run 创建、provider error 或最终结果倒推 `seenAt`。
+
 ### 父责任（closure responsibility）
 
 当 A 对用户消息开始处理时，A 是该处理链的父责任人。A 可以直接答复，也可以发出 A2A/human 请求建立分支。父责任始终带着：
@@ -105,7 +107,7 @@ planned → queued → processing → responded | failed | rejected | expired
 
 `queued` 表示已经有精确候选但 target 尚未开始；`processing` 只在该 target 的 Queue entry 被取走并创建 Run 后出现；`responded` 必须带可引用的结果/回复 message 或 human decision。自然语言“我来看看”和 target 被 `@` 都不是 `responded`。
 
-分支的 target 可以是猫、co-creator 或其他 human participant。human 分支不创建 provider Run，但一样经历 `planned → queued/pending_human → responded | rejected | expired`，也一样向父责任提供可观察结果。
+分支的 target 可以是猫、co-creator 或其他 human participant。human 分支只由持久化为可行动 `handoff` / request / gate 的意图建立；现有消息模型不足以可靠区分时，不能凭一个 `@co-creator` 猜出待办。`fyi` 和 `done-notify` 保留为消息/receipt 事实，但不创建 pending-human inbox、不参与 join、也不让父链等待。真正的 human 分支不创建 provider Run，但一样经历 `planned → queued/pending_human → responded | rejected | expired`，也一样向父责任提供可观察结果。
 
 ## 输入路由和入队
 
@@ -138,7 +140,7 @@ new message
 
 - A 发给 B/C 的明确 @ 消息，既是可见消息，也是由 A 创建的一个或多个分支；各 branch 各自入队。
 - B 的结果消息首先结算 B branch，并作为 A 父链的结算证据；它不是一条无 @ 用户消息，因此不走“最近回复者”回退。
-- co-creator 的确认/批准/拒绝同样结算对应 human branch。它不自动唤起模型，但需要给 A 父链产生可追踪的状态变化。
+- co-creator 的确认/批准/拒绝同样结算对应 human branch。它不自动唤起模型，但需要给 A 父链产生可追踪的状态变化。单纯 `@co-creator` 的 FYI 或完成通知只交付为可见消息，不制造一个虚假的人类待办。
 
 ## 父责任的完整生命周期
 
@@ -148,7 +150,7 @@ new message
 
 ### 2. A 请求 B、C 或 co-creator
 
-A 的输出中出现显式 @ target 时，系统原子地：
+A 的输出中出现猫 target，或 human target 已被判定为可行动 `handoff` / request / gate 时，系统原子地：
 
 1. 持久化 A 的请求消息及其 source/parent 关系；
 2. 为每个 target 创建一个 branch 和对应 target receipt；
@@ -156,6 +158,8 @@ A 的输出中出现显式 @ target 时，系统原子地：
 4. 把分支 ID 写回 A 的父处理链。
 
 此时 A 的 Run 可以正常结束，但 A 的**父责任不结束**。它进入 `waiting_for_children`，由这个父链和 branch 状态被动地再次唤起，而不是让 A 常驻观察。
+
+若 human mention 是 `fyi` 或 `done-notify`，只持久化/投递该通知及其 intent provenance；不执行上述第 2–4 步。若 intent 无法可靠判定，也不能先建 branch 再以 timeout 修正：必须保留为非行动通知或要求发送者显式标明 intent。
 
 ### 3. B/C 接受并处理
 
@@ -248,11 +252,11 @@ allowed action: reply, create branch, reroute, ask human, suspend, cancel
 
 | 现有对象 | 保留职责 | 本次需要的连接/改造 |
 |---|---|---|
-| `MessageStore` | 正文、作者、时间线、可见性、消息关系 | message 与 parent/root/append 的明确关联；历史消息不补链 |
+| `MessageStore` + Queue custody receipt | 正文、作者、时间线、可见性、消息关系；child creation 与精确 `bodyExposures.seenAt` | message 与 parent/root/append 的明确关联；receipt 将 body exposure 作为独立事实，历史消息不补链 |
 | `AgentRouter` | 显式 @、最近用户 @ 继承、最近健康回复者、preferred/default 的初始目标选择 | 路由决策输出可引用的 target 与来源；不再以“无 @ 无 owner”替代既有回退 |
 | `InvocationQueue` | 每 target 的 queued/processing candidate 与单成员 slot | 所有 active-target 新消息仍入队；删除 “active target 已覆盖所以 skip” 语义 |
 | F194 invocation / `TurnExecution` | 真实 live Run 与 terminal execution outcome | Run outcome 只更新自己的 receipt/branch，不能直接判父责任完成 |
-| `ActionSuccessor` / `AwaitState` / F233 custody | 精确等待、动作 holder、generation 与恢复 | 父责任/branch 的 pending state 必须引用 exact holder，而非 thread pause |
+| `ActionSuccessor` / `AwaitState` / F233 custody | 精确等待、动作 holder、generation、human handoff intent 与恢复 | 父责任/branch 的 pending state 必须引用 exact holder 和 `handoff` intent，而非 thread pause 或裸 mention |
 | UI projection | 从上述事实汇总现场 | 仅为可重建 read model；不成为责任、队列或恢复权威 |
 
 因此不保留 `ThreadContinuationProjection` 作为新增 canonical contract，也不引入通用 `AuthorityGrant`。执行副作用所需权限继续由既有 freshness/approval/custody 契约决定；本 RFC 只要求其 outcome 能回写相应 branch 和父责任。
@@ -285,7 +289,9 @@ allowed action: reply, create branch, reroute, ask human, suspend, cancel
 
 ### 运行时切换边界
 
-发布前存在的消息、Run、Queue 与 thread status 全部保留为历史诊断；它们不需要、也不得被猜测性迁移成新的父责任/branch。发布后首次进入系统的消息，才以本 RFC 的 root/branch/receipt 关系建立新链路。没有 hot update 和双模型过渡期。
+这不是“部署时把所有旧对象归档”。发布 preflight 必须列出每个非终局的旧 message target、Queue entry、Run、wait 和 custody record，并先关闭旧模型的新 ingress。只要清单非空，旧 executor 继续按旧语义 drain；release 不切换，且不得删除其恢复入口或把它交给新模型猜测处理。若 drain 超时或遇到不能安全终局的记录，取消本次切换、保留旧运行时和诊断，待既有 owner/recovery 流程完成后再重新 preflight。
+
+只有清单为空时，才允许原子切到新入口并让后续消息以本文的 root/branch/receipt 关系建立新链路。终局旧消息、旧回复和诊断保持历史可读，但不被猜测性迁移或双模型运行时解释；因此没有 hot update，也没有旧/新并行裁定期。
 
 ### 建议实现顺序
 
@@ -295,7 +301,7 @@ allowed action: reply, create branch, reroute, ask human, suspend, cancel
 4. 将 Run 终局接到 branch result 与父责任 continuation，而非 thread-wide pause；
 5. 将 human approval/confirm 接成相同 branch；
 6. 最后替换 QueuePanel、气泡 receipt 和协作状态卡，删除无对象 Continue；
-7. 在隔离数据环境跑并发、重试、重启和 append 验收，才移除旧 thread-level 运行时裁定。
+7. 在隔离数据环境跑并发、重试、重启、append 与 quiescent-drain 验收；只有 preflight 对全部旧记录给出零非终局清单，才移除旧 thread-level 运行时裁定。
 
 ## 验收矩阵
 
@@ -306,13 +312,16 @@ allowed action: reply, create branch, reroute, ask human, suspend, cancel
 | L3 | A @B | B dequeue/processing 不让 A 结束；B 的可引用结果才可结算 A |
 | L4 | A 同时 @B、@C | B/C 可并行；默认 `all_of`，二者成功才结算 A |
 | L5 | B 成功、C provider retry 耗尽 | B 证据保留；C failed；A 获得 exact continuation，能换 D 或升级 human |
-| L6 | A @co-creator | human branch 有 pending、approve/reject/timeout；其状态和 A 的责任可见，不创建 provider Run |
+| L6 | A 以 `handoff` / request / gate @co-creator | human branch 有 pending、approve/reject/timeout；其状态和 A 的责任可见，不创建 provider Run |
+| L6a | A `@co-creator` FYI 或完成通知 | intent 被持久化为 `fyi` / `done-notify`；消息可见，但不产生 human inbox、open branch 或父链等待 |
 | L7 | B 结果需要 A 判断 | B responded 后 A 被唤起，不由 B 的 Run 成功偷关父链 |
 | L8 | `any_of` 首个成功 | 父链按政策结算，其余 branch 有显式 cancel/continue disposition |
 | L9 | 用户在 active chain 选择 append，快照尚未建立 | 新消息持久化但只成为同 target 的同批输入，不路由给其他成员 |
 | L10 | 用户在 active chain 选择 append，Run 已读输入 | 不注入当前 prompt；同 target 的后续 Queue entry 消费 append，父链不得提前终局 |
 | L11 | Queue/Run/hold 任一退出竞态 | 每个 terminal path 要么写 exact branch/parent outcome，要么保留可恢复 candidate；不会出现“队列 0 + 无对象失败” |
 | L12 | 进程重启 | 从 message、receipt、Queue、branch、await/custody 重建现场；不依赖内存 projection 或最近参与者猜测 |
+| L13 | Run 在正文暴露前或后失败 | 两个 receipt 都连到同一精确 invocation，但只有暴露后有 `bodyExposure.seenAt` / 已读；UI 不从 `processing` 或 failed 猜测 |
+| L14 | 切换 preflight 遇到旧 in-flight work | 切换被阻断，旧 executor 与恢复入口继续服务并 drain；只有零非终局清单才允许新入口启用，绝不把 admitted work 降为历史 |
 
 ## 非目标
 
@@ -328,6 +337,8 @@ allowed action: reply, create branch, reroute, ask human, suspend, cancel
 - `packages/api/src/routes/messages.ts`：用户消息的 target 解析与 busy 时 queue 决策；
 - `packages/api/src/domains/cats/services/agents/invocation/InvocationQueue.ts`：同 thread、同成员 processing slot 与 queued entries；
 - `packages/api/src/routes/callback-a2a-trigger.ts`：当前 target active 时 skip 的待替换短路；
+- `packages/api/src/domains/cats/services/stores/ports/queued-message-custody.ts`：child creation 与 append-only `bodyExposures(targetCatId, invocationId, seenAt)` 的独立耐久事实；
+- `docs/features/F233-ball-custody-observability.md`：human `handoff` / `fyi` / `done-notify` intent 是 inbox/ball-custody 的必要区分；
 - `packages/api/src/domains/cats/services/stores/ports/MessageStore.ts` 与 `RedisMessageStore.ts`：现有 composer-draft recall `merge: 'append'`，它不是本 RFC 的运行中 append；
 - [#1354](https://github.com/zts212653/clowder-ai/issues/1354)：用户可见故障和运行时证据登记。
 
