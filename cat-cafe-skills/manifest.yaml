@@ -132,6 +132,73 @@ skills:
     sop_step: null
     merged_from: ["brainstorming", "multi-cat-brainstorm", "discussion-convergence"]
 
+  # ── 方案拷问与领域沉淀 ──
+  grill-with-docs:
+    category: "引导与协作"
+    description: >
+      把方案拷问与领域文档沉淀组合成一次设计会话。
+      Use when: 用户要求 "grill with docs"、边追问边统一术语、或把关键取舍沉淀为 glossary/ADR。
+      Not for: 普通问答、已经定稿的执行计划、直接实现代码、只需纯口头 stress-test 的讨论。
+      Output: 经确认的 design tree + 按需更新的 CONTEXT.md / ADR。
+      GOTCHA: 必须显式加载 grilling 与 domain-modeling，不能把它们当斜杠命令。
+    triggers:
+      - "grill with docs"
+      - "带文档拷问"
+      - "边追问边写 ADR"
+      - "把方案问透并沉淀"
+    not_for:
+      - "普通问答"
+      - "已定稿的执行计划"
+      - "直接实现代码"
+      - "纯口头 stress-test"
+    output: "Confirmed design tree + glossary and selective ADR updates"
+    next: ["writing-plans", "feat-lifecycle"]
+    sop_step: null
+
+  grilling:
+    category: "引导与协作"
+    description: >
+      用分层决策树持续 stress-test 一个计划、决定或想法。
+      Use when: 用户说 "grill me"、要求拷问方案、找出隐含假设、或在行动前把关键决策问透。
+      Not for: 普通事实问答、已经定稿的执行、代码实现、需要同步写 glossary/ADR 的会话。
+      Output: 带推荐答案的 frontier 问题轮次 + 经用户确认的 shared understanding。
+      GOTCHA: 环境事实由 agent 自己查；每轮只问完整的当前 frontier。
+    triggers:
+      - "grill me"
+      - "拷问我的方案"
+      - "把这个想法问透"
+      - "stress-test"
+    not_for:
+      - "普通事实问答"
+      - "已定稿的执行"
+      - "代码实现"
+      - "同步写 glossary 或 ADR"
+    output: "Recommended frontier rounds + confirmed shared understanding"
+    next: ["grill-with-docs", "writing-plans"]
+    sop_step: null
+
+  domain-modeling:
+    category: "引导与协作"
+    description: >
+      主动建立和校准项目领域模型，并把已确认的语言与少量关键决策写回仓库。
+      Use when: 讨论代码库术语、统一 bounded-context 语言、创建或修改 CONTEXT.md、或记录真正必要的 ADR。
+      Not for: 只读取 glossary、实现细节文档、普通代码修改、容易逆转或没有真实取舍的决定。
+      Output: 按仓库约定更新的 CONTEXT.md / CONTEXT-MAP.md + 仅在三条件同时成立时创建的 ADR。
+      GOTCHA: CONTEXT.md 只能是领域 glossary；写文件前先服从目标仓库既有文档约定。
+    triggers:
+      - "领域建模"
+      - "统一术语"
+      - "CONTEXT.md"
+      - "写 ADR"
+    not_for:
+      - "只读 glossary"
+      - "实现细节文档"
+      - "普通代码修改"
+      - "trivial reversible decision"
+    output: "Repository-conformant glossary and selective ADR updates"
+    next: ["grill-with-docs", "writing-plans"]
+    sop_step: null
+
   # ── 专家辩论团 ──
   expert-panel:
     category: "引导与协作"

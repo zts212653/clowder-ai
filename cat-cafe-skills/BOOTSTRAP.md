@@ -21,6 +21,9 @@ co-creation docs → co-creation-docs → direct push | merge-gate(docs PR)
 | `guide-authoring` | 编排场景引导 YAML / registry / 标签契约 | — |
 | `guide-interaction` | 判断是否需要交互引导，并按 Guide Matched/Pending/Active 等状态驱动回复 | — |
 | `collaborative-thinking` | brainstorm/多猫讨论/收敛 | — |
+| `grill-with-docs` | 把方案拷问与 glossary/ADR 沉淀组合成一次设计会话 | — |
+| `grilling` | 用 design tree/frontier 轮次拷问方案并确认 shared understanding | — |
+| `domain-modeling` | 统一领域术语、更新 CONTEXT.md，并仅为关键取舍记录 ADR | — |
 | `expert-panel` | 专家辩论团/竞品分析/技术趋势/showcase | — |
 | `writing-plans` | 写实施计划 | ① impl |
 | `co-creation-docs` | 共创型 docs-only 落盘：按冲突/治理/可逆性选择 direct push 或 PR | — |
